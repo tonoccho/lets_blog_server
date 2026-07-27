@@ -1,25 +1,61 @@
 package com.letsblog.api.controller;
 
+import com.letsblog.api.domain.Post;
+import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.PostPublishCommand;
 import com.letsblog.api.dto.PostPublishResponse;
+import com.letsblog.api.dto.PostSummaryResponse;
+import com.letsblog.api.repository.PostRepository;
+import com.letsblog.api.repository.SiteRepository;
 import com.letsblog.api.service.PostPublishService;
 import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/posts")
 public class PostController {
 
     private final PostPublishService postPublishService;
+    private final PostRepository postRepository;
+    private final SiteRepository siteRepository;
 
-    public PostController(PostPublishService postPublishService) {
+    public PostController(PostPublishService postPublishService, PostRepository postRepository,
+                           SiteRepository siteRepository) {
         this.postPublishService = postPublishService;
+        this.postRepository = postRepository;
+        this.siteRepository = siteRepository;
+    }
+
+    /**
+     * 投稿履歴一覧(Web管理フロントエンドの表示用)。
+     */
+    @GetMapping
+    public List<PostSummaryResponse> list() {
+        Map<Long, String> siteNamesById = siteRepository.findAll().stream()
+                .collect(Collectors.toMap(Site::getId, Site::getName));
+
+        return postRepository.findAll().stream()
+                .sorted(Comparator.comparing(Post::getUpdatedAt).reversed())
+                .map((Post post) -> new PostSummaryResponse(
+                        post.getId(),
+                        post.getSiteId(),
+                        siteNamesById.getOrDefault(post.getSiteId(), "(不明なサイト)"),
+                        post.getWpPostId(),
+                        post.getSlug(),
+                        post.getStatus(),
+                        post.getLastPublishedAt()
+                ))
+                .toList();
     }
 
     /**

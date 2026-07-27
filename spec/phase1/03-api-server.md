@@ -38,6 +38,8 @@ VSCode拡張・Webフロントエンドからのリクエストを受け、WordP
 |---|---|---|---|
 | POST | `/api/sites` | サイト登録 | 実装済み |
 | GET | `/api/sites` | サイト一覧取得 | 実装済み |
+| GET | `/api/posts` | 投稿履歴一覧(サイト名を結合、Web管理画面向け) | 実装済み |
+| GET | `/api/generation-jobs` | AIジョブ履歴一覧(Web管理画面向け) | 実装済み(ジョブ作成は06/07で着手) |
 | POST | `/api/posts/publish` | Markdown(multipart、画像同梱)をWordPressへ新規投稿/更新(`wpPostId`指定時は更新) | 実装済み・実機検証済み |
 | POST | `/api/media/upload` | 画像単体アップロード(ローカル画像 or 将来のComfyUI生成画像) | 実装済み・実機検証済み |
 | POST | `/api/taxonomy/resolve` | カテゴリ/タグ名 → ID解決(なければ作成) | 実装済み・実機検証済み |

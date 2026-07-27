@@ -36,11 +36,13 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
   - [x] APIキー設定(SecretStorage)実装(`letsBlog.setApiKey`)
   - [x] AI支援コマンド実装(`letsBlog.askAi` / `letsBlog.suggestTags` / `letsBlog.generateImage`、対応サーバーAPIは06/07で実装)
   - [x] コンパイル済みクライアントコードを一時WordPressに対して実機検証(サイト一覧取得・画像同梱投稿・カテゴリ/タグ自動作成を確認)
-- [ ] [05-web-frontend](phase1/05-web-frontend.md) — Web管理フロントエンド
-  - [ ] プロジェクト雛形作成(Next.js等 + Tailwind)
-  - [ ] サイト登録UI実装
-  - [ ] APIキー発行UI実装
-  - [ ] 投稿履歴閲覧UI実装
+- [x] [05-web-frontend](phase1/05-web-frontend.md) — Web管理フロントエンド
+  - [x] プロジェクト雛形作成(Next.js + Tailwind CSS v4)
+  - [x] サイト登録UI実装(Server Action、Playwrightでブラウザ経由の送信を実機検証)
+  - [x] 投稿履歴閲覧UI実装(`/posts`、バックエンドに`GET /api/posts`を追加)
+  - [x] AIジョブ状況閲覧UI実装(`/ai-jobs`、バックエンドに`GET /api/generation-jobs`を追加)
+  - [x] システム画面実装(`/system`、phpMyAdmin/ComfyUI/PlantUMLへのリンク)
+  - ※「APIキー発行UI」は固定APIキー方式に伴いスコープ外化(詳細は[05-web-frontend](phase1/05-web-frontend.md)参照)
 - [ ] [06-ollama-integration](phase1/06-ollama-integration.md) — Ollama 連携
   - [ ] モデル選定・pull
   - [ ] 下書き/校正/要約 API実装
