@@ -43,10 +43,12 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
   - [x] AIジョブ状況閲覧UI実装(`/ai-jobs`、バックエンドに`GET /api/generation-jobs`を追加)
   - [x] システム画面実装(`/system`、phpMyAdmin/ComfyUI/PlantUMLへのリンク)
   - ※「APIキー発行UI」は固定APIキー方式に伴いスコープ外化(詳細は[05-web-frontend](phase1/05-web-frontend.md)参照)
-- [ ] [06-ollama-integration](phase1/06-ollama-integration.md) — Ollama 連携
-  - [ ] モデル選定・pull
-  - [ ] 下書き/校正/要約 API実装
-  - [ ] タグ/カテゴリ自動提案 API実装
+- [x] [06-ollama-integration](phase1/06-ollama-integration.md) — Ollama 連携
+  - [x] モデル選定・pull(`qwen2.5:7b-instruct`)
+  - [x] 下書き/校正/要約 API実装(`POST /api/ai/draft`)
+  - [x] タグ/カテゴリ自動提案 API実装(`POST /api/ai/tags`)
+  - [x] `generation_jobs` への実行履歴記録を実装
+  - [x] 実モデル・実APIでdraft/proofread/summarize/tagsを実機検証(VSCode拡張のクライアントコード経由でも確認)
 - [ ] [07-comfyui-integration](phase1/07-comfyui-integration.md) — ComfyUI 連携
   - [ ] ワークフローJSON作成
   - [ ] 画像生成API仲介実装

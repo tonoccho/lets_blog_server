@@ -20,5 +20,6 @@ app:
   api-key: ${APP_API_KEY:dev_local_api_key}
   encryption-key: ${APP_ENCRYPTION_KEY:}
   ollama-base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+  ollama-model: ${OLLAMA_MODEL:qwen2.5:7b-instruct}
   comfyui-base-url: ${COMFYUI_BASE_URL:http://localhost:8188}
   plantuml-base-url: ${PLANTUML_BASE_URL:http://localhost:8085}
