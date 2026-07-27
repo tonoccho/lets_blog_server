@@ -19,14 +19,15 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
   - [x] ER図確定(sites / posts / generation_jobs。api_keysはPhase1では見送り、固定APIキーのみで運用)
   - [x] マイグレーションツール選定 → Flyway に決定
   - [x] 初期マイグレーションスクリプト作成(`V1__init_schema.sql`、起動時の自動適用を確認済み)
-- [ ] [03-api-server](phase1/03-api-server.md) — Spring Boot API サーバー
+- [x] [03-api-server](phase1/03-api-server.md) — Spring Boot API サーバー
   - [x] プロジェクト雛形作成 → Gradle(Kotlin DSLではなくGroovy DSL)+ Java 21 toolchainに決定
   - [x] APIキー認証フィルタ実装(固定キー、`X-API-Key`ヘッダ、401/CORS等は未対応)
   - [x] サイト登録・認証情報 暗号化保存 実装(AES-256-GCM、`/api/sites` で動作確認済み)
-  - [ ] WordPress REST API アダプタ実装
-  - [ ] Markdown→HTML 変換パイプライン実装
-  - [ ] カテゴリ/タグ 自動作成ロジック実装
-  - [ ] 画像アップロード仲介実装
+  - [x] WordPress REST API アダプタ実装(`CmsAdapter`/`WordPressAdapter`、Basic認証)
+  - [x] Markdown→HTML 変換パイプライン実装(flexmark-java)
+  - [x] カテゴリ/タグ 自動作成ロジック実装(名前検索→無ければ作成)
+  - [x] 画像アップロード仲介実装(`/api/posts/publish` 内、および単体 `/api/media/upload`)
+  - [x] `/api/posts/publish`(新規作成・更新)を一時WordPressコンテナに対して実機検証(HTML/画像/カテゴリ/タグ反映、再投稿での更新・upsertを確認)
 - [ ] [04-vscode-extension](phase1/04-vscode-extension.md) — VSCode 拡張
   - [ ] プロジェクト雛形作成
   - [ ] Front matter スキーマ実装・バリデーション

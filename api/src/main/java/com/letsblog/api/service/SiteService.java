@@ -1,5 +1,6 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.crypto.CredentialCipher;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.SiteRegisterRequest;
@@ -40,5 +41,18 @@ public class SiteService {
     @Transactional(readOnly = true)
     public List<SiteResponse> list() {
         return siteRepository.findAll().stream().map(SiteResponse::from).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public Site getBySiteKey(String siteKey) {
+        return siteRepository.findBySiteKey(siteKey)
+                .orElseThrow(() -> new SiteNotFoundException("siteKey '" + siteKey + "' は登録されていません"));
+    }
+
+    @Transactional(readOnly = true)
+    public CmsCredentials getCredentials(String siteKey) {
+        Site site = getBySiteKey(siteKey);
+        String appPassword = credentialCipher.decrypt(site.getWpAppPasswordEncrypted());
+        return new CmsCredentials(site.getBaseUrl(), site.getWpUsername(), appPassword);
     }
 }
