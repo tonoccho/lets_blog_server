@@ -28,12 +28,14 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
   - [x] カテゴリ/タグ 自動作成ロジック実装(名前検索→無ければ作成)
   - [x] 画像アップロード仲介実装(`/api/posts/publish` 内、および単体 `/api/media/upload`)
   - [x] `/api/posts/publish`(新規作成・更新)を一時WordPressコンテナに対して実機検証(HTML/画像/カテゴリ/タグ反映、再投稿での更新・upsertを確認)
-- [ ] [04-vscode-extension](phase1/04-vscode-extension.md) — VSCode 拡張
-  - [ ] プロジェクト雛形作成
-  - [ ] Front matter スキーマ実装・バリデーション
-  - [ ] 「投稿/更新」コマンド実装
-  - [ ] サイト切り替えUI実装
-  - [ ] APIキー設定(SecretStorage)実装
+- [x] [04-vscode-extension](phase1/04-vscode-extension.md) — VSCode 拡張
+  - [x] プロジェクト雛形作成(TypeScript, `extension/`配下)
+  - [x] Front matter スキーマ実装・バリデーション(gray-matter、`site`/`title`必須チェック)
+  - [x] 「投稿/更新」コマンド実装(`letsBlog.publish`、画像同梱・front matter書き戻し)
+  - [x] サイト切り替えUI実装(`letsBlog.selectSite`、QuickPick)
+  - [x] APIキー設定(SecretStorage)実装(`letsBlog.setApiKey`)
+  - [x] AI支援コマンド実装(`letsBlog.askAi` / `letsBlog.suggestTags` / `letsBlog.generateImage`、対応サーバーAPIは06/07で実装)
+  - [x] コンパイル済みクライアントコードを一時WordPressに対して実機検証(サイト一覧取得・画像同梱投稿・カテゴリ/タグ自動作成を確認)
 - [ ] [05-web-frontend](phase1/05-web-frontend.md) — Web管理フロントエンド
   - [ ] プロジェクト雛形作成(Next.js等 + Tailwind)
   - [ ] サイト登録UI実装
