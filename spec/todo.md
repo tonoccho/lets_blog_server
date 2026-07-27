@@ -61,8 +61,22 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
   - [x] 生成画像の埋め込み処理実装(`PlantUmlEmbedService`、投稿パイプラインに自動組み込み)
   - [x] 実機検証(日本語シーケンス図のレンダリング→WordPress投稿への埋め込みまで確認)
 
+## Phase 2: Web管理フロントエンドのユーザー認証(複数人利用)
+
+- [ ] [00-overview](phase2/00-overview.md) — 全体スコープ・ユーザー認証アーキテクチャの確定
+- [ ] [01-database-schema](phase2/01-database-schema.md) — MySQL `users` テーブル設計・マイグレーション
+- [ ] [02-api-server](phase2/02-api-server.md) — Spring Boot API サーバー拡張(ユーザー認証・管理エンドポイント)
+  - [ ] BCryptパッケージ追加・`UserService` 実装
+  - [ ] `/api/auth/login` エンドポイント実装
+  - [ ] `/api/users` CRUD エンドポイント実装
+  - [ ] 初回管理者ブートストラップ処理実装
+- [ ] [03-web-frontend](phase2/03-web-frontend.md) — Web管理フロントエンド(Next.js)拡張
+  - [ ] Auth.js(NextAuth)導入・ログイン画面実装
+  - [ ] ユーザー管理画面(`/users`)実装
+  - [ ] 既存ページのログイン必須化・admin権限チェック実装
+  - [ ] 実機検証(ログイン・ユーザー管理・アクセス制御)
+
 ## Phase 2 以降(未着手・スコープ外候補)
 
 - [ ] WordPress 以外のCMSアダプタ追加
 - [ ] リモート常時稼働化(自宅サーバー/VPS)対応・外部公開時のセキュリティ強化
-- [ ] Web管理フロントエンドのユーザー認証(複数人利用)
