@@ -1,0 +1,67 @@
+{
+  "name": "letsblog-vscode",
+  "displayName": "Let's Blog",
+  "description": "Markdownで執筆した記事を仲介APIサーバー経由でWordPressへ投稿するVSCode拡張",
+  "version": "0.1.0",
+  "publisher": "letsblog",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "letsBlog.publish",
+        "title": "Let's Blog: Publish"
+      },
+      {
+        "command": "letsBlog.selectSite",
+        "title": "Let's Blog: Select Site"
+      },
+      {
+        "command": "letsBlog.setApiKey",
+        "title": "Let's Blog: Set API Key"
+      },
+      {
+        "command": "letsBlog.askAi",
+        "title": "Let's Blog: Ask AI (Draft/Proofread/Summarize)"
+      },
+      {
+        "command": "letsBlog.suggestTags",
+        "title": "Let's Blog: Suggest Tags"
+      },
+      {
+        "command": "letsBlog.generateImage",
+        "title": "Let's Blog: Generate Image"
+      }
+    ],
+    "configuration": {
+      "title": "Let's Blog",
+      "properties": {
+        "letsBlog.serverUrl": {
+          "type": "string",
+          "default": "http://localhost:8080",
+          "description": "仲介APIサーバーのベースURL"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -w -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.5.4"
+  },
+  "dependencies": {
+    "gray-matter": "^4.0.3",
+    "form-data": "^4.0.0",
+    "node-fetch": "^2.7.0",
+    "@types/node-fetch": "^2.6.11"
+  }
+}

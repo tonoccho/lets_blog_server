@@ -1,0 +1,26 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: lets-blog-api
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lets_blog?useSSL=false&serverTimezone=UTC}
+    username: ${SPRING_DATASOURCE_USERNAME:lbs_app}
+    password: ${SPRING_DATASOURCE_PASSWORD:lbs_app}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+app:
+  api-key: ${APP_API_KEY:dev_local_api_key}
+  encryption-key: ${APP_ENCRYPTION_KEY:}
+  ollama-base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+  ollama-model: ${OLLAMA_MODEL:qwen2.5:7b-instruct}
+  comfyui-base-url: ${COMFYUI_BASE_URL:http://localhost:8188}
+  comfyui-checkpoint: ${COMFYUI_CHECKPOINT:v1-5-pruned-emaonly.safetensors}
+  plantuml-base-url: ${PLANTUML_BASE_URL:http://localhost:8085}
