@@ -1,6 +1,7 @@
 package com.letsblog.api.service;
 
 import com.letsblog.api.cms.CmsAdapter;
+import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.MediaUploadResult;
 import com.letsblog.api.render.PlantUmlClient;
@@ -11,7 +12,7 @@ import java.util.regex.Pattern;
 
 /**
  * Markdown本文中の ```plantuml フェンスコードブロックをPlantUMLサーバーでPNGにレンダリングし、
- * WordPressメディアライブラリへアップロードして画像参照に差し替える。
+ * CMSのメディアライブラリへアップロードして画像参照に差し替える。
  */
 @Service
 public class PlantUmlEmbedService {
@@ -20,14 +21,15 @@ public class PlantUmlEmbedService {
             Pattern.compile("```plantuml\\s*\\n(.*?)```", Pattern.DOTALL);
 
     private final PlantUmlClient plantUmlClient;
-    private final CmsAdapter cmsAdapter;
+    private final CmsAdapterFactory cmsAdapterFactory;
 
-    public PlantUmlEmbedService(PlantUmlClient plantUmlClient, CmsAdapter cmsAdapter) {
+    public PlantUmlEmbedService(PlantUmlClient plantUmlClient, CmsAdapterFactory cmsAdapterFactory) {
         this.plantUmlClient = plantUmlClient;
-        this.cmsAdapter = cmsAdapter;
+        this.cmsAdapterFactory = cmsAdapterFactory;
     }
 
     public String embedDiagrams(CmsCredentials credentials, String markdown) {
+        CmsAdapter cmsAdapter = cmsAdapterFactory.resolve(credentials.cmsType());
         Matcher matcher = PLANTUML_BLOCK_PATTERN.matcher(markdown);
         StringBuilder result = new StringBuilder();
         int index = 0;

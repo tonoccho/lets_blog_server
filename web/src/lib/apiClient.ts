@@ -1,11 +1,13 @@
 import 'server-only';
 
+export type CmsType = "WORDPRESS" | "MICROCMS";
+
 export interface Site {
   id: number;
   name: string;
   siteKey: string;
+  cmsType: CmsType;
   baseUrl: string;
-  wpUsername: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -14,7 +16,7 @@ export interface PostSummary {
   id: number;
   siteId: number;
   siteName: string;
-  wpPostId: number;
+  wpPostId: string;
   slug: string | null;
   status: string;
   lastPublishedAt: string | null;
@@ -31,9 +33,8 @@ export interface GenerationJob {
 export interface SiteRegisterInput {
   name: string;
   siteKey: string;
-  baseUrl: string;
-  wpUsername: string;
-  wpAppPassword: string;
+  cmsType: CmsType;
+  credentials: Record<string, string>;
 }
 
 export interface AuthenticatedUser {

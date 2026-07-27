@@ -1,12 +1,17 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { registerSite } from "@/lib/apiClient";
+import { CmsType, registerSite } from "@/lib/apiClient";
 
 export interface RegisterSiteState {
   error?: string;
   success?: boolean;
 }
+
+const CREDENTIAL_FIELDS: Record<CmsType, string[]> = {
+  WORDPRESS: ["baseUrl", "username", "appPassword"],
+  MICROCMS: ["serviceId", "apiKey", "managementApiKey", "postsEndpoint", "categoriesEndpoint", "tagsEndpoint"],
+};
 
 export async function registerSiteAction(
   _prevState: RegisterSiteState,
@@ -14,16 +19,28 @@ export async function registerSiteAction(
 ): Promise<RegisterSiteState> {
   const name = String(formData.get("name") ?? "").trim();
   const siteKey = String(formData.get("siteKey") ?? "").trim();
-  const baseUrl = String(formData.get("baseUrl") ?? "").trim();
-  const wpUsername = String(formData.get("wpUsername") ?? "").trim();
-  const wpAppPassword = String(formData.get("wpAppPassword") ?? "").trim();
+  const cmsType = String(formData.get("cmsType") ?? "") as CmsType;
 
-  if (!name || !siteKey || !baseUrl || !wpUsername || !wpAppPassword) {
-    return { error: "すべての項目を入力してください。" };
+  if (!name || !siteKey) {
+    return { error: "表示名とサイトキーは必須です。" };
+  }
+
+  const fields = CREDENTIAL_FIELDS[cmsType];
+  if (!fields) {
+    return { error: "CMS種別を選択してください。" };
+  }
+
+  const credentials: Record<string, string> = {};
+  for (const field of fields) {
+    const value = String(formData.get(field) ?? "").trim();
+    if (!value) {
+      return { error: `${field} は必須です。` };
+    }
+    credentials[field] = value;
   }
 
   try {
-    await registerSite({ name, siteKey, baseUrl, wpUsername, wpAppPassword });
+    await registerSite({ name, siteKey, cmsType, credentials });
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

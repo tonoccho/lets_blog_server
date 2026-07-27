@@ -7,7 +7,7 @@ public record PostContent(
         String slug,
         String htmlContent,
         String status,
-        List<Long> categoryIds,
-        List<Long> tagIds
+        List<String> categoryIds,
+        List<String> tagIds
 ) {
 }

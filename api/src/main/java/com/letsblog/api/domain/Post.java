@@ -21,8 +21,8 @@ public class Post {
     @Column(name = "site_id", nullable = false)
     private Long siteId;
 
-    @Column(name = "wp_post_id")
-    private Long wpPostId;
+    @Column(name = "wp_post_id", length = 255)
+    private String wpPostId;
 
     @Column(length = 255)
     private String slug;

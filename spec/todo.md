@@ -76,7 +76,18 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
   - [x] 既存ページのログイン必須化・admin権限チェック実装
   - [x] 実機検証(ログイン・ユーザー管理・アクセス制御)
 
-## Phase 2 以降(未着手・スコープ外候補)
+## Phase 3: CMSアダプタ拡張(microCMS対応)
 
-- [ ] WordPress 以外のCMSアダプタ追加
+- [x] [00-overview](phase3/00-overview.md) — 全体スコープ・アーキテクチャの確定
+- [x] [01-domain-model](phase3/01-domain-model.md) — CmsType、sealed CmsCredentials、ID型String化
+- [x] [02-wordpress-adapter-tests](phase3/02-wordpress-adapter-tests.md) — WordPressAdapter修正・回帰テスト整備
+- [x] [03-cms-adapter-factory](phase3/03-cms-adapter-factory.md) — CmsAdapterFactory新設、既存4コンポーネントの注入変更
+- [x] [04-database-schema](phase3/04-database-schema.md) — Flyway V3、エンティティ/DTO/Service更新
+- [x] [05-microcms-adapter](phase3/05-microcms-adapter.md) — MicroCmsAdapter実装・テスト・実機検証
+- [x] [06-web-frontend](phase3/06-web-frontend.md) — サイト登録UI動的化(CMS選択)
+- [x] [07-vscode-extension](phase3/07-vscode-extension.md) — wpPostId型のString化
+
+## Phase 3 以降(未着手・スコープ外候補)
+
 - [ ] リモート常時稼働化(自宅サーバー/VPS)対応・外部公開時のセキュリティ強化
+- [ ] その他のCMS対応(WordPress/microCMS以外)

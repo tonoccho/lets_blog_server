@@ -10,13 +10,13 @@ export interface PublishParams {
   status?: string;
   categories?: string[];
   tags?: string[];
-  wpPostId?: number | null;
+  wpPostId?: string | null;
   markdown: string;
   images: LocalImageReference[];
 }
 
 export interface PublishResult {
-  wpPostId: number;
+  wpPostId: string;
   wpPostUrl: string;
   status: string;
 }

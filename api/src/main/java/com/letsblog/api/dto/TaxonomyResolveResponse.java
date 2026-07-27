@@ -2,5 +2,5 @@ package com.letsblog.api.dto;
 
 import java.util.List;
 
-public record TaxonomyResolveResponse(List<Long> categoryIds, List<Long> tagIds) {
+public record TaxonomyResolveResponse(List<String> categoryIds, List<String> tagIds) {
 }

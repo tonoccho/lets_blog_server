@@ -11,7 +11,7 @@ public record PostPublishCommand(
         String status,
         List<String> categories,
         List<String> tags,
-        Long wpPostId,
+        String wpPostId,
         String markdown,
         List<MultipartFile> images
 ) {

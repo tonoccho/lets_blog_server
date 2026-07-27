@@ -111,7 +111,7 @@ async function commandPublish(context: vscode.ExtensionContext): Promise<void> {
           status: article.data.status ?? 'draft',
           categories: article.data.categories ?? [],
           tags: article.data.tags ?? [],
-          wpPostId: article.data.wp_post_id ?? undefined,
+          wpPostId: article.data.wp_post_id != null ? String(article.data.wp_post_id) : undefined,
           markdown: article.content,
           images,
         })

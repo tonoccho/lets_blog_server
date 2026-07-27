@@ -1,6 +1,7 @@
 package com.letsblog.api.service;
 
 import com.letsblog.api.cms.CmsAdapter;
+import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsApiException;
 import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.MediaUploadResult;
@@ -30,16 +31,16 @@ import java.util.Map;
 public class PostPublishService {
 
     private final SiteService siteService;
-    private final CmsAdapter cmsAdapter;
+    private final CmsAdapterFactory cmsAdapterFactory;
     private final MarkdownRenderer markdownRenderer;
     private final PostRepository postRepository;
     private final PlantUmlEmbedService plantUmlEmbedService;
 
-    public PostPublishService(SiteService siteService, CmsAdapter cmsAdapter,
+    public PostPublishService(SiteService siteService, CmsAdapterFactory cmsAdapterFactory,
                                MarkdownRenderer markdownRenderer, PostRepository postRepository,
                                PlantUmlEmbedService plantUmlEmbedService) {
         this.siteService = siteService;
-        this.cmsAdapter = cmsAdapter;
+        this.cmsAdapterFactory = cmsAdapterFactory;
         this.markdownRenderer = markdownRenderer;
         this.postRepository = postRepository;
         this.plantUmlEmbedService = plantUmlEmbedService;
@@ -49,13 +50,14 @@ public class PostPublishService {
     public PostPublishResponse publish(PostPublishCommand command) {
         Site site = siteService.getBySiteKey(command.siteKey());
         CmsCredentials credentials = siteService.getCredentials(command.siteKey());
+        CmsAdapter cmsAdapter = cmsAdapterFactory.resolve(credentials.cmsType());
 
         String markdown = plantUmlEmbedService.embedDiagrams(credentials, command.markdown());
-        markdown = replaceImageReferences(credentials, markdown, command.images());
+        markdown = replaceImageReferences(cmsAdapter, credentials, markdown, command.images());
         String html = markdownRenderer.render(markdown);
 
-        List<Long> categoryIds = cmsAdapter.resolveCategories(credentials, command.categories());
-        List<Long> tagIds = cmsAdapter.resolveTags(credentials, command.tags());
+        List<String> categoryIds = cmsAdapter.resolveCategories(credentials, command.categories());
+        List<String> tagIds = cmsAdapter.resolveTags(credentials, command.tags());
 
         PostContent content = new PostContent(
                 command.title(),
@@ -73,7 +75,7 @@ public class PostPublishService {
         return new PostPublishResponse(result.id(), result.link(), result.status());
     }
 
-    private String replaceImageReferences(CmsCredentials credentials, String markdown, List<MultipartFile> images) {
+    private String replaceImageReferences(CmsAdapter cmsAdapter, CmsCredentials credentials, String markdown, List<MultipartFile> images) {
         if (images == null || images.isEmpty()) {
             return markdown;
         }

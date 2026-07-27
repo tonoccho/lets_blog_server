@@ -9,7 +9,7 @@ export interface LetsBlogFrontMatter {
   categories?: string[];
   tags?: string[];
   featured_image?: string;
-  wp_post_id?: number | null;
+  wp_post_id?: string | null;
   wp_post_url?: string | null;
   [key: string]: unknown;
 }

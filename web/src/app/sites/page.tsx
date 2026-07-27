@@ -14,8 +14,8 @@ export default async function SitesPage() {
             <tr>
               <th className="px-4 py-2">サイトキー</th>
               <th className="px-4 py-2">表示名</th>
+              <th className="px-4 py-2">CMS種別</th>
               <th className="px-4 py-2">URL</th>
-              <th className="px-4 py-2">ユーザー名</th>
               <th className="px-4 py-2">登録日</th>
             </tr>
           </thead>
@@ -32,11 +32,19 @@ export default async function SitesPage() {
                 <td className="px-4 py-2 font-mono">{site.siteKey}</td>
                 <td className="px-4 py-2">{site.name}</td>
                 <td className="px-4 py-2">
+                  <span
+                    className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
+                      site.cmsType === "WORDPRESS" ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700"
+                    }`}
+                  >
+                    {site.cmsType}
+                  </span>
+                </td>
+                <td className="px-4 py-2">
                   <a href={site.baseUrl} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
                     {site.baseUrl}
                   </a>
                 </td>
-                <td className="px-4 py-2">{site.wpUsername}</td>
                 <td className="px-4 py-2 text-neutral-500">{new Date(site.createdAt).toLocaleString("ja-JP")}</td>
               </tr>
             ))}

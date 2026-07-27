@@ -1,5 +1,6 @@
 package com.letsblog.api.domain;
 
+import com.letsblog.api.cms.CmsType;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -24,14 +25,23 @@ public class Site {
     @Column(name = "site_key", nullable = false, unique = true, length = 100)
     private String siteKey;
 
+    @Column(name = "cms_type", nullable = false, length = 50)
+    @Enumerated(EnumType.STRING)
+    private CmsType cmsType;
+
     @Column(name = "base_url", nullable = false, length = 500)
     private String baseUrl;
 
-    @Column(name = "wp_username", nullable = false)
+    // 既存WordPressサイト向けの後方互換カラム(新規登録サイトはcredentialsEncryptedを使う)
+    @Column(name = "wp_username")
     private String wpUsername;
 
-    @Column(name = "wp_app_password_encrypted", nullable = false)
+    @Column(name = "wp_app_password_encrypted")
     private byte[] wpAppPasswordEncrypted;
+
+    // CMS種別を問わない汎用の暗号化認証情報(JSON化してAES-256-GCMで暗号化)
+    @Column(name = "credentials_encrypted")
+    private byte[] credentialsEncrypted;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

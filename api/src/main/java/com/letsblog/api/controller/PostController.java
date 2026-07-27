@@ -71,7 +71,7 @@ public class PostController {
             @RequestParam(value = "status", defaultValue = "draft") String status,
             @RequestParam(value = "categories", required = false) List<String> categories,
             @RequestParam(value = "tags", required = false) List<String> tags,
-            @RequestParam(value = "wpPostId", required = false) Long wpPostId,
+            @RequestParam(value = "wpPostId", required = false) String wpPostId,
             @RequestParam("markdown") String markdown,
             @RequestParam(value = "images", required = false) List<MultipartFile> images
     ) {

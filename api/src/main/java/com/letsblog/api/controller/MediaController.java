@@ -1,7 +1,9 @@
 package com.letsblog.api.controller;
 
 import com.letsblog.api.cms.CmsAdapter;
+import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsApiException;
+import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.MediaUploadResult;
 import com.letsblog.api.service.SiteService;
 import org.springframework.http.MediaType;
@@ -17,18 +19,20 @@ import java.io.IOException;
 public class MediaController {
 
     private final SiteService siteService;
-    private final CmsAdapter cmsAdapter;
+    private final CmsAdapterFactory cmsAdapterFactory;
 
-    public MediaController(SiteService siteService, CmsAdapter cmsAdapter) {
+    public MediaController(SiteService siteService, CmsAdapterFactory cmsAdapterFactory) {
         this.siteService = siteService;
-        this.cmsAdapter = cmsAdapter;
+        this.cmsAdapterFactory = cmsAdapterFactory;
     }
 
     @PostMapping(value = "/api/media/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public MediaUploadResult upload(@RequestParam("site") String site, @RequestPart("file") MultipartFile file) {
         try {
+            CmsCredentials credentials = siteService.getCredentials(site);
+            CmsAdapter cmsAdapter = cmsAdapterFactory.resolve(credentials.cmsType());
             return cmsAdapter.uploadMedia(
-                    siteService.getCredentials(site),
+                    credentials,
                     file.getOriginalFilename(),
                     file.getContentType(),
                     file.getBytes());

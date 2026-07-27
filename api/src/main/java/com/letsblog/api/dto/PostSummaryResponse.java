@@ -6,7 +6,7 @@ public record PostSummaryResponse(
         Long id,
         Long siteId,
         String siteName,
-        Long wpPostId,
+        String wpPostId,
         String slug,
         String status,
         LocalDateTime lastPublishedAt
