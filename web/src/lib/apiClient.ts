@@ -36,6 +36,26 @@ export interface SiteRegisterInput {
   wpAppPassword: string;
 }
 
+export interface AuthenticatedUser {
+  id: number;
+  email: string;
+  role: "admin" | "user";
+}
+
+export interface AppUser {
+  id: number;
+  email: string;
+  role: "admin" | "user";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UserCreateInput {
+  email: string;
+  password: string;
+  role: "admin" | "user";
+}
+
 function serverUrl(): string {
   return (process.env.LETS_BLOG_API_URL ?? 'http://localhost:8080').replace(/\/+$/, '');
 }
@@ -86,4 +106,49 @@ export function listPosts(): Promise<PostSummary[]> {
 
 export function listGenerationJobs(): Promise<GenerationJob[]> {
   return apiFetch<GenerationJob[]>('/api/generation-jobs');
+}
+
+export async function login(email: string, password: string): Promise<AuthenticatedUser | null> {
+  const res = await fetch(`${serverUrl()}/api/auth/login`, {
+    method: 'POST',
+    headers: {
+      'X-API-Key': apiKey(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ email, password }),
+    cache: 'no-store',
+  });
+
+  if (res.status === 401) {
+    return null;
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
+  }
+  return (await res.json()) as AuthenticatedUser;
+}
+
+export function listUsers(): Promise<AppUser[]> {
+  return apiFetch<AppUser[]>('/api/users');
+}
+
+export function createUser(input: UserCreateInput): Promise<AppUser> {
+  return apiFetch<AppUser>('/api/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateUserRole(id: number, role: "admin" | "user"): Promise<AppUser> {
+  return apiFetch<AppUser>(`/api/users/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role }),
+  });
+}
+
+export function deleteUser(id: number): Promise<void> {
+  return apiFetch<void>(`/api/users/${id}`, { method: 'DELETE' });
 }

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
+import { getSession } from "@/lib/session";
+import { LogoutButton } from "./LogoutButton";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -26,11 +28,14 @@ const NAV_ITEMS = [
   { href: "/system", label: "システム" },
 ];
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const session = await getSession();
+  const navItems = session?.user.role === "admin" ? [...NAV_ITEMS, { href: "/users", label: "ユーザー" }] : NAV_ITEMS;
+
   return (
     <html
       lang="ja"
@@ -40,13 +45,21 @@ export default function RootLayout({
         <header className="border-b border-neutral-200 bg-white">
           <div className="mx-auto flex max-w-5xl items-center gap-6 px-4 py-3">
             <span className="font-semibold">Let&apos;s Blog Server</span>
-            <nav className="flex gap-4 text-sm">
-              {NAV_ITEMS.map((item) => (
-                <Link key={item.href} href={item.href} className="text-neutral-600 hover:text-neutral-900">
-                  {item.label}
-                </Link>
-              ))}
-            </nav>
+            {session && (
+              <nav className="flex gap-4 text-sm">
+                {navItems.map((item) => (
+                  <Link key={item.href} href={item.href} className="text-neutral-600 hover:text-neutral-900">
+                    {item.label}
+                  </Link>
+                ))}
+              </nav>
+            )}
+            {session && (
+              <div className="ml-auto flex items-center gap-4 text-sm">
+                <span className="text-neutral-500">{session.user.email}</span>
+                <LogoutButton />
+              </div>
+            )}
           </div>
         </header>
         <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">{children}</main>
