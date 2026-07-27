@@ -33,13 +33,16 @@ public class PostPublishService {
     private final CmsAdapter cmsAdapter;
     private final MarkdownRenderer markdownRenderer;
     private final PostRepository postRepository;
+    private final PlantUmlEmbedService plantUmlEmbedService;
 
     public PostPublishService(SiteService siteService, CmsAdapter cmsAdapter,
-                               MarkdownRenderer markdownRenderer, PostRepository postRepository) {
+                               MarkdownRenderer markdownRenderer, PostRepository postRepository,
+                               PlantUmlEmbedService plantUmlEmbedService) {
         this.siteService = siteService;
         this.cmsAdapter = cmsAdapter;
         this.markdownRenderer = markdownRenderer;
         this.postRepository = postRepository;
+        this.plantUmlEmbedService = plantUmlEmbedService;
     }
 
     @Transactional
@@ -47,7 +50,8 @@ public class PostPublishService {
         Site site = siteService.getBySiteKey(command.siteKey());
         CmsCredentials credentials = siteService.getCredentials(command.siteKey());
 
-        String markdown = replaceImageReferences(credentials, command.markdown(), command.images());
+        String markdown = plantUmlEmbedService.embedDiagrams(credentials, command.markdown());
+        markdown = replaceImageReferences(credentials, markdown, command.images());
         String html = markdownRenderer.render(markdown);
 
         List<Long> categoryIds = cmsAdapter.resolveCategories(credentials, command.categories());

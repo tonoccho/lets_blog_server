@@ -43,7 +43,7 @@ VSCode拡張・Webフロントエンドからのリクエストを受け、WordP
 | POST | `/api/posts/publish` | Markdown(multipart、画像同梱)をWordPressへ新規投稿/更新(`wpPostId`指定時は更新) | 実装済み・実機検証済み |
 | POST | `/api/media/upload` | 画像単体アップロード(ローカル画像 or 将来のComfyUI生成画像) | 実装済み・実機検証済み |
 | POST | `/api/taxonomy/resolve` | カテゴリ/タグ名 → ID解決(なければ作成) | 実装済み・実機検証済み |
-| POST | `/api/render/plantuml` | PlantUMLブロックのレンダリング仲介 | 未実装([08-plantuml-integration](08-plantuml-integration.md)) |
+| POST | `/api/render/plantuml` | PlantUMLブロックのレンダリング仲介 | 実装済み・実機検証済み([08-plantuml-integration](08-plantuml-integration.md)) |
 | POST | `/api/ai/draft` | Ollamaによる下書き/校正/要約 | 実装済み・実機検証済み([06-ollama-integration](06-ollama-integration.md)) |
 | POST | `/api/ai/tags` | Ollamaによるタグ/カテゴリ提案 | 実装済み・実機検証済み([06-ollama-integration](06-ollama-integration.md)) |
 | POST | `/api/ai/image` | ComfyUIによる画像生成 | 実装済み・実機検証済み([07-comfyui-integration](07-comfyui-integration.md)) |

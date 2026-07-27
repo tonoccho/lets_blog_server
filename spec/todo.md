@@ -4,7 +4,7 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
 
 ## Phase 1: 初期スタック構築
 
-- [ ] [00-overview](phase1/00-overview.md) — 全体スコープ・アーキテクチャの確定
+- [x] [00-overview](phase1/00-overview.md) — 全体スコープ・アーキテクチャの確定(ユーザー承認済み)
 - [x] [01-docker-compose](phase1/01-docker-compose.md) — Docker Compose 一式の構成
   - [x] docker-compose.yml 作成
   - [x] .env.example 作成
@@ -55,10 +55,11 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
   - [x] 画像生成API仲介実装(`POST /api/ai/image`、`/prompt`投入→`/history`ポーリング→`/view`取得)
   - [x] 生成画像のWordPressメディア自動アップロード → 既存の`/api/posts/publish`画像アップロード経路に統合
   - [x] 実機検証(プロンプト→画像生成→VSCode拡張経由でのWordPress投稿まで一気通貫で確認)
-- [ ] [08-plantuml-integration](phase1/08-plantuml-integration.md) — PlantUML 連携
-  - [ ] Markdown内図ブロック記法確定
-  - [ ] レンダリングAPI仲介実装
-  - [ ] 生成画像の埋め込み処理実装
+- [x] [08-plantuml-integration](phase1/08-plantuml-integration.md) — PlantUML 連携
+  - [x] Markdown内図ブロック記法確定(標準的な```plantumlフェンスコードブロック)
+  - [x] レンダリングAPI仲介実装(`POST /api/render/plantuml`、PlantUML独自エンコードを自前実装)
+  - [x] 生成画像の埋め込み処理実装(`PlantUmlEmbedService`、投稿パイプラインに自動組み込み)
+  - [x] 実機検証(日本語シーケンス図のレンダリング→WordPress投稿への埋め込みまで確認)
 
 ## Phase 2 以降(未着手・スコープ外候補)
 
