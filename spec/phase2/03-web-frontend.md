@@ -7,260 +7,91 @@ Auth.js(NextAuth)を導入し、ユーザーログイン・セッション管理
 
 ## 前提・決定事項
 
-- Auth.js v5系を採用、Credentials Providerで `/api/auth/login` を呼び出す。
-- ブラウザ⇔Next.jsサーバー間のセッション情報(user id/email/role)は、Auth.jsが発行するhttpOnly暗号化Cookieに保存。
+- **next-auth v4系(`^4.24`)を採用**。当初はv5系(Auth.js)を想定していたが、実装時点でもv5はnpm上で`beta`タグのまま(`latest`は引き続き4.24.15)だったため、安定版のv4を採用した。v4でもApp Routerの`route.ts`ハンドラ + `getServerSession`によるApp Router対応は可能。
+- Credentials Providerで `/api/auth/login` を呼び出す。セッション戦略は `jwt`(データベースセッションは持たない)。
+- ブラウザ⇔Next.jsサーバー間のセッション情報(user id/email/role)は、next-authが発行するhttpOnly暗号化Cookieに保存。
 - ブラウザからAPIサーバーへの呼び出しは引き続きないため、固定APIキーもブラウザに露出しない([phase1/05-web-frontend](../phase1/05-web-frontend.md)の方針を維持)。
 - Credentials Providerの実装は「email/password」の2フィールドを想定。OAuthプロバイダ連携(Google/GitHub等)はPhase 2では対象外。
+- **重要な前提修正**: このプロジェクトのNext.jsは v16 系であり、`web/AGENTS.md` に明記の通り訓練データと異なる破壊的変更がある。実際に `node_modules/next/dist/docs/` を確認したところ、**v16で`middleware`規約は`proxy`に改称**されており(ファイル名は`proxy.ts`、エクスポート名も`proxy`、実行ランタイムはNode.js固定)、旧来の`middleware.ts`は非推奨。本タスクでは当初案の`middleware.ts`ではなく`src/proxy.ts`として実装した。
 
-## 実装コンポーネント
+## 実装状況(更新: 03-web-frontend 完了時点)
 
-### 1. `app/api/auth/[...nextauth]/route.ts` (新規)
+以下の構成で実装済み。当初案(v5想定のコード例)から実装が変わった点は都度注記する。
 
-Auth.jsのAPIハンドラ。以下を実装:
-- Credentials Provider: `authorize()` コールバック内で、Server Action経由でAPIサーバーの `/api/auth/login` を呼び出し、email/passwordを検証。
-- session callback: ログインユーザー情報(id/email/role)をセッションにマップ。
-- 環境変数 `AUTH_SECRET`(署名・暗号化鍵)を指定。`.env.local` に追記し、 `openssl rand -hex 32` で生成。
+### 1. `src/lib/auth.ts`(認証設定, 新規)
+
+`NextAuthOptions`(v4)を定義。Credentials Providerの`authorize()`で`src/lib/apiClient.ts`の`login()`(APIサーバーの`/api/auth/login`をX-API-Key付きで呼び出す関数)を利用し、`jwt`/`session`コールバックで`id`/`role`をトークン・セッションに橋渡しする。
+
+### 2. `src/app/api/auth/[...nextauth]/route.ts`(route handler, 新規)
 
 ```typescript
-// 実装例(参考)
 import NextAuth from "next-auth";
-import CredentialsProvider from "next-auth/providers/credentials";
-import { login } from "@/app/auth/actions"; // Server Action
+import { authOptions } from "@/lib/auth";
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
-  providers: [
-    CredentialsProvider({
-      async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) return null;
-        const user = await login(
-          credentials.email as string,
-          credentials.password as string
-        );
-        return user ?? null;
-      },
-    }),
-  ],
-  callbacks: {
-    async session({ session, token }) {
-      if (session.user) {
-        session.user.id = token.id as string;
-        session.user.role = token.role as "admin" | "user";
-      }
-      return session;
-    },
-    async jwt({ token, user }) {
-      if (user) {
-        token.id = user.id;
-        token.role = user.role;
-      }
-      return token;
-    },
-  },
-});
+const handler = NextAuth(authOptions);
+
+export { handler as GET, handler as POST };
 ```
 
-### 2. `app/auth/actions.ts` (新規)
+### 3. `src/lib/session.ts`(セッション取得ヘルパー, 新規)
 
-Server Action。APIサーバー側の `/api/auth/login` を呼び出す:
+- `getSession()`: `getServerSession(authOptions)` のラッパー(layout.tsx等での表示用)
+- `requireAdminSession()`: 未ログインなら`/login`へ、admin以外なら`/`へ`redirect()`する。`proxy.ts`によるページ保護はオプティミスティックな判定にとどまるため、`/users`のServer Component・Server Actionの両方でこの関数を呼び、admin権限を再検証している。
 
-```typescript
-// 実装例(参考)
-"use server";
+### 4. `src/proxy.ts`(ページ保護, 新規。当初案の`middleware.ts`から名称変更)
 
-import { LETS_BLOG_API_KEY } from "@/lib/config";
+`next-auth/jwt`の`getToken()`でセッションJWTを検証し、未ログインなら`/login`へリダイレクト、`/users`配下はadmin以外を`/`へリダイレクトする。`matcher`で`/api/auth`等を除外。
 
-export async function login(email: string, password: string) {
-  const response = await fetch(
-    `${process.env.NEXT_PUBLIC_API_URL}/api/auth/login`,
-    {
-      method: "POST",
-      headers: {
-        "X-API-Key": LETS_BLOG_API_KEY,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ email, password }),
-    }
-  );
+### 5. `src/app/login/page.tsx`(ログイン画面, 新規)
 
-  if (!response.ok) return null;
+Client Componentとして実装。`next-auth/react`の`signIn("credentials", { redirect: false, ... })`を呼び出し、成功時は`router.push("/")`、失敗時はエラーメッセージを表示する。
 
-  const user = await response.json();
-  return {
-    id: String(user.id),
-    email: user.email,
-    role: user.role,
-  };
-}
-```
+### 6. `src/app/users/page.tsx` + `UserForm.tsx` + `DeleteUserButton.tsx` + `actions.ts`(ユーザー管理画面, 新規)
 
-### 3. `middleware.ts` (新規・または更新)
+- `page.tsx`: `requireAdminSession()`でadmin確認後、`listUsers()`で一覧取得・表示。ログイン中の自分自身には削除ボタンを表示しない。
+- `actions.ts`: `createUserAction`(バリデーション + `requireAdminSession()` + APIサーバー呼び出し)、`deleteUserAction`(`requireAdminSession()` + 自分自身のid比較で削除拒否)。
 
-全リクエストをインターセプトし、ログイン必須ページへのアクセスを保護:
+### 7. `src/app/layout.tsx` / `src/app/LogoutButton.tsx`(既存レイアウト更新)
 
-```typescript
-// 実装例(参考)
-import { auth } from "@/app/api/auth/[...nextauth]/route";
+`RootLayout`を非同期化し`getSession()`でログインユーザーを取得。ログイン中はメールアドレス表示・ログアウトボタンを表示し、admin roleの場合のみナビに「ユーザー」項目を追加する。
 
-const protectedRoutes = ["/", "/sites", "/posts", "/ai-jobs", "/system", "/users"];
+### 8. `src/lib/apiClient.ts`(拡張)
 
-export default auth((req) => {
-  const isProtected = protectedRoutes.some((route) =>
-    req.nextUrl.pathname.startsWith(route)
-  );
+`login()`(401は例外にせずnullを返す)、`listUsers()`、`createUser()`、`updateUserRole()`、`deleteUser()`を追加。
 
-  if (isProtected && !req.auth) {
-    return Response.redirect(new URL("/login", req.url));
-  }
+### 9. 環境変数(`.env.local` / `.env.local.example`)
 
-  // admin ページの保護
-  if (req.nextUrl.pathname.startsWith("/users") && req.auth?.user?.role !== "admin") {
-    return Response.redirect(new URL("/", req.url));
-  }
-});
-
-export const config = {
-  matcher: ["/((?!api/auth|public|_next).*)"],
-};
-```
-
-### 4. `app/login/page.tsx` (新規)
-
-ログインフォーム画面。Credentials Provider へのログインを実行:
-
-- email / password の2フィールドと「ログイン」ボタン
-- React `useActionState` で `signIn("credentials", ...)` を呼び出し
-- ログイン失敗時はエラーメッセージを表示
-- ログイン成功時は既存ページにリダイレクト
-
-```typescript
-// 実装例(参考)
-"use client";
-
-import { signIn } from "next-auth/react";
-import { useActionState } from "react";
-import { useRouter } from "next/navigation";
-
-export default function LoginPage() {
-  const router = useRouter();
-
-  async function handleLogin(formData: FormData) {
-    const result = await signIn("credentials", {
-      email: formData.get("email") as string,
-      password: formData.get("password") as string,
-      redirect: false,
-    });
-
-    if (result?.ok) {
-      router.push("/");
-    }
-    return result?.error ? "Invalid credentials" : null;
-  }
-
-  const [error, formAction, isPending] = useActionState(
-    handleLogin,
-    null
-  );
-
-  return (
-    <form action={formAction} className="...">
-      <input type="email" name="email" placeholder="Email" required />
-      <input type="password" name="password" placeholder="Password" required />
-      <button type="submit" disabled={isPending}>
-        {isPending ? "Logging in..." : "Login"}
-      </button>
-      {error && <div className="text-red-600">{error}</div>}
-    </form>
-  );
-}
-```
-
-### 5. `app/users/page.tsx` (新規)
-
-ユーザー管理画面。以下を実装:
-- admin roleのみアクセス可(`middleware.ts` で保護)
-- ユーザー一覧表(email / role / 作成日時、削除ボタン)
-- 新規ユーザー追加フォーム(email / 初期パスワード / role)
-- 削除確認ダイアログ
-
-### 6. `app/users/actions.ts` (新規)
-
-ユーザー管理のServer Action:
-
-```typescript
-"use server";
-
-import { LETS_BLOG_API_KEY } from "@/lib/config";
-
-export async function listUsers() {
-  // GET /api/users
-}
-
-export async function createUser(email: string, password: string, role: "admin" | "user") {
-  // POST /api/users
-}
-
-export async function deleteUser(id: string) {
-  // DELETE /api/users/{id}
-}
-
-export async function updateUserRole(id: string, role: "admin" | "user") {
-  // PATCH /api/users/{id} with { role }
-}
-```
-
-### 7. 既存ページの更新
-
-全ページのレイアウトにユーザー情報表示・ログアウトボタンを追加:
-
-```typescript
-// 実装例(参考, app/layout.tsx 等で)
-import { auth, signOut } from "@/app/api/auth/[...nextauth]/route";
-
-export default async function Layout() {
-  const session = await auth();
-
-  return (
-    <header>
-      {session?.user && (
-        <>
-          <span>{session.user.email}</span>
-          <form action={async () => { "use server"; await signOut(); }}>
-            <button type="submit">Logout</button>
-          </form>
-        </>
-      )}
-    </header>
-  );
-}
-```
-
-### 8. `.env.local` / `.env.example` の更新
-
-以下を追記:
+next-auth v4の標準に合わせ、**当初案の`AUTH_SECRET`/`AUTH_URL`ではなく`NEXTAUTH_SECRET`/`NEXTAUTH_URL`を使用**。
 
 ```bash
-# Auth.js
-AUTH_SECRET=<openssl rand -hex 32 で生成>
-AUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=<openssl rand -hex 32 で生成>
+NEXTAUTH_URL=http://localhost:3000
 ```
 
-`.env.example` にもプレースホルダを記載。
+### 実機検証
+
+Dockerで起動したAPIサーバーに対し、`next dev`起動後にcurlでnext-authの資格情報フロー(`/api/auth/csrf`→`/api/auth/callback/credentials`→セッションCookie)を実行し、以下を確認済み:
+- 未ログイン時に`/`へアクセスすると`/login`へリダイレクト(307)
+- 正しい資格情報でログイン後、`/api/auth/session`にrole付きのセッションが返る
+- admin roleでログインした場合、`/`・`/users`ともに200
+- user roleでログインした場合、`/users`へのアクセスは`/`へリダイレクト(307)され、ダッシュボードにも「ユーザー」ナビが表示されない
+
+`npx tsc --noEmit` / `npm run build` / `npm run lint` はいずれも成功。
 
 ## タスクチェックリスト
 
-- [ ] `package.json` に `next-auth@latest` を追加
-- [ ] `app/api/auth/[...nextauth]/route.ts` 実装
-- [ ] `app/auth/actions.ts` 実装(login Server Action)
-- [ ] `middleware.ts` 実装・更新(ページ保護 + admin 権限チェック)
-- [ ] `app/login/page.tsx` 実装
-- [ ] `app/users/page.tsx` 実装(ユーザー一覧・追加フォーム)
-- [ ] `app/users/actions.ts` 実装(ユーザー管理のServer Action)
-- [ ] 既存ページレイアウトにユーザー情報表示・ログアウトボタンを追加
-- [ ] `.env.local` / `.env.example` 更新
-- [ ] 実機検証(ログイン・ユーザー追加・アクセス制御など一通りをブラウザで確認)
+- [x] `package.json` に `next-auth`(v4系)を追加
+- [x] `src/lib/auth.ts` / `src/app/api/auth/[...nextauth]/route.ts` 実装
+- [x] `src/lib/session.ts` 実装(`getSession` / `requireAdminSession`)
+- [x] `src/proxy.ts` 実装・更新(ページ保護 + admin 権限チェック)
+- [x] `src/app/login/page.tsx` 実装
+- [x] `src/app/users/page.tsx` 実装(ユーザー一覧・追加フォーム・削除)
+- [x] `src/app/users/actions.ts` 実装(ユーザー管理のServer Action)
+- [x] 既存ページレイアウトにユーザー情報表示・ログアウトボタンを追加
+- [x] `.env.local` / `.env.local.example` 更新
+- [x] 実機検証(ログイン・ユーザー追加・アクセス制御など一通りを確認)
 
 ## 未決事項
 
-- セッションのタイムアウト期間(デフォルトで次回訪問時に再検証される設定にするか、明示的にTTLを設定するか)
+- セッションのタイムアウト期間(現状はnext-authのデフォルト設定のまま。明示的なTTL調整は将来検討)
 - 「パスワード変更」画面の実装要否(Phase 2では対象外の想定。必要なら別途追加)
-- ユーザー削除時に確認ダイアログを表示するか、また削除対象が自分自身の場合の処理(Next.js側で禁止する想定)

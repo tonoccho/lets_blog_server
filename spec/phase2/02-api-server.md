@@ -10,15 +10,21 @@
 - パスワードハッシュはBCrypt(`spring-security-crypto`をライブラリ追加。spring-securityフレームワーク全体は導入しない)。
 - 権限チェックはNext.js側(セッション情報の`role`)で行い、APIサーバー側は「Web管理フロントから来た正当なリクエスト」の検証のみに徹する(二重実装を避ける)。
 
+## 実装状況(更新: 02-api-server 完了時点)
+
+- `User`(domain)/`UserRepository`/`UserService`/`AuthController`/`UserController` を実装。BCryptは `spring-security-crypto` の `BCryptPasswordEncoder` を `UserService` 内で直接利用(Spring Security本体は導入していない)。
+- 「自分自身の削除禁止」は当初の未決事項どおり、Next.js側(`requireAdminSession`+セッションのuser id比較)で実装した([03-web-frontend](03-web-frontend.md)参照)。APIサーバー側は関与しない。
+- Dockerコンテナ上でログイン成功/失敗・一覧・作成・重複409・不正role 400・更新・404・削除・APIキー未指定401を実機検証済み。
+
 ## 主要APIエンドポイント(新規)
 
 | メソッド | パス | 用途 | リクエスト / レスポンス | 状態 |
 |---|---|---|---|---|
-| POST | `/api/auth/login` | ユーザー認証 | req: `{ email, password }` / res: `{ id, email, role }` (認証失敗時は401) | 実装待ち |
-| GET | `/api/users` | ユーザー一覧取得 | res: `[{ id, email, role, created_at }, ...]` | 実装待ち |
-| POST | `/api/users` | ユーザー新規作成 | req: `{ email, password, role }` / res: `{ id, email, role }` | 実装待ち |
-| PATCH | `/api/users/{id}` | ユーザー情報更新(role/パスワード) | req: `{ role?, password? }` / res: `{ id, email, role }` | 実装待ち |
-| DELETE | `/api/users/{id}` | ユーザー削除 | status: 204 No Content | 実装待ち |
+| POST | `/api/auth/login` | ユーザー認証 | req: `{ email, password }` / res: `{ id, email, role, createdAt, updatedAt }` (認証失敗時は401) | 実装済み |
+| GET | `/api/users` | ユーザー一覧取得 | res: `[{ id, email, role, createdAt, updatedAt }, ...]` | 実装済み |
+| POST | `/api/users` | ユーザー新規作成 | req: `{ email, password, role }` / res: 同上(201) | 実装済み |
+| PATCH | `/api/users/{id}` | ユーザー情報更新(role/パスワード) | req: `{ role?, password? }` / res: 同上(200) | 実装済み |
+| DELETE | `/api/users/{id}` | ユーザー削除 | status: 204 No Content | 実装済み |
 
 ### `/api/auth/login` 詳細
 
@@ -48,7 +54,7 @@
 
 ### `/api/users/{id}` 削除詳細
 
-- 自分自身(セッションユーザー)の削除は認めない(400 Bad Request)。管理者権限なし時の削除試行の防止。※実装時に検討: APIサーバー側で禁止するか、Next.js側で禁止するか(後者が責任分離として望ましい)
+- 自分自身(セッションユーザー)の削除禁止はNext.js側(`requireAdminSession`)で実装し、APIサーバー側では検証しない(下記「実装状況」参照)
 - id が存在しない場合は404
 - 成功後は204 No Content
 
@@ -72,21 +78,20 @@
 - `EmailAlreadyExistsException` → 409 Conflict
 - `InvalidRoleException` → 400 Bad Request
 - `UserNotFoundException` → 404 Not Found
-- 認証失敗時の401 は既存の認証フィルタで返す
+- `InvalidCredentialsException` → 401 Unauthorized(`/api/auth/login`の認証失敗)
 
 ## タスクチェックリスト
 
-- [ ] BCryptパッケージ(`spring-security-crypto`)をbuild.gradleに追加
-- [ ] `users` テーブルのJPA Entity/Repository実装
-- [ ] `UserService` 実装(CRUD・BCrypt処理)
-- [ ] `/api/auth/login` エンドポイント実装
-- [ ] `/api/users` CRUD エンドポイント実装(GET一覧, POST作成, PATCH更新, DELETE削除)
-- [ ] 初回管理者ブートストラップの `ApplicationRunner` 実装
-- [ ] エラーハンドリング(`GlobalExceptionHandler`拡張)
-- [ ] 実機検証(ログイン・ユーザー追加・一覧取得・削除など一通りをcurlやPostmanで確認)
+- [x] BCryptパッケージ(`spring-security-crypto`)をbuild.gradleに追加
+- [x] `users` テーブルのJPA Entity/Repository実装
+- [x] `UserService` 実装(CRUD・BCrypt処理)
+- [x] `/api/auth/login` エンドポイント実装
+- [x] `/api/users` CRUD エンドポイント実装(GET一覧, POST作成, PATCH更新, DELETE削除)
+- [x] 初回管理者ブートストラップの `ApplicationRunner` 実装
+- [x] エラーハンドリング(`GlobalExceptionHandler`拡張)
+- [x] 実機検証(ログイン・ユーザー追加・一覧取得・削除など一通りをcurlで確認)
 
 ## 未決事項
 
-- ユーザー削除時に「自分自身の削除禁止」をAPIサーバー側で検証するか、Next.js側で禁止するか(責任分離の観点から後者が望ましい想定だが、実装時に検討)
 - パスワード更新履歴の追跡必要性(Phase 2では不要と想定)
 - ユーザー削除時に該当ユーザーが作成した投稿レコードをどうするか(Phase 2では「投稿主」カラムなし、未検討)

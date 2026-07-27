@@ -10,6 +10,11 @@ Web管理フロントエンドのログインユーザーを管理するため�
 - パスワードは平文保存せず、APIサーバー側でBCryptハッシュ化した値のみを保存する。
 - 複数人利用が前提のため `email` はUNIQUE制約を付与する。
 
+## 実装状況(更新: 01-database-schema 完了時点)
+
+- `V2__add_users.sql` を追加し、Dockerコンテナ再起動でFlywayが自動適用することを確認済み(`schema_version=2`)。
+- 初回管理者アカウントは `InitialAdminBootstrap`(`ApplicationRunner`)で実装([02-api-server](02-api-server.md)参照)。
+
 ## テーブル案
 
 ### `users`
@@ -31,10 +36,10 @@ Web管理フロントエンドのログインユーザーを管理するため�
 
 ## タスクチェックリスト
 
-- [ ] `users` テーブルのカラム定義レビュー(上記ドラフトの確定)
-- [ ] `V2__add_users.sql` マイグレーション作成
-- [ ] 初回管理者アカウントのブートストラップ処理実装
-- [ ] `.env.example` に `INITIAL_ADMIN_EMAIL` / `INITIAL_ADMIN_PASSWORD` を追記
+- [x] `users` テーブルのカラム定義レビュー(上記ドラフトの確定)
+- [x] `V2__add_users.sql` マイグレーション作成
+- [x] 初回管理者アカウントのブートストラップ処理実装
+- [x] `.env.example` に `INITIAL_ADMIN_EMAIL` / `INITIAL_ADMIN_PASSWORD` を追記
 
 ## 未決事項
 
