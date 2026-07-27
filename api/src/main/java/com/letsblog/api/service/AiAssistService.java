@@ -2,21 +2,26 @@ package com.letsblog.api.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.letsblog.api.ai.ComfyUiClient;
+import com.letsblog.api.ai.ComfyUiImage;
 import com.letsblog.api.ai.OllamaClient;
 import com.letsblog.api.domain.GenerationJob;
 import com.letsblog.api.dto.AiDraftRequest;
 import com.letsblog.api.dto.AiDraftResponse;
+import com.letsblog.api.dto.AiImageRequest;
+import com.letsblog.api.dto.AiImageResponse;
 import com.letsblog.api.dto.AiTagsRequest;
 import com.letsblog.api.dto.AiTagsResponse;
 import com.letsblog.api.repository.GenerationJobRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Ollamaを利用した記事執筆支援(下書き/校正/要約、タグ・カテゴリ提案)。
+ * Ollama/ComfyUIを利用した記事執筆支援(下書き/校正/要約、タグ・カテゴリ提案、画像生成)。
  * 呼び出しごとに generation_jobs テーブルへ履歴を記録する。
  */
 @Service
@@ -56,14 +61,29 @@ public class AiAssistService {
             """;
 
     private final OllamaClient ollamaClient;
+    private final ComfyUiClient comfyUiClient;
     private final GenerationJobRepository generationJobRepository;
     private final ObjectMapper objectMapper;
 
-    public AiAssistService(OllamaClient ollamaClient, GenerationJobRepository generationJobRepository,
-                           ObjectMapper objectMapper) {
+    public AiAssistService(OllamaClient ollamaClient, ComfyUiClient comfyUiClient,
+                           GenerationJobRepository generationJobRepository, ObjectMapper objectMapper) {
         this.ollamaClient = ollamaClient;
+        this.comfyUiClient = comfyUiClient;
         this.generationJobRepository = generationJobRepository;
         this.objectMapper = objectMapper;
+    }
+
+    public AiImageResponse generateImage(AiImageRequest request) {
+        GenerationJob job = startJob("comfyui_image", Map.of("prompt", request.prompt()));
+        try {
+            ComfyUiImage image = comfyUiClient.generateImage(request.prompt());
+            String base64 = Base64.getEncoder().encodeToString(image.data());
+            completeJob(job, Map.of("fileName", image.fileName()));
+            return new AiImageResponse(image.fileName(), base64, image.mimeType());
+        } catch (RuntimeException e) {
+            failJob(job, e);
+            throw e;
+        }
     }
 
     public AiDraftResponse draft(AiDraftRequest request) {

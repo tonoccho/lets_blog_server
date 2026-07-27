@@ -49,10 +49,12 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
   - [x] タグ/カテゴリ自動提案 API実装(`POST /api/ai/tags`)
   - [x] `generation_jobs` への実行履歴記録を実装
   - [x] 実モデル・実APIでdraft/proofread/summarize/tagsを実機検証(VSCode拡張のクライアントコード経由でも確認)
-- [ ] [07-comfyui-integration](phase1/07-comfyui-integration.md) — ComfyUI 連携
-  - [ ] ワークフローJSON作成
-  - [ ] 画像生成API仲介実装
-  - [ ] 生成画像のWordPressメディア自動アップロード実装
+- [x] [07-comfyui-integration](phase1/07-comfyui-integration.md) — ComfyUI 連携
+  - [x] チェックポイント配置(`v1-5-pruned-emaonly.safetensors`)
+  - [x] ワークフローJSON作成(txt2img: Checkpoint→CLIPTextEncode→EmptyLatentImage→KSampler→VAEDecode→SaveImage)
+  - [x] 画像生成API仲介実装(`POST /api/ai/image`、`/prompt`投入→`/history`ポーリング→`/view`取得)
+  - [x] 生成画像のWordPressメディア自動アップロード → 既存の`/api/posts/publish`画像アップロード経路に統合
+  - [x] 実機検証(プロンプト→画像生成→VSCode拡張経由でのWordPress投稿まで一気通貫で確認)
 - [ ] [08-plantuml-integration](phase1/08-plantuml-integration.md) — PlantUML 連携
   - [ ] Markdown内図ブロック記法確定
   - [ ] レンダリングAPI仲介実装

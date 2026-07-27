@@ -16,6 +16,7 @@ services:
       OLLAMA_BASE_URL: http://ollama:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b-instruct}
       COMFYUI_BASE_URL: http://comfyui:8188
+      COMFYUI_CHECKPOINT: ${COMFYUI_CHECKPOINT:-v1-5-pruned-emaonly.safetensors}
       PLANTUML_BASE_URL: http://plantuml:8080
     depends_on:
       mysql:

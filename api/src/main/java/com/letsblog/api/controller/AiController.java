@@ -2,6 +2,8 @@ package com.letsblog.api.controller;
 
 import com.letsblog.api.dto.AiDraftRequest;
 import com.letsblog.api.dto.AiDraftResponse;
+import com.letsblog.api.dto.AiImageRequest;
+import com.letsblog.api.dto.AiImageResponse;
 import com.letsblog.api.dto.AiTagsRequest;
 import com.letsblog.api.dto.AiTagsResponse;
 import com.letsblog.api.service.AiAssistService;
@@ -27,5 +29,10 @@ public class AiController {
     @PostMapping("/api/ai/tags")
     public AiTagsResponse tags(@Valid @RequestBody AiTagsRequest request) {
         return aiAssistService.suggestTags(request);
+    }
+
+    @PostMapping("/api/ai/image")
+    public AiImageResponse image(@Valid @RequestBody AiImageRequest request) {
+        return aiAssistService.generateImage(request);
     }
 }

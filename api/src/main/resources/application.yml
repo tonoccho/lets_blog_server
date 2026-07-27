@@ -22,4 +22,5 @@ app:
   ollama-base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
   ollama-model: ${OLLAMA_MODEL:qwen2.5:7b-instruct}
   comfyui-base-url: ${COMFYUI_BASE_URL:http://localhost:8188}
+  comfyui-checkpoint: ${COMFYUI_CHECKPOINT:v1-5-pruned-emaonly.safetensors}
   plantuml-base-url: ${PLANTUML_BASE_URL:http://localhost:8085}
