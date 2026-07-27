@@ -91,3 +91,13 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
 
 - [ ] リモート常時稼働化(自宅サーバー/VPS)対応・外部公開時のセキュリティ強化
 - [ ] その他のCMS対応(WordPress/microCMS以外)
+- [ ] microCMS実アカウントでのエンドツーエンド実機検証(サイト登録・投稿作成/更新・画像アップロード・カテゴリ/タグ自動作成)、実際のAPIレスポンス仕様に応じた `MicroCmsAdapter` の調整([05-microcms-adapter](phase3/05-microcms-adapter.md)未決事項)
+- [ ] VSCode拡張のGUI経由での実機検証(拡張パネルのロード確認、投稿/更新コマンドの手動操作)([07-vscode-extension](phase3/07-vscode-extension.md)未決事項)
+- [ ] microCMS利用時の事前準備手順(カテゴリ/タグ用list型APIの作成方法)のドキュメント化
+- [ ] microCMSサイト登録時のエンドポイント名・認証情報のバリデーション強化(現状はAPI呼び出し時のエラー任せ、[06-web-frontend](phase3/06-web-frontend.md)未決事項)
+- [ ] `CmsAdapterFactory` の未対応CMS種別エラーのHTTPステータス見直し(現状 `CmsApiException` 経由で502だが、本来は400/501が適切ではないか、[03-cms-adapter-factory](phase3/03-cms-adapter-factory.md)未決事項)
+- [ ] 認証情報(`credentials` Map)の型安全性強化の検討(現状は `Map<String,String>` の自由形式、[04-database-schema](phase3/04-database-schema.md)未決事項)
+- [ ] レガシーWordPress専用カラム(`sites.wp_username`/`wp_app_password_encrypted`)の整理・削除の検討(全サイトが新スキーマに移行し安定運用が確認できた後)
+- [ ] front matterの `wp_post_id`/`wpPostId` をCMS非依存な名称(`cms_post_id` 等)へリネームする移行計画([07-vscode-extension](phase3/07-vscode-extension.md)未決事項、後方互換性の設計込み)
+- [ ] `WordPressAdapterTest`/`MicroCmsAdapterTest` のリクエストボディ検証強化(現状はHTTPメソッド/URIのみ検証、[02-wordpress-adapter-tests](phase3/02-wordpress-adapter-tests.md)未決事項)
+- [ ] ユーザー管理の拡張機能(パスワード再設定、監査ログ)の検討
