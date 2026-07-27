@@ -1,0 +1,34 @@
+# Env / secrets
+.env
+
+# Claude Code セッション固有のランタイム状態(CLAUDE.md 等の規約ファイルはコミット対象)
+.claude/scheduled_tasks.lock
+
+# Java / Gradle
+api/.gradle/
+api/build/
+!api/gradle/wrapper/gradle-wrapper.jar
+*.class
+*.jar
+!api/gradle/wrapper/gradle-wrapper.jar
+
+# Node
+node_modules/
+web/.next/
+web/dist/
+npm-debug.log*
+
+# VSCode extension
+extension/out/
+extension/dist/
+extension/*.vsix
+
+# IDE
+.idea/
+*.iml
+
+# OS
+.DS_Store
+
+# Docker volumes data dumps (if any local bind mounts used)
+docker-data/
