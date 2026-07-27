@@ -100,4 +100,9 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
 - [ ] レガシーWordPress専用カラム(`sites.wp_username`/`wp_app_password_encrypted`)の整理・削除の検討(全サイトが新スキーマに移行し安定運用が確認できた後)
 - [ ] front matterの `wp_post_id`/`wpPostId` をCMS非依存な名称(`cms_post_id` 等)へリネームする移行計画([07-vscode-extension](phase3/07-vscode-extension.md)未決事項、後方互換性の設計込み)
 - [ ] `WordPressAdapterTest`/`MicroCmsAdapterTest` のリクエストボディ検証強化(現状はHTTPメソッド/URIのみ検証、[02-wordpress-adapter-tests](phase3/02-wordpress-adapter-tests.md)未決事項)
-- [ ] ユーザー管理の拡張機能(パスワード再設定、監査ログ)の検討
+
+## Phase 4: ユーザー管理拡張機能
+
+- [ ] [00-overview](phase4/00-overview.md) — 全体スコープ・決定事項・タスク一覧
+- [ ] [01-password-reset](phase4/01-password-reset.md) — パスワード再設定機能(トークン・メール送信・Web画面)
+- [ ] [02-audit-log](phase4/02-audit-log.md) — 監査ログ機能(AOP・管理画面・検索・削除ポリシー)
