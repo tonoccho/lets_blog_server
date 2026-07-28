@@ -10,11 +10,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.mail.SimpleMailMessage;
-import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -22,6 +21,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -37,14 +38,13 @@ class PasswordResetServiceTest {
     private UserRepository userRepository;
 
     @Mock
-    private JavaMailSender mailSender;
+    private MailSenderService mailSenderService;
 
     private PasswordResetService service;
 
     @BeforeEach
     void setUp() {
-        service = new PasswordResetService(tokenRepository, userRepository, mailSender);
-        ReflectionTestUtils.setField(service, "fromEmail", "noreply@letsblog.example.com");
+        service = new PasswordResetService(tokenRepository, userRepository, mailSenderService);
         ReflectionTestUtils.setField(service, "baseUrl", "http://localhost:3000");
     }
 
@@ -64,7 +64,7 @@ class PasswordResetServiceTest {
         service.requestPasswordReset("unknown@example.com");
 
         verify(tokenRepository, never()).save(any());
-        verify(mailSender, never()).send(any(SimpleMailMessage.class));
+        verify(mailSenderService, never()).sendMail(any(), any(), any());
     }
 
     @Test
@@ -80,7 +80,8 @@ class PasswordResetServiceTest {
         assertEquals(1L, tokenCaptor.getValue().getUserId());
         assertFalse(tokenCaptor.getValue().getUsed());
 
-        verify(mailSender, times(1)).send(any(SimpleMailMessage.class));
+        verify(mailSenderService, times(1))
+                .sendMail(eq("user@example.com"), eq("password-reset"), any(Map.class));
     }
 
     @Test
@@ -159,8 +160,8 @@ class PasswordResetServiceTest {
         User user = buildUser();
         when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(user));
         when(tokenRepository.findByUserIdAndUsedFalse(1L)).thenReturn(Optional.empty());
-        org.mockito.Mockito.doThrow(new RuntimeException("smtp down"))
-                .when(mailSender).send(any(SimpleMailMessage.class));
+        doThrow(new EmailSendException("メール送信に失敗しました", new RuntimeException("smtp down")))
+                .when(mailSenderService).sendMail(any(), any(), any());
 
         assertThrows(EmailSendException.class,
                 () -> service.requestPasswordReset("user@example.com"));

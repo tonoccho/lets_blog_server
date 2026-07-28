@@ -106,3 +106,15 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
 - [ ] [00-overview](phase4/00-overview.md) — 全体スコープ・決定事項・タスク一覧
 - [ ] [01-password-reset](phase4/01-password-reset.md) — パスワード再設定機能(トークン・メール送信・Web画面)
 - [ ] [02-audit-log](phase4/02-audit-log.md) — 監査ログ機能(AOP・管理画面・検索・削除ポリシー)
+- [ ] [03-ui-contrast-fix](phase4/03-ui-contrast-fix.md) — 管理画面の低コントラスト箇所の修正
+- [ ] [04-user-self-registration](phase4/04-user-self-registration.md) — セルフサインアップ実装・初期管理者払い出し方式の変更
+- [ ] [05-site-provisioning-visibility](phase4/05-site-provisioning-visibility.md) — サイト登録の疎通確認・プロビジョニング有無の明示
+
+## Phase 5: ユーザー認証・運用機能の強化
+
+- [ ] [00-overview](phase5/00-overview.md) — 全体スコープ・決定事項・タスク一覧
+- [x] [01-smtp-mail-setup](phase5/01-smtp-mail-setup.md) — SMTP メール送信の本番環境対応・テンプレート実装
+- [ ] [02-audit-log-archival](phase5/02-audit-log-archival.md) — 監査ログアーカイブ・削除ポリシーの自動化
+- [ ] [03-two-factor-auth](phase5/03-two-factor-auth.md) — 2FA(TOTP)認証の実装
+- [ ] [04-rbac-enhancements](phase5/04-rbac-enhancements.md) — ロールベースアクセス制御の細粒度化
+- [ ] [05-true-provisioning](phase5/05-true-provisioning.md) — 真のプロビジョニング機能の実装

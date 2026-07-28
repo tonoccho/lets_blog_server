@@ -7,6 +7,7 @@ import com.letsblog.api.service.ForbiddenException;
 import com.letsblog.api.service.InvalidCredentialsException;
 import com.letsblog.api.service.InvalidRoleException;
 import com.letsblog.api.service.InvalidTokenException;
+import com.letsblog.api.service.MailTemplateNotFoundException;
 import com.letsblog.api.service.SiteNotFoundException;
 import com.letsblog.api.service.UserNotFoundException;
 import org.springframework.http.HttpStatus;
@@ -63,6 +64,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(EmailSendException.class)
     public ResponseEntity<Map<String, String>> handleEmailSendError(EmailSendException e) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(MailTemplateNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleMailTemplateNotFound(MailTemplateNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
     }
 
     @ExceptionHandler(CmsApiException.class)
