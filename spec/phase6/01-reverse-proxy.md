@@ -356,13 +356,13 @@ nginx リバースプロキシコンテナを docker-compose に追加し、す�
 - [x] 問題が発生した場合の調査・対応
   - 実装中に発覚した実際の問題と対処:
     1. `proxy_pass` に変数(`set $upstream_xxx ...`)を使うと、location プレフィックスの自動除去(URI部分によるリライト)が効かず、常に固定URI(`/`)がバックエンドに渡ってしまう(Ollamaのアクセスログで全リクエストが`GET /`になっていたことで発覚)。`rewrite ^/prefix/(.*)$ /$1 break;` を明示的に追加して解消
-    2. `host.docker.internal` は Docker の組み込みDNS(`resolver 127.0.0.11`)では解決できず、`extra_hosts`(`/etc/hosts`)経由の静的解決のみ有効。Webフロント向け location だけは変数を使わず `proxy_pass http://host.docker.internal:3000;` と直接指定することで解消
+    2. (当初のホスト上 `npm run dev` 方式で発生)`host.docker.internal` は Docker の組み込みDNS(`resolver 127.0.0.11`)では解決できず、`extra_hosts`(`/etc/hosts`)経由の静的解決のみ有効だった。後述の通りWebフロントをコンテナ化したことで、この制約自体が不要になった
+    3. ホスト上の `npm run dev` を手動起動する運用は、プロセス停止・再起動忘れにより `https://localhost/` が502を返す障害を実機で誘発した(ユーザー報告により発覚)。Webフロントを`web`サービスとしてdocker-compose管理下に移し、`docker compose up -d`で自動起動・再起動されるように変更して解消(nginxの`location /`も`web:3000`への変数ベース転送に統一し、`host.docker.internal`/`extra_hosts`は削除)
 
 ## 未決事項・要検証事項
 
 - **ComfyUI JS バンドル内の絶対パスAPI呼び出し**: `fetch("/prompt")` 等、`/comfyui` プレフィックスを考慮しないハードコードされた絶対パスがJS実行時に呼ばれていないか(静的アセット・WebSocket疎通は確認済みだが、実際にワークフローを実行してのエンドツーエンド検証は未実施)
 - **ブラウザでの目視確認**: 自己署名証明書の警告表示・例外承認操作、実際のログイン〜各画面遷移はcurlでの疎通確認に留まり、ブラウザでの実機確認は未実施
-- **Web フロント (Next.js) のコンテナ化**: 現状はホスト上の `npm run dev` を前提とし、`host.docker.internal` 経由でプロキシしている(Linux環境でも `extra_hosts: host-gateway` で動作することを確認済み)。コンテナ化自体は引き続きスコープ外
 
 ## 関連ドキュメント
 
