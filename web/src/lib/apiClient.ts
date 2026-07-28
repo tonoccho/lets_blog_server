@@ -58,8 +58,17 @@ export interface AppUser {
   id: number;
   email: string;
   role: "admin" | "user";
+  roleNames: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface RoleInfo {
+  id: number;
+  roleName: string;
+  displayName: string;
+  description: string | null;
+  permissions: string[];
 }
 
 export interface UserCreateInput {
@@ -244,6 +253,18 @@ export function updateUserRole(id: number, role: "admin" | "user", actor?: Actor
 
 export function deleteUser(id: number, actor?: ActorInfo): Promise<void> {
   return apiFetch<void>(`/api/users/${id}`, { method: 'DELETE', actor });
+}
+
+export function listRoles(actor: ActorInfo): Promise<RoleInfo[]> {
+  return apiFetch<RoleInfo[]>('/api/roles', { actor });
+}
+
+export function assignRole(userId: number, roleName: string, actor: ActorInfo): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>(`/api/users/${userId}/roles/${roleName}`, { method: 'POST', actor });
+}
+
+export function removeRole(userId: number, roleName: string, actor: ActorInfo): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>(`/api/users/${userId}/roles/${roleName}`, { method: 'DELETE', actor });
 }
 
 export function requestPasswordReset(email: string): Promise<{ message: string }> {
