@@ -43,8 +43,8 @@
       "properties": {
         "letsBlog.serverUrl": {
           "type": "string",
-          "default": "http://localhost:8080",
-          "description": "仲介APIサーバーのベースURL"
+          "default": "https://localhost",
+          "description": "仲介APIサーバーのベースURL(リバースプロキシ経由。自己署名証明書のためNODE_TLS_REJECT_UNAUTHORIZEDの検証が必要な場合あり)"
         }
       }
     }

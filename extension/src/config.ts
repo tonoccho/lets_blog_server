@@ -4,7 +4,7 @@ const API_KEY_SECRET = 'letsBlog.apiKey';
 
 export function getServerUrl(): string {
   const url = vscode.workspace.getConfiguration('letsBlog').get<string>('serverUrl');
-  return (url ?? 'http://localhost:8080').replace(/\/+$/, '');
+  return (url ?? 'https://localhost').replace(/\/+$/, '');
 }
 
 export async function getApiKey(context: vscode.ExtensionContext): Promise<string | undefined> {

@@ -1,12 +1,12 @@
 const LINKS = [
-  { label: "phpMyAdmin", url: "http://localhost:8081", description: "MySQLデータベースの管理" },
-  { label: "ComfyUI", url: "http://localhost:8188", description: "画像生成ワークフローUI" },
-  { label: "PlantUML Server", url: "http://localhost:8085", description: "図のプレビュー・検証用" },
-  { label: "Ollama", url: "http://localhost:11434", description: "ローカルLLM API(UIなし)" },
+  { label: "phpMyAdmin", url: "https://localhost/phpmyadmin/", description: "MySQLデータベースの管理" },
+  { label: "ComfyUI", url: "https://localhost/comfyui/", description: "画像生成ワークフローUI" },
+  { label: "PlantUML Server", url: "https://localhost/plantuml/", description: "図のプレビュー・検証用" },
+  { label: "Ollama", url: "https://localhost/ollama/", description: "ローカルLLM API(UIなし)" },
 ];
 
 export default function SystemPage() {
-  const apiUrl = process.env.LETS_BLOG_API_URL ?? "http://localhost:8080";
+  const apiUrl = process.env.LETS_BLOG_API_URL ?? "https://localhost";
 
   return (
     <div className="space-y-8">
