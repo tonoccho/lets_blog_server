@@ -11,6 +11,7 @@ export interface Site {
   createdAt: string;
   updatedAt: string;
   connectionCheckStatus: "SUCCESS" | "FAILED" | null;
+  managedWordpress: boolean;
 }
 
 export interface PostSummary {
@@ -36,6 +37,15 @@ export interface SiteRegisterInput {
   siteKey: string;
   cmsType: CmsType;
   credentials: Record<string, string>;
+}
+
+export interface ManagedWordPressSiteInput {
+  name: string;
+  siteKey: string;
+  title: string;
+  adminUser: string;
+  adminEmail: string;
+  adminPassword: string;
 }
 
 export interface AuthenticatedUser {
@@ -131,6 +141,19 @@ export function registerSite(input: SiteRegisterInput, actor?: ActorInfo): Promi
     body: JSON.stringify(input),
     actor,
   });
+}
+
+export function createManagedWordPressSite(input: ManagedWordPressSiteInput, actor?: ActorInfo): Promise<Site> {
+  return apiFetch<Site>('/api/sites/managed-wordpress', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function deleteSite(id: number, actor?: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/sites/${id}`, { method: 'DELETE', actor });
 }
 
 export function listPosts(): Promise<PostSummary[]> {
@@ -281,6 +304,49 @@ export function confirmPasswordReset(token: string, newPassword: string): Promis
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ token, newPassword }),
   });
+}
+
+export interface CustomTag {
+  id: number;
+  tagName: string;
+  htmlTemplate: string;
+  description: string | null;
+  cssContent: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomTagInput {
+  tagName: string;
+  htmlTemplate: string;
+  description?: string;
+  cssContent?: string;
+}
+
+export function listCustomTags(actor?: ActorInfo): Promise<CustomTag[]> {
+  return apiFetch<CustomTag[]>('/api/custom-tags', { actor });
+}
+
+export function createCustomTag(input: CustomTagInput, actor: ActorInfo): Promise<CustomTag> {
+  return apiFetch<CustomTag>('/api/custom-tags', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function updateCustomTag(id: number, input: CustomTagInput, actor: ActorInfo): Promise<CustomTag> {
+  return apiFetch<CustomTag>(`/api/custom-tags/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function deleteCustomTag(id: number, actor: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/custom-tags/${id}`, { method: 'DELETE', actor });
 }
 
 export interface AuditLogEntry {

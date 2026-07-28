@@ -42,6 +42,7 @@ export default async function RootLayout({
           { href: "/users", label: "ユーザー" },
           { href: "/audit-logs", label: "監査ログ" },
           { href: "/admin/roles", label: "ロール管理" },
+          { href: "/custom-tags", label: "カスタムタグ" },
         ]
       : NAV_ITEMS;
 

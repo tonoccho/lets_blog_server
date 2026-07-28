@@ -111,6 +111,12 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
 - [x] [01-reverse-proxy](phase6/01-reverse-proxy.md) — リバースプロキシコンテナ追加・https://localhost一本化・ComfyUI/Ollamaのサブパスルーティング(実機でweb/api/phpmyadmin/ollama/comfyui/plantuml/mailhogの疎通・個別ポート遮断・ComfyUI WebSocketまで確認済み。ComfyUI JS内の絶対パスAPI呼び出しの有無とブラウザでの目視確認は未実施)
 - [x] [02-setup-manual](phase6/02-setup-manual.md) — セットアップマニュアル整備(docs/setup.mdを新規作成)
 
+## Phase 7: WordPress自動プロビジョニング・カスタムタグレンダリング機能
+
+- [x] [00-overview](phase7/00-overview.md) — 全体スコープ・決定事項・タスク一覧
+- [x] [01-wordpress-provisioning](phase7/01-wordpress-provisioning.md) — 常駐WordPressコンテナへのサブディレクトリ設置型自動プロビジョニング(実機検証済み。credentials.baseUrlとsite.baseUrlの分離、mysqlクライアントのTLS、wp-cliのメモリ上限、.htaccess手動生成、Application PasswordsのHTTPS要件、サイト削除時の`posts`外部キー制約など、実機検証で判明した問題に対応済み)
+- [x] [02-custom-tags](phase7/02-custom-tags.md) — カスタムショートコードタグ機能(DB駆動、実機検証済み)
+
 ## 未着手・スコープ外候補
 
 - [ ] リモート常時稼働化(自宅サーバー/VPS)対応・外部公開時のセキュリティ強化

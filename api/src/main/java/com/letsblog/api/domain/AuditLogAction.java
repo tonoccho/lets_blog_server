@@ -12,7 +12,12 @@ public enum AuditLogAction {
     TWO_FACTOR_ENABLED("2FA有効化"),
     TWO_FACTOR_DISABLED("2FA無効化"),
     USER_ROLE_ASSIGNED("ユーザーロール割り当て"),
-    USER_ROLE_REMOVED("ユーザーロール削除");
+    USER_ROLE_REMOVED("ユーザーロール削除"),
+    CUSTOM_TAG_CREATED("カスタムタグ作成"),
+    CUSTOM_TAG_UPDATED("カスタムタグ更新"),
+    CUSTOM_TAG_DELETED("カスタムタグ削除"),
+    SITE_DELETED("サイト削除"),
+    WORDPRESS_PROVISIONED("WordPress自動構築");
 
     private final String displayName;
 

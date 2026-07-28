@@ -1,8 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { CmsType, registerSite } from "@/lib/apiClient";
-import { getSession } from "@/lib/session";
+import { CmsType, createManagedWordPressSite, deleteSite, registerSite } from "@/lib/apiClient";
+import { getSession, requireAdminSession } from "@/lib/session";
 
 export interface RegisterSiteState {
   error?: string;
@@ -54,4 +54,43 @@ export async function registerSiteAction(
 
   revalidatePath("/sites");
   return { success: true, connectionCheckStatus };
+}
+
+export interface CreateManagedWordPressSiteState {
+  error?: string;
+  success?: boolean;
+}
+
+export async function createManagedWordPressSiteAction(
+  _prevState: CreateManagedWordPressSiteState,
+  formData: FormData
+): Promise<CreateManagedWordPressSiteState> {
+  const name = String(formData.get("managedName") ?? "").trim();
+  const siteKey = String(formData.get("managedSiteKey") ?? "").trim();
+  const title = String(formData.get("managedTitle") ?? "").trim();
+  const adminUser = String(formData.get("managedAdminUser") ?? "").trim();
+  const adminEmail = String(formData.get("managedAdminEmail") ?? "").trim();
+  const adminPassword = String(formData.get("managedAdminPassword") ?? "").trim();
+
+  if (!name || !siteKey || !title || !adminUser || !adminEmail || !adminPassword) {
+    return { error: "すべての項目を入力してください。" };
+  }
+
+  const session = await getSession();
+  const actor = session ? { id: Number(session.user.id), role: session.user.role } : undefined;
+
+  try {
+    await createManagedWordPressSite({ name, siteKey, title, adminUser, adminEmail, adminPassword }, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath("/sites");
+  return { success: true };
+}
+
+export async function deleteSiteAction(id: number) {
+  const session = await requireAdminSession();
+  await deleteSite(id, { id: Number(session.user.id), role: session.user.role });
+  revalidatePath("/sites");
 }

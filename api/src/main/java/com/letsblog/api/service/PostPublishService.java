@@ -37,15 +37,18 @@ public class PostPublishService {
     private final MarkdownRenderer markdownRenderer;
     private final PostRepository postRepository;
     private final PlantUmlEmbedService plantUmlEmbedService;
+    private final CustomTagRenderService customTagRenderService;
 
     public PostPublishService(SiteService siteService, CmsAdapterFactory cmsAdapterFactory,
                                MarkdownRenderer markdownRenderer, PostRepository postRepository,
-                               PlantUmlEmbedService plantUmlEmbedService) {
+                               PlantUmlEmbedService plantUmlEmbedService,
+                               CustomTagRenderService customTagRenderService) {
         this.siteService = siteService;
         this.cmsAdapterFactory = cmsAdapterFactory;
         this.markdownRenderer = markdownRenderer;
         this.postRepository = postRepository;
         this.plantUmlEmbedService = plantUmlEmbedService;
+        this.customTagRenderService = customTagRenderService;
     }
 
     @AuditLog(action = AuditLogAction.POST_PUBLISHED, resourceType = "POST")
@@ -55,7 +58,8 @@ public class PostPublishService {
         CmsCredentials credentials = siteService.getCredentials(command.siteKey());
         CmsAdapter cmsAdapter = cmsAdapterFactory.resolve(credentials.cmsType());
 
-        String markdown = plantUmlEmbedService.embedDiagrams(credentials, command.markdown());
+        String markdown = customTagRenderService.render(command.markdown());
+        markdown = plantUmlEmbedService.embedDiagrams(credentials, markdown);
         markdown = replaceImageReferences(cmsAdapter, credentials, markdown, command.images());
         String html = markdownRenderer.render(markdown);
 

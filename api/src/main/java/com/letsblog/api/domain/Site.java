@@ -43,6 +43,17 @@ public class Site {
     @Column(name = "credentials_encrypted")
     private byte[] credentialsEncrypted;
 
+    // WordPress自動プロビジョニング(常駐wordpressコンテナへのサブディレクトリ設置)で作成されたサイトかどうか。
+    // trueの場合、サイト削除時にWPインスタンス・専用DBも連動削除する。
+    @Column(name = "managed_wordpress", nullable = false)
+    private boolean managedWordpress = false;
+
+    @Column(name = "wp_slug", length = 100)
+    private String wpSlug;
+
+    @Column(name = "wp_db_name", length = 100)
+    private String wpDbName;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

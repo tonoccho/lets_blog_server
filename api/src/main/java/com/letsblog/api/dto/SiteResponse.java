@@ -13,7 +13,8 @@ public record SiteResponse(
         String baseUrl,
         LocalDateTime createdAt,
         LocalDateTime updatedAt,
-        String connectionCheckStatus
+        String connectionCheckStatus,
+        boolean managedWordpress
 ) {
     public static SiteResponse from(Site site) {
         return from(site, null);
@@ -28,7 +29,8 @@ public record SiteResponse(
                 site.getBaseUrl(),
                 site.getCreatedAt(),
                 site.getUpdatedAt(),
-                connectionOk == null ? null : (connectionOk ? "SUCCESS" : "FAILED")
+                connectionOk == null ? null : (connectionOk ? "SUCCESS" : "FAILED"),
+                site.isManagedWordpress()
         );
     }
 }

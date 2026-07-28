@@ -40,3 +40,5 @@ app:
   comfyui-base-url: ${COMFYUI_BASE_URL:http://localhost:8188}
   comfyui-checkpoint: ${COMFYUI_CHECKPOINT:v1-5-pruned-emaonly.safetensors}
   plantuml-base-url: ${PLANTUML_BASE_URL:http://localhost:8085}
+  wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
+  wordpress-provision-token: ${WP_PROVISION_TOKEN:}

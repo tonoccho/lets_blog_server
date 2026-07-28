@@ -1,6 +1,7 @@
 package com.letsblog.api.config;
 
 import com.letsblog.api.cms.CmsApiException;
+import com.letsblog.api.service.CustomTagNotFoundException;
 import com.letsblog.api.service.EmailAlreadyExistsException;
 import com.letsblog.api.service.EmailSendException;
 import com.letsblog.api.service.ForbiddenException;
@@ -38,6 +39,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(SiteNotFoundException.class)
     public ResponseEntity<Map<String, String>> handleSiteNotFound(SiteNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(CustomTagNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleCustomTagNotFound(CustomTagNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
     }
 

@@ -1,11 +1,13 @@
 package com.letsblog.api.controller;
 
+import com.letsblog.api.dto.CreateManagedWordPressSiteRequest;
 import com.letsblog.api.dto.SiteRegisterRequest;
 import com.letsblog.api.dto.SiteResponse;
 import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.CurrentActorService;
 import com.letsblog.api.service.ProvisioningService;
 import com.letsblog.api.service.SiteService;
+import com.letsblog.api.service.WordPressSiteProvisioningService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -21,14 +23,17 @@ public class SiteController {
     private final SiteService siteService;
     private final CurrentActorService currentActorService;
     private final AdminAuthorizationService adminAuthorizationService;
+    private final WordPressSiteProvisioningService wordPressSiteProvisioningService;
 
     public SiteController(
             SiteService siteService,
             CurrentActorService currentActorService,
-            AdminAuthorizationService adminAuthorizationService) {
+            AdminAuthorizationService adminAuthorizationService,
+            WordPressSiteProvisioningService wordPressSiteProvisioningService) {
         this.siteService = siteService;
         this.currentActorService = currentActorService;
         this.adminAuthorizationService = adminAuthorizationService;
+        this.wordPressSiteProvisioningService = wordPressSiteProvisioningService;
     }
 
     @PostMapping
@@ -37,9 +42,24 @@ public class SiteController {
         return ResponseEntity.status(HttpStatus.CREATED).body(siteService.register(request, actorId));
     }
 
+    @PostMapping("/managed-wordpress")
+    public ResponseEntity<SiteResponse> createManagedWordPress(
+            @Valid @RequestBody CreateManagedWordPressSiteRequest request) {
+        Long actorId = currentActorService.getCurrentActorId();
+        SiteResponse response = wordPressSiteProvisioningService.createManagedSite(request, actorId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
     @GetMapping
     public List<SiteResponse> list() {
         return siteService.list();
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(@PathVariable Long id) {
+        adminAuthorizationService.requireAdmin();
+        wordPressSiteProvisioningService.deleteSite(id);
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{id}/reprovision")

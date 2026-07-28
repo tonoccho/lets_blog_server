@@ -57,6 +57,8 @@ services:
       COMFYUI_BASE_URL: http://comfyui:8188
       COMFYUI_CHECKPOINT: ${COMFYUI_CHECKPOINT:-v1-5-pruned-emaonly.safetensors}
       PLANTUML_BASE_URL: http://plantuml:8080
+      WORDPRESS_PROVISION_BASE_URL: http://wordpress:9000
+      WP_PROVISION_TOKEN: ${WP_PROVISION_TOKEN}
     depends_on:
       mysql:
         condition: service_healthy
@@ -146,6 +148,26 @@ services:
     networks:
       - lbs-net
 
+  wordpress:
+    build:
+      context: ./wordpress
+      dockerfile: Dockerfile
+    container_name: lbs-wordpress
+    restart: unless-stopped
+    environment:
+      WP_PROVISION_TOKEN: ${WP_PROVISION_TOKEN}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      WORDPRESS_DB_HOST: mysql
+      WORDPRESS_DB_USER: ${MYSQL_USER}
+      WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - wordpress_sites:/var/www/html/sites
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - lbs-net
+
 networks:
   lbs-net:
     driver: bridge
@@ -155,3 +177,4 @@ volumes:
   ollama_models:
   comfyui_models:
   comfyui_output:
+  wordpress_sites:
