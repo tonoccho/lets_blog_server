@@ -167,3 +167,19 @@ export function updateUserRole(id: number, role: "admin" | "user", actor?: Actor
 export function deleteUser(id: number, actor?: ActorInfo): Promise<void> {
   return apiFetch<void>(`/api/users/${id}`, { method: 'DELETE', actor });
 }
+
+export function requestPasswordReset(email: string): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>('/api/auth/password-reset/request', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+}
+
+export function confirmPasswordReset(token: string, newPassword: string): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>('/api/auth/password-reset/confirm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, newPassword }),
+  });
+}
