@@ -32,4 +32,9 @@ public interface CmsAdapter {
      * タグ名のリストをID解決する。存在しなければ作成する。
      */
     List<String> resolveTags(CmsCredentials credentials, List<String> names);
+
+    /**
+     * 認証情報が有効かどうかを軽量なリクエストで確認する。例外は投げず成否をbooleanで返す。
+     */
+    boolean testConnection(CmsCredentials credentials);
 }

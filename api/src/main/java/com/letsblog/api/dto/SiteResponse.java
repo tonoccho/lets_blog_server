@@ -12,9 +12,14 @@ public record SiteResponse(
         CmsType cmsType,
         String baseUrl,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+        String connectionCheckStatus
 ) {
     public static SiteResponse from(Site site) {
+        return from(site, null);
+    }
+
+    public static SiteResponse from(Site site, Boolean connectionOk) {
         return new SiteResponse(
                 site.getId(),
                 site.getName(),
@@ -22,7 +27,8 @@ public record SiteResponse(
                 site.getCmsType(),
                 site.getBaseUrl(),
                 site.getCreatedAt(),
-                site.getUpdatedAt()
+                site.getUpdatedAt(),
+                connectionOk == null ? null : (connectionOk ? "SUCCESS" : "FAILED")
         );
     }
 }

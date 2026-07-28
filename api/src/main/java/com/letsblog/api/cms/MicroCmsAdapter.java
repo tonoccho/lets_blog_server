@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
@@ -161,6 +162,19 @@ public class MicroCmsAdapter implements CmsAdapter {
             return created.get("id").asText();
         } catch (RestClientResponseException e) {
             throw new CmsApiException("microCMSカテゴリ/タグ '" + name + "' の解決に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+        }
+    }
+
+    @Override
+    public boolean testConnection(CmsCredentials credentials) {
+        CmsCredentials.MicroCmsCredentials creds = (CmsCredentials.MicroCmsCredentials) credentials;
+        RestClient client = buildContentApiClient(creds);
+        String url = contentApiUrl(creds, creds.postsEndpoint()) + "?limit=1";
+        try {
+            client.get().uri(url).retrieve().toBodilessEntity();
+            return true;
+        } catch (RestClientResponseException | ResourceAccessException e) {
+            return false;
         }
     }
 

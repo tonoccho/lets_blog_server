@@ -10,6 +10,7 @@ export interface Site {
   baseUrl: string;
   createdAt: string;
   updatedAt: string;
+  connectionCheckStatus: "SUCCESS" | "FAILED" | null;
 }
 
 export interface PostSummary {
