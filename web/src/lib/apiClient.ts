@@ -78,7 +78,7 @@ export interface UserCreateInput {
 }
 
 function serverUrl(): string {
-  return (process.env.LETS_BLOG_API_URL ?? 'http://localhost:8080').replace(/\/+$/, '');
+  return (process.env.LETS_BLOG_API_URL ?? 'https://localhost').replace(/\/+$/, '');
 }
 
 function apiKey(): string {

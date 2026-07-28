@@ -7,7 +7,7 @@ const ADMIN_ONLY_PREFIXES = ["/users", "/audit-logs", "/admin"];
 
 async function needsInitialSetup(): Promise<boolean> {
   try {
-    const apiUrl = (process.env.LETS_BLOG_API_URL ?? "http://localhost:8080").replace(/\/+$/, "");
+    const apiUrl = (process.env.LETS_BLOG_API_URL ?? "https://localhost").replace(/\/+$/, "");
     const apiKey = process.env.LETS_BLOG_API_KEY;
     if (!apiKey) {
       return false;

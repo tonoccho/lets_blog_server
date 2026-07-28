@@ -105,6 +105,12 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
 - [x] [04-rbac-enhancements](phase5/04-rbac-enhancements.md) — ロールベースアクセス制御の細粒度化(/admin/rolesでのロール割り当て・解除まで実機確認済み)
 - [x] [05-true-provisioning](phase5/05-true-provisioning.md) — 真のプロビジョニング機能の実装(実WordPressコンテナでカテゴリ・タグ・著者の自動作成を実機確認済み。microCMSの著者プロビジョニングは未対応のまま)
 
+## Phase 6: リバースプロキシ導入・サブパスルーティング・セットアップマニュアル整備
+
+- [x] [00-overview](phase6/00-overview.md) — 全体スコープ・決定事項・タスク一覧
+- [x] [01-reverse-proxy](phase6/01-reverse-proxy.md) — リバースプロキシコンテナ追加・https://localhost一本化・ComfyUI/Ollamaのサブパスルーティング(実機でweb/api/phpmyadmin/ollama/comfyui/plantuml/mailhogの疎通・個別ポート遮断・ComfyUI WebSocketまで確認済み。ComfyUI JS内の絶対パスAPI呼び出しの有無とブラウザでの目視確認は未実施)
+- [x] [02-setup-manual](phase6/02-setup-manual.md) — セットアップマニュアル整備(docs/setup.mdを新規作成)
+
 ## 未着手・スコープ外候補
 
 - [ ] リモート常時稼働化(自宅サーバー/VPS)対応・外部公開時のセキュリティ強化
