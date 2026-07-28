@@ -2,6 +2,7 @@ package com.letsblog.api.config;
 
 import com.letsblog.api.cms.CmsApiException;
 import com.letsblog.api.service.EmailAlreadyExistsException;
+import com.letsblog.api.service.ForbiddenException;
 import com.letsblog.api.service.InvalidCredentialsException;
 import com.letsblog.api.service.InvalidRoleException;
 import com.letsblog.api.service.SiteNotFoundException;
@@ -45,6 +46,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(InvalidCredentialsException.class)
     public ResponseEntity<Map<String, String>> handleInvalidCredentials(InvalidCredentialsException e) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(ForbiddenException.class)
+    public ResponseEntity<Map<String, String>> handleForbidden(ForbiddenException e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", e.getMessage()));
     }
 
     @ExceptionHandler(CmsApiException.class)

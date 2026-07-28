@@ -69,12 +69,23 @@ function apiKey(): string {
   return key;
 }
 
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+export interface ActorInfo {
+  id: number;
+  role: "admin" | "user";
+}
+
+interface ApiFetchInit extends RequestInit {
+  actor?: ActorInfo;
+}
+
+async function apiFetch<T>(path: string, init?: ApiFetchInit): Promise<T> {
+  const { actor, ...requestInit } = init ?? {};
   const res = await fetch(`${serverUrl()}${path}`, {
-    ...init,
+    ...requestInit,
     headers: {
       'X-API-Key': apiKey(),
-      ...(init?.headers ?? {}),
+      ...(actor ? { 'X-Actor-Id': String(actor.id), 'X-Actor-Role': actor.role } : {}),
+      ...(requestInit.headers ?? {}),
     },
     cache: 'no-store',
   });
@@ -93,11 +104,12 @@ export function listSites(): Promise<Site[]> {
   return apiFetch<Site[]>('/api/sites');
 }
 
-export function registerSite(input: SiteRegisterInput): Promise<Site> {
+export function registerSite(input: SiteRegisterInput, actor?: ActorInfo): Promise<Site> {
   return apiFetch<Site>('/api/sites', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
+    actor,
   });
 }
 
@@ -134,22 +146,24 @@ export function listUsers(): Promise<AppUser[]> {
   return apiFetch<AppUser[]>('/api/users');
 }
 
-export function createUser(input: UserCreateInput): Promise<AppUser> {
+export function createUser(input: UserCreateInput, actor?: ActorInfo): Promise<AppUser> {
   return apiFetch<AppUser>('/api/users', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
+    actor,
   });
 }
 
-export function updateUserRole(id: number, role: "admin" | "user"): Promise<AppUser> {
+export function updateUserRole(id: number, role: "admin" | "user", actor?: ActorInfo): Promise<AppUser> {
   return apiFetch<AppUser>(`/api/users/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ role }),
+    actor,
   });
 }
 
-export function deleteUser(id: number): Promise<void> {
-  return apiFetch<void>(`/api/users/${id}`, { method: 'DELETE' });
+export function deleteUser(id: number, actor?: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/users/${id}`, { method: 'DELETE', actor });
 }

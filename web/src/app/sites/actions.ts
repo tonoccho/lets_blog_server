@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { CmsType, registerSite } from "@/lib/apiClient";
+import { getSession } from "@/lib/session";
 
 export interface RegisterSiteState {
   error?: string;
@@ -39,8 +40,11 @@ export async function registerSiteAction(
     credentials[field] = value;
   }
 
+  const session = await getSession();
+  const actor = session ? { id: Number(session.user.id), role: session.user.role } : undefined;
+
   try {
-    await registerSite({ name, siteKey, cmsType, credentials });
+    await registerSite({ name, siteKey, cmsType, credentials }, actor);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
