@@ -9,6 +9,7 @@ import com.letsblog.api.service.InvalidRoleException;
 import com.letsblog.api.service.InvalidTokenException;
 import com.letsblog.api.service.InvalidTotpCodeException;
 import com.letsblog.api.service.MailTemplateNotFoundException;
+import com.letsblog.api.service.ProvisioningException;
 import com.letsblog.api.service.QrCodeGenerationException;
 import com.letsblog.api.service.RoleNotFoundException;
 import com.letsblog.api.service.SiteNotFoundException;
@@ -87,6 +88,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(CmsApiException.class)
     public ResponseEntity<Map<String, String>> handleCmsApiException(CmsApiException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(ProvisioningException.class)
+    public ResponseEntity<Map<String, String>> handleProvisioningException(ProvisioningException e) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
     }
 

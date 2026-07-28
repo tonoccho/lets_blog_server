@@ -117,4 +117,4 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
 - [x] [02-audit-log-archival](phase5/02-audit-log-archival.md) — 監査ログアーカイブ・削除ポリシーの自動化(削除処理自体はPhase4で実装済み、cron時刻をUTC 02:00に調整)
 - [x] [03-two-factor-auth](phase5/03-two-factor-auth.md) — 2FA(TOTP)認証の実装(設定画面・ログイン時2段階入力まで実機確認済み)
 - [x] [04-rbac-enhancements](phase5/04-rbac-enhancements.md) — ロールベースアクセス制御の細粒度化(/admin/rolesでのロール割り当て・解除まで実機確認済み)
-- [ ] [05-true-provisioning](phase5/05-true-provisioning.md) — 真のプロビジョニング機能の実装
+- [x] [05-true-provisioning](phase5/05-true-provisioning.md) — 真のプロビジョニング機能の実装(実WordPressコンテナでカテゴリ・タグ・著者の自動作成を実機確認済み。microCMSの著者プロビジョニングは未対応のまま)

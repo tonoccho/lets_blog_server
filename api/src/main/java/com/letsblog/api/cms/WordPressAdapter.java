@@ -22,6 +22,9 @@ import java.util.List;
 @Component
 public class WordPressAdapter implements CmsAdapter {
 
+    private static final String DEFAULT_CATEGORY_NAME = "Uncategorized";
+    private static final String DEFAULT_TAG_NAME = "Let's Blog";
+
     private final RestClient.Builder restClientBuilder;
 
     public WordPressAdapter(RestClient.Builder restClientBuilder) {
@@ -146,6 +149,75 @@ public class WordPressAdapter implements CmsAdapter {
         } catch (RestClientResponseException e) {
             throw new CmsApiException("カテゴリ/タグ '" + name + "' の解決に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
         }
+    }
+
+    @Override
+    public String provisionDefaultCategory(CmsCredentials credentials) {
+        return resolveCategories(credentials, List.of(DEFAULT_CATEGORY_NAME)).get(0);
+    }
+
+    @Override
+    public String provisionDefaultTag(CmsCredentials credentials) {
+        return resolveTags(credentials, List.of(DEFAULT_TAG_NAME)).get(0);
+    }
+
+    @Override
+    public String provisionAuthor(CmsCredentials credentials, String email) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        RestClient client = buildClient(creds);
+
+        String existingId = findExistingAuthorId(client, email);
+        if (existingId != null) {
+            return existingId;
+        }
+
+        ObjectNode body = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
+        body.put("username", email.substring(0, email.indexOf('@')));
+        body.put("email", email);
+        // このパスワードはLet's Blog側では保持・利用しない(WordPress側にauthorレコードを
+        // 作成するために必須の項目のため、ランダム値を生成して使い捨てる)
+        body.put("password", generateRandomPassword());
+        ArrayNode roles = body.putArray("roles");
+        roles.add("author");
+
+        try {
+            JsonNode created = client.post()
+                    .uri("/wp-json/wp/v2/users")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body)
+                    .retrieve()
+                    .body(JsonNode.class);
+            return created.get("id").asText();
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 409) {
+                String fallbackId = findExistingAuthorId(client, email);
+                if (fallbackId != null) {
+                    return fallbackId;
+                }
+            }
+            throw new CmsApiException("WordPress著者の作成に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+        }
+    }
+
+    private String findExistingAuthorId(RestClient client, String email) {
+        try {
+            JsonNode searchResult = client.get()
+                    .uri(uriBuilder -> uriBuilder.path("/wp-json/wp/v2/users").queryParam("search", email).build())
+                    .retrieve()
+                    .body(JsonNode.class);
+            if (searchResult != null && searchResult.isArray() && !searchResult.isEmpty()) {
+                return searchResult.get(0).get("id").asText();
+            }
+        } catch (RestClientResponseException | ResourceAccessException e) {
+            // 検索に失敗した場合は新規作成を試みる(呼び出し元でハンドリング)
+        }
+        return null;
+    }
+
+    private String generateRandomPassword() {
+        byte[] bytes = new byte[24];
+        new java.security.SecureRandom().nextBytes(bytes);
+        return Base64.getEncoder().encodeToString(bytes);
     }
 
     @Override

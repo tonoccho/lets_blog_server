@@ -11,9 +11,12 @@ import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.crypto.CredentialCipher;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Site;
+import com.letsblog.api.domain.User;
 import com.letsblog.api.dto.SiteRegisterRequest;
 import com.letsblog.api.dto.SiteResponse;
 import com.letsblog.api.repository.SiteRepository;
+import com.letsblog.api.repository.UserRepository;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -22,34 +25,56 @@ import java.util.List;
 import java.util.Map;
 
 @Service
+@Slf4j
 public class SiteService {
 
     private final SiteRepository siteRepository;
     private final CredentialCipher credentialCipher;
     private final ObjectMapper objectMapper;
     private final CmsAdapterFactory cmsAdapterFactory;
+    private final ProvisioningService provisioningService;
+    private final UserRepository userRepository;
 
     public SiteService(SiteRepository siteRepository, CredentialCipher credentialCipher, ObjectMapper objectMapper,
-                        CmsAdapterFactory cmsAdapterFactory) {
+                        CmsAdapterFactory cmsAdapterFactory, ProvisioningService provisioningService,
+                        UserRepository userRepository) {
         this.siteRepository = siteRepository;
         this.credentialCipher = credentialCipher;
         this.objectMapper = objectMapper;
         this.cmsAdapterFactory = cmsAdapterFactory;
+        this.provisioningService = provisioningService;
+        this.userRepository = userRepository;
     }
 
     /**
-     * サイトを登録する。ここで行うのは入力された認証情報の保存のみで、CMS側やサーバー側で
-     * 新規にリソースを作成する「プロビジョニング」は行わない。登録後に疎通確認(軽量なAPI呼び出し)を
-     * 行うが、失敗しても登録自体は取り消さず、結果をレスポンスの connectionCheckStatus で通知する。
+     * サイトを登録する。保存前にCMS側へのプロビジョニング(デフォルトカテゴリ・タグ・著者の作成)を実行し、
+     * 致命的な失敗の場合は登録自体を行わない(ProvisioningServiceは個々のリソースの部分的失敗は許容するため、
+     * 実際にここで例外が伝播するのはCMSアダプタ解決に失敗する等の致命的なケースのみ)。
+     * 登録後に疎通確認(軽量なAPI呼び出し)も行うが、こちらは失敗しても登録自体は取り消さず、
+     * 結果をレスポンスの connectionCheckStatus で通知する。
+     *
+     * @param actorId サイト登録を行った操作者のユーザーID。著者プロビジョニングに使う(null可)。
      */
     @AuditLog(action = AuditLogAction.SITE_REGISTERED, resourceType = "SITE")
     @Transactional
-    public SiteResponse register(SiteRegisterRequest request) {
+    public SiteResponse register(SiteRegisterRequest request, Long actorId) {
         if (siteRepository.existsBySiteKey(request.siteKey())) {
             throw new IllegalArgumentException("siteKey '" + request.siteKey() + "' は既に登録されています");
         }
 
         validateCredentials(request.cmsType(), request.credentials());
+
+        CmsCredentials credentials = buildCredentialsFromMap(request.cmsType(), request.credentials());
+        String actorEmail = resolveActorEmail(actorId);
+
+        ProvisioningService.ProvisioningResult provisioningResult =
+                provisioningService.provisionSite(request.cmsType(), credentials, actorEmail);
+        if (provisioningResult.categoryError != null || provisioningResult.tagError != null
+                || provisioningResult.authorError != null) {
+            log.warn("Provisioning partial failure for site '{}': category={}, tag={}, author={}",
+                    request.siteKey(), provisioningResult.categoryError, provisioningResult.tagError,
+                    provisioningResult.authorError);
+        }
 
         Site site = new Site();
         site.setName(request.name());
@@ -62,6 +87,26 @@ public class SiteService {
         boolean connectionOk = testConnection(request.cmsType(), request.credentials());
 
         return SiteResponse.from(saved, connectionOk);
+    }
+
+    /**
+     * 既存サイトに対してプロビジョニングを再実行する(管理画面用)。
+     */
+    @Transactional
+    public ProvisioningService.ProvisioningResult reprovision(Long siteId, Long actorId) {
+        Site site = siteRepository.findById(siteId)
+                .orElseThrow(() -> new SiteNotFoundException("id " + siteId + " のサイトは登録されていません"));
+
+        CmsCredentials credentials = getCredentials(site.getSiteKey());
+        String actorEmail = resolveActorEmail(actorId);
+        return provisioningService.provisionSite(site.getCmsType(), credentials, actorEmail);
+    }
+
+    private String resolveActorEmail(Long actorId) {
+        if (actorId == null) {
+            return null;
+        }
+        return userRepository.findById(actorId).map(User::getEmail).orElse(null);
     }
 
     private boolean testConnection(CmsType cmsType, Map<String, String> credentialsMap) {

@@ -157,4 +157,66 @@ class WordPressAdapterTest {
                 () -> adapter.createOrUpdatePost(creds, content, null));
         server.verify();
     }
+
+    @Test
+    void testProvisionDefaultCategory_既存カテゴリを返す() {
+        server.expect(requestTo(containsString("/wp-json/wp/v2/categories")))
+                .andRespond(withSuccess("[{\"id\":1,\"name\":\"Uncategorized\"}]", MediaType.APPLICATION_JSON));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        String categoryId = adapter.provisionDefaultCategory(creds);
+
+        assertEquals("1", categoryId);
+        server.verify();
+    }
+
+    @Test
+    void testProvisionDefaultTag_存在しなければ作成する() {
+        server.expect(requestTo(containsString("/wp-json/wp/v2/tags")))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/tags"))
+                .andExpect(method(POST))
+                .andRespond(withSuccess("{\"id\":5,\"name\":\"Let's Blog\"}", MediaType.APPLICATION_JSON));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        String tagId = adapter.provisionDefaultTag(creds);
+
+        assertEquals("5", tagId);
+        server.verify();
+    }
+
+    @Test
+    void testProvisionAuthor_既存ユーザーが見つかればそのIDを返す() {
+        server.expect(requestTo(containsString("/wp-json/wp/v2/users")))
+                .andRespond(withSuccess("[{\"id\":7,\"email\":\"author@example.com\"}]", MediaType.APPLICATION_JSON));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        String authorId = adapter.provisionAuthor(creds, "author@example.com");
+
+        assertEquals("7", authorId);
+        server.verify();
+    }
+
+    @Test
+    void testProvisionAuthor_見つからなければ新規作成する() {
+        server.expect(requestTo(containsString("/wp-json/wp/v2/users?search=")))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/users"))
+                .andExpect(method(POST))
+                .andRespond(withSuccess("{\"id\":8,\"email\":\"newauthor@example.com\"}", MediaType.APPLICATION_JSON));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        String authorId = adapter.provisionAuthor(creds, "newauthor@example.com");
+
+        assertEquals("8", authorId);
+        server.verify();
+    }
 }
