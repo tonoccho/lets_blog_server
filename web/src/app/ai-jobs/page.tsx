@@ -23,7 +23,7 @@ export default async function AiJobsPage() {
           <tbody>
             {jobs.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-neutral-400">
+                <td colSpan={4} className="px-4 py-6 text-center text-neutral-600">
                   ジョブ履歴はありません
                 </td>
               </tr>
