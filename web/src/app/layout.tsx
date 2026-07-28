@@ -26,6 +26,7 @@ const NAV_ITEMS = [
   { href: "/posts", label: "投稿履歴" },
   { href: "/ai-jobs", label: "AIジョブ" },
   { href: "/system", label: "システム" },
+  { href: "/settings/security", label: "セキュリティ設定" },
 ];
 
 export default async function RootLayout({
@@ -36,7 +37,12 @@ export default async function RootLayout({
   const session = await getSession();
   const navItems =
     session?.user.role === "admin"
-      ? [...NAV_ITEMS, { href: "/users", label: "ユーザー" }, { href: "/audit-logs", label: "監査ログ" }]
+      ? [
+          ...NAV_ITEMS,
+          { href: "/users", label: "ユーザー" },
+          { href: "/audit-logs", label: "監査ログ" },
+          { href: "/admin/roles", label: "ロール管理" },
+        ]
       : NAV_ITEMS;
 
   return (

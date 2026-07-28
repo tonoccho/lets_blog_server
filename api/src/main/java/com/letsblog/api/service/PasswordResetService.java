@@ -8,14 +8,13 @@ import com.letsblog.api.repository.PasswordResetTokenRepository;
 import com.letsblog.api.repository.UserRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.mail.SimpleMailMessage;
-import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -27,10 +26,7 @@ public class PasswordResetService {
     private final PasswordResetTokenRepository tokenRepository;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
-    private final JavaMailSender mailSender;
-
-    @Value("${app.mail.from:noreply@letsblog.example.com}")
-    private String fromEmail;
+    private final MailSenderService mailSenderService;
 
     @Value("${app.web.base-url:http://localhost:3000}")
     private String baseUrl;
@@ -38,10 +34,10 @@ public class PasswordResetService {
     public PasswordResetService(
             PasswordResetTokenRepository tokenRepository,
             UserRepository userRepository,
-            JavaMailSender mailSender) {
+            MailSenderService mailSenderService) {
         this.tokenRepository = tokenRepository;
         this.userRepository = userRepository;
-        this.mailSender = mailSender;
+        this.mailSenderService = mailSenderService;
     }
 
     /**
@@ -104,24 +100,7 @@ public class PasswordResetService {
 
     private void sendResetEmail(String email, String token) {
         String resetLink = baseUrl + "/login/password-reset?token=" + token;
-        String subject = "Let's Blog - パスワード再設定";
-        String body = "パスワードをリセットするには、以下のリンクをクリックしてください:\n\n"
-                + resetLink + "\n\n"
-                + "このリンクは24時間有効です。\n\n"
-                + "覚えのない場合はこのメールを無視してください。";
-
-        SimpleMailMessage message = new SimpleMailMessage();
-        message.setFrom(fromEmail);
-        message.setTo(email);
-        message.setSubject(subject);
-        message.setText(body);
-
-        try {
-            mailSender.send(message);
-            log.info("Reset email sent to: {}", email);
-        } catch (Exception e) {
-            log.error("Failed to send reset email to {}: {}", email, e.getMessage());
-            throw new EmailSendException("パスワード再設定メールの送信に失敗しました", e);
-        }
+        mailSenderService.sendMail(email, "password-reset", Map.of("resetLink", resetLink));
+        log.info("Reset email sent to: {}", email);
     }
 }

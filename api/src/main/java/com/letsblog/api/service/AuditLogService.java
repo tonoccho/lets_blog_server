@@ -68,9 +68,10 @@ public class AuditLogService {
     }
 
     /**
-     * 1年以上前のログを削除する。毎日午前3時に自動実行する。
+     * 1年以上前のログを削除する。毎日UTC 02:00に自動実行する
+     * (業務時間を避けた低負荷時間帯として指定、spec/phase5/02-audit-log-archival.md 参照)。
      */
-    @Scheduled(cron = "0 0 3 * * *")
+    @Scheduled(cron = "0 0 2 * * *", zone = "UTC")
     @Transactional
     public void deleteOldLogs() {
         LocalDateTime threshold = LocalDateTime.now().minus(RETENTION_DAYS, ChronoUnit.DAYS);

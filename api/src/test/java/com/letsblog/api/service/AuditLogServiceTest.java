@@ -8,7 +8,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.scheduling.annotation.Scheduled;
 
+import java.lang.reflect.Method;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -63,5 +65,14 @@ class AuditLogServiceTest {
         service.deleteOldLogs();
 
         verify(auditLogRepository, times(0)).deleteAll(any());
+    }
+
+    @Test
+    void deleteOldLogs_毎日UTC午前2時にスケジュール実行される() throws NoSuchMethodException {
+        Method method = AuditLogService.class.getMethod("deleteOldLogs");
+        Scheduled scheduled = method.getAnnotation(Scheduled.class);
+
+        assertEquals("0 0 2 * * *", scheduled.cron());
+        assertEquals("UTC", scheduled.zone());
     }
 }

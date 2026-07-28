@@ -3,9 +3,12 @@ package com.letsblog.api.service;
 import com.letsblog.api.aop.AuditLog;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.User;
+import com.letsblog.api.dto.LoginResponse;
 import com.letsblog.api.dto.UserCreateRequest;
 import com.letsblog.api.dto.UserResponse;
 import com.letsblog.api.dto.UserUpdateRequest;
+import com.letsblog.api.repository.RoleRepository;
+import com.letsblog.api.repository.TwoFactorSecretRepository;
 import com.letsblog.api.repository.UserRepository;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -13,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 @Service
@@ -20,16 +24,35 @@ public class UserService {
 
     private static final Set<String> VALID_ROLES = Set.of("admin", "user");
 
+    /**
+     * 従来の role 文字列(BFFヘッダ互換用)と、RBACの Role エンティティとの対応。
+     * 新規ユーザー作成時のデフォルトロール付与に使う。
+     */
+    private static final Map<String, String> LEGACY_ROLE_TO_ROLE_NAME = Map.of(
+            "admin", "ROLE_ADMIN",
+            "user", "ROLE_VIEWER");
+
     private final UserRepository userRepository;
+    private final TwoFactorSecretRepository twoFactorSecretRepository;
+    private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
-    public UserService(UserRepository userRepository) {
+    public UserService(
+            UserRepository userRepository,
+            TwoFactorSecretRepository twoFactorSecretRepository,
+            RoleRepository roleRepository) {
         this.userRepository = userRepository;
+        this.twoFactorSecretRepository = twoFactorSecretRepository;
+        this.roleRepository = roleRepository;
     }
 
+    /**
+     * パスワード認証のみを行う。2FAが有効なユーザーはtwoFactorRequired=trueを返し、
+     * 呼び出し元(Web BFF)はTOTPコード入力を経て /api/auth/totp/verify で本ログインを完了させる。
+     */
     @AuditLog(action = AuditLogAction.LOGIN, resourceType = "USER")
     @Transactional(readOnly = true)
-    public UserResponse login(String email, String password) {
+    public LoginResponse login(String email, String password) {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new InvalidCredentialsException("メールアドレスまたはパスワードが正しくありません"));
 
@@ -37,7 +60,8 @@ public class UserService {
             throw new InvalidCredentialsException("メールアドレスまたはパスワードが正しくありません");
         }
 
-        return UserResponse.from(user);
+        boolean twoFactorRequired = twoFactorSecretRepository.findByUserIdAndIsEnabledTrue(user.getId()).isPresent();
+        return new LoginResponse(UserResponse.from(user), twoFactorRequired);
     }
 
     @Transactional(readOnly = true)
@@ -57,6 +81,11 @@ public class UserService {
         user.setEmail(request.email());
         user.setPasswordHash(passwordEncoder.encode(request.password()));
         user.setRole(request.role());
+
+        String defaultRoleName = LEGACY_ROLE_TO_ROLE_NAME.get(request.role());
+        if (defaultRoleName != null) {
+            roleRepository.findByRoleName(defaultRoleName).ifPresent(role -> user.getRoles().add(role));
+        }
 
         return UserResponse.from(userRepository.save(user));
     }

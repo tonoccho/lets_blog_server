@@ -26,6 +26,8 @@ import java.util.List;
 public class MicroCmsAdapter implements CmsAdapter {
 
     private static final String API_KEY_HEADER = "X-MICROCMS-API-KEY";
+    private static final String DEFAULT_CATEGORY_NAME = "Uncategorized";
+    private static final String DEFAULT_TAG_NAME = "Let's Blog";
 
     private final RestClient.Builder restClientBuilder;
 
@@ -163,6 +165,25 @@ public class MicroCmsAdapter implements CmsAdapter {
         } catch (RestClientResponseException e) {
             throw new CmsApiException("microCMSカテゴリ/タグ '" + name + "' の解決に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
         }
+    }
+
+    @Override
+    public String provisionDefaultCategory(CmsCredentials credentials) {
+        return resolveCategories(credentials, List.of(DEFAULT_CATEGORY_NAME)).get(0);
+    }
+
+    @Override
+    public String provisionDefaultTag(CmsCredentials credentials) {
+        return resolveTags(credentials, List.of(DEFAULT_TAG_NAME)).get(0);
+    }
+
+    /**
+     * microCMSはlist型APIの仕様がサービスごとに異なり著者フィールドの標準化された仕様がないため、
+     * 現時点では著者プロビジョニングは未対応(将来対応、spec/phase5/05-true-provisioning.md 未決事項)。
+     */
+    @Override
+    public String provisionAuthor(CmsCredentials credentials, String email) {
+        return null;
     }
 
     @Override

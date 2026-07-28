@@ -15,6 +15,9 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+    # マイグレーションSQL内でメールテンプレートのThymeleaf構文 [[${var}]] を使うため、
+    # Flyway自身の ${...} プレースホルダー置換とぶつからないよう無効化する
+    placeholder-replacement: false
   mail:
     host: ${SPRING_MAIL_HOST:localhost}
     port: ${SPRING_MAIL_PORT:1025}

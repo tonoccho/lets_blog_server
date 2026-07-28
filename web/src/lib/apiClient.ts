@@ -44,12 +44,31 @@ export interface AuthenticatedUser {
   role: "admin" | "user";
 }
 
+export interface LoginResult {
+  user: AuthenticatedUser;
+  twoFactorRequired: boolean;
+}
+
+export interface TwoFactorSetup {
+  qrCodeDataUrl: string;
+  backupCodes: string[];
+}
+
 export interface AppUser {
   id: number;
   email: string;
   role: "admin" | "user";
+  roleNames: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface RoleInfo {
+  id: number;
+  roleName: string;
+  displayName: string;
+  description: string | null;
+  permissions: string[];
 }
 
 export interface UserCreateInput {
@@ -122,7 +141,7 @@ export function listGenerationJobs(): Promise<GenerationJob[]> {
   return apiFetch<GenerationJob[]>('/api/generation-jobs');
 }
 
-export async function login(email: string, password: string): Promise<AuthenticatedUser | null> {
+export async function login(email: string, password: string): Promise<LoginResult | null> {
   const res = await fetch(`${serverUrl()}/api/auth/login`, {
     method: 'POST',
     headers: {
@@ -140,7 +159,54 @@ export async function login(email: string, password: string): Promise<Authentica
     const body = await res.text().catch(() => '');
     throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
   }
-  return (await res.json()) as AuthenticatedUser;
+  return (await res.json()) as LoginResult;
+}
+
+/**
+ * ログイン2段階目。login()でtwoFactorRequired=trueだった場合に、
+ * TOTPコード(またはバックアップコード)を検証してログインを完了する。
+ * 401の場合はコードが無効なのでnullを返す。
+ */
+export async function verifyTotpLogin(userId: number, code: string): Promise<LoginResult | null> {
+  const res = await fetch(`${serverUrl()}/api/auth/totp/verify`, {
+    method: 'POST',
+    headers: {
+      'X-API-Key': apiKey(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ userId, code }),
+    cache: 'no-store',
+  });
+
+  if (res.status === 401) {
+    return null;
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
+  }
+  return (await res.json()) as LoginResult;
+}
+
+export function getTwoFactorStatus(actor: ActorInfo): Promise<{ enabled: boolean }> {
+  return apiFetch<{ enabled: boolean }>('/api/auth/totp/status', { actor });
+}
+
+export function setupTwoFactor(actor: ActorInfo): Promise<TwoFactorSetup> {
+  return apiFetch<TwoFactorSetup>('/api/auth/totp/setup', { method: 'POST', actor });
+}
+
+export function verifyTwoFactorSetup(code: string, actor: ActorInfo): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>('/api/auth/totp/verify-setup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+    actor,
+  });
+}
+
+export function disableTwoFactor(actor: ActorInfo): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>('/api/auth/totp/disable', { method: 'POST', actor });
 }
 
 export function listUsers(): Promise<AppUser[]> {
@@ -187,6 +253,18 @@ export function updateUserRole(id: number, role: "admin" | "user", actor?: Actor
 
 export function deleteUser(id: number, actor?: ActorInfo): Promise<void> {
   return apiFetch<void>(`/api/users/${id}`, { method: 'DELETE', actor });
+}
+
+export function listRoles(actor: ActorInfo): Promise<RoleInfo[]> {
+  return apiFetch<RoleInfo[]>('/api/roles', { actor });
+}
+
+export function assignRole(userId: number, roleName: string, actor: ActorInfo): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>(`/api/users/${userId}/roles/${roleName}`, { method: 'POST', actor });
+}
+
+export function removeRole(userId: number, roleName: string, actor: ActorInfo): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>(`/api/users/${userId}/roles/${roleName}`, { method: 'DELETE', actor });
 }
 
 export function requestPasswordReset(email: string): Promise<{ message: string }> {

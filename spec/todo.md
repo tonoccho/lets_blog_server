@@ -87,7 +87,25 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
 - [x] [06-web-frontend](phase3/06-web-frontend.md) — サイト登録UI動的化(CMS選択)
 - [x] [07-vscode-extension](phase3/07-vscode-extension.md) — wpPostId型のString化
 
-## Phase 3 以降(未着手・スコープ外候補)
+## Phase 4: ユーザー管理拡張機能
+
+- [x] [00-overview](phase4/00-overview.md) — 全体スコープ・決定事項・タスク一覧
+- [x] [01-password-reset](phase4/01-password-reset.md) — パスワード再設定機能(トークン・メール送信・Web画面)
+- [x] [02-audit-log](phase4/02-audit-log.md) — 監査ログ機能(AOP・管理画面・検索・削除ポリシー)
+- [x] [03-ui-contrast-fix](phase4/03-ui-contrast-fix.md) — 管理画面の低コントラスト箇所の修正
+- [x] [04-user-self-registration](phase4/04-user-self-registration.md) — セルフサインアップ実装・初期管理者払い出し方式の変更
+- [x] [05-site-provisioning-visibility](phase4/05-site-provisioning-visibility.md) — サイト登録の疎通確認・プロビジョニング有無の明示
+
+## Phase 5: ユーザー認証・運用機能の強化
+
+- [x] [00-overview](phase5/00-overview.md) — 全体スコープ・決定事項・タスク一覧
+- [x] [01-smtp-mail-setup](phase5/01-smtp-mail-setup.md) — SMTP メール送信の本番環境対応・テンプレート実装
+- [x] [02-audit-log-archival](phase5/02-audit-log-archival.md) — 監査ログアーカイブ・削除ポリシーの自動化(削除処理自体はPhase4で実装済み、cron時刻をUTC 02:00に調整)
+- [x] [03-two-factor-auth](phase5/03-two-factor-auth.md) — 2FA(TOTP)認証の実装(設定画面・ログイン時2段階入力まで実機確認済み)
+- [x] [04-rbac-enhancements](phase5/04-rbac-enhancements.md) — ロールベースアクセス制御の細粒度化(/admin/rolesでのロール割り当て・解除まで実機確認済み)
+- [x] [05-true-provisioning](phase5/05-true-provisioning.md) — 真のプロビジョニング機能の実装(実WordPressコンテナでカテゴリ・タグ・著者の自動作成を実機確認済み。microCMSの著者プロビジョニングは未対応のまま)
+
+## 未着手・スコープ外候補
 
 - [ ] リモート常時稼働化(自宅サーバー/VPS)対応・外部公開時のセキュリティ強化
 - [ ] その他のCMS対応(WordPress/microCMS以外)
@@ -100,9 +118,3 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
 - [ ] レガシーWordPress専用カラム(`sites.wp_username`/`wp_app_password_encrypted`)の整理・削除の検討(全サイトが新スキーマに移行し安定運用が確認できた後)
 - [ ] front matterの `wp_post_id`/`wpPostId` をCMS非依存な名称(`cms_post_id` 等)へリネームする移行計画([07-vscode-extension](phase3/07-vscode-extension.md)未決事項、後方互換性の設計込み)
 - [ ] `WordPressAdapterTest`/`MicroCmsAdapterTest` のリクエストボディ検証強化(現状はHTTPメソッド/URIのみ検証、[02-wordpress-adapter-tests](phase3/02-wordpress-adapter-tests.md)未決事項)
-
-## Phase 4: ユーザー管理拡張機能
-
-- [ ] [00-overview](phase4/00-overview.md) — 全体スコープ・決定事項・タスク一覧
-- [ ] [01-password-reset](phase4/01-password-reset.md) — パスワード再設定機能(トークン・メール送信・Web画面)
-- [ ] [02-audit-log](phase4/02-audit-log.md) — 監査ログ機能(AOP・管理画面・検索・削除ポリシー)

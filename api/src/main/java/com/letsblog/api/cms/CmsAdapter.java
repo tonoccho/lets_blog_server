@@ -37,4 +37,20 @@ public interface CmsAdapter {
      * 認証情報が有効かどうかを軽量なリクエストで確認する。例外は投げず成否をbooleanで返す。
      */
     boolean testConnection(CmsCredentials credentials);
+
+    /**
+     * デフォルトカテゴリを作成(または既存のものを取得)し、IDを返す。
+     */
+    String provisionDefaultCategory(CmsCredentials credentials);
+
+    /**
+     * デフォルトタグを作成(または既存のものを取得)し、IDを返す。
+     */
+    String provisionDefaultTag(CmsCredentials credentials);
+
+    /**
+     * サイト登録者を著者として登録(または既存の著者を取得)し、IDを返す。
+     * CMS側が著者の概念を持たない、または未対応の場合はnullを返してよい。
+     */
+    String provisionAuthor(CmsCredentials credentials, String email);
 }

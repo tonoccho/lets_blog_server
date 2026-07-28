@@ -7,7 +7,13 @@ import com.letsblog.api.service.ForbiddenException;
 import com.letsblog.api.service.InvalidCredentialsException;
 import com.letsblog.api.service.InvalidRoleException;
 import com.letsblog.api.service.InvalidTokenException;
+import com.letsblog.api.service.InvalidTotpCodeException;
+import com.letsblog.api.service.MailTemplateNotFoundException;
+import com.letsblog.api.service.ProvisioningException;
+import com.letsblog.api.service.QrCodeGenerationException;
+import com.letsblog.api.service.RoleNotFoundException;
 import com.letsblog.api.service.SiteNotFoundException;
+import com.letsblog.api.service.TwoFactorSecretNotFoundException;
 import com.letsblog.api.service.UserNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -25,8 +31,18 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", e.getMessage()));
     }
 
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Map<String, String>> handleIllegalState(IllegalStateException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", e.getMessage()));
+    }
+
     @ExceptionHandler(SiteNotFoundException.class)
     public ResponseEntity<Map<String, String>> handleSiteNotFound(SiteNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(RoleNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleRoleNotFound(RoleNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
     }
 
@@ -65,9 +81,34 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
     }
 
+    @ExceptionHandler(MailTemplateNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleMailTemplateNotFound(MailTemplateNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    }
+
     @ExceptionHandler(CmsApiException.class)
     public ResponseEntity<Map<String, String>> handleCmsApiException(CmsApiException e) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(ProvisioningException.class)
+    public ResponseEntity<Map<String, String>> handleProvisioningException(ProvisioningException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(TwoFactorSecretNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleTwoFactorSecretNotFound(TwoFactorSecretNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidTotpCodeException.class)
+    public ResponseEntity<Map<String, String>> handleInvalidTotpCode(InvalidTotpCodeException e) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(QrCodeGenerationException.class)
+    public ResponseEntity<Map<String, String>> handleQrCodeGeneration(QrCodeGenerationException e) {
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

@@ -1,12 +1,18 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.domain.TwoFactorSecret;
 import com.letsblog.api.domain.User;
+import com.letsblog.api.dto.LoginResponse;
 import com.letsblog.api.dto.UserResponse;
+import com.letsblog.api.repository.RoleRepository;
+import com.letsblog.api.repository.TwoFactorSecretRepository;
 import com.letsblog.api.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -21,10 +27,16 @@ class UserServiceTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private TwoFactorSecretRepository twoFactorSecretRepository;
+
+    @Mock
+    private RoleRepository roleRepository;
+
     private UserService service;
 
     private UserService service() {
-        return new UserService(userRepository);
+        return new UserService(userRepository, twoFactorSecretRepository, roleRepository);
     }
 
     @Test
@@ -41,6 +53,23 @@ class UserServiceTest {
 
         assertEquals("user", response.role());
         assertEquals("new@example.com", response.email());
+    }
+
+    @Test
+    void signup_ROLE_VIEWERが自動付与される() {
+        service = service();
+        com.letsblog.api.domain.Role viewerRole = new com.letsblog.api.domain.Role("ROLE_VIEWER", "閲覧者");
+        when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
+        when(roleRepository.findByRoleName("ROLE_VIEWER")).thenReturn(Optional.of(viewerRole));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> {
+            User u = invocation.getArgument(0);
+            u.setId(1L);
+            return u;
+        });
+
+        UserResponse response = service.signup("new@example.com", "password123");
+
+        assertTrue(response.roleNames().contains("ROLE_VIEWER"));
     }
 
     @Test
@@ -91,5 +120,47 @@ class UserServiceTest {
 
         assertThrows(IllegalArgumentException.class,
                 () -> service.setupInitialAdmin("admin@example.com", "password123"));
+    }
+
+    private User buildUser() {
+        User user = new User();
+        user.setId(1L);
+        user.setEmail("user@example.com");
+        user.setPasswordHash(new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder().encode("password123"));
+        user.setRole("user");
+        return user;
+    }
+
+    @Test
+    void login_2FA未設定ユーザーはtwoFactorRequiredがfalse() {
+        service = service();
+        when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(buildUser()));
+        when(twoFactorSecretRepository.findByUserIdAndIsEnabledTrue(1L)).thenReturn(Optional.empty());
+
+        LoginResponse response = service.login("user@example.com", "password123");
+
+        assertFalse(response.twoFactorRequired());
+        assertEquals("user@example.com", response.user().email());
+    }
+
+    @Test
+    void login_2FA有効ユーザーはtwoFactorRequiredがtrue() {
+        service = service();
+        when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(buildUser()));
+        when(twoFactorSecretRepository.findByUserIdAndIsEnabledTrue(1L))
+                .thenReturn(Optional.of(new TwoFactorSecret()));
+
+        LoginResponse response = service.login("user@example.com", "password123");
+
+        assertTrue(response.twoFactorRequired());
+    }
+
+    @Test
+    void login_パスワード不一致は例外() {
+        service = service();
+        when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(buildUser()));
+
+        assertThrows(InvalidCredentialsException.class,
+                () -> service.login("user@example.com", "wrong-password"));
     }
 }

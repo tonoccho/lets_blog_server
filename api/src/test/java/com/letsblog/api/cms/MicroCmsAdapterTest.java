@@ -10,6 +10,7 @@ import java.util.List;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.http.HttpMethod.PATCH;
@@ -142,5 +143,37 @@ class MicroCmsAdapterTest {
         assertThrows(CmsApiException.class,
                 () -> adapter.createOrUpdatePost(creds, content, null));
         server.verify();
+    }
+
+    @Test
+    void testProvisionDefaultCategory_既存カテゴリを返す() {
+        server.expect(requestTo(containsString("/categories")))
+                .andRespond(withSuccess(
+                        "{\"contents\":[{\"id\":\"cat-1\",\"name\":\"Uncategorized\"}]}",
+                        MediaType.APPLICATION_JSON));
+
+        String categoryId = adapter.provisionDefaultCategory(creds);
+
+        assertEquals("cat-1", categoryId);
+        server.verify();
+    }
+
+    @Test
+    void testProvisionDefaultTag_存在しなければ作成する() {
+        server.expect(requestTo(containsString("/tags")))
+                .andRespond(withSuccess("{\"contents\":[]}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://myservice.microcms.io/api/v1/tags"))
+                .andExpect(method(POST))
+                .andRespond(withSuccess("{\"id\":\"tag-9\",\"name\":\"Let's Blog\"}", MediaType.APPLICATION_JSON));
+
+        String tagId = adapter.provisionDefaultTag(creds);
+
+        assertEquals("tag-9", tagId);
+        server.verify();
+    }
+
+    @Test
+    void testProvisionAuthor_未対応のためnullを返す() {
+        assertNull(adapter.provisionAuthor(creds, "author@example.com"));
     }
 }
