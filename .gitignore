@@ -33,3 +33,6 @@ extension/*.vsix
 
 # Docker volumes data dumps (if any local bind mounts used)
 docker-data/
+
+# リバースプロキシ用TLS証明書(scripts/generate-certs.sh で生成、秘密鍵のためコミットしない)
+certs/
