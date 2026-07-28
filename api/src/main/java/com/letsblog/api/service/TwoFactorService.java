@@ -46,24 +46,28 @@ public class TwoFactorService {
 
     /**
      * TOTPシークレットを生成し、QRコード(Base64 Data URL)とバックアップコードを返す。
-     * 未有効化のシークレットが既にある場合は上書きする。
+     * 未有効化のシークレットが既にある場合は、削除→再作成ではなく既存行を上書きする
+     * (同一トランザクション内でdelete+insertを行うと、Hibernateのフラッシュ順序が
+     * 常にinsertを先に実行するため、user_idのUNIQUE制約に違反してしまう)。
      */
     @Transactional
     public TwoFactorSetupResponse generateTwoFactorSecret(Long userId, String userEmail) {
-        twoFactorSecretRepository.findByUserId(userId).ifPresent(existing -> {
-            if (existing.getIsEnabled()) {
-                throw new IllegalStateException("ユーザーは既に2FAが有効化されています");
-            }
-            twoFactorSecretRepository.delete(existing);
-        });
+        TwoFactorSecret twoFactorSecret = twoFactorSecretRepository.findByUserId(userId)
+                .map(existing -> {
+                    if (existing.getIsEnabled()) {
+                        throw new IllegalStateException("ユーザーは既に2FAが有効化されています");
+                    }
+                    return existing;
+                })
+                .orElseGet(TwoFactorSecret::new);
 
         String secret = new DefaultSecretGenerator().generate();
         List<String> backupCodes = generateBackupCodes();
 
-        TwoFactorSecret twoFactorSecret = new TwoFactorSecret();
         twoFactorSecret.setUserId(userId);
         twoFactorSecret.setSecret(secret);
         twoFactorSecret.setIsEnabled(false);
+        twoFactorSecret.setEnabledAt(null);
         twoFactorSecret.setBackupCodes(serializeBackupCodes(backupCodes));
 
         twoFactorSecretRepository.save(twoFactorSecret);

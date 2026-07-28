@@ -88,6 +88,15 @@ public class AuthController {
     }
 
     /**
+     * ログイン中の本人の2FA有効化状態を返す(設定画面の初期表示用)。
+     */
+    @GetMapping("/totp/status")
+    public Map<String, Boolean> twoFactorStatus() {
+        Long actorId = currentActorService.getCurrentActorId();
+        return Map.of("enabled", twoFactorService.isTwoFactorEnabled(actorId));
+    }
+
+    /**
      * 2FA有効化を開始する(ログイン済みの本人のみ、X-Actor-Idヘッダから取得)。
      */
     @PostMapping("/totp/setup")
@@ -107,6 +116,17 @@ public class AuthController {
         Long actorId = currentActorService.getCurrentActorId();
         twoFactorService.verifyAndEnableTwoFactor(actorId, request.code());
         return ResponseEntity.ok(Map.of("message", "2FAが有効化されました。"));
+    }
+
+    /**
+     * ログイン中の本人が自分の2FAを無効化する。
+     */
+    @AuditLog(action = AuditLogAction.TWO_FACTOR_DISABLED, resourceType = "USER")
+    @PostMapping("/totp/disable")
+    public ResponseEntity<Map<String, String>> disableTwoFactor() {
+        Long actorId = currentActorService.getCurrentActorId();
+        twoFactorService.disableTwoFactor(actorId);
+        return ResponseEntity.ok(Map.of("message", "2FAを無効化しました。"));
     }
 
     /**

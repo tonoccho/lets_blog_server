@@ -69,7 +69,7 @@ class TwoFactorServiceTest {
     }
 
     @Test
-    void generateTwoFactorSecret_未有効化の既存シークレットは削除してから再生成する() {
+    void generateTwoFactorSecret_未有効化の既存シークレットは削除せず上書きする() {
         TwoFactorSecret existing = new TwoFactorSecret();
         existing.setIsEnabled(false);
         when(twoFactorSecretRepository.findByUserId(1L)).thenReturn(Optional.of(existing));
@@ -78,7 +78,12 @@ class TwoFactorServiceTest {
 
         service.generateTwoFactorSecret(1L, "user@example.com");
 
-        verify(twoFactorSecretRepository, times(1)).delete(existing);
+        // delete+insertはHibernateのフラッシュ順序でUNIQUE制約違反を起こすため、
+        // 既存行をそのまま上書きする実装であることを確認する
+        verify(twoFactorSecretRepository, times(0)).delete(any());
+        verify(twoFactorSecretRepository, times(1)).save(existing);
+        assertTrue(existing.getSecret() != null && !existing.getSecret().isBlank(),
+                "シークレットが新しい値に設定されているべき");
     }
 
     @Test

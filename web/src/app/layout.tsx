@@ -26,6 +26,7 @@ const NAV_ITEMS = [
   { href: "/posts", label: "投稿履歴" },
   { href: "/ai-jobs", label: "AIジョブ" },
   { href: "/system", label: "システム" },
+  { href: "/settings/security", label: "セキュリティ設定" },
 ];
 
 export default async function RootLayout({
