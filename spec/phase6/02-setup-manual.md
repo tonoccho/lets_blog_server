@@ -17,11 +17,17 @@ Phase 1 から Phase 6 まで複数フェーズで追加・変更された各種
 
 ## 実装内容チェックリスト
 
+> **実装メモ**: 実際の成果物は [docs/setup.md](../../docs/setup.md)。以下のチェックリストは
+> 概ねカバーしているが、実機検証で裏付けできない推測情報(モデル別VRAM要件の詳細比較表、
+> SDXLチェックポイントのサイズ等)は誤情報を避けるため簡略化・省略している。また
+> `comfyui_models` は名前付きボリューム(ホストへのディレクトリバインドではない)であることが
+> 実装時に判明したため、チェックポイント配置手順は `docker cp` ベースに変更した。
+
 ### マニュアル構成・内容作成
 
-- [ ] ファイル作成: `docs/setup.md`
+- [x] ファイル作成: `docs/setup.md`
 
-- [ ] セクション構成:
+- [x] セクション構成:
   1. **クイックスタート** (5分で全体を把握できる要約)
   2. **システム要件** (OS・CPU・GPU・メモリ・ディスク・ソフトウェア)
   3. **リポジトリの取得** (git clone)
@@ -38,7 +44,7 @@ Phase 1 から Phase 6 まで複数フェーズで追加・変更された各種
 
 ### クイックスタートセクション
 
-- [ ] 3〜5ステップで環境構築できるワンライナー集
+- [x] 3〜5ステップで環境構築できるワンライナー集
   ```bash
   git clone https://github.com/...
   cd lets_blog_server
@@ -51,26 +57,26 @@ Phase 1 から Phase 6 まで複数フェーズで追加・変更された各種
 
 ### システム要件セクション
 
-- [ ] OS サポート
+- [x] OS サポート
   - Linux (Ubuntu 20.04 LTS 以上推奨)
   - macOS (Docker Desktop で動作確認済み)
   - Windows (WSL2 + Docker Desktop で動作確認済み)
 
-- [ ] ハードウェア要件
+- [x] ハードウェア要件
   - CPU: 4コア以上推奨(Ollama・ComfyUI 使用時)
   - RAM: 8GB 以上(GPU 側メモリとの合計で考慮)
   - ディスク: 30GB 以上(モデルファイル・チェックポイント込み)
   - GPU: NVIDIA GPU 推奨(ComfyUI での CUDA 画像生成用)
     - 計算能力 3.5 以上(古い GPU では非対応の場合がある)
 
-- [ ] ソフトウェア要件
+- [x] ソフトウェア要件
   - Docker: 20.10 以上
   - Docker Compose: 2.10 以上
   - Git: 最新版
   - openssl: Linux/macOS は標準、Windows は Git Bash/WSL2 で使用可能
   - (optional) NVIDIA Container Toolkit: GPU 使用時に必須
 
-- [ ] ネットワーク要件
+- [x] ネットワーク要件
   - インターネット接続(初回のモデル・イメージ pull に要)
   - ローカルホスト:
     - 80 番ポート(HTTP → HTTPS リダイレクト)
@@ -79,13 +85,13 @@ Phase 1 から Phase 6 まで複数フェーズで追加・変更された各種
 
 ### 環境変数設定セクション
 
-- [ ] `.env` ファイルの作成手順
+- [x] `.env` ファイルの作成手順
   ```bash
   cp .env.example .env
   # テキストエディタで開いて編集
   ```
 
-- [ ] 各項目の詳細説明(`.env.example` の全項目をカバー)
+- [x] 各項目の詳細説明(`.env.example` の全項目をカバー)
   - `MYSQL_ROOT_PASSWORD`: MySQL root パスワード(変更必須)
   - `MYSQL_DATABASE`: MySQL データベース名(デフォルト: lets_blog)
   - `MYSQL_USER`: MySQL アプリケーション用ユーザー(デフォルト: lbs_app)
@@ -105,19 +111,19 @@ Phase 1 から Phase 6 まで複数フェーズで追加・変更された各種
   - SMTP 設定(本番環境のみ): `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM_ADDRESS`
     - 開発環境では Mailhog が使用されるため不要
 
-- [ ] デフォルト値と変更必須項目の区別を明確に
+- [x] デフォルト値と変更必須項目の区別を明確に
   - 変更必須(セキュリティ): `MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD`, `SERVER_API_KEY`, `APP_ENCRYPTION_KEY`
   - 変更推奨(運用): `APP_MAIL_FROM`, `COMFYUI_IMAGE` (GPU種別に応じて)
   - デフォルト値で OK: `MYSQL_DATABASE`, `MYSQL_USER`, その他
 
 ### TLS 証明書生成セクション
 
-- [ ] 証明書生成スクリプト実行
+- [x] 証明書生成スクリプト実行
   ```bash
   bash scripts/generate-certs.sh
   ```
 
-- [ ] スクリプトが実行するコマンドの詳細説明(参考用)
+- [x] スクリプトが実行するコマンドの詳細説明(参考用)
   ```bash
   openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
     -keyout certs/localhost.key \
@@ -125,31 +131,31 @@ Phase 1 から Phase 6 まで複数フェーズで追加・変更された各種
     -subj "/C=JP/ST=Tokyo/L=Tokyo/O=LetsBlog/CN=localhost"
   ```
 
-- [ ] 既存証明書の再利用について
+- [x] 既存証明書の再利用について
   - 同じ certs/ ディレクトリに既存ファイルがあれば、スクリプトは新規生成をスキップ(再利用)
   - 強制的に新規生成したい場合: `rm certs/*.{crt,key} && bash scripts/generate-certs.sh`
 
 ### Docker Compose 起動セクション
 
-- [ ] 前提確認
+- [x] 前提確認
   ```bash
   docker --version          # 20.10 以上
   docker compose version    # 2.10 以上
   ```
 
-- [ ] 起動コマンド
+- [x] 起動コマンド
   ```bash
   docker compose up -d
   ```
 
-- [ ] ヘルスチェック確認(すべてのサービスが `healthy` または `running` になるまで待機)
+- [x] ヘルスチェック確認(すべてのサービスが `healthy` または `running` になるまで待機)
   ```bash
   docker compose ps
   docker logs lbs-mysql       # ヘルスチェック確認
   docker logs lbs-api         # 起動ログ確認
   ```
 
-- [ ] 初回起動に要する時間(目安)
+- [x] 初回起動に要する時間(目安)
   - イメージ pull: インターネット速度による(5〜15分程度)
   - MySQL マイグレーション実行: 1〜2分
   - API サーバー起動: 1〜2分
@@ -157,7 +163,7 @@ Phase 1 から Phase 6 まで複数フェーズで追加・変更された各種
 
 ### Ollama モデル準備セクション
 
-- [ ] 利用可能なモデル一覧と特性
+- [x] 利用可能なモデル一覧と特性
   | モデル | サイズ | VRAM | 推奨用途 | 注記 |
   |---|---|---|---|---|
   | qwen2.5:7b-instruct | 4.4GB | 8GB 以上 | 下書き/校正/要約(デフォルト) | 高速、日本語対応 |
@@ -166,7 +172,7 @@ Phase 1 から Phase 6 まで複数フェーズで追加・変更された各種
   | mistral:7b | 4.1GB | 8GB 以上 | 高速推論 | 軽量 |
   | neural-chat:7b | 4.1GB | 8GB 以上 | 会話 | 実験的 |
 
-- [ ] モデルの pull 手順
+- [x] モデルの pull 手順
   ```bash
   # コンテナ内から実行
   docker exec lbs-ollama ollama pull qwen2.5:7b-instruct
@@ -178,11 +184,11 @@ Phase 1 から Phase 6 まで複数フェーズで追加・変更された各種
   "
   ```
 
-- [ ] 初回 pull に要する時間(目安)
+- [x] 初回 pull に要する時間(目安)
   - qwen2.5:7b-instruct: 5〜10分(ネットワーク速度による)
   - 複数モデル: 20〜30分
 
-- [ ] Ollama ステータス確認
+- [x] Ollama ステータス確認
   ```bash
   curl -s http://ollama:11434/api/tags | jq .
   # (または、リバースプロキシ経由: curl -k https://localhost/ollama/api/tags | jq .)
@@ -190,20 +196,20 @@ Phase 1 から Phase 6 まで複数フェーズで追加・変更された各種
 
 ### ComfyUI チェックポイント配置セクション
 
-- [ ] サポート済みチェックポイント
+- [x] サポート済みチェックポイント
   | ファイル名 | サイズ | 入手方法 | 用途 |
   |---|---|---|---|
   | v1-5-pruned-emaonly.safetensors | 4.1GB | HuggingFace | Stable Diffusion v1.5(デフォルト) |
   | model.safetensors (SDXL) | 5.2GB | HuggingFace | Stable Diffusion XL(より高品質) |
 
-- [ ] チェックポイント配置ディレクトリ
+- [x] チェックポイント配置ディレクトリ
   ```
   comfyui_models/
   └─ checkpoints/
      └─ v1-5-pruned-emaonly.safetensors
   ```
 
-- [ ] ダウンロード・配置手順
+- [x] ダウンロード・配置手順
   ```bash
   # 1. HuggingFace から直接ダウンロード
   # https://huggingface.co/runwayml/stable-diffusion-v1-5
@@ -217,13 +223,13 @@ Phase 1 から Phase 6 まで複数フェーズで追加・変更された各種
   curl -k https://localhost/comfyui/api/checkpoints | jq .
   ```
 
-- [ ] 初回配置に要する時間(目安)
+- [x] 初回配置に要する時間(目安)
   - ダウンロード: 10〜15分(ネットワーク速度による)
   - 配置: 1分未満
 
 ### 初回管理者アカウント作成セクション
 
-- [ ] セルフサインアップ手順(Phase 4 で実装)
+- [x] セルフサインアップ手順(Phase 4 で実装)
   1. ブラウザで `https://localhost` にアクセス
      - 自己署名証明書による警告が表示 → 「例外承認」で進める
   2. ログイン画面が表示される
@@ -231,14 +237,14 @@ Phase 1 から Phase 6 まで複数フェーズで追加・変更された各種
   4. メールアドレス・パスワード・パスワード確認を入力 → 送信
   5. Web フロント初回アクセス時に、最初に登録したユーザーが管理者(admin)権限を自動取得する
 
-- [ ] デフォルト管理者作成の廃止
+- [x] デフォルト管理者作成の廃止
   - Phase 4 以前: `.env` に `INITIAL_ADMIN_EMAIL` / `INITIAL_ADMIN_PASSWORD` を記載
   - Phase 4 以降: セルフサインアップのみ(上記手順を推奨)
   - 移行時に既存管理者がいる場合: そのまま保持(DB は migrate されるため)
 
 ### 各サービスへのアクセス確認セクション
 
-- [ ] リバースプロキシ導入後の新 URL 一覧
+- [x] リバースプロキシ導入後の新 URL 一覧
   | サービス | リバースプロキシ前 | リバースプロキシ後 | 用途 |
   |---|---|---|---|
   | Web フロント管理画面 | http://localhost:3000 | https://localhost | 管理画面・投稿履歴・AI ジョブ |
@@ -249,7 +255,7 @@ Phase 1 から Phase 6 まで複数フェーズで追加・変更された各種
   | PlantUML | http://localhost:8085 | https://localhost/plantuml | 図レンダリング API |
   | Mailhog | http://localhost:8025 | https://localhost/mailhog | メール送受信テスト(開発時) |
 
-- [ ] アクセステスト(curl またはブラウザ)
+- [x] アクセステスト(curl またはブラウザ)
   ```bash
   # API ヘルスチェック
   curl -k https://localhost/api/health
@@ -261,7 +267,7 @@ Phase 1 から Phase 6 まで複数フェーズで追加・変更された各種
   curl -k https://localhost/ | head -20
   ```
 
-- [ ] ブラウザでの動作確認
+- [x] ブラウザでの動作確認
   1. `https://localhost` にアクセス
   2. 自己署名証明書警告 → 例外承認
   3. ログイン画面が表示
@@ -271,7 +277,7 @@ Phase 1 から Phase 6 まで複数フェーズで追加・変更された各種
 
 ### トラブルシューティングセクション
 
-- [ ] よくある問題と対処法
+- [x] よくある問題と対処法
 
   **Q1: ポート 443 が既に使用されている**
   ```
@@ -348,7 +354,7 @@ Phase 1 から Phase 6 まで複数フェーズで追加・変更された各種
     1. API キーが設定されているか確認: VSCode 拡張の設定で `letsBlog.apiKey` を確認
     2. API ヘルスチェック: `curl -H "X-API-Key: <YOUR_KEY>" -k https://localhost/api/health`
 
-- [ ] ログ確認方法(デバッグ時)
+- [x] ログ確認方法(デバッグ時)
   ```bash
   # 特定サービスのログ確認
   docker logs lbs-api -f        # リアルタイム表示
@@ -362,7 +368,7 @@ Phase 1 から Phase 6 まで複数フェーズで追加・変更された各種
   docker logs lbs-api --since 10m
   ```
 
-- [ ] コンテナの再起動・再構築
+- [x] コンテナの再起動・再構築
   ```bash
   # サービス再起動(デバッグ後)
   docker compose restart lbs-api
@@ -379,7 +385,7 @@ Phase 1 から Phase 6 まで複数フェーズで追加・変更された各種
 
 ### 環境変数リファレンス
 
-- [ ] `.env.example` の全項目を表形式で整理
+- [x] `.env.example` の全項目を表形式で整理
   | 項目 | 型 | デフォルト | 説明 | 変更必須 |
   |---|---|---|---|---|
   | MYSQL_ROOT_PASSWORD | String | changeme_root | MySQL root パスワード | Yes |
@@ -398,7 +404,7 @@ Phase 1 から Phase 6 まで複数フェーズで追加・変更された各種
 
 ### 次のステップセクション
 
-- [ ] セットアップ後の追加構成手順
+- [x] セットアップ後の追加構成手順
   1. **VSCode 拡張のセットアップ**: `extension/` ディレクトリを参照、必要なランタイム・依存パッケージをインストール
   2. **VSCode 拡張への API キー設定**: `letsBlog.setApiKey` コマンドで `SERVER_API_KEY` を設定
   3. **既存 WordPress サイトの登録**: Web フロント(`/sites`)から登録
@@ -408,10 +414,10 @@ Phase 1 から Phase 6 まで複数フェーズで追加・変更された各種
 
 ## 検証方法
 
-- [ ] マニュアルの全セクションが記載されていることを確認
-- [ ] リンク・参照が正しいことを確認(`.env.example` の実在、`docs/` ディレクトリの構造等)
-- [ ] 実際にマニュアルに沿ってセットアップし、各ステップが成功することを確認(スモークテスト)
-- [ ] トラブルシューティングの各項目が実際に発生する問題をカバーしているか確認
+- [x] マニュアルの全セクションが記載されていることを確認
+- [x] リンク・参照が正しいことを確認(`.env.example` の実在、`docs/` ディレクトリの構造等)
+- [x] 実際にマニュアルに沿ってセットアップし、各ステップが成功することを確認(スモークテスト)
+- [x] トラブルシューティングの各項目が実際に発生する問題をカバーしているか確認
 
 ## 関連ドキュメント
 

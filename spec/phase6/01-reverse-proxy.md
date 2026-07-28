@@ -31,7 +31,7 @@ nginx リバースプロキシコンテナを docker-compose に追加し、す�
 
 ### docker-compose.yml 変更
 
-- [ ] `reverse-proxy` (nginx) サービスを最初(依存関係が無いため)に追加
+- [x] `reverse-proxy` (nginx) サービスを最初(依存関係が無いため)に追加
   - イメージ: `nginx:alpine`
   - コンテナ名: `lbs-reverse-proxy`
   - ポート: `80:80`, `443:443` のみを外部公開
@@ -44,7 +44,7 @@ nginx リバースプロキシコンテナを docker-compose に追加し、す�
   - depends_on: なし(nginx は各サービス起動を待つ必要がないため「-1」戦略で OK)
   - restart: `unless-stopped`
 
-- [ ] 既存サービスの `ports:` 削除(全サービス対象):
+- [x] 既存サービスの `ports:` 削除(全サービス対象):
   - api: `8080:8080` 削除
   - phpmyadmin: `8081:80` 削除
   - ollama: `11434:11434` 削除
@@ -54,27 +54,33 @@ nginx リバースプロキシコンテナを docker-compose に追加し、す�
   - mysql: `3306:3306` **削除(重要: PHPMyAdmin からのアクセスのみ許可、直接 MySQL 接続は遮断)**
   - phpmyadmin の `depends_on` 設定は保持(nginx からは indirect に依存)
 
-- [ ] 既存サービスで環境変数が直接ポートを参照していないか確認
+- [x] 既存サービスで環境変数が直接ポートを参照していないか確認
   - 例: `api` の `COMFYUI_BASE_URL: http://comfyui:8188` はそのまま(内部通信)
   - 例: web フロント環境変数で `API_BASE_URL` が `http://localhost:8080` を指していないか確認
     - もしそうなら `https://localhost/api` に修正
 
 ### nginx 設定ファイル作成
 
-- [ ] ディレクトリ構成:
+> **実装メモ**: 以下のコード例は設計時点のたたき台。実際の最終実装は
+> [nginx/nginx.conf](../../nginx/nginx.conf) / [nginx/conf.d/default.conf](../../nginx/conf.d/default.conf)
+> を正とする。主な相違点: `upstream {}` ブロックではなく `set $upstream_xxx host:port;` +
+> `rewrite ^/prefix/(.*)$ /$1 break;` でプレフィックス除去(理由は後述の「問題が発生した場合の
+> 調査・対応」参照)、`resolver 127.0.0.11` をnginx.confに追加(バックエンド未起動時の起動失敗回避)。
+
+- [x] ディレクトリ構成(実際は `nginx.conf` を `nginx/` 配下に配置):
   ```
   .
   ├─ docker-compose.yml
-  ├─ nginx.conf              (メインのnginx設定)
   ├─ nginx/
+  │  ├─ nginx.conf            (メインのnginx設定)
   │  └─ conf.d/
-  │     └─ default.conf      (上流サーバー定義・ロケーション ルーティング)
-  └─ certs/                  (TLS証明書・秘密鍵、起動時生成)
+  │     └─ default.conf       (アップストリーム変数・ロケーション ルーティング)
+  └─ certs/                   (TLS証明書・秘密鍵、scripts/generate-certs.shで生成)
      ├─ localhost.crt
      └─ localhost.key
   ```
 
-- [ ] `nginx.conf` 実装内容:
+- [x] `nginx.conf` 実装内容:
   ```nginx
   user nginx;
   worker_processes auto;
@@ -112,7 +118,7 @@ nginx リバースプロキシコンテナを docker-compose に追加し、す�
   }
   ```
 
-- [ ] `nginx/conf.d/default.conf` 実装内容:
+- [x] `nginx/conf.d/default.conf` 実装内容:
   ```nginx
   # HTTP → HTTPS リダイレクト
   server {
@@ -245,7 +251,7 @@ nginx リバースプロキシコンテナを docker-compose に追加し、す�
 
 ### TLS 証明書生成スクリプト
 
-- [ ] スクリプト作成: `scripts/generate-certs.sh`
+- [x] スクリプト作成: `scripts/generate-certs.sh`
   ```bash
   #!/bin/bash
   # 自己署名証明書生成スクリプト
@@ -275,42 +281,42 @@ nginx リバースプロキシコンテナを docker-compose に追加し、す�
   echo "  Key: $KEY_FILE"
   ```
 
-- [ ] `.env.example` に証明書生成手順を記載(コメント)
+- [x] `.env.example` に証明書生成手順を記載(コメント)
   ```bash
   # 初回起動時に以下を実行してください
   # bash scripts/generate-certs.sh
   ```
 
-- [ ] docker-compose 起動前に証明書を確認・生成する手順を検討
+- [x] docker-compose 起動前に証明書を確認・生成する手順を検討
   - オプション A: `docker-compose up -d` 前に `scripts/generate-certs.sh` を手動実行
   - オプション B: init コンテナまたは nginx の entrypoint で自動生成(複雑性が増すため今回は見送り)
 
 ### 既存アプリの設定変更
 
-- [ ] Web フロント (Next.js) の環境変数確認・修正
+- [x] Web フロント (Next.js) の環境変数確認・修正
   - 現状で `API_BASE_URL` が `http://localhost:8080` 等と直接ポートを参照していないか確認
   - もしそうなら `https://localhost/api` に修正(`web/.env.local` または `app.config` )
 
-- [ ] API サーバー (`application.yml`) の設定確認
+- [x] API サーバー (`application.yml`) の設定確認
   - `COMFYUI_BASE_URL`, `OLLAMA_BASE_URL` 等の内部参照 → Docker 内部通信(変更不要)
   - Web フロント向けの `APP_WEB_BASE_URL` → `https://localhost` に修正(存在する場合)
 
-- [ ] Web フロント内の管理画面リンク確認・修正
+- [x] Web フロント内の管理画面リンク確認・修正
   - 特に `/system` ページで、各サービスへの直接リンク(`http://localhost:8080`, `http://localhost:8081` 等)を使用している場合は削除または `https://localhost/...` に修正
 
 ### 動作検証
 
-- [ ] 自己署名証明書を生成
+- [x] 自己署名証明書を生成
   ```bash
   bash scripts/generate-certs.sh
   ```
 
-- [ ] docker-compose を起動
+- [x] docker-compose を起動
   ```bash
   docker compose up -d
   ```
 
-- [ ] 各サービスへの HTTPS アクセス確認(curl または ブラウザ)
+- [x] 各サービスへの HTTPS アクセス確認(curl または ブラウザ)
   ```bash
   curl -k https://localhost/api/health     # API ヘルスチェック
   curl -k https://localhost/phpmyadmin/    # phpMyAdmin(HTMLリダイレクト確認)
@@ -318,44 +324,45 @@ nginx リバースプロキシコンテナを docker-compose に追加し、す�
   # 以下、その他サービスも同様
   ```
 
-- [ ] 個別ポートへのアクセスが遮断されていることを確認
+- [x] 個別ポートへのアクセスが遮断されていることを確認
   ```bash
   curl -k https://localhost:8080/api/health     # 失敗(ポート 8080 公開なし)
   curl http://localhost:3000/                   # 失敗(ホスト上 dev server の外部アクセスも制限)
   ```
 
-- [ ] ブラウザで `https://localhost` にアクセス
-  - 自己署名証明書による警告が表示される → 例外承認して進める
-  - Web フロント管理画面が表示される
-  - 各ページのリンク・API 呼び出しが正常に動作することを確認
+- [x] `https://localhost` へのアクセス確認(curlベース。ブラウザでの目視確認・自己署名証明書の例外承認操作自体は未実施)
+  - Web フロント管理画面のトップ(`/`)が未ログイン時に `/login` へ307リダイレクトされることを確認
+  - `/login` が200で応答することを確認
 
-- [ ] nginx ログの確認(必要に応じてデバッグ)
+- [x] nginx ログの確認(必要に応じてデバッグ)
   ```bash
   docker logs lbs-reverse-proxy
   ```
 
 ### ComfyUI/Ollama のサブパス対応検証
 
-- [ ] ComfyUI の `/comfyui` パス配下での動作確認
-  - UI が正常に読み込まれるか
-  - WebSocket 通信(`/ws`)が正常に動作するか
-  - 静的アセット(JavaScript/CSS)が正常に読み込まれるか
-  - 必要に応じて nginx の `sub_filter` で HTML 内のパス参照を書き換え
+- [x] ComfyUI の `/comfyui` パス配下での動作確認
+  - ルートHTML(`GET /comfyui/`)が200で応答することを確認
+  - 静的アセット(JS/CSS)は相対パス(`href="js/..."`, `src="./assets/..."`)で参照されており、`/comfyui/` 配下でも追加のpath書き換えなしで200が返ることを確認(実際に `js/vendor/jquery/jquery.min.js`、`assets/index-*.js` を個別に取得して確認)
+  - WebSocket通信(`/comfyui/ws`)は、クライアントがHTTP/1.1でハンドシェイクした場合に101 Switching Protocolsで確立し、ComfyUIから実際のstatusメッセージ(`{"type":"status",...}`)を受信できることを確認
+    - 注: curlをHTTP/2(既定のALPN交渉)のまま使うとUpgradeヘッダが正しく機能せず400になる。ブラウザのWebSocket APIは常にHTTP/1.1相当のUpgradeハンドシェイクを行うため、実際のブラウザ利用では問題にならない見込み(未確認)
+  - `sub_filter` によるHTML内パス書き換えは現状のComfyUIビルドでは(相対パスのため)効果が薄いことが判明。将来のComfyUIバージョンアップで絶対パス参照が混入した場合の保険として設定は残す
+  - 未検証: ComfyUI JS バンドル内部で `fetch("/prompt")` 等の絶対パスAPI呼び出しが行われていないか(実際にワークフローを投入して画像生成が完走するかは、モデル/チェックポイント配置を伴う実運用テストが必要なため未実施)
 
-- [ ] Ollama の `/ollama` パス配下での API 動作確認
-  - `GET /ollama/api/tags` でモデル一覧が取得できるか
-  - API レスポンスが正常か
+- [x] Ollama の `/ollama` パス配下での API 動作確認
+  - `GET /ollama/api/tags` で実際にpull済みモデル(`qwen2.5:7b-instruct`)一覧のJSONが取得できることを確認
+  - API レスポンスは正常(JSON Content-Type)
 
-- [ ] 問題が発生した場合の調査・対応
-  - nginx error ログを確認
-  - 必要に応じて `sub_filter` または 各アプリの base-path 設定オプションを使用
+- [x] 問題が発生した場合の調査・対応
+  - 実装中に発覚した実際の問題と対処:
+    1. `proxy_pass` に変数(`set $upstream_xxx ...`)を使うと、location プレフィックスの自動除去(URI部分によるリライト)が効かず、常に固定URI(`/`)がバックエンドに渡ってしまう(Ollamaのアクセスログで全リクエストが`GET /`になっていたことで発覚)。`rewrite ^/prefix/(.*)$ /$1 break;` を明示的に追加して解消
+    2. `host.docker.internal` は Docker の組み込みDNS(`resolver 127.0.0.11`)では解決できず、`extra_hosts`(`/etc/hosts`)経由の静的解決のみ有効。Webフロント向け location だけは変数を使わず `proxy_pass http://host.docker.internal:3000;` と直接指定することで解消
 
 ## 未決事項・要検証事項
 
-- **ComfyUI の静的アセット path**: ComfyUI のフロントエンドが `/js`, `/css` 等の絶対パス参照を持つ場合、`/comfyui` プレフィックス配下で正しく読み込まれるか(相対パス変換 or nginx sub_filter が必要な場合がある)
-- **Ollama のレスポンス Content-Type**: Ollama API がパスプレフィックス付きレスポンスを返すか、フロント側で path adjustment が必要か(検証待ち)
-- **Web フロント (Next.js) のホスト側 3000 でのリッスン**: docker-compose 外でホスト上の `npm run dev` を起動しているため、nginx → `host.docker.internal:3000` プロキシが Docker 環境で正常に動作するか(Linux のみでは `host.docker.internal` が使えない場合がある)
-  - 必要に応じて Docker Desktop 環境向けと Linux 環境向けで設定を分ける、または web をコンテナ化する
+- **ComfyUI JS バンドル内の絶対パスAPI呼び出し**: `fetch("/prompt")` 等、`/comfyui` プレフィックスを考慮しないハードコードされた絶対パスがJS実行時に呼ばれていないか(静的アセット・WebSocket疎通は確認済みだが、実際にワークフローを実行してのエンドツーエンド検証は未実施)
+- **ブラウザでの目視確認**: 自己署名証明書の警告表示・例外承認操作、実際のログイン〜各画面遷移はcurlでの疎通確認に留まり、ブラウザでの実機確認は未実施
+- **Web フロント (Next.js) のコンテナ化**: 現状はホスト上の `npm run dev` を前提とし、`host.docker.internal` 経由でプロキシしている(Linux環境でも `extra_hosts: host-gateway` で動作することを確認済み)。コンテナ化自体は引き続きスコープ外
 
 ## 関連ドキュメント
 
