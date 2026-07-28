@@ -8,7 +8,9 @@ public enum AuditLogAction {
     POST_PUBLISHED("投稿公開"),
     SITE_REGISTERED("サイト登録"),
     PASSWORD_RESET_REQUESTED("パスワード再設定リクエスト"),
-    PASSWORD_RESET_CONFIRMED("パスワード再設定完了");
+    PASSWORD_RESET_CONFIRMED("パスワード再設定完了"),
+    TWO_FACTOR_ENABLED("2FA有効化"),
+    TWO_FACTOR_DISABLED("2FA無効化");
 
     private final String displayName;
 

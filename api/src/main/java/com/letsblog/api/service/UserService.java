@@ -3,9 +3,11 @@ package com.letsblog.api.service;
 import com.letsblog.api.aop.AuditLog;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.User;
+import com.letsblog.api.dto.LoginResponse;
 import com.letsblog.api.dto.UserCreateRequest;
 import com.letsblog.api.dto.UserResponse;
 import com.letsblog.api.dto.UserUpdateRequest;
+import com.letsblog.api.repository.TwoFactorSecretRepository;
 import com.letsblog.api.repository.UserRepository;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -21,15 +23,21 @@ public class UserService {
     private static final Set<String> VALID_ROLES = Set.of("admin", "user");
 
     private final UserRepository userRepository;
+    private final TwoFactorSecretRepository twoFactorSecretRepository;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
-    public UserService(UserRepository userRepository) {
+    public UserService(UserRepository userRepository, TwoFactorSecretRepository twoFactorSecretRepository) {
         this.userRepository = userRepository;
+        this.twoFactorSecretRepository = twoFactorSecretRepository;
     }
 
+    /**
+     * パスワード認証のみを行う。2FAが有効なユーザーはtwoFactorRequired=trueを返し、
+     * 呼び出し元(Web BFF)はTOTPコード入力を経て /api/auth/totp/verify で本ログインを完了させる。
+     */
     @AuditLog(action = AuditLogAction.LOGIN, resourceType = "USER")
     @Transactional(readOnly = true)
-    public UserResponse login(String email, String password) {
+    public LoginResponse login(String email, String password) {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new InvalidCredentialsException("メールアドレスまたはパスワードが正しくありません"));
 
@@ -37,7 +45,8 @@ public class UserService {
             throw new InvalidCredentialsException("メールアドレスまたはパスワードが正しくありません");
         }
 
-        return UserResponse.from(user);
+        boolean twoFactorRequired = twoFactorSecretRepository.findByUserIdAndIsEnabledTrue(user.getId()).isPresent();
+        return new LoginResponse(UserResponse.from(user), twoFactorRequired);
     }
 
     @Transactional(readOnly = true)
