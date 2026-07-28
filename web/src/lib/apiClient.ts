@@ -146,6 +146,26 @@ export function listUsers(): Promise<AppUser[]> {
   return apiFetch<AppUser[]>('/api/users');
 }
 
+export function signup(email: string, password: string): Promise<AuthenticatedUser> {
+  return apiFetch<AuthenticatedUser>('/api/auth/signup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export function getSetupStatus(): Promise<{ needsSetup: boolean }> {
+  return apiFetch<{ needsSetup: boolean }>('/api/auth/setup-status');
+}
+
+export function setupInitialAdmin(email: string, password: string): Promise<AuthenticatedUser> {
+  return apiFetch<AuthenticatedUser>('/api/auth/setup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+}
+
 export function createUser(input: UserCreateInput, actor?: ActorInfo): Promise<AppUser> {
   return apiFetch<AppUser>('/api/users', {
     method: 'POST',

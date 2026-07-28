@@ -3,11 +3,13 @@ package com.letsblog.api.controller;
 import com.letsblog.api.dto.LoginRequest;
 import com.letsblog.api.dto.PasswordResetConfirmRequest;
 import com.letsblog.api.dto.PasswordResetRequest;
+import com.letsblog.api.dto.SignupRequest;
 import com.letsblog.api.dto.UserResponse;
 import com.letsblog.api.service.PasswordResetService;
 import com.letsblog.api.service.UserService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -45,5 +47,20 @@ public class AuthController {
             @Valid @RequestBody PasswordResetConfirmRequest request) {
         passwordResetService.confirmPasswordReset(request.token(), request.newPassword());
         return ResponseEntity.ok(Map.of("message", "パスワードをリセットしました。新しいパスワードでログインしてください。"));
+    }
+
+    @PostMapping("/signup")
+    public UserResponse signup(@Valid @RequestBody SignupRequest request) {
+        return userService.signup(request.email(), request.password());
+    }
+
+    @GetMapping("/setup-status")
+    public Map<String, Boolean> setupStatus() {
+        return Map.of("needsSetup", !userService.hasAnyUser());
+    }
+
+    @PostMapping("/setup")
+    public UserResponse setup(@Valid @RequestBody SignupRequest request) {
+        return userService.setupInitialAdmin(request.email(), request.password());
     }
 }
