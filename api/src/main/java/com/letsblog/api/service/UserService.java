@@ -1,5 +1,7 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.aop.AuditLog;
+import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.User;
 import com.letsblog.api.dto.UserCreateRequest;
 import com.letsblog.api.dto.UserResponse;
@@ -25,6 +27,7 @@ public class UserService {
         this.userRepository = userRepository;
     }
 
+    @AuditLog(action = AuditLogAction.LOGIN, resourceType = "USER")
     @Transactional(readOnly = true)
     public UserResponse login(String email, String password) {
         User user = userRepository.findByEmail(email)
@@ -42,6 +45,7 @@ public class UserService {
         return userRepository.findAll().stream().map(UserResponse::from).toList();
     }
 
+    @AuditLog(action = AuditLogAction.USER_CREATED, resourceType = "USER")
     @Transactional
     public UserResponse create(UserCreateRequest request) {
         if (userRepository.existsByEmail(request.email())) {
@@ -57,6 +61,7 @@ public class UserService {
         return UserResponse.from(userRepository.save(user));
     }
 
+    @AuditLog(action = AuditLogAction.USER_UPDATED, resourceType = "USER")
     @Transactional
     public UserResponse update(Long id, UserUpdateRequest request) {
         User user = userRepository.findById(id)
@@ -73,12 +78,39 @@ public class UserService {
         return UserResponse.from(userRepository.save(user));
     }
 
+    @AuditLog(action = AuditLogAction.USER_DELETED, resourceType = "USER")
     @Transactional
     public void delete(Long id) {
         if (!userRepository.existsById(id)) {
             throw new UserNotFoundException("id " + id + " のユーザーは登録されていません");
         }
         userRepository.deleteById(id);
+    }
+
+    /**
+     * 誰でも呼び出せるセルフサインアップ。roleは常に"user"固定。
+     */
+    @AuditLog(action = AuditLogAction.USER_CREATED, resourceType = "USER")
+    @Transactional
+    public UserResponse signup(String email, String password) {
+        return create(new UserCreateRequest(email, password, "user"));
+    }
+
+    @Transactional(readOnly = true)
+    public boolean hasAnyUser() {
+        return userRepository.count() > 0;
+    }
+
+    /**
+     * usersテーブルが空の場合のみ許可される初回セットアップ。roleは常に"admin"固定。
+     */
+    @AuditLog(action = AuditLogAction.USER_CREATED, resourceType = "USER")
+    @Transactional
+    public UserResponse setupInitialAdmin(String email, String password) {
+        if (hasAnyUser()) {
+            throw new IllegalArgumentException("初回セットアップは既に完了しています");
+        }
+        return create(new UserCreateRequest(email, password, "admin"));
     }
 
     private void validateRole(String role) {

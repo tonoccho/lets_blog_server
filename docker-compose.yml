@@ -13,8 +13,10 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
       APP_API_KEY: ${SERVER_API_KEY}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
-      INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL}
-      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD}
+      SPRING_MAIL_HOST: mailhog
+      SPRING_MAIL_PORT: 1025
+      APP_MAIL_FROM: ${APP_MAIL_FROM:-noreply@letsblog.example.com}
+      APP_WEB_BASE_URL: ${APP_WEB_BASE_URL:-http://localhost:3000}
       OLLAMA_BASE_URL: http://ollama:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b-instruct}
       COMFYUI_BASE_URL: http://comfyui:8188
@@ -23,6 +25,18 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      mailhog:
+        condition: service_started
+    networks:
+      - lbs-net
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: lbs-mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"
+      - "8025:8025"
     networks:
       - lbs-net
 

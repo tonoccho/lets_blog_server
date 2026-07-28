@@ -10,6 +10,7 @@ export interface Site {
   baseUrl: string;
   createdAt: string;
   updatedAt: string;
+  connectionCheckStatus: "SUCCESS" | "FAILED" | null;
 }
 
 export interface PostSummary {
@@ -69,12 +70,23 @@ function apiKey(): string {
   return key;
 }
 
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+export interface ActorInfo {
+  id: number;
+  role: "admin" | "user";
+}
+
+interface ApiFetchInit extends RequestInit {
+  actor?: ActorInfo;
+}
+
+async function apiFetch<T>(path: string, init?: ApiFetchInit): Promise<T> {
+  const { actor, ...requestInit } = init ?? {};
   const res = await fetch(`${serverUrl()}${path}`, {
-    ...init,
+    ...requestInit,
     headers: {
       'X-API-Key': apiKey(),
-      ...(init?.headers ?? {}),
+      ...(actor ? { 'X-Actor-Id': String(actor.id), 'X-Actor-Role': actor.role } : {}),
+      ...(requestInit.headers ?? {}),
     },
     cache: 'no-store',
   });
@@ -93,11 +105,12 @@ export function listSites(): Promise<Site[]> {
   return apiFetch<Site[]>('/api/sites');
 }
 
-export function registerSite(input: SiteRegisterInput): Promise<Site> {
+export function registerSite(input: SiteRegisterInput, actor?: ActorInfo): Promise<Site> {
   return apiFetch<Site>('/api/sites', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
+    actor,
   });
 }
 
@@ -134,22 +147,94 @@ export function listUsers(): Promise<AppUser[]> {
   return apiFetch<AppUser[]>('/api/users');
 }
 
-export function createUser(input: UserCreateInput): Promise<AppUser> {
+export function signup(email: string, password: string): Promise<AuthenticatedUser> {
+  return apiFetch<AuthenticatedUser>('/api/auth/signup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export function getSetupStatus(): Promise<{ needsSetup: boolean }> {
+  return apiFetch<{ needsSetup: boolean }>('/api/auth/setup-status');
+}
+
+export function setupInitialAdmin(email: string, password: string): Promise<AuthenticatedUser> {
+  return apiFetch<AuthenticatedUser>('/api/auth/setup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export function createUser(input: UserCreateInput, actor?: ActorInfo): Promise<AppUser> {
   return apiFetch<AppUser>('/api/users', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
+    actor,
   });
 }
 
-export function updateUserRole(id: number, role: "admin" | "user"): Promise<AppUser> {
+export function updateUserRole(id: number, role: "admin" | "user", actor?: ActorInfo): Promise<AppUser> {
   return apiFetch<AppUser>(`/api/users/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ role }),
+    actor,
   });
 }
 
-export function deleteUser(id: number): Promise<void> {
-  return apiFetch<void>(`/api/users/${id}`, { method: 'DELETE' });
+export function deleteUser(id: number, actor?: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/users/${id}`, { method: 'DELETE', actor });
+}
+
+export function requestPasswordReset(email: string): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>('/api/auth/password-reset/request', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+}
+
+export function confirmPasswordReset(token: string, newPassword: string): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>('/api/auth/password-reset/confirm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, newPassword }),
+  });
+}
+
+export interface AuditLogEntry {
+  id: number;
+  userId: number | null;
+  action: string;
+  resourceType: string | null;
+  resourceId: number | null;
+  changes: string | null;
+  remoteIp: string | null;
+  userAgent: string | null;
+  createdAt: string;
+}
+
+export interface AuditLogPage {
+  content: AuditLogEntry[];
+  totalElements: number;
+  totalPages: number;
+  number: number;
+  size: number;
+}
+
+export function listAuditLogs(
+  params: { userId?: number; action?: string; page?: number; size?: number },
+  actor: ActorInfo
+): Promise<AuditLogPage> {
+  const query = new URLSearchParams();
+  if (params.userId != null) query.set('userId', String(params.userId));
+  if (params.action) query.set('action', params.action);
+  query.set('page', String(params.page ?? 0));
+  query.set('size', String(params.size ?? 20));
+  query.set('sort', 'createdAt,desc');
+
+  return apiFetch<AuditLogPage>(`/api/audit-logs?${query.toString()}`, { actor });
 }

@@ -3,9 +3,13 @@ package com.letsblog.api.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.letsblog.api.aop.AuditLog;
+import com.letsblog.api.cms.CmsAdapter;
+import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.crypto.CredentialCipher;
+import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.SiteRegisterRequest;
 import com.letsblog.api.dto.SiteResponse;
@@ -23,13 +27,22 @@ public class SiteService {
     private final SiteRepository siteRepository;
     private final CredentialCipher credentialCipher;
     private final ObjectMapper objectMapper;
+    private final CmsAdapterFactory cmsAdapterFactory;
 
-    public SiteService(SiteRepository siteRepository, CredentialCipher credentialCipher, ObjectMapper objectMapper) {
+    public SiteService(SiteRepository siteRepository, CredentialCipher credentialCipher, ObjectMapper objectMapper,
+                        CmsAdapterFactory cmsAdapterFactory) {
         this.siteRepository = siteRepository;
         this.credentialCipher = credentialCipher;
         this.objectMapper = objectMapper;
+        this.cmsAdapterFactory = cmsAdapterFactory;
     }
 
+    /**
+     * サイトを登録する。ここで行うのは入力された認証情報の保存のみで、CMS側やサーバー側で
+     * 新規にリソースを作成する「プロビジョニング」は行わない。登録後に疎通確認(軽量なAPI呼び出し)を
+     * 行うが、失敗しても登録自体は取り消さず、結果をレスポンスの connectionCheckStatus で通知する。
+     */
+    @AuditLog(action = AuditLogAction.SITE_REGISTERED, resourceType = "SITE")
     @Transactional
     public SiteResponse register(SiteRegisterRequest request) {
         if (siteRepository.existsBySiteKey(request.siteKey())) {
@@ -45,7 +58,20 @@ public class SiteService {
         site.setBaseUrl(resolveDisplayBaseUrl(request.cmsType(), request.credentials()));
         site.setCredentialsEncrypted(credentialCipher.encrypt(writeCredentialsJson(request.credentials())));
 
-        return SiteResponse.from(siteRepository.save(site));
+        Site saved = siteRepository.save(site);
+        boolean connectionOk = testConnection(request.cmsType(), request.credentials());
+
+        return SiteResponse.from(saved, connectionOk);
+    }
+
+    private boolean testConnection(CmsType cmsType, Map<String, String> credentialsMap) {
+        try {
+            CmsCredentials credentials = buildCredentialsFromMap(cmsType, credentialsMap);
+            CmsAdapter adapter = cmsAdapterFactory.resolve(cmsType);
+            return adapter.testConnection(credentials);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     @Transactional(readOnly = true)

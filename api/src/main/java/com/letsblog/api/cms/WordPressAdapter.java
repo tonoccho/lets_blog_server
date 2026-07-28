@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
@@ -144,6 +145,18 @@ public class WordPressAdapter implements CmsAdapter {
             return created.get("id").asText();
         } catch (RestClientResponseException e) {
             throw new CmsApiException("カテゴリ/タグ '" + name + "' の解決に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+        }
+    }
+
+    @Override
+    public boolean testConnection(CmsCredentials credentials) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        RestClient client = buildClient(creds);
+        try {
+            client.get().uri("/wp-json/wp/v2/users/me").retrieve().toBodilessEntity();
+            return true;
+        } catch (RestClientResponseException | ResourceAccessException e) {
+            return false;
         }
     }
 

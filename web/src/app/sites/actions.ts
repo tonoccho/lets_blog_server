@@ -2,10 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { CmsType, registerSite } from "@/lib/apiClient";
+import { getSession } from "@/lib/session";
 
 export interface RegisterSiteState {
   error?: string;
   success?: boolean;
+  connectionCheckStatus?: "SUCCESS" | "FAILED" | null;
 }
 
 const CREDENTIAL_FIELDS: Record<CmsType, string[]> = {
@@ -39,12 +41,17 @@ export async function registerSiteAction(
     credentials[field] = value;
   }
 
+  const session = await getSession();
+  const actor = session ? { id: Number(session.user.id), role: session.user.role } : undefined;
+
+  let connectionCheckStatus: "SUCCESS" | "FAILED" | null;
   try {
-    await registerSite({ name, siteKey, cmsType, credentials });
+    const site = await registerSite({ name, siteKey, cmsType, credentials }, actor);
+    connectionCheckStatus = site.connectionCheckStatus;
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
 
   revalidatePath("/sites");
-  return { success: true };
+  return { success: true, connectionCheckStatus };
 }

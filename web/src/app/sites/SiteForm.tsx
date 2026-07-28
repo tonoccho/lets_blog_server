@@ -23,6 +23,11 @@ export function SiteForm() {
   return (
     <form ref={formRef} action={formAction} className="space-y-3 rounded-lg border border-neutral-200 bg-white p-5">
       <h2 className="font-medium">サイトを登録</h2>
+      <p className="text-sm text-neutral-600">
+        サイト登録は既存のWordPress/microCMSサイトの認証情報を保存するだけです。サーバー側で新規にサイトや
+        リソースを作成する「プロビジョニング」は行いません。登録時に入力内容で疎通確認を行いますが、
+        失敗した場合も登録自体は完了します(後から認証情報を見直してください)。
+      </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-neutral-600">CMS種別</span>
@@ -66,11 +71,23 @@ export function SiteForm() {
       )}
 
       {state.error && <p className="text-sm text-red-600">{state.error}</p>}
-      {state.success && <p className="text-sm text-green-600">登録しました。</p>}
+      {state.success && (
+        <div className="space-y-1">
+          <p className="text-sm text-green-600">登録しました。</p>
+          {state.connectionCheckStatus === "SUCCESS" && (
+            <p className="text-sm text-green-600">疎通確認: 成功しました。</p>
+          )}
+          {state.connectionCheckStatus === "FAILED" && (
+            <p className="text-sm text-amber-700">
+              疎通確認: 失敗しました。認証情報が正しいか確認してください(登録自体は完了しています)。
+            </p>
+          )}
+        </div>
+      )}
       <button
         type="submit"
         disabled={pending}
-        className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-50"
+        className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:bg-neutral-200 disabled:text-neutral-600"
       >
         {pending ? "登録中…" : "登録"}
       </button>

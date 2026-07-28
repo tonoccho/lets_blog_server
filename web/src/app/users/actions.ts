@@ -13,7 +13,8 @@ export async function createUserAction(
   _prevState: CreateUserState,
   formData: FormData
 ): Promise<CreateUserState> {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "").trim();
@@ -27,7 +28,7 @@ export async function createUserAction(
   }
 
   try {
-    await createUser({ email, password, role });
+    await createUser({ email, password, role }, actor);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -43,6 +44,6 @@ export async function deleteUserAction(id: number) {
     throw new Error("自分自身のアカウントは削除できません。");
   }
 
-  await deleteUser(id);
+  await deleteUser(id, { id: Number(session.user.id), role: session.user.role });
   revalidatePath("/users");
 }

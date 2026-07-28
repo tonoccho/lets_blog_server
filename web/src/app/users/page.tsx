@@ -24,7 +24,7 @@ export default async function UsersPage() {
           <tbody>
             {users.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-neutral-400">
+                <td colSpan={4} className="px-4 py-6 text-center text-neutral-600">
                   登録済みユーザーはありません
                 </td>
               </tr>

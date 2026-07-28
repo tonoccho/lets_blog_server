@@ -20,7 +20,7 @@ export function DeleteUserButton({ id }: { id: number }) {
       type="button"
       onClick={handleClick}
       disabled={isPending}
-      className="text-sm text-red-600 hover:underline disabled:opacity-50"
+      className="text-sm text-red-600 hover:underline disabled:text-neutral-600 disabled:no-underline"
     >
       {isPending ? "削除中…" : "削除"}
     </button>

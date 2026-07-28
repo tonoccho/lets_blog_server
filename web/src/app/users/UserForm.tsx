@@ -40,7 +40,7 @@ export function UserForm() {
       <button
         type="submit"
         disabled={pending}
-        className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-50"
+        className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:bg-neutral-200 disabled:text-neutral-600"
       >
         {pending ? "追加中…" : "追加"}
       </button>

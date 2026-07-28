@@ -30,7 +30,7 @@ export default function SystemPage() {
                 </a>
                 <span className="ml-2 text-neutral-500">{link.description}</span>
               </div>
-              <span className="text-neutral-400">{link.url}</span>
+              <span className="text-neutral-600">{link.url}</span>
             </li>
           ))}
         </ul>

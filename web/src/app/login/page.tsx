@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
+import Link from "next/link";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -58,10 +59,18 @@ export default function LoginPage() {
         <button
           type="submit"
           disabled={pending}
-          className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-50"
+          className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:bg-neutral-200 disabled:text-neutral-600"
         >
           {pending ? "ログイン中…" : "ログイン"}
         </button>
+        <div className="flex justify-between text-sm">
+          <Link href="/login/forgot-password" className="text-blue-600 hover:underline">
+            パスワードをお忘れの方
+          </Link>
+          <Link href="/signup" className="text-blue-600 hover:underline">
+            新規登録
+          </Link>
+        </div>
       </form>
     </div>
   );

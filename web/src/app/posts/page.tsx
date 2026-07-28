@@ -21,7 +21,7 @@ export default async function PostsPage() {
           <tbody>
             {posts.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-neutral-400">
+                <td colSpan={5} className="px-4 py-6 text-center text-neutral-600">
                   投稿履歴はまだありません(VSCode拡張から投稿すると表示されます)
                 </td>
               </tr>
