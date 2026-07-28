@@ -1,7 +1,9 @@
 # セットアップマニュアル
 
 Let's Blog Server の開発環境を構築する手順。Phase 6 でリバースプロキシ(nginx)が導入され、
-以降はすべてのサービスに `https://localhost` 経由でアクセスする。
+以降はすべてのサービスに `https://localhost` 経由でアクセスする。Web管理画面(Next.js)も
+Docker Compose管理下のコンテナとして起動するため、`docker compose up -d` だけで全サービスが
+立ち上がる(ホスト側で `npm run dev` を手動起動し続ける必要はない)。
 
 ## クイックスタート
 
@@ -11,28 +13,20 @@ cd lets_blog_server
 
 # 1. 環境変数を設定
 cp .env.example .env
-vi .env   # パスワード・APIキー・暗号化キー等を変更
+vi .env   # パスワード・APIキー・暗号化キー・NEXTAUTH_SECRET等を変更
 
 # 2. リバースプロキシ用の自己署名証明書を生成
 bash scripts/generate-certs.sh
 
-# 3. Docker Compose で各サービスを起動(api/mysql/phpmyadmin/ollama/comfyui/plantuml/mailhog/reverse-proxy)
+# 3. Docker Compose で全サービスを起動(reverse-proxy/web/api/mysql/phpmyadmin/ollama/comfyui/plantuml/mailhog)
 docker compose up -d
 
-# 4. Web管理画面(Next.js)は現状Docker外で起動する
-cd web
-cp .env.local.example .env.local
-vi .env.local   # NEXTAUTH_SECRET等を変更
-npm install
-npm run dev
-
-# 5. ブラウザで https://localhost にアクセス(自己署名証明書の警告は例外承認する)
+# 4. ブラウザで https://localhost にアクセス(自己署名証明書の警告は例外承認する)
 ```
 
 ## システム要件
 
 - Docker / Docker Compose(Compose v2 系。`docker compose version` で確認)
-- Node.js(`web/.node-version` 相当。Web管理画面をローカルで起動する場合に必要)
 - openssl(証明書生成に使用。Linux/macOSは標準搭載)
 - NVIDIA GPU + NVIDIA Container Toolkit(Ollama・ComfyUIのGPU利用に推奨。CPUのみでも動作するイメージタグに変更すれば起動は可能だが低速)
 - ホストの 80番・443番ポートが空いていること(リバースプロキシが使用)
@@ -50,6 +44,7 @@ npm run dev
 | `OLLAMA_MODEL` | 下書き/校正/要約・タグ提案で使うOllamaモデル | 既定値のままでも可 |
 | `COMFYUI_CHECKPOINT` | 画像生成に使うチェックポイントファイル名 | 既定値のままでも可 |
 | `APP_MAIL_FROM` / `APP_WEB_BASE_URL` | メール送信元・Web公開URL(メール内リンク生成に使用) | `APP_WEB_BASE_URL` は `https://localhost` を指定 |
+| `NEXTAUTH_SECRET` | Web管理画面(Auth.js)のセッション署名鍵。生成例: `openssl rand -hex 32` | 必須変更 |
 
 ## 2. TLS証明書の生成
 
@@ -69,21 +64,26 @@ bash scripts/generate-certs.sh
 docker compose up -d
 ```
 
-起動するサービス: `reverse-proxy`(nginx) / `api` / `mysql` / `phpmyadmin` / `ollama` / `comfyui` / `plantuml` / `mailhog`。
+起動するサービス: `reverse-proxy`(nginx) / `web`(Next.js) / `api` / `mysql` / `phpmyadmin` / `ollama` / `comfyui` / `plantuml` / `mailhog`。
 
 Phase 6 以降、`reverse-proxy` の `80`(HTTP→HTTPSリダイレクト)・`443`(HTTPS)以外はホストにポート公開していない。
 各サービスへは直接ポートではなく、必ず `https://localhost/...` 経由でアクセスする。
 
+`web` サービスはソースディレクトリ(`./web`)をコンテナにバインドマウントしているため、
+コード変更は再ビルドなしでホットリロードされる。`package.json` の依存関係を変更した場合は
+`docker compose up -d --build web` でイメージを再ビルドする。
+
 ```bash
 docker compose ps           # 起動状況確認
 docker compose logs -f api  # 個別サービスのログ確認
+docker compose logs -f web  # Web管理画面のログ確認
 ```
 
 ### アクセスURL一覧
 
 | サービス | URL | 用途 |
 |---|---|---|
-| Web管理画面 | https://localhost/ | サイト管理・投稿履歴・AIジョブ・ユーザー管理等(Next.js、Docker外で別途起動) |
+| Web管理画面 | https://localhost/ | サイト管理・投稿履歴・AIジョブ・ユーザー管理等(Next.js) |
 | 仲介APIサーバー | https://localhost/api/ | REST API(VSCode拡張・Web管理画面が使用) |
 | phpMyAdmin | https://localhost/phpmyadmin/ | MySQLデータベース管理 |
 | Ollama | https://localhost/ollama/ | ローカルLLM API(UIなし。`GET /ollama/api/tags` 等) |
@@ -125,36 +125,40 @@ docker cp <ダウンロードしたcheckpointファイル> lbs-comfyui:/root/Com
 docker exec lbs-comfyui ls /root/ComfyUI/models/checkpoints/
 ```
 
-## 6. Web管理画面(Next.js)の起動
+## 6. Web管理画面(Next.js)について
 
-Web管理画面は現状 Docker Compose の対象外で、ホスト上で直接起動する。
+`docker compose up -d` に含まれる `web` サービスが自動的に起動する。設定は
+`docker-compose.yml` の `web.environment` で以下のように渡される(`.env` の値を参照)。
+
+| 環境変数 | 値 | 説明 |
+|---|---|---|
+| `LETS_BLOG_API_URL` | `http://api:8080` | lbs-net内部でapiコンテナへ直接到達するため自己署名証明書を経由しない |
+| `LETS_BLOG_API_KEY` | `${SERVER_API_KEY}` | `.env` の `SERVER_API_KEY` と同じ値 |
+| `NEXTAUTH_SECRET` | `${NEXTAUTH_SECRET}` | `.env` の値 |
+| `NEXTAUTH_URL` | `https://localhost` | ブラウザから見える公開URL(認証コールバック等の生成に使用) |
+
+Web管理画面自身のサーバーサイドAPI呼び出しがコンテナ間の平文HTTP通信になるため、
+Web管理画面側では自己署名証明書の信頼設定(`NODE_EXTRA_CA_CERTS`)は不要。
+
+### (代替)ホスト上で `npm run dev` を直接起動する場合
+
+より高速なホットリロードを求める場合など、コンテナを使わずホスト上で直接起動することもできる。
+この場合は `docker-compose.yml` の `web` サービスを停止し(`docker compose stop web`)、
+リバースプロキシがホスト側の3000番へ到達できるよう `nginx/conf.d/default.conf` の
+`location /` の `proxy_pass` 先を `host.docker.internal:3000` に戻す必要がある(Linuxでは
+`reverse-proxy` サービスに `extra_hosts: ["host.docker.internal:host-gateway"]` の追加が必要)。
 
 ```bash
 cd web
 cp .env.local.example .env.local
-```
-
-`.env.local` の内容:
-
-| 項目 | 説明 |
-|---|---|
-| `LETS_BLOG_API_URL` | 仲介APIサーバーのURL。リバースプロキシ経由の `https://localhost` を指定(直接の `:8080` は非公開のため使用不可) |
-| `LETS_BLOG_API_KEY` | `.env` の `SERVER_API_KEY` と同じ値 |
-| `NEXTAUTH_SECRET` | セッション署名鍵。生成例: `openssl rand -hex 32` |
-| `NEXTAUTH_URL` | Web管理画面の外部公開URL。`https://localhost` を指定 |
-| `NODE_EXTRA_CA_CERTS` | `../certs/localhost.crt` を指定(下記参照) |
-
-Next.jsサーバー自身がAPI呼び出し(`proxy.ts`/`apiClient.ts`)で `https://localhost` へ
-サーバーサイドfetchを行うため、Node.jsが自己署名証明書を信頼できるよう
-`NODE_EXTRA_CA_CERTS` で証明書ファイルを指定する必要がある。未設定の場合、
-`DEPTH_ZERO_SELF_SIGNED_CERT` エラーで通信に失敗する。
-
-```bash
+vi .env.local   # LETS_BLOG_API_URL=https://localhost, NODE_EXTRA_CA_CERTS=../certs/localhost.crt 等
 npm install
 npm run dev
 ```
 
-起動後、`https://localhost/`(nginx経由でホストの3000番へプロキシされる)でアクセスする。
+この方式ではWeb管理画面のサーバーサイドfetchが `https://localhost` 経由になり自己署名証明書を
+経由するため、`.env.local` で `NODE_EXTRA_CA_CERTS=../certs/localhost.crt` の指定が必須
+(未設定だと `DEPTH_ZERO_SELF_SIGNED_CERT` エラーで失敗する)。
 
 ## 7. 初回管理者アカウントの作成
 
@@ -177,13 +181,16 @@ OS/ブラウザの証明書ストアに `certs/localhost.crt` を信頼済み証
 他のWebサーバー等が既にそのポートを使用していないか確認する(`sudo ss -ltnp | grep -E ':(80|443)'`)。
 
 **`https://localhost/` (Web管理画面) が 502 を返す**
-Web管理画面(Next.js dev server)がホスト側で起動していない、または `LETS_BLOG_API_URL` 等の
-環境変数変更後にプロセスを再起動していない可能性がある。`npm run dev` が起動しているか、
-ポート3000でLISTENしているか確認する。
+`web` コンテナが起動していない可能性がある。`docker compose ps` で `lbs-web` が `Up` に
+なっているか確認し、`docker compose up -d web` で起動する。ホスト上で `npm run dev` を
+直接起動する代替方式を使っている場合は、そのプロセスが起動しているか・ポート3000で
+LISTENしているかを確認する(環境変数変更後はプロセス再起動が必要)。
 
 **Web管理画面からのAPI呼び出しが `DEPTH_ZERO_SELF_SIGNED_CERT` で失敗する**
-`web/.env.local` の `NODE_EXTRA_CA_CERTS` が正しいパス(`../certs/localhost.crt`)を
-指しているか確認し、`npm run dev` を再起動する(環境変数の変更はプロセス再起動が必要)。
+コンテナ化された `web` サービスでは内部通信が平文HTTP(`http://api:8080`)のため通常発生しない。
+ホスト上で `npm run dev` を直接起動する代替方式を使っている場合のみ、`web/.env.local` の
+`NODE_EXTRA_CA_CERTS` が正しいパス(`../certs/localhost.crt`)を指しているか確認し、
+`npm run dev` を再起動する(環境変数の変更はプロセス再起動が必要)。
 
 **GPU (NVIDIA) が認識されない**
 ホスト側で `nvidia-smi` が動作するか、NVIDIA Container Toolkitが導入済みか確認する。
