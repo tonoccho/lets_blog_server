@@ -7,6 +7,7 @@ import com.letsblog.api.dto.LoginResponse;
 import com.letsblog.api.dto.UserCreateRequest;
 import com.letsblog.api.dto.UserResponse;
 import com.letsblog.api.dto.UserUpdateRequest;
+import com.letsblog.api.repository.RoleRepository;
 import com.letsblog.api.repository.TwoFactorSecretRepository;
 import com.letsblog.api.repository.UserRepository;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -15,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 @Service
@@ -22,13 +24,26 @@ public class UserService {
 
     private static final Set<String> VALID_ROLES = Set.of("admin", "user");
 
+    /**
+     * 従来の role 文字列(BFFヘッダ互換用)と、RBACの Role エンティティとの対応。
+     * 新規ユーザー作成時のデフォルトロール付与に使う。
+     */
+    private static final Map<String, String> LEGACY_ROLE_TO_ROLE_NAME = Map.of(
+            "admin", "ROLE_ADMIN",
+            "user", "ROLE_VIEWER");
+
     private final UserRepository userRepository;
     private final TwoFactorSecretRepository twoFactorSecretRepository;
+    private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
-    public UserService(UserRepository userRepository, TwoFactorSecretRepository twoFactorSecretRepository) {
+    public UserService(
+            UserRepository userRepository,
+            TwoFactorSecretRepository twoFactorSecretRepository,
+            RoleRepository roleRepository) {
         this.userRepository = userRepository;
         this.twoFactorSecretRepository = twoFactorSecretRepository;
+        this.roleRepository = roleRepository;
     }
 
     /**
@@ -66,6 +81,11 @@ public class UserService {
         user.setEmail(request.email());
         user.setPasswordHash(passwordEncoder.encode(request.password()));
         user.setRole(request.role());
+
+        String defaultRoleName = LEGACY_ROLE_TO_ROLE_NAME.get(request.role());
+        if (defaultRoleName != null) {
+            roleRepository.findByRoleName(defaultRoleName).ifPresent(role -> user.getRoles().add(role));
+        }
 
         return UserResponse.from(userRepository.save(user));
     }

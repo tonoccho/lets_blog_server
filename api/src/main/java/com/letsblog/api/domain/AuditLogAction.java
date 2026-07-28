@@ -10,7 +10,9 @@ public enum AuditLogAction {
     PASSWORD_RESET_REQUESTED("パスワード再設定リクエスト"),
     PASSWORD_RESET_CONFIRMED("パスワード再設定完了"),
     TWO_FACTOR_ENABLED("2FA有効化"),
-    TWO_FACTOR_DISABLED("2FA無効化");
+    TWO_FACTOR_DISABLED("2FA無効化"),
+    USER_ROLE_ASSIGNED("ユーザーロール割り当て"),
+    USER_ROLE_REMOVED("ユーザーロール削除");
 
     private final String displayName;
 

@@ -10,6 +10,7 @@ import com.letsblog.api.service.InvalidTokenException;
 import com.letsblog.api.service.InvalidTotpCodeException;
 import com.letsblog.api.service.MailTemplateNotFoundException;
 import com.letsblog.api.service.QrCodeGenerationException;
+import com.letsblog.api.service.RoleNotFoundException;
 import com.letsblog.api.service.SiteNotFoundException;
 import com.letsblog.api.service.TwoFactorSecretNotFoundException;
 import com.letsblog.api.service.UserNotFoundException;
@@ -36,6 +37,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(SiteNotFoundException.class)
     public ResponseEntity<Map<String, String>> handleSiteNotFound(SiteNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(RoleNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleRoleNotFound(RoleNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
     }
 

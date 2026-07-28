@@ -4,6 +4,7 @@ import com.letsblog.api.domain.TwoFactorSecret;
 import com.letsblog.api.domain.User;
 import com.letsblog.api.dto.LoginResponse;
 import com.letsblog.api.dto.UserResponse;
+import com.letsblog.api.repository.RoleRepository;
 import com.letsblog.api.repository.TwoFactorSecretRepository;
 import com.letsblog.api.repository.UserRepository;
 import org.junit.jupiter.api.Test;
@@ -29,10 +30,13 @@ class UserServiceTest {
     @Mock
     private TwoFactorSecretRepository twoFactorSecretRepository;
 
+    @Mock
+    private RoleRepository roleRepository;
+
     private UserService service;
 
     private UserService service() {
-        return new UserService(userRepository, twoFactorSecretRepository);
+        return new UserService(userRepository, twoFactorSecretRepository, roleRepository);
     }
 
     @Test
@@ -49,6 +53,23 @@ class UserServiceTest {
 
         assertEquals("user", response.role());
         assertEquals("new@example.com", response.email());
+    }
+
+    @Test
+    void signup_ROLE_VIEWERが自動付与される() {
+        service = service();
+        com.letsblog.api.domain.Role viewerRole = new com.letsblog.api.domain.Role("ROLE_VIEWER", "閲覧者");
+        when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
+        when(roleRepository.findByRoleName("ROLE_VIEWER")).thenReturn(Optional.of(viewerRole));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> {
+            User u = invocation.getArgument(0);
+            u.setId(1L);
+            return u;
+        });
+
+        UserResponse response = service.signup("new@example.com", "password123");
+
+        assertTrue(response.roleNames().contains("ROLE_VIEWER"));
     }
 
     @Test

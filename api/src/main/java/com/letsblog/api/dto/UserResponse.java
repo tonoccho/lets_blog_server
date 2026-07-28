@@ -1,13 +1,16 @@
 package com.letsblog.api.dto;
 
+import com.letsblog.api.domain.Role;
 import com.letsblog.api.domain.User;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 public record UserResponse(
         Long id,
         String email,
         String role,
+        List<String> roleNames,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -16,6 +19,7 @@ public record UserResponse(
                 user.getId(),
                 user.getEmail(),
                 user.getRole(),
+                user.getRoles().stream().map(Role::getRoleName).sorted().toList(),
                 user.getCreatedAt(),
                 user.getUpdatedAt()
         );
