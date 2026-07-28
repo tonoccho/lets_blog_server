@@ -8,6 +8,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -25,7 +26,12 @@ public class AuditLogService {
         this.auditLogRepository = auditLogRepository;
     }
 
-    @Transactional
+    /**
+     * REQUIRES_NEWで独立した書き込みトランザクションとして実行する。
+     * 呼び出し元(@AuditLogが付いたメソッド)が読み取り専用トランザクション中でも
+     * 監査ログの記録自体は書き込みとして成功させる必要があるため。
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void log(Long userId, AuditLogAction action, String resourceType,
                      Long resourceId, String changes, String remoteIp, String userAgent) {
         AuditLog auditLog = new AuditLog();
