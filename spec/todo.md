@@ -112,7 +112,7 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
 
 ## Phase 5: ユーザー認証・運用機能の強化
 
-- [ ] [00-overview](phase5/00-overview.md) — 全体スコープ・決定事項・タスク一覧
+- [x] [00-overview](phase5/00-overview.md) — 全体スコープ・決定事項・タスク一覧
 - [x] [01-smtp-mail-setup](phase5/01-smtp-mail-setup.md) — SMTP メール送信の本番環境対応・テンプレート実装
 - [x] [02-audit-log-archival](phase5/02-audit-log-archival.md) — 監査ログアーカイブ・削除ポリシーの自動化(削除処理自体はPhase4で実装済み、cron時刻をUTC 02:00に調整)
 - [x] [03-two-factor-auth](phase5/03-two-factor-auth.md) — 2FA(TOTP)認証の実装(設定画面・ログイン時2段階入力まで実機確認済み)
