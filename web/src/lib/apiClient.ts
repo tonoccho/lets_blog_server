@@ -183,3 +183,37 @@ export function confirmPasswordReset(token: string, newPassword: string): Promis
     body: JSON.stringify({ token, newPassword }),
   });
 }
+
+export interface AuditLogEntry {
+  id: number;
+  userId: number | null;
+  action: string;
+  resourceType: string | null;
+  resourceId: number | null;
+  changes: string | null;
+  remoteIp: string | null;
+  userAgent: string | null;
+  createdAt: string;
+}
+
+export interface AuditLogPage {
+  content: AuditLogEntry[];
+  totalElements: number;
+  totalPages: number;
+  number: number;
+  size: number;
+}
+
+export function listAuditLogs(
+  params: { userId?: number; action?: string; page?: number; size?: number },
+  actor: ActorInfo
+): Promise<AuditLogPage> {
+  const query = new URLSearchParams();
+  if (params.userId != null) query.set('userId', String(params.userId));
+  if (params.action) query.set('action', params.action);
+  query.set('page', String(params.page ?? 0));
+  query.set('size', String(params.size ?? 20));
+  query.set('sort', 'createdAt,desc');
+
+  return apiFetch<AuditLogPage>(`/api/audit-logs?${query.toString()}`, { actor });
+}

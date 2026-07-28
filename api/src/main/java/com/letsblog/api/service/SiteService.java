@@ -3,9 +3,11 @@ package com.letsblog.api.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.letsblog.api.aop.AuditLog;
 import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.crypto.CredentialCipher;
+import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.SiteRegisterRequest;
 import com.letsblog.api.dto.SiteResponse;
@@ -30,6 +32,7 @@ public class SiteService {
         this.objectMapper = objectMapper;
     }
 
+    @AuditLog(action = AuditLogAction.SITE_REGISTERED, resourceType = "SITE")
     @Transactional
     public SiteResponse register(SiteRegisterRequest request) {
         if (siteRepository.existsBySiteKey(request.siteKey())) {

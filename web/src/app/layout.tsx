@@ -34,7 +34,10 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const session = await getSession();
-  const navItems = session?.user.role === "admin" ? [...NAV_ITEMS, { href: "/users", label: "ユーザー" }] : NAV_ITEMS;
+  const navItems =
+    session?.user.role === "admin"
+      ? [...NAV_ITEMS, { href: "/users", label: "ユーザー" }, { href: "/audit-logs", label: "監査ログ" }]
+      : NAV_ITEMS;
 
   return (
     <html

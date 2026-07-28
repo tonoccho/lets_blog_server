@@ -1,5 +1,7 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.aop.AuditLog;
+import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.PasswordResetToken;
 import com.letsblog.api.domain.User;
 import com.letsblog.api.repository.PasswordResetTokenRepository;
@@ -47,6 +49,7 @@ public class PasswordResetService {
      * メールアドレスが未登録の場合も例外にせず何もしない
      * (登録有無を応答から推測されないようにするため。呼び出し元は常に成功メッセージを返す)。
      */
+    @AuditLog(action = AuditLogAction.PASSWORD_RESET_REQUESTED, resourceType = "USER")
     @Transactional
     public void requestPasswordReset(String email) {
         userRepository.findByEmail(email).ifPresent(user -> {
@@ -73,6 +76,7 @@ public class PasswordResetService {
     /**
      * トークンを検証して、新しいパスワードを設定する。
      */
+    @AuditLog(action = AuditLogAction.PASSWORD_RESET_CONFIRMED, resourceType = "USER")
     @Transactional
     public void confirmPasswordReset(String token, String newPassword) {
         PasswordResetToken resetToken = tokenRepository.findByToken(token)

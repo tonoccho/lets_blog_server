@@ -40,4 +40,16 @@ public class CurrentActorService {
     public boolean isAdmin() {
         return "admin".equals(getCurrentActorRole());
     }
+
+    public String getRemoteIp() {
+        String forwardedFor = request.getHeader("X-Forwarded-For");
+        if (forwardedFor != null && !forwardedFor.isBlank()) {
+            return forwardedFor;
+        }
+        return request.getRemoteAddr();
+    }
+
+    public String getUserAgent() {
+        return request.getHeader("User-Agent");
+    }
 }

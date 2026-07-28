@@ -1,5 +1,6 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.aop.AuditLog;
 import com.letsblog.api.cms.CmsAdapter;
 import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsApiException;
@@ -7,6 +8,7 @@ import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.MediaUploadResult;
 import com.letsblog.api.cms.PostContent;
 import com.letsblog.api.cms.PostResult;
+import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Post;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.PostPublishCommand;
@@ -46,6 +48,7 @@ public class PostPublishService {
         this.plantUmlEmbedService = plantUmlEmbedService;
     }
 
+    @AuditLog(action = AuditLogAction.POST_PUBLISHED, resourceType = "POST")
     @Transactional
     public PostPublishResponse publish(PostPublishCommand command) {
         Site site = siteService.getBySiteKey(command.siteKey());
