@@ -117,7 +117,48 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
 - [x] [01-wordpress-provisioning](phase7/01-wordpress-provisioning.md) — 常駐WordPressコンテナへのサブディレクトリ設置型自動プロビジョニング(実機検証済み。credentials.baseUrlとsite.baseUrlの分離、mysqlクライアントのTLS、wp-cliのメモリ上限、.htaccess手動生成、Application PasswordsのHTTPS要件、サイト削除時の`posts`外部キー制約など、実機検証で判明した問題に対応済み)
 - [x] [02-custom-tags](phase7/02-custom-tags.md) — カスタムショートコードタグ機能(DB駆動、実機検証済み)
 
-## 未着手・スコープ外候補
+## Phase 8: マルチ環境プロジェクト管理・ユーザー情報拡充・UI改善
+
+- [ ] [00-overview](phase8/00-overview.md) — 全体スコープ・決定事項・タスク一覧
+- [ ] [01-user-profile-expansion](phase8/01-user-profile-expansion.md) — ユーザー情報拡充(WordPress互換フィールド追加、V12マイグレーション)
+- [ ] [02-project-management](phase8/02-project-management.md) — プロジェクト管理基盤(projects/project_users テーブル、CRUD、V13マイグレーション)
+- [ ] [03-project-scoped-custom-tags](phase8/03-project-scoped-custom-tags.md) — カスタムタグのプロジェクトスコープ化(V14マイグレーション)
+- [ ] [04-project-user-wp-sync](phase8/04-project-user-wp-sync.md) — プロジェクト参加ユーザーのWordPress自動登録・同期
+- [ ] [05-ui-menu-icons](phase8/05-ui-menu-icons.md) — 管理画面メニューのアイコン化(lucide-react導入)
+
+## Phase 8 未決事項・検討項目
+
+### 全般
+- [ ] ユーザー同期のタイミング: 即時(REST API呼び出し) vs 非同期ジョブ化(初期は即時、後続で非同期化検討)
+- [ ] 同期失敗時のリトライ戦略・キューイング・ユーザーへのエラー通知方針
+- [ ] アクセス制御: プロジェクトメンバー(参加ユーザー)による編集権限の段階的導入(現状は管理者のみ)
+
+### ユーザー情報拡充
+- [ ] アバター画像ファイルアップロード機構の対応時期・メカニズム(Gravatar参照が基本)
+- [ ] WordPress側への `department`/`position` カスタムメタ同期の実装検討
+- [ ] ユーザー削除時の `avatar_url` ファイル管理ポリシー(現状URL参照のみのため不要だが要確認)
+
+### プロジェクト管理
+- [ ] 環境スロット作成時、既存の `sites` 登録フロー(`SiteCreationPanel`)との統合方法(新規/既存登録の切替 + プロジェクト自動紐付)
+- [ ] プロジェクト slug の形式・衝突検出・自動生成ロジック(name から自動生成するか、手入力か)
+- [ ] ページング・ソート機能の実装時期
+
+### カスタムタグスコープ化
+- [ ] プロジェクト削除時のカスタムタグ削除ポリシー(FK CASCADE で自動削除 vs 手動削除)
+- [ ] グローバルタグを特定プロジェクト専用に変更する機能の要否
+- [ ] タグテンプレートの継承・複製機能
+
+### WordPress同期
+- [ ] WordPress側ユーザーの削除・無効化処理ポリシー(現状は削除しない方針)
+- [ ] `department`/`position` 情報の WordPress側マッピング方法(カスタムメタ or 別途管理)
+
+### UI・その他
+- [ ] モバイル対応: ナビゲーションメニューのアイコンのみ表示 or ドロワー化の時期
+- [ ] 現在ページへのハイライト表示(active link styling)実装
+- [ ] メニュー/各ページのアニメーション・トランジション効果(任意)
+- [ ] テスト用・本番用 WordPress サーバーの接続情報管理・暗号化方式(環境変数 vs DB)
+
+## 既存未決事項・スコープ外候補
 
 - [ ] リモート常時稼働化(自宅サーバー/VPS)対応・外部公開時のセキュリティ強化
 - [ ] その他のCMS対応(WordPress/microCMS以外)
