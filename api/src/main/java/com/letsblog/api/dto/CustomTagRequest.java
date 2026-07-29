@@ -8,6 +8,7 @@ public record CustomTagRequest(
         String tagName,
         @NotBlank String htmlTemplate,
         String description,
-        String cssContent
+        String cssContent,
+        Long projectId
 ) {
 }

@@ -1,21 +1,41 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState, useTransition } from "react";
-import type { CustomTag } from "@/lib/apiClient";
+import { useRouter } from "next/navigation";
+import type { CustomTag, Project } from "@/lib/apiClient";
 import { deleteCustomTagAction, upsertCustomTagAction, CustomTagFormState } from "./actions";
 
 const initialState: CustomTagFormState = {};
 
-export function CustomTagManager({ tags }: { tags: CustomTag[] }) {
+export function CustomTagManager({
+  tags,
+  projects,
+  currentProjectId,
+}: {
+  tags: CustomTag[];
+  projects: Project[];
+  currentProjectId: number | null;
+}) {
+  const router = useRouter();
   const [editing, setEditing] = useState<CustomTag | null>(null);
   const [state, formAction, pending] = useActionState(upsertCustomTagAction, initialState);
   const [isDeleting, startDeleteTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
+  const [handledSuccess, setHandledSuccess] = useState(false);
+
+  const projectNameById = new Map(projects.map((p) => [p.id, p.name]));
+  const formProjectId = editing ? editing.projectId : currentProjectId;
+
+  if (state.success && !handledSuccess) {
+    setHandledSuccess(true);
+    setEditing(null);
+  } else if (!state.success && handledSuccess) {
+    setHandledSuccess(false);
+  }
 
   useEffect(() => {
     if (state.success) {
       formRef.current?.reset();
-      setEditing(null);
     }
   }, [state.success]);
 
@@ -30,11 +50,31 @@ export function CustomTagManager({ tags }: { tags: CustomTag[] }) {
 
   return (
     <div className="space-y-8">
+      <label className="flex max-w-sm flex-col gap-1 text-sm">
+        <span className="text-neutral-600">表示スコープ</span>
+        <select
+          value={currentProjectId ?? ""}
+          onChange={(e) => {
+            const value = e.target.value;
+            router.push(value ? `/custom-tags?projectId=${value}` : "/custom-tags");
+          }}
+          className="rounded border border-neutral-300 px-3 py-2 text-sm"
+        >
+          <option value="">グローバル</option>
+          {projects.map((project) => (
+            <option key={project.id} value={project.id}>
+              {project.name}
+            </option>
+          ))}
+        </select>
+      </label>
+
       <div className="overflow-x-auto rounded-lg border border-neutral-200 bg-white">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-500">
             <tr>
               <th className="px-4 py-2">タグ名</th>
+              <th className="px-4 py-2">スコープ</th>
               <th className="px-4 py-2">説明</th>
               <th className="px-4 py-2">HTMLテンプレート</th>
               <th className="px-4 py-2">CSS</th>
@@ -44,7 +84,7 @@ export function CustomTagManager({ tags }: { tags: CustomTag[] }) {
           <tbody>
             {tags.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-neutral-600">
+                <td colSpan={6} className="px-4 py-6 text-center text-neutral-600">
                   登録済みカスタムタグはありません
                 </td>
               </tr>
@@ -52,6 +92,15 @@ export function CustomTagManager({ tags }: { tags: CustomTag[] }) {
             {tags.map((tag) => (
               <tr key={tag.id} className="border-b border-neutral-100 last:border-0 align-top">
                 <td className="px-4 py-2 font-mono">:::{tag.tagName}</td>
+                <td className="px-4 py-2">
+                  <span
+                    className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
+                      tag.projectId ? "bg-blue-100 text-blue-700" : "bg-neutral-100 text-neutral-600"
+                    }`}
+                  >
+                    {tag.projectId ? projectNameById.get(tag.projectId) ?? `project#${tag.projectId}` : "グローバル"}
+                  </span>
+                </td>
                 <td className="px-4 py-2 text-neutral-600">{tag.description}</td>
                 <td className="px-4 py-2 font-mono text-xs text-neutral-500">
                   <code className="whitespace-pre-wrap break-all">{tag.htmlTemplate}</code>
@@ -102,8 +151,11 @@ export function CustomTagManager({ tags }: { tags: CustomTag[] }) {
         <p className="text-sm text-neutral-600">
           投稿のMarkdown本文中で <code>{":::tagname key=\"value\""}</code> 〜 <code>:::</code> の形式で使用できます。
           テンプレート内では本文を <code>{"{{content}}"}</code>、属性値を <code>{"{{attr:key}}"}</code> で参照できます。
+          スコープ: <strong>{formProjectId ? projectNameById.get(formProjectId) ?? `project#${formProjectId}` : "グローバル"}</strong>
+          (上部の表示スコープに従います。プロジェクト変更後は再保存されません)
         </p>
         {editing && <input type="hidden" name="id" value={editing.id} />}
+        <input type="hidden" name="projectId" value={formProjectId ?? ""} />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-neutral-600">タグ名(英数字・ハイフン・アンダースコアのみ)</span>

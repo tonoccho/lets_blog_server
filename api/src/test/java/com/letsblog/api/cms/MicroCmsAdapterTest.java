@@ -174,6 +174,6 @@ class MicroCmsAdapterTest {
 
     @Test
     void testProvisionAuthor_未対応のためnullを返す() {
-        assertNull(adapter.provisionAuthor(creds, "author@example.com"));
+        assertNull(adapter.provisionAuthor(creds, AuthorProvisioningRequest.of("author@example.com")));
     }
 }

@@ -182,7 +182,7 @@ public class MicroCmsAdapter implements CmsAdapter {
      * 現時点では著者プロビジョニングは未対応(将来対応、spec/phase5/05-true-provisioning.md 未決事項)。
      */
     @Override
-    public String provisionAuthor(CmsCredentials credentials, String email) {
+    public String provisionAuthor(CmsCredentials credentials, AuthorProvisioningRequest request) {
         return null;
     }
 

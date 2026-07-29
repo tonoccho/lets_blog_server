@@ -10,6 +10,7 @@ public record CustomTagResponse(
         String htmlTemplate,
         String description,
         String cssContent,
+        Long projectId,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -20,6 +21,7 @@ public record CustomTagResponse(
                 tag.getHtmlTemplate(),
                 tag.getDescription(),
                 tag.getCssContent(),
+                tag.getProjectId(),
                 tag.getCreatedAt(),
                 tag.getUpdatedAt());
     }

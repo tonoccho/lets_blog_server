@@ -127,7 +127,11 @@ async function apiFetch<T>(path: string, init?: ApiFetchInit): Promise<T> {
   if (res.status === 204) {
     return undefined as T;
   }
-  return (await res.json()) as T;
+  const text = await res.text();
+  if (text === '') {
+    return undefined as T;
+  }
+  return JSON.parse(text) as T;
 }
 
 export function listSites(): Promise<Site[]> {
@@ -278,6 +282,51 @@ export function deleteUser(id: number, actor?: ActorInfo): Promise<void> {
   return apiFetch<void>(`/api/users/${id}`, { method: 'DELETE', actor });
 }
 
+export interface UserProfile {
+  id: number;
+  email: string;
+  role: "admin" | "user";
+  roleNames: string[];
+  firstName: string | null;
+  lastName: string | null;
+  displayName: string | null;
+  nickname: string | null;
+  websiteUrl: string | null;
+  bio: string | null;
+  locale: string | null;
+  avatarUrl: string | null;
+  department: string | null;
+  position: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UserProfileInput {
+  firstName: string | null;
+  lastName: string | null;
+  displayName: string | null;
+  nickname: string | null;
+  websiteUrl: string | null;
+  bio: string | null;
+  locale: string | null;
+  avatarUrl: string | null;
+  department: string | null;
+  position: string | null;
+}
+
+export function getUserProfile(id: number, actor?: ActorInfo): Promise<UserProfile> {
+  return apiFetch<UserProfile>(`/api/users/${id}`, { actor });
+}
+
+export function updateUserProfile(id: number, input: UserProfileInput, actor?: ActorInfo): Promise<UserProfile> {
+  return apiFetch<UserProfile>(`/api/users/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
 export function listRoles(actor: ActorInfo): Promise<RoleInfo[]> {
   return apiFetch<RoleInfo[]>('/api/roles', { actor });
 }
@@ -312,6 +361,7 @@ export interface CustomTag {
   htmlTemplate: string;
   description: string | null;
   cssContent: string | null;
+  projectId: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -321,10 +371,12 @@ export interface CustomTagInput {
   htmlTemplate: string;
   description?: string;
   cssContent?: string;
+  projectId?: number | null;
 }
 
-export function listCustomTags(actor?: ActorInfo): Promise<CustomTag[]> {
-  return apiFetch<CustomTag[]>('/api/custom-tags', { actor });
+export function listCustomTags(actor?: ActorInfo, projectId?: number): Promise<CustomTag[]> {
+  const query = projectId != null ? `?projectId=${projectId}` : '';
+  return apiFetch<CustomTag[]>(`/api/custom-tags${query}`, { actor });
 }
 
 export function createCustomTag(input: CustomTagInput, actor: ActorInfo): Promise<CustomTag> {
@@ -381,4 +433,112 @@ export function listAuditLogs(
   query.set('sort', 'createdAt,desc');
 
   return apiFetch<AuditLogPage>(`/api/audit-logs?${query.toString()}`, { actor });
+}
+
+export interface Project {
+  id: number;
+  name: string;
+  slug: string;
+  localSite: Site | null;
+  testSite: Site | null;
+  productionSite: Site | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ProjectEnvironment = "local" | "test" | "production";
+
+export function listProjects(actor?: ActorInfo): Promise<Project[]> {
+  return apiFetch<Project[]>('/api/projects', { actor });
+}
+
+export function getProject(id: number, actor?: ActorInfo): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}`, { actor });
+}
+
+export function createProject(input: { name: string; slug: string }, actor?: ActorInfo): Promise<Project> {
+  return apiFetch<Project>('/api/projects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function updateProject(id: number, name: string, actor?: ActorInfo): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+    actor,
+  });
+}
+
+export function deleteProject(id: number, actor?: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/projects/${id}`, { method: 'DELETE', actor });
+}
+
+export function bindProjectEnvironment(
+  id: number,
+  environment: ProjectEnvironment,
+  siteId: number,
+  actor?: ActorInfo
+): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}/environments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ environment, siteId }),
+    actor,
+  });
+}
+
+export function unbindProjectEnvironment(
+  id: number,
+  environment: ProjectEnvironment,
+  actor?: ActorInfo
+): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}/environments/${environment}`, { method: 'DELETE', actor });
+}
+
+export interface ProjectUser {
+  userId: number;
+  email: string | null;
+  displayName: string | null;
+  wpRole: string;
+}
+
+export function listProjectUsers(projectId: number, actor?: ActorInfo): Promise<ProjectUser[]> {
+  return apiFetch<ProjectUser[]>(`/api/projects/${projectId}/users`, { actor });
+}
+
+export function addProjectUser(
+  projectId: number,
+  userId: number,
+  wpRole: string,
+  actor?: ActorInfo
+): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/users`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, wpRole }),
+    actor,
+  });
+}
+
+export function updateProjectUserRole(
+  projectId: number,
+  userId: number,
+  wpRole: string,
+  actor?: ActorInfo
+): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/users/${userId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ wpRole }),
+    actor,
+  });
+}
+
+export function removeProjectUser(projectId: number, userId: number, actor?: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/users/${userId}`, { method: 'DELETE', actor });
 }

@@ -21,6 +21,7 @@ export async function upsertCustomTagAction(
   const htmlTemplate = String(formData.get("htmlTemplate") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
   const cssContent = String(formData.get("cssContent") ?? "").trim();
+  const projectIdRaw = String(formData.get("projectId") ?? "").trim();
 
   if (!tagName || !htmlTemplate) {
     return { error: "タグ名とHTMLテンプレートは必須です。" };
@@ -32,6 +33,7 @@ export async function upsertCustomTagAction(
       htmlTemplate,
       description: description || undefined,
       cssContent: cssContent || undefined,
+      projectId: projectIdRaw ? Number(projectIdRaw) : null,
     };
     if (idRaw) {
       await updateCustomTag(Number(idRaw), input, actor);

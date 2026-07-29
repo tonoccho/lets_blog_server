@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -36,11 +37,22 @@ public class CustomTagRenderService {
     }
 
     public String render(String markdown) {
+        return render(markdown, null);
+    }
+
+    /**
+     * projectIdが指定されている場合、そのプロジェクトのタグ + グローバルタグ(project_id IS NULL)を
+     * レンダリング対象とする。nullの場合はグローバルタグのみが対象。
+     */
+    public String render(String markdown, Long projectId) {
         if (markdown == null || markdown.isEmpty()) {
             return markdown;
         }
 
-        Map<String, CustomTag> tagsByName = customTagRepository.findAll().stream()
+        List<CustomTag> candidates = projectId == null
+                ? customTagRepository.findByProjectIdIsNull()
+                : customTagRepository.findByProjectIdOrProjectIdIsNull(projectId);
+        Map<String, CustomTag> tagsByName = candidates.stream()
                 .collect(Collectors.toMap(CustomTag::getTagName, tag -> tag, (a, b) -> a));
 
         if (tagsByName.isEmpty()) {

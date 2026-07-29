@@ -30,6 +30,9 @@ public class CustomTag {
     @Column(name = "css_content", columnDefinition = "TEXT")
     private String cssContent;
 
+    @Column(name = "project_id")
+    private Long projectId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
