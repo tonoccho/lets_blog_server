@@ -17,7 +17,12 @@ public enum AuditLogAction {
     CUSTOM_TAG_UPDATED("カスタムタグ更新"),
     CUSTOM_TAG_DELETED("カスタムタグ削除"),
     SITE_DELETED("サイト削除"),
-    WORDPRESS_PROVISIONED("WordPress自動構築");
+    WORDPRESS_PROVISIONED("WordPress自動構築"),
+    PROJECT_CREATED("プロジェクト作成"),
+    PROJECT_UPDATED("プロジェクト更新"),
+    PROJECT_DELETED("プロジェクト削除"),
+    PROJECT_ENVIRONMENT_BOUND("プロジェクト環境紐付け"),
+    PROJECT_ENVIRONMENT_UNBOUND("プロジェクト環境切離し");
 
     private final String displayName;
 

@@ -10,6 +10,7 @@ import com.letsblog.api.service.InvalidRoleException;
 import com.letsblog.api.service.InvalidTokenException;
 import com.letsblog.api.service.InvalidTotpCodeException;
 import com.letsblog.api.service.MailTemplateNotFoundException;
+import com.letsblog.api.service.ProjectNotFoundException;
 import com.letsblog.api.service.ProvisioningException;
 import com.letsblog.api.service.QrCodeGenerationException;
 import com.letsblog.api.service.RoleNotFoundException;
@@ -44,6 +45,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(CustomTagNotFoundException.class)
     public ResponseEntity<Map<String, String>> handleCustomTagNotFound(CustomTagNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(ProjectNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleProjectNotFound(ProjectNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
     }
 

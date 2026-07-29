@@ -427,3 +427,68 @@ export function listAuditLogs(
 
   return apiFetch<AuditLogPage>(`/api/audit-logs?${query.toString()}`, { actor });
 }
+
+export interface Project {
+  id: number;
+  name: string;
+  slug: string;
+  localSite: Site | null;
+  testSite: Site | null;
+  productionSite: Site | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ProjectEnvironment = "local" | "test" | "production";
+
+export function listProjects(actor?: ActorInfo): Promise<Project[]> {
+  return apiFetch<Project[]>('/api/projects', { actor });
+}
+
+export function getProject(id: number, actor?: ActorInfo): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}`, { actor });
+}
+
+export function createProject(input: { name: string; slug: string }, actor?: ActorInfo): Promise<Project> {
+  return apiFetch<Project>('/api/projects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function updateProject(id: number, name: string, actor?: ActorInfo): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+    actor,
+  });
+}
+
+export function deleteProject(id: number, actor?: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/projects/${id}`, { method: 'DELETE', actor });
+}
+
+export function bindProjectEnvironment(
+  id: number,
+  environment: ProjectEnvironment,
+  siteId: number,
+  actor?: ActorInfo
+): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}/environments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ environment, siteId }),
+    actor,
+  });
+}
+
+export function unbindProjectEnvironment(
+  id: number,
+  environment: ProjectEnvironment,
+  actor?: ActorInfo
+): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}/environments/${environment}`, { method: 'DELETE', actor });
+}
