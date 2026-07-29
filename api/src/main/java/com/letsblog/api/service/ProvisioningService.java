@@ -1,5 +1,6 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.cms.AuthorProvisioningRequest;
 import com.letsblog.api.cms.CmsAdapter;
 import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsCredentials;
@@ -54,7 +55,7 @@ public class ProvisioningService {
 
         if (actorEmail != null) {
             try {
-                result.authorId = adapter.provisionAuthor(credentials, actorEmail);
+                result.authorId = adapter.provisionAuthor(credentials, AuthorProvisioningRequest.of(actorEmail));
                 log.info("Author provisioned: {}", result.authorId);
             } catch (Exception e) {
                 log.warn("Failed to provision author: {}", e.getMessage());

@@ -162,23 +162,22 @@ public class WordPressAdapter implements CmsAdapter {
     }
 
     @Override
-    public String provisionAuthor(CmsCredentials credentials, String email) {
+    public String provisionAuthor(CmsCredentials credentials, AuthorProvisioningRequest request) {
         CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
         RestClient client = buildClient(creds);
+        String email = request.email();
 
         String existingId = findExistingAuthorId(client, email);
         if (existingId != null) {
-            return existingId;
+            return updateAuthor(client, existingId, request);
         }
 
-        ObjectNode body = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
+        ObjectNode body = profileBody(request);
         body.put("username", email.substring(0, email.indexOf('@')));
         body.put("email", email);
         // このパスワードはLet's Blog側では保持・利用しない(WordPress側にauthorレコードを
         // 作成するために必須の項目のため、ランダム値を生成して使い捨てる)
         body.put("password", generateRandomPassword());
-        ArrayNode roles = body.putArray("roles");
-        roles.add("author");
 
         try {
             JsonNode created = client.post()
@@ -192,11 +191,50 @@ public class WordPressAdapter implements CmsAdapter {
             if (e.getStatusCode().value() == 409) {
                 String fallbackId = findExistingAuthorId(client, email);
                 if (fallbackId != null) {
-                    return fallbackId;
+                    return updateAuthor(client, fallbackId, request);
                 }
             }
             throw new CmsApiException("WordPress著者の作成に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
         }
+    }
+
+    private String updateAuthor(RestClient client, String userId, AuthorProvisioningRequest request) {
+        ObjectNode body = profileBody(request);
+        try {
+            JsonNode updated = client.put()
+                    .uri("/wp-json/wp/v2/users/" + userId)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body)
+                    .retrieve()
+                    .body(JsonNode.class);
+            return updated.get("id").asText();
+        } catch (RestClientResponseException e) {
+            throw new CmsApiException("WordPress著者の更新に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+        }
+    }
+
+    private ObjectNode profileBody(AuthorProvisioningRequest request) {
+        ObjectNode body = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
+        if (request.firstName() != null) {
+            body.put("first_name", request.firstName());
+        }
+        if (request.lastName() != null) {
+            body.put("last_name", request.lastName());
+        }
+        if (request.displayName() != null) {
+            body.put("name", request.displayName());
+        }
+        if (request.websiteUrl() != null) {
+            body.put("url", request.websiteUrl());
+        }
+        if (request.bio() != null) {
+            body.put("description", request.bio());
+        }
+        // localeはWordPress側にインストールされている言語パックのenumでしか許容されず、
+        // 未インストールの言語(既定インストールのja_JPなど)を送ると400エラーになるため送信しない。
+        ArrayNode roles = body.putArray("roles");
+        roles.add(request.wpRole() != null ? request.wpRole() : "author");
+        return body;
     }
 
     private String findExistingAuthorId(RestClient client, String email) {

@@ -12,6 +12,8 @@ import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.springframework.http.HttpMethod.POST;
+import static org.springframework.http.HttpMethod.PUT;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
@@ -190,14 +192,17 @@ class WordPressAdapterTest {
     }
 
     @Test
-    void testProvisionAuthor_既存ユーザーが見つかればそのIDを返す() {
+    void testProvisionAuthor_既存ユーザーが見つかればプロフィールを更新する() {
         server.expect(requestTo(containsString("/wp-json/wp/v2/users")))
                 .andRespond(withSuccess("[{\"id\":7,\"email\":\"author@example.com\"}]", MediaType.APPLICATION_JSON));
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/users/7"))
+                .andExpect(method(PUT))
+                .andRespond(withSuccess("{\"id\":7,\"email\":\"author@example.com\"}", MediaType.APPLICATION_JSON));
 
         CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
                 "http://example.com", "admin", "apppass123");
 
-        String authorId = adapter.provisionAuthor(creds, "author@example.com");
+        String authorId = adapter.provisionAuthor(creds, AuthorProvisioningRequest.of("author@example.com"));
 
         assertEquals("7", authorId);
         server.verify();
@@ -214,9 +219,52 @@ class WordPressAdapterTest {
         CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
                 "http://example.com", "admin", "apppass123");
 
-        String authorId = adapter.provisionAuthor(creds, "newauthor@example.com");
+        String authorId = adapter.provisionAuthor(creds, AuthorProvisioningRequest.of("newauthor@example.com"));
 
         assertEquals("8", authorId);
+        server.verify();
+    }
+
+    @Test
+    void testProvisionAuthor_ロール引数指定で作成される() {
+        server.expect(requestTo(containsString("/wp-json/wp/v2/users?search=")))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/users"))
+                .andExpect(method(POST))
+                .andExpect(content().string(containsString("\"editor\"")))
+                .andRespond(withSuccess("{\"id\":9,\"email\":\"editor@example.com\"}", MediaType.APPLICATION_JSON));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        AuthorProvisioningRequest request = new AuthorProvisioningRequest(
+                "editor@example.com", "editor", "太郎", "山田", "山田太郎",
+                "https://example.com", "自己紹介", "ja_JP");
+        String authorId = adapter.provisionAuthor(creds, request);
+
+        assertEquals("9", authorId);
+        server.verify();
+    }
+
+    @Test
+    void testProvisionAuthor_既存ユーザー更新時にプロフィール項目を送信する() {
+        server.expect(requestTo(containsString("/wp-json/wp/v2/users")))
+                .andRespond(withSuccess("[{\"id\":7,\"email\":\"author@example.com\"}]", MediaType.APPLICATION_JSON));
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/users/7"))
+                .andExpect(method(PUT))
+                .andExpect(content().string(containsString("\"author\"")))
+                .andExpect(content().string(containsString("山田太郎")))
+                .andRespond(withSuccess("{\"id\":7,\"email\":\"author@example.com\"}", MediaType.APPLICATION_JSON));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        AuthorProvisioningRequest request = new AuthorProvisioningRequest(
+                "author@example.com", "author", "太郎", "山田", "山田太郎",
+                null, null, null);
+        String authorId = adapter.provisionAuthor(creds, request);
+
+        assertEquals("7", authorId);
         server.verify();
     }
 }

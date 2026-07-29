@@ -49,8 +49,8 @@ public interface CmsAdapter {
     String provisionDefaultTag(CmsCredentials credentials);
 
     /**
-     * サイト登録者を著者として登録(または既存の著者を取得)し、IDを返す。
+     * ユーザーを著者として登録する。既に存在する場合はプロフィール・ロールを更新する。
      * CMS側が著者の概念を持たない、または未対応の場合はnullを返してよい。
      */
-    String provisionAuthor(CmsCredentials credentials, String email);
+    String provisionAuthor(CmsCredentials credentials, AuthorProvisioningRequest request);
 }

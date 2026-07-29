@@ -22,7 +22,10 @@ public enum AuditLogAction {
     PROJECT_UPDATED("プロジェクト更新"),
     PROJECT_DELETED("プロジェクト削除"),
     PROJECT_ENVIRONMENT_BOUND("プロジェクト環境紐付け"),
-    PROJECT_ENVIRONMENT_UNBOUND("プロジェクト環境切離し");
+    PROJECT_ENVIRONMENT_UNBOUND("プロジェクト環境切離し"),
+    PROJECT_USER_ADDED("プロジェクトユーザー追加"),
+    PROJECT_USER_ROLE_UPDATED("プロジェクトユーザーロール変更"),
+    PROJECT_USER_REMOVED("プロジェクトユーザー削除");
 
     private final String displayName;
 

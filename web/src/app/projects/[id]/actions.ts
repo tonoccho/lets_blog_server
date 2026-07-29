@@ -5,6 +5,9 @@ import {
   bindProjectEnvironment,
   unbindProjectEnvironment,
   updateProject,
+  addProjectUser,
+  updateProjectUserRole,
+  removeProjectUser,
   ProjectEnvironment,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
@@ -74,4 +77,51 @@ export async function updateProjectNameAction(
   revalidatePath(`/projects/${projectId}`);
   revalidatePath("/projects");
   return { success: true };
+}
+
+export interface AddProjectUserState {
+  error?: string;
+  success?: boolean;
+}
+
+export async function addProjectUserAction(
+  projectId: number,
+  _prevState: AddProjectUserState,
+  formData: FormData
+): Promise<AddProjectUserState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const userId = Number(formData.get("userId"));
+  const wpRole = String(formData.get("wpRole") ?? "").trim();
+  if (!userId || !wpRole) {
+    return { error: "ユーザーとロールを選択してください。" };
+  }
+
+  try {
+    await addProjectUser(projectId, userId, wpRole, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  return { success: true };
+}
+
+export async function updateProjectUserRoleAction(projectId: number, userId: number, wpRole: string) {
+  const session = await requireAdminSession();
+  await updateProjectUserRole(projectId, userId, wpRole, {
+    id: Number(session.user.id),
+    role: session.user.role,
+  });
+  revalidatePath(`/projects/${projectId}`);
+}
+
+export async function removeProjectUserAction(projectId: number, userId: number) {
+  const session = await requireAdminSession();
+  await removeProjectUser(projectId, userId, {
+    id: Number(session.user.id),
+    role: session.user.role,
+  });
+  revalidatePath(`/projects/${projectId}`);
 }

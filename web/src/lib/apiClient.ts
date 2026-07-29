@@ -495,3 +495,46 @@ export function unbindProjectEnvironment(
 ): Promise<Project> {
   return apiFetch<Project>(`/api/projects/${id}/environments/${environment}`, { method: 'DELETE', actor });
 }
+
+export interface ProjectUser {
+  userId: number;
+  email: string | null;
+  displayName: string | null;
+  wpRole: string;
+}
+
+export function listProjectUsers(projectId: number, actor?: ActorInfo): Promise<ProjectUser[]> {
+  return apiFetch<ProjectUser[]>(`/api/projects/${projectId}/users`, { actor });
+}
+
+export function addProjectUser(
+  projectId: number,
+  userId: number,
+  wpRole: string,
+  actor?: ActorInfo
+): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/users`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, wpRole }),
+    actor,
+  });
+}
+
+export function updateProjectUserRole(
+  projectId: number,
+  userId: number,
+  wpRole: string,
+  actor?: ActorInfo
+): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/users/${userId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ wpRole }),
+    actor,
+  });
+}
+
+export function removeProjectUser(projectId: number, userId: number, actor?: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/users/${userId}`, { method: 'DELETE', actor });
+}

@@ -1,5 +1,6 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.cms.AuthorProvisioningRequest;
 import com.letsblog.api.cms.CmsAdapter;
 import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsCredentials;
@@ -43,7 +44,7 @@ class ProvisioningServiceTest {
     void provisionSite_カテゴリ_タグ_著者すべて成功する() {
         when(cmsAdapter.provisionDefaultCategory(credentials)).thenReturn("cat-1");
         when(cmsAdapter.provisionDefaultTag(credentials)).thenReturn("tag-1");
-        when(cmsAdapter.provisionAuthor(credentials, "actor@example.com")).thenReturn("author-1");
+        when(cmsAdapter.provisionAuthor(credentials, AuthorProvisioningRequest.of("actor@example.com"))).thenReturn("author-1");
 
         ProvisioningService.ProvisioningResult result =
                 service.provisionSite(CmsType.WORDPRESS, credentials, "actor@example.com");
@@ -72,7 +73,7 @@ class ProvisioningServiceTest {
     void provisionSite_カテゴリ作成失敗は部分的失敗として記録し続行する() {
         when(cmsAdapter.provisionDefaultCategory(credentials)).thenThrow(new RuntimeException("category failed"));
         when(cmsAdapter.provisionDefaultTag(credentials)).thenReturn("tag-1");
-        when(cmsAdapter.provisionAuthor(credentials, "actor@example.com")).thenReturn("author-1");
+        when(cmsAdapter.provisionAuthor(credentials, AuthorProvisioningRequest.of("actor@example.com"))).thenReturn("author-1");
 
         ProvisioningService.ProvisioningResult result =
                 service.provisionSite(CmsType.WORDPRESS, credentials, "actor@example.com");
@@ -87,7 +88,7 @@ class ProvisioningServiceTest {
     void provisionSite_全リソース失敗しても例外は投げない() {
         when(cmsAdapter.provisionDefaultCategory(credentials)).thenThrow(new RuntimeException("category failed"));
         when(cmsAdapter.provisionDefaultTag(credentials)).thenThrow(new RuntimeException("tag failed"));
-        when(cmsAdapter.provisionAuthor(credentials, "actor@example.com")).thenThrow(new RuntimeException("author failed"));
+        when(cmsAdapter.provisionAuthor(credentials, AuthorProvisioningRequest.of("actor@example.com"))).thenThrow(new RuntimeException("author failed"));
 
         ProvisioningService.ProvisioningResult result =
                 service.provisionSite(CmsType.WORDPRESS, credentials, "actor@example.com");

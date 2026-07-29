@@ -1,12 +1,16 @@
 package com.letsblog.api.controller;
 
+import com.letsblog.api.dto.AddProjectUserRequest;
 import com.letsblog.api.dto.ProjectCreateRequest;
 import com.letsblog.api.dto.ProjectEnvironmentBindRequest;
 import com.letsblog.api.dto.ProjectResponse;
 import com.letsblog.api.dto.ProjectUpdateRequest;
+import com.letsblog.api.dto.ProjectUserResponse;
+import com.letsblog.api.dto.UpdateProjectUserRequest;
 import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.ForbiddenException;
 import com.letsblog.api.service.ProjectService;
+import com.letsblog.api.service.ProjectUserSyncService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -14,6 +18,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.ResponseEntity;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -28,10 +33,13 @@ class ProjectControllerTest {
     private ProjectService projectService;
 
     @Mock
+    private ProjectUserSyncService projectUserSyncService;
+
+    @Mock
     private AdminAuthorizationService adminAuthorizationService;
 
     private ProjectController controller() {
-        return new ProjectController(projectService, adminAuthorizationService);
+        return new ProjectController(projectService, projectUserSyncService, adminAuthorizationService);
     }
 
     private ProjectResponse buildResponse() {
@@ -112,5 +120,59 @@ class ProjectControllerTest {
 
         verify(adminAuthorizationService).requireAdmin();
         verify(projectService).unbindEnvironment(1L, "local");
+    }
+
+    @Test
+    void listUsers_admin権限があれば取得できる() {
+        ProjectController controller = controller();
+        when(projectUserSyncService.getProjectUsers(1L))
+                .thenReturn(List.of(new ProjectUserResponse(2L, "user@example.com", "山田太郎", "editor")));
+
+        List<ProjectUserResponse> response = controller.listUsers(1L);
+
+        assertEquals(1, response.size());
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void addUser_admin権限があれば追加できる() {
+        ProjectController controller = controller();
+        AddProjectUserRequest request = new AddProjectUserRequest(2L, "editor");
+
+        ResponseEntity<Void> response = controller.addUser(1L, request);
+
+        assertEquals(201, response.getStatusCode().value());
+        verify(adminAuthorizationService).requireAdmin();
+        verify(projectUserSyncService).addUserToProject(1L, 2L, "editor");
+    }
+
+    @Test
+    void addUser_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        AddProjectUserRequest request = new AddProjectUserRequest(2L, "editor");
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.addUser(1L, request));
+    }
+
+    @Test
+    void updateUserRole_admin権限があれば変更できる() {
+        ProjectController controller = controller();
+        UpdateProjectUserRequest request = new UpdateProjectUserRequest("author");
+
+        ResponseEntity<Void> response = controller.updateUserRole(1L, 2L, request);
+
+        assertEquals(204, response.getStatusCode().value());
+        verify(projectUserSyncService).updateUserProjectRole(1L, 2L, "author");
+    }
+
+    @Test
+    void removeUser_admin権限があれば削除できる() {
+        ProjectController controller = controller();
+
+        ResponseEntity<Void> response = controller.removeUser(1L, 2L);
+
+        assertEquals(204, response.getStatusCode().value());
+        verify(projectUserSyncService).removeUserFromProject(1L, 2L);
     }
 }
