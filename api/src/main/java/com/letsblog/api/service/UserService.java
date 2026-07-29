@@ -5,6 +5,8 @@ import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.User;
 import com.letsblog.api.dto.LoginResponse;
 import com.letsblog.api.dto.UserCreateRequest;
+import com.letsblog.api.dto.UserProfileResponse;
+import com.letsblog.api.dto.UserProfileUpdateRequest;
 import com.letsblog.api.dto.UserResponse;
 import com.letsblog.api.dto.UserUpdateRequest;
 import com.letsblog.api.repository.RoleRepository;
@@ -105,6 +107,33 @@ public class UserService {
         }
 
         return UserResponse.from(userRepository.save(user));
+    }
+
+    @Transactional(readOnly = true)
+    public UserProfileResponse findUserWithProfile(Long id) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new UserNotFoundException("id " + id + " のユーザーは登録されていません"));
+        return UserProfileResponse.from(user);
+    }
+
+    @AuditLog(action = AuditLogAction.USER_UPDATED, resourceType = "USER")
+    @Transactional
+    public UserProfileResponse updateUserProfile(Long id, UserProfileUpdateRequest request) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new UserNotFoundException("id " + id + " のユーザーは登録されていません"));
+
+        user.setFirstName(request.firstName());
+        user.setLastName(request.lastName());
+        user.setDisplayName(request.displayName());
+        user.setNickname(request.nickname());
+        user.setWebsiteUrl(request.websiteUrl());
+        user.setBio(request.bio());
+        user.setLocale(request.locale());
+        user.setAvatarUrl(request.avatarUrl());
+        user.setDepartment(request.department());
+        user.setPosition(request.position());
+
+        return UserProfileResponse.from(userRepository.save(user));
     }
 
     @AuditLog(action = AuditLogAction.USER_DELETED, resourceType = "USER")

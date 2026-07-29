@@ -2,8 +2,11 @@ package com.letsblog.api.controller;
 
 import com.letsblog.api.domain.Permission;
 import com.letsblog.api.dto.UserCreateRequest;
+import com.letsblog.api.dto.UserProfileResponse;
+import com.letsblog.api.dto.UserProfileUpdateRequest;
 import com.letsblog.api.dto.UserResponse;
 import com.letsblog.api.dto.UserUpdateRequest;
+import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.PermissionAuthorizationService;
 import com.letsblog.api.service.RoleService;
 import com.letsblog.api.service.UserService;
@@ -22,14 +25,17 @@ public class UserController {
     private final UserService userService;
     private final RoleService roleService;
     private final PermissionAuthorizationService permissionAuthorizationService;
+    private final AdminAuthorizationService adminAuthorizationService;
 
     public UserController(
             UserService userService,
             RoleService roleService,
-            PermissionAuthorizationService permissionAuthorizationService) {
+            PermissionAuthorizationService permissionAuthorizationService,
+            AdminAuthorizationService adminAuthorizationService) {
         this.userService = userService;
         this.roleService = roleService;
         this.permissionAuthorizationService = permissionAuthorizationService;
+        this.adminAuthorizationService = adminAuthorizationService;
     }
 
     @GetMapping
@@ -51,6 +57,19 @@ public class UserController {
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         userService.delete(id);
         return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/{id}")
+    public UserProfileResponse getProfile(@PathVariable Long id) {
+        adminAuthorizationService.requireSelfOrAdmin(id);
+        return userService.findUserWithProfile(id);
+    }
+
+    @PutMapping("/{id}")
+    public UserProfileResponse updateProfile(
+            @PathVariable Long id, @RequestBody UserProfileUpdateRequest request) {
+        adminAuthorizationService.requireSelfOrAdmin(id);
+        return userService.updateUserProfile(id, request);
     }
 
     @PostMapping("/{userId}/roles/{roleName}")

@@ -278,6 +278,51 @@ export function deleteUser(id: number, actor?: ActorInfo): Promise<void> {
   return apiFetch<void>(`/api/users/${id}`, { method: 'DELETE', actor });
 }
 
+export interface UserProfile {
+  id: number;
+  email: string;
+  role: "admin" | "user";
+  roleNames: string[];
+  firstName: string | null;
+  lastName: string | null;
+  displayName: string | null;
+  nickname: string | null;
+  websiteUrl: string | null;
+  bio: string | null;
+  locale: string | null;
+  avatarUrl: string | null;
+  department: string | null;
+  position: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UserProfileInput {
+  firstName: string | null;
+  lastName: string | null;
+  displayName: string | null;
+  nickname: string | null;
+  websiteUrl: string | null;
+  bio: string | null;
+  locale: string | null;
+  avatarUrl: string | null;
+  department: string | null;
+  position: string | null;
+}
+
+export function getUserProfile(id: number, actor?: ActorInfo): Promise<UserProfile> {
+  return apiFetch<UserProfile>(`/api/users/${id}`, { actor });
+}
+
+export function updateUserProfile(id: number, input: UserProfileInput, actor?: ActorInfo): Promise<UserProfile> {
+  return apiFetch<UserProfile>(`/api/users/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
 export function listRoles(actor: ActorInfo): Promise<RoleInfo[]> {
   return apiFetch<RoleInfo[]>('/api/roles', { actor });
 }
