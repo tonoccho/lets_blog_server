@@ -119,12 +119,12 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
 
 ## Phase 8: マルチ環境プロジェクト管理・ユーザー情報拡充・UI改善
 
-- [ ] [00-overview](phase8/00-overview.md) — 全体スコープ・決定事項・タスク一覧
-- [ ] [01-user-profile-expansion](phase8/01-user-profile-expansion.md) — ユーザー情報拡充(WordPress互換フィールド追加、V12マイグレーション)
-- [ ] [02-project-management](phase8/02-project-management.md) — プロジェクト管理基盤(projects/project_users テーブル、CRUD、V13マイグレーション)
-- [ ] [03-project-scoped-custom-tags](phase8/03-project-scoped-custom-tags.md) — カスタムタグのプロジェクトスコープ化(V14マイグレーション)
-- [ ] [04-project-user-wp-sync](phase8/04-project-user-wp-sync.md) — プロジェクト参加ユーザーのWordPress自動登録・同期
-- [ ] [05-ui-menu-icons](phase8/05-ui-menu-icons.md) — 管理画面メニューのアイコン化(lucide-react導入)
+- [x] [00-overview](phase8/00-overview.md) — 全体スコープ・決定事項・タスク一覧
+- [x] [01-user-profile-expansion](phase8/01-user-profile-expansion.md) — ユーザー情報拡充(WordPress互換フィールド追加、V12マイグレーション。実機検証済み)
+- [x] [02-project-management](phase8/02-project-management.md) — プロジェクト管理基盤(projects/project_users テーブル、CRUD、V13マイグレーション。実機検証済み)
+- [x] [03-project-scoped-custom-tags](phase8/03-project-scoped-custom-tags.md) — カスタムタグのプロジェクトスコープ化(V14マイグレーション。実機検証済み)
+- [x] [04-project-user-wp-sync](phase8/04-project-user-wp-sync.md) — プロジェクト参加ユーザーのWordPress自動登録・同期(実機の管理対象WordPressで作成・ロール変更・削除まで確認済み。WordPress側`locale`フィールドが未インストール言語で400エラーになる問題を発見し、同期対象から除外して対応)
+- [x] [05-ui-menu-icons](phase8/05-ui-menu-icons.md) — 管理画面メニューのアイコン化(lucide-react導入)
 
 ## Phase 8 未決事項・検討項目
 
