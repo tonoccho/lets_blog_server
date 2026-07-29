@@ -141,7 +141,7 @@ class ProjectControllerTest {
 
         ResponseEntity<Void> response = controller.addUser(1L, request);
 
-        assertEquals(201, response.getStatusCode().value());
+        assertEquals(204, response.getStatusCode().value());
         verify(adminAuthorizationService).requireAdmin();
         verify(projectUserSyncService).addUserToProject(1L, 2L, "editor");
     }

@@ -87,7 +87,7 @@ public class ProjectController {
     public ResponseEntity<Void> addUser(@PathVariable Long id, @Valid @RequestBody AddProjectUserRequest request) {
         adminAuthorizationService.requireAdmin();
         projectUserSyncService.addUserToProject(id, request.userId(), request.wpRole());
-        return ResponseEntity.status(HttpStatus.CREATED).build();
+        return ResponseEntity.noContent().build();
     }
 
     @PutMapping("/{id}/users/{userId}")
