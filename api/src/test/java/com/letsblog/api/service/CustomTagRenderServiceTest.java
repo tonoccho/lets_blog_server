@@ -41,7 +41,7 @@ class CustomTagRenderServiceTest {
 
     @Test
     void render_定義済みタグを本文込みでHTMLテンプレートに展開する() {
-        when(customTagRepository.findAll()).thenReturn(
+        when(customTagRepository.findByProjectIdIsNull()).thenReturn(
                 List.of(tag("alert", "<div class=\"alert\">{{content}}</div>")));
 
         String markdown = "本文\n\n:::alert\n注意してください\n:::\n\n続き";
@@ -53,7 +53,7 @@ class CustomTagRenderServiceTest {
 
     @Test
     void render_属性プレースホルダを展開する() {
-        when(customTagRepository.findAll()).thenReturn(
+        when(customTagRepository.findByProjectIdIsNull()).thenReturn(
                 List.of(tag("youtube", "<iframe src=\"https://youtube.com/embed/{{attr:id}}\"></iframe>")));
 
         String markdown = ":::youtube id=\"abc123\"\n\n:::";
@@ -65,7 +65,7 @@ class CustomTagRenderServiceTest {
 
     @Test
     void render_未定義のタグ名はそのまま残す() {
-        when(customTagRepository.findAll()).thenReturn(
+        when(customTagRepository.findByProjectIdIsNull()).thenReturn(
                 List.of(tag("alert", "<div>{{content}}</div>")));
 
         String markdown = ":::unknown\n本文\n:::";
@@ -77,7 +77,7 @@ class CustomTagRenderServiceTest {
 
     @Test
     void render_カスタムタグ未登録時はMarkdownをそのまま返す() {
-        when(customTagRepository.findAll()).thenReturn(List.of());
+        when(customTagRepository.findByProjectIdIsNull()).thenReturn(List.of());
 
         String markdown = ":::alert\n本文\n:::";
 
@@ -86,7 +86,7 @@ class CustomTagRenderServiceTest {
 
     @Test
     void render_複数タグが混在しても個別に展開する() {
-        when(customTagRepository.findAll()).thenReturn(List.of(
+        when(customTagRepository.findByProjectIdIsNull()).thenReturn(List.of(
                 tag("alert", "<div class=\"alert\">{{content}}</div>"),
                 tag("note", "<div class=\"note\">{{content}}</div>")));
 
@@ -99,7 +99,7 @@ class CustomTagRenderServiceTest {
 
     @Test
     void render_CSS付きタグを使うと本文冒頭にstyleブロックを差し込む() {
-        when(customTagRepository.findAll()).thenReturn(
+        when(customTagRepository.findByProjectIdIsNull()).thenReturn(
                 List.of(tagWithCss("alert", "<div class=\"alert\">{{content}}</div>", ".alert { color: red; }")));
 
         String markdown = ":::alert\n注意\n:::";
@@ -113,7 +113,7 @@ class CustomTagRenderServiceTest {
 
     @Test
     void render_同じCSS付きタグを複数回使ってもstyleブロックは1回だけ() {
-        when(customTagRepository.findAll()).thenReturn(
+        when(customTagRepository.findByProjectIdIsNull()).thenReturn(
                 List.of(tagWithCss("alert", "<div class=\"alert\">{{content}}</div>", ".alert { color: red; }")));
 
         String markdown = ":::alert\n注意1\n:::\n本文\n:::alert\n注意2\n:::";
@@ -126,7 +126,7 @@ class CustomTagRenderServiceTest {
 
     @Test
     void render_CSSが未設定のタグではstyleブロックを出力しない() {
-        when(customTagRepository.findAll()).thenReturn(
+        when(customTagRepository.findByProjectIdIsNull()).thenReturn(
                 List.of(tag("alert", "<div class=\"alert\">{{content}}</div>")));
 
         String markdown = ":::alert\n注意\n:::";
@@ -134,5 +134,43 @@ class CustomTagRenderServiceTest {
         String result = service.render(markdown);
 
         assertEquals("<div class=\"alert\">注意</div>", result);
+    }
+
+    @Test
+    void render_プロジェクトスコープタグがレンダリングされる() {
+        CustomTag projectTag = tag("project-only", "<div class=\"p\">{{content}}</div>");
+        projectTag.setProjectId(1L);
+        when(customTagRepository.findByProjectIdOrProjectIdIsNull(1L)).thenReturn(List.of(projectTag));
+
+        String markdown = ":::project-only\n本文\n:::";
+
+        String result = service.render(markdown, 1L);
+
+        assertEquals("<div class=\"p\">本文</div>", result);
+    }
+
+    @Test
+    void render_プロジェクト指定時もグローバルタグが対象になる() {
+        CustomTag globalTag = tag("alert", "<div class=\"alert\">{{content}}</div>");
+        when(customTagRepository.findByProjectIdOrProjectIdIsNull(1L)).thenReturn(List.of(globalTag));
+
+        String markdown = ":::alert\n注意\n:::";
+
+        String result = service.render(markdown, 1L);
+
+        assertEquals("<div class=\"alert\">注意</div>", result);
+    }
+
+    @Test
+    void render_異なるプロジェクトのタグは対象外() {
+        // プロジェクト2のタグはリポジトリ検索条件(findByProjectIdOrProjectIdIsNull(1L))に含まれないため、
+        // クエリ自体が呼び出し対象外タグを返さないことを想定してスタブする。
+        when(customTagRepository.findByProjectIdOrProjectIdIsNull(1L)).thenReturn(List.of());
+
+        String markdown = ":::project-two-only\n本文\n:::";
+
+        String result = service.render(markdown, 1L);
+
+        assertEquals(markdown, result);
     }
 }

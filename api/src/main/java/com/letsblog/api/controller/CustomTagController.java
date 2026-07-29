@@ -26,8 +26,8 @@ public class CustomTagController {
     }
 
     @GetMapping
-    public List<CustomTagResponse> list() {
-        return customTagService.list();
+    public List<CustomTagResponse> list(@RequestParam(required = false) Long projectId) {
+        return customTagService.list(projectId);
     }
 
     @PutMapping("/{id}")

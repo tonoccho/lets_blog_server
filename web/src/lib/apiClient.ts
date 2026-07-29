@@ -357,6 +357,7 @@ export interface CustomTag {
   htmlTemplate: string;
   description: string | null;
   cssContent: string | null;
+  projectId: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -366,10 +367,12 @@ export interface CustomTagInput {
   htmlTemplate: string;
   description?: string;
   cssContent?: string;
+  projectId?: number | null;
 }
 
-export function listCustomTags(actor?: ActorInfo): Promise<CustomTag[]> {
-  return apiFetch<CustomTag[]>('/api/custom-tags', { actor });
+export function listCustomTags(actor?: ActorInfo, projectId?: number): Promise<CustomTag[]> {
+  const query = projectId != null ? `?projectId=${projectId}` : '';
+  return apiFetch<CustomTag[]>(`/api/custom-tags${query}`, { actor });
 }
 
 export function createCustomTag(input: CustomTagInput, actor: ActorInfo): Promise<CustomTag> {

@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class CustomTagService {
@@ -28,15 +29,17 @@ public class CustomTagService {
     public CustomTagResponse create(CustomTagRequest request) {
         adminAuthorizationService.requireAdmin();
 
-        if (customTagRepository.existsByTagName(request.tagName())) {
+        Long projectId = request.projectId();
+        findDuplicate(request.tagName(), projectId).ifPresent(existing -> {
             throw new IllegalArgumentException("タグ名 '" + request.tagName() + "' は既に登録されています");
-        }
+        });
 
         CustomTag tag = new CustomTag();
         tag.setTagName(request.tagName());
         tag.setHtmlTemplate(request.htmlTemplate());
         tag.setDescription(request.description());
         tag.setCssContent(request.cssContent());
+        tag.setProjectId(projectId);
 
         return CustomTagResponse.from(customTagRepository.save(tag));
     }
@@ -49,7 +52,9 @@ public class CustomTagService {
         CustomTag tag = customTagRepository.findById(id)
                 .orElseThrow(() -> new CustomTagNotFoundException("id " + id + " のカスタムタグは登録されていません"));
 
-        customTagRepository.findByTagName(request.tagName())
+        // projectIdの変更は許可しない(リクエストに含まれていても無視する)
+        Long projectId = tag.getProjectId();
+        findDuplicate(request.tagName(), projectId)
                 .filter(existing -> !existing.getId().equals(id))
                 .ifPresent(existing -> {
                     throw new IllegalArgumentException("タグ名 '" + request.tagName() + "' は既に登録されています");
@@ -74,8 +79,20 @@ public class CustomTagService {
         customTagRepository.deleteById(id);
     }
 
+    /**
+     * projectId が null ならグローバルタグのみ、指定時はそのプロジェクトのタグ + グローバルタグを返す。
+     */
     @Transactional(readOnly = true)
-    public List<CustomTagResponse> list() {
-        return customTagRepository.findAll().stream().map(CustomTagResponse::from).toList();
+    public List<CustomTagResponse> list(Long projectId) {
+        List<CustomTag> tags = projectId == null
+                ? customTagRepository.findByProjectIdIsNull()
+                : customTagRepository.findByProjectIdOrProjectIdIsNull(projectId);
+        return tags.stream().map(CustomTagResponse::from).toList();
+    }
+
+    private Optional<CustomTag> findDuplicate(String tagName, Long projectId) {
+        return projectId == null
+                ? customTagRepository.findByTagNameAndProjectIdIsNull(tagName)
+                : customTagRepository.findByTagNameAndProjectId(tagName, projectId);
     }
 }

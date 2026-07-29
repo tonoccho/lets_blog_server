@@ -104,6 +104,17 @@ public class ProjectService {
         return toResponse(projectRepository.save(project));
     }
 
+    /**
+     * 指定サイトが所属するプロジェクトのIDを返す(いずれの環境にも紐付いていなければnull)。
+     * カスタムタグのプロジェクトスコープ判定(投稿レンダリング時)に使う。
+     */
+    @Transactional(readOnly = true)
+    public Long findProjectIdBySiteId(Long siteId) {
+        return projectRepository.findByLocalSiteIdOrTestSiteIdOrProductionSiteId(siteId, siteId, siteId)
+                .map(Project::getId)
+                .orElse(null);
+    }
+
     private void requireValidEnvironment(String environment) {
         if (!VALID_ENVIRONMENTS.contains(environment)) {
             throw new IllegalArgumentException("environment は local/test/production のいずれかを指定してください");
