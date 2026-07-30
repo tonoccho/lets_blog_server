@@ -1,7 +1,9 @@
+import Link from "next/link";
 import { listSites, listProjects, listUsers } from "@/lib/apiClient";
 import { getSession } from "@/lib/session";
 import { SiteCreationPanel } from "./SiteCreationPanel";
 import { DeleteSiteButton } from "./DeleteSiteButton";
+import { CheckConnectionButton } from "./CheckConnectionButton";
 
 export default async function SitesPage() {
   const [sites, projects, users, session] = await Promise.all([
@@ -35,13 +37,14 @@ export default async function SitesPage() {
               <th className="px-4 py-2">プロジェクト</th>
               <th className="px-4 py-2">URL</th>
               <th className="px-4 py-2">登録日</th>
+              <th className="px-4 py-2">疎通確認</th>
               {isAdmin && <th className="px-4 py-2"></th>}
             </tr>
           </thead>
           <tbody>
             {sites.length === 0 && (
               <tr>
-                <td colSpan={isAdmin ? 7 : 6} className="px-4 py-6 text-center text-neutral-600">
+                <td colSpan={isAdmin ? 8 : 7} className="px-4 py-6 text-center text-neutral-600">
                   登録済みサイトはありません
                 </td>
               </tr>
@@ -75,9 +78,17 @@ export default async function SitesPage() {
                     </a>
                   </td>
                   <td className="px-4 py-2 text-neutral-500">{new Date(site.createdAt).toLocaleString("ja-JP")}</td>
+                  <td className="px-4 py-2">
+                    <CheckConnectionButton id={site.id} />
+                  </td>
                   {isAdmin && (
                     <td className="px-4 py-2 text-right">
-                      <DeleteSiteButton id={site.id} managedWordpress={site.managedWordpress} />
+                      <div className="flex justify-end gap-3">
+                        <Link href={`/sites/${site.id}/edit`} className="text-sm text-neutral-600 hover:underline">
+                          編集
+                        </Link>
+                        <DeleteSiteButton id={site.id} managedWordpress={site.managedWordpress} />
+                      </div>
                     </td>
                   )}
                 </tr>

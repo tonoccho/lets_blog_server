@@ -161,6 +161,24 @@ export function deleteSite(id: number, actor?: ActorInfo): Promise<void> {
   return apiFetch<void>(`/api/sites/${id}`, { method: 'DELETE', actor });
 }
 
+export interface SiteUpdateInput {
+  name?: string;
+  credentials?: Record<string, string>;
+}
+
+export function updateSite(id: number, input: SiteUpdateInput, actor?: ActorInfo): Promise<Site> {
+  return apiFetch<Site>(`/api/sites/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function checkSiteConnection(id: number): Promise<{ connectionCheckStatus: "SUCCESS" | "FAILED" }> {
+  return apiFetch(`/api/sites/${id}/test-connection`, { method: 'POST' });
+}
+
 export function listPosts(): Promise<PostSummary[]> {
   return apiFetch<PostSummary[]>('/api/posts');
 }

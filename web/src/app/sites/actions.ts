@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { CmsType, createManagedWordPressSite, deleteSite, registerSite } from "@/lib/apiClient";
+import { CmsType, checkSiteConnection, createManagedWordPressSite, deleteSite, registerSite } from "@/lib/apiClient";
 import { getSession, requireAdminSession } from "@/lib/session";
 
 export interface RegisterSiteState {
@@ -94,4 +94,8 @@ export async function deleteSiteAction(id: number) {
   const session = await requireAdminSession();
   await deleteSite(id, { id: Number(session.user.id), role: session.user.role });
   revalidatePath("/sites");
+}
+
+export async function checkSiteConnectionAction(id: number): Promise<{ connectionCheckStatus: "SUCCESS" | "FAILED" }> {
+  return checkSiteConnection(id);
 }

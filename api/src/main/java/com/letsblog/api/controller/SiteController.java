@@ -3,6 +3,7 @@ package com.letsblog.api.controller;
 import com.letsblog.api.dto.CreateManagedWordPressSiteRequest;
 import com.letsblog.api.dto.SiteRegisterRequest;
 import com.letsblog.api.dto.SiteResponse;
+import com.letsblog.api.dto.SiteUpdateRequest;
 import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.CurrentActorService;
 import com.letsblog.api.service.ProvisioningService;
@@ -53,6 +54,18 @@ public class SiteController {
     @GetMapping
     public List<SiteResponse> list() {
         return siteService.list();
+    }
+
+    @PutMapping("/{id}")
+    public SiteResponse update(@PathVariable Long id, @RequestBody SiteUpdateRequest request) {
+        adminAuthorizationService.requireAdmin();
+        return siteService.update(id, request);
+    }
+
+    @PostMapping("/{id}/test-connection")
+    public Map<String, Object> testConnection(@PathVariable Long id) {
+        boolean ok = siteService.checkConnection(id);
+        return Map.of("connectionCheckStatus", ok ? "SUCCESS" : "FAILED");
     }
 
     @DeleteMapping("/{id}")

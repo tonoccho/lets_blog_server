@@ -9,6 +9,7 @@ import com.letsblog.api.domain.Site;
 import com.letsblog.api.domain.User;
 import com.letsblog.api.dto.SiteRegisterRequest;
 import com.letsblog.api.dto.SiteResponse;
+import com.letsblog.api.dto.SiteUpdateRequest;
 import com.letsblog.api.repository.SiteRepository;
 import com.letsblog.api.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -177,5 +178,88 @@ class SiteServiceTest {
         when(siteRepository.findById(99L)).thenReturn(Optional.empty());
 
         assertThrows(SiteNotFoundException.class, () -> service.reprovision(99L, null));
+    }
+
+    private Site buildExternalSite() {
+        Site site = new Site();
+        site.setId(1L);
+        site.setSiteKey("main");
+        site.setName("My Blog");
+        site.setCmsType(CmsType.WORDPRESS);
+        site.setManagedWordpress(false);
+        site.setCredentialsEncrypted(new byte[]{1, 2, 3});
+        return site;
+    }
+
+    @Test
+    void update_名前のみ変更できる() {
+        Site site = buildExternalSite();
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
+        when(siteRepository.save(any(Site.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        SiteResponse response = service.update(1L, new SiteUpdateRequest("New Name", null));
+
+        assertEquals("New Name", response.name());
+        assertEquals(null, response.connectionCheckStatus());
+    }
+
+    @Test
+    void update_credentialsは指定フィールドのみ上書きし既存値を保持する() {
+        Site site = buildExternalSite();
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
+        when(credentialCipher.decrypt(any()))
+                .thenReturn("{\"baseUrl\":\"https://example.com\",\"username\":\"admin\",\"appPassword\":\"old-pass\"}");
+        when(credentialCipher.encrypt(any())).thenReturn(new byte[]{9, 9, 9});
+        when(siteRepository.save(any(Site.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.testConnection(any())).thenReturn(true);
+
+        SiteResponse response = service.update(1L, new SiteUpdateRequest(null, Map.of("appPassword", "new-pass")));
+
+        assertEquals("SUCCESS", response.connectionCheckStatus());
+        org.mockito.ArgumentCaptor<String> jsonCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(credentialCipher).encrypt(jsonCaptor.capture());
+        assertEquals(true, jsonCaptor.getValue().contains("\"baseUrl\":\"https://example.com\""));
+        assertEquals(true, jsonCaptor.getValue().contains("\"appPassword\":\"new-pass\""));
+    }
+
+    @Test
+    void update_managedWordpressサイトのcredentials編集は例外() {
+        Site site = buildExternalSite();
+        site.setManagedWordpress(true);
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.update(1L, new SiteUpdateRequest(null, Map.of("appPassword", "x"))));
+    }
+
+    @Test
+    void update_存在しないサイトは例外() {
+        when(siteRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThrows(SiteNotFoundException.class, () -> service.update(99L, new SiteUpdateRequest("x", null)));
+    }
+
+    @Test
+    void checkConnection_成功時true() {
+        Site site = buildExternalSite();
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
+        when(credentialCipher.decrypt(any()))
+                .thenReturn("{\"baseUrl\":\"https://example.com\",\"username\":\"admin\",\"appPassword\":\"secret\"}");
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.testConnection(any())).thenReturn(true);
+
+        assertEquals(true, service.checkConnection(1L));
+    }
+
+    @Test
+    void checkConnection_例外発生時はfalse() {
+        Site site = buildExternalSite();
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
+        when(credentialCipher.decrypt(any()))
+                .thenReturn("{\"baseUrl\":\"https://example.com\",\"username\":\"admin\",\"appPassword\":\"secret\"}");
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenThrow(new RuntimeException("boom"));
+
+        assertEquals(false, service.checkConnection(1L));
     }
 }

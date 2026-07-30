@@ -14,6 +14,7 @@ import com.letsblog.api.domain.Site;
 import com.letsblog.api.domain.User;
 import com.letsblog.api.dto.SiteRegisterRequest;
 import com.letsblog.api.dto.SiteResponse;
+import com.letsblog.api.dto.SiteUpdateRequest;
 import com.letsblog.api.repository.SiteRepository;
 import com.letsblog.api.repository.UserRepository;
 import lombok.extern.slf4j.Slf4j;
@@ -21,6 +22,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -133,20 +135,74 @@ public class SiteService {
     @Transactional(readOnly = true)
     public CmsCredentials getCredentials(String siteKey) {
         Site site = getBySiteKey(siteKey);
+        return buildCredentialsFromMap(site.getCmsType(), getRawCredentials(site));
+    }
 
-        // 新規登録サイト(汎用カラム)を優先的に使う
+    /**
+     * サイトの認証情報を復号し、生のMapとして返す(汎用列を優先し、Phase2以前のレガシー列にフォールバック)。
+     * 編集(update)時に既存値へのpatchを行うために使う。
+     */
+    private Map<String, String> getRawCredentials(Site site) {
         if (site.getCredentialsEncrypted() != null) {
-            Map<String, String> credentials = readCredentialsJson(credentialCipher.decrypt(site.getCredentialsEncrypted()));
-            return buildCredentialsFromMap(site.getCmsType(), credentials);
+            return readCredentialsJson(credentialCipher.decrypt(site.getCredentialsEncrypted()));
         }
 
-        // 既存WordPressサイト(Phase2以前に登録されたもの)からのフォールバック
         if (site.getWpUsername() != null && site.getWpAppPasswordEncrypted() != null) {
-            String appPassword = credentialCipher.decrypt(site.getWpAppPasswordEncrypted());
-            return new CmsCredentials.WordPressCredentials(site.getBaseUrl(), site.getWpUsername(), appPassword);
+            Map<String, String> credentials = new HashMap<>();
+            credentials.put("baseUrl", site.getBaseUrl());
+            credentials.put("username", site.getWpUsername());
+            credentials.put("appPassword", credentialCipher.decrypt(site.getWpAppPasswordEncrypted()));
+            return credentials;
         }
 
-        throw new IllegalStateException("サイト '" + siteKey + "' の認証情報が無効です");
+        throw new IllegalStateException("サイト '" + site.getSiteKey() + "' の認証情報が無効です");
+    }
+
+    /**
+     * サイトの表示名・認証情報を編集する。credentialsは指定されたキーのみ既存値へ上書きする部分patch方式。
+     * managedWordpressサイトの認証情報はインフラ側で自動管理されているため編集不可。
+     * レガシー列(wpUsername/wpAppPasswordEncrypted)のみを持つサイトを編集した場合、
+     * この機会に汎用のcredentialsEncrypted列へ統合する。
+     */
+    @Transactional
+    public SiteResponse update(Long id, SiteUpdateRequest request) {
+        Site site = siteRepository.findById(id)
+                .orElseThrow(() -> new SiteNotFoundException("id " + id + " のサイトは登録されていません"));
+
+        if (StringUtils.hasText(request.name())) {
+            site.setName(request.name());
+        }
+
+        Boolean connectionOk = null;
+        if (request.credentials() != null && !request.credentials().isEmpty()) {
+            if (site.isManagedWordpress()) {
+                throw new IllegalArgumentException("自動構築されたWordPressサイトの認証情報は編集できません");
+            }
+            Map<String, String> merged = new HashMap<>(getRawCredentials(site));
+            merged.putAll(request.credentials());
+            validateCredentials(site.getCmsType(), merged);
+            site.setCredentialsEncrypted(credentialCipher.encrypt(writeCredentialsJson(merged)));
+            connectionOk = testConnection(site.getCmsType(), merged);
+        }
+
+        Site saved = siteRepository.save(site);
+        return connectionOk != null ? SiteResponse.from(saved, connectionOk) : SiteResponse.from(saved);
+    }
+
+    /**
+     * 既存サイトの疎通確認を再実行する(結果は永続化しない、リクエストの都度計算)。
+     */
+    @Transactional(readOnly = true)
+    public boolean checkConnection(Long id) {
+        Site site = siteRepository.findById(id)
+                .orElseThrow(() -> new SiteNotFoundException("id " + id + " のサイトは登録されていません"));
+        try {
+            CmsCredentials credentials = buildCredentialsFromMap(site.getCmsType(), getRawCredentials(site));
+            CmsAdapter adapter = cmsAdapterFactory.resolve(site.getCmsType());
+            return adapter.testConnection(credentials);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private void validateCredentials(CmsType cmsType, Map<String, String> credentials) {
