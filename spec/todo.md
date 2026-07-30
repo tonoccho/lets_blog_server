@@ -170,10 +170,12 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
 
 ## Phase 10: サイト管理強化・WordPress著者作成エラー修正・環境間同期
 
-- [ ] [00-overview](phase10/00-overview.md) — 全体スコープ・決定事項・タスク一覧
-- [ ] [01-site-management-visibility-edit](phase10/01-site-management-visibility-edit.md) — サイト管理画面に疎通確認(再チェック)・編集機能を追加
-- [ ] [02-wordpress-author-permission-fix](phase10/02-wordpress-author-permission-fix.md) — WordPress著者作成403エラーの原因究明・修正(登録認証情報の管理者権限不足を検知・警告)
-- [ ] [03-environment-sync](phase10/03-environment-sync.md) — プロジェクト環境(ローカル/テスト/本番)間のテーマ・プラグイン・DB同期
+- [x] [00-overview](phase10/00-overview.md) — 全体スコープ・決定事項・タスク一覧
+- [x] [01-site-management-visibility-edit](phase10/01-site-management-visibility-edit.md) — サイト管理画面に疎通確認(再チェック)・編集機能を追加(`PUT /api/sites/{id}`、`POST /api/sites/{id}/test-connection`。実機確認済み)
+- [x] [02-wordpress-author-permission-fix](phase10/02-wordpress-author-permission-fix.md) — WordPress著者作成403エラーの原因究明・修正(登録認証情報の管理者権限不足を検知・警告。`CmsAdapter.hasAuthorProvisioningCapability()`追加、事前チェックで403を未然防止)
+- [x] [03-environment-sync](phase10/03-environment-sync.md) — プロジェクト環境(ローカル/テスト/本番)間のテーマ・プラグイン・DB同期(実際にmanaged環境を2つ構築し、テーマ/プラグイン/DB同期→記事反映・URL維持・同期先固有アカウント保護・バックアップ生成・nginx経由到達まで実機確認済み)
+
+実装・バックエンド全テスト(`./gradlew test`)・フロントエンド型チェック/lint/`next build`・Docker実機検証まですべて完了。ブラウザでのUI目視確認(疎通確認ボタン・編集フォーム・環境同期パネルの操作感)は本セッションではブラウザ操作ツールが利用できず未実施。
 
 ## Phase 10 未決事項・検討項目
 
