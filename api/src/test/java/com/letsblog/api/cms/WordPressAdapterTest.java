@@ -17,7 +17,9 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+import org.springframework.http.HttpStatus;
 
 /**
  * WordPressAdapterの回帰テスト。RestClient.Builderは単体で生成し、
@@ -265,6 +267,64 @@ class WordPressAdapterTest {
         String authorId = adapter.provisionAuthor(creds, request);
 
         assertEquals("7", authorId);
+        server.verify();
+    }
+
+    @Test
+    void testProvisionAuthor_403時は権限不足を案内するメッセージになる() {
+        server.expect(requestTo(containsString("/wp-json/wp/v2/users?search=")))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/users"))
+                .andExpect(method(POST))
+                .andRespond(withStatus(HttpStatus.FORBIDDEN)
+                        .body("{\"code\":\"rest_cannot_create\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        CmsApiException exception = assertThrows(CmsApiException.class,
+                () -> adapter.provisionAuthor(creds, AuthorProvisioningRequest.of("newauthor@example.com")));
+
+        org.hamcrest.MatcherAssert.assertThat(exception.getMessage(), containsString("管理者権限を持つアカウント"));
+        server.verify();
+    }
+
+    @Test
+    void testHasAuthorProvisioningCapability_create_users権限があればtrue() {
+        server.expect(requestTo(containsString("/wp-json/wp/v2/users/me")))
+                .andRespond(withSuccess(
+                        "{\"id\":1,\"capabilities\":{\"create_users\":true,\"read\":true}}", MediaType.APPLICATION_JSON));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        assertEquals(true, adapter.hasAuthorProvisioningCapability(creds));
+        server.verify();
+    }
+
+    @Test
+    void testHasAuthorProvisioningCapability_create_users権限がなければfalse() {
+        server.expect(requestTo(containsString("/wp-json/wp/v2/users/me")))
+                .andRespond(withSuccess(
+                        "{\"id\":2,\"capabilities\":{\"create_users\":false,\"read\":true}}", MediaType.APPLICATION_JSON));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "editor", "apppass123");
+
+        assertEquals(false, adapter.hasAuthorProvisioningCapability(creds));
+        server.verify();
+    }
+
+    @Test
+    void testHasAuthorProvisioningCapability_リクエスト失敗時はfalse() {
+        server.expect(requestTo(containsString("/wp-json/wp/v2/users/me")))
+                .andRespond(withServerError());
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        assertEquals(false, adapter.hasAuthorProvisioningCapability(creds));
         server.verify();
     }
 }

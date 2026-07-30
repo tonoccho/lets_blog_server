@@ -1,6 +1,7 @@
 package com.letsblog.api.controller;
 
 import com.letsblog.api.cms.CmsType;
+import com.letsblog.api.dto.SiteConnectionCheckResult;
 import com.letsblog.api.dto.SiteResponse;
 import com.letsblog.api.dto.SiteUpdateRequest;
 import com.letsblog.api.service.AdminAuthorizationService;
@@ -70,17 +71,18 @@ class SiteControllerTest {
     @Test
     void testConnection_成功時SUCCESSを返す() {
         SiteController controller = controller();
-        when(siteService.checkConnection(1L)).thenReturn(true);
+        when(siteService.checkConnection(1L)).thenReturn(new SiteConnectionCheckResult(true, true));
 
         Map<String, Object> response = controller.testConnection(1L);
 
         assertEquals("SUCCESS", response.get("connectionCheckStatus"));
+        assertEquals(true, response.get("hasAdminCapability"));
     }
 
     @Test
     void testConnection_失敗時FAILEDを返す() {
         SiteController controller = controller();
-        when(siteService.checkConnection(1L)).thenReturn(false);
+        when(siteService.checkConnection(1L)).thenReturn(new SiteConnectionCheckResult(false, null));
 
         Map<String, Object> response = controller.testConnection(1L);
 
@@ -90,7 +92,7 @@ class SiteControllerTest {
     @Test
     void testConnection_admin権限不問で呼べる() {
         SiteController controller = controller();
-        when(siteService.checkConnection(1L)).thenReturn(true);
+        when(siteService.checkConnection(1L)).thenReturn(new SiteConnectionCheckResult(true, true));
 
         controller.testConnection(1L);
 

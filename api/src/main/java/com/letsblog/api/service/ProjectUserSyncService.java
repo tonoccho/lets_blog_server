@@ -4,6 +4,7 @@ import com.letsblog.api.aop.AuditLog;
 import com.letsblog.api.cms.AuthorProvisioningRequest;
 import com.letsblog.api.cms.CmsAdapter;
 import com.letsblog.api.cms.CmsAdapterFactory;
+import com.letsblog.api.cms.CmsApiException;
 import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Project;
@@ -118,6 +119,11 @@ public class ProjectUserSyncService {
         for (Site site : getProjectSites(project)) {
             CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
             CmsAdapter adapter = cmsAdapterFactory.resolve(site.getCmsType());
+            if (!adapter.hasAuthorProvisioningCapability(credentials)) {
+                throw new CmsApiException(
+                        "サイト '" + site.getSiteKey() + "' の登録済み認証情報に、ユーザー作成に必要な管理者権限が"
+                                + "ありません。サイト管理画面から認証情報を更新してください。");
+            }
             adapter.provisionAuthor(credentials, request);
         }
     }

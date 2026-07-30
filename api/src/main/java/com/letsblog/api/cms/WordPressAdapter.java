@@ -194,7 +194,7 @@ public class WordPressAdapter implements CmsAdapter {
                     return updateAuthor(client, fallbackId, request);
                 }
             }
-            throw new CmsApiException("WordPress著者の作成に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+            throw new CmsApiException(authorErrorMessage("作成", e), e);
         }
     }
 
@@ -209,8 +209,23 @@ public class WordPressAdapter implements CmsAdapter {
                     .body(JsonNode.class);
             return updated.get("id").asText();
         } catch (RestClientResponseException e) {
-            throw new CmsApiException("WordPress著者の更新に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+            throw new CmsApiException(authorErrorMessage("更新", e), e);
         }
+    }
+
+    /**
+     * 403 Forbiddenの場合、登録済み認証情報の管理者権限不足が原因である可能性が高いため、
+     * 生のWordPressエラーの前に分かりやすい案内文を付加する。
+     */
+    private String authorErrorMessage(String action, RestClientResponseException e) {
+        String detail = e.getStatusCode() + " " + e.getResponseBodyAsString();
+        if (e.getStatusCode().value() == 403) {
+            return "WordPress著者の" + action + "に失敗しました: サイトに登録されている認証情報のWordPress"
+                    + "アカウントにユーザー作成・更新権限(Administrator)がない可能性があります。"
+                    + "サイト管理画面の編集機能で、管理者権限を持つアカウントのアプリケーションパスワードに"
+                    + "更新してください。(詳細: " + detail + ")";
+        }
+        return "WordPress著者の" + action + "に失敗しました: " + detail;
     }
 
     private ObjectNode profileBody(AuthorProvisioningRequest request) {
@@ -265,6 +280,22 @@ public class WordPressAdapter implements CmsAdapter {
         try {
             client.get().uri("/wp-json/wp/v2/users/me").retrieve().toBodilessEntity();
             return true;
+        } catch (RestClientResponseException | ResourceAccessException e) {
+            return false;
+        }
+    }
+
+    @Override
+    public boolean hasAuthorProvisioningCapability(CmsCredentials credentials) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        RestClient client = buildClient(creds);
+        try {
+            JsonNode me = client.get()
+                    .uri("/wp-json/wp/v2/users/me?context=edit")
+                    .retrieve()
+                    .body(JsonNode.class);
+            JsonNode capabilities = me != null ? me.get("capabilities") : null;
+            return capabilities != null && capabilities.path("create_users").asBoolean(false);
         } catch (RestClientResponseException | ResourceAccessException e) {
             return false;
         }

@@ -175,7 +175,12 @@ export function updateSite(id: number, input: SiteUpdateInput, actor?: ActorInfo
   });
 }
 
-export function checkSiteConnection(id: number): Promise<{ connectionCheckStatus: "SUCCESS" | "FAILED" }> {
+export interface SiteConnectionCheckResult {
+  connectionCheckStatus: "SUCCESS" | "FAILED";
+  hasAdminCapability: boolean | null;
+}
+
+export function checkSiteConnection(id: number): Promise<SiteConnectionCheckResult> {
   return apiFetch(`/api/sites/${id}/test-connection`, { method: 'POST' });
 }
 

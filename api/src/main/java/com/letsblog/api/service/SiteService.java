@@ -12,6 +12,7 @@ import com.letsblog.api.crypto.CredentialCipher;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.domain.User;
+import com.letsblog.api.dto.SiteConnectionCheckResult;
 import com.letsblog.api.dto.SiteRegisterRequest;
 import com.letsblog.api.dto.SiteResponse;
 import com.letsblog.api.dto.SiteUpdateRequest;
@@ -191,17 +192,21 @@ public class SiteService {
 
     /**
      * 既存サイトの疎通確認を再実行する(結果は永続化しない、リクエストの都度計算)。
+     * 接続に成功したWordPressサイトについては、著者(ユーザー)作成に必要な管理者権限の有無も判定する。
      */
     @Transactional(readOnly = true)
-    public boolean checkConnection(Long id) {
+    public SiteConnectionCheckResult checkConnection(Long id) {
         Site site = siteRepository.findById(id)
                 .orElseThrow(() -> new SiteNotFoundException("id " + id + " のサイトは登録されていません"));
         try {
             CmsCredentials credentials = buildCredentialsFromMap(site.getCmsType(), getRawCredentials(site));
             CmsAdapter adapter = cmsAdapterFactory.resolve(site.getCmsType());
-            return adapter.testConnection(credentials);
+            boolean ok = adapter.testConnection(credentials);
+            Boolean hasAdminCapability = (ok && site.getCmsType() == CmsType.WORDPRESS)
+                    ? adapter.hasAuthorProvisioningCapability(credentials) : null;
+            return new SiteConnectionCheckResult(ok, hasAdminCapability);
         } catch (Exception e) {
-            return false;
+            return new SiteConnectionCheckResult(false, null);
         }
     }
 

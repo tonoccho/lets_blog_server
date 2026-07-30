@@ -53,4 +53,12 @@ public interface CmsAdapter {
      * CMS側が著者の概念を持たない、または未対応の場合はnullを返してよい。
      */
     String provisionAuthor(CmsCredentials credentials, AuthorProvisioningRequest request);
+
+    /**
+     * この認証情報が、著者(ユーザー)の作成・更新を行うのに十分な権限を持っているかどうかを判定する。
+     * CMSによっては著者という概念自体がなく判定不要なため、既定はtrueを返す。
+     */
+    default boolean hasAuthorProvisioningCapability(CmsCredentials credentials) {
+        return true;
+    }
 }

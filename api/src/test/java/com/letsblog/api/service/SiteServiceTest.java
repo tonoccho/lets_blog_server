@@ -7,6 +7,7 @@ import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.crypto.CredentialCipher;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.domain.User;
+import com.letsblog.api.dto.SiteConnectionCheckResult;
 import com.letsblog.api.dto.SiteRegisterRequest;
 import com.letsblog.api.dto.SiteResponse;
 import com.letsblog.api.dto.SiteUpdateRequest;
@@ -248,18 +249,40 @@ class SiteServiceTest {
                 .thenReturn("{\"baseUrl\":\"https://example.com\",\"username\":\"admin\",\"appPassword\":\"secret\"}");
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
         when(cmsAdapter.testConnection(any())).thenReturn(true);
+        when(cmsAdapter.hasAuthorProvisioningCapability(any())).thenReturn(true);
 
-        assertEquals(true, service.checkConnection(1L));
+        SiteConnectionCheckResult result = service.checkConnection(1L);
+
+        assertEquals(true, result.connectionOk());
+        assertEquals(true, result.hasAdminCapability());
     }
 
     @Test
-    void checkConnection_例外発生時はfalse() {
+    void checkConnection_接続失敗時は管理者権限を判定しない() {
+        Site site = buildExternalSite();
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
+        when(credentialCipher.decrypt(any()))
+                .thenReturn("{\"baseUrl\":\"https://example.com\",\"username\":\"admin\",\"appPassword\":\"secret\"}");
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.testConnection(any())).thenReturn(false);
+
+        SiteConnectionCheckResult result = service.checkConnection(1L);
+
+        assertEquals(false, result.connectionOk());
+        assertEquals(null, result.hasAdminCapability());
+    }
+
+    @Test
+    void checkConnection_例外発生時はfalseかつhasAdminCapabilityはnull() {
         Site site = buildExternalSite();
         when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
         when(credentialCipher.decrypt(any()))
                 .thenReturn("{\"baseUrl\":\"https://example.com\",\"username\":\"admin\",\"appPassword\":\"secret\"}");
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenThrow(new RuntimeException("boom"));
 
-        assertEquals(false, service.checkConnection(1L));
+        SiteConnectionCheckResult result = service.checkConnection(1L);
+
+        assertEquals(false, result.connectionOk());
+        assertEquals(null, result.hasAdminCapability());
     }
 }

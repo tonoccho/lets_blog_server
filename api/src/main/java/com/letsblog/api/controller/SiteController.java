@@ -1,6 +1,7 @@
 package com.letsblog.api.controller;
 
 import com.letsblog.api.dto.CreateManagedWordPressSiteRequest;
+import com.letsblog.api.dto.SiteConnectionCheckResult;
 import com.letsblog.api.dto.SiteRegisterRequest;
 import com.letsblog.api.dto.SiteResponse;
 import com.letsblog.api.dto.SiteUpdateRequest;
@@ -14,6 +15,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -64,8 +66,11 @@ public class SiteController {
 
     @PostMapping("/{id}/test-connection")
     public Map<String, Object> testConnection(@PathVariable Long id) {
-        boolean ok = siteService.checkConnection(id);
-        return Map.of("connectionCheckStatus", ok ? "SUCCESS" : "FAILED");
+        SiteConnectionCheckResult result = siteService.checkConnection(id);
+        Map<String, Object> response = new HashMap<>();
+        response.put("connectionCheckStatus", result.connectionOk() ? "SUCCESS" : "FAILED");
+        response.put("hasAdminCapability", result.hasAdminCapability());
+        return response;
     }
 
     @DeleteMapping("/{id}")

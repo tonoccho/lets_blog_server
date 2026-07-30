@@ -3,6 +3,7 @@ package com.letsblog.api.service;
 import com.letsblog.api.cms.AuthorProvisioningRequest;
 import com.letsblog.api.cms.CmsAdapter;
 import com.letsblog.api.cms.CmsAdapterFactory;
+import com.letsblog.api.cms.CmsApiException;
 import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.domain.Project;
@@ -102,6 +103,7 @@ class ProjectUserSyncServiceTest {
         when(siteRepository.findAllById(List.of(10L, 20L))).thenReturn(List.of(localSite, testSite));
         when(siteService.getCredentials(any())).thenReturn(credentials);
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.hasAuthorProvisioningCapability(any())).thenReturn(true);
 
         service.addUserToProject(1L, 2L, "editor");
 
@@ -137,6 +139,7 @@ class ProjectUserSyncServiceTest {
         when(siteRepository.findAllById(List.of(10L))).thenReturn(List.of(localSite));
         when(siteService.getCredentials("local-site")).thenReturn(credentials);
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.hasAuthorProvisioningCapability(any())).thenReturn(true);
 
         service.addUserToProject(1L, 2L, "contributor");
 
@@ -144,6 +147,27 @@ class ProjectUserSyncServiceTest {
         verify(cmsAdapter).provisionAuthor(eq(credentials), captor.capture());
         assertEquals("contributor", captor.getValue().wpRole());
         assertEquals("member@example.com", captor.getValue().email());
+    }
+
+    @Test
+    void addUserToProject_管理者権限がないサイトは著者作成前に例外() {
+        ProjectUserSyncService service = service();
+        Project project = buildProject(10L, null, null);
+        User user = buildUser();
+        Site localSite = buildSite(10L, "local-site");
+        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "editor", "pass");
+
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(userRepository.findById(2L)).thenReturn(Optional.of(user));
+        when(siteRepository.findAllById(List.of(10L))).thenReturn(List.of(localSite));
+        when(siteService.getCredentials("local-site")).thenReturn(credentials);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.hasAuthorProvisioningCapability(credentials)).thenReturn(false);
+
+        assertThrows(CmsApiException.class, () -> service.addUserToProject(1L, 2L, "editor"));
+
+        verify(cmsAdapter, org.mockito.Mockito.never()).provisionAuthor(any(), any());
+        verify(projectUserRepository, org.mockito.Mockito.never()).save(any());
     }
 
     @Test
@@ -161,6 +185,7 @@ class ProjectUserSyncServiceTest {
         when(siteRepository.findAllById(List.of(10L))).thenReturn(List.of(localSite));
         when(siteService.getCredentials("local-site")).thenReturn(credentials);
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.hasAuthorProvisioningCapability(any())).thenReturn(true);
 
         service.updateUserProjectRole(1L, 2L, "author");
 
