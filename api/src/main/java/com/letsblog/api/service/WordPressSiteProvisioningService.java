@@ -47,11 +47,19 @@ public class WordPressSiteProvisioningService {
 
         String slug = normalizeSlug(request.siteKey());
         String dbName = "wp_" + slug;
+        String locale = (request.locale() != null && !request.locale().isBlank()) ? request.locale() : "ja";
 
-        WordPressProvisioningClient.ProvisionResult result = provisioningClient.provision(
-                new WordPressProvisioningClient.ProvisionCommand(
-                        slug, dbName, request.title(), request.adminUser(), request.adminEmail(),
-                        request.adminPassword()));
+        WordPressProvisioningClient.ProvisionResult result;
+        try {
+            result = provisioningClient.provision(
+                    new WordPressProvisioningClient.ProvisionCommand(
+                            slug, dbName, request.title(), request.adminUser(), request.adminEmail(),
+                            request.adminPassword(), locale));
+        } catch (ProvisioningException e) {
+            // エージェント側の自己クリーンアップが働かなかった場合(接続断など)の保険的な後始末
+            provisioningClient.deprovision(slug, dbName);
+            throw e;
+        }
 
         // credentials.baseUrlはSpring Boot API自身がREST呼び出しに使う値のため、
         // ブラウザ向けの公開URL(https://localhost/sites/{slug}、reverse-proxy経由)ではなく、

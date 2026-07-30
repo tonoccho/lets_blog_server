@@ -11,6 +11,7 @@ import com.letsblog.api.domain.ProjectUser;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.domain.User;
 import com.letsblog.api.dto.ProjectUserResponse;
+import com.letsblog.api.dto.ProjectUserSummaryResponse;
 import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.ProjectUserRepository;
 import com.letsblog.api.repository.SiteRepository;
@@ -93,6 +94,13 @@ public class ProjectUserSyncService {
                             user != null ? user.getDisplayName() : null,
                             pu.getWpRole());
                 })
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<ProjectUserSummaryResponse> listAllProjectUsers() {
+        return projectUserRepository.findAll().stream()
+                .map(pu -> new ProjectUserSummaryResponse(pu.getProjectId(), pu.getUserId(), pu.getWpRole()))
                 .toList();
     }
 

@@ -1,24 +1,82 @@
 "use client";
 
+import { useState } from "react";
 import { useActionState } from "react";
 import type { UserProfile } from "@/lib/apiClient";
 import { updateUserProfileAction, UpdateProfileState } from "./actions";
+import { DisplayNameSelect } from "./DisplayNameSelect";
+import { CustomLinksEditor } from "./CustomLinksEditor";
 
 const initialState: UpdateProfileState = {};
+
+const SOCIAL_LINK_FIELDS: { key: keyof NonNullable<UserProfile["socialLinks"]>; label: string }[] = [
+  { key: "facebook", label: "Facebook" },
+  { key: "youtube", label: "YouTube" },
+  { key: "whatsapp", label: "WhatsApp" },
+  { key: "tiktok", label: "TikTok" },
+  { key: "instagram", label: "Instagram" },
+  { key: "wechat", label: "WeChat" },
+  { key: "x", label: "X (Twitter)" },
+  { key: "threads", label: "Threads" },
+  { key: "github", label: "GitHub" },
+  { key: "pinterest", label: "Pinterest" },
+  { key: "meetup", label: "Meetup" },
+  { key: "line", label: "LINE" },
+  { key: "linkedin", label: "LinkedIn" },
+  { key: "hatena", label: "はてな" },
+];
+
+function SocialLinkField({
+  label,
+  name,
+  value,
+}: {
+  label: string;
+  name: string;
+  value: string | null | undefined;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-sm">
+      <span className="text-neutral-600">{label}</span>
+      <input
+        name={`socialLinks.${name}`}
+        type="url"
+        defaultValue={value ?? ""}
+        className="rounded border border-neutral-300 px-3 py-2 text-sm"
+      />
+    </label>
+  );
+}
 
 export function UserProfileForm({ profile }: { profile: UserProfile }) {
   const action = (prevState: UpdateProfileState, formData: FormData) =>
     updateUserProfileAction(profile.id, prevState, formData);
   const [state, formAction, pending] = useActionState(action, initialState);
 
+  const [lastName, setLastName] = useState(profile.lastName ?? "");
+  const [firstName, setFirstName] = useState(profile.firstName ?? "");
+  const [nickname, setNickname] = useState(profile.nickname ?? "");
+
   return (
     <form action={formAction} className="space-y-4 rounded-lg border border-neutral-200 bg-white p-5">
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="text-neutral-600">メールアドレス</span>
+        <input
+          type="email"
+          value={profile.email ?? ""}
+          disabled
+          className="rounded border border-neutral-300 bg-neutral-50 px-3 py-2 text-sm text-neutral-500"
+        />
+        <span className="text-xs text-neutral-400">(変更は設定から行えます)</span>
+      </label>
+
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-neutral-600">姓</span>
           <input
             name="lastName"
-            defaultValue={profile.lastName ?? ""}
+            value={lastName}
+            onChange={(e) => setLastName(e.target.value)}
             className="rounded border border-neutral-300 px-3 py-2 text-sm"
           />
         </label>
@@ -26,23 +84,24 @@ export function UserProfileForm({ profile }: { profile: UserProfile }) {
           <span className="text-neutral-600">名</span>
           <input
             name="firstName"
-            defaultValue={profile.firstName ?? ""}
+            value={firstName}
+            onChange={(e) => setFirstName(e.target.value)}
             className="rounded border border-neutral-300 px-3 py-2 text-sm"
           />
         </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">表示名</span>
-          <input
-            name="displayName"
-            defaultValue={profile.displayName ?? ""}
-            className="rounded border border-neutral-300 px-3 py-2 text-sm"
-          />
-        </label>
+        <DisplayNameSelect
+          firstName={firstName}
+          lastName={lastName}
+          nickname={nickname}
+          email={profile.email}
+          defaultValue={profile.displayName}
+        />
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-neutral-600">ニックネーム</span>
           <input
             name="nickname"
-            defaultValue={profile.nickname ?? ""}
+            value={nickname}
+            onChange={(e) => setNickname(e.target.value)}
             className="rounded border border-neutral-300 px-3 py-2 text-sm"
           />
         </label>
@@ -105,6 +164,17 @@ export function UserProfileForm({ profile }: { profile: UserProfile }) {
           <img src={profile.avatarUrl} alt="" className="mt-2 h-16 w-16 rounded-full border border-neutral-200" />
         )}
       </label>
+
+      <fieldset className="flex flex-col gap-3">
+        <legend className="text-sm font-medium text-neutral-600">SNSリンク</legend>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {SOCIAL_LINK_FIELDS.map(({ key, label }) => (
+            <SocialLinkField key={key} label={label} name={key} value={profile.socialLinks?.[key]} />
+          ))}
+        </div>
+      </fieldset>
+
+      <CustomLinksEditor defaultLinks={profile.customLinks} />
 
       {state.error && <p className="text-sm text-red-600">{state.error}</p>}
       {state.success && <p className="text-sm text-green-600">保存しました。</p>}

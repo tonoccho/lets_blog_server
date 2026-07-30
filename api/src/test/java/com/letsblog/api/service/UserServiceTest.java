@@ -1,5 +1,7 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.domain.CustomLink;
+import com.letsblog.api.domain.SocialLinks;
 import com.letsblog.api.domain.TwoFactorSecret;
 import com.letsblog.api.domain.User;
 import com.letsblog.api.dto.LoginResponse;
@@ -14,6 +16,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -173,10 +176,18 @@ class UserServiceTest {
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
+        SocialLinks socialLinks = new SocialLinks(
+                "https://facebook.com/taro", null, null, null, null, null, null,
+                null, null, null, null, null, null, null);
+        List<CustomLink> customLinks = List.of(
+                new CustomLink("自分のブログ", "https://myblog.example.com"),
+                new CustomLink("ポートフォリオ", "https://portfolio.example.com"));
+
         UserProfileUpdateRequest request = new UserProfileUpdateRequest(
                 "太郎", "山田", "山田太郎", "taro",
                 "https://example.com", "自己紹介", "ja_JP",
-                "https://gravatar.com/avatar/xxx", "開発部", "エンジニア");
+                "https://gravatar.com/avatar/xxx", "開発部", "エンジニア",
+                socialLinks, customLinks);
 
         UserProfileResponse response = service.updateUserProfile(1L, request);
 
@@ -186,6 +197,29 @@ class UserServiceTest {
         assertEquals("開発部", response.department());
         assertEquals("エンジニア", response.position());
         assertEquals("ja_JP", response.locale());
+        assertEquals("https://facebook.com/taro", response.socialLinks().facebook());
+        assertEquals(2, response.customLinks().size());
+        assertEquals("自分のブログ", response.customLinks().get(0).label());
+        assertEquals("ポートフォリオ", response.customLinks().get(1).label());
+    }
+
+    @Test
+    void updateUserProfile_socialLinksとcustomLinksがnullでも更新できる() {
+        service = service();
+        User user = buildUser();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        UserProfileUpdateRequest request = new UserProfileUpdateRequest(
+                "太郎", "山田", "山田太郎", "taro",
+                "https://example.com", "自己紹介", "ja_JP",
+                "https://gravatar.com/avatar/xxx", "開発部", "エンジニア",
+                null, null);
+
+        UserProfileResponse response = service.updateUserProfile(1L, request);
+
+        assertEquals(null, response.socialLinks());
+        assertEquals(null, response.customLinks());
     }
 
     @Test
@@ -194,7 +228,7 @@ class UserServiceTest {
         when(userRepository.findById(99L)).thenReturn(Optional.empty());
 
         UserProfileUpdateRequest request = new UserProfileUpdateRequest(
-                null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null, null);
 
         assertThrows(UserNotFoundException.class, () -> service.updateUserProfile(99L, request));
     }

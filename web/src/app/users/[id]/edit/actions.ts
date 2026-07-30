@@ -1,13 +1,30 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { updateUserProfile } from "@/lib/apiClient";
+import { updateUserProfile, type CustomLink, type SocialLinks } from "@/lib/apiClient";
 import { requireSession } from "@/lib/session";
 
 export interface UpdateProfileState {
   error?: string;
   success?: boolean;
 }
+
+const SOCIAL_LINK_KEYS: (keyof SocialLinks)[] = [
+  "facebook",
+  "youtube",
+  "whatsapp",
+  "tiktok",
+  "instagram",
+  "wechat",
+  "x",
+  "threads",
+  "github",
+  "pinterest",
+  "meetup",
+  "line",
+  "linkedin",
+  "hatena",
+];
 
 export async function updateUserProfileAction(
   userId: number,
@@ -28,6 +45,18 @@ export async function updateUserProfileAction(
 
   const actor = { id: Number(session.user.id), role: session.user.role };
 
+  const customLinksJson = String(formData.get("customLinks") ?? "[]");
+  let customLinks: CustomLink[];
+  try {
+    customLinks = JSON.parse(customLinksJson);
+  } catch {
+    return { error: "カスタムリンクの解析に失敗しました。" };
+  }
+
+  const socialLinks = Object.fromEntries(
+    SOCIAL_LINK_KEYS.map((key) => [key, field(`socialLinks.${key}`)])
+  ) as unknown as SocialLinks;
+
   try {
     await updateUserProfile(
       userId,
@@ -42,6 +71,8 @@ export async function updateUserProfileAction(
         avatarUrl: field("avatarUrl"),
         department: field("department"),
         position: field("position"),
+        socialLinks,
+        customLinks,
       },
       actor
     );

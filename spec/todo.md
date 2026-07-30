@@ -158,6 +158,16 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
 - [ ] メニュー/各ページのアニメーション・トランジション効果(任意)
 - [ ] テスト用・本番用 WordPress サーバーの接続情報管理・暗号化方式(環境変数 vs DB)
 
+## Phase 9: Phase8フィードバック対応・UI改善・運用堅牢化
+
+- [x] [00-overview](phase9/00-overview.md) — 全体スコープ・決定事項・タスク一覧
+- [x] [01-header-fixed](phase9/01-header-fixed.md) — ヘッダーメニューのスクロール固定表示(`sticky top-0 z-40`、1行変更)
+- [x] [02-wordpress-provisioning-hardening](phase9/02-wordpress-provisioning-hardening.md) — WordPress新規構築の堅牢化(クリーンアップ・管理者ピッカー・言語選択。実際に`locale=en_US`で新規構築→英語UI確認→削除によるディレクトリ・DB完全クリーンアップまで実機確認済み。不正ロケール指定時の400応答も確認済み)
+- [x] [03-project-site-user-visibility](phase9/03-project-site-user-visibility.md) — プロジェクト⇔サイト⇔ユーザー可視化(新規`GET /api/project-users`のadmin認可・データ取得を実機確認済み)
+- [x] [04-user-profile-expansion](phase9/04-user-profile-expansion.md) — ユーザープロフィール拡充(SNSリンク・カスタムリンク・WP互換項目。V15マイグレーション適用・JSON型フィールドの実DB往復を実機確認済み)
+
+実装はすべて完了・バックエンド全テスト(`./gradlew test`)通過・フロントエンド型チェック/lint/`next build`通過・API経由での実機検証(WordPress実構築/削除、プロフィールJSON往復、project-users認可)まで確認済み。ヘッダー固定表示やフォームのUI操作(管理者ピッカー・言語選択・DisplayNameプルダウン・カスタムリンク追加削除)についてはブラウザでの目視確認が未実施(本セッションではブラウザ操作ツールが利用できなかったため)。
+
 ## 既存未決事項・スコープ外候補
 
 - [ ] リモート常時稼働化(自宅サーバー/VPS)対応・外部公開時のセキュリティ強化

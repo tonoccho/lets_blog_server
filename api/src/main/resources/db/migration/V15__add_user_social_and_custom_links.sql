@@ -1,0 +1,2 @@
+ALTER TABLE users ADD COLUMN social_links JSON NULL;
+ALTER TABLE users ADD COLUMN custom_links JSON NULL;

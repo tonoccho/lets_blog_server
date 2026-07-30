@@ -71,6 +71,7 @@ export async function createManagedWordPressSiteAction(
   const adminUser = String(formData.get("managedAdminUser") ?? "").trim();
   const adminEmail = String(formData.get("managedAdminEmail") ?? "").trim();
   const adminPassword = String(formData.get("managedAdminPassword") ?? "").trim();
+  const locale = String(formData.get("managedLocale") ?? "ja").trim();
 
   if (!name || !siteKey || !title || !adminUser || !adminEmail || !adminPassword) {
     return { error: "すべての項目を入力してください。" };
@@ -80,7 +81,7 @@ export async function createManagedWordPressSiteAction(
   const actor = session ? { id: Number(session.user.id), role: session.user.role } : undefined;
 
   try {
-    await createManagedWordPressSite({ name, siteKey, title, adminUser, adminEmail, adminPassword }, actor);
+    await createManagedWordPressSite({ name, siteKey, title, adminUser, adminEmail, adminPassword, locale }, actor);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

@@ -4,9 +4,12 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 @Entity
@@ -69,6 +72,14 @@ public class User {
 
     @Column(name = "position", length = 100)
     private String position;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "social_links", columnDefinition = "json")
+    private SocialLinks socialLinks;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "custom_links", columnDefinition = "json")
+    private List<CustomLink> customLinks;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

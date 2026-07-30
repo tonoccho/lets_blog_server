@@ -1,5 +1,10 @@
 package com.letsblog.api.dto;
 
+import com.letsblog.api.domain.CustomLink;
+import com.letsblog.api.domain.SocialLinks;
+
+import java.util.List;
+
 public record UserProfileUpdateRequest(
         String firstName,
         String lastName,
@@ -10,6 +15,8 @@ public record UserProfileUpdateRequest(
         String locale,
         String avatarUrl,
         String department,
-        String position
+        String position,
+        SocialLinks socialLinks,
+        List<CustomLink> customLinks
 ) {
 }

@@ -132,6 +132,8 @@ public class UserService {
         user.setAvatarUrl(request.avatarUrl());
         user.setDepartment(request.department());
         user.setPosition(request.position());
+        user.setSocialLinks(request.socialLinks());
+        user.setCustomLinks(request.customLinks());
 
         return UserProfileResponse.from(userRepository.save(user));
     }

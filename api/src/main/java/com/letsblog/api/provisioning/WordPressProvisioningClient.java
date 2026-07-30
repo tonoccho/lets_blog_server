@@ -57,7 +57,8 @@ public class WordPressProvisioningClient {
             String title,
             String adminUser,
             String adminEmail,
-            String adminPassword
+            String adminPassword,
+            String locale
     ) {
     }
 

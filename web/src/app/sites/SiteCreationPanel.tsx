@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import type { AppUser } from "@/lib/apiClient";
 import { SiteForm } from "./SiteForm";
 import { ManagedWordPressForm } from "./ManagedWordPressForm";
 
 type Mode = "external" | "managed-wordpress";
 
-export function SiteCreationPanel() {
+export function SiteCreationPanel({ users }: { users: AppUser[] }) {
   const [mode, setMode] = useState<Mode>("external");
 
   return (
@@ -31,7 +32,7 @@ export function SiteCreationPanel() {
           WordPressを新規構築
         </button>
       </div>
-      {mode === "external" ? <SiteForm /> : <ManagedWordPressForm />}
+      {mode === "external" ? <SiteForm /> : <ManagedWordPressForm users={users} />}
     </div>
   );
 }

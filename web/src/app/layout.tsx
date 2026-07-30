@@ -36,7 +36,7 @@ export default async function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-neutral-50 text-neutral-900">
-        <header className="border-b border-neutral-200 bg-white">
+        <header className="sticky top-0 z-40 border-b border-neutral-200 bg-white">
           <div className="mx-auto flex max-w-7xl items-center gap-6 px-4 py-3">
             <span className="shrink-0 font-semibold">Let&apos;s Blog Server</span>
             {session && (

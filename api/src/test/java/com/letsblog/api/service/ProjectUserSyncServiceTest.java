@@ -201,4 +201,23 @@ class ProjectUserSyncServiceTest {
         assertEquals("member@example.com", response.get(0).email());
         assertEquals("editor", response.get(0).wpRole());
     }
+
+    @Test
+    void listAllProjectUsers_全プロジェクトの紐付けを返す() {
+        ProjectUserSyncService service = service();
+        ProjectUser pu1 = new ProjectUser(1L, 2L, "editor");
+        ProjectUser pu2 = new ProjectUser(1L, 3L, "author");
+        ProjectUser pu3 = new ProjectUser(2L, 2L, "contributor");
+
+        when(projectUserRepository.findAll()).thenReturn(List.of(pu1, pu2, pu3));
+
+        List<com.letsblog.api.dto.ProjectUserSummaryResponse> response = service.listAllProjectUsers();
+
+        assertEquals(3, response.size());
+        assertEquals(1L, response.get(0).projectId());
+        assertEquals(2L, response.get(0).userId());
+        assertEquals("editor", response.get(0).wpRole());
+        assertEquals(2L, response.get(2).projectId());
+        assertEquals("contributor", response.get(2).wpRole());
+    }
 }

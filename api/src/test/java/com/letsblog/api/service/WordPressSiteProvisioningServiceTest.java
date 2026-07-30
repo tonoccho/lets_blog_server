@@ -10,6 +10,7 @@ import com.letsblog.api.repository.SiteRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -47,7 +48,7 @@ class WordPressSiteProvisioningServiceTest {
 
     private CreateManagedWordPressSiteRequest request() {
         return new CreateManagedWordPressSiteRequest(
-                "My Blog", "main", "My Blog", "admin", "admin@example.com", "s3cret-pass");
+                "My Blog", "main", "My Blog", "admin", "admin@example.com", "s3cret-pass", null);
     }
 
     @Test
@@ -95,6 +96,62 @@ class WordPressSiteProvisioningServiceTest {
 
         verify(provisioningClient).deprovision("main", "wp_main");
         verify(siteRepository, never()).save(any());
+    }
+
+    @Test
+    void createManagedSite_locale未指定の場合はjaがデフォルトで渡される() {
+        when(siteRepository.existsBySiteKey("main")).thenReturn(false);
+        when(provisioningClient.provision(any())).thenReturn(new WordPressProvisioningClient.ProvisionResult(
+                "https://localhost/sites/main", "admin", "app-pass-1234"));
+        SiteResponse response = new SiteResponse(1L, "My Blog", "main", CmsType.WORDPRESS,
+                "https://localhost/sites/main", LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false);
+        when(siteService.register(any(), eq(9L))).thenReturn(response);
+        Site site = new Site();
+        site.setId(1L);
+        site.setSiteKey("main");
+        when(siteRepository.findBySiteKey("main")).thenReturn(Optional.of(site));
+
+        service.createManagedSite(request(), 9L);
+
+        ArgumentCaptor<WordPressProvisioningClient.ProvisionCommand> captor =
+                ArgumentCaptor.forClass(WordPressProvisioningClient.ProvisionCommand.class);
+        verify(provisioningClient).provision(captor.capture());
+        assertEquals("ja", captor.getValue().locale());
+    }
+
+    @Test
+    void createManagedSite_locale指定時はそのままProvisionCommandへ伝搬する() {
+        when(siteRepository.existsBySiteKey("main")).thenReturn(false);
+        when(provisioningClient.provision(any())).thenReturn(new WordPressProvisioningClient.ProvisionResult(
+                "https://localhost/sites/main", "admin", "app-pass-1234"));
+        SiteResponse response = new SiteResponse(1L, "My Blog", "main", CmsType.WORDPRESS,
+                "https://localhost/sites/main", LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false);
+        when(siteService.register(any(), eq(9L))).thenReturn(response);
+        Site site = new Site();
+        site.setId(1L);
+        site.setSiteKey("main");
+        when(siteRepository.findBySiteKey("main")).thenReturn(Optional.of(site));
+
+        CreateManagedWordPressSiteRequest requestWithLocale = new CreateManagedWordPressSiteRequest(
+                "My Blog", "main", "My Blog", "admin", "admin@example.com", "s3cret-pass", "en_US");
+
+        service.createManagedSite(requestWithLocale, 9L);
+
+        ArgumentCaptor<WordPressProvisioningClient.ProvisionCommand> captor =
+                ArgumentCaptor.forClass(WordPressProvisioningClient.ProvisionCommand.class);
+        verify(provisioningClient).provision(captor.capture());
+        assertEquals("en_US", captor.getValue().locale());
+    }
+
+    @Test
+    void createManagedSite_provision呼び出し自体が失敗した場合はdeprovisionして例外を伝播する() {
+        when(siteRepository.existsBySiteKey("main")).thenReturn(false);
+        when(provisioningClient.provision(any())).thenThrow(new ProvisioningException("接続に失敗しました", null));
+
+        assertThrows(ProvisioningException.class, () -> service.createManagedSite(request(), 9L));
+
+        verify(provisioningClient).deprovision("main", "wp_main");
+        verify(siteService, never()).register(any(), any());
     }
 
     @Test

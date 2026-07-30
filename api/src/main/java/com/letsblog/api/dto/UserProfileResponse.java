@@ -1,6 +1,8 @@
 package com.letsblog.api.dto;
 
+import com.letsblog.api.domain.CustomLink;
 import com.letsblog.api.domain.Role;
+import com.letsblog.api.domain.SocialLinks;
 import com.letsblog.api.domain.User;
 
 import java.time.LocalDateTime;
@@ -21,6 +23,8 @@ public record UserProfileResponse(
         String avatarUrl,
         String department,
         String position,
+        SocialLinks socialLinks,
+        List<CustomLink> customLinks,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -40,6 +44,8 @@ public record UserProfileResponse(
                 user.getAvatarUrl(),
                 user.getDepartment(),
                 user.getPosition(),
+                user.getSocialLinks(),
+                user.getCustomLinks(),
                 user.getCreatedAt(),
                 user.getUpdatedAt()
         );

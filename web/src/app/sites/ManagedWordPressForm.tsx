@@ -1,11 +1,30 @@
 "use client";
 
 import { useActionState, useRef, useEffect } from "react";
+import type { AppUser } from "@/lib/apiClient";
 import { createManagedWordPressSiteAction, CreateManagedWordPressSiteState } from "./actions";
 
 const initialState: CreateManagedWordPressSiteState = {};
 
-export function ManagedWordPressForm() {
+const LOCALE_OPTIONS = [
+  { value: "ja", label: "日本語" },
+  { value: "en_US", label: "English (US)" },
+  { value: "en_GB", label: "English (UK)" },
+  { value: "zh_CN", label: "中文(简体)" },
+  { value: "zh_TW", label: "中文(繁體)" },
+  { value: "ko_KR", label: "한국어" },
+  { value: "fr_FR", label: "Français" },
+  { value: "de_DE", label: "Deutsch" },
+  { value: "es_ES", label: "Español" },
+  { value: "pt_BR", label: "Português" },
+];
+
+function deriveWpUsername(email: string): string {
+  const localPart = email.split("@")[0] ?? "";
+  return localPart.replace(/[^a-zA-Z0-9._-]/g, "");
+}
+
+export function ManagedWordPressForm({ users }: { users: AppUser[] }) {
   const [state, formAction, pending] = useActionState(createManagedWordPressSiteAction, initialState);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -14,6 +33,17 @@ export function ManagedWordPressForm() {
       formRef.current?.reset();
     }
   }, [state.success]);
+
+  const handleUserPick = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const userId = e.target.value;
+    if (!userId) return;
+    const user = users.find((u) => u.id === Number(userId));
+    if (!user || !formRef.current) return;
+    const userNameInput = formRef.current.elements.namedItem("managedAdminUser") as HTMLInputElement | null;
+    const emailInput = formRef.current.elements.namedItem("managedAdminEmail") as HTMLInputElement | null;
+    if (userNameInput) userNameInput.value = deriveWpUsername(user.email);
+    if (emailInput) emailInput.value = user.email;
+  };
 
   return (
     <form ref={formRef} action={formAction} className="space-y-3 rounded-lg border border-neutral-200 bg-white p-5">
@@ -27,6 +57,21 @@ export function ManagedWordPressForm() {
         <Field name="managedName" label="表示名" placeholder="My Blog" />
         <Field name="managedSiteKey" label="サイトキー(英数字・ハイフン)" placeholder="main" />
         <Field name="managedTitle" label="WordPressサイトタイトル" placeholder="My Blog" wide />
+        <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+          <span className="text-neutral-600">サーバー登録ユーザーから選択(任意)</span>
+          <select
+            onChange={handleUserPick}
+            defaultValue=""
+            className="rounded border border-neutral-300 px-3 py-2 text-sm"
+          >
+            <option value="">選択してください</option>
+            {users.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.email}
+              </option>
+            ))}
+          </select>
+        </label>
         <Field name="managedAdminUser" label="管理者ユーザー名" placeholder="admin" />
         <Field name="managedAdminEmail" label="管理者メールアドレス" placeholder="admin@example.com" type="email" />
         <Field
@@ -35,6 +80,13 @@ export function ManagedWordPressForm() {
           placeholder="8文字以上"
           type="password"
           wide
+        />
+        <Field
+          name="managedLocale"
+          label="WordPress言語"
+          isSelect
+          options={LOCALE_OPTIONS}
+          defaultValue="ja"
         />
       </div>
       {state.error && <p className="text-sm text-red-600">{state.error}</p>}
@@ -56,13 +108,39 @@ function Field({
   placeholder,
   type = "text",
   wide = false,
+  isSelect = false,
+  options,
+  defaultValue,
 }: {
   name: string;
   label: string;
   placeholder?: string;
   type?: string;
   wide?: boolean;
+  isSelect?: boolean;
+  options?: { value: string; label: string }[];
+  defaultValue?: string;
 }) {
+  if (isSelect) {
+    return (
+      <label className={`flex flex-col gap-1 text-sm ${wide ? "sm:col-span-2" : ""}`}>
+        <span className="text-neutral-600">{label}</span>
+        <select
+          name={name}
+          defaultValue={defaultValue}
+          required
+          className="rounded border border-neutral-300 px-3 py-2 text-sm"
+        >
+          {options?.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
   return (
     <label className={`flex flex-col gap-1 text-sm ${wide ? "sm:col-span-2" : ""}`}>
       <span className="text-neutral-600">{label}</span>

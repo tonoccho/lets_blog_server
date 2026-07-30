@@ -46,6 +46,7 @@ class UserControllerTest {
                 "太郎", "山田", "山田太郎", "taro",
                 "https://example.com", "自己紹介", "ja_JP",
                 "https://gravatar.com/avatar/xxx", "開発部", "エンジニア",
+                null, List.of(),
                 LocalDateTime.now(), LocalDateTime.now());
     }
 
@@ -75,7 +76,8 @@ class UserControllerTest {
         UserProfileUpdateRequest request = new UserProfileUpdateRequest(
                 "太郎", "山田", "山田太郎", "taro",
                 "https://example.com", "自己紹介", "ja_JP",
-                "https://gravatar.com/avatar/xxx", "開発部", "エンジニア");
+                "https://gravatar.com/avatar/xxx", "開発部", "エンジニア",
+                null, List.of());
         when(userService.updateUserProfile(1L, request)).thenReturn(buildProfile());
 
         UserProfileResponse response = controller.updateProfile(1L, request);
@@ -88,7 +90,7 @@ class UserControllerTest {
     void updateProfile_権限がなければForbidden() {
         UserController controller = controller();
         UserProfileUpdateRequest request = new UserProfileUpdateRequest(
-                null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null, null);
         doThrow(new ForbiddenException("この操作には本人またはadmin権限が必要です"))
                 .when(adminAuthorizationService).requireSelfOrAdmin(1L);
 

@@ -46,6 +46,7 @@ export interface ManagedWordPressSiteInput {
   adminUser: string;
   adminEmail: string;
   adminPassword: string;
+  locale: string;
 }
 
 export interface AuthenticatedUser {
@@ -282,6 +283,28 @@ export function deleteUser(id: number, actor?: ActorInfo): Promise<void> {
   return apiFetch<void>(`/api/users/${id}`, { method: 'DELETE', actor });
 }
 
+export interface SocialLinks {
+  facebook: string | null;
+  youtube: string | null;
+  whatsapp: string | null;
+  tiktok: string | null;
+  instagram: string | null;
+  wechat: string | null;
+  x: string | null;
+  threads: string | null;
+  github: string | null;
+  pinterest: string | null;
+  meetup: string | null;
+  line: string | null;
+  linkedin: string | null;
+  hatena: string | null;
+}
+
+export interface CustomLink {
+  label: string;
+  url: string;
+}
+
 export interface UserProfile {
   id: number;
   email: string;
@@ -297,6 +320,8 @@ export interface UserProfile {
   avatarUrl: string | null;
   department: string | null;
   position: string | null;
+  socialLinks: SocialLinks | null;
+  customLinks: CustomLink[] | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -312,6 +337,8 @@ export interface UserProfileInput {
   avatarUrl: string | null;
   department: string | null;
   position: string | null;
+  socialLinks: SocialLinks | null;
+  customLinks: CustomLink[] | null;
 }
 
 export function getUserProfile(id: number, actor?: ActorInfo): Promise<UserProfile> {
@@ -541,4 +568,14 @@ export function updateProjectUserRole(
 
 export function removeProjectUser(projectId: number, userId: number, actor?: ActorInfo): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}/users/${userId}`, { method: 'DELETE', actor });
+}
+
+export interface ProjectUserSummary {
+  projectId: number;
+  userId: number;
+  wpRole: string;
+}
+
+export function listAllProjectUsers(actor?: ActorInfo): Promise<ProjectUserSummary[]> {
+  return apiFetch<ProjectUserSummary[]>('/api/project-users', { actor });
 }

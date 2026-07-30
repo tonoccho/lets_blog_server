@@ -9,6 +9,7 @@ public record CreateManagedWordPressSiteRequest(
         @NotBlank String title,
         @NotBlank String adminUser,
         @NotBlank @Email String adminEmail,
-        @NotBlank String adminPassword
+        @NotBlank String adminPassword,
+        String locale
 ) {
 }

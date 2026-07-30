@@ -53,6 +53,26 @@ function runWp(array $args): array
     return runCommand(array_merge(['php', '-d', 'memory_limit=512M', '/usr/local/bin/wp'], $args));
 }
 
+/**
+ * core download以降の失敗時に呼び出す。既に作成済みのディレクトリ・DBを
+ * (存在すれば)削除してから、通常のrespond()と同じ形式でエラーを返す。
+ * rm -rf/DROP DATABASE IF EXISTSはいずれも冪等なため、/deprovisionとの二重実行でも問題ない。
+ */
+function cleanupAndRespond(
+    int $status,
+    array $body,
+    string $sitePath,
+    string $dbName,
+    string $dbHost,
+    string $rootPassword
+): void {
+    runCommand(['rm', '-rf', $sitePath]);
+    runCommand(['mysql', '--skip-ssl', '-h', $dbHost, '-uroot', "-p$rootPassword", '-e', "DROP DATABASE IF EXISTS `$dbName`;"]);
+    respond($status, $body);
+}
+
+const ALLOWED_LOCALES = ['ja', 'en_US', 'en_GB', 'zh_CN', 'zh_TW', 'ko_KR', 'fr_FR', 'de_DE', 'es_ES', 'pt_BR'];
+
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
 $rawBody = file_get_contents('php://input');
 $input = json_decode($rawBody === false ? '' : $rawBody, true);
@@ -72,9 +92,14 @@ if ($path === '/provision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $adminUser = (string) ($input['adminUser'] ?? '');
     $adminEmail = (string) ($input['adminEmail'] ?? '');
     $adminPassword = (string) ($input['adminPassword'] ?? '');
+    $locale = (string) ($input['locale'] ?? 'ja');
 
     if (!isValidSlug($slug) || !isValidDbName($dbName) || $adminUser === '' || $adminEmail === '' || $adminPassword === '') {
         respond(400, ['error' => 'パラメータが不正です']);
+    }
+
+    if (!in_array($locale, ALLOWED_LOCALES, true)) {
+        respond(400, ['error' => 'ロケールが無効です']);
     }
 
     $sitePath = "/var/www/html/sites/$slug";
@@ -99,9 +124,9 @@ if ($path === '/provision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         respond(500, ['error' => 'データベース作成に失敗しました', 'detail' => $out]);
     }
 
-    [$code, $out] = runWp(['core', 'download', "--path=$sitePath", '--allow-root']);
+    [$code, $out] = runWp(['core', 'download', "--path=$sitePath", "--locale=$locale", '--allow-root']);
     if ($code !== 0) {
-        respond(500, ['error' => 'WordPressコアのダウンロードに失敗しました', 'detail' => $out]);
+        cleanupAndRespond(500, ['error' => 'WordPressコアのダウンロードに失敗しました', 'detail' => $out], $sitePath, $dbName, $dbHost, $rootPassword);
     }
 
     [$code, $out] = runWp([
@@ -114,7 +139,7 @@ if ($path === '/provision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         '--allow-root',
     ]);
     if ($code !== 0) {
-        respond(500, ['error' => 'wp-config.php作成に失敗しました', 'detail' => $out]);
+        cleanupAndRespond(500, ['error' => 'wp-config.php作成に失敗しました', 'detail' => $out], $sitePath, $dbName, $dbHost, $rootPassword);
     }
 
     // このWordPressインスタンスは常駐wordpressコンテナ内でのみ動作し、外部からは
@@ -146,14 +171,14 @@ if ($path === '/provision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         '--allow-root',
     ]);
     if ($code !== 0) {
-        respond(500, ['error' => 'WordPressのインストールに失敗しました', 'detail' => $out]);
+        cleanupAndRespond(500, ['error' => 'WordPressのインストールに失敗しました', 'detail' => $out], $sitePath, $dbName, $dbHost, $rootPassword);
     }
 
     // パーマリンクを「投稿名」構造にする(デフォルトの「基本」のままでは
     // /wp-json/ のようなpretty permalink形式のREST APIパスが404になるため必須)。
     [$code, $out] = runWp(['rewrite', 'structure', '/%postname%/', "--path=$sitePath", '--allow-root']);
     if ($code !== 0) {
-        respond(500, ['error' => 'パーマリンク設定に失敗しました', 'detail' => $out]);
+        cleanupAndRespond(500, ['error' => 'パーマリンク設定に失敗しました', 'detail' => $out], $sitePath, $dbName, $dbHost, $rootPassword);
     }
 
     // wp-cliはCLI SAPIで動作するためapache_get_modules()でmod_rewriteを検出できず、
@@ -178,7 +203,7 @@ if ($path === '/provision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $adminUser, 'letsblog', '--porcelain', '--allow-root',
     ]);
     if ($code !== 0) {
-        respond(500, ['error' => 'アプリケーションパスワードの発行に失敗しました', 'detail' => $out]);
+        cleanupAndRespond(500, ['error' => 'アプリケーションパスワードの発行に失敗しました', 'detail' => $out], $sitePath, $dbName, $dbHost, $rootPassword);
     }
     $applicationPassword = trim($out);
 
