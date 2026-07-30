@@ -8,7 +8,9 @@ import {
   addProjectUser,
   updateProjectUserRole,
   removeProjectUser,
+  syncProjectEnvironment,
   ProjectEnvironment,
+  EnvironmentSyncTarget,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 
@@ -124,4 +126,41 @@ export async function removeProjectUserAction(projectId: number, userId: number)
     role: session.user.role,
   });
   revalidatePath(`/projects/${projectId}`);
+}
+
+export interface SyncEnvironmentState {
+  error?: string;
+  success?: boolean;
+}
+
+export async function syncEnvironmentAction(
+  projectId: number,
+  _prevState: SyncEnvironmentState,
+  formData: FormData
+): Promise<SyncEnvironmentState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const from = String(formData.get("from") ?? "") as ProjectEnvironment;
+  const to = String(formData.get("to") ?? "") as ProjectEnvironment;
+  const targets = formData.getAll("targets") as EnvironmentSyncTarget[];
+
+  if (!from || !to) {
+    return { error: "同期元・同期先の環境を選択してください。" };
+  }
+  if (from === to) {
+    return { error: "同期元と同期先には異なる環境を指定してください。" };
+  }
+  if (targets.length === 0) {
+    return { error: "同期する対象(テーマ/プラグイン/DB)を1つ以上選択してください。" };
+  }
+
+  try {
+    await syncProjectEnvironment(projectId, { from, to, targets }, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  return { success: true };
 }

@@ -550,6 +550,21 @@ export function unbindProjectEnvironment(
   return apiFetch<Project>(`/api/projects/${id}/environments/${environment}`, { method: 'DELETE', actor });
 }
 
+export type EnvironmentSyncTarget = "themes" | "plugins" | "db";
+
+export function syncProjectEnvironment(
+  id: number,
+  input: { from: ProjectEnvironment; to: ProjectEnvironment; targets: EnvironmentSyncTarget[] },
+  actor?: ActorInfo
+): Promise<void> {
+  return apiFetch<void>(`/api/projects/${id}/environments/sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
 export interface ProjectUser {
   userId: number;
   email: string | null;

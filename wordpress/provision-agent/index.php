@@ -216,6 +216,84 @@ if ($path === '/provision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     ]);
 }
 
+const ALLOWED_SYNC_TARGETS = ['themes', 'plugins', 'db'];
+
+if ($path === '/sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $fromSlug = (string) ($input['fromSlug'] ?? '');
+    $fromDbName = (string) ($input['fromDbName'] ?? '');
+    $toSlug = (string) ($input['toSlug'] ?? '');
+    $toDbName = (string) ($input['toDbName'] ?? '');
+    $targets = is_array($input['targets'] ?? null) ? array_values($input['targets']) : [];
+
+    if (!isValidSlug($fromSlug) || !isValidSlug($toSlug) || !isValidDbName($fromDbName) || !isValidDbName($toDbName)) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    if ($fromSlug === $toSlug) {
+        respond(400, ['error' => '同期元と同期先には異なるサイトを指定してください']);
+    }
+    if (empty($targets) || !empty(array_diff($targets, ALLOWED_SYNC_TARGETS))) {
+        respond(400, ['error' => 'targetsが不正です(themes/plugins/dbのいずれかを指定してください)']);
+    }
+
+    $fromPath = "/var/www/html/sites/$fromSlug";
+    $toPath = "/var/www/html/sites/$toSlug";
+    if (!is_dir($fromPath) || !is_dir($toPath)) {
+        respond(404, ['error' => '同期元または同期先のサイトが見つかりません']);
+    }
+
+    $backupDir = "/var/www/html/backups/$toSlug";
+    runCommand(['mkdir', '-p', $backupDir]);
+    $timestamp = date('Ymd-His');
+
+    foreach (['themes', 'plugins'] as $type) {
+        if (!in_array($type, $targets, true)) {
+            continue;
+        }
+        $fromContentPath = "$fromPath/wp-content/$type";
+        $toContentPath = "$toPath/wp-content/$type";
+        if (!is_dir($fromContentPath)) {
+            continue;
+        }
+        runCommand(['tar', '-czf', "$backupDir/{$type}-{$timestamp}.tar.gz", '-C', "$toPath/wp-content", $type]);
+        runCommand(['rm', '-rf', $toContentPath]);
+        [$code, $out] = runCommand(['cp', '-r', $fromContentPath, $toContentPath]);
+        if ($code !== 0) {
+            respond(500, ['error' => "{$type}の同期に失敗しました", 'detail' => $out]);
+        }
+    }
+
+    if (in_array('db', $targets, true)) {
+        // 上書きされる側(同期先)のバックアップを先に取得しておく
+        runCommand(['sh', '-c',
+            'mysqldump --skip-ssl -h' . escapeshellarg($dbHost) . ' -uroot -p' . escapeshellarg($rootPassword)
+                . ' ' . escapeshellarg($toDbName) . ' > ' . escapeshellarg("$backupDir/db-{$timestamp}.sql")]);
+
+        // 各環境の管理者・プロジェクトメンバーアカウント(wp_users/wp_usermeta)は
+        // ProjectUserSyncServiceが環境ごとに個別管理しているため、DB同期の対象から除外する
+        $dumpCmd = 'mysqldump --skip-ssl -h' . escapeshellarg($dbHost) . ' -uroot -p' . escapeshellarg($rootPassword)
+            . ' --ignore-table=' . escapeshellarg("$fromDbName.wp_users")
+            . ' --ignore-table=' . escapeshellarg("$fromDbName.wp_usermeta")
+            . ' ' . escapeshellarg($fromDbName);
+        $importCmd = 'mysql --skip-ssl -h' . escapeshellarg($dbHost) . ' -uroot -p' . escapeshellarg($rootPassword)
+            . ' ' . escapeshellarg($toDbName);
+        [$code, $out] = runCommand(['sh', '-c', "$dumpCmd | $importCmd"]);
+        if ($code !== 0) {
+            respond(500, ['error' => 'DBの同期に失敗しました', 'detail' => $out]);
+        }
+
+        // コピー元のURLがwp_options等に焼き込まれたままになるため、コピー先自身のURLへ書き戻す
+        $fromUrl = "https://localhost/sites/$fromSlug";
+        $toUrl = "https://localhost/sites/$toSlug";
+        [$code, $out] = runWp(['search-replace', $fromUrl, $toUrl, '--all-tables', "--path=$toPath", '--allow-root']);
+        if ($code !== 0) {
+            respond(500, ['error' => 'URL書き換え(search-replace)に失敗しました', 'detail' => $out]);
+        }
+    }
+
+    runCommand(['chown', '-R', 'www-data:www-data', $toPath]);
+    respond(200, ['status' => 'ok']);
+}
+
 if ($path === '/deprovision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = (string) ($input['slug'] ?? '');
     $dbName = (string) ($input['dbName'] ?? '');

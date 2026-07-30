@@ -6,8 +6,10 @@ import com.letsblog.api.dto.ProjectEnvironmentBindRequest;
 import com.letsblog.api.dto.ProjectResponse;
 import com.letsblog.api.dto.ProjectUpdateRequest;
 import com.letsblog.api.dto.ProjectUserResponse;
+import com.letsblog.api.dto.SyncEnvironmentRequest;
 import com.letsblog.api.dto.UpdateProjectUserRequest;
 import com.letsblog.api.service.AdminAuthorizationService;
+import com.letsblog.api.service.ProjectEnvironmentSyncService;
 import com.letsblog.api.service.ProjectService;
 import com.letsblog.api.service.ProjectUserSyncService;
 import jakarta.validation.Valid;
@@ -23,14 +25,17 @@ public class ProjectController {
 
     private final ProjectService projectService;
     private final ProjectUserSyncService projectUserSyncService;
+    private final ProjectEnvironmentSyncService projectEnvironmentSyncService;
     private final AdminAuthorizationService adminAuthorizationService;
 
     public ProjectController(
             ProjectService projectService,
             ProjectUserSyncService projectUserSyncService,
+            ProjectEnvironmentSyncService projectEnvironmentSyncService,
             AdminAuthorizationService adminAuthorizationService) {
         this.projectService = projectService;
         this.projectUserSyncService = projectUserSyncService;
+        this.projectEnvironmentSyncService = projectEnvironmentSyncService;
         this.adminAuthorizationService = adminAuthorizationService;
     }
 
@@ -75,6 +80,14 @@ public class ProjectController {
     public ProjectResponse unbindEnvironment(@PathVariable Long id, @PathVariable String environment) {
         adminAuthorizationService.requireAdmin();
         return projectService.unbindEnvironment(id, environment);
+    }
+
+    @PostMapping("/{id}/environments/sync")
+    public ResponseEntity<Void> syncEnvironment(
+            @PathVariable Long id, @Valid @RequestBody SyncEnvironmentRequest request) {
+        adminAuthorizationService.requireAdmin();
+        projectEnvironmentSyncService.sync(id, request.from(), request.to(), request.targets());
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/{id}/users")

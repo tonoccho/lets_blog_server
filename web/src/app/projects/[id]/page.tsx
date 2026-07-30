@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getProject, listSites, listProjectUsers, listUsers } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 import { EnvironmentSlot } from "./EnvironmentSlot";
+import { EnvironmentSyncPanel } from "./EnvironmentSyncPanel";
 import { ProjectNameForm } from "./ProjectNameForm";
 import { DeleteProjectButton } from "./DeleteProjectButton";
 import { ProjectUserManager } from "./ProjectUserManager";
@@ -50,6 +51,8 @@ export default async function ProjectDetailPage({
           candidateSites={sites}
         />
       </div>
+
+      <EnvironmentSyncPanel projectId={project.id} project={project} />
 
       <div className="space-y-4">
         <h2 className="text-lg font-semibold">プロジェクトメンバー</h2>
