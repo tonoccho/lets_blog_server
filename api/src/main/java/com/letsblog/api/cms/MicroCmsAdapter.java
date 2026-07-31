@@ -3,6 +3,7 @@ package com.letsblog.api.cms;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -23,6 +24,7 @@ import java.util.List;
  * WordPressと同様の「検索して無ければ作成」を行う。
  */
 @Component
+@Slf4j
 public class MicroCmsAdapter implements CmsAdapter {
 
     private static final String API_KEY_HEADER = "X-MICROCMS-API-KEY";
@@ -187,15 +189,20 @@ public class MicroCmsAdapter implements CmsAdapter {
     }
 
     @Override
-    public boolean testConnection(CmsCredentials credentials) {
+    public ConnectionCheckResult testConnection(CmsCredentials credentials) {
         CmsCredentials.MicroCmsCredentials creds = (CmsCredentials.MicroCmsCredentials) credentials;
         RestClient client = buildContentApiClient(creds);
         String url = contentApiUrl(creds, creds.postsEndpoint()) + "?limit=1";
         try {
             client.get().uri(url).retrieve().toBodilessEntity();
-            return true;
-        } catch (RestClientResponseException | ResourceAccessException e) {
-            return false;
+            return ConnectionCheckResult.success();
+        } catch (RestClientResponseException e) {
+            log.warn("microCMS疎通確認に失敗しました (serviceId={}, url={}): {} {}",
+                    creds.serviceId(), url, e.getStatusCode(), e.getResponseBodyAsString());
+            return ConnectionCheckResult.failure("HTTP " + e.getStatusCode().value() + " " + e.getStatusText());
+        } catch (ResourceAccessException e) {
+            log.warn("microCMS疎通確認に失敗しました (serviceId={}, url={}): {}", creds.serviceId(), url, e.getMessage());
+            return ConnectionCheckResult.failure(e.getMessage());
         }
     }
 

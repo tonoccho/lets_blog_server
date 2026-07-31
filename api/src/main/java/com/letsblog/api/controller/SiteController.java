@@ -1,8 +1,13 @@
 package com.letsblog.api.controller;
 
 import com.letsblog.api.dto.CreateManagedWordPressSiteRequest;
+import com.letsblog.api.dto.SiteConnectionCheckResult;
 import com.letsblog.api.dto.SiteRegisterRequest;
 import com.letsblog.api.dto.SiteResponse;
+import com.letsblog.api.dto.SiteUpdateRequest;
+import com.letsblog.api.dto.SshKeyPairRequest;
+import com.letsblog.api.dto.SshKeyPairResponse;
+import com.letsblog.api.crypto.SshKeyGenerationService;
 import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.CurrentActorService;
 import com.letsblog.api.service.ProvisioningService;
@@ -13,6 +18,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -24,16 +30,19 @@ public class SiteController {
     private final CurrentActorService currentActorService;
     private final AdminAuthorizationService adminAuthorizationService;
     private final WordPressSiteProvisioningService wordPressSiteProvisioningService;
+    private final SshKeyGenerationService sshKeyGenerationService;
 
     public SiteController(
             SiteService siteService,
             CurrentActorService currentActorService,
             AdminAuthorizationService adminAuthorizationService,
-            WordPressSiteProvisioningService wordPressSiteProvisioningService) {
+            WordPressSiteProvisioningService wordPressSiteProvisioningService,
+            SshKeyGenerationService sshKeyGenerationService) {
         this.siteService = siteService;
         this.currentActorService = currentActorService;
         this.adminAuthorizationService = adminAuthorizationService;
         this.wordPressSiteProvisioningService = wordPressSiteProvisioningService;
+        this.sshKeyGenerationService = sshKeyGenerationService;
     }
 
     @PostMapping
@@ -53,6 +62,29 @@ public class SiteController {
     @GetMapping
     public List<SiteResponse> list() {
         return siteService.list();
+    }
+
+    @PostMapping("/ssh-keypair")
+    public SshKeyPairResponse generateSshKeyPair(@RequestBody(required = false) SshKeyPairRequest request) {
+        adminAuthorizationService.requireAdmin();
+        String comment = (request != null && request.comment() != null) ? request.comment() : "letsblog";
+        return SshKeyPairResponse.from(sshKeyGenerationService.generateEd25519(comment));
+    }
+
+    @PutMapping("/{id}")
+    public SiteResponse update(@PathVariable Long id, @RequestBody SiteUpdateRequest request) {
+        adminAuthorizationService.requireAdmin();
+        return siteService.update(id, request);
+    }
+
+    @PostMapping("/{id}/test-connection")
+    public Map<String, Object> testConnection(@PathVariable Long id) {
+        SiteConnectionCheckResult result = siteService.checkConnection(id);
+        Map<String, Object> response = new HashMap<>();
+        response.put("connectionCheckStatus", result.connectionOk() ? "SUCCESS" : "FAILED");
+        response.put("hasAdminCapability", result.hasAdminCapability());
+        response.put("failureReason", result.failureReason());
+        return response;
     }
 
     @DeleteMapping("/{id}")

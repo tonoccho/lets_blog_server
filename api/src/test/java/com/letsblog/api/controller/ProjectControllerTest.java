@@ -6,9 +6,11 @@ import com.letsblog.api.dto.ProjectEnvironmentBindRequest;
 import com.letsblog.api.dto.ProjectResponse;
 import com.letsblog.api.dto.ProjectUpdateRequest;
 import com.letsblog.api.dto.ProjectUserResponse;
+import com.letsblog.api.dto.SyncEnvironmentRequest;
 import com.letsblog.api.dto.UpdateProjectUserRequest;
 import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.ForbiddenException;
+import com.letsblog.api.service.ProjectEnvironmentSyncService;
 import com.letsblog.api.service.ProjectService;
 import com.letsblog.api.service.ProjectUserSyncService;
 import org.junit.jupiter.api.Test;
@@ -36,10 +38,14 @@ class ProjectControllerTest {
     private ProjectUserSyncService projectUserSyncService;
 
     @Mock
+    private ProjectEnvironmentSyncService projectEnvironmentSyncService;
+
+    @Mock
     private AdminAuthorizationService adminAuthorizationService;
 
     private ProjectController controller() {
-        return new ProjectController(projectService, projectUserSyncService, adminAuthorizationService);
+        return new ProjectController(
+                projectService, projectUserSyncService, projectEnvironmentSyncService, adminAuthorizationService);
     }
 
     private ProjectResponse buildResponse() {
@@ -120,6 +126,27 @@ class ProjectControllerTest {
 
         verify(adminAuthorizationService).requireAdmin();
         verify(projectService).unbindEnvironment(1L, "local");
+    }
+
+    @Test
+    void syncEnvironment_admin権限があれば同期できる() {
+        ProjectController controller = controller();
+        SyncEnvironmentRequest request = new SyncEnvironmentRequest("local", "test", List.of("themes", "db"));
+
+        ResponseEntity<Void> response = controller.syncEnvironment(1L, request);
+
+        assertEquals(204, response.getStatusCode().value());
+        verify(adminAuthorizationService).requireAdmin();
+        verify(projectEnvironmentSyncService).sync(1L, "local", "test", List.of("themes", "db"));
+    }
+
+    @Test
+    void syncEnvironment_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        SyncEnvironmentRequest request = new SyncEnvironmentRequest("local", "test", List.of("db"));
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.syncEnvironment(1L, request));
     }
 
     @Test

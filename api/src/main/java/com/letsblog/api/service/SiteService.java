@@ -8,12 +8,15 @@ import com.letsblog.api.cms.CmsAdapter;
 import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.CmsType;
+import com.letsblog.api.cms.ConnectionCheckResult;
 import com.letsblog.api.crypto.CredentialCipher;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.domain.User;
+import com.letsblog.api.dto.SiteConnectionCheckResult;
 import com.letsblog.api.dto.SiteRegisterRequest;
 import com.letsblog.api.dto.SiteResponse;
+import com.letsblog.api.dto.SiteUpdateRequest;
 import com.letsblog.api.repository.SiteRepository;
 import com.letsblog.api.repository.UserRepository;
 import lombok.extern.slf4j.Slf4j;
@@ -21,6 +24,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -76,17 +80,21 @@ public class SiteService {
                     provisioningResult.authorError);
         }
 
+        ConnectionCheckResult connectionResult = runConnectionCheck(request.cmsType(), request.credentials());
+        Map<String, String> credentialsToStore = shouldPinHostKeyFingerprint(request.credentials(), connectionResult)
+                ? withObservedHostKeyFingerprint(request.credentials(), connectionResult)
+                : request.credentials();
+
         Site site = new Site();
         site.setName(request.name());
         site.setSiteKey(request.siteKey());
         site.setCmsType(request.cmsType());
         site.setBaseUrl(resolveDisplayBaseUrl(request.cmsType(), request.credentials()));
-        site.setCredentialsEncrypted(credentialCipher.encrypt(writeCredentialsJson(request.credentials())));
+        site.setCredentialsEncrypted(credentialCipher.encrypt(writeCredentialsJson(credentialsToStore)));
 
         Site saved = siteRepository.save(site);
-        boolean connectionOk = testConnection(request.cmsType(), request.credentials());
 
-        return SiteResponse.from(saved, connectionOk);
+        return SiteResponse.from(saved, connectionResult.ok());
     }
 
     /**
@@ -109,14 +117,31 @@ public class SiteService {
         return userRepository.findById(actorId).map(User::getEmail).orElse(null);
     }
 
-    private boolean testConnection(CmsType cmsType, Map<String, String> credentialsMap) {
+    private ConnectionCheckResult runConnectionCheck(CmsType cmsType, Map<String, String> credentialsMap) {
         try {
             CmsCredentials credentials = buildCredentialsFromMap(cmsType, credentialsMap);
             CmsAdapter adapter = cmsAdapterFactory.resolve(cmsType);
             return adapter.testConnection(credentials);
         } catch (Exception e) {
-            return false;
+            log.warn("疎通確認に失敗しました (cmsType={}): {}", cmsType, e.getMessage(), e);
+            return ConnectionCheckResult.failure(e.getMessage());
         }
+    }
+
+    /**
+     * SSHトランスポートのホスト鍵は初回接続時にTOFUで受理される。まだ`sshHostKeyFingerprint`が
+     * 保存されておらず、かつ疎通確認が成功してfingerprintが観測された場合のみピン留め対象とする
+     * (以後の接続はこのfingerprintとの完全一致のみ許可され、なりすましを検知できるようになる)。
+     */
+    private boolean shouldPinHostKeyFingerprint(Map<String, String> credentials, ConnectionCheckResult result) {
+        return result.ok() && result.observedHostKeyFingerprint() != null
+                && !StringUtils.hasText(credentials.get("sshHostKeyFingerprint"));
+    }
+
+    private Map<String, String> withObservedHostKeyFingerprint(Map<String, String> credentials, ConnectionCheckResult result) {
+        Map<String, String> updated = new HashMap<>(credentials);
+        updated.put("sshHostKeyFingerprint", result.observedHostKeyFingerprint());
+        return updated;
     }
 
     @Transactional(readOnly = true)
@@ -133,37 +158,117 @@ public class SiteService {
     @Transactional(readOnly = true)
     public CmsCredentials getCredentials(String siteKey) {
         Site site = getBySiteKey(siteKey);
+        return buildCredentialsFromMap(site.getCmsType(), getRawCredentials(site));
+    }
 
-        // 新規登録サイト(汎用カラム)を優先的に使う
+    /**
+     * サイトの認証情報を復号し、生のMapとして返す(汎用列を優先し、Phase2以前のレガシー列にフォールバック)。
+     * 編集(update)時に既存値へのpatchを行うために使う。
+     */
+    private Map<String, String> getRawCredentials(Site site) {
         if (site.getCredentialsEncrypted() != null) {
-            Map<String, String> credentials = readCredentialsJson(credentialCipher.decrypt(site.getCredentialsEncrypted()));
-            return buildCredentialsFromMap(site.getCmsType(), credentials);
+            return readCredentialsJson(credentialCipher.decrypt(site.getCredentialsEncrypted()));
         }
 
-        // 既存WordPressサイト(Phase2以前に登録されたもの)からのフォールバック
         if (site.getWpUsername() != null && site.getWpAppPasswordEncrypted() != null) {
-            String appPassword = credentialCipher.decrypt(site.getWpAppPasswordEncrypted());
-            return new CmsCredentials.WordPressCredentials(site.getBaseUrl(), site.getWpUsername(), appPassword);
+            Map<String, String> credentials = new HashMap<>();
+            credentials.put("baseUrl", site.getBaseUrl());
+            credentials.put("username", site.getWpUsername());
+            credentials.put("appPassword", credentialCipher.decrypt(site.getWpAppPasswordEncrypted()));
+            return credentials;
         }
 
-        throw new IllegalStateException("サイト '" + siteKey + "' の認証情報が無効です");
+        throw new IllegalStateException("サイト '" + site.getSiteKey() + "' の認証情報が無効です");
+    }
+
+    /**
+     * サイトの表示名・認証情報を編集する。credentialsは指定されたキーのみ既存値へ上書きする部分patch方式。
+     * managedWordpressサイトの認証情報はインフラ側で自動管理されているため編集不可。
+     * レガシー列(wpUsername/wpAppPasswordEncrypted)のみを持つサイトを編集した場合、
+     * この機会に汎用のcredentialsEncrypted列へ統合する。
+     */
+    @Transactional
+    public SiteResponse update(Long id, SiteUpdateRequest request) {
+        Site site = siteRepository.findById(id)
+                .orElseThrow(() -> new SiteNotFoundException("id " + id + " のサイトは登録されていません"));
+
+        if (StringUtils.hasText(request.name())) {
+            site.setName(request.name());
+        }
+
+        Boolean connectionOk = null;
+        if (request.credentials() != null && !request.credentials().isEmpty()) {
+            if (site.isManagedWordpress()) {
+                throw new IllegalArgumentException("自動構築されたWordPressサイトの認証情報は編集できません");
+            }
+            Map<String, String> merged = new HashMap<>(getRawCredentials(site));
+            merged.putAll(request.credentials());
+            validateCredentials(site.getCmsType(), merged);
+
+            ConnectionCheckResult connectionResult = runConnectionCheck(site.getCmsType(), merged);
+            Map<String, String> credentialsToStore = shouldPinHostKeyFingerprint(merged, connectionResult)
+                    ? withObservedHostKeyFingerprint(merged, connectionResult)
+                    : merged;
+            site.setCredentialsEncrypted(credentialCipher.encrypt(writeCredentialsJson(credentialsToStore)));
+            connectionOk = connectionResult.ok();
+        }
+
+        Site saved = siteRepository.save(site);
+        return connectionOk != null ? SiteResponse.from(saved, connectionOk) : SiteResponse.from(saved);
+    }
+
+    /**
+     * 既存サイトの疎通確認を再実行する(接続結果自体は永続化しない、リクエストの都度計算)。
+     * ただしSSHトランスポートで初回接続のホスト鍵fingerprintが新たに観測された場合のみ、
+     * 以後のなりすまし検知のためcredentialsへ書き戻して保存する。
+     * 接続に成功したWordPressサイトについては、著者(ユーザー)作成に必要な管理者権限の有無も判定する。
+     */
+    @Transactional
+    public SiteConnectionCheckResult checkConnection(Long id) {
+        Site site = siteRepository.findById(id)
+                .orElseThrow(() -> new SiteNotFoundException("id " + id + " のサイトは登録されていません"));
+        try {
+            Map<String, String> rawCredentials = getRawCredentials(site);
+            CmsCredentials credentials = buildCredentialsFromMap(site.getCmsType(), rawCredentials);
+            CmsAdapter adapter = cmsAdapterFactory.resolve(site.getCmsType());
+            ConnectionCheckResult connectionCheckResult = adapter.testConnection(credentials);
+
+            if (shouldPinHostKeyFingerprint(rawCredentials, connectionCheckResult)) {
+                Map<String, String> updated = withObservedHostKeyFingerprint(rawCredentials, connectionCheckResult);
+                site.setCredentialsEncrypted(credentialCipher.encrypt(writeCredentialsJson(updated)));
+                siteRepository.save(site);
+            }
+
+            Boolean hasAdminCapability = (connectionCheckResult.ok() && site.getCmsType() == CmsType.WORDPRESS)
+                    ? adapter.hasAuthorProvisioningCapability(credentials) : null;
+            return new SiteConnectionCheckResult(connectionCheckResult.ok(), hasAdminCapability, connectionCheckResult.failureReason());
+        } catch (Exception e) {
+            log.warn("疎通確認に失敗しました (siteId={}, siteKey={}): {}", id, site.getSiteKey(), e.getMessage(), e);
+            return new SiteConnectionCheckResult(false, null, e.getMessage());
+        }
     }
 
     private void validateCredentials(CmsType cmsType, Map<String, String> credentials) {
-        for (String key : requiredCredentialKeys(cmsType)) {
+        for (String key : requiredCredentialKeys(cmsType, credentials)) {
             if (!StringUtils.hasText(credentials.get(key))) {
                 throw new IllegalArgumentException(cmsType.displayName() + ": " + key + " は必須です");
             }
         }
     }
 
-    private List<String> requiredCredentialKeys(CmsType cmsType) {
+    private List<String> requiredCredentialKeys(CmsType cmsType, Map<String, String> credentials) {
         return switch (cmsType) {
-            case WORDPRESS -> List.of("baseUrl", "username", "appPassword");
+            case WORDPRESS -> isSshTransport(credentials)
+                    ? List.of("baseUrl", "transport", "sshHost", "sshUser", "wpPath", "sshPrivateKeyPem")
+                    : List.of("baseUrl", "username", "appPassword");
             case MICROCMS -> List.of(
                     "serviceId", "apiKey", "managementApiKey",
                     "postsEndpoint", "categoriesEndpoint", "tagsEndpoint");
         };
+    }
+
+    private boolean isSshTransport(Map<String, String> credentials) {
+        return "SSH".equalsIgnoreCase(credentials.get("transport"));
     }
 
     private String resolveDisplayBaseUrl(CmsType cmsType, Map<String, String> credentials) {
@@ -178,7 +283,14 @@ public class SiteService {
             case WORDPRESS -> new CmsCredentials.WordPressCredentials(
                     credentials.get("baseUrl"),
                     credentials.get("username"),
-                    credentials.get("appPassword"));
+                    credentials.get("appPassword"),
+                    credentials.getOrDefault("transport", "REST"),
+                    credentials.get("sshHost"),
+                    parseSshPort(credentials.get("sshPort")),
+                    credentials.get("sshUser"),
+                    credentials.get("wpPath"),
+                    credentials.get("sshPrivateKeyPem"),
+                    credentials.get("sshHostKeyFingerprint"));
             case MICROCMS -> new CmsCredentials.MicroCmsCredentials(
                     credentials.get("serviceId"),
                     credentials.get("apiKey"),
@@ -187,6 +299,17 @@ public class SiteService {
                     credentials.get("categoriesEndpoint"),
                     credentials.get("tagsEndpoint"));
         };
+    }
+
+    private Integer parseSshPort(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(value);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("sshPortは数値で指定してください: " + value);
+        }
     }
 
     private String writeCredentialsJson(Map<String, String> credentials) {

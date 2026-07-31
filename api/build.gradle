@@ -34,6 +34,8 @@ dependencies {
 
     implementation 'com.vladsch.flexmark:flexmark-all:0.64.8'
 
+    implementation 'com.hierynomus:sshj:0.38.0'
+
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
 

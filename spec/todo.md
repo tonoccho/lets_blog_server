@@ -168,6 +168,36 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
 
 実装はすべて完了・バックエンド全テスト(`./gradlew test`)通過・フロントエンド型チェック/lint/`next build`通過・API経由での実機検証(WordPress実構築/削除、プロフィールJSON往復、project-users認可)まで確認済み。ヘッダー固定表示やフォームのUI操作(管理者ピッカー・言語選択・DisplayNameプルダウン・カスタムリンク追加削除)についてはブラウザでの目視確認が未実施(本セッションではブラウザ操作ツールが利用できなかったため)。
 
+## Phase 10: サイト管理強化・WordPress著者作成エラー修正・環境間同期
+
+- [x] [00-overview](phase10/00-overview.md) — 全体スコープ・決定事項・タスク一覧
+- [x] [01-site-management-visibility-edit](phase10/01-site-management-visibility-edit.md) — サイト管理画面に疎通確認(再チェック)・編集機能を追加(`PUT /api/sites/{id}`、`POST /api/sites/{id}/test-connection`。実機確認済み)
+- [x] [02-wordpress-author-permission-fix](phase10/02-wordpress-author-permission-fix.md) — WordPress著者作成403エラーの原因究明・修正(登録認証情報の管理者権限不足を検知・警告。`CmsAdapter.hasAuthorProvisioningCapability()`追加、事前チェックで403を未然防止)
+- [x] [03-environment-sync](phase10/03-environment-sync.md) — プロジェクト環境(ローカル/テスト/本番)間のテーマ・プラグイン・DB同期(実際にmanaged環境を2つ構築し、テーマ/プラグイン/DB同期→記事反映・URL維持・同期先固有アカウント保護・バックアップ生成・nginx経由到達まで実機確認済み)
+- [x] [04-wordpress-ssh-transport](phase10/04-wordpress-ssh-transport.md) — Cloudflare等でREST APIが遮断される外部サイト向けにSSH+wp-cli経由の代替操作経路を追加(実装・バックエンド全テスト(`./gradlew test`)通過・フロントエンド型チェック/lint(既存の無関係な1件を除く)/`next build`通過・docker実機でのE2E確認(ログイン→SSHトランスポート選択→鍵ペア生成まで)済み。実際のリモートSSHサーバーでの投稿作成・メディアアップロード等の実機検証は未実施)
+
+実装・バックエンド全テスト(`./gradlew test`)・フロントエンド型チェック/lint/`next build`・Docker実機検証まですべて完了。ブラウザでのUI目視確認(疎通確認ボタン・編集フォーム・環境同期パネルの操作感)は本セッションではブラウザ操作ツールが利用できず未実施。
+
+## Phase 10 未決事項・検討項目
+
+### サイト管理(01)
+- [ ] `siteKey`/`cmsType`の変更を編集機能で許可するかどうか
+- [ ] managedサイトの`baseUrl`/認証情報を編集可能にする要否(現状は名前のみ編集可)
+- [ ] 疎通確認結果の履歴保存・一覧表示の要否
+
+### WordPress著者作成403修正(02)
+- [ ] WordPress管理者権限チェック(`create_users`)を登録時にブロッキングにするか、警告のみに留めるかの継続検討
+- [ ] プロジェクト詳細画面に各環境サイトの管理者権限状態を表示するかどうか
+- [ ] 既に登録済みで権限不足になっているサイトを一括検出する棚卸し用バッチ・画面の要否
+
+### 環境間同期(03)
+- [ ] 大規模DBで同期処理がnginxの延長タイムアウト(300秒)を超える場合の非同期ジョブ化・進捗表示
+- [ ] バックアップの保持世代数・自動削除ポリシー(現状は直近1世代を上書き保存するのみ)
+- [ ] 外部登録(非managed)サイトへの同期対応の要否・実現方式(SSH鍵配布、リモートエージェント設置等)
+- [ ] テーマ/プラグインの個別選択同期(現状は`wp-content/themes`・`wp-content/plugins`ディレクトリ全体の一括同期)
+- [ ] DB同期時に`wp_users`/`wp_usermeta`以外にも除外すべきテーブルがないかの継続精査(プラグイン依存データ等)
+- [ ] 同期の確認UXを`window.confirm`より強固にする要否(環境名の入力必須化等)
+
 ## 既存未決事項・スコープ外候補
 
 - [ ] リモート常時稼働化(自宅サーバー/VPS)対応・外部公開時のセキュリティ強化

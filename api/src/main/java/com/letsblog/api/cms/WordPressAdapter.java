@@ -3,6 +3,8 @@ package com.letsblog.api.cms;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.letsblog.api.cms.ssh.WordPressSshOperations;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -20,15 +22,18 @@ import java.util.List;
  * 認証はサイトごとの Basic認証(ユーザー名 + アプリケーションパスワード)を使う。
  */
 @Component
+@Slf4j
 public class WordPressAdapter implements CmsAdapter {
 
     private static final String DEFAULT_CATEGORY_NAME = "Uncategorized";
     private static final String DEFAULT_TAG_NAME = "Let's Blog";
 
     private final RestClient.Builder restClientBuilder;
+    private final WordPressSshOperations sshOperations;
 
-    public WordPressAdapter(RestClient.Builder restClientBuilder) {
+    public WordPressAdapter(RestClient.Builder restClientBuilder, WordPressSshOperations sshOperations) {
         this.restClientBuilder = restClientBuilder;
+        this.sshOperations = sshOperations;
     }
 
     @Override
@@ -39,6 +44,9 @@ public class WordPressAdapter implements CmsAdapter {
     @Override
     public PostResult createOrUpdatePost(CmsCredentials credentials, PostContent content, String existingPostId) {
         CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.createOrUpdatePost(creds, content, existingPostId);
+        }
         RestClient client = buildClient(creds);
 
         ObjectNode body = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
@@ -80,6 +88,9 @@ public class WordPressAdapter implements CmsAdapter {
     @Override
     public MediaUploadResult uploadMedia(CmsCredentials credentials, String filename, String contentType, byte[] data) {
         CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.uploadMedia(creds, filename, contentType, data);
+        }
         RestClient client = buildClient(creds);
 
         try {
@@ -99,12 +110,20 @@ public class WordPressAdapter implements CmsAdapter {
 
     @Override
     public List<String> resolveCategories(CmsCredentials credentials, List<String> names) {
-        return resolveTerms((CmsCredentials.WordPressCredentials) credentials, "/wp-json/wp/v2/categories", names);
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.resolveCategories(creds, names);
+        }
+        return resolveTerms(creds, "/wp-json/wp/v2/categories", names);
     }
 
     @Override
     public List<String> resolveTags(CmsCredentials credentials, List<String> names) {
-        return resolveTerms((CmsCredentials.WordPressCredentials) credentials, "/wp-json/wp/v2/tags", names);
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.resolveTags(creds, names);
+        }
+        return resolveTerms(creds, "/wp-json/wp/v2/tags", names);
     }
 
     private List<String> resolveTerms(CmsCredentials.WordPressCredentials credentials, String path, List<String> names) {
@@ -164,6 +183,9 @@ public class WordPressAdapter implements CmsAdapter {
     @Override
     public String provisionAuthor(CmsCredentials credentials, AuthorProvisioningRequest request) {
         CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.provisionAuthor(creds, request);
+        }
         RestClient client = buildClient(creds);
         String email = request.email();
 
@@ -194,7 +216,7 @@ public class WordPressAdapter implements CmsAdapter {
                     return updateAuthor(client, fallbackId, request);
                 }
             }
-            throw new CmsApiException("WordPress著者の作成に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+            throw new CmsApiException(authorErrorMessage("作成", e), e);
         }
     }
 
@@ -209,8 +231,23 @@ public class WordPressAdapter implements CmsAdapter {
                     .body(JsonNode.class);
             return updated.get("id").asText();
         } catch (RestClientResponseException e) {
-            throw new CmsApiException("WordPress著者の更新に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+            throw new CmsApiException(authorErrorMessage("更新", e), e);
         }
+    }
+
+    /**
+     * 403 Forbiddenの場合、登録済み認証情報の管理者権限不足が原因である可能性が高いため、
+     * 生のWordPressエラーの前に分かりやすい案内文を付加する。
+     */
+    private String authorErrorMessage(String action, RestClientResponseException e) {
+        String detail = e.getStatusCode() + " " + e.getResponseBodyAsString();
+        if (e.getStatusCode().value() == 403) {
+            return "WordPress著者の" + action + "に失敗しました: サイトに登録されている認証情報のWordPress"
+                    + "アカウントにユーザー作成・更新権限(Administrator)がない可能性があります。"
+                    + "サイト管理画面の編集機能で、管理者権限を持つアカウントのアプリケーションパスワードに"
+                    + "更新してください。(詳細: " + detail + ")";
+        }
+        return "WordPress著者の" + action + "に失敗しました: " + detail;
     }
 
     private ObjectNode profileBody(AuthorProvisioningRequest request) {
@@ -259,13 +296,47 @@ public class WordPressAdapter implements CmsAdapter {
     }
 
     @Override
-    public boolean testConnection(CmsCredentials credentials) {
+    public ConnectionCheckResult testConnection(CmsCredentials credentials) {
         CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.testConnection(creds);
+        }
         RestClient client = buildClient(creds);
         try {
             client.get().uri("/wp-json/wp/v2/users/me").retrieve().toBodilessEntity();
-            return true;
-        } catch (RestClientResponseException | ResourceAccessException e) {
+            return ConnectionCheckResult.success();
+        } catch (RestClientResponseException e) {
+            log.warn("WordPress疎通確認に失敗しました (baseUrl={}, username={}): {} {}",
+                    creds.baseUrl(), creds.username(), e.getStatusCode(), e.getResponseBodyAsString());
+            return ConnectionCheckResult.failure("HTTP " + e.getStatusCode().value() + " " + e.getStatusText());
+        } catch (ResourceAccessException e) {
+            log.warn("WordPress疎通確認に失敗しました (baseUrl={}, username={}): {}",
+                    creds.baseUrl(), creds.username(), e.getMessage());
+            return ConnectionCheckResult.failure(e.getMessage());
+        }
+    }
+
+    @Override
+    public boolean hasAuthorProvisioningCapability(CmsCredentials credentials) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.hasAuthorProvisioningCapability(creds);
+        }
+        RestClient client = buildClient(creds);
+        try {
+            JsonNode me = client.get()
+                    .uri("/wp-json/wp/v2/users/me?context=edit")
+                    .retrieve()
+                    .body(JsonNode.class);
+            JsonNode capabilities = me != null ? me.get("capabilities") : null;
+            return capabilities != null && capabilities.path("create_users").asBoolean(false);
+        } catch (RestClientResponseException e) {
+            log.warn("WordPress管理者権限確認に失敗しました (baseUrl={}, username={}): {} {}",
+                    creds.baseUrl(), creds.username(), e.getStatusCode(), e.getResponseBodyAsString());
+            return false;
+        } catch (ResourceAccessException e) {
+            log.warn("WordPress管理者権限確認に失敗しました (baseUrl={}, username={}): {}",
+                    creds.baseUrl(), creds.username(), e.getMessage());
             return false;
         }
     }

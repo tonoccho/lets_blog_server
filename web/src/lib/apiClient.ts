@@ -161,6 +161,44 @@ export function deleteSite(id: number, actor?: ActorInfo): Promise<void> {
   return apiFetch<void>(`/api/sites/${id}`, { method: 'DELETE', actor });
 }
 
+export interface SiteUpdateInput {
+  name?: string;
+  credentials?: Record<string, string>;
+}
+
+export function updateSite(id: number, input: SiteUpdateInput, actor?: ActorInfo): Promise<Site> {
+  return apiFetch<Site>(`/api/sites/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export interface SiteConnectionCheckResult {
+  connectionCheckStatus: "SUCCESS" | "FAILED";
+  hasAdminCapability: boolean | null;
+  failureReason: string | null;
+}
+
+export function checkSiteConnection(id: number): Promise<SiteConnectionCheckResult> {
+  return apiFetch(`/api/sites/${id}/test-connection`, { method: 'POST' });
+}
+
+export interface SshKeyPair {
+  publicKeyLine: string;
+  privateKeyPem: string;
+}
+
+export function generateSshKeyPair(comment: string | undefined, actor?: ActorInfo): Promise<SshKeyPair> {
+  return apiFetch<SshKeyPair>('/api/sites/ssh-keypair', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ comment: comment || null }),
+    actor,
+  });
+}
+
 export function listPosts(): Promise<PostSummary[]> {
   return apiFetch<PostSummary[]>('/api/posts');
 }
@@ -525,6 +563,21 @@ export function unbindProjectEnvironment(
   actor?: ActorInfo
 ): Promise<Project> {
   return apiFetch<Project>(`/api/projects/${id}/environments/${environment}`, { method: 'DELETE', actor });
+}
+
+export type EnvironmentSyncTarget = "themes" | "plugins" | "db";
+
+export function syncProjectEnvironment(
+  id: number,
+  input: { from: ProjectEnvironment; to: ProjectEnvironment; targets: EnvironmentSyncTarget[] },
+  actor?: ActorInfo
+): Promise<void> {
+  return apiFetch<void>(`/api/projects/${id}/environments/sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
 }
 
 export interface ProjectUser {
