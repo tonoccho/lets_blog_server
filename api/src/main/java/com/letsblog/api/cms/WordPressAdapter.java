@@ -3,6 +3,7 @@ package com.letsblog.api.cms;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -20,6 +21,7 @@ import java.util.List;
  * 認証はサイトごとの Basic認証(ユーザー名 + アプリケーションパスワード)を使う。
  */
 @Component
+@Slf4j
 public class WordPressAdapter implements CmsAdapter {
 
     private static final String DEFAULT_CATEGORY_NAME = "Uncategorized";
@@ -280,7 +282,13 @@ public class WordPressAdapter implements CmsAdapter {
         try {
             client.get().uri("/wp-json/wp/v2/users/me").retrieve().toBodilessEntity();
             return true;
-        } catch (RestClientResponseException | ResourceAccessException e) {
+        } catch (RestClientResponseException e) {
+            log.warn("WordPress疎通確認に失敗しました (baseUrl={}, username={}): {} {}",
+                    creds.baseUrl(), creds.username(), e.getStatusCode(), e.getResponseBodyAsString());
+            return false;
+        } catch (ResourceAccessException e) {
+            log.warn("WordPress疎通確認に失敗しました (baseUrl={}, username={}): {}",
+                    creds.baseUrl(), creds.username(), e.getMessage());
             return false;
         }
     }
@@ -296,7 +304,13 @@ public class WordPressAdapter implements CmsAdapter {
                     .body(JsonNode.class);
             JsonNode capabilities = me != null ? me.get("capabilities") : null;
             return capabilities != null && capabilities.path("create_users").asBoolean(false);
-        } catch (RestClientResponseException | ResourceAccessException e) {
+        } catch (RestClientResponseException e) {
+            log.warn("WordPress管理者権限確認に失敗しました (baseUrl={}, username={}): {} {}",
+                    creds.baseUrl(), creds.username(), e.getStatusCode(), e.getResponseBodyAsString());
+            return false;
+        } catch (ResourceAccessException e) {
+            log.warn("WordPress管理者権限確認に失敗しました (baseUrl={}, username={}): {}",
+                    creds.baseUrl(), creds.username(), e.getMessage());
             return false;
         }
     }

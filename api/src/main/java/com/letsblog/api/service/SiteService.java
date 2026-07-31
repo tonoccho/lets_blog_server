@@ -118,6 +118,7 @@ public class SiteService {
             CmsAdapter adapter = cmsAdapterFactory.resolve(cmsType);
             return adapter.testConnection(credentials);
         } catch (Exception e) {
+            log.warn("疎通確認に失敗しました (cmsType={}): {}", cmsType, e.getMessage(), e);
             return false;
         }
     }
@@ -206,6 +207,7 @@ public class SiteService {
                     ? adapter.hasAuthorProvisioningCapability(credentials) : null;
             return new SiteConnectionCheckResult(ok, hasAdminCapability);
         } catch (Exception e) {
+            log.warn("疎通確認に失敗しました (siteId={}, siteKey={}): {}", id, site.getSiteKey(), e.getMessage(), e);
             return new SiteConnectionCheckResult(false, null);
         }
     }
