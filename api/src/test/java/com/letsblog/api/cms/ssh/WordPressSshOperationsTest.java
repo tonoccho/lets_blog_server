@@ -1,6 +1,7 @@
 package com.letsblog.api.cms.ssh;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.letsblog.api.cms.AuthorProvisioningRequest;
 import com.letsblog.api.cms.CmsCredentials.WordPressCredentials;
 import com.letsblog.api.cms.ConnectionCheckResult;
 import com.letsblog.api.cms.ssh.SshCommandExecutor.SshCommandResult;
@@ -158,5 +159,72 @@ class WordPressSshOperationsTest {
 
         assertEquals(List.of(), ids);
         verify(executor, never()).exec(any(), any(), any());
+    }
+
+    @Test
+    void provisionAuthor_既存ユーザーが見つかればプロフィール更新のみ実行する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("[{\"ID\":\"11\"}]"))
+                .thenReturn(ok(""));
+
+        String userId = operations.provisionAuthor(creds(), AuthorProvisioningRequest.of("author@example.com"));
+
+        assertEquals("11", userId);
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getAllValues().get(0).contains("user list --search="));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("user update 11"));
+    }
+
+    @Test
+    void provisionAuthor_見つからなければ作成してからプロフィールを更新する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("[]"))
+                .thenReturn(ok("23\n"))
+                .thenReturn(ok(""));
+
+        String userId = operations.provisionAuthor(creds(), AuthorProvisioningRequest.of("new-author@example.com"));
+
+        assertEquals("23", userId);
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(3)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("user create"));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("--porcelain"));
+        assertEquals(true, commandCaptor.getAllValues().get(2).contains("user update 23"));
+    }
+
+    @Test
+    void provisionAuthor_作成が失敗しても再検索で見つかれば更新にフォールバックする() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("[]"))
+                .thenReturn(fail("A user with that email already exists."))
+                .thenReturn(ok("[{\"ID\":\"31\"}]"))
+                .thenReturn(ok(""));
+
+        String userId = operations.provisionAuthor(creds(), AuthorProvisioningRequest.of("race@example.com"));
+
+        assertEquals("31", userId);
+        verify(executor, times(4)).exec(any(SshConnectionParams.class), any(), isNull());
+    }
+
+    @Test
+    void provisionAuthor_作成が失敗し再検索でも見つからなければ例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("[]"))
+                .thenReturn(fail("unexpected error"))
+                .thenReturn(ok("[]"));
+
+        assertThrows(SshOperationException.class,
+                () -> operations.provisionAuthor(creds(), AuthorProvisioningRequest.of("broken@example.com")));
+    }
+
+    @Test
+    void provisionAuthor_プロフィール更新が失敗したら例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("[{\"ID\":\"11\"}]"))
+                .thenReturn(fail("update failed"));
+
+        assertThrows(SshOperationException.class,
+                () -> operations.provisionAuthor(creds(), AuthorProvisioningRequest.of("author@example.com")));
     }
 }

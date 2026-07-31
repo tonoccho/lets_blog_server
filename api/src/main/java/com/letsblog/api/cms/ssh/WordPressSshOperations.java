@@ -15,7 +15,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 
 /**
@@ -115,8 +117,80 @@ public class WordPressSshOperations {
         }
     }
 
+    /**
+     * REST版(WordPressAdapter.provisionAuthor)と同じくメールアドレスで既存ユーザーを探し、
+     * 存在すればプロフィール更新、なければ新規作成する。作成コマンドが失敗した場合、
+     * 既に他のプロセスが同時作成した可能性を考慮して再検索しフォールバックする。
+     */
     public String provisionAuthor(WordPressCredentials creds, AuthorProvisioningRequest request) {
-        throw new UnsupportedOperationException("SSH transport: provisionAuthor is not yet implemented");
+        String email = request.email();
+        String existingId = findExistingAuthorId(creds, email);
+        if (existingId != null) {
+            return updateAuthor(creds, existingId, request);
+        }
+
+        String username = email.substring(0, email.indexOf('@'));
+        SshCommandResult createResult = exec(creds, wpCli(creds,
+                "user create " + ShellQuote.single(username) + " " + ShellQuote.single(email)
+                        + " --role=" + ShellQuote.single(resolveRole(request))
+                        + " --user_pass=" + ShellQuote.single(generateRandomPassword())
+                        + " --porcelain"));
+        if (!createResult.ok()) {
+            String fallbackId = findExistingAuthorId(creds, email);
+            if (fallbackId != null) {
+                return updateAuthor(creds, fallbackId, request);
+            }
+            throw new SshOperationException(authorErrorMessage("作成", createResult));
+        }
+        return updateAuthor(creds, createResult.stdout().strip(), request);
+    }
+
+    private String findExistingAuthorId(WordPressCredentials creds, String email) {
+        SshCommandResult result = exec(creds, wpCli(creds,
+                "user list --search=" + ShellQuote.single(email) + " --fields=ID --format=json"));
+        if (!result.ok()) {
+            return null;
+        }
+        List<JsonNode> users = parseJsonArray(result.stdout());
+        return users.isEmpty() ? null : users.get(0).path("ID").asText();
+    }
+
+    private String updateAuthor(WordPressCredentials creds, String userId, AuthorProvisioningRequest request) {
+        StringBuilder command = new StringBuilder("user update ").append(userId);
+        appendFieldIfPresent(command, "user_email", request.email());
+        appendFieldIfPresent(command, "display_name", request.displayName());
+        appendFieldIfPresent(command, "first_name", request.firstName());
+        appendFieldIfPresent(command, "last_name", request.lastName());
+        appendFieldIfPresent(command, "user_url", request.websiteUrl());
+        appendFieldIfPresent(command, "description", request.bio());
+        // localeはREST版と同じ理由(未インストール言語だと失敗しうる)で送信しない
+        command.append(" --role=").append(ShellQuote.single(resolveRole(request)));
+
+        SshCommandResult result = exec(creds, wpCli(creds, command.toString()));
+        if (!result.ok()) {
+            throw new SshOperationException(authorErrorMessage("更新", result));
+        }
+        return userId;
+    }
+
+    private void appendFieldIfPresent(StringBuilder command, String field, String value) {
+        if (value != null) {
+            command.append(" --").append(field).append("=").append(ShellQuote.single(value));
+        }
+    }
+
+    private String resolveRole(AuthorProvisioningRequest request) {
+        return request.wpRole() != null ? request.wpRole() : "author";
+    }
+
+    private String authorErrorMessage(String action, SshCommandResult result) {
+        return "WordPress著者の" + action + "に失敗しました: " + firstLine(result.stderr(), result.stdout());
+    }
+
+    private String generateRandomPassword() {
+        byte[] bytes = new byte[24];
+        new SecureRandom().nextBytes(bytes);
+        return Base64.getEncoder().encodeToString(bytes);
     }
 
     public PostResult createOrUpdatePost(WordPressCredentials creds, PostContent content, String existingPostId) {
