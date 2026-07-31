@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.cms.AuthorProvisioningRequest;
 import com.letsblog.api.cms.CmsCredentials.WordPressCredentials;
 import com.letsblog.api.cms.ConnectionCheckResult;
+import com.letsblog.api.cms.MediaUploadResult;
 import com.letsblog.api.cms.PostContent;
 import com.letsblog.api.cms.PostResult;
 import com.letsblog.api.cms.ssh.SshCommandExecutor.SshCommandResult;
@@ -21,6 +22,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.notNull;
 import static org.mockito.Mockito.never;
@@ -287,5 +289,66 @@ class WordPressSshOperationsTest {
 
         assertThrows(SshOperationException.class,
                 () -> operations.createOrUpdatePost(creds(), postContent(), null));
+    }
+
+    @Test
+    void uploadMedia_成功時はSFTP転送してmedia_importで取り込み一時ファイルを削除する() {
+        byte[] data = "image-bytes".getBytes(StandardCharsets.UTF_8);
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("55\n"))
+                .thenReturn(ok("{\"guid\":\"https://example.com/wp-content/uploads/photo.png\"}"));
+
+        MediaUploadResult result = operations.uploadMedia(creds(), "photo.png", "image/png", data);
+
+        assertEquals("55", result.id());
+        assertEquals("https://example.com/wp-content/uploads/photo.png", result.url());
+
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).putFile(any(SshConnectionParams.class), eq(data), pathCaptor.capture());
+        String remotePath = pathCaptor.getValue();
+        assertEquals(true, remotePath.contains("photo.png"));
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getAllValues().get(0).contains("media import"));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("post get 55"));
+
+        verify(executor).removeFile(any(SshConnectionParams.class), eq(remotePath));
+    }
+
+    @Test
+    void uploadMedia_import失敗時も一時ファイルを削除してから例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("import failed"));
+
+        assertThrows(SshOperationException.class,
+                () -> operations.uploadMedia(creds(), "photo.png", "image/png", new byte[]{1}));
+
+        verify(executor).removeFile(any(SshConnectionParams.class), any());
+    }
+
+    @Test
+    void uploadMedia_情報取得失敗時も一時ファイルを削除してから例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("55\n"))
+                .thenReturn(fail("not found"));
+
+        assertThrows(SshOperationException.class,
+                () -> operations.uploadMedia(creds(), "photo.png", "image/png", new byte[]{1}));
+
+        verify(executor).removeFile(any(SshConnectionParams.class), any());
+    }
+
+    @Test
+    void uploadMedia_ファイル名のパス区切り文字は除去される() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("55\n"))
+                .thenReturn(ok("{\"guid\":\"https://example.com/x.png\"}"));
+
+        operations.uploadMedia(creds(), "../../etc/passwd.png", "image/png", new byte[]{1});
+
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).putFile(any(SshConnectionParams.class), any(), pathCaptor.capture());
+        assertEquals(false, pathCaptor.getValue().contains("/etc/"));
+        assertEquals(false, pathCaptor.getValue().contains(".."));
     }
 }

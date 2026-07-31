@@ -20,6 +20,7 @@ import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * SSH+wp-cli経由でWordPressを操作する実装。WordPressAdapterからtransport=SSHの
@@ -257,9 +258,45 @@ public class WordPressSshOperations {
         }
     }
 
+    /**
+     * SFTPでリモートの一時パスへ転送してから`wp media import`で取り込む
+     * (wp-cliにバイト列を直接渡す手段がないため)。取り込み後は一時ファイルを削除する
+     * (削除失敗はSshCommandExecutor.removeFileの方針通り無視してログのみ)。
+     */
     public MediaUploadResult uploadMedia(WordPressCredentials creds, String filename, String contentType,
             byte[] data) {
-        throw new UnsupportedOperationException("SSH transport: uploadMedia is not yet implemented");
+        SshConnectionParams params = connectionParams(creds);
+        String remotePath = "/tmp/letsblog-media-" + UUID.randomUUID() + "-" + sanitizeFilename(filename);
+        executor.putFile(params, data, remotePath);
+        try {
+            SshCommandResult importResult = exec(creds, wpCli(creds,
+                    "media import " + ShellQuote.single(remotePath) + " --porcelain"));
+            if (!importResult.ok()) {
+                throw new SshOperationException("WordPressメディアのアップロードに失敗しました: "
+                        + firstLine(importResult.stderr(), importResult.stdout()));
+            }
+            String mediaId = importResult.stdout().strip();
+
+            SshCommandResult getResult = exec(creds, wpCli(creds,
+                    "post get " + mediaId + " --fields=guid --format=json"));
+            if (!getResult.ok()) {
+                throw new SshOperationException("アップロードしたメディアの情報取得に失敗しました: "
+                        + firstLine(getResult.stderr(), getResult.stdout()));
+            }
+            JsonNode media = parseJsonObject(getResult.stdout());
+            return new MediaUploadResult(mediaId, media.path("guid").asText());
+        } finally {
+            executor.removeFile(params, remotePath);
+        }
+    }
+
+    private String sanitizeFilename(String filename) {
+        String base = filename != null ? filename : "upload";
+        int slash = Math.max(base.lastIndexOf('/'), base.lastIndexOf('\\'));
+        if (slash >= 0) {
+            base = base.substring(slash + 1);
+        }
+        return base.replaceAll("[^A-Za-z0-9._-]", "_");
     }
 
     private SshCommandResult exec(WordPressCredentials creds, String command) {
