@@ -10,11 +10,26 @@ public sealed interface CmsCredentials {
     record WordPressCredentials(
             String baseUrl,
             String username,
-            String appPassword
+            String appPassword,
+            String transport,
+            String sshHost,
+            Integer sshPort,
+            String sshUser,
+            String wpPath,
+            String sshPrivateKeyPem,
+            String sshHostKeyFingerprint
     ) implements CmsCredentials {
         @Override
         public CmsType cmsType() {
             return CmsType.WORDPRESS;
+        }
+
+        public WordPressCredentials(String baseUrl, String username, String appPassword) {
+            this(baseUrl, username, appPassword, "REST", null, null, null, null, null, null);
+        }
+
+        public boolean isSsh() {
+            return "SSH".equalsIgnoreCase(transport);
         }
     }
 

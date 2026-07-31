@@ -1,5 +1,6 @@
 package com.letsblog.api.cms;
 
+import com.letsblog.api.cms.ssh.WordPressSshOperations;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -11,6 +12,11 @@ import java.util.List;
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.http.HttpMethod.POST;
 import static org.springframework.http.HttpMethod.PUT;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
@@ -30,12 +36,43 @@ class WordPressAdapterTest {
     private RestClient.Builder restClientBuilder;
     private WordPressAdapter adapter;
     private MockRestServiceServer server;
+    private WordPressSshOperations sshOperations;
 
     @BeforeEach
     void setUp() {
         restClientBuilder = RestClient.builder();
         server = MockRestServiceServer.bindTo(restClientBuilder).build();
-        adapter = new WordPressAdapter(restClientBuilder);
+        sshOperations = mock(WordPressSshOperations.class);
+        adapter = new WordPressAdapter(restClientBuilder, sshOperations);
+    }
+
+    private CmsCredentials.WordPressCredentials sshCredentials() {
+        return new CmsCredentials.WordPressCredentials(
+                "https://example.com", null, null,
+                "SSH", "ssh.example.com", 22, "deploy", "/var/www/html", "PRIVATE-KEY-PEM", null);
+    }
+
+    @Test
+    void testTestConnection_SSHトランスポートはWordPressSshOperationsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = sshCredentials();
+        when(sshOperations.testConnection(creds)).thenReturn(ConnectionCheckResult.success());
+
+        ConnectionCheckResult result = adapter.testConnection(creds);
+
+        assertEquals(true, result.ok());
+        verify(sshOperations).testConnection(creds);
+    }
+
+    @Test
+    void testTestConnection_RESTトランスポートはWordPressSshOperationsを呼ばない() {
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+        server.expect(requestTo(containsString("/wp-json/wp/v2/users/me")))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        adapter.testConnection(creds);
+
+        verify(sshOperations, never()).testConnection(any());
     }
 
     @Test

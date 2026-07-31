@@ -3,6 +3,7 @@ package com.letsblog.api.cms;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.letsblog.api.cms.ssh.WordPressSshOperations;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -28,9 +29,11 @@ public class WordPressAdapter implements CmsAdapter {
     private static final String DEFAULT_TAG_NAME = "Let's Blog";
 
     private final RestClient.Builder restClientBuilder;
+    private final WordPressSshOperations sshOperations;
 
-    public WordPressAdapter(RestClient.Builder restClientBuilder) {
+    public WordPressAdapter(RestClient.Builder restClientBuilder, WordPressSshOperations sshOperations) {
         this.restClientBuilder = restClientBuilder;
+        this.sshOperations = sshOperations;
     }
 
     @Override
@@ -41,6 +44,9 @@ public class WordPressAdapter implements CmsAdapter {
     @Override
     public PostResult createOrUpdatePost(CmsCredentials credentials, PostContent content, String existingPostId) {
         CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.createOrUpdatePost(creds, content, existingPostId);
+        }
         RestClient client = buildClient(creds);
 
         ObjectNode body = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
@@ -82,6 +88,9 @@ public class WordPressAdapter implements CmsAdapter {
     @Override
     public MediaUploadResult uploadMedia(CmsCredentials credentials, String filename, String contentType, byte[] data) {
         CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.uploadMedia(creds, filename, contentType, data);
+        }
         RestClient client = buildClient(creds);
 
         try {
@@ -101,12 +110,20 @@ public class WordPressAdapter implements CmsAdapter {
 
     @Override
     public List<String> resolveCategories(CmsCredentials credentials, List<String> names) {
-        return resolveTerms((CmsCredentials.WordPressCredentials) credentials, "/wp-json/wp/v2/categories", names);
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.resolveCategories(creds, names);
+        }
+        return resolveTerms(creds, "/wp-json/wp/v2/categories", names);
     }
 
     @Override
     public List<String> resolveTags(CmsCredentials credentials, List<String> names) {
-        return resolveTerms((CmsCredentials.WordPressCredentials) credentials, "/wp-json/wp/v2/tags", names);
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.resolveTags(creds, names);
+        }
+        return resolveTerms(creds, "/wp-json/wp/v2/tags", names);
     }
 
     private List<String> resolveTerms(CmsCredentials.WordPressCredentials credentials, String path, List<String> names) {
@@ -166,6 +183,9 @@ public class WordPressAdapter implements CmsAdapter {
     @Override
     public String provisionAuthor(CmsCredentials credentials, AuthorProvisioningRequest request) {
         CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.provisionAuthor(creds, request);
+        }
         RestClient client = buildClient(creds);
         String email = request.email();
 
@@ -278,6 +298,9 @@ public class WordPressAdapter implements CmsAdapter {
     @Override
     public ConnectionCheckResult testConnection(CmsCredentials credentials) {
         CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.testConnection(creds);
+        }
         RestClient client = buildClient(creds);
         try {
             client.get().uri("/wp-json/wp/v2/users/me").retrieve().toBodilessEntity();
@@ -296,6 +319,9 @@ public class WordPressAdapter implements CmsAdapter {
     @Override
     public boolean hasAuthorProvisioningCapability(CmsCredentials credentials) {
         CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.hasAuthorProvisioningCapability(creds);
+        }
         RestClient client = buildClient(creds);
         try {
             JsonNode me = client.get()
