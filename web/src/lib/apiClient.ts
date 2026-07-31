@@ -185,6 +185,20 @@ export function checkSiteConnection(id: number): Promise<SiteConnectionCheckResu
   return apiFetch(`/api/sites/${id}/test-connection`, { method: 'POST' });
 }
 
+export interface SshKeyPair {
+  publicKeyLine: string;
+  privateKeyPem: string;
+}
+
+export function generateSshKeyPair(comment: string | undefined, actor?: ActorInfo): Promise<SshKeyPair> {
+  return apiFetch<SshKeyPair>('/api/sites/ssh-keypair', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ comment: comment || null }),
+    actor,
+  });
+}
+
 export function listPosts(): Promise<PostSummary[]> {
   return apiFetch<PostSummary[]>('/api/posts');
 }

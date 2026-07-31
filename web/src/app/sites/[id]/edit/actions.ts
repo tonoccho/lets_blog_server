@@ -20,6 +20,13 @@ const CREDENTIAL_FIELDS = [
   "postsEndpoint",
   "categoriesEndpoint",
   "tagsEndpoint",
+  "transport",
+  "sshHost",
+  "sshPort",
+  "sshUser",
+  "wpPath",
+  "sshPrivateKeyPem",
+  "sshHostKeyFingerprint",
 ];
 
 export async function updateSiteAction(

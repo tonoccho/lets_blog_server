@@ -1,24 +1,47 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useState, useTransition } from "react";
 import { useRef, useEffect } from "react";
-import { registerSiteAction, RegisterSiteState } from "./actions";
+import { generateSshKeyPairAction, registerSiteAction, RegisterSiteState } from "./actions";
 
 const initialState: RegisterSiteState = {};
 
 type CmsType = "WORDPRESS" | "MICROCMS";
+type Transport = "REST" | "SSH";
 
 export function SiteForm() {
   const [state, formAction, pending] = useActionState(registerSiteAction, initialState);
   const [cmsType, setCmsType] = useState<CmsType>("WORDPRESS");
+  const [transport, setTransport] = useState<Transport>("REST");
+  const [privateKeyPem, setPrivateKeyPem] = useState("");
+  const [publicKeyLine, setPublicKeyLine] = useState("");
+  const [keyGenError, setKeyGenError] = useState<string | null>(null);
+  const [keyGenPending, startKeyGenTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     if (state.success) {
       formRef.current?.reset();
       setCmsType("WORDPRESS");
+      setTransport("REST");
+      setPrivateKeyPem("");
+      setPublicKeyLine("");
+      setKeyGenError(null);
     }
   }, [state.success]);
+
+  function handleGenerateKeyPair() {
+    setKeyGenError(null);
+    startKeyGenTransition(async () => {
+      const result = await generateSshKeyPairAction("letsblog");
+      if (result.error) {
+        setKeyGenError(result.error);
+        return;
+      }
+      setPrivateKeyPem(result.privateKeyPem ?? "");
+      setPublicKeyLine(result.publicKeyLine ?? "");
+    });
+  }
 
   return (
     <form ref={formRef} action={formAction} className="space-y-3 rounded-lg border border-neutral-200 bg-white p-5">
@@ -46,16 +69,71 @@ export function SiteForm() {
       </div>
 
       {cmsType === "WORDPRESS" && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field name="baseUrl" label="WordPressのURL" placeholder="https://example.com" />
-          <Field name="username" label="WordPressユーザー名" placeholder="admin" />
-          <Field
-            name="appPassword"
-            label="アプリケーションパスワード"
-            placeholder="xxxx xxxx xxxx xxxx xxxx xxxx"
-            type="password"
-            wide
-          />
+        <div className="space-y-3">
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-neutral-600">接続方式</span>
+            <select
+              name="transport"
+              value={transport}
+              onChange={(e) => setTransport(e.target.value as Transport)}
+              className="rounded border border-neutral-300 px-3 py-2 text-sm sm:max-w-xs"
+            >
+              <option value="REST">REST API(通常はこちら)</option>
+              <option value="SSH">SSH経由(wp-cli。REST APIがブロックされているサイト向け)</option>
+            </select>
+          </label>
+
+          {transport === "REST" ? (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field name="baseUrl" label="WordPressのURL" placeholder="https://example.com" />
+              <Field name="username" label="WordPressユーザー名" placeholder="admin" />
+              <Field
+                name="appPassword"
+                label="アプリケーションパスワード"
+                placeholder="xxxx xxxx xxxx xxxx xxxx xxxx"
+                type="password"
+                wide
+              />
+            </div>
+          ) : (
+            <div className="space-y-3 rounded border border-neutral-200 p-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Field name="baseUrl" label="WordPressの公開URL" placeholder="https://example.com" />
+                <Field name="sshHost" label="SSHホスト" placeholder="203.0.113.5" />
+                <Field name="sshPort" label="SSHポート(既定22)" placeholder="22" required={false} />
+                <Field name="sshUser" label="SSHユーザー" placeholder="deploy" />
+                <Field name="wpPath" label="wp-cliのパス(--path)" placeholder="/var/www/html" wide />
+              </div>
+
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={handleGenerateKeyPair}
+                  disabled={keyGenPending}
+                  className="rounded bg-neutral-100 px-3 py-1.5 text-sm text-neutral-700 disabled:opacity-50"
+                >
+                  {keyGenPending ? "鍵ペアを生成中…" : "SSH鍵ペアを生成"}
+                </button>
+                {keyGenError && <p className="text-sm text-red-600">{keyGenError}</p>}
+                {publicKeyLine && (
+                  <div className="space-y-1">
+                    <p className="text-sm text-neutral-600">
+                      以下の公開鍵をリモートサーバーの対象ユーザーの<code>~/.ssh/authorized_keys</code>
+                      へ手動で追記してから登録してください。
+                    </p>
+                    <textarea
+                      readOnly
+                      value={publicKeyLine}
+                      rows={2}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="w-full rounded border border-neutral-300 bg-neutral-50 px-3 py-2 font-mono text-xs"
+                    />
+                  </div>
+                )}
+                <input type="hidden" name="sshPrivateKeyPem" value={privateKeyPem} />
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -101,12 +179,14 @@ function Field({
   placeholder,
   type = "text",
   wide = false,
+  required = true,
 }: {
   name: string;
   label: string;
   placeholder?: string;
   type?: string;
   wide?: boolean;
+  required?: boolean;
 }) {
   return (
     <label className={`flex flex-col gap-1 text-sm ${wide ? "sm:col-span-2" : ""}`}>
@@ -115,7 +195,7 @@ function Field({
         name={name}
         type={type}
         placeholder={placeholder}
-        required
+        required={required}
         className="rounded border border-neutral-300 px-3 py-2 text-sm"
       />
     </label>

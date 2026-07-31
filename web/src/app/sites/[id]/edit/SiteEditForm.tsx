@@ -1,7 +1,8 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState, useTransition } from "react";
 import type { Site } from "@/lib/apiClient";
+import { generateSshKeyPairAction } from "../../actions";
 import { updateSiteAction, UpdateSiteState } from "./actions";
 
 const initialState: UpdateSiteState = {};
@@ -9,6 +10,24 @@ const initialState: UpdateSiteState = {};
 export function SiteEditForm({ site }: { site: Site }) {
   const action = (prevState: UpdateSiteState, formData: FormData) => updateSiteAction(site.id, prevState, formData);
   const [state, formAction, pending] = useActionState(action, initialState);
+  const [sshEnabled, setSshEnabled] = useState(false);
+  const [privateKeyPem, setPrivateKeyPem] = useState("");
+  const [publicKeyLine, setPublicKeyLine] = useState("");
+  const [keyGenError, setKeyGenError] = useState<string | null>(null);
+  const [keyGenPending, startKeyGenTransition] = useTransition();
+
+  function handleGenerateKeyPair() {
+    setKeyGenError(null);
+    startKeyGenTransition(async () => {
+      const result = await generateSshKeyPairAction(site.siteKey);
+      if (result.error) {
+        setKeyGenError(result.error);
+        return;
+      }
+      setPrivateKeyPem(result.privateKeyPem ?? "");
+      setPublicKeyLine(result.publicKeyLine ?? "");
+    });
+  }
 
   return (
     <form action={formAction} className="max-w-xl space-y-4 rounded-lg border border-neutral-200 bg-white p-5">
@@ -40,16 +59,73 @@ export function SiteEditForm({ site }: { site: Site }) {
             認証情報の変更(空欄のままなら変更されません)
           </legend>
           {site.cmsType === "WORDPRESS" ? (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field name="baseUrl" label="WordPressのURL" placeholder="変更する場合のみ入力" />
-              <Field name="username" label="WordPressユーザー名" placeholder="変更する場合のみ入力" />
-              <Field
-                name="appPassword"
-                label="アプリケーションパスワード"
-                placeholder="変更する場合のみ入力"
-                type="password"
-                wide
-              />
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Field name="baseUrl" label="WordPressのURL" placeholder="変更する場合のみ入力" />
+                <Field name="username" label="WordPressユーザー名" placeholder="変更する場合のみ入力" />
+                <Field
+                  name="appPassword"
+                  label="アプリケーションパスワード"
+                  placeholder="変更する場合のみ入力"
+                  type="password"
+                  wide
+                />
+              </div>
+
+              <label className="flex items-center gap-2 text-sm text-neutral-600">
+                <input
+                  type="checkbox"
+                  checked={sshEnabled}
+                  onChange={(e) => setSshEnabled(e.target.checked)}
+                />
+                SSH経由(wp-cli)での接続に切り替える/接続情報を変更する
+              </label>
+
+              {sshEnabled && (
+                <div className="space-y-3 rounded border border-neutral-200 p-3">
+                  <input type="hidden" name="transport" value="SSH" />
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <Field name="sshHost" label="SSHホスト" placeholder="変更する場合のみ入力" />
+                    <Field name="sshPort" label="SSHポート(既定22)" placeholder="変更する場合のみ入力" />
+                    <Field name="sshUser" label="SSHユーザー" placeholder="変更する場合のみ入力" />
+                    <Field name="wpPath" label="wp-cliのパス(--path)" placeholder="変更する場合のみ入力" />
+                    <Field
+                      name="sshHostKeyFingerprint"
+                      label="ホスト鍵fingerprint(上級者向け・通常は空欄)"
+                      placeholder="変更する場合のみ入力"
+                      wide
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={handleGenerateKeyPair}
+                      disabled={keyGenPending}
+                      className="rounded bg-neutral-100 px-3 py-1.5 text-sm text-neutral-700 disabled:opacity-50"
+                    >
+                      {keyGenPending ? "鍵ペアを生成中…" : "SSH鍵ペアを再生成"}
+                    </button>
+                    {keyGenError && <p className="text-sm text-red-600">{keyGenError}</p>}
+                    {publicKeyLine && (
+                      <div className="space-y-1">
+                        <p className="text-sm text-neutral-600">
+                          以下の公開鍵をリモートサーバーの対象ユーザーの<code>~/.ssh/authorized_keys</code>
+                          へ手動で追記してから保存してください。
+                        </p>
+                        <textarea
+                          readOnly
+                          value={publicKeyLine}
+                          rows={2}
+                          onFocus={(e) => e.currentTarget.select()}
+                          className="w-full rounded border border-neutral-300 bg-neutral-50 px-3 py-2 font-mono text-xs"
+                        />
+                      </div>
+                    )}
+                    <input type="hidden" name="sshPrivateKeyPem" value={privateKeyPem} />
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

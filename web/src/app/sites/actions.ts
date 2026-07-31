@@ -6,6 +6,7 @@ import {
   checkSiteConnection,
   createManagedWordPressSite,
   deleteSite,
+  generateSshKeyPair,
   registerSite,
   SiteConnectionCheckResult,
 } from "@/lib/apiClient";
@@ -22,6 +23,8 @@ const CREDENTIAL_FIELDS: Record<CmsType, string[]> = {
   MICROCMS: ["serviceId", "apiKey", "managementApiKey", "postsEndpoint", "categoriesEndpoint", "tagsEndpoint"],
 };
 
+const WORDPRESS_SSH_FIELDS = ["baseUrl", "sshHost", "sshUser", "wpPath", "sshPrivateKeyPem"];
+
 export async function registerSiteAction(
   _prevState: RegisterSiteState,
   formData: FormData
@@ -29,15 +32,18 @@ export async function registerSiteAction(
   const name = String(formData.get("name") ?? "").trim();
   const siteKey = String(formData.get("siteKey") ?? "").trim();
   const cmsType = String(formData.get("cmsType") ?? "") as CmsType;
+  const transport = String(formData.get("transport") ?? "REST").trim();
 
   if (!name || !siteKey) {
     return { error: "表示名とサイトキーは必須です。" };
   }
 
-  const fields = CREDENTIAL_FIELDS[cmsType];
-  if (!fields) {
+  if (cmsType !== "WORDPRESS" && cmsType !== "MICROCMS") {
     return { error: "CMS種別を選択してください。" };
   }
+
+  const useSsh = cmsType === "WORDPRESS" && transport === "SSH";
+  const fields = useSsh ? WORDPRESS_SSH_FIELDS : CREDENTIAL_FIELDS[cmsType];
 
   const credentials: Record<string, string> = {};
   for (const field of fields) {
@@ -46,6 +52,14 @@ export async function registerSiteAction(
       return { error: `${field} は必須です。` };
     }
     credentials[field] = value;
+  }
+
+  if (useSsh) {
+    credentials.transport = "SSH";
+    const sshPort = String(formData.get("sshPort") ?? "").trim();
+    if (sshPort) {
+      credentials.sshPort = sshPort;
+    }
   }
 
   const session = await getSession();
@@ -61,6 +75,24 @@ export async function registerSiteAction(
 
   revalidatePath("/sites");
   return { success: true, connectionCheckStatus };
+}
+
+export interface GenerateSshKeyPairResult {
+  error?: string;
+  publicKeyLine?: string;
+  privateKeyPem?: string;
+}
+
+export async function generateSshKeyPairAction(comment: string): Promise<GenerateSshKeyPairResult> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const keyPair = await generateSshKeyPair(comment, actor);
+    return { publicKeyLine: keyPair.publicKeyLine, privateKeyPem: keyPair.privateKeyPem };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 export interface CreateManagedWordPressSiteState {
