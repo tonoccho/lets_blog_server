@@ -164,13 +164,13 @@ DBへの永続化は行わない(ステートレス。登録リクエスト側�
 
 実装対象:
 
-- [ ] `cms/ConnectionCheckResult.java`: `observedHostKeyFingerprint`追加
-- [ ] `cms/ssh/WordPressSshOperations.java`: `testConnection`のfingerprint橋渡し、`resolveCategories`/`resolveTags`/`provisionAuthor`/`createOrUpdatePost`/`uploadMedia`のwp-cli実装
-- [ ] `service/SiteService.java`: `requiredCredentialKeys`/`buildCredentialsFromMap`のSSH分岐、fingerprint書き戻し
-- [ ] `dto/SshKeyPairRequest.java`・`dto/SshKeyPairResponse.java`(新規)
-- [ ] `controller/SiteController.java`: `POST /api/sites/ssh-keypair`(新規、`SshKeyGenerationService`注入)
-- [ ] `web/src/lib/apiClient.ts`: `generateSshKeyPair()`
-- [ ] `web/src/app/sites/SiteCreationPanel.tsx`・`SiteEditForm.tsx`: transport選択・SSH入力欄・鍵生成UI
+- [x] `cms/ConnectionCheckResult.java`: `observedHostKeyFingerprint`追加
+- [x] `cms/ssh/WordPressSshOperations.java`: `testConnection`のfingerprint橋渡し、`resolveCategories`/`resolveTags`/`provisionAuthor`/`createOrUpdatePost`/`uploadMedia`のwp-cli実装
+- [x] `service/SiteService.java`: `requiredCredentialKeys`/`buildCredentialsFromMap`のSSH分岐、fingerprint書き戻し
+- [x] `dto/SshKeyPairRequest.java`・`dto/SshKeyPairResponse.java`(新規)
+- [x] `controller/SiteController.java`: `POST /api/sites/ssh-keypair`(新規、`SshKeyGenerationService`注入)
+- [x] `web/src/lib/apiClient.ts`: `generateSshKeyPair()`
+- [x] `web/src/app/sites/SiteForm.tsx`・`SiteEditForm.tsx`: transport選択・SSH入力欄・鍵生成UI(実機のdocker環境でPlaywrightによるE2E確認済み)
 
 対象外・スコープ外:
 
@@ -190,19 +190,26 @@ DBへの永続化は行わない(ステートレス。登録リクエスト側�
 
 ## テスト整備
 
-- `ShellQuoteTest`: シングルクォート・特殊文字(`$`, `` ` ``, `;`, 改行等)のエスケープ
-- `SshKeyGenerationServiceTest`: 生成された鍵ペアが有効なOpenSSH形式であること、一時ディレクトリが削除されること
-- `WordPressSshOperationsTest`(`SshCommandExecutor`をモック化): 各メソッドが期待するコマンド文字列・stdinを組み立てて`exec`/`putFile`/`removeFile`を呼ぶこと、`testConnection`成功時に`observedHostKeyFingerprint`が伝播すること
-- `SiteServiceTest`: SSH transportの`credentials`で`register`/`update`が通ること、必須キー欠落時に例外、fingerprint未設定→初回成功で書き戻されること、2回目以降は書き戻し済みfingerprintのまま変わらないこと
-- `SshjCommandExecutorTest`: 可能であれば埋め込みSSHサーバ(Apache MINA SSHD等)を使った結合テストを検討(実機のSSHサーバーが必要なため、モックのみで完結しない箇所は実機検証に回す)
+- [x] `ShellQuoteTest`: シングルクォート・特殊文字(`$`, `` ` ``, `;`, 改行等)のエスケープ
+- [x] `SshKeyGenerationServiceTest`: 生成された鍵ペアが有効なOpenSSH形式であること、呼び出しごとに異なる鍵が生成されること(実際の`ssh-keygen`サブプロセスを使用)
+- [x] `WordPressSshOperationsTest`(`SshCommandExecutor`をモック化、24件): 全メソッド(`testConnection`/`hasAuthorProvisioningCapability`/`resolveCategories`/`resolveTags`/`provisionAuthor`/`createOrUpdatePost`/`uploadMedia`)の正常系・異常系、`observedHostKeyFingerprint`の伝播を検証
+- [x] `SiteServiceTest`: SSH transportの`credentials`で`register`が通ること、必須キー欠落時に例外、fingerprint未設定→初回成功で書き戻されること、既にfingerprint設定済みなら書き戻さないこと(`register`/`checkConnection`双方)
+- [x] `SiteControllerTest`: `generateSshKeyPair`のadmin権限チェック・既定コメント
+- [ ] `SshjCommandExecutorTest`: 埋め込みSSHサーバ(Apache MINA SSHD等)を使った結合テストは未実施(実機検証で代替)
 
 ## 実機検証
 
-1. Cloudflare等でREST APIがブロックされた(または単純にSSHのみ提供された)実サーバーを用意し、SSH transportでサイト登録
-2. 「鍵ペアを生成」→公開鍵をリモートの`authorized_keys`に手動追記→登録実行→疎通確認成功を確認
-3. 記事作成・画像アップロード・カテゴリ/タグ付与が実際にWordPress管理画面に反映されることを確認
-4. サイト編集画面から再疎通確認を実行し、2回目以降もfingerprint検証で正しく成功することを確認
-5. リモートの`authorized_keys`の鍵を削除、または`sshHostKeyFingerprint`を意図的に不一致な値に書き換えて、接続が明示的に失敗することを確認(なりすまし検知の動作確認)
+実施済み(2026-07-31、既存のdocker composeスタックに対して):
+
+- [x] `api`コンテナを再ビルド(`openssh-client`インストールを含むDockerfileの実機ビルド確認)、DBマイグレーション不要であることを確認(Flyway: 変更なしでV15のまま起動)
+- [x] Playwrightで実ブラウザ操作を自動化し、ログイン→サイト登録フォームでWordPress選択→接続方式をSSHに切替→SSH入力欄表示→「SSH鍵ペアを生成」ボタン押下→実際に`POST /api/sites/ssh-keypair`が呼ばれ`ssh-ed25519 ...`形式の公開鍵が画面に表示されることを確認(コンソールエラーなし)
+- [x] 検証用に作成した使い捨てadminユーザーは確認後にDBから削除済み(既存の実ユーザーには一切影響なし)
+
+未実施(実際のリモートSSHサーバーが必要なため今回はスコープ外):
+
+- [ ] 実際にCloudflare等でREST APIがブロックされたサーバー(またはSSHのみのサーバー)を用意し、生成した公開鍵を`authorized_keys`に追記した上でのサイト登録・疎通確認
+- [ ] 記事作成・画像アップロード・カテゴリ/タグ付与が実際のWordPress管理画面に反映されることの確認
+- [ ] ホスト鍵fingerprintのなりすまし検知(意図的な不一致)の実機確認
 
 ## 未決事項・将来検討
 
