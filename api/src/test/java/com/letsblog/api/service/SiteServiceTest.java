@@ -158,6 +158,60 @@ class SiteServiceTest {
         verify(siteRepository, never()).save(any());
     }
 
+    private SiteRegisterRequest sshWordPressRequest() {
+        return new SiteRegisterRequest(
+                "SSH Blog", "ssh-main", CmsType.WORDPRESS,
+                Map.of("baseUrl", "https://example.com", "transport", "SSH",
+                        "sshHost", "203.0.113.5", "sshUser", "deploy",
+                        "wpPath", "/var/www/html", "sshPrivateKeyPem", "PRIVATE-KEY-PEM"));
+    }
+
+    @Test
+    void register_SSHトランスポートで必須キーが揃っていれば登録できる() {
+        when(siteRepository.existsBySiteKey("ssh-main")).thenReturn(false);
+        when(credentialCipher.encrypt(any())).thenReturn(new byte[]{1, 2, 3});
+        when(siteRepository.save(any(Site.class))).thenAnswer(invocation -> {
+            Site s = invocation.getArgument(0);
+            s.setId(2L);
+            return s;
+        });
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.testConnection(any())).thenReturn(ConnectionCheckResult.success());
+
+        SiteResponse response = service.register(sshWordPressRequest(), null);
+
+        assertEquals("SUCCESS", response.connectionCheckStatus());
+    }
+
+    @Test
+    void register_SSHトランスポートで必須キー欠落時は例外() {
+        when(siteRepository.existsBySiteKey("ssh-main")).thenReturn(false);
+        SiteRegisterRequest request = new SiteRegisterRequest(
+                "SSH Blog", "ssh-main", CmsType.WORDPRESS,
+                Map.of("baseUrl", "https://example.com", "transport", "SSH", "sshHost", "203.0.113.5"));
+
+        assertThrows(IllegalArgumentException.class, () -> service.register(request, null));
+    }
+
+    @Test
+    void register_SSH疎通確認成功時に観測したfingerprintを保存する() {
+        when(siteRepository.existsBySiteKey("ssh-main")).thenReturn(false);
+        when(credentialCipher.encrypt(any())).thenReturn(new byte[]{1, 2, 3});
+        when(siteRepository.save(any(Site.class))).thenAnswer(invocation -> {
+            Site s = invocation.getArgument(0);
+            s.setId(2L);
+            return s;
+        });
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.testConnection(any())).thenReturn(ConnectionCheckResult.success("SHA256:observed-fingerprint"));
+
+        service.register(sshWordPressRequest(), null);
+
+        org.mockito.ArgumentCaptor<String> jsonCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(credentialCipher).encrypt(jsonCaptor.capture());
+        assertEquals(true, jsonCaptor.getValue().contains("\"sshHostKeyFingerprint\":\"SHA256:observed-fingerprint\""));
+    }
+
     @Test
     void reprovision_既存サイトの認証情報でプロビジョニングを再実行する() {
         Site site = new Site();
@@ -272,6 +326,47 @@ class SiteServiceTest {
         assertEquals(false, result.connectionOk());
         assertEquals(null, result.hasAdminCapability());
         assertEquals("connection refused", result.failureReason());
+    }
+
+    @Test
+    void checkConnection_SSHで初回はfingerprintを書き戻して保存する() {
+        Site site = buildExternalSite();
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
+        when(credentialCipher.decrypt(any())).thenReturn(
+                "{\"baseUrl\":\"https://example.com\",\"transport\":\"SSH\",\"sshHost\":\"203.0.113.5\","
+                        + "\"sshUser\":\"deploy\",\"wpPath\":\"/var/www/html\",\"sshPrivateKeyPem\":\"PRIVATE-KEY-PEM\"}");
+        when(credentialCipher.encrypt(any())).thenReturn(new byte[]{9, 9, 9});
+        when(siteRepository.save(any(Site.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.testConnection(any())).thenReturn(ConnectionCheckResult.success("SHA256:observed-fingerprint"));
+        when(cmsAdapter.hasAuthorProvisioningCapability(any())).thenReturn(true);
+
+        SiteConnectionCheckResult result = service.checkConnection(1L);
+
+        assertEquals(true, result.connectionOk());
+        org.mockito.ArgumentCaptor<String> jsonCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(credentialCipher).encrypt(jsonCaptor.capture());
+        assertEquals(true, jsonCaptor.getValue().contains("\"sshHostKeyFingerprint\":\"SHA256:observed-fingerprint\""));
+        verify(siteRepository).save(site);
+    }
+
+    @Test
+    void checkConnection_SSHで既にfingerprintがあれば書き戻さない() {
+        Site site = buildExternalSite();
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
+        when(credentialCipher.decrypt(any())).thenReturn(
+                "{\"baseUrl\":\"https://example.com\",\"transport\":\"SSH\",\"sshHost\":\"203.0.113.5\","
+                        + "\"sshUser\":\"deploy\",\"wpPath\":\"/var/www/html\",\"sshPrivateKeyPem\":\"PRIVATE-KEY-PEM\","
+                        + "\"sshHostKeyFingerprint\":\"SHA256:already-pinned\"}");
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.testConnection(any())).thenReturn(ConnectionCheckResult.success("SHA256:different-observed"));
+        when(cmsAdapter.hasAuthorProvisioningCapability(any())).thenReturn(true);
+
+        SiteConnectionCheckResult result = service.checkConnection(1L);
+
+        assertEquals(true, result.connectionOk());
+        verify(credentialCipher, never()).encrypt(any());
+        verify(siteRepository, never()).save(any());
     }
 
     @Test
