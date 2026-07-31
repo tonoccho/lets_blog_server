@@ -15,6 +15,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -193,8 +194,67 @@ public class WordPressSshOperations {
         return Base64.getEncoder().encodeToString(bytes);
     }
 
+    /**
+     * `wp post create`/`wp post update`はporcelain出力でID以外の情報を返さないため、
+     * 作成/更新後に`wp post get`で改めてlink(guid)・statusを取得してPostResultを組み立てる。
+     * 本文(htmlContent)は`-`(標準入力読み込み)経由で渡す(シェル引数に展開すると
+     * 特殊文字・サイズ上限の問題があるため)。
+     */
     public PostResult createOrUpdatePost(WordPressCredentials creds, PostContent content, String existingPostId) {
-        throw new UnsupportedOperationException("SSH transport: createOrUpdatePost is not yet implemented");
+        byte[] stdin = (content.htmlContent() != null ? content.htmlContent() : "").getBytes(StandardCharsets.UTF_8);
+        String fields = postFieldsArgs(content);
+
+        String subcommand = existingPostId == null
+                ? "post create - " + fields + " --porcelain"
+                : "post update " + existingPostId + " - " + fields + " --porcelain";
+
+        SshCommandResult result = exec(creds, wpCli(creds, subcommand), stdin);
+        if (!result.ok()) {
+            throw new SshOperationException("WordPress投稿の作成/更新に失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+        String postId = existingPostId != null ? existingPostId : result.stdout().strip();
+        return fetchPostResult(creds, postId);
+    }
+
+    private String postFieldsArgs(PostContent content) {
+        StringBuilder args = new StringBuilder();
+        args.append("--post_title=").append(ShellQuote.single(content.title()));
+        args.append(" --post_status=").append(ShellQuote.single(content.status()));
+        if (content.slug() != null && !content.slug().isBlank()) {
+            args.append(" --post_name=").append(ShellQuote.single(content.slug()));
+        }
+        if (content.categoryIds() != null && !content.categoryIds().isEmpty()) {
+            args.append(" --post_category=").append(ShellQuote.single(String.join(",", content.categoryIds())));
+        }
+        if (content.tagIds() != null && !content.tagIds().isEmpty()) {
+            String tagIds = String.join(",", content.tagIds());
+            args.append(" --tax_input=").append(ShellQuote.single("{\"post_tag\":[" + tagIds + "]}"));
+        }
+        return args.toString();
+    }
+
+    private PostResult fetchPostResult(WordPressCredentials creds, String postId) {
+        SshCommandResult result = exec(creds, wpCli(creds,
+                "post get " + postId + " --fields=guid,post_status --format=json"));
+        if (!result.ok()) {
+            throw new SshOperationException("作成/更新した投稿の情報取得に失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+        JsonNode post = parseJsonObject(result.stdout());
+        return new PostResult(postId, post.path("guid").asText(), post.path("post_status").asText());
+    }
+
+    private JsonNode parseJsonObject(String json) {
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            if (node == null || node.isMissingNode()) {
+                throw new SshOperationException("wp-cliの出力(JSON)が空です");
+            }
+            return node;
+        } catch (IOException e) {
+            throw new SshOperationException("wp-cliの出力(JSON)の解析に失敗しました: " + e.getMessage(), e);
+        }
     }
 
     public MediaUploadResult uploadMedia(WordPressCredentials creds, String filename, String contentType,
@@ -204,6 +264,10 @@ public class WordPressSshOperations {
 
     private SshCommandResult exec(WordPressCredentials creds, String command) {
         return executor.exec(connectionParams(creds), command, null);
+    }
+
+    private SshCommandResult exec(WordPressCredentials creds, String command, byte[] stdin) {
+        return executor.exec(connectionParams(creds), command, stdin);
     }
 
     private SshConnectionParams connectionParams(WordPressCredentials creds) {

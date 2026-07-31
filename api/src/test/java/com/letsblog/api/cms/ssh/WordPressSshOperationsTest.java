@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.cms.AuthorProvisioningRequest;
 import com.letsblog.api.cms.CmsCredentials.WordPressCredentials;
 import com.letsblog.api.cms.ConnectionCheckResult;
+import com.letsblog.api.cms.PostContent;
+import com.letsblog.api.cms.PostResult;
 import com.letsblog.api.cms.ssh.SshCommandExecutor.SshCommandResult;
 import com.letsblog.api.cms.ssh.SshCommandExecutor.SshConnectionParams;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,12 +15,14 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.notNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -226,5 +230,62 @@ class WordPressSshOperationsTest {
 
         assertThrows(SshOperationException.class,
                 () -> operations.provisionAuthor(creds(), AuthorProvisioningRequest.of("author@example.com")));
+    }
+
+    private PostContent postContent() {
+        return new PostContent("Title", "my-slug", "<p>Hello</p>", "publish", List.of("5"), List.of("7"));
+    }
+
+    @Test
+    void createOrUpdatePost_新規作成時はpost_createをstdin経由で実行する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), notNull())).thenReturn(ok("99\n"));
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"guid\":\"https://example.com/?p=99\",\"post_status\":\"publish\"}"));
+
+        PostResult result = operations.createOrUpdatePost(creds(), postContent(), null);
+
+        assertEquals("99", result.id());
+        assertEquals("https://example.com/?p=99", result.link());
+        assertEquals("publish", result.status());
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<byte[]> stdinCaptor = ArgumentCaptor.forClass(byte[].class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), stdinCaptor.capture());
+        String createCommand = commandCaptor.getAllValues().get(0);
+        assertEquals(true, createCommand.contains("post create -"));
+        assertEquals(true, createCommand.contains("--post_category='5'"));
+        assertEquals(true, createCommand.contains("post_tag"));
+        assertEquals("<p>Hello</p>", new String(stdinCaptor.getAllValues().get(0), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void createOrUpdatePost_既存投稿は更新コマンドを実行する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), notNull())).thenReturn(ok(""));
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"guid\":\"https://example.com/?p=42\",\"post_status\":\"draft\"}"));
+
+        PostResult result = operations.createOrUpdatePost(creds(), postContent(), "42");
+
+        assertEquals("42", result.id());
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), notNull());
+        assertEquals(true, commandCaptor.getValue().contains("post update 42 -"));
+    }
+
+    @Test
+    void createOrUpdatePost_作成コマンドが失敗したら例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), notNull())).thenReturn(fail("wp-cli error"));
+
+        assertThrows(SshOperationException.class,
+                () -> operations.createOrUpdatePost(creds(), postContent(), null));
+    }
+
+    @Test
+    void createOrUpdatePost_情報取得コマンドが失敗したら例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), notNull())).thenReturn(ok("99\n"));
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("post not found"));
+
+        assertThrows(SshOperationException.class,
+                () -> operations.createOrUpdatePost(creds(), postContent(), null));
     }
 }
