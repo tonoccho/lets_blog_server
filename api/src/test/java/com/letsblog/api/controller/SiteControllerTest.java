@@ -1,9 +1,13 @@
 package com.letsblog.api.controller;
 
 import com.letsblog.api.cms.CmsType;
+import com.letsblog.api.crypto.SshKeyGenerationService;
+import com.letsblog.api.crypto.SshKeyGenerationService.SshKeyPair;
 import com.letsblog.api.dto.SiteConnectionCheckResult;
 import com.letsblog.api.dto.SiteResponse;
 import com.letsblog.api.dto.SiteUpdateRequest;
+import com.letsblog.api.dto.SshKeyPairRequest;
+import com.letsblog.api.dto.SshKeyPairResponse;
 import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.CurrentActorService;
 import com.letsblog.api.service.ForbiddenException;
@@ -19,6 +23,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -38,8 +43,12 @@ class SiteControllerTest {
     @Mock
     private WordPressSiteProvisioningService wordPressSiteProvisioningService;
 
+    @Mock
+    private SshKeyGenerationService sshKeyGenerationService;
+
     private SiteController controller() {
-        return new SiteController(siteService, currentActorService, adminAuthorizationService, wordPressSiteProvisioningService);
+        return new SiteController(siteService, currentActorService, adminAuthorizationService,
+                wordPressSiteProvisioningService, sshKeyGenerationService);
     }
 
     private SiteResponse buildResponse() {
@@ -102,5 +111,38 @@ class SiteControllerTest {
 
     private void verifyNoAdminCheck() {
         org.mockito.Mockito.verifyNoInteractions(adminAuthorizationService);
+    }
+
+    @Test
+    void generateSshKeyPair_admin権限があれば鍵ペアを返す() {
+        SiteController controller = controller();
+        when(sshKeyGenerationService.generateEd25519(any()))
+                .thenReturn(new SshKeyPair("PRIVATE-KEY-PEM", "ssh-ed25519 AAAA... letsblog"));
+
+        SshKeyPairResponse response = controller.generateSshKeyPair(new SshKeyPairRequest("my-site"));
+
+        assertEquals("PRIVATE-KEY-PEM", response.privateKeyPem());
+        assertEquals("ssh-ed25519 AAAA... letsblog", response.publicKeyLine());
+        verify(adminAuthorizationService).requireAdmin();
+        verify(sshKeyGenerationService).generateEd25519("my-site");
+    }
+
+    @Test
+    void generateSshKeyPair_コメント未指定時は既定値を使う() {
+        SiteController controller = controller();
+        when(sshKeyGenerationService.generateEd25519(any()))
+                .thenReturn(new SshKeyPair("PRIVATE-KEY-PEM", "ssh-ed25519 AAAA..."));
+
+        controller.generateSshKeyPair(null);
+
+        verify(sshKeyGenerationService).generateEd25519("letsblog");
+    }
+
+    @Test
+    void generateSshKeyPair_admin権限がなければForbidden() {
+        SiteController controller = controller();
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.generateSshKeyPair(null));
     }
 }
