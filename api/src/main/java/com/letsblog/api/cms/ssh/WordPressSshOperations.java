@@ -30,7 +30,7 @@ public class WordPressSshOperations {
         try {
             SshCommandResult result = exec(creds, wpCli(creds, "option get siteurl --format=json"));
             if (result.ok()) {
-                return ConnectionCheckResult.success();
+                return ConnectionCheckResult.success(result.observedHostKeyFingerprint());
             }
             return ConnectionCheckResult.failure(firstLine(result.stderr(), result.stdout()));
         } catch (SshOperationException e) {

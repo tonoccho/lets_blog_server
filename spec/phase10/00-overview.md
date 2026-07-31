@@ -61,6 +61,9 @@ Database
 ### 3. プロジェクト環境間のテーマ・プラグイン・DB同期
 - [03-environment-sync.md](03-environment-sync.md)
 
+### 4. WordPress SSH(wp-cli)トランスポートの追加
+- [04-wordpress-ssh-transport.md](04-wordpress-ssh-transport.md) — Cloudflare等でREST APIが遮断される外部サイト向けに、SSH+wp-cli経由の代替操作経路を追加(設計中、01〜03完了後に着手する追加スコープ)
+
 対象外・スコープ外(全体):
 
 - 外部登録(非managed)サイトへの環境同期対応
