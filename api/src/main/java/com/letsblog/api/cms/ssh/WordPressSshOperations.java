@@ -8,10 +8,14 @@ import com.letsblog.api.cms.PostContent;
 import com.letsblog.api.cms.PostResult;
 import com.letsblog.api.cms.ssh.SshCommandExecutor.SshCommandResult;
 import com.letsblog.api.cms.ssh.SshCommandExecutor.SshConnectionParams;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -25,6 +29,7 @@ import java.util.List;
 public class WordPressSshOperations {
 
     private final SshCommandExecutor executor;
+    private final ObjectMapper objectMapper;
 
     public ConnectionCheckResult testConnection(WordPressCredentials creds) {
         try {
@@ -52,11 +57,62 @@ public class WordPressSshOperations {
     }
 
     public List<String> resolveCategories(WordPressCredentials creds, List<String> names) {
-        throw new UnsupportedOperationException("SSH transport: resolveCategories is not yet implemented");
+        return resolveTerms(creds, "category", names);
     }
 
     public List<String> resolveTags(WordPressCredentials creds, List<String> names) {
-        throw new UnsupportedOperationException("SSH transport: resolveTags is not yet implemented");
+        return resolveTerms(creds, "post_tag", names);
+    }
+
+    /**
+     * REST版(WordPressAdapter.resolveTerms)と同じく、名前の完全一致(大文字小文字無視)で
+     * 既存タームを探し、なければ作成する。
+     */
+    private List<String> resolveTerms(WordPressCredentials creds, String taxonomy, List<String> names) {
+        if (names == null || names.isEmpty()) {
+            return List.of();
+        }
+        List<String> ids = new ArrayList<>();
+        for (String name : names) {
+            ids.add(findOrCreateTerm(creds, taxonomy, name));
+        }
+        return ids;
+    }
+
+    private String findOrCreateTerm(WordPressCredentials creds, String taxonomy, String name) {
+        SshCommandResult searchResult = exec(creds, wpCli(creds,
+                "term list " + taxonomy + " --search=" + ShellQuote.single(name)
+                        + " --fields=name,term_id --format=json"));
+        if (!searchResult.ok()) {
+            throw new SshOperationException("カテゴリ/タグ '" + name + "' の検索に失敗しました: "
+                    + firstLine(searchResult.stderr(), searchResult.stdout()));
+        }
+        for (JsonNode term : parseJsonArray(searchResult.stdout())) {
+            if (term.path("name").asText().equalsIgnoreCase(name)) {
+                return term.path("term_id").asText();
+            }
+        }
+
+        SshCommandResult createResult = exec(creds, wpCli(creds,
+                "term create " + taxonomy + " " + ShellQuote.single(name) + " --porcelain"));
+        if (!createResult.ok()) {
+            throw new SshOperationException("カテゴリ/タグ '" + name + "' の作成に失敗しました: "
+                    + firstLine(createResult.stderr(), createResult.stdout()));
+        }
+        return createResult.stdout().strip();
+    }
+
+    private List<JsonNode> parseJsonArray(String json) {
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            List<JsonNode> result = new ArrayList<>();
+            if (node != null && node.isArray()) {
+                node.forEach(result::add);
+            }
+            return result;
+        } catch (IOException e) {
+            throw new SshOperationException("wp-cliの出力(JSON)の解析に失敗しました: " + e.getMessage(), e);
+        }
     }
 
     public String provisionAuthor(WordPressCredentials creds, AuthorProvisioningRequest request) {

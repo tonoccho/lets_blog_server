@@ -1,0 +1,162 @@
+package com.letsblog.api.cms.ssh;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.letsblog.api.cms.CmsCredentials.WordPressCredentials;
+import com.letsblog.api.cms.ConnectionCheckResult;
+import com.letsblog.api.cms.ssh.SshCommandExecutor.SshCommandResult;
+import com.letsblog.api.cms.ssh.SshCommandExecutor.SshConnectionParams;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class WordPressSshOperationsTest {
+
+    @Mock
+    private SshCommandExecutor executor;
+
+    private WordPressSshOperations operations;
+
+    @BeforeEach
+    void setUp() {
+        operations = new WordPressSshOperations(executor, new ObjectMapper());
+    }
+
+    private WordPressCredentials creds() {
+        return new WordPressCredentials(
+                "https://example.com", null, null,
+                "SSH", "203.0.113.5", 22, "deploy", "/var/www/html", "PRIVATE-KEY-PEM", "SHA256:pinned");
+    }
+
+    private SshCommandResult ok(String stdout) {
+        return new SshCommandResult(0, stdout, "", "SHA256:observed");
+    }
+
+    private SshCommandResult fail(String stderr) {
+        return new SshCommandResult(1, "", stderr, null);
+    }
+
+    @Test
+    void testConnection_成功時にfingerprintを伝播する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok("{\"siteurl\":\"https://example.com\"}"));
+
+        ConnectionCheckResult result = operations.testConnection(creds());
+
+        assertEquals(true, result.ok());
+        assertEquals("SHA256:observed", result.observedHostKeyFingerprint());
+    }
+
+    @Test
+    void testConnection_失敗時は理由を返す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("wp-cli: command not found"));
+
+        ConnectionCheckResult result = operations.testConnection(creds());
+
+        assertEquals(false, result.ok());
+        assertEquals("wp-cli: command not found", result.failureReason());
+    }
+
+    @Test
+    void testConnection_SSH接続例外時は失敗として返す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenThrow(new SshOperationException("接続がタイムアウトしました"));
+
+        ConnectionCheckResult result = operations.testConnection(creds());
+
+        assertEquals(false, result.ok());
+        assertEquals("接続がタイムアウトしました", result.failureReason());
+    }
+
+    @Test
+    void hasAuthorProvisioningCapability_疎通確認が成功すればtrue() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok("{}"));
+
+        assertEquals(true, operations.hasAuthorProvisioningCapability(creds()));
+    }
+
+    @Test
+    void hasAuthorProvisioningCapability_疎通確認が失敗すればfalse() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("error"));
+
+        assertEquals(false, operations.hasAuthorProvisioningCapability(creds()));
+    }
+
+    @Test
+    void resolveCategories_既存タームが見つかればそれを返す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("[{\"name\":\"News\",\"term_id\":\"5\"}]"));
+
+        List<String> ids = operations.resolveCategories(creds(), List.of("News"));
+
+        assertEquals(List.of("5"), ids);
+        verify(executor, times(1)).exec(any(SshConnectionParams.class), any(), isNull());
+    }
+
+    @Test
+    void resolveCategories_見つからなければ作成する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("[]"))
+                .thenReturn(ok("42\n"));
+
+        List<String> ids = operations.resolveCategories(creds(), List.of("New Category"));
+
+        assertEquals(List.of("42"), ids);
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getAllValues().get(0).contains("term list category"));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("term create category"));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("--porcelain"));
+    }
+
+    @Test
+    void resolveTags_タクソノミにpost_tagを使う() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("[{\"name\":\"Tech\",\"term_id\":\"7\"}]"));
+
+        List<String> ids = operations.resolveTags(creds(), List.of("Tech"));
+
+        assertEquals(List.of("7"), ids);
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getValue().contains("term list post_tag"));
+    }
+
+    @Test
+    void resolveCategories_検索コマンドが失敗したら例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("wp: command not found"));
+
+        assertThrows(SshOperationException.class, () -> operations.resolveCategories(creds(), List.of("News")));
+    }
+
+    @Test
+    void resolveCategories_作成コマンドが失敗したら例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("[]"))
+                .thenReturn(fail("term already exists"));
+
+        assertThrows(SshOperationException.class, () -> operations.resolveCategories(creds(), List.of("Dup")));
+    }
+
+    @Test
+    void resolveCategories_空リストはコマンドを実行せず空を返す() {
+        List<String> ids = operations.resolveCategories(creds(), List.of());
+
+        assertEquals(List.of(), ids);
+        verify(executor, never()).exec(any(), any(), any());
+    }
+}
