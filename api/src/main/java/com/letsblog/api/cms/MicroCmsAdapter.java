@@ -189,20 +189,20 @@ public class MicroCmsAdapter implements CmsAdapter {
     }
 
     @Override
-    public boolean testConnection(CmsCredentials credentials) {
+    public ConnectionCheckResult testConnection(CmsCredentials credentials) {
         CmsCredentials.MicroCmsCredentials creds = (CmsCredentials.MicroCmsCredentials) credentials;
         RestClient client = buildContentApiClient(creds);
         String url = contentApiUrl(creds, creds.postsEndpoint()) + "?limit=1";
         try {
             client.get().uri(url).retrieve().toBodilessEntity();
-            return true;
+            return ConnectionCheckResult.success();
         } catch (RestClientResponseException e) {
             log.warn("microCMS疎通確認に失敗しました (serviceId={}, url={}): {} {}",
                     creds.serviceId(), url, e.getStatusCode(), e.getResponseBodyAsString());
-            return false;
+            return ConnectionCheckResult.failure("HTTP " + e.getStatusCode().value() + " " + e.getStatusText());
         } catch (ResourceAccessException e) {
             log.warn("microCMS疎通確認に失敗しました (serviceId={}, url={}): {}", creds.serviceId(), url, e.getMessage());
-            return false;
+            return ConnectionCheckResult.failure(e.getMessage());
         }
     }
 

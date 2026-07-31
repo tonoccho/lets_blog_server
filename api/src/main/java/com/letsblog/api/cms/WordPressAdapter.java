@@ -276,20 +276,20 @@ public class WordPressAdapter implements CmsAdapter {
     }
 
     @Override
-    public boolean testConnection(CmsCredentials credentials) {
+    public ConnectionCheckResult testConnection(CmsCredentials credentials) {
         CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
         RestClient client = buildClient(creds);
         try {
             client.get().uri("/wp-json/wp/v2/users/me").retrieve().toBodilessEntity();
-            return true;
+            return ConnectionCheckResult.success();
         } catch (RestClientResponseException e) {
             log.warn("WordPress疎通確認に失敗しました (baseUrl={}, username={}): {} {}",
                     creds.baseUrl(), creds.username(), e.getStatusCode(), e.getResponseBodyAsString());
-            return false;
+            return ConnectionCheckResult.failure("HTTP " + e.getStatusCode().value() + " " + e.getStatusText());
         } catch (ResourceAccessException e) {
             log.warn("WordPress疎通確認に失敗しました (baseUrl={}, username={}): {}",
                     creds.baseUrl(), creds.username(), e.getMessage());
-            return false;
+            return ConnectionCheckResult.failure(e.getMessage());
         }
     }
 

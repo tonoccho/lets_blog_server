@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.cms.CmsAdapter;
 import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsType;
+import com.letsblog.api.cms.ConnectionCheckResult;
 import com.letsblog.api.crypto.CredentialCipher;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.domain.User;
@@ -83,7 +84,7 @@ class SiteServiceTest {
     void register_疎通確認成功時はSUCCESSを返す() {
         stubSaveSuccess();
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
-        when(cmsAdapter.testConnection(any())).thenReturn(true);
+        when(cmsAdapter.testConnection(any())).thenReturn(ConnectionCheckResult.success());
 
         SiteResponse response = service.register(wordPressRequest(), null);
 
@@ -95,7 +96,7 @@ class SiteServiceTest {
     void register_疎通確認失敗時もFAILEDとして登録自体は成功する() {
         stubSaveSuccess();
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
-        when(cmsAdapter.testConnection(any())).thenReturn(false);
+        when(cmsAdapter.testConnection(any())).thenReturn(ConnectionCheckResult.failure("failed"));
 
         SiteResponse response = service.register(wordPressRequest(), null);
 
@@ -128,7 +129,7 @@ class SiteServiceTest {
         actor.setEmail("actor@example.com");
         when(userRepository.findById(9L)).thenReturn(Optional.of(actor));
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
-        when(cmsAdapter.testConnection(any())).thenReturn(true);
+        when(cmsAdapter.testConnection(any())).thenReturn(ConnectionCheckResult.success());
 
         service.register(wordPressRequest(), 9L);
 
@@ -139,7 +140,7 @@ class SiteServiceTest {
     void register_actorIdがnullならプロビジョニングのメールアドレスもnull() {
         stubSaveSuccess();
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
-        when(cmsAdapter.testConnection(any())).thenReturn(true);
+        when(cmsAdapter.testConnection(any())).thenReturn(ConnectionCheckResult.success());
 
         service.register(wordPressRequest(), null);
 
@@ -213,7 +214,7 @@ class SiteServiceTest {
         when(credentialCipher.encrypt(any())).thenReturn(new byte[]{9, 9, 9});
         when(siteRepository.save(any(Site.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
-        when(cmsAdapter.testConnection(any())).thenReturn(true);
+        when(cmsAdapter.testConnection(any())).thenReturn(ConnectionCheckResult.success());
 
         SiteResponse response = service.update(1L, new SiteUpdateRequest(null, Map.of("appPassword", "new-pass")));
 
@@ -248,7 +249,7 @@ class SiteServiceTest {
         when(credentialCipher.decrypt(any()))
                 .thenReturn("{\"baseUrl\":\"https://example.com\",\"username\":\"admin\",\"appPassword\":\"secret\"}");
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
-        when(cmsAdapter.testConnection(any())).thenReturn(true);
+        when(cmsAdapter.testConnection(any())).thenReturn(ConnectionCheckResult.success());
         when(cmsAdapter.hasAuthorProvisioningCapability(any())).thenReturn(true);
 
         SiteConnectionCheckResult result = service.checkConnection(1L);
@@ -264,12 +265,13 @@ class SiteServiceTest {
         when(credentialCipher.decrypt(any()))
                 .thenReturn("{\"baseUrl\":\"https://example.com\",\"username\":\"admin\",\"appPassword\":\"secret\"}");
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
-        when(cmsAdapter.testConnection(any())).thenReturn(false);
+        when(cmsAdapter.testConnection(any())).thenReturn(ConnectionCheckResult.failure("connection refused"));
 
         SiteConnectionCheckResult result = service.checkConnection(1L);
 
         assertEquals(false, result.connectionOk());
         assertEquals(null, result.hasAdminCapability());
+        assertEquals("connection refused", result.failureReason());
     }
 
     @Test
@@ -284,5 +286,6 @@ class SiteServiceTest {
 
         assertEquals(false, result.connectionOk());
         assertEquals(null, result.hasAdminCapability());
+        assertEquals("boom", result.failureReason());
     }
 }

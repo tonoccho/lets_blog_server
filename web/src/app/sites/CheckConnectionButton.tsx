@@ -14,7 +14,7 @@ export function CheckConnectionButton({ id }: { id: number }) {
         const res = await checkSiteConnectionAction(id);
         setResult(res);
       } catch {
-        setResult({ connectionCheckStatus: "FAILED", hasAdminCapability: null });
+        setResult({ connectionCheckStatus: "FAILED", hasAdminCapability: null, failureReason: null });
       }
     });
   }
@@ -33,6 +33,9 @@ export function CheckConnectionButton({ id }: { id: number }) {
         {result?.connectionCheckStatus === "SUCCESS" && <span className="text-xs text-green-600">SUCCESS</span>}
         {result?.connectionCheckStatus === "FAILED" && <span className="text-xs text-red-600">FAILED</span>}
       </div>
+      {result?.connectionCheckStatus === "FAILED" && result.failureReason && (
+        <span className="text-xs text-red-600">{result.failureReason}</span>
+      )}
       {result?.hasAdminCapability === false && (
         <span className="text-xs text-amber-700">
           ⚠ このサイトの認証情報には管理者権限(ユーザー作成)がありません

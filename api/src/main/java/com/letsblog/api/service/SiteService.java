@@ -8,6 +8,7 @@ import com.letsblog.api.cms.CmsAdapter;
 import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.CmsType;
+import com.letsblog.api.cms.ConnectionCheckResult;
 import com.letsblog.api.crypto.CredentialCipher;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Site;
@@ -116,7 +117,7 @@ public class SiteService {
         try {
             CmsCredentials credentials = buildCredentialsFromMap(cmsType, credentialsMap);
             CmsAdapter adapter = cmsAdapterFactory.resolve(cmsType);
-            return adapter.testConnection(credentials);
+            return adapter.testConnection(credentials).ok();
         } catch (Exception e) {
             log.warn("疎通確認に失敗しました (cmsType={}): {}", cmsType, e.getMessage(), e);
             return false;
@@ -202,13 +203,13 @@ public class SiteService {
         try {
             CmsCredentials credentials = buildCredentialsFromMap(site.getCmsType(), getRawCredentials(site));
             CmsAdapter adapter = cmsAdapterFactory.resolve(site.getCmsType());
-            boolean ok = adapter.testConnection(credentials);
-            Boolean hasAdminCapability = (ok && site.getCmsType() == CmsType.WORDPRESS)
+            ConnectionCheckResult connectionCheckResult = adapter.testConnection(credentials);
+            Boolean hasAdminCapability = (connectionCheckResult.ok() && site.getCmsType() == CmsType.WORDPRESS)
                     ? adapter.hasAuthorProvisioningCapability(credentials) : null;
-            return new SiteConnectionCheckResult(ok, hasAdminCapability);
+            return new SiteConnectionCheckResult(connectionCheckResult.ok(), hasAdminCapability, connectionCheckResult.failureReason());
         } catch (Exception e) {
             log.warn("疎通確認に失敗しました (siteId={}, siteKey={}): {}", id, site.getSiteKey(), e.getMessage(), e);
-            return new SiteConnectionCheckResult(false, null);
+            return new SiteConnectionCheckResult(false, null, e.getMessage());
         }
     }
 

@@ -70,6 +70,7 @@ public class SiteController {
         Map<String, Object> response = new HashMap<>();
         response.put("connectionCheckStatus", result.connectionOk() ? "SUCCESS" : "FAILED");
         response.put("hasAdminCapability", result.hasAdminCapability());
+        response.put("failureReason", result.failureReason());
         return response;
     }
 

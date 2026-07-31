@@ -2,6 +2,7 @@ package com.letsblog.api.dto;
 
 public record SiteConnectionCheckResult(
         boolean connectionOk,
-        Boolean hasAdminCapability
+        Boolean hasAdminCapability,
+        String failureReason
 ) {
 }

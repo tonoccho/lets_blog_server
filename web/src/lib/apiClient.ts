@@ -178,6 +178,7 @@ export function updateSite(id: number, input: SiteUpdateInput, actor?: ActorInfo
 export interface SiteConnectionCheckResult {
   connectionCheckStatus: "SUCCESS" | "FAILED";
   hasAdminCapability: boolean | null;
+  failureReason: string | null;
 }
 
 export function checkSiteConnection(id: number): Promise<SiteConnectionCheckResult> {

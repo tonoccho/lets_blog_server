@@ -34,9 +34,9 @@ public interface CmsAdapter {
     List<String> resolveTags(CmsCredentials credentials, List<String> names);
 
     /**
-     * 認証情報が有効かどうかを軽量なリクエストで確認する。例外は投げず成否をbooleanで返す。
+     * 認証情報が有効かどうかを軽量なリクエストで確認する。例外は投げず結果を返す。
      */
-    boolean testConnection(CmsCredentials credentials);
+    ConnectionCheckResult testConnection(CmsCredentials credentials);
 
     /**
      * デフォルトカテゴリを作成(または既存のものを取得)し、IDを返す。
