@@ -69,15 +69,15 @@ class ProjectEnvironmentSyncServiceTest {
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
 
-        service.sync(1L, "local", "test", List.of("themes", "db"));
+        service.sync(1L, "test", "local", List.of("themes", "db"));
 
         ArgumentCaptor<WordPressSyncClient.SyncCommand> captor =
                 ArgumentCaptor.forClass(WordPressSyncClient.SyncCommand.class);
         verify(syncClient).sync(captor.capture());
-        assertEquals("local-site", captor.getValue().fromSlug());
-        assertEquals("wp_local-site", captor.getValue().fromDbName());
-        assertEquals("test-site", captor.getValue().toSlug());
-        assertEquals("wp_test-site", captor.getValue().toDbName());
+        assertEquals("test-site", captor.getValue().fromSlug());
+        assertEquals("wp_test-site", captor.getValue().fromDbName());
+        assertEquals("local-site", captor.getValue().toSlug());
+        assertEquals("wp_local-site", captor.getValue().toDbName());
         assertEquals(List.of("themes", "db"), captor.getValue().targets());
     }
 
@@ -92,12 +92,35 @@ class ProjectEnvironmentSyncServiceTest {
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
 
-        service.sync(1L, "local", "test", List.of("themes", "plugins", "media", "db"));
+        service.sync(1L, "test", "local", List.of("themes", "plugins", "media", "db"));
 
         ArgumentCaptor<WordPressSyncClient.SyncCommand> captor =
                 ArgumentCaptor.forClass(WordPressSyncClient.SyncCommand.class);
         verify(syncClient).sync(captor.capture());
         assertEquals(List.of("themes", "plugins", "media", "db"), captor.getValue().targets());
+    }
+
+    @Test
+    void sync_同期元がlocalなら例外() {
+        ProjectEnvironmentSyncService service = service();
+
+        assertThrows(IllegalArgumentException.class, () -> service.sync(1L, "local", "test", List.of("db")));
+    }
+
+    @Test
+    void sync_同期先にlocalを指定するのは許可される() {
+        ProjectEnvironmentSyncService service = service();
+        Project project = buildProject(10L, 20L, null);
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site testSite = buildManagedSite(20L, "test-site");
+
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+
+        service.sync(1L, "test", "local", List.of("db"));
+
+        verify(syncClient).sync(org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -117,28 +140,28 @@ class ProjectEnvironmentSyncServiceTest {
     @Test
     void sync_環境にサイトが紐付いていなければ例外() {
         ProjectEnvironmentSyncService service = service();
-        Project project = buildProject(null, 20L, null);
+        Project project = buildProject(10L, null, null);
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
 
-        assertThrows(IllegalArgumentException.class, () -> service.sync(1L, "local", "test", List.of("db")));
+        assertThrows(IllegalArgumentException.class, () -> service.sync(1L, "test", "local", List.of("db")));
     }
 
     @Test
     void sync_非managedサイトが紐付いた環境は同期できない() {
         ProjectEnvironmentSyncService service = service();
-        Project project = buildProject(10L, 20L, null);
-        Site localSite = buildManagedSite(10L, "local-site");
+        Project project = buildProject(10L, 20L, 30L);
+        Site testSite = buildManagedSite(20L, "test-site");
         Site externalSite = new Site();
-        externalSite.setId(20L);
+        externalSite.setId(30L);
         externalSite.setSiteKey("external-site");
         externalSite.setCmsType(CmsType.WORDPRESS);
         externalSite.setManagedWordpress(false);
 
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(externalSite));
+        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+        when(siteRepository.findById(30L)).thenReturn(Optional.of(externalSite));
 
-        assertThrows(IllegalArgumentException.class, () -> service.sync(1L, "local", "test", List.of("db")));
+        assertThrows(IllegalArgumentException.class, () -> service.sync(1L, "test", "production", List.of("db")));
     }
 
     @Test
@@ -146,6 +169,6 @@ class ProjectEnvironmentSyncServiceTest {
         ProjectEnvironmentSyncService service = service();
         when(projectRepository.findById(99L)).thenReturn(Optional.empty());
 
-        assertThrows(ProjectNotFoundException.class, () -> service.sync(99L, "local", "test", List.of("db")));
+        assertThrows(ProjectNotFoundException.class, () -> service.sync(99L, "test", "local", List.of("db")));
     }
 }

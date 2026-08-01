@@ -39,6 +39,9 @@ public class ProjectEnvironmentSyncService {
         if (fromEnvironment.equals(toEnvironment)) {
             throw new IllegalArgumentException("同期元と同期先には異なる環境を指定してください");
         }
+        if ("local".equals(fromEnvironment)) {
+            throw new IllegalArgumentException("ローカル環境は同期元に指定できません");
+        }
 
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません"));
