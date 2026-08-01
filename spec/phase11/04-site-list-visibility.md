@@ -66,12 +66,12 @@ export default async function SitesPage() {
 
 実装対象:
 
-- [ ] `web/src/app/sites/SiteListTable.tsx`(新規)
-- [ ] `web/src/app/sites/page.tsx`: テーブル部分を`SiteListTable`へ切り出し
-- [ ] 検索・絞り込みUI(テキスト検索・CMS種別・プロジェクト紐付け有無)
-- [ ] 環境バッジ・未紐付けバッジの追加
-- [ ] sticky header・ゼブラストライプ・ホバーハイライト
-- [ ] URL列の省略表示(`title`属性でフルURL表示)
+- [x] `web/src/app/sites/SiteListTable.tsx`(新規)
+- [x] `web/src/app/sites/page.tsx`: テーブル部分を`SiteListTable`へ切り出し
+- [x] 検索・絞り込みUI(テキスト検索・CMS種別・プロジェクト紐付け有無)
+- [x] 環境バッジ・未紐付けバッジの追加
+- [x] sticky header・ゼブラストライプ・ホバーハイライト
+- [x] URL列の省略表示(`title`属性でフルURL表示)
 
 対象外・スコープ外:
 
