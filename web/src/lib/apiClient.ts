@@ -581,7 +581,18 @@ export function syncProjectEnvironment(
   });
 }
 
-export type BulkOperationType = "CATEGORY" | "PLUGIN" | "THEME";
+export type BulkOperationType =
+  | "CATEGORY_CREATE"
+  | "CATEGORY_EDIT"
+  | "CATEGORY_DELETE"
+  | "PLUGIN_INSTALL"
+  | "PLUGIN_ACTIVATE"
+  | "PLUGIN_DEACTIVATE"
+  | "PLUGIN_DELETE"
+  | "THEME_INSTALL"
+  | "THEME_ACTIVATE"
+  | "THEME_DELETE";
+export type ZipInstallOperationType = "PLUGIN_INSTALL" | "THEME_INSTALL";
 export type BulkOperationSourceType = "SLUG" | "ZIP";
 export type BulkOperationStatus = "SUCCESS" | "SKIPPED" | "FAILED";
 
@@ -591,7 +602,8 @@ export interface BulkOperationLog {
   sourceType: BulkOperationSourceType;
   value: string;
   categorySlug: string | null;
-  categoryParentName: string | null;
+  categoryParentSlug: string | null;
+  categoryTargetSlug: string | null;
   categoryDescription: string | null;
   originalFilename: string | null;
   environment: ProjectEnvironment;
@@ -601,14 +613,22 @@ export interface BulkOperationLog {
   createdAt: string;
 }
 
+export interface CategoryOption {
+  name: string;
+  slug: string;
+  parentSlug: string | null;
+  description: string | null;
+}
+
 export function runBulkOperation(
   projectId: number,
   input: {
     operationType: BulkOperationType;
-    value: string;
+    value?: string;
     categorySlug?: string;
-    categoryParentName?: string;
+    categoryParentSlug?: string;
     categoryDescription?: string;
+    categoryTargetSlug?: string;
   },
   actor?: ActorInfo
 ): Promise<BulkOperationLog[]> {
@@ -622,7 +642,7 @@ export function runBulkOperation(
 
 export function runBulkOperationUpload(
   projectId: number,
-  input: { operationType: "PLUGIN" | "THEME"; file: File },
+  input: { operationType: ZipInstallOperationType; file: File },
   actor?: ActorInfo
 ): Promise<BulkOperationLog[]> {
   const formData = new FormData();
@@ -650,6 +670,10 @@ export function replayBulkOperations(
 
 export function listBulkOperationLogs(projectId: number, actor?: ActorInfo): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/logs`, { actor });
+}
+
+export function listBulkManagementCategories(projectId: number, actor?: ActorInfo): Promise<CategoryOption[]> {
+  return apiFetch<CategoryOption[]>(`/api/projects/${projectId}/bulk-management/categories`, { actor });
 }
 
 export interface ProjectUser {

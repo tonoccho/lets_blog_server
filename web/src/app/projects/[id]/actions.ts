@@ -187,11 +187,26 @@ export async function runBulkOperationAction(
   const operationType = String(formData.get("operationType") ?? "") as BulkOperationType;
   const value = String(formData.get("value") ?? "").trim();
   const categorySlug = String(formData.get("categorySlug") ?? "").trim();
-  const categoryParentName = String(formData.get("categoryParentName") ?? "").trim();
+  const categoryParentSlug = String(formData.get("categoryParentSlug") ?? "").trim();
   const categoryDescription = String(formData.get("categoryDescription") ?? "").trim();
+  const categoryTargetSlug = String(formData.get("categoryTargetSlug") ?? "").trim();
 
-  if (!operationType || !value) {
-    return { error: "操作種別と値を入力してください。" };
+  if (!operationType) {
+    return { error: "操作種別を選択してください。" };
+  }
+  if (operationType === "CATEGORY_DELETE") {
+    if (!categoryTargetSlug) {
+      return { error: "削除対象のカテゴリを選択してください。" };
+    }
+  } else if (operationType === "CATEGORY_CREATE" || operationType === "CATEGORY_EDIT") {
+    if (!value || !categorySlug) {
+      return { error: "カテゴリ名とスラッグを入力してください。" };
+    }
+    if (operationType === "CATEGORY_EDIT" && !categoryTargetSlug) {
+      return { error: "編集対象のカテゴリを選択してください。" };
+    }
+  } else if (!value) {
+    return { error: "slugを入力してください。" };
   }
 
   try {
@@ -199,10 +214,11 @@ export async function runBulkOperationAction(
       projectId,
       {
         operationType,
-        value,
+        value: value || undefined,
         categorySlug: categorySlug || undefined,
-        categoryParentName: categoryParentName || undefined,
+        categoryParentSlug: categoryParentSlug || undefined,
         categoryDescription: categoryDescription || undefined,
+        categoryTargetSlug: categoryTargetSlug || undefined,
       },
       actor
     );
@@ -224,8 +240,8 @@ export async function runBulkOperationUploadAction(
   const operationType = String(formData.get("operationType") ?? "") as BulkOperationType;
   const file = formData.get("file");
 
-  if (operationType !== "PLUGIN" && operationType !== "THEME") {
-    return { error: "zipアップロードはプラグイン/テーマのみ対応しています。" };
+  if (operationType !== "PLUGIN_INSTALL" && operationType !== "THEME_INSTALL") {
+    return { error: "zipアップロードはプラグイン/テーマのインストールのみ対応しています。" };
   }
   if (!(file instanceof File) || file.size === 0) {
     return { error: "アップロードするzipファイルを選択してください。" };

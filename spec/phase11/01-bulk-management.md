@@ -526,10 +526,30 @@ location ~ ^/api/projects/[0-9]+/bulk-management(/upload|/replay)?$ {
 6. ローカル環境のWordPressインスタンスを削除→`managed-wordpress`で同じsiteKeyで再構築(または新規構築)した後、作業ログからロールフォワードを実行し、過去に実行したカテゴリ作成・プラグインインストール(SLUG方式・ZIP方式の両方)がローカル環境へ再適用されることを確認
 7. 作業ログ一覧に通常実行とロールフォワード実行が区別して表示されること、ZIP方式のログには元のファイル名が表示されることを確認
 
+## 拡張(2026-08-01追加): カテゴリ編集・削除/プラグイン有効化・無効化・削除/テーマ有効化・削除
+
+初版の実装後、以下のフィードバックを受けて操作種別を大幅に拡張した。
+
+| 項目 | 決定内容 |
+|---|---|
+| `BulkOperationType`の再編 | `CATEGORY`→`CATEGORY_CREATE`、`PLUGIN`→`PLUGIN_INSTALL`、`THEME`→`THEME_INSTALL`に改名し、`CATEGORY_EDIT`/`CATEGORY_DELETE`/`PLUGIN_ACTIVATE`/`PLUGIN_DEACTIVATE`/`PLUGIN_DELETE`/`THEME_ACTIVATE`/`THEME_DELETE`を追加(計10種)。provision-agentへ送る`action`は列挙子名を小文字化した値をそのまま使う(例: `category_create`) |
+| カテゴリの環境間同一性判定 | 名前ではなく**スラッグ**で判定するよう変更。カテゴリ作成時のスラッグ入力を必須化した(自動生成に頼ると日本語名から予測不能なスラッグになるため) |
+| 親カテゴリ・編集/削除対象の指定方法 | 名前ではなく**スラッグ**で指定する(`categoryParentSlug`/`categoryTargetSlug`、DBカラムも`category_parent_name`→`category_parent_slug`にリネームし`category_target_slug`を追加)。UI上はテキスト入力ではなく、参照環境(プロジェクトに紐づくmanaged環境のうちlocal→test→production優先順で最初に見つかったもの)のカテゴリ一覧から選択式にする |
+| カテゴリ一覧取得エンドポイント | `GET /api/projects/{id}/bulk-management/categories`(新規)。provision-agentの`/categories`(新規、`fetchCategories()`ヘルパーを`/bulk-management`ハンドラと共用)を参照環境に対して呼び出す |
+| カテゴリ編集 | `CATEGORY_EDIT`。`categoryTargetSlug`(編集対象の現在のスラッグ、必須)で対象を特定し、`wp term update`で名前・スラッグ・親・説明を更新する。対象が見つからない環境は`FAILED` |
+| カテゴリ削除 | `CATEGORY_DELETE`。`categoryTargetSlug`で対象を特定し`wp term delete`。対象が見つからない環境は「既に削除済み」とみなし`SKIPPED`(他の削除操作と異なり冪等性を優先) |
+| プラグイン有効化/無効化 | `wp plugin activate`/`wp plugin deactivate`をそのまま実行(既に有効/無効な状態への実行もwp-cli自体が冪等なため、SKIPPED判定は行わずSUCCESS/FAILEDのみ) |
+| プラグイン削除 | 有効化されている場合に備え先に`wp plugin deactivate`(失敗は無視)→`wp plugin delete`。最終的な削除コマンドの結果のみを判定に使う |
+| テーマ有効化 | `wp theme activate`。WordPressは同時に1つのテーマしか有効化できないため「無効化」の概念はない |
+| テーマ削除 | `wp theme delete`をそのまま実行。有効化中のテーマは wp-cli 自身がエラーを返す(このアプリ側で自動的に他のテーマへ切り替える等の救済は行わない) |
+| zipアップロード対応の範囲 | `PLUGIN_INSTALL`/`THEME_INSTALL`のみ(変更なし)。有効化/無効化/削除・カテゴリ操作はzip非対応 |
+| フロントエンドUI | 「対象(カテゴリ/プラグイン/テーマ)」→「操作(作成/編集/削除、インストール/有効化/無効化/削除等)」の二階層タブ選択に変更。カテゴリ編集は対象選択時に現在の名前/スラッグ/親/説明をフォームへ自動反映する |
+
 ## 未決事項・将来検討
 
 - 外部登録(非managed)サイトへの一括管理対応の要否・実現方式
-- プラグイン/テーマの自動有効化オプションの要否
+- プラグイン/テーマの自動有効化オプションの要否(インストール時)
 - ロールフォワード対象を「全履歴」ではなく期間・操作種別で絞り込む機能の要否
 - 作業ログ・保存済みzipファイルの保持世代・自動削除ポリシー(容量監視も含む)
 - zipファイルのウイルススキャン等のセキュリティチェックの要否(現状は管理者のみが実行可能なため対象外としている)
+- カテゴリ削除時に、そのカテゴリに属する投稿の再割り当て(WordPressの既定動作である「未分類」への自動移動に任せるか、明示的な移行手段を用意するか)

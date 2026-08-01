@@ -10,13 +10,15 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
+import java.util.List;
 import java.util.Map;
 
 /**
  * 常駐wordpressコンテナ内の内部限定プロビジョニングエージェント(ポート9000)へ、
- * カテゴリ作成・プラグイン/テーマインストール(SLUG指定・zipアップロード双方)を依頼するクライアント。
- * 環境同期(WordPressSyncClient)と異なり「1環境の失敗が他環境への実行を止めない」という
- * 一括管理の方針に合わせ、例外を投げず常に結果(BulkApplyResult)を返す。
+ * カテゴリ作成/編集/削除・プラグイン/テーマのインストール(SLUG指定・zipアップロード)/
+ * 有効化/無効化/削除を依頼するクライアント。環境同期(WordPressSyncClient)と異なり
+ * 「1環境の失敗が他環境への実行を止めない」という一括管理の方針に合わせ、
+ * apply系メソッドは例外を投げず常に結果(BulkApplyResult)を返す。
  */
 @Component
 public class WordPressBulkManagementClient {
@@ -31,21 +33,12 @@ public class WordPressBulkManagementClient {
         this.provisionToken = provisionToken;
     }
 
-    public BulkApplyResult apply(String slug, String action, String value) {
-        return apply(slug, action, value, null, null, null);
-    }
-
-    /**
-     * categorySlug/categoryParentName/categoryDescriptionはaction=categoryの場合のみ有効(他は無視される)。
-     */
-    public BulkApplyResult apply(
-            String slug, String action, String value,
-            String categorySlug, String categoryParentName, String categoryDescription) {
+    public BulkApplyResult apply(BulkApplyCommand command) {
         try {
             Map<String, String> body = client.post()
                     .uri("/bulk-management")
                     .header("X-Provision-Token", provisionToken)
-                    .body(new BulkApplyCommand(slug, action, value, categorySlug, categoryParentName, categoryDescription))
+                    .body(command)
                     .retrieve()
                     .body(new ParameterizedTypeReference<Map<String, String>>() {
                     });
@@ -80,14 +73,59 @@ public class WordPressBulkManagementClient {
         }
     }
 
+    /**
+     * 参照環境のカテゴリ一覧を取得する(親カテゴリ選択・編集/削除対象選択のUI向け)。
+     * 取得に失敗した場合は空リストを返す(呼び出し元でエラーとして扱わず、単に選択肢なしとする)。
+     */
+    public List<CategoryInfo> listCategories(String slug) {
+        try {
+            Map<String, Object> body = client.post()
+                    .uri("/categories")
+                    .header("X-Provision-Token", provisionToken)
+                    .body(Map.of("slug", slug))
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<Map<String, Object>>() {
+                    });
+            if (body == null || !(body.get("categories") instanceof List<?> rawList)) {
+                return List.of();
+            }
+            return rawList.stream()
+                    .filter(Map.class::isInstance)
+                    .map(item -> {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> term = (Map<String, Object>) item;
+                        return new CategoryInfo(
+                                asString(term.get("name")),
+                                asString(term.get("slug")),
+                                asString(term.get("parentSlug")),
+                                asString(term.get("description")));
+                    })
+                    .toList();
+        } catch (RestClientException e) {
+            return List.of();
+        }
+    }
+
+    private static String asString(Object value) {
+        return value == null ? null : value.toString();
+    }
+
     private BulkApplyResult resultOf(Map<String, String> body) {
         String status = body != null ? body.get("status") : null;
         return "skipped".equals(status) ? BulkApplyResult.skipped() : BulkApplyResult.success();
     }
 
+    /**
+     * value/categorySlug/categoryParentSlug/categoryDescription/categoryTargetSlugの意味は
+     * actionによって変わる(BulkOperationRequestのフィールドコメントを参照)。
+     */
     public record BulkApplyCommand(
             String slug, String action, String value,
-            String categorySlug, String categoryParentName, String categoryDescription) {
+            String categorySlug, String categoryParentSlug, String categoryDescription,
+            String categoryTargetSlug) {
+    }
+
+    public record CategoryInfo(String name, String slug, String parentSlug, String description) {
     }
 
     public record BulkApplyResult(String status, String errorMessage) {

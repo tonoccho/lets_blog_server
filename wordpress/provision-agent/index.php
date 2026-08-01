@@ -296,7 +296,55 @@ if ($path === '/sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     respond(200, ['status' => 'ok']);
 }
 
-const ALLOWED_BULK_ACTIONS = ['category', 'plugin', 'theme'];
+/**
+ * サイトのカテゴリ一覧を取得し、parent(term_id)を対応するparentSlugへ解決したうえで返す。
+ * 環境間のカテゴリ同一性・親子関係はterm_idではなくスラッグで判定するため、一括管理の
+ * カテゴリ操作(作成/編集/削除)・一覧取得(/categories)はいずれもこの関数を経由する。
+ * @return array<int, array{term_id:int,name:string,slug:string,parent:int,parentSlug:?string,description:string}>
+ */
+function fetchCategories(string $sitePath): array
+{
+    [$code, $out] = runWp(['term', 'list', 'category', '--fields=term_id,name,slug,parent,description', '--format=json', "--path=$sitePath", '--allow-root']);
+    $terms = $code === 0 ? (json_decode($out, true) ?: []) : [];
+    $slugById = [];
+    foreach ($terms as $term) {
+        $slugById[(int) $term['term_id']] = $term['slug'];
+    }
+    foreach ($terms as &$term) {
+        $parentId = (int) ($term['parent'] ?? 0);
+        $term['parentSlug'] = $parentId > 0 ? ($slugById[$parentId] ?? null) : null;
+    }
+    unset($term);
+    return $terms;
+}
+
+function findCategoryBySlug(array $categories, string $slug): ?array
+{
+    foreach ($categories as $term) {
+        if (strcasecmp($term['slug'], $slug) === 0) {
+            return $term;
+        }
+    }
+    return null;
+}
+
+if ($path === '/categories' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    if (!isValidSlug($slug)) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = "/var/www/html/sites/$slug";
+    if (!is_dir($sitePath)) {
+        respond(404, ['error' => 'サイトが見つかりません']);
+    }
+    respond(200, ['categories' => array_values(fetchCategories($sitePath))]);
+}
+
+const ALLOWED_BULK_ACTIONS = [
+    'category_create', 'category_edit', 'category_delete',
+    'plugin_install', 'plugin_activate', 'plugin_deactivate', 'plugin_delete',
+    'theme_install', 'theme_activate', 'theme_delete',
+];
 
 if ($path === '/bulk-management' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = (string) ($input['slug'] ?? '');
@@ -311,39 +359,29 @@ if ($path === '/bulk-management' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         respond(404, ['error' => 'サイトが見つかりません']);
     }
 
-    if ($action === 'category') {
+    if ($action === 'category_create') {
         $categorySlug = (string) ($input['categorySlug'] ?? '');
-        $categoryParentName = (string) ($input['categoryParentName'] ?? '');
+        $categoryParentSlug = (string) ($input['categoryParentSlug'] ?? '');
         $categoryDescription = (string) ($input['categoryDescription'] ?? '');
+        if ($categorySlug === '') {
+            respond(400, ['error' => 'カテゴリのスラッグを指定してください']);
+        }
 
-        [$code, $out] = runWp(['term', 'list', 'category', "--search=$value", '--field=name', '--format=json', "--path=$sitePath", '--allow-root']);
-        $existing = $code === 0 ? (json_decode($out, true) ?: []) : [];
-        $matched = array_filter($existing, fn($name) => strcasecmp($name, $value) === 0);
-        if (!empty($matched)) {
+        $categories = fetchCategories($sitePath);
+        if (findCategoryBySlug($categories, $categorySlug) !== null) {
             respond(200, ['status' => 'skipped']);
         }
 
-        $createArgs = ['term', 'create', 'category', $value, '--porcelain', "--path=$sitePath", '--allow-root'];
-        if ($categorySlug !== '') {
-            $createArgs[] = "--slug=$categorySlug";
-        }
+        $createArgs = ['term', 'create', 'category', $value, "--slug=$categorySlug", '--porcelain', "--path=$sitePath", '--allow-root'];
         if ($categoryDescription !== '') {
             $createArgs[] = "--description=$categoryDescription";
         }
-        if ($categoryParentName !== '') {
-            [$pcode, $pout] = runWp(['term', 'list', 'category', "--search=$categoryParentName", '--field=name,term_id', '--format=json', "--path=$sitePath", '--allow-root']);
-            $parentCandidates = $pcode === 0 ? (json_decode($pout, true) ?: []) : [];
-            $parentTermId = null;
-            foreach ($parentCandidates as $term) {
-                if (strcasecmp($term['name'], $categoryParentName) === 0) {
-                    $parentTermId = $term['term_id'];
-                    break;
-                }
+        if ($categoryParentSlug !== '') {
+            $parent = findCategoryBySlug($categories, $categoryParentSlug);
+            if ($parent === null) {
+                respond(500, ['error' => "親カテゴリ(slug: $categoryParentSlug)が見つかりません"]);
             }
-            if ($parentTermId === null) {
-                respond(500, ['error' => "親カテゴリ '$categoryParentName' が見つかりません"]);
-            }
-            $createArgs[] = "--parent=$parentTermId";
+            $createArgs[] = '--parent=' . $parent['term_id'];
         }
 
         [$code, $out] = runWp($createArgs);
@@ -353,21 +391,118 @@ if ($path === '/bulk-management' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         respond(200, ['status' => 'ok']);
     }
 
-    // action === 'plugin' | 'theme' (SLUG方式: wordpress.orgのディレクトリから指定)
-    [$code, $out] = runWp([$action, 'list', '--field=name', '--format=json', "--path=$sitePath", '--allow-root']);
-    $installed = $code === 0 ? (json_decode($out, true) ?: []) : [];
-    if (in_array($value, $installed, true)) {
-        respond(200, ['status' => 'skipped']);
+    if ($action === 'category_edit') {
+        $categoryTargetSlug = (string) ($input['categoryTargetSlug'] ?? '');
+        $categorySlug = (string) ($input['categorySlug'] ?? '');
+        $categoryParentSlug = (string) ($input['categoryParentSlug'] ?? '');
+        $categoryDescription = (string) ($input['categoryDescription'] ?? '');
+        if ($categoryTargetSlug === '' || $categorySlug === '') {
+            respond(400, ['error' => '編集対象のスラッグと変更後のスラッグを指定してください']);
+        }
+
+        $categories = fetchCategories($sitePath);
+        $target = findCategoryBySlug($categories, $categoryTargetSlug);
+        if ($target === null) {
+            respond(500, ['error' => "対象カテゴリ(slug: $categoryTargetSlug)が見つかりません"]);
+        }
+
+        $updateArgs = ['term', 'update', 'category', (string) $target['term_id'],
+            "--name=$value", "--slug=$categorySlug", "--path=$sitePath", '--allow-root'];
+        if ($categoryDescription !== '') {
+            $updateArgs[] = "--description=$categoryDescription";
+        }
+        if ($categoryParentSlug !== '') {
+            $parent = findCategoryBySlug($categories, $categoryParentSlug);
+            if ($parent === null) {
+                respond(500, ['error' => "親カテゴリ(slug: $categoryParentSlug)が見つかりません"]);
+            }
+            if ((int) $parent['term_id'] === (int) $target['term_id']) {
+                respond(500, ['error' => '親カテゴリに自分自身は指定できません']);
+            }
+            $updateArgs[] = '--parent=' . $parent['term_id'];
+        }
+
+        [$code, $out] = runWp($updateArgs);
+        if ($code !== 0) {
+            respond(500, ['error' => 'カテゴリの更新に失敗しました', 'detail' => $out]);
+        }
+        respond(200, ['status' => 'ok']);
     }
-    [$code, $out] = runWp([$action, 'install', $value, "--path=$sitePath", '--allow-root']);
-    if ($code !== 0) {
-        respond(500, ['error' => "{$action}のインストールに失敗しました", 'detail' => $out]);
+
+    if ($action === 'category_delete') {
+        $categoryTargetSlug = (string) ($input['categoryTargetSlug'] ?? '');
+        if ($categoryTargetSlug === '') {
+            respond(400, ['error' => '削除対象のスラッグを指定してください']);
+        }
+
+        $target = findCategoryBySlug(fetchCategories($sitePath), $categoryTargetSlug);
+        if ($target === null) {
+            // 既に存在しない = 目的達成済みとみなす
+            respond(200, ['status' => 'skipped']);
+        }
+
+        [$code, $out] = runWp(['term', 'delete', 'category', (string) $target['term_id'], "--path=$sitePath", '--allow-root']);
+        if ($code !== 0) {
+            respond(500, ['error' => 'カテゴリの削除に失敗しました', 'detail' => $out]);
+        }
+        respond(200, ['status' => 'ok']);
     }
-    runCommand(['chown', '-R', 'www-data:www-data', $sitePath]);
-    respond(200, ['status' => 'ok']);
+
+    if ($action === 'plugin_install' || $action === 'theme_install') {
+        $type = $action === 'plugin_install' ? 'plugin' : 'theme';
+        [$code, $out] = runWp([$type, 'list', '--field=name', '--format=json', "--path=$sitePath", '--allow-root']);
+        $installed = $code === 0 ? (json_decode($out, true) ?: []) : [];
+        if (in_array($value, $installed, true)) {
+            respond(200, ['status' => 'skipped']);
+        }
+        [$code, $out] = runWp([$type, 'install', $value, "--path=$sitePath", '--allow-root']);
+        if ($code !== 0) {
+            respond(500, ['error' => "{$type}のインストールに失敗しました", 'detail' => $out]);
+        }
+        runCommand(['chown', '-R', 'www-data:www-data', $sitePath]);
+        respond(200, ['status' => 'ok']);
+    }
+
+    if ($action === 'plugin_activate' || $action === 'plugin_deactivate') {
+        $verb = $action === 'plugin_activate' ? 'activate' : 'deactivate';
+        [$code, $out] = runWp(['plugin', $verb, $value, "--path=$sitePath", '--allow-root']);
+        if ($code !== 0) {
+            respond(500, ['error' => "プラグインの{$verb}に失敗しました", 'detail' => $out]);
+        }
+        respond(200, ['status' => 'ok']);
+    }
+
+    if ($action === 'plugin_delete') {
+        // 有効化されている場合に備え先に無効化を試みる(未有効化時のエラーは無視してよい)
+        runWp(['plugin', 'deactivate', $value, "--path=$sitePath", '--allow-root']);
+        [$code, $out] = runWp(['plugin', 'delete', $value, "--path=$sitePath", '--allow-root']);
+        if ($code !== 0) {
+            respond(500, ['error' => 'プラグインの削除に失敗しました', 'detail' => $out]);
+        }
+        respond(200, ['status' => 'ok']);
+    }
+
+    if ($action === 'theme_activate') {
+        [$code, $out] = runWp(['theme', 'activate', $value, "--path=$sitePath", '--allow-root']);
+        if ($code !== 0) {
+            respond(500, ['error' => 'テーマの有効化に失敗しました', 'detail' => $out]);
+        }
+        respond(200, ['status' => 'ok']);
+    }
+
+    if ($action === 'theme_delete') {
+        // 有効化中のテーマは削除できない(wp-cliが自然にエラーを返す想定。自動での切替は行わない)
+        [$code, $out] = runWp(['theme', 'delete', $value, "--path=$sitePath", '--allow-root']);
+        if ($code !== 0) {
+            respond(500, ['error' => 'テーマの削除に失敗しました', 'detail' => $out]);
+        }
+        respond(200, ['status' => 'ok']);
+    }
+
+    respond(400, ['error' => '未対応のactionです']);
 }
 
-const ALLOWED_BULK_UPLOAD_ACTIONS = ['plugin', 'theme'];
+const ALLOWED_BULK_UPLOAD_ACTIONS = ['plugin_install', 'theme_install'];
 
 if ($path === '/bulk-management/upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = (string) ($_POST['slug'] ?? '');
@@ -380,6 +515,7 @@ if ($path === '/bulk-management/upload' && $_SERVER['REQUEST_METHOD'] === 'POST'
     if (!is_dir($sitePath)) {
         respond(404, ['error' => 'サイトが見つかりません']);
     }
+    $type = $action === 'plugin_install' ? 'plugin' : 'theme';
 
     $tmpPath = '/tmp/letsblog-bulk-' . bin2hex(random_bytes(8)) . '.zip';
     if (!move_uploaded_file($_FILES['file']['tmp_name'], $tmpPath)) {
@@ -388,10 +524,10 @@ if ($path === '/bulk-management/upload' && $_SERVER['REQUEST_METHOD'] === 'POST'
 
     // zipの中身(実際のslug)は展開するまで確定しないため事前の存在チェックは行わず、
     // 常に--forceで上書きインストールする(本アプリ全体の「差分チェックをせず全上書き」方針に合わせる)
-    [$code, $out] = runWp([$action, 'install', $tmpPath, '--force', "--path=$sitePath", '--allow-root']);
+    [$code, $out] = runWp([$type, 'install', $tmpPath, '--force', "--path=$sitePath", '--allow-root']);
     runCommand(['rm', '-f', $tmpPath]);
     if ($code !== 0) {
-        respond(500, ['error' => "{$action}のインストールに失敗しました", 'detail' => $out]);
+        respond(500, ['error' => "{$type}のインストールに失敗しました", 'detail' => $out]);
     }
     runCommand(['chown', '-R', 'www-data:www-data', $sitePath]);
     respond(200, ['status' => 'ok']);

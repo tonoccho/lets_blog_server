@@ -35,12 +35,16 @@ public class BulkOperationLog {
     @Column(name = "value", nullable = false)
     private String value;
 
-    // 以下3項目はCATEGORY(source_type=SLUG)のみ使用。ロールフォワード時に同じ内容で再作成するため保持する。
+    // 以下4項目はCATEGORY_CREATE/EDIT/DELETEのみ使用。ロールフォワード時に同じ内容で再現するため保持する。
+    // 親カテゴリ・編集/削除対象はterm_idではなくスラッグで識別する(term_idは環境ごとに異なるため)。
     @Column(name = "category_slug", length = 200)
     private String categorySlug;
 
-    @Column(name = "category_parent_name", length = 200)
-    private String categoryParentName;
+    @Column(name = "category_parent_slug", length = 200)
+    private String categoryParentSlug;
+
+    @Column(name = "category_target_slug", length = 200)
+    private String categoryTargetSlug;
 
     @Column(name = "category_description", columnDefinition = "TEXT")
     private String categoryDescription;

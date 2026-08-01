@@ -3,6 +3,7 @@ package com.letsblog.api.controller;
 import com.letsblog.api.dto.AddProjectUserRequest;
 import com.letsblog.api.dto.BulkOperationLogResponse;
 import com.letsblog.api.dto.BulkOperationRequest;
+import com.letsblog.api.dto.CategoryOptionResponse;
 import com.letsblog.api.dto.ProjectCreateRequest;
 import com.letsblog.api.dto.ProjectEnvironmentBindRequest;
 import com.letsblog.api.dto.ProjectResponse;
@@ -113,7 +114,8 @@ public class ProjectController {
         Long actorId = currentActorService.getCurrentActorId();
         List<BulkOperationLog> logs = bulkManagementService.execute(
                 id, request.operationType(), request.value(),
-                request.categorySlug(), request.categoryParentName(), request.categoryDescription(), actorId);
+                request.categorySlug(), request.categoryParentSlug(), request.categoryDescription(),
+                request.categoryTargetSlug(), actorId);
         return logs.stream().map(BulkOperationLogResponse::from).toList();
     }
 
@@ -141,6 +143,14 @@ public class ProjectController {
     public List<BulkOperationLogResponse> listBulkOperationLogs(@PathVariable Long id) {
         adminAuthorizationService.requireAdmin();
         return bulkManagementService.listLogs(id).stream().map(BulkOperationLogResponse::from).toList();
+    }
+
+    @GetMapping("/{id}/bulk-management/categories")
+    public List<CategoryOptionResponse> listBulkManagementCategories(@PathVariable Long id) {
+        adminAuthorizationService.requireAdmin();
+        return bulkManagementService.listReferenceCategories(id).stream()
+                .map(c -> new CategoryOptionResponse(c.name(), c.slug(), c.parentSlug(), c.description()))
+                .toList();
     }
 
     @GetMapping("/{id}/users")
