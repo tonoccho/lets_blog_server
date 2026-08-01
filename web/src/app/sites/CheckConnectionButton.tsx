@@ -14,7 +14,7 @@ export function CheckConnectionButton({ id }: { id: number }) {
         const res = await checkSiteConnectionAction(id);
         setResult(res);
       } catch {
-        setResult({ connectionCheckStatus: "FAILED", hasAdminCapability: null, failureReason: null });
+        setResult({ connectionCheckStatus: "FAILED", hasAdminCapability: null, failureReason: null, detail: null });
       }
     });
   }
@@ -33,6 +33,9 @@ export function CheckConnectionButton({ id }: { id: number }) {
         {result?.connectionCheckStatus === "SUCCESS" && <span className="text-xs text-green-600">SUCCESS</span>}
         {result?.connectionCheckStatus === "FAILED" && <span className="text-xs text-red-600">FAILED</span>}
       </div>
+      {result?.connectionCheckStatus === "SUCCESS" && result.detail && (
+        <span className="text-xs text-neutral-500">{result.detail}</span>
+      )}
       {result?.connectionCheckStatus === "FAILED" && result.failureReason && (
         <span className="text-xs text-red-600">{result.failureReason}</span>
       )}

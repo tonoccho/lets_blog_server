@@ -54,6 +54,42 @@ function runWp(array $args): array
 }
 
 /**
+ * 投稿本文の送信等、STDIN経由の入力が必要なwp-cli呼び出し用。
+ * runWp/runCommandと同様に各トークンをescapeshellargで個別にエスケープしたコマンド文字列を
+ * proc_openでSTDINパイプ付き実行する(exec()はSTDINを渡せないため)。
+ * @param string[] $args
+ * @return array{0:int,1:string}
+ */
+function runWpWithStdin(array $args, string $stdin): array
+{
+    $command = implode(' ', array_map('escapeshellarg',
+        array_merge(['php', '-d', 'memory_limit=512M', '/usr/local/bin/wp'], $args)));
+    $descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+    $process = proc_open($command, $descriptors, $pipes);
+    if (!is_resource($process)) {
+        return [1, 'proc_openに失敗しました'];
+    }
+    fwrite($pipes[0], $stdin);
+    fclose($pipes[0]);
+    $stdout = stream_get_contents($pipes[1]);
+    $stderr = stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    $exitCode = proc_close($process);
+    return [$exitCode, trim($stdout . ($stderr !== '' ? "\n$stderr" : ''))];
+}
+
+/**
+ * 指定slugのサイトディレクトリパスを返す。存在しなければnullを返す
+ * (wp-cli系エンドポイントで共通の「サイト存在確認」に使う)。
+ */
+function resolveExistingSitePath(string $slug): ?string
+{
+    $sitePath = "/var/www/html/sites/$slug";
+    return is_dir($sitePath) ? $sitePath : null;
+}
+
+/**
  * core download以降の失敗時に呼び出す。既に作成済みのディレクトリ・DBを
  * (存在すれば)削除してから、通常のrespond()と同じ形式でエラーを返す。
  * rm -rf/DROP DATABASE IF EXISTSはいずれも冪等なため、/deprovisionとの二重実行でも問題ない。
@@ -546,6 +582,207 @@ if ($path === '/deprovision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     runCommand(['mysql', '--skip-ssl', '-h', $dbHost, '-uroot', "-p$rootPassword", '-e', "DROP DATABASE IF EXISTS `$dbName`;"]);
 
     respond(200, ['status' => 'ok']);
+}
+
+/**
+ * 通常のブログ運用操作(投稿・カテゴリ/タグ解決・著者・メディア・疎通確認)をmanaged
+ * WordPressサイトに対してwp-cli経由で行うためのエンドポイント群。
+ * SSH経由のWordPressSshOperationsと同等の操作をエージェント側で行う。
+ */
+
+if ($path === '/wp-cli/core-version' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    if (!isValidSlug($slug)) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = resolveExistingSitePath($slug);
+    if ($sitePath === null) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    [$code, $out] = runWp(['core', 'version', "--path=$sitePath", '--allow-root']);
+    if ($code !== 0) {
+        respond(500, ['error' => 'wp core versionの実行に失敗しました', 'detail' => $out]);
+    }
+    respond(200, ['version' => trim($out)]);
+}
+
+const ALLOWED_RESOLVE_TAXONOMIES = ['category', 'post_tag'];
+
+if ($path === '/wp-cli/resolve-terms' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    $taxonomy = (string) ($input['taxonomy'] ?? '');
+    $names = is_array($input['names'] ?? null) ? array_values($input['names']) : [];
+
+    if (!isValidSlug($slug) || !in_array($taxonomy, ALLOWED_RESOLVE_TAXONOMIES, true) || empty($names)) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = resolveExistingSitePath($slug);
+    if ($sitePath === null) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    [$code, $out] = runWp(['term', 'list', $taxonomy, '--fields=name,term_id', '--format=json', "--path=$sitePath", '--allow-root']);
+    $existing = $code === 0 ? (json_decode($out, true) ?: []) : [];
+
+    $ids = [];
+    foreach ($names as $name) {
+        $name = (string) $name;
+        $matchId = null;
+        foreach ($existing as $term) {
+            if (strcasecmp((string) $term['name'], $name) === 0) {
+                $matchId = (string) $term['term_id'];
+                break;
+            }
+        }
+        if ($matchId === null) {
+            [$code, $out] = runWp(['term', 'create', $taxonomy, $name, '--porcelain', "--path=$sitePath", '--allow-root']);
+            if ($code !== 0) {
+                respond(500, ['error' => "カテゴリ/タグ '$name' の作成に失敗しました", 'detail' => $out]);
+            }
+            $matchId = trim($out);
+            $existing[] = ['name' => $name, 'term_id' => $matchId];
+        }
+        $ids[] = $matchId;
+    }
+    respond(200, ['ids' => $ids]);
+}
+
+if ($path === '/wp-cli/provision-author' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    $email = (string) ($input['email'] ?? '');
+    $wpRole = (string) ($input['wpRole'] ?? 'author');
+
+    if (!isValidSlug($slug) || $email === '' || !str_contains($email, '@')) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = resolveExistingSitePath($slug);
+    if ($sitePath === null) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    [$code, $out] = runWp(['user', 'list', "--search=$email", '--fields=ID', '--format=json', "--path=$sitePath", '--allow-root']);
+    $existing = $code === 0 ? (json_decode($out, true) ?: []) : [];
+    $userId = !empty($existing) ? (string) $existing[0]['ID'] : null;
+
+    if ($userId === null) {
+        $username = substr($email, 0, strpos($email, '@'));
+        $randomPassword = bin2hex(random_bytes(18));
+        [$code, $out] = runWp([
+            'user', 'create', $username, $email,
+            "--role=$wpRole", "--user_pass=$randomPassword", '--porcelain', "--path=$sitePath", '--allow-root',
+        ]);
+        if ($code !== 0) {
+            // 同時作成の可能性を考慮し再検索してからフォールバックする
+            [$code2, $out2] = runWp(['user', 'list', "--search=$email", '--fields=ID', '--format=json', "--path=$sitePath", '--allow-root']);
+            $retry = $code2 === 0 ? (json_decode($out2, true) ?: []) : [];
+            if (empty($retry)) {
+                respond(500, ['error' => '著者の作成に失敗しました', 'detail' => $out]);
+            }
+            $userId = (string) $retry[0]['ID'];
+        } else {
+            $userId = trim($out);
+        }
+    }
+
+    $updateArgs = ['user', 'update', $userId, "--role=$wpRole", "--path=$sitePath", '--allow-root'];
+    foreach ([
+        'email' => 'user_email', 'displayName' => 'display_name',
+        'firstName' => 'first_name', 'lastName' => 'last_name',
+        'websiteUrl' => 'user_url', 'bio' => 'description',
+    ] as $inputKey => $wpField) {
+        $value = $input[$inputKey] ?? null;
+        if (is_string($value) && $value !== '') {
+            $updateArgs[] = "--$wpField=$value";
+        }
+    }
+    [$code, $out] = runWp($updateArgs);
+    if ($code !== 0) {
+        respond(500, ['error' => '著者の更新に失敗しました', 'detail' => $out]);
+    }
+    respond(200, ['userId' => $userId]);
+}
+
+if ($path === '/wp-cli/post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    $title = (string) ($input['title'] ?? '');
+    $status = (string) ($input['status'] ?? '');
+    $existingPostId = $input['existingPostId'] ?? null;
+    $postSlug = (string) ($input['postSlug'] ?? '');
+    $categoryIds = is_array($input['categoryIds'] ?? null) ? array_values($input['categoryIds']) : [];
+    $tagIds = is_array($input['tagIds'] ?? null) ? array_values($input['tagIds']) : [];
+    $htmlContent = (string) ($input['htmlContent'] ?? '');
+
+    if (!isValidSlug($slug) || $title === '' || $status === '') {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = resolveExistingSitePath($slug);
+    if ($sitePath === null) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    $subArgs = $existingPostId !== null ? ['post', 'update', (string) $existingPostId, '-'] : ['post', 'create', '-'];
+    $subArgs[] = "--post_title=$title";
+    $subArgs[] = "--post_status=$status";
+    if ($postSlug !== '') {
+        $subArgs[] = "--post_name=$postSlug";
+    }
+    if (!empty($categoryIds)) {
+        $subArgs[] = '--post_category=' . implode(',', $categoryIds);
+    }
+    if (!empty($tagIds)) {
+        $subArgs[] = '--tax_input=' . json_encode(['post_tag' => array_map('intval', $tagIds)]);
+    }
+    $subArgs[] = '--porcelain';
+    $subArgs[] = "--path=$sitePath";
+    $subArgs[] = '--allow-root';
+
+    [$code, $out] = runWpWithStdin($subArgs, $htmlContent);
+    if ($code !== 0) {
+        respond(500, ['error' => '投稿の作成/更新に失敗しました', 'detail' => $out]);
+    }
+    $postId = $existingPostId !== null ? (string) $existingPostId : trim($out);
+
+    [$code, $out] = runWp(['post', 'get', $postId, '--fields=guid,post_status', '--format=json', "--path=$sitePath", '--allow-root']);
+    if ($code !== 0) {
+        respond(500, ['error' => '作成/更新した投稿の情報取得に失敗しました', 'detail' => $out]);
+    }
+    $post = json_decode($out, true) ?: [];
+    respond(200, ['postId' => $postId, 'guid' => $post['guid'] ?? '', 'status' => $post['post_status'] ?? '']);
+}
+
+if ($path === '/wp-cli/media-upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($_POST['slug'] ?? '');
+    if (!isValidSlug($slug) || empty($_FILES['file'])) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = resolveExistingSitePath($slug);
+    if ($sitePath === null) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    $originalName = (string) ($_FILES['file']['name'] ?? 'upload');
+    $safeName = preg_replace('/[^A-Za-z0-9._-]/', '_', basename($originalName));
+    $safeName = $safeName !== '' && $safeName !== null ? $safeName : 'upload';
+    $tmpPath = '/tmp/letsblog-media-' . bin2hex(random_bytes(8)) . '-' . $safeName;
+    if (!move_uploaded_file($_FILES['file']['tmp_name'], $tmpPath)) {
+        respond(500, ['error' => 'アップロードファイルの一時保存に失敗しました']);
+    }
+
+    [$code, $out] = runWp(['media', 'import', $tmpPath, '--porcelain', "--path=$sitePath", '--allow-root']);
+    runCommand(['rm', '-f', $tmpPath]);
+    if ($code !== 0) {
+        respond(500, ['error' => 'メディアのアップロードに失敗しました', 'detail' => $out]);
+    }
+    $mediaId = trim($out);
+
+    [$code, $out] = runWp(['post', 'get', $mediaId, '--fields=guid', '--format=json', "--path=$sitePath", '--allow-root']);
+    if ($code !== 0) {
+        respond(500, ['error' => 'アップロードしたメディアの情報取得に失敗しました', 'detail' => $out]);
+    }
+    $media = json_decode($out, true) ?: [];
+    runCommand(['chown', '-R', 'www-data:www-data', "$sitePath/wp-content/uploads"]);
+    respond(200, ['mediaId' => $mediaId, 'guid' => $media['guid'] ?? '']);
 }
 
 respond(404, ['error' => 'not found']);

@@ -17,7 +17,8 @@ public sealed interface CmsCredentials {
             String sshUser,
             String wpPath,
             String sshPrivateKeyPem,
-            String sshHostKeyFingerprint
+            String sshHostKeyFingerprint,
+            String wpSlug
     ) implements CmsCredentials {
         @Override
         public CmsType cmsType() {
@@ -25,11 +26,20 @@ public sealed interface CmsCredentials {
         }
 
         public WordPressCredentials(String baseUrl, String username, String appPassword) {
-            this(baseUrl, username, appPassword, "REST", null, null, null, null, null, null);
+            this(baseUrl, username, appPassword, "REST", null, null, null, null, null, null, null);
         }
 
         public boolean isSsh() {
             return "SSH".equalsIgnoreCase(transport);
+        }
+
+        /**
+         * 自動構築(managed)WordPressサイト向け。常駐wordpressコンテナ内の内部限定
+         * プロビジョニングエージェント(wordpress/provision-agent)経由でwp-cliを実行する。
+         * wpSlugはそのサイトディレクトリ({@code /var/www/html/sites/{wpSlug}})の識別子。
+         */
+        public boolean isAgent() {
+            return "AGENT".equalsIgnoreCase(transport);
         }
     }
 

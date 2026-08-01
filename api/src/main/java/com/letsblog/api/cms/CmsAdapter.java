@@ -61,4 +61,12 @@ public interface CmsAdapter {
     default boolean hasAuthorProvisioningCapability(CmsCredentials credentials) {
         return true;
     }
+
+    /**
+     * SSHトランスポートで接続されたサイトにwp-cliをインストールする。
+     * SSH接続に対応しない、またはCMS側にwp-cliの概念がない場合はUnsupportedOperationExceptionを投げる。
+     */
+    default WpCliInstallResult installWpCli(CmsCredentials credentials) {
+        throw new UnsupportedOperationException("このCMSはwp-cliのインストールに対応していません");
+    }
 }

@@ -69,11 +69,17 @@ public class WordPressSiteProvisioningService {
         // credentials.baseUrlはSpring Boot API自身がREST呼び出しに使う値のため、
         // ブラウザ向けの公開URL(https://localhost/sites/{slug}、reverse-proxy経由)ではなく、
         // lbs-net内部で直接到達できるwordpressコンテナのURLを使う(Ollama/ComfyUI等と同じ内部直結方式)。
+        // transport=AGENTにより、通常のブログ運用操作(投稿・カテゴリ/タグ解決・著者・メディア・疎通確認)は
+        // このURLへのREST呼び出しではなく、常駐wordpressコンテナ内のプロビジョニングエージェント経由の
+        // wp-cli実行(WordPressAgentOperations)で行われる。username/appPasswordはエージェント経路では
+        // 使われないが、フォールバック・将来的な用途のために保持しておく。
         String internalUrl = "http://wordpress/sites/" + slug;
         Map<String, String> credentials = Map.of(
                 "baseUrl", internalUrl,
                 "username", result.adminUser(),
-                "appPassword", result.applicationPassword());
+                "appPassword", result.applicationPassword(),
+                "transport", "AGENT",
+                "wpSlug", slug);
 
         SiteRegisterRequest registerRequest = new SiteRegisterRequest(
                 request.name(), request.siteKey(), CmsType.WORDPRESS, credentials);

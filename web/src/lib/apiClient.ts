@@ -140,6 +140,24 @@ export function listSites(): Promise<Site[]> {
   return apiFetch<Site[]>('/api/sites');
 }
 
+export interface SiteDetail {
+  id: number;
+  name: string;
+  siteKey: string;
+  cmsType: CmsType;
+  baseUrl: string;
+  createdAt: string;
+  updatedAt: string;
+  managedWordpress: boolean;
+  sshConfigured: boolean;
+  credentials: Record<string, string>;
+  configuredSecretFields: string[];
+}
+
+export function getSiteDetail(id: number, actor?: ActorInfo): Promise<SiteDetail> {
+  return apiFetch<SiteDetail>(`/api/sites/${id}`, { actor });
+}
+
 export function registerSite(input: SiteRegisterInput, actor?: ActorInfo): Promise<Site> {
   return apiFetch<Site>('/api/sites', {
     method: 'POST',
@@ -180,10 +198,19 @@ export interface SiteConnectionCheckResult {
   connectionCheckStatus: "SUCCESS" | "FAILED";
   hasAdminCapability: boolean | null;
   failureReason: string | null;
+  detail: string | null;
 }
 
 export function checkSiteConnection(id: number): Promise<SiteConnectionCheckResult> {
   return apiFetch(`/api/sites/${id}/test-connection`, { method: 'POST' });
+}
+
+export interface WpCliInstallResult {
+  message: string;
+}
+
+export function installWpCli(id: number, actor?: ActorInfo): Promise<WpCliInstallResult> {
+  return apiFetch<WpCliInstallResult>(`/api/sites/${id}/install-wp-cli`, { method: 'POST', actor });
 }
 
 export interface SshKeyPair {

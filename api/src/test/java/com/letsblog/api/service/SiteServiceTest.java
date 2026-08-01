@@ -339,11 +339,12 @@ class SiteServiceTest {
         when(siteRepository.save(any(Site.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
         when(cmsAdapter.testConnection(any())).thenReturn(ConnectionCheckResult.success("SHA256:observed-fingerprint"));
-        when(cmsAdapter.hasAuthorProvisioningCapability(any())).thenReturn(true);
 
         SiteConnectionCheckResult result = service.checkConnection(1L);
 
         assertEquals(true, result.connectionOk());
+        assertEquals(true, result.hasAdminCapability());
+        verify(cmsAdapter, never()).hasAuthorProvisioningCapability(any());
         org.mockito.ArgumentCaptor<String> jsonCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
         verify(credentialCipher).encrypt(jsonCaptor.capture());
         assertEquals(true, jsonCaptor.getValue().contains("\"sshHostKeyFingerprint\":\"SHA256:observed-fingerprint\""));
@@ -360,11 +361,12 @@ class SiteServiceTest {
                         + "\"sshHostKeyFingerprint\":\"SHA256:already-pinned\"}");
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
         when(cmsAdapter.testConnection(any())).thenReturn(ConnectionCheckResult.success("SHA256:different-observed"));
-        when(cmsAdapter.hasAuthorProvisioningCapability(any())).thenReturn(true);
 
         SiteConnectionCheckResult result = service.checkConnection(1L);
 
         assertEquals(true, result.connectionOk());
+        assertEquals(true, result.hasAdminCapability());
+        verify(cmsAdapter, never()).hasAuthorProvisioningCapability(any());
         verify(credentialCipher, never()).encrypt(any());
         verify(siteRepository, never()).save(any());
     }

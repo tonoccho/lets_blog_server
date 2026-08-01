@@ -7,8 +7,10 @@ import {
   createManagedWordPressSite,
   deleteSite,
   generateSshKeyPair,
+  installWpCli,
   registerSite,
   SiteConnectionCheckResult,
+  WpCliInstallResult,
 } from "@/lib/apiClient";
 import { getSession, requireAdminSession } from "@/lib/session";
 
@@ -142,4 +144,10 @@ export async function deleteSiteAction(id: number) {
 
 export async function checkSiteConnectionAction(id: number): Promise<SiteConnectionCheckResult> {
   return checkSiteConnection(id);
+}
+
+export async function installWpCliAction(id: number): Promise<WpCliInstallResult> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  return installWpCli(id, actor);
 }

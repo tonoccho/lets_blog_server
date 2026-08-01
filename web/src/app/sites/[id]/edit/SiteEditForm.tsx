@@ -1,16 +1,17 @@
 "use client";
 
 import { useActionState, useState, useTransition } from "react";
-import type { Site } from "@/lib/apiClient";
+import type { SiteDetail } from "@/lib/apiClient";
 import { generateSshKeyPairAction } from "../../actions";
 import { updateSiteAction, UpdateSiteState } from "./actions";
+import { InstallWpCliButton } from "./InstallWpCliButton";
 
 const initialState: UpdateSiteState = {};
 
-export function SiteEditForm({ site }: { site: Site }) {
+export function SiteEditForm({ site }: { site: SiteDetail }) {
   const action = (prevState: UpdateSiteState, formData: FormData) => updateSiteAction(site.id, prevState, formData);
   const [state, formAction, pending] = useActionState(action, initialState);
-  const [sshEnabled, setSshEnabled] = useState(false);
+  const [sshEnabled, setSshEnabled] = useState(site.sshConfigured);
   const [privateKeyPem, setPrivateKeyPem] = useState("");
   const [publicKeyLine, setPublicKeyLine] = useState("");
   const [keyGenError, setKeyGenError] = useState<string | null>(null);
@@ -28,6 +29,8 @@ export function SiteEditForm({ site }: { site: Site }) {
       setPublicKeyLine(result.publicKeyLine ?? "");
     });
   }
+
+  const isSecretConfigured = (name: string) => site.configuredSecretFields.includes(name);
 
   return (
     <form action={formAction} className="max-w-xl space-y-4 rounded-lg border border-neutral-200 bg-white p-5">
@@ -61,14 +64,25 @@ export function SiteEditForm({ site }: { site: Site }) {
           {site.cmsType === "WORDPRESS" ? (
             <div className="space-y-3">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Field name="baseUrl" label="WordPressのURL" placeholder="変更する場合のみ入力" />
-                <Field name="username" label="WordPressユーザー名" placeholder="変更する場合のみ入力" />
+                <Field
+                  name="baseUrl"
+                  label="WordPressのURL"
+                  placeholder="変更する場合のみ入力"
+                  defaultValue={site.credentials.baseUrl}
+                />
+                <Field
+                  name="username"
+                  label="WordPressユーザー名"
+                  placeholder="変更する場合のみ入力"
+                  defaultValue={site.credentials.username}
+                />
                 <Field
                   name="appPassword"
                   label="アプリケーションパスワード"
                   placeholder="変更する場合のみ入力"
                   type="password"
                   wide
+                  configured={isSecretConfigured("appPassword")}
                 />
               </div>
 
@@ -85,14 +99,36 @@ export function SiteEditForm({ site }: { site: Site }) {
                 <div className="space-y-3 rounded border border-neutral-200 p-3">
                   <input type="hidden" name="transport" value="SSH" />
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <Field name="sshHost" label="SSHホスト" placeholder="変更する場合のみ入力" />
-                    <Field name="sshPort" label="SSHポート(既定22)" placeholder="変更する場合のみ入力" />
-                    <Field name="sshUser" label="SSHユーザー" placeholder="変更する場合のみ入力" />
-                    <Field name="wpPath" label="wp-cliのパス(--path)" placeholder="変更する場合のみ入力" />
+                    <Field
+                      name="sshHost"
+                      label="SSHホスト"
+                      placeholder="変更する場合のみ入力"
+                      defaultValue={site.credentials.sshHost}
+                    />
+                    <Field
+                      name="sshPort"
+                      label="SSHポート(既定22)"
+                      placeholder="変更する場合のみ入力"
+                      defaultValue={site.credentials.sshPort}
+                    />
+                    <Field
+                      name="sshUser"
+                      label="SSHユーザー"
+                      placeholder="変更する場合のみ入力"
+                      defaultValue={site.credentials.sshUser}
+                    />
+                    <Field
+                      name="wpPath"
+                      label="WordPressインストール先ディレクトリ(wp-cliの--path)"
+                      placeholder="例: /home/deploy/public_html(wp-cli本体のパスではありません)"
+                      defaultValue={site.credentials.wpPath}
+                      wide
+                    />
                     <Field
                       name="sshHostKeyFingerprint"
                       label="ホスト鍵fingerprint(上級者向け・通常は空欄)"
                       placeholder="変更する場合のみ入力"
+                      defaultValue={site.credentials.sshHostKeyFingerprint}
                       wide
                     />
                   </div>
@@ -106,6 +142,9 @@ export function SiteEditForm({ site }: { site: Site }) {
                     >
                       {keyGenPending ? "鍵ペアを生成中…" : "SSH鍵ペアを再生成"}
                     </button>
+                    {isSecretConfigured("sshPrivateKeyPem") && !publicKeyLine && (
+                      <p className="text-xs text-green-600">SSH秘密鍵は設定済みです。</p>
+                    )}
                     {keyGenError && <p className="text-sm text-red-600">{keyGenError}</p>}
                     {publicKeyLine && (
                       <div className="space-y-1">
@@ -126,15 +165,56 @@ export function SiteEditForm({ site }: { site: Site }) {
                   </div>
                 </div>
               )}
+
+              {site.sshConfigured && (
+                <div className="rounded border border-neutral-200 p-3">
+                  <p className="mb-2 text-sm text-neutral-600">
+                    SSH接続が設定されています。wp-cliが未インストールの場合はここからインストールできます。
+                  </p>
+                  <InstallWpCliButton id={site.id} />
+                </div>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field name="serviceId" label="Service ID" placeholder="変更する場合のみ入力" />
-              <Field name="apiKey" label="API Key" placeholder="変更する場合のみ入力" type="password" />
-              <Field name="managementApiKey" label="Management API Key" placeholder="変更する場合のみ入力" type="password" />
-              <Field name="postsEndpoint" label="投稿用エンドポイント" placeholder="変更する場合のみ入力" />
-              <Field name="categoriesEndpoint" label="カテゴリ用エンドポイント" placeholder="変更する場合のみ入力" />
-              <Field name="tagsEndpoint" label="タグ用エンドポイント" placeholder="変更する場合のみ入力" />
+              <Field
+                name="serviceId"
+                label="Service ID"
+                placeholder="変更する場合のみ入力"
+                defaultValue={site.credentials.serviceId}
+              />
+              <Field
+                name="apiKey"
+                label="API Key"
+                placeholder="変更する場合のみ入力"
+                type="password"
+                configured={isSecretConfigured("apiKey")}
+              />
+              <Field
+                name="managementApiKey"
+                label="Management API Key"
+                placeholder="変更する場合のみ入力"
+                type="password"
+                configured={isSecretConfigured("managementApiKey")}
+              />
+              <Field
+                name="postsEndpoint"
+                label="投稿用エンドポイント"
+                placeholder="変更する場合のみ入力"
+                defaultValue={site.credentials.postsEndpoint}
+              />
+              <Field
+                name="categoriesEndpoint"
+                label="カテゴリ用エンドポイント"
+                placeholder="変更する場合のみ入力"
+                defaultValue={site.credentials.categoriesEndpoint}
+              />
+              <Field
+                name="tagsEndpoint"
+                label="タグ用エンドポイント"
+                placeholder="変更する場合のみ入力"
+                defaultValue={site.credentials.tagsEndpoint}
+              />
             </div>
           )}
         </fieldset>
@@ -170,19 +250,27 @@ function Field({
   placeholder,
   type = "text",
   wide = false,
+  defaultValue,
+  configured = false,
 }: {
   name: string;
   label: string;
   placeholder?: string;
   type?: string;
   wide?: boolean;
+  defaultValue?: string;
+  configured?: boolean;
 }) {
   return (
     <label className={`flex flex-col gap-1 text-sm ${wide ? "sm:col-span-2" : ""}`}>
-      <span className="text-neutral-600">{label}</span>
+      <span className="text-neutral-600">
+        {label}
+        {configured && <span className="ml-1 text-xs text-green-600">(設定済み)</span>}
+      </span>
       <input
         name={name}
         type={type}
+        defaultValue={defaultValue}
         placeholder={placeholder}
         className="rounded border border-neutral-300 px-3 py-2 text-sm"
       />

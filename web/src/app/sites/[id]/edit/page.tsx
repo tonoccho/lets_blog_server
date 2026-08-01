@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { listSites } from "@/lib/apiClient";
+import { getSiteDetail } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 import { SiteEditForm } from "./SiteEditForm";
 
@@ -8,18 +8,18 @@ export default async function SiteEditPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
   const { id } = await params;
 
-  const sites = await listSites().catch(() => []);
-  const site = sites.find((s) => s.id === Number(id));
+  const site = await getSiteDetail(Number(id), actor).catch(() => null);
   if (!site) {
     notFound();
   }
 
   return (
     <div className="space-y-8">
-      <h1 className="text-xl font-semibold">サイト編集</h1>
+      <h1 className="text-xl font-semibold">サイト管理</h1>
       <SiteEditForm site={site} />
     </div>
   );

@@ -1,7 +1,9 @@
 package com.letsblog.api.controller;
 
+import com.letsblog.api.cms.WpCliInstallResult;
 import com.letsblog.api.dto.CreateManagedWordPressSiteRequest;
 import com.letsblog.api.dto.SiteConnectionCheckResult;
+import com.letsblog.api.dto.SiteDetailResponse;
 import com.letsblog.api.dto.SiteRegisterRequest;
 import com.letsblog.api.dto.SiteResponse;
 import com.letsblog.api.dto.SiteUpdateRequest;
@@ -64,6 +66,12 @@ public class SiteController {
         return siteService.list();
     }
 
+    @GetMapping("/{id}")
+    public SiteDetailResponse getDetail(@PathVariable Long id) {
+        adminAuthorizationService.requireAdmin();
+        return siteService.getDetail(id);
+    }
+
     @PostMapping("/ssh-keypair")
     public SshKeyPairResponse generateSshKeyPair(@RequestBody(required = false) SshKeyPairRequest request) {
         adminAuthorizationService.requireAdmin();
@@ -84,6 +92,7 @@ public class SiteController {
         response.put("connectionCheckStatus", result.connectionOk() ? "SUCCESS" : "FAILED");
         response.put("hasAdminCapability", result.hasAdminCapability());
         response.put("failureReason", result.failureReason());
+        response.put("detail", result.detail());
         return response;
     }
 
@@ -92,6 +101,12 @@ public class SiteController {
         adminAuthorizationService.requireAdmin();
         wordPressSiteProvisioningService.deleteSite(id);
         return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/{id}/install-wp-cli")
+    public WpCliInstallResult installWpCli(@PathVariable Long id) {
+        adminAuthorizationService.requireAdmin();
+        return siteService.installWpCli(id);
     }
 
     @PostMapping("/{id}/reprovision")

@@ -100,6 +100,27 @@ class WordPressSiteProvisioningServiceTest {
     }
 
     @Test
+    void createManagedSite_credentialsにtransportAGENTとwpSlugを設定する() {
+        when(siteRepository.existsBySiteKey("main")).thenReturn(false);
+        when(provisioningClient.provision(any())).thenReturn(new WordPressProvisioningClient.ProvisionResult(
+                "https://localhost/sites/main", "admin", "app-pass-1234"));
+        SiteResponse response = new SiteResponse(1L, "My Blog", "main", CmsType.WORDPRESS,
+                "https://localhost/sites/main", LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false);
+        ArgumentCaptor<com.letsblog.api.dto.SiteRegisterRequest> registerCaptor =
+                ArgumentCaptor.forClass(com.letsblog.api.dto.SiteRegisterRequest.class);
+        when(siteService.register(registerCaptor.capture(), eq(9L))).thenReturn(response);
+        Site site = new Site();
+        site.setId(1L);
+        site.setSiteKey("main");
+        when(siteRepository.findBySiteKey("main")).thenReturn(Optional.of(site));
+
+        service.createManagedSite(request(), 9L);
+
+        assertEquals("AGENT", registerCaptor.getValue().credentials().get("transport"));
+        assertEquals("main", registerCaptor.getValue().credentials().get("wpSlug"));
+    }
+
+    @Test
     void createManagedSite_siteKeyが重複していれば構築せずに例外() {
         when(siteRepository.existsBySiteKey("main")).thenReturn(true);
 

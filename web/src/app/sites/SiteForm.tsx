@@ -102,7 +102,12 @@ export function SiteForm() {
                 <Field name="sshHost" label="SSHホスト" placeholder="203.0.113.5" />
                 <Field name="sshPort" label="SSHポート(既定22)" placeholder="22" required={false} />
                 <Field name="sshUser" label="SSHユーザー" placeholder="deploy" />
-                <Field name="wpPath" label="wp-cliのパス(--path)" placeholder="/var/www/html" wide />
+                <Field
+                  name="wpPath"
+                  label="WordPressインストール先ディレクトリ(wp-cliの--path)"
+                  placeholder="/home/deploy/public_html (wp-cli本体のパスではありません)"
+                  wide
+                />
               </div>
 
               <div className="space-y-2">

@@ -181,7 +181,7 @@ export function SiteListTable({
                     <td className="px-4 py-2 text-right">
                       <div className="flex justify-end gap-3">
                         <Link href={`/sites/${site.id}/edit`} className="text-sm text-neutral-600 hover:underline">
-                          編集
+                          管理
                         </Link>
                         <DeleteSiteButton id={site.id} managedWordpress={site.managedWordpress} />
                       </div>
