@@ -1,14 +1,22 @@
 package com.letsblog.api.controller;
 
+import com.letsblog.api.domain.BulkOperationLog;
+import com.letsblog.api.domain.BulkOperationSourceType;
+import com.letsblog.api.domain.BulkOperationStatus;
+import com.letsblog.api.domain.BulkOperationType;
 import com.letsblog.api.dto.AddProjectUserRequest;
+import com.letsblog.api.dto.BulkOperationRequest;
 import com.letsblog.api.dto.ProjectCreateRequest;
 import com.letsblog.api.dto.ProjectEnvironmentBindRequest;
 import com.letsblog.api.dto.ProjectResponse;
 import com.letsblog.api.dto.ProjectUpdateRequest;
 import com.letsblog.api.dto.ProjectUserResponse;
+import com.letsblog.api.dto.ReplayBulkOperationRequest;
 import com.letsblog.api.dto.SyncEnvironmentRequest;
 import com.letsblog.api.dto.UpdateProjectUserRequest;
 import com.letsblog.api.service.AdminAuthorizationService;
+import com.letsblog.api.service.BulkManagementService;
+import com.letsblog.api.service.CurrentActorService;
 import com.letsblog.api.service.ForbiddenException;
 import com.letsblog.api.service.ProjectEnvironmentSyncService;
 import com.letsblog.api.service.ProjectService;
@@ -18,6 +26,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.ResponseEntity;
+import org.springframework.mock.web.MockMultipartFile;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -41,11 +50,31 @@ class ProjectControllerTest {
     private ProjectEnvironmentSyncService projectEnvironmentSyncService;
 
     @Mock
+    private BulkManagementService bulkManagementService;
+
+    @Mock
     private AdminAuthorizationService adminAuthorizationService;
+
+    @Mock
+    private CurrentActorService currentActorService;
 
     private ProjectController controller() {
         return new ProjectController(
-                projectService, projectUserSyncService, projectEnvironmentSyncService, adminAuthorizationService);
+                projectService, projectUserSyncService, projectEnvironmentSyncService, bulkManagementService,
+                adminAuthorizationService, currentActorService);
+    }
+
+    private BulkOperationLog buildLog() {
+        BulkOperationLog log = new BulkOperationLog();
+        log.setId(1L);
+        log.setProjectId(1L);
+        log.setOperationType(BulkOperationType.CATEGORY_CREATE);
+        log.setSourceType(BulkOperationSourceType.SLUG);
+        log.setValue("お知らせ");
+        log.setEnvironment("local");
+        log.setStatus(BulkOperationStatus.SUCCESS);
+        log.setCreatedAt(LocalDateTime.now());
+        return log;
     }
 
     private ProjectResponse buildResponse() {
@@ -147,6 +176,95 @@ class ProjectControllerTest {
         doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
 
         assertThrows(ForbiddenException.class, () -> controller.syncEnvironment(1L, request));
+    }
+
+    @Test
+    void runBulkOperation_admin権限があれば実行できる() {
+        ProjectController controller = controller();
+        BulkOperationRequest request = new BulkOperationRequest(
+                BulkOperationType.CATEGORY_CREATE, "お知らせ", "oshirase", null, null, null);
+        when(bulkManagementService.execute(1L, BulkOperationType.CATEGORY_CREATE, "お知らせ", "oshirase", null, null, null, 0L))
+                .thenReturn(List.of(buildLog()));
+
+        List<?> response = controller.runBulkOperation(1L, request);
+
+        assertEquals(1, response.size());
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void runBulkOperation_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        BulkOperationRequest request = new BulkOperationRequest(
+                BulkOperationType.CATEGORY_CREATE, "お知らせ", "oshirase", null, null, null);
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.runBulkOperation(1L, request));
+    }
+
+    @Test
+    void runBulkOperationUpload_admin権限があれば実行できる() throws Exception {
+        ProjectController controller = controller();
+        MockMultipartFile file = new MockMultipartFile("file", "custom-plugin.zip", "application/zip", new byte[]{1, 2, 3});
+        when(bulkManagementService.executeFromUpload(1L, BulkOperationType.PLUGIN_INSTALL, file, 0L))
+                .thenReturn(List.of(buildLog()));
+
+        List<?> response = controller.runBulkOperationUpload(1L, BulkOperationType.PLUGIN_INSTALL, file);
+
+        assertEquals(1, response.size());
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void replayBulkOperations_admin権限があれば実行できる() {
+        ProjectController controller = controller();
+        ReplayBulkOperationRequest request = new ReplayBulkOperationRequest("local");
+        when(bulkManagementService.replay(1L, "local", 0L)).thenReturn(List.of(buildLog()));
+
+        List<?> response = controller.replayBulkOperations(1L, request);
+
+        assertEquals(1, response.size());
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void listBulkOperationLogs_admin権限があれば取得できる() {
+        ProjectController controller = controller();
+        when(bulkManagementService.listLogs(1L)).thenReturn(List.of(buildLog()));
+
+        List<?> response = controller.listBulkOperationLogs(1L);
+
+        assertEquals(1, response.size());
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void listBulkOperationLogs_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.listBulkOperationLogs(1L));
+    }
+
+    @Test
+    void listBulkManagementCategories_admin権限があれば取得できる() {
+        ProjectController controller = controller();
+        when(bulkManagementService.listReferenceCategories(1L)).thenReturn(
+                List.of(new com.letsblog.api.provisioning.WordPressBulkManagementClient.CategoryInfo(
+                        "お知らせ", "oshirase", null, null)));
+
+        List<?> response = controller.listBulkManagementCategories(1L);
+
+        assertEquals(1, response.size());
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void listBulkManagementCategories_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.listBulkManagementCategories(1L));
     }
 
     @Test

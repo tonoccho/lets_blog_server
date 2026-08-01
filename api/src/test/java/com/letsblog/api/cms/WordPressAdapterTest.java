@@ -1,5 +1,6 @@
 package com.letsblog.api.cms;
 
+import com.letsblog.api.cms.agent.WordPressAgentOperations;
 import com.letsblog.api.cms.ssh.WordPressSshOperations;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,19 +38,27 @@ class WordPressAdapterTest {
     private WordPressAdapter adapter;
     private MockRestServiceServer server;
     private WordPressSshOperations sshOperations;
+    private WordPressAgentOperations agentOperations;
 
     @BeforeEach
     void setUp() {
         restClientBuilder = RestClient.builder();
         server = MockRestServiceServer.bindTo(restClientBuilder).build();
         sshOperations = mock(WordPressSshOperations.class);
-        adapter = new WordPressAdapter(restClientBuilder, sshOperations);
+        agentOperations = mock(WordPressAgentOperations.class);
+        adapter = new WordPressAdapter(restClientBuilder, sshOperations, agentOperations);
     }
 
     private CmsCredentials.WordPressCredentials sshCredentials() {
         return new CmsCredentials.WordPressCredentials(
                 "https://example.com", null, null,
-                "SSH", "ssh.example.com", 22, "deploy", "/var/www/html", "PRIVATE-KEY-PEM", null);
+                "SSH", "ssh.example.com", 22, "deploy", "/var/www/html", "PRIVATE-KEY-PEM", null, null);
+    }
+
+    private CmsCredentials.WordPressCredentials agentCredentials() {
+        return new CmsCredentials.WordPressCredentials(
+                "http://wordpress/sites/main", "admin", "app-pass",
+                "AGENT", null, null, null, null, null, null, "main");
     }
 
     @Test
@@ -64,6 +73,18 @@ class WordPressAdapterTest {
     }
 
     @Test
+    void testTestConnection_AGENTトランスポートはWordPressAgentOperationsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = agentCredentials();
+        when(agentOperations.testConnection(creds)).thenReturn(ConnectionCheckResult.success());
+
+        ConnectionCheckResult result = adapter.testConnection(creds);
+
+        assertEquals(true, result.ok());
+        verify(agentOperations).testConnection(creds);
+        verify(sshOperations, never()).testConnection(any());
+    }
+
+    @Test
     void testTestConnection_RESTトランスポートはWordPressSshOperationsを呼ばない() {
         CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
                 "http://example.com", "admin", "apppass123");
@@ -73,6 +94,7 @@ class WordPressAdapterTest {
         adapter.testConnection(creds);
 
         verify(sshOperations, never()).testConnection(any());
+        verify(agentOperations, never()).testConnection(any());
     }
 
     @Test

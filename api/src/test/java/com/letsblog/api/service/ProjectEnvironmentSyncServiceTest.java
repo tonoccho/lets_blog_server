@@ -82,6 +82,25 @@ class ProjectEnvironmentSyncServiceTest {
     }
 
     @Test
+    void sync_mediaを含むtargetsもそのままWordPressSyncClientへ渡す() {
+        ProjectEnvironmentSyncService service = service();
+        Project project = buildProject(10L, 20L, null);
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site testSite = buildManagedSite(20L, "test-site");
+
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+
+        service.sync(1L, "local", "test", List.of("themes", "plugins", "media", "db"));
+
+        ArgumentCaptor<WordPressSyncClient.SyncCommand> captor =
+                ArgumentCaptor.forClass(WordPressSyncClient.SyncCommand.class);
+        verify(syncClient).sync(captor.capture());
+        assertEquals(List.of("themes", "plugins", "media", "db"), captor.getValue().targets());
+    }
+
+    @Test
     void sync_同期元と同期先が同じ環境なら例外() {
         ProjectEnvironmentSyncService service = service();
 

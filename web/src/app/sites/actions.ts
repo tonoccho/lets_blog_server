@@ -7,8 +7,10 @@ import {
   createManagedWordPressSite,
   deleteSite,
   generateSshKeyPair,
+  installWpCli,
   registerSite,
   SiteConnectionCheckResult,
+  WpCliInstallResult,
 } from "@/lib/apiClient";
 import { getSession, requireAdminSession } from "@/lib/session";
 
@@ -111,6 +113,8 @@ export async function createManagedWordPressSiteAction(
   const adminEmail = String(formData.get("managedAdminEmail") ?? "").trim();
   const adminPassword = String(formData.get("managedAdminPassword") ?? "").trim();
   const locale = String(formData.get("managedLocale") ?? "ja").trim();
+  const templateSiteIdRaw = String(formData.get("managedTemplateSiteId") ?? "").trim();
+  const templateSiteId = templateSiteIdRaw ? Number(templateSiteIdRaw) : undefined;
 
   if (!name || !siteKey || !title || !adminUser || !adminEmail || !adminPassword) {
     return { error: "すべての項目を入力してください。" };
@@ -120,7 +124,10 @@ export async function createManagedWordPressSiteAction(
   const actor = session ? { id: Number(session.user.id), role: session.user.role } : undefined;
 
   try {
-    await createManagedWordPressSite({ name, siteKey, title, adminUser, adminEmail, adminPassword, locale }, actor);
+    await createManagedWordPressSite(
+      { name, siteKey, title, adminUser, adminEmail, adminPassword, locale, templateSiteId },
+      actor
+    );
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -137,4 +144,10 @@ export async function deleteSiteAction(id: number) {
 
 export async function checkSiteConnectionAction(id: number): Promise<SiteConnectionCheckResult> {
   return checkSiteConnection(id);
+}
+
+export async function installWpCliAction(id: number): Promise<WpCliInstallResult> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  return installWpCli(id, actor);
 }

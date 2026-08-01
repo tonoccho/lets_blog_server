@@ -46,7 +46,7 @@ class WordPressSshOperationsTest {
     private WordPressCredentials creds() {
         return new WordPressCredentials(
                 "https://example.com", null, null,
-                "SSH", "203.0.113.5", 22, "deploy", "/var/www/html", "PRIVATE-KEY-PEM", "SHA256:pinned");
+                "SSH", "203.0.113.5", 22, "deploy", "/var/www/html", "PRIVATE-KEY-PEM", "SHA256:pinned", null);
     }
 
     private SshCommandResult ok(String stdout) {
@@ -58,34 +58,56 @@ class WordPressSshOperationsTest {
     }
 
     @Test
-    void testConnection_成功時にfingerprintを伝播する() {
-        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok("{\"siteurl\":\"https://example.com\"}"));
+    void testConnection_成功時にfingerprintとwp_core_versionの応答を返す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("ok"))
+                .thenReturn(ok("6.4.2"));
 
         ConnectionCheckResult result = operations.testConnection(creds());
 
         assertEquals(true, result.ok());
         assertEquals("SHA256:observed", result.observedHostKeyFingerprint());
+        assertEquals("wp core version: 6.4.2", result.detail());
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals("echo ok", commandCaptor.getAllValues().get(0));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("core version"));
     }
 
     @Test
-    void testConnection_失敗時は理由を返す() {
-        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("wp-cli: command not found"));
+    void testConnection_SSH接続コマンドが失敗すればSSH接続失敗として返す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("Permission denied"));
 
         ConnectionCheckResult result = operations.testConnection(creds());
 
         assertEquals(false, result.ok());
-        assertEquals("wp-cli: command not found", result.failureReason());
+        assertEquals(true, result.failureReason().startsWith("SSH接続に失敗しました: "));
+        verify(executor, times(1)).exec(any(SshConnectionParams.class), any(), isNull());
     }
 
     @Test
-    void testConnection_SSH接続例外時は失敗として返す() {
+    void testConnection_SSH接続例外時はSSH接続失敗として返す() {
         when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
                 .thenThrow(new SshOperationException("接続がタイムアウトしました"));
 
         ConnectionCheckResult result = operations.testConnection(creds());
 
         assertEquals(false, result.ok());
-        assertEquals("接続がタイムアウトしました", result.failureReason());
+        assertEquals(true, result.failureReason().startsWith("SSH接続に失敗しました: "));
+        verify(executor, times(1)).exec(any(SshConnectionParams.class), any(), isNull());
+    }
+
+    @Test
+    void testConnection_wp_core_versionが失敗すればwp_cli実行失敗として返す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("ok"))
+                .thenReturn(fail("wp-cli: command not found"));
+
+        ConnectionCheckResult result = operations.testConnection(creds());
+
+        assertEquals(false, result.ok());
+        assertEquals(true, result.failureReason().startsWith("wp core versionの実行に失敗しました: "));
     }
 
     @Test

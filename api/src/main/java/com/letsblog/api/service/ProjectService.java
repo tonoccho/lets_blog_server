@@ -20,10 +20,15 @@ public class ProjectService {
 
     private final ProjectRepository projectRepository;
     private final SiteRepository siteRepository;
+    private final BulkUploadStorageService bulkUploadStorageService;
 
-    public ProjectService(ProjectRepository projectRepository, SiteRepository siteRepository) {
+    public ProjectService(
+            ProjectRepository projectRepository,
+            SiteRepository siteRepository,
+            BulkUploadStorageService bulkUploadStorageService) {
         this.projectRepository = projectRepository;
         this.siteRepository = siteRepository;
+        this.bulkUploadStorageService = bulkUploadStorageService;
     }
 
     @AuditLog(action = AuditLogAction.PROJECT_CREATED, resourceType = "PROJECT")
@@ -62,8 +67,10 @@ public class ProjectService {
         if (!projectRepository.existsById(projectId)) {
             throw new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません");
         }
-        // project_usersはDB側のON DELETE CASCADEで連動削除される
+        // project_users・bulk_operation_logsはDB側のON DELETE CASCADEで連動削除される
         projectRepository.deleteById(projectId);
+        // 一括管理でアップロードされたzipファイルはDBのCASCADEでは消えないため、明示的に削除する
+        bulkUploadStorageService.deleteAll(projectId);
     }
 
     @AuditLog(action = AuditLogAction.PROJECT_ENVIRONMENT_BOUND, resourceType = "PROJECT")

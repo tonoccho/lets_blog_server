@@ -1,6 +1,7 @@
 package com.letsblog.api.cms.ssh;
 
 import com.letsblog.api.cms.AuthorProvisioningRequest;
+import com.letsblog.api.cms.WpCliInstallResult;
 import com.letsblog.api.cms.CmsCredentials.WordPressCredentials;
 import com.letsblog.api.cms.ConnectionCheckResult;
 import com.letsblog.api.cms.MediaUploadResult;
@@ -35,17 +36,36 @@ public class WordPressSshOperations {
     private final SshCommandExecutor executor;
     private final ObjectMapper objectMapper;
 
+    /**
+     * 疎通確認を「1. SSH接続」「2. wp core versionの実行」の2段階で行い、
+     * どちらの段階で失敗したかをfailureReasonに含めて返す。
+     */
     public ConnectionCheckResult testConnection(WordPressCredentials creds) {
+        SshCommandResult connectResult;
         try {
-            SshCommandResult result = exec(creds, wpCli(creds, "option get siteurl --format=json"));
-            if (result.ok()) {
-                return ConnectionCheckResult.success(result.observedHostKeyFingerprint());
-            }
-            return ConnectionCheckResult.failure(firstLine(result.stderr(), result.stdout()));
+            connectResult = exec(creds, "echo ok");
         } catch (SshOperationException e) {
-            log.warn("WordPress(SSH)疎通確認に失敗しました (sshHost={}, sshUser={}, wpPath={}): {}",
+            log.warn("SSH接続に失敗しました (sshHost={}, sshUser={}): {}",
+                    creds.sshHost(), creds.sshUser(), e.getMessage());
+            return ConnectionCheckResult.failure("SSH接続に失敗しました: " + e.getMessage());
+        }
+        if (!connectResult.ok()) {
+            return ConnectionCheckResult.failure("SSH接続に失敗しました: "
+                    + firstLine(connectResult.stderr(), connectResult.stdout()));
+        }
+
+        try {
+            SshCommandResult versionResult = exec(creds, wpCli(creds, "core version"));
+            if (!versionResult.ok()) {
+                return ConnectionCheckResult.failure("wp core versionの実行に失敗しました: "
+                        + firstLine(versionResult.stderr(), versionResult.stdout()));
+            }
+            return ConnectionCheckResult.success(connectResult.observedHostKeyFingerprint(),
+                    "wp core version: " + versionResult.stdout().strip());
+        } catch (SshOperationException e) {
+            log.warn("wp core versionの実行に失敗しました (sshHost={}, sshUser={}, wpPath={}): {}",
                     creds.sshHost(), creds.sshUser(), creds.wpPath(), e.getMessage());
-            return ConnectionCheckResult.failure(e.getMessage());
+            return ConnectionCheckResult.failure("wp core versionの実行に失敗しました: " + e.getMessage());
         }
     }
 
@@ -145,6 +165,38 @@ public class WordPressSshOperations {
             throw new SshOperationException(authorErrorMessage("作成", createResult));
         }
         return updateAuthor(creds, createResult.stdout().strip(), request);
+    }
+
+    /**
+     * `command -v wp`でインストール済みかを確認し、未インストールならwp-cli公式pharを
+     * `$HOME/bin/wp`へ配置する(sudoは使わない。パスワード入力待ちで非対話実行がハングする
+     * リスクを避けるため)。`/usr/local/bin`等の共有PATHへの配置はSSHユーザーの権限に依存するため、
+     * このメソッドでは行わない。そのため`$HOME/bin`がリモート側のPATHに含まれていない場合、
+     * 以後のwp-cli呼び出し(投稿作成等、本クラスの他メソッド)はこのインストールだけでは
+     * 解決しないことがあり、その旨を結果メッセージに含める。
+     */
+    public WpCliInstallResult installWpCli(WordPressCredentials creds) {
+        SshCommandResult check = exec(creds, "command -v wp");
+        if (check.ok() && !check.stdout().isBlank()) {
+            throw new IllegalStateException("wp-cliは既にインストールされています(場所: "
+                    + check.stdout().strip() + ")");
+        }
+
+        String installScript = "mkdir -p \"$HOME/bin\" && "
+                + "curl -fsSL -o \"$HOME/bin/wp\" "
+                + "https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar && "
+                + "chmod +x \"$HOME/bin/wp\" && "
+                + "\"$HOME/bin/wp\" --version";
+        SshCommandResult result = exec(creds, installScript);
+        if (!result.ok()) {
+            throw new SshOperationException("wp-cliのインストールに失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+        return new WpCliInstallResult(
+                "wp-cliを $HOME/bin/wp にインストールしました(" + firstLine(result.stdout()) + ")。"
+                        + "リモートサーバーの $HOME/bin がPATHに含まれていない場合、"
+                        + "投稿作成等の他のwp-cli操作が引き続き失敗することがあります。"
+                        + "その場合はリモート側でPATHに追加してください。");
     }
 
     private String findExistingAuthorId(WordPressCredentials creds, String email) {

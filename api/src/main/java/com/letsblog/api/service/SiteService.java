@@ -9,11 +9,13 @@ import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.cms.ConnectionCheckResult;
+import com.letsblog.api.cms.WpCliInstallResult;
 import com.letsblog.api.crypto.CredentialCipher;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.domain.User;
 import com.letsblog.api.dto.SiteConnectionCheckResult;
+import com.letsblog.api.dto.SiteDetailResponse;
 import com.letsblog.api.dto.SiteRegisterRequest;
 import com.letsblog.api.dto.SiteResponse;
 import com.letsblog.api.dto.SiteUpdateRequest;
@@ -24,9 +26,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 @Slf4j
@@ -166,19 +171,27 @@ public class SiteService {
      * 編集(update)時に既存値へのpatchを行うために使う。
      */
     private Map<String, String> getRawCredentials(Site site) {
+        Map<String, String> credentials;
         if (site.getCredentialsEncrypted() != null) {
-            return readCredentialsJson(credentialCipher.decrypt(site.getCredentialsEncrypted()));
-        }
-
-        if (site.getWpUsername() != null && site.getWpAppPasswordEncrypted() != null) {
-            Map<String, String> credentials = new HashMap<>();
+            credentials = readCredentialsJson(credentialCipher.decrypt(site.getCredentialsEncrypted()));
+        } else if (site.getWpUsername() != null && site.getWpAppPasswordEncrypted() != null) {
+            credentials = new HashMap<>();
             credentials.put("baseUrl", site.getBaseUrl());
             credentials.put("username", site.getWpUsername());
             credentials.put("appPassword", credentialCipher.decrypt(site.getWpAppPasswordEncrypted()));
-            return credentials;
+        } else {
+            throw new IllegalStateException("サイト '" + site.getSiteKey() + "' の認証情報が無効です");
         }
 
-        throw new IllegalStateException("サイト '" + site.getSiteKey() + "' の認証情報が無効です");
+        // managedWordpressサイトは常にエージェント経由のwp-cli運用とする。この上書きにより、
+        // transport=AGENT導入(2026-08-01)より前に構築済みのサイトも含め、保存済みcredentialsの
+        // 内容に関わらず一貫してエージェント経由になる(個別のデータ移行が不要)。
+        if (site.isManagedWordpress()) {
+            credentials = new HashMap<>(credentials);
+            credentials.put("transport", "AGENT");
+            credentials.put("wpSlug", site.getWpSlug());
+        }
+        return credentials;
     }
 
     /**
@@ -239,13 +252,80 @@ public class SiteService {
                 siteRepository.save(site);
             }
 
-            Boolean hasAdminCapability = (connectionCheckResult.ok() && site.getCmsType() == CmsType.WORDPRESS)
-                    ? adapter.hasAuthorProvisioningCapability(credentials) : null;
-            return new SiteConnectionCheckResult(connectionCheckResult.ok(), hasAdminCapability, connectionCheckResult.failureReason());
+            Boolean hasAdminCapability = resolveHasAdminCapability(connectionCheckResult, site, adapter, credentials, rawCredentials);
+            return new SiteConnectionCheckResult(connectionCheckResult.ok(), hasAdminCapability,
+                    connectionCheckResult.failureReason(), connectionCheckResult.detail());
         } catch (Exception e) {
             log.warn("疎通確認に失敗しました (siteId={}, siteKey={}): {}", id, site.getSiteKey(), e.getMessage(), e);
-            return new SiteConnectionCheckResult(false, null, e.getMessage());
+            return new SiteConnectionCheckResult(false, null, e.getMessage(), null);
         }
+    }
+
+    private static final Set<String> SECRET_CREDENTIAL_KEYS =
+            Set.of("appPassword", "sshPrivateKeyPem", "apiKey", "managementApiKey");
+
+    /**
+     * サイト管理画面表示用に、現在の設定値を返す。appPassword等のシークレットは値を返さず、
+     * どのキーが設定済みかのみをconfiguredSecretFieldsとして返す(ブラウザへ秘密情報を送らないため)。
+     */
+    @Transactional(readOnly = true)
+    public SiteDetailResponse getDetail(Long id) {
+        Site site = siteRepository.findById(id)
+                .orElseThrow(() -> new SiteNotFoundException("id " + id + " のサイトは登録されていません"));
+
+        Map<String, String> visibleCredentials = new LinkedHashMap<>();
+        List<String> configuredSecretFields = new ArrayList<>();
+        boolean sshConfigured = false;
+        try {
+            Map<String, String> rawCredentials = getRawCredentials(site);
+            sshConfigured = isSshTransport(rawCredentials);
+            for (Map.Entry<String, String> entry : rawCredentials.entrySet()) {
+                if (!StringUtils.hasText(entry.getValue())) {
+                    continue;
+                }
+                if (SECRET_CREDENTIAL_KEYS.contains(entry.getKey())) {
+                    configuredSecretFields.add(entry.getKey());
+                } else {
+                    visibleCredentials.put(entry.getKey(), entry.getValue());
+                }
+            }
+        } catch (Exception e) {
+            log.warn("サイト設定値の取得に失敗しました (siteId={}, siteKey={}): {}", id, site.getSiteKey(), e.getMessage());
+        }
+
+        return SiteDetailResponse.from(site, sshConfigured, visibleCredentials, configuredSecretFields);
+    }
+
+    /**
+     * SSH接続が設定されているサイトに限り、wp-cliをリモートへインストールする。
+     */
+    @Transactional(readOnly = true)
+    public WpCliInstallResult installWpCli(Long id) {
+        Site site = siteRepository.findById(id)
+                .orElseThrow(() -> new SiteNotFoundException("id " + id + " のサイトは登録されていません"));
+        CmsCredentials credentials = buildCredentialsFromMap(site.getCmsType(), getRawCredentials(site));
+        CmsAdapter adapter = cmsAdapterFactory.resolve(site.getCmsType());
+        return adapter.installWpCli(credentials);
+    }
+
+    /**
+     * SSH/エージェント(自動構築サイトのwp-cli)接続の場合、hasAuthorProvisioningCapability自体が
+     * testConnection相当の再接続を行う実装のため(いずれもREST APIのcreate_users権限に相当する概念がなく、
+     * 疎通確認の成功=管理操作可能とみなす設計)、ここで改めて呼ぶと1回の疎通確認で無駄な再接続が発生し、
+     * (SSHの場合)共有ホスティングの同時接続数制限等で後続の接続だけがたまたま失敗すると
+     * 「管理者権限がない」という紛らわしい結果になる。
+     * そのため、SSH/エージェント接続では直前のtestConnectionの成功をそのまま管理者権限ありとみなし、
+     * 再接続を避ける。
+     */
+    private Boolean resolveHasAdminCapability(ConnectionCheckResult connectionCheckResult, Site site,
+            CmsAdapter adapter, CmsCredentials credentials, Map<String, String> rawCredentials) {
+        if (!connectionCheckResult.ok() || site.getCmsType() != CmsType.WORDPRESS) {
+            return null;
+        }
+        if (isSshTransport(rawCredentials) || isAgentTransport(rawCredentials)) {
+            return true;
+        }
+        return adapter.hasAuthorProvisioningCapability(credentials);
     }
 
     private void validateCredentials(CmsType cmsType, Map<String, String> credentials) {
@@ -271,6 +351,10 @@ public class SiteService {
         return "SSH".equalsIgnoreCase(credentials.get("transport"));
     }
 
+    private boolean isAgentTransport(Map<String, String> credentials) {
+        return "AGENT".equalsIgnoreCase(credentials.get("transport"));
+    }
+
     private String resolveDisplayBaseUrl(CmsType cmsType, Map<String, String> credentials) {
         return switch (cmsType) {
             case WORDPRESS -> credentials.get("baseUrl");
@@ -290,7 +374,8 @@ public class SiteService {
                     credentials.get("sshUser"),
                     credentials.get("wpPath"),
                     credentials.get("sshPrivateKeyPem"),
-                    credentials.get("sshHostKeyFingerprint"));
+                    credentials.get("sshHostKeyFingerprint"),
+                    credentials.get("wpSlug"));
             case MICROCMS -> new CmsCredentials.MicroCmsCredentials(
                     credentials.get("serviceId"),
                     credentials.get("apiKey"),

@@ -80,7 +80,7 @@ class SiteControllerTest {
     @Test
     void testConnection_成功時SUCCESSを返す() {
         SiteController controller = controller();
-        when(siteService.checkConnection(1L)).thenReturn(new SiteConnectionCheckResult(true, true, null));
+        when(siteService.checkConnection(1L)).thenReturn(new SiteConnectionCheckResult(true, true, null, null));
 
         Map<String, Object> response = controller.testConnection(1L);
 
@@ -91,7 +91,7 @@ class SiteControllerTest {
     @Test
     void testConnection_失敗時FAILEDを返す() {
         SiteController controller = controller();
-        when(siteService.checkConnection(1L)).thenReturn(new SiteConnectionCheckResult(false, null, "HTTP 403 Forbidden"));
+        when(siteService.checkConnection(1L)).thenReturn(new SiteConnectionCheckResult(false, null, "HTTP 403 Forbidden", null));
 
         Map<String, Object> response = controller.testConnection(1L);
 
@@ -102,7 +102,7 @@ class SiteControllerTest {
     @Test
     void testConnection_admin権限不問で呼べる() {
         SiteController controller = controller();
-        when(siteService.checkConnection(1L)).thenReturn(new SiteConnectionCheckResult(true, true, null));
+        when(siteService.checkConnection(1L)).thenReturn(new SiteConnectionCheckResult(true, true, null, null));
 
         controller.testConnection(1L);
 

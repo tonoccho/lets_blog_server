@@ -56,6 +56,7 @@ export async function updateSiteAction(
       actor
     );
     revalidatePath("/sites");
+    revalidatePath(`/sites/${siteId}/edit`);
     return { success: true, connectionCheckStatus: site.connectionCheckStatus };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };

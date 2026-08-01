@@ -9,8 +9,13 @@ import {
   updateProjectUserRole,
   removeProjectUser,
   syncProjectEnvironment,
+  runBulkOperation,
+  runBulkOperationUpload,
+  replayBulkOperations,
   ProjectEnvironment,
   EnvironmentSyncTarget,
+  BulkOperationType,
+  BulkOperationLog,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 
@@ -152,7 +157,7 @@ export async function syncEnvironmentAction(
     return { error: "同期元と同期先には異なる環境を指定してください。" };
   }
   if (targets.length === 0) {
-    return { error: "同期する対象(テーマ/プラグイン/DB)を1つ以上選択してください。" };
+    return { error: "同期する対象(テーマ/プラグイン/メディア/DB)を1つ以上選択してください。" };
   }
 
   try {
@@ -163,4 +168,106 @@ export async function syncEnvironmentAction(
 
   revalidatePath(`/projects/${projectId}`);
   return { success: true };
+}
+
+export interface BulkOperationState {
+  error?: string;
+  success?: boolean;
+  results?: BulkOperationLog[];
+}
+
+export async function runBulkOperationAction(
+  projectId: number,
+  _prevState: BulkOperationState,
+  formData: FormData
+): Promise<BulkOperationState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const operationType = String(formData.get("operationType") ?? "") as BulkOperationType;
+  const value = String(formData.get("value") ?? "").trim();
+  const categorySlug = String(formData.get("categorySlug") ?? "").trim();
+  const categoryParentSlug = String(formData.get("categoryParentSlug") ?? "").trim();
+  const categoryDescription = String(formData.get("categoryDescription") ?? "").trim();
+  const categoryTargetSlug = String(formData.get("categoryTargetSlug") ?? "").trim();
+
+  if (!operationType) {
+    return { error: "操作種別を選択してください。" };
+  }
+  if (operationType === "CATEGORY_DELETE") {
+    if (!categoryTargetSlug) {
+      return { error: "削除対象のカテゴリを選択してください。" };
+    }
+  } else if (operationType === "CATEGORY_CREATE" || operationType === "CATEGORY_EDIT") {
+    if (!value || !categorySlug) {
+      return { error: "カテゴリ名とスラッグを入力してください。" };
+    }
+    if (operationType === "CATEGORY_EDIT" && !categoryTargetSlug) {
+      return { error: "編集対象のカテゴリを選択してください。" };
+    }
+  } else if (!value) {
+    return { error: "slugを入力してください。" };
+  }
+
+  try {
+    const results = await runBulkOperation(
+      projectId,
+      {
+        operationType,
+        value: value || undefined,
+        categorySlug: categorySlug || undefined,
+        categoryParentSlug: categoryParentSlug || undefined,
+        categoryDescription: categoryDescription || undefined,
+        categoryTargetSlug: categoryTargetSlug || undefined,
+      },
+      actor
+    );
+    revalidatePath(`/projects/${projectId}`);
+    return { success: true, results };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function runBulkOperationUploadAction(
+  projectId: number,
+  _prevState: BulkOperationState,
+  formData: FormData
+): Promise<BulkOperationState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const operationType = String(formData.get("operationType") ?? "") as BulkOperationType;
+  const file = formData.get("file");
+
+  if (operationType !== "PLUGIN_INSTALL" && operationType !== "THEME_INSTALL") {
+    return { error: "zipアップロードはプラグイン/テーマのインストールのみ対応しています。" };
+  }
+  if (!(file instanceof File) || file.size === 0) {
+    return { error: "アップロードするzipファイルを選択してください。" };
+  }
+
+  try {
+    const results = await runBulkOperationUpload(projectId, { operationType, file }, actor);
+    revalidatePath(`/projects/${projectId}`);
+    return { success: true, results };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function replayBulkOperationsAction(
+  projectId: number,
+  environment: ProjectEnvironment
+): Promise<BulkOperationState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const results = await replayBulkOperations(projectId, { environment }, actor);
+    revalidatePath(`/projects/${projectId}`);
+    return { success: true, results };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
 }

@@ -47,6 +47,7 @@ export interface ManagedWordPressSiteInput {
   adminEmail: string;
   adminPassword: string;
   locale: string;
+  templateSiteId?: number;
 }
 
 export interface AuthenticatedUser {
@@ -139,6 +140,24 @@ export function listSites(): Promise<Site[]> {
   return apiFetch<Site[]>('/api/sites');
 }
 
+export interface SiteDetail {
+  id: number;
+  name: string;
+  siteKey: string;
+  cmsType: CmsType;
+  baseUrl: string;
+  createdAt: string;
+  updatedAt: string;
+  managedWordpress: boolean;
+  sshConfigured: boolean;
+  credentials: Record<string, string>;
+  configuredSecretFields: string[];
+}
+
+export function getSiteDetail(id: number, actor?: ActorInfo): Promise<SiteDetail> {
+  return apiFetch<SiteDetail>(`/api/sites/${id}`, { actor });
+}
+
 export function registerSite(input: SiteRegisterInput, actor?: ActorInfo): Promise<Site> {
   return apiFetch<Site>('/api/sites', {
     method: 'POST',
@@ -179,10 +198,19 @@ export interface SiteConnectionCheckResult {
   connectionCheckStatus: "SUCCESS" | "FAILED";
   hasAdminCapability: boolean | null;
   failureReason: string | null;
+  detail: string | null;
 }
 
 export function checkSiteConnection(id: number): Promise<SiteConnectionCheckResult> {
   return apiFetch(`/api/sites/${id}/test-connection`, { method: 'POST' });
+}
+
+export interface WpCliInstallResult {
+  message: string;
+}
+
+export function installWpCli(id: number, actor?: ActorInfo): Promise<WpCliInstallResult> {
+  return apiFetch<WpCliInstallResult>(`/api/sites/${id}/install-wp-cli`, { method: 'POST', actor });
 }
 
 export interface SshKeyPair {
@@ -565,7 +593,7 @@ export function unbindProjectEnvironment(
   return apiFetch<Project>(`/api/projects/${id}/environments/${environment}`, { method: 'DELETE', actor });
 }
 
-export type EnvironmentSyncTarget = "themes" | "plugins" | "db";
+export type EnvironmentSyncTarget = "themes" | "plugins" | "media" | "db";
 
 export function syncProjectEnvironment(
   id: number,
@@ -578,6 +606,101 @@ export function syncProjectEnvironment(
     body: JSON.stringify(input),
     actor,
   });
+}
+
+export type BulkOperationType =
+  | "CATEGORY_CREATE"
+  | "CATEGORY_EDIT"
+  | "CATEGORY_DELETE"
+  | "PLUGIN_INSTALL"
+  | "PLUGIN_ACTIVATE"
+  | "PLUGIN_DEACTIVATE"
+  | "PLUGIN_DELETE"
+  | "THEME_INSTALL"
+  | "THEME_ACTIVATE"
+  | "THEME_DELETE";
+export type ZipInstallOperationType = "PLUGIN_INSTALL" | "THEME_INSTALL";
+export type BulkOperationSourceType = "SLUG" | "ZIP";
+export type BulkOperationStatus = "SUCCESS" | "SKIPPED" | "FAILED";
+
+export interface BulkOperationLog {
+  id: number;
+  operationType: BulkOperationType;
+  sourceType: BulkOperationSourceType;
+  value: string;
+  categorySlug: string | null;
+  categoryParentSlug: string | null;
+  categoryTargetSlug: string | null;
+  categoryDescription: string | null;
+  originalFilename: string | null;
+  environment: ProjectEnvironment;
+  status: BulkOperationStatus;
+  errorMessage: string | null;
+  isReplay: boolean;
+  createdAt: string;
+}
+
+export interface CategoryOption {
+  name: string;
+  slug: string;
+  parentSlug: string | null;
+  description: string | null;
+}
+
+export function runBulkOperation(
+  projectId: number,
+  input: {
+    operationType: BulkOperationType;
+    value?: string;
+    categorySlug?: string;
+    categoryParentSlug?: string;
+    categoryDescription?: string;
+    categoryTargetSlug?: string;
+  },
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function runBulkOperationUpload(
+  projectId: number,
+  input: { operationType: ZipInstallOperationType; file: File },
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  const formData = new FormData();
+  formData.append('operationType', input.operationType);
+  formData.append('file', input.file);
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/upload`, {
+    method: 'POST',
+    body: formData,
+    actor,
+  });
+}
+
+export function replayBulkOperations(
+  projectId: number,
+  input: { environment: ProjectEnvironment },
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/replay`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function listBulkOperationLogs(projectId: number, actor?: ActorInfo): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/logs`, { actor });
+}
+
+export function listBulkManagementCategories(projectId: number, actor?: ActorInfo): Promise<CategoryOption[]> {
+  return apiFetch<CategoryOption[]>(`/api/projects/${projectId}/bulk-management/categories`, { actor });
 }
 
 export interface ProjectUser {
