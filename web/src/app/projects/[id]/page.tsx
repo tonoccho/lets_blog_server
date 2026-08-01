@@ -5,7 +5,8 @@ import {
   listProjectUsers,
   listUsers,
   listBulkOperationLogs,
-  listBulkManagementCategories,
+  listCategoryComparison,
+  listTagComparison,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 import { EnvironmentSlot } from "./EnvironmentSlot";
@@ -27,13 +28,16 @@ export default async function ProjectDetailPage({
   const actor = { id: Number(session.user.id), role: session.user.role };
   const projectId = Number(id);
 
-  const [project, sites, members, allUsers, bulkOperationLogs, bulkManagementCategories] = await Promise.all([
+  const emptyComparisonPage = { items: [], page: 0, size: 20, totalCount: 0, masterEnvironment: "test" as const };
+
+  const [project, sites, members, allUsers, bulkOperationLogs, categoryPage, tagPage] = await Promise.all([
     getProject(projectId, actor).catch(() => null),
     listSites().catch(() => []),
     listProjectUsers(projectId, actor).catch(() => []),
     listUsers().catch(() => []),
     listBulkOperationLogs(projectId, actor).catch(() => []),
-    listBulkManagementCategories(projectId, actor).catch(() => []),
+    listCategoryComparison(projectId, 0, actor).catch(() => emptyComparisonPage),
+    listTagComparison(projectId, 0, actor).catch(() => emptyComparisonPage),
   ]);
 
   if (!project) {
@@ -71,7 +75,8 @@ export default async function ProjectDetailPage({
         projectId={project.id}
         project={project}
         logs={bulkOperationLogs}
-        categories={bulkManagementCategories}
+        categoryPage={categoryPage}
+        tagPage={tagPage}
       />
 
       <div className="space-y-4">

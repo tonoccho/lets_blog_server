@@ -74,19 +74,31 @@ public class WordPressBulkManagementClient {
     }
 
     /**
-     * 参照環境のカテゴリ一覧を取得する(親カテゴリ選択・編集/削除対象選択のUI向け)。
-     * 取得に失敗した場合は空リストを返す(呼び出し元でエラーとして扱わず、単に選択肢なしとする)。
+     * 1環境分のカテゴリ一覧を取得する(比較テーブル・親カテゴリ解決に使用)。
+     * 取得に失敗した場合は空リストを返す(呼び出し元でエラーとして扱わず、単に該当なしとする)。
      */
     public List<CategoryInfo> listCategories(String slug) {
+        return listTerms("/categories", "categories", slug);
+    }
+
+    /**
+     * 1環境分のタグ一覧を取得する(比較テーブルに使用)。タグは階層を持たないため
+     * CategoryInfo.parentSlug()は常にnullになる。
+     */
+    public List<CategoryInfo> listTags(String slug) {
+        return listTerms("/tags", "tags", slug);
+    }
+
+    private List<CategoryInfo> listTerms(String uri, String bodyKey, String slug) {
         try {
             Map<String, Object> body = client.post()
-                    .uri("/categories")
+                    .uri(uri)
                     .header("X-Provision-Token", provisionToken)
                     .body(Map.of("slug", slug))
                     .retrieve()
                     .body(new ParameterizedTypeReference<Map<String, Object>>() {
                     });
-            if (body == null || !(body.get("categories") instanceof List<?> rawList)) {
+            if (body == null || !(body.get(bodyKey) instanceof List<?> rawList)) {
                 return List.of();
             }
             return rawList.stream()
@@ -117,7 +129,7 @@ public class WordPressBulkManagementClient {
 
     /**
      * value/categorySlug/categoryParentSlug/categoryDescription/categoryTargetSlugの意味は
-     * actionによって変わる(BulkOperationRequestのフィールドコメントを参照)。
+     * actionによって変わる(ApplyToEnvironmentRequestのフィールドコメントを参照)。
      */
     public record BulkApplyCommand(
             String slug, String action, String value,

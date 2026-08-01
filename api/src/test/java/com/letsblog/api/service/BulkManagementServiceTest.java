@@ -83,62 +83,67 @@ class BulkManagementServiceTest {
         when(bulkOperationLogRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
     }
 
-    // ---- CATEGORY_CREATE ----
+    // ---- applyToEnvironment: CATEGORY_CREATE ----
 
     @Test
-    void execute_categoryCreate_スラッグ未指定は例外() {
+    void applyToEnvironment_categoryCreate_スラッグ未指定は例外() {
         BulkManagementService service = service();
 
-        assertThrows(IllegalArgumentException.class,
-                () -> service.execute(1L, BulkOperationType.CATEGORY_CREATE, "お知らせ", null, null, null, null, 9L));
+        assertThrows(IllegalArgumentException.class, () -> service.applyToEnvironment(
+                1L, "local", BulkOperationType.CATEGORY_CREATE, "お知らせ", null, null, null, null, 9L));
     }
 
     @Test
-    void execute_categoryCreate_managed環境が1つもなければ何も実行せず空リストを返す() {
+    void applyToEnvironment_categoryCreate_環境にサイトが紐付いていなければ例外() {
         BulkManagementService service = service();
         Project project = buildProject(null, null, null);
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
 
-        List<BulkOperationLog> results = service.execute(
-                1L, BulkOperationType.CATEGORY_CREATE, "お知らせ", "oshirase", null, null, null, 9L);
-
-        assertTrue(results.isEmpty());
+        assertThrows(IllegalArgumentException.class, () -> service.applyToEnvironment(
+                1L, "local", BulkOperationType.CATEGORY_CREATE, "お知らせ", "oshirase", null, null, null, 9L));
         verify(bulkManagementClient, never()).apply(any());
     }
 
     @Test
-    void execute_categoryCreate_managed環境のみ対象にしてログを保存する() {
+    void applyToEnvironment_categoryCreate_非managedサイトの環境は例外() {
         BulkManagementService service = service();
-        Project project = buildProject(10L, 20L, null);
-        Site localSite = buildManagedSite(10L, "local-site");
+        Project project = buildProject(10L, null, null);
         Site externalSite = new Site();
-        externalSite.setId(20L);
+        externalSite.setId(10L);
         externalSite.setSiteKey("external-site");
         externalSite.setCmsType(CmsType.WORDPRESS);
         externalSite.setManagedWordpress(false);
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(externalSite));
 
+        assertThrows(IllegalArgumentException.class, () -> service.applyToEnvironment(
+                1L, "local", BulkOperationType.CATEGORY_CREATE, "お知らせ", "oshirase", null, null, null, 9L));
+    }
+
+    @Test
+    void applyToEnvironment_categoryCreate_指定した環境のみへ適用してログを保存する() {
+        BulkManagementService service = service();
+        Project project = buildProject(10L, 20L, null);
+        Site localSite = buildManagedSite(10L, "local-site");
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(externalSite));
         when(bulkManagementClient.apply(new BulkApplyCommand(
                 "local-site", "category_create", "お知らせ", "oshirase", null, null, null)))
                 .thenReturn(BulkApplyResult.success());
         stubSave();
 
-        List<BulkOperationLog> results = service.execute(
-                1L, BulkOperationType.CATEGORY_CREATE, "お知らせ", "oshirase", null, null, null, 9L);
+        BulkOperationLog result = service.applyToEnvironment(
+                1L, "local", BulkOperationType.CATEGORY_CREATE, "お知らせ", "oshirase", null, null, null, 9L);
 
-        assertEquals(1, results.size());
-        assertEquals("local", results.get(0).getEnvironment());
-        assertEquals(BulkOperationStatus.SUCCESS, results.get(0).getStatus());
-        assertEquals(BulkOperationSourceType.SLUG, results.get(0).getSourceType());
-        assertEquals("oshirase", results.get(0).getCategorySlug());
-        verify(bulkManagementClient, never()).apply(eq(new BulkApplyCommand(
-                "external-site", "category_create", "お知らせ", "oshirase", null, null, null)));
+        assertEquals("local", result.getEnvironment());
+        assertEquals(BulkOperationStatus.SUCCESS, result.getStatus());
+        assertEquals(BulkOperationSourceType.SLUG, result.getSourceType());
+        assertEquals("oshirase", result.getCategorySlug());
+        verify(siteRepository, never()).findById(20L);
     }
 
     @Test
-    void execute_categoryCreate_親カテゴリと説明を渡せる() {
+    void applyToEnvironment_categoryCreate_親カテゴリと説明を渡せる() {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site localSite = buildManagedSite(10L, "local-site");
@@ -149,43 +154,36 @@ class BulkManagementServiceTest {
                 .thenReturn(BulkApplyResult.success());
         stubSave();
 
-        List<BulkOperationLog> results = service.execute(
-                1L, BulkOperationType.CATEGORY_CREATE, "サブお知らせ", "sub-oshirase", "oshirase", "説明文", null, 9L);
+        BulkOperationLog result = service.applyToEnvironment(
+                1L, "local", BulkOperationType.CATEGORY_CREATE, "サブお知らせ", "sub-oshirase", "oshirase", "説明文",
+                null, 9L);
 
-        assertEquals("sub-oshirase", results.get(0).getCategorySlug());
-        assertEquals("oshirase", results.get(0).getCategoryParentSlug());
-        assertEquals("説明文", results.get(0).getCategoryDescription());
+        assertEquals("sub-oshirase", result.getCategorySlug());
+        assertEquals("oshirase", result.getCategoryParentSlug());
+        assertEquals("説明文", result.getCategoryDescription());
     }
 
     @Test
-    void execute_1環境が失敗しても他環境の実行は続行される() {
+    void applyToEnvironment_失敗結果もそのまま記録される() {
         BulkManagementService service = service();
-        Project project = buildProject(10L, 20L, null);
+        Project project = buildProject(10L, null, null);
         Site localSite = buildManagedSite(10L, "local-site");
-        Site testSite = buildManagedSite(20L, "test-site");
-
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
         when(bulkManagementClient.apply(new BulkApplyCommand(
                 "local-site", "plugin_install", "akismet", null, null, null, null)))
                 .thenReturn(BulkApplyResult.failed("接続に失敗しました"));
-        when(bulkManagementClient.apply(new BulkApplyCommand(
-                "test-site", "plugin_install", "akismet", null, null, null, null)))
-                .thenReturn(BulkApplyResult.success());
         stubSave();
 
-        List<BulkOperationLog> results = service.execute(
-                1L, BulkOperationType.PLUGIN_INSTALL, "akismet", null, null, null, null, 9L);
+        BulkOperationLog result = service.applyToEnvironment(
+                1L, "local", BulkOperationType.PLUGIN_INSTALL, "akismet", null, null, null, null, 9L);
 
-        assertEquals(2, results.size());
-        assertEquals(BulkOperationStatus.FAILED, results.get(0).getStatus());
-        assertEquals("接続に失敗しました", results.get(0).getErrorMessage());
-        assertEquals(BulkOperationStatus.SUCCESS, results.get(1).getStatus());
+        assertEquals(BulkOperationStatus.FAILED, result.getStatus());
+        assertEquals("接続に失敗しました", result.getErrorMessage());
     }
 
     @Test
-    void execute_SKIPPEDもそのまま記録される() {
+    void applyToEnvironment_SKIPPEDもそのまま記録される() {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site localSite = buildManagedSite(10L, "local-site");
@@ -196,22 +194,22 @@ class BulkManagementServiceTest {
                 .thenReturn(BulkApplyResult.skipped());
         stubSave();
 
-        List<BulkOperationLog> results = service.execute(
-                1L, BulkOperationType.THEME_INSTALL, "twentytwentyfour", null, null, null, null, 9L);
+        BulkOperationLog result = service.applyToEnvironment(
+                1L, "local", BulkOperationType.THEME_INSTALL, "twentytwentyfour", null, null, null, null, 9L);
 
-        assertEquals(BulkOperationStatus.SKIPPED, results.get(0).getStatus());
+        assertEquals(BulkOperationStatus.SKIPPED, result.getStatus());
     }
 
     @Test
-    void execute_プラグイン系はslug未指定で例外() {
+    void applyToEnvironment_プラグイン系はslug未指定で例外() {
         BulkManagementService service = service();
 
-        assertThrows(IllegalArgumentException.class,
-                () -> service.execute(1L, BulkOperationType.PLUGIN_ACTIVATE, "", null, null, null, null, 9L));
+        assertThrows(IllegalArgumentException.class, () -> service.applyToEnvironment(
+                1L, "local", BulkOperationType.PLUGIN_ACTIVATE, "", null, null, null, null, 9L));
     }
 
     @Test
-    void execute_プラグイン有効化_無効化_削除がそれぞれのactionで呼ばれる() {
+    void applyToEnvironment_プラグイン有効化_無効化_削除がそれぞれのactionで呼ばれる() {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site localSite = buildManagedSite(10L, "local-site");
@@ -220,9 +218,9 @@ class BulkManagementServiceTest {
         when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
         stubSave();
 
-        service.execute(1L, BulkOperationType.PLUGIN_ACTIVATE, "akismet", null, null, null, null, 9L);
-        service.execute(1L, BulkOperationType.PLUGIN_DEACTIVATE, "akismet", null, null, null, null, 9L);
-        service.execute(1L, BulkOperationType.PLUGIN_DELETE, "akismet", null, null, null, null, 9L);
+        service.applyToEnvironment(1L, "local", BulkOperationType.PLUGIN_ACTIVATE, "akismet", null, null, null, null, 9L);
+        service.applyToEnvironment(1L, "local", BulkOperationType.PLUGIN_DEACTIVATE, "akismet", null, null, null, null, 9L);
+        service.applyToEnvironment(1L, "local", BulkOperationType.PLUGIN_DELETE, "akismet", null, null, null, null, 9L);
 
         verify(bulkManagementClient).apply(new BulkApplyCommand(
                 "local-site", "plugin_activate", "akismet", null, null, null, null));
@@ -233,7 +231,7 @@ class BulkManagementServiceTest {
     }
 
     @Test
-    void execute_テーマ有効化_削除がそれぞれのactionで呼ばれる() {
+    void applyToEnvironment_テーマ有効化_削除がそれぞれのactionで呼ばれる() {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site localSite = buildManagedSite(10L, "local-site");
@@ -242,8 +240,8 @@ class BulkManagementServiceTest {
         when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
         stubSave();
 
-        service.execute(1L, BulkOperationType.THEME_ACTIVATE, "twentytwentyfour", null, null, null, null, 9L);
-        service.execute(1L, BulkOperationType.THEME_DELETE, "twentytwentyfour", null, null, null, null, 9L);
+        service.applyToEnvironment(1L, "local", BulkOperationType.THEME_ACTIVATE, "twentytwentyfour", null, null, null, null, 9L);
+        service.applyToEnvironment(1L, "local", BulkOperationType.THEME_DELETE, "twentytwentyfour", null, null, null, null, 9L);
 
         verify(bulkManagementClient).apply(new BulkApplyCommand(
                 "local-site", "theme_activate", "twentytwentyfour", null, null, null, null));
@@ -251,18 +249,18 @@ class BulkManagementServiceTest {
                 "local-site", "theme_delete", "twentytwentyfour", null, null, null, null));
     }
 
-    // ---- CATEGORY_EDIT / CATEGORY_DELETE ----
+    // ---- applyToEnvironment: CATEGORY_EDIT / CATEGORY_DELETE / TAG_* ----
 
     @Test
-    void execute_categoryEdit_targetSlug未指定は例外() {
+    void applyToEnvironment_categoryEdit_targetSlug未指定は例外() {
         BulkManagementService service = service();
 
-        assertThrows(IllegalArgumentException.class, () -> service.execute(
-                1L, BulkOperationType.CATEGORY_EDIT, "新名前", "new-slug", null, null, null, 9L));
+        assertThrows(IllegalArgumentException.class, () -> service.applyToEnvironment(
+                1L, "local", BulkOperationType.CATEGORY_EDIT, "新名前", "new-slug", null, null, null, 9L));
     }
 
     @Test
-    void execute_categoryEdit_正しいコマンドで呼ばれる() {
+    void applyToEnvironment_categoryEdit_正しいコマンドで呼ばれる() {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site localSite = buildManagedSite(10L, "local-site");
@@ -273,24 +271,24 @@ class BulkManagementServiceTest {
                 .thenReturn(BulkApplyResult.success());
         stubSave();
 
-        List<BulkOperationLog> results = service.execute(
-                1L, BulkOperationType.CATEGORY_EDIT, "新お知らせ", "new-oshirase", "parent-slug", "更新後の説明",
+        BulkOperationLog result = service.applyToEnvironment(
+                1L, "local", BulkOperationType.CATEGORY_EDIT, "新お知らせ", "new-oshirase", "parent-slug", "更新後の説明",
                 "old-oshirase", 9L);
 
-        assertEquals(BulkOperationStatus.SUCCESS, results.get(0).getStatus());
-        assertEquals("old-oshirase", results.get(0).getCategoryTargetSlug());
+        assertEquals(BulkOperationStatus.SUCCESS, result.getStatus());
+        assertEquals("old-oshirase", result.getCategoryTargetSlug());
     }
 
     @Test
-    void execute_categoryDelete_targetSlug未指定は例外() {
+    void applyToEnvironment_categoryDelete_targetSlug未指定は例外() {
         BulkManagementService service = service();
 
-        assertThrows(IllegalArgumentException.class, () -> service.execute(
-                1L, BulkOperationType.CATEGORY_DELETE, null, null, null, null, null, 9L));
+        assertThrows(IllegalArgumentException.class, () -> service.applyToEnvironment(
+                1L, "local", BulkOperationType.CATEGORY_DELETE, null, null, null, null, null, 9L));
     }
 
     @Test
-    void execute_categoryDelete_valueが空でもtargetSlugで補われる() {
+    void applyToEnvironment_categoryDelete_valueが空でもtargetSlugで補われる() {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site localSite = buildManagedSite(10L, "local-site");
@@ -301,11 +299,30 @@ class BulkManagementServiceTest {
                 .thenReturn(BulkApplyResult.success());
         stubSave();
 
-        List<BulkOperationLog> results = service.execute(
-                1L, BulkOperationType.CATEGORY_DELETE, null, null, null, null, "oshirase", 9L);
+        BulkOperationLog result = service.applyToEnvironment(
+                1L, "local", BulkOperationType.CATEGORY_DELETE, null, null, null, null, "oshirase", 9L);
 
-        assertEquals("oshirase", results.get(0).getValue());
-        assertEquals("oshirase", results.get(0).getCategoryTargetSlug());
+        assertEquals("oshirase", result.getValue());
+        assertEquals("oshirase", result.getCategoryTargetSlug());
+    }
+
+    @Test
+    void applyToEnvironment_tagCreate_正しいactionで呼ばれる() {
+        BulkManagementService service = service();
+        Project project = buildProject(10L, null, null);
+        Site localSite = buildManagedSite(10L, "local-site");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(bulkManagementClient.apply(new BulkApplyCommand(
+                "local-site", "tag_create", "新着", "shinchaku", null, null, null)))
+                .thenReturn(BulkApplyResult.success());
+        stubSave();
+
+        BulkOperationLog result = service.applyToEnvironment(
+                1L, "local", BulkOperationType.TAG_CREATE, "新着", "shinchaku", null, null, null, 9L);
+
+        assertEquals(BulkOperationStatus.SUCCESS, result.getStatus());
+        assertEquals("shinchaku", result.getCategorySlug());
     }
 
     // ---- executeFromUpload ----
@@ -501,39 +518,6 @@ class BulkManagementServiceTest {
         List<BulkOperationLog> results = service.listLogs(1L);
 
         assertEquals(1, results.size());
-    }
-
-    // ---- listReferenceCategories ----
-
-    @Test
-    void listReferenceCategories_managed環境が1つもなければ空リスト() {
-        BulkManagementService service = service();
-        Project project = buildProject(null, null, null);
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-
-        List<WordPressBulkManagementClient.CategoryInfo> results = service.listReferenceCategories(1L);
-
-        assertTrue(results.isEmpty());
-        verify(bulkManagementClient, never()).listCategories(any());
-    }
-
-    @Test
-    void listReferenceCategories_local優先でクライアントを呼ぶ() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, 20L, null);
-        Site localSite = buildManagedSite(10L, "local-site");
-        Site testSite = buildManagedSite(20L, "test-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
-        when(bulkManagementClient.listCategories("local-site"))
-                .thenReturn(List.of(new WordPressBulkManagementClient.CategoryInfo("お知らせ", "oshirase", null, null)));
-
-        List<WordPressBulkManagementClient.CategoryInfo> results = service.listReferenceCategories(1L);
-
-        assertEquals(1, results.size());
-        assertEquals("oshirase", results.get(0).slug());
-        verify(bulkManagementClient, never()).listCategories("test-site");
     }
 
     private BulkOperationLog buildHistoryLog(BulkOperationType type, BulkOperationSourceType sourceType, String value) {

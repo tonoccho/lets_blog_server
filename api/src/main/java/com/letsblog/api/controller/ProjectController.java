@@ -1,9 +1,8 @@
 package com.letsblog.api.controller;
 
 import com.letsblog.api.dto.AddProjectUserRequest;
+import com.letsblog.api.dto.ApplyToEnvironmentRequest;
 import com.letsblog.api.dto.BulkOperationLogResponse;
-import com.letsblog.api.dto.BulkOperationRequest;
-import com.letsblog.api.dto.CategoryOptionResponse;
 import com.letsblog.api.dto.ProjectCreateRequest;
 import com.letsblog.api.dto.ProjectEnvironmentBindRequest;
 import com.letsblog.api.dto.ProjectResponse;
@@ -11,6 +10,8 @@ import com.letsblog.api.dto.ProjectUpdateRequest;
 import com.letsblog.api.dto.ProjectUserResponse;
 import com.letsblog.api.dto.ReplayBulkOperationRequest;
 import com.letsblog.api.dto.SyncEnvironmentRequest;
+import com.letsblog.api.dto.TermComparisonPage;
+import com.letsblog.api.dto.TermNameRequest;
 import com.letsblog.api.dto.UpdateMasterEnvironmentRequest;
 import com.letsblog.api.dto.UpdateProjectUserRequest;
 import com.letsblog.api.domain.BulkOperationLog;
@@ -21,6 +22,7 @@ import com.letsblog.api.service.CurrentActorService;
 import com.letsblog.api.service.ProjectEnvironmentSyncService;
 import com.letsblog.api.service.ProjectService;
 import com.letsblog.api.service.ProjectUserSyncService;
+import com.letsblog.api.service.TermComparisonService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -39,6 +41,7 @@ public class ProjectController {
     private final ProjectUserSyncService projectUserSyncService;
     private final ProjectEnvironmentSyncService projectEnvironmentSyncService;
     private final BulkManagementService bulkManagementService;
+    private final TermComparisonService termComparisonService;
     private final AdminAuthorizationService adminAuthorizationService;
     private final CurrentActorService currentActorService;
 
@@ -47,12 +50,14 @@ public class ProjectController {
             ProjectUserSyncService projectUserSyncService,
             ProjectEnvironmentSyncService projectEnvironmentSyncService,
             BulkManagementService bulkManagementService,
+            TermComparisonService termComparisonService,
             AdminAuthorizationService adminAuthorizationService,
             CurrentActorService currentActorService) {
         this.projectService = projectService;
         this.projectUserSyncService = projectUserSyncService;
         this.projectEnvironmentSyncService = projectEnvironmentSyncService;
         this.bulkManagementService = bulkManagementService;
+        this.termComparisonService = termComparisonService;
         this.adminAuthorizationService = adminAuthorizationService;
         this.currentActorService = currentActorService;
     }
@@ -115,16 +120,23 @@ public class ProjectController {
         return ResponseEntity.noContent().build();
     }
 
-    @PostMapping("/{id}/bulk-management")
-    public List<BulkOperationLogResponse> runBulkOperation(
-            @PathVariable Long id, @Valid @RequestBody BulkOperationRequest request) {
+    @PostMapping("/{id}/bulk-management/apply")
+    public BulkOperationLogResponse applyBulkOperation(
+            @PathVariable Long id, @Valid @RequestBody ApplyToEnvironmentRequest request) {
         adminAuthorizationService.requireAdmin();
+        if (request.operationType().requiresMasterEnvironment()) {
+            String masterEnvironment = projectService.getProject(id).masterEnvironment();
+            if (!masterEnvironment.equals(request.environment())) {
+                throw new IllegalArgumentException(
+                        "マスター環境(" + masterEnvironment + ")以外への作成・編集はできません");
+            }
+        }
         Long actorId = currentActorService.getCurrentActorId();
-        List<BulkOperationLog> logs = bulkManagementService.execute(
-                id, request.operationType(), request.value(),
+        BulkOperationLog log = bulkManagementService.applyToEnvironment(
+                id, request.environment(), request.operationType(), request.value(),
                 request.categorySlug(), request.categoryParentSlug(), request.categoryDescription(),
                 request.categoryTargetSlug(), actorId);
-        return logs.stream().map(BulkOperationLogResponse::from).toList();
+        return BulkOperationLogResponse.from(log);
     }
 
     @PostMapping(value = "/{id}/bulk-management/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -153,12 +165,54 @@ public class ProjectController {
         return bulkManagementService.listLogs(id).stream().map(BulkOperationLogResponse::from).toList();
     }
 
-    @GetMapping("/{id}/bulk-management/categories")
-    public List<CategoryOptionResponse> listBulkManagementCategories(@PathVariable Long id) {
+    @GetMapping("/{id}/bulk-management/categories/comparison")
+    public TermComparisonPage categoryComparison(
+            @PathVariable Long id, @RequestParam(defaultValue = "0") int page) {
         adminAuthorizationService.requireAdmin();
-        return bulkManagementService.listReferenceCategories(id).stream()
-                .map(c -> new CategoryOptionResponse(c.name(), c.slug(), c.parentSlug(), c.description()))
-                .toList();
+        return termComparisonService.listCategoryComparison(id, page, 20);
+    }
+
+    @GetMapping("/{id}/bulk-management/tags/comparison")
+    public TermComparisonPage tagComparison(
+            @PathVariable Long id, @RequestParam(defaultValue = "0") int page) {
+        adminAuthorizationService.requireAdmin();
+        return termComparisonService.listTagComparison(id, page, 20);
+    }
+
+    @PostMapping("/{id}/bulk-management/categories/sync")
+    public List<BulkOperationLogResponse> syncCategory(
+            @PathVariable Long id, @Valid @RequestBody TermNameRequest request) {
+        adminAuthorizationService.requireAdmin();
+        Long actorId = currentActorService.getCurrentActorId();
+        return termComparisonService.syncCategory(id, request.name(), actorId).stream()
+                .map(BulkOperationLogResponse::from).toList();
+    }
+
+    @PostMapping("/{id}/bulk-management/categories/delete-all")
+    public List<BulkOperationLogResponse> deleteCategoryEverywhere(
+            @PathVariable Long id, @Valid @RequestBody TermNameRequest request) {
+        adminAuthorizationService.requireAdmin();
+        Long actorId = currentActorService.getCurrentActorId();
+        return termComparisonService.deleteCategoryEverywhere(id, request.name(), actorId).stream()
+                .map(BulkOperationLogResponse::from).toList();
+    }
+
+    @PostMapping("/{id}/bulk-management/tags/sync")
+    public List<BulkOperationLogResponse> syncTag(
+            @PathVariable Long id, @Valid @RequestBody TermNameRequest request) {
+        adminAuthorizationService.requireAdmin();
+        Long actorId = currentActorService.getCurrentActorId();
+        return termComparisonService.syncTag(id, request.name(), actorId).stream()
+                .map(BulkOperationLogResponse::from).toList();
+    }
+
+    @PostMapping("/{id}/bulk-management/tags/delete-all")
+    public List<BulkOperationLogResponse> deleteTagEverywhere(
+            @PathVariable Long id, @Valid @RequestBody TermNameRequest request) {
+        adminAuthorizationService.requireAdmin();
+        Long actorId = currentActorService.getCurrentActorId();
+        return termComparisonService.deleteTagEverywhere(id, request.name(), actorId).stream()
+                .map(BulkOperationLogResponse::from).toList();
     }
 
     @GetMapping("/{id}/users")

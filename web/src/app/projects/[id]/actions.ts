@@ -10,13 +10,20 @@ import {
   updateProjectUserRole,
   removeProjectUser,
   syncProjectEnvironment,
-  runBulkOperation,
+  applyToEnvironment,
+  syncCategoryToMaster,
+  deleteCategoryEverywhere,
+  syncTagToMaster,
+  deleteTagEverywhere,
+  listCategoryComparison,
+  listTagComparison,
   runBulkOperationUpload,
   replayBulkOperations,
   ProjectEnvironment,
   EnvironmentSyncTarget,
   BulkOperationType,
   BulkOperationLog,
+  TermComparisonPage,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 
@@ -205,7 +212,7 @@ export interface BulkOperationState {
   results?: BulkOperationLog[];
 }
 
-export async function runBulkOperationAction(
+export async function applyToEnvironmentAction(
   projectId: number,
   _prevState: BulkOperationState,
   formData: FormData
@@ -213,6 +220,7 @@ export async function runBulkOperationAction(
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };
 
+  const environment = String(formData.get("environment") ?? "") as ProjectEnvironment;
   const operationType = String(formData.get("operationType") ?? "") as BulkOperationType;
   const value = String(formData.get("value") ?? "").trim();
   const categorySlug = String(formData.get("categorySlug") ?? "").trim();
@@ -220,28 +228,37 @@ export async function runBulkOperationAction(
   const categoryDescription = String(formData.get("categoryDescription") ?? "").trim();
   const categoryTargetSlug = String(formData.get("categoryTargetSlug") ?? "").trim();
 
+  if (!environment) {
+    return { error: "対象環境を選択してください。" };
+  }
   if (!operationType) {
     return { error: "操作種別を選択してください。" };
   }
-  if (operationType === "CATEGORY_DELETE") {
+  if (operationType === "CATEGORY_DELETE" || operationType === "TAG_DELETE") {
     if (!categoryTargetSlug) {
-      return { error: "削除対象のカテゴリを選択してください。" };
+      return { error: "削除対象を選択してください。" };
     }
-  } else if (operationType === "CATEGORY_CREATE" || operationType === "CATEGORY_EDIT") {
+  } else if (
+    operationType === "CATEGORY_CREATE" ||
+    operationType === "CATEGORY_EDIT" ||
+    operationType === "TAG_CREATE" ||
+    operationType === "TAG_EDIT"
+  ) {
     if (!value || !categorySlug) {
-      return { error: "カテゴリ名とスラッグを入力してください。" };
+      return { error: "名前とスラッグを入力してください。" };
     }
-    if (operationType === "CATEGORY_EDIT" && !categoryTargetSlug) {
-      return { error: "編集対象のカテゴリを選択してください。" };
+    if ((operationType === "CATEGORY_EDIT" || operationType === "TAG_EDIT") && !categoryTargetSlug) {
+      return { error: "編集対象を選択してください。" };
     }
   } else if (!value) {
     return { error: "slugを入力してください。" };
   }
 
   try {
-    const results = await runBulkOperation(
+    const result = await applyToEnvironment(
       projectId,
       {
+        environment,
         operationType,
         value: value || undefined,
         categorySlug: categorySlug || undefined,
@@ -251,6 +268,44 @@ export async function runBulkOperationAction(
       },
       actor
     );
+    revalidatePath(`/projects/${projectId}`);
+    return { success: true, results: [result] };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function syncTermToMasterAction(
+  projectId: number,
+  kind: "category" | "tag",
+  name: string
+): Promise<BulkOperationState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const results = await (kind === "category"
+      ? syncCategoryToMaster(projectId, name, actor)
+      : syncTagToMaster(projectId, name, actor));
+    revalidatePath(`/projects/${projectId}`);
+    return { success: true, results };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function deleteTermEverywhereAction(
+  projectId: number,
+  kind: "category" | "tag",
+  name: string
+): Promise<BulkOperationState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const results = await (kind === "category"
+      ? deleteCategoryEverywhere(projectId, name, actor)
+      : deleteTagEverywhere(projectId, name, actor));
     revalidatePath(`/projects/${projectId}`);
     return { success: true, results };
   } catch (err) {
@@ -283,6 +338,19 @@ export async function runBulkOperationUploadAction(
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+export async function fetchTermComparisonAction(
+  projectId: number,
+  kind: "category" | "tag",
+  page: number
+): Promise<TermComparisonPage> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  return kind === "category"
+    ? listCategoryComparison(projectId, page, actor)
+    : listTagComparison(projectId, page, actor);
 }
 
 export async function replayBulkOperationsAction(

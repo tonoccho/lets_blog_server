@@ -626,6 +626,9 @@ export type BulkOperationType =
   | "CATEGORY_CREATE"
   | "CATEGORY_EDIT"
   | "CATEGORY_DELETE"
+  | "TAG_CREATE"
+  | "TAG_EDIT"
+  | "TAG_DELETE"
   | "PLUGIN_INSTALL"
   | "PLUGIN_ACTIVATE"
   | "PLUGIN_DEACTIVATE"
@@ -654,16 +657,54 @@ export interface BulkOperationLog {
   createdAt: string;
 }
 
-export interface CategoryOption {
-  name: string;
-  slug: string;
+export interface TermEnvironmentValue {
+  available: boolean;
+  slug: string | null;
   parentSlug: string | null;
   description: string | null;
 }
 
-export function runBulkOperation(
+export interface TermComparisonRow {
+  name: string;
+  local: TermEnvironmentValue;
+  test: TermEnvironmentValue;
+  production: TermEnvironmentValue;
+}
+
+export interface TermComparisonPage {
+  items: TermComparisonRow[];
+  page: number;
+  size: number;
+  totalCount: number;
+  masterEnvironment: "test" | "production";
+}
+
+export function listCategoryComparison(
+  projectId: number,
+  page: number,
+  actor?: ActorInfo
+): Promise<TermComparisonPage> {
+  return apiFetch<TermComparisonPage>(
+    `/api/projects/${projectId}/bulk-management/categories/comparison?page=${page}`,
+    { actor }
+  );
+}
+
+export function listTagComparison(
+  projectId: number,
+  page: number,
+  actor?: ActorInfo
+): Promise<TermComparisonPage> {
+  return apiFetch<TermComparisonPage>(
+    `/api/projects/${projectId}/bulk-management/tags/comparison?page=${page}`,
+    { actor }
+  );
+}
+
+export function applyToEnvironment(
   projectId: number,
   input: {
+    environment: ProjectEnvironment;
     operationType: BulkOperationType;
     value?: string;
     categorySlug?: string;
@@ -672,11 +713,63 @@ export function runBulkOperation(
     categoryTargetSlug?: string;
   },
   actor?: ActorInfo
-): Promise<BulkOperationLog[]> {
-  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management`, {
+): Promise<BulkOperationLog> {
+  return apiFetch<BulkOperationLog>(`/api/projects/${projectId}/bulk-management/apply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function syncCategoryToMaster(
+  projectId: number,
+  name: string,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/categories/sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+    actor,
+  });
+}
+
+export function deleteCategoryEverywhere(
+  projectId: number,
+  name: string,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/categories/delete-all`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+    actor,
+  });
+}
+
+export function syncTagToMaster(
+  projectId: number,
+  name: string,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/tags/sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+    actor,
+  });
+}
+
+export function deleteTagEverywhere(
+  projectId: number,
+  name: string,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/tags/delete-all`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
     actor,
   });
 }
@@ -711,10 +804,6 @@ export function replayBulkOperations(
 
 export function listBulkOperationLogs(projectId: number, actor?: ActorInfo): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/logs`, { actor });
-}
-
-export function listBulkManagementCategories(projectId: number, actor?: ActorInfo): Promise<CategoryOption[]> {
-  return apiFetch<CategoryOption[]>(`/api/projects/${projectId}/bulk-management/categories`, { actor });
 }
 
 export interface ProjectUser {

@@ -6,16 +6,17 @@ import type {
   ProjectEnvironment,
   BulkOperationLog,
   BulkOperationType,
-  CategoryOption,
+  TermComparisonPage,
 } from "@/lib/apiClient";
 import {
-  runBulkOperationAction,
+  applyToEnvironmentAction,
   runBulkOperationUploadAction,
   replayBulkOperationsAction,
   BulkOperationState,
 } from "./actions";
+import { TermComparisonTable } from "./TermComparisonTable";
 
-type Target = "CATEGORY" | "PLUGIN" | "THEME";
+type Tab = "CATEGORY" | "PLUGIN" | "THEME" | "TAG";
 
 const ENVIRONMENT_LABEL: Record<ProjectEnvironment, string> = {
   local: "ローカル",
@@ -23,18 +24,14 @@ const ENVIRONMENT_LABEL: Record<ProjectEnvironment, string> = {
   production: "本番",
 };
 
-const TARGET_LABEL: Record<Target, string> = {
+const TAB_LABEL: Record<Tab, string> = {
   CATEGORY: "カテゴリ",
   PLUGIN: "プラグイン",
   THEME: "テーマ",
+  TAG: "タグ",
 };
 
-const TARGET_ACTIONS: Record<Target, { type: BulkOperationType; label: string }[]> = {
-  CATEGORY: [
-    { type: "CATEGORY_CREATE", label: "作成" },
-    { type: "CATEGORY_EDIT", label: "編集" },
-    { type: "CATEGORY_DELETE", label: "削除" },
-  ],
+const PLUGIN_THEME_ACTIONS: Record<"PLUGIN" | "THEME", { type: BulkOperationType; label: string }[]> = {
   PLUGIN: [
     { type: "PLUGIN_INSTALL", label: "インストール" },
     { type: "PLUGIN_ACTIVATE", label: "有効化" },
@@ -52,6 +49,9 @@ const OPERATION_LABEL: Record<BulkOperationType, string> = {
   CATEGORY_CREATE: "カテゴリ作成",
   CATEGORY_EDIT: "カテゴリ編集",
   CATEGORY_DELETE: "カテゴリ削除",
+  TAG_CREATE: "タグ作成",
+  TAG_EDIT: "タグ編集",
+  TAG_DELETE: "タグ削除",
   PLUGIN_INSTALL: "プラグインインストール",
   PLUGIN_ACTIVATE: "プラグイン有効化",
   PLUGIN_DEACTIVATE: "プラグイン無効化",
@@ -73,41 +73,24 @@ const STATUS_COLOR: Record<string, string> = {
   FAILED: "text-red-600",
 };
 
-const ZIP_INSTALL_TYPES: BulkOperationType[] = ["PLUGIN_INSTALL", "THEME_INSTALL"];
-const SLUG_INPUT_TYPES: BulkOperationType[] = [
-  "PLUGIN_INSTALL",
-  "PLUGIN_ACTIVATE",
-  "PLUGIN_DEACTIVATE",
-  "PLUGIN_DELETE",
-  "THEME_INSTALL",
-  "THEME_ACTIVATE",
-  "THEME_DELETE",
-];
-
 const initialState: BulkOperationState = {};
 
 export function BulkManagementPanel({
   projectId,
   project,
   logs,
-  categories,
+  categoryPage,
+  tagPage,
 }: {
   projectId: number;
   project: Project;
   logs: BulkOperationLog[];
-  categories: CategoryOption[];
+  categoryPage: TermComparisonPage;
+  tagPage: TermComparisonPage;
 }) {
-  const [target, setTarget] = useState<Target>("CATEGORY");
-  const [operationType, setOperationType] = useState<BulkOperationType>("CATEGORY_CREATE");
-  const [inputMode, setInputMode] = useState<"slug" | "zip">("slug");
+  const [tab, setTab] = useState<Tab>("CATEGORY");
   const [replayState, setReplayState] = useState<BulkOperationState | null>(null);
   const [replayPendingEnv, setReplayPendingEnv] = useState<ProjectEnvironment | null>(null);
-
-  // カテゴリ編集: 編集対象を選択したら現在の値をフォームへ反映する
-  const [editName, setEditName] = useState("");
-  const [editSlug, setEditSlug] = useState("");
-  const [editParentSlug, setEditParentSlug] = useState("");
-  const [editDescription, setEditDescription] = useState("");
 
   const managedEnvironments: { value: ProjectEnvironment; label: string }[] = (
     [
@@ -118,28 +101,6 @@ export function BulkManagementPanel({
   )
     .filter(([, site]) => site?.managedWordpress)
     .map(([environment]) => ({ value: environment, label: ENVIRONMENT_LABEL[environment] }));
-
-  const slugAction = (prevState: BulkOperationState, formData: FormData) =>
-    runBulkOperationAction(projectId, prevState, formData);
-  const [slugState, slugFormAction, slugPending] = useActionState(slugAction, initialState);
-
-  const uploadAction = (prevState: BulkOperationState, formData: FormData) =>
-    runBulkOperationUploadAction(projectId, prevState, formData);
-  const [uploadState, uploadFormAction, uploadPending] = useActionState(uploadAction, initialState);
-
-  function handleTargetChange(nextTarget: Target) {
-    setTarget(nextTarget);
-    setOperationType(TARGET_ACTIONS[nextTarget][0].type);
-    setInputMode("slug");
-  }
-
-  function handleEditTargetChange(slug: string) {
-    const found = categories.find((c) => c.slug === slug);
-    setEditName(found?.name ?? "");
-    setEditSlug(found?.slug ?? "");
-    setEditParentSlug(found?.parentSlug ?? "");
-    setEditDescription(found?.description ?? "");
-  }
 
   async function handleReplay(environment: ProjectEnvironment) {
     if (
@@ -155,210 +116,47 @@ export function BulkManagementPanel({
     setReplayPendingEnv(null);
   }
 
-  function confirmExecute(label: string): boolean {
-    const envNames = managedEnvironments.map((env) => env.label).join("・");
-    return window.confirm(
-      `紐付いている全環境(${envNames})に対して、${OPERATION_LABEL[operationType]}「${label}」を実行します。よろしいですか?`
-    );
-  }
-
-  function handleSlugSubmit(e: React.FormEvent<HTMLFormElement>) {
-    const formData = new FormData(e.currentTarget);
-    const label =
-      operationType === "CATEGORY_DELETE"
-        ? String(formData.get("categoryTargetSlug") ?? "")
-        : String(formData.get("value") ?? "");
-    if (!confirmExecute(label)) {
-      e.preventDefault();
-    }
-  }
-
-  function handleUploadSubmit(e: React.FormEvent<HTMLFormElement>) {
-    const formData = new FormData(e.currentTarget);
-    const file = formData.get("file") as File | null;
-    if (!confirmExecute(file?.name ?? "")) {
-      e.preventDefault();
-    }
-  }
-
   if (managedEnvironments.length === 0) {
     return (
       <div className="rounded-lg border border-neutral-200 bg-white p-4 text-sm text-neutral-500">
         <h3 className="mb-2 font-medium text-neutral-700">一括管理</h3>
         自動構築(managed)されたWordPress環境が1つ以上紐付いている場合に、
-        カテゴリ・プラグイン・テーマの一括操作ができます。
+        カテゴリ・プラグイン・テーマ・タグの管理ができます。
       </div>
     );
   }
-
-  const isZipInstallType = ZIP_INSTALL_TYPES.includes(operationType);
-  const showSlugForm = !isZipInstallType || inputMode === "slug";
 
   return (
     <div className="space-y-6 rounded-lg border border-neutral-200 bg-white p-4">
       <div>
         <h3 className="mb-1 font-medium text-neutral-700">一括管理</h3>
         <p className="mb-3 text-sm text-neutral-500">
-          紐付いている全環境({managedEnvironments.map((e) => e.label).join("・")})に対して、
-          カテゴリ・プラグイン・テーマの操作を同時実行します。
+          紐付いている環境({managedEnvironments.map((e) => e.label).join("・")})の
+          カテゴリ・プラグイン・テーマ・タグを比較・管理します。
         </p>
 
-        <div className="mb-2 flex gap-2 text-sm">
-          {(Object.keys(TARGET_LABEL) as Target[]).map((t) => (
+        <div className="mb-4 flex gap-2 text-sm">
+          {(Object.keys(TAB_LABEL) as Tab[]).map((t) => (
             <button
               key={t}
               type="button"
-              onClick={() => handleTargetChange(t)}
-              className={`rounded px-3 py-1.5 ${
-                target === t ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600"
-              }`}
+              onClick={() => setTab(t)}
+              className={`rounded px-3 py-1.5 ${tab === t ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600"}`}
             >
-              {TARGET_LABEL[t]}
+              {TAB_LABEL[t]}
             </button>
           ))}
         </div>
 
-        <div className="mb-3 flex gap-2 text-sm">
-          {TARGET_ACTIONS[target].map((action) => (
-            <button
-              key={action.type}
-              type="button"
-              onClick={() => {
-                setOperationType(action.type);
-                setInputMode("slug");
-              }}
-              className={`rounded px-3 py-1.5 ${
-                operationType === action.type ? "bg-neutral-700 text-white" : "bg-neutral-100 text-neutral-600"
-              }`}
-            >
-              {action.label}
-            </button>
-          ))}
-        </div>
-
-        {isZipInstallType && (
-          <div className="mb-3 flex gap-2 text-sm">
-            <button
-              type="button"
-              onClick={() => setInputMode("slug")}
-              className={`rounded px-3 py-1.5 ${
-                inputMode === "slug" ? "bg-neutral-700 text-white" : "bg-neutral-100 text-neutral-600"
-              }`}
-            >
-              slugを指定
-            </button>
-            <button
-              type="button"
-              onClick={() => setInputMode("zip")}
-              className={`rounded px-3 py-1.5 ${
-                inputMode === "zip" ? "bg-neutral-700 text-white" : "bg-neutral-100 text-neutral-600"
-              }`}
-            >
-              zipをアップロード
-            </button>
-          </div>
+        {tab === "CATEGORY" && <TermComparisonTable projectId={projectId} kind="category" initialPage={categoryPage} />}
+        {tab === "TAG" && <TermComparisonTable projectId={projectId} kind="tag" initialPage={tagPage} />}
+        {(tab === "PLUGIN" || tab === "THEME") && (
+          <PluginThemeInterimPanel
+            projectId={projectId}
+            tab={tab}
+            managedEnvironments={managedEnvironments}
+          />
         )}
-
-        {showSlugForm ? (
-          <>
-            <form
-              key={operationType}
-              action={slugFormAction}
-              onSubmit={handleSlugSubmit}
-              className="flex flex-wrap items-end gap-2 text-sm"
-            >
-              <input type="hidden" name="operationType" value={operationType} />
-
-              {operationType === "CATEGORY_CREATE" && (
-                <>
-                  <Field label="カテゴリ名" name="value" placeholder="お知らせ" required />
-                  <Field label="スラッグ" name="categorySlug" placeholder="oshirase" required />
-                  <CategorySelect label="親カテゴリ(任意)" name="categoryParentSlug" categories={categories} />
-                  <Field label="説明(任意)" name="categoryDescription" placeholder="カテゴリの説明" />
-                </>
-              )}
-
-              {operationType === "CATEGORY_EDIT" && (
-                <>
-                  <CategorySelect
-                    label="編集対象"
-                    name="categoryTargetSlug"
-                    categories={categories}
-                    required
-                    onSelect={handleEditTargetChange}
-                  />
-                  <Field label="新しいカテゴリ名" name="value" required value={editName} onChange={setEditName} />
-                  <Field
-                    label="新しいスラッグ"
-                    name="categorySlug"
-                    required
-                    value={editSlug}
-                    onChange={setEditSlug}
-                  />
-                  <CategorySelect
-                    label="親カテゴリ(任意)"
-                    name="categoryParentSlug"
-                    categories={categories}
-                    value={editParentSlug}
-                    onSelect={setEditParentSlug}
-                  />
-                  <Field
-                    label="説明(任意)"
-                    name="categoryDescription"
-                    value={editDescription}
-                    onChange={setEditDescription}
-                  />
-                </>
-              )}
-
-              {operationType === "CATEGORY_DELETE" && (
-                <CategorySelect label="削除対象" name="categoryTargetSlug" categories={categories} required />
-              )}
-
-              {SLUG_INPUT_TYPES.includes(operationType) && (
-                <Field label="wordpress.orgのslug" name="value" placeholder="akismet" required />
-              )}
-
-              <button
-                type="submit"
-                disabled={slugPending}
-                className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:bg-neutral-200 disabled:text-neutral-600"
-              >
-                {slugPending ? "実行中…" : "実行する"}
-              </button>
-            </form>
-            {(operationType === "CATEGORY_CREATE" || operationType === "CATEGORY_EDIT") && (
-              <p className="mt-1 text-xs text-neutral-500">
-                親カテゴリは各環境の既存カテゴリからスラッグで解決されます。対象環境に存在しない場合、
-                その環境の処理は失敗として記録されます。
-              </p>
-            )}
-          </>
-        ) : (
-          <form
-            action={uploadFormAction}
-            onSubmit={handleUploadSubmit}
-            className="flex flex-wrap items-end gap-2 text-sm"
-          >
-            <input type="hidden" name="operationType" value={operationType} />
-            <label className="flex flex-col gap-1">
-              <span className="text-neutral-600">zipファイル</span>
-              <input name="file" type="file" accept=".zip" required className="text-sm" />
-            </label>
-            <button
-              type="submit"
-              disabled={uploadPending}
-              className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:bg-neutral-200 disabled:text-neutral-600"
-            >
-              {uploadPending ? "アップロード・実行中(数分かかる場合があります)…" : "実行する"}
-            </button>
-          </form>
-        )}
-
-        {slugState.error && <p className="mt-2 text-sm text-red-600">{slugState.error}</p>}
-        {slugState.results && <ResultList results={slugState.results} />}
-        {uploadState.error && <p className="mt-2 text-sm text-red-600">{uploadState.error}</p>}
-        {uploadState.results && <ResultList results={uploadState.results} />}
       </div>
 
       <div>
@@ -427,11 +225,169 @@ export function BulkManagementPanel({
   );
 }
 
+function PluginThemeInterimPanel({
+  projectId,
+  tab,
+  managedEnvironments,
+}: {
+  projectId: number;
+  tab: "PLUGIN" | "THEME";
+  managedEnvironments: { value: ProjectEnvironment; label: string }[];
+}) {
+  const [operationType, setOperationType] = useState<BulkOperationType>(PLUGIN_THEME_ACTIONS[tab][0].type);
+  const [inputMode, setInputMode] = useState<"slug" | "zip">("slug");
+
+  const slugAction = (prevState: BulkOperationState, formData: FormData) =>
+    applyToEnvironmentAction(projectId, prevState, formData);
+  const [slugState, slugFormAction, slugPending] = useActionState(slugAction, initialState);
+
+  const uploadAction = (prevState: BulkOperationState, formData: FormData) =>
+    runBulkOperationUploadAction(projectId, prevState, formData);
+  const [uploadState, uploadFormAction, uploadPending] = useActionState(uploadAction, initialState);
+
+  const isInstallType = operationType === "PLUGIN_INSTALL" || operationType === "THEME_INSTALL";
+
+  function handleTabActionChange(type: BulkOperationType) {
+    setOperationType(type);
+    setInputMode("slug");
+  }
+
+  function handleSlugSubmit(e: React.FormEvent<HTMLFormElement>) {
+    const formData = new FormData(e.currentTarget);
+    const environment = String(formData.get("environment") ?? "");
+    const value = String(formData.get("value") ?? "");
+    if (
+      !window.confirm(
+        `${ENVIRONMENT_LABEL[environment as ProjectEnvironment] ?? environment}環境に対して、` +
+          `${OPERATION_LABEL[operationType]}「${value}」を実行します。よろしいですか?`
+      )
+    ) {
+      e.preventDefault();
+    }
+  }
+
+  function handleUploadSubmit(e: React.FormEvent<HTMLFormElement>) {
+    const formData = new FormData(e.currentTarget);
+    const file = formData.get("file") as File | null;
+    if (
+      !window.confirm(
+        `紐付いている全環境に対して、${OPERATION_LABEL[operationType]}「${file?.name ?? ""}」を実行します。よろしいですか?`
+      )
+    ) {
+      e.preventDefault();
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-neutral-500">
+        プラグイン・テーマの環境ごとの比較表示は今後のフェーズで追加予定です。現時点では環境を指定して個別に操作してください。
+      </p>
+
+      <div className="flex gap-2 text-sm">
+        {PLUGIN_THEME_ACTIONS[tab].map((action) => (
+          <button
+            key={action.type}
+            type="button"
+            onClick={() => handleTabActionChange(action.type)}
+            className={`rounded px-3 py-1.5 ${
+              operationType === action.type ? "bg-neutral-700 text-white" : "bg-neutral-100 text-neutral-600"
+            }`}
+          >
+            {action.label}
+          </button>
+        ))}
+      </div>
+
+      {isInstallType && (
+        <div className="flex gap-2 text-sm">
+          <button
+            type="button"
+            onClick={() => setInputMode("slug")}
+            className={`rounded px-3 py-1.5 ${inputMode === "slug" ? "bg-neutral-700 text-white" : "bg-neutral-100 text-neutral-600"}`}
+          >
+            slugを指定(1環境ずつ)
+          </button>
+          <button
+            type="button"
+            onClick={() => setInputMode("zip")}
+            className={`rounded px-3 py-1.5 ${inputMode === "zip" ? "bg-neutral-700 text-white" : "bg-neutral-100 text-neutral-600"}`}
+          >
+            zipをアップロード(全環境へ一括)
+          </button>
+        </div>
+      )}
+
+      {!isInstallType || inputMode === "slug" ? (
+        <form
+          key={operationType}
+          action={slugFormAction}
+          onSubmit={handleSlugSubmit}
+          className="flex flex-wrap items-end gap-2 text-sm"
+        >
+          <input type="hidden" name="operationType" value={operationType} />
+          <label className="flex flex-col gap-1">
+            <span className="text-neutral-600">対象環境</span>
+            <select name="environment" required className="rounded border border-neutral-300 px-3 py-2 text-sm">
+              <option value="">選択してください</option>
+              {managedEnvironments.map((env) => (
+                <option key={env.value} value={env.value}>
+                  {env.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-neutral-600">wordpress.orgのslug</span>
+            <input
+              name="value"
+              placeholder="akismet"
+              required
+              className="rounded border border-neutral-300 px-3 py-2 text-sm"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={slugPending}
+            className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:bg-neutral-200 disabled:text-neutral-600"
+          >
+            {slugPending ? "実行中…" : "実行する"}
+          </button>
+        </form>
+      ) : (
+        <form
+          action={uploadFormAction}
+          onSubmit={handleUploadSubmit}
+          className="flex flex-wrap items-end gap-2 text-sm"
+        >
+          <input type="hidden" name="operationType" value={operationType} />
+          <label className="flex flex-col gap-1">
+            <span className="text-neutral-600">zipファイル</span>
+            <input name="file" type="file" accept=".zip" required className="text-sm" />
+          </label>
+          <button
+            type="submit"
+            disabled={uploadPending}
+            className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:bg-neutral-200 disabled:text-neutral-600"
+          >
+            {uploadPending ? "アップロード・実行中(数分かかる場合があります)…" : "実行する"}
+          </button>
+        </form>
+      )}
+
+      {slugState.error && <p className="text-sm text-red-600">{slugState.error}</p>}
+      {slugState.results && <ResultList results={slugState.results} />}
+      {uploadState.error && <p className="text-sm text-red-600">{uploadState.error}</p>}
+      {uploadState.results && <ResultList results={uploadState.results} />}
+    </div>
+  );
+}
+
 function describeLogValue(log: BulkOperationLog): string {
   if (log.sourceType === "ZIP") {
     return `${log.originalFilename ?? log.value}(zip)`;
   }
-  if (log.operationType.startsWith("CATEGORY")) {
+  if (log.operationType.startsWith("CATEGORY") || log.operationType.startsWith("TAG")) {
     const slug = log.categorySlug ?? log.categoryTargetSlug;
     return slug ? `${log.value}(${slug})` : log.value;
   }
@@ -448,71 +404,5 @@ function ResultList({ results }: { results: BulkOperationLog[] }) {
         </li>
       ))}
     </ul>
-  );
-}
-
-function Field({
-  label,
-  name,
-  placeholder,
-  required,
-  value,
-  onChange,
-}: {
-  label: string;
-  name: string;
-  placeholder?: string;
-  required?: boolean;
-  value?: string;
-  onChange?: (value: string) => void;
-}) {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="text-neutral-600">{label}</span>
-      <input
-        name={name}
-        required={required}
-        placeholder={placeholder}
-        value={value}
-        onChange={onChange ? (e) => onChange(e.target.value) : undefined}
-        className="rounded border border-neutral-300 px-3 py-2 text-sm"
-      />
-    </label>
-  );
-}
-
-function CategorySelect({
-  label,
-  name,
-  categories,
-  required,
-  value,
-  onSelect,
-}: {
-  label: string;
-  name: string;
-  categories: CategoryOption[];
-  required?: boolean;
-  value?: string;
-  onSelect?: (slug: string) => void;
-}) {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="text-neutral-600">{label}</span>
-      <select
-        name={name}
-        required={required}
-        value={value}
-        onChange={onSelect ? (e) => onSelect(e.target.value) : undefined}
-        className="rounded border border-neutral-300 px-3 py-2 text-sm"
-      >
-        <option value="">{required ? "選択してください" : "なし"}</option>
-        {categories.map((c) => (
-          <option key={c.slug} value={c.slug}>
-            {c.name}({c.slug})
-          </option>
-        ))}
-      </select>
-    </label>
   );
 }

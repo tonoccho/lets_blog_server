@@ -9,6 +9,9 @@ public enum BulkOperationType {
     CATEGORY_CREATE,
     CATEGORY_EDIT,
     CATEGORY_DELETE,
+    TAG_CREATE,
+    TAG_EDIT,
+    TAG_DELETE,
     PLUGIN_INSTALL,
     PLUGIN_ACTIVATE,
     PLUGIN_DEACTIVATE,
@@ -21,11 +24,15 @@ public enum BulkOperationType {
         return name().toLowerCase();
     }
 
-    public boolean isCategory() {
-        return this == CATEGORY_CREATE || this == CATEGORY_EDIT || this == CATEGORY_DELETE;
-    }
-
     public boolean supportsZipUpload() {
         return this == PLUGIN_INSTALL || this == THEME_INSTALL;
+    }
+
+    /**
+     * 作成・編集は比較テーブル上「マスター環境のみ」を対象に実行する(他環境への反映は同期操作で行う)。
+     * ProjectController#applyBulkOperationでこの制約を検証する。
+     */
+    public boolean requiresMasterEnvironment() {
+        return this == CATEGORY_CREATE || this == CATEGORY_EDIT || this == TAG_CREATE || this == TAG_EDIT;
     }
 }

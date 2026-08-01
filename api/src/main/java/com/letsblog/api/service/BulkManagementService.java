@@ -24,10 +24,12 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * プロジェクトに紐づくmanagedWordpress環境すべてへ、カテゴリ作成/編集/削除・
- * プラグイン/テーマのインストール/有効化/無効化/削除を一括実行する。
- * 1環境の失敗が他環境の実行を止めないよう、環境ごとに結果を個別に記録する。
- * 実行内容はbulk_operation_logsへ保存し、任意の1環境へのロールフォワード(過去の成功ログの再適用)に使う。
+ * カテゴリ/タグ/プラグイン/テーマの操作を単一環境へ適用する({@link #applyToEnvironment})、
+ * またはzipアップロードによるプラグイン/テーマのインストールを全managed環境へ一括実行する
+ * ({@link #executeFromUpload})。実行内容はbulk_operation_logsへ保存し、任意の1環境への
+ * ロールフォワード(過去の成功ログの再適用、{@link #replay})に使う。
+ * 環境をまたぐ比較・同期(マスター環境の値を他環境へ反映する等)のオーケストレーションは
+ * {@link TermComparisonService}が本クラスの{@link #applyToEnvironment}を都度呼び出す形で行う。
  */
 @Service
 public class BulkManagementService {
@@ -54,26 +56,21 @@ public class BulkManagementService {
         this.bulkUploadStorageService = bulkUploadStorageService;
     }
 
+    /**
+     * 単一環境に対して1件の操作を適用し、1件のBulkOperationLogとして記録する。
+     * カテゴリ/タグの比較テーブル(新規追加・編集はマスター環境のみ、削除・同期は非マスター環境も含む)・
+     * プラグイン/テーマの状態反映(環境ごとのセル単位)のいずれからも呼ばれる共通経路。
+     */
     @Transactional
-    public List<BulkOperationLog> execute(
-            Long projectId, BulkOperationType type, String value,
+    public BulkOperationLog applyToEnvironment(
+            Long projectId, String environment, BulkOperationType type, String value,
             String categorySlug, String categoryParentSlug, String categoryDescription,
             String categoryTargetSlug, Long actorId) {
         String effectiveValue = requireFields(type, value, categorySlug, categoryTargetSlug);
-
         Project project = getProject(projectId);
-        List<Map.Entry<String, Site>> environments = resolveManagedEnvironments(project);
-
-        List<BulkOperationLog> results = new ArrayList<>();
-        for (Map.Entry<String, Site> entry : environments) {
-            WordPressBulkManagementClient.BulkApplyResult result = bulkManagementClient.apply(new BulkApplyCommand(
-                    entry.getValue().getWpSlug(), type.wpCliAction(), effectiveValue,
-                    categorySlug, categoryParentSlug, categoryDescription, categoryTargetSlug));
-            results.add(saveLog(projectId, type, BulkOperationSourceType.SLUG, effectiveValue,
-                    categorySlug, categoryParentSlug, categoryTargetSlug, categoryDescription, null, null, null,
-                    entry.getKey(), result, actorId, false));
-        }
-        return results;
+        Site site = resolveManagedSite(project, environment);
+        return applyToSite(projectId, environment, site, type, effectiveValue,
+                categorySlug, categoryParentSlug, categoryDescription, categoryTargetSlug, actorId, false);
     }
 
     @Transactional
@@ -111,12 +108,13 @@ public class BulkManagementService {
 
         List<BulkOperationLog> results = new ArrayList<>();
         for (BulkOperationLog log : history) {
-            WordPressBulkManagementClient.BulkApplyResult result = applyFromHistory(log, targetSite);
-            results.add(saveLog(projectId, log.getOperationType(), log.getSourceType(), log.getValue(),
-                    log.getCategorySlug(), log.getCategoryParentSlug(), log.getCategoryTargetSlug(),
-                    log.getCategoryDescription(),
-                    log.getOriginalFilename(), log.getStoragePath(), log.getFileSha256(),
-                    environment, result, actorId, true));
+            if (log.getSourceType() == BulkOperationSourceType.ZIP) {
+                results.add(replayZip(projectId, environment, targetSite, log, actorId));
+            } else {
+                results.add(applyToSite(projectId, environment, targetSite, log.getOperationType(), log.getValue(),
+                        log.getCategorySlug(), log.getCategoryParentSlug(), log.getCategoryDescription(),
+                        log.getCategoryTargetSlug(), actorId, true));
+            }
         }
         return results;
     }
@@ -126,57 +124,55 @@ public class BulkManagementService {
         return bulkOperationLogRepository.findByProjectIdOrderByCreatedAtDesc(projectId);
     }
 
-    /**
-     * カテゴリ選択UI(親カテゴリ選択・編集/削除対象選択)向けに、プロジェクトに紐づくmanaged環境のうち
-     * local→test→production優先順で最初に見つかった環境(参照環境)のカテゴリ一覧を返す。
-     * managed環境が1つもなければ空リストを返す。
-     */
-    @Transactional(readOnly = true)
-    public List<WordPressBulkManagementClient.CategoryInfo> listReferenceCategories(Long projectId) {
-        Project project = getProject(projectId);
-        List<Map.Entry<String, Site>> environments = resolveManagedEnvironments(project);
-        if (environments.isEmpty()) {
-            return List.of();
-        }
-        return bulkManagementClient.listCategories(environments.get(0).getValue().getWpSlug());
+    private BulkOperationLog applyToSite(
+            Long projectId, String environment, Site site, BulkOperationType type, String value,
+            String categorySlug, String categoryParentSlug, String categoryDescription, String categoryTargetSlug,
+            Long actorId, boolean isReplay) {
+        WordPressBulkManagementClient.BulkApplyResult result = bulkManagementClient.apply(new BulkApplyCommand(
+                site.getWpSlug(), type.wpCliAction(), value,
+                categorySlug, categoryParentSlug, categoryDescription, categoryTargetSlug));
+        return saveLog(projectId, type, BulkOperationSourceType.SLUG, value,
+                categorySlug, categoryParentSlug, categoryTargetSlug, categoryDescription, null, null, null,
+                environment, result, actorId, isReplay);
     }
 
-    private WordPressBulkManagementClient.BulkApplyResult applyFromHistory(BulkOperationLog log, Site targetSite) {
-        if (log.getSourceType() == BulkOperationSourceType.ZIP) {
-            try {
-                byte[] bytes = bulkUploadStorageService.load(log.getStoragePath());
-                return bulkManagementClient.applyZip(
-                        targetSite.getWpSlug(), log.getOperationType().wpCliAction(), bytes, log.getOriginalFilename());
-            } catch (IOException e) {
-                return WordPressBulkManagementClient.BulkApplyResult.failed(
-                        "元ファイルが見つかりません。再度アップロードしてください: " + e.getMessage());
-            }
+    private BulkOperationLog replayZip(
+            Long projectId, String environment, Site targetSite, BulkOperationLog log, Long actorId) {
+        WordPressBulkManagementClient.BulkApplyResult result;
+        try {
+            byte[] bytes = bulkUploadStorageService.load(log.getStoragePath());
+            result = bulkManagementClient.applyZip(
+                    targetSite.getWpSlug(), log.getOperationType().wpCliAction(), bytes, log.getOriginalFilename());
+        } catch (IOException e) {
+            result = WordPressBulkManagementClient.BulkApplyResult.failed(
+                    "元ファイルが見つかりません。再度アップロードしてください: " + e.getMessage());
         }
-        return bulkManagementClient.apply(new BulkApplyCommand(
-                targetSite.getWpSlug(), log.getOperationType().wpCliAction(), log.getValue(),
-                log.getCategorySlug(), log.getCategoryParentSlug(), log.getCategoryDescription(),
-                log.getCategoryTargetSlug()));
+        return saveLog(projectId, log.getOperationType(), log.getSourceType(), log.getValue(),
+                log.getCategorySlug(), log.getCategoryParentSlug(), log.getCategoryTargetSlug(),
+                log.getCategoryDescription(),
+                log.getOriginalFilename(), log.getStoragePath(), log.getFileSha256(),
+                environment, result, actorId, true);
     }
 
     /**
      * operationTypeごとに必須項目を検証し、ログ・wp-cli呼び出しに使う実効値(value)を返す。
-     * CATEGORY_DELETEはUI上valueの入力が不要なため、表示用にcategoryTargetSlugを補う。
+     * CATEGORY_DELETE/TAG_DELETEはUI上valueの入力が不要なため、表示用にcategoryTargetSlugを補う。
      */
     private String requireFields(BulkOperationType type, String value, String categorySlug, String categoryTargetSlug) {
         switch (type) {
-            case CATEGORY_CREATE -> {
-                requireNonBlank(value, "カテゴリ名を入力してください");
-                requireNonBlank(categorySlug, "カテゴリのスラッグを入力してください");
+            case CATEGORY_CREATE, TAG_CREATE -> {
+                requireNonBlank(value, "名前を入力してください");
+                requireNonBlank(categorySlug, "スラッグを入力してください");
                 return value;
             }
-            case CATEGORY_EDIT -> {
-                requireNonBlank(categoryTargetSlug, "編集対象のカテゴリを選択してください");
-                requireNonBlank(value, "カテゴリ名を入力してください");
-                requireNonBlank(categorySlug, "カテゴリのスラッグを入力してください");
+            case CATEGORY_EDIT, TAG_EDIT -> {
+                requireNonBlank(categoryTargetSlug, "編集対象を選択してください");
+                requireNonBlank(value, "名前を入力してください");
+                requireNonBlank(categorySlug, "スラッグを入力してください");
                 return value;
             }
-            case CATEGORY_DELETE -> {
-                requireNonBlank(categoryTargetSlug, "削除対象のカテゴリを選択してください");
+            case CATEGORY_DELETE, TAG_DELETE -> {
+                requireNonBlank(categoryTargetSlug, "削除対象を選択してください");
                 return (value == null || value.isBlank()) ? categoryTargetSlug : value;
             }
             default -> {
