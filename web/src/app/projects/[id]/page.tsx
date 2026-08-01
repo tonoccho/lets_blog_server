@@ -7,6 +7,8 @@ import {
   listBulkOperationLogs,
   listCategoryComparison,
   listTagComparison,
+  listPluginComparison,
+  listThemeComparison,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 import { EnvironmentSlot } from "./EnvironmentSlot";
@@ -30,15 +32,18 @@ export default async function ProjectDetailPage({
 
   const emptyComparisonPage = { items: [], page: 0, size: 20, totalCount: 0, masterEnvironment: "test" as const };
 
-  const [project, sites, members, allUsers, bulkOperationLogs, categoryPage, tagPage] = await Promise.all([
-    getProject(projectId, actor).catch(() => null),
-    listSites().catch(() => []),
-    listProjectUsers(projectId, actor).catch(() => []),
-    listUsers().catch(() => []),
-    listBulkOperationLogs(projectId, actor).catch(() => []),
-    listCategoryComparison(projectId, 0, actor).catch(() => emptyComparisonPage),
-    listTagComparison(projectId, 0, actor).catch(() => emptyComparisonPage),
-  ]);
+  const [project, sites, members, allUsers, bulkOperationLogs, categoryPage, tagPage, pluginPage, themePage] =
+    await Promise.all([
+      getProject(projectId, actor).catch(() => null),
+      listSites().catch(() => []),
+      listProjectUsers(projectId, actor).catch(() => []),
+      listUsers().catch(() => []),
+      listBulkOperationLogs(projectId, actor).catch(() => []),
+      listCategoryComparison(projectId, 0, actor).catch(() => emptyComparisonPage),
+      listTagComparison(projectId, 0, actor).catch(() => emptyComparisonPage),
+      listPluginComparison(projectId, 0, actor).catch(() => emptyComparisonPage),
+      listThemeComparison(projectId, 0, actor).catch(() => emptyComparisonPage),
+    ]);
 
   if (!project) {
     notFound();
@@ -77,6 +82,8 @@ export default async function ProjectDetailPage({
         logs={bulkOperationLogs}
         categoryPage={categoryPage}
         tagPage={tagPage}
+        pluginPage={pluginPage}
+        themePage={themePage}
       />
 
       <div className="space-y-4">

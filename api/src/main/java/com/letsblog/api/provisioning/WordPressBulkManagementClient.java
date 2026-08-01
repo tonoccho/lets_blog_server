@@ -118,6 +118,47 @@ public class WordPressBulkManagementClient {
         }
     }
 
+    /**
+     * 1環境分の、インストール済みプラグイン一覧(name+status)を取得する(比較テーブルに使用)。
+     * 未インストールのプラグインはこの一覧に含まれない(呼び出し元で「一覧に無ければ未インストール」と判定する)。
+     * 取得に失敗した場合は空リストを返す。
+     */
+    public List<PluginThemeInfo> listPlugins(String slug) {
+        return listPluginsOrThemes("/plugins", "plugins", slug);
+    }
+
+    /**
+     * 1環境分の、インストール済みテーマ一覧(name+status)を取得する(比較テーブルに使用)。
+     */
+    public List<PluginThemeInfo> listThemes(String slug) {
+        return listPluginsOrThemes("/themes", "themes", slug);
+    }
+
+    private List<PluginThemeInfo> listPluginsOrThemes(String uri, String bodyKey, String slug) {
+        try {
+            Map<String, Object> body = client.post()
+                    .uri(uri)
+                    .header("X-Provision-Token", provisionToken)
+                    .body(Map.of("slug", slug))
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<Map<String, Object>>() {
+                    });
+            if (body == null || !(body.get(bodyKey) instanceof List<?> rawList)) {
+                return List.of();
+            }
+            return rawList.stream()
+                    .filter(Map.class::isInstance)
+                    .map(item -> {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> entry = (Map<String, Object>) item;
+                        return new PluginThemeInfo(asString(entry.get("name")), asString(entry.get("status")));
+                    })
+                    .toList();
+        } catch (RestClientException e) {
+            return List.of();
+        }
+    }
+
     private static String asString(Object value) {
         return value == null ? null : value.toString();
     }
@@ -138,6 +179,13 @@ public class WordPressBulkManagementClient {
     }
 
     public record CategoryInfo(String name, String slug, String parentSlug, String description) {
+    }
+
+    /**
+     * statusは"active"(有効)またはそれ以外(インストール済みだが無効、例:"inactive")。
+     * 一覧に含まれないslugは「未インストール」を意味する(呼び出し元で判定)。
+     */
+    public record PluginThemeInfo(String name, String status) {
     }
 
     public record BulkApplyResult(String status, String errorMessage) {

@@ -7,14 +7,15 @@ import type {
   BulkOperationLog,
   BulkOperationType,
   TermComparisonPage,
+  StatusComparisonPage,
 } from "@/lib/apiClient";
 import {
-  applyToEnvironmentAction,
   runBulkOperationUploadAction,
   replayBulkOperationsAction,
   BulkOperationState,
 } from "./actions";
 import { TermComparisonTable } from "./TermComparisonTable";
+import { PluginThemeComparisonTable } from "./PluginThemeComparisonTable";
 
 type Tab = "CATEGORY" | "PLUGIN" | "THEME" | "TAG";
 
@@ -29,20 +30,6 @@ const TAB_LABEL: Record<Tab, string> = {
   PLUGIN: "プラグイン",
   THEME: "テーマ",
   TAG: "タグ",
-};
-
-const PLUGIN_THEME_ACTIONS: Record<"PLUGIN" | "THEME", { type: BulkOperationType; label: string }[]> = {
-  PLUGIN: [
-    { type: "PLUGIN_INSTALL", label: "インストール" },
-    { type: "PLUGIN_ACTIVATE", label: "有効化" },
-    { type: "PLUGIN_DEACTIVATE", label: "無効化" },
-    { type: "PLUGIN_DELETE", label: "削除" },
-  ],
-  THEME: [
-    { type: "THEME_INSTALL", label: "インストール" },
-    { type: "THEME_ACTIVATE", label: "有効化" },
-    { type: "THEME_DELETE", label: "削除" },
-  ],
 };
 
 const OPERATION_LABEL: Record<BulkOperationType, string> = {
@@ -81,12 +68,16 @@ export function BulkManagementPanel({
   logs,
   categoryPage,
   tagPage,
+  pluginPage,
+  themePage,
 }: {
   projectId: number;
   project: Project;
   logs: BulkOperationLog[];
   categoryPage: TermComparisonPage;
   tagPage: TermComparisonPage;
+  pluginPage: StatusComparisonPage;
+  themePage: StatusComparisonPage;
 }) {
   const [tab, setTab] = useState<Tab>("CATEGORY");
   const [replayState, setReplayState] = useState<BulkOperationState | null>(null);
@@ -150,12 +141,27 @@ export function BulkManagementPanel({
 
         {tab === "CATEGORY" && <TermComparisonTable projectId={projectId} kind="category" initialPage={categoryPage} />}
         {tab === "TAG" && <TermComparisonTable projectId={projectId} kind="tag" initialPage={tagPage} />}
-        {(tab === "PLUGIN" || tab === "THEME") && (
-          <PluginThemeInterimPanel
-            projectId={projectId}
-            tab={tab}
-            managedEnvironments={managedEnvironments}
-          />
+        {tab === "PLUGIN" && (
+          <div className="space-y-4">
+            <PluginThemeComparisonTable
+              projectId={projectId}
+              kind="plugin"
+              initialPage={pluginPage}
+              managedEnvironments={managedEnvironments}
+            />
+            <ZipUploadPanel projectId={projectId} operationType="PLUGIN_INSTALL" />
+          </div>
+        )}
+        {tab === "THEME" && (
+          <div className="space-y-4">
+            <PluginThemeComparisonTable
+              projectId={projectId}
+              kind="theme"
+              initialPage={themePage}
+              managedEnvironments={managedEnvironments}
+            />
+            <ZipUploadPanel projectId={projectId} operationType="THEME_INSTALL" />
+          </div>
         )}
       </div>
 
@@ -225,46 +231,16 @@ export function BulkManagementPanel({
   );
 }
 
-function PluginThemeInterimPanel({
+function ZipUploadPanel({
   projectId,
-  tab,
-  managedEnvironments,
+  operationType,
 }: {
   projectId: number;
-  tab: "PLUGIN" | "THEME";
-  managedEnvironments: { value: ProjectEnvironment; label: string }[];
+  operationType: "PLUGIN_INSTALL" | "THEME_INSTALL";
 }) {
-  const [operationType, setOperationType] = useState<BulkOperationType>(PLUGIN_THEME_ACTIONS[tab][0].type);
-  const [inputMode, setInputMode] = useState<"slug" | "zip">("slug");
-
-  const slugAction = (prevState: BulkOperationState, formData: FormData) =>
-    applyToEnvironmentAction(projectId, prevState, formData);
-  const [slugState, slugFormAction, slugPending] = useActionState(slugAction, initialState);
-
   const uploadAction = (prevState: BulkOperationState, formData: FormData) =>
     runBulkOperationUploadAction(projectId, prevState, formData);
   const [uploadState, uploadFormAction, uploadPending] = useActionState(uploadAction, initialState);
-
-  const isInstallType = operationType === "PLUGIN_INSTALL" || operationType === "THEME_INSTALL";
-
-  function handleTabActionChange(type: BulkOperationType) {
-    setOperationType(type);
-    setInputMode("slug");
-  }
-
-  function handleSlugSubmit(e: React.FormEvent<HTMLFormElement>) {
-    const formData = new FormData(e.currentTarget);
-    const environment = String(formData.get("environment") ?? "");
-    const value = String(formData.get("value") ?? "");
-    if (
-      !window.confirm(
-        `${ENVIRONMENT_LABEL[environment as ProjectEnvironment] ?? environment}環境に対して、` +
-          `${OPERATION_LABEL[operationType]}「${value}」を実行します。よろしいですか?`
-      )
-    ) {
-      e.preventDefault();
-    }
-  }
 
   function handleUploadSubmit(e: React.FormEvent<HTMLFormElement>) {
     const formData = new FormData(e.currentTarget);
@@ -279,105 +255,26 @@ function PluginThemeInterimPanel({
   }
 
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-neutral-500">
-        プラグイン・テーマの環境ごとの比較表示は今後のフェーズで追加予定です。現時点では環境を指定して個別に操作してください。
+    <div className="rounded border border-neutral-200 bg-neutral-50 p-3">
+      <p className="mb-2 text-sm text-neutral-500">
+        zipファイルをアップロードして、紐付いている全環境へ同じ内容を一括インストールします
+        (非公式・カスタムビルドのプラグイン/テーマ向け)。
       </p>
-
-      <div className="flex gap-2 text-sm">
-        {PLUGIN_THEME_ACTIONS[tab].map((action) => (
-          <button
-            key={action.type}
-            type="button"
-            onClick={() => handleTabActionChange(action.type)}
-            className={`rounded px-3 py-1.5 ${
-              operationType === action.type ? "bg-neutral-700 text-white" : "bg-neutral-100 text-neutral-600"
-            }`}
-          >
-            {action.label}
-          </button>
-        ))}
-      </div>
-
-      {isInstallType && (
-        <div className="flex gap-2 text-sm">
-          <button
-            type="button"
-            onClick={() => setInputMode("slug")}
-            className={`rounded px-3 py-1.5 ${inputMode === "slug" ? "bg-neutral-700 text-white" : "bg-neutral-100 text-neutral-600"}`}
-          >
-            slugを指定(1環境ずつ)
-          </button>
-          <button
-            type="button"
-            onClick={() => setInputMode("zip")}
-            className={`rounded px-3 py-1.5 ${inputMode === "zip" ? "bg-neutral-700 text-white" : "bg-neutral-100 text-neutral-600"}`}
-          >
-            zipをアップロード(全環境へ一括)
-          </button>
-        </div>
-      )}
-
-      {!isInstallType || inputMode === "slug" ? (
-        <form
-          key={operationType}
-          action={slugFormAction}
-          onSubmit={handleSlugSubmit}
-          className="flex flex-wrap items-end gap-2 text-sm"
+      <form action={uploadFormAction} onSubmit={handleUploadSubmit} className="flex flex-wrap items-end gap-2 text-sm">
+        <input type="hidden" name="operationType" value={operationType} />
+        <label className="flex flex-col gap-1">
+          <span className="text-neutral-600">zipファイル</span>
+          <input name="file" type="file" accept=".zip" required className="text-sm" />
+        </label>
+        <button
+          type="submit"
+          disabled={uploadPending}
+          className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:bg-neutral-200 disabled:text-neutral-600"
         >
-          <input type="hidden" name="operationType" value={operationType} />
-          <label className="flex flex-col gap-1">
-            <span className="text-neutral-600">対象環境</span>
-            <select name="environment" required className="rounded border border-neutral-300 px-3 py-2 text-sm">
-              <option value="">選択してください</option>
-              {managedEnvironments.map((env) => (
-                <option key={env.value} value={env.value}>
-                  {env.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-neutral-600">wordpress.orgのslug</span>
-            <input
-              name="value"
-              placeholder="akismet"
-              required
-              className="rounded border border-neutral-300 px-3 py-2 text-sm"
-            />
-          </label>
-          <button
-            type="submit"
-            disabled={slugPending}
-            className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:bg-neutral-200 disabled:text-neutral-600"
-          >
-            {slugPending ? "実行中…" : "実行する"}
-          </button>
-        </form>
-      ) : (
-        <form
-          action={uploadFormAction}
-          onSubmit={handleUploadSubmit}
-          className="flex flex-wrap items-end gap-2 text-sm"
-        >
-          <input type="hidden" name="operationType" value={operationType} />
-          <label className="flex flex-col gap-1">
-            <span className="text-neutral-600">zipファイル</span>
-            <input name="file" type="file" accept=".zip" required className="text-sm" />
-          </label>
-          <button
-            type="submit"
-            disabled={uploadPending}
-            className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:bg-neutral-200 disabled:text-neutral-600"
-          >
-            {uploadPending ? "アップロード・実行中(数分かかる場合があります)…" : "実行する"}
-          </button>
-        </form>
-      )}
-
-      {slugState.error && <p className="text-sm text-red-600">{slugState.error}</p>}
-      {slugState.results && <ResultList results={slugState.results} />}
-      {uploadState.error && <p className="text-sm text-red-600">{uploadState.error}</p>}
+          {uploadPending ? "アップロード・実行中(数分かかる場合があります)…" : "全環境へインストール"}
+        </button>
+      </form>
+      {uploadState.error && <p className="mt-2 text-sm text-red-600">{uploadState.error}</p>}
       {uploadState.results && <ResultList results={uploadState.results} />}
     </div>
   );

@@ -17,6 +17,12 @@ import {
   deleteTagEverywhere,
   listCategoryComparison,
   listTagComparison,
+  listPluginComparison,
+  listThemeComparison,
+  reconcilePluginState,
+  reconcileThemeState,
+  deletePluginEverywhere,
+  deleteThemeEverywhere,
   runBulkOperationUpload,
   replayBulkOperations,
   ProjectEnvironment,
@@ -24,6 +30,8 @@ import {
   BulkOperationType,
   BulkOperationLog,
   TermComparisonPage,
+  StatusComparisonPage,
+  PluginThemeStatus,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 
@@ -351,6 +359,58 @@ export async function fetchTermComparisonAction(
   return kind === "category"
     ? listCategoryComparison(projectId, page, actor)
     : listTagComparison(projectId, page, actor);
+}
+
+export async function fetchStatusComparisonAction(
+  projectId: number,
+  kind: "plugin" | "theme",
+  page: number
+): Promise<StatusComparisonPage> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  return kind === "plugin"
+    ? listPluginComparison(projectId, page, actor)
+    : listThemeComparison(projectId, page, actor);
+}
+
+export async function reconcileStateAction(
+  projectId: number,
+  kind: "plugin" | "theme",
+  slug: string,
+  changes: { environment: ProjectEnvironment; desiredStatus: PluginThemeStatus }[]
+): Promise<BulkOperationState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const results = await (kind === "plugin"
+      ? reconcilePluginState(projectId, { slug, changes }, actor)
+      : reconcileThemeState(projectId, { slug, changes }, actor));
+    revalidatePath(`/projects/${projectId}`);
+    return { success: true, results };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function deleteSlugEverywhereAction(
+  projectId: number,
+  kind: "plugin" | "theme",
+  slug: string
+): Promise<BulkOperationState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const results = await (kind === "plugin"
+      ? deletePluginEverywhere(projectId, slug, actor)
+      : deleteThemeEverywhere(projectId, slug, actor));
+    revalidatePath(`/projects/${projectId}`);
+    return { success: true, results };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 export async function replayBulkOperationsAction(

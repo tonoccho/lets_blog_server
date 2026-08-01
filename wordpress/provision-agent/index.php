@@ -392,6 +392,32 @@ if ($path === '/tags' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     respond(200, ['tags' => array_values(fetchTerms($sitePath, 'post_tag'))]);
 }
 
+if ($path === '/plugins' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    if (!isValidSlug($slug)) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = "/var/www/html/sites/$slug";
+    if (!is_dir($sitePath)) {
+        respond(404, ['error' => 'サイトが見つかりません']);
+    }
+    [$code, $out] = runWp(['plugin', 'list', '--fields=name,status', '--format=json', "--path=$sitePath", '--allow-root']);
+    respond(200, ['plugins' => $code === 0 ? (json_decode($out, true) ?: []) : []]);
+}
+
+if ($path === '/themes' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    if (!isValidSlug($slug)) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = "/var/www/html/sites/$slug";
+    if (!is_dir($sitePath)) {
+        respond(404, ['error' => 'サイトが見つかりません']);
+    }
+    [$code, $out] = runWp(['theme', 'list', '--fields=name,status', '--format=json', "--path=$sitePath", '--allow-root']);
+    respond(200, ['themes' => $code === 0 ? (json_decode($out, true) ?: []) : []]);
+}
+
 const ALLOWED_BULK_ACTIONS = [
     'category_create', 'category_edit', 'category_delete',
     'tag_create', 'tag_edit', 'tag_delete',

@@ -774,6 +774,102 @@ export function deleteTagEverywhere(
   });
 }
 
+export type PluginThemeStatus = "NOT_INSTALLED" | "INACTIVE" | "ACTIVE";
+
+export interface StatusEnvironmentValue {
+  available: boolean;
+  status: PluginThemeStatus | null;
+}
+
+export interface StatusComparisonRow {
+  slug: string;
+  local: StatusEnvironmentValue;
+  test: StatusEnvironmentValue;
+  production: StatusEnvironmentValue;
+}
+
+export interface StatusComparisonPage {
+  items: StatusComparisonRow[];
+  page: number;
+  size: number;
+  totalCount: number;
+  masterEnvironment: "test" | "production";
+}
+
+export function listPluginComparison(
+  projectId: number,
+  page: number,
+  actor?: ActorInfo
+): Promise<StatusComparisonPage> {
+  return apiFetch<StatusComparisonPage>(
+    `/api/projects/${projectId}/bulk-management/plugins/comparison?page=${page}`,
+    { actor }
+  );
+}
+
+export function listThemeComparison(
+  projectId: number,
+  page: number,
+  actor?: ActorInfo
+): Promise<StatusComparisonPage> {
+  return apiFetch<StatusComparisonPage>(
+    `/api/projects/${projectId}/bulk-management/themes/comparison?page=${page}`,
+    { actor }
+  );
+}
+
+export function reconcilePluginState(
+  projectId: number,
+  input: { slug: string; changes: { environment: ProjectEnvironment; desiredStatus: PluginThemeStatus }[] },
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/plugins/reconcile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function reconcileThemeState(
+  projectId: number,
+  input: { slug: string; changes: { environment: ProjectEnvironment; desiredStatus: PluginThemeStatus }[] },
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/themes/reconcile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function deletePluginEverywhere(
+  projectId: number,
+  slug: string,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/plugins/delete-all`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug }),
+    actor,
+  });
+}
+
+export function deleteThemeEverywhere(
+  projectId: number,
+  slug: string,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/themes/delete-all`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug }),
+    actor,
+  });
+}
+
 export function runBulkOperationUpload(
   projectId: number,
   input: { operationType: ZipInstallOperationType; file: File },

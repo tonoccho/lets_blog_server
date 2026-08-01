@@ -3,12 +3,15 @@ package com.letsblog.api.controller;
 import com.letsblog.api.dto.AddProjectUserRequest;
 import com.letsblog.api.dto.ApplyToEnvironmentRequest;
 import com.letsblog.api.dto.BulkOperationLogResponse;
+import com.letsblog.api.dto.DeleteSlugRequest;
 import com.letsblog.api.dto.ProjectCreateRequest;
 import com.letsblog.api.dto.ProjectEnvironmentBindRequest;
 import com.letsblog.api.dto.ProjectResponse;
 import com.letsblog.api.dto.ProjectUpdateRequest;
 import com.letsblog.api.dto.ProjectUserResponse;
+import com.letsblog.api.dto.ReconcileStateRequest;
 import com.letsblog.api.dto.ReplayBulkOperationRequest;
+import com.letsblog.api.dto.StatusComparisonPage;
 import com.letsblog.api.dto.SyncEnvironmentRequest;
 import com.letsblog.api.dto.TermComparisonPage;
 import com.letsblog.api.dto.TermNameRequest;
@@ -19,6 +22,7 @@ import com.letsblog.api.domain.BulkOperationType;
 import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.BulkManagementService;
 import com.letsblog.api.service.CurrentActorService;
+import com.letsblog.api.service.PluginThemeComparisonService;
 import com.letsblog.api.service.ProjectEnvironmentSyncService;
 import com.letsblog.api.service.ProjectService;
 import com.letsblog.api.service.ProjectUserSyncService;
@@ -42,6 +46,7 @@ public class ProjectController {
     private final ProjectEnvironmentSyncService projectEnvironmentSyncService;
     private final BulkManagementService bulkManagementService;
     private final TermComparisonService termComparisonService;
+    private final PluginThemeComparisonService pluginThemeComparisonService;
     private final AdminAuthorizationService adminAuthorizationService;
     private final CurrentActorService currentActorService;
 
@@ -51,6 +56,7 @@ public class ProjectController {
             ProjectEnvironmentSyncService projectEnvironmentSyncService,
             BulkManagementService bulkManagementService,
             TermComparisonService termComparisonService,
+            PluginThemeComparisonService pluginThemeComparisonService,
             AdminAuthorizationService adminAuthorizationService,
             CurrentActorService currentActorService) {
         this.projectService = projectService;
@@ -58,6 +64,7 @@ public class ProjectController {
         this.projectEnvironmentSyncService = projectEnvironmentSyncService;
         this.bulkManagementService = bulkManagementService;
         this.termComparisonService = termComparisonService;
+        this.pluginThemeComparisonService = pluginThemeComparisonService;
         this.adminAuthorizationService = adminAuthorizationService;
         this.currentActorService = currentActorService;
     }
@@ -212,6 +219,56 @@ public class ProjectController {
         adminAuthorizationService.requireAdmin();
         Long actorId = currentActorService.getCurrentActorId();
         return termComparisonService.deleteTagEverywhere(id, request.name(), actorId).stream()
+                .map(BulkOperationLogResponse::from).toList();
+    }
+
+    @GetMapping("/{id}/bulk-management/plugins/comparison")
+    public StatusComparisonPage pluginComparison(
+            @PathVariable Long id, @RequestParam(defaultValue = "0") int page) {
+        adminAuthorizationService.requireAdmin();
+        return pluginThemeComparisonService.listPluginComparison(id, page, 20);
+    }
+
+    @GetMapping("/{id}/bulk-management/themes/comparison")
+    public StatusComparisonPage themeComparison(
+            @PathVariable Long id, @RequestParam(defaultValue = "0") int page) {
+        adminAuthorizationService.requireAdmin();
+        return pluginThemeComparisonService.listThemeComparison(id, page, 20);
+    }
+
+    @PostMapping("/{id}/bulk-management/plugins/reconcile")
+    public List<BulkOperationLogResponse> reconcilePlugin(
+            @PathVariable Long id, @Valid @RequestBody ReconcileStateRequest request) {
+        adminAuthorizationService.requireAdmin();
+        Long actorId = currentActorService.getCurrentActorId();
+        return pluginThemeComparisonService.reconcilePlugin(id, request.slug(), request.changes(), actorId).stream()
+                .map(BulkOperationLogResponse::from).toList();
+    }
+
+    @PostMapping("/{id}/bulk-management/themes/reconcile")
+    public List<BulkOperationLogResponse> reconcileTheme(
+            @PathVariable Long id, @Valid @RequestBody ReconcileStateRequest request) {
+        adminAuthorizationService.requireAdmin();
+        Long actorId = currentActorService.getCurrentActorId();
+        return pluginThemeComparisonService.reconcileTheme(id, request.slug(), request.changes(), actorId).stream()
+                .map(BulkOperationLogResponse::from).toList();
+    }
+
+    @PostMapping("/{id}/bulk-management/plugins/delete-all")
+    public List<BulkOperationLogResponse> deletePluginEverywhere(
+            @PathVariable Long id, @Valid @RequestBody DeleteSlugRequest request) {
+        adminAuthorizationService.requireAdmin();
+        Long actorId = currentActorService.getCurrentActorId();
+        return pluginThemeComparisonService.deletePluginEverywhere(id, request.slug(), actorId).stream()
+                .map(BulkOperationLogResponse::from).toList();
+    }
+
+    @PostMapping("/{id}/bulk-management/themes/delete-all")
+    public List<BulkOperationLogResponse> deleteThemeEverywhere(
+            @PathVariable Long id, @Valid @RequestBody DeleteSlugRequest request) {
+        adminAuthorizationService.requireAdmin();
+        Long actorId = currentActorService.getCurrentActorId();
+        return pluginThemeComparisonService.deleteThemeEverywhere(id, request.slug(), actorId).stream()
                 .map(BulkOperationLogResponse::from).toList();
     }
 

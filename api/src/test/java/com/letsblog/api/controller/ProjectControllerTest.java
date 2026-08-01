@@ -6,12 +6,15 @@ import com.letsblog.api.domain.BulkOperationStatus;
 import com.letsblog.api.domain.BulkOperationType;
 import com.letsblog.api.dto.AddProjectUserRequest;
 import com.letsblog.api.dto.ApplyToEnvironmentRequest;
+import com.letsblog.api.dto.DeleteSlugRequest;
 import com.letsblog.api.dto.ProjectCreateRequest;
 import com.letsblog.api.dto.ProjectEnvironmentBindRequest;
 import com.letsblog.api.dto.ProjectResponse;
 import com.letsblog.api.dto.ProjectUpdateRequest;
 import com.letsblog.api.dto.ProjectUserResponse;
+import com.letsblog.api.dto.ReconcileStateRequest;
 import com.letsblog.api.dto.ReplayBulkOperationRequest;
+import com.letsblog.api.dto.StatusComparisonPage;
 import com.letsblog.api.dto.SyncEnvironmentRequest;
 import com.letsblog.api.dto.TermComparisonPage;
 import com.letsblog.api.dto.TermNameRequest;
@@ -21,6 +24,7 @@ import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.BulkManagementService;
 import com.letsblog.api.service.CurrentActorService;
 import com.letsblog.api.service.ForbiddenException;
+import com.letsblog.api.service.PluginThemeComparisonService;
 import com.letsblog.api.service.ProjectEnvironmentSyncService;
 import com.letsblog.api.service.ProjectService;
 import com.letsblog.api.service.ProjectUserSyncService;
@@ -60,6 +64,9 @@ class ProjectControllerTest {
     private TermComparisonService termComparisonService;
 
     @Mock
+    private PluginThemeComparisonService pluginThemeComparisonService;
+
+    @Mock
     private AdminAuthorizationService adminAuthorizationService;
 
     @Mock
@@ -68,7 +75,7 @@ class ProjectControllerTest {
     private ProjectController controller() {
         return new ProjectController(
                 projectService, projectUserSyncService, projectEnvironmentSyncService, bulkManagementService,
-                termComparisonService, adminAuthorizationService, currentActorService);
+                termComparisonService, pluginThemeComparisonService, adminAuthorizationService, currentActorService);
     }
 
     private BulkOperationLog buildLog() {
@@ -315,6 +322,52 @@ class ProjectControllerTest {
         when(termComparisonService.deleteCategoryEverywhere(1L, "お知らせ", 0L)).thenReturn(List.of(buildLog()));
 
         List<?> response = controller.deleteCategoryEverywhere(1L, request);
+
+        assertEquals(1, response.size());
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void pluginComparison_admin権限があれば取得できる() {
+        ProjectController controller = controller();
+        StatusComparisonPage page = new StatusComparisonPage(List.of(), 0, 20, 0, "test");
+        when(pluginThemeComparisonService.listPluginComparison(1L, 0, 20)).thenReturn(page);
+
+        StatusComparisonPage response = controller.pluginComparison(1L, 0);
+
+        assertEquals(page, response);
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void pluginComparison_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.pluginComparison(1L, 0));
+    }
+
+    @Test
+    void reconcilePlugin_admin権限があれば実行できる() {
+        ProjectController controller = controller();
+        ReconcileStateRequest request = new ReconcileStateRequest(
+                "akismet", List.of(new ReconcileStateRequest.StateChangeRequest("local", "ACTIVE")));
+        when(pluginThemeComparisonService.reconcilePlugin(1L, "akismet", request.changes(), 0L))
+                .thenReturn(List.of(buildLog()));
+
+        List<?> response = controller.reconcilePlugin(1L, request);
+
+        assertEquals(1, response.size());
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void deletePluginEverywhere_admin権限があれば実行できる() {
+        ProjectController controller = controller();
+        DeleteSlugRequest request = new DeleteSlugRequest("akismet");
+        when(pluginThemeComparisonService.deletePluginEverywhere(1L, "akismet", 0L)).thenReturn(List.of(buildLog()));
+
+        List<?> response = controller.deletePluginEverywhere(1L, request);
 
         assertEquals(1, response.size());
         verify(adminAuthorizationService).requireAdmin();
