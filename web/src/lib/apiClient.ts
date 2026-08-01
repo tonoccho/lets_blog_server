@@ -47,6 +47,7 @@ export interface ManagedWordPressSiteInput {
   adminEmail: string;
   adminPassword: string;
   locale: string;
+  templateSiteId?: number;
 }
 
 export interface AuthenticatedUser {

@@ -1,14 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import type { AppUser } from "@/lib/apiClient";
+import type { AppUser, Site } from "@/lib/apiClient";
 import { SiteForm } from "./SiteForm";
 import { ManagedWordPressForm } from "./ManagedWordPressForm";
 
 type Mode = "external" | "managed-wordpress";
 
-export function SiteCreationPanel({ users }: { users: AppUser[] }) {
+export function SiteCreationPanel({ users, sites }: { users: AppUser[]; sites: Site[] }) {
   const [mode, setMode] = useState<Mode>("external");
+  const templateCandidates = sites.filter((site) => site.managedWordpress);
 
   return (
     <div className="space-y-3">
@@ -32,7 +33,11 @@ export function SiteCreationPanel({ users }: { users: AppUser[] }) {
           WordPressを新規構築
         </button>
       </div>
-      {mode === "external" ? <SiteForm /> : <ManagedWordPressForm users={users} />}
+      {mode === "external" ? (
+        <SiteForm />
+      ) : (
+        <ManagedWordPressForm users={users} templateCandidates={templateCandidates} />
+      )}
     </div>
   );
 }

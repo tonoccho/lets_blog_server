@@ -127,12 +127,12 @@ export interface ManagedWordPressSiteInput {
 
 実装対象:
 
-- [ ] `api/src/main/java/com/letsblog/api/dto/CreateManagedWordPressSiteRequest.java`: `templateSiteId`追加
-- [ ] `api/src/main/java/com/letsblog/api/service/WordPressSiteProvisioningService.java`: テンプレート指定時のクローン処理・失敗時ロールバック
-- [ ] `web/src/lib/apiClient.ts`: `ManagedWordPressSiteInput.templateSiteId`追加
-- [ ] `web/src/app/sites/ManagedWordPressForm.tsx`: テンプレート選択UI追加
-- [ ] `web/src/app/sites/SiteCreationPanel.tsx`・`web/src/app/sites/page.tsx`: `sites`の受け渡し追加
-- [ ] `web/src/app/sites/actions.ts`: `createManagedWordPressSiteAction`でtemplateSiteIdを読み取り
+- [x] `api/src/main/java/com/letsblog/api/dto/CreateManagedWordPressSiteRequest.java`: `templateSiteId`追加
+- [x] `api/src/main/java/com/letsblog/api/service/WordPressSiteProvisioningService.java`: テンプレート指定時のクローン処理・失敗時ロールバック
+- [x] `web/src/lib/apiClient.ts`: `ManagedWordPressSiteInput.templateSiteId`追加
+- [x] `web/src/app/sites/ManagedWordPressForm.tsx`: テンプレート選択UI追加
+- [x] `web/src/app/sites/SiteCreationPanel.tsx`・`web/src/app/sites/page.tsx`: `sites`の受け渡し追加
+- [x] `web/src/app/sites/actions.ts`: `createManagedWordPressSiteAction`でtemplateSiteIdを読み取り
 
 対象外・スコープ外:
 

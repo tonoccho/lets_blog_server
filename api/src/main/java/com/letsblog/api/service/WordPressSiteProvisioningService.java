@@ -8,11 +8,13 @@ import com.letsblog.api.dto.CreateManagedWordPressSiteRequest;
 import com.letsblog.api.dto.SiteRegisterRequest;
 import com.letsblog.api.dto.SiteResponse;
 import com.letsblog.api.provisioning.WordPressProvisioningClient;
+import com.letsblog.api.provisioning.WordPressSyncClient;
 import com.letsblog.api.repository.PostRepository;
 import com.letsblog.api.repository.SiteRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -24,15 +26,18 @@ import java.util.Map;
 public class WordPressSiteProvisioningService {
 
     private final WordPressProvisioningClient provisioningClient;
+    private final WordPressSyncClient syncClient;
     private final SiteService siteService;
     private final SiteRepository siteRepository;
     private final PostRepository postRepository;
 
     public WordPressSiteProvisioningService(WordPressProvisioningClient provisioningClient,
+                                             WordPressSyncClient syncClient,
                                              SiteService siteService,
                                              SiteRepository siteRepository,
                                              PostRepository postRepository) {
         this.provisioningClient = provisioningClient;
+        this.syncClient = syncClient;
         this.siteService = siteService;
         this.siteRepository = siteRepository;
         this.postRepository = postRepository;
@@ -91,6 +96,10 @@ public class WordPressSiteProvisioningService {
         site.setBaseUrl(result.url());
         siteRepository.save(site);
 
+        if (request.templateSiteId() != null) {
+            cloneFromTemplate(request.templateSiteId(), site, slug, dbName);
+        }
+
         return new SiteResponse(
                 site.getId(), site.getName(), site.getSiteKey(), site.getCmsType(), site.getBaseUrl(),
                 site.getCreatedAt(), site.getUpdatedAt(), response.connectionCheckStatus(), true);
@@ -107,6 +116,31 @@ public class WordPressSiteProvisioningService {
         }
         postRepository.deleteBySiteId(siteId);
         siteRepository.delete(site);
+    }
+
+    /**
+     * テンプレートサイトのテーマ・プラグイン・メディア・DB(コンテンツ)を新規サイトへ複製する。
+     * DB同期はwp_users/wp_usermetaを対象外にするため、直前に発行した新規サイトの管理者アカウントは
+     * 上書きされずそのまま有効(WordPressSyncClient/provision-agentの/syncハンドラの既存仕様)。
+     */
+    private void cloneFromTemplate(Long templateSiteId, Site newSite, String slug, String dbName) {
+        Site templateSite = siteRepository.findById(templateSiteId)
+                .orElseThrow(() -> new SiteNotFoundException(
+                        "id " + templateSiteId + " のテンプレートサイトは登録されていません"));
+        if (!templateSite.isManagedWordpress()) {
+            provisioningClient.deprovision(slug, dbName);
+            siteRepository.delete(newSite);
+            throw new IllegalArgumentException("テンプレートには自動構築サイトのみ指定できます");
+        }
+        try {
+            syncClient.sync(new WordPressSyncClient.SyncCommand(
+                    templateSite.getWpSlug(), templateSite.getWpDbName(),
+                    slug, dbName, List.of("themes", "plugins", "media", "db")));
+        } catch (RuntimeException e) {
+            provisioningClient.deprovision(slug, dbName);
+            siteRepository.delete(newSite);
+            throw e;
+        }
     }
 
     private String normalizeSlug(String siteKey) {

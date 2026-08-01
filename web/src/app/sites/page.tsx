@@ -98,7 +98,7 @@ export default async function SitesPage() {
         </table>
       </div>
 
-      <SiteCreationPanel users={users} />
+      <SiteCreationPanel users={users} sites={sites} />
     </div>
   );
 }

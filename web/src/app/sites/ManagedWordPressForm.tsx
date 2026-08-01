@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useRef, useEffect } from "react";
-import type { AppUser } from "@/lib/apiClient";
+import type { AppUser, Site } from "@/lib/apiClient";
 import { createManagedWordPressSiteAction, CreateManagedWordPressSiteState } from "./actions";
 
 const initialState: CreateManagedWordPressSiteState = {};
@@ -24,7 +24,7 @@ function deriveWpUsername(email: string): string {
   return localPart.replace(/[^a-zA-Z0-9._-]/g, "");
 }
 
-export function ManagedWordPressForm({ users }: { users: AppUser[] }) {
+export function ManagedWordPressForm({ users, templateCandidates }: { users: AppUser[]; templateCandidates: Site[] }) {
   const [state, formAction, pending] = useActionState(createManagedWordPressSiteAction, initialState);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -52,11 +52,28 @@ export function ManagedWordPressForm({ users }: { users: AppUser[] }) {
         常駐WordPressコンテナ上にサブディレクトリでWordPressを自動インストールし、
         カテゴリ・タグ・著者の初期設定まで自動で行います。構築完了後は
         <code>https://localhost/sites/&#123;サイトキー&#125;/</code> でアクセスできます。
+        テンプレートサイトを選択した場合、テーマ・プラグイン・メディア・投稿等のコンテンツを
+        複製するため、DB・メディアの量に応じて構築にさらに時間がかかることがあります。
       </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field name="managedName" label="表示名" placeholder="My Blog" />
         <Field name="managedSiteKey" label="サイトキー(英数字・ハイフン)" placeholder="main" />
         <Field name="managedTitle" label="WordPressサイトタイトル" placeholder="My Blog" wide />
+        <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+          <span className="text-neutral-600">テンプレートサイト(任意)</span>
+          <select
+            name="managedTemplateSiteId"
+            defaultValue=""
+            className="rounded border border-neutral-300 px-3 py-2 text-sm"
+          >
+            <option value="">なし(空のWordPressから始める)</option>
+            {templateCandidates.map((site) => (
+              <option key={site.id} value={site.id}>
+                {site.name}({site.siteKey})
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="flex flex-col gap-1 text-sm sm:col-span-2">
           <span className="text-neutral-600">サーバー登録ユーザーから選択(任意)</span>
           <select

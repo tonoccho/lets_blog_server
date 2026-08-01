@@ -5,6 +5,7 @@ import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.CreateManagedWordPressSiteRequest;
 import com.letsblog.api.dto.SiteResponse;
 import com.letsblog.api.provisioning.WordPressProvisioningClient;
+import com.letsblog.api.provisioning.WordPressSyncClient;
 import com.letsblog.api.repository.PostRepository;
 import com.letsblog.api.repository.SiteRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,6 +32,9 @@ class WordPressSiteProvisioningServiceTest {
     private WordPressProvisioningClient provisioningClient;
 
     @Mock
+    private WordPressSyncClient syncClient;
+
+    @Mock
     private SiteService siteService;
 
     @Mock
@@ -43,12 +47,31 @@ class WordPressSiteProvisioningServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new WordPressSiteProvisioningService(provisioningClient, siteService, siteRepository, postRepository);
+        service = new WordPressSiteProvisioningService(
+                provisioningClient, syncClient, siteService, siteRepository, postRepository);
     }
 
     private CreateManagedWordPressSiteRequest request() {
         return new CreateManagedWordPressSiteRequest(
-                "My Blog", "main", "My Blog", "admin", "admin@example.com", "s3cret-pass", null);
+                "My Blog", "main", "My Blog", "admin", "admin@example.com", "s3cret-pass", null, null);
+    }
+
+    private CreateManagedWordPressSiteRequest requestWithTemplate(Long templateSiteId) {
+        return new CreateManagedWordPressSiteRequest(
+                "My Blog", "main", "My Blog", "admin", "admin@example.com", "s3cret-pass", null, templateSiteId);
+    }
+
+    private void stubSuccessfulProvisionAndRegister() {
+        when(siteRepository.existsBySiteKey("main")).thenReturn(false);
+        when(provisioningClient.provision(any())).thenReturn(new WordPressProvisioningClient.ProvisionResult(
+                "https://localhost/sites/main", "admin", "app-pass-1234"));
+        SiteResponse response = new SiteResponse(1L, "My Blog", "main", CmsType.WORDPRESS,
+                "https://localhost/sites/main", LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false);
+        when(siteService.register(any(), eq(9L))).thenReturn(response);
+        Site site = new Site();
+        site.setId(1L);
+        site.setSiteKey("main");
+        when(siteRepository.findBySiteKey("main")).thenReturn(Optional.of(site));
     }
 
     @Test
@@ -133,7 +156,7 @@ class WordPressSiteProvisioningServiceTest {
         when(siteRepository.findBySiteKey("main")).thenReturn(Optional.of(site));
 
         CreateManagedWordPressSiteRequest requestWithLocale = new CreateManagedWordPressSiteRequest(
-                "My Blog", "main", "My Blog", "admin", "admin@example.com", "s3cret-pass", "en_US");
+                "My Blog", "main", "My Blog", "admin", "admin@example.com", "s3cret-pass", "en_US", null);
 
         service.createManagedSite(requestWithLocale, 9L);
 
@@ -189,5 +212,80 @@ class WordPressSiteProvisioningServiceTest {
         when(siteRepository.findById(99L)).thenReturn(Optional.empty());
 
         assertThrows(SiteNotFoundException.class, () -> service.deleteSite(99L));
+    }
+
+    @Test
+    void createManagedSite_templateSiteId未指定ならsyncClientは呼ばれない() {
+        stubSuccessfulProvisionAndRegister();
+
+        service.createManagedSite(request(), 9L);
+
+        verify(syncClient, never()).sync(any());
+    }
+
+    @Test
+    void createManagedSite_templateSiteId指定時はWordPressSyncClientでクローンする() {
+        stubSuccessfulProvisionAndRegister();
+        Site templateSite = new Site();
+        templateSite.setId(5L);
+        templateSite.setManagedWordpress(true);
+        templateSite.setWpSlug("template-site");
+        templateSite.setWpDbName("wp_template-site");
+        when(siteRepository.findById(5L)).thenReturn(Optional.of(templateSite));
+
+        service.createManagedSite(requestWithTemplate(5L), 9L);
+
+        ArgumentCaptor<WordPressSyncClient.SyncCommand> captor =
+                ArgumentCaptor.forClass(WordPressSyncClient.SyncCommand.class);
+        verify(syncClient).sync(captor.capture());
+        assertEquals("template-site", captor.getValue().fromSlug());
+        assertEquals("wp_template-site", captor.getValue().fromDbName());
+        assertEquals("main", captor.getValue().toSlug());
+        assertEquals("wp_main", captor.getValue().toDbName());
+        assertEquals(java.util.List.of("themes", "plugins", "media", "db"), captor.getValue().targets());
+    }
+
+    @Test
+    void createManagedSite_テンプレートが非managedなら構築済みリソースを削除して例外() {
+        stubSuccessfulProvisionAndRegister();
+        Site templateSite = new Site();
+        templateSite.setId(5L);
+        templateSite.setManagedWordpress(false);
+        when(siteRepository.findById(5L)).thenReturn(Optional.of(templateSite));
+
+        assertThrows(IllegalArgumentException.class, () -> service.createManagedSite(requestWithTemplate(5L), 9L));
+
+        verify(provisioningClient).deprovision("main", "wp_main");
+        ArgumentCaptor<Site> deletedSiteCaptor = ArgumentCaptor.forClass(Site.class);
+        verify(siteRepository).delete(deletedSiteCaptor.capture());
+        assertEquals("main", deletedSiteCaptor.getValue().getSiteKey());
+        verify(syncClient, never()).sync(any());
+    }
+
+    @Test
+    void createManagedSite_クローン失敗時は構築済みリソースを削除して例外を伝播する() {
+        stubSuccessfulProvisionAndRegister();
+        Site templateSite = new Site();
+        templateSite.setId(5L);
+        templateSite.setManagedWordpress(true);
+        templateSite.setWpSlug("template-site");
+        templateSite.setWpDbName("wp_template-site");
+        when(siteRepository.findById(5L)).thenReturn(Optional.of(templateSite));
+        doThrow(new ProvisioningException("環境同期に失敗しました", null)).when(syncClient).sync(any());
+
+        assertThrows(ProvisioningException.class, () -> service.createManagedSite(requestWithTemplate(5L), 9L));
+
+        verify(provisioningClient).deprovision("main", "wp_main");
+        ArgumentCaptor<Site> deletedSiteCaptor = ArgumentCaptor.forClass(Site.class);
+        verify(siteRepository).delete(deletedSiteCaptor.capture());
+        assertEquals("main", deletedSiteCaptor.getValue().getSiteKey());
+    }
+
+    @Test
+    void createManagedSite_存在しないtemplateSiteIdは例外() {
+        stubSuccessfulProvisionAndRegister();
+        when(siteRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThrows(SiteNotFoundException.class, () -> service.createManagedSite(requestWithTemplate(99L), 9L));
     }
 }
