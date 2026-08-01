@@ -296,6 +296,79 @@ if ($path === '/sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     respond(200, ['status' => 'ok']);
 }
 
+const ALLOWED_BULK_ACTIONS = ['category', 'plugin', 'theme'];
+
+if ($path === '/bulk-management' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    $action = (string) ($input['action'] ?? '');
+    $value = (string) ($input['value'] ?? '');
+
+    if (!isValidSlug($slug) || !in_array($action, ALLOWED_BULK_ACTIONS, true) || $value === '') {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = "/var/www/html/sites/$slug";
+    if (!is_dir($sitePath)) {
+        respond(404, ['error' => 'サイトが見つかりません']);
+    }
+
+    if ($action === 'category') {
+        [$code, $out] = runWp(['term', 'list', 'category', "--search=$value", '--field=name', '--format=json', "--path=$sitePath", '--allow-root']);
+        $existing = $code === 0 ? (json_decode($out, true) ?: []) : [];
+        $matched = array_filter($existing, fn($name) => strcasecmp($name, $value) === 0);
+        if (!empty($matched)) {
+            respond(200, ['status' => 'skipped']);
+        }
+        [$code, $out] = runWp(['term', 'create', 'category', $value, '--porcelain', "--path=$sitePath", '--allow-root']);
+        if ($code !== 0) {
+            respond(500, ['error' => 'カテゴリの作成に失敗しました', 'detail' => $out]);
+        }
+        respond(200, ['status' => 'ok']);
+    }
+
+    // action === 'plugin' | 'theme' (SLUG方式: wordpress.orgのディレクトリから指定)
+    [$code, $out] = runWp([$action, 'list', '--field=name', '--format=json', "--path=$sitePath", '--allow-root']);
+    $installed = $code === 0 ? (json_decode($out, true) ?: []) : [];
+    if (in_array($value, $installed, true)) {
+        respond(200, ['status' => 'skipped']);
+    }
+    [$code, $out] = runWp([$action, 'install', $value, "--path=$sitePath", '--allow-root']);
+    if ($code !== 0) {
+        respond(500, ['error' => "{$action}のインストールに失敗しました", 'detail' => $out]);
+    }
+    runCommand(['chown', '-R', 'www-data:www-data', $sitePath]);
+    respond(200, ['status' => 'ok']);
+}
+
+const ALLOWED_BULK_UPLOAD_ACTIONS = ['plugin', 'theme'];
+
+if ($path === '/bulk-management/upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($_POST['slug'] ?? '');
+    $action = (string) ($_POST['action'] ?? '');
+
+    if (!isValidSlug($slug) || !in_array($action, ALLOWED_BULK_UPLOAD_ACTIONS, true) || empty($_FILES['file'])) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = "/var/www/html/sites/$slug";
+    if (!is_dir($sitePath)) {
+        respond(404, ['error' => 'サイトが見つかりません']);
+    }
+
+    $tmpPath = '/tmp/letsblog-bulk-' . bin2hex(random_bytes(8)) . '.zip';
+    if (!move_uploaded_file($_FILES['file']['tmp_name'], $tmpPath)) {
+        respond(500, ['error' => 'アップロードファイルの一時保存に失敗しました']);
+    }
+
+    // zipの中身(実際のslug)は展開するまで確定しないため事前の存在チェックは行わず、
+    // 常に--forceで上書きインストールする(本アプリ全体の「差分チェックをせず全上書き」方針に合わせる)
+    [$code, $out] = runWp([$action, 'install', $tmpPath, '--force', "--path=$sitePath", '--allow-root']);
+    runCommand(['rm', '-f', $tmpPath]);
+    if ($code !== 0) {
+        respond(500, ['error' => "{$action}のインストールに失敗しました", 'detail' => $out]);
+    }
+    runCommand(['chown', '-R', 'www-data:www-data', $sitePath]);
+    respond(200, ['status' => 'ok']);
+}
+
 if ($path === '/deprovision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = (string) ($input['slug'] ?? '');
     $dbName = (string) ($input['dbName'] ?? '');

@@ -30,8 +30,11 @@ class ProjectServiceTest {
     @Mock
     private SiteRepository siteRepository;
 
+    @Mock
+    private BulkUploadStorageService bulkUploadStorageService;
+
     private ProjectService service() {
-        return new ProjectService(projectRepository, siteRepository);
+        return new ProjectService(projectRepository, siteRepository, bulkUploadStorageService);
     }
 
     private Project buildProject(Long id, String slug) {
@@ -143,5 +146,6 @@ class ProjectServiceTest {
         service.deleteProject(1L);
 
         verify(projectRepository, times(1)).deleteById(1L);
+        verify(bulkUploadStorageService).deleteAll(1L);
     }
 }

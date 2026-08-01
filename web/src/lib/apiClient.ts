@@ -581,6 +581,68 @@ export function syncProjectEnvironment(
   });
 }
 
+export type BulkOperationType = "CATEGORY" | "PLUGIN" | "THEME";
+export type BulkOperationSourceType = "SLUG" | "ZIP";
+export type BulkOperationStatus = "SUCCESS" | "SKIPPED" | "FAILED";
+
+export interface BulkOperationLog {
+  id: number;
+  operationType: BulkOperationType;
+  sourceType: BulkOperationSourceType;
+  value: string;
+  originalFilename: string | null;
+  environment: ProjectEnvironment;
+  status: BulkOperationStatus;
+  errorMessage: string | null;
+  isReplay: boolean;
+  createdAt: string;
+}
+
+export function runBulkOperation(
+  projectId: number,
+  input: { operationType: BulkOperationType; value: string },
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function runBulkOperationUpload(
+  projectId: number,
+  input: { operationType: "PLUGIN" | "THEME"; file: File },
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  const formData = new FormData();
+  formData.append('operationType', input.operationType);
+  formData.append('file', input.file);
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/upload`, {
+    method: 'POST',
+    body: formData,
+    actor,
+  });
+}
+
+export function replayBulkOperations(
+  projectId: number,
+  input: { environment: ProjectEnvironment },
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/replay`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function listBulkOperationLogs(projectId: number, actor?: ActorInfo): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/logs`, { actor });
+}
+
 export interface ProjectUser {
   userId: number;
   email: string | null;

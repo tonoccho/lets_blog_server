@@ -468,23 +468,23 @@ location ~ ^/api/projects/[0-9]+/bulk-management(/upload|/replay)?$ {
 
 実装対象:
 
-- [ ] `api/src/main/resources/db/migration/V16__add_bulk_operation_logs.sql`(新規)
-- [ ] `api/src/main/java/com/letsblog/api/domain/BulkOperationLog.java`・`BulkOperationType.java`・`BulkOperationSourceType.java`・`BulkOperationStatus.java`(新規)
-- [ ] `api/src/main/java/com/letsblog/api/repository/BulkOperationLogRepository.java`(新規)
-- [ ] `api/src/main/java/com/letsblog/api/service/BulkUploadStorageService.java`(新規)
-- [ ] `api/src/main/java/com/letsblog/api/service/ProjectService.java`: `deleteProject()`に`BulkUploadStorageService.deleteAll()`呼び出しを追加
-- [ ] `api/src/main/resources/application.yml`: multipart上限・`app.bulk-upload-storage-path`追加
-- [ ] `wordpress/provision-agent/index.php`: `/bulk-management`・`/bulk-management/upload`ハンドラ
-- [ ] `api/src/main/java/com/letsblog/api/provisioning/WordPressBulkManagementClient.java`(新規)
-- [ ] `api/src/main/java/com/letsblog/api/service/BulkManagementService.java`(新規)
-- [ ] `api/src/main/java/com/letsblog/api/dto/BulkOperationRequest.java`・`ReplayBulkOperationRequest.java`・`BulkOperationLogResponse.java`(新規)
-- [ ] `ProjectController.java`: `POST /bulk-management`・`POST /bulk-management/upload`・`POST /bulk-management/replay`・`GET /bulk-management/logs`
-- [ ] `nginx/conf.d/default.conf`: 一括管理・アップロード・ロールフォワード用location(300秒タイムアウト・アップロードサイズ上限)
-- [ ] `docker-compose.yml`: `bulk_upload_files`ボリューム追加(api・トップレベル`volumes:`双方)
-- [ ] `web/src/lib/apiClient.ts`: `runBulkOperation()`・`runBulkOperationUpload()`・`replayBulkOperations()`・`listBulkOperationLogs()`
-- [ ] `web/src/app/projects/[id]/BulkManagementPanel.tsx`(新規)
-- [ ] `web/src/app/projects/[id]/page.tsx`: パネル追加
-- [ ] `web/src/app/projects/[id]/actions.ts`: `runBulkOperationAction`・`runBulkOperationUploadAction`・`replayBulkOperationsAction`
+- [x] `api/src/main/resources/db/migration/V16__add_bulk_operation_logs.sql`(新規)
+- [x] `api/src/main/java/com/letsblog/api/domain/BulkOperationLog.java`・`BulkOperationType.java`・`BulkOperationSourceType.java`・`BulkOperationStatus.java`(新規)
+- [x] `api/src/main/java/com/letsblog/api/repository/BulkOperationLogRepository.java`(新規)
+- [x] `api/src/main/java/com/letsblog/api/service/BulkUploadStorageService.java`(新規)
+- [x] `api/src/main/java/com/letsblog/api/service/ProjectService.java`: `deleteProject()`に`BulkUploadStorageService.deleteAll()`呼び出しを追加
+- [x] `api/src/main/resources/application.yml`: multipart上限・`app.bulk-upload-storage-path`追加
+- [x] `wordpress/provision-agent/index.php`: `/bulk-management`・`/bulk-management/upload`ハンドラ
+- [x] `api/src/main/java/com/letsblog/api/provisioning/WordPressBulkManagementClient.java`(新規)
+- [x] `api/src/main/java/com/letsblog/api/service/BulkManagementService.java`(新規)
+- [x] `api/src/main/java/com/letsblog/api/dto/BulkOperationRequest.java`・`ReplayBulkOperationRequest.java`・`BulkOperationLogResponse.java`(新規)
+- [x] `ProjectController.java`: `POST /bulk-management`・`POST /bulk-management/upload`・`POST /bulk-management/replay`・`GET /bulk-management/logs`
+- [x] `nginx/conf.d/default.conf`: 一括管理・アップロード・ロールフォワード用location(300秒タイムアウト・アップロードサイズ上限)
+- [x] `docker-compose.yml`: `bulk_upload_files`ボリューム追加(api・トップレベル`volumes:`双方)
+- [x] `web/src/lib/apiClient.ts`: `runBulkOperation()`・`runBulkOperationUpload()`・`replayBulkOperations()`・`listBulkOperationLogs()`
+- [x] `web/src/app/projects/[id]/BulkManagementPanel.tsx`(新規)
+- [x] `web/src/app/projects/[id]/page.tsx`: パネル追加
+- [x] `web/src/app/projects/[id]/actions.ts`: `runBulkOperationAction`・`runBulkOperationUploadAction`・`replayBulkOperationsAction`
 
 対象外・スコープ外:
 

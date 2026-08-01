@@ -27,6 +27,10 @@ spring:
           auth: false
           starttls:
             enable: false
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
 
 app:
   api-key: ${APP_API_KEY:dev_local_api_key}
@@ -42,3 +46,4 @@ app:
   plantuml-base-url: ${PLANTUML_BASE_URL:http://localhost:8085}
   wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
   wordpress-provision-token: ${WP_PROVISION_TOKEN:}
+  bulk-upload-storage-path: ${BULK_UPLOAD_STORAGE_PATH:/app/data/bulk-uploads}

@@ -59,6 +59,9 @@ services:
       PLANTUML_BASE_URL: http://plantuml:8080
       WORDPRESS_PROVISION_BASE_URL: http://wordpress:9000
       WP_PROVISION_TOKEN: ${WP_PROVISION_TOKEN}
+      BULK_UPLOAD_STORAGE_PATH: /app/data/bulk-uploads
+    volumes:
+      - bulk_upload_files:/app/data/bulk-uploads
     depends_on:
       mysql:
         condition: service_healthy
@@ -178,3 +181,4 @@ volumes:
   comfyui_models:
   comfyui_output:
   wordpress_sites:
+  bulk_upload_files:

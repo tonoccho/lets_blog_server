@@ -1,8 +1,9 @@
 import { notFound } from "next/navigation";
-import { getProject, listSites, listProjectUsers, listUsers } from "@/lib/apiClient";
+import { getProject, listSites, listProjectUsers, listUsers, listBulkOperationLogs } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 import { EnvironmentSlot } from "./EnvironmentSlot";
 import { EnvironmentSyncPanel } from "./EnvironmentSyncPanel";
+import { BulkManagementPanel } from "./BulkManagementPanel";
 import { ProjectNameForm } from "./ProjectNameForm";
 import { DeleteProjectButton } from "./DeleteProjectButton";
 import { ProjectUserManager } from "./ProjectUserManager";
@@ -18,11 +19,12 @@ export default async function ProjectDetailPage({
   const actor = { id: Number(session.user.id), role: session.user.role };
   const projectId = Number(id);
 
-  const [project, sites, members, allUsers] = await Promise.all([
+  const [project, sites, members, allUsers, bulkOperationLogs] = await Promise.all([
     getProject(projectId, actor).catch(() => null),
     listSites().catch(() => []),
     listProjectUsers(projectId, actor).catch(() => []),
     listUsers().catch(() => []),
+    listBulkOperationLogs(projectId, actor).catch(() => []),
   ]);
 
   if (!project) {
@@ -53,6 +55,8 @@ export default async function ProjectDetailPage({
       </div>
 
       <EnvironmentSyncPanel projectId={project.id} project={project} />
+
+      <BulkManagementPanel projectId={project.id} project={project} logs={bulkOperationLogs} />
 
       <div className="space-y-4">
         <h2 className="text-lg font-semibold">プロジェクトメンバー</h2>

@@ -9,8 +9,13 @@ import {
   updateProjectUserRole,
   removeProjectUser,
   syncProjectEnvironment,
+  runBulkOperation,
+  runBulkOperationUpload,
+  replayBulkOperations,
   ProjectEnvironment,
   EnvironmentSyncTarget,
+  BulkOperationType,
+  BulkOperationLog,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 
@@ -163,4 +168,77 @@ export async function syncEnvironmentAction(
 
   revalidatePath(`/projects/${projectId}`);
   return { success: true };
+}
+
+export interface BulkOperationState {
+  error?: string;
+  success?: boolean;
+  results?: BulkOperationLog[];
+}
+
+export async function runBulkOperationAction(
+  projectId: number,
+  _prevState: BulkOperationState,
+  formData: FormData
+): Promise<BulkOperationState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const operationType = String(formData.get("operationType") ?? "") as BulkOperationType;
+  const value = String(formData.get("value") ?? "").trim();
+
+  if (!operationType || !value) {
+    return { error: "操作種別と値を入力してください。" };
+  }
+
+  try {
+    const results = await runBulkOperation(projectId, { operationType, value }, actor);
+    revalidatePath(`/projects/${projectId}`);
+    return { success: true, results };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function runBulkOperationUploadAction(
+  projectId: number,
+  _prevState: BulkOperationState,
+  formData: FormData
+): Promise<BulkOperationState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const operationType = String(formData.get("operationType") ?? "") as BulkOperationType;
+  const file = formData.get("file");
+
+  if (operationType !== "PLUGIN" && operationType !== "THEME") {
+    return { error: "zipアップロードはプラグイン/テーマのみ対応しています。" };
+  }
+  if (!(file instanceof File) || file.size === 0) {
+    return { error: "アップロードするzipファイルを選択してください。" };
+  }
+
+  try {
+    const results = await runBulkOperationUpload(projectId, { operationType, file }, actor);
+    revalidatePath(`/projects/${projectId}`);
+    return { success: true, results };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function replayBulkOperationsAction(
+  projectId: number,
+  environment: ProjectEnvironment
+): Promise<BulkOperationState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const results = await replayBulkOperations(projectId, { environment }, actor);
+    revalidatePath(`/projects/${projectId}`);
+    return { success: true, results };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
 }
