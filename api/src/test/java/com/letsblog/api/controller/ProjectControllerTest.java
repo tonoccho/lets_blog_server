@@ -13,6 +13,7 @@ import com.letsblog.api.dto.ProjectUpdateRequest;
 import com.letsblog.api.dto.ProjectUserResponse;
 import com.letsblog.api.dto.ReplayBulkOperationRequest;
 import com.letsblog.api.dto.SyncEnvironmentRequest;
+import com.letsblog.api.dto.UpdateMasterEnvironmentRequest;
 import com.letsblog.api.dto.UpdateProjectUserRequest;
 import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.BulkManagementService;
@@ -78,7 +79,7 @@ class ProjectControllerTest {
     }
 
     private ProjectResponse buildResponse() {
-        return new ProjectResponse(1L, "テスト", "test", null, null, null, LocalDateTime.now(), LocalDateTime.now());
+        return new ProjectResponse(1L, "テスト", "test", null, null, null, "test", LocalDateTime.now(), LocalDateTime.now());
     }
 
     @Test
@@ -122,6 +123,18 @@ class ProjectControllerTest {
 
         verify(adminAuthorizationService).requireAdmin();
         verify(projectService).updateProject(1L, "新しい名前");
+    }
+
+    @Test
+    void updateMasterEnvironment_admin権限があれば更新できる() {
+        ProjectController controller = controller();
+        UpdateMasterEnvironmentRequest request = new UpdateMasterEnvironmentRequest("production");
+        when(projectService.updateMasterEnvironment(1L, "production")).thenReturn(buildResponse());
+
+        controller.updateMasterEnvironment(1L, request);
+
+        verify(adminAuthorizationService).requireAdmin();
+        verify(projectService).updateMasterEnvironment(1L, "production");
     }
 
     @Test

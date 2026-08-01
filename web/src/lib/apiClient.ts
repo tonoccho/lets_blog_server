@@ -535,6 +535,7 @@ export interface Project {
   localSite: Site | null;
   testSite: Site | null;
   productionSite: Site | null;
+  masterEnvironment: "test" | "production";
   createdAt: string;
   updatedAt: string;
 }
@@ -569,6 +570,19 @@ export function updateProject(id: number, name: string, actor?: ActorInfo): Prom
 
 export function deleteProject(id: number, actor?: ActorInfo): Promise<void> {
   return apiFetch<void>(`/api/projects/${id}`, { method: 'DELETE', actor });
+}
+
+export function updateMasterEnvironment(
+  id: number,
+  masterEnvironment: "test" | "production",
+  actor?: ActorInfo
+): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}/master-environment`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ masterEnvironment }),
+    actor,
+  });
 }
 
 export function bindProjectEnvironment(

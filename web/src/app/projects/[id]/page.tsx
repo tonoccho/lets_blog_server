@@ -9,6 +9,7 @@ import {
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 import { EnvironmentSlot } from "./EnvironmentSlot";
+import { MasterEnvironmentSelector } from "./MasterEnvironmentSelector";
 import { EnvironmentSyncPanel } from "./EnvironmentSyncPanel";
 import { BulkManagementPanel } from "./BulkManagementPanel";
 import { ProjectNameForm } from "./ProjectNameForm";
@@ -61,6 +62,8 @@ export default async function ProjectDetailPage({
           candidateSites={sites}
         />
       </div>
+
+      <MasterEnvironmentSelector projectId={project.id} project={project} />
 
       <EnvironmentSyncPanel projectId={project.id} project={project} />
 

@@ -5,6 +5,7 @@ import {
   bindProjectEnvironment,
   unbindProjectEnvironment,
   updateProject,
+  updateMasterEnvironment,
   addProjectUser,
   updateProjectUserRole,
   removeProjectUser,
@@ -83,6 +84,34 @@ export async function updateProjectNameAction(
 
   revalidatePath(`/projects/${projectId}`);
   revalidatePath("/projects");
+  return { success: true };
+}
+
+export interface UpdateMasterEnvironmentState {
+  error?: string;
+  success?: boolean;
+}
+
+export async function updateMasterEnvironmentAction(
+  projectId: number,
+  _prevState: UpdateMasterEnvironmentState,
+  formData: FormData
+): Promise<UpdateMasterEnvironmentState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const masterEnvironment = String(formData.get("masterEnvironment") ?? "");
+  if (masterEnvironment !== "test" && masterEnvironment !== "production") {
+    return { error: "テスト環境または本番環境を選択してください。" };
+  }
+
+  try {
+    await updateMasterEnvironment(projectId, masterEnvironment, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}`);
   return { success: true };
 }
 

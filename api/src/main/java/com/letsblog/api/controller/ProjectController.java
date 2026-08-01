@@ -11,6 +11,7 @@ import com.letsblog.api.dto.ProjectUpdateRequest;
 import com.letsblog.api.dto.ProjectUserResponse;
 import com.letsblog.api.dto.ReplayBulkOperationRequest;
 import com.letsblog.api.dto.SyncEnvironmentRequest;
+import com.letsblog.api.dto.UpdateMasterEnvironmentRequest;
 import com.letsblog.api.dto.UpdateProjectUserRequest;
 import com.letsblog.api.domain.BulkOperationLog;
 import com.letsblog.api.domain.BulkOperationType;
@@ -97,6 +98,13 @@ public class ProjectController {
     public ProjectResponse unbindEnvironment(@PathVariable Long id, @PathVariable String environment) {
         adminAuthorizationService.requireAdmin();
         return projectService.unbindEnvironment(id, environment);
+    }
+
+    @PutMapping("/{id}/master-environment")
+    public ProjectResponse updateMasterEnvironment(
+            @PathVariable Long id, @Valid @RequestBody UpdateMasterEnvironmentRequest request) {
+        adminAuthorizationService.requireAdmin();
+        return projectService.updateMasterEnvironment(id, request.masterEnvironment());
     }
 
     @PostMapping("/{id}/environments/sync")
