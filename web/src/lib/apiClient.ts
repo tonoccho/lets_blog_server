@@ -565,7 +565,7 @@ export function unbindProjectEnvironment(
   return apiFetch<Project>(`/api/projects/${id}/environments/${environment}`, { method: 'DELETE', actor });
 }
 
-export type EnvironmentSyncTarget = "themes" | "plugins" | "db";
+export type EnvironmentSyncTarget = "themes" | "plugins" | "media" | "db";
 
 export function syncProjectEnvironment(
   id: number,

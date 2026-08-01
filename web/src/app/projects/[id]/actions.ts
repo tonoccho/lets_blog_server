@@ -152,7 +152,7 @@ export async function syncEnvironmentAction(
     return { error: "同期元と同期先には異なる環境を指定してください。" };
   }
   if (targets.length === 0) {
-    return { error: "同期する対象(テーマ/プラグイン/DB)を1つ以上選択してください。" };
+    return { error: "同期する対象(テーマ/プラグイン/メディア/DB)を1つ以上選択してください。" };
   }
 
   try {

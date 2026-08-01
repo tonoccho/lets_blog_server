@@ -91,6 +91,10 @@ export function EnvironmentSyncPanel({ projectId, project }: { projectId: number
             プラグイン
           </label>
           <label className="flex items-center gap-1.5">
+            <input type="checkbox" name="targets" value="media" />
+            メディア
+          </label>
+          <label className="flex items-center gap-1.5">
             <input type="checkbox" name="targets" value="db" />
             DB
           </label>

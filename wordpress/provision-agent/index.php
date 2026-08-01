@@ -216,7 +216,9 @@ if ($path === '/provision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     ]);
 }
 
-const ALLOWED_SYNC_TARGETS = ['themes', 'plugins', 'db'];
+const ALLOWED_SYNC_TARGETS = ['themes', 'plugins', 'media', 'db'];
+// mediaのみ実際のディレクトリ名(uploads)が公開名と異なるため、対応表を持つ
+const SYNC_TARGET_DIRS = ['themes' => 'themes', 'plugins' => 'plugins', 'media' => 'uploads'];
 
 if ($path === '/sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $fromSlug = (string) ($input['fromSlug'] ?? '');
@@ -232,7 +234,7 @@ if ($path === '/sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         respond(400, ['error' => '同期元と同期先には異なるサイトを指定してください']);
     }
     if (empty($targets) || !empty(array_diff($targets, ALLOWED_SYNC_TARGETS))) {
-        respond(400, ['error' => 'targetsが不正です(themes/plugins/dbのいずれかを指定してください)']);
+        respond(400, ['error' => 'targetsが不正です(themes/plugins/media/dbのいずれかを指定してください)']);
     }
 
     $fromPath = "/var/www/html/sites/$fromSlug";
@@ -245,20 +247,20 @@ if ($path === '/sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     runCommand(['mkdir', '-p', $backupDir]);
     $timestamp = date('Ymd-His');
 
-    foreach (['themes', 'plugins'] as $type) {
-        if (!in_array($type, $targets, true)) {
+    foreach (SYNC_TARGET_DIRS as $target => $dirName) {
+        if (!in_array($target, $targets, true)) {
             continue;
         }
-        $fromContentPath = "$fromPath/wp-content/$type";
-        $toContentPath = "$toPath/wp-content/$type";
+        $fromContentPath = "$fromPath/wp-content/$dirName";
+        $toContentPath = "$toPath/wp-content/$dirName";
         if (!is_dir($fromContentPath)) {
             continue;
         }
-        runCommand(['tar', '-czf', "$backupDir/{$type}-{$timestamp}.tar.gz", '-C', "$toPath/wp-content", $type]);
+        runCommand(['tar', '-czf', "$backupDir/{$target}-{$timestamp}.tar.gz", '-C', "$toPath/wp-content", $dirName]);
         runCommand(['rm', '-rf', $toContentPath]);
         [$code, $out] = runCommand(['cp', '-r', $fromContentPath, $toContentPath]);
         if ($code !== 0) {
-            respond(500, ['error' => "{$type}の同期に失敗しました", 'detail' => $out]);
+            respond(500, ['error' => "{$target}の同期に失敗しました", 'detail' => $out]);
         }
     }
 
