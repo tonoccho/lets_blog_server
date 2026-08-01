@@ -32,11 +32,20 @@ public class WordPressBulkManagementClient {
     }
 
     public BulkApplyResult apply(String slug, String action, String value) {
+        return apply(slug, action, value, null, null, null);
+    }
+
+    /**
+     * categorySlug/categoryParentName/categoryDescriptionはaction=categoryの場合のみ有効(他は無視される)。
+     */
+    public BulkApplyResult apply(
+            String slug, String action, String value,
+            String categorySlug, String categoryParentName, String categoryDescription) {
         try {
             Map<String, String> body = client.post()
                     .uri("/bulk-management")
                     .header("X-Provision-Token", provisionToken)
-                    .body(new BulkApplyCommand(slug, action, value))
+                    .body(new BulkApplyCommand(slug, action, value, categorySlug, categoryParentName, categoryDescription))
                     .retrieve()
                     .body(new ParameterizedTypeReference<Map<String, String>>() {
                     });
@@ -76,7 +85,9 @@ public class WordPressBulkManagementClient {
         return "skipped".equals(status) ? BulkApplyResult.skipped() : BulkApplyResult.success();
     }
 
-    public record BulkApplyCommand(String slug, String action, String value) {
+    public record BulkApplyCommand(
+            String slug, String action, String value,
+            String categorySlug, String categoryParentName, String categoryDescription) {
     }
 
     public record BulkApplyResult(String status, String errorMessage) {

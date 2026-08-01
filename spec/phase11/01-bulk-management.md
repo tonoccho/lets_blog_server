@@ -27,6 +27,7 @@
 | インストール後の有効化 | 自動有効化しない(`--activate`を付けない)。複数環境へ同時投入する性質上、意図せず本番の有効テーマ/プラグイン構成を変えてしまうことを避けるため、有効化は各環境の管理者が個別に判断してwp-admin等から行う |
 | カテゴリ作成の実装方式 | 既存の`CmsAdapter.resolveCategories`(REST/SSH)は流用せず、プラグイン/テーマと同じくprovision-agent経由の`wp-cli`(`wp term create category`)で統一する。対象がmanagedWordpressのみのため実行経路を1つに揃え、実装・テストを単純化する |
 | 名前の一致条件(カテゴリ) | `wp term list category --search=<name>`で大文字小文字を無視した完全一致を既存カテゴリとみなし、あれば作成しない(REST版`resolveCategories`と同じ方針) |
+| カテゴリ作成の追加項目(2026-08-01追加) | 名前に加えてスラッグ・親カテゴリ名・説明を任意で指定できる。親カテゴリは環境ごとに`term_id`が異なるため**名前**で指定し(大文字小文字を無視した完全一致)、provision-agent側で対象環境ごとに`term_id`へ解決する。指定した親カテゴリ名が対象環境に存在しない場合、その環境の作成は`FAILED`として記録する(黙って親なしで作成する、というフォールバックは行わない。環境間でカテゴリ階層が食い違うことを防ぐため)。既存カテゴリと名前が完全一致してSKIPPEDになる場合は、スラッグ/親/説明は無視する(既存の属性を上書きしない) |
 | 冪等性(プラグイン/テーマ・SLUG) | `wp plugin install`/`wp theme install`は既にインストール済みの対象に対して実行するとエラー終了するため、事前に`wp plugin list --field=name --format=json`/`wp theme list --field=name --format=json`で存在確認し、既に存在する場合は実行せず`SKIPPED`として記録する |
 | 冪等性(プラグイン/テーマ・ZIP) | zipの中身(実際のslug/フォルダ名)はインストールするまで確定しないため、SLUG方式のような事前存在チェックは行わない。常に`--force`を付与して`wp plugin install <zip> --force`/`wp theme install <zip> --force`を実行し、既存インストールがあれば無条件に上書きする(Phase10-03のDB同期等、本アプリで一貫している「差分チェックをせずマスターの内容で上書きする」という方針に合わせる)。そのためZIP方式の結果は`SUCCESS`/`FAILED`のみで`SKIPPED`は発生しない |
 | 実行結果の粒度 | 環境ごとに成功(`SUCCESS`)/スキップ(`SKIPPED`)/失敗(`FAILED`)を個別に記録する。1環境の失敗が他環境への実行を止めない(全環境に対して実行を試み、まとめて結果を返す) |
@@ -125,7 +126,7 @@ ProjectController.listBulkOperationLogs(id)
 BulkManagementService.listLogs(projectId) // createdAt降順
 ```
 
-### データベース(新規マイグレーション `V16__add_bulk_operation_logs.sql`)
+### データベース(新規マイグレーション `V16__add_bulk_operation_logs.sql`、`V17__add_bulk_operation_logs_category_options.sql`)
 
 ```sql
 CREATE TABLE bulk_operation_logs (
@@ -133,7 +134,10 @@ CREATE TABLE bulk_operation_logs (
     project_id BIGINT NOT NULL,
     operation_type VARCHAR(20) NOT NULL, -- CATEGORY / PLUGIN / THEME
     source_type VARCHAR(10) NOT NULL DEFAULT 'SLUG', -- SLUG / ZIP
-    value VARCHAR(255) NOT NULL, -- SLUG: wordpress.orgのslug / ZIP: 元のファイル名(original_filenameと同値)
+    value VARCHAR(255) NOT NULL, -- SLUG: wordpress.orgのslug/カテゴリ名 / ZIP: 元のファイル名(original_filenameと同値)
+    category_slug VARCHAR(200), -- CATEGORYのみ(V17で追加)
+    category_parent_name VARCHAR(200), -- CATEGORYのみ、親カテゴリの名前(V17で追加)
+    category_description TEXT, -- CATEGORYのみ(V17で追加)
     original_filename VARCHAR(255), -- ZIPのみ
     storage_path VARCHAR(500), -- ZIPのみ、bulk_upload_files ボリューム内の相対パス
     file_sha256 VARCHAR(64), -- ZIPのみ

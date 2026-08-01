@@ -87,7 +87,7 @@ class BulkManagementServiceTest {
         List<BulkOperationLog> results = service.execute(1L, BulkOperationType.CATEGORY, "お知らせ", 9L);
 
         assertTrue(results.isEmpty());
-        verify(bulkManagementClient, never()).apply(any(), any(), any());
+        verify(bulkManagementClient, never()).apply(any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -104,7 +104,7 @@ class BulkManagementServiceTest {
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(siteRepository.findById(20L)).thenReturn(Optional.of(externalSite));
-        when(bulkManagementClient.apply("local-site", "category", "お知らせ")).thenReturn(BulkApplyResult.success());
+        when(bulkManagementClient.apply("local-site", "category", "お知らせ", null, null, null)).thenReturn(BulkApplyResult.success());
         when(bulkOperationLogRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         List<BulkOperationLog> results = service.execute(1L, BulkOperationType.CATEGORY, "お知らせ", 9L);
@@ -113,7 +113,28 @@ class BulkManagementServiceTest {
         assertEquals("local", results.get(0).getEnvironment());
         assertEquals(BulkOperationStatus.SUCCESS, results.get(0).getStatus());
         assertEquals(BulkOperationSourceType.SLUG, results.get(0).getSourceType());
-        verify(bulkManagementClient, never()).apply(eq("external-site"), any(), any());
+        verify(bulkManagementClient, never()).apply(eq("external-site"), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void execute_カテゴリのスラッグ_親カテゴリ_説明を指定して渡せる() {
+        BulkManagementService service = service();
+        Project project = buildProject(10L, null, null);
+        Site localSite = buildManagedSite(10L, "local-site");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(bulkManagementClient.apply("local-site", "category", "サブお知らせ", "sub-oshirase", "お知らせ", "説明文"))
+                .thenReturn(BulkApplyResult.success());
+        when(bulkOperationLogRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        List<BulkOperationLog> results = service.execute(
+                1L, BulkOperationType.CATEGORY, "サブお知らせ", "sub-oshirase", "お知らせ", "説明文", 9L);
+
+        assertEquals(1, results.size());
+        assertEquals("sub-oshirase", results.get(0).getCategorySlug());
+        assertEquals("お知らせ", results.get(0).getCategoryParentName());
+        assertEquals("説明文", results.get(0).getCategoryDescription());
+        verify(bulkManagementClient).apply("local-site", "category", "サブお知らせ", "sub-oshirase", "お知らせ", "説明文");
     }
 
     @Test
@@ -126,9 +147,9 @@ class BulkManagementServiceTest {
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
-        when(bulkManagementClient.apply("local-site", "plugin", "akismet"))
+        when(bulkManagementClient.apply("local-site", "plugin", "akismet", null, null, null))
                 .thenReturn(BulkApplyResult.failed("接続に失敗しました"));
-        when(bulkManagementClient.apply("test-site", "plugin", "akismet")).thenReturn(BulkApplyResult.success());
+        when(bulkManagementClient.apply("test-site", "plugin", "akismet", null, null, null)).thenReturn(BulkApplyResult.success());
         when(bulkOperationLogRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         List<BulkOperationLog> results = service.execute(1L, BulkOperationType.PLUGIN, "akismet", 9L);
@@ -146,7 +167,7 @@ class BulkManagementServiceTest {
         Site localSite = buildManagedSite(10L, "local-site");
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.apply("local-site", "theme", "twentytwentyfour"))
+        when(bulkManagementClient.apply("local-site", "theme", "twentytwentyfour", null, null, null))
                 .thenReturn(BulkApplyResult.skipped());
         when(bulkOperationLogRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -202,6 +223,30 @@ class BulkManagementServiceTest {
     }
 
     @Test
+    void replay_カテゴリのスラッグ_親カテゴリ_説明も再適用時に引き継がれる() {
+        BulkManagementService service = service();
+        Project project = buildProject(10L, null, null);
+        Site localSite = buildManagedSite(10L, "local-site");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+
+        BulkOperationLog log1 = buildHistoryLog(BulkOperationType.CATEGORY, BulkOperationSourceType.SLUG, "サブお知らせ");
+        log1.setCategorySlug("sub-oshirase");
+        log1.setCategoryParentName("お知らせ");
+        log1.setCategoryDescription("説明文");
+        when(bulkOperationLogRepository.findByProjectIdAndStatusOrderByCreatedAtAsc(1L, BulkOperationStatus.SUCCESS))
+                .thenReturn(List.of(log1));
+        when(bulkManagementClient.apply("local-site", "category", "サブお知らせ", "sub-oshirase", "お知らせ", "説明文"))
+                .thenReturn(BulkApplyResult.success());
+        when(bulkOperationLogRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        List<BulkOperationLog> results = service.replay(1L, "local", 9L);
+
+        assertEquals("sub-oshirase", results.get(0).getCategorySlug());
+        verify(bulkManagementClient).apply("local-site", "category", "サブお知らせ", "sub-oshirase", "お知らせ", "説明文");
+    }
+
+    @Test
     void replay_成功ログのみを古い順に対象環境へ再適用する() {
         BulkManagementService service = service();
         Project project = buildProject(10L, 20L, null);
@@ -212,7 +257,7 @@ class BulkManagementServiceTest {
         BulkOperationLog log1 = buildHistoryLog(BulkOperationType.CATEGORY, BulkOperationSourceType.SLUG, "お知らせ");
         when(bulkOperationLogRepository.findByProjectIdAndStatusOrderByCreatedAtAsc(1L, BulkOperationStatus.SUCCESS))
                 .thenReturn(List.of(log1));
-        when(bulkManagementClient.apply("test-site", "category", "お知らせ")).thenReturn(BulkApplyResult.success());
+        when(bulkManagementClient.apply("test-site", "category", "お知らせ", null, null, null)).thenReturn(BulkApplyResult.success());
         when(bulkOperationLogRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         List<BulkOperationLog> results = service.replay(1L, "test", 9L);
@@ -220,7 +265,7 @@ class BulkManagementServiceTest {
         assertEquals(1, results.size());
         assertEquals("test", results.get(0).getEnvironment());
         assertTrue(results.get(0).isReplay());
-        verify(bulkManagementClient).apply("test-site", "category", "お知らせ");
+        verify(bulkManagementClient).apply("test-site", "category", "お知らせ", null, null, null);
     }
 
     @Test
@@ -263,7 +308,7 @@ class BulkManagementServiceTest {
         when(bulkOperationLogRepository.findByProjectIdAndStatusOrderByCreatedAtAsc(1L, BulkOperationStatus.SUCCESS))
                 .thenReturn(List.of(log1, log2));
         when(bulkUploadStorageService.load("1/missing.zip")).thenThrow(new IOException("not found"));
-        when(bulkManagementClient.apply("local-site", "category", "お知らせ")).thenReturn(BulkApplyResult.success());
+        when(bulkManagementClient.apply("local-site", "category", "お知らせ", null, null, null)).thenReturn(BulkApplyResult.success());
         when(bulkOperationLogRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         List<BulkOperationLog> results = service.replay(1L, "local", 9L);

@@ -6,6 +6,10 @@ import jakarta.validation.constraints.NotNull;
 
 public record BulkOperationRequest(
         @NotNull BulkOperationType operationType,
-        @NotBlank String value
+        @NotBlank String value,
+        // 以下3項目はoperationType=CATEGORYの場合のみ有効(PLUGIN/THEMEでは無視される)
+        String categorySlug,
+        String categoryParentName,
+        String categoryDescription
 ) {
 }

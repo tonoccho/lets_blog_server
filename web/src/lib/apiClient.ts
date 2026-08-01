@@ -590,6 +590,9 @@ export interface BulkOperationLog {
   operationType: BulkOperationType;
   sourceType: BulkOperationSourceType;
   value: string;
+  categorySlug: string | null;
+  categoryParentName: string | null;
+  categoryDescription: string | null;
   originalFilename: string | null;
   environment: ProjectEnvironment;
   status: BulkOperationStatus;
@@ -600,7 +603,13 @@ export interface BulkOperationLog {
 
 export function runBulkOperation(
   projectId: number,
-  input: { operationType: BulkOperationType; value: string },
+  input: {
+    operationType: BulkOperationType;
+    value: string;
+    categorySlug?: string;
+    categoryParentName?: string;
+    categoryDescription?: string;
+  },
   actor?: ActorInfo
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management`, {

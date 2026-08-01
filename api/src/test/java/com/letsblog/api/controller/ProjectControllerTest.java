@@ -181,8 +181,8 @@ class ProjectControllerTest {
     @Test
     void runBulkOperation_admin権限があれば実行できる() {
         ProjectController controller = controller();
-        BulkOperationRequest request = new BulkOperationRequest(BulkOperationType.CATEGORY, "お知らせ");
-        when(bulkManagementService.execute(1L, BulkOperationType.CATEGORY, "お知らせ", 0L))
+        BulkOperationRequest request = new BulkOperationRequest(BulkOperationType.CATEGORY, "お知らせ", null, null, null);
+        when(bulkManagementService.execute(1L, BulkOperationType.CATEGORY, "お知らせ", null, null, null, 0L))
                 .thenReturn(List.of(buildLog()));
 
         List<?> response = controller.runBulkOperation(1L, request);
@@ -194,7 +194,7 @@ class ProjectControllerTest {
     @Test
     void runBulkOperation_admin権限がなければForbidden() {
         ProjectController controller = controller();
-        BulkOperationRequest request = new BulkOperationRequest(BulkOperationType.CATEGORY, "お知らせ");
+        BulkOperationRequest request = new BulkOperationRequest(BulkOperationType.CATEGORY, "お知らせ", null, null, null);
         doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
 
         assertThrows(ForbiddenException.class, () -> controller.runBulkOperation(1L, request));

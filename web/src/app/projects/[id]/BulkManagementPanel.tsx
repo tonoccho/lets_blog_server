@@ -167,11 +167,12 @@ export function BulkManagementPanel({
         )}
 
         {showSlugForm ? (
-          <form
-            action={slugFormAction}
-            onSubmit={handleSlugSubmit}
-            className="flex flex-wrap items-end gap-2 text-sm"
-          >
+          <>
+            <form
+              action={slugFormAction}
+              onSubmit={handleSlugSubmit}
+              className="flex flex-wrap items-end gap-2 text-sm"
+            >
             <input type="hidden" name="operationType" value={operationType} />
             <label className="flex flex-col gap-1">
               <span className="text-neutral-600">
@@ -184,6 +185,34 @@ export function BulkManagementPanel({
                 className="rounded border border-neutral-300 px-3 py-2 text-sm"
               />
             </label>
+            {operationType === "CATEGORY" && (
+              <>
+                <label className="flex flex-col gap-1">
+                  <span className="text-neutral-600">スラッグ(任意)</span>
+                  <input
+                    name="categorySlug"
+                    placeholder="oshirase"
+                    className="rounded border border-neutral-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-neutral-600">親カテゴリ名(任意)</span>
+                  <input
+                    name="categoryParentName"
+                    placeholder="既存カテゴリの名前"
+                    className="rounded border border-neutral-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-neutral-600">説明(任意)</span>
+                  <input
+                    name="categoryDescription"
+                    placeholder="カテゴリの説明"
+                    className="rounded border border-neutral-300 px-3 py-2 text-sm"
+                  />
+                </label>
+              </>
+            )}
             <button
               type="submit"
               disabled={slugPending}
@@ -192,6 +221,13 @@ export function BulkManagementPanel({
               {slugPending ? "実行中…" : "実行する"}
             </button>
           </form>
+            {operationType === "CATEGORY" && (
+              <p className="mt-1 text-xs text-neutral-500">
+                親カテゴリ名は各環境に既存のカテゴリ名(完全一致)で指定してください。指定した名前が
+                対象環境に存在しない場合、その環境の作成は失敗として記録されます。
+              </p>
+            )}
+          </>
         ) : (
           <form
             action={uploadFormAction}

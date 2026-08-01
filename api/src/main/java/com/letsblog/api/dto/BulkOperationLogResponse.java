@@ -12,6 +12,9 @@ public record BulkOperationLogResponse(
         BulkOperationType operationType,
         BulkOperationSourceType sourceType,
         String value,
+        String categorySlug,
+        String categoryParentName,
+        String categoryDescription,
         String originalFilename,
         String environment,
         BulkOperationStatus status,
@@ -22,6 +25,7 @@ public record BulkOperationLogResponse(
     public static BulkOperationLogResponse from(BulkOperationLog log) {
         return new BulkOperationLogResponse(
                 log.getId(), log.getOperationType(), log.getSourceType(), log.getValue(),
+                log.getCategorySlug(), log.getCategoryParentName(), log.getCategoryDescription(),
                 log.getOriginalFilename(), log.getEnvironment(), log.getStatus(), log.getErrorMessage(),
                 log.isReplay(), log.getCreatedAt());
     }

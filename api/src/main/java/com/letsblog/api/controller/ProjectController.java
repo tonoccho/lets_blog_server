@@ -111,8 +111,9 @@ public class ProjectController {
             @PathVariable Long id, @Valid @RequestBody BulkOperationRequest request) {
         adminAuthorizationService.requireAdmin();
         Long actorId = currentActorService.getCurrentActorId();
-        List<BulkOperationLog> logs =
-                bulkManagementService.execute(id, request.operationType(), request.value(), actorId);
+        List<BulkOperationLog> logs = bulkManagementService.execute(
+                id, request.operationType(), request.value(),
+                request.categorySlug(), request.categoryParentName(), request.categoryDescription(), actorId);
         return logs.stream().map(BulkOperationLogResponse::from).toList();
     }
 

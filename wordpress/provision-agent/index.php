@@ -312,13 +312,41 @@ if ($path === '/bulk-management' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'category') {
+        $categorySlug = (string) ($input['categorySlug'] ?? '');
+        $categoryParentName = (string) ($input['categoryParentName'] ?? '');
+        $categoryDescription = (string) ($input['categoryDescription'] ?? '');
+
         [$code, $out] = runWp(['term', 'list', 'category', "--search=$value", '--field=name', '--format=json', "--path=$sitePath", '--allow-root']);
         $existing = $code === 0 ? (json_decode($out, true) ?: []) : [];
         $matched = array_filter($existing, fn($name) => strcasecmp($name, $value) === 0);
         if (!empty($matched)) {
             respond(200, ['status' => 'skipped']);
         }
-        [$code, $out] = runWp(['term', 'create', 'category', $value, '--porcelain', "--path=$sitePath", '--allow-root']);
+
+        $createArgs = ['term', 'create', 'category', $value, '--porcelain', "--path=$sitePath", '--allow-root'];
+        if ($categorySlug !== '') {
+            $createArgs[] = "--slug=$categorySlug";
+        }
+        if ($categoryDescription !== '') {
+            $createArgs[] = "--description=$categoryDescription";
+        }
+        if ($categoryParentName !== '') {
+            [$pcode, $pout] = runWp(['term', 'list', 'category', "--search=$categoryParentName", '--field=name,term_id', '--format=json', "--path=$sitePath", '--allow-root']);
+            $parentCandidates = $pcode === 0 ? (json_decode($pout, true) ?: []) : [];
+            $parentTermId = null;
+            foreach ($parentCandidates as $term) {
+                if (strcasecmp($term['name'], $categoryParentName) === 0) {
+                    $parentTermId = $term['term_id'];
+                    break;
+                }
+            }
+            if ($parentTermId === null) {
+                respond(500, ['error' => "親カテゴリ '$categoryParentName' が見つかりません"]);
+            }
+            $createArgs[] = "--parent=$parentTermId";
+        }
+
+        [$code, $out] = runWp($createArgs);
         if ($code !== 0) {
             respond(500, ['error' => 'カテゴリの作成に失敗しました', 'detail' => $out]);
         }

@@ -186,13 +186,26 @@ export async function runBulkOperationAction(
 
   const operationType = String(formData.get("operationType") ?? "") as BulkOperationType;
   const value = String(formData.get("value") ?? "").trim();
+  const categorySlug = String(formData.get("categorySlug") ?? "").trim();
+  const categoryParentName = String(formData.get("categoryParentName") ?? "").trim();
+  const categoryDescription = String(formData.get("categoryDescription") ?? "").trim();
 
   if (!operationType || !value) {
     return { error: "操作種別と値を入力してください。" };
   }
 
   try {
-    const results = await runBulkOperation(projectId, { operationType, value }, actor);
+    const results = await runBulkOperation(
+      projectId,
+      {
+        operationType,
+        value,
+        categorySlug: categorySlug || undefined,
+        categoryParentName: categoryParentName || undefined,
+        categoryDescription: categoryDescription || undefined,
+      },
+      actor
+    );
     revalidatePath(`/projects/${projectId}`);
     return { success: true, results };
   } catch (err) {

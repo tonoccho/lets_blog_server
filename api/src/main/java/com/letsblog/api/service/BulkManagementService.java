@@ -54,14 +54,26 @@ public class BulkManagementService {
 
     @Transactional
     public List<BulkOperationLog> execute(Long projectId, BulkOperationType type, String value, Long actorId) {
+        return execute(projectId, type, value, null, null, null, actorId);
+    }
+
+    /**
+     * categorySlug/categoryParentName/categoryDescriptionはtype=CATEGORYの場合のみ有効(他は無視される)。
+     */
+    @Transactional
+    public List<BulkOperationLog> execute(
+            Long projectId, BulkOperationType type, String value,
+            String categorySlug, String categoryParentName, String categoryDescription, Long actorId) {
         Project project = getProject(projectId);
         List<Map.Entry<String, Site>> environments = resolveManagedEnvironments(project);
 
         List<BulkOperationLog> results = new ArrayList<>();
         for (Map.Entry<String, Site> entry : environments) {
-            WordPressBulkManagementClient.BulkApplyResult result =
-                    bulkManagementClient.apply(entry.getValue().getWpSlug(), type.wpCliAction(), value);
-            results.add(saveLog(projectId, type, BulkOperationSourceType.SLUG, value, null, null, null,
+            WordPressBulkManagementClient.BulkApplyResult result = bulkManagementClient.apply(
+                    entry.getValue().getWpSlug(), type.wpCliAction(), value,
+                    categorySlug, categoryParentName, categoryDescription);
+            results.add(saveLog(projectId, type, BulkOperationSourceType.SLUG, value,
+                    categorySlug, categoryParentName, categoryDescription, null, null, null,
                     entry.getKey(), result, actorId, false));
         }
         return results;
@@ -86,6 +98,7 @@ public class BulkManagementService {
             WordPressBulkManagementClient.BulkApplyResult result = bulkManagementClient.applyZip(
                     entry.getValue().getWpSlug(), type.wpCliAction(), bytes, stored.originalFilename());
             results.add(saveLog(projectId, type, BulkOperationSourceType.ZIP, stored.originalFilename(),
+                    null, null, null,
                     stored.originalFilename(), stored.storagePath(), stored.sha256(),
                     entry.getKey(), result, actorId, false));
         }
@@ -103,6 +116,7 @@ public class BulkManagementService {
         for (BulkOperationLog log : history) {
             WordPressBulkManagementClient.BulkApplyResult result = applyFromHistory(log, targetSite);
             results.add(saveLog(projectId, log.getOperationType(), log.getSourceType(), log.getValue(),
+                    log.getCategorySlug(), log.getCategoryParentName(), log.getCategoryDescription(),
                     log.getOriginalFilename(), log.getStoragePath(), log.getFileSha256(),
                     environment, result, actorId, true));
         }
@@ -125,11 +139,14 @@ public class BulkManagementService {
                         "元ファイルが見つかりません。再度アップロードしてください: " + e.getMessage());
             }
         }
-        return bulkManagementClient.apply(targetSite.getWpSlug(), log.getOperationType().wpCliAction(), log.getValue());
+        return bulkManagementClient.apply(
+                targetSite.getWpSlug(), log.getOperationType().wpCliAction(), log.getValue(),
+                log.getCategorySlug(), log.getCategoryParentName(), log.getCategoryDescription());
     }
 
     private BulkOperationLog saveLog(
             Long projectId, BulkOperationType type, BulkOperationSourceType sourceType, String value,
+            String categorySlug, String categoryParentName, String categoryDescription,
             String originalFilename, String storagePath, String fileSha256, String environment,
             WordPressBulkManagementClient.BulkApplyResult result, Long actorId, boolean isReplay) {
         BulkOperationLog log = new BulkOperationLog();
@@ -137,6 +154,9 @@ public class BulkManagementService {
         log.setOperationType(type);
         log.setSourceType(sourceType);
         log.setValue(value);
+        log.setCategorySlug(categorySlug);
+        log.setCategoryParentName(categoryParentName);
+        log.setCategoryDescription(categoryDescription);
         log.setOriginalFilename(originalFilename);
         log.setStoragePath(storagePath);
         log.setFileSha256(fileSha256);
