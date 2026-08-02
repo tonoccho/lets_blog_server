@@ -657,6 +657,7 @@ export interface BulkOperationLog {
   environment: ProjectEnvironment;
   status: BulkOperationStatus;
   errorMessage: string | null;
+  stackTrace: string | null;
   isReplay: boolean;
   createdAt: string;
 }

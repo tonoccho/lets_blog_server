@@ -10,6 +10,7 @@ import com.letsblog.api.cms.PostResult;
 import com.letsblog.api.cms.ssh.SshCommandExecutor.SshCommandResult;
 import com.letsblog.api.cms.ssh.SshCommandExecutor.SshConnectionParams;
 import com.letsblog.api.domain.BulkOperationType;
+import com.letsblog.api.util.StackTraceUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -258,7 +259,7 @@ public class WordPressSshOperations {
                 default -> throw new IllegalArgumentException("SSH経由ではサポートされていない操作です: " + type);
             };
         } catch (SshOperationException e) {
-            return SshApplyResult.failed(e.getMessage());
+            return SshApplyResult.failed(e);
         }
     }
 
@@ -360,24 +361,34 @@ public class WordPressSshOperations {
             results = executor.execAll(connectionParams(credsByEnvironment.get(environments.get(0))), commands);
         } catch (SshOperationException e) {
             Map<String, String> errors = new LinkedHashMap<>();
-            environments.forEach(env -> errors.put(env, e.getMessage()));
-            return new EnvironmentFetchResult<>(Map.of(), errors);
+            Map<String, String> stackTraces = new LinkedHashMap<>();
+            String stackTrace = StackTraceUtil.toString(e);
+            environments.forEach(env -> {
+                errors.put(env, e.getMessage());
+                stackTraces.put(env, stackTrace);
+            });
+            return new EnvironmentFetchResult<>(Map.of(), errors, stackTraces);
         }
 
         Map<String, List<T>> byEnvironment = new LinkedHashMap<>();
         Map<String, String> errorByEnvironment = new LinkedHashMap<>();
+        Map<String, String> stackTraceByEnvironment = new LinkedHashMap<>();
         for (int i = 0; i < environments.size(); i++) {
             String environment = environments.get(i);
             try {
                 byEnvironment.put(environment, parser.apply(results.get(i)));
             } catch (SshOperationException e) {
                 errorByEnvironment.put(environment, e.getMessage());
+                stackTraceByEnvironment.put(environment, StackTraceUtil.toString(e));
             }
         }
-        return new EnvironmentFetchResult<>(byEnvironment, errorByEnvironment);
+        return new EnvironmentFetchResult<>(byEnvironment, errorByEnvironment, stackTraceByEnvironment);
     }
 
-    public record EnvironmentFetchResult<T>(Map<String, List<T>> byEnvironment, Map<String, String> errorByEnvironment) {
+    public record EnvironmentFetchResult<T>(
+            Map<String, List<T>> byEnvironment,
+            Map<String, String> errorByEnvironment,
+            Map<String, String> stackTraceByEnvironment) {
     }
 
     /**
@@ -399,7 +410,7 @@ public class WordPressSshOperations {
                 default -> throw new IllegalArgumentException("SSH経由ではサポートされていない操作です: " + type);
             };
         } catch (SshOperationException e) {
-            return SshApplyResult.failed(e.getMessage());
+            return SshApplyResult.failed(e);
         }
     }
 
@@ -485,17 +496,17 @@ public class WordPressSshOperations {
     public record PluginThemeInfo(String name, String status) {
     }
 
-    public record SshApplyResult(String status, String errorMessage) {
+    public record SshApplyResult(String status, String errorMessage, String stackTrace) {
         public static SshApplyResult success() {
-            return new SshApplyResult("SUCCESS", null);
+            return new SshApplyResult("SUCCESS", null, null);
         }
 
         public static SshApplyResult skipped() {
-            return new SshApplyResult("SKIPPED", null);
+            return new SshApplyResult("SKIPPED", null, null);
         }
 
-        public static SshApplyResult failed(String message) {
-            return new SshApplyResult("FAILED", message);
+        public static SshApplyResult failed(Throwable cause) {
+            return new SshApplyResult("FAILED", cause.getMessage(), StackTraceUtil.toString(cause));
         }
     }
 

@@ -165,7 +165,7 @@ public class WordPressRestBulkManagementOperations {
                 default -> throw new IllegalArgumentException("REST経由ではサポートされていない操作です: " + type);
             };
         } catch (CmsApiException e) {
-            return SshApplyResult.failed(e.getMessage());
+            return SshApplyResult.failed(e);
         }
     }
 
@@ -275,7 +275,7 @@ public class WordPressRestBulkManagementOperations {
                 default -> throw new IllegalArgumentException("REST経由ではサポートされていない操作です: " + type);
             };
         } catch (CmsApiException e) {
-            return SshApplyResult.failed(e.getMessage());
+            return SshApplyResult.failed(e);
         }
     }
 

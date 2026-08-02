@@ -238,6 +238,7 @@ export function BulkManagementPanel({
                   <th className="px-2 py-1.5">環境</th>
                   <th className="px-2 py-1.5">結果</th>
                   <th className="px-2 py-1.5">再適用</th>
+                  <th className="px-2 py-1.5">詳細</th>
                 </tr>
               </thead>
               <tbody>
@@ -256,6 +257,7 @@ export function BulkManagementPanel({
                       )}
                     </td>
                     <td className="px-2 py-1.5 text-neutral-500">{log.isReplay ? "はい" : "-"}</td>
+                    <td className="px-2 py-1.5">{log.status === "FAILED" && <CopyLogButton log={log} />}</td>
                   </tr>
                 ))}
               </tbody>
@@ -339,11 +341,49 @@ function ResultList({ results }: { results: BulkOperationLog[] }) {
   return (
     <ul className="mt-2 space-y-0.5 text-sm">
       {results.map((r) => (
-        <li key={r.id} className={STATUS_COLOR[r.status]}>
-          {ENVIRONMENT_LABEL[r.environment]}: {STATUS_LABEL[r.status]}
-          {r.status === "FAILED" && r.errorMessage ? `(${r.errorMessage})` : ""}
+        <li key={r.id} className={`flex items-center gap-2 ${STATUS_COLOR[r.status]}`}>
+          <span>
+            {ENVIRONMENT_LABEL[r.environment]}: {STATUS_LABEL[r.status]}
+            {r.status === "FAILED" && r.errorMessage ? `(${r.errorMessage})` : ""}
+          </span>
+          {r.status === "FAILED" && <CopyLogButton log={r} />}
         </li>
       ))}
     </ul>
+  );
+}
+
+function describeLogText(log: BulkOperationLog): string {
+  return [
+    `日時: ${new Date(log.createdAt).toLocaleString("ja-JP")}`,
+    `操作: ${OPERATION_LABEL[log.operationType]}`,
+    `値: ${describeLogValue(log)}`,
+    `環境: ${ENVIRONMENT_LABEL[log.environment]}`,
+    `ステータス: ${STATUS_LABEL[log.status]}`,
+    `エラー: ${log.errorMessage ?? "(なし)"}`,
+    "",
+    "スタックトレース:",
+    log.stackTrace ?? "(なし)",
+  ].join("\n");
+}
+
+function CopyLogButton({ log }: { log: BulkOperationLog }) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    await navigator.clipboard.writeText(describeLogText(log));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className="rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700"
+      title="日時・操作・エラー内容・スタックトレースをコピーします"
+    >
+      {copied ? "コピーしました" : "コピー"}
+    </button>
   );
 }

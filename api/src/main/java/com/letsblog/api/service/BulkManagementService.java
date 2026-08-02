@@ -13,6 +13,7 @@ import com.letsblog.api.provisioning.WordPressBulkManagementClient.BulkApplyComm
 import com.letsblog.api.repository.BulkOperationLogRepository;
 import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.SiteRepository;
+import com.letsblog.api.util.StackTraceUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -108,7 +109,7 @@ public class BulkManagementService {
             results.add(saveLog(projectId, type, BulkOperationSourceType.ZIP, stored.originalFilename(),
                     null, null, null, null,
                     stored.originalFilename(), stored.storagePath(), stored.sha256(),
-                    entry.getKey(), result.status(), result.errorMessage(), actorId, false));
+                    entry.getKey(), result.status(), result.errorMessage(), result.stackTrace(), actorId, false));
         }
         return results;
     }
@@ -149,6 +150,7 @@ public class BulkManagementService {
             Long actorId, boolean isReplay) {
         String status;
         String errorMessage;
+        String stackTrace;
         String transportLabel;
         if (site.isManagedWordpress()) {
             WordPressBulkManagementClient.BulkApplyResult result = bulkManagementClient.apply(new BulkApplyCommand(
@@ -156,6 +158,7 @@ public class BulkManagementService {
                     categorySlug, categoryParentSlug, categoryDescription, categoryTargetSlug));
             status = result.status();
             errorMessage = result.errorMessage();
+            stackTrace = result.stackTrace();
             transportLabel = "内部エージェント";
         } else {
             // resolveSite()がREST/SSH経由適用可能と判定した(managedでない)サイトはここに到達する。
@@ -195,6 +198,7 @@ public class BulkManagementService {
             }
             status = result.status();
             errorMessage = result.errorMessage();
+            stackTrace = result.stackTrace();
             if (BulkOperationStatus.FAILED.name().equals(status)) {
                 log.warn("{}経由の操作に失敗しました(project={}, environment={}, site={}, type={}): {}",
                         transportLabel, projectId, environment, site.getSiteKey(), type, errorMessage);
@@ -202,7 +206,7 @@ public class BulkManagementService {
         }
         return saveLog(projectId, type, BulkOperationSourceType.SLUG, value,
                 categorySlug, categoryParentSlug, categoryTargetSlug, categoryDescription, null, null, null,
-                environment, status, errorMessage, actorId, isReplay);
+                environment, status, errorMessage, stackTrace, actorId, isReplay);
     }
 
     /**
@@ -214,30 +218,34 @@ public class BulkManagementService {
      * 独立したトランザクションとして必ずコミットする。
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void logFetchFailure(Long projectId, BulkOperationType type, String environment, String errorMessage) {
+    public void logFetchFailure(
+            Long projectId, BulkOperationType type, String environment, String errorMessage, String stackTrace) {
         saveLog(projectId, type, BulkOperationSourceType.SLUG, "-", null, null, null, null, null, null, null,
-                environment, BulkOperationStatus.FAILED.name(), errorMessage, null, false);
+                environment, BulkOperationStatus.FAILED.name(), errorMessage, stackTrace, null, false);
     }
 
     private BulkOperationLog replayZip(
             Long projectId, String environment, Site targetSite, BulkOperationLog log, Long actorId) {
         String status;
         String errorMessage;
+        String stackTrace;
         try {
             byte[] bytes = bulkUploadStorageService.load(log.getStoragePath());
             WordPressBulkManagementClient.BulkApplyResult result = bulkManagementClient.applyZip(
                     targetSite.getWpSlug(), log.getOperationType().wpCliAction(), bytes, log.getOriginalFilename());
             status = result.status();
             errorMessage = result.errorMessage();
+            stackTrace = result.stackTrace();
         } catch (IOException e) {
             status = BulkOperationStatus.FAILED.name();
             errorMessage = "元ファイルが見つかりません。再度アップロードしてください: " + e.getMessage();
+            stackTrace = StackTraceUtil.toString(e);
         }
         return saveLog(projectId, log.getOperationType(), log.getSourceType(), log.getValue(),
                 log.getCategorySlug(), log.getCategoryParentSlug(), log.getCategoryTargetSlug(),
                 log.getCategoryDescription(),
                 log.getOriginalFilename(), log.getStoragePath(), log.getFileSha256(),
-                environment, status, errorMessage, actorId, true);
+                environment, status, errorMessage, stackTrace, actorId, true);
     }
 
     /**
@@ -278,7 +286,7 @@ public class BulkManagementService {
             Long projectId, BulkOperationType type, BulkOperationSourceType sourceType, String value,
             String categorySlug, String categoryParentSlug, String categoryTargetSlug, String categoryDescription,
             String originalFilename, String storagePath, String fileSha256, String environment,
-            String status, String errorMessage, Long actorId, boolean isReplay) {
+            String status, String errorMessage, String stackTrace, Long actorId, boolean isReplay) {
         BulkOperationLog log = new BulkOperationLog();
         log.setProjectId(projectId);
         log.setOperationType(type);
@@ -294,6 +302,7 @@ public class BulkManagementService {
         log.setEnvironment(environment);
         log.setStatus(BulkOperationStatus.valueOf(status));
         log.setErrorMessage(errorMessage);
+        log.setStackTrace(stackTrace);
         log.setReplay(isReplay);
         log.setActorId(actorId);
         return bulkOperationLogRepository.save(log);

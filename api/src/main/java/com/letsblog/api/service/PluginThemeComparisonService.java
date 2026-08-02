@@ -15,6 +15,7 @@ import com.letsblog.api.dto.StatusEnvironmentValue;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient;
 import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.SiteRepository;
+import com.letsblog.api.util.StackTraceUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -265,7 +266,7 @@ public class PluginThemeComparisonService {
             for (String environment : group.keySet()) {
                 String error = fetchResult.errorByEnvironment().get(environment);
                 if (error != null) {
-                    logFetchError(project, environment, isTheme, error);
+                    logFetchError(project, environment, isTheme, error, fetchResult.stackTraceByEnvironment().get(environment));
                     result.put(environment, EnvironmentInfos.error(error));
                 } else {
                     List<PluginThemeInfo> infos = fetchResult.byEnvironment()
@@ -298,7 +299,7 @@ public class PluginThemeComparisonService {
                     .map(info -> new PluginThemeInfo(info.name(), info.status()))
                     .toList());
         } catch (CmsApiException e) {
-            logFetchError(project, environment, isTheme, e.getMessage());
+            logFetchError(project, environment, isTheme, e.getMessage(), StackTraceUtil.toString(e));
             return EnvironmentInfos.error(e.getMessage());
         }
     }
@@ -307,11 +308,13 @@ public class PluginThemeComparisonService {
         return creds.sshHost() + ":" + (creds.sshPort() != null ? creds.sshPort() : 22);
     }
 
-    private void logFetchError(Project project, String environment, boolean isTheme, String message) {
+    private void logFetchError(
+            Project project, String environment, boolean isTheme, String message, String stackTrace) {
         log.warn("{}一覧取得に失敗しました(project={}, environment={}): {}",
                 isTheme ? "テーマ" : "プラグイン", project.getId(), environment, message);
         bulkManagementService.logFetchFailure(project.getId(),
-                isTheme ? BulkOperationType.THEME_FETCH : BulkOperationType.PLUGIN_FETCH, environment, message);
+                isTheme ? BulkOperationType.THEME_FETCH : BulkOperationType.PLUGIN_FETCH, environment, message,
+                stackTrace);
     }
 
     /**

@@ -20,6 +20,7 @@ public record BulkOperationLogResponse(
         String environment,
         BulkOperationStatus status,
         String errorMessage,
+        String stackTrace,
         boolean isReplay,
         LocalDateTime createdAt
 ) {
@@ -29,6 +30,6 @@ public record BulkOperationLogResponse(
                 log.getCategorySlug(), log.getCategoryParentSlug(), log.getCategoryTargetSlug(),
                 log.getCategoryDescription(),
                 log.getOriginalFilename(), log.getEnvironment(), log.getStatus(), log.getErrorMessage(),
-                log.isReplay(), log.getCreatedAt());
+                log.getStackTrace(), log.isReplay(), log.getCreatedAt());
     }
 }

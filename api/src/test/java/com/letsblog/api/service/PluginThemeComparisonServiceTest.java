@@ -254,7 +254,7 @@ class PluginThemeComparisonServiceTest {
                                         "akismet", "active")),
                                 "production", List.of(new com.letsblog.api.cms.ssh.WordPressSshOperations.PluginThemeInfo(
                                         "akismet", "inactive"))),
-                        java.util.Map.of()));
+                        java.util.Map.of(), java.util.Map.of()));
 
         StatusComparisonPage page = service.listPluginComparison(1L, 0, 20);
 
@@ -276,12 +276,14 @@ class PluginThemeComparisonServiceTest {
                 .thenReturn(new SiteService.SiteDataSource(false, null, sshCreds("/var/www/html/test")));
         when(sshOperations.fetchPluginsOrThemesForEnvironments(eq("plugin"), any())).thenReturn(
                 new com.letsblog.api.cms.ssh.WordPressSshOperations.EnvironmentFetchResult<>(
-                        java.util.Map.of(), java.util.Map.of("test", "Connection refused")));
+                        java.util.Map.of(), java.util.Map.of("test", "Connection refused"),
+                        java.util.Map.of("test", "java.io.IOException: Connection refused\n\tat ...")));
 
         StatusComparisonPage page = service.listPluginComparison(1L, 0, 20);
 
         assertEquals(0, page.items().size());
         verify(bulkManagementService).logFetchFailure(
-                eq(1L), eq(BulkOperationType.PLUGIN_FETCH), eq("test"), eq("Connection refused"));
+                eq(1L), eq(BulkOperationType.PLUGIN_FETCH), eq("test"), eq("Connection refused"),
+                eq("java.io.IOException: Connection refused\n\tat ..."));
     }
 }

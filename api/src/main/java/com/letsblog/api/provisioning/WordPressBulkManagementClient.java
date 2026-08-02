@@ -10,6 +10,8 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
+import com.letsblog.api.util.StackTraceUtil;
+
 import java.util.List;
 import java.util.Map;
 
@@ -44,7 +46,7 @@ public class WordPressBulkManagementClient {
                     });
             return resultOf(body);
         } catch (RestClientException e) {
-            return BulkApplyResult.failed(e.getMessage());
+            return BulkApplyResult.failed(e);
         }
     }
 
@@ -69,7 +71,7 @@ public class WordPressBulkManagementClient {
                     });
             return resultOf(body);
         } catch (RestClientException e) {
-            return BulkApplyResult.failed(e.getMessage());
+            return BulkApplyResult.failed(e);
         }
     }
 
@@ -188,17 +190,17 @@ public class WordPressBulkManagementClient {
     public record PluginThemeInfo(String name, String status) {
     }
 
-    public record BulkApplyResult(String status, String errorMessage) {
+    public record BulkApplyResult(String status, String errorMessage, String stackTrace) {
         public static BulkApplyResult success() {
-            return new BulkApplyResult("SUCCESS", null);
+            return new BulkApplyResult("SUCCESS", null, null);
         }
 
         public static BulkApplyResult skipped() {
-            return new BulkApplyResult("SKIPPED", null);
+            return new BulkApplyResult("SKIPPED", null, null);
         }
 
-        public static BulkApplyResult failed(String message) {
-            return new BulkApplyResult("FAILED", message);
+        public static BulkApplyResult failed(Throwable cause) {
+            return new BulkApplyResult("FAILED", cause.getMessage(), StackTraceUtil.toString(cause));
         }
     }
 }

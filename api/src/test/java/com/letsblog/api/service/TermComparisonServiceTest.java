@@ -444,7 +444,7 @@ class TermComparisonServiceTest {
                                         "1", "News", "news", null, "")),
                                 "production", List.of(new com.letsblog.api.cms.ssh.WordPressSshOperations.CategoryInfo(
                                         "1", "News", "news", null, ""))),
-                        java.util.Map.of()));
+                        java.util.Map.of(), java.util.Map.of()));
 
         TermComparisonPage page = service.listCategoryComparison(1L, 0, 20);
 
@@ -468,12 +468,14 @@ class TermComparisonServiceTest {
                 .thenReturn(new SiteService.SiteDataSource(false, null, sshCreds("/var/www/html/test")));
         when(sshOperations.fetchTermsForEnvironments(eq("category"), any())).thenReturn(
                 new com.letsblog.api.cms.ssh.WordPressSshOperations.EnvironmentFetchResult<>(
-                        java.util.Map.of(), java.util.Map.of("test", "Connection refused")));
+                        java.util.Map.of(), java.util.Map.of("test", "Connection refused"),
+                        java.util.Map.of("test", "java.io.IOException: Connection refused\n\tat ...")));
 
         TermComparisonPage page = service.listCategoryComparison(1L, 0, 20);
 
         assertEquals(0, page.items().size());
         verify(bulkManagementService).logFetchFailure(
-                eq(1L), eq(BulkOperationType.CATEGORY_FETCH), eq("test"), eq("Connection refused"));
+                eq(1L), eq(BulkOperationType.CATEGORY_FETCH), eq("test"), eq("Connection refused"),
+                eq("java.io.IOException: Connection refused\n\tat ..."));
     }
 }

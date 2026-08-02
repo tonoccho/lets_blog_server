@@ -68,6 +68,9 @@ public class BulkOperationLog {
     @Column(name = "error_message", columnDefinition = "TEXT")
     private String errorMessage;
 
+    @Column(name = "stack_trace", columnDefinition = "TEXT")
+    private String stackTrace;
+
     @Column(name = "is_replay", nullable = false)
     private boolean replay = false;
 

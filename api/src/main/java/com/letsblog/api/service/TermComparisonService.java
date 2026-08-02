@@ -14,6 +14,7 @@ import com.letsblog.api.dto.TermEnvironmentValue;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient;
 import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.SiteRepository;
+import com.letsblog.api.util.StackTraceUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -396,7 +397,7 @@ public class TermComparisonService {
             for (String environment : group.keySet()) {
                 String error = fetchResult.errorByEnvironment().get(environment);
                 if (error != null) {
-                    logFetchError(project, environment, isCategory, error);
+                    logFetchError(project, environment, isCategory, error, fetchResult.stackTraceByEnvironment().get(environment));
                     result.put(environment, EnvironmentTerms.error(error));
                 } else {
                     List<CategoryInfo> infos = fetchResult.byEnvironment()
@@ -429,7 +430,7 @@ public class TermComparisonService {
                     .map(info -> new CategoryInfo(info.name(), info.slug(), info.parentSlug(), info.description()))
                     .toList());
         } catch (CmsApiException e) {
-            logFetchError(project, environment, isCategory, e.getMessage());
+            logFetchError(project, environment, isCategory, e.getMessage(), StackTraceUtil.toString(e));
             return EnvironmentTerms.error(e.getMessage());
         }
     }
@@ -438,11 +439,13 @@ public class TermComparisonService {
         return creds.sshHost() + ":" + (creds.sshPort() != null ? creds.sshPort() : 22);
     }
 
-    private void logFetchError(Project project, String environment, boolean isCategory, String message) {
+    private void logFetchError(
+            Project project, String environment, boolean isCategory, String message, String stackTrace) {
         log.warn("{}一覧取得に失敗しました(project={}, environment={}): {}",
                 isCategory ? "カテゴリ" : "タグ", project.getId(), environment, message);
         bulkManagementService.logFetchFailure(project.getId(),
-                isCategory ? BulkOperationType.CATEGORY_FETCH : BulkOperationType.TAG_FETCH, environment, message);
+                isCategory ? BulkOperationType.CATEGORY_FETCH : BulkOperationType.TAG_FETCH, environment, message,
+                stackTrace);
     }
 
     /**

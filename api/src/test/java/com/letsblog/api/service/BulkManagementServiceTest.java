@@ -182,7 +182,7 @@ class BulkManagementServiceTest {
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(bulkManagementClient.apply(new BulkApplyCommand(
                 "local-site", "plugin_install", "akismet", null, null, null, null)))
-                .thenReturn(BulkApplyResult.failed("接続に失敗しました"));
+                .thenReturn(BulkApplyResult.failed(new RuntimeException("接続に失敗しました")));
         stubSave();
 
         BulkOperationLog result = service.applyToEnvironment(
@@ -594,7 +594,7 @@ class BulkManagementServiceTest {
                 .thenReturn(new SiteService.SiteDataSource(false, restCreds(), sshCreds()));
         when(sshOperations.applyTerm(eq(sshCreds()), eq(BulkOperationType.CATEGORY_DELETE), eq("oshirase"),
                 any(), any(), any(), eq("oshirase")))
-                .thenReturn(com.letsblog.api.cms.ssh.WordPressSshOperations.SshApplyResult.failed("SSH接続に失敗しました"));
+                .thenReturn(com.letsblog.api.cms.ssh.WordPressSshOperations.SshApplyResult.failed(new RuntimeException("SSH接続に失敗しました")));
         when(restOperations.applyTerm(eq(restCreds()), eq(BulkOperationType.CATEGORY_DELETE), eq("oshirase"),
                 any(), any(), any(), eq("oshirase")))
                 .thenReturn(com.letsblog.api.cms.ssh.WordPressSshOperations.SshApplyResult.success());
@@ -620,7 +620,7 @@ class BulkManagementServiceTest {
         when(siteService.resolveDataSource(externalSite))
                 .thenReturn(new SiteService.SiteDataSource(false, restCreds(), sshCreds()));
         when(sshOperations.applyPluginTheme(sshCreds(), BulkOperationType.THEME_ACTIVATE, "twentytwentyfour"))
-                .thenReturn(com.letsblog.api.cms.ssh.WordPressSshOperations.SshApplyResult.failed("SSH接続に失敗しました"));
+                .thenReturn(com.letsblog.api.cms.ssh.WordPressSshOperations.SshApplyResult.failed(new RuntimeException("SSH接続に失敗しました")));
         stubSave();
 
         BulkOperationLog result = service.applyToEnvironment(
@@ -691,7 +691,7 @@ class BulkManagementServiceTest {
         BulkManagementService service = service();
         stubSave();
 
-        service.logFetchFailure(1L, BulkOperationType.CATEGORY_FETCH, "test", "Connection refused");
+        service.logFetchFailure(1L, BulkOperationType.CATEGORY_FETCH, "test", "Connection refused", "java.io.IOException: Connection refused\n\tat ...");
 
         org.mockito.ArgumentCaptor<BulkOperationLog> captor = org.mockito.ArgumentCaptor.forClass(BulkOperationLog.class);
         verify(bulkOperationLogRepository).save(captor.capture());
@@ -700,6 +700,7 @@ class BulkManagementServiceTest {
         assertEquals(BulkOperationStatus.FAILED, saved.getStatus());
         assertEquals("test", saved.getEnvironment());
         assertEquals("Connection refused", saved.getErrorMessage());
+        assertEquals("java.io.IOException: Connection refused\n\tat ...", saved.getStackTrace());
     }
 
     @Test
