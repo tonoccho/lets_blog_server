@@ -192,7 +192,7 @@ public class ProjectController {
             @PathVariable Long id, @Valid @RequestBody TermNameRequest request) {
         adminAuthorizationService.requireAdmin();
         Long actorId = currentActorService.getCurrentActorId();
-        return termComparisonService.syncCategory(id, request.name(), actorId).stream()
+        return termComparisonService.syncCategory(id, request.slug(), actorId).stream()
                 .map(BulkOperationLogResponse::from).toList();
     }
 
@@ -201,7 +201,7 @@ public class ProjectController {
             @PathVariable Long id, @Valid @RequestBody TermNameRequest request) {
         adminAuthorizationService.requireAdmin();
         Long actorId = currentActorService.getCurrentActorId();
-        return termComparisonService.deleteCategoryEverywhere(id, request.name(), actorId).stream()
+        return termComparisonService.deleteCategoryEverywhere(id, request.slug(), actorId).stream()
                 .map(BulkOperationLogResponse::from).toList();
     }
 
@@ -210,7 +210,7 @@ public class ProjectController {
             @PathVariable Long id, @Valid @RequestBody EditTermRequest request) {
         adminAuthorizationService.requireAdmin();
         Long actorId = currentActorService.getCurrentActorId();
-        return termComparisonService.editCategoryAndSync(id, request.name(), request.value(), request.slug(),
+        return termComparisonService.editCategoryAndSync(id, request.targetSlug(), request.value(), request.slug(),
                 request.parentSlug(), request.description(), actorId).stream()
                 .map(BulkOperationLogResponse::from).toList();
     }
@@ -228,7 +228,7 @@ public class ProjectController {
             @PathVariable Long id, @Valid @RequestBody TermNameRequest request) {
         adminAuthorizationService.requireAdmin();
         Long actorId = currentActorService.getCurrentActorId();
-        return termComparisonService.syncTag(id, request.name(), actorId).stream()
+        return termComparisonService.syncTag(id, request.slug(), actorId).stream()
                 .map(BulkOperationLogResponse::from).toList();
     }
 
@@ -237,7 +237,7 @@ public class ProjectController {
             @PathVariable Long id, @Valid @RequestBody TermNameRequest request) {
         adminAuthorizationService.requireAdmin();
         Long actorId = currentActorService.getCurrentActorId();
-        return termComparisonService.deleteTagEverywhere(id, request.name(), actorId).stream()
+        return termComparisonService.deleteTagEverywhere(id, request.slug(), actorId).stream()
                 .map(BulkOperationLogResponse::from).toList();
     }
 
@@ -246,7 +246,7 @@ public class ProjectController {
             @PathVariable Long id, @Valid @RequestBody EditTermRequest request) {
         adminAuthorizationService.requireAdmin();
         Long actorId = currentActorService.getCurrentActorId();
-        return termComparisonService.editTagAndSync(id, request.name(), request.value(), request.slug(),
+        return termComparisonService.editTagAndSync(id, request.targetSlug(), request.value(), request.slug(),
                 request.parentSlug(), request.description(), actorId).stream()
                 .map(BulkOperationLogResponse::from).toList();
     }

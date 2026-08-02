@@ -35,8 +35,10 @@ export function TermComparisonTable({
   const [pageData, setPageData] = useState(initialPage);
   const [loading, setLoading] = useState(false);
   const [showNewForm, setShowNewForm] = useState(false);
-  const [editingName, setEditingName] = useState<string | null>(null);
+  const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: "error" | "success"; text: string } | null>(null);
+  const [pendingAction, setPendingAction] = useState<{ slug: string; type: "sync" | "delete" } | null>(null);
+  const [syncAllPending, setSyncAllPending] = useState(false);
 
   const master = pageData.masterEnvironment;
   const label = kind === "category" ? "カテゴリ" : "タグ";
@@ -60,19 +62,29 @@ export function TermComparisonTable({
     ) {
       return;
     }
-    const result = await syncTermToMasterAction(projectId, kind, row.name);
-    setMessage(result.error ? { type: "error", text: result.error } : { type: "success", text: "同期しました。" });
-    await goToPage(pageData.page);
+    setPendingAction({ slug: row.slug, type: "sync" });
+    try {
+      const result = await syncTermToMasterAction(projectId, kind, row.slug);
+      setMessage(result.error ? { type: "error", text: result.error } : { type: "success", text: "同期しました。" });
+      await goToPage(pageData.page);
+    } finally {
+      setPendingAction(null);
+    }
   }
 
   async function handleDelete(row: TermComparisonRow) {
     if (!window.confirm(`「${row.name}」を、存在するすべての環境から削除します。よろしいですか?`)) {
       return;
     }
-    const result = await deleteTermEverywhereAction(projectId, kind, row.name);
-    setMessage(result.error ? { type: "error", text: result.error } : { type: "success", text: "削除しました。" });
-    setEditingName(null);
-    await goToPage(pageData.page);
+    setPendingAction({ slug: row.slug, type: "delete" });
+    try {
+      const result = await deleteTermEverywhereAction(projectId, kind, row.slug);
+      setMessage(result.error ? { type: "error", text: result.error } : { type: "success", text: "削除しました。" });
+      setEditingSlug(null);
+      await goToPage(pageData.page);
+    } finally {
+      setPendingAction(null);
+    }
   }
 
   async function handleSyncAll() {
@@ -83,15 +95,20 @@ export function TermComparisonTable({
     ) {
       return;
     }
-    const result = await syncAllTermsToMasterAction(projectId, kind);
-    if (result.error) {
-      setMessage({ type: "error", text: result.error });
-    } else if (!result.results || result.results.length === 0) {
-      setMessage({ type: "success", text: "マスターとの差分はありませんでした。" });
-    } else {
-      setMessage({ type: "success", text: `${result.results.length}件の操作でマスターに揃えました。` });
+    setSyncAllPending(true);
+    try {
+      const result = await syncAllTermsToMasterAction(projectId, kind);
+      if (result.error) {
+        setMessage({ type: "error", text: result.error });
+      } else if (!result.results || result.results.length === 0) {
+        setMessage({ type: "success", text: "マスターとの差分はありませんでした。" });
+      } else {
+        setMessage({ type: "success", text: `${result.results.length}件の操作でマスターに揃えました。` });
+      }
+      await goToPage(pageData.page);
+    } finally {
+      setSyncAllPending(false);
     }
-    await goToPage(pageData.page);
   }
 
   return (
@@ -117,9 +134,10 @@ export function TermComparisonTable({
           <button
             type="button"
             onClick={handleSyncAll}
-            className="rounded bg-neutral-100 px-3 py-1.5 text-sm text-neutral-700"
+            disabled={syncAllPending}
+            className="rounded bg-neutral-100 px-3 py-1.5 text-sm text-neutral-700 disabled:opacity-50"
           >
-            マスターに一括で揃える
+            {syncAllPending ? "処理中…" : "マスターに一括で揃える"}
           </button>
           <button
             type="button"
@@ -155,7 +173,7 @@ export function TermComparisonTable({
             const masterValue = valueOf(row, master);
             const canEditOrSync = masterValue.available && !!masterValue.slug;
             return (
-              <div key={row.name} className="overflow-x-auto rounded border border-neutral-200">
+              <div key={row.slug} className="overflow-x-auto rounded border border-neutral-200">
                 <table className="w-full text-left text-sm">
                   <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-500">
                     <tr>
@@ -176,38 +194,48 @@ export function TermComparisonTable({
                     <tr className="border-t border-neutral-100">
                       <td className="px-2 py-1.5" colSpan={4} />
                       <td className="px-2 py-1.5">
-                        <div className="flex flex-wrap gap-2">
-                          {canEditOrSync && (
-                            <button
-                              type="button"
-                              onClick={() => setEditingName(editingName === row.name ? null : row.name)}
-                              className="rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700"
-                            >
-                              編集
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(row)}
-                            className="rounded bg-red-50 px-2 py-1 text-xs text-red-600"
-                          >
-                            削除
-                          </button>
-                          {canEditOrSync && (
-                            <button
-                              type="button"
-                              onClick={() => handleSync(row)}
-                              className="rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700"
-                            >
-                              同期
-                            </button>
-                          )}
-                        </div>
+                        {(() => {
+                          const isDeleting = pendingAction?.slug === row.slug && pendingAction.type === "delete";
+                          const isSyncing = pendingAction?.slug === row.slug && pendingAction.type === "sync";
+                          const rowBusy = isDeleting || isSyncing;
+                          return (
+                            <div className="flex flex-wrap gap-2">
+                              {canEditOrSync && (
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingSlug(editingSlug === row.slug ? null : row.slug)}
+                                  disabled={rowBusy}
+                                  className="rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 disabled:opacity-50"
+                                >
+                                  編集
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleDelete(row)}
+                                disabled={rowBusy}
+                                className="rounded bg-red-50 px-2 py-1 text-xs text-red-600 disabled:opacity-50"
+                              >
+                                {isDeleting ? "削除中…" : "削除"}
+                              </button>
+                              {canEditOrSync && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSync(row)}
+                                  disabled={rowBusy}
+                                  className="rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 disabled:opacity-50"
+                                >
+                                  {isSyncing ? "同期中…" : "同期"}
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </td>
                     </tr>
                   </tbody>
                 </table>
-                {editingName === row.name && canEditOrSync && (
+                {editingSlug === row.slug && canEditOrSync && (
                   <div className="border-t border-neutral-200 bg-neutral-50 p-3">
                     <EditItemForm
                       projectId={projectId}
@@ -215,7 +243,7 @@ export function TermComparisonTable({
                       masterEnvironment={master}
                       row={row}
                       onDone={async () => {
-                        setEditingName(null);
+                        setEditingSlug(null);
                         await goToPage(pageData.page);
                       }}
                     />
@@ -384,7 +412,7 @@ function EditItemForm({
     setPending(true);
     setError(null);
     const result = await editTermAndSyncAction(projectId, kind, {
-      name: row.name,
+      targetSlug: row.slug,
       value: String(formData.get("value") ?? ""),
       slug: String(formData.get("categorySlug") ?? ""),
       parentSlug: String(formData.get("categoryParentSlug") ?? "") || undefined,

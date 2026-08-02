@@ -43,6 +43,7 @@ export function PluginThemeComparisonTable({
   const [selections, setSelections] = useState<Record<string, Partial<Record<ProjectEnvironment, PluginThemeStatus>>>>(
     {}
   );
+  const [pendingAction, setPendingAction] = useState<{ slug: string; type: "apply" | "delete" } | null>(null);
 
   const master = pageData.masterEnvironment;
   const label = kind === "plugin" ? "プラグイン" : "テーマ";
@@ -86,18 +87,28 @@ export function PluginThemeComparisonTable({
     if (!window.confirm(`「${slug}」について、変更した環境の状態を反映します。よろしいですか?`)) {
       return;
     }
-    const result = await reconcileStateAction(projectId, kind, slug, changes);
-    setMessage(result.error ? { type: "error", text: result.error } : { type: "success", text: "反映しました。" });
-    await goToPage(pageData.page);
+    setPendingAction({ slug, type: "apply" });
+    try {
+      const result = await reconcileStateAction(projectId, kind, slug, changes);
+      setMessage(result.error ? { type: "error", text: result.error } : { type: "success", text: "反映しました。" });
+      await goToPage(pageData.page);
+    } finally {
+      setPendingAction(null);
+    }
   }
 
   async function handleDelete(slug: string) {
     if (!window.confirm(`「${slug}」を、インストールされているすべての環境から削除します。よろしいですか?`)) {
       return;
     }
-    const result = await deleteSlugEverywhereAction(projectId, kind, slug);
-    setMessage(result.error ? { type: "error", text: result.error } : { type: "success", text: "削除しました。" });
-    await goToPage(pageData.page);
+    setPendingAction({ slug, type: "delete" });
+    try {
+      const result = await deleteSlugEverywhereAction(projectId, kind, slug);
+      setMessage(result.error ? { type: "error", text: result.error } : { type: "success", text: "削除しました。" });
+      await goToPage(pageData.page);
+    } finally {
+      setPendingAction(null);
+    }
   }
 
   return (
@@ -203,22 +214,31 @@ export function PluginThemeComparisonTable({
                     );
                   })}
                   <td className="px-2 py-1.5">
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleApply(row.slug, row)}
-                        className="rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700"
-                      >
-                        反映
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(row.slug)}
-                        className="rounded bg-red-50 px-2 py-1 text-xs text-red-600"
-                      >
-                        削除
-                      </button>
-                    </div>
+                    {(() => {
+                      const isApplying = pendingAction?.slug === row.slug && pendingAction.type === "apply";
+                      const isDeleting = pendingAction?.slug === row.slug && pendingAction.type === "delete";
+                      const rowBusy = isApplying || isDeleting;
+                      return (
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleApply(row.slug, row)}
+                            disabled={rowBusy}
+                            className="rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 disabled:opacity-50"
+                          >
+                            {isApplying ? "反映中…" : "反映"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(row.slug)}
+                            disabled={rowBusy}
+                            className="rounded bg-red-50 px-2 py-1 text-xs text-red-600 disabled:opacity-50"
+                          >
+                            {isDeleting ? "削除中…" : "削除"}
+                          </button>
+                        </div>
+                      );
+                    })()}
                   </td>
                 </tr>
               ))}

@@ -291,15 +291,15 @@ export async function applyToEnvironmentAction(
 export async function syncTermToMasterAction(
   projectId: number,
   kind: "category" | "tag",
-  name: string
+  slug: string
 ): Promise<BulkOperationState> {
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
     const results = await (kind === "category"
-      ? syncCategoryToMaster(projectId, name, actor)
-      : syncTagToMaster(projectId, name, actor));
+      ? syncCategoryToMaster(projectId, slug, actor)
+      : syncTagToMaster(projectId, slug, actor));
     revalidatePath(`/projects/${projectId}`);
     return { success: true, results };
   } catch (err) {
@@ -347,15 +347,15 @@ export async function syncAllTermsToMasterAction(
 export async function deleteTermEverywhereAction(
   projectId: number,
   kind: "category" | "tag",
-  name: string
+  slug: string
 ): Promise<BulkOperationState> {
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
     const results = await (kind === "category"
-      ? deleteCategoryEverywhere(projectId, name, actor)
-      : deleteTagEverywhere(projectId, name, actor));
+      ? deleteCategoryEverywhere(projectId, slug, actor)
+      : deleteTagEverywhere(projectId, slug, actor));
     revalidatePath(`/projects/${projectId}`);
     return { success: true, results };
   } catch (err) {

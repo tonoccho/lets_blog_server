@@ -84,7 +84,35 @@ class TermComparisonServiceTest {
     // ---- listCategoryComparison ----
 
     @Test
-    void listCategoryComparison_名前でマージし未紐付け環境はavailable_falseになる() {
+    void listCategoryComparison_スラッグでマージし未紐付け環境はavailable_falseになる() {
+        TermComparisonService service = service();
+        Project project = buildProject(10L, 20L, null, "test");
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site testSite = buildManagedSite(20L, "test-site");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+        when(bulkManagementClient.listCategories("local-site"))
+                .thenReturn(List.of(new CategoryInfo("お知らせ(旧)", "oshirase", null, null)));
+        when(bulkManagementClient.listCategories("test-site"))
+                .thenReturn(List.of(new CategoryInfo("お知らせ", "oshirase", null, "説明")));
+
+        TermComparisonPage page = service.listCategoryComparison(1L, 0, 20);
+
+        assertEquals(1, page.items().size());
+        // 名前は環境間で異なっていても、スラッグが同じなら1行にまとまり、
+        // 表示名はマスター環境(test)の値が採用される
+        assertEquals("お知らせ", page.items().get(0).name());
+        assertEquals("oshirase", page.items().get(0).slug());
+        assertEquals("test", page.masterEnvironment());
+        assertTrue(page.items().get(0).local().available());
+        assertEquals("oshirase", page.items().get(0).local().slug());
+        assertEquals("oshirase", page.items().get(0).test().slug());
+        assertFalse(page.items().get(0).production().available());
+    }
+
+    @Test
+    void listCategoryComparison_スラッグが異なれば名前が同じでも別行になる() {
         TermComparisonService service = service();
         Project project = buildProject(10L, 20L, null, "test");
         Site localSite = buildManagedSite(10L, "local-site");
@@ -99,13 +127,7 @@ class TermComparisonServiceTest {
 
         TermComparisonPage page = service.listCategoryComparison(1L, 0, 20);
 
-        assertEquals(1, page.items().size());
-        assertEquals("お知らせ", page.items().get(0).name());
-        assertEquals("test", page.masterEnvironment());
-        assertTrue(page.items().get(0).local().available());
-        assertEquals("oshirase-old", page.items().get(0).local().slug());
-        assertEquals("oshirase", page.items().get(0).test().slug());
-        assertFalse(page.items().get(0).production().available());
+        assertEquals(2, page.items().size());
     }
 
     @Test
@@ -162,7 +184,7 @@ class TermComparisonServiceTest {
         when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
         when(bulkManagementClient.listCategories(any())).thenReturn(List.of());
 
-        assertThrows(IllegalArgumentException.class, () -> service.syncCategory(1L, "お知らせ", 9L));
+        assertThrows(IllegalArgumentException.class, () -> service.syncCategory(1L, "oshirase", 9L));
     }
 
     @Test
@@ -180,17 +202,18 @@ class TermComparisonServiceTest {
         CategoryInfo master = new CategoryInfo("お知らせ", "oshirase", null, "説明");
         when(bulkManagementClient.listCategories("test-site")).thenReturn(List.of(master));
         when(bulkManagementClient.listCategories("local-site")).thenReturn(List.of());
+        // productionは同じスラッグ(名寄せキー)だが表示名・説明が異なる = 同一項目として編集対象になる
         when(bulkManagementClient.listCategories("production-site"))
-                .thenReturn(List.of(new CategoryInfo("お知らせ", "oshirase-old", null, null)));
+                .thenReturn(List.of(new CategoryInfo("お知らせ(旧)", "oshirase", null, "旧説明")));
         when(bulkManagementService.applyToEnvironment(eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L)))
                 .thenReturn(new BulkOperationLog());
 
-        service.syncCategory(1L, "お知らせ", 9L);
+        service.syncCategory(1L, "oshirase", 9L);
 
         verify(bulkManagementService).applyToEnvironment(
                 1L, "local", BulkOperationType.CATEGORY_CREATE, "お知らせ", "oshirase", null, "説明", null, 9L);
         verify(bulkManagementService).applyToEnvironment(
-                1L, "production", BulkOperationType.CATEGORY_EDIT, "お知らせ", "oshirase", null, "説明", "oshirase-old", 9L);
+                1L, "production", BulkOperationType.CATEGORY_EDIT, "お知らせ", "oshirase", null, "説明", "oshirase", 9L);
         verify(bulkManagementService, never()).applyToEnvironment(
                 eq(1L), eq("test"), any(), any(), any(), any(), any(), any(), eq(9L));
     }
@@ -212,7 +235,7 @@ class TermComparisonServiceTest {
         when(bulkManagementService.applyToEnvironment(eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L)))
                 .thenReturn(new BulkOperationLog());
 
-        List<BulkOperationLog> results = service.deleteCategoryEverywhere(1L, "お知らせ", 9L);
+        List<BulkOperationLog> results = service.deleteCategoryEverywhere(1L, "oshirase", 9L);
 
         assertEquals(1, results.size());
         verify(bulkManagementService).applyToEnvironment(
@@ -230,7 +253,7 @@ class TermComparisonServiceTest {
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(bulkManagementClient.listCategories("local-site")).thenReturn(List.of());
 
-        assertThrows(IllegalArgumentException.class, () -> service.deleteCategoryEverywhere(1L, "お知らせ", 9L));
+        assertThrows(IllegalArgumentException.class, () -> service.deleteCategoryEverywhere(1L, "oshirase", 9L));
     }
 
     // ---- editCategoryAndSync ----
@@ -247,7 +270,7 @@ class TermComparisonServiceTest {
         when(bulkManagementClient.listCategories(any())).thenReturn(List.of());
 
         assertThrows(IllegalArgumentException.class,
-                () -> service.editCategoryAndSync(1L, "お知らせ", "新お知らせ", "new-oshirase", null, null, 9L));
+                () -> service.editCategoryAndSync(1L, "oshirase", "新お知らせ", "new-oshirase", null, null, 9L));
     }
 
     @Test
@@ -264,14 +287,15 @@ class TermComparisonServiceTest {
 
         CategoryInfo master = new CategoryInfo("お知らせ", "oshirase", null, "旧説明");
         when(bulkManagementClient.listCategories("test-site")).thenReturn(List.of(master));
+        // localは同じスラッグ(名寄せキー)だが表示名は異なりうる = 同一項目として編集対象になる
         when(bulkManagementClient.listCategories("local-site"))
-                .thenReturn(List.of(new CategoryInfo("お知らせ", "oshirase-local", null, null)));
+                .thenReturn(List.of(new CategoryInfo("お知らせ(旧)", "oshirase", null, null)));
         when(bulkManagementClient.listCategories("production-site")).thenReturn(List.of());
         when(bulkManagementService.applyToEnvironment(eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L)))
                 .thenReturn(new BulkOperationLog());
 
         List<BulkOperationLog> results = service.editCategoryAndSync(
-                1L, "お知らせ", "新お知らせ", "new-oshirase", "parent-slug", "新説明", 9L);
+                1L, "oshirase", "新お知らせ", "new-oshirase", "parent-slug", "新説明", 9L);
 
         assertEquals(3, results.size());
         verify(bulkManagementService).applyToEnvironment(
@@ -279,7 +303,7 @@ class TermComparisonServiceTest {
                 "oshirase", 9L);
         verify(bulkManagementService).applyToEnvironment(
                 1L, "local", BulkOperationType.CATEGORY_EDIT, "新お知らせ", "new-oshirase", "parent-slug", "新説明",
-                "oshirase-local", 9L);
+                "oshirase", 9L);
         verify(bulkManagementService).applyToEnvironment(
                 1L, "production", BulkOperationType.CATEGORY_CREATE, "新お知らせ", "new-oshirase", "parent-slug",
                 "新説明", null, 9L);
@@ -301,7 +325,7 @@ class TermComparisonServiceTest {
         CategoryInfo masterSame = new CategoryInfo("イベント", "event", null, null);
         when(bulkManagementClient.listCategories("test-site")).thenReturn(List.of(masterDiff, masterSame));
         when(bulkManagementClient.listCategories("local-site")).thenReturn(List.of(
-                new CategoryInfo("お知らせ", "oshirase-old", null, null),
+                new CategoryInfo("お知らせ(旧)", "oshirase", null, null),
                 new CategoryInfo("イベント", "event", null, null)));
         when(bulkManagementService.applyToEnvironment(eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L)))
                 .thenReturn(new BulkOperationLog());
@@ -310,7 +334,7 @@ class TermComparisonServiceTest {
 
         assertEquals(1, results.size());
         verify(bulkManagementService).applyToEnvironment(
-                1L, "local", BulkOperationType.CATEGORY_EDIT, "お知らせ", "oshirase", null, "説明", "oshirase-old", 9L);
+                1L, "local", BulkOperationType.CATEGORY_EDIT, "お知らせ", "oshirase", null, "説明", "oshirase", 9L);
     }
 
     @Test
@@ -350,7 +374,7 @@ class TermComparisonServiceTest {
         when(bulkManagementService.applyToEnvironment(eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L)))
                 .thenReturn(new BulkOperationLog());
 
-        service.syncTag(1L, "新着", 9L);
+        service.syncTag(1L, "shinchaku", 9L);
 
         verify(bulkManagementService).applyToEnvironment(
                 1L, "local", BulkOperationType.TAG_CREATE, "新着", "shinchaku", null, null, null, 9L);

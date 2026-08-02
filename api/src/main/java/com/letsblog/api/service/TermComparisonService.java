@@ -31,7 +31,9 @@ import java.util.Objects;
  * 値を基準に、非マスター環境への同期・全環境からの削除をオーケストレーションする。
  * 実際のwp-cli/REST呼び出し・ログ記録は{@link BulkManagementService#applyToEnvironment}に委譲する
  * (1環境=1操作=1ログという既存の粒度をそのまま使う)。
- * 項目の同一性は名前(大文字小文字を無視した完全一致)で判定する(Phase11-01初版の判定方針を踏襲)。
+ * 項目の同一性はスラッグ(大文字小文字を無視した完全一致)で判定する。名前は環境間で表記が
+ * 揺れうる(空白・全角半角・リネーム等)一方、WordPressの内部識別としてはスラッグが安定しているため
+ * (Phase12フィードバックで、名前基準の名寄せだと同一スラッグでも行が分裂する不具合を修正した)。
  * <p>
  * 環境の値取得は{@link #resolveTermsByEnvironment}に集約する: managed(自動構築)サイトは内部エージェント
  * ({@link WordPressBulkManagementClient})経由、非managedサイトはREST(Application Password)が
@@ -82,37 +84,37 @@ public class TermComparisonService {
     }
 
     @Transactional
-    public List<BulkOperationLog> syncCategory(Long projectId, String name, Long actorId) {
-        return sync(projectId, name, actorId, true);
+    public List<BulkOperationLog> syncCategory(Long projectId, String slug, Long actorId) {
+        return sync(projectId, slug, actorId, true);
     }
 
     @Transactional
-    public List<BulkOperationLog> syncTag(Long projectId, String name, Long actorId) {
-        return sync(projectId, name, actorId, false);
+    public List<BulkOperationLog> syncTag(Long projectId, String slug, Long actorId) {
+        return sync(projectId, slug, actorId, false);
     }
 
     @Transactional
-    public List<BulkOperationLog> deleteCategoryEverywhere(Long projectId, String name, Long actorId) {
-        return deleteEverywhere(projectId, name, actorId, true);
+    public List<BulkOperationLog> deleteCategoryEverywhere(Long projectId, String slug, Long actorId) {
+        return deleteEverywhere(projectId, slug, actorId, true);
     }
 
     @Transactional
-    public List<BulkOperationLog> deleteTagEverywhere(Long projectId, String name, Long actorId) {
-        return deleteEverywhere(projectId, name, actorId, false);
+    public List<BulkOperationLog> deleteTagEverywhere(Long projectId, String slug, Long actorId) {
+        return deleteEverywhere(projectId, slug, actorId, false);
     }
 
     @Transactional
     public List<BulkOperationLog> editCategoryAndSync(
-            Long projectId, String oldName, String value, String slug, String parentSlug, String description,
+            Long projectId, String oldSlug, String value, String slug, String parentSlug, String description,
             Long actorId) {
-        return editAndSync(projectId, oldName, value, slug, parentSlug, description, actorId, true);
+        return editAndSync(projectId, oldSlug, value, slug, parentSlug, description, actorId, true);
     }
 
     @Transactional
     public List<BulkOperationLog> editTagAndSync(
-            Long projectId, String oldName, String value, String slug, String parentSlug, String description,
+            Long projectId, String oldSlug, String value, String slug, String parentSlug, String description,
             Long actorId) {
-        return editAndSync(projectId, oldName, value, slug, parentSlug, description, actorId, false);
+        return editAndSync(projectId, oldSlug, value, slug, parentSlug, description, actorId, false);
     }
 
     @Transactional
@@ -152,7 +154,7 @@ public class TermComparisonService {
                 continue;
             }
             for (CategoryInfo term : terms) {
-                String key = term.name().toLowerCase(Locale.ROOT);
+                String key = term.slug().toLowerCase(Locale.ROOT);
                 termByKeyAndEnvironment.computeIfAbsent(key, k -> new LinkedHashMap<>()).put(environment, term);
                 if (!displayNameByKey.containsKey(key) || environment.equals(masterEnvironment)) {
                     displayNameByKey.put(key, term.name());
@@ -161,15 +163,17 @@ public class TermComparisonService {
         }
 
         return termByKeyAndEnvironment.entrySet().stream()
-                .map(entry -> toRow(displayNameByKey.get(entry.getKey()), entry.getValue(), termsByEnvironment))
+                .map(entry -> toRow(displayNameByKey.get(entry.getKey()), entry.getKey(), entry.getValue(), termsByEnvironment))
                 .sorted(Comparator.comparing(TermComparisonRow::name, Comparator.naturalOrder()))
                 .toList();
     }
 
     private TermComparisonRow toRow(
-            String name, Map<String, CategoryInfo> byEnvironment, Map<String, EnvironmentTerms> termsByEnvironment) {
+            String name, String slug, Map<String, CategoryInfo> byEnvironment,
+            Map<String, EnvironmentTerms> termsByEnvironment) {
         return new TermComparisonRow(
                 name,
+                slug,
                 toValue(byEnvironment.get("local"), termsByEnvironment.get("local")),
                 toValue(byEnvironment.get("test"), termsByEnvironment.get("test")),
                 toValue(byEnvironment.get("production"), termsByEnvironment.get("production")));
@@ -188,15 +192,15 @@ public class TermComparisonService {
         return TermEnvironmentValue.of(term.slug(), term.parentSlug(), term.description());
     }
 
-    private List<BulkOperationLog> sync(Long projectId, String name, Long actorId, boolean isCategory) {
+    private List<BulkOperationLog> sync(Long projectId, String slug, Long actorId, boolean isCategory) {
         Project project = getProject(projectId);
         String masterEnvironment = project.getMasterEnvironment();
         Map<String, EnvironmentTerms> termsByEnvironment = resolveTermsByEnvironment(project, isCategory);
 
-        Map<String, CategoryInfo> byEnvironment = findByNameFrom(termsByEnvironment, name);
+        Map<String, CategoryInfo> byEnvironment = findBySlugFrom(termsByEnvironment, slug);
         CategoryInfo master = byEnvironment.get(masterEnvironment);
         if (master == null) {
-            throw new IllegalArgumentException("マスター環境に存在しない項目は同期できません: " + name);
+            throw new IllegalArgumentException("マスター環境に存在しない項目は同期できません: " + slug);
         }
 
         BulkOperationType createType = isCategory ? BulkOperationType.CATEGORY_CREATE : BulkOperationType.TAG_CREATE;
@@ -229,16 +233,16 @@ public class TermComparisonService {
      * (「編集」と「マスターへの同期」を1回の操作にまとめたもの)。
      */
     private List<BulkOperationLog> editAndSync(
-            Long projectId, String oldName, String value, String slug, String parentSlug, String description,
+            Long projectId, String oldSlug, String value, String slug, String parentSlug, String description,
             Long actorId, boolean isCategory) {
         Project project = getProject(projectId);
         String masterEnvironment = project.getMasterEnvironment();
         Map<String, EnvironmentTerms> termsByEnvironment = resolveTermsByEnvironment(project, isCategory);
 
-        Map<String, CategoryInfo> byEnvironment = findByNameFrom(termsByEnvironment, oldName);
+        Map<String, CategoryInfo> byEnvironment = findBySlugFrom(termsByEnvironment, oldSlug);
         CategoryInfo master = byEnvironment.get(masterEnvironment);
         if (master == null) {
-            throw new IllegalArgumentException("マスター環境に存在しない項目は編集できません: " + oldName);
+            throw new IllegalArgumentException("マスター環境に存在しない項目は編集できません: " + oldSlug);
         }
 
         BulkOperationType createType = isCategory ? BulkOperationType.CATEGORY_CREATE : BulkOperationType.TAG_CREATE;
@@ -283,7 +287,7 @@ public class TermComparisonService {
                 continue;
             }
             if (needsSync(row, masterEnvironment)) {
-                results.addAll(sync(projectId, row.name(), actorId, isCategory));
+                results.addAll(sync(projectId, row.slug(), actorId, isCategory));
             }
         }
         return results;
@@ -308,9 +312,9 @@ public class TermComparisonService {
         return false;
     }
 
-    private List<BulkOperationLog> deleteEverywhere(Long projectId, String name, Long actorId, boolean isCategory) {
+    private List<BulkOperationLog> deleteEverywhere(Long projectId, String slug, Long actorId, boolean isCategory) {
         Project project = getProject(projectId);
-        Map<String, CategoryInfo> byEnvironment = findByNameFrom(resolveTermsByEnvironment(project, isCategory), name);
+        Map<String, CategoryInfo> byEnvironment = findBySlugFrom(resolveTermsByEnvironment(project, isCategory), slug);
         BulkOperationType deleteType = isCategory ? BulkOperationType.CATEGORY_DELETE : BulkOperationType.TAG_DELETE;
 
         List<BulkOperationLog> results = new ArrayList<>();
@@ -323,7 +327,7 @@ public class TermComparisonService {
                     null, null, null, null, existing.slug(), actorId));
         }
         if (results.isEmpty()) {
-            throw new IllegalArgumentException("削除対象が見つかりません: " + name);
+            throw new IllegalArgumentException("削除対象が見つかりません: " + slug);
         }
         return results;
     }
@@ -337,7 +341,7 @@ public class TermComparisonService {
         };
     }
 
-    private Map<String, CategoryInfo> findByNameFrom(Map<String, EnvironmentTerms> termsByEnvironment, String name) {
+    private Map<String, CategoryInfo> findBySlugFrom(Map<String, EnvironmentTerms> termsByEnvironment, String slug) {
         Map<String, CategoryInfo> result = new LinkedHashMap<>();
         for (String environment : ENVIRONMENT_ORDER) {
             List<CategoryInfo> terms = termsByEnvironment.get(environment).terms();
@@ -345,7 +349,7 @@ public class TermComparisonService {
                 continue;
             }
             terms.stream()
-                    .filter(term -> term.name().equalsIgnoreCase(name))
+                    .filter(term -> term.slug().equalsIgnoreCase(slug))
                     .findFirst()
                     .ifPresent(term -> result.put(environment, term));
         }

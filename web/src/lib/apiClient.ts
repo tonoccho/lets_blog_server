@@ -672,6 +672,7 @@ export interface TermEnvironmentValue {
 
 export interface TermComparisonRow {
   name: string;
+  slug: string;
   local: TermEnvironmentValue;
   test: TermEnvironmentValue;
   production: TermEnvironmentValue;
@@ -730,45 +731,45 @@ export function applyToEnvironment(
 
 export function syncCategoryToMaster(
   projectId: number,
-  name: string,
+  slug: string,
   actor?: ActorInfo
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/categories/sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ slug }),
     actor,
   });
 }
 
 export function deleteCategoryEverywhere(
   projectId: number,
-  name: string,
+  slug: string,
   actor?: ActorInfo
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/categories/delete-all`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ slug }),
     actor,
   });
 }
 
 export function syncTagToMaster(
   projectId: number,
-  name: string,
+  slug: string,
   actor?: ActorInfo
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/tags/sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ slug }),
     actor,
   });
 }
 
 export interface EditTermInput {
-  name: string;
+  targetSlug: string;
   value: string;
   slug: string;
   parentSlug?: string;
@@ -823,13 +824,13 @@ export function syncAllTagsToMaster(
 
 export function deleteTagEverywhere(
   projectId: number,
-  name: string,
+  slug: string,
   actor?: ActorInfo
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/tags/delete-all`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ slug }),
     actor,
   });
 }
