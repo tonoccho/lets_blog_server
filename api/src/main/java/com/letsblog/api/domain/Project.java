@@ -33,6 +33,13 @@ public class Project {
     @Column(name = "production_site_id")
     private Long productionSiteId;
 
+    /**
+     * カテゴリ/タグ/プラグイン/テーマの比較テーブル(Phase12)における「正」の環境。
+     * test/productionのいずれかのみを許容する(ローカルはマスターにできない)。
+     */
+    @Column(name = "master_environment", nullable = false, length = 20)
+    private String masterEnvironment = "test";
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

@@ -131,6 +131,34 @@ class ProjectServiceTest {
     }
 
     @Test
+    void updateMasterEnvironment_testまたはproductionを設定できる() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProjectResponse response = service.updateMasterEnvironment(1L, "production");
+
+        assertEquals("production", response.masterEnvironment());
+        assertEquals("production", project.getMasterEnvironment());
+    }
+
+    @Test
+    void updateMasterEnvironment_localは指定できない() {
+        ProjectService service = service();
+
+        assertThrows(IllegalArgumentException.class, () -> service.updateMasterEnvironment(1L, "local"));
+        verify(projectRepository, never()).save(any(Project.class));
+    }
+
+    @Test
+    void updateMasterEnvironment_不正な値は例外() {
+        ProjectService service = service();
+
+        assertThrows(IllegalArgumentException.class, () -> service.updateMasterEnvironment(1L, "invalid"));
+    }
+
+    @Test
     void deleteProject_存在しないプロジェクトは例外() {
         ProjectService service = service();
         when(projectRepository.existsById(99L)).thenReturn(false);

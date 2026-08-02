@@ -5,17 +5,39 @@ import {
   bindProjectEnvironment,
   unbindProjectEnvironment,
   updateProject,
+  updateMasterEnvironment,
   addProjectUser,
   updateProjectUserRole,
   removeProjectUser,
   syncProjectEnvironment,
-  runBulkOperation,
+  applyToEnvironment,
+  syncCategoryToMaster,
+  deleteCategoryEverywhere,
+  syncTagToMaster,
+  deleteTagEverywhere,
+  editCategoryAndSync,
+  editTagAndSync,
+  syncAllCategoriesToMaster,
+  syncAllTagsToMaster,
+  EditTermInput,
+  listCategoryComparison,
+  listTagComparison,
+  listPluginComparison,
+  listThemeComparison,
+  reconcilePluginState,
+  reconcileThemeState,
+  deletePluginEverywhere,
+  deleteThemeEverywhere,
   runBulkOperationUpload,
   replayBulkOperations,
+  clearBulkOperationLogs,
   ProjectEnvironment,
   EnvironmentSyncTarget,
   BulkOperationType,
   BulkOperationLog,
+  TermComparisonPage,
+  StatusComparisonPage,
+  PluginThemeStatus,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 
@@ -83,6 +105,34 @@ export async function updateProjectNameAction(
 
   revalidatePath(`/projects/${projectId}`);
   revalidatePath("/projects");
+  return { success: true };
+}
+
+export interface UpdateMasterEnvironmentState {
+  error?: string;
+  success?: boolean;
+}
+
+export async function updateMasterEnvironmentAction(
+  projectId: number,
+  _prevState: UpdateMasterEnvironmentState,
+  formData: FormData
+): Promise<UpdateMasterEnvironmentState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const masterEnvironment = String(formData.get("masterEnvironment") ?? "");
+  if (masterEnvironment !== "test" && masterEnvironment !== "production") {
+    return { error: "テスト環境または本番環境を選択してください。" };
+  }
+
+  try {
+    await updateMasterEnvironment(projectId, masterEnvironment, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}`);
   return { success: true };
 }
 
@@ -176,7 +226,7 @@ export interface BulkOperationState {
   results?: BulkOperationLog[];
 }
 
-export async function runBulkOperationAction(
+export async function applyToEnvironmentAction(
   projectId: number,
   _prevState: BulkOperationState,
   formData: FormData
@@ -184,6 +234,7 @@ export async function runBulkOperationAction(
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };
 
+  const environment = String(formData.get("environment") ?? "") as ProjectEnvironment;
   const operationType = String(formData.get("operationType") ?? "") as BulkOperationType;
   const value = String(formData.get("value") ?? "").trim();
   const categorySlug = String(formData.get("categorySlug") ?? "").trim();
@@ -191,28 +242,37 @@ export async function runBulkOperationAction(
   const categoryDescription = String(formData.get("categoryDescription") ?? "").trim();
   const categoryTargetSlug = String(formData.get("categoryTargetSlug") ?? "").trim();
 
+  if (!environment) {
+    return { error: "対象環境を選択してください。" };
+  }
   if (!operationType) {
     return { error: "操作種別を選択してください。" };
   }
-  if (operationType === "CATEGORY_DELETE") {
+  if (operationType === "CATEGORY_DELETE" || operationType === "TAG_DELETE") {
     if (!categoryTargetSlug) {
-      return { error: "削除対象のカテゴリを選択してください。" };
+      return { error: "削除対象を選択してください。" };
     }
-  } else if (operationType === "CATEGORY_CREATE" || operationType === "CATEGORY_EDIT") {
+  } else if (
+    operationType === "CATEGORY_CREATE" ||
+    operationType === "CATEGORY_EDIT" ||
+    operationType === "TAG_CREATE" ||
+    operationType === "TAG_EDIT"
+  ) {
     if (!value || !categorySlug) {
-      return { error: "カテゴリ名とスラッグを入力してください。" };
+      return { error: "名前とスラッグを入力してください。" };
     }
-    if (operationType === "CATEGORY_EDIT" && !categoryTargetSlug) {
-      return { error: "編集対象のカテゴリを選択してください。" };
+    if ((operationType === "CATEGORY_EDIT" || operationType === "TAG_EDIT") && !categoryTargetSlug) {
+      return { error: "編集対象を選択してください。" };
     }
   } else if (!value) {
     return { error: "slugを入力してください。" };
   }
 
   try {
-    const results = await runBulkOperation(
+    const result = await applyToEnvironment(
       projectId,
       {
+        environment,
         operationType,
         value: value || undefined,
         categorySlug: categorySlug || undefined,
@@ -222,6 +282,81 @@ export async function runBulkOperationAction(
       },
       actor
     );
+    revalidatePath(`/projects/${projectId}`);
+    return { success: true, results: [result] };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function syncTermToMasterAction(
+  projectId: number,
+  kind: "category" | "tag",
+  slug: string
+): Promise<BulkOperationState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const results = await (kind === "category"
+      ? syncCategoryToMaster(projectId, slug, actor)
+      : syncTagToMaster(projectId, slug, actor));
+    revalidatePath(`/projects/${projectId}`);
+    return { success: true, results };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function editTermAndSyncAction(
+  projectId: number,
+  kind: "category" | "tag",
+  input: EditTermInput
+): Promise<BulkOperationState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const results = await (kind === "category"
+      ? editCategoryAndSync(projectId, input, actor)
+      : editTagAndSync(projectId, input, actor));
+    revalidatePath(`/projects/${projectId}`);
+    return { success: true, results };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function syncAllTermsToMasterAction(
+  projectId: number,
+  kind: "category" | "tag"
+): Promise<BulkOperationState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const results = await (kind === "category"
+      ? syncAllCategoriesToMaster(projectId, actor)
+      : syncAllTagsToMaster(projectId, actor));
+    revalidatePath(`/projects/${projectId}`);
+    return { success: true, results };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function deleteTermEverywhereAction(
+  projectId: number,
+  kind: "category" | "tag",
+  slug: string
+): Promise<BulkOperationState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const results = await (kind === "category"
+      ? deleteCategoryEverywhere(projectId, slug, actor)
+      : deleteTagEverywhere(projectId, slug, actor));
     revalidatePath(`/projects/${projectId}`);
     return { success: true, results };
   } catch (err) {
@@ -256,6 +391,71 @@ export async function runBulkOperationUploadAction(
   }
 }
 
+export async function fetchTermComparisonAction(
+  projectId: number,
+  kind: "category" | "tag",
+  page: number
+): Promise<TermComparisonPage> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  return kind === "category"
+    ? listCategoryComparison(projectId, page, actor)
+    : listTagComparison(projectId, page, actor);
+}
+
+export async function fetchStatusComparisonAction(
+  projectId: number,
+  kind: "plugin" | "theme",
+  page: number
+): Promise<StatusComparisonPage> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  return kind === "plugin"
+    ? listPluginComparison(projectId, page, actor)
+    : listThemeComparison(projectId, page, actor);
+}
+
+export async function reconcileStateAction(
+  projectId: number,
+  kind: "plugin" | "theme",
+  slug: string,
+  changes: { environment: ProjectEnvironment; desiredStatus: PluginThemeStatus }[]
+): Promise<BulkOperationState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const results = await (kind === "plugin"
+      ? reconcilePluginState(projectId, { slug, changes }, actor)
+      : reconcileThemeState(projectId, { slug, changes }, actor));
+    revalidatePath(`/projects/${projectId}`);
+    return { success: true, results };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function deleteSlugEverywhereAction(
+  projectId: number,
+  kind: "plugin" | "theme",
+  slug: string
+): Promise<BulkOperationState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const results = await (kind === "plugin"
+      ? deletePluginEverywhere(projectId, slug, actor)
+      : deleteThemeEverywhere(projectId, slug, actor));
+    revalidatePath(`/projects/${projectId}`);
+    return { success: true, results };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export async function replayBulkOperationsAction(
   projectId: number,
   environment: ProjectEnvironment
@@ -270,4 +470,12 @@ export async function replayBulkOperationsAction(
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+export async function clearBulkOperationLogsAction(projectId: number): Promise<void> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  await clearBulkOperationLogs(projectId, actor);
+  revalidatePath(`/projects/${projectId}`);
 }

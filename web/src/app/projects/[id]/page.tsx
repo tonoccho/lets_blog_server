@@ -5,10 +5,14 @@ import {
   listProjectUsers,
   listUsers,
   listBulkOperationLogs,
-  listBulkManagementCategories,
+  listCategoryComparison,
+  BulkOperationType,
+  BulkOperationLogLevel,
+  ProjectEnvironment,
 } from "@/lib/apiClient";
-import { requireAdminSession } from "@/lib/session";
+import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
 import { EnvironmentSlot } from "./EnvironmentSlot";
+import { MasterEnvironmentSelector } from "./MasterEnvironmentSelector";
 import { EnvironmentSyncPanel } from "./EnvironmentSyncPanel";
 import { BulkManagementPanel } from "./BulkManagementPanel";
 import { ProjectNameForm } from "./ProjectNameForm";
@@ -18,21 +22,42 @@ import { AddProjectUserModal } from "./AddProjectUserModal";
 
 export default async function ProjectDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ logOperationType?: string; logEnvironment?: string; logLevel?: string }>;
 }) {
   const { id } = await params;
+  const logFilterParams = await searchParams;
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };
   const projectId = Number(id);
 
-  const [project, sites, members, allUsers, bulkOperationLogs, bulkManagementCategories] = await Promise.all([
-    getProject(projectId, actor).catch(() => null),
-    listSites().catch(() => []),
-    listProjectUsers(projectId, actor).catch(() => []),
-    listUsers().catch(() => []),
-    listBulkOperationLogs(projectId, actor).catch(() => []),
-    listBulkManagementCategories(projectId, actor).catch(() => []),
+  const logFilter = {
+    operationType: (logFilterParams.logOperationType || undefined) as BulkOperationType | undefined,
+    environment: (logFilterParams.logEnvironment || undefined) as ProjectEnvironment | undefined,
+    level: (logFilterParams.logLevel || undefined) as BulkOperationLogLevel | undefined,
+  };
+
+  const emptyComparisonPage = { items: [], page: 0, size: 20, totalCount: 0, masterEnvironment: "test" as const };
+
+  function logAndFallback<T>(label: string, fallback: T) {
+    return (err: unknown) => {
+      console.error(`[projects/${projectId}] ${label}の取得に失敗しました:`, err);
+      return fallback;
+    };
+  }
+
+  // タグ・プラグイン・テーマは一括管理パネルでタブを開いたときにクライアント側から遅延取得する
+  // (初期表示で4種類すべて並行取得すると、同一ホストのSSH接続が集中しやすいため)。
+  const [project, sites, members, allUsers, bulkOperationLogs, categoryPage, timezone] = await Promise.all([
+    getProject(projectId, actor).catch(logAndFallback("プロジェクト情報", null)),
+    listSites().catch(logAndFallback("サイト一覧", [])),
+    listProjectUsers(projectId, actor).catch(logAndFallback("プロジェクトメンバー", [])),
+    listUsers().catch(logAndFallback("ユーザー一覧", [])),
+    listBulkOperationLogs(projectId, actor, logFilter).catch(logAndFallback("作業ログ", [])),
+    listCategoryComparison(projectId, 0, actor).catch(logAndFallback("カテゴリ比較", emptyComparisonPage)),
+    getViewerTimeZone(),
   ]);
 
   if (!project) {
@@ -62,13 +87,17 @@ export default async function ProjectDetailPage({
         />
       </div>
 
+      <MasterEnvironmentSelector projectId={project.id} project={project} />
+
       <EnvironmentSyncPanel projectId={project.id} project={project} />
 
       <BulkManagementPanel
         projectId={project.id}
         project={project}
         logs={bulkOperationLogs}
-        categories={bulkManagementCategories}
+        logFilter={logFilter}
+        categoryPage={categoryPage}
+        timezone={timezone}
       />
 
       <div className="space-y-4">

@@ -44,7 +44,7 @@ class UserControllerTest {
         return new UserProfileResponse(
                 1L, "user@example.com", "user", List.of(),
                 "太郎", "山田", "山田太郎", "taro",
-                "https://example.com", "自己紹介", "ja_JP",
+                "https://example.com", "自己紹介", "ja_JP", "Asia/Tokyo",
                 "https://gravatar.com/avatar/xxx", "開発部", "エンジニア",
                 null, List.of(),
                 LocalDateTime.now(), LocalDateTime.now());

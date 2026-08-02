@@ -1,3 +1,7 @@
+import { getUserProfile } from "@/lib/apiClient";
+import { requireSession } from "@/lib/session";
+import { SystemPreferencesForm } from "./SystemPreferencesForm";
+
 const LINKS = [
   { label: "phpMyAdmin", url: "https://localhost/phpmyadmin/", description: "MySQLデータベースの管理" },
   { label: "ComfyUI", url: "https://localhost/comfyui/", description: "画像生成ワークフローUI" },
@@ -5,12 +9,51 @@ const LINKS = [
   { label: "Ollama", url: "https://localhost/ollama/", description: "ローカルLLM API(UIなし)" },
 ];
 
-export default function SystemPage() {
+// Node/ブラウザがIntl.supportedValuesOfに対応していない場合のフォールバック。
+const FALLBACK_TIMEZONES = [
+  "Asia/Tokyo",
+  "Asia/Seoul",
+  "Asia/Shanghai",
+  "Asia/Singapore",
+  "Asia/Kolkata",
+  "Europe/London",
+  "Europe/Paris",
+  "Europe/Berlin",
+  "America/New_York",
+  "America/Chicago",
+  "America/Los_Angeles",
+  "UTC",
+];
+
+function getTimezoneOptions(): string[] {
+  if (typeof Intl.supportedValuesOf === "function") {
+    try {
+      return Intl.supportedValuesOf("timeZone");
+    } catch {
+      return FALLBACK_TIMEZONES;
+    }
+  }
+  return FALLBACK_TIMEZONES;
+}
+
+export default async function SystemPage() {
   const apiUrl = process.env.LETS_BLOG_API_URL ?? "https://localhost";
+  const session = await requireSession();
+  const profile = await getUserProfile(Number(session.user.id), {
+    id: Number(session.user.id),
+    role: session.user.role,
+  });
+  const timezoneOptions = getTimezoneOptions();
 
   return (
     <div className="space-y-8">
       <h1 className="text-xl font-semibold">システム</h1>
+
+      <SystemPreferencesForm
+        locale={profile.locale ?? "ja_JP"}
+        timezone={profile.timezone ?? "Asia/Tokyo"}
+        timezoneOptions={timezoneOptions}
+      />
 
       <div className="rounded-lg border border-neutral-200 bg-white p-5">
         <h2 className="mb-2 font-medium">仲介APIサーバー</h2>

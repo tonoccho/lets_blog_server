@@ -385,4 +385,122 @@ class SiteServiceTest {
         assertEquals(null, result.hasAdminCapability());
         assertEquals("boom", result.failureReason());
     }
+
+    // ---- resolveDataSource ----
+
+    private Site siteWithCredentials(String siteKey, Map<String, String> credentials, boolean managed) {
+        Site site = new Site();
+        site.setId(1L);
+        site.setSiteKey(siteKey);
+        site.setCmsType(CmsType.WORDPRESS);
+        site.setManagedWordpress(managed);
+        if (!managed) {
+            site.setCredentialsEncrypted(new byte[]{9, 9, 9});
+            when(siteRepository.findBySiteKey(siteKey)).thenReturn(Optional.of(site));
+            when(credentialCipher.decrypt(site.getCredentialsEncrypted())).thenReturn(toJson(credentials));
+        }
+        return site;
+    }
+
+    private String toJson(Map<String, String> credentials) {
+        try {
+            return new ObjectMapper().writeValueAsString(credentials);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void resolveDataSource_managedサイトはmanagedのみtrueになる() {
+        Site site = siteWithCredentials("s", Map.of(), true);
+
+        SiteService.SiteDataSource dataSource = service.resolveDataSource(site);
+
+        assertEquals(true, dataSource.managed());
+        assertEquals(false, dataSource.hasRest());
+        assertEquals(false, dataSource.hasSsh());
+    }
+
+    @Test
+    void resolveDataSource_baseUrlUsernameAppPasswordが揃っていてもRESTは現在常に利用不可() {
+        // フィードバック対応により一括管理はSSHのみを使う方針のため、REST資格情報があってもhasRest()はfalseになる
+        Site site = siteWithCredentials("s",
+                Map.of("baseUrl", "https://example.com", "username", "admin", "appPassword", "secret"), false);
+
+        SiteService.SiteDataSource dataSource = service.resolveDataSource(site);
+
+        assertEquals(false, dataSource.managed());
+        assertEquals(false, dataSource.hasRest());
+        assertEquals(false, dataSource.hasSsh());
+        assertEquals(true, dataSource.isUnavailable());
+    }
+
+    @Test
+    void resolveDataSource_transportSSHでRESTの資格情報もあればSSHのみtrueになる() {
+        Site site = siteWithCredentials("s", Map.of(
+                "baseUrl", "https://example.com", "username", "admin", "appPassword", "secret",
+                "transport", "SSH", "sshHost", "203.0.113.5", "sshUser", "deploy",
+                "wpPath", "/var/www/html", "sshPrivateKeyPem", "PEM"), false);
+
+        SiteService.SiteDataSource dataSource = service.resolveDataSource(site);
+
+        assertEquals(false, dataSource.hasRest());
+        assertEquals(true, dataSource.hasSsh());
+    }
+
+    @Test
+    void resolveDataSource_SSH設定済みならRESTは常に利用不可でSSHのみ() {
+        Site site = siteWithCredentials("s", Map.of(
+                "baseUrl", "https://example.com",
+                "transport", "SSH", "sshHost", "203.0.113.5", "sshUser", "deploy",
+                "wpPath", "/var/www/html", "sshPrivateKeyPem", "PEM"), false);
+
+        SiteService.SiteDataSource dataSource = service.resolveDataSource(site);
+
+        assertEquals(false, dataSource.hasRest());
+        assertEquals(true, dataSource.hasSsh());
+        assertEquals(false, dataSource.isUnavailable());
+    }
+
+    @Test
+    void resolveDataSource_RESTもSSHも設定されていなければ両方false() {
+        Site site = siteWithCredentials("s", Map.of("baseUrl", "https://example.com"), false);
+
+        SiteService.SiteDataSource dataSource = service.resolveDataSource(site);
+
+        assertEquals(false, dataSource.hasRest());
+        assertEquals(false, dataSource.hasSsh());
+        assertEquals(true, dataSource.isUnavailable());
+    }
+
+    @Test
+    void resolveDataSource_認証情報の復号に失敗したら両方falseで例外を投げない() {
+        Site site = new Site();
+        site.setId(1L);
+        site.setSiteKey("broken");
+        site.setCmsType(CmsType.WORDPRESS);
+        site.setManagedWordpress(false);
+        site.setCredentialsEncrypted(new byte[]{1});
+        when(siteRepository.findBySiteKey("broken")).thenReturn(Optional.of(site));
+        when(credentialCipher.decrypt(site.getCredentialsEncrypted())).thenThrow(new RuntimeException("decrypt failed"));
+
+        SiteService.SiteDataSource dataSource = service.resolveDataSource(site);
+
+        assertEquals(false, dataSource.hasRest());
+        assertEquals(false, dataSource.hasSsh());
+    }
+
+    @Test
+    void resolveDataSource_WordPress以外のCMS種別は両方false() {
+        Site site = new Site();
+        site.setId(1L);
+        site.setSiteKey("micro");
+        site.setCmsType(CmsType.MICROCMS);
+        site.setManagedWordpress(false);
+
+        SiteService.SiteDataSource dataSource = service.resolveDataSource(site);
+
+        assertEquals(false, dataSource.hasRest());
+        assertEquals(false, dataSource.hasSsh());
+    }
 }

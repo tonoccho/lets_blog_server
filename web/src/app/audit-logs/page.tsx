@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { listAuditLogs } from "@/lib/apiClient";
-import { requireAdminSession } from "@/lib/session";
+import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
+import { formatDateTime } from "@/lib/formatDate";
 
 const ACTIONS = [
   "LOGIN",
@@ -22,6 +23,7 @@ export default async function AuditLogsPage({
   const params = await searchParams;
   const page = Number(params.page ?? "0") || 0;
   const actor = { id: Number(session.user.id), role: session.user.role };
+  const timezone = await getViewerTimeZone();
 
   const result = await listAuditLogs(
     {
@@ -95,7 +97,7 @@ export default async function AuditLogsPage({
             )}
             {result.content.map((entry) => (
               <tr key={entry.id} className="border-b border-neutral-100 last:border-0">
-                <td className="px-4 py-2 text-neutral-600">{new Date(entry.createdAt).toLocaleString("ja-JP")}</td>
+                <td className="px-4 py-2 text-neutral-600">{formatDateTime(entry.createdAt, timezone)}</td>
                 <td className="px-4 py-2 font-mono">{entry.userId ?? "-"}</td>
                 <td className="px-4 py-2">{entry.action}</td>
                 <td className="px-4 py-2 text-neutral-600">

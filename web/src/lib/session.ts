@@ -2,9 +2,29 @@ import "server-only";
 import { redirect } from "next/navigation";
 import { getServerSession, type Session } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { getUserProfile } from "@/lib/apiClient";
 
 export function getSession(): Promise<Session | null> {
   return getServerSession(authOptions);
+}
+
+/**
+ * ログインユーザーが個人設定(システム画面)で保存したタイムゾーンを取得する。
+ * 日時表示の際にブラウザのローカルタイムゾーンではなくこちらを使う。
+ * 未ログイン・未設定・取得失敗時はnull(呼び出し側はブラウザのローカルタイムゾーンにフォールバックする)。
+ */
+export async function getViewerTimeZone(): Promise<string | null> {
+  const session = await getSession();
+  if (!session) {
+    return null;
+  }
+  const userId = Number(session.user.id);
+  try {
+    const profile = await getUserProfile(userId, { id: userId, role: session.user.role });
+    return profile.timezone ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**

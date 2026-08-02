@@ -338,9 +338,13 @@ if ($path === '/sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
  * カテゴリ操作(作成/編集/削除)・一覧取得(/categories)はいずれもこの関数を経由する。
  * @return array<int, array{term_id:int,name:string,slug:string,parent:int,parentSlug:?string,description:string}>
  */
-function fetchCategories(string $sitePath): array
+/**
+ * category(親を持つ)・post_tag(親なし)のいずれのtaxonomyでも共用するterm一覧取得ヘルパー。
+ * taxonomy='post_tag'の場合もparent(常に0)は取得するが、parentSlugは常にnullになる。
+ */
+function fetchTerms(string $sitePath, string $taxonomy): array
 {
-    [$code, $out] = runWp(['term', 'list', 'category', '--fields=term_id,name,slug,parent,description', '--format=json', "--path=$sitePath", '--allow-root']);
+    [$code, $out] = runWp(['term', 'list', $taxonomy, '--fields=term_id,name,slug,parent,description', '--format=json', "--path=$sitePath", '--allow-root']);
     $terms = $code === 0 ? (json_decode($out, true) ?: []) : [];
     $slugById = [];
     foreach ($terms as $term) {
@@ -354,9 +358,9 @@ function fetchCategories(string $sitePath): array
     return $terms;
 }
 
-function findCategoryBySlug(array $categories, string $slug): ?array
+function findTermBySlug(array $terms, string $slug): ?array
 {
-    foreach ($categories as $term) {
+    foreach ($terms as $term) {
         if (strcasecmp($term['slug'], $slug) === 0) {
             return $term;
         }
@@ -373,11 +377,50 @@ if ($path === '/categories' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!is_dir($sitePath)) {
         respond(404, ['error' => 'サイトが見つかりません']);
     }
-    respond(200, ['categories' => array_values(fetchCategories($sitePath))]);
+    respond(200, ['categories' => array_values(fetchTerms($sitePath, 'category'))]);
+}
+
+if ($path === '/tags' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    if (!isValidSlug($slug)) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = "/var/www/html/sites/$slug";
+    if (!is_dir($sitePath)) {
+        respond(404, ['error' => 'サイトが見つかりません']);
+    }
+    respond(200, ['tags' => array_values(fetchTerms($sitePath, 'post_tag'))]);
+}
+
+if ($path === '/plugins' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    if (!isValidSlug($slug)) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = "/var/www/html/sites/$slug";
+    if (!is_dir($sitePath)) {
+        respond(404, ['error' => 'サイトが見つかりません']);
+    }
+    [$code, $out] = runWp(['plugin', 'list', '--fields=name,status', '--format=json', "--path=$sitePath", '--allow-root']);
+    respond(200, ['plugins' => $code === 0 ? (json_decode($out, true) ?: []) : []]);
+}
+
+if ($path === '/themes' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    if (!isValidSlug($slug)) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = "/var/www/html/sites/$slug";
+    if (!is_dir($sitePath)) {
+        respond(404, ['error' => 'サイトが見つかりません']);
+    }
+    [$code, $out] = runWp(['theme', 'list', '--fields=name,status', '--format=json', "--path=$sitePath", '--allow-root']);
+    respond(200, ['themes' => $code === 0 ? (json_decode($out, true) ?: []) : []]);
 }
 
 const ALLOWED_BULK_ACTIONS = [
     'category_create', 'category_edit', 'category_delete',
+    'tag_create', 'tag_edit', 'tag_delete',
     'plugin_install', 'plugin_activate', 'plugin_deactivate', 'plugin_delete',
     'theme_install', 'theme_activate', 'theme_delete',
 ];
@@ -395,25 +438,26 @@ if ($path === '/bulk-management' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         respond(404, ['error' => 'サイトが見つかりません']);
     }
 
-    if ($action === 'category_create') {
+    if ($action === 'category_create' || $action === 'tag_create') {
+        $taxonomy = $action === 'category_create' ? 'category' : 'post_tag';
         $categorySlug = (string) ($input['categorySlug'] ?? '');
         $categoryParentSlug = (string) ($input['categoryParentSlug'] ?? '');
         $categoryDescription = (string) ($input['categoryDescription'] ?? '');
         if ($categorySlug === '') {
-            respond(400, ['error' => 'カテゴリのスラッグを指定してください']);
+            respond(400, ['error' => 'スラッグを指定してください']);
         }
 
-        $categories = fetchCategories($sitePath);
-        if (findCategoryBySlug($categories, $categorySlug) !== null) {
+        $terms = fetchTerms($sitePath, $taxonomy);
+        if (findTermBySlug($terms, $categorySlug) !== null) {
             respond(200, ['status' => 'skipped']);
         }
 
-        $createArgs = ['term', 'create', 'category', $value, "--slug=$categorySlug", '--porcelain', "--path=$sitePath", '--allow-root'];
+        $createArgs = ['term', 'create', $taxonomy, $value, "--slug=$categorySlug", '--porcelain', "--path=$sitePath", '--allow-root'];
         if ($categoryDescription !== '') {
             $createArgs[] = "--description=$categoryDescription";
         }
-        if ($categoryParentSlug !== '') {
-            $parent = findCategoryBySlug($categories, $categoryParentSlug);
+        if ($taxonomy === 'category' && $categoryParentSlug !== '') {
+            $parent = findTermBySlug($terms, $categoryParentSlug);
             if ($parent === null) {
                 respond(500, ['error' => "親カテゴリ(slug: $categoryParentSlug)が見つかりません"]);
             }
@@ -422,12 +466,13 @@ if ($path === '/bulk-management' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
         [$code, $out] = runWp($createArgs);
         if ($code !== 0) {
-            respond(500, ['error' => 'カテゴリの作成に失敗しました', 'detail' => $out]);
+            respond(500, ['error' => '作成に失敗しました', 'detail' => $out]);
         }
         respond(200, ['status' => 'ok']);
     }
 
-    if ($action === 'category_edit') {
+    if ($action === 'category_edit' || $action === 'tag_edit') {
+        $taxonomy = $action === 'category_edit' ? 'category' : 'post_tag';
         $categoryTargetSlug = (string) ($input['categoryTargetSlug'] ?? '');
         $categorySlug = (string) ($input['categorySlug'] ?? '');
         $categoryParentSlug = (string) ($input['categoryParentSlug'] ?? '');
@@ -436,19 +481,19 @@ if ($path === '/bulk-management' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             respond(400, ['error' => '編集対象のスラッグと変更後のスラッグを指定してください']);
         }
 
-        $categories = fetchCategories($sitePath);
-        $target = findCategoryBySlug($categories, $categoryTargetSlug);
+        $terms = fetchTerms($sitePath, $taxonomy);
+        $target = findTermBySlug($terms, $categoryTargetSlug);
         if ($target === null) {
-            respond(500, ['error' => "対象カテゴリ(slug: $categoryTargetSlug)が見つかりません"]);
+            respond(500, ['error' => "対象(slug: $categoryTargetSlug)が見つかりません"]);
         }
 
-        $updateArgs = ['term', 'update', 'category', (string) $target['term_id'],
+        $updateArgs = ['term', 'update', $taxonomy, (string) $target['term_id'],
             "--name=$value", "--slug=$categorySlug", "--path=$sitePath", '--allow-root'];
         if ($categoryDescription !== '') {
             $updateArgs[] = "--description=$categoryDescription";
         }
-        if ($categoryParentSlug !== '') {
-            $parent = findCategoryBySlug($categories, $categoryParentSlug);
+        if ($taxonomy === 'category' && $categoryParentSlug !== '') {
+            $parent = findTermBySlug($terms, $categoryParentSlug);
             if ($parent === null) {
                 respond(500, ['error' => "親カテゴリ(slug: $categoryParentSlug)が見つかりません"]);
             }
@@ -460,26 +505,27 @@ if ($path === '/bulk-management' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
         [$code, $out] = runWp($updateArgs);
         if ($code !== 0) {
-            respond(500, ['error' => 'カテゴリの更新に失敗しました', 'detail' => $out]);
+            respond(500, ['error' => '更新に失敗しました', 'detail' => $out]);
         }
         respond(200, ['status' => 'ok']);
     }
 
-    if ($action === 'category_delete') {
+    if ($action === 'category_delete' || $action === 'tag_delete') {
+        $taxonomy = $action === 'category_delete' ? 'category' : 'post_tag';
         $categoryTargetSlug = (string) ($input['categoryTargetSlug'] ?? '');
         if ($categoryTargetSlug === '') {
             respond(400, ['error' => '削除対象のスラッグを指定してください']);
         }
 
-        $target = findCategoryBySlug(fetchCategories($sitePath), $categoryTargetSlug);
+        $target = findTermBySlug(fetchTerms($sitePath, $taxonomy), $categoryTargetSlug);
         if ($target === null) {
             // 既に存在しない = 目的達成済みとみなす
             respond(200, ['status' => 'skipped']);
         }
 
-        [$code, $out] = runWp(['term', 'delete', 'category', (string) $target['term_id'], "--path=$sitePath", '--allow-root']);
+        [$code, $out] = runWp(['term', 'delete', $taxonomy, (string) $target['term_id'], "--path=$sitePath", '--allow-root']);
         if ($code !== 0) {
-            respond(500, ['error' => 'カテゴリの削除に失敗しました', 'detail' => $out]);
+            respond(500, ['error' => '削除に失敗しました', 'detail' => $out]);
         }
         respond(200, ['status' => 'ok']);
     }

@@ -111,6 +111,17 @@ public class ProjectService {
         return toResponse(projectRepository.save(project));
     }
 
+    @AuditLog(action = AuditLogAction.PROJECT_UPDATED, resourceType = "PROJECT")
+    @Transactional
+    public ProjectResponse updateMasterEnvironment(Long projectId, String masterEnvironment) {
+        if (!Set.of("test", "production").contains(masterEnvironment)) {
+            throw new IllegalArgumentException("マスター環境はtest/productionのいずれかを指定してください");
+        }
+        Project project = getProjectEntity(projectId);
+        project.setMasterEnvironment(masterEnvironment);
+        return toResponse(projectRepository.save(project));
+    }
+
     /**
      * 指定サイトが所属するプロジェクトのIDを返す(いずれの環境にも紐付いていなければnull)。
      * カスタムタグのプロジェクトスコープ判定(投稿レンダリング時)に使う。

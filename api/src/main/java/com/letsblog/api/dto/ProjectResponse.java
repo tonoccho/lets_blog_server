@@ -11,6 +11,7 @@ public record ProjectResponse(
         SiteResponse localSite,
         SiteResponse testSite,
         SiteResponse productionSite,
+        String masterEnvironment,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -23,6 +24,7 @@ public record ProjectResponse(
                 localSite,
                 testSite,
                 productionSite,
+                project.getMasterEnvironment(),
                 project.getCreatedAt(),
                 project.getUpdatedAt()
         );

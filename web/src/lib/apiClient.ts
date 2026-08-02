@@ -383,6 +383,7 @@ export interface UserProfile {
   websiteUrl: string | null;
   bio: string | null;
   locale: string | null;
+  timezone: string | null;
   avatarUrl: string | null;
   department: string | null;
   position: string | null;
@@ -414,6 +415,24 @@ export function getUserProfile(id: number, actor?: ActorInfo): Promise<UserProfi
 export function updateUserProfile(id: number, input: UserProfileInput, actor?: ActorInfo): Promise<UserProfile> {
   return apiFetch<UserProfile>(`/api/users/${id}`, {
     method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export interface UpdateUserPreferencesInput {
+  locale: string;
+  timezone: string;
+}
+
+export function updateUserPreferences(
+  id: number,
+  input: UpdateUserPreferencesInput,
+  actor?: ActorInfo
+): Promise<UserProfile> {
+  return apiFetch<UserProfile>(`/api/users/${id}/preferences`, {
+    method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
     actor,
@@ -535,6 +554,7 @@ export interface Project {
   localSite: Site | null;
   testSite: Site | null;
   productionSite: Site | null;
+  masterEnvironment: "test" | "production";
   createdAt: string;
   updatedAt: string;
 }
@@ -569,6 +589,19 @@ export function updateProject(id: number, name: string, actor?: ActorInfo): Prom
 
 export function deleteProject(id: number, actor?: ActorInfo): Promise<void> {
   return apiFetch<void>(`/api/projects/${id}`, { method: 'DELETE', actor });
+}
+
+export function updateMasterEnvironment(
+  id: number,
+  masterEnvironment: "test" | "production",
+  actor?: ActorInfo
+): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}/master-environment`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ masterEnvironment }),
+    actor,
+  });
 }
 
 export function bindProjectEnvironment(
@@ -612,16 +645,24 @@ export type BulkOperationType =
   | "CATEGORY_CREATE"
   | "CATEGORY_EDIT"
   | "CATEGORY_DELETE"
+  | "TAG_CREATE"
+  | "TAG_EDIT"
+  | "TAG_DELETE"
   | "PLUGIN_INSTALL"
   | "PLUGIN_ACTIVATE"
   | "PLUGIN_DEACTIVATE"
   | "PLUGIN_DELETE"
   | "THEME_INSTALL"
   | "THEME_ACTIVATE"
-  | "THEME_DELETE";
+  | "THEME_DELETE"
+  | "CATEGORY_FETCH"
+  | "TAG_FETCH"
+  | "PLUGIN_FETCH"
+  | "THEME_FETCH";
 export type ZipInstallOperationType = "PLUGIN_INSTALL" | "THEME_INSTALL";
 export type BulkOperationSourceType = "SLUG" | "ZIP";
 export type BulkOperationStatus = "SUCCESS" | "SKIPPED" | "FAILED";
+export type BulkOperationLogLevel = "INFO" | "WARNING" | "ERROR";
 
 export interface BulkOperationLog {
   id: number;
@@ -635,21 +676,64 @@ export interface BulkOperationLog {
   originalFilename: string | null;
   environment: ProjectEnvironment;
   status: BulkOperationStatus;
+  level: BulkOperationLogLevel;
   errorMessage: string | null;
+  stackTrace: string | null;
   isReplay: boolean;
   createdAt: string;
 }
 
-export interface CategoryOption {
-  name: string;
-  slug: string;
+export interface TermEnvironmentValue {
+  available: boolean;
+  error: boolean;
+  errorMessage: string | null;
+  slug: string | null;
   parentSlug: string | null;
   description: string | null;
 }
 
-export function runBulkOperation(
+export interface TermComparisonRow {
+  name: string;
+  slug: string;
+  local: TermEnvironmentValue;
+  test: TermEnvironmentValue;
+  production: TermEnvironmentValue;
+}
+
+export interface TermComparisonPage {
+  items: TermComparisonRow[];
+  page: number;
+  size: number;
+  totalCount: number;
+  masterEnvironment: "test" | "production";
+}
+
+export function listCategoryComparison(
+  projectId: number,
+  page: number,
+  actor?: ActorInfo
+): Promise<TermComparisonPage> {
+  return apiFetch<TermComparisonPage>(
+    `/api/projects/${projectId}/bulk-management/categories/comparison?page=${page}`,
+    { actor }
+  );
+}
+
+export function listTagComparison(
+  projectId: number,
+  page: number,
+  actor?: ActorInfo
+): Promise<TermComparisonPage> {
+  return apiFetch<TermComparisonPage>(
+    `/api/projects/${projectId}/bulk-management/tags/comparison?page=${page}`,
+    { actor }
+  );
+}
+
+export function applyToEnvironment(
   projectId: number,
   input: {
+    environment: ProjectEnvironment;
     operationType: BulkOperationType;
     value?: string;
     categorySlug?: string;
@@ -658,11 +742,215 @@ export function runBulkOperation(
     categoryTargetSlug?: string;
   },
   actor?: ActorInfo
-): Promise<BulkOperationLog[]> {
-  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management`, {
+): Promise<BulkOperationLog> {
+  return apiFetch<BulkOperationLog>(`/api/projects/${projectId}/bulk-management/apply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function syncCategoryToMaster(
+  projectId: number,
+  slug: string,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/categories/sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug }),
+    actor,
+  });
+}
+
+export function deleteCategoryEverywhere(
+  projectId: number,
+  slug: string,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/categories/delete-all`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug }),
+    actor,
+  });
+}
+
+export function syncTagToMaster(
+  projectId: number,
+  slug: string,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/tags/sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug }),
+    actor,
+  });
+}
+
+export interface EditTermInput {
+  targetSlug: string;
+  value: string;
+  slug: string;
+  parentSlug?: string;
+  description?: string;
+}
+
+export function editCategoryAndSync(
+  projectId: number,
+  input: EditTermInput,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/categories/edit-sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function editTagAndSync(
+  projectId: number,
+  input: EditTermInput,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/tags/edit-sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function syncAllCategoriesToMaster(
+  projectId: number,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/categories/sync-all`, {
+    method: 'POST',
+    actor,
+  });
+}
+
+export function syncAllTagsToMaster(
+  projectId: number,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/tags/sync-all`, {
+    method: 'POST',
+    actor,
+  });
+}
+
+export function deleteTagEverywhere(
+  projectId: number,
+  slug: string,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/tags/delete-all`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug }),
+    actor,
+  });
+}
+
+export type PluginThemeStatus = "NOT_INSTALLED" | "INACTIVE" | "ACTIVE";
+
+export interface StatusEnvironmentValue {
+  available: boolean;
+  error: boolean;
+  errorMessage: string | null;
+  status: PluginThemeStatus | null;
+}
+
+export interface StatusComparisonRow {
+  slug: string;
+  local: StatusEnvironmentValue;
+  test: StatusEnvironmentValue;
+  production: StatusEnvironmentValue;
+}
+
+export interface StatusComparisonPage {
+  items: StatusComparisonRow[];
+  page: number;
+  size: number;
+  totalCount: number;
+  masterEnvironment: "test" | "production";
+}
+
+export function listPluginComparison(
+  projectId: number,
+  page: number,
+  actor?: ActorInfo
+): Promise<StatusComparisonPage> {
+  return apiFetch<StatusComparisonPage>(
+    `/api/projects/${projectId}/bulk-management/plugins/comparison?page=${page}`,
+    { actor }
+  );
+}
+
+export function listThemeComparison(
+  projectId: number,
+  page: number,
+  actor?: ActorInfo
+): Promise<StatusComparisonPage> {
+  return apiFetch<StatusComparisonPage>(
+    `/api/projects/${projectId}/bulk-management/themes/comparison?page=${page}`,
+    { actor }
+  );
+}
+
+export function reconcilePluginState(
+  projectId: number,
+  input: { slug: string; changes: { environment: ProjectEnvironment; desiredStatus: PluginThemeStatus }[] },
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/plugins/reconcile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function reconcileThemeState(
+  projectId: number,
+  input: { slug: string; changes: { environment: ProjectEnvironment; desiredStatus: PluginThemeStatus }[] },
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/themes/reconcile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function deletePluginEverywhere(
+  projectId: number,
+  slug: string,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/plugins/delete-all`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug }),
+    actor,
+  });
+}
+
+export function deleteThemeEverywhere(
+  projectId: number,
+  slug: string,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/themes/delete-all`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug }),
     actor,
   });
 }
@@ -695,12 +983,30 @@ export function replayBulkOperations(
   });
 }
 
-export function listBulkOperationLogs(projectId: number, actor?: ActorInfo): Promise<BulkOperationLog[]> {
-  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/logs`, { actor });
+export interface BulkOperationLogFilter {
+  operationType?: BulkOperationType;
+  environment?: ProjectEnvironment;
+  level?: BulkOperationLogLevel;
 }
 
-export function listBulkManagementCategories(projectId: number, actor?: ActorInfo): Promise<CategoryOption[]> {
-  return apiFetch<CategoryOption[]>(`/api/projects/${projectId}/bulk-management/categories`, { actor });
+export function listBulkOperationLogs(
+  projectId: number,
+  actor?: ActorInfo,
+  filter?: BulkOperationLogFilter
+): Promise<BulkOperationLog[]> {
+  const query = new URLSearchParams();
+  if (filter?.operationType) query.set("operationType", filter.operationType);
+  if (filter?.environment) query.set("environment", filter.environment);
+  if (filter?.level) query.set("level", filter.level);
+  const qs = query.toString();
+  return apiFetch<BulkOperationLog[]>(
+    `/api/projects/${projectId}/bulk-management/logs${qs ? `?${qs}` : ""}`,
+    { actor }
+  );
+}
+
+export function clearBulkOperationLogs(projectId: number, actor?: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/bulk-management/logs`, { method: "DELETE", actor });
 }
 
 export interface ProjectUser {

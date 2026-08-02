@@ -10,6 +10,8 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
+import com.letsblog.api.util.StackTraceUtil;
+
 import java.util.List;
 import java.util.Map;
 
@@ -44,7 +46,7 @@ public class WordPressBulkManagementClient {
                     });
             return resultOf(body);
         } catch (RestClientException e) {
-            return BulkApplyResult.failed(e.getMessage());
+            return BulkApplyResult.failed(e);
         }
     }
 
@@ -69,24 +71,36 @@ public class WordPressBulkManagementClient {
                     });
             return resultOf(body);
         } catch (RestClientException e) {
-            return BulkApplyResult.failed(e.getMessage());
+            return BulkApplyResult.failed(e);
         }
     }
 
     /**
-     * 参照環境のカテゴリ一覧を取得する(親カテゴリ選択・編集/削除対象選択のUI向け)。
-     * 取得に失敗した場合は空リストを返す(呼び出し元でエラーとして扱わず、単に選択肢なしとする)。
+     * 1環境分のカテゴリ一覧を取得する(比較テーブル・親カテゴリ解決に使用)。
+     * 取得に失敗した場合は空リストを返す(呼び出し元でエラーとして扱わず、単に該当なしとする)。
      */
     public List<CategoryInfo> listCategories(String slug) {
+        return listTerms("/categories", "categories", slug);
+    }
+
+    /**
+     * 1環境分のタグ一覧を取得する(比較テーブルに使用)。タグは階層を持たないため
+     * CategoryInfo.parentSlug()は常にnullになる。
+     */
+    public List<CategoryInfo> listTags(String slug) {
+        return listTerms("/tags", "tags", slug);
+    }
+
+    private List<CategoryInfo> listTerms(String uri, String bodyKey, String slug) {
         try {
             Map<String, Object> body = client.post()
-                    .uri("/categories")
+                    .uri(uri)
                     .header("X-Provision-Token", provisionToken)
                     .body(Map.of("slug", slug))
                     .retrieve()
                     .body(new ParameterizedTypeReference<Map<String, Object>>() {
                     });
-            if (body == null || !(body.get("categories") instanceof List<?> rawList)) {
+            if (body == null || !(body.get(bodyKey) instanceof List<?> rawList)) {
                 return List.of();
             }
             return rawList.stream()
@@ -106,6 +120,47 @@ public class WordPressBulkManagementClient {
         }
     }
 
+    /**
+     * 1環境分の、インストール済みプラグイン一覧(name+status)を取得する(比較テーブルに使用)。
+     * 未インストールのプラグインはこの一覧に含まれない(呼び出し元で「一覧に無ければ未インストール」と判定する)。
+     * 取得に失敗した場合は空リストを返す。
+     */
+    public List<PluginThemeInfo> listPlugins(String slug) {
+        return listPluginsOrThemes("/plugins", "plugins", slug);
+    }
+
+    /**
+     * 1環境分の、インストール済みテーマ一覧(name+status)を取得する(比較テーブルに使用)。
+     */
+    public List<PluginThemeInfo> listThemes(String slug) {
+        return listPluginsOrThemes("/themes", "themes", slug);
+    }
+
+    private List<PluginThemeInfo> listPluginsOrThemes(String uri, String bodyKey, String slug) {
+        try {
+            Map<String, Object> body = client.post()
+                    .uri(uri)
+                    .header("X-Provision-Token", provisionToken)
+                    .body(Map.of("slug", slug))
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<Map<String, Object>>() {
+                    });
+            if (body == null || !(body.get(bodyKey) instanceof List<?> rawList)) {
+                return List.of();
+            }
+            return rawList.stream()
+                    .filter(Map.class::isInstance)
+                    .map(item -> {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> entry = (Map<String, Object>) item;
+                        return new PluginThemeInfo(asString(entry.get("name")), asString(entry.get("status")));
+                    })
+                    .toList();
+        } catch (RestClientException e) {
+            return List.of();
+        }
+    }
+
     private static String asString(Object value) {
         return value == null ? null : value.toString();
     }
@@ -117,7 +172,7 @@ public class WordPressBulkManagementClient {
 
     /**
      * value/categorySlug/categoryParentSlug/categoryDescription/categoryTargetSlugの意味は
-     * actionによって変わる(BulkOperationRequestのフィールドコメントを参照)。
+     * actionによって変わる(ApplyToEnvironmentRequestのフィールドコメントを参照)。
      */
     public record BulkApplyCommand(
             String slug, String action, String value,
@@ -128,17 +183,24 @@ public class WordPressBulkManagementClient {
     public record CategoryInfo(String name, String slug, String parentSlug, String description) {
     }
 
-    public record BulkApplyResult(String status, String errorMessage) {
+    /**
+     * statusは"active"(有効)またはそれ以外(インストール済みだが無効、例:"inactive")。
+     * 一覧に含まれないslugは「未インストール」を意味する(呼び出し元で判定)。
+     */
+    public record PluginThemeInfo(String name, String status) {
+    }
+
+    public record BulkApplyResult(String status, String errorMessage, String stackTrace) {
         public static BulkApplyResult success() {
-            return new BulkApplyResult("SUCCESS", null);
+            return new BulkApplyResult("SUCCESS", null, null);
         }
 
         public static BulkApplyResult skipped() {
-            return new BulkApplyResult("SKIPPED", null);
+            return new BulkApplyResult("SKIPPED", null, null);
         }
 
-        public static BulkApplyResult failed(String message) {
-            return new BulkApplyResult("FAILED", message);
+        public static BulkApplyResult failed(Throwable cause) {
+            return new BulkApplyResult("FAILED", cause.getMessage(), StackTraceUtil.toString(cause));
         }
     }
 }
