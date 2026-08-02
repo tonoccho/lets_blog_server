@@ -215,8 +215,8 @@ export function PluginThemeComparisonTable({
                   })}
                   <td className="px-2 py-1.5">
                     {(() => {
-                      const isApplying = pendingAction?.slug === row.slug && pendingAction.type === "apply";
-                      const isDeleting = pendingAction?.slug === row.slug && pendingAction.type === "delete";
+                      const isApplying = pendingAction?.slug === row.slug && pendingAction?.type === "apply";
+                      const isDeleting = pendingAction?.slug === row.slug && pendingAction?.type === "delete";
                       const rowBusy = isApplying || isDeleting;
                       return (
                         <div className="flex flex-wrap gap-2">

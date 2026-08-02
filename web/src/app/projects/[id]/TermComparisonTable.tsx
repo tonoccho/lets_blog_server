@@ -195,8 +195,8 @@ export function TermComparisonTable({
                       <td className="px-2 py-1.5" colSpan={4} />
                       <td className="px-2 py-1.5">
                         {(() => {
-                          const isDeleting = pendingAction?.slug === row.slug && pendingAction.type === "delete";
-                          const isSyncing = pendingAction?.slug === row.slug && pendingAction.type === "sync";
+                          const isDeleting = pendingAction?.slug === row.slug && pendingAction?.type === "delete";
+                          const isSyncing = pendingAction?.slug === row.slug && pendingAction?.type === "sync";
                           const rowBusy = isDeleting || isSyncing;
                           return (
                             <div className="flex flex-wrap gap-2">
