@@ -231,7 +231,8 @@ public class TermComparisonService {
 
     /**
      * マスター環境の項目を新しい値へ更新し、続けて他の非マスター環境にも同じ新しい値を反映する
-     * (「編集」と「マスターへの同期」を1回の操作にまとめたもの)。
+     * (「編集」と「マスターへの同期」を1回の操作にまとめたもの)。マスター環境にまだ項目が
+     * 存在しない場合(他の環境にのみ存在する項目)は、マスター環境には新規作成する。
      */
     private List<BulkOperationLog> editAndSync(
             Long projectId, String oldSlug, String value, String slug, String parentSlug, String description,
@@ -242,16 +243,18 @@ public class TermComparisonService {
 
         Map<String, CategoryInfo> byEnvironment = findBySlugFrom(termsByEnvironment, oldSlug);
         CategoryInfo master = byEnvironment.get(masterEnvironment);
-        if (master == null) {
-            throw new IllegalArgumentException("マスター環境に存在しない項目は編集できません: " + oldSlug);
-        }
 
         BulkOperationType createType = isCategory ? BulkOperationType.CATEGORY_CREATE : BulkOperationType.TAG_CREATE;
         BulkOperationType editType = isCategory ? BulkOperationType.CATEGORY_EDIT : BulkOperationType.TAG_EDIT;
 
         List<BulkOperationLog> results = new ArrayList<>();
-        results.add(bulkManagementService.applyToEnvironment(projectId, masterEnvironment, editType,
-                value, slug, parentSlug, description, master.slug(), actorId));
+        if (master != null) {
+            results.add(bulkManagementService.applyToEnvironment(projectId, masterEnvironment, editType,
+                    value, slug, parentSlug, description, master.slug(), actorId));
+        } else {
+            results.add(bulkManagementService.applyToEnvironment(projectId, masterEnvironment, createType,
+                    value, slug, parentSlug, description, null, actorId));
+        }
 
         for (String environment : ENVIRONMENT_ORDER) {
             if (environment.equals(masterEnvironment)) {

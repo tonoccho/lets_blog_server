@@ -23,6 +23,19 @@ function valueOf(row: TermComparisonRow, environment: ProjectEnvironment): TermE
   return environment === "local" ? row.local : environment === "test" ? row.test : row.production;
 }
 
+// マスター環境にまだ値が無い行を編集フォームで開いたときの初期値用に、
+// マスター→ローカル→テスト→本番の順で最初に見つかった値を返す。
+function preferredValue(row: TermComparisonRow, master: ProjectEnvironment): TermEnvironmentValue {
+  const order: ProjectEnvironment[] = [master, "local", "test", "production"];
+  for (const environment of order) {
+    const value = valueOf(row, environment);
+    if (value.available && value.slug) {
+      return value;
+    }
+  }
+  return valueOf(row, master);
+}
+
 export function TermComparisonTable({
   projectId,
   kind,
@@ -171,7 +184,9 @@ export function TermComparisonTable({
         <div className="space-y-4">
           {pageData.items.map((row) => {
             const masterValue = valueOf(row, master);
-            const canEditOrSync = masterValue.available && !!masterValue.slug;
+            // 同期はマスター環境の値を他環境へ反映する操作のため、マスターに値がある行のみ対象。
+            // 編集はマスターに値が無い行でも行える(保存するとマスター環境に新規作成される)。
+            const canSync = masterValue.available && !!masterValue.slug;
             return (
               <div key={row.slug} className="overflow-x-auto rounded border border-neutral-200">
                 <table className="w-full text-left text-sm">
@@ -200,16 +215,14 @@ export function TermComparisonTable({
                           const rowBusy = isDeleting || isSyncing;
                           return (
                             <div className="flex flex-wrap gap-2">
-                              {canEditOrSync && (
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingSlug(editingSlug === row.slug ? null : row.slug)}
-                                  disabled={rowBusy}
-                                  className="rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 disabled:opacity-50"
-                                >
-                                  編集
-                                </button>
-                              )}
+                              <button
+                                type="button"
+                                onClick={() => setEditingSlug(editingSlug === row.slug ? null : row.slug)}
+                                disabled={rowBusy}
+                                className="rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 disabled:opacity-50"
+                              >
+                                編集
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => handleDelete(row)}
@@ -218,7 +231,7 @@ export function TermComparisonTable({
                               >
                                 {isDeleting ? "削除中…" : "削除"}
                               </button>
-                              {canEditOrSync && (
+                              {canSync && (
                                 <button
                                   type="button"
                                   onClick={() => handleSync(row)}
@@ -235,7 +248,7 @@ export function TermComparisonTable({
                     </tr>
                   </tbody>
                 </table>
-                {editingSlug === row.slug && canEditOrSync && (
+                {editingSlug === row.slug && (
                   <div className="border-t border-neutral-200 bg-neutral-50 p-3">
                     <EditItemForm
                       projectId={projectId}
@@ -395,17 +408,17 @@ function EditItemForm({
   row: TermComparisonRow;
   onDone: () => void;
 }) {
-  const masterValue = valueOf(row, masterEnvironment);
+  const masterValue = preferredValue(row, masterEnvironment);
+  const hasMasterValue = valueOf(row, masterEnvironment).available && !!valueOf(row, masterEnvironment).slug;
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (
-      !window.confirm(
-        `保存すると、マスター環境(${ENVIRONMENT_LABEL[masterEnvironment]})以外の環境の内容も上書きされます。よろしいですか?`
-      )
-    ) {
+    const confirmText = hasMasterValue
+      ? `保存すると、マスター環境(${ENVIRONMENT_LABEL[masterEnvironment]})以外の環境の内容も上書きされます。よろしいですか?`
+      : `マスター環境(${ENVIRONMENT_LABEL[masterEnvironment]})にはまだ存在しないため、新規作成した上で他の環境にも反映します。よろしいですか?`;
+    if (!window.confirm(confirmText)) {
       return;
     }
     const formData = new FormData(e.currentTarget);

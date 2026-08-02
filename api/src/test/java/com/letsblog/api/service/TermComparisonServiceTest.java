@@ -259,7 +259,7 @@ class TermComparisonServiceTest {
     // ---- editCategoryAndSync ----
 
     @Test
-    void editCategoryAndSync_マスターに存在しなければ例外() {
+    void editCategoryAndSync_マスターに存在しなければ新規作成する() {
         TermComparisonService service = service();
         Project project = buildProject(10L, 20L, null, "test");
         Site localSite = buildManagedSite(10L, "local-site");
@@ -268,9 +268,17 @@ class TermComparisonServiceTest {
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
         when(bulkManagementClient.listCategories(any())).thenReturn(List.of());
+        when(bulkManagementService.applyToEnvironment(eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L)))
+                .thenReturn(new BulkOperationLog());
 
-        assertThrows(IllegalArgumentException.class,
-                () -> service.editCategoryAndSync(1L, "oshirase", "新お知らせ", "new-oshirase", null, null, 9L));
+        List<BulkOperationLog> results = service.editCategoryAndSync(
+                1L, "oshirase", "新お知らせ", "new-oshirase", null, null, 9L);
+
+        assertEquals(2, results.size());
+        verify(bulkManagementService).applyToEnvironment(
+                1L, "test", BulkOperationType.CATEGORY_CREATE, "新お知らせ", "new-oshirase", null, null, null, 9L);
+        verify(bulkManagementService).applyToEnvironment(
+                1L, "local", BulkOperationType.CATEGORY_CREATE, "新お知らせ", "new-oshirase", null, null, null, 9L);
     }
 
     @Test
