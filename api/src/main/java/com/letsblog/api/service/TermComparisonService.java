@@ -1,5 +1,9 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.cms.CmsApiException;
+import com.letsblog.api.cms.CmsCredentials;
+import com.letsblog.api.cms.rest.WordPressRestBulkManagementOperations;
+import com.letsblog.api.cms.ssh.WordPressSshOperations;
 import com.letsblog.api.domain.BulkOperationLog;
 import com.letsblog.api.domain.BulkOperationType;
 import com.letsblog.api.domain.Project;
@@ -8,9 +12,9 @@ import com.letsblog.api.dto.TermComparisonPage;
 import com.letsblog.api.dto.TermComparisonRow;
 import com.letsblog.api.dto.TermEnvironmentValue;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient;
-import com.letsblog.api.provisioning.WordPressBulkManagementClient.CategoryInfo;
 import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.SiteRepository;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,16 +24,24 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.function.Function;
+import java.util.Objects;
 
 /**
  * カテゴリ・タグを3環境(ローカル/テスト/本番)で横断比較し、マスター環境(Project#masterEnvironment)の
  * 値を基準に、非マスター環境への同期・全環境からの削除をオーケストレーションする。
- * 実際のwp-cli呼び出し・ログ記録は{@link BulkManagementService#applyToEnvironment}に委譲する
+ * 実際のwp-cli/REST呼び出し・ログ記録は{@link BulkManagementService#applyToEnvironment}に委譲する
  * (1環境=1操作=1ログという既存の粒度をそのまま使う)。
  * 項目の同一性は名前(大文字小文字を無視した完全一致)で判定する(Phase11-01初版の判定方針を踏襲)。
+ * <p>
+ * 環境の値取得は{@link #resolveTermsByEnvironment}に集約する: managed(自動構築)サイトは内部エージェント
+ * ({@link WordPressBulkManagementClient})経由、非managedサイトはREST(Application Password)が
+ * 利用可能ならそちらを優先し({@link WordPressRestBulkManagementOperations})、無ければSSH接続情報
+ * (transport=SSH)があれば{@link WordPressSshOperations}経由で取得する。SSHのみで解決する環境が
+ * 複数あり同一ホストを共有している場合は、{@link WordPressSshOperations#fetchTermsForEnvironments}で
+ * 1回の接続にまとめる。取得に失敗した環境は「対象外」ではなく「エラー」として扱い、作業ログにも記録する。
  */
 @Service
+@Slf4j
 public class TermComparisonService {
 
     private static final List<String> ENVIRONMENT_ORDER = List.of("local", "test", "production");
@@ -38,26 +50,35 @@ public class TermComparisonService {
     private final SiteRepository siteRepository;
     private final WordPressBulkManagementClient bulkManagementClient;
     private final BulkManagementService bulkManagementService;
+    private final SiteService siteService;
+    private final WordPressSshOperations sshOperations;
+    private final WordPressRestBulkManagementOperations restOperations;
 
     public TermComparisonService(
             ProjectRepository projectRepository,
             SiteRepository siteRepository,
             WordPressBulkManagementClient bulkManagementClient,
-            BulkManagementService bulkManagementService) {
+            BulkManagementService bulkManagementService,
+            SiteService siteService,
+            WordPressSshOperations sshOperations,
+            WordPressRestBulkManagementOperations restOperations) {
         this.projectRepository = projectRepository;
         this.siteRepository = siteRepository;
         this.bulkManagementClient = bulkManagementClient;
         this.bulkManagementService = bulkManagementService;
+        this.siteService = siteService;
+        this.sshOperations = sshOperations;
+        this.restOperations = restOperations;
     }
 
     @Transactional(readOnly = true)
     public TermComparisonPage listCategoryComparison(Long projectId, int page, int size) {
-        return listComparison(projectId, page, size, bulkManagementClient::listCategories);
+        return listComparison(projectId, page, size, true);
     }
 
     @Transactional(readOnly = true)
     public TermComparisonPage listTagComparison(Long projectId, int page, int size) {
-        return listComparison(projectId, page, size, bulkManagementClient::listTags);
+        return listComparison(projectId, page, size, false);
     }
 
     @Transactional
@@ -80,21 +101,53 @@ public class TermComparisonService {
         return deleteEverywhere(projectId, name, actorId, false);
     }
 
-    private TermComparisonPage listComparison(
-            Long projectId, int page, int size, Function<String, List<CategoryInfo>> fetcher) {
-        Project project = getProject(projectId);
-        String masterEnvironment = project.getMasterEnvironment();
+    @Transactional
+    public List<BulkOperationLog> editCategoryAndSync(
+            Long projectId, String oldName, String value, String slug, String parentSlug, String description,
+            Long actorId) {
+        return editAndSync(projectId, oldName, value, slug, parentSlug, description, actorId, true);
+    }
 
-        Map<String, List<CategoryInfo>> termsByEnvironment = new LinkedHashMap<>();
-        for (String environment : ENVIRONMENT_ORDER) {
-            Site site = resolveOptionalManagedSite(project, environment);
-            termsByEnvironment.put(environment, site != null ? fetcher.apply(site.getWpSlug()) : null);
-        }
+    @Transactional
+    public List<BulkOperationLog> editTagAndSync(
+            Long projectId, String oldName, String value, String slug, String parentSlug, String description,
+            Long actorId) {
+        return editAndSync(projectId, oldName, value, slug, parentSlug, description, actorId, false);
+    }
+
+    @Transactional
+    public List<BulkOperationLog> syncAllCategoriesToMaster(Long projectId, Long actorId) {
+        return syncAllToMaster(projectId, actorId, true);
+    }
+
+    @Transactional
+    public List<BulkOperationLog> syncAllTagsToMaster(Long projectId, Long actorId) {
+        return syncAllToMaster(projectId, actorId, false);
+    }
+
+    private TermComparisonPage listComparison(Long projectId, int page, int size, boolean isCategory) {
+        Project project = getProject(projectId);
+        List<TermComparisonRow> rows = buildRows(project, isCategory);
+
+        long totalCount = rows.size();
+        List<TermComparisonRow> pageItems = rows.stream()
+                .skip((long) page * size)
+                .limit(size)
+                .toList();
+        return new TermComparisonPage(pageItems, page, size, totalCount, project.getMasterEnvironment());
+    }
+
+    /**
+     * ページングする前の全件比較行を組み立てる({@link #listComparison}・{@link #syncAllToMaster}で共用)。
+     */
+    private List<TermComparisonRow> buildRows(Project project, boolean isCategory) {
+        String masterEnvironment = project.getMasterEnvironment();
+        Map<String, EnvironmentTerms> termsByEnvironment = resolveTermsByEnvironment(project, isCategory);
 
         Map<String, String> displayNameByKey = new LinkedHashMap<>();
         Map<String, Map<String, CategoryInfo>> termByKeyAndEnvironment = new LinkedHashMap<>();
         for (String environment : ENVIRONMENT_ORDER) {
-            List<CategoryInfo> terms = termsByEnvironment.get(environment);
+            List<CategoryInfo> terms = termsByEnvironment.get(environment).terms();
             if (terms == null) {
                 continue;
             }
@@ -107,30 +160,26 @@ public class TermComparisonService {
             }
         }
 
-        List<TermComparisonRow> rows = termByKeyAndEnvironment.entrySet().stream()
+        return termByKeyAndEnvironment.entrySet().stream()
                 .map(entry -> toRow(displayNameByKey.get(entry.getKey()), entry.getValue(), termsByEnvironment))
                 .sorted(Comparator.comparing(TermComparisonRow::name, Comparator.naturalOrder()))
                 .toList();
-
-        long totalCount = rows.size();
-        List<TermComparisonRow> pageItems = rows.stream()
-                .skip((long) page * size)
-                .limit(size)
-                .toList();
-        return new TermComparisonPage(pageItems, page, size, totalCount, masterEnvironment);
     }
 
     private TermComparisonRow toRow(
-            String name, Map<String, CategoryInfo> byEnvironment, Map<String, List<CategoryInfo>> availability) {
+            String name, Map<String, CategoryInfo> byEnvironment, Map<String, EnvironmentTerms> termsByEnvironment) {
         return new TermComparisonRow(
                 name,
-                toValue(byEnvironment.get("local"), availability.get("local") != null),
-                toValue(byEnvironment.get("test"), availability.get("test") != null),
-                toValue(byEnvironment.get("production"), availability.get("production") != null));
+                toValue(byEnvironment.get("local"), termsByEnvironment.get("local")),
+                toValue(byEnvironment.get("test"), termsByEnvironment.get("test")),
+                toValue(byEnvironment.get("production"), termsByEnvironment.get("production")));
     }
 
-    private TermEnvironmentValue toValue(CategoryInfo term, boolean environmentAvailable) {
-        if (!environmentAvailable) {
+    private TermEnvironmentValue toValue(CategoryInfo term, EnvironmentTerms environmentTerms) {
+        if (environmentTerms.error()) {
+            return TermEnvironmentValue.error(environmentTerms.errorMessage());
+        }
+        if (environmentTerms.terms() == null) {
             return TermEnvironmentValue.unavailable();
         }
         if (term == null) {
@@ -142,11 +191,9 @@ public class TermComparisonService {
     private List<BulkOperationLog> sync(Long projectId, String name, Long actorId, boolean isCategory) {
         Project project = getProject(projectId);
         String masterEnvironment = project.getMasterEnvironment();
-        Function<String, List<CategoryInfo>> fetcher = isCategory
-                ? bulkManagementClient::listCategories
-                : bulkManagementClient::listTags;
+        Map<String, EnvironmentTerms> termsByEnvironment = resolveTermsByEnvironment(project, isCategory);
 
-        Map<String, CategoryInfo> byEnvironment = findByName(project, name, fetcher);
+        Map<String, CategoryInfo> byEnvironment = findByNameFrom(termsByEnvironment, name);
         CategoryInfo master = byEnvironment.get(masterEnvironment);
         if (master == null) {
             throw new IllegalArgumentException("マスター環境に存在しない項目は同期できません: " + name);
@@ -160,7 +207,7 @@ public class TermComparisonService {
             if (environment.equals(masterEnvironment)) {
                 continue;
             }
-            if (resolveOptionalManagedSite(project, environment) == null) {
+            if (termsByEnvironment.get(environment).terms() == null) {
                 continue;
             }
             CategoryInfo existing = byEnvironment.get(environment);
@@ -177,12 +224,93 @@ public class TermComparisonService {
         return results;
     }
 
+    /**
+     * マスター環境の項目を新しい値へ更新し、続けて他の非マスター環境にも同じ新しい値を反映する
+     * (「編集」と「マスターへの同期」を1回の操作にまとめたもの)。
+     */
+    private List<BulkOperationLog> editAndSync(
+            Long projectId, String oldName, String value, String slug, String parentSlug, String description,
+            Long actorId, boolean isCategory) {
+        Project project = getProject(projectId);
+        String masterEnvironment = project.getMasterEnvironment();
+        Map<String, EnvironmentTerms> termsByEnvironment = resolveTermsByEnvironment(project, isCategory);
+
+        Map<String, CategoryInfo> byEnvironment = findByNameFrom(termsByEnvironment, oldName);
+        CategoryInfo master = byEnvironment.get(masterEnvironment);
+        if (master == null) {
+            throw new IllegalArgumentException("マスター環境に存在しない項目は編集できません: " + oldName);
+        }
+
+        BulkOperationType createType = isCategory ? BulkOperationType.CATEGORY_CREATE : BulkOperationType.TAG_CREATE;
+        BulkOperationType editType = isCategory ? BulkOperationType.CATEGORY_EDIT : BulkOperationType.TAG_EDIT;
+
+        List<BulkOperationLog> results = new ArrayList<>();
+        results.add(bulkManagementService.applyToEnvironment(projectId, masterEnvironment, editType,
+                value, slug, parentSlug, description, master.slug(), actorId));
+
+        for (String environment : ENVIRONMENT_ORDER) {
+            if (environment.equals(masterEnvironment)) {
+                continue;
+            }
+            if (termsByEnvironment.get(environment).terms() == null) {
+                continue;
+            }
+            CategoryInfo existing = byEnvironment.get(environment);
+            if (existing != null) {
+                results.add(bulkManagementService.applyToEnvironment(projectId, environment, editType,
+                        value, slug, parentSlug, description, existing.slug(), actorId));
+            } else {
+                results.add(bulkManagementService.applyToEnvironment(projectId, environment, createType,
+                        value, slug, parentSlug, description, null, actorId));
+            }
+        }
+        return results;
+    }
+
+    /**
+     * マスター環境と異なる(または非マスター環境に存在しない)項目をすべて洗い出し、既存の{@link #sync}を
+     * 項目ごとに呼び出してマスターへ一括で揃える。マスター環境に存在しない項目(非マスターのみに存在)は対象外。
+     */
+    private List<BulkOperationLog> syncAllToMaster(Long projectId, Long actorId, boolean isCategory) {
+        Project project = getProject(projectId);
+        String masterEnvironment = project.getMasterEnvironment();
+
+        List<TermComparisonRow> rows = buildRows(project, isCategory);
+        List<BulkOperationLog> results = new ArrayList<>();
+        for (TermComparisonRow row : rows) {
+            TermEnvironmentValue masterValue = valueOf(row, masterEnvironment);
+            if (!masterValue.available() || masterValue.slug() == null) {
+                continue;
+            }
+            if (needsSync(row, masterEnvironment)) {
+                results.addAll(sync(projectId, row.name(), actorId, isCategory));
+            }
+        }
+        return results;
+    }
+
+    private boolean needsSync(TermComparisonRow row, String masterEnvironment) {
+        TermEnvironmentValue masterValue = valueOf(row, masterEnvironment);
+        for (String environment : ENVIRONMENT_ORDER) {
+            if (environment.equals(masterEnvironment)) {
+                continue;
+            }
+            TermEnvironmentValue value = valueOf(row, environment);
+            if (!value.available()) {
+                continue;
+            }
+            if (!Objects.equals(value.slug(), masterValue.slug())
+                    || !Objects.equals(value.parentSlug(), masterValue.parentSlug())
+                    || !Objects.equals(value.description(), masterValue.description())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private List<BulkOperationLog> deleteEverywhere(Long projectId, String name, Long actorId, boolean isCategory) {
         Project project = getProject(projectId);
-        Function<String, List<CategoryInfo>> fetcher = isCategory
-                ? bulkManagementClient::listCategories
-                : bulkManagementClient::listTags;
-        Map<String, CategoryInfo> byEnvironment = findByName(project, name, fetcher);
+        Map<String, CategoryInfo> byEnvironment = findByNameFrom(resolveTermsByEnvironment(project, isCategory), name);
         BulkOperationType deleteType = isCategory ? BulkOperationType.CATEGORY_DELETE : BulkOperationType.TAG_DELETE;
 
         List<BulkOperationLog> results = new ArrayList<>();
@@ -200,15 +328,23 @@ public class TermComparisonService {
         return results;
     }
 
-    private Map<String, CategoryInfo> findByName(
-            Project project, String name, Function<String, List<CategoryInfo>> fetcher) {
+    private TermEnvironmentValue valueOf(TermComparisonRow row, String environment) {
+        return switch (environment) {
+            case "local" -> row.local();
+            case "test" -> row.test();
+            case "production" -> row.production();
+            default -> throw new IllegalArgumentException("unknown environment: " + environment);
+        };
+    }
+
+    private Map<String, CategoryInfo> findByNameFrom(Map<String, EnvironmentTerms> termsByEnvironment, String name) {
         Map<String, CategoryInfo> result = new LinkedHashMap<>();
         for (String environment : ENVIRONMENT_ORDER) {
-            Site site = resolveOptionalManagedSite(project, environment);
-            if (site == null) {
+            List<CategoryInfo> terms = termsByEnvironment.get(environment).terms();
+            if (terms == null) {
                 continue;
             }
-            fetcher.apply(site.getWpSlug()).stream()
+            terms.stream()
                     .filter(term -> term.name().equalsIgnoreCase(name))
                     .findFirst()
                     .ifPresent(term -> result.put(environment, term));
@@ -216,22 +352,131 @@ public class TermComparisonService {
         return result;
     }
 
-    private Site resolveOptionalManagedSite(Project project, String environment) {
+    /**
+     * 3環境分のカテゴリ/タグ一覧を、環境ごとの経路(managed=内部エージェント、REST優先、無ければSSH)で
+     * 解決する。SSHのみで解決する環境が複数あり同一ホスト(sshHost:sshPort)を共有している場合は、
+     * ホストごとにまとめて{@link WordPressSshOperations#fetchTermsForEnvironments}で1回の接続にする。
+     * 取得に失敗した環境は{@link EnvironmentTerms#error}にし、作業ログにも記録する。
+     */
+    private Map<String, EnvironmentTerms> resolveTermsByEnvironment(Project project, boolean isCategory) {
+        Map<String, EnvironmentTerms> result = new LinkedHashMap<>();
+        Map<String, Map<String, CmsCredentials.WordPressCredentials>> sshGroupsByHost = new LinkedHashMap<>();
+
+        for (String environment : ENVIRONMENT_ORDER) {
+            Site site = resolveSite(project, environment);
+            if (site == null) {
+                result.put(environment, EnvironmentTerms.unavailable());
+                continue;
+            }
+            if (site.isManagedWordpress()) {
+                result.put(environment, fetchViaAgent(site, isCategory));
+                continue;
+            }
+            SiteService.SiteDataSource dataSource = siteService.resolveDataSource(site);
+            if (dataSource.hasRest()) {
+                result.put(environment, fetchViaRest(project, environment, dataSource.restCredentials(), isCategory));
+                continue;
+            }
+            if (dataSource.hasSsh()) {
+                String hostKey = hostKeyOf(dataSource.sshCredentials());
+                sshGroupsByHost.computeIfAbsent(hostKey, k -> new LinkedHashMap<>())
+                        .put(environment, dataSource.sshCredentials());
+                continue;
+            }
+            result.put(environment, EnvironmentTerms.unavailable());
+        }
+
+        for (Map<String, CmsCredentials.WordPressCredentials> group : sshGroupsByHost.values()) {
+            WordPressSshOperations.EnvironmentFetchResult<WordPressSshOperations.CategoryInfo> fetchResult =
+                    sshOperations.fetchTermsForEnvironments(isCategory ? "category" : "post_tag", group);
+            for (String environment : group.keySet()) {
+                String error = fetchResult.errorByEnvironment().get(environment);
+                if (error != null) {
+                    logFetchError(project, environment, isCategory, error);
+                    result.put(environment, EnvironmentTerms.error(error));
+                } else {
+                    List<CategoryInfo> infos = fetchResult.byEnvironment()
+                            .getOrDefault(environment, List.of()).stream()
+                            .map(info -> new CategoryInfo(info.name(), info.slug(), info.parentSlug(), info.description()))
+                            .toList();
+                    result.put(environment, EnvironmentTerms.of(infos));
+                }
+            }
+        }
+        return result;
+    }
+
+    private EnvironmentTerms fetchViaAgent(Site site, boolean isCategory) {
+        List<WordPressBulkManagementClient.CategoryInfo> infos = isCategory
+                ? bulkManagementClient.listCategories(site.getWpSlug())
+                : bulkManagementClient.listTags(site.getWpSlug());
+        return EnvironmentTerms.of(infos.stream()
+                .map(info -> new CategoryInfo(info.name(), info.slug(), info.parentSlug(), info.description()))
+                .toList());
+    }
+
+    private EnvironmentTerms fetchViaRest(
+            Project project, String environment, CmsCredentials.WordPressCredentials creds, boolean isCategory) {
+        try {
+            List<WordPressRestBulkManagementOperations.CategoryInfo> infos = isCategory
+                    ? restOperations.listCategories(creds)
+                    : restOperations.listTags(creds);
+            return EnvironmentTerms.of(infos.stream()
+                    .map(info -> new CategoryInfo(info.name(), info.slug(), info.parentSlug(), info.description()))
+                    .toList());
+        } catch (CmsApiException e) {
+            logFetchError(project, environment, isCategory, e.getMessage());
+            return EnvironmentTerms.error(e.getMessage());
+        }
+    }
+
+    private String hostKeyOf(CmsCredentials.WordPressCredentials creds) {
+        return creds.sshHost() + ":" + (creds.sshPort() != null ? creds.sshPort() : 22);
+    }
+
+    private void logFetchError(Project project, String environment, boolean isCategory, String message) {
+        log.warn("{}一覧取得に失敗しました(project={}, environment={}): {}",
+                isCategory ? "カテゴリ" : "タグ", project.getId(), environment, message);
+        bulkManagementService.logFetchFailure(project.getId(),
+                isCategory ? BulkOperationType.CATEGORY_FETCH : BulkOperationType.TAG_FETCH, environment, message);
+    }
+
+    /**
+     * 環境に紐付いたサイトを、managed/非managedを問わず返す(紐付けなしはnull)。
+     */
+    private Site resolveSite(Project project, String environment) {
         Long siteId = switch (environment) {
             case "local" -> project.getLocalSiteId();
             case "test" -> project.getTestSiteId();
             case "production" -> project.getProductionSiteId();
             default -> null;
         };
-        if (siteId == null) {
-            return null;
-        }
-        Site site = siteRepository.findById(siteId).orElse(null);
-        return (site != null && site.isManagedWordpress()) ? site : null;
+        return siteId == null ? null : siteRepository.findById(siteId).orElse(null);
     }
 
     private Project getProject(Long projectId) {
         return projectRepository.findById(projectId)
                 .orElseThrow(() -> new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません"));
+    }
+
+    private record CategoryInfo(String name, String slug, String parentSlug, String description) {
+    }
+
+    /**
+     * 1環境分の取得結果。terms=null かつ error=false は「対象外」、terms=null かつ error=true は
+     * 「取得を試みて失敗」を表す(TermEnvironmentValueへの変換時にこの2つを区別する)。
+     */
+    private record EnvironmentTerms(List<CategoryInfo> terms, boolean error, String errorMessage) {
+        static EnvironmentTerms unavailable() {
+            return new EnvironmentTerms(null, false, null);
+        }
+
+        static EnvironmentTerms error(String errorMessage) {
+            return new EnvironmentTerms(null, true, errorMessage);
+        }
+
+        static EnvironmentTerms of(List<CategoryInfo> terms) {
+            return new EnvironmentTerms(terms, false, null);
+        }
     }
 }

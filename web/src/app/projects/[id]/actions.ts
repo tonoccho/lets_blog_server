@@ -15,6 +15,11 @@ import {
   deleteCategoryEverywhere,
   syncTagToMaster,
   deleteTagEverywhere,
+  editCategoryAndSync,
+  editTagAndSync,
+  syncAllCategoriesToMaster,
+  syncAllTagsToMaster,
+  EditTermInput,
   listCategoryComparison,
   listTagComparison,
   listPluginComparison,
@@ -295,6 +300,43 @@ export async function syncTermToMasterAction(
     const results = await (kind === "category"
       ? syncCategoryToMaster(projectId, name, actor)
       : syncTagToMaster(projectId, name, actor));
+    revalidatePath(`/projects/${projectId}`);
+    return { success: true, results };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function editTermAndSyncAction(
+  projectId: number,
+  kind: "category" | "tag",
+  input: EditTermInput
+): Promise<BulkOperationState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const results = await (kind === "category"
+      ? editCategoryAndSync(projectId, input, actor)
+      : editTagAndSync(projectId, input, actor));
+    revalidatePath(`/projects/${projectId}`);
+    return { success: true, results };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function syncAllTermsToMasterAction(
+  projectId: number,
+  kind: "category" | "tag"
+): Promise<BulkOperationState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const results = await (kind === "category"
+      ? syncAllCategoriesToMaster(projectId, actor)
+      : syncAllTagsToMaster(projectId, actor));
     revalidatePath(`/projects/${projectId}`);
     return { success: true, results };
   } catch (err) {

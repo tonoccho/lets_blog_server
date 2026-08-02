@@ -18,7 +18,13 @@ public enum BulkOperationType {
     PLUGIN_DELETE,
     THEME_INSTALL,
     THEME_ACTIVATE,
-    THEME_DELETE;
+    THEME_DELETE,
+    // 比較テーブルの一覧取得(読み取り)が失敗した際に、作業ログへエラーを記録する専用の種別。
+    // wp-cli/REST操作を実際に発行するわけではないため、wpCliAction()は使わない。
+    CATEGORY_FETCH,
+    TAG_FETCH,
+    PLUGIN_FETCH,
+    THEME_FETCH;
 
     public String wpCliAction() {
         return name().toLowerCase();

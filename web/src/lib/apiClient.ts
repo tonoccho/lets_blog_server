@@ -635,7 +635,11 @@ export type BulkOperationType =
   | "PLUGIN_DELETE"
   | "THEME_INSTALL"
   | "THEME_ACTIVATE"
-  | "THEME_DELETE";
+  | "THEME_DELETE"
+  | "CATEGORY_FETCH"
+  | "TAG_FETCH"
+  | "PLUGIN_FETCH"
+  | "THEME_FETCH";
 export type ZipInstallOperationType = "PLUGIN_INSTALL" | "THEME_INSTALL";
 export type BulkOperationSourceType = "SLUG" | "ZIP";
 export type BulkOperationStatus = "SUCCESS" | "SKIPPED" | "FAILED";
@@ -659,6 +663,8 @@ export interface BulkOperationLog {
 
 export interface TermEnvironmentValue {
   available: boolean;
+  error: boolean;
+  errorMessage: string | null;
   slug: string | null;
   parentSlug: string | null;
   description: string | null;
@@ -761,6 +767,60 @@ export function syncTagToMaster(
   });
 }
 
+export interface EditTermInput {
+  name: string;
+  value: string;
+  slug: string;
+  parentSlug?: string;
+  description?: string;
+}
+
+export function editCategoryAndSync(
+  projectId: number,
+  input: EditTermInput,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/categories/edit-sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function editTagAndSync(
+  projectId: number,
+  input: EditTermInput,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/tags/edit-sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function syncAllCategoriesToMaster(
+  projectId: number,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/categories/sync-all`, {
+    method: 'POST',
+    actor,
+  });
+}
+
+export function syncAllTagsToMaster(
+  projectId: number,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/tags/sync-all`, {
+    method: 'POST',
+    actor,
+  });
+}
+
 export function deleteTagEverywhere(
   projectId: number,
   name: string,
@@ -778,6 +838,8 @@ export type PluginThemeStatus = "NOT_INSTALLED" | "INACTIVE" | "ACTIVE";
 
 export interface StatusEnvironmentValue {
   available: boolean;
+  error: boolean;
+  errorMessage: string | null;
   status: PluginThemeStatus | null;
 }
 

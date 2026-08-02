@@ -9,6 +9,7 @@ import com.letsblog.api.cms.PostContent;
 import com.letsblog.api.cms.PostResult;
 import com.letsblog.api.cms.ssh.SshCommandExecutor.SshCommandResult;
 import com.letsblog.api.cms.ssh.SshCommandExecutor.SshConnectionParams;
+import com.letsblog.api.domain.BulkOperationType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -17,7 +18,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -44,9 +47,13 @@ class WordPressSshOperationsTest {
     }
 
     private WordPressCredentials creds() {
+        return creds("/var/www/html");
+    }
+
+    private WordPressCredentials creds(String wpPath) {
         return new WordPressCredentials(
                 "https://example.com", null, null,
-                "SSH", "203.0.113.5", 22, "deploy", "/var/www/html", "PRIVATE-KEY-PEM", "SHA256:pinned", null);
+                "SSH", "203.0.113.5", 22, "deploy", wpPath, "PRIVATE-KEY-PEM", "SHA256:pinned", null);
     }
 
     private SshCommandResult ok(String stdout) {
@@ -372,5 +379,248 @@ class WordPressSshOperationsTest {
         verify(executor).putFile(any(SshConnectionParams.class), any(), pathCaptor.capture());
         assertEquals(false, pathCaptor.getValue().contains("/etc/"));
         assertEquals(false, pathCaptor.getValue().contains(".."));
+    }
+
+    @Test
+    void listPlugins_name_statusの一覧を返す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("[{\"name\":\"akismet\",\"status\":\"active\"},{\"name\":\"hello\",\"status\":\"inactive\"}]"));
+
+        List<WordPressSshOperations.PluginThemeInfo> infos = operations.listPlugins(creds());
+
+        assertEquals(2, infos.size());
+        assertEquals("akismet", infos.get(0).name());
+        assertEquals("active", infos.get(0).status());
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getValue().contains("plugin list --fields=name,status --format=json"));
+    }
+
+    @Test
+    void listThemes_取得に失敗したら例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("wp: command not found"));
+
+        assertThrows(SshOperationException.class, () -> operations.listThemes(creds()));
+    }
+
+    @Test
+    void applyPluginTheme_未インストールのプラグインはインストールする() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("[]"))
+                .thenReturn(ok(""));
+
+        WordPressSshOperations.SshApplyResult result =
+                operations.applyPluginTheme(creds(), BulkOperationType.PLUGIN_INSTALL, "akismet");
+
+        assertEquals("SUCCESS", result.status());
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("plugin install 'akismet'"));
+    }
+
+    @Test
+    void applyPluginTheme_インストール済みのプラグインはskippedを返しinstallを実行しない() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("[{\"name\":\"akismet\",\"status\":\"inactive\"}]"));
+
+        WordPressSshOperations.SshApplyResult result =
+                operations.applyPluginTheme(creds(), BulkOperationType.PLUGIN_INSTALL, "akismet");
+
+        assertEquals("SKIPPED", result.status());
+        verify(executor, times(1)).exec(any(SshConnectionParams.class), any(), isNull());
+    }
+
+    @Test
+    void applyPluginTheme_有効化_無効化はそれぞれのwp_cliコマンドを実行する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok(""));
+
+        operations.applyPluginTheme(creds(), BulkOperationType.PLUGIN_ACTIVATE, "akismet");
+        operations.applyPluginTheme(creds(), BulkOperationType.PLUGIN_DEACTIVATE, "akismet");
+        operations.applyPluginTheme(creds(), BulkOperationType.THEME_ACTIVATE, "twentytwentyfour");
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(3)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getAllValues().get(0).contains("plugin activate 'akismet'"));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("plugin deactivate 'akismet'"));
+        assertEquals(true, commandCaptor.getAllValues().get(2).contains("theme activate 'twentytwentyfour'"));
+    }
+
+    @Test
+    void applyPluginTheme_プラグイン削除は先に無効化を試みてから削除する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(fail("not active"))
+                .thenReturn(ok(""));
+
+        WordPressSshOperations.SshApplyResult result =
+                operations.applyPluginTheme(creds(), BulkOperationType.PLUGIN_DELETE, "akismet");
+
+        assertEquals("SUCCESS", result.status());
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getAllValues().get(0).contains("plugin deactivate"));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("plugin delete 'akismet'"));
+    }
+
+    @Test
+    void applyPluginTheme_失敗しても例外を投げずfailedを返す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("permission denied"));
+
+        WordPressSshOperations.SshApplyResult result =
+                operations.applyPluginTheme(creds(), BulkOperationType.THEME_DELETE, "twentytwentyfour");
+
+        assertEquals("FAILED", result.status());
+        assertEquals(true, result.errorMessage().contains("permission denied"));
+    }
+
+    @Test
+    void listCategories_parentのterm_idをparentSlugへ解決する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok(
+                "[{\"term_id\":\"1\",\"name\":\"News\",\"slug\":\"news\",\"parent\":\"0\",\"description\":\"\"},"
+                        + "{\"term_id\":\"2\",\"name\":\"Sub\",\"slug\":\"sub-news\",\"parent\":\"1\",\"description\":\"d\"}]"));
+
+        List<WordPressSshOperations.CategoryInfo> infos = operations.listCategories(creds());
+
+        assertEquals(2, infos.size());
+        assertEquals(null, infos.get(0).parentSlug());
+        assertEquals("news", infos.get(1).parentSlug());
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getValue().contains("term list category"));
+    }
+
+    @Test
+    void applyTerm_未作成のカテゴリは作成しparentを解決する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("[{\"term_id\":\"1\",\"name\":\"News\",\"slug\":\"news\",\"parent\":\"0\",\"description\":\"\"}]"))
+                .thenReturn(ok(""));
+
+        WordPressSshOperations.SshApplyResult result = operations.applyTerm(
+                creds(), BulkOperationType.CATEGORY_CREATE, "Sub News", "sub-news", "news", "desc", null);
+
+        assertEquals("SUCCESS", result.status());
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        String createCommand = commandCaptor.getAllValues().get(1);
+        assertEquals(true, createCommand.contains("term create category"));
+        assertEquals(true, createCommand.contains("--parent=1"));
+    }
+
+    @Test
+    void applyTerm_既に同じslugが存在すればskippedを返す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("[{\"term_id\":\"1\",\"name\":\"News\",\"slug\":\"news\",\"parent\":\"0\",\"description\":\"\"}]"));
+
+        WordPressSshOperations.SshApplyResult result = operations.applyTerm(
+                creds(), BulkOperationType.TAG_CREATE, "News", "news", null, null, null);
+
+        assertEquals("SKIPPED", result.status());
+        verify(executor, times(1)).exec(any(SshConnectionParams.class), any(), isNull());
+    }
+
+    @Test
+    void applyTerm_編集は対象slugのterm_idをupdateする() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("[{\"term_id\":\"1\",\"name\":\"News\",\"slug\":\"news\",\"parent\":\"0\",\"description\":\"\"}]"))
+                .thenReturn(ok(""));
+
+        WordPressSshOperations.SshApplyResult result = operations.applyTerm(
+                creds(), BulkOperationType.TAG_EDIT, "Updated", "updated-news", null, null, "news");
+
+        assertEquals("SUCCESS", result.status());
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("term update post_tag 1"));
+    }
+
+    @Test
+    void applyTerm_編集対象が見つからなければfailedを返す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok("[]"));
+
+        WordPressSshOperations.SshApplyResult result = operations.applyTerm(
+                creds(), BulkOperationType.CATEGORY_EDIT, "Updated", "updated", null, null, "missing");
+
+        assertEquals("FAILED", result.status());
+        assertEquals(true, result.errorMessage().contains("見つかりません"));
+    }
+
+    @Test
+    void applyTerm_削除対象が存在しなければskippedを返す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok("[]"));
+
+        WordPressSshOperations.SshApplyResult result = operations.applyTerm(
+                creds(), BulkOperationType.CATEGORY_DELETE, null, null, null, null, "already-gone");
+
+        assertEquals("SKIPPED", result.status());
+    }
+
+    @Test
+    void fetchTermsForEnvironments_複数環境分を1回のexecAllで取得する() {
+        when(executor.execAll(any(SshConnectionParams.class), any())).thenReturn(List.of(
+                ok("[{\"term_id\":\"1\",\"name\":\"News\",\"slug\":\"news\",\"parent\":\"0\",\"description\":\"\"}]"),
+                ok("[{\"term_id\":\"5\",\"name\":\"Others\",\"slug\":\"others\",\"parent\":\"0\",\"description\":\"\"}]")));
+        Map<String, WordPressCredentials> credsByEnvironment = new LinkedHashMap<>();
+        credsByEnvironment.put("test", creds("/var/www/html/test"));
+        credsByEnvironment.put("production", creds("/var/www/html/production"));
+
+        WordPressSshOperations.EnvironmentFetchResult<WordPressSshOperations.CategoryInfo> result =
+                operations.fetchTermsForEnvironments("category", credsByEnvironment);
+
+        assertEquals(true, result.errorByEnvironment().isEmpty());
+        assertEquals("news", result.byEnvironment().get("test").get(0).slug());
+        assertEquals("others", result.byEnvironment().get("production").get(0).slug());
+        ArgumentCaptor<List<String>> commandsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(executor, times(1)).execAll(any(SshConnectionParams.class), commandsCaptor.capture());
+        assertEquals(2, commandsCaptor.getValue().size());
+        verify(executor, never()).exec(any(), any(), any());
+    }
+
+    @Test
+    void fetchTermsForEnvironments_接続自体が失敗したら全環境にエラーを設定する() {
+        when(executor.execAll(any(SshConnectionParams.class), any()))
+                .thenThrow(new SshOperationException("Connection refused"));
+        Map<String, WordPressCredentials> credsByEnvironment = new LinkedHashMap<>();
+        credsByEnvironment.put("test", creds("/var/www/html/test"));
+        credsByEnvironment.put("production", creds("/var/www/html/production"));
+
+        WordPressSshOperations.EnvironmentFetchResult<WordPressSshOperations.CategoryInfo> result =
+                operations.fetchTermsForEnvironments("category", credsByEnvironment);
+
+        assertEquals(true, result.byEnvironment().isEmpty());
+        assertEquals(true, result.errorByEnvironment().get("test").contains("Connection refused"));
+        assertEquals(true, result.errorByEnvironment().get("production").contains("Connection refused"));
+    }
+
+    @Test
+    void fetchTermsForEnvironments_1環境分だけ取得コマンドが失敗してもその環境だけエラーになる() {
+        when(executor.execAll(any(SshConnectionParams.class), any())).thenReturn(List.of(
+                ok("[{\"term_id\":\"1\",\"name\":\"News\",\"slug\":\"news\",\"parent\":\"0\",\"description\":\"\"}]"),
+                fail("wp: command not found")));
+        Map<String, WordPressCredentials> credsByEnvironment = new LinkedHashMap<>();
+        credsByEnvironment.put("test", creds("/var/www/html/test"));
+        credsByEnvironment.put("production", creds("/var/www/html/production"));
+
+        WordPressSshOperations.EnvironmentFetchResult<WordPressSshOperations.CategoryInfo> result =
+                operations.fetchTermsForEnvironments("category", credsByEnvironment);
+
+        assertEquals(1, result.byEnvironment().get("test").size());
+        assertEquals(false, result.byEnvironment().containsKey("production"));
+        assertEquals(true, result.errorByEnvironment().containsKey("production"));
+    }
+
+    @Test
+    void fetchPluginsOrThemesForEnvironments_複数環境分を1回のexecAllで取得する() {
+        when(executor.execAll(any(SshConnectionParams.class), any())).thenReturn(List.of(
+                ok("[{\"name\":\"akismet\",\"status\":\"active\"}]"),
+                ok("[{\"name\":\"akismet\",\"status\":\"inactive\"}]")));
+        Map<String, WordPressCredentials> credsByEnvironment = new LinkedHashMap<>();
+        credsByEnvironment.put("test", creds("/var/www/html/test"));
+        credsByEnvironment.put("production", creds("/var/www/html/production"));
+
+        WordPressSshOperations.EnvironmentFetchResult<WordPressSshOperations.PluginThemeInfo> result =
+                operations.fetchPluginsOrThemesForEnvironments("plugin", credsByEnvironment);
+
+        assertEquals("active", result.byEnvironment().get("test").get(0).status());
+        assertEquals("inactive", result.byEnvironment().get("production").get(0).status());
+        verify(executor, times(1)).execAll(any(SshConnectionParams.class), any());
     }
 }

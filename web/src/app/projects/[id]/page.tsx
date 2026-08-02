@@ -6,9 +6,6 @@ import {
   listUsers,
   listBulkOperationLogs,
   listCategoryComparison,
-  listTagComparison,
-  listPluginComparison,
-  listThemeComparison,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 import { EnvironmentSlot } from "./EnvironmentSlot";
@@ -32,18 +29,23 @@ export default async function ProjectDetailPage({
 
   const emptyComparisonPage = { items: [], page: 0, size: 20, totalCount: 0, masterEnvironment: "test" as const };
 
-  const [project, sites, members, allUsers, bulkOperationLogs, categoryPage, tagPage, pluginPage, themePage] =
-    await Promise.all([
-      getProject(projectId, actor).catch(() => null),
-      listSites().catch(() => []),
-      listProjectUsers(projectId, actor).catch(() => []),
-      listUsers().catch(() => []),
-      listBulkOperationLogs(projectId, actor).catch(() => []),
-      listCategoryComparison(projectId, 0, actor).catch(() => emptyComparisonPage),
-      listTagComparison(projectId, 0, actor).catch(() => emptyComparisonPage),
-      listPluginComparison(projectId, 0, actor).catch(() => emptyComparisonPage),
-      listThemeComparison(projectId, 0, actor).catch(() => emptyComparisonPage),
-    ]);
+  function logAndFallback<T>(label: string, fallback: T) {
+    return (err: unknown) => {
+      console.error(`[projects/${projectId}] ${label}の取得に失敗しました:`, err);
+      return fallback;
+    };
+  }
+
+  // タグ・プラグイン・テーマは一括管理パネルでタブを開いたときにクライアント側から遅延取得する
+  // (初期表示で4種類すべて並行取得すると、同一ホストのSSH接続が集中しやすいため)。
+  const [project, sites, members, allUsers, bulkOperationLogs, categoryPage] = await Promise.all([
+    getProject(projectId, actor).catch(logAndFallback("プロジェクト情報", null)),
+    listSites().catch(logAndFallback("サイト一覧", [])),
+    listProjectUsers(projectId, actor).catch(logAndFallback("プロジェクトメンバー", [])),
+    listUsers().catch(logAndFallback("ユーザー一覧", [])),
+    listBulkOperationLogs(projectId, actor).catch(logAndFallback("作業ログ", [])),
+    listCategoryComparison(projectId, 0, actor).catch(logAndFallback("カテゴリ比較", emptyComparisonPage)),
+  ]);
 
   if (!project) {
     notFound();
@@ -81,9 +83,6 @@ export default async function ProjectDetailPage({
         project={project}
         logs={bulkOperationLogs}
         categoryPage={categoryPage}
-        tagPage={tagPage}
-        pluginPage={pluginPage}
-        themePage={themePage}
       />
 
       <div className="space-y-4">

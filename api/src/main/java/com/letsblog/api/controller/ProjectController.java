@@ -4,6 +4,7 @@ import com.letsblog.api.dto.AddProjectUserRequest;
 import com.letsblog.api.dto.ApplyToEnvironmentRequest;
 import com.letsblog.api.dto.BulkOperationLogResponse;
 import com.letsblog.api.dto.DeleteSlugRequest;
+import com.letsblog.api.dto.EditTermRequest;
 import com.letsblog.api.dto.ProjectCreateRequest;
 import com.letsblog.api.dto.ProjectEnvironmentBindRequest;
 import com.letsblog.api.dto.ProjectResponse;
@@ -204,6 +205,24 @@ public class ProjectController {
                 .map(BulkOperationLogResponse::from).toList();
     }
 
+    @PostMapping("/{id}/bulk-management/categories/edit-sync")
+    public List<BulkOperationLogResponse> editCategoryAndSync(
+            @PathVariable Long id, @Valid @RequestBody EditTermRequest request) {
+        adminAuthorizationService.requireAdmin();
+        Long actorId = currentActorService.getCurrentActorId();
+        return termComparisonService.editCategoryAndSync(id, request.name(), request.value(), request.slug(),
+                request.parentSlug(), request.description(), actorId).stream()
+                .map(BulkOperationLogResponse::from).toList();
+    }
+
+    @PostMapping("/{id}/bulk-management/categories/sync-all")
+    public List<BulkOperationLogResponse> syncAllCategoriesToMaster(@PathVariable Long id) {
+        adminAuthorizationService.requireAdmin();
+        Long actorId = currentActorService.getCurrentActorId();
+        return termComparisonService.syncAllCategoriesToMaster(id, actorId).stream()
+                .map(BulkOperationLogResponse::from).toList();
+    }
+
     @PostMapping("/{id}/bulk-management/tags/sync")
     public List<BulkOperationLogResponse> syncTag(
             @PathVariable Long id, @Valid @RequestBody TermNameRequest request) {
@@ -219,6 +238,24 @@ public class ProjectController {
         adminAuthorizationService.requireAdmin();
         Long actorId = currentActorService.getCurrentActorId();
         return termComparisonService.deleteTagEverywhere(id, request.name(), actorId).stream()
+                .map(BulkOperationLogResponse::from).toList();
+    }
+
+    @PostMapping("/{id}/bulk-management/tags/edit-sync")
+    public List<BulkOperationLogResponse> editTagAndSync(
+            @PathVariable Long id, @Valid @RequestBody EditTermRequest request) {
+        adminAuthorizationService.requireAdmin();
+        Long actorId = currentActorService.getCurrentActorId();
+        return termComparisonService.editTagAndSync(id, request.name(), request.value(), request.slug(),
+                request.parentSlug(), request.description(), actorId).stream()
+                .map(BulkOperationLogResponse::from).toList();
+    }
+
+    @PostMapping("/{id}/bulk-management/tags/sync-all")
+    public List<BulkOperationLogResponse> syncAllTagsToMaster(@PathVariable Long id) {
+        adminAuthorizationService.requireAdmin();
+        Long actorId = currentActorService.getCurrentActorId();
+        return termComparisonService.syncAllTagsToMaster(id, actorId).stream()
                 .map(BulkOperationLogResponse::from).toList();
     }
 

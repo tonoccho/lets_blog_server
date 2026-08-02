@@ -9,6 +9,7 @@ import com.letsblog.api.cms.PostContent;
 import com.letsblog.api.cms.PostResult;
 import com.letsblog.api.cms.ssh.SshCommandExecutor.SshCommandResult;
 import com.letsblog.api.cms.ssh.SshCommandExecutor.SshConnectionParams;
+import com.letsblog.api.domain.BulkOperationType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -20,8 +21,12 @@ import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
 
 /**
  * SSH+wp-cli経由でWordPressを操作する実装。WordPressAdapterからtransport=SSHの
@@ -197,6 +202,301 @@ public class WordPressSshOperations {
                         + "リモートサーバーの $HOME/bin がPATHに含まれていない場合、"
                         + "投稿作成等の他のwp-cli操作が引き続き失敗することがあります。"
                         + "その場合はリモート側でPATHに追加してください。");
+    }
+
+    /**
+     * インストール済みプラグイン/テーマの一覧(name+status)を取得する
+     * (比較テーブルに使用。managed環境向けのWordPressBulkManagementClient#listPlugins/listThemesのSSH版)。
+     */
+    public List<PluginThemeInfo> listPlugins(WordPressCredentials creds) {
+        return listPluginsOrThemes(creds, "plugin");
+    }
+
+    public List<PluginThemeInfo> listThemes(WordPressCredentials creds) {
+        return listPluginsOrThemes(creds, "theme");
+    }
+
+    private List<PluginThemeInfo> listPluginsOrThemes(WordPressCredentials creds, String type) {
+        SshCommandResult result = exec(creds, wpCli(creds, pluginThemeListCommand(type)));
+        return parsePluginThemeList(result, type.equals("plugin") ? "プラグイン" : "テーマ");
+    }
+
+    private String pluginThemeListCommand(String type) {
+        return type + " list --fields=name,status --format=json";
+    }
+
+    private List<PluginThemeInfo> parsePluginThemeList(SshCommandResult result, String label) {
+        if (!result.ok()) {
+            throw new SshOperationException(label + "一覧の取得に失敗しました: " + firstLine(result.stderr(), result.stdout()));
+        }
+        List<JsonNode> items = parseJsonArray(result.stdout());
+        return items.stream()
+                .map(node -> new PluginThemeInfo(node.path("name").asText(), node.path("status").asText()))
+                .toList();
+    }
+
+    /**
+     * プラグイン/テーマのインストール・有効化・無効化・削除をwp-cli経由で行う。
+     * provision-agent(wordpress/provision-agent/index.php)の/bulk-managementハンドラと同じ挙動
+     * (インストール済みならskipped、失敗時は例外を投げずfailed()を返す)に揃える。
+     */
+    public SshApplyResult applyPluginTheme(WordPressCredentials creds, BulkOperationType type, String slug) {
+        try {
+            return switch (type) {
+                case PLUGIN_INSTALL -> installIfMissing(creds, "plugin", slug);
+                case THEME_INSTALL -> installIfMissing(creds, "theme", slug);
+                case PLUGIN_ACTIVATE -> runWpCli(creds, "plugin activate " + ShellQuote.single(slug), "プラグインの有効化");
+                case PLUGIN_DEACTIVATE ->
+                        runWpCli(creds, "plugin deactivate " + ShellQuote.single(slug), "プラグインの無効化");
+                case PLUGIN_DELETE -> {
+                    // 有効化されている場合に備え先に無効化を試みる(未有効化時のエラーは無視してよい)
+                    exec(creds, wpCli(creds, "plugin deactivate " + ShellQuote.single(slug)));
+                    yield runWpCli(creds, "plugin delete " + ShellQuote.single(slug), "プラグインの削除");
+                }
+                case THEME_ACTIVATE -> runWpCli(creds, "theme activate " + ShellQuote.single(slug), "テーマの有効化");
+                case THEME_DELETE -> runWpCli(creds, "theme delete " + ShellQuote.single(slug), "テーマの削除");
+                default -> throw new IllegalArgumentException("SSH経由ではサポートされていない操作です: " + type);
+            };
+        } catch (SshOperationException e) {
+            return SshApplyResult.failed(e.getMessage());
+        }
+    }
+
+    private SshApplyResult installIfMissing(WordPressCredentials creds, String type, String slug) {
+        List<PluginThemeInfo> installed = listPluginsOrThemes(creds, type);
+        if (installed.stream().anyMatch(info -> info.name().equals(slug))) {
+            return SshApplyResult.skipped();
+        }
+        return runWpCli(creds, type + " install " + ShellQuote.single(slug),
+                (type.equals("plugin") ? "プラグイン" : "テーマ") + "のインストール");
+    }
+
+    private SshApplyResult runWpCli(WordPressCredentials creds, String subcommand, String actionLabel) {
+        SshCommandResult result = exec(creds, wpCli(creds, subcommand));
+        if (!result.ok()) {
+            throw new SshOperationException(actionLabel + "に失敗しました: " + firstLine(result.stderr(), result.stdout()));
+        }
+        return SshApplyResult.success();
+    }
+
+    /**
+     * カテゴリ/タグ一覧を取得する(比較テーブルに使用。managed環境向けの
+     * WordPressBulkManagementClient#listCategories/listTagsのSSH版)。parent(term_id)は
+     * 同一取得結果内でslugへ解決する(provision-agentのfetchTerms()と同じ方針)。
+     */
+    public List<CategoryInfo> listCategories(WordPressCredentials creds) {
+        return listTerms(creds, "category");
+    }
+
+    public List<CategoryInfo> listTags(WordPressCredentials creds) {
+        return listTerms(creds, "post_tag");
+    }
+
+    private List<CategoryInfo> listTerms(WordPressCredentials creds, String taxonomy) {
+        SshCommandResult result = exec(creds, wpCli(creds, termListCommand(taxonomy)));
+        return parseTerms(result, taxonomy.equals("category") ? "カテゴリ" : "タグ");
+    }
+
+    private String termListCommand(String taxonomy) {
+        return "term list " + taxonomy + " --fields=term_id,name,slug,parent,description --format=json";
+    }
+
+    private List<CategoryInfo> parseTerms(SshCommandResult result, String label) {
+        if (!result.ok()) {
+            throw new SshOperationException(label + "一覧の取得に失敗しました: " + firstLine(result.stderr(), result.stdout()));
+        }
+        List<JsonNode> terms = parseJsonArray(result.stdout());
+        Map<String, String> slugByTermId = new HashMap<>();
+        for (JsonNode term : terms) {
+            slugByTermId.put(term.path("term_id").asText(), term.path("slug").asText());
+        }
+        return terms.stream()
+                .map(term -> {
+                    String parentId = term.path("parent").asText("0");
+                    String parentSlug = !"0".equals(parentId) ? slugByTermId.get(parentId) : null;
+                    return new CategoryInfo(term.path("term_id").asText(), term.path("name").asText(),
+                            term.path("slug").asText(), parentSlug, term.path("description").asText());
+                })
+                .toList();
+    }
+
+    /**
+     * 複数環境が同一SSHホストを使っている場合に、1回の接続(環境ごとに別セッション)で
+     * まとめてカテゴリ/タグ一覧を取得する。credsByEnvironmentの値群はhost/port/user/鍵が
+     * 同一であることを前提とする(呼び出し元がホスト単位でグルーピングして渡す。wpPathだけ
+     * 環境ごとに異なってよい)。接続自体が失敗した場合は全環境に同じエラーを設定し、
+     * 1コマンド分だけの失敗(その環境のwp-cli実行エラー)はその環境だけをエラーにする。
+     */
+    public EnvironmentFetchResult<CategoryInfo> fetchTermsForEnvironments(
+            String taxonomy, Map<String, WordPressCredentials> credsByEnvironment) {
+        String label = taxonomy.equals("category") ? "カテゴリ" : "タグ";
+        return fetchForEnvironments(credsByEnvironment,
+                creds -> termListCommand(taxonomy),
+                result -> parseTerms(result, label));
+    }
+
+    /**
+     * {@link #fetchTermsForEnvironments}のプラグイン/テーマ版。
+     */
+    public EnvironmentFetchResult<PluginThemeInfo> fetchPluginsOrThemesForEnvironments(
+            String type, Map<String, WordPressCredentials> credsByEnvironment) {
+        String label = type.equals("plugin") ? "プラグイン" : "テーマ";
+        return fetchForEnvironments(credsByEnvironment,
+                creds -> pluginThemeListCommand(type),
+                result -> parsePluginThemeList(result, label));
+    }
+
+    private <T> EnvironmentFetchResult<T> fetchForEnvironments(
+            Map<String, WordPressCredentials> credsByEnvironment,
+            Function<WordPressCredentials, String> commandBuilder,
+            Function<SshCommandResult, List<T>> parser) {
+        List<String> environments = new ArrayList<>(credsByEnvironment.keySet());
+        List<String> commands = environments.stream()
+                .map(env -> wpCli(credsByEnvironment.get(env), commandBuilder.apply(credsByEnvironment.get(env))))
+                .toList();
+
+        List<SshCommandResult> results;
+        try {
+            results = executor.execAll(connectionParams(credsByEnvironment.get(environments.get(0))), commands);
+        } catch (SshOperationException e) {
+            Map<String, String> errors = new LinkedHashMap<>();
+            environments.forEach(env -> errors.put(env, e.getMessage()));
+            return new EnvironmentFetchResult<>(Map.of(), errors);
+        }
+
+        Map<String, List<T>> byEnvironment = new LinkedHashMap<>();
+        Map<String, String> errorByEnvironment = new LinkedHashMap<>();
+        for (int i = 0; i < environments.size(); i++) {
+            String environment = environments.get(i);
+            try {
+                byEnvironment.put(environment, parser.apply(results.get(i)));
+            } catch (SshOperationException e) {
+                errorByEnvironment.put(environment, e.getMessage());
+            }
+        }
+        return new EnvironmentFetchResult<>(byEnvironment, errorByEnvironment);
+    }
+
+    public record EnvironmentFetchResult<T>(Map<String, List<T>> byEnvironment, Map<String, String> errorByEnvironment) {
+    }
+
+    /**
+     * カテゴリ/タグの作成・編集・削除をwp-cli経由で行う。provision-agentの/bulk-management
+     * ハンドラ(category_create/category_edit/category_delete、tagはtaxonomy=post_tagで共用)と
+     * 同じ挙動(作成済みならskipped、削除対象が既に無ければskipped、失敗時はfailed()を返す)に揃える。
+     */
+    public SshApplyResult applyTerm(
+            WordPressCredentials creds, BulkOperationType type, String value, String slug, String parentSlug,
+            String description, String targetSlug) {
+        try {
+            String taxonomy = (type == BulkOperationType.CATEGORY_CREATE || type == BulkOperationType.CATEGORY_EDIT
+                    || type == BulkOperationType.CATEGORY_DELETE) ? "category" : "post_tag";
+            return switch (type) {
+                case CATEGORY_CREATE, TAG_CREATE -> createTerm(creds, taxonomy, value, slug, parentSlug, description);
+                case CATEGORY_EDIT, TAG_EDIT ->
+                        updateTerm(creds, taxonomy, value, slug, parentSlug, description, targetSlug);
+                case CATEGORY_DELETE, TAG_DELETE -> deleteTerm(creds, taxonomy, targetSlug);
+                default -> throw new IllegalArgumentException("SSH経由ではサポートされていない操作です: " + type);
+            };
+        } catch (SshOperationException e) {
+            return SshApplyResult.failed(e.getMessage());
+        }
+    }
+
+    private SshApplyResult createTerm(
+            WordPressCredentials creds, String taxonomy, String value, String slug, String parentSlug,
+            String description) {
+        List<CategoryInfo> terms = listTerms(creds, taxonomy);
+        if (findBySlug(terms, slug) != null) {
+            return SshApplyResult.skipped();
+        }
+        StringBuilder command = new StringBuilder("term create ").append(taxonomy).append(" ")
+                .append(ShellQuote.single(value)).append(" --slug=").append(ShellQuote.single(slug))
+                .append(" --porcelain");
+        if (description != null && !description.isBlank()) {
+            command.append(" --description=").append(ShellQuote.single(description));
+        }
+        if ("category".equals(taxonomy) && parentSlug != null && !parentSlug.isBlank()) {
+            CategoryInfo parent = findBySlug(terms, parentSlug);
+            if (parent == null) {
+                throw new SshOperationException("親カテゴリ(slug: " + parentSlug + ")が見つかりません");
+            }
+            command.append(" --parent=").append(parent.termId());
+        }
+        SshCommandResult result = exec(creds, wpCli(creds, command.toString()));
+        if (!result.ok()) {
+            throw new SshOperationException("作成に失敗しました: " + firstLine(result.stderr(), result.stdout()));
+        }
+        return SshApplyResult.success();
+    }
+
+    private SshApplyResult updateTerm(
+            WordPressCredentials creds, String taxonomy, String value, String slug, String parentSlug,
+            String description, String targetSlug) {
+        List<CategoryInfo> terms = listTerms(creds, taxonomy);
+        CategoryInfo target = findBySlug(terms, targetSlug);
+        if (target == null) {
+            throw new SshOperationException("対象(slug: " + targetSlug + ")が見つかりません");
+        }
+        StringBuilder command = new StringBuilder("term update ").append(taxonomy).append(" ").append(target.termId())
+                .append(" --name=").append(ShellQuote.single(value))
+                .append(" --slug=").append(ShellQuote.single(slug));
+        if (description != null && !description.isBlank()) {
+            command.append(" --description=").append(ShellQuote.single(description));
+        }
+        if ("category".equals(taxonomy) && parentSlug != null && !parentSlug.isBlank()) {
+            CategoryInfo parent = findBySlug(terms, parentSlug);
+            if (parent == null) {
+                throw new SshOperationException("親カテゴリ(slug: " + parentSlug + ")が見つかりません");
+            }
+            if (parent.termId().equals(target.termId())) {
+                throw new SshOperationException("親カテゴリに自分自身は指定できません");
+            }
+            command.append(" --parent=").append(parent.termId());
+        }
+        SshCommandResult result = exec(creds, wpCli(creds, command.toString()));
+        if (!result.ok()) {
+            throw new SshOperationException("更新に失敗しました: " + firstLine(result.stderr(), result.stdout()));
+        }
+        return SshApplyResult.success();
+    }
+
+    private SshApplyResult deleteTerm(WordPressCredentials creds, String taxonomy, String targetSlug) {
+        List<CategoryInfo> terms = listTerms(creds, taxonomy);
+        CategoryInfo target = findBySlug(terms, targetSlug);
+        if (target == null) {
+            // 既に存在しない = 目的達成済みとみなす(provision-agentの/bulk-managementと同じ方針)
+            return SshApplyResult.skipped();
+        }
+        SshCommandResult result = exec(creds, wpCli(creds, "term delete " + taxonomy + " " + target.termId()));
+        if (!result.ok()) {
+            throw new SshOperationException("削除に失敗しました: " + firstLine(result.stderr(), result.stdout()));
+        }
+        return SshApplyResult.success();
+    }
+
+    private CategoryInfo findBySlug(List<CategoryInfo> terms, String slug) {
+        return terms.stream().filter(t -> t.slug().equalsIgnoreCase(slug)).findFirst().orElse(null);
+    }
+
+    public record CategoryInfo(String termId, String name, String slug, String parentSlug, String description) {
+    }
+
+    public record PluginThemeInfo(String name, String status) {
+    }
+
+    public record SshApplyResult(String status, String errorMessage) {
+        public static SshApplyResult success() {
+            return new SshApplyResult("SUCCESS", null);
+        }
+
+        public static SshApplyResult skipped() {
+            return new SshApplyResult("SKIPPED", null);
+        }
+
+        public static SshApplyResult failed(String message) {
+            return new SshApplyResult("FAILED", message);
+        }
     }
 
     private String findExistingAuthorId(WordPressCredentials creds, String email) {

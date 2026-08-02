@@ -1,5 +1,9 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.cms.CmsApiException;
+import com.letsblog.api.cms.CmsCredentials;
+import com.letsblog.api.cms.rest.WordPressRestBulkManagementOperations;
+import com.letsblog.api.cms.ssh.WordPressSshOperations;
 import com.letsblog.api.domain.BulkOperationLog;
 import com.letsblog.api.domain.BulkOperationType;
 import com.letsblog.api.domain.Project;
@@ -9,9 +13,9 @@ import com.letsblog.api.dto.StatusComparisonPage;
 import com.letsblog.api.dto.StatusComparisonRow;
 import com.letsblog.api.dto.StatusEnvironmentValue;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient;
-import com.letsblog.api.provisioning.WordPressBulkManagementClient.PluginThemeInfo;
 import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.SiteRepository;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,16 +26,22 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Function;
 
 /**
  * プラグイン・テーマを3環境(ローカル/テスト/本番)で横断比較し、行(slug)ごとに
  * 環境単位で希望状態(未インストール/無効/有効)へ反映する({@link #reconcilePlugin}/{@link #reconcileTheme})、
  * または全環境から削除する({@link #deletePluginEverywhere}/{@link #deleteThemeEverywhere})。
  * カテゴリ/タグの{@link TermComparisonService}と異なり、slugそのものが環境間で共通のwordpress.org識別子のため
- * 名寄せの曖昧さはない。実際のwp-cli呼び出し・ログ記録は{@link BulkManagementService#applyToEnvironment}に委譲する。
+ * 名寄せの曖昧さはない。実際のwp-cli/REST呼び出し・ログ記録は{@link BulkManagementService#applyToEnvironment}に
+ * 委譲する(書き込み時のREST/SSH優先順位・テーマ書き込みのSSH限定はBulkManagementService側で判定する)。
+ * <p>
+ * 読み取り(一覧取得)は{@link #resolveInfosByEnvironment}に集約する。managedサイトは内部エージェント、
+ * 非managedサイトはREST優先・無ければSSH(テーマの一覧取得はコアREST APIでも可能)、SSHのみで解決する
+ * 環境が同一ホストを共有していれば{@link WordPressSshOperations#fetchPluginsOrThemesForEnvironments}で
+ * 1回の接続にまとめる。取得に失敗した環境は「対象外」ではなく「エラー」として扱い、作業ログにも記録する。
  */
 @Service
+@Slf4j
 public class PluginThemeComparisonService {
 
     private static final List<String> ENVIRONMENT_ORDER = List.of("local", "test", "production");
@@ -43,26 +53,35 @@ public class PluginThemeComparisonService {
     private final SiteRepository siteRepository;
     private final WordPressBulkManagementClient bulkManagementClient;
     private final BulkManagementService bulkManagementService;
+    private final SiteService siteService;
+    private final WordPressSshOperations sshOperations;
+    private final WordPressRestBulkManagementOperations restOperations;
 
     public PluginThemeComparisonService(
             ProjectRepository projectRepository,
             SiteRepository siteRepository,
             WordPressBulkManagementClient bulkManagementClient,
-            BulkManagementService bulkManagementService) {
+            BulkManagementService bulkManagementService,
+            SiteService siteService,
+            WordPressSshOperations sshOperations,
+            WordPressRestBulkManagementOperations restOperations) {
         this.projectRepository = projectRepository;
         this.siteRepository = siteRepository;
         this.bulkManagementClient = bulkManagementClient;
         this.bulkManagementService = bulkManagementService;
+        this.siteService = siteService;
+        this.sshOperations = sshOperations;
+        this.restOperations = restOperations;
     }
 
     @Transactional(readOnly = true)
     public StatusComparisonPage listPluginComparison(Long projectId, int page, int size) {
-        return listComparison(projectId, page, size, bulkManagementClient::listPlugins);
+        return listComparison(projectId, page, size, false);
     }
 
     @Transactional(readOnly = true)
     public StatusComparisonPage listThemeComparison(Long projectId, int page, int size) {
-        return listComparison(projectId, page, size, bulkManagementClient::listThemes);
+        return listComparison(projectId, page, size, true);
     }
 
     @Transactional
@@ -87,23 +106,17 @@ public class PluginThemeComparisonService {
         return deleteEverywhere(projectId, slug, actorId, true);
     }
 
-    private StatusComparisonPage listComparison(
-            Long projectId, int page, int size, Function<String, List<PluginThemeInfo>> fetcher) {
+    private StatusComparisonPage listComparison(Long projectId, int page, int size, boolean isTheme) {
         Project project = getProject(projectId);
         String masterEnvironment = project.getMasterEnvironment();
-
-        Map<String, List<PluginThemeInfo>> byEnvironment = new LinkedHashMap<>();
-        for (String environment : ENVIRONMENT_ORDER) {
-            Site site = resolveOptionalManagedSite(project, environment);
-            byEnvironment.put(environment, site != null ? fetcher.apply(site.getWpSlug()) : null);
-        }
+        Map<String, EnvironmentInfos> byEnvironment = resolveInfosByEnvironment(project, isTheme);
 
         Set<String> slugs = new LinkedHashSet<>();
-        for (List<PluginThemeInfo> infos : byEnvironment.values()) {
-            if (infos == null) {
+        for (EnvironmentInfos envInfos : byEnvironment.values()) {
+            if (envInfos.infos() == null) {
                 continue;
             }
-            infos.forEach(info -> slugs.add(info.name()));
+            envInfos.infos().forEach(info -> slugs.add(info.name()));
         }
 
         List<StatusComparisonRow> rows = slugs.stream()
@@ -119,7 +132,7 @@ public class PluginThemeComparisonService {
         return new StatusComparisonPage(pageItems, page, size, totalCount, masterEnvironment);
     }
 
-    private StatusComparisonRow toRow(String slug, Map<String, List<PluginThemeInfo>> byEnvironment) {
+    private StatusComparisonRow toRow(String slug, Map<String, EnvironmentInfos> byEnvironment) {
         return new StatusComparisonRow(
                 slug,
                 toValue(slug, byEnvironment.get("local")),
@@ -127,11 +140,14 @@ public class PluginThemeComparisonService {
                 toValue(slug, byEnvironment.get("production")));
     }
 
-    private StatusEnvironmentValue toValue(String slug, List<PluginThemeInfo> infos) {
-        if (infos == null) {
+    private StatusEnvironmentValue toValue(String slug, EnvironmentInfos envInfos) {
+        if (envInfos.error()) {
+            return StatusEnvironmentValue.error(envInfos.errorMessage());
+        }
+        if (envInfos.infos() == null) {
             return StatusEnvironmentValue.unavailable();
         }
-        return infos.stream()
+        return envInfos.infos().stream()
                 .filter(info -> info.name().equals(slug))
                 .findFirst()
                 .map(info -> StatusEnvironmentValue.of("active".equalsIgnoreCase(info.status()) ? ACTIVE : INACTIVE))
@@ -141,14 +157,16 @@ public class PluginThemeComparisonService {
     private List<BulkOperationLog> reconcile(
             Long projectId, String slug, List<StateChangeRequest> changes, Long actorId, boolean isTheme) {
         Project project = getProject(projectId);
-        Function<String, List<PluginThemeInfo>> fetcher = isTheme
-                ? bulkManagementClient::listThemes
-                : bulkManagementClient::listPlugins;
+        Map<String, EnvironmentInfos> byEnvironment = resolveInfosByEnvironment(project, isTheme);
 
         List<BulkOperationLog> results = new ArrayList<>();
         for (StateChangeRequest change : changes) {
-            Site site = resolveManagedSiteOrThrow(project, change.environment());
-            String currentStatus = toValue(slug, fetcher.apply(site.getWpSlug())).status();
+            EnvironmentInfos envInfos = byEnvironment.get(change.environment());
+            if (envInfos == null || envInfos.infos() == null) {
+                throw new IllegalArgumentException(
+                        change.environment() + "環境は対象外です(自動構築サイト・REST・SSHのいずれも利用できません)");
+            }
+            String currentStatus = toValue(slug, envInfos).status();
             for (BulkOperationType step : stepsFor(currentStatus, change.desiredStatus(), isTheme)) {
                 results.add(bulkManagementService.applyToEnvironment(
                         projectId, change.environment(), step, slug, null, null, null, null, actorId));
@@ -185,18 +203,16 @@ public class PluginThemeComparisonService {
 
     private List<BulkOperationLog> deleteEverywhere(Long projectId, String slug, Long actorId, boolean isTheme) {
         Project project = getProject(projectId);
-        Function<String, List<PluginThemeInfo>> fetcher = isTheme
-                ? bulkManagementClient::listThemes
-                : bulkManagementClient::listPlugins;
+        Map<String, EnvironmentInfos> byEnvironment = resolveInfosByEnvironment(project, isTheme);
         BulkOperationType deleteType = isTheme ? BulkOperationType.THEME_DELETE : BulkOperationType.PLUGIN_DELETE;
 
         List<BulkOperationLog> results = new ArrayList<>();
         for (String environment : ENVIRONMENT_ORDER) {
-            Site site = resolveOptionalManagedSite(project, environment);
-            if (site == null) {
+            EnvironmentInfos envInfos = byEnvironment.get(environment);
+            if (envInfos.infos() == null) {
                 continue;
             }
-            String status = toValue(slug, fetcher.apply(site.getWpSlug())).status();
+            String status = toValue(slug, envInfos).status();
             if (NOT_INSTALLED.equals(status)) {
                 continue;
             }
@@ -209,30 +225,131 @@ public class PluginThemeComparisonService {
         return results;
     }
 
-    private Site resolveManagedSiteOrThrow(Project project, String environment) {
-        Site site = resolveOptionalManagedSite(project, environment);
-        if (site == null) {
-            throw new IllegalArgumentException(environment + "環境には自動構築サイトが紐付けられていません");
+    /**
+     * 3環境分のプラグイン/テーマ一覧を、環境ごとの経路(managed=内部エージェント、REST優先、無ければSSH)で
+     * 解決する。SSHのみで解決する環境が複数あり同一ホスト(sshHost:sshPort)を共有している場合は、
+     * ホストごとにまとめて{@link WordPressSshOperations#fetchPluginsOrThemesForEnvironments}で
+     * 1回の接続にする。取得に失敗した環境は{@link EnvironmentInfos#error}にし、作業ログにも記録する。
+     */
+    private Map<String, EnvironmentInfos> resolveInfosByEnvironment(Project project, boolean isTheme) {
+        Map<String, EnvironmentInfos> result = new LinkedHashMap<>();
+        Map<String, Map<String, CmsCredentials.WordPressCredentials>> sshGroupsByHost = new LinkedHashMap<>();
+
+        for (String environment : ENVIRONMENT_ORDER) {
+            Site site = resolveSite(project, environment);
+            if (site == null) {
+                result.put(environment, EnvironmentInfos.unavailable());
+                continue;
+            }
+            if (site.isManagedWordpress()) {
+                result.put(environment, fetchViaAgent(site, isTheme));
+                continue;
+            }
+            SiteService.SiteDataSource dataSource = siteService.resolveDataSource(site);
+            if (dataSource.hasRest()) {
+                result.put(environment, fetchViaRest(project, environment, dataSource.restCredentials(), isTheme));
+                continue;
+            }
+            if (dataSource.hasSsh()) {
+                String hostKey = hostKeyOf(dataSource.sshCredentials());
+                sshGroupsByHost.computeIfAbsent(hostKey, k -> new LinkedHashMap<>())
+                        .put(environment, dataSource.sshCredentials());
+                continue;
+            }
+            result.put(environment, EnvironmentInfos.unavailable());
         }
-        return site;
+
+        for (Map<String, CmsCredentials.WordPressCredentials> group : sshGroupsByHost.values()) {
+            WordPressSshOperations.EnvironmentFetchResult<WordPressSshOperations.PluginThemeInfo> fetchResult =
+                    sshOperations.fetchPluginsOrThemesForEnvironments(isTheme ? "theme" : "plugin", group);
+            for (String environment : group.keySet()) {
+                String error = fetchResult.errorByEnvironment().get(environment);
+                if (error != null) {
+                    logFetchError(project, environment, isTheme, error);
+                    result.put(environment, EnvironmentInfos.error(error));
+                } else {
+                    List<PluginThemeInfo> infos = fetchResult.byEnvironment()
+                            .getOrDefault(environment, List.of()).stream()
+                            .map(info -> new PluginThemeInfo(info.name(), info.status()))
+                            .toList();
+                    result.put(environment, EnvironmentInfos.of(infos));
+                }
+            }
+        }
+        return result;
     }
 
-    private Site resolveOptionalManagedSite(Project project, String environment) {
+    private EnvironmentInfos fetchViaAgent(Site site, boolean isTheme) {
+        List<WordPressBulkManagementClient.PluginThemeInfo> infos = isTheme
+                ? bulkManagementClient.listThemes(site.getWpSlug())
+                : bulkManagementClient.listPlugins(site.getWpSlug());
+        return EnvironmentInfos.of(infos.stream()
+                .map(info -> new PluginThemeInfo(info.name(), info.status()))
+                .toList());
+    }
+
+    private EnvironmentInfos fetchViaRest(
+            Project project, String environment, CmsCredentials.WordPressCredentials creds, boolean isTheme) {
+        try {
+            List<WordPressRestBulkManagementOperations.PluginThemeInfo> infos = isTheme
+                    ? restOperations.listThemes(creds)
+                    : restOperations.listPlugins(creds);
+            return EnvironmentInfos.of(infos.stream()
+                    .map(info -> new PluginThemeInfo(info.name(), info.status()))
+                    .toList());
+        } catch (CmsApiException e) {
+            logFetchError(project, environment, isTheme, e.getMessage());
+            return EnvironmentInfos.error(e.getMessage());
+        }
+    }
+
+    private String hostKeyOf(CmsCredentials.WordPressCredentials creds) {
+        return creds.sshHost() + ":" + (creds.sshPort() != null ? creds.sshPort() : 22);
+    }
+
+    private void logFetchError(Project project, String environment, boolean isTheme, String message) {
+        log.warn("{}一覧取得に失敗しました(project={}, environment={}): {}",
+                isTheme ? "テーマ" : "プラグイン", project.getId(), environment, message);
+        bulkManagementService.logFetchFailure(project.getId(),
+                isTheme ? BulkOperationType.THEME_FETCH : BulkOperationType.PLUGIN_FETCH, environment, message);
+    }
+
+    /**
+     * 環境に紐付いたサイトを、managed/非managedを問わず返す(紐付けなしはnull)。
+     */
+    private Site resolveSite(Project project, String environment) {
         Long siteId = switch (environment) {
             case "local" -> project.getLocalSiteId();
             case "test" -> project.getTestSiteId();
             case "production" -> project.getProductionSiteId();
             default -> null;
         };
-        if (siteId == null) {
-            return null;
-        }
-        Site site = siteRepository.findById(siteId).orElse(null);
-        return (site != null && site.isManagedWordpress()) ? site : null;
+        return siteId == null ? null : siteRepository.findById(siteId).orElse(null);
     }
 
     private Project getProject(Long projectId) {
         return projectRepository.findById(projectId)
                 .orElseThrow(() -> new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません"));
+    }
+
+    private record PluginThemeInfo(String name, String status) {
+    }
+
+    /**
+     * 1環境分の取得結果。infos=null かつ error=false は「対象外」、infos=null かつ error=true は
+     * 「取得を試みて失敗」を表す(StatusEnvironmentValueへの変換時にこの2つを区別する)。
+     */
+    private record EnvironmentInfos(List<PluginThemeInfo> infos, boolean error, String errorMessage) {
+        static EnvironmentInfos unavailable() {
+            return new EnvironmentInfos(null, false, null);
+        }
+
+        static EnvironmentInfos error(String errorMessage) {
+            return new EnvironmentInfos(null, true, errorMessage);
+        }
+
+        static EnvironmentInfos of(List<PluginThemeInfo> infos) {
+            return new EnvironmentInfos(infos, false, null);
+        }
     }
 }

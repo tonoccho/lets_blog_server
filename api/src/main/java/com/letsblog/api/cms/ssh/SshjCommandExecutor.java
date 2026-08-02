@@ -18,14 +18,18 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.security.PublicKey;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * sshjを使ったSshCommandExecutorの実装。呼び出しごとに新規接続・認証・切断する
+ * sshjを使ったSshCommandExecutorの実装。exec()の呼び出しごとに新規接続・認証・切断する
  * (コネクションプーリングはしない。疎通確認・プロビジョニングは頻度が低いため、
- * ハンドシェイクのオーバーヘッドよりも実装のシンプルさを優先する)。
+ * ハンドシェイクのオーバーヘッドよりも実装のシンプルさを優先する)。execAll()は例外的に、
+ * 複数コマンドの実行に対して接続確立を1回だけに抑える(比較テーブルの初期表示のように
+ * 同じホストへ複数種類の一覧取得をまとめて行う場合、種類ごとに新規接続すると同時接続数を
+ * 制限する共有ホスティングでConnection refusedになりやすいため)。
  *
  * ホスト鍵のfingerprintは接続のたびにローカル変数で捕捉しSshCommandResultに載せて返す
  * (シングルトンbeanのインスタンスフィールドに保持すると、並行接続時にfingerprintを
@@ -42,21 +46,39 @@ public class SshjCommandExecutor implements SshCommandExecutor {
     public SshCommandResult exec(SshConnectionParams params, String command, byte[] stdin) {
         AtomicReference<String> observedFingerprint = new AtomicReference<>();
         try (SSHClient client = connect(params, observedFingerprint)) {
-            try (Session session = client.startSession()) {
-                Session.Command cmd = session.exec(command);
-                if (stdin != null) {
-                    cmd.getOutputStream().write(stdin);
-                    cmd.getOutputStream().close();
-                }
-                String stdout = IOUtils.readFully(cmd.getInputStream()).toString(StandardCharsets.UTF_8);
-                String stderr = IOUtils.readFully(cmd.getErrorStream()).toString(StandardCharsets.UTF_8);
-                cmd.join(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                Integer exitStatus = cmd.getExitStatus();
-                return new SshCommandResult(exitStatus != null ? exitStatus : -1, stdout, stderr,
-                        observedFingerprint.get());
-            }
+            return execInSession(client, command, stdin, observedFingerprint.get());
         } catch (IOException e) {
             throw new SshOperationException("SSHコマンド実行に失敗しました (host=" + params.host() + "): " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public List<SshCommandResult> execAll(SshConnectionParams params, List<String> commands) {
+        AtomicReference<String> observedFingerprint = new AtomicReference<>();
+        try (SSHClient client = connect(params, observedFingerprint)) {
+            List<SshCommandResult> results = new ArrayList<>();
+            for (String command : commands) {
+                results.add(execInSession(client, command, null, observedFingerprint.get()));
+            }
+            return results;
+        } catch (IOException e) {
+            throw new SshOperationException("SSHコマンド実行に失敗しました (host=" + params.host() + "): " + e.getMessage(), e);
+        }
+    }
+
+    private SshCommandResult execInSession(SSHClient client, String command, byte[] stdin, String fingerprint)
+            throws IOException {
+        try (Session session = client.startSession()) {
+            Session.Command cmd = session.exec(command);
+            if (stdin != null) {
+                cmd.getOutputStream().write(stdin);
+                cmd.getOutputStream().close();
+            }
+            String stdout = IOUtils.readFully(cmd.getInputStream()).toString(StandardCharsets.UTF_8);
+            String stderr = IOUtils.readFully(cmd.getErrorStream()).toString(StandardCharsets.UTF_8);
+            cmd.join(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            Integer exitStatus = cmd.getExitStatus();
+            return new SshCommandResult(exitStatus != null ? exitStatus : -1, stdout, stderr, fingerprint);
         }
     }
 

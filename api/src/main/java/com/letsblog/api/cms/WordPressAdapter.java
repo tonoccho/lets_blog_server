@@ -375,6 +375,11 @@ public class WordPressAdapter implements CmsAdapter {
         return sshOperations.installWpCli(creds);
     }
 
+    /**
+     * デフォルトのJDK HttpClientが送るUser-Agent(例: "Java-http-client/21")やAcceptヘッダ未指定は、
+     * 一部レンタルサーバーのMod_Security(WAF)に「406 Not Acceptable」でブロックされることがあるため、
+     * ブラウザ相当のUser-AgentとAcceptヘッダを明示的に付与する。
+     */
     private RestClient buildClient(CmsCredentials.WordPressCredentials credentials) {
         String token = Base64.getEncoder().encodeToString(
                 (credentials.username() + ":" + credentials.appPassword()).getBytes(StandardCharsets.UTF_8));
@@ -382,6 +387,9 @@ public class WordPressAdapter implements CmsAdapter {
         return restClientBuilder.clone()
                 .baseUrl(credentials.baseUrl())
                 .defaultHeader(HttpHeaders.AUTHORIZATION, "Basic " + token)
+                .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
+                .defaultHeader(HttpHeaders.USER_AGENT,
+                        "Mozilla/5.0 (compatible; LetsBlogBulkManagement/1.0; +https://letsblog.local)")
                 .build();
     }
 }

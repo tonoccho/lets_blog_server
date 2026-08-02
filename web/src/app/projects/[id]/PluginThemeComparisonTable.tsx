@@ -105,14 +105,29 @@ export function PluginThemeComparisonTable({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-neutral-500">
           マスター環境: <span className="font-medium text-neutral-700">{ENVIRONMENT_LABEL[master]}</span>
+          (取得エラーは「エラー」で表示されます)
         </p>
-        <button
-          type="button"
-          onClick={() => setShowNewForm((v) => !v)}
-          className="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white"
-        >
-          + 新規インストール
-        </button>
+        <div className="flex flex-wrap gap-2">
+          {ENVIRONMENTS.map((env) => (
+            <button
+              key={env}
+              type="button"
+              disabled={loading}
+              onClick={() => goToPage(pageData.page)}
+              className="rounded bg-neutral-100 px-3 py-1.5 text-sm text-neutral-700 disabled:opacity-50"
+              title={`${ENVIRONMENT_LABEL[env]}環境を含め、この一覧を再取得します`}
+            >
+              {ENVIRONMENT_LABEL[env]}を更新
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setShowNewForm((v) => !v)}
+            className="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white"
+          >
+            + 新規インストール
+          </button>
+        </div>
       </div>
 
       {message && (
@@ -151,6 +166,13 @@ export function PluginThemeComparisonTable({
                   <td className="px-2 py-1.5 font-medium text-neutral-700">{row.slug}</td>
                   {ENVIRONMENTS.map((env) => {
                     const value = row[env];
+                    if (value.error) {
+                      return (
+                        <td key={env} className="px-2 py-1.5 text-red-600" title={value.errorMessage ?? undefined}>
+                          エラー
+                        </td>
+                      );
+                    }
                     if (!value.available || !value.status) {
                       return (
                         <td key={env} className="px-2 py-1.5 text-neutral-300">

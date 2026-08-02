@@ -1,5 +1,7 @@
 package com.letsblog.api.cms.ssh;
 
+import java.util.List;
+
 /**
  * SSH経由でのコマンド実行・ファイル転送を抽象化するインターフェース。
  * WordPressSshOperationsはこれにのみ依存し、単体テストではモックに差し替える。
@@ -11,6 +13,14 @@ public interface SshCommandExecutor {
      * (大きなHTML本文をシェル引数として展開せず安全に渡すため)。
      */
     SshCommandResult exec(SshConnectionParams params, String command, byte[] stdin);
+
+    /**
+     * 1回の接続確立で複数のコマンドを順番に実行する(コマンドごとに別セッションを使うが、
+     * 接続・認証は1回だけ)。比較テーブルの初期表示のように、同じホストへ複数種類の一覧取得を
+     * まとめて行う場合に使う(接続のたびに新規TCP接続・認証をする{@link #exec}を種類ごとに
+     * 呼ぶと、同時接続数を制限している共有ホスティングでConnection refusedになりやすいため)。
+     */
+    List<SshCommandResult> execAll(SshConnectionParams params, List<String> commands);
 
     /**
      * バイト列をリモートの指定パスへ転送する(SFTP)。

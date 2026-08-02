@@ -2,7 +2,14 @@
 
 import { useState } from "react";
 import type { ProjectEnvironment, TermComparisonPage, TermComparisonRow, TermEnvironmentValue } from "@/lib/apiClient";
-import { applyToEnvironmentAction, syncTermToMasterAction, deleteTermEverywhereAction, fetchTermComparisonAction } from "./actions";
+import {
+  applyToEnvironmentAction,
+  syncTermToMasterAction,
+  deleteTermEverywhereAction,
+  fetchTermComparisonAction,
+  editTermAndSyncAction,
+  syncAllTermsToMasterAction,
+} from "./actions";
 
 const ENVIRONMENT_LABEL: Record<ProjectEnvironment, string> = {
   local: "ローカル",
@@ -68,20 +75,60 @@ export function TermComparisonTable({
     await goToPage(pageData.page);
   }
 
+  async function handleSyncAll() {
+    if (
+      !window.confirm(
+        `マスター環境(${ENVIRONMENT_LABEL[master]})と異なる${label}をすべて、マスター環境の内容で上書きします。よろしいですか?`
+      )
+    ) {
+      return;
+    }
+    const result = await syncAllTermsToMasterAction(projectId, kind);
+    if (result.error) {
+      setMessage({ type: "error", text: result.error });
+    } else if (!result.results || result.results.length === 0) {
+      setMessage({ type: "success", text: "マスターとの差分はありませんでした。" });
+    } else {
+      setMessage({ type: "success", text: `${result.results.length}件の操作でマスターに揃えました。` });
+    }
+    await goToPage(pageData.page);
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-neutral-500">
           マスター環境: <span className="font-medium text-neutral-700">{ENVIRONMENT_LABEL[master]}</span>
-          (マスターと異なる値は赤字で表示されます)
+          (マスターと異なる値は赤字、取得エラーは「エラー」で表示されます)
         </p>
-        <button
-          type="button"
-          onClick={() => setShowNewForm((v) => !v)}
-          className="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white"
-        >
-          + 新規追加
-        </button>
+        <div className="flex flex-wrap gap-2">
+          {(["local", "test", "production"] as ProjectEnvironment[]).map((env) => (
+            <button
+              key={env}
+              type="button"
+              disabled={loading}
+              onClick={() => goToPage(pageData.page)}
+              className="rounded bg-neutral-100 px-3 py-1.5 text-sm text-neutral-700 disabled:opacity-50"
+              title={`${ENVIRONMENT_LABEL[env]}環境を含め、この一覧を再取得します`}
+            >
+              {ENVIRONMENT_LABEL[env]}を更新
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={handleSyncAll}
+            className="rounded bg-neutral-100 px-3 py-1.5 text-sm text-neutral-700"
+          >
+            マスターに一括で揃える
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowNewForm((v) => !v)}
+            className="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white"
+          >
+            + 新規追加
+          </button>
+        </div>
       </div>
 
       {message && (
@@ -229,6 +276,13 @@ function AttributeRow({
 
   function cell(environment: ProjectEnvironment) {
     const value = valueOf(row, environment);
+    if (value.error) {
+      return (
+        <span className="text-red-600" title={value.errorMessage ?? undefined}>
+          エラー
+        </span>
+      );
+    }
     if (!value.available) {
       return <span className="text-neutral-300">対象外</span>;
     }
@@ -319,13 +373,23 @@ function EditItemForm({
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (
+      !window.confirm(
+        `保存すると、マスター環境(${ENVIRONMENT_LABEL[masterEnvironment]})以外の環境の内容も上書きされます。よろしいですか?`
+      )
+    ) {
+      return;
+    }
     const formData = new FormData(e.currentTarget);
-    formData.set("environment", masterEnvironment);
-    formData.set("operationType", kind === "category" ? "CATEGORY_EDIT" : "TAG_EDIT");
-    formData.set("categoryTargetSlug", masterValue.slug ?? "");
     setPending(true);
     setError(null);
-    const result = await applyToEnvironmentAction(projectId, {}, formData);
+    const result = await editTermAndSyncAction(projectId, kind, {
+      name: row.name,
+      value: String(formData.get("value") ?? ""),
+      slug: String(formData.get("categorySlug") ?? ""),
+      parentSlug: String(formData.get("categoryParentSlug") ?? "") || undefined,
+      description: String(formData.get("categoryDescription") ?? "") || undefined,
+    });
     setPending(false);
     if (result.error) {
       setError(result.error);
@@ -347,7 +411,7 @@ function EditItemForm({
         disabled={pending}
         className="rounded bg-neutral-900 px-3 py-2 text-white disabled:bg-neutral-200 disabled:text-neutral-600"
       >
-        {pending ? "保存中…" : "マスター環境を更新"}
+        {pending ? "保存中…" : "保存(全環境に反映)"}
       </button>
       {error && <p className="w-full text-red-600">{error}</p>}
     </form>

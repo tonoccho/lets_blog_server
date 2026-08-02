@@ -12,6 +12,8 @@ import type {
 import {
   runBulkOperationUploadAction,
   replayBulkOperationsAction,
+  fetchTermComparisonAction,
+  fetchStatusComparisonAction,
   BulkOperationState,
 } from "./actions";
 import { TermComparisonTable } from "./TermComparisonTable";
@@ -46,6 +48,10 @@ const OPERATION_LABEL: Record<BulkOperationType, string> = {
   THEME_INSTALL: "テーマインストール",
   THEME_ACTIVATE: "テーマ有効化",
   THEME_DELETE: "テーマ削除",
+  CATEGORY_FETCH: "カテゴリ取得",
+  TAG_FETCH: "タグ取得",
+  PLUGIN_FETCH: "プラグイン取得",
+  THEME_FETCH: "テーマ取得",
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -67,19 +73,19 @@ export function BulkManagementPanel({
   project,
   logs,
   categoryPage,
-  tagPage,
-  pluginPage,
-  themePage,
 }: {
   projectId: number;
   project: Project;
   logs: BulkOperationLog[];
   categoryPage: TermComparisonPage;
-  tagPage: TermComparisonPage;
-  pluginPage: StatusComparisonPage;
-  themePage: StatusComparisonPage;
 }) {
   const [tab, setTab] = useState<Tab>("CATEGORY");
+  // タグ・プラグイン・テーマは、そのタブを初めて開いたときにクライアント側から取得する
+  // (初期表示で4種類すべて並行取得すると、同一ホストのSSH接続が集中しやすいため)。
+  const [tagPage, setTagPage] = useState<TermComparisonPage | null>(null);
+  const [pluginPage, setPluginPage] = useState<StatusComparisonPage | null>(null);
+  const [themePage, setThemePage] = useState<StatusComparisonPage | null>(null);
+  const [loadingTab, setLoadingTab] = useState<Tab | null>(null);
   const [replayState, setReplayState] = useState<BulkOperationState | null>(null);
   const [replayPendingEnv, setReplayPendingEnv] = useState<ProjectEnvironment | null>(null);
 
@@ -92,6 +98,23 @@ export function BulkManagementPanel({
   )
     .filter(([, site]) => site?.managedWordpress)
     .map(([environment]) => ({ value: environment, label: ENVIRONMENT_LABEL[environment] }));
+
+  async function handleTabChange(nextTab: Tab) {
+    setTab(nextTab);
+    if (nextTab === "TAG" && tagPage === null) {
+      setLoadingTab(nextTab);
+      setTagPage(await fetchTermComparisonAction(projectId, "tag", 0));
+      setLoadingTab(null);
+    } else if (nextTab === "PLUGIN" && pluginPage === null) {
+      setLoadingTab(nextTab);
+      setPluginPage(await fetchStatusComparisonAction(projectId, "plugin", 0));
+      setLoadingTab(null);
+    } else if (nextTab === "THEME" && themePage === null) {
+      setLoadingTab(nextTab);
+      setThemePage(await fetchStatusComparisonAction(projectId, "theme", 0));
+      setLoadingTab(null);
+    }
+  }
 
   async function handleReplay(environment: ProjectEnvironment) {
     if (
@@ -118,8 +141,8 @@ export function BulkManagementPanel({
   }
 
   return (
-    <div className="space-y-6 rounded-lg border border-neutral-200 bg-white p-4">
-      <div>
+    <div className="space-y-6">
+      <div className="rounded-lg border border-neutral-200 bg-white p-4">
         <h3 className="mb-1 font-medium text-neutral-700">一括管理</h3>
         <p className="mb-3 text-sm text-neutral-500">
           紐付いている環境({managedEnvironments.map((e) => e.label).join("・")})の
@@ -131,7 +154,7 @@ export function BulkManagementPanel({
             <button
               key={t}
               type="button"
-              onClick={() => setTab(t)}
+              onClick={() => handleTabChange(t)}
               className={`rounded px-3 py-1.5 ${tab === t ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600"}`}
             >
               {TAB_LABEL[t]}
@@ -140,32 +163,45 @@ export function BulkManagementPanel({
         </div>
 
         {tab === "CATEGORY" && <TermComparisonTable projectId={projectId} kind="category" initialPage={categoryPage} />}
-        {tab === "TAG" && <TermComparisonTable projectId={projectId} kind="tag" initialPage={tagPage} />}
+        {tab === "TAG" &&
+          (tagPage ? (
+            <TermComparisonTable projectId={projectId} kind="tag" initialPage={tagPage} />
+          ) : (
+            <TabLoading loading={loadingTab === "TAG"} />
+          ))}
         {tab === "PLUGIN" && (
           <div className="space-y-4">
-            <PluginThemeComparisonTable
-              projectId={projectId}
-              kind="plugin"
-              initialPage={pluginPage}
-              managedEnvironments={managedEnvironments}
-            />
+            {pluginPage ? (
+              <PluginThemeComparisonTable
+                projectId={projectId}
+                kind="plugin"
+                initialPage={pluginPage}
+                managedEnvironments={managedEnvironments}
+              />
+            ) : (
+              <TabLoading loading={loadingTab === "PLUGIN"} />
+            )}
             <ZipUploadPanel projectId={projectId} operationType="PLUGIN_INSTALL" />
           </div>
         )}
         {tab === "THEME" && (
           <div className="space-y-4">
-            <PluginThemeComparisonTable
-              projectId={projectId}
-              kind="theme"
-              initialPage={themePage}
-              managedEnvironments={managedEnvironments}
-            />
+            {themePage ? (
+              <PluginThemeComparisonTable
+                projectId={projectId}
+                kind="theme"
+                initialPage={themePage}
+                managedEnvironments={managedEnvironments}
+              />
+            ) : (
+              <TabLoading loading={loadingTab === "THEME"} />
+            )}
             <ZipUploadPanel projectId={projectId} operationType="THEME_INSTALL" />
           </div>
         )}
       </div>
 
-      <div>
+      <div className="rounded-lg border border-neutral-200 bg-white p-4">
         <h3 className="mb-1 font-medium text-neutral-700">ロールフォワード</h3>
         <p className="mb-3 text-sm text-neutral-500">
           過去に成功した一括管理の内容を、指定した環境へまとめて再適用します(例: ローカル環境を再構築した後に使用)。
@@ -187,7 +223,7 @@ export function BulkManagementPanel({
         {replayState?.results && <ResultList results={replayState.results} />}
       </div>
 
-      <div>
+      <div className="rounded-lg border border-neutral-200 bg-white p-4">
         <h3 className="mb-2 font-medium text-neutral-700">作業ログ</h3>
         {logs.length === 0 ? (
           <p className="text-sm text-neutral-500">実行履歴はまだありません。</p>
@@ -228,6 +264,14 @@ export function BulkManagementPanel({
         )}
       </div>
     </div>
+  );
+}
+
+function TabLoading({ loading }: { loading: boolean }) {
+  return (
+    <p className="text-sm text-neutral-500">
+      {loading ? "読み込み中…" : "このタブを開くとデータを取得します。"}
+    </p>
   );
 }
 

@@ -31,6 +31,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 @Service
@@ -164,6 +165,62 @@ public class SiteService {
     public CmsCredentials getCredentials(String siteKey) {
         Site site = getBySiteKey(siteKey);
         return buildCredentialsFromMap(site.getCmsType(), getRawCredentials(site));
+    }
+
+    /**
+     * 一括管理(カテゴリ/タグ/プラグイン/テーマ比較)で、非managedサイトをどの経路で扱えるかを判定する。
+     * REST(Application Password)とSSHは同一サイトに両方設定されていることもあるため、両方の可否を
+     * 個別に持たせる(呼び出し元が「読み取り・作成/編集/削除・SSHのみ対応の操作」を使い分けられるように)。
+     * WordPress以外のCMS種別・認証情報の復号失敗の場合はどちらもfalseになる
+     * (呼び出し元でエラーにせず「対象外」表示にフォールバックするため)。
+     */
+    @Transactional(readOnly = true)
+    public SiteDataSource resolveDataSource(Site site) {
+        if (site.isManagedWordpress()) {
+            return new SiteDataSource(true, null, null);
+        }
+        if (site.getCmsType() != CmsType.WORDPRESS) {
+            return new SiteDataSource(false, null, null);
+        }
+        try {
+            CmsCredentials credentials = getCredentials(site.getSiteKey());
+            if (credentials instanceof CmsCredentials.WordPressCredentials wp) {
+                boolean restUsable = StringUtils.hasText(wp.baseUrl())
+                        && StringUtils.hasText(wp.username())
+                        && StringUtils.hasText(wp.appPassword());
+                return new SiteDataSource(false, restUsable ? wp : null, wp.isSsh() ? wp : null);
+            }
+        } catch (RuntimeException e) {
+            log.warn("サイト '{}' の認証情報取得に失敗しました(一括管理の対象外として扱います): {}",
+                    site.getSiteKey(), e.getMessage());
+        }
+        return new SiteDataSource(false, null, null);
+    }
+
+    /**
+     * REST(Application Password)はtransport設定に関わらず、baseUrl/username/appPasswordが
+     * 揃っていれば利用可能とみなす(SSH用に登録されたサイトでもREST側の資格情報が入っていれば使える)。
+     * REST/SSHの両方が利用可能な場合、呼び出し元は原則SSH優先で扱う(REST APIはロール権限不足等で
+     * 拒否されるケースがあるため)。SSHでの実行に失敗した場合はRESTへフォールバックする。
+     * ただしテーマのインストール/有効化/削除はWordPressコアのREST APIに書き込みエンドポイントが無いため、
+     * この場合に限りSSHのみが対象になる(SSH失敗時のRESTフォールバックも行わない)。
+     */
+    public record SiteDataSource(
+            boolean managed,
+            CmsCredentials.WordPressCredentials restCredentials,
+            CmsCredentials.WordPressCredentials sshCredentials
+    ) {
+        public boolean hasRest() {
+            return restCredentials != null;
+        }
+
+        public boolean hasSsh() {
+            return sshCredentials != null;
+        }
+
+        public boolean isUnavailable() {
+            return !managed && restCredentials == null && sshCredentials == null;
+        }
     }
 
     /**
