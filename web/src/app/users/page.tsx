@@ -1,16 +1,18 @@
 import Link from "next/link";
 import { listUsers, listProjects, listAllProjectUsers } from "@/lib/apiClient";
-import { requireAdminSession } from "@/lib/session";
+import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
+import { formatDateTime } from "@/lib/formatDate";
 import { UserForm } from "./UserForm";
 import { DeleteUserButton } from "./DeleteUserButton";
 
 export default async function UsersPage() {
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };
-  const [users, projects, projectUsers] = await Promise.all([
+  const [users, projects, projectUsers, timezone] = await Promise.all([
     listUsers().catch(() => []),
     listProjects().catch(() => []),
     listAllProjectUsers(actor).catch(() => []),
+    getViewerTimeZone(),
   ]);
 
   const userToProjects = new Map<number, string[]>();
@@ -53,7 +55,7 @@ export default async function UsersPage() {
                   </td>
                   <td className="px-4 py-2">{user.email}</td>
                   <td className="px-4 py-2 font-mono">{user.role}</td>
-                  <td className="px-4 py-2 text-neutral-500">{new Date(user.createdAt).toLocaleString("ja-JP")}</td>
+                  <td className="px-4 py-2 text-neutral-500">{formatDateTime(user.createdAt, timezone)}</td>
                   <td className="px-4 py-2 text-right">
                     <div className="flex justify-end gap-3">
                       <Link href={`/users/${user.id}/edit`} className="text-sm text-neutral-600 hover:underline">

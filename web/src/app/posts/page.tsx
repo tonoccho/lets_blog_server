@@ -1,7 +1,9 @@
 import { listPosts } from "@/lib/apiClient";
+import { formatDateTime } from "@/lib/formatDate";
+import { getViewerTimeZone } from "@/lib/session";
 
 export default async function PostsPage() {
-  const posts = await listPosts().catch(() => []);
+  const [posts, timezone] = await Promise.all([listPosts().catch(() => []), getViewerTimeZone()]);
 
   return (
     <div className="space-y-8">
@@ -35,7 +37,7 @@ export default async function PostsPage() {
                   <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs">{post.status}</span>
                 </td>
                 <td className="px-4 py-2 text-neutral-500">
-                  {post.lastPublishedAt ? new Date(post.lastPublishedAt).toLocaleString("ja-JP") : "-"}
+                  {post.lastPublishedAt ? formatDateTime(post.lastPublishedAt, timezone) : "-"}
                 </td>
               </tr>
             ))}

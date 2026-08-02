@@ -30,6 +30,7 @@ import {
   deleteThemeEverywhere,
   runBulkOperationUpload,
   replayBulkOperations,
+  clearBulkOperationLogs,
   ProjectEnvironment,
   EnvironmentSyncTarget,
   BulkOperationType,
@@ -469,4 +470,12 @@ export async function replayBulkOperationsAction(
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+export async function clearBulkOperationLogsAction(projectId: number): Promise<void> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  await clearBulkOperationLogs(projectId, actor);
+  revalidatePath(`/projects/${projectId}`);
 }

@@ -19,6 +19,7 @@ import com.letsblog.api.dto.TermNameRequest;
 import com.letsblog.api.dto.UpdateMasterEnvironmentRequest;
 import com.letsblog.api.dto.UpdateProjectUserRequest;
 import com.letsblog.api.domain.BulkOperationLog;
+import com.letsblog.api.domain.BulkOperationLogLevel;
 import com.letsblog.api.domain.BulkOperationType;
 import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.BulkManagementService;
@@ -168,9 +169,24 @@ public class ProjectController {
     }
 
     @GetMapping("/{id}/bulk-management/logs")
-    public List<BulkOperationLogResponse> listBulkOperationLogs(@PathVariable Long id) {
+    public List<BulkOperationLogResponse> listBulkOperationLogs(
+            @PathVariable Long id,
+            @RequestParam(required = false) BulkOperationType operationType,
+            @RequestParam(required = false) String environment,
+            @RequestParam(required = false) BulkOperationLogLevel level) {
         adminAuthorizationService.requireAdmin();
-        return bulkManagementService.listLogs(id).stream().map(BulkOperationLogResponse::from).toList();
+        if (operationType == null && environment == null && level == null) {
+            return bulkManagementService.listLogs(id).stream().map(BulkOperationLogResponse::from).toList();
+        }
+        return bulkManagementService.listLogs(id, operationType, environment, level).stream()
+                .map(BulkOperationLogResponse::from).toList();
+    }
+
+    @DeleteMapping("/{id}/bulk-management/logs")
+    public ResponseEntity<Void> clearBulkOperationLogs(@PathVariable Long id) {
+        adminAuthorizationService.requireAdmin();
+        bulkManagementService.clearLogs(id);
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/{id}/bulk-management/categories/comparison")

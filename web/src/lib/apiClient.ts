@@ -383,6 +383,7 @@ export interface UserProfile {
   websiteUrl: string | null;
   bio: string | null;
   locale: string | null;
+  timezone: string | null;
   avatarUrl: string | null;
   department: string | null;
   position: string | null;
@@ -414,6 +415,24 @@ export function getUserProfile(id: number, actor?: ActorInfo): Promise<UserProfi
 export function updateUserProfile(id: number, input: UserProfileInput, actor?: ActorInfo): Promise<UserProfile> {
   return apiFetch<UserProfile>(`/api/users/${id}`, {
     method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export interface UpdateUserPreferencesInput {
+  locale: string;
+  timezone: string;
+}
+
+export function updateUserPreferences(
+  id: number,
+  input: UpdateUserPreferencesInput,
+  actor?: ActorInfo
+): Promise<UserProfile> {
+  return apiFetch<UserProfile>(`/api/users/${id}/preferences`, {
+    method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
     actor,
@@ -643,6 +662,7 @@ export type BulkOperationType =
 export type ZipInstallOperationType = "PLUGIN_INSTALL" | "THEME_INSTALL";
 export type BulkOperationSourceType = "SLUG" | "ZIP";
 export type BulkOperationStatus = "SUCCESS" | "SKIPPED" | "FAILED";
+export type BulkOperationLogLevel = "INFO" | "WARNING" | "ERROR";
 
 export interface BulkOperationLog {
   id: number;
@@ -656,6 +676,7 @@ export interface BulkOperationLog {
   originalFilename: string | null;
   environment: ProjectEnvironment;
   status: BulkOperationStatus;
+  level: BulkOperationLogLevel;
   errorMessage: string | null;
   stackTrace: string | null;
   isReplay: boolean;
@@ -962,8 +983,30 @@ export function replayBulkOperations(
   });
 }
 
-export function listBulkOperationLogs(projectId: number, actor?: ActorInfo): Promise<BulkOperationLog[]> {
-  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/logs`, { actor });
+export interface BulkOperationLogFilter {
+  operationType?: BulkOperationType;
+  environment?: ProjectEnvironment;
+  level?: BulkOperationLogLevel;
+}
+
+export function listBulkOperationLogs(
+  projectId: number,
+  actor?: ActorInfo,
+  filter?: BulkOperationLogFilter
+): Promise<BulkOperationLog[]> {
+  const query = new URLSearchParams();
+  if (filter?.operationType) query.set("operationType", filter.operationType);
+  if (filter?.environment) query.set("environment", filter.environment);
+  if (filter?.level) query.set("level", filter.level);
+  const qs = query.toString();
+  return apiFetch<BulkOperationLog[]>(
+    `/api/projects/${projectId}/bulk-management/logs${qs ? `?${qs}` : ""}`,
+    { actor }
+  );
+}
+
+export function clearBulkOperationLogs(projectId: number, actor?: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/bulk-management/logs`, { method: "DELETE", actor });
 }
 
 export interface ProjectUser {

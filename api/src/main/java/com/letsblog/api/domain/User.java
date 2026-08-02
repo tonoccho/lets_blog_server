@@ -64,6 +64,11 @@ public class User {
     @Column(name = "locale", length = 10)
     private String locale;
 
+    // JPAのINSERTは全カラムを明示するため、DBカラムのDEFAULT句は新規作成時に効かない。
+    // ここでのフィールド初期値が実質的なデフォルト値になる。
+    @Column(name = "timezone", length = 50)
+    private String timezone = "Asia/Tokyo";
+
     @Column(name = "avatar_url", length = 500)
     private String avatarUrl;
 

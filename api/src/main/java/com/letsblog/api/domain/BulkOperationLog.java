@@ -65,6 +65,10 @@ public class BulkOperationLog {
     @Enumerated(EnumType.STRING)
     private BulkOperationStatus status;
 
+    @Column(name = "level", nullable = false, length = 10)
+    @Enumerated(EnumType.STRING)
+    private BulkOperationLogLevel level;
+
     @Column(name = "error_message", columnDefinition = "TEXT")
     private String errorMessage;
 

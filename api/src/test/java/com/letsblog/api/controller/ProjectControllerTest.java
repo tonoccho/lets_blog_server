@@ -269,7 +269,7 @@ class ProjectControllerTest {
         ProjectController controller = controller();
         when(bulkManagementService.listLogs(1L)).thenReturn(List.of(buildLog()));
 
-        List<?> response = controller.listBulkOperationLogs(1L);
+        List<?> response = controller.listBulkOperationLogs(1L, null, null, null);
 
         assertEquals(1, response.size());
         verify(adminAuthorizationService).requireAdmin();
@@ -280,7 +280,7 @@ class ProjectControllerTest {
         ProjectController controller = controller();
         doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
 
-        assertThrows(ForbiddenException.class, () -> controller.listBulkOperationLogs(1L));
+        assertThrows(ForbiddenException.class, () -> controller.listBulkOperationLogs(1L, null, null, null));
     }
 
     @Test

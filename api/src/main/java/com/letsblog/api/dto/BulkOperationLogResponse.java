@@ -1,6 +1,7 @@
 package com.letsblog.api.dto;
 
 import com.letsblog.api.domain.BulkOperationLog;
+import com.letsblog.api.domain.BulkOperationLogLevel;
 import com.letsblog.api.domain.BulkOperationSourceType;
 import com.letsblog.api.domain.BulkOperationStatus;
 import com.letsblog.api.domain.BulkOperationType;
@@ -19,6 +20,7 @@ public record BulkOperationLogResponse(
         String originalFilename,
         String environment,
         BulkOperationStatus status,
+        BulkOperationLogLevel level,
         String errorMessage,
         String stackTrace,
         boolean isReplay,
@@ -29,7 +31,7 @@ public record BulkOperationLogResponse(
                 log.getId(), log.getOperationType(), log.getSourceType(), log.getValue(),
                 log.getCategorySlug(), log.getCategoryParentSlug(), log.getCategoryTargetSlug(),
                 log.getCategoryDescription(),
-                log.getOriginalFilename(), log.getEnvironment(), log.getStatus(), log.getErrorMessage(),
-                log.getStackTrace(), log.isReplay(), log.getCreatedAt());
+                log.getOriginalFilename(), log.getEnvironment(), log.getStatus(), log.getLevel(),
+                log.getErrorMessage(), log.getStackTrace(), log.isReplay(), log.getCreatedAt());
     }
 }

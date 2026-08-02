@@ -1,14 +1,15 @@
 import { listSites, listProjects, listUsers } from "@/lib/apiClient";
-import { getSession } from "@/lib/session";
+import { getSession, getViewerTimeZone } from "@/lib/session";
 import { SiteCreationPanel } from "./SiteCreationPanel";
 import { SiteListTable } from "./SiteListTable";
 
 export default async function SitesPage() {
-  const [sites, projects, users, session] = await Promise.all([
+  const [sites, projects, users, session, timezone] = await Promise.all([
     listSites().catch(() => []),
     listProjects().catch(() => []),
     listUsers().catch(() => []),
     getSession(),
+    getViewerTimeZone(),
   ]);
   const isAdmin = session?.user.role === "admin";
 
@@ -16,7 +17,7 @@ export default async function SitesPage() {
     <div className="space-y-8">
       <h1 className="text-xl font-semibold">サイト</h1>
 
-      <SiteListTable sites={sites} projects={projects} isAdmin={isAdmin} />
+      <SiteListTable sites={sites} projects={projects} isAdmin={isAdmin} timezone={timezone} />
 
       <SiteCreationPanel users={users} sites={sites} />
     </div>

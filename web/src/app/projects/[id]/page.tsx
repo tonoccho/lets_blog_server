@@ -6,8 +6,11 @@ import {
   listUsers,
   listBulkOperationLogs,
   listCategoryComparison,
+  BulkOperationType,
+  BulkOperationLogLevel,
+  ProjectEnvironment,
 } from "@/lib/apiClient";
-import { requireAdminSession } from "@/lib/session";
+import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
 import { EnvironmentSlot } from "./EnvironmentSlot";
 import { MasterEnvironmentSelector } from "./MasterEnvironmentSelector";
 import { EnvironmentSyncPanel } from "./EnvironmentSyncPanel";
@@ -19,13 +22,22 @@ import { AddProjectUserModal } from "./AddProjectUserModal";
 
 export default async function ProjectDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ logOperationType?: string; logEnvironment?: string; logLevel?: string }>;
 }) {
   const { id } = await params;
+  const logFilterParams = await searchParams;
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };
   const projectId = Number(id);
+
+  const logFilter = {
+    operationType: (logFilterParams.logOperationType || undefined) as BulkOperationType | undefined,
+    environment: (logFilterParams.logEnvironment || undefined) as ProjectEnvironment | undefined,
+    level: (logFilterParams.logLevel || undefined) as BulkOperationLogLevel | undefined,
+  };
 
   const emptyComparisonPage = { items: [], page: 0, size: 20, totalCount: 0, masterEnvironment: "test" as const };
 
@@ -38,13 +50,14 @@ export default async function ProjectDetailPage({
 
   // タグ・プラグイン・テーマは一括管理パネルでタブを開いたときにクライアント側から遅延取得する
   // (初期表示で4種類すべて並行取得すると、同一ホストのSSH接続が集中しやすいため)。
-  const [project, sites, members, allUsers, bulkOperationLogs, categoryPage] = await Promise.all([
+  const [project, sites, members, allUsers, bulkOperationLogs, categoryPage, timezone] = await Promise.all([
     getProject(projectId, actor).catch(logAndFallback("プロジェクト情報", null)),
     listSites().catch(logAndFallback("サイト一覧", [])),
     listProjectUsers(projectId, actor).catch(logAndFallback("プロジェクトメンバー", [])),
     listUsers().catch(logAndFallback("ユーザー一覧", [])),
-    listBulkOperationLogs(projectId, actor).catch(logAndFallback("作業ログ", [])),
+    listBulkOperationLogs(projectId, actor, logFilter).catch(logAndFallback("作業ログ", [])),
     listCategoryComparison(projectId, 0, actor).catch(logAndFallback("カテゴリ比較", emptyComparisonPage)),
+    getViewerTimeZone(),
   ]);
 
   if (!project) {
@@ -82,7 +95,9 @@ export default async function ProjectDetailPage({
         projectId={project.id}
         project={project}
         logs={bulkOperationLogs}
+        logFilter={logFilter}
         categoryPage={categoryPage}
+        timezone={timezone}
       />
 
       <div className="space-y-4">

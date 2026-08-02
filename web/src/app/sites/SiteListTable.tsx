@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { CmsType, Project, Site } from "@/lib/apiClient";
+import { formatDateTime } from "@/lib/formatDate";
 import { DeleteSiteButton } from "./DeleteSiteButton";
 import { CheckConnectionButton } from "./CheckConnectionButton";
 
@@ -32,10 +33,12 @@ export function SiteListTable({
   sites,
   projects,
   isAdmin,
+  timezone,
 }: {
   sites: Site[];
   projects: Project[];
   isAdmin: boolean;
+  timezone: string | null;
 }) {
   const [searchText, setSearchText] = useState("");
   const [cmsFilter, setCmsFilter] = useState<CmsFilter>("ALL");
@@ -173,7 +176,7 @@ export function SiteListTable({
                       {site.baseUrl}
                     </a>
                   </td>
-                  <td className="px-4 py-2 text-neutral-500">{new Date(site.createdAt).toLocaleString("ja-JP")}</td>
+                  <td className="px-4 py-2 text-neutral-500">{formatDateTime(site.createdAt, timezone)}</td>
                   <td className="px-4 py-2">
                     <CheckConnectionButton id={site.id} />
                   </td>

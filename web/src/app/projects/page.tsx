@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { listProjects } from "@/lib/apiClient";
-import { requireAdminSession } from "@/lib/session";
+import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
+import { formatDateTime } from "@/lib/formatDate";
 import { ProjectForm } from "./ProjectForm";
 
 export default async function ProjectsPage() {
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };
-  const projects = await listProjects(actor).catch(() => []);
+  const [projects, timezone] = await Promise.all([listProjects(actor).catch(() => []), getViewerTimeZone()]);
 
   return (
     <div className="space-y-8">
@@ -60,7 +61,7 @@ export default async function ProjectsPage() {
                     </span>
                   </div>
                 </td>
-                <td className="px-4 py-2 text-neutral-500">{new Date(project.createdAt).toLocaleString("ja-JP")}</td>
+                <td className="px-4 py-2 text-neutral-500">{formatDateTime(project.createdAt, timezone)}</td>
                 <td className="px-4 py-2 text-right">
                   <Link href={`/projects/${project.id}`} className="text-sm text-neutral-600 hover:underline">
                     詳細

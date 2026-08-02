@@ -4,6 +4,7 @@ import com.letsblog.api.aop.AuditLog;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.User;
 import com.letsblog.api.dto.LoginResponse;
+import com.letsblog.api.dto.UpdateUserPreferencesRequest;
 import com.letsblog.api.dto.UserCreateRequest;
 import com.letsblog.api.dto.UserProfileResponse;
 import com.letsblog.api.dto.UserProfileUpdateRequest;
@@ -17,6 +18,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.DateTimeException;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -134,6 +137,24 @@ public class UserService {
         user.setPosition(request.position());
         user.setSocialLinks(request.socialLinks());
         user.setCustomLinks(request.customLinks());
+
+        return UserProfileResponse.from(userRepository.save(user));
+    }
+
+    @AuditLog(action = AuditLogAction.USER_UPDATED, resourceType = "USER")
+    @Transactional
+    public UserProfileResponse updateUserPreferences(Long id, UpdateUserPreferencesRequest request) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new UserNotFoundException("id " + id + " のユーザーは登録されていません"));
+
+        try {
+            ZoneId.of(request.timezone());
+        } catch (DateTimeException e) {
+            throw new IllegalArgumentException("不正なタイムゾーンです: " + request.timezone());
+        }
+
+        user.setLocale(request.locale());
+        user.setTimezone(request.timezone());
 
         return UserProfileResponse.from(userRepository.save(user));
     }

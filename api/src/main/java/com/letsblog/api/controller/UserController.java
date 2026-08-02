@@ -1,6 +1,7 @@
 package com.letsblog.api.controller;
 
 import com.letsblog.api.domain.Permission;
+import com.letsblog.api.dto.UpdateUserPreferencesRequest;
 import com.letsblog.api.dto.UserCreateRequest;
 import com.letsblog.api.dto.UserProfileResponse;
 import com.letsblog.api.dto.UserProfileUpdateRequest;
@@ -70,6 +71,13 @@ public class UserController {
             @PathVariable Long id, @RequestBody UserProfileUpdateRequest request) {
         adminAuthorizationService.requireSelfOrAdmin(id);
         return userService.updateUserProfile(id, request);
+    }
+
+    @PatchMapping("/{id}/preferences")
+    public UserProfileResponse updatePreferences(
+            @PathVariable Long id, @Valid @RequestBody UpdateUserPreferencesRequest request) {
+        adminAuthorizationService.requireSelfOrAdmin(id);
+        return userService.updateUserPreferences(id, request);
     }
 
     @PostMapping("/{userId}/roles/{roleName}")

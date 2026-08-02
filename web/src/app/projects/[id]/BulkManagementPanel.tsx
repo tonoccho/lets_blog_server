@@ -5,6 +5,8 @@ import type {
   Project,
   ProjectEnvironment,
   BulkOperationLog,
+  BulkOperationLogFilter,
+  BulkOperationLogLevel,
   BulkOperationType,
   TermComparisonPage,
   StatusComparisonPage,
@@ -16,8 +18,10 @@ import {
   fetchStatusComparisonAction,
   BulkOperationState,
 } from "./actions";
+import { formatDateTime } from "@/lib/formatDate";
 import { TermComparisonTable } from "./TermComparisonTable";
 import { PluginThemeComparisonTable } from "./PluginThemeComparisonTable";
+import { ClearLogsButton } from "./ClearLogsButton";
 
 type Tab = "CATEGORY" | "PLUGIN" | "THEME" | "TAG";
 
@@ -66,18 +70,34 @@ const STATUS_COLOR: Record<string, string> = {
   FAILED: "text-red-600",
 };
 
+const LEVEL_LABEL: Record<BulkOperationLogLevel, string> = {
+  INFO: "情報",
+  WARNING: "警告",
+  ERROR: "エラー",
+};
+
+const LEVEL_COLOR: Record<BulkOperationLogLevel, string> = {
+  INFO: "text-green-600",
+  WARNING: "text-amber-600",
+  ERROR: "text-red-600",
+};
+
 const initialState: BulkOperationState = {};
 
 export function BulkManagementPanel({
   projectId,
   project,
   logs,
+  logFilter,
   categoryPage,
+  timezone,
 }: {
   projectId: number;
   project: Project;
   logs: BulkOperationLog[];
+  logFilter: BulkOperationLogFilter;
   categoryPage: TermComparisonPage;
+  timezone: string | null;
 }) {
   const [tab, setTab] = useState<Tab>("CATEGORY");
   // タグ・プラグイン・テーマは、そのタブを初めて開いたときにクライアント側から取得する
@@ -181,7 +201,7 @@ export function BulkManagementPanel({
             ) : (
               <TabLoading loading={loadingTab === "PLUGIN"} />
             )}
-            <ZipUploadPanel projectId={projectId} operationType="PLUGIN_INSTALL" />
+            <ZipUploadPanel projectId={projectId} operationType="PLUGIN_INSTALL" timezone={timezone} />
           </div>
         )}
         {tab === "THEME" && (
@@ -196,7 +216,7 @@ export function BulkManagementPanel({
             ) : (
               <TabLoading loading={loadingTab === "THEME"} />
             )}
-            <ZipUploadPanel projectId={projectId} operationType="THEME_INSTALL" />
+            <ZipUploadPanel projectId={projectId} operationType="THEME_INSTALL" timezone={timezone} />
           </div>
         )}
       </div>
@@ -220,13 +240,71 @@ export function BulkManagementPanel({
           ))}
         </div>
         {replayState?.error && <p className="text-sm text-red-600">{replayState.error}</p>}
-        {replayState?.results && <ResultList results={replayState.results} />}
+        {replayState?.results && <ResultList results={replayState.results} timezone={timezone} />}
       </div>
 
       <div className="rounded-lg border border-neutral-200 bg-white p-4">
-        <h3 className="mb-2 font-medium text-neutral-700">作業ログ</h3>
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="font-medium text-neutral-700">作業ログ</h3>
+          <ClearLogsButton projectId={projectId} />
+        </div>
+
+        <form
+          method="get"
+          className="mb-3 flex flex-wrap items-end gap-2 text-sm"
+        >
+          <label className="flex flex-col gap-1">
+            <span className="text-neutral-600">操作</span>
+            <select
+              name="logOperationType"
+              defaultValue={logFilter.operationType ?? ""}
+              className="rounded border border-neutral-300 px-2 py-1.5 text-sm"
+            >
+              <option value="">すべて</option>
+              {(Object.keys(OPERATION_LABEL) as BulkOperationType[]).map((type) => (
+                <option key={type} value={type}>
+                  {OPERATION_LABEL[type]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-neutral-600">環境</span>
+            <select
+              name="logEnvironment"
+              defaultValue={logFilter.environment ?? ""}
+              className="rounded border border-neutral-300 px-2 py-1.5 text-sm"
+            >
+              <option value="">すべて</option>
+              {(Object.keys(ENVIRONMENT_LABEL) as ProjectEnvironment[]).map((env) => (
+                <option key={env} value={env}>
+                  {ENVIRONMENT_LABEL[env]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-neutral-600">レベル</span>
+            <select
+              name="logLevel"
+              defaultValue={logFilter.level ?? ""}
+              className="rounded border border-neutral-300 px-2 py-1.5 text-sm"
+            >
+              <option value="">すべて</option>
+              {(Object.keys(LEVEL_LABEL) as BulkOperationLogLevel[]).map((level) => (
+                <option key={level} value={level}>
+                  {LEVEL_LABEL[level]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="submit" className="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white">
+            絞り込み
+          </button>
+        </form>
+
         {logs.length === 0 ? (
-          <p className="text-sm text-neutral-500">実行履歴はまだありません。</p>
+          <p className="text-sm text-neutral-500">該当する実行履歴はありません。</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
@@ -236,6 +314,7 @@ export function BulkManagementPanel({
                   <th className="px-2 py-1.5">操作</th>
                   <th className="px-2 py-1.5">値</th>
                   <th className="px-2 py-1.5">環境</th>
+                  <th className="px-2 py-1.5">レベル</th>
                   <th className="px-2 py-1.5">結果</th>
                   <th className="px-2 py-1.5">再適用</th>
                   <th className="px-2 py-1.5">詳細</th>
@@ -245,11 +324,12 @@ export function BulkManagementPanel({
                 {logs.map((log) => (
                   <tr key={log.id} className="border-b border-neutral-100 last:border-0">
                     <td className="px-2 py-1.5 text-neutral-500">
-                      {new Date(log.createdAt).toLocaleString("ja-JP")}
+                      {formatDateTime(log.createdAt, timezone)}
                     </td>
                     <td className="px-2 py-1.5">{OPERATION_LABEL[log.operationType]}</td>
                     <td className="px-2 py-1.5">{describeLogValue(log)}</td>
                     <td className="px-2 py-1.5">{ENVIRONMENT_LABEL[log.environment]}</td>
+                    <td className={`px-2 py-1.5 ${LEVEL_COLOR[log.level]}`}>{LEVEL_LABEL[log.level]}</td>
                     <td className={`px-2 py-1.5 ${STATUS_COLOR[log.status]}`}>
                       {STATUS_LABEL[log.status]}
                       {log.status === "FAILED" && log.errorMessage && (
@@ -257,7 +337,9 @@ export function BulkManagementPanel({
                       )}
                     </td>
                     <td className="px-2 py-1.5 text-neutral-500">{log.isReplay ? "はい" : "-"}</td>
-                    <td className="px-2 py-1.5">{log.status === "FAILED" && <CopyLogButton log={log} />}</td>
+                    <td className="px-2 py-1.5">
+                      {log.status === "FAILED" && <CopyLogButton log={log} timezone={timezone} />}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -280,9 +362,11 @@ function TabLoading({ loading }: { loading: boolean }) {
 function ZipUploadPanel({
   projectId,
   operationType,
+  timezone,
 }: {
   projectId: number;
   operationType: "PLUGIN_INSTALL" | "THEME_INSTALL";
+  timezone: string | null;
 }) {
   const uploadAction = (prevState: BulkOperationState, formData: FormData) =>
     runBulkOperationUploadAction(projectId, prevState, formData);
@@ -321,7 +405,7 @@ function ZipUploadPanel({
         </button>
       </form>
       {uploadState.error && <p className="mt-2 text-sm text-red-600">{uploadState.error}</p>}
-      {uploadState.results && <ResultList results={uploadState.results} />}
+      {uploadState.results && <ResultList results={uploadState.results} timezone={timezone} />}
     </div>
   );
 }
@@ -337,7 +421,7 @@ function describeLogValue(log: BulkOperationLog): string {
   return log.value;
 }
 
-function ResultList({ results }: { results: BulkOperationLog[] }) {
+function ResultList({ results, timezone }: { results: BulkOperationLog[]; timezone: string | null }) {
   return (
     <ul className="mt-2 space-y-0.5 text-sm">
       {results.map((r) => (
@@ -346,16 +430,16 @@ function ResultList({ results }: { results: BulkOperationLog[] }) {
             {ENVIRONMENT_LABEL[r.environment]}: {STATUS_LABEL[r.status]}
             {r.status === "FAILED" && r.errorMessage ? `(${r.errorMessage})` : ""}
           </span>
-          {r.status === "FAILED" && <CopyLogButton log={r} />}
+          {r.status === "FAILED" && <CopyLogButton log={r} timezone={timezone} />}
         </li>
       ))}
     </ul>
   );
 }
 
-function describeLogText(log: BulkOperationLog): string {
+function describeLogText(log: BulkOperationLog, timezone: string | null): string {
   return [
-    `日時: ${new Date(log.createdAt).toLocaleString("ja-JP")}`,
+    `日時: ${formatDateTime(log.createdAt, timezone)}`,
     `操作: ${OPERATION_LABEL[log.operationType]}`,
     `値: ${describeLogValue(log)}`,
     `環境: ${ENVIRONMENT_LABEL[log.environment]}`,
@@ -367,11 +451,11 @@ function describeLogText(log: BulkOperationLog): string {
   ].join("\n");
 }
 
-function CopyLogButton({ log }: { log: BulkOperationLog }) {
+function CopyLogButton({ log, timezone }: { log: BulkOperationLog; timezone: string | null }) {
   const [copied, setCopied] = useState(false);
 
   async function handleCopy() {
-    await navigator.clipboard.writeText(describeLogText(log));
+    await navigator.clipboard.writeText(describeLogText(log, timezone));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }

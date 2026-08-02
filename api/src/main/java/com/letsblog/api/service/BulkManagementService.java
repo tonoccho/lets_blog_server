@@ -3,6 +3,7 @@ package com.letsblog.api.service;
 import com.letsblog.api.cms.rest.WordPressRestBulkManagementOperations;
 import com.letsblog.api.cms.ssh.WordPressSshOperations;
 import com.letsblog.api.domain.BulkOperationLog;
+import com.letsblog.api.domain.BulkOperationLogLevel;
 import com.letsblog.api.domain.BulkOperationSourceType;
 import com.letsblog.api.domain.BulkOperationStatus;
 import com.letsblog.api.domain.BulkOperationType;
@@ -142,6 +143,16 @@ public class BulkManagementService {
     @Transactional(readOnly = true)
     public List<BulkOperationLog> listLogs(Long projectId) {
         return bulkOperationLogRepository.findByProjectIdOrderByCreatedAtDesc(projectId);
+    }
+
+    public List<BulkOperationLog> listLogs(
+            Long projectId, BulkOperationType operationType, String environment, BulkOperationLogLevel level) {
+        return bulkOperationLogRepository.findByFilters(projectId, operationType, environment, level);
+    }
+
+    @Transactional
+    public void clearLogs(Long projectId) {
+        bulkOperationLogRepository.deleteByProjectId(projectId);
     }
 
     private BulkOperationLog applyToSite(
@@ -300,7 +311,9 @@ public class BulkManagementService {
         log.setStoragePath(storagePath);
         log.setFileSha256(fileSha256);
         log.setEnvironment(environment);
-        log.setStatus(BulkOperationStatus.valueOf(status));
+        BulkOperationStatus resolvedStatus = BulkOperationStatus.valueOf(status);
+        log.setStatus(resolvedStatus);
+        log.setLevel(resolvedStatus.toLogLevel());
         log.setErrorMessage(errorMessage);
         log.setStackTrace(stackTrace);
         log.setReplay(isReplay);

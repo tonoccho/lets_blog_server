@@ -1,7 +1,9 @@
 import { listGenerationJobs } from "@/lib/apiClient";
+import { formatDateTime } from "@/lib/formatDate";
+import { getViewerTimeZone } from "@/lib/session";
 
 export default async function AiJobsPage() {
-  const jobs = await listGenerationJobs().catch(() => []);
+  const [jobs, timezone] = await Promise.all([listGenerationJobs().catch(() => []), getViewerTimeZone()]);
 
   return (
     <div className="space-y-8">
@@ -34,8 +36,8 @@ export default async function AiJobsPage() {
                 <td className="px-4 py-2">
                   <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs">{job.status}</span>
                 </td>
-                <td className="px-4 py-2 text-neutral-500">{new Date(job.createdAt).toLocaleString("ja-JP")}</td>
-                <td className="px-4 py-2 text-neutral-500">{new Date(job.updatedAt).toLocaleString("ja-JP")}</td>
+                <td className="px-4 py-2 text-neutral-500">{formatDateTime(job.createdAt, timezone)}</td>
+                <td className="px-4 py-2 text-neutral-500">{formatDateTime(job.updatedAt, timezone)}</td>
               </tr>
             ))}
           </tbody>
