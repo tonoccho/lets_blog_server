@@ -422,20 +422,21 @@ class SiteServiceTest {
     }
 
     @Test
-    void resolveDataSource_baseUrlUsernameAppPasswordが揃っていればREST利用可能() {
+    void resolveDataSource_baseUrlUsernameAppPasswordが揃っていてもRESTは現在常に利用不可() {
+        // フィードバック対応により一括管理はSSHのみを使う方針のため、REST資格情報があってもhasRest()はfalseになる
         Site site = siteWithCredentials("s",
                 Map.of("baseUrl", "https://example.com", "username", "admin", "appPassword", "secret"), false);
 
         SiteService.SiteDataSource dataSource = service.resolveDataSource(site);
 
         assertEquals(false, dataSource.managed());
-        assertEquals(true, dataSource.hasRest());
+        assertEquals(false, dataSource.hasRest());
         assertEquals(false, dataSource.hasSsh());
-        assertEquals("https://example.com", dataSource.restCredentials().baseUrl());
+        assertEquals(true, dataSource.isUnavailable());
     }
 
     @Test
-    void resolveDataSource_transportSSHでもRESTの資格情報があれば両方trueになる() {
+    void resolveDataSource_transportSSHでRESTの資格情報もあればSSHのみtrueになる() {
         Site site = siteWithCredentials("s", Map.of(
                 "baseUrl", "https://example.com", "username", "admin", "appPassword", "secret",
                 "transport", "SSH", "sshHost", "203.0.113.5", "sshUser", "deploy",
@@ -443,12 +444,12 @@ class SiteServiceTest {
 
         SiteService.SiteDataSource dataSource = service.resolveDataSource(site);
 
-        assertEquals(true, dataSource.hasRest());
+        assertEquals(false, dataSource.hasRest());
         assertEquals(true, dataSource.hasSsh());
     }
 
     @Test
-    void resolveDataSource_appPassword未設定ならRESTは利用不可でSSHのみ() {
+    void resolveDataSource_SSH設定済みならRESTは常に利用不可でSSHのみ() {
         Site site = siteWithCredentials("s", Map.of(
                 "baseUrl", "https://example.com",
                 "transport", "SSH", "sshHost", "203.0.113.5", "sshUser", "deploy",

@@ -169,10 +169,12 @@ public class SiteService {
 
     /**
      * 一括管理(カテゴリ/タグ/プラグイン/テーマ比較)で、非managedサイトをどの経路で扱えるかを判定する。
-     * REST(Application Password)とSSHは同一サイトに両方設定されていることもあるため、両方の可否を
-     * 個別に持たせる(呼び出し元が「読み取り・作成/編集/削除・SSHのみ対応の操作」を使い分けられるように)。
      * WordPress以外のCMS種別・認証情報の復号失敗の場合はどちらもfalseになる
      * (呼び出し元でエラーにせず「対象外」表示にフォールバックするため)。
+     * <p>
+     * REST(Application Password)経路は現時点では常に利用不可として返す(フィードバック対応により、
+     * 一括管理はSSHのみを使う方針に一時的に変更したため)。{@link com.letsblog.api.cms.rest.WordPressRestBulkManagementOperations}
+     * 自体や呼び出し側のREST利用コードは削除していないため、再度REST経路を有効化する場合はここを戻すだけでよい。
      */
     @Transactional(readOnly = true)
     public SiteDataSource resolveDataSource(Site site) {
@@ -185,10 +187,7 @@ public class SiteService {
         try {
             CmsCredentials credentials = getCredentials(site.getSiteKey());
             if (credentials instanceof CmsCredentials.WordPressCredentials wp) {
-                boolean restUsable = StringUtils.hasText(wp.baseUrl())
-                        && StringUtils.hasText(wp.username())
-                        && StringUtils.hasText(wp.appPassword());
-                return new SiteDataSource(false, restUsable ? wp : null, wp.isSsh() ? wp : null);
+                return new SiteDataSource(false, null, wp.isSsh() ? wp : null);
             }
         } catch (RuntimeException e) {
             log.warn("サイト '{}' の認証情報取得に失敗しました(一括管理の対象外として扱います): {}",
