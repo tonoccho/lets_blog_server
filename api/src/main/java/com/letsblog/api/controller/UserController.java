@@ -1,6 +1,7 @@
 package com.letsblog.api.controller;
 
 import com.letsblog.api.domain.Permission;
+import com.letsblog.api.dto.UpdateGithubTokenRequest;
 import com.letsblog.api.dto.UpdateUserPreferencesRequest;
 import com.letsblog.api.dto.UserCreateRequest;
 import com.letsblog.api.dto.UserProfileResponse;
@@ -78,6 +79,13 @@ public class UserController {
             @PathVariable Long id, @Valid @RequestBody UpdateUserPreferencesRequest request) {
         adminAuthorizationService.requireSelfOrAdmin(id);
         return userService.updateUserPreferences(id, request);
+    }
+
+    @PutMapping("/{id}/github-token")
+    public UserProfileResponse updateGithubToken(
+            @PathVariable Long id, @Valid @RequestBody UpdateGithubTokenRequest request) {
+        adminAuthorizationService.requireSelfOrAdmin(id);
+        return userService.updateGithubToken(id, request);
     }
 
     @PostMapping("/{userId}/roles/{roleName}")

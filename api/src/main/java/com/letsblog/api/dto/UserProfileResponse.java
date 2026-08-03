@@ -26,6 +26,7 @@ public record UserProfileResponse(
         String position,
         SocialLinks socialLinks,
         List<CustomLink> customLinks,
+        boolean githubTokenConfigured,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -48,6 +49,7 @@ public record UserProfileResponse(
                 user.getPosition(),
                 user.getSocialLinks(),
                 user.getCustomLinks(),
+                user.hasGithubToken(),
                 user.getCreatedAt(),
                 user.getUpdatedAt()
         );

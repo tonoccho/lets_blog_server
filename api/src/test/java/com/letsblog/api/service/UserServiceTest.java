@@ -1,10 +1,12 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.crypto.CredentialCipher;
 import com.letsblog.api.domain.CustomLink;
 import com.letsblog.api.domain.SocialLinks;
 import com.letsblog.api.domain.TwoFactorSecret;
 import com.letsblog.api.domain.User;
 import com.letsblog.api.dto.LoginResponse;
+import com.letsblog.api.dto.UpdateGithubTokenRequest;
 import com.letsblog.api.dto.UserProfileResponse;
 import com.letsblog.api.dto.UserProfileUpdateRequest;
 import com.letsblog.api.dto.UserResponse;
@@ -38,10 +40,13 @@ class UserServiceTest {
     @Mock
     private RoleRepository roleRepository;
 
+    private final CredentialCipher credentialCipher = new CredentialCipher(
+            java.util.Base64.getEncoder().encodeToString(new byte[32]));
+
     private UserService service;
 
     private UserService service() {
-        return new UserService(userRepository, twoFactorSecretRepository, roleRepository);
+        return new UserService(userRepository, twoFactorSecretRepository, roleRepository, credentialCipher);
     }
 
     @Test
@@ -244,5 +249,38 @@ class UserServiceTest {
 
         assertEquals("山田太郎", response.displayName());
         assertEquals("user@example.com", response.email());
+    }
+
+    @Test
+    void updateGithubToken_暗号化して保存される() {
+        service = service();
+        User user = buildUser();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        UserProfileResponse response = service.updateGithubToken(1L, new UpdateGithubTokenRequest("ghp_dummy"));
+
+        assertTrue(response.githubTokenConfigured());
+        assertTrue(user.hasGithubToken());
+        assertEquals("ghp_dummy", credentialCipher.decrypt(user.getGithubTokenEncrypted()));
+    }
+
+    @Test
+    void getDecryptedGithubToken_復号された値が元の値と一致する() {
+        service = service();
+        User user = buildUser();
+        user.setGithubTokenEncrypted(credentialCipher.encrypt("ghp_dummy"));
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        assertEquals("ghp_dummy", service.getDecryptedGithubToken(1L));
+    }
+
+    @Test
+    void getDecryptedGithubToken_未設定なら例外() {
+        service = service();
+        User user = buildUser();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        assertThrows(IllegalStateException.class, () -> service.getDecryptedGithubToken(1L));
     }
 }

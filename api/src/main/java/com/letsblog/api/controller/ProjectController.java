@@ -17,6 +17,7 @@ import com.letsblog.api.dto.SyncEnvironmentRequest;
 import com.letsblog.api.dto.TermComparisonPage;
 import com.letsblog.api.dto.TermNameRequest;
 import com.letsblog.api.dto.UpdateMasterEnvironmentRequest;
+import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
 import com.letsblog.api.dto.UpdateProjectUserRequest;
 import com.letsblog.api.domain.BulkOperationLog;
 import com.letsblog.api.domain.BulkOperationLogLevel;
@@ -119,6 +120,13 @@ public class ProjectController {
             @PathVariable Long id, @Valid @RequestBody UpdateMasterEnvironmentRequest request) {
         adminAuthorizationService.requireAdmin();
         return projectService.updateMasterEnvironment(id, request.masterEnvironment());
+    }
+
+    @PutMapping("/{id}/github-repository")
+    public ProjectResponse updateGithubRepository(
+            @PathVariable Long id, @Valid @RequestBody UpdateProjectGithubRepositoryRequest request) {
+        adminAuthorizationService.requireAdmin();
+        return projectService.updateGithubRepository(id, request);
     }
 
     @PostMapping("/{id}/environments/sync")

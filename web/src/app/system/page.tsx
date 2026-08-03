@@ -1,6 +1,7 @@
 import { getUserProfile } from "@/lib/apiClient";
 import { requireSession } from "@/lib/session";
 import { SystemPreferencesForm } from "./SystemPreferencesForm";
+import { GithubTokenForm } from "./GithubTokenForm";
 
 const LINKS = [
   { label: "phpMyAdmin", url: "https://localhost/phpmyadmin/", description: "MySQLデータベースの管理" },
@@ -54,6 +55,8 @@ export default async function SystemPage() {
         timezone={profile.timezone ?? "Asia/Tokyo"}
         timezoneOptions={timezoneOptions}
       />
+
+      <GithubTokenForm githubTokenConfigured={profile.githubTokenConfigured} />
 
       <div className="rounded-lg border border-neutral-200 bg-white p-5">
         <h2 className="mb-2 font-medium">仲介APIサーバー</h2>

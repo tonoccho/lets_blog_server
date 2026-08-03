@@ -6,6 +6,7 @@ import {
   unbindProjectEnvironment,
   updateProject,
   updateMasterEnvironment,
+  updateProjectGithubRepository,
   addProjectUser,
   updateProjectUserRole,
   removeProjectUser,
@@ -128,6 +129,31 @@ export async function updateMasterEnvironmentAction(
 
   try {
     await updateMasterEnvironment(projectId, masterEnvironment, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  return { success: true };
+}
+
+export interface UpdateProjectGithubRepositoryState {
+  error?: string;
+  success?: boolean;
+}
+
+export async function updateProjectGithubRepositoryAction(
+  projectId: number,
+  _prevState: UpdateProjectGithubRepositoryState,
+  formData: FormData
+): Promise<UpdateProjectGithubRepositoryState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const githubRepository = String(formData.get("githubRepository") ?? "").trim();
+
+  try {
+    await updateProjectGithubRepository(projectId, githubRepository, actor);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

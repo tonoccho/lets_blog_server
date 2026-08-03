@@ -86,11 +86,18 @@ public class User {
     @Column(name = "custom_links", columnDefinition = "json")
     private List<CustomLink> customLinks;
 
+    @Column(name = "github_token_encrypted", columnDefinition = "VARBINARY(1024)")
+    private byte[] githubTokenEncrypted;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    public boolean hasGithubToken() {
+        return githubTokenEncrypted != null && githubTokenEncrypted.length > 0;
+    }
 
     @PrePersist
     void onCreate() {

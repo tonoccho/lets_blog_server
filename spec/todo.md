@@ -211,3 +211,12 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
 - [ ] レガシーWordPress専用カラム(`sites.wp_username`/`wp_app_password_encrypted`)の整理・削除の検討(全サイトが新スキーマに移行し安定運用が確認できた後)
 - [ ] front matterの `wp_post_id`/`wpPostId` をCMS非依存な名称(`cms_post_id` 等)へリネームする移行計画([07-vscode-extension](phase3/07-vscode-extension.md)未決事項、後方互換性の設計込み)
 - [ ] `WordPressAdapterTest`/`MicroCmsAdapterTest` のリクエストボディ検証強化(現状はHTTPメソッド/URIのみ検証、[02-wordpress-adapter-tests](phase3/02-wordpress-adapter-tests.md)未決事項)
+
+## Phase 13: プロジェクト⇔GitHub連携とAI壁打ちによる記事計画(仕様策定)
+
+- [x] [00-overview](phase13/00-overview.md) — 全体スコープ・決定事項・アーキテクチャ・タスク一覧・未決事項
+- [x] [01-github-settings](phase13/01-github-settings.md) — GitHub リポジトリ連携・個人アクセストークン設定(ユーザー・プロジェクト単位。マイグレーション`V21`/`V22`、`UserService`/`ProjectService`拡張、`/system`・プロジェクト詳細ページへのフォーム追加まで実装済み。バックエンド全テスト・フロントエンド型チェック/lint/`next build`通過。実機でのGitHub PAT登録・リポジトリ紐付け確認は未実施)
+- [ ] [02-article-plan-chat](phase13/02-article-plan-chat.md) — AI 壁打ちチャートとタイトル提案(マルチターン対話、Ollama 再利用)
+- [ ] [03-article-plan-accept](phase13/03-article-plan-accept.md) — 計画受け入れ・GitHub issue 作成(GithubClient 新設、部分失敗の集約)
+
+本 phase の仕様ファイル作成完了。タスク01実装完了、02/03は次セッション以降。

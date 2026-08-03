@@ -1,9 +1,11 @@
 package com.letsblog.api.service;
 
 import com.letsblog.api.aop.AuditLog;
+import com.letsblog.api.crypto.CredentialCipher;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.User;
 import com.letsblog.api.dto.LoginResponse;
+import com.letsblog.api.dto.UpdateGithubTokenRequest;
 import com.letsblog.api.dto.UpdateUserPreferencesRequest;
 import com.letsblog.api.dto.UserCreateRequest;
 import com.letsblog.api.dto.UserProfileResponse;
@@ -40,15 +42,18 @@ public class UserService {
     private final UserRepository userRepository;
     private final TwoFactorSecretRepository twoFactorSecretRepository;
     private final RoleRepository roleRepository;
+    private final CredentialCipher credentialCipher;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     public UserService(
             UserRepository userRepository,
             TwoFactorSecretRepository twoFactorSecretRepository,
-            RoleRepository roleRepository) {
+            RoleRepository roleRepository,
+            CredentialCipher credentialCipher) {
         this.userRepository = userRepository;
         this.twoFactorSecretRepository = twoFactorSecretRepository;
         this.roleRepository = roleRepository;
+        this.credentialCipher = credentialCipher;
     }
 
     /**
@@ -157,6 +162,31 @@ public class UserService {
         user.setTimezone(request.timezone());
 
         return UserProfileResponse.from(userRepository.save(user));
+    }
+
+    @AuditLog(action = AuditLogAction.USER_UPDATED, resourceType = "USER")
+    @Transactional
+    public UserProfileResponse updateGithubToken(Long id, UpdateGithubTokenRequest request) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new UserNotFoundException("id " + id + " のユーザーは登録されていません"));
+
+        byte[] encrypted = credentialCipher.encrypt(request.githubToken());
+        user.setGithubTokenEncrypted(encrypted);
+
+        return UserProfileResponse.from(userRepository.save(user));
+    }
+
+    /**
+     * 内部利用のみ。ArticlePlanServiceからGitHub issue作成時に呼び出す想定。
+     */
+    @Transactional(readOnly = true)
+    public String getDecryptedGithubToken(Long id) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new UserNotFoundException("id " + id + " のユーザーは登録されていません"));
+        if (!user.hasGithubToken()) {
+            throw new IllegalStateException("ユーザーの GitHub トークンが設定されていません");
+        }
+        return credentialCipher.decrypt(user.getGithubTokenEncrypted());
     }
 
     @AuditLog(action = AuditLogAction.USER_DELETED, resourceType = "USER")

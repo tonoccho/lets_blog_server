@@ -389,6 +389,7 @@ export interface UserProfile {
   position: string | null;
   socialLinks: SocialLinks | null;
   customLinks: CustomLink[] | null;
+  githubTokenConfigured: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -433,6 +434,19 @@ export function updateUserPreferences(
 ): Promise<UserProfile> {
   return apiFetch<UserProfile>(`/api/users/${id}/preferences`, {
     method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function updateGithubToken(
+  id: number,
+  input: { githubToken: string },
+  actor?: ActorInfo
+): Promise<UserProfile> {
+  return apiFetch<UserProfile>(`/api/users/${id}/github-token`, {
+    method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
     actor,
@@ -555,6 +569,7 @@ export interface Project {
   testSite: Site | null;
   productionSite: Site | null;
   masterEnvironment: "test" | "production";
+  githubRepository: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -589,6 +604,19 @@ export function updateProject(id: number, name: string, actor?: ActorInfo): Prom
 
 export function deleteProject(id: number, actor?: ActorInfo): Promise<void> {
   return apiFetch<void>(`/api/projects/${id}`, { method: 'DELETE', actor });
+}
+
+export function updateProjectGithubRepository(
+  id: number,
+  githubRepository: string,
+  actor?: ActorInfo
+): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}/github-repository`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ githubRepository }),
+    actor,
+  });
 }
 
 export function updateMasterEnvironment(

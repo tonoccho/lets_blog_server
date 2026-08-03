@@ -40,11 +40,18 @@ public class Project {
     @Column(name = "master_environment", nullable = false, length = 20)
     private String masterEnvironment = "test";
 
+    @Column(name = "github_repository", length = 255)
+    private String githubRepository;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    public boolean isGithubRepositoryConfigured() {
+        return githubRepository != null && !githubRepository.isBlank();
+    }
 
     @PrePersist
     void onCreate() {
