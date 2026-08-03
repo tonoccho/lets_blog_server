@@ -16,7 +16,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.generateImage', () => commandGenerateImage(context)),
     vscode.commands.registerCommand('letsBlog.selectActor', () => commandSelectActor(context)),
     vscode.commands.registerCommand('letsBlog.selectProject', () => commandSelectProject(context)),
-    vscode.commands.registerCommand('letsBlog.planArticle', () => commandPlanArticle(context))
+    vscode.commands.registerCommand('letsBlog.planArticle', () => commandPlanArticle(context)),
+    vscode.commands.registerCommand('letsBlog.publishToTestEnvironment', () => commandPublishToTestEnvironment(context))
   );
 }
 
@@ -82,59 +83,98 @@ async function commandSelectSite(context: vscode.ExtensionContext): Promise<void
   }
 }
 
+/**
+ * 指定サイトへ現在のエディタの記事を投稿する共通処理。
+ * front matterのtitleチェック・画像収集・publishPost呼び出し・front matter書き戻し・完了通知を行う。
+ * letsBlog.publish(front matterのsiteを使用)とletsBlog.publishToTestEnvironment(test環境サイトを使用)から共有される。
+ */
+async function publishToSite(context: vscode.ExtensionContext, editor: vscode.TextEditor, siteKey: string): Promise<void> {
+  const apiKey = await requireApiKey(context);
+  const serverUrl = getServerUrl();
+  const article = parseArticle(editor.document.getText());
+
+  if (!article.data.title) {
+    vscode.window.showErrorMessage("front matterに 'title' がありません。");
+    return;
+  }
+
+  const baseDir = path.dirname(editor.document.uri.fsPath);
+  const images = extractLocalImageReferences(article.content, baseDir).filter((img) =>
+    fs.existsSync(img.absolutePath)
+  );
+
+  const result = await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: 'WordPressへ投稿しています…' },
+    () =>
+      api.publishPost(serverUrl, apiKey, {
+        site: siteKey,
+        title: article.data.title as string,
+        slug: article.data.slug,
+        status: article.data.status ?? 'draft',
+        categories: article.data.categories ?? [],
+        tags: article.data.tags ?? [],
+        wpPostId: article.data.wp_post_id != null ? String(article.data.wp_post_id) : undefined,
+        markdown: article.content,
+        images,
+      })
+  );
+
+  article.data.site = siteKey;
+  article.data.wp_post_id = result.wpPostId;
+  article.data.wp_post_url = result.wpPostUrl;
+  article.data.status = result.status;
+  await replaceDocumentText(editor, stringifyArticle(article));
+
+  const selection = await vscode.window.showInformationMessage(
+    `投稿しました(status: ${result.status})`,
+    '開く'
+  );
+  if (selection === '開く') {
+    vscode.env.openExternal(vscode.Uri.parse(result.wpPostUrl));
+  }
+}
+
 async function commandPublish(context: vscode.ExtensionContext): Promise<void> {
   const editor = getActiveMarkdownEditor();
   if (!editor) return;
 
   try {
-    const apiKey = await requireApiKey(context);
-    const serverUrl = getServerUrl();
     const article = parseArticle(editor.document.getText());
-
     if (!article.data.site) {
       vscode.window.showErrorMessage("front matterに 'site' が未設定です。先に「Let's Blog: Select Site」を実行してください。");
       return;
     }
-    if (!article.data.title) {
-      vscode.window.showErrorMessage("front matterに 'title' がありません。");
+    await publishToSite(context, editor, article.data.site);
+  } catch (err) {
+    vscode.window.showErrorMessage(`投稿に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+  }
+}
+
+async function commandPublishToTestEnvironment(context: vscode.ExtensionContext): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  try {
+    const article = parseArticle(editor.document.getText());
+    const projectId = (article.data.project_id as number | undefined) ?? getProjectId(context);
+    if (!projectId) {
+      vscode.window.showErrorMessage(
+        'プロジェクトが未選択です。front matterのproject_id、または「Let\'s Blog: Select Project」で設定してください。'
+      );
       return;
     }
 
-    const baseDir = path.dirname(editor.document.uri.fsPath);
-    const images = extractLocalImageReferences(article.content, baseDir).filter((img) =>
-      fs.existsSync(img.absolutePath)
-    );
-
-    const result = await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: 'WordPressへ投稿しています…' },
-      () =>
-        api.publishPost(serverUrl, apiKey, {
-          site: article.data.site as string,
-          title: article.data.title as string,
-          slug: article.data.slug,
-          status: article.data.status ?? 'draft',
-          categories: article.data.categories ?? [],
-          tags: article.data.tags ?? [],
-          wpPostId: article.data.wp_post_id != null ? String(article.data.wp_post_id) : undefined,
-          markdown: article.content,
-          images,
-        })
-    );
-
-    article.data.wp_post_id = result.wpPostId;
-    article.data.wp_post_url = result.wpPostUrl;
-    article.data.status = result.status;
-    await replaceDocumentText(editor, stringifyArticle(article));
-
-    const selection = await vscode.window.showInformationMessage(
-      `投稿しました(status: ${result.status})`,
-      '開く'
-    );
-    if (selection === '開く') {
-      vscode.env.openExternal(vscode.Uri.parse(result.wpPostUrl));
+    const apiKey = await requireApiKey(context);
+    const actor = await getActor(context);
+    const project = await api.getProject(getServerUrl(), apiKey, actor, projectId);
+    if (!project.testSite) {
+      vscode.window.showErrorMessage(`プロジェクト '${project.name}' にはtest環境サイトが紐づいていません。`);
+      return;
     }
+
+    await publishToSite(context, editor, project.testSite.siteKey);
   } catch (err) {
-    vscode.window.showErrorMessage(`投稿に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+    vscode.window.showErrorMessage(`test環境への投稿に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
   }
 }
 

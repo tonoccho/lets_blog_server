@@ -48,6 +48,10 @@
       {
         "command": "letsBlog.planArticle",
         "title": "Let's Blog: Plan Article"
+      },
+      {
+        "command": "letsBlog.publishToTestEnvironment",
+        "title": "Let's Blog: Publish to Test Environment"
       }
     ],
     "configuration": {

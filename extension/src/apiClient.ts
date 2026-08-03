@@ -173,6 +173,36 @@ export async function listProjects(serverUrl: string, apiKey: string, actor?: Ac
   return (await res.json()) as ProjectSummary[];
 }
 
+export interface ProjectSite {
+  id: number;
+  name: string;
+  siteKey: string;
+}
+
+export interface ProjectDetail {
+  id: number;
+  name: string;
+  slug: string;
+  localSite: ProjectSite | null;
+  testSite: ProjectSite | null;
+  productionSite: ProjectSite | null;
+  masterEnvironment: string;
+  githubRepository?: string | null;
+}
+
+export async function getProject(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  projectId: number
+): Promise<ProjectDetail> {
+  const res = await fetch(`${serverUrl}/api/projects/${projectId}`, {
+    headers: buildHeaders(apiKey, actor),
+  });
+  await assertOk(res);
+  return (await res.json()) as ProjectDetail;
+}
+
 export interface RepositoryIssue {
   number: number;
   title: string;
