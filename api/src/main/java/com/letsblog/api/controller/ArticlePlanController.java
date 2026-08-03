@@ -10,6 +10,8 @@ import com.letsblog.api.dto.IssueDescriptionResponse;
 import com.letsblog.api.dto.PlanChatRequest;
 import com.letsblog.api.dto.PlanChatResponse;
 import com.letsblog.api.dto.RepositoryIssueResponse;
+import com.letsblog.api.dto.SuggestMetadataRequest;
+import com.letsblog.api.dto.SuggestMetadataResponse;
 import com.letsblog.api.dto.SuggestStructureRequest;
 import com.letsblog.api.dto.SuggestStructureResponse;
 import com.letsblog.api.dto.SuggestTitlesRequest;
@@ -118,5 +120,12 @@ public class ArticlePlanController {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         Long userId = currentActorService.getCurrentActorId();
         return articlePlanService.acceptStructure(projectId, userId, issueNumber, request.structure());
+    }
+
+    @PostMapping("/suggest-metadata")
+    public SuggestMetadataResponse suggestMetadata(
+            @PathVariable Long projectId, @Valid @RequestBody SuggestMetadataRequest request) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        return articlePlanService.suggestMetadata(projectId, request.history());
     }
 }

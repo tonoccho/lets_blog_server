@@ -172,3 +172,99 @@ export async function listProjects(serverUrl: string, apiKey: string, actor?: Ac
   await assertOk(res);
   return (await res.json()) as ProjectSummary[];
 }
+
+export interface RepositoryIssue {
+  number: number;
+  title: string;
+  htmlUrl: string;
+  state: string;
+  assignees?: string[];
+}
+
+/** リポジトリのissue一覧のうち、未割り当て(assigneesが空)のものだけを返す。 */
+export async function listUnassignedIssues(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor,
+  projectId: number,
+  state: string = 'open'
+): Promise<RepositoryIssue[]> {
+  const res = await fetch(`${serverUrl}/api/projects/${projectId}/article-plan/issues?state=${state}`, {
+    headers: buildHeaders(apiKey, actor),
+  });
+  await assertOk(res);
+  const issues = (await res.json()) as RepositoryIssue[];
+  return issues.filter((i) => !i.assignees || i.assignees.length === 0);
+}
+
+export interface PlanChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface PlanChatRequestParams {
+  history: PlanChatMessage[];
+  message: string;
+  sessionId?: number;
+  githubIssueNumber?: number;
+}
+
+export interface PlanChatResult {
+  reply: string;
+  sessionId: number;
+}
+
+export async function postPlanChat(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor,
+  projectId: number,
+  request: PlanChatRequestParams
+): Promise<PlanChatResult> {
+  const res = await fetch(`${serverUrl}/api/projects/${projectId}/article-plan/chat`, {
+    method: 'POST',
+    headers: buildHeaders(apiKey, actor, 'application/json'),
+    body: JSON.stringify(request),
+  });
+  await assertOk(res);
+  return (await res.json()) as PlanChatResult;
+}
+
+export async function getIssueDescription(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor,
+  projectId: number,
+  issueNumber: number
+): Promise<string> {
+  const res = await fetch(
+    `${serverUrl}/api/projects/${projectId}/article-plan/issues/${issueNumber}/description`,
+    { headers: buildHeaders(apiKey, actor) }
+  );
+  await assertOk(res);
+  const data = (await res.json()) as { body: string };
+  return data.body ?? '';
+}
+
+export interface SuggestMetadataResult {
+  title: string;
+  slug: string;
+  categories: string[];
+  tags: string[];
+}
+
+export async function suggestMetadata(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor,
+  projectId: number,
+  history: PlanChatMessage[]
+): Promise<SuggestMetadataResult> {
+  const res = await fetch(`${serverUrl}/api/projects/${projectId}/article-plan/suggest-metadata`, {
+    method: 'POST',
+    headers: buildHeaders(apiKey, actor, 'application/json'),
+    body: JSON.stringify({ history }),
+  });
+  await assertOk(res);
+  return (await res.json()) as SuggestMetadataResult;
+}

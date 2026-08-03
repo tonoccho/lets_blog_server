@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import { getServerUrl, requireApiKey, setApiKey, getActor, setActor, getProjectId, setProjectId } from './config';
 import { parseArticle, stringifyArticle, extractLocalImageReferences } from './frontMatter';
 import * as api from './apiClient';
+import { PlanPanel } from './planPanel';
 
 export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
@@ -14,7 +15,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.suggestTags', () => commandSuggestTags(context)),
     vscode.commands.registerCommand('letsBlog.generateImage', () => commandGenerateImage(context)),
     vscode.commands.registerCommand('letsBlog.selectActor', () => commandSelectActor(context)),
-    vscode.commands.registerCommand('letsBlog.selectProject', () => commandSelectProject(context))
+    vscode.commands.registerCommand('letsBlog.selectProject', () => commandSelectProject(context)),
+    vscode.commands.registerCommand('letsBlog.planArticle', () => commandPlanArticle(context))
   );
 }
 
@@ -269,6 +271,20 @@ async function commandSelectActor(context: vscode.ExtensionContext): Promise<voi
   } catch (err) {
     vscode.window.showErrorMessage(`ユーザー選択に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
   }
+}
+
+async function commandPlanArticle(context: vscode.ExtensionContext): Promise<void> {
+  const actor = await getActor(context);
+  if (!actor) {
+    vscode.window.showErrorMessage('先に「Let\'s Blog: Select User」でユーザーを選択してください。');
+    return;
+  }
+  const projectId = getProjectId(context);
+  if (!projectId) {
+    vscode.window.showErrorMessage('先に「Let\'s Blog: Select Project」でプロジェクトを選択してください。');
+    return;
+  }
+  PlanPanel.createOrShow(context);
 }
 
 async function commandSelectProject(context: vscode.ExtensionContext): Promise<void> {

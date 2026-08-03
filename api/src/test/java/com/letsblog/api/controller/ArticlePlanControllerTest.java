@@ -11,6 +11,8 @@ import com.letsblog.api.dto.PlanChatMessage;
 import com.letsblog.api.dto.PlanChatRequest;
 import com.letsblog.api.dto.PlanChatResponse;
 import com.letsblog.api.dto.RepositoryIssueResponse;
+import com.letsblog.api.dto.SuggestMetadataRequest;
+import com.letsblog.api.dto.SuggestMetadataResponse;
 import com.letsblog.api.dto.SuggestStructureRequest;
 import com.letsblog.api.dto.SuggestStructureResponse;
 import com.letsblog.api.dto.SuggestTitlesRequest;
@@ -256,5 +258,26 @@ class ArticlePlanControllerTest {
 
         assertThrows(ForbiddenException.class,
                 () -> controller.acceptStructure(1L, 42, new AcceptStructureRequest("## 構成")));
+    }
+
+    @Test
+    void suggestMetadata_認可後にサービスへ委譲する() {
+        ArticlePlanController controller = controller();
+        when(articlePlanService.suggestMetadata(1L, List.of()))
+                .thenReturn(new SuggestMetadataResponse("タイトル", "slug", List.of("カテゴリ"), List.of("タグ")));
+
+        SuggestMetadataResponse response = controller.suggestMetadata(1L, new SuggestMetadataRequest(List.of()));
+
+        assertEquals("タイトル", response.title());
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+    }
+
+    @Test
+    void suggestMetadata_認可拒否ならForbidden() {
+        ArticlePlanController controller = controller();
+        doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+
+        assertThrows(ForbiddenException.class,
+                () -> controller.suggestMetadata(1L, new SuggestMetadataRequest(List.of())));
     }
 }

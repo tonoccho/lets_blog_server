@@ -44,6 +44,10 @@
       {
         "command": "letsBlog.selectProject",
         "title": "Let's Blog: Select Project"
+      },
+      {
+        "command": "letsBlog.planArticle",
+        "title": "Let's Blog: Plan Article"
       }
     ],
     "configuration": {
