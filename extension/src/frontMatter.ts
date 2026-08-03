@@ -11,6 +11,9 @@ export interface LetsBlogFrontMatter {
   featured_image?: string;
   wp_post_id?: string | null;
   wp_post_url?: string | null;
+  github_issue_number?: number;
+  github_repository?: string;
+  project_id?: number;
   [key: string]: unknown;
 }
 

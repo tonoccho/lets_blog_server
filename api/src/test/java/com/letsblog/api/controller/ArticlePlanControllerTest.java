@@ -6,6 +6,7 @@ import com.letsblog.api.dto.AcceptStructureRequest;
 import com.letsblog.api.dto.AcceptStructureResponse;
 import com.letsblog.api.dto.ArticlePlanSessionDetailResponse;
 import com.letsblog.api.dto.ArticlePlanSessionSummaryResponse;
+import com.letsblog.api.dto.AssignIssueResponse;
 import com.letsblog.api.dto.IssueDescriptionResponse;
 import com.letsblog.api.dto.PlanChatMessage;
 import com.letsblog.api.dto.PlanChatRequest;
@@ -162,7 +163,7 @@ class ArticlePlanControllerTest {
     void listIssues_認可後にサービスへ委譲する() {
         ArticlePlanController controller = controller();
         when(articlePlanService.listRepositoryIssues(1L, 10L, "open")).thenReturn(List.of(
-                new RepositoryIssueResponse(1, "issue", "https://example.com/1", "open")));
+                new RepositoryIssueResponse(1, "issue", "https://example.com/1", "open", List.of())));
 
         List<RepositoryIssueResponse> result = controller.listIssues(1L, "open");
 
@@ -279,5 +280,25 @@ class ArticlePlanControllerTest {
 
         assertThrows(ForbiddenException.class,
                 () -> controller.suggestMetadata(1L, new SuggestMetadataRequest(List.of())));
+    }
+
+    @Test
+    void assignIssue_認可後にサービスへ委譲する() {
+        ArticlePlanController controller = controller();
+        when(articlePlanService.assignIssueToActor(1L, 10L, 42))
+                .thenReturn(new AssignIssueResponse(42, "https://example.com/42", "octocat"));
+
+        AssignIssueResponse response = controller.assignIssue(1L, 42);
+
+        assertEquals("octocat", response.assignedLogin());
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+    }
+
+    @Test
+    void assignIssue_認可拒否ならForbidden() {
+        ArticlePlanController controller = controller();
+        doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+
+        assertThrows(ForbiddenException.class, () -> controller.assignIssue(1L, 42));
     }
 }

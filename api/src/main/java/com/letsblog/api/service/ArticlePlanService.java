@@ -13,6 +13,7 @@ import com.letsblog.api.dto.AcceptPlanResultItem;
 import com.letsblog.api.dto.AcceptStructureResponse;
 import com.letsblog.api.dto.ArticlePlanSessionDetailResponse;
 import com.letsblog.api.dto.ArticlePlanSessionSummaryResponse;
+import com.letsblog.api.dto.AssignIssueResponse;
 import com.letsblog.api.dto.IssueDescriptionResponse;
 import com.letsblog.api.dto.PlanChatMessage;
 import com.letsblog.api.dto.PlanChatResponse;
@@ -23,6 +24,7 @@ import com.letsblog.api.dto.SuggestTitlesResponse;
 import com.letsblog.api.github.GithubClient;
 import com.letsblog.api.github.GithubIssue;
 import com.letsblog.api.github.GithubIssueSummary;
+import com.letsblog.api.github.GithubUser;
 import com.letsblog.api.repository.ArticlePlanSessionRepository;
 import com.letsblog.api.repository.GenerationJobRepository;
 import org.springframework.stereotype.Service;
@@ -230,7 +232,7 @@ public class ArticlePlanService {
         GithubAccess access = resolveGithubAccess(projectId, userId);
         List<GithubIssueSummary> issues = githubClient.listIssues(access.token(), access.owner(), access.repo(), state);
         return issues.stream()
-                .map(i -> new RepositoryIssueResponse(i.number(), i.title(), i.htmlUrl(), i.state()))
+                .map(i -> new RepositoryIssueResponse(i.number(), i.title(), i.htmlUrl(), i.state(), i.assignees()))
                 .toList();
     }
 
@@ -286,6 +288,25 @@ public class ArticlePlanService {
         GithubIssue issue = githubClient.updateIssueBody(
                 access.token(), access.owner(), access.repo(), issueNumber, structure);
         return new AcceptStructureResponse(issue.number(), issue.htmlUrl());
+    }
+
+    /**
+     * 指定issueをログイン中のユーザーに割り当て、in-progressラベルを付与する。
+     */
+    public AssignIssueResponse assignIssueToActor(Long projectId, Long userId, Integer issueNumber) {
+        GithubAccess access = resolveGithubAccess(projectId, userId);
+
+        GithubUser authUser = githubClient.getAuthenticatedUser(access.token());
+
+        GithubIssue issue = githubClient.assignAndLabelIssue(
+                access.token(),
+                access.owner(),
+                access.repo(),
+                issueNumber,
+                List.of(authUser.login()),
+                List.of("in-progress"));
+
+        return new AssignIssueResponse(issue.number(), issue.htmlUrl(), authUser.login());
     }
 
     public SuggestTitlesResponse suggestTitles(Long projectId, List<PlanChatMessage> history) {

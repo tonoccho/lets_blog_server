@@ -6,6 +6,7 @@ import com.letsblog.api.dto.AcceptStructureRequest;
 import com.letsblog.api.dto.AcceptStructureResponse;
 import com.letsblog.api.dto.ArticlePlanSessionDetailResponse;
 import com.letsblog.api.dto.ArticlePlanSessionSummaryResponse;
+import com.letsblog.api.dto.AssignIssueResponse;
 import com.letsblog.api.dto.IssueDescriptionResponse;
 import com.letsblog.api.dto.PlanChatRequest;
 import com.letsblog.api.dto.PlanChatResponse;
@@ -127,5 +128,13 @@ public class ArticlePlanController {
             @PathVariable Long projectId, @Valid @RequestBody SuggestMetadataRequest request) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         return articlePlanService.suggestMetadata(projectId, request.history());
+    }
+
+    @PostMapping("/issues/{issueNumber}/assign")
+    public AssignIssueResponse assignIssue(
+            @PathVariable Long projectId, @PathVariable Integer issueNumber) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        Long userId = currentActorService.getCurrentActorId();
+        return articlePlanService.assignIssueToActor(projectId, userId, issueNumber);
     }
 }

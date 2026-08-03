@@ -9,6 +9,7 @@ import com.letsblog.api.dto.AcceptPlanResponse;
 import com.letsblog.api.dto.AcceptPlanResultItem;
 import com.letsblog.api.dto.ArticlePlanSessionDetailResponse;
 import com.letsblog.api.dto.ArticlePlanSessionSummaryResponse;
+import com.letsblog.api.dto.AssignIssueResponse;
 import com.letsblog.api.dto.PlanChatMessage;
 import com.letsblog.api.dto.PlanChatResponse;
 import com.letsblog.api.dto.RepositoryIssueResponse;
@@ -18,6 +19,7 @@ import com.letsblog.api.github.GithubApiException;
 import com.letsblog.api.github.GithubClient;
 import com.letsblog.api.github.GithubIssue;
 import com.letsblog.api.github.GithubIssueSummary;
+import com.letsblog.api.github.GithubUser;
 import com.letsblog.api.repository.ArticlePlanSessionRepository;
 import com.letsblog.api.repository.GenerationJobRepository;
 import org.junit.jupiter.api.Test;
@@ -509,7 +511,8 @@ class ArticlePlanServiceTest {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithRepository("owner/repo"));
         when(userService.getDecryptedGithubToken(10L)).thenReturn("test-token");
         when(githubClient.listIssues("test-token", "owner", "repo", "open"))
-                .thenReturn(List.of(new GithubIssueSummary(3, "記事タイトル", "https://github.com/owner/repo/issues/3", "open")));
+                .thenReturn(List.of(new GithubIssueSummary(
+                        3, "記事タイトル", "https://github.com/owner/repo/issues/3", "open", List.of())));
 
         List<RepositoryIssueResponse> result = service.listRepositoryIssues(1L, 10L, "open");
 
@@ -588,5 +591,30 @@ class ArticlePlanServiceTest {
         assertThrows(RuntimeException.class, () -> service.suggestMetadata(1L, List.of()));
 
         assertEquals(List.of("running", "failed"), savedStatuses);
+    }
+
+    @Test
+    void assignIssueToActor_成功時はassigneeとURLを含む結果を返す() {
+        ArticlePlanService service = service();
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithRepository("owner/repo"));
+        when(userService.getDecryptedGithubToken(10L)).thenReturn("test-token");
+        when(githubClient.getAuthenticatedUser("test-token")).thenReturn(new GithubUser("octocat"));
+        when(githubClient.assignAndLabelIssue(
+                "test-token", "owner", "repo", 42, List.of("octocat"), List.of("in-progress")))
+                .thenReturn(new GithubIssue(42, "https://github.com/owner/repo/issues/42"));
+
+        AssignIssueResponse response = service.assignIssueToActor(1L, 10L, 42);
+
+        assertEquals(42, response.issueNumber());
+        assertEquals("https://github.com/owner/repo/issues/42", response.htmlUrl());
+        assertEquals("octocat", response.assignedLogin());
+    }
+
+    @Test
+    void assignIssueToActor_リポジトリ未設定の場合は例外をスローする() {
+        ArticlePlanService service = service();
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithRepository(null));
+
+        assertThrows(IllegalStateException.class, () -> service.assignIssueToActor(1L, 10L, 42));
     }
 }

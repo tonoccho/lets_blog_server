@@ -268,3 +268,24 @@ export async function suggestMetadata(
   await assertOk(res);
   return (await res.json()) as SuggestMetadataResult;
 }
+
+export interface AssignIssueResult {
+  issueNumber: number;
+  htmlUrl: string;
+  assignedLogin: string;
+}
+
+export async function assignIssue(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor,
+  projectId: number,
+  issueNumber: number
+): Promise<AssignIssueResult> {
+  const res = await fetch(`${serverUrl}/api/projects/${projectId}/article-plan/issues/${issueNumber}/assign`, {
+    method: 'POST',
+    headers: buildHeaders(apiKey, actor, 'application/json'),
+  });
+  await assertOk(res);
+  return (await res.json()) as AssignIssueResult;
+}
