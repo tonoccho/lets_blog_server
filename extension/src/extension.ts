@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { getServerUrl, requireApiKey, setApiKey } from './config';
+import { getServerUrl, requireApiKey, setApiKey, getActor, setActor, getProjectId, setProjectId } from './config';
 import { parseArticle, stringifyArticle, extractLocalImageReferences } from './frontMatter';
 import * as api from './apiClient';
 
@@ -12,7 +12,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.publish', () => commandPublish(context)),
     vscode.commands.registerCommand('letsBlog.askAi', () => commandAskAi(context)),
     vscode.commands.registerCommand('letsBlog.suggestTags', () => commandSuggestTags(context)),
-    vscode.commands.registerCommand('letsBlog.generateImage', () => commandGenerateImage(context))
+    vscode.commands.registerCommand('letsBlog.generateImage', () => commandGenerateImage(context)),
+    vscode.commands.registerCommand('letsBlog.selectActor', () => commandSelectActor(context)),
+    vscode.commands.registerCommand('letsBlog.selectProject', () => commandSelectProject(context))
   );
 }
 
@@ -238,5 +240,65 @@ async function commandGenerateImage(context: vscode.ExtensionContext): Promise<v
     vscode.window.showInformationMessage(`画像を生成し ${image.fileName} として保存しました。`);
   } catch (err) {
     vscode.window.showErrorMessage(`画像生成に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+  }
+}
+
+async function commandSelectActor(context: vscode.ExtensionContext): Promise<void> {
+  try {
+    const apiKey = await requireApiKey(context);
+    const users = await api.listUsers(getServerUrl(), apiKey);
+
+    if (users.length === 0) {
+      vscode.window.showWarningMessage('利用可能なユーザーがありません。先に管理画面でユーザーを作成してください。');
+      return;
+    }
+
+    const currentActor = await getActor(context);
+    const picked = await vscode.window.showQuickPick(
+      users.map((u) => ({
+        label: u.email,
+        description: u.role + (currentActor?.id === u.id ? ' (現在選択中)' : ''),
+        actor: u,
+      })),
+      { placeHolder: 'ユーザーを選択' }
+    );
+    if (!picked) return;
+
+    await setActor(context, picked.actor);
+    vscode.window.showInformationMessage(`ユーザーを '${picked.label}' に設定しました。`);
+  } catch (err) {
+    vscode.window.showErrorMessage(`ユーザー選択に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+  }
+}
+
+async function commandSelectProject(context: vscode.ExtensionContext): Promise<void> {
+  try {
+    const apiKey = await requireApiKey(context);
+    const actor = await getActor(context);
+    const projects = await api.listProjects(getServerUrl(), apiKey, actor);
+
+    const validProjects = projects.filter((p) => p.githubRepository);
+    if (validProjects.length === 0) {
+      vscode.window.showWarningMessage(
+        'GitHub連携済みのプロジェクトがありません。先に管理画面でプロジェクトのGitHubリポジトリを設定してください。'
+      );
+      return;
+    }
+
+    const currentProjectId = getProjectId(context);
+    const picked = await vscode.window.showQuickPick(
+      validProjects.map((p) => ({
+        label: p.name,
+        description: p.githubRepository + (currentProjectId === p.id ? ' (現在選択中)' : ''),
+        projectId: p.id,
+      })),
+      { placeHolder: 'プロジェクトを選択' }
+    );
+    if (!picked) return;
+
+    await setProjectId(context, picked.projectId);
+    vscode.window.showInformationMessage(`プロジェクトを '${picked.label}' に設定しました。`);
+  } catch (err) {
+    vscode.window.showErrorMessage(`プロジェクト選択に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
   }
 }

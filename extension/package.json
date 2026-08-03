@@ -36,6 +36,14 @@
       {
         "command": "letsBlog.generateImage",
         "title": "Let's Blog: Generate Image"
+      },
+      {
+        "command": "letsBlog.selectActor",
+        "title": "Let's Blog: Select User"
+      },
+      {
+        "command": "letsBlog.selectProject",
+        "title": "Let's Blog: Select Project"
       }
     ],
     "configuration": {
