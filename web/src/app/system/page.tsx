@@ -66,6 +66,21 @@ export default async function SystemPage() {
       </div>
 
       <div className="rounded-lg border border-neutral-200 bg-white p-5">
+        <h2 className="mb-2 font-medium">VSCode拡張機能</h2>
+        <p className="mb-3 text-sm text-neutral-600">
+          Markdownでの記事執筆・投稿・記事計画ワークフローに使うVSCode拡張機能をダウンロードできます。
+          クリック後にAPIサーバー側でビルドするため、初回は数十秒かかる場合があります。
+        </p>
+        <a
+          href="/api/vscode-extension"
+          download
+          className="inline-block rounded bg-neutral-900 px-4 py-2 text-sm text-white hover:bg-neutral-700"
+        >
+          拡張機能をダウンロード (.vsix)
+        </a>
+      </div>
+
+      <div className="rounded-lg border border-neutral-200 bg-white p-5">
         <h2 className="mb-3 font-medium">関連サービス</h2>
         <ul className="space-y-2">
           {LINKS.map((link) => (

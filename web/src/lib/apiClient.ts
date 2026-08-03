@@ -1399,3 +1399,23 @@ export function deleteComfyUiCheckpoint(
     { method: 'DELETE', actor }
   );
 }
+
+/**
+ * VSCode拡張機能(.vsix)をAPIサーバーからダウンロードする。APIサーバー側で
+ * オンデマンドビルド(初回は数十秒かかる場合がある)されるため、apiFetchのJSON前提の
+ * エラーハンドリングは使わずバイナリを直接扱う。
+ */
+export async function downloadVscodeExtension(): Promise<{ body: ArrayBuffer; filename: string }> {
+  const res = await fetch(`${serverUrl()}/api/system/vscode-extension`, {
+    headers: { 'X-API-Key': apiKey() },
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
+  }
+  const disposition = res.headers.get('content-disposition') ?? '';
+  const match = disposition.match(/filename="([^"]+)"/);
+  const filename = match ? match[1] : 'letsblog-vscode.vsix';
+  return { body: await res.arrayBuffer(), filename };
+}
