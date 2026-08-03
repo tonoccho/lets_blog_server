@@ -26,15 +26,21 @@ Web管理画面(`/system`)からVSCode拡張機能(.vsix)をダウンロード�
 ### Web管理画面
 
 - `web/src/lib/apiClient.ts`: `downloadVscodeExtension()`でバイナリをArrayBufferとして取得
-- `web/src/app/api/vscode-extension/route.ts`(新規Route Handler): `requireSession()`後にバイナリをストリーミング返却
-- `web/src/app/system/page.tsx`: 「VSCode拡張機能」カードにダウンロードリンク(`<a href="/api/vscode-extension" download>`)を追加
+- `web/src/app/downloads/vscode-extension/route.ts`(新規Route Handler): `getSession()`後にバイナリをストリーミング返却。エラー時はJSON `{ error: string }`を返す
+- `web/src/app/system/VscodeExtensionDownloadButton.tsx`(新規、クライアントコンポーネント): `fetch`でダウンロードし、失敗時はレスポンスのエラーメッセージまたはリダイレクト検知(セッション切れ)を画面に表示する
+- `web/src/app/system/page.tsx`: 「VSCode拡張機能」カードに上記ボタンを設置
+
+#### nginxルーティング上の注意(実機検証で発覚・修正済み)
+
+`nginx/conf.d/*.conf`の`location /api/`は仲介APIサーバー(Spring Boot)への直接転送専用であり、Web BFF(Next.js)側のルートは`/api/`配下に置けない(置くとブラウザからのリクエストがNext.jsを経由せずAPIサーバーへ直接送られ、`X-API-Key`未送信で401になる)。この制約に気づかずWeb側の中継ルートを最初`/api/vscode-extension`としてしまい、実機で「ファイルをダウンロードできませんでした」という汎用エラーになる不具合を作り込んだため、`/downloads/vscode-extension`へ移動して修正した。Web BFF側に新しい中継ルートを追加する際は、既存の`/api/auth/*`のような個別carve-outをnginx側に足さない限り`/api/`配下を避けること。
 
 ## テスト・実機検証
 
 - `VscodeExtensionBuildServiceTest`: キャッシュヒット時にビルドを実行せず返すこと、ソース(`package.json`)未検出時・version未記載時に例外となることを検証(実際のnpm/vsce呼び出しはビルド環境依存のため単体テスト対象外)
 - `VscodeExtensionControllerTest`: レスポンスヘッダー(Content-Disposition)を検証
 - **実機検証済み**: `docker compose build api && docker compose up -d api`でイメージ再作成 → `GET /api/system/vscode-extension`を`curl`で実行し、初回リクエストで実際に`.vsix`(555ファイル、約1.1MB)が生成されることを確認。2回目のリクエストはキャッシュヒットで即時応答(0.014秒)することも確認済み
-- Web管理画面の「ダウンロード」ボタンをブラウザで実際にクリックする操作確認は、本セッションではブラウザ操作ツールが使えず未実施(Route Handlerの実装・`next build`通過は確認済み)
+- **実機で発覚した不具合と修正**: 上記nginxルーティングの問題により、ユーザーがブラウザで実際にダウンロードボタンを押したところ失敗。`curl`で`https://localhost/api/vscode-extension`(旧パス)を叩き401(APIキー未送信)を確認して原因を特定し、`/downloads/vscode-extension`への移動で解消。移動後は`curl`で(未ログイン状態のため)`/login`へのリダイレクトが返る=nginxがWeb側へ正しくルーティングしていることを確認済み。ただしログイン済みブラウザでの最終的なクリック確認は本セッションでは未実施
+- `next build`通過を都度確認
 
 ## 既知の制限
 
