@@ -1,8 +1,9 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { getProject } from "@/lib/apiClient";
+import { getProject, listArticlePlanSessions, listArticlePlanIssues } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 import { ArticlePlanWorkspace } from "./ArticlePlanWorkspace";
+import { ArticlePlanIssueList } from "./ArticlePlanIssueList";
 
 export default async function ArticlePlanPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -14,6 +15,13 @@ export default async function ArticlePlanPage({ params }: { params: Promise<{ id
   if (!project) {
     notFound();
   }
+
+  const [sessions, issues] = await Promise.all([
+    listArticlePlanSessions(projectId, actor).catch(() => []),
+    project.githubRepository
+      ? listArticlePlanIssues(projectId, "open", actor).catch(() => [])
+      : Promise.resolve([]),
+  ]);
 
   return (
     <div className="space-y-8">
@@ -29,7 +37,11 @@ export default async function ArticlePlanPage({ params }: { params: Promise<{ id
         </div>
       )}
 
-      <ArticlePlanWorkspace projectId={projectId} />
+      <ArticlePlanWorkspace projectId={projectId} initialSessions={sessions} />
+
+      {project.githubRepository && (
+        <ArticlePlanIssueList projectId={projectId} initialIssues={issues} initialState="open" />
+      )}
     </div>
   );
 }

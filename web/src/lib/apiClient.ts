@@ -626,6 +626,31 @@ export interface PlanChatMessage {
 
 export interface PlanChatResponse {
   reply: string;
+  sessionId: number;
+}
+
+export interface ArticlePlanSessionSummary {
+  id: number;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ArticlePlanSessionDetail {
+  id: number;
+  title: string;
+  history: PlanChatMessage[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type RepositoryIssueState = "open" | "closed" | "all";
+
+export interface RepositoryIssue {
+  number: number;
+  title: string;
+  htmlUrl: string;
+  state: string;
 }
 
 export interface SuggestTitlesResponse {
@@ -645,7 +670,7 @@ export interface AcceptPlanResponse {
 
 export function sendArticlePlanChatMessage(
   projectId: number,
-  data: { history: PlanChatMessage[]; message: string },
+  data: { history: PlanChatMessage[]; message: string; sessionId?: number | null },
   actor?: ActorInfo
 ): Promise<PlanChatResponse> {
   return apiFetch<PlanChatResponse>(`/api/projects/${projectId}/article-plan/chat`, {
@@ -654,6 +679,35 @@ export function sendArticlePlanChatMessage(
     body: JSON.stringify(data),
     actor,
   });
+}
+
+export function listArticlePlanSessions(
+  projectId: number,
+  actor?: ActorInfo
+): Promise<ArticlePlanSessionSummary[]> {
+  return apiFetch<ArticlePlanSessionSummary[]>(`/api/projects/${projectId}/article-plan/sessions`, { actor });
+}
+
+export function getArticlePlanSession(
+  projectId: number,
+  sessionId: number,
+  actor?: ActorInfo
+): Promise<ArticlePlanSessionDetail> {
+  return apiFetch<ArticlePlanSessionDetail>(
+    `/api/projects/${projectId}/article-plan/sessions/${sessionId}`,
+    { actor }
+  );
+}
+
+export function listArticlePlanIssues(
+  projectId: number,
+  state: RepositoryIssueState,
+  actor?: ActorInfo
+): Promise<RepositoryIssue[]> {
+  return apiFetch<RepositoryIssue[]>(
+    `/api/projects/${projectId}/article-plan/issues?state=${state}`,
+    { actor }
+  );
 }
 
 export function suggestArticlePlanTitles(

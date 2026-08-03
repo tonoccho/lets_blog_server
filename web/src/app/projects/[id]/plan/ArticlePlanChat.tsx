@@ -2,40 +2,25 @@
 
 import { useState } from "react";
 import type { PlanChatMessage } from "@/lib/apiClient";
-import { sendPlanChatMessage } from "./actions";
 
 export function ArticlePlanChat({
-  projectId,
   history,
-  setHistory,
+  onSend,
+  isLoading,
+  error,
 }: {
-  projectId: number;
   history: PlanChatMessage[];
-  setHistory: (history: PlanChatMessage[]) => void;
+  onSend: (message: string) => Promise<void>;
+  isLoading: boolean;
+  error?: string;
 }) {
   const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | undefined>(undefined);
 
   const handleSendMessage = async () => {
     const message = input.trim();
     if (!message || isLoading) return;
-
     setInput("");
-    setIsLoading(true);
-    setError(undefined);
-
-    const result = await sendPlanChatMessage(projectId, history, message);
-    if (result.ok) {
-      setHistory([
-        ...history,
-        { role: "user", content: message },
-        { role: "assistant", content: result.data.reply },
-      ]);
-    } else {
-      setError(result.error);
-    }
-    setIsLoading(false);
+    await onSend(message);
   };
 
   return (
