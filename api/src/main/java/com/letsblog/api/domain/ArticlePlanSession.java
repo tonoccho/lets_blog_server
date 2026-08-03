@@ -25,6 +25,9 @@ public class ArticlePlanSession {
     @Column(name = "project_id", nullable = false)
     private Long projectId;
 
+    @Column(name = "github_issue_number")
+    private Integer githubIssueNumber;
+
     @Column(name = "title", nullable = false, length = 255)
     private String title;
 

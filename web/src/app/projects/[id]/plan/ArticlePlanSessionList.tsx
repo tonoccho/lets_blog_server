@@ -54,6 +54,11 @@ export function ArticlePlanSessionList({
                   : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
               }`}
             >
+              {s.githubIssueNumber && (
+                <span className="mr-1 rounded bg-blue-100 px-1.5 py-0.5 text-xs text-blue-700">
+                  #{s.githubIssueNumber}
+                </span>
+              )}
               {formatSessionDate(s.createdAt)}-{s.title}
             </button>
           ))}

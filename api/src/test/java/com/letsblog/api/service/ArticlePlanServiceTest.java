@@ -123,7 +123,7 @@ class ArticlePlanServiceTest {
                 .thenReturn(Optional.of(existingSession(99L, 1L, history)));
         when(ollamaClient.generate(anyString())).thenReturn("初心者エンジニア向けはどうでしょう");
 
-        PlanChatResponse response = service.chat(1L, history, "初心者向けにしたいです", 99L);
+        PlanChatResponse response = service.chat(1L, history, "初心者向けにしたいです", 99L, null);
 
         assertEquals("初心者エンジニア向けはどうでしょう", response.reply());
         assertEquals(99L, response.sessionId());
@@ -144,7 +144,7 @@ class ArticlePlanServiceTest {
                 .thenReturn(Optional.of(existingSession(99L, 1L, List.of())));
         when(ollamaClient.generate(anyString())).thenReturn("応答");
 
-        service.chat(1L, List.of(), "テーマ", 99L);
+        service.chat(1L, List.of(), "テーマ", 99L, null);
 
         assertEquals(List.of("running", "done"), savedStatuses);
 
@@ -158,7 +158,7 @@ class ArticlePlanServiceTest {
         ArticlePlanService service = service();
         when(ollamaClient.generate(anyString())).thenThrow(new RuntimeException("接続できません"));
 
-        assertThrows(RuntimeException.class, () -> service.chat(1L, List.of(), "テーマ", null));
+        assertThrows(RuntimeException.class, () -> service.chat(1L, List.of(), "テーマ", null, null));
 
         assertEquals(List.of("running", "failed"), savedStatuses);
     }
@@ -170,7 +170,7 @@ class ArticlePlanServiceTest {
                 .thenReturn("AIとのやり取りの応答")
                 .thenReturn("生成されたタイトル");
 
-        PlanChatResponse response = service.chat(1L, List.of(), "AIブログの企画を考えたい", null);
+        PlanChatResponse response = service.chat(1L, List.of(), "AIブログの企画を考えたい", null, null);
 
         assertEquals(100L, response.sessionId());
         verify(articlePlanSessionRepository, never()).findById(any());
@@ -195,7 +195,7 @@ class ArticlePlanServiceTest {
                 .thenReturn(Optional.of(existingSession(5L, 1L, existingHistory)));
         when(ollamaClient.generate(anyString())).thenReturn("続きの応答");
 
-        PlanChatResponse response = service.chat(1L, existingHistory, "追加の発言", 5L);
+        PlanChatResponse response = service.chat(1L, existingHistory, "追加の発言", 5L, null);
 
         assertEquals(5L, response.sessionId());
         // タイトル生成は行われないため、Ollama呼び出しは1回のみ
@@ -217,7 +217,7 @@ class ArticlePlanServiceTest {
         when(ollamaClient.generate(anyString())).thenReturn("応答");
 
         assertThrows(ArticlePlanSessionNotFoundException.class,
-                () -> service.chat(1L, List.of(), "発言", 5L));
+                () -> service.chat(1L, List.of(), "発言", 5L, null));
     }
 
     @Test
@@ -227,7 +227,46 @@ class ArticlePlanServiceTest {
         when(ollamaClient.generate(anyString())).thenReturn("応答");
 
         assertThrows(ArticlePlanSessionNotFoundException.class,
-                () -> service.chat(1L, List.of(), "発言", 5L));
+                () -> service.chat(1L, List.of(), "発言", 5L, null));
+    }
+
+    @Test
+    void chat_githubIssueNumber指定時は新規セッションにissue番号が保存される() {
+        ArticlePlanService service = service();
+        when(ollamaClient.generate(anyString()))
+                .thenReturn("応答")
+                .thenReturn("生成されたタイトル");
+
+        PlanChatResponse response = service.chat(1L, List.of(), "issueの記事について壁打ち", null, 42);
+
+        assertEquals(100L, response.sessionId());
+        ArgumentCaptor<ArticlePlanSession> sessionCaptor = ArgumentCaptor.forClass(ArticlePlanSession.class);
+        verify(articlePlanSessionRepository).save(sessionCaptor.capture());
+        assertEquals(42, sessionCaptor.getValue().getGithubIssueNumber());
+    }
+
+    @Test
+    void getSessionByIssue_issue番号に紐づく最新セッションの詳細を返す() {
+        ArticlePlanService service = service();
+        ArticlePlanSession session = existingSession(7L, 1L, List.of(new PlanChatMessage("user", "こんにちは")));
+        session.setGithubIssueNumber(42);
+        when(articlePlanSessionRepository.findFirstByProjectIdAndGithubIssueNumberOrderByUpdatedAtDesc(1L, 42))
+                .thenReturn(Optional.of(session));
+
+        ArticlePlanSessionDetailResponse response = service.getSessionByIssue(1L, 42);
+
+        assertEquals(7L, response.id());
+        assertEquals(42, response.githubIssueNumber());
+        assertEquals(1, response.history().size());
+    }
+
+    @Test
+    void getSessionByIssue_見つからない場合は例外() {
+        ArticlePlanService service = service();
+        when(articlePlanSessionRepository.findFirstByProjectIdAndGithubIssueNumberOrderByUpdatedAtDesc(1L, 42))
+                .thenReturn(Optional.empty());
+
+        assertThrows(ArticlePlanSessionNotFoundException.class, () -> service.getSessionByIssue(1L, 42));
     }
 
     @Test
@@ -375,6 +414,83 @@ class ArticlePlanServiceTest {
         assertNull(response.results().get(0).error());
         assertEquals("GitHub issueの作成に失敗しました", response.results().get(1).error());
         assertNull(response.results().get(1).issueNumber());
+    }
+
+    @Test
+    void suggestStructure_構成案の指示がプロンプトに含まれる() {
+        ArticlePlanService service = service();
+        when(ollamaClient.generate(anyString())).thenReturn("## 見出し1\n- 小見出しA");
+
+        service.suggestStructure(1L, List.of(new PlanChatMessage("user", "テーマ案")));
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient).generate(promptCaptor.capture());
+        assertTrue(promptCaptor.getValue().contains("構成案"));
+    }
+
+    @Test
+    void suggestStructure_Ollamaの応答をそのまま返す() {
+        ArticlePlanService service = service();
+        when(ollamaClient.generate(anyString())).thenReturn("## 見出し1\n- 小見出しA");
+
+        var response = service.suggestStructure(1L, List.of());
+
+        assertEquals("## 見出し1\n- 小見出しA", response.structure());
+    }
+
+    @Test
+    void suggestStructure_生成ジョブがplan_suggest_structureとして記録される() {
+        ArticlePlanService service = service();
+        when(ollamaClient.generate(anyString())).thenReturn("構成案");
+
+        service.suggestStructure(1L, List.of());
+
+        assertEquals(List.of("running", "done"), savedStatuses);
+        ArgumentCaptor<GenerationJob> jobCaptor = ArgumentCaptor.forClass(GenerationJob.class);
+        verify(generationJobRepository, atLeastOnce()).save(jobCaptor.capture());
+        assertEquals("plan_suggest_structure", jobCaptor.getValue().getType());
+    }
+
+    @Test
+    void getIssueDescription_GithubClientから取得したbodyを返す() {
+        ArticlePlanService service = service();
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithRepository("owner/repo"));
+        when(userService.getDecryptedGithubToken(10L)).thenReturn("test-token");
+        when(githubClient.getIssueBody("test-token", "owner", "repo", 3)).thenReturn("## 現状の構成");
+
+        var response = service.getIssueDescription(1L, 10L, 3);
+
+        assertEquals("## 現状の構成", response.body());
+    }
+
+    @Test
+    void getIssueDescription_リポジトリ未設定の場合は例外をスローする() {
+        ArticlePlanService service = service();
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithRepository(null));
+
+        assertThrows(IllegalStateException.class, () -> service.getIssueDescription(1L, 10L, 3));
+    }
+
+    @Test
+    void acceptStructure_成功時はissue番号とURLを含む結果を返す() {
+        ArticlePlanService service = service();
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithRepository("owner/repo"));
+        when(userService.getDecryptedGithubToken(10L)).thenReturn("test-token");
+        when(githubClient.updateIssueBody("test-token", "owner", "repo", 42, "## 構成案"))
+                .thenReturn(new GithubIssue(42, "https://github.com/owner/repo/issues/42"));
+
+        var response = service.acceptStructure(1L, 10L, 42, "## 構成案");
+
+        assertEquals(42, response.issueNumber());
+        assertEquals("https://github.com/owner/repo/issues/42", response.issueUrl());
+    }
+
+    @Test
+    void acceptStructure_リポジトリ未設定の場合は例外をスローする() {
+        ArticlePlanService service = service();
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithRepository(null));
+
+        assertThrows(IllegalStateException.class, () -> service.acceptStructure(1L, 10L, 42, "## 構成案"));
     }
 
     @Test

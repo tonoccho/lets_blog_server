@@ -8,11 +8,15 @@ export function ArticlePlanChat({
   onSend,
   isLoading,
   error,
+  issueNumber,
+  issueTitle,
 }: {
   history: PlanChatMessage[];
   onSend: (message: string) => Promise<void>;
   isLoading: boolean;
   error?: string;
+  issueNumber?: number | null;
+  issueTitle?: string | null;
 }) {
   const [input, setInput] = useState("");
 
@@ -25,7 +29,15 @@ export function ArticlePlanChat({
 
   return (
     <div className="rounded-lg border border-neutral-200 bg-white p-5">
-      <h2 className="mb-4 font-medium">AI との壁打ち</h2>
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <h2 className="font-medium">AI との壁打ち</h2>
+        {issueNumber && (
+          <span className="truncate rounded bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700">
+            Issue #{issueNumber}
+            {issueTitle ? `: ${issueTitle}` : ""}
+          </span>
+        )}
+      </div>
 
       <div className="mb-4 max-h-96 space-y-3 overflow-y-auto rounded-lg bg-neutral-50 p-4">
         {history.length === 0 ? (

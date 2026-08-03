@@ -96,6 +96,91 @@ class GithubClientTest {
     }
 
     @Test
+    void updateIssueBody_成功時にissue番号とURLを返す() {
+        server.expect(requestTo("https://api.github.com/repos/owner/repo/issues/42"))
+                .andExpect(method(org.springframework.http.HttpMethod.PATCH))
+                .andExpect(header("Authorization", "Bearer test-token"))
+                .andExpect(content().string(containsString("\"body\":\"## 構成案\\n- 見出し1\"")))
+                .andRespond(withSuccess(
+                        "{\"number\":42,\"html_url\":\"https://github.com/owner/repo/issues/42\"}",
+                        MediaType.APPLICATION_JSON));
+
+        GithubIssue issue = client.updateIssueBody("test-token", "owner", "repo", 42, "## 構成案\n- 見出し1");
+
+        assertEquals(42, issue.number());
+        assertEquals("https://github.com/owner/repo/issues/42", issue.htmlUrl());
+        server.verify();
+    }
+
+    @Test
+    void updateIssueBody_401の場合は認証エラーメッセージになる() {
+        server.expect(requestTo("https://api.github.com/repos/owner/repo/issues/42"))
+                .andRespond(withStatus(HttpStatus.UNAUTHORIZED)
+                        .body("{\"message\":\"Bad credentials\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        GithubApiException exception = assertThrows(GithubApiException.class,
+                () -> client.updateIssueBody("invalid-token", "owner", "repo", 42, "本文"));
+
+        org.hamcrest.MatcherAssert.assertThat(exception.getMessage(), containsString("認証に失敗しました"));
+        server.verify();
+    }
+
+    @Test
+    void updateIssueBody_404の場合はリポジトリ未検出メッセージになる() {
+        server.expect(requestTo("https://api.github.com/repos/owner/repo/issues/999"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND)
+                        .body("{\"message\":\"Not Found\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        GithubApiException exception = assertThrows(GithubApiException.class,
+                () -> client.updateIssueBody("test-token", "owner", "repo", 999, "本文"));
+
+        org.hamcrest.MatcherAssert.assertThat(exception.getMessage(), containsString("見つかりません"));
+        server.verify();
+    }
+
+    @Test
+    void getIssueBody_成功時にbodyを返す() {
+        server.expect(requestTo("https://api.github.com/repos/owner/repo/issues/3"))
+                .andExpect(method(GET))
+                .andExpect(header("Authorization", "Bearer test-token"))
+                .andRespond(withSuccess(
+                        "{\"number\":3,\"body\":\"## 現状の構成\\n- 見出し1\"}",
+                        MediaType.APPLICATION_JSON));
+
+        String body = client.getIssueBody("test-token", "owner", "repo", 3);
+
+        assertEquals("## 現状の構成\n- 見出し1", body);
+        server.verify();
+    }
+
+    @Test
+    void getIssueBody_bodyがnullの場合は空文字列を返す() {
+        server.expect(requestTo("https://api.github.com/repos/owner/repo/issues/3"))
+                .andRespond(withSuccess("{\"number\":3,\"body\":null}", MediaType.APPLICATION_JSON));
+
+        String body = client.getIssueBody("test-token", "owner", "repo", 3);
+
+        assertEquals("", body);
+        server.verify();
+    }
+
+    @Test
+    void getIssueBody_404の場合はリポジトリ未検出メッセージになる() {
+        server.expect(requestTo("https://api.github.com/repos/owner/repo/issues/999"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND)
+                        .body("{\"message\":\"Not Found\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        GithubApiException exception = assertThrows(GithubApiException.class,
+                () -> client.getIssueBody("test-token", "owner", "repo", 999));
+
+        org.hamcrest.MatcherAssert.assertThat(exception.getMessage(), containsString("見つかりません"));
+        server.verify();
+    }
+
+    @Test
     void listIssues_成功時に一覧をパースする() {
         server.expect(requestTo(containsString("https://api.github.com/repos/owner/repo/issues")))
                 .andExpect(method(GET))

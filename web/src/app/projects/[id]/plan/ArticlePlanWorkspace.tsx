@@ -1,21 +1,34 @@
 "use client";
 
 import { useState } from "react";
-import type { PlanChatMessage, ArticlePlanSessionSummary } from "@/lib/apiClient";
+import type { PlanChatMessage, ArticlePlanSessionSummary, ArticlePlanSessionDetail } from "@/lib/apiClient";
 import { ArticlePlanChat } from "./ArticlePlanChat";
 import { ArticlePlanProposals } from "./ArticlePlanProposals";
+import { ArticlePlanStructureProposal } from "./ArticlePlanStructureProposal";
 import { ArticlePlanSessionList } from "./ArticlePlanSessionList";
-import { sendPlanChatMessage, loadPlanSessions, loadPlanSession } from "./actions";
+import { sendPlanChatMessage, loadPlanSessions, loadPlanSession, loadIssueDescription } from "./actions";
 
 export function ArticlePlanWorkspace({
   projectId,
   initialSessions,
+  initialIssueNumber,
+  initialIssueTitle,
+  initialIssueSession,
+  initialIssueStructure,
 }: {
   projectId: number;
   initialSessions: ArticlePlanSessionSummary[];
+  initialIssueNumber: number | null;
+  initialIssueTitle: string | null;
+  initialIssueSession: ArticlePlanSessionDetail | null;
+  initialIssueStructure: string | null;
 }) {
-  const [history, setHistory] = useState<PlanChatMessage[]>([]);
-  const [sessionId, setSessionId] = useState<number | null>(null);
+  const [history, setHistory] = useState<PlanChatMessage[]>(initialIssueSession?.history ?? []);
+  const [sessionId, setSessionId] = useState<number | null>(initialIssueSession?.id ?? null);
+  const [issueNumber, setIssueNumber] = useState<number | null>(initialIssueNumber);
+  const [issueTitle, setIssueTitle] = useState<string | null>(initialIssueTitle);
+  const [issueStructure, setIssueStructure] = useState<string | null>(initialIssueStructure);
+  const [proposalTab, setProposalTab] = useState<"structure" | "titles">("structure");
   const [sessions, setSessions] = useState<ArticlePlanSessionSummary[]>(initialSessions);
   const [isSending, setIsSending] = useState(false);
   const [chatError, setChatError] = useState<string | undefined>(undefined);
@@ -33,7 +46,7 @@ export function ArticlePlanWorkspace({
     setIsSending(true);
     setChatError(undefined);
 
-    const result = await sendPlanChatMessage(projectId, history, message, sessionId);
+    const result = await sendPlanChatMessage(projectId, history, message, sessionId, issueNumber);
     if (result.ok) {
       setHistory([
         ...history,
@@ -56,6 +69,17 @@ export function ArticlePlanWorkspace({
     if (result.ok) {
       setHistory(result.data.session.history);
       setSessionId(result.data.session.id);
+      const newIssueNumber = result.data.session.githubIssueNumber;
+      setIssueNumber(newIssueNumber);
+      setIssueTitle(null);
+      setProposalTab("structure");
+
+      if (newIssueNumber) {
+        const descResult = await loadIssueDescription(projectId, newIssueNumber);
+        setIssueStructure(descResult.ok ? descResult.data.body : null);
+      } else {
+        setIssueStructure(null);
+      }
     } else {
       setSessionError(result.error);
     }
@@ -81,8 +105,53 @@ export function ArticlePlanWorkspace({
       />
 
       <div className="grid gap-8 lg:grid-cols-2">
-        <ArticlePlanChat history={history} onSend={handleSend} isLoading={isSending} error={chatError} />
-        <ArticlePlanProposals projectId={projectId} history={history} />
+        <ArticlePlanChat
+          history={history}
+          onSend={handleSend}
+          isLoading={isSending}
+          error={chatError}
+          issueNumber={issueNumber}
+          issueTitle={issueTitle}
+        />
+
+        <div className="space-y-3">
+          {issueNumber && (
+            <div className="flex gap-2">
+              <button
+                onClick={() => setProposalTab("structure")}
+                className={`rounded-full border px-3 py-1.5 text-sm ${
+                  proposalTab === "structure"
+                    ? "border-neutral-900 bg-neutral-900 text-white"
+                    : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
+                }`}
+              >
+                構成提案
+              </button>
+              <button
+                onClick={() => setProposalTab("titles")}
+                className={`rounded-full border px-3 py-1.5 text-sm ${
+                  proposalTab === "titles"
+                    ? "border-neutral-900 bg-neutral-900 text-white"
+                    : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
+                }`}
+              >
+                タイトル提案
+              </button>
+            </div>
+          )}
+
+          {issueNumber && proposalTab === "structure" ? (
+            <ArticlePlanStructureProposal
+              key={issueNumber}
+              projectId={projectId}
+              issueNumber={issueNumber}
+              history={history}
+              initialStructure={issueStructure}
+            />
+          ) : (
+            <ArticlePlanProposals projectId={projectId} history={history} />
+          )}
+        </div>
       </div>
     </div>
   );

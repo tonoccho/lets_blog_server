@@ -3,6 +3,7 @@ package com.letsblog.api.github;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -20,7 +21,7 @@ public class GithubClient {
 
     private final RestClient client;
 
-    public GithubClient(RestClient.Builder restClientBuilder) {
+    public GithubClient(@Qualifier("githubRestClientBuilder") RestClient.Builder restClientBuilder) {
         this.client = restClientBuilder.clone().baseUrl("https://api.github.com").build();
     }
 
@@ -76,6 +77,51 @@ public class GithubClient {
             return issues;
         } catch (RestClientResponseException e) {
             throw new GithubApiException(errorMessage(owner, repo, e, "issue一覧の取得"), e);
+        } catch (Exception e) {
+            throw new GithubApiException("GitHub API呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 既存issueのbody(description)を上書き更新する。
+     */
+    public GithubIssue updateIssueBody(String token, String owner, String repo, int issueNumber, String body) {
+        ObjectNode requestBody = JsonNodeFactory.instance.objectNode()
+                .put("body", body != null ? body : "");
+
+        try {
+            JsonNode response = client.patch()
+                    .uri("/repos/{owner}/{repo}/issues/{issueNumber}", owner, repo, issueNumber)
+                    .header("Authorization", "Bearer " + token)
+                    .header("Accept", "application/vnd.github+json")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(requestBody)
+                    .retrieve()
+                    .body(JsonNode.class);
+
+            return new GithubIssue(response.get("number").asInt(), response.get("html_url").asText());
+        } catch (RestClientResponseException e) {
+            throw new GithubApiException(errorMessage(owner, repo, e, "issueの更新"), e);
+        } catch (Exception e) {
+            throw new GithubApiException("GitHub API呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * issueの現在のbody(description)を取得する。まだ未設定の場合は空文字列を返す。
+     */
+    public String getIssueBody(String token, String owner, String repo, int issueNumber) {
+        try {
+            JsonNode response = client.get()
+                    .uri("/repos/{owner}/{repo}/issues/{issueNumber}", owner, repo, issueNumber)
+                    .header("Authorization", "Bearer " + token)
+                    .header("Accept", "application/vnd.github+json")
+                    .retrieve()
+                    .body(JsonNode.class);
+
+            return response != null ? response.path("body").asText("") : "";
+        } catch (RestClientResponseException e) {
+            throw new GithubApiException(errorMessage(owner, repo, e, "issueの取得"), e);
         } catch (Exception e) {
             throw new GithubApiException("GitHub API呼び出しに失敗しました: " + e.getMessage(), e);
         }

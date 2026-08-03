@@ -9,11 +9,14 @@ import com.letsblog.api.domain.GenerationJob;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.dto.AcceptPlanResponse;
 import com.letsblog.api.dto.AcceptPlanResultItem;
+import com.letsblog.api.dto.AcceptStructureResponse;
 import com.letsblog.api.dto.ArticlePlanSessionDetailResponse;
 import com.letsblog.api.dto.ArticlePlanSessionSummaryResponse;
+import com.letsblog.api.dto.IssueDescriptionResponse;
 import com.letsblog.api.dto.PlanChatMessage;
 import com.letsblog.api.dto.PlanChatResponse;
 import com.letsblog.api.dto.RepositoryIssueResponse;
+import com.letsblog.api.dto.SuggestStructureResponse;
 import com.letsblog.api.dto.SuggestTitlesResponse;
 import com.letsblog.api.github.GithubClient;
 import com.letsblog.api.github.GithubIssue;
@@ -45,6 +48,10 @@ public class ArticlePlanService {
             "上記のユーザーの発言内容を、10〜20文字程度の日本語の短い見出しに要約してください。"
             + "出力は見出しの文字列のみとし、記号や説明文、前置きは含めないでください。";
 
+    private static final String STRUCTURE_SUGGESTION_INSTRUCTION =
+            "上記の会話を踏まえて、この記事の構成案をMarkdown形式の見出し構造(##や-のリスト等)で提案してください。"
+            + "出力は構成案のMarkdownのみとし、他の説明文や前置きは含めないでください。";
+
     private final OllamaClient ollamaClient;
     private final GenerationJobRepository generationJobRepository;
     private final ObjectMapper objectMapper;
@@ -74,7 +81,8 @@ public class ArticlePlanService {
      * マルチターンチャット。sessionIdが未指定(初回発言)の場合は新規セッションを作成し、
      * AIにタイトルを生成させて保存する。指定済みの場合は既存セッションの履歴を更新する。
      */
-    public PlanChatResponse chat(Long projectId, List<PlanChatMessage> history, String message, Long sessionId) {
+    public PlanChatResponse chat(
+            Long projectId, List<PlanChatMessage> history, String message, Long sessionId, Integer githubIssueNumber) {
         GenerationJob job = startJob("plan_chat", Map.of(
                 "projectId", String.valueOf(projectId),
                 "message", message,
@@ -90,7 +98,7 @@ public class ArticlePlanService {
             updatedHistory.add(new PlanChatMessage("assistant", reply));
 
             Long resolvedSessionId = sessionId == null
-                    ? createSession(projectId, message, updatedHistory)
+                    ? createSession(projectId, message, updatedHistory, githubIssueNumber)
                     : appendToSession(projectId, sessionId, updatedHistory);
 
             return new PlanChatResponse(reply, resolvedSessionId);
@@ -100,11 +108,13 @@ public class ArticlePlanService {
         }
     }
 
-    private Long createSession(Long projectId, String firstMessage, List<PlanChatMessage> history) {
+    private Long createSession(
+            Long projectId, String firstMessage, List<PlanChatMessage> history, Integer githubIssueNumber) {
         String title = generateSessionTitle(firstMessage);
 
         ArticlePlanSession session = new ArticlePlanSession();
         session.setProjectId(projectId);
+        session.setGithubIssueNumber(githubIssueNumber);
         session.setTitle(title);
         session.setHistory(toJson(history));
         return articlePlanSessionRepository.save(session).getId();
@@ -157,7 +167,8 @@ public class ArticlePlanService {
      */
     public List<ArticlePlanSessionSummaryResponse> listSessions(Long projectId) {
         return articlePlanSessionRepository.findByProjectIdOrderByUpdatedAtDesc(projectId).stream()
-                .map(s -> new ArticlePlanSessionSummaryResponse(s.getId(), s.getTitle(), s.getCreatedAt(), s.getUpdatedAt()))
+                .map(s -> new ArticlePlanSessionSummaryResponse(
+                        s.getId(), s.getTitle(), s.getGithubIssueNumber(), s.getCreatedAt(), s.getUpdatedAt()))
                 .toList();
     }
 
@@ -166,9 +177,25 @@ public class ArticlePlanService {
      */
     public ArticlePlanSessionDetailResponse getSession(Long projectId, Long sessionId) {
         ArticlePlanSession session = findSession(projectId, sessionId);
+        return toDetailResponse(session);
+    }
+
+    /**
+     * issue番号に紐づく最新の壁打ちセッションを取得する。issue一覧の「計画」導線から使う。
+     */
+    public ArticlePlanSessionDetailResponse getSessionByIssue(Long projectId, Integer githubIssueNumber) {
+        ArticlePlanSession session = articlePlanSessionRepository
+                .findFirstByProjectIdAndGithubIssueNumberOrderByUpdatedAtDesc(projectId, githubIssueNumber)
+                .orElseThrow(() -> new ArticlePlanSessionNotFoundException(
+                        "issue #" + githubIssueNumber + " に紐づく壁打ちセッションは見つかりません"));
+        return toDetailResponse(session);
+    }
+
+    private ArticlePlanSessionDetailResponse toDetailResponse(ArticlePlanSession session) {
         List<PlanChatMessage> history = fromJson(session.getHistory());
         return new ArticlePlanSessionDetailResponse(
-                session.getId(), session.getTitle(), history, session.getCreatedAt(), session.getUpdatedAt());
+                session.getId(), session.getTitle(), session.getGithubIssueNumber(), history,
+                session.getCreatedAt(), session.getUpdatedAt());
     }
 
     /**
@@ -216,6 +243,26 @@ public class ArticlePlanService {
         return new AcceptPlanResponse(results);
     }
 
+    /**
+     * issueの現在のdescription(body)を取得する。「計画」導線から壁打ちを再開した際、
+     * 既に構成案で更新済みのissueであれば現状の内容をそのまま表示できるようにする。
+     */
+    public IssueDescriptionResponse getIssueDescription(Long projectId, Long userId, Integer issueNumber) {
+        GithubAccess access = resolveGithubAccess(projectId, userId);
+        String body = githubClient.getIssueBody(access.token(), access.owner(), access.repo(), issueNumber);
+        return new IssueDescriptionResponse(body);
+    }
+
+    /**
+     * 提案された記事構成で、指定issueのdescription(body)を上書きする。
+     */
+    public AcceptStructureResponse acceptStructure(Long projectId, Long userId, Integer issueNumber, String structure) {
+        GithubAccess access = resolveGithubAccess(projectId, userId);
+        GithubIssue issue = githubClient.updateIssueBody(
+                access.token(), access.owner(), access.repo(), issueNumber, structure);
+        return new AcceptStructureResponse(issue.number(), issue.htmlUrl());
+    }
+
     public SuggestTitlesResponse suggestTitles(Long projectId, List<PlanChatMessage> history) {
         GenerationJob job = startJob("plan_suggest_titles", Map.of(
                 "projectId", String.valueOf(projectId),
@@ -226,6 +273,24 @@ public class ArticlePlanService {
             List<String> titles = parseTitles(raw);
             completeJob(job, Map.of("titlesCount", String.valueOf(titles.size()), "raw", raw));
             return new SuggestTitlesResponse(titles);
+        } catch (RuntimeException e) {
+            failJob(job, e);
+            throw e;
+        }
+    }
+
+    /**
+     * 会話履歴から記事の構成案(Markdown)を提案する。issueのdescription上書きに使う。
+     */
+    public SuggestStructureResponse suggestStructure(Long projectId, List<PlanChatMessage> history) {
+        GenerationJob job = startJob("plan_suggest_structure", Map.of(
+                "projectId", String.valueOf(projectId),
+                "historyLength", String.valueOf(history.size())
+        ));
+        try {
+            String structure = ollamaClient.generate(buildStructureSuggestionPrompt(history)).strip();
+            completeJob(job, Map.of("structureLength", String.valueOf(structure.length())));
+            return new SuggestStructureResponse(structure);
         } catch (RuntimeException e) {
             failJob(job, e);
             throw e;
@@ -246,6 +311,14 @@ public class ArticlePlanService {
         sb.append("System: ").append(SYSTEM_PROMPT).append("\n\n");
         appendHistory(sb, history);
         sb.append("\n").append(TITLE_SUGGESTION_INSTRUCTION).append("\n");
+        return sb.toString();
+    }
+
+    private String buildStructureSuggestionPrompt(List<PlanChatMessage> history) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("System: ").append(SYSTEM_PROMPT).append("\n\n");
+        appendHistory(sb, history);
+        sb.append("\n").append(STRUCTURE_SUGGESTION_INSTRUCTION).append("\n");
         return sb.toString();
     }
 

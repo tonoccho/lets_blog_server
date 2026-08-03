@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import type { RepositoryIssue, RepositoryIssueState } from "@/lib/apiClient";
 import { loadRepositoryIssues } from "./actions";
 
@@ -76,6 +77,12 @@ export function ArticlePlanIssueList({
               >
                 {issue.state}
               </span>
+              <Link
+                href={`/projects/${projectId}/plan?issue=${issue.number}`}
+                className="ml-2 shrink-0 rounded border border-blue-300 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-50"
+              >
+                計画
+              </Link>
             </li>
           ))}
         </ul>

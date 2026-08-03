@@ -2,11 +2,16 @@ package com.letsblog.api.controller;
 
 import com.letsblog.api.dto.AcceptPlanRequest;
 import com.letsblog.api.dto.AcceptPlanResponse;
+import com.letsblog.api.dto.AcceptStructureRequest;
+import com.letsblog.api.dto.AcceptStructureResponse;
 import com.letsblog.api.dto.ArticlePlanSessionDetailResponse;
 import com.letsblog.api.dto.ArticlePlanSessionSummaryResponse;
+import com.letsblog.api.dto.IssueDescriptionResponse;
 import com.letsblog.api.dto.PlanChatRequest;
 import com.letsblog.api.dto.PlanChatResponse;
 import com.letsblog.api.dto.RepositoryIssueResponse;
+import com.letsblog.api.dto.SuggestStructureRequest;
+import com.letsblog.api.dto.SuggestStructureResponse;
 import com.letsblog.api.dto.SuggestTitlesRequest;
 import com.letsblog.api.dto.SuggestTitlesResponse;
 import com.letsblog.api.service.AdminAuthorizationService;
@@ -43,7 +48,8 @@ public class ArticlePlanController {
     @PostMapping("/chat")
     public PlanChatResponse chat(@PathVariable Long projectId, @Valid @RequestBody PlanChatRequest request) {
         adminAuthorizationService.requireAdmin();
-        return articlePlanService.chat(projectId, request.history(), request.message(), request.sessionId());
+        return articlePlanService.chat(
+                projectId, request.history(), request.message(), request.sessionId(), request.githubIssueNumber());
     }
 
     @GetMapping("/sessions")
@@ -57,6 +63,21 @@ public class ArticlePlanController {
             @PathVariable Long projectId, @PathVariable Long sessionId) {
         adminAuthorizationService.requireAdmin();
         return articlePlanService.getSession(projectId, sessionId);
+    }
+
+    @GetMapping("/sessions/by-issue/{issueNumber}")
+    public ArticlePlanSessionDetailResponse getSessionByIssue(
+            @PathVariable Long projectId, @PathVariable Integer issueNumber) {
+        adminAuthorizationService.requireAdmin();
+        return articlePlanService.getSessionByIssue(projectId, issueNumber);
+    }
+
+    @GetMapping("/issues/{issueNumber}/description")
+    public IssueDescriptionResponse getIssueDescription(
+            @PathVariable Long projectId, @PathVariable Integer issueNumber) {
+        adminAuthorizationService.requireAdmin();
+        Long userId = currentActorService.getCurrentActorId();
+        return articlePlanService.getIssueDescription(projectId, userId, issueNumber);
     }
 
     @GetMapping("/issues")
@@ -80,5 +101,22 @@ public class ArticlePlanController {
         adminAuthorizationService.requireAdmin();
         Long userId = currentActorService.getCurrentActorId();
         return articlePlanService.acceptPlan(projectId, userId, request.titles());
+    }
+
+    @PostMapping("/suggest-structure")
+    public SuggestStructureResponse suggestStructure(
+            @PathVariable Long projectId, @Valid @RequestBody SuggestStructureRequest request) {
+        adminAuthorizationService.requireAdmin();
+        return articlePlanService.suggestStructure(projectId, request.history());
+    }
+
+    @PostMapping("/issues/{issueNumber}/accept-structure")
+    public AcceptStructureResponse acceptStructure(
+            @PathVariable Long projectId,
+            @PathVariable Integer issueNumber,
+            @Valid @RequestBody AcceptStructureRequest request) {
+        adminAuthorizationService.requireAdmin();
+        Long userId = currentActorService.getCurrentActorId();
+        return articlePlanService.acceptStructure(projectId, userId, issueNumber, request.structure());
     }
 }

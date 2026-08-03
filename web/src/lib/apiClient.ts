@@ -632,6 +632,7 @@ export interface PlanChatResponse {
 export interface ArticlePlanSessionSummary {
   id: number;
   title: string;
+  githubIssueNumber: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -639,6 +640,7 @@ export interface ArticlePlanSessionSummary {
 export interface ArticlePlanSessionDetail {
   id: number;
   title: string;
+  githubIssueNumber: number | null;
   history: PlanChatMessage[];
   createdAt: string;
   updatedAt: string;
@@ -657,6 +659,15 @@ export interface SuggestTitlesResponse {
   titles: string[];
 }
 
+export interface SuggestStructureResponse {
+  structure: string;
+}
+
+export interface AcceptStructureResponse {
+  issueNumber: number;
+  issueUrl: string;
+}
+
 export interface AcceptPlanResultItem {
   title: string;
   issueNumber?: number;
@@ -670,7 +681,12 @@ export interface AcceptPlanResponse {
 
 export function sendArticlePlanChatMessage(
   projectId: number,
-  data: { history: PlanChatMessage[]; message: string; sessionId?: number | null },
+  data: {
+    history: PlanChatMessage[];
+    message: string;
+    sessionId?: number | null;
+    githubIssueNumber?: number | null;
+  },
   actor?: ActorInfo
 ): Promise<PlanChatResponse> {
   return apiFetch<PlanChatResponse>(`/api/projects/${projectId}/article-plan/chat`, {
@@ -695,6 +711,32 @@ export function getArticlePlanSession(
 ): Promise<ArticlePlanSessionDetail> {
   return apiFetch<ArticlePlanSessionDetail>(
     `/api/projects/${projectId}/article-plan/sessions/${sessionId}`,
+    { actor }
+  );
+}
+
+export function getArticlePlanSessionByIssue(
+  projectId: number,
+  issueNumber: number,
+  actor?: ActorInfo
+): Promise<ArticlePlanSessionDetail> {
+  return apiFetch<ArticlePlanSessionDetail>(
+    `/api/projects/${projectId}/article-plan/sessions/by-issue/${issueNumber}`,
+    { actor }
+  );
+}
+
+export interface IssueDescriptionResponse {
+  body: string;
+}
+
+export function getArticlePlanIssueDescription(
+  projectId: number,
+  issueNumber: number,
+  actor?: ActorInfo
+): Promise<IssueDescriptionResponse> {
+  return apiFetch<IssueDescriptionResponse>(
+    `/api/projects/${projectId}/article-plan/issues/${issueNumber}/description`,
     { actor }
   );
 }
@@ -734,6 +776,36 @@ export function acceptArticlePlan(
     body: JSON.stringify(data),
     actor,
   });
+}
+
+export function suggestArticleStructure(
+  projectId: number,
+  data: { history: PlanChatMessage[] },
+  actor?: ActorInfo
+): Promise<SuggestStructureResponse> {
+  return apiFetch<SuggestStructureResponse>(`/api/projects/${projectId}/article-plan/suggest-structure`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+    actor,
+  });
+}
+
+export function acceptArticleStructure(
+  projectId: number,
+  issueNumber: number,
+  data: { structure: string },
+  actor?: ActorInfo
+): Promise<AcceptStructureResponse> {
+  return apiFetch<AcceptStructureResponse>(
+    `/api/projects/${projectId}/article-plan/issues/${issueNumber}/accept-structure`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+      actor,
+    }
+  );
 }
 
 export function updateMasterEnvironment(
