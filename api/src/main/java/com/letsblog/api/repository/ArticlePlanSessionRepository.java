@@ -1,0 +1,10 @@
+package com.letsblog.api.repository;
+
+import com.letsblog.api.domain.ArticlePlanSession;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.List;
+
+public interface ArticlePlanSessionRepository extends JpaRepository<ArticlePlanSession, Long> {
+    List<ArticlePlanSession> findByProjectIdOrderByUpdatedAtDesc(Long projectId);
+}

@@ -8,6 +8,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * GitHub REST API(issues)を利用したissue作成クライアント。
  * Octokit等のライブラリは導入せず、OllamaClient/WordPressAdapterと同様にRestClientの薄いラッパーとして実装する。
@@ -44,7 +47,45 @@ public class GithubClient {
         }
     }
 
+    /**
+     * リポジトリのissue一覧を取得する。GitHubのissues APIはPull Requestも含めて返すため、
+     * レスポンスに"pull_request"キーを持つ要素(=PR)は除外する。
+     */
+    public List<GithubIssueSummary> listIssues(String token, String owner, String repo, String state) {
+        try {
+            JsonNode response = client.get()
+                    .uri("/repos/{owner}/{repo}/issues?state={state}&per_page=100", owner, repo, state)
+                    .header("Authorization", "Bearer " + token)
+                    .header("Accept", "application/vnd.github+json")
+                    .retrieve()
+                    .body(JsonNode.class);
+
+            List<GithubIssueSummary> issues = new ArrayList<>();
+            if (response != null && response.isArray()) {
+                for (JsonNode node : response) {
+                    if (node.has("pull_request")) {
+                        continue;
+                    }
+                    issues.add(new GithubIssueSummary(
+                            node.get("number").asInt(),
+                            node.get("title").asText(),
+                            node.get("html_url").asText(),
+                            node.get("state").asText()));
+                }
+            }
+            return issues;
+        } catch (RestClientResponseException e) {
+            throw new GithubApiException(errorMessage(owner, repo, e, "issue一覧の取得"), e);
+        } catch (Exception e) {
+            throw new GithubApiException("GitHub API呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+    }
+
     private String errorMessage(String owner, String repo, RestClientResponseException e) {
+        return errorMessage(owner, repo, e, "issueの作成");
+    }
+
+    private String errorMessage(String owner, String repo, RestClientResponseException e, String action) {
         int status = e.getStatusCode().value();
         if (status == 401) {
             return "GitHubの認証に失敗しました。Personal Access Tokenが無効またはスコープが不足している可能性があります。";
@@ -52,6 +93,6 @@ public class GithubClient {
         if (status == 404) {
             return "リポジトリが見つかりません: " + owner + "/" + repo;
         }
-        return "GitHub issueの作成に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString();
+        return "GitHub " + action + "に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString();
     }
 }

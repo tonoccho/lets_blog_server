@@ -2,16 +2,22 @@ package com.letsblog.api.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.ai.OllamaClient;
+import com.letsblog.api.domain.ArticlePlanSession;
 import com.letsblog.api.domain.GenerationJob;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.dto.AcceptPlanResponse;
 import com.letsblog.api.dto.AcceptPlanResultItem;
+import com.letsblog.api.dto.ArticlePlanSessionDetailResponse;
+import com.letsblog.api.dto.ArticlePlanSessionSummaryResponse;
 import com.letsblog.api.dto.PlanChatMessage;
 import com.letsblog.api.dto.PlanChatResponse;
+import com.letsblog.api.dto.RepositoryIssueResponse;
 import com.letsblog.api.dto.SuggestTitlesResponse;
 import com.letsblog.api.github.GithubApiException;
 import com.letsblog.api.github.GithubClient;
 import com.letsblog.api.github.GithubIssue;
+import com.letsblog.api.github.GithubIssueSummary;
+import com.letsblog.api.repository.ArticlePlanSessionRepository;
 import com.letsblog.api.repository.GenerationJobRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -19,8 +25,10 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -30,6 +38,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -51,6 +60,11 @@ class ArticlePlanServiceTest {
     @Mock
     private ProjectService projectService;
 
+    @Mock
+    private ArticlePlanSessionRepository articlePlanSessionRepository;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
     // GenerationJob はミュータブルなため、save() 呼び出しの都度その時点のstatusをスナップショットして記録する
     private final List<String> savedStatuses = new ArrayList<>();
 
@@ -60,8 +74,16 @@ class ArticlePlanServiceTest {
             savedStatuses.add(job.getStatus());
             return job;
         });
+        lenient().when(articlePlanSessionRepository.save(any(ArticlePlanSession.class))).thenAnswer(invocation -> {
+            ArticlePlanSession session = invocation.getArgument(0);
+            if (session.getId() == null) {
+                session.setId(100L);
+            }
+            return session;
+        });
         return new ArticlePlanService(
-                ollamaClient, generationJobRepository, new ObjectMapper(), githubClient, userService, projectService);
+                ollamaClient, generationJobRepository, objectMapper, githubClient, userService, projectService,
+                articlePlanSessionRepository);
     }
 
     private Project projectWithRepository(String githubRepository) {
@@ -71,6 +93,25 @@ class ArticlePlanServiceTest {
         return project;
     }
 
+    private ArticlePlanSession existingSession(Long id, Long projectId, List<PlanChatMessage> history) {
+        ArticlePlanSession session = new ArticlePlanSession();
+        session.setId(id);
+        session.setProjectId(projectId);
+        session.setTitle("既存の壁打ち");
+        session.setHistory(toJson(history));
+        session.setCreatedAt(LocalDateTime.of(2026, 1, 1, 10, 0));
+        session.setUpdatedAt(LocalDateTime.of(2026, 1, 2, 10, 0));
+        return session;
+    }
+
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     @Test
     void chat_履歴とメッセージを含むプロンプトを組み立ててOllamaを呼び出す() {
         ArticlePlanService service = service();
@@ -78,11 +119,14 @@ class ArticlePlanServiceTest {
                 new PlanChatMessage("user", "AIブログの企画を考えたい"),
                 new PlanChatMessage("assistant", "どんな読者層を想定していますか?")
         );
+        when(articlePlanSessionRepository.findById(99L))
+                .thenReturn(Optional.of(existingSession(99L, 1L, history)));
         when(ollamaClient.generate(anyString())).thenReturn("初心者エンジニア向けはどうでしょう");
 
-        PlanChatResponse response = service.chat(1L, history, "初心者向けにしたいです");
+        PlanChatResponse response = service.chat(1L, history, "初心者向けにしたいです", 99L);
 
         assertEquals("初心者エンジニア向けはどうでしょう", response.reply());
+        assertEquals(99L, response.sessionId());
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         verify(ollamaClient).generate(promptCaptor.capture());
@@ -96,9 +140,11 @@ class ArticlePlanServiceTest {
     @Test
     void chat_生成ジョブがplan_chatとして記録される() {
         ArticlePlanService service = service();
+        when(articlePlanSessionRepository.findById(99L))
+                .thenReturn(Optional.of(existingSession(99L, 1L, List.of())));
         when(ollamaClient.generate(anyString())).thenReturn("応答");
 
-        service.chat(1L, List.of(), "テーマ");
+        service.chat(1L, List.of(), "テーマ", 99L);
 
         assertEquals(List.of("running", "done"), savedStatuses);
 
@@ -112,9 +158,111 @@ class ArticlePlanServiceTest {
         ArticlePlanService service = service();
         when(ollamaClient.generate(anyString())).thenThrow(new RuntimeException("接続できません"));
 
-        assertThrows(RuntimeException.class, () -> service.chat(1L, List.of(), "テーマ"));
+        assertThrows(RuntimeException.class, () -> service.chat(1L, List.of(), "テーマ", null));
 
         assertEquals(List.of("running", "failed"), savedStatuses);
+    }
+
+    @Test
+    void chat_sessionId未指定の初回発言では新規セッションを作成しタイトルを生成する() {
+        ArticlePlanService service = service();
+        when(ollamaClient.generate(anyString()))
+                .thenReturn("AIとのやり取りの応答")
+                .thenReturn("生成されたタイトル");
+
+        PlanChatResponse response = service.chat(1L, List.of(), "AIブログの企画を考えたい", null);
+
+        assertEquals(100L, response.sessionId());
+        verify(articlePlanSessionRepository, never()).findById(any());
+
+        ArgumentCaptor<ArticlePlanSession> sessionCaptor = ArgumentCaptor.forClass(ArticlePlanSession.class);
+        verify(articlePlanSessionRepository).save(sessionCaptor.capture());
+        ArticlePlanSession saved = sessionCaptor.getValue();
+        assertEquals(1L, saved.getProjectId());
+        assertEquals("生成されたタイトル", saved.getTitle());
+        assertTrue(saved.getHistory().contains("AIブログの企画を考えたい"));
+        assertTrue(saved.getHistory().contains("AIとのやり取りの応答"));
+
+        // 1回目: チャット応答生成、2回目: タイトル生成
+        verify(ollamaClient, org.mockito.Mockito.times(2)).generate(anyString());
+    }
+
+    @Test
+    void chat_sessionId指定時は既存セッションの履歴に追記する() {
+        ArticlePlanService service = service();
+        List<PlanChatMessage> existingHistory = List.of(new PlanChatMessage("user", "前回の発言"));
+        when(articlePlanSessionRepository.findById(5L))
+                .thenReturn(Optional.of(existingSession(5L, 1L, existingHistory)));
+        when(ollamaClient.generate(anyString())).thenReturn("続きの応答");
+
+        PlanChatResponse response = service.chat(1L, existingHistory, "追加の発言", 5L);
+
+        assertEquals(5L, response.sessionId());
+        // タイトル生成は行われないため、Ollama呼び出しは1回のみ
+        verify(ollamaClient, org.mockito.Mockito.times(1)).generate(anyString());
+
+        ArgumentCaptor<ArticlePlanSession> sessionCaptor = ArgumentCaptor.forClass(ArticlePlanSession.class);
+        verify(articlePlanSessionRepository).save(sessionCaptor.capture());
+        String savedHistory = sessionCaptor.getValue().getHistory();
+        assertTrue(savedHistory.contains("前回の発言"));
+        assertTrue(savedHistory.contains("追加の発言"));
+        assertTrue(savedHistory.contains("続きの応答"));
+    }
+
+    @Test
+    void chat_異なるプロジェクトのsessionIdを指定すると例外() {
+        ArticlePlanService service = service();
+        when(articlePlanSessionRepository.findById(5L))
+                .thenReturn(Optional.of(existingSession(5L, 999L, List.of())));
+        when(ollamaClient.generate(anyString())).thenReturn("応答");
+
+        assertThrows(ArticlePlanSessionNotFoundException.class,
+                () -> service.chat(1L, List.of(), "発言", 5L));
+    }
+
+    @Test
+    void chat_存在しないsessionIdを指定すると例外() {
+        ArticlePlanService service = service();
+        when(articlePlanSessionRepository.findById(5L)).thenReturn(Optional.empty());
+        when(ollamaClient.generate(anyString())).thenReturn("応答");
+
+        assertThrows(ArticlePlanSessionNotFoundException.class,
+                () -> service.chat(1L, List.of(), "発言", 5L));
+    }
+
+    @Test
+    void listSessions_更新日時降順のサマリー一覧を返す() {
+        ArticlePlanService service = service();
+        ArticlePlanSession session = existingSession(1L, 1L, List.of());
+        when(articlePlanSessionRepository.findByProjectIdOrderByUpdatedAtDesc(1L)).thenReturn(List.of(session));
+
+        List<ArticlePlanSessionSummaryResponse> result = service.listSessions(1L);
+
+        assertEquals(1, result.size());
+        assertEquals(1L, result.get(0).id());
+        assertEquals("既存の壁打ち", result.get(0).title());
+    }
+
+    @Test
+    void getSession_履歴を含む詳細を返す() {
+        ArticlePlanService service = service();
+        List<PlanChatMessage> history = List.of(new PlanChatMessage("user", "こんにちは"));
+        when(articlePlanSessionRepository.findById(1L))
+                .thenReturn(Optional.of(existingSession(1L, 1L, history)));
+
+        ArticlePlanSessionDetailResponse response = service.getSession(1L, 1L);
+
+        assertEquals(1L, response.id());
+        assertEquals(1, response.history().size());
+        assertEquals("こんにちは", response.history().get(0).content());
+    }
+
+    @Test
+    void getSession_存在しない場合は例外() {
+        ArticlePlanService service = service();
+        when(articlePlanSessionRepository.findById(1L)).thenReturn(Optional.empty());
+
+        assertThrows(ArticlePlanSessionNotFoundException.class, () -> service.getSession(1L, 1L));
     }
 
     @Test
@@ -227,5 +375,29 @@ class ArticlePlanServiceTest {
         assertNull(response.results().get(0).error());
         assertEquals("GitHub issueの作成に失敗しました", response.results().get(1).error());
         assertNull(response.results().get(1).issueNumber());
+    }
+
+    @Test
+    void listRepositoryIssues_GithubClientに委譲して結果を変換する() {
+        ArticlePlanService service = service();
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithRepository("owner/repo"));
+        when(userService.getDecryptedGithubToken(10L)).thenReturn("test-token");
+        when(githubClient.listIssues("test-token", "owner", "repo", "open"))
+                .thenReturn(List.of(new GithubIssueSummary(3, "記事タイトル", "https://github.com/owner/repo/issues/3", "open")));
+
+        List<RepositoryIssueResponse> result = service.listRepositoryIssues(1L, 10L, "open");
+
+        assertEquals(1, result.size());
+        assertEquals(3, result.get(0).number());
+        assertEquals("記事タイトル", result.get(0).title());
+        assertEquals("open", result.get(0).state());
+    }
+
+    @Test
+    void listRepositoryIssues_リポジトリ未設定の場合は例外をスローする() {
+        ArticlePlanService service = service();
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithRepository(null));
+
+        assertThrows(IllegalStateException.class, () -> service.listRepositoryIssues(1L, 10L, "open"));
     }
 }

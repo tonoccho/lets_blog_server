@@ -8,6 +8,7 @@ import java.util.List;
 
 public record PlanChatRequest(
         @Valid @NotNull List<PlanChatMessage> history,
-        @NotBlank String message
+        @NotBlank String message,
+        Long sessionId
 ) {
 }

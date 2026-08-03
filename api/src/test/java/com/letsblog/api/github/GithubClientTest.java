@@ -7,9 +7,12 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import java.util.List;
+
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.springframework.http.HttpMethod.GET;
 import static org.springframework.http.HttpMethod.POST;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
@@ -89,6 +92,65 @@ class GithubClientTest {
                 () -> client.createIssue("test-token", "owner", "repo", "タイトル", ""));
 
         org.hamcrest.MatcherAssert.assertThat(exception.getMessage(), containsString("issueの作成に失敗しました"));
+        server.verify();
+    }
+
+    @Test
+    void listIssues_成功時に一覧をパースする() {
+        server.expect(requestTo(containsString("https://api.github.com/repos/owner/repo/issues")))
+                .andExpect(method(GET))
+                .andExpect(header("Authorization", "Bearer test-token"))
+                .andRespond(withSuccess(
+                        "[{\"number\":1,\"title\":\"記事案1\",\"html_url\":\"https://github.com/owner/repo/issues/1\",\"state\":\"open\"}]",
+                        MediaType.APPLICATION_JSON));
+
+        List<GithubIssueSummary> issues = client.listIssues("test-token", "owner", "repo", "open");
+
+        assertEquals(1, issues.size());
+        assertEquals(1, issues.get(0).number());
+        assertEquals("記事案1", issues.get(0).title());
+        assertEquals("https://github.com/owner/repo/issues/1", issues.get(0).htmlUrl());
+        assertEquals("open", issues.get(0).state());
+        server.verify();
+    }
+
+    @Test
+    void listIssues_pull_requestキーを持つ要素は除外される() {
+        server.expect(requestTo(containsString("/repos/owner/repo/issues")))
+                .andRespond(withSuccess(
+                        "[{\"number\":1,\"title\":\"記事案\",\"html_url\":\"https://github.com/owner/repo/issues/1\",\"state\":\"open\"},"
+                        + "{\"number\":2,\"title\":\"PR\",\"html_url\":\"https://github.com/owner/repo/pull/2\",\"state\":\"open\","
+                        + "\"pull_request\":{\"url\":\"https://api.github.com/repos/owner/repo/pulls/2\"}}]",
+                        MediaType.APPLICATION_JSON));
+
+        List<GithubIssueSummary> issues = client.listIssues("test-token", "owner", "repo", "all");
+
+        assertEquals(1, issues.size());
+        assertEquals(1, issues.get(0).number());
+        server.verify();
+    }
+
+    @Test
+    void listIssues_stateクエリパラメータが送信される() {
+        server.expect(requestTo(containsString("state=closed")))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        client.listIssues("test-token", "owner", "repo", "closed");
+
+        server.verify();
+    }
+
+    @Test
+    void listIssues_401の場合は認証エラーメッセージになる() {
+        server.expect(requestTo(containsString("/repos/owner/repo/issues")))
+                .andRespond(withStatus(HttpStatus.UNAUTHORIZED)
+                        .body("{\"message\":\"Bad credentials\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        GithubApiException exception = assertThrows(GithubApiException.class,
+                () -> client.listIssues("invalid-token", "owner", "repo", "open"));
+
+        org.hamcrest.MatcherAssert.assertThat(exception.getMessage(), containsString("認証に失敗しました"));
         server.verify();
     }
 }
