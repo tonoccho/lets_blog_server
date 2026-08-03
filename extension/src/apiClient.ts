@@ -319,3 +319,39 @@ export async function assignIssue(
   await assertOk(res);
   return (await res.json()) as AssignIssueResult;
 }
+
+export async function renderPreviewHtml(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  projectId: number,
+  markdown: string
+): Promise<string> {
+  const res = await fetch(`${serverUrl}/api/projects/${projectId}/preview/render`, {
+    method: 'POST',
+    headers: buildHeaders(apiKey, actor, 'application/json'),
+    body: JSON.stringify({ markdown }),
+  });
+  await assertOk(res);
+  const data = (await res.json()) as { html: string };
+  return data.html;
+}
+
+export interface ThemeCssResult {
+  css: string;
+  available: boolean;
+  reason?: string;
+}
+
+export async function getMasterThemeCss(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  projectId: number
+): Promise<ThemeCssResult> {
+  const res = await fetch(`${serverUrl}/api/projects/${projectId}/preview/theme-css`, {
+    headers: buildHeaders(apiKey, actor),
+  });
+  await assertOk(res);
+  return (await res.json()) as ThemeCssResult;
+}

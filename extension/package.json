@@ -52,6 +52,10 @@
       {
         "command": "letsBlog.publishToTestEnvironment",
         "title": "Let's Blog: Publish to Test Environment"
+      },
+      {
+        "command": "letsBlog.previewArticle",
+        "title": "Let's Blog: Preview Article"
       }
     ],
     "configuration": {

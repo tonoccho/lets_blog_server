@@ -5,6 +5,7 @@ import { getServerUrl, requireApiKey, setApiKey, getActor, setActor, getProjectI
 import { parseArticle, stringifyArticle, extractLocalImageReferences } from './frontMatter';
 import * as api from './apiClient';
 import { PlanPanel } from './planPanel';
+import { PreviewPanel } from './previewPanel';
 
 export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
@@ -17,7 +18,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.selectActor', () => commandSelectActor(context)),
     vscode.commands.registerCommand('letsBlog.selectProject', () => commandSelectProject(context)),
     vscode.commands.registerCommand('letsBlog.planArticle', () => commandPlanArticle(context)),
-    vscode.commands.registerCommand('letsBlog.publishToTestEnvironment', () => commandPublishToTestEnvironment(context))
+    vscode.commands.registerCommand('letsBlog.publishToTestEnvironment', () => commandPublishToTestEnvironment(context)),
+    vscode.commands.registerCommand('letsBlog.previewArticle', () => commandPreviewArticle(context))
   );
 }
 
@@ -356,5 +358,77 @@ async function commandSelectProject(context: vscode.ExtensionContext): Promise<v
     vscode.window.showInformationMessage(`プロジェクトを '${picked.label}' に設定しました。`);
   } catch (err) {
     vscode.window.showErrorMessage(`プロジェクト選択に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+  }
+}
+
+const IMAGE_MIME_TYPES: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
+};
+
+/**
+ * Markdown本文中のローカル画像参照をbase64データURIへ置換する。プレビューはWebviewの外(APIサーバー)で
+ * HTML化するため、投稿先を持たないローカル画像をそのまま渡すと壊れたリンクになってしまうのを防ぐ。
+ */
+function inlineLocalImages(content: string, baseDir: string): string {
+  let rewritten = content;
+  for (const image of extractLocalImageReferences(content, baseDir)) {
+    if (!fs.existsSync(image.absolutePath)) continue;
+    const mimeType = IMAGE_MIME_TYPES[path.extname(image.absolutePath).toLowerCase()];
+    if (!mimeType) continue;
+    const dataUri = `data:${mimeType};base64,${fs.readFileSync(image.absolutePath).toString('base64')}`;
+    rewritten = rewritten.split(image.reference).join(dataUri);
+  }
+  return rewritten;
+}
+
+async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  try {
+    const article = parseArticle(editor.document.getText());
+    const projectId = (article.data.project_id as number | undefined) ?? getProjectId(context);
+    if (!projectId) {
+      vscode.window.showErrorMessage(
+        'プロジェクトが未選択です。front matterのproject_id、または「Let\'s Blog: Select Project」で設定してください。'
+      );
+      return;
+    }
+
+    const apiKey = await requireApiKey(context);
+    const actor = await getActor(context);
+    const serverUrl = getServerUrl();
+    const baseDir = path.dirname(editor.document.uri.fsPath);
+    const markdown = inlineLocalImages(article.content, baseDir);
+
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'プレビューを生成しています…' },
+      async () => {
+        const html = await api.renderPreviewHtml(serverUrl, apiKey, actor, projectId, markdown);
+
+        let css = '';
+        let warning: string | undefined;
+        try {
+          const themeCss = await api.getMasterThemeCss(serverUrl, apiKey, actor, projectId);
+          if (themeCss.available) {
+            css = themeCss.css;
+          } else {
+            warning = `マスター環境サイトのCSSを取得できませんでした: ${themeCss.reason ?? '不明なエラー'}`;
+          }
+        } catch (cssError) {
+          warning = `マスター環境サイトのCSS取得に失敗しました: ${String(cssError instanceof Error ? cssError.message : cssError)}`;
+        }
+
+        PreviewPanel.createOrShow(html, css, warning);
+      }
+    );
+  } catch (err) {
+    vscode.window.showErrorMessage(`プレビューの生成に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
   }
 }
