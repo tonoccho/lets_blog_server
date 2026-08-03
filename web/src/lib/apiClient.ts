@@ -632,6 +632,17 @@ export interface SuggestTitlesResponse {
   titles: string[];
 }
 
+export interface AcceptPlanResultItem {
+  title: string;
+  issueNumber?: number;
+  issueUrl?: string;
+  error?: string;
+}
+
+export interface AcceptPlanResponse {
+  results: AcceptPlanResultItem[];
+}
+
 export function sendArticlePlanChatMessage(
   projectId: number,
   data: { history: PlanChatMessage[]; message: string },
@@ -651,6 +662,19 @@ export function suggestArticlePlanTitles(
   actor?: ActorInfo
 ): Promise<SuggestTitlesResponse> {
   return apiFetch<SuggestTitlesResponse>(`/api/projects/${projectId}/article-plan/suggest-titles`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+    actor,
+  });
+}
+
+export function acceptArticlePlan(
+  projectId: number,
+  data: { titles: string[] },
+  actor?: ActorInfo
+): Promise<AcceptPlanResponse> {
+  return apiFetch<AcceptPlanResponse>(`/api/projects/${projectId}/article-plan/accept`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),

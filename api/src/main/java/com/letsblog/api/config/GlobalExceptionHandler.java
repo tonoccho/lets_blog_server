@@ -3,6 +3,7 @@ package com.letsblog.api.config;
 import com.letsblog.api.cms.CmsApiException;
 import com.letsblog.api.cms.agent.AgentOperationException;
 import com.letsblog.api.cms.ssh.SshOperationException;
+import com.letsblog.api.github.GithubApiException;
 import com.letsblog.api.service.CustomTagNotFoundException;
 import com.letsblog.api.service.EmailAlreadyExistsException;
 import com.letsblog.api.service.EmailSendException;
@@ -123,6 +124,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(AgentOperationException.class)
     public ResponseEntity<Map<String, String>> handleAgentOperationException(AgentOperationException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(GithubApiException.class)
+    public ResponseEntity<Map<String, String>> handleGithubApiException(GithubApiException e) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
     }
 

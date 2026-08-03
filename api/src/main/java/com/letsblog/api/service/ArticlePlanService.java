@@ -4,9 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.ai.OllamaClient;
 import com.letsblog.api.domain.GenerationJob;
+import com.letsblog.api.domain.Project;
+import com.letsblog.api.dto.AcceptPlanResponse;
+import com.letsblog.api.dto.AcceptPlanResultItem;
 import com.letsblog.api.dto.PlanChatMessage;
 import com.letsblog.api.dto.PlanChatResponse;
 import com.letsblog.api.dto.SuggestTitlesResponse;
+import com.letsblog.api.github.GithubClient;
+import com.letsblog.api.github.GithubIssue;
 import com.letsblog.api.repository.GenerationJobRepository;
 import org.springframework.stereotype.Service;
 
@@ -32,14 +37,23 @@ public class ArticlePlanService {
     private final OllamaClient ollamaClient;
     private final GenerationJobRepository generationJobRepository;
     private final ObjectMapper objectMapper;
+    private final GithubClient githubClient;
+    private final UserService userService;
+    private final ProjectService projectService;
 
     public ArticlePlanService(
             OllamaClient ollamaClient,
             GenerationJobRepository generationJobRepository,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            GithubClient githubClient,
+            UserService userService,
+            ProjectService projectService) {
         this.ollamaClient = ollamaClient;
         this.generationJobRepository = generationJobRepository;
         this.objectMapper = objectMapper;
+        this.githubClient = githubClient;
+        this.userService = userService;
+        this.projectService = projectService;
     }
 
     public PlanChatResponse chat(Long projectId, List<PlanChatMessage> history, String message) {
@@ -57,6 +71,34 @@ public class ArticlePlanService {
             failJob(job, e);
             throw e;
         }
+    }
+
+    /**
+     * ユーザーが選択したタイトルを1件1issueとしてGitHubに登録する。
+     * 1件の作成に失敗しても他のタイトルの登録は続け、結果を個別に集約して返す。
+     */
+    public AcceptPlanResponse acceptPlan(Long projectId, Long userId, List<String> titles) {
+        Project project = projectService.getProjectEntity(projectId);
+        if (!project.isGithubRepositoryConfigured()) {
+            throw new IllegalStateException(
+                    "このプロジェクトにGitHubリポジトリが紐付けられていません。プロジェクト詳細ページから設定してください。");
+        }
+
+        String token = userService.getDecryptedGithubToken(userId);
+        String[] repoParts = project.getGithubRepository().split("/", 2);
+        String owner = repoParts[0];
+        String repo = repoParts[1];
+
+        List<AcceptPlanResultItem> results = new ArrayList<>();
+        for (String title : titles) {
+            try {
+                GithubIssue issue = githubClient.createIssue(token, owner, repo, title, "");
+                results.add(new AcceptPlanResultItem(title, issue.number(), issue.htmlUrl(), null));
+            } catch (RuntimeException e) {
+                results.add(new AcceptPlanResultItem(title, null, null, e.getMessage()));
+            }
+        }
+        return new AcceptPlanResponse(results);
     }
 
     public SuggestTitlesResponse suggestTitles(Long projectId, List<PlanChatMessage> history) {

@@ -3,60 +3,56 @@
 import {
   sendArticlePlanChatMessage,
   suggestArticlePlanTitles,
+  acceptArticlePlan,
+  AcceptPlanResultItem,
   PlanChatMessage,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 
-export interface PlanChatState {
-  history: PlanChatMessage[];
-  error?: string;
-}
+export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
-export async function sendPlanChatMessageAction(
+export async function sendPlanChatMessage(
   projectId: number,
-  prevState: PlanChatState,
-  formData: FormData
-): Promise<PlanChatState> {
+  history: PlanChatMessage[],
+  message: string
+): Promise<ActionResult<{ reply: string }>> {
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };
 
-  const message = String(formData.get("message") ?? "").trim();
-  if (!message) {
-    return prevState;
-  }
-
   try {
-    const response = await sendArticlePlanChatMessage(projectId, { history: prevState.history, message }, actor);
-    return {
-      history: [
-        ...prevState.history,
-        { role: "user", content: message },
-        { role: "assistant", content: response.reply },
-      ],
-    };
+    const response = await sendArticlePlanChatMessage(projectId, { history, message }, actor);
+    return { ok: true, data: { reply: response.reply } };
   } catch (err) {
-    return { history: prevState.history, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
-export interface SuggestTitlesState {
-  titles: string[];
-  error?: string;
-}
-
-export async function suggestPlanTitlesAction(
+export async function suggestPlanTitles(
   projectId: number,
-  history: PlanChatMessage[],
-  _prevState: SuggestTitlesState,
-  _formData: FormData
-): Promise<SuggestTitlesState> {
+  history: PlanChatMessage[]
+): Promise<ActionResult<{ titles: string[] }>> {
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
     const response = await suggestArticlePlanTitles(projectId, { history }, actor);
-    return { titles: response.titles };
+    return { ok: true, data: { titles: response.titles } };
   } catch (err) {
-    return { titles: [], error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function acceptPlan(
+  projectId: number,
+  titles: string[]
+): Promise<ActionResult<{ results: AcceptPlanResultItem[] }>> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const response = await acceptArticlePlan(projectId, { titles }, actor);
+    return { ok: true, data: { results: response.results } };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }

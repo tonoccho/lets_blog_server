@@ -3,9 +3,15 @@ package com.letsblog.api.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.ai.OllamaClient;
 import com.letsblog.api.domain.GenerationJob;
+import com.letsblog.api.domain.Project;
+import com.letsblog.api.dto.AcceptPlanResponse;
+import com.letsblog.api.dto.AcceptPlanResultItem;
 import com.letsblog.api.dto.PlanChatMessage;
 import com.letsblog.api.dto.PlanChatResponse;
 import com.letsblog.api.dto.SuggestTitlesResponse;
+import com.letsblog.api.github.GithubApiException;
+import com.letsblog.api.github.GithubClient;
+import com.letsblog.api.github.GithubIssue;
 import com.letsblog.api.repository.GenerationJobRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -17,10 +23,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -33,16 +42,33 @@ class ArticlePlanServiceTest {
     @Mock
     private GenerationJobRepository generationJobRepository;
 
+    @Mock
+    private GithubClient githubClient;
+
+    @Mock
+    private UserService userService;
+
+    @Mock
+    private ProjectService projectService;
+
     // GenerationJob はミュータブルなため、save() 呼び出しの都度その時点のstatusをスナップショットして記録する
     private final List<String> savedStatuses = new ArrayList<>();
 
     private ArticlePlanService service() {
-        when(generationJobRepository.save(any(GenerationJob.class))).thenAnswer(invocation -> {
+        lenient().when(generationJobRepository.save(any(GenerationJob.class))).thenAnswer(invocation -> {
             GenerationJob job = invocation.getArgument(0);
             savedStatuses.add(job.getStatus());
             return job;
         });
-        return new ArticlePlanService(ollamaClient, generationJobRepository, new ObjectMapper());
+        return new ArticlePlanService(
+                ollamaClient, generationJobRepository, new ObjectMapper(), githubClient, userService, projectService);
+    }
+
+    private Project projectWithRepository(String githubRepository) {
+        Project project = new Project();
+        project.setId(1L);
+        project.setGithubRepository(githubRepository);
+        return project;
     }
 
     @Test
@@ -77,7 +103,7 @@ class ArticlePlanServiceTest {
         assertEquals(List.of("running", "done"), savedStatuses);
 
         ArgumentCaptor<GenerationJob> jobCaptor = ArgumentCaptor.forClass(GenerationJob.class);
-        verify(generationJobRepository, org.mockito.Mockito.atLeastOnce()).save(jobCaptor.capture());
+        verify(generationJobRepository, atLeastOnce()).save(jobCaptor.capture());
         assertEquals("plan_chat", jobCaptor.getValue().getType());
     }
 
@@ -155,7 +181,51 @@ class ArticlePlanServiceTest {
         assertEquals(List.of("running", "done"), savedStatuses);
 
         ArgumentCaptor<GenerationJob> jobCaptor = ArgumentCaptor.forClass(GenerationJob.class);
-        verify(generationJobRepository, org.mockito.Mockito.atLeastOnce()).save(jobCaptor.capture());
+        verify(generationJobRepository, atLeastOnce()).save(jobCaptor.capture());
         assertEquals("plan_suggest_titles", jobCaptor.getValue().getType());
+    }
+
+    @Test
+    void acceptPlan_リポジトリ未設定の場合は例外をスローする() {
+        ArticlePlanService service = service();
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithRepository(null));
+
+        assertThrows(IllegalStateException.class, () -> service.acceptPlan(1L, 10L, List.of("タイトル")));
+    }
+
+    @Test
+    void acceptPlan_成功時はissue番号とURLを含む結果を返す() {
+        ArticlePlanService service = service();
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithRepository("owner/repo"));
+        when(userService.getDecryptedGithubToken(10L)).thenReturn("test-token");
+        when(githubClient.createIssue("test-token", "owner", "repo", "タイトル1", ""))
+                .thenReturn(new GithubIssue(1, "https://github.com/owner/repo/issues/1"));
+
+        AcceptPlanResponse response = service.acceptPlan(1L, 10L, List.of("タイトル1"));
+
+        assertEquals(1, response.results().size());
+        AcceptPlanResultItem item = response.results().get(0);
+        assertEquals("タイトル1", item.title());
+        assertEquals(1, item.issueNumber());
+        assertEquals("https://github.com/owner/repo/issues/1", item.issueUrl());
+        assertNull(item.error());
+    }
+
+    @Test
+    void acceptPlan_一部のissue作成に失敗しても他のタイトルの登録は続行する() {
+        ArticlePlanService service = service();
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithRepository("owner/repo"));
+        when(userService.getDecryptedGithubToken(10L)).thenReturn("test-token");
+        when(githubClient.createIssue("test-token", "owner", "repo", "成功タイトル", ""))
+                .thenReturn(new GithubIssue(1, "https://github.com/owner/repo/issues/1"));
+        when(githubClient.createIssue("test-token", "owner", "repo", "失敗タイトル", ""))
+                .thenThrow(new GithubApiException("GitHub issueの作成に失敗しました"));
+
+        AcceptPlanResponse response = service.acceptPlan(1L, 10L, List.of("成功タイトル", "失敗タイトル"));
+
+        assertEquals(2, response.results().size());
+        assertNull(response.results().get(0).error());
+        assertEquals("GitHub issueの作成に失敗しました", response.results().get(1).error());
+        assertNull(response.results().get(1).issueNumber());
     }
 }

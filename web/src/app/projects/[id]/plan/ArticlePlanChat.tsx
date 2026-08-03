@@ -1,18 +1,43 @@
 "use client";
 
+import { useState } from "react";
 import type { PlanChatMessage } from "@/lib/apiClient";
+import { sendPlanChatMessage } from "./actions";
 
 export function ArticlePlanChat({
+  projectId,
   history,
-  error,
-  formAction,
-  pending,
+  setHistory,
 }: {
+  projectId: number;
   history: PlanChatMessage[];
-  error?: string;
-  formAction: (formData: FormData) => void;
-  pending: boolean;
+  setHistory: (history: PlanChatMessage[]) => void;
 }) {
+  const [input, setInput] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+
+  const handleSendMessage = async () => {
+    const message = input.trim();
+    if (!message || isLoading) return;
+
+    setInput("");
+    setIsLoading(true);
+    setError(undefined);
+
+    const result = await sendPlanChatMessage(projectId, history, message);
+    if (result.ok) {
+      setHistory([
+        ...history,
+        { role: "user", content: message },
+        { role: "assistant", content: result.data.reply },
+      ]);
+    } else {
+      setError(result.error);
+    }
+    setIsLoading(false);
+  };
+
   return (
     <div className="rounded-lg border border-neutral-200 bg-white p-5">
       <h2 className="mb-4 font-medium">AI との壁打ち</h2>
@@ -34,24 +59,28 @@ export function ArticlePlanChat({
         )}
       </div>
 
-      <form action={formAction} className="flex gap-2">
+      <div className="flex gap-2">
         <input
-          key={history.length}
           type="text"
-          name="message"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !isLoading) {
+              handleSendMessage();
+            }
+          }}
           placeholder="質問や企画案を入力..."
-          required
-          disabled={pending}
+          disabled={isLoading}
           className="flex-1 rounded border border-neutral-300 px-3 py-2 text-sm disabled:bg-neutral-100"
         />
         <button
-          type="submit"
-          disabled={pending}
+          onClick={handleSendMessage}
+          disabled={isLoading || !input.trim()}
           className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:bg-neutral-200 disabled:text-neutral-600"
         >
-          {pending ? "送信中…" : "送信"}
+          {isLoading ? "送信中…" : "送信"}
         </button>
-      </form>
+      </div>
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
     </div>
   );
