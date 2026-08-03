@@ -12,6 +12,7 @@ public record ProjectResponse(
         SiteResponse testSite,
         SiteResponse productionSite,
         String masterEnvironment,
+        String githubRepository,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -25,6 +26,7 @@ public record ProjectResponse(
                 testSite,
                 productionSite,
                 project.getMasterEnvironment(),
+                project.getGithubRepository(),
                 project.getCreatedAt(),
                 project.getUpdatedAt()
         );

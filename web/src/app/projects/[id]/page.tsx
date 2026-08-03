@@ -13,6 +13,7 @@ import {
 import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
 import { EnvironmentSlot } from "./EnvironmentSlot";
 import { MasterEnvironmentSelector } from "./MasterEnvironmentSelector";
+import { ProjectGithubRepositoryForm } from "./ProjectGithubRepositoryForm";
 import { EnvironmentSyncPanel } from "./EnvironmentSyncPanel";
 import { BulkManagementPanel } from "./BulkManagementPanel";
 import { ProjectNameForm } from "./ProjectNameForm";
@@ -88,6 +89,8 @@ export default async function ProjectDetailPage({
       </div>
 
       <MasterEnvironmentSelector projectId={project.id} project={project} />
+
+      <ProjectGithubRepositoryForm projectId={project.id} githubRepository={project.githubRepository} />
 
       <EnvironmentSyncPanel projectId={project.id} project={project} />
 

@@ -389,6 +389,7 @@ export interface UserProfile {
   position: string | null;
   socialLinks: SocialLinks | null;
   customLinks: CustomLink[] | null;
+  githubTokenConfigured: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -433,6 +434,19 @@ export function updateUserPreferences(
 ): Promise<UserProfile> {
   return apiFetch<UserProfile>(`/api/users/${id}/preferences`, {
     method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function updateGithubToken(
+  id: number,
+  input: { githubToken: string },
+  actor?: ActorInfo
+): Promise<UserProfile> {
+  return apiFetch<UserProfile>(`/api/users/${id}/github-token`, {
+    method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
     actor,
@@ -555,6 +569,7 @@ export interface Project {
   testSite: Site | null;
   productionSite: Site | null;
   masterEnvironment: "test" | "production";
+  githubRepository: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -589,6 +604,208 @@ export function updateProject(id: number, name: string, actor?: ActorInfo): Prom
 
 export function deleteProject(id: number, actor?: ActorInfo): Promise<void> {
   return apiFetch<void>(`/api/projects/${id}`, { method: 'DELETE', actor });
+}
+
+export function updateProjectGithubRepository(
+  id: number,
+  githubRepository: string,
+  actor?: ActorInfo
+): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}/github-repository`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ githubRepository }),
+    actor,
+  });
+}
+
+export interface PlanChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface PlanChatResponse {
+  reply: string;
+  sessionId: number;
+}
+
+export interface ArticlePlanSessionSummary {
+  id: number;
+  title: string;
+  githubIssueNumber: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ArticlePlanSessionDetail {
+  id: number;
+  title: string;
+  githubIssueNumber: number | null;
+  history: PlanChatMessage[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type RepositoryIssueState = "open" | "closed" | "all";
+
+export interface RepositoryIssue {
+  number: number;
+  title: string;
+  htmlUrl: string;
+  state: string;
+}
+
+export interface SuggestTitlesResponse {
+  titles: string[];
+}
+
+export interface SuggestStructureResponse {
+  structure: string;
+}
+
+export interface AcceptStructureResponse {
+  issueNumber: number;
+  issueUrl: string;
+}
+
+export interface AcceptPlanResultItem {
+  title: string;
+  issueNumber?: number;
+  issueUrl?: string;
+  error?: string;
+}
+
+export interface AcceptPlanResponse {
+  results: AcceptPlanResultItem[];
+}
+
+export function sendArticlePlanChatMessage(
+  projectId: number,
+  data: {
+    history: PlanChatMessage[];
+    message: string;
+    sessionId?: number | null;
+    githubIssueNumber?: number | null;
+  },
+  actor?: ActorInfo
+): Promise<PlanChatResponse> {
+  return apiFetch<PlanChatResponse>(`/api/projects/${projectId}/article-plan/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+    actor,
+  });
+}
+
+export function listArticlePlanSessions(
+  projectId: number,
+  actor?: ActorInfo
+): Promise<ArticlePlanSessionSummary[]> {
+  return apiFetch<ArticlePlanSessionSummary[]>(`/api/projects/${projectId}/article-plan/sessions`, { actor });
+}
+
+export function getArticlePlanSession(
+  projectId: number,
+  sessionId: number,
+  actor?: ActorInfo
+): Promise<ArticlePlanSessionDetail> {
+  return apiFetch<ArticlePlanSessionDetail>(
+    `/api/projects/${projectId}/article-plan/sessions/${sessionId}`,
+    { actor }
+  );
+}
+
+export function getArticlePlanSessionByIssue(
+  projectId: number,
+  issueNumber: number,
+  actor?: ActorInfo
+): Promise<ArticlePlanSessionDetail> {
+  return apiFetch<ArticlePlanSessionDetail>(
+    `/api/projects/${projectId}/article-plan/sessions/by-issue/${issueNumber}`,
+    { actor }
+  );
+}
+
+export interface IssueDescriptionResponse {
+  body: string;
+}
+
+export function getArticlePlanIssueDescription(
+  projectId: number,
+  issueNumber: number,
+  actor?: ActorInfo
+): Promise<IssueDescriptionResponse> {
+  return apiFetch<IssueDescriptionResponse>(
+    `/api/projects/${projectId}/article-plan/issues/${issueNumber}/description`,
+    { actor }
+  );
+}
+
+export function listArticlePlanIssues(
+  projectId: number,
+  state: RepositoryIssueState,
+  actor?: ActorInfo
+): Promise<RepositoryIssue[]> {
+  return apiFetch<RepositoryIssue[]>(
+    `/api/projects/${projectId}/article-plan/issues?state=${state}`,
+    { actor }
+  );
+}
+
+export function suggestArticlePlanTitles(
+  projectId: number,
+  data: { history: PlanChatMessage[] },
+  actor?: ActorInfo
+): Promise<SuggestTitlesResponse> {
+  return apiFetch<SuggestTitlesResponse>(`/api/projects/${projectId}/article-plan/suggest-titles`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+    actor,
+  });
+}
+
+export function acceptArticlePlan(
+  projectId: number,
+  data: { titles: string[] },
+  actor?: ActorInfo
+): Promise<AcceptPlanResponse> {
+  return apiFetch<AcceptPlanResponse>(`/api/projects/${projectId}/article-plan/accept`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+    actor,
+  });
+}
+
+export function suggestArticleStructure(
+  projectId: number,
+  data: { history: PlanChatMessage[] },
+  actor?: ActorInfo
+): Promise<SuggestStructureResponse> {
+  return apiFetch<SuggestStructureResponse>(`/api/projects/${projectId}/article-plan/suggest-structure`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+    actor,
+  });
+}
+
+export function acceptArticleStructure(
+  projectId: number,
+  issueNumber: number,
+  data: { structure: string },
+  actor?: ActorInfo
+): Promise<AcceptStructureResponse> {
+  return apiFetch<AcceptStructureResponse>(
+    `/api/projects/${projectId}/article-plan/issues/${issueNumber}/accept-structure`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+      actor,
+    }
+  );
 }
 
 export function updateMasterEnvironment(

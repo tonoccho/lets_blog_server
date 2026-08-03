@@ -2,8 +2,13 @@ package com.letsblog.api.service;
 
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.dto.ProjectResponse;
+import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
 import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.SiteRepository;
+import jakarta.validation.ConstraintViolationException;
+import jakarta.validation.Validation;
+import jakarta.validation.Validator;
+import jakarta.validation.ValidatorFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -11,10 +16,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -175,5 +183,60 @@ class ProjectServiceTest {
 
         verify(projectRepository, times(1)).deleteById(1L);
         verify(bulkUploadStorageService).deleteAll(1L);
+    }
+
+    @Test
+    void updateGithubRepository_owner_repo形式の値が正常に保存される() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProjectResponse response = service.updateGithubRepository(
+                1L, new UpdateProjectGithubRepositoryRequest("anthropics/prompt-library"));
+
+        assertEquals("anthropics/prompt-library", response.githubRepository());
+        assertEquals("anthropics/prompt-library", project.getGithubRepository());
+    }
+
+    @Test
+    void updateGithubRepository_空文字列はnullに変換される() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        project.setGithubRepository("owner/repo");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProjectResponse response = service.updateGithubRepository(1L, new UpdateProjectGithubRepositoryRequest(""));
+
+        assertNull(response.githubRepository());
+        assertNull(project.getGithubRepository());
+    }
+
+    @Test
+    void updateGithubRepository_正規表現に違反する値はConstraintViolationExceptionをスロー() {
+        try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
+            Validator validator = factory.getValidator();
+            Set<jakarta.validation.ConstraintViolation<UpdateProjectGithubRepositoryRequest>> violations =
+                    validator.validate(new UpdateProjectGithubRepositoryRequest("invalid-format"));
+
+            assertFalse(violations.isEmpty());
+            assertThrows(ConstraintViolationException.class, () -> {
+                if (!violations.isEmpty()) {
+                    throw new ConstraintViolationException(violations);
+                }
+            });
+        }
+    }
+
+    @Test
+    void updateGithubRepository_owner_repo形式は制約違反にならない() {
+        try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
+            Validator validator = factory.getValidator();
+            Set<jakarta.validation.ConstraintViolation<UpdateProjectGithubRepositoryRequest>> violations =
+                    validator.validate(new UpdateProjectGithubRepositoryRequest("owner/repo"));
+
+            assertTrue(violations.isEmpty());
+        }
     }
 }

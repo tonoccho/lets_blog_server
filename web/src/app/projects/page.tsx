@@ -62,7 +62,10 @@ export default async function ProjectsPage() {
                   </div>
                 </td>
                 <td className="px-4 py-2 text-neutral-500">{formatDateTime(project.createdAt, timezone)}</td>
-                <td className="px-4 py-2 text-right">
+                <td className="px-4 py-2 text-right space-x-2">
+                  <Link href={`/projects/${project.id}/plan`} className="text-sm text-neutral-600 hover:underline">
+                    計画
+                  </Link>
                   <Link href={`/projects/${project.id}`} className="text-sm text-neutral-600 hover:underline">
                     詳細
                   </Link>

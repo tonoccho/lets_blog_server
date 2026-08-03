@@ -4,6 +4,7 @@ import com.letsblog.api.aop.AuditLog;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.dto.ProjectResponse;
+import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
 import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.SiteRepository;
 import com.letsblog.api.dto.SiteResponse;
@@ -133,13 +134,24 @@ public class ProjectService {
                 .orElse(null);
     }
 
+    @AuditLog(action = AuditLogAction.PROJECT_UPDATED, resourceType = "PROJECT")
+    @Transactional
+    public ProjectResponse updateGithubRepository(Long projectId, UpdateProjectGithubRepositoryRequest request) {
+        Project project = getProjectEntity(projectId);
+        String repo = request.githubRepository() == null || request.githubRepository().isBlank()
+                ? null
+                : request.githubRepository();
+        project.setGithubRepository(repo);
+        return toResponse(projectRepository.save(project));
+    }
+
     private void requireValidEnvironment(String environment) {
         if (!VALID_ENVIRONMENTS.contains(environment)) {
             throw new IllegalArgumentException("environment は local/test/production のいずれかを指定してください");
         }
     }
 
-    private Project getProjectEntity(Long projectId) {
+    public Project getProjectEntity(Long projectId) {
         return projectRepository.findById(projectId)
                 .orElseThrow(() -> new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません"));
     }
