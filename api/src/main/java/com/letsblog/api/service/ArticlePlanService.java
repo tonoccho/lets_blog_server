@@ -3,6 +3,7 @@ package com.letsblog.api.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.letsblog.api.ai.BraveSearchResult;
 import com.letsblog.api.ai.OllamaClient;
 import com.letsblog.api.domain.ArticlePlanSession;
 import com.letsblog.api.domain.GenerationJob;
@@ -53,6 +54,8 @@ public class ArticlePlanService {
             + "出力は構成案のMarkdownのみとし、他の説明文や前置きは含めないでください。";
 
     private final OllamaClient ollamaClient;
+    private final OllamaModelService ollamaModelService;
+    private final WebSearchService webSearchService;
     private final GenerationJobRepository generationJobRepository;
     private final ObjectMapper objectMapper;
     private final GithubClient githubClient;
@@ -62,6 +65,8 @@ public class ArticlePlanService {
 
     public ArticlePlanService(
             OllamaClient ollamaClient,
+            OllamaModelService ollamaModelService,
+            WebSearchService webSearchService,
             GenerationJobRepository generationJobRepository,
             ObjectMapper objectMapper,
             GithubClient githubClient,
@@ -69,6 +74,8 @@ public class ArticlePlanService {
             ProjectService projectService,
             ArticlePlanSessionRepository articlePlanSessionRepository) {
         this.ollamaClient = ollamaClient;
+        this.ollamaModelService = ollamaModelService;
+        this.webSearchService = webSearchService;
         this.generationJobRepository = generationJobRepository;
         this.objectMapper = objectMapper;
         this.githubClient = githubClient;
@@ -89,16 +96,23 @@ public class ArticlePlanService {
                 "historyLength", String.valueOf(history.size())
         ));
         try {
-            String prompt = buildChatPrompt(history, message);
-            String reply = ollamaClient.generate(prompt);
-            completeJob(job, Map.of("reply", reply));
+            String model = ollamaModelService.getSelectedModel(projectId);
+            WebSearchOutcome searchOutcome = webSearchService.searchSafely(message);
+            String prompt = buildChatPrompt(history, message, searchOutcome);
+            String reply = ollamaClient.generate(prompt, model);
+            completeJob(job, Map.of(
+                    "reply", reply,
+                    "webSearchAttempted", "true",
+                    "webSearchSucceeded", String.valueOf(searchOutcome.succeeded()),
+                    "webSearchError", String.valueOf(searchOutcome.errorMessage())
+            ));
 
             List<PlanChatMessage> updatedHistory = new ArrayList<>(history);
             updatedHistory.add(new PlanChatMessage("user", message));
             updatedHistory.add(new PlanChatMessage("assistant", reply));
 
             Long resolvedSessionId = sessionId == null
-                    ? createSession(projectId, message, updatedHistory, githubIssueNumber)
+                    ? createSession(projectId, message, updatedHistory, githubIssueNumber, model)
                     : appendToSession(projectId, sessionId, updatedHistory);
 
             return new PlanChatResponse(reply, resolvedSessionId);
@@ -109,8 +123,8 @@ public class ArticlePlanService {
     }
 
     private Long createSession(
-            Long projectId, String firstMessage, List<PlanChatMessage> history, Integer githubIssueNumber) {
-        String title = generateSessionTitle(firstMessage);
+            Long projectId, String firstMessage, List<PlanChatMessage> history, Integer githubIssueNumber, String model) {
+        String title = generateSessionTitle(firstMessage, model);
 
         ArticlePlanSession session = new ArticlePlanSession();
         session.setProjectId(projectId);
@@ -137,11 +151,11 @@ public class ArticlePlanService {
         return session;
     }
 
-    private String generateSessionTitle(String firstMessage) {
+    private String generateSessionTitle(String firstMessage, String model) {
         GenerationJob job = startJob("plan_session_title", Map.of("message", firstMessage));
         try {
             String prompt = "User: " + firstMessage + "\n\n" + TITLE_GENERATION_INSTRUCTION;
-            String raw = ollamaClient.generate(prompt);
+            String raw = ollamaClient.generate(prompt, model);
             String title = sanitizeTitle(raw);
             completeJob(job, Map.of("title", title));
             return title;
@@ -269,7 +283,8 @@ public class ArticlePlanService {
                 "historyLength", String.valueOf(history.size())
         ));
         try {
-            String raw = ollamaClient.generate(buildTitleSuggestionPrompt(history));
+            String model = ollamaModelService.getSelectedModel(projectId);
+            String raw = ollamaClient.generate(buildTitleSuggestionPrompt(history), model);
             List<String> titles = parseTitles(raw);
             completeJob(job, Map.of("titlesCount", String.valueOf(titles.size()), "raw", raw));
             return new SuggestTitlesResponse(titles);
@@ -288,7 +303,8 @@ public class ArticlePlanService {
                 "historyLength", String.valueOf(history.size())
         ));
         try {
-            String structure = ollamaClient.generate(buildStructureSuggestionPrompt(history)).strip();
+            String model = ollamaModelService.getSelectedModel(projectId);
+            String structure = ollamaClient.generate(buildStructureSuggestionPrompt(history), model).strip();
             completeJob(job, Map.of("structureLength", String.valueOf(structure.length())));
             return new SuggestStructureResponse(structure);
         } catch (RuntimeException e) {
@@ -297,13 +313,27 @@ public class ArticlePlanService {
         }
     }
 
-    private String buildChatPrompt(List<PlanChatMessage> history, String message) {
+    private String buildChatPrompt(List<PlanChatMessage> history, String message, WebSearchOutcome searchOutcome) {
         StringBuilder sb = new StringBuilder();
         sb.append("System: ").append(SYSTEM_PROMPT).append("\n\n");
+        appendSearchResults(sb, searchOutcome);
         appendHistory(sb, history);
         sb.append("User: ").append(message).append("\n");
         sb.append("Assistant: ");
         return sb.toString();
+    }
+
+    private void appendSearchResults(StringBuilder sb, WebSearchOutcome searchOutcome) {
+        if (!searchOutcome.succeeded() || searchOutcome.results().isEmpty()) {
+            return;
+        }
+        sb.append("参考のWeb検索結果:\n");
+        int i = 1;
+        for (BraveSearchResult result : searchOutcome.results()) {
+            sb.append(i++).append(". ").append(result.title()).append(" - ").append(result.description())
+                    .append(" (").append(result.url()).append(")\n");
+        }
+        sb.append("\n");
     }
 
     private String buildTitleSuggestionPrompt(List<PlanChatMessage> history) {

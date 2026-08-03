@@ -49,6 +49,12 @@ class ArticlePlanServiceTest {
     private OllamaClient ollamaClient;
 
     @Mock
+    private OllamaModelService ollamaModelService;
+
+    @Mock
+    private WebSearchService webSearchService;
+
+    @Mock
     private GenerationJobRepository generationJobRepository;
 
     @Mock
@@ -81,9 +87,12 @@ class ArticlePlanServiceTest {
             }
             return session;
         });
+        lenient().when(ollamaModelService.getSelectedModel(any())).thenReturn("qwen2.5:7b-instruct");
+        lenient().when(webSearchService.searchSafely(anyString()))
+                .thenReturn(WebSearchOutcome.failure("テストではWeb検索を行わない"));
         return new ArticlePlanService(
-                ollamaClient, generationJobRepository, objectMapper, githubClient, userService, projectService,
-                articlePlanSessionRepository);
+                ollamaClient, ollamaModelService, webSearchService, generationJobRepository, objectMapper,
+                githubClient, userService, projectService, articlePlanSessionRepository);
     }
 
     private Project projectWithRepository(String githubRepository) {
@@ -121,7 +130,7 @@ class ArticlePlanServiceTest {
         );
         when(articlePlanSessionRepository.findById(99L))
                 .thenReturn(Optional.of(existingSession(99L, 1L, history)));
-        when(ollamaClient.generate(anyString())).thenReturn("初心者エンジニア向けはどうでしょう");
+        when(ollamaClient.generate(anyString(), anyString())).thenReturn("初心者エンジニア向けはどうでしょう");
 
         PlanChatResponse response = service.chat(1L, history, "初心者向けにしたいです", 99L, null);
 
@@ -129,7 +138,7 @@ class ArticlePlanServiceTest {
         assertEquals(99L, response.sessionId());
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(ollamaClient).generate(promptCaptor.capture());
+        verify(ollamaClient).generate(promptCaptor.capture(), anyString());
         String prompt = promptCaptor.getValue();
         assertTrue(prompt.contains("AIブログの企画を考えたい"));
         assertTrue(prompt.contains("どんな読者層を想定していますか?"));
@@ -142,7 +151,7 @@ class ArticlePlanServiceTest {
         ArticlePlanService service = service();
         when(articlePlanSessionRepository.findById(99L))
                 .thenReturn(Optional.of(existingSession(99L, 1L, List.of())));
-        when(ollamaClient.generate(anyString())).thenReturn("応答");
+        when(ollamaClient.generate(anyString(), anyString())).thenReturn("応答");
 
         service.chat(1L, List.of(), "テーマ", 99L, null);
 
@@ -156,7 +165,7 @@ class ArticlePlanServiceTest {
     @Test
     void chat_Ollama呼び出しが失敗した場合ジョブがfailedになり例外を再送出する() {
         ArticlePlanService service = service();
-        when(ollamaClient.generate(anyString())).thenThrow(new RuntimeException("接続できません"));
+        when(ollamaClient.generate(anyString(), anyString())).thenThrow(new RuntimeException("接続できません"));
 
         assertThrows(RuntimeException.class, () -> service.chat(1L, List.of(), "テーマ", null, null));
 
@@ -166,7 +175,7 @@ class ArticlePlanServiceTest {
     @Test
     void chat_sessionId未指定の初回発言では新規セッションを作成しタイトルを生成する() {
         ArticlePlanService service = service();
-        when(ollamaClient.generate(anyString()))
+        when(ollamaClient.generate(anyString(), anyString()))
                 .thenReturn("AIとのやり取りの応答")
                 .thenReturn("生成されたタイトル");
 
@@ -184,7 +193,7 @@ class ArticlePlanServiceTest {
         assertTrue(saved.getHistory().contains("AIとのやり取りの応答"));
 
         // 1回目: チャット応答生成、2回目: タイトル生成
-        verify(ollamaClient, org.mockito.Mockito.times(2)).generate(anyString());
+        verify(ollamaClient, org.mockito.Mockito.times(2)).generate(anyString(), anyString());
     }
 
     @Test
@@ -193,13 +202,13 @@ class ArticlePlanServiceTest {
         List<PlanChatMessage> existingHistory = List.of(new PlanChatMessage("user", "前回の発言"));
         when(articlePlanSessionRepository.findById(5L))
                 .thenReturn(Optional.of(existingSession(5L, 1L, existingHistory)));
-        when(ollamaClient.generate(anyString())).thenReturn("続きの応答");
+        when(ollamaClient.generate(anyString(), anyString())).thenReturn("続きの応答");
 
         PlanChatResponse response = service.chat(1L, existingHistory, "追加の発言", 5L, null);
 
         assertEquals(5L, response.sessionId());
         // タイトル生成は行われないため、Ollama呼び出しは1回のみ
-        verify(ollamaClient, org.mockito.Mockito.times(1)).generate(anyString());
+        verify(ollamaClient, org.mockito.Mockito.times(1)).generate(anyString(), anyString());
 
         ArgumentCaptor<ArticlePlanSession> sessionCaptor = ArgumentCaptor.forClass(ArticlePlanSession.class);
         verify(articlePlanSessionRepository).save(sessionCaptor.capture());
@@ -214,7 +223,7 @@ class ArticlePlanServiceTest {
         ArticlePlanService service = service();
         when(articlePlanSessionRepository.findById(5L))
                 .thenReturn(Optional.of(existingSession(5L, 999L, List.of())));
-        when(ollamaClient.generate(anyString())).thenReturn("応答");
+        when(ollamaClient.generate(anyString(), anyString())).thenReturn("応答");
 
         assertThrows(ArticlePlanSessionNotFoundException.class,
                 () -> service.chat(1L, List.of(), "発言", 5L, null));
@@ -224,7 +233,7 @@ class ArticlePlanServiceTest {
     void chat_存在しないsessionIdを指定すると例外() {
         ArticlePlanService service = service();
         when(articlePlanSessionRepository.findById(5L)).thenReturn(Optional.empty());
-        when(ollamaClient.generate(anyString())).thenReturn("応答");
+        when(ollamaClient.generate(anyString(), anyString())).thenReturn("応答");
 
         assertThrows(ArticlePlanSessionNotFoundException.class,
                 () -> service.chat(1L, List.of(), "発言", 5L, null));
@@ -233,7 +242,7 @@ class ArticlePlanServiceTest {
     @Test
     void chat_githubIssueNumber指定時は新規セッションにissue番号が保存される() {
         ArticlePlanService service = service();
-        when(ollamaClient.generate(anyString()))
+        when(ollamaClient.generate(anyString(), anyString()))
                 .thenReturn("応答")
                 .thenReturn("生成されたタイトル");
 
@@ -307,19 +316,19 @@ class ArticlePlanServiceTest {
     @Test
     void suggestTitles_タイトル提案の指示がプロンプトに含まれる() {
         ArticlePlanService service = service();
-        when(ollamaClient.generate(anyString())).thenReturn("[\"タイトル1\", \"タイトル2\"]");
+        when(ollamaClient.generate(anyString(), anyString())).thenReturn("[\"タイトル1\", \"タイトル2\"]");
 
         service.suggestTitles(1L, List.of(new PlanChatMessage("user", "テーマ案")));
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(ollamaClient).generate(promptCaptor.capture());
+        verify(ollamaClient).generate(promptCaptor.capture(), anyString());
         assertTrue(promptCaptor.getValue().contains("JSON配列形式"));
     }
 
     @Test
     void suggestTitles_JSON配列を正しくパースする() {
         ArticlePlanService service = service();
-        when(ollamaClient.generate(anyString())).thenReturn("[\"タイトル1\", \"タイトル2\"]");
+        when(ollamaClient.generate(anyString(), anyString())).thenReturn("[\"タイトル1\", \"タイトル2\"]");
 
         SuggestTitlesResponse response = service.suggestTitles(1L, List.of());
 
@@ -329,7 +338,7 @@ class ArticlePlanServiceTest {
     @Test
     void suggestTitles_前後に説明文が付いていてもJSON配列部分だけを抽出する() {
         ArticlePlanService service = service();
-        when(ollamaClient.generate(anyString()))
+        when(ollamaClient.generate(anyString(), anyString()))
                 .thenReturn("以下が提案です。\n[\"タイトルA\", \"タイトルB\"]\nご確認ください。");
 
         SuggestTitlesResponse response = service.suggestTitles(1L, List.of());
@@ -340,7 +349,7 @@ class ArticlePlanServiceTest {
     @Test
     void suggestTitles_不正なJSONの場合は空リストを返す() {
         ArticlePlanService service = service();
-        when(ollamaClient.generate(anyString())).thenReturn("JSONではない応答です");
+        when(ollamaClient.generate(anyString(), anyString())).thenReturn("JSONではない応答です");
 
         SuggestTitlesResponse response = service.suggestTitles(1L, List.of());
 
@@ -350,7 +359,7 @@ class ArticlePlanServiceTest {
     @Test
     void suggestTitles_6件以上の提案は5件に制限される() {
         ArticlePlanService service = service();
-        when(ollamaClient.generate(anyString()))
+        when(ollamaClient.generate(anyString(), anyString()))
                 .thenReturn("[\"1\", \"2\", \"3\", \"4\", \"5\", \"6\", \"7\"]");
 
         SuggestTitlesResponse response = service.suggestTitles(1L, List.of());
@@ -361,7 +370,7 @@ class ArticlePlanServiceTest {
     @Test
     void suggestTitles_生成ジョブがplan_suggest_titlesとして記録される() {
         ArticlePlanService service = service();
-        when(ollamaClient.generate(anyString())).thenReturn("[]");
+        when(ollamaClient.generate(anyString(), anyString())).thenReturn("[]");
 
         service.suggestTitles(1L, List.of());
 
@@ -419,19 +428,19 @@ class ArticlePlanServiceTest {
     @Test
     void suggestStructure_構成案の指示がプロンプトに含まれる() {
         ArticlePlanService service = service();
-        when(ollamaClient.generate(anyString())).thenReturn("## 見出し1\n- 小見出しA");
+        when(ollamaClient.generate(anyString(), anyString())).thenReturn("## 見出し1\n- 小見出しA");
 
         service.suggestStructure(1L, List.of(new PlanChatMessage("user", "テーマ案")));
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(ollamaClient).generate(promptCaptor.capture());
+        verify(ollamaClient).generate(promptCaptor.capture(), anyString());
         assertTrue(promptCaptor.getValue().contains("構成案"));
     }
 
     @Test
     void suggestStructure_Ollamaの応答をそのまま返す() {
         ArticlePlanService service = service();
-        when(ollamaClient.generate(anyString())).thenReturn("## 見出し1\n- 小見出しA");
+        when(ollamaClient.generate(anyString(), anyString())).thenReturn("## 見出し1\n- 小見出しA");
 
         var response = service.suggestStructure(1L, List.of());
 
@@ -441,7 +450,7 @@ class ArticlePlanServiceTest {
     @Test
     void suggestStructure_生成ジョブがplan_suggest_structureとして記録される() {
         ArticlePlanService service = service();
-        when(ollamaClient.generate(anyString())).thenReturn("構成案");
+        when(ollamaClient.generate(anyString(), anyString())).thenReturn("構成案");
 
         service.suggestStructure(1L, List.of());
 

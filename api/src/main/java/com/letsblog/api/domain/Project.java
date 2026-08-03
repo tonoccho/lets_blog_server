@@ -43,6 +43,12 @@ public class Project {
     @Column(name = "github_repository", length = 255)
     private String githubRepository;
 
+    @Column(name = "ollama_model", length = 255)
+    private String ollamaModel;
+
+    @Column(name = "comfyui_checkpoint", length = 255)
+    private String comfyuiCheckpoint;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

@@ -32,6 +32,15 @@ import {
   runBulkOperationUpload,
   replayBulkOperations,
   clearBulkOperationLogs,
+  listOllamaModels,
+  selectOllamaModel,
+  installOllamaModel,
+  deleteOllamaModel,
+  listComfyUiCheckpoints,
+  selectComfyUiCheckpoint,
+  installComfyUiCheckpoint,
+  deleteComfyUiCheckpoint,
+  getGenerationJob,
   ProjectEnvironment,
   EnvironmentSyncTarget,
   BulkOperationType,
@@ -39,6 +48,9 @@ import {
   TermComparisonPage,
   StatusComparisonPage,
   PluginThemeStatus,
+  OllamaModelListResponse,
+  ComfyUiCheckpointListResponse,
+  GenerationJobDetail,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 
@@ -504,4 +516,120 @@ export async function clearBulkOperationLogsAction(projectId: number): Promise<v
 
   await clearBulkOperationLogs(projectId, actor);
   revalidatePath(`/projects/${projectId}`);
+}
+
+export interface AiModelActionState {
+  error?: string;
+  jobId?: number;
+}
+
+export async function fetchOllamaModelsAction(projectId: number): Promise<OllamaModelListResponse> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  return listOllamaModels(projectId, actor);
+}
+
+export async function selectOllamaModelAction(
+  projectId: number,
+  modelName: string
+): Promise<{ error?: string }> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    await selectOllamaModel(projectId, modelName, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+  revalidatePath(`/projects/${projectId}`);
+  return {};
+}
+
+export async function installOllamaModelAction(
+  projectId: number,
+  modelName: string
+): Promise<AiModelActionState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const job = await installOllamaModel(projectId, modelName, actor);
+    return { jobId: job.id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function deleteOllamaModelAction(
+  projectId: number,
+  modelName: string
+): Promise<AiModelActionState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const job = await deleteOllamaModel(projectId, modelName, actor);
+    return { jobId: job.id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function fetchComfyUiCheckpointsAction(projectId: number): Promise<ComfyUiCheckpointListResponse> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  return listComfyUiCheckpoints(projectId, actor);
+}
+
+export async function selectComfyUiCheckpointAction(
+  projectId: number,
+  checkpointName: string
+): Promise<{ error?: string }> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    await selectComfyUiCheckpoint(projectId, checkpointName, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+  revalidatePath(`/projects/${projectId}`);
+  return {};
+}
+
+export async function installComfyUiCheckpointAction(
+  projectId: number,
+  downloadUrl: string,
+  fileName: string
+): Promise<AiModelActionState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const job = await installComfyUiCheckpoint(projectId, downloadUrl, fileName, actor);
+    return { jobId: job.id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function deleteComfyUiCheckpointAction(
+  projectId: number,
+  fileName: string
+): Promise<AiModelActionState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const job = await deleteComfyUiCheckpoint(projectId, fileName, actor);
+    return { jobId: job.id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function fetchGenerationJobAction(jobId: number): Promise<GenerationJobDetail> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  return getGenerationJob(jobId, actor);
 }

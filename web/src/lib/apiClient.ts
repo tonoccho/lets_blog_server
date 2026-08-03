@@ -1278,3 +1278,124 @@ export interface ProjectUserSummary {
 export function listAllProjectUsers(actor?: ActorInfo): Promise<ProjectUserSummary[]> {
   return apiFetch<ProjectUserSummary[]>('/api/project-users', { actor });
 }
+
+export interface GenerationJobDetail {
+  id: number;
+  type: string;
+  status: string;
+  requestPayload: string | null;
+  resultPayload: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function getGenerationJob(id: number, actor?: ActorInfo): Promise<GenerationJobDetail> {
+  return apiFetch<GenerationJobDetail>(`/api/generation-jobs/${id}`, { actor });
+}
+
+export interface OllamaModelInfo {
+  name: string;
+  sizeBytes: number;
+  modifiedAt: string | null;
+}
+
+export interface OllamaModelListResponse {
+  models: OllamaModelInfo[];
+  selected: string;
+}
+
+export function listOllamaModels(projectId: number, actor?: ActorInfo): Promise<OllamaModelListResponse> {
+  return apiFetch<OllamaModelListResponse>(`/api/projects/${projectId}/ai-models/ollama/models`, { actor });
+}
+
+export function selectOllamaModel(
+  projectId: number,
+  modelName: string,
+  actor?: ActorInfo
+): Promise<OllamaModelListResponse> {
+  return apiFetch<OllamaModelListResponse>(`/api/projects/${projectId}/ai-models/ollama/models/selection`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ modelName }),
+    actor,
+  });
+}
+
+export function installOllamaModel(
+  projectId: number,
+  modelName: string,
+  actor?: ActorInfo
+): Promise<GenerationJob> {
+  return apiFetch<GenerationJob>(`/api/projects/${projectId}/ai-models/ollama/models/install`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ modelName }),
+    actor,
+  });
+}
+
+export function deleteOllamaModel(
+  projectId: number,
+  modelName: string,
+  actor?: ActorInfo
+): Promise<GenerationJob> {
+  return apiFetch<GenerationJob>(
+    `/api/projects/${projectId}/ai-models/ollama/models?modelName=${encodeURIComponent(modelName)}`,
+    { method: 'DELETE', actor }
+  );
+}
+
+export interface ComfyUiCheckpointListResponse {
+  checkpoints: string[];
+  selected: string;
+}
+
+export function listComfyUiCheckpoints(
+  projectId: number,
+  actor?: ActorInfo
+): Promise<ComfyUiCheckpointListResponse> {
+  return apiFetch<ComfyUiCheckpointListResponse>(`/api/projects/${projectId}/ai-models/comfyui/checkpoints`, {
+    actor,
+  });
+}
+
+export function selectComfyUiCheckpoint(
+  projectId: number,
+  checkpointName: string,
+  actor?: ActorInfo
+): Promise<ComfyUiCheckpointListResponse> {
+  return apiFetch<ComfyUiCheckpointListResponse>(
+    `/api/projects/${projectId}/ai-models/comfyui/checkpoints/selection`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ checkpointName }),
+      actor,
+    }
+  );
+}
+
+export function installComfyUiCheckpoint(
+  projectId: number,
+  downloadUrl: string,
+  fileName: string,
+  actor?: ActorInfo
+): Promise<GenerationJob> {
+  return apiFetch<GenerationJob>(`/api/projects/${projectId}/ai-models/comfyui/checkpoints/install`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ downloadUrl, fileName }),
+    actor,
+  });
+}
+
+export function deleteComfyUiCheckpoint(
+  projectId: number,
+  fileName: string,
+  actor?: ActorInfo
+): Promise<GenerationJob> {
+  return apiFetch<GenerationJob>(
+    `/api/projects/${projectId}/ai-models/comfyui/checkpoints/${encodeURIComponent(fileName)}`,
+    { method: 'DELETE', actor }
+  );
+}

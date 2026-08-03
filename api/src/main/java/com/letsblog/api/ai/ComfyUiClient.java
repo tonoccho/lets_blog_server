@@ -8,6 +8,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -30,8 +32,12 @@ public class ComfyUiClient {
     }
 
     public ComfyUiImage generateImage(String prompt) {
+        return generateImage(prompt, this.checkpointName);
+    }
+
+    public ComfyUiImage generateImage(String prompt, String checkpoint) {
         String clientId = UUID.randomUUID().toString();
-        ObjectNode workflow = buildWorkflow(prompt);
+        ObjectNode workflow = buildWorkflow(prompt, checkpoint);
 
         ObjectNode requestBody = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
         requestBody.set("prompt", workflow);
@@ -90,14 +96,35 @@ public class ComfyUiClient {
         throw new AiServiceException("ComfyUIの画像生成がタイムアウトしました(prompt_id=" + promptId + ")", null);
     }
 
-    private ObjectNode buildWorkflow(String prompt) {
+    /**
+     * ComfyUIに現在配置されているチェックポイント一覧を取得する(GET /object_info/CheckpointLoaderSimple)。
+     */
+    public List<String> listCheckpoints() {
+        try {
+            JsonNode response = client.get().uri("/object_info/CheckpointLoaderSimple").retrieve().body(JsonNode.class);
+            List<String> checkpoints = new ArrayList<>();
+            if (response == null) {
+                return checkpoints;
+            }
+            JsonNode names = response.path("CheckpointLoaderSimple")
+                    .path("input").path("required").path("ckpt_name").path(0);
+            for (JsonNode name : names) {
+                checkpoints.add(name.asText());
+            }
+            return checkpoints;
+        } catch (RestClientResponseException e) {
+            throw new AiServiceException("ComfyUIチェックポイント一覧の取得に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+        }
+    }
+
+    private ObjectNode buildWorkflow(String prompt, String checkpoint) {
         var factory = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance;
         ObjectNode graph = factory.objectNode();
 
         ObjectNode checkpointLoader = factory.objectNode();
         checkpointLoader.put("class_type", "CheckpointLoaderSimple");
         ObjectNode checkpointInputs = checkpointLoader.putObject("inputs");
-        checkpointInputs.put("ckpt_name", checkpointName);
+        checkpointInputs.put("ckpt_name", checkpoint);
         graph.set("4", checkpointLoader);
 
         ObjectNode latentImage = factory.objectNode();
