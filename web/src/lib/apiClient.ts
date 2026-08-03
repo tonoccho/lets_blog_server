@@ -619,6 +619,45 @@ export function updateProjectGithubRepository(
   });
 }
 
+export interface PlanChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface PlanChatResponse {
+  reply: string;
+}
+
+export interface SuggestTitlesResponse {
+  titles: string[];
+}
+
+export function sendArticlePlanChatMessage(
+  projectId: number,
+  data: { history: PlanChatMessage[]; message: string },
+  actor?: ActorInfo
+): Promise<PlanChatResponse> {
+  return apiFetch<PlanChatResponse>(`/api/projects/${projectId}/article-plan/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+    actor,
+  });
+}
+
+export function suggestArticlePlanTitles(
+  projectId: number,
+  data: { history: PlanChatMessage[] },
+  actor?: ActorInfo
+): Promise<SuggestTitlesResponse> {
+  return apiFetch<SuggestTitlesResponse>(`/api/projects/${projectId}/article-plan/suggest-titles`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+    actor,
+  });
+}
+
 export function updateMasterEnvironment(
   id: number,
   masterEnvironment: "test" | "production",
