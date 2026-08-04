@@ -60,10 +60,12 @@ services:
       WORDPRESS_PROVISION_BASE_URL: http://wordpress:9000
       WP_PROVISION_TOKEN: ${WP_PROVISION_TOKEN}
       BULK_UPLOAD_STORAGE_PATH: /app/data/bulk-uploads
+      GENERATED_IMAGES_STORAGE_PATH: /app/data/generated-images
       VSCODE_EXTENSION_SOURCE_PATH: /app/extension-src
       VSCODE_EXTENSION_BUILD_PATH: /app/extension-build
     volumes:
       - bulk_upload_files:/app/data/bulk-uploads
+      - generated_images:/app/data/generated-images
       - comfyui_models:/comfyui-models
       # システム画面からのVSCode拡張機能ダウンロード用。オンデマンドビルドの作業ディレクトリは
       # コンテナ内の書き込み可能な場所(/app/extension-build)を使うため、ソースは読み取り専用でマウントする。
@@ -188,3 +190,4 @@ volumes:
   comfyui_output:
   wordpress_sites:
   bulk_upload_files:
+  generated_images:
