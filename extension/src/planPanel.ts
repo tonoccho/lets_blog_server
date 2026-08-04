@@ -52,6 +52,12 @@ export class PlanPanel {
         case 'sendChat':
           await this._handleSendChat(message as unknown as SendChatMessage);
           break;
+        case 'suggestStructure':
+          await this._handleSuggestStructure(message as unknown as SuggestStructureMessage);
+          break;
+        case 'acceptStructure':
+          await this._handleAcceptStructure(message as unknown as AcceptStructureMessage);
+          break;
         case 'suggestMetadata':
           await this._handleSuggestMetadata(message as unknown as SuggestMetadataMessage);
           break;
@@ -92,6 +98,25 @@ export class PlanPanel {
       githubIssueNumber: message.issueNumber,
     });
     this._sendMessage('chatResponse', response);
+  }
+
+  private async _handleSuggestStructure(message: SuggestStructureMessage): Promise<void> {
+    const { apiKey, actor, projectId } = await this._requireContext();
+    const suggestion = await api.suggestArticleStructure(getServerUrl(), apiKey, actor, projectId, message.history);
+    this._sendMessage('structureSuggestion', suggestion);
+  }
+
+  private async _handleAcceptStructure(message: AcceptStructureMessage): Promise<void> {
+    const { apiKey, actor, projectId } = await this._requireContext();
+    const result = await api.acceptArticleStructure(
+      getServerUrl(),
+      apiKey,
+      actor,
+      projectId,
+      message.issueNumber,
+      message.structure
+    );
+    this._sendMessage('structureAccepted', result);
   }
 
   private async _handleSuggestMetadata(message: SuggestMetadataMessage): Promise<void> {
@@ -195,6 +220,13 @@ export class PlanPanel {
   .form-group label { display: block; margin-bottom: 4px; font-weight: bold; }
   .form-group input { width: 100%; padding: 6px; }
   .button-group { display: flex; gap: 10px; }
+  .structure-box { border: 1px solid var(--vscode-panel-border, #ccc); padding: 10px; }
+  .structure-box textarea {
+    width: 100%; min-height: 200px; padding: 8px; font-family: var(--vscode-editor-font-family, monospace);
+    background: var(--vscode-input-background, #fff); color: var(--vscode-input-foreground, inherit);
+  }
+  .hint { opacity: 0.7; font-size: 0.9em; margin-bottom: 8px; }
+  .accepted-badge { color: #388e3c; margin-bottom: 8px; }
   #message.error { color: var(--vscode-errorForeground, #d32f2f); }
   #message.success { color: #388e3c; }
 </style>
@@ -216,6 +248,19 @@ export class PlanPanel {
       </div>
     </div>
     <button id="suggestButton" class="primary" style="margin-top: 10px;">メタデータを提案</button>
+  </div>
+
+  <div class="section" id="structureSection" style="display: none;">
+    <div class="section-title">記事構成の提案(Issueへ反映)</div>
+    <div class="structure-box">
+      <div class="hint">チャットの内容から見出し構成を提案し、承認するとGitHub Issueの本文に書き込まれます。スキャフォールド生成時にこの内容が記事本文として使われます。</div>
+      <button id="suggestStructureButton" class="primary" style="margin-bottom: 10px;">構成案を生成</button>
+      <div id="structureAcceptedBadge" class="accepted-badge" style="display: none;"></div>
+      <textarea id="structureTextarea" placeholder="構成案はまだありません。「構成案を生成」を押してください。"></textarea>
+      <div class="button-group" style="margin-top: 10px;">
+        <button id="acceptStructureButton">この内容でIssueを更新</button>
+      </div>
+    </div>
   </div>
 
   <div class="section" id="metadataSection" style="display: none;">
@@ -268,6 +313,9 @@ export class PlanPanel {
     document.querySelectorAll('.issue-item').forEach((n) => n.classList.remove('selected'));
     el.classList.add('selected');
     document.getElementById('chatSection').style.display = 'block';
+    document.getElementById('structureSection').style.display = 'block';
+    document.getElementById('structureTextarea').value = '';
+    document.getElementById('structureAcceptedBadge').style.display = 'none';
     document.getElementById('metadataSection').style.display = 'none';
   }
 
@@ -288,6 +336,23 @@ export class PlanPanel {
     addMessage('user', text);
     input.value = '';
     post('sendChat', { history: chatHistory.slice(0, -1), message: text, sessionId, issueNumber: selectedIssue.number });
+  }
+
+  function requestStructureSuggestion() {
+    if (!selectedIssue || chatHistory.length === 0) {
+      showMessage('先にチャットで壁打ちしてください。', 'error');
+      return;
+    }
+    post('suggestStructure', { history: chatHistory });
+  }
+
+  function acceptStructure() {
+    const structure = document.getElementById('structureTextarea').value.trim();
+    if (!selectedIssue || !structure) {
+      showMessage('構成案が空です。', 'error');
+      return;
+    }
+    post('acceptStructure', { issueNumber: selectedIssue.number, structure });
   }
 
   function requestMetadataSuggestion() {
@@ -325,6 +390,8 @@ export class PlanPanel {
   document.getElementById('chatInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') sendMessage();
   });
+  document.getElementById('suggestStructureButton').addEventListener('click', requestStructureSuggestion);
+  document.getElementById('acceptStructureButton').addEventListener('click', acceptStructure);
   document.getElementById('suggestButton').addEventListener('click', requestMetadataSuggestion);
   document.getElementById('approveButton').addEventListener('click', approveMetadata);
 
@@ -337,6 +404,16 @@ export class PlanPanel {
       case 'chatResponse':
         addMessage('assistant', payload.reply);
         sessionId = payload.sessionId;
+        break;
+      case 'structureSuggestion':
+        document.getElementById('structureTextarea').value = payload.structure || '';
+        document.getElementById('structureAcceptedBadge').style.display = 'none';
+        break;
+      case 'structureAccepted':
+        const badge = document.getElementById('structureAcceptedBadge');
+        badge.textContent = 'Issue #' + payload.issueNumber + ' の本文を更新しました。';
+        badge.style.display = 'block';
+        showMessage('記事構成をIssueへ反映しました。', 'success');
         break;
       case 'metadataSuggestion':
         showMetadataForm(payload);
@@ -364,6 +441,17 @@ interface SendChatMessage {
   message: string;
   sessionId?: number;
   issueNumber: number;
+}
+
+interface SuggestStructureMessage {
+  command: 'suggestStructure';
+  history: api.PlanChatMessage[];
+}
+
+interface AcceptStructureMessage {
+  command: 'acceptStructure';
+  issueNumber: number;
+  structure: string;
 }
 
 interface SuggestMetadataMessage {

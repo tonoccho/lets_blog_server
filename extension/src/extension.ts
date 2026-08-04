@@ -9,13 +9,13 @@ import { PreviewPanel } from './previewPanel';
 
 export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
+    vscode.commands.registerCommand('letsBlog.login', () => commandLogin(context)),
     vscode.commands.registerCommand('letsBlog.setApiKey', () => commandSetApiKey(context)),
     vscode.commands.registerCommand('letsBlog.selectSite', () => commandSelectSite(context)),
     vscode.commands.registerCommand('letsBlog.publish', () => commandPublish(context)),
     vscode.commands.registerCommand('letsBlog.askAi', () => commandAskAi(context)),
     vscode.commands.registerCommand('letsBlog.suggestTags', () => commandSuggestTags(context)),
     vscode.commands.registerCommand('letsBlog.generateImage', () => commandGenerateImage(context)),
-    vscode.commands.registerCommand('letsBlog.selectActor', () => commandSelectActor(context)),
     vscode.commands.registerCommand('letsBlog.selectProject', () => commandSelectProject(context)),
     vscode.commands.registerCommand('letsBlog.planArticle', () => commandPlanArticle(context)),
     vscode.commands.registerCommand('letsBlog.publishToTestEnvironment', () => commandPublishToTestEnvironment(context)),
@@ -43,6 +43,46 @@ async function replaceDocumentText(editor: vscode.TextEditor, newText: string): 
   );
   await editor.edit((builder) => builder.replace(fullRange, newText));
   await editor.document.save();
+}
+
+/**
+ * メールアドレス/パスワード(必要なら2FAコード)でLet's Blogにログインし、
+ * 発行されたAPIキーをSecretStorageに保存する。ログインしたユーザーがそのままActorになる
+ * (以前の「Select User」QuickPickによるActor選択は廃止し、ログインに一本化した)。
+ */
+async function commandLogin(context: vscode.ExtensionContext): Promise<void> {
+  const email = await vscode.window.showInputBox({ prompt: 'メールアドレス', ignoreFocusOut: true });
+  if (!email) return;
+
+  const password = await vscode.window.showInputBox({
+    prompt: 'パスワード',
+    password: true,
+    ignoreFocusOut: true,
+  });
+  if (!password) return;
+
+  try {
+    let result = await api.login(getServerUrl(), email, password);
+
+    if (result.twoFactorRequired) {
+      const code = await vscode.window.showInputBox({
+        prompt: '2段階認証コードを入力してください',
+        ignoreFocusOut: true,
+      });
+      if (!code) return;
+      result = await api.verifyTotpLogin(getServerUrl(), result.user.id, code);
+    }
+
+    if (!result.apiKey) {
+      throw new Error('APIキーの取得に失敗しました。');
+    }
+
+    await setApiKey(context, result.apiKey);
+    await setActor(context, result.user);
+    vscode.window.showInformationMessage(`'${result.user.email}' としてログインしました。`);
+  } catch (err) {
+    vscode.window.showErrorMessage(`ログインに失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+  }
 }
 
 async function commandSetApiKey(context: vscode.ExtensionContext): Promise<void> {
@@ -287,38 +327,10 @@ async function commandGenerateImage(context: vscode.ExtensionContext): Promise<v
   }
 }
 
-async function commandSelectActor(context: vscode.ExtensionContext): Promise<void> {
-  try {
-    const apiKey = await requireApiKey(context);
-    const users = await api.listUsers(getServerUrl(), apiKey);
-
-    if (users.length === 0) {
-      vscode.window.showWarningMessage('利用可能なユーザーがありません。先に管理画面でユーザーを作成してください。');
-      return;
-    }
-
-    const currentActor = await getActor(context);
-    const picked = await vscode.window.showQuickPick(
-      users.map((u) => ({
-        label: u.email,
-        description: u.role + (currentActor?.id === u.id ? ' (現在選択中)' : ''),
-        actor: u,
-      })),
-      { placeHolder: 'ユーザーを選択' }
-    );
-    if (!picked) return;
-
-    await setActor(context, picked.actor);
-    vscode.window.showInformationMessage(`ユーザーを '${picked.label}' に設定しました。`);
-  } catch (err) {
-    vscode.window.showErrorMessage(`ユーザー選択に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
-  }
-}
-
 async function commandPlanArticle(context: vscode.ExtensionContext): Promise<void> {
   const actor = await getActor(context);
   if (!actor) {
-    vscode.window.showErrorMessage('先に「Let\'s Blog: Select User」でユーザーを選択してください。');
+    vscode.window.showErrorMessage('先に「Let\'s Blog: Login」でログインしてください。');
     return;
   }
   const projectId = getProjectId(context);

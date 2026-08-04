@@ -1,8 +1,23 @@
 import fetch from 'node-fetch';
 import FormData from 'form-data';
 import * as fs from 'fs';
+import * as https from 'https';
+import * as vscode from 'vscode';
 import { LocalImageReference } from './frontMatter';
 import { Actor } from './config';
+
+/**
+ * letsBlog.serverUrlは既定でリバースプロキシ経由の自己署名証明書(https://localhost)を
+ * 指す個人用ローカル環境のため、既定で証明書検証をスキップする。実サーバーの正規証明書を
+ * 使う場合は設定`letsBlog.allowInsecureTls`をfalseにすれば通常の検証に戻る。
+ */
+function buildAgent(serverUrl: string): https.Agent | undefined {
+  if (!serverUrl.startsWith('https://')) {
+    return undefined;
+  }
+  const allowInsecureTls = vscode.workspace.getConfiguration('letsBlog').get<boolean>('allowInsecureTls', true);
+  return allowInsecureTls ? new https.Agent({ rejectUnauthorized: false }) : undefined;
+}
 
 function buildHeaders(apiKey: string, actor?: Actor, contentType?: string): Record<string, string> {
   const headers: Record<string, string> = { 'X-API-Key': apiKey };
@@ -58,6 +73,40 @@ async function assertOk(res: import('node-fetch').Response): Promise<void> {
   }
 }
 
+export interface LoginResult {
+  user: Actor;
+  twoFactorRequired: boolean;
+  apiKey: string | null;
+}
+
+/**
+ * メールアドレス/パスワードでログインする。ログイン前はAPIキーを持たないため、
+ * このエンドポイントはサーバー側でX-API-Keyヘッダなしでの呼び出しが許可されている。
+ * 2FA未設定ユーザーはこの時点でapiKeyが発行される。
+ */
+export async function login(serverUrl: string, email: string, password: string): Promise<LoginResult> {
+  const res = await fetch(`${serverUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, label: 'vscode' }),
+    agent: buildAgent(serverUrl),
+  });
+  await assertOk(res);
+  return (await res.json()) as LoginResult;
+}
+
+/** ログイン2段階目。login()でtwoFactorRequired=trueだった場合にTOTPコードを検証し、apiKeyを取得する。 */
+export async function verifyTotpLogin(serverUrl: string, userId: number, code: string): Promise<LoginResult> {
+  const res = await fetch(`${serverUrl}/api/auth/totp/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, code, label: 'vscode' }),
+    agent: buildAgent(serverUrl),
+  });
+  await assertOk(res);
+  return (await res.json()) as LoginResult;
+}
+
 export async function publishPost(
   serverUrl: string,
   apiKey: string,
@@ -87,6 +136,7 @@ export async function publishPost(
     method: 'POST',
     headers: { ...buildHeaders(apiKey, actor), ...form.getHeaders() },
     body: form,
+    agent: buildAgent(serverUrl),
   });
   await assertOk(res);
   return (await res.json()) as PublishResult;
@@ -99,6 +149,7 @@ export async function listSites(
 ): Promise<{ id: number; name: string; siteKey: string }[]> {
   const res = await fetch(`${serverUrl}/api/sites`, {
     headers: buildHeaders(apiKey, actor),
+    agent: buildAgent(serverUrl),
   });
   await assertOk(res);
   return (await res.json()) as { id: number; name: string; siteKey: string }[];
@@ -115,6 +166,7 @@ export async function askAi(
     method: 'POST',
     headers: buildHeaders(apiKey, actor, 'application/json'),
     body: JSON.stringify({ mode, text }),
+    agent: buildAgent(serverUrl),
   });
   await assertOk(res);
   return (await res.json()) as AiDraftResult;
@@ -130,6 +182,7 @@ export async function suggestTags(
     method: 'POST',
     headers: buildHeaders(apiKey, actor, 'application/json'),
     body: JSON.stringify({ text }),
+    agent: buildAgent(serverUrl),
   });
   await assertOk(res);
   return (await res.json()) as AiTagsResult;
@@ -145,6 +198,7 @@ export async function generateImage(
     method: 'POST',
     headers: buildHeaders(apiKey, actor, 'application/json'),
     body: JSON.stringify({ prompt }),
+    agent: buildAgent(serverUrl),
   });
   await assertOk(res);
   return (await res.json()) as AiImageResult;
@@ -153,6 +207,7 @@ export async function generateImage(
 export async function listUsers(serverUrl: string, apiKey: string): Promise<Actor[]> {
   const res = await fetch(`${serverUrl}/api/users`, {
     headers: buildHeaders(apiKey),
+    agent: buildAgent(serverUrl),
   });
   await assertOk(res);
   return (await res.json()) as Actor[];
@@ -168,6 +223,7 @@ export interface ProjectSummary {
 export async function listProjects(serverUrl: string, apiKey: string, actor?: Actor): Promise<ProjectSummary[]> {
   const res = await fetch(`${serverUrl}/api/projects`, {
     headers: buildHeaders(apiKey, actor),
+    agent: buildAgent(serverUrl),
   });
   await assertOk(res);
   return (await res.json()) as ProjectSummary[];
@@ -198,6 +254,7 @@ export async function getProject(
 ): Promise<ProjectDetail> {
   const res = await fetch(`${serverUrl}/api/projects/${projectId}`, {
     headers: buildHeaders(apiKey, actor),
+    agent: buildAgent(serverUrl),
   });
   await assertOk(res);
   return (await res.json()) as ProjectDetail;
@@ -221,6 +278,7 @@ export async function listUnassignedIssues(
 ): Promise<RepositoryIssue[]> {
   const res = await fetch(`${serverUrl}/api/projects/${projectId}/article-plan/issues?state=${state}`, {
     headers: buildHeaders(apiKey, actor),
+    agent: buildAgent(serverUrl),
   });
   await assertOk(res);
   const issues = (await res.json()) as RepositoryIssue[];
@@ -255,6 +313,7 @@ export async function postPlanChat(
     method: 'POST',
     headers: buildHeaders(apiKey, actor, 'application/json'),
     body: JSON.stringify(request),
+    agent: buildAgent(serverUrl),
   });
   await assertOk(res);
   return (await res.json()) as PlanChatResult;
@@ -269,7 +328,7 @@ export async function getIssueDescription(
 ): Promise<string> {
   const res = await fetch(
     `${serverUrl}/api/projects/${projectId}/article-plan/issues/${issueNumber}/description`,
-    { headers: buildHeaders(apiKey, actor) }
+    { headers: buildHeaders(apiKey, actor), agent: buildAgent(serverUrl) }
   );
   await assertOk(res);
   const data = (await res.json()) as { body: string };
@@ -294,9 +353,55 @@ export async function suggestMetadata(
     method: 'POST',
     headers: buildHeaders(apiKey, actor, 'application/json'),
     body: JSON.stringify({ history }),
+    agent: buildAgent(serverUrl),
   });
   await assertOk(res);
   return (await res.json()) as SuggestMetadataResult;
+}
+
+export interface SuggestStructureResult {
+  structure: string;
+}
+
+export async function suggestArticleStructure(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor,
+  projectId: number,
+  history: PlanChatMessage[]
+): Promise<SuggestStructureResult> {
+  const res = await fetch(`${serverUrl}/api/projects/${projectId}/article-plan/suggest-structure`, {
+    method: 'POST',
+    headers: buildHeaders(apiKey, actor, 'application/json'),
+    body: JSON.stringify({ history }),
+    agent: buildAgent(serverUrl),
+  });
+  await assertOk(res);
+  return (await res.json()) as SuggestStructureResult;
+}
+
+export interface AcceptStructureResult {
+  issueNumber: number;
+  issueUrl: string;
+}
+
+/** 提案された構成案でGitHub Issueの本文を更新する。スキャフォールド時にこの内容がarticle.mdへ反映される。 */
+export async function acceptArticleStructure(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor,
+  projectId: number,
+  issueNumber: number,
+  structure: string
+): Promise<AcceptStructureResult> {
+  const res = await fetch(`${serverUrl}/api/projects/${projectId}/article-plan/issues/${issueNumber}/accept-structure`, {
+    method: 'POST',
+    headers: buildHeaders(apiKey, actor, 'application/json'),
+    body: JSON.stringify({ structure }),
+    agent: buildAgent(serverUrl),
+  });
+  await assertOk(res);
+  return (await res.json()) as AcceptStructureResult;
 }
 
 export interface AssignIssueResult {
@@ -315,6 +420,7 @@ export async function assignIssue(
   const res = await fetch(`${serverUrl}/api/projects/${projectId}/article-plan/issues/${issueNumber}/assign`, {
     method: 'POST',
     headers: buildHeaders(apiKey, actor, 'application/json'),
+    agent: buildAgent(serverUrl),
   });
   await assertOk(res);
   return (await res.json()) as AssignIssueResult;
@@ -331,6 +437,7 @@ export async function renderPreviewHtml(
     method: 'POST',
     headers: buildHeaders(apiKey, actor, 'application/json'),
     body: JSON.stringify({ markdown }),
+    agent: buildAgent(serverUrl),
   });
   await assertOk(res);
   const data = (await res.json()) as { html: string };
@@ -351,6 +458,7 @@ export async function getMasterThemeCss(
 ): Promise<ThemeCssResult> {
   const res = await fetch(`${serverUrl}/api/projects/${projectId}/preview/theme-css`, {
     headers: buildHeaders(apiKey, actor),
+    agent: buildAgent(serverUrl),
   });
   await assertOk(res);
   return (await res.json()) as ThemeCssResult;

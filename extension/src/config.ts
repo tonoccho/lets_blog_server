@@ -52,7 +52,7 @@ export async function clearActor(context: vscode.ExtensionContext): Promise<void
 export async function requireActor(context: vscode.ExtensionContext): Promise<Actor> {
   const actor = await getActor(context);
   if (!actor) {
-    throw new Error('ユーザーが未選択です。「Let\'s Blog: Select User」を先に実行してください。');
+    throw new Error('ログインしていません。「Let\'s Blog: Login」を先に実行してください。');
   }
   return actor;
 }
