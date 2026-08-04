@@ -2,7 +2,13 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { getServerUrl, requireApiKey, setApiKey, getActor, setActor, getProjectId, setProjectId } from './config';
-import { parseArticle, stringifyArticle, extractLocalImageReferences, resolveFeaturedImageReference } from './frontMatter';
+import {
+  parseArticle,
+  stringifyArticle,
+  extractLocalImageReferences,
+  resolveFeaturedImageReference,
+  resolveExistingPostId,
+} from './frontMatter';
 import * as api from './apiClient';
 import { PlanPanel } from './planPanel';
 import { PreviewPanel } from './previewPanel';
@@ -157,6 +163,8 @@ async function publishToSite(
     }
   }
 
+  const existingPostId = resolveExistingPostId(article.data, siteKey);
+
   const result = await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'WordPressへ投稿しています…' },
     () =>
@@ -167,7 +175,7 @@ async function publishToSite(
         status: forceStatus ?? article.data.status ?? 'draft',
         categories: article.data.categories ?? [],
         tags: article.data.tags ?? [],
-        wpPostId: article.data.wp_post_id != null ? String(article.data.wp_post_id) : undefined,
+        wpPostId: existingPostId,
         markdown: article.content,
         images,
         featuredImageFilename: featuredImage?.reference,
@@ -178,6 +186,7 @@ async function publishToSite(
   article.data.wp_post_id = result.wpPostId;
   article.data.wp_post_url = result.wpPostUrl;
   article.data.status = result.status;
+  article.data.wp_post_ids = { ...(article.data.wp_post_ids ?? {}), [siteKey]: result.wpPostId };
   await replaceDocumentText(editor, stringifyArticle(article));
 
   const selection = await vscode.window.showInformationMessage(
