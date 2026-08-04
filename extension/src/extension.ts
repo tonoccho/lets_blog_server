@@ -19,7 +19,6 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.generateImage', () => commandGenerateImage(context)),
     vscode.commands.registerCommand('letsBlog.selectProject', () => commandSelectProject(context)),
     vscode.commands.registerCommand('letsBlog.planArticle', () => commandPlanArticle(context)),
-    vscode.commands.registerCommand('letsBlog.publishToTestEnvironment', () => commandPublishToTestEnvironment(context)),
     vscode.commands.registerCommand('letsBlog.previewArticle', () => commandPreviewArticle(context))
   );
 }
@@ -129,7 +128,6 @@ async function commandSelectSite(context: vscode.ExtensionContext): Promise<void
 /**
  * 指定サイトへ現在のエディタの記事を投稿する共通処理。
  * front matterのtitleチェック・画像収集・publishPost呼び出し・front matter書き戻し・完了通知を行う。
- * letsBlog.publish(front matterのsiteを使用)とletsBlog.publishToTestEnvironment(test環境サイトを使用)から共有される。
  */
 async function publishToSite(context: vscode.ExtensionContext, editor: vscode.TextEditor, siteKey: string): Promise<void> {
   const apiKey = await requireApiKey(context);
@@ -186,23 +184,29 @@ async function publishToSite(context: vscode.ExtensionContext, editor: vscode.Te
   }
 }
 
-async function commandPublish(context: vscode.ExtensionContext): Promise<void> {
-  const editor = getActiveMarkdownEditor();
-  if (!editor) return;
-
-  try {
-    const article = parseArticle(editor.document.getText());
-    if (!article.data.site) {
-      vscode.window.showErrorMessage("front matterに 'site' が未設定です。先に「Let's Blog: Select Site」を実行してください。");
-      return;
-    }
-    await publishToSite(context, editor, article.data.site);
-  } catch (err) {
-    vscode.window.showErrorMessage(`投稿に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
-  }
+interface EnvironmentOption extends vscode.QuickPickItem {
+  siteKey: string;
 }
 
-async function commandPublishToTestEnvironment(context: vscode.ExtensionContext): Promise<void> {
+/**
+ * プロジェクトに紐づくローカル/テスト/本番の各サイトをQuickPickの選択肢へ変換する。
+ * 未設定の環境(サイト未紐づけ)は選択肢から除外する。
+ */
+function buildEnvironmentOptions(project: api.ProjectDetail): EnvironmentOption[] {
+  const options: EnvironmentOption[] = [];
+  if (project.localSite) {
+    options.push({ label: 'ローカル', description: project.localSite.name, siteKey: project.localSite.siteKey });
+  }
+  if (project.testSite) {
+    options.push({ label: 'テスト', description: project.testSite.name, siteKey: project.testSite.siteKey });
+  }
+  if (project.productionSite) {
+    options.push({ label: '本番', description: project.productionSite.name, siteKey: project.productionSite.siteKey });
+  }
+  return options;
+}
+
+async function commandPublish(context: vscode.ExtensionContext): Promise<void> {
   const editor = getActiveMarkdownEditor();
   if (!editor) return;
 
@@ -219,14 +223,19 @@ async function commandPublishToTestEnvironment(context: vscode.ExtensionContext)
     const apiKey = await requireApiKey(context);
     const actor = await getActor(context);
     const project = await api.getProject(getServerUrl(), apiKey, actor, projectId);
-    if (!project.testSite) {
-      vscode.window.showErrorMessage(`プロジェクト '${project.name}' にはtest環境サイトが紐づいていません。`);
+
+    const options = buildEnvironmentOptions(project);
+    if (options.length === 0) {
+      vscode.window.showErrorMessage(`プロジェクト '${project.name}' には投稿先サイトが紐づいていません。`);
       return;
     }
 
-    await publishToSite(context, editor, project.testSite.siteKey);
+    const picked = await vscode.window.showQuickPick(options, { placeHolder: '投稿先の環境を選択' });
+    if (!picked) return;
+
+    await publishToSite(context, editor, picked.siteKey);
   } catch (err) {
-    vscode.window.showErrorMessage(`test環境への投稿に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+    vscode.window.showErrorMessage(`投稿に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
   }
 }
 
