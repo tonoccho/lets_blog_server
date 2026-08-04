@@ -129,7 +129,12 @@ async function commandSelectSite(context: vscode.ExtensionContext): Promise<void
  * 指定サイトへ現在のエディタの記事を投稿する共通処理。
  * front matterのtitleチェック・画像収集・publishPost呼び出し・front matter書き戻し・完了通知を行う。
  */
-async function publishToSite(context: vscode.ExtensionContext, editor: vscode.TextEditor, siteKey: string): Promise<void> {
+async function publishToSite(
+  context: vscode.ExtensionContext,
+  editor: vscode.TextEditor,
+  siteKey: string,
+  forceStatus?: string
+): Promise<void> {
   const apiKey = await requireApiKey(context);
   const serverUrl = getServerUrl();
   const article = parseArticle(editor.document.getText());
@@ -159,7 +164,7 @@ async function publishToSite(context: vscode.ExtensionContext, editor: vscode.Te
         site: siteKey,
         title: article.data.title as string,
         slug: article.data.slug,
-        status: article.data.status ?? 'draft',
+        status: forceStatus ?? article.data.status ?? 'draft',
         categories: article.data.categories ?? [],
         tags: article.data.tags ?? [],
         wpPostId: article.data.wp_post_id != null ? String(article.data.wp_post_id) : undefined,
@@ -186,6 +191,8 @@ async function publishToSite(context: vscode.ExtensionContext, editor: vscode.Te
 
 interface EnvironmentOption extends vscode.QuickPickItem {
   siteKey: string;
+  /** ローカル/テストは動作確認用途のため即公開(publish)する。本番はfront matterのstatus(既定draft)を尊重する。 */
+  forceStatus?: string;
 }
 
 /**
@@ -195,10 +202,20 @@ interface EnvironmentOption extends vscode.QuickPickItem {
 function buildEnvironmentOptions(project: api.ProjectDetail): EnvironmentOption[] {
   const options: EnvironmentOption[] = [];
   if (project.localSite) {
-    options.push({ label: 'ローカル', description: project.localSite.name, siteKey: project.localSite.siteKey });
+    options.push({
+      label: 'ローカル',
+      description: project.localSite.name,
+      siteKey: project.localSite.siteKey,
+      forceStatus: 'publish',
+    });
   }
   if (project.testSite) {
-    options.push({ label: 'テスト', description: project.testSite.name, siteKey: project.testSite.siteKey });
+    options.push({
+      label: 'テスト',
+      description: project.testSite.name,
+      siteKey: project.testSite.siteKey,
+      forceStatus: 'publish',
+    });
   }
   if (project.productionSite) {
     options.push({ label: '本番', description: project.productionSite.name, siteKey: project.productionSite.siteKey });
@@ -233,7 +250,7 @@ async function commandPublish(context: vscode.ExtensionContext): Promise<void> {
     const picked = await vscode.window.showQuickPick(options, { placeHolder: '投稿先の環境を選択' });
     if (!picked) return;
 
-    await publishToSite(context, editor, picked.siteKey);
+    await publishToSite(context, editor, picked.siteKey, picked.forceStatus);
   } catch (err) {
     vscode.window.showErrorMessage(`投稿に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
   }
