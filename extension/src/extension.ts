@@ -2,10 +2,11 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { getServerUrl, requireApiKey, setApiKey, getActor, setActor, getProjectId, setProjectId } from './config';
-import { parseArticle, stringifyArticle, extractLocalImageReferences } from './frontMatter';
+import { parseArticle, stringifyArticle, extractLocalImageReferences, resolveFeaturedImageReference } from './frontMatter';
 import * as api from './apiClient';
 import { PlanPanel } from './planPanel';
 import { PreviewPanel } from './previewPanel';
+import { ImageGenPanel } from './imageGenPanel';
 
 export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
@@ -141,9 +142,17 @@ async function publishToSite(context: vscode.ExtensionContext, editor: vscode.Te
   }
 
   const baseDir = path.dirname(editor.document.uri.fsPath);
-  const images = extractLocalImageReferences(article.content, baseDir).filter((img) =>
+  const bodyImages = extractLocalImageReferences(article.content, baseDir).filter((img) =>
     fs.existsSync(img.absolutePath)
   );
+  const featuredImage = resolveFeaturedImageReference(article.data, baseDir);
+
+  const images = [...bodyImages];
+  if (featuredImage && fs.existsSync(featuredImage.absolutePath)) {
+    if (!images.find((img) => img.reference === featuredImage.reference)) {
+      images.push(featuredImage);
+    }
+  }
 
   const result = await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'WordPressへ投稿しています…' },
@@ -158,6 +167,7 @@ async function publishToSite(context: vscode.ExtensionContext, editor: vscode.Te
         wpPostId: article.data.wp_post_id != null ? String(article.data.wp_post_id) : undefined,
         markdown: article.content,
         images,
+        featuredImageFilename: featuredImage?.reference,
       })
   );
 
@@ -300,30 +310,20 @@ async function commandGenerateImage(context: vscode.ExtensionContext): Promise<v
   const editor = getActiveMarkdownEditor();
   if (!editor) return;
 
-  const prompt = await vscode.window.showInputBox({
-    prompt: '生成したい画像のプロンプトを入力してください',
-    ignoreFocusOut: true,
-  });
-  if (!prompt) return;
-
   try {
-    const apiKey = await requireApiKey(context);
-    const image = await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: '画像を生成しています…' },
-      () => api.generateImage(getServerUrl(), apiKey, prompt)
-    );
+    const article = parseArticle(editor.document.getText());
+    const projectId = (article.data.project_id as number | undefined) ?? getProjectId(context);
+    if (!projectId) {
+      vscode.window.showErrorMessage(
+        'プロジェクトが未選択です。front matterのproject_id、または「Let\'s Blog: Select Project」で設定してください。'
+      );
+      return;
+    }
 
     const baseDir = path.dirname(editor.document.uri.fsPath);
-    const destPath = path.join(baseDir, image.fileName);
-    fs.writeFileSync(destPath, Buffer.from(image.dataBase64, 'base64'));
-
-    await editor.edit((builder) => {
-      builder.insert(editor.selection.active, `![${prompt}](${image.fileName})`);
-    });
-
-    vscode.window.showInformationMessage(`画像を生成し ${image.fileName} として保存しました。`);
+    ImageGenPanel.createOrShow(context, editor, baseDir, projectId);
   } catch (err) {
-    vscode.window.showErrorMessage(`画像生成に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+    vscode.window.showErrorMessage(`画像生成パネルの起動に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
   }
 }
 

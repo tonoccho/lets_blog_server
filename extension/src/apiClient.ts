@@ -41,6 +41,7 @@ export interface PublishParams {
   wpPostId?: string | null;
   markdown: string;
   images: LocalImageReference[];
+  featuredImageFilename?: string;
 }
 
 export interface PublishResult {
@@ -59,9 +60,34 @@ export interface AiTagsResult {
 }
 
 export interface AiImageResult {
+  id: number;
   fileName: string;
   dataBase64: string;
   mimeType: string;
+}
+
+export interface ImageGenerationParams {
+  prompt: string;
+  negativePrompt?: string;
+  steps?: number;
+  cfgScale?: number;
+  samplerName?: string;
+  scheduler?: string;
+  seed?: number | null;
+  width?: number;
+  height?: number;
+  batchSize?: number;
+  checkpoint?: string;
+  loraName?: string;
+  loraWeight?: number;
+}
+
+export interface ImageGenerationOptions {
+  checkpoints: string[];
+  selectedCheckpoint: string;
+  samplers: string[];
+  schedulers: string[];
+  loras: string[];
 }
 
 class ApiError extends Error {}
@@ -131,6 +157,9 @@ export async function publishPost(
   for (const image of params.images) {
     form.append('images', fs.createReadStream(image.absolutePath), { filename: image.reference });
   }
+  if (params.featuredImageFilename) {
+    form.append('featuredImageFilename', params.featuredImageFilename);
+  }
 
   const res = await fetch(`${serverUrl}/api/posts/publish`, {
     method: 'POST',
@@ -191,17 +220,32 @@ export async function suggestTags(
 export async function generateImage(
   serverUrl: string,
   apiKey: string,
-  prompt: string,
-  actor?: Actor
+  actor: Actor | undefined,
+  projectId: number | undefined,
+  params: ImageGenerationParams
 ): Promise<AiImageResult> {
   const res = await fetch(`${serverUrl}/api/ai/image`, {
     method: 'POST',
     headers: buildHeaders(apiKey, actor, 'application/json'),
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({ projectId, ...params }),
     agent: buildAgent(serverUrl),
   });
   await assertOk(res);
   return (await res.json()) as AiImageResult;
+}
+
+export async function getImageGenerationOptions(
+  serverUrl: string,
+  apiKey: string,
+  projectId?: number
+): Promise<ImageGenerationOptions> {
+  const query = projectId ? `?projectId=${projectId}` : '';
+  const res = await fetch(`${serverUrl}/api/ai/image-options${query}`, {
+    headers: buildHeaders(apiKey),
+    agent: buildAgent(serverUrl),
+  });
+  await assertOk(res);
+  return (await res.json()) as ImageGenerationOptions;
 }
 
 export async function listUsers(serverUrl: string, apiKey: string): Promise<Actor[]> {

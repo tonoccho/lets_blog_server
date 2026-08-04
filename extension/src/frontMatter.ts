@@ -62,3 +62,21 @@ export function extractLocalImageReferences(content: string, baseDir: string): L
 
   return results;
 }
+
+/**
+ * front matterのfeatured_imageをLocalImageReferenceへ変換する。相対パス(例: "assets/eyecatch.png")のみ対象とし、
+ * 外部URL(http(s))やdata URIは投稿時のimages同梱対象にできないためundefinedを返す。
+ */
+export function resolveFeaturedImageReference(
+  data: LetsBlogFrontMatter,
+  baseDir: string
+): LocalImageReference | undefined {
+  const reference = data.featured_image;
+  if (!reference) {
+    return undefined;
+  }
+  if (/^(https?:)?\/\//.test(reference) || reference.startsWith('data:')) {
+    return undefined;
+  }
+  return { reference, absolutePath: path.resolve(baseDir, reference) };
+}
