@@ -3,6 +3,7 @@ package com.letsblog.api.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.ai.ComfyUiClient;
+import com.letsblog.api.ai.ComfyUiGenerationParams;
 import com.letsblog.api.ai.ComfyUiImage;
 import com.letsblog.api.ai.OllamaClient;
 import com.letsblog.api.domain.GenerationJob;
@@ -76,7 +77,7 @@ public class AiAssistService {
     public AiImageResponse generateImage(AiImageRequest request) {
         GenerationJob job = startJob("comfyui_image", Map.of("prompt", request.prompt()));
         try {
-            ComfyUiImage image = comfyUiClient.generateImage(request.prompt());
+            ComfyUiImage image = comfyUiClient.generateImage(ComfyUiGenerationParams.withDefaults(request.prompt()));
             String base64 = Base64.getEncoder().encodeToString(image.data());
             completeJob(job, Map.of("fileName", image.fileName()));
             return new AiImageResponse(image.fileName(), base64, image.mimeType());
