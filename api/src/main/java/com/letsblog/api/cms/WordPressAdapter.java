@@ -71,6 +71,9 @@ public class WordPressAdapter implements CmsAdapter {
             ArrayNode tags = body.putArray("tags");
             content.tagIds().forEach(id -> tags.add(Integer.parseInt(id)));
         }
+        if (content.featuredMediaId() != null) {
+            body.put("featured_media", Long.parseLong(content.featuredMediaId()));
+        }
 
         String path = existingPostId == null ? "/wp-json/wp/v2/posts" : "/wp-json/wp/v2/posts/" + existingPostId;
 

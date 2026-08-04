@@ -757,6 +757,7 @@ if ($path === '/wp-cli/post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $postSlug = (string) ($input['postSlug'] ?? '');
     $categoryIds = is_array($input['categoryIds'] ?? null) ? array_values($input['categoryIds']) : [];
     $tagIds = is_array($input['tagIds'] ?? null) ? array_values($input['tagIds']) : [];
+    $featuredMediaId = $input['featuredMediaId'] ?? null;
     $htmlContent = (string) ($input['htmlContent'] ?? '');
 
     if (!isValidSlug($slug) || $title === '' || $status === '') {
@@ -778,6 +779,9 @@ if ($path === '/wp-cli/post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if (!empty($tagIds)) {
         $subArgs[] = '--tax_input=' . json_encode(['post_tag' => array_map('intval', $tagIds)]);
+    }
+    if ($featuredMediaId !== null) {
+        $subArgs[] = '--post_thumbnail=' . $featuredMediaId;
     }
     $subArgs[] = '--porcelain';
     $subArgs[] = "--path=$sitePath";

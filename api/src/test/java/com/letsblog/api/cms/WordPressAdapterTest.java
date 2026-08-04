@@ -112,7 +112,7 @@ class WordPressAdapterTest {
 
         CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
                 "http://example.com", "admin", "apppass123");
-        PostContent content = new PostContent("Test Title", "test-slug", "<p>HTML</p>", "draft", null, null);
+        PostContent content = new PostContent("Test Title", "test-slug", "<p>HTML</p>", "draft", null, null, null);
 
         PostResult result = adapter.createOrUpdatePost(creds, content, null);
 
@@ -132,7 +132,7 @@ class WordPressAdapterTest {
 
         CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
                 "http://example.com", "admin", "apppass123");
-        PostContent content = new PostContent("Updated Title", "test-slug", "<p>Updated</p>", "publish", null, null);
+        PostContent content = new PostContent("Updated Title", "test-slug", "<p>Updated</p>", "publish", null, null, null);
 
         PostResult result = adapter.createOrUpdatePost(creds, content, "123");
 
@@ -214,7 +214,7 @@ class WordPressAdapterTest {
 
         CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
                 "http://example.com", "admin", "apppass123");
-        PostContent content = new PostContent("Test", null, "<p>Test</p>", "draft", null, null);
+        PostContent content = new PostContent("Test", null, "<p>Test</p>", "draft", null, null, null);
 
         assertThrows(CmsApiException.class,
                 () -> adapter.createOrUpdatePost(creds, content, null));

@@ -73,10 +73,11 @@ public class PostController {
             @RequestParam(value = "tags", required = false) List<String> tags,
             @RequestParam(value = "wpPostId", required = false) String wpPostId,
             @RequestParam("markdown") String markdown,
-            @RequestParam(value = "images", required = false) List<MultipartFile> images
+            @RequestParam(value = "images", required = false) List<MultipartFile> images,
+            @RequestParam(value = "featuredImageFilename", required = false) String featuredImageFilename
     ) {
         PostPublishCommand command = new PostPublishCommand(
-                site, title, slug, status, categories, tags, wpPostId, markdown, images);
+                site, title, slug, status, categories, tags, wpPostId, markdown, images, featuredImageFilename);
         return postPublishService.publish(command);
     }
 }
