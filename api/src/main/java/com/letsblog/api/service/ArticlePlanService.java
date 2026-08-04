@@ -3,11 +3,14 @@ package com.letsblog.api.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.api.ai.BraveSearchResult;
 import com.letsblog.api.ai.OllamaClient;
+import com.letsblog.api.cms.CmsAdapter;
+import com.letsblog.api.cms.CmsAdapterFactory;
+import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.domain.ArticlePlanSession;
 import com.letsblog.api.domain.GenerationJob;
 import com.letsblog.api.domain.Project;
+import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.AcceptPlanResponse;
 import com.letsblog.api.dto.AcceptPlanResultItem;
 import com.letsblog.api.dto.AcceptStructureResponse;
@@ -27,6 +30,7 @@ import com.letsblog.api.github.GithubIssueSummary;
 import com.letsblog.api.github.GithubUser;
 import com.letsblog.api.repository.ArticlePlanSessionRepository;
 import com.letsblog.api.repository.GenerationJobRepository;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -38,6 +42,7 @@ import java.util.Map;
  * 会話履歴はサーバー側で保持せず、呼び出しごとにフロントから全履歴を受け取る。
  */
 @Service
+@Slf4j
 public class ArticlePlanService {
 
     private static final String SYSTEM_PROMPT =
@@ -59,8 +64,10 @@ public class ArticlePlanService {
     private static final String METADATA_SUGGESTION_INSTRUCTION =
             "上記の会話から、記事の以下の情報をJSON形式で提案してください:\n"
             + "{\n"
-            + "  \"title\": \"記事タイトル(20-50文字程度)\",\n"
-            + "  \"slug\": \"article-slug(URLに適した英数字)\",\n"
+            + "  \"titles\": [\"タイトル案1\", \"タイトル案2\", \"タイトル案3\", \"タイトル案4\", \"タイトル案5\"]"
+            + "(20-50文字程度で、必ず5件、内容の異なる案),\n"
+            + "  \"slugs\": [\"slug-an-1\", \"slug-an-2\", \"slug-an-3\", \"slug-an-4\", \"slug-an-5\"]"
+            + "(URLに適した英数字で、必ず5件。titlesと同じ順番で、それぞれ対応するタイトルの内容に沿ったもの),\n"
             + "  \"categories\": [\"カテゴリ1\", \"カテゴリ2\"],\n"
             + "  \"tags\": [\"タグ1\", \"タグ2\", \"タグ3\"]\n"
             + "}\n\n"
@@ -75,6 +82,8 @@ public class ArticlePlanService {
     private final UserService userService;
     private final ProjectService projectService;
     private final ArticlePlanSessionRepository articlePlanSessionRepository;
+    private final SiteService siteService;
+    private final CmsAdapterFactory cmsAdapterFactory;
 
     public ArticlePlanService(
             OllamaClient ollamaClient,
@@ -85,7 +94,9 @@ public class ArticlePlanService {
             GithubClient githubClient,
             UserService userService,
             ProjectService projectService,
-            ArticlePlanSessionRepository articlePlanSessionRepository) {
+            ArticlePlanSessionRepository articlePlanSessionRepository,
+            SiteService siteService,
+            CmsAdapterFactory cmsAdapterFactory) {
         this.ollamaClient = ollamaClient;
         this.ollamaModelService = ollamaModelService;
         this.webSearchService = webSearchService;
@@ -95,6 +106,8 @@ public class ArticlePlanService {
         this.userService = userService;
         this.projectService = projectService;
         this.articlePlanSessionRepository = articlePlanSessionRepository;
+        this.siteService = siteService;
+        this.cmsAdapterFactory = cmsAdapterFactory;
     }
 
     /**
@@ -345,8 +358,21 @@ public class ArticlePlanService {
         }
     }
 
+    private static final int MAX_METADATA_ATTEMPTS = 2;
+
     /**
-     * 会話履歴から記事のtitle/slug/categories/tagsをJSONで提案する。VSCode拡張のスキャフォールド生成に使う。
+     * 会話履歴から記事のtitles/slugs(各5件)/categories/tagsをJSONで提案する。VSCode拡張の
+     * スキャフォールド生成に使う。タイトルとスラッグは1件ずつではなく5件ずつ候補を提示し、
+     * 利用者が拡張側で好きなものを選べるようにする。titlesとslugsは同じ並び順で対応させる
+     * (AIには「同じ順番で対応させる」ようプロンプトで指示するが、件数がずれる場合に備え、
+     * 拡張側では両者を独立した選択肢として扱う)。
+     * カテゴリはプロジェクトのマスター環境サイトに既に存在するもの一覧をAIへ提示し、その中から
+     * 選ばせる(取得できた場合)。AIが一覧にない名前を返してもcategoriesは既存名のみへ絞り込む
+     * (「既に作成されたものから選びたい」という利用者の意図を、プロンプトの指示だけでなく
+     * プログラム側でも保証するため)。既存カテゴリが1件も取得できない場合は、従来通りAIの自由提案を許可する。
+     * ローカルLLM(特にqwen3等の推論系モデル)は同一プロンプトでもtitles/slugs/tagsが全て空の
+     * JSONを返すことが稀にあるため、その場合は1回だけ再生成を試みる(モデル呼び出しの非決定性を
+     * 吸収するための保険であり、恒久的な失敗まで無限にリトライするものではない)。
      */
     public SuggestMetadataResponse suggestMetadata(Long projectId, List<PlanChatMessage> history) {
         GenerationJob job = startJob("plan_suggest_metadata", Map.of(
@@ -354,9 +380,24 @@ public class ArticlePlanService {
                 "historyLength", String.valueOf(history.size())
         ));
         try {
+            List<String> existingCategories = listExistingCategories(projectId);
             String model = ollamaModelService.getSelectedModel(projectId);
-            String raw = ollamaClient.generate(buildMetadataSuggestionPrompt(history), model);
-            SuggestMetadataResponse response = parseMetadata(raw);
+            String prompt = buildMetadataSuggestionPrompt(history, existingCategories);
+
+            String raw = "";
+            SuggestMetadataResponse response = new SuggestMetadataResponse(List.of(), List.of(), List.of(), List.of());
+            for (int attempt = 1; attempt <= MAX_METADATA_ATTEMPTS; attempt++) {
+                raw = ollamaClient.generate(prompt, model);
+                response = parseMetadata(raw);
+                if (isUsableMetadata(response)) {
+                    break;
+                }
+                log.warn("メタデータ提案がtitles/slugs/tags全て空でした(試行{}/{})。再試行します。", attempt, MAX_METADATA_ATTEMPTS);
+            }
+
+            if (!existingCategories.isEmpty()) {
+                response = filterToExistingCategories(response, existingCategories);
+            }
             completeJob(job, Map.of("raw", raw));
             return response;
         } catch (RuntimeException e) {
@@ -365,11 +406,49 @@ public class ArticlePlanService {
         }
     }
 
-    private String buildMetadataSuggestionPrompt(List<PlanChatMessage> history) {
+    private boolean isUsableMetadata(SuggestMetadataResponse response) {
+        return !response.titles().isEmpty() || !response.slugs().isEmpty() || !response.tags().isEmpty();
+    }
+
+    /**
+     * プロジェクトのマスター環境サイトに既に存在するカテゴリ名一覧を取得する。
+     * サイト未紐付け・非WordPress・取得失敗時は空リストを返す(例外は投げない。
+     * カテゴリ提示はメタデータ提案の主目的ではなく補助情報のため)。
+     */
+    public List<String> listExistingCategories(Long projectId) {
+        try {
+            Project project = projectService.getProjectEntity(projectId);
+            Site site = projectService.resolveMasterSite(project);
+            if (site == null) {
+                return List.of();
+            }
+            CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
+            CmsAdapter cmsAdapter = cmsAdapterFactory.resolve(credentials.cmsType());
+            return cmsAdapter.listCategoryNames(credentials);
+        } catch (RuntimeException e) {
+            return List.of();
+        }
+    }
+
+    private SuggestMetadataResponse filterToExistingCategories(
+            SuggestMetadataResponse response, List<String> existingCategories) {
+        List<String> filtered = response.categories().stream()
+                .filter(category -> existingCategories.stream().anyMatch(existing -> existing.equalsIgnoreCase(category)))
+                .toList();
+        return new SuggestMetadataResponse(response.titles(), response.slugs(), filtered, response.tags());
+    }
+
+    private String buildMetadataSuggestionPrompt(List<PlanChatMessage> history, List<String> existingCategories) {
         StringBuilder sb = new StringBuilder();
         sb.append("System: ").append(SYSTEM_PROMPT).append("\n\n");
         appendHistory(sb, history);
         sb.append("\n").append(METADATA_SUGGESTION_INSTRUCTION).append("\n");
+        if (!existingCategories.isEmpty()) {
+            sb.append("\ncategoriesは新しい名前を作らず、必ず次の既存カテゴリ一覧の中からこの記事に合うものだけを選んでください"
+                            + "(合うものがなければ空配列にしてください): ")
+                    .append(String.join(", ", existingCategories))
+                    .append("\n");
+        }
         return sb.toString();
     }
 
@@ -377,13 +456,13 @@ public class ArticlePlanService {
         String jsonPart = extractJsonObject(raw);
         try {
             JsonNode node = objectMapper.readTree(jsonPart);
-            String title = node.path("title").asText("");
-            String slug = node.path("slug").asText("");
+            List<String> titles = parseStringArray(node.get("titles"));
+            List<String> slugs = parseStringArray(node.get("slugs"));
             List<String> categories = parseStringArray(node.get("categories"));
             List<String> tags = parseStringArray(node.get("tags"));
-            return new SuggestMetadataResponse(title, slug, categories, tags);
+            return new SuggestMetadataResponse(titles, slugs, categories, tags);
         } catch (Exception e) {
-            return new SuggestMetadataResponse("", "", List.of(), List.of());
+            return new SuggestMetadataResponse(List.of(), List.of(), List.of(), List.of());
         }
     }
 
@@ -421,16 +500,7 @@ public class ArticlePlanService {
     }
 
     private void appendSearchResults(StringBuilder sb, WebSearchOutcome searchOutcome) {
-        if (!searchOutcome.succeeded() || searchOutcome.results().isEmpty()) {
-            return;
-        }
-        sb.append("参考のWeb検索結果:\n");
-        int i = 1;
-        for (BraveSearchResult result : searchOutcome.results()) {
-            sb.append(i++).append(". ").append(result.title()).append(" - ").append(result.description())
-                    .append(" (").append(result.url()).append(")\n");
-        }
-        sb.append("\n");
+        sb.append(WebSearchService.formatForPrompt(searchOutcome));
     }
 
     private String buildTitleSuggestionPrompt(List<PlanChatMessage> history) {

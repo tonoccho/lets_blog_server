@@ -50,8 +50,28 @@ export interface PublishResult {
   status: string;
 }
 
+export interface SourceReference {
+  title: string;
+  url: string;
+}
+
 export interface AiDraftResult {
   result: string;
+  sources: SourceReference[];
+  searchNote: string | null;
+}
+
+export interface AiSectionParams {
+  mode: 'body' | 'lead';
+  heading: string;
+  precedingContext?: string;
+  articleTitle?: string;
+}
+
+export interface AiSectionResult {
+  result: string;
+  sources: SourceReference[];
+  searchNote: string | null;
 }
 
 export interface AiTagsResult {
@@ -155,7 +175,10 @@ export async function publishPost(
   }
   form.append('markdown', params.markdown);
   for (const image of params.images) {
+    // filenameはコンテナ/サーバー側のマルチパート処理でパス区切りがベース名のみに変換される
+    // ことがあり往復しないため、Markdown中の実際の参照文字列はimageReferencesで別途明示的に送る。
     form.append('images', fs.createReadStream(image.absolutePath), { filename: image.reference });
+    form.append('imageReferences', image.reference);
   }
   if (params.featuredImageFilename) {
     form.append('featuredImageFilename', params.featuredImageFilename);
@@ -169,6 +192,25 @@ export async function publishPost(
   });
   await assertOk(res);
   return (await res.json()) as PublishResult;
+}
+
+/** 投稿を削除する(WordPressの場合、既定でゴミ箱へ移動する。完全削除は行わない)。 */
+export async function deletePost(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  site: string,
+  wpPostId: string
+): Promise<void> {
+  const res = await fetch(
+    `${serverUrl}/api/posts/${encodeURIComponent(site)}/${encodeURIComponent(wpPostId)}`,
+    {
+      method: 'DELETE',
+      headers: buildHeaders(apiKey, actor),
+      agent: buildAgent(serverUrl),
+    }
+  );
+  await assertOk(res);
 }
 
 export async function listSites(
@@ -199,6 +241,22 @@ export async function askAi(
   });
   await assertOk(res);
   return (await res.json()) as AiDraftResult;
+}
+
+export async function generateSection(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  params: AiSectionParams
+): Promise<AiSectionResult> {
+  const res = await fetch(`${serverUrl}/api/ai/section`, {
+    method: 'POST',
+    headers: buildHeaders(apiKey, actor, 'application/json'),
+    body: JSON.stringify(params),
+    agent: buildAgent(serverUrl),
+  });
+  await assertOk(res);
+  return (await res.json()) as AiSectionResult;
 }
 
 export async function suggestTags(
@@ -380,10 +438,25 @@ export async function getIssueDescription(
 }
 
 export interface SuggestMetadataResult {
-  title: string;
-  slug: string;
+  titles: string[];
+  slugs: string[];
   categories: string[];
   tags: string[];
+}
+
+/** プロジェクトのマスター環境サイトに既に存在するカテゴリ名一覧。サイト未紐付け等の場合は空配列。 */
+export async function listExistingCategories(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor,
+  projectId: number
+): Promise<string[]> {
+  const res = await fetch(`${serverUrl}/api/projects/${projectId}/article-plan/categories`, {
+    headers: buildHeaders(apiKey, actor),
+    agent: buildAgent(serverUrl),
+  });
+  await assertOk(res);
+  return (await res.json()) as string[];
 }
 
 export async function suggestMetadata(

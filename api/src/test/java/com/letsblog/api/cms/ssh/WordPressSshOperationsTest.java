@@ -264,7 +264,7 @@ class WordPressSshOperationsTest {
     }
 
     private PostContent postContent() {
-        return new PostContent("Title", "my-slug", "<p>Hello</p>", "publish", List.of("5"), List.of("7"), null);
+        return new PostContent("Title", "my-slug", "<p>Hello</p>", "publish", List.of("5"), List.of("7"), null, null);
     }
 
     @Test
@@ -287,6 +287,68 @@ class WordPressSshOperationsTest {
         assertEquals(true, createCommand.contains("--post_category='5'"));
         assertEquals(true, createCommand.contains("post_tag"));
         assertEquals("<p>Hello</p>", new String(stdinCaptor.getAllValues().get(0), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void createOrUpdatePost_authorId指定時はpost_authorを付与する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), notNull())).thenReturn(ok("99\n"));
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"guid\":\"https://example.com/?p=99\",\"post_status\":\"publish\"}"));
+        PostContent contentWithAuthor = new PostContent(
+                "Title", "my-slug", "<p>Hello</p>", "publish", List.of("5"), List.of("7"), null, "42");
+
+        operations.createOrUpdatePost(creds(), contentWithAuthor, null);
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), any());
+        assertEquals(true, commandCaptor.getAllValues().get(0).contains("--post_author='42'"));
+    }
+
+    @Test
+    void createOrUpdatePost_featuredMediaId指定時はpost_thumbnailではなくpost_meta_updateでアイキャッチを設定する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), notNull())).thenReturn(ok("99\n"));
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("")) // post meta update
+                .thenReturn(ok("{\"guid\":\"https://example.com/?p=99\",\"post_status\":\"publish\"}")); // post get
+        PostContent contentWithFeaturedMedia = new PostContent(
+                "Title", "my-slug", "<p>Hello</p>", "publish", List.of("5"), List.of("7"), "55", null);
+
+        operations.createOrUpdatePost(creds(), contentWithFeaturedMedia, null);
+
+        ArgumentCaptor<String> createCommandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(1)).exec(any(SshConnectionParams.class), createCommandCaptor.capture(), notNull());
+        // wp-cliの post create/update は --post_thumbnail を認識しないため付与しない
+        assertEquals(false, createCommandCaptor.getValue().contains("post_thumbnail"));
+
+        ArgumentCaptor<String> readonlyCommandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), readonlyCommandCaptor.capture(), isNull());
+        assertEquals(true, readonlyCommandCaptor.getAllValues().get(0).contains("post meta update 99 _thumbnail_id '55'"));
+    }
+
+    @Test
+    void createOrUpdatePost_アイキャッチ設定コマンドが失敗したら例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), notNull())).thenReturn(ok("99\n"));
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("meta update failed"));
+        PostContent contentWithFeaturedMedia = new PostContent(
+                "Title", "my-slug", "<p>Hello</p>", "publish", List.of("5"), List.of("7"), "55", null);
+
+        assertThrows(SshOperationException.class,
+                () -> operations.createOrUpdatePost(creds(), contentWithFeaturedMedia, null));
+    }
+
+    @Test
+    void findAuthorIdByEmail_見つかればIDを返す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("[{\"ID\":\"11\"}]"));
+
+        assertEquals("11", operations.findAuthorIdByEmail(creds(), "author@example.com").orElse(null));
+    }
+
+    @Test
+    void findAuthorIdByEmail_見つからなければ空を返す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok("[]"));
+
+        assertEquals(true, operations.findAuthorIdByEmail(creds(), "unknown@example.com").isEmpty());
     }
 
     @Test
@@ -318,6 +380,25 @@ class WordPressSshOperationsTest {
 
         assertThrows(SshOperationException.class,
                 () -> operations.createOrUpdatePost(creds(), postContent(), null));
+    }
+
+    @Test
+    void deletePost_forceなしでpost_deleteを実行する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok(""));
+
+        operations.deletePost(creds(), "99");
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getValue().contains("post delete 99 --yes"));
+        assertEquals(false, commandCaptor.getValue().contains("--force"));
+    }
+
+    @Test
+    void deletePost_失敗したら例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("post not found"));
+
+        assertThrows(SshOperationException.class, () -> operations.deletePost(creds(), "99"));
     }
 
     @Test

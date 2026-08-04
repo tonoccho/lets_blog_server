@@ -59,6 +59,11 @@ services:
       PLANTUML_BASE_URL: http://plantuml:8080
       WORDPRESS_PROVISION_BASE_URL: http://wordpress:9000
       WP_PROVISION_TOKEN: ${WP_PROVISION_TOKEN}
+      BACKUP_MYSQL_HOST: mysql
+      BACKUP_MYSQL_PORT: "3306"
+      BACKUP_MYSQL_DATABASE: ${MYSQL_DATABASE}
+      BACKUP_MYSQL_USER: ${MYSQL_USER}
+      BACKUP_MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       BULK_UPLOAD_STORAGE_PATH: /app/data/bulk-uploads
       GENERATED_IMAGES_STORAGE_PATH: /app/data/generated-images
       VSCODE_EXTENSION_SOURCE_PATH: /app/extension-src

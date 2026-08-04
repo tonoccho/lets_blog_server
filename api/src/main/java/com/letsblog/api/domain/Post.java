@@ -30,6 +30,13 @@ public class Post {
     @Column(name = "local_file_hash", length = 64)
     private String localFileHash;
 
+    /**
+     * 画像参照文字列(例: "assets/eyecatch.png")→アップロード済み情報(sha256/url/mediaId)のJSONマップ。
+     * 再投稿(更新)時に同一内容の画像を毎回アップロードし直さないよう、PostPublishServiceが参照・更新する。
+     */
+    @Column(name = "uploaded_images_json", columnDefinition = "TEXT")
+    private String uploadedImagesJson;
+
     @Column(nullable = false, length = 20)
     private String status = "draft";
 

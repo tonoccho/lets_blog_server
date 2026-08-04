@@ -2,6 +2,7 @@ package com.letsblog.api.cms;
 
 import com.letsblog.api.cms.agent.WordPressAgentOperations;
 import com.letsblog.api.cms.ssh.WordPressSshOperations;
+import com.letsblog.api.provisioning.WordPressBulkManagementClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -18,6 +19,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.http.HttpMethod.DELETE;
 import static org.springframework.http.HttpMethod.POST;
 import static org.springframework.http.HttpMethod.PUT;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
@@ -39,6 +41,7 @@ class WordPressAdapterTest {
     private MockRestServiceServer server;
     private WordPressSshOperations sshOperations;
     private WordPressAgentOperations agentOperations;
+    private WordPressBulkManagementClient bulkManagementClient;
 
     @BeforeEach
     void setUp() {
@@ -46,7 +49,8 @@ class WordPressAdapterTest {
         server = MockRestServiceServer.bindTo(restClientBuilder).build();
         sshOperations = mock(WordPressSshOperations.class);
         agentOperations = mock(WordPressAgentOperations.class);
-        adapter = new WordPressAdapter(restClientBuilder, sshOperations, agentOperations);
+        bulkManagementClient = mock(WordPressBulkManagementClient.class);
+        adapter = new WordPressAdapter(restClientBuilder, sshOperations, agentOperations, bulkManagementClient);
     }
 
     private CmsCredentials.WordPressCredentials sshCredentials() {
@@ -112,7 +116,7 @@ class WordPressAdapterTest {
 
         CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
                 "http://example.com", "admin", "apppass123");
-        PostContent content = new PostContent("Test Title", "test-slug", "<p>HTML</p>", "draft", null, null, null);
+        PostContent content = new PostContent("Test Title", "test-slug", "<p>HTML</p>", "draft", null, null, null, null);
 
         PostResult result = adapter.createOrUpdatePost(creds, content, null);
 
@@ -132,7 +136,7 @@ class WordPressAdapterTest {
 
         CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
                 "http://example.com", "admin", "apppass123");
-        PostContent content = new PostContent("Updated Title", "test-slug", "<p>Updated</p>", "publish", null, null, null);
+        PostContent content = new PostContent("Updated Title", "test-slug", "<p>Updated</p>", "publish", null, null, null, null);
 
         PostResult result = adapter.createOrUpdatePost(creds, content, "123");
 
@@ -208,13 +212,153 @@ class WordPressAdapterTest {
     }
 
     @Test
+    void testCreatePost_authorId指定時はauthorフィールドを送信する() {
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/posts"))
+                .andExpect(method(POST))
+                .andExpect(content().string(containsString("\"author\":42")))
+                .andRespond(withSuccess(
+                        "{\"id\":123,\"link\":\"http://example.com/posts/test\",\"status\":\"draft\"}",
+                        MediaType.APPLICATION_JSON));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+        PostContent content = new PostContent("Test Title", "test-slug", "<p>HTML</p>", "draft", null, null, null, "42");
+
+        adapter.createOrUpdatePost(creds, content, null);
+
+        server.verify();
+    }
+
+    @Test
+    void testFindAuthorIdByEmail_RESTトランスポートは検索結果のIDを返す() {
+        server.expect(requestTo(containsString("/wp-json/wp/v2/users?search=")))
+                .andRespond(withSuccess("[{\"id\":7,\"email\":\"author@example.com\"}]", MediaType.APPLICATION_JSON));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        java.util.Optional<String> authorId = adapter.findAuthorIdByEmail(creds, "author@example.com");
+
+        assertEquals(true, authorId.isPresent());
+        assertEquals("7", authorId.get());
+        server.verify();
+    }
+
+    @Test
+    void testFindAuthorIdByEmail_見つからなければ空を返す() {
+        server.expect(requestTo(containsString("/wp-json/wp/v2/users?search=")))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        java.util.Optional<String> authorId = adapter.findAuthorIdByEmail(creds, "unknown@example.com");
+
+        assertEquals(true, authorId.isEmpty());
+    }
+
+    @Test
+    void testFindAuthorIdByEmail_SSHトランスポートはWordPressSshOperationsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = sshCredentials();
+        when(sshOperations.findAuthorIdByEmail(creds, "author@example.com"))
+                .thenReturn(java.util.Optional.of("9"));
+
+        java.util.Optional<String> authorId = adapter.findAuthorIdByEmail(creds, "author@example.com");
+
+        assertEquals("9", authorId.get());
+    }
+
+    @Test
+    void testListCategoryNames_RESTトランスポートは名前一覧を返す() {
+        server.expect(requestTo(containsString("/wp-json/wp/v2/categories?per_page=100")))
+                .andRespond(withSuccess(
+                        "[{\"id\":1,\"name\":\"お知らせ\"},{\"id\":2,\"name\":\"技術\"}]", MediaType.APPLICATION_JSON));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        List<String> names = adapter.listCategoryNames(creds);
+
+        assertEquals(List.of("お知らせ", "技術"), names);
+        server.verify();
+    }
+
+    @Test
+    void testListCategoryNames_取得失敗時は空リストを返す() {
+        server.expect(requestTo(containsString("/wp-json/wp/v2/categories")))
+                .andRespond(withServerError());
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        List<String> names = adapter.listCategoryNames(creds);
+
+        assertEquals(List.of(), names);
+    }
+
+    @Test
+    void testListCategoryNames_SSHトランスポートはWordPressSshOperationsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = sshCredentials();
+        when(sshOperations.listCategories(creds)).thenReturn(List.of(
+                new WordPressSshOperations.CategoryInfo("1", "お知らせ", "news", null, "")));
+
+        List<String> names = adapter.listCategoryNames(creds);
+
+        assertEquals(List.of("お知らせ"), names);
+    }
+
+    @Test
+    void testListCategoryNames_AGENTトランスポートはWordPressBulkManagementClientに委譲する() {
+        CmsCredentials.WordPressCredentials creds = agentCredentials();
+        when(bulkManagementClient.listCategories(creds.wpSlug())).thenReturn(List.of(
+                new WordPressBulkManagementClient.CategoryInfo("技術", "tech", null, "")));
+
+        List<String> names = adapter.listCategoryNames(creds);
+
+        assertEquals(List.of("技術"), names);
+    }
+
+    @Test
+    void testDeletePost_RESTトランスポートはforceパラメータなしでDELETEする() {
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/posts/123"))
+                .andExpect(method(DELETE))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        adapter.deletePost(creds, "123");
+
+        server.verify();
+    }
+
+    @Test
+    void testDeletePost_SSHトランスポートはWordPressSshOperationsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = sshCredentials();
+
+        adapter.deletePost(creds, "123");
+
+        verify(sshOperations).deletePost(creds, "123");
+    }
+
+    @Test
+    void testDeletePost_AGENTトランスポートはWordPressAgentOperationsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = agentCredentials();
+
+        adapter.deletePost(creds, "123");
+
+        verify(agentOperations).deletePost(creds, "123");
+        verify(sshOperations, never()).deletePost(any(), any());
+    }
+
+    @Test
     void testApiError() {
         server.expect(requestTo("http://example.com/wp-json/wp/v2/posts"))
                 .andRespond(withServerError());
 
         CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
                 "http://example.com", "admin", "apppass123");
-        PostContent content = new PostContent("Test", null, "<p>Test</p>", "draft", null, null, null);
+        PostContent content = new PostContent("Test", null, "<p>Test</p>", "draft", null, null, null, null);
 
         assertThrows(CmsApiException.class,
                 () -> adapter.createOrUpdatePost(creds, content, null));

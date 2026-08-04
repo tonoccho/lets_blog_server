@@ -72,6 +72,12 @@ class ArticlePlanServiceTest {
     @Mock
     private ArticlePlanSessionRepository articlePlanSessionRepository;
 
+    @Mock
+    private SiteService siteService;
+
+    @Mock
+    private com.letsblog.api.cms.CmsAdapterFactory cmsAdapterFactory;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     // GenerationJob はミュータブルなため、save() 呼び出しの都度その時点のstatusをスナップショットして記録する
@@ -95,7 +101,7 @@ class ArticlePlanServiceTest {
                 .thenReturn(WebSearchOutcome.failure("テストではWeb検索を行わない"));
         return new ArticlePlanService(
                 ollamaClient, ollamaModelService, webSearchService, generationJobRepository, objectMapper,
-                githubClient, userService, projectService, articlePlanSessionRepository);
+                githubClient, userService, projectService, articlePlanSessionRepository, siteService, cmsAdapterFactory);
     }
 
     private Project projectWithRepository(String githubRepository) {
@@ -534,27 +540,85 @@ class ArticlePlanServiceTest {
     void suggestMetadata_JSONオブジェクトを正しくパースする() {
         ArticlePlanService service = service();
         when(ollamaClient.generate(anyString(), anyString())).thenReturn(
-                "{\"title\":\"タイトル案\",\"slug\":\"article-slug\","
+                "{\"titles\":[\"タイトル案1\",\"タイトル案2\"],\"slugs\":[\"article-slug-1\",\"article-slug-2\"],"
                 + "\"categories\":[\"カテゴリ1\"],\"tags\":[\"tag1\",\"tag2\"]}");
 
         SuggestMetadataResponse response = service.suggestMetadata(1L, List.of());
 
-        assertEquals("タイトル案", response.title());
-        assertEquals("article-slug", response.slug());
+        assertEquals(List.of("タイトル案1", "タイトル案2"), response.titles());
+        assertEquals(List.of("article-slug-1", "article-slug-2"), response.slugs());
         assertEquals(List.of("カテゴリ1"), response.categories());
         assertEquals(List.of("tag1", "tag2"), response.tags());
+    }
+
+    @Test
+    void suggestMetadata_全て空のJSONが返った場合は1回だけ再試行する() {
+        ArticlePlanService service = service();
+        when(ollamaClient.generate(anyString(), anyString()))
+                .thenReturn("{\"titles\":[],\"slugs\":[],\"categories\":[],\"tags\":[]}")
+                .thenReturn("{\"titles\":[\"タイトル案\"],\"slugs\":[\"article-slug\"],\"categories\":[],\"tags\":[\"tag1\"]}");
+
+        SuggestMetadataResponse response = service.suggestMetadata(1L, List.of());
+
+        assertEquals(List.of("タイトル案"), response.titles());
+        assertEquals(List.of("article-slug"), response.slugs());
+        assertEquals(List.of("tag1"), response.tags());
+        verify(ollamaClient, org.mockito.Mockito.times(2)).generate(anyString(), anyString());
+    }
+
+    @Test
+    void suggestMetadata_2回とも空のJSONなら空のまま返し3回目は試行しない() {
+        ArticlePlanService service = service();
+        when(ollamaClient.generate(anyString(), anyString()))
+                .thenReturn("{\"titles\":[],\"slugs\":[],\"categories\":[],\"tags\":[]}");
+
+        SuggestMetadataResponse response = service.suggestMetadata(1L, List.of());
+
+        assertEquals(List.of(), response.titles());
+        assertEquals(List.of(), response.tags());
+        verify(ollamaClient, org.mockito.Mockito.times(2)).generate(anyString(), anyString());
     }
 
     @Test
     void suggestMetadata_前後に説明文が付いていてもJSONオブジェクト部分だけを抽出する() {
         ArticlePlanService service = service();
         when(ollamaClient.generate(anyString(), anyString())).thenReturn(
-                "以下が提案です。\n{\"title\":\"タイトル\",\"slug\":\"slug\",\"categories\":[],\"tags\":[]}\nご確認ください。");
+                "以下が提案です。\n{\"titles\":[\"タイトル\"],\"slugs\":[\"slug\"],\"categories\":[],\"tags\":[]}\nご確認ください。");
 
         SuggestMetadataResponse response = service.suggestMetadata(1L, List.of());
 
-        assertEquals("タイトル", response.title());
-        assertEquals("slug", response.slug());
+        assertEquals(List.of("タイトル"), response.titles());
+        assertEquals(List.of("slug"), response.slugs());
+    }
+
+    @Test
+    void suggestMetadata_既存カテゴリが取得できる場合はAI提案を既存カテゴリのみに絞り込む() {
+        ArticlePlanService service = service();
+        com.letsblog.api.domain.Project project = new com.letsblog.api.domain.Project();
+        project.setId(1L);
+        project.setMasterEnvironment("test");
+        project.setTestSiteId(5L);
+        com.letsblog.api.domain.Site site = new com.letsblog.api.domain.Site();
+        site.setId(5L);
+        site.setSiteKey("test-site");
+        com.letsblog.api.cms.CmsCredentials.WordPressCredentials credentials =
+                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://example.com", "admin", "secret");
+        com.letsblog.api.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(projectService.resolveMasterSite(project)).thenReturn(site);
+        when(siteService.getCredentials("test-site")).thenReturn(credentials);
+        when(cmsAdapterFactory.resolve(any())).thenReturn(cmsAdapter);
+        when(cmsAdapter.listCategoryNames(credentials)).thenReturn(List.of("お知らせ", "技術"));
+        when(ollamaClient.generate(anyString(), anyString())).thenReturn(
+                "{\"titles\":[\"タイトル\"],\"slugs\":[\"slug\"],"
+                + "\"categories\":[\"お知らせ\",\"存在しないカテゴリ\"],\"tags\":[]}");
+
+        SuggestMetadataResponse response = service.suggestMetadata(1L, List.of());
+
+        assertEquals(List.of("お知らせ"), response.categories());
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(ollamaClient).generate(promptCaptor.capture(), anyString());
+        assertTrue(promptCaptor.getValue().contains("お知らせ, 技術"));
     }
 
     @Test
@@ -564,8 +628,8 @@ class ArticlePlanServiceTest {
 
         SuggestMetadataResponse response = service.suggestMetadata(1L, List.of());
 
-        assertEquals("", response.title());
-        assertEquals("", response.slug());
+        assertEquals(List.of(), response.titles());
+        assertEquals(List.of(), response.slugs());
         assertEquals(List.of(), response.categories());
         assertEquals(List.of(), response.tags());
     }

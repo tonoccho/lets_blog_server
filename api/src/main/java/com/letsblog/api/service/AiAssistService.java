@@ -13,6 +13,8 @@ import com.letsblog.api.dto.AiDraftRequest;
 import com.letsblog.api.dto.AiDraftResponse;
 import com.letsblog.api.dto.AiImageRequest;
 import com.letsblog.api.dto.AiImageResponse;
+import com.letsblog.api.dto.AiSectionRequest;
+import com.letsblog.api.dto.AiSectionResponse;
 import com.letsblog.api.dto.AiTagsRequest;
 import com.letsblog.api.dto.AiTagsResponse;
 import com.letsblog.api.dto.ImageGenerationOptionsResponse;
@@ -56,6 +58,29 @@ public class AiAssistService {
                     """
     );
 
+    private static final Map<String, String> SECTION_PROMPT_TEMPLATES = Map.of(
+            "body", """
+                    あなたはブログ執筆アシスタントです。以下の見出しについて、日本語のブログ記事の本文をMarkdown形式で作成してください。
+                    見出し自体は出力せず、本文の段落のみを出力してください。前置きや説明は不要です。
+
+                    記事タイトル: %s
+                    直前までの文脈:
+                    %s
+
+                    見出し:
+                    %s
+                    """,
+            "lead", """
+                    あなたはブログ執筆アシスタントです。以下の記事のリード文(導入文)を日本語で作成してください。
+                    読者の関心を引く2〜3文程度の簡潔な文章のみを出力してください。前置きや説明は不要です。
+
+                    記事タイトル: %s
+
+                    見出し(最初のセクション):
+                    %s
+                    """
+    );
+
     private static final String TAGS_PROMPT_TEMPLATE = """
             以下のブログ記事本文を読み、適切なカテゴリ候補とタグ候補を提案してください。
             出力は必ず次のJSON形式のみとし、他の文章は一切含めないでください。
@@ -72,19 +97,22 @@ public class AiAssistService {
     private final GeneratedImageStorageService generatedImageStorageService;
     private final GeneratedImageRepository generatedImageRepository;
     private final GenerationJobRepository generationJobRepository;
+    private final WebSearchService webSearchService;
     private final ObjectMapper objectMapper;
 
     public AiAssistService(OllamaClient ollamaClient, ComfyUiClient comfyUiClient,
                            ComfyUiModelService comfyUiModelService,
                            GeneratedImageStorageService generatedImageStorageService,
                            GeneratedImageRepository generatedImageRepository,
-                           GenerationJobRepository generationJobRepository, ObjectMapper objectMapper) {
+                           GenerationJobRepository generationJobRepository,
+                           WebSearchService webSearchService, ObjectMapper objectMapper) {
         this.ollamaClient = ollamaClient;
         this.comfyUiClient = comfyUiClient;
         this.comfyUiModelService = comfyUiModelService;
         this.generatedImageStorageService = generatedImageStorageService;
         this.generatedImageRepository = generatedImageRepository;
         this.generationJobRepository = generationJobRepository;
+        this.webSearchService = webSearchService;
         this.objectMapper = objectMapper;
     }
 
@@ -164,13 +192,58 @@ public class AiAssistService {
 
         GenerationJob job = startJob("ollama_" + request.mode(), Map.of("mode", request.mode(), "text", request.text()));
         try {
-            String result = ollamaClient.generate(template.formatted(request.text()));
+            WebSearchOutcome searchOutcome = webSearchService.searchSafely(buildSearchQuery(request.text()));
+            String prompt = WebSearchService.formatForPrompt(searchOutcome) + template.formatted(request.text());
+            String result = ollamaClient.generate(prompt);
             completeJob(job, Map.of("result", result));
-            return new AiDraftResponse(result);
+            return new AiDraftResponse(result, WebSearchService.toSources(searchOutcome),
+                    WebSearchService.buildSearchNote(searchOutcome));
         } catch (RuntimeException e) {
             failJob(job, e);
             throw e;
         }
+    }
+
+    /**
+     * セクション単位(本文/リード文)のAI生成。draft()と同様にBrave検索結果を出典として付与する。
+     */
+    public AiSectionResponse generateSection(AiSectionRequest request) {
+        String template = SECTION_PROMPT_TEMPLATES.get(request.mode());
+        if (template == null) {
+            throw new IllegalArgumentException("mode は body/lead のいずれかを指定してください: " + request.mode());
+        }
+
+        String articleTitle = request.articleTitle() != null && !request.articleTitle().isBlank()
+                ? request.articleTitle() : "(未設定)";
+        String precedingContext = request.precedingContext() != null && !request.precedingContext().isBlank()
+                ? request.precedingContext() : "(なし)";
+        String searchQuery = buildSearchQuery(
+                (request.articleTitle() != null ? request.articleTitle() + " " : "") + request.heading());
+
+        GenerationJob job = startJob("ollama_section_" + request.mode(),
+                Map.of("mode", request.mode(), "heading", request.heading()));
+        try {
+            WebSearchOutcome searchOutcome = webSearchService.searchSafely(searchQuery);
+            String body = "body".equals(request.mode())
+                    ? template.formatted(articleTitle, precedingContext, request.heading())
+                    : template.formatted(articleTitle, request.heading());
+            String prompt = WebSearchService.formatForPrompt(searchOutcome) + body;
+            String result = ollamaClient.generate(prompt);
+            completeJob(job, Map.of("result", result));
+            return new AiSectionResponse(result, WebSearchService.toSources(searchOutcome),
+                    WebSearchService.buildSearchNote(searchOutcome));
+        } catch (RuntimeException e) {
+            failJob(job, e);
+            throw e;
+        }
+    }
+
+    /**
+     * Brave検索クエリはURLに載る都合上長すぎる入力をそのまま渡さないよう先頭200文字に丸める。
+     */
+    private String buildSearchQuery(String text) {
+        String trimmed = text == null ? "" : text.strip();
+        return trimmed.length() > 200 ? trimmed.substring(0, 200) : trimmed;
     }
 
     public AiTagsResponse suggestTags(AiTagsRequest request) {

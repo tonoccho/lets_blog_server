@@ -163,4 +163,37 @@ class CustomTagServiceTest {
 
         assertEquals(1, service.list(5L).size());
     }
+
+    @Test
+    void buildCssBundle_空でないCSSのみを区切りコメント付きで連結する() {
+        CustomTag withCss = new CustomTag();
+        withCss.setTagName("alert");
+        withCss.setCssContent(".alert { color: red; }");
+        CustomTag withoutCss = new CustomTag();
+        withoutCss.setTagName("plain");
+        withoutCss.setCssContent(null);
+        CustomTag blankCss = new CustomTag();
+        blankCss.setTagName("blank");
+        blankCss.setCssContent("   ");
+        when(customTagRepository.findByProjectIdIsNull()).thenReturn(List.of(withCss, withoutCss, blankCss));
+
+        String bundle = service.buildCssBundle(null);
+
+        assertEquals(true, bundle.contains("/* === alert === */"));
+        assertEquals(true, bundle.contains(".alert { color: red; }"));
+        assertEquals(false, bundle.contains("plain"));
+        assertEquals(false, bundle.contains("blank"));
+    }
+
+    @Test
+    void buildCssBundle_projectId指定時はプロジェクトタグとグローバルタグを結合する() {
+        CustomTag tag = new CustomTag();
+        tag.setTagName("project-tag");
+        tag.setCssContent(".project { color: blue; }");
+        when(customTagRepository.findByProjectIdOrProjectIdIsNull(5L)).thenReturn(List.of(tag));
+
+        String bundle = service.buildCssBundle(5L);
+
+        assertEquals(true, bundle.contains(".project { color: blue; }"));
+    }
 }

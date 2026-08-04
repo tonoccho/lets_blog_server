@@ -265,11 +265,11 @@ class ArticlePlanControllerTest {
     void suggestMetadata_認可後にサービスへ委譲する() {
         ArticlePlanController controller = controller();
         when(articlePlanService.suggestMetadata(1L, List.of()))
-                .thenReturn(new SuggestMetadataResponse("タイトル", "slug", List.of("カテゴリ"), List.of("タグ")));
+                .thenReturn(new SuggestMetadataResponse(List.of("タイトル"), List.of("slug"), List.of("カテゴリ"), List.of("タグ")));
 
         SuggestMetadataResponse response = controller.suggestMetadata(1L, new SuggestMetadataRequest(List.of()));
 
-        assertEquals("タイトル", response.title());
+        assertEquals(List.of("タイトル"), response.titles());
         verify(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
     }
 

@@ -20,7 +20,9 @@ import java.util.stream.Stream;
  * ソースは読み取り専用でマウントされた{@code vscode-extension-source-path}配下にあり、
  * 書き込み可能な作業ディレクトリへコピーした上で npm ci → npm run compile → npx vsce package を実行する
  * (SshKeyGenerationServiceと同様、ProcessBuilderでホストコマンドに委譲するパターン)。
- * バージョンごとにビルド結果をキャッシュし、同一バージョンへの再ビルドを避ける。
+ * ダウンロードのたびに必ず再ビルドする(以前はバージョンごとにキャッシュしていたが、
+ * package.jsonのversionを上げ忘れると古いビルドが配布され続けてしまう事故が起きたため、
+ * キャッシュはせず常に最新ソースからビルドする)。
  */
 @Service
 @Slf4j
@@ -44,28 +46,22 @@ public class VscodeExtensionBuildService {
     }
 
     /**
-     * ビルド済み.vsixのパスを返す。同一バージョンで既にビルド済みならそのまま返し(キャッシュヒット)、
-     * そうでなければビルドしてから返す。同時ビルドはロックで直列化する。
+     * 常に最新ソースから再ビルドして.vsixのパスを返す(キャッシュしない)。
+     * 同時ダウンロードによるビルドの競合はロックで直列化する。
      */
     public BuiltExtension buildAndGetVsix() {
         String version = readVersion();
         String filename = "letsblog-vscode-" + version + ".vsix";
         Path outputDir = buildDir.resolve("output");
-        Path cached = outputDir.resolve(filename);
-        if (Files.exists(cached)) {
-            return new BuiltExtension(cached, filename);
-        }
+        Path builtPath = outputDir.resolve(filename);
 
         buildLock.lock();
         try {
-            if (Files.exists(cached)) {
-                return new BuiltExtension(cached, filename);
-            }
             build(outputDir, filename);
-            if (!Files.exists(cached)) {
-                throw new VscodeExtensionBuildException("ビルドは成功しましたが出力ファイルが見つかりません: " + cached);
+            if (!Files.exists(builtPath)) {
+                throw new VscodeExtensionBuildException("ビルドは成功しましたが出力ファイルが見つかりません: " + builtPath);
             }
-            return new BuiltExtension(cached, filename);
+            return new BuiltExtension(builtPath, filename);
         } finally {
             buildLock.unlock();
         }
@@ -93,6 +89,8 @@ public class VscodeExtensionBuildService {
         Path workspace = buildDir.resolve("workspace");
         try {
             Files.createDirectories(outputDir);
+            // vsce packageの--outが確実に新しい内容で上書きするよう、既存の同名ファイルは先に削除しておく
+            Files.deleteIfExists(outputDir.resolve(filename));
             deleteRecursively(workspace);
             Files.createDirectories(workspace);
             copySource(sourceDir, workspace);

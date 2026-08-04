@@ -90,6 +90,28 @@ public class CustomTagService {
         return tags.stream().map(CustomTagResponse::from).toList();
     }
 
+    /**
+     * WordPressへ一括貼り付けするための統合CSS。list()と同じスコープ規約(projectId未指定=グローバルのみ、
+     * 指定時はそのプロジェクト+グローバル)で、cssContentが空でないタグのみを連結する。
+     * テーマCSSは含めない(WordPress側に既存のため重複・競合の原因になるため)。
+     */
+    @Transactional(readOnly = true)
+    public String buildCssBundle(Long projectId) {
+        List<CustomTag> tags = projectId == null
+                ? customTagRepository.findByProjectIdIsNull()
+                : customTagRepository.findByProjectIdOrProjectIdIsNull(projectId);
+
+        StringBuilder sb = new StringBuilder();
+        for (CustomTag tag : tags) {
+            if (tag.getCssContent() == null || tag.getCssContent().isBlank()) {
+                continue;
+            }
+            sb.append("/* === ").append(tag.getTagName()).append(" === */\n");
+            sb.append(tag.getCssContent().strip()).append("\n\n");
+        }
+        return sb.toString();
+    }
+
     private Optional<CustomTag> findDuplicate(String tagName, Long projectId) {
         return projectId == null
                 ? customTagRepository.findByTagNameAndProjectIdIsNull(tagName)

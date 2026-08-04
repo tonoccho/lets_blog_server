@@ -1,6 +1,7 @@
 package com.letsblog.api.cms;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * CMS(WordPress、microCMS等)への操作を抽象化するインターフェース。
@@ -68,5 +69,31 @@ public interface CmsAdapter {
      */
     default WpCliInstallResult installWpCli(CmsCredentials credentials) {
         throw new UnsupportedOperationException("このCMSはwp-cliのインストールに対応していません");
+    }
+
+    /**
+     * 投稿を削除する(WordPressの場合、既定でゴミ箱へ移動する。完全削除は行わない)。
+     * 対応しないCMSはUnsupportedOperationExceptionを投げる。
+     */
+    default void deletePost(CmsCredentials credentials, String postId) {
+        throw new UnsupportedOperationException("このCMSは投稿削除に対応していません");
+    }
+
+    /**
+     * メールアドレスに一致する既存の著者(ユーザー)IDを検索する(新規作成は行わない、読み取り専用)。
+     * 投稿作成時に、投稿者に対応するCMS側ユーザーを投稿の著者として設定するために使う。
+     * 見つからない場合、またはCMSが著者検索に対応しない場合は空を返す(例外は投げない)。
+     */
+    default Optional<String> findAuthorIdByEmail(CmsCredentials credentials, String email) {
+        return Optional.empty();
+    }
+
+    /**
+     * 既存のカテゴリ名一覧を取得する(読み取り専用、新規作成は行わない)。
+     * 記事メタデータ提案時に、AIへ既存カテゴリの候補を提示するために使う。
+     * 取得できない、またはCMSがカテゴリの概念を持たない場合は空リストを返す(例外は投げない)。
+     */
+    default List<String> listCategoryNames(CmsCredentials credentials) {
+        return List.of();
     }
 }

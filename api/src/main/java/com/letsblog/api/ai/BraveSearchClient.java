@@ -12,23 +12,21 @@ import java.util.List;
 /**
  * Brave Search API(Web検索)を呼び出す薄いクライアント。壁打ちチャットの応答生成前に
  * 参考情報を取得するために使用する。
+ * APIキーはSystemSettingService(DB設定 or 環境変数)が解決した値を呼び出し側(WebSearchService)から
+ * 都度受け取る(このクラス自体はどこから鍵を得るかを知らない、ai→serviceの依存を作らないため)。
  */
 @Component
 public class BraveSearchClient {
 
     private final RestClient client;
-    private final String apiKey;
 
-    public BraveSearchClient(
-            @Value("${app.brave-search-base-url}") String baseUrl,
-            @Value("${app.brave-search-api-key}") String apiKey) {
+    public BraveSearchClient(@Value("${app.brave-search-base-url}") String baseUrl) {
         this.client = RestClient.builder().baseUrl(baseUrl).build();
-        this.apiKey = apiKey;
     }
 
-    public List<BraveSearchResult> search(String query, int count) {
+    public List<BraveSearchResult> search(String query, int count, String apiKey) {
         if (apiKey == null || apiKey.isBlank()) {
-            throw new AiServiceException("Brave Search APIキーが設定されていません(BRAVE_SEARCH_API_KEY)", null);
+            throw new AiServiceException("Brave Search APIキーが設定されていません(Web管理画面またはBRAVE_SEARCH_API_KEYで設定してください)", null);
         }
         try {
             JsonNode response = client.get()

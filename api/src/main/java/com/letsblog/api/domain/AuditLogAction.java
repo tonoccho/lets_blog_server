@@ -6,6 +6,7 @@ public enum AuditLogAction {
     USER_UPDATED("ユーザー更新"),
     USER_DELETED("ユーザー削除"),
     POST_PUBLISHED("投稿公開"),
+    POST_DELETED("投稿削除"),
     SITE_REGISTERED("サイト登録"),
     PASSWORD_RESET_REQUESTED("パスワード再設定リクエスト"),
     PASSWORD_RESET_CONFIRMED("パスワード再設定完了"),
@@ -25,7 +26,10 @@ public enum AuditLogAction {
     PROJECT_ENVIRONMENT_UNBOUND("プロジェクト環境切離し"),
     PROJECT_USER_ADDED("プロジェクトユーザー追加"),
     PROJECT_USER_ROLE_UPDATED("プロジェクトユーザーロール変更"),
-    PROJECT_USER_REMOVED("プロジェクトユーザー削除");
+    PROJECT_USER_REMOVED("プロジェクトユーザー削除"),
+    DB_BACKUP_DOWNLOADED("DBバックアップダウンロード"),
+    DB_RESTORED("DBリストア"),
+    SYSTEM_SETTING_UPDATED("システム設定更新");
 
     private final String displayName;
 

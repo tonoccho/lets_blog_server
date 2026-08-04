@@ -7,6 +7,76 @@ import { deleteCustomTagAction, upsertCustomTagAction, CustomTagFormState } from
 
 const initialState: CustomTagFormState = {};
 
+const SAMPLE_CONTENT = "サンプルテキストです。ここに本文が入ります。";
+const ATTR_PATTERN = /\{\{attr:([a-zA-Z0-9_]+)\}\}/g;
+
+/** プレビュー用に{{content}}をサンプルテキストへ、{{attr:xxx}}をサンプル値へ置換したHTMLを組み立てる。 */
+function buildPreviewSrcDoc(htmlTemplate: string, cssContent: string): string {
+  const html = htmlTemplate
+    .replaceAll("{{content}}", SAMPLE_CONTENT)
+    .replace(ATTR_PATTERN, (_match, key: string) => `サンプル${key}`);
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${cssContent}</style></head><body>${html}</body></html>`;
+}
+
+/**
+ * HTMLテンプレート/CSS入力とライブプレビューを担当する。編集対象(editing)が変わるたびに
+ * 親側で`key`を変えて再マウントさせることで初期値を切り替える(useEffectでのprops→state同期は避ける)。
+ */
+function TemplateEditor({ initialHtml, initialCss }: { initialHtml: string; initialCss: string }) {
+  const [htmlTemplateValue, setHtmlTemplateValue] = useState(initialHtml);
+  const [cssContentValue, setCssContentValue] = useState(initialCss);
+  const [previewSrcDoc, setPreviewSrcDoc] = useState(() => buildPreviewSrcDoc(initialHtml, initialCss));
+
+  // HTML/CSS変更のたびに即再描画すると入力のたびにiframeが再構築されカクつくため、300msデバウンスする
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPreviewSrcDoc(buildPreviewSrcDoc(htmlTemplateValue, cssContentValue));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [htmlTemplateValue, cssContentValue]);
+
+  return (
+    <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+      <div className="space-y-3">
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-neutral-600">HTMLテンプレート</span>
+          <textarea
+            name="htmlTemplate"
+            value={htmlTemplateValue}
+            onChange={(e) => setHtmlTemplateValue(e.target.value)}
+            required
+            rows={6}
+            placeholder='<div class="alert">{{content}}</div>'
+            className="rounded border border-neutral-300 px-3 py-2 font-mono text-sm"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-neutral-600">CSS(任意、このタグが使われた投稿の本文冒頭に一度だけ挿入されます)</span>
+          <textarea
+            name="cssContent"
+            value={cssContentValue}
+            onChange={(e) => setCssContentValue(e.target.value)}
+            rows={6}
+            placeholder=".alert { color: red; border: 1px solid; padding: 0.5em; }"
+            className="rounded border border-neutral-300 px-3 py-2 font-mono text-sm"
+          />
+        </label>
+      </div>
+      <div className="flex flex-col gap-1 text-sm">
+        <span className="text-neutral-600">
+          プレビュー({"{{content}}"}/{"{{attr:xxx}}"}はサンプル値に置き換えて表示、入力後300ms自動更新)
+        </span>
+        <iframe
+          title="カスタムタグプレビュー"
+          srcDoc={previewSrcDoc}
+          sandbox="allow-same-origin"
+          className="h-[268px] rounded border border-neutral-300 bg-white"
+        />
+      </div>
+    </div>
+  );
+}
+
 export function CustomTagManager({
   tags,
   projects,
@@ -50,24 +120,32 @@ export function CustomTagManager({
 
   return (
     <div className="space-y-8">
-      <label className="flex max-w-sm flex-col gap-1 text-sm">
-        <span className="text-neutral-600">表示スコープ</span>
-        <select
-          value={currentProjectId ?? ""}
-          onChange={(e) => {
-            const value = e.target.value;
-            router.push(value ? `/custom-tags?projectId=${value}` : "/custom-tags");
-          }}
-          className="rounded border border-neutral-300 px-3 py-2 text-sm"
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <label className="flex max-w-sm flex-col gap-1 text-sm">
+          <span className="text-neutral-600">表示スコープ</span>
+          <select
+            value={currentProjectId ?? ""}
+            onChange={(e) => {
+              const value = e.target.value;
+              router.push(value ? `/custom-tags?projectId=${value}` : "/custom-tags");
+            }}
+            className="rounded border border-neutral-300 px-3 py-2 text-sm"
+          >
+            <option value="">グローバル</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <a
+          href={`/custom-tags/css-bundle${currentProjectId ? `?projectId=${currentProjectId}` : ""}`}
+          className="rounded border border-neutral-300 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
         >
-          <option value="">グローバル</option>
-          {projects.map((project) => (
-            <option key={project.id} value={project.id}>
-              {project.name}
-            </option>
-          ))}
-        </select>
-      </label>
+          統合CSSダウンロード
+        </a>
+      </div>
 
       <div className="overflow-x-auto rounded-lg border border-neutral-200 bg-white">
         <table className="w-full text-left text-sm">
@@ -180,29 +258,11 @@ export function CustomTagManager({
             />
           </label>
         </div>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">HTMLテンプレート</span>
-          <textarea
-            name="htmlTemplate"
-            key={`tpl-${editing?.id ?? "new"}`}
-            defaultValue={editing?.htmlTemplate}
-            required
-            rows={4}
-            placeholder='<div class="alert">{{content}}</div>'
-            className="rounded border border-neutral-300 px-3 py-2 font-mono text-sm"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">CSS(任意、このタグが使われた投稿の本文冒頭に一度だけ挿入されます)</span>
-          <textarea
-            name="cssContent"
-            key={`css-${editing?.id ?? "new"}`}
-            defaultValue={editing?.cssContent ?? ""}
-            rows={4}
-            placeholder=".alert { color: red; border: 1px solid; padding: 0.5em; }"
-            className="rounded border border-neutral-300 px-3 py-2 font-mono text-sm"
-          />
-        </label>
+        <TemplateEditor
+          key={editing?.id ?? "new"}
+          initialHtml={editing?.htmlTemplate ?? ""}
+          initialCss={editing?.cssContent ?? ""}
+        />
         {state.error && <p className="text-sm text-red-600">{state.error}</p>}
         {state.success && <p className="text-sm text-green-600">保存しました。</p>}
         <button

@@ -148,12 +148,42 @@ public class WordPressAgentOperations {
         if (content.featuredMediaId() != null) {
             payload.put("featuredMediaId", content.featuredMediaId());
         }
+        if (content.authorId() != null) {
+            payload.put("authorId", content.authorId());
+        }
 
+        log.info("エージェント投稿リクエスト送信: slug={}, existingPostId={}, featuredMediaId={}",
+                creds.wpSlug(), existingPostId, content.featuredMediaId());
         try {
             JsonNode body = post("/wp-cli/post", payload);
-            return new PostResult(body.path("postId").asText(), body.path("guid").asText(), body.path("status").asText());
+            PostResult postResult = new PostResult(
+                    body.path("postId").asText(), body.path("guid").asText(), body.path("status").asText());
+            log.info("エージェント投稿レスポンス: postId={}, status={}", postResult.id(), postResult.status());
+            return postResult;
         } catch (RestClientResponseException e) {
             throw new AgentOperationException("WordPress投稿の作成/更新に失敗しました: " + agentErrorDetail(e), e);
+        } catch (ResourceAccessException e) {
+            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /** メールアドレスに一致する既存WordPressユーザーIDを検索する(作成は行わない、読み取り専用)。 */
+    public java.util.Optional<String> findAuthorIdByEmail(WordPressCredentials creds, String email) {
+        try {
+            JsonNode body = post("/wp-cli/find-author", Map.of("slug", creds.wpSlug(), "email", email));
+            String userId = body.path("userId").asText(null);
+            return java.util.Optional.ofNullable(userId);
+        } catch (RestClientResponseException | ResourceAccessException e) {
+            log.warn("投稿者のWordPressユーザーID検索に失敗しました (wpSlug={}): {}", creds.wpSlug(), e.getMessage());
+            return java.util.Optional.empty();
+        }
+    }
+
+    public void deletePost(WordPressCredentials creds, String postId) {
+        try {
+            post("/wp-cli/post-delete", Map.of("slug", creds.wpSlug(), "postId", postId));
+        } catch (RestClientResponseException e) {
+            throw new AgentOperationException("WordPress投稿の削除に失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
             throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
         }

@@ -52,3 +52,8 @@ app:
   generated-images-storage-path: ${GENERATED_IMAGES_STORAGE_PATH:/app/data/generated-images}
   vscode-extension-source-path: ${VSCODE_EXTENSION_SOURCE_PATH:/app/extension-src}
   vscode-extension-build-path: ${VSCODE_EXTENSION_BUILD_PATH:/app/extension-build}
+  backup-mysql-host: ${BACKUP_MYSQL_HOST:localhost}
+  backup-mysql-port: ${BACKUP_MYSQL_PORT:3306}
+  backup-mysql-database: ${BACKUP_MYSQL_DATABASE:lets_blog}
+  backup-mysql-user: ${BACKUP_MYSQL_USER:lbs_app}
+  backup-mysql-password: ${BACKUP_MYSQL_PASSWORD:lbs_app}

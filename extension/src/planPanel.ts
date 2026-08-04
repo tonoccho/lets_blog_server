@@ -49,6 +49,9 @@ export class PlanPanel {
         case 'loadIssues':
           await this._handleLoadIssues();
           break;
+        case 'loadCategories':
+          await this._handleLoadCategories();
+          break;
         case 'sendChat':
           await this._handleSendChat(message as unknown as SendChatMessage);
           break;
@@ -117,6 +120,12 @@ export class PlanPanel {
       message.structure
     );
     this._sendMessage('structureAccepted', result);
+  }
+
+  private async _handleLoadCategories(): Promise<void> {
+    const { apiKey, actor, projectId } = await this._requireContext();
+    const categories = await api.listExistingCategories(getServerUrl(), apiKey, actor, projectId);
+    this._sendMessage('categoryList', { categories });
   }
 
   private async _handleSuggestMetadata(message: SuggestMetadataMessage): Promise<void> {
@@ -218,7 +227,8 @@ export class PlanPanel {
   .metadata-form { border: 1px solid var(--vscode-panel-border, #ccc); padding: 10px; }
   .form-group { margin-bottom: 10px; }
   .form-group label { display: block; margin-bottom: 4px; font-weight: bold; }
-  .form-group input { width: 100%; padding: 6px; }
+  .form-group input, .form-group select { width: 100%; padding: 6px; }
+  .form-group select { margin-bottom: 6px; }
   .button-group { display: flex; gap: 10px; }
   .structure-box { border: 1px solid var(--vscode-panel-border, #ccc); padding: 10px; }
   .structure-box textarea {
@@ -226,6 +236,12 @@ export class PlanPanel {
     background: var(--vscode-input-background, #fff); color: var(--vscode-input-foreground, inherit);
   }
   .hint { opacity: 0.7; font-size: 0.9em; margin-bottom: 8px; }
+  .category-checkboxes {
+    border: 1px solid var(--vscode-panel-border, #ccc); padding: 8px; max-height: 140px; overflow-y: auto;
+    background: var(--vscode-input-background, #fff); margin-bottom: 6px;
+  }
+  .category-checkboxes label { display: block; font-weight: normal; margin-bottom: 4px; }
+  .category-checkboxes input[type="checkbox"] { margin-right: 6px; }
   .accepted-badge { color: #388e3c; margin-bottom: 8px; }
   #message.error { color: var(--vscode-errorForeground, #d32f2f); }
   #message.success { color: #388e3c; }
@@ -266,9 +282,24 @@ export class PlanPanel {
   <div class="section" id="metadataSection" style="display: none;">
     <div class="section-title">提案メタデータ</div>
     <div class="metadata-form">
-      <div class="form-group"><label>タイトル</label><input type="text" id="titleInput"></div>
-      <div class="form-group"><label>スラッグ</label><input type="text" id="slugInput"></div>
-      <div class="form-group"><label>カテゴリ (カンマ区切り)</label><input type="text" id="categoriesInput"></div>
+      <div class="form-group">
+        <label>タイトル(候補から選択、または下欄を直接編集)</label>
+        <select id="titleOptions"></select>
+        <input type="text" id="titleInput">
+      </div>
+      <div class="form-group">
+        <label>スラッグ(候補から選択、または下欄を直接編集)</label>
+        <select id="slugOptions"></select>
+        <input type="text" id="slugInput">
+      </div>
+      <div class="form-group">
+        <label>カテゴリ(既存から選択)</label>
+        <div class="category-checkboxes" id="categoryCheckboxes"><span class="hint">読み込み中...</span></div>
+      </div>
+      <div class="form-group">
+        <label>新規カテゴリ(任意、カンマ区切り。既存にないものだけ入力してください)</label>
+        <input type="text" id="newCategoriesInput">
+      </div>
       <div class="form-group"><label>タグ (カンマ区切り)</label><input type="text" id="tagsInput"></div>
       <div class="button-group">
         <button id="approveButton" class="primary">承認してスキャフォールド生成</button>
@@ -284,6 +315,7 @@ export class PlanPanel {
   let selectedIssue = null;
   let sessionId = undefined;
   let chatHistory = [];
+  let existingCategories = [];
 
   function post(command, payload) {
     vscode.postMessage(Object.assign({ command }, payload || {}));
@@ -359,10 +391,60 @@ export class PlanPanel {
     post('suggestMetadata', { history: chatHistory });
   }
 
+  function renderCategoryCheckboxes(selected) {
+    const container = document.getElementById('categoryCheckboxes');
+    container.innerHTML = '';
+    if (existingCategories.length === 0) {
+      container.innerHTML = '<span class="hint">既存カテゴリを取得できませんでした(サイト未紐付け等)。新規カテゴリ欄に直接入力してください。</span>';
+      return;
+    }
+    existingCategories.forEach((name) => {
+      const label = document.createElement('label');
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = name;
+      checkbox.checked = (selected || []).some((s) => s.toLowerCase() === name.toLowerCase());
+      label.appendChild(checkbox);
+      label.appendChild(document.createTextNode(' ' + name));
+      container.appendChild(label);
+    });
+  }
+
+  function renderOptionList(selectId, targetInputId, options) {
+    const select = document.getElementById(selectId);
+    select.innerHTML = '';
+    if (!options || options.length === 0) {
+      const placeholder = document.createElement('option');
+      placeholder.textContent = '候補がありません。下欄に直接入力してください。';
+      placeholder.disabled = true;
+      placeholder.selected = true;
+      select.appendChild(placeholder);
+      return;
+    }
+    options.forEach((value) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = value;
+      select.appendChild(option);
+    });
+    select.onchange = () => {
+      document.getElementById(targetInputId).value = select.value;
+    };
+  }
+
   function showMetadataForm(suggestion) {
-    document.getElementById('titleInput').value = suggestion.title || '';
-    document.getElementById('slugInput').value = suggestion.slug || '';
-    document.getElementById('categoriesInput').value = (suggestion.categories || []).join(', ');
+    const titles = suggestion.titles || [];
+    const slugs = suggestion.slugs || [];
+    renderOptionList('titleOptions', 'titleInput', titles);
+    renderOptionList('slugOptions', 'slugInput', slugs);
+    document.getElementById('titleInput').value = titles[0] || '';
+    document.getElementById('slugInput').value = slugs[0] || '';
+    const suggestedCategories = suggestion.categories || [];
+    renderCategoryCheckboxes(suggestedCategories);
+    const unmatched = suggestedCategories.filter(
+      (c) => !existingCategories.some((e) => e.toLowerCase() === c.toLowerCase())
+    );
+    document.getElementById('newCategoriesInput').value = unmatched.join(', ');
     document.getElementById('tagsInput').value = (suggestion.tags || []).join(', ');
     document.getElementById('metadataSection').style.display = 'block';
   }
@@ -370,7 +452,11 @@ export class PlanPanel {
   function approveMetadata() {
     const title = document.getElementById('titleInput').value.trim();
     const slug = document.getElementById('slugInput').value.trim();
-    const categories = document.getElementById('categoriesInput').value.split(',').map((s) => s.trim()).filter(Boolean);
+    const checkedCategories = Array.from(
+      document.querySelectorAll('#categoryCheckboxes input[type=checkbox]:checked')
+    ).map((el) => el.value);
+    const newCategories = document.getElementById('newCategoriesInput').value.split(',').map((s) => s.trim()).filter(Boolean);
+    const categories = Array.from(new Set(checkedCategories.concat(newCategories)));
     const tags = document.getElementById('tagsInput').value.split(',').map((s) => s.trim()).filter(Boolean);
     if (!title || !slug) {
       showMessage('タイトルとスラッグは必須です。', 'error');
@@ -401,6 +487,10 @@ export class PlanPanel {
       case 'issueList':
         renderIssueList(payload.issues);
         break;
+      case 'categoryList':
+        existingCategories = payload.categories || [];
+        renderCategoryCheckboxes([]);
+        break;
       case 'chatResponse':
         addMessage('assistant', payload.reply);
         sessionId = payload.sessionId;
@@ -429,6 +519,7 @@ export class PlanPanel {
   });
 
   post('loadIssues');
+  post('loadCategories');
 </script>
 </body>
 </html>`;

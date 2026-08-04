@@ -114,12 +114,43 @@ class WordPressAgentOperationsTest {
                         "{\"postId\":\"123\",\"guid\":\"http://wordpress/sites/main/?p=123\",\"status\":\"draft\"}",
                         MediaType.APPLICATION_JSON));
 
-        PostContent content = new PostContent("Test Title", "test-slug", "<p>HTML</p>", "draft", null, null, null);
+        PostContent content = new PostContent("Test Title", "test-slug", "<p>HTML</p>", "draft", null, null, null, null);
         PostResult result = operations.createOrUpdatePost(creds(), content, null);
 
         assertEquals("123", result.id());
         assertEquals("draft", result.status());
         server.verify();
+    }
+
+    @Test
+    void createOrUpdatePost_authorId指定時はペイロードに含める() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/post"))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("\"authorId\":\"42\"")))
+                .andRespond(withSuccess(
+                        "{\"postId\":\"123\",\"guid\":\"http://wordpress/sites/main/?p=123\",\"status\":\"draft\"}",
+                        MediaType.APPLICATION_JSON));
+
+        PostContent content = new PostContent("Test Title", "test-slug", "<p>HTML</p>", "draft", null, null, null, "42");
+        operations.createOrUpdatePost(creds(), content, null);
+
+        server.verify();
+    }
+
+    @Test
+    void findAuthorIdByEmail_見つかればIDを返す() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/find-author"))
+                .andRespond(withSuccess("{\"userId\":\"11\"}", MediaType.APPLICATION_JSON));
+
+        assertEquals("11", operations.findAuthorIdByEmail(creds(), "author@example.com").orElse(null));
+        server.verify();
+    }
+
+    @Test
+    void findAuthorIdByEmail_見つからなければ空を返す() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/find-author"))
+                .andRespond(withSuccess("{\"userId\":null}", MediaType.APPLICATION_JSON));
+
+        assertTrue(operations.findAuthorIdByEmail(creds(), "unknown@example.com").isEmpty());
     }
 
     @Test
@@ -129,9 +160,30 @@ class WordPressAgentOperationsTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .body("{\"error\":\"投稿の作成/更新に失敗しました\",\"detail\":\"boom\"}"));
 
-        PostContent content = new PostContent("Test Title", null, "<p>HTML</p>", "draft", null, null, null);
+        PostContent content = new PostContent("Test Title", null, "<p>HTML</p>", "draft", null, null, null, null);
 
         assertThrows(AgentOperationException.class, () -> operations.createOrUpdatePost(creds(), content, null));
+    }
+
+    @Test
+    void deletePost_成功時は例外を投げない() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/post-delete"))
+                .andExpect(content().json("{\"slug\":\"main\",\"postId\":\"99\"}"))
+                .andRespond(withSuccess("{\"postId\":\"99\"}", MediaType.APPLICATION_JSON));
+
+        operations.deletePost(creds(), "99");
+
+        server.verify();
+    }
+
+    @Test
+    void deletePost_失敗時は例外を投げる() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/post-delete"))
+                .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"投稿の削除に失敗しました\",\"detail\":\"boom\"}"));
+
+        assertThrows(AgentOperationException.class, () -> operations.deletePost(creds(), "99"));
     }
 
     @Test

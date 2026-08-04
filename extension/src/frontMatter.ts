@@ -47,6 +47,18 @@ export interface LocalImageReference {
 const IMAGE_MARKDOWN_PATTERN = /!\[[^\]]*]\(\s*([^)\s]+)[^)]*\)/g;
 
 /**
+ * 画像参照をbaseDir配下の絶対パスへ解決する。参照が"/"で始まる場合(例: "/assets/eyecatch.png")、
+ * Node標準のpath.resolveはこれをファイルシステム絶対パスとして扱いbaseDirを無視してしまう。
+ * このリポジトリの規約上、画像は常に記事ディレクトリの assets/ 配下からの相対パスとして
+ * 書かれる想定であり、"/xxx"はサイトルート相対のつもりで書かれたMarkdown相対パスであって
+ * OS絶対パスではないため、先頭の"/"を除去してから解決する。
+ */
+export function resolveLocalImagePath(baseDir: string, reference: string): string {
+  const normalized = reference.startsWith('/') ? reference.slice(1) : reference;
+  return path.resolve(baseDir, normalized);
+}
+
+/**
  * Markdown本文からローカル画像参照(http(s)/dataスキームでないもの)を抽出する。
  * baseDir はMarkdownファイルが置かれているディレクトリ。
  */
@@ -63,7 +75,7 @@ export function extractLocalImageReferences(content: string, baseDir: string): L
       continue;
     }
     seen.add(reference);
-    results.push({ reference, absolutePath: path.resolve(baseDir, reference) });
+    results.push({ reference, absolutePath: resolveLocalImagePath(baseDir, reference) });
   }
 
   return results;
@@ -84,7 +96,7 @@ export function resolveFeaturedImageReference(
   if (/^(https?:)?\/\//.test(reference) || reference.startsWith('data:')) {
     return undefined;
   }
-  return { reference, absolutePath: path.resolve(baseDir, reference) };
+  return { reference, absolutePath: resolveLocalImagePath(baseDir, reference) };
 }
 
 /**

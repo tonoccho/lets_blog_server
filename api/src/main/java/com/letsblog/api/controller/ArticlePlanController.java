@@ -130,6 +130,16 @@ public class ArticlePlanController {
         return articlePlanService.suggestMetadata(projectId, request.history());
     }
 
+    /**
+     * プロジェクトのマスター環境サイトに既に存在するカテゴリ名一覧。VSCode拡張がメタデータ
+     * 入力時にカテゴリを自由入力ではなく既存カテゴリから選択できるようにするために使う。
+     */
+    @GetMapping("/categories")
+    public List<String> listCategories(@PathVariable Long projectId) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        return articlePlanService.listExistingCategories(projectId);
+    }
+
     @PostMapping("/issues/{issueNumber}/assign")
     public AssignIssueResponse assignIssue(
             @PathVariable Long projectId, @PathVariable Integer issueNumber) {

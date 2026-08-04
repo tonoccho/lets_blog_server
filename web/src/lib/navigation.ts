@@ -11,6 +11,8 @@ import {
   ScrollText,
   Shield,
   Images,
+  DatabaseBackup,
+  KeyRound,
   type LucideIcon,
 } from "lucide-react";
 
@@ -37,4 +39,6 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
   { href: "/audit-logs", label: "監査ログ", icon: ScrollText, adminOnly: true },
   { href: "/admin/roles", label: "ロール管理", icon: Shield, adminOnly: true },
   { href: "/custom-tags", label: "カスタムタグ", icon: Tag, adminOnly: true },
+  { href: "/admin/backup", label: "データバックアップ", icon: DatabaseBackup, adminOnly: true },
+  { href: "/admin/settings", label: "システム設定", icon: KeyRound, adminOnly: true },
 ];

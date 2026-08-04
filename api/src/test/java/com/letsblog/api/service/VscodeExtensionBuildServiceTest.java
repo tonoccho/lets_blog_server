@@ -1,6 +1,5 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.service.VscodeExtensionBuildService.BuiltExtension;
 import com.letsblog.api.service.VscodeExtensionBuildService.VscodeExtensionBuildException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -9,14 +8,13 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 実際のnpm/vsce呼び出しはビルド環境依存のため単体テストでは検証しない
- * (Docker環境での実機ビルド確認をplan/todoに明記済み)。ここではキャッシュ判定と
- * ソース未検出時のエラーハンドリングという、プロセス起動前に完結するロジックのみ検証する。
+ * (Docker環境での実機ビルド確認をplan/todoに明記済み)。ここではソース未検出時の
+ * エラーハンドリングと、キャッシュを使わず必ず再ビルドを試みることを検証する。
  */
 class VscodeExtensionBuildServiceTest {
 
@@ -38,18 +36,19 @@ class VscodeExtensionBuildServiceTest {
     }
 
     @Test
-    void buildAndGetVsix_キャッシュ済みのvsixがあればビルドを実行せず返す() throws IOException {
+    void buildAndGetVsix_古いvsixが残っていてもキャッシュせず再ビルドを試みる() throws IOException {
         VscodeExtensionBuildService service = service();
         writePackageJson("1.2.3");
         Path outputDir = buildDir.resolve("output");
         Files.createDirectories(outputDir);
-        Path cached = outputDir.resolve("letsblog-vscode-1.2.3.vsix");
-        Files.writeString(cached, "dummy");
+        Path stale = outputDir.resolve("letsblog-vscode-1.2.3.vsix");
+        Files.writeString(stale, "stale-dummy-content");
 
-        BuiltExtension result = service.buildAndGetVsix();
-
-        assertEquals(cached, result.vsixPath());
-        assertEquals("letsblog-vscode-1.2.3.vsix", result.filename());
+        // sourceDirはpackage.jsonのみの最小構成のため、実際のnpm ci等は失敗する。
+        // ここでは「古いvsixをそのまま返さず、実際にビルドを試みて失敗する」ことを確認できればよい
+        // (もしキャッシュヒットのショートカットが復活していたら、この呼び出しは例外を投げず
+        // staleな内容をそのまま返してしまう)。
+        assertThrows(VscodeExtensionBuildException.class, service::buildAndGetVsix);
     }
 
     @Test

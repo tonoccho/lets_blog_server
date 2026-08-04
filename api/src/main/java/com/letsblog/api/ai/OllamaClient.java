@@ -21,6 +21,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 
 /**
  * OllamaのREST API(/api/generate, /api/tags, /api/pull, /api/delete)を呼び出す薄いクライアント。
@@ -29,6 +30,15 @@ import java.util.function.Consumer;
 public class OllamaClient {
 
     private static final Duration PULL_TIMEOUT = Duration.ofMinutes(30);
+
+    /**
+     * Qwen3/DeepSeek-R1等の推論(thinking)モデルが出力に含める<think>...</think>ブロックを除去する。
+     * 素の/api/generateはchatテンプレートを経由しないため、thinkパラメータでは制御できず、
+     * モデルによっては既定で思考過程がresponseテキストにそのまま混入する。この中に含まれる
+     * "{"/"}"が原因で、呼び出し元(ArticlePlanService等)のJSON抽出が不安定に壊れることがあるため、
+     * 全呼び出し元に共通の対策としてここで一括して取り除く。
+     */
+    private static final Pattern THINK_BLOCK_PATTERN = Pattern.compile("(?s)<think>.*?</think>");
 
     private final RestClient client;
     private final HttpClient rawHttpClient;
@@ -65,10 +75,15 @@ public class OllamaClient {
                     .retrieve()
                     .body(JsonNode.class);
 
-            return response.get("response").asText().trim();
+            return stripThinkingBlocks(response.get("response").asText()).trim();
         } catch (RestClientResponseException e) {
             throw new AiServiceException("Ollama呼び出しに失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
         }
+    }
+
+    /** package-privateはテストから直接検証するため(HTTP呼び出しをモックせずロジックだけ確認できるように)。 */
+    String stripThinkingBlocks(String text) {
+        return THINK_BLOCK_PATTERN.matcher(text).replaceAll("").trim();
     }
 
     /**

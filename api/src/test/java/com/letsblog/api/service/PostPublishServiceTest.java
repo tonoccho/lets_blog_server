@@ -12,6 +12,7 @@ import com.letsblog.api.dto.PostPublishCommand;
 import com.letsblog.api.dto.PostPublishResponse;
 import com.letsblog.api.markdown.MarkdownRenderer;
 import com.letsblog.api.repository.PostRepository;
+import com.letsblog.api.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -55,6 +56,10 @@ class PostPublishServiceTest {
     @Mock
     private ProjectService projectService;
     @Mock
+    private CurrentActorService currentActorService;
+    @Mock
+    private UserRepository userRepository;
+    @Mock
     private CmsAdapter cmsAdapter;
 
     private PostPublishService service;
@@ -65,7 +70,8 @@ class PostPublishServiceTest {
     @BeforeEach
     void setUp() {
         service = new PostPublishService(siteService, cmsAdapterFactory, markdownRenderer, postRepository,
-                plantUmlEmbedService, customTagRenderService, projectService);
+                plantUmlEmbedService, customTagRenderService, projectService, currentActorService, userRepository,
+                new com.fasterxml.jackson.databind.ObjectMapper());
 
         Site site = new Site();
         site.setId(1L);
@@ -82,11 +88,18 @@ class PostPublishServiceTest {
         lenient().when(cmsAdapter.resolveCategories(any(), any())).thenReturn(List.of());
         lenient().when(cmsAdapter.resolveTags(any(), any())).thenReturn(List.of());
         lenient().when(postRepository.findBySiteIdAndWpPostId(any(), any())).thenReturn(Optional.empty());
+        lenient().when(currentActorService.getCurrentActorId()).thenReturn(null);
     }
 
     private PostPublishCommand command(String slug, String title, List<MultipartFile> images, String featuredImageFilename) {
+        return command(slug, title, images, featuredImageFilename, null);
+    }
+
+    private PostPublishCommand command(String slug, String title, List<MultipartFile> images,
+            String featuredImageFilename, List<String> imageReferences) {
         return new PostPublishCommand(
-                "main", title, slug, "draft", List.of(), List.of(), null, "本文", images, featuredImageFilename);
+                "main", title, slug, "draft", List.of(), List.of(), null, "本文", images, featuredImageFilename,
+                imageReferences);
     }
 
     @Test
@@ -200,5 +213,128 @@ class PostPublishServiceTest {
         service.publish(command("my-article", "My Article", images, null));
 
         verify(markdownRenderer).render("![alt](https://example.com/wp-content/uploads/1.png)");
+    }
+
+    @Test
+    void publish_assetsサブフォルダ参照はimageReferencesを使い二重結合されずに置換される() {
+        // マルチパートのoriginalFilenameがコンテナ/サーバー側で"assets/eyecatch.png"から
+        // "eyecatch.png"へパス部分を失って渡ってきても(実運用で確認された不具合の再現)、
+        // imageReferencesで明示された"assets/eyecatch.png"を優先して置換に使う。
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
+                .thenReturn(new MediaUploadResult("11", "https://example.com/wp-content/uploads/1.png"));
+        when(customTagRenderService.render(anyString(), any())).thenReturn("![alt](assets/eyecatch.png)");
+
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
+
+        service.publish(command("my-article", "My Article", images, "assets/eyecatch.png",
+                List.of("assets/eyecatch.png")));
+
+        verify(markdownRenderer).render("![alt](https://example.com/wp-content/uploads/1.png)");
+        ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
+        verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
+        assertEquals("11", contentCaptor.getValue().featuredMediaId());
+    }
+
+    @Test
+    void publish_発信者に対応するWordPressユーザーが見つかればauthorIdを設定する() {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        when(currentActorService.getCurrentActorId()).thenReturn(10L);
+        com.letsblog.api.domain.User user = new com.letsblog.api.domain.User();
+        user.setId(10L);
+        user.setEmail("author@example.com");
+        when(userRepository.findById(10L)).thenReturn(Optional.of(user));
+        when(cmsAdapter.findAuthorIdByEmail(credentials, "author@example.com")).thenReturn(Optional.of("7"));
+
+        service.publish(command("my-article", "My Article", List.of(), null));
+
+        ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
+        verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
+        assertEquals("7", contentCaptor.getValue().authorId());
+    }
+
+    @Test
+    void publish_発信者不明時はauthorIdがnullのまま投稿を続行する() {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+
+        service.publish(command("my-article", "My Article", List.of(), null));
+
+        ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
+        verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
+        assertNull(contentCaptor.getValue().authorId());
+    }
+
+    @Test
+    void publish_著者解決が例外を投げても投稿は続行される() {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        when(currentActorService.getCurrentActorId()).thenReturn(10L);
+        when(userRepository.findById(10L)).thenThrow(new RuntimeException("DB接続エラー"));
+
+        PostPublishResponse response = service.publish(command("my-article", "My Article", List.of(), null));
+
+        assertEquals("101", response.wpPostId());
+        ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
+        verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
+        assertNull(contentCaptor.getValue().authorId());
+    }
+
+    private String sha256Hex(byte[] data) throws Exception {
+        java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+        return java.util.HexFormat.of().formatHex(digest.digest(data));
+    }
+
+    @Test
+    void publish_再投稿時に内容が同じ画像は再アップロードしない() throws Exception {
+        com.letsblog.api.domain.Post existingPost = new com.letsblog.api.domain.Post();
+        existingPost.setSiteId(1L);
+        existingPost.setWpPostId("55");
+        String sha256 = sha256Hex(new byte[]{1});
+        existingPost.setUploadedImagesJson(
+                "{\"assets/eyecatch.png\":{\"sha256\":\"" + sha256 + "\","
+                        + "\"url\":\"https://example.com/wp-content/uploads/1.png\",\"mediaId\":\"11\"}}");
+        when(postRepository.findBySiteIdAndWpPostId(1L, "55")).thenReturn(Optional.of(existingPost));
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
+
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
+        PostPublishCommand command = new PostPublishCommand(
+                "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", images, null,
+                List.of("assets/eyecatch.png"));
+
+        service.publish(command);
+
+        verify(cmsAdapter, org.mockito.Mockito.never()).uploadMedia(any(), any(), any(), any());
+    }
+
+    @Test
+    void publish_再投稿時に内容が異なる画像は再アップロードされる() throws Exception {
+        com.letsblog.api.domain.Post existingPost = new com.letsblog.api.domain.Post();
+        existingPost.setSiteId(1L);
+        existingPost.setWpPostId("55");
+        String oldSha256 = sha256Hex(new byte[]{9, 9, 9});
+        existingPost.setUploadedImagesJson(
+                "{\"assets/eyecatch.png\":{\"sha256\":\"" + oldSha256 + "\","
+                        + "\"url\":\"https://example.com/old.png\",\"mediaId\":\"1\"}}");
+        when(postRepository.findBySiteIdAndWpPostId(1L, "55")).thenReturn(Optional.of(existingPost));
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
+                .thenReturn(new MediaUploadResult("22", "https://example.com/wp-content/uploads/2.png"));
+
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
+        PostPublishCommand command = new PostPublishCommand(
+                "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", images, null,
+                List.of("assets/eyecatch.png"));
+
+        service.publish(command);
+
+        verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.png"), any(), any());
     }
 }

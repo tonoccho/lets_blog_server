@@ -3,6 +3,7 @@ package com.letsblog.api.service;
 import com.letsblog.api.aop.AuditLog;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Project;
+import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.ProjectResponse;
 import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
 import com.letsblog.api.repository.ProjectRepository;
@@ -154,6 +155,20 @@ public class ProjectService {
     public Project getProjectEntity(Long projectId) {
         return projectRepository.findById(projectId)
                 .orElseThrow(() -> new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません"));
+    }
+
+    /**
+     * プロジェクトのマスター環境(test/production)に紐づくサイトを解決する。未紐付けの場合はnullを返す。
+     * テーマCSS取得(ArticlePreviewService)・既存カテゴリ一覧取得(ArticlePlanService)など、
+     * 「複数環境のうちどれを基準にするか」を要する機能から共通で利用する。
+     */
+    public Site resolveMasterSite(Project project) {
+        Long siteId = switch (project.getMasterEnvironment()) {
+            case "test" -> project.getTestSiteId();
+            case "production" -> project.getProductionSiteId();
+            default -> null;
+        };
+        return siteId == null ? null : siteRepository.findById(siteId).orElse(null);
     }
 
     private ProjectResponse toResponse(Project project) {

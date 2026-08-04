@@ -13,6 +13,7 @@ import * as api from './apiClient';
 import { PlanPanel } from './planPanel';
 import { PreviewPanel } from './previewPanel';
 import { ImageGenPanel } from './imageGenPanel';
+import { SectionGenPanel } from './sectionGenPanel';
 
 export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
@@ -20,9 +21,11 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.setApiKey', () => commandSetApiKey(context)),
     vscode.commands.registerCommand('letsBlog.selectSite', () => commandSelectSite(context)),
     vscode.commands.registerCommand('letsBlog.publish', () => commandPublish(context)),
+    vscode.commands.registerCommand('letsBlog.deletePost', () => commandDeletePost(context)),
     vscode.commands.registerCommand('letsBlog.askAi', () => commandAskAi(context)),
     vscode.commands.registerCommand('letsBlog.suggestTags', () => commandSuggestTags(context)),
     vscode.commands.registerCommand('letsBlog.generateImage', () => commandGenerateImage(context)),
+    vscode.commands.registerCommand('letsBlog.generateSection', () => commandGenerateSection(context)),
     vscode.commands.registerCommand('letsBlog.selectProject', () => commandSelectProject(context)),
     vscode.commands.registerCommand('letsBlog.planArticle', () => commandPlanArticle(context)),
     vscode.commands.registerCommand('letsBlog.previewArticle', () => commandPreviewArticle(context))
@@ -40,6 +43,18 @@ function getActiveMarkdownEditor(): vscode.TextEditor | undefined {
     return undefined;
   }
   return editor;
+}
+
+/**
+ * AI生成結果末尾に付加する出典セクション。出典があるかのように装わないよう、
+ * 検索失敗/未設定/0件時はsearchNoteでその旨を明示する。
+ */
+function buildSourcesSection(sources: api.SourceReference[], searchNote: string | null): string {
+  if (sources.length === 0) {
+    return searchNote ? `\n\n---\n*${searchNote}*\n` : '';
+  }
+  const list = sources.map((s) => `- [${s.title}](${s.url})`).join('\n');
+  return `\n\n---\n**出典:**\n${list}\n`;
 }
 
 async function replaceDocumentText(editor: vscode.TextEditor, newText: string): Promise<void> {
@@ -151,13 +166,25 @@ async function publishToSite(
   }
 
   const baseDir = path.dirname(editor.document.uri.fsPath);
-  const bodyImages = extractLocalImageReferences(article.content, baseDir).filter((img) =>
-    fs.existsSync(img.absolutePath)
-  );
+  const allBodyImages = extractLocalImageReferences(article.content, baseDir);
+  const bodyImages = allBodyImages.filter((img) => fs.existsSync(img.absolutePath));
   const featuredImage = resolveFeaturedImageReference(article.data, baseDir);
 
+  const missingReferences = allBodyImages
+    .filter((img) => !fs.existsSync(img.absolutePath))
+    .map((img) => img.reference);
+  const featuredImageMissing = featuredImage != null && !fs.existsSync(featuredImage.absolutePath);
+  if (featuredImageMissing) {
+    missingReferences.push(featuredImage.reference);
+  }
+  if (missingReferences.length > 0) {
+    vscode.window.showWarningMessage(
+      `以下の画像ファイルが見つからないため、投稿に含まれません: ${missingReferences.join(', ')}`
+    );
+  }
+
   const images = [...bodyImages];
-  if (featuredImage && fs.existsSync(featuredImage.absolutePath)) {
+  if (featuredImage && !featuredImageMissing) {
     if (!images.find((img) => img.reference === featuredImage.reference)) {
       images.push(featuredImage);
     }
@@ -265,6 +292,66 @@ async function commandPublish(context: vscode.ExtensionContext): Promise<void> {
   }
 }
 
+/**
+ * 現在の記事を、front matterのwp_post_idsに記録されているサイトから選んで削除する
+ * (WordPressの場合、既定でゴミ箱へ移動する。完全削除は行わない)。
+ */
+async function commandDeletePost(context: vscode.ExtensionContext): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  try {
+    const article = parseArticle(editor.document.getText());
+    const wpPostIds = article.data.wp_post_ids ?? {};
+    const siteKeys = Object.keys(wpPostIds);
+
+    if (siteKeys.length === 0) {
+      vscode.window.showErrorMessage('この記事はまだどのサイトにも投稿されていません。');
+      return;
+    }
+
+    let siteKey: string;
+    if (siteKeys.length === 1) {
+      siteKey = siteKeys[0];
+    } else {
+      const picked = await vscode.window.showQuickPick(
+        siteKeys.map((key) => ({ label: key, description: wpPostIds[key] })),
+        { placeHolder: '削除対象のサイトを選択' }
+      );
+      if (!picked) return;
+      siteKey = picked.label;
+    }
+
+    const wpPostId = wpPostIds[siteKey];
+    const confirmation = await vscode.window.showWarningMessage(
+      `サイト '${siteKey}' の投稿(ID: ${wpPostId})を削除します(WordPressの場合はゴミ箱へ移動します)。よろしいですか?`,
+      { modal: true },
+      '削除する'
+    );
+    if (confirmation !== '削除する') return;
+
+    const apiKey = await requireApiKey(context);
+    const actor = await getActor(context);
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: '投稿を削除しています…' },
+      () => api.deletePost(getServerUrl(), apiKey, actor, siteKey, wpPostId)
+    );
+
+    const remainingWpPostIds = { ...wpPostIds };
+    delete remainingWpPostIds[siteKey];
+    article.data.wp_post_ids = remainingWpPostIds;
+    if (article.data.site === siteKey) {
+      article.data.wp_post_id = null;
+      article.data.wp_post_url = null;
+    }
+    await replaceDocumentText(editor, stringifyArticle(article));
+
+    vscode.window.showInformationMessage(`サイト '${siteKey}' の投稿を削除しました。`);
+  } catch (err) {
+    vscode.window.showErrorMessage(`投稿の削除に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+  }
+}
+
 async function commandAskAi(context: vscode.ExtensionContext): Promise<void> {
   const editor = getActiveMarkdownEditor();
   if (!editor) return;
@@ -290,7 +377,8 @@ async function commandAskAi(context: vscode.ExtensionContext): Promise<void> {
       () => api.askAi(getServerUrl(), apiKey, mode.value, text)
     );
 
-    const doc = await vscode.workspace.openTextDocument({ content: result.result, language: 'markdown' });
+    const content = result.result + buildSourcesSection(result.sources, result.searchNote);
+    const doc = await vscode.workspace.openTextDocument({ content, language: 'markdown' });
     await vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.Beside });
   } catch (err) {
     vscode.window.showErrorMessage(`AI呼び出しに失敗しました: ${String(err instanceof Error ? err.message : err)}`);
@@ -359,6 +447,21 @@ async function commandGenerateImage(context: vscode.ExtensionContext): Promise<v
     ImageGenPanel.createOrShow(context, editor, baseDir, projectId);
   } catch (err) {
     vscode.window.showErrorMessage(`画像生成パネルの起動に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+  }
+}
+
+async function commandGenerateSection(context: vscode.ExtensionContext): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  try {
+    const article = parseArticle(editor.document.getText());
+    const articleTitle = typeof article.data.title === 'string' ? article.data.title : undefined;
+    SectionGenPanel.createOrShow(context, editor, articleTitle);
+  } catch (err) {
+    vscode.window.showErrorMessage(
+      `セクション生成パネルの起動に失敗しました: ${String(err instanceof Error ? err.message : err)}`
+    );
   }
 }
 

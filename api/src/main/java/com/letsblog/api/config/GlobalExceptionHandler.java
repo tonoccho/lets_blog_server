@@ -5,6 +5,7 @@ import com.letsblog.api.cms.agent.AgentOperationException;
 import com.letsblog.api.cms.ssh.SshOperationException;
 import com.letsblog.api.github.GithubApiException;
 import com.letsblog.api.service.ArticlePlanSessionNotFoundException;
+import com.letsblog.api.service.BackupException;
 import com.letsblog.api.service.CustomTagNotFoundException;
 import com.letsblog.api.service.EmailAlreadyExistsException;
 import com.letsblog.api.service.EmailSendException;
@@ -162,6 +163,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(QrCodeGenerationException.class)
     public ResponseEntity<Map<String, String>> handleQrCodeGeneration(QrCodeGenerationException e) {
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(BackupException.class)
+    public ResponseEntity<Map<String, String>> handleBackupException(BackupException e) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
     }
 

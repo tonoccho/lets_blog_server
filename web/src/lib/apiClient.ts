@@ -525,6 +525,29 @@ export function removeRole(userId: number, roleName: string, actor: ActorInfo): 
   return apiFetch<{ message: string }>(`/api/users/${userId}/roles/${roleName}`, { method: 'DELETE', actor });
 }
 
+export interface BraveSearchApiKeyStatus {
+  configured: boolean;
+  source: "DATABASE" | "ENVIRONMENT" | "NONE";
+}
+
+/** 実際のキー値は取得できない(設定済みかどうか・設定元のみ)。 */
+export function getBraveSearchApiKeyStatus(actor?: ActorInfo): Promise<BraveSearchApiKeyStatus> {
+  return apiFetch<BraveSearchApiKeyStatus>('/api/system-settings/brave-search-api-key', { actor });
+}
+
+export function setBraveSearchApiKey(apiKey: string, actor: ActorInfo): Promise<void> {
+  return apiFetch<void>('/api/system-settings/brave-search-api-key', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apiKey }),
+    actor,
+  });
+}
+
+export function clearBraveSearchApiKey(actor: ActorInfo): Promise<void> {
+  return apiFetch<void>('/api/system-settings/brave-search-api-key', { method: 'DELETE', actor });
+}
+
 export function requestPasswordReset(email: string): Promise<{ message: string }> {
   return apiFetch<{ message: string }>('/api/auth/password-reset/request', {
     method: 'POST',
@@ -585,6 +608,59 @@ export function updateCustomTag(id: number, input: CustomTagInput, actor: ActorI
 
 export function deleteCustomTag(id: number, actor: ActorInfo): Promise<void> {
   return apiFetch<void>(`/api/custom-tags/${id}`, { method: 'DELETE', actor });
+}
+
+export async function downloadCustomTagCssBundle(projectId?: number | null): Promise<ArrayBuffer> {
+  const query = projectId != null ? `?projectId=${projectId}` : '';
+  const res = await fetch(`${serverUrl()}/api/custom-tags/css-bundle${query}`, {
+    headers: { 'X-API-Key': await currentApiKey() },
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
+  }
+  return res.arrayBuffer();
+}
+
+/**
+ * Let's Blogアプリ自身のバックアップアーカイブ(DB + 生成画像ファイル + メタデータをまとめたZIP)を
+ * ダウンロードする(admin限定)。
+ */
+export async function downloadBackupFile(): Promise<{ body: ArrayBuffer; filename: string }> {
+  const res = await fetch(`${serverUrl()}/api/backup/download`, {
+    headers: { 'X-API-Key': await currentApiKey() },
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
+  }
+  const disposition = res.headers.get('content-disposition') ?? '';
+  const match = disposition.match(/filename="([^"]+)"/);
+  return { body: await res.arrayBuffer(), filename: match?.[1] ?? 'lets-blog-backup.zip' };
+}
+
+/**
+ * アップロードしたバックアップアーカイブでDB+生成画像ファイルを復元する(admin限定、
+ * 破壊的操作のためconfirm=trueが必須)。バックアップ作成時と異なるAPP_ENCRYPTION_KEYの
+ * 環境へリストアしようとした場合、acknowledgeKeyMismatchがfalseだとサーバー側で拒否される
+ * (サイト認証情報等が復号できなくなるデータ破損を防ぐため)。
+ */
+export async function restoreBackup(
+  file: File,
+  actor: ActorInfo,
+  acknowledgeKeyMismatch: boolean
+): Promise<void> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('confirm', 'true');
+  formData.append('acknowledgeKeyMismatch', String(acknowledgeKeyMismatch));
+  return apiFetch<void>('/api/backup/restore', {
+    method: 'POST',
+    body: formData,
+    actor,
+  });
 }
 
 export interface AuditLogEntry {

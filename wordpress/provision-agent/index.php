@@ -771,6 +771,25 @@ if ($path === '/wp-cli/provision-author' && $_SERVER['REQUEST_METHOD'] === 'POST
     respond(200, ['userId' => $userId]);
 }
 
+if ($path === '/wp-cli/find-author' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    $email = (string) ($input['email'] ?? '');
+
+    if (!isValidSlug($slug) || $email === '' || !str_contains($email, '@')) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = resolveExistingSitePath($slug);
+    if ($sitePath === null) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    [$code, $out, $err] = runWp(['user', 'list', "--search=$email", '--fields=ID', '--format=json', "--path=$sitePath", '--allow-root']);
+    $existing = $code === 0 ? (json_decode($out, true) ?: []) : [];
+    $userId = !empty($existing) ? (string) $existing[0]['ID'] : null;
+
+    respond(200, ['userId' => $userId]);
+}
+
 if ($path === '/wp-cli/post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = (string) ($input['slug'] ?? '');
     $title = (string) ($input['title'] ?? '');
@@ -780,6 +799,7 @@ if ($path === '/wp-cli/post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $categoryIds = is_array($input['categoryIds'] ?? null) ? array_values($input['categoryIds']) : [];
     $tagIds = is_array($input['tagIds'] ?? null) ? array_values($input['tagIds']) : [];
     $featuredMediaId = $input['featuredMediaId'] ?? null;
+    $authorId = $input['authorId'] ?? null;
     $htmlContent = (string) ($input['htmlContent'] ?? '');
 
     if (!isValidSlug($slug) || $title === '' || $status === '') {
@@ -802,20 +822,35 @@ if ($path === '/wp-cli/post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!empty($tagIds)) {
         $subArgs[] = '--tax_input=' . json_encode(['post_tag' => array_map('intval', $tagIds)]);
     }
-    if ($featuredMediaId !== null) {
-        $subArgs[] = '--post_thumbnail=' . $featuredMediaId;
+    if ($authorId !== null) {
+        $subArgs[] = '--post_author=' . $authorId;
     }
     $subArgs[] = '--porcelain';
     $subArgs[] = "--path=$sitePath";
     $subArgs[] = '--allow-root';
 
+    error_log("[wp-cli/post] slug=$slug existingPostId=" . var_export($existingPostId, true)
+        . " featuredMediaId=" . var_export($featuredMediaId, true) . " args=" . implode(' ', $subArgs));
+
     [$code, $out, $err] = runWpWithStdin($subArgs, $htmlContent);
     if ($code !== 0) {
+        error_log("[wp-cli/post] post create/update失敗: code=$code detail=" . combinedOutput($out, $err));
         respond(500, ['error' => '投稿の作成/更新に失敗しました', 'detail' => combinedOutput($out, $err)]);
     }
     // $existingPostIdはinputそのまま(更新対象)、新規作成時は$out(porcelain出力のstdoutのみ、
     // stderrへのPHP Warning等が混ざらないよう分離済み)を投稿IDとして使う。
     $postId = $existingPostId !== null ? (string) $existingPostId : $out;
+
+    // `wp post create/update`の--post_thumbnailはwp_insert_post()の認識するフィールドではなく
+    // 黙って無視される(_thumbnail_id postmetaが更新されない)ため、明示的に`post meta update`で設定する。
+    if ($featuredMediaId !== null) {
+        [$thumbCode, $thumbOut, $thumbErr] = runWp(['post', 'meta', 'update', $postId, '_thumbnail_id', (string) $featuredMediaId, "--path=$sitePath", '--allow-root']);
+        if ($thumbCode !== 0) {
+            error_log("[wp-cli/post] postId=$postId のアイキャッチ設定に失敗: code=$thumbCode detail=" . combinedOutput($thumbOut, $thumbErr));
+            respond(500, ['error' => 'アイキャッチ(featured media)の設定に失敗しました', 'detail' => combinedOutput($thumbOut, $thumbErr)]);
+        }
+        error_log("[wp-cli/post] postId=$postId のアイキャッチをmediaId=$featuredMediaId に設定しました");
+    }
 
     [$code, $out, $err] = runWp(['post', 'get', $postId, '--fields=guid,post_status', '--format=json', "--path=$sitePath", '--allow-root']);
     if ($code !== 0) {
@@ -823,6 +858,26 @@ if ($path === '/wp-cli/post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     $post = json_decode($out, true) ?: [];
     respond(200, ['postId' => $postId, 'guid' => $post['guid'] ?? '', 'status' => $post['post_status'] ?? '']);
+}
+
+if ($path === '/wp-cli/post-delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    $postId = (string) ($input['postId'] ?? '');
+
+    if (!isValidSlug($slug) || $postId === '') {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = resolveExistingSitePath($slug);
+    if ($sitePath === null) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    // --forceを付けない = WordPressコアのwp_delete_post()既定挙動(ゴミ箱対応の投稿タイプはゴミ箱へ移動)に委ねる
+    [$code, $out, $err] = runWp(['post', 'delete', $postId, '--yes', "--path=$sitePath", '--allow-root']);
+    if ($code !== 0) {
+        respond(500, ['error' => '投稿の削除に失敗しました', 'detail' => combinedOutput($out, $err)]);
+    }
+    respond(200, ['postId' => $postId]);
 }
 
 if ($path === '/wp-cli/media-upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {

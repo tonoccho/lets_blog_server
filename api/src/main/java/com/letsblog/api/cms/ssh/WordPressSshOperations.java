@@ -510,6 +510,11 @@ public class WordPressSshOperations {
         }
     }
 
+    /** メールアドレスに一致する既存WordPressユーザーIDを検索する(作成は行わない、読み取り専用)。 */
+    public java.util.Optional<String> findAuthorIdByEmail(WordPressCredentials creds, String email) {
+        return java.util.Optional.ofNullable(findExistingAuthorId(creds, email));
+    }
+
     private String findExistingAuthorId(WordPressCredentials creds, String email) {
         SshCommandResult result = exec(creds, wpCli(creds,
                 "user list --search=" + ShellQuote.single(email) + " --fields=ID --format=json"));
@@ -567,6 +572,8 @@ public class WordPressSshOperations {
     public PostResult createOrUpdatePost(WordPressCredentials creds, PostContent content, String existingPostId) {
         byte[] stdin = (content.htmlContent() != null ? content.htmlContent() : "").getBytes(StandardCharsets.UTF_8);
         String fields = postFieldsArgs(content);
+        log.info("SSH投稿コマンド組み立て: existingPostId={}, featuredMediaId={}, args={}",
+                existingPostId, content.featuredMediaId(), fields);
 
         String subcommand = existingPostId == null
                 ? "post create - " + fields + " --porcelain"
@@ -578,7 +585,25 @@ public class WordPressSshOperations {
                     + firstLine(result.stderr(), result.stdout()));
         }
         String postId = existingPostId != null ? existingPostId : result.stdout().strip();
+        if (content.featuredMediaId() != null) {
+            setFeaturedMedia(creds, postId, content.featuredMediaId());
+        }
         return fetchPostResult(creds, postId);
+    }
+
+    /**
+     * `wp post create/update`の`--post_thumbnail`は wp_insert_post() の認識するフィールドではなく
+     * 黙って無視される(_thumbnail_id postmetaが更新されない)ため、投稿作成/更新後に
+     * `wp post meta update` で明示的にアイキャッチ(_thumbnail_id)を設定する。
+     */
+    private void setFeaturedMedia(WordPressCredentials creds, String postId, String mediaId) {
+        SshCommandResult result = exec(creds, wpCli(creds,
+                "post meta update " + postId + " _thumbnail_id " + ShellQuote.single(mediaId)));
+        if (!result.ok()) {
+            throw new SshOperationException("アイキャッチ(featured media)の設定に失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+        log.info("投稿{}のアイキャッチをmediaId={}に設定しました", postId, mediaId);
     }
 
     private String postFieldsArgs(PostContent content) {
@@ -595,8 +620,8 @@ public class WordPressSshOperations {
             String tagIds = String.join(",", content.tagIds());
             args.append(" --tax_input=").append(ShellQuote.single("{\"post_tag\":[" + tagIds + "]}"));
         }
-        if (content.featuredMediaId() != null) {
-            args.append(" --post_thumbnail=").append(ShellQuote.single(content.featuredMediaId()));
+        if (content.authorId() != null) {
+            args.append(" --post_author=").append(ShellQuote.single(content.authorId()));
         }
         return args.toString();
     }
@@ -621,6 +646,19 @@ public class WordPressSshOperations {
             return node;
         } catch (IOException e) {
             throw new SshOperationException("wp-cliの出力(JSON)の解析に失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * `wp post delete`を`--force`なしで実行する(ゴミ箱対応の投稿タイプはWordPressコアの
+     * `wp_delete_post()`既定挙動でゴミ箱へ移動される。REST API版(forceパラメータなし)と
+     * 同じ挙動になる想定)。
+     */
+    public void deletePost(WordPressCredentials creds, String postId) {
+        SshCommandResult result = exec(creds, wpCli(creds, "post delete " + postId + " --yes"));
+        if (!result.ok()) {
+            throw new SshOperationException("WordPress投稿の削除に失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
         }
     }
 

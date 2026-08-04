@@ -9,6 +9,7 @@ public record PostContent(
         String status,
         List<String> categoryIds,
         List<String> tagIds,
-        String featuredMediaId
+        String featuredMediaId,
+        String authorId
 ) {
 }

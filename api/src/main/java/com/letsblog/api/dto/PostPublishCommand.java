@@ -14,6 +14,7 @@ public record PostPublishCommand(
         String wpPostId,
         String markdown,
         List<MultipartFile> images,
-        String featuredImageFilename
+        String featuredImageFilename,
+        List<String> imageReferences
 ) {
 }

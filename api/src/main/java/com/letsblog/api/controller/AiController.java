@@ -4,6 +4,8 @@ import com.letsblog.api.dto.AiDraftRequest;
 import com.letsblog.api.dto.AiDraftResponse;
 import com.letsblog.api.dto.AiImageRequest;
 import com.letsblog.api.dto.AiImageResponse;
+import com.letsblog.api.dto.AiSectionRequest;
+import com.letsblog.api.dto.AiSectionResponse;
 import com.letsblog.api.dto.AiTagsRequest;
 import com.letsblog.api.dto.AiTagsResponse;
 import com.letsblog.api.dto.ImageGenerationOptionsResponse;
@@ -42,5 +44,10 @@ public class AiController {
     @GetMapping("/api/ai/image-options")
     public ImageGenerationOptionsResponse imageOptions(@RequestParam(required = false) Long projectId) {
         return aiAssistService.getImageOptions(projectId);
+    }
+
+    @PostMapping("/api/ai/section")
+    public AiSectionResponse section(@Valid @RequestBody AiSectionRequest request) {
+        return aiAssistService.generateSection(request);
     }
 }
