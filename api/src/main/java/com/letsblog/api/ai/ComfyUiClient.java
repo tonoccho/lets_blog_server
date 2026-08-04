@@ -2,6 +2,7 @@ package com.letsblog.api.ai;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -25,6 +26,7 @@ public class ComfyUiClient {
     private final RestClient client;
     private final String checkpointName;
 
+    @Autowired
     public ComfyUiClient(@Value("${app.comfyui-base-url}") String baseUrl,
                           @Value("${app.comfyui-checkpoint}") String checkpointName) {
         this(RestClient.builder().baseUrl(baseUrl), checkpointName);
