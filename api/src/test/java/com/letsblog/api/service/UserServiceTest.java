@@ -40,13 +40,16 @@ class UserServiceTest {
     @Mock
     private RoleRepository roleRepository;
 
+    @Mock
+    private ApiKeyService apiKeyService;
+
     private final CredentialCipher credentialCipher = new CredentialCipher(
             java.util.Base64.getEncoder().encodeToString(new byte[32]));
 
     private UserService service;
 
     private UserService service() {
-        return new UserService(userRepository, twoFactorSecretRepository, roleRepository, credentialCipher);
+        return new UserService(userRepository, twoFactorSecretRepository, roleRepository, credentialCipher, apiKeyService);
     }
 
     @Test
@@ -146,11 +149,13 @@ class UserServiceTest {
         service = service();
         when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(buildUser()));
         when(twoFactorSecretRepository.findByUserIdAndIsEnabledTrue(1L)).thenReturn(Optional.empty());
+        when(apiKeyService.issue(any(User.class), any())).thenReturn("lb_test");
 
-        LoginResponse response = service.login("user@example.com", "password123");
+        LoginResponse response = service.login("user@example.com", "password123", "test");
 
         assertFalse(response.twoFactorRequired());
         assertEquals("user@example.com", response.user().email());
+        assertEquals("lb_test", response.apiKey());
     }
 
     @Test
@@ -160,7 +165,7 @@ class UserServiceTest {
         when(twoFactorSecretRepository.findByUserIdAndIsEnabledTrue(1L))
                 .thenReturn(Optional.of(new TwoFactorSecret()));
 
-        LoginResponse response = service.login("user@example.com", "password123");
+        LoginResponse response = service.login("user@example.com", "password123", "test");
 
         assertTrue(response.twoFactorRequired());
     }
@@ -171,7 +176,7 @@ class UserServiceTest {
         when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(buildUser()));
 
         assertThrows(InvalidCredentialsException.class,
-                () -> service.login("user@example.com", "wrong-password"));
+                () -> service.login("user@example.com", "wrong-password", "test"));
     }
 
     @Test

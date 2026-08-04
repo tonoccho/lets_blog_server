@@ -9,6 +9,7 @@ import jakarta.validation.constraints.NotNull;
  */
 public record TotpLoginVerifyRequest(
         @NotNull Long userId,
-        @NotBlank(message = "TOTPコードは必須です") String code
+        @NotBlank(message = "TOTPコードは必須です") String code,
+        String label
 ) {
 }

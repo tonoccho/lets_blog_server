@@ -43,26 +43,31 @@ public class UserService {
     private final TwoFactorSecretRepository twoFactorSecretRepository;
     private final RoleRepository roleRepository;
     private final CredentialCipher credentialCipher;
+    private final ApiKeyService apiKeyService;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     public UserService(
             UserRepository userRepository,
             TwoFactorSecretRepository twoFactorSecretRepository,
             RoleRepository roleRepository,
-            CredentialCipher credentialCipher) {
+            CredentialCipher credentialCipher,
+            ApiKeyService apiKeyService) {
         this.userRepository = userRepository;
         this.twoFactorSecretRepository = twoFactorSecretRepository;
         this.roleRepository = roleRepository;
         this.credentialCipher = credentialCipher;
+        this.apiKeyService = apiKeyService;
     }
 
     /**
-     * パスワード認証のみを行う。2FAが有効なユーザーはtwoFactorRequired=trueを返し、
-     * 呼び出し元(Web BFF)はTOTPコード入力を経て /api/auth/totp/verify で本ログインを完了させる。
+     * パスワード認証を行う。2FAが有効なユーザーはtwoFactorRequired=trueのみを返し、
+     * この時点ではAPIキーを発行しない。呼び出し元はTOTPコード入力を経て
+     * /api/auth/totp/verify でログインを完了させ、そこでキーを取得する。
+     * 2FAが無効なユーザーはこの時点で認証完了とみなし、APIキーを発行して返す。
      */
     @AuditLog(action = AuditLogAction.LOGIN, resourceType = "USER")
-    @Transactional(readOnly = true)
-    public LoginResponse login(String email, String password) {
+    @Transactional
+    public LoginResponse login(String email, String password, String label) {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new InvalidCredentialsException("メールアドレスまたはパスワードが正しくありません"));
 
@@ -71,7 +76,11 @@ public class UserService {
         }
 
         boolean twoFactorRequired = twoFactorSecretRepository.findByUserIdAndIsEnabledTrue(user.getId()).isPresent();
-        return new LoginResponse(UserResponse.from(user), twoFactorRequired);
+        if (twoFactorRequired) {
+            return new LoginResponse(UserResponse.from(user), true, null);
+        }
+        String apiKey = apiKeyService.issue(user, label);
+        return new LoginResponse(UserResponse.from(user), false, apiKey);
     }
 
     @Transactional(readOnly = true)

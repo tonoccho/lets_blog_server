@@ -8,12 +8,8 @@ const ADMIN_ONLY_PREFIXES = ["/users", "/audit-logs", "/admin"];
 async function needsInitialSetup(): Promise<boolean> {
   try {
     const apiUrl = (process.env.LETS_BLOG_API_URL ?? "https://localhost").replace(/\/+$/, "");
-    const apiKey = process.env.LETS_BLOG_API_KEY;
-    if (!apiKey) {
-      return false;
-    }
+    // /api/auth/setup-status はログイン前でも到達できる公開エンドポイントのためAPIキー不要。
     const res = await fetch(`${apiUrl}/api/auth/setup-status`, {
-      headers: { "X-API-Key": apiKey },
       cache: "no-store",
     });
     if (!res.ok) {

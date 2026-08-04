@@ -1,4 +1,6 @@
 import 'server-only';
+import { cookies, headers } from 'next/headers';
+import { getToken } from 'next-auth/jwt';
 
 export type CmsType = "WORDPRESS" | "MICROCMS";
 
@@ -59,6 +61,7 @@ export interface AuthenticatedUser {
 export interface LoginResult {
   user: AuthenticatedUser;
   twoFactorRequired: boolean;
+  apiKey: string | null;
 }
 
 export interface TwoFactorSetup {
@@ -93,12 +96,21 @@ function serverUrl(): string {
   return (process.env.LETS_BLOG_API_URL ?? 'https://localhost').replace(/\/+$/, '');
 }
 
-function apiKey(): string {
-  const key = process.env.LETS_BLOG_API_KEY;
-  if (!key) {
-    throw new Error('環境変数 LETS_BLOG_API_KEY が設定されていません。');
+/**
+ * ログイン中ユーザーのAPIキーをNextAuthのJWT(HttpOnly cookie)から取得する。
+ * next-auth/jwtのgetToken()はreq.cookies/req.headersしか参照しないため、
+ * NextRequestが無いServer Component/Server Actionからでもnext/headersのcookies()/headers()を
+ * そのまま渡せる(型定義上はNextRequest等を期待しているため as any で吸収する)。
+ */
+async function currentApiKey(): Promise<string> {
+  const token = await getToken({
+    req: { cookies: await cookies(), headers: await headers() } as unknown as Parameters<typeof getToken>[0]['req'],
+    secret: process.env.NEXTAUTH_SECRET,
+  });
+  if (!token?.apiKey) {
+    throw new Error('ログインしていないか、APIキーが未取得です。再度ログインしてください。');
   }
-  return key;
+  return token.apiKey;
 }
 
 export interface ActorInfo {
@@ -108,14 +120,16 @@ export interface ActorInfo {
 
 interface ApiFetchInit extends RequestInit {
   actor?: ActorInfo;
+  /** ログイン前でも呼べる公開エンドポイント(signup/setup/setup-status)向け。既定はtrue。 */
+  requiresAuth?: boolean;
 }
 
 async function apiFetch<T>(path: string, init?: ApiFetchInit): Promise<T> {
-  const { actor, ...requestInit } = init ?? {};
+  const { actor, requiresAuth = true, ...requestInit } = init ?? {};
   const res = await fetch(`${serverUrl()}${path}`, {
     ...requestInit,
     headers: {
-      'X-API-Key': apiKey(),
+      ...(requiresAuth ? { 'X-API-Key': await currentApiKey() } : {}),
       ...(actor ? { 'X-Actor-Id': String(actor.id), 'X-Actor-Role': actor.role } : {}),
       ...(requestInit.headers ?? {}),
     },
@@ -239,10 +253,9 @@ export async function login(email: string, password: string): Promise<LoginResul
   const res = await fetch(`${serverUrl()}/api/auth/login`, {
     method: 'POST',
     headers: {
-      'X-API-Key': apiKey(),
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, label: 'web' }),
     cache: 'no-store',
   });
 
@@ -265,10 +278,9 @@ export async function verifyTotpLogin(userId: number, code: string): Promise<Log
   const res = await fetch(`${serverUrl()}/api/auth/totp/verify`, {
     method: 'POST',
     headers: {
-      'X-API-Key': apiKey(),
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ userId, code }),
+    body: JSON.stringify({ userId, code, label: 'web' }),
     cache: 'no-store',
   });
 
@@ -312,11 +324,12 @@ export function signup(email: string, password: string): Promise<AuthenticatedUs
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
+    requiresAuth: false,
   });
 }
 
 export function getSetupStatus(): Promise<{ needsSetup: boolean }> {
-  return apiFetch<{ needsSetup: boolean }>('/api/auth/setup-status');
+  return apiFetch<{ needsSetup: boolean }>('/api/auth/setup-status', { requiresAuth: false });
 }
 
 export function setupInitialAdmin(email: string, password: string): Promise<AuthenticatedUser> {
@@ -324,6 +337,7 @@ export function setupInitialAdmin(email: string, password: string): Promise<Auth
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
+    requiresAuth: false,
   });
 }
 
@@ -1407,7 +1421,7 @@ export function deleteComfyUiCheckpoint(
  */
 export async function downloadVscodeExtension(): Promise<{ body: ArrayBuffer; filename: string }> {
   const res = await fetch(`${serverUrl()}/api/system/vscode-extension`, {
-    headers: { 'X-API-Key': apiKey() },
+    headers: { 'X-API-Key': await currentApiKey() },
     cache: 'no-store',
   });
   if (!res.ok) {
