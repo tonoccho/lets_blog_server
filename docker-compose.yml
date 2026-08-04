@@ -23,7 +23,6 @@ services:
       # コンテナ間通信のためlbs-net内部でapiへ直接到達させる(自己署名証明書を経由しないため
       # NODE_EXTRA_CA_CERTSは不要)
       LETS_BLOG_API_URL: http://api:8080
-      LETS_BLOG_API_KEY: ${SERVER_API_KEY}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
       # ブラウザから見える公開URL(認証コールバック等の生成に使用)
       NEXTAUTH_URL: https://localhost
@@ -46,7 +45,6 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: ${MYSQL_USER}
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
-      APP_API_KEY: ${SERVER_API_KEY}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
       SPRING_MAIL_HOST: mailhog
       SPRING_MAIL_PORT: 1025
@@ -62,9 +60,14 @@ services:
       WORDPRESS_PROVISION_BASE_URL: http://wordpress:9000
       WP_PROVISION_TOKEN: ${WP_PROVISION_TOKEN}
       BULK_UPLOAD_STORAGE_PATH: /app/data/bulk-uploads
+      VSCODE_EXTENSION_SOURCE_PATH: /app/extension-src
+      VSCODE_EXTENSION_BUILD_PATH: /app/extension-build
     volumes:
       - bulk_upload_files:/app/data/bulk-uploads
       - comfyui_models:/comfyui-models
+      # システム画面からのVSCode拡張機能ダウンロード用。オンデマンドビルドの作業ディレクトリは
+      # コンテナ内の書き込み可能な場所(/app/extension-build)を使うため、ソースは読み取り専用でマウントする。
+      - ./extension:/app/extension-src:ro
     depends_on:
       mysql:
         condition: service_healthy

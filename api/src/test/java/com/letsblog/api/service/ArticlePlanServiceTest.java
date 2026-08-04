@@ -9,14 +9,17 @@ import com.letsblog.api.dto.AcceptPlanResponse;
 import com.letsblog.api.dto.AcceptPlanResultItem;
 import com.letsblog.api.dto.ArticlePlanSessionDetailResponse;
 import com.letsblog.api.dto.ArticlePlanSessionSummaryResponse;
+import com.letsblog.api.dto.AssignIssueResponse;
 import com.letsblog.api.dto.PlanChatMessage;
 import com.letsblog.api.dto.PlanChatResponse;
 import com.letsblog.api.dto.RepositoryIssueResponse;
+import com.letsblog.api.dto.SuggestMetadataResponse;
 import com.letsblog.api.dto.SuggestTitlesResponse;
 import com.letsblog.api.github.GithubApiException;
 import com.letsblog.api.github.GithubClient;
 import com.letsblog.api.github.GithubIssue;
 import com.letsblog.api.github.GithubIssueSummary;
+import com.letsblog.api.github.GithubUser;
 import com.letsblog.api.repository.ArticlePlanSessionRepository;
 import com.letsblog.api.repository.GenerationJobRepository;
 import org.junit.jupiter.api.Test;
@@ -508,7 +511,8 @@ class ArticlePlanServiceTest {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithRepository("owner/repo"));
         when(userService.getDecryptedGithubToken(10L)).thenReturn("test-token");
         when(githubClient.listIssues("test-token", "owner", "repo", "open"))
-                .thenReturn(List.of(new GithubIssueSummary(3, "記事タイトル", "https://github.com/owner/repo/issues/3", "open")));
+                .thenReturn(List.of(new GithubIssueSummary(
+                        3, "記事タイトル", "https://github.com/owner/repo/issues/3", "open", List.of())));
 
         List<RepositoryIssueResponse> result = service.listRepositoryIssues(1L, 10L, "open");
 
@@ -524,5 +528,93 @@ class ArticlePlanServiceTest {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithRepository(null));
 
         assertThrows(IllegalStateException.class, () -> service.listRepositoryIssues(1L, 10L, "open"));
+    }
+
+    @Test
+    void suggestMetadata_JSONオブジェクトを正しくパースする() {
+        ArticlePlanService service = service();
+        when(ollamaClient.generate(anyString(), anyString())).thenReturn(
+                "{\"title\":\"タイトル案\",\"slug\":\"article-slug\","
+                + "\"categories\":[\"カテゴリ1\"],\"tags\":[\"tag1\",\"tag2\"]}");
+
+        SuggestMetadataResponse response = service.suggestMetadata(1L, List.of());
+
+        assertEquals("タイトル案", response.title());
+        assertEquals("article-slug", response.slug());
+        assertEquals(List.of("カテゴリ1"), response.categories());
+        assertEquals(List.of("tag1", "tag2"), response.tags());
+    }
+
+    @Test
+    void suggestMetadata_前後に説明文が付いていてもJSONオブジェクト部分だけを抽出する() {
+        ArticlePlanService service = service();
+        when(ollamaClient.generate(anyString(), anyString())).thenReturn(
+                "以下が提案です。\n{\"title\":\"タイトル\",\"slug\":\"slug\",\"categories\":[],\"tags\":[]}\nご確認ください。");
+
+        SuggestMetadataResponse response = service.suggestMetadata(1L, List.of());
+
+        assertEquals("タイトル", response.title());
+        assertEquals("slug", response.slug());
+    }
+
+    @Test
+    void suggestMetadata_不正なJSONの場合はすべて空のレスポンスを返す() {
+        ArticlePlanService service = service();
+        when(ollamaClient.generate(anyString(), anyString())).thenReturn("JSONではない応答です");
+
+        SuggestMetadataResponse response = service.suggestMetadata(1L, List.of());
+
+        assertEquals("", response.title());
+        assertEquals("", response.slug());
+        assertEquals(List.of(), response.categories());
+        assertEquals(List.of(), response.tags());
+    }
+
+    @Test
+    void suggestMetadata_生成ジョブがplan_suggest_metadataとして記録される() {
+        ArticlePlanService service = service();
+        when(ollamaClient.generate(anyString(), anyString())).thenReturn("{}");
+
+        service.suggestMetadata(1L, List.of());
+
+        assertEquals(List.of("running", "done"), savedStatuses);
+        ArgumentCaptor<GenerationJob> jobCaptor = ArgumentCaptor.forClass(GenerationJob.class);
+        verify(generationJobRepository, atLeastOnce()).save(jobCaptor.capture());
+        assertEquals("plan_suggest_metadata", jobCaptor.getValue().getType());
+    }
+
+    @Test
+    void suggestMetadata_Ollama呼び出しが失敗した場合ジョブがfailedになり例外を再送出する() {
+        ArticlePlanService service = service();
+        when(ollamaClient.generate(anyString(), anyString())).thenThrow(new RuntimeException("接続できません"));
+
+        assertThrows(RuntimeException.class, () -> service.suggestMetadata(1L, List.of()));
+
+        assertEquals(List.of("running", "failed"), savedStatuses);
+    }
+
+    @Test
+    void assignIssueToActor_成功時はassigneeとURLを含む結果を返す() {
+        ArticlePlanService service = service();
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithRepository("owner/repo"));
+        when(userService.getDecryptedGithubToken(10L)).thenReturn("test-token");
+        when(githubClient.getAuthenticatedUser("test-token")).thenReturn(new GithubUser("octocat"));
+        when(githubClient.assignAndLabelIssue(
+                "test-token", "owner", "repo", 42, List.of("octocat"), List.of("in-progress")))
+                .thenReturn(new GithubIssue(42, "https://github.com/owner/repo/issues/42"));
+
+        AssignIssueResponse response = service.assignIssueToActor(1L, 10L, 42);
+
+        assertEquals(42, response.issueNumber());
+        assertEquals("https://github.com/owner/repo/issues/42", response.htmlUrl());
+        assertEquals("octocat", response.assignedLogin());
+    }
+
+    @Test
+    void assignIssueToActor_リポジトリ未設定の場合は例外をスローする() {
+        ArticlePlanService service = service();
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithRepository(null));
+
+        assertThrows(IllegalStateException.class, () -> service.assignIssueToActor(1L, 10L, 42));
     }
 }

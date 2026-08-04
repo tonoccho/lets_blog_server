@@ -71,7 +71,8 @@ public class GithubClient {
                             node.get("number").asInt(),
                             node.get("title").asText(),
                             node.get("html_url").asText(),
-                            node.get("state").asText()));
+                            node.get("state").asText(),
+                            extractAssignees(node)));
                 }
             }
             return issues;
@@ -122,6 +123,72 @@ public class GithubClient {
             return response != null ? response.path("body").asText("") : "";
         } catch (RestClientResponseException e) {
             throw new GithubApiException(errorMessage(owner, repo, e, "issueの取得"), e);
+        } catch (Exception e) {
+            throw new GithubApiException("GitHub API呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    private List<String> extractAssignees(JsonNode node) {
+        List<String> assignees = new ArrayList<>();
+        JsonNode assigneesNode = node.get("assignees");
+        if (assigneesNode != null && assigneesNode.isArray()) {
+            for (JsonNode assigneeNode : assigneesNode) {
+                assignees.add(assigneeNode.get("login").asText());
+            }
+        }
+        return assignees;
+    }
+
+    /**
+     * 認証されたユーザー情報を取得する。PATの所有者のGitHub loginを得る。issueのassignee指定に必要。
+     */
+    public GithubUser getAuthenticatedUser(String token) {
+        try {
+            JsonNode response = client.get()
+                    .uri("/user")
+                    .header("Authorization", "Bearer " + token)
+                    .header("Accept", "application/vnd.github+json")
+                    .retrieve()
+                    .body(JsonNode.class);
+
+            return new GithubUser(response.get("login").asText());
+        } catch (RestClientResponseException e) {
+            int status = e.getStatusCode().value();
+            if (status == 401) {
+                throw new GithubApiException(
+                        "GitHubの認証に失敗しました。Personal Access Tokenが無効またはスコープが不足している可能性があります。", e);
+            }
+            throw new GithubApiException(
+                    "GitHub認証ユーザー情報の取得に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+        } catch (Exception e) {
+            throw new GithubApiException("GitHub API呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * issueのassigneesとlabelsを設定する。既存issueのbodyは上書きしない。
+     */
+    public GithubIssue assignAndLabelIssue(
+            String token, String owner, String repo, int issueNumber, List<String> assignees, List<String> labels) {
+        ObjectNode requestBody = JsonNodeFactory.instance.objectNode();
+        requestBody.set("assignees", JsonNodeFactory.instance.arrayNode().addAll(
+                assignees.stream().map(JsonNodeFactory.instance::textNode).toList()));
+        requestBody.set("labels", JsonNodeFactory.instance.arrayNode().addAll(
+                labels.stream().map(JsonNodeFactory.instance::textNode).toList()));
+
+        try {
+            JsonNode response = client.patch()
+                    .uri("/repos/{owner}/{repo}/issues/{issueNumber}", owner, repo, issueNumber)
+                    .header("Authorization", "Bearer " + token)
+                    .header("Accept", "application/vnd.github+json")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(requestBody)
+                    .retrieve()
+                    .body(JsonNode.class);
+
+            return new GithubIssue(response.get("number").asInt(), response.get("html_url").asText());
+        } catch (RestClientResponseException e) {
+            throw new GithubApiException(errorMessage(owner, repo, e, "issueへの割り当て"), e);
         } catch (Exception e) {
             throw new GithubApiException("GitHub API呼び出しに失敗しました: " + e.getMessage(), e);
         }

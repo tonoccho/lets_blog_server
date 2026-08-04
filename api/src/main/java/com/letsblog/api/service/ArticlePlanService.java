@@ -13,15 +13,18 @@ import com.letsblog.api.dto.AcceptPlanResultItem;
 import com.letsblog.api.dto.AcceptStructureResponse;
 import com.letsblog.api.dto.ArticlePlanSessionDetailResponse;
 import com.letsblog.api.dto.ArticlePlanSessionSummaryResponse;
+import com.letsblog.api.dto.AssignIssueResponse;
 import com.letsblog.api.dto.IssueDescriptionResponse;
 import com.letsblog.api.dto.PlanChatMessage;
 import com.letsblog.api.dto.PlanChatResponse;
 import com.letsblog.api.dto.RepositoryIssueResponse;
+import com.letsblog.api.dto.SuggestMetadataResponse;
 import com.letsblog.api.dto.SuggestStructureResponse;
 import com.letsblog.api.dto.SuggestTitlesResponse;
 import com.letsblog.api.github.GithubClient;
 import com.letsblog.api.github.GithubIssue;
 import com.letsblog.api.github.GithubIssueSummary;
+import com.letsblog.api.github.GithubUser;
 import com.letsblog.api.repository.ArticlePlanSessionRepository;
 import com.letsblog.api.repository.GenerationJobRepository;
 import org.springframework.stereotype.Service;
@@ -52,6 +55,16 @@ public class ArticlePlanService {
     private static final String STRUCTURE_SUGGESTION_INSTRUCTION =
             "上記の会話を踏まえて、この記事の構成案をMarkdown形式の見出し構造(##や-のリスト等)で提案してください。"
             + "出力は構成案のMarkdownのみとし、他の説明文や前置きは含めないでください。";
+
+    private static final String METADATA_SUGGESTION_INSTRUCTION =
+            "上記の会話から、記事の以下の情報をJSON形式で提案してください:\n"
+            + "{\n"
+            + "  \"title\": \"記事タイトル(20-50文字程度)\",\n"
+            + "  \"slug\": \"article-slug(URLに適した英数字)\",\n"
+            + "  \"categories\": [\"カテゴリ1\", \"カテゴリ2\"],\n"
+            + "  \"tags\": [\"タグ1\", \"タグ2\", \"タグ3\"]\n"
+            + "}\n\n"
+            + "出力はJSONオブジェクトのみとし、説明文は含めないでください。";
 
     private final OllamaClient ollamaClient;
     private final OllamaModelService ollamaModelService;
@@ -219,7 +232,7 @@ public class ArticlePlanService {
         GithubAccess access = resolveGithubAccess(projectId, userId);
         List<GithubIssueSummary> issues = githubClient.listIssues(access.token(), access.owner(), access.repo(), state);
         return issues.stream()
-                .map(i -> new RepositoryIssueResponse(i.number(), i.title(), i.htmlUrl(), i.state()))
+                .map(i -> new RepositoryIssueResponse(i.number(), i.title(), i.htmlUrl(), i.state(), i.assignees()))
                 .toList();
     }
 
@@ -277,6 +290,25 @@ public class ArticlePlanService {
         return new AcceptStructureResponse(issue.number(), issue.htmlUrl());
     }
 
+    /**
+     * 指定issueをログイン中のユーザーに割り当て、in-progressラベルを付与する。
+     */
+    public AssignIssueResponse assignIssueToActor(Long projectId, Long userId, Integer issueNumber) {
+        GithubAccess access = resolveGithubAccess(projectId, userId);
+
+        GithubUser authUser = githubClient.getAuthenticatedUser(access.token());
+
+        GithubIssue issue = githubClient.assignAndLabelIssue(
+                access.token(),
+                access.owner(),
+                access.repo(),
+                issueNumber,
+                List.of(authUser.login()),
+                List.of("in-progress"));
+
+        return new AssignIssueResponse(issue.number(), issue.htmlUrl(), authUser.login());
+    }
+
     public SuggestTitlesResponse suggestTitles(Long projectId, List<PlanChatMessage> history) {
         GenerationJob job = startJob("plan_suggest_titles", Map.of(
                 "projectId", String.valueOf(projectId),
@@ -311,6 +343,71 @@ public class ArticlePlanService {
             failJob(job, e);
             throw e;
         }
+    }
+
+    /**
+     * 会話履歴から記事のtitle/slug/categories/tagsをJSONで提案する。VSCode拡張のスキャフォールド生成に使う。
+     */
+    public SuggestMetadataResponse suggestMetadata(Long projectId, List<PlanChatMessage> history) {
+        GenerationJob job = startJob("plan_suggest_metadata", Map.of(
+                "projectId", String.valueOf(projectId),
+                "historyLength", String.valueOf(history.size())
+        ));
+        try {
+            String model = ollamaModelService.getSelectedModel(projectId);
+            String raw = ollamaClient.generate(buildMetadataSuggestionPrompt(history), model);
+            SuggestMetadataResponse response = parseMetadata(raw);
+            completeJob(job, Map.of("raw", raw));
+            return response;
+        } catch (RuntimeException e) {
+            failJob(job, e);
+            throw e;
+        }
+    }
+
+    private String buildMetadataSuggestionPrompt(List<PlanChatMessage> history) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("System: ").append(SYSTEM_PROMPT).append("\n\n");
+        appendHistory(sb, history);
+        sb.append("\n").append(METADATA_SUGGESTION_INSTRUCTION).append("\n");
+        return sb.toString();
+    }
+
+    private SuggestMetadataResponse parseMetadata(String raw) {
+        String jsonPart = extractJsonObject(raw);
+        try {
+            JsonNode node = objectMapper.readTree(jsonPart);
+            String title = node.path("title").asText("");
+            String slug = node.path("slug").asText("");
+            List<String> categories = parseStringArray(node.get("categories"));
+            List<String> tags = parseStringArray(node.get("tags"));
+            return new SuggestMetadataResponse(title, slug, categories, tags);
+        } catch (Exception e) {
+            return new SuggestMetadataResponse("", "", List.of(), List.of());
+        }
+    }
+
+    private String extractJsonObject(String raw) {
+        int start = raw.indexOf('{');
+        int end = raw.lastIndexOf('}');
+        if (start < 0 || end < 0 || end < start) {
+            return "{}";
+        }
+        return raw.substring(start, end + 1);
+    }
+
+    private List<String> parseStringArray(JsonNode node) {
+        if (node == null || !node.isArray()) {
+            return List.of();
+        }
+        List<String> result = new ArrayList<>();
+        for (JsonNode item : node) {
+            String str = item.asText("").strip();
+            if (!str.isBlank()) {
+                result.add(str);
+            }
+        }
+        return result;
     }
 
     private String buildChatPrompt(List<PlanChatMessage> history, String message, WebSearchOutcome searchOutcome) {

@@ -13,6 +13,7 @@ import com.letsblog.api.dto.TwoFactorSetupResponse;
 import com.letsblog.api.dto.UserResponse;
 import com.letsblog.api.dto.VerifyTotpRequest;
 import com.letsblog.api.repository.UserRepository;
+import com.letsblog.api.service.ApiKeyService;
 import com.letsblog.api.service.CurrentActorService;
 import com.letsblog.api.service.InvalidTotpCodeException;
 import com.letsblog.api.service.PasswordResetService;
@@ -38,23 +39,26 @@ public class AuthController {
     private final TwoFactorService twoFactorService;
     private final CurrentActorService currentActorService;
     private final UserRepository userRepository;
+    private final ApiKeyService apiKeyService;
 
     public AuthController(
             UserService userService,
             PasswordResetService passwordResetService,
             TwoFactorService twoFactorService,
             CurrentActorService currentActorService,
-            UserRepository userRepository) {
+            UserRepository userRepository,
+            ApiKeyService apiKeyService) {
         this.userService = userService;
         this.passwordResetService = passwordResetService;
         this.twoFactorService = twoFactorService;
         this.currentActorService = currentActorService;
         this.userRepository = userRepository;
+        this.apiKeyService = apiKeyService;
     }
 
     @PostMapping("/login")
     public LoginResponse login(@Valid @RequestBody LoginRequest request) {
-        return userService.login(request.email(), request.password());
+        return userService.login(request.email(), request.password(), request.label());
     }
 
     @PostMapping("/password-reset/request")
@@ -142,6 +146,7 @@ public class AuthController {
             throw new InvalidTotpCodeException("TOTPコードが無効です。");
         }
 
-        return new LoginResponse(UserResponse.from(user), false);
+        String apiKey = apiKeyService.issue(user, request.label());
+        return new LoginResponse(UserResponse.from(user), false, apiKey);
     }
 }

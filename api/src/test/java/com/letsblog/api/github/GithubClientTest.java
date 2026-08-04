@@ -238,4 +238,93 @@ class GithubClientTest {
         org.hamcrest.MatcherAssert.assertThat(exception.getMessage(), containsString("認証に失敗しました"));
         server.verify();
     }
+
+    @Test
+    void listIssues_assigneesのloginを抽出する() {
+        server.expect(requestTo(containsString("https://api.github.com/repos/owner/repo/issues")))
+                .andRespond(withSuccess(
+                        "[{\"number\":1,\"title\":\"記事案1\",\"html_url\":\"https://github.com/owner/repo/issues/1\","
+                        + "\"state\":\"open\",\"assignees\":[{\"login\":\"octocat\"}]}]",
+                        MediaType.APPLICATION_JSON));
+
+        List<GithubIssueSummary> issues = client.listIssues("test-token", "owner", "repo", "open");
+
+        assertEquals(List.of("octocat"), issues.get(0).assignees());
+        server.verify();
+    }
+
+    @Test
+    void listIssues_assigneesが空の場合は空リストになる() {
+        server.expect(requestTo(containsString("https://api.github.com/repos/owner/repo/issues")))
+                .andRespond(withSuccess(
+                        "[{\"number\":1,\"title\":\"記事案1\",\"html_url\":\"https://github.com/owner/repo/issues/1\","
+                        + "\"state\":\"open\",\"assignees\":[]}]",
+                        MediaType.APPLICATION_JSON));
+
+        List<GithubIssueSummary> issues = client.listIssues("test-token", "owner", "repo", "open");
+
+        assertEquals(List.of(), issues.get(0).assignees());
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_成功時にloginを返す() {
+        server.expect(requestTo("https://api.github.com/user"))
+                .andExpect(method(GET))
+                .andExpect(header("Authorization", "Bearer test-token"))
+                .andRespond(withSuccess("{\"login\":\"octocat\"}", MediaType.APPLICATION_JSON));
+
+        GithubUser user = client.getAuthenticatedUser("test-token");
+
+        assertEquals("octocat", user.login());
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_401の場合は認証エラーメッセージになる() {
+        server.expect(requestTo("https://api.github.com/user"))
+                .andRespond(withStatus(HttpStatus.UNAUTHORIZED)
+                        .body("{\"message\":\"Bad credentials\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        GithubApiException exception = assertThrows(GithubApiException.class,
+                () -> client.getAuthenticatedUser("invalid-token"));
+
+        org.hamcrest.MatcherAssert.assertThat(exception.getMessage(), containsString("認証に失敗しました"));
+        server.verify();
+    }
+
+    @Test
+    void assignAndLabelIssue_成功時はissue番号とURLを返しリクエストボディにassigneesとlabelsを含む() {
+        server.expect(requestTo("https://api.github.com/repos/owner/repo/issues/42"))
+                .andExpect(method(org.springframework.http.HttpMethod.PATCH))
+                .andExpect(header("Authorization", "Bearer test-token"))
+                .andExpect(content().string(containsString("\"assignees\":[\"octocat\"]")))
+                .andExpect(content().string(containsString("\"labels\":[\"in-progress\"]")))
+                .andRespond(withSuccess(
+                        "{\"number\":42,\"html_url\":\"https://github.com/owner/repo/issues/42\"}",
+                        MediaType.APPLICATION_JSON));
+
+        GithubIssue issue = client.assignAndLabelIssue(
+                "test-token", "owner", "repo", 42, List.of("octocat"), List.of("in-progress"));
+
+        assertEquals(42, issue.number());
+        assertEquals("https://github.com/owner/repo/issues/42", issue.htmlUrl());
+        server.verify();
+    }
+
+    @Test
+    void assignAndLabelIssue_401の場合は認証エラーメッセージになる() {
+        server.expect(requestTo("https://api.github.com/repos/owner/repo/issues/42"))
+                .andRespond(withStatus(HttpStatus.UNAUTHORIZED)
+                        .body("{\"message\":\"Bad credentials\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        GithubApiException exception = assertThrows(GithubApiException.class,
+                () -> client.assignAndLabelIssue(
+                        "invalid-token", "owner", "repo", 42, List.of("octocat"), List.of("in-progress")));
+
+        org.hamcrest.MatcherAssert.assertThat(exception.getMessage(), containsString("認証に失敗しました"));
+        server.verify();
+    }
 }

@@ -2,6 +2,7 @@ import { getUserProfile } from "@/lib/apiClient";
 import { requireSession } from "@/lib/session";
 import { SystemPreferencesForm } from "./SystemPreferencesForm";
 import { GithubTokenForm } from "./GithubTokenForm";
+import { VscodeExtensionDownloadButton } from "./VscodeExtensionDownloadButton";
 
 const LINKS = [
   { label: "phpMyAdmin", url: "https://localhost/phpmyadmin/", description: "MySQLデータベースの管理" },
@@ -63,6 +64,15 @@ export default async function SystemPage() {
         <p className="text-sm text-neutral-600">
           このWeb管理画面が接続しているAPIサーバー: <code className="rounded bg-neutral-100 px-1">{apiUrl}</code>
         </p>
+      </div>
+
+      <div className="rounded-lg border border-neutral-200 bg-white p-5">
+        <h2 className="mb-2 font-medium">VSCode拡張機能</h2>
+        <p className="mb-3 text-sm text-neutral-600">
+          Markdownでの記事執筆・投稿・記事計画ワークフローに使うVSCode拡張機能をダウンロードできます。
+          クリック後にAPIサーバー側でビルドするため、初回は数十秒かかる場合があります。
+        </p>
+        <VscodeExtensionDownloadButton />
       </div>
 
       <div className="rounded-lg border border-neutral-200 bg-white p-5">

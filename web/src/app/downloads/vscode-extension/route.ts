@@ -1,0 +1,28 @@
+import { downloadVscodeExtension } from "@/lib/apiClient";
+import { getSession } from "@/lib/session";
+
+/**
+ * VSCode拡張機能(.vsix)のダウンロード。nginxの `location /api/` はSpring Boot APIサーバーへの
+ * 直接転送専用(reverse-proxy/conf.d参照)のため、Web BFF側の中継ルートは /api/ 配下に置けない。
+ * このパスを /downloads/vscode-extension としているのはそのため。
+ */
+export async function GET() {
+  const session = await getSession();
+  if (!session) {
+    return Response.json({ error: "ログインが必要です。" }, { status: 401 });
+  }
+
+  try {
+    const { body, filename } = await downloadVscodeExtension();
+    return new Response(body, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+      },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return Response.json({ error: message }, { status: 502 });
+  }
+}

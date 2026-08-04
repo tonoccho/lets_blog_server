@@ -1,18 +1,25 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { getServerUrl, requireApiKey, setApiKey } from './config';
+import { getServerUrl, requireApiKey, setApiKey, getActor, setActor, getProjectId, setProjectId } from './config';
 import { parseArticle, stringifyArticle, extractLocalImageReferences } from './frontMatter';
 import * as api from './apiClient';
+import { PlanPanel } from './planPanel';
+import { PreviewPanel } from './previewPanel';
 
 export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
+    vscode.commands.registerCommand('letsBlog.login', () => commandLogin(context)),
     vscode.commands.registerCommand('letsBlog.setApiKey', () => commandSetApiKey(context)),
     vscode.commands.registerCommand('letsBlog.selectSite', () => commandSelectSite(context)),
     vscode.commands.registerCommand('letsBlog.publish', () => commandPublish(context)),
     vscode.commands.registerCommand('letsBlog.askAi', () => commandAskAi(context)),
     vscode.commands.registerCommand('letsBlog.suggestTags', () => commandSuggestTags(context)),
-    vscode.commands.registerCommand('letsBlog.generateImage', () => commandGenerateImage(context))
+    vscode.commands.registerCommand('letsBlog.generateImage', () => commandGenerateImage(context)),
+    vscode.commands.registerCommand('letsBlog.selectProject', () => commandSelectProject(context)),
+    vscode.commands.registerCommand('letsBlog.planArticle', () => commandPlanArticle(context)),
+    vscode.commands.registerCommand('letsBlog.publishToTestEnvironment', () => commandPublishToTestEnvironment(context)),
+    vscode.commands.registerCommand('letsBlog.previewArticle', () => commandPreviewArticle(context))
   );
 }
 
@@ -36,6 +43,46 @@ async function replaceDocumentText(editor: vscode.TextEditor, newText: string): 
   );
   await editor.edit((builder) => builder.replace(fullRange, newText));
   await editor.document.save();
+}
+
+/**
+ * メールアドレス/パスワード(必要なら2FAコード)でLet's Blogにログインし、
+ * 発行されたAPIキーをSecretStorageに保存する。ログインしたユーザーがそのままActorになる
+ * (以前の「Select User」QuickPickによるActor選択は廃止し、ログインに一本化した)。
+ */
+async function commandLogin(context: vscode.ExtensionContext): Promise<void> {
+  const email = await vscode.window.showInputBox({ prompt: 'メールアドレス', ignoreFocusOut: true });
+  if (!email) return;
+
+  const password = await vscode.window.showInputBox({
+    prompt: 'パスワード',
+    password: true,
+    ignoreFocusOut: true,
+  });
+  if (!password) return;
+
+  try {
+    let result = await api.login(getServerUrl(), email, password);
+
+    if (result.twoFactorRequired) {
+      const code = await vscode.window.showInputBox({
+        prompt: '2段階認証コードを入力してください',
+        ignoreFocusOut: true,
+      });
+      if (!code) return;
+      result = await api.verifyTotpLogin(getServerUrl(), result.user.id, code);
+    }
+
+    if (!result.apiKey) {
+      throw new Error('APIキーの取得に失敗しました。');
+    }
+
+    await setApiKey(context, result.apiKey);
+    await setActor(context, result.user);
+    vscode.window.showInformationMessage(`'${result.user.email}' としてログインしました。`);
+  } catch (err) {
+    vscode.window.showErrorMessage(`ログインに失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+  }
 }
 
 async function commandSetApiKey(context: vscode.ExtensionContext): Promise<void> {
@@ -78,59 +125,98 @@ async function commandSelectSite(context: vscode.ExtensionContext): Promise<void
   }
 }
 
+/**
+ * 指定サイトへ現在のエディタの記事を投稿する共通処理。
+ * front matterのtitleチェック・画像収集・publishPost呼び出し・front matter書き戻し・完了通知を行う。
+ * letsBlog.publish(front matterのsiteを使用)とletsBlog.publishToTestEnvironment(test環境サイトを使用)から共有される。
+ */
+async function publishToSite(context: vscode.ExtensionContext, editor: vscode.TextEditor, siteKey: string): Promise<void> {
+  const apiKey = await requireApiKey(context);
+  const serverUrl = getServerUrl();
+  const article = parseArticle(editor.document.getText());
+
+  if (!article.data.title) {
+    vscode.window.showErrorMessage("front matterに 'title' がありません。");
+    return;
+  }
+
+  const baseDir = path.dirname(editor.document.uri.fsPath);
+  const images = extractLocalImageReferences(article.content, baseDir).filter((img) =>
+    fs.existsSync(img.absolutePath)
+  );
+
+  const result = await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: 'WordPressへ投稿しています…' },
+    () =>
+      api.publishPost(serverUrl, apiKey, {
+        site: siteKey,
+        title: article.data.title as string,
+        slug: article.data.slug,
+        status: article.data.status ?? 'draft',
+        categories: article.data.categories ?? [],
+        tags: article.data.tags ?? [],
+        wpPostId: article.data.wp_post_id != null ? String(article.data.wp_post_id) : undefined,
+        markdown: article.content,
+        images,
+      })
+  );
+
+  article.data.site = siteKey;
+  article.data.wp_post_id = result.wpPostId;
+  article.data.wp_post_url = result.wpPostUrl;
+  article.data.status = result.status;
+  await replaceDocumentText(editor, stringifyArticle(article));
+
+  const selection = await vscode.window.showInformationMessage(
+    `投稿しました(status: ${result.status})`,
+    '開く'
+  );
+  if (selection === '開く') {
+    vscode.env.openExternal(vscode.Uri.parse(result.wpPostUrl));
+  }
+}
+
 async function commandPublish(context: vscode.ExtensionContext): Promise<void> {
   const editor = getActiveMarkdownEditor();
   if (!editor) return;
 
   try {
-    const apiKey = await requireApiKey(context);
-    const serverUrl = getServerUrl();
     const article = parseArticle(editor.document.getText());
-
     if (!article.data.site) {
       vscode.window.showErrorMessage("front matterに 'site' が未設定です。先に「Let's Blog: Select Site」を実行してください。");
       return;
     }
-    if (!article.data.title) {
-      vscode.window.showErrorMessage("front matterに 'title' がありません。");
+    await publishToSite(context, editor, article.data.site);
+  } catch (err) {
+    vscode.window.showErrorMessage(`投稿に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+  }
+}
+
+async function commandPublishToTestEnvironment(context: vscode.ExtensionContext): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  try {
+    const article = parseArticle(editor.document.getText());
+    const projectId = (article.data.project_id as number | undefined) ?? getProjectId(context);
+    if (!projectId) {
+      vscode.window.showErrorMessage(
+        'プロジェクトが未選択です。front matterのproject_id、または「Let\'s Blog: Select Project」で設定してください。'
+      );
       return;
     }
 
-    const baseDir = path.dirname(editor.document.uri.fsPath);
-    const images = extractLocalImageReferences(article.content, baseDir).filter((img) =>
-      fs.existsSync(img.absolutePath)
-    );
-
-    const result = await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: 'WordPressへ投稿しています…' },
-      () =>
-        api.publishPost(serverUrl, apiKey, {
-          site: article.data.site as string,
-          title: article.data.title as string,
-          slug: article.data.slug,
-          status: article.data.status ?? 'draft',
-          categories: article.data.categories ?? [],
-          tags: article.data.tags ?? [],
-          wpPostId: article.data.wp_post_id != null ? String(article.data.wp_post_id) : undefined,
-          markdown: article.content,
-          images,
-        })
-    );
-
-    article.data.wp_post_id = result.wpPostId;
-    article.data.wp_post_url = result.wpPostUrl;
-    article.data.status = result.status;
-    await replaceDocumentText(editor, stringifyArticle(article));
-
-    const selection = await vscode.window.showInformationMessage(
-      `投稿しました(status: ${result.status})`,
-      '開く'
-    );
-    if (selection === '開く') {
-      vscode.env.openExternal(vscode.Uri.parse(result.wpPostUrl));
+    const apiKey = await requireApiKey(context);
+    const actor = await getActor(context);
+    const project = await api.getProject(getServerUrl(), apiKey, actor, projectId);
+    if (!project.testSite) {
+      vscode.window.showErrorMessage(`プロジェクト '${project.name}' にはtest環境サイトが紐づいていません。`);
+      return;
     }
+
+    await publishToSite(context, editor, project.testSite.siteKey);
   } catch (err) {
-    vscode.window.showErrorMessage(`投稿に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+    vscode.window.showErrorMessage(`test環境への投稿に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
   }
 }
 
@@ -238,5 +324,123 @@ async function commandGenerateImage(context: vscode.ExtensionContext): Promise<v
     vscode.window.showInformationMessage(`画像を生成し ${image.fileName} として保存しました。`);
   } catch (err) {
     vscode.window.showErrorMessage(`画像生成に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+  }
+}
+
+async function commandPlanArticle(context: vscode.ExtensionContext): Promise<void> {
+  const actor = await getActor(context);
+  if (!actor) {
+    vscode.window.showErrorMessage('先に「Let\'s Blog: Login」でログインしてください。');
+    return;
+  }
+  const projectId = getProjectId(context);
+  if (!projectId) {
+    vscode.window.showErrorMessage('先に「Let\'s Blog: Select Project」でプロジェクトを選択してください。');
+    return;
+  }
+  PlanPanel.createOrShow(context);
+}
+
+async function commandSelectProject(context: vscode.ExtensionContext): Promise<void> {
+  try {
+    const apiKey = await requireApiKey(context);
+    const actor = await getActor(context);
+    const projects = await api.listProjects(getServerUrl(), apiKey, actor);
+
+    const validProjects = projects.filter((p) => p.githubRepository);
+    if (validProjects.length === 0) {
+      vscode.window.showWarningMessage(
+        'GitHub連携済みのプロジェクトがありません。先に管理画面でプロジェクトのGitHubリポジトリを設定してください。'
+      );
+      return;
+    }
+
+    const currentProjectId = getProjectId(context);
+    const picked = await vscode.window.showQuickPick(
+      validProjects.map((p) => ({
+        label: p.name,
+        description: p.githubRepository + (currentProjectId === p.id ? ' (現在選択中)' : ''),
+        projectId: p.id,
+      })),
+      { placeHolder: 'プロジェクトを選択' }
+    );
+    if (!picked) return;
+
+    await setProjectId(context, picked.projectId);
+    vscode.window.showInformationMessage(`プロジェクトを '${picked.label}' に設定しました。`);
+  } catch (err) {
+    vscode.window.showErrorMessage(`プロジェクト選択に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+  }
+}
+
+const IMAGE_MIME_TYPES: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
+};
+
+/**
+ * Markdown本文中のローカル画像参照をbase64データURIへ置換する。プレビューはWebviewの外(APIサーバー)で
+ * HTML化するため、投稿先を持たないローカル画像をそのまま渡すと壊れたリンクになってしまうのを防ぐ。
+ */
+function inlineLocalImages(content: string, baseDir: string): string {
+  let rewritten = content;
+  for (const image of extractLocalImageReferences(content, baseDir)) {
+    if (!fs.existsSync(image.absolutePath)) continue;
+    const mimeType = IMAGE_MIME_TYPES[path.extname(image.absolutePath).toLowerCase()];
+    if (!mimeType) continue;
+    const dataUri = `data:${mimeType};base64,${fs.readFileSync(image.absolutePath).toString('base64')}`;
+    rewritten = rewritten.split(image.reference).join(dataUri);
+  }
+  return rewritten;
+}
+
+async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  try {
+    const article = parseArticle(editor.document.getText());
+    const projectId = (article.data.project_id as number | undefined) ?? getProjectId(context);
+    if (!projectId) {
+      vscode.window.showErrorMessage(
+        'プロジェクトが未選択です。front matterのproject_id、または「Let\'s Blog: Select Project」で設定してください。'
+      );
+      return;
+    }
+
+    const apiKey = await requireApiKey(context);
+    const actor = await getActor(context);
+    const serverUrl = getServerUrl();
+    const baseDir = path.dirname(editor.document.uri.fsPath);
+    const markdown = inlineLocalImages(article.content, baseDir);
+
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'プレビューを生成しています…' },
+      async () => {
+        const html = await api.renderPreviewHtml(serverUrl, apiKey, actor, projectId, markdown);
+
+        let css = '';
+        let warning: string | undefined;
+        try {
+          const themeCss = await api.getMasterThemeCss(serverUrl, apiKey, actor, projectId);
+          if (themeCss.available) {
+            css = themeCss.css;
+          } else {
+            warning = `マスター環境サイトのCSSを取得できませんでした: ${themeCss.reason ?? '不明なエラー'}`;
+          }
+        } catch (cssError) {
+          warning = `マスター環境サイトのCSS取得に失敗しました: ${String(cssError instanceof Error ? cssError.message : cssError)}`;
+        }
+
+        PreviewPanel.createOrShow(html, css, warning);
+      }
+    );
+  } catch (err) {
+    vscode.window.showErrorMessage(`プレビューの生成に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
   }
 }

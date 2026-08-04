@@ -220,3 +220,15 @@ Phase 1(初期構築)の進捗管理リスト。各項目の詳細は `phase1/` 
 - [ ] [03-article-plan-accept](phase13/03-article-plan-accept.md) — 計画受け入れ・GitHub issue 作成(GithubClient 新設、部分失敗の集約)
 
 本 phase の仕様ファイル作成完了。タスク01実装完了、02/03は次セッション以降。
+
+## Phase 15: VSCode拡張からの記事作成開始ワークフロー
+
+- [x] [00-overview](phase15/00-overview.md) — 全体スコープ・決定事項・アーキテクチャ・タスク一覧
+- [x] [01-vscode-auth-and-permission](phase15/01-vscode-auth-and-permission.md) — VSCode 認証・権限モデル・ユーザー/プロジェクト選択(`AdminAuthorizationService.requireProjectMemberOrAdmin`追加、ArticlePlanController全10メソッドの認可緩和、VSCode拡張に`selectActor`/`selectProject`コマンド追加。実装済み)
+- [x] [02-vscode-article-plan-panel](phase15/02-vscode-article-plan-panel.md) — Webviewパネル・壁打ちチャット・メタデータ提案(`POST /suggest-metadata`エンドポイント新設、VSCode拡張に`planPanel.ts`(Webviewパネル)・`planArticle`コマンド追加。実装済み)
+- [x] [03-article-scaffold-and-issue-assign](phase15/03-article-scaffold-and-issue-assign.md) — フォルダ・ファイル生成・issue割り当て・ラベル付与(`GithubClient.getAuthenticatedUser`/`assignAndLabelIssue`、`ArticlePlanService.assignIssueToActor`、`POST /issues/{issueNumber}/assign`エンドポイント追加。VSCode拡張側で`articles/<slug>/article.md`・`assets/.gitkeep`生成とissue割り当てまでのフロー実装済み)
+- [x] [04-vscode-extension-download](phase15/04-vscode-extension-download.md) — Web管理画面からVSCode拡張機能(.vsix)をダウンロード(APIサーバー側でnpm/vsceによるオンデマンドビルド・バージョン単位キャッシュ。Docker実機で初回ビルド・キャッシュヒット双方を確認済み)
+- [x] [05-article-preview](phase15/05-article-preview.md) — VSCode拡張の記事プレビュー機能(マスター環境サイトのCSSを適用。`ArticlePreviewService`新設、既存Markdown変換パイプラインを再利用)
+- [x] [06-test-environment-publish](phase15/06-test-environment-publish.md) — VSCode拡張からプロジェクトのtest環境サイトへワンクリック投稿(バックエンド変更なし、既存`GET /api/projects/{id}`を再利用)
+
+実装・バックエンド全テスト(`./gradlew test`)通過・VSCode拡張コンパイル(`npm run compile`)通過・Web管理画面`next build`通過まで確認済み。04(拡張機能ダウンロード)のみDocker実機で`.vsix`生成・キャッシュヒットまで確認済み。Extension Development Hostでの実機操作(パネル起動・issue選択・壁打ち・スキャフォールド生成・プレビュー表示・test環境投稿・実際のGitHub issueへの割り当て確認)およびWeb管理画面のダウンロードボタンのブラウザ操作確認は、本セッションではブラウザ/VSCode操作ツールが利用できず未実施。

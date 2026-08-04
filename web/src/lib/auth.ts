@@ -34,13 +34,21 @@ export const authOptions: NextAuthOptions = {
             throw new Error("2FA_REQUIRED");
           }
           const verified = await verifyTotpLogin(result.user.id, credentials.totpCode);
-          if (!verified) {
+          if (!verified || !verified.apiKey) {
             throw new Error("2FA_INVALID");
           }
-          return { id: String(verified.user.id), email: verified.user.email, role: verified.user.role };
+          return {
+            id: String(verified.user.id),
+            email: verified.user.email,
+            role: verified.user.role,
+            apiKey: verified.apiKey,
+          };
         }
 
-        return { id: String(result.user.id), email: result.user.email, role: result.user.role };
+        if (!result.apiKey) {
+          return null;
+        }
+        return { id: String(result.user.id), email: result.user.email, role: result.user.role, apiKey: result.apiKey };
       },
     }),
   ],
@@ -49,9 +57,12 @@ export const authOptions: NextAuthOptions = {
       if (user) {
         token.id = user.id;
         token.role = user.role;
+        token.apiKey = user.apiKey;
       }
       return token;
     },
+    // apiKeyはHttpOnly cookie内のJWTにのみ保持し、ブラウザ側JS(useSession等)から
+    // 参照可能なsession.userには意図的にコピーしない。
     async session({ session, token }) {
       if (session.user) {
         session.user.id = token.id;

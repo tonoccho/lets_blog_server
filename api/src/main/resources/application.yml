@@ -33,7 +33,6 @@ spring:
       max-request-size: 100MB
 
 app:
-  api-key: ${APP_API_KEY:dev_local_api_key}
   encryption-key: ${APP_ENCRYPTION_KEY:}
   mail:
     from: ${APP_MAIL_FROM:noreply@letsblog.example.com}
@@ -50,3 +49,5 @@ app:
   wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
   wordpress-provision-token: ${WP_PROVISION_TOKEN:}
   bulk-upload-storage-path: ${BULK_UPLOAD_STORAGE_PATH:/app/data/bulk-uploads}
+  vscode-extension-source-path: ${VSCODE_EXTENSION_SOURCE_PATH:/app/extension-src}
+  vscode-extension-build-path: ${VSCODE_EXTENSION_BUILD_PATH:/app/extension-build}

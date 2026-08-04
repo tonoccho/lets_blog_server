@@ -6,10 +6,13 @@ import com.letsblog.api.dto.AcceptStructureRequest;
 import com.letsblog.api.dto.AcceptStructureResponse;
 import com.letsblog.api.dto.ArticlePlanSessionDetailResponse;
 import com.letsblog.api.dto.ArticlePlanSessionSummaryResponse;
+import com.letsblog.api.dto.AssignIssueResponse;
 import com.letsblog.api.dto.IssueDescriptionResponse;
 import com.letsblog.api.dto.PlanChatRequest;
 import com.letsblog.api.dto.PlanChatResponse;
 import com.letsblog.api.dto.RepositoryIssueResponse;
+import com.letsblog.api.dto.SuggestMetadataRequest;
+import com.letsblog.api.dto.SuggestMetadataResponse;
 import com.letsblog.api.dto.SuggestStructureRequest;
 import com.letsblog.api.dto.SuggestStructureResponse;
 import com.letsblog.api.dto.SuggestTitlesRequest;
@@ -47,35 +50,35 @@ public class ArticlePlanController {
 
     @PostMapping("/chat")
     public PlanChatResponse chat(@PathVariable Long projectId, @Valid @RequestBody PlanChatRequest request) {
-        adminAuthorizationService.requireAdmin();
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         return articlePlanService.chat(
                 projectId, request.history(), request.message(), request.sessionId(), request.githubIssueNumber());
     }
 
     @GetMapping("/sessions")
     public List<ArticlePlanSessionSummaryResponse> listSessions(@PathVariable Long projectId) {
-        adminAuthorizationService.requireAdmin();
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         return articlePlanService.listSessions(projectId);
     }
 
     @GetMapping("/sessions/{sessionId}")
     public ArticlePlanSessionDetailResponse getSession(
             @PathVariable Long projectId, @PathVariable Long sessionId) {
-        adminAuthorizationService.requireAdmin();
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         return articlePlanService.getSession(projectId, sessionId);
     }
 
     @GetMapping("/sessions/by-issue/{issueNumber}")
     public ArticlePlanSessionDetailResponse getSessionByIssue(
             @PathVariable Long projectId, @PathVariable Integer issueNumber) {
-        adminAuthorizationService.requireAdmin();
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         return articlePlanService.getSessionByIssue(projectId, issueNumber);
     }
 
     @GetMapping("/issues/{issueNumber}/description")
     public IssueDescriptionResponse getIssueDescription(
             @PathVariable Long projectId, @PathVariable Integer issueNumber) {
-        adminAuthorizationService.requireAdmin();
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         Long userId = currentActorService.getCurrentActorId();
         return articlePlanService.getIssueDescription(projectId, userId, issueNumber);
     }
@@ -83,7 +86,7 @@ public class ArticlePlanController {
     @GetMapping("/issues")
     public List<RepositoryIssueResponse> listIssues(
             @PathVariable Long projectId, @RequestParam(defaultValue = "open") String state) {
-        adminAuthorizationService.requireAdmin();
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         Long userId = currentActorService.getCurrentActorId();
         return articlePlanService.listRepositoryIssues(projectId, userId, state);
     }
@@ -91,14 +94,14 @@ public class ArticlePlanController {
     @PostMapping("/suggest-titles")
     public SuggestTitlesResponse suggestTitles(
             @PathVariable Long projectId, @Valid @RequestBody SuggestTitlesRequest request) {
-        adminAuthorizationService.requireAdmin();
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         return articlePlanService.suggestTitles(projectId, request.history());
     }
 
     @PostMapping("/accept")
     public AcceptPlanResponse acceptPlan(
             @PathVariable Long projectId, @Valid @RequestBody AcceptPlanRequest request) {
-        adminAuthorizationService.requireAdmin();
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         Long userId = currentActorService.getCurrentActorId();
         return articlePlanService.acceptPlan(projectId, userId, request.titles());
     }
@@ -106,7 +109,7 @@ public class ArticlePlanController {
     @PostMapping("/suggest-structure")
     public SuggestStructureResponse suggestStructure(
             @PathVariable Long projectId, @Valid @RequestBody SuggestStructureRequest request) {
-        adminAuthorizationService.requireAdmin();
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         return articlePlanService.suggestStructure(projectId, request.history());
     }
 
@@ -115,8 +118,23 @@ public class ArticlePlanController {
             @PathVariable Long projectId,
             @PathVariable Integer issueNumber,
             @Valid @RequestBody AcceptStructureRequest request) {
-        adminAuthorizationService.requireAdmin();
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         Long userId = currentActorService.getCurrentActorId();
         return articlePlanService.acceptStructure(projectId, userId, issueNumber, request.structure());
+    }
+
+    @PostMapping("/suggest-metadata")
+    public SuggestMetadataResponse suggestMetadata(
+            @PathVariable Long projectId, @Valid @RequestBody SuggestMetadataRequest request) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        return articlePlanService.suggestMetadata(projectId, request.history());
+    }
+
+    @PostMapping("/issues/{issueNumber}/assign")
+    public AssignIssueResponse assignIssue(
+            @PathVariable Long projectId, @PathVariable Integer issueNumber) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        Long userId = currentActorService.getCurrentActorId();
+        return articlePlanService.assignIssueToActor(projectId, userId, issueNumber);
     }
 }
