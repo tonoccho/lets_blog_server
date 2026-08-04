@@ -2,10 +2,17 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { getServerUrl, requireApiKey, setApiKey, getActor, setActor, getProjectId, setProjectId } from './config';
-import { parseArticle, stringifyArticle, extractLocalImageReferences } from './frontMatter';
+import {
+  parseArticle,
+  stringifyArticle,
+  extractLocalImageReferences,
+  resolveFeaturedImageReference,
+  resolveExistingPostId,
+} from './frontMatter';
 import * as api from './apiClient';
 import { PlanPanel } from './planPanel';
 import { PreviewPanel } from './previewPanel';
+import { ImageGenPanel } from './imageGenPanel';
 
 export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
@@ -18,7 +25,6 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.generateImage', () => commandGenerateImage(context)),
     vscode.commands.registerCommand('letsBlog.selectProject', () => commandSelectProject(context)),
     vscode.commands.registerCommand('letsBlog.planArticle', () => commandPlanArticle(context)),
-    vscode.commands.registerCommand('letsBlog.publishToTestEnvironment', () => commandPublishToTestEnvironment(context)),
     vscode.commands.registerCommand('letsBlog.previewArticle', () => commandPreviewArticle(context))
   );
 }
@@ -128,9 +134,13 @@ async function commandSelectSite(context: vscode.ExtensionContext): Promise<void
 /**
  * 指定サイトへ現在のエディタの記事を投稿する共通処理。
  * front matterのtitleチェック・画像収集・publishPost呼び出し・front matter書き戻し・完了通知を行う。
- * letsBlog.publish(front matterのsiteを使用)とletsBlog.publishToTestEnvironment(test環境サイトを使用)から共有される。
  */
-async function publishToSite(context: vscode.ExtensionContext, editor: vscode.TextEditor, siteKey: string): Promise<void> {
+async function publishToSite(
+  context: vscode.ExtensionContext,
+  editor: vscode.TextEditor,
+  siteKey: string,
+  forceStatus?: string
+): Promise<void> {
   const apiKey = await requireApiKey(context);
   const serverUrl = getServerUrl();
   const article = parseArticle(editor.document.getText());
@@ -141,9 +151,19 @@ async function publishToSite(context: vscode.ExtensionContext, editor: vscode.Te
   }
 
   const baseDir = path.dirname(editor.document.uri.fsPath);
-  const images = extractLocalImageReferences(article.content, baseDir).filter((img) =>
+  const bodyImages = extractLocalImageReferences(article.content, baseDir).filter((img) =>
     fs.existsSync(img.absolutePath)
   );
+  const featuredImage = resolveFeaturedImageReference(article.data, baseDir);
+
+  const images = [...bodyImages];
+  if (featuredImage && fs.existsSync(featuredImage.absolutePath)) {
+    if (!images.find((img) => img.reference === featuredImage.reference)) {
+      images.push(featuredImage);
+    }
+  }
+
+  const existingPostId = resolveExistingPostId(article.data, siteKey);
 
   const result = await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'WordPressへ投稿しています…' },
@@ -152,12 +172,13 @@ async function publishToSite(context: vscode.ExtensionContext, editor: vscode.Te
         site: siteKey,
         title: article.data.title as string,
         slug: article.data.slug,
-        status: article.data.status ?? 'draft',
+        status: forceStatus ?? article.data.status ?? 'draft',
         categories: article.data.categories ?? [],
         tags: article.data.tags ?? [],
-        wpPostId: article.data.wp_post_id != null ? String(article.data.wp_post_id) : undefined,
+        wpPostId: existingPostId,
         markdown: article.content,
         images,
+        featuredImageFilename: featuredImage?.reference,
       })
   );
 
@@ -165,6 +186,7 @@ async function publishToSite(context: vscode.ExtensionContext, editor: vscode.Te
   article.data.wp_post_id = result.wpPostId;
   article.data.wp_post_url = result.wpPostUrl;
   article.data.status = result.status;
+  article.data.wp_post_ids = { ...(article.data.wp_post_ids ?? {}), [siteKey]: result.wpPostId };
   await replaceDocumentText(editor, stringifyArticle(article));
 
   const selection = await vscode.window.showInformationMessage(
@@ -176,23 +198,41 @@ async function publishToSite(context: vscode.ExtensionContext, editor: vscode.Te
   }
 }
 
-async function commandPublish(context: vscode.ExtensionContext): Promise<void> {
-  const editor = getActiveMarkdownEditor();
-  if (!editor) return;
-
-  try {
-    const article = parseArticle(editor.document.getText());
-    if (!article.data.site) {
-      vscode.window.showErrorMessage("front matterに 'site' が未設定です。先に「Let's Blog: Select Site」を実行してください。");
-      return;
-    }
-    await publishToSite(context, editor, article.data.site);
-  } catch (err) {
-    vscode.window.showErrorMessage(`投稿に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
-  }
+interface EnvironmentOption extends vscode.QuickPickItem {
+  siteKey: string;
+  /** ローカル/テストは動作確認用途のため即公開(publish)する。本番はfront matterのstatus(既定draft)を尊重する。 */
+  forceStatus?: string;
 }
 
-async function commandPublishToTestEnvironment(context: vscode.ExtensionContext): Promise<void> {
+/**
+ * プロジェクトに紐づくローカル/テスト/本番の各サイトをQuickPickの選択肢へ変換する。
+ * 未設定の環境(サイト未紐づけ)は選択肢から除外する。
+ */
+function buildEnvironmentOptions(project: api.ProjectDetail): EnvironmentOption[] {
+  const options: EnvironmentOption[] = [];
+  if (project.localSite) {
+    options.push({
+      label: 'ローカル',
+      description: project.localSite.name,
+      siteKey: project.localSite.siteKey,
+      forceStatus: 'publish',
+    });
+  }
+  if (project.testSite) {
+    options.push({
+      label: 'テスト',
+      description: project.testSite.name,
+      siteKey: project.testSite.siteKey,
+      forceStatus: 'publish',
+    });
+  }
+  if (project.productionSite) {
+    options.push({ label: '本番', description: project.productionSite.name, siteKey: project.productionSite.siteKey });
+  }
+  return options;
+}
+
+async function commandPublish(context: vscode.ExtensionContext): Promise<void> {
   const editor = getActiveMarkdownEditor();
   if (!editor) return;
 
@@ -209,14 +249,19 @@ async function commandPublishToTestEnvironment(context: vscode.ExtensionContext)
     const apiKey = await requireApiKey(context);
     const actor = await getActor(context);
     const project = await api.getProject(getServerUrl(), apiKey, actor, projectId);
-    if (!project.testSite) {
-      vscode.window.showErrorMessage(`プロジェクト '${project.name}' にはtest環境サイトが紐づいていません。`);
+
+    const options = buildEnvironmentOptions(project);
+    if (options.length === 0) {
+      vscode.window.showErrorMessage(`プロジェクト '${project.name}' には投稿先サイトが紐づいていません。`);
       return;
     }
 
-    await publishToSite(context, editor, project.testSite.siteKey);
+    const picked = await vscode.window.showQuickPick(options, { placeHolder: '投稿先の環境を選択' });
+    if (!picked) return;
+
+    await publishToSite(context, editor, picked.siteKey, picked.forceStatus);
   } catch (err) {
-    vscode.window.showErrorMessage(`test環境への投稿に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+    vscode.window.showErrorMessage(`投稿に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
   }
 }
 
@@ -300,30 +345,20 @@ async function commandGenerateImage(context: vscode.ExtensionContext): Promise<v
   const editor = getActiveMarkdownEditor();
   if (!editor) return;
 
-  const prompt = await vscode.window.showInputBox({
-    prompt: '生成したい画像のプロンプトを入力してください',
-    ignoreFocusOut: true,
-  });
-  if (!prompt) return;
-
   try {
-    const apiKey = await requireApiKey(context);
-    const image = await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: '画像を生成しています…' },
-      () => api.generateImage(getServerUrl(), apiKey, prompt)
-    );
+    const article = parseArticle(editor.document.getText());
+    const projectId = (article.data.project_id as number | undefined) ?? getProjectId(context);
+    if (!projectId) {
+      vscode.window.showErrorMessage(
+        'プロジェクトが未選択です。front matterのproject_id、または「Let\'s Blog: Select Project」で設定してください。'
+      );
+      return;
+    }
 
     const baseDir = path.dirname(editor.document.uri.fsPath);
-    const destPath = path.join(baseDir, image.fileName);
-    fs.writeFileSync(destPath, Buffer.from(image.dataBase64, 'base64'));
-
-    await editor.edit((builder) => {
-      builder.insert(editor.selection.active, `![${prompt}](${image.fileName})`);
-    });
-
-    vscode.window.showInformationMessage(`画像を生成し ${image.fileName} として保存しました。`);
+    ImageGenPanel.createOrShow(context, editor, baseDir, projectId);
   } catch (err) {
-    vscode.window.showErrorMessage(`画像生成に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+    vscode.window.showErrorMessage(`画像生成パネルの起動に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
   }
 }
 

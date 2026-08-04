@@ -145,6 +145,9 @@ public class WordPressAgentOperations {
         if (content.tagIds() != null && !content.tagIds().isEmpty()) {
             payload.put("tagIds", content.tagIds());
         }
+        if (content.featuredMediaId() != null) {
+            payload.put("featuredMediaId", content.featuredMediaId());
+        }
 
         try {
             JsonNode body = post("/wp-cli/post", payload);

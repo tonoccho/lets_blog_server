@@ -34,6 +34,28 @@ export interface GenerationJob {
   updatedAt: string;
 }
 
+export interface GeneratedImageSummary {
+  id: number;
+  projectId: number | null;
+  prompt: string;
+  checkpoint: string;
+  createdAt: string;
+}
+
+export interface GeneratedImageDetail extends GeneratedImageSummary {
+  negativePrompt: string;
+  steps: number;
+  cfgScale: number;
+  samplerName: string;
+  scheduler: string;
+  seed: number;
+  width: number;
+  height: number;
+  batchSize: number;
+  loraName: string | null;
+  loraWeight: number | null;
+}
+
 export interface SiteRegisterInput {
   name: string;
   siteKey: string;
@@ -247,6 +269,30 @@ export function listPosts(): Promise<PostSummary[]> {
 
 export function listGenerationJobs(): Promise<GenerationJob[]> {
   return apiFetch<GenerationJob[]>('/api/generation-jobs');
+}
+
+export function listGeneratedImages(projectId?: number): Promise<GeneratedImageSummary[]> {
+  const query = projectId ? `?projectId=${projectId}` : '';
+  return apiFetch<GeneratedImageSummary[]>(`/api/generated-images${query}`);
+}
+
+export function getGeneratedImage(id: number): Promise<GeneratedImageDetail> {
+  return apiFetch<GeneratedImageDetail>(`/api/generated-images/${id}`);
+}
+
+export async function downloadGeneratedImageFile(id: number): Promise<{ body: ArrayBuffer; mimeType: string }> {
+  const res = await fetch(`${serverUrl()}/api/generated-images/${id}/file`, {
+    headers: { 'X-API-Key': await currentApiKey() },
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
+  }
+  return {
+    body: await res.arrayBuffer(),
+    mimeType: res.headers.get('content-type') ?? 'image/png',
+  };
 }
 
 export async function login(email: string, password: string): Promise<LoginResult | null> {

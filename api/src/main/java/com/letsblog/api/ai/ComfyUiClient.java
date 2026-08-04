@@ -2,6 +2,7 @@ package com.letsblog.api.ai;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -13,7 +14,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * ComfyUIのAPI(/prompt, /history, /view)を呼び出し、txt2img画像を生成するクライアント。
+ * ComfyUIのAPI(/prompt, /history, /view, /object_info)を呼び出し、txt2img画像を生成するクライアント。
  * ComfyUIは非同期のキュー方式のため、/prompt投入後 /history をポーリングして完了を待つ。
  */
 @Component
@@ -25,19 +26,21 @@ public class ComfyUiClient {
     private final RestClient client;
     private final String checkpointName;
 
+    @Autowired
     public ComfyUiClient(@Value("${app.comfyui-base-url}") String baseUrl,
                           @Value("${app.comfyui-checkpoint}") String checkpointName) {
-        this.client = RestClient.builder().baseUrl(baseUrl).build();
+        this(RestClient.builder().baseUrl(baseUrl), checkpointName);
+    }
+
+    /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
+    ComfyUiClient(RestClient.Builder builder, String checkpointName) {
+        this.client = builder.build();
         this.checkpointName = checkpointName;
     }
 
-    public ComfyUiImage generateImage(String prompt) {
-        return generateImage(prompt, this.checkpointName);
-    }
-
-    public ComfyUiImage generateImage(String prompt, String checkpoint) {
+    public ComfyUiImage generateImage(ComfyUiGenerationParams params) {
         String clientId = UUID.randomUUID().toString();
-        ObjectNode workflow = buildWorkflow(prompt, checkpoint);
+        ObjectNode workflow = buildWorkflow(params);
 
         ObjectNode requestBody = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
         requestBody.set("prompt", workflow);
@@ -117,48 +120,133 @@ public class ComfyUiClient {
         }
     }
 
-    private ObjectNode buildWorkflow(String prompt, String checkpoint) {
+    /**
+     * ComfyUIが対応しているサンプラー名の一覧を取得する(GET /object_info/KSampler)。
+     */
+    public List<String> listSamplers() {
+        try {
+            JsonNode response = client.get().uri("/object_info/KSampler").retrieve().body(JsonNode.class);
+            List<String> samplers = new ArrayList<>();
+            if (response == null) {
+                return samplers;
+            }
+            JsonNode samplerNames = response.path("KSampler")
+                    .path("input").path("required").path("sampler_name").path(0);
+            for (JsonNode name : samplerNames) {
+                samplers.add(name.asText());
+            }
+            return samplers;
+        } catch (RestClientResponseException e) {
+            throw new AiServiceException("ComfyUIサンプラー一覧の取得に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+        }
+    }
+
+    /**
+     * ComfyUIが対応しているスケジューラー名の一覧を取得する(GET /object_info/KSampler)。
+     */
+    public List<String> listSchedulers() {
+        try {
+            JsonNode response = client.get().uri("/object_info/KSampler").retrieve().body(JsonNode.class);
+            List<String> schedulers = new ArrayList<>();
+            if (response == null) {
+                return schedulers;
+            }
+            JsonNode schedulerNames = response.path("KSampler")
+                    .path("input").path("required").path("scheduler").path(0);
+            for (JsonNode name : schedulerNames) {
+                schedulers.add(name.asText());
+            }
+            return schedulers;
+        } catch (RestClientResponseException e) {
+            throw new AiServiceException("ComfyUIスケジューラー一覧の取得に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+        }
+    }
+
+    /**
+     * ComfyUIに配置されているLoRAモデルの一覧を取得する(GET /object_info/LoraLoader)。
+     * LoraLoaderノードが未実装のComfyUI環境では例外を投げず空リストを返す。
+     */
+    public List<String> listLoras() {
+        try {
+            JsonNode response = client.get().uri("/object_info/LoraLoader").retrieve().body(JsonNode.class);
+            List<String> loras = new ArrayList<>();
+            if (response == null) {
+                return loras;
+            }
+            JsonNode loraNames = response.path("LoraLoader")
+                    .path("input").path("required").path("lora_name").path(0);
+            for (JsonNode name : loraNames) {
+                loras.add(name.asText());
+            }
+            return loras;
+        } catch (RestClientResponseException e) {
+            return new ArrayList<>();
+        }
+    }
+
+    private ObjectNode buildWorkflow(ComfyUiGenerationParams params) {
         var factory = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance;
         ObjectNode graph = factory.objectNode();
 
+        String checkpoint = params.checkpoint() != null ? params.checkpoint() : this.checkpointName;
+
         ObjectNode checkpointLoader = factory.objectNode();
         checkpointLoader.put("class_type", "CheckpointLoaderSimple");
-        ObjectNode checkpointInputs = checkpointLoader.putObject("inputs");
-        checkpointInputs.put("ckpt_name", checkpoint);
+        checkpointLoader.putObject("inputs").put("ckpt_name", checkpoint);
         graph.set("4", checkpointLoader);
 
         ObjectNode latentImage = factory.objectNode();
         latentImage.put("class_type", "EmptyLatentImage");
         ObjectNode latentInputs = latentImage.putObject("inputs");
-        latentInputs.put("width", 512);
-        latentInputs.put("height", 512);
-        latentInputs.put("batch_size", 1);
+        latentInputs.put("width", params.width());
+        latentInputs.put("height", params.height());
+        latentInputs.put("batch_size", params.batchSize());
         graph.set("5", latentImage);
+
+        String clipRef = "4";
+        String modelRef = "4";
+        if (params.loraName() != null && !params.loraName().isBlank()) {
+            ObjectNode loraLoader = factory.objectNode();
+            loraLoader.put("class_type", "LoraLoader");
+            ObjectNode loraInputs = loraLoader.putObject("inputs");
+            loraInputs.put("lora_name", params.loraName());
+            double loraWeight = params.loraWeight() != null ? params.loraWeight() : 1.0;
+            loraInputs.put("strength_model", loraWeight);
+            loraInputs.put("strength_clip", loraWeight);
+            loraInputs.putArray("model").add("4").add(0);
+            loraInputs.putArray("clip").add("4").add(1);
+            graph.set("10", loraLoader);
+
+            modelRef = "10";
+            clipRef = "10";
+        }
 
         ObjectNode positive = factory.objectNode();
         positive.put("class_type", "CLIPTextEncode");
         ObjectNode positiveInputs = positive.putObject("inputs");
-        positiveInputs.put("text", prompt);
-        positiveInputs.putArray("clip").add("4").add(1);
+        positiveInputs.put("text", params.prompt());
+        positiveInputs.putArray("clip").add(clipRef).add(1);
         graph.set("6", positive);
 
         ObjectNode negative = factory.objectNode();
         negative.put("class_type", "CLIPTextEncode");
         ObjectNode negativeInputs = negative.putObject("inputs");
-        negativeInputs.put("text", "low quality, blurry, watermark, text");
-        negativeInputs.putArray("clip").add("4").add(1);
+        negativeInputs.put("text", params.negativePrompt());
+        negativeInputs.putArray("clip").add(clipRef).add(1);
         graph.set("7", negative);
 
         ObjectNode sampler = factory.objectNode();
         sampler.put("class_type", "KSampler");
         ObjectNode samplerInputs = sampler.putObject("inputs");
-        samplerInputs.put("seed", System.nanoTime() & 0xFFFFFFFFL);
-        samplerInputs.put("steps", 20);
-        samplerInputs.put("cfg", 7.0);
-        samplerInputs.put("sampler_name", "euler");
-        samplerInputs.put("scheduler", "normal");
+        long seed = params.seed() != null && params.seed() >= 0
+                ? params.seed() : (System.nanoTime() & 0xFFFFFFFFL);
+        samplerInputs.put("seed", seed);
+        samplerInputs.put("steps", params.steps());
+        samplerInputs.put("cfg", params.cfgScale());
+        samplerInputs.put("sampler_name", params.samplerName());
+        samplerInputs.put("scheduler", params.scheduler());
         samplerInputs.put("denoise", 1.0);
-        samplerInputs.putArray("model").add("4").add(0);
+        samplerInputs.putArray("model").add(modelRef).add(0);
         samplerInputs.putArray("positive").add("6").add(0);
         samplerInputs.putArray("negative").add("7").add(0);
         samplerInputs.putArray("latent_image").add("5").add(0);

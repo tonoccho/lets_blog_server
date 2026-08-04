@@ -9,6 +9,7 @@ import com.letsblog.api.service.CustomTagNotFoundException;
 import com.letsblog.api.service.EmailAlreadyExistsException;
 import com.letsblog.api.service.EmailSendException;
 import com.letsblog.api.service.ForbiddenException;
+import com.letsblog.api.service.GeneratedImageNotFoundException;
 import com.letsblog.api.service.GenerationJobNotFoundException;
 import com.letsblog.api.service.InvalidCredentialsException;
 import com.letsblog.api.service.InvalidRoleException;
@@ -66,6 +67,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(GenerationJobNotFoundException.class)
     public ResponseEntity<Map<String, String>> handleGenerationJobNotFound(GenerationJobNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(GeneratedImageNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleGeneratedImageNotFound(GeneratedImageNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
     }
 

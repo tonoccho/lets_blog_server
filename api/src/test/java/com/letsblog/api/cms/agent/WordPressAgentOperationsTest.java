@@ -114,7 +114,7 @@ class WordPressAgentOperationsTest {
                         "{\"postId\":\"123\",\"guid\":\"http://wordpress/sites/main/?p=123\",\"status\":\"draft\"}",
                         MediaType.APPLICATION_JSON));
 
-        PostContent content = new PostContent("Test Title", "test-slug", "<p>HTML</p>", "draft", null, null);
+        PostContent content = new PostContent("Test Title", "test-slug", "<p>HTML</p>", "draft", null, null, null);
         PostResult result = operations.createOrUpdatePost(creds(), content, null);
 
         assertEquals("123", result.id());
@@ -129,7 +129,7 @@ class WordPressAgentOperationsTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .body("{\"error\":\"投稿の作成/更新に失敗しました\",\"detail\":\"boom\"}"));
 
-        PostContent content = new PostContent("Test Title", null, "<p>HTML</p>", "draft", null, null);
+        PostContent content = new PostContent("Test Title", null, "<p>HTML</p>", "draft", null, null, null);
 
         assertThrows(AgentOperationException.class, () -> operations.createOrUpdatePost(creds(), content, null));
     }

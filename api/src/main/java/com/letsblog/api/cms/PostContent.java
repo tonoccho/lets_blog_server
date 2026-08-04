@@ -8,6 +8,7 @@ public record PostContent(
         String htmlContent,
         String status,
         List<String> categoryIds,
-        List<String> tagIds
+        List<String> tagIds,
+        String featuredMediaId
 ) {
 }

@@ -264,7 +264,7 @@ class WordPressSshOperationsTest {
     }
 
     private PostContent postContent() {
-        return new PostContent("Title", "my-slug", "<p>Hello</p>", "publish", List.of("5"), List.of("7"));
+        return new PostContent("Title", "my-slug", "<p>Hello</p>", "publish", List.of("5"), List.of("7"), null);
     }
 
     @Test

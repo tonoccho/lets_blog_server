@@ -13,6 +13,7 @@ public record PostPublishCommand(
         List<String> tags,
         String wpPostId,
         String markdown,
-        List<MultipartFile> images
+        List<MultipartFile> images,
+        String featuredImageFilename
 ) {
 }

@@ -2,7 +2,7 @@
   "name": "letsblog-vscode",
   "displayName": "Let's Blog",
   "description": "Markdownで執筆した記事を仲介APIサーバー経由でWordPressへ投稿するVSCode拡張",
-  "version": "0.2.2",
+  "version": "0.2.5",
   "publisher": "letsblog",
   "private": true,
   "engines": {
@@ -48,10 +48,6 @@
       {
         "command": "letsBlog.planArticle",
         "title": "Let's Blog: Plan Article"
-      },
-      {
-        "command": "letsBlog.publishToTestEnvironment",
-        "title": "Let's Blog: Publish to Test Environment"
       },
       {
         "command": "letsBlog.previewArticle",

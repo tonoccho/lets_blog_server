@@ -10,6 +10,7 @@ import {
   Tag,
   ScrollText,
   Shield,
+  Images,
   type LucideIcon,
 } from "lucide-react";
 
@@ -26,6 +27,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/sites", label: "サイト", icon: Globe },
   { href: "/posts", label: "投稿履歴", icon: FileText },
   { href: "/ai-jobs", label: "AIジョブ", icon: Zap },
+  { href: "/image-gallery", label: "生成画像ギャラリー", icon: Images },
   { href: "/system", label: "システム", icon: Settings },
   { href: "/settings/security", label: "セキュリティ設定", icon: Lock },
 ];

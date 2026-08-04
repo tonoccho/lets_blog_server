@@ -11,6 +11,12 @@ export interface LetsBlogFrontMatter {
   featured_image?: string;
   wp_post_id?: string | null;
   wp_post_url?: string | null;
+  /**
+   * 環境(サイトキー)ごとのWordPress投稿ID。ローカル/テスト/本番は別々のWordPressサイトのため、
+   * 単一のwp_post_idを使い回すと別サイトの投稿IDで更新しようとして失敗する。
+   * 投稿先を都度選べるようになった際に、サイトごとの投稿IDを個別に記録するために追加。
+   */
+  wp_post_ids?: Record<string, string>;
   github_issue_number?: number;
   github_repository?: string;
   project_id?: number;
@@ -61,4 +67,39 @@ export function extractLocalImageReferences(content: string, baseDir: string): L
   }
 
   return results;
+}
+
+/**
+ * front matterのfeatured_imageをLocalImageReferenceへ変換する。相対パス(例: "assets/eyecatch.png")のみ対象とし、
+ * 外部URL(http(s))やdata URIは投稿時のimages同梱対象にできないためundefinedを返す。
+ */
+export function resolveFeaturedImageReference(
+  data: LetsBlogFrontMatter,
+  baseDir: string
+): LocalImageReference | undefined {
+  const reference = data.featured_image;
+  if (!reference) {
+    return undefined;
+  }
+  if (/^(https?:)?\/\//.test(reference) || reference.startsWith('data:')) {
+    return undefined;
+  }
+  return { reference, absolutePath: path.resolve(baseDir, reference) };
+}
+
+/**
+ * 投稿先サイト(siteKey)に対応する既存投稿IDを解決する。wp_post_idsに記録があればそれを使う。
+ * wp_post_ids導入前に作成された記事(まだこのフィールドを持たない)は、front matterのsiteが
+ * 投稿先と一致する場合に限り、従来のwp_post_idを既存投稿として扱う(異なるサイトのIDを
+ * 誤って使い回さないよう、一致しない場合は新規投稿として扱う)。
+ */
+export function resolveExistingPostId(data: LetsBlogFrontMatter, siteKey: string): string | undefined {
+  const mapped = data.wp_post_ids?.[siteKey];
+  if (mapped) {
+    return mapped;
+  }
+  if (data.site === siteKey && data.wp_post_id != null) {
+    return String(data.wp_post_id);
+  }
+  return undefined;
 }

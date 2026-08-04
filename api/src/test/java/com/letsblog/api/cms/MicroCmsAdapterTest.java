@@ -53,7 +53,7 @@ class MicroCmsAdapterTest {
                         "{\"id\":\"post-abc123\"}",
                         MediaType.APPLICATION_JSON));
 
-        PostContent content = new PostContent("Test", null, "<p>Test</p>", "draft", null, null);
+        PostContent content = new PostContent("Test", null, "<p>Test</p>", "draft", null, null, null);
 
         PostResult result = adapter.createOrUpdatePost(creds, content, null);
 
@@ -70,7 +70,7 @@ class MicroCmsAdapterTest {
                         "{\"id\":\"post-abc123\"}",
                         MediaType.APPLICATION_JSON));
 
-        PostContent content = new PostContent("Updated", null, "<p>Updated</p>", "published", null, null);
+        PostContent content = new PostContent("Updated", null, "<p>Updated</p>", "published", null, null, null);
 
         PostResult result = adapter.createOrUpdatePost(creds, content, "post-abc123");
 
@@ -138,7 +138,7 @@ class MicroCmsAdapterTest {
         server.expect(requestTo("https://myservice.microcms.io/api/v1/posts"))
                 .andRespond(withServerError());
 
-        PostContent content = new PostContent("Test", null, "<p>Test</p>", "draft", null, null);
+        PostContent content = new PostContent("Test", null, "<p>Test</p>", "draft", null, null, null);
 
         assertThrows(CmsApiException.class,
                 () -> adapter.createOrUpdatePost(creds, content, null));

@@ -3,8 +3,11 @@ package com.letsblog.api.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.ai.ComfyUiClient;
+import com.letsblog.api.ai.ComfyUiGenerationParams;
 import com.letsblog.api.ai.ComfyUiImage;
+import com.letsblog.api.ai.GeneratedImageStorageService;
 import com.letsblog.api.ai.OllamaClient;
+import com.letsblog.api.domain.GeneratedImage;
 import com.letsblog.api.domain.GenerationJob;
 import com.letsblog.api.dto.AiDraftRequest;
 import com.letsblog.api.dto.AiDraftResponse;
@@ -12,9 +15,12 @@ import com.letsblog.api.dto.AiImageRequest;
 import com.letsblog.api.dto.AiImageResponse;
 import com.letsblog.api.dto.AiTagsRequest;
 import com.letsblog.api.dto.AiTagsResponse;
+import com.letsblog.api.dto.ImageGenerationOptionsResponse;
+import com.letsblog.api.repository.GeneratedImageRepository;
 import com.letsblog.api.repository.GenerationJobRepository;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -62,13 +68,22 @@ public class AiAssistService {
 
     private final OllamaClient ollamaClient;
     private final ComfyUiClient comfyUiClient;
+    private final ComfyUiModelService comfyUiModelService;
+    private final GeneratedImageStorageService generatedImageStorageService;
+    private final GeneratedImageRepository generatedImageRepository;
     private final GenerationJobRepository generationJobRepository;
     private final ObjectMapper objectMapper;
 
     public AiAssistService(OllamaClient ollamaClient, ComfyUiClient comfyUiClient,
+                           ComfyUiModelService comfyUiModelService,
+                           GeneratedImageStorageService generatedImageStorageService,
+                           GeneratedImageRepository generatedImageRepository,
                            GenerationJobRepository generationJobRepository, ObjectMapper objectMapper) {
         this.ollamaClient = ollamaClient;
         this.comfyUiClient = comfyUiClient;
+        this.comfyUiModelService = comfyUiModelService;
+        this.generatedImageStorageService = generatedImageStorageService;
+        this.generatedImageRepository = generatedImageRepository;
         this.generationJobRepository = generationJobRepository;
         this.objectMapper = objectMapper;
     }
@@ -76,14 +91,68 @@ public class AiAssistService {
     public AiImageResponse generateImage(AiImageRequest request) {
         GenerationJob job = startJob("comfyui_image", Map.of("prompt", request.prompt()));
         try {
-            ComfyUiImage image = comfyUiClient.generateImage(request.prompt());
+            ComfyUiGenerationParams params = resolveParams(request);
+            ComfyUiImage image = comfyUiClient.generateImage(params);
             String base64 = Base64.getEncoder().encodeToString(image.data());
+            String filePath = generatedImageStorageService.store(request.projectId(), image.data());
+            GeneratedImage saved = generatedImageRepository.save(toEntity(request.projectId(), params, filePath, image.mimeType()));
             completeJob(job, Map.of("fileName", image.fileName()));
-            return new AiImageResponse(image.fileName(), base64, image.mimeType());
+            return new AiImageResponse(saved.getId(), image.fileName(), base64, image.mimeType());
         } catch (RuntimeException e) {
             failJob(job, e);
             throw e;
         }
+    }
+
+    public ImageGenerationOptionsResponse getImageOptions(Long projectId) {
+        return new ImageGenerationOptionsResponse(
+                comfyUiClient.listCheckpoints(),
+                comfyUiModelService.getSelectedCheckpointOrGlobalDefault(projectId),
+                comfyUiClient.listSamplers(),
+                comfyUiClient.listSchedulers(),
+                comfyUiClient.listLoras());
+    }
+
+    private ComfyUiGenerationParams resolveParams(AiImageRequest request) {
+        String checkpoint = request.checkpoint() != null && !request.checkpoint().isBlank()
+                ? request.checkpoint()
+                : comfyUiModelService.getSelectedCheckpointOrGlobalDefault(request.projectId());
+        return new ComfyUiGenerationParams(
+                request.prompt(),
+                request.negativePrompt() != null ? request.negativePrompt() : "low quality, blurry, watermark, text",
+                request.steps() != null ? request.steps() : 20,
+                request.cfgScale() != null ? request.cfgScale() : 7.0,
+                request.samplerName() != null ? request.samplerName() : "euler",
+                request.scheduler() != null ? request.scheduler() : "normal",
+                request.seed(),
+                request.width() != null ? request.width() : 512,
+                request.height() != null ? request.height() : 512,
+                request.batchSize() != null ? request.batchSize() : 1,
+                checkpoint,
+                request.loraName(),
+                request.loraWeight()
+        );
+    }
+
+    private GeneratedImage toEntity(Long projectId, ComfyUiGenerationParams params, String filePath, String mimeType) {
+        GeneratedImage entity = new GeneratedImage();
+        entity.setProjectId(projectId);
+        entity.setPrompt(params.prompt());
+        entity.setNegativePrompt(params.negativePrompt());
+        entity.setSteps(params.steps());
+        entity.setCfgScale(params.cfgScale() != null ? BigDecimal.valueOf(params.cfgScale()) : null);
+        entity.setSamplerName(params.samplerName());
+        entity.setScheduler(params.scheduler());
+        entity.setSeed(params.seed());
+        entity.setWidth(params.width());
+        entity.setHeight(params.height());
+        entity.setBatchSize(params.batchSize());
+        entity.setCheckpoint(params.checkpoint());
+        entity.setLoraName(params.loraName());
+        entity.setLoraWeight(params.loraWeight() != null ? BigDecimal.valueOf(params.loraWeight()) : null);
+        entity.setFilePath(filePath);
+        entity.setMimeType(mimeType);
+        return entity;
     }
 
     public AiDraftResponse draft(AiDraftRequest request) {

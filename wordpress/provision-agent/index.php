@@ -31,22 +31,43 @@ function isValidDbName(string $value): bool
 }
 
 /**
+ * stdout/stderrをエラー表示用に1つの文字列へまとめる。porcelain出力の抽出には使わないこと
+ * (wp-cliがstderrへPHP Warning等を出すことがあり、それが混ざるとID等の値が壊れるため)。
+ */
+function combinedOutput(string $stdout, string $stderr): string
+{
+    return trim($stdout . ($stderr !== '' ? "\n$stderr" : ''));
+}
+
+/**
  * escapeshellargで各トークンを個別にエスケープしてからシェルへ渡す(コマンドインジェクション対策)。
+ * stdout/stderrは分離して返す。porcelain出力(投稿ID等)はstdoutのみから取り出すこと
+ * (stderrにPHP Warning等が出た場合に、stdoutの値と混ざって壊れるのを防ぐため)。
  * @param string[] $args
- * @return array{0:int,1:string}
+ * @return array{0:int,1:string,2:string}
  */
 function runCommand(array $args): array
 {
-    $command = implode(' ', array_map('escapeshellarg', $args)) . ' 2>&1';
-    exec($command, $output, $exitCode);
-    return [$exitCode, implode("\n", $output)];
+    $command = implode(' ', array_map('escapeshellarg', $args));
+    $descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+    $process = proc_open($command, $descriptors, $pipes);
+    if (!is_resource($process)) {
+        return [1, '', 'proc_openに失敗しました'];
+    }
+    fclose($pipes[0]);
+    $stdout = stream_get_contents($pipes[1]);
+    $stderr = stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    $exitCode = proc_close($process);
+    return [$exitCode, trim($stdout), trim($stderr)];
 }
 
 /**
  * wp-cli(phar)実行時、PHP CLIのデフォルトmemory_limitではWordPressコア展開時に
  * メモリ不足になることがあるため、明示的に緩和した上で実行する。
  * @param string[] $args wp-cliへのサブコマンド以降の引数
- * @return array{0:int,1:string}
+ * @return array{0:int,1:string,2:string}
  */
 function runWp(array $args): array
 {
@@ -57,8 +78,9 @@ function runWp(array $args): array
  * 投稿本文の送信等、STDIN経由の入力が必要なwp-cli呼び出し用。
  * runWp/runCommandと同様に各トークンをescapeshellargで個別にエスケープしたコマンド文字列を
  * proc_openでSTDINパイプ付き実行する(exec()はSTDINを渡せないため)。
+ * stdout/stderrは分離して返す(runCommandと同じ理由)。
  * @param string[] $args
- * @return array{0:int,1:string}
+ * @return array{0:int,1:string,2:string}
  */
 function runWpWithStdin(array $args, string $stdin): array
 {
@@ -67,7 +89,7 @@ function runWpWithStdin(array $args, string $stdin): array
     $descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
     $process = proc_open($command, $descriptors, $pipes);
     if (!is_resource($process)) {
-        return [1, 'proc_openに失敗しました'];
+        return [1, '', 'proc_openに失敗しました'];
     }
     fwrite($pipes[0], $stdin);
     fclose($pipes[0]);
@@ -76,7 +98,7 @@ function runWpWithStdin(array $args, string $stdin): array
     fclose($pipes[1]);
     fclose($pipes[2]);
     $exitCode = proc_close($process);
-    return [$exitCode, trim($stdout . ($stderr !== '' ? "\n$stderr" : ''))];
+    return [$exitCode, trim($stdout), trim($stderr)];
 }
 
 /**
@@ -145,27 +167,27 @@ if ($path === '/provision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $siteUrl = "https://localhost/sites/$slug";
 
-    [$code, $out] = runCommand(['mkdir', '-p', $sitePath]);
+    [$code, $out, $err] = runCommand(['mkdir', '-p', $sitePath]);
     if ($code !== 0) {
-        respond(500, ['error' => 'ディレクトリ作成に失敗しました', 'detail' => $out]);
+        respond(500, ['error' => 'ディレクトリ作成に失敗しました', 'detail' => combinedOutput($out, $err)]);
     }
 
     $createDbSql = sprintf(
         "CREATE DATABASE IF NOT EXISTS `%s`; GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'%%'; FLUSH PRIVILEGES;",
         $dbName, $dbName, $dbUser
     );
-    [$code, $out] = runCommand(['mysql', '--skip-ssl', '-h', $dbHost, '-uroot', "-p$rootPassword", '-e', $createDbSql]);
+    [$code, $out, $err] = runCommand(['mysql', '--skip-ssl', '-h', $dbHost, '-uroot', "-p$rootPassword", '-e', $createDbSql]);
     if ($code !== 0) {
         runCommand(['rm', '-rf', $sitePath]);
-        respond(500, ['error' => 'データベース作成に失敗しました', 'detail' => $out]);
+        respond(500, ['error' => 'データベース作成に失敗しました', 'detail' => combinedOutput($out, $err)]);
     }
 
-    [$code, $out] = runWp(['core', 'download', "--path=$sitePath", "--locale=$locale", '--allow-root']);
+    [$code, $out, $err] = runWp(['core', 'download', "--path=$sitePath", "--locale=$locale", '--allow-root']);
     if ($code !== 0) {
-        cleanupAndRespond(500, ['error' => 'WordPressコアのダウンロードに失敗しました', 'detail' => $out], $sitePath, $dbName, $dbHost, $rootPassword);
+        cleanupAndRespond(500, ['error' => 'WordPressコアのダウンロードに失敗しました', 'detail' => combinedOutput($out, $err)], $sitePath, $dbName, $dbHost, $rootPassword);
     }
 
-    [$code, $out] = runWp([
+    [$code, $out, $err] = runWp([
         'config', 'create',
         "--path=$sitePath",
         "--dbname=$dbName",
@@ -175,7 +197,7 @@ if ($path === '/provision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         '--allow-root',
     ]);
     if ($code !== 0) {
-        cleanupAndRespond(500, ['error' => 'wp-config.php作成に失敗しました', 'detail' => $out], $sitePath, $dbName, $dbHost, $rootPassword);
+        cleanupAndRespond(500, ['error' => 'wp-config.php作成に失敗しました', 'detail' => combinedOutput($out, $err)], $sitePath, $dbName, $dbHost, $rootPassword);
     }
 
     // このWordPressインスタンスは常駐wordpressコンテナ内でのみ動作し、外部からは
@@ -195,7 +217,7 @@ if ($path === '/provision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         file_put_contents($configPath, $configContents);
     }
 
-    [$code, $out] = runWp([
+    [$code, $out, $err] = runWp([
         'core', 'install',
         "--path=$sitePath",
         "--url=$siteUrl",
@@ -207,14 +229,14 @@ if ($path === '/provision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         '--allow-root',
     ]);
     if ($code !== 0) {
-        cleanupAndRespond(500, ['error' => 'WordPressのインストールに失敗しました', 'detail' => $out], $sitePath, $dbName, $dbHost, $rootPassword);
+        cleanupAndRespond(500, ['error' => 'WordPressのインストールに失敗しました', 'detail' => combinedOutput($out, $err)], $sitePath, $dbName, $dbHost, $rootPassword);
     }
 
     // パーマリンクを「投稿名」構造にする(デフォルトの「基本」のままでは
     // /wp-json/ のようなpretty permalink形式のREST APIパスが404になるため必須)。
-    [$code, $out] = runWp(['rewrite', 'structure', '/%postname%/', "--path=$sitePath", '--allow-root']);
+    [$code, $out, $err] = runWp(['rewrite', 'structure', '/%postname%/', "--path=$sitePath", '--allow-root']);
     if ($code !== 0) {
-        cleanupAndRespond(500, ['error' => 'パーマリンク設定に失敗しました', 'detail' => $out], $sitePath, $dbName, $dbHost, $rootPassword);
+        cleanupAndRespond(500, ['error' => 'パーマリンク設定に失敗しました', 'detail' => combinedOutput($out, $err)], $sitePath, $dbName, $dbHost, $rootPassword);
     }
 
     // wp-cliはCLI SAPIで動作するためapache_get_modules()でmod_rewriteを検出できず、
@@ -233,15 +255,15 @@ if ($path === '/provision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         . "# END WordPress\n";
     file_put_contents("$sitePath/.htaccess", $htaccess);
 
-    [$code, $out] = runWp([
+    [$code, $out, $err] = runWp([
         'user', 'application-password', 'create',
         "--path=$sitePath",
         $adminUser, 'letsblog', '--porcelain', '--allow-root',
     ]);
     if ($code !== 0) {
-        cleanupAndRespond(500, ['error' => 'アプリケーションパスワードの発行に失敗しました', 'detail' => $out], $sitePath, $dbName, $dbHost, $rootPassword);
+        cleanupAndRespond(500, ['error' => 'アプリケーションパスワードの発行に失敗しました', 'detail' => combinedOutput($out, $err)], $sitePath, $dbName, $dbHost, $rootPassword);
     }
-    $applicationPassword = trim($out);
+    $applicationPassword = $out;
 
     runCommand(['chown', '-R', 'www-data:www-data', $sitePath]);
 
@@ -294,9 +316,9 @@ if ($path === '/sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         runCommand(['tar', '-czf', "$backupDir/{$target}-{$timestamp}.tar.gz", '-C', "$toPath/wp-content", $dirName]);
         runCommand(['rm', '-rf', $toContentPath]);
-        [$code, $out] = runCommand(['cp', '-r', $fromContentPath, $toContentPath]);
+        [$code, $out, $err] = runCommand(['cp', '-r', $fromContentPath, $toContentPath]);
         if ($code !== 0) {
-            respond(500, ['error' => "{$target}の同期に失敗しました", 'detail' => $out]);
+            respond(500, ['error' => "{$target}の同期に失敗しました", 'detail' => combinedOutput($out, $err)]);
         }
     }
 
@@ -314,17 +336,17 @@ if ($path === '/sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             . ' ' . escapeshellarg($fromDbName);
         $importCmd = 'mysql --skip-ssl -h' . escapeshellarg($dbHost) . ' -uroot -p' . escapeshellarg($rootPassword)
             . ' ' . escapeshellarg($toDbName);
-        [$code, $out] = runCommand(['sh', '-c', "$dumpCmd | $importCmd"]);
+        [$code, $out, $err] = runCommand(['sh', '-c', "$dumpCmd | $importCmd"]);
         if ($code !== 0) {
-            respond(500, ['error' => 'DBの同期に失敗しました', 'detail' => $out]);
+            respond(500, ['error' => 'DBの同期に失敗しました', 'detail' => combinedOutput($out, $err)]);
         }
 
         // コピー元のURLがwp_options等に焼き込まれたままになるため、コピー先自身のURLへ書き戻す
         $fromUrl = "https://localhost/sites/$fromSlug";
         $toUrl = "https://localhost/sites/$toSlug";
-        [$code, $out] = runWp(['search-replace', $fromUrl, $toUrl, '--all-tables', "--path=$toPath", '--allow-root']);
+        [$code, $out, $err] = runWp(['search-replace', $fromUrl, $toUrl, '--all-tables', "--path=$toPath", '--allow-root']);
         if ($code !== 0) {
-            respond(500, ['error' => 'URL書き換え(search-replace)に失敗しました', 'detail' => $out]);
+            respond(500, ['error' => 'URL書き換え(search-replace)に失敗しました', 'detail' => combinedOutput($out, $err)]);
         }
     }
 
@@ -344,7 +366,7 @@ if ($path === '/sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
  */
 function fetchTerms(string $sitePath, string $taxonomy): array
 {
-    [$code, $out] = runWp(['term', 'list', $taxonomy, '--fields=term_id,name,slug,parent,description', '--format=json', "--path=$sitePath", '--allow-root']);
+    [$code, $out, $err] = runWp(['term', 'list', $taxonomy, '--fields=term_id,name,slug,parent,description', '--format=json', "--path=$sitePath", '--allow-root']);
     $terms = $code === 0 ? (json_decode($out, true) ?: []) : [];
     $slugById = [];
     foreach ($terms as $term) {
@@ -401,7 +423,7 @@ if ($path === '/plugins' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!is_dir($sitePath)) {
         respond(404, ['error' => 'サイトが見つかりません']);
     }
-    [$code, $out] = runWp(['plugin', 'list', '--fields=name,status', '--format=json', "--path=$sitePath", '--allow-root']);
+    [$code, $out, $err] = runWp(['plugin', 'list', '--fields=name,status', '--format=json', "--path=$sitePath", '--allow-root']);
     respond(200, ['plugins' => $code === 0 ? (json_decode($out, true) ?: []) : []]);
 }
 
@@ -414,7 +436,7 @@ if ($path === '/themes' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!is_dir($sitePath)) {
         respond(404, ['error' => 'サイトが見つかりません']);
     }
-    [$code, $out] = runWp(['theme', 'list', '--fields=name,status', '--format=json', "--path=$sitePath", '--allow-root']);
+    [$code, $out, $err] = runWp(['theme', 'list', '--fields=name,status', '--format=json', "--path=$sitePath", '--allow-root']);
     respond(200, ['themes' => $code === 0 ? (json_decode($out, true) ?: []) : []]);
 }
 
@@ -464,9 +486,9 @@ if ($path === '/bulk-management' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $createArgs[] = '--parent=' . $parent['term_id'];
         }
 
-        [$code, $out] = runWp($createArgs);
+        [$code, $out, $err] = runWp($createArgs);
         if ($code !== 0) {
-            respond(500, ['error' => '作成に失敗しました', 'detail' => $out]);
+            respond(500, ['error' => '作成に失敗しました', 'detail' => combinedOutput($out, $err)]);
         }
         respond(200, ['status' => 'ok']);
     }
@@ -503,9 +525,9 @@ if ($path === '/bulk-management' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $updateArgs[] = '--parent=' . $parent['term_id'];
         }
 
-        [$code, $out] = runWp($updateArgs);
+        [$code, $out, $err] = runWp($updateArgs);
         if ($code !== 0) {
-            respond(500, ['error' => '更新に失敗しました', 'detail' => $out]);
+            respond(500, ['error' => '更新に失敗しました', 'detail' => combinedOutput($out, $err)]);
         }
         respond(200, ['status' => 'ok']);
     }
@@ -523,23 +545,23 @@ if ($path === '/bulk-management' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             respond(200, ['status' => 'skipped']);
         }
 
-        [$code, $out] = runWp(['term', 'delete', $taxonomy, (string) $target['term_id'], "--path=$sitePath", '--allow-root']);
+        [$code, $out, $err] = runWp(['term', 'delete', $taxonomy, (string) $target['term_id'], "--path=$sitePath", '--allow-root']);
         if ($code !== 0) {
-            respond(500, ['error' => '削除に失敗しました', 'detail' => $out]);
+            respond(500, ['error' => '削除に失敗しました', 'detail' => combinedOutput($out, $err)]);
         }
         respond(200, ['status' => 'ok']);
     }
 
     if ($action === 'plugin_install' || $action === 'theme_install') {
         $type = $action === 'plugin_install' ? 'plugin' : 'theme';
-        [$code, $out] = runWp([$type, 'list', '--field=name', '--format=json', "--path=$sitePath", '--allow-root']);
+        [$code, $out, $err] = runWp([$type, 'list', '--field=name', '--format=json', "--path=$sitePath", '--allow-root']);
         $installed = $code === 0 ? (json_decode($out, true) ?: []) : [];
         if (in_array($value, $installed, true)) {
             respond(200, ['status' => 'skipped']);
         }
-        [$code, $out] = runWp([$type, 'install', $value, "--path=$sitePath", '--allow-root']);
+        [$code, $out, $err] = runWp([$type, 'install', $value, "--path=$sitePath", '--allow-root']);
         if ($code !== 0) {
-            respond(500, ['error' => "{$type}のインストールに失敗しました", 'detail' => $out]);
+            respond(500, ['error' => "{$type}のインストールに失敗しました", 'detail' => combinedOutput($out, $err)]);
         }
         runCommand(['chown', '-R', 'www-data:www-data', $sitePath]);
         respond(200, ['status' => 'ok']);
@@ -547,9 +569,9 @@ if ($path === '/bulk-management' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'plugin_activate' || $action === 'plugin_deactivate') {
         $verb = $action === 'plugin_activate' ? 'activate' : 'deactivate';
-        [$code, $out] = runWp(['plugin', $verb, $value, "--path=$sitePath", '--allow-root']);
+        [$code, $out, $err] = runWp(['plugin', $verb, $value, "--path=$sitePath", '--allow-root']);
         if ($code !== 0) {
-            respond(500, ['error' => "プラグインの{$verb}に失敗しました", 'detail' => $out]);
+            respond(500, ['error' => "プラグインの{$verb}に失敗しました", 'detail' => combinedOutput($out, $err)]);
         }
         respond(200, ['status' => 'ok']);
     }
@@ -557,26 +579,26 @@ if ($path === '/bulk-management' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'plugin_delete') {
         // 有効化されている場合に備え先に無効化を試みる(未有効化時のエラーは無視してよい)
         runWp(['plugin', 'deactivate', $value, "--path=$sitePath", '--allow-root']);
-        [$code, $out] = runWp(['plugin', 'delete', $value, "--path=$sitePath", '--allow-root']);
+        [$code, $out, $err] = runWp(['plugin', 'delete', $value, "--path=$sitePath", '--allow-root']);
         if ($code !== 0) {
-            respond(500, ['error' => 'プラグインの削除に失敗しました', 'detail' => $out]);
+            respond(500, ['error' => 'プラグインの削除に失敗しました', 'detail' => combinedOutput($out, $err)]);
         }
         respond(200, ['status' => 'ok']);
     }
 
     if ($action === 'theme_activate') {
-        [$code, $out] = runWp(['theme', 'activate', $value, "--path=$sitePath", '--allow-root']);
+        [$code, $out, $err] = runWp(['theme', 'activate', $value, "--path=$sitePath", '--allow-root']);
         if ($code !== 0) {
-            respond(500, ['error' => 'テーマの有効化に失敗しました', 'detail' => $out]);
+            respond(500, ['error' => 'テーマの有効化に失敗しました', 'detail' => combinedOutput($out, $err)]);
         }
         respond(200, ['status' => 'ok']);
     }
 
     if ($action === 'theme_delete') {
         // 有効化中のテーマは削除できない(wp-cliが自然にエラーを返す想定。自動での切替は行わない)
-        [$code, $out] = runWp(['theme', 'delete', $value, "--path=$sitePath", '--allow-root']);
+        [$code, $out, $err] = runWp(['theme', 'delete', $value, "--path=$sitePath", '--allow-root']);
         if ($code !== 0) {
-            respond(500, ['error' => 'テーマの削除に失敗しました', 'detail' => $out]);
+            respond(500, ['error' => 'テーマの削除に失敗しました', 'detail' => combinedOutput($out, $err)]);
         }
         respond(200, ['status' => 'ok']);
     }
@@ -606,10 +628,10 @@ if ($path === '/bulk-management/upload' && $_SERVER['REQUEST_METHOD'] === 'POST'
 
     // zipの中身(実際のslug)は展開するまで確定しないため事前の存在チェックは行わず、
     // 常に--forceで上書きインストールする(本アプリ全体の「差分チェックをせず全上書き」方針に合わせる)
-    [$code, $out] = runWp([$type, 'install', $tmpPath, '--force', "--path=$sitePath", '--allow-root']);
+    [$code, $out, $err] = runWp([$type, 'install', $tmpPath, '--force', "--path=$sitePath", '--allow-root']);
     runCommand(['rm', '-f', $tmpPath]);
     if ($code !== 0) {
-        respond(500, ['error' => "{$type}のインストールに失敗しました", 'detail' => $out]);
+        respond(500, ['error' => "{$type}のインストールに失敗しました", 'detail' => combinedOutput($out, $err)]);
     }
     runCommand(['chown', '-R', 'www-data:www-data', $sitePath]);
     respond(200, ['status' => 'ok']);
@@ -646,11 +668,11 @@ if ($path === '/wp-cli/core-version' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         respond(404, ['error' => "サイト '$slug' が見つかりません"]);
     }
 
-    [$code, $out] = runWp(['core', 'version', "--path=$sitePath", '--allow-root']);
+    [$code, $out, $err] = runWp(['core', 'version', "--path=$sitePath", '--allow-root']);
     if ($code !== 0) {
-        respond(500, ['error' => 'wp core versionの実行に失敗しました', 'detail' => $out]);
+        respond(500, ['error' => 'wp core versionの実行に失敗しました', 'detail' => combinedOutput($out, $err)]);
     }
-    respond(200, ['version' => trim($out)]);
+    respond(200, ['version' => $out]);
 }
 
 const ALLOWED_RESOLVE_TAXONOMIES = ['category', 'post_tag'];
@@ -668,7 +690,7 @@ if ($path === '/wp-cli/resolve-terms' && $_SERVER['REQUEST_METHOD'] === 'POST') 
         respond(404, ['error' => "サイト '$slug' が見つかりません"]);
     }
 
-    [$code, $out] = runWp(['term', 'list', $taxonomy, '--fields=name,term_id', '--format=json', "--path=$sitePath", '--allow-root']);
+    [$code, $out, $err] = runWp(['term', 'list', $taxonomy, '--fields=name,term_id', '--format=json', "--path=$sitePath", '--allow-root']);
     $existing = $code === 0 ? (json_decode($out, true) ?: []) : [];
 
     $ids = [];
@@ -682,11 +704,11 @@ if ($path === '/wp-cli/resolve-terms' && $_SERVER['REQUEST_METHOD'] === 'POST') 
             }
         }
         if ($matchId === null) {
-            [$code, $out] = runWp(['term', 'create', $taxonomy, $name, '--porcelain', "--path=$sitePath", '--allow-root']);
+            [$code, $out, $err] = runWp(['term', 'create', $taxonomy, $name, '--porcelain', "--path=$sitePath", '--allow-root']);
             if ($code !== 0) {
-                respond(500, ['error' => "カテゴリ/タグ '$name' の作成に失敗しました", 'detail' => $out]);
+                respond(500, ['error' => "カテゴリ/タグ '$name' の作成に失敗しました", 'detail' => combinedOutput($out, $err)]);
             }
-            $matchId = trim($out);
+            $matchId = $out;
             $existing[] = ['name' => $name, 'term_id' => $matchId];
         }
         $ids[] = $matchId;
@@ -707,27 +729,27 @@ if ($path === '/wp-cli/provision-author' && $_SERVER['REQUEST_METHOD'] === 'POST
         respond(404, ['error' => "サイト '$slug' が見つかりません"]);
     }
 
-    [$code, $out] = runWp(['user', 'list', "--search=$email", '--fields=ID', '--format=json', "--path=$sitePath", '--allow-root']);
+    [$code, $out, $err] = runWp(['user', 'list', "--search=$email", '--fields=ID', '--format=json', "--path=$sitePath", '--allow-root']);
     $existing = $code === 0 ? (json_decode($out, true) ?: []) : [];
     $userId = !empty($existing) ? (string) $existing[0]['ID'] : null;
 
     if ($userId === null) {
         $username = substr($email, 0, strpos($email, '@'));
         $randomPassword = bin2hex(random_bytes(18));
-        [$code, $out] = runWp([
+        [$code, $out, $err] = runWp([
             'user', 'create', $username, $email,
             "--role=$wpRole", "--user_pass=$randomPassword", '--porcelain', "--path=$sitePath", '--allow-root',
         ]);
         if ($code !== 0) {
             // 同時作成の可能性を考慮し再検索してからフォールバックする
-            [$code2, $out2] = runWp(['user', 'list', "--search=$email", '--fields=ID', '--format=json', "--path=$sitePath", '--allow-root']);
+            [$code2, $out2, $err2] = runWp(['user', 'list', "--search=$email", '--fields=ID', '--format=json', "--path=$sitePath", '--allow-root']);
             $retry = $code2 === 0 ? (json_decode($out2, true) ?: []) : [];
             if (empty($retry)) {
-                respond(500, ['error' => '著者の作成に失敗しました', 'detail' => $out]);
+                respond(500, ['error' => '著者の作成に失敗しました', 'detail' => combinedOutput($out, $err)]);
             }
             $userId = (string) $retry[0]['ID'];
         } else {
-            $userId = trim($out);
+            $userId = $out;
         }
     }
 
@@ -742,9 +764,9 @@ if ($path === '/wp-cli/provision-author' && $_SERVER['REQUEST_METHOD'] === 'POST
             $updateArgs[] = "--$wpField=$value";
         }
     }
-    [$code, $out] = runWp($updateArgs);
+    [$code, $out, $err] = runWp($updateArgs);
     if ($code !== 0) {
-        respond(500, ['error' => '著者の更新に失敗しました', 'detail' => $out]);
+        respond(500, ['error' => '著者の更新に失敗しました', 'detail' => combinedOutput($out, $err)]);
     }
     respond(200, ['userId' => $userId]);
 }
@@ -757,6 +779,7 @@ if ($path === '/wp-cli/post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $postSlug = (string) ($input['postSlug'] ?? '');
     $categoryIds = is_array($input['categoryIds'] ?? null) ? array_values($input['categoryIds']) : [];
     $tagIds = is_array($input['tagIds'] ?? null) ? array_values($input['tagIds']) : [];
+    $featuredMediaId = $input['featuredMediaId'] ?? null;
     $htmlContent = (string) ($input['htmlContent'] ?? '');
 
     if (!isValidSlug($slug) || $title === '' || $status === '') {
@@ -779,19 +802,24 @@ if ($path === '/wp-cli/post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!empty($tagIds)) {
         $subArgs[] = '--tax_input=' . json_encode(['post_tag' => array_map('intval', $tagIds)]);
     }
+    if ($featuredMediaId !== null) {
+        $subArgs[] = '--post_thumbnail=' . $featuredMediaId;
+    }
     $subArgs[] = '--porcelain';
     $subArgs[] = "--path=$sitePath";
     $subArgs[] = '--allow-root';
 
-    [$code, $out] = runWpWithStdin($subArgs, $htmlContent);
+    [$code, $out, $err] = runWpWithStdin($subArgs, $htmlContent);
     if ($code !== 0) {
-        respond(500, ['error' => '投稿の作成/更新に失敗しました', 'detail' => $out]);
+        respond(500, ['error' => '投稿の作成/更新に失敗しました', 'detail' => combinedOutput($out, $err)]);
     }
-    $postId = $existingPostId !== null ? (string) $existingPostId : trim($out);
+    // $existingPostIdはinputそのまま(更新対象)、新規作成時は$out(porcelain出力のstdoutのみ、
+    // stderrへのPHP Warning等が混ざらないよう分離済み)を投稿IDとして使う。
+    $postId = $existingPostId !== null ? (string) $existingPostId : $out;
 
-    [$code, $out] = runWp(['post', 'get', $postId, '--fields=guid,post_status', '--format=json', "--path=$sitePath", '--allow-root']);
+    [$code, $out, $err] = runWp(['post', 'get', $postId, '--fields=guid,post_status', '--format=json', "--path=$sitePath", '--allow-root']);
     if ($code !== 0) {
-        respond(500, ['error' => '作成/更新した投稿の情報取得に失敗しました', 'detail' => $out]);
+        respond(500, ['error' => '作成/更新した投稿の情報取得に失敗しました', 'detail' => combinedOutput($out, $err)]);
     }
     $post = json_decode($out, true) ?: [];
     respond(200, ['postId' => $postId, 'guid' => $post['guid'] ?? '', 'status' => $post['post_status'] ?? '']);
@@ -815,16 +843,16 @@ if ($path === '/wp-cli/media-upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         respond(500, ['error' => 'アップロードファイルの一時保存に失敗しました']);
     }
 
-    [$code, $out] = runWp(['media', 'import', $tmpPath, '--porcelain', "--path=$sitePath", '--allow-root']);
+    [$code, $out, $err] = runWp(['media', 'import', $tmpPath, '--porcelain', "--path=$sitePath", '--allow-root']);
     runCommand(['rm', '-f', $tmpPath]);
     if ($code !== 0) {
-        respond(500, ['error' => 'メディアのアップロードに失敗しました', 'detail' => $out]);
+        respond(500, ['error' => 'メディアのアップロードに失敗しました', 'detail' => combinedOutput($out, $err)]);
     }
-    $mediaId = trim($out);
+    $mediaId = $out;
 
-    [$code, $out] = runWp(['post', 'get', $mediaId, '--fields=guid', '--format=json', "--path=$sitePath", '--allow-root']);
+    [$code, $out, $err] = runWp(['post', 'get', $mediaId, '--fields=guid', '--format=json', "--path=$sitePath", '--allow-root']);
     if ($code !== 0) {
-        respond(500, ['error' => 'アップロードしたメディアの情報取得に失敗しました', 'detail' => $out]);
+        respond(500, ['error' => 'アップロードしたメディアの情報取得に失敗しました', 'detail' => combinedOutput($out, $err)]);
     }
     $media = json_decode($out, true) ?: [];
     runCommand(['chown', '-R', 'www-data:www-data', "$sitePath/wp-content/uploads"]);

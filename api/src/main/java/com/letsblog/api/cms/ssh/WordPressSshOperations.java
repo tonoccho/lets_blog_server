@@ -595,6 +595,9 @@ public class WordPressSshOperations {
             String tagIds = String.join(",", content.tagIds());
             args.append(" --tax_input=").append(ShellQuote.single("{\"post_tag\":[" + tagIds + "]}"));
         }
+        if (content.featuredMediaId() != null) {
+            args.append(" --post_thumbnail=").append(ShellQuote.single(content.featuredMediaId()));
+        }
         return args.toString();
     }
 

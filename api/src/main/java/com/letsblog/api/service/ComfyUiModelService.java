@@ -57,6 +57,14 @@ public class ComfyUiModelService {
         return selected == null || selected.isBlank() ? globalDefaultCheckpoint : selected;
     }
 
+    /**
+     * プロジェクト未指定(projectId=null)呼び出しを許容する版。/api/ai/image-options等、
+     * VSCode拡張がプロジェクト未選択のまま呼び出す可能性があるエンドポイント向け。
+     */
+    public String getSelectedCheckpointOrGlobalDefault(Long projectId) {
+        return projectId == null ? globalDefaultCheckpoint : getSelectedCheckpoint(projectId);
+    }
+
     public ComfyUiCheckpointListResponse selectCheckpoint(Long projectId, String checkpointName) {
         Project project = getProjectEntity(projectId);
         boolean exists = comfyUiClient.listCheckpoints().contains(checkpointName);
