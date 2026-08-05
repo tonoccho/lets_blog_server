@@ -62,10 +62,13 @@ export interface AiDraftResult {
 }
 
 export interface AiSectionParams {
-  mode: 'body' | 'lead';
-  heading: string;
+  mode: 'body' | 'lead' | 'lead-subsections';
+  heading?: string;
   precedingContext?: string;
   articleTitle?: string;
+  subsectionHeadings?: string[];
+  history?: PlanChatMessage[];
+  message?: string;
 }
 
 export interface AiSectionResult {

@@ -60,10 +60,13 @@ class BulkManagementServiceTest {
     @Mock
     private com.letsblog.api.cms.rest.WordPressRestBulkManagementOperations restOperations;
 
+    @Mock
+    private com.letsblog.api.cms.CmsAdapterFactory cmsAdapterFactory;
+
     private BulkManagementService service() {
         return new BulkManagementService(
                 projectRepository, siteRepository, bulkOperationLogRepository, bulkManagementClient,
-                bulkUploadStorageService, siteService, sshOperations, restOperations);
+                bulkUploadStorageService, siteService, sshOperations, restOperations, cmsAdapterFactory);
     }
 
     private Project buildProject(Long localSiteId, Long testSiteId, Long productionSiteId) {
@@ -573,6 +576,144 @@ class BulkManagementServiceTest {
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
 
         assertThrows(IllegalArgumentException.class, () -> service.replay(1L, "test", 9L));
+    }
+
+    @Test
+    void replay_MEDIA_UPLOADなど再現非対応の種別はスキップされる() {
+        BulkManagementService service = service();
+        Project project = buildProject(10L, 20L, null);
+        Site testSite = buildManagedSite(20L, "test-site");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+
+        BulkOperationLog mediaLog = buildHistoryLog(BulkOperationType.MEDIA_UPLOAD, BulkOperationSourceType.SLUG, "image.png");
+        when(bulkOperationLogRepository.findByProjectIdAndStatusOrderByCreatedAtAsc(1L, BulkOperationStatus.SUCCESS))
+                .thenReturn(List.of(mediaLog));
+
+        List<BulkOperationLog> results = service.replay(1L, "test", 9L);
+
+        assertTrue(results.isEmpty());
+        verify(bulkManagementClient, never()).apply(any());
+    }
+
+    // ---- uploadImageToAllEnvironments ----
+
+    @Test
+    void uploadImageToAllEnvironments_紐付いた環境ごとにアップロードしログを記録する() {
+        BulkManagementService service = service();
+        Project project = buildProject(10L, 20L, null);
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site testSite = buildManagedSite(20L, "test-site");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+
+        com.letsblog.api.cms.CmsCredentials.WordPressCredentials localCreds =
+                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "pass");
+        com.letsblog.api.cms.CmsCredentials.WordPressCredentials testCreds =
+                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://test.test", "admin", "pass");
+        when(siteService.getCredentials("local-site")).thenReturn(localCreds);
+        when(siteService.getCredentials("test-site")).thenReturn(testCreds);
+
+        com.letsblog.api.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(com.letsblog.api.cms.CmsType.WORDPRESS)).thenReturn(adapter);
+        when(adapter.uploadMedia(eq(localCreds), eq("cat.png"), eq("image/png"), any()))
+                .thenReturn(new com.letsblog.api.cms.MediaUploadResult("1", "https://local.test/cat.png"));
+        when(adapter.uploadMedia(eq(testCreds), eq("cat.png"), eq("image/png"), any()))
+                .thenThrow(new RuntimeException("接続に失敗しました"));
+        stubSave();
+
+        List<BulkOperationLog> results = service.uploadImageToAllEnvironments(
+                1L, new byte[]{1, 2, 3}, "cat.png", "image/png", 9L);
+
+        assertEquals(2, results.size());
+        assertEquals("local", results.get(0).getEnvironment());
+        assertEquals(BulkOperationStatus.SUCCESS, results.get(0).getStatus());
+        assertEquals("https://local.test/cat.png", results.get(0).getValue());
+        assertEquals("test", results.get(1).getEnvironment());
+        assertEquals(BulkOperationStatus.FAILED, results.get(1).getStatus());
+        assertEquals("接続に失敗しました", results.get(1).getErrorMessage());
+    }
+
+    @Test
+    void uploadImageToAllEnvironments_サイト未紐付けの環境はスキップされる() {
+        BulkManagementService service = service();
+        Project project = buildProject(10L, null, null);
+        Site localSite = buildManagedSite(10L, "local-site");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getCredentials("local-site")).thenReturn(
+                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "pass"));
+        com.letsblog.api.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(any())).thenReturn(adapter);
+        when(adapter.uploadMedia(any(), any(), any(), any()))
+                .thenReturn(new com.letsblog.api.cms.MediaUploadResult("1", "https://local.test/cat.png"));
+        stubSave();
+
+        List<BulkOperationLog> results = service.uploadImageToAllEnvironments(
+                1L, new byte[]{1}, "cat.png", "image/png", 9L);
+
+        assertEquals(1, results.size());
+        assertEquals("local", results.get(0).getEnvironment());
+    }
+
+    // ---- deletePostAtEnvironment / updatePostStatusAtEnvironment ----
+
+    @Test
+    void deletePostAtEnvironment_成功時はCmsAdapter経由で削除しSUCCESSを記録する() {
+        BulkManagementService service = service();
+        Site site = buildManagedSite(10L, "local-site");
+        com.letsblog.api.cms.CmsCredentials.WordPressCredentials creds =
+                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "pass");
+        when(siteService.getCredentials("local-site")).thenReturn(creds);
+        com.letsblog.api.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(adapter);
+        stubSave();
+
+        BulkOperationLog result = service.deletePostAtEnvironment(1L, "local", site, "101", "post", "hello", 9L);
+
+        assertEquals(BulkOperationStatus.SUCCESS, result.getStatus());
+        assertEquals(BulkOperationType.POST_DELETE, result.getOperationType());
+        assertEquals("hello", result.getValue());
+        verify(adapter).deletePost(creds, "101", "post");
+    }
+
+    @Test
+    void deletePostAtEnvironment_失敗時はFAILEDを記録し例外を投げない() {
+        BulkManagementService service = service();
+        Site site = buildManagedSite(10L, "local-site");
+        when(siteService.getCredentials("local-site")).thenReturn(
+                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "pass"));
+        com.letsblog.api.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(adapter);
+        org.mockito.Mockito.doThrow(new RuntimeException("削除に失敗しました"))
+                .when(adapter).deletePost(any(), any(), any());
+        stubSave();
+
+        BulkOperationLog result = service.deletePostAtEnvironment(1L, "local", site, "101", "post", "hello", 9L);
+
+        assertEquals(BulkOperationStatus.FAILED, result.getStatus());
+        assertEquals("削除に失敗しました", result.getErrorMessage());
+    }
+
+    @Test
+    void updatePostStatusAtEnvironment_成功時はステータスをpost_statusへ記録する() {
+        BulkManagementService service = service();
+        Site site = buildManagedSite(10L, "local-site");
+        com.letsblog.api.cms.CmsCredentials.WordPressCredentials creds =
+                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "pass");
+        when(siteService.getCredentials("local-site")).thenReturn(creds);
+        com.letsblog.api.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(adapter);
+        stubSave();
+
+        BulkOperationLog result = service.updatePostStatusAtEnvironment(
+                1L, "local", site, "101", "post", "hello", "publish", 9L);
+
+        assertEquals(BulkOperationStatus.SUCCESS, result.getStatus());
+        assertEquals(BulkOperationType.POST_STATUS_UPDATE, result.getOperationType());
+        assertEquals("publish", result.getPostStatus());
+        verify(adapter).updatePostStatus(creds, "101", "post", "publish");
     }
 
     // ---- 非managedサイト: REST/SSHの優先順位 ----

@@ -11,11 +11,13 @@ import com.letsblog.api.domain.GeneratedImage;
 import com.letsblog.api.domain.GenerationJob;
 import com.letsblog.api.dto.AiDraftRequest;
 import com.letsblog.api.dto.AiDraftResponse;
+import com.letsblog.api.dto.AiImageBatchResponse;
 import com.letsblog.api.dto.AiImageRequest;
 import com.letsblog.api.dto.AiImageResponse;
 import com.letsblog.api.dto.AiSectionRequest;
 import com.letsblog.api.dto.AiSectionResponse;
 import com.letsblog.api.dto.AiTagsRequest;
+import com.letsblog.api.dto.PlanChatMessage;
 import com.letsblog.api.dto.AiTagsResponse;
 import com.letsblog.api.dto.ImageGenerationOptionsResponse;
 import com.letsblog.api.repository.GeneratedImageRepository;
@@ -71,12 +73,23 @@ public class AiAssistService {
                     %s
                     """,
             "lead", """
-                    あなたはブログ執筆アシスタントです。以下の記事のリード文(導入文)を日本語で作成してください。
+                    あなたはブログ執筆アシスタントです。以下の記事全体の構成を踏まえて、記事のリード文(導入文)を日本語で作成してください。
                     読者の関心を引く2〜3文程度の簡潔な文章のみを出力してください。前置きや説明は不要です。
 
                     記事タイトル: %s
 
-                    見出し(最初のセクション):
+                    記事の構成(見出し一覧):
+                    %s
+                    """,
+            "lead-subsections", """
+                    あなたはブログ執筆アシスタントです。以下のセクションにはこのあと複数のサブセクションが続きます。
+                    読者にこのセクション全体の見通しを示すリード文(導入文)を日本語で2〜3文程度で作成してください。
+                    見出し自体は出力せず、リード文の文章のみを出力してください。前置きや説明は不要です。
+
+                    記事タイトル: %s
+
+                    セクション見出し: %s
+                    このセクションに含まれるサブセクション:
                     %s
                     """
     );
@@ -116,16 +129,21 @@ public class AiAssistService {
         this.objectMapper = objectMapper;
     }
 
-    public AiImageResponse generateImage(AiImageRequest request) {
+    public AiImageBatchResponse generateImage(AiImageRequest request) {
         GenerationJob job = startJob("comfyui_image", Map.of("prompt", request.prompt()));
         try {
             ComfyUiGenerationParams params = resolveParams(request);
-            ComfyUiImage image = comfyUiClient.generateImage(params);
-            String base64 = Base64.getEncoder().encodeToString(image.data());
-            String filePath = generatedImageStorageService.store(request.projectId(), image.data());
-            GeneratedImage saved = generatedImageRepository.save(toEntity(request.projectId(), params, filePath, image.mimeType()));
-            completeJob(job, Map.of("fileName", image.fileName()));
-            return new AiImageResponse(saved.getId(), image.fileName(), base64, image.mimeType());
+            List<ComfyUiImage> images = comfyUiClient.generateImage(params);
+            List<AiImageResponse> responses = new ArrayList<>();
+            for (ComfyUiImage image : images) {
+                String base64 = Base64.getEncoder().encodeToString(image.data());
+                String filePath = generatedImageStorageService.store(request.projectId(), image.data());
+                GeneratedImage saved = generatedImageRepository.save(
+                        toEntity(request.projectId(), params, filePath, image.mimeType()));
+                responses.add(new AiImageResponse(saved.getId(), image.fileName(), base64, image.mimeType()));
+            }
+            completeJob(job, Map.of("count", String.valueOf(responses.size())));
+            return new AiImageBatchResponse(responses);
         } catch (RuntimeException e) {
             failJob(job, e);
             throw e;
@@ -206,28 +224,41 @@ public class AiAssistService {
 
     /**
      * セクション単位(本文/リード文)のAI生成。draft()と同様にBrave検索結果を出典として付与する。
+     * request.message()が指定されている場合は壁打ち(追加指示による再生成)として扱い、
+     * 初回生成時の指示をSystemプロンプトとしたまま、履歴+追加指示を踏まえて再生成する。
      */
     public AiSectionResponse generateSection(AiSectionRequest request) {
         String template = SECTION_PROMPT_TEMPLATES.get(request.mode());
         if (template == null) {
-            throw new IllegalArgumentException("mode は body/lead のいずれかを指定してください: " + request.mode());
+            throw new IllegalArgumentException(
+                    "mode は body/lead/lead-subsections のいずれかを指定してください: " + request.mode());
         }
 
         String articleTitle = request.articleTitle() != null && !request.articleTitle().isBlank()
                 ? request.articleTitle() : "(未設定)";
         String precedingContext = request.precedingContext() != null && !request.precedingContext().isBlank()
                 ? request.precedingContext() : "(なし)";
+        String heading = request.heading() != null && !request.heading().isBlank()
+                ? request.heading() : "(未設定)";
+        String outline = formatOutline(request.subsectionHeadings());
         String searchQuery = buildSearchQuery(
-                (request.articleTitle() != null ? request.articleTitle() + " " : "") + request.heading());
+                (request.articleTitle() != null ? request.articleTitle() + " " : "") + heading);
 
         GenerationJob job = startJob("ollama_section_" + request.mode(),
-                Map.of("mode", request.mode(), "heading", request.heading()));
+                Map.of("mode", request.mode(), "heading", heading));
         try {
             WebSearchOutcome searchOutcome = webSearchService.searchSafely(searchQuery);
-            String body = "body".equals(request.mode())
-                    ? template.formatted(articleTitle, precedingContext, request.heading())
-                    : template.formatted(articleTitle, request.heading());
-            String prompt = WebSearchService.formatForPrompt(searchOutcome) + body;
+            String basePrompt = switch (request.mode()) {
+                case "body" -> template.formatted(articleTitle, precedingContext, heading);
+                case "lead" -> template.formatted(articleTitle, outline);
+                case "lead-subsections" -> template.formatted(articleTitle, heading, outline);
+                default -> throw new IllegalArgumentException("未対応のmodeです: " + request.mode());
+            };
+
+            String prompt = request.message() != null && !request.message().isBlank()
+                    ? buildSectionChatPrompt(basePrompt, request.history(), request.message(), searchOutcome)
+                    : WebSearchService.formatForPrompt(searchOutcome) + basePrompt;
+
             String result = ollamaClient.generate(prompt);
             completeJob(job, Map.of("result", result));
             return new AiSectionResponse(result, WebSearchService.toSources(searchOutcome),
@@ -236,6 +267,41 @@ public class AiAssistService {
             failJob(job, e);
             throw e;
         }
+    }
+
+    /** 見出し一覧を箇条書きテキストに整形する。空なら"(なし)"を返す。 */
+    private String formatOutline(List<String> headings) {
+        if (headings == null || headings.isEmpty()) {
+            return "(なし)";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String heading : headings) {
+            sb.append("・").append(heading).append("\n");
+        }
+        return sb.toString().stripTrailing();
+    }
+
+    /**
+     * 壁打ち(追加指示による再生成)用のプロンプトを組み立てる。初回生成の指示文をSystemとして固定し、
+     * これまでの往復(history)と最新の追加指示(message)を続けることで、同じ方針のまま再生成させる。
+     * ArticlePlanService.buildChatPromptと同じ「System+履歴+User」形式を踏襲する。
+     */
+    private String buildSectionChatPrompt(
+            String basePrompt, List<PlanChatMessage> history, String message, WebSearchOutcome searchOutcome) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("System: ").append(basePrompt.strip()).append("\n\n");
+        sb.append(WebSearchService.formatForPrompt(searchOutcome));
+        if (history != null) {
+            for (PlanChatMessage msg : history) {
+                sb.append("user".equals(msg.role()) ? "User" : "Assistant")
+                        .append(": ")
+                        .append(msg.content())
+                        .append("\n");
+            }
+        }
+        sb.append("User: ").append(message).append("\n");
+        sb.append("Assistant: ");
+        return sb.toString();
     }
 
     /**

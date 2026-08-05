@@ -1,0 +1,345 @@
+"use client";
+
+import { useState } from "react";
+import type { AiImageResult, ImageGenerationOptionsResponse } from "@/lib/apiClient";
+import {
+  fetchImageGenerationOptionsAction,
+  generateProjectImagesAction,
+  uploadProjectAssetImageAction,
+} from "./actions";
+
+/**
+ * プロジェクト管理画面でComfyUI画像を生成し(automatic1111相当のパラメータ、最大4枚)、
+ * 選択した1枚をlocal/test/production全環境へアセットとしてアップロードするパネル。
+ * フォーム項目はVSCode拡張のimageGenPanel.tsと揃えている。
+ */
+export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }) {
+  const [open, setOpen] = useState(false);
+  const [options, setOptions] = useState<ImageGenerationOptionsResponse | null>(null);
+  const [loadingOptions, setLoadingOptions] = useState(false);
+
+  const [prompt, setPrompt] = useState("");
+  const [negativePrompt, setNegativePrompt] = useState("");
+  const [steps, setSteps] = useState(20);
+  const [cfgScale, setCfgScale] = useState(7.0);
+  const [seed, setSeed] = useState("");
+  const [samplerName, setSamplerName] = useState("");
+  const [scheduler, setScheduler] = useState("");
+  const [width, setWidth] = useState(512);
+  const [height, setHeight] = useState(512);
+  const [batchSize, setBatchSize] = useState(4);
+  const [checkpoint, setCheckpoint] = useState("");
+  const [loraName, setLoraName] = useState("");
+  const [loraWeight, setLoraWeight] = useState(1.0);
+
+  const [generating, setGenerating] = useState(false);
+  const [images, setImages] = useState<AiImageResult[] | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [message, setMessage] = useState<{ type: "error" | "success"; text: string } | null>(null);
+
+  async function handleOpen() {
+    setOpen(true);
+    if (options) return;
+    setLoadingOptions(true);
+    try {
+      const opts = await fetchImageGenerationOptionsAction(projectId);
+      setOptions(opts);
+      setSamplerName(opts.samplers[0] ?? "euler");
+      setScheduler(opts.schedulers[0] ?? "normal");
+      setCheckpoint(opts.selectedCheckpoint ?? "");
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setLoadingOptions(false);
+    }
+  }
+
+  async function handleGenerate() {
+    if (!prompt.trim()) {
+      setMessage({ type: "error", text: "promptを入力してください。" });
+      return;
+    }
+    setGenerating(true);
+    setMessage(null);
+    setImages(null);
+    setSelectedId(null);
+    const result = await generateProjectImagesAction(projectId, {
+      prompt,
+      negativePrompt: negativePrompt || undefined,
+      steps,
+      cfgScale,
+      samplerName: samplerName || undefined,
+      scheduler: scheduler || undefined,
+      seed: seed.trim() ? Number(seed) : null,
+      width,
+      height,
+      batchSize,
+      checkpoint: checkpoint || undefined,
+      loraName: loraName || undefined,
+      loraWeight: loraName ? loraWeight : undefined,
+    });
+    setGenerating(false);
+    if (result.error) {
+      setMessage({ type: "error", text: result.error });
+      return;
+    }
+    setImages(result.images ?? []);
+    setMessage({ type: "success", text: "生成しました。アセットとして追加する画像を選択してください。" });
+  }
+
+  async function handleUpload() {
+    if (selectedId == null) return;
+    setUploading(true);
+    setMessage(null);
+    const result = await uploadProjectAssetImageAction(projectId, selectedId);
+    setUploading(false);
+    if (result.error) {
+      setMessage({ type: "error", text: result.error });
+      return;
+    }
+    const logs = result.logs ?? [];
+    const failed = logs.filter((l) => l.status !== "SUCCESS");
+    if (failed.length === 0) {
+      setMessage({ type: "success", text: `全${logs.length}環境へアップロードしました。` });
+    } else {
+      setMessage({
+        type: "error",
+        text: `${failed.map((l) => l.environment).join(", ")}環境でアップロードに失敗しました。`,
+      });
+    }
+  }
+
+  if (!open) {
+    return (
+      <section className="rounded border p-4">
+        <button
+          type="button"
+          onClick={handleOpen}
+          className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+        >
+          アセット画像生成
+        </button>
+      </section>
+    );
+  }
+
+  return (
+    <section className="space-y-4 rounded border p-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">アセット画像生成</h2>
+        <button type="button" onClick={() => setOpen(false)} className="text-sm text-gray-500 hover:underline">
+          閉じる
+        </button>
+      </div>
+
+      {loadingOptions ? (
+        <p className="text-sm text-gray-500">パラメータ選択肢を読み込んでいます…</p>
+      ) : (
+        <div className="grid gap-3">
+          <div>
+            <label className="block text-sm font-medium">prompt</label>
+            <textarea
+              className="mt-1 w-full rounded border p-2 text-sm"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="生成したい画像の説明"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium">negative prompt</label>
+            <textarea
+              className="mt-1 w-full rounded border p-2 text-sm"
+              value={negativePrompt}
+              onChange={(e) => setNegativePrompt(e.target.value)}
+              placeholder="low quality, blurry, watermark, text"
+            />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-sm font-medium">steps</label>
+              <input
+                type="number"
+                className="mt-1 w-full rounded border p-2 text-sm"
+                value={steps}
+                min={1}
+                max={150}
+                onChange={(e) => setSteps(Number(e.target.value))}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium">cfg scale</label>
+              <input
+                type="number"
+                step={0.1}
+                className="mt-1 w-full rounded border p-2 text-sm"
+                value={cfgScale}
+                onChange={(e) => setCfgScale(Number(e.target.value))}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium">seed(空欄でランダム)</label>
+              <input
+                type="text"
+                className="mt-1 w-full rounded border p-2 text-sm"
+                value={seed}
+                onChange={(e) => setSeed(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium">sampler</label>
+              <select
+                className="mt-1 w-full rounded border p-2 text-sm"
+                value={samplerName}
+                onChange={(e) => setSamplerName(e.target.value)}
+              >
+                {(options?.samplers ?? []).map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium">scheduler</label>
+              <select
+                className="mt-1 w-full rounded border p-2 text-sm"
+                value={scheduler}
+                onChange={(e) => setScheduler(e.target.value)}
+              >
+                {(options?.schedulers ?? []).map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-sm font-medium">width</label>
+              <input
+                type="number"
+                step={8}
+                className="mt-1 w-full rounded border p-2 text-sm"
+                value={width}
+                onChange={(e) => setWidth(Number(e.target.value))}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium">height</label>
+              <input
+                type="number"
+                step={8}
+                className="mt-1 w-full rounded border p-2 text-sm"
+                value={height}
+                onChange={(e) => setHeight(Number(e.target.value))}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium">batch size(最大4)</label>
+              <input
+                type="number"
+                min={1}
+                max={4}
+                className="mt-1 w-full rounded border p-2 text-sm"
+                value={batchSize}
+                onChange={(e) => setBatchSize(Number(e.target.value))}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium">checkpoint</label>
+            <select
+              className="mt-1 w-full rounded border p-2 text-sm"
+              value={checkpoint}
+              onChange={(e) => setCheckpoint(e.target.value)}
+            >
+              {(options?.checkpoints ?? []).map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium">LoRA</label>
+              <select
+                className="mt-1 w-full rounded border p-2 text-sm"
+                value={loraName}
+                onChange={(e) => setLoraName(e.target.value)}
+              >
+                <option value="">なし</option>
+                {(options?.loras ?? []).map((l) => (
+                  <option key={l} value={l}>
+                    {l}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {loraName && (
+              <div>
+                <label className="block text-sm font-medium">LoRA weight</label>
+                <input
+                  type="number"
+                  step={0.1}
+                  min={0}
+                  max={2}
+                  className="mt-1 w-full rounded border p-2 text-sm"
+                  value={loraWeight}
+                  onChange={(e) => setLoraWeight(Number(e.target.value))}
+                />
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={handleGenerate}
+            disabled={generating}
+            className="w-fit rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+          >
+            {generating ? "生成しています…" : "生成"}
+          </button>
+        </div>
+      )}
+
+      {images && images.length > 0 && (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {images.map((img) => (
+              <button
+                type="button"
+                key={img.id}
+                onClick={() => setSelectedId(img.id)}
+                className={`rounded border-2 p-1 ${selectedId === img.id ? "border-blue-600" : "border-transparent"}`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={`data:${img.mimeType};base64,${img.dataBase64}`}
+                  alt={img.fileName}
+                  className="aspect-square w-full rounded object-cover"
+                />
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={handleUpload}
+            disabled={selectedId == null || uploading}
+            className="rounded bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-60"
+          >
+            {uploading ? "アップロードしています…" : "アセットとして追加(全環境へアップロード)"}
+          </button>
+        </div>
+      )}
+
+      {message && (
+        <p className={`text-sm ${message.type === "error" ? "text-red-600" : "text-green-600"}`}>{message.text}</p>
+      )}
+    </section>
+  );
+}

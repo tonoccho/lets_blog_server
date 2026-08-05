@@ -17,6 +17,7 @@ import { ProjectGithubRepositoryForm } from "./ProjectGithubRepositoryForm";
 import { EnvironmentSyncPanel } from "./EnvironmentSyncPanel";
 import { BulkManagementPanel } from "./BulkManagementPanel";
 import { ProjectAiModelsPanel } from "./ProjectAiModelsPanel";
+import { ProjectAssetGenerationPanel } from "./ProjectAssetGenerationPanel";
 import { ProjectNameForm } from "./ProjectNameForm";
 import { DeleteProjectButton } from "./DeleteProjectButton";
 import { ProjectUserManager } from "./ProjectUserManager";
@@ -105,6 +106,8 @@ export default async function ProjectDetailPage({
       />
 
       <ProjectAiModelsPanel projectId={project.id} />
+
+      <ProjectAssetGenerationPanel projectId={project.id} />
 
       <div className="space-y-4">
         <h2 className="text-lg font-semibold">プロジェクトメンバー</h2>

@@ -10,20 +10,23 @@ import type {
   BulkOperationType,
   TermComparisonPage,
   StatusComparisonPage,
+  PostComparisonPage,
 } from "@/lib/apiClient";
 import {
   runBulkOperationUploadAction,
   replayBulkOperationsAction,
   fetchTermComparisonAction,
   fetchStatusComparisonAction,
+  fetchPostComparisonAction,
   BulkOperationState,
 } from "./actions";
 import { formatDateTime } from "@/lib/formatDate";
 import { TermComparisonTable } from "./TermComparisonTable";
 import { PluginThemeComparisonTable } from "./PluginThemeComparisonTable";
+import { PostComparisonTable } from "./PostComparisonTable";
 import { ClearLogsButton } from "./ClearLogsButton";
 
-type Tab = "CATEGORY" | "PLUGIN" | "THEME" | "TAG";
+type Tab = "CATEGORY" | "PLUGIN" | "THEME" | "TAG" | "POST";
 
 const ENVIRONMENT_LABEL: Record<ProjectEnvironment, string> = {
   local: "ローカル",
@@ -36,6 +39,7 @@ const TAB_LABEL: Record<Tab, string> = {
   PLUGIN: "プラグイン",
   THEME: "テーマ",
   TAG: "タグ",
+  POST: "ポスト/ページ",
 };
 
 const OPERATION_LABEL: Record<BulkOperationType, string> = {
@@ -56,6 +60,10 @@ const OPERATION_LABEL: Record<BulkOperationType, string> = {
   TAG_FETCH: "タグ取得",
   PLUGIN_FETCH: "プラグイン取得",
   THEME_FETCH: "テーマ取得",
+  POST_FETCH: "ポスト/ページ取得",
+  MEDIA_UPLOAD: "アセット画像アップロード",
+  POST_DELETE: "ポスト/ページ削除",
+  POST_STATUS_UPDATE: "ポスト/ページステータス変更",
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -105,6 +113,7 @@ export function BulkManagementPanel({
   const [tagPage, setTagPage] = useState<TermComparisonPage | null>(null);
   const [pluginPage, setPluginPage] = useState<StatusComparisonPage | null>(null);
   const [themePage, setThemePage] = useState<StatusComparisonPage | null>(null);
+  const [postPage, setPostPage] = useState<PostComparisonPage | null>(null);
   const [loadingTab, setLoadingTab] = useState<Tab | null>(null);
   const [replayState, setReplayState] = useState<BulkOperationState | null>(null);
   const [replayPendingEnv, setReplayPendingEnv] = useState<ProjectEnvironment | null>(null);
@@ -132,6 +141,10 @@ export function BulkManagementPanel({
     } else if (nextTab === "THEME" && themePage === null) {
       setLoadingTab(nextTab);
       setThemePage(await fetchStatusComparisonAction(projectId, "theme", 0));
+      setLoadingTab(null);
+    } else if (nextTab === "POST" && postPage === null) {
+      setLoadingTab(nextTab);
+      setPostPage(await fetchPostComparisonAction(projectId, "post", 0));
       setLoadingTab(null);
     }
   }
@@ -219,6 +232,12 @@ export function BulkManagementPanel({
             <ZipUploadPanel projectId={projectId} operationType="THEME_INSTALL" timezone={timezone} />
           </div>
         )}
+        {tab === "POST" &&
+          (postPage ? (
+            <PostComparisonTable projectId={projectId} initialPage={postPage} />
+          ) : (
+            <TabLoading loading={loadingTab === "POST"} />
+          ))}
       </div>
 
       <div className="rounded-lg border border-neutral-200 bg-white p-4">
@@ -417,6 +436,9 @@ function describeLogValue(log: BulkOperationLog): string {
   if (log.operationType.startsWith("CATEGORY") || log.operationType.startsWith("TAG")) {
     const slug = log.categorySlug ?? log.categoryTargetSlug;
     return slug ? `${log.value}(${slug})` : log.value;
+  }
+  if (log.operationType === "POST_STATUS_UPDATE" && log.postStatus) {
+    return `${log.value} → ${log.postStatus}`;
   }
   return log.value;
 }

@@ -448,6 +448,98 @@ public class WordPressAdapter implements CmsAdapter {
     }
 
     @Override
+    public List<CmsPostSummary> listPosts(CmsCredentials credentials, String postType) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.listPosts(creds, postType);
+        }
+        if (creds.isAgent()) {
+            return agentOperations.listPosts(creds, postType);
+        }
+        RestClient client = buildClient(creds);
+        String path = "page".equals(postType) ? "/wp-json/wp/v2/pages" : "/wp-json/wp/v2/posts";
+        List<CmsPostSummary> results = new ArrayList<>();
+        int page = 1;
+        while (true) {
+            int currentPage = page;
+            JsonNode response;
+            try {
+                response = client.get()
+                        .uri(uriBuilder -> uriBuilder.path(path)
+                                .queryParam("per_page", 100)
+                                .queryParam("page", currentPage)
+                                .queryParam("status", "publish,future,draft,pending,private")
+                                .queryParam("context", "edit")
+                                .build())
+                        .retrieve()
+                        .body(JsonNode.class);
+            } catch (RestClientResponseException e) {
+                if (e.getStatusCode().value() == 400) {
+                    break;
+                }
+                throw new CmsApiException(
+                        "WordPress投稿/ページ一覧の取得に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+            }
+            if (response == null || !response.isArray() || response.isEmpty()) {
+                break;
+            }
+            for (JsonNode item : response) {
+                results.add(new CmsPostSummary(
+                        item.path("id").asText(),
+                        item.path("title").path("rendered").asText(""),
+                        item.path("slug").asText(""),
+                        item.path("status").asText(""),
+                        postType));
+            }
+            if (response.size() < 100) {
+                break;
+            }
+            page++;
+        }
+        return results;
+    }
+
+    @Override
+    public void updatePostStatus(CmsCredentials credentials, String postId, String postType, String status) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            sshOperations.updatePostStatus(creds, postId, status);
+            return;
+        }
+        if (creds.isAgent()) {
+            agentOperations.updatePostStatus(creds, postId, status);
+            return;
+        }
+        RestClient client = buildClient(creds);
+        String path = ("page".equals(postType) ? "/wp-json/wp/v2/pages/" : "/wp-json/wp/v2/posts/") + postId;
+        ObjectNode body = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
+        body.put("status", status);
+        try {
+            client.post().uri(path).contentType(MediaType.APPLICATION_JSON).body(body).retrieve().toBodilessEntity();
+        } catch (RestClientResponseException e) {
+            throw new CmsApiException(
+                    "WordPress投稿/ページのステータス変更に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+        }
+    }
+
+    @Override
+    public void deletePost(CmsCredentials credentials, String postId, String postType) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh() || creds.isAgent()) {
+            deletePost(credentials, postId);
+            return;
+        }
+        RestClient client = buildClient(creds);
+        String path = ("page".equals(postType) ? "/wp-json/wp/v2/pages/" : "/wp-json/wp/v2/posts/") + postId;
+        try {
+            client.delete().uri(path).retrieve().toBodilessEntity();
+        } catch (RestClientResponseException e) {
+            throw new CmsApiException(
+                    "WordPress投稿/ページの削除に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+        }
+    }
+
+    @Override
     public WpCliInstallResult installWpCli(CmsCredentials credentials) {
         CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
         if (!creds.isSsh()) {

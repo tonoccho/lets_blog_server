@@ -3,6 +3,7 @@ package com.letsblog.api.cms.ssh;
 import com.letsblog.api.cms.AuthorProvisioningRequest;
 import com.letsblog.api.cms.WpCliInstallResult;
 import com.letsblog.api.cms.CmsCredentials.WordPressCredentials;
+import com.letsblog.api.cms.CmsPostSummary;
 import com.letsblog.api.cms.ConnectionCheckResult;
 import com.letsblog.api.cms.MediaUploadResult;
 import com.letsblog.api.cms.PostContent;
@@ -684,6 +685,35 @@ public class WordPressSshOperations {
         SshCommandResult result = exec(creds, wpCli(creds, "post delete " + postId + " --yes"));
         if (!result.ok()) {
             throw new SshOperationException("WordPress投稿の削除に失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+    }
+
+    /**
+     * 投稿/固定ページの一覧を取得する(ポスト/ページ管理タブの環境間比較に使用)。
+     * `wp post list --post_type=post|page` はIDベースで投稿種別を問わず動作するwp-cliの標準コマンド。
+     */
+    public List<CmsPostSummary> listPosts(WordPressCredentials creds, String postType) {
+        SshCommandResult result = exec(creds, wpCli(creds,
+                "post list --post_type=" + ShellQuote.single(postType)
+                        + " --fields=ID,post_title,post_name,post_status --format=json"));
+        if (!result.ok()) {
+            throw new SshOperationException("投稿/ページ一覧の取得に失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+        return parseJsonArray(result.stdout()).stream()
+                .map(item -> new CmsPostSummary(
+                        item.path("ID").asText(), item.path("post_title").asText(),
+                        item.path("post_name").asText(), item.path("post_status").asText(), postType))
+                .toList();
+    }
+
+    /** `wp post update <id> --post_status=` はIDベースで投稿種別を問わず動作する。 */
+    public void updatePostStatus(WordPressCredentials creds, String postId, String status) {
+        SshCommandResult result = exec(creds, wpCli(creds,
+                "post update " + postId + " --post_status=" + ShellQuote.single(status)));
+        if (!result.ok()) {
+            throw new SshOperationException("投稿/ページのステータス変更に失敗しました: "
                     + firstLine(result.stderr(), result.stdout()));
         }
     }

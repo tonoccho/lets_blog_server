@@ -15,11 +15,13 @@ import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Post;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.domain.User;
+import com.letsblog.api.domain.UserSiteAuthor;
 import com.letsblog.api.dto.PostPublishCommand;
 import com.letsblog.api.dto.PostPublishResponse;
 import com.letsblog.api.markdown.MarkdownRenderer;
 import com.letsblog.api.repository.PostRepository;
 import com.letsblog.api.repository.UserRepository;
+import com.letsblog.api.repository.UserSiteAuthorRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,6 +54,7 @@ public class PostPublishService {
     private final ProjectService projectService;
     private final CurrentActorService currentActorService;
     private final UserRepository userRepository;
+    private final UserSiteAuthorRepository userSiteAuthorRepository;
     private final ObjectMapper objectMapper;
 
     public PostPublishService(SiteService siteService, CmsAdapterFactory cmsAdapterFactory,
@@ -61,6 +64,7 @@ public class PostPublishService {
                                ProjectService projectService,
                                CurrentActorService currentActorService,
                                UserRepository userRepository,
+                               UserSiteAuthorRepository userSiteAuthorRepository,
                                ObjectMapper objectMapper) {
         this.siteService = siteService;
         this.cmsAdapterFactory = cmsAdapterFactory;
@@ -71,6 +75,7 @@ public class PostPublishService {
         this.projectService = projectService;
         this.currentActorService = currentActorService;
         this.userRepository = userRepository;
+        this.userSiteAuthorRepository = userSiteAuthorRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -92,7 +97,7 @@ public class PostPublishService {
 
         List<String> categoryIds = cmsAdapter.resolveCategories(credentials, command.categories());
         List<String> tagIds = cmsAdapter.resolveTags(credentials, command.tags());
-        String authorId = resolveAuthorId(cmsAdapter, credentials);
+        String authorId = resolveAuthorId(cmsAdapter, credentials, site.getId());
 
         PostContent content = new PostContent(
                 command.title(),
@@ -161,22 +166,31 @@ public class PostPublishService {
 
     /**
      * 投稿者(X-Actor-Idヘッダで識別されるLet's Blogユーザー)に対応する、投稿先サイト上の
-     * 既存WordPressユーザーIDを解決する。プロジェクトメンバー追加時に{@code ProjectUserSyncService}が
-     * 同じメールアドレスでWordPressユーザーを作成/更新済みのはずだが、未実施(サイトがプロジェクトに
-     * 未紐付け等)の場合もあるため、見つからない・解決に失敗した場合はnullを返し、投稿自体は
-     * 従来通り(authorId未指定)続行する(著者解決の失敗で投稿全体を失敗させない)。
+     * 既存WordPressユーザーIDを解決する。まずuser_site_authors(ProjectUserSyncServiceが
+     * プロジェクトメンバー追加/ロール変更のたびにprovisionAuthorの結果を書き込む対応表)を参照し、
+     * 無ければ従来通りメールアドレスでの動的検索にフォールバックする(見つかればその場でキャッシュする)。
+     * 見つからない・解決に失敗した場合はnullを返し、投稿自体は従来通り(authorId未指定)続行する
+     * (著者解決の失敗で投稿全体を失敗させない)。
      */
-    private String resolveAuthorId(CmsAdapter cmsAdapter, CmsCredentials credentials) {
+    private String resolveAuthorId(CmsAdapter cmsAdapter, CmsCredentials credentials, Long siteId) {
         Long actorId = currentActorService.getCurrentActorId();
         if (actorId == null) {
             return null;
         }
         try {
+            Optional<UserSiteAuthor> mapping = userSiteAuthorRepository.findByUserIdAndSiteId(actorId, siteId);
+            if (mapping.isPresent()) {
+                return mapping.get().getCmsAuthorId();
+            }
+
             Optional<User> user = userRepository.findById(actorId);
             if (user.isEmpty()) {
                 return null;
             }
-            return cmsAdapter.findAuthorIdByEmail(credentials, user.get().getEmail()).orElse(null);
+            Optional<String> resolved = cmsAdapter.findAuthorIdByEmail(credentials, user.get().getEmail());
+            resolved.ifPresent(cmsAuthorId ->
+                    userSiteAuthorRepository.save(new UserSiteAuthor(actorId, siteId, cmsAuthorId)));
+            return resolved.orElse(null);
         } catch (RuntimeException e) {
             log.warn("投稿者のWordPressユーザーID解決に失敗しました(著者未設定のまま投稿を続行します): {}", e.getMessage());
             return null;

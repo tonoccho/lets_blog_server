@@ -24,7 +24,15 @@ public enum BulkOperationType {
     CATEGORY_FETCH,
     TAG_FETCH,
     PLUGIN_FETCH,
-    THEME_FETCH;
+    THEME_FETCH,
+    POST_FETCH,
+    // アセット画像の全環境アップロード(BulkManagementService#uploadImageToAllEnvironments)。
+    // applyToSite()のwp-cli/REST分岐は経由せずCmsAdapter.uploadMediaを直接呼ぶため、
+    // wpCliAction()は使わない。
+    MEDIA_UPLOAD,
+    // ポスト/ページの削除・ステータス変更(スラッグで全環境へ適用)。
+    POST_DELETE,
+    POST_STATUS_UPDATE;
 
     public String wpCliAction() {
         return name().toLowerCase();
@@ -40,5 +48,20 @@ public enum BulkOperationType {
      */
     public boolean requiresMasterEnvironment() {
         return this == CATEGORY_CREATE || this == CATEGORY_EDIT || this == TAG_CREATE || this == TAG_EDIT;
+    }
+
+    /**
+     * BulkManagementService#replayが再現できる種別かどうか。カテゴリ/タグ/プラグイン/テーマの
+     * 操作(および内部でzip再現に切り替わるPLUGIN_INSTALL/THEME_INSTALL)はapplyToSite()の
+     * 汎用分岐で再現できるが、MEDIA_UPLOAD/POST_*系は専用の適用経路を持つため対象外とする。
+     */
+    public boolean isReplayable() {
+        return switch (this) {
+            case CATEGORY_CREATE, CATEGORY_EDIT, CATEGORY_DELETE,
+                 TAG_CREATE, TAG_EDIT, TAG_DELETE,
+                 PLUGIN_INSTALL, PLUGIN_ACTIVATE, PLUGIN_DEACTIVATE, PLUGIN_DELETE,
+                 THEME_INSTALL, THEME_ACTIVATE, THEME_DELETE -> true;
+            default -> false;
+        };
     }
 }

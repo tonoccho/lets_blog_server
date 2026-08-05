@@ -38,7 +38,11 @@ public class ComfyUiClient {
         this.checkpointName = checkpointName;
     }
 
-    public ComfyUiImage generateImage(ComfyUiGenerationParams params) {
+    /**
+     * batch_size枚分の画像を生成する。EmptyLatentImageのbatch_sizeに応じてComfyUI側のSaveImageノードが
+     * 複数ファイルを出力するため、historyのoutputs.images配列を全件取得して1枚ずつ/viewで取得する。
+     */
+    public List<ComfyUiImage> generateImage(ComfyUiGenerationParams params) {
         String clientId = UUID.randomUUID().toString();
         ObjectNode workflow = buildWorkflow(params);
 
@@ -59,24 +63,28 @@ public class ComfyUiClient {
             throw new AiServiceException("ComfyUIへのジョブ投入に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
         }
 
-        JsonNode outputImage = pollForResult(promptId);
-        String filename = outputImage.get("filename").asText();
-        String subfolder = outputImage.has("subfolder") ? outputImage.get("subfolder").asText() : "";
-        String type = outputImage.has("type") ? outputImage.get("type").asText() : "output";
+        List<JsonNode> outputImages = pollForResult(promptId);
+        List<ComfyUiImage> images = new ArrayList<>();
+        for (JsonNode outputImage : outputImages) {
+            String filename = outputImage.get("filename").asText();
+            String subfolder = outputImage.has("subfolder") ? outputImage.get("subfolder").asText() : "";
+            String type = outputImage.has("type") ? outputImage.get("type").asText() : "output";
 
-        byte[] data = client.get()
-                .uri(uriBuilder -> uriBuilder.path("/view")
-                        .queryParam("filename", filename)
-                        .queryParam("subfolder", subfolder)
-                        .queryParam("type", type)
-                        .build())
-                .retrieve()
-                .body(byte[].class);
+            byte[] data = client.get()
+                    .uri(uriBuilder -> uriBuilder.path("/view")
+                            .queryParam("filename", filename)
+                            .queryParam("subfolder", subfolder)
+                            .queryParam("type", type)
+                            .build())
+                    .retrieve()
+                    .body(byte[].class);
 
-        return new ComfyUiImage(filename, data, "image/png");
+            images.add(new ComfyUiImage(filename, data, "image/png"));
+        }
+        return images;
     }
 
-    private JsonNode pollForResult(String promptId) {
+    private List<JsonNode> pollForResult(String promptId) {
         for (int attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
             JsonNode history = client.get().uri("/history/" + promptId).retrieve().body(JsonNode.class);
             JsonNode entry = history != null ? history.get(promptId) : null;
@@ -84,7 +92,9 @@ public class ComfyUiClient {
             if (entry != null && entry.has("outputs")) {
                 for (JsonNode nodeOutput : entry.get("outputs")) {
                     if (nodeOutput.has("images") && nodeOutput.get("images").size() > 0) {
-                        return nodeOutput.get("images").get(0);
+                        List<JsonNode> images = new ArrayList<>();
+                        nodeOutput.get("images").forEach(images::add);
+                        return images;
                     }
                 }
             }

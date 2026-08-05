@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import type { GeneratedImageDetail, GeneratedImageSummary } from "@/lib/apiClient";
 import { formatDateTime } from "@/lib/formatDate";
-import { getGeneratedImageAction } from "./actions";
+import { deleteGeneratedImageAction, getGeneratedImageAction } from "./actions";
 
 export function ImageGalleryGrid({
   images,
@@ -16,6 +16,7 @@ export function ImageGalleryGrid({
   const [detail, setDetail] = useState<GeneratedImageDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [isDeleting, startDeleteTransition] = useTransition();
 
   function openDetail(id: number) {
     setSelectedId(id);
@@ -35,6 +36,20 @@ export function ImageGalleryGrid({
     setSelectedId(null);
     setDetail(null);
     setError(null);
+  }
+
+  function handleDelete(id: number) {
+    if (!window.confirm("この生成画像を削除しますか?この操作は取り消せません。")) {
+      return;
+    }
+    startDeleteTransition(async () => {
+      try {
+        await deleteGeneratedImageAction(id);
+        closeDetail();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    });
   }
 
   return (
@@ -71,9 +86,19 @@ export function ImageGalleryGrid({
           >
             <div className="mb-4 flex items-start justify-between gap-4">
               <h2 className="text-lg font-semibold">生成画像の詳細</h2>
-              <button type="button" onClick={closeDetail} className="text-neutral-400 hover:text-neutral-700">
-                閉じる
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => handleDelete(selectedId)}
+                  disabled={isDeleting}
+                  className="text-red-600 hover:text-red-800 disabled:opacity-50"
+                >
+                  {isDeleting ? "削除中…" : "削除"}
+                </button>
+                <button type="button" onClick={closeDetail} className="text-neutral-400 hover:text-neutral-700">
+                  閉じる
+                </button>
+              </div>
             </div>
 
             <img

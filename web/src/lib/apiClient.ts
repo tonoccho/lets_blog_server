@@ -280,6 +280,10 @@ export function getGeneratedImage(id: number): Promise<GeneratedImageDetail> {
   return apiFetch<GeneratedImageDetail>(`/api/generated-images/${id}`);
 }
 
+export function deleteGeneratedImage(id: number): Promise<void> {
+  return apiFetch<void>(`/api/generated-images/${id}`, { method: 'DELETE' });
+}
+
 export async function downloadGeneratedImageFile(id: number): Promise<{ body: ArrayBuffer; mimeType: string }> {
   const res = await fetch(`${serverUrl()}/api/generated-images/${id}/file`, {
     headers: { 'X-API-Key': await currentApiKey() },
@@ -293,6 +297,69 @@ export async function downloadGeneratedImageFile(id: number): Promise<{ body: Ar
     body: await res.arrayBuffer(),
     mimeType: res.headers.get('content-type') ?? 'image/png',
   };
+}
+
+export interface ImageGenerationOptionsResponse {
+  checkpoints: string[];
+  selectedCheckpoint: string;
+  samplers: string[];
+  schedulers: string[];
+  loras: string[];
+}
+
+export function getImageGenerationOptions(projectId: number, actor?: ActorInfo): Promise<ImageGenerationOptionsResponse> {
+  return apiFetch<ImageGenerationOptionsResponse>(`/api/ai/image-options?projectId=${projectId}`, { actor });
+}
+
+export interface AiImageGenerationParams {
+  prompt: string;
+  negativePrompt?: string;
+  steps?: number;
+  cfgScale?: number;
+  samplerName?: string;
+  scheduler?: string;
+  seed?: number | null;
+  width?: number;
+  height?: number;
+  batchSize?: number;
+  checkpoint?: string;
+  loraName?: string;
+  loraWeight?: number;
+  projectId?: number;
+}
+
+export interface AiImageResult {
+  id: number;
+  fileName: string;
+  dataBase64: string;
+  mimeType: string;
+}
+
+export interface AiImageBatchResult {
+  images: AiImageResult[];
+}
+
+export function generateProjectImages(
+  params: AiImageGenerationParams,
+  actor?: ActorInfo
+): Promise<AiImageBatchResult> {
+  return apiFetch<AiImageBatchResult>('/api/ai/image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+    actor,
+  });
+}
+
+export function uploadProjectAssetImage(
+  projectId: number,
+  generatedImageId: number,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/asset-images/${generatedImageId}/upload`, {
+    method: 'POST',
+    actor,
+  });
 }
 
 export async function login(email: string, password: string): Promise<LoginResult | null> {
@@ -1011,7 +1078,11 @@ export type BulkOperationType =
   | "CATEGORY_FETCH"
   | "TAG_FETCH"
   | "PLUGIN_FETCH"
-  | "THEME_FETCH";
+  | "THEME_FETCH"
+  | "POST_FETCH"
+  | "MEDIA_UPLOAD"
+  | "POST_DELETE"
+  | "POST_STATUS_UPDATE";
 export type ZipInstallOperationType = "PLUGIN_INSTALL" | "THEME_INSTALL";
 export type BulkOperationSourceType = "SLUG" | "ZIP";
 export type BulkOperationStatus = "SUCCESS" | "SKIPPED" | "FAILED";
@@ -1027,6 +1098,7 @@ export interface BulkOperationLog {
   categoryTargetSlug: string | null;
   categoryDescription: string | null;
   originalFilename: string | null;
+  postStatus: string | null;
   environment: ProjectEnvironment;
   status: BulkOperationStatus;
   level: BulkOperationLogLevel;
@@ -1306,6 +1378,79 @@ export function deleteThemeEverywhere(
     body: JSON.stringify({ slug }),
     actor,
   });
+}
+
+export type PostType = "post" | "page";
+
+export interface PostEnvironmentValue {
+  available: boolean;
+  error: boolean;
+  errorMessage: string | null;
+  postId: string | null;
+  title: string | null;
+  status: string | null;
+}
+
+export interface PostComparisonRow {
+  slug: string;
+  local: PostEnvironmentValue;
+  test: PostEnvironmentValue;
+  production: PostEnvironmentValue;
+}
+
+export interface PostComparisonPage {
+  items: PostComparisonRow[];
+  page: number;
+  size: number;
+  totalCount: number;
+  postType: PostType;
+}
+
+export function listPostComparison(
+  projectId: number,
+  postType: PostType,
+  page: number,
+  actor?: ActorInfo
+): Promise<PostComparisonPage> {
+  return apiFetch<PostComparisonPage>(
+    `/api/projects/${projectId}/bulk-management/posts/comparison?postType=${postType}&page=${page}`,
+    { actor }
+  );
+}
+
+export function deletePostEverywhere(
+  projectId: number,
+  postType: PostType,
+  slug: string,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(
+    `/api/projects/${projectId}/bulk-management/posts/delete-all?postType=${postType}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug }),
+      actor,
+    }
+  );
+}
+
+export function updatePostStatusEverywhere(
+  projectId: number,
+  postType: PostType,
+  slug: string,
+  status: string,
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(
+    `/api/projects/${projectId}/bulk-management/posts/status-update?postType=${postType}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug, status }),
+      actor,
+    }
+  );
 }
 
 export function runBulkOperationUpload(

@@ -15,6 +15,7 @@ import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.ProjectUserRepository;
 import com.letsblog.api.repository.SiteRepository;
 import com.letsblog.api.repository.UserRepository;
+import com.letsblog.api.repository.UserSiteAuthorRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -57,9 +58,13 @@ class ProjectUserSyncServiceTest {
     @Mock
     private CmsAdapter cmsAdapter;
 
+    @Mock
+    private UserSiteAuthorRepository userSiteAuthorRepository;
+
     private ProjectUserSyncService service() {
         return new ProjectUserSyncService(
-                projectRepository, projectUserRepository, userRepository, siteRepository, siteService, cmsAdapterFactory);
+                projectRepository, projectUserRepository, userRepository, siteRepository, siteService,
+                cmsAdapterFactory, userSiteAuthorRepository);
     }
 
     private Project buildProject(Long localSiteId, Long testSiteId, Long productionSiteId) {
@@ -104,11 +109,14 @@ class ProjectUserSyncServiceTest {
         when(siteService.getCredentials(any())).thenReturn(credentials);
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
         when(cmsAdapter.hasAuthorProvisioningCapability(any())).thenReturn(true);
+        when(cmsAdapter.provisionAuthor(eq(credentials), any(AuthorProvisioningRequest.class))).thenReturn("9");
+        when(userSiteAuthorRepository.findByUserIdAndSiteId(any(), any())).thenReturn(Optional.empty());
 
         service.addUserToProject(1L, 2L, "editor");
 
         verify(cmsAdapter, times(2)).provisionAuthor(eq(credentials), any(AuthorProvisioningRequest.class));
         verify(projectUserRepository).save(any(ProjectUser.class));
+        verify(userSiteAuthorRepository, times(2)).save(any(com.letsblog.api.domain.UserSiteAuthor.class));
     }
 
     @Test

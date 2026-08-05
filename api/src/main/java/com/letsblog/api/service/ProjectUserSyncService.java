@@ -11,12 +11,14 @@ import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.ProjectUser;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.domain.User;
+import com.letsblog.api.domain.UserSiteAuthor;
 import com.letsblog.api.dto.ProjectUserResponse;
 import com.letsblog.api.dto.ProjectUserSummaryResponse;
 import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.ProjectUserRepository;
 import com.letsblog.api.repository.SiteRepository;
 import com.letsblog.api.repository.UserRepository;
+import com.letsblog.api.repository.UserSiteAuthorRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,6 +41,7 @@ public class ProjectUserSyncService {
     private final SiteRepository siteRepository;
     private final SiteService siteService;
     private final CmsAdapterFactory cmsAdapterFactory;
+    private final UserSiteAuthorRepository userSiteAuthorRepository;
 
     public ProjectUserSyncService(
             ProjectRepository projectRepository,
@@ -46,13 +49,15 @@ public class ProjectUserSyncService {
             UserRepository userRepository,
             SiteRepository siteRepository,
             SiteService siteService,
-            CmsAdapterFactory cmsAdapterFactory) {
+            CmsAdapterFactory cmsAdapterFactory,
+            UserSiteAuthorRepository userSiteAuthorRepository) {
         this.projectRepository = projectRepository;
         this.projectUserRepository = projectUserRepository;
         this.userRepository = userRepository;
         this.siteRepository = siteRepository;
         this.siteService = siteService;
         this.cmsAdapterFactory = cmsAdapterFactory;
+        this.userSiteAuthorRepository = userSiteAuthorRepository;
     }
 
     @AuditLog(action = AuditLogAction.PROJECT_USER_ADDED, resourceType = "PROJECT_USER")
@@ -124,8 +129,24 @@ public class ProjectUserSyncService {
                         "サイト '" + site.getSiteKey() + "' の登録済み認証情報に、ユーザー作成に必要な管理者権限が"
                                 + "ありません。サイト管理画面から認証情報を更新してください。");
             }
-            adapter.provisionAuthor(credentials, request);
+            String cmsAuthorId = adapter.provisionAuthor(credentials, request);
+            saveAuthorMapping(user.getId(), site.getId(), cmsAuthorId);
         }
+    }
+
+    /**
+     * provisionAuthorが返したWordPress側ユーザーIDをuser_site_authorsへ永続化する。
+     * 投稿時(PostPublishService.resolveAuthorId)は、この対応表を優先して参照することで
+     * 投稿の都度メールアドレス検索を行わずに著者IDを解決できる。
+     */
+    private void saveAuthorMapping(Long userId, Long siteId, String cmsAuthorId) {
+        if (cmsAuthorId == null) {
+            return;
+        }
+        UserSiteAuthor mapping = userSiteAuthorRepository.findByUserIdAndSiteId(userId, siteId)
+                .orElseGet(() -> new UserSiteAuthor(userId, siteId, cmsAuthorId));
+        mapping.setCmsAuthorId(cmsAuthorId);
+        userSiteAuthorRepository.save(mapping);
     }
 
     private List<Site> getProjectSites(Project project) {

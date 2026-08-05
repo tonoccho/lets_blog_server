@@ -18,6 +18,7 @@ public record BulkOperationLogResponse(
         String categoryTargetSlug,
         String categoryDescription,
         String originalFilename,
+        String postStatus,
         String environment,
         BulkOperationStatus status,
         BulkOperationLogLevel level,
@@ -31,7 +32,7 @@ public record BulkOperationLogResponse(
                 log.getId(), log.getOperationType(), log.getSourceType(), log.getValue(),
                 log.getCategorySlug(), log.getCategoryParentSlug(), log.getCategoryTargetSlug(),
                 log.getCategoryDescription(),
-                log.getOriginalFilename(), log.getEnvironment(), log.getStatus(), log.getLevel(),
+                log.getOriginalFilename(), log.getPostStatus(), log.getEnvironment(), log.getStatus(), log.getLevel(),
                 log.getErrorMessage(), log.getStackTrace(), log.isReplay(), log.getCreatedAt());
     }
 }

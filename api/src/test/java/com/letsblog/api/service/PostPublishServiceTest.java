@@ -13,6 +13,7 @@ import com.letsblog.api.dto.PostPublishResponse;
 import com.letsblog.api.markdown.MarkdownRenderer;
 import com.letsblog.api.repository.PostRepository;
 import com.letsblog.api.repository.UserRepository;
+import com.letsblog.api.repository.UserSiteAuthorRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -60,6 +61,8 @@ class PostPublishServiceTest {
     @Mock
     private UserRepository userRepository;
     @Mock
+    private UserSiteAuthorRepository userSiteAuthorRepository;
+    @Mock
     private CmsAdapter cmsAdapter;
 
     private PostPublishService service;
@@ -71,7 +74,7 @@ class PostPublishServiceTest {
     void setUp() {
         service = new PostPublishService(siteService, cmsAdapterFactory, markdownRenderer, postRepository,
                 plantUmlEmbedService, customTagRenderService, projectService, currentActorService, userRepository,
-                new com.fasterxml.jackson.databind.ObjectMapper());
+                userSiteAuthorRepository, new com.fasterxml.jackson.databind.ObjectMapper());
 
         Site site = new Site();
         site.setId(1L);
@@ -89,6 +92,7 @@ class PostPublishServiceTest {
         lenient().when(cmsAdapter.resolveTags(any(), any())).thenReturn(List.of());
         lenient().when(postRepository.findBySiteIdAndWpPostId(any(), any())).thenReturn(Optional.empty());
         lenient().when(currentActorService.getCurrentActorId()).thenReturn(null);
+        lenient().when(userSiteAuthorRepository.findByUserIdAndSiteId(any(), any())).thenReturn(Optional.empty());
     }
 
     private PostPublishCommand command(String slug, String title, List<MultipartFile> images, String featuredImageFilename) {
@@ -254,6 +258,44 @@ class PostPublishServiceTest {
         ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
         verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
         assertEquals("7", contentCaptor.getValue().authorId());
+    }
+
+    @Test
+    void publish_user_site_authorsに対応表があればメール検索せずそれを使う() {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        when(currentActorService.getCurrentActorId()).thenReturn(10L);
+        when(userSiteAuthorRepository.findByUserIdAndSiteId(10L, 1L))
+                .thenReturn(Optional.of(new com.letsblog.api.domain.UserSiteAuthor(10L, 1L, "7")));
+
+        service.publish(command("my-article", "My Article", List.of(), null));
+
+        ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
+        verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
+        assertEquals("7", contentCaptor.getValue().authorId());
+        verify(cmsAdapter, org.mockito.Mockito.never()).findAuthorIdByEmail(any(), any());
+        verify(userRepository, org.mockito.Mockito.never()).findById(any());
+    }
+
+    @Test
+    void publish_メール検索で解決できた場合はuser_site_authorsへキャッシュする() {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        when(currentActorService.getCurrentActorId()).thenReturn(10L);
+        com.letsblog.api.domain.User user = new com.letsblog.api.domain.User();
+        user.setId(10L);
+        user.setEmail("author@example.com");
+        when(userRepository.findById(10L)).thenReturn(Optional.of(user));
+        when(cmsAdapter.findAuthorIdByEmail(credentials, "author@example.com")).thenReturn(Optional.of("7"));
+
+        service.publish(command("my-article", "My Article", List.of(), null));
+
+        ArgumentCaptor<com.letsblog.api.domain.UserSiteAuthor> mappingCaptor =
+                ArgumentCaptor.forClass(com.letsblog.api.domain.UserSiteAuthor.class);
+        verify(userSiteAuthorRepository).save(mappingCaptor.capture());
+        assertEquals(10L, mappingCaptor.getValue().getUserId());
+        assertEquals(1L, mappingCaptor.getValue().getSiteId());
+        assertEquals("7", mappingCaptor.getValue().getCmsAuthorId());
     }
 
     @Test

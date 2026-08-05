@@ -67,15 +67,26 @@ class ProjectControllerTest {
     private PluginThemeComparisonService pluginThemeComparisonService;
 
     @Mock
+    private com.letsblog.api.service.PostComparisonService postComparisonService;
+
+    @Mock
     private AdminAuthorizationService adminAuthorizationService;
 
     @Mock
     private CurrentActorService currentActorService;
 
+    @Mock
+    private com.letsblog.api.repository.GeneratedImageRepository generatedImageRepository;
+
+    @Mock
+    private com.letsblog.api.ai.GeneratedImageStorageService generatedImageStorageService;
+
     private ProjectController controller() {
         return new ProjectController(
                 projectService, projectUserSyncService, projectEnvironmentSyncService, bulkManagementService,
-                termComparisonService, pluginThemeComparisonService, adminAuthorizationService, currentActorService);
+                termComparisonService, pluginThemeComparisonService, postComparisonService,
+                adminAuthorizationService, currentActorService,
+                generatedImageRepository, generatedImageStorageService);
     }
 
     private BulkOperationLog buildLog() {
@@ -250,6 +261,33 @@ class ProjectControllerTest {
 
         assertEquals(1, response.size());
         verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void uploadAssetImage_admin権限があれば全環境アップロードを実行できる() {
+        ProjectController controller = controller();
+        com.letsblog.api.domain.GeneratedImage image = new com.letsblog.api.domain.GeneratedImage();
+        image.setId(5L);
+        image.setFilePath("global/0001.png");
+        image.setMimeType("image/png");
+        when(generatedImageRepository.findById(5L)).thenReturn(java.util.Optional.of(image));
+        when(generatedImageStorageService.load("global/0001.png")).thenReturn(new byte[]{1, 2, 3});
+        when(bulkManagementService.uploadImageToAllEnvironments(1L, new byte[]{1, 2, 3}, "comfyui-5.png", "image/png", 0L))
+                .thenReturn(List.of(buildLog()));
+
+        List<?> response = controller.uploadAssetImage(1L, 5L);
+
+        assertEquals(1, response.size());
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void uploadAssetImage_存在しない画像は例外() {
+        ProjectController controller = controller();
+        when(generatedImageRepository.findById(99L)).thenReturn(java.util.Optional.empty());
+
+        assertThrows(com.letsblog.api.service.GeneratedImageNotFoundException.class,
+                () -> controller.uploadAssetImage(1L, 99L));
     }
 
     @Test

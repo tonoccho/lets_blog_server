@@ -96,4 +96,29 @@ public interface CmsAdapter {
     default List<String> listCategoryNames(CmsCredentials credentials) {
         return List.of();
     }
+
+    /**
+     * 投稿(post)または固定ページ(page)の一覧を取得する(読み取り専用。プロジェクト管理画面の
+     * ポスト/ページ管理タブで環境間比較に使う)。対応しないCMSはUnsupportedOperationExceptionを投げる。
+     */
+    default List<CmsPostSummary> listPosts(CmsCredentials credentials, String postType) {
+        throw new UnsupportedOperationException("このCMSは投稿/ページ一覧取得に対応していません");
+    }
+
+    /**
+     * 投稿または固定ページのステータスを変更する。対応しないCMSはUnsupportedOperationExceptionを投げる。
+     */
+    default void updatePostStatus(CmsCredentials credentials, String postId, String postType, String status) {
+        throw new UnsupportedOperationException("このCMSは投稿/ページのステータス変更に対応していません");
+    }
+
+    /**
+     * 投稿または固定ページを削除する(WordPressの場合、既定でゴミ箱へ移動する)。
+     * {@link #deletePost(CmsCredentials, String)}のpostType対応版(REST APIはpostとpageで
+     * エンドポイントが異なるため必要)。既定はpostType不問で{@link #deletePost(CmsCredentials, String)}
+     * に委譲する(SSH/エージェント経由はIDのみで削除できるため、この既定で十分)。
+     */
+    default void deletePost(CmsCredentials credentials, String postId, String postType) {
+        deletePost(credentials, postId);
+    }
 }

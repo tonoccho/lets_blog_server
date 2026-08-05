@@ -41,6 +41,17 @@ import {
   installComfyUiCheckpoint,
   deleteComfyUiCheckpoint,
   getGenerationJob,
+  getImageGenerationOptions,
+  generateProjectImages,
+  uploadProjectAssetImage,
+  listPostComparison,
+  deletePostEverywhere,
+  updatePostStatusEverywhere,
+  ImageGenerationOptionsResponse,
+  AiImageGenerationParams,
+  AiImageResult,
+  PostComparisonPage,
+  PostType,
   ProjectEnvironment,
   EnvironmentSyncTarget,
   BulkOperationType,
@@ -632,4 +643,86 @@ export async function fetchGenerationJobAction(jobId: number): Promise<Generatio
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };
   return getGenerationJob(jobId, actor);
+}
+
+export async function fetchImageGenerationOptionsAction(projectId: number): Promise<ImageGenerationOptionsResponse> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  return getImageGenerationOptions(projectId, actor);
+}
+
+export async function generateProjectImagesAction(
+  projectId: number,
+  params: Omit<AiImageGenerationParams, "projectId">
+): Promise<{ images?: AiImageResult[]; error?: string }> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const result = await generateProjectImages({ ...params, projectId }, actor);
+    return { images: result.images };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function fetchPostComparisonAction(
+  projectId: number,
+  postType: PostType,
+  page: number
+): Promise<PostComparisonPage> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  return listPostComparison(projectId, postType, page, actor);
+}
+
+export async function deletePostEverywhereAction(
+  projectId: number,
+  postType: PostType,
+  slug: string
+): Promise<BulkOperationState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    await deletePostEverywhere(projectId, postType, slug, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+  revalidatePath(`/projects/${projectId}`);
+  return {};
+}
+
+export async function updatePostStatusEverywhereAction(
+  projectId: number,
+  postType: PostType,
+  slug: string,
+  status: string
+): Promise<BulkOperationState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    await updatePostStatusEverywhere(projectId, postType, slug, status, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+  revalidatePath(`/projects/${projectId}`);
+  return {};
+}
+
+export async function uploadProjectAssetImageAction(
+  projectId: number,
+  generatedImageId: number
+): Promise<{ logs?: BulkOperationLog[]; error?: string }> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const logs = await uploadProjectAssetImage(projectId, generatedImageId, actor);
+    revalidatePath(`/projects/${projectId}`);
+    return { logs };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
 }

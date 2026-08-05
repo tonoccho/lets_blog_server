@@ -49,6 +49,14 @@ public class GeneratedImageStorageService {
         }
     }
 
+    public void delete(String relativeFilePath) {
+        try {
+            Files.deleteIfExists(storageDir.resolve(relativeFilePath));
+        } catch (IOException e) {
+            throw new AiServiceException("生成画像の削除に失敗しました: " + e.getMessage(), e);
+        }
+    }
+
     private int nextSequenceWithRetry(String projectKey) {
         try {
             return sequenceService.nextSequence(projectKey);

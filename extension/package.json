@@ -62,6 +62,20 @@
         "title": "Let's Blog: Preview Article"
       }
     ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "letsBlog.generateImage",
+          "when": "editorTextFocus && resourceLangId == markdown",
+          "group": "letsBlog@1"
+        },
+        {
+          "command": "letsBlog.generateSection",
+          "when": "editorTextFocus && resourceLangId == markdown",
+          "group": "letsBlog@2"
+        }
+      ]
+    },
     "configuration": {
       "title": "Let's Blog",
       "properties": {

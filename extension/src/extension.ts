@@ -14,6 +14,7 @@ import { PlanPanel } from './planPanel';
 import { PreviewPanel } from './previewPanel';
 import { ImageGenPanel } from './imageGenPanel';
 import { SectionGenPanel } from './sectionGenPanel';
+import { resolveSectionContext } from './headingContext';
 
 export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
@@ -191,22 +192,28 @@ async function publishToSite(
   }
 
   const existingPostId = resolveExistingPostId(article.data, siteKey);
+  const actor = await getActor(context);
 
   const result = await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'WordPressへ投稿しています…' },
     () =>
-      api.publishPost(serverUrl, apiKey, {
-        site: siteKey,
-        title: article.data.title as string,
-        slug: article.data.slug,
-        status: forceStatus ?? article.data.status ?? 'draft',
-        categories: article.data.categories ?? [],
-        tags: article.data.tags ?? [],
-        wpPostId: existingPostId,
-        markdown: article.content,
-        images,
-        featuredImageFilename: featuredImage?.reference,
-      })
+      api.publishPost(
+        serverUrl,
+        apiKey,
+        {
+          site: siteKey,
+          title: article.data.title as string,
+          slug: article.data.slug,
+          status: forceStatus ?? article.data.status ?? 'draft',
+          categories: article.data.categories ?? [],
+          tags: article.data.tags ?? [],
+          wpPostId: existingPostId,
+          markdown: article.content,
+          images,
+          featuredImageFilename: featuredImage?.reference,
+        },
+        actor
+      )
   );
 
   article.data.site = siteKey;
@@ -457,7 +464,8 @@ async function commandGenerateSection(context: vscode.ExtensionContext): Promise
   try {
     const article = parseArticle(editor.document.getText());
     const articleTitle = typeof article.data.title === 'string' ? article.data.title : undefined;
-    SectionGenPanel.createOrShow(context, editor, articleTitle);
+    const sectionContext = resolveSectionContext(editor.document.getText(), editor.selection.active.line);
+    SectionGenPanel.createOrShow(context, editor, articleTitle, sectionContext);
   } catch (err) {
     vscode.window.showErrorMessage(
       `セクション生成パネルの起動に失敗しました: ${String(err instanceof Error ? err.message : err)}`

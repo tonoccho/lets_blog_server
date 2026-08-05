@@ -2,8 +2,8 @@ package com.letsblog.api.controller;
 
 import com.letsblog.api.dto.AiDraftRequest;
 import com.letsblog.api.dto.AiDraftResponse;
+import com.letsblog.api.dto.AiImageBatchResponse;
 import com.letsblog.api.dto.AiImageRequest;
-import com.letsblog.api.dto.AiImageResponse;
 import com.letsblog.api.dto.AiSectionRequest;
 import com.letsblog.api.dto.AiSectionResponse;
 import com.letsblog.api.dto.AiTagsRequest;
@@ -37,7 +37,7 @@ public class AiController {
     }
 
     @PostMapping("/api/ai/image")
-    public AiImageResponse image(@Valid @RequestBody AiImageRequest request) {
+    public AiImageBatchResponse image(@Valid @RequestBody AiImageRequest request) {
         return aiAssistService.generateImage(request);
     }
 

@@ -880,6 +880,55 @@ if ($path === '/wp-cli/post-delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     respond(200, ['postId' => $postId]);
 }
 
+if ($path === '/wp-cli/post-list' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    $postType = (string) ($input['postType'] ?? 'post');
+
+    if (!isValidSlug($slug) || !in_array($postType, ['post', 'page'], true)) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = resolveExistingSitePath($slug);
+    if ($sitePath === null) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    [$code, $out, $err] = runWp(['post', 'list', "--post_type=$postType",
+        '--fields=ID,post_title,post_name,post_status', '--format=json', "--path=$sitePath", '--allow-root']);
+    if ($code !== 0) {
+        respond(500, ['error' => '投稿/ページ一覧の取得に失敗しました', 'detail' => combinedOutput($out, $err)]);
+    }
+    $items = json_decode($out, true) ?: [];
+    $posts = array_map(function ($item) {
+        return [
+            'id' => (string) ($item['ID'] ?? ''),
+            'title' => $item['post_title'] ?? '',
+            'slug' => $item['post_name'] ?? '',
+            'status' => $item['post_status'] ?? '',
+        ];
+    }, $items);
+    respond(200, ['posts' => $posts]);
+}
+
+if ($path === '/wp-cli/post-status-update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    $postId = (string) ($input['postId'] ?? '');
+    $status = (string) ($input['status'] ?? '');
+
+    if (!isValidSlug($slug) || $postId === '' || $status === '') {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = resolveExistingSitePath($slug);
+    if ($sitePath === null) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    [$code, $out, $err] = runWp(['post', 'update', $postId, "--post_status=$status", "--path=$sitePath", '--allow-root']);
+    if ($code !== 0) {
+        respond(500, ['error' => '投稿/ページのステータス変更に失敗しました', 'detail' => combinedOutput($out, $err)]);
+    }
+    respond(200, ['postId' => $postId, 'status' => $status]);
+}
+
 if ($path === '/wp-cli/media-upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = (string) ($_POST['slug'] ?? '');
     if (!isValidSlug($slug) || empty($_FILES['file'])) {

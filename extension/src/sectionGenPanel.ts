@@ -1,11 +1,13 @@
 import * as vscode from 'vscode';
 import * as api from './apiClient';
 import { getActor, getServerUrl, requireApiKey } from './config';
+import { SectionContext } from './headingContext';
 
 /**
- * VSCode拡張の「Let's Blog: Generate Section」用WebviewPanel。見出し単位で本文/リード文を
- * AI生成し、選択範囲があれば置換、なければカーソル位置へ挿入する。WebviewPanelの骨格は
- * imageGenPanel.ts(acquireVsCodeApi + postMessageディスパッチ)に準拠する。
+ * VSCode拡張の「Let's Blog: Generate Section」用WebviewPanel。カーソル位置の見出し階層から
+ * 自動判定したモード(本文/リード文/サブセクション考慮リード文)で生成し、追加の指示による
+ * 壁打ち(再生成)を経て、選択範囲があれば置換・なければカーソル位置へ挿入する。
+ * WebviewPanelの骨格はimageGenPanel.ts(acquireVsCodeApi + postMessageディスパッチ)に準拠する。
  */
 export class SectionGenPanel {
   private static currentPanel: SectionGenPanel | undefined;
@@ -14,19 +16,21 @@ export class SectionGenPanel {
   static createOrShow(
     context: vscode.ExtensionContext,
     editor: vscode.TextEditor,
-    articleTitle: string | undefined
+    articleTitle: string | undefined,
+    sectionContext: SectionContext
   ): void {
     if (SectionGenPanel.currentPanel) {
       SectionGenPanel.currentPanel._panel.reveal(vscode.ViewColumn.Beside);
       return;
     }
-    SectionGenPanel.currentPanel = new SectionGenPanel(context, editor, articleTitle);
+    SectionGenPanel.currentPanel = new SectionGenPanel(context, editor, articleTitle, sectionContext);
   }
 
   private constructor(
     private readonly _context: vscode.ExtensionContext,
     private readonly _editor: vscode.TextEditor,
-    private readonly _articleTitle: string | undefined
+    private readonly _articleTitle: string | undefined,
+    private readonly _sectionContext: SectionContext
   ) {
     this._panel = vscode.window.createWebviewPanel(
       'letsBlog.sectionGen',
@@ -55,6 +59,7 @@ export class SectionGenPanel {
           this._sendMessage('init', {
             articleTitle: this._articleTitle ?? '',
             selectedText: this._editor.document.getText(this._editor.selection),
+            sectionContext: this._sectionContext,
           });
           break;
         case 'generate':
@@ -110,11 +115,18 @@ export class SectionGenPanel {
   button { padding: 6px 14px; cursor: pointer; }
   button.primary { background: var(--vscode-button-background, #007acc); color: var(--vscode-button-foreground, #fff); border: none; }
   button:disabled { opacity: 0.6; cursor: default; }
-  .result-section { display: none; border: 1px solid var(--vscode-panel-border, #ccc); padding: 10px; margin-top: 16px; }
-  .result-text { white-space: pre-wrap; margin-bottom: 8px; }
+  .hint { font-size: 0.85em; opacity: 0.75; margin: -4px 0 10px; }
+  .chat { display: none; border: 1px solid var(--vscode-panel-border, #ccc); padding: 10px; margin-top: 16px; }
+  .bubble { white-space: pre-wrap; margin-bottom: 10px; padding: 8px; border-radius: 4px; }
+  .bubble.assistant { background: var(--vscode-editor-inactiveSelectionBackground, #2a2d2e); }
+  .bubble.user { background: var(--vscode-list-hoverBackground, #37373d); text-align: right; }
+  .bubble .role { font-size: 0.75em; opacity: 0.7; display: block; margin-bottom: 4px; }
   .sources { font-size: 0.85em; opacity: 0.85; margin-bottom: 8px; }
   .sources a { color: var(--vscode-textLink-foreground, #3794ff); }
   .search-note { font-size: 0.85em; opacity: 0.7; font-style: italic; margin-bottom: 8px; }
+  .refine-row { display: flex; gap: 8px; margin-top: 10px; }
+  .refine-row input { flex: 1; }
+  .button-group { display: flex; gap: 10px; margin-top: 10px; }
   #message { margin-top: 16px; display: none; }
   #message.error { color: var(--vscode-errorForeground, #d32f2f); }
   #message.success { color: #388e3c; }
@@ -123,31 +135,39 @@ export class SectionGenPanel {
 <body>
 <div class="container">
   <div class="form-group">
-    <label>モード</label>
+    <label>モード(カーソル位置から自動判定。必要に応じて変更可)</label>
     <select id="mode">
-      <option value="body">本文</option>
-      <option value="lead">リード文</option>
+      <option value="body">本文(セクションタイトルを考慮)</option>
+      <option value="lead">リード文(記事全体を考慮)</option>
+      <option value="lead-subsections">リード文(サブセクションを考慮)</option>
     </select>
   </div>
   <div class="form-group">
     <label>記事タイトル</label>
     <input type="text" id="articleTitle">
   </div>
-  <div class="form-group">
+  <div class="form-group" id="headingGroup">
     <label>見出し</label>
     <input type="text" id="heading" placeholder="このセクションの見出し">
   </div>
+  <div class="hint" id="outlineHint"></div>
   <div class="form-group" id="precedingContextGroup">
-    <label>直前までの文脈(任意。選択範囲があれば自動入力されます)</label>
+    <label>直前までの文脈(任意。選択範囲やカーソル位置までの本文から自動入力されます)</label>
     <textarea id="precedingContext"></textarea>
   </div>
   <button id="generateButton" class="primary">生成</button>
 
-  <div class="result-section" id="resultSection">
-    <div class="result-text" id="resultText"></div>
+  <div class="chat" id="chat">
+    <div id="messages"></div>
     <div class="sources" id="sourcesArea"></div>
     <div class="search-note" id="searchNoteArea"></div>
-    <button id="insertButton" class="primary">記事に挿入</button>
+    <div class="refine-row">
+      <input type="text" id="refineInput" placeholder="追加の指示(例: もっと短く、丁寧語で)">
+      <button id="refineButton">壁打ちで再生成</button>
+    </div>
+    <div class="button-group">
+      <button id="insertButton" class="primary">この案を記事に挿入</button>
+    </div>
   </div>
 
   <div id="message"></div>
@@ -156,6 +176,9 @@ export class SectionGenPanel {
 <script>
   const vscode = acquireVsCodeApi();
   let currentResult = null;
+  let chatHistory = [];
+  let pendingUserMessage = null;
+  let subsectionHeadings = [];
 
   function post(command, payload) {
     vscode.postMessage(Object.assign({ command }, payload || {}));
@@ -168,32 +191,76 @@ export class SectionGenPanel {
     el.style.display = 'block';
   }
 
-  document.getElementById('mode').addEventListener('change', (e) => {
-    document.getElementById('precedingContextGroup').style.display = e.target.value === 'body' ? 'block' : 'none';
-  });
-
-  function generate() {
-    const heading = document.getElementById('heading').value.trim();
-    if (!heading) {
-      showMessage('見出しを入力してください。', 'error');
-      return;
+  function applyModeVisibility() {
+    const mode = document.getElementById('mode').value;
+    document.getElementById('precedingContextGroup').style.display = mode === 'body' ? 'block' : 'none';
+    document.getElementById('headingGroup').style.display = mode === 'lead' ? 'none' : 'block';
+    const hint = document.getElementById('outlineHint');
+    if ((mode === 'lead' || mode === 'lead-subsections') && subsectionHeadings.length > 0) {
+      const label = mode === 'lead' ? '記事の構成: ' : 'サブセクション: ';
+      hint.textContent = label + subsectionHeadings.join(' / ');
+    } else {
+      hint.textContent = '';
     }
-    const params = {
+  }
+
+  document.getElementById('mode').addEventListener('change', applyModeVisibility);
+
+  function baseParams() {
+    return {
       mode: document.getElementById('mode').value,
-      heading,
+      heading: document.getElementById('heading').value.trim() || undefined,
       articleTitle: document.getElementById('articleTitle').value || undefined,
       precedingContext: document.getElementById('precedingContext').value || undefined,
+      subsectionHeadings: subsectionHeadings.length > 0 ? subsectionHeadings : undefined,
     };
+  }
+
+  function generate() {
     document.getElementById('generateButton').disabled = true;
     showMessage('生成しています…', '');
-    post('generate', { params });
+    chatHistory = [];
+    pendingUserMessage = null;
+    document.getElementById('messages').innerHTML = '';
+    post('generate', { params: baseParams() });
+  }
+
+  function refine() {
+    const instruction = document.getElementById('refineInput').value.trim();
+    if (!instruction || !currentResult) return;
+    document.getElementById('refineButton').disabled = true;
+    showMessage('再生成しています…', '');
+    pendingUserMessage = instruction;
+    post('generate', { params: Object.assign(baseParams(), { history: chatHistory, message: instruction }) });
+  }
+
+  function appendBubble(role, text) {
+    const div = document.createElement('div');
+    div.className = 'bubble ' + role;
+    const roleLabel = document.createElement('span');
+    roleLabel.className = 'role';
+    roleLabel.textContent = role === 'assistant' ? 'AI提案' : '追加の指示';
+    div.appendChild(roleLabel);
+    const body = document.createElement('div');
+    body.textContent = text;
+    div.appendChild(body);
+    document.getElementById('messages').appendChild(div);
   }
 
   function renderResult(result) {
     currentResult = result;
     document.getElementById('generateButton').disabled = false;
-    document.getElementById('resultSection').style.display = 'block';
-    document.getElementById('resultText').textContent = result.result;
+    document.getElementById('refineButton').disabled = false;
+    document.getElementById('refineInput').value = '';
+    document.getElementById('chat').style.display = 'block';
+
+    if (pendingUserMessage) {
+      chatHistory.push({ role: 'user', content: pendingUserMessage });
+      appendBubble('user', pendingUserMessage);
+      pendingUserMessage = null;
+    }
+    chatHistory.push({ role: 'assistant', content: result.result });
+    appendBubble('assistant', result.result);
 
     const sourcesArea = document.getElementById('sourcesArea');
     if (result.sources && result.sources.length > 0) {
@@ -216,17 +283,28 @@ export class SectionGenPanel {
   }
 
   document.getElementById('generateButton').addEventListener('click', generate);
+  document.getElementById('refineButton').addEventListener('click', refine);
   document.getElementById('insertButton').addEventListener('click', insertText);
 
   window.addEventListener('message', (event) => {
     const { command, payload } = event.data;
     switch (command) {
-      case 'init':
+      case 'init': {
         document.getElementById('articleTitle').value = payload.articleTitle || '';
-        if (payload.selectedText) {
+        const ctx = payload.sectionContext || {};
+        document.getElementById('mode').value = ctx.mode || 'body';
+        if (ctx.heading) {
+          document.getElementById('heading').value = ctx.heading;
+        }
+        subsectionHeadings = ctx.subsectionHeadings || [];
+        if (ctx.mode === 'body' && ctx.precedingContext) {
+          document.getElementById('precedingContext').value = ctx.precedingContext;
+        } else if (payload.selectedText) {
           document.getElementById('precedingContext').value = payload.selectedText;
         }
+        applyModeVisibility();
         break;
+      }
       case 'generated':
         renderResult(payload);
         break;
@@ -235,6 +313,7 @@ export class SectionGenPanel {
         break;
       case 'error':
         document.getElementById('generateButton').disabled = false;
+        document.getElementById('refineButton').disabled = false;
         showMessage(payload.error, 'error');
         break;
     }

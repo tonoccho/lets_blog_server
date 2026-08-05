@@ -3,6 +3,7 @@ package com.letsblog.api.cms.agent;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.letsblog.api.cms.AuthorProvisioningRequest;
 import com.letsblog.api.cms.CmsCredentials.WordPressCredentials;
+import com.letsblog.api.cms.CmsPostSummary;
 import com.letsblog.api.cms.ConnectionCheckResult;
 import com.letsblog.api.cms.MediaUploadResult;
 import com.letsblog.api.cms.PostContent;
@@ -184,6 +185,31 @@ public class WordPressAgentOperations {
             post("/wp-cli/post-delete", Map.of("slug", creds.wpSlug(), "postId", postId));
         } catch (RestClientResponseException e) {
             throw new AgentOperationException("WordPress投稿の削除に失敗しました: " + agentErrorDetail(e), e);
+        } catch (ResourceAccessException e) {
+            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    public List<CmsPostSummary> listPosts(WordPressCredentials creds, String postType) {
+        try {
+            JsonNode body = post("/wp-cli/post-list", Map.of("slug", creds.wpSlug(), "postType", postType));
+            List<CmsPostSummary> results = new ArrayList<>();
+            body.path("posts").forEach(item -> results.add(new CmsPostSummary(
+                    item.path("id").asText(), item.path("title").asText(),
+                    item.path("slug").asText(), item.path("status").asText(), postType)));
+            return results;
+        } catch (RestClientResponseException e) {
+            throw new AgentOperationException("投稿/ページ一覧の取得に失敗しました: " + agentErrorDetail(e), e);
+        } catch (ResourceAccessException e) {
+            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    public void updatePostStatus(WordPressCredentials creds, String postId, String status) {
+        try {
+            post("/wp-cli/post-status-update", Map.of("slug", creds.wpSlug(), "postId", postId, "status", status));
+        } catch (RestClientResponseException e) {
+            throw new AgentOperationException("投稿/ページのステータス変更に失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
             throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
         }

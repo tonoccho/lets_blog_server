@@ -58,6 +58,10 @@ public class BulkOperationLog {
     @Column(name = "file_sha256", length = 64)
     private String fileSha256;
 
+    // POST_STATUS_UPDATEのみ使用。変更後のステータス(publish/draft等)を記録する。
+    @Column(name = "post_status", length = 20)
+    private String postStatus;
+
     @Column(name = "environment", nullable = false, length = 20)
     private String environment;
 

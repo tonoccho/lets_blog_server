@@ -62,10 +62,43 @@ class ComfyUiClientTest {
         expectPromptAndHistory("\"text\":\"a cat\"");
 
         ComfyUiGenerationParams params = ComfyUiGenerationParams.withDefaults("a cat");
-        ComfyUiImage image = client.generateImage(params);
+        List<ComfyUiImage> images = client.generateImage(params);
 
-        assertEquals("letsblog_00001_.png", image.fileName());
-        assertEquals("image/png", image.mimeType());
+        assertEquals(1, images.size());
+        assertEquals("letsblog_00001_.png", images.get(0).fileName());
+        assertEquals("image/png", images.get(0).mimeType());
+        server.verify();
+    }
+
+    @Test
+    void generateImage_batch_sizeが複数の場合はimages配列全件をviewで取得する() {
+        server.expect(requestTo(BASE_URL + "/prompt"))
+                .andExpect(method(POST))
+                .andExpect(content().string(containsString("\"batch_size\":4")))
+                .andRespond(withSuccess("{\"prompt_id\":\"job-batch\"}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE_URL + "/history/job-batch"))
+                .andExpect(method(GET))
+                .andRespond(withSuccess(
+                        "{\"job-batch\":{\"outputs\":{\"9\":{\"images\":["
+                                + "{\"filename\":\"letsblog_00001_.png\",\"subfolder\":\"\",\"type\":\"output\"},"
+                                + "{\"filename\":\"letsblog_00002_.png\",\"subfolder\":\"\",\"type\":\"output\"},"
+                                + "{\"filename\":\"letsblog_00003_.png\",\"subfolder\":\"\",\"type\":\"output\"},"
+                                + "{\"filename\":\"letsblog_00004_.png\",\"subfolder\":\"\",\"type\":\"output\"}]}}}}",
+                        MediaType.APPLICATION_JSON));
+        for (int i = 1; i <= 4; i++) {
+            server.expect(requestToUriTemplate(BASE_URL + "/view?filename={filename}&subfolder={subfolder}&type={type}",
+                            "letsblog_0000" + i + "_.png", "", "output"))
+                    .andExpect(method(GET))
+                    .andRespond(withSuccess(new byte[] {(byte) i}, MediaType.IMAGE_PNG));
+        }
+
+        ComfyUiGenerationParams params = new ComfyUiGenerationParams(
+                "a cat", "bad", 20, 7.0, "euler", "normal", null, 512, 512, 4, null, null, null);
+        List<ComfyUiImage> images = client.generateImage(params);
+
+        assertEquals(4, images.size());
+        assertEquals("letsblog_00001_.png", images.get(0).fileName());
+        assertEquals("letsblog_00004_.png", images.get(3).fileName());
         server.verify();
     }
 

@@ -1,5 +1,9 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.cms.CmsAdapter;
+import com.letsblog.api.cms.CmsAdapterFactory;
+import com.letsblog.api.cms.CmsCredentials;
+import com.letsblog.api.cms.MediaUploadResult;
 import com.letsblog.api.cms.rest.WordPressRestBulkManagementOperations;
 import com.letsblog.api.cms.ssh.WordPressSshOperations;
 import com.letsblog.api.domain.BulkOperationLog;
@@ -52,6 +56,7 @@ public class BulkManagementService {
     private final SiteService siteService;
     private final WordPressSshOperations sshOperations;
     private final WordPressRestBulkManagementOperations restOperations;
+    private final CmsAdapterFactory cmsAdapterFactory;
 
     public BulkManagementService(
             ProjectRepository projectRepository,
@@ -61,7 +66,8 @@ public class BulkManagementService {
             BulkUploadStorageService bulkUploadStorageService,
             SiteService siteService,
             WordPressSshOperations sshOperations,
-            WordPressRestBulkManagementOperations restOperations) {
+            WordPressRestBulkManagementOperations restOperations,
+            CmsAdapterFactory cmsAdapterFactory) {
         this.projectRepository = projectRepository;
         this.siteRepository = siteRepository;
         this.bulkOperationLogRepository = bulkOperationLogRepository;
@@ -70,6 +76,7 @@ public class BulkManagementService {
         this.siteService = siteService;
         this.sshOperations = sshOperations;
         this.restOperations = restOperations;
+        this.cmsAdapterFactory = cmsAdapterFactory;
     }
 
     /**
@@ -151,6 +158,100 @@ public class BulkManagementService {
     private record ZipApplyResult(String status, String errorMessage, String stackTrace) {
     }
 
+    /**
+     * 生成画像をプロジェクトのlocal/test/production環境(サイトが紐付けられているもののみ)へ
+     * アセットとしてアップロードする。CmsAdapter.uploadMediaは認証情報(managed/SSH/REST)に応じた
+     * トランスポート選択を内部で行うため、applyToSite()のような分岐は不要でサイトごとに委譲するだけでよい。
+     * 環境単位で成否をBulkOperationLogへ記録する(1環境の失敗が他環境の実行を止めない)。
+     */
+    @Transactional
+    public List<BulkOperationLog> uploadImageToAllEnvironments(
+            Long projectId, byte[] data, String filename, String contentType, Long actorId) {
+        Project project = getProject(projectId);
+        List<BulkOperationLog> results = new ArrayList<>();
+        for (String environment : ENVIRONMENT_ORDER) {
+            Long siteId = siteIdOf(project, environment);
+            if (siteId == null) {
+                continue;
+            }
+            Site site = siteRepository.findById(siteId).orElse(null);
+            if (site == null) {
+                continue;
+            }
+
+            String status;
+            String errorMessage = null;
+            String value;
+            try {
+                CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
+                CmsAdapter adapter = cmsAdapterFactory.resolve(credentials.cmsType());
+                MediaUploadResult result = adapter.uploadMedia(credentials, filename, contentType, data);
+                status = BulkOperationStatus.SUCCESS.name();
+                value = result.url();
+            } catch (RuntimeException e) {
+                status = BulkOperationStatus.FAILED.name();
+                errorMessage = e.getMessage();
+                value = filename;
+                log.warn("アセット画像のアップロードに失敗しました(project={}, environment={}, site={}): {}",
+                        projectId, environment, site.getSiteKey(), errorMessage);
+            }
+            results.add(saveLog(projectId, BulkOperationType.MEDIA_UPLOAD, BulkOperationSourceType.SLUG, value,
+                    null, null, null, null, filename, null, null,
+                    environment, status, errorMessage, null, actorId, false));
+        }
+        return results;
+    }
+
+    /**
+     * 指定環境の1投稿/ページを削除する(PostComparisonService#deleteEverywhereが環境ごとに呼ぶ)。
+     * カテゴリ/タグ/プラグイン/テーマのようなwp-cliアクション文字列を経由せず、CmsAdapterへ直接委譲する
+     * (投稿一覧取得(listPosts)と同じCmsAdapter経由でmanaged/SSH/RESTが解決される)。
+     */
+    @Transactional
+    public BulkOperationLog deletePostAtEnvironment(
+            Long projectId, String environment, Site site, String postId, String postType, String slug, Long actorId) {
+        String status;
+        String errorMessage = null;
+        try {
+            CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
+            CmsAdapter adapter = cmsAdapterFactory.resolve(credentials.cmsType());
+            adapter.deletePost(credentials, postId, postType);
+            status = BulkOperationStatus.SUCCESS.name();
+        } catch (RuntimeException e) {
+            status = BulkOperationStatus.FAILED.name();
+            errorMessage = e.getMessage();
+            log.warn("投稿/ページの削除に失敗しました(project={}, environment={}, site={}, postId={}): {}",
+                    projectId, environment, site.getSiteKey(), postId, errorMessage);
+        }
+        return saveLog(projectId, BulkOperationType.POST_DELETE, BulkOperationSourceType.SLUG, slug,
+                null, null, null, null, null, null, null, environment, status, errorMessage, null, actorId, false);
+    }
+
+    /**
+     * 指定環境の1投稿/ページのステータスを変更する(PostComparisonService#updateStatusEverywhereが環境ごとに呼ぶ)。
+     */
+    @Transactional
+    public BulkOperationLog updatePostStatusAtEnvironment(
+            Long projectId, String environment, Site site, String postId, String postType, String slug,
+            String newStatus, Long actorId) {
+        String status;
+        String errorMessage = null;
+        try {
+            CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
+            CmsAdapter adapter = cmsAdapterFactory.resolve(credentials.cmsType());
+            adapter.updatePostStatus(credentials, postId, postType, newStatus);
+            status = BulkOperationStatus.SUCCESS.name();
+        } catch (RuntimeException e) {
+            status = BulkOperationStatus.FAILED.name();
+            errorMessage = e.getMessage();
+            log.warn("投稿/ページのステータス変更に失敗しました(project={}, environment={}, site={}, postId={}): {}",
+                    projectId, environment, site.getSiteKey(), postId, errorMessage);
+        }
+        return saveLog(projectId, BulkOperationType.POST_STATUS_UPDATE, BulkOperationSourceType.SLUG, slug,
+                null, null, null, null, null, null, null, newStatus, environment, status, errorMessage, null,
+                actorId, false);
+    }
+
     @Transactional
     public List<BulkOperationLog> replay(Long projectId, String environment, Long actorId) {
         Project project = getProject(projectId);
@@ -162,6 +263,9 @@ public class BulkManagementService {
 
         List<BulkOperationLog> results = new ArrayList<>();
         for (BulkOperationLog log : history) {
+            if (!log.getOperationType().isReplayable()) {
+                continue;
+            }
             if (log.getSourceType() == BulkOperationSourceType.ZIP) {
                 // zipアップロードの再現は、実行時(executeFromUpload)と同じくmanaged環境に加え
                 // SSH接続情報が設定された非managed環境も対象にする
@@ -334,6 +438,16 @@ public class BulkManagementService {
             String categorySlug, String categoryParentSlug, String categoryTargetSlug, String categoryDescription,
             String originalFilename, String storagePath, String fileSha256, String environment,
             String status, String errorMessage, String stackTrace, Long actorId, boolean isReplay) {
+        return saveLog(projectId, type, sourceType, value, categorySlug, categoryParentSlug, categoryTargetSlug,
+                categoryDescription, originalFilename, storagePath, fileSha256, null, environment, status,
+                errorMessage, stackTrace, actorId, isReplay);
+    }
+
+    private BulkOperationLog saveLog(
+            Long projectId, BulkOperationType type, BulkOperationSourceType sourceType, String value,
+            String categorySlug, String categoryParentSlug, String categoryTargetSlug, String categoryDescription,
+            String originalFilename, String storagePath, String fileSha256, String postStatus, String environment,
+            String status, String errorMessage, String stackTrace, Long actorId, boolean isReplay) {
         BulkOperationLog log = new BulkOperationLog();
         log.setProjectId(projectId);
         log.setOperationType(type);
@@ -346,6 +460,7 @@ public class BulkManagementService {
         log.setOriginalFilename(originalFilename);
         log.setStoragePath(storagePath);
         log.setFileSha256(fileSha256);
+        log.setPostStatus(postStatus);
         log.setEnvironment(environment);
         BulkOperationStatus resolvedStatus = BulkOperationStatus.valueOf(status);
         log.setStatus(resolvedStatus);

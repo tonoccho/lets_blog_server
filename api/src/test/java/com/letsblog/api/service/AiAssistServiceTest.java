@@ -3,13 +3,18 @@ package com.letsblog.api.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.ai.BraveSearchResult;
 import com.letsblog.api.ai.ComfyUiClient;
+import com.letsblog.api.ai.ComfyUiImage;
 import com.letsblog.api.ai.GeneratedImageStorageService;
 import com.letsblog.api.ai.OllamaClient;
+import com.letsblog.api.domain.GeneratedImage;
 import com.letsblog.api.domain.GenerationJob;
 import com.letsblog.api.dto.AiDraftRequest;
 import com.letsblog.api.dto.AiDraftResponse;
+import com.letsblog.api.dto.AiImageBatchResponse;
+import com.letsblog.api.dto.AiImageRequest;
 import com.letsblog.api.dto.AiSectionRequest;
 import com.letsblog.api.dto.AiSectionResponse;
+import com.letsblog.api.dto.PlanChatMessage;
 import com.letsblog.api.repository.GeneratedImageRepository;
 import com.letsblog.api.repository.GenerationJobRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -66,6 +71,30 @@ class AiAssistServiceTest {
             }
             return job;
         });
+        lenient().when(generatedImageStorageService.store(any(), any())).thenReturn("global/0001.png");
+        lenient().when(generatedImageRepository.save(any())).thenAnswer(inv -> {
+            GeneratedImage image = inv.getArgument(0);
+            image.setId(image.getId() == null ? 1L : image.getId() + 1);
+            return image;
+        });
+    }
+
+    @Test
+    void generateImage_batch_sizeが4の場合は4枚分保存し4枚分のレスポンスを返す() {
+        List<ComfyUiImage> images = List.of(
+                new ComfyUiImage("a.png", new byte[]{1}, "image/png"),
+                new ComfyUiImage("b.png", new byte[]{2}, "image/png"),
+                new ComfyUiImage("c.png", new byte[]{3}, "image/png"),
+                new ComfyUiImage("d.png", new byte[]{4}, "image/png"));
+        when(comfyUiClient.generateImage(any())).thenReturn(images);
+        when(comfyUiModelService.getSelectedCheckpointOrGlobalDefault(any())).thenReturn("checkpoint.safetensors");
+
+        AiImageBatchResponse response = service.generateImage(AiImageRequest.withDefaults("a cat"));
+
+        assertEquals(4, response.images().size());
+        assertEquals("a.png", response.images().get(0).fileName());
+        assertEquals("d.png", response.images().get(3).fileName());
+        org.mockito.Mockito.verify(generatedImageRepository, org.mockito.Mockito.times(4)).save(any());
     }
 
     @Test
@@ -120,7 +149,7 @@ class AiAssistServiceTest {
         when(ollamaClient.generate(anyString())).thenReturn("セクション本文");
 
         AiSectionResponse response = service.generateSection(
-                new AiSectionRequest("body", "導入部", "前の段落の文脈", "記事タイトル"));
+                new AiSectionRequest("body", "導入部", "前の段落の文脈", "記事タイトル", null, null, null));
 
         assertEquals("セクション本文", response.result());
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
@@ -137,16 +166,60 @@ class AiAssistServiceTest {
         when(ollamaClient.generate(anyString())).thenReturn("リード文");
 
         AiSectionResponse response = service.generateSection(
-                new AiSectionRequest("lead", "はじめに", null, "記事タイトル"));
+                new AiSectionRequest("lead", null, null, "記事タイトル", List.of("導入", "本編", "まとめ"), null, null));
 
         assertEquals("リード文", response.result());
         assertEquals(1, response.sources().size());
         assertNull(response.searchNote());
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(ollamaClient).generate(promptCaptor.capture());
+        assertTrue(promptCaptor.getValue().contains("導入"));
+        assertTrue(promptCaptor.getValue().contains("まとめ"));
+    }
+
+    @Test
+    void generateSection_サブセクション考慮モードは見出しとサブセクション一覧を含むプロンプトを組み立てる() {
+        when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.failure("未設定"));
+        when(ollamaClient.generate(anyString())).thenReturn("セクションリード文");
+
+        AiSectionResponse response = service.generateSection(
+                new AiSectionRequest("lead-subsections", "第2章 実装編", null, "記事タイトル",
+                        List.of("設計", "実装", "テスト"), null, null));
+
+        assertEquals("セクションリード文", response.result());
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(ollamaClient).generate(promptCaptor.capture());
+        assertTrue(promptCaptor.getValue().contains("第2章 実装編"));
+        assertTrue(promptCaptor.getValue().contains("設計"));
+        assertTrue(promptCaptor.getValue().contains("テスト"));
+    }
+
+    @Test
+    void generateSection_messageが指定されると壁打ち形式のプロンプトを組み立てる() {
+        when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.failure("未設定"));
+        when(ollamaClient.generate(anyString())).thenReturn("再生成された本文");
+
+        List<PlanChatMessage> history = List.of(
+                new PlanChatMessage("assistant", "1回目の生成結果"));
+
+        AiSectionResponse response = service.generateSection(
+                new AiSectionRequest("body", "導入部", "前の段落の文脈", "記事タイトル", null,
+                        history, "もっと短くして"));
+
+        assertEquals("再生成された本文", response.result());
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(ollamaClient).generate(promptCaptor.capture());
+        String prompt = promptCaptor.getValue();
+        assertTrue(prompt.contains("System:"));
+        assertTrue(prompt.contains("1回目の生成結果"));
+        assertTrue(prompt.contains("もっと短くして"));
+        assertTrue(prompt.trim().endsWith("Assistant:"));
     }
 
     @Test
     void generateSection_不正なmodeは例外() {
         org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
-                () -> service.generateSection(new AiSectionRequest("invalid", "見出し", null, null)));
+                () -> service.generateSection(new AiSectionRequest("invalid", "見出し", null, null, null, null, null)));
     }
 }

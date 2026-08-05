@@ -9,6 +9,7 @@ import com.letsblog.api.dto.ProjectCreateRequest;
 import com.letsblog.api.dto.ProjectEnvironmentBindRequest;
 import com.letsblog.api.dto.ProjectResponse;
 import com.letsblog.api.dto.ProjectUpdateRequest;
+import com.letsblog.api.dto.PostComparisonPage;
 import com.letsblog.api.dto.ProjectUserResponse;
 import com.letsblog.api.dto.ReconcileStateRequest;
 import com.letsblog.api.dto.ReplayBulkOperationRequest;
@@ -17,15 +18,21 @@ import com.letsblog.api.dto.SyncEnvironmentRequest;
 import com.letsblog.api.dto.TermComparisonPage;
 import com.letsblog.api.dto.TermNameRequest;
 import com.letsblog.api.dto.UpdateMasterEnvironmentRequest;
+import com.letsblog.api.dto.UpdatePostStatusRequest;
 import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
 import com.letsblog.api.dto.UpdateProjectUserRequest;
+import com.letsblog.api.ai.GeneratedImageStorageService;
 import com.letsblog.api.domain.BulkOperationLog;
 import com.letsblog.api.domain.BulkOperationLogLevel;
 import com.letsblog.api.domain.BulkOperationType;
+import com.letsblog.api.domain.GeneratedImage;
+import com.letsblog.api.repository.GeneratedImageRepository;
 import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.BulkManagementService;
 import com.letsblog.api.service.CurrentActorService;
+import com.letsblog.api.service.GeneratedImageNotFoundException;
 import com.letsblog.api.service.PluginThemeComparisonService;
+import com.letsblog.api.service.PostComparisonService;
 import com.letsblog.api.service.ProjectEnvironmentSyncService;
 import com.letsblog.api.service.ProjectService;
 import com.letsblog.api.service.ProjectUserSyncService;
@@ -50,8 +57,11 @@ public class ProjectController {
     private final BulkManagementService bulkManagementService;
     private final TermComparisonService termComparisonService;
     private final PluginThemeComparisonService pluginThemeComparisonService;
+    private final PostComparisonService postComparisonService;
     private final AdminAuthorizationService adminAuthorizationService;
     private final CurrentActorService currentActorService;
+    private final GeneratedImageRepository generatedImageRepository;
+    private final GeneratedImageStorageService generatedImageStorageService;
 
     public ProjectController(
             ProjectService projectService,
@@ -60,16 +70,22 @@ public class ProjectController {
             BulkManagementService bulkManagementService,
             TermComparisonService termComparisonService,
             PluginThemeComparisonService pluginThemeComparisonService,
+            PostComparisonService postComparisonService,
             AdminAuthorizationService adminAuthorizationService,
-            CurrentActorService currentActorService) {
+            CurrentActorService currentActorService,
+            GeneratedImageRepository generatedImageRepository,
+            GeneratedImageStorageService generatedImageStorageService) {
         this.projectService = projectService;
         this.projectUserSyncService = projectUserSyncService;
         this.projectEnvironmentSyncService = projectEnvironmentSyncService;
         this.bulkManagementService = bulkManagementService;
         this.termComparisonService = termComparisonService;
         this.pluginThemeComparisonService = pluginThemeComparisonService;
+        this.postComparisonService = postComparisonService;
         this.adminAuthorizationService = adminAuthorizationService;
         this.currentActorService = currentActorService;
+        this.generatedImageRepository = generatedImageRepository;
+        this.generatedImageStorageService = generatedImageStorageService;
     }
 
     @PostMapping
@@ -195,6 +211,24 @@ public class ProjectController {
         adminAuthorizationService.requireAdmin();
         bulkManagementService.clearLogs(id);
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * ComfyUIで生成済みの画像(generated_images)を、プロジェクトのlocal/test/production
+     * 全環境へアセットとしてアップロードする(プロジェクト管理画面の画像生成パネル用)。
+     */
+    @PostMapping("/{id}/asset-images/{generatedImageId}/upload")
+    public List<BulkOperationLogResponse> uploadAssetImage(
+            @PathVariable Long id, @PathVariable Long generatedImageId) {
+        adminAuthorizationService.requireAdmin();
+        GeneratedImage image = generatedImageRepository.findById(generatedImageId)
+                .orElseThrow(() -> new GeneratedImageNotFoundException("id: " + generatedImageId));
+        byte[] data = generatedImageStorageService.load(image.getFilePath());
+        String filename = "comfyui-" + generatedImageId + ".png";
+        Long actorId = currentActorService.getCurrentActorId();
+        List<BulkOperationLog> logs = bulkManagementService.uploadImageToAllEnvironments(
+                id, data, filename, image.getMimeType(), actorId);
+        return logs.stream().map(BulkOperationLogResponse::from).toList();
     }
 
     @GetMapping("/{id}/bulk-management/categories/comparison")
@@ -331,6 +365,37 @@ public class ProjectController {
         Long actorId = currentActorService.getCurrentActorId();
         return pluginThemeComparisonService.deleteThemeEverywhere(id, request.slug(), actorId).stream()
                 .map(BulkOperationLogResponse::from).toList();
+    }
+
+    @GetMapping("/{id}/bulk-management/posts/comparison")
+    public PostComparisonPage postComparison(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "post") String postType,
+            @RequestParam(defaultValue = "0") int page) {
+        adminAuthorizationService.requireAdmin();
+        return postComparisonService.listComparison(id, postType, page, 20);
+    }
+
+    @PostMapping("/{id}/bulk-management/posts/delete-all")
+    public List<BulkOperationLogResponse> deletePostEverywhere(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "post") String postType,
+            @Valid @RequestBody DeleteSlugRequest request) {
+        adminAuthorizationService.requireAdmin();
+        Long actorId = currentActorService.getCurrentActorId();
+        return postComparisonService.deleteEverywhere(id, postType, request.slug(), actorId).stream()
+                .map(BulkOperationLogResponse::from).toList();
+    }
+
+    @PostMapping("/{id}/bulk-management/posts/status-update")
+    public List<BulkOperationLogResponse> updatePostStatusEverywhere(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "post") String postType,
+            @Valid @RequestBody UpdatePostStatusRequest request) {
+        adminAuthorizationService.requireAdmin();
+        Long actorId = currentActorService.getCurrentActorId();
+        return postComparisonService.updateStatusEverywhere(id, postType, request.slug(), request.status(), actorId)
+                .stream().map(BulkOperationLogResponse::from).toList();
     }
 
     @GetMapping("/{id}/users")
