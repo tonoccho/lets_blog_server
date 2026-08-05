@@ -97,7 +97,7 @@ public class BulkManagementService {
         }
         validateZip(file);
         Project project = getProject(projectId);
-        List<Map.Entry<String, Site>> environments = resolveManagedEnvironments(project);
+        List<Map.Entry<String, Site>> environments = resolveZipUploadEnvironments(project);
 
         byte[] bytes = file.getBytes();
         BulkUploadStorageService.StoredZip stored =
@@ -105,14 +105,50 @@ public class BulkManagementService {
 
         List<BulkOperationLog> results = new ArrayList<>();
         for (Map.Entry<String, Site> entry : environments) {
-            WordPressBulkManagementClient.BulkApplyResult result = bulkManagementClient.applyZip(
-                    entry.getValue().getWpSlug(), type.wpCliAction(), bytes, stored.originalFilename());
+            ZipApplyResult result = applyZipToSite(entry.getValue(), type, bytes, stored.originalFilename());
             results.add(saveLog(projectId, type, BulkOperationSourceType.ZIP, stored.originalFilename(),
                     null, null, null, null,
                     stored.originalFilename(), stored.storagePath(), stored.sha256(),
                     entry.getKey(), result.status(), result.errorMessage(), result.stackTrace(), actorId, false));
         }
         return results;
+    }
+
+    /**
+     * zipアップロードは、managed環境(内部プロビジョニングエージェント経由)に加え、
+     * SSH接続情報が設定された非managed環境も対象にする(REST APIにはzipインストールに
+     * 相当するエンドポイントが無いため、非managedはSSHが設定されている場合のみ対応)。
+     */
+    private List<Map.Entry<String, Site>> resolveZipUploadEnvironments(Project project) {
+        List<Map.Entry<String, Site>> result = new ArrayList<>();
+        for (String environment : ENVIRONMENT_ORDER) {
+            Long siteId = siteIdOf(project, environment);
+            if (siteId == null) {
+                continue;
+            }
+            Site site = siteRepository.findById(siteId).orElse(null);
+            if (site == null) {
+                continue;
+            }
+            if (site.isManagedWordpress() || siteService.resolveDataSource(site).hasSsh()) {
+                result.add(new AbstractMap.SimpleEntry<>(environment, site));
+            }
+        }
+        return result;
+    }
+
+    private ZipApplyResult applyZipToSite(Site site, BulkOperationType type, byte[] bytes, String filename) {
+        if (site.isManagedWordpress()) {
+            WordPressBulkManagementClient.BulkApplyResult result =
+                    bulkManagementClient.applyZip(site.getWpSlug(), type.wpCliAction(), bytes, filename);
+            return new ZipApplyResult(result.status(), result.errorMessage(), result.stackTrace());
+        }
+        SiteService.SiteDataSource dataSource = siteService.resolveDataSource(site);
+        WordPressSshOperations.SshApplyResult result = sshOperations.applyZip(dataSource.sshCredentials(), type, bytes, filename);
+        return new ZipApplyResult(result.status(), result.errorMessage(), result.stackTrace());
+    }
+
+    private record ZipApplyResult(String status, String errorMessage, String stackTrace) {
     }
 
     @Transactional
@@ -127,8 +163,9 @@ public class BulkManagementService {
         List<BulkOperationLog> results = new ArrayList<>();
         for (BulkOperationLog log : history) {
             if (log.getSourceType() == BulkOperationSourceType.ZIP) {
-                // zipアップロードの再現(SFTP転送は未対応)はmanaged環境のみ許可する
-                Site targetSite = resolveManagedSite(project, environment);
+                // zipアップロードの再現は、実行時(executeFromUpload)と同じくmanaged環境に加え
+                // SSH接続情報が設定された非managed環境も対象にする
+                Site targetSite = resolveZipCapableSite(project, environment);
                 results.add(replayZip(projectId, environment, targetSite, log, actorId));
             } else {
                 Site targetSite = resolveSite(project, environment, log.getOperationType());
@@ -242,8 +279,7 @@ public class BulkManagementService {
         String stackTrace;
         try {
             byte[] bytes = bulkUploadStorageService.load(log.getStoragePath());
-            WordPressBulkManagementClient.BulkApplyResult result = bulkManagementClient.applyZip(
-                    targetSite.getWpSlug(), log.getOperationType().wpCliAction(), bytes, log.getOriginalFilename());
+            ZipApplyResult result = applyZipToSite(targetSite, log.getOperationType(), bytes, log.getOriginalFilename());
             status = result.status();
             errorMessage = result.errorMessage();
             stackTrace = result.stackTrace();
@@ -321,21 +357,6 @@ public class BulkManagementService {
         return bulkOperationLogRepository.save(log);
     }
 
-    private List<Map.Entry<String, Site>> resolveManagedEnvironments(Project project) {
-        List<Map.Entry<String, Site>> result = new ArrayList<>();
-        for (String environment : ENVIRONMENT_ORDER) {
-            Long siteId = siteIdOf(project, environment);
-            if (siteId == null) {
-                continue;
-            }
-            Site site = siteRepository.findById(siteId).orElse(null);
-            if (site != null && site.isManagedWordpress()) {
-                result.add(new AbstractMap.SimpleEntry<>(environment, site));
-            }
-        }
-        return result;
-    }
-
     /**
      * environmentの形式検証とサイト紐付けの存在確認のみを行う(managed/SSH等のポリシー判定は行わない)。
      */
@@ -351,13 +372,18 @@ public class BulkManagementService {
                 .orElseThrow(() -> new SiteNotFoundException("id " + siteId + " のサイトは登録されていません"));
     }
 
-    private Site resolveManagedSite(Project project, String environment) {
+    /**
+     * zipアップロード(実行/再現)が対象にできるサイトかを検証する。managed環境に加え、
+     * SSH接続情報が設定された非managed環境も許可する(REST APIにはzipインストールに
+     * 相当するエンドポイントが無いため対象外)。
+     */
+    private Site resolveZipCapableSite(Project project, String environment) {
         Site site = requireSiteBound(project, environment);
-        if (!site.isManagedWordpress()) {
-            throw new IllegalArgumentException(
-                    environment + "環境(" + site.getSiteKey() + ")は自動構築サイトではないため対象外です");
+        if (site.isManagedWordpress() || siteService.resolveDataSource(site).hasSsh()) {
+            return site;
         }
-        return site;
+        throw new IllegalArgumentException(
+                environment + "環境(" + site.getSiteKey() + ")はzipアップロードに対応するSSH接続設定がないため対象外です");
     }
 
     /**

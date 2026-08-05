@@ -263,6 +263,32 @@ public class WordPressSshOperations {
         }
     }
 
+    /**
+     * zipアップロードによるプラグイン/テーマインストール(managed環境向けの
+     * WordPressBulkManagementClient#applyZipのSSH版)。SFTPでリモートの一時パスへ転送してから
+     * `wp plugin/theme install <path> --force`を実行する(uploadMediaと同じ転送パターン)。
+     * provision-agentと同じく、zipの中身(実際のslug)は展開するまで確定しないため事前の
+     * 存在チェックは行わず、常に--forceで上書きインストールする。
+     */
+    public SshApplyResult applyZip(WordPressCredentials creds, BulkOperationType type, byte[] zipBytes, String filename) {
+        SshConnectionParams params = connectionParams(creds);
+        String remotePath = "/tmp/letsblog-bulk-" + UUID.randomUUID() + "-" + sanitizeFilename(filename);
+        String wpType = type == BulkOperationType.PLUGIN_INSTALL ? "plugin" : "theme";
+        try {
+            executor.putFile(params, zipBytes, remotePath);
+        } catch (SshOperationException e) {
+            return SshApplyResult.failed(e);
+        }
+        try {
+            return runWpCli(creds, wpType + " install " + ShellQuote.single(remotePath) + " --force",
+                    (wpType.equals("plugin") ? "プラグイン" : "テーマ") + "のインストール");
+        } catch (SshOperationException e) {
+            return SshApplyResult.failed(e);
+        } finally {
+            executor.removeFile(params, remotePath);
+        }
+    }
+
     private SshApplyResult installIfMissing(WordPressCredentials creds, String type, String slug) {
         List<PluginThemeInfo> installed = listPluginsOrThemes(creds, type);
         if (installed.stream().anyMatch(info -> info.name().equals(slug))) {

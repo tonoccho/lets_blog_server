@@ -28,6 +28,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.notNull;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -446,6 +447,64 @@ class WordPressSshOperationsTest {
                 () -> operations.uploadMedia(creds(), "photo.png", "image/png", new byte[]{1}));
 
         verify(executor).removeFile(any(SshConnectionParams.class), any());
+    }
+
+    @Test
+    void applyZip_成功時はSFTP転送してinstall_forceを実行し一時ファイルを削除する() {
+        byte[] zip = "zip-bytes".getBytes(StandardCharsets.UTF_8);
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok(""));
+
+        WordPressSshOperations.SshApplyResult result =
+                operations.applyZip(creds(), BulkOperationType.THEME_INSTALL, zip, "custom-theme.zip");
+
+        assertEquals("SUCCESS", result.status());
+
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).putFile(any(SshConnectionParams.class), eq(zip), pathCaptor.capture());
+        String remotePath = pathCaptor.getValue();
+        assertEquals(true, remotePath.contains("custom-theme.zip"));
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getValue().contains("theme install"));
+        assertEquals(true, commandCaptor.getValue().contains("--force"));
+        assertEquals(true, commandCaptor.getValue().contains(remotePath));
+
+        verify(executor).removeFile(any(SshConnectionParams.class), eq(remotePath));
+    }
+
+    @Test
+    void applyZip_plugin_installはplugin_installコマンドを実行する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok(""));
+
+        operations.applyZip(creds(), BulkOperationType.PLUGIN_INSTALL, new byte[]{1}, "custom-plugin.zip");
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getValue().contains("plugin install"));
+    }
+
+    @Test
+    void applyZip_インストール失敗時も一時ファイルを削除してFAILEDを返す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("install failed"));
+
+        WordPressSshOperations.SshApplyResult result =
+                operations.applyZip(creds(), BulkOperationType.THEME_INSTALL, new byte[]{1}, "custom-theme.zip");
+
+        assertEquals("FAILED", result.status());
+        verify(executor).removeFile(any(SshConnectionParams.class), any());
+    }
+
+    @Test
+    void applyZip_転送失敗時は一時ファイル削除を試みずFAILEDを返す() {
+        doThrow(new SshOperationException("put failed"))
+                .when(executor).putFile(any(SshConnectionParams.class), any(byte[].class), any());
+
+        WordPressSshOperations.SshApplyResult result =
+                operations.applyZip(creds(), BulkOperationType.THEME_INSTALL, new byte[]{1}, "custom-theme.zip");
+
+        assertEquals("FAILED", result.status());
+        verify(executor, never()).removeFile(any(), any());
     }
 
     @Test

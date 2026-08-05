@@ -392,6 +392,62 @@ class BulkManagementServiceTest {
         verify(bulkManagementClient).applyZip(eq("test-site"), eq("theme_install"), any(byte[].class), eq("custom-theme.zip"));
     }
 
+    @Test
+    void executeFromUpload_SSH接続情報のある非managed環境にもSFTP転送で適用する() throws IOException {
+        BulkManagementService service = service();
+        Project project = buildProject(10L, 20L, null);
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site externalSite = buildExternalSite(20L, "external-site");
+        byte[] content = new byte[]{1, 2, 3};
+        MockMultipartFile file = new MockMultipartFile("file", "custom-theme.zip", "application/zip", content);
+
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(siteRepository.findById(20L)).thenReturn(Optional.of(externalSite));
+        when(siteService.resolveDataSource(externalSite))
+                .thenReturn(new SiteService.SiteDataSource(false, null, sshCreds()));
+        when(bulkUploadStorageService.store(eq(1L), any(byte[].class), eq("custom-theme.zip")))
+                .thenReturn(new BulkUploadStorageService.StoredZip("1/abc.zip", "abc", "custom-theme.zip"));
+        when(bulkManagementClient.applyZip(any(), eq("theme_install"), any(byte[].class), eq("custom-theme.zip")))
+                .thenReturn(BulkApplyResult.success());
+        when(sshOperations.applyZip(eq(sshCreds()), eq(BulkOperationType.THEME_INSTALL), any(byte[].class), eq("custom-theme.zip")))
+                .thenReturn(new com.letsblog.api.cms.ssh.WordPressSshOperations.SshApplyResult("SUCCESS", null, null));
+        stubSave();
+
+        List<BulkOperationLog> results = service.executeFromUpload(1L, BulkOperationType.THEME_INSTALL, file, 9L);
+
+        assertEquals(2, results.size());
+        verify(bulkManagementClient).applyZip(eq("local-site"), eq("theme_install"), any(byte[].class), eq("custom-theme.zip"));
+        verify(sshOperations).applyZip(eq(sshCreds()), eq(BulkOperationType.THEME_INSTALL), any(byte[].class), eq("custom-theme.zip"));
+    }
+
+    @Test
+    void executeFromUpload_REST接続のみでSSHが無い非managed環境は対象外() throws IOException {
+        BulkManagementService service = service();
+        Project project = buildProject(10L, 20L, null);
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site externalSite = buildExternalSite(20L, "external-site");
+        byte[] content = new byte[]{1, 2, 3};
+        MockMultipartFile file = new MockMultipartFile("file", "custom-theme.zip", "application/zip", content);
+
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(siteRepository.findById(20L)).thenReturn(Optional.of(externalSite));
+        when(siteService.resolveDataSource(externalSite))
+                .thenReturn(new SiteService.SiteDataSource(false, restCreds(), null));
+        when(bulkUploadStorageService.store(eq(1L), any(byte[].class), eq("custom-theme.zip")))
+                .thenReturn(new BulkUploadStorageService.StoredZip("1/abc.zip", "abc", "custom-theme.zip"));
+        when(bulkManagementClient.applyZip(any(), eq("theme_install"), any(byte[].class), eq("custom-theme.zip")))
+                .thenReturn(BulkApplyResult.success());
+        stubSave();
+
+        List<BulkOperationLog> results = service.executeFromUpload(1L, BulkOperationType.THEME_INSTALL, file, 9L);
+
+        assertEquals(1, results.size());
+        assertEquals("local", results.get(0).getEnvironment());
+        verify(sshOperations, never()).applyZip(any(), any(), any(), any());
+    }
+
     // ---- replay ----
 
     @Test
