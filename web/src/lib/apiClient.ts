@@ -739,6 +739,102 @@ export async function downloadCustomTagCssBundle(projectId?: number | null): Pro
   return res.arrayBuffer();
 }
 
+export interface CustomTagTemplate {
+  id: number;
+  templateName: string;
+  description: string | null;
+  category: string | null;
+  htmlTemplate: string;
+  cssContent: string | null;
+  version: number;
+  isPublished: boolean;
+  originalTagId: number | null;
+  projectId: number | null;
+  createdBy: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomTagTemplateInput {
+  templateName: string;
+  description?: string;
+  category?: string;
+  htmlTemplate: string;
+  cssContent?: string;
+  projectId?: number | null;
+  originalTagId?: number | null;
+}
+
+export interface CloneCustomTagTemplateInput {
+  newTemplateName: string;
+  description?: string;
+  category?: string;
+  projectId?: number | null;
+}
+
+export function listCustomTagTemplates(actor?: ActorInfo, projectId?: number, options?: { category?: string; search?: string; showAll?: boolean }): Promise<CustomTagTemplate[]> {
+  const params = new URLSearchParams();
+  if (projectId != null) params.set('projectId', String(projectId));
+  if (options?.category) params.set('category', options.category);
+  if (options?.search) params.set('search', options.search);
+  if (options?.showAll) params.set('showAll', 'true');
+  const query = params.toString() ? `?${params.toString()}` : '';
+  return apiFetch<CustomTagTemplate[]>(`/api/custom-tag-templates${query}`, { actor });
+}
+
+export function getCustomTagTemplate(id: number, actor?: ActorInfo): Promise<CustomTagTemplate> {
+  return apiFetch<CustomTagTemplate>(`/api/custom-tag-templates/${id}`, { actor });
+}
+
+export function createCustomTagTemplate(input: CustomTagTemplateInput, actor: ActorInfo): Promise<CustomTagTemplate> {
+  return apiFetch<CustomTagTemplate>('/api/custom-tag-templates', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function updateCustomTagTemplate(id: number, input: CustomTagTemplateInput, actor: ActorInfo): Promise<CustomTagTemplate> {
+  return apiFetch<CustomTagTemplate>(`/api/custom-tag-templates/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function publishCustomTagTemplate(id: number, actor: ActorInfo): Promise<CustomTagTemplate> {
+  return apiFetch<CustomTagTemplate>(`/api/custom-tag-templates/${id}/publish`, {
+    method: 'POST',
+    actor,
+  });
+}
+
+export function unpublishCustomTagTemplate(id: number, actor: ActorInfo): Promise<CustomTagTemplate> {
+  return apiFetch<CustomTagTemplate>(`/api/custom-tag-templates/${id}/unpublish`, {
+    method: 'POST',
+    actor,
+  });
+}
+
+export function cloneCustomTagTemplate(id: number, input: CloneCustomTagTemplateInput, actor: ActorInfo): Promise<CustomTagTemplate> {
+  return apiFetch<CustomTagTemplate>(`/api/custom-tag-templates/${id}/clone`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function deleteCustomTagTemplate(id: number, actor: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/custom-tag-templates/${id}`, { method: 'DELETE', actor });
+}
+
+export function getMyCustomTagTemplates(actor: ActorInfo): Promise<CustomTagTemplate[]> {
+  return apiFetch<CustomTagTemplate[]>('/api/custom-tag-templates/my-templates', { actor });
+}
+
 /**
  * Let's Blogアプリ自身のバックアップアーカイブ(DB + 生成画像ファイル + メタデータをまとめたZIP)を
  * ダウンロードする(admin限定)。
