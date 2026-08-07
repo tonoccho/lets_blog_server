@@ -124,6 +124,37 @@ services:
     networks:
       - lbs-net
 
+  penpot_postgres:
+    image: postgres:15-alpine
+    container_name: lbs-penpot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: penpot
+      POSTGRES_USER: penpot_user
+      POSTGRES_PASSWORD: ${PENPOT_DB_PASSWORD}
+    volumes:
+      - penpot_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U penpot_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - lbs-net
+
+  penpot:
+    image: penpot/penpot:latest
+    container_name: lbs-penpot
+    restart: unless-stopped
+    environment:
+      PENPOT_POSTGRES_URI: "postgresql://penpot_user:${PENPOT_DB_PASSWORD}@penpot_postgres:5432/penpot"
+      PENPOT_PUBLIC_URI: "https://localhost/penpot"
+    depends_on:
+      penpot_postgres:
+        condition: service_healthy
+    networks:
+      - lbs-net
+
   ollama:
     image: ollama/ollama:latest
     container_name: lbs-ollama
@@ -190,6 +221,7 @@ networks:
 
 volumes:
   mysql_data:
+  penpot_postgres:
   ollama_models:
   comfyui_models:
   comfyui_output:
