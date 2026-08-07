@@ -4,8 +4,11 @@ import com.letsblog.api.dto.CustomTagRequest;
 import com.letsblog.api.dto.CustomTagResponse;
 import com.letsblog.api.dto.GenerateCustomTagRequest;
 import com.letsblog.api.dto.GenerateCustomTagResponse;
+import com.letsblog.api.dto.ValidateCustomTagRequest;
+import com.letsblog.api.dto.ValidationResult;
 import com.letsblog.api.service.CustomTagService;
 import com.letsblog.api.service.CustomTagGenerationService;
+import com.letsblog.api.service.CustomTagValidationService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -23,18 +26,27 @@ public class CustomTagController {
 
     private final CustomTagService customTagService;
     private final CustomTagGenerationService customTagGenerationService;
+    private final CustomTagValidationService customTagValidationService;
 
     public CustomTagController(
             CustomTagService customTagService,
-            CustomTagGenerationService customTagGenerationService) {
+            CustomTagGenerationService customTagGenerationService,
+            CustomTagValidationService customTagValidationService) {
         this.customTagService = customTagService;
         this.customTagGenerationService = customTagGenerationService;
+        this.customTagValidationService = customTagValidationService;
     }
 
     @PostMapping("/generate")
     public ResponseEntity<GenerateCustomTagResponse> generate(@Valid @RequestBody GenerateCustomTagRequest request) {
         GenerateCustomTagResponse response = customTagGenerationService.generate(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    @PostMapping("/validate")
+    public ResponseEntity<ValidationResult> validate(@Valid @RequestBody ValidateCustomTagRequest request) {
+        ValidationResult result = customTagValidationService.validate(request.htmlTemplate(), request.cssContent());
+        return ResponseEntity.ok(result);
     }
 
     @PostMapping

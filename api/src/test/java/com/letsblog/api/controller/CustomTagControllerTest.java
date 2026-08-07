@@ -3,6 +3,7 @@ package com.letsblog.api.controller;
 import com.letsblog.api.dto.CustomTagResponse;
 import com.letsblog.api.service.CustomTagService;
 import com.letsblog.api.service.CustomTagGenerationService;
+import com.letsblog.api.service.CustomTagValidationService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -23,8 +24,11 @@ class CustomTagControllerTest {
     @Mock
     private CustomTagGenerationService customTagGenerationService;
 
+    @Mock
+    private CustomTagValidationService customTagValidationService;
+
     private CustomTagController controller() {
-        return new CustomTagController(customTagService, customTagGenerationService);
+        return new CustomTagController(customTagService, customTagGenerationService, customTagValidationService);
     }
 
     @Test
