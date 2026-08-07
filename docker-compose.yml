@@ -195,6 +195,28 @@ services:
     networks:
       - lbs-net
 
+  mcp-penpot:
+    build:
+      context: ./mcp-server
+      dockerfile: Dockerfile
+    container_name: lbs-mcp-penpot
+    restart: unless-stopped
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b-instruct}
+      MCP_PORT: 3000
+      MCP_LOG_LEVEL: ${MCP_LOG_LEVEL:-info}
+    depends_on:
+      - ollama
+    networks:
+      - lbs-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
   wordpress:
     build:
       context: ./wordpress
