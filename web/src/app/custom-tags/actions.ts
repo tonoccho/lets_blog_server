@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createCustomTag, deleteCustomTag, updateCustomTag, generateCustomTag, type GenerateCustomTagInput, type CustomTag } from "@/lib/apiClient";
+import { createCustomTag, deleteCustomTag, updateCustomTag, generateCustomTag, validateCustomTag, type GenerateCustomTagInput, type CustomTag, type ValidationResult, type ValidateCustomTagRequest } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 
 export interface CustomTagFormState {
@@ -62,6 +62,20 @@ export async function generateCustomTagAction(
 
   try {
     const result = await generateCustomTag(input, actor);
+    return { data: result };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function validateCustomTagAction(
+  input: ValidateCustomTagRequest
+): Promise<{ data?: ValidationResult; error?: string }> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const result = await validateCustomTag(input, actor);
     return { data: result };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };

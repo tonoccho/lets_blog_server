@@ -3,6 +3,8 @@
 import { useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useCustomTagGeneration } from "@/lib/useCustomTagGeneration";
+import { useCustomTagValidation } from "@/lib/useCustomTagValidation";
+import { ValidationPanel } from "./ValidationPanel";
 import type { Project } from "@/lib/apiClient";
 
 interface CustomTagGenerationFormProps {
@@ -18,6 +20,7 @@ export function CustomTagGenerationForm({
 }: CustomTagGenerationFormProps) {
   const { data: session } = useSession();
   const { isLoading, error, result, generate, reset } = useCustomTagGeneration();
+  const { isLoading: isValidating, error: validationError, result: validationResult, validate: validateContent, reset: resetValidation } = useCustomTagValidation();
   const formRef = useRef<HTMLFormElement>(null);
   const [showResults, setShowResults] = useState(false);
 
@@ -42,6 +45,9 @@ export function CustomTagGenerationForm({
       });
 
       if (generatedTag) {
+        // 生成後に自動検証
+        resetValidation();
+        await validateContent(generatedTag.htmlTemplate, generatedTag.cssContent || "");
         setShowResults(true);
         onGenerationSuccess(
           generatedTag.htmlTemplate,
@@ -164,6 +170,7 @@ export function CustomTagGenerationForm({
               </div>
             )}
           </div>
+          <ValidationPanel result={validationResult} isLoading={isValidating} error={validationError} />
           <button
             type="button"
             onClick={handleUseResult}

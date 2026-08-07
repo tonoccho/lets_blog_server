@@ -657,6 +657,30 @@ export interface GenerateCustomTagInput {
   projectId?: number | null;
 }
 
+export interface ValidationErrorDetail {
+  type: string;
+  message: string;
+  line?: number;
+  severity: string;
+}
+
+export interface ValidationWarningDetail {
+  type: string;
+  message: string;
+  line?: number;
+}
+
+export interface ValidationResult {
+  isValid: boolean;
+  errors: ValidationErrorDetail[];
+  warnings: ValidationWarningDetail[];
+}
+
+export interface ValidateCustomTagRequest {
+  htmlTemplate: string;
+  cssContent?: string;
+}
+
 export function listCustomTags(actor?: ActorInfo, projectId?: number): Promise<CustomTag[]> {
   const query = projectId != null ? `?projectId=${projectId}` : '';
   return apiFetch<CustomTag[]>(`/api/custom-tags${query}`, { actor });
@@ -686,6 +710,15 @@ export function deleteCustomTag(id: number, actor: ActorInfo): Promise<void> {
 
 export function generateCustomTag(input: GenerateCustomTagInput, actor: ActorInfo): Promise<CustomTag> {
   return apiFetch<CustomTag>('/api/custom-tags/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function validateCustomTag(input: ValidateCustomTagRequest, actor: ActorInfo): Promise<ValidationResult> {
+  return apiFetch<ValidationResult>('/api/custom-tags/validate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
