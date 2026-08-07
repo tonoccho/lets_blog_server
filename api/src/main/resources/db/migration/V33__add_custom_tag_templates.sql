@@ -1,0 +1,22 @@
+CREATE TABLE custom_tag_templates (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    template_name VARCHAR(100) NOT NULL,
+    description VARCHAR(500),
+    category VARCHAR(100),
+    html_template TEXT NOT NULL,
+    css_content TEXT,
+    version INT NOT NULL DEFAULT 1,
+    is_published BOOLEAN NOT NULL DEFAULT false,
+    original_tag_id BIGINT,
+    project_id BIGINT,
+    created_by BIGINT NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    CONSTRAINT fk_original_tag_id FOREIGN KEY (original_tag_id) REFERENCES custom_tags(id) ON DELETE SET NULL,
+    CONSTRAINT fk_project_id FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    CONSTRAINT fk_created_by FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT,
+    INDEX idx_category (category),
+    INDEX idx_project_id (project_id),
+    INDEX idx_is_published (is_published),
+    INDEX idx_created_by (created_by)
+);
