@@ -4,6 +4,7 @@ import { useActionState, useEffect, useRef, useState, useTransition } from "reac
 import { useRouter } from "next/navigation";
 import type { CustomTag, Project } from "@/lib/apiClient";
 import { deleteCustomTagAction, upsertCustomTagAction, CustomTagFormState } from "./actions";
+import { CustomTagGenerationForm } from "./CustomTagGenerationForm";
 
 const initialState: CustomTagFormState = {};
 
@@ -77,6 +78,13 @@ function TemplateEditor({ initialHtml, initialCss }: { initialHtml: string; init
   );
 }
 
+interface GeneratedContent {
+  htmlTemplate: string;
+  cssContent: string;
+  tagName: string;
+  description: string;
+}
+
 export function CustomTagManager({
   tags,
   projects,
@@ -88,6 +96,7 @@ export function CustomTagManager({
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState<CustomTag | null>(null);
+  const [generatedContent, setGeneratedContent] = useState<GeneratedContent | null>(null);
   const [state, formAction, pending] = useActionState(upsertCustomTagAction, initialState);
   const [isDeleting, startDeleteTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
@@ -146,6 +155,15 @@ export function CustomTagManager({
           統合CSSダウンロード
         </a>
       </div>
+
+      <CustomTagGenerationForm
+        projects={projects}
+        currentProjectId={currentProjectId}
+        onGenerationSuccess={(htmlTemplate, cssContent, tagName, description) => {
+          setGeneratedContent({ htmlTemplate, cssContent, tagName, description });
+          setEditing(null);
+        }}
+      />
 
       <div className="overflow-x-auto rounded-lg border border-neutral-200 bg-white">
         <table className="w-full text-left text-sm">
@@ -215,11 +233,20 @@ export function CustomTagManager({
         className="space-y-3 rounded-lg border border-neutral-200 bg-white p-5"
       >
         <div className="flex items-center justify-between">
-          <h2 className="font-medium">{editing ? `カスタムタグを編集: :::${editing.tagName}` : "カスタムタグを追加"}</h2>
-          {editing && (
+          <h2 className="font-medium">
+            {editing
+              ? `カスタムタグを編集: :::${editing.tagName}`
+              : generatedContent
+              ? `カスタムタグを作成: :::${generatedContent.tagName}`
+              : "カスタムタグを追加"}
+          </h2>
+          {(editing || generatedContent) && (
             <button
               type="button"
-              onClick={() => setEditing(null)}
+              onClick={() => {
+                setEditing(null);
+                setGeneratedContent(null);
+              }}
               className="text-sm text-neutral-500 hover:underline"
             >
               新規作成に戻す
@@ -239,8 +266,8 @@ export function CustomTagManager({
             <span className="text-neutral-600">タグ名(英数字・ハイフン・アンダースコアのみ)</span>
             <input
               name="tagName"
-              key={editing?.id ?? "new"}
-              defaultValue={editing?.tagName}
+              key={editing?.id ?? generatedContent?.tagName ?? "new"}
+              defaultValue={editing?.tagName ?? generatedContent?.tagName ?? ""}
               required
               pattern="[a-zA-Z][a-zA-Z0-9_\-]*"
               placeholder="alert"
@@ -251,17 +278,17 @@ export function CustomTagManager({
             <span className="text-neutral-600">説明(任意)</span>
             <input
               name="description"
-              key={`desc-${editing?.id ?? "new"}`}
-              defaultValue={editing?.description ?? ""}
+              key={`desc-${editing?.id ?? generatedContent?.tagName ?? "new"}`}
+              defaultValue={editing?.description ?? generatedContent?.description ?? ""}
               placeholder="注意書きの装飾"
               className="rounded border border-neutral-300 px-3 py-2 text-sm"
             />
           </label>
         </div>
         <TemplateEditor
-          key={editing?.id ?? "new"}
-          initialHtml={editing?.htmlTemplate ?? ""}
-          initialCss={editing?.cssContent ?? ""}
+          key={editing?.id ?? generatedContent?.tagName ?? "new"}
+          initialHtml={editing?.htmlTemplate ?? generatedContent?.htmlTemplate ?? ""}
+          initialCss={editing?.cssContent ?? generatedContent?.cssContent ?? ""}
         />
         {state.error && <p className="text-sm text-red-600">{state.error}</p>}
         {state.success && <p className="text-sm text-green-600">保存しました。</p>}

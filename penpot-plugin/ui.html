@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Design Assistant</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>🤖 AI Design Assistant</h1>
+        <p class="subtitle">Powered by Ollama</p>
+      </div>
+
+      <div class="tabs">
+        <button class="tab-button active" data-tab="suggestion">Design Suggestion</button>
+        <button class="tab-button" data-tab="improve">Improve Component</button>
+        <button class="tab-button" data-tab="palette">Color Palette</button>
+        <button class="tab-button" data-tab="typography">Typography</button>
+      </div>
+
+      <!-- Design Suggestion Tab -->
+      <div id="suggestion" class="tab-content active">
+        <div class="form-group">
+          <label>Design Brief</label>
+          <textarea
+            id="designBrief"
+            placeholder="e.g., Primary button, blue, medium size, rounded corners"
+            rows="3"
+          ></textarea>
+          <small>Describe the component you want to design</small>
+        </div>
+
+        <div class="form-group">
+          <label>Brand Style</label>
+          <select id="brandStyle">
+            <option value="modern">Modern</option>
+            <option value="minimal">Minimal</option>
+            <option value="bold">Bold</option>
+            <option value="elegant">Elegant</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Audience</label>
+          <select id="audience">
+            <option value="developers">Developers</option>
+            <option value="general">General</option>
+            <option value="enterprise">Enterprise</option>
+          </select>
+        </div>
+
+        <button id="suggestButton" class="btn btn-primary">
+          ✨ Generate Design Suggestion
+        </button>
+
+        <div id="suggestionResult" class="result-box hidden">
+          <h3>Suggestion:</h3>
+          <p id="suggestionText"></p>
+          <h4>CSS:</h4>
+          <pre id="suggestionCSS"></pre>
+          <button id="applyButton" class="btn btn-success">📐 Apply to Canvas</button>
+        </div>
+      </div>
+
+      <!-- Improve Component Tab -->
+      <div id="improve" class="tab-content">
+        <div class="form-group">
+          <label>Selected Component</label>
+          <div id="selectedComponent" class="info-box">Select a component on the canvas</div>
+        </div>
+
+        <div class="form-group">
+          <label>Focus Areas</label>
+          <div class="checkbox-group">
+            <label>
+              <input type="checkbox" value="accessibility" />
+              Accessibility
+            </label>
+            <label>
+              <input type="checkbox" value="responsiveness" />
+              Responsiveness
+            </label>
+            <label>
+              <input type="checkbox" value="dark-mode" />
+              Dark Mode
+            </label>
+            <label>
+              <input type="checkbox" value="performance" />
+              Performance
+            </label>
+          </div>
+        </div>
+
+        <button id="improveButton" class="btn btn-primary">🔍 Get Improvements</button>
+
+        <div id="improvementResult" class="result-box hidden">
+          <h3>Suggested Improvements:</h3>
+          <div id="improvementsList"></div>
+        </div>
+      </div>
+
+      <!-- Color Palette Tab -->
+      <div id="palette" class="tab-content">
+        <div class="form-group">
+          <label>Brand Description</label>
+          <textarea
+            id="brandDescription"
+            placeholder="e.g., tech startup, innovative, trustworthy"
+            rows="3"
+          ></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Base Color (optional)</label>
+          <input type="color" id="baseColor" value="#0066CC" />
+        </div>
+
+        <div class="checkbox-group">
+          <label>
+            <input type="checkbox" id="wcagCompliance" checked />
+            WCAG AA Compliance
+          </label>
+          <label>
+            <input type="checkbox" id="darkModeSupport" checked />
+            Dark Mode Support
+          </label>
+        </div>
+
+        <button id="paletteButton" class="btn btn-primary">🎨 Generate Palette</button>
+
+        <div id="paletteResult" class="result-box hidden">
+          <h3>Color Palette:</h3>
+          <div id="colorGrid"></div>
+        </div>
+      </div>
+
+      <!-- Typography Tab -->
+      <div id="typography" class="tab-content">
+        <div class="form-group">
+          <label>Design Context</label>
+          <textarea
+            id="typographyContext"
+            placeholder="e.g., web admin dashboard, mobile app, landing page"
+            rows="2"
+          ></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Content Type</label>
+          <select id="contentType">
+            <option value="body text">Body Text</option>
+            <option value="heading">Heading</option>
+            <option value="label">Label/Caption</option>
+            <option value="code">Code</option>
+          </select>
+        </div>
+
+        <button id="typographyButton" class="btn btn-primary">📝 Suggest Typography</button>
+
+        <div id="typographyResult" class="result-box hidden">
+          <h3>Typography Recommendations:</h3>
+          <div id="typographyList"></div>
+        </div>
+      </div>
+
+      <div class="status-bar">
+        <span id="statusText">Ready</span>
+      </div>
+    </div>
+
+    <script src="ui.js"></script>
+  </body>
+</html>

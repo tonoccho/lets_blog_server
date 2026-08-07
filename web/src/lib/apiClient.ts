@@ -650,6 +650,13 @@ export interface CustomTagInput {
   projectId?: number | null;
 }
 
+export interface GenerateCustomTagInput {
+  prompt: string;
+  tagName: string;
+  description?: string;
+  projectId?: number | null;
+}
+
 export function listCustomTags(actor?: ActorInfo, projectId?: number): Promise<CustomTag[]> {
   const query = projectId != null ? `?projectId=${projectId}` : '';
   return apiFetch<CustomTag[]>(`/api/custom-tags${query}`, { actor });
@@ -675,6 +682,15 @@ export function updateCustomTag(id: number, input: CustomTagInput, actor: ActorI
 
 export function deleteCustomTag(id: number, actor: ActorInfo): Promise<void> {
   return apiFetch<void>(`/api/custom-tags/${id}`, { method: 'DELETE', actor });
+}
+
+export function generateCustomTag(input: GenerateCustomTagInput, actor: ActorInfo): Promise<CustomTag> {
+  return apiFetch<CustomTag>('/api/custom-tags/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
 }
 
 export async function downloadCustomTagCssBundle(projectId?: number | null): Promise<ArrayBuffer> {

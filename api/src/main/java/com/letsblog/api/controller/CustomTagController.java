@@ -2,7 +2,10 @@ package com.letsblog.api.controller;
 
 import com.letsblog.api.dto.CustomTagRequest;
 import com.letsblog.api.dto.CustomTagResponse;
+import com.letsblog.api.dto.GenerateCustomTagRequest;
+import com.letsblog.api.dto.GenerateCustomTagResponse;
 import com.letsblog.api.service.CustomTagService;
+import com.letsblog.api.service.CustomTagGenerationService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -19,9 +22,19 @@ import java.util.List;
 public class CustomTagController {
 
     private final CustomTagService customTagService;
+    private final CustomTagGenerationService customTagGenerationService;
 
-    public CustomTagController(CustomTagService customTagService) {
+    public CustomTagController(
+            CustomTagService customTagService,
+            CustomTagGenerationService customTagGenerationService) {
         this.customTagService = customTagService;
+        this.customTagGenerationService = customTagGenerationService;
+    }
+
+    @PostMapping("/generate")
+    public ResponseEntity<GenerateCustomTagResponse> generate(@Valid @RequestBody GenerateCustomTagRequest request) {
+        GenerateCustomTagResponse response = customTagGenerationService.generate(request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     @PostMapping

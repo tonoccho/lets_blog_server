@@ -1,0 +1,7 @@
+{
+  "name": "Let's Blog AI Design Assistant",
+  "description": "AI-powered design suggestions powered by Ollama, integrated with Let's Blog Server",
+  "plugin_url": "plugin.js",
+  "permissions": ["content:read", "content:write", "library:read"],
+  "code": "plugin.js"
+}
