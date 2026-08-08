@@ -153,6 +153,15 @@ code --install-extension letsblog-vscode-<バージョン>.vsix
 証明書ストアに `certs/localhost.crt` を信頼済み証明書として登録する必要がある。詳細は
 [docs/setup.md](docs/setup.md) の「VSCode拡張の設定」を参照。
 
+## API ドキュメント
+
+REST APIは以下のエンドポイントで公開しています:
+
+- **Swagger UI (対話的ドキュメント)**: `https://localhost/api/swagger-ui.html`
+- **OpenAPI JSON スペック**: `https://localhost/api-docs`
+
+APIの認証にはX-API-Keyヘッダを使用します。APIキーはログイン(`/api/auth/login`)またはTOTP認証(`/api/auth/totp/verify`)成功時にレスポンスのheadersに含まれます。
+
 ## 関連ドキュメント
 
 - [docs/setup.md](docs/setup.md) — 環境変数・起動手順・トラブルシューティングの詳細
