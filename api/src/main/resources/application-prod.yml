@@ -1,3 +1,24 @@
+logging:
+  level:
+    root: INFO
+    com.letsblog.api: INFO
+  path: /var/log/lets-blog-api
+  json:
+    enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
 spring:
   mail:
     host: ${MAIL_HOST}
@@ -15,3 +36,4 @@ spring:
 app:
   mail:
     from: ${MAIL_FROM_ADDRESS:noreply@letsblog.example.com}
+  environment: production

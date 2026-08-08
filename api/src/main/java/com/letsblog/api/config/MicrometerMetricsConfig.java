@@ -1,0 +1,63 @@
+package com.letsblog.api.config;
+
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.actuate.autoconfigure.metrics.MeterRegistryCustomizer;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Slf4j
+@Configuration
+@RequiredArgsConstructor
+public class MicrometerMetricsConfig {
+
+    private final MeterRegistry meterRegistry;
+
+    @Bean
+    public MeterRegistryCustomizer<MeterRegistry> metricsCommonTags() {
+        return registry -> registry.config()
+                .commonTags(
+                        "application", "lets-blog-api",
+                        "environment", "${app.environment:development}"
+                );
+    }
+
+    public Counter createApiRequestCounter(String endpoint) {
+        return Counter.builder("api.request.count")
+                .tag("endpoint", endpoint)
+                .description("Total number of API requests")
+                .register(meterRegistry);
+    }
+
+    public Counter createApiErrorCounter(String endpoint, String errorType) {
+        return Counter.builder("api.request.error")
+                .tag("endpoint", endpoint)
+                .tag("error_type", errorType)
+                .description("Total number of API errors")
+                .register(meterRegistry);
+    }
+
+    public Timer createApiResponseTimer(String endpoint) {
+        return Timer.builder("api.response.time")
+                .tag("endpoint", endpoint)
+                .description("API response time in milliseconds")
+                .publishPercentiles(0.5, 0.95, 0.99)
+                .register(meterRegistry);
+    }
+
+    public Counter createDatabaseQueryCounter() {
+        return Counter.builder("database.query.count")
+                .description("Total number of database queries")
+                .register(meterRegistry);
+    }
+
+    public Timer createDatabaseQueryTimer() {
+        return Timer.builder("database.query.time")
+                .description("Database query execution time")
+                .publishPercentiles(0.5, 0.95, 0.99)
+                .register(meterRegistry);
+    }
+}
