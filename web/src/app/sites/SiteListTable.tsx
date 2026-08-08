@@ -130,8 +130,20 @@ export function SiteListTable({
           <tbody>
             {filteredSites.length === 0 && (
               <tr>
-                <td colSpan={isAdmin ? 8 : 7} className="px-4 py-6 text-center text-neutral-600">
-                  {sites.length === 0 ? "登録済みサイトはありません" : "条件に一致するサイトはありません"}
+                <td colSpan={isAdmin ? 8 : 7} className="px-4 py-8 text-center">
+                  {sites.length === 0 ? (
+                    <div className="flex flex-col items-center gap-4">
+                      <p className="text-neutral-600">登録済みサイトはありません</p>
+                      <a
+                        href="#site-creation"
+                        className="rounded bg-neutral-900 px-4 py-2 text-sm text-white hover:bg-neutral-800"
+                      >
+                        サイトを登録する
+                      </a>
+                    </div>
+                  ) : (
+                    <p className="text-neutral-600">条件に一致するサイトはありません</p>
+                  )}
                 </td>
               </tr>
             )}

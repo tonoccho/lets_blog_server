@@ -180,8 +180,16 @@ export function CustomTagManager({
           <tbody>
             {tags.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-neutral-600">
-                  登録済みカスタムタグはありません
+                <td colSpan={6} className="px-4 py-8 text-center">
+                  <div className="flex flex-col items-center gap-4">
+                    <p className="text-neutral-600">登録済みカスタムタグはありません</p>
+                    <a
+                      href="#custom-tag-form"
+                      className="rounded bg-neutral-900 px-4 py-2 text-sm text-white hover:bg-neutral-800"
+                    >
+                      カスタムタグを作成する
+                    </a>
+                  </div>
                 </td>
               </tr>
             )}
@@ -228,6 +236,7 @@ export function CustomTagManager({
       </div>
 
       <form
+        id="custom-tag-form"
         ref={formRef}
         action={formAction}
         className="space-y-3 rounded-lg border border-neutral-200 bg-white p-5"

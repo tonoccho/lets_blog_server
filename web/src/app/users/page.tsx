@@ -41,8 +41,16 @@ export default async function UsersPage() {
           <tbody>
             {users.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-neutral-600">
-                  登録済みユーザーはありません
+                <td colSpan={5} className="px-4 py-8 text-center">
+                  <div className="flex flex-col items-center gap-4">
+                    <p className="text-neutral-600">登録済みユーザーはありません</p>
+                    <a
+                      href="#user-form"
+                      className="rounded bg-neutral-900 px-4 py-2 text-sm text-white hover:bg-neutral-800"
+                    >
+                      ユーザーを招待する
+                    </a>
+                  </div>
                 </td>
               </tr>
             )}
@@ -71,7 +79,9 @@ export default async function UsersPage() {
         </table>
       </div>
 
-      <UserForm />
+      <div id="user-form">
+        <UserForm />
+      </div>
     </div>
   );
 }

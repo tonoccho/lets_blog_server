@@ -19,7 +19,9 @@ export default async function SitesPage() {
 
       <SiteListTable sites={sites} projects={projects} isAdmin={isAdmin} timezone={timezone} />
 
-      <SiteCreationPanel users={users} sites={sites} />
+      <div id="site-creation">
+        <SiteCreationPanel users={users} sites={sites} />
+      </div>
     </div>
   );
 }
