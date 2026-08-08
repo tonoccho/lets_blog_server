@@ -24,15 +24,21 @@ import com.letsblog.api.service.QrCodeGenerationException;
 import com.letsblog.api.service.RoleNotFoundException;
 import com.letsblog.api.service.SiteNotFoundException;
 import com.letsblog.api.service.TwoFactorSecretNotFoundException;
+import com.letsblog.api.exception.RateLimitExceededException;
 import com.letsblog.api.service.UserNotFoundException;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -172,11 +178,31 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Map<String, String>> handleValidation(MethodArgumentNotValidException e) {
-        String message = e.getBindingResult().getFieldErrors().stream()
-                .findFirst()
-                .map(fe -> fe.getField() + ": " + fe.getDefaultMessage())
-                .orElse("validation error");
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", message));
+    public ResponseEntity<Map<String, Object>> handleValidation(MethodArgumentNotValidException e) {
+        List<Map<String, String>> errors = e.getBindingResult().getFieldErrors().stream()
+                .map(fe -> Map.of(
+                        "field", fe.getField(),
+                        "message", fe.getDefaultMessage()
+                ))
+                .collect(Collectors.toList());
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("error", "Validation failed");
+        response.put("details", errors);
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+    }
+
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<Map<String, String>> handleRateLimitExceeded(RateLimitExceededException e) {
+        log.warn("Rate limit exceeded: {}", e.getRateLimiterName());
+        Map<String, String> response = Map.of(
+                "error", "Rate limit exceeded",
+                "message", e.getMessage(),
+                "retry-after", "60"
+        );
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", "60")
+                .body(response);
     }
 }
