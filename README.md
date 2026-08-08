@@ -194,3 +194,7 @@ APIの認証にはX-API-Keyヘッダを使用します。APIキーはログイ�
 
 - [docs/setup.md](docs/setup.md) — 環境変数・起動手順・トラブルシューティングの詳細
 - [spec/phase1/00-overview.md](spec/phase1/00-overview.md) — 全体アーキテクチャ
+
+## ライセンス
+
+このプロジェクトはMITライセンスの下で公開されています。詳細は [LICENSE](LICENSE) ファイルを参照してください。
