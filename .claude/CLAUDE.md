@@ -440,3 +440,47 @@ The following rules have priority over convenience:
 The objective is not to make the largest possible change.
 
 The objective is to make the **smallest correct, tested, reviewable change that completely satisfies the GitHub Issue**.
+
+---
+
+# 18. API Client Code Generation
+
+The API client for TypeScript/JavaScript projects is auto-generated from the OpenAPI specification.
+
+## Workflow
+
+1. **OpenAPI Spec**: The Spring Boot API server generates an OpenAPI 3.0 spec at `/v3/api-docs` using `springdoc-openapi`.
+
+2. **Client Generation**: Use `orval` to generate a type-safe TypeScript client:
+
+   ```bash
+   # From project root:
+   npx orval --config orval.config.js
+   ```
+
+3. **Output**: Generated client code is placed in `sdk/api-client/src/generated/`.
+
+4. **Usage**: Import and use from `@api-client` path alias:
+
+   ```typescript
+   import { listSites, type Site } from '@api-client';
+   ```
+
+## Setup
+
+* **orval.config.js**: Main configuration file (root directory)
+* **openapi.json**: Downloaded OpenAPI spec (regenerated before running orval)
+* **sdk/api-client/**: Generated client library package
+* **web/tsconfig.json**: Includes path alias `@api-client` → `../sdk/api-client/src`
+* **extension/tsconfig.json**: Includes path alias `@api-client` → `../sdk/api-client/src`
+
+## Regenerating the Client
+
+After API changes, regenerate the client:
+
+```bash
+# In web or extension directory:
+npm run generate:api-client
+```
+
+This script fetches the latest OpenAPI spec and regenerates client code.
