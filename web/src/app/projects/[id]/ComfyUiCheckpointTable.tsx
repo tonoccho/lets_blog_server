@@ -31,12 +31,6 @@ export function ComfyUiCheckpointTable({
   );
   const [progress, setProgress] = useState<JobProgress | null>(null);
 
-  // eslint-disable-next-line react-hooks/immutability, react-hooks/exhaustive-deps
-  const { startPolling } = useGenerationJobPolling(
-    (job: GenerationJobDetail) => handleJobSettled(job),
-    (job: GenerationJobDetail) => setProgress(parseJobProgress(job.resultPayload))
-  );
-
   async function refresh() {
     setData(await fetchComfyUiCheckpointsAction(projectId));
   }
@@ -58,6 +52,11 @@ export function ComfyUiCheckpointTable({
     }
     refresh();
   }
+
+  const { startPolling } = useGenerationJobPolling(
+    (job: GenerationJobDetail) => handleJobSettled(job),
+    (job: GenerationJobDetail) => setProgress(parseJobProgress(job.resultPayload))
+  );
 
   async function handleSelect(checkpointName: string) {
     setPendingAction({ name: checkpointName, type: "select" });
