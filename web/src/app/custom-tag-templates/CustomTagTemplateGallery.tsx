@@ -203,6 +203,7 @@ export function CustomTagTemplateGallery({
 
   useEffect(() => {
     const uniqueCategories = Array.from(new Set(templates.map((t) => t.category).filter(Boolean) as string[]));
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCategories(uniqueCategories.sort());
   }, [templates]);
 

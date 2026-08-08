@@ -19,7 +19,8 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@api-client": ["../sdk/api-client/src"]
     }
   },
   "include": [

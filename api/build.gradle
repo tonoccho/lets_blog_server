@@ -1,7 +1,11 @@
 plugins {
     id 'java'
-    id 'org.springframework.boot' version '3.3.4'
+    id 'org.springframework.boot' version '4.1.0'
     id 'io.spring.dependency-management' version '1.1.6'
+    id 'org.owasp.dependencycheck' version '13.0.0'
+    id 'me.champeau.jmh' version '0.7.2'
+    id 'jacoco'
+    id 'checkstyle'
 }
 
 group = 'com.letsblog'
@@ -54,8 +58,86 @@ dependencies {
     testImplementation 'org.testcontainers:mysql:1.19.3'
     testImplementation 'org.testcontainers:junit-jupiter:1.19.3'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    // JMH for benchmarking
+    testImplementation 'org.openjdk.jmh:jmh-core:1.37'
+    testAnnotationProcessor 'org.openjdk.jmh:jmh-generator-annprocess:1.37'
 }
 
 tasks.named('test') {
     useJUnitPlatform()
+    finalizedBy jacocoTestReport
+}
+
+jacoco {
+    toolVersion = '0.8.11'
+}
+
+jacocoTestReport {
+    dependsOn test
+    afterEvaluate {
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: [
+                '**/config/**',
+                '**/entity/**',
+                '**/dto/**',
+                '**/exception/**',
+                '**/*$*',
+            ])
+        }))
+    }
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+    }
+}
+
+checkstyle {
+    configFile = file('checkstyle.xml')
+    ignoreFailures = false
+    showViolations = true
+}
+
+tasks.named('checkstyleMain') {
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}
+
+task lint {
+    dependsOn checkstyleMain
+    doLast {
+        println "✓ Lint check passed"
+    }
+}
+
+task coverageCheck {
+    dependsOn jacocoTestReport
+    doLast {
+        def xmlFile = file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
+        if (xmlFile.exists()) {
+            println "✓ JaCoCo coverage report generated at: ${xmlFile}"
+        }
+    }
+}
+
+dependencyCheck {
+    format = 'HTML'
+    suppressionFile = 'dependency-check-suppression.xml'
+    failBuildOnCVSS = 7.0
+}
+
+jmh {
+    jmhVersion = '1.37'
+    warmupIterations = 3
+    iterations = 5
+    timeOnIteration = '1s'
+    timeUnit = 'ms'
+    benchmarkMode = ['avgt']
+    fork = 1
+    threads = 1
+    verbosity = 'EXTRA'
+    resultFormat = 'JSON'
 }

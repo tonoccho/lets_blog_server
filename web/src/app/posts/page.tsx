@@ -1,5 +1,6 @@
 import { listPosts } from "@/lib/apiClient";
 import { getViewerTimeZone } from "@/lib/session";
+import { formatDateTime } from "@/lib/formatDate";
 import { PostsTable } from "./PostsTable";
 
 export default async function PostsPage() {

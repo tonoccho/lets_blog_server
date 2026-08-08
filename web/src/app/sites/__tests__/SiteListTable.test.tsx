@@ -1,4 +1,5 @@
 import { render, screen, fireEvent } from '@testing-library/react'
+import { ReactNode } from 'react'
 import { SiteListTable } from '../SiteListTable'
 import type { Site, Project } from '@/lib/apiClient'
 
@@ -15,7 +16,9 @@ jest.mock('../CheckConnectionButton', () => ({
 }))
 
 jest.mock('next/link', () => {
-  return ({ children, href }: any) => <a href={href}>{children}</a>
+  const Link = ({ children, href }: { children: ReactNode; href: string }) => <a href={href}>{children}</a>
+  Link.displayName = 'MockLink'
+  return Link
 })
 
 const mockSites: Site[] = [

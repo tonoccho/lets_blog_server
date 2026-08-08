@@ -1,15 +1,18 @@
 import { render, screen, fireEvent } from '@testing-library/react'
+import { ReactNode } from 'react'
 import { HeaderNav } from '../HeaderNav'
 import type { NavItem } from '@/lib/navigation'
 
 jest.mock('next/link', () => {
-  return ({ children, href }: any) => <a href={href}>{children}</a>
+  const Link = ({ children, href }: { children: ReactNode; href: string }) => <a href={href}>{children}</a>
+  Link.displayName = 'MockLink'
+  return Link
 })
 
 jest.mock('lucide-react', () => ({
-  Menu: ({ className }: any) => <div className={className}>Menu</div>,
-  X: ({ className }: any) => <div className={className}>X</div>,
-  ChevronDown: ({ className }: any) => <div className={className}>ChevronDown</div>,
+  Menu: ({ className }: { className: string }) => <div className={className}>Menu</div>,
+  X: ({ className }: { className: string }) => <div className={className}>X</div>,
+  ChevronDown: ({ className }: { className: string }) => <div className={className}>ChevronDown</div>,
 }))
 
 const mockNavItems: NavItem[] = [
