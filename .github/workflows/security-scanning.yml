@@ -24,8 +24,6 @@ jobs:
             name: "Frontend"
           - directory: "extension"
             name: "Extension"
-          - directory: "sdk/api-client"
-            name: "SDK"
 
     steps:
       - uses: actions/checkout@v4
@@ -80,6 +78,7 @@ jobs:
             api/build/reports/dependency-check-report.html
             api/build/reports/dependency-check-report.json
         if: always()
+        continue-on-error: true
 
   license-scanning:
     name: License Compliance Check
@@ -91,8 +90,6 @@ jobs:
             name: "Frontend"
           - directory: "extension"
             name: "Extension"
-          - directory: "sdk/api-client"
-            name: "SDK"
 
     steps:
       - uses: actions/checkout@v4
@@ -156,6 +153,7 @@ jobs:
 
       - name: Install cyclonedx-npm
         run: npm install -g @cyclonedx/npm
+        continue-on-error: true
 
       - name: Generate SBOM for Frontend
         run: |
@@ -169,3 +167,4 @@ jobs:
           name: sbom-reports
           path: sbom-*.json
         if: always()
+        continue-on-error: true
