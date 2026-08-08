@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+    <!--
+    This file is used to suppress false positives and known vulnerabilities that have been
+    reviewed and determined to be acceptable risks.
+
+    Each suppression entry should include:
+    - The CVE ID being suppressed
+    - The reason for suppression
+    - The expiration date (optional)
+    - The affected package
+
+    Example:
+    <suppress>
+        <note>This vulnerability does not affect our usage of the library</note>
+        <cve>CVE-2021-12345</cve>
+        <expiration>2024-12-31</expiration>
+    </suppress>
+
+    Note: Suppressions should be reviewed regularly to ensure they are still valid.
+    -->
+
+</suppressions>

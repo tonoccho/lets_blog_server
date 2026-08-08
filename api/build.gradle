@@ -2,6 +2,7 @@ plugins {
     id 'java'
     id 'org.springframework.boot' version '3.3.4'
     id 'io.spring.dependency-management' version '1.1.6'
+    id 'org.owasp.dependencycheck' version '9.0.7'
 }
 
 group = 'com.letsblog'
@@ -58,4 +59,10 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+}
+
+dependencyCheck {
+    format = 'HTML'
+    suppressionFile = 'dependency-check-suppression.xml'
+    failBuildOnCVSS = 7.0
 }
