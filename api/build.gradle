@@ -4,6 +4,7 @@ plugins {
     id 'io.spring.dependency-management' version '1.1.6'
     id 'org.owasp.dependencycheck' version '9.0.7'
     id 'me.champeau.jmh' version '0.7.2'
+    id 'jacoco'
 }
 
 group = 'com.letsblog'
@@ -64,6 +65,41 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+    finalizedBy jacocoTestReport
+}
+
+jacoco {
+    toolVersion = '0.8.11'
+}
+
+jacocoTestReport {
+    dependsOn test
+    afterEvaluate {
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: [
+                '**/config/**',
+                '**/entity/**',
+                '**/dto/**',
+                '**/exception/**',
+                '**/*$*',
+            ])
+        }))
+    }
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+    }
+}
+
+task coverageCheck {
+    dependsOn jacocoTestReport
+    doLast {
+        def xmlFile = file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
+        if (xmlFile.exists()) {
+            println "✓ JaCoCo coverage report generated at: ${xmlFile}"
+        }
+    }
 }
 
 dependencyCheck {
