@@ -17,10 +17,10 @@ export function useGenerationJobPolling(
   const [activeJobId, setActiveJobId] = useState<number | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onSettledRef = useRef(onSettled);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line
   onSettledRef.current = onSettled;
   const onProgressRef = useRef(onProgress);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line
   onProgressRef.current = onProgress;
 
   useEffect(() => {
