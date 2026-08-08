@@ -26,7 +26,7 @@
   },
   "devDependencies": {
     "@orval/core": "^6.23.0",
-    "@orval/fetch": "^6.23.0",
+    "@orval/fetch": "^8.23.0",
     "@playwright/test": "^1.40.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^7.0.0",
