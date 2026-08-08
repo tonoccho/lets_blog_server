@@ -1,6 +1,30 @@
 server:
   port: 8080
 
+logging:
+  level:
+    root: INFO
+    com.letsblog.api: DEBUG
+    org.springframework.web: DEBUG
+  path: ./logs
+  json:
+    enabled: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    enable:
+      jvm: true
+      process: true
+      system: true
+      logback: true
+
 springdoc:
   api-docs:
     path: /api-docs
