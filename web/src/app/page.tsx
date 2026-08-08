@@ -22,9 +22,9 @@ export default async function DashboardPage() {
           <Link
             key={card.href}
             href={card.href}
-            className="rounded-lg border border-neutral-200 bg-white p-5 shadow-sm hover:shadow"
+            className="rounded-lg border border-neutral-200 bg-white p-5 shadow-sm hover:shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
           >
-            <div className="text-sm text-neutral-500">{card.label}</div>
+            <div className="text-sm text-neutral-700">{card.label}</div>
             <div className="mt-1 text-3xl font-semibold">{card.value}</div>
           </Link>
         ))}

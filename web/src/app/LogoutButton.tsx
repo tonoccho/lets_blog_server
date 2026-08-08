@@ -7,7 +7,8 @@ export function LogoutButton() {
     <button
       type="button"
       onClick={() => signOut({ callbackUrl: "/login" })}
-      className="text-sm text-neutral-600 hover:text-neutral-900"
+      aria-label="ログアウト"
+      className="text-sm text-neutral-900 hover:text-neutral-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 rounded px-2 py-1"
     >
       ログアウト
     </button>
