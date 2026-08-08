@@ -10,7 +10,11 @@
     "noImplicitAny": true,
     "moduleResolution": "node",
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@api-client": ["../sdk/api-client/src"]
+    }
   },
   "exclude": ["node_modules", ".vscode-test"]
 }

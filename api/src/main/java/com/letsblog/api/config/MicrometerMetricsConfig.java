@@ -3,7 +3,6 @@ package com.letsblog.api.config;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.actuate.autoconfigure.metrics.MeterRegistryCustomizer;
 import org.springframework.context.annotation.Bean;
@@ -11,10 +10,13 @@ import org.springframework.context.annotation.Configuration;
 
 @Slf4j
 @Configuration
-@RequiredArgsConstructor
 public class MicrometerMetricsConfig {
 
     private final MeterRegistry meterRegistry;
+
+    public MicrometerMetricsConfig(MeterRegistry meterRegistry) {
+        this.meterRegistry = meterRegistry;
+    }
 
     @Bean
     public MeterRegistryCustomizer<MeterRegistry> metricsCommonTags() {

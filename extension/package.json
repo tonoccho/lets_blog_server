@@ -94,7 +94,8 @@
   },
   "scripts": {
     "compile": "tsc -p ./",
-    "watch": "tsc -w -p ./"
+    "watch": "tsc -w -p ./",
+    "generate:api-client": "cd .. && ./scripts/generate-api-client.sh"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
