@@ -164,5 +164,15 @@ APIの認証にはX-API-Keyヘッダを使用します。APIキーはログイ�
 
 ## 関連ドキュメント
 
+### ユーザーガイド
+
+- [**Getting Started Guide**](docs/GETTING_STARTED.md) — セットアップの詳細ガイド（スクリーンショット説明付き）
+- [**Features and Usage Guide**](docs/FEATURES_AND_USAGE.md) — 主要機能と使用方法
+- [**Article Authoring Best Practices**](docs/ARTICLE_AUTHORING_BEST_PRACTICES.md) — 記事作成のベストプラクティス
+- [**Video Tutorials Guide**](docs/VIDEO_TUTORIALS_GUIDE.md) — ビデオチュートリアルの構成と活用方法
+- [**Comprehensive Troubleshooting Guide**](docs/COMPREHENSIVE_TROUBLESHOOTING.md) — 問題解決ガイド
+
+### 技術ドキュメント
+
 - [docs/setup.md](docs/setup.md) — 環境変数・起動手順・トラブルシューティングの詳細
 - [spec/phase1/00-overview.md](spec/phase1/00-overview.md) — 全体アーキテクチャ
