@@ -43,6 +43,17 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
     return () => document.removeEventListener("keydown", handleEscape);
   }, [isOpen]);
 
+  useEffect(() => {
+    function handleEscape(e: KeyboardEvent) {
+      if (e.key === "Escape" && isOpen) {
+        setIsOpen(false);
+      }
+    }
+
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [isOpen]);
+
   return (
     <>
       {/* Desktop navigation */}
