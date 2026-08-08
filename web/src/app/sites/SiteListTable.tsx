@@ -28,6 +28,8 @@ const ENVIRONMENT_BADGE_COLOR: Record<Environment, string> = {
 
 type CmsFilter = "ALL" | CmsType;
 type ProjectFilter = "ALL" | "BOUND" | "UNBOUND";
+type SortColumn = "name" | "createdAt" | "updatedAt" | null;
+type SortOrder = "asc" | "desc";
 
 export function SiteListTable({
   sites,
@@ -43,6 +45,8 @@ export function SiteListTable({
   const [searchText, setSearchText] = useState("");
   const [cmsFilter, setCmsFilter] = useState<CmsFilter>("ALL");
   const [projectFilter, setProjectFilter] = useState<ProjectFilter>("ALL");
+  const [sortBy, setSortBy] = useState<SortColumn>(null);
+  const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
 
   const siteToProject = useMemo(() => {
     const map = new Map<number, ProjectBinding>();
@@ -58,7 +62,7 @@ export function SiteListTable({
 
   const filteredSites = useMemo(() => {
     const query = searchText.trim().toLowerCase();
-    return sites.filter((site) => {
+    const filtered = sites.filter((site) => {
       const projectInfo = siteToProject.get(site.id);
       if (cmsFilter !== "ALL" && site.cmsType !== cmsFilter) {
         return false;
@@ -78,7 +82,37 @@ export function SiteListTable({
         site.baseUrl.toLowerCase().includes(query)
       );
     });
-  }, [sites, siteToProject, searchText, cmsFilter, projectFilter]);
+
+    if (sortBy) {
+      return [...filtered].sort((a, b) => {
+        let compareResult = 0;
+        if (sortBy === "name") {
+          compareResult = a.name.localeCompare(b.name);
+        } else if (sortBy === "createdAt") {
+          compareResult = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        } else if (sortBy === "updatedAt") {
+          compareResult = new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
+        }
+        return sortOrder === "asc" ? compareResult : -compareResult;
+      });
+    }
+
+    return filtered;
+  }, [sites, siteToProject, searchText, cmsFilter, projectFilter, sortBy, sortOrder]);
+
+  const handleColumnSort = (column: SortColumn) => {
+    if (sortBy === column) {
+      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+    } else {
+      setSortBy(column);
+      setSortOrder("asc");
+    }
+  };
+
+  const renderSortIndicator = (column: SortColumn) => {
+    if (sortBy !== column) return null;
+    return sortOrder === "asc" ? " ↑" : " ↓";
+  };
 
   return (
     <div className="space-y-3">
@@ -118,11 +152,15 @@ export function SiteListTable({
           <thead className="sticky top-0 border-b border-neutral-200 bg-neutral-50 text-neutral-500">
             <tr>
               <th className="px-4 py-2">サイトキー</th>
-              <th className="px-4 py-2">表示名</th>
+              <th className="cursor-pointer px-4 py-2 hover:bg-neutral-100" onClick={() => handleColumnSort("name")}>
+                表示名{renderSortIndicator("name")}
+              </th>
               <th className="px-4 py-2">CMS種別</th>
               <th className="px-4 py-2">プロジェクト</th>
               <th className="px-4 py-2">URL</th>
-              <th className="px-4 py-2">登録日</th>
+              <th className="cursor-pointer px-4 py-2 hover:bg-neutral-100" onClick={() => handleColumnSort("createdAt")}>
+                登録日{renderSortIndicator("createdAt")}
+              </th>
               <th className="px-4 py-2">疎通確認</th>
               {isAdmin && <th className="px-4 py-2"></th>}
             </tr>

@@ -96,8 +96,10 @@ public class ProjectController {
     }
 
     @GetMapping
-    public List<ProjectResponse> list() {
-        return projectService.listProjects();
+    public List<ProjectResponse> list(
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(required = false) String sortOrder) {
+        return projectService.listProjects(sortBy, sortOrder);
     }
 
     @GetMapping("/{id}")

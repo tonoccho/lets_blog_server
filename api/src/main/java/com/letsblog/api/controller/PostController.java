@@ -47,12 +47,16 @@ public class PostController {
      * 投稿履歴一覧(Web管理フロントエンドの表示用)。
      */
     @GetMapping
-    public List<PostSummaryResponse> list() {
+    public List<PostSummaryResponse> list(
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(required = false) String sortOrder) {
         Map<Long, String> siteNamesById = siteRepository.findAll().stream()
                 .collect(Collectors.toMap(Site::getId, Site::getName));
 
-        return postRepository.findAll().stream()
-                .sorted(Comparator.comparing(Post::getUpdatedAt).reversed())
+        List<Post> posts = postRepository.findAll();
+        posts = sortPosts(posts, sortBy, sortOrder);
+
+        return posts.stream()
                 .map((Post post) -> new PostSummaryResponse(
                         post.getId(),
                         post.getSiteId(),
@@ -63,6 +67,27 @@ public class PostController {
                         post.getLastPublishedAt()
                 ))
                 .toList();
+    }
+
+    private List<Post> sortPosts(List<Post> posts, String sortBy, String sortOrder) {
+        boolean ascending = !"desc".equalsIgnoreCase(sortOrder);
+
+        Comparator<Post> comparator = switch (sortBy) {
+            case "siteName" -> Comparator.comparing(post -> {
+                Site site = siteRepository.findById(post.getSiteId()).orElse(null);
+                return site != null ? site.getName() : "";
+            });
+            case "status" -> Comparator.comparing(Post::getStatus);
+            case "lastPublishedAt" -> Comparator.nullsFirst(Comparator.comparing(Post::getLastPublishedAt));
+            default -> Comparator.comparing(Post::getUpdatedAt);
+        };
+
+        if (!ascending) {
+            comparator = comparator.reversed();
+        }
+
+        posts.sort(comparator);
+        return posts;
     }
 
     /**

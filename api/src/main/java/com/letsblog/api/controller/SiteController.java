@@ -62,8 +62,10 @@ public class SiteController {
     }
 
     @GetMapping
-    public List<SiteResponse> list() {
-        return siteService.list();
+    public List<SiteResponse> list(
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(required = false) String sortOrder) {
+        return siteService.list(sortBy, sortOrder);
     }
 
     @GetMapping("/{id}")
