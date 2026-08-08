@@ -151,8 +151,32 @@ public class SiteService {
     }
 
     @Transactional(readOnly = true)
-    public List<SiteResponse> list() {
-        return siteRepository.findAll().stream().map(SiteResponse::from).toList();
+    public List<SiteResponse> list(String sortBy, String sortOrder) {
+        List<Site> sites = siteRepository.findAll();
+
+        if (sortBy != null && !sortBy.isBlank()) {
+            sites = sortSites(sites, sortBy, sortOrder);
+        }
+
+        return sites.stream().map(SiteResponse::from).toList();
+    }
+
+    private List<Site> sortSites(List<Site> sites, String sortBy, String sortOrder) {
+        boolean ascending = !"desc".equalsIgnoreCase(sortOrder);
+
+        sites.sort((a, b) -> {
+            int result = switch (sortBy) {
+                case "name" -> a.getName().compareToIgnoreCase(b.getName());
+                case "siteKey" -> a.getSiteKey().compareToIgnoreCase(b.getSiteKey());
+                case "cmsType" -> a.getCmsType().toString().compareTo(b.getCmsType().toString());
+                case "createdAt" -> a.getCreatedAt().compareTo(b.getCreatedAt());
+                case "updatedAt" -> a.getUpdatedAt().compareTo(b.getUpdatedAt());
+                default -> 0;
+            };
+            return ascending ? result : -result;
+        });
+
+        return sites;
     }
 
     @Transactional(readOnly = true)

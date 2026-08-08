@@ -51,8 +51,32 @@ public class ProjectService {
     }
 
     @Transactional(readOnly = true)
-    public List<ProjectResponse> listProjects() {
-        return projectRepository.findAllByOrderByCreatedAtDesc().stream().map(this::toResponse).toList();
+    public List<ProjectResponse> listProjects(String sortBy, String sortOrder) {
+        List<Project> projects = projectRepository.findAll();
+
+        if (sortBy != null && !sortBy.isBlank()) {
+            projects = sortProjects(projects, sortBy, sortOrder);
+        } else {
+            projects = sortProjects(projects, "createdAt", "desc");
+        }
+
+        return projects.stream().map(this::toResponse).toList();
+    }
+
+    private List<Project> sortProjects(List<Project> projects, String sortBy, String sortOrder) {
+        boolean ascending = !"desc".equalsIgnoreCase(sortOrder);
+
+        projects.sort((a, b) -> {
+            int result = switch (sortBy) {
+                case "name" -> a.getName().compareToIgnoreCase(b.getName());
+                case "slug" -> a.getSlug().compareToIgnoreCase(b.getSlug());
+                case "createdAt" -> a.getCreatedAt().compareTo(b.getCreatedAt());
+                default -> 0;
+            };
+            return ascending ? result : -result;
+        });
+
+        return projects;
     }
 
     @AuditLog(action = AuditLogAction.PROJECT_UPDATED, resourceType = "PROJECT")
