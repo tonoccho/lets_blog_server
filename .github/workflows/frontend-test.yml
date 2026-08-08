@@ -14,7 +14,6 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    working-directory: web
 
     steps:
       - uses: actions/checkout@v7
