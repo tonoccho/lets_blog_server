@@ -98,7 +98,7 @@
     "generate:api-client": "cd .. && ./scripts/generate-api-client.sh"
   },
   "devDependencies": {
-    "@types/node": "^20.14.0",
+    "@types/node": "^26.1.2",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.9.2",
     "typescript": "^5.5.4"
