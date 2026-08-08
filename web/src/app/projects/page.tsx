@@ -27,8 +27,16 @@ export default async function ProjectsPage() {
           <tbody>
             {projects.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-neutral-600">
-                  登録済みプロジェクトはありません
+                <td colSpan={5} className="px-4 py-8 text-center">
+                  <div className="flex flex-col items-center gap-4">
+                    <p className="text-neutral-600">登録済みプロジェクトはありません</p>
+                    <a
+                      href="#project-form"
+                      className="rounded bg-neutral-900 px-4 py-2 text-sm text-white hover:bg-neutral-800"
+                    >
+                      プロジェクトを作成する
+                    </a>
+                  </div>
                 </td>
               </tr>
             )}
@@ -76,7 +84,9 @@ export default async function ProjectsPage() {
         </table>
       </div>
 
-      <ProjectForm />
+      <div id="project-form">
+        <ProjectForm />
+      </div>
     </div>
   );
 }
