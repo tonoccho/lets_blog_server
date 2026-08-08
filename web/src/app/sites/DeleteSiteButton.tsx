@@ -23,7 +23,7 @@ export function DeleteSiteButton({ id, managedWordpress }: { id: number; managed
       type="button"
       onClick={handleClick}
       disabled={isPending}
-      className="text-sm text-red-600 hover:underline disabled:text-neutral-400"
+      className="text-sm text-red-700 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 rounded px-2 py-1 disabled:text-neutral-500"
     >
       {isPending ? "削除中…" : "削除"}
     </button>

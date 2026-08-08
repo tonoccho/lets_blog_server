@@ -88,12 +88,12 @@ export function SiteListTable({
           value={searchText}
           onChange={(e) => setSearchText(e.target.value)}
           placeholder="サイトキー・表示名・URLで検索"
-          className="w-64 rounded border border-neutral-300 px-3 py-1.5"
+          className="w-64 rounded border border-neutral-300 px-3 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
         />
         <select
           value={cmsFilter}
           onChange={(e) => setCmsFilter(e.target.value as CmsFilter)}
-          className="rounded border border-neutral-300 px-2 py-1.5"
+          className="rounded border border-neutral-300 px-2 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
         >
           <option value="ALL">CMS種別: すべて</option>
           <option value="WORDPRESS">WORDPRESS</option>
@@ -102,20 +102,20 @@ export function SiteListTable({
         <select
           value={projectFilter}
           onChange={(e) => setProjectFilter(e.target.value as ProjectFilter)}
-          className="rounded border border-neutral-300 px-2 py-1.5"
+          className="rounded border border-neutral-300 px-2 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
         >
           <option value="ALL">プロジェクト紐付け: すべて</option>
           <option value="BOUND">紐付け済みのみ</option>
           <option value="UNBOUND">未紐付けのみ</option>
         </select>
-        <span className="text-neutral-500">
+        <span className="text-neutral-700">
           {sites.length}件中{filteredSites.length}件を表示
         </span>
       </div>
 
       <div className="max-h-[70vh] overflow-auto rounded-lg border border-neutral-200 bg-white">
         <table className="w-full text-left text-sm">
-          <thead className="sticky top-0 border-b border-neutral-200 bg-neutral-50 text-neutral-500">
+          <thead className="sticky top-0 border-b border-neutral-200 bg-neutral-50 text-neutral-700 font-medium">
             <tr>
               <th className="px-4 py-2">サイトキー</th>
               <th className="px-4 py-2">表示名</th>
@@ -130,7 +130,7 @@ export function SiteListTable({
           <tbody>
             {filteredSites.length === 0 && (
               <tr>
-                <td colSpan={isAdmin ? 8 : 7} className="px-4 py-6 text-center text-neutral-600">
+                <td colSpan={isAdmin ? 8 : 7} className="px-4 py-6 text-center text-neutral-700">
                   {sites.length === 0 ? "登録済みサイトはありません" : "条件に一致するサイトはありません"}
                 </td>
               </tr>
@@ -144,13 +144,13 @@ export function SiteListTable({
                   <td className="px-4 py-2">
                     <span
                       className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
-                        site.cmsType === "WORDPRESS" ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700"
+                        site.cmsType === "WORDPRESS" ? "bg-blue-100 text-blue-800" : "bg-green-100 text-green-800"
                       }`}
                     >
                       {site.cmsType}
                     </span>
                     {site.managedWordpress && (
-                      <span className="ml-1 inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                      <span className="ml-1 inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
                         自動構築
                       </span>
                     )}
@@ -163,20 +163,20 @@ export function SiteListTable({
                         >
                           {ENVIRONMENT_LABEL[projectInfo.environment]}
                         </span>
-                        <span className="text-neutral-700">{projectInfo.projectName}</span>
+                        <span className="text-neutral-900">{projectInfo.projectName}</span>
                       </span>
                     ) : (
-                      <span className="inline-block rounded bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-400">
+                      <span className="inline-block rounded bg-neutral-200 px-2 py-0.5 text-xs font-medium text-neutral-700">
                         未紐付け
                       </span>
                     )}
                   </td>
                   <td className="max-w-xs truncate px-4 py-2" title={site.baseUrl}>
-                    <a href={site.baseUrl} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
+                    <a href={site.baseUrl} target="_blank" rel="noreferrer" className="text-blue-700 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500">
                       {site.baseUrl}
                     </a>
                   </td>
-                  <td className="px-4 py-2 text-neutral-500">{formatDateTime(site.createdAt, timezone)}</td>
+                  <td className="px-4 py-2 text-neutral-700">{formatDateTime(site.createdAt, timezone)}</td>
                   <td className="px-4 py-2">
                     <CheckConnectionButton id={site.id} />
                   </td>
