@@ -5,6 +5,8 @@ import { NAV_ITEMS, ADMIN_NAV_ITEMS } from "@/lib/navigation";
 import { HeaderNav } from "./HeaderNav";
 import { LogoutButton } from "./LogoutButton";
 import { ThemeSwitcher } from "./ThemeSwitcher";
+import { LanguageSwitcher } from "./LanguageSwitcher";
+import { I18nProvider } from "./I18nProvider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -37,20 +39,23 @@ export default async function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-50">
-        <header className="sticky top-0 z-40 border-b border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
-          <div className="mx-auto flex max-w-7xl items-center gap-6 px-4 py-3">
-            <span className="shrink-0 font-semibold">Let&apos;s Blog Server</span>
-            {session && <HeaderNav navItems={navItems} />}
-            {session && (
-              <div className="ml-auto flex shrink-0 items-center gap-4 text-sm">
-                <span className="text-neutral-500 dark:text-neutral-400">{session.user.email}</span>
-                <ThemeSwitcher />
-                <LogoutButton />
-              </div>
-            )}
-          </div>
-        </header>
-        <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">{children}</main>
+        <I18nProvider>
+          <header className="sticky top-0 z-40 border-b border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
+            <div className="mx-auto flex max-w-7xl items-center gap-6 px-4 py-3">
+              <span className="shrink-0 font-semibold">Let&apos;s Blog Server</span>
+              {session && <HeaderNav navItems={navItems} />}
+              {session && (
+                <div className="ml-auto flex shrink-0 items-center gap-4 text-sm">
+                  <span className="text-neutral-500 dark:text-neutral-400">{session.user.email}</span>
+                  <LanguageSwitcher />
+                  <ThemeSwitcher />
+                  <LogoutButton />
+                </div>
+              )}
+            </div>
+          </header>
+          <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">{children}</main>
+        </I18nProvider>
       </body>
     </html>
   );

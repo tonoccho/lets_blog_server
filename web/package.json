@@ -12,7 +12,9 @@
     "test:coverage": "jest --coverage",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:debug": "playwright test --debug"
+    "test:e2e:debug": "playwright test --debug",
+    "test:a11y": "playwright test --grep Accessibility",
+    "generate:api-client": "cd .. && ./scripts/generate-api-client.sh"
   },
   "dependencies": {
     "lucide-react": "^1.27.0",
@@ -23,6 +25,8 @@
     "server-only": "^0.0.1"
   },
   "devDependencies": {
+    "@orval/core": "^6.23.0",
+    "@orval/fetch": "^6.23.0",
     "@playwright/test": "^1.40.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^7.0.0",
@@ -32,6 +36,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "axe-playwright": "^2.2.2",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "jest": "^30.4.2",

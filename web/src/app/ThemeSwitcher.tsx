@@ -5,11 +5,23 @@ import { Moon, Sun } from "lucide-react";
 
 type Theme = "light" | "dark" | "auto";
 
+const applyTheme = (newTheme: Theme) => {
+  const html = document.documentElement;
+  if (newTheme === "auto") {
+    html.removeAttribute("data-theme");
+    localStorage.removeItem("theme");
+  } else {
+    html.setAttribute("data-theme", newTheme);
+    localStorage.setItem("theme", newTheme);
+  }
+};
+
 export function ThemeSwitcher() {
   const [theme, setTheme] = useState<Theme>("auto");
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
     const stored = localStorage.getItem("theme") as Theme | null;
     if (stored) {
@@ -19,17 +31,6 @@ export function ThemeSwitcher() {
       applyTheme("auto");
     }
   }, []);
-
-  const applyTheme = (newTheme: Theme) => {
-    const html = document.documentElement;
-    if (newTheme === "auto") {
-      html.removeAttribute("data-theme");
-      localStorage.removeItem("theme");
-    } else {
-      html.setAttribute("data-theme", newTheme);
-      localStorage.setItem("theme", newTheme);
-    }
-  };
 
   const nextTheme = (): Theme => {
     const themes: Theme[] = ["light", "dark", "auto"];
