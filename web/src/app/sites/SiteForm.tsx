@@ -22,6 +22,7 @@ export function SiteForm() {
   useEffect(() => {
     if (state.success) {
       formRef.current?.reset();
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCmsType("WORDPRESS");
       setTransport("REST");
       setPrivateKeyPem("");

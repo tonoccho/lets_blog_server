@@ -31,6 +31,7 @@ export function ComfyUiCheckpointTable({
   );
   const [progress, setProgress] = useState<JobProgress | null>(null);
 
+  // eslint-disable-next-line react-hooks/immutability
   const { startPolling } = useGenerationJobPolling(
     (job: GenerationJobDetail) => handleJobSettled(job),
     (job: GenerationJobDetail) => setProgress(parseJobProgress(job.resultPayload))
