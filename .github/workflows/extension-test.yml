@@ -1,0 +1,64 @@
+name: Extension Build
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'extension/**'
+      - '.github/workflows/extension-test.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'extension/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: 'extension/package-lock.json'
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: extension
+
+      - name: Compile TypeScript
+        run: npm run compile
+        working-directory: extension
+
+      - name: Validate extension manifest
+        run: |
+          if [ ! -f "package.json" ]; then
+            echo "Error: package.json not found"
+            exit 1
+          fi
+          if ! grep -q '"displayName"' package.json; then
+            echo "Error: displayName not found in package.json"
+            exit 1
+          fi
+          if ! grep -q '"main"' package.json; then
+            echo "Error: main entry point not found in package.json"
+            exit 1
+          fi
+          if ! grep -q '"engines"' package.json; then
+            echo "Error: engines field not found in package.json"
+            exit 1
+          fi
+          echo "✓ Extension manifest validation passed"
+        working-directory: extension
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-build
+          path: extension/out/
+          retention-days: 30

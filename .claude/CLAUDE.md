@@ -484,3 +484,51 @@ npm run generate:api-client
 ```
 
 This script fetches the latest OpenAPI spec and regenerates client code.
+
+---
+
+## 19. GitHub Actions CI/CD Workflows
+
+This repository uses GitHub Actions to automate testing, linting, and validation on every push and pull request.
+
+### Workflow Overview
+
+| Workflow | Trigger | Purpose |
+| --- | --- | --- |
+| **API Tests and Coverage** | Push to main/develop; API path changes | Run unit tests with JaCoCo coverage, lint checks, and upload coverage to Codecov |
+| **Frontend Tests** | Push to main/develop; web path changes | TypeScript type checking, Next.js build, linting, unit tests, and E2E tests |
+| **Extension Build** | Push to main/develop; extension path changes | TypeScript compilation and extension manifest validation |
+
+#### Running Locally
+
+Before pushing, run the same checks locally to catch issues early:
+
+```bash
+# API
+cd api
+./gradlew lint test
+
+# Frontend
+cd web
+npm run lint
+npm run build  # Includes TypeScript type checking
+
+# Extension
+cd extension
+npm run compile
+```
+
+### Workflow Status
+
+Workflow status badges are displayed in the README.md. You can also view detailed reports on the [Actions page](https://github.com/tonoccho/lets_blog_server/actions).
+
+### Understanding Failures
+
+If a workflow fails:
+
+1. **Check the workflow log** on the Actions page
+2. **Identify which step failed** (lint, test, build, etc.)
+3. **Run that step locally** to reproduce the error
+4. **Fix the issue** and commit/push again
+
+The workflow will automatically re-run on your next push.

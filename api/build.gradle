@@ -5,6 +5,7 @@ plugins {
     id 'org.owasp.dependencycheck' version '9.0.7'
     id 'me.champeau.jmh' version '0.7.2'
     id 'jacoco'
+    id 'checkstyle'
 }
 
 group = 'com.letsblog'
@@ -89,6 +90,26 @@ jacocoTestReport {
         xml.required = true
         html.required = true
         csv.required = false
+    }
+}
+
+checkstyle {
+    configFile = file('checkstyle.xml')
+    ignoreFailures = false
+    showViolations = true
+}
+
+tasks.named('checkstyleMain') {
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}
+
+task lint {
+    dependsOn checkstyleMain
+    doLast {
+        println "✓ Lint check passed"
     }
 }
 
