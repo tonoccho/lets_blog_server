@@ -40,7 +40,7 @@ spring:
       max-request-size: 100MB
 
 app:
-  encryption-key: test-key-for-testing-only
+  encryption-key: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
   mail:
     from: test@letsblog.example.com
   web:

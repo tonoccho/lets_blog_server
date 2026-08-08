@@ -9,6 +9,7 @@ import com.letsblog.api.cms.MediaUploadResult;
 import com.letsblog.api.cms.PostContent;
 import com.letsblog.api.cms.PostResult;
 import com.letsblog.api.cms.WpCliInstallResult;
+import com.letsblog.api.config.LegacyJacksonRestClientConfig;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
@@ -42,7 +43,9 @@ public class WordPressAgentOperations {
             RestClient.Builder restClientBuilder,
             @Value("${app.wordpress-provision-base-url}") String baseUrl,
             @Value("${app.wordpress-provision-token}") String provisionToken) {
-        this.client = restClientBuilder.clone().baseUrl(baseUrl).build();
+        RestClient.Builder clonedBuilder = restClientBuilder.clone().baseUrl(baseUrl);
+        LegacyJacksonRestClientConfig.preferJackson2(clonedBuilder);
+        this.client = clonedBuilder.build();
         this.provisionToken = provisionToken;
     }
 

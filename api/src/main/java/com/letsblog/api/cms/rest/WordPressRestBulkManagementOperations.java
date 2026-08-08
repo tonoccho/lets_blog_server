@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.letsblog.api.cms.CmsApiException;
 import com.letsblog.api.cms.CmsCredentials.WordPressCredentials;
 import com.letsblog.api.cms.ssh.WordPressSshOperations.SshApplyResult;
+import com.letsblog.api.config.LegacyJacksonRestClientConfig;
 import com.letsblog.api.domain.BulkOperationType;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -40,6 +41,7 @@ public class WordPressRestBulkManagementOperations {
     private final RestClient.Builder restClientBuilder;
 
     public WordPressRestBulkManagementOperations(RestClient.Builder restClientBuilder) {
+        LegacyJacksonRestClientConfig.preferJackson2(restClientBuilder);
         this.restClientBuilder = restClientBuilder;
     }
 

@@ -2,6 +2,7 @@ package com.letsblog.api.ai;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.letsblog.api.config.LegacyJacksonRestClientConfig;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
@@ -34,6 +35,7 @@ public class ComfyUiClient {
 
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
     ComfyUiClient(RestClient.Builder builder, String checkpointName) {
+        LegacyJacksonRestClientConfig.preferJackson2(builder);
         this.client = builder.build();
         this.checkpointName = checkpointName;
     }

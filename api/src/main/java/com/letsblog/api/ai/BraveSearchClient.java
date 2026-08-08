@@ -1,6 +1,7 @@
 package com.letsblog.api.ai;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.letsblog.api.config.LegacyJacksonRestClientConfig;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -21,7 +22,9 @@ public class BraveSearchClient {
     private final RestClient client;
 
     public BraveSearchClient(@Value("${app.brave-search-base-url}") String baseUrl) {
-        this.client = RestClient.builder().baseUrl(baseUrl).build();
+        RestClient.Builder builder = RestClient.builder().baseUrl(baseUrl);
+        LegacyJacksonRestClientConfig.preferJackson2(builder);
+        this.client = builder.build();
     }
 
     public List<BraveSearchResult> search(String query, int count, String apiKey) {

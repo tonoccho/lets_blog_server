@@ -5,14 +5,16 @@ import com.letsblog.api.domain.CustomTag;
 import com.letsblog.api.dto.GenerateCustomTagRequest;
 import com.letsblog.api.dto.ValidateCustomTagRequest;
 import com.letsblog.api.repository.CustomTagRepository;
+import com.letsblog.api.service.ApiKeyService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,9 +31,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@ActiveProfiles("test")
 @Transactional
 @DisplayName("カスタムタグ生成機能の統合テスト")
 class CustomTagGenerationIntegrationTest {
+
+    private static final String API_KEY_HEADER = "X-API-Key";
+    private static final String TEST_API_KEY = "lb_test-key";
+    private static final String ACTOR_ROLE_HEADER = "X-Actor-Role";
+    private static final String ADMIN_ROLE = "admin";
 
     @Autowired
     private MockMvc mockMvc;
@@ -39,11 +47,19 @@ class CustomTagGenerationIntegrationTest {
     @Autowired
     private ObjectMapper objectMapper;
 
-    @MockBean
+    @MockitoBean
     private OllamaClient ollamaClient;
+
+    @MockitoBean
+    private ApiKeyService apiKeyService;
 
     @Autowired
     private CustomTagRepository customTagRepository;
+
+    @BeforeEach
+    void setUpApiKeyAuth() {
+        when(apiKeyService.resolveUserId(TEST_API_KEY)).thenReturn(Optional.of(1L));
+    }
 
     @Test
     @DisplayName("正常系: Ollamaプロンプト入力からタグ生成・保存までの完全フロー")
@@ -89,6 +105,8 @@ class CustomTagGenerationIntegrationTest {
         MvcResult result = mockMvc.perform(
             post("/api/custom-tags/generate")
                 .contentType(MediaType.APPLICATION_JSON)
+                .header(API_KEY_HEADER, TEST_API_KEY)
+                .header(ACTOR_ROLE_HEADER, ADMIN_ROLE)
                 .content(objectMapper.writeValueAsString(request))
         )
         .andExpect(status().isCreated())
@@ -124,6 +142,8 @@ class CustomTagGenerationIntegrationTest {
         mockMvc.perform(
             post("/api/custom-tags/generate")
                 .contentType(MediaType.APPLICATION_JSON)
+                .header(API_KEY_HEADER, TEST_API_KEY)
+                .header(ACTOR_ROLE_HEADER, ADMIN_ROLE)
                 .content(objectMapper.writeValueAsString(request))
         )
         .andExpect(status().isBadRequest());
@@ -158,6 +178,8 @@ class CustomTagGenerationIntegrationTest {
         mockMvc.perform(
             post("/api/custom-tags/generate")
                 .contentType(MediaType.APPLICATION_JSON)
+                .header(API_KEY_HEADER, TEST_API_KEY)
+                .header(ACTOR_ROLE_HEADER, ADMIN_ROLE)
                 .content(objectMapper.writeValueAsString(request))
         )
         .andExpect(status().isConflict());
@@ -186,6 +208,8 @@ class CustomTagGenerationIntegrationTest {
         mockMvc.perform(
             post("/api/custom-tags/generate")
                 .contentType(MediaType.APPLICATION_JSON)
+                .header(API_KEY_HEADER, TEST_API_KEY)
+                .header(ACTOR_ROLE_HEADER, ADMIN_ROLE)
                 .content(objectMapper.writeValueAsString(request))
         )
         .andExpect(status().isBadRequest());
@@ -214,6 +238,8 @@ class CustomTagGenerationIntegrationTest {
         mockMvc.perform(
             post("/api/custom-tags/generate")
                 .contentType(MediaType.APPLICATION_JSON)
+                .header(API_KEY_HEADER, TEST_API_KEY)
+                .header(ACTOR_ROLE_HEADER, ADMIN_ROLE)
                 .content(objectMapper.writeValueAsString(request))
         )
         .andExpect(status().isBadRequest());
@@ -242,6 +268,8 @@ class CustomTagGenerationIntegrationTest {
         mockMvc.perform(
             post("/api/custom-tags/generate")
                 .contentType(MediaType.APPLICATION_JSON)
+                .header(API_KEY_HEADER, TEST_API_KEY)
+                .header(ACTOR_ROLE_HEADER, ADMIN_ROLE)
                 .content(objectMapper.writeValueAsString(globalRequest))
         )
         .andExpect(status().isCreated());
@@ -262,12 +290,13 @@ class CustomTagGenerationIntegrationTest {
         mockMvc.perform(
             post("/api/custom-tags/validate")
                 .contentType(MediaType.APPLICATION_JSON)
+                .header(API_KEY_HEADER, TEST_API_KEY)
                 .content(objectMapper.writeValueAsString(
                     new ValidateCustomTagRequest(validHtml, validCss)
                 ))
         )
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.valid").value(true));
+        .andExpect(jsonPath("$.isValid").value(true));
     }
 
     @Test
@@ -281,12 +310,13 @@ class CustomTagGenerationIntegrationTest {
         mockMvc.perform(
             post("/api/custom-tags/validate")
                 .contentType(MediaType.APPLICATION_JSON)
+                .header(API_KEY_HEADER, TEST_API_KEY)
                 .content(objectMapper.writeValueAsString(
                     new ValidateCustomTagRequest(maliciousHtml, css)
                 ))
         )
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.valid").value(false))
+        .andExpect(jsonPath("$.isValid").value(false))
         .andExpect(jsonPath("$.errors").isArray());
     }
 
