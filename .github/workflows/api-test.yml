@@ -45,6 +45,10 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x api/gradlew
 
+      - name: Run linter
+        working-directory: api
+        run: ./gradlew lint
+
       - name: Run unit tests with coverage
         working-directory: api
         run: |

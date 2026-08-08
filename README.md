@@ -7,6 +7,15 @@ Docker Composeでまとめて起動する。クライアントはVSCode拡張機
 
 詳細なアーキテクチャは [spec/phase1/00-overview.md](spec/phase1/00-overview.md) を参照。
 
+## CI/CD & Quality
+
+[![API Tests and Coverage](https://github.com/tonoccho/lets_blog_server/actions/workflows/api-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/api-test.yml)
+[![Frontend Tests](https://github.com/tonoccho/lets_blog_server/actions/workflows/frontend-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/frontend-test.yml)
+[![Extension Build](https://github.com/tonoccho/lets_blog_server/actions/workflows/extension-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/extension-test.yml)
+
+[![codecov](https://codecov.io/gh/tonoccho/lets_blog_server/graph/badge.svg?flag=api)](https://codecov.io/gh/tonoccho/lets_blog_server)
+[![codecov](https://codecov.io/gh/tonoccho/lets_blog_server/graph/badge.svg?flag=frontend)](https://codecov.io/gh/tonoccho/lets_blog_server)
+
 ## 目次
 
 - [ハードウェア要件](#ハードウェア要件)
@@ -162,15 +171,13 @@ REST APIは以下のエンドポイントで公開しています:
 
 APIの認証にはX-API-Keyヘッダを使用します。APIキーはログイン(`/api/auth/login`)またはTOTP認証(`/api/auth/totp/verify`)成功時にレスポンスのheadersに含まれます。
 
-## Code Quality & Coverage
+## Code Quality & Coverage Details
 
-[![codecov](https://codecov.io/gh/tonoccho/lets_blog_server/graph/badge.svg?flag=api)](https://codecov.io/gh/tonoccho/lets_blog_server)
-[![codecov](https://codecov.io/gh/tonoccho/lets_blog_server/graph/badge.svg?flag=frontend)](https://codecov.io/gh/tonoccho/lets_blog_server)
+我々は継続的に全コンポーネント(API・Frontend・Extension)のコード品質を監視しています:
 
-我々は継続的に全コンポーネント(API・Frontend)のコード品質を監視しています:
-
-- **API**: JaCoCo経由でコード品質を測定(Java/Spring Boot)
-- **Frontend**: Jest経由でユニットテストカバレッジを測定(TypeScript/React)
+- **API Tests**: JaCoCo経由でコード品質を測定(Java/Spring Boot)
+- **Frontend Tests**: Jest経由でユニットテストカバレッジを測定(TypeScript/React)
+- **Extension Build**: TypeScript型チェックとコンパイル検証
 - **詳細**: [COVERAGE_TARGETS.md](docs/COVERAGE_TARGETS.md) を参照
 
 ## 関連ドキュメント
