@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useRef, useState, useEffect } from "react";
 import Link from "next/link";
 import { Menu, X, ChevronDown } from "lucide-react";
+import { useI18n } from "./I18nProvider";
 import type { NavItem } from "@/lib/navigation";
 
 export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
+  const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
   const [isAdminDropdownOpen, setIsAdminDropdownOpen] = useState(false);
   const adminDropdownRef = useRef<HTMLDivElement>(null);
@@ -77,11 +79,11 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
           <div className="relative" ref={adminDropdownRef}>
             <button
               onClick={() => setIsAdminDropdownOpen(!isAdminDropdownOpen)}
-              aria-label="管理メニューを開く"
+              aria-label={t("header", "openAdminMenu")}
               aria-expanded={isAdminDropdownOpen}
               className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg px-3 py-2 text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
             >
-              <span className="font-medium">管理</span>
+              <span className="font-medium">{t("header", "admin")}</span>
               <ChevronDown
                 className={`h-4 w-4 transition-transform ${
                   isAdminDropdownOpen ? "rotate-180" : ""
@@ -115,7 +117,7 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
       {/* Mobile hamburger button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        aria-label={isOpen ? "メニューを閉じる" : "メニューを開く"}
+        aria-label={isOpen ? t("header", "closeMenu") : t("header", "openMenu")}
         aria-expanded={isOpen}
         className="ml-1 flex items-center sm:hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 rounded"
       >
@@ -128,7 +130,7 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
 
       {/* Mobile drawer menu */}
       {isOpen && (
-        <div className="absolute left-0 right-0 top-full z-50 border-b border-neutral-200 bg-white sm:hidden" role="dialog" aria-label="ナビゲーション">
+        <div className="absolute left-0 right-0 top-full z-50 border-b border-neutral-200 bg-white sm:hidden" role="dialog" aria-label={t("header", "navigation")}>
           <nav className="space-y-1 px-4 py-3 text-sm">
             {regularItems.map((item) => {
               const Icon = item.icon;
@@ -149,7 +151,7 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
               <>
                 <div className="border-t border-neutral-200 my-2" />
                 <div className="font-medium text-neutral-500 px-3 py-2 text-xs uppercase tracking-wide">
-                  管理
+                  {t("header", "admin")}
                 </div>
                 {adminItems.map((item) => {
                   const Icon = item.icon;
