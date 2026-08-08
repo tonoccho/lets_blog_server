@@ -1,0 +1,37 @@
+{
+  "common": {
+    "appTitle": "Let's Blog Server",
+    "appName": "Let's Blog Server 管理画面"
+  },
+  "nav": {
+    "dashboard": "ダッシュボード",
+    "projects": "プロジェクト",
+    "sites": "サイト",
+    "posts": "投稿履歴",
+    "aiJobs": "AIジョブ",
+    "imageGallery": "生成画像ギャラリー",
+    "system": "システム",
+    "security": "セキュリティ設定",
+    "users": "ユーザー",
+    "auditLogs": "監査ログ",
+    "roleManagement": "ロール管理",
+    "customTags": "カスタムタグ",
+    "dataBackup": "データバックアップ",
+    "systemSettings": "システム設定",
+    "admin": "管理"
+  },
+  "header": {
+    "openAdminMenu": "管理メニューを開く",
+    "openMenu": "メニューを開く",
+    "closeMenu": "メニューを閉じる",
+    "navigation": "ナビゲーション",
+    "logout": "ログアウト"
+  },
+  "dashboard": {
+    "title": "ダッシュボード",
+    "registeredSites": "登録サイト数",
+    "posts": "投稿数",
+    "aiJobs": "AIジョブ数",
+    "description": "サイト登録・投稿履歴・AIジョブ状況を管理する画面"
+  }
+}
