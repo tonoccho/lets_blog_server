@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
 import { getSession } from "@/lib/session";
 import { NAV_ITEMS, ADMIN_NAV_ITEMS } from "@/lib/navigation";
+import { HeaderNav } from "./HeaderNav";
 import { LogoutButton } from "./LogoutButton";
 import "./globals.css";
 
@@ -39,24 +39,7 @@ export default async function RootLayout({
         <header className="sticky top-0 z-40 border-b border-neutral-200 bg-white">
           <div className="mx-auto flex max-w-7xl items-center gap-6 px-4 py-3">
             <span className="shrink-0 font-semibold">Let&apos;s Blog Server</span>
-            {session && (
-              <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto text-sm">
-                {navItems.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      title={item.label}
-                      className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
-                    >
-                      <Icon className="h-4 w-4" aria-hidden="true" />
-                      <span className="font-medium">{item.label}</span>
-                    </Link>
-                  );
-                })}
-              </nav>
-            )}
+            {session && <HeaderNav navItems={navItems} />}
             {session && (
               <div className="ml-auto flex shrink-0 items-center gap-4 text-sm">
                 <span className="text-neutral-500">{session.user.email}</span>
