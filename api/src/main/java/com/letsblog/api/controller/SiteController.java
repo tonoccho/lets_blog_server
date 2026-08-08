@@ -78,8 +78,10 @@ public class SiteController {
     @ApiResponse(responseCode = "200", description = "サイト一覧を返す")
     @ApiResponse(responseCode = "401", description = "認証ヘッダが無効")
     @GetMapping
-    public List<SiteResponse> list() {
-        return siteService.list();
+    public List<SiteResponse> list(
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(required = false) String sortOrder) {
+        return siteService.list(sortBy, sortOrder);
     }
 
     @Operation(summary = "サイトの詳細情報を取得", description = "指定されたサイトの詳細情報を取得します")

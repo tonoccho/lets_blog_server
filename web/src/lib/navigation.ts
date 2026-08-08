@@ -21,6 +21,7 @@ export type NavItem = {
   label: string;
   icon: LucideIcon;
   adminOnly?: boolean;
+  group?: "admin"; // ドロップダウングループの指定
 };
 
 export const NAV_ITEMS: NavItem[] = [
@@ -35,10 +36,10 @@ export const NAV_ITEMS: NavItem[] = [
 ];
 
 export const ADMIN_NAV_ITEMS: NavItem[] = [
-  { href: "/users", label: "ユーザー", icon: Users, adminOnly: true },
-  { href: "/audit-logs", label: "監査ログ", icon: ScrollText, adminOnly: true },
-  { href: "/admin/roles", label: "ロール管理", icon: Shield, adminOnly: true },
-  { href: "/custom-tags", label: "カスタムタグ", icon: Tag, adminOnly: true },
-  { href: "/admin/backup", label: "データバックアップ", icon: DatabaseBackup, adminOnly: true },
-  { href: "/admin/settings", label: "システム設定", icon: KeyRound, adminOnly: true },
+  { href: "/users", label: "ユーザー", icon: Users, adminOnly: true, group: "admin" },
+  { href: "/audit-logs", label: "監査ログ", icon: ScrollText, adminOnly: true, group: "admin" },
+  { href: "/admin/roles", label: "ロール管理", icon: Shield, adminOnly: true, group: "admin" },
+  { href: "/custom-tags", label: "カスタムタグ", icon: Tag, adminOnly: true, group: "admin" },
+  { href: "/admin/backup", label: "データバックアップ", icon: DatabaseBackup, adminOnly: true, group: "admin" },
+  { href: "/admin/settings", label: "システム設定", icon: KeyRound, adminOnly: true, group: "admin" },
 ];

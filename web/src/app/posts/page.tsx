@@ -1,6 +1,6 @@
 import { listPosts } from "@/lib/apiClient";
-import { formatDateTime } from "@/lib/formatDate";
 import { getViewerTimeZone } from "@/lib/session";
+import { PostsTable } from "./PostsTable";
 
 export default async function PostsPage() {
   const [posts, timezone] = await Promise.all([listPosts().catch(() => []), getViewerTimeZone()]);

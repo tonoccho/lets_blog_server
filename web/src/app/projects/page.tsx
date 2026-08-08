@@ -3,6 +3,7 @@ import { listProjects } from "@/lib/apiClient";
 import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
 import { formatDateTime } from "@/lib/formatDate";
 import { ProjectForm } from "./ProjectForm";
+import { ProjectsTable } from "./ProjectsTable";
 
 export default async function ProjectsPage() {
   const session = await requireAdminSession();
@@ -80,7 +81,10 @@ export default async function ProjectsPage() {
         </table>
       </div>
 
-      <ProjectForm />
+      <div id="project-form">
+        <ProjectForm />
+      </div>
     </div>
   );
 }
+
