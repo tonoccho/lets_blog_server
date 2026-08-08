@@ -12,6 +12,7 @@ import {
 } from "@/lib/apiClient";
 import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { Tabs, type TabItem } from "@/components/Tabs";
 import { EnvironmentSlot } from "./EnvironmentSlot";
 import { MasterEnvironmentSelector } from "./MasterEnvironmentSelector";
 import { ProjectGithubRepositoryForm } from "./ProjectGithubRepositoryForm";
@@ -70,6 +71,78 @@ export default async function ProjectDetailPage({
 
   const candidateUsers = allUsers.filter((user) => !members.some((member) => member.userId === user.id));
 
+  const tabs: TabItem[] = [
+    {
+      id: "overview",
+      label: "概要",
+      content: (
+        <div className="space-y-6">
+          <ProjectNameForm projectId={project.id} name={project.name} />
+
+          <div>
+            <h3 className="text-sm font-semibold mb-3">環境設定</h3>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <EnvironmentSlot projectId={project.id} environment="local" site={project.localSite} candidateSites={sites} />
+              <EnvironmentSlot projectId={project.id} environment="test" site={project.testSite} candidateSites={sites} />
+              <EnvironmentSlot
+                projectId={project.id}
+                environment="production"
+                site={project.productionSite}
+                candidateSites={sites}
+              />
+            </div>
+          </div>
+
+          <MasterEnvironmentSelector projectId={project.id} project={project} />
+        </div>
+      ),
+    },
+    {
+      id: "settings",
+      label: "設定",
+      content: (
+        <div className="space-y-6">
+          <ProjectGithubRepositoryForm projectId={project.id} githubRepository={project.githubRepository} />
+          <EnvironmentSyncPanel projectId={project.id} project={project} />
+        </div>
+      ),
+    },
+    {
+      id: "bulk-management",
+      label: "一括管理",
+      content: (
+        <BulkManagementPanel
+          projectId={project.id}
+          project={project}
+          logs={bulkOperationLogs}
+          logFilter={logFilter}
+          categoryPage={categoryPage}
+          timezone={timezone}
+        />
+      ),
+    },
+    {
+      id: "ai-models",
+      label: "AI・アセット",
+      content: (
+        <div className="space-y-6">
+          <ProjectAiModelsPanel projectId={project.id} />
+          <ProjectAssetGenerationPanel projectId={project.id} />
+        </div>
+      ),
+    },
+    {
+      id: "members",
+      label: "メンバー",
+      content: (
+        <div className="space-y-4">
+          <ProjectUserManager projectId={project.id} members={members} />
+          <AddProjectUserModal projectId={project.id} candidateUsers={candidateUsers} />
+        </div>
+      ),
+    },
+  ];
+
   return (
     <div className="space-y-8">
       <Breadcrumb
@@ -85,43 +158,7 @@ export default async function ProjectDetailPage({
       </div>
       <p className="font-mono text-sm text-neutral-500">{project.slug}</p>
 
-      <ProjectNameForm projectId={project.id} name={project.name} />
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <EnvironmentSlot projectId={project.id} environment="local" site={project.localSite} candidateSites={sites} />
-        <EnvironmentSlot projectId={project.id} environment="test" site={project.testSite} candidateSites={sites} />
-        <EnvironmentSlot
-          projectId={project.id}
-          environment="production"
-          site={project.productionSite}
-          candidateSites={sites}
-        />
-      </div>
-
-      <MasterEnvironmentSelector projectId={project.id} project={project} />
-
-      <ProjectGithubRepositoryForm projectId={project.id} githubRepository={project.githubRepository} />
-
-      <EnvironmentSyncPanel projectId={project.id} project={project} />
-
-      <BulkManagementPanel
-        projectId={project.id}
-        project={project}
-        logs={bulkOperationLogs}
-        logFilter={logFilter}
-        categoryPage={categoryPage}
-        timezone={timezone}
-      />
-
-      <ProjectAiModelsPanel projectId={project.id} />
-
-      <ProjectAssetGenerationPanel projectId={project.id} />
-
-      <div className="space-y-4">
-        <h2 className="text-lg font-semibold">プロジェクトメンバー</h2>
-        <ProjectUserManager projectId={project.id} members={members} />
-        <AddProjectUserModal projectId={project.id} candidateUsers={candidateUsers} />
-      </div>
+      <Tabs tabs={tabs} />
     </div>
   );
 }
