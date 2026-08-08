@@ -96,7 +96,7 @@ export default async function AuditLogsPage({
               </tr>
             )}
             {result.content.map((entry) => (
-              <tr key={entry.id} className="border-b border-neutral-100 last:border-0">
+              <tr key={entry.id} className="border-b border-neutral-100 last:border-0 cursor-pointer hover:bg-neutral-50 hover:shadow-sm transition-colors">
                 <td className="px-4 py-2 text-neutral-600">{formatDateTime(entry.createdAt, timezone)}</td>
                 <td className="px-4 py-2 font-mono">{entry.userId ?? "-"}</td>
                 <td className="px-4 py-2">{entry.action}</td>

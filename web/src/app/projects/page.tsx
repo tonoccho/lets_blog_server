@@ -33,7 +33,7 @@ export default async function ProjectsPage() {
               </tr>
             )}
             {projects.map((project) => (
-              <tr key={project.id} className="border-b border-neutral-100 last:border-0">
+              <tr key={project.id} className="border-b border-neutral-100 last:border-0 cursor-pointer hover:bg-neutral-50 hover:shadow-sm transition-colors">
                 <td className="px-4 py-2">{project.name}</td>
                 <td className="px-4 py-2 font-mono">{project.slug}</td>
                 <td className="px-4 py-2">
