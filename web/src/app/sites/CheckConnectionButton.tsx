@@ -26,21 +26,21 @@ export function CheckConnectionButton({ id }: { id: number }) {
           type="button"
           onClick={handleClick}
           disabled={isPending}
-          className="text-sm text-blue-600 hover:underline disabled:text-neutral-400"
+          className="text-sm text-blue-700 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 rounded px-2 py-1 disabled:text-neutral-500"
         >
           {isPending ? "確認中…" : "疎通確認"}
         </button>
-        {result?.connectionCheckStatus === "SUCCESS" && <span className="text-xs text-green-600">SUCCESS</span>}
-        {result?.connectionCheckStatus === "FAILED" && <span className="text-xs text-red-600">FAILED</span>}
+        {result?.connectionCheckStatus === "SUCCESS" && <span className="text-xs text-green-700 font-medium">SUCCESS</span>}
+        {result?.connectionCheckStatus === "FAILED" && <span className="text-xs text-red-700 font-medium">FAILED</span>}
       </div>
       {result?.connectionCheckStatus === "SUCCESS" && result.detail && (
-        <span className="text-xs text-neutral-500">{result.detail}</span>
+        <span className="text-xs text-neutral-700">{result.detail}</span>
       )}
       {result?.connectionCheckStatus === "FAILED" && result.failureReason && (
-        <span className="text-xs text-red-600">{result.failureReason}</span>
+        <span className="text-xs text-red-700">{result.failureReason}</span>
       )}
       {result?.hasAdminCapability === false && (
-        <span className="text-xs text-amber-700">
+        <span className="text-xs text-amber-800 font-medium">
           ⚠ このサイトの認証情報には管理者権限(ユーザー作成)がありません
         </span>
       )}

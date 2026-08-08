@@ -27,6 +27,10 @@ export default async function UsersPage() {
     <div className="space-y-8">
       <h1 className="text-xl font-semibold">ユーザー管理</h1>
 
+      <div className="text-sm text-neutral-600">
+        全{users.length}件を表示
+      </div>
+
       <div className="overflow-x-auto rounded-lg border border-neutral-200 bg-white">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-500">
@@ -57,7 +61,7 @@ export default async function UsersPage() {
             {users.map((user) => {
               const joinedProjects = userToProjects.get(user.id) ?? [];
               return (
-                <tr key={user.id} className="border-b border-neutral-100 last:border-0">
+                <tr key={user.id} className="border-b border-neutral-100 last:border-0 cursor-pointer hover:bg-neutral-50 hover:shadow-sm transition-colors">
                   <td className="px-4 py-2 text-neutral-500">
                     {joinedProjects.length > 0 ? joinedProjects.join(", ") : "-"}
                   </td>
