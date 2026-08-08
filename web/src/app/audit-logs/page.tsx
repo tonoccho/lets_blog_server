@@ -76,6 +76,14 @@ export default async function AuditLogsPage({
         </button>
       </form>
 
+      <div className="mb-3 flex items-center justify-between text-sm text-neutral-600">
+        <span>
+          {result.content.length > 0
+            ? `${result.number * result.size + 1}〜${Math.min((result.number + 1) * result.size, result.totalElements)}件 / 全${result.totalElements}件を表示`
+            : `全${result.totalElements}件`}
+        </span>
+      </div>
+
       <div className="overflow-x-auto rounded-lg border border-neutral-200 bg-white">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-500">
@@ -111,18 +119,30 @@ export default async function AuditLogsPage({
       </div>
 
       {result.totalPages > 1 && (
-        <div className="flex gap-2 text-sm">
-          {Array.from({ length: result.totalPages }, (_, i) => i).map((p) => (
-            <Link
-              key={p}
-              href={`/audit-logs?${buildQuery(p)}`}
-              className={`rounded px-3 py-1 ${
-                p === page ? "bg-neutral-900 text-white" : "border border-neutral-300 text-neutral-600"
-              }`}
-            >
-              {p + 1}
-            </Link>
-          ))}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between text-sm text-neutral-600">
+            <span>
+              ページ {result.number + 1} / {result.totalPages}
+            </span>
+            <span>
+              {result.content.length > 0
+                ? `${result.number * result.size + 1}〜${Math.min((result.number + 1) * result.size, result.totalElements)}件 / 全${result.totalElements}件`
+                : `全${result.totalElements}件`}
+            </span>
+          </div>
+          <div className="flex gap-2">
+            {Array.from({ length: result.totalPages }, (_, i) => i).map((p) => (
+              <Link
+                key={p}
+                href={`/audit-logs?${buildQuery(p)}`}
+                className={`rounded px-3 py-1 text-sm ${
+                  p === page ? "bg-neutral-900 text-white" : "border border-neutral-300 text-neutral-600 hover:bg-neutral-50"
+                }`}
+              >
+                {p + 1}
+              </Link>
+            ))}
+          </div>
         </div>
       )}
     </div>

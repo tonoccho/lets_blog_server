@@ -143,7 +143,7 @@ export function SiteListTable({
           <option value="UNBOUND">未紐付けのみ</option>
         </select>
         <span className="text-neutral-700">
-          {sites.length}件中{filteredSites.length}件を表示
+          {filteredSites.length > 0 ? `${filteredSites.length}件を表示 (全${sites.length}件中)` : `全${sites.length}件`}
         </span>
       </div>
 

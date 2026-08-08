@@ -9,6 +9,10 @@ export default async function PostsPage() {
     <div className="space-y-8">
       <h1 className="text-xl font-semibold">投稿履歴</h1>
 
+      <div className="text-sm text-neutral-600">
+        全{posts.length}件を表示
+      </div>
+
       <div className="overflow-x-auto rounded-lg border border-neutral-200 bg-white">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-500">
