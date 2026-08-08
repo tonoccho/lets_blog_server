@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.letsblog.api.cms.agent.WordPressAgentOperations;
 import com.letsblog.api.cms.ssh.WordPressSshOperations;
+import com.letsblog.api.config.LegacyJacksonRestClientConfig;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
@@ -38,6 +39,7 @@ public class WordPressAdapter implements CmsAdapter {
 
     public WordPressAdapter(RestClient.Builder restClientBuilder, WordPressSshOperations sshOperations,
             WordPressAgentOperations agentOperations, WordPressBulkManagementClient bulkManagementClient) {
+        LegacyJacksonRestClientConfig.preferJackson2(restClientBuilder);
         this.restClientBuilder = restClientBuilder;
         this.sshOperations = sshOperations;
         this.agentOperations = agentOperations;

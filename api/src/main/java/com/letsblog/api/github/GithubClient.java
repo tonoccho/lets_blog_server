@@ -3,6 +3,7 @@ package com.letsblog.api.github;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.letsblog.api.config.LegacyJacksonRestClientConfig;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -22,7 +23,9 @@ public class GithubClient {
     private final RestClient client;
 
     public GithubClient(@Qualifier("githubRestClientBuilder") RestClient.Builder restClientBuilder) {
-        this.client = restClientBuilder.clone().baseUrl("https://api.github.com").build();
+        RestClient.Builder clonedBuilder = restClientBuilder.clone().baseUrl("https://api.github.com");
+        LegacyJacksonRestClientConfig.preferJackson2(clonedBuilder);
+        this.client = clonedBuilder.build();
     }
 
     public GithubIssue createIssue(String token, String owner, String repo, String title, String body) {

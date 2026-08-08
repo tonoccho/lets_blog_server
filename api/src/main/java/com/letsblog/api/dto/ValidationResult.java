@@ -12,6 +12,6 @@ public record ValidationResult(
     }
 
     public static ValidationResult invalid(List<ValidationError> errors, List<ValidationWarning> warnings) {
-        return new ValidationResult(!errors.isEmpty(), errors, warnings);
+        return new ValidationResult(errors.isEmpty(), errors, warnings);
     }
 }

@@ -3,6 +3,7 @@ package com.letsblog.api.cms;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.letsblog.api.config.LegacyJacksonRestClientConfig;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -34,6 +35,7 @@ public class MicroCmsAdapter implements CmsAdapter {
     private final RestClient.Builder restClientBuilder;
 
     public MicroCmsAdapter(RestClient.Builder restClientBuilder) {
+        LegacyJacksonRestClientConfig.preferJackson2(restClientBuilder);
         this.restClientBuilder = restClientBuilder;
     }
 

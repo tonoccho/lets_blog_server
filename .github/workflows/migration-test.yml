@@ -46,7 +46,7 @@ jobs:
       - name: Run migration tests
         run: |
           cd api
-          ./gradlew test -Dspring.datasource.url=jdbc:mysql://localhost:3306/lets_blog_test?useSSL=false&serverTimezone=UTC \
+          ./gradlew test "-Dspring.datasource.url=jdbc:mysql://localhost:3306/lets_blog_test?useSSL=false&serverTimezone=UTC" \
             -Dspring.datasource.username=test_user \
             -Dspring.datasource.password=test_pass \
             -Dspring.test.database.replace=any \
@@ -55,7 +55,7 @@ jobs:
       - name: Run idempotency test
         run: |
           cd api
-          ./gradlew test -Dspring.datasource.url=jdbc:mysql://localhost:3306/lets_blog_test?useSSL=false&serverTimezone=UTC \
+          ./gradlew test "-Dspring.datasource.url=jdbc:mysql://localhost:3306/lets_blog_test?useSSL=false&serverTimezone=UTC" \
             -Dspring.datasource.username=test_user \
             -Dspring.datasource.password=test_pass \
             -Dspring.test.database.replace=any \

@@ -11,5 +11,5 @@ CREATE TABLE frontend_error_logs (
     created_at DATETIME NOT NULL,
     INDEX idx_level (level),
     INDEX idx_created_at (created_at),
-    INDEX idx_url (url)
+    INDEX idx_url (url(255))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -20,6 +20,7 @@ import java.util.Map;
 public class HttpLoggingFilter extends OncePerRequestFilter {
 
     private static final long REQUEST_LOG_THRESHOLD_MS = 100;
+    private static final int REQUEST_BODY_CACHE_LIMIT = Integer.MAX_VALUE;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -29,7 +30,8 @@ public class HttpLoggingFilter extends OncePerRequestFilter {
             return;
         }
 
-        ContentCachingRequestWrapper requestWrapper = new ContentCachingRequestWrapper(request);
+        ContentCachingRequestWrapper requestWrapper =
+                new ContentCachingRequestWrapper(request, REQUEST_BODY_CACHE_LIMIT);
         ContentCachingResponseWrapper responseWrapper = new ContentCachingResponseWrapper(response);
 
         long startTime = System.currentTimeMillis();
