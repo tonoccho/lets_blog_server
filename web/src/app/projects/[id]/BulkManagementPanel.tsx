@@ -341,7 +341,7 @@ export function BulkManagementPanel({
               </thead>
               <tbody>
                 {logs.map((log) => (
-                  <tr key={log.id} className="border-b border-neutral-100 last:border-0">
+                  <tr key={log.id} className="border-b border-neutral-100 last:border-0 cursor-pointer hover:bg-neutral-50 hover:shadow-sm transition-colors">
                     <td className="px-2 py-1.5 text-neutral-500">
                       {formatDateTime(log.createdAt, timezone)}
                     </td>

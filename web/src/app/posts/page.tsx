@@ -29,7 +29,7 @@ export default async function PostsPage() {
               </tr>
             )}
             {posts.map((post) => (
-              <tr key={post.id} className="border-b border-neutral-100 last:border-0">
+              <tr key={post.id} className="border-b border-neutral-100 last:border-0 cursor-pointer hover:bg-neutral-50 hover:shadow-sm transition-colors">
                 <td className="px-4 py-2">{post.siteName}</td>
                 <td className="px-4 py-2 font-mono">{post.wpPostId}</td>
                 <td className="px-4 py-2">{post.slug ?? "-"}</td>

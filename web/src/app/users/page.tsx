@@ -49,7 +49,7 @@ export default async function UsersPage() {
             {users.map((user) => {
               const joinedProjects = userToProjects.get(user.id) ?? [];
               return (
-                <tr key={user.id} className="border-b border-neutral-100 last:border-0">
+                <tr key={user.id} className="border-b border-neutral-100 last:border-0 cursor-pointer hover:bg-neutral-50 hover:shadow-sm transition-colors">
                   <td className="px-4 py-2 text-neutral-500">
                     {joinedProjects.length > 0 ? joinedProjects.join(", ") : "-"}
                   </td>
