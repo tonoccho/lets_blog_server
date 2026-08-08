@@ -25,7 +25,7 @@ function MemberRow({ projectId, member }: { projectId: number; member: ProjectUs
   }
 
   return (
-    <tr className="border-b border-neutral-100 last:border-0">
+    <tr className="border-b border-neutral-100 last:border-0 cursor-pointer hover:bg-neutral-50 hover:shadow-sm transition-colors">
       <td className="px-4 py-2">{member.email}</td>
       <td className="px-4 py-2 text-neutral-600">{member.displayName}</td>
       <td className="px-4 py-2">

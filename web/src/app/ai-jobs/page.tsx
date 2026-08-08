@@ -31,7 +31,7 @@ export default async function AiJobsPage() {
               </tr>
             )}
             {jobs.map((job) => (
-              <tr key={job.id} className="border-b border-neutral-100 last:border-0">
+              <tr key={job.id} className="border-b border-neutral-100 last:border-0 cursor-pointer hover:bg-neutral-50 hover:shadow-sm transition-colors">
                 <td className="px-4 py-2 font-mono">{job.type}</td>
                 <td className="px-4 py-2">
                   <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs">{job.status}</span>

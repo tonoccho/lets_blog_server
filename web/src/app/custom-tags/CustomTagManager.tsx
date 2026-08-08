@@ -194,7 +194,7 @@ export function CustomTagManager({
               </tr>
             )}
             {tags.map((tag) => (
-              <tr key={tag.id} className="border-b border-neutral-100 last:border-0 align-top">
+              <tr key={tag.id} className="border-b border-neutral-100 last:border-0 align-top cursor-pointer hover:bg-neutral-50 hover:shadow-sm transition-colors">
                 <td className="px-4 py-2 font-mono">:::{tag.tagName}</td>
                 <td className="px-4 py-2">
                   <span

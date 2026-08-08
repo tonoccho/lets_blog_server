@@ -71,7 +71,7 @@ function UserRoleRow({ user, roles }: { user: UserRow; roles: RoleOption[] }) {
   }
 
   return (
-    <tr className="border-b border-neutral-100 align-top last:border-0">
+    <tr className="border-b border-neutral-100 align-top last:border-0 cursor-pointer hover:bg-neutral-50 hover:shadow-sm transition-colors">
       <td className="px-4 py-2">{user.email}</td>
       <td className="px-4 py-2">
         <div className="flex flex-wrap gap-1">
