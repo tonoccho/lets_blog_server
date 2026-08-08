@@ -2,6 +2,7 @@ package com.letsblog.api.ai;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.letsblog.api.config.LegacyJacksonRestClientConfig;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -50,7 +51,9 @@ public class OllamaClient {
             @Value("${app.ollama-base-url}") String baseUrl,
             @Value("${app.ollama-model}") String model,
             ObjectMapper objectMapper) {
-        this.client = RestClient.builder().baseUrl(baseUrl).build();
+        RestClient.Builder builder = RestClient.builder().baseUrl(baseUrl);
+        LegacyJacksonRestClientConfig.preferJackson2(builder);
+        this.client = builder.build();
         this.rawHttpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build();
         this.baseUrl = baseUrl;
         this.model = model;

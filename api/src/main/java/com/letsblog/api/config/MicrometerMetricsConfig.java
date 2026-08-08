@@ -4,9 +4,10 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.actuate.autoconfigure.metrics.MeterRegistryCustomizer;
+import org.springframework.boot.micrometer.metrics.autoconfigure.MeterRegistryCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Lazy;
 
 @Slf4j
 @Configuration
@@ -14,7 +15,11 @@ public class MicrometerMetricsConfig {
 
     private final MeterRegistry meterRegistry;
 
-    public MicrometerMetricsConfig(MeterRegistry meterRegistry) {
+    /**
+     * MeterRegistry生成自体がこのクラスの@Bean(metricsCommonTags)を要求するため、
+     * 即時注入すると循環参照(BeanCurrentlyInCreationException)になる。@Lazyで遅延解決する。
+     */
+    public MicrometerMetricsConfig(@Lazy MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
     }
 

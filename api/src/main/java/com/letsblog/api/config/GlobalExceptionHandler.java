@@ -13,6 +13,7 @@ import com.letsblog.api.service.ForbiddenException;
 import com.letsblog.api.service.GeneratedImageNotFoundException;
 import com.letsblog.api.service.GenerationJobNotFoundException;
 import com.letsblog.api.service.InvalidCredentialsException;
+import com.letsblog.api.service.InvalidCustomTagContentException;
 import com.letsblog.api.service.InvalidRoleException;
 import com.letsblog.api.service.InvalidTokenException;
 import com.letsblog.api.service.InvalidTotpCodeException;
@@ -104,6 +105,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(InvalidRoleException.class)
     public ResponseEntity<Map<String, String>> handleInvalidRole(InvalidRoleException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidCustomTagContentException.class)
+    public ResponseEntity<Map<String, String>> handleInvalidCustomTagContent(InvalidCustomTagContentException e) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
     }
 

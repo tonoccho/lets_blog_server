@@ -22,7 +22,7 @@ class CustomTagValidationServiceTest {
 
         ValidationResult result = validationService.validate(html, css);
 
-        assertFalse(result.isValid() || !result.errors().isEmpty());
+        assertTrue(result.isValid());
         assertTrue(result.errors().isEmpty());
     }
 

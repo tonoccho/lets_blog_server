@@ -4,6 +4,8 @@ import com.letsblog.api.ai.OllamaClient;
 import com.letsblog.api.domain.CustomTag;
 import com.letsblog.api.dto.GenerateCustomTagRequest;
 import com.letsblog.api.dto.GenerateCustomTagResponse;
+import com.letsblog.api.dto.ValidationError;
+import com.letsblog.api.dto.ValidationResult;
 import com.letsblog.api.repository.CustomTagRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -11,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Service
 public class CustomTagGenerationService {
@@ -18,17 +21,20 @@ public class CustomTagGenerationService {
     private final OllamaClient ollamaClient;
     private final CustomTagRepository customTagRepository;
     private final AdminAuthorizationService adminAuthorizationService;
+    private final CustomTagValidationService customTagValidationService;
 
     private static final Pattern HTML_PATTERN = Pattern.compile("```html\\s*\\n([\\s\\S]*?)\\n```");
-    private static final Pattern CSS_PATTERN = Pattern.compile("```(?:css)?\\s*\\n([\\s\\S]*?)\\n```");
+    private static final Pattern CSS_PATTERN = Pattern.compile("```css\\s*\\n([\\s\\S]*?)\\n```");
 
     public CustomTagGenerationService(
             OllamaClient ollamaClient,
             CustomTagRepository customTagRepository,
-            AdminAuthorizationService adminAuthorizationService) {
+            AdminAuthorizationService adminAuthorizationService,
+            CustomTagValidationService customTagValidationService) {
         this.ollamaClient = ollamaClient;
         this.customTagRepository = customTagRepository;
         this.adminAuthorizationService = adminAuthorizationService;
+        this.customTagValidationService = customTagValidationService;
     }
 
     @Transactional
@@ -44,7 +50,16 @@ public class CustomTagGenerationService {
 
         // バリデーション
         if (htmlTemplate.isBlank()) {
-            throw new IllegalArgumentException("OllamaレスポンスからHTMLを抽出できませんでした。```html ... ``` の形式で返されることを確認してください。");
+            throw new InvalidCustomTagContentException(
+                    "OllamaレスポンスからHTMLを抽出できませんでした。```html ... ``` の形式で返されることを確認してください。");
+        }
+
+        ValidationResult validationResult = customTagValidationService.validate(htmlTemplate, cssContent);
+        if (!validationResult.isValid()) {
+            String errorMessage = validationResult.errors().stream()
+                    .map(ValidationError::message)
+                    .collect(Collectors.joining(", "));
+            throw new InvalidCustomTagContentException("生成されたHTML/CSSがセキュリティ要件を満たしていません: " + errorMessage);
         }
 
         // カスタムタグが既に存在するかチェック
