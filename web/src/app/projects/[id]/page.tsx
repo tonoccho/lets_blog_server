@@ -11,6 +11,7 @@ import {
   ProjectEnvironment,
 } from "@/lib/apiClient";
 import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
+import { Breadcrumb } from "@/components/Breadcrumb";
 import { EnvironmentSlot } from "./EnvironmentSlot";
 import { MasterEnvironmentSelector } from "./MasterEnvironmentSelector";
 import { ProjectGithubRepositoryForm } from "./ProjectGithubRepositoryForm";
@@ -71,6 +72,13 @@ export default async function ProjectDetailPage({
 
   return (
     <div className="space-y-8">
+      <Breadcrumb
+        items={[
+          { label: "ダッシュボード", href: "/" },
+          { label: "プロジェクト", href: "/projects" },
+          { label: project.name },
+        ]}
+      />
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">{project.name}</h1>
         <DeleteProjectButton id={project.id} />

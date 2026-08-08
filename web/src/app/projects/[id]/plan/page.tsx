@@ -8,6 +8,7 @@ import {
   getArticlePlanIssueDescription,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
+import { Breadcrumb } from "@/components/Breadcrumb";
 import { ArticlePlanWorkspace } from "./ArticlePlanWorkspace";
 import { ArticlePlanIssueList } from "./ArticlePlanIssueList";
 
@@ -50,6 +51,14 @@ export default async function ArticlePlanPage({
 
   return (
     <div className="space-y-8">
+      <Breadcrumb
+        items={[
+          { label: "ダッシュボード", href: "/" },
+          { label: "プロジェクト", href: "/projects" },
+          { label: project.name, href: `/projects/${projectId}` },
+          { label: "記事計画" },
+        ]}
+      />
       <h1 className="text-xl font-semibold">{project.name} — 記事計画</h1>
 
       {!project.githubRepository && (
