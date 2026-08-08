@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import Link from 'next/link';
 import { logErrorToBackend, logErrorToConsole } from '@/lib/errorLogger';
 
 interface ErrorProps {
@@ -54,12 +55,12 @@ export default function GlobalError({ error, reset }: ErrorProps) {
             >
               もう一度試す
             </button>
-            <a
+            <Link
               href="/"
               className="block rounded-lg border border-neutral-300 px-4 py-2 text-center font-semibold text-neutral-900 transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-50 dark:hover:bg-neutral-900"
             >
               ホームページに戻る
-            </a>
+            </Link>
           </div>
 
           {process.env.NODE_ENV === 'development' && (

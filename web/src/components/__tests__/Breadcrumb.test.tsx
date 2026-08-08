@@ -1,8 +1,11 @@
 import { render, screen } from '@testing-library/react'
+import { ReactNode } from 'react'
 import { Breadcrumb, type BreadcrumbItem } from '../Breadcrumb'
 
 jest.mock('next/link', () => {
-  return ({ children, href }: any) => <a href={href}>{children}</a>
+  const Link = ({ children, href }: { children: ReactNode; href: string }) => <a href={href}>{children}</a>
+  Link.displayName = 'MockLink'
+  return Link
 })
 
 describe('Breadcrumb', () => {

@@ -44,7 +44,7 @@ test.describe('Accessibility (a11y) Testing', () => {
     // Log violations for manual review
     if (violations.length > 0) {
       console.log(`Found ${violations.length} accessibility violation(s):`);
-      violations.forEach((violation: any) => {
+      violations.forEach((violation: { id: string; description: string; impact: string; nodes: unknown[] }) => {
         console.log(`- ${violation.id}: ${violation.description}`);
         console.log(`  Impact: ${violation.impact}`);
         console.log(`  Elements affected: ${violation.nodes.length}`);
