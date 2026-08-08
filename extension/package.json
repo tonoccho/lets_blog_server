@@ -106,7 +106,7 @@
   "dependencies": {
     "gray-matter": "^4.0.3",
     "form-data": "^4.0.0",
-    "node-fetch": "^2.7.0",
+    "node-fetch": "^3.3.2",
     "@types/node-fetch": "^2.6.11"
   }
 }
