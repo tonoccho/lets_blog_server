@@ -36,7 +36,8 @@ public class TocStyleRenderService {
         return "<style>\n" + buildStyle(colors) + "\n</style>\n\n" + markdown;
     }
 
-    private String buildStyle(TagDesignColors colors) {
+    /** CustomTagServiceの統合CSS生成からも呼ばれるためpackage-private。 */
+    String buildStyle(TagDesignColors colors) {
         return "." + MarkdownRenderer.TOC_LIST_CLASS + "{list-style:none;margin:1em 0;padding:12px 16px;"
                 + "border-radius:8px;background:" + colors.backgroundColor() + ";}"
                 + "." + MarkdownRenderer.TOC_LIST_CLASS + " ul{list-style:none;}"

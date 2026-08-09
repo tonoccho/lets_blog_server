@@ -4,8 +4,10 @@ import com.letsblog.api.aop.AuditLog;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.CustomTag;
 import com.letsblog.api.domain.CustomTagFormat;
+import com.letsblog.api.domain.EmbedTagType;
 import com.letsblog.api.dto.CustomTagRequest;
 import com.letsblog.api.dto.CustomTagResponse;
+import com.letsblog.api.dto.TagDesignColors;
 import com.letsblog.api.repository.CustomTagRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,11 +20,23 @@ public class CustomTagService {
 
     private final CustomTagRepository customTagRepository;
     private final AdminAuthorizationService adminAuthorizationService;
+    private final TagDesignSettingService tagDesignSettingService;
+    private final TocStyleRenderService tocStyleRenderService;
+    private final BlogCardTagRenderService blogCardTagRenderService;
+    private final AmazonTagRenderService amazonTagRenderService;
 
     public CustomTagService(CustomTagRepository customTagRepository,
-                             AdminAuthorizationService adminAuthorizationService) {
+                             AdminAuthorizationService adminAuthorizationService,
+                             TagDesignSettingService tagDesignSettingService,
+                             TocStyleRenderService tocStyleRenderService,
+                             BlogCardTagRenderService blogCardTagRenderService,
+                             AmazonTagRenderService amazonTagRenderService) {
         this.customTagRepository = customTagRepository;
         this.adminAuthorizationService = adminAuthorizationService;
+        this.tagDesignSettingService = tagDesignSettingService;
+        this.tocStyleRenderService = tocStyleRenderService;
+        this.blogCardTagRenderService = blogCardTagRenderService;
+        this.amazonTagRenderService = amazonTagRenderService;
     }
 
     @AuditLog(action = AuditLogAction.CUSTOM_TAG_CREATED, resourceType = "CUSTOM_TAG")
@@ -97,13 +111,16 @@ public class CustomTagService {
      * WordPressへ一括貼り付けするための統合CSS。list()と同じスコープ規約(projectId未指定=グローバルのみ、
      * 指定時はそのプロジェクト+グローバル)で、cssContentが空でないタグのみを連結する。
      * テーマCSSは含めない(WordPress側に既存のため重複・競合の原因になるため)。
+     * projectIdが指定されている場合、そのプロジェクトの[toc]/[blogcard]/[amazon]組み込みタグの
+     * デザインCSSも先頭に含める(組み込みタグのデザインはプロジェクト単位のためprojectId未指定時は対象外)。
      */
     @Transactional(readOnly = true)
     public String buildCssBundle(Long projectId) {
         List<CustomTag> tags = projectId == null
                 ? customTagRepository.findByProjectIdIsNull()
                 : customTagRepository.findByProjectIdOrProjectIdIsNull(projectId);
-        return buildCssFrom(tags);
+        String embedTagCss = projectId == null ? "" : buildEmbedTagCss(projectId);
+        return embedTagCss + buildCssFrom(tags);
     }
 
     /**
@@ -115,12 +132,33 @@ public class CustomTagService {
     }
 
     /**
-     * プロジェクト詳細向けの統合CSS。buildCssBundle()と異なりグローバルタグは含めず、
-     * 指定プロジェクトのタグのみを連結する。
+     * プロジェクト詳細/プロジェクト一覧向けの統合CSS。buildCssBundle()と異なりグローバルタグは含めず、
+     * 指定プロジェクトのタグのみを連結する。プロジェクトの[toc]/[blogcard]/[amazon]組み込みタグの
+     * デザインCSSも先頭に含める。
      */
     @Transactional(readOnly = true)
     public String buildProjectCssBundle(Long projectId) {
-        return buildCssFrom(customTagRepository.findByProjectId(projectId));
+        return buildEmbedTagCss(projectId) + buildCssFrom(customTagRepository.findByProjectId(projectId));
+    }
+
+    /**
+     * プロジェクトの[toc]/[blogcard]/[amazon]組み込みタグのデザインCSSを連結する。
+     * 記事本文への注入(TocStyleRenderService等)と同じbuildStyle()を再利用し、
+     * デザイン未保存のタグ種別もDesignPreset.DEFAULTのCSSとして含める。
+     */
+    private String buildEmbedTagCss(Long projectId) {
+        StringBuilder sb = new StringBuilder();
+        for (EmbedTagType tagType : EmbedTagType.values()) {
+            TagDesignColors colors = tagDesignSettingService.resolveColors(projectId, tagType);
+            String style = switch (tagType) {
+                case TOC -> tocStyleRenderService.buildStyle(colors);
+                case BLOGCARD -> blogCardTagRenderService.buildStyle(colors);
+                case AMAZON -> amazonTagRenderService.buildStyle(colors);
+            };
+            sb.append("/* === ").append(tagType.name().toLowerCase()).append(" (組み込みタグ) === */\n");
+            sb.append(style).append("\n\n");
+        }
+        return sb.toString();
     }
 
     private String buildCssFrom(List<CustomTag> tags) {
