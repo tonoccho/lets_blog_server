@@ -16,7 +16,6 @@ public class CustomTagValidationService {
     private static final Pattern SCRIPT_TAG_PATTERN = Pattern.compile("(?i)<\\s*script[^>]*>.*?</\\s*script\\s*>");
     private static final Pattern EVENT_HANDLER_PATTERN = Pattern.compile("(?i)\\s(on\\w+)\\s*=");
     private static final Pattern JAVASCRIPT_PROTOCOL_PATTERN = Pattern.compile("(?i)javascript\\s*:");
-    private static final Pattern CSS_SELECTOR_PATTERN = Pattern.compile("^[a-zA-Z0-9\\s.,#:\\[\\]=\"'()>+~-]+\\s*\\{");
 
     public ValidationResult validate(String htmlTemplate, String cssContent) {
         List<ValidationError> errors = new ArrayList<>();
@@ -126,8 +125,16 @@ public class CustomTagValidationService {
     }
 
     private void validateCssRule(String line, int lineNumber, List<ValidationError> errors) {
-        // セレクタの基本的なバリデーション
-        if (!CSS_SELECTOR_PATTERN.matcher(line).find()) {
+        // セレクタの基本的なバリデーション - CSSルールが { で始まるキーワード（@media, @keyframes等）でないこと確認
+        // 実際のセレクタ内容は多様なため、単純に { が存在することと基本的な構文を確認する
+        if (line.startsWith("@")) {
+            // @ルール（@media, @keyframes等）は許可
+            return;
+        }
+
+        // セレクタが空でなく、基本的な形式を持つことを確認
+        String selector = line.substring(0, line.indexOf("{")).trim();
+        if (selector.isEmpty()) {
             errors.add(ValidationError.of(
                 "invalid-css-selector",
                 "無効なCSSセレクタの形式です。セレクタ { の形式を確認してください。",
