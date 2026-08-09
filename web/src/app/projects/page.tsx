@@ -14,13 +14,13 @@ export default async function ProjectsPage() {
     <div className="space-y-8">
       <h1 className="text-xl font-semibold">プロジェクト</h1>
 
-      <div className="text-sm text-neutral-600">
+      <div className="text-sm text-neutral-600 dark:text-neutral-400">
         全{projects.length}件を表示
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-neutral-200 bg-white">
+      <div className="overflow-x-auto rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-500">
+          <thead className="border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">
             <tr>
               <th className="px-4 py-2">名前</th>
               <th className="px-4 py-2">slug</th>
@@ -32,46 +32,46 @@ export default async function ProjectsPage() {
           <tbody>
             {projects.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-neutral-600">
+                <td colSpan={5} className="px-4 py-6 text-center text-neutral-600 dark:text-neutral-400">
                   登録済みプロジェクトはありません
                 </td>
               </tr>
             )}
             {projects.map((project) => (
-              <tr key={project.id} className="border-b border-neutral-100 last:border-0 cursor-pointer hover:bg-neutral-50 hover:shadow-sm transition-colors">
+              <tr key={project.id} className="border-b border-neutral-100 dark:border-neutral-800 last:border-0 cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:shadow-sm transition-colors">
                 <td className="px-4 py-2">{project.name}</td>
                 <td className="px-4 py-2 font-mono">{project.slug}</td>
                 <td className="px-4 py-2">
                   <div className="flex gap-1">
                     <span
                       className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
-                        project.localSite ? "bg-blue-100 text-blue-700" : "bg-neutral-100 text-neutral-400"
+                        project.localSite ? "bg-blue-100 text-blue-700" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500"
                       }`}
                     >
                       local
                     </span>
                     <span
                       className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
-                        project.testSite ? "bg-amber-100 text-amber-700" : "bg-neutral-100 text-neutral-400"
+                        project.testSite ? "bg-amber-100 text-amber-700" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500"
                       }`}
                     >
                       test
                     </span>
                     <span
                       className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
-                        project.productionSite ? "bg-green-100 text-green-700" : "bg-neutral-100 text-neutral-400"
+                        project.productionSite ? "bg-green-100 text-green-700" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500"
                       }`}
                     >
                       production
                     </span>
                   </div>
                 </td>
-                <td className="px-4 py-2 text-neutral-500">{formatDateTime(project.createdAt, timezone)}</td>
+                <td className="px-4 py-2 text-neutral-500 dark:text-neutral-400">{formatDateTime(project.createdAt, timezone)}</td>
                 <td className="px-4 py-2 text-right space-x-2">
-                  <Link href={`/projects/${project.id}/plan`} className="text-sm text-neutral-600 hover:underline">
+                  <Link href={`/projects/${project.id}/plan`} className="text-sm text-neutral-600 dark:text-neutral-400 hover:underline">
                     計画
                   </Link>
-                  <Link href={`/projects/${project.id}`} className="text-sm text-neutral-600 hover:underline">
+                  <Link href={`/projects/${project.id}`} className="text-sm text-neutral-600 dark:text-neutral-400 hover:underline">
                     詳細
                   </Link>
                 </td>

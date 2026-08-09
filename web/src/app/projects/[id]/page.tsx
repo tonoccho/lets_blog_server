@@ -156,7 +156,7 @@ export default async function ProjectDetailPage({
         <h1 className="text-xl font-semibold">{project.name}</h1>
         <DeleteProjectButton id={project.id} />
       </div>
-      <p className="font-mono text-sm text-neutral-500">{project.slug}</p>
+      <p className="font-mono text-sm text-neutral-500 dark:text-neutral-400">{project.slug}</p>
 
       <Tabs tabs={tabs} />
     </div>

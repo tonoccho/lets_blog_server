@@ -26,12 +26,12 @@ export function ArticlePlanSessionList({
   error?: string;
 }) {
   return (
-    <div className="rounded-lg border border-neutral-200 bg-white p-5">
+    <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="font-medium">壁打ち一覧</h2>
         <button
           onClick={onNewChat}
-          className="rounded border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
+          className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-1.5 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
         >
           新規チャットを開始
         </button>
@@ -40,7 +40,7 @@ export function ArticlePlanSessionList({
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
 
       {sessions.length === 0 ? (
-        <p className="text-sm text-neutral-500">まだ壁打ちセッションはありません。</p>
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">まだ壁打ちセッションはありません。</p>
       ) : (
         <div className="flex flex-wrap gap-2">
           {sessions.map((s) => (
@@ -51,7 +51,7 @@ export function ArticlePlanSessionList({
               className={`rounded-full border px-3 py-1.5 text-sm disabled:opacity-50 ${
                 s.id === activeSessionId
                   ? "border-neutral-900 bg-neutral-900 text-white"
-                  : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
+                  : "border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
               }`}
             >
               {s.githubIssueNumber && (

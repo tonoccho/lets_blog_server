@@ -29,12 +29,12 @@ export function EnvironmentSlot({
   const [isUnbinding, startUnbind] = useTransition();
 
   return (
-    <div className="rounded-lg border border-neutral-200 bg-white p-4">
+    <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
       <h3 className="mb-2 font-medium">{ENVIRONMENT_LABEL[environment]}環境</h3>
       {site ? (
         <div className="space-y-2 text-sm">
           <p className="font-mono">{site.siteKey}</p>
-          <p className="text-neutral-600">{site.name}</p>
+          <p className="text-neutral-600 dark:text-neutral-400">{site.name}</p>
           <a href={site.baseUrl} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
             {site.baseUrl}
           </a>
@@ -51,7 +51,7 @@ export function EnvironmentSlot({
         </div>
       ) : (
         <form action={formAction} className="space-y-2 text-sm">
-          <select name="siteId" required className="w-full rounded border border-neutral-300 px-3 py-2 text-sm">
+          <select name="siteId" required className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm">
             <option value="">サイトを選択…</option>
             {candidateSites.map((candidate) => (
               <option key={candidate.id} value={candidate.id}>

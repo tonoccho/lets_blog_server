@@ -40,7 +40,7 @@ function TemplateEditor({ initialHtml, initialCss }: { initialHtml: string; init
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
       <div className="space-y-3">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">HTMLテンプレート</span>
+          <span className="text-neutral-600 dark:text-neutral-400">HTMLテンプレート</span>
           <textarea
             name="htmlTemplate"
             value={htmlTemplateValue}
@@ -48,30 +48,30 @@ function TemplateEditor({ initialHtml, initialCss }: { initialHtml: string; init
             required
             rows={6}
             placeholder='<div class="alert">{{content}}</div>'
-            className="rounded border border-neutral-300 px-3 py-2 font-mono text-sm"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 font-mono text-sm"
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">CSS(任意、このタグが使われた投稿の本文冒頭に一度だけ挿入されます)</span>
+          <span className="text-neutral-600 dark:text-neutral-400">CSS(任意、このタグが使われた投稿の本文冒頭に一度だけ挿入されます)</span>
           <textarea
             name="cssContent"
             value={cssContentValue}
             onChange={(e) => setCssContentValue(e.target.value)}
             rows={6}
             placeholder=".alert { color: red; border: 1px solid; padding: 0.5em; }"
-            className="rounded border border-neutral-300 px-3 py-2 font-mono text-sm"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 font-mono text-sm"
           />
         </label>
       </div>
       <div className="flex flex-col gap-1 text-sm">
-        <span className="text-neutral-600">
+        <span className="text-neutral-600 dark:text-neutral-400">
           プレビュー({"{{content}}"}/{"{{attr:xxx}}"}はサンプル値に置き換えて表示、入力後300ms自動更新)
         </span>
         <iframe
           title="カスタムタグプレビュー"
           srcDoc={previewSrcDoc}
           sandbox="allow-same-origin"
-          className="h-[268px] rounded border border-neutral-300 bg-white"
+          className="h-[268px] rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900"
         />
       </div>
     </div>
@@ -131,14 +131,14 @@ export function CustomTagManager({
     <div className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <label className="flex max-w-sm flex-col gap-1 text-sm">
-          <span className="text-neutral-600">表示スコープ</span>
+          <span className="text-neutral-600 dark:text-neutral-400">表示スコープ</span>
           <select
             value={currentProjectId ?? ""}
             onChange={(e) => {
               const value = e.target.value;
               router.push(value ? `/custom-tags?projectId=${value}` : "/custom-tags");
             }}
-            className="rounded border border-neutral-300 px-3 py-2 text-sm"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
           >
             <option value="">グローバル</option>
             {projects.map((project) => (
@@ -150,7 +150,7 @@ export function CustomTagManager({
         </label>
         <a
           href={`/custom-tags/css-bundle${currentProjectId ? `?projectId=${currentProjectId}` : ""}`}
-          className="rounded border border-neutral-300 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
+          className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
         >
           統合CSSダウンロード
         </a>
@@ -165,9 +165,9 @@ export function CustomTagManager({
         }}
       />
 
-      <div className="overflow-x-auto rounded-lg border border-neutral-200 bg-white">
+      <div className="overflow-x-auto rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-500">
+          <thead className="border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">
             <tr>
               <th className="px-4 py-2">タグ名</th>
               <th className="px-4 py-2">スコープ</th>
@@ -182,7 +182,7 @@ export function CustomTagManager({
               <tr>
                 <td colSpan={6} className="px-4 py-8 text-center">
                   <div className="flex flex-col items-center gap-4">
-                    <p className="text-neutral-600">登録済みカスタムタグはありません</p>
+                    <p className="text-neutral-600 dark:text-neutral-400">登録済みカスタムタグはありません</p>
                     <a
                       href="#custom-tag-form"
                       className="rounded bg-neutral-900 px-4 py-2 text-sm text-white hover:bg-neutral-800"
@@ -194,22 +194,24 @@ export function CustomTagManager({
               </tr>
             )}
             {tags.map((tag) => (
-              <tr key={tag.id} className="border-b border-neutral-100 last:border-0 align-top cursor-pointer hover:bg-neutral-50 hover:shadow-sm transition-colors">
+              <tr key={tag.id} className="border-b border-neutral-100 dark:border-neutral-800 last:border-0 align-top cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:shadow-sm transition-colors">
                 <td className="px-4 py-2 font-mono">:::{tag.tagName}</td>
                 <td className="px-4 py-2">
                   <span
                     className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
-                      tag.projectId ? "bg-blue-100 text-blue-700" : "bg-neutral-100 text-neutral-600"
+                      tag.projectId
+                        ? "bg-blue-100 text-blue-700"
+                        : "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400"
                     }`}
                   >
                     {tag.projectId ? projectNameById.get(tag.projectId) ?? `project#${tag.projectId}` : "グローバル"}
                   </span>
                 </td>
-                <td className="px-4 py-2 text-neutral-600">{tag.description}</td>
-                <td className="px-4 py-2 font-mono text-xs text-neutral-500">
+                <td className="px-4 py-2 text-neutral-600 dark:text-neutral-400">{tag.description}</td>
+                <td className="px-4 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-400">
                   <code className="whitespace-pre-wrap break-all">{tag.htmlTemplate}</code>
                 </td>
-                <td className="px-4 py-2 font-mono text-xs text-neutral-500">
+                <td className="px-4 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-400">
                   {tag.cssContent && <code className="whitespace-pre-wrap break-all">{tag.cssContent}</code>}
                 </td>
                 <td className="px-4 py-2 text-right whitespace-nowrap">
@@ -239,7 +241,7 @@ export function CustomTagManager({
         id="custom-tag-form"
         ref={formRef}
         action={formAction}
-        className="space-y-3 rounded-lg border border-neutral-200 bg-white p-5"
+        className="space-y-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5"
       >
         <div className="flex items-center justify-between">
           <h2 className="font-medium">
@@ -256,13 +258,13 @@ export function CustomTagManager({
                 setEditing(null);
                 setGeneratedContent(null);
               }}
-              className="text-sm text-neutral-500 hover:underline"
+              className="text-sm text-neutral-500 dark:text-neutral-400 hover:underline"
             >
               新規作成に戻す
             </button>
           )}
         </div>
-        <p className="text-sm text-neutral-600">
+        <p className="text-sm text-neutral-600 dark:text-neutral-400">
           投稿のMarkdown本文中で <code>{":::tagname key=\"value\""}</code> 〜 <code>:::</code> の形式で使用できます。
           テンプレート内では本文を <code>{"{{content}}"}</code>、属性値を <code>{"{{attr:key}}"}</code> で参照できます。
           スコープ: <strong>{formProjectId ? projectNameById.get(formProjectId) ?? `project#${formProjectId}` : "グローバル"}</strong>
@@ -272,7 +274,7 @@ export function CustomTagManager({
         <input type="hidden" name="projectId" value={formProjectId ?? ""} />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-neutral-600">タグ名(英数字・ハイフン・アンダースコアのみ)</span>
+            <span className="text-neutral-600 dark:text-neutral-400">タグ名(英数字・ハイフン・アンダースコアのみ)</span>
             <input
               name="tagName"
               key={editing?.id ?? generatedContent?.tagName ?? "new"}
@@ -280,17 +282,17 @@ export function CustomTagManager({
               required
               pattern="[a-zA-Z][a-zA-Z0-9_\-]*"
               placeholder="alert"
-              className="rounded border border-neutral-300 px-3 py-2 text-sm"
+              className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-neutral-600">説明(任意)</span>
+            <span className="text-neutral-600 dark:text-neutral-400">説明(任意)</span>
             <input
               name="description"
               key={`desc-${editing?.id ?? generatedContent?.tagName ?? "new"}`}
               defaultValue={editing?.description ?? generatedContent?.description ?? ""}
               placeholder="注意書きの装飾"
-              className="rounded border border-neutral-300 px-3 py-2 text-sm"
+              className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
             />
           </label>
         </div>

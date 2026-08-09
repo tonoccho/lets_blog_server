@@ -68,7 +68,7 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
               key={item.href}
               href={item.href}
               title={item.label}
-              className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+              className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-neutral-600 dark:text-neutral-400 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
             >
               <Icon className="h-4 w-4" aria-hidden="true" />
               <span className="font-medium">{item.label}</span>
@@ -82,7 +82,7 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
               onClick={() => setIsAdminDropdownOpen(!isAdminDropdownOpen)}
               aria-label={t("header", "openAdminMenu")}
               aria-expanded={isAdminDropdownOpen}
-              className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg px-3 py-2 text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
+              className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg px-3 py-2 text-neutral-600 dark:text-neutral-400 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-50"
             >
               <span className="font-medium">{t("header", "admin")}</span>
               <ChevronDown
@@ -94,7 +94,7 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
             </button>
 
             {isAdminDropdownOpen && (
-              <div className="absolute top-full right-0 z-50 mt-1 rounded-lg border border-neutral-200 bg-white shadow-lg">
+              <div className="absolute top-full right-0 z-50 mt-1 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-lg">
                 {adminItems.map((item) => {
                   const Icon = ICON_MAP[item.icon];
                   return (
@@ -102,7 +102,7 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
                       key={item.href}
                       href={item.href}
                       onClick={() => setIsAdminDropdownOpen(false)}
-                      className="flex items-center gap-2 whitespace-nowrap px-4 py-2 text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 first:rounded-t-lg last:rounded-b-lg"
+                      className="flex items-center gap-2 whitespace-nowrap px-4 py-2 text-neutral-600 dark:text-neutral-400 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-50 first:rounded-t-lg last:rounded-b-lg"
                     >
                       <Icon className="h-4 w-4" aria-hidden="true" />
                       <span className="font-medium">{item.label}</span>
@@ -123,15 +123,15 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
         className="ml-1 flex items-center sm:hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 rounded"
       >
         {isOpen ? (
-          <X className="h-5 w-5 text-neutral-600" />
+          <X className="h-5 w-5 text-neutral-600 dark:text-neutral-400" />
         ) : (
-          <Menu className="h-5 w-5 text-neutral-600" />
+          <Menu className="h-5 w-5 text-neutral-600 dark:text-neutral-400" />
         )}
       </button>
 
       {/* Mobile drawer menu */}
       {isOpen && (
-        <div className="absolute left-0 right-0 top-full z-50 border-b border-neutral-200 bg-white sm:hidden" role="dialog" aria-label={t("header", "navigation")}>
+        <div className="absolute left-0 right-0 top-full z-50 border-b border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 sm:hidden" role="dialog" aria-label={t("header", "navigation")}>
           <nav className="space-y-1 px-4 py-3 text-sm">
             {regularItems.map((item) => {
               const Icon = ICON_MAP[item.icon];
@@ -140,7 +140,7 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
                   key={item.href}
                   href={item.href}
                   onClick={() => setIsOpen(false)}
-                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-neutral-600 dark:text-neutral-400 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
                 >
                   <Icon className="h-4 w-4" aria-hidden="true" />
                   <span className="font-medium">{item.label}</span>
@@ -150,8 +150,8 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
 
             {adminItems.length > 0 && (
               <>
-                <div className="border-t border-neutral-200 my-2" />
-                <div className="font-medium text-neutral-500 px-3 py-2 text-xs uppercase tracking-wide">
+                <div className="border-t border-neutral-200 dark:border-neutral-800 my-2" />
+                <div className="font-medium text-neutral-500 dark:text-neutral-400 px-3 py-2 text-xs uppercase tracking-wide">
                   {t("header", "admin")}
                 </div>
                 {adminItems.map((item) => {
@@ -161,7 +161,7 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
                       key={item.href}
                       href={item.href}
                       onClick={() => setIsOpen(false)}
-                      className="flex items-center gap-2 rounded-lg px-3 py-2 text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 ml-2"
+                      className="flex items-center gap-2 rounded-lg px-3 py-2 text-neutral-600 dark:text-neutral-400 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-50 ml-2"
                     >
                       <Icon className="h-4 w-4" aria-hidden="true" />
                       <span className="font-medium">{item.label}</span>

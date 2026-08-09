@@ -21,9 +21,9 @@ export function BackupPanel() {
 
   return (
     <div className="space-y-8">
-      <section className="space-y-3 rounded-lg border border-neutral-200 bg-white p-5">
+      <section className="space-y-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
         <h2 className="font-medium">バックアップのダウンロード</h2>
-        <p className="text-sm text-neutral-600">
+        <p className="text-sm text-neutral-600 dark:text-neutral-400">
           現在のデータベース全体と生成画像ファイルをZIPアーカイブとしてダウンロードします
           (managed WordPressサイト個別のDB/ファイルは対象外です)。
         </p>
@@ -35,23 +35,23 @@ export function BackupPanel() {
         </a>
       </section>
 
-      <section className="space-y-3 rounded-lg border border-neutral-200 bg-white p-5">
+      <section className="space-y-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
         <h2 className="font-medium">バックアップからのリストア</h2>
         <p className="text-sm text-red-600">
           警告: リストアを実行すると、現在のデータベース・生成画像ファイルの内容は上書きされ元に戻せません。
         </p>
         <form ref={formRef} action={formAction} onSubmit={handleSubmit} className="space-y-3">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-neutral-600">バックアップファイル(.zip)</span>
+            <span className="text-neutral-600 dark:text-neutral-400">バックアップファイル(.zip)</span>
             <input
               type="file"
               name="file"
               accept=".zip"
               required
-              className="rounded border border-neutral-300 px-3 py-2 text-sm"
+              className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
             />
           </label>
-          <label className="flex items-start gap-2 text-sm text-neutral-600">
+          <label className="flex items-start gap-2 text-sm text-neutral-600 dark:text-neutral-400">
             <input type="checkbox" name="acknowledgeKeyMismatch" className="mt-0.5" />
             <span>
               このバックアップは現在の環境と異なるAPP_ENCRYPTION_KEYで作成された可能性があることを理解した上で続行する

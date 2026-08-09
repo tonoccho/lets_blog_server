@@ -18,7 +18,7 @@ export function SiteCreationPanel({ users, sites }: { users: AppUser[]; sites: S
           type="button"
           onClick={() => setMode("external")}
           className={`rounded px-3 py-1.5 ${
-            mode === "external" ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600"
+            mode === "external" ? "bg-neutral-900 text-white" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400"
           }`}
         >
           既存サイトを登録
@@ -27,7 +27,7 @@ export function SiteCreationPanel({ users, sites }: { users: AppUser[]; sites: S
           type="button"
           onClick={() => setMode("managed-wordpress")}
           className={`rounded px-3 py-1.5 ${
-            mode === "managed-wordpress" ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600"
+            mode === "managed-wordpress" ? "bg-neutral-900 text-white" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400"
           }`}
         >
           WordPressを新規構築

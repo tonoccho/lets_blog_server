@@ -34,7 +34,7 @@ function TemplateEditor({ initialHtml, initialCss }: TemplateEditorProps) {
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
       <div className="space-y-3">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">HTMLテンプレート</span>
+          <span className="text-neutral-600 dark:text-neutral-400">HTMLテンプレート</span>
           <textarea
             name="htmlTemplate"
             value={htmlTemplateValue}
@@ -42,28 +42,28 @@ function TemplateEditor({ initialHtml, initialCss }: TemplateEditorProps) {
             required
             rows={6}
             placeholder='<div class="alert">{{content}}</div>'
-            className="rounded border border-neutral-300 px-3 py-2 font-mono text-sm"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 font-mono text-sm"
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">CSS(任意)</span>
+          <span className="text-neutral-600 dark:text-neutral-400">CSS(任意)</span>
           <textarea
             name="cssContent"
             value={cssContentValue}
             onChange={(e) => setCssContentValue(e.target.value)}
             rows={6}
             placeholder=".alert { color: red; border: 1px solid; padding: 0.5em; }"
-            className="rounded border border-neutral-300 px-3 py-2 font-mono text-sm"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 font-mono text-sm"
           />
         </label>
       </div>
       <div className="flex flex-col gap-1 text-sm">
-        <span className="text-neutral-600">プレビュー(自動更新)</span>
+        <span className="text-neutral-600 dark:text-neutral-400">プレビュー(自動更新)</span>
         <iframe
           title="テンプレートプレビュー"
           srcDoc={previewSrcDoc}
           sandbox="allow-same-origin"
-          className="h-[268px] rounded border border-neutral-300 bg-white"
+          className="h-[268px] rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900"
         />
       </div>
     </div>
@@ -109,12 +109,12 @@ function TemplateDetailPanel({ template, projects, onClose, onClone }: TemplateD
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="bg-white rounded-lg w-full max-w-2xl max-h-[90vh] overflow-auto p-6 space-y-4">
+      <div className="bg-white dark:bg-neutral-900 rounded-lg w-full max-w-2xl max-h-[90vh] overflow-auto p-6 space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">{template.templateName}</h2>
           <button
             onClick={onClose}
-            className="text-neutral-500 hover:text-neutral-700 text-xl"
+            className="text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300 text-xl"
           >
             ✕
           </button>
@@ -122,25 +122,25 @@ function TemplateDetailPanel({ template, projects, onClose, onClone }: TemplateD
 
         <div className="space-y-3">
           <div>
-            <span className="text-sm text-neutral-600">説明</span>
+            <span className="text-sm text-neutral-600 dark:text-neutral-400">説明</span>
             <p className="text-sm">{template.description || "なし"}</p>
           </div>
           <div>
-            <span className="text-sm text-neutral-600">カテゴリー</span>
+            <span className="text-sm text-neutral-600 dark:text-neutral-400">カテゴリー</span>
             <p className="text-sm">{template.category || "なし"}</p>
           </div>
           <div>
-            <span className="text-sm text-neutral-600">スコープ</span>
+            <span className="text-sm text-neutral-600 dark:text-neutral-400">スコープ</span>
             <p className="text-sm">
               {template.projectId ? projectNameById.get(template.projectId) ?? `Project #${template.projectId}` : "グローバル"}
             </p>
           </div>
           <div>
-            <span className="text-sm text-neutral-600">バージョン</span>
+            <span className="text-sm text-neutral-600 dark:text-neutral-400">バージョン</span>
             <p className="text-sm">{template.version}</p>
           </div>
           <div>
-            <span className="text-sm text-neutral-600">公開状態</span>
+            <span className="text-sm text-neutral-600 dark:text-neutral-400">公開状態</span>
             <p className="text-sm">{template.isPublished ? "公開" : "非公開"}</p>
           </div>
         </div>
@@ -149,13 +149,13 @@ function TemplateDetailPanel({ template, projects, onClose, onClone }: TemplateD
 
         <div className="space-y-2">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-neutral-600">複製として新しい名前で保存</span>
+            <span className="text-neutral-600 dark:text-neutral-400">複製として新しい名前で保存</span>
             <input
               type="text"
               value={cloneName}
               onChange={(e) => setCloneName(e.target.value)}
               placeholder="新しいテンプレート名"
-              className="rounded border border-neutral-300 px-3 py-2 text-sm"
+              className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
             />
           </label>
           <button
@@ -169,7 +169,7 @@ function TemplateDetailPanel({ template, projects, onClose, onClone }: TemplateD
 
         <button
           onClick={onClose}
-          className="w-full rounded border border-neutral-300 px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
+          className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-4 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
         >
           閉じる
         </button>
@@ -230,14 +230,14 @@ export function CustomTagTemplateGallery({
       <div className="space-y-4">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <label className="flex max-w-sm flex-col gap-1 text-sm">
-            <span className="text-neutral-600">表示スコープ</span>
+            <span className="text-neutral-600 dark:text-neutral-400">表示スコープ</span>
             <select
               value={currentProjectId ?? ""}
               onChange={(e) => {
                 const value = e.target.value;
                 router.push(value ? `/custom-tag-templates?projectId=${value}` : "/custom-tag-templates");
               }}
-              className="rounded border border-neutral-300 px-3 py-2 text-sm"
+              className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
             >
               <option value="">グローバル</option>
               {projects.map((project) => (
@@ -257,7 +257,7 @@ export function CustomTagTemplateGallery({
                   updateSearchParams(searchValue, categoryValue, e.target.checked);
                 }}
               />
-              <span className="text-neutral-600">未公開を含める</span>
+              <span className="text-neutral-600 dark:text-neutral-400">未公開を含める</span>
             </label>
           </div>
         </div>
@@ -271,7 +271,7 @@ export function CustomTagTemplateGallery({
               if (e.key === "Enter") handleSearch();
             }}
             placeholder="テンプレート名で検索"
-            className="flex-1 rounded border border-neutral-300 px-3 py-2 text-sm"
+            className="flex-1 rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
           />
           <button
             onClick={handleSearch}
@@ -288,7 +288,7 @@ export function CustomTagTemplateGallery({
               className={`rounded px-3 py-1 text-sm ${
                 categoryValue === ""
                   ? "bg-blue-600 text-white"
-                  : "bg-neutral-100 text-neutral-700 hover:bg-neutral-200"
+                  : "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700"
               }`}
             >
               すべて
@@ -300,7 +300,7 @@ export function CustomTagTemplateGallery({
                 className={`rounded px-3 py-1 text-sm ${
                   categoryValue === category
                     ? "bg-blue-600 text-white"
-                    : "bg-neutral-100 text-neutral-700 hover:bg-neutral-200"
+                    : "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700"
                 }`}
               >
                 {category}
@@ -312,21 +312,21 @@ export function CustomTagTemplateGallery({
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {templates.length === 0 ? (
-          <div className="col-span-full rounded-lg border border-neutral-200 bg-neutral-50 p-8 text-center text-neutral-600">
+          <div className="col-span-full rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 p-8 text-center text-neutral-600 dark:text-neutral-400">
             テンプレートがありません
           </div>
         ) : (
           templates.map((template) => (
             <div
               key={template.id}
-              className="rounded-lg border border-neutral-200 bg-white p-4 hover:shadow-md transition cursor-pointer"
+              className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 hover:shadow-md transition cursor-pointer"
               onClick={() => setSelectedTemplate(template)}
             >
               <div className="space-y-2">
                 <h3 className="font-semibold text-sm truncate">{template.templateName}</h3>
-                <p className="text-xs text-neutral-600 line-clamp-2">{template.description || "説明なし"}</p>
+                <p className="text-xs text-neutral-600 dark:text-neutral-400 line-clamp-2">{template.description || "説明なし"}</p>
                 <div className="flex items-center justify-between gap-2 text-xs">
-                  {template.category && <span className="bg-neutral-100 px-2 py-1 rounded">{template.category}</span>}
+                  {template.category && <span className="bg-neutral-100 dark:bg-neutral-800 px-2 py-1 rounded">{template.category}</span>}
                   <span
                     className={`px-2 py-1 rounded font-medium ${
                       template.isPublished

@@ -71,7 +71,7 @@ export function CustomTagGenerationForm({
   }
 
   return (
-    <div className="space-y-3 rounded-lg border border-neutral-200 bg-white p-5">
+    <div className="space-y-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
       <div className="flex items-center justify-between">
         <h2 className="font-medium">AIでカスタムタグを生成</h2>
         {showResults && (
@@ -81,7 +81,7 @@ export function CustomTagGenerationForm({
               setShowResults(false);
               reset();
             }}
-            className="text-sm text-neutral-500 hover:underline"
+            className="text-sm text-neutral-500 dark:text-neutral-400 hover:underline"
           >
             別のプロンプトを試す
           </button>
@@ -90,41 +90,41 @@ export function CustomTagGenerationForm({
 
       {!showResults ? (
         <>
-          <p className="text-sm text-neutral-600">
+          <p className="text-sm text-neutral-600 dark:text-neutral-400">
             Ollamaに自然言語でUIコンポーネントのリクエストを送信すると、HTMLテンプレートとCSSが自動生成されます。
           </p>
           <form ref={formRef} onSubmit={handleSubmit} className="space-y-3">
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-neutral-600">プロンプト（UIコンポーネントの説明）</span>
+              <span className="text-neutral-600 dark:text-neutral-400">プロンプト（UIコンポーネントの説明）</span>
               <textarea
                 name="prompt"
                 required
                 rows={4}
                 placeholder="例: 青いボタンコンポーネントを作成してください。padding 10px、background-color #007bff、text-color whiteをstyleしてください。"
-                className="rounded border border-neutral-300 px-3 py-2 font-mono text-sm"
+                className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 font-mono text-sm"
               />
             </label>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="flex flex-col gap-1 text-sm">
-                <span className="text-neutral-600">タグ名(英数字・ハイフン・アンダースコアのみ)</span>
+                <span className="text-neutral-600 dark:text-neutral-400">タグ名(英数字・ハイフン・アンダースコアのみ)</span>
                 <input
                   name="tagName"
                   required
                   pattern="[a-zA-Z][a-zA-Z0-9_\-]*"
                   placeholder="my-button"
-                  className="rounded border border-neutral-300 px-3 py-2 text-sm"
+                  className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
                 />
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="text-neutral-600">説明(任意)</span>
+                <span className="text-neutral-600 dark:text-neutral-400">説明(任意)</span>
                 <input
                   name="description"
                   placeholder="生成されたボタンコンポーネント"
-                  className="rounded border border-neutral-300 px-3 py-2 text-sm"
+                  className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
                 />
               </label>
             </div>
-            <div className="flex items-center justify-between text-sm text-neutral-600">
+            <div className="flex items-center justify-between text-sm text-neutral-600 dark:text-neutral-400">
               <span>
                 スコープ:{" "}
                 <strong>{formProjectId ? projectNameById.get(formProjectId) ?? `project#${formProjectId}` : "グローバル"}</strong>
@@ -148,23 +148,23 @@ export function CustomTagGenerationForm({
           </div>
           <div className="space-y-2">
             <div>
-              <span className="text-sm font-medium text-neutral-700">タグ名:</span>
-              <p className="font-mono text-sm text-neutral-600">:::{result.tagName}</p>
+              <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">タグ名:</span>
+              <p className="font-mono text-sm text-neutral-600 dark:text-neutral-400">:::{result.tagName}</p>
             </div>
             <div>
-              <span className="text-sm font-medium text-neutral-700">説明:</span>
-              <p className="text-sm text-neutral-600">{result.description || "(なし)"}</p>
+              <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">説明:</span>
+              <p className="text-sm text-neutral-600 dark:text-neutral-400">{result.description || "(なし)"}</p>
             </div>
             <div>
-              <span className="text-sm font-medium text-neutral-700">HTMLテンプレート:</span>
-              <pre className="overflow-x-auto rounded bg-neutral-50 p-2 font-mono text-xs text-neutral-600">
+              <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">HTMLテンプレート:</span>
+              <pre className="overflow-x-auto rounded bg-neutral-50 dark:bg-neutral-800 p-2 font-mono text-xs text-neutral-600 dark:text-neutral-400">
                 {result.htmlTemplate}
               </pre>
             </div>
             {result.cssContent && (
               <div>
-                <span className="text-sm font-medium text-neutral-700">CSS:</span>
-                <pre className="overflow-x-auto rounded bg-neutral-50 p-2 font-mono text-xs text-neutral-600">
+                <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">CSS:</span>
+                <pre className="overflow-x-auto rounded bg-neutral-50 dark:bg-neutral-800 p-2 font-mono text-xs text-neutral-600 dark:text-neutral-400">
                   {result.cssContent}
                 </pre>
               </div>

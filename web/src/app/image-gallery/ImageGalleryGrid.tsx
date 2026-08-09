@@ -60,7 +60,7 @@ export function ImageGalleryGrid({
             key={image.id}
             type="button"
             onClick={() => openDetail(image.id)}
-            className="group overflow-hidden rounded-lg border border-neutral-200 bg-white text-left"
+            className="group overflow-hidden rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-left"
           >
             <img
               src={`/image-gallery/${image.id}/file`}
@@ -68,7 +68,7 @@ export function ImageGalleryGrid({
               className="aspect-square w-full object-cover group-hover:opacity-80"
             />
             <div className="space-y-1 p-2 text-xs">
-              <p className="line-clamp-2 text-neutral-700">{image.prompt}</p>
+              <p className="line-clamp-2 text-neutral-700 dark:text-neutral-300">{image.prompt}</p>
               <p className="text-neutral-400">{formatDateTime(image.createdAt, timezone)}</p>
             </div>
           </button>
@@ -81,7 +81,7 @@ export function ImageGalleryGrid({
           onClick={closeDetail}
         >
           <div
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg bg-white p-6"
+            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg bg-white dark:bg-neutral-900 p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-4 flex items-start justify-between gap-4">
@@ -95,7 +95,7 @@ export function ImageGalleryGrid({
                 >
                   {isDeleting ? "削除中…" : "削除"}
                 </button>
-                <button type="button" onClick={closeDetail} className="text-neutral-400 hover:text-neutral-700">
+                <button type="button" onClick={closeDetail} className="text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300">
                   閉じる
                 </button>
               </div>
@@ -104,41 +104,41 @@ export function ImageGalleryGrid({
             <img
               src={`/image-gallery/${selectedId}/file`}
               alt="生成画像"
-              className="mb-4 w-full rounded border border-neutral-200"
+              className="mb-4 w-full rounded border border-neutral-200 dark:border-neutral-800"
             />
 
-            {isPending && <p className="text-neutral-500">読み込み中…</p>}
+            {isPending && <p className="text-neutral-500 dark:text-neutral-400">読み込み中…</p>}
             {error && <p className="text-red-600">{error}</p>}
             {detail && (
               <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
                 <dt className="col-span-2 font-semibold">prompt</dt>
-                <dd className="col-span-2 whitespace-pre-wrap text-neutral-600">{detail.prompt}</dd>
+                <dd className="col-span-2 whitespace-pre-wrap text-neutral-600 dark:text-neutral-400">{detail.prompt}</dd>
                 <dt className="col-span-2 font-semibold">negative prompt</dt>
-                <dd className="col-span-2 whitespace-pre-wrap text-neutral-600">{detail.negativePrompt || "-"}</dd>
+                <dd className="col-span-2 whitespace-pre-wrap text-neutral-600 dark:text-neutral-400">{detail.negativePrompt || "-"}</dd>
                 <dt className="font-semibold">steps</dt>
-                <dd className="text-neutral-600">{detail.steps}</dd>
+                <dd className="text-neutral-600 dark:text-neutral-400">{detail.steps}</dd>
                 <dt className="font-semibold">cfg scale</dt>
-                <dd className="text-neutral-600">{detail.cfgScale}</dd>
+                <dd className="text-neutral-600 dark:text-neutral-400">{detail.cfgScale}</dd>
                 <dt className="font-semibold">sampler</dt>
-                <dd className="text-neutral-600">{detail.samplerName}</dd>
+                <dd className="text-neutral-600 dark:text-neutral-400">{detail.samplerName}</dd>
                 <dt className="font-semibold">scheduler</dt>
-                <dd className="text-neutral-600">{detail.scheduler}</dd>
+                <dd className="text-neutral-600 dark:text-neutral-400">{detail.scheduler}</dd>
                 <dt className="font-semibold">seed</dt>
-                <dd className="text-neutral-600">{detail.seed}</dd>
+                <dd className="text-neutral-600 dark:text-neutral-400">{detail.seed}</dd>
                 <dt className="font-semibold">size</dt>
-                <dd className="text-neutral-600">
+                <dd className="text-neutral-600 dark:text-neutral-400">
                   {detail.width}x{detail.height}
                 </dd>
                 <dt className="font-semibold">batch size</dt>
-                <dd className="text-neutral-600">{detail.batchSize}</dd>
+                <dd className="text-neutral-600 dark:text-neutral-400">{detail.batchSize}</dd>
                 <dt className="font-semibold">checkpoint</dt>
-                <dd className="text-neutral-600">{detail.checkpoint}</dd>
+                <dd className="text-neutral-600 dark:text-neutral-400">{detail.checkpoint}</dd>
                 <dt className="font-semibold">LoRA</dt>
-                <dd className="text-neutral-600">
+                <dd className="text-neutral-600 dark:text-neutral-400">
                   {detail.loraName ? `${detail.loraName} (weight: ${detail.loraWeight})` : "-"}
                 </dd>
                 <dt className="font-semibold">作成日時</dt>
-                <dd className="text-neutral-600">{formatDateTime(detail.createdAt, timezone)}</dd>
+                <dd className="text-neutral-600 dark:text-neutral-400">{formatDateTime(detail.createdAt, timezone)}</dd>
               </dl>
             )}
           </div>

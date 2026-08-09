@@ -27,13 +27,13 @@ export default async function UsersPage() {
     <div className="space-y-8">
       <h1 className="text-xl font-semibold">ユーザー管理</h1>
 
-      <div className="text-sm text-neutral-600">
+      <div className="text-sm text-neutral-600 dark:text-neutral-400">
         全{users.length}件を表示
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-neutral-200 bg-white">
+      <div className="overflow-x-auto rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-500">
+          <thead className="border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">
             <tr>
               <th className="px-4 py-2">参加プロジェクト</th>
               <th className="px-4 py-2">メールアドレス</th>
@@ -47,7 +47,7 @@ export default async function UsersPage() {
               <tr>
                 <td colSpan={5} className="px-4 py-8 text-center">
                   <div className="flex flex-col items-center gap-4">
-                    <p className="text-neutral-600">登録済みユーザーはありません</p>
+                    <p className="text-neutral-600 dark:text-neutral-400">登録済みユーザーはありません</p>
                     <a
                       href="#user-form"
                       className="rounded bg-neutral-900 px-4 py-2 text-sm text-white hover:bg-neutral-800"
@@ -61,16 +61,16 @@ export default async function UsersPage() {
             {users.map((user) => {
               const joinedProjects = userToProjects.get(user.id) ?? [];
               return (
-                <tr key={user.id} className="border-b border-neutral-100 last:border-0 cursor-pointer hover:bg-neutral-50 hover:shadow-sm transition-colors">
-                  <td className="px-4 py-2 text-neutral-500">
+                <tr key={user.id} className="border-b border-neutral-100 dark:border-neutral-800 last:border-0 cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:shadow-sm transition-colors">
+                  <td className="px-4 py-2 text-neutral-500 dark:text-neutral-400">
                     {joinedProjects.length > 0 ? joinedProjects.join(", ") : "-"}
                   </td>
                   <td className="px-4 py-2">{user.email}</td>
                   <td className="px-4 py-2 font-mono">{user.role}</td>
-                  <td className="px-4 py-2 text-neutral-500">{formatDateTime(user.createdAt, timezone)}</td>
+                  <td className="px-4 py-2 text-neutral-500 dark:text-neutral-400">{formatDateTime(user.createdAt, timezone)}</td>
                   <td className="px-4 py-2 text-right">
                     <div className="flex justify-end gap-3">
-                      <Link href={`/users/${user.id}/edit`} className="text-sm text-neutral-600 hover:underline">
+                      <Link href={`/users/${user.id}/edit`} className="text-sm text-neutral-600 dark:text-neutral-400 hover:underline">
                         編集
                       </Link>
                       {String(user.id) !== session.user.id && <DeleteUserButton id={user.id} />}

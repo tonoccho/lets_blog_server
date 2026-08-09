@@ -31,8 +31,8 @@ export function EnvironmentSyncPanel({ projectId, project }: { projectId: number
 
   if (syncableEnvironments.length < 2 || syncSourceEnvironments.length === 0) {
     return (
-      <div className="rounded-lg border border-neutral-200 bg-white p-4 text-sm text-neutral-500">
-        <h3 className="mb-2 font-medium text-neutral-700">環境同期</h3>
+      <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 text-sm text-neutral-500 dark:text-neutral-400">
+        <h3 className="mb-2 font-medium text-neutral-700 dark:text-neutral-300">環境同期</h3>
         自動構築(managed)されたWordPress環境が2つ以上紐付いており、そのうちテスト環境または本番環境が
         1つ以上ある場合に、テーマ・プラグイン・メディア・DBの同期が行えます(ローカル環境は同期元に指定できません)。
       </div>
@@ -55,13 +55,13 @@ export function EnvironmentSyncPanel({ projectId, project }: { projectId: number
   }
 
   return (
-    <div className="rounded-lg border border-neutral-200 bg-white p-4">
-      <h3 className="mb-3 font-medium text-neutral-700">環境同期</h3>
+    <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
+      <h3 className="mb-3 font-medium text-neutral-700 dark:text-neutral-300">環境同期</h3>
       <form action={formAction} onSubmit={handleSubmit} className="space-y-3 text-sm">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1">
-            <span className="text-neutral-600">同期元</span>
-            <select name="from" required className="rounded border border-neutral-300 px-3 py-2 text-sm">
+            <span className="text-neutral-600 dark:text-neutral-400">同期元</span>
+            <select name="from" required className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm">
               <option value="">選択してください</option>
               {syncSourceEnvironments.map((env) => (
                 <option key={env.value} value={env.value}>
@@ -71,8 +71,8 @@ export function EnvironmentSyncPanel({ projectId, project }: { projectId: number
             </select>
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-neutral-600">同期先</span>
-            <select name="to" required className="rounded border border-neutral-300 px-3 py-2 text-sm">
+            <span className="text-neutral-600 dark:text-neutral-400">同期先</span>
+            <select name="to" required className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm">
               <option value="">選択してください</option>
               {syncableEnvironments.map((env) => (
                 <option key={env.value} value={env.value}>
@@ -84,7 +84,7 @@ export function EnvironmentSyncPanel({ projectId, project }: { projectId: number
         </div>
 
         <fieldset className="flex gap-4">
-          <legend className="mb-1 text-neutral-600">同期対象</legend>
+          <legend className="mb-1 text-neutral-600 dark:text-neutral-400">同期対象</legend>
           <label className="flex items-center gap-1.5">
             <input type="checkbox" name="targets" value="themes" />
             テーマ

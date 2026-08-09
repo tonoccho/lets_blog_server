@@ -42,24 +42,24 @@ export default function SignupPage() {
   return (
     <div className="mx-auto max-w-sm">
       <h1 className="mb-6 text-xl font-semibold">新規登録</h1>
-      <form onSubmit={handleSubmit} className="space-y-3 rounded-lg border border-neutral-200 bg-white p-5">
+      <form onSubmit={handleSubmit} className="space-y-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">メールアドレス</span>
+          <span className="text-neutral-600 dark:text-neutral-400">メールアドレス</span>
           <input
             name="email"
             type="email"
             required
-            className="rounded border border-neutral-300 px-3 py-2 text-sm"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">パスワード(8文字以上)</span>
+          <span className="text-neutral-600 dark:text-neutral-400">パスワード(8文字以上)</span>
           <input
             name="password"
             type="password"
             required
             minLength={8}
-            className="rounded border border-neutral-300 px-3 py-2 text-sm"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
           />
         </label>
         {error && <p className="text-sm text-red-600">{error}</p>}

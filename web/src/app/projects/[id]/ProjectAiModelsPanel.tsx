@@ -41,9 +41,9 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
   }, [projectId]);
 
   return (
-    <div className="rounded-lg border border-neutral-200 bg-white p-4">
-      <h3 className="mb-1 font-medium text-neutral-700">AIモデル管理</h3>
-      <p className="mb-3 text-sm text-neutral-500">
+    <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
+      <h3 className="mb-1 font-medium text-neutral-700 dark:text-neutral-300">AIモデル管理</h3>
+      <p className="mb-3 text-sm text-neutral-500 dark:text-neutral-400">
         壁打ちチャット等で使用するOllamaモデル、画像生成で使用するComfyUIチェックポイントを、
         プロジェクトごとに切り替えられます。
       </p>
@@ -54,7 +54,7 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
             key={t}
             type="button"
             onClick={() => handleTabChange(t)}
-            className={`rounded px-3 py-1.5 ${tab === t ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600"}`}
+            className={`rounded px-3 py-1.5 ${tab === t ? "bg-neutral-900 text-white" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400"}`}
           >
             {TAB_LABEL[t]}
           </button>
@@ -78,5 +78,5 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
 }
 
 function TabLoading({ loading }: { loading: boolean }) {
-  return <p className="text-sm text-neutral-500">{loading ? "読み込み中…" : "このタブを開くとデータを取得します。"}</p>;
+  return <p className="text-sm text-neutral-500 dark:text-neutral-400">{loading ? "読み込み中…" : "このタブを開くとデータを取得します。"}</p>;
 }

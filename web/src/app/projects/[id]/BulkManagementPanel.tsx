@@ -74,7 +74,7 @@ const STATUS_LABEL: Record<string, string> = {
 
 const STATUS_COLOR: Record<string, string> = {
   SUCCESS: "text-green-600",
-  SKIPPED: "text-neutral-500",
+  SKIPPED: "text-neutral-500 dark:text-neutral-400",
   FAILED: "text-red-600",
 };
 
@@ -165,8 +165,8 @@ export function BulkManagementPanel({
 
   if (managedEnvironments.length === 0) {
     return (
-      <div className="rounded-lg border border-neutral-200 bg-white p-4 text-sm text-neutral-500">
-        <h3 className="mb-2 font-medium text-neutral-700">一括管理</h3>
+      <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 text-sm text-neutral-500 dark:text-neutral-400">
+        <h3 className="mb-2 font-medium text-neutral-700 dark:text-neutral-300">一括管理</h3>
         自動構築(managed)されたWordPress環境が1つ以上紐付いている場合に、
         カテゴリ・プラグイン・テーマ・タグの管理ができます。
       </div>
@@ -175,9 +175,9 @@ export function BulkManagementPanel({
 
   return (
     <div className="space-y-6">
-      <div className="rounded-lg border border-neutral-200 bg-white p-4">
-        <h3 className="mb-1 font-medium text-neutral-700">一括管理</h3>
-        <p className="mb-3 text-sm text-neutral-500">
+      <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
+        <h3 className="mb-1 font-medium text-neutral-700 dark:text-neutral-300">一括管理</h3>
+        <p className="mb-3 text-sm text-neutral-500 dark:text-neutral-400">
           紐付いている環境({managedEnvironments.map((e) => e.label).join("・")})の
           カテゴリ・プラグイン・テーマ・タグを比較・管理します。
         </p>
@@ -188,7 +188,7 @@ export function BulkManagementPanel({
               key={t}
               type="button"
               onClick={() => handleTabChange(t)}
-              className={`rounded px-3 py-1.5 ${tab === t ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600"}`}
+              className={`rounded px-3 py-1.5 ${tab === t ? "bg-neutral-900 text-white" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400"}`}
             >
               {TAB_LABEL[t]}
             </button>
@@ -240,9 +240,9 @@ export function BulkManagementPanel({
           ))}
       </div>
 
-      <div className="rounded-lg border border-neutral-200 bg-white p-4">
-        <h3 className="mb-1 font-medium text-neutral-700">ロールフォワード</h3>
-        <p className="mb-3 text-sm text-neutral-500">
+      <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
+        <h3 className="mb-1 font-medium text-neutral-700 dark:text-neutral-300">ロールフォワード</h3>
+        <p className="mb-3 text-sm text-neutral-500 dark:text-neutral-400">
           過去に成功した一括管理の内容を、指定した環境へまとめて再適用します(例: ローカル環境を再構築した後に使用)。
         </p>
         <div className="mb-3 flex flex-wrap gap-2">
@@ -252,7 +252,7 @@ export function BulkManagementPanel({
               type="button"
               onClick={() => handleReplay(env.value)}
               disabled={replayPendingEnv === env.value}
-              className="rounded bg-neutral-100 px-3 py-1.5 text-sm text-neutral-700 disabled:opacity-50"
+              className="rounded bg-neutral-100 dark:bg-neutral-800 px-3 py-1.5 text-sm text-neutral-700 dark:text-neutral-300 disabled:opacity-50"
             >
               {replayPendingEnv === env.value ? "実行中…" : `${env.label}へロールフォワード`}
             </button>
@@ -262,9 +262,9 @@ export function BulkManagementPanel({
         {replayState?.results && <ResultList results={replayState.results} timezone={timezone} />}
       </div>
 
-      <div className="rounded-lg border border-neutral-200 bg-white p-4">
+      <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="font-medium text-neutral-700">作業ログ</h3>
+          <h3 className="font-medium text-neutral-700 dark:text-neutral-300">作業ログ</h3>
           <ClearLogsButton projectId={projectId} />
         </div>
 
@@ -273,11 +273,11 @@ export function BulkManagementPanel({
           className="mb-3 flex flex-wrap items-end gap-2 text-sm"
         >
           <label className="flex flex-col gap-1">
-            <span className="text-neutral-600">操作</span>
+            <span className="text-neutral-600 dark:text-neutral-400">操作</span>
             <select
               name="logOperationType"
               defaultValue={logFilter.operationType ?? ""}
-              className="rounded border border-neutral-300 px-2 py-1.5 text-sm"
+              className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1.5 text-sm"
             >
               <option value="">すべて</option>
               {(Object.keys(OPERATION_LABEL) as BulkOperationType[]).map((type) => (
@@ -288,11 +288,11 @@ export function BulkManagementPanel({
             </select>
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-neutral-600">環境</span>
+            <span className="text-neutral-600 dark:text-neutral-400">環境</span>
             <select
               name="logEnvironment"
               defaultValue={logFilter.environment ?? ""}
-              className="rounded border border-neutral-300 px-2 py-1.5 text-sm"
+              className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1.5 text-sm"
             >
               <option value="">すべて</option>
               {(Object.keys(ENVIRONMENT_LABEL) as ProjectEnvironment[]).map((env) => (
@@ -303,11 +303,11 @@ export function BulkManagementPanel({
             </select>
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-neutral-600">レベル</span>
+            <span className="text-neutral-600 dark:text-neutral-400">レベル</span>
             <select
               name="logLevel"
               defaultValue={logFilter.level ?? ""}
-              className="rounded border border-neutral-300 px-2 py-1.5 text-sm"
+              className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1.5 text-sm"
             >
               <option value="">すべて</option>
               {(Object.keys(LEVEL_LABEL) as BulkOperationLogLevel[]).map((level) => (
@@ -323,11 +323,11 @@ export function BulkManagementPanel({
         </form>
 
         {logs.length === 0 ? (
-          <p className="text-sm text-neutral-500">該当する実行履歴はありません。</p>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">該当する実行履歴はありません。</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="border-b border-neutral-200 text-neutral-500">
+              <thead className="border-b border-neutral-200 dark:border-neutral-800 text-neutral-500 dark:text-neutral-400">
                 <tr>
                   <th className="px-2 py-1.5">日時</th>
                   <th className="px-2 py-1.5">操作</th>
@@ -341,8 +341,8 @@ export function BulkManagementPanel({
               </thead>
               <tbody>
                 {logs.map((log) => (
-                  <tr key={log.id} className="border-b border-neutral-100 last:border-0 cursor-pointer hover:bg-neutral-50 hover:shadow-sm transition-colors">
-                    <td className="px-2 py-1.5 text-neutral-500">
+                  <tr key={log.id} className="border-b border-neutral-100 dark:border-neutral-800 last:border-0 cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:shadow-sm transition-colors">
+                    <td className="px-2 py-1.5 text-neutral-500 dark:text-neutral-400">
                       {formatDateTime(log.createdAt, timezone)}
                     </td>
                     <td className="px-2 py-1.5">{OPERATION_LABEL[log.operationType]}</td>
@@ -355,7 +355,7 @@ export function BulkManagementPanel({
                         <span className="ml-1 text-xs text-neutral-400">({log.errorMessage})</span>
                       )}
                     </td>
-                    <td className="px-2 py-1.5 text-neutral-500">{log.isReplay ? "はい" : "-"}</td>
+                    <td className="px-2 py-1.5 text-neutral-500 dark:text-neutral-400">{log.isReplay ? "はい" : "-"}</td>
                     <td className="px-2 py-1.5">
                       {log.status === "FAILED" && <CopyLogButton log={log} timezone={timezone} />}
                     </td>
@@ -372,7 +372,7 @@ export function BulkManagementPanel({
 
 function TabLoading({ loading }: { loading: boolean }) {
   return (
-    <p className="text-sm text-neutral-500">
+    <p className="text-sm text-neutral-500 dark:text-neutral-400">
       {loading ? "読み込み中…" : "このタブを開くとデータを取得します。"}
     </p>
   );
@@ -404,15 +404,15 @@ function ZipUploadPanel({
   }
 
   return (
-    <div className="rounded border border-neutral-200 bg-neutral-50 p-3">
-      <p className="mb-2 text-sm text-neutral-500">
+    <div className="rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 p-3">
+      <p className="mb-2 text-sm text-neutral-500 dark:text-neutral-400">
         zipファイルをアップロードして、紐付いている全環境へ同じ内容を一括インストールします
         (非公式・カスタムビルドのプラグイン/テーマ向け)。
       </p>
       <form action={uploadFormAction} onSubmit={handleUploadSubmit} className="flex flex-wrap items-end gap-2 text-sm">
         <input type="hidden" name="operationType" value={operationType} />
         <label className="flex flex-col gap-1">
-          <span className="text-neutral-600">zipファイル</span>
+          <span className="text-neutral-600 dark:text-neutral-400">zipファイル</span>
           <input name="file" type="file" accept=".zip" required className="text-sm" />
         </label>
         <button
@@ -486,7 +486,7 @@ function CopyLogButton({ log, timezone }: { log: BulkOperationLog; timezone: str
     <button
       type="button"
       onClick={handleCopy}
-      className="rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700"
+      className="rounded bg-neutral-100 dark:bg-neutral-800 px-2 py-1 text-xs text-neutral-700 dark:text-neutral-300"
       title="日時・操作・エラー内容・スタックトレースをコピーします"
     >
       {copied ? "コピーしました" : "コピー"}

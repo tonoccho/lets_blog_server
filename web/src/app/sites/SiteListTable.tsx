@@ -122,12 +122,12 @@ export function SiteListTable({
           value={searchText}
           onChange={(e) => setSearchText(e.target.value)}
           placeholder="サイトキー・表示名・URLで検索"
-          className="w-64 rounded border border-neutral-300 px-3 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+          className="w-64 rounded border border-neutral-300 dark:border-neutral-700 px-3 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
         />
         <select
           value={cmsFilter}
           onChange={(e) => setCmsFilter(e.target.value as CmsFilter)}
-          className="rounded border border-neutral-300 px-2 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+          className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
         >
           <option value="ALL">CMS種別: すべて</option>
           <option value="WORDPRESS">WORDPRESS</option>
@@ -136,29 +136,29 @@ export function SiteListTable({
         <select
           value={projectFilter}
           onChange={(e) => setProjectFilter(e.target.value as ProjectFilter)}
-          className="rounded border border-neutral-300 px-2 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+          className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
         >
           <option value="ALL">プロジェクト紐付け: すべて</option>
           <option value="BOUND">紐付け済みのみ</option>
           <option value="UNBOUND">未紐付けのみ</option>
         </select>
-        <span className="text-neutral-700">
+        <span className="text-neutral-700 dark:text-neutral-300">
           {filteredSites.length > 0 ? `${filteredSites.length}件を表示 (全${sites.length}件中)` : `全${sites.length}件`}
         </span>
       </div>
 
-      <div className="max-h-[70vh] overflow-auto rounded-lg border border-neutral-200 bg-white">
+      <div className="max-h-[70vh] overflow-auto rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
         <table className="w-full text-left text-sm">
-          <thead className="sticky top-0 border-b border-neutral-200 bg-neutral-50 text-neutral-700 font-medium">
+          <thead className="sticky top-0 border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 font-medium">
             <tr>
               <th className="px-4 py-2">サイトキー</th>
-              <th className="cursor-pointer px-4 py-2 hover:bg-neutral-100" onClick={() => handleColumnSort("name")}>
+              <th className="cursor-pointer px-4 py-2 hover:bg-neutral-100 dark:hover:bg-neutral-800" onClick={() => handleColumnSort("name")}>
                 表示名{renderSortIndicator("name")}
               </th>
               <th className="px-4 py-2">CMS種別</th>
               <th className="px-4 py-2">プロジェクト</th>
               <th className="px-4 py-2">URL</th>
-              <th className="cursor-pointer px-4 py-2 hover:bg-neutral-100" onClick={() => handleColumnSort("createdAt")}>
+              <th className="cursor-pointer px-4 py-2 hover:bg-neutral-100 dark:hover:bg-neutral-800" onClick={() => handleColumnSort("createdAt")}>
                 登録日{renderSortIndicator("createdAt")}
               </th>
               <th className="px-4 py-2">疎通確認</th>
@@ -168,7 +168,7 @@ export function SiteListTable({
           <tbody>
             {filteredSites.length === 0 && (
               <tr>
-                <td colSpan={isAdmin ? 8 : 7} className="px-4 py-6 text-center text-neutral-700">
+                <td colSpan={isAdmin ? 8 : 7} className="px-4 py-6 text-center text-neutral-700 dark:text-neutral-300">
                   {sites.length === 0 ? "登録済みサイトはありません" : "条件に一致するサイトはありません"}
                 </td>
               </tr>
@@ -176,7 +176,7 @@ export function SiteListTable({
             {filteredSites.map((site) => {
               const projectInfo = siteToProject.get(site.id);
               return (
-                <tr key={site.id} className="border-b border-neutral-100 odd:bg-neutral-50/50 last:border-0 cursor-pointer hover:bg-neutral-100 hover:shadow-sm transition-colors">
+                <tr key={site.id} className="border-b border-neutral-100 dark:border-neutral-800 odd:bg-neutral-50/50 last:border-0 cursor-pointer hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:shadow-sm transition-colors">
                   <td className="px-4 py-2 font-mono">{site.siteKey}</td>
                   <td className="px-4 py-2">{site.name}</td>
                   <td className="px-4 py-2">
@@ -201,10 +201,10 @@ export function SiteListTable({
                         >
                           {ENVIRONMENT_LABEL[projectInfo.environment]}
                         </span>
-                        <span className="text-neutral-900">{projectInfo.projectName}</span>
+                        <span className="text-neutral-900 dark:text-neutral-50">{projectInfo.projectName}</span>
                       </span>
                     ) : (
-                      <span className="inline-block rounded bg-neutral-200 px-2 py-0.5 text-xs font-medium text-neutral-700">
+                      <span className="inline-block rounded bg-neutral-200 dark:bg-neutral-700 px-2 py-0.5 text-xs font-medium text-neutral-700 dark:text-neutral-300">
                         未紐付け
                       </span>
                     )}
@@ -214,14 +214,14 @@ export function SiteListTable({
                       {site.baseUrl}
                     </a>
                   </td>
-                  <td className="px-4 py-2 text-neutral-700">{formatDateTime(site.createdAt, timezone)}</td>
+                  <td className="px-4 py-2 text-neutral-700 dark:text-neutral-300">{formatDateTime(site.createdAt, timezone)}</td>
                   <td className="px-4 py-2">
                     <CheckConnectionButton id={site.id} />
                   </td>
                   {isAdmin && (
                     <td className="px-4 py-2 text-right">
                       <div className="flex justify-end gap-3">
-                        <Link href={`/sites/${site.id}/edit`} className="text-sm text-neutral-600 hover:underline">
+                        <Link href={`/sites/${site.id}/edit`} className="text-sm text-neutral-600 dark:text-neutral-400 hover:underline">
                           管理
                         </Link>
                         <DeleteSiteButton id={site.id} managedWordpress={site.managedWordpress} />

@@ -56,43 +56,43 @@ export default function LoginPage() {
   return (
     <div className="mx-auto max-w-sm">
       <h1 className="mb-6 text-xl font-semibold">ログイン</h1>
-      <form onSubmit={handleSubmit} className="space-y-3 rounded-lg border border-neutral-200 bg-white p-5">
+      <form onSubmit={handleSubmit} className="space-y-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
         {!needsTotp && (
           <>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-neutral-600">メールアドレス</span>
+              <span className="text-neutral-600 dark:text-neutral-400">メールアドレス</span>
               <input
                 name="email"
                 type="email"
                 required
-                className="rounded border border-neutral-300 px-3 py-2 text-sm"
+                className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-neutral-600">パスワード</span>
+              <span className="text-neutral-600 dark:text-neutral-400">パスワード</span>
               <input
                 name="password"
                 type="password"
                 required
-                className="rounded border border-neutral-300 px-3 py-2 text-sm"
+                className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
               />
             </label>
           </>
         )}
         {needsTotp && (
           <>
-            <p className="text-sm text-neutral-600">
+            <p className="text-sm text-neutral-600 dark:text-neutral-400">
               認証アプリに表示されている6桁のコード(またはバックアップコード)を入力してください。
             </p>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-neutral-600">認証コード</span>
+              <span className="text-neutral-600 dark:text-neutral-400">認証コード</span>
               <input
                 name="totpCode"
                 type="text"
                 inputMode="numeric"
                 autoFocus
                 required
-                className="rounded border border-neutral-300 px-3 py-2 text-sm"
+                className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
               />
             </label>
           </>

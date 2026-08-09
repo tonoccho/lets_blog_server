@@ -47,19 +47,19 @@ export function PostsTable({ posts: initialPosts, timezone }: { posts: PostSumma
   };
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-neutral-200 bg-white">
+    <div className="overflow-x-auto rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
       <table className="w-full text-left text-sm">
-        <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-500">
+        <thead className="border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">
           <tr>
-            <th className="cursor-pointer px-4 py-2 hover:bg-neutral-100" onClick={() => handleColumnSort("siteName")}>
+            <th className="cursor-pointer px-4 py-2 hover:bg-neutral-100 dark:hover:bg-neutral-800" onClick={() => handleColumnSort("siteName")}>
               サイト{renderSortIndicator("siteName")}
             </th>
             <th className="px-4 py-2">WP投稿ID</th>
             <th className="px-4 py-2">スラッグ</th>
-            <th className="cursor-pointer px-4 py-2 hover:bg-neutral-100" onClick={() => handleColumnSort("status")}>
+            <th className="cursor-pointer px-4 py-2 hover:bg-neutral-100 dark:hover:bg-neutral-800" onClick={() => handleColumnSort("status")}>
               ステータス{renderSortIndicator("status")}
             </th>
-            <th className="cursor-pointer px-4 py-2 hover:bg-neutral-100" onClick={() => handleColumnSort("lastPublishedAt")}>
+            <th className="cursor-pointer px-4 py-2 hover:bg-neutral-100 dark:hover:bg-neutral-800" onClick={() => handleColumnSort("lastPublishedAt")}>
               最終投稿日時{renderSortIndicator("lastPublishedAt")}
             </th>
           </tr>
@@ -67,20 +67,20 @@ export function PostsTable({ posts: initialPosts, timezone }: { posts: PostSumma
         <tbody>
           {sortedPosts.length === 0 && (
             <tr>
-              <td colSpan={5} className="px-4 py-6 text-center text-neutral-600">
+              <td colSpan={5} className="px-4 py-6 text-center text-neutral-600 dark:text-neutral-400">
                 投稿履歴はまだありません(VSCode拡張から投稿すると表示されます)
               </td>
             </tr>
           )}
           {sortedPosts.map((post) => (
-            <tr key={post.id} className="border-b border-neutral-100 last:border-0">
+            <tr key={post.id} className="border-b border-neutral-100 dark:border-neutral-800 last:border-0">
               <td className="px-4 py-2">{post.siteName}</td>
               <td className="px-4 py-2 font-mono">{post.wpPostId}</td>
               <td className="px-4 py-2">{post.slug ?? "-"}</td>
               <td className="px-4 py-2">
-                <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs">{post.status}</span>
+                <span className="rounded-full bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 text-xs">{post.status}</span>
               </td>
-              <td className="px-4 py-2 text-neutral-500">
+              <td className="px-4 py-2 text-neutral-500 dark:text-neutral-400">
                 {post.lastPublishedAt ? formatDateTime(post.lastPublishedAt, timezone) : "-"}
               </td>
             </tr>

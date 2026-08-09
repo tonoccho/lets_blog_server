@@ -114,8 +114,8 @@ export function PluginThemeComparisonTable({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-neutral-500">
-          マスター環境: <span className="font-medium text-neutral-700">{ENVIRONMENT_LABEL[master]}</span>
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">
+          マスター環境: <span className="font-medium text-neutral-700 dark:text-neutral-300">{ENVIRONMENT_LABEL[master]}</span>
           (取得エラーは「エラー」で表示されます)
         </p>
         <div className="flex flex-wrap gap-2">
@@ -125,7 +125,7 @@ export function PluginThemeComparisonTable({
               type="button"
               disabled={loading}
               onClick={() => goToPage(pageData.page)}
-              className="rounded bg-neutral-100 px-3 py-1.5 text-sm text-neutral-700 disabled:opacity-50"
+              className="rounded bg-neutral-100 dark:bg-neutral-800 px-3 py-1.5 text-sm text-neutral-700 dark:text-neutral-300 disabled:opacity-50"
               title={`${ENVIRONMENT_LABEL[env]}環境を含め、この一覧を再取得します`}
             >
               {ENVIRONMENT_LABEL[env]}を更新
@@ -158,11 +158,11 @@ export function PluginThemeComparisonTable({
       )}
 
       {pageData.items.length === 0 ? (
-        <p className="text-sm text-neutral-500">{label}はまだありません。</p>
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">{label}はまだありません。</p>
       ) : (
-        <div className="overflow-x-auto rounded border border-neutral-200">
+        <div className="overflow-x-auto rounded border border-neutral-200 dark:border-neutral-800">
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-500">
+            <thead className="border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">
               <tr>
                 <th className="px-2 py-1.5">{label}</th>
                 <th className="px-2 py-1.5">ローカル</th>
@@ -173,8 +173,8 @@ export function PluginThemeComparisonTable({
             </thead>
             <tbody>
               {pageData.items.map((row) => (
-                <tr key={row.slug} className="border-t border-neutral-100">
-                  <td className="px-2 py-1.5 font-medium text-neutral-700">{row.slug}</td>
+                <tr key={row.slug} className="border-t border-neutral-100 dark:border-neutral-800">
+                  <td className="px-2 py-1.5 font-medium text-neutral-700 dark:text-neutral-300">{row.slug}</td>
                   {ENVIRONMENTS.map((env) => {
                     const value = row[env];
                     if (value.error) {
@@ -200,7 +200,7 @@ export function PluginThemeComparisonTable({
                         <select
                           value={selected}
                           onChange={(e) => handleSelectChange(row.slug, env, e.target.value as PluginThemeStatus)}
-                          className="rounded border border-neutral-300 px-2 py-1 text-sm"
+                          className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-sm"
                         >
                           <option value="NOT_INSTALLED" disabled={disableNotInstalled}>
                             {STATUS_LABEL.NOT_INSTALLED}
@@ -224,7 +224,7 @@ export function PluginThemeComparisonTable({
                             type="button"
                             onClick={() => handleApply(row.slug, row)}
                             disabled={rowBusy}
-                            className="rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 disabled:opacity-50"
+                            className="rounded bg-neutral-100 dark:bg-neutral-800 px-2 py-1 text-xs text-neutral-700 dark:text-neutral-300 disabled:opacity-50"
                           >
                             {isApplying ? "反映中…" : "反映"}
                           </button>
@@ -248,7 +248,7 @@ export function PluginThemeComparisonTable({
       )}
 
       <div className="flex items-center justify-between text-sm">
-        <span className="text-neutral-500">
+        <span className="text-neutral-500 dark:text-neutral-400">
           {pageData.totalCount}件中{" "}
           {pageData.items.length === 0 ? 0 : pageData.page * pageData.size + 1}-
           {pageData.page * pageData.size + pageData.items.length}件を表示
@@ -258,18 +258,18 @@ export function PluginThemeComparisonTable({
             type="button"
             disabled={pageData.page <= 0 || loading}
             onClick={() => goToPage(pageData.page - 1)}
-            className="rounded bg-neutral-100 px-3 py-1.5 disabled:opacity-50"
+            className="rounded bg-neutral-100 dark:bg-neutral-800 px-3 py-1.5 disabled:opacity-50"
           >
             前へ
           </button>
-          <span className="text-neutral-500">
+          <span className="text-neutral-500 dark:text-neutral-400">
             {pageData.page + 1} / {totalPages}
           </span>
           <button
             type="button"
             disabled={pageData.page + 1 >= totalPages || loading}
             onClick={() => goToPage(pageData.page + 1)}
-            className="rounded bg-neutral-100 px-3 py-1.5 disabled:opacity-50"
+            className="rounded bg-neutral-100 dark:bg-neutral-800 px-3 py-1.5 disabled:opacity-50"
           >
             次へ
           </button>
@@ -311,11 +311,11 @@ function NewInstallForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="flex flex-wrap items-end gap-2 rounded border border-neutral-200 bg-neutral-50 p-3 text-sm"
+      className="flex flex-wrap items-end gap-2 rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 p-3 text-sm"
     >
       <label className="flex flex-col gap-1">
-        <span className="text-neutral-600">対象環境</span>
-        <select name="environment" required className="rounded border border-neutral-300 px-3 py-2 text-sm">
+        <span className="text-neutral-600 dark:text-neutral-400">対象環境</span>
+        <select name="environment" required className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm">
           <option value="">選択してください</option>
           {managedEnvironments.map((env) => (
             <option key={env.value} value={env.value}>
@@ -325,8 +325,8 @@ function NewInstallForm({
         </select>
       </label>
       <label className="flex flex-col gap-1">
-        <span className="text-neutral-600">wordpress.orgのslug</span>
-        <input name="value" placeholder="akismet" required className="rounded border border-neutral-300 px-3 py-2 text-sm" />
+        <span className="text-neutral-600 dark:text-neutral-400">wordpress.orgのslug</span>
+        <input name="value" placeholder="akismet" required className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm" />
       </label>
       <button
         type="submit"

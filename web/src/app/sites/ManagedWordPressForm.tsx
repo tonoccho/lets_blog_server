@@ -46,9 +46,9 @@ export function ManagedWordPressForm({ users, templateCandidates }: { users: App
   };
 
   return (
-    <form ref={formRef} action={formAction} className="space-y-3 rounded-lg border border-neutral-200 bg-white p-5">
+    <form ref={formRef} action={formAction} className="space-y-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
       <h2 className="font-medium">WordPressをこのサーバーに新規構築</h2>
-      <p className="text-sm text-neutral-600">
+      <p className="text-sm text-neutral-600 dark:text-neutral-400">
         常駐WordPressコンテナ上にサブディレクトリでWordPressを自動インストールし、
         カテゴリ・タグ・著者の初期設定まで自動で行います。構築完了後は
         <code>https://localhost/sites/&#123;サイトキー&#125;/</code> でアクセスできます。
@@ -60,11 +60,11 @@ export function ManagedWordPressForm({ users, templateCandidates }: { users: App
         <Field name="managedSiteKey" label="サイトキー(英数字・ハイフン)" placeholder="main" />
         <Field name="managedTitle" label="WordPressサイトタイトル" placeholder="My Blog" wide />
         <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-          <span className="text-neutral-600">テンプレートサイト(任意)</span>
+          <span className="text-neutral-600 dark:text-neutral-400">テンプレートサイト(任意)</span>
           <select
             name="managedTemplateSiteId"
             defaultValue=""
-            className="rounded border border-neutral-300 px-3 py-2 text-sm"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
           >
             <option value="">なし(空のWordPressから始める)</option>
             {templateCandidates.map((site) => (
@@ -75,11 +75,11 @@ export function ManagedWordPressForm({ users, templateCandidates }: { users: App
           </select>
         </label>
         <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-          <span className="text-neutral-600">サーバー登録ユーザーから選択(任意)</span>
+          <span className="text-neutral-600 dark:text-neutral-400">サーバー登録ユーザーから選択(任意)</span>
           <select
             onChange={handleUserPick}
             defaultValue=""
-            className="rounded border border-neutral-300 px-3 py-2 text-sm"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
           >
             <option value="">選択してください</option>
             {users.map((u) => (
@@ -141,12 +141,12 @@ function Field({
   if (isSelect) {
     return (
       <label className={`flex flex-col gap-1 text-sm ${wide ? "sm:col-span-2" : ""}`}>
-        <span className="text-neutral-600">{label}</span>
+        <span className="text-neutral-600 dark:text-neutral-400">{label}</span>
         <select
           name={name}
           defaultValue={defaultValue}
           required
-          className="rounded border border-neutral-300 px-3 py-2 text-sm"
+          className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
         >
           {options?.map((opt) => (
             <option key={opt.value} value={opt.value}>
@@ -160,13 +160,13 @@ function Field({
 
   return (
     <label className={`flex flex-col gap-1 text-sm ${wide ? "sm:col-span-2" : ""}`}>
-      <span className="text-neutral-600">{label}</span>
+      <span className="text-neutral-600 dark:text-neutral-400">{label}</span>
       <input
         name={name}
         type={type}
         placeholder={placeholder}
         required
-        className="rounded border border-neutral-300 px-3 py-2 text-sm"
+        className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
       />
     </label>
   );

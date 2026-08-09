@@ -37,12 +37,12 @@ function SocialLinkField({
 }) {
   return (
     <label className="flex flex-col gap-1 text-sm">
-      <span className="text-neutral-600">{label}</span>
+      <span className="text-neutral-600 dark:text-neutral-400">{label}</span>
       <input
         name={`socialLinks.${name}`}
         type="url"
         defaultValue={value ?? ""}
-        className="rounded border border-neutral-300 px-3 py-2 text-sm"
+        className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
       />
     </label>
   );
@@ -58,35 +58,35 @@ export function UserProfileForm({ profile }: { profile: UserProfile }) {
   const [nickname, setNickname] = useState(profile.nickname ?? "");
 
   return (
-    <form action={formAction} className="space-y-4 rounded-lg border border-neutral-200 bg-white p-5">
+    <form action={formAction} className="space-y-4 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-neutral-600">メールアドレス</span>
+        <span className="text-neutral-600 dark:text-neutral-400">メールアドレス</span>
         <input
           type="email"
           value={profile.email ?? ""}
           disabled
-          className="rounded border border-neutral-300 bg-neutral-50 px-3 py-2 text-sm text-neutral-500"
+          className="rounded border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-500 dark:text-neutral-400"
         />
         <span className="text-xs text-neutral-400">(変更は設定から行えます)</span>
       </label>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">姓</span>
+          <span className="text-neutral-600 dark:text-neutral-400">姓</span>
           <input
             name="lastName"
             value={lastName}
             onChange={(e) => setLastName(e.target.value)}
-            className="rounded border border-neutral-300 px-3 py-2 text-sm"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">名</span>
+          <span className="text-neutral-600 dark:text-neutral-400">名</span>
           <input
             name="firstName"
             value={firstName}
             onChange={(e) => setFirstName(e.target.value)}
-            className="rounded border border-neutral-300 px-3 py-2 text-sm"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
           />
         </label>
         <DisplayNameSelect
@@ -97,76 +97,76 @@ export function UserProfileForm({ profile }: { profile: UserProfile }) {
           defaultValue={profile.displayName}
         />
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">ニックネーム</span>
+          <span className="text-neutral-600 dark:text-neutral-400">ニックネーム</span>
           <input
             name="nickname"
             value={nickname}
             onChange={(e) => setNickname(e.target.value)}
-            className="rounded border border-neutral-300 px-3 py-2 text-sm"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">ウェブサイト</span>
+          <span className="text-neutral-600 dark:text-neutral-400">ウェブサイト</span>
           <input
             name="websiteUrl"
             type="url"
             defaultValue={profile.websiteUrl ?? ""}
-            className="rounded border border-neutral-300 px-3 py-2 text-sm"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">言語</span>
+          <span className="text-neutral-600 dark:text-neutral-400">言語</span>
           <select
             name="locale"
             defaultValue={profile.locale ?? "ja_JP"}
-            className="rounded border border-neutral-300 px-3 py-2 text-sm"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
           >
             <option value="ja_JP">日本語</option>
             <option value="en_US">English</option>
           </select>
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">部署</span>
+          <span className="text-neutral-600 dark:text-neutral-400">部署</span>
           <input
             name="department"
             defaultValue={profile.department ?? ""}
-            className="rounded border border-neutral-300 px-3 py-2 text-sm"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">役職</span>
+          <span className="text-neutral-600 dark:text-neutral-400">役職</span>
           <input
             name="position"
             defaultValue={profile.position ?? ""}
-            className="rounded border border-neutral-300 px-3 py-2 text-sm"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
           />
         </label>
       </div>
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-neutral-600">自己紹介</span>
+        <span className="text-neutral-600 dark:text-neutral-400">自己紹介</span>
         <textarea
           name="bio"
           rows={3}
           defaultValue={profile.bio ?? ""}
-          className="rounded border border-neutral-300 px-3 py-2 text-sm"
+          className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
         />
       </label>
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-neutral-600">アバターURL(Gravatar等)</span>
+        <span className="text-neutral-600 dark:text-neutral-400">アバターURL(Gravatar等)</span>
         <input
           name="avatarUrl"
           type="url"
           defaultValue={profile.avatarUrl ?? ""}
-          className="rounded border border-neutral-300 px-3 py-2 text-sm"
+          className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
         />
         {profile.avatarUrl && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={profile.avatarUrl} alt="" className="mt-2 h-16 w-16 rounded-full border border-neutral-200" />
+          <img src={profile.avatarUrl} alt="" className="mt-2 h-16 w-16 rounded-full border border-neutral-200 dark:border-neutral-800" />
         )}
       </label>
 
       <fieldset className="flex flex-col gap-3">
-        <legend className="text-sm font-medium text-neutral-600">SNSリンク</legend>
+        <legend className="text-sm font-medium text-neutral-600 dark:text-neutral-400">SNSリンク</legend>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {SOCIAL_LINK_FIELDS.map(({ key, label }) => (
             <SocialLinkField key={key} label={label} name={key} value={profile.socialLinks?.[key]} />

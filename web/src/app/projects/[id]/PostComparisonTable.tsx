@@ -91,12 +91,12 @@ export function PostComparisonTable({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-sm">
-          <span className="text-neutral-500">種別:</span>
+          <span className="text-neutral-500 dark:text-neutral-400">種別:</span>
           <select
             value={postType}
             disabled={loading}
             onChange={(e) => handlePostTypeChange(e.target.value as PostType)}
-            className="rounded border border-neutral-300 px-2 py-1"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1"
           >
             <option value="post">ポスト</option>
             <option value="page">ページ</option>
@@ -106,7 +106,7 @@ export function PostComparisonTable({
           type="button"
           disabled={loading}
           onClick={() => load(postType, pageData.page)}
-          className="rounded bg-neutral-100 px-3 py-1.5 text-sm text-neutral-700 disabled:opacity-50"
+          className="rounded bg-neutral-100 dark:bg-neutral-800 px-3 py-1.5 text-sm text-neutral-700 dark:text-neutral-300 disabled:opacity-50"
         >
           更新
         </button>
@@ -117,11 +117,11 @@ export function PostComparisonTable({
       )}
 
       {pageData.items.length === 0 ? (
-        <p className="text-sm text-neutral-500">{postType === "post" ? "ポスト" : "ページ"}はまだありません。</p>
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">{postType === "post" ? "ポスト" : "ページ"}はまだありません。</p>
       ) : (
-        <div className="overflow-x-auto rounded border border-neutral-200">
+        <div className="overflow-x-auto rounded border border-neutral-200 dark:border-neutral-800">
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-500">
+            <thead className="border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">
               <tr>
                 <th className="px-2 py-1.5">slug</th>
                 <th className="px-2 py-1.5">ローカル</th>
@@ -136,8 +136,8 @@ export function PostComparisonTable({
                 const isDeletePending = pendingAction?.slug === row.slug && pendingAction?.type === "delete";
                 const rowBusy = isStatusPending || isDeletePending;
                 return (
-                  <tr key={row.slug} className="border-t border-neutral-100 align-top">
-                    <td className="px-2 py-1.5 font-medium text-neutral-700">{row.slug}</td>
+                  <tr key={row.slug} className="border-t border-neutral-100 dark:border-neutral-800 align-top">
+                    <td className="px-2 py-1.5 font-medium text-neutral-700 dark:text-neutral-300">{row.slug}</td>
                     {ENVIRONMENTS.map((env) => {
                       const value = row[env];
                       if (value.error) {
@@ -166,7 +166,7 @@ export function PostComparisonTable({
                           <div className="max-w-[220px] truncate" title={value.title ?? undefined}>
                             {value.title || "(無題)"}
                           </div>
-                          <div className="text-xs text-neutral-500">{value.status}</div>
+                          <div className="text-xs text-neutral-500 dark:text-neutral-400">{value.status}</div>
                         </td>
                       );
                     })}
@@ -177,7 +177,7 @@ export function PostComparisonTable({
                           onChange={(e) =>
                             setStatusSelections((prev) => ({ ...prev, [row.slug]: e.target.value }))
                           }
-                          className="rounded border border-neutral-300 px-2 py-1 text-xs"
+                          className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-xs"
                         >
                           <option value="">ステータス変更…</option>
                           {STATUS_OPTIONS.map((opt) => (
@@ -190,7 +190,7 @@ export function PostComparisonTable({
                           type="button"
                           onClick={() => handleStatusApply(row.slug)}
                           disabled={rowBusy}
-                          className="rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 disabled:opacity-50"
+                          className="rounded bg-neutral-100 dark:bg-neutral-800 px-2 py-1 text-xs text-neutral-700 dark:text-neutral-300 disabled:opacity-50"
                         >
                           {isStatusPending ? "変更中…" : "適用"}
                         </button>
@@ -213,7 +213,7 @@ export function PostComparisonTable({
       )}
 
       <div className="flex items-center justify-between text-sm">
-        <span className="text-neutral-500">
+        <span className="text-neutral-500 dark:text-neutral-400">
           {pageData.totalCount}件中{" "}
           {pageData.items.length === 0 ? 0 : pageData.page * pageData.size + 1}-
           {pageData.page * pageData.size + pageData.items.length}件を表示
@@ -223,18 +223,18 @@ export function PostComparisonTable({
             type="button"
             disabled={pageData.page <= 0 || loading}
             onClick={() => load(postType, pageData.page - 1)}
-            className="rounded bg-neutral-100 px-3 py-1.5 disabled:opacity-50"
+            className="rounded bg-neutral-100 dark:bg-neutral-800 px-3 py-1.5 disabled:opacity-50"
           >
             前へ
           </button>
-          <span className="text-neutral-500">
+          <span className="text-neutral-500 dark:text-neutral-400">
             {pageData.page + 1} / {totalPages}
           </span>
           <button
             type="button"
             disabled={pageData.page + 1 >= totalPages || loading}
             onClick={() => load(postType, pageData.page + 1)}
-            className="rounded bg-neutral-100 px-3 py-1.5 disabled:opacity-50"
+            className="rounded bg-neutral-100 dark:bg-neutral-800 px-3 py-1.5 disabled:opacity-50"
           >
             次へ
           </button>

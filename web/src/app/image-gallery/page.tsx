@@ -13,7 +13,7 @@ export default async function ImageGalleryPage() {
       <h1 className="text-xl font-semibold">生成画像ギャラリー</h1>
 
       {images.length === 0 ? (
-        <p className="text-neutral-500">生成画像がありません(VSCode拡張で画像を生成すると表示されます)</p>
+        <p className="text-neutral-500 dark:text-neutral-400">生成画像がありません(VSCode拡張で画像を生成すると表示されます)</p>
       ) : (
         <ImageGalleryGrid images={images} timezone={timezone} />
       )}
