@@ -52,12 +52,12 @@ export async function upsertProjectCustomTagAction(
     return { error: err instanceof Error ? err.message : String(err) };
   }
 
-  revalidatePath(`/projects/${projectId}/custom-tags`);
+  revalidatePath(`/projects/${projectId}/tags`);
   return { success: true };
 }
 
 export async function deleteProjectCustomTagAction(projectId: number, id: number) {
   const session = await requireAdminSession();
   await deleteCustomTag(id, { id: Number(session.user.id), role: session.user.role });
-  revalidatePath(`/projects/${projectId}/custom-tags`);
+  revalidatePath(`/projects/${projectId}/tags`);
 }

@@ -71,15 +71,9 @@ export default async function ProjectsPage() {
                   <Link href={`/projects/${project.id}/plan`} className="text-sm text-neutral-600 dark:text-neutral-400 hover:underline">
                     計画
                   </Link>
-                  <Link href={`/projects/${project.id}/tag-design`} className="text-sm text-neutral-600 dark:text-neutral-400 hover:underline">
-                    組み込みタグ
+                  <Link href={`/projects/${project.id}/tags`} className="text-sm text-neutral-600 dark:text-neutral-400 hover:underline">
+                    タグ
                   </Link>
-                  <a
-                    href={`/projects/${project.id}/custom-tags/css-bundle`}
-                    className="text-sm text-neutral-600 dark:text-neutral-400 hover:underline"
-                  >
-                    統合CSSダウンロード
-                  </a>
                   <Link href={`/projects/${project.id}`} className="text-sm text-neutral-600 dark:text-neutral-400 hover:underline">
                     詳細
                   </Link>

@@ -37,6 +37,6 @@ export async function saveTagDesignSettingAction(
     return { error: err instanceof Error ? err.message : String(err) };
   }
 
-  revalidatePath(`/projects/${projectId}/tag-design`);
+  revalidatePath(`/projects/${projectId}/tags`);
   return { success: true };
 }

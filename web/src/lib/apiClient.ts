@@ -837,9 +837,13 @@ export async function downloadCustomTagCssBundle(projectId?: number | null): Pro
 }
 
 /** プロジェクト詳細/プロジェクト一覧向け。グローバルタグを含めず、プロジェクトのタグのCSSのみを連結する。 */
-export async function downloadProjectCustomTagCssBundle(projectId: number): Promise<ArrayBuffer> {
+export async function downloadProjectCustomTagCssBundle(projectId: number, actor: ActorInfo): Promise<ArrayBuffer> {
   const res = await fetch(`${serverUrl()}/api/projects/${projectId}/custom-tags/css-bundle`, {
-    headers: { 'X-API-Key': await currentApiKey() },
+    headers: {
+      'X-API-Key': await currentApiKey(),
+      'X-Actor-Id': String(actor.id),
+      'X-Actor-Role': actor.role,
+    },
     cache: 'no-store',
   });
   if (!res.ok) {
