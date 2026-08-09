@@ -43,11 +43,13 @@ export default async function RootLayout({
         <SessionProvider>
           <I18nProvider>
             <header className="sticky top-0 z-40 border-b border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
-              <div className="mx-auto flex max-w-7xl items-center gap-6 px-4 py-3">
-                <span className="shrink-0 font-semibold">Let&apos;s Blog Server</span>
-                {session && <HeaderNav navItems={navItems} />}
+              <div className="mx-auto max-w-7xl px-4">
+                <div className="flex items-center gap-6 py-3">
+                  <span className="shrink-0 font-semibold">Let&apos;s Blog Server</span>
+                  {session && <HeaderNav navItems={navItems} />}
+                </div>
                 {session && (
-                  <div className="ml-auto flex shrink-0 items-center gap-4 text-sm">
+                  <div className="flex items-center justify-end gap-4 border-t border-neutral-200 px-0 py-3 text-sm dark:border-neutral-800">
                     <span className="text-neutral-500 dark:text-neutral-400">{session.user.email}</span>
                     <LanguageSwitcher />
                     <ThemeSwitcher />
