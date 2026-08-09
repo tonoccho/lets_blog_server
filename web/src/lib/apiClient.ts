@@ -871,6 +871,7 @@ export interface TagDesignSetting {
   backgroundColor: string;
   textColor: string;
   accentColor: string;
+  customCss: string | null;
 }
 
 export interface TagDesignSettingsOverview {
@@ -883,6 +884,7 @@ export interface SaveTagDesignSettingInput {
   backgroundColor: string;
   textColor: string;
   accentColor: string;
+  customCss?: string;
 }
 
 export function getTagDesignSettings(projectId: number, actor?: ActorInfo): Promise<TagDesignSettingsOverview> {

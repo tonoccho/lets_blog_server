@@ -11,6 +11,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class TocStyleRenderServiceTest {
@@ -26,7 +27,7 @@ class TocStyleRenderServiceTest {
     void setUp() {
         service = new TocStyleRenderService(tagDesignSettingService);
         lenient().when(tagDesignSettingService.resolveColors(PROJECT_ID, EmbedTagType.TOC))
-                .thenReturn(new TagDesignColors("#1f2937", "#f3f4f6", "#60a5fa"));
+                .thenReturn(new TagDesignColors("#1f2937", "#f3f4f6", "#60a5fa", null));
     }
 
     @Test
@@ -41,6 +42,17 @@ class TocStyleRenderServiceTest {
         assertTrue(result.contains("color:#f3f4f6"));
         assertTrue(result.contains("color:#60a5fa"));
         assertTrue(result.contains("[toc]"), "元のMarkdown本文は保持されること");
+    }
+
+    @Test
+    void render_customCssが設定されていれば色ベースのCSSの後ろに連結する() {
+        org.mockito.Mockito.reset(tagDesignSettingService);
+        when(tagDesignSettingService.resolveColors(PROJECT_ID, EmbedTagType.TOC))
+                .thenReturn(new TagDesignColors("#1f2937", "#f3f4f6", "#60a5fa", ".lb-toc-list{font-weight:bold;}"));
+
+        String result = service.render("[toc]\n\n## セクション1\n\n本文", PROJECT_ID);
+
+        assertTrue(result.contains(".lb-toc-list{font-weight:bold;}"));
     }
 
     @Test

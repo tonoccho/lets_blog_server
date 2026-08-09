@@ -7,5 +7,6 @@ public record TagDesignSettingResponse(
         String presetId,
         String backgroundColor,
         String textColor,
-        String accentColor) {
+        String accentColor,
+        String customCss) {
 }

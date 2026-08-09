@@ -24,11 +24,13 @@ export async function saveTagDesignSettingAction(
     return { error: "不正なリクエストです。" };
   }
 
+  const customCss = String(formData.get("customCss") ?? "").trim();
   const input: SaveTagDesignSettingInput = {
     presetId: String(formData.get("presetId") ?? "").trim(),
     backgroundColor: String(formData.get("backgroundColor") ?? "").trim(),
     textColor: String(formData.get("textColor") ?? "").trim(),
     accentColor: String(formData.get("accentColor") ?? "").trim(),
+    customCss: customCss || undefined,
   };
 
   try {

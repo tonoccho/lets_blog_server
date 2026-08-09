@@ -52,6 +52,10 @@ public class TagDesignSetting {
     @Column(name = "accent_color", nullable = false, length = 7)
     private String accentColor;
 
+    /** 色プリセットでは表現できない追加の生CSS(任意)。設定されていれば色ベースのCSSの後ろに連結する。 */
+    @Column(name = "custom_css", columnDefinition = "TEXT")
+    private String customCss;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

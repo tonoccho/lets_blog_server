@@ -14,5 +14,6 @@ public record SaveTagDesignSettingRequest(
         String textColor,
         @NotBlank(message = "アクセントカラーは必須です")
         @Pattern(regexp = "^#[0-9a-fA-F]{6}$", message = "アクセントカラーは#RRGGBB形式で指定してください")
-        String accentColor) {
+        String accentColor,
+        String customCss) {
 }

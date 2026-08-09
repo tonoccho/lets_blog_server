@@ -38,7 +38,7 @@ class BlogCardTagRenderServiceTest {
     void setUp() {
         service = new BlogCardTagRenderService(contentCacheService, tagDesignSettingService);
         lenient().when(tagDesignSettingService.resolveColors(PROJECT_ID, EmbedTagType.BLOGCARD))
-                .thenReturn(new TagDesignColors("#ffffff", "#1a1a1a", "#2563eb"));
+                .thenReturn(new TagDesignColors("#ffffff", "#1a1a1a", "#2563eb", null));
     }
 
     private ContentCacheResponse response(Map<String, String> data) {
@@ -66,6 +66,19 @@ class BlogCardTagRenderServiceTest {
         assertTrue(result.contains("background-image:url('https://example.com/eyecatch.png')"));
         assertTrue(result.contains("本文"));
         assertTrue(result.contains("続き"));
+    }
+
+    @Test
+    void render_customCssが設定されていれば色ベースのCSSの後ろに連結する() {
+        org.mockito.Mockito.reset(tagDesignSettingService, contentCacheService);
+        String url = "https://example.com/posts/1";
+        when(contentCacheService.resolve(url)).thenReturn(response(Map.of("title", "記事タイトル")));
+        when(tagDesignSettingService.resolveColors(PROJECT_ID, EmbedTagType.BLOGCARD))
+                .thenReturn(new TagDesignColors("#ffffff", "#1a1a1a", "#2563eb", ".lb-blogcard{font-weight:bold;}"));
+
+        String result = service.render("[blogcard " + url + "]", PROJECT_ID);
+
+        assertTrue(result.contains(".lb-blogcard{font-weight:bold;}"));
     }
 
     @Test

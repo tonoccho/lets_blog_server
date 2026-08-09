@@ -38,7 +38,7 @@ class AmazonTagRenderServiceTest {
     void setUp() {
         service = new AmazonTagRenderService(contentCacheService, tagDesignSettingService);
         lenient().when(tagDesignSettingService.resolveColors(PROJECT_ID, EmbedTagType.AMAZON))
-                .thenReturn(new TagDesignColors("#ffffff", "#1a1a1a", "#2563eb"));
+                .thenReturn(new TagDesignColors("#ffffff", "#1a1a1a", "#2563eb", null));
     }
 
     private ContentCacheResponse response(Map<String, String> data) {
@@ -66,6 +66,19 @@ class AmazonTagRenderServiceTest {
         assertTrue(result.contains("rel=\"noopener noreferrer nofollow sponsored\""));
         assertTrue(result.contains("本文"));
         assertTrue(result.contains("続き"));
+    }
+
+    @Test
+    void render_customCssが設定されていれば色ベースのCSSの後ろに連結する() {
+        org.mockito.Mockito.reset(tagDesignSettingService, contentCacheService);
+        String url = "https://www.amazon.co.jp/dp/B000000000";
+        when(contentCacheService.resolve(url)).thenReturn(response(Map.of("productName", "サンプル商品")));
+        when(tagDesignSettingService.resolveColors(PROJECT_ID, EmbedTagType.AMAZON))
+                .thenReturn(new TagDesignColors("#ffffff", "#1a1a1a", "#2563eb", ".lb-amazon-card{font-weight:bold;}"));
+
+        String result = service.render("[amazon " + url + "]", PROJECT_ID);
+
+        assertTrue(result.contains(".lb-amazon-card{font-weight:bold;}"));
     }
 
     @Test

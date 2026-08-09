@@ -64,7 +64,7 @@ public class AmazonTagRenderService {
 
     /** CustomTagServiceの統合CSS生成からも呼ばれるためpackage-private。 */
     String buildStyle(TagDesignColors colors) {
-        return ".lb-amazon-card{display:flex;align-items:stretch;border:1px solid #e0e0e0;"
+        String base = ".lb-amazon-card{display:flex;align-items:stretch;border:1px solid #e0e0e0;"
                 + "border-radius:8px;overflow:hidden;text-decoration:none;color:" + colors.textColor()
                 + ";max-width:100%;margin:1em 0;background:" + colors.backgroundColor()
                 + ";transition:box-shadow .15s ease;}"
@@ -78,6 +78,8 @@ public class AmazonTagRenderService {
                 + ".lb-amazon-card-price{font-size:1.05em;font-weight:700;color:" + colors.accentColor() + ";}"
                 + ".lb-amazon-card-cta{font-size:.8em;color:#fff;background:" + colors.accentColor()
                 + ";border-radius:4px;padding:4px 10px;align-self:flex-start;margin-top:auto;}";
+        String customCss = colors.customCss();
+        return customCss == null || customCss.isBlank() ? base : base + "\n" + customCss.trim();
     }
 
     private String renderCard(String rawUrl) {

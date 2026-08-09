@@ -24,17 +24,30 @@ const TAG_SYNTAX: Record<EmbedTagType, string> = {
   AMAZON: "[amazon URL]",
 };
 
-function buildPreviewHtml(tagType: EmbedTagType, colors: Colors): string {
+/** 実際のレンダリング(TocStyleRenderService等)が出力するクラス名。customCssのプレビュー反映に使う。 */
+const TAG_CLASS: Record<EmbedTagType, string> = {
+  TOC: "lb-toc-list",
+  BLOGCARD: "lb-blogcard",
+  AMAZON: "lb-amazon-card",
+};
+
+/**
+ * 色は本文注入時と同じくCSSクラス経由で反映するのが正確だが、プレビューでは即時反映のため
+ * 要素へのinline styleで表現している。customCssで同じプロパティを上書きしたい場合は
+ * !importantが必要になる(実際の本文出力はinline styleを使わないため、customCssだけで上書き可能)。
+ */
+function buildPreviewHtml(tagType: EmbedTagType, colors: Colors, customCss: string): string {
+  const tagClass = TAG_CLASS[tagType];
   const body = (() => {
     switch (tagType) {
       case "TOC":
-        return `<ul style="list-style:none;margin:0;padding:12px 16px;border-radius:8px;background:${colors.backgroundColor};font-family:sans-serif;">
+        return `<ul class="${tagClass}" style="list-style:none;margin:0;padding:12px 16px;border-radius:8px;background:${colors.backgroundColor};font-family:sans-serif;">
           <li style="margin:4px 0;"><a href="#" style="color:${colors.textColor};text-decoration:none;">セクション1</a></li>
           <li style="margin:4px 0 4px 16px;"><a href="#" style="color:${colors.accentColor};text-decoration:underline;">セクション1-1(ホバー時の色)</a></li>
           <li style="margin:4px 0;"><a href="#" style="color:${colors.textColor};text-decoration:none;">セクション2</a></li>
         </ul>`;
       case "BLOGCARD":
-        return `<a style="display:flex;align-items:stretch;border:1px solid #e0e0e0;border-left:4px solid ${colors.accentColor};border-radius:8px;overflow:hidden;text-decoration:none;background:${colors.backgroundColor};color:${colors.textColor};font-family:sans-serif;">
+        return `<a class="${tagClass}" style="display:flex;align-items:stretch;border:1px solid #e0e0e0;border-left:4px solid ${colors.accentColor};border-radius:8px;overflow:hidden;text-decoration:none;background:${colors.backgroundColor};color:${colors.textColor};font-family:sans-serif;">
           <div style="flex:0 0 96px;background:#f2f2f2;"></div>
           <div style="flex:1 1 auto;min-width:0;padding:10px 14px;">
             <div style="font-weight:600;">サンプル記事タイトル</div>
@@ -43,7 +56,7 @@ function buildPreviewHtml(tagType: EmbedTagType, colors: Colors): string {
           </div>
         </a>`;
       case "AMAZON":
-        return `<a style="display:flex;align-items:stretch;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;text-decoration:none;color:${colors.textColor};background:${colors.backgroundColor};font-family:sans-serif;">
+        return `<a class="${tagClass}" style="display:flex;align-items:stretch;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;text-decoration:none;color:${colors.textColor};background:${colors.backgroundColor};font-family:sans-serif;">
           <div style="flex:0 0 96px;background:#fff;"></div>
           <div style="flex:1 1 auto;min-width:0;padding:10px 14px;">
             <div style="font-weight:600;">サンプル商品名</div>
@@ -55,7 +68,8 @@ function buildPreviewHtml(tagType: EmbedTagType, colors: Colors): string {
         return "";
     }
   })();
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:12px;">${body}</body></html>`;
+  const styleTag = customCss.trim() ? `<style>${customCss}</style>` : "";
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">${styleTag}</head><body style="margin:12px;">${body}</body></html>`;
 }
 
 function presetLabel(presets: TagDesignPreset[], presetId: string): string {
@@ -92,15 +106,16 @@ function TagDesignEditor({
     textColor: initialSetting.textColor,
     accentColor: initialSetting.accentColor,
   });
-  const [previewSrcDoc, setPreviewSrcDoc] = useState(() => buildPreviewHtml(tagType, colors));
+  const [customCss, setCustomCss] = useState(initialSetting.customCss ?? "");
+  const [previewSrcDoc, setPreviewSrcDoc] = useState(() => buildPreviewHtml(tagType, colors, customCss));
 
-  // 色変更のたびに即再描画すると入力のたびにiframeが再構築されカクつくため、300msデバウンスする
+  // 色・CSS変更のたびに即再描画すると入力のたびにiframeが再構築されカクつくため、300msデバウンスする
   useEffect(() => {
     const timer = setTimeout(() => {
-      setPreviewSrcDoc(buildPreviewHtml(tagType, colors));
+      setPreviewSrcDoc(buildPreviewHtml(tagType, colors, customCss));
     }, 300);
     return () => clearTimeout(timer);
-  }, [tagType, colors]);
+  }, [tagType, colors, customCss]);
 
   function applyPreset(preset: TagDesignPreset) {
     setPresetId(preset.id);
@@ -179,6 +194,20 @@ function TagDesignEditor({
         </label>
       </div>
 
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="text-neutral-600 dark:text-neutral-400">
+          追加CSS(任意、色設定では表現できない装飾を <code>.{TAG_CLASS[tagType]}</code> 等のセレクタで追加できます)
+        </span>
+        <textarea
+          name="customCss"
+          value={customCss}
+          onChange={(e) => setCustomCss(e.target.value)}
+          rows={6}
+          placeholder={`.${TAG_CLASS[tagType]} { border: 1px dashed; }`}
+          className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 font-mono text-sm"
+        />
+      </label>
+
       <div className="flex flex-col gap-1 text-sm">
         <span className="text-neutral-600 dark:text-neutral-400">プレビュー(サンプルデータ、入力後300ms自動更新)</span>
         <iframe
@@ -225,6 +254,7 @@ export function TagDesignSettingsPanel({
               <th className="px-4 py-2">背景色</th>
               <th className="px-4 py-2">テキスト色</th>
               <th className="px-4 py-2">アクセントカラー</th>
+              <th className="px-4 py-2">追加CSS</th>
               <th className="px-4 py-2"></th>
             </tr>
           </thead>
@@ -253,6 +283,9 @@ export function TagDesignSettingsPanel({
                 </td>
                 <td className="px-4 py-2">
                   <ColorSwatch color={setting.accentColor} />
+                </td>
+                <td className="px-4 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-400">
+                  {setting.customCss && <code className="whitespace-pre-wrap break-all">{setting.customCss}</code>}
                 </td>
                 <td className="px-4 py-2 text-right whitespace-nowrap">
                   <button

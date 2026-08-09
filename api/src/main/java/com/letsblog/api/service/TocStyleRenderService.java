@@ -38,7 +38,7 @@ public class TocStyleRenderService {
 
     /** CustomTagServiceの統合CSS生成からも呼ばれるためpackage-private。 */
     String buildStyle(TagDesignColors colors) {
-        return "." + MarkdownRenderer.TOC_LIST_CLASS + "{list-style:none;margin:1em 0;padding:12px 16px;"
+        String base = "." + MarkdownRenderer.TOC_LIST_CLASS + "{list-style:none;margin:1em 0;padding:12px 16px;"
                 + "border-radius:8px;background:" + colors.backgroundColor() + ";}"
                 + "." + MarkdownRenderer.TOC_LIST_CLASS + " ul{list-style:none;}"
                 + "." + MarkdownRenderer.TOC_LIST_CLASS + " li{margin:4px 0;}"
@@ -46,5 +46,7 @@ public class TocStyleRenderService {
                 + ";text-decoration:none;}"
                 + "." + MarkdownRenderer.TOC_LIST_CLASS + " a:hover{color:" + colors.accentColor()
                 + ";text-decoration:underline;}";
+        String customCss = colors.customCss();
+        return customCss == null || customCss.isBlank() ? base : base + "\n" + customCss.trim();
     }
 }

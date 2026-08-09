@@ -35,7 +35,7 @@ public class TagDesignSettingService {
     @Transactional(readOnly = true)
     public TagDesignColors resolveColors(Long projectId, EmbedTagType tagType) {
         return repository.findByProjectIdAndTagType(projectId, tagType)
-                .map(s -> new TagDesignColors(s.getBackgroundColor(), s.getTextColor(), s.getAccentColor()))
+                .map(s -> new TagDesignColors(s.getBackgroundColor(), s.getTextColor(), s.getAccentColor(), s.getCustomCss()))
                 .orElseGet(() -> presetColors(DesignPreset.DEFAULT));
     }
 
@@ -67,23 +67,25 @@ public class TagDesignSettingService {
         entity.setBackgroundColor(request.backgroundColor());
         entity.setTextColor(request.textColor());
         entity.setAccentColor(request.accentColor());
+        entity.setCustomCss(request.customCss());
 
         TagDesignSetting saved = repository.save(entity);
         return toResponse(tagType, saved);
     }
 
     private TagDesignColors presetColors(DesignPreset preset) {
-        return new TagDesignColors(preset.backgroundColor(), preset.textColor(), preset.accentColor());
+        return new TagDesignColors(preset.backgroundColor(), preset.textColor(), preset.accentColor(), null);
     }
 
     private TagDesignSettingResponse toResponse(EmbedTagType tagType, TagDesignSetting saved) {
         if (saved != null) {
             return new TagDesignSettingResponse(
-                    tagType, saved.getPresetId(), saved.getBackgroundColor(), saved.getTextColor(), saved.getAccentColor());
+                    tagType, saved.getPresetId(), saved.getBackgroundColor(), saved.getTextColor(),
+                    saved.getAccentColor(), saved.getCustomCss());
         }
         DesignPreset defaultPreset = DesignPreset.DEFAULT;
         return new TagDesignSettingResponse(
                 tagType, defaultPreset.id(), defaultPreset.backgroundColor(), defaultPreset.textColor(),
-                defaultPreset.accentColor());
+                defaultPreset.accentColor(), null);
     }
 }
