@@ -56,6 +56,14 @@ public class TagDesignSetting {
     @Column(name = "custom_css", columnDefinition = "TEXT")
     private String customCss;
 
+    /**
+     * 標準のHTML構造を置き換える任意のテンプレート。プレースホルダは種別ごとに固定
+     * (BLOGCARD/AMAZON: {{title}}等のデータ項目、TOC: 生成された目次全体を表す{{toc}}のみ)。
+     * 未設定時は従来どおりのハードコードされたHTML構造を使う。
+     */
+    @Column(name = "html_template", columnDefinition = "TEXT")
+    private String htmlTemplate;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

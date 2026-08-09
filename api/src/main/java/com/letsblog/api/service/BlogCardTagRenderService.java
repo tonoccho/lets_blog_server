@@ -50,7 +50,7 @@ public class BlogCardTagRenderService {
         StringBuilder result = new StringBuilder();
         while (matcher.find()) {
             String rawUrl = matcher.group(1);
-            matcher.appendReplacement(result, Matcher.quoteReplacement(renderCard(rawUrl)));
+            matcher.appendReplacement(result, Matcher.quoteReplacement(renderCard(rawUrl, projectId)));
         }
         matcher.appendTail(result);
 
@@ -82,7 +82,7 @@ public class BlogCardTagRenderService {
         return customCss == null || customCss.isBlank() ? base : base + "\n" + customCss.trim();
     }
 
-    private String renderCard(String rawUrl) {
+    private String renderCard(String rawUrl, Long projectId) {
         try {
             ContentCacheResponse response = contentCacheService.resolve(rawUrl);
             Map<String, String> data = response.data();
@@ -93,13 +93,24 @@ public class BlogCardTagRenderService {
             String description = HtmlUtils.htmlEscape(nullToEmpty(data.get("description")));
             String siteName = HtmlUtils.htmlEscape(nullToEmpty(data.get("siteName")));
             String escapedHref = HtmlUtils.htmlEscape(href);
+            String escapedImageUrl = imageUrl == null ? "" : HtmlUtils.htmlEscape(imageUrl);
+
+            String customTemplate = tagDesignSettingService.resolveHtmlTemplate(projectId, EmbedTagType.BLOGCARD);
+            if (customTemplate != null) {
+                return EmbedTagTemplateRenderer.render(customTemplate, Map.of(
+                        "title", title,
+                        "description", description,
+                        "siteName", siteName,
+                        "url", escapedHref,
+                        "imageUrl", escapedImageUrl));
+            }
 
             StringBuilder html = new StringBuilder();
             html.append("<a class=\"lb-blogcard\" href=\"").append(escapedHref)
                     .append("\" target=\"_blank\" rel=\"noopener noreferrer\">");
             if (imageUrl != null) {
                 html.append("<div class=\"lb-blogcard-thumb\" style=\"background-image:url('")
-                        .append(HtmlUtils.htmlEscape(imageUrl)).append("')\"></div>");
+                        .append(escapedImageUrl).append("')\"></div>");
             }
             html.append("<div class=\"lb-blogcard-body\">")
                     .append("<div class=\"lb-blogcard-title\">").append(title).append("</div>")

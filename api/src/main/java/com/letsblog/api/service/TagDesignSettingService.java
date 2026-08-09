@@ -39,6 +39,18 @@ public class TagDesignSettingService {
                 .orElseGet(() -> presetColors(DesignPreset.DEFAULT));
     }
 
+    /**
+     * レンダリング時に使うHTMLテンプレートを返す。未設定(保存なし、または保存済みだが空欄)の場合はnullを返し、
+     * 呼び出し側は従来どおりのハードコードされたHTML構造にフォールバックする。
+     */
+    @Transactional(readOnly = true)
+    public String resolveHtmlTemplate(Long projectId, EmbedTagType tagType) {
+        return repository.findByProjectIdAndTagType(projectId, tagType)
+                .map(TagDesignSetting::getHtmlTemplate)
+                .filter(template -> template != null && !template.isBlank())
+                .orElse(null);
+    }
+
     @Transactional(readOnly = true)
     public TagDesignSettingsOverviewResponse getOverview(Long projectId) {
         List<TagDesignPresetResponse> presets = Arrays.stream(DesignPreset.values())
@@ -68,6 +80,7 @@ public class TagDesignSettingService {
         entity.setTextColor(request.textColor());
         entity.setAccentColor(request.accentColor());
         entity.setCustomCss(request.customCss());
+        entity.setHtmlTemplate(request.htmlTemplate());
 
         TagDesignSetting saved = repository.save(entity);
         return toResponse(tagType, saved);
@@ -81,11 +94,11 @@ public class TagDesignSettingService {
         if (saved != null) {
             return new TagDesignSettingResponse(
                     tagType, saved.getPresetId(), saved.getBackgroundColor(), saved.getTextColor(),
-                    saved.getAccentColor(), saved.getCustomCss());
+                    saved.getAccentColor(), saved.getCustomCss(), saved.getHtmlTemplate());
         }
         DesignPreset defaultPreset = DesignPreset.DEFAULT;
         return new TagDesignSettingResponse(
                 tagType, defaultPreset.id(), defaultPreset.backgroundColor(), defaultPreset.textColor(),
-                defaultPreset.accentColor(), null);
+                defaultPreset.accentColor(), null, null);
     }
 }

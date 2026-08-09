@@ -71,7 +71,8 @@ public class ArticlePreviewService {
         rendered = blogCardTagRenderService.render(rendered, projectId);
         rendered = amazonTagRenderService.render(rendered, projectId);
         rendered = tocStyleRenderService.render(rendered, projectId);
-        return markdownRenderer.render(rendered);
+        String html = markdownRenderer.render(rendered);
+        return tocStyleRenderService.applyHtmlTemplate(html, projectId);
     }
 
     /**

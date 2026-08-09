@@ -25,12 +25,14 @@ export async function saveTagDesignSettingAction(
   }
 
   const customCss = String(formData.get("customCss") ?? "").trim();
+  const htmlTemplate = String(formData.get("htmlTemplate") ?? "").trim();
   const input: SaveTagDesignSettingInput = {
     presetId: String(formData.get("presetId") ?? "").trim(),
     backgroundColor: String(formData.get("backgroundColor") ?? "").trim(),
     textColor: String(formData.get("textColor") ?? "").trim(),
     accentColor: String(formData.get("accentColor") ?? "").trim(),
     customCss: customCss || undefined,
+    htmlTemplate: htmlTemplate || undefined,
   };
 
   try {

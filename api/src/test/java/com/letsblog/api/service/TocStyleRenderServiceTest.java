@@ -95,4 +95,57 @@ class TocStyleRenderServiceTest {
         org.mockito.Mockito.verify(tagDesignSettingService, org.mockito.Mockito.never())
                 .resolveColors(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
+
+    @Test
+    void applyHtmlTemplate_未設定ならhtmlをそのまま返す() {
+        String html = "<ul class=\"lb-toc-list\"><li><a href=\"#a\">a</a></li></ul>";
+
+        String result = service.applyHtmlTemplate(html, PROJECT_ID);
+
+        assertEquals(html, result);
+    }
+
+    @Test
+    void applyHtmlTemplate_設定されていれば目次全体をtocプレースホルダに差し込む() {
+        when(tagDesignSettingService.resolveHtmlTemplate(PROJECT_ID, EmbedTagType.TOC))
+                .thenReturn("<details><summary>目次</summary>{{toc}}</details>");
+        String toc = "<ul class=\"lb-toc-list\"><li><a href=\"#a\">a</a></li></ul>";
+        String html = "<h1>タイトル</h1>\n" + toc + "\n<h2 id=\"a\">a</h2>";
+
+        String result = service.applyHtmlTemplate(html, PROJECT_ID);
+
+        assertEquals("<h1>タイトル</h1>\n<details><summary>目次</summary>" + toc + "</details>\n<h2 id=\"a\">a</h2>", result);
+    }
+
+    @Test
+    void applyHtmlTemplate_見出し階層による入れ子ulも1ブロックとして丸ごと差し込む() {
+        when(tagDesignSettingService.resolveHtmlTemplate(PROJECT_ID, EmbedTagType.TOC))
+                .thenReturn("<nav>{{toc}}</nav>");
+        String toc = "<ul class=\"lb-toc-list\">\n"
+                + "<li><a href=\"#a\">a</a>\n<ul>\n<li><a href=\"#a-1\">a-1</a></li>\n</ul>\n</li>\n"
+                + "<li><a href=\"#b\">b</a></li>\n"
+                + "</ul>";
+        String html = "<h1>タイトル</h1>\n" + toc + "\n<h2 id=\"a\">a</h2>";
+
+        String result = service.applyHtmlTemplate(html, PROJECT_ID);
+
+        assertEquals("<h1>タイトル</h1>\n<nav>" + toc + "</nav>\n<h2 id=\"a\">a</h2>", result);
+    }
+
+    @Test
+    void applyHtmlTemplate_目次自体がなければ何もしない() {
+        when(tagDesignSettingService.resolveHtmlTemplate(PROJECT_ID, EmbedTagType.TOC))
+                .thenReturn("<nav>{{toc}}</nav>");
+        String html = "<h1>タイトル</h1>\n<p>本文</p>";
+
+        String result = service.applyHtmlTemplate(html, PROJECT_ID);
+
+        assertEquals(html, result);
+    }
+
+    @Test
+    void applyHtmlTemplate_nullとから文字列はそのまま返す() {
+        assertEquals(null, service.applyHtmlTemplate(null, PROJECT_ID));
+        assertEquals("", service.applyHtmlTemplate("", PROJECT_ID));
+    }
 }

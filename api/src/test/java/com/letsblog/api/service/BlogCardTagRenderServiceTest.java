@@ -82,6 +82,24 @@ class BlogCardTagRenderServiceTest {
     }
 
     @Test
+    void render_htmlTemplateが設定されていればプレースホルダを差し込んで展開する() {
+        String url = "https://example.com/posts/1";
+        when(contentCacheService.resolve(url)).thenReturn(response(Map.of(
+                "title", "記事タイトル",
+                "description", "記事の説明",
+                "siteName", "サンプルブログ",
+                "url", url)));
+        when(tagDesignSettingService.resolveHtmlTemplate(PROJECT_ID, EmbedTagType.BLOGCARD))
+                .thenReturn("<div class=\"custom\"><a href=\"{{url}}\">{{title}}</a><p>{{description}}({{siteName}})</p></div>");
+
+        String result = service.render("[blogcard " + url + "]", PROJECT_ID);
+
+        assertEquals(
+                "<div class=\"custom\"><a href=\"" + url + "\">記事タイトル</a><p>記事の説明(サンプルブログ)</p></div>",
+                result);
+    }
+
+    @Test
     void render_タグがなければ何も変更せずスタイルブロックも付与しない() {
         String markdown = "普通の本文です。";
 

@@ -32,20 +32,66 @@ const TAG_CLASS: Record<EmbedTagType, string> = {
 };
 
 /**
- * 色は本文注入時と同じくCSSクラス経由で反映するのが正確だが、プレビューでは即時反映のため
- * 要素へのinline styleで表現している。customCssで同じプロパティを上書きしたい場合は
- * !importantが必要になる(実際の本文出力はinline styleを使わないため、customCssだけで上書き可能)。
+ * HTMLテンプレートで使えるプレースホルダ一覧(バックエンドのEmbedTagTemplateRenderer/
+ * TocStyleRenderService.applyHtmlTemplateと対応)。TOCのみ、目次全体を表す{{toc}}という
+ * 1つのプレースホルダで外枠だけをカスタマイズする方式。
  */
-function buildPreviewHtml(tagType: EmbedTagType, colors: Colors, customCss: string): string {
-  const tagClass = TAG_CLASS[tagType];
-  const body = (() => {
-    switch (tagType) {
-      case "TOC":
-        return `<ul class="${tagClass}" style="list-style:none;margin:0;padding:12px 16px;border-radius:8px;background:${colors.backgroundColor};font-family:sans-serif;">
+const TAG_PLACEHOLDERS: Record<EmbedTagType, string[]> = {
+  TOC: ["toc"],
+  BLOGCARD: ["title", "description", "siteName", "url", "imageUrl"],
+  AMAZON: ["productName", "price", "productUrl", "imageUrl"],
+};
+
+/** プレビュー用のサンプル値。実データ取得時に空になりうるimageUrlはあえて空のままにする。 */
+const SAMPLE_VALUES: Record<EmbedTagType, Record<string, string>> = {
+  TOC: {},
+  BLOGCARD: {
+    title: "サンプル記事タイトル",
+    description: "記事の説明文がここに入ります。",
+    siteName: "example.com",
+    url: "https://example.com/sample-article",
+    imageUrl: "",
+  },
+  AMAZON: {
+    productName: "サンプル商品名",
+    price: "￥1,980",
+    productUrl: "https://www.amazon.co.jp/dp/SAMPLE",
+    imageUrl: "",
+  },
+};
+
+function substitutePlaceholders(template: string, values: Record<string, string>): string {
+  return template.replace(/\{\{([a-zA-Z0-9_]+)}}/g, (_match, key: string) => values[key] ?? "");
+}
+
+function buildSampleTocList(tagClass: string, colors: Colors): string {
+  return `<ul class="${tagClass}" style="list-style:none;margin:0;padding:12px 16px;border-radius:8px;background:${colors.backgroundColor};font-family:sans-serif;">
           <li style="margin:4px 0;"><a href="#" style="color:${colors.textColor};text-decoration:none;">セクション1</a></li>
           <li style="margin:4px 0 4px 16px;"><a href="#" style="color:${colors.accentColor};text-decoration:underline;">セクション1-1(ホバー時の色)</a></li>
           <li style="margin:4px 0;"><a href="#" style="color:${colors.textColor};text-decoration:none;">セクション2</a></li>
         </ul>`;
+}
+
+/**
+ * 色は本文注入時と同じくCSSクラス経由で反映するのが正確だが、プレビューでは即時反映のため
+ * 要素へのinline styleで表現している。customCssで同じプロパティを上書きしたい場合は
+ * !importantが必要になる(実際の本文出力はinline styleを使わないため、customCssだけで上書き可能)。
+ * htmlTemplateが設定されている場合は、標準のHTML構造の代わりにテンプレートへサンプル値を
+ * 差し込んだ結果を表示する(バックエンドのEmbedTagTemplateRenderer/applyHtmlTemplateと同じ規則)。
+ */
+function buildPreviewHtml(tagType: EmbedTagType, colors: Colors, customCss: string, htmlTemplate: string): string {
+  const tagClass = TAG_CLASS[tagType];
+  const trimmedTemplate = htmlTemplate.trim();
+
+  const body = (() => {
+    if (tagType === "TOC") {
+      const tocList = buildSampleTocList(tagClass, colors);
+      return trimmedTemplate ? substitutePlaceholders(trimmedTemplate, { toc: tocList }) : tocList;
+    }
+    if (trimmedTemplate) {
+      return substitutePlaceholders(trimmedTemplate, SAMPLE_VALUES[tagType]);
+    }
+    switch (tagType) {
       case "BLOGCARD":
         return `<a class="${tagClass}" style="display:flex;align-items:stretch;border:1px solid #e0e0e0;border-left:4px solid ${colors.accentColor};border-radius:8px;overflow:hidden;text-decoration:none;background:${colors.backgroundColor};color:${colors.textColor};font-family:sans-serif;">
           <div style="flex:0 0 96px;background:#f2f2f2;"></div>
@@ -107,15 +153,18 @@ function TagDesignEditor({
     accentColor: initialSetting.accentColor,
   });
   const [customCss, setCustomCss] = useState(initialSetting.customCss ?? "");
-  const [previewSrcDoc, setPreviewSrcDoc] = useState(() => buildPreviewHtml(tagType, colors, customCss));
+  const [htmlTemplate, setHtmlTemplate] = useState(initialSetting.htmlTemplate ?? "");
+  const [previewSrcDoc, setPreviewSrcDoc] = useState(() =>
+    buildPreviewHtml(tagType, colors, customCss, htmlTemplate)
+  );
 
-  // 色・CSS変更のたびに即再描画すると入力のたびにiframeが再構築されカクつくため、300msデバウンスする
+  // 色・CSS・HTML変更のたびに即再描画すると入力のたびにiframeが再構築されカクつくため、300msデバウンスする
   useEffect(() => {
     const timer = setTimeout(() => {
-      setPreviewSrcDoc(buildPreviewHtml(tagType, colors, customCss));
+      setPreviewSrcDoc(buildPreviewHtml(tagType, colors, customCss, htmlTemplate));
     }, 300);
     return () => clearTimeout(timer);
-  }, [tagType, colors, customCss]);
+  }, [tagType, colors, customCss, htmlTemplate]);
 
   function applyPreset(preset: TagDesignPreset) {
     setPresetId(preset.id);
@@ -208,6 +257,35 @@ function TagDesignEditor({
         />
       </label>
 
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="text-neutral-600 dark:text-neutral-400">
+          HTMLテンプレート(任意、標準のHTML構造を丸ごと置き換えます。未入力の場合は標準の構造のまま)
+        </span>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-neutral-500 dark:text-neutral-400">利用可能なプレースホルダ:</span>
+          {TAG_PLACEHOLDERS[tagType].map((placeholder) => (
+            <code
+              key={placeholder}
+              className="rounded bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 font-mono text-xs text-neutral-700 dark:text-neutral-300"
+            >
+              {`{{${placeholder}}}`}
+            </code>
+          ))}
+        </div>
+        <textarea
+          name="htmlTemplate"
+          value={htmlTemplate}
+          onChange={(e) => setHtmlTemplate(e.target.value)}
+          rows={6}
+          placeholder={
+            tagType === "TOC"
+              ? '<details><summary>目次</summary>{{toc}}</details>'
+              : `<a class="${TAG_CLASS[tagType]}" href="{{${TAG_PLACEHOLDERS[tagType][0]}}}">...`
+          }
+          className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 font-mono text-sm"
+        />
+      </label>
+
       <div className="flex flex-col gap-1 text-sm">
         <span className="text-neutral-600 dark:text-neutral-400">プレビュー(サンプルデータ、入力後300ms自動更新)</span>
         <iframe
@@ -255,6 +333,7 @@ export function TagDesignSettingsPanel({
               <th className="px-4 py-2">テキスト色</th>
               <th className="px-4 py-2">アクセントカラー</th>
               <th className="px-4 py-2">追加CSS</th>
+              <th className="px-4 py-2">HTMLテンプレート</th>
               <th className="px-4 py-2"></th>
             </tr>
           </thead>
@@ -286,6 +365,11 @@ export function TagDesignSettingsPanel({
                 </td>
                 <td className="px-4 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-400">
                   {setting.customCss && <code className="whitespace-pre-wrap break-all">{setting.customCss}</code>}
+                </td>
+                <td className="px-4 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-400">
+                  {setting.htmlTemplate && (
+                    <code className="whitespace-pre-wrap break-all">{setting.htmlTemplate}</code>
+                  )}
                 </td>
                 <td className="px-4 py-2 text-right whitespace-nowrap">
                   <button

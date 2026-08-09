@@ -50,7 +50,7 @@ public class AmazonTagRenderService {
         StringBuilder result = new StringBuilder();
         while (matcher.find()) {
             String rawUrl = matcher.group(1);
-            matcher.appendReplacement(result, Matcher.quoteReplacement(renderCard(rawUrl)));
+            matcher.appendReplacement(result, Matcher.quoteReplacement(renderCard(rawUrl, projectId)));
         }
         matcher.appendTail(result);
 
@@ -82,7 +82,7 @@ public class AmazonTagRenderService {
         return customCss == null || customCss.isBlank() ? base : base + "\n" + customCss.trim();
     }
 
-    private String renderCard(String rawUrl) {
+    private String renderCard(String rawUrl, Long projectId) {
         try {
             ContentCacheResponse response = contentCacheService.resolve(rawUrl);
             Map<String, String> data = response.data();
@@ -92,13 +92,23 @@ public class AmazonTagRenderService {
             String productName = HtmlUtils.htmlEscape(firstNonBlank(data.get("productName"), href));
             String price = HtmlUtils.htmlEscape(nullToEmpty(data.get("price")));
             String escapedHref = HtmlUtils.htmlEscape(href);
+            String escapedImageUrl = imageUrl == null ? "" : HtmlUtils.htmlEscape(imageUrl);
+
+            String customTemplate = tagDesignSettingService.resolveHtmlTemplate(projectId, EmbedTagType.AMAZON);
+            if (customTemplate != null) {
+                return EmbedTagTemplateRenderer.render(customTemplate, Map.of(
+                        "productName", productName,
+                        "price", price,
+                        "productUrl", escapedHref,
+                        "imageUrl", escapedImageUrl));
+            }
 
             StringBuilder html = new StringBuilder();
             html.append("<a class=\"lb-amazon-card\" href=\"").append(escapedHref)
                     .append("\" target=\"_blank\" rel=\"noopener noreferrer nofollow sponsored\">");
             if (imageUrl != null) {
                 html.append("<div class=\"lb-amazon-card-thumb\" style=\"background-image:url('")
-                        .append(HtmlUtils.htmlEscape(imageUrl)).append("')\"></div>");
+                        .append(escapedImageUrl).append("')\"></div>");
             }
             html.append("<div class=\"lb-amazon-card-body\">")
                     .append("<div class=\"lb-amazon-card-name\">").append(productName).append("</div>");

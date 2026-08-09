@@ -8,5 +8,6 @@ public record TagDesignSettingResponse(
         String backgroundColor,
         String textColor,
         String accentColor,
-        String customCss) {
+        String customCss,
+        String htmlTemplate) {
 }

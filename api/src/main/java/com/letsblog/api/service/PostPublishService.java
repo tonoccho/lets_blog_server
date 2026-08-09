@@ -106,6 +106,7 @@ public class PostPublishService {
                 command.slug(), command.title(), command.featuredImageFilename(), priorUploads);
         String finalMarkdown = tocStyleRenderService.render(imageResult.markdown(), projectId);
         String html = markdownRenderer.render(finalMarkdown);
+        html = tocStyleRenderService.applyHtmlTemplate(html, projectId);
 
         List<String> categoryIds = cmsAdapter.resolveCategories(credentials, command.categories());
         List<String> tagIds = cmsAdapter.resolveTags(credentials, command.tags());
