@@ -774,6 +774,11 @@ export function listCustomTags(actor?: ActorInfo, projectId?: number): Promise<C
   return apiFetch<CustomTag[]>(`/api/custom-tags${query}`, { actor });
 }
 
+/** プロジェクト詳細のカスタムタグ画面向け。グローバルタグを含めず、プロジェクトのタグのみを返す。 */
+export function listProjectCustomTags(projectId: number, actor?: ActorInfo): Promise<CustomTag[]> {
+  return apiFetch<CustomTag[]>(`/api/projects/${projectId}/custom-tags`, { actor });
+}
+
 export function createCustomTag(input: CustomTagInput, actor: ActorInfo): Promise<CustomTag> {
   return apiFetch<CustomTag>('/api/custom-tags', {
     method: 'POST',
@@ -817,6 +822,19 @@ export function validateCustomTag(input: ValidateCustomTagRequest, actor: ActorI
 export async function downloadCustomTagCssBundle(projectId?: number | null): Promise<ArrayBuffer> {
   const query = projectId != null ? `?projectId=${projectId}` : '';
   const res = await fetch(`${serverUrl()}/api/custom-tags/css-bundle${query}`, {
+    headers: { 'X-API-Key': await currentApiKey() },
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
+  }
+  return res.arrayBuffer();
+}
+
+/** プロジェクト詳細/プロジェクト一覧向け。グローバルタグを含めず、プロジェクトのタグのCSSのみを連結する。 */
+export async function downloadProjectCustomTagCssBundle(projectId: number): Promise<ArrayBuffer> {
+  const res = await fetch(`${serverUrl()}/api/projects/${projectId}/custom-tags/css-bundle`, {
     headers: { 'X-API-Key': await currentApiKey() },
     cache: 'no-store',
   });

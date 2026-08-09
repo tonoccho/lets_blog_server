@@ -196,4 +196,33 @@ class CustomTagServiceTest {
 
         assertEquals(true, bundle.contains(".project { color: blue; }"));
     }
+
+    @Test
+    void listByProject_グローバルタグを含まずプロジェクトのタグのみ返す() {
+        CustomTag tag = new CustomTag();
+        tag.setId(1L);
+        tag.setTagName("project-tag");
+        tag.setHtmlTemplate("<div>{{content}}</div>");
+        tag.setProjectId(5L);
+        when(customTagRepository.findByProjectId(5L)).thenReturn(List.of(tag));
+
+        List<CustomTagResponse> result = service.listByProject(5L);
+
+        assertEquals(1, result.size());
+        assertEquals(5L, result.get(0).projectId());
+        verify(customTagRepository, never()).findByProjectIdOrProjectIdIsNull(any());
+    }
+
+    @Test
+    void buildProjectCssBundle_グローバルタグを含まずプロジェクトのCSSのみ連結する() {
+        CustomTag tag = new CustomTag();
+        tag.setTagName("project-tag");
+        tag.setCssContent(".project { color: blue; }");
+        when(customTagRepository.findByProjectId(5L)).thenReturn(List.of(tag));
+
+        String bundle = service.buildProjectCssBundle(5L);
+
+        assertEquals(true, bundle.contains(".project { color: blue; }"));
+        verify(customTagRepository, never()).findByProjectIdOrProjectIdIsNull(any());
+    }
 }
