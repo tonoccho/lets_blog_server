@@ -22,11 +22,25 @@ async function needsInitialSetup(): Promise<boolean> {
   }
 }
 
+const OPERATION_ID_HEADER = "x-operation-id";
+
+/**
+ * リクエストごとに操作IDを発番し、リクエストヘッダーに載せて後段(Server Component/Server Action)へ渡す。
+ * apiClient.tsのapiFetch()がこのIDを操作ログの紐付けキーとして使い、
+ * 1回のブラウザ操作で発生した複数のバックエンドAPI呼び出しを1つの操作としてまとめる(issue #143)。
+ */
+function withOperationId(request: NextRequest): Headers {
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set(OPERATION_ID_HEADER, crypto.randomUUID());
+  return requestHeaders;
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const requestHeaders = withOperationId(request);
 
   if (PUBLIC_PATHS.some((path) => pathname.startsWith(path))) {
-    return NextResponse.next();
+    return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
   const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET });
@@ -42,7 +56,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL("/", request.url));
   }
 
-  return NextResponse.next();
+  return NextResponse.next({ request: { headers: requestHeaders } });
 }
 
 export const config = {
