@@ -36,6 +36,9 @@ class ArticlePreviewServiceTest {
     private BlogCardTagRenderService blogCardTagRenderService;
 
     @Mock
+    private AmazonTagRenderService amazonTagRenderService;
+
+    @Mock
     private MarkdownRenderer markdownRenderer;
 
     @Mock
@@ -52,8 +55,8 @@ class ArticlePreviewServiceTest {
         RestClient.Builder builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
         service = new ArticlePreviewService(
-                customTagRenderService, blogCardTagRenderService, markdownRenderer, projectService,
-                siteRepository, builder);
+                customTagRenderService, blogCardTagRenderService, amazonTagRenderService, markdownRenderer,
+                projectService, siteRepository, builder);
     }
 
     private Project projectWithMaster(String masterEnvironment, Long testSiteId, Long productionSiteId) {
@@ -77,6 +80,7 @@ class ArticlePreviewServiceTest {
     void renderHtml_カスタムタグ展開後にMarkdownをHTML変換する() {
         when(customTagRenderService.render("**bold**", 1L)).thenReturn("**bold** rendered");
         when(blogCardTagRenderService.render("**bold** rendered")).thenReturn("**bold** rendered");
+        when(amazonTagRenderService.render("**bold** rendered")).thenReturn("**bold** rendered");
         when(markdownRenderer.render("**bold** rendered")).thenReturn("<p><strong>bold</strong> rendered</p>");
 
         String html = service.renderHtml(1L, "**bold**");
@@ -84,6 +88,7 @@ class ArticlePreviewServiceTest {
         assertEquals("<p><strong>bold</strong> rendered</p>", html);
         verify(customTagRenderService).render("**bold**", 1L);
         verify(blogCardTagRenderService).render("**bold** rendered");
+        verify(amazonTagRenderService).render("**bold** rendered");
         verify(markdownRenderer).render("**bold** rendered");
     }
 
