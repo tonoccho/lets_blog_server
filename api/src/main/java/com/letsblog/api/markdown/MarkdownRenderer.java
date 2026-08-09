@@ -1,6 +1,7 @@
 package com.letsblog.api.markdown;
 
 import com.vladsch.flexmark.ext.tables.TablesExtension;
+import com.vladsch.flexmark.ext.toc.TocExtension;
 import com.vladsch.flexmark.html.HtmlRenderer;
 import com.vladsch.flexmark.parser.Parser;
 import com.vladsch.flexmark.util.ast.Node;
@@ -15,12 +16,18 @@ import java.util.List;
 @Component
 public class MarkdownRenderer {
 
+    /** 組み込み[toc]タグの対象見出しレベル(H2〜H4)。ビットNが見出しレベルNに対応する(flexmark-ext-tocの仕様)。 */
+    private static final int TOC_LEVELS_H2_TO_H4 = (1 << 2) | (1 << 3) | (1 << 4);
+
     private final Parser parser;
     private final HtmlRenderer renderer;
 
     public MarkdownRenderer() {
         MutableDataSet options = new MutableDataSet();
-        options.set(Parser.EXTENSIONS, List.of(TablesExtension.create()));
+        options.set(Parser.EXTENSIONS, List.of(TablesExtension.create(), TocExtension.create()));
+        options.set(TocExtension.LEVELS, TOC_LEVELS_H2_TO_H4);
+        // 組み込みカスタムタグの規約(小文字 [toc])に合わせ、flexmark標準の[TOC]記法の大文字小文字を区別しない
+        options.set(TocExtension.CASE_SENSITIVE_TOC_TAG, false);
 
         this.parser = Parser.builder(options).build();
         this.renderer = HtmlRenderer.builder(options).build();
