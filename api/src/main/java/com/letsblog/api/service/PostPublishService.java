@@ -53,6 +53,7 @@ public class PostPublishService {
     private final CustomTagRenderService customTagRenderService;
     private final BlogCardTagRenderService blogCardTagRenderService;
     private final AmazonTagRenderService amazonTagRenderService;
+    private final TocStyleRenderService tocStyleRenderService;
     private final ProjectService projectService;
     private final CurrentActorService currentActorService;
     private final UserRepository userRepository;
@@ -65,6 +66,7 @@ public class PostPublishService {
                                CustomTagRenderService customTagRenderService,
                                BlogCardTagRenderService blogCardTagRenderService,
                                AmazonTagRenderService amazonTagRenderService,
+                               TocStyleRenderService tocStyleRenderService,
                                ProjectService projectService,
                                CurrentActorService currentActorService,
                                UserRepository userRepository,
@@ -78,6 +80,7 @@ public class PostPublishService {
         this.customTagRenderService = customTagRenderService;
         this.blogCardTagRenderService = blogCardTagRenderService;
         this.amazonTagRenderService = amazonTagRenderService;
+        this.tocStyleRenderService = tocStyleRenderService;
         this.projectService = projectService;
         this.currentActorService = currentActorService;
         this.userRepository = userRepository;
@@ -94,14 +97,15 @@ public class PostPublishService {
 
         Long projectId = projectService.findProjectIdBySiteId(site.getId());
         String markdown = customTagRenderService.render(command.markdown(), projectId);
-        markdown = blogCardTagRenderService.render(markdown);
-        markdown = amazonTagRenderService.render(markdown);
+        markdown = blogCardTagRenderService.render(markdown, projectId);
+        markdown = amazonTagRenderService.render(markdown, projectId);
         markdown = plantUmlEmbedService.embedDiagrams(credentials, markdown);
         Map<String, UploadedImageInfo> priorUploads = loadPriorUploadedImages(site.getId(), command.wpPostId());
         ImageReplacementResult imageResult = replaceImageReferences(
                 cmsAdapter, credentials, markdown, command.images(), command.imageReferences(),
                 command.slug(), command.title(), command.featuredImageFilename(), priorUploads);
-        String html = markdownRenderer.render(imageResult.markdown());
+        String finalMarkdown = tocStyleRenderService.render(imageResult.markdown(), projectId);
+        String html = markdownRenderer.render(finalMarkdown);
 
         List<String> categoryIds = cmsAdapter.resolveCategories(credentials, command.categories());
         List<String> tagIds = cmsAdapter.resolveTags(credentials, command.tags());

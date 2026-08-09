@@ -827,6 +827,56 @@ export async function downloadCustomTagCssBundle(projectId?: number | null): Pro
   return res.arrayBuffer();
 }
 
+// --- 組み込みタグ([toc]/[blogcard]/[amazon])のデザインカスタマイズ (issue #150) ---
+
+export type EmbedTagType = "TOC" | "BLOGCARD" | "AMAZON";
+
+export interface TagDesignPreset {
+  id: string;
+  label: string;
+  backgroundColor: string;
+  textColor: string;
+  accentColor: string;
+}
+
+export interface TagDesignSetting {
+  tagType: EmbedTagType;
+  presetId: string;
+  backgroundColor: string;
+  textColor: string;
+  accentColor: string;
+}
+
+export interface TagDesignSettingsOverview {
+  presets: TagDesignPreset[];
+  settings: TagDesignSetting[];
+}
+
+export interface SaveTagDesignSettingInput {
+  presetId: string;
+  backgroundColor: string;
+  textColor: string;
+  accentColor: string;
+}
+
+export function getTagDesignSettings(projectId: number, actor?: ActorInfo): Promise<TagDesignSettingsOverview> {
+  return apiFetch<TagDesignSettingsOverview>(`/api/projects/${projectId}/tag-design-settings`, { actor });
+}
+
+export function saveTagDesignSetting(
+  projectId: number,
+  tagType: EmbedTagType,
+  input: SaveTagDesignSettingInput,
+  actor: ActorInfo
+): Promise<TagDesignSetting> {
+  return apiFetch<TagDesignSetting>(`/api/projects/${projectId}/tag-design-settings/${tagType}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
 export interface CustomTagTemplate {
   id: number;
   templateName: string;

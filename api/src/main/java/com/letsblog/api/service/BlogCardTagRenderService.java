@@ -2,7 +2,9 @@ package com.letsblog.api.service;
 
 import com.letsblog.api.contentcache.ContentCacheService;
 import com.letsblog.api.contentcache.ContentScrapingException;
+import com.letsblog.api.domain.EmbedTagType;
 import com.letsblog.api.dto.ContentCacheResponse;
+import com.letsblog.api.dto.TagDesignColors;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.util.HtmlUtils;
@@ -19,6 +21,7 @@ import java.util.regex.Pattern;
  * フォールバックし、記事全体のレンダリングは失敗させない。
  * スクレイピング結果(タイトル・説明・URL等)は対象サイトが自由に設定できる非信頼な文字列のため、
  * HTML出力に含める際は必ずエスケープし、URLはhttp/https以外を許可しない(XSS対策)。
+ * カードの配色はプロジェクトごとのデザイン設定(#150、TagDesignSettingService)に従う。
  */
 @Service
 @Slf4j
@@ -29,27 +32,16 @@ public class BlogCardTagRenderService {
 
     private static final String CARD_CLASS_ATTR = "class=\"lb-blogcard\"";
 
-    private static final String STYLE = ".lb-blogcard{display:flex;align-items:stretch;border:1px solid #e0e0e0;"
-            + "border-radius:8px;overflow:hidden;text-decoration:none;color:inherit;max-width:100%;margin:1em 0;"
-            + "transition:box-shadow .15s ease;}"
-            + ".lb-blogcard:hover{box-shadow:0 2px 8px rgba(0,0,0,.12);}"
-            + ".lb-blogcard-thumb{flex:0 0 120px;background-size:cover;background-position:center;"
-            + "background-color:#f2f2f2;}"
-            + ".lb-blogcard-body{flex:1 1 auto;min-width:0;padding:12px 16px;display:flex;flex-direction:column;"
-            + "gap:4px;}"
-            + ".lb-blogcard-title{font-weight:600;font-size:1em;overflow:hidden;text-overflow:ellipsis;"
-            + "white-space:nowrap;}"
-            + ".lb-blogcard-description{font-size:.875em;color:#595959;overflow:hidden;display:-webkit-box;"
-            + "-webkit-line-clamp:2;-webkit-box-orient:vertical;}"
-            + ".lb-blogcard-site{font-size:.75em;color:#8c8c8c;margin-top:auto;}";
-
     private final ContentCacheService contentCacheService;
+    private final TagDesignSettingService tagDesignSettingService;
 
-    public BlogCardTagRenderService(ContentCacheService contentCacheService) {
+    public BlogCardTagRenderService(
+            ContentCacheService contentCacheService, TagDesignSettingService tagDesignSettingService) {
         this.contentCacheService = contentCacheService;
+        this.tagDesignSettingService = tagDesignSettingService;
     }
 
-    public String render(String markdown) {
+    public String render(String markdown, Long projectId) {
         if (markdown == null || markdown.isEmpty()) {
             return markdown;
         }
@@ -66,7 +58,25 @@ public class BlogCardTagRenderService {
         if (result.indexOf(CARD_CLASS_ATTR) < 0) {
             return result.toString();
         }
-        return "<style>\n" + STYLE + "\n</style>\n\n" + result;
+        TagDesignColors colors = tagDesignSettingService.resolveColors(projectId, EmbedTagType.BLOGCARD);
+        return "<style>\n" + buildStyle(colors) + "\n</style>\n\n" + result;
+    }
+
+    private String buildStyle(TagDesignColors colors) {
+        return ".lb-blogcard{display:flex;align-items:stretch;border:1px solid #e0e0e0;"
+                + "border-left:4px solid " + colors.accentColor() + ";border-radius:8px;overflow:hidden;"
+                + "text-decoration:none;background:" + colors.backgroundColor() + ";color:" + colors.textColor()
+                + ";max-width:100%;margin:1em 0;transition:box-shadow .15s ease;}"
+                + ".lb-blogcard:hover{box-shadow:0 2px 8px rgba(0,0,0,.12);}"
+                + ".lb-blogcard-thumb{flex:0 0 120px;background-size:cover;background-position:center;"
+                + "background-color:#f2f2f2;}"
+                + ".lb-blogcard-body{flex:1 1 auto;min-width:0;padding:12px 16px;display:flex;"
+                + "flex-direction:column;gap:4px;}"
+                + ".lb-blogcard-title{font-weight:600;font-size:1em;overflow:hidden;text-overflow:ellipsis;"
+                + "white-space:nowrap;}"
+                + ".lb-blogcard-description{font-size:.875em;opacity:.75;overflow:hidden;display:-webkit-box;"
+                + "-webkit-line-clamp:2;-webkit-box-orient:vertical;}"
+                + ".lb-blogcard-site{font-size:.75em;opacity:.6;margin-top:auto;}";
     }
 
     private String renderCard(String rawUrl) {

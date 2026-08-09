@@ -2,7 +2,9 @@ package com.letsblog.api.service;
 
 import com.letsblog.api.contentcache.ContentCacheService;
 import com.letsblog.api.contentcache.ContentScrapingException;
+import com.letsblog.api.domain.EmbedTagType;
 import com.letsblog.api.dto.ContentCacheResponse;
+import com.letsblog.api.dto.TagDesignColors;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.util.HtmlUtils;
@@ -19,6 +21,7 @@ import java.util.regex.Pattern;
  * フォールバックし、記事全体のレンダリングは失敗させない。
  * スクレイピング結果(商品名・価格・URL等)は対象サイトが自由に設定できる非信頼な文字列のため、
  * HTML出力に含める際は必ずエスケープし、URLはhttp/https以外を許可しない(XSS対策)。
+ * カードの配色はプロジェクトごとのデザイン設定(#150、TagDesignSettingService)に従う。
  */
 @Service
 @Slf4j
@@ -29,27 +32,16 @@ public class AmazonTagRenderService {
 
     private static final String CARD_CLASS_ATTR = "class=\"lb-amazon-card\"";
 
-    private static final String STYLE = ".lb-amazon-card{display:flex;align-items:stretch;border:1px solid #e0e0e0;"
-            + "border-radius:8px;overflow:hidden;text-decoration:none;color:inherit;max-width:100%;margin:1em 0;"
-            + "background:#fff;transition:box-shadow .15s ease;}"
-            + ".lb-amazon-card:hover{box-shadow:0 2px 8px rgba(0,0,0,.12);}"
-            + ".lb-amazon-card-thumb{flex:0 0 120px;background-size:contain;background-repeat:no-repeat;"
-            + "background-position:center;background-color:#fff;}"
-            + ".lb-amazon-card-body{flex:1 1 auto;min-width:0;padding:12px 16px;display:flex;flex-direction:column;"
-            + "gap:4px;}"
-            + ".lb-amazon-card-name{font-weight:600;font-size:1em;overflow:hidden;display:-webkit-box;"
-            + "-webkit-line-clamp:2;-webkit-box-orient:vertical;}"
-            + ".lb-amazon-card-price{font-size:1.05em;font-weight:700;color:#B12704;}"
-            + ".lb-amazon-card-cta{font-size:.8em;color:#fff;background:#FF9900;border-radius:4px;padding:4px 10px;"
-            + "align-self:flex-start;margin-top:auto;}";
-
     private final ContentCacheService contentCacheService;
+    private final TagDesignSettingService tagDesignSettingService;
 
-    public AmazonTagRenderService(ContentCacheService contentCacheService) {
+    public AmazonTagRenderService(
+            ContentCacheService contentCacheService, TagDesignSettingService tagDesignSettingService) {
         this.contentCacheService = contentCacheService;
+        this.tagDesignSettingService = tagDesignSettingService;
     }
 
-    public String render(String markdown) {
+    public String render(String markdown, Long projectId) {
         if (markdown == null || markdown.isEmpty()) {
             return markdown;
         }
@@ -66,7 +58,25 @@ public class AmazonTagRenderService {
         if (result.indexOf(CARD_CLASS_ATTR) < 0) {
             return result.toString();
         }
-        return "<style>\n" + STYLE + "\n</style>\n\n" + result;
+        TagDesignColors colors = tagDesignSettingService.resolveColors(projectId, EmbedTagType.AMAZON);
+        return "<style>\n" + buildStyle(colors) + "\n</style>\n\n" + result;
+    }
+
+    private String buildStyle(TagDesignColors colors) {
+        return ".lb-amazon-card{display:flex;align-items:stretch;border:1px solid #e0e0e0;"
+                + "border-radius:8px;overflow:hidden;text-decoration:none;color:" + colors.textColor()
+                + ";max-width:100%;margin:1em 0;background:" + colors.backgroundColor()
+                + ";transition:box-shadow .15s ease;}"
+                + ".lb-amazon-card:hover{box-shadow:0 2px 8px rgba(0,0,0,.12);}"
+                + ".lb-amazon-card-thumb{flex:0 0 120px;background-size:contain;background-repeat:no-repeat;"
+                + "background-position:center;background-color:#fff;}"
+                + ".lb-amazon-card-body{flex:1 1 auto;min-width:0;padding:12px 16px;display:flex;"
+                + "flex-direction:column;gap:4px;}"
+                + ".lb-amazon-card-name{font-weight:600;font-size:1em;overflow:hidden;display:-webkit-box;"
+                + "-webkit-line-clamp:2;-webkit-box-orient:vertical;}"
+                + ".lb-amazon-card-price{font-size:1.05em;font-weight:700;color:" + colors.accentColor() + ";}"
+                + ".lb-amazon-card-cta{font-size:.8em;color:#fff;background:" + colors.accentColor()
+                + ";border-radius:4px;padding:4px 10px;align-self:flex-start;margin-top:auto;}";
     }
 
     private String renderCard(String rawUrl) {
