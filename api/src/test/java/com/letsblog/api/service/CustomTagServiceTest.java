@@ -39,7 +39,7 @@ class CustomTagServiceTest {
         doThrow(new ForbiddenException("この操作にはadmin権限が必要です"))
                 .when(adminAuthorizationService).requireAdmin();
 
-        CustomTagRequest request = new CustomTagRequest("alert", "<div>{{content}}</div>", null, null, null);
+        CustomTagRequest request = new CustomTagRequest("alert", "<div>{{content}}</div>", null, null, null, null);
 
         assertThrows(ForbiddenException.class, () -> service.create(request));
         verify(customTagRepository, never()).save(any());
@@ -47,7 +47,7 @@ class CustomTagServiceTest {
 
     @Test
     void create_タグ名が重複していれば例外() {
-        CustomTagRequest request = new CustomTagRequest("alert", "<div>{{content}}</div>", null, null, null);
+        CustomTagRequest request = new CustomTagRequest("alert", "<div>{{content}}</div>", null, null, null, null);
         CustomTag existing = new CustomTag();
         existing.setId(2L);
         when(customTagRepository.findByTagNameAndProjectIdIsNull("alert")).thenReturn(Optional.of(existing));
@@ -57,7 +57,7 @@ class CustomTagServiceTest {
 
     @Test
     void create_正常にタグを作成する() {
-        CustomTagRequest request = new CustomTagRequest("alert", "<div>{{content}}</div>", "注意書き", null, null);
+        CustomTagRequest request = new CustomTagRequest("alert", "<div>{{content}}</div>", "注意書き", null, null, null);
         when(customTagRepository.findByTagNameAndProjectIdIsNull("alert")).thenReturn(Optional.empty());
         when(customTagRepository.save(any(CustomTag.class))).thenAnswer(invocation -> {
             CustomTag tag = invocation.getArgument(0);
@@ -73,7 +73,7 @@ class CustomTagServiceTest {
 
     @Test
     void create_プロジェクトスコープ作成() {
-        CustomTagRequest request = new CustomTagRequest("alert", "<div>{{content}}</div>", null, null, 5L);
+        CustomTagRequest request = new CustomTagRequest("alert", "<div>{{content}}</div>", null, null, null, 5L);
         when(customTagRepository.findByTagNameAndProjectId("alert", 5L)).thenReturn(Optional.empty());
         when(customTagRepository.save(any(CustomTag.class))).thenAnswer(invocation -> {
             CustomTag tag = invocation.getArgument(0);
@@ -88,7 +88,7 @@ class CustomTagServiceTest {
 
     @Test
     void create_同じプロジェクト内で同名タグは例外() {
-        CustomTagRequest request = new CustomTagRequest("alert", "<div>{{content}}</div>", null, null, 5L);
+        CustomTagRequest request = new CustomTagRequest("alert", "<div>{{content}}</div>", null, null, null, 5L);
         CustomTag existing = new CustomTag();
         existing.setId(2L);
         when(customTagRepository.findByTagNameAndProjectId("alert", 5L)).thenReturn(Optional.of(existing));
@@ -98,7 +98,7 @@ class CustomTagServiceTest {
 
     @Test
     void create_異なるプロジェクト間では同名タグを許可() {
-        CustomTagRequest request = new CustomTagRequest("alert", "<div>{{content}}</div>", null, null, 6L);
+        CustomTagRequest request = new CustomTagRequest("alert", "<div>{{content}}</div>", null, null, null, 6L);
         when(customTagRepository.findByTagNameAndProjectId("alert", 6L)).thenReturn(Optional.empty());
         when(customTagRepository.save(any(CustomTag.class))).thenAnswer(invocation -> {
             CustomTag tag = invocation.getArgument(0);
@@ -121,7 +121,7 @@ class CustomTagServiceTest {
         when(customTagRepository.findByTagNameAndProjectId("alert", 5L)).thenReturn(Optional.of(existing));
         when(customTagRepository.save(any(CustomTag.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        CustomTagRequest request = new CustomTagRequest("alert", "<div>更新</div>", null, null, 999L);
+        CustomTagRequest request = new CustomTagRequest("alert", "<div>更新</div>", null, null, null, 999L);
         CustomTagResponse response = service.update(1L, request);
 
         assertEquals(5L, response.projectId());
@@ -130,7 +130,7 @@ class CustomTagServiceTest {
     @Test
     void update_存在しなければ例外() {
         when(customTagRepository.findById(99L)).thenReturn(Optional.empty());
-        CustomTagRequest request = new CustomTagRequest("alert", "<div>{{content}}</div>", null, null, null);
+        CustomTagRequest request = new CustomTagRequest("alert", "<div>{{content}}</div>", null, null, null, null);
 
         assertThrows(CustomTagNotFoundException.class, () -> service.update(99L, request));
     }

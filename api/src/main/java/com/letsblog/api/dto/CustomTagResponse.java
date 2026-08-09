@@ -1,6 +1,7 @@
 package com.letsblog.api.dto;
 
 import com.letsblog.api.domain.CustomTag;
+import com.letsblog.api.domain.CustomTagFormat;
 
 import java.time.LocalDateTime;
 
@@ -10,6 +11,7 @@ public record CustomTagResponse(
         String htmlTemplate,
         String description,
         String cssContent,
+        CustomTagFormat tagFormat,
         Long projectId,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
@@ -21,6 +23,7 @@ public record CustomTagResponse(
                 tag.getHtmlTemplate(),
                 tag.getDescription(),
                 tag.getCssContent(),
+                tag.getTagFormat(),
                 tag.getProjectId(),
                 tag.getCreatedAt(),
                 tag.getUpdatedAt());

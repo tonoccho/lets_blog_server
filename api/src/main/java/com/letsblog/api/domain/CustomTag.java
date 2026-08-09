@@ -30,6 +30,10 @@ public class CustomTag {
     @Column(name = "css_content", columnDefinition = "TEXT")
     private String cssContent;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "tag_format", nullable = false, length = 20)
+    private CustomTagFormat tagFormat = CustomTagFormat.BLOCK;
+
     @Column(name = "project_id")
     private Long projectId;
 
