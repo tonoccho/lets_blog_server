@@ -1,4 +1,5 @@
 import 'server-only';
+import { after } from 'next/server';
 import { cookies, headers } from 'next/headers';
 import { getToken } from 'next-auth/jwt';
 
@@ -119,16 +120,20 @@ function serverUrl(): string {
 }
 
 /**
- * ログイン中ユーザーのAPIキーをNextAuthのJWT(HttpOnly cookie)から取得する。
  * next-auth/jwtのgetToken()はreq.cookies/req.headersしか参照しないため、
  * NextRequestが無いServer Component/Server Actionからでもnext/headersのcookies()/headers()を
  * そのまま渡せる(型定義上はNextRequest等を期待しているため as any で吸収する)。
  */
-async function currentApiKey(): Promise<string> {
-  const token = await getToken({
+async function currentToken() {
+  return getToken({
     req: { cookies: await cookies(), headers: await headers() } as unknown as Parameters<typeof getToken>[0]['req'],
     secret: process.env.NEXTAUTH_SECRET,
   });
+}
+
+/** ログイン中ユーザーのAPIキーをNextAuthのJWT(HttpOnly cookie)から取得する。 */
+async function currentApiKey(): Promise<string> {
+  const token = await currentToken();
   if (!token?.apiKey) {
     throw new Error('ログインしていないか、APIキーが未取得です。再度ログインしてください。');
   }
@@ -140,6 +145,55 @@ export interface ActorInfo {
   role: "admin" | "user";
 }
 
+/** actorが明示指定されなかった呼び出しでも操作ログにユーザーを紐付けられるよう、JWTから補完する。 */
+async function currentTokenActor(): Promise<ActorInfo | undefined> {
+  const token = await currentToken();
+  if (!token?.id || !token?.role) {
+    return undefined;
+  }
+  return { id: Number(token.id), role: token.role };
+}
+
+const OPERATION_ID_HEADER = 'x-operation-id';
+
+/** proxy.tsがリクエストごとに発番したIDを読み取り、1回の操作で発生した複数のAPI呼び出しを束ねる。 */
+async function currentOperationId(): Promise<string> {
+  const hdrs = await headers();
+  return hdrs.get(OPERATION_ID_HEADER) ?? crypto.randomUUID();
+}
+
+interface OperationLogEntryInput {
+  operationId: string;
+  method: string;
+  path: string;
+  statusCode: number | null;
+  durationMs: number;
+  success: boolean;
+  errorMessage?: string;
+}
+
+/**
+ * 操作ログをバックエンドへ記録する(issue #143)。apiFetch()自身から呼ぶため、
+ * 無限再帰を避けるためにapiFetch()を経由せず直接fetchする(=この記録リクエスト自体はログされない)。
+ * 記録の失敗が本来のAPI呼び出しに影響しないよう例外は握りつぶす。
+ */
+async function recordOperationLog(apiKey: string, actor: ActorInfo | undefined, entry: OperationLogEntryInput): Promise<void> {
+  try {
+    await fetch(`${serverUrl()}/api/operation-logs`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': apiKey,
+        ...(actor ? { 'X-Actor-Id': String(actor.id), 'X-Actor-Role': actor.role } : {}),
+      },
+      body: JSON.stringify(entry),
+      cache: 'no-store',
+    });
+  } catch {
+    // 操作ログの記録失敗は無視する(本来の操作を妨げない)
+  }
+}
+
 interface ApiFetchInit extends RequestInit {
   actor?: ActorInfo;
   /** ログイン前でも呼べる公開エンドポイント(signup/setup/setup-status)向け。既定はtrue。 */
@@ -148,20 +202,54 @@ interface ApiFetchInit extends RequestInit {
 
 async function apiFetch<T>(path: string, init?: ApiFetchInit): Promise<T> {
   const { actor, requiresAuth = true, ...requestInit } = init ?? {};
-  const res = await fetch(`${serverUrl()}${path}`, {
-    ...requestInit,
-    headers: {
-      ...(requiresAuth ? { 'X-API-Key': await currentApiKey() } : {}),
-      ...(actor ? { 'X-Actor-Id': String(actor.id), 'X-Actor-Role': actor.role } : {}),
-      ...(requestInit.headers ?? {}),
-    },
-    cache: 'no-store',
-  });
+  const apiKey = requiresAuth ? await currentApiKey() : undefined;
+  const method = (requestInit.method ?? 'GET').toString().toUpperCase();
+  const startedAt = Date.now();
+  // after()内ではRequest-time API(headers/cookies)を呼べないため、レンダリング中に読んでおく。
+  const operationId = apiKey ? await currentOperationId() : null;
+  const logActor = actor ?? (apiKey ? await currentTokenActor() : undefined);
+
+  const scheduleLog = (entry: OperationLogEntryInput) => {
+    if (apiKey && operationId) {
+      after(() => recordOperationLog(apiKey, logActor, entry));
+    }
+  };
+
+  let res: Response;
+  try {
+    res = await fetch(`${serverUrl()}${path}`, {
+      ...requestInit,
+      headers: {
+        ...(apiKey ? { 'X-API-Key': apiKey } : {}),
+        ...(actor ? { 'X-Actor-Id': String(actor.id), 'X-Actor-Role': actor.role } : {}),
+        ...(requestInit.headers ?? {}),
+      },
+      cache: 'no-store',
+    });
+  } catch (err) {
+    scheduleLog({
+      operationId: operationId ?? '',
+      method,
+      path,
+      statusCode: null,
+      durationMs: Date.now() - startedAt,
+      success: false,
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
+
+  const durationMs = Date.now() - startedAt;
 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
+    const message = `APIエラー (${res.status}): ${body || res.statusText}`;
+    scheduleLog({ operationId: operationId ?? '', method, path, statusCode: res.status, durationMs, success: false, errorMessage: message });
+    throw new Error(message);
   }
+
+  scheduleLog({ operationId: operationId ?? '', method, path, statusCode: res.status, durationMs, success: true });
+
   if (res.status === 204) {
     return undefined as T;
   }
@@ -907,6 +995,42 @@ export function listAuditLogs(
   query.set('sort', 'createdAt,desc');
 
   return apiFetch<AuditLogPage>(`/api/audit-logs?${query.toString()}`, { actor });
+}
+
+export interface OperationLogEntry {
+  id: number;
+  operationId: string;
+  userId: number | null;
+  method: string;
+  path: string;
+  statusCode: number | null;
+  durationMs: number;
+  success: boolean;
+  errorMessage: string | null;
+  createdAt: string;
+}
+
+export interface OperationLogPage {
+  content: OperationLogEntry[];
+  totalElements: number;
+  totalPages: number;
+  number: number;
+  size: number;
+}
+
+export function listOperationLogs(
+  params: { page?: number; size?: number },
+  actor: ActorInfo
+): Promise<OperationLogPage> {
+  const query = new URLSearchParams();
+  query.set('page', String(params.page ?? 0));
+  query.set('size', String(params.size ?? 200));
+  query.set('sort', 'createdAt,desc');
+  return apiFetch<OperationLogPage>(`/api/operation-logs?${query.toString()}`, { actor });
+}
+
+export function getOperationTrace(operationId: string, actor: ActorInfo): Promise<OperationLogEntry[]> {
+  return apiFetch<OperationLogEntry[]>(`/api/operation-logs/${encodeURIComponent(operationId)}`, { actor });
 }
 
 export interface Project {
