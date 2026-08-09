@@ -71,6 +71,9 @@ export default async function ProjectsPage() {
                   <Link href={`/projects/${project.id}/plan`} className="text-sm text-neutral-600 dark:text-neutral-400 hover:underline">
                     計画
                   </Link>
+                  <Link href={`/projects/${project.id}/tag-design`} className="text-sm text-neutral-600 dark:text-neutral-400 hover:underline">
+                    タグデザイン
+                  </Link>
                   <Link href={`/projects/${project.id}`} className="text-sm text-neutral-600 dark:text-neutral-400 hover:underline">
                     詳細
                   </Link>

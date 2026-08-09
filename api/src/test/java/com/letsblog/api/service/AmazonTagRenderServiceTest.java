@@ -3,7 +3,9 @@ package com.letsblog.api.service;
 import com.letsblog.api.contentcache.ContentCacheService;
 import com.letsblog.api.contentcache.ContentScrapingException;
 import com.letsblog.api.domain.ContentType;
+import com.letsblog.api.domain.EmbedTagType;
 import com.letsblog.api.dto.ContentCacheResponse;
+import com.letsblog.api.dto.TagDesignColors;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -16,19 +18,27 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class AmazonTagRenderServiceTest {
 
+    private static final Long PROJECT_ID = 1L;
+
     @Mock
     private ContentCacheService contentCacheService;
+
+    @Mock
+    private TagDesignSettingService tagDesignSettingService;
 
     private AmazonTagRenderService service;
 
     @BeforeEach
     void setUp() {
-        service = new AmazonTagRenderService(contentCacheService);
+        service = new AmazonTagRenderService(contentCacheService, tagDesignSettingService);
+        lenient().when(tagDesignSettingService.resolveColors(PROJECT_ID, EmbedTagType.AMAZON))
+                .thenReturn(new TagDesignColors("#ffffff", "#1a1a1a", "#2563eb"));
     }
 
     private ContentCacheResponse response(Map<String, String> data) {
@@ -46,7 +56,7 @@ class AmazonTagRenderServiceTest {
                 "price", "￥1,980",
                 "productUrl", url)));
 
-        String result = service.render("本文\n\n[amazon " + url + "]\n\n続き");
+        String result = service.render("本文\n\n[amazon " + url + "]\n\n続き", PROJECT_ID);
 
         assertTrue(result.contains("<style>"), "スタイルブロックが含まれること");
         assertTrue(result.contains("サンプル商品"));
@@ -62,7 +72,7 @@ class AmazonTagRenderServiceTest {
     void render_タグがなければ何も変更せずスタイルブロックも付与しない() {
         String markdown = "普通の本文です。";
 
-        String result = service.render(markdown);
+        String result = service.render(markdown, PROJECT_ID);
 
         assertEquals(markdown, result);
     }
@@ -72,7 +82,7 @@ class AmazonTagRenderServiceTest {
         String url = "https://www.amazon.co.jp/dp/B000000000";
         when(contentCacheService.resolve(url)).thenReturn(response(Map.of("productName", "サンプル商品")));
 
-        String result = service.render("[amazon " + url + "]");
+        String result = service.render("[amazon " + url + "]", PROJECT_ID);
 
         assertFalse(result.contains("class=\"lb-amazon-card-price\""));
     }
@@ -84,7 +94,7 @@ class AmazonTagRenderServiceTest {
         when(contentCacheService.resolve(url1)).thenReturn(response(Map.of("productName", "商品A")));
         when(contentCacheService.resolve(url2)).thenReturn(response(Map.of("productName", "商品B")));
 
-        String result = service.render("[amazon " + url1 + "]\n\n[amazon " + url2 + "]");
+        String result = service.render("[amazon " + url1 + "]\n\n[amazon " + url2 + "]", PROJECT_ID);
 
         assertTrue(result.contains("商品A"));
         assertTrue(result.contains("商品B"));
@@ -96,7 +106,7 @@ class AmazonTagRenderServiceTest {
         String url = "https://www.amazon.co.jp/dp/B000000000";
         when(contentCacheService.resolve(url)).thenThrow(new ContentScrapingException("失敗", new RuntimeException()));
 
-        String result = service.render("[amazon " + url + "]");
+        String result = service.render("[amazon " + url + "]", PROJECT_ID);
 
         assertEquals("<a href=\"" + url + "\" target=\"_blank\" rel=\"noopener noreferrer nofollow sponsored\">"
                 + url + "</a>", result);
@@ -108,7 +118,7 @@ class AmazonTagRenderServiceTest {
         String url = "javascript:alert(1)";
         when(contentCacheService.resolve(url)).thenThrow(new IllegalArgumentException("不正なURL"));
 
-        String result = service.render("[amazon " + url + "]");
+        String result = service.render("[amazon " + url + "]", PROJECT_ID);
 
         assertFalse(result.contains("<a "), "javascript:等はリンク化されないこと: " + result);
         assertFalse(result.contains("javascript:alert(1)\""), "属性値として埋め込まれないこと: " + result);
@@ -121,7 +131,7 @@ class AmazonTagRenderServiceTest {
                 "productName", "<script>alert(1)</script>",
                 "price", "\"onmouseover=\"alert(1)")));
 
-        String result = service.render("[amazon " + url + "]");
+        String result = service.render("[amazon " + url + "]", PROJECT_ID);
 
         assertFalse(result.contains("<script>alert(1)</script>"), "scriptタグがエスケープされずに出力されないこと: " + result);
         assertTrue(result.contains("&lt;script&gt;"));
@@ -134,7 +144,7 @@ class AmazonTagRenderServiceTest {
                 "productName", "サンプル商品",
                 "productUrl", "javascript:alert(1)")));
 
-        String result = service.render("[amazon " + url + "]");
+        String result = service.render("[amazon " + url + "]", PROJECT_ID);
 
         assertTrue(result.contains("href=\"" + url + "\""));
         assertFalse(result.contains("javascript:alert(1)"));
@@ -147,7 +157,7 @@ class AmazonTagRenderServiceTest {
                 "productName", "サンプル商品",
                 "imageUrl", "data:text/html,<script>alert(1)</script>")));
 
-        String result = service.render("[amazon " + url + "]");
+        String result = service.render("[amazon " + url + "]", PROJECT_ID);
 
         assertFalse(result.contains("class=\"lb-amazon-card-thumb\""),
                 "無効な画像URLはサムネイル要素自体を出さないこと(CSS定義自体は含まれてよい): " + result);
@@ -155,8 +165,8 @@ class AmazonTagRenderServiceTest {
 
     @Test
     void render_nullとから文字列はそのまま返す() {
-        assertEquals(null, service.render(null));
-        assertEquals("", service.render(""));
+        assertEquals(null, service.render(null, PROJECT_ID));
+        assertEquals("", service.render("", PROJECT_ID));
     }
 
     private int countOccurrences(String text, String needle) {
