@@ -62,17 +62,9 @@ export function ProjectCustomTagManager({
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <p className="max-w-2xl text-sm text-neutral-600 dark:text-neutral-400">
-          このプロジェクト専用のカスタムタグです。グローバルタグや他プロジェクトのタグは表示されません。
-        </p>
-        <a
-          href={`/projects/${projectId}/custom-tags/css-bundle`}
-          className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
-        >
-          統合CSSダウンロード
-        </a>
-      </div>
+      <p className="max-w-2xl text-sm text-neutral-600 dark:text-neutral-400">
+        このプロジェクト専用のカスタムタグです。グローバルタグや他プロジェクトのタグは表示されません。
+      </p>
 
       <CustomTagGenerationForm
         projects={[currentProject]}

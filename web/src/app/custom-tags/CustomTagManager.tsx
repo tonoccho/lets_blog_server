@@ -133,32 +133,24 @@ export function CustomTagManager({
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <label className="flex max-w-sm flex-col gap-1 text-sm">
-          <span className="text-neutral-600 dark:text-neutral-400">表示スコープ</span>
-          <select
-            value={currentProjectId ?? ""}
-            onChange={(e) => {
-              const value = e.target.value;
-              router.push(value ? `/custom-tags?projectId=${value}` : "/custom-tags");
-            }}
-            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-          >
-            <option value="">グローバル</option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <a
-          href={`/custom-tags/css-bundle${currentProjectId ? `?projectId=${currentProjectId}` : ""}`}
-          className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
+      <label className="flex max-w-sm flex-col gap-1 text-sm">
+        <span className="text-neutral-600 dark:text-neutral-400">表示スコープ</span>
+        <select
+          value={currentProjectId ?? ""}
+          onChange={(e) => {
+            const value = e.target.value;
+            router.push(value ? `/custom-tags?projectId=${value}` : "/custom-tags");
+          }}
+          className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
         >
-          統合CSSダウンロード
-        </a>
-      </div>
+          <option value="">グローバル</option>
+          {projects.map((project) => (
+            <option key={project.id} value={project.id}>
+              {project.name}
+            </option>
+          ))}
+        </select>
+      </label>
 
       <CustomTagGenerationForm
         projects={projects}

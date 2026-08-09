@@ -1,8 +1,10 @@
 package com.letsblog.api.service;
 
 import com.letsblog.api.domain.CustomTag;
+import com.letsblog.api.domain.EmbedTagType;
 import com.letsblog.api.dto.CustomTagRequest;
 import com.letsblog.api.dto.CustomTagResponse;
+import com.letsblog.api.dto.TagDesignColors;
 import com.letsblog.api.repository.CustomTagRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,11 +29,32 @@ class CustomTagServiceTest {
     @Mock
     private AdminAuthorizationService adminAuthorizationService;
 
+    @Mock
+    private TagDesignSettingService tagDesignSettingService;
+
+    @Mock
+    private TocStyleRenderService tocStyleRenderService;
+
+    @Mock
+    private BlogCardTagRenderService blogCardTagRenderService;
+
+    @Mock
+    private AmazonTagRenderService amazonTagRenderService;
+
     private CustomTagService service;
 
     @BeforeEach
     void setUp() {
-        service = new CustomTagService(customTagRepository, adminAuthorizationService);
+        service = new CustomTagService(customTagRepository, adminAuthorizationService,
+                tagDesignSettingService, tocStyleRenderService, blogCardTagRenderService, amazonTagRenderService);
+    }
+
+    private void stubEmbedTagCss(Long projectId) {
+        TagDesignColors colors = new TagDesignColors("#ffffff", "#1a1a1a", "#2563eb");
+        when(tagDesignSettingService.resolveColors(eq(projectId), any(EmbedTagType.class))).thenReturn(colors);
+        when(tocStyleRenderService.buildStyle(colors)).thenReturn(".toc-css{}");
+        when(blogCardTagRenderService.buildStyle(colors)).thenReturn(".blogcard-css{}");
+        when(amazonTagRenderService.buildStyle(colors)).thenReturn(".amazon-css{}");
     }
 
     @Test
@@ -186,15 +209,37 @@ class CustomTagServiceTest {
     }
 
     @Test
+    void buildCssBundle_projectId未指定時は組み込みタグのCSSを含めない() {
+        when(customTagRepository.findByProjectIdIsNull()).thenReturn(List.of());
+
+        service.buildCssBundle(null);
+
+        verifyNoInteractions(tagDesignSettingService, tocStyleRenderService, blogCardTagRenderService, amazonTagRenderService);
+    }
+
+    @Test
     void buildCssBundle_projectId指定時はプロジェクトタグとグローバルタグを結合する() {
         CustomTag tag = new CustomTag();
         tag.setTagName("project-tag");
         tag.setCssContent(".project { color: blue; }");
         when(customTagRepository.findByProjectIdOrProjectIdIsNull(5L)).thenReturn(List.of(tag));
+        stubEmbedTagCss(5L);
 
         String bundle = service.buildCssBundle(5L);
 
         assertEquals(true, bundle.contains(".project { color: blue; }"));
+    }
+
+    @Test
+    void buildCssBundle_projectId指定時は組み込みタグのデザインCSSも含める() {
+        when(customTagRepository.findByProjectIdOrProjectIdIsNull(5L)).thenReturn(List.of());
+        stubEmbedTagCss(5L);
+
+        String bundle = service.buildCssBundle(5L);
+
+        assertEquals(true, bundle.contains(".toc-css{}"));
+        assertEquals(true, bundle.contains(".blogcard-css{}"));
+        assertEquals(true, bundle.contains(".amazon-css{}"));
     }
 
     @Test
@@ -219,10 +264,23 @@ class CustomTagServiceTest {
         tag.setTagName("project-tag");
         tag.setCssContent(".project { color: blue; }");
         when(customTagRepository.findByProjectId(5L)).thenReturn(List.of(tag));
+        stubEmbedTagCss(5L);
 
         String bundle = service.buildProjectCssBundle(5L);
 
         assertEquals(true, bundle.contains(".project { color: blue; }"));
         verify(customTagRepository, never()).findByProjectIdOrProjectIdIsNull(any());
+    }
+
+    @Test
+    void buildProjectCssBundle_組み込みタグのデザインCSSを含める() {
+        when(customTagRepository.findByProjectId(5L)).thenReturn(List.of());
+        stubEmbedTagCss(5L);
+
+        String bundle = service.buildProjectCssBundle(5L);
+
+        assertEquals(true, bundle.contains(".toc-css{}"));
+        assertEquals(true, bundle.contains(".blogcard-css{}"));
+        assertEquals(true, bundle.contains(".amazon-css{}"));
     }
 }

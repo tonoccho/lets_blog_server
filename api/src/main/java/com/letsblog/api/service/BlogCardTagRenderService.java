@@ -62,7 +62,8 @@ public class BlogCardTagRenderService {
         return "<style>\n" + buildStyle(colors) + "\n</style>\n\n" + result;
     }
 
-    private String buildStyle(TagDesignColors colors) {
+    /** CustomTagServiceの統合CSS生成からも呼ばれるためpackage-private。 */
+    String buildStyle(TagDesignColors colors) {
         return ".lb-blogcard{display:flex;align-items:stretch;border:1px solid #e0e0e0;"
                 + "border-left:4px solid " + colors.accentColor() + ";border-radius:8px;overflow:hidden;"
                 + "text-decoration:none;background:" + colors.backgroundColor() + ";color:" + colors.textColor()

@@ -62,7 +62,8 @@ public class AmazonTagRenderService {
         return "<style>\n" + buildStyle(colors) + "\n</style>\n\n" + result;
     }
 
-    private String buildStyle(TagDesignColors colors) {
+    /** CustomTagServiceの統合CSS生成からも呼ばれるためpackage-private。 */
+    String buildStyle(TagDesignColors colors) {
         return ".lb-amazon-card{display:flex;align-items:stretch;border:1px solid #e0e0e0;"
                 + "border-radius:8px;overflow:hidden;text-decoration:none;color:" + colors.textColor()
                 + ";max-width:100%;margin:1em 0;background:" + colors.backgroundColor()
