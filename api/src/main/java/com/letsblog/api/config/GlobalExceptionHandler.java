@@ -3,6 +3,7 @@ package com.letsblog.api.config;
 import com.letsblog.api.cms.CmsApiException;
 import com.letsblog.api.cms.agent.AgentOperationException;
 import com.letsblog.api.cms.ssh.SshOperationException;
+import com.letsblog.api.contentcache.ContentScrapingException;
 import com.letsblog.api.github.GithubApiException;
 import com.letsblog.api.service.ArticlePlanSessionNotFoundException;
 import com.letsblog.api.service.BackupException;
@@ -160,6 +161,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(GithubApiException.class)
     public ResponseEntity<Map<String, String>> handleGithubApiException(GithubApiException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(ContentScrapingException.class)
+    public ResponseEntity<Map<String, String>> handleContentScrapingException(ContentScrapingException e) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
     }
 
