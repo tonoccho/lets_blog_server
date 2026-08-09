@@ -46,22 +46,22 @@ export default async function AuditLogsPage({
     <div className="space-y-8">
       <h1 className="text-xl font-semibold">監査ログ</h1>
 
-      <form className="flex flex-wrap items-end gap-3 rounded-lg border border-neutral-200 bg-white p-5" method="get">
+      <form className="flex flex-wrap items-end gap-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5" method="get">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">ユーザーID</span>
+          <span className="text-neutral-600 dark:text-neutral-400">ユーザーID</span>
           <input
             name="userId"
             type="number"
             defaultValue={params.userId ?? ""}
-            className="rounded border border-neutral-300 px-3 py-2 text-sm"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600">操作種別</span>
+          <span className="text-neutral-600 dark:text-neutral-400">操作種別</span>
           <select
             name="action"
             defaultValue={params.action ?? ""}
-            className="rounded border border-neutral-300 px-3 py-2 text-sm"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
           >
             <option value="">すべて</option>
             {ACTIONS.map((action) => (
@@ -76,7 +76,7 @@ export default async function AuditLogsPage({
         </button>
       </form>
 
-      <div className="mb-3 flex items-center justify-between text-sm text-neutral-600">
+      <div className="mb-3 flex items-center justify-between text-sm text-neutral-600 dark:text-neutral-400">
         <span>
           {result.content.length > 0
             ? `${result.number * result.size + 1}〜${Math.min((result.number + 1) * result.size, result.totalElements)}件 / 全${result.totalElements}件を表示`
@@ -84,9 +84,9 @@ export default async function AuditLogsPage({
         </span>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-neutral-200 bg-white">
+      <div className="overflow-x-auto rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-500">
+          <thead className="border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">
             <tr>
               <th className="px-4 py-2">日時</th>
               <th className="px-4 py-2">ユーザーID</th>
@@ -98,20 +98,20 @@ export default async function AuditLogsPage({
           <tbody>
             {result.content.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-neutral-600">
+                <td colSpan={5} className="px-4 py-6 text-center text-neutral-600 dark:text-neutral-400">
                   該当する監査ログはありません
                 </td>
               </tr>
             )}
             {result.content.map((entry) => (
-              <tr key={entry.id} className="border-b border-neutral-100 last:border-0 cursor-pointer hover:bg-neutral-50 hover:shadow-sm transition-colors">
-                <td className="px-4 py-2 text-neutral-600">{formatDateTime(entry.createdAt, timezone)}</td>
+              <tr key={entry.id} className="border-b border-neutral-100 dark:border-neutral-800 last:border-0 cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:shadow-sm transition-colors">
+                <td className="px-4 py-2 text-neutral-600 dark:text-neutral-400">{formatDateTime(entry.createdAt, timezone)}</td>
                 <td className="px-4 py-2 font-mono">{entry.userId ?? "-"}</td>
                 <td className="px-4 py-2">{entry.action}</td>
-                <td className="px-4 py-2 text-neutral-600">
+                <td className="px-4 py-2 text-neutral-600 dark:text-neutral-400">
                   {entry.resourceType ? `${entry.resourceType}${entry.resourceId ? ` #${entry.resourceId}` : ""}` : "-"}
                 </td>
-                <td className="px-4 py-2 text-neutral-600">{entry.remoteIp ?? "-"}</td>
+                <td className="px-4 py-2 text-neutral-600 dark:text-neutral-400">{entry.remoteIp ?? "-"}</td>
               </tr>
             ))}
           </tbody>
@@ -120,7 +120,7 @@ export default async function AuditLogsPage({
 
       {result.totalPages > 1 && (
         <div className="space-y-3">
-          <div className="flex items-center justify-between text-sm text-neutral-600">
+          <div className="flex items-center justify-between text-sm text-neutral-600 dark:text-neutral-400">
             <span>
               ページ {result.number + 1} / {result.totalPages}
             </span>
@@ -136,7 +136,9 @@ export default async function AuditLogsPage({
                 key={p}
                 href={`/audit-logs?${buildQuery(p)}`}
                 className={`rounded px-3 py-1 text-sm ${
-                  p === page ? "bg-neutral-900 text-white" : "border border-neutral-300 text-neutral-600 hover:bg-neutral-50"
+                  p === page
+                    ? "bg-neutral-900 text-white"
+                    : "border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800"
                 }`}
               >
                 {p + 1}

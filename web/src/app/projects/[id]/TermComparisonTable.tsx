@@ -127,8 +127,8 @@ export function TermComparisonTable({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-neutral-500">
-          マスター環境: <span className="font-medium text-neutral-700">{ENVIRONMENT_LABEL[master]}</span>
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">
+          マスター環境: <span className="font-medium text-neutral-700 dark:text-neutral-300">{ENVIRONMENT_LABEL[master]}</span>
           (マスターと異なる値は赤字、取得エラーは「エラー」で表示されます)
         </p>
         <div className="flex flex-wrap gap-2">
@@ -138,7 +138,7 @@ export function TermComparisonTable({
               type="button"
               disabled={loading}
               onClick={() => goToPage(pageData.page)}
-              className="rounded bg-neutral-100 px-3 py-1.5 text-sm text-neutral-700 disabled:opacity-50"
+              className="rounded bg-neutral-100 dark:bg-neutral-800 px-3 py-1.5 text-sm text-neutral-700 dark:text-neutral-300 disabled:opacity-50"
               title={`${ENVIRONMENT_LABEL[env]}環境を含め、この一覧を再取得します`}
             >
               {ENVIRONMENT_LABEL[env]}を更新
@@ -148,7 +148,7 @@ export function TermComparisonTable({
             type="button"
             onClick={handleSyncAll}
             disabled={syncAllPending}
-            className="rounded bg-neutral-100 px-3 py-1.5 text-sm text-neutral-700 disabled:opacity-50"
+            className="rounded bg-neutral-100 dark:bg-neutral-800 px-3 py-1.5 text-sm text-neutral-700 dark:text-neutral-300 disabled:opacity-50"
           >
             {syncAllPending ? "処理中…" : "マスターに一括で揃える"}
           </button>
@@ -179,7 +179,7 @@ export function TermComparisonTable({
       )}
 
       {pageData.items.length === 0 ? (
-        <p className="text-sm text-neutral-500">{label}はまだありません。</p>
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">{label}はまだありません。</p>
       ) : (
         <div className="space-y-4">
           {pageData.items.map((row) => {
@@ -188,9 +188,9 @@ export function TermComparisonTable({
             // 編集はマスターに値が無い行でも行える(保存するとマスター環境に新規作成される)。
             const canSync = masterValue.available && !!masterValue.slug;
             return (
-              <div key={row.slug} className="overflow-x-auto rounded border border-neutral-200">
+              <div key={row.slug} className="overflow-x-auto rounded border border-neutral-200 dark:border-neutral-800">
                 <table className="w-full text-left text-sm">
-                  <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-500">
+                  <thead className="border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">
                     <tr>
                       <th className="px-2 py-1.5">{row.name}</th>
                       <th className="px-2 py-1.5">ローカル</th>
@@ -206,7 +206,7 @@ export function TermComparisonTable({
                       <AttributeRow label="親カテゴリ" row={row} master={master} field={(v) => v.parentSlug} />
                     )}
                     <AttributeRow label="説明" row={row} master={master} field={(v) => v.description} />
-                    <tr className="border-t border-neutral-100">
+                    <tr className="border-t border-neutral-100 dark:border-neutral-800">
                       <td className="px-2 py-1.5" colSpan={4} />
                       <td className="px-2 py-1.5">
                         {(() => {
@@ -219,7 +219,7 @@ export function TermComparisonTable({
                                 type="button"
                                 onClick={() => setEditingSlug(editingSlug === row.slug ? null : row.slug)}
                                 disabled={rowBusy}
-                                className="rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 disabled:opacity-50"
+                                className="rounded bg-neutral-100 dark:bg-neutral-800 px-2 py-1 text-xs text-neutral-700 dark:text-neutral-300 disabled:opacity-50"
                               >
                                 編集
                               </button>
@@ -236,7 +236,7 @@ export function TermComparisonTable({
                                   type="button"
                                   onClick={() => handleSync(row)}
                                   disabled={rowBusy}
-                                  className="rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 disabled:opacity-50"
+                                  className="rounded bg-neutral-100 dark:bg-neutral-800 px-2 py-1 text-xs text-neutral-700 dark:text-neutral-300 disabled:opacity-50"
                                 >
                                   {isSyncing ? "同期中…" : "同期"}
                                 </button>
@@ -249,7 +249,7 @@ export function TermComparisonTable({
                   </tbody>
                 </table>
                 {editingSlug === row.slug && (
-                  <div className="border-t border-neutral-200 bg-neutral-50 p-3">
+                  <div className="border-t border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 p-3">
                     <EditItemForm
                       projectId={projectId}
                       kind={kind}
@@ -269,7 +269,7 @@ export function TermComparisonTable({
       )}
 
       <div className="flex items-center justify-between text-sm">
-        <span className="text-neutral-500">
+        <span className="text-neutral-500 dark:text-neutral-400">
           {pageData.totalCount}件中{" "}
           {pageData.items.length === 0 ? 0 : pageData.page * pageData.size + 1}-
           {pageData.page * pageData.size + pageData.items.length}件を表示
@@ -279,18 +279,18 @@ export function TermComparisonTable({
             type="button"
             disabled={pageData.page <= 0 || loading}
             onClick={() => goToPage(pageData.page - 1)}
-            className="rounded bg-neutral-100 px-3 py-1.5 disabled:opacity-50"
+            className="rounded bg-neutral-100 dark:bg-neutral-800 px-3 py-1.5 disabled:opacity-50"
           >
             前へ
           </button>
-          <span className="text-neutral-500">
+          <span className="text-neutral-500 dark:text-neutral-400">
             {pageData.page + 1} / {totalPages}
           </span>
           <button
             type="button"
             disabled={pageData.page + 1 >= totalPages || loading}
             onClick={() => goToPage(pageData.page + 1)}
-            className="rounded bg-neutral-100 px-3 py-1.5 disabled:opacity-50"
+            className="rounded bg-neutral-100 dark:bg-neutral-800 px-3 py-1.5 disabled:opacity-50"
           >
             次へ
           </button>
@@ -334,8 +334,8 @@ function AttributeRow({
   }
 
   return (
-    <tr className="border-t border-neutral-100">
-      <td className="px-2 py-1.5 text-neutral-500">{label}</td>
+    <tr className="border-t border-neutral-100 dark:border-neutral-800">
+      <td className="px-2 py-1.5 text-neutral-500 dark:text-neutral-400">{label}</td>
       <td className="px-2 py-1.5">{cell("local")}</td>
       <td className="px-2 py-1.5">{cell("test")}</td>
       <td className="px-2 py-1.5">{cell("production")}</td>
@@ -377,7 +377,7 @@ function NewItemForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="flex flex-wrap items-end gap-2 rounded border border-neutral-200 bg-neutral-50 p-3 text-sm"
+      className="flex flex-wrap items-end gap-2 rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 p-3 text-sm"
     >
       <Field label="名前" name="value" required />
       <Field label="スラッグ" name="categorySlug" required />
@@ -472,12 +472,12 @@ function Field({
 }) {
   return (
     <label className="flex flex-col gap-1">
-      <span className="text-neutral-600">{label}</span>
+      <span className="text-neutral-600 dark:text-neutral-400">{label}</span>
       <input
         name={name}
         defaultValue={defaultValue}
         required={required}
-        className="rounded border border-neutral-300 px-3 py-2 text-sm"
+        className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
       />
     </label>
   );

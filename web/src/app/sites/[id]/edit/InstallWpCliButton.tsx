@@ -27,7 +27,7 @@ export function InstallWpCliButton({ id }: { id: number }) {
         type="button"
         onClick={handleClick}
         disabled={isPending}
-        className="w-fit rounded bg-neutral-100 px-3 py-1.5 text-sm text-neutral-700 disabled:opacity-50"
+        className="w-fit rounded bg-neutral-100 dark:bg-neutral-800 px-3 py-1.5 text-sm text-neutral-700 dark:text-neutral-300 disabled:opacity-50"
       >
         {isPending ? "インストール中…" : "wp-cliをインストール"}
       </button>

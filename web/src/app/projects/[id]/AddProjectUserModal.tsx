@@ -23,11 +23,11 @@ export function AddProjectUserModal({ projectId, candidateUsers }: { projectId: 
     <form
       ref={formRef}
       action={formAction}
-      className="flex flex-wrap items-end gap-3 rounded-lg border border-neutral-200 bg-white p-5 text-sm"
+      className="flex flex-wrap items-end gap-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 text-sm"
     >
       <label className="flex flex-col gap-1">
-        <span className="text-neutral-600">ユーザーを追加</span>
-        <select name="userId" required className="rounded border border-neutral-300 px-3 py-2 text-sm">
+        <span className="text-neutral-600 dark:text-neutral-400">ユーザーを追加</span>
+        <select name="userId" required className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm">
           <option value="">選択…</option>
           {candidateUsers.map((user) => (
             <option key={user.id} value={user.id}>
@@ -37,8 +37,8 @@ export function AddProjectUserModal({ projectId, candidateUsers }: { projectId: 
         </select>
       </label>
       <label className="flex flex-col gap-1">
-        <span className="text-neutral-600">ロール</span>
-        <select name="wpRole" defaultValue="contributor" className="rounded border border-neutral-300 px-3 py-2 text-sm">
+        <span className="text-neutral-600 dark:text-neutral-400">ロール</span>
+        <select name="wpRole" defaultValue="contributor" className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm">
           {WP_ROLES.map((role) => (
             <option key={role} value={role}>
               {role}

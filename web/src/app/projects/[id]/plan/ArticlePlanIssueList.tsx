@@ -39,14 +39,14 @@ export function ArticlePlanIssueList({
   };
 
   return (
-    <div className="rounded-lg border border-neutral-200 bg-white p-5">
+    <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="font-medium">登録済み記事(Issue)一覧</h2>
         <select
           value={state}
           onChange={(e) => handleStateChange(e.target.value as RepositoryIssueState)}
           disabled={isLoading}
-          className="rounded border border-neutral-300 px-2 py-1 text-sm"
+          className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-sm"
         >
           {(Object.keys(STATE_LABEL) as RepositoryIssueState[]).map((s) => (
             <option key={s} value={s}>
@@ -59,20 +59,22 @@ export function ArticlePlanIssueList({
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
 
       {issues.length === 0 ? (
-        <p className="text-sm text-neutral-500">{isLoading ? "読み込み中…" : "該当するissueはありません。"}</p>
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">{isLoading ? "読み込み中…" : "該当するissueはありません。"}</p>
       ) : (
         <ul className="space-y-2">
           {issues.map((issue) => (
             <li
               key={issue.number}
-              className="flex items-center justify-between rounded border border-neutral-200 p-3 text-sm"
+              className="flex items-center justify-between rounded border border-neutral-200 dark:border-neutral-800 p-3 text-sm"
             >
               <a href={issue.htmlUrl} target="_blank" rel="noreferrer" className="flex-1 truncate hover:underline">
                 #{issue.number} {issue.title}
               </a>
               <span
                 className={`ml-2 shrink-0 rounded px-2 py-0.5 text-xs font-medium ${
-                  issue.state === "open" ? "bg-green-100 text-green-700" : "bg-neutral-200 text-neutral-600"
+                  issue.state === "open"
+                    ? "bg-green-100 text-green-700"
+                    : "bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-400"
                 }`}
               >
                 {issue.state}

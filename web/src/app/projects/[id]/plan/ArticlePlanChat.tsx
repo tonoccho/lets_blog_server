@@ -28,7 +28,7 @@ export function ArticlePlanChat({
   };
 
   return (
-    <div className="rounded-lg border border-neutral-200 bg-white p-5">
+    <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
       <div className="mb-4 flex items-center justify-between gap-2">
         <h2 className="font-medium">AI との壁打ち</h2>
         {issueNumber && (
@@ -39,15 +39,17 @@ export function ArticlePlanChat({
         )}
       </div>
 
-      <div className="mb-4 max-h-96 space-y-3 overflow-y-auto rounded-lg bg-neutral-50 p-4">
+      <div className="mb-4 max-h-96 space-y-3 overflow-y-auto rounded-lg bg-neutral-50 dark:bg-neutral-800 p-4">
         {history.length === 0 ? (
-          <p className="text-sm text-neutral-500">チャットを始めましょう。記事のテーマや企画を入力してください。</p>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">チャットを始めましょう。記事のテーマや企画を入力してください。</p>
         ) : (
           history.map((msg, idx) => (
             <div
               key={idx}
               className={`rounded px-3 py-2 text-sm ${
-                msg.role === "user" ? "bg-blue-100 text-blue-900" : "bg-neutral-200 text-neutral-900"
+                msg.role === "user"
+                  ? "bg-blue-100 text-blue-900"
+                  : "bg-neutral-200 dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50"
               }`}
             >
               <strong>{msg.role === "user" ? "あなた" : "AI"}:</strong> {msg.content}
@@ -68,7 +70,7 @@ export function ArticlePlanChat({
           }}
           placeholder="質問や企画案を入力..."
           disabled={isLoading}
-          className="flex-1 rounded border border-neutral-300 px-3 py-2 text-sm disabled:bg-neutral-100"
+          className="flex-1 rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm disabled:bg-neutral-100"
         />
         <button
           onClick={handleSendMessage}

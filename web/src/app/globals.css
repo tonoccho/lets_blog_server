@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+/*
+ * The app's theme (light/dark/auto) is controlled at runtime by ThemeSwitcher,
+ * which sets html[data-theme]. Without this, Tailwind's `dark:` variant defaults
+ * to the `prefers-color-scheme` media query and never responds to that attribute,
+ * so the manual toggle silently has no effect on any `dark:` utility class.
+ */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 :root {
   --background: #ffffff;
   --foreground: #171717;

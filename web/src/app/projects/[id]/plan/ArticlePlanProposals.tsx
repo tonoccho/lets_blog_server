@@ -60,7 +60,7 @@ export function ArticlePlanProposals({ projectId, history }: { projectId: number
   };
 
   return (
-    <div className="rounded-lg border border-neutral-200 bg-white p-5">
+    <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
       <h2 className="mb-4 font-medium">記事タイトル提案</h2>
 
       {results === null ? (
@@ -75,7 +75,7 @@ export function ArticlePlanProposals({ projectId, history }: { projectId: number
           {suggestError && <p className="mb-4 text-sm text-red-600">{suggestError}</p>}
 
           {titles.length === 0 ? (
-            <p className="text-sm text-neutral-500">
+            <p className="text-sm text-neutral-500 dark:text-neutral-400">
               タイトル提案はまだありません。チャットで壁打ちしてから取得してください。
             </p>
           ) : (
@@ -83,7 +83,7 @@ export function ArticlePlanProposals({ projectId, history }: { projectId: number
               {titles.map((title, idx) => (
                 <label
                   key={idx}
-                  className="flex items-center gap-2 rounded border border-neutral-200 p-3 hover:bg-neutral-50"
+                  className="flex items-center gap-2 rounded border border-neutral-200 dark:border-neutral-800 p-3 hover:bg-neutral-50 dark:hover:bg-neutral-800"
                 >
                   <input
                     type="checkbox"

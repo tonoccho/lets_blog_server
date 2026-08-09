@@ -34,7 +34,7 @@ export function CheckConnectionButton({ id }: { id: number }) {
         {result?.connectionCheckStatus === "FAILED" && <span className="text-xs text-red-700 font-medium">FAILED</span>}
       </div>
       {result?.connectionCheckStatus === "SUCCESS" && result.detail && (
-        <span className="text-xs text-neutral-700">{result.detail}</span>
+        <span className="text-xs text-neutral-700 dark:text-neutral-300">{result.detail}</span>
       )}
       {result?.connectionCheckStatus === "FAILED" && result.failureReason && (
         <span className="text-xs text-red-700">{result.failureReason}</span>

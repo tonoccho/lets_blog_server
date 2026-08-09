@@ -16,9 +16,9 @@ interface RoleOption {
 
 export function RoleAssignmentPanel({ users, roles }: { users: UserRow[]; roles: RoleOption[] }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-neutral-200 bg-white">
+    <div className="overflow-x-auto rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
       <table className="w-full text-sm">
-        <thead className="bg-neutral-50 text-neutral-500">
+        <thead className="bg-neutral-50 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">
           <tr>
             <th className="px-4 py-2 text-left font-medium">ユーザー</th>
             <th className="px-4 py-2 text-left font-medium">割り当て済みロール</th>
@@ -28,7 +28,7 @@ export function RoleAssignmentPanel({ users, roles }: { users: UserRow[]; roles:
         <tbody>
           {users.length === 0 && (
             <tr>
-              <td colSpan={3} className="px-4 py-6 text-center text-neutral-500">
+              <td colSpan={3} className="px-4 py-6 text-center text-neutral-500 dark:text-neutral-400">
                 ユーザーがいません。
               </td>
             </tr>
@@ -71,7 +71,7 @@ function UserRoleRow({ user, roles }: { user: UserRow; roles: RoleOption[] }) {
   }
 
   return (
-    <tr className="border-b border-neutral-100 align-top last:border-0 cursor-pointer hover:bg-neutral-50 hover:shadow-sm transition-colors">
+    <tr className="border-b border-neutral-100 dark:border-neutral-800 align-top last:border-0 cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:shadow-sm transition-colors">
       <td className="px-4 py-2">{user.email}</td>
       <td className="px-4 py-2">
         <div className="flex flex-wrap gap-1">
@@ -79,7 +79,7 @@ function UserRoleRow({ user, roles }: { user: UserRow; roles: RoleOption[] }) {
           {user.roleNames.map((roleName) => (
             <span
               key={roleName}
-              className="inline-flex items-center gap-1 rounded bg-neutral-100 px-2 py-0.5 text-xs text-neutral-700"
+              className="inline-flex items-center gap-1 rounded bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 text-xs text-neutral-700 dark:text-neutral-300"
             >
               {roleName}
               <button
@@ -100,7 +100,7 @@ function UserRoleRow({ user, roles }: { user: UserRow; roles: RoleOption[] }) {
           <select
             value={selected}
             onChange={(e) => setSelected(e.target.value)}
-            className="rounded border border-neutral-300 px-2 py-1 text-sm"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-sm"
           >
             {roles.map((role) => (
               <option key={role.roleName} value={role.roleName}>

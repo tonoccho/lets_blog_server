@@ -38,10 +38,11 @@ describe('ThemeSwitcher', () => {
     })
   })
 
-  it('applies auto theme by default', async () => {
+  it('applies auto theme by default, resolved against OS preference', async () => {
     render(<ThemeSwitcher />)
     await waitFor(() => {
-      expect(document.documentElement.getAttribute('data-theme')).toBeNull()
+      // matchMedia is mocked to matches: false (light), so auto resolves to light
+      expect(document.documentElement.getAttribute('data-theme')).toBe('light')
     })
   })
 
@@ -61,10 +62,10 @@ describe('ThemeSwitcher', () => {
       expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
     })
 
-    // Third click: auto (removed)
+    // Third click: auto (resolved against OS preference, mocked as light)
     fireEvent.click(button)
     await waitFor(() => {
-      expect(document.documentElement.getAttribute('data-theme')).toBeNull()
+      expect(document.documentElement.getAttribute('data-theme')).toBe('light')
     })
   })
 

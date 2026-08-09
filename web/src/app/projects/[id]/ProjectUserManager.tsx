@@ -25,15 +25,15 @@ function MemberRow({ projectId, member }: { projectId: number; member: ProjectUs
   }
 
   return (
-    <tr className="border-b border-neutral-100 last:border-0 cursor-pointer hover:bg-neutral-50 hover:shadow-sm transition-colors">
+    <tr className="border-b border-neutral-100 dark:border-neutral-800 last:border-0 cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:shadow-sm transition-colors">
       <td className="px-4 py-2">{member.email}</td>
-      <td className="px-4 py-2 text-neutral-600">{member.displayName}</td>
+      <td className="px-4 py-2 text-neutral-600 dark:text-neutral-400">{member.displayName}</td>
       <td className="px-4 py-2">
         <select
           value={member.wpRole}
           disabled={isPending}
           onChange={(e) => handleRoleChange(e.target.value)}
-          className="rounded border border-neutral-300 px-2 py-1 text-sm"
+          className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-sm"
         >
           {WP_ROLES.map((role) => (
             <option key={role} value={role}>
@@ -58,9 +58,9 @@ function MemberRow({ projectId, member }: { projectId: number; member: ProjectUs
 
 export function ProjectUserManager({ projectId, members }: { projectId: number; members: ProjectUser[] }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-neutral-200 bg-white">
+    <div className="overflow-x-auto rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
       <table className="w-full text-left text-sm">
-        <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-500">
+        <thead className="border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">
           <tr>
             <th className="px-4 py-2">メールアドレス</th>
             <th className="px-4 py-2">表示名</th>
@@ -71,7 +71,7 @@ export function ProjectUserManager({ projectId, members }: { projectId: number; 
         <tbody>
           {members.length === 0 && (
             <tr>
-              <td colSpan={4} className="px-4 py-6 text-center text-neutral-600">
+              <td colSpan={4} className="px-4 py-6 text-center text-neutral-600 dark:text-neutral-400">
                 参加ユーザーはいません
               </td>
             </tr>

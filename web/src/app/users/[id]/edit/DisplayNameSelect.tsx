@@ -40,11 +40,11 @@ export function DisplayNameSelect({
 
   return (
     <label className="flex flex-col gap-1 text-sm">
-      <span className="text-neutral-600">表示名</span>
+      <span className="text-neutral-600 dark:text-neutral-400">表示名</span>
       <select
         name="displayName"
         defaultValue={defaultValue ?? ""}
-        className="rounded border border-neutral-300 px-3 py-2 text-sm"
+        className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
       >
         <option value="">選択してください</option>
         {candidates.map((c) => (

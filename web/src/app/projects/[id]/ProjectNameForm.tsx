@@ -13,12 +13,12 @@ export function ProjectNameForm({ projectId, name }: { projectId: number; name: 
   return (
     <form action={formAction} className="flex flex-wrap items-end gap-2 text-sm">
       <label className="flex flex-col gap-1">
-        <span className="text-neutral-600">プロジェクト名</span>
+        <span className="text-neutral-600 dark:text-neutral-400">プロジェクト名</span>
         <input
           name="name"
           defaultValue={name}
           required
-          className="rounded border border-neutral-300 px-3 py-2 text-sm"
+          className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
         />
       </label>
       <button

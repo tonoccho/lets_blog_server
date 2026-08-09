@@ -33,32 +33,32 @@ export function SiteEditForm({ site }: { site: SiteDetail }) {
   const isSecretConfigured = (name: string) => site.configuredSecretFields.includes(name);
 
   return (
-    <form action={formAction} className="max-w-xl space-y-4 rounded-lg border border-neutral-200 bg-white p-5">
+    <form action={formAction} className="max-w-xl space-y-4 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-neutral-600">サイトキー</span>
+        <span className="text-neutral-600 dark:text-neutral-400">サイトキー</span>
         <input
           value={site.siteKey}
           disabled
-          className="rounded border border-neutral-300 bg-neutral-50 px-3 py-2 text-sm text-neutral-500"
+          className="rounded border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-500 dark:text-neutral-400"
         />
       </label>
 
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-neutral-600">表示名</span>
+        <span className="text-neutral-600 dark:text-neutral-400">表示名</span>
         <input
           name="name"
           defaultValue={site.name}
-          className="rounded border border-neutral-300 px-3 py-2 text-sm"
+          className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
         />
       </label>
 
       {site.managedWordpress ? (
-        <p className="text-sm text-neutral-500">
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">
           自動構築されたWordPressサイトのため、URL・認証情報は編集できません(表示名のみ編集可能です)。
         </p>
       ) : (
         <fieldset className="space-y-3">
-          <legend className="text-sm font-medium text-neutral-600">
+          <legend className="text-sm font-medium text-neutral-600 dark:text-neutral-400">
             認証情報の変更(空欄のままなら変更されません)
           </legend>
           {site.cmsType === "WORDPRESS" ? (
@@ -86,7 +86,7 @@ export function SiteEditForm({ site }: { site: SiteDetail }) {
                 />
               </div>
 
-              <label className="flex items-center gap-2 text-sm text-neutral-600">
+              <label className="flex items-center gap-2 text-sm text-neutral-600 dark:text-neutral-400">
                 <input
                   type="checkbox"
                   checked={sshEnabled}
@@ -96,7 +96,7 @@ export function SiteEditForm({ site }: { site: SiteDetail }) {
               </label>
 
               {sshEnabled && (
-                <div className="space-y-3 rounded border border-neutral-200 p-3">
+                <div className="space-y-3 rounded border border-neutral-200 dark:border-neutral-800 p-3">
                   <input type="hidden" name="transport" value="SSH" />
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <Field
@@ -138,7 +138,7 @@ export function SiteEditForm({ site }: { site: SiteDetail }) {
                       type="button"
                       onClick={handleGenerateKeyPair}
                       disabled={keyGenPending}
-                      className="rounded bg-neutral-100 px-3 py-1.5 text-sm text-neutral-700 disabled:opacity-50"
+                      className="rounded bg-neutral-100 dark:bg-neutral-800 px-3 py-1.5 text-sm text-neutral-700 dark:text-neutral-300 disabled:opacity-50"
                     >
                       {keyGenPending ? "鍵ペアを生成中…" : "SSH鍵ペアを再生成"}
                     </button>
@@ -148,7 +148,7 @@ export function SiteEditForm({ site }: { site: SiteDetail }) {
                     {keyGenError && <p className="text-sm text-red-600">{keyGenError}</p>}
                     {publicKeyLine && (
                       <div className="space-y-1">
-                        <p className="text-sm text-neutral-600">
+                        <p className="text-sm text-neutral-600 dark:text-neutral-400">
                           以下の公開鍵をリモートサーバーの対象ユーザーの<code>~/.ssh/authorized_keys</code>
                           へ手動で追記してから保存してください。
                         </p>
@@ -157,7 +157,7 @@ export function SiteEditForm({ site }: { site: SiteDetail }) {
                           value={publicKeyLine}
                           rows={2}
                           onFocus={(e) => e.currentTarget.select()}
-                          className="w-full rounded border border-neutral-300 bg-neutral-50 px-3 py-2 font-mono text-xs"
+                          className="w-full rounded border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 font-mono text-xs"
                         />
                       </div>
                     )}
@@ -167,8 +167,8 @@ export function SiteEditForm({ site }: { site: SiteDetail }) {
               )}
 
               {site.sshConfigured && (
-                <div className="rounded border border-neutral-200 p-3">
-                  <p className="mb-2 text-sm text-neutral-600">
+                <div className="rounded border border-neutral-200 dark:border-neutral-800 p-3">
+                  <p className="mb-2 text-sm text-neutral-600 dark:text-neutral-400">
                     SSH接続が設定されています。wp-cliが未インストールの場合はここからインストールできます。
                   </p>
                   <InstallWpCliButton id={site.id} />
@@ -263,7 +263,7 @@ function Field({
 }) {
   return (
     <label className={`flex flex-col gap-1 text-sm ${wide ? "sm:col-span-2" : ""}`}>
-      <span className="text-neutral-600">
+      <span className="text-neutral-600 dark:text-neutral-400">
         {label}
         {configured && <span className="ml-1 text-xs text-green-600">(設定済み)</span>}
       </span>
@@ -272,7 +272,7 @@ function Field({
         type={type}
         defaultValue={defaultValue}
         placeholder={placeholder}
-        className="rounded border border-neutral-300 px-3 py-2 text-sm"
+        className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
       />
     </label>
   );

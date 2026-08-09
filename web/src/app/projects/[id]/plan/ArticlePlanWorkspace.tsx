@@ -122,7 +122,7 @@ export function ArticlePlanWorkspace({
                 className={`rounded-full border px-3 py-1.5 text-sm ${
                   proposalTab === "structure"
                     ? "border-neutral-900 bg-neutral-900 text-white"
-                    : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
+                    : "border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
                 }`}
               >
                 構成提案
@@ -132,7 +132,7 @@ export function ArticlePlanWorkspace({
                 className={`rounded-full border px-3 py-1.5 text-sm ${
                   proposalTab === "titles"
                     ? "border-neutral-900 bg-neutral-900 text-white"
-                    : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
+                    : "border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
                 }`}
               >
                 タイトル提案

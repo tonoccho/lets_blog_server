@@ -59,7 +59,7 @@ export function ArticlePlanStructureProposal({
   };
 
   return (
-    <div className="rounded-lg border border-neutral-200 bg-white p-5">
+    <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
       <h2 className="mb-4 font-medium">記事構成の提案(Issue #{issueNumber})</h2>
 
       {result === null ? (
@@ -74,7 +74,7 @@ export function ArticlePlanStructureProposal({
           {suggestError && <p className="mb-4 text-sm text-red-600">{suggestError}</p>}
 
           {structure === null ? (
-            <p className="text-sm text-neutral-500">
+            <p className="text-sm text-neutral-500 dark:text-neutral-400">
               構成案はまだありません。チャットで壁打ちしてから取得してください。
             </p>
           ) : (
@@ -82,7 +82,7 @@ export function ArticlePlanStructureProposal({
               value={structure}
               onChange={(e) => setStructure(e.target.value)}
               rows={10}
-              className="mb-4 w-full rounded border border-neutral-300 p-3 text-sm font-mono"
+              className="mb-4 w-full rounded border border-neutral-300 dark:border-neutral-700 p-3 text-sm font-mono"
             />
           )}
 

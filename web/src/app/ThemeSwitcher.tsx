@@ -5,13 +5,17 @@ import { Moon, Sun } from "lucide-react";
 
 type Theme = "light" | "dark" | "auto";
 
+const resolveEffectiveTheme = (theme: Theme): "light" | "dark" =>
+  theme === "auto"
+    ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+    : theme;
+
 const applyTheme = (newTheme: Theme) => {
   const html = document.documentElement;
+  html.setAttribute("data-theme", resolveEffectiveTheme(newTheme));
   if (newTheme === "auto") {
-    html.removeAttribute("data-theme");
     localStorage.removeItem("theme");
   } else {
-    html.setAttribute("data-theme", newTheme);
     localStorage.setItem("theme", newTheme);
   }
 };
@@ -24,12 +28,19 @@ export function ThemeSwitcher() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
     const stored = localStorage.getItem("theme") as Theme | null;
-    if (stored) {
-      setTheme(stored);
-      applyTheme(stored);
-    } else {
-      applyTheme("auto");
-    }
+    const initial = stored ?? "auto";
+    setTheme(initial);
+    applyTheme(initial);
+
+    // Keep the resolved attribute in sync with OS changes while in "auto" mode.
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const handleChange = () => {
+      if (!localStorage.getItem("theme")) {
+        applyTheme("auto");
+      }
+    };
+    media.addEventListener("change", handleChange);
+    return () => media.removeEventListener("change", handleChange);
   }, []);
 
   const nextTheme = (): Theme => {

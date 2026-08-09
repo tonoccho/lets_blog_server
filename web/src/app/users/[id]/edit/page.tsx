@@ -33,7 +33,7 @@ export default async function UserProfileEditPage({
         ]}
       />
       <h1 className="text-xl font-semibold">ユーザープロフィール編集</h1>
-      <p className="text-sm text-neutral-500">{profile.email}</p>
+      <p className="text-sm text-neutral-500 dark:text-neutral-400">{profile.email}</p>
       <UserProfileForm profile={profile} />
     </div>
   );

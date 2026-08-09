@@ -11,8 +11,8 @@ interface ValidationPanelProps {
 export function ValidationPanel({ result, isLoading, error }: ValidationPanelProps) {
   if (isLoading) {
     return (
-      <div className="rounded-lg border border-neutral-300 bg-neutral-50 p-4">
-        <p className="text-sm text-neutral-600">検証中...</p>
+      <div className="rounded-lg border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 p-4">
+        <p className="text-sm text-neutral-600 dark:text-neutral-400">検証中...</p>
       </div>
     );
   }
@@ -43,7 +43,7 @@ export function ValidationPanel({ result, isLoading, error }: ValidationPanelPro
   }
 
   return (
-    <div className="space-y-3 rounded-lg border border-neutral-300 bg-white p-4">
+    <div className="space-y-3 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 p-4">
       {hasErrors && (
         <div>
           <h3 className="text-sm font-semibold text-red-800">エラー ({result.errors.length})</h3>

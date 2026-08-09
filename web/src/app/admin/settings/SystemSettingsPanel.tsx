@@ -27,15 +27,15 @@ export function SystemSettingsPanel({ braveSearchStatus }: { braveSearchStatus: 
   }
 
   return (
-    <section className="space-y-3 rounded-lg border border-neutral-200 bg-white p-5">
+    <section className="space-y-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
       <h2 className="font-medium">Brave Search APIキー</h2>
-      <p className="text-sm text-neutral-600">
+      <p className="text-sm text-neutral-600 dark:text-neutral-400">
         AIによる記事構成・セクション本文生成・下書き/校正/要約で、Web検索結果を出典付きで提案するために使用します。
         未設定の場合、これらの機能は出典なしで動作します。
       </p>
       <p className="text-sm">
         現在の状態:{" "}
-        <span className={braveSearchStatus.configured ? "text-green-600" : "text-neutral-500"}>
+        <span className={braveSearchStatus.configured ? "text-green-600" : "text-neutral-500 dark:text-neutral-400"}>
           {SOURCE_LABEL[braveSearchStatus.source]}
         </span>
       </p>
@@ -46,13 +46,13 @@ export function SystemSettingsPanel({ braveSearchStatus }: { braveSearchStatus: 
         className="flex flex-col gap-2 sm:flex-row sm:items-end"
       >
         <label className="flex flex-1 flex-col gap-1 text-sm">
-          <span className="text-neutral-600">APIキー</span>
+          <span className="text-neutral-600 dark:text-neutral-400">APIキー</span>
           <input
             type="password"
             name="apiKey"
             placeholder="BSA..."
             autoComplete="off"
-            className="rounded border border-neutral-300 px-3 py-2 text-sm"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
           />
         </label>
         <button
@@ -67,7 +67,7 @@ export function SystemSettingsPanel({ braveSearchStatus }: { braveSearchStatus: 
             type="button"
             onClick={handleClear}
             disabled={isClearing}
-            className="rounded border border-neutral-300 px-4 py-2 text-sm text-red-600 hover:bg-neutral-50 disabled:text-neutral-400"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-4 py-2 text-sm text-red-600 hover:bg-neutral-50 dark:hover:bg-neutral-800 disabled:text-neutral-400"
           >
             {isClearing ? "削除中…" : "画面設定を削除"}
           </button>

@@ -17,20 +17,20 @@ export function ProjectGithubRepositoryForm({
   const [state, formAction, pending] = useActionState(action, initialState);
 
   return (
-    <div className="rounded-lg border border-neutral-200 bg-white p-4">
-      <h3 className="mb-1 font-medium text-neutral-700">GitHub リポジトリ設定</h3>
-      <p className="mb-3 text-sm text-neutral-500">
+    <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
+      <h3 className="mb-1 font-medium text-neutral-700 dark:text-neutral-300">GitHub リポジトリ設定</h3>
+      <p className="mb-3 text-sm text-neutral-500 dark:text-neutral-400">
         記事計画で issue を作成する先のリポジトリを指定します。空にすると紐付けを解除します。
       </p>
       <form action={formAction} className="flex flex-wrap items-end gap-2 text-sm">
         <label className="flex flex-col gap-1">
-          <span className="text-neutral-600">リポジトリ (owner/repo)</span>
+          <span className="text-neutral-600 dark:text-neutral-400">リポジトリ (owner/repo)</span>
           <input
             type="text"
             name="githubRepository"
             placeholder="anthropics/prompt-library"
             defaultValue={githubRepository ?? ""}
-            className="rounded border border-neutral-300 px-3 py-2 text-sm font-mono"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm font-mono"
           />
         </label>
         <button

@@ -100,8 +100,8 @@ export function OllamaModelTable({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-neutral-500">
-          選択中のモデル: <span className="font-medium text-neutral-700">{data.selected}</span>
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">
+          選択中のモデル: <span className="font-medium text-neutral-700 dark:text-neutral-300">{data.selected}</span>
         </p>
         <button
           type="button"
@@ -119,16 +119,16 @@ export function OllamaModelTable({
       {showNewForm && (
         <form
           onSubmit={handleInstallSubmit}
-          className="flex flex-wrap items-end gap-2 rounded border border-neutral-200 bg-neutral-50 p-3 text-sm"
+          className="flex flex-wrap items-end gap-2 rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 p-3 text-sm"
         >
           <label className="flex flex-col gap-1">
-            <span className="text-neutral-600">Ollamaのモデル名(例: qwen2.5:7b-instruct)</span>
+            <span className="text-neutral-600 dark:text-neutral-400">Ollamaのモデル名(例: qwen2.5:7b-instruct)</span>
             <input
               value={newModelName}
               onChange={(e) => setNewModelName(e.target.value)}
               placeholder="qwen2.5:7b-instruct"
               required
-              className="rounded border border-neutral-300 px-3 py-2 text-sm"
+              className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
             />
           </label>
           <button
@@ -139,7 +139,7 @@ export function OllamaModelTable({
             {pendingAction?.type === "install" ? "インストール中…" : "インストール"}
           </button>
           {pendingAction?.type === "install" && (
-            <p className="w-full text-neutral-500">
+            <p className="w-full text-neutral-500 dark:text-neutral-400">
               {progress ? formatJobProgress(progress) : "開始しています…"}
             </p>
           )}
@@ -147,11 +147,11 @@ export function OllamaModelTable({
       )}
 
       {data.models.length === 0 ? (
-        <p className="text-sm text-neutral-500">インストール済みのモデルはまだありません。</p>
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">インストール済みのモデルはまだありません。</p>
       ) : (
-        <div className="overflow-x-auto rounded border border-neutral-200">
+        <div className="overflow-x-auto rounded border border-neutral-200 dark:border-neutral-800">
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-neutral-200 bg-neutral-50 text-neutral-500">
+            <thead className="border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">
               <tr>
                 <th className="px-2 py-1.5">モデル名</th>
                 <th className="px-2 py-1.5">サイズ</th>
@@ -166,22 +166,22 @@ export function OllamaModelTable({
                 const isDeleting = pendingAction?.name === model.name && pendingAction?.type === "delete";
                 const rowBusy = isSelecting || isDeleting;
                 return (
-                  <tr key={model.name} className="border-t border-neutral-100">
-                    <td className="px-2 py-1.5 font-medium text-neutral-700">
+                  <tr key={model.name} className="border-t border-neutral-100 dark:border-neutral-800">
+                    <td className="px-2 py-1.5 font-medium text-neutral-700 dark:text-neutral-300">
                       {model.name}
                       {isSelected && (
                         <span className="ml-2 rounded bg-neutral-900 px-1.5 py-0.5 text-xs text-white">選択中</span>
                       )}
                     </td>
-                    <td className="px-2 py-1.5 text-neutral-500">{formatBytes(model.sizeBytes)}</td>
-                    <td className="px-2 py-1.5 text-neutral-500">{model.modifiedAt ?? "-"}</td>
+                    <td className="px-2 py-1.5 text-neutral-500 dark:text-neutral-400">{formatBytes(model.sizeBytes)}</td>
+                    <td className="px-2 py-1.5 text-neutral-500 dark:text-neutral-400">{model.modifiedAt ?? "-"}</td>
                     <td className="px-2 py-1.5">
                       <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
                           onClick={() => handleSelect(model.name)}
                           disabled={isSelected || rowBusy}
-                          className="rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-700 disabled:opacity-50"
+                          className="rounded bg-neutral-100 dark:bg-neutral-800 px-2 py-1 text-xs text-neutral-700 dark:text-neutral-300 disabled:opacity-50"
                         >
                           {isSelecting ? "切替中…" : "選択"}
                         </button>
