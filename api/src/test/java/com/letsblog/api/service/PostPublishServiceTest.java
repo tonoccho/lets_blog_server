@@ -57,6 +57,8 @@ class PostPublishServiceTest {
     @Mock
     private BlogCardTagRenderService blogCardTagRenderService;
     @Mock
+    private AmazonTagRenderService amazonTagRenderService;
+    @Mock
     private ProjectService projectService;
     @Mock
     private CurrentActorService currentActorService;
@@ -75,8 +77,8 @@ class PostPublishServiceTest {
     @BeforeEach
     void setUp() {
         service = new PostPublishService(siteService, cmsAdapterFactory, markdownRenderer, postRepository,
-                plantUmlEmbedService, customTagRenderService, blogCardTagRenderService, projectService,
-                currentActorService, userRepository,
+                plantUmlEmbedService, customTagRenderService, blogCardTagRenderService, amazonTagRenderService,
+                projectService, currentActorService, userRepository,
                 userSiteAuthorRepository, new com.fasterxml.jackson.databind.ObjectMapper());
 
         Site site = new Site();
@@ -90,6 +92,7 @@ class PostPublishServiceTest {
         lenient().when(projectService.findProjectIdBySiteId(1L)).thenReturn(null);
         lenient().when(customTagRenderService.render(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(blogCardTagRenderService.render(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(amazonTagRenderService.render(anyString())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(plantUmlEmbedService.embedDiagrams(any(), anyString())).thenAnswer(inv -> inv.getArgument(1));
         lenient().when(markdownRenderer.render(anyString())).thenAnswer(inv -> "<p>" + inv.getArgument(0) + "</p>");
         lenient().when(cmsAdapter.resolveCategories(any(), any())).thenReturn(List.of());

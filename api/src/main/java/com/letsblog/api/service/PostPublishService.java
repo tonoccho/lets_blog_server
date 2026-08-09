@@ -52,6 +52,7 @@ public class PostPublishService {
     private final PlantUmlEmbedService plantUmlEmbedService;
     private final CustomTagRenderService customTagRenderService;
     private final BlogCardTagRenderService blogCardTagRenderService;
+    private final AmazonTagRenderService amazonTagRenderService;
     private final ProjectService projectService;
     private final CurrentActorService currentActorService;
     private final UserRepository userRepository;
@@ -63,6 +64,7 @@ public class PostPublishService {
                                PlantUmlEmbedService plantUmlEmbedService,
                                CustomTagRenderService customTagRenderService,
                                BlogCardTagRenderService blogCardTagRenderService,
+                               AmazonTagRenderService amazonTagRenderService,
                                ProjectService projectService,
                                CurrentActorService currentActorService,
                                UserRepository userRepository,
@@ -75,6 +77,7 @@ public class PostPublishService {
         this.plantUmlEmbedService = plantUmlEmbedService;
         this.customTagRenderService = customTagRenderService;
         this.blogCardTagRenderService = blogCardTagRenderService;
+        this.amazonTagRenderService = amazonTagRenderService;
         this.projectService = projectService;
         this.currentActorService = currentActorService;
         this.userRepository = userRepository;
@@ -92,6 +95,7 @@ public class PostPublishService {
         Long projectId = projectService.findProjectIdBySiteId(site.getId());
         String markdown = customTagRenderService.render(command.markdown(), projectId);
         markdown = blogCardTagRenderService.render(markdown);
+        markdown = amazonTagRenderService.render(markdown);
         markdown = plantUmlEmbedService.embedDiagrams(credentials, markdown);
         Map<String, UploadedImageInfo> priorUploads = loadPriorUploadedImages(site.getId(), command.wpPostId());
         ImageReplacementResult imageResult = replaceImageReferences(

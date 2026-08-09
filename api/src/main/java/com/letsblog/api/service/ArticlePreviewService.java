@@ -35,6 +35,7 @@ public class ArticlePreviewService {
 
     private final CustomTagRenderService customTagRenderService;
     private final BlogCardTagRenderService blogCardTagRenderService;
+    private final AmazonTagRenderService amazonTagRenderService;
     private final MarkdownRenderer markdownRenderer;
     private final ProjectService projectService;
     private final SiteRepository siteRepository;
@@ -43,12 +44,14 @@ public class ArticlePreviewService {
     public ArticlePreviewService(
             CustomTagRenderService customTagRenderService,
             BlogCardTagRenderService blogCardTagRenderService,
+            AmazonTagRenderService amazonTagRenderService,
             MarkdownRenderer markdownRenderer,
             ProjectService projectService,
             SiteRepository siteRepository,
             RestClient.Builder restClientBuilder) {
         this.customTagRenderService = customTagRenderService;
         this.blogCardTagRenderService = blogCardTagRenderService;
+        this.amazonTagRenderService = amazonTagRenderService;
         this.markdownRenderer = markdownRenderer;
         this.projectService = projectService;
         this.siteRepository = siteRepository;
@@ -63,6 +66,7 @@ public class ArticlePreviewService {
     public String renderHtml(Long projectId, String markdown) {
         String rendered = customTagRenderService.render(markdown, projectId);
         rendered = blogCardTagRenderService.render(rendered);
+        rendered = amazonTagRenderService.render(rendered);
         return markdownRenderer.render(rendered);
     }
 
