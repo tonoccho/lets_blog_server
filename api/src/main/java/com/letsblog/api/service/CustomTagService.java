@@ -3,6 +3,7 @@ package com.letsblog.api.service;
 import com.letsblog.api.aop.AuditLog;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.CustomTag;
+import com.letsblog.api.domain.CustomTagFormat;
 import com.letsblog.api.dto.CustomTagRequest;
 import com.letsblog.api.dto.CustomTagResponse;
 import com.letsblog.api.repository.CustomTagRepository;
@@ -39,6 +40,7 @@ public class CustomTagService {
         tag.setHtmlTemplate(request.htmlTemplate());
         tag.setDescription(request.description());
         tag.setCssContent(request.cssContent());
+        tag.setTagFormat(request.tagFormat() != null ? request.tagFormat() : CustomTagFormat.BLOCK);
         tag.setProjectId(projectId);
 
         return CustomTagResponse.from(customTagRepository.save(tag));
@@ -64,6 +66,7 @@ public class CustomTagService {
         tag.setHtmlTemplate(request.htmlTemplate());
         tag.setDescription(request.description());
         tag.setCssContent(request.cssContent());
+        tag.setTagFormat(request.tagFormat() != null ? request.tagFormat() : CustomTagFormat.BLOCK);
 
         return CustomTagResponse.from(customTagRepository.save(tag));
     }

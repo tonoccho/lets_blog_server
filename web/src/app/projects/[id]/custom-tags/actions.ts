@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createCustomTag, deleteCustomTag, updateCustomTag } from "@/lib/apiClient";
+import { createCustomTag, deleteCustomTag, updateCustomTag, type CustomTagFormat } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 
 export interface CustomTagFormState {
@@ -22,6 +22,7 @@ export async function upsertProjectCustomTagAction(
   const htmlTemplate = String(formData.get("htmlTemplate") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
   const cssContent = String(formData.get("cssContent") ?? "").trim();
+  const tagFormatRaw = String(formData.get("tagFormat") ?? "").trim();
   const projectIdRaw = String(formData.get("projectId") ?? "").trim();
 
   if (!tagName || !htmlTemplate) {
@@ -31,6 +32,7 @@ export async function upsertProjectCustomTagAction(
     return { error: "プロジェクトIDが不正です。" };
   }
   const projectId = Number(projectIdRaw);
+  const tagFormat: CustomTagFormat = tagFormatRaw === "INLINE" ? "INLINE" : "BLOCK";
 
   try {
     const input = {
@@ -38,6 +40,7 @@ export async function upsertProjectCustomTagAction(
       htmlTemplate,
       description: description || undefined,
       cssContent: cssContent || undefined,
+      tagFormat,
       projectId,
     };
     if (idRaw) {

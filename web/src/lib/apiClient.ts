@@ -719,12 +719,15 @@ export function confirmPasswordReset(token: string, newPassword: string): Promis
   });
 }
 
+export type CustomTagFormat = 'INLINE' | 'BLOCK';
+
 export interface CustomTag {
   id: number;
   tagName: string;
   htmlTemplate: string;
   description: string | null;
   cssContent: string | null;
+  tagFormat: CustomTagFormat;
   projectId: number | null;
   createdAt: string;
   updatedAt: string;
@@ -735,6 +738,7 @@ export interface CustomTagInput {
   htmlTemplate: string;
   description?: string;
   cssContent?: string;
+  tagFormat?: CustomTagFormat;
   projectId?: number | null;
 }
 

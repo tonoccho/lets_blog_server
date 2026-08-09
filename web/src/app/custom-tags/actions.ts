@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createCustomTag, deleteCustomTag, updateCustomTag, generateCustomTag, validateCustomTag, type GenerateCustomTagInput, type CustomTag, type ValidationResult, type ValidateCustomTagRequest } from "@/lib/apiClient";
+import { createCustomTag, deleteCustomTag, updateCustomTag, generateCustomTag, validateCustomTag, type GenerateCustomTagInput, type CustomTag, type CustomTagFormat, type ValidationResult, type ValidateCustomTagRequest } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 
 export interface CustomTagFormState {
@@ -21,11 +21,14 @@ export async function upsertCustomTagAction(
   const htmlTemplate = String(formData.get("htmlTemplate") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
   const cssContent = String(formData.get("cssContent") ?? "").trim();
+  const tagFormatRaw = String(formData.get("tagFormat") ?? "").trim();
   const projectIdRaw = String(formData.get("projectId") ?? "").trim();
 
   if (!tagName || !htmlTemplate) {
     return { error: "タグ名とHTMLテンプレートは必須です。" };
   }
+
+  const tagFormat: CustomTagFormat = tagFormatRaw === "INLINE" ? "INLINE" : "BLOCK";
 
   try {
     const input = {
@@ -33,6 +36,7 @@ export async function upsertCustomTagAction(
       htmlTemplate,
       description: description || undefined,
       cssContent: cssContent || undefined,
+      tagFormat,
       projectId: projectIdRaw ? Number(projectIdRaw) : null,
     };
     if (idRaw) {

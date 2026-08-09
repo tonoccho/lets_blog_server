@@ -149,7 +149,7 @@ export function CustomTagGenerationForm({
           <div className="space-y-2">
             <div>
               <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">タグ名:</span>
-              <p className="font-mono text-sm text-neutral-600 dark:text-neutral-400">:::{result.tagName}</p>
+              <p className="font-mono text-sm text-neutral-600 dark:text-neutral-400">[{result.tagName}]</p>
             </div>
             <div>
               <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">説明:</span>

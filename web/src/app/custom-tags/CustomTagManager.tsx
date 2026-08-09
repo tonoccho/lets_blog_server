@@ -85,6 +85,10 @@ interface GeneratedContent {
   description: string;
 }
 
+function formatLabel(tagFormat: CustomTag["tagFormat"]): string {
+  return tagFormat === "INLINE" ? "インライン" : "ブロック";
+}
+
 export function CustomTagManager({
   tags,
   projects,
@@ -170,6 +174,7 @@ export function CustomTagManager({
           <thead className="border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">
             <tr>
               <th className="px-4 py-2">タグ名</th>
+              <th className="px-4 py-2">形式</th>
               <th className="px-4 py-2">スコープ</th>
               <th className="px-4 py-2">説明</th>
               <th className="px-4 py-2">HTMLテンプレート</th>
@@ -180,7 +185,7 @@ export function CustomTagManager({
           <tbody>
             {tags.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center">
+                <td colSpan={7} className="px-4 py-8 text-center">
                   <div className="flex flex-col items-center gap-4">
                     <p className="text-neutral-600 dark:text-neutral-400">登録済みカスタムタグはありません</p>
                     <a
@@ -195,7 +200,18 @@ export function CustomTagManager({
             )}
             {tags.map((tag) => (
               <tr key={tag.id} className="border-b border-neutral-100 dark:border-neutral-800 last:border-0 align-top cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:shadow-sm transition-colors">
-                <td className="px-4 py-2 font-mono">:::{tag.tagName}</td>
+                <td className="px-4 py-2 font-mono">[{tag.tagName}]</td>
+                <td className="px-4 py-2">
+                  <span
+                    className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
+                      tag.tagFormat === "INLINE"
+                        ? "bg-purple-100 text-purple-700"
+                        : "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400"
+                    }`}
+                  >
+                    {formatLabel(tag.tagFormat)}
+                  </span>
+                </td>
                 <td className="px-4 py-2">
                   <span
                     className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
@@ -246,9 +262,9 @@ export function CustomTagManager({
         <div className="flex items-center justify-between">
           <h2 className="font-medium">
             {editing
-              ? `カスタムタグを編集: :::${editing.tagName}`
+              ? `カスタムタグを編集: [${editing.tagName}]`
               : generatedContent
-              ? `カスタムタグを作成: :::${generatedContent.tagName}`
+              ? `カスタムタグを作成: [${generatedContent.tagName}]`
               : "カスタムタグを追加"}
           </h2>
           {(editing || generatedContent) && (
@@ -265,7 +281,10 @@ export function CustomTagManager({
           )}
         </div>
         <p className="text-sm text-neutral-600 dark:text-neutral-400">
-          投稿のMarkdown本文中で <code>{":::tagname key=\"value\""}</code> 〜 <code>:::</code> の形式で使用できます。
+          投稿のMarkdown本文中で <code>{"[tagname key=\"value\"]"}</code> 〜 <code>{"[/tagname]"}</code> の形式で使用できます。
+          ブロック形式は <code>{"[tagname]\\n複数行のコンテンツ\\n[/tagname]"}</code>
+          のように開始タグの直後で改行し、インライン形式は <code>{"文章中[tagname]コンテンツ[/tagname]の続き"}</code>
+          のように同じ行に開始・終了タグを書きます。
           テンプレート内では本文を <code>{"{{content}}"}</code>、属性値を <code>{"{{attr:key}}"}</code> で参照できます。
           スコープ: <strong>{formProjectId ? projectNameById.get(formProjectId) ?? `project#${formProjectId}` : "グローバル"}</strong>
           (上部の表示スコープに従います。プロジェクト変更後は再保存されません)
@@ -294,6 +313,18 @@ export function CustomTagManager({
               placeholder="注意書きの装飾"
               className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
             />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-neutral-600 dark:text-neutral-400">形式</span>
+            <select
+              name="tagFormat"
+              key={`format-${editing?.id ?? generatedContent?.tagName ?? "new"}`}
+              defaultValue={editing?.tagFormat ?? "BLOCK"}
+              className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
+            >
+              <option value="BLOCK">ブロック([tag]〜複数行〜[/tag])</option>
+              <option value="INLINE">インライン(文章中に[tag]〜[/tag]を埋め込む)</option>
+            </select>
           </label>
         </div>
         <TemplateEditor

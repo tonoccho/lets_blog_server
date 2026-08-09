@@ -1,5 +1,6 @@
 package com.letsblog.api.dto;
 
+import com.letsblog.api.domain.CustomTagFormat;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 
@@ -9,6 +10,8 @@ public record CustomTagRequest(
         @NotBlank String htmlTemplate,
         String description,
         String cssContent,
+        // 未指定時はBLOCK扱い(CustomTagService側でデフォルト適用、既存クライアントとの後方互換のため)
+        CustomTagFormat tagFormat,
         Long projectId
 ) {
 }
