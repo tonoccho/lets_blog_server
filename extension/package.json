@@ -5,6 +5,7 @@
   "version": "0.2.6",
   "publisher": "letsblog",
   "private": true,
+  "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
   },

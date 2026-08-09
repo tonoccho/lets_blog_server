@@ -27,12 +27,6 @@ export function OllamaModelTable({
   );
   const [progress, setProgress] = useState<JobProgress | null>(null);
 
-  // eslint-disable-next-line react-hooks/immutability, react-hooks/exhaustive-deps
-  const { startPolling } = useGenerationJobPolling(
-    (job: GenerationJobDetail) => handleJobSettled(job),
-    (job: GenerationJobDetail) => setProgress(parseJobProgress(job.resultPayload))
-  );
-
   async function refresh() {
     setData(await fetchOllamaModelsAction(projectId));
   }
@@ -53,6 +47,11 @@ export function OllamaModelTable({
     }
     refresh();
   }
+
+  const { startPolling } = useGenerationJobPolling(
+    (job: GenerationJobDetail) => handleJobSettled(job),
+    (job: GenerationJobDetail) => setProgress(parseJobProgress(job.resultPayload))
+  );
 
   async function handleSelect(modelName: string) {
     setPendingAction({ name: modelName, type: "select" });

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Menu, X, ChevronDown } from "lucide-react";
 import { useI18n } from "./I18nProvider";
 import type { NavItem } from "@/lib/navigation";
+import { ICON_MAP } from "@/lib/navigation";
 
 export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
   const { t } = useI18n();
@@ -57,11 +58,11 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
   }, [isOpen]);
 
   return (
-    <>
+    <div className="relative flex min-w-0 flex-1 items-center gap-1">
       {/* Desktop navigation */}
       <nav className="hidden min-w-0 flex-1 items-center gap-1 text-sm sm:flex">
         {regularItems.map((item) => {
-          const Icon = item.icon;
+          const Icon = ICON_MAP[item.icon];
           return (
             <Link
               key={item.href}
@@ -95,7 +96,7 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
             {isAdminDropdownOpen && (
               <div className="absolute top-full right-0 z-50 mt-1 rounded-lg border border-neutral-200 bg-white shadow-lg">
                 {adminItems.map((item) => {
-                  const Icon = item.icon;
+                  const Icon = ICON_MAP[item.icon];
                   return (
                     <Link
                       key={item.href}
@@ -133,7 +134,7 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
         <div className="absolute left-0 right-0 top-full z-50 border-b border-neutral-200 bg-white sm:hidden" role="dialog" aria-label={t("header", "navigation")}>
           <nav className="space-y-1 px-4 py-3 text-sm">
             {regularItems.map((item) => {
-              const Icon = item.icon;
+              const Icon = ICON_MAP[item.icon];
               return (
                 <Link
                   key={item.href}
@@ -154,7 +155,7 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
                   {t("header", "admin")}
                 </div>
                 {adminItems.map((item) => {
-                  const Icon = item.icon;
+                  const Icon = ICON_MAP[item.icon];
                   return (
                     <Link
                       key={item.href}
@@ -172,6 +173,6 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
           </nav>
         </div>
       )}
-    </>
+    </div>
   );
 }
