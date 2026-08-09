@@ -109,7 +109,11 @@ If there are pre-existing uncommitted changes:
 
 # 4. Branching Strategy
 
-Never work directly on `main` unless explicitly instructed.
+- Never work directly on `main` unless explicitly instructed.
+- Never create branches from `main` unless explicitly instructed.
+- Always create branches from `develop` unless explicitly instructed.
+- Never merge working branches to `develop` without PR.
+- Never merge working branches to `main` without PRNever merge working branches to `main` without PR..
 
 For an Issue, prefer:
 
