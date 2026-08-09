@@ -34,6 +34,7 @@ public class ArticlePreviewService {
             Pattern.compile("href\\s*=\\s*[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE);
 
     private final CustomTagRenderService customTagRenderService;
+    private final BlogCardTagRenderService blogCardTagRenderService;
     private final MarkdownRenderer markdownRenderer;
     private final ProjectService projectService;
     private final SiteRepository siteRepository;
@@ -41,11 +42,13 @@ public class ArticlePreviewService {
 
     public ArticlePreviewService(
             CustomTagRenderService customTagRenderService,
+            BlogCardTagRenderService blogCardTagRenderService,
             MarkdownRenderer markdownRenderer,
             ProjectService projectService,
             SiteRepository siteRepository,
             RestClient.Builder restClientBuilder) {
         this.customTagRenderService = customTagRenderService;
+        this.blogCardTagRenderService = blogCardTagRenderService;
         this.markdownRenderer = markdownRenderer;
         this.projectService = projectService;
         this.siteRepository = siteRepository;
@@ -53,11 +56,13 @@ public class ArticlePreviewService {
     }
 
     /**
-     * カスタムタグ展開 + Markdown→HTML変換のみを行う。PostPublishServiceと違い、PlantUML埋め込みや
-     * 画像アップロードは行わない(プレビュー用の軽量処理。ローカル画像やPlantUML図はVSCode拡張側の責務)。
+     * カスタムタグ展開 + 組み込みタグ展開 + Markdown→HTML変換を行う。PostPublishServiceと違い、
+     * PlantUML埋め込みや画像アップロードは行わない(プレビュー用の軽量処理。ローカル画像やPlantUML図は
+     * VSCode拡張側の責務)。
      */
     public String renderHtml(Long projectId, String markdown) {
         String rendered = customTagRenderService.render(markdown, projectId);
+        rendered = blogCardTagRenderService.render(rendered);
         return markdownRenderer.render(rendered);
     }
 

@@ -51,6 +51,7 @@ public class PostPublishService {
     private final PostRepository postRepository;
     private final PlantUmlEmbedService plantUmlEmbedService;
     private final CustomTagRenderService customTagRenderService;
+    private final BlogCardTagRenderService blogCardTagRenderService;
     private final ProjectService projectService;
     private final CurrentActorService currentActorService;
     private final UserRepository userRepository;
@@ -61,6 +62,7 @@ public class PostPublishService {
                                MarkdownRenderer markdownRenderer, PostRepository postRepository,
                                PlantUmlEmbedService plantUmlEmbedService,
                                CustomTagRenderService customTagRenderService,
+                               BlogCardTagRenderService blogCardTagRenderService,
                                ProjectService projectService,
                                CurrentActorService currentActorService,
                                UserRepository userRepository,
@@ -72,6 +74,7 @@ public class PostPublishService {
         this.postRepository = postRepository;
         this.plantUmlEmbedService = plantUmlEmbedService;
         this.customTagRenderService = customTagRenderService;
+        this.blogCardTagRenderService = blogCardTagRenderService;
         this.projectService = projectService;
         this.currentActorService = currentActorService;
         this.userRepository = userRepository;
@@ -88,6 +91,7 @@ public class PostPublishService {
 
         Long projectId = projectService.findProjectIdBySiteId(site.getId());
         String markdown = customTagRenderService.render(command.markdown(), projectId);
+        markdown = blogCardTagRenderService.render(markdown);
         markdown = plantUmlEmbedService.embedDiagrams(credentials, markdown);
         Map<String, UploadedImageInfo> priorUploads = loadPriorUploadedImages(site.getId(), command.wpPostId());
         ImageReplacementResult imageResult = replaceImageReferences(
