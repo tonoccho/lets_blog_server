@@ -1,82 +1,12 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import type { CustomTag, Project } from "@/lib/apiClient";
-import { deleteCustomTagAction, upsertCustomTagAction, CustomTagFormState } from "./actions";
-import { CustomTagGenerationForm } from "./CustomTagGenerationForm";
+import { CustomTagGenerationForm } from "@/app/custom-tags/CustomTagGenerationForm";
+import { TemplateEditor } from "@/app/custom-tags/CustomTagManager";
+import { upsertProjectCustomTagAction, deleteProjectCustomTagAction, type CustomTagFormState } from "./actions";
 
 const initialState: CustomTagFormState = {};
-
-const SAMPLE_CONTENT = "サンプルテキストです。ここに本文が入ります。";
-const ATTR_PATTERN = /\{\{attr:([a-zA-Z0-9_]+)\}\}/g;
-
-/** プレビュー用に{{content}}をサンプルテキストへ、{{attr:xxx}}をサンプル値へ置換したHTMLを組み立てる。 */
-function buildPreviewSrcDoc(htmlTemplate: string, cssContent: string): string {
-  const html = htmlTemplate
-    .replaceAll("{{content}}", SAMPLE_CONTENT)
-    .replace(ATTR_PATTERN, (_match, key: string) => `サンプル${key}`);
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${cssContent}</style></head><body>${html}</body></html>`;
-}
-
-/**
- * HTMLテンプレート/CSS入力とライブプレビューを担当する。編集対象(editing)が変わるたびに
- * 親側で`key`を変えて再マウントさせることで初期値を切り替える(useEffectでのprops→state同期は避ける)。
- */
-export function TemplateEditor({ initialHtml, initialCss }: { initialHtml: string; initialCss: string }) {
-  const [htmlTemplateValue, setHtmlTemplateValue] = useState(initialHtml);
-  const [cssContentValue, setCssContentValue] = useState(initialCss);
-  const [previewSrcDoc, setPreviewSrcDoc] = useState(() => buildPreviewSrcDoc(initialHtml, initialCss));
-
-  // HTML/CSS変更のたびに即再描画すると入力のたびにiframeが再構築されカクつくため、300msデバウンスする
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setPreviewSrcDoc(buildPreviewSrcDoc(htmlTemplateValue, cssContentValue));
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [htmlTemplateValue, cssContentValue]);
-
-  return (
-    <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-      <div className="space-y-3">
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600 dark:text-neutral-400">HTMLテンプレート</span>
-          <textarea
-            name="htmlTemplate"
-            value={htmlTemplateValue}
-            onChange={(e) => setHtmlTemplateValue(e.target.value)}
-            required
-            rows={6}
-            placeholder='<div class="alert">{{content}}</div>'
-            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 font-mono text-sm"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600 dark:text-neutral-400">CSS(任意、このタグが使われた投稿の本文冒頭に一度だけ挿入されます)</span>
-          <textarea
-            name="cssContent"
-            value={cssContentValue}
-            onChange={(e) => setCssContentValue(e.target.value)}
-            rows={6}
-            placeholder=".alert { color: red; border: 1px solid; padding: 0.5em; }"
-            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 font-mono text-sm"
-          />
-        </label>
-      </div>
-      <div className="flex flex-col gap-1 text-sm">
-        <span className="text-neutral-600 dark:text-neutral-400">
-          プレビュー({"{{content}}"}/{"{{attr:xxx}}"}はサンプル値に置き換えて表示、入力後300ms自動更新)
-        </span>
-        <iframe
-          title="カスタムタグプレビュー"
-          srcDoc={previewSrcDoc}
-          sandbox="allow-same-origin"
-          className="h-[268px] rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900"
-        />
-      </div>
-    </div>
-  );
-}
 
 interface GeneratedContent {
   htmlTemplate: string;
@@ -85,25 +15,24 @@ interface GeneratedContent {
   description: string;
 }
 
-export function CustomTagManager({
+/** プロジェクト詳細のカスタムタグ画面。表示・保存の対象を常に自プロジェクトのみに固定する(issue #157)。 */
+export function ProjectCustomTagManager({
+  projectId,
+  projectName,
   tags,
-  projects,
-  currentProjectId,
 }: {
+  projectId: number;
+  projectName: string;
   tags: CustomTag[];
-  projects: Project[];
-  currentProjectId: number | null;
 }) {
-  const router = useRouter();
   const [editing, setEditing] = useState<CustomTag | null>(null);
   const [generatedContent, setGeneratedContent] = useState<GeneratedContent | null>(null);
-  const [state, formAction, pending] = useActionState(upsertCustomTagAction, initialState);
+  const [state, formAction, pending] = useActionState(upsertProjectCustomTagAction, initialState);
   const [isDeleting, startDeleteTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
   const [handledSuccess, setHandledSuccess] = useState(false);
 
-  const projectNameById = new Map(projects.map((p) => [p.id, p.name]));
-  const formProjectId = editing ? editing.projectId : currentProjectId;
+  const currentProject: Project = { id: projectId, name: projectName } as Project;
 
   if (state.success && !handledSuccess) {
     setHandledSuccess(true);
@@ -123,33 +52,18 @@ export function CustomTagManager({
       return;
     }
     startDeleteTransition(() => {
-      deleteCustomTagAction(id);
+      deleteProjectCustomTagAction(projectId, id);
     });
   }
 
   return (
     <div className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <label className="flex max-w-sm flex-col gap-1 text-sm">
-          <span className="text-neutral-600 dark:text-neutral-400">表示スコープ</span>
-          <select
-            value={currentProjectId ?? ""}
-            onChange={(e) => {
-              const value = e.target.value;
-              router.push(value ? `/custom-tags?projectId=${value}` : "/custom-tags");
-            }}
-            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-          >
-            <option value="">グローバル</option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <p className="max-w-2xl text-sm text-neutral-600 dark:text-neutral-400">
+          このプロジェクト専用のカスタムタグです。グローバルタグや他プロジェクトのタグは表示されません。
+        </p>
         <a
-          href={`/custom-tags/css-bundle${currentProjectId ? `?projectId=${currentProjectId}` : ""}`}
+          href={`/projects/${projectId}/custom-tags/css-bundle`}
           className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
         >
           統合CSSダウンロード
@@ -157,8 +71,8 @@ export function CustomTagManager({
       </div>
 
       <CustomTagGenerationForm
-        projects={projects}
-        currentProjectId={currentProjectId}
+        projects={[currentProject]}
+        currentProjectId={projectId}
         onGenerationSuccess={(htmlTemplate, cssContent, tagName, description) => {
           setGeneratedContent({ htmlTemplate, cssContent, tagName, description });
           setEditing(null);
@@ -170,7 +84,6 @@ export function CustomTagManager({
           <thead className="border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">
             <tr>
               <th className="px-4 py-2">タグ名</th>
-              <th className="px-4 py-2">スコープ</th>
               <th className="px-4 py-2">説明</th>
               <th className="px-4 py-2">HTMLテンプレート</th>
               <th className="px-4 py-2">CSS</th>
@@ -180,7 +93,7 @@ export function CustomTagManager({
           <tbody>
             {tags.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center">
+                <td colSpan={5} className="px-4 py-8 text-center">
                   <div className="flex flex-col items-center gap-4">
                     <p className="text-neutral-600 dark:text-neutral-400">登録済みカスタムタグはありません</p>
                     <a
@@ -194,19 +107,11 @@ export function CustomTagManager({
               </tr>
             )}
             {tags.map((tag) => (
-              <tr key={tag.id} className="border-b border-neutral-100 dark:border-neutral-800 last:border-0 align-top cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:shadow-sm transition-colors">
+              <tr
+                key={tag.id}
+                className="border-b border-neutral-100 dark:border-neutral-800 last:border-0 align-top cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:shadow-sm transition-colors"
+              >
                 <td className="px-4 py-2 font-mono">:::{tag.tagName}</td>
-                <td className="px-4 py-2">
-                  <span
-                    className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
-                      tag.projectId
-                        ? "bg-blue-100 text-blue-700"
-                        : "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400"
-                    }`}
-                  >
-                    {tag.projectId ? projectNameById.get(tag.projectId) ?? `project#${tag.projectId}` : "グローバル"}
-                  </span>
-                </td>
                 <td className="px-4 py-2 text-neutral-600 dark:text-neutral-400">{tag.description}</td>
                 <td className="px-4 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-400">
                   <code className="whitespace-pre-wrap break-all">{tag.htmlTemplate}</code>
@@ -215,11 +120,7 @@ export function CustomTagManager({
                   {tag.cssContent && <code className="whitespace-pre-wrap break-all">{tag.cssContent}</code>}
                 </td>
                 <td className="px-4 py-2 text-right whitespace-nowrap">
-                  <button
-                    type="button"
-                    onClick={() => setEditing(tag)}
-                    className="text-sm text-blue-600 hover:underline"
-                  >
+                  <button type="button" onClick={() => setEditing(tag)} className="text-sm text-blue-600 hover:underline">
                     編集
                   </button>
                   <button
@@ -267,11 +168,9 @@ export function CustomTagManager({
         <p className="text-sm text-neutral-600 dark:text-neutral-400">
           投稿のMarkdown本文中で <code>{":::tagname key=\"value\""}</code> 〜 <code>:::</code> の形式で使用できます。
           テンプレート内では本文を <code>{"{{content}}"}</code>、属性値を <code>{"{{attr:key}}"}</code> で参照できます。
-          スコープ: <strong>{formProjectId ? projectNameById.get(formProjectId) ?? `project#${formProjectId}` : "グローバル"}</strong>
-          (上部の表示スコープに従います。プロジェクト変更後は再保存されません)
         </p>
         {editing && <input type="hidden" name="id" value={editing.id} />}
-        <input type="hidden" name="projectId" value={formProjectId ?? ""} />
+        <input type="hidden" name="projectId" value={projectId} />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-neutral-600 dark:text-neutral-400">タグ名(英数字・ハイフン・アンダースコアのみ)</span>

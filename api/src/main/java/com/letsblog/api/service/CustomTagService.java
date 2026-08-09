@@ -100,7 +100,27 @@ public class CustomTagService {
         List<CustomTag> tags = projectId == null
                 ? customTagRepository.findByProjectIdIsNull()
                 : customTagRepository.findByProjectIdOrProjectIdIsNull(projectId);
+        return buildCssFrom(tags);
+    }
 
+    /**
+     * プロジェクト詳細のカスタムタグ画面向け。グローバルタグを含めず、指定プロジェクトのタグのみを返す。
+     */
+    @Transactional(readOnly = true)
+    public List<CustomTagResponse> listByProject(Long projectId) {
+        return customTagRepository.findByProjectId(projectId).stream().map(CustomTagResponse::from).toList();
+    }
+
+    /**
+     * プロジェクト詳細向けの統合CSS。buildCssBundle()と異なりグローバルタグは含めず、
+     * 指定プロジェクトのタグのみを連結する。
+     */
+    @Transactional(readOnly = true)
+    public String buildProjectCssBundle(Long projectId) {
+        return buildCssFrom(customTagRepository.findByProjectId(projectId));
+    }
+
+    private String buildCssFrom(List<CustomTag> tags) {
         StringBuilder sb = new StringBuilder();
         for (CustomTag tag : tags) {
             if (tag.getCssContent() == null || tag.getCssContent().isBlank()) {

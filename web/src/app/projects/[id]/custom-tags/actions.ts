@@ -1,0 +1,60 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { createCustomTag, deleteCustomTag, updateCustomTag } from "@/lib/apiClient";
+import { requireAdminSession } from "@/lib/session";
+
+export interface CustomTagFormState {
+  error?: string;
+  success?: boolean;
+}
+
+/** プロジェクト詳細のカスタムタグ画面向け。projectIdはフォームの隠しフィールドに固定値として埋め込まれる。 */
+export async function upsertProjectCustomTagAction(
+  _prevState: CustomTagFormState,
+  formData: FormData
+): Promise<CustomTagFormState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const idRaw = String(formData.get("id") ?? "").trim();
+  const tagName = String(formData.get("tagName") ?? "").trim();
+  const htmlTemplate = String(formData.get("htmlTemplate") ?? "").trim();
+  const description = String(formData.get("description") ?? "").trim();
+  const cssContent = String(formData.get("cssContent") ?? "").trim();
+  const projectIdRaw = String(formData.get("projectId") ?? "").trim();
+
+  if (!tagName || !htmlTemplate) {
+    return { error: "タグ名とHTMLテンプレートは必須です。" };
+  }
+  if (!projectIdRaw) {
+    return { error: "プロジェクトIDが不正です。" };
+  }
+  const projectId = Number(projectIdRaw);
+
+  try {
+    const input = {
+      tagName,
+      htmlTemplate,
+      description: description || undefined,
+      cssContent: cssContent || undefined,
+      projectId,
+    };
+    if (idRaw) {
+      await updateCustomTag(Number(idRaw), input, actor);
+    } else {
+      await createCustomTag(input, actor);
+    }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}/custom-tags`);
+  return { success: true };
+}
+
+export async function deleteProjectCustomTagAction(projectId: number, id: number) {
+  const session = await requireAdminSession();
+  await deleteCustomTag(id, { id: Number(session.user.id), role: session.user.role });
+  revalidatePath(`/projects/${projectId}/custom-tags`);
+}

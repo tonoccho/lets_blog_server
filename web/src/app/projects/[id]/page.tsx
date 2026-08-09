@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import {
   getProject,
   listSites,
@@ -154,7 +155,21 @@ export default async function ProjectDetailPage({
       />
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">{project.name}</h1>
-        <DeleteProjectButton id={project.id} />
+        <div className="flex items-center gap-4">
+          <Link
+            href={`/projects/${project.id}/tag-design`}
+            className="text-sm text-neutral-600 dark:text-neutral-400 hover:underline"
+          >
+            組み込みタグ
+          </Link>
+          <Link
+            href={`/projects/${project.id}/custom-tags`}
+            className="text-sm text-neutral-600 dark:text-neutral-400 hover:underline"
+          >
+            カスタムタグ
+          </Link>
+          <DeleteProjectButton id={project.id} />
+        </div>
       </div>
       <p className="font-mono text-sm text-neutral-500 dark:text-neutral-400">{project.slug}</p>
 

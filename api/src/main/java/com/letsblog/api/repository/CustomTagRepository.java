@@ -18,4 +18,6 @@ public interface CustomTagRepository extends JpaRepository<CustomTag, Long> {
     List<CustomTag> findByProjectIdIsNull();
 
     List<CustomTag> findByProjectIdOrProjectIdIsNull(Long projectId);
+
+    List<CustomTag> findByProjectId(Long projectId);
 }
