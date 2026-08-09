@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, ReactNode } from "react";
+import { createContext, useContext, ReactNode, useState, useEffect } from "react";
 import type { Locale } from "@/lib/i18nConfig";
 import messages_ja from "../../messages/ja.json";
 import messages_en from "../../messages/en.json";
@@ -26,13 +26,19 @@ interface I18nProviderProps {
 }
 
 export function I18nProvider({ children, initialLocale = "ja" }: I18nProviderProps) {
-  const locale: Locale = (typeof window !== "undefined"
-    ? localStorage.getItem("locale") as Locale | null
-    : null) || initialLocale;
+  const [locale, setLocale] = useState<Locale>(initialLocale);
+
+  useEffect(() => {
+    const storedLocale = localStorage.getItem("locale") as Locale | null;
+    if (storedLocale && storedLocale in messagesByLocale) {
+      setLocale(storedLocale);
+    }
+  }, []);
 
   const messages = messagesByLocale[locale];
 
   const t = (namespace: keyof Messages, key: string): string => {
+    if (!messages) return key;
     const namespaceMessages = messages[namespace];
     if (!namespaceMessages) return key;
     return (namespaceMessages as Record<string, string>)[key] || key;
