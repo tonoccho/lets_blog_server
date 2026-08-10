@@ -7,7 +7,6 @@ import {
   Zap,
   Settings,
   Lock,
-  Tag,
   ScrollText,
   Shield,
   Images,
@@ -34,7 +33,6 @@ export const ICON_MAP: Record<string, LucideIcon> = {
   Zap,
   Settings,
   Lock,
-  Tag,
   ScrollText,
   Shield,
   Images,
@@ -59,7 +57,6 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
   { href: "/users", label: "ユーザー", icon: "Users", adminOnly: true, group: "admin" },
   { href: "/audit-logs", label: "監査ログ", icon: "ScrollText", adminOnly: true, group: "admin" },
   { href: "/admin/roles", label: "ロール管理", icon: "Shield", adminOnly: true, group: "admin" },
-  { href: "/custom-tags", label: "カスタムタグ", icon: "Tag", adminOnly: true, group: "admin" },
   { href: "/admin/backup", label: "データバックアップ", icon: "DatabaseBackup", adminOnly: true, group: "admin" },
   { href: "/admin/settings", label: "システム設定", icon: "KeyRound", adminOnly: true, group: "admin" },
 ];
