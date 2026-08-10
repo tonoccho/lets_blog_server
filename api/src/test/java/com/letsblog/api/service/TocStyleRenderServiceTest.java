@@ -9,8 +9,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class TocStyleRenderServiceTest {
@@ -26,7 +28,7 @@ class TocStyleRenderServiceTest {
     void setUp() {
         service = new TocStyleRenderService(tagDesignSettingService);
         lenient().when(tagDesignSettingService.resolveColors(PROJECT_ID, EmbedTagType.TOC))
-                .thenReturn(new TagDesignColors("#1f2937", "#f3f4f6", "#60a5fa"));
+                .thenReturn(new TagDesignColors("#1f2937", "#f3f4f6", "#60a5fa", null));
     }
 
     @Test
@@ -41,6 +43,18 @@ class TocStyleRenderServiceTest {
         assertTrue(result.contains("color:#f3f4f6"));
         assertTrue(result.contains("color:#60a5fa"));
         assertTrue(result.contains("[toc]"), "元のMarkdown本文は保持されること");
+    }
+
+    @Test
+    void render_customCssが設定されていれば色ベースのCSSの代わりに完全に置き換える() {
+        org.mockito.Mockito.reset(tagDesignSettingService);
+        when(tagDesignSettingService.resolveColors(PROJECT_ID, EmbedTagType.TOC))
+                .thenReturn(new TagDesignColors("#1f2937", "#f3f4f6", "#60a5fa", ".lb-toc-list{font-weight:bold;}"));
+
+        String result = service.render("[toc]\n\n## セクション1\n\n本文", PROJECT_ID);
+
+        assertTrue(result.contains(".lb-toc-list{font-weight:bold;}"));
+        assertFalse(result.contains("background:#1f2937"), "色ベースの生成CSSは含まれないこと: " + result);
     }
 
     @Test
@@ -82,5 +96,58 @@ class TocStyleRenderServiceTest {
 
         org.mockito.Mockito.verify(tagDesignSettingService, org.mockito.Mockito.never())
                 .resolveColors(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void applyHtmlTemplate_未設定ならhtmlをそのまま返す() {
+        String html = "<ul class=\"lb-toc-list\"><li><a href=\"#a\">a</a></li></ul>";
+
+        String result = service.applyHtmlTemplate(html, PROJECT_ID);
+
+        assertEquals(html, result);
+    }
+
+    @Test
+    void applyHtmlTemplate_設定されていれば目次全体をtocプレースホルダに差し込む() {
+        when(tagDesignSettingService.resolveHtmlTemplate(PROJECT_ID, EmbedTagType.TOC))
+                .thenReturn("<details><summary>目次</summary>{{toc}}</details>");
+        String toc = "<ul class=\"lb-toc-list\"><li><a href=\"#a\">a</a></li></ul>";
+        String html = "<h1>タイトル</h1>\n" + toc + "\n<h2 id=\"a\">a</h2>";
+
+        String result = service.applyHtmlTemplate(html, PROJECT_ID);
+
+        assertEquals("<h1>タイトル</h1>\n<details><summary>目次</summary>" + toc + "</details>\n<h2 id=\"a\">a</h2>", result);
+    }
+
+    @Test
+    void applyHtmlTemplate_見出し階層による入れ子ulも1ブロックとして丸ごと差し込む() {
+        when(tagDesignSettingService.resolveHtmlTemplate(PROJECT_ID, EmbedTagType.TOC))
+                .thenReturn("<nav>{{toc}}</nav>");
+        String toc = "<ul class=\"lb-toc-list\">\n"
+                + "<li><a href=\"#a\">a</a>\n<ul>\n<li><a href=\"#a-1\">a-1</a></li>\n</ul>\n</li>\n"
+                + "<li><a href=\"#b\">b</a></li>\n"
+                + "</ul>";
+        String html = "<h1>タイトル</h1>\n" + toc + "\n<h2 id=\"a\">a</h2>";
+
+        String result = service.applyHtmlTemplate(html, PROJECT_ID);
+
+        assertEquals("<h1>タイトル</h1>\n<nav>" + toc + "</nav>\n<h2 id=\"a\">a</h2>", result);
+    }
+
+    @Test
+    void applyHtmlTemplate_目次自体がなければ何もしない() {
+        when(tagDesignSettingService.resolveHtmlTemplate(PROJECT_ID, EmbedTagType.TOC))
+                .thenReturn("<nav>{{toc}}</nav>");
+        String html = "<h1>タイトル</h1>\n<p>本文</p>";
+
+        String result = service.applyHtmlTemplate(html, PROJECT_ID);
+
+        assertEquals(html, result);
+    }
+
+    @Test
+    void applyHtmlTemplate_nullとから文字列はそのまま返す() {
+        assertEquals(null, service.applyHtmlTemplate(null, PROJECT_ID));
+        assertEquals("", service.applyHtmlTemplate("", PROJECT_ID));
     }
 }

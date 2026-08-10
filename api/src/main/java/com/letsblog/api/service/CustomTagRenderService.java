@@ -6,10 +6,8 @@ import com.letsblog.api.repository.CustomTagRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -27,8 +25,8 @@ import java.util.stream.Collectors;
  *   `文章[tagname]コンテンツ[/tagname]文章`
  * 記述された形式とタグに設定された形式が一致しない場合は展開せずそのまま残す。
  *
- * タグに紐づくCSSが設定されている場合、実際に使用されたタグの分だけ
- * (同じタグが複数回使われても重複させず)本文冒頭に `<style>` ブロックとして差し込む。
+ * タグに紐づくCSSは本文には差し込まない(issue #165)。CSSはCustomTagServiceの
+ * 統合CSSダウンロード機能経由でのみ提供する。
  */
 @Service
 public class CustomTagRenderService {
@@ -71,12 +69,8 @@ public class CustomTagRenderService {
             return markdown;
         }
 
-        Set<CustomTag> usedTags = new LinkedHashSet<>();
-        String afterBlock = expand(markdown, BLOCK_TAG_PATTERN, CustomTagFormat.BLOCK, tagsByName, usedTags);
-        String afterInline = expand(afterBlock, INLINE_TAG_PATTERN, CustomTagFormat.INLINE, tagsByName, usedTags);
-
-        String styleBlock = buildStyleBlock(usedTags);
-        return styleBlock.isEmpty() ? afterInline : styleBlock + "\n\n" + afterInline;
+        String afterBlock = expand(markdown, BLOCK_TAG_PATTERN, CustomTagFormat.BLOCK, tagsByName);
+        return expand(afterBlock, INLINE_TAG_PATTERN, CustomTagFormat.INLINE, tagsByName);
     }
 
     /**
@@ -84,7 +78,7 @@ public class CustomTagRenderService {
      * 一致するものだけをテンプレート展開する。一致しないものは元の記述のまま残す。
      */
     private String expand(String markdown, Pattern pattern, CustomTagFormat requiredFormat,
-                           Map<String, CustomTag> tagsByName, Set<CustomTag> usedTags) {
+                           Map<String, CustomTag> tagsByName) {
         Matcher matcher = pattern.matcher(markdown);
         StringBuilder result = new StringBuilder();
 
@@ -98,7 +92,6 @@ public class CustomTagRenderService {
             if (tag == null || tag.getTagFormat() != requiredFormat) {
                 replacement = matcher.group(0);
             } else {
-                usedTags.add(tag);
                 replacement = applyTemplate(tag.getHtmlTemplate(), content, parseAttrs(attrPart));
             }
 
@@ -107,17 +100,6 @@ public class CustomTagRenderService {
         matcher.appendTail(result);
 
         return result.toString();
-    }
-
-    private String buildStyleBlock(Set<CustomTag> usedTags) {
-        StringBuilder css = new StringBuilder();
-        for (CustomTag tag : usedTags) {
-            String cssContent = tag.getCssContent();
-            if (cssContent != null && !cssContent.isBlank()) {
-                css.append("<style>\n").append(cssContent.trim()).append("\n</style>\n\n");
-            }
-        }
-        return css.toString().trim();
     }
 
     private String applyTemplate(String template, String content, Map<String, String> attrs) {

@@ -50,7 +50,7 @@ class CustomTagServiceTest {
     }
 
     private void stubEmbedTagCss(Long projectId) {
-        TagDesignColors colors = new TagDesignColors("#ffffff", "#1a1a1a", "#2563eb");
+        TagDesignColors colors = new TagDesignColors("#ffffff", "#1a1a1a", "#2563eb", null);
         when(tagDesignSettingService.resolveColors(eq(projectId), any(EmbedTagType.class))).thenReturn(colors);
         when(tocStyleRenderService.buildStyle(colors)).thenReturn(".toc-css{}");
         when(blogCardTagRenderService.buildStyle(colors)).thenReturn(".blogcard-css{}");

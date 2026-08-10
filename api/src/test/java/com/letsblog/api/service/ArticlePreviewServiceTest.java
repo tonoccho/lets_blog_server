@@ -86,6 +86,8 @@ class ArticlePreviewServiceTest {
         when(amazonTagRenderService.render("**bold** rendered", 1L)).thenReturn("**bold** rendered");
         when(tocStyleRenderService.render("**bold** rendered", 1L)).thenReturn("**bold** rendered");
         when(markdownRenderer.render("**bold** rendered")).thenReturn("<p><strong>bold</strong> rendered</p>");
+        when(tocStyleRenderService.applyHtmlTemplate("<p><strong>bold</strong> rendered</p>", 1L))
+                .thenReturn("<p><strong>bold</strong> rendered</p>");
 
         String html = service.renderHtml(1L, "**bold**");
 
@@ -95,6 +97,7 @@ class ArticlePreviewServiceTest {
         verify(amazonTagRenderService).render("**bold** rendered", 1L);
         verify(tocStyleRenderService).render("**bold** rendered", 1L);
         verify(markdownRenderer).render("**bold** rendered");
+        verify(tocStyleRenderService).applyHtmlTemplate("<p><strong>bold</strong> rendered</p>", 1L);
     }
 
     @Test

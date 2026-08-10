@@ -99,7 +99,7 @@ class TagDesignSettingServiceTest {
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         SaveTagDesignSettingRequest request =
-                new SaveTagDesignSettingRequest("dark", "#111111", "#eeeeee", "#60a5fa");
+                new SaveTagDesignSettingRequest("dark", "#111111", "#eeeeee", "#60a5fa", null, null);
         TagDesignSettingResponse response = service.save(PROJECT_ID, EmbedTagType.TOC, request);
 
         assertEquals(EmbedTagType.TOC, response.tagType());
@@ -120,7 +120,7 @@ class TagDesignSettingServiceTest {
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         SaveTagDesignSettingRequest request =
-                new SaveTagDesignSettingRequest("vivid", "#fff7ed", "#7c2d12", "#ea580c");
+                new SaveTagDesignSettingRequest("vivid", "#fff7ed", "#7c2d12", "#ea580c", null, null);
         service.save(PROJECT_ID, EmbedTagType.BLOGCARD, request);
 
         assertEquals("vivid", existing.getPresetId());
@@ -128,9 +128,78 @@ class TagDesignSettingServiceTest {
     }
 
     @Test
+    void save_customCssを渡すと保存され応答にも含まれる() {
+        when(repository.findByProjectIdAndTagType(PROJECT_ID, EmbedTagType.TOC)).thenReturn(Optional.empty());
+        when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        SaveTagDesignSettingRequest request =
+                new SaveTagDesignSettingRequest("dark", "#111111", "#eeeeee", "#60a5fa", ".lb-toc-list{font-weight:bold;}", null);
+        TagDesignSettingResponse response = service.save(PROJECT_ID, EmbedTagType.TOC, request);
+
+        assertEquals(".lb-toc-list{font-weight:bold;}", response.customCss());
+    }
+
+    @Test
+    void save_htmlTemplateを渡すと保存され応答にも含まれる() {
+        when(repository.findByProjectIdAndTagType(PROJECT_ID, EmbedTagType.TOC)).thenReturn(Optional.empty());
+        when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        SaveTagDesignSettingRequest request =
+                new SaveTagDesignSettingRequest("dark", "#111111", "#eeeeee", "#60a5fa", null, "<div>{{toc}}</div>");
+        TagDesignSettingResponse response = service.save(PROJECT_ID, EmbedTagType.TOC, request);
+
+        assertEquals("<div>{{toc}}</div>", response.htmlTemplate());
+    }
+
+    @Test
+    void resolveHtmlTemplate_未保存の場合はnull() {
+        when(repository.findByProjectIdAndTagType(PROJECT_ID, EmbedTagType.TOC)).thenReturn(Optional.empty());
+
+        assertEquals(null, service.resolveHtmlTemplate(PROJECT_ID, EmbedTagType.TOC));
+    }
+
+    @Test
+    void resolveHtmlTemplate_保存済みだが空欄の場合はnull() {
+        TagDesignSetting setting = saved(EmbedTagType.TOC, "dark", "#111111", "#eeeeee", "#60a5fa");
+        setting.setHtmlTemplate("   ");
+        when(repository.findByProjectIdAndTagType(PROJECT_ID, EmbedTagType.TOC)).thenReturn(Optional.of(setting));
+
+        assertEquals(null, service.resolveHtmlTemplate(PROJECT_ID, EmbedTagType.TOC));
+    }
+
+    @Test
+    void resolveHtmlTemplate_保存済みの場合はその内容を返す() {
+        TagDesignSetting setting = saved(EmbedTagType.BLOGCARD, "dark", "#111111", "#eeeeee", "#60a5fa");
+        setting.setHtmlTemplate("<a href=\"{{url}}\">{{title}}</a>");
+        when(repository.findByProjectIdAndTagType(PROJECT_ID, EmbedTagType.BLOGCARD)).thenReturn(Optional.of(setting));
+
+        assertEquals("<a href=\"{{url}}\">{{title}}</a>", service.resolveHtmlTemplate(PROJECT_ID, EmbedTagType.BLOGCARD));
+    }
+
+    @Test
+    void resolveColors_customCssが保存されていれば含めて返す() {
+        TagDesignSetting setting = saved(EmbedTagType.TOC, "dark", "#111111", "#eeeeee", "#60a5fa");
+        setting.setCustomCss(".lb-toc-list{font-weight:bold;}");
+        when(repository.findByProjectIdAndTagType(PROJECT_ID, EmbedTagType.TOC)).thenReturn(Optional.of(setting));
+
+        TagDesignColors colors = service.resolveColors(PROJECT_ID, EmbedTagType.TOC);
+
+        assertEquals(".lb-toc-list{font-weight:bold;}", colors.customCss());
+    }
+
+    @Test
+    void resolveColors_未保存の場合はcustomCssがnull() {
+        when(repository.findByProjectIdAndTagType(PROJECT_ID, EmbedTagType.TOC)).thenReturn(Optional.empty());
+
+        TagDesignColors colors = service.resolveColors(PROJECT_ID, EmbedTagType.TOC);
+
+        assertEquals(null, colors.customCss());
+    }
+
+    @Test
     void save_不明なプリセットIDはIllegalArgumentExceptionを投げる() {
         SaveTagDesignSettingRequest request =
-                new SaveTagDesignSettingRequest("unknown-preset", "#111111", "#eeeeee", "#60a5fa");
+                new SaveTagDesignSettingRequest("unknown-preset", "#111111", "#eeeeee", "#60a5fa", null, null);
 
         assertThrows(IllegalArgumentException.class, () -> service.save(PROJECT_ID, EmbedTagType.TOC, request));
     }

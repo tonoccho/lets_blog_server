@@ -98,6 +98,7 @@ class PostPublishServiceTest {
         lenient().when(tocStyleRenderService.render(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(plantUmlEmbedService.embedDiagrams(any(), anyString())).thenAnswer(inv -> inv.getArgument(1));
         lenient().when(markdownRenderer.render(anyString())).thenAnswer(inv -> "<p>" + inv.getArgument(0) + "</p>");
+        lenient().when(tocStyleRenderService.applyHtmlTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(cmsAdapter.resolveCategories(any(), any())).thenReturn(List.of());
         lenient().when(cmsAdapter.resolveTags(any(), any())).thenReturn(List.of());
         lenient().when(postRepository.findBySiteIdAndWpPostId(any(), any())).thenReturn(Optional.empty());

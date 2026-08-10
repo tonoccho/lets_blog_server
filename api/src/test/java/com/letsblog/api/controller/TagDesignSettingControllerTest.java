@@ -57,9 +57,9 @@ class TagDesignSettingControllerTest {
     @Test
     void save_認可後にサービスへ委譲する() {
         TagDesignSettingController controller = controller();
-        SaveTagDesignSettingRequest request = new SaveTagDesignSettingRequest("dark", "#111111", "#eeeeee", "#60a5fa");
+        SaveTagDesignSettingRequest request = new SaveTagDesignSettingRequest("dark", "#111111", "#eeeeee", "#60a5fa", null, null);
         TagDesignSettingResponse expected =
-                new TagDesignSettingResponse(EmbedTagType.TOC, "dark", "#111111", "#eeeeee", "#60a5fa");
+                new TagDesignSettingResponse(EmbedTagType.TOC, "dark", "#111111", "#eeeeee", "#60a5fa", null, null);
         when(tagDesignSettingService.save(1L, EmbedTagType.TOC, request)).thenReturn(expected);
 
         TagDesignSettingResponse response = controller.save(1L, EmbedTagType.TOC, request);
@@ -72,7 +72,7 @@ class TagDesignSettingControllerTest {
     void save_認可拒否ならForbidden() {
         TagDesignSettingController controller = controller();
         doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
-        SaveTagDesignSettingRequest request = new SaveTagDesignSettingRequest("dark", "#111111", "#eeeeee", "#60a5fa");
+        SaveTagDesignSettingRequest request = new SaveTagDesignSettingRequest("dark", "#111111", "#eeeeee", "#60a5fa", null, null);
 
         assertThrows(ForbiddenException.class, () -> controller.save(1L, EmbedTagType.TOC, request));
         verify(tagDesignSettingService, org.mockito.Mockito.never()).save(any(), any(), any());

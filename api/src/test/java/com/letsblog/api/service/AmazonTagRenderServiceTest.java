@@ -38,7 +38,7 @@ class AmazonTagRenderServiceTest {
     void setUp() {
         service = new AmazonTagRenderService(contentCacheService, tagDesignSettingService);
         lenient().when(tagDesignSettingService.resolveColors(PROJECT_ID, EmbedTagType.AMAZON))
-                .thenReturn(new TagDesignColors("#ffffff", "#1a1a1a", "#2563eb"));
+                .thenReturn(new TagDesignColors("#ffffff", "#1a1a1a", "#2563eb", null));
     }
 
     private ContentCacheResponse response(Map<String, String> data) {
@@ -66,6 +66,37 @@ class AmazonTagRenderServiceTest {
         assertTrue(result.contains("rel=\"noopener noreferrer nofollow sponsored\""));
         assertTrue(result.contains("本文"));
         assertTrue(result.contains("続き"));
+    }
+
+    @Test
+    void render_customCssが設定されていれば色ベースのCSSの代わりに完全に置き換える() {
+        org.mockito.Mockito.reset(tagDesignSettingService, contentCacheService);
+        String url = "https://www.amazon.co.jp/dp/B000000000";
+        when(contentCacheService.resolve(url)).thenReturn(response(Map.of("productName", "サンプル商品")));
+        when(tagDesignSettingService.resolveColors(PROJECT_ID, EmbedTagType.AMAZON))
+                .thenReturn(new TagDesignColors("#ffffff", "#1a1a1a", "#2563eb", ".lb-amazon-card{font-weight:bold;}"));
+
+        String result = service.render("[amazon " + url + "]", PROJECT_ID);
+
+        assertTrue(result.contains(".lb-amazon-card{font-weight:bold;}"));
+        assertFalse(result.contains("background:#ffffff"), "色ベースの生成CSSは含まれないこと: " + result);
+    }
+
+    @Test
+    void render_htmlTemplateが設定されていればプレースホルダを差し込んで展開する() {
+        String url = "https://www.amazon.co.jp/dp/B000000000";
+        when(contentCacheService.resolve(url)).thenReturn(response(Map.of(
+                "productName", "サンプル商品",
+                "price", "￥1,980",
+                "productUrl", url)));
+        when(tagDesignSettingService.resolveHtmlTemplate(PROJECT_ID, EmbedTagType.AMAZON))
+                .thenReturn("<div class=\"custom\"><a href=\"{{productUrl}}\">{{productName}} - {{price}}</a></div>");
+
+        String result = service.render("[amazon " + url + "]", PROJECT_ID);
+
+        assertEquals(
+                "<div class=\"custom\"><a href=\"" + url + "\">サンプル商品 - ￥1,980</a></div>",
+                result);
     }
 
     @Test

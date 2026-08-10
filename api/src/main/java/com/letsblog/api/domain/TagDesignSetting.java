@@ -39,7 +39,11 @@ public class TagDesignSetting {
     @Column(name = "tag_type", nullable = false, length = 20)
     private EmbedTagType tagType;
 
-    /** 最後に選択されたプリセットID。レンダリングには使わない(色は下記3列が常に確定値)、UI表示用。 */
+    /**
+     * 最後に選択されたプリセットID。レンダリングには使わない、UI表示用。
+     * customCssが設定されている場合、下記3色はUI上でのCSS再生成の元になる値であり、
+     * レンダリングされるCSSそのものには使われない(customCssが優先される)。
+     */
     @Column(name = "preset_id", nullable = false, length = 50)
     private String presetId;
 
@@ -51,6 +55,21 @@ public class TagDesignSetting {
 
     @Column(name = "accent_color", nullable = false, length = 7)
     private String accentColor;
+
+    /**
+     * 任意の生CSS。設定されていれば、背景色/テキスト色/アクセントカラーから組み立てる標準CSSの
+     * 代わりにこちらを丸ごと使う(完全上書き、issue #165)。未設定時のみ上記3色から生成する。
+     */
+    @Column(name = "custom_css", columnDefinition = "TEXT")
+    private String customCss;
+
+    /**
+     * 標準のHTML構造を置き換える任意のテンプレート。プレースホルダは種別ごとに固定
+     * (BLOGCARD/AMAZON: {{title}}等のデータ項目、TOC: 生成された目次全体を表す{{toc}}のみ)。
+     * 未設定時は従来どおりのハードコードされたHTML構造を使う。
+     */
+    @Column(name = "html_template", columnDefinition = "TEXT")
+    private String htmlTemplate;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

@@ -39,12 +39,6 @@ class CustomTagRenderServiceTest {
         return tag;
     }
 
-    private CustomTag tagWithCss(String name, String template, String css) {
-        CustomTag tag = tag(name, template);
-        tag.setCssContent(css);
-        return tag;
-    }
-
     @Test
     void render_ブロック形式のタグを本文込みでHTMLテンプレートに展開する() {
         when(customTagRepository.findByProjectIdIsNull()).thenReturn(
@@ -162,45 +156,6 @@ class CustomTagRenderServiceTest {
         String result = service.render(markdown);
 
         assertEquals("<div class=\"alert\">危険</div>\n本文中の<span class=\"badge\">強調</span>です。", result);
-    }
-
-    @Test
-    void render_CSS付きタグを使うと本文冒頭にstyleブロックを差し込む() {
-        when(customTagRepository.findByProjectIdIsNull()).thenReturn(
-                List.of(tagWithCss("alert", "<div class=\"alert\">{{content}}</div>", ".alert { color: red; }")));
-
-        String markdown = "[alert]\n注意\n[/alert]";
-
-        String result = service.render(markdown);
-
-        assertEquals(
-                "<style>\n.alert { color: red; }\n</style>\n\n<div class=\"alert\">注意</div>",
-                result);
-    }
-
-    @Test
-    void render_同じCSS付きタグを複数回使ってもstyleブロックは1回だけ() {
-        when(customTagRepository.findByProjectIdIsNull()).thenReturn(
-                List.of(tagWithCss("alert", "<div class=\"alert\">{{content}}</div>", ".alert { color: red; }")));
-
-        String markdown = "[alert]\n注意1\n[/alert]\n本文\n[alert]\n注意2\n[/alert]";
-
-        String result = service.render(markdown);
-
-        long styleCount = result.split("<style>", -1).length - 1;
-        assertEquals(1, styleCount);
-    }
-
-    @Test
-    void render_CSSが未設定のタグではstyleブロックを出力しない() {
-        when(customTagRepository.findByProjectIdIsNull()).thenReturn(
-                List.of(tag("alert", "<div class=\"alert\">{{content}}</div>")));
-
-        String markdown = "[alert]\n注意\n[/alert]";
-
-        String result = service.render(markdown);
-
-        assertEquals("<div class=\"alert\">注意</div>", result);
     }
 
     @Test

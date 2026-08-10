@@ -50,7 +50,7 @@ public class BlogCardTagRenderService {
         StringBuilder result = new StringBuilder();
         while (matcher.find()) {
             String rawUrl = matcher.group(1);
-            matcher.appendReplacement(result, Matcher.quoteReplacement(renderCard(rawUrl)));
+            matcher.appendReplacement(result, Matcher.quoteReplacement(renderCard(rawUrl, projectId)));
         }
         matcher.appendTail(result);
 
@@ -62,8 +62,16 @@ public class BlogCardTagRenderService {
         return "<style>\n" + buildStyle(colors) + "\n</style>\n\n" + result;
     }
 
-    /** CustomTagServiceの統合CSS生成からも呼ばれるためpackage-private。 */
+    /**
+     * CustomTagServiceの統合CSS生成からも呼ばれるためpackage-private。
+     * customCssが設定されていれば、色ベースの生成CSSの代わりにそちらを丸ごと使う(完全上書き、issue #165)。
+     * 未設定の場合のみ、背景色/テキスト色/アクセントカラーから組み立てる。
+     */
     String buildStyle(TagDesignColors colors) {
+        String customCss = colors.customCss();
+        if (customCss != null && !customCss.isBlank()) {
+            return customCss.trim();
+        }
         return ".lb-blogcard{display:flex;align-items:stretch;border:1px solid #e0e0e0;"
                 + "border-left:4px solid " + colors.accentColor() + ";border-radius:8px;overflow:hidden;"
                 + "text-decoration:none;background:" + colors.backgroundColor() + ";color:" + colors.textColor()
@@ -80,7 +88,7 @@ public class BlogCardTagRenderService {
                 + ".lb-blogcard-site{font-size:.75em;opacity:.6;margin-top:auto;}";
     }
 
-    private String renderCard(String rawUrl) {
+    private String renderCard(String rawUrl, Long projectId) {
         try {
             ContentCacheResponse response = contentCacheService.resolve(rawUrl);
             Map<String, String> data = response.data();
@@ -91,13 +99,24 @@ public class BlogCardTagRenderService {
             String description = HtmlUtils.htmlEscape(nullToEmpty(data.get("description")));
             String siteName = HtmlUtils.htmlEscape(nullToEmpty(data.get("siteName")));
             String escapedHref = HtmlUtils.htmlEscape(href);
+            String escapedImageUrl = imageUrl == null ? "" : HtmlUtils.htmlEscape(imageUrl);
+
+            String customTemplate = tagDesignSettingService.resolveHtmlTemplate(projectId, EmbedTagType.BLOGCARD);
+            if (customTemplate != null) {
+                return EmbedTagTemplateRenderer.render(customTemplate, Map.of(
+                        "title", title,
+                        "description", description,
+                        "siteName", siteName,
+                        "url", escapedHref,
+                        "imageUrl", escapedImageUrl));
+            }
 
             StringBuilder html = new StringBuilder();
             html.append("<a class=\"lb-blogcard\" href=\"").append(escapedHref)
                     .append("\" target=\"_blank\" rel=\"noopener noreferrer\">");
             if (imageUrl != null) {
                 html.append("<div class=\"lb-blogcard-thumb\" style=\"background-image:url('")
-                        .append(HtmlUtils.htmlEscape(imageUrl)).append("')\"></div>");
+                        .append(escapedImageUrl).append("')\"></div>");
             }
             html.append("<div class=\"lb-blogcard-body\">")
                     .append("<div class=\"lb-blogcard-title\">").append(title).append("</div>")
