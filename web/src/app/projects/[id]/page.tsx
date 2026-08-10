@@ -6,6 +6,8 @@ import {
   listUsers,
   listBulkOperationLogs,
   listCategoryComparison,
+  getProjectGithubTokenStatus,
+  getProjectBraveSearchApiKeyStatus,
   BulkOperationType,
   BulkOperationLogLevel,
   ProjectEnvironment,
@@ -17,6 +19,7 @@ import { ProjectSectionNav } from "./ProjectSectionNav";
 import { EnvironmentSlot } from "./EnvironmentSlot";
 import { MasterEnvironmentSelector } from "./MasterEnvironmentSelector";
 import { ProjectGithubRepositoryForm } from "./ProjectGithubRepositoryForm";
+import { ProjectApiKeysForm } from "./ProjectApiKeysForm";
 import { EnvironmentSyncPanel } from "./EnvironmentSyncPanel";
 import { BulkManagementPanel } from "./BulkManagementPanel";
 import { ProjectAiModelsPanel } from "./ProjectAiModelsPanel";
@@ -56,7 +59,17 @@ export default async function ProjectDetailPage({
 
   // タグ・プラグイン・テーマは一括管理パネルでタブを開いたときにクライアント側から遅延取得する
   // (初期表示で4種類すべて並行取得すると、同一ホストのSSH接続が集中しやすいため)。
-  const [project, sites, members, allUsers, bulkOperationLogs, categoryPage, timezone] = await Promise.all([
+  const [
+    project,
+    sites,
+    members,
+    allUsers,
+    bulkOperationLogs,
+    categoryPage,
+    timezone,
+    githubTokenStatus,
+    braveSearchApiKeyStatus,
+  ] = await Promise.all([
     getProject(projectId, actor).catch(logAndFallback("プロジェクト情報", null)),
     listSites().catch(logAndFallback("サイト一覧", [])),
     listProjectUsers(projectId, actor).catch(logAndFallback("プロジェクトメンバー", [])),
@@ -64,6 +77,9 @@ export default async function ProjectDetailPage({
     listBulkOperationLogs(projectId, actor, logFilter).catch(logAndFallback("作業ログ", [])),
     listCategoryComparison(projectId, 0, actor).catch(logAndFallback("カテゴリ比較", emptyComparisonPage)),
     getViewerTimeZone(),
+    getProjectGithubTokenStatus(projectId, actor).catch(logAndFallback("GitHubトークン設定状況", { configured: false })),
+    getProjectBraveSearchApiKeyStatus(projectId, actor)
+      .catch(logAndFallback("Brave APIキー設定状況", { configured: false })),
   ]);
 
   if (!project) {
@@ -104,6 +120,18 @@ export default async function ProjectDetailPage({
       content: (
         <div className="space-y-6">
           <ProjectGithubRepositoryForm projectId={project.id} githubRepository={project.githubRepository} />
+          <ProjectApiKeysForm
+            projectId={project.id}
+            githubTokenConfigured={githubTokenStatus.configured}
+            braveSearchApiKeyConfigured={braveSearchApiKeyStatus.configured}
+          />
+          <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
+            <h2 className="font-medium">モデル設定</h2>
+            <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+              壁打ちチャットで使うOllamaモデル・画像生成で使うComfyUIチェックポイントは、プロジェクトごとに
+              「AI・アセット」タブから切り替えられます。
+            </p>
+          </div>
           <EnvironmentSyncPanel projectId={project.id} project={project} />
         </div>
       ),

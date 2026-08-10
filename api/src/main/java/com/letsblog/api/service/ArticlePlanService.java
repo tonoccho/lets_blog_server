@@ -79,7 +79,7 @@ public class ArticlePlanService {
     private final GenerationJobRepository generationJobRepository;
     private final ObjectMapper objectMapper;
     private final GithubClient githubClient;
-    private final UserService userService;
+    private final ProjectApiKeyService projectApiKeyService;
     private final ProjectService projectService;
     private final ArticlePlanSessionRepository articlePlanSessionRepository;
     private final SiteService siteService;
@@ -92,7 +92,7 @@ public class ArticlePlanService {
             GenerationJobRepository generationJobRepository,
             ObjectMapper objectMapper,
             GithubClient githubClient,
-            UserService userService,
+            ProjectApiKeyService projectApiKeyService,
             ProjectService projectService,
             ArticlePlanSessionRepository articlePlanSessionRepository,
             SiteService siteService,
@@ -103,7 +103,7 @@ public class ArticlePlanService {
         this.generationJobRepository = generationJobRepository;
         this.objectMapper = objectMapper;
         this.githubClient = githubClient;
-        this.userService = userService;
+        this.projectApiKeyService = projectApiKeyService;
         this.projectService = projectService;
         this.articlePlanSessionRepository = articlePlanSessionRepository;
         this.siteService = siteService;
@@ -123,7 +123,7 @@ public class ArticlePlanService {
         ));
         try {
             String model = ollamaModelService.getSelectedModel(projectId);
-            WebSearchOutcome searchOutcome = webSearchService.searchSafely(message);
+            WebSearchOutcome searchOutcome = webSearchService.searchSafely(message, projectId);
             String prompt = buildChatPrompt(history, message, searchOutcome);
             String reply = ollamaClient.generate(prompt, model);
             completeJob(job, Map.of(
@@ -259,7 +259,7 @@ public class ArticlePlanService {
                     "このプロジェクトにGitHubリポジトリが紐付けられていません。プロジェクト詳細ページから設定してください。");
         }
 
-        String token = userService.getDecryptedGithubToken(userId);
+        String token = projectApiKeyService.resolveGithubToken(projectId, userId);
         String[] repoParts = project.getGithubRepository().split("/", 2);
         return new GithubAccess(token, repoParts[0], repoParts[1]);
     }

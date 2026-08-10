@@ -7,6 +7,10 @@ import {
   updateProject,
   updateMasterEnvironment,
   updateProjectGithubRepository,
+  setProjectGithubToken,
+  clearProjectGithubToken,
+  setProjectBraveSearchApiKey,
+  clearProjectBraveSearchApiKey,
   addProjectUser,
   updateProjectUserRole,
   removeProjectUser,
@@ -183,6 +187,71 @@ export async function updateProjectGithubRepositoryAction(
 
   revalidatePath(`/projects/${projectId}`);
   return { success: true };
+}
+
+export interface ProjectApiKeyFormState {
+  error?: string;
+  success?: boolean;
+}
+
+export async function setProjectGithubTokenAction(
+  projectId: number,
+  _prevState: ProjectApiKeyFormState,
+  formData: FormData
+): Promise<ProjectApiKeyFormState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const githubToken = String(formData.get("githubToken") ?? "").trim();
+  if (!githubToken) {
+    return { error: "GitHubトークンを入力してください。" };
+  }
+
+  try {
+    await setProjectGithubToken(projectId, githubToken, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  return { success: true };
+}
+
+export async function clearProjectGithubTokenAction(projectId: number): Promise<void> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  await clearProjectGithubToken(projectId, actor);
+  revalidatePath(`/projects/${projectId}`);
+}
+
+export async function setProjectBraveSearchApiKeyAction(
+  projectId: number,
+  _prevState: ProjectApiKeyFormState,
+  formData: FormData
+): Promise<ProjectApiKeyFormState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const apiKey = String(formData.get("apiKey") ?? "").trim();
+  if (!apiKey) {
+    return { error: "APIキーを入力してください。" };
+  }
+
+  try {
+    await setProjectBraveSearchApiKey(projectId, apiKey, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  return { success: true };
+}
+
+export async function clearProjectBraveSearchApiKeyAction(projectId: number): Promise<void> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  await clearProjectBraveSearchApiKey(projectId, actor);
+  revalidatePath(`/projects/${projectId}`);
 }
 
 export interface AddProjectUserState {
