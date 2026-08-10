@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
-import type { ConnectedServiceStatus } from "@/lib/apiClient";
+import type { ConnectedServiceStatus, ConnectedServiceStatusDetail } from "@/lib/apiClient";
 
 const POLL_INTERVAL_MS = 30000;
 
@@ -25,7 +25,14 @@ function StatusIcon({ status }: { status: ConnectedServiceStatus["status"] }) {
   return <XCircle className={className} aria-hidden="true" />;
 }
 
-export function ConnectedServiceStatusPanel({ initialStatuses }: { initialStatuses: ConnectedServiceStatus[] }) {
+export function ConnectedServiceStatusPanel({
+  initialStatuses,
+  initialDetail,
+}: {
+  initialStatuses: ConnectedServiceStatus[];
+  /** admin向けの詳細診断情報(issue #199)。非adminまたは取得失敗時はnull(セクション自体を表示しない)。 */
+  initialDetail: ConnectedServiceStatusDetail[] | null;
+}) {
   const [statuses, setStatuses] = useState(initialStatuses);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [live, setLive] = useState(false);
@@ -123,6 +130,47 @@ export function ConnectedServiceStatusPanel({ initialStatuses }: { initialStatus
           </li>
         ))}
       </ul>
+      {initialDetail && initialDetail.length > 0 && (
+        <details className="mt-4 border-t border-neutral-200 dark:border-neutral-800 pt-4">
+          <summary className="cursor-pointer text-sm font-semibold text-neutral-700 dark:text-neutral-300">
+            管理者向け詳細診断
+          </summary>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left text-xs">
+              <thead>
+                <tr className="text-neutral-500 dark:text-neutral-400">
+                  <th className="pb-2 pr-4 font-medium">サービス</th>
+                  <th className="pb-2 pr-4 font-medium">ステータス</th>
+                  <th className="pb-2 pr-4 font-medium">応答時間</th>
+                  <th className="pb-2 pr-4 font-medium">HTTPステータス</th>
+                  <th className="pb-2 pr-4 font-medium">エラー内容</th>
+                  <th className="pb-2 pr-4 font-medium">チェック対象URL</th>
+                  <th className="pb-2 font-medium">最終チェック時刻</th>
+                </tr>
+              </thead>
+              <tbody>
+                {initialDetail.map((detail) => (
+                  <tr key={detail.id} className="border-t border-neutral-100 dark:border-neutral-800">
+                    <td className="py-2 pr-4 text-neutral-700 dark:text-neutral-300">{detail.name}</td>
+                    <td className={`py-2 pr-4 font-medium ${STATUS_STYLE[detail.status]}`}>
+                      {STATUS_LABEL[detail.status]}
+                    </td>
+                    <td className="py-2 pr-4 text-neutral-700 dark:text-neutral-300">{detail.responseTimeMs}ms</td>
+                    <td className="py-2 pr-4 text-neutral-700 dark:text-neutral-300">{detail.httpStatus ?? "-"}</td>
+                    <td className="py-2 pr-4 text-neutral-700 dark:text-neutral-300">{detail.errorMessage ?? "-"}</td>
+                    <td className="py-2 pr-4 break-all text-neutral-700 dark:text-neutral-300">
+                      {detail.targetUrl ?? "-"}
+                    </td>
+                    <td className="py-2 text-neutral-700 dark:text-neutral-300">
+                      {new Date(detail.checkedAt).toLocaleString("ja-JP")}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
     </section>
   );
 }

@@ -2039,6 +2039,22 @@ export function getConnectedServiceStatuses(): Promise<ConnectedServiceStatus[]>
   return apiFetch<ConnectedServiceStatus[]>('/api/dashboard/service-status');
 }
 
+export interface ConnectedServiceStatusDetail {
+  id: string;
+  name: string;
+  status: "NORMAL" | "WARNING" | "ERROR";
+  responseTimeMs: number;
+  httpStatus: number | null;
+  errorMessage: string | null;
+  targetUrl: string | null;
+  checkedAt: string;
+}
+
+/** 応答時間・エラー内容・チェック対象URLなどの詳細診断情報(issue #199)。admin限定、非adminが呼ぶと403になる。 */
+export function getConnectedServiceStatusDetail(actor?: ActorInfo): Promise<ConnectedServiceStatusDetail[]> {
+  return apiFetch<ConnectedServiceStatusDetail[]>('/api/dashboard/service-status/detail', { actor });
+}
+
 /**
  * 接続サービスの稼働状況をSSEで受け取るためのアップストリーム接続(issue #198)。
  * apiFetch()はJSONレスポンス前提のためストリーミングには使えず、ここだけ直接fetchする。

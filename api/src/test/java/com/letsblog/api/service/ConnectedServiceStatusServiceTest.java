@@ -1,5 +1,6 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.dto.ConnectedServiceStatusDetailResponse;
 import com.letsblog.api.dto.ConnectedServiceStatusResponse;
 import com.letsblog.api.dto.ConnectedServiceStatusResponse.Status;
 import com.letsblog.api.render.PlantUmlEncoder;
@@ -20,6 +21,9 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
@@ -67,7 +71,12 @@ class ConnectedServiceStatusServiceTest {
         wordpressServer = MockRestServiceServer.bindTo(wordpressBuilder).build();
 
         service = new ConnectedServiceStatusService(
-                dataSource, ollamaBuilder, comfyUiBuilder, plantUmlBuilder, wordpressBuilder, systemSettingService);
+                dataSource,
+                ollamaBuilder, OLLAMA_URL,
+                comfyUiBuilder, COMFYUI_URL,
+                plantUmlBuilder, PLANTUML_URL,
+                wordpressBuilder, WORDPRESS_URL,
+                systemSettingService);
     }
 
     private void respondSuccessToAll() {
@@ -197,6 +206,58 @@ class ConnectedServiceStatusServiceTest {
         List<ConnectedServiceStatusResponse> statuses = service.checkAll();
 
         assertEquals(Status.WARNING, toMapById(statuses).get("brave-search"));
+    }
+
+    @Test
+    void checkAllDetailed_正常時は応答時間とチェック対象URLを含む() throws SQLException {
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(true);
+        respondSuccessToAll();
+        when(systemSettingService.getBraveSearchApiKeyStatus())
+                .thenReturn(new SystemSettingService.BraveSearchApiKeyStatus(
+                        true, SystemSettingService.SettingSource.DATABASE));
+
+        List<ConnectedServiceStatusDetailResponse> details = service.checkAllDetailed();
+
+        Map<String, ConnectedServiceStatusDetailResponse> byId = details.stream()
+                .collect(java.util.stream.Collectors.toMap(ConnectedServiceStatusDetailResponse::id, d -> d));
+        ConnectedServiceStatusDetailResponse ollama = byId.get("ollama");
+        assertEquals(Status.NORMAL, ollama.status());
+        assertEquals(OLLAMA_URL + "/api/tags", ollama.targetUrl());
+        assertEquals(200, ollama.httpStatus());
+        assertNull(ollama.errorMessage());
+        assertTrue(ollama.responseTimeMs() >= 0);
+        assertNotNull(ollama.checkedAt());
+
+        ConnectedServiceStatusDetailResponse database = byId.get("database");
+        assertEquals(Status.NORMAL, database.status());
+        assertNull(database.targetUrl());
+    }
+
+    @Test
+    void checkAllDetailed_接続不可の外部サービスはエラー内容を含む() throws SQLException {
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(true);
+        ollamaServer.expect(requestTo(OLLAMA_URL + "/api/tags")).andRespond(request -> {
+            throw new java.io.IOException("connection refused");
+        });
+        comfyUiServer.expect(requestTo(COMFYUI_URL + "/system_stats")).andRespond(withSuccess());
+        plantUmlServer.expect(requestTo(PLANTUML_URL + PLANTUML_HEALTHCHECK_PATH))
+                .andRespond(withSuccess(new byte[]{1, 2, 3}, MediaType.IMAGE_PNG));
+        wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
+        when(systemSettingService.getBraveSearchApiKeyStatus())
+                .thenReturn(new SystemSettingService.BraveSearchApiKeyStatus(
+                        true, SystemSettingService.SettingSource.DATABASE));
+
+        List<ConnectedServiceStatusDetailResponse> details = service.checkAllDetailed();
+
+        ConnectedServiceStatusDetailResponse ollama = details.stream()
+                .filter(d -> d.id().equals("ollama"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(Status.ERROR, ollama.status());
+        assertNotNull(ollama.errorMessage());
+        assertNull(ollama.httpStatus());
     }
 
     private static Map<String, Status> toMapById(List<ConnectedServiceStatusResponse> statuses) {

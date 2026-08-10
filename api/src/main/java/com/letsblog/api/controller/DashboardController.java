@@ -1,6 +1,8 @@
 package com.letsblog.api.controller;
 
+import com.letsblog.api.dto.ConnectedServiceStatusDetailResponse;
 import com.letsblog.api.dto.ConnectedServiceStatusResponse;
+import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.ConnectedServiceStatusBroadcaster;
 import com.letsblog.api.service.ConnectedServiceStatusService;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,12 +18,15 @@ public class DashboardController {
 
     private final ConnectedServiceStatusService connectedServiceStatusService;
     private final ConnectedServiceStatusBroadcaster connectedServiceStatusBroadcaster;
+    private final AdminAuthorizationService adminAuthorizationService;
 
     public DashboardController(
             ConnectedServiceStatusService connectedServiceStatusService,
-            ConnectedServiceStatusBroadcaster connectedServiceStatusBroadcaster) {
+            ConnectedServiceStatusBroadcaster connectedServiceStatusBroadcaster,
+            AdminAuthorizationService adminAuthorizationService) {
         this.connectedServiceStatusService = connectedServiceStatusService;
         this.connectedServiceStatusBroadcaster = connectedServiceStatusBroadcaster;
+        this.adminAuthorizationService = adminAuthorizationService;
     }
 
     @GetMapping("/service-status")
@@ -33,5 +38,12 @@ public class DashboardController {
     @GetMapping("/service-status/stream")
     public SseEmitter streamServiceStatus() {
         return connectedServiceStatusBroadcaster.subscribe();
+    }
+
+    /** issue #199: 応答時間・エラー内容・チェック対象URLなどの詳細診断情報。admin限定。 */
+    @GetMapping("/service-status/detail")
+    public List<ConnectedServiceStatusDetailResponse> getServiceStatusDetail() {
+        adminAuthorizationService.requireAdmin();
+        return connectedServiceStatusService.checkAllDetailed();
     }
 }
