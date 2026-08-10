@@ -7,7 +7,6 @@ import com.letsblog.api.cms.MediaUploadResult;
 import com.letsblog.api.cms.rest.WordPressRestBulkManagementOperations;
 import com.letsblog.api.cms.ssh.WordPressSshOperations;
 import com.letsblog.api.domain.BulkOperationLog;
-import com.letsblog.api.domain.BulkOperationLogLevel;
 import com.letsblog.api.domain.BulkOperationSourceType;
 import com.letsblog.api.domain.BulkOperationStatus;
 import com.letsblog.api.domain.BulkOperationType;
@@ -15,17 +14,15 @@ import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient.BulkApplyCommand;
-import com.letsblog.api.repository.BulkOperationLogRepository;
 import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.SiteRepository;
-import com.letsblog.api.util.StackTraceUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.List;
@@ -36,8 +33,9 @@ import java.util.Set;
 /**
  * カテゴリ/タグ/プラグイン/テーマの操作を単一環境へ適用する({@link #applyToEnvironment})、
  * またはzipアップロードによるプラグイン/テーマのインストールを全managed環境へ一括実行する
- * ({@link #executeFromUpload})。実行内容はbulk_operation_logsへ保存し、任意の1環境への
- * ロールフォワード(過去の成功ログの再適用、{@link #replay})に使う。
+ * ({@link #executeFromUpload})。実行結果は非永続のBulkOperationLog値オブジェクトとして
+ * 呼び出し元(画面)へ返すのみで、履歴の永続化・一覧・ロールフォワードは行わない
+ * (issue #184。以前はbulk_operation_logsへ保存していたが、操作ログ(operation_logs)へ一本化した)。
  * 環境をまたぐ比較・同期(マスター環境の値を他環境へ反映する等)のオーケストレーションは
  * {@link TermComparisonService}が本クラスの{@link #applyToEnvironment}を都度呼び出す形で行う。
  */
@@ -50,7 +48,6 @@ public class BulkManagementService {
 
     private final ProjectRepository projectRepository;
     private final SiteRepository siteRepository;
-    private final BulkOperationLogRepository bulkOperationLogRepository;
     private final WordPressBulkManagementClient bulkManagementClient;
     private final BulkUploadStorageService bulkUploadStorageService;
     private final SiteService siteService;
@@ -61,7 +58,6 @@ public class BulkManagementService {
     public BulkManagementService(
             ProjectRepository projectRepository,
             SiteRepository siteRepository,
-            BulkOperationLogRepository bulkOperationLogRepository,
             WordPressBulkManagementClient bulkManagementClient,
             BulkUploadStorageService bulkUploadStorageService,
             SiteService siteService,
@@ -70,7 +66,6 @@ public class BulkManagementService {
             CmsAdapterFactory cmsAdapterFactory) {
         this.projectRepository = projectRepository;
         this.siteRepository = siteRepository;
-        this.bulkOperationLogRepository = bulkOperationLogRepository;
         this.bulkManagementClient = bulkManagementClient;
         this.bulkUploadStorageService = bulkUploadStorageService;
         this.siteService = siteService;
@@ -80,7 +75,7 @@ public class BulkManagementService {
     }
 
     /**
-     * 単一環境に対して1件の操作を適用し、1件のBulkOperationLogとして記録する。
+     * 単一環境に対して1件の操作を適用し、1件のBulkOperationLogとして結果を返す。
      * カテゴリ/タグの比較テーブル(新規追加・編集はマスター環境のみ、削除・同期は非マスター環境も含む)・
      * プラグイン/テーマの状態反映(環境ごとのセル単位)のいずれからも呼ばれる共通経路。
      */
@@ -93,7 +88,7 @@ public class BulkManagementService {
         Project project = getProject(projectId);
         Site site = resolveSite(project, environment, type);
         return applyToSite(projectId, environment, site, type, effectiveValue,
-                categorySlug, categoryParentSlug, categoryDescription, categoryTargetSlug, actorId, false);
+                categorySlug, categoryParentSlug, categoryDescription, categoryTargetSlug, actorId);
     }
 
     @Transactional
@@ -116,7 +111,7 @@ public class BulkManagementService {
             results.add(saveLog(projectId, type, BulkOperationSourceType.ZIP, stored.originalFilename(),
                     null, null, null, null,
                     stored.originalFilename(), stored.storagePath(), stored.sha256(),
-                    entry.getKey(), result.status(), result.errorMessage(), result.stackTrace(), actorId, false));
+                    entry.getKey(), result.status(), result.errorMessage(), result.stackTrace(), actorId));
         }
         return results;
     }
@@ -197,7 +192,7 @@ public class BulkManagementService {
             }
             results.add(saveLog(projectId, BulkOperationType.MEDIA_UPLOAD, BulkOperationSourceType.SLUG, value,
                     null, null, null, null, filename, null, null,
-                    environment, status, errorMessage, null, actorId, false));
+                    environment, status, errorMessage, null, actorId));
         }
         return results;
     }
@@ -224,7 +219,7 @@ public class BulkManagementService {
                     projectId, environment, site.getSiteKey(), postId, errorMessage);
         }
         return saveLog(projectId, BulkOperationType.POST_DELETE, BulkOperationSourceType.SLUG, slug,
-                null, null, null, null, null, null, null, environment, status, errorMessage, null, actorId, false);
+                null, null, null, null, null, null, null, environment, status, errorMessage, null, actorId);
     }
 
     /**
@@ -249,57 +244,13 @@ public class BulkManagementService {
         }
         return saveLog(projectId, BulkOperationType.POST_STATUS_UPDATE, BulkOperationSourceType.SLUG, slug,
                 null, null, null, null, null, null, null, newStatus, environment, status, errorMessage, null,
-                actorId, false);
-    }
-
-    @Transactional
-    public List<BulkOperationLog> replay(Long projectId, String environment, Long actorId) {
-        Project project = getProject(projectId);
-        // 環境が不正・未紐付けの場合は、履歴の有無に関わらず即座に例外にする(fail-fast)
-        requireSiteBound(project, environment);
-
-        List<BulkOperationLog> history = bulkOperationLogRepository
-                .findByProjectIdAndStatusOrderByCreatedAtAsc(projectId, BulkOperationStatus.SUCCESS);
-
-        List<BulkOperationLog> results = new ArrayList<>();
-        for (BulkOperationLog log : history) {
-            if (!log.getOperationType().isReplayable()) {
-                continue;
-            }
-            if (log.getSourceType() == BulkOperationSourceType.ZIP) {
-                // zipアップロードの再現は、実行時(executeFromUpload)と同じくmanaged環境に加え
-                // SSH接続情報が設定された非managed環境も対象にする
-                Site targetSite = resolveZipCapableSite(project, environment);
-                results.add(replayZip(projectId, environment, targetSite, log, actorId));
-            } else {
-                Site targetSite = resolveSite(project, environment, log.getOperationType());
-                results.add(applyToSite(projectId, environment, targetSite, log.getOperationType(), log.getValue(),
-                        log.getCategorySlug(), log.getCategoryParentSlug(), log.getCategoryDescription(),
-                        log.getCategoryTargetSlug(), actorId, true));
-            }
-        }
-        return results;
-    }
-
-    @Transactional(readOnly = true)
-    public List<BulkOperationLog> listLogs(Long projectId) {
-        return bulkOperationLogRepository.findByProjectIdOrderByCreatedAtDesc(projectId);
-    }
-
-    public List<BulkOperationLog> listLogs(
-            Long projectId, BulkOperationType operationType, String environment, BulkOperationLogLevel level) {
-        return bulkOperationLogRepository.findByFilters(projectId, operationType, environment, level);
-    }
-
-    @Transactional
-    public void clearLogs(Long projectId) {
-        bulkOperationLogRepository.deleteByProjectId(projectId);
+                actorId);
     }
 
     private BulkOperationLog applyToSite(
             Long projectId, String environment, Site site, BulkOperationType type, String value,
             String categorySlug, String categoryParentSlug, String categoryDescription, String categoryTargetSlug,
-            Long actorId, boolean isReplay) {
+            Long actorId) {
         String status;
         String errorMessage;
         String stackTrace;
@@ -358,45 +309,18 @@ public class BulkManagementService {
         }
         return saveLog(projectId, type, BulkOperationSourceType.SLUG, value,
                 categorySlug, categoryParentSlug, categoryTargetSlug, categoryDescription, null, null, null,
-                environment, status, errorMessage, stackTrace, actorId, isReplay);
+                environment, status, errorMessage, stackTrace, actorId);
     }
 
     /**
-     * カテゴリ/タグ/プラグイン/テーマの一覧取得(読み取り)が失敗した際に、作業ログへ記録するだけの
-     * 軽量な経路。resolveSite/applyToSiteのような解決・適用処理は行わない(TermComparisonService/
-     * PluginThemeComparisonServiceがREST/SSH取得の失敗を検知した時点で呼ぶ)。
-     * 呼び出し元(listCategoryComparison等)は@Transactional(readOnly = true)なので、
-     * 同じトランザクションに相乗りすると書き込みができずSQL例外になる。REQUIRES_NEWで
-     * 独立したトランザクションとして必ずコミットする。
+     * カテゴリ/タグ/プラグイン/テーマの一覧取得(読み取り)が失敗した際に、アプリケーションログへ
+     * 警告として記録するだけの軽量な経路。resolveSite/applyToSiteのような解決・適用処理は行わない
+     * (TermComparisonService/PluginThemeComparisonServiceがREST/SSH取得の失敗を検知した時点で呼ぶ)。
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void logFetchFailure(
             Long projectId, BulkOperationType type, String environment, String errorMessage, String stackTrace) {
-        saveLog(projectId, type, BulkOperationSourceType.SLUG, "-", null, null, null, null, null, null, null,
-                environment, BulkOperationStatus.FAILED.name(), errorMessage, stackTrace, null, false);
-    }
-
-    private BulkOperationLog replayZip(
-            Long projectId, String environment, Site targetSite, BulkOperationLog log, Long actorId) {
-        String status;
-        String errorMessage;
-        String stackTrace;
-        try {
-            byte[] bytes = bulkUploadStorageService.load(log.getStoragePath());
-            ZipApplyResult result = applyZipToSite(targetSite, log.getOperationType(), bytes, log.getOriginalFilename());
-            status = result.status();
-            errorMessage = result.errorMessage();
-            stackTrace = result.stackTrace();
-        } catch (IOException e) {
-            status = BulkOperationStatus.FAILED.name();
-            errorMessage = "元ファイルが見つかりません。再度アップロードしてください: " + e.getMessage();
-            stackTrace = StackTraceUtil.toString(e);
-        }
-        return saveLog(projectId, log.getOperationType(), log.getSourceType(), log.getValue(),
-                log.getCategorySlug(), log.getCategoryParentSlug(), log.getCategoryTargetSlug(),
-                log.getCategoryDescription(),
-                log.getOriginalFilename(), log.getStoragePath(), log.getFileSha256(),
-                environment, status, errorMessage, stackTrace, actorId, true);
+        log.warn("一覧取得に失敗しました(project={}, type={}, environment={}): {}\n{}",
+                projectId, type, environment, errorMessage, stackTrace);
     }
 
     /**
@@ -437,17 +361,18 @@ public class BulkManagementService {
             Long projectId, BulkOperationType type, BulkOperationSourceType sourceType, String value,
             String categorySlug, String categoryParentSlug, String categoryTargetSlug, String categoryDescription,
             String originalFilename, String storagePath, String fileSha256, String environment,
-            String status, String errorMessage, String stackTrace, Long actorId, boolean isReplay) {
+            String status, String errorMessage, String stackTrace, Long actorId) {
         return saveLog(projectId, type, sourceType, value, categorySlug, categoryParentSlug, categoryTargetSlug,
                 categoryDescription, originalFilename, storagePath, fileSha256, null, environment, status,
-                errorMessage, stackTrace, actorId, isReplay);
+                errorMessage, stackTrace, actorId);
     }
 
+    /** 実行結果を非永続のBulkOperationLog値オブジェクトとして組み立てて返す(issue #184)。 */
     private BulkOperationLog saveLog(
             Long projectId, BulkOperationType type, BulkOperationSourceType sourceType, String value,
             String categorySlug, String categoryParentSlug, String categoryTargetSlug, String categoryDescription,
             String originalFilename, String storagePath, String fileSha256, String postStatus, String environment,
-            String status, String errorMessage, String stackTrace, Long actorId, boolean isReplay) {
+            String status, String errorMessage, String stackTrace, Long actorId) {
         BulkOperationLog log = new BulkOperationLog();
         log.setProjectId(projectId);
         log.setOperationType(type);
@@ -467,9 +392,9 @@ public class BulkManagementService {
         log.setLevel(resolvedStatus.toLogLevel());
         log.setErrorMessage(errorMessage);
         log.setStackTrace(stackTrace);
-        log.setReplay(isReplay);
         log.setActorId(actorId);
-        return bulkOperationLogRepository.save(log);
+        log.setCreatedAt(LocalDateTime.now());
+        return log;
     }
 
     /**
@@ -485,20 +410,6 @@ public class BulkManagementService {
         }
         return siteRepository.findById(siteId)
                 .orElseThrow(() -> new SiteNotFoundException("id " + siteId + " のサイトは登録されていません"));
-    }
-
-    /**
-     * zipアップロード(実行/再現)が対象にできるサイトかを検証する。managed環境に加え、
-     * SSH接続情報が設定された非managed環境も許可する(REST APIにはzipインストールに
-     * 相当するエンドポイントが無いため対象外)。
-     */
-    private Site resolveZipCapableSite(Project project, String environment) {
-        Site site = requireSiteBound(project, environment);
-        if (site.isManagedWordpress() || siteService.resolveDataSource(site).hasSsh()) {
-            return site;
-        }
-        throw new IllegalArgumentException(
-                environment + "環境(" + site.getSiteKey() + ")はzipアップロードに対応するSSH接続設定がないため対象外です");
     }
 
     /**

@@ -12,7 +12,6 @@ import com.letsblog.api.dto.ProjectUpdateRequest;
 import com.letsblog.api.dto.PostComparisonPage;
 import com.letsblog.api.dto.ProjectUserResponse;
 import com.letsblog.api.dto.ReconcileStateRequest;
-import com.letsblog.api.dto.ReplayBulkOperationRequest;
 import com.letsblog.api.dto.StatusComparisonPage;
 import com.letsblog.api.dto.SyncEnvironmentRequest;
 import com.letsblog.api.dto.TermComparisonPage;
@@ -23,7 +22,6 @@ import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
 import com.letsblog.api.dto.UpdateProjectUserRequest;
 import com.letsblog.api.ai.GeneratedImageStorageService;
 import com.letsblog.api.domain.BulkOperationLog;
-import com.letsblog.api.domain.BulkOperationLogLevel;
 import com.letsblog.api.domain.BulkOperationType;
 import com.letsblog.api.domain.GeneratedImage;
 import com.letsblog.api.repository.GeneratedImageRepository;
@@ -183,36 +181,6 @@ public class ProjectController {
         Long actorId = currentActorService.getCurrentActorId();
         List<BulkOperationLog> logs = bulkManagementService.executeFromUpload(id, operationType, file, actorId);
         return logs.stream().map(BulkOperationLogResponse::from).toList();
-    }
-
-    @PostMapping("/{id}/bulk-management/replay")
-    public List<BulkOperationLogResponse> replayBulkOperations(
-            @PathVariable Long id, @Valid @RequestBody ReplayBulkOperationRequest request) {
-        adminAuthorizationService.requireAdmin();
-        Long actorId = currentActorService.getCurrentActorId();
-        List<BulkOperationLog> logs = bulkManagementService.replay(id, request.environment(), actorId);
-        return logs.stream().map(BulkOperationLogResponse::from).toList();
-    }
-
-    @GetMapping("/{id}/bulk-management/logs")
-    public List<BulkOperationLogResponse> listBulkOperationLogs(
-            @PathVariable Long id,
-            @RequestParam(required = false) BulkOperationType operationType,
-            @RequestParam(required = false) String environment,
-            @RequestParam(required = false) BulkOperationLogLevel level) {
-        adminAuthorizationService.requireAdmin();
-        if (operationType == null && environment == null && level == null) {
-            return bulkManagementService.listLogs(id).stream().map(BulkOperationLogResponse::from).toList();
-        }
-        return bulkManagementService.listLogs(id, operationType, environment, level).stream()
-                .map(BulkOperationLogResponse::from).toList();
-    }
-
-    @DeleteMapping("/{id}/bulk-management/logs")
-    public ResponseEntity<Void> clearBulkOperationLogs(@PathVariable Long id) {
-        adminAuthorizationService.requireAdmin();
-        bulkManagementService.clearLogs(id);
-        return ResponseEntity.noContent().build();
     }
 
     /**
