@@ -3,6 +3,7 @@ import { getProject, getTagDesignSettings, listProjectCustomTags } from "@/lib/a
 import { requireAdminSession } from "@/lib/session";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { Tabs, type TabItem } from "@/components/Tabs";
+import { ProjectSectionNav } from "../ProjectSectionNav";
 import { TagDesignSettingsPanel } from "../tag-design/TagDesignSettingsPanel";
 import { ProjectCustomTagManager } from "../custom-tags/ProjectCustomTagManager";
 
@@ -76,6 +77,8 @@ export default async function ProjectTagsPage({ params }: { params: Promise<{ id
       <div>
         <h1 className="text-xl font-semibold">{project.name} — タグ</h1>
       </div>
+
+      <ProjectSectionNav projectId={projectId} active="tags" />
 
       <Tabs tabs={tabs} />
     </div>

@@ -13,6 +13,7 @@ import {
 import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { Tabs, type TabItem } from "@/components/Tabs";
+import { ProjectSectionNav } from "./ProjectSectionNav";
 import { EnvironmentSlot } from "./EnvironmentSlot";
 import { MasterEnvironmentSelector } from "./MasterEnvironmentSelector";
 import { ProjectGithubRepositoryForm } from "./ProjectGithubRepositoryForm";
@@ -159,6 +160,8 @@ export default async function ProjectDetailPage({
         </div>
       </div>
       <p className="font-mono text-sm text-neutral-500 dark:text-neutral-400">{project.slug}</p>
+
+      <ProjectSectionNav projectId={project.id} active="detail" />
 
       <Tabs tabs={tabs} />
     </div>

@@ -9,6 +9,7 @@ import {
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { ProjectSectionNav } from "../ProjectSectionNav";
 import { ArticlePlanWorkspace } from "./ArticlePlanWorkspace";
 import { ArticlePlanIssueList } from "./ArticlePlanIssueList";
 
@@ -60,6 +61,8 @@ export default async function ArticlePlanPage({
         ]}
       />
       <h1 className="text-xl font-semibold">{project.name} — 記事計画</h1>
+
+      <ProjectSectionNav projectId={projectId} active="plan" />
 
       {!project.githubRepository && (
         <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800">
