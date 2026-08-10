@@ -14,6 +14,13 @@ function respond(int $status, array $body): void
     exit;
 }
 
+// ダッシュボードの稼働状況チェック用の軽量なヘルスチェック(issue #197)。
+// エージェント自体の生死のみを返すため、他のエンドポイントと異なり認証を要求しない
+// (lbs-net内部限定でnginxには公開されないネットワーク境界を前提とする)。
+if (($_SERVER['REQUEST_URI'] ?? '') === '/health' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    respond(200, ['status' => 'ok']);
+}
+
 $expectedToken = getenv('WP_PROVISION_TOKEN');
 $providedToken = $_SERVER['HTTP_X_PROVISION_TOKEN'] ?? '';
 if (!$expectedToken || !hash_equals($expectedToken, $providedToken)) {

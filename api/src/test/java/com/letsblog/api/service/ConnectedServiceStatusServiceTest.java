@@ -2,12 +2,14 @@ package com.letsblog.api.service;
 
 import com.letsblog.api.dto.ConnectedServiceStatusResponse;
 import com.letsblog.api.dto.ConnectedServiceStatusResponse.Status;
+import com.letsblog.api.render.PlantUmlEncoder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
@@ -25,8 +27,9 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /**
- * ConnectedServiceStatusServiceの回帰テスト(issue #181)。DB疎通確認と、外部連携4サービスへの
- * HTTP到達確認(正常/5xx/接続不可)、Brave Search APIキー設定有無の判定を検証する。
+ * ConnectedServiceStatusServiceの回帰テスト(issue #181, #197)。DB疎通確認と、外部連携4サービスへの
+ * 専用ヘルスチェックエンドポイントでの到達確認(正常/5xx/接続不可)、Brave Search APIキー設定有無の
+ * 判定を検証する。
  */
 @ExtendWith(MockitoExtension.class)
 class ConnectedServiceStatusServiceTest {
@@ -35,6 +38,8 @@ class ConnectedServiceStatusServiceTest {
     private static final String COMFYUI_URL = "http://comfyui.test";
     private static final String PLANTUML_URL = "http://plantuml.test";
     private static final String WORDPRESS_URL = "http://wordpress-provision.test";
+    private static final String PLANTUML_HEALTHCHECK_PATH =
+            "/png/" + PlantUmlEncoder.encode("@startuml\nA->B\n@enduml");
 
     @Mock
     private DataSource dataSource;
@@ -66,10 +71,11 @@ class ConnectedServiceStatusServiceTest {
     }
 
     private void respondSuccessToAll() {
-        ollamaServer.expect(requestTo(OLLAMA_URL + "/")).andRespond(withSuccess());
-        comfyUiServer.expect(requestTo(COMFYUI_URL + "/")).andRespond(withSuccess());
-        plantUmlServer.expect(requestTo(PLANTUML_URL + "/")).andRespond(withSuccess());
-        wordpressServer.expect(requestTo(WORDPRESS_URL + "/")).andRespond(withSuccess());
+        ollamaServer.expect(requestTo(OLLAMA_URL + "/api/tags")).andRespond(withSuccess());
+        comfyUiServer.expect(requestTo(COMFYUI_URL + "/system_stats")).andRespond(withSuccess());
+        plantUmlServer.expect(requestTo(PLANTUML_URL + PLANTUML_HEALTHCHECK_PATH))
+                .andRespond(withSuccess(new byte[]{1, 2, 3}, MediaType.IMAGE_PNG));
+        wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
     }
 
     @Test
@@ -109,12 +115,13 @@ class ConnectedServiceStatusServiceTest {
     void checkAll_接続不可の外部サービスはERRORを返す() throws SQLException {
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.isValid(3)).thenReturn(true);
-        ollamaServer.expect(requestTo(OLLAMA_URL + "/")).andRespond(request -> {
+        ollamaServer.expect(requestTo(OLLAMA_URL + "/api/tags")).andRespond(request -> {
             throw new java.io.IOException("connection refused");
         });
-        comfyUiServer.expect(requestTo(COMFYUI_URL + "/")).andRespond(withSuccess());
-        plantUmlServer.expect(requestTo(PLANTUML_URL + "/")).andRespond(withSuccess());
-        wordpressServer.expect(requestTo(WORDPRESS_URL + "/")).andRespond(withSuccess());
+        comfyUiServer.expect(requestTo(COMFYUI_URL + "/system_stats")).andRespond(withSuccess());
+        plantUmlServer.expect(requestTo(PLANTUML_URL + PLANTUML_HEALTHCHECK_PATH))
+                .andRespond(withSuccess(new byte[]{1, 2, 3}, MediaType.IMAGE_PNG));
+        wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
         when(systemSettingService.getBraveSearchApiKeyStatus())
                 .thenReturn(new SystemSettingService.BraveSearchApiKeyStatus(
                         true, SystemSettingService.SettingSource.DATABASE));
@@ -128,10 +135,11 @@ class ConnectedServiceStatusServiceTest {
     void checkAll_5xx応答の外部サービスはWARNINGを返す() throws SQLException {
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.isValid(3)).thenReturn(true);
-        ollamaServer.expect(requestTo(OLLAMA_URL + "/")).andRespond(withServerError());
-        comfyUiServer.expect(requestTo(COMFYUI_URL + "/")).andRespond(withSuccess());
-        plantUmlServer.expect(requestTo(PLANTUML_URL + "/")).andRespond(withSuccess());
-        wordpressServer.expect(requestTo(WORDPRESS_URL + "/")).andRespond(withSuccess());
+        ollamaServer.expect(requestTo(OLLAMA_URL + "/api/tags")).andRespond(withServerError());
+        comfyUiServer.expect(requestTo(COMFYUI_URL + "/system_stats")).andRespond(withSuccess());
+        plantUmlServer.expect(requestTo(PLANTUML_URL + PLANTUML_HEALTHCHECK_PATH))
+                .andRespond(withSuccess(new byte[]{1, 2, 3}, MediaType.IMAGE_PNG));
+        wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
         when(systemSettingService.getBraveSearchApiKeyStatus())
                 .thenReturn(new SystemSettingService.BraveSearchApiKeyStatus(
                         true, SystemSettingService.SettingSource.DATABASE));
@@ -145,10 +153,11 @@ class ConnectedServiceStatusServiceTest {
     void checkAll_4xx応答の外部サービスはNORMALを返す() throws SQLException {
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.isValid(3)).thenReturn(true);
-        ollamaServer.expect(requestTo(OLLAMA_URL + "/")).andRespond(withStatus(HttpStatus.NOT_FOUND));
-        comfyUiServer.expect(requestTo(COMFYUI_URL + "/")).andRespond(withSuccess());
-        plantUmlServer.expect(requestTo(PLANTUML_URL + "/")).andRespond(withSuccess());
-        wordpressServer.expect(requestTo(WORDPRESS_URL + "/")).andRespond(withSuccess());
+        ollamaServer.expect(requestTo(OLLAMA_URL + "/api/tags")).andRespond(withStatus(HttpStatus.NOT_FOUND));
+        comfyUiServer.expect(requestTo(COMFYUI_URL + "/system_stats")).andRespond(withSuccess());
+        plantUmlServer.expect(requestTo(PLANTUML_URL + PLANTUML_HEALTHCHECK_PATH))
+                .andRespond(withSuccess(new byte[]{1, 2, 3}, MediaType.IMAGE_PNG));
+        wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
         when(systemSettingService.getBraveSearchApiKeyStatus())
                 .thenReturn(new SystemSettingService.BraveSearchApiKeyStatus(
                         true, SystemSettingService.SettingSource.DATABASE));
@@ -156,6 +165,24 @@ class ConnectedServiceStatusServiceTest {
         List<ConnectedServiceStatusResponse> statuses = service.checkAll();
 
         assertEquals(Status.NORMAL, toMapById(statuses).get("ollama"));
+    }
+
+    @Test
+    void checkAll_PlantUMLが空のレスポンスを返せばWARNINGを返す() throws SQLException {
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(true);
+        ollamaServer.expect(requestTo(OLLAMA_URL + "/api/tags")).andRespond(withSuccess());
+        comfyUiServer.expect(requestTo(COMFYUI_URL + "/system_stats")).andRespond(withSuccess());
+        plantUmlServer.expect(requestTo(PLANTUML_URL + PLANTUML_HEALTHCHECK_PATH))
+                .andRespond(withSuccess(new byte[0], MediaType.IMAGE_PNG));
+        wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
+        when(systemSettingService.getBraveSearchApiKeyStatus())
+                .thenReturn(new SystemSettingService.BraveSearchApiKeyStatus(
+                        true, SystemSettingService.SettingSource.DATABASE));
+
+        List<ConnectedServiceStatusResponse> statuses = service.checkAll();
+
+        assertEquals(Status.WARNING, toMapById(statuses).get("plantuml"));
     }
 
     @Test
