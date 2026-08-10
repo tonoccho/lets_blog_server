@@ -9,7 +9,7 @@ import java.util.zip.Deflater;
  * 独自エンコード(raw deflate + 64文字の専用アルファベット)を実装する。
  * PlantUML公式・各種サードパーティ実装(plantuml.com のJSエンコーダ等)と同一のアルゴリズム。
  */
-final class PlantUmlEncoder {
+public final class PlantUmlEncoder {
 
     private static final char[] ALPHABET =
             "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_".toCharArray();
@@ -17,7 +17,7 @@ final class PlantUmlEncoder {
     private PlantUmlEncoder() {
     }
 
-    static String encode(String source) {
+    public static String encode(String source) {
         byte[] deflated = deflate(source.getBytes(StandardCharsets.UTF_8));
         return encode64(deflated);
     }
