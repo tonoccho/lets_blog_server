@@ -279,9 +279,23 @@ describe('validateScheduledPublication', () => {
     });
   });
 
-  it('存在しない日付は拒否する', () => {
-    const result = validateScheduledPublication('2026-02-30T09:00:00Z', NOW);
+  it('日時として成立しない値は拒否する', () => {
+    // 月13は形式(数字2桁)としては通るが、日時としては解釈できない。
+    const result = validateScheduledPublication('2026-13-01T09:00:00Z', NOW);
     expect(result.value).toBeUndefined();
-    expect(result.error).toBeDefined();
+    expect(result.error).toContain('解釈できません');
+  });
+
+  it('2月30日のような繰り上がる日付は、繰り上がり後の日時として扱われる', () => {
+    // JavaScriptのDateは 2026-02-30 を 2026-03-02 として解釈する(不正値にはならない)。
+    // 繰り上がり後がNOWより過去のため、過去日時として拒否される。
+    const result = validateScheduledPublication('2026-02-30T09:00:00Z', NOW);
+    expect(result.error).toContain('未来の日時');
+  });
+
+  it('現在時刻を省略した場合は実時刻と比較する', () => {
+    const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    expect(validateScheduledPublication(future)).toEqual({ value: future });
+    expect(validateScheduledPublication('2000-01-01T00:00:00Z').error).toContain('未来の日時');
   });
 });
