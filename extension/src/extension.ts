@@ -124,6 +124,8 @@ async function commandLogin(context: vscode.ExtensionContext): Promise<void> {
 
     await setApiKey(context, apiKey);
     await setActor(context, result.user);
+    // 別ユーザーでログインし直した場合に、前のユーザーの参照結果が残らないようにする。
+    api.clearResponseCache();
     vscode.window.showInformationMessage(`'${result.user.email}' としてログインしました。`);
   } catch (err) {
     reportError('ログインに失敗しました', err);
@@ -145,6 +147,7 @@ async function commandSetApiKey(context: vscode.ExtensionContext): Promise<void>
   }
   try {
     await setApiKey(context, value);
+    api.clearResponseCache();
     vscode.window.showInformationMessage('APIキーを保存しました。');
   } finally {
     value = '';

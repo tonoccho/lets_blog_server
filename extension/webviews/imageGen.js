@@ -1,6 +1,5 @@
   const vscode = acquireVsCodeApi();
   let currentImage = null;
-  let currentPrompt = '';
 
   function post(command, payload) {
     vscode.postMessage(Object.assign({ command }, payload || {}));
@@ -71,14 +70,14 @@
   function generate() {
     const params = collectParams();
     if (!params) return;
-    currentPrompt = params.prompt;
     document.getElementById('generateButton').disabled = true;
     showMessage('生成しています…', '');
     post('generate', { params });
   }
 
   function renderGenerated(result) {
-    currentImage = result;
+    // base64本体は<img>のsrcへ渡した後は保持しない(Webview側にコピーを残さない)。
+    currentImage = { fileName: result.fileName };
     document.getElementById('generateButton').disabled = false;
     document.getElementById('previewSection').style.display = 'block';
     // mimeTypeはサーバー応答由来のため、既知の画像種別だけをデータURIへ組み立てる。
@@ -91,14 +90,16 @@
     showMessage('生成しました。', 'success');
   }
 
+  // 保存対象の画像データはパネル側が保持しているため、コマンドだけを送る
+  // (数MBのbase64文字列をWebview境界で往復させない)。
   function setAsEyecatch() {
     if (!currentImage) return;
-    post('setAsEyecatch', { imageData: currentImage.dataBase64, fileName: currentImage.fileName, prompt: currentPrompt });
+    post('setAsEyecatch');
   }
 
   function addAsAsset() {
     if (!currentImage) return;
-    post('addAsAsset', { imageData: currentImage.dataBase64, fileName: currentImage.fileName, prompt: currentPrompt });
+    post('addAsAsset');
   }
 
   document.getElementById('generateButton').addEventListener('click', generate);

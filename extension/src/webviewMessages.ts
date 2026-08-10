@@ -50,8 +50,10 @@ export type PlanOutboundCommand =
 export type ImageGenInboundMessage =
   | WebviewMessageBase<'loadOptions'>
   | (WebviewMessageBase<'generate'> & { params: api.ImageGenerationParams })
-  | (WebviewMessageBase<'setAsEyecatch'> & { imageData: string; fileName: string; prompt: string })
-  | (WebviewMessageBase<'addAsAsset'> & { imageData: string; fileName: string; prompt: string });
+  // 生成画像の実体(base64)はパネル側が保持し、Webviewからは送り返さない。
+  // 数MBの文字列をWebview境界で往復させると、その都度コピーが作られるため。
+  | WebviewMessageBase<'setAsEyecatch'>
+  | WebviewMessageBase<'addAsAsset'>;
 
 export type ImageGenOutboundCommand = 'options' | 'generated' | 'eyecatchSet' | 'assetAdded' | 'error';
 

@@ -38,3 +38,6 @@
   .accepted-badge { color: #388e3c; margin-bottom: 8px; }
   #message.error { color: var(--vscode-errorForeground, #d32f2f); }
   #message.success { color: #388e3c; }
+  .pager { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 0.9em; }
+  .pager button { padding: 2px 10px; }
+  .pager button:disabled { opacity: 0.5; cursor: default; }

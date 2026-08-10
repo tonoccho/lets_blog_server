@@ -13,6 +13,7 @@ import {
 import { logger } from './logger';
 import { httpRequest, HttpResponse } from './httpClient';
 import { buildMultipartBody, MultipartPart } from './multipart';
+import { LruCache } from './cache';
 import * as schemas from './schemas';
 
 /** 応答が返らない場合に諦めるまでの既定時間。AI生成は数十秒かかることがあるため長めに取る。 */
@@ -155,6 +156,36 @@ async function requestJson<S extends ZodType>(
 /** JSONボディを送るリクエストのボディファクトリ。 */
 function jsonBody(payload: unknown): RequestSpec['createBody'] {
   return () => ({ body: JSON.stringify(payload), headers: { 'Content-Type': 'application/json' } });
+}
+
+/**
+ * 参照系レスポンスのキャッシュ。同じ一覧をパネルの開閉やコマンド実行のたびに
+ * 取得し直していたのを抑える。変更されうるデータのため有効期間は5分に留め、
+ * 内容を変える操作(issueの割り当て等)の直後は明示的に無効化する。
+ */
+const responseCache = new LruCache<unknown>({ ttlMs: 5 * 60 * 1000, maxEntries: 50 });
+
+/** キャッシュ全体を破棄する(ログイン/ログアウトやサーバー切り替え時に使う)。 */
+export function clearResponseCache(): void {
+  responseCache.clear();
+}
+
+/** 指定プロジェクトの参照系キャッシュを無効化する。 */
+export function invalidateProjectCache(projectId: number): void {
+  responseCache.invalidate(`project:${projectId}`);
+}
+
+/** キャッシュを経由してJSONを取得する。キーが衝突しないようserverUrlとパラメータを含める。 */
+async function cachedRequestJson<S extends ZodType>(
+  cacheKey: string,
+  serverUrl: string,
+  path: string,
+  spec: RequestSpec,
+  schema: S
+): Promise<z.infer<S>> {
+  return responseCache.getOrLoad(`${cacheKey}@${serverUrl}`, () =>
+    requestJson(serverUrl, path, spec, schema)
+  ) as Promise<z.infer<S>>;
 }
 
 /**
@@ -335,7 +366,7 @@ export async function listSites(
   apiKey: string,
   actor?: Actor
 ): Promise<{ id: number; name: string; siteKey: string }[]> {
-  return requestJson(serverUrl, '/api/sites', {
+  return cachedRequestJson('sites', serverUrl, '/api/sites', {
     label: 'listSites',
     headers: buildHeaders(apiKey, actor),
   }, schemas.SiteSummaryListSchema);
@@ -410,10 +441,13 @@ export async function getImageGenerationOptions(
   projectId?: number
 ): Promise<ImageGenerationOptions> {
   const query = projectId ? `?projectId=${projectId}` : '';
-  return requestJson(serverUrl, `/api/ai/image-options${query}`, {
-    label: 'getImageGenerationOptions',
-    headers: buildHeaders(apiKey),
-  }, schemas.ImageGenerationOptionsSchema);
+  return cachedRequestJson(
+    `project:${projectId ?? 'none'}:image-options`,
+    serverUrl,
+    `/api/ai/image-options${query}`,
+    { label: 'getImageGenerationOptions', headers: buildHeaders(apiKey) },
+    schemas.ImageGenerationOptionsSchema
+  );
 }
 
 export async function listUsers(serverUrl: string, apiKey: string): Promise<Actor[]> {
@@ -424,7 +458,7 @@ export async function listUsers(serverUrl: string, apiKey: string): Promise<Acto
 }
 
 export async function listProjects(serverUrl: string, apiKey: string, actor?: Actor): Promise<ProjectSummary[]> {
-  return requestJson(serverUrl, '/api/projects', {
+  return cachedRequestJson('projects', serverUrl, '/api/projects', {
     label: 'listProjects',
     headers: buildHeaders(apiKey, actor),
   }, schemas.ProjectSummaryListSchema);
@@ -436,10 +470,13 @@ export async function getProject(
   actor: Actor | undefined,
   projectId: number
 ): Promise<ProjectDetail> {
-  return requestJson(serverUrl, `/api/projects/${projectId}`, {
-    label: 'getProject',
-    headers: buildHeaders(apiKey, actor),
-  }, schemas.ProjectDetailSchema);
+  return cachedRequestJson(
+    `project:${projectId}:detail`,
+    serverUrl,
+    `/api/projects/${projectId}`,
+    { label: 'getProject', headers: buildHeaders(apiKey, actor) },
+    schemas.ProjectDetailSchema
+  );
 }
 
 /** リポジトリのissue一覧のうち、未割り当て(assigneesが空)のものだけを返す。 */
@@ -450,10 +487,13 @@ export async function listUnassignedIssues(
   projectId: number,
   state: string = 'open'
 ): Promise<RepositoryIssue[]> {
-  const issues = await requestJson(
+  const issues = await cachedRequestJson(
+    `project:${projectId}:issues:${state}`,
     serverUrl,
     `/api/projects/${projectId}/article-plan/issues?state=${state}`,
-    { label: 'listUnassignedIssues', headers: buildHeaders(apiKey, actor) }, schemas.RepositoryIssueListSchema);
+    { label: 'listUnassignedIssues', headers: buildHeaders(apiKey, actor) },
+    schemas.RepositoryIssueListSchema
+  );
   return issues.filter((i) => !i.assignees || i.assignees.length === 0);
 }
 
@@ -506,10 +546,13 @@ export async function listExistingCategories(
   actor: Actor,
   projectId: number
 ): Promise<string[]> {
-  return requestJson(serverUrl, `/api/projects/${projectId}/article-plan/categories`, {
-    label: 'listExistingCategories',
-    headers: buildHeaders(apiKey, actor),
-  }, schemas.CategoryNameListSchema);
+  return cachedRequestJson(
+    `project:${projectId}:categories`,
+    serverUrl,
+    `/api/projects/${projectId}/article-plan/categories`,
+    { label: 'listExistingCategories', headers: buildHeaders(apiKey, actor) },
+    schemas.CategoryNameListSchema
+  );
 }
 
 export async function suggestMetadata(
@@ -559,7 +602,7 @@ export async function acceptArticleStructure(
   issueNumber: number,
   structure: string
 ): Promise<AcceptStructureResult> {
-  return requestJson(
+  const result = await requestJson(
     serverUrl,
     `/api/projects/${projectId}/article-plan/issues/${issueNumber}/accept-structure`,
     {
@@ -567,7 +610,12 @@ export async function acceptArticleStructure(
       method: 'POST',
       headers: buildHeaders(apiKey, actor),
       createBody: jsonBody({ structure }),
-    }, schemas.AcceptStructureResultSchema);
+    },
+    schemas.AcceptStructureResultSchema
+  );
+  // Issue本文を書き換えたため、このプロジェクトの参照系キャッシュを破棄する。
+  invalidateProjectCache(projectId);
+  return result;
 }
 
 export async function assignIssue(
@@ -577,14 +625,19 @@ export async function assignIssue(
   projectId: number,
   issueNumber: number
 ): Promise<AssignIssueResult> {
-  return requestJson(
+  const result = await requestJson(
     serverUrl,
     `/api/projects/${projectId}/article-plan/issues/${issueNumber}/assign`,
     {
       label: 'assignIssue',
       method: 'POST',
       headers: buildHeaders(apiKey, actor, 'application/json'),
-    }, schemas.AssignIssueResultSchema);
+    },
+    schemas.AssignIssueResultSchema
+  );
+  // 割り当て済みになったissueは未割り当て一覧から外れるため、キャッシュを破棄する。
+  invalidateProjectCache(projectId);
+  return result;
 }
 
 export async function renderPreviewHtml(

@@ -15,6 +15,14 @@ const ALLOWED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bm
  * ComfyUI画像を生成し、生成結果を記事の「アイキャッチ」または「アセット」として組み込む。
  */
 export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, ImageGenOutboundCommand> {
+  /**
+   * 直近の生成結果。base64データはここに1つだけ保持し、Webviewへは
+   * プレビュー表示用に一度送るだけにする(保存時に送り返させない)。
+   */
+  private _lastGenerated: api.AiImageResult | undefined;
+  /** 直近の生成に使ったprompt(アセット挿入時のalt文言に使う)。 */
+  private _lastPrompt: string | undefined;
+
 
   static createOrShow(
     context: vscode.ExtensionContext,
@@ -41,9 +49,9 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
       case 'generate':
         return this._handleGenerate(message);
       case 'setAsEyecatch':
-        return this._handleSetAsEyecatch(message);
+        return this._handleSetAsEyecatch();
       case 'addAsAsset':
-        return this._handleAddAsAsset(message);
+        return this._handleAddAsAsset();
     }
   }
 
@@ -59,13 +67,14 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
     const apiKey = await requireApiKey(this.context);
     const actor = await getActor(this.context);
     const result = await api.generateImage(getServerUrl(), apiKey, actor, this._projectId, message.params);
+    this._lastGenerated = result;
+    this._lastPrompt = message.params.prompt;
     this.postMessage('generated', result);
   }
 
-  private async _handleSetAsEyecatch(
-    message: Extract<ImageGenInboundMessage, { command: 'setAsEyecatch' }>
-  ): Promise<void> {
-    const fileName = this._saveToAssets(message.imageData, message.fileName, 'eyecatch');
+  private async _handleSetAsEyecatch(): Promise<void> {
+    const generated = this._requireGenerated();
+    const fileName = this._saveToAssets(generated.dataBase64, generated.fileName, 'eyecatch');
 
     const article = parseArticle(this._editor.document.getText());
     article.data.featured_image = `assets/${fileName}`;
@@ -75,12 +84,11 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
     vscode.window.showInformationMessage(`アイキャッチを 'assets/${fileName}' に設定しました。`);
   }
 
-  private async _handleAddAsAsset(
-    message: Extract<ImageGenInboundMessage, { command: 'addAsAsset' }>
-  ): Promise<void> {
-    const fileName = this._saveToAssets(message.imageData, message.fileName, 'generated-asset');
+  private async _handleAddAsAsset(): Promise<void> {
+    const generated = this._requireGenerated();
+    const fileName = this._saveToAssets(generated.dataBase64, generated.fileName, 'generated-asset');
 
-    const markdownImage = `![${message.prompt}](assets/${fileName})`;
+    const markdownImage = `![${this._lastPrompt ?? ''}](assets/${fileName})`;
     const edit = new vscode.WorkspaceEdit();
     edit.insert(this._editor.document.uri, this._editor.selection.active, markdownImage);
     await vscode.workspace.applyEdit(edit);
@@ -88,6 +96,14 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
 
     this.postMessage('assetAdded', { fileName });
     vscode.window.showInformationMessage(`アセットを 'assets/${fileName}' に追加しました。`);
+  }
+
+  /** 保存対象の生成結果を取り出す。生成前に保存操作が来た場合は明示的に失敗させる。 */
+  private _requireGenerated(): api.AiImageResult {
+    if (!this._lastGenerated) {
+      throw new Error('保存できる生成画像がありません。先に画像を生成してください。');
+    }
+    return this._lastGenerated;
   }
 
   /** Base64画像データを{baseDir}/assets配下へ保存し、生成したファイル名を返す。 */

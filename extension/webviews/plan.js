@@ -8,20 +8,68 @@
     vscode.postMessage(Object.assign({ command }, payload || {}));
   }
 
+  // Issue一覧はページ単位で描画する。件数が多いリポジトリで全件を一度にDOM化すると
+  // パネルの初期表示が重くなるため、1ページ分だけを生成する。
+  const ISSUES_PER_PAGE = 20;
+  let allIssues = [];
+  let issuePage = 0;
+
+  function totalIssuePages() {
+    return Math.max(1, Math.ceil(allIssues.length / ISSUES_PER_PAGE));
+  }
+
   function renderIssueList(issues) {
+    allIssues = issues || [];
+    issuePage = 0;
+    renderIssuePage();
+  }
+
+  function renderIssuePage() {
     const el = document.getElementById('issueList');
-    el.innerHTML = '';
-    if (issues.length === 0) {
-      el.innerHTML = '<div class="empty">未割り当てのissueはありません。</div>';
+    el.textContent = '';
+    if (allIssues.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = '未割り当てのissueはありません。';
+      el.appendChild(empty);
+      updateIssuePager();
       return;
     }
-    issues.forEach((issue) => {
+
+    const start = issuePage * ISSUES_PER_PAGE;
+    allIssues.slice(start, start + ISSUES_PER_PAGE).forEach((issue) => {
       const item = document.createElement('div');
       item.className = 'issue-item';
       item.textContent = '#' + issue.number + ': ' + issue.title;
+      if (selectedIssue && selectedIssue.number === issue.number) {
+        item.classList.add('selected');
+      }
       item.addEventListener('click', () => selectIssue(issue, item));
       el.appendChild(item);
     });
+    updateIssuePager();
+  }
+
+  function updateIssuePager() {
+    const pager = document.getElementById('issuePager');
+    const status = document.getElementById('issuePageStatus');
+    const prev = document.getElementById('issuePrevButton');
+    const next = document.getElementById('issueNextButton');
+    if (!pager) return;
+
+    pager.style.display = allIssues.length > ISSUES_PER_PAGE ? 'flex' : 'none';
+    const start = allIssues.length === 0 ? 0 : issuePage * ISSUES_PER_PAGE + 1;
+    const end = Math.min((issuePage + 1) * ISSUES_PER_PAGE, allIssues.length);
+    status.textContent = start + '-' + end + ' / ' + allIssues.length + ' 件';
+    prev.disabled = issuePage === 0;
+    next.disabled = issuePage >= totalIssuePages() - 1;
+  }
+
+  function changeIssuePage(delta) {
+    const next = issuePage + delta;
+    if (next < 0 || next >= totalIssuePages()) return;
+    issuePage = next;
+    renderIssuePage();
   }
 
   function selectIssue(issue, el) {
@@ -159,6 +207,8 @@
     el.style.display = 'block';
   }
 
+  document.getElementById('issuePrevButton').addEventListener('click', () => changeIssuePage(-1));
+  document.getElementById('issueNextButton').addEventListener('click', () => changeIssuePage(1));
   document.getElementById('sendButton').addEventListener('click', sendMessage);
   document.getElementById('chatInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') sendMessage();
