@@ -889,6 +889,26 @@ export function saveTagDesignSetting(
   });
 }
 
+/** htmlTemplateはAIが構造変更不要と判断した場合に空文字になりうる(その場合は現在の値を維持する)。 */
+export interface GenerateTagDesignResult {
+  htmlTemplate: string;
+  cssContent: string;
+}
+
+export function generateTagDesign(
+  projectId: number,
+  tagType: EmbedTagType,
+  prompt: string,
+  actor: ActorInfo
+): Promise<GenerateTagDesignResult> {
+  return apiFetch<GenerateTagDesignResult>(`/api/projects/${projectId}/tag-design-settings/${tagType}/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+    actor,
+  });
+}
+
 export interface CustomTagTemplate {
   id: number;
   templateName: string;

@@ -1,7 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { saveTagDesignSetting, type EmbedTagType, type SaveTagDesignSettingInput } from "@/lib/apiClient";
+import {
+  saveTagDesignSetting,
+  generateTagDesign,
+  type EmbedTagType,
+  type SaveTagDesignSettingInput,
+  type GenerateTagDesignResult,
+} from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 
 export interface TagDesignFormState {
@@ -43,4 +49,20 @@ export async function saveTagDesignSettingAction(
 
   revalidatePath(`/projects/${projectId}/tags`);
   return { success: true };
+}
+
+export async function generateTagDesignAction(
+  projectId: number,
+  tagType: EmbedTagType,
+  prompt: string
+): Promise<{ data?: GenerateTagDesignResult; error?: string }> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const result = await generateTagDesign(projectId, tagType, prompt, actor);
+    return { data: result };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
 }
