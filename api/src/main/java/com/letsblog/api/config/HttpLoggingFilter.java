@@ -131,6 +131,11 @@ public class HttpLoggingFilter extends OncePerRequestFilter {
                path.startsWith("/api-docs") ||
                path.startsWith("/swagger-ui") ||
                path.equals("/") ||
-               path.isEmpty();
+               path.isEmpty() ||
+               // SSEエンドポイント: ContentCachingResponseWrapperで包むと、非同期処理の
+               // 開始直後にfinallyブロックのcopyBodyToResponse()がその時点のバッファ内容だけで
+               // レスポンスをContent-Length付きでコミットしてしまい、後続のイベント配信が
+               // 届く前にストリームが終了したとクライアントに誤認させてしまう(issue #198)。
+               path.endsWith("/stream");
     }
 }
