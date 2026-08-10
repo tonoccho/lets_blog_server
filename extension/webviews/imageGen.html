@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="{{csp}}">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generate Image</title>
+<link rel="stylesheet" href="{{styleUri}}">
+</head>
+<body>
+<div class="container">
+  <div class="section">
+    <div class="section-title">パラメータ</div>
+    <div class="form-group">
+      <label>prompt</label>
+      <textarea id="prompt" placeholder="生成したい画像の説明"></textarea>
+    </div>
+    <div class="form-group">
+      <label>negative prompt</label>
+      <textarea id="negativePrompt" placeholder="low quality, blurry, watermark, text"></textarea>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>steps</label>
+        <input type="number" id="steps" min="1" max="150" value="20">
+      </div>
+      <div class="form-group">
+        <label>cfg scale</label>
+        <input type="number" id="cfgScale" min="0" max="30" step="0.1" value="7.0">
+      </div>
+      <div class="form-group">
+        <label>seed(空欄でランダム)</label>
+        <input type="text" id="seed" placeholder="">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>sampler</label>
+        <select id="samplerName"></select>
+      </div>
+      <div class="form-group">
+        <label>scheduler</label>
+        <select id="scheduler"></select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>width</label>
+        <input type="number" id="width" min="64" max="2048" step="8" value="512">
+      </div>
+      <div class="form-group">
+        <label>height</label>
+        <input type="number" id="height" min="64" max="2048" step="8" value="512">
+      </div>
+      <div class="form-group">
+        <label>batch size</label>
+        <input type="number" id="batchSize" min="1" max="4" value="1">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>checkpoint</label>
+      <select id="checkpoint"></select>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>LoRA</label>
+        <select id="loraName"><option value="">なし</option></select>
+      </div>
+      <div class="form-group" id="loraWeightGroup">
+        <label>LoRA weight</label>
+        <input type="number" id="loraWeight" min="0" max="2" step="0.1" value="1.0">
+      </div>
+    </div>
+    <button id="generateButton" class="primary">生成</button>
+  </div>
+
+  <div class="section preview-section" id="previewSection">
+    <div class="section-title">プレビュー</div>
+    <img id="previewImage" alt="生成画像プレビュー">
+    <div class="preview-info" id="previewInfo"></div>
+    <div class="button-group">
+      <button id="setAsEyecatchButton" class="primary">アイキャッチとして設定</button>
+      <button id="addAsAssetButton">アセットとして追加</button>
+    </div>
+  </div>
+
+  <div id="message"></div>
+</div>
+<script nonce="{{nonce}}" src="{{scriptUri}}"></script>
+</body>
+</html>

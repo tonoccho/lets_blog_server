@@ -4,102 +4,69 @@ import * as path from 'path';
 import * as api from './apiClient';
 import { Actor, getActor, getProjectId, getServerUrl, requireApiKey } from './config';
 import { LetsBlogFrontMatter, stringifyArticle } from './frontMatter';
-import { describeError } from './errorHandler';
-import { buildScriptedCsp, createNonce } from './webviewSecurity';
-import { logger } from './logger';
+import { messageOf } from './errorHandler';
+import { showSingletonPanel, WebviewPanelBase } from './webviewPanelBase';
+import { PlanInboundMessage, PlanOutboundCommand } from './webviewMessages';
 
 const GITHUB_ISSUE_URL_PATTERN = /^(https:\/\/github\.com\/[^/]+\/[^/]+)\/issues\/\d+$/;
 
-export class PlanPanel {
-  public static currentPanel: PlanPanel | undefined;
-  private readonly _panel: vscode.WebviewPanel;
-  private readonly _context: vscode.ExtensionContext;
+/**
+ * 「Let's Blog: Plan Article」用のWebviewパネル。
+ * GitHub Issueを起点に、壁打ちチャット → 記事構成の提案とIssueへの反映 →
+ * メタデータ提案 → 記事スキャフォールド生成までを担う。
+ */
+export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutboundCommand> {
   private _lastArticlePath: string | undefined;
 
   public static createOrShow(context: vscode.ExtensionContext): void {
-    if (PlanPanel.currentPanel) {
-      PlanPanel.currentPanel._panel.reveal(vscode.ViewColumn.Beside);
-      return;
-    }
-    PlanPanel.currentPanel = new PlanPanel(context);
+    showSingletonPanel('letsBlog.articlePlan', () => new PlanPanel(context));
   }
 
   private constructor(context: vscode.ExtensionContext) {
-    this._context = context;
-    this._panel = vscode.window.createWebviewPanel(
-      'letsBlog.articlePlan',
-      'Article Plan',
-      vscode.ViewColumn.Beside,
-      { enableScripts: true, retainContextWhenHidden: true }
-    );
-    this._panel.onDidDispose(() => this.dispose(), null);
-    this._panel.webview.onDidReceiveMessage((message) => this._handleMessage(message), null);
-    this._panel.webview.html = this._getHtmlContent();
+    super(context, { viewType: 'letsBlog.articlePlan', title: 'Article Plan', assetName: 'plan' });
   }
 
-  private dispose(): void {
-    PlanPanel.currentPanel = undefined;
-    this._panel.dispose();
-  }
-
-  private _sendMessage(command: string, payload: unknown): void {
-    this._panel.webview.postMessage({ command, payload });
-  }
-
-  private async _handleMessage(message: { command: string; [key: string]: unknown }): Promise<void> {
-    try {
-      switch (message.command) {
-        case 'loadIssues':
-          await this._handleLoadIssues();
-          break;
-        case 'loadCategories':
-          await this._handleLoadCategories();
-          break;
-        case 'sendChat':
-          await this._handleSendChat(message as unknown as SendChatMessage);
-          break;
-        case 'suggestStructure':
-          await this._handleSuggestStructure(message as unknown as SuggestStructureMessage);
-          break;
-        case 'acceptStructure':
-          await this._handleAcceptStructure(message as unknown as AcceptStructureMessage);
-          break;
-        case 'suggestMetadata':
-          await this._handleSuggestMetadata(message as unknown as SuggestMetadataMessage);
-          break;
-        case 'approveAndScaffold':
-          await this._handleApproveAndScaffold(message as unknown as ApproveAndScaffoldMessage);
-          break;
-        case 'openArticle':
-          await this._handleOpenArticle();
-          break;
-      }
-    } catch (error) {
-      const description = describeError(error);
-      logger.error(`${this.constructor.name}: ${String(message.command)} に失敗しました: ${description}`, {
-        stack: error instanceof Error ? error.stack : undefined,
-      });
-      this._sendMessage('error', { error: description });
+  protected async handleMessage(message: PlanInboundMessage): Promise<void> {
+    switch (message.command) {
+      case 'loadIssues':
+        return this._handleLoadIssues();
+      case 'loadCategories':
+        return this._handleLoadCategories();
+      case 'sendChat':
+        return this._handleSendChat(message);
+      case 'suggestStructure':
+        return this._handleSuggestStructure(message);
+      case 'acceptStructure':
+        return this._handleAcceptStructure(message);
+      case 'suggestMetadata':
+        return this._handleSuggestMetadata(message);
+      case 'approveAndScaffold':
+        return this._handleApproveAndScaffold(message);
+      case 'openArticle':
+        return this._handleOpenArticle();
     }
   }
 
+  /** APIキー・ログインユーザー・選択中プロジェクトが揃っていることを確認して取り出す。 */
   private async _requireContext(): Promise<{ apiKey: string; actor: Actor; projectId: number }> {
-    const actor = await getActor(this._context);
-    const projectId = getProjectId(this._context);
+    const actor = await getActor(this.context);
+    const projectId = getProjectId(this.context);
     if (!actor || !projectId) {
-      throw new Error('ユーザーまたはプロジェクトが未選択です。「Let\'s Blog: Select User」「Let\'s Blog: Select Project」を先に実行してください。');
+      throw new Error(
+        'ユーザーまたはプロジェクトが未選択です。「Let\'s Blog: Login」「Let\'s Blog: Select Project」を先に実行してください。'
+      );
     }
-    const apiKey = await requireApiKey(this._context);
+    const apiKey = await requireApiKey(this.context);
     return { apiKey, actor, projectId };
   }
 
   private async _handleLoadIssues(): Promise<void> {
     const { apiKey, actor, projectId } = await this._requireContext();
     const issues = await api.listUnassignedIssues(getServerUrl(), apiKey, actor, projectId);
-    this._sendMessage('issueList', { issues });
+    this.postMessage('issueList', { issues });
   }
 
-  private async _handleSendChat(message: SendChatMessage): Promise<void> {
+  private async _handleSendChat(message: Extract<PlanInboundMessage, { command: 'sendChat' }>): Promise<void> {
     const { apiKey, actor, projectId } = await this._requireContext();
     const response = await api.postPlanChat(getServerUrl(), apiKey, actor, projectId, {
       history: message.history,
@@ -107,16 +74,20 @@ export class PlanPanel {
       sessionId: message.sessionId,
       githubIssueNumber: message.issueNumber,
     });
-    this._sendMessage('chatResponse', response);
+    this.postMessage('chatResponse', response);
   }
 
-  private async _handleSuggestStructure(message: SuggestStructureMessage): Promise<void> {
+  private async _handleSuggestStructure(
+    message: Extract<PlanInboundMessage, { command: 'suggestStructure' }>
+  ): Promise<void> {
     const { apiKey, actor, projectId } = await this._requireContext();
     const suggestion = await api.suggestArticleStructure(getServerUrl(), apiKey, actor, projectId, message.history);
-    this._sendMessage('structureSuggestion', suggestion);
+    this.postMessage('structureSuggestion', suggestion);
   }
 
-  private async _handleAcceptStructure(message: AcceptStructureMessage): Promise<void> {
+  private async _handleAcceptStructure(
+    message: Extract<PlanInboundMessage, { command: 'acceptStructure' }>
+  ): Promise<void> {
     const { apiKey, actor, projectId } = await this._requireContext();
     const result = await api.acceptArticleStructure(
       getServerUrl(),
@@ -126,22 +97,26 @@ export class PlanPanel {
       message.issueNumber,
       message.structure
     );
-    this._sendMessage('structureAccepted', result);
+    this.postMessage('structureAccepted', result);
   }
 
   private async _handleLoadCategories(): Promise<void> {
     const { apiKey, actor, projectId } = await this._requireContext();
     const categories = await api.listExistingCategories(getServerUrl(), apiKey, actor, projectId);
-    this._sendMessage('categoryList', { categories });
+    this.postMessage('categoryList', { categories });
   }
 
-  private async _handleSuggestMetadata(message: SuggestMetadataMessage): Promise<void> {
+  private async _handleSuggestMetadata(
+    message: Extract<PlanInboundMessage, { command: 'suggestMetadata' }>
+  ): Promise<void> {
     const { apiKey, actor, projectId } = await this._requireContext();
     const suggestion = await api.suggestMetadata(getServerUrl(), apiKey, actor, projectId, message.history);
-    this._sendMessage('metadataSuggestion', suggestion);
+    this.postMessage('metadataSuggestion', suggestion);
   }
 
-  private async _handleApproveAndScaffold(message: ApproveAndScaffoldMessage): Promise<void> {
+  private async _handleApproveAndScaffold(
+    message: Extract<PlanInboundMessage, { command: 'approveAndScaffold' }>
+  ): Promise<void> {
     const { apiKey, actor, projectId } = await this._requireContext();
     const { issue, metadata } = message;
 
@@ -158,7 +133,7 @@ export class PlanPanel {
         'No'
       );
       if (overwrite !== 'Yes') {
-        this._sendMessage('error', { error: 'キャンセルしました。' });
+        this.postMessage('error', { error: 'キャンセルしました。' });
         return;
       }
     }
@@ -188,14 +163,14 @@ export class PlanPanel {
     try {
       await api.assignIssue(getServerUrl(), apiKey, actor, projectId, issue.number);
     } catch (error) {
-      this._sendMessage('error', {
-        error: `記事ファイルは生成されましたが、issueの割り当てに失敗しました: ${String(error instanceof Error ? error.message : error)}`,
+      this.postMessage('error', {
+        error: `記事ファイルは生成されましたが、issueの割り当てに失敗しました: ${messageOf(error)}`,
       });
       await this._handleOpenArticle();
       return;
     }
 
-    this._sendMessage('scaffoldCreated', {});
+    this.postMessage('scaffoldCreated', {});
   }
 
   private async _handleOpenArticle(): Promise<void> {
@@ -203,364 +178,4 @@ export class PlanPanel {
     const doc = await vscode.workspace.openTextDocument(this._lastArticlePath);
     await vscode.window.showTextDocument(doc);
   }
-
-  private _getHtmlContent(): string {
-    const nonce = createNonce();
-    return `<!DOCTYPE html>
-<html lang="ja">
-<head>
-<meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="${buildScriptedCsp(nonce)}">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Article Plan</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: var(--vscode-font-family, sans-serif); padding: 16px; color: var(--vscode-foreground); }
-  .container { max-width: 800px; }
-  .section { margin-bottom: 20px; }
-  .section-title { font-weight: bold; margin-bottom: 8px; }
-  .issue-list { border: 1px solid var(--vscode-panel-border, #ccc); max-height: 160px; overflow-y: auto; }
-  .issue-item { padding: 8px; border-bottom: 1px solid var(--vscode-panel-border, #eee); cursor: pointer; }
-  .issue-item:hover { background: var(--vscode-list-hoverBackground, #f5f5f5); }
-  .issue-item.selected { background: var(--vscode-list-activeSelectionBackground, #e3f2fd); }
-  .empty { padding: 8px; opacity: 0.7; }
-  .chat-container { border: 1px solid var(--vscode-panel-border, #ccc); height: 280px; display: flex; flex-direction: column; }
-  .messages { flex: 1; overflow-y: auto; padding: 10px; }
-  .message { margin-bottom: 8px; padding: 8px; border-radius: 4px; white-space: pre-wrap; }
-  .message.user { background: var(--vscode-list-activeSelectionBackground, #e3f2fd); text-align: right; }
-  .message.assistant { background: var(--vscode-editorWidget-background, #f5f5f5); }
-  .chat-input { display: flex; gap: 5px; padding: 8px; border-top: 1px solid var(--vscode-panel-border, #ccc); }
-  .chat-input input { flex: 1; padding: 6px; }
-  button { padding: 6px 14px; cursor: pointer; }
-  button.primary { background: var(--vscode-button-background, #007acc); color: var(--vscode-button-foreground, #fff); border: none; }
-  .metadata-form { border: 1px solid var(--vscode-panel-border, #ccc); padding: 10px; }
-  .form-group { margin-bottom: 10px; }
-  .form-group label { display: block; margin-bottom: 4px; font-weight: bold; }
-  .form-group input, .form-group select { width: 100%; padding: 6px; }
-  .form-group select { margin-bottom: 6px; }
-  .button-group { display: flex; gap: 10px; }
-  .structure-box { border: 1px solid var(--vscode-panel-border, #ccc); padding: 10px; }
-  .structure-box textarea {
-    width: 100%; min-height: 200px; padding: 8px; font-family: var(--vscode-editor-font-family, monospace);
-    background: var(--vscode-input-background, #fff); color: var(--vscode-input-foreground, inherit);
-  }
-  .hint { opacity: 0.7; font-size: 0.9em; margin-bottom: 8px; }
-  .category-checkboxes {
-    border: 1px solid var(--vscode-panel-border, #ccc); padding: 8px; max-height: 140px; overflow-y: auto;
-    background: var(--vscode-input-background, #fff); margin-bottom: 6px;
-  }
-  .category-checkboxes label { display: block; font-weight: normal; margin-bottom: 4px; }
-  .category-checkboxes input[type="checkbox"] { margin-right: 6px; }
-  .accepted-badge { color: #388e3c; margin-bottom: 8px; }
-  #message.error { color: var(--vscode-errorForeground, #d32f2f); }
-  #message.success { color: #388e3c; }
-</style>
-</head>
-<body>
-<div class="container">
-  <div class="section">
-    <div class="section-title">未割り当てのIssue</div>
-    <div class="issue-list" id="issueList"><div class="empty">読み込み中...</div></div>
-  </div>
-
-  <div class="section" id="chatSection" style="display: none;">
-    <div class="section-title">壁打ちチャット</div>
-    <div class="chat-container">
-      <div class="messages" id="messages"></div>
-      <div class="chat-input">
-        <input type="text" id="chatInput" placeholder="メッセージを入力...">
-        <button id="sendButton">送信</button>
-      </div>
-    </div>
-    <button id="suggestButton" class="primary" style="margin-top: 10px;">メタデータを提案</button>
-  </div>
-
-  <div class="section" id="structureSection" style="display: none;">
-    <div class="section-title">記事構成の提案(Issueへ反映)</div>
-    <div class="structure-box">
-      <div class="hint">チャットの内容から見出し構成を提案し、承認するとGitHub Issueの本文に書き込まれます。スキャフォールド生成時にこの内容が記事本文として使われます。</div>
-      <button id="suggestStructureButton" class="primary" style="margin-bottom: 10px;">構成案を生成</button>
-      <div id="structureAcceptedBadge" class="accepted-badge" style="display: none;"></div>
-      <textarea id="structureTextarea" placeholder="構成案はまだありません。「構成案を生成」を押してください。"></textarea>
-      <div class="button-group" style="margin-top: 10px;">
-        <button id="acceptStructureButton">この内容でIssueを更新</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="section" id="metadataSection" style="display: none;">
-    <div class="section-title">提案メタデータ</div>
-    <div class="metadata-form">
-      <div class="form-group">
-        <label>タイトル(候補から選択、または下欄を直接編集)</label>
-        <select id="titleOptions"></select>
-        <input type="text" id="titleInput">
-      </div>
-      <div class="form-group">
-        <label>スラッグ(候補から選択、または下欄を直接編集)</label>
-        <select id="slugOptions"></select>
-        <input type="text" id="slugInput">
-      </div>
-      <div class="form-group">
-        <label>カテゴリ(既存から選択)</label>
-        <div class="category-checkboxes" id="categoryCheckboxes"><span class="hint">読み込み中...</span></div>
-      </div>
-      <div class="form-group">
-        <label>新規カテゴリ(任意、カンマ区切り。既存にないものだけ入力してください)</label>
-        <input type="text" id="newCategoriesInput">
-      </div>
-      <div class="form-group"><label>タグ (カンマ区切り)</label><input type="text" id="tagsInput"></div>
-      <div class="button-group">
-        <button id="approveButton" class="primary">承認してスキャフォールド生成</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="message" style="margin-top: 16px; display: none;"></div>
-</div>
-
-<script nonce="${nonce}">
-  const vscode = acquireVsCodeApi();
-  let selectedIssue = null;
-  let sessionId = undefined;
-  let chatHistory = [];
-  let existingCategories = [];
-
-  function post(command, payload) {
-    vscode.postMessage(Object.assign({ command }, payload || {}));
-  }
-
-  function renderIssueList(issues) {
-    const el = document.getElementById('issueList');
-    el.innerHTML = '';
-    if (issues.length === 0) {
-      el.innerHTML = '<div class="empty">未割り当てのissueはありません。</div>';
-      return;
-    }
-    issues.forEach((issue) => {
-      const item = document.createElement('div');
-      item.className = 'issue-item';
-      item.textContent = '#' + issue.number + ': ' + issue.title;
-      item.addEventListener('click', () => selectIssue(issue, item));
-      el.appendChild(item);
-    });
-  }
-
-  function selectIssue(issue, el) {
-    selectedIssue = issue;
-    sessionId = undefined;
-    chatHistory = [];
-    document.getElementById('messages').innerHTML = '';
-    document.querySelectorAll('.issue-item').forEach((n) => n.classList.remove('selected'));
-    el.classList.add('selected');
-    document.getElementById('chatSection').style.display = 'block';
-    document.getElementById('structureSection').style.display = 'block';
-    document.getElementById('structureTextarea').value = '';
-    document.getElementById('structureAcceptedBadge').style.display = 'none';
-    document.getElementById('metadataSection').style.display = 'none';
-  }
-
-  function addMessage(role, content) {
-    chatHistory.push({ role, content });
-    const messagesDiv = document.getElementById('messages');
-    const msgEl = document.createElement('div');
-    msgEl.className = 'message ' + role;
-    msgEl.textContent = content;
-    messagesDiv.appendChild(msgEl);
-    messagesDiv.scrollTop = messagesDiv.scrollHeight;
-  }
-
-  function sendMessage() {
-    const input = document.getElementById('chatInput');
-    const text = input.value.trim();
-    if (!text || !selectedIssue) return;
-    addMessage('user', text);
-    input.value = '';
-    post('sendChat', { history: chatHistory.slice(0, -1), message: text, sessionId, issueNumber: selectedIssue.number });
-  }
-
-  function requestStructureSuggestion() {
-    if (!selectedIssue || chatHistory.length === 0) {
-      showMessage('先にチャットで壁打ちしてください。', 'error');
-      return;
-    }
-    post('suggestStructure', { history: chatHistory });
-  }
-
-  function acceptStructure() {
-    const structure = document.getElementById('structureTextarea').value.trim();
-    if (!selectedIssue || !structure) {
-      showMessage('構成案が空です。', 'error');
-      return;
-    }
-    post('acceptStructure', { issueNumber: selectedIssue.number, structure });
-  }
-
-  function requestMetadataSuggestion() {
-    post('suggestMetadata', { history: chatHistory });
-  }
-
-  function renderCategoryCheckboxes(selected) {
-    const container = document.getElementById('categoryCheckboxes');
-    container.innerHTML = '';
-    if (existingCategories.length === 0) {
-      container.innerHTML = '<span class="hint">既存カテゴリを取得できませんでした(サイト未紐付け等)。新規カテゴリ欄に直接入力してください。</span>';
-      return;
-    }
-    existingCategories.forEach((name) => {
-      const label = document.createElement('label');
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.value = name;
-      checkbox.checked = (selected || []).some((s) => s.toLowerCase() === name.toLowerCase());
-      label.appendChild(checkbox);
-      label.appendChild(document.createTextNode(' ' + name));
-      container.appendChild(label);
-    });
-  }
-
-  function renderOptionList(selectId, targetInputId, options) {
-    const select = document.getElementById(selectId);
-    select.innerHTML = '';
-    if (!options || options.length === 0) {
-      const placeholder = document.createElement('option');
-      placeholder.textContent = '候補がありません。下欄に直接入力してください。';
-      placeholder.disabled = true;
-      placeholder.selected = true;
-      select.appendChild(placeholder);
-      return;
-    }
-    options.forEach((value) => {
-      const option = document.createElement('option');
-      option.value = value;
-      option.textContent = value;
-      select.appendChild(option);
-    });
-    select.onchange = () => {
-      document.getElementById(targetInputId).value = select.value;
-    };
-  }
-
-  function showMetadataForm(suggestion) {
-    const titles = suggestion.titles || [];
-    const slugs = suggestion.slugs || [];
-    renderOptionList('titleOptions', 'titleInput', titles);
-    renderOptionList('slugOptions', 'slugInput', slugs);
-    document.getElementById('titleInput').value = titles[0] || '';
-    document.getElementById('slugInput').value = slugs[0] || '';
-    const suggestedCategories = suggestion.categories || [];
-    renderCategoryCheckboxes(suggestedCategories);
-    const unmatched = suggestedCategories.filter(
-      (c) => !existingCategories.some((e) => e.toLowerCase() === c.toLowerCase())
-    );
-    document.getElementById('newCategoriesInput').value = unmatched.join(', ');
-    document.getElementById('tagsInput').value = (suggestion.tags || []).join(', ');
-    document.getElementById('metadataSection').style.display = 'block';
-  }
-
-  function approveMetadata() {
-    const title = document.getElementById('titleInput').value.trim();
-    const slug = document.getElementById('slugInput').value.trim();
-    const checkedCategories = Array.from(
-      document.querySelectorAll('#categoryCheckboxes input[type=checkbox]:checked')
-    ).map((el) => el.value);
-    const newCategories = document.getElementById('newCategoriesInput').value.split(',').map((s) => s.trim()).filter(Boolean);
-    const categories = Array.from(new Set(checkedCategories.concat(newCategories)));
-    const tags = document.getElementById('tagsInput').value.split(',').map((s) => s.trim()).filter(Boolean);
-    if (!title || !slug) {
-      showMessage('タイトルとスラッグは必須です。', 'error');
-      return;
-    }
-    post('approveAndScaffold', { issue: selectedIssue, metadata: { title, slug, categories, tags } });
-  }
-
-  function showMessage(text, type) {
-    const el = document.getElementById('message');
-    el.textContent = text;
-    el.className = type || '';
-    el.style.display = 'block';
-  }
-
-  document.getElementById('sendButton').addEventListener('click', sendMessage);
-  document.getElementById('chatInput').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') sendMessage();
-  });
-  document.getElementById('suggestStructureButton').addEventListener('click', requestStructureSuggestion);
-  document.getElementById('acceptStructureButton').addEventListener('click', acceptStructure);
-  document.getElementById('suggestButton').addEventListener('click', requestMetadataSuggestion);
-  document.getElementById('approveButton').addEventListener('click', approveMetadata);
-
-  window.addEventListener('message', (event) => {
-    const { command, payload } = event.data;
-    switch (command) {
-      case 'issueList':
-        renderIssueList(payload.issues);
-        break;
-      case 'categoryList':
-        existingCategories = payload.categories || [];
-        renderCategoryCheckboxes([]);
-        break;
-      case 'chatResponse':
-        addMessage('assistant', payload.reply);
-        sessionId = payload.sessionId;
-        break;
-      case 'structureSuggestion':
-        document.getElementById('structureTextarea').value = payload.structure || '';
-        document.getElementById('structureAcceptedBadge').style.display = 'none';
-        break;
-      case 'structureAccepted':
-        const badge = document.getElementById('structureAcceptedBadge');
-        badge.textContent = 'Issue #' + payload.issueNumber + ' の本文を更新しました。';
-        badge.style.display = 'block';
-        showMessage('記事構成をIssueへ反映しました。', 'success');
-        break;
-      case 'metadataSuggestion':
-        showMetadataForm(payload);
-        break;
-      case 'scaffoldCreated':
-        showMessage('記事のスキャフォールドを生成しました。', 'success');
-        setTimeout(() => post('openArticle'), 500);
-        break;
-      case 'error':
-        showMessage(payload.error, 'error');
-        break;
-    }
-  });
-
-  post('loadIssues');
-  post('loadCategories');
-</script>
-</body>
-</html>`;
-  }
-}
-
-interface SendChatMessage {
-  command: 'sendChat';
-  history: api.PlanChatMessage[];
-  message: string;
-  sessionId?: number;
-  issueNumber: number;
-}
-
-interface SuggestStructureMessage {
-  command: 'suggestStructure';
-  history: api.PlanChatMessage[];
-}
-
-interface AcceptStructureMessage {
-  command: 'acceptStructure';
-  issueNumber: number;
-  structure: string;
-}
-
-interface SuggestMetadataMessage {
-  command: 'suggestMetadata';
-  history: api.PlanChatMessage[];
-}
-
-interface ApproveAndScaffoldMessage {
-  command: 'approveAndScaffold';
-  issue: api.RepositoryIssue;
-  metadata: { title: string; slug: string; categories: string[]; tags: string[] };
 }

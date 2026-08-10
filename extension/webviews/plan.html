@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="{{csp}}">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Article Plan</title>
+<link rel="stylesheet" href="{{styleUri}}">
+</head>
+<body>
+<div class="container">
+  <div class="section">
+    <div class="section-title">未割り当てのIssue</div>
+    <div class="issue-list" id="issueList"><div class="empty">読み込み中...</div></div>
+  </div>
+
+  <div class="section" id="chatSection" style="display: none;">
+    <div class="section-title">壁打ちチャット</div>
+    <div class="chat-container">
+      <div class="messages" id="messages"></div>
+      <div class="chat-input">
+        <input type="text" id="chatInput" placeholder="メッセージを入力...">
+        <button id="sendButton">送信</button>
+      </div>
+    </div>
+    <button id="suggestButton" class="primary" style="margin-top: 10px;">メタデータを提案</button>
+  </div>
+
+  <div class="section" id="structureSection" style="display: none;">
+    <div class="section-title">記事構成の提案(Issueへ反映)</div>
+    <div class="structure-box">
+      <div class="hint">チャットの内容から見出し構成を提案し、承認するとGitHub Issueの本文に書き込まれます。スキャフォールド生成時にこの内容が記事本文として使われます。</div>
+      <button id="suggestStructureButton" class="primary" style="margin-bottom: 10px;">構成案を生成</button>
+      <div id="structureAcceptedBadge" class="accepted-badge" style="display: none;"></div>
+      <textarea id="structureTextarea" placeholder="構成案はまだありません。「構成案を生成」を押してください。"></textarea>
+      <div class="button-group" style="margin-top: 10px;">
+        <button id="acceptStructureButton">この内容でIssueを更新</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="section" id="metadataSection" style="display: none;">
+    <div class="section-title">提案メタデータ</div>
+    <div class="metadata-form">
+      <div class="form-group">
+        <label>タイトル(候補から選択、または下欄を直接編集)</label>
+        <select id="titleOptions"></select>
+        <input type="text" id="titleInput">
+      </div>
+      <div class="form-group">
+        <label>スラッグ(候補から選択、または下欄を直接編集)</label>
+        <select id="slugOptions"></select>
+        <input type="text" id="slugInput">
+      </div>
+      <div class="form-group">
+        <label>カテゴリ(既存から選択)</label>
+        <div class="category-checkboxes" id="categoryCheckboxes"><span class="hint">読み込み中...</span></div>
+      </div>
+      <div class="form-group">
+        <label>新規カテゴリ(任意、カンマ区切り。既存にないものだけ入力してください)</label>
+        <input type="text" id="newCategoriesInput">
+      </div>
+      <div class="form-group"><label>タグ (カンマ区切り)</label><input type="text" id="tagsInput"></div>
+      <div class="button-group">
+        <button id="approveButton" class="primary">承認してスキャフォールド生成</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="message" style="margin-top: 16px; display: none;"></div>
+</div>
+
+<script nonce="{{nonce}}" src="{{scriptUri}}"></script>
+</body>
+</html>
