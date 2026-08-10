@@ -9,7 +9,6 @@ import com.letsblog.api.domain.BulkOperationType;
 import java.time.LocalDateTime;
 
 public record BulkOperationLogResponse(
-        Long id,
         BulkOperationType operationType,
         BulkOperationSourceType sourceType,
         String value,
@@ -24,15 +23,14 @@ public record BulkOperationLogResponse(
         BulkOperationLogLevel level,
         String errorMessage,
         String stackTrace,
-        boolean isReplay,
         LocalDateTime createdAt
 ) {
     public static BulkOperationLogResponse from(BulkOperationLog log) {
         return new BulkOperationLogResponse(
-                log.getId(), log.getOperationType(), log.getSourceType(), log.getValue(),
+                log.getOperationType(), log.getSourceType(), log.getValue(),
                 log.getCategorySlug(), log.getCategoryParentSlug(), log.getCategoryTargetSlug(),
                 log.getCategoryDescription(),
                 log.getOriginalFilename(), log.getPostStatus(), log.getEnvironment(), log.getStatus(), log.getLevel(),
-                log.getErrorMessage(), log.getStackTrace(), log.isReplay(), log.getCreatedAt());
+                log.getErrorMessage(), log.getStackTrace(), log.getCreatedAt());
     }
 }

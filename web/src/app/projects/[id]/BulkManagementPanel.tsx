@@ -1,12 +1,11 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import Link from "next/link";
 import type {
   Project,
   ProjectEnvironment,
   BulkOperationLog,
-  BulkOperationLogFilter,
-  BulkOperationLogLevel,
   BulkOperationType,
   TermComparisonPage,
   StatusComparisonPage,
@@ -14,7 +13,6 @@ import type {
 } from "@/lib/apiClient";
 import {
   runBulkOperationUploadAction,
-  replayBulkOperationsAction,
   fetchTermComparisonAction,
   fetchStatusComparisonAction,
   fetchPostComparisonAction,
@@ -24,7 +22,6 @@ import { formatDateTime } from "@/lib/formatDate";
 import { TermComparisonTable } from "./TermComparisonTable";
 import { PluginThemeComparisonTable } from "./PluginThemeComparisonTable";
 import { PostComparisonTable } from "./PostComparisonTable";
-import { ClearLogsButton } from "./ClearLogsButton";
 
 type Tab = "CATEGORY" | "PLUGIN" | "THEME" | "TAG" | "POST";
 
@@ -78,32 +75,16 @@ const STATUS_COLOR: Record<string, string> = {
   FAILED: "text-red-600",
 };
 
-const LEVEL_LABEL: Record<BulkOperationLogLevel, string> = {
-  INFO: "情報",
-  WARNING: "警告",
-  ERROR: "エラー",
-};
-
-const LEVEL_COLOR: Record<BulkOperationLogLevel, string> = {
-  INFO: "text-green-600",
-  WARNING: "text-amber-600",
-  ERROR: "text-red-600",
-};
-
 const initialState: BulkOperationState = {};
 
 export function BulkManagementPanel({
   projectId,
   project,
-  logs,
-  logFilter,
   categoryPage,
   timezone,
 }: {
   projectId: number;
   project: Project;
-  logs: BulkOperationLog[];
-  logFilter: BulkOperationLogFilter;
   categoryPage: TermComparisonPage;
   timezone: string | null;
 }) {
@@ -115,8 +96,6 @@ export function BulkManagementPanel({
   const [themePage, setThemePage] = useState<StatusComparisonPage | null>(null);
   const [postPage, setPostPage] = useState<PostComparisonPage | null>(null);
   const [loadingTab, setLoadingTab] = useState<Tab | null>(null);
-  const [replayState, setReplayState] = useState<BulkOperationState | null>(null);
-  const [replayPendingEnv, setReplayPendingEnv] = useState<ProjectEnvironment | null>(null);
 
   const managedEnvironments: { value: ProjectEnvironment; label: string }[] = (
     [
@@ -147,20 +126,6 @@ export function BulkManagementPanel({
       setPostPage(await fetchPostComparisonAction(projectId, "post", 0));
       setLoadingTab(null);
     }
-  }
-
-  async function handleReplay(environment: ProjectEnvironment) {
-    if (
-      !window.confirm(
-        `${ENVIRONMENT_LABEL[environment]}環境へ、これまでの作業ログ(成功分)をすべて再適用します。よろしいですか?`
-      )
-    ) {
-      return;
-    }
-    setReplayPendingEnv(environment);
-    const result = await replayBulkOperationsAction(projectId, environment);
-    setReplayState(result);
-    setReplayPendingEnv(null);
   }
 
   if (managedEnvironments.length === 0) {
@@ -240,131 +205,12 @@ export function BulkManagementPanel({
           ))}
       </div>
 
-      <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
-        <h3 className="mb-1 font-medium text-neutral-700 dark:text-neutral-300">ロールフォワード</h3>
-        <p className="mb-3 text-sm text-neutral-500 dark:text-neutral-400">
-          過去に成功した一括管理の内容を、指定した環境へまとめて再適用します(例: ローカル環境を再構築した後に使用)。
-        </p>
-        <div className="mb-3 flex flex-wrap gap-2">
-          {managedEnvironments.map((env) => (
-            <button
-              key={env.value}
-              type="button"
-              onClick={() => handleReplay(env.value)}
-              disabled={replayPendingEnv === env.value}
-              className="rounded bg-neutral-100 dark:bg-neutral-800 px-3 py-1.5 text-sm text-neutral-700 dark:text-neutral-300 disabled:opacity-50"
-            >
-              {replayPendingEnv === env.value ? "実行中…" : `${env.label}へロールフォワード`}
-            </button>
-          ))}
-        </div>
-        {replayState?.error && <p className="text-sm text-red-600">{replayState.error}</p>}
-        {replayState?.results && <ResultList results={replayState.results} timezone={timezone} />}
-      </div>
-
-      <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
-        <div className="mb-2 flex items-center justify-between">
-          <h3 className="font-medium text-neutral-700 dark:text-neutral-300">作業ログ</h3>
-          <ClearLogsButton projectId={projectId} />
-        </div>
-
-        <form
-          method="get"
-          className="mb-3 flex flex-wrap items-end gap-2 text-sm"
-        >
-          <label className="flex flex-col gap-1">
-            <span className="text-neutral-600 dark:text-neutral-400">操作</span>
-            <select
-              name="logOperationType"
-              defaultValue={logFilter.operationType ?? ""}
-              className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1.5 text-sm"
-            >
-              <option value="">すべて</option>
-              {(Object.keys(OPERATION_LABEL) as BulkOperationType[]).map((type) => (
-                <option key={type} value={type}>
-                  {OPERATION_LABEL[type]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-neutral-600 dark:text-neutral-400">環境</span>
-            <select
-              name="logEnvironment"
-              defaultValue={logFilter.environment ?? ""}
-              className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1.5 text-sm"
-            >
-              <option value="">すべて</option>
-              {(Object.keys(ENVIRONMENT_LABEL) as ProjectEnvironment[]).map((env) => (
-                <option key={env} value={env}>
-                  {ENVIRONMENT_LABEL[env]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-neutral-600 dark:text-neutral-400">レベル</span>
-            <select
-              name="logLevel"
-              defaultValue={logFilter.level ?? ""}
-              className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1.5 text-sm"
-            >
-              <option value="">すべて</option>
-              {(Object.keys(LEVEL_LABEL) as BulkOperationLogLevel[]).map((level) => (
-                <option key={level} value={level}>
-                  {LEVEL_LABEL[level]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button type="submit" className="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white">
-            絞り込み
-          </button>
-        </form>
-
-        {logs.length === 0 ? (
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">該当する実行履歴はありません。</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="border-b border-neutral-200 dark:border-neutral-800 text-neutral-500 dark:text-neutral-400">
-                <tr>
-                  <th className="px-2 py-1.5">日時</th>
-                  <th className="px-2 py-1.5">操作</th>
-                  <th className="px-2 py-1.5">値</th>
-                  <th className="px-2 py-1.5">環境</th>
-                  <th className="px-2 py-1.5">レベル</th>
-                  <th className="px-2 py-1.5">結果</th>
-                  <th className="px-2 py-1.5">再適用</th>
-                  <th className="px-2 py-1.5">詳細</th>
-                </tr>
-              </thead>
-              <tbody>
-                {logs.map((log) => (
-                  <tr key={log.id} className="border-b border-neutral-100 dark:border-neutral-800 last:border-0 cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:shadow-sm transition-colors">
-                    <td className="px-2 py-1.5 text-neutral-500 dark:text-neutral-400">
-                      {formatDateTime(log.createdAt, timezone)}
-                    </td>
-                    <td className="px-2 py-1.5">{OPERATION_LABEL[log.operationType]}</td>
-                    <td className="px-2 py-1.5">{describeLogValue(log)}</td>
-                    <td className="px-2 py-1.5">{ENVIRONMENT_LABEL[log.environment]}</td>
-                    <td className={`px-2 py-1.5 ${LEVEL_COLOR[log.level]}`}>{LEVEL_LABEL[log.level]}</td>
-                    <td className={`px-2 py-1.5 ${STATUS_COLOR[log.status]}`}>
-                      {STATUS_LABEL[log.status]}
-                      {log.status === "FAILED" && log.errorMessage && (
-                        <span className="ml-1 text-xs text-neutral-400">({log.errorMessage})</span>
-                      )}
-                    </td>
-                    <td className="px-2 py-1.5 text-neutral-500 dark:text-neutral-400">{log.isReplay ? "はい" : "-"}</td>
-                    <td className="px-2 py-1.5">
-                      {log.status === "FAILED" && <CopyLogButton log={log} timezone={timezone} />}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+      <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 text-sm text-neutral-500 dark:text-neutral-400">
+        一括管理操作の実行履歴は
+        <Link href="/operation-logs?type=OPERATION" className="mx-1 text-blue-600 hover:underline">
+          操作ログ
+        </Link>
+        から確認できます。
       </div>
     </div>
   );
@@ -446,8 +292,8 @@ function describeLogValue(log: BulkOperationLog): string {
 function ResultList({ results, timezone }: { results: BulkOperationLog[]; timezone: string | null }) {
   return (
     <ul className="mt-2 space-y-0.5 text-sm">
-      {results.map((r) => (
-        <li key={r.id} className={`flex items-center gap-2 ${STATUS_COLOR[r.status]}`}>
+      {results.map((r, index) => (
+        <li key={`${r.environment}-${index}`} className={`flex items-center gap-2 ${STATUS_COLOR[r.status]}`}>
           <span>
             {ENVIRONMENT_LABEL[r.environment]}: {STATUS_LABEL[r.status]}
             {r.status === "FAILED" && r.errorMessage ? `(${r.errorMessage})` : ""}

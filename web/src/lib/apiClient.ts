@@ -1481,7 +1481,6 @@ export type BulkOperationStatus = "SUCCESS" | "SKIPPED" | "FAILED";
 export type BulkOperationLogLevel = "INFO" | "WARNING" | "ERROR";
 
 export interface BulkOperationLog {
-  id: number;
   operationType: BulkOperationType;
   sourceType: BulkOperationSourceType;
   value: string;
@@ -1496,7 +1495,6 @@ export interface BulkOperationLog {
   level: BulkOperationLogLevel;
   errorMessage: string | null;
   stackTrace: string | null;
-  isReplay: boolean;
   createdAt: string;
 }
 
@@ -1858,45 +1856,6 @@ export function runBulkOperationUpload(
     body: formData,
     actor,
   });
-}
-
-export function replayBulkOperations(
-  projectId: number,
-  input: { environment: ProjectEnvironment },
-  actor?: ActorInfo
-): Promise<BulkOperationLog[]> {
-  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/replay`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-    actor,
-  });
-}
-
-export interface BulkOperationLogFilter {
-  operationType?: BulkOperationType;
-  environment?: ProjectEnvironment;
-  level?: BulkOperationLogLevel;
-}
-
-export function listBulkOperationLogs(
-  projectId: number,
-  actor?: ActorInfo,
-  filter?: BulkOperationLogFilter
-): Promise<BulkOperationLog[]> {
-  const query = new URLSearchParams();
-  if (filter?.operationType) query.set("operationType", filter.operationType);
-  if (filter?.environment) query.set("environment", filter.environment);
-  if (filter?.level) query.set("level", filter.level);
-  const qs = query.toString();
-  return apiFetch<BulkOperationLog[]>(
-    `/api/projects/${projectId}/bulk-management/logs${qs ? `?${qs}` : ""}`,
-    { actor }
-  );
-}
-
-export function clearBulkOperationLogs(projectId: number, actor?: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/projects/${projectId}/bulk-management/logs`, { method: "DELETE", actor });
 }
 
 export interface ProjectUser {

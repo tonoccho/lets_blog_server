@@ -13,7 +13,6 @@ import com.letsblog.api.dto.ProjectResponse;
 import com.letsblog.api.dto.ProjectUpdateRequest;
 import com.letsblog.api.dto.ProjectUserResponse;
 import com.letsblog.api.dto.ReconcileStateRequest;
-import com.letsblog.api.dto.ReplayBulkOperationRequest;
 import com.letsblog.api.dto.StatusComparisonPage;
 import com.letsblog.api.dto.SyncEnvironmentRequest;
 import com.letsblog.api.dto.TermComparisonPage;
@@ -91,7 +90,6 @@ class ProjectControllerTest {
 
     private BulkOperationLog buildLog() {
         BulkOperationLog log = new BulkOperationLog();
-        log.setId(1L);
         log.setProjectId(1L);
         log.setOperationType(BulkOperationType.CATEGORY_CREATE);
         log.setSourceType(BulkOperationSourceType.SLUG);
@@ -288,37 +286,6 @@ class ProjectControllerTest {
 
         assertThrows(com.letsblog.api.service.GeneratedImageNotFoundException.class,
                 () -> controller.uploadAssetImage(1L, 99L));
-    }
-
-    @Test
-    void replayBulkOperations_admin権限があれば実行できる() {
-        ProjectController controller = controller();
-        ReplayBulkOperationRequest request = new ReplayBulkOperationRequest("local");
-        when(bulkManagementService.replay(1L, "local", 0L)).thenReturn(List.of(buildLog()));
-
-        List<?> response = controller.replayBulkOperations(1L, request);
-
-        assertEquals(1, response.size());
-        verify(adminAuthorizationService).requireAdmin();
-    }
-
-    @Test
-    void listBulkOperationLogs_admin権限があれば取得できる() {
-        ProjectController controller = controller();
-        when(bulkManagementService.listLogs(1L)).thenReturn(List.of(buildLog()));
-
-        List<?> response = controller.listBulkOperationLogs(1L, null, null, null);
-
-        assertEquals(1, response.size());
-        verify(adminAuthorizationService).requireAdmin();
-    }
-
-    @Test
-    void listBulkOperationLogs_admin権限がなければForbidden() {
-        ProjectController controller = controller();
-        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
-
-        assertThrows(ForbiddenException.class, () -> controller.listBulkOperationLogs(1L, null, null, null));
     }
 
     @Test

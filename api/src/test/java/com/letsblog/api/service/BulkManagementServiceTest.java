@@ -10,7 +10,6 @@ import com.letsblog.api.domain.Site;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient.BulkApplyCommand;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient.BulkApplyResult;
-import com.letsblog.api.repository.BulkOperationLogRepository;
 import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.SiteRepository;
 import org.junit.jupiter.api.Test;
@@ -20,13 +19,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
 
 import java.io.IOException;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -41,9 +39,6 @@ class BulkManagementServiceTest {
 
     @Mock
     private SiteRepository siteRepository;
-
-    @Mock
-    private BulkOperationLogRepository bulkOperationLogRepository;
 
     @Mock
     private WordPressBulkManagementClient bulkManagementClient;
@@ -65,7 +60,7 @@ class BulkManagementServiceTest {
 
     private BulkManagementService service() {
         return new BulkManagementService(
-                projectRepository, siteRepository, bulkOperationLogRepository, bulkManagementClient,
+                projectRepository, siteRepository, bulkManagementClient,
                 bulkUploadStorageService, siteService, sshOperations, restOperations, cmsAdapterFactory);
     }
 
@@ -89,10 +84,6 @@ class BulkManagementServiceTest {
         site.setWpSlug(slug);
         site.setWpDbName("wp_" + slug);
         return site;
-    }
-
-    private void stubSave() {
-        when(bulkOperationLogRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
     }
 
     // ---- applyToEnvironment: CATEGORY_CREATE ----
@@ -143,7 +134,6 @@ class BulkManagementServiceTest {
         when(bulkManagementClient.apply(new BulkApplyCommand(
                 "local-site", "category_create", "お知らせ", "oshirase", null, null, null)))
                 .thenReturn(BulkApplyResult.success());
-        stubSave();
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.CATEGORY_CREATE, "お知らせ", "oshirase", null, null, null, 9L);
@@ -165,7 +155,6 @@ class BulkManagementServiceTest {
         when(bulkManagementClient.apply(new BulkApplyCommand(
                 "local-site", "category_create", "サブお知らせ", "sub-oshirase", "oshirase", "説明文", null)))
                 .thenReturn(BulkApplyResult.success());
-        stubSave();
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.CATEGORY_CREATE, "サブお知らせ", "sub-oshirase", "oshirase", "説明文",
@@ -186,7 +175,6 @@ class BulkManagementServiceTest {
         when(bulkManagementClient.apply(new BulkApplyCommand(
                 "local-site", "plugin_install", "akismet", null, null, null, null)))
                 .thenReturn(BulkApplyResult.failed(new RuntimeException("接続に失敗しました")));
-        stubSave();
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.PLUGIN_INSTALL, "akismet", null, null, null, null, 9L);
@@ -205,7 +193,6 @@ class BulkManagementServiceTest {
         when(bulkManagementClient.apply(new BulkApplyCommand(
                 "local-site", "theme_install", "twentytwentyfour", null, null, null, null)))
                 .thenReturn(BulkApplyResult.skipped());
-        stubSave();
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.THEME_INSTALL, "twentytwentyfour", null, null, null, null, 9L);
@@ -229,7 +216,6 @@ class BulkManagementServiceTest {
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
-        stubSave();
 
         service.applyToEnvironment(1L, "local", BulkOperationType.PLUGIN_ACTIVATE, "akismet", null, null, null, null, 9L);
         service.applyToEnvironment(1L, "local", BulkOperationType.PLUGIN_DEACTIVATE, "akismet", null, null, null, null, 9L);
@@ -251,7 +237,6 @@ class BulkManagementServiceTest {
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
-        stubSave();
 
         service.applyToEnvironment(1L, "local", BulkOperationType.THEME_ACTIVATE, "twentytwentyfour", null, null, null, null, 9L);
         service.applyToEnvironment(1L, "local", BulkOperationType.THEME_DELETE, "twentytwentyfour", null, null, null, null, 9L);
@@ -282,7 +267,6 @@ class BulkManagementServiceTest {
         when(bulkManagementClient.apply(new BulkApplyCommand(
                 "local-site", "category_edit", "新お知らせ", "new-oshirase", "parent-slug", "更新後の説明", "old-oshirase")))
                 .thenReturn(BulkApplyResult.success());
-        stubSave();
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.CATEGORY_EDIT, "新お知らせ", "new-oshirase", "parent-slug", "更新後の説明",
@@ -310,7 +294,6 @@ class BulkManagementServiceTest {
         when(bulkManagementClient.apply(new BulkApplyCommand(
                 "local-site", "category_delete", "oshirase", null, null, null, "oshirase")))
                 .thenReturn(BulkApplyResult.success());
-        stubSave();
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.CATEGORY_DELETE, null, null, null, null, "oshirase", 9L);
@@ -329,7 +312,6 @@ class BulkManagementServiceTest {
         when(bulkManagementClient.apply(new BulkApplyCommand(
                 "local-site", "tag_create", "新着", "shinchaku", null, null, null)))
                 .thenReturn(BulkApplyResult.success());
-        stubSave();
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.TAG_CREATE, "新着", "shinchaku", null, null, null, 9L);
@@ -383,7 +365,6 @@ class BulkManagementServiceTest {
                 .thenReturn(new BulkUploadStorageService.StoredZip("1/abc.zip", "abc", "custom-theme.zip"));
         when(bulkManagementClient.applyZip(any(), eq("theme_install"), any(byte[].class), eq("custom-theme.zip")))
                 .thenReturn(BulkApplyResult.success());
-        stubSave();
 
         List<BulkOperationLog> results = service.executeFromUpload(1L, BulkOperationType.THEME_INSTALL, file, 9L);
 
@@ -415,7 +396,6 @@ class BulkManagementServiceTest {
                 .thenReturn(BulkApplyResult.success());
         when(sshOperations.applyZip(eq(sshCreds()), eq(BulkOperationType.THEME_INSTALL), any(byte[].class), eq("custom-theme.zip")))
                 .thenReturn(new com.letsblog.api.cms.ssh.WordPressSshOperations.SshApplyResult("SUCCESS", null, null));
-        stubSave();
 
         List<BulkOperationLog> results = service.executeFromUpload(1L, BulkOperationType.THEME_INSTALL, file, 9L);
 
@@ -442,158 +422,12 @@ class BulkManagementServiceTest {
                 .thenReturn(new BulkUploadStorageService.StoredZip("1/abc.zip", "abc", "custom-theme.zip"));
         when(bulkManagementClient.applyZip(any(), eq("theme_install"), any(byte[].class), eq("custom-theme.zip")))
                 .thenReturn(BulkApplyResult.success());
-        stubSave();
 
         List<BulkOperationLog> results = service.executeFromUpload(1L, BulkOperationType.THEME_INSTALL, file, 9L);
 
         assertEquals(1, results.size());
         assertEquals("local", results.get(0).getEnvironment());
         verify(sshOperations, never()).applyZip(any(), any(), any(), any());
-    }
-
-    // ---- replay ----
-
-    @Test
-    void replay_成功ログのみを古い順に対象環境へ再適用する() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, 20L, null);
-        Site testSite = buildManagedSite(20L, "test-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
-
-        BulkOperationLog log1 = buildHistoryLog(BulkOperationType.CATEGORY_CREATE, BulkOperationSourceType.SLUG, "お知らせ");
-        log1.setCategorySlug("oshirase");
-        when(bulkOperationLogRepository.findByProjectIdAndStatusOrderByCreatedAtAsc(1L, BulkOperationStatus.SUCCESS))
-                .thenReturn(List.of(log1));
-        when(bulkManagementClient.apply(new BulkApplyCommand(
-                "test-site", "category_create", "お知らせ", "oshirase", null, null, null)))
-                .thenReturn(BulkApplyResult.success());
-        stubSave();
-
-        List<BulkOperationLog> results = service.replay(1L, "test", 9L);
-
-        assertEquals(1, results.size());
-        assertEquals("test", results.get(0).getEnvironment());
-        assertTrue(results.get(0).isReplay());
-        verify(bulkManagementClient).apply(new BulkApplyCommand(
-                "test-site", "category_create", "お知らせ", "oshirase", null, null, null));
-    }
-
-    @Test
-    void replay_カテゴリの親_対象_説明も再適用時に引き継がれる() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-
-        BulkOperationLog log1 = buildHistoryLog(BulkOperationType.CATEGORY_EDIT, BulkOperationSourceType.SLUG, "新お知らせ");
-        log1.setCategorySlug("new-oshirase");
-        log1.setCategoryParentSlug("parent-slug");
-        log1.setCategoryTargetSlug("old-oshirase");
-        log1.setCategoryDescription("説明文");
-        when(bulkOperationLogRepository.findByProjectIdAndStatusOrderByCreatedAtAsc(1L, BulkOperationStatus.SUCCESS))
-                .thenReturn(List.of(log1));
-        when(bulkManagementClient.apply(new BulkApplyCommand(
-                "local-site", "category_edit", "新お知らせ", "new-oshirase", "parent-slug", "説明文", "old-oshirase")))
-                .thenReturn(BulkApplyResult.success());
-        stubSave();
-
-        List<BulkOperationLog> results = service.replay(1L, "local", 9L);
-
-        assertEquals("new-oshirase", results.get(0).getCategorySlug());
-        verify(bulkManagementClient).apply(new BulkApplyCommand(
-                "local-site", "category_edit", "新お知らせ", "new-oshirase", "parent-slug", "説明文", "old-oshirase"));
-    }
-
-    @Test
-    void replay_ZIP方式は保存済みファイルを読み出して再適用する() throws IOException {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-
-        BulkOperationLog log1 = buildHistoryLog(BulkOperationType.PLUGIN_INSTALL, BulkOperationSourceType.ZIP, "custom.zip");
-        log1.setStoragePath("1/abc.zip");
-        log1.setOriginalFilename("custom.zip");
-        when(bulkOperationLogRepository.findByProjectIdAndStatusOrderByCreatedAtAsc(1L, BulkOperationStatus.SUCCESS))
-                .thenReturn(List.of(log1));
-        byte[] content = new byte[]{9, 9, 9};
-        when(bulkUploadStorageService.load("1/abc.zip")).thenReturn(content);
-        when(bulkManagementClient.applyZip("local-site", "plugin_install", content, "custom.zip"))
-                .thenReturn(BulkApplyResult.success());
-        stubSave();
-
-        List<BulkOperationLog> results = service.replay(1L, "local", 9L);
-
-        assertEquals(BulkOperationStatus.SUCCESS, results.get(0).getStatus());
-        verify(bulkManagementClient).applyZip("local-site", "plugin_install", content, "custom.zip");
-    }
-
-    @Test
-    void replay_保存済みzipが見つからなければFAILEDとして記録し処理を続行する() throws IOException {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-
-        BulkOperationLog log1 = buildHistoryLog(BulkOperationType.PLUGIN_INSTALL, BulkOperationSourceType.ZIP, "custom.zip");
-        log1.setStoragePath("1/missing.zip");
-        log1.setOriginalFilename("custom.zip");
-        BulkOperationLog log2 = buildHistoryLog(BulkOperationType.CATEGORY_CREATE, BulkOperationSourceType.SLUG, "お知らせ");
-        log2.setCategorySlug("oshirase");
-        when(bulkOperationLogRepository.findByProjectIdAndStatusOrderByCreatedAtAsc(1L, BulkOperationStatus.SUCCESS))
-                .thenReturn(List.of(log1, log2));
-        when(bulkUploadStorageService.load("1/missing.zip")).thenThrow(new IOException("not found"));
-        when(bulkManagementClient.apply(new BulkApplyCommand(
-                "local-site", "category_create", "お知らせ", "oshirase", null, null, null)))
-                .thenReturn(BulkApplyResult.success());
-        stubSave();
-
-        List<BulkOperationLog> results = service.replay(1L, "local", 9L);
-
-        assertEquals(2, results.size());
-        assertEquals(BulkOperationStatus.FAILED, results.get(0).getStatus());
-        assertEquals(BulkOperationStatus.SUCCESS, results.get(1).getStatus());
-        verify(bulkManagementClient, never()).applyZip(any(), any(), any(), any());
-    }
-
-    @Test
-    void replay_不正なenvironmentは例外() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-
-        assertThrows(IllegalArgumentException.class, () -> service.replay(1L, "invalid", 9L));
-    }
-
-    @Test
-    void replay_環境にサイトが紐付いていなければ例外() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-
-        assertThrows(IllegalArgumentException.class, () -> service.replay(1L, "test", 9L));
-    }
-
-    @Test
-    void replay_MEDIA_UPLOADなど再現非対応の種別はスキップされる() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, 20L, null);
-        Site testSite = buildManagedSite(20L, "test-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
-
-        BulkOperationLog mediaLog = buildHistoryLog(BulkOperationType.MEDIA_UPLOAD, BulkOperationSourceType.SLUG, "image.png");
-        when(bulkOperationLogRepository.findByProjectIdAndStatusOrderByCreatedAtAsc(1L, BulkOperationStatus.SUCCESS))
-                .thenReturn(List.of(mediaLog));
-
-        List<BulkOperationLog> results = service.replay(1L, "test", 9L);
-
-        assertTrue(results.isEmpty());
-        verify(bulkManagementClient, never()).apply(any());
     }
 
     // ---- uploadImageToAllEnvironments ----
@@ -621,7 +455,6 @@ class BulkManagementServiceTest {
                 .thenReturn(new com.letsblog.api.cms.MediaUploadResult("1", "https://local.test/cat.png"));
         when(adapter.uploadMedia(eq(testCreds), eq("cat.png"), eq("image/png"), any()))
                 .thenThrow(new RuntimeException("接続に失敗しました"));
-        stubSave();
 
         List<BulkOperationLog> results = service.uploadImageToAllEnvironments(
                 1L, new byte[]{1, 2, 3}, "cat.png", "image/png", 9L);
@@ -648,7 +481,6 @@ class BulkManagementServiceTest {
         when(cmsAdapterFactory.resolve(any())).thenReturn(adapter);
         when(adapter.uploadMedia(any(), any(), any(), any()))
                 .thenReturn(new com.letsblog.api.cms.MediaUploadResult("1", "https://local.test/cat.png"));
-        stubSave();
 
         List<BulkOperationLog> results = service.uploadImageToAllEnvironments(
                 1L, new byte[]{1}, "cat.png", "image/png", 9L);
@@ -668,7 +500,6 @@ class BulkManagementServiceTest {
         when(siteService.getCredentials("local-site")).thenReturn(creds);
         com.letsblog.api.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(adapter);
-        stubSave();
 
         BulkOperationLog result = service.deletePostAtEnvironment(1L, "local", site, "101", "post", "hello", 9L);
 
@@ -688,7 +519,6 @@ class BulkManagementServiceTest {
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(adapter);
         org.mockito.Mockito.doThrow(new RuntimeException("削除に失敗しました"))
                 .when(adapter).deletePost(any(), any(), any());
-        stubSave();
 
         BulkOperationLog result = service.deletePostAtEnvironment(1L, "local", site, "101", "post", "hello", 9L);
 
@@ -705,7 +535,6 @@ class BulkManagementServiceTest {
         when(siteService.getCredentials("local-site")).thenReturn(creds);
         com.letsblog.api.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(adapter);
-        stubSave();
 
         BulkOperationLog result = service.updatePostStatusAtEnvironment(
                 1L, "local", site, "101", "post", "hello", "publish", 9L);
@@ -749,7 +578,6 @@ class BulkManagementServiceTest {
                 .thenReturn(new SiteService.SiteDataSource(false, restCreds(), null));
         when(restOperations.applyPlugin(restCreds(), BulkOperationType.PLUGIN_ACTIVATE, "akismet"))
                 .thenReturn(com.letsblog.api.cms.ssh.WordPressSshOperations.SshApplyResult.success());
-        stubSave();
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.PLUGIN_ACTIVATE, "akismet", null, null, null, null, 9L);
@@ -770,7 +598,6 @@ class BulkManagementServiceTest {
                 .thenReturn(new SiteService.SiteDataSource(false, restCreds(), sshCreds()));
         when(sshOperations.applyPluginTheme(sshCreds(), BulkOperationType.PLUGIN_ACTIVATE, "akismet"))
                 .thenReturn(com.letsblog.api.cms.ssh.WordPressSshOperations.SshApplyResult.success());
-        stubSave();
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.PLUGIN_ACTIVATE, "akismet", null, null, null, null, 9L);
@@ -795,7 +622,6 @@ class BulkManagementServiceTest {
         when(restOperations.applyTerm(eq(restCreds()), eq(BulkOperationType.CATEGORY_DELETE), eq("oshirase"),
                 any(), any(), any(), eq("oshirase")))
                 .thenReturn(com.letsblog.api.cms.ssh.WordPressSshOperations.SshApplyResult.success());
-        stubSave();
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.CATEGORY_DELETE, null, null, null, null, "oshirase", 9L);
@@ -818,7 +644,6 @@ class BulkManagementServiceTest {
                 .thenReturn(new SiteService.SiteDataSource(false, restCreds(), sshCreds()));
         when(sshOperations.applyPluginTheme(sshCreds(), BulkOperationType.THEME_ACTIVATE, "twentytwentyfour"))
                 .thenReturn(com.letsblog.api.cms.ssh.WordPressSshOperations.SshApplyResult.failed(new RuntimeException("SSH接続に失敗しました")));
-        stubSave();
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.THEME_ACTIVATE, "twentytwentyfour", null, null, null, null, 9L);
@@ -838,7 +663,6 @@ class BulkManagementServiceTest {
                 .thenReturn(new SiteService.SiteDataSource(false, null, sshCreds()));
         when(sshOperations.applyPluginTheme(sshCreds(), BulkOperationType.PLUGIN_ACTIVATE, "akismet"))
                 .thenReturn(com.letsblog.api.cms.ssh.WordPressSshOperations.SshApplyResult.success());
-        stubSave();
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.PLUGIN_ACTIVATE, "akismet", null, null, null, null, 9L);
@@ -859,7 +683,6 @@ class BulkManagementServiceTest {
                 .thenReturn(new SiteService.SiteDataSource(false, restCreds(), sshCreds()));
         when(sshOperations.applyPluginTheme(sshCreds(), BulkOperationType.THEME_ACTIVATE, "twentytwentyfour"))
                 .thenReturn(com.letsblog.api.cms.ssh.WordPressSshOperations.SshApplyResult.success());
-        stubSave();
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.THEME_ACTIVATE, "twentytwentyfour", null, null, null, null, 9L);
@@ -884,42 +707,10 @@ class BulkManagementServiceTest {
     }
 
     @Test
-    void logFetchFailure_FAILEDステータスでログを保存する() {
+    void logFetchFailure_例外を投げずに完了する() {
         BulkManagementService service = service();
-        stubSave();
 
-        service.logFetchFailure(1L, BulkOperationType.CATEGORY_FETCH, "test", "Connection refused", "java.io.IOException: Connection refused\n\tat ...");
-
-        org.mockito.ArgumentCaptor<BulkOperationLog> captor = org.mockito.ArgumentCaptor.forClass(BulkOperationLog.class);
-        verify(bulkOperationLogRepository).save(captor.capture());
-        BulkOperationLog saved = captor.getValue();
-        assertEquals(BulkOperationType.CATEGORY_FETCH, saved.getOperationType());
-        assertEquals(BulkOperationStatus.FAILED, saved.getStatus());
-        assertEquals("test", saved.getEnvironment());
-        assertEquals("Connection refused", saved.getErrorMessage());
-        assertEquals("java.io.IOException: Connection refused\n\tat ...", saved.getStackTrace());
-    }
-
-    @Test
-    void listLogs_リポジトリの結果をそのまま返す() {
-        BulkManagementService service = service();
-        BulkOperationLog log = buildHistoryLog(BulkOperationType.CATEGORY_CREATE, BulkOperationSourceType.SLUG, "お知らせ");
-        when(bulkOperationLogRepository.findByProjectIdOrderByCreatedAtDesc(1L)).thenReturn(List.of(log));
-
-        List<BulkOperationLog> results = service.listLogs(1L);
-
-        assertEquals(1, results.size());
-    }
-
-    private BulkOperationLog buildHistoryLog(BulkOperationType type, BulkOperationSourceType sourceType, String value) {
-        BulkOperationLog log = new BulkOperationLog();
-        log.setProjectId(1L);
-        log.setOperationType(type);
-        log.setSourceType(sourceType);
-        log.setValue(value);
-        log.setEnvironment("local");
-        log.setStatus(BulkOperationStatus.SUCCESS);
-        log.setCreatedAt(LocalDateTime.now());
-        return log;
+        assertDoesNotThrow(() -> service.logFetchFailure(1L, BulkOperationType.CATEGORY_FETCH, "test",
+                "Connection refused", "java.io.IOException: Connection refused\n\tat ..."));
     }
 }

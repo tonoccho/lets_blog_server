@@ -193,7 +193,6 @@ class PostComparisonServiceTest {
 
     private BulkOperationLog buildLog() {
         BulkOperationLog log = new BulkOperationLog();
-        log.setId(1L);
         log.setProjectId(1L);
         log.setOperationType(BulkOperationType.POST_DELETE);
         log.setEnvironment("local");

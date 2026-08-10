@@ -34,8 +34,6 @@ import {
   deletePluginEverywhere,
   deleteThemeEverywhere,
   runBulkOperationUpload,
-  replayBulkOperations,
-  clearBulkOperationLogs,
   listOllamaModels,
   selectOllamaModel,
   installOllamaModel,
@@ -572,30 +570,6 @@ export async function deleteSlugEverywhereAction(
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
-}
-
-export async function replayBulkOperationsAction(
-  projectId: number,
-  environment: ProjectEnvironment
-): Promise<BulkOperationState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-
-  try {
-    const results = await replayBulkOperations(projectId, { environment }, actor);
-    revalidatePath(`/projects/${projectId}`);
-    return { success: true, results };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-export async function clearBulkOperationLogsAction(projectId: number): Promise<void> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-
-  await clearBulkOperationLogs(projectId, actor);
-  revalidatePath(`/projects/${projectId}`);
 }
 
 export interface AiModelActionState {
