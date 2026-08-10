@@ -1,10 +1,19 @@
 import * as vscode from 'vscode';
+import { z, ZodType } from 'zod';
 import { LocalImageReference, guessImageMimeType } from './frontMatter';
 import { Actor } from './config';
-import { ApiError, NetworkError, TimeoutError, withRetry } from './errorHandler';
+import {
+  ApiError,
+  NetworkError,
+  ResponseValidationError,
+  TimeoutError,
+  messageOf,
+  withRetry,
+} from './errorHandler';
 import { logger } from './logger';
 import { httpRequest, HttpResponse } from './httpClient';
 import { buildMultipartBody, MultipartPart } from './multipart';
+import * as schemas from './schemas';
 
 /** 応答が返らない場合に諦めるまでの既定時間。AI生成は数十秒かかることがあるため長めに取る。 */
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -101,16 +110,93 @@ async function request(serverUrl: string, path: string, spec: RequestSpec): Prom
   );
 }
 
-/** JSONレスポンスを返すエンドポイント用のヘルパー。 */
-async function requestJson<T>(serverUrl: string, path: string, spec: RequestSpec): Promise<T> {
+/**
+ * JSONレスポンスを返すエンドポイント用のヘルパー。
+ * 受信直後にZodスキーマで検証し、想定外の形式をそのまま拡張内部へ持ち込まないようにする。
+ * 戻り値の型はスキーマから推論されるため、スキーマと型定義が乖離しない。
+ */
+async function requestJson<S extends ZodType>(
+  serverUrl: string,
+  path: string,
+  spec: RequestSpec,
+  schema: S
+): Promise<z.infer<S>> {
   const res = await request(serverUrl, path, spec);
-  return (await res.json()) as T;
+  const url = `${serverUrl}${path}`;
+
+  let payload: unknown;
+  try {
+    payload = await res.json();
+  } catch (error) {
+    throw new ResponseValidationError(`${spec.label}: 応答をJSONとして解釈できませんでした`, url, [
+      messageOf(error),
+    ]);
+  }
+
+  const parsed = schema.safeParse(payload);
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map(
+      (issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`
+    );
+    logger.error(`${spec.label}: レスポンス検証に失敗しました`, { url, issues, payload });
+    throw new ResponseValidationError(`${spec.label}: 応答の形式が想定と異なります`, url, issues);
+  }
+  return parsed.data;
 }
 
 /** JSONボディを送るリクエストのボディファクトリ。 */
 function jsonBody(payload: unknown): RequestSpec['createBody'] {
   return () => ({ body: JSON.stringify(payload), headers: { 'Content-Type': 'application/json' } });
 }
+
+/**
+ * レスポンス型はschemas.tsの検証スキーマから導出する。従来ここで手書きしていた
+ * interfaceと実際の検証内容が食い違わないよう、単一の定義元として再エクスポートする。
+ */
+import type {
+  AcceptStructureResult,
+  AiDraftResult,
+  AiImageResult,
+  AiSectionResult,
+  AiTagsResult,
+  AssignIssueResult,
+  ImageGenerationOptions,
+  LoginResult,
+  PlanChatResult,
+  ProjectDetail,
+  ProjectSite,
+  ProjectSummary,
+  PublishResult,
+  RepositoryIssue,
+  SiteSummary,
+  SourceReference,
+  SuggestMetadataResult,
+  SuggestStructureResult,
+  ThemeCssResult,
+} from './schemas';
+
+export type {
+  Actor,
+  AcceptStructureResult,
+  AiDraftResult,
+  AiImageResult,
+  AiSectionResult,
+  AiTagsResult,
+  AssignIssueResult,
+  ImageGenerationOptions,
+  LoginResult,
+  PlanChatResult,
+  ProjectDetail,
+  ProjectSite,
+  ProjectSummary,
+  PublishResult,
+  RepositoryIssue,
+  SiteSummary,
+  SourceReference,
+  SuggestMetadataResult,
+  SuggestStructureResult,
+  ThemeCssResult,
+};
 
 export interface PublishParams {
   site: string;
@@ -125,23 +211,6 @@ export interface PublishParams {
   featuredImageFilename?: string;
 }
 
-export interface PublishResult {
-  wpPostId: string;
-  wpPostUrl: string;
-  status: string;
-}
-
-export interface SourceReference {
-  title: string;
-  url: string;
-}
-
-export interface AiDraftResult {
-  result: string;
-  sources: SourceReference[];
-  searchNote: string | null;
-}
-
 export interface AiSectionParams {
   mode: 'body' | 'lead' | 'lead-subsections';
   heading?: string;
@@ -150,24 +219,6 @@ export interface AiSectionParams {
   subsectionHeadings?: string[];
   history?: PlanChatMessage[];
   message?: string;
-}
-
-export interface AiSectionResult {
-  result: string;
-  sources: SourceReference[];
-  searchNote: string | null;
-}
-
-export interface AiTagsResult {
-  categories: string[];
-  tags: string[];
-}
-
-export interface AiImageResult {
-  id: number;
-  fileName: string;
-  dataBase64: string;
-  mimeType: string;
 }
 
 export interface ImageGenerationParams {
@@ -186,40 +237,26 @@ export interface ImageGenerationParams {
   loraWeight?: number;
 }
 
-export interface ImageGenerationOptions {
-  checkpoints: string[];
-  selectedCheckpoint: string;
-  samplers: string[];
-  schedulers: string[];
-  loras: string[];
-}
-
-export interface LoginResult {
-  user: Actor;
-  twoFactorRequired: boolean;
-  apiKey: string | null;
-}
-
 /**
  * メールアドレス/パスワードでログインする。ログイン前はAPIキーを持たないため、
  * このエンドポイントはサーバー側でX-API-Keyヘッダなしでの呼び出しが許可されている。
  * 2FA未設定ユーザーはこの時点でapiKeyが発行される。
  */
 export async function login(serverUrl: string, email: string, password: string): Promise<LoginResult> {
-  return requestJson<LoginResult>(serverUrl, '/api/auth/login', {
+  return requestJson(serverUrl, '/api/auth/login', {
     label: 'login',
     method: 'POST',
     createBody: jsonBody({ email, password, label: 'vscode' }),
-  });
+  }, schemas.LoginResultSchema);
 }
 
 /** ログイン2段階目。login()でtwoFactorRequired=trueだった場合にTOTPコードを検証し、apiKeyを取得する。 */
 export async function verifyTotpLogin(serverUrl: string, userId: number, code: string): Promise<LoginResult> {
-  return requestJson<LoginResult>(serverUrl, '/api/auth/totp/verify', {
+  return requestJson(serverUrl, '/api/auth/totp/verify', {
     label: 'verifyTotpLogin',
     method: 'POST',
     createBody: jsonBody({ userId, code, label: 'vscode' }),
-  });
+  }, schemas.LoginResultSchema);
 }
 
 export async function publishPost(
@@ -228,7 +265,7 @@ export async function publishPost(
   params: PublishParams,
   actor?: Actor
 ): Promise<PublishResult> {
-  return requestJson<PublishResult>(serverUrl, '/api/posts/publish', {
+  return requestJson(serverUrl, '/api/posts/publish', {
     label: 'publishPost',
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
@@ -267,7 +304,7 @@ export async function publishPost(
       const multipart = buildMultipartBody(parts);
       return { body: multipart.body, headers: { 'Content-Type': multipart.contentType } };
     },
-  });
+  }, schemas.PublishResultSchema);
 }
 
 /** 投稿を削除する(WordPressの場合、既定でゴミ箱へ移動する。完全削除は行わない)。 */
@@ -290,10 +327,10 @@ export async function listSites(
   apiKey: string,
   actor?: Actor
 ): Promise<{ id: number; name: string; siteKey: string }[]> {
-  return requestJson<{ id: number; name: string; siteKey: string }[]>(serverUrl, '/api/sites', {
+  return requestJson(serverUrl, '/api/sites', {
     label: 'listSites',
     headers: buildHeaders(apiKey, actor),
-  });
+  }, schemas.SiteSummaryListSchema);
 }
 
 export async function askAi(
@@ -303,14 +340,14 @@ export async function askAi(
   text: string,
   actor?: Actor
 ): Promise<AiDraftResult> {
-  return requestJson<AiDraftResult>(serverUrl, '/api/ai/draft', {
+  return requestJson(serverUrl, '/api/ai/draft', {
     label: 'askAi',
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
     createBody: jsonBody({ mode, text }),
     // 生成結果を返すだけでサーバー状態を変えないため、再試行して差し支えない。
     retryable: true,
-  });
+  }, schemas.AiGenerationResultSchema);
 }
 
 export async function generateSection(
@@ -319,13 +356,13 @@ export async function generateSection(
   actor: Actor | undefined,
   params: AiSectionParams
 ): Promise<AiSectionResult> {
-  return requestJson<AiSectionResult>(serverUrl, '/api/ai/section', {
+  return requestJson(serverUrl, '/api/ai/section', {
     label: 'generateSection',
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
     createBody: jsonBody(params),
     retryable: true,
-  });
+  }, schemas.AiGenerationResultSchema);
 }
 
 export async function suggestTags(
@@ -334,13 +371,13 @@ export async function suggestTags(
   text: string,
   actor?: Actor
 ): Promise<AiTagsResult> {
-  return requestJson<AiTagsResult>(serverUrl, '/api/ai/tags', {
+  return requestJson(serverUrl, '/api/ai/tags', {
     label: 'suggestTags',
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
     createBody: jsonBody({ text }),
     retryable: true,
-  });
+  }, schemas.AiTagsResultSchema);
 }
 
 export async function generateImage(
@@ -351,12 +388,12 @@ export async function generateImage(
   params: ImageGenerationParams
 ): Promise<AiImageResult> {
   // 生成画像はサーバー側に保存されるため、再試行すると重複した生成結果が残る。
-  return requestJson<AiImageResult>(serverUrl, '/api/ai/image', {
+  return requestJson(serverUrl, '/api/ai/image', {
     label: 'generateImage',
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
     createBody: jsonBody({ projectId, ...params }),
-  });
+  }, schemas.AiImageResultSchema);
 }
 
 export async function getImageGenerationOptions(
@@ -365,48 +402,24 @@ export async function getImageGenerationOptions(
   projectId?: number
 ): Promise<ImageGenerationOptions> {
   const query = projectId ? `?projectId=${projectId}` : '';
-  return requestJson<ImageGenerationOptions>(serverUrl, `/api/ai/image-options${query}`, {
+  return requestJson(serverUrl, `/api/ai/image-options${query}`, {
     label: 'getImageGenerationOptions',
     headers: buildHeaders(apiKey),
-  });
+  }, schemas.ImageGenerationOptionsSchema);
 }
 
 export async function listUsers(serverUrl: string, apiKey: string): Promise<Actor[]> {
-  return requestJson<Actor[]>(serverUrl, '/api/users', {
+  return requestJson(serverUrl, '/api/users', {
     label: 'listUsers',
     headers: buildHeaders(apiKey),
-  });
-}
-
-export interface ProjectSummary {
-  id: number;
-  name: string;
-  slug: string;
-  githubRepository?: string | null;
+  }, schemas.ActorListSchema);
 }
 
 export async function listProjects(serverUrl: string, apiKey: string, actor?: Actor): Promise<ProjectSummary[]> {
-  return requestJson<ProjectSummary[]>(serverUrl, '/api/projects', {
+  return requestJson(serverUrl, '/api/projects', {
     label: 'listProjects',
     headers: buildHeaders(apiKey, actor),
-  });
-}
-
-export interface ProjectSite {
-  id: number;
-  name: string;
-  siteKey: string;
-}
-
-export interface ProjectDetail {
-  id: number;
-  name: string;
-  slug: string;
-  localSite: ProjectSite | null;
-  testSite: ProjectSite | null;
-  productionSite: ProjectSite | null;
-  masterEnvironment: string;
-  githubRepository?: string | null;
+  }, schemas.ProjectSummaryListSchema);
 }
 
 export async function getProject(
@@ -415,18 +428,10 @@ export async function getProject(
   actor: Actor | undefined,
   projectId: number
 ): Promise<ProjectDetail> {
-  return requestJson<ProjectDetail>(serverUrl, `/api/projects/${projectId}`, {
+  return requestJson(serverUrl, `/api/projects/${projectId}`, {
     label: 'getProject',
     headers: buildHeaders(apiKey, actor),
-  });
-}
-
-export interface RepositoryIssue {
-  number: number;
-  title: string;
-  htmlUrl: string;
-  state: string;
-  assignees?: string[];
+  }, schemas.ProjectDetailSchema);
 }
 
 /** リポジトリのissue一覧のうち、未割り当て(assigneesが空)のものだけを返す。 */
@@ -437,11 +442,10 @@ export async function listUnassignedIssues(
   projectId: number,
   state: string = 'open'
 ): Promise<RepositoryIssue[]> {
-  const issues = await requestJson<RepositoryIssue[]>(
+  const issues = await requestJson(
     serverUrl,
     `/api/projects/${projectId}/article-plan/issues?state=${state}`,
-    { label: 'listUnassignedIssues', headers: buildHeaders(apiKey, actor) }
-  );
+    { label: 'listUnassignedIssues', headers: buildHeaders(apiKey, actor) }, schemas.RepositoryIssueListSchema);
   return issues.filter((i) => !i.assignees || i.assignees.length === 0);
 }
 
@@ -457,11 +461,6 @@ export interface PlanChatRequestParams {
   githubIssueNumber?: number;
 }
 
-export interface PlanChatResult {
-  reply: string;
-  sessionId: number;
-}
-
 export async function postPlanChat(
   serverUrl: string,
   apiKey: string,
@@ -470,12 +469,12 @@ export async function postPlanChat(
   request: PlanChatRequestParams
 ): Promise<PlanChatResult> {
   // チャットセッションがサーバー側に記録されるため、再試行すると履歴が重複する。
-  return requestJson<PlanChatResult>(serverUrl, `/api/projects/${projectId}/article-plan/chat`, {
+  return requestJson(serverUrl, `/api/projects/${projectId}/article-plan/chat`, {
     label: 'postPlanChat',
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
     createBody: jsonBody(request),
-  });
+  }, schemas.PlanChatResultSchema);
 }
 
 export async function getIssueDescription(
@@ -485,19 +484,11 @@ export async function getIssueDescription(
   projectId: number,
   issueNumber: number
 ): Promise<string> {
-  const data = await requestJson<{ body: string }>(
+  const data = await requestJson(
     serverUrl,
     `/api/projects/${projectId}/article-plan/issues/${issueNumber}/description`,
-    { label: 'getIssueDescription', headers: buildHeaders(apiKey, actor) }
-  );
+    { label: 'getIssueDescription', headers: buildHeaders(apiKey, actor) }, schemas.IssueDescriptionSchema);
   return data.body ?? '';
-}
-
-export interface SuggestMetadataResult {
-  titles: string[];
-  slugs: string[];
-  categories: string[];
-  tags: string[];
 }
 
 /** プロジェクトのマスター環境サイトに既に存在するカテゴリ名一覧。サイト未紐付け等の場合は空配列。 */
@@ -507,10 +498,10 @@ export async function listExistingCategories(
   actor: Actor,
   projectId: number
 ): Promise<string[]> {
-  return requestJson<string[]>(serverUrl, `/api/projects/${projectId}/article-plan/categories`, {
+  return requestJson(serverUrl, `/api/projects/${projectId}/article-plan/categories`, {
     label: 'listExistingCategories',
     headers: buildHeaders(apiKey, actor),
-  });
+  }, schemas.CategoryNameListSchema);
 }
 
 export async function suggestMetadata(
@@ -520,7 +511,7 @@ export async function suggestMetadata(
   projectId: number,
   history: PlanChatMessage[]
 ): Promise<SuggestMetadataResult> {
-  return requestJson<SuggestMetadataResult>(
+  return requestJson(
     serverUrl,
     `/api/projects/${projectId}/article-plan/suggest-metadata`,
     {
@@ -529,12 +520,7 @@ export async function suggestMetadata(
       headers: buildHeaders(apiKey, actor),
       createBody: jsonBody({ history }),
       retryable: true,
-    }
-  );
-}
-
-export interface SuggestStructureResult {
-  structure: string;
+    }, schemas.SuggestMetadataResultSchema);
 }
 
 export async function suggestArticleStructure(
@@ -544,7 +530,7 @@ export async function suggestArticleStructure(
   projectId: number,
   history: PlanChatMessage[]
 ): Promise<SuggestStructureResult> {
-  return requestJson<SuggestStructureResult>(
+  return requestJson(
     serverUrl,
     `/api/projects/${projectId}/article-plan/suggest-structure`,
     {
@@ -553,13 +539,7 @@ export async function suggestArticleStructure(
       headers: buildHeaders(apiKey, actor),
       createBody: jsonBody({ history }),
       retryable: true,
-    }
-  );
-}
-
-export interface AcceptStructureResult {
-  issueNumber: number;
-  issueUrl: string;
+    }, schemas.SuggestStructureResultSchema);
 }
 
 /** 提案された構成案でGitHub Issueの本文を更新する。スキャフォールド時にこの内容がarticle.mdへ反映される。 */
@@ -571,7 +551,7 @@ export async function acceptArticleStructure(
   issueNumber: number,
   structure: string
 ): Promise<AcceptStructureResult> {
-  return requestJson<AcceptStructureResult>(
+  return requestJson(
     serverUrl,
     `/api/projects/${projectId}/article-plan/issues/${issueNumber}/accept-structure`,
     {
@@ -579,14 +559,7 @@ export async function acceptArticleStructure(
       method: 'POST',
       headers: buildHeaders(apiKey, actor),
       createBody: jsonBody({ structure }),
-    }
-  );
-}
-
-export interface AssignIssueResult {
-  issueNumber: number;
-  htmlUrl: string;
-  assignedLogin: string;
+    }, schemas.AcceptStructureResultSchema);
 }
 
 export async function assignIssue(
@@ -596,15 +569,14 @@ export async function assignIssue(
   projectId: number,
   issueNumber: number
 ): Promise<AssignIssueResult> {
-  return requestJson<AssignIssueResult>(
+  return requestJson(
     serverUrl,
     `/api/projects/${projectId}/article-plan/issues/${issueNumber}/assign`,
     {
       label: 'assignIssue',
       method: 'POST',
       headers: buildHeaders(apiKey, actor, 'application/json'),
-    }
-  );
+    }, schemas.AssignIssueResultSchema);
 }
 
 export async function renderPreviewHtml(
@@ -614,21 +586,15 @@ export async function renderPreviewHtml(
   projectId: number,
   markdown: string
 ): Promise<string> {
-  const data = await requestJson<{ html: string }>(serverUrl, `/api/projects/${projectId}/preview/render`, {
+  const data = await requestJson(serverUrl, `/api/projects/${projectId}/preview/render`, {
     label: 'renderPreviewHtml',
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
     createBody: jsonBody({ markdown }),
     // 変換結果を返すだけでサーバー状態を変えないため、再試行して差し支えない。
     retryable: true,
-  });
+  }, schemas.RenderPreviewResultSchema);
   return data.html;
-}
-
-export interface ThemeCssResult {
-  css: string;
-  available: boolean;
-  reason?: string;
 }
 
 export async function getMasterThemeCss(
@@ -637,8 +603,8 @@ export async function getMasterThemeCss(
   actor: Actor | undefined,
   projectId: number
 ): Promise<ThemeCssResult> {
-  return requestJson<ThemeCssResult>(serverUrl, `/api/projects/${projectId}/preview/theme-css`, {
+  return requestJson(serverUrl, `/api/projects/${projectId}/preview/theme-css`, {
     label: 'getMasterThemeCss',
     headers: buildHeaders(apiKey, actor),
-  });
+  }, schemas.ThemeCssResultSchema);
 }

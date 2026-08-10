@@ -29,6 +29,22 @@ export class NetworkError extends Error {
   }
 }
 
+/**
+ * APIレスポンスがスキーマ検証を通らなかった場合の例外。
+ * 再試行しても同じ結果になるためリトライ対象にはしない。
+ */
+export class ResponseValidationError extends Error {
+  constructor(
+    message: string,
+    public readonly url: string,
+    /** どのフィールドがどう不正だったかの一覧(例: "sources.0.url: Invalid input")。 */
+    public readonly issues: string[]
+  ) {
+    super(message);
+    this.name = 'ResponseValidationError';
+  }
+}
+
 /** リクエストが所定時間内に完了しなかった場合の例外。リトライ対象。 */
 export class TimeoutError extends Error {
   constructor(
@@ -76,6 +92,14 @@ export function describeError(error: unknown): string {
       parts.push(`サーバーからの応答: ${truncate(detail, 500)}`);
     }
     return parts.join(' ');
+  }
+  if (error instanceof ResponseValidationError) {
+    return (
+      `サーバーの応答が想定した形式ではありませんでした (${error.url})。` +
+      ` 不一致: ${error.issues.slice(0, 5).join(' / ')}` +
+      ' 対応: APIサーバーと拡張のバージョンが対応しているか確認してください。' +
+      ' letsBlog.debugModeを有効にすると応答内容をログで確認できます。'
+    );
   }
   if (error instanceof TimeoutError) {
     return (

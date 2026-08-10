@@ -1,15 +1,13 @@
 import * as vscode from 'vscode';
 import { logger } from './logger';
+import { Actor, ActorSchema } from './schemas';
 
 const API_KEY_SECRET = 'letsBlog.apiKey';
 const ACTOR_SECRET = 'letsBlog.actor';
 const PROJECT_ID_STATE = 'letsBlog.projectId';
 
-export interface Actor {
-  id: number;
-  email: string;
-  role: string;
-}
+/** Actorの定義元はschemas.ts(APIレスポンスの検証スキーマ)。ここでは型を中継する。 */
+export type { Actor };
 
 export function getServerUrl(): string {
   const url = vscode.workspace.getConfiguration('letsBlog').get<string>('serverUrl');
@@ -40,11 +38,8 @@ export async function getActor(context: vscode.ExtensionContext): Promise<Actor 
   const json = await context.secrets.get(ACTOR_SECRET);
   if (!json) return undefined;
   try {
-    const parsed = JSON.parse(json) as Partial<Actor>;
-    if (typeof parsed?.id !== 'number' || typeof parsed?.email !== 'string' || typeof parsed?.role !== 'string') {
-      throw new Error('Actorの必須項目(id/email/role)が欠けています');
-    }
-    return parsed as Actor;
+    // 保存値もAPIレスポンスと同じスキーマで検証し、欠落や型不一致を早期に検出する。
+    return ActorSchema.parse(JSON.parse(json));
   } catch (error) {
     logger.warn('保存されたログイン情報を読み込めませんでした。再ログインが必要です。', {
       reason: String(error instanceof Error ? error.message : error),
