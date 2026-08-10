@@ -4,7 +4,6 @@ import {
   Globe,
   Users,
   FileText,
-  Lock,
   Shield,
   Images,
   DatabaseBackup,
@@ -27,7 +26,6 @@ export const ICON_MAP: Record<string, LucideIcon> = {
   Globe,
   Users,
   FileText,
-  Lock,
   Shield,
   Images,
   DatabaseBackup,
@@ -42,7 +40,6 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/posts", label: "投稿履歴", icon: "FileText" },
   { href: "/image-gallery", label: "生成画像ギャラリー", icon: "Images" },
   { href: "/operation-logs", label: "操作ログ", icon: "History" },
-  { href: "/settings/security", label: "セキュリティ設定", icon: "Lock" },
 ];
 
 export const ADMIN_NAV_ITEMS: NavItem[] = [

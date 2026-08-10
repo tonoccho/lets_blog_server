@@ -5,7 +5,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { Tabs, type TabItem } from "@/components/Tabs";
 import { UserProfileForm } from "./UserProfileForm";
 import { PersonalPreferencesForm } from "./PersonalPreferencesForm";
-import { TwoFactorSettings } from "@/app/settings/security/TwoFactorSettings";
+import { TwoFactorSettings } from "./TwoFactorSettings";
 
 // Node/ブラウザがIntl.supportedValuesOfに対応していない場合のフォールバック。
 const FALLBACK_TIMEZONES = [
