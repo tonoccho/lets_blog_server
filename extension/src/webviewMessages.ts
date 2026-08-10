@@ -30,12 +30,14 @@ export type PlanInboundMessage =
   | (WebviewMessageBase<'suggestStructure'> & { history: api.PlanChatMessage[] })
   | (WebviewMessageBase<'acceptStructure'> & { issueNumber: number; structure: string })
   | (WebviewMessageBase<'suggestMetadata'> & { history: api.PlanChatMessage[] })
+  | WebviewMessageBase<'cancel'>
   | (WebviewMessageBase<'approveAndScaffold'> & {
       issue: api.RepositoryIssue;
       metadata: { title: string; slug: string; categories: string[]; tags: string[] };
     });
 
 export type PlanOutboundCommand =
+  | 'cancelled'
   | 'issueList'
   | 'categoryList'
   | 'chatResponse'
@@ -49,22 +51,30 @@ export type PlanOutboundCommand =
 
 export type ImageGenInboundMessage =
   | WebviewMessageBase<'loadOptions'>
+  | WebviewMessageBase<'cancel'>
   | (WebviewMessageBase<'generate'> & { params: api.ImageGenerationParams })
   // 生成画像の実体(base64)はパネル側が保持し、Webviewからは送り返さない。
   // 数MBの文字列をWebview境界で往復させると、その都度コピーが作られるため。
   | WebviewMessageBase<'setAsEyecatch'>
   | WebviewMessageBase<'addAsAsset'>;
 
-export type ImageGenOutboundCommand = 'options' | 'generated' | 'eyecatchSet' | 'assetAdded' | 'error';
+export type ImageGenOutboundCommand =
+  | 'options'
+  | 'generated'
+  | 'eyecatchSet'
+  | 'assetAdded'
+  | 'cancelled'
+  | 'error';
 
 // --- Generate Section パネル ---
 
 export type SectionGenInboundMessage =
   | WebviewMessageBase<'init'>
+  | WebviewMessageBase<'cancel'>
   | (WebviewMessageBase<'generate'> & { params: api.AiSectionParams })
   | (WebviewMessageBase<'insert'> & { text: string });
 
-export type SectionGenOutboundCommand = 'init' | 'generated' | 'inserted' | 'error';
+export type SectionGenOutboundCommand = 'init' | 'generated' | 'inserted' | 'cancelled' | 'error';
 
 /** Generate Section パネルの初期化ペイロード。 */
 export interface SectionGenInitPayload {

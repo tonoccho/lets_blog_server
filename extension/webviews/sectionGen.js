@@ -41,8 +41,14 @@
   }
 
   function generate() {
-    document.getElementById('generateButton').disabled = true;
-    showMessage('生成しています…', '');
+    if (LetsBlogLoading.isRunning()) return;
+    showMessage('', '');
+    LetsBlogLoading.begin({
+      buttonIds: ['generateButton', 'refineButton', 'insertButton'],
+      text: '本文を生成しています…',
+      kind: 'generate',
+      onCancel: function () { post('cancel'); },
+    });
     chatHistory = [];
     pendingUserMessage = null;
     document.getElementById('messages').innerHTML = '';
@@ -51,9 +57,14 @@
 
   function refine() {
     const instruction = document.getElementById('refineInput').value.trim();
-    if (!instruction || !currentResult) return;
-    document.getElementById('refineButton').disabled = true;
-    showMessage('再生成しています…', '');
+    if (!instruction || !currentResult || LetsBlogLoading.isRunning()) return;
+    showMessage('', '');
+    LetsBlogLoading.begin({
+      buttonIds: ['generateButton', 'refineButton', 'insertButton'],
+      text: '指示を反映して再生成しています…',
+      kind: 'generate',
+      onCancel: function () { post('cancel'); },
+    });
     pendingUserMessage = instruction;
     post('generate', { params: Object.assign(baseParams(), { history: chatHistory, message: instruction }) });
   }
@@ -72,9 +83,8 @@
   }
 
   function renderResult(result) {
+    LetsBlogLoading.end();
     currentResult = result;
-    document.getElementById('generateButton').disabled = false;
-    document.getElementById('refineButton').disabled = false;
     document.getElementById('refineInput').value = '';
     document.getElementById('chat').style.display = 'block';
 
@@ -108,7 +118,8 @@
   }
 
   function insertText() {
-    if (!currentResult) return;
+    if (!currentResult || LetsBlogLoading.isRunning()) return;
+    LetsBlogLoading.begin({ buttonIds: ['insertButton'], text: '記事へ挿入しています…', kind: 'load' });
     post('insert', { text: currentResult.result });
   }
 
@@ -139,11 +150,17 @@
         renderResult(payload);
         break;
       case 'inserted':
+        LetsBlogLoading.end();
         showMessage('記事に挿入しました。', 'success');
         break;
+      case 'cancelled':
+        LetsBlogLoading.end();
+        pendingUserMessage = null;
+        showMessage('生成をキャンセルしました。', '');
+        break;
       case 'error':
-        document.getElementById('generateButton').disabled = false;
-        document.getElementById('refineButton').disabled = false;
+        LetsBlogLoading.end();
+        pendingUserMessage = null;
         showMessage(payload.error, 'error');
         break;
     }

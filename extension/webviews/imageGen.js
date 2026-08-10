@@ -68,17 +68,23 @@
   }
 
   function generate() {
+    if (LetsBlogLoading.isRunning()) return;
     const params = collectParams();
     if (!params) return;
-    document.getElementById('generateButton').disabled = true;
-    showMessage('生成しています…', '');
+    showMessage('', '');
+    LetsBlogLoading.begin({
+      buttonIds: ['generateButton', 'setAsEyecatchButton', 'addAsAssetButton'],
+      text: '画像を生成しています…',
+      kind: 'image',
+      onCancel: function () { post('cancel'); },
+    });
     post('generate', { params });
   }
 
   function renderGenerated(result) {
+    LetsBlogLoading.end();
     // base64本体は<img>のsrcへ渡した後は保持しない(Webview側にコピーを残さない)。
     currentImage = { fileName: result.fileName };
-    document.getElementById('generateButton').disabled = false;
     document.getElementById('previewSection').style.display = 'block';
     // mimeTypeはサーバー応答由来のため、既知の画像種別だけをデータURIへ組み立てる。
     const safeMimeType = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/.test(result.mimeType || '')
@@ -93,12 +99,22 @@
   // 保存対象の画像データはパネル側が保持しているため、コマンドだけを送る
   // (数MBのbase64文字列をWebview境界で往復させない)。
   function setAsEyecatch() {
-    if (!currentImage) return;
+    if (!currentImage || LetsBlogLoading.isRunning()) return;
+    LetsBlogLoading.begin({
+      buttonIds: ['setAsEyecatchButton', 'addAsAssetButton'],
+      text: 'アイキャッチとして保存しています…',
+      kind: 'load',
+    });
     post('setAsEyecatch');
   }
 
   function addAsAsset() {
-    if (!currentImage) return;
+    if (!currentImage || LetsBlogLoading.isRunning()) return;
+    LetsBlogLoading.begin({
+      buttonIds: ['setAsEyecatchButton', 'addAsAssetButton'],
+      text: 'アセットとして保存しています…',
+      kind: 'load',
+    });
     post('addAsAsset');
   }
 
@@ -110,6 +126,7 @@
     const { command, payload } = event.data;
     switch (command) {
       case 'options':
+        LetsBlogLoading.end();
         renderOptions(payload);
         break;
       case 'generated':
@@ -117,13 +134,19 @@
         break;
       case 'eyecatchSet':
       case 'assetAdded':
+        LetsBlogLoading.end();
         showMessage('反映しました。', 'success');
         break;
+      case 'cancelled':
+        LetsBlogLoading.end();
+        showMessage('生成をキャンセルしました。', '');
+        break;
       case 'error':
-        document.getElementById('generateButton').disabled = false;
+        LetsBlogLoading.end();
         showMessage(payload.error, 'error');
         break;
     }
   });
 
+  LetsBlogLoading.begin({ buttonIds: ['generateButton'], text: '生成オプションを取得しています…', kind: 'load' });
   post('loadOptions');

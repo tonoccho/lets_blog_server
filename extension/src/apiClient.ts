@@ -4,6 +4,7 @@ import { LocalImageReference, guessImageMimeType } from './frontMatter';
 import { Actor } from './config';
 import {
   ApiError,
+  CancelledError,
   NetworkError,
   ResponseValidationError,
   TimeoutError,
@@ -71,6 +72,11 @@ interface RequestSpec {
    * 変更系を再試行すると重複して実行されてしまうため、安全なものだけ明示的に有効化する。
    */
   retryable?: boolean;
+  /**
+   * 呼び出し側からの中断シグナル。利用者がパネル上で「キャンセル」を押した場合に、
+   * 進行中のリクエストを実際に打ち切るために使う(タイムアウトとは別系統)。
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -87,6 +93,13 @@ async function request(serverUrl: string, path: string, spec: RequestSpec): Prom
       const built = spec.createBody?.();
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
+      // 外部シグナル(利用者によるキャンセル)もこのリクエストの中断へつなぐ。
+      const onExternalAbort = (): void => controller.abort();
+      if (spec.signal?.aborted) {
+        controller.abort();
+      } else {
+        spec.signal?.addEventListener('abort', onExternalAbort, { once: true });
+      }
       logger.debug(`${spec.label}: ${method} ${url}`);
 
       let res: HttpResponse;
@@ -99,12 +112,17 @@ async function request(serverUrl: string, path: string, spec: RequestSpec): Prom
           allowInsecureTls: allowsInsecureTls(),
         });
       } catch (error) {
+        // 利用者によるキャンセルとタイムアウトは、利用者への伝え方が異なるため区別する。
+        if (spec.signal?.aborted) {
+          throw new CancelledError(`${spec.label} was cancelled`);
+        }
         if (controller.signal.aborted) {
           throw new TimeoutError(`${spec.label} timed out`, url, timeoutMs);
         }
         throw new NetworkError(`${spec.label} failed to reach server`, url, error);
       } finally {
         clearTimeout(timer);
+        spec.signal?.removeEventListener('abort', onExternalAbort);
       }
 
       if (!res.ok) {
@@ -393,10 +411,12 @@ export async function generateSection(
   serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
-  params: AiSectionParams
+  params: AiSectionParams,
+  signal?: AbortSignal
 ): Promise<AiSectionResult> {
   return requestJson(serverUrl, '/api/ai/section', {
     label: 'generateSection',
+    signal,
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
     createBody: jsonBody(params),
@@ -424,11 +444,13 @@ export async function generateImage(
   apiKey: string,
   actor: Actor | undefined,
   projectId: number | undefined,
-  params: ImageGenerationParams
+  params: ImageGenerationParams,
+  signal?: AbortSignal
 ): Promise<AiImageResult> {
   // 生成画像はサーバー側に保存されるため、再試行すると重複した生成結果が残る。
   return requestJson(serverUrl, '/api/ai/image', {
     label: 'generateImage',
+    signal,
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
     createBody: jsonBody({ projectId, ...params }),
@@ -514,11 +536,13 @@ export async function postPlanChat(
   apiKey: string,
   actor: Actor,
   projectId: number,
-  request: PlanChatRequestParams
+  request: PlanChatRequestParams,
+  signal?: AbortSignal
 ): Promise<PlanChatResult> {
   // チャットセッションがサーバー側に記録されるため、再試行すると履歴が重複する。
   return requestJson(serverUrl, `/api/projects/${projectId}/article-plan/chat`, {
     label: 'postPlanChat',
+    signal,
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
     createBody: jsonBody(request),
@@ -560,13 +584,15 @@ export async function suggestMetadata(
   apiKey: string,
   actor: Actor,
   projectId: number,
-  history: PlanChatMessage[]
+  history: PlanChatMessage[],
+  signal?: AbortSignal
 ): Promise<SuggestMetadataResult> {
   return requestJson(
     serverUrl,
     `/api/projects/${projectId}/article-plan/suggest-metadata`,
     {
       label: 'suggestMetadata',
+      signal,
       method: 'POST',
       headers: buildHeaders(apiKey, actor),
       createBody: jsonBody({ history }),
@@ -579,13 +605,15 @@ export async function suggestArticleStructure(
   apiKey: string,
   actor: Actor,
   projectId: number,
-  history: PlanChatMessage[]
+  history: PlanChatMessage[],
+  signal?: AbortSignal
 ): Promise<SuggestStructureResult> {
   return requestJson(
     serverUrl,
     `/api/projects/${projectId}/article-plan/suggest-structure`,
     {
       label: 'suggestArticleStructure',
+      signal,
       method: 'POST',
       headers: buildHeaders(apiKey, actor),
       createBody: jsonBody({ history }),

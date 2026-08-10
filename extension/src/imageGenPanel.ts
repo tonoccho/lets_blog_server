@@ -46,6 +46,9 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
     switch (message.command) {
       case 'loadOptions':
         return this._handleLoadOptions();
+      case 'cancel':
+        this.cancelCurrentOperation();
+        return;
       case 'generate':
         return this._handleGenerate(message);
       case 'setAsEyecatch':
@@ -66,7 +69,9 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
   ): Promise<void> {
     const apiKey = await requireApiKey(this.context);
     const actor = await getActor(this.context);
-    const result = await api.generateImage(getServerUrl(), apiKey, actor, this._projectId, message.params);
+    const result = await this.runCancellable((signal) =>
+      api.generateImage(getServerUrl(), apiKey, actor, this._projectId, message.params, signal)
+    );
     this._lastGenerated = result;
     this._lastPrompt = message.params.prompt;
     this.postMessage('generated', result);

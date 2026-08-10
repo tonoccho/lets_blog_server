@@ -45,6 +45,16 @@ export class ResponseValidationError extends Error {
   }
 }
 
+/**
+ * 利用者が操作を中断した場合の例外。失敗ではないため、通知やリトライの対象にしない。
+ */
+export class CancelledError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CancelledError';
+  }
+}
+
 /** リクエストが所定時間内に完了しなかった場合の例外。リトライ対象。 */
 export class TimeoutError extends Error {
   constructor(
@@ -81,6 +91,9 @@ const STATUS_GUIDANCE: Record<number, { cause: string; remedy: string }> = {
  * どの例外型でも「何が起きたか」「次に何をすべきか」が読み取れる文面にする。
  */
 export function describeError(error: unknown): string {
+  if (error instanceof CancelledError) {
+    return '操作をキャンセルしました。';
+  }
   if (error instanceof ApiError) {
     const guidance = STATUS_GUIDANCE[error.status];
     const detail = error.responseBody.trim();

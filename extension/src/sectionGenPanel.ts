@@ -42,6 +42,9 @@ export class SectionGenPanel extends WebviewPanelBase<SectionGenInboundMessage, 
     switch (message.command) {
       case 'init':
         return this._handleInit();
+      case 'cancel':
+        this.cancelCurrentOperation();
+        return;
       case 'generate':
         return this._handleGenerate(message);
       case 'insert':
@@ -63,7 +66,9 @@ export class SectionGenPanel extends WebviewPanelBase<SectionGenInboundMessage, 
   ): Promise<void> {
     const apiKey = await requireApiKey(this.context);
     const actor = await getActor(this.context);
-    const result = await api.generateSection(getServerUrl(), apiKey, actor, message.params);
+    const result = await this.runCancellable((signal) =>
+      api.generateSection(getServerUrl(), apiKey, actor, message.params, signal)
+    );
     this.postMessage('generated', result);
   }
 

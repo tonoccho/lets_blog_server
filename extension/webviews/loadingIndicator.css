@@ -1,0 +1,55 @@
+/* 全パネル共通のローディング表示。画面下部に固定し、どこまでスクロールしていても状態が見えるようにする。 */
+.lb-loading {
+  display: none;
+  position: sticky;
+  bottom: 0;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 8px 10px;
+  background: var(--vscode-editorWidget-background, #f5f5f5);
+  border: 1px solid var(--vscode-panel-border, #ccc);
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.lb-loading.visible {
+  display: flex;
+}
+
+.lb-loading-text {
+  flex: 1;
+}
+
+.lb-loading-elapsed {
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
+.lb-cancel-button {
+  padding: 2px 10px;
+}
+
+.lb-spinner {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border: 2px solid var(--vscode-panel-border, #ccc);
+  border-top-color: var(--vscode-button-background, #007acc);
+  border-radius: 50%;
+  animation: lb-spin 0.9s linear infinite;
+}
+
+@keyframes lb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 動きを減らす設定の利用者には回転させず、色の対比だけで進行中を示す。 */
+@media (prefers-reduced-motion: reduce) {
+  .lb-spinner {
+    animation: none;
+    border-top-color: var(--vscode-button-background, #007acc);
+  }
+}

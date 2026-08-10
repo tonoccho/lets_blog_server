@@ -30,6 +30,9 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
     switch (message.command) {
       case 'loadIssues':
         return this._handleLoadIssues();
+      case 'cancel':
+        this.cancelCurrentOperation();
+        return;
       case 'loadCategories':
         return this._handleLoadCategories();
       case 'sendChat':
@@ -68,12 +71,21 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
 
   private async _handleSendChat(message: Extract<PlanInboundMessage, { command: 'sendChat' }>): Promise<void> {
     const { apiKey, actor, projectId } = await this._requireContext();
-    const response = await api.postPlanChat(getServerUrl(), apiKey, actor, projectId, {
-      history: message.history,
-      message: message.message,
-      sessionId: message.sessionId,
-      githubIssueNumber: message.issueNumber,
-    });
+    const response = await this.runCancellable((signal) =>
+      api.postPlanChat(
+        getServerUrl(),
+        apiKey,
+        actor,
+        projectId,
+        {
+          history: message.history,
+          message: message.message,
+          sessionId: message.sessionId,
+          githubIssueNumber: message.issueNumber,
+        },
+        signal
+      )
+    );
     this.postMessage('chatResponse', response);
   }
 
@@ -81,7 +93,9 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
     message: Extract<PlanInboundMessage, { command: 'suggestStructure' }>
   ): Promise<void> {
     const { apiKey, actor, projectId } = await this._requireContext();
-    const suggestion = await api.suggestArticleStructure(getServerUrl(), apiKey, actor, projectId, message.history);
+    const suggestion = await this.runCancellable((signal) =>
+      api.suggestArticleStructure(getServerUrl(), apiKey, actor, projectId, message.history, signal)
+    );
     this.postMessage('structureSuggestion', suggestion);
   }
 
@@ -110,7 +124,9 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
     message: Extract<PlanInboundMessage, { command: 'suggestMetadata' }>
   ): Promise<void> {
     const { apiKey, actor, projectId } = await this._requireContext();
-    const suggestion = await api.suggestMetadata(getServerUrl(), apiKey, actor, projectId, message.history);
+    const suggestion = await this.runCancellable((signal) =>
+      api.suggestMetadata(getServerUrl(), apiKey, actor, projectId, message.history, signal)
+    );
     this.postMessage('metadataSuggestion', suggestion);
   }
 

@@ -246,8 +246,15 @@ async function publishToSite(
 
   const result = await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'WordPressへ投稿しています…' },
-    () =>
-      api.publishPost(
+    (progress) => {
+      // 画像同梱の有無で待ち時間が大きく変わるため、何をしているかを明示する。
+      progress.report({
+        message:
+          images.length > 0
+            ? `本文と画像${images.length}件を送信しています…`
+            : '本文を送信しています…',
+      });
+      return api.publishPost(
         serverUrl,
         apiKey,
         {
@@ -263,7 +270,8 @@ async function publishToSite(
           featuredImageFilename: featuredImage?.reference,
         },
         actor
-      )
+      );
+    }
   );
 
   article.data.site = siteKey;
@@ -605,9 +613,11 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
 
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'プレビューを生成しています…' },
-      async () => {
+      async (progress) => {
+        progress.report({ message: 'Markdownを変換しています…' });
         const html = await api.renderPreviewHtml(serverUrl, apiKey, actor, projectId, markdown);
 
+        progress.report({ message: 'サイトのCSSを取得しています…' });
         let css = '';
         let warning: string | undefined;
         try {

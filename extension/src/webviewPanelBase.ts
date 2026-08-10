@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import { describeError } from './errorHandler';
+import { CancelledError, describeError } from './errorHandler';
 import { logger } from './logger';
 import { createNonce } from './webviewSecurity';
 import { WebviewMessageBase } from './webviewMessages';
@@ -35,6 +35,12 @@ export interface WebviewPanelOptions {
   /** webviews/配下の資材のベース名(例: 'plan' → plan.html / plan.css / plan.js)。 */
   assetName: string;
 }
+
+/**
+ * 全パネルが読み込む共通資材。ローディング表示は3パネルで同じ挙動が要るため、
+ * パネル固有の資材とは別に共通ファイルとして配信する。
+ */
+const SHARED_ASSETS = ['loadingIndicator.css', 'loadingIndicator.js'];
 
 /**
  * Webviewパネルの共通処理をまとめた基底クラス。
@@ -78,6 +84,35 @@ export abstract class WebviewPanelBase<TInbound extends WebviewMessageBase<strin
     this.panel.dispose();
   }
 
+  /**
+   * 進行中の長時間処理を中断するためのコントローラ。
+   * パネルは同時に1つの長時間処理しか走らせないため、1本だけ保持すれば足りる。
+   */
+  private _currentOperation: AbortController | undefined;
+
+  /**
+   * 中断可能な処理を実行する。実行中に cancel を受け取ると、この処理へ渡した
+   * signal 経由でHTTPリクエストごと打ち切られる。
+   */
+  protected async runCancellable<T>(operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    this._currentOperation?.abort();
+    const controller = new AbortController();
+    this._currentOperation = controller;
+    try {
+      return await operation(controller.signal);
+    } finally {
+      if (this._currentOperation === controller) {
+        this._currentOperation = undefined;
+      }
+    }
+  }
+
+  /** 進行中の処理を中断する。Webviewの「キャンセル」ボタンから呼ばれる。 */
+  protected cancelCurrentOperation(): void {
+    this._currentOperation?.abort();
+    this._currentOperation = undefined;
+  }
+
   /** Webviewへメッセージを送る。 */
   protected postMessage(command: TOutbound, payload: unknown): void {
     void this.panel.webview.postMessage({ command, payload });
@@ -97,6 +132,12 @@ export abstract class WebviewPanelBase<TInbound extends WebviewMessageBase<strin
     try {
       await this.handleMessage(message);
     } catch (error) {
+      // 利用者による中断は失敗ではないため、エラーとしては通知しない。
+      if (error instanceof CancelledError) {
+        logger.info(`${this.options.viewType}: ${message.command} をキャンセルしました。`);
+        this.postMessage('cancelled' as TOutbound, {});
+        return;
+      }
       const description = describeError(error);
       logger.error(`${this.options.viewType}: ${message.command} に失敗しました: ${description}`, {
         stack: error instanceof Error ? error.stack : undefined,
@@ -133,10 +174,19 @@ export abstract class WebviewPanelBase<TInbound extends WebviewMessageBase<strin
       `${this.options.assetName}.html`
     ).fsPath;
 
+    const sharedStyles = SHARED_ASSETS.filter((name) => name.endsWith('.css'))
+      .map((name) => `<link rel="stylesheet" href="${assetUri(name)}">`)
+      .join('\n');
+    const sharedScripts = SHARED_ASSETS.filter((name) => name.endsWith('.js'))
+      .map((name) => `<script nonce="${nonce}" src="${assetUri(name)}"></script>`)
+      .join('\n');
+
     return fs
       .readFileSync(htmlPath, 'utf-8')
       .replace(/\{\{csp\}\}/g, csp)
       .replace(/\{\{nonce\}\}/g, nonce)
+      .replace(/\{\{sharedStyles\}\}/g, sharedStyles)
+      .replace(/\{\{sharedScripts\}\}/g, sharedScripts)
       .replace(/\{\{styleUri\}\}/g, assetUri(`${this.options.assetName}.css`).toString())
       .replace(/\{\{scriptUri\}\}/g, assetUri(`${this.options.assetName}.js`).toString());
   }

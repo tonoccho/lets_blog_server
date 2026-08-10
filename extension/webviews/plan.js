@@ -99,30 +99,56 @@
   function sendMessage() {
     const input = document.getElementById('chatInput');
     const text = input.value.trim();
-    if (!text || !selectedIssue) return;
+    if (!text || !selectedIssue || LetsBlogLoading.isRunning()) return;
     addMessage('user', text);
     input.value = '';
+    LetsBlogLoading.begin({
+      buttonIds: ['sendButton', 'suggestButton', 'suggestStructureButton'],
+      text: 'AIの応答を待っています…',
+      kind: 'chat',
+      onCancel: function () { post('cancel'); },
+    });
     post('sendChat', { history: chatHistory.slice(0, -1), message: text, sessionId, issueNumber: selectedIssue.number });
   }
 
   function requestStructureSuggestion() {
+    if (LetsBlogLoading.isRunning()) return;
     if (!selectedIssue || chatHistory.length === 0) {
       showMessage('先にチャットで壁打ちしてください。', 'error');
       return;
     }
+    LetsBlogLoading.begin({
+      buttonIds: ['suggestStructureButton', 'acceptStructureButton', 'sendButton'],
+      text: '記事構成を生成しています…',
+      kind: 'structure',
+      onCancel: function () { post('cancel'); },
+    });
     post('suggestStructure', { history: chatHistory });
   }
 
   function acceptStructure() {
+    if (LetsBlogLoading.isRunning()) return;
     const structure = document.getElementById('structureTextarea').value.trim();
     if (!selectedIssue || !structure) {
       showMessage('構成案が空です。', 'error');
       return;
     }
+    LetsBlogLoading.begin({
+      buttonIds: ['acceptStructureButton'],
+      text: 'GitHub Issueの本文を更新しています…',
+      kind: 'load',
+    });
     post('acceptStructure', { issueNumber: selectedIssue.number, structure });
   }
 
   function requestMetadataSuggestion() {
+    if (LetsBlogLoading.isRunning()) return;
+    LetsBlogLoading.begin({
+      buttonIds: ['suggestButton', 'sendButton'],
+      text: 'メタデータを提案しています…',
+      kind: 'metadata',
+      onCancel: function () { post('cancel'); },
+    });
     post('suggestMetadata', { history: chatHistory });
   }
 
@@ -197,6 +223,11 @@
       showMessage('タイトルとスラッグは必須です。', 'error');
       return;
     }
+    LetsBlogLoading.begin({
+      buttonIds: ['approveButton'],
+      text: '記事のスキャフォールドを生成しています…',
+      kind: 'load',
+    });
     post('approveAndScaffold', { issue: selectedIssue, metadata: { title, slug, categories, tags } });
   }
 
@@ -222,38 +253,51 @@
     const { command, payload } = event.data;
     switch (command) {
       case 'issueList':
+        LetsBlogLoading.end();
         renderIssueList(payload.issues);
         break;
       case 'categoryList':
+        LetsBlogLoading.end();
         existingCategories = payload.categories || [];
         renderCategoryCheckboxes([]);
         break;
       case 'chatResponse':
+        LetsBlogLoading.end();
         addMessage('assistant', payload.reply);
         sessionId = payload.sessionId;
         break;
       case 'structureSuggestion':
+        LetsBlogLoading.end();
         document.getElementById('structureTextarea').value = payload.structure || '';
         document.getElementById('structureAcceptedBadge').style.display = 'none';
         break;
       case 'structureAccepted':
+        LetsBlogLoading.end();
         const badge = document.getElementById('structureAcceptedBadge');
         badge.textContent = 'Issue #' + payload.issueNumber + ' の本文を更新しました。';
         badge.style.display = 'block';
         showMessage('記事構成をIssueへ反映しました。', 'success');
         break;
       case 'metadataSuggestion':
+        LetsBlogLoading.end();
         showMetadataForm(payload);
         break;
       case 'scaffoldCreated':
+        LetsBlogLoading.end();
         showMessage('記事のスキャフォールドを生成しました。', 'success');
         setTimeout(() => post('openArticle'), 500);
         break;
+      case 'cancelled':
+        LetsBlogLoading.end();
+        showMessage('操作をキャンセルしました。', '');
+        break;
       case 'error':
+        LetsBlogLoading.end();
         showMessage(payload.error, 'error');
         break;
     }
   });
 
+  LetsBlogLoading.begin({ text: 'Issueとカテゴリを取得しています…', kind: 'load' });
   post('loadIssues');
   post('loadCategories');
