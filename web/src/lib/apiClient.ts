@@ -2038,3 +2038,16 @@ export interface ConnectedServiceStatus {
 export function getConnectedServiceStatuses(): Promise<ConnectedServiceStatus[]> {
   return apiFetch<ConnectedServiceStatus[]>('/api/dashboard/service-status');
 }
+
+/**
+ * 接続サービスの稼働状況をSSEで受け取るためのアップストリーム接続(issue #198)。
+ * apiFetch()はJSONレスポンス前提のためストリーミングには使えず、ここだけ直接fetchする。
+ * 呼び出し元(Route Handler)がbodyをそのままブラウザへ中継する。
+ */
+export async function streamConnectedServiceStatuses(): Promise<Response> {
+  const apiKey = await currentApiKey();
+  return fetch(`${serverUrl()}/api/dashboard/service-status/stream`, {
+    headers: { 'X-API-Key': apiKey, Accept: 'text/event-stream' },
+    cache: 'no-store',
+  });
+}

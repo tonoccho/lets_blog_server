@@ -3,6 +3,7 @@ package com.letsblog.api.service;
 import com.letsblog.api.dto.ConnectedServiceStatusResponse;
 import com.letsblog.api.dto.ConnectedServiceStatusResponse.Status;
 import com.letsblog.api.render.PlantUmlEncoder;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
@@ -16,6 +17,8 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Supplier;
 
 /**
  * ダッシュボードに表示する接続サービス(DB・外部連携)の稼働状況をチェックする(issue #181, #197)。
@@ -35,6 +38,7 @@ public class ConnectedServiceStatusService {
     private final RestClient wordpressProvisioningClient;
     private final SystemSettingService systemSettingService;
 
+    @Autowired
     public ConnectedServiceStatusService(
             DataSource dataSource,
             @Value("${app.ollama-base-url}") String ollamaBaseUrl,
@@ -73,15 +77,29 @@ public class ConnectedServiceStatusService {
         return RestClient.builder().baseUrl(baseUrl).requestFactory(requestFactory);
     }
 
+    /**
+     * 各サービスへの疎通確認を並列に実行する(issue #198でSSE配信の周期を短縮したため、
+     * 直列実行だと最悪ケースでTIMEOUT×サービス数の遅延が生じうる問題を避ける)。
+     * DB確認・Brave Search判定は元々ミリ秒未満で終わるためそのまま直列に含める。
+     */
     public List<ConnectedServiceStatusResponse> checkAll() {
+        CompletableFuture<ConnectedServiceStatusResponse> ollama = checkAsync("ollama", "Ollama", this::checkOllama);
+        CompletableFuture<ConnectedServiceStatusResponse> comfyUi = checkAsync("comfyui", "ComfyUI", this::checkComfyUi);
+        CompletableFuture<ConnectedServiceStatusResponse> plantUml = checkAsync("plantuml", "PlantUML", this::checkPlantUml);
+        CompletableFuture<ConnectedServiceStatusResponse> wordpressProvisioning = checkAsync(
+                "wordpress-provisioning", "WordPress Provisioning Agent", this::checkWordpressProvisioning);
+
         return List.of(
                 new ConnectedServiceStatusResponse("database", "データベース", checkDatabase()),
-                new ConnectedServiceStatusResponse("ollama", "Ollama", checkOllama()),
-                new ConnectedServiceStatusResponse("comfyui", "ComfyUI", checkComfyUi()),
-                new ConnectedServiceStatusResponse("plantuml", "PlantUML", checkPlantUml()),
-                new ConnectedServiceStatusResponse(
-                        "wordpress-provisioning", "WordPress Provisioning Agent", checkWordpressProvisioning()),
+                ollama.join(),
+                comfyUi.join(),
+                plantUml.join(),
+                wordpressProvisioning.join(),
                 new ConnectedServiceStatusResponse("brave-search", "Brave Search API", checkBraveSearch()));
+    }
+
+    private CompletableFuture<ConnectedServiceStatusResponse> checkAsync(String id, String name, Supplier<Status> check) {
+        return CompletableFuture.supplyAsync(() -> new ConnectedServiceStatusResponse(id, name, check.get()));
     }
 
     private Status checkDatabase() {
