@@ -2,9 +2,11 @@ package com.letsblog.api.controller;
 
 import com.letsblog.api.domain.OperationLog;
 import com.letsblog.api.dto.OperationLogRequest;
+import com.letsblog.api.dto.UnifiedLogEntryResponse;
 import com.letsblog.api.service.CurrentActorService;
 import com.letsblog.api.service.ForbiddenException;
 import com.letsblog.api.service.OperationLogService;
+import com.letsblog.api.service.UnifiedOperationLogService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -32,10 +34,13 @@ class OperationLogControllerTest {
     private OperationLogService service;
 
     @Mock
+    private UnifiedOperationLogService unifiedOperationLogService;
+
+    @Mock
     private CurrentActorService currentActorService;
 
     private OperationLogController controller() {
-        return new OperationLogController(service, currentActorService);
+        return new OperationLogController(service, unifiedOperationLogService, currentActorService);
     }
 
     @Test
@@ -97,5 +102,28 @@ class OperationLogControllerTest {
 
         assertEquals(1, result.size());
         verify(service).findTrace(1L, "op-1");
+    }
+
+    @Test
+    void listUnified_ログイン中ユーザーのadmin区分を渡して統合サービスへ委譲する() {
+        OperationLogController controller = controller();
+        when(currentActorService.getCurrentActorId()).thenReturn(1L);
+        when(currentActorService.isAdmin()).thenReturn(true);
+        Pageable pageable = PageRequest.of(0, 20);
+        Page<UnifiedLogEntryResponse> page = new PageImpl<>(List.of());
+        when(unifiedOperationLogService.list(1L, true, "AI_JOB", "draft", pageable)).thenReturn(page);
+
+        Page<UnifiedLogEntryResponse> result = controller.listUnified("AI_JOB", "draft", pageable);
+
+        assertEquals(page, result);
+    }
+
+    @Test
+    void listUnified_未ログインならForbidden() {
+        OperationLogController controller = controller();
+        when(currentActorService.getCurrentActorId()).thenReturn(null);
+        Pageable pageable = PageRequest.of(0, 20);
+
+        assertThrows(ForbiddenException.class, () -> controller.listUnified(null, null, pageable));
     }
 }

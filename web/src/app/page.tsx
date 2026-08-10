@@ -13,7 +13,7 @@ export default async function DashboardPage() {
   const cards = [
     { label: "登録サイト数", value: sites.length, href: "/sites" },
     { label: "投稿数", value: posts.length, href: "/posts" },
-    { label: "AIジョブ数", value: jobs.length, href: "/ai-jobs" },
+    { label: "AIジョブ数", value: jobs.length, href: "/operation-logs?type=AI_JOB" },
   ];
 
   return (
