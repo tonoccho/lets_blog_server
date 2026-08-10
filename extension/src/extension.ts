@@ -8,6 +8,7 @@ import {
   extractLocalImageReferences,
   resolveFeaturedImageReference,
   resolveExistingPostId,
+  guessImageMimeType,
 } from './frontMatter';
 import * as api from './apiClient';
 import { PlanPanel } from './planPanel';
@@ -531,16 +532,6 @@ async function commandSelectProject(context: vscode.ExtensionContext): Promise<v
   }
 }
 
-const IMAGE_MIME_TYPES: Record<string, string> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.svg': 'image/svg+xml',
-  '.webp': 'image/webp',
-  '.bmp': 'image/bmp',
-};
-
 /**
  * Markdown本文中のローカル画像参照をbase64データURIへ置換する。プレビューはWebviewの外(APIサーバー)で
  * HTML化するため、投稿先を持たないローカル画像をそのまま渡すと壊れたリンクになってしまうのを防ぐ。
@@ -549,7 +540,7 @@ function inlineLocalImages(content: string, baseDir: string): string {
   let rewritten = content;
   for (const image of extractLocalImageReferences(content, baseDir)) {
     if (!fs.existsSync(image.absolutePath)) continue;
-    const mimeType = IMAGE_MIME_TYPES[path.extname(image.absolutePath).toLowerCase()];
+    const mimeType = guessImageMimeType(image.absolutePath);
     if (!mimeType) continue;
     const dataUri = `data:${mimeType};base64,${fs.readFileSync(image.absolutePath).toString('base64')}`;
     rewritten = rewritten.split(image.reference).join(dataUri);

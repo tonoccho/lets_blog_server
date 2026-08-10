@@ -9,7 +9,9 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Other"],
+  "categories": [
+    "Other"
+  ],
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
@@ -116,9 +118,6 @@
     "typescript": "^5.5.4"
   },
   "dependencies": {
-    "gray-matter": "^4.0.3",
-    "form-data": "^4.0.0",
-    "node-fetch": "^2.7.0",
-    "@types/node-fetch": "^2.6.11"
+    "gray-matter": "^4.0.3"
   }
 }

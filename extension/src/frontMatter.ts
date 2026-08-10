@@ -46,6 +46,24 @@ export interface LocalImageReference {
 
 const IMAGE_MARKDOWN_PATTERN = /!\[[^\]]*]\(\s*([^)\s]+)[^)]*\)/g;
 
+const IMAGE_MIME_TYPES: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
+};
+
+/**
+ * 画像参照の拡張子からMIMEタイプを推定する。判定できない場合はundefinedを返す
+ * (プレビューのデータURI化では対象外とし、アップロード時は汎用のバイナリ種別へフォールバックする)。
+ */
+export function guessImageMimeType(reference: string): string | undefined {
+  return IMAGE_MIME_TYPES[path.extname(reference).toLowerCase()];
+}
+
 /**
  * 画像参照をbaseDir配下の絶対パスへ解決する。参照が"/"で始まる場合(例: "/assets/eyecatch.png")、
  * Node標準のpath.resolveはこれをファイルシステム絶対パスとして扱いbaseDirを無視してしまう。

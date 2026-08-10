@@ -1,12 +1,10 @@
-import fetch, { RequestInit, Response } from 'node-fetch';
-import FormData from 'form-data';
-import * as fs from 'fs';
-import * as https from 'https';
 import * as vscode from 'vscode';
-import { LocalImageReference } from './frontMatter';
+import { LocalImageReference, guessImageMimeType } from './frontMatter';
 import { Actor } from './config';
 import { ApiError, NetworkError, TimeoutError, withRetry } from './errorHandler';
 import { logger } from './logger';
+import { httpRequest, HttpResponse } from './httpClient';
+import { buildMultipartBody, MultipartPart } from './multipart';
 
 /** 応答が返らない場合に諦めるまでの既定時間。AI生成は数十秒かかることがあるため長めに取る。 */
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -16,12 +14,8 @@ const DEFAULT_TIMEOUT_MS = 120_000;
  * 指す個人用ローカル環境のため、既定で証明書検証をスキップする。実サーバーの正規証明書を
  * 使う場合は設定`letsBlog.allowInsecureTls`をfalseにすれば通常の検証に戻る。
  */
-function buildAgent(serverUrl: string): https.Agent | undefined {
-  if (!serverUrl.startsWith('https://')) {
-    return undefined;
-  }
-  const allowInsecureTls = vscode.workspace.getConfiguration('letsBlog').get<boolean>('allowInsecureTls', true);
-  return allowInsecureTls ? new https.Agent({ rejectUnauthorized: false }) : undefined;
+function allowsInsecureTls(): boolean {
+  return vscode.workspace.getConfiguration('letsBlog').get<boolean>('allowInsecureTls', true);
 }
 
 function buildHeaders(apiKey: string, actor?: Actor, contentType?: string): Record<string, string> {
@@ -49,10 +43,10 @@ interface RequestSpec {
   method?: string;
   headers?: Record<string, string>;
   /**
-   * リクエストボディを組み立てる。ファイルストリームを含むボディは一度しか読めず
-   * 再試行時に使い回せないため、値ではなくファクトリで受け取り試行ごとに作り直す。
+   * リクエストボディを組み立てる。マルチパートのボディは画像を読み込んで組み立てるため、
+   * 実際に送信する直前まで構築を遅らせられるようファクトリで受け取る。
    */
-  createBody?: () => { body: RequestInit['body']; headers?: Record<string, string> };
+  createBody?: () => { body: string | Buffer; headers?: Record<string, string> };
   /**
    * 一時的な失敗を再試行してよいか。既定はGETのみ(サーバー状態を変更しないため安全)。
    * タイムアウト後にサーバー側で処理が完了していた場合、投稿や課題の割り当てのような
@@ -65,7 +59,7 @@ interface RequestSpec {
  * 全API呼び出しの共通経路。タイムアウト・リトライ・ログ・エラー整形をここへ集約し、
  * 個々のエンドポイント関数がエラーハンドリングを取りこぼさないようにする。
  */
-async function request(serverUrl: string, path: string, spec: RequestSpec): Promise<Response> {
+async function request(serverUrl: string, path: string, spec: RequestSpec): Promise<HttpResponse> {
   const url = `${serverUrl}${path}`;
   const method = spec.method ?? 'GET';
   const timeoutMs = getTimeoutMs();
@@ -77,14 +71,14 @@ async function request(serverUrl: string, path: string, spec: RequestSpec): Prom
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       logger.debug(`${spec.label}: ${method} ${url}`);
 
-      let res: Response;
+      let res: HttpResponse;
       try {
-        res = await fetch(url, {
+        res = await httpRequest(url, {
           method,
           headers: { ...(spec.headers ?? {}), ...(built?.headers ?? {}) },
           body: built?.body,
-          agent: buildAgent(serverUrl),
-          signal: controller.signal as RequestInit['signal'],
+          signal: controller.signal,
+          allowInsecureTls: allowsInsecureTls(),
         });
       } catch (error) {
         if (controller.signal.aborted) {
@@ -238,33 +232,40 @@ export async function publishPost(
     label: 'publishPost',
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
-    // 画像はストリームで読み込むため、再試行のたびにフォームを作り直す必要がある。
     createBody: () => {
-      const form = new FormData();
-      form.append('site', params.site);
-      form.append('title', params.title);
-      if (params.slug) form.append('slug', params.slug);
-      form.append('status', params.status ?? 'draft');
+      const parts: MultipartPart[] = [
+        { kind: 'field', name: 'site', value: params.site },
+        { kind: 'field', name: 'title', value: params.title },
+      ];
+      if (params.slug) parts.push({ kind: 'field', name: 'slug', value: params.slug });
+      parts.push({ kind: 'field', name: 'status', value: params.status ?? 'draft' });
       for (const category of params.categories ?? []) {
-        form.append('categories', category);
+        parts.push({ kind: 'field', name: 'categories', value: category });
       }
       for (const tag of params.tags ?? []) {
-        form.append('tags', tag);
+        parts.push({ kind: 'field', name: 'tags', value: tag });
       }
       if (params.wpPostId) {
-        form.append('wpPostId', String(params.wpPostId));
+        parts.push({ kind: 'field', name: 'wpPostId', value: String(params.wpPostId) });
       }
-      form.append('markdown', params.markdown);
+      parts.push({ kind: 'field', name: 'markdown', value: params.markdown });
       for (const image of params.images) {
         // filenameはコンテナ/サーバー側のマルチパート処理でパス区切りがベース名のみに変換される
         // ことがあり往復しないため、Markdown中の実際の参照文字列はimageReferencesで別途明示的に送る。
-        form.append('images', fs.createReadStream(image.absolutePath), { filename: image.reference });
-        form.append('imageReferences', image.reference);
+        parts.push({
+          kind: 'file',
+          name: 'images',
+          filename: image.reference,
+          filePath: image.absolutePath,
+          contentType: guessImageMimeType(image.reference),
+        });
+        parts.push({ kind: 'field', name: 'imageReferences', value: image.reference });
       }
       if (params.featuredImageFilename) {
-        form.append('featuredImageFilename', params.featuredImageFilename);
+        parts.push({ kind: 'field', name: 'featuredImageFilename', value: params.featuredImageFilename });
       }
-      return { body: form, headers: form.getHeaders() };
+      const multipart = buildMultipartBody(parts);
+      return { body: multipart.body, headers: { 'Content-Type': multipart.contentType } };
     },
   });
 }
