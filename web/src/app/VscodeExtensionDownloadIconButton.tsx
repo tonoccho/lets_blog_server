@@ -1,8 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { Download, Loader2 } from "lucide-react";
+import { useI18n } from "./I18nProvider";
 
-export function VscodeExtensionDownloadButton() {
+export function VscodeExtensionDownloadIconButton() {
+  const { t } = useI18n();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,17 +45,34 @@ export function VscodeExtensionDownloadButton() {
     }
   }
 
+  const label = pending
+    ? t("header", "downloadVscodeExtensionPending")
+    : t("header", "downloadVscodeExtension");
+
   return (
-    <div>
+    <div className="relative">
       <button
         type="button"
         onClick={handleClick}
         disabled={pending}
-        className="inline-block rounded bg-neutral-900 px-4 py-2 text-sm text-white hover:bg-neutral-700 disabled:bg-neutral-400"
+        aria-label={label}
+        title={label}
+        className="rounded-md p-2 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:opacity-50"
       >
-        {pending ? "ビルド中…" : "拡張機能をダウンロード (.vsix)"}
+        {pending ? (
+          <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+        ) : (
+          <Download className="h-5 w-5" aria-hidden="true" />
+        )}
       </button>
-      {error && <p className="mt-2 text-sm text-red-600">エラー: {error}</p>}
+      {error && (
+        <div
+          role="alert"
+          className="absolute top-full right-0 z-50 mt-1 w-64 rounded-md border border-red-200 dark:border-red-900 bg-white dark:bg-neutral-900 p-2 text-xs text-red-600 dark:text-red-400 shadow-lg"
+        >
+          {error}
+        </div>
+      )}
     </div>
   );
 }

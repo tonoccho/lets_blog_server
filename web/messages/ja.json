@@ -25,7 +25,9 @@
     "openMenu": "メニューを開く",
     "closeMenu": "メニューを閉じる",
     "navigation": "ナビゲーション",
-    "logout": "ログアウト"
+    "logout": "ログアウト",
+    "downloadVscodeExtension": "VSCode拡張機能をダウンロード (.vsix)",
+    "downloadVscodeExtensionPending": "VSCode拡張機能をビルド中…"
   },
   "dashboard": {
     "title": "ダッシュボード",

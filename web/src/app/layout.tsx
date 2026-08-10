@@ -6,6 +6,7 @@ import { HeaderNav } from "./HeaderNav";
 import { LogoutButton } from "./LogoutButton";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 import { LanguageSwitcher } from "./LanguageSwitcher";
+import { VscodeExtensionDownloadIconButton } from "./VscodeExtensionDownloadIconButton";
 import { I18nProvider } from "./I18nProvider";
 import { SessionProvider } from "./SessionProvider";
 import "./globals.css";
@@ -64,6 +65,7 @@ export default async function RootLayout({
                     <LanguageSwitcher />
                     <ThemeSwitcher />
                     <LogoutButton />
+                    <VscodeExtensionDownloadIconButton />
                   </div>
                 )}
               </div>
