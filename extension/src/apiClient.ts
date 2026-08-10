@@ -19,12 +19,20 @@ import * as schemas from './schemas';
 const DEFAULT_TIMEOUT_MS = 120_000;
 
 /**
- * letsBlog.serverUrlは既定でリバースプロキシ経由の自己署名証明書(https://localhost)を
- * 指す個人用ローカル環境のため、既定で証明書検証をスキップする。実サーバーの正規証明書を
- * 使う場合は設定`letsBlog.allowInsecureTls`をfalseにすれば通常の検証に戻る。
+ * TLS証明書の検証は既定で有効(allowInsecureTls=false)。
+ * 検証を無効化すると中間者攻撃でAPIキーや記事内容を傍受・改竄されうるため、
+ * 自己署名証明書のローカル環境へ接続する場合に限り、利用者が明示的に有効化する。
+ * 危険な設定であることに気付けるよう、有効な間は警告としてログに残す。
  */
 function allowsInsecureTls(): boolean {
-  return vscode.workspace.getConfiguration('letsBlog').get<boolean>('allowInsecureTls', true);
+  const allowed = vscode.workspace.getConfiguration('letsBlog').get<boolean>('allowInsecureTls', false);
+  if (allowed) {
+    logger.warn(
+      'letsBlog.allowInsecureTlsが有効なため、TLS証明書の検証をスキップします。' +
+        '信頼できるネットワーク上のローカル環境でのみ使用してください。'
+    );
+  }
+  return allowed;
 }
 
 function buildHeaders(apiKey: string, actor?: Actor, contentType?: string): Record<string, string> {

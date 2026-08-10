@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { buildStaticCsp } from './webviewSecurity';
 
 /**
  * 記事プレビュー用のシングルトンWebviewパネル。マスター環境サイトのCSSを<style>として埋め込み、
@@ -45,6 +46,7 @@ export class PreviewPanel {
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="${buildStaticCsp()}">
 <title>Article Preview</title>
 <style>
 ${css}

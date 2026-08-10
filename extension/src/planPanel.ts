@@ -5,6 +5,7 @@ import * as api from './apiClient';
 import { Actor, getActor, getProjectId, getServerUrl, requireApiKey } from './config';
 import { LetsBlogFrontMatter, stringifyArticle } from './frontMatter';
 import { describeError } from './errorHandler';
+import { buildScriptedCsp, createNonce } from './webviewSecurity';
 import { logger } from './logger';
 
 const GITHUB_ISSUE_URL_PATTERN = /^(https:\/\/github\.com\/[^/]+\/[^/]+)\/issues\/\d+$/;
@@ -204,10 +205,12 @@ export class PlanPanel {
   }
 
   private _getHtmlContent(): string {
+    const nonce = createNonce();
     return `<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="${buildScriptedCsp(nonce)}">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Article Plan</title>
 <style>
@@ -316,7 +319,7 @@ export class PlanPanel {
   <div id="message" style="margin-top: 16px; display: none;"></div>
 </div>
 
-<script>
+<script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   let selectedIssue = null;
   let sessionId = undefined;

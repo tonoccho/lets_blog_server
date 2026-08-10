@@ -5,6 +5,7 @@ import * as api from './apiClient';
 import { getActor, getServerUrl, requireApiKey } from './config';
 import { parseArticle, stringifyArticle } from './frontMatter';
 import { describeError } from './errorHandler';
+import { buildScriptedCsp, createNonce } from './webviewSecurity';
 import { logger } from './logger';
 
 /**
@@ -12,6 +13,8 @@ import { logger } from './logger';
  * ComfyUI画像を生成し、生成結果を記事の「アイキャッチ」または「アセット」として組み込む。
  * WebviewPanelの骨格はplanPanel.ts(acquireVsCodeApi + postMessageディスパッチ)に準拠する。
  */
+const ALLOWED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'];
+
 export class ImageGenPanel {
   private static currentPanel: ImageGenPanel | undefined;
   private readonly _panel: vscode.WebviewPanel;
@@ -123,7 +126,10 @@ export class ImageGenPanel {
     fs.mkdirSync(assetsDir, { recursive: true });
 
     const decoded = Buffer.from(imageDataBase64, 'base64');
-    const extension = path.extname(sourceFileName) || '.png';
+    // 拡張子はサーバー応答由来のため、既知の画像拡張子だけを採用する
+    // (ファイル名自体は接頭辞とタイムスタンプから組み立てるため、パス要素は混入しない)。
+    const candidate = path.extname(sourceFileName).toLowerCase();
+    const extension = ALLOWED_IMAGE_EXTENSIONS.includes(candidate) ? candidate : '.png';
     const fileName = `${prefix}-${Date.now()}${extension}`;
     fs.writeFileSync(path.join(assetsDir, fileName), decoded);
     return fileName;
@@ -142,10 +148,12 @@ export class ImageGenPanel {
   }
 
   private _getHtmlContent(): string {
+    const nonce = createNonce();
     return `<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="${buildScriptedCsp(nonce)}">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Generate Image</title>
 <style>
@@ -256,7 +264,7 @@ export class ImageGenPanel {
   <div id="message"></div>
 </div>
 
-<script>
+<script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   let currentImage = null;
   let currentPrompt = '';
@@ -340,7 +348,11 @@ export class ImageGenPanel {
     currentImage = result;
     document.getElementById('generateButton').disabled = false;
     document.getElementById('previewSection').style.display = 'block';
-    document.getElementById('previewImage').src = 'data:' + result.mimeType + ';base64,' + result.dataBase64;
+    // mimeTypeはサーバー応答由来のため、既知の画像種別だけをデータURIへ組み立てる。
+    const safeMimeType = /^image\\/(png|jpeg|gif|webp|bmp|svg\\+xml)$/.test(result.mimeType || '')
+      ? result.mimeType
+      : 'image/png';
+    document.getElementById('previewImage').src = 'data:' + safeMimeType + ';base64,' + result.dataBase64;
     document.getElementById('previewInfo').textContent =
       'ファイル名: ' + result.fileName + '\\n生成時刻: ' + new Date().toLocaleString();
     showMessage('生成しました。', 'success');

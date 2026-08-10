@@ -91,39 +91,51 @@ async function commandLogin(context: vscode.ExtensionContext): Promise<void> {
   const email = await vscode.window.showInputBox({ prompt: 'メールアドレス', ignoreFocusOut: true });
   if (!email) return;
 
-  const password = await vscode.window.showInputBox({
+  const serverUrl = getServerUrl();
+  if (!(await confirmCredentialTransport(serverUrl))) return;
+
+  let password = await vscode.window.showInputBox({
     prompt: 'パスワード',
     password: true,
     ignoreFocusOut: true,
   });
   if (!password) return;
 
+  let apiKey: string | null = null;
   try {
-    let result = await api.login(getServerUrl(), email, password);
+    let result = await api.login(serverUrl, email, password);
+    // 送信済みの資格情報はこれ以降使わないため、保持し続けないよう参照を切る。
+    password = '';
 
     if (result.twoFactorRequired) {
-      const code = await vscode.window.showInputBox({
+      let code = await vscode.window.showInputBox({
         prompt: '2段階認証コードを入力してください',
         ignoreFocusOut: true,
       });
       if (!code) return;
-      result = await api.verifyTotpLogin(getServerUrl(), result.user.id, code);
+      result = await api.verifyTotpLogin(serverUrl, result.user.id, code);
+      code = '';
     }
 
-    if (!result.apiKey) {
+    apiKey = result.apiKey;
+    if (!apiKey) {
       throw new Error('APIキーの取得に失敗しました。');
     }
 
-    await setApiKey(context, result.apiKey);
+    await setApiKey(context, apiKey);
     await setActor(context, result.user);
     vscode.window.showInformationMessage(`'${result.user.email}' としてログインしました。`);
   } catch (err) {
     reportError('ログインに失敗しました', err);
+  } finally {
+    // 例外時も含め、平文の資格情報をこの関数のスコープに残さない。
+    password = '';
+    apiKey = null;
   }
 }
 
 async function commandSetApiKey(context: vscode.ExtensionContext): Promise<void> {
-  const value = await vscode.window.showInputBox({
+  let value = await vscode.window.showInputBox({
     prompt: "仲介APIサーバーのAPIキーを入力してください",
     password: true,
     ignoreFocusOut: true,
@@ -131,8 +143,28 @@ async function commandSetApiKey(context: vscode.ExtensionContext): Promise<void>
   if (!value) {
     return;
   }
-  await setApiKey(context, value);
-  vscode.window.showInformationMessage('APIキーを保存しました。');
+  try {
+    await setApiKey(context, value);
+    vscode.window.showInformationMessage('APIキーを保存しました。');
+  } finally {
+    value = '';
+  }
+}
+
+/**
+ * 資格情報を送信する前に、通信経路が保護されているかを確認する。
+ * 平文HTTPではパスワードとAPIキーが傍受されうるため、利用者へ明示的な同意を求める。
+ */
+async function confirmCredentialTransport(serverUrl: string): Promise<boolean> {
+  if (serverUrl.startsWith('https://')) {
+    return true;
+  }
+  const proceed = await vscode.window.showWarningMessage(
+    `接続先 '${serverUrl}' はHTTPS ではありません。パスワードとAPIキーが平文で送信されます。続行しますか?`,
+    { modal: true },
+    '続行する'
+  );
+  return proceed === '続行する';
 }
 
 async function commandSelectSite(context: vscode.ExtensionContext): Promise<void> {

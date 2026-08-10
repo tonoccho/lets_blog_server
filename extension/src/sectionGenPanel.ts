@@ -3,6 +3,7 @@ import * as api from './apiClient';
 import { getActor, getServerUrl, requireApiKey } from './config';
 import { SectionContext } from './headingContext';
 import { describeError } from './errorHandler';
+import { buildScriptedCsp, createNonce } from './webviewSecurity';
 import { logger } from './logger';
 
 /**
@@ -101,10 +102,12 @@ export class SectionGenPanel {
   }
 
   private _getHtmlContent(): string {
+    const nonce = createNonce();
     return `<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="${buildScriptedCsp(nonce)}">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Generate Section</title>
 <style>
@@ -179,7 +182,7 @@ export class SectionGenPanel {
   <div id="message"></div>
 </div>
 
-<script>
+<script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   let currentResult = null;
   let chatHistory = [];
@@ -268,13 +271,19 @@ export class SectionGenPanel {
     chatHistory.push({ role: 'assistant', content: result.result });
     appendBubble('assistant', result.result);
 
+    // 出典はサーバー/AI由来の文字列のため、HTMLとして組み立てずDOM APIで構築する
+    // (タイトルやURLにマークアップが混入しても要素として解釈されないようにする)。
     const sourcesArea = document.getElementById('sourcesArea');
+    sourcesArea.textContent = '';
     if (result.sources && result.sources.length > 0) {
-      sourcesArea.innerHTML = '出典: ' + result.sources
-        .map((s) => '<a href="' + s.url + '">' + s.title + '</a>')
-        .join(', ');
-    } else {
-      sourcesArea.innerHTML = '';
+      sourcesArea.appendChild(document.createTextNode('出典: '));
+      result.sources.forEach((s, index) => {
+        if (index > 0) sourcesArea.appendChild(document.createTextNode(', '));
+        const link = document.createElement('a');
+        link.href = s.url;
+        link.textContent = s.title;
+        sourcesArea.appendChild(link);
+      });
     }
 
     const noteArea = document.getElementById('searchNoteArea');
