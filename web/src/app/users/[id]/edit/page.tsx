@@ -1,8 +1,38 @@
 import { redirect } from "next/navigation";
-import { getUserProfile } from "@/lib/apiClient";
+import { getUserProfile, getTwoFactorStatus } from "@/lib/apiClient";
 import { requireSession } from "@/lib/session";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { Tabs, type TabItem } from "@/components/Tabs";
 import { UserProfileForm } from "./UserProfileForm";
+import { PersonalPreferencesForm } from "./PersonalPreferencesForm";
+import { TwoFactorSettings } from "@/app/settings/security/TwoFactorSettings";
+
+// Node/ブラウザがIntl.supportedValuesOfに対応していない場合のフォールバック。
+const FALLBACK_TIMEZONES = [
+  "Asia/Tokyo",
+  "Asia/Seoul",
+  "Asia/Shanghai",
+  "Asia/Singapore",
+  "Asia/Kolkata",
+  "Europe/London",
+  "Europe/Paris",
+  "Europe/Berlin",
+  "America/New_York",
+  "America/Chicago",
+  "America/Los_Angeles",
+  "UTC",
+];
+
+function getTimezoneOptions(): string[] {
+  if (typeof Intl.supportedValuesOf === "function") {
+    try {
+      return Intl.supportedValuesOf("timeZone");
+    } catch {
+      return FALLBACK_TIMEZONES;
+    }
+  }
+  return FALLBACK_TIMEZONES;
+}
 
 export default async function UserProfileEditPage({
   params,
@@ -23,6 +53,39 @@ export default async function UserProfileEditPage({
     redirect(isSelf ? "/" : "/users");
   }
 
+  // 個人設定(言語・タイムゾーン)・2FAは本人のみが対象(セッションに紐付く操作のため、
+  // adminが他ユーザーの画面を開いても代理設定はできない)。
+  const twoFactorStatus = isSelf
+    ? await getTwoFactorStatus(actor).catch(() => ({ enabled: false }))
+    : null;
+
+  const tabs: TabItem[] = [
+    {
+      id: "profile",
+      label: "プロフィール",
+      content: <UserProfileForm profile={profile} />,
+    },
+  ];
+
+  if (isSelf) {
+    tabs.push({
+      id: "preferences",
+      label: "個人設定",
+      content: (
+        <PersonalPreferencesForm
+          locale={profile.locale ?? "ja_JP"}
+          timezone={profile.timezone ?? "Asia/Tokyo"}
+          timezoneOptions={getTimezoneOptions()}
+        />
+      ),
+    });
+    tabs.push({
+      id: "security",
+      label: "セキュリティ",
+      content: <TwoFactorSettings initialEnabled={twoFactorStatus?.enabled ?? false} />,
+    });
+  }
+
   return (
     <div className="space-y-8">
       <Breadcrumb
@@ -34,7 +97,7 @@ export default async function UserProfileEditPage({
       />
       <h1 className="text-xl font-semibold">ユーザープロフィール編集</h1>
       <p className="text-sm text-neutral-500 dark:text-neutral-400">{profile.email}</p>
-      <UserProfileForm profile={profile} />
+      <Tabs tabs={tabs} />
     </div>
   );
 }

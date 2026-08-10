@@ -5,7 +5,8 @@ import { updatePreferencesAction, UpdatePreferencesState } from "./actions";
 
 const initialState: UpdatePreferencesState = {};
 
-export function SystemPreferencesForm({
+/** 管理画面自体の言語・タイムゾーン設定。システム画面から移動(issue #185)。 */
+export function PersonalPreferencesForm({
   locale,
   timezone,
   timezoneOptions,
@@ -19,6 +20,9 @@ export function SystemPreferencesForm({
   return (
     <form action={formAction} className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
       <h2 className="mb-3 font-medium">個人設定</h2>
+      <p className="mb-3 text-sm text-neutral-500 dark:text-neutral-400">
+        この管理画面自体の表示言語とタイムゾーンです。プロフィール情報とは別の設定です。
+      </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-neutral-600 dark:text-neutral-400">言語</span>
