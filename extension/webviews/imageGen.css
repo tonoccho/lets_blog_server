@@ -17,9 +17,13 @@
   button:disabled { opacity: 0.6; cursor: default; }
   .preview-section { display: none; border: 1px solid var(--vscode-panel-border, #ccc); padding: 10px; }
   .preview-section img { max-width: 100%; display: block; margin-bottom: 8px; }
-  .preview-info { font-size: 0.9em; opacity: 0.8; margin-bottom: 8px; white-space: pre-wrap; }
+  .preview-info { font-size: 0.9em; opacity: 0.9; margin-bottom: 8px; white-space: pre-wrap; }
   .button-group { display: flex; gap: 10px; }
   #message { margin-top: 16px; display: none; }
   #message.error { color: var(--vscode-errorForeground, #d32f2f); }
-  #message.success { color: #388e3c; }
+  #message.success { color: var(--vscode-testing-iconPassed, #2e7d32); }
   #loraWeightGroup { display: none; }
+
+  /* 無効化されたボタンは、透明度のみだと文字のコントラストが不足しうるため
+     カーソル形状と合わせて状態を示す。 */
+  button:disabled { opacity: 0.6; cursor: not-allowed; }

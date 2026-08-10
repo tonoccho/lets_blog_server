@@ -17,8 +17,9 @@
 
   function applyModeVisibility() {
     const mode = document.getElementById('mode').value;
-    document.getElementById('precedingContextGroup').style.display = mode === 'body' ? 'block' : 'none';
-    document.getElementById('headingGroup').style.display = mode === 'lead' ? 'none' : 'block';
+    // 非表示のグループは支援技術からも隠し、Tab移動の対象からも外す。
+    setGroupVisible(document.getElementById('precedingContextGroup'), mode === 'body');
+    setGroupVisible(document.getElementById('headingGroup'), mode !== 'lead');
     const hint = document.getElementById('outlineHint');
     if ((mode === 'lead' || mode === 'lead-subsections') && subsectionHeadings.length > 0) {
       const label = mode === 'lead' ? '記事の構成: ' : 'サブセクション: ';
@@ -26,6 +27,14 @@
     } else {
       hint.textContent = '';
     }
+  }
+
+  function setGroupVisible(group, visible) {
+    group.style.display = visible ? 'block' : 'none';
+    group.setAttribute('aria-hidden', visible ? 'false' : 'true');
+    group.querySelectorAll('input, textarea, select').forEach((el) => {
+      el.disabled = !visible;
+    });
   }
 
   document.getElementById('mode').addEventListener('change', applyModeVisibility);
@@ -87,6 +96,8 @@
     currentResult = result;
     document.getElementById('refineInput').value = '';
     document.getElementById('chat').style.display = 'block';
+    // 生成後は挿入操作へ進めるようフォーカスを移す。
+    document.getElementById('insertButton').focus();
 
     if (pendingUserMessage) {
       chatHistory.push({ role: 'user', content: pendingUserMessage });
@@ -122,6 +133,23 @@
     LetsBlogLoading.begin({ buttonIds: ['insertButton'], text: '記事へ挿入しています…', kind: 'load' });
     post('insert', { text: currentResult.result });
   }
+
+  // Ctrl/Cmd+Enter で生成、Escape で実行中の処理を中断する。
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      generate();
+    } else if (e.key === 'Escape' && LetsBlogLoading.isRunning()) {
+      post('cancel');
+    }
+  });
+  // 追加の指示はEnterのみで送れるようにする(1行入力のため)。
+  document.getElementById('refineInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      refine();
+    }
+  });
 
   document.getElementById('generateButton').addEventListener('click', generate);
   document.getElementById('refineButton').addEventListener('click', refine);

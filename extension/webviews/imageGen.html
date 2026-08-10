@@ -9,84 +9,85 @@
 <link rel="stylesheet" href="{{styleUri}}">
 </head>
 <body>
-<div class="container">
+<main class="container">
+  <h1 class="visually-hidden">画像生成</h1>
   <div class="section">
-    <div class="section-title">パラメータ</div>
+    <h2 class="section-title">パラメータ</h2>
     <div class="form-group">
-      <label>prompt</label>
+      <label for="prompt">prompt</label>
       <textarea id="prompt" placeholder="生成したい画像の説明"></textarea>
     </div>
     <div class="form-group">
-      <label>negative prompt</label>
+      <label for="negativePrompt">negative prompt</label>
       <textarea id="negativePrompt" placeholder="low quality, blurry, watermark, text"></textarea>
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label>steps</label>
+        <label for="steps">steps</label>
         <input type="number" id="steps" min="1" max="150" value="20">
       </div>
       <div class="form-group">
-        <label>cfg scale</label>
+        <label for="cfgScale">cfg scale</label>
         <input type="number" id="cfgScale" min="0" max="30" step="0.1" value="7.0">
       </div>
       <div class="form-group">
-        <label>seed(空欄でランダム)</label>
+        <label for="seed">seed(空欄でランダム)</label>
         <input type="text" id="seed" placeholder="">
       </div>
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label>sampler</label>
+        <label for="samplerName">sampler</label>
         <select id="samplerName"></select>
       </div>
       <div class="form-group">
-        <label>scheduler</label>
+        <label for="scheduler">scheduler</label>
         <select id="scheduler"></select>
       </div>
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label>width</label>
+        <label for="width">width</label>
         <input type="number" id="width" min="64" max="2048" step="8" value="512">
       </div>
       <div class="form-group">
-        <label>height</label>
+        <label for="height">height</label>
         <input type="number" id="height" min="64" max="2048" step="8" value="512">
       </div>
       <div class="form-group">
-        <label>batch size</label>
+        <label for="batchSize">batch size</label>
         <input type="number" id="batchSize" min="1" max="4" value="1">
       </div>
     </div>
     <div class="form-group">
-      <label>checkpoint</label>
+      <label for="checkpoint">checkpoint</label>
       <select id="checkpoint"></select>
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label>LoRA</label>
+        <label for="loraName">LoRA</label>
         <select id="loraName"><option value="">なし</option></select>
       </div>
       <div class="form-group" id="loraWeightGroup">
-        <label>LoRA weight</label>
+        <label for="loraWeight">LoRA weight</label>
         <input type="number" id="loraWeight" min="0" max="2" step="0.1" value="1.0">
       </div>
     </div>
-    <button id="generateButton" class="primary">生成</button>
+    <button type="button" id="generateButton" class="primary">生成</button>
   </div>
 
-  <div class="section preview-section" id="previewSection">
-    <div class="section-title">プレビュー</div>
+  <section class="section preview-section" id="previewSection" aria-label="生成画像のプレビュー">
+    <h2 class="section-title">プレビュー</h2>
     <img id="previewImage" alt="生成画像プレビュー">
-    <div class="preview-info" id="previewInfo"></div>
+    <p class="preview-info" id="previewInfo" role="status" aria-live="polite"></p>
     <div class="button-group">
-      <button id="setAsEyecatchButton" class="primary">アイキャッチとして設定</button>
-      <button id="addAsAssetButton">アセットとして追加</button>
+      <button type="button" id="setAsEyecatchButton" class="primary">アイキャッチとして設定</button>
+      <button type="button" id="addAsAssetButton">アセットとして追加</button>
     </div>
-  </div>
+  </section>
 
-  <div id="message"></div>
-</div>
+  <div id="message" role="status" aria-live="polite"></div>
+</main>
 {{sharedScripts}}
 <script nonce="{{nonce}}" src="{{scriptUri}}"></script>
 </body>

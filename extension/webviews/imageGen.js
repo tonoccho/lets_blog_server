@@ -39,7 +39,12 @@
   }
 
   document.getElementById('loraName').addEventListener('change', (e) => {
-    document.getElementById('loraWeightGroup').style.display = e.target.value ? 'block' : 'none';
+    const group = document.getElementById('loraWeightGroup');
+    const enabled = Boolean(e.target.value);
+    group.style.display = enabled ? 'block' : 'none';
+    // 非表示の入力を支援技術が読み上げないようにする。
+    group.setAttribute('aria-hidden', enabled ? 'false' : 'true');
+    document.getElementById('loraWeight').disabled = !enabled;
   });
 
   function collectParams() {
@@ -86,6 +91,8 @@
     // base64本体は<img>のsrcへ渡した後は保持しない(Webview側にコピーを残さない)。
     currentImage = { fileName: result.fileName };
     document.getElementById('previewSection').style.display = 'block';
+    // 生成後は次の操作(保存)へ進めるようフォーカスを移す。
+    document.getElementById('setAsEyecatchButton').focus();
     // mimeTypeはサーバー応答由来のため、既知の画像種別だけをデータURIへ組み立てる。
     const safeMimeType = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/.test(result.mimeType || '')
       ? result.mimeType
@@ -117,6 +124,16 @@
     });
     post('addAsAsset');
   }
+
+  // Ctrl/Cmd+Enter で生成、Escape で実行中の処理を中断する。
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      generate();
+    } else if (e.key === 'Escape' && LetsBlogLoading.isRunning()) {
+      post('cancel');
+    }
+  });
 
   document.getElementById('generateButton').addEventListener('click', generate);
   document.getElementById('setAsEyecatchButton').addEventListener('click', setAsEyecatch);

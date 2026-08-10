@@ -40,7 +40,7 @@ export class PreviewPanel {
 
   private _getHtmlContent(html: string, css: string, warning: string | undefined): string {
     const warningBlock = warning
-      ? `<div style="background:#fff3cd;color:#664d03;padding:8px 12px;margin-bottom:16px;border-radius:4px;font-family:sans-serif;font-size:13px;">${escapeHtml(warning)}</div>`
+      ? `<div role="alert" style="background:#fff3cd;color:#664d03;padding:8px 12px;margin-bottom:16px;border-radius:4px;font-family:sans-serif;font-size:13px;">${escapeHtml(warning)}</div>`
       : '';
     return `<!DOCTYPE html>
 <html lang="ja">
@@ -54,7 +54,9 @@ ${css}
 </head>
 <body>
 ${warningBlock}
+<main>
 ${html}
+</main>
 </body>
 </html>`;
   }

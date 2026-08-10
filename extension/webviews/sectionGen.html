@@ -9,9 +9,11 @@
 <link rel="stylesheet" href="{{styleUri}}">
 </head>
 <body>
-<div class="container">
+<main class="container">
+  <h1 class="visually-hidden">セクション生成</h1>
+  <h2 class="visually-hidden">生成条件</h2>
   <div class="form-group">
-    <label>モード(カーソル位置から自動判定。必要に応じて変更可)</label>
+    <label for="mode">モード(カーソル位置から自動判定。必要に応じて変更可)</label>
     <select id="mode">
       <option value="body">本文(セクションタイトルを考慮)</option>
       <option value="lead">リード文(記事全体を考慮)</option>
@@ -19,35 +21,37 @@
     </select>
   </div>
   <div class="form-group">
-    <label>記事タイトル</label>
+    <label for="articleTitle">記事タイトル</label>
     <input type="text" id="articleTitle">
   </div>
   <div class="form-group" id="headingGroup">
-    <label>見出し</label>
+    <label for="heading">見出し</label>
     <input type="text" id="heading" placeholder="このセクションの見出し">
   </div>
   <div class="hint" id="outlineHint"></div>
   <div class="form-group" id="precedingContextGroup">
-    <label>直前までの文脈(任意。選択範囲やカーソル位置までの本文から自動入力されます)</label>
+    <label for="precedingContext">直前までの文脈(任意。選択範囲やカーソル位置までの本文から自動入力されます)</label>
     <textarea id="precedingContext"></textarea>
   </div>
-  <button id="generateButton" class="primary">生成</button>
+  <button type="button" id="generateButton" class="primary">生成</button>
 
-  <div class="chat" id="chat">
-    <div id="messages"></div>
-    <div class="sources" id="sourcesArea"></div>
+  <section class="chat" id="chat" aria-labelledby="chatResultTitle">
+    <h2 class="visually-hidden" id="chatResultTitle">生成結果</h2>
+    <div id="messages" role="log" aria-live="polite" aria-label="生成結果の履歴"></div>
+    <div class="sources" id="sourcesArea" aria-label="出典"></div>
     <div class="search-note" id="searchNoteArea"></div>
     <div class="refine-row">
+      <label class="visually-hidden" for="refineInput">追加の指示</label>
       <input type="text" id="refineInput" placeholder="追加の指示(例: もっと短く、丁寧語で)">
-      <button id="refineButton">壁打ちで再生成</button>
+      <button type="button" id="refineButton">壁打ちで再生成</button>
     </div>
     <div class="button-group">
-      <button id="insertButton" class="primary">この案を記事に挿入</button>
+      <button type="button" id="insertButton" class="primary">この案を記事に挿入</button>
     </div>
-  </div>
+  </section>
 
-  <div id="message"></div>
-</div>
+  <div id="message" role="status" aria-live="polite"></div>
+</main>
 {{sharedScripts}}
 <script nonce="{{nonce}}" src="{{scriptUri}}"></script>
 </body>

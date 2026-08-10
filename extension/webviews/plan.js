@@ -41,10 +41,24 @@
       const item = document.createElement('div');
       item.className = 'issue-item';
       item.textContent = '#' + issue.number + ': ' + issue.title;
-      if (selectedIssue && selectedIssue.number === issue.number) {
+      // リストボックスの選択肢として扱い、Tab/矢印キーで到達・選択できるようにする。
+      item.setAttribute('role', 'option');
+      item.setAttribute('tabindex', '0');
+      const isSelected = selectedIssue && selectedIssue.number === issue.number;
+      item.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+      if (isSelected) {
         item.classList.add('selected');
       }
       item.addEventListener('click', () => selectIssue(issue, item));
+      item.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          selectIssue(issue, item);
+        } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          moveIssueFocus(item, e.key === 'ArrowDown' ? 1 : -1);
+        }
+      });
       el.appendChild(item);
     });
     updateIssuePager();
@@ -65,6 +79,26 @@
     next.disabled = issuePage >= totalIssuePages() - 1;
   }
 
+  /** 矢印キーでのフォーカス移動。ページ端では隣のページへ送る。 */
+  function moveIssueFocus(current, delta) {
+    const items = Array.from(document.querySelectorAll('.issue-item'));
+    const index = items.indexOf(current);
+    const next = items[index + delta];
+    if (next) {
+      next.focus();
+      return;
+    }
+    if (delta > 0 && issuePage < totalIssuePages() - 1) {
+      changeIssuePage(1);
+      const first = document.querySelector('.issue-item');
+      if (first) first.focus();
+    } else if (delta < 0 && issuePage > 0) {
+      changeIssuePage(-1);
+      const all = document.querySelectorAll('.issue-item');
+      if (all.length > 0) all[all.length - 1].focus();
+    }
+  }
+
   function changeIssuePage(delta) {
     const next = issuePage + delta;
     if (next < 0 || next >= totalIssuePages()) return;
@@ -77,13 +111,19 @@
     sessionId = undefined;
     chatHistory = [];
     document.getElementById('messages').innerHTML = '';
-    document.querySelectorAll('.issue-item').forEach((n) => n.classList.remove('selected'));
+    document.querySelectorAll('.issue-item').forEach((n) => {
+      n.classList.remove('selected');
+      n.setAttribute('aria-selected', 'false');
+    });
     el.classList.add('selected');
+    el.setAttribute('aria-selected', 'true');
     document.getElementById('chatSection').style.display = 'block';
     document.getElementById('structureSection').style.display = 'block';
     document.getElementById('structureTextarea').value = '';
     document.getElementById('structureAcceptedBadge').style.display = 'none';
     document.getElementById('metadataSection').style.display = 'none';
+    // 選択直後に入力できるよう、次の操作先へフォーカスを移す。
+    document.getElementById('chatInput').focus();
   }
 
   function addMessage(role, content) {
@@ -159,12 +199,15 @@
       container.innerHTML = '<span class="hint">既存カテゴリを取得できませんでした(サイト未紐付け等)。新規カテゴリ欄に直接入力してください。</span>';
       return;
     }
-    existingCategories.forEach((name) => {
+    existingCategories.forEach((name, index) => {
       const label = document.createElement('label');
       const checkbox = document.createElement('input');
+      const id = 'category-' + index;
       checkbox.type = 'checkbox';
+      checkbox.id = id;
       checkbox.value = name;
       checkbox.checked = (selected || []).some((s) => s.toLowerCase() === name.toLowerCase());
+      label.setAttribute('for', id);
       label.appendChild(checkbox);
       label.appendChild(document.createTextNode(' ' + name));
       container.appendChild(label);
@@ -208,6 +251,7 @@
     document.getElementById('newCategoriesInput').value = unmatched.join(', ');
     document.getElementById('tagsInput').value = (suggestion.tags || []).join(', ');
     document.getElementById('metadataSection').style.display = 'block';
+    document.getElementById('titleInput').focus();
   }
 
   function approveMetadata() {
@@ -237,6 +281,13 @@
     el.className = type || '';
     el.style.display = 'block';
   }
+
+  // Escapeで実行中の処理を中断できるようにする。
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && LetsBlogLoading.isRunning()) {
+      post('cancel');
+    }
+  });
 
   document.getElementById('issuePrevButton').addEventListener('click', () => changeIssuePage(-1));
   document.getElementById('issueNextButton').addEventListener('click', () => changeIssuePage(1));
