@@ -18,6 +18,8 @@ import org.springframework.web.client.RestClientResponseException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Optional;
 
@@ -84,6 +86,12 @@ public class WordPressAdapter implements CmsAdapter {
         }
         if (content.authorId() != null) {
             body.put("author", Long.parseLong(content.authorId()));
+        }
+        if (content.publishScheduledAt() != null) {
+            // WordPressはstatus=futureとdate_gmtの組で予約投稿を扱う。
+            // date_gmtはタイムゾーン指定子を含まないUTCのローカル日時形式で渡す。
+            body.put("date_gmt", DateTimeFormatter.ISO_LOCAL_DATE_TIME
+                    .format(content.publishScheduledAt().atOffset(ZoneOffset.UTC)));
         }
 
         String path = existingPostId == null ? "/wp-json/wp/v2/posts" : "/wp-json/wp/v2/posts/" + existingPostId;

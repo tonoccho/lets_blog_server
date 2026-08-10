@@ -25,6 +25,8 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -637,6 +639,12 @@ public class WordPressSshOperations {
         StringBuilder args = new StringBuilder();
         args.append("--post_title=").append(ShellQuote.single(content.title()));
         args.append(" --post_status=").append(ShellQuote.single(content.status()));
+        if (content.publishScheduledAt() != null) {
+            // wp-cliはUTCの日時を --post_date_gmt で受け取る(status=futureと組で予約投稿になる)。
+            String scheduledAt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+                    .format(content.publishScheduledAt().atOffset(ZoneOffset.UTC));
+            args.append(" --post_date_gmt=").append(ShellQuote.single(scheduledAt));
+        }
         if (content.slug() != null && !content.slug().isBlank()) {
             args.append(" --post_name=").append(ShellQuote.single(content.slug()));
         }

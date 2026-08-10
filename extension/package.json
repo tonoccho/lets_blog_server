@@ -67,6 +67,10 @@
       {
         "command": "letsBlog.previewArticle",
         "title": "Let's Blog: Preview Article"
+      },
+      {
+        "command": "letsBlog.schedulePublication",
+        "title": "Let's Blog: Schedule Publication"
       }
     ],
     "menus": {

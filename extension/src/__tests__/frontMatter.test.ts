@@ -9,6 +9,7 @@ import {
   guessImageMimeType,
   buildArticleFrontMatter,
   suggestSlugFromTitle,
+  validateScheduledPublication,
 } from '../frontMatter';
 
 const BASE_DIR = path.resolve('/workspace/articles/sample');
@@ -223,5 +224,64 @@ describe('suggestSlugFromTitle', () => {
 
   it('英数字を含まないタイトルでは空文字を返す(利用者に入力を促す)', () => {
     expect(suggestSlugFromTitle('日本語のみのタイトル')).toBe('');
+  });
+});
+
+describe('validateScheduledPublication', () => {
+  const NOW = new Date('2026-06-01T00:00:00Z');
+
+  it('未設定の場合は値もエラーも返さない', () => {
+    expect(validateScheduledPublication(undefined, NOW)).toEqual({});
+    expect(validateScheduledPublication(null, NOW)).toEqual({});
+    expect(validateScheduledPublication('', NOW)).toEqual({});
+  });
+
+  it('未来のUTC日時を受け付ける', () => {
+    expect(validateScheduledPublication('2026-12-25T09:00:00Z', NOW)).toEqual({
+      value: '2026-12-25T09:00:00Z',
+    });
+  });
+
+  it('オフセット付きの日時も受け付ける', () => {
+    expect(validateScheduledPublication('2026-12-25T18:00:00+09:00', NOW)).toEqual({
+      value: '2026-12-25T18:00:00+09:00',
+    });
+  });
+
+  it('過去の日時は拒否する', () => {
+    const result = validateScheduledPublication('2020-01-01T00:00:00Z', NOW);
+    expect(result.value).toBeUndefined();
+    expect(result.error).toContain('未来の日時');
+  });
+
+  it('現在時刻ちょうどは拒否する(予約にならないため)', () => {
+    const result = validateScheduledPublication('2026-06-01T00:00:00Z', NOW);
+    expect(result.error).toContain('未来の日時');
+  });
+
+  it('タイムゾーンを含まない日時は拒否する', () => {
+    const result = validateScheduledPublication('2026-12-25T09:00:00', NOW);
+    expect(result.error).toContain('タイムゾーン');
+  });
+
+  it('ISO 8601以外の形式は拒否する', () => {
+    expect(validateScheduledPublication('2026/12/25 09:00', NOW).error).toContain('ISO 8601');
+    expect(validateScheduledPublication('明日', NOW).error).toContain('ISO 8601');
+  });
+
+  it('文字列以外は拒否する', () => {
+    expect(validateScheduledPublication(12345, NOW).error).toContain('文字列');
+  });
+
+  it('前後の空白は取り除いて扱う', () => {
+    expect(validateScheduledPublication('  2026-12-25T09:00:00Z  ', NOW)).toEqual({
+      value: '2026-12-25T09:00:00Z',
+    });
+  });
+
+  it('存在しない日付は拒否する', () => {
+    const result = validateScheduledPublication('2026-02-30T09:00:00Z', NOW);
+    expect(result.value).toBeUndefined();
+    expect(result.error).toBeDefined();
   });
 });

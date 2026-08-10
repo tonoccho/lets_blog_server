@@ -15,6 +15,8 @@ public record PostPublishCommand(
         String markdown,
         List<MultipartFile> images,
         String featuredImageFilename,
-        List<String> imageReferences
+        List<String> imageReferences,
+        /** front matterのpublish_scheduled_at(ISO 8601)。予約投稿しない場合はnull。 */
+        String publishScheduledAt
 ) {
 }

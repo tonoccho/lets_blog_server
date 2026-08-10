@@ -9,6 +9,7 @@ import {
   resolveFeaturedImageReference,
   resolveExistingPostId,
   guessImageMimeType,
+  validateScheduledPublication,
 } from './frontMatter';
 import * as api from './apiClient';
 import { PlanPanel } from './planPanel';
@@ -35,6 +36,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('letsBlog.createArticle', () => commandCreateArticle(context)),
+    vscode.commands.registerCommand('letsBlog.schedulePublication', () => commandSchedulePublication()),
     vscode.commands.registerCommand('letsBlog.login', () => commandLogin(context)),
     vscode.commands.registerCommand('letsBlog.setApiKey', () => commandSetApiKey(context)),
     vscode.commands.registerCommand('letsBlog.selectSite', () => commandSelectSite(context)),
@@ -243,6 +245,13 @@ async function publishToSite(
     }
   }
 
+  // 予約投稿は本番サイトでのみ有効。送信前に形式と未来日時であることを確認する。
+  const scheduled = validateScheduledPublication(article.data.publish_scheduled_at);
+  if (scheduled.error) {
+    vscode.window.showErrorMessage(scheduled.error);
+    return;
+  }
+
   const existingPostId = resolveExistingPostId(article.data, siteKey);
   const actor = await getActor(context);
 
@@ -270,6 +279,7 @@ async function publishToSite(
           markdown: article.content,
           images,
           featuredImageFilename: featuredImage?.reference,
+          publishScheduledAt: scheduled.value,
         },
         actor
       );
@@ -542,6 +552,129 @@ async function commandCreateArticle(context: vscode.ExtensionContext): Promise<v
   } catch (err) {
     reportError('記事作成パネルの起動に失敗しました', err);
   }
+}
+
+/**
+ * front matterのpublish_scheduled_atを対話的に設定する。
+ *
+ * 日付と時刻を順に選ばせ、ISO 8601(UTC)へ変換して書き込む。
+ * VSCodeの標準UIにはカレンダーピッカーが無いため、QuickPickで日付候補を出しつつ
+ * 任意の日付も入力できるようにしている。
+ */
+async function commandSchedulePublication(): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  try {
+    const article = parseArticle(editor.document.getText());
+
+    const current = typeof article.data.publish_scheduled_at === 'string'
+      ? article.data.publish_scheduled_at
+      : undefined;
+
+    const action = await vscode.window.showQuickPick(
+      [
+        { label: '公開予定日時を設定する', value: 'set' as const },
+        ...(current
+          ? [{ label: `公開予定日時を解除する (現在: ${current})`, value: 'clear' as const }]
+          : []),
+      ],
+      { placeHolder: current ? `現在の設定: ${current}` : '公開予定日時は未設定です' }
+    );
+    if (!action) return;
+
+    if (action.value === 'clear') {
+      delete article.data.publish_scheduled_at;
+      await replaceDocumentText(editor, stringifyArticle(article));
+      vscode.window.showInformationMessage('公開予定日時を解除しました。');
+      return;
+    }
+
+    const date = await pickScheduledDate();
+    if (!date) return;
+    const time = await pickScheduledTime();
+    if (!time) return;
+
+    // 入力はローカルタイムゾーンとして解釈し、front matterにはUTCのISO 8601で保存する。
+    const localDateTime = new Date(`${date}T${time}:00`);
+    if (Number.isNaN(localDateTime.getTime())) {
+      vscode.window.showErrorMessage(`日時として解釈できません: ${date} ${time}`);
+      return;
+    }
+    const isoValue = localDateTime.toISOString();
+
+    const validation = validateScheduledPublication(isoValue);
+    if (validation.error) {
+      vscode.window.showErrorMessage(validation.error);
+      return;
+    }
+
+    article.data.publish_scheduled_at = isoValue;
+    await replaceDocumentText(editor, stringifyArticle(article));
+    vscode.window.showInformationMessage(
+      `公開予定日時を ${localDateTime.toLocaleString()} (${isoValue}) に設定しました。` +
+        ' 本番サイトへ投稿したときに有効になります。'
+    );
+  } catch (err) {
+    reportError('公開予定日時の設定に失敗しました', err);
+  }
+}
+
+/** 日付を選ばせる。今日から2週間分の候補に加え、任意の日付も入力できる。 */
+async function pickScheduledDate(): Promise<string | undefined> {
+  const today = new Date();
+  const candidates: vscode.QuickPickItem[] = [];
+  for (let offset = 0; offset < 14; offset++) {
+    const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset);
+    candidates.push({
+      label: formatLocalDate(day),
+      description: offset === 0 ? '今日' : offset === 1 ? '明日' : day.toLocaleDateString(undefined, { weekday: 'long' }),
+    });
+  }
+  candidates.push({ label: 'その他の日付を入力…', description: 'YYYY-MM-DD' });
+
+  const picked = await vscode.window.showQuickPick(candidates, { placeHolder: '公開する日付を選択' });
+  if (!picked) return undefined;
+  if (!picked.label.startsWith('その他')) {
+    return picked.label;
+  }
+
+  return vscode.window.showInputBox({
+    prompt: '公開する日付 (YYYY-MM-DD)',
+    validateInput: (value) =>
+      /^\d{4}-\d{2}-\d{2}$/.test(value) ? undefined : 'YYYY-MM-DD 形式で入力してください。',
+    ignoreFocusOut: true,
+  });
+}
+
+/** 時刻を選ばせる。よく使う時刻の候補に加え、任意の時刻も入力できる。 */
+async function pickScheduledTime(): Promise<string | undefined> {
+  const candidates: vscode.QuickPickItem[] = [
+    { label: '09:00', description: '朝' },
+    { label: '12:00', description: '昼' },
+    { label: '18:00', description: '夕方' },
+    { label: '21:00', description: '夜' },
+    { label: 'その他の時刻を入力…', description: 'HH:MM' },
+  ];
+  const picked = await vscode.window.showQuickPick(candidates, { placeHolder: '公開する時刻を選択(ローカル時間)' });
+  if (!picked) return undefined;
+  if (!picked.label.startsWith('その他')) {
+    return picked.label;
+  }
+
+  return vscode.window.showInputBox({
+    prompt: '公開する時刻 (HH:MM、ローカル時間)',
+    validateInput: (value) =>
+      /^([01]\d|2[0-3]):[0-5]\d$/.test(value) ? undefined : 'HH:MM 形式で入力してください。',
+    ignoreFocusOut: true,
+  });
+}
+
+/** Dateをローカルタイムゾーンの YYYY-MM-DD へ整形する(toISOStringはUTCになるため使わない)。 */
+function formatLocalDate(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
 }
 
 async function commandPlanArticle(context: vscode.ExtensionContext): Promise<void> {

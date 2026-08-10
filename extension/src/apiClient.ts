@@ -266,6 +266,8 @@ export interface PublishParams {
   markdown: string;
   images: LocalImageReference[];
   featuredImageFilename?: string;
+  /** 公開予定日時(ISO 8601)。本番サイトへの投稿時のみサーバー側で有効になる。 */
+  publishScheduledAt?: string;
 }
 
 export interface AiSectionParams {
@@ -357,6 +359,9 @@ export async function publishPost(
       }
       if (params.featuredImageFilename) {
         parts.push({ kind: 'field', name: 'featuredImageFilename', value: params.featuredImageFilename });
+      }
+      if (params.publishScheduledAt) {
+        parts.push({ kind: 'field', name: 'publishScheduledAt', value: params.publishScheduledAt });
       }
       const multipart = buildMultipartBody(parts);
       return { body: multipart.body, headers: { 'Content-Type': multipart.contentType } };

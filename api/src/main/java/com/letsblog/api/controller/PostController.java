@@ -109,11 +109,12 @@ public class PostController {
             @RequestParam("markdown") String markdown,
             @RequestParam(value = "images", required = false) List<MultipartFile> images,
             @RequestParam(value = "featuredImageFilename", required = false) String featuredImageFilename,
-            @RequestParam(value = "imageReferences", required = false) List<String> imageReferences
+            @RequestParam(value = "imageReferences", required = false) List<String> imageReferences,
+            @RequestParam(value = "publishScheduledAt", required = false) String publishScheduledAt
     ) {
         PostPublishCommand command = new PostPublishCommand(
                 site, title, slug, status, categories, tags, wpPostId, markdown, images, featuredImageFilename,
-                imageReferences);
+                imageReferences, publishScheduledAt);
         return postPublishService.publish(command);
     }
 

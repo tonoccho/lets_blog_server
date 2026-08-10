@@ -17,6 +17,11 @@ export interface LetsBlogFrontMatter {
    * 投稿先を都度選べるようになった際に、サイトごとの投稿IDを個別に記録するために追加。
    */
   wp_post_ids?: Record<string, string>;
+  /**
+   * 公開予定日時(ISO 8601)。本番(live)サイトへの投稿時のみ有効で、
+   * サーバー側でWordPressの予約投稿(status=future)として扱われる。
+   */
+  publish_scheduled_at?: string;
   github_issue_number?: number;
   github_repository?: string;
   project_id?: number;
@@ -188,4 +193,46 @@ export function suggestSlugFromTitle(title: string): string {
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
+}
+
+export interface ScheduledPublicationValidation {
+  /** 検証を通ったISO 8601文字列。未設定または不正な場合はundefined。 */
+  value?: string;
+  /** 不正だった場合の理由。 */
+  error?: string;
+}
+
+/**
+ * front matterのpublish_scheduled_atを検証する。
+ *
+ * 過去の日時を許可しないのは、投稿しても即時公開扱いになり、利用者の意図
+ * (予約したつもり)と結果が食い違うため。サーバー側でも同じ検証を行うが、
+ * 送信前に気付ける方が手戻りが少ないため拡張側でも確認する。
+ */
+export function validateScheduledPublication(
+  value: unknown,
+  now: Date = new Date()
+): ScheduledPublicationValidation {
+  if (value == null || value === '') {
+    return {};
+  }
+  if (typeof value !== 'string') {
+    return { error: 'publish_scheduled_at は文字列(ISO 8601形式)で指定してください。' };
+  }
+  const trimmed = value.trim();
+  // タイムゾーン指定の無い日時は、どの時刻を意図したのか一意に決まらないため受け付けない。
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.test(trimmed)) {
+    return {
+      error:
+        'publish_scheduled_at はタイムゾーンを含むISO 8601形式で指定してください(例: 2026-12-25T09:00:00Z、2026-12-25T18:00:00+09:00)。',
+    };
+  }
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    return { error: `publish_scheduled_at を日時として解釈できません: ${trimmed}` };
+  }
+  if (parsed.getTime() <= now.getTime()) {
+    return { error: `publish_scheduled_at には未来の日時を指定してください: ${trimmed}` };
+  }
+  return { value: trimmed };
 }
