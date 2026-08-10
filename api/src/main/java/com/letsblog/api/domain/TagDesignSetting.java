@@ -39,7 +39,11 @@ public class TagDesignSetting {
     @Column(name = "tag_type", nullable = false, length = 20)
     private EmbedTagType tagType;
 
-    /** 最後に選択されたプリセットID。レンダリングには使わない(色は下記3列が常に確定値)、UI表示用。 */
+    /**
+     * 最後に選択されたプリセットID。レンダリングには使わない、UI表示用。
+     * customCssが設定されている場合、下記3色はUI上でのCSS再生成の元になる値であり、
+     * レンダリングされるCSSそのものには使われない(customCssが優先される)。
+     */
     @Column(name = "preset_id", nullable = false, length = 50)
     private String presetId;
 
@@ -52,7 +56,10 @@ public class TagDesignSetting {
     @Column(name = "accent_color", nullable = false, length = 7)
     private String accentColor;
 
-    /** 色プリセットでは表現できない追加の生CSS(任意)。設定されていれば色ベースのCSSの後ろに連結する。 */
+    /**
+     * 任意の生CSS。設定されていれば、背景色/テキスト色/アクセントカラーから組み立てる標準CSSの
+     * 代わりにこちらを丸ごと使う(完全上書き、issue #165)。未設定時のみ上記3色から生成する。
+     */
     @Column(name = "custom_css", columnDefinition = "TEXT")
     private String customCss;
 

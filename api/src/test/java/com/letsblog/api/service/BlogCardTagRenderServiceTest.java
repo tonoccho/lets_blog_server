@@ -69,7 +69,7 @@ class BlogCardTagRenderServiceTest {
     }
 
     @Test
-    void render_customCssが設定されていれば色ベースのCSSの後ろに連結する() {
+    void render_customCssが設定されていれば色ベースのCSSの代わりに完全に置き換える() {
         org.mockito.Mockito.reset(tagDesignSettingService, contentCacheService);
         String url = "https://example.com/posts/1";
         when(contentCacheService.resolve(url)).thenReturn(response(Map.of("title", "記事タイトル")));
@@ -79,6 +79,7 @@ class BlogCardTagRenderServiceTest {
         String result = service.render("[blogcard " + url + "]", PROJECT_ID);
 
         assertTrue(result.contains(".lb-blogcard{font-weight:bold;}"));
+        assertFalse(result.contains("background:#ffffff"), "色ベースの生成CSSは含まれないこと: " + result);
     }
 
     @Test

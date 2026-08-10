@@ -62,9 +62,17 @@ public class BlogCardTagRenderService {
         return "<style>\n" + buildStyle(colors) + "\n</style>\n\n" + result;
     }
 
-    /** CustomTagServiceの統合CSS生成からも呼ばれるためpackage-private。 */
+    /**
+     * CustomTagServiceの統合CSS生成からも呼ばれるためpackage-private。
+     * customCssが設定されていれば、色ベースの生成CSSの代わりにそちらを丸ごと使う(完全上書き、issue #165)。
+     * 未設定の場合のみ、背景色/テキスト色/アクセントカラーから組み立てる。
+     */
     String buildStyle(TagDesignColors colors) {
-        String base = ".lb-blogcard{display:flex;align-items:stretch;border:1px solid #e0e0e0;"
+        String customCss = colors.customCss();
+        if (customCss != null && !customCss.isBlank()) {
+            return customCss.trim();
+        }
+        return ".lb-blogcard{display:flex;align-items:stretch;border:1px solid #e0e0e0;"
                 + "border-left:4px solid " + colors.accentColor() + ";border-radius:8px;overflow:hidden;"
                 + "text-decoration:none;background:" + colors.backgroundColor() + ";color:" + colors.textColor()
                 + ";max-width:100%;margin:1em 0;transition:box-shadow .15s ease;}"
@@ -78,8 +86,6 @@ public class BlogCardTagRenderService {
                 + ".lb-blogcard-description{font-size:.875em;opacity:.75;overflow:hidden;display:-webkit-box;"
                 + "-webkit-line-clamp:2;-webkit-box-orient:vertical;}"
                 + ".lb-blogcard-site{font-size:.75em;opacity:.6;margin-top:auto;}";
-        String customCss = colors.customCss();
-        return customCss == null || customCss.isBlank() ? base : base + "\n" + customCss.trim();
     }
 
     private String renderCard(String rawUrl, Long projectId) {

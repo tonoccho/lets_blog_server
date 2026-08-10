@@ -9,6 +9,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
@@ -45,7 +46,7 @@ class TocStyleRenderServiceTest {
     }
 
     @Test
-    void render_customCssが設定されていれば色ベースのCSSの後ろに連結する() {
+    void render_customCssが設定されていれば色ベースのCSSの代わりに完全に置き換える() {
         org.mockito.Mockito.reset(tagDesignSettingService);
         when(tagDesignSettingService.resolveColors(PROJECT_ID, EmbedTagType.TOC))
                 .thenReturn(new TagDesignColors("#1f2937", "#f3f4f6", "#60a5fa", ".lb-toc-list{font-weight:bold;}"));
@@ -53,6 +54,7 @@ class TocStyleRenderServiceTest {
         String result = service.render("[toc]\n\n## セクション1\n\n本文", PROJECT_ID);
 
         assertTrue(result.contains(".lb-toc-list{font-weight:bold;}"));
+        assertFalse(result.contains("background:#1f2937"), "色ベースの生成CSSは含まれないこと: " + result);
     }
 
     @Test

@@ -99,9 +99,17 @@ public class TocStyleRenderService {
         return -1;
     }
 
-    /** CustomTagServiceの統合CSS生成からも呼ばれるためpackage-private。 */
+    /**
+     * CustomTagServiceの統合CSS生成からも呼ばれるためpackage-private。
+     * customCssが設定されていれば、色ベースの生成CSSの代わりにそちらを丸ごと使う(完全上書き、issue #165)。
+     * 未設定の場合のみ、背景色/テキスト色/アクセントカラーから組み立てる。
+     */
     String buildStyle(TagDesignColors colors) {
-        String base = "." + MarkdownRenderer.TOC_LIST_CLASS + "{list-style:none;margin:1em 0;padding:12px 16px;"
+        String customCss = colors.customCss();
+        if (customCss != null && !customCss.isBlank()) {
+            return customCss.trim();
+        }
+        return "." + MarkdownRenderer.TOC_LIST_CLASS + "{list-style:none;margin:1em 0;padding:12px 16px;"
                 + "border-radius:8px;background:" + colors.backgroundColor() + ";}"
                 + "." + MarkdownRenderer.TOC_LIST_CLASS + " ul{list-style:none;}"
                 + "." + MarkdownRenderer.TOC_LIST_CLASS + " li{margin:4px 0;}"
@@ -109,7 +117,5 @@ public class TocStyleRenderService {
                 + ";text-decoration:none;}"
                 + "." + MarkdownRenderer.TOC_LIST_CLASS + " a:hover{color:" + colors.accentColor()
                 + ";text-decoration:underline;}";
-        String customCss = colors.customCss();
-        return customCss == null || customCss.isBlank() ? base : base + "\n" + customCss.trim();
     }
 }

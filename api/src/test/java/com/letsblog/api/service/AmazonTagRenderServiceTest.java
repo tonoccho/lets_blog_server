@@ -69,7 +69,7 @@ class AmazonTagRenderServiceTest {
     }
 
     @Test
-    void render_customCssが設定されていれば色ベースのCSSの後ろに連結する() {
+    void render_customCssが設定されていれば色ベースのCSSの代わりに完全に置き換える() {
         org.mockito.Mockito.reset(tagDesignSettingService, contentCacheService);
         String url = "https://www.amazon.co.jp/dp/B000000000";
         when(contentCacheService.resolve(url)).thenReturn(response(Map.of("productName", "サンプル商品")));
@@ -79,6 +79,7 @@ class AmazonTagRenderServiceTest {
         String result = service.render("[amazon " + url + "]", PROJECT_ID);
 
         assertTrue(result.contains(".lb-amazon-card{font-weight:bold;}"));
+        assertFalse(result.contains("background:#ffffff"), "色ベースの生成CSSは含まれないこと: " + result);
     }
 
     @Test
