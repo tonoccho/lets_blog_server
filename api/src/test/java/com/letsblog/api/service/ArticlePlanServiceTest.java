@@ -64,7 +64,7 @@ class ArticlePlanServiceTest {
     private GithubClient githubClient;
 
     @Mock
-    private UserService userService;
+    private ProjectApiKeyService projectApiKeyService;
 
     @Mock
     private ProjectService projectService;
@@ -97,11 +97,11 @@ class ArticlePlanServiceTest {
             return session;
         });
         lenient().when(ollamaModelService.getSelectedModel(any())).thenReturn("qwen2.5:7b-instruct");
-        lenient().when(webSearchService.searchSafely(anyString()))
+        lenient().when(webSearchService.searchSafely(anyString(), any()))
                 .thenReturn(WebSearchOutcome.failure("テストではWeb検索を行わない"));
         return new ArticlePlanService(
                 ollamaClient, ollamaModelService, webSearchService, generationJobRepository, objectMapper,
-                githubClient, userService, projectService, articlePlanSessionRepository, siteService, cmsAdapterFactory);
+                githubClient, projectApiKeyService, projectService, articlePlanSessionRepository, siteService, cmsAdapterFactory);
     }
 
     private Project projectWithRepository(String githubRepository) {
@@ -402,7 +402,7 @@ class ArticlePlanServiceTest {
     void acceptPlan_成功時はissue番号とURLを含む結果を返す() {
         ArticlePlanService service = service();
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithRepository("owner/repo"));
-        when(userService.getDecryptedGithubToken(10L)).thenReturn("test-token");
+        when(projectApiKeyService.resolveGithubToken(1L, 10L)).thenReturn("test-token");
         when(githubClient.createIssue("test-token", "owner", "repo", "タイトル1", ""))
                 .thenReturn(new GithubIssue(1, "https://github.com/owner/repo/issues/1"));
 
@@ -420,7 +420,7 @@ class ArticlePlanServiceTest {
     void acceptPlan_一部のissue作成に失敗しても他のタイトルの登録は続行する() {
         ArticlePlanService service = service();
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithRepository("owner/repo"));
-        when(userService.getDecryptedGithubToken(10L)).thenReturn("test-token");
+        when(projectApiKeyService.resolveGithubToken(1L, 10L)).thenReturn("test-token");
         when(githubClient.createIssue("test-token", "owner", "repo", "成功タイトル", ""))
                 .thenReturn(new GithubIssue(1, "https://github.com/owner/repo/issues/1"));
         when(githubClient.createIssue("test-token", "owner", "repo", "失敗タイトル", ""))
@@ -473,7 +473,7 @@ class ArticlePlanServiceTest {
     void getIssueDescription_GithubClientから取得したbodyを返す() {
         ArticlePlanService service = service();
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithRepository("owner/repo"));
-        when(userService.getDecryptedGithubToken(10L)).thenReturn("test-token");
+        when(projectApiKeyService.resolveGithubToken(1L, 10L)).thenReturn("test-token");
         when(githubClient.getIssueBody("test-token", "owner", "repo", 3)).thenReturn("## 現状の構成");
 
         var response = service.getIssueDescription(1L, 10L, 3);
@@ -493,7 +493,7 @@ class ArticlePlanServiceTest {
     void acceptStructure_成功時はissue番号とURLを含む結果を返す() {
         ArticlePlanService service = service();
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithRepository("owner/repo"));
-        when(userService.getDecryptedGithubToken(10L)).thenReturn("test-token");
+        when(projectApiKeyService.resolveGithubToken(1L, 10L)).thenReturn("test-token");
         when(githubClient.updateIssueBody("test-token", "owner", "repo", 42, "## 構成案"))
                 .thenReturn(new GithubIssue(42, "https://github.com/owner/repo/issues/42"));
 
@@ -515,7 +515,7 @@ class ArticlePlanServiceTest {
     void listRepositoryIssues_GithubClientに委譲して結果を変換する() {
         ArticlePlanService service = service();
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithRepository("owner/repo"));
-        when(userService.getDecryptedGithubToken(10L)).thenReturn("test-token");
+        when(projectApiKeyService.resolveGithubToken(1L, 10L)).thenReturn("test-token");
         when(githubClient.listIssues("test-token", "owner", "repo", "open"))
                 .thenReturn(List.of(new GithubIssueSummary(
                         3, "記事タイトル", "https://github.com/owner/repo/issues/3", "open", List.of())));
@@ -661,7 +661,7 @@ class ArticlePlanServiceTest {
     void assignIssueToActor_成功時はassigneeとURLを含む結果を返す() {
         ArticlePlanService service = service();
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithRepository("owner/repo"));
-        when(userService.getDecryptedGithubToken(10L)).thenReturn("test-token");
+        when(projectApiKeyService.resolveGithubToken(1L, 10L)).thenReturn("test-token");
         when(githubClient.getAuthenticatedUser("test-token")).thenReturn(new GithubUser("octocat"));
         when(githubClient.assignAndLabelIssue(
                 "test-token", "owner", "repo", 42, List.of("octocat"), List.of("in-progress")))

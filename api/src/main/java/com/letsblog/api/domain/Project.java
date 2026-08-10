@@ -49,6 +49,12 @@ public class Project {
     @Column(name = "comfyui_checkpoint", length = 255)
     private String comfyuiCheckpoint;
 
+    @Column(name = "github_token_encrypted", columnDefinition = "VARBINARY(1024)")
+    private byte[] githubTokenEncrypted;
+
+    @Column(name = "brave_search_api_key_encrypted", columnDefinition = "VARBINARY(1024)")
+    private byte[] braveSearchApiKeyEncrypted;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -57,6 +63,14 @@ public class Project {
 
     public boolean isGithubRepositoryConfigured() {
         return githubRepository != null && !githubRepository.isBlank();
+    }
+
+    public boolean hasGithubToken() {
+        return githubTokenEncrypted != null && githubTokenEncrypted.length > 0;
+    }
+
+    public boolean hasBraveSearchApiKey() {
+        return braveSearchApiKeyEncrypted != null && braveSearchApiKeyEncrypted.length > 0;
     }
 
     @PrePersist

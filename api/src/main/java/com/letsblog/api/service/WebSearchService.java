@@ -20,15 +20,31 @@ public class WebSearchService {
 
     private final BraveSearchClient braveSearchClient;
     private final SystemSettingService systemSettingService;
+    private final ProjectApiKeyService projectApiKeyService;
 
-    public WebSearchService(BraveSearchClient braveSearchClient, SystemSettingService systemSettingService) {
+    public WebSearchService(
+            BraveSearchClient braveSearchClient,
+            SystemSettingService systemSettingService,
+            ProjectApiKeyService projectApiKeyService) {
         this.braveSearchClient = braveSearchClient;
         this.systemSettingService = systemSettingService;
+        this.projectApiKeyService = projectApiKeyService;
     }
 
+    /** プロジェクトに紐付かない呼び出し元(AiAssistService)向け。システム全体設定のキーを使う。 */
     public WebSearchOutcome searchSafely(String query) {
+        return searchSafely(query, null);
+    }
+
+    /**
+     * プロジェクトスコープの呼び出し元(ArticlePlanService)向け。プロジェクトにキーが
+     * 設定されていればそれを優先し、未設定ならシステム全体設定へフォールバックする(issue #184)。
+     */
+    public WebSearchOutcome searchSafely(String query, Long projectId) {
         try {
-            String apiKey = systemSettingService.getBraveSearchApiKey();
+            String apiKey = projectId != null
+                    ? projectApiKeyService.resolveBraveSearchApiKey(projectId)
+                    : systemSettingService.getBraveSearchApiKey();
             return WebSearchOutcome.success(braveSearchClient.search(query, SEARCH_RESULT_COUNT, apiKey));
         } catch (RuntimeException e) {
             return WebSearchOutcome.failure(e.getMessage());

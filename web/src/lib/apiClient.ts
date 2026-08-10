@@ -1173,6 +1173,48 @@ export function updateProjectGithubRepository(
   });
 }
 
+/** valueそのものは返さず、設定済みかどうかのみ返す(SiteDetailのconfiguredSecretFieldsと同じ方針)。 */
+export interface ProjectApiKeyStatus {
+  configured: boolean;
+}
+
+export function getProjectGithubTokenStatus(projectId: number, actor?: ActorInfo): Promise<ProjectApiKeyStatus> {
+  return apiFetch<ProjectApiKeyStatus>(`/api/projects/${projectId}/api-keys/github-token`, { actor });
+}
+
+export function setProjectGithubToken(projectId: number, githubToken: string, actor: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/github-token`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ githubToken }),
+    actor,
+  });
+}
+
+export function clearProjectGithubToken(projectId: number, actor: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/github-token`, { method: 'DELETE', actor });
+}
+
+export function getProjectBraveSearchApiKeyStatus(
+  projectId: number,
+  actor?: ActorInfo
+): Promise<ProjectApiKeyStatus> {
+  return apiFetch<ProjectApiKeyStatus>(`/api/projects/${projectId}/api-keys/brave-search-api-key`, { actor });
+}
+
+export function setProjectBraveSearchApiKey(projectId: number, apiKey: string, actor: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/brave-search-api-key`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apiKey }),
+    actor,
+  });
+}
+
+export function clearProjectBraveSearchApiKey(projectId: number, actor: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/brave-search-api-key`, { method: 'DELETE', actor });
+}
+
 export interface PlanChatMessage {
   role: "user" | "assistant";
   content: string;
