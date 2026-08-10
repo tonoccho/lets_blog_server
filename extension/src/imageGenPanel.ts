@@ -4,6 +4,8 @@ import * as path from 'path';
 import * as api from './apiClient';
 import { getActor, getServerUrl, requireApiKey } from './config';
 import { parseArticle, stringifyArticle } from './frontMatter';
+import { describeError } from './errorHandler';
+import { logger } from './logger';
 
 /**
  * VSCode拡張の「Let's Blog: Generate Image」用WebviewPanel。automatic1111相当のパラメータで
@@ -70,7 +72,11 @@ export class ImageGenPanel {
           break;
       }
     } catch (error) {
-      this._sendMessage('error', { error: String(error instanceof Error ? error.message : error) });
+      const description = describeError(error);
+      logger.error(`${this.constructor.name}: ${String(message.command)} に失敗しました: ${description}`, {
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      this._sendMessage('error', { error: description });
     }
   }
 

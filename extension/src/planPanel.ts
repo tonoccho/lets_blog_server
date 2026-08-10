@@ -4,6 +4,8 @@ import * as path from 'path';
 import * as api from './apiClient';
 import { Actor, getActor, getProjectId, getServerUrl, requireApiKey } from './config';
 import { LetsBlogFrontMatter, stringifyArticle } from './frontMatter';
+import { describeError } from './errorHandler';
+import { logger } from './logger';
 
 const GITHUB_ISSUE_URL_PATTERN = /^(https:\/\/github\.com\/[^/]+\/[^/]+)\/issues\/\d+$/;
 
@@ -72,7 +74,11 @@ export class PlanPanel {
           break;
       }
     } catch (error) {
-      this._sendMessage('error', { error: String(error instanceof Error ? error.message : error) });
+      const description = describeError(error);
+      logger.error(`${this.constructor.name}: ${String(message.command)} に失敗しました: ${description}`, {
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      this._sendMessage('error', { error: description });
     }
   }
 

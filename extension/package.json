@@ -89,6 +89,17 @@
           "type": "boolean",
           "default": true,
           "description": "letsBlog.serverUrlへのHTTPS接続で自己署名証明書を許容する(証明書検証をスキップする)。既定は個人用ローカル環境(https://localhost)向けにtrue。正規の証明書を持つサーバーに接続する場合はfalseに設定してください。"
+        },
+        "letsBlog.debugMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "デバッグログを出力パネル「Let's Blog」へ出力する。不具合の調査時に有効化してください。"
+        },
+        "letsBlog.requestTimeoutMs": {
+          "type": "number",
+          "default": 120000,
+          "minimum": 1000,
+          "description": "APIリクエストのタイムアウト時間(ミリ秒)。AI生成など時間のかかる処理でタイムアウトする場合は延ばしてください。"
         }
       }
     }

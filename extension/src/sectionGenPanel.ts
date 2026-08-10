@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import * as api from './apiClient';
 import { getActor, getServerUrl, requireApiKey } from './config';
 import { SectionContext } from './headingContext';
+import { describeError } from './errorHandler';
+import { logger } from './logger';
 
 /**
  * VSCode拡張の「Let's Blog: Generate Section」用WebviewPanel。カーソル位置の見出し階層から
@@ -70,7 +72,11 @@ export class SectionGenPanel {
           break;
       }
     } catch (error) {
-      this._sendMessage('error', { error: String(error instanceof Error ? error.message : error) });
+      const description = describeError(error);
+      logger.error(`${this.constructor.name}: ${String(message.command)} に失敗しました: ${description}`, {
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      this._sendMessage('error', { error: description });
     }
   }
 

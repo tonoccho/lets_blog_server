@@ -15,8 +15,22 @@ import { PreviewPanel } from './previewPanel';
 import { ImageGenPanel } from './imageGenPanel';
 import { SectionGenPanel } from './sectionGenPanel';
 import { resolveSectionContext } from './headingContext';
+import { logger } from './logger';
+import { reportError } from './errorHandler';
 
 export function activate(context: vscode.ExtensionContext): void {
+  logger.refreshFromConfiguration();
+  logger.info("Let's Blog 拡張を有効化しました。");
+
+  context.subscriptions.push(
+    { dispose: () => logger.dispose() },
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration('letsBlog.debugMode')) {
+        logger.refreshFromConfiguration();
+      }
+    })
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand('letsBlog.login', () => commandLogin(context)),
     vscode.commands.registerCommand('letsBlog.setApiKey', () => commandSetApiKey(context)),
@@ -103,7 +117,7 @@ async function commandLogin(context: vscode.ExtensionContext): Promise<void> {
     await setActor(context, result.user);
     vscode.window.showInformationMessage(`'${result.user.email}' としてログインしました。`);
   } catch (err) {
-    vscode.window.showErrorMessage(`ログインに失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+    reportError('ログインに失敗しました', err);
   }
 }
 
@@ -143,7 +157,7 @@ async function commandSelectSite(context: vscode.ExtensionContext): Promise<void
     await replaceDocumentText(editor, stringifyArticle(article));
     vscode.window.showInformationMessage(`サイトを '${picked.siteKey}' に設定しました。`);
   } catch (err) {
-    vscode.window.showErrorMessage(String(err instanceof Error ? err.message : err));
+    reportError('サイトの選択に失敗しました', err);
   }
 }
 
@@ -295,7 +309,7 @@ async function commandPublish(context: vscode.ExtensionContext): Promise<void> {
 
     await publishToSite(context, editor, picked.siteKey, picked.forceStatus);
   } catch (err) {
-    vscode.window.showErrorMessage(`投稿に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+    reportError('投稿に失敗しました', err);
   }
 }
 
@@ -355,7 +369,7 @@ async function commandDeletePost(context: vscode.ExtensionContext): Promise<void
 
     vscode.window.showInformationMessage(`サイト '${siteKey}' の投稿を削除しました。`);
   } catch (err) {
-    vscode.window.showErrorMessage(`投稿の削除に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+    reportError('投稿の削除に失敗しました', err);
   }
 }
 
@@ -388,7 +402,7 @@ async function commandAskAi(context: vscode.ExtensionContext): Promise<void> {
     const doc = await vscode.workspace.openTextDocument({ content, language: 'markdown' });
     await vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.Beside });
   } catch (err) {
-    vscode.window.showErrorMessage(`AI呼び出しに失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+    reportError('AI呼び出しに失敗しました', err);
   }
 }
 
@@ -432,7 +446,7 @@ async function commandSuggestTags(context: vscode.ExtensionContext): Promise<voi
     await replaceDocumentText(editor, stringifyArticle(article));
     vscode.window.showInformationMessage('front matterに反映しました。');
   } catch (err) {
-    vscode.window.showErrorMessage(`タグ提案に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+    reportError('タグ提案に失敗しました', err);
   }
 }
 
@@ -453,7 +467,7 @@ async function commandGenerateImage(context: vscode.ExtensionContext): Promise<v
     const baseDir = path.dirname(editor.document.uri.fsPath);
     ImageGenPanel.createOrShow(context, editor, baseDir, projectId);
   } catch (err) {
-    vscode.window.showErrorMessage(`画像生成パネルの起動に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+    reportError('画像生成パネルの起動に失敗しました', err);
   }
 }
 
@@ -467,9 +481,7 @@ async function commandGenerateSection(context: vscode.ExtensionContext): Promise
     const sectionContext = resolveSectionContext(editor.document.getText(), editor.selection.active.line);
     SectionGenPanel.createOrShow(context, editor, articleTitle, sectionContext);
   } catch (err) {
-    vscode.window.showErrorMessage(
-      `セクション生成パネルの起動に失敗しました: ${String(err instanceof Error ? err.message : err)}`
-    );
+    reportError('セクション生成パネルの起動に失敗しました', err);
   }
 }
 
@@ -515,7 +527,7 @@ async function commandSelectProject(context: vscode.ExtensionContext): Promise<v
     await setProjectId(context, picked.projectId);
     vscode.window.showInformationMessage(`プロジェクトを '${picked.label}' に設定しました。`);
   } catch (err) {
-    vscode.window.showErrorMessage(`プロジェクト選択に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+    reportError('プロジェクト選択に失敗しました', err);
   }
 }
 
@@ -587,6 +599,6 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
       }
     );
   } catch (err) {
-    vscode.window.showErrorMessage(`プレビューの生成に失敗しました: ${String(err instanceof Error ? err.message : err)}`);
+    reportError('プレビューの生成に失敗しました', err);
   }
 }
