@@ -1,10 +1,15 @@
-import fetch from 'node-fetch';
+import fetch, { RequestInit, Response } from 'node-fetch';
 import FormData from 'form-data';
 import * as fs from 'fs';
 import * as https from 'https';
 import * as vscode from 'vscode';
 import { LocalImageReference } from './frontMatter';
 import { Actor } from './config';
+import { ApiError, NetworkError, TimeoutError, withRetry } from './errorHandler';
+import { logger } from './logger';
+
+/** 応答が返らない場合に諦めるまでの既定時間。AI生成は数十秒かかることがあるため長めに取る。 */
+const DEFAULT_TIMEOUT_MS = 120_000;
 
 /**
  * letsBlog.serverUrlは既定でリバースプロキシ経由の自己署名証明書(https://localhost)を
@@ -29,6 +34,88 @@ function buildHeaders(apiKey: string, actor?: Actor, contentType?: string): Reco
     headers['Content-Type'] = contentType;
   }
   return headers;
+}
+
+function getTimeoutMs(): number {
+  const configured = vscode.workspace
+    .getConfiguration('letsBlog')
+    .get<number>('requestTimeoutMs', DEFAULT_TIMEOUT_MS);
+  return typeof configured === 'number' && configured > 0 ? configured : DEFAULT_TIMEOUT_MS;
+}
+
+interface RequestSpec {
+  /** ログ上で処理を識別するラベル(例: "publishPost")。 */
+  label: string;
+  method?: string;
+  headers?: Record<string, string>;
+  /**
+   * リクエストボディを組み立てる。ファイルストリームを含むボディは一度しか読めず
+   * 再試行時に使い回せないため、値ではなくファクトリで受け取り試行ごとに作り直す。
+   */
+  createBody?: () => { body: RequestInit['body']; headers?: Record<string, string> };
+  /**
+   * 一時的な失敗を再試行してよいか。既定はGETのみ(サーバー状態を変更しないため安全)。
+   * タイムアウト後にサーバー側で処理が完了していた場合、投稿や課題の割り当てのような
+   * 変更系を再試行すると重複して実行されてしまうため、安全なものだけ明示的に有効化する。
+   */
+  retryable?: boolean;
+}
+
+/**
+ * 全API呼び出しの共通経路。タイムアウト・リトライ・ログ・エラー整形をここへ集約し、
+ * 個々のエンドポイント関数がエラーハンドリングを取りこぼさないようにする。
+ */
+async function request(serverUrl: string, path: string, spec: RequestSpec): Promise<Response> {
+  const url = `${serverUrl}${path}`;
+  const method = spec.method ?? 'GET';
+  const timeoutMs = getTimeoutMs();
+
+  return withRetry(
+    async () => {
+      const built = spec.createBody?.();
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      logger.debug(`${spec.label}: ${method} ${url}`);
+
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          method,
+          headers: { ...(spec.headers ?? {}), ...(built?.headers ?? {}) },
+          body: built?.body,
+          agent: buildAgent(serverUrl),
+          signal: controller.signal as RequestInit['signal'],
+        });
+      } catch (error) {
+        if (controller.signal.aborted) {
+          throw new TimeoutError(`${spec.label} timed out`, url, timeoutMs);
+        }
+        throw new NetworkError(`${spec.label} failed to reach server`, url, error);
+      } finally {
+        clearTimeout(timer);
+      }
+
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        logger.warn(`${spec.label}: ${method} ${url} -> ${res.status}`, { body });
+        throw new ApiError(`APIエラー (${res.status})`, res.status, body || res.statusText, url);
+      }
+      logger.debug(`${spec.label}: ${method} ${url} -> ${res.status}`);
+      return res;
+    },
+    { label: spec.label, maxRetries: (spec.retryable ?? method === 'GET') ? undefined : 0 }
+  );
+}
+
+/** JSONレスポンスを返すエンドポイント用のヘルパー。 */
+async function requestJson<T>(serverUrl: string, path: string, spec: RequestSpec): Promise<T> {
+  const res = await request(serverUrl, path, spec);
+  return (await res.json()) as T;
+}
+
+/** JSONボディを送るリクエストのボディファクトリ。 */
+function jsonBody(payload: unknown): RequestSpec['createBody'] {
+  return () => ({ body: JSON.stringify(payload), headers: { 'Content-Type': 'application/json' } });
 }
 
 export interface PublishParams {
@@ -113,15 +200,6 @@ export interface ImageGenerationOptions {
   loras: string[];
 }
 
-class ApiError extends Error {}
-
-async function assertOk(res: import('node-fetch').Response): Promise<void> {
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new ApiError(`APIエラー (${res.status}): ${body || res.statusText}`);
-  }
-}
-
 export interface LoginResult {
   user: Actor;
   twoFactorRequired: boolean;
@@ -134,26 +212,20 @@ export interface LoginResult {
  * 2FA未設定ユーザーはこの時点でapiKeyが発行される。
  */
 export async function login(serverUrl: string, email: string, password: string): Promise<LoginResult> {
-  const res = await fetch(`${serverUrl}/api/auth/login`, {
+  return requestJson<LoginResult>(serverUrl, '/api/auth/login', {
+    label: 'login',
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, label: 'vscode' }),
-    agent: buildAgent(serverUrl),
+    createBody: jsonBody({ email, password, label: 'vscode' }),
   });
-  await assertOk(res);
-  return (await res.json()) as LoginResult;
 }
 
 /** ログイン2段階目。login()でtwoFactorRequired=trueだった場合にTOTPコードを検証し、apiKeyを取得する。 */
 export async function verifyTotpLogin(serverUrl: string, userId: number, code: string): Promise<LoginResult> {
-  const res = await fetch(`${serverUrl}/api/auth/totp/verify`, {
+  return requestJson<LoginResult>(serverUrl, '/api/auth/totp/verify', {
+    label: 'verifyTotpLogin',
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, code, label: 'vscode' }),
-    agent: buildAgent(serverUrl),
+    createBody: jsonBody({ userId, code, label: 'vscode' }),
   });
-  await assertOk(res);
-  return (await res.json()) as LoginResult;
 }
 
 export async function publishPost(
@@ -162,39 +234,39 @@ export async function publishPost(
   params: PublishParams,
   actor?: Actor
 ): Promise<PublishResult> {
-  const form = new FormData();
-  form.append('site', params.site);
-  form.append('title', params.title);
-  if (params.slug) form.append('slug', params.slug);
-  form.append('status', params.status ?? 'draft');
-  for (const category of params.categories ?? []) {
-    form.append('categories', category);
-  }
-  for (const tag of params.tags ?? []) {
-    form.append('tags', tag);
-  }
-  if (params.wpPostId) {
-    form.append('wpPostId', String(params.wpPostId));
-  }
-  form.append('markdown', params.markdown);
-  for (const image of params.images) {
-    // filenameはコンテナ/サーバー側のマルチパート処理でパス区切りがベース名のみに変換される
-    // ことがあり往復しないため、Markdown中の実際の参照文字列はimageReferencesで別途明示的に送る。
-    form.append('images', fs.createReadStream(image.absolutePath), { filename: image.reference });
-    form.append('imageReferences', image.reference);
-  }
-  if (params.featuredImageFilename) {
-    form.append('featuredImageFilename', params.featuredImageFilename);
-  }
-
-  const res = await fetch(`${serverUrl}/api/posts/publish`, {
+  return requestJson<PublishResult>(serverUrl, '/api/posts/publish', {
+    label: 'publishPost',
     method: 'POST',
-    headers: { ...buildHeaders(apiKey, actor), ...form.getHeaders() },
-    body: form,
-    agent: buildAgent(serverUrl),
+    headers: buildHeaders(apiKey, actor),
+    // 画像はストリームで読み込むため、再試行のたびにフォームを作り直す必要がある。
+    createBody: () => {
+      const form = new FormData();
+      form.append('site', params.site);
+      form.append('title', params.title);
+      if (params.slug) form.append('slug', params.slug);
+      form.append('status', params.status ?? 'draft');
+      for (const category of params.categories ?? []) {
+        form.append('categories', category);
+      }
+      for (const tag of params.tags ?? []) {
+        form.append('tags', tag);
+      }
+      if (params.wpPostId) {
+        form.append('wpPostId', String(params.wpPostId));
+      }
+      form.append('markdown', params.markdown);
+      for (const image of params.images) {
+        // filenameはコンテナ/サーバー側のマルチパート処理でパス区切りがベース名のみに変換される
+        // ことがあり往復しないため、Markdown中の実際の参照文字列はimageReferencesで別途明示的に送る。
+        form.append('images', fs.createReadStream(image.absolutePath), { filename: image.reference });
+        form.append('imageReferences', image.reference);
+      }
+      if (params.featuredImageFilename) {
+        form.append('featuredImageFilename', params.featuredImageFilename);
+      }
+      return { body: form, headers: form.getHeaders() };
+    },
   });
-  await assertOk(res);
-  return (await res.json()) as PublishResult;
 }
 
 /** 投稿を削除する(WordPressの場合、既定でゴミ箱へ移動する。完全削除は行わない)。 */
@@ -205,15 +277,11 @@ export async function deletePost(
   site: string,
   wpPostId: string
 ): Promise<void> {
-  const res = await fetch(
-    `${serverUrl}/api/posts/${encodeURIComponent(site)}/${encodeURIComponent(wpPostId)}`,
-    {
-      method: 'DELETE',
-      headers: buildHeaders(apiKey, actor),
-      agent: buildAgent(serverUrl),
-    }
-  );
-  await assertOk(res);
+  await request(serverUrl, `/api/posts/${encodeURIComponent(site)}/${encodeURIComponent(wpPostId)}`, {
+    label: 'deletePost',
+    method: 'DELETE',
+    headers: buildHeaders(apiKey, actor),
+  });
 }
 
 export async function listSites(
@@ -221,12 +289,10 @@ export async function listSites(
   apiKey: string,
   actor?: Actor
 ): Promise<{ id: number; name: string; siteKey: string }[]> {
-  const res = await fetch(`${serverUrl}/api/sites`, {
+  return requestJson<{ id: number; name: string; siteKey: string }[]>(serverUrl, '/api/sites', {
+    label: 'listSites',
     headers: buildHeaders(apiKey, actor),
-    agent: buildAgent(serverUrl),
   });
-  await assertOk(res);
-  return (await res.json()) as { id: number; name: string; siteKey: string }[];
 }
 
 export async function askAi(
@@ -236,14 +302,14 @@ export async function askAi(
   text: string,
   actor?: Actor
 ): Promise<AiDraftResult> {
-  const res = await fetch(`${serverUrl}/api/ai/draft`, {
+  return requestJson<AiDraftResult>(serverUrl, '/api/ai/draft', {
+    label: 'askAi',
     method: 'POST',
-    headers: buildHeaders(apiKey, actor, 'application/json'),
-    body: JSON.stringify({ mode, text }),
-    agent: buildAgent(serverUrl),
+    headers: buildHeaders(apiKey, actor),
+    createBody: jsonBody({ mode, text }),
+    // 生成結果を返すだけでサーバー状態を変えないため、再試行して差し支えない。
+    retryable: true,
   });
-  await assertOk(res);
-  return (await res.json()) as AiDraftResult;
 }
 
 export async function generateSection(
@@ -252,14 +318,13 @@ export async function generateSection(
   actor: Actor | undefined,
   params: AiSectionParams
 ): Promise<AiSectionResult> {
-  const res = await fetch(`${serverUrl}/api/ai/section`, {
+  return requestJson<AiSectionResult>(serverUrl, '/api/ai/section', {
+    label: 'generateSection',
     method: 'POST',
-    headers: buildHeaders(apiKey, actor, 'application/json'),
-    body: JSON.stringify(params),
-    agent: buildAgent(serverUrl),
+    headers: buildHeaders(apiKey, actor),
+    createBody: jsonBody(params),
+    retryable: true,
   });
-  await assertOk(res);
-  return (await res.json()) as AiSectionResult;
 }
 
 export async function suggestTags(
@@ -268,14 +333,13 @@ export async function suggestTags(
   text: string,
   actor?: Actor
 ): Promise<AiTagsResult> {
-  const res = await fetch(`${serverUrl}/api/ai/tags`, {
+  return requestJson<AiTagsResult>(serverUrl, '/api/ai/tags', {
+    label: 'suggestTags',
     method: 'POST',
-    headers: buildHeaders(apiKey, actor, 'application/json'),
-    body: JSON.stringify({ text }),
-    agent: buildAgent(serverUrl),
+    headers: buildHeaders(apiKey, actor),
+    createBody: jsonBody({ text }),
+    retryable: true,
   });
-  await assertOk(res);
-  return (await res.json()) as AiTagsResult;
 }
 
 export async function generateImage(
@@ -285,14 +349,13 @@ export async function generateImage(
   projectId: number | undefined,
   params: ImageGenerationParams
 ): Promise<AiImageResult> {
-  const res = await fetch(`${serverUrl}/api/ai/image`, {
+  // 生成画像はサーバー側に保存されるため、再試行すると重複した生成結果が残る。
+  return requestJson<AiImageResult>(serverUrl, '/api/ai/image', {
+    label: 'generateImage',
     method: 'POST',
-    headers: buildHeaders(apiKey, actor, 'application/json'),
-    body: JSON.stringify({ projectId, ...params }),
-    agent: buildAgent(serverUrl),
+    headers: buildHeaders(apiKey, actor),
+    createBody: jsonBody({ projectId, ...params }),
   });
-  await assertOk(res);
-  return (await res.json()) as AiImageResult;
 }
 
 export async function getImageGenerationOptions(
@@ -301,21 +364,17 @@ export async function getImageGenerationOptions(
   projectId?: number
 ): Promise<ImageGenerationOptions> {
   const query = projectId ? `?projectId=${projectId}` : '';
-  const res = await fetch(`${serverUrl}/api/ai/image-options${query}`, {
+  return requestJson<ImageGenerationOptions>(serverUrl, `/api/ai/image-options${query}`, {
+    label: 'getImageGenerationOptions',
     headers: buildHeaders(apiKey),
-    agent: buildAgent(serverUrl),
   });
-  await assertOk(res);
-  return (await res.json()) as ImageGenerationOptions;
 }
 
 export async function listUsers(serverUrl: string, apiKey: string): Promise<Actor[]> {
-  const res = await fetch(`${serverUrl}/api/users`, {
+  return requestJson<Actor[]>(serverUrl, '/api/users', {
+    label: 'listUsers',
     headers: buildHeaders(apiKey),
-    agent: buildAgent(serverUrl),
   });
-  await assertOk(res);
-  return (await res.json()) as Actor[];
 }
 
 export interface ProjectSummary {
@@ -326,12 +385,10 @@ export interface ProjectSummary {
 }
 
 export async function listProjects(serverUrl: string, apiKey: string, actor?: Actor): Promise<ProjectSummary[]> {
-  const res = await fetch(`${serverUrl}/api/projects`, {
+  return requestJson<ProjectSummary[]>(serverUrl, '/api/projects', {
+    label: 'listProjects',
     headers: buildHeaders(apiKey, actor),
-    agent: buildAgent(serverUrl),
   });
-  await assertOk(res);
-  return (await res.json()) as ProjectSummary[];
 }
 
 export interface ProjectSite {
@@ -357,12 +414,10 @@ export async function getProject(
   actor: Actor | undefined,
   projectId: number
 ): Promise<ProjectDetail> {
-  const res = await fetch(`${serverUrl}/api/projects/${projectId}`, {
+  return requestJson<ProjectDetail>(serverUrl, `/api/projects/${projectId}`, {
+    label: 'getProject',
     headers: buildHeaders(apiKey, actor),
-    agent: buildAgent(serverUrl),
   });
-  await assertOk(res);
-  return (await res.json()) as ProjectDetail;
 }
 
 export interface RepositoryIssue {
@@ -381,12 +436,11 @@ export async function listUnassignedIssues(
   projectId: number,
   state: string = 'open'
 ): Promise<RepositoryIssue[]> {
-  const res = await fetch(`${serverUrl}/api/projects/${projectId}/article-plan/issues?state=${state}`, {
-    headers: buildHeaders(apiKey, actor),
-    agent: buildAgent(serverUrl),
-  });
-  await assertOk(res);
-  const issues = (await res.json()) as RepositoryIssue[];
+  const issues = await requestJson<RepositoryIssue[]>(
+    serverUrl,
+    `/api/projects/${projectId}/article-plan/issues?state=${state}`,
+    { label: 'listUnassignedIssues', headers: buildHeaders(apiKey, actor) }
+  );
   return issues.filter((i) => !i.assignees || i.assignees.length === 0);
 }
 
@@ -414,14 +468,13 @@ export async function postPlanChat(
   projectId: number,
   request: PlanChatRequestParams
 ): Promise<PlanChatResult> {
-  const res = await fetch(`${serverUrl}/api/projects/${projectId}/article-plan/chat`, {
+  // チャットセッションがサーバー側に記録されるため、再試行すると履歴が重複する。
+  return requestJson<PlanChatResult>(serverUrl, `/api/projects/${projectId}/article-plan/chat`, {
+    label: 'postPlanChat',
     method: 'POST',
-    headers: buildHeaders(apiKey, actor, 'application/json'),
-    body: JSON.stringify(request),
-    agent: buildAgent(serverUrl),
+    headers: buildHeaders(apiKey, actor),
+    createBody: jsonBody(request),
   });
-  await assertOk(res);
-  return (await res.json()) as PlanChatResult;
 }
 
 export async function getIssueDescription(
@@ -431,12 +484,11 @@ export async function getIssueDescription(
   projectId: number,
   issueNumber: number
 ): Promise<string> {
-  const res = await fetch(
-    `${serverUrl}/api/projects/${projectId}/article-plan/issues/${issueNumber}/description`,
-    { headers: buildHeaders(apiKey, actor), agent: buildAgent(serverUrl) }
+  const data = await requestJson<{ body: string }>(
+    serverUrl,
+    `/api/projects/${projectId}/article-plan/issues/${issueNumber}/description`,
+    { label: 'getIssueDescription', headers: buildHeaders(apiKey, actor) }
   );
-  await assertOk(res);
-  const data = (await res.json()) as { body: string };
   return data.body ?? '';
 }
 
@@ -454,12 +506,10 @@ export async function listExistingCategories(
   actor: Actor,
   projectId: number
 ): Promise<string[]> {
-  const res = await fetch(`${serverUrl}/api/projects/${projectId}/article-plan/categories`, {
+  return requestJson<string[]>(serverUrl, `/api/projects/${projectId}/article-plan/categories`, {
+    label: 'listExistingCategories',
     headers: buildHeaders(apiKey, actor),
-    agent: buildAgent(serverUrl),
   });
-  await assertOk(res);
-  return (await res.json()) as string[];
 }
 
 export async function suggestMetadata(
@@ -469,14 +519,17 @@ export async function suggestMetadata(
   projectId: number,
   history: PlanChatMessage[]
 ): Promise<SuggestMetadataResult> {
-  const res = await fetch(`${serverUrl}/api/projects/${projectId}/article-plan/suggest-metadata`, {
-    method: 'POST',
-    headers: buildHeaders(apiKey, actor, 'application/json'),
-    body: JSON.stringify({ history }),
-    agent: buildAgent(serverUrl),
-  });
-  await assertOk(res);
-  return (await res.json()) as SuggestMetadataResult;
+  return requestJson<SuggestMetadataResult>(
+    serverUrl,
+    `/api/projects/${projectId}/article-plan/suggest-metadata`,
+    {
+      label: 'suggestMetadata',
+      method: 'POST',
+      headers: buildHeaders(apiKey, actor),
+      createBody: jsonBody({ history }),
+      retryable: true,
+    }
+  );
 }
 
 export interface SuggestStructureResult {
@@ -490,14 +543,17 @@ export async function suggestArticleStructure(
   projectId: number,
   history: PlanChatMessage[]
 ): Promise<SuggestStructureResult> {
-  const res = await fetch(`${serverUrl}/api/projects/${projectId}/article-plan/suggest-structure`, {
-    method: 'POST',
-    headers: buildHeaders(apiKey, actor, 'application/json'),
-    body: JSON.stringify({ history }),
-    agent: buildAgent(serverUrl),
-  });
-  await assertOk(res);
-  return (await res.json()) as SuggestStructureResult;
+  return requestJson<SuggestStructureResult>(
+    serverUrl,
+    `/api/projects/${projectId}/article-plan/suggest-structure`,
+    {
+      label: 'suggestArticleStructure',
+      method: 'POST',
+      headers: buildHeaders(apiKey, actor),
+      createBody: jsonBody({ history }),
+      retryable: true,
+    }
+  );
 }
 
 export interface AcceptStructureResult {
@@ -514,14 +570,16 @@ export async function acceptArticleStructure(
   issueNumber: number,
   structure: string
 ): Promise<AcceptStructureResult> {
-  const res = await fetch(`${serverUrl}/api/projects/${projectId}/article-plan/issues/${issueNumber}/accept-structure`, {
-    method: 'POST',
-    headers: buildHeaders(apiKey, actor, 'application/json'),
-    body: JSON.stringify({ structure }),
-    agent: buildAgent(serverUrl),
-  });
-  await assertOk(res);
-  return (await res.json()) as AcceptStructureResult;
+  return requestJson<AcceptStructureResult>(
+    serverUrl,
+    `/api/projects/${projectId}/article-plan/issues/${issueNumber}/accept-structure`,
+    {
+      label: 'acceptArticleStructure',
+      method: 'POST',
+      headers: buildHeaders(apiKey, actor),
+      createBody: jsonBody({ structure }),
+    }
+  );
 }
 
 export interface AssignIssueResult {
@@ -537,13 +595,15 @@ export async function assignIssue(
   projectId: number,
   issueNumber: number
 ): Promise<AssignIssueResult> {
-  const res = await fetch(`${serverUrl}/api/projects/${projectId}/article-plan/issues/${issueNumber}/assign`, {
-    method: 'POST',
-    headers: buildHeaders(apiKey, actor, 'application/json'),
-    agent: buildAgent(serverUrl),
-  });
-  await assertOk(res);
-  return (await res.json()) as AssignIssueResult;
+  return requestJson<AssignIssueResult>(
+    serverUrl,
+    `/api/projects/${projectId}/article-plan/issues/${issueNumber}/assign`,
+    {
+      label: 'assignIssue',
+      method: 'POST',
+      headers: buildHeaders(apiKey, actor, 'application/json'),
+    }
+  );
 }
 
 export async function renderPreviewHtml(
@@ -553,14 +613,14 @@ export async function renderPreviewHtml(
   projectId: number,
   markdown: string
 ): Promise<string> {
-  const res = await fetch(`${serverUrl}/api/projects/${projectId}/preview/render`, {
+  const data = await requestJson<{ html: string }>(serverUrl, `/api/projects/${projectId}/preview/render`, {
+    label: 'renderPreviewHtml',
     method: 'POST',
-    headers: buildHeaders(apiKey, actor, 'application/json'),
-    body: JSON.stringify({ markdown }),
-    agent: buildAgent(serverUrl),
+    headers: buildHeaders(apiKey, actor),
+    createBody: jsonBody({ markdown }),
+    // 変換結果を返すだけでサーバー状態を変えないため、再試行して差し支えない。
+    retryable: true,
   });
-  await assertOk(res);
-  const data = (await res.json()) as { html: string };
   return data.html;
 }
 
@@ -576,10 +636,8 @@ export async function getMasterThemeCss(
   actor: Actor | undefined,
   projectId: number
 ): Promise<ThemeCssResult> {
-  const res = await fetch(`${serverUrl}/api/projects/${projectId}/preview/theme-css`, {
+  return requestJson<ThemeCssResult>(serverUrl, `/api/projects/${projectId}/preview/theme-css`, {
+    label: 'getMasterThemeCss',
     headers: buildHeaders(apiKey, actor),
-    agent: buildAgent(serverUrl),
   });
-  await assertOk(res);
-  return (await res.json()) as ThemeCssResult;
 }

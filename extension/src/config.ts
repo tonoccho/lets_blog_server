@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { logger } from './logger';
 
 const API_KEY_SECRET = 'letsBlog.apiKey';
 const ACTOR_SECRET = 'letsBlog.actor';
@@ -31,12 +32,27 @@ export async function requireApiKey(context: vscode.ExtensionContext): Promise<s
   return key;
 }
 
+/**
+ * SecretStorageに保存されたActorを復元する。壊れた値が残っていると以降のログイン状態判定が
+ * 常に失敗し続けるため、解析に失敗した場合はログに残した上で保存値を破棄し、再ログインを促す。
+ */
 export async function getActor(context: vscode.ExtensionContext): Promise<Actor | undefined> {
   const json = await context.secrets.get(ACTOR_SECRET);
   if (!json) return undefined;
   try {
-    return JSON.parse(json) as Actor;
-  } catch {
+    const parsed = JSON.parse(json) as Partial<Actor>;
+    if (typeof parsed?.id !== 'number' || typeof parsed?.email !== 'string' || typeof parsed?.role !== 'string') {
+      throw new Error('Actorの必須項目(id/email/role)が欠けています');
+    }
+    return parsed as Actor;
+  } catch (error) {
+    logger.warn('保存されたログイン情報を読み込めませんでした。再ログインが必要です。', {
+      reason: String(error instanceof Error ? error.message : error),
+    });
+    await context.secrets.delete(ACTOR_SECRET);
+    void vscode.window.showWarningMessage(
+      '保存されたログイン情報を読み込めませんでした。「Let\'s Blog: Login」で再ログインしてください。'
+    );
     return undefined;
   }
 }
