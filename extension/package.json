@@ -109,12 +109,17 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -w -p ./",
-    "generate:api-client": "cd .. && ./scripts/generate-api-client.sh"
+    "generate:api-client": "cd .. && ./scripts/generate-api-client.sh",
+    "test": "jest",
+    "test:coverage": "jest --coverage"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.14.0",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.9.2",
+    "jest": "^30.4.2",
+    "ts-jest": "^29.4.12",
     "typescript": "^5.5.4"
   },
   "dependencies": {

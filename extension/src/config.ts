@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { logger } from './logger';
 import { Actor, ActorSchema } from './schemas';
+import { messageOf } from './errorHandler';
 
 const API_KEY_SECRET = 'letsBlog.apiKey';
 const ACTOR_SECRET = 'letsBlog.actor';
@@ -42,7 +43,7 @@ export async function getActor(context: vscode.ExtensionContext): Promise<Actor 
     return ActorSchema.parse(JSON.parse(json));
   } catch (error) {
     logger.warn('保存されたログイン情報を読み込めませんでした。再ログインが必要です。', {
-      reason: String(error instanceof Error ? error.message : error),
+      reason: messageOf(error),
     });
     await context.secrets.delete(ACTOR_SECRET);
     void vscode.window.showWarningMessage(
