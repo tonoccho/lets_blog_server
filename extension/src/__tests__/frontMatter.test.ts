@@ -7,6 +7,8 @@ import {
   resolveFeaturedImageReference,
   resolveExistingPostId,
   guessImageMimeType,
+  buildArticleFrontMatter,
+  suggestSlugFromTitle,
 } from '../frontMatter';
 
 const BASE_DIR = path.resolve('/workspace/articles/sample');
@@ -152,5 +154,74 @@ describe('guessImageMimeType', () => {
   it('未知の拡張子はundefinedを返す', () => {
     expect(guessImageMimeType('a.tiff')).toBeUndefined();
     expect(guessImageMimeType('noext')).toBeUndefined();
+  });
+});
+
+describe('buildArticleFrontMatter', () => {
+  it('必須項目とstatusの既定値を設定する', () => {
+    expect(buildArticleFrontMatter({ title: 'T', slug: 's', projectId: 3 })).toEqual({
+      title: 'T',
+      slug: 's',
+      status: 'draft',
+      project_id: 3,
+    });
+  });
+
+  it('空のカテゴリ・タグはfront matterへ書き込まない', () => {
+    const frontMatter = buildArticleFrontMatter({
+      title: 'T',
+      slug: 's',
+      projectId: 3,
+      categories: [],
+      tags: [],
+    });
+    expect(frontMatter).not.toHaveProperty('categories');
+    expect(frontMatter).not.toHaveProperty('tags');
+  });
+
+  it('GitHub Issue起点の情報を含められる', () => {
+    const frontMatter = buildArticleFrontMatter({
+      title: 'T',
+      slug: 's',
+      projectId: 3,
+      categories: ['技術'],
+      tags: ['docker'],
+      status: 'publish',
+      githubIssueNumber: 42,
+      githubRepository: 'https://github.com/o/r',
+    });
+    expect(frontMatter).toEqual({
+      title: 'T',
+      slug: 's',
+      status: 'publish',
+      project_id: 3,
+      categories: ['技術'],
+      tags: ['docker'],
+      github_issue_number: 42,
+      github_repository: 'https://github.com/o/r',
+    });
+  });
+
+  it('生成したfront matterはそのまま記事として書き出せる', () => {
+    const frontMatter = buildArticleFrontMatter({ title: 'タイトル', slug: 'my-slug', projectId: 1 });
+    const reparsed = parseArticle(stringifyArticle({ data: frontMatter, content: '本文' }));
+    expect(reparsed.data.title).toBe('タイトル');
+    expect(reparsed.data.project_id).toBe(1);
+  });
+});
+
+describe('suggestSlugFromTitle', () => {
+  it.each([
+    ['Getting Started with Docker', 'getting-started-with-docker'],
+    ['  Hello   World  ', 'hello-world'],
+    ['Node.js 18 の新機能', 'node-js-18'],
+    ['C++ & Rust: A Comparison', 'c-rust-a-comparison'],
+    ['already-a-slug', 'already-a-slug'],
+  ])('%s -> %s', (title, expected) => {
+    expect(suggestSlugFromTitle(title)).toBe(expected);
+  });
+
+  it('英数字を含まないタイトルでは空文字を返す(利用者に入力を促す)', () => {
+    expect(suggestSlugFromTitle('日本語のみのタイトル')).toBe('');
   });
 });

@@ -12,6 +12,7 @@ import {
 } from './frontMatter';
 import * as api from './apiClient';
 import { PlanPanel } from './planPanel';
+import { ArticleCreationPanel } from './articleCreationPanel';
 import { PreviewPanel } from './previewPanel';
 import { ImageGenPanel } from './imageGenPanel';
 import { SectionGenPanel } from './sectionGenPanel';
@@ -33,6 +34,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('letsBlog.createArticle', () => commandCreateArticle(context)),
     vscode.commands.registerCommand('letsBlog.login', () => commandLogin(context)),
     vscode.commands.registerCommand('letsBlog.setApiKey', () => commandSetApiKey(context)),
     vscode.commands.registerCommand('letsBlog.selectSite', () => commandSelectSite(context)),
@@ -526,6 +528,19 @@ async function commandGenerateSection(context: vscode.ExtensionContext): Promise
     SectionGenPanel.createOrShow(context, editor, articleTitle, sectionContext);
   } catch (err) {
     reportError('セクション生成パネルの起動に失敗しました', err);
+  }
+}
+
+/**
+ * GitHub Issueを起点にせず、コマンドから直接記事を作成する。
+ * Issueが無い記事(単発の告知や覚書など)を書き始めるための入口。
+ */
+async function commandCreateArticle(context: vscode.ExtensionContext): Promise<void> {
+  try {
+    await requireApiKey(context);
+    ArticleCreationPanel.createOrShow(context);
+  } catch (err) {
+    reportError('記事作成パネルの起動に失敗しました', err);
   }
 }
 

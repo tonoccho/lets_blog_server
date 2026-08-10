@@ -1,9 +1,8 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
-import * as path from 'path';
 import * as api from './apiClient';
 import { Actor, getActor, getProjectId, getServerUrl, requireApiKey } from './config';
-import { LetsBlogFrontMatter, stringifyArticle } from './frontMatter';
+import { buildArticleFrontMatter } from './frontMatter';
+import { createArticleScaffold, openArticle, requireWorkspaceRoot } from './articleScaffold';
 import { messageOf } from './errorHandler';
 import { extractIssueOutline, formatOutlineAsMarkdown } from './issueParser';
 import { showSingletonPanel, WebviewPanelBase } from './webviewPanelBase';
@@ -162,45 +161,28 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
     const { apiKey, actor, projectId } = await this._requireContext();
     const { issue, metadata } = message;
 
-    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-    if (!workspaceFolder) {
-      throw new Error('ワークスペースフォルダが開かれていません。');
-    }
-
-    const articlesPath = path.join(workspaceFolder.uri.fsPath, 'articles', metadata.slug);
-    if (fs.existsSync(articlesPath)) {
-      const overwrite = await vscode.window.showWarningMessage(
-        `articles/${metadata.slug} は既に存在します。上書きしますか?`,
-        'Yes',
-        'No'
-      );
-      if (overwrite !== 'Yes') {
-        this.postMessage('error', { error: 'キャンセルしました。' });
-        return;
-      }
-    }
-
-    fs.mkdirSync(articlesPath, { recursive: true });
-    fs.mkdirSync(path.join(articlesPath, 'assets'), { recursive: true });
-    fs.writeFileSync(path.join(articlesPath, 'assets', '.gitkeep'), '');
-
     const description = await api.getIssueDescription(getServerUrl(), apiKey, actor, projectId, issue.number);
-
     const githubRepositoryMatch = issue.htmlUrl.match(GITHUB_ISSUE_URL_PATTERN);
-    const frontMatter: LetsBlogFrontMatter = {
-      title: metadata.title,
+
+    const scaffold = await createArticleScaffold({
+      workspaceRoot: requireWorkspaceRoot(),
       slug: metadata.slug,
-      categories: metadata.categories,
-      tags: metadata.tags,
-      status: 'draft',
-      github_issue_number: issue.number,
-      github_repository: githubRepositoryMatch?.[1],
-      project_id: projectId,
-    };
-    const content = description.trim().length > 0 ? description : '記事本文をここに記入してください。';
-    const articlePath = path.join(articlesPath, 'article.md');
-    fs.writeFileSync(articlePath, stringifyArticle({ data: frontMatter, content }), 'utf-8');
-    this._lastArticlePath = articlePath;
+      frontMatter: buildArticleFrontMatter({
+        title: metadata.title,
+        slug: metadata.slug,
+        projectId,
+        categories: metadata.categories,
+        tags: metadata.tags,
+        githubIssueNumber: issue.number,
+        githubRepository: githubRepositoryMatch?.[1],
+      }),
+      content: description,
+    });
+    if (!scaffold) {
+      this.postMessage('error', { error: 'キャンセルしました。' });
+      return;
+    }
+    this._lastArticlePath = scaffold.articlePath;
 
     try {
       await api.assignIssue(getServerUrl(), apiKey, actor, projectId, issue.number);
@@ -217,7 +199,6 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
 
   private async _handleOpenArticle(): Promise<void> {
     if (!this._lastArticlePath) return;
-    const doc = await vscode.workspace.openTextDocument(this._lastArticlePath);
-    await vscode.window.showTextDocument(doc);
+    await openArticle(this._lastArticlePath);
   }
 }

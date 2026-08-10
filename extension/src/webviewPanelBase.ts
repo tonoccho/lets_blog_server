@@ -73,6 +73,11 @@ export abstract class WebviewPanelBase<TInbound extends WebviewMessageBase<strin
     this.panel.webview.html = this.renderHtml();
   }
 
+  /** パネルを閉じる(フォーム系パネルのEscape操作など、Webview側からの明示的な終了)。 */
+  public close(): void {
+    this.dispose();
+  }
+
   /** 既存のパネルを前面に出す。 */
   public reveal(): void {
     this.panel.reveal(vscode.ViewColumn.Beside);

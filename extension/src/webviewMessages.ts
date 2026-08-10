@@ -84,3 +84,22 @@ export interface SectionGenInitPayload {
   selectedText: string;
   sectionContext: SectionContext;
 }
+
+// --- Create Article パネル ---
+
+export type ArticleCreationInboundMessage =
+  | WebviewMessageBase<'loadProjects'>
+  | WebviewMessageBase<'close'>
+  | (WebviewMessageBase<'loadCategories'> & { projectId: number })
+  | (WebviewMessageBase<'createArticle'> & {
+      metadata: {
+        projectId: number;
+        title: string;
+        slug: string;
+        categories: string[];
+        tags: string[];
+        status: string;
+      };
+    });
+
+export type ArticleCreationOutboundCommand = 'projectList' | 'categoryList' | 'articleCreated' | 'error';

@@ -17,6 +17,10 @@
   "contributes": {
     "commands": [
       {
+        "command": "letsBlog.createArticle",
+        "title": "Let's Blog: Create Article"
+      },
+      {
         "command": "letsBlog.login",
         "title": "Let's Blog: Login"
       },

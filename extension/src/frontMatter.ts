@@ -133,3 +133,59 @@ export function resolveExistingPostId(data: LetsBlogFrontMatter, siteKey: string
   }
   return undefined;
 }
+
+export interface ArticleFrontMatterInput {
+  title: string;
+  slug: string;
+  projectId: number;
+  categories?: string[];
+  tags?: string[];
+  status?: string;
+  /** GitHub Issue起点で作成した場合のIssue番号。 */
+  githubIssueNumber?: number;
+  /** GitHub Issue起点で作成した場合のリポジトリURL。 */
+  githubRepository?: string;
+}
+
+/**
+ * 新規記事のfront matterを組み立てる。
+ *
+ * GitHub Issue起点(Article Plan)とコマンド起点(Create Article)で
+ * 同じ項目・同じ既定値になるよう、生成をこの関数へ集約する。
+ * 値が無い項目は省略し、front matterに空の項目が並ばないようにする。
+ */
+export function buildArticleFrontMatter(input: ArticleFrontMatterInput): LetsBlogFrontMatter {
+  const frontMatter: LetsBlogFrontMatter = {
+    title: input.title,
+    slug: input.slug,
+    status: input.status ?? 'draft',
+    project_id: input.projectId,
+  };
+  if (input.categories && input.categories.length > 0) {
+    frontMatter.categories = input.categories;
+  }
+  if (input.tags && input.tags.length > 0) {
+    frontMatter.tags = input.tags;
+  }
+  if (input.githubIssueNumber != null) {
+    frontMatter.github_issue_number = input.githubIssueNumber;
+  }
+  if (input.githubRepository) {
+    frontMatter.github_repository = input.githubRepository;
+  }
+  return frontMatter;
+}
+
+/**
+ * タイトルからスラッグの候補を作る。英数字とハイフンのみを残し、
+ * 日本語など変換できない文字しか残らない場合は空文字を返す(利用者に入力を促す)。
+ */
+export function suggestSlugFromTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+}
