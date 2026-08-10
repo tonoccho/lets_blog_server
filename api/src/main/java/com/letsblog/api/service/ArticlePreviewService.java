@@ -76,19 +76,42 @@ public class ArticlePreviewService {
     }
 
     /**
-     * プロジェクトのマスター環境(test/production)に紐づくサイトがWordPressであれば、
-     * トップページのstylesheetリンクを収集して連結したCSSを返す。
-     * 紐付けなし・非WordPress・取得失敗時はavailable=falseで理由を添えて返す。
+     * プロジェクトのマスター環境(test/production)に紐づくサイトのテーマCSSを返す。
      */
     public ThemeCssResponse fetchMasterThemeCss(Long projectId) {
+        return fetchThemeCss(projectId, null);
+    }
+
+    /**
+     * 指定サイト(siteId)のテーマCSSを返す。siteIdがnullの場合はマスター環境のサイトを対象とする。
+     *
+     * VSCode拡張のプレビューで、ローカル/テスト/本番のどのサイトの見た目で確認するかを
+     * 選べるようにするためにsiteIdを受け取る。指定されたサイトがこのプロジェクトに
+     * 紐づいていない場合は、他プロジェクトのサイトを覗けてしまわないよう取得を拒否する。
+     *
+     * 対象がWordPressであれば、トップページのstylesheetリンクを収集して連結したCSSを返す。
+     * 紐付けなし・非WordPress・取得失敗時はavailable=falseで理由を添えて返す。
+     */
+    public ThemeCssResponse fetchThemeCss(Long projectId, Long siteId) {
         Project project = projectService.getProjectEntity(projectId);
-        Site site = resolveMasterSite(project);
-        if (site == null) {
-            return new ThemeCssResponse("", false,
-                    "マスター環境(" + project.getMasterEnvironment() + ")にサイトが紐づいていません");
+        Site site;
+        if (siteId == null) {
+            site = resolveMasterSite(project);
+            if (site == null) {
+                return new ThemeCssResponse("", false,
+                        "マスター環境(" + project.getMasterEnvironment() + ")にサイトが紐づいていません");
+            }
+        } else {
+            if (!isProjectSite(project, siteId)) {
+                return new ThemeCssResponse("", false, "指定されたサイトはこのプロジェクトに紐づいていません");
+            }
+            site = siteRepository.findById(siteId).orElse(null);
+            if (site == null) {
+                return new ThemeCssResponse("", false, "指定されたサイトが見つかりません");
+            }
         }
         if (site.getCmsType() != CmsType.WORDPRESS) {
-            return new ThemeCssResponse("", false, "マスター環境サイトがWordPress以外のCMSのためテーマCSSを取得できません");
+            return new ThemeCssResponse("", false, "対象サイトがWordPress以外のCMSのためテーマCSSを取得できません");
         }
 
         String html;
@@ -111,6 +134,13 @@ public class ArticlePreviewService {
 
         String css = fetchAndConcatStylesheets(stylesheetUrls);
         return new ThemeCssResponse(css, true, null);
+    }
+
+    /** siteIdがこのプロジェクトのいずれかの環境に紐づいているか。 */
+    private boolean isProjectSite(Project project, Long siteId) {
+        return siteId.equals(project.getLocalSiteId())
+                || siteId.equals(project.getTestSiteId())
+                || siteId.equals(project.getProductionSiteId());
     }
 
     private Site resolveMasterSite(Project project) {

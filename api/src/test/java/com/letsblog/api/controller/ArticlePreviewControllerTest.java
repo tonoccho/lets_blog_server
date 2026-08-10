@@ -52,12 +52,24 @@ class ArticlePreviewControllerTest {
     @Test
     void themeCss_認可後にサービスへ委譲する() {
         ArticlePreviewController controller = controller();
-        when(articlePreviewService.fetchMasterThemeCss(1L))
+        when(articlePreviewService.fetchThemeCss(1L, null))
                 .thenReturn(new ThemeCssResponse("body{}", true, null));
 
-        ThemeCssResponse response = controller.themeCss(1L);
+        ThemeCssResponse response = controller.themeCss(1L, null);
 
         assertEquals("body{}", response.css());
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+    }
+
+    @Test
+    void themeCss_siteId指定時はそのサイトのCSSを返す() {
+        ArticlePreviewController controller = controller();
+        when(articlePreviewService.fetchThemeCss(1L, 20L))
+                .thenReturn(new ThemeCssResponse("body{color:red}", true, null));
+
+        ThemeCssResponse response = controller.themeCss(1L, 20L);
+
+        assertEquals("body{color:red}", response.css());
         verify(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
     }
 
@@ -66,6 +78,6 @@ class ArticlePreviewControllerTest {
         ArticlePreviewController controller = controller();
         doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
 
-        assertThrows(ForbiddenException.class, () -> controller.themeCss(1L));
+        assertThrows(ForbiddenException.class, () -> controller.themeCss(1L, null));
     }
 }

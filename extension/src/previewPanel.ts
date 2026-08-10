@@ -9,16 +9,21 @@ export class PreviewPanel {
   public static currentPanel: PreviewPanel | undefined;
   private readonly _panel: vscode.WebviewPanel;
 
-  public static createOrShow(html: string, css: string, warning: string | undefined): void {
+  public static createOrShow(
+    html: string,
+    css: string,
+    warning: string | undefined,
+    siteLabel?: string
+  ): void {
     if (PreviewPanel.currentPanel) {
       PreviewPanel.currentPanel._panel.reveal(vscode.ViewColumn.Beside);
-      PreviewPanel.currentPanel._update(html, css, warning);
+      PreviewPanel.currentPanel._update(html, css, warning, siteLabel);
       return;
     }
-    PreviewPanel.currentPanel = new PreviewPanel(html, css, warning);
+    PreviewPanel.currentPanel = new PreviewPanel(html, css, warning, siteLabel);
   }
 
-  private constructor(html: string, css: string, warning: string | undefined) {
+  private constructor(html: string, css: string, warning: string | undefined, siteLabel?: string) {
     this._panel = vscode.window.createWebviewPanel(
       'letsBlog.articlePreview',
       'Article Preview',
@@ -26,7 +31,7 @@ export class PreviewPanel {
       { enableScripts: false }
     );
     this._panel.onDidDispose(() => this.dispose(), null);
-    this._update(html, css, warning);
+    this._update(html, css, warning, siteLabel);
   }
 
   private dispose(): void {
@@ -34,13 +39,25 @@ export class PreviewPanel {
     this._panel.dispose();
   }
 
-  private _update(html: string, css: string, warning: string | undefined): void {
-    this._panel.webview.html = this._getHtmlContent(html, css, warning);
+  private _update(html: string, css: string, warning: string | undefined, siteLabel?: string): void {
+    // どのサイトのCSSで表示しているかがタブから分かるようにする。
+    this._panel.title = siteLabel ? `Article Preview (${siteLabel})` : 'Article Preview';
+    this._panel.webview.html = this._getHtmlContent(html, css, warning, siteLabel);
   }
 
-  private _getHtmlContent(html: string, css: string, warning: string | undefined): string {
+  private _getHtmlContent(
+    html: string,
+    css: string,
+    warning: string | undefined,
+    siteLabel?: string
+  ): string {
     const warningBlock = warning
       ? `<div role="alert" style="background:#fff3cd;color:#664d03;padding:8px 12px;margin-bottom:16px;border-radius:4px;font-family:sans-serif;font-size:13px;">${escapeHtml(warning)}</div>`
+      : '';
+    // 適用中のCSSの出所を明示する。どのサイトの見た目を見ているのか分からないと
+    // 環境間の差分確認という目的を果たせないため。
+    const siteBanner = siteLabel
+      ? `<div style="background:var(--vscode-editorWidget-background,#eee);color:var(--vscode-foreground,#333);padding:6px 12px;margin-bottom:12px;border-radius:4px;font-family:sans-serif;font-size:12px;">適用中のCSS: ${escapeHtml(siteLabel)}</div>`
       : '';
     return `<!DOCTYPE html>
 <html lang="ja">
@@ -53,6 +70,7 @@ ${css}
 </style>
 </head>
 <body>
+${siteBanner}
 ${warningBlock}
 <main>
 ${html}

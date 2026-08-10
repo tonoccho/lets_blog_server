@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
@@ -169,5 +170,48 @@ class ArticlePreviewServiceTest {
         ThemeCssResponse response = service.fetchMasterThemeCss(1L);
 
         assertFalse(response.available());
+    }
+
+    @Test
+    void fetchThemeCss_siteId指定でそのサイトのCSSを取得する() {
+        Project project = projectWithMaster("test", 10L, null);
+        project.setLocalSiteId(20L);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteRepository.findById(20L)).thenReturn(Optional.of(wordPressSite(20L, "http://local.example.com")));
+
+        server.expect(requestTo("http://local.example.com"))
+                .andRespond(withSuccess(
+                        "<html><head><link rel=\"stylesheet\" href=\"/local.css\"></head></html>",
+                        MediaType.TEXT_HTML));
+        server.expect(requestTo("http://local.example.com/local.css"))
+                .andRespond(withSuccess("body{color:red}", MediaType.valueOf("text/css")));
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 20L);
+
+        assertTrue(response.available());
+        assertTrue(response.css().contains("body{color:red}"));
+    }
+
+    @Test
+    void fetchThemeCss_プロジェクトに紐づかないサイトは取得を拒否する() {
+        Project project = projectWithMaster("test", 10L, null);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 999L);
+
+        assertFalse(response.available());
+        assertTrue(response.reason().contains("このプロジェクトに紐づいていません"));
+        // 紐づかないサイトはリポジトリ参照すら行わない(他プロジェクトのサイトを覗けないようにする)。
+        verifyNoInteractions(siteRepository);
+    }
+
+    @Test
+    void fetchThemeCss_siteIdがnullの場合はマスター環境を対象とする() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", null, null));
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, null);
+
+        assertFalse(response.available());
+        assertTrue(response.reason().contains("マスター環境"));
     }
 }

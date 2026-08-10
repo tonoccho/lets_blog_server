@@ -18,7 +18,7 @@ import { ImageGenPanel } from './imageGenPanel';
 import { SectionGenPanel } from './sectionGenPanel';
 import { resolveSectionContext } from './headingContext';
 import { logger } from './logger';
-import { reportError } from './errorHandler';
+import { messageOf, reportError } from './errorHandler';
 
 export function activate(context: vscode.ExtensionContext): void {
   logger.refreshFromConfiguration();
@@ -606,6 +606,52 @@ function inlineLocalImages(content: string, baseDir: string): string {
   return rewritten;
 }
 
+/**
+ * プレビューに使うCSSの取得元サイトを選ばせる。
+ * プロジェクトに紐づくサイトが1つだけなら確認を挟まずそれを使い、
+ * 複数ある場合のみ選択肢を出す(常にダイアログを出すと毎回の操作が増えるため)。
+ */
+interface PreviewSiteChoice extends vscode.QuickPickItem {
+  siteId?: number;
+  siteName: string;
+}
+
+function buildPreviewSiteChoices(project: api.ProjectDetail): PreviewSiteChoice[] {
+  const choices: PreviewSiteChoice[] = [];
+  const environments: [string, api.ProjectSite | null][] = [
+    ['ローカル', project.localSite],
+    ['テスト', project.testSite],
+    ['本番', project.productionSite],
+  ];
+  for (const [label, site] of environments) {
+    if (site) {
+      choices.push({ label, description: site.name, siteId: site.id, siteName: site.name });
+    }
+  }
+  return choices;
+}
+
+async function pickPreviewSite(
+  serverUrl: string,
+  apiKey: string,
+  actor: api.Actor | undefined,
+  projectId: number
+): Promise<PreviewSiteChoice | undefined> {
+  const project = await api.getProject(serverUrl, apiKey, actor, projectId);
+  const choices = buildPreviewSiteChoices(project);
+
+  if (choices.length === 0) {
+    // サイト未紐付けでもプレビュー自体は可能(CSSなしで表示する)。
+    return { label: 'サイトなし', siteName: 'サイト未紐付け' };
+  }
+  if (choices.length === 1) {
+    return choices[0];
+  }
+  return vscode.window.showQuickPick(choices, {
+    placeHolder: 'プレビューに使うサイトのCSSを選択',
+  });
+}
+
 async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<void> {
   const editor = getActiveMarkdownEditor();
   if (!editor) return;
@@ -623,6 +669,10 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
     const apiKey = await requireApiKey(context);
     const actor = await getActor(context);
     const serverUrl = getServerUrl();
+
+    const site = await pickPreviewSite(serverUrl, apiKey, actor, projectId);
+    if (!site) return;
+
     const baseDir = path.dirname(editor.document.uri.fsPath);
     const markdown = inlineLocalImages(article.content, baseDir);
 
@@ -632,21 +682,25 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
         progress.report({ message: 'Markdownを変換しています…' });
         const html = await api.renderPreviewHtml(serverUrl, apiKey, actor, projectId, markdown);
 
-        progress.report({ message: 'サイトのCSSを取得しています…' });
+        progress.report({ message: `${site.siteName} のCSSを取得しています…` });
         let css = '';
         let warning: string | undefined;
-        try {
-          const themeCss = await api.getMasterThemeCss(serverUrl, apiKey, actor, projectId);
-          if (themeCss.available) {
-            css = themeCss.css;
-          } else {
-            warning = `マスター環境サイトのCSSを取得できませんでした: ${themeCss.reason ?? '不明なエラー'}`;
+        if (site.siteId == null) {
+          warning = 'プロジェクトにサイトが紐づいていないため、CSSなしで表示しています。';
+        } else {
+          try {
+            const themeCss = await api.getThemeCss(serverUrl, apiKey, actor, projectId, site.siteId);
+            if (themeCss.available) {
+              css = themeCss.css;
+            } else {
+              warning = `${site.siteName} のCSSを取得できませんでした: ${themeCss.reason ?? '不明なエラー'}`;
+            }
+          } catch (cssError) {
+            warning = `${site.siteName} のCSS取得に失敗しました: ${messageOf(cssError)}`;
           }
-        } catch (cssError) {
-          warning = `マスター環境サイトのCSS取得に失敗しました: ${String(cssError instanceof Error ? cssError.message : cssError)}`;
         }
 
-        PreviewPanel.createOrShow(html, css, warning);
+        PreviewPanel.createOrShow(html, css, warning, `${site.label} / ${site.siteName}`);
       }
     );
   } catch (err) {

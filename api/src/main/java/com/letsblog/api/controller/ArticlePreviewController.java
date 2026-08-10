@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -33,9 +34,14 @@ public class ArticlePreviewController {
         return new RenderPreviewResponse(articlePreviewService.renderHtml(projectId, request.markdown()));
     }
 
+    /**
+     * プレビューに適用するテーマCSSを返す。siteId未指定時はマスター環境のサイトを対象とする
+     * (VSCode拡張のプレビューで、ローカル/テスト/本番のどのサイトの見た目で確認するかを選べるようにする)。
+     */
     @GetMapping("/theme-css")
-    public ThemeCssResponse themeCss(@PathVariable Long projectId) {
+    public ThemeCssResponse themeCss(
+            @PathVariable Long projectId, @RequestParam(required = false) Long siteId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        return articlePreviewService.fetchMasterThemeCss(projectId);
+        return articlePreviewService.fetchThemeCss(projectId, siteId);
     }
 }

@@ -72,6 +72,11 @@
     "menus": {
       "editor/context": [
         {
+          "command": "letsBlog.previewArticle",
+          "when": "editorTextFocus && resourceLangId == markdown",
+          "group": "letsBlog@0"
+        },
+        {
           "command": "letsBlog.generateImage",
           "when": "editorTextFocus && resourceLangId == markdown",
           "group": "letsBlog@1"

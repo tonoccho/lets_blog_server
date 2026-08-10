@@ -686,14 +686,24 @@ export async function renderPreviewHtml(
   return data.html;
 }
 
-export async function getMasterThemeCss(
+/**
+ * プレビューに適用するテーマCSSを取得する。siteIdを指定するとそのサイト、
+ * 省略時はプロジェクトのマスター環境サイトのCSSを返す。
+ * サイトのCSSは短時間で変わるものではないため、サイトごとにキャッシュする。
+ */
+export async function getThemeCss(
   serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
-  projectId: number
+  projectId: number,
+  siteId?: number
 ): Promise<ThemeCssResult> {
-  return requestJson(serverUrl, `/api/projects/${projectId}/preview/theme-css`, {
-    label: 'getMasterThemeCss',
-    headers: buildHeaders(apiKey, actor),
-  }, schemas.ThemeCssResultSchema);
+  const query = siteId != null ? `?siteId=${siteId}` : '';
+  return cachedRequestJson(
+    `project:${projectId}:theme-css:${siteId ?? 'master'}`,
+    serverUrl,
+    `/api/projects/${projectId}/preview/theme-css${query}`,
+    { label: 'getThemeCss', headers: buildHeaders(apiKey, actor) },
+    schemas.ThemeCssResultSchema
+  );
 }
