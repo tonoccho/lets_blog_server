@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { listSites, listPosts, listGenerationJobs } from "@/lib/apiClient";
+import { listSites, listPosts, listGenerationJobs, getConnectedServiceStatuses } from "@/lib/apiClient";
+import { ConnectedServiceStatusPanel } from "./ConnectedServiceStatusPanel";
 
 export default async function DashboardPage() {
-  const [sites, posts, jobs] = await Promise.all([
+  const [sites, posts, jobs, serviceStatuses] = await Promise.all([
     listSites().catch(() => []),
     listPosts().catch(() => []),
     listGenerationJobs().catch(() => []),
+    getConnectedServiceStatuses().catch(() => []),
   ]);
 
   const cards = [
@@ -29,6 +31,7 @@ export default async function DashboardPage() {
           </Link>
         ))}
       </div>
+      <ConnectedServiceStatusPanel initialStatuses={serviceStatuses} />
     </div>
   );
 }

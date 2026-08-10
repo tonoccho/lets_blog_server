@@ -2031,3 +2031,13 @@ export async function downloadVscodeExtension(): Promise<{ body: ArrayBuffer; fi
   const filename = match ? match[1] : 'letsblog-vscode.vsix';
   return { body: await res.arrayBuffer(), filename };
 }
+
+export interface ConnectedServiceStatus {
+  id: string;
+  name: string;
+  status: "NORMAL" | "WARNING" | "ERROR";
+}
+
+export function getConnectedServiceStatuses(): Promise<ConnectedServiceStatus[]> {
+  return apiFetch<ConnectedServiceStatus[]>('/api/dashboard/service-status');
+}
