@@ -165,7 +165,10 @@ code --install-extension letsblog-vscode-<バージョン>.vsix
 拡張のTLS証明書検証は既定で有効(`letsBlog.allowInsecureTls: false`)。上記の証明書登録が
 行えない場合に限り、`letsBlog.allowInsecureTls: true` で検証をスキップできるが、
 中間者攻撃を検出できなくなるため信頼できるネットワーク上のローカル環境でのみ使用すること。
-拡張のセキュリティ仕様は [extension/SECURITY.md](extension/SECURITY.md) を参照。
+拡張の設計は [extension/ARCHITECTURE.md](extension/ARCHITECTURE.md)、API仕様は
+[extension/API_REFERENCE.md](extension/API_REFERENCE.md)、セキュリティ仕様は
+[extension/SECURITY.md](extension/SECURITY.md)、不具合調査は
+[extension/TROUBLESHOOTING.md](extension/TROUBLESHOOTING.md) を参照。
 
 ## API ドキュメント
 
