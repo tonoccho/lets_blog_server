@@ -171,6 +171,12 @@ async function requestJson<S extends ZodType>(
   return parsed.data;
 }
 
+/** 画像などのバイナリを返すエンドポイント用のヘルパー。 */
+async function requestBinary(serverUrl: string, path: string, spec: RequestSpec): Promise<Buffer> {
+  const res = await request(serverUrl, path, spec);
+  return Buffer.from(await res.arrayBuffer());
+}
+
 /** JSONボディを送るリクエストのボディファクトリ。 */
 function jsonBody(payload: unknown): RequestSpec['createBody'] {
   return () => ({ body: JSON.stringify(payload), headers: { 'Content-Type': 'application/json' } });
@@ -712,3 +718,51 @@ export async function getThemeCss(
     schemas.ThemeCssResultSchema
   );
 }
+
+/**
+ * サーバーに保存された生成画像の一覧を取得する。
+ * projectId未指定時は全プロジェクトが対象になるため、通常はプロジェクトを指定して呼ぶ。
+ */
+export async function listGeneratedImages(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  projectId: number
+): Promise<schemas.GeneratedImageSummary[]> {
+  return cachedRequestJson(
+    `project:${projectId}:generated-images`,
+    serverUrl,
+    `/api/generated-images?projectId=${projectId}`,
+    { label: 'listGeneratedImages', headers: buildHeaders(apiKey, actor) },
+    schemas.GeneratedImageSummaryListSchema
+  );
+}
+
+/** 生成画像のバイナリを取得する。 */
+export async function downloadGeneratedImage(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  imageId: number
+): Promise<Buffer> {
+  return requestBinary(serverUrl, `/api/generated-images/${imageId}/file`, {
+    label: 'downloadGeneratedImage',
+    headers: buildHeaders(apiKey, actor),
+  });
+}
+
+/** 生成画像をサーバーから削除する。 */
+export async function deleteGeneratedImage(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  imageId: number
+): Promise<void> {
+  await request(serverUrl, `/api/generated-images/${imageId}`, {
+    label: 'deleteGeneratedImage',
+    method: 'DELETE',
+    headers: buildHeaders(apiKey, actor),
+  });
+}
+
+export type { GeneratedImageSummary } from './schemas';

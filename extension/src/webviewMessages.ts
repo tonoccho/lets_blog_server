@@ -103,3 +103,23 @@ export type ArticleCreationInboundMessage =
     });
 
 export type ArticleCreationOutboundCommand = 'projectList' | 'categoryList' | 'articleCreated' | 'error';
+
+// --- Image Gallery パネル ---
+
+export type ImageGalleryInboundMessage =
+  | WebviewMessageBase<'loadImages'>
+  | WebviewMessageBase<'cancel'>
+  | (WebviewMessageBase<'loadThumbnails'> & { imageIds: number[] })
+  | (WebviewMessageBase<'insertImage'> & { imageId: number; prompt?: string })
+  | (WebviewMessageBase<'setAsEyecatch'> & { imageId: number })
+  | (WebviewMessageBase<'deleteImage'> & { imageId: number });
+
+export type ImageGalleryOutboundCommand =
+  | 'imageList'
+  | 'thumbnails'
+  | 'imageInserted'
+  | 'eyecatchSet'
+  | 'imageDeleted'
+  | 'deleteCancelled'
+  | 'cancelled'
+  | 'error';

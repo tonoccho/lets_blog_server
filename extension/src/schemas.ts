@@ -172,3 +172,17 @@ export const RenderPreviewResultSchema = z.object({
 export const CategoryNameListSchema = z.array(z.string());
 
 export const ActorListSchema = z.array(ActorSchema);
+
+/**
+ * サーバーに保存された生成画像の一覧項目(/api/generated-images)。
+ * 画像バイナリは別エンドポイント(/file)から取得する。
+ */
+export const GeneratedImageSummarySchema = z.object({
+  id: z.number(),
+  projectId: z.number().nullish(),
+  prompt: z.string().nullish(),
+  checkpoint: z.string().nullish(),
+  createdAt: z.string().nullish(),
+});
+export type GeneratedImageSummary = z.infer<typeof GeneratedImageSummarySchema>;
+export const GeneratedImageSummaryListSchema = z.array(GeneratedImageSummarySchema);

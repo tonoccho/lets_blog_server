@@ -71,6 +71,10 @@
       {
         "command": "letsBlog.schedulePublication",
         "title": "Let's Blog: Schedule Publication"
+      },
+      {
+        "command": "letsBlog.imageGallery",
+        "title": "Let's Blog: Image Gallery"
       }
     ],
     "menus": {
@@ -89,6 +93,11 @@
           "command": "letsBlog.generateSection",
           "when": "editorTextFocus && resourceLangId == markdown",
           "group": "letsBlog@2"
+        },
+        {
+          "command": "letsBlog.imageGallery",
+          "when": "editorTextFocus && resourceLangId == markdown",
+          "group": "letsBlog@3"
         }
       ]
     },

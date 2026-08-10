@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="{{csp}}">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Image Gallery</title>
+{{sharedStyles}}
+<link rel="stylesheet" href="{{styleUri}}">
+</head>
+<body>
+<main class="container">
+  <h1 class="visually-hidden">画像ギャラリー</h1>
+
+  <section class="section" aria-labelledby="gallerySectionTitle">
+    <h2 class="section-title" id="gallerySectionTitle">サーバーに保存された生成画像</h2>
+    <p class="hint" id="galleryHint">画像を選ぶと詳細が表示されます。記事へ挿入すると assets/ へ保存されます。</p>
+
+    <div class="gallery" id="gallery" role="listbox" aria-labelledby="gallerySectionTitle" tabindex="0">
+      <p class="empty">読み込み中...</p>
+    </div>
+
+    <div class="pager" id="galleryPager" style="display: none;">
+      <button type="button" id="prevButton" aria-label="前のページの画像を表示">前へ</button>
+      <span id="pageStatus" aria-live="polite"></span>
+      <button type="button" id="nextButton" aria-label="次のページの画像を表示">次へ</button>
+    </div>
+  </section>
+
+  <section class="section preview-section" id="previewSection" style="display: none;" aria-labelledby="previewTitle">
+    <h2 class="section-title" id="previewTitle">選択中の画像</h2>
+    <img id="previewImage" alt="選択した生成画像のプレビュー">
+    <p class="preview-info" id="previewInfo" role="status" aria-live="polite"></p>
+    <div class="button-group">
+      <button type="button" id="insertButton" class="primary">記事に挿入</button>
+      <button type="button" id="eyecatchButton">アイキャッチに設定</button>
+      <button type="button" id="deleteButton" class="danger">サーバーから削除</button>
+    </div>
+  </section>
+
+  <div id="message" role="status" aria-live="polite"></div>
+</main>
+
+{{sharedScripts}}
+<script nonce="{{nonce}}" src="{{scriptUri}}"></script>
+</body>
+</html>

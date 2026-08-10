@@ -16,6 +16,7 @@ import { PlanPanel } from './planPanel';
 import { ArticleCreationPanel } from './articleCreationPanel';
 import { PreviewPanel } from './previewPanel';
 import { ImageGenPanel } from './imageGenPanel';
+import { ImageGalleryPanel } from './imageGalleryPanel';
 import { SectionGenPanel } from './sectionGenPanel';
 import { resolveSectionContext } from './headingContext';
 import { logger } from './logger';
@@ -45,6 +46,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.askAi', () => commandAskAi(context)),
     vscode.commands.registerCommand('letsBlog.suggestTags', () => commandSuggestTags(context)),
     vscode.commands.registerCommand('letsBlog.generateImage', () => commandGenerateImage(context)),
+    vscode.commands.registerCommand('letsBlog.imageGallery', () => commandImageGallery(context)),
     vscode.commands.registerCommand('letsBlog.generateSection', () => commandGenerateSection(context)),
     vscode.commands.registerCommand('letsBlog.selectProject', () => commandSelectProject(context)),
     vscode.commands.registerCommand('letsBlog.planArticle', () => commandPlanArticle(context)),
@@ -524,6 +526,31 @@ async function commandGenerateImage(context: vscode.ExtensionContext): Promise<v
     ImageGenPanel.createOrShow(context, editor, baseDir, projectId);
   } catch (err) {
     reportError('画像生成パネルの起動に失敗しました', err);
+  }
+}
+
+/**
+ * サーバーに保存済みの生成画像を一覧し、記事へ取り込む。
+ * 画像生成パネルで作った画像を後から再利用するための入口。
+ */
+async function commandImageGallery(context: vscode.ExtensionContext): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  try {
+    const article = parseArticle(editor.document.getText());
+    const projectId = (article.data.project_id as number | undefined) ?? getProjectId(context);
+    if (!projectId) {
+      vscode.window.showErrorMessage(
+        'プロジェクトが未選択です。front matterのproject_id、または「Let\'s Blog: Select Project」で設定してください。'
+      );
+      return;
+    }
+
+    const baseDir = path.dirname(editor.document.uri.fsPath);
+    ImageGalleryPanel.createOrShow(context, editor, baseDir, projectId);
+  } catch (err) {
+    reportError('画像ギャラリーの起動に失敗しました', err);
   }
 }
 
