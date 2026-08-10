@@ -2,9 +2,11 @@ package com.letsblog.api.controller;
 
 import com.letsblog.api.domain.OperationLog;
 import com.letsblog.api.dto.OperationLogRequest;
+import com.letsblog.api.dto.UnifiedLogEntryResponse;
 import com.letsblog.api.service.CurrentActorService;
 import com.letsblog.api.service.ForbiddenException;
 import com.letsblog.api.service.OperationLogService;
+import com.letsblog.api.service.UnifiedOperationLogService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
@@ -16,16 +18,22 @@ import java.util.List;
 /**
  * Web BFFが記録する操作ログ(デバッグ/サポート共有用のAPI呼び出しトレース)。
  * 常にログイン中の本人のログのみを対象とする(他ユーザーのログは参照不可)。
+ * /unified はAIジョブ・監査ログも合わせた統合ビュー向け(issue #187)。
  */
 @RestController
 @RequestMapping("/api/operation-logs")
 public class OperationLogController {
 
     private final OperationLogService service;
+    private final UnifiedOperationLogService unifiedOperationLogService;
     private final CurrentActorService currentActorService;
 
-    public OperationLogController(OperationLogService service, CurrentActorService currentActorService) {
+    public OperationLogController(
+            OperationLogService service,
+            UnifiedOperationLogService unifiedOperationLogService,
+            CurrentActorService currentActorService) {
         this.service = service;
+        this.unifiedOperationLogService = unifiedOperationLogService;
         this.currentActorService = currentActorService;
     }
 
@@ -47,6 +55,15 @@ public class OperationLogController {
     @GetMapping("/{operationId}")
     public List<OperationLog> trace(@PathVariable String operationId) {
         return service.findTrace(requireActorId(), operationId);
+    }
+
+    @GetMapping("/unified")
+    public Page<UnifiedLogEntryResponse> listUnified(
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) String q,
+            Pageable pageable) {
+        Long userId = requireActorId();
+        return unifiedOperationLogService.list(userId, currentActorService.isAdmin(), type, q, pageable);
     }
 
     private Long requireActorId() {

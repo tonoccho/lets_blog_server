@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 
 const PUBLIC_PATHS = ["/login", "/signup", "/setup"];
-const ADMIN_ONLY_PREFIXES = ["/users", "/audit-logs", "/admin"];
+const ADMIN_ONLY_PREFIXES = ["/users", "/admin"];
 
 async function needsInitialSetup(): Promise<boolean> {
   try {

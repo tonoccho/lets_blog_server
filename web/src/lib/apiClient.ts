@@ -1045,40 +1045,6 @@ export async function restoreBackup(
   });
 }
 
-export interface AuditLogEntry {
-  id: number;
-  userId: number | null;
-  action: string;
-  resourceType: string | null;
-  resourceId: number | null;
-  changes: string | null;
-  remoteIp: string | null;
-  userAgent: string | null;
-  createdAt: string;
-}
-
-export interface AuditLogPage {
-  content: AuditLogEntry[];
-  totalElements: number;
-  totalPages: number;
-  number: number;
-  size: number;
-}
-
-export function listAuditLogs(
-  params: { userId?: number; action?: string; page?: number; size?: number },
-  actor: ActorInfo
-): Promise<AuditLogPage> {
-  const query = new URLSearchParams();
-  if (params.userId != null) query.set('userId', String(params.userId));
-  if (params.action) query.set('action', params.action);
-  query.set('page', String(params.page ?? 0));
-  query.set('size', String(params.size ?? 20));
-  query.set('sort', 'createdAt,desc');
-
-  return apiFetch<AuditLogPage>(`/api/audit-logs?${query.toString()}`, { actor });
-}
-
 export interface OperationLogEntry {
   id: number;
   operationId: string;
@@ -1113,6 +1079,39 @@ export function listOperationLogs(
 
 export function getOperationTrace(operationId: string, actor: ActorInfo): Promise<OperationLogEntry[]> {
   return apiFetch<OperationLogEntry[]>(`/api/operation-logs/${encodeURIComponent(operationId)}`, { actor });
+}
+
+/** 操作ログ・AIジョブ・監査ログを一元表示するための統合エントリ(issue #187)。 */
+export type UnifiedLogSourceType = "OPERATION" | "AI_JOB" | "AUDIT";
+
+export interface UnifiedLogEntry {
+  sourceType: UnifiedLogSourceType;
+  id: number;
+  createdAt: string;
+  title: string;
+  detail: string | null;
+  status: string | null;
+  operationId: string | null;
+}
+
+export interface UnifiedLogPage {
+  content: UnifiedLogEntry[];
+  totalElements: number;
+  totalPages: number;
+  number: number;
+  size: number;
+}
+
+export function listUnifiedOperationLogs(
+  params: { type?: UnifiedLogSourceType; q?: string; page?: number; size?: number },
+  actor: ActorInfo
+): Promise<UnifiedLogPage> {
+  const query = new URLSearchParams();
+  if (params.type) query.set('type', params.type);
+  if (params.q) query.set('q', params.q);
+  query.set('page', String(params.page ?? 0));
+  query.set('size', String(params.size ?? 50));
+  return apiFetch<UnifiedLogPage>(`/api/operation-logs/unified?${query.toString()}`, { actor });
 }
 
 export interface Project {
