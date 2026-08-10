@@ -680,29 +680,6 @@ export function removeRole(userId: number, roleName: string, actor: ActorInfo): 
   return apiFetch<{ message: string }>(`/api/users/${userId}/roles/${roleName}`, { method: 'DELETE', actor });
 }
 
-export interface BraveSearchApiKeyStatus {
-  configured: boolean;
-  source: "DATABASE" | "ENVIRONMENT" | "NONE";
-}
-
-/** 実際のキー値は取得できない(設定済みかどうか・設定元のみ)。 */
-export function getBraveSearchApiKeyStatus(actor?: ActorInfo): Promise<BraveSearchApiKeyStatus> {
-  return apiFetch<BraveSearchApiKeyStatus>('/api/system-settings/brave-search-api-key', { actor });
-}
-
-export function setBraveSearchApiKey(apiKey: string, actor: ActorInfo): Promise<void> {
-  return apiFetch<void>('/api/system-settings/brave-search-api-key', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ apiKey }),
-    actor,
-  });
-}
-
-export function clearBraveSearchApiKey(actor: ActorInfo): Promise<void> {
-  return apiFetch<void>('/api/system-settings/brave-search-api-key', { method: 'DELETE', actor });
-}
-
 export function requestPasswordReset(email: string): Promise<{ message: string }> {
   return apiFetch<{ message: string }>('/api/auth/password-reset/request', {
     method: 'POST',
