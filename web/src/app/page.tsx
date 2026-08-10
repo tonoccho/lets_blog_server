@@ -1,13 +1,25 @@
 import Link from "next/link";
-import { listSites, listPosts, listGenerationJobs, getConnectedServiceStatuses } from "@/lib/apiClient";
+import {
+  listSites,
+  listPosts,
+  listGenerationJobs,
+  getConnectedServiceStatuses,
+  getConnectedServiceStatusDetail,
+} from "@/lib/apiClient";
+import { getSession } from "@/lib/session";
 import { ConnectedServiceStatusPanel } from "./ConnectedServiceStatusPanel";
 
 export default async function DashboardPage() {
-  const [sites, posts, jobs, serviceStatuses] = await Promise.all([
+  const session = await getSession();
+  const isAdmin = session?.user.role === "admin";
+  const actor = session ? { id: Number(session.user.id), role: session.user.role } : undefined;
+
+  const [sites, posts, jobs, serviceStatuses, serviceStatusDetail] = await Promise.all([
     listSites().catch(() => []),
     listPosts().catch(() => []),
     listGenerationJobs().catch(() => []),
     getConnectedServiceStatuses().catch(() => []),
+    isAdmin ? getConnectedServiceStatusDetail(actor).catch(() => null) : Promise.resolve(null),
   ]);
 
   const cards = [
@@ -31,7 +43,7 @@ export default async function DashboardPage() {
           </Link>
         ))}
       </div>
-      <ConnectedServiceStatusPanel initialStatuses={serviceStatuses} />
+      <ConnectedServiceStatusPanel initialStatuses={serviceStatuses} initialDetail={serviceStatusDetail} />
     </div>
   );
 }

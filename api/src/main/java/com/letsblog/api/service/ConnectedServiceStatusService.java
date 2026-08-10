@@ -1,10 +1,12 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.dto.ConnectedServiceStatusDetailResponse;
 import com.letsblog.api.dto.ConnectedServiceStatusResponse;
 import com.letsblog.api.dto.ConnectedServiceStatusResponse.Status;
 import com.letsblog.api.render.PlantUmlEncoder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -16,6 +18,7 @@ import java.net.http.HttpClient;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
@@ -37,6 +40,10 @@ public class ConnectedServiceStatusService {
     private final RestClient plantUmlClient;
     private final RestClient wordpressProvisioningClient;
     private final SystemSettingService systemSettingService;
+    private final String ollamaBaseUrl;
+    private final String comfyUiBaseUrl;
+    private final String plantUmlBaseUrl;
+    private final String wordpressProvisionBaseUrl;
 
     @Autowired
     public ConnectedServiceStatusService(
@@ -47,20 +54,20 @@ public class ConnectedServiceStatusService {
             @Value("${app.wordpress-provision-base-url}") String wordpressProvisionBaseUrl,
             SystemSettingService systemSettingService) {
         this(dataSource,
-                builderWithTimeout(ollamaBaseUrl),
-                builderWithTimeout(comfyUiBaseUrl),
-                builderWithTimeout(plantUmlBaseUrl),
-                builderWithTimeout(wordpressProvisionBaseUrl),
+                builderWithTimeout(ollamaBaseUrl), ollamaBaseUrl,
+                builderWithTimeout(comfyUiBaseUrl), comfyUiBaseUrl,
+                builderWithTimeout(plantUmlBaseUrl), plantUmlBaseUrl,
+                builderWithTimeout(wordpressProvisionBaseUrl), wordpressProvisionBaseUrl,
                 systemSettingService);
     }
 
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
     ConnectedServiceStatusService(
             DataSource dataSource,
-            RestClient.Builder ollamaBuilder,
-            RestClient.Builder comfyUiBuilder,
-            RestClient.Builder plantUmlBuilder,
-            RestClient.Builder wordpressBuilder,
+            RestClient.Builder ollamaBuilder, String ollamaBaseUrl,
+            RestClient.Builder comfyUiBuilder, String comfyUiBaseUrl,
+            RestClient.Builder plantUmlBuilder, String plantUmlBaseUrl,
+            RestClient.Builder wordpressBuilder, String wordpressProvisionBaseUrl,
             SystemSettingService systemSettingService) {
         this.dataSource = dataSource;
         this.ollamaClient = ollamaBuilder.build();
@@ -68,6 +75,10 @@ public class ConnectedServiceStatusService {
         this.plantUmlClient = plantUmlBuilder.build();
         this.wordpressProvisioningClient = wordpressBuilder.build();
         this.systemSettingService = systemSettingService;
+        this.ollamaBaseUrl = ollamaBaseUrl;
+        this.comfyUiBaseUrl = comfyUiBaseUrl;
+        this.plantUmlBaseUrl = plantUmlBaseUrl;
+        this.wordpressProvisionBaseUrl = wordpressProvisionBaseUrl;
     }
 
     private static RestClient.Builder builderWithTimeout(String baseUrl) {
@@ -77,67 +88,97 @@ public class ConnectedServiceStatusService {
         return RestClient.builder().baseUrl(baseUrl).requestFactory(requestFactory);
     }
 
+    /** 稼働状況(正常/警告/エラーの3値)のみを返す。全ログインユーザーが参照できる(issue #181)。 */
+    public List<ConnectedServiceStatusResponse> checkAll() {
+        return checkAllDetailed().stream()
+                .map(d -> new ConnectedServiceStatusResponse(d.id(), d.name(), d.status()))
+                .toList();
+    }
+
     /**
+     * 応答時間・エラー内容・チェック対象URLなどを含む詳細診断情報を返す。admin限定(issue #199)。
      * 各サービスへの疎通確認を並列に実行する(issue #198でSSE配信の周期を短縮したため、
      * 直列実行だと最悪ケースでTIMEOUT×サービス数の遅延が生じうる問題を避ける)。
-     * DB確認・Brave Search判定は元々ミリ秒未満で終わるためそのまま直列に含める。
      */
-    public List<ConnectedServiceStatusResponse> checkAll() {
-        CompletableFuture<ConnectedServiceStatusResponse> ollama = checkAsync("ollama", "Ollama", this::checkOllama);
-        CompletableFuture<ConnectedServiceStatusResponse> comfyUi = checkAsync("comfyui", "ComfyUI", this::checkComfyUi);
-        CompletableFuture<ConnectedServiceStatusResponse> plantUml = checkAsync("plantuml", "PlantUML", this::checkPlantUml);
-        CompletableFuture<ConnectedServiceStatusResponse> wordpressProvisioning = checkAsync(
-                "wordpress-provisioning", "WordPress Provisioning Agent", this::checkWordpressProvisioning);
+    public List<ConnectedServiceStatusDetailResponse> checkAllDetailed() {
+        CompletableFuture<ConnectedServiceStatusDetailResponse> ollama =
+                checkAsync("ollama", "Ollama", this::checkOllama);
+        CompletableFuture<ConnectedServiceStatusDetailResponse> comfyUi =
+                checkAsync("comfyui", "ComfyUI", this::checkComfyUi);
+        CompletableFuture<ConnectedServiceStatusDetailResponse> plantUml =
+                checkAsync("plantuml", "PlantUML", this::checkPlantUml);
+        CompletableFuture<ConnectedServiceStatusDetailResponse> wordpressProvisioning =
+                checkAsync("wordpress-provisioning", "WordPress Provisioning Agent", this::checkWordpressProvisioning);
 
         return List.of(
-                new ConnectedServiceStatusResponse("database", "データベース", checkDatabase()),
+                runTimed("database", "データベース", this::checkDatabase),
                 ollama.join(),
                 comfyUi.join(),
                 plantUml.join(),
                 wordpressProvisioning.join(),
-                new ConnectedServiceStatusResponse("brave-search", "Brave Search API", checkBraveSearch()));
+                runTimed("brave-search", "Brave Search API", this::checkBraveSearch));
     }
 
-    private CompletableFuture<ConnectedServiceStatusResponse> checkAsync(String id, String name, Supplier<Status> check) {
-        return CompletableFuture.supplyAsync(() -> new ConnectedServiceStatusResponse(id, name, check.get()));
+    private CompletableFuture<ConnectedServiceStatusDetailResponse> checkAsync(
+            String id, String name, Supplier<CheckOutcome> check) {
+        return CompletableFuture.supplyAsync(() -> runTimed(id, name, check));
     }
 
-    private Status checkDatabase() {
+    private ConnectedServiceStatusDetailResponse runTimed(String id, String name, Supplier<CheckOutcome> check) {
+        long startedAt = System.currentTimeMillis();
+        CheckOutcome outcome = check.get();
+        long responseTimeMs = System.currentTimeMillis() - startedAt;
+        return new ConnectedServiceStatusDetailResponse(
+                id, name, outcome.status(), responseTimeMs,
+                outcome.httpStatus(), outcome.errorMessage(), outcome.targetUrl(), Instant.now());
+    }
+
+    private CheckOutcome checkDatabase() {
         try (Connection connection = dataSource.getConnection()) {
-            return connection.isValid((int) TIMEOUT.toSeconds()) ? Status.NORMAL : Status.ERROR;
+            if (connection.isValid((int) TIMEOUT.toSeconds())) {
+                return CheckOutcome.normal(null);
+            }
+            return new CheckOutcome(Status.ERROR, null, "接続の検証に失敗しました", null);
         } catch (SQLException e) {
-            return Status.ERROR;
+            return new CheckOutcome(Status.ERROR, null, e.getMessage(), null);
         }
     }
 
     /** モデル一覧を取得できるか(OllamaClient#listModelsが使うのと同じエンドポイント)で判定する。 */
-    private Status checkOllama() {
-        return checkHttpService(ollamaClient, "/api/tags");
+    private CheckOutcome checkOllama() {
+        return checkHttpService(ollamaClient, ollamaBaseUrl, "/api/tags");
     }
 
     /** ComfyUI公式の軽量なシステム状態エンドポイントで判定する。 */
-    private Status checkComfyUi() {
-        return checkHttpService(comfyUiClient, "/system_stats");
+    private CheckOutcome checkComfyUi() {
+        return checkHttpService(comfyUiClient, comfyUiBaseUrl, "/system_stats");
     }
 
     /** provision-agentの専用ヘルスチェックルート(issue #197で追加)で判定する。 */
-    private Status checkWordpressProvisioning() {
-        return checkHttpService(wordpressProvisioningClient, "/health");
+    private CheckOutcome checkWordpressProvisioning() {
+        return checkHttpService(wordpressProvisioningClient, wordpressProvisionBaseUrl, "/health");
     }
 
     /**
      * 単なる疎通確認ではなく、実際に最小限のPlantUML図をレンダリングできるかで判定する
      * (PlantUmlClientが使うのと同じ/png/{encoded}エンドポイント)。
      */
-    private Status checkPlantUml() {
+    private CheckOutcome checkPlantUml() {
+        String path = "/png/" + PlantUmlEncoder.encode(PLANTUML_HEALTHCHECK_SOURCE);
+        String targetUrl = plantUmlBaseUrl + path;
         try {
-            String encoded = PlantUmlEncoder.encode(PLANTUML_HEALTHCHECK_SOURCE);
-            byte[] png = plantUmlClient.get().uri("/png/" + encoded).retrieve().body(byte[].class);
-            return (png != null && png.length > 0) ? Status.NORMAL : Status.WARNING;
+            ResponseEntity<byte[]> response = plantUmlClient.get().uri(path).retrieve().toEntity(byte[].class);
+            byte[] png = response.getBody();
+            int httpStatus = response.getStatusCode().value();
+            if (png != null && png.length > 0) {
+                return new CheckOutcome(Status.NORMAL, httpStatus, null, targetUrl);
+            }
+            return new CheckOutcome(Status.WARNING, httpStatus, "PNGデータが空です", targetUrl);
         } catch (RestClientResponseException e) {
-            return e.getStatusCode().is5xxServerError() ? Status.WARNING : Status.NORMAL;
+            Status status = e.getStatusCode().is5xxServerError() ? Status.WARNING : Status.NORMAL;
+            return new CheckOutcome(status, e.getStatusCode().value(), e.getMessage(), targetUrl);
         } catch (RestClientException e) {
-            return Status.ERROR;
+            return new CheckOutcome(Status.ERROR, null, e.getMessage(), targetUrl);
         }
     }
 
@@ -145,14 +186,16 @@ public class ConnectedServiceStatusService {
      * 指定パスへのGETが何らかのHTTP応答を返すこと(4xxも含む)を「到達可能」とみなす。
      * 5xxはプロセスは生きているが異常応答のため警告、接続自体ができない場合はエラーとして扱う。
      */
-    private Status checkHttpService(RestClient client, String path) {
+    private CheckOutcome checkHttpService(RestClient client, String baseUrl, String path) {
+        String targetUrl = baseUrl + path;
         try {
-            client.get().uri(path).retrieve().toBodilessEntity();
-            return Status.NORMAL;
+            ResponseEntity<Void> response = client.get().uri(path).retrieve().toBodilessEntity();
+            return new CheckOutcome(Status.NORMAL, response.getStatusCode().value(), null, targetUrl);
         } catch (RestClientResponseException e) {
-            return e.getStatusCode().is5xxServerError() ? Status.WARNING : Status.NORMAL;
+            Status status = e.getStatusCode().is5xxServerError() ? Status.WARNING : Status.NORMAL;
+            return new CheckOutcome(status, e.getStatusCode().value(), e.getMessage(), targetUrl);
         } catch (RestClientException e) {
-            return Status.ERROR;
+            return new CheckOutcome(Status.ERROR, null, e.getMessage(), targetUrl);
         }
     }
 
@@ -160,7 +203,17 @@ public class ConnectedServiceStatusService {
      * Brave Search APIは第三者の有料APIのため、疎通確認のために定期的に実リクエストを送ることはせず、
      * APIキーが設定されているかどうかを稼働状況の代わりとして扱う。
      */
-    private Status checkBraveSearch() {
-        return systemSettingService.getBraveSearchApiKeyStatus().configured() ? Status.NORMAL : Status.WARNING;
+    private CheckOutcome checkBraveSearch() {
+        if (systemSettingService.getBraveSearchApiKeyStatus().configured()) {
+            return CheckOutcome.normal(null);
+        }
+        return new CheckOutcome(Status.WARNING, null, "APIキーが設定されていません", null);
+    }
+
+    /** 各チェックの結果(issue #199の詳細診断用フィールドを含む)。targetUrlはHTTPを伴わないチェックではnull。 */
+    private record CheckOutcome(Status status, Integer httpStatus, String errorMessage, String targetUrl) {
+        private static CheckOutcome normal(String targetUrl) {
+            return new CheckOutcome(Status.NORMAL, null, null, targetUrl);
+        }
     }
 }
