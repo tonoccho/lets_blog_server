@@ -20,8 +20,11 @@ export interface SectionContext {
   precedingContext: string;
 }
 
-/** フェンスコードブロック(```/~~~)内の行を除外して見出し(ATX形式)を抽出する。 */
-function extractHeadings(lines: string[]): HeadingInfo[] {
+/**
+ * フェンスコードブロック(```/~~~)内の行を除外して見出し(ATX形式)を抽出する。
+ * Issue本文の見出し構造抽出(issueParser.ts)でも同じ判定が必要なためエクスポートしている。
+ */
+export function extractHeadings(lines: string[]): HeadingInfo[] {
   const headings: HeadingInfo[] = [];
   let inFence = false;
   for (let i = 0; i < lines.length; i++) {

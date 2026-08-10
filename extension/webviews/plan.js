@@ -122,6 +122,9 @@
     document.getElementById('structureTextarea').value = '';
     document.getElementById('structureAcceptedBadge').style.display = 'none';
     document.getElementById('metadataSection').style.display = 'none';
+    document.getElementById('structureSourceNote').textContent = 'Issue本文から構成を読み込んでいます…';
+    // Issue本文に書かれた構成をそのまま初期案として使う(無ければAI提案へ委ねる)。
+    post('loadIssueOutline', { issueNumber: issue.number });
     // 選択直後に入力できるよう、次の操作先へフォーカスを移す。
     document.getElementById('chatInput').focus();
   }
@@ -317,9 +320,26 @@
         addMessage('assistant', payload.reply);
         sessionId = payload.sessionId;
         break;
+      case 'issueOutline': {
+        // 利用者が既に構成を編集していた場合は上書きしない。
+        const textarea = document.getElementById('structureTextarea');
+        const note = document.getElementById('structureSourceNote');
+        if (!selectedIssue || payload.issueNumber !== selectedIssue.number) break;
+        if (payload.headingCount > 0 && textarea.value.trim() === '') {
+          textarea.value = payload.structure;
+          note.textContent =
+            'Issue #' + payload.issueNumber + ' の本文から ' + payload.headingCount +
+            ' 件の見出しを読み込みました。編集してから「この内容でIssueを更新」で反映できます。';
+        } else if (payload.headingCount === 0) {
+          note.textContent =
+            'Issue本文に見出し・箇条書きが見つかりませんでした。「構成案を生成」でAIに提案させることもできます。';
+        }
+        break;
+      }
       case 'structureSuggestion':
         LetsBlogLoading.end();
         document.getElementById('structureTextarea').value = payload.structure || '';
+        document.getElementById('structureSourceNote').textContent = 'AIが提案した構成案です。';
         document.getElementById('structureAcceptedBadge').style.display = 'none';
         break;
       case 'structureAccepted':

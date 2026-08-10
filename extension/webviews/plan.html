@@ -43,10 +43,11 @@
     <h2 class="section-title" id="structureSectionTitle">記事構成の提案(Issueへ反映)</h2>
     <div class="structure-box">
       <p class="hint" id="structureHint">チャットの内容から見出し構成を提案し、承認するとGitHub Issueの本文に書き込まれます。スキャフォールド生成時にこの内容が記事本文として使われます。</p>
+      <p class="hint" id="structureSourceNote" role="status" aria-live="polite"></p>
       <button type="button" id="suggestStructureButton" class="primary" style="margin-bottom: 10px;">構成案を生成</button>
       <div id="structureAcceptedBadge" class="accepted-badge" style="display: none;" role="status"></div>
       <label class="visually-hidden" for="structureTextarea">記事構成</label>
-      <textarea id="structureTextarea" aria-describedby="structureHint" placeholder="構成案はまだありません。「構成案を生成」を押してください。"></textarea>
+      <textarea id="structureTextarea" aria-describedby="structureHint structureSourceNote" placeholder="構成案はまだありません。「構成案を生成」を押してください。"></textarea>
       <div class="button-group" style="margin-top: 10px;">
         <button type="button" id="acceptStructureButton">この内容でIssueを更新</button>
       </div>

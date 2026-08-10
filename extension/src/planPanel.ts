@@ -5,6 +5,7 @@ import * as api from './apiClient';
 import { Actor, getActor, getProjectId, getServerUrl, requireApiKey } from './config';
 import { LetsBlogFrontMatter, stringifyArticle } from './frontMatter';
 import { messageOf } from './errorHandler';
+import { extractIssueOutline, formatOutlineAsMarkdown } from './issueParser';
 import { showSingletonPanel, WebviewPanelBase } from './webviewPanelBase';
 import { PlanInboundMessage, PlanOutboundCommand } from './webviewMessages';
 
@@ -35,6 +36,8 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
         return;
       case 'loadCategories':
         return this._handleLoadCategories();
+      case 'loadIssueOutline':
+        return this._handleLoadIssueOutline(message);
       case 'sendChat':
         return this._handleSendChat(message);
       case 'suggestStructure':
@@ -67,6 +70,29 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
     const { apiKey, actor, projectId } = await this._requireContext();
     const issues = await api.listUnassignedIssues(getServerUrl(), apiKey, actor, projectId);
     this.postMessage('issueList', { issues });
+  }
+
+  /**
+   * 選択されたIssueの本文から見出し構造を抽出し、記事構成の初期案としてWebviewへ返す。
+   * Issueに構造が書かれていない場合は空を返し、従来どおりAIによる提案へ委ねる。
+   */
+  private async _handleLoadIssueOutline(
+    message: Extract<PlanInboundMessage, { command: 'loadIssueOutline' }>
+  ): Promise<void> {
+    const { apiKey, actor, projectId } = await this._requireContext();
+    const description = await api.getIssueDescription(
+      getServerUrl(),
+      apiKey,
+      actor,
+      projectId,
+      message.issueNumber
+    );
+    const outline = extractIssueOutline(description);
+    this.postMessage('issueOutline', {
+      issueNumber: message.issueNumber,
+      structure: formatOutlineAsMarkdown(outline),
+      headingCount: outline.length,
+    });
   }
 
   private async _handleSendChat(message: Extract<PlanInboundMessage, { command: 'sendChat' }>): Promise<void> {

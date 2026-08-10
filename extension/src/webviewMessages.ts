@@ -31,6 +31,7 @@ export type PlanInboundMessage =
   | (WebviewMessageBase<'acceptStructure'> & { issueNumber: number; structure: string })
   | (WebviewMessageBase<'suggestMetadata'> & { history: api.PlanChatMessage[] })
   | WebviewMessageBase<'cancel'>
+  | (WebviewMessageBase<'loadIssueOutline'> & { issueNumber: number })
   | (WebviewMessageBase<'approveAndScaffold'> & {
       issue: api.RepositoryIssue;
       metadata: { title: string; slug: string; categories: string[]; tags: string[] };
@@ -38,6 +39,7 @@ export type PlanInboundMessage =
 
 export type PlanOutboundCommand =
   | 'cancelled'
+  | 'issueOutline'
   | 'issueList'
   | 'categoryList'
   | 'chatResponse'
