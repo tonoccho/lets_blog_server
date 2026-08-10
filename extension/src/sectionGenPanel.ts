@@ -16,6 +16,10 @@ import {
  */
 export class SectionGenPanel extends WebviewPanelBase<SectionGenInboundMessage, SectionGenOutboundCommand> {
 
+  /**
+   * Generate Sectionパネルを開く。既に開いていれば前面に出す。
+   * @param sectionContext カーソル位置から判定した生成モードと文脈
+   */
   static createOrShow(
     context: vscode.ExtensionContext,
     editor: vscode.TextEditor,
@@ -38,6 +42,7 @@ export class SectionGenPanel extends WebviewPanelBase<SectionGenInboundMessage, 
     });
   }
 
+  /** Webviewからのコマンドを対応する処理へ振り分ける。 */
   protected async handleMessage(message: SectionGenInboundMessage): Promise<void> {
     switch (message.command) {
       case 'init':

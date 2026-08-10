@@ -189,7 +189,89 @@ front matterの`wp_post_ids`は**サイトキーごとに投稿IDを持ちます
 
 ---
 
-## 6. テスト
+## 6. apiClient の使い方
+
+新しいエンドポイントを呼ぶときの型です。
+
+### 参照系(キャッシュあり・リトライあり)
+
+```ts
+export async function listSites(
+  serverUrl: string,
+  apiKey: string,
+  actor?: Actor
+): Promise<SiteSummary[]> {
+  return cachedRequestJson(
+    'sites',                                  // キャッシュキー(パラメータを含めて一意にする)
+    serverUrl,
+    '/api/sites',
+    { label: 'listSites', headers: buildHeaders(apiKey, actor) },
+    schemas.SiteSummaryListSchema             // レスポンス検証スキーマ(必須)
+  );
+}
+```
+
+### 更新系(リトライしない)
+
+```ts
+export async function assignIssue(/* ... */): Promise<AssignIssueResult> {
+  const result = await requestJson(
+    serverUrl,
+    `/api/projects/${projectId}/article-plan/issues/${issueNumber}/assign`,
+    {
+      label: 'assignIssue',
+      method: 'POST',
+      headers: buildHeaders(apiKey, actor, 'application/json'),
+    },
+    schemas.AssignIssueResultSchema
+  );
+  invalidateProjectCache(projectId);          // 一覧の内容が変わるためキャッシュを破棄
+  return result;
+}
+```
+
+### 中断できる長時間処理
+
+`signal` を受け取り `RequestSpec` へ渡すと、パネルの「キャンセル」で実際に打ち切れます。
+
+```ts
+// apiClient側
+export async function generateSection(
+  /* ... */,
+  signal?: AbortSignal
+): Promise<AiSectionResult> {
+  return requestJson(serverUrl, '/api/ai/section', {
+    label: 'generateSection',
+    signal,
+    method: 'POST',
+    headers: buildHeaders(apiKey, actor),
+    createBody: jsonBody(params),
+    retryable: true,                          // 副作用が無いので再試行してよい
+  }, schemas.AiGenerationResultSchema);
+}
+
+// パネル側
+const result = await this.runCancellable((signal) =>
+  api.generateSection(getServerUrl(), apiKey, actor, message.params, signal)
+);
+```
+
+### 呼び出し側(コマンド)
+
+```ts
+try {
+  const apiKey = await requireApiKey(context);   // 未設定なら対応方法付きの例外
+  const actor = await getActor(context);
+  const sites = await api.listSites(getServerUrl(), apiKey, actor);
+  // ...
+} catch (err) {
+  reportError('サイトの選択に失敗しました', err); // ログ記録 + 対応策付きの通知
+}
+```
+
+---
+
+## 7. テスト
 
 ```bash
 npm test              # ユニットテスト
@@ -203,7 +285,7 @@ npm run compile       # 型チェック + ビルド
 
 ---
 
-## 7. 設定項目
+## 8. 設定項目
 
 | 設定 | 既定値 | 用途 |
 | --- | --- | --- |

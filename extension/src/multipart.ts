@@ -5,6 +5,7 @@ export type MultipartPart =
   | { kind: 'field'; name: string; value: string }
   | { kind: 'file'; name: string; filename: string; filePath: string; contentType?: string };
 
+/** 組み立て済みのmultipartボディと、境界文字列を含むContent-Type。 */
 export interface MultipartBody {
   body: Buffer;
   contentType: string;

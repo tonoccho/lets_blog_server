@@ -149,6 +149,7 @@ export function reportError(prefix: string, error: unknown): void {
   });
 }
 
+/** withRetryの挙動を調整するオプション。 */
 export interface RetryOptions {
   /** 初回実行の後に行う再試行の最大回数。 */
   maxRetries?: number;

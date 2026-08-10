@@ -10,6 +10,7 @@ import { LetsBlogFrontMatter, stringifyArticle } from './frontMatter';
  * 同じ配置・同じfront matterで記事を作れるよう、生成処理をここへ集約する。
  */
 
+/** 記事ディレクトリ生成の入力。 */
 export interface ArticleScaffoldOptions {
   /** ワークスペースのルート。articles/ はこの直下に作る。 */
   workspaceRoot: string;
@@ -21,6 +22,7 @@ export interface ArticleScaffoldOptions {
   content: string;
 }
 
+/** 生成した記事の位置。 */
 export interface ArticleScaffoldResult {
   /** 生成した article.md の絶対パス。 */
   articlePath: string;

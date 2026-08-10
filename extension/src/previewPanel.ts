@@ -6,9 +6,17 @@ import { buildStaticCsp } from './webviewSecurity';
  * 変換済みHTMLをそのまま表示する(view-onlyで、Webviewからのメッセージは扱わない)。
  */
 export class PreviewPanel {
+  /** 開いているプレビューパネル。プレビューは常に1枚に保つ。 */
   public static currentPanel: PreviewPanel | undefined;
   private readonly _panel: vscode.WebviewPanel;
 
+  /**
+   * プレビューを表示する。既に開いている場合は内容を差し替える。
+   * @param html サーバーで変換済みの記事HTML
+   * @param css 適用するテーマCSS(取得できなかった場合は空文字)
+   * @param warning CSSを取得できなかった場合などの警告文
+   * @param siteLabel 適用中のCSSの取得元(例: "本番 / example.com")
+   */
   public static createOrShow(
     html: string,
     css: string,

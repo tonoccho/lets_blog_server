@@ -7,11 +7,15 @@ export interface HttpResponse {
   status: number;
   ok: boolean;
   statusText: string;
+  /** 応答本文を文字列として読む。 */
   text(): Promise<string>;
+  /** 応答本文をJSONとして読む(検証はrequestJson側で行う)。 */
   json(): Promise<unknown>;
+  /** 応答本文をバイナリとして読む(画像の取得に使う)。 */
   arrayBuffer(): Promise<ArrayBuffer>;
 }
 
+/** httpRequestへ渡すリクエストの内容。 */
 export interface HttpRequestOptions {
   method: string;
   headers: Record<string, string>;

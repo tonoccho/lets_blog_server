@@ -1,6 +1,7 @@
 import matter from 'gray-matter';
 import * as path from 'path';
 
+/** article.md のfront matterで扱う項目。未知のキーはそのまま保持する。 */
 export interface LetsBlogFrontMatter {
   title?: string;
   slug?: string;
@@ -28,20 +29,24 @@ export interface LetsBlogFrontMatter {
   [key: string]: unknown;
 }
 
+/** front matterと本文へ分離した記事。 */
 export interface ParsedArticle {
   data: LetsBlogFrontMatter;
   content: string;
 }
 
+/** 記事テキストをfront matterと本文へ分離する。front matterが無い場合dataは空になる。 */
 export function parseArticle(text: string): ParsedArticle {
   const parsed = matter(text);
   return { data: parsed.data as LetsBlogFrontMatter, content: parsed.content };
 }
 
+/** front matterと本文を1つの記事テキストへ戻す。 */
 export function stringifyArticle(article: ParsedArticle): string {
   return matter.stringify(article.content, article.data);
 }
 
+/** 本文中のローカル画像参照と、その実ファイルの位置。 */
 export interface LocalImageReference {
   /** Markdown本文中に書かれている参照文字列そのもの(例: "images/eyecatch.png") */
   reference: string;
@@ -139,6 +144,7 @@ export function resolveExistingPostId(data: LetsBlogFrontMatter, siteKey: string
   return undefined;
 }
 
+/** 新規記事のfront matterを組み立てるための入力。 */
 export interface ArticleFrontMatterInput {
   title: string;
   slug: string;
@@ -195,6 +201,7 @@ export function suggestSlugFromTitle(title: string): string {
     .replace(/^-|-$/g, '');
 }
 
+/** 公開予定日時の検証結果。値とエラーは排他。 */
 export interface ScheduledPublicationValidation {
   /** 検証を通ったISO 8601文字列。未設定または不正な場合はundefined。 */
   value?: string;

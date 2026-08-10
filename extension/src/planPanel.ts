@@ -18,6 +18,7 @@ const GITHUB_ISSUE_URL_PATTERN = /^(https:\/\/github\.com\/[^/]+\/[^/]+)\/issues
 export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutboundCommand> {
   private _lastArticlePath: string | undefined;
 
+  /** Article Planパネルを開く。既に開いていれば前面に出す。 */
   public static createOrShow(context: vscode.ExtensionContext): void {
     showSingletonPanel('letsBlog.articlePlan', () => new PlanPanel(context));
   }
@@ -26,6 +27,7 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
     super(context, { viewType: 'letsBlog.articlePlan', title: 'Article Plan', assetName: 'plan' });
   }
 
+  /** Webviewからのコマンドを対応する処理へ振り分ける。 */
   protected async handleMessage(message: PlanInboundMessage): Promise<void> {
     switch (message.command) {
       case 'loadIssues':

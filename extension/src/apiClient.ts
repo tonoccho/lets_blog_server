@@ -261,6 +261,7 @@ export type {
   ThemeCssResult,
 };
 
+/** 投稿(publishPost)へ渡すパラメータ。front matterと本文から組み立てる。 */
 export interface PublishParams {
   site: string;
   title: string;
@@ -276,6 +277,10 @@ export interface PublishParams {
   publishScheduledAt?: string;
 }
 
+/**
+ * セクション生成のパラメータ。modeはカーソル位置の見出し階層から自動判定される
+ * (headingContext.resolveSectionContextを参照)。historyとmessageは壁打ち再生成時のみ使う。
+ */
 export interface AiSectionParams {
   mode: 'body' | 'lead' | 'lead-subsections';
   heading?: string;
@@ -286,6 +291,7 @@ export interface AiSectionParams {
   message?: string;
 }
 
+/** 画像生成のパラメータ。automatic1111相当の項目をそのまま受け渡す。 */
 export interface ImageGenerationParams {
   prompt: string;
   negativePrompt?: string;
@@ -324,6 +330,12 @@ export async function verifyTotpLogin(serverUrl: string, userId: number, code: s
   }, schemas.LoginResultSchema);
 }
 
+/**
+ * Markdown記事をCMSへ投稿する(既存投稿がある場合は更新)。
+ * 本文中のローカル画像をマルチパートで同梱する。副作用があるため再試行しない。
+ *
+ * @param params 投稿内容。imagesは実ファイルが存在するものだけを渡すこと。
+ */
 export async function publishPost(
   serverUrl: string,
   apiKey: string,
@@ -390,6 +402,7 @@ export async function deletePost(
   });
 }
 
+/** 登録済みサイトの一覧を取得する。 */
 export async function listSites(
   serverUrl: string,
   apiKey: string,
@@ -401,6 +414,10 @@ export async function listSites(
   }, schemas.SiteSummaryListSchema);
 }
 
+/**
+ * 下書き生成・校正・要約をAIへ依頼する。
+ * @param mode draft(下書き) / proofread(校正) / summarize(要約)
+ */
 export async function askAi(
   serverUrl: string,
   apiKey: string,
@@ -418,6 +435,10 @@ export async function askAi(
   }, schemas.AiGenerationResultSchema);
 }
 
+/**
+ * セクション本文またはリード文を生成する。
+ * @param signal 利用者によるキャンセル用。中断時はCancelledErrorが投げられる。
+ */
 export async function generateSection(
   serverUrl: string,
   apiKey: string,
@@ -435,6 +456,7 @@ export async function generateSection(
   }, schemas.AiGenerationResultSchema);
 }
 
+/** 本文からカテゴリ/タグの候補を提案させる。 */
 export async function suggestTags(
   serverUrl: string,
   apiKey: string,
@@ -450,6 +472,10 @@ export async function suggestTags(
   }, schemas.AiTagsResultSchema);
 }
 
+/**
+ * ComfyUIで画像を生成する。生成結果はサーバー側にも保存される。
+ * @param signal 利用者によるキャンセル用。
+ */
 export async function generateImage(
   serverUrl: string,
   apiKey: string,
@@ -468,6 +494,7 @@ export async function generateImage(
   }, schemas.AiImageResultSchema);
 }
 
+/** 画像生成で選択できるモデル/サンプラー/スケジューラ/LoRAの一覧を取得する。 */
 export async function getImageGenerationOptions(
   serverUrl: string,
   apiKey: string,
@@ -483,6 +510,7 @@ export async function getImageGenerationOptions(
   );
 }
 
+/** ユーザー一覧を取得する。 */
 export async function listUsers(serverUrl: string, apiKey: string): Promise<Actor[]> {
   return requestJson(serverUrl, '/api/users', {
     label: 'listUsers',
@@ -490,6 +518,7 @@ export async function listUsers(serverUrl: string, apiKey: string): Promise<Acto
   }, schemas.ActorListSchema);
 }
 
+/** プロジェクト一覧を取得する。 */
 export async function listProjects(serverUrl: string, apiKey: string, actor?: Actor): Promise<ProjectSummary[]> {
   return cachedRequestJson('projects', serverUrl, '/api/projects', {
     label: 'listProjects',
@@ -497,6 +526,7 @@ export async function listProjects(serverUrl: string, apiKey: string, actor?: Ac
   }, schemas.ProjectSummaryListSchema);
 }
 
+/** プロジェクト詳細を取得する。ローカル/テスト/本番のサイト紐付けを含む。 */
 export async function getProject(
   serverUrl: string,
   apiKey: string,
@@ -530,11 +560,13 @@ export async function listUnassignedIssues(
   return issues.filter((i) => !i.assignees || i.assignees.length === 0);
 }
 
+/** 壁打ちチャットの1発言。 */
 export interface PlanChatMessage {
   role: 'user' | 'assistant';
   content: string;
 }
 
+/** 壁打ちチャットの送信内容。sessionIdは2回目以降の継続時に指定する。 */
 export interface PlanChatRequestParams {
   history: PlanChatMessage[];
   message: string;
@@ -542,6 +574,11 @@ export interface PlanChatRequestParams {
   githubIssueNumber?: number;
 }
 
+/**
+ * 記事の壁打ちチャットへメッセージを送る。
+ * サーバー側にセッションが記録されるため再試行しない。
+ * @param signal 利用者によるキャンセル用。
+ */
 export async function postPlanChat(
   serverUrl: string,
   apiKey: string,
@@ -560,6 +597,7 @@ export async function postPlanChat(
   }, schemas.PlanChatResultSchema);
 }
 
+/** GitHub Issueの本文を取得する。未記入のIssueでは空文字を返す。 */
 export async function getIssueDescription(
   serverUrl: string,
   apiKey: string,
@@ -590,6 +628,10 @@ export async function listExistingCategories(
   );
 }
 
+/**
+ * チャット履歴からタイトル/スラッグ/カテゴリ/タグの候補を提案させる。
+ * @param signal 利用者によるキャンセル用。
+ */
 export async function suggestMetadata(
   serverUrl: string,
   apiKey: string,
@@ -611,6 +653,10 @@ export async function suggestMetadata(
     }, schemas.SuggestMetadataResultSchema);
 }
 
+/**
+ * チャット履歴から記事の見出し構成を提案させる。
+ * @param signal 利用者によるキャンセル用。
+ */
 export async function suggestArticleStructure(
   serverUrl: string,
   apiKey: string,
@@ -657,6 +703,10 @@ export async function acceptArticleStructure(
   return result;
 }
 
+/**
+ * Issueを実行者へ割り当てる。割り当て後は未割り当て一覧から外れるため、
+ * 該当プロジェクトのキャッシュを破棄する。副作用があるため再試行しない。
+ */
 export async function assignIssue(
   serverUrl: string,
   apiKey: string,
@@ -679,6 +729,10 @@ export async function assignIssue(
   return result;
 }
 
+/**
+ * プレビュー用にMarkdownをHTMLへ変換する(カスタムタグの展開を含む)。
+ * ローカル画像はサーバー側で解決できないため、呼び出し前にdata URIへ置換しておくこと。
+ */
 export async function renderPreviewHtml(
   serverUrl: string,
   apiKey: string,

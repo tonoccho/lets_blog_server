@@ -6,12 +6,17 @@
  * 3. サブセクションが無い → セクションタイトルを考慮した本文
  */
 
+/** 本文中で見つかった見出し1件。 */
 export interface HeadingInfo {
+  /** 見出しがある行(0始まり)。 */
   line: number;
+  /** 見出しの階層(#の個数、1〜6)。 */
   level: number;
+  /** 記号を除いた見出しのテキスト。 */
   text: string;
 }
 
+/** カーソル位置から判定した、AI文章生成に渡す文脈。 */
 export interface SectionContext {
   mode: 'lead' | 'lead-subsections' | 'body';
   heading?: string;
@@ -43,6 +48,11 @@ export function extractHeadings(lines: string[]): HeadingInfo[] {
   return headings;
 }
 
+/**
+ * カーソル位置の見出し階層から、AI文章生成のモードと渡すべき文脈を判定する。
+ * @param fullText エディタの全文(front matterを含む)
+ * @param cursorLine カーソルのある行(0始まり)
+ */
 export function resolveSectionContext(fullText: string, cursorLine: number): SectionContext {
   const lines = fullText.split(/\r?\n/);
   const headings = extractHeadings(lines);

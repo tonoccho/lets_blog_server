@@ -24,6 +24,10 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
   private _lastPrompt: string | undefined;
 
 
+  /**
+   * Generate Imageパネルを開く。既に開いていれば前面に出す。
+   * @param baseDir 生成画像の保存先(この直下のassets/へ書き出す)
+   */
   static createOrShow(
     context: vscode.ExtensionContext,
     editor: vscode.TextEditor,
@@ -42,6 +46,7 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
     super(context, { viewType: 'letsBlog.imageGen', title: 'Generate Image', assetName: 'imageGen' });
   }
 
+  /** Webviewからのコマンドを対応する処理へ振り分ける。 */
   protected async handleMessage(message: ImageGenInboundMessage): Promise<void> {
     switch (message.command) {
       case 'loadOptions':

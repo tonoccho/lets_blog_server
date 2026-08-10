@@ -13,6 +13,7 @@ interface CacheEntry<V> {
   expiresAt: number;
 }
 
+/** LruCacheの構成。いずれも省略時は既定値(5分TTL・最大50件)を使う。 */
 export interface LruCacheOptions {
   /** 保持する最大件数。超過すると最も長く参照されていない項目を捨てる。 */
   maxEntries?: number;
@@ -25,6 +26,7 @@ export interface LruCacheOptions {
 const DEFAULT_MAX_ENTRIES = 50;
 const DEFAULT_TTL_MS = 5 * 60 * 1000;
 
+/** TTLとLRUによる破棄を持つ、プロセス内のキャッシュ。 */
 export class LruCache<V> {
   private readonly _entries = new Map<string, CacheEntry<V>>();
   private readonly _maxEntries: number;
@@ -53,6 +55,7 @@ export class LruCache<V> {
     return entry.value;
   }
 
+  /** 値を保存する。上限を超えた場合は最も長く参照されていない項目を捨てる。 */
   public set(key: string, value: V): void {
     // 既存キーの更新でも最近使った位置へ移すため、一度削除する。
     this._entries.delete(key);
@@ -103,11 +106,13 @@ export class LruCache<V> {
     }
   }
 
+  /** すべてのキャッシュと進行中の読み込みを破棄する。 */
   public clear(): void {
     this._entries.clear();
     this._inFlight.clear();
   }
 
+  /** 保持している有効・無効を問わないエントリ数(テストと診断用)。 */
   public get size(): number {
     return this._entries.size;
   }

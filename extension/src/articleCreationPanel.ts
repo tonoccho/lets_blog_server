@@ -17,6 +17,7 @@ export class ArticleCreationPanel extends WebviewPanelBase<
   ArticleCreationInboundMessage,
   ArticleCreationOutboundCommand
 > {
+  /** Create Articleパネルを開く。既に開いていれば前面に出す。 */
   public static createOrShow(context: vscode.ExtensionContext): void {
     showSingletonPanel('letsBlog.createArticle', () => new ArticleCreationPanel(context));
   }
@@ -29,6 +30,7 @@ export class ArticleCreationPanel extends WebviewPanelBase<
     });
   }
 
+  /** Webviewからのコマンドを対応する処理へ振り分ける。 */
   protected async handleMessage(message: ArticleCreationInboundMessage): Promise<void> {
     switch (message.command) {
       case 'loadProjects':

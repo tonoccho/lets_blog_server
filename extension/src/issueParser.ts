@@ -8,6 +8,7 @@ import { extractHeadings, HeadingInfo } from './headingContext';
  * ここで機械的に抽出し、Article Planパネルの構成案として初期表示する。
  */
 
+/** 抽出した記事構成の1項目。 */
 export interface OutlineItem {
   /** 見出しレベル(1〜6)。箇条書きから起こした場合はネストの深さに対応する。 */
   level: number;

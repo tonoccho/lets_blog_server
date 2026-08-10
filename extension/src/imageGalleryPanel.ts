@@ -19,6 +19,10 @@ export class ImageGalleryPanel extends WebviewPanelBase<
   ImageGalleryInboundMessage,
   ImageGalleryOutboundCommand
 > {
+  /**
+   * Image Galleryパネルを開く。既に開いていれば前面に出す。
+   * @param baseDir 取り込んだ画像の保存先(この直下のassets/へ書き出す)
+   */
   static createOrShow(
     context: vscode.ExtensionContext,
     editor: vscode.TextEditor,
@@ -44,6 +48,7 @@ export class ImageGalleryPanel extends WebviewPanelBase<
     });
   }
 
+  /** Webviewからのコマンドを対応する処理へ振り分ける。 */
   protected async handleMessage(message: ImageGalleryInboundMessage): Promise<void> {
     switch (message.command) {
       case 'loadImages':

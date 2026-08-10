@@ -22,6 +22,10 @@ import { resolveSectionContext } from './headingContext';
 import { logger } from './logger';
 import { messageOf, reportError } from './errorHandler';
 
+/**
+ * 拡張の有効化。ロガーの初期化と全コマンドの登録を行う。
+ * VSCodeが拡張を読み込んだ際に一度だけ呼ばれる。
+ */
 export function activate(context: vscode.ExtensionContext): void {
   logger.refreshFromConfiguration();
   logger.info("Let's Blog 拡張を有効化しました。");
@@ -54,6 +58,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 }
 
+/** 拡張の無効化。破棄処理はcontext.subscriptionsに登録済みのため、ここでは何もしない。 */
 export function deactivate(): void {
   // no-op
 }

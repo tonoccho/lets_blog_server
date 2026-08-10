@@ -27,6 +27,7 @@ export function showSingletonPanel(viewType: string, create: () => { reveal(): v
   openPanels.set(viewType, create());
 }
 
+/** パネルの識別子・タイトル・使用する資材の指定。 */
 export interface WebviewPanelOptions {
   /** vscode.window.createWebviewPanelに渡すviewType(パネルの識別子)。 */
   viewType: string;
@@ -50,8 +51,13 @@ const SHARED_ASSETS = ['loadingIndicator.css', 'loadingIndicator.js'];
  * 派生クラスはコマンドごとの処理(handleMessage)だけを実装すればよい。
  */
 export abstract class WebviewPanelBase<TInbound extends WebviewMessageBase<string>, TOutbound extends string> {
+  /** VSCodeのパネル本体。派生クラスからタイトル変更などに使う。 */
   protected readonly panel: vscode.WebviewPanel;
 
+  /**
+   * パネルを生成し、資材の読み込みとメッセージ購読までを済ませる。
+   * 派生クラスはsuper()を呼ぶだけでよい。
+   */
   protected constructor(
     protected readonly context: vscode.ExtensionContext,
     private readonly options: WebviewPanelOptions
