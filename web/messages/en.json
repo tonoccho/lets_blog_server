@@ -25,7 +25,9 @@
     "openMenu": "Open menu",
     "closeMenu": "Close menu",
     "navigation": "Navigation",
-    "logout": "Logout"
+    "logout": "Logout",
+    "downloadVscodeExtension": "Download VSCode extension (.vsix)",
+    "downloadVscodeExtensionPending": "Building VSCode extension…"
   },
   "dashboard": {
     "title": "Dashboard",
