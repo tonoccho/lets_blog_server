@@ -11,6 +11,7 @@ import com.letsblog.api.domain.GenerationJob;
 import com.letsblog.api.dto.AiDraftRequest;
 import com.letsblog.api.dto.AiDraftResponse;
 import com.letsblog.api.dto.AiImageBatchResponse;
+import com.letsblog.api.dto.AiImagePromptResponse;
 import com.letsblog.api.dto.AiImageRequest;
 import com.letsblog.api.dto.AiSectionRequest;
 import com.letsblog.api.dto.AiSectionResponse;
@@ -44,6 +45,8 @@ class AiAssistServiceTest {
     @Mock
     private OllamaClient ollamaClient;
     @Mock
+    private OllamaModelService ollamaModelService;
+    @Mock
     private ComfyUiClient comfyUiClient;
     @Mock
     private ComfyUiModelService comfyUiModelService;
@@ -60,7 +63,7 @@ class AiAssistServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AiAssistService(ollamaClient, comfyUiClient, comfyUiModelService,
+        service = new AiAssistService(ollamaClient, ollamaModelService, comfyUiClient, comfyUiModelService,
                 generatedImageStorageService, generatedImageRepository, generationJobRepository,
                 webSearchService, new ObjectMapper());
 
@@ -221,5 +224,46 @@ class AiAssistServiceTest {
     void generateSection_不正なmodeは例外() {
         org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
                 () -> service.generateSection(new AiSectionRequest("invalid", "見出し", null, null, null, null, null)));
+    }
+
+    @Test
+    void generateImagePrompt_プロジェクトの選択モデルでシステムプロンプトと履歴を含めて生成する() {
+        when(ollamaModelService.getSelectedModel(1L)).thenReturn("llama3");
+        when(ollamaClient.generate(anyString(), org.mockito.ArgumentMatchers.eq("llama3")))
+                .thenReturn("a cute cat, studio lighting, high quality");
+
+        List<PlanChatMessage> history = List.of(new PlanChatMessage("user", "猫の画像がほしい"));
+
+        AiImagePromptResponse response = service.generateImagePrompt(1L, history, "もっと可愛くして");
+
+        assertEquals("a cute cat, studio lighting, high quality", response.prompt());
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(ollamaClient).generate(promptCaptor.capture(), org.mockito.ArgumentMatchers.eq("llama3"));
+        String prompt = promptCaptor.getValue();
+        assertTrue(prompt.contains("System:"));
+        assertTrue(prompt.contains("猫の画像がほしい"));
+        assertTrue(prompt.contains("もっと可愛くして"));
+        assertTrue(prompt.trim().endsWith("Assistant:"));
+    }
+
+    @Test
+    void generateImagePrompt_履歴がnullでも生成できる() {
+        when(ollamaModelService.getSelectedModel(2L)).thenReturn("llama3");
+        when(ollamaClient.generate(anyString(), anyString())).thenReturn("a mountain landscape");
+
+        AiImagePromptResponse response = service.generateImagePrompt(2L, null, "山の風景");
+
+        assertEquals("a mountain landscape", response.prompt());
+    }
+
+    @Test
+    void generateImagePrompt_Ollama呼び出し失敗時はジョブを失敗として記録し例外を伝播する() {
+        when(ollamaModelService.getSelectedModel(1L)).thenReturn("llama3");
+        when(ollamaClient.generate(anyString(), anyString()))
+                .thenThrow(new RuntimeException("接続エラー"));
+
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
+                () -> service.generateImagePrompt(1L, List.of(), "犬の画像"));
     }
 }
