@@ -888,7 +888,43 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
           }
         }
 
-        PreviewPanel.createOrShow(html, css, warning, `${site.label} / ${site.siteName}`, featuredImageDataUri);
+        // サイト内の既存記事ページを骨格に、実テーマのDOM構造(タイトル/カテゴリ/日付/アイキャッチ等)を
+        // 保ったまま表示できるか試す。取得できた場合はアイキャッチも骨格側へ差し替え済みのため、
+        // PreviewPanel側の簡易アイキャッチ表示は使わない(二重表示を避ける)。
+        // 参照記事が無い等で再現できない場合は、従来のプレーンな表示へフォールバックする。
+        let bodyHtml = html;
+        let usingSkeleton = false;
+        if (site.siteId != null) {
+          progress.report({ message: `${site.siteName} の実際のテーマ構造を再現しています…` });
+          try {
+            const skeleton = await api.renderPreviewSkeleton(
+              serverUrl,
+              apiKey,
+              actor,
+              projectId,
+              site.siteId,
+              (article.data.title as string | undefined) ?? '',
+              html,
+              featuredImageDataUri
+            );
+            if (skeleton.available && skeleton.html) {
+              bodyHtml = skeleton.html;
+              usingSkeleton = true;
+            } else {
+              logger.debug(`テーマ構造の再現をスキップしました: ${skeleton.reason ?? '不明な理由'}`);
+            }
+          } catch (skeletonError) {
+            logger.debug(`テーマ構造の再現取得に失敗しました: ${messageOf(skeletonError)}`);
+          }
+        }
+
+        PreviewPanel.createOrShow(
+          bodyHtml,
+          css,
+          warning,
+          `${site.label} / ${site.siteName}`,
+          usingSkeleton ? undefined : featuredImageDataUri
+        );
       }
     );
   } catch (err) {

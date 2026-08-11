@@ -4,6 +4,7 @@ import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.ThemeCssResponse;
+import com.letsblog.api.dto.ThemeSkeletonResponse;
 import com.letsblog.api.markdown.MarkdownRenderer;
 import com.letsblog.api.repository.SiteRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -55,6 +56,9 @@ class ArticlePreviewServiceTest {
     @Mock
     private SiteService siteService;
 
+    @Mock
+    private PreviewSkeletonFetcher previewSkeletonFetcher;
+
     private MockRestServiceServer server;
     private ArticlePreviewService service;
 
@@ -64,7 +68,7 @@ class ArticlePreviewServiceTest {
         server = MockRestServiceServer.bindTo(builder).build();
         service = new ArticlePreviewService(
                 customTagRenderService, blogCardTagRenderService, amazonTagRenderService, tocStyleRenderService,
-                markdownRenderer, projectService, siteRepository, siteService, builder);
+                markdownRenderer, projectService, siteRepository, siteService, builder, previewSkeletonFetcher);
     }
 
     private Project projectWithMaster(String masterEnvironment, Long testSiteId, Long productionSiteId) {
@@ -378,5 +382,104 @@ class ArticlePreviewServiceTest {
 
         assertFalse(response.available());
         assertTrue(response.reason().contains("マスター環境"));
+    }
+
+    @Test
+    void renderSkeleton_マスター環境にサイトが紐づいていない場合はavailableがfalse() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", null, null));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(1L, null, "タイトル", "<p>本文</p>", null);
+
+        assertFalse(response.available());
+        assertTrue(response.reason().contains("紐づいていません"));
+        verifyNoInteractions(previewSkeletonFetcher);
+    }
+
+    @Test
+    void renderSkeleton_参照記事が存在しない場合はavailableがfalse() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc"
+                        + "&_fields=id,link,title,content"))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(1L, null, "タイトル", "<p>本文</p>", null);
+
+        assertFalse(response.available());
+        assertTrue(response.reason().contains("参照記事"));
+        verifyNoInteractions(previewSkeletonFetcher);
+    }
+
+    @Test
+    void renderSkeleton_参照記事のタイトルと本文で差し替え位置を検索しspliceした結果を返す() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc"
+                        + "&_fields=id,link,title,content"))
+                .andRespond(withSuccess(
+                        "[{\"id\":1,\"link\":\"http://example.com/hello-world/\","
+                        + "\"title\":{\"rendered\":\"Hello World\"},\"content\":{\"rendered\":\"<p>Hi</p>\"}}]",
+                        MediaType.APPLICATION_JSON));
+        when(previewSkeletonFetcher.fetchAndSplice(
+                "http://example.com/hello-world/", "Hello World", "<p>Hi</p>", "新タイトル", "<p>新本文</p>", null))
+                .thenReturn(new ThemeSkeletonResponse("<article>spliced</article>", true, null, true));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(1L, null, "新タイトル", "<p>新本文</p>", null);
+
+        assertTrue(response.available());
+        assertEquals("<article>spliced</article>", response.html());
+        assertTrue(response.eyecatchSpliced());
+    }
+
+    @Test
+    void renderSkeleton_managedサイトは内部URLへナビゲートし結果は公開オリジンへ戻す() {
+        Project project = projectWithMaster("test", 10L, null);
+        project.setLocalSiteId(30L);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+
+        Site site = managedWordPressSite(30L, "local-site", "https://localhost/sites/local-site", "local-site");
+        when(siteRepository.findById(30L)).thenReturn(Optional.of(site));
+
+        server.expect(requestTo("http://wordpress/sites/local-site/wp-json/wp/v2/posts?per_page=1&orderby=date"
+                        + "&order=desc&_fields=id,link,title,content"))
+                .andRespond(withSuccess(
+                        "[{\"id\":1,\"link\":\"https://localhost/sites/local-site/hello-world/\","
+                        + "\"title\":{\"rendered\":\"Hello World\"},\"content\":{\"rendered\":\"<p>Hi</p>\"}}]",
+                        MediaType.APPLICATION_JSON));
+        when(previewSkeletonFetcher.fetchAndSplice(
+                "http://wordpress/sites/local-site/hello-world/", "Hello World", "<p>Hi</p>",
+                "新タイトル", "<p>新本文</p>", null))
+                .thenReturn(new ThemeSkeletonResponse(
+                        "<article><img src=\"http://wordpress/sites/local-site/wp-content/uploads/x.png\"></article>",
+                        true, null, true));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(1L, 30L, "新タイトル", "<p>新本文</p>", null);
+
+        assertTrue(response.available());
+        assertTrue(response.html().contains("https://localhost/sites/local-site/wp-content/uploads/x.png"));
+        server.verify();
+    }
+
+    @Test
+    void renderSkeleton_splice側で位置を特定できない場合はavailableがfalseの結果をそのまま返す() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc"
+                        + "&_fields=id,link,title,content"))
+                .andRespond(withSuccess(
+                        "[{\"id\":1,\"link\":\"http://example.com/hello-world/\","
+                        + "\"title\":{\"rendered\":\"Hello World\"},\"content\":{\"rendered\":\"<p>Hi</p>\"}}]",
+                        MediaType.APPLICATION_JSON));
+        when(previewSkeletonFetcher.fetchAndSplice(
+                "http://example.com/hello-world/", "Hello World", "<p>Hi</p>", "新タイトル", "<p>新本文</p>", null))
+                .thenReturn(new ThemeSkeletonResponse(null, false, "本文の位置を特定できませんでした", false));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(1L, null, "新タイトル", "<p>新本文</p>", null);
+
+        assertFalse(response.available());
+        assertTrue(response.reason().contains("本文の位置を特定できませんでした"));
     }
 }
