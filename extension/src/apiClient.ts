@@ -485,13 +485,14 @@ export async function generateImage(
   signal?: AbortSignal
 ): Promise<AiImageResult> {
   // 生成画像はサーバー側に保存されるため、再試行すると重複した生成結果が残る。
-  return requestJson(serverUrl, '/api/ai/image', {
+  const batch = await requestJson(serverUrl, '/api/ai/image', {
     label: 'generateImage',
     signal,
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
     createBody: jsonBody({ projectId, ...params }),
-  }, schemas.AiImageResultSchema);
+  }, schemas.AiImageBatchResponseSchema);
+  return batch.images[0];
 }
 
 /** 画像生成で選択できるモデル/サンプラー/スケジューラ/LoRAの一覧を取得する。 */

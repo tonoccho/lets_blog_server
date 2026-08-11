@@ -64,6 +64,11 @@ export const AiImageResultSchema = z.object({
 });
 export type AiImageResult = z.infer<typeof AiImageResultSchema>;
 
+export const AiImageBatchResponseSchema = z.object({
+  images: z.array(AiImageResultSchema).min(1),
+});
+export type AiImageBatchResponse = z.infer<typeof AiImageBatchResponseSchema>;
+
 export const ImageGenerationOptionsSchema = z.object({
   checkpoints: z.array(z.string()).default([]),
   selectedCheckpoint: z.string().default(''),
