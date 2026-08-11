@@ -1,6 +1,5 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
@@ -85,10 +84,11 @@ class ArticlePreviewServiceTest {
         return site;
     }
 
-    private Site managedWordPressSite(Long id, String siteKey, String publicBaseUrl) {
+    private Site managedWordPressSite(Long id, String siteKey, String publicBaseUrl, String wpSlug) {
         Site site = wordPressSite(id, publicBaseUrl);
         site.setSiteKey(siteKey);
         site.setManagedWordpress(true);
+        site.setWpSlug(wpSlug);
         return site;
     }
 
@@ -205,16 +205,13 @@ class ArticlePreviewServiceTest {
     }
 
     @Test
-    void fetchThemeCss_managedサイトは内部URLでテーマCSSを取得する() {
+    void fetchThemeCss_managedサイトはwpSlugから組み立てた内部URLでテーマCSSを取得する() {
         Project project = projectWithMaster("test", 10L, null);
         project.setLocalSiteId(30L);
         when(projectService.getProjectEntity(1L)).thenReturn(project);
 
-        Site site = managedWordPressSite(30L, "local-site", "https://localhost/sites/local-site");
+        Site site = managedWordPressSite(30L, "local-site", "https://localhost/sites/local-site", "local-site");
         when(siteRepository.findById(30L)).thenReturn(Optional.of(site));
-        when(siteService.getCredentials("local-site")).thenReturn(
-                new CmsCredentials.WordPressCredentials(
-                        "http://wordpress/sites/local-site", "admin", "app-password"));
 
         server.expect(requestTo("http://wordpress/sites/local-site/"))
                 .andRespond(withSuccess(
@@ -232,14 +229,13 @@ class ArticlePreviewServiceTest {
     }
 
     @Test
-    void fetchThemeCss_managedサイトでも認証情報が取得できない場合は公開URLにフォールバックする() {
+    void fetchThemeCss_managedサイトでもwpSlug未設定の場合は公開URLにフォールバックする() {
         Project project = projectWithMaster("test", 10L, null);
         project.setLocalSiteId(30L);
         when(projectService.getProjectEntity(1L)).thenReturn(project);
 
-        Site site = managedWordPressSite(30L, "local-site", "http://public.example.com");
+        Site site = managedWordPressSite(30L, "local-site", "http://public.example.com", null);
         when(siteRepository.findById(30L)).thenReturn(Optional.of(site));
-        when(siteService.getCredentials("local-site")).thenThrow(new IllegalStateException("復号失敗"));
 
         server.expect(requestTo("http://public.example.com"))
                 .andRespond(withSuccess(
