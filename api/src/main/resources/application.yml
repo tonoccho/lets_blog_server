@@ -72,6 +72,7 @@ app:
     base-url: ${APP_WEB_BASE_URL:http://localhost:3000}
   ollama-base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
   ollama-model: ${OLLAMA_MODEL:qwen2.5:7b-instruct}
+  ollama-request-timeout-seconds: ${OLLAMA_REQUEST_TIMEOUT_SECONDS:120}
   comfyui-base-url: ${COMFYUI_BASE_URL:http://localhost:8188}
   comfyui-checkpoint: ${COMFYUI_CHECKPOINT:v1-5-pruned-emaonly.safetensors}
   comfyui-models-path: ${COMFYUI_MODELS_PATH:/app/data/comfyui-models}
