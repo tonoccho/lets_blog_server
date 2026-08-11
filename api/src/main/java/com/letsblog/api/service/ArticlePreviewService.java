@@ -43,8 +43,16 @@ public class ArticlePreviewService {
             Pattern.compile("<link\\b[^>]*>", Pattern.CASE_INSENSITIVE);
     private static final Pattern REL_STYLESHEET_PATTERN =
             Pattern.compile("rel\\s*=\\s*[\"']stylesheet[\"']", Pattern.CASE_INSENSITIVE);
+    private static final Pattern REL_PRELOAD_PATTERN =
+            Pattern.compile("rel\\s*=\\s*[\"']preload[\"']", Pattern.CASE_INSENSITIVE);
+    private static final Pattern AS_STYLE_PATTERN =
+            Pattern.compile("as\\s*=\\s*[\"']style[\"']", Pattern.CASE_INSENSITIVE);
     private static final Pattern HREF_PATTERN =
             Pattern.compile("href\\s*=\\s*[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE);
+    private static final Pattern STYLE_BLOCK_PATTERN =
+            Pattern.compile("<style\\b[^>]*>(.*?)</style>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final Pattern CSS_URL_PATTERN =
+            Pattern.compile("url\\(\\s*(['\"]?)([^'\")]+)\\1\\s*\\)", Pattern.CASE_INSENSITIVE);
 
     private final CustomTagRenderService customTagRenderService;
     private final BlogCardTagRenderService blogCardTagRenderService;
@@ -164,23 +172,32 @@ public class ArticlePreviewService {
         }
 
         List<String> stylesheetUrls = extractStylesheetUrls(html, site.getBaseUrl());
-        logger.debug("Extracted {} stylesheet URLs for site: {}", stylesheetUrls.size(), site.getSiteKey());
+        List<String> inlineStyles = extractInlineStyles(html);
+        logger.debug("Extracted {} stylesheet URLs and {} inline <style> blocks for site: {}",
+                stylesheetUrls.size(), inlineStyles.size(), site.getSiteKey());
         if (!stylesheetUrls.isEmpty()) {
             stylesheetUrls.forEach(url -> logger.debug("  - {}", url));
         }
-        if (stylesheetUrls.isEmpty()) {
-            logger.warn("No stylesheet links found in site top page for site: {} (HTML length: {} bytes)",
-                    site.getSiteKey(), html.length());
+        if (stylesheetUrls.isEmpty() && inlineStyles.isEmpty()) {
+            logger.warn("No stylesheet links or inline <style> blocks found in site top page for site: {} "
+                    + "(HTML length: {} bytes)", site.getSiteKey(), html.length());
             return new ThemeCssResponse("", false, "サイトのトップページにstylesheetリンクが見つかりませんでした");
         }
-        if (internalOrigin != null) {
+        if (internalOrigin != null && !stylesheetUrls.isEmpty()) {
             // stylesheetのhrefはWordPressのsiteurl設定(公開URL)を基準に絶対URLで出力されるため、
             // トップページと同様に公開オリジンを内部オリジンへ差し替えてから取得する。
             stylesheetUrls = rewriteToInternalOrigin(stylesheetUrls, originOf(site.getBaseUrl()), internalOrigin);
         }
 
-        String css = fetchAndConcatStylesheets(stylesheetUrls);
-        return new ThemeCssResponse(css, true, null);
+        StringBuilder css = new StringBuilder(fetchAndConcatStylesheets(stylesheetUrls));
+        for (String inlineStyle : inlineStyles) {
+            if (css.length() >= MAX_CSS_LENGTH) {
+                break;
+            }
+            css.append("/* inline <style> */\n").append(inlineStyle).append("\n");
+        }
+        String result = css.length() > MAX_CSS_LENGTH ? css.substring(0, MAX_CSS_LENGTH) : css.toString();
+        return new ThemeCssResponse(result, true, null);
     }
 
     /**
@@ -240,8 +257,15 @@ public class ArticlePreviewService {
             String tag = linkMatcher.group();
             logger.debug("Found <link> tag #{}: {}", linkTagCount, tag.substring(0, Math.min(100, tag.length())));
 
-            if (!REL_STYLESHEET_PATTERN.matcher(tag).find()) {
-                logger.debug("  -> No rel=\"stylesheet\" found, skipping");
+            boolean isStylesheet = REL_STYLESHEET_PATTERN.matcher(tag).find();
+            // 最適化プラグイン(Autoptimize/WP Rocket等)は rel="preload" as="style" で読み込み、
+            // JS実行後にonloadでrel="stylesheet"へ書き換える。プレビューはJSを実行しないため、
+            // このパターンも通常のstylesheetと同様に扱う。
+            boolean isPreloadStyle = !isStylesheet
+                    && REL_PRELOAD_PATTERN.matcher(tag).find()
+                    && AS_STYLE_PATTERN.matcher(tag).find();
+            if (!isStylesheet && !isPreloadStyle) {
+                logger.debug("  -> No rel=\"stylesheet\" or rel=\"preload\" as=\"style\" found, skipping");
                 continue;
             }
             stylesheetCount++;
@@ -271,6 +295,22 @@ public class ArticlePreviewService {
     }
 
     /**
+     * Critical CSSや wp_add_inline_style() 等でページに直接埋め込まれるインライン<style>ブロックの
+     * 中身を収集する。<link rel="stylesheet">では収集できないCSSを補うため。
+     */
+    private List<String> extractInlineStyles(String html) {
+        List<String> styles = new ArrayList<>();
+        Matcher matcher = STYLE_BLOCK_PATTERN.matcher(html);
+        while (matcher.find()) {
+            String content = matcher.group(1).trim();
+            if (!content.isEmpty()) {
+                styles.add(content);
+            }
+        }
+        return styles;
+    }
+
+    /**
      * ブラウザ相当のUser-Agent/Acceptヘッダーを付与したRestClientを返す(Issue #245)。
      */
     private RestClient browserLikeClient() {
@@ -291,7 +331,7 @@ public class ArticlePreviewService {
                 if (body == null || body.isBlank()) {
                     continue;
                 }
-                String entry = "/* " + url + " */\n" + body + "\n";
+                String entry = "/* " + url + " */\n" + rewriteRelativeCssUrls(body, url) + "\n";
                 // 上限超過分を単純に切り詰めるとCSSが構文の途中で壊れるため、
                 // 上限を超えるstylesheetは丸ごとスキップし、既に連結済みの内容は壊さない。
                 if (css.length() + entry.length() > MAX_CSS_LENGTH) {
@@ -305,5 +345,38 @@ public class ArticlePreviewService {
             }
         }
         return css.toString();
+    }
+
+    /**
+     * CSS内の url(...) の相対参照を、そのstylesheet自身の絶対URLを基準に絶対URLへ書き換える。
+     * 取得したCSSはWebview内の<style>として埋め込まれ、埋め込み先のbase URIはstylesheetの
+     * オリジンと異なるため、相対参照のままだとフォントや背景画像が解決できなくなる。
+     */
+    private String rewriteRelativeCssUrls(String css, String stylesheetUrl) {
+        URI base;
+        try {
+            base = URI.create(stylesheetUrl);
+        } catch (IllegalArgumentException e) {
+            return css;
+        }
+        Matcher matcher = CSS_URL_PATTERN.matcher(css);
+        StringBuilder result = new StringBuilder();
+        while (matcher.find()) {
+            String quote = matcher.group(1);
+            String value = matcher.group(2).trim();
+            String replacement = matcher.group(0);
+            if (!value.startsWith("data:") && !value.startsWith("http://")
+                    && !value.startsWith("https://") && !value.startsWith("//")) {
+                try {
+                    String resolved = base.resolve(value).toString();
+                    replacement = "url(" + quote + resolved + quote + ")";
+                } catch (IllegalArgumentException ignored) {
+                    // 解決できない場合は元の値をそのまま残す
+                }
+            }
+            matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(result);
+        return result.toString();
     }
 }
