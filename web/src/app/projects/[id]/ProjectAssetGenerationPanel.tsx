@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import type { AiImageResult, ImageGenerationOptionsResponse } from "@/lib/apiClient";
+import type { AiImageResult, ImageGenerationOptionsResponse, PlanChatMessage } from "@/lib/apiClient";
 import {
   fetchImageGenerationOptionsAction,
+  generateImagePromptAction,
   generateProjectImagesAction,
   uploadProjectAssetImageAction,
 } from "./actions";
@@ -37,6 +38,12 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState<{ type: "error" | "success"; text: string } | null>(null);
+
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatHistory, setChatHistory] = useState<PlanChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState<string | undefined>(undefined);
 
   async function handleOpen() {
     setOpen(true);
@@ -88,6 +95,23 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
     setMessage({ type: "success", text: "生成しました。アセットとして追加する画像を選択してください。" });
   }
 
+  async function handleChatSend() {
+    const chatMessage = chatInput.trim();
+    if (!chatMessage || chatLoading) return;
+    setChatInput("");
+    setChatLoading(true);
+    setChatError(undefined);
+    const result = await generateImagePromptAction(projectId, { history: chatHistory, message: chatMessage });
+    setChatLoading(false);
+    if (result.error) {
+      setChatError(result.error);
+      return;
+    }
+    const generatedPrompt = result.prompt ?? "";
+    setChatHistory((prev) => [...prev, { role: "user", content: chatMessage }, { role: "assistant", content: generatedPrompt }]);
+    setPrompt(generatedPrompt);
+  }
+
   async function handleUpload() {
     if (selectedId == null) return;
     setUploading(true);
@@ -137,6 +161,64 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
         <p className="text-sm text-gray-500">パラメータ選択肢を読み込んでいます…</p>
       ) : (
         <div className="grid gap-3">
+          <div className="space-y-2 rounded border bg-gray-50 p-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">チャットでプロンプトを作成</h3>
+              <button
+                type="button"
+                onClick={() => setChatOpen((v) => !v)}
+                className="text-xs text-gray-500 hover:underline"
+              >
+                {chatOpen ? "閉じる" : "開く"}
+              </button>
+            </div>
+            {chatOpen && (
+              <>
+                <div className="max-h-48 space-y-2 overflow-y-auto rounded bg-white p-2">
+                  {chatHistory.length === 0 ? (
+                    <p className="text-xs text-gray-500">
+                      作りたい画像の内容をチャットで伝えてください。生成されたプロンプトが下のprompt欄に反映されます。
+                    </p>
+                  ) : (
+                    chatHistory.map((msg, idx) => (
+                      <div
+                        key={idx}
+                        className={`rounded px-2 py-1 text-xs ${
+                          msg.role === "user" ? "bg-blue-100 text-blue-900" : "bg-gray-200 text-gray-900"
+                        }`}
+                      >
+                        <strong>{msg.role === "user" ? "あなた" : "生成プロンプト"}:</strong> {msg.content}
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !chatLoading) {
+                        handleChatSend();
+                      }
+                    }}
+                    placeholder="例: 夕焼けの海辺を歩く猫"
+                    disabled={chatLoading}
+                    className="flex-1 rounded border p-2 text-xs disabled:bg-gray-100"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleChatSend}
+                    disabled={chatLoading || !chatInput.trim()}
+                    className="rounded bg-neutral-900 px-3 py-2 text-xs text-white disabled:opacity-60"
+                  >
+                    {chatLoading ? "生成中…" : "プロンプト生成"}
+                  </button>
+                </div>
+                {chatError && <p className="text-xs text-red-600">{chatError}</p>}
+              </>
+            )}
+          </div>
           <div>
             <label className="block text-sm font-medium">prompt</label>
             <textarea

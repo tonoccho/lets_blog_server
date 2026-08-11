@@ -45,6 +45,7 @@ import {
   getGenerationJob,
   getImageGenerationOptions,
   generateProjectImages,
+  generateImagePromptFromChat,
   uploadProjectAssetImage,
   listPostComparison,
   deletePostEverywhere,
@@ -52,6 +53,7 @@ import {
   ImageGenerationOptionsResponse,
   AiImageGenerationParams,
   AiImageResult,
+  PlanChatMessage,
   PostComparisonPage,
   PostType,
   ProjectEnvironment,
@@ -704,6 +706,21 @@ export async function generateProjectImagesAction(
   try {
     const result = await generateProjectImages({ ...params, projectId }, actor);
     return { images: result.images };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function generateImagePromptAction(
+  projectId: number,
+  data: { history: PlanChatMessage[]; message: string }
+): Promise<{ prompt?: string; error?: string }> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const result = await generateImagePromptFromChat(projectId, data, actor);
+    return { prompt: result.prompt };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
