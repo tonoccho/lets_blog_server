@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class OllamaClientTest {
 
     private final OllamaClient client =
-            new OllamaClient("http://ollama:11434", "qwen3:14b", new ObjectMapper());
+            new OllamaClient("http://ollama:11434", "qwen3:14b", 120L, new ObjectMapper());
 
     @Test
     void stripThinkingBlocks_thinkブロックを除去する() {

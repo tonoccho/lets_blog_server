@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.config.LegacyJacksonRestClientConfig;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
@@ -50,8 +51,13 @@ public class OllamaClient {
     public OllamaClient(
             @Value("${app.ollama-base-url}") String baseUrl,
             @Value("${app.ollama-model}") String model,
+            @Value("${app.ollama-request-timeout-seconds}") long requestTimeoutSeconds,
             ObjectMapper objectMapper) {
-        RestClient.Builder builder = RestClient.builder().baseUrl(baseUrl);
+        Duration requestTimeout = Duration.ofSeconds(requestTimeoutSeconds);
+        JdkClientHttpRequestFactory requestFactory =
+                new JdkClientHttpRequestFactory(HttpClient.newBuilder().connectTimeout(requestTimeout).build());
+        requestFactory.setReadTimeout(requestTimeout);
+        RestClient.Builder builder = RestClient.builder().baseUrl(baseUrl).requestFactory(requestFactory);
         LegacyJacksonRestClientConfig.preferJackson2(builder);
         this.client = builder.build();
         this.rawHttpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build();
