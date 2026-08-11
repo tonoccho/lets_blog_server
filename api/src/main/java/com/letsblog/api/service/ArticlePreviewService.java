@@ -1,5 +1,6 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
@@ -7,6 +8,7 @@ import com.letsblog.api.dto.ThemeCssResponse;
 import com.letsblog.api.markdown.MarkdownRenderer;
 import com.letsblog.api.repository.SiteRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 
 import java.net.URI;
@@ -40,6 +42,7 @@ public class ArticlePreviewService {
     private final MarkdownRenderer markdownRenderer;
     private final ProjectService projectService;
     private final SiteRepository siteRepository;
+    private final SiteService siteService;
     private final RestClient.Builder restClientBuilder;
 
     public ArticlePreviewService(
@@ -50,6 +53,7 @@ public class ArticlePreviewService {
             MarkdownRenderer markdownRenderer,
             ProjectService projectService,
             SiteRepository siteRepository,
+            SiteService siteService,
             RestClient.Builder restClientBuilder) {
         this.customTagRenderService = customTagRenderService;
         this.blogCardTagRenderService = blogCardTagRenderService;
@@ -58,6 +62,7 @@ public class ArticlePreviewService {
         this.markdownRenderer = markdownRenderer;
         this.projectService = projectService;
         this.siteRepository = siteRepository;
+        this.siteService = siteService;
         this.restClientBuilder = restClientBuilder;
     }
 
@@ -114,10 +119,24 @@ public class ArticlePreviewService {
             return new ThemeCssResponse("", false, "対象サイトがWordPress以外のCMSのためテーマCSSを取得できません");
         }
 
+        // managed(local)サイトのbase_urlはreverse-proxy経由のブラウザ向け公開URL(https://localhost/...)であり、
+        // APIコンテナ自身からは(コンテナ内の「localhost」は自分自身を指すため)到達できない。
+        // 常駐wordpressコンテナへ直結できる内部URル(credentials.baseUrl、例: http://wordpress/sites/{slug})が
+        // 取得できる場合は、そちらをfetch起点として使う(Issue #246)。取得できない場合は従来通りbase_urlを使う。
+        String fetchUrl = site.getBaseUrl();
+        String internalOrigin = null;
+        if (site.isManagedWordpress()) {
+            String internalBaseUrl = resolveManagedInternalBaseUrl(site);
+            if (internalBaseUrl != null) {
+                fetchUrl = internalBaseUrl.endsWith("/") ? internalBaseUrl : internalBaseUrl + "/";
+                internalOrigin = originOf(internalBaseUrl);
+            }
+        }
+
         String html;
         try {
             html = restClientBuilder.clone().build().get()
-                    .uri(URI.create(site.getBaseUrl()))
+                    .uri(URI.create(fetchUrl))
                     .retrieve()
                     .body(String.class);
         } catch (Exception e) {
@@ -131,9 +150,44 @@ public class ArticlePreviewService {
         if (stylesheetUrls.isEmpty()) {
             return new ThemeCssResponse("", false, "サイトのトップページにstylesheetリンクが見つかりませんでした");
         }
+        if (internalOrigin != null) {
+            // stylesheetのhrefはWordPressのsiteurl設定(公開URL)を基準に絶対URLで出力されるため、
+            // トップページと同様に公開オリジンを内部オリジンへ差し替えてから取得する。
+            stylesheetUrls = rewriteToInternalOrigin(stylesheetUrls, originOf(site.getBaseUrl()), internalOrigin);
+        }
 
         String css = fetchAndConcatStylesheets(stylesheetUrls);
         return new ThemeCssResponse(css, true, null);
+    }
+
+    /**
+     * managed(local)WordPressサイトの、APIコンテナから直接到達できる内部URLを返す。
+     * credentials(baseUrl)が復号できない・保持されていない場合はnullを返し、呼び出し元は
+     * 従来通りsite.getBaseUrl()にフォールバックする。
+     */
+    private String resolveManagedInternalBaseUrl(Site site) {
+        try {
+            CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
+            if (credentials instanceof CmsCredentials.WordPressCredentials wp && StringUtils.hasText(wp.baseUrl())) {
+                return wp.baseUrl();
+            }
+        } catch (RuntimeException ignored) {
+            // 認証情報の復号に失敗した場合は公開URL(site.getBaseUrl())へのフォールバックに任せる
+        }
+        return null;
+    }
+
+    private String originOf(String url) {
+        URI uri = URI.create(url);
+        return uri.getScheme() + "://" + uri.getAuthority();
+    }
+
+    private List<String> rewriteToInternalOrigin(List<String> urls, String publicOrigin, String internalOrigin) {
+        List<String> rewritten = new ArrayList<>(urls.size());
+        for (String url : urls) {
+            rewritten.add(url.startsWith(publicOrigin) ? internalOrigin + url.substring(publicOrigin.length()) : url);
+        }
+        return rewritten;
     }
 
     /** siteIdがこのプロジェクトのいずれかの環境に紐づいているか。 */

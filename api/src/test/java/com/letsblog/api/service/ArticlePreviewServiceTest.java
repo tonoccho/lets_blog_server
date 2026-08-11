@@ -1,5 +1,6 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
@@ -51,6 +52,9 @@ class ArticlePreviewServiceTest {
     @Mock
     private SiteRepository siteRepository;
 
+    @Mock
+    private SiteService siteService;
+
     private MockRestServiceServer server;
     private ArticlePreviewService service;
 
@@ -60,7 +64,7 @@ class ArticlePreviewServiceTest {
         server = MockRestServiceServer.bindTo(builder).build();
         service = new ArticlePreviewService(
                 customTagRenderService, blogCardTagRenderService, amazonTagRenderService, tocStyleRenderService,
-                markdownRenderer, projectService, siteRepository, builder);
+                markdownRenderer, projectService, siteRepository, siteService, builder);
     }
 
     private Project projectWithMaster(String masterEnvironment, Long testSiteId, Long productionSiteId) {
@@ -77,6 +81,13 @@ class ArticlePreviewServiceTest {
         site.setId(id);
         site.setCmsType(CmsType.WORDPRESS);
         site.setBaseUrl(baseUrl);
+        return site;
+    }
+
+    private Site managedWordPressSite(Long id, String siteKey, String publicBaseUrl) {
+        Site site = wordPressSite(id, publicBaseUrl);
+        site.setSiteKey(siteKey);
+        site.setManagedWordpress(true);
         return site;
     }
 
@@ -190,6 +201,57 @@ class ArticlePreviewServiceTest {
 
         assertTrue(response.available());
         assertTrue(response.css().contains("body{color:red}"));
+    }
+
+    @Test
+    void fetchThemeCss_managedサイトは内部URLでテーマCSSを取得する() {
+        Project project = projectWithMaster("test", 10L, null);
+        project.setLocalSiteId(30L);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+
+        Site site = managedWordPressSite(30L, "local-site", "https://localhost/sites/local-site");
+        when(siteRepository.findById(30L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("local-site")).thenReturn(
+                new CmsCredentials.WordPressCredentials(
+                        "http://wordpress/sites/local-site", "admin", "app-password"));
+
+        server.expect(requestTo("http://wordpress/sites/local-site/"))
+                .andRespond(withSuccess(
+                        "<html><head><link rel=\"stylesheet\" "
+                        + "href=\"https://localhost/sites/local-site/wp-content/style.css\"></head></html>",
+                        MediaType.TEXT_HTML));
+        server.expect(requestTo("http://wordpress/sites/local-site/wp-content/style.css"))
+                .andRespond(withSuccess("body { color: blue; }", MediaType.valueOf("text/css")));
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 30L);
+
+        assertTrue(response.available());
+        assertTrue(response.css().contains("body { color: blue; }"));
+        server.verify();
+    }
+
+    @Test
+    void fetchThemeCss_managedサイトでも認証情報が取得できない場合は公開URLにフォールバックする() {
+        Project project = projectWithMaster("test", 10L, null);
+        project.setLocalSiteId(30L);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+
+        Site site = managedWordPressSite(30L, "local-site", "http://public.example.com");
+        when(siteRepository.findById(30L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("local-site")).thenThrow(new IllegalStateException("復号失敗"));
+
+        server.expect(requestTo("http://public.example.com"))
+                .andRespond(withSuccess(
+                        "<html><head><link rel=\"stylesheet\" href=\"/style.css\"></head></html>",
+                        MediaType.TEXT_HTML));
+        server.expect(requestTo("http://public.example.com/style.css"))
+                .andRespond(withSuccess("body { color: green; }", MediaType.valueOf("text/css")));
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 30L);
+
+        assertTrue(response.available());
+        assertTrue(response.css().contains("body { color: green; }"));
+        server.verify();
     }
 
     @Test
