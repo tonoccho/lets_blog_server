@@ -185,6 +185,66 @@ class ArticlePreviewServiceTest {
     }
 
     @Test
+    void fetchMasterThemeCss_preloadAsStyleのstylesheetも収集する() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+
+        server.expect(requestTo("http://example.com"))
+                .andRespond(withSuccess(
+                        "<html><head>"
+                        + "<link rel=\"preload\" as=\"style\" href=\"/optimized.css\" "
+                        + "onload=\"this.rel='stylesheet'\">"
+                        + "</head></html>",
+                        MediaType.TEXT_HTML));
+        server.expect(requestTo("http://example.com/optimized.css"))
+                .andRespond(withSuccess("body { color: purple; }", MediaType.valueOf("text/css")));
+
+        ThemeCssResponse response = service.fetchMasterThemeCss(1L);
+
+        assertTrue(response.available());
+        assertTrue(response.css().contains("body { color: purple; }"));
+        server.verify();
+    }
+
+    @Test
+    void fetchMasterThemeCss_インラインstyleブロックも収集する() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+
+        server.expect(requestTo("http://example.com"))
+                .andRespond(withSuccess(
+                        "<html><head>"
+                        + "<style id=\"critical-css\">.hero { color: orange; }</style>"
+                        + "</head></html>",
+                        MediaType.TEXT_HTML));
+
+        ThemeCssResponse response = service.fetchMasterThemeCss(1L);
+
+        assertTrue(response.available());
+        assertTrue(response.css().contains(".hero { color: orange; }"));
+    }
+
+    @Test
+    void fetchMasterThemeCss_stylesheet内のurl相対参照を絶対URLへ書き換える() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+
+        server.expect(requestTo("http://example.com"))
+                .andRespond(withSuccess(
+                        "<html><head><link rel=\"stylesheet\" href=\"/theme/style.css\"></head></html>",
+                        MediaType.TEXT_HTML));
+        server.expect(requestTo("http://example.com/theme/style.css"))
+                .andRespond(withSuccess(
+                        "@font-face { src: url(fonts/foo.woff2); }",
+                        MediaType.valueOf("text/css")));
+
+        ThemeCssResponse response = service.fetchMasterThemeCss(1L);
+
+        assertTrue(response.available());
+        assertTrue(response.css().contains("url(http://example.com/theme/fonts/foo.woff2)"));
+    }
+
+    @Test
     void fetchThemeCss_siteId指定でそのサイトのCSSを取得する() {
         Project project = projectWithMaster("test", 10L, null);
         project.setLocalSiteId(20L);
