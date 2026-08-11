@@ -287,6 +287,10 @@ public class ArticlePreviewService {
         }
         logger.debug("HTML parsing summary: {} <link> tags found, {} with rel=stylesheet, {} with valid href",
                 linkTagCount, stylesheetCount, hrefMatchCount);
+        if (urls.size() >= MAX_STYLESHEETS) {
+            logger.warn("Reached MAX_STYLESHEETS ({}) limit; remaining <link rel=\"stylesheet\"> tags "
+                    + "on the page were not collected", MAX_STYLESHEETS);
+        }
         return urls;
     }
 
@@ -322,20 +326,25 @@ public class ArticlePreviewService {
         StringBuilder css = new StringBuilder();
         RestClient client = browserLikeClient();
         for (String url : stylesheetUrls) {
-            if (css.length() >= MAX_CSS_LENGTH) {
-                break;
-            }
             try {
                 String body = client.get().uri(URI.create(url)).retrieve().body(String.class);
-                if (body != null && !body.isBlank()) {
-                    css.append("/* ").append(url).append(" */\n")
-                            .append(rewriteRelativeCssUrls(body, url)).append("\n");
+                if (body == null || body.isBlank()) {
+                    continue;
                 }
-            } catch (Exception ignored) {
-                // 個別のCSS取得失敗はスキップする(プレビューが完全に崩れることを防ぐ)
+                String entry = "/* " + url + " */\n" + rewriteRelativeCssUrls(body, url) + "\n";
+                // 上限超過分を単純に切り詰めるとCSSが構文の途中で壊れるため、
+                // 上限を超えるstylesheetは丸ごとスキップし、既に連結済みの内容は壊さない。
+                if (css.length() + entry.length() > MAX_CSS_LENGTH) {
+                    logger.warn("Skipping stylesheet because concatenated CSS would exceed "
+                            + "MAX_CSS_LENGTH ({}): {}", MAX_CSS_LENGTH, url);
+                    continue;
+                }
+                css.append(entry);
+            } catch (Exception e) {
+                logger.debug("Failed to fetch stylesheet: {}", url, e);
             }
         }
-        return css.length() > MAX_CSS_LENGTH ? css.substring(0, MAX_CSS_LENGTH) : css.toString();
+        return css.toString();
     }
 
     /**
