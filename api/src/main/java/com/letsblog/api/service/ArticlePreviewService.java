@@ -6,6 +6,7 @@ import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.ThemeCssResponse;
 import com.letsblog.api.markdown.MarkdownRenderer;
 import com.letsblog.api.repository.SiteRepository;
+import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
@@ -25,6 +26,13 @@ public class ArticlePreviewService {
 
     private static final int MAX_STYLESHEETS = 15;
     private static final int MAX_CSS_LENGTH = 3_000_000;
+
+    // live/staging環境はCloudflareのボット対策が有効で、User-Agent等が無いプレーンなHTTPクライアントには
+    // JSチャレンジページ(stylesheetリンクを含まないHTML)を返してくる。ブラウザ相当のヘッダーを付与することで
+    // 通常のページ取得として扱われるようにする(Issue #245)。
+    private static final String BROWSER_USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                    + "Chrome/124.0.0.0 Safari/537.36";
 
     private static final Pattern LINK_TAG_PATTERN =
             Pattern.compile("<link\\b[^>]*>", Pattern.CASE_INSENSITIVE);
@@ -116,7 +124,7 @@ public class ArticlePreviewService {
 
         String html;
         try {
-            html = restClientBuilder.clone().build().get()
+            html = browserLikeClient().get()
                     .uri(URI.create(site.getBaseUrl()))
                     .retrieve()
                     .body(String.class);
@@ -174,9 +182,21 @@ public class ArticlePreviewService {
         return urls;
     }
 
+    /**
+     * ブラウザ相当のUser-Agent/Acceptヘッダーを付与したRestClientを返す(Issue #245)。
+     */
+    private RestClient browserLikeClient() {
+        return restClientBuilder.clone()
+                .defaultHeader(HttpHeaders.USER_AGENT, BROWSER_USER_AGENT)
+                .defaultHeader(HttpHeaders.ACCEPT,
+                        "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+                .defaultHeader(HttpHeaders.ACCEPT_LANGUAGE, "ja,en-US;q=0.9,en;q=0.8")
+                .build();
+    }
+
     private String fetchAndConcatStylesheets(List<String> stylesheetUrls) {
         StringBuilder css = new StringBuilder();
-        RestClient client = restClientBuilder.clone().build();
+        RestClient client = browserLikeClient();
         for (String url : stylesheetUrls) {
             if (css.length() >= MAX_CSS_LENGTH) {
                 break;
