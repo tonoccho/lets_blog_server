@@ -756,16 +756,25 @@ async function commandSelectProject(context: vscode.ExtensionContext): Promise<v
 }
 
 /**
+ * ローカル画像ファイルをbase64データURIへ変換する。ファイルが存在しない、または
+ * 拡張子からMIMEタイプを判定できない場合はundefinedを返す。
+ */
+function toDataUri(absolutePath: string): string | undefined {
+  if (!fs.existsSync(absolutePath)) return undefined;
+  const mimeType = guessImageMimeType(absolutePath);
+  if (!mimeType) return undefined;
+  return `data:${mimeType};base64,${fs.readFileSync(absolutePath).toString('base64')}`;
+}
+
+/**
  * Markdown本文中のローカル画像参照をbase64データURIへ置換する。プレビューはWebviewの外(APIサーバー)で
  * HTML化するため、投稿先を持たないローカル画像をそのまま渡すと壊れたリンクになってしまうのを防ぐ。
  */
 function inlineLocalImages(content: string, baseDir: string): string {
   let rewritten = content;
   for (const image of extractLocalImageReferences(content, baseDir)) {
-    if (!fs.existsSync(image.absolutePath)) continue;
-    const mimeType = guessImageMimeType(image.absolutePath);
-    if (!mimeType) continue;
-    const dataUri = `data:${mimeType};base64,${fs.readFileSync(image.absolutePath).toString('base64')}`;
+    const dataUri = toDataUri(image.absolutePath);
+    if (!dataUri) continue;
     rewritten = rewritten.split(image.reference).join(dataUri);
   }
   return rewritten;
@@ -817,6 +826,11 @@ async function pickPreviewSite(
   });
 }
 
+/** 複数の警告文を改行区切りでまとめる。 */
+function appendWarning(base: string | undefined, next: string): string {
+  return base ? `${base}\n${next}` : next;
+}
+
 async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<void> {
   const editor = getActiveMarkdownEditor();
   if (!editor) return;
@@ -841,6 +855,13 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
     const baseDir = path.dirname(editor.document.uri.fsPath);
     const markdown = inlineLocalImages(article.content, baseDir);
 
+    const featuredImage = resolveFeaturedImageReference(article.data, baseDir);
+    const featuredImageDataUri = featuredImage ? toDataUri(featuredImage.absolutePath) : undefined;
+    let warning: string | undefined;
+    if (featuredImage && !featuredImageDataUri) {
+      warning = `アイキャッチ画像が見つかりません: ${featuredImage.reference}`;
+    }
+
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'プレビューを生成しています…' },
       async (progress) => {
@@ -849,23 +870,25 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
 
         progress.report({ message: `${site.siteName} のCSSを取得しています…` });
         let css = '';
-        let warning: string | undefined;
         if (site.siteId == null) {
-          warning = 'プロジェクトにサイトが紐づいていないため、CSSなしで表示しています。';
+          warning = appendWarning(warning, 'プロジェクトにサイトが紐づいていないため、CSSなしで表示しています。');
         } else {
           try {
             const themeCss = await api.getThemeCss(serverUrl, apiKey, actor, projectId, site.siteId);
             if (themeCss.available) {
               css = themeCss.css;
             } else {
-              warning = `${site.siteName} のCSSを取得できませんでした: ${themeCss.reason ?? '不明なエラー'}`;
+              warning = appendWarning(
+                warning,
+                `${site.siteName} のCSSを取得できませんでした: ${themeCss.reason ?? '不明なエラー'}`
+              );
             }
           } catch (cssError) {
-            warning = `${site.siteName} のCSS取得に失敗しました: ${messageOf(cssError)}`;
+            warning = appendWarning(warning, `${site.siteName} のCSS取得に失敗しました: ${messageOf(cssError)}`);
           }
         }
 
-        PreviewPanel.createOrShow(html, css, warning, `${site.label} / ${site.siteName}`);
+        PreviewPanel.createOrShow(html, css, warning, `${site.label} / ${site.siteName}`, featuredImageDataUri);
       }
     );
   } catch (err) {
