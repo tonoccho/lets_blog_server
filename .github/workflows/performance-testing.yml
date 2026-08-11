@@ -168,14 +168,14 @@ jobs:
     if: always()
     steps:
       - name: Download JMH results
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: jmh-results
           path: jmh-results
         continue-on-error: true
 
       - name: Download k6 results
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: k6-results
           path: k6-results
