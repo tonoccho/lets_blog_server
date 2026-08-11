@@ -1,5 +1,6 @@
   const vscode = acquireVsCodeApi();
   let currentImage = null;
+  let chatHistory = [];
 
   function post(command, payload) {
     vscode.postMessage(Object.assign({ command }, payload || {}));
@@ -72,6 +73,32 @@
     };
   }
 
+  function addChatMessage(role, content) {
+    chatHistory.push({ role, content });
+    const messagesDiv = document.getElementById('chatMessages');
+    const msgEl = document.createElement('div');
+    msgEl.className = 'message ' + role;
+    msgEl.textContent = content;
+    messagesDiv.appendChild(msgEl);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+  }
+
+  function sendChat() {
+    const input = document.getElementById('chatInput');
+    const text = input.value.trim();
+    if (!text || LetsBlogLoading.isRunning()) return;
+    addChatMessage('user', text);
+    input.value = '';
+    showMessage('', '');
+    LetsBlogLoading.begin({
+      buttonIds: ['sendChatButton', 'generateButton'],
+      text: 'プロンプトを生成しています…',
+      kind: 'chat',
+      onCancel: function () { post('cancel'); },
+    });
+    post('sendChat', { history: chatHistory.slice(0, -1), message: text });
+  }
+
   function generate() {
     if (LetsBlogLoading.isRunning()) return;
     const params = collectParams();
@@ -138,6 +165,10 @@
   document.getElementById('generateButton').addEventListener('click', generate);
   document.getElementById('setAsEyecatchButton').addEventListener('click', setAsEyecatch);
   document.getElementById('addAsAssetButton').addEventListener('click', addAsAsset);
+  document.getElementById('sendChatButton').addEventListener('click', sendChat);
+  document.getElementById('chatInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') sendChat();
+  });
 
   window.addEventListener('message', (event) => {
     const { command, payload } = event.data;
@@ -148,6 +179,11 @@
         break;
       case 'generated':
         renderGenerated(payload);
+        break;
+      case 'promptGenerated':
+        LetsBlogLoading.end();
+        addChatMessage('assistant', payload.prompt);
+        document.getElementById('prompt').value = payload.prompt;
         break;
       case 'eyecatchSet':
       case 'assetAdded':

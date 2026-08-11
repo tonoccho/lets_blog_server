@@ -11,6 +11,18 @@
 <body>
 <main class="container">
   <h1 class="visually-hidden">画像生成</h1>
+  <div class="section" id="chatSection" aria-labelledby="chatSectionTitle">
+    <h2 class="section-title" id="chatSectionTitle">チャットでプロンプトを作成</h2>
+    <p class="hint">作りたい画像の内容をチャットで伝えてください。生成されたプロンプトが下のprompt欄に反映されます。</p>
+    <div class="chat-container">
+      <div class="messages" id="chatMessages" role="log" aria-live="polite" aria-label="チャット履歴"></div>
+      <div class="chat-input">
+        <label class="visually-hidden" for="chatInput">メッセージ</label>
+        <input type="text" id="chatInput" placeholder="例: 夕焼けの海辺を歩く猫">
+        <button type="button" id="sendChatButton">プロンプト生成</button>
+      </div>
+    </div>
+  </div>
   <div class="section">
     <h2 class="section-title">パラメータ</h2>
     <div class="form-group">
