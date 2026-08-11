@@ -439,6 +439,23 @@ export function generateProjectImages(
   });
 }
 
+export interface AiImagePromptResponse {
+  prompt: string;
+}
+
+export function generateImagePromptFromChat(
+  projectId: number,
+  data: { history: PlanChatMessage[]; message: string },
+  actor?: ActorInfo
+): Promise<AiImagePromptResponse> {
+  return apiFetch<AiImagePromptResponse>(`/api/projects/${projectId}/ai/generate-image-prompt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+    actor,
+  });
+}
+
 export function uploadProjectAssetImage(
   projectId: number,
   generatedImageId: number,
