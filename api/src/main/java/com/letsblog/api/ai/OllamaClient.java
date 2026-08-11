@@ -87,6 +87,8 @@ public class OllamaClient {
             return stripThinkingBlocks(response.get("response").asText()).trim();
         } catch (RestClientResponseException e) {
             throw new AiServiceException("Ollama呼び出しに失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+        } catch (Exception e) {
+            throw new AiServiceException("Ollama呼び出し中にエラーが発生しました（タイムアウトまたはネットワークエラーの可能性があります）: " + e.getMessage(), e);
         }
     }
 
@@ -113,6 +115,8 @@ public class OllamaClient {
             return models;
         } catch (RestClientResponseException e) {
             throw new AiServiceException("Ollamaモデル一覧の取得に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+        } catch (Exception e) {
+            throw new AiServiceException("Ollamaモデル一覧の取得中にエラーが発生しました（タイムアウトまたはネットワークエラーの可能性があります）: " + e.getMessage(), e);
         }
     }
 
@@ -180,6 +184,8 @@ public class OllamaClient {
                     .toBodilessEntity();
         } catch (RestClientResponseException e) {
             throw new AiServiceException("Ollamaモデルの削除に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+        } catch (Exception e) {
+            throw new AiServiceException("Ollamaモデルの削除中にエラーが発生しました（タイムアウトまたはネットワークエラーの可能性があります）: " + e.getMessage(), e);
         }
     }
 }
