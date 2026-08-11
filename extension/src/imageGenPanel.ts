@@ -60,6 +60,8 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
         return this._handleSetAsEyecatch();
       case 'addAsAsset':
         return this._handleAddAsAsset();
+      case 'sendChat':
+        return this._handleSendChat(message);
     }
   }
 
@@ -80,6 +82,26 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
     this._lastGenerated = result;
     this._lastPrompt = message.params.prompt;
     this.postMessage('generated', result);
+  }
+
+  /** チャットメッセージ(と履歴)からOllamaで画像生成プロンプトを作成する。 */
+  private async _handleSendChat(
+    message: Extract<ImageGenInboundMessage, { command: 'sendChat' }>
+  ): Promise<void> {
+    const apiKey = await requireApiKey(this.context);
+    const actor = await getActor(this.context);
+    const result = await this.runCancellable((signal) =>
+      api.generateImagePrompt(
+        getServerUrl(),
+        apiKey,
+        actor,
+        this._projectId,
+        message.history,
+        message.message,
+        signal
+      )
+    );
+    this.postMessage('promptGenerated', result);
   }
 
   private async _handleSetAsEyecatch(): Promise<void> {
