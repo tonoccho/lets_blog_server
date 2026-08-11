@@ -752,6 +752,37 @@ export async function renderPreviewHtml(
 }
 
 /**
+ * サイト内の既存記事ページを骨格として流用し、実テーマのDOM構造(タイトル/カテゴリ/日付/
+ * アイキャッチ等)を保ったままプレビュー対象記事の内容へ差し替えたHTML断片を取得する。
+ * 参照記事が無い・差し替え位置を特定できない等の場合はavailable:falseが返る
+ * (呼び出し側は従来のプレーンな表示へフォールバックすること)。
+ */
+export async function renderPreviewSkeleton(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  projectId: number,
+  siteId: number | undefined,
+  title: string,
+  contentHtml: string,
+  featuredImageDataUri: string | undefined
+): Promise<schemas.ThemeSkeletonResult> {
+  return requestJson(
+    serverUrl,
+    `/api/projects/${projectId}/preview/skeleton`,
+    {
+      label: 'renderPreviewSkeleton',
+      method: 'POST',
+      headers: buildHeaders(apiKey, actor),
+      createBody: jsonBody({ title, contentHtml, featuredImageDataUri, siteId }),
+      // 変換結果を返すだけでサーバー状態を変えないため、再試行して差し支えない。
+      retryable: true,
+    },
+    schemas.ThemeSkeletonResultSchema
+  );
+}
+
+/**
  * プレビューに適用するテーマCSSを取得する。siteIdを指定するとそのサイト、
  * 省略時はプロジェクトのマスター環境サイトのCSSを返す。
  * サイトのCSSは短時間で変わるものではないため、サイトごとにキャッシュする。

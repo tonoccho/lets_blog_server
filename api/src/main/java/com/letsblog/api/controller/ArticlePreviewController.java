@@ -2,7 +2,9 @@ package com.letsblog.api.controller;
 
 import com.letsblog.api.dto.RenderPreviewRequest;
 import com.letsblog.api.dto.RenderPreviewResponse;
+import com.letsblog.api.dto.RenderSkeletonRequest;
 import com.letsblog.api.dto.ThemeCssResponse;
+import com.letsblog.api.dto.ThemeSkeletonResponse;
 import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.ArticlePreviewService;
 import jakarta.validation.Valid;
@@ -43,5 +45,17 @@ public class ArticlePreviewController {
             @PathVariable Long projectId, @RequestParam(required = false) Long siteId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         return articlePreviewService.fetchThemeCss(projectId, siteId);
+    }
+
+    /**
+     * サイト内の既存記事ページを骨格として流用し、実テーマのDOM構造を保ったまま
+     * タイトル/本文/アイキャッチをプレビュー対象記事の内容へ差し替えたHTML断片を返す。
+     */
+    @PostMapping("/skeleton")
+    public ThemeSkeletonResponse skeleton(
+            @PathVariable Long projectId, @Valid @RequestBody RenderSkeletonRequest request) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        return articlePreviewService.renderSkeleton(
+                projectId, request.siteId(), request.title(), request.contentHtml(), request.featuredImageDataUri());
     }
 }

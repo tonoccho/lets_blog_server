@@ -1,10 +1,13 @@
 package com.letsblog.api.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.CmsType;
+import com.letsblog.api.config.LegacyJacksonRestClientConfig;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.ThemeCssResponse;
+import com.letsblog.api.dto.ThemeSkeletonResponse;
 import com.letsblog.api.markdown.MarkdownRenderer;
 import com.letsblog.api.repository.SiteRepository;
 import org.slf4j.Logger;
@@ -63,6 +66,7 @@ public class ArticlePreviewService {
     private final SiteRepository siteRepository;
     private final SiteService siteService;
     private final RestClient.Builder restClientBuilder;
+    private final PreviewSkeletonFetcher previewSkeletonFetcher;
 
     public ArticlePreviewService(
             CustomTagRenderService customTagRenderService,
@@ -73,7 +77,8 @@ public class ArticlePreviewService {
             ProjectService projectService,
             SiteRepository siteRepository,
             SiteService siteService,
-            RestClient.Builder restClientBuilder) {
+            RestClient.Builder restClientBuilder,
+            PreviewSkeletonFetcher previewSkeletonFetcher) {
         this.customTagRenderService = customTagRenderService;
         this.blogCardTagRenderService = blogCardTagRenderService;
         this.amazonTagRenderService = amazonTagRenderService;
@@ -83,6 +88,7 @@ public class ArticlePreviewService {
         this.siteRepository = siteRepository;
         this.siteService = siteService;
         this.restClientBuilder = restClientBuilder;
+        this.previewSkeletonFetcher = previewSkeletonFetcher;
     }
 
     /**
@@ -118,25 +124,11 @@ public class ArticlePreviewService {
      */
     public ThemeCssResponse fetchThemeCss(Long projectId, Long siteId) {
         Project project = projectService.getProjectEntity(projectId);
-        Site site;
-        if (siteId == null) {
-            site = resolveMasterSite(project);
-            if (site == null) {
-                return new ThemeCssResponse("", false,
-                        "マスター環境(" + project.getMasterEnvironment() + ")にサイトが紐づいていません");
-            }
-        } else {
-            if (!isProjectSite(project, siteId)) {
-                return new ThemeCssResponse("", false, "指定されたサイトはこのプロジェクトに紐づいていません");
-            }
-            site = siteRepository.findById(siteId).orElse(null);
-            if (site == null) {
-                return new ThemeCssResponse("", false, "指定されたサイトが見つかりません");
-            }
+        SiteResolution resolution = resolveSiteForPreview(project, siteId);
+        if (resolution.site() == null) {
+            return new ThemeCssResponse("", false, resolution.errorReason());
         }
-        if (site.getCmsType() != CmsType.WORDPRESS) {
-            return new ThemeCssResponse("", false, "対象サイトがWordPress以外のCMSのためテーマCSSを取得できません");
-        }
+        Site site = resolution.site();
 
         // managed(local)サイトのbase_urlはreverse-proxy経由のブラウザ向け公開URL(https://localhost/...)であり、
         // APIコンテナ自身からは(コンテナ内の「localhost」は自分自身を指すため)到達できない。
@@ -201,6 +193,83 @@ public class ArticlePreviewService {
     }
 
     /**
+     * サイト内の既存記事ページを骨格として流用し、実テーマのDOM構造(タイトルの見出し要素、
+     * アイキャッチ、本文コンテナ等)を保ったまま、プレビュー対象記事のタイトル/本文/アイキャッチへ
+     * 差し替えたHTML断片を返す。
+     *
+     * 差し替え位置は、サイト内の最新記事をWP REST APIで取得し、そのtitle.rendered/content.renderedを
+     * 実際に描画されたDOM内から検索することで特定する({@link PreviewSkeletonFetcher}参照)。
+     * 参照記事が存在しない、差し替え位置を特定できない等の場合はavailable=falseを返し、
+     * 呼び出し側で従来の表示(テーマDOM構造を再現しないプレーンな表示)へフォールバックする。
+     */
+    public ThemeSkeletonResponse renderSkeleton(
+            Long projectId, Long siteId, String title, String contentHtml, String featuredImageDataUri) {
+        Project project = projectService.getProjectEntity(projectId);
+        SiteResolution resolution = resolveSiteForPreview(project, siteId);
+        if (resolution.site() == null) {
+            return new ThemeSkeletonResponse(null, false, resolution.errorReason(), false);
+        }
+        Site site = resolution.site();
+
+        String fetchOrigin = site.getBaseUrl();
+        String internalOrigin = null;
+        if (site.isManagedWordpress()) {
+            String internalBaseUrl = resolveManagedInternalBaseUrl(site);
+            if (internalBaseUrl != null) {
+                fetchOrigin = internalBaseUrl;
+                internalOrigin = originOf(internalBaseUrl);
+            }
+        }
+        String base = fetchOrigin.endsWith("/") ? fetchOrigin : fetchOrigin + "/";
+
+        JsonNode posts;
+        try {
+            posts = browserLikeClient().get()
+                    .uri(base + "wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc"
+                            + "&_fields=id,link,title,content")
+                    .retrieve()
+                    .body(JsonNode.class);
+        } catch (Exception e) {
+            logger.warn("Failed to fetch reference post for skeleton preview: {}", site.getSiteKey(), e);
+            return new ThemeSkeletonResponse(null, false, "参照記事の取得に失敗しました: " + e.getMessage(), false);
+        }
+        if (posts == null || posts.size() == 0) {
+            return new ThemeSkeletonResponse(null, false, "参照記事が見つかりませんでした", false);
+        }
+        JsonNode reference = posts.get(0);
+        String titleRendered = reference.path("title").path("rendered").asText("");
+        String contentRendered = reference.path("content").path("rendered").asText("");
+        String referenceLink = reference.path("link").asText(null);
+        if (referenceLink == null) {
+            return new ThemeSkeletonResponse(null, false, "参照記事のURLを取得できませんでした", false);
+        }
+
+        // 参照記事のlinkはWordPressのsiteurl設定(公開URL)を基準に絶対URLで出力されるため、
+        // fetchThemeCssと同様、managedサイトでは公開オリジンを内部オリジンへ差し替えてから
+        // Playwrightのナビゲーション先として使う(APIコンテナ自身からは公開URLに到達できないため)。
+        String publicOrigin = originOf(site.getBaseUrl());
+        String navigateUrl = internalOrigin != null
+                ? rewriteToInternalOrigin(referenceLink, publicOrigin, internalOrigin)
+                : referenceLink;
+
+        ThemeSkeletonResponse spliced;
+        try {
+            spliced = previewSkeletonFetcher.fetchAndSplice(
+                    navigateUrl, titleRendered, contentRendered, title, contentHtml, featuredImageDataUri);
+        } catch (Exception e) {
+            logger.warn("Failed to render skeleton preview for site: {}", site.getSiteKey(), e);
+            return new ThemeSkeletonResponse(null, false, "記事ページの取得に失敗しました: " + e.getMessage(), false);
+        }
+        if (!spliced.available() || spliced.html() == null) {
+            return spliced;
+        }
+        // Playwright側で解決された絶対URL(img src/a href等)は内部オリジン基準のため、
+        // Webviewから実際に読み込める公開オリジンへ戻してから返す。
+        String html = internalOrigin != null ? spliced.html().replace(internalOrigin, publicOrigin) : spliced.html();
+        return new ThemeSkeletonResponse(html, true, null, spliced.eyecatchSpliced());
+    }
+
+    /**
      * managed(local)WordPressサイトの、APIコンテナから直接到達できる内部URLを返す。
      * WordPressコンテナ内の常駐インスタンスへは http://wordpress/sites/{slug}/ でアクセス可能。
      * credentials復号の複雑性を避けるため、wpSlugから直接内部URLを構築する。
@@ -224,9 +293,45 @@ public class ArticlePreviewService {
     private List<String> rewriteToInternalOrigin(List<String> urls, String publicOrigin, String internalOrigin) {
         List<String> rewritten = new ArrayList<>(urls.size());
         for (String url : urls) {
-            rewritten.add(url.startsWith(publicOrigin) ? internalOrigin + url.substring(publicOrigin.length()) : url);
+            rewritten.add(rewriteToInternalOrigin(url, publicOrigin, internalOrigin));
         }
         return rewritten;
+    }
+
+    private String rewriteToInternalOrigin(String url, String publicOrigin, String internalOrigin) {
+        return url.startsWith(publicOrigin) ? internalOrigin + url.substring(publicOrigin.length()) : url;
+    }
+
+    /** site==nullの場合はerrorReasonに理由が入る({@link #resolveSiteForPreview}参照)。 */
+    private record SiteResolution(Site site, String errorReason) {
+    }
+
+    /**
+     * projectId/siteIdからプレビュー対象サイトを解決する。fetchThemeCssとrenderSkeletonの両方で
+     * 必要な「サイトの紐付け確認 + WordPressサイトであることの確認」が共通のため、ここへ集約する。
+     * siteIdがnullの場合はマスター環境のサイトを対象とする。
+     */
+    private SiteResolution resolveSiteForPreview(Project project, Long siteId) {
+        Site site;
+        if (siteId == null) {
+            site = resolveMasterSite(project);
+            if (site == null) {
+                return new SiteResolution(null,
+                        "マスター環境(" + project.getMasterEnvironment() + ")にサイトが紐づいていません");
+            }
+        } else {
+            if (!isProjectSite(project, siteId)) {
+                return new SiteResolution(null, "指定されたサイトはこのプロジェクトに紐づいていません");
+            }
+            site = siteRepository.findById(siteId).orElse(null);
+            if (site == null) {
+                return new SiteResolution(null, "指定されたサイトが見つかりません");
+            }
+        }
+        if (site.getCmsType() != CmsType.WORDPRESS) {
+            return new SiteResolution(null, "対象サイトがWordPress以外のCMSのため取得できません");
+        }
+        return new SiteResolution(site, null);
     }
 
     /** siteIdがこのプロジェクトのいずれかの環境に紐づいているか。 */
@@ -314,12 +419,15 @@ public class ArticlePreviewService {
      * ブラウザ相当のUser-Agent/Acceptヘッダーを付与したRestClientを返す(Issue #245)。
      */
     private RestClient browserLikeClient() {
-        return restClientBuilder.clone()
+        RestClient.Builder builder = restClientBuilder.clone()
                 .defaultHeader(HttpHeaders.USER_AGENT, BROWSER_USER_AGENT)
                 .defaultHeader(HttpHeaders.ACCEPT,
                         "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
-                .defaultHeader(HttpHeaders.ACCEPT_LANGUAGE, "ja,en-US;q=0.9,en;q=0.8")
-                .build();
+                .defaultHeader(HttpHeaders.ACCEPT_LANGUAGE, "ja,en-US;q=0.9,en;q=0.8");
+        // WP REST API(/wp-json/wp/v2/posts)の応答をJsonNode(Jackson2)へデシリアライズするため、
+        // Boot4既定のJackson3コンバータをJackson2へ差し替える(LegacyJacksonRestClientConfig参照)。
+        LegacyJacksonRestClientConfig.preferJackson2(builder);
+        return builder.build();
     }
 
     private String fetchAndConcatStylesheets(List<String> stylesheetUrls) {
