@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
@@ -251,6 +252,26 @@ class ArticlePreviewServiceTest {
 
         assertTrue(response.available());
         assertTrue(response.css().contains("body { color: green; }"));
+        server.verify();
+    }
+
+    @Test
+    void fetchMasterThemeCss_ブラウザ相当のUser_Agentヘッダーを付与してリクエストする() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+
+        server.expect(requestTo("http://example.com"))
+                .andExpect(header("User-Agent", org.hamcrest.Matchers.containsString("Mozilla")))
+                .andRespond(withSuccess(
+                        "<html><head><link rel=\"stylesheet\" href=\"/style.css\"></head></html>",
+                        MediaType.TEXT_HTML));
+        server.expect(requestTo("http://example.com/style.css"))
+                .andExpect(header("User-Agent", org.hamcrest.Matchers.containsString("Mozilla")))
+                .andRespond(withSuccess("body { color: red; }", MediaType.valueOf("text/css")));
+
+        ThemeCssResponse response = service.fetchMasterThemeCss(1L);
+
+        assertTrue(response.available());
         server.verify();
     }
 
