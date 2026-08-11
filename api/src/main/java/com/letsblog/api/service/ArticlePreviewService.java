@@ -7,6 +7,8 @@ import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.ThemeCssResponse;
 import com.letsblog.api.markdown.MarkdownRenderer;
 import com.letsblog.api.repository.SiteRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -26,6 +28,7 @@ import java.util.regex.Pattern;
 @Service
 public class ArticlePreviewService {
 
+    private static final Logger logger = LoggerFactory.getLogger(ArticlePreviewService.class);
     private static final int MAX_STYLESHEETS = 15;
     private static final int MAX_CSS_LENGTH = 3_000_000;
 
@@ -143,19 +146,31 @@ public class ArticlePreviewService {
 
         String html;
         try {
+            logger.debug("Fetching site top page: {} (site: {})", fetchUrl, site.getSiteKey());
             html = browserLikeClient().get()
                     .uri(URI.create(fetchUrl))
                     .retrieve()
                     .body(String.class);
+            if (html != null) {
+                logger.debug("Fetched HTML length: {} bytes for site: {}", html.length(), site.getSiteKey());
+            }
         } catch (Exception e) {
+            logger.warn("Failed to fetch site top page for site: {}", site.getSiteKey(), e);
             return new ThemeCssResponse("", false, "サイトへの接続に失敗しました: " + e.getMessage());
         }
         if (html == null || html.isBlank()) {
+            logger.warn("Empty or null response from site: {}", site.getSiteKey());
             return new ThemeCssResponse("", false, "サイトから空のレスポンスが返されました");
         }
 
         List<String> stylesheetUrls = extractStylesheetUrls(html, site.getBaseUrl());
+        logger.debug("Extracted {} stylesheet URLs for site: {}", stylesheetUrls.size(), site.getSiteKey());
+        if (!stylesheetUrls.isEmpty()) {
+            stylesheetUrls.forEach(url -> logger.debug("  - {}", url));
+        }
         if (stylesheetUrls.isEmpty()) {
+            logger.warn("No stylesheet links found in site top page for site: {} (HTML length: {} bytes)",
+                    site.getSiteKey(), html.length());
             return new ThemeCssResponse("", false, "サイトのトップページにstylesheetリンクが見つかりませんでした");
         }
         if (internalOrigin != null) {
@@ -170,19 +185,18 @@ public class ArticlePreviewService {
 
     /**
      * managed(local)WordPressサイトの、APIコンテナから直接到達できる内部URLを返す。
-     * credentials(baseUrl)が復号できない・保持されていない場合はnullを返し、呼び出し元は
-     * 従来通りsite.getBaseUrl()にフォールバックする。
+     * WordPressコンテナ内の常駐インスタンスへは http://wordpress/sites/{slug}/ でアクセス可能。
+     * credentials復号の複雑性を避けるため、wpSlugから直接内部URLを構築する。
+     * wpSlugが未設定の場合はnullを返す。
      */
     private String resolveManagedInternalBaseUrl(Site site) {
-        try {
-            CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
-            if (credentials instanceof CmsCredentials.WordPressCredentials wp && StringUtils.hasText(wp.baseUrl())) {
-                return wp.baseUrl();
-            }
-        } catch (RuntimeException ignored) {
-            // 認証情報の復号に失敗した場合は公開URL(site.getBaseUrl())へのフォールバックに任せる
+        if (!site.isManagedWordpress() || !StringUtils.hasText(site.getWpSlug())) {
+            logger.debug("Site {} is not a managed WordPress site or wpSlug is missing", site.getSiteKey());
+            return null;
         }
-        return null;
+        String internalUrl = "http://wordpress/sites/" + site.getWpSlug() + "/";
+        logger.debug("Resolved internal URL for site {}: {}", site.getSiteKey(), internalUrl);
+        return internalUrl;
     }
 
     private String originOf(String url) {
@@ -218,21 +232,37 @@ public class ArticlePreviewService {
         URI base = URI.create(baseUrl);
         List<String> urls = new ArrayList<>();
         Matcher linkMatcher = LINK_TAG_PATTERN.matcher(html);
+        int linkTagCount = 0;
+        int stylesheetCount = 0;
+        int hrefMatchCount = 0;
         while (linkMatcher.find() && urls.size() < MAX_STYLESHEETS) {
+            linkTagCount++;
             String tag = linkMatcher.group();
+            logger.debug("Found <link> tag #{}: {}", linkTagCount, tag.substring(0, Math.min(100, tag.length())));
+
             if (!REL_STYLESHEET_PATTERN.matcher(tag).find()) {
+                logger.debug("  -> No rel=\"stylesheet\" found, skipping");
                 continue;
             }
+            stylesheetCount++;
+
             Matcher hrefMatcher = HREF_PATTERN.matcher(tag);
             if (!hrefMatcher.find()) {
+                logger.debug("  -> No href attribute found, skipping");
                 continue;
             }
+            hrefMatchCount++;
+
             try {
-                urls.add(base.resolve(hrefMatcher.group(1)).toString());
-            } catch (IllegalArgumentException ignored) {
-                // 不正なURLは無視する
+                String resolvedUrl = base.resolve(hrefMatcher.group(1)).toString();
+                urls.add(resolvedUrl);
+                logger.debug("  -> Resolved href to: {}", resolvedUrl);
+            } catch (IllegalArgumentException e) {
+                logger.debug("  -> Failed to resolve href: {}", e.getMessage());
             }
         }
+        logger.debug("HTML parsing summary: {} <link> tags found, {} with rel=stylesheet, {} with valid href",
+                linkTagCount, stylesheetCount, hrefMatchCount);
         return urls;
     }
 
