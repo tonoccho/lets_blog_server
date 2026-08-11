@@ -16,22 +16,30 @@ export class PreviewPanel {
    * @param css 適用するテーマCSS(取得できなかった場合は空文字)
    * @param warning CSSを取得できなかった場合などの警告文
    * @param siteLabel 適用中のCSSの取得元(例: "本番 / example.com")
+   * @param featuredImageDataUri front matterのfeatured_imageのdata URI(未設定/未検出の場合はundefined)
    */
   public static createOrShow(
     html: string,
     css: string,
     warning: string | undefined,
-    siteLabel?: string
+    siteLabel?: string,
+    featuredImageDataUri?: string
   ): void {
     if (PreviewPanel.currentPanel) {
       PreviewPanel.currentPanel._panel.reveal(vscode.ViewColumn.Beside);
-      PreviewPanel.currentPanel._update(html, css, warning, siteLabel);
+      PreviewPanel.currentPanel._update(html, css, warning, siteLabel, featuredImageDataUri);
       return;
     }
-    PreviewPanel.currentPanel = new PreviewPanel(html, css, warning, siteLabel);
+    PreviewPanel.currentPanel = new PreviewPanel(html, css, warning, siteLabel, featuredImageDataUri);
   }
 
-  private constructor(html: string, css: string, warning: string | undefined, siteLabel?: string) {
+  private constructor(
+    html: string,
+    css: string,
+    warning: string | undefined,
+    siteLabel?: string,
+    featuredImageDataUri?: string
+  ) {
     this._panel = vscode.window.createWebviewPanel(
       'letsBlog.articlePreview',
       'Article Preview',
@@ -39,7 +47,7 @@ export class PreviewPanel {
       { enableScripts: false }
     );
     this._panel.onDidDispose(() => this.dispose(), null);
-    this._update(html, css, warning, siteLabel);
+    this._update(html, css, warning, siteLabel, featuredImageDataUri);
   }
 
   private dispose(): void {
@@ -47,17 +55,24 @@ export class PreviewPanel {
     this._panel.dispose();
   }
 
-  private _update(html: string, css: string, warning: string | undefined, siteLabel?: string): void {
+  private _update(
+    html: string,
+    css: string,
+    warning: string | undefined,
+    siteLabel?: string,
+    featuredImageDataUri?: string
+  ): void {
     // どのサイトのCSSで表示しているかがタブから分かるようにする。
     this._panel.title = siteLabel ? `Article Preview (${siteLabel})` : 'Article Preview';
-    this._panel.webview.html = this._getHtmlContent(html, css, warning, siteLabel);
+    this._panel.webview.html = this._getHtmlContent(html, css, warning, siteLabel, featuredImageDataUri);
   }
 
   private _getHtmlContent(
     html: string,
     css: string,
     warning: string | undefined,
-    siteLabel?: string
+    siteLabel?: string,
+    featuredImageDataUri?: string
   ): string {
     const warningBlock = warning
       ? `<div role="alert" style="background:#fff3cd;color:#664d03;padding:8px 12px;margin-bottom:16px;border-radius:4px;font-family:sans-serif;font-size:13px;">${escapeHtml(warning)}</div>`
@@ -66,6 +81,11 @@ export class PreviewPanel {
     // 環境間の差分確認という目的を果たせないため。
     const siteBanner = siteLabel
       ? `<div style="background:var(--vscode-editorWidget-background,#eee);color:var(--vscode-foreground,#333);padding:6px 12px;margin-bottom:12px;border-radius:4px;font-family:sans-serif;font-size:12px;">適用中のCSS: ${escapeHtml(siteLabel)}</div>`
+      : '';
+    // 投稿先サイトのテーマは記事に紐づくアイキャッチ画像を表示するため、プレビューでも
+    // 同様に本文の先頭に表示する(テーマのDOM構造までは再現せず、単に画像を出すのみ)。
+    const eyecatchBlock = featuredImageDataUri
+      ? `<div class="letsblog-preview-eyecatch" style="margin:0 0 16px;"><img src="${escapeHtml(featuredImageDataUri)}" alt="" style="max-width:100%;height:auto;display:block;"></div>`
       : '';
     return `<!DOCTYPE html>
 <html lang="ja">
@@ -81,6 +101,7 @@ ${css}
 ${siteBanner}
 ${warningBlock}
 <main>
+${eyecatchBlock}
 ${html}
 </main>
 </body>
