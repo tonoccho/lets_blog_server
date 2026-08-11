@@ -72,7 +72,7 @@ public class PostController {
     private List<Post> sortPosts(List<Post> posts, String sortBy, String sortOrder) {
         boolean ascending = !"desc".equalsIgnoreCase(sortOrder);
 
-        Comparator<Post> comparator = switch (sortBy) {
+        Comparator<Post> comparator = switch (sortBy == null ? "" : sortBy) {
             case "siteName" -> Comparator.comparing(post -> {
                 Site site = siteRepository.findById(post.getSiteId()).orElse(null);
                 return site != null ? site.getName() : "";
