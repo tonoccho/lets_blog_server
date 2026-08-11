@@ -1,12 +1,15 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.ThemeCssResponse;
 import com.letsblog.api.markdown.MarkdownRenderer;
 import com.letsblog.api.repository.SiteRepository;
+import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 
 import java.net.URI;
@@ -26,6 +29,13 @@ public class ArticlePreviewService {
     private static final int MAX_STYLESHEETS = 15;
     private static final int MAX_CSS_LENGTH = 3_000_000;
 
+    // live/staging環境はCloudflareのボット対策が有効で、User-Agent等が無いプレーンなHTTPクライアントには
+    // JSチャレンジページ(stylesheetリンクを含まないHTML)を返してくる。ブラウザ相当のヘッダーを付与することで
+    // 通常のページ取得として扱われるようにする(Issue #245)。
+    private static final String BROWSER_USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                    + "Chrome/124.0.0.0 Safari/537.36";
+
     private static final Pattern LINK_TAG_PATTERN =
             Pattern.compile("<link\\b[^>]*>", Pattern.CASE_INSENSITIVE);
     private static final Pattern REL_STYLESHEET_PATTERN =
@@ -40,6 +50,7 @@ public class ArticlePreviewService {
     private final MarkdownRenderer markdownRenderer;
     private final ProjectService projectService;
     private final SiteRepository siteRepository;
+    private final SiteService siteService;
     private final RestClient.Builder restClientBuilder;
 
     public ArticlePreviewService(
@@ -50,6 +61,7 @@ public class ArticlePreviewService {
             MarkdownRenderer markdownRenderer,
             ProjectService projectService,
             SiteRepository siteRepository,
+            SiteService siteService,
             RestClient.Builder restClientBuilder) {
         this.customTagRenderService = customTagRenderService;
         this.blogCardTagRenderService = blogCardTagRenderService;
@@ -58,6 +70,7 @@ public class ArticlePreviewService {
         this.markdownRenderer = markdownRenderer;
         this.projectService = projectService;
         this.siteRepository = siteRepository;
+        this.siteService = siteService;
         this.restClientBuilder = restClientBuilder;
     }
 
@@ -76,25 +89,62 @@ public class ArticlePreviewService {
     }
 
     /**
-     * プロジェクトのマスター環境(test/production)に紐づくサイトがWordPressであれば、
-     * トップページのstylesheetリンクを収集して連結したCSSを返す。
-     * 紐付けなし・非WordPress・取得失敗時はavailable=falseで理由を添えて返す。
+     * プロジェクトのマスター環境(test/production)に紐づくサイトのテーマCSSを返す。
      */
     public ThemeCssResponse fetchMasterThemeCss(Long projectId) {
+        return fetchThemeCss(projectId, null);
+    }
+
+    /**
+     * 指定サイト(siteId)のテーマCSSを返す。siteIdがnullの場合はマスター環境のサイトを対象とする。
+     *
+     * VSCode拡張のプレビューで、ローカル/テスト/本番のどのサイトの見た目で確認するかを
+     * 選べるようにするためにsiteIdを受け取る。指定されたサイトがこのプロジェクトに
+     * 紐づいていない場合は、他プロジェクトのサイトを覗けてしまわないよう取得を拒否する。
+     *
+     * 対象がWordPressであれば、トップページのstylesheetリンクを収集して連結したCSSを返す。
+     * 紐付けなし・非WordPress・取得失敗時はavailable=falseで理由を添えて返す。
+     */
+    public ThemeCssResponse fetchThemeCss(Long projectId, Long siteId) {
         Project project = projectService.getProjectEntity(projectId);
-        Site site = resolveMasterSite(project);
-        if (site == null) {
-            return new ThemeCssResponse("", false,
-                    "マスター環境(" + project.getMasterEnvironment() + ")にサイトが紐づいていません");
+        Site site;
+        if (siteId == null) {
+            site = resolveMasterSite(project);
+            if (site == null) {
+                return new ThemeCssResponse("", false,
+                        "マスター環境(" + project.getMasterEnvironment() + ")にサイトが紐づいていません");
+            }
+        } else {
+            if (!isProjectSite(project, siteId)) {
+                return new ThemeCssResponse("", false, "指定されたサイトはこのプロジェクトに紐づいていません");
+            }
+            site = siteRepository.findById(siteId).orElse(null);
+            if (site == null) {
+                return new ThemeCssResponse("", false, "指定されたサイトが見つかりません");
+            }
         }
         if (site.getCmsType() != CmsType.WORDPRESS) {
-            return new ThemeCssResponse("", false, "マスター環境サイトがWordPress以外のCMSのためテーマCSSを取得できません");
+            return new ThemeCssResponse("", false, "対象サイトがWordPress以外のCMSのためテーマCSSを取得できません");
+        }
+
+        // managed(local)サイトのbase_urlはreverse-proxy経由のブラウザ向け公開URL(https://localhost/...)であり、
+        // APIコンテナ自身からは(コンテナ内の「localhost」は自分自身を指すため)到達できない。
+        // 常駐wordpressコンテナへ直結できる内部URル(credentials.baseUrl、例: http://wordpress/sites/{slug})が
+        // 取得できる場合は、そちらをfetch起点として使う(Issue #246)。取得できない場合は従来通りbase_urlを使う。
+        String fetchUrl = site.getBaseUrl();
+        String internalOrigin = null;
+        if (site.isManagedWordpress()) {
+            String internalBaseUrl = resolveManagedInternalBaseUrl(site);
+            if (internalBaseUrl != null) {
+                fetchUrl = internalBaseUrl.endsWith("/") ? internalBaseUrl : internalBaseUrl + "/";
+                internalOrigin = originOf(internalBaseUrl);
+            }
         }
 
         String html;
         try {
-            html = restClientBuilder.clone().build().get()
-                    .uri(URI.create(site.getBaseUrl()))
+            html = browserLikeClient().get()
+                    .uri(URI.create(fetchUrl))
                     .retrieve()
                     .body(String.class);
         } catch (Exception e) {
@@ -108,9 +158,51 @@ public class ArticlePreviewService {
         if (stylesheetUrls.isEmpty()) {
             return new ThemeCssResponse("", false, "サイトのトップページにstylesheetリンクが見つかりませんでした");
         }
+        if (internalOrigin != null) {
+            // stylesheetのhrefはWordPressのsiteurl設定(公開URL)を基準に絶対URLで出力されるため、
+            // トップページと同様に公開オリジンを内部オリジンへ差し替えてから取得する。
+            stylesheetUrls = rewriteToInternalOrigin(stylesheetUrls, originOf(site.getBaseUrl()), internalOrigin);
+        }
 
         String css = fetchAndConcatStylesheets(stylesheetUrls);
         return new ThemeCssResponse(css, true, null);
+    }
+
+    /**
+     * managed(local)WordPressサイトの、APIコンテナから直接到達できる内部URLを返す。
+     * credentials(baseUrl)が復号できない・保持されていない場合はnullを返し、呼び出し元は
+     * 従来通りsite.getBaseUrl()にフォールバックする。
+     */
+    private String resolveManagedInternalBaseUrl(Site site) {
+        try {
+            CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
+            if (credentials instanceof CmsCredentials.WordPressCredentials wp && StringUtils.hasText(wp.baseUrl())) {
+                return wp.baseUrl();
+            }
+        } catch (RuntimeException ignored) {
+            // 認証情報の復号に失敗した場合は公開URL(site.getBaseUrl())へのフォールバックに任せる
+        }
+        return null;
+    }
+
+    private String originOf(String url) {
+        URI uri = URI.create(url);
+        return uri.getScheme() + "://" + uri.getAuthority();
+    }
+
+    private List<String> rewriteToInternalOrigin(List<String> urls, String publicOrigin, String internalOrigin) {
+        List<String> rewritten = new ArrayList<>(urls.size());
+        for (String url : urls) {
+            rewritten.add(url.startsWith(publicOrigin) ? internalOrigin + url.substring(publicOrigin.length()) : url);
+        }
+        return rewritten;
+    }
+
+    /** siteIdがこのプロジェクトのいずれかの環境に紐づいているか。 */
+    private boolean isProjectSite(Project project, Long siteId) {
+        return siteId.equals(project.getLocalSiteId())
+                || siteId.equals(project.getTestSiteId())
+                || siteId.equals(project.getProductionSiteId());
     }
 
     private Site resolveMasterSite(Project project) {
@@ -144,9 +236,21 @@ public class ArticlePreviewService {
         return urls;
     }
 
+    /**
+     * ブラウザ相当のUser-Agent/Acceptヘッダーを付与したRestClientを返す(Issue #245)。
+     */
+    private RestClient browserLikeClient() {
+        return restClientBuilder.clone()
+                .defaultHeader(HttpHeaders.USER_AGENT, BROWSER_USER_AGENT)
+                .defaultHeader(HttpHeaders.ACCEPT,
+                        "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+                .defaultHeader(HttpHeaders.ACCEPT_LANGUAGE, "ja,en-US;q=0.9,en;q=0.8")
+                .build();
+    }
+
     private String fetchAndConcatStylesheets(List<String> stylesheetUrls) {
         StringBuilder css = new StringBuilder();
-        RestClient client = restClientBuilder.clone().build();
+        RestClient client = browserLikeClient();
         for (String url : stylesheetUrls) {
             if (css.length() >= MAX_CSS_LENGTH) {
                 break;

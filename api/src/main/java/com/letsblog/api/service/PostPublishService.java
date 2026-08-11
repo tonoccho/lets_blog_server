@@ -13,6 +13,7 @@ import com.letsblog.api.cms.PostContent;
 import com.letsblog.api.cms.PostResult;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Post;
+import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.domain.User;
 import com.letsblog.api.domain.UserSiteAuthor;
@@ -35,6 +36,9 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.Optional;
 
 /**
@@ -112,15 +116,22 @@ public class PostPublishService {
         List<String> tagIds = cmsAdapter.resolveTags(credentials, command.tags());
         String authorId = resolveAuthorId(cmsAdapter, credentials, site.getId());
 
+        Instant publishScheduledAt = resolvePublishScheduledAt(command.publishScheduledAt(), site, projectId);
+        // 予約投稿はWordPressの"future"ステータスで表現する(指定日時にCMS側が自動公開する)。
+        String status = publishScheduledAt != null
+                ? "future"
+                : (command.status() == null ? "draft" : command.status());
+
         PostContent content = new PostContent(
                 command.title(),
                 command.slug(),
                 html,
-                command.status() == null ? "draft" : command.status(),
+                status,
                 categoryIds,
                 tagIds,
                 imageResult.featuredMediaId(),
-                authorId
+                authorId,
+                publishScheduledAt
         );
 
         log.info("WordPress投稿リクエスト送信: wpPostId={}, featuredMediaId={}", command.wpPostId(), content.featuredMediaId());
@@ -334,5 +345,46 @@ public class PostPublishService {
 
     /** アップロード済み画像1件分の情報。sha256は再投稿時に内容が変わっていないかの判定に使う。 */
     private record UploadedImageInfo(String sha256, String url, String mediaId) {
+    }
+
+    /**
+     * front matterのpublish_scheduled_atを検証し、実際に適用する公開予定日時を返す。
+     *
+     * 予約投稿は本番(live)サイトでのみ有効とする。ローカル/テスト環境は動作確認用途で
+     * 即時に結果を見たいため、予約指定があっても無視して通常どおり投稿する。
+     * 形式不正や過去日時は、利用者が意図と異なる公開状態に気付けないまま進むのを防ぐため
+     * エラーとして扱う。
+     */
+    private Instant resolvePublishScheduledAt(String raw, Site site, Long projectId) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+
+        Instant scheduledAt;
+        try {
+            scheduledAt = OffsetDateTime.parse(raw.trim()).toInstant();
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException(
+                    "publish_scheduled_at はISO 8601形式(例: 2026-12-25T09:00:00Z)で指定してください: " + raw);
+        }
+        if (!scheduledAt.isAfter(Instant.now())) {
+            throw new IllegalArgumentException("publish_scheduled_at には未来の日時を指定してください: " + raw);
+        }
+
+        if (!isProductionSite(site, projectId)) {
+            log.info("本番サイト以外への投稿のため、publish_scheduled_at({})を無視します: siteKey={}",
+                    raw, site.getSiteKey());
+            return null;
+        }
+        return scheduledAt;
+    }
+
+    /** 投稿先がプロジェクトの本番(live)サイトかどうか。 */
+    private boolean isProductionSite(Site site, Long projectId) {
+        if (projectId == null) {
+            return false;
+        }
+        Project project = projectService.getProjectEntity(projectId);
+        return project != null && site.getId().equals(project.getProductionSiteId());
     }
 }

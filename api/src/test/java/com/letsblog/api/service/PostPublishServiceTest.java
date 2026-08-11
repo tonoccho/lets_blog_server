@@ -28,6 +28,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -114,7 +115,7 @@ class PostPublishServiceTest {
             String featuredImageFilename, List<String> imageReferences) {
         return new PostPublishCommand(
                 "main", title, slug, "draft", List.of(), List.of(), null, "本文", images, featuredImageFilename,
-                imageReferences);
+                imageReferences, null);
     }
 
     @Test
@@ -358,7 +359,7 @@ class PostPublishServiceTest {
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", images, null,
-                List.of("assets/eyecatch.png"));
+                List.of("assets/eyecatch.png"), null);
 
         service.publish(command);
 
@@ -384,10 +385,105 @@ class PostPublishServiceTest {
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", images, null,
-                List.of("assets/eyecatch.png"));
+                List.of("assets/eyecatch.png"), null);
 
         service.publish(command);
 
         verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.png"), any(), any());
+    }
+
+    private PostPublishCommand scheduledCommand(String publishScheduledAt) {
+        return new PostPublishCommand(
+                "main", "My Article", "my-article", "draft", List.of(), List.of(), null, "本文", List.of(), null,
+                List.of(), publishScheduledAt);
+    }
+
+    /** siteId=1 を本番サイトに持つプロジェクトを紐づける。 */
+    private void bindProductionSite() {
+        com.letsblog.api.domain.Project project = new com.letsblog.api.domain.Project();
+        project.setId(7L);
+        project.setProductionSiteId(1L);
+        // 形式不正・過去日時は本番判定より前に弾かれるため、この経路を通らないことがある。
+        lenient().when(projectService.findProjectIdBySiteId(1L)).thenReturn(7L);
+        lenient().when(projectService.getProjectEntity(7L)).thenReturn(project);
+    }
+
+    /** siteId=1 をテスト環境に持つ(本番は別サイト)プロジェクトを紐づける。 */
+    private void bindNonProductionSite() {
+        com.letsblog.api.domain.Project project = new com.letsblog.api.domain.Project();
+        project.setId(7L);
+        project.setTestSiteId(1L);
+        project.setProductionSiteId(99L);
+        when(projectService.findProjectIdBySiteId(1L)).thenReturn(7L);
+        when(projectService.getProjectEntity(7L)).thenReturn(project);
+    }
+
+    @Test
+    void publish_本番サイトでは公開予定日時がstatus_futureとして送られる() {
+        bindProductionSite();
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "future"));
+        String scheduledAt = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).plusDays(1)
+                .withNano(0).toString();
+
+        service.publish(scheduledCommand(scheduledAt));
+
+        org.mockito.ArgumentCaptor<PostContent> captor =
+                org.mockito.ArgumentCaptor.forClass(PostContent.class);
+        verify(cmsAdapter).createOrUpdatePost(any(), captor.capture(), any());
+        assertEquals("future", captor.getValue().status());
+        assertEquals(java.time.OffsetDateTime.parse(scheduledAt).toInstant(),
+                captor.getValue().publishScheduledAt());
+    }
+
+    @Test
+    void publish_本番以外のサイトでは公開予定日時を無視する() {
+        bindNonProductionSite();
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        String scheduledAt = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).plusDays(1).toString();
+
+        service.publish(scheduledCommand(scheduledAt));
+
+        org.mockito.ArgumentCaptor<PostContent> captor =
+                org.mockito.ArgumentCaptor.forClass(PostContent.class);
+        verify(cmsAdapter).createOrUpdatePost(any(), captor.capture(), any());
+        // 予約は無視され、指定どおりのstatusで投稿される。
+        assertEquals("draft", captor.getValue().status());
+        assertNull(captor.getValue().publishScheduledAt());
+    }
+
+    @Test
+    void publish_過去の公開予定日時は拒否する() {
+        bindProductionSite();
+        String past = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).minusDays(1).toString();
+
+        IllegalArgumentException e = org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalArgumentException.class, () -> service.publish(scheduledCommand(past)));
+        assertTrue(e.getMessage().contains("未来の日時"));
+    }
+
+    @Test
+    void publish_ISO8601以外の公開予定日時は拒否する() {
+        bindProductionSite();
+
+        IllegalArgumentException e = org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalArgumentException.class, () -> service.publish(scheduledCommand("2026/12/25 09:00")));
+        assertTrue(e.getMessage().contains("ISO 8601"));
+    }
+
+    @Test
+    void publish_公開予定日時が空文字の場合は通常投稿として扱う() {
+        bindProductionSite();
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+
+        service.publish(scheduledCommand("  "));
+
+        org.mockito.ArgumentCaptor<PostContent> captor =
+                org.mockito.ArgumentCaptor.forClass(PostContent.class);
+        verify(cmsAdapter).createOrUpdatePost(any(), captor.capture(), any());
+        assertEquals("draft", captor.getValue().status());
+        assertNull(captor.getValue().publishScheduledAt());
     }
 }

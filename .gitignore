@@ -21,6 +21,7 @@ npm-debug.log*
 
 # VSCode extension
 extension/out/
+extension/coverage/
 extension/dist/
 extension/*.vsix
 

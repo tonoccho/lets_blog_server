@@ -20,8 +20,11 @@ const LEVEL_LABELS: Record<LogLevel, string> = {
  * vscode.OutputChannelそのものではなく必要な操作だけを要求する。
  */
 export interface LogSink {
+  /** 1行を出力する。 */
   appendLine(value: string): void;
+  /** 出力先を前面に表示する(対応する出力先のみ)。 */
   show?(preserveFocus?: boolean): void;
+  /** 出力先を破棄する(対応する出力先のみ)。 */
   dispose?(): void;
 }
 
@@ -52,18 +55,22 @@ export class Logger {
     this._minLevel = debugMode ? LogLevel.Debug : LogLevel.Info;
   }
 
+  /** 不具合調査用の詳細ログ。letsBlog.debugModeが有効なときだけ出力される。 */
   public debug(message: string, context?: Record<string, unknown>): void {
     this._log(LogLevel.Debug, message, context);
   }
 
+  /** 通常の動作記録。 */
   public info(message: string, context?: Record<string, unknown>): void {
     this._log(LogLevel.Info, message, context);
   }
 
+  /** 処理は継続するが注意が必要な事象。 */
   public warn(message: string, context?: Record<string, unknown>): void {
     this._log(LogLevel.Warn, message, context);
   }
 
+  /** 処理が失敗した事象。 */
   public error(message: string, context?: Record<string, unknown>): void {
     this._log(LogLevel.Error, message, context);
   }
@@ -73,6 +80,7 @@ export class Logger {
     this._resolveSink().show?.(true);
   }
 
+  /** 出力先を破棄する。拡張の無効化時に呼ばれる。 */
   public dispose(): void {
     this._sink?.dispose?.();
     this._sink = undefined;

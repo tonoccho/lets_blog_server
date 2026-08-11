@@ -162,6 +162,14 @@ code --install-extension letsblog-vscode-<バージョン>.vsix
 証明書ストアに `certs/localhost.crt` を信頼済み証明書として登録する必要がある。詳細は
 [docs/setup.md](docs/setup.md) の「VSCode拡張の設定」を参照。
 
+拡張のTLS証明書検証は既定で有効(`letsBlog.allowInsecureTls: false`)。上記の証明書登録が
+行えない場合に限り、`letsBlog.allowInsecureTls: true` で検証をスキップできるが、
+中間者攻撃を検出できなくなるため信頼できるネットワーク上のローカル環境でのみ使用すること。
+拡張の設計は [extension/ARCHITECTURE.md](extension/ARCHITECTURE.md)、API仕様は
+[extension/API_REFERENCE.md](extension/API_REFERENCE.md)、セキュリティ仕様は
+[extension/SECURITY.md](extension/SECURITY.md)、不具合調査は
+[extension/TROUBLESHOOTING.md](extension/TROUBLESHOOTING.md) を参照。
+
 ## API ドキュメント
 
 REST APIは以下のエンドポイントで公開しています:

@@ -8,16 +8,24 @@ import {
   extractLocalImageReferences,
   resolveFeaturedImageReference,
   resolveExistingPostId,
+  guessImageMimeType,
+  validateScheduledPublication,
 } from './frontMatter';
 import * as api from './apiClient';
 import { PlanPanel } from './planPanel';
+import { ArticleCreationPanel } from './articleCreationPanel';
 import { PreviewPanel } from './previewPanel';
 import { ImageGenPanel } from './imageGenPanel';
+import { ImageGalleryPanel } from './imageGalleryPanel';
 import { SectionGenPanel } from './sectionGenPanel';
 import { resolveSectionContext } from './headingContext';
 import { logger } from './logger';
-import { reportError } from './errorHandler';
+import { messageOf, reportError } from './errorHandler';
 
+/**
+ * 拡張の有効化。ロガーの初期化と全コマンドの登録を行う。
+ * VSCodeが拡張を読み込んだ際に一度だけ呼ばれる。
+ */
 export function activate(context: vscode.ExtensionContext): void {
   logger.refreshFromConfiguration();
   logger.info("Let's Blog 拡張を有効化しました。");
@@ -32,6 +40,8 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('letsBlog.createArticle', () => commandCreateArticle(context)),
+    vscode.commands.registerCommand('letsBlog.schedulePublication', () => commandSchedulePublication()),
     vscode.commands.registerCommand('letsBlog.login', () => commandLogin(context)),
     vscode.commands.registerCommand('letsBlog.setApiKey', () => commandSetApiKey(context)),
     vscode.commands.registerCommand('letsBlog.selectSite', () => commandSelectSite(context)),
@@ -40,6 +50,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.askAi', () => commandAskAi(context)),
     vscode.commands.registerCommand('letsBlog.suggestTags', () => commandSuggestTags(context)),
     vscode.commands.registerCommand('letsBlog.generateImage', () => commandGenerateImage(context)),
+    vscode.commands.registerCommand('letsBlog.imageGallery', () => commandImageGallery(context)),
     vscode.commands.registerCommand('letsBlog.generateSection', () => commandGenerateSection(context)),
     vscode.commands.registerCommand('letsBlog.selectProject', () => commandSelectProject(context)),
     vscode.commands.registerCommand('letsBlog.planArticle', () => commandPlanArticle(context)),
@@ -47,6 +58,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 }
 
+/** 拡張の無効化。破棄処理はcontext.subscriptionsに登録済みのため、ここでは何もしない。 */
 export function deactivate(): void {
   // no-op
 }
@@ -90,39 +102,53 @@ async function commandLogin(context: vscode.ExtensionContext): Promise<void> {
   const email = await vscode.window.showInputBox({ prompt: 'メールアドレス', ignoreFocusOut: true });
   if (!email) return;
 
-  const password = await vscode.window.showInputBox({
+  const serverUrl = getServerUrl();
+  if (!(await confirmCredentialTransport(serverUrl))) return;
+
+  let password = await vscode.window.showInputBox({
     prompt: 'パスワード',
     password: true,
     ignoreFocusOut: true,
   });
   if (!password) return;
 
+  let apiKey: string | null = null;
   try {
-    let result = await api.login(getServerUrl(), email, password);
+    let result = await api.login(serverUrl, email, password);
+    // 送信済みの資格情報はこれ以降使わないため、保持し続けないよう参照を切る。
+    password = '';
 
     if (result.twoFactorRequired) {
-      const code = await vscode.window.showInputBox({
+      let code = await vscode.window.showInputBox({
         prompt: '2段階認証コードを入力してください',
         ignoreFocusOut: true,
       });
       if (!code) return;
-      result = await api.verifyTotpLogin(getServerUrl(), result.user.id, code);
+      result = await api.verifyTotpLogin(serverUrl, result.user.id, code);
+      code = '';
     }
 
-    if (!result.apiKey) {
+    apiKey = result.apiKey;
+    if (!apiKey) {
       throw new Error('APIキーの取得に失敗しました。');
     }
 
-    await setApiKey(context, result.apiKey);
+    await setApiKey(context, apiKey);
     await setActor(context, result.user);
+    // 別ユーザーでログインし直した場合に、前のユーザーの参照結果が残らないようにする。
+    api.clearResponseCache();
     vscode.window.showInformationMessage(`'${result.user.email}' としてログインしました。`);
   } catch (err) {
     reportError('ログインに失敗しました', err);
+  } finally {
+    // 例外時も含め、平文の資格情報をこの関数のスコープに残さない。
+    password = '';
+    apiKey = null;
   }
 }
 
 async function commandSetApiKey(context: vscode.ExtensionContext): Promise<void> {
-  const value = await vscode.window.showInputBox({
+  let value = await vscode.window.showInputBox({
     prompt: "仲介APIサーバーのAPIキーを入力してください",
     password: true,
     ignoreFocusOut: true,
@@ -130,8 +156,29 @@ async function commandSetApiKey(context: vscode.ExtensionContext): Promise<void>
   if (!value) {
     return;
   }
-  await setApiKey(context, value);
-  vscode.window.showInformationMessage('APIキーを保存しました。');
+  try {
+    await setApiKey(context, value);
+    api.clearResponseCache();
+    vscode.window.showInformationMessage('APIキーを保存しました。');
+  } finally {
+    value = '';
+  }
+}
+
+/**
+ * 資格情報を送信する前に、通信経路が保護されているかを確認する。
+ * 平文HTTPではパスワードとAPIキーが傍受されうるため、利用者へ明示的な同意を求める。
+ */
+async function confirmCredentialTransport(serverUrl: string): Promise<boolean> {
+  if (serverUrl.startsWith('https://')) {
+    return true;
+  }
+  const proceed = await vscode.window.showWarningMessage(
+    `接続先 '${serverUrl}' はHTTPS ではありません。パスワードとAPIキーが平文で送信されます。続行しますか?`,
+    { modal: true },
+    '続行する'
+  );
+  return proceed === '続行する';
 }
 
 async function commandSelectSite(context: vscode.ExtensionContext): Promise<void> {
@@ -205,13 +252,27 @@ async function publishToSite(
     }
   }
 
+  // 予約投稿は本番サイトでのみ有効。送信前に形式と未来日時であることを確認する。
+  const scheduled = validateScheduledPublication(article.data.publish_scheduled_at);
+  if (scheduled.error) {
+    vscode.window.showErrorMessage(scheduled.error);
+    return;
+  }
+
   const existingPostId = resolveExistingPostId(article.data, siteKey);
   const actor = await getActor(context);
 
   const result = await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'WordPressへ投稿しています…' },
-    () =>
-      api.publishPost(
+    (progress) => {
+      // 画像同梱の有無で待ち時間が大きく変わるため、何をしているかを明示する。
+      progress.report({
+        message:
+          images.length > 0
+            ? `本文と画像${images.length}件を送信しています…`
+            : '本文を送信しています…',
+      });
+      return api.publishPost(
         serverUrl,
         apiKey,
         {
@@ -225,9 +286,11 @@ async function publishToSite(
           markdown: article.content,
           images,
           featuredImageFilename: featuredImage?.reference,
+          publishScheduledAt: scheduled.value,
         },
         actor
-      )
+      );
+    }
   );
 
   article.data.site = siteKey;
@@ -471,6 +534,31 @@ async function commandGenerateImage(context: vscode.ExtensionContext): Promise<v
   }
 }
 
+/**
+ * サーバーに保存済みの生成画像を一覧し、記事へ取り込む。
+ * 画像生成パネルで作った画像を後から再利用するための入口。
+ */
+async function commandImageGallery(context: vscode.ExtensionContext): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  try {
+    const article = parseArticle(editor.document.getText());
+    const projectId = (article.data.project_id as number | undefined) ?? getProjectId(context);
+    if (!projectId) {
+      vscode.window.showErrorMessage(
+        'プロジェクトが未選択です。front matterのproject_id、または「Let\'s Blog: Select Project」で設定してください。'
+      );
+      return;
+    }
+
+    const baseDir = path.dirname(editor.document.uri.fsPath);
+    ImageGalleryPanel.createOrShow(context, editor, baseDir, projectId);
+  } catch (err) {
+    reportError('画像ギャラリーの起動に失敗しました', err);
+  }
+}
+
 async function commandGenerateSection(context: vscode.ExtensionContext): Promise<void> {
   const editor = getActiveMarkdownEditor();
   if (!editor) return;
@@ -483,6 +571,142 @@ async function commandGenerateSection(context: vscode.ExtensionContext): Promise
   } catch (err) {
     reportError('セクション生成パネルの起動に失敗しました', err);
   }
+}
+
+/**
+ * GitHub Issueを起点にせず、コマンドから直接記事を作成する。
+ * Issueが無い記事(単発の告知や覚書など)を書き始めるための入口。
+ */
+async function commandCreateArticle(context: vscode.ExtensionContext): Promise<void> {
+  try {
+    await requireApiKey(context);
+    ArticleCreationPanel.createOrShow(context);
+  } catch (err) {
+    reportError('記事作成パネルの起動に失敗しました', err);
+  }
+}
+
+/**
+ * front matterのpublish_scheduled_atを対話的に設定する。
+ *
+ * 日付と時刻を順に選ばせ、ISO 8601(UTC)へ変換して書き込む。
+ * VSCodeの標準UIにはカレンダーピッカーが無いため、QuickPickで日付候補を出しつつ
+ * 任意の日付も入力できるようにしている。
+ */
+async function commandSchedulePublication(): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  try {
+    const article = parseArticle(editor.document.getText());
+
+    const current = typeof article.data.publish_scheduled_at === 'string'
+      ? article.data.publish_scheduled_at
+      : undefined;
+
+    const action = await vscode.window.showQuickPick(
+      [
+        { label: '公開予定日時を設定する', value: 'set' as const },
+        ...(current
+          ? [{ label: `公開予定日時を解除する (現在: ${current})`, value: 'clear' as const }]
+          : []),
+      ],
+      { placeHolder: current ? `現在の設定: ${current}` : '公開予定日時は未設定です' }
+    );
+    if (!action) return;
+
+    if (action.value === 'clear') {
+      delete article.data.publish_scheduled_at;
+      await replaceDocumentText(editor, stringifyArticle(article));
+      vscode.window.showInformationMessage('公開予定日時を解除しました。');
+      return;
+    }
+
+    const date = await pickScheduledDate();
+    if (!date) return;
+    const time = await pickScheduledTime();
+    if (!time) return;
+
+    // 入力はローカルタイムゾーンとして解釈し、front matterにはUTCのISO 8601で保存する。
+    const localDateTime = new Date(`${date}T${time}:00`);
+    if (Number.isNaN(localDateTime.getTime())) {
+      vscode.window.showErrorMessage(`日時として解釈できません: ${date} ${time}`);
+      return;
+    }
+    const isoValue = localDateTime.toISOString();
+
+    const validation = validateScheduledPublication(isoValue);
+    if (validation.error) {
+      vscode.window.showErrorMessage(validation.error);
+      return;
+    }
+
+    article.data.publish_scheduled_at = isoValue;
+    await replaceDocumentText(editor, stringifyArticle(article));
+    vscode.window.showInformationMessage(
+      `公開予定日時を ${localDateTime.toLocaleString()} (${isoValue}) に設定しました。` +
+        ' 本番サイトへ投稿したときに有効になります。'
+    );
+  } catch (err) {
+    reportError('公開予定日時の設定に失敗しました', err);
+  }
+}
+
+/** 日付を選ばせる。今日から2週間分の候補に加え、任意の日付も入力できる。 */
+async function pickScheduledDate(): Promise<string | undefined> {
+  const today = new Date();
+  const candidates: vscode.QuickPickItem[] = [];
+  for (let offset = 0; offset < 14; offset++) {
+    const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset);
+    candidates.push({
+      label: formatLocalDate(day),
+      description: offset === 0 ? '今日' : offset === 1 ? '明日' : day.toLocaleDateString(undefined, { weekday: 'long' }),
+    });
+  }
+  candidates.push({ label: 'その他の日付を入力…', description: 'YYYY-MM-DD' });
+
+  const picked = await vscode.window.showQuickPick(candidates, { placeHolder: '公開する日付を選択' });
+  if (!picked) return undefined;
+  if (!picked.label.startsWith('その他')) {
+    return picked.label;
+  }
+
+  return vscode.window.showInputBox({
+    prompt: '公開する日付 (YYYY-MM-DD)',
+    validateInput: (value) =>
+      /^\d{4}-\d{2}-\d{2}$/.test(value) ? undefined : 'YYYY-MM-DD 形式で入力してください。',
+    ignoreFocusOut: true,
+  });
+}
+
+/** 時刻を選ばせる。よく使う時刻の候補に加え、任意の時刻も入力できる。 */
+async function pickScheduledTime(): Promise<string | undefined> {
+  const candidates: vscode.QuickPickItem[] = [
+    { label: '09:00', description: '朝' },
+    { label: '12:00', description: '昼' },
+    { label: '18:00', description: '夕方' },
+    { label: '21:00', description: '夜' },
+    { label: 'その他の時刻を入力…', description: 'HH:MM' },
+  ];
+  const picked = await vscode.window.showQuickPick(candidates, { placeHolder: '公開する時刻を選択(ローカル時間)' });
+  if (!picked) return undefined;
+  if (!picked.label.startsWith('その他')) {
+    return picked.label;
+  }
+
+  return vscode.window.showInputBox({
+    prompt: '公開する時刻 (HH:MM、ローカル時間)',
+    validateInput: (value) =>
+      /^([01]\d|2[0-3]):[0-5]\d$/.test(value) ? undefined : 'HH:MM 形式で入力してください。',
+    ignoreFocusOut: true,
+  });
+}
+
+/** Dateをローカルタイムゾーンの YYYY-MM-DD へ整形する(toISOStringはUTCになるため使わない)。 */
+function formatLocalDate(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
 }
 
 async function commandPlanArticle(context: vscode.ExtensionContext): Promise<void> {
@@ -531,16 +755,6 @@ async function commandSelectProject(context: vscode.ExtensionContext): Promise<v
   }
 }
 
-const IMAGE_MIME_TYPES: Record<string, string> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.svg': 'image/svg+xml',
-  '.webp': 'image/webp',
-  '.bmp': 'image/bmp',
-};
-
 /**
  * Markdown本文中のローカル画像参照をbase64データURIへ置換する。プレビューはWebviewの外(APIサーバー)で
  * HTML化するため、投稿先を持たないローカル画像をそのまま渡すと壊れたリンクになってしまうのを防ぐ。
@@ -549,12 +763,58 @@ function inlineLocalImages(content: string, baseDir: string): string {
   let rewritten = content;
   for (const image of extractLocalImageReferences(content, baseDir)) {
     if (!fs.existsSync(image.absolutePath)) continue;
-    const mimeType = IMAGE_MIME_TYPES[path.extname(image.absolutePath).toLowerCase()];
+    const mimeType = guessImageMimeType(image.absolutePath);
     if (!mimeType) continue;
     const dataUri = `data:${mimeType};base64,${fs.readFileSync(image.absolutePath).toString('base64')}`;
     rewritten = rewritten.split(image.reference).join(dataUri);
   }
   return rewritten;
+}
+
+/**
+ * プレビューに使うCSSの取得元サイトを選ばせる。
+ * プロジェクトに紐づくサイトが1つだけなら確認を挟まずそれを使い、
+ * 複数ある場合のみ選択肢を出す(常にダイアログを出すと毎回の操作が増えるため)。
+ */
+interface PreviewSiteChoice extends vscode.QuickPickItem {
+  siteId?: number;
+  siteName: string;
+}
+
+function buildPreviewSiteChoices(project: api.ProjectDetail): PreviewSiteChoice[] {
+  const choices: PreviewSiteChoice[] = [];
+  const environments: [string, api.ProjectSite | null][] = [
+    ['ローカル', project.localSite],
+    ['テスト', project.testSite],
+    ['本番', project.productionSite],
+  ];
+  for (const [label, site] of environments) {
+    if (site) {
+      choices.push({ label, description: site.name, siteId: site.id, siteName: site.name });
+    }
+  }
+  return choices;
+}
+
+async function pickPreviewSite(
+  serverUrl: string,
+  apiKey: string,
+  actor: api.Actor | undefined,
+  projectId: number
+): Promise<PreviewSiteChoice | undefined> {
+  const project = await api.getProject(serverUrl, apiKey, actor, projectId);
+  const choices = buildPreviewSiteChoices(project);
+
+  if (choices.length === 0) {
+    // サイト未紐付けでもプレビュー自体は可能(CSSなしで表示する)。
+    return { label: 'サイトなし', siteName: 'サイト未紐付け' };
+  }
+  if (choices.length === 1) {
+    return choices[0];
+  }
+  return vscode.window.showQuickPick(choices, {
+    placeHolder: 'プレビューに使うサイトのCSSを選択',
+  });
 }
 
 async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<void> {
@@ -574,28 +834,38 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
     const apiKey = await requireApiKey(context);
     const actor = await getActor(context);
     const serverUrl = getServerUrl();
+
+    const site = await pickPreviewSite(serverUrl, apiKey, actor, projectId);
+    if (!site) return;
+
     const baseDir = path.dirname(editor.document.uri.fsPath);
     const markdown = inlineLocalImages(article.content, baseDir);
 
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'プレビューを生成しています…' },
-      async () => {
+      async (progress) => {
+        progress.report({ message: 'Markdownを変換しています…' });
         const html = await api.renderPreviewHtml(serverUrl, apiKey, actor, projectId, markdown);
 
+        progress.report({ message: `${site.siteName} のCSSを取得しています…` });
         let css = '';
         let warning: string | undefined;
-        try {
-          const themeCss = await api.getMasterThemeCss(serverUrl, apiKey, actor, projectId);
-          if (themeCss.available) {
-            css = themeCss.css;
-          } else {
-            warning = `マスター環境サイトのCSSを取得できませんでした: ${themeCss.reason ?? '不明なエラー'}`;
+        if (site.siteId == null) {
+          warning = 'プロジェクトにサイトが紐づいていないため、CSSなしで表示しています。';
+        } else {
+          try {
+            const themeCss = await api.getThemeCss(serverUrl, apiKey, actor, projectId, site.siteId);
+            if (themeCss.available) {
+              css = themeCss.css;
+            } else {
+              warning = `${site.siteName} のCSSを取得できませんでした: ${themeCss.reason ?? '不明なエラー'}`;
+            }
+          } catch (cssError) {
+            warning = `${site.siteName} のCSS取得に失敗しました: ${messageOf(cssError)}`;
           }
-        } catch (cssError) {
-          warning = `マスター環境サイトのCSS取得に失敗しました: ${String(cssError instanceof Error ? cssError.message : cssError)}`;
         }
 
-        PreviewPanel.createOrShow(html, css, warning);
+        PreviewPanel.createOrShow(html, css, warning, `${site.label} / ${site.siteName}`);
       }
     );
   } catch (err) {

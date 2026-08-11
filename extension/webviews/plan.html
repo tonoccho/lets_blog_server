@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="{{csp}}">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Article Plan</title>
+{{sharedStyles}}
+<link rel="stylesheet" href="{{styleUri}}">
+</head>
+<body>
+<main class="container">
+  <h1 class="visually-hidden">記事プランニング</h1>
+
+  <section class="section" aria-labelledby="issueSectionTitle">
+    <h2 class="section-title" id="issueSectionTitle">未割り当てのIssue</h2>
+    <!-- 一覧は矢印キーで移動できるリストボックスとして扱う(項目はJS側でrole=optionを付与)。 -->
+    <div class="issue-list" id="issueList" role="listbox" aria-labelledby="issueSectionTitle" tabindex="0">
+      <div class="empty">読み込み中...</div>
+    </div>
+    <div class="pager" id="issuePager" style="display: none;">
+      <button type="button" id="issuePrevButton" aria-label="前のページのIssueを表示">前へ</button>
+      <span id="issuePageStatus" aria-live="polite"></span>
+      <button type="button" id="issueNextButton" aria-label="次のページのIssueを表示">次へ</button>
+    </div>
+  </section>
+
+  <section class="section" id="chatSection" style="display: none;" aria-labelledby="chatSectionTitle">
+    <h2 class="section-title" id="chatSectionTitle">壁打ちチャット</h2>
+    <div class="chat-container">
+      <!-- 応答が届いたことを読み上げで伝える。 -->
+      <div class="messages" id="messages" role="log" aria-live="polite" aria-label="チャット履歴"></div>
+      <div class="chat-input">
+        <label class="visually-hidden" for="chatInput">メッセージ</label>
+        <input type="text" id="chatInput" placeholder="メッセージを入力...">
+        <button type="button" id="sendButton">送信</button>
+      </div>
+    </div>
+    <button type="button" id="suggestButton" class="primary" style="margin-top: 10px;">メタデータを提案</button>
+  </section>
+
+  <section class="section" id="structureSection" style="display: none;" aria-labelledby="structureSectionTitle">
+    <h2 class="section-title" id="structureSectionTitle">記事構成の提案(Issueへ反映)</h2>
+    <div class="structure-box">
+      <p class="hint" id="structureHint">チャットの内容から見出し構成を提案し、承認するとGitHub Issueの本文に書き込まれます。スキャフォールド生成時にこの内容が記事本文として使われます。</p>
+      <p class="hint" id="structureSourceNote" role="status" aria-live="polite"></p>
+      <button type="button" id="suggestStructureButton" class="primary" style="margin-bottom: 10px;">構成案を生成</button>
+      <div id="structureAcceptedBadge" class="accepted-badge" style="display: none;" role="status"></div>
+      <label class="visually-hidden" for="structureTextarea">記事構成</label>
+      <textarea id="structureTextarea" aria-describedby="structureHint structureSourceNote" placeholder="構成案はまだありません。「構成案を生成」を押してください。"></textarea>
+      <div class="button-group" style="margin-top: 10px;">
+        <button type="button" id="acceptStructureButton">この内容でIssueを更新</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="metadataSection" style="display: none;" aria-labelledby="metadataSectionTitle">
+    <h2 class="section-title" id="metadataSectionTitle">提案メタデータ</h2>
+    <div class="metadata-form">
+      <div class="form-group">
+        <label for="titleOptions">タイトルの候補</label>
+        <select id="titleOptions"></select>
+        <label for="titleInput">タイトル(直接編集できます)</label>
+        <input type="text" id="titleInput" required>
+      </div>
+      <div class="form-group">
+        <label for="slugOptions">スラッグの候補</label>
+        <select id="slugOptions"></select>
+        <label for="slugInput">スラッグ(直接編集できます)</label>
+        <input type="text" id="slugInput" required>
+      </div>
+      <div class="form-group">
+        <fieldset class="category-fieldset">
+          <legend>カテゴリ(既存から選択)</legend>
+          <div class="category-checkboxes" id="categoryCheckboxes"><span class="hint">読み込み中...</span></div>
+        </fieldset>
+      </div>
+      <div class="form-group">
+        <label for="newCategoriesInput">新規カテゴリ(任意、カンマ区切り。既存にないものだけ入力してください)</label>
+        <input type="text" id="newCategoriesInput">
+      </div>
+      <div class="form-group">
+        <label for="tagsInput">タグ(カンマ区切り)</label>
+        <input type="text" id="tagsInput">
+      </div>
+      <div class="button-group">
+        <button type="button" id="approveButton" class="primary">承認してスキャフォールド生成</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 成否のメッセージは、フォーカスを奪わずに読み上げへ伝える。 -->
+  <div id="message" style="margin-top: 16px; display: none;" role="status" aria-live="polite"></div>
+</main>
+
+{{sharedScripts}}
+<script nonce="{{nonce}}" src="{{scriptUri}}"></script>
+</body>
+</html>

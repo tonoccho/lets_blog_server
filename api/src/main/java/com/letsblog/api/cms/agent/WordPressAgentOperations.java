@@ -136,6 +136,10 @@ public class WordPressAgentOperations {
         payload.put("slug", creds.wpSlug());
         payload.put("title", content.title());
         payload.put("status", content.status());
+        if (content.publishScheduledAt() != null) {
+            // エージェント側が対応していれば予約投稿として扱われる(未対応の場合は無視される)。
+            payload.put("publishScheduledAt", content.publishScheduledAt().toString());
+        }
         payload.put("htmlContent", content.htmlContent() != null ? content.htmlContent() : "");
         if (existingPostId != null) {
             payload.put("existingPostId", existingPostId);

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="{{csp}}">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Create Article</title>
+{{sharedStyles}}
+<link rel="stylesheet" href="{{styleUri}}">
+</head>
+<body>
+<main class="container">
+  <h1 class="visually-hidden">記事の新規作成</h1>
+
+  <section class="section" aria-labelledby="basicSectionTitle">
+    <h2 class="section-title" id="basicSectionTitle">記事の基本情報</h2>
+    <p class="hint" id="formHint">入力した内容は articles/&lt;スラッグ&gt;/article.md の front matter に書き込まれます。</p>
+
+    <div class="form-group">
+      <label for="projectSelect">プロジェクト</label>
+      <select id="projectSelect" required></select>
+    </div>
+
+    <div class="form-group">
+      <label for="titleInput">タイトル</label>
+      <input type="text" id="titleInput" required placeholder="記事のタイトル">
+    </div>
+
+    <div class="form-group">
+      <label for="slugInput">スラッグ(記事ディレクトリ名になります)</label>
+      <input type="text" id="slugInput" required placeholder="my-first-article" aria-describedby="slugHint">
+      <p class="hint" id="slugHint">半角英数字とハイフンで入力してください。タイトルから自動入力されます。</p>
+    </div>
+
+    <div class="form-group">
+      <fieldset class="category-fieldset">
+        <legend>カテゴリ(既存から選択)</legend>
+        <div class="category-checkboxes" id="categoryCheckboxes"><span class="hint">プロジェクトを選択してください。</span></div>
+      </fieldset>
+    </div>
+
+    <div class="form-group">
+      <label for="newCategoriesInput">新規カテゴリ(任意、カンマ区切り)</label>
+      <input type="text" id="newCategoriesInput">
+    </div>
+
+    <div class="form-group">
+      <label for="tagsInput">タグ(カンマ区切り)</label>
+      <input type="text" id="tagsInput">
+    </div>
+
+    <div class="form-group">
+      <label for="statusSelect">投稿ステータス</label>
+      <select id="statusSelect">
+        <option value="draft" selected>下書き (draft)</option>
+        <option value="publish">公開 (publish)</option>
+      </select>
+    </div>
+
+    <div class="button-group">
+      <button type="button" id="createButton" class="primary">記事を作成して開く</button>
+    </div>
+  </section>
+
+  <div id="message" role="status" aria-live="polite"></div>
+</main>
+
+{{sharedScripts}}
+<script nonce="{{nonce}}" src="{{scriptUri}}"></script>
+</body>
+</html>
