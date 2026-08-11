@@ -130,6 +130,11 @@ export const PlanChatResultSchema = z.object({
 });
 export type PlanChatResult = z.infer<typeof PlanChatResultSchema>;
 
+export const AiImagePromptResultSchema = z.object({
+  prompt: z.string(),
+});
+export type AiImagePromptResult = z.infer<typeof AiImagePromptResultSchema>;
+
 export const SuggestMetadataResultSchema = z.object({
   titles: z.array(z.string()).default([]),
   slugs: z.array(z.string()).default([]),

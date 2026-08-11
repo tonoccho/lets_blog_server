@@ -219,6 +219,7 @@ async function cachedRequestJson<S extends ZodType>(
 import type {
   AcceptStructureResult,
   AiDraftResult,
+  AiImagePromptResult,
   AiImageResult,
   AiSectionResult,
   AiTagsResult,
@@ -242,6 +243,7 @@ export type {
   Actor,
   AcceptStructureResult,
   AiDraftResult,
+  AiImagePromptResult,
   AiImageResult,
   AiSectionResult,
   AiTagsResult,
@@ -596,6 +598,30 @@ export async function postPlanChat(
     headers: buildHeaders(apiKey, actor),
     createBody: jsonBody(request),
   }, schemas.PlanChatResultSchema);
+}
+
+/**
+ * チャットメッセージ(と任意の履歴)から画像生成プロンプトを作成する。
+ * サーバー側で状態を持たないため、再試行して差し支えない。
+ * @param signal 利用者によるキャンセル用。
+ */
+export async function generateImagePrompt(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  projectId: number,
+  history: PlanChatMessage[],
+  message: string,
+  signal?: AbortSignal
+): Promise<AiImagePromptResult> {
+  return requestJson(serverUrl, `/api/projects/${projectId}/ai/generate-image-prompt`, {
+    label: 'generateImagePrompt',
+    signal,
+    method: 'POST',
+    headers: buildHeaders(apiKey, actor),
+    createBody: jsonBody({ history, message }),
+    retryable: true,
+  }, schemas.AiImagePromptResultSchema);
 }
 
 /** GitHub Issueの本文を取得する。未記入のIssueでは空文字を返す。 */
