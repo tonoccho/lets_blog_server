@@ -185,6 +185,32 @@ class ArticlePreviewServiceTest {
     }
 
     @Test
+    void fetchMasterThemeCss_上限を超えるstylesheetは丸ごとスキップし他のCSSを壊さない() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+
+        String hugeCss = "a".repeat(3_000_100);
+
+        server.expect(requestTo("http://example.com"))
+                .andRespond(withSuccess(
+                        "<html><head>"
+                        + "<link rel=\"stylesheet\" href=\"/small.css\">"
+                        + "<link rel=\"stylesheet\" href=\"/huge.css\">"
+                        + "</head></html>",
+                        MediaType.TEXT_HTML));
+        server.expect(requestTo("http://example.com/small.css"))
+                .andRespond(withSuccess("body { color: red; }", MediaType.valueOf("text/css")));
+        server.expect(requestTo("http://example.com/huge.css"))
+                .andRespond(withSuccess(hugeCss, MediaType.valueOf("text/css")));
+
+        ThemeCssResponse response = service.fetchMasterThemeCss(1L);
+
+        assertTrue(response.available());
+        assertTrue(response.css().contains("body { color: red; }"));
+        assertFalse(response.css().contains(hugeCss.substring(0, 100)));
+    }
+
+    @Test
     void fetchThemeCss_siteId指定でそのサイトのCSSを取得する() {
         Project project = projectWithMaster("test", 10L, null);
         project.setLocalSiteId(20L);
