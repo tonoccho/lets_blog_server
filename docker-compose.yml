@@ -53,6 +53,7 @@ services:
       APP_WEB_BASE_URL: ${APP_WEB_BASE_URL:-https://localhost}
       OLLAMA_BASE_URL: http://ollama:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b-instruct}
+      OLLAMA_REQUEST_TIMEOUT_SECONDS: ${OLLAMA_REQUEST_TIMEOUT_SECONDS:-300}
       COMFYUI_BASE_URL: http://comfyui:8188
       COMFYUI_CHECKPOINT: ${COMFYUI_CHECKPOINT:-v1-5-pruned-emaonly.safetensors}
       COMFYUI_MODELS_PATH: /comfyui-models
@@ -125,36 +126,36 @@ services:
     networks:
       - lbs-net
 
-  penpot_postgres:
-    image: postgres:15-alpine
-    container_name: lbs-penpot-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: penpot
-      POSTGRES_USER: penpot_user
-      POSTGRES_PASSWORD: ${PENPOT_DB_PASSWORD}
-    volumes:
-      - penpot_postgres:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U penpot_user"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - lbs-net
+  # penpot_postgres:
+  #   image: postgres:15-alpine
+  #   container_name: lbs-penpot-postgres
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_DB: penpot
+  #     POSTGRES_USER: penpot_user
+  #     POSTGRES_PASSWORD: ${PENPOT_DB_PASSWORD}
+  #   volumes:
+  #     - penpot_postgres:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U penpot_user"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   networks:
+  #     - lbs-net
 
-  penpot:
-    image: penpot/penpot:latest
-    container_name: lbs-penpot
-    restart: unless-stopped
-    environment:
-      PENPOT_POSTGRES_URI: "postgresql://penpot_user:${PENPOT_DB_PASSWORD}@penpot_postgres:5432/penpot"
-      PENPOT_PUBLIC_URI: "https://localhost/penpot"
-    depends_on:
-      penpot_postgres:
-        condition: service_healthy
-    networks:
-      - lbs-net
+  # penpot:
+  #   image: penpot/penpot:latest
+  #   container_name: lbs-penpot
+  #   restart: unless-stopped
+  #   environment:
+  #     PENPOT_POSTGRES_URI: "postgresql://penpot_user:${PENPOT_DB_PASSWORD}@penpot_postgres:5432/penpot"
+  #     PENPOT_PUBLIC_URI: "https://localhost/penpot"
+  #   depends_on:
+  #     penpot_postgres:
+  #       condition: service_healthy
+  #   networks:
+  #     - lbs-net
 
   ollama:
     image: ollama/ollama:latest
@@ -196,27 +197,27 @@ services:
     networks:
       - lbs-net
 
-  mcp-penpot:
-    build:
-      context: ./mcp-server
-      dockerfile: Dockerfile
-    container_name: lbs-mcp-penpot
-    restart: unless-stopped
-    environment:
-      OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b-instruct}
-      MCP_PORT: 3000
-      MCP_LOG_LEVEL: ${MCP_LOG_LEVEL:-info}
-    depends_on:
-      - ollama
-    networks:
-      - lbs-net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
+  # mcp-penpot:
+  #   build:
+  #     context: ./mcp-server
+  #     dockerfile: Dockerfile
+  #   container_name: lbs-mcp-penpot
+  #   restart: unless-stopped
+  #   environment:
+  #     OLLAMA_BASE_URL: http://ollama:11434
+  #     OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b-instruct}
+  #     MCP_PORT: 3000
+  #     MCP_LOG_LEVEL: ${MCP_LOG_LEVEL:-info}
+  #   depends_on:
+  #     - ollama
+  #   networks:
+  #     - lbs-net
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 10s
 
   wordpress:
     build:
@@ -244,7 +245,7 @@ networks:
 
 volumes:
   mysql_data:
-  penpot_postgres:
+  # penpot_postgres:
   ollama_models:
   comfyui_models:
   comfyui_output:
