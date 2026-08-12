@@ -12,6 +12,29 @@
 <main class="container">
   <h1 class="visually-hidden">記事の新規作成</h1>
 
+  <section class="section" id="brainstormSection" aria-labelledby="brainstormSectionTitle">
+    <h2 class="section-title" id="brainstormSectionTitle">AIブレインストーミング</h2>
+    <p class="hint">記事のアイデアをAIと壁打ちできます。会話の内容をもとに、タイトル・スラッグ・カテゴリ・タグや記事構成を提案します(任意)。</p>
+    <div class="chat-container">
+      <div class="messages" id="brainstormMessages" role="log" aria-live="polite" aria-label="ブレインストーミングの会話履歴"></div>
+      <div class="chat-input">
+        <label class="visually-hidden" for="brainstormInput">メッセージ</label>
+        <input type="text" id="brainstormInput" placeholder="記事で書きたいことを入力...">
+        <button type="button" id="brainstormSendButton">送信</button>
+      </div>
+    </div>
+    <div class="button-group" style="margin-top: 10px;">
+      <button type="button" id="suggestMetadataButton" class="primary">タイトル・スラッグ・タグを提案</button>
+      <button type="button" id="suggestStructureButton">構成案を提案</button>
+    </div>
+  </section>
+
+  <section class="section" id="structureSection" style="display: none;" aria-labelledby="structureSectionTitle">
+    <h2 class="section-title" id="structureSectionTitle">記事構成の提案(本文の下書き)</h2>
+    <label class="visually-hidden" for="structureTextarea">記事構成</label>
+    <textarea id="structureTextarea" class="structure-textarea" placeholder="AIが提案した構成案です。編集して記事の初期本文として使えます。"></textarea>
+  </section>
+
   <section class="section" aria-labelledby="basicSectionTitle">
     <h2 class="section-title" id="basicSectionTitle">記事の基本情報</h2>
     <p class="hint" id="formHint">入力した内容は articles/&lt;スラッグ&gt;/article.md の front matter に書き込まれます。</p>
@@ -22,11 +45,15 @@
     </div>
 
     <div class="form-group">
+      <label for="titleOptions">タイトルの候補(AIブレインストーミングの提案)</label>
+      <select id="titleOptions"></select>
       <label for="titleInput">タイトル</label>
       <input type="text" id="titleInput" required placeholder="記事のタイトル">
     </div>
 
     <div class="form-group">
+      <label for="slugOptions">スラッグの候補(AIブレインストーミングの提案)</label>
+      <select id="slugOptions"></select>
       <label for="slugInput">スラッグ(記事ディレクトリ名になります)</label>
       <input type="text" id="slugInput" required placeholder="my-first-article" aria-describedby="slugHint">
       <p class="hint" id="slugHint">半角英数字とハイフンで入力してください。タイトルから自動入力されます。</p>
