@@ -5,7 +5,10 @@ import { useEffect, useState } from "react";
 const SAMPLE_CONTENT = "サンプルテキストです。ここに本文が入ります。";
 const ATTR_PATTERN = /\{\{attr:([a-zA-Z0-9_]+)\}\}/g;
 
-/** プレビュー用に{{content}}をテスト用コンテンツへ、{{attr:xxx}}をサンプル値へ置換したHTMLを組み立てる。 */
+/**
+ * プレビュー用に{{content}}をテスト用コンテンツへ、{{attr:xxx}}をサンプル値へ置換したHTMLを組み立てる。
+ * フォームのライブプレビュー(TemplateEditor)とタグ一覧の表示サンプル(issue #297)の両方で使う。
+ */
 export function buildPreviewSrcDoc(htmlTemplate: string, cssContent: string, testContent: string = SAMPLE_CONTENT): string {
   const html = htmlTemplate
     .replaceAll("{{content}}", testContent)
