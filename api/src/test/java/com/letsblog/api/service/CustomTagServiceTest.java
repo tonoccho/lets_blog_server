@@ -2,6 +2,7 @@ package com.letsblog.api.service;
 
 import com.letsblog.api.domain.CustomTag;
 import com.letsblog.api.domain.EmbedTagType;
+import com.letsblog.api.domain.Project;
 import com.letsblog.api.dto.CustomTagRequest;
 import com.letsblog.api.dto.CustomTagResponse;
 import com.letsblog.api.dto.TagDesignColors;
@@ -41,12 +42,16 @@ class CustomTagServiceTest {
     @Mock
     private AmazonTagRenderService amazonTagRenderService;
 
+    @Mock
+    private ProjectService projectService;
+
     private CustomTagService service;
 
     @BeforeEach
     void setUp() {
         service = new CustomTagService(customTagRepository, adminAuthorizationService,
-                tagDesignSettingService, tocStyleRenderService, blogCardTagRenderService, amazonTagRenderService);
+                tagDesignSettingService, tocStyleRenderService, blogCardTagRenderService, amazonTagRenderService,
+                projectService);
     }
 
     private void stubEmbedTagCss(Long projectId) {
@@ -240,6 +245,41 @@ class CustomTagServiceTest {
         assertEquals(true, bundle.contains(".toc-css{}"));
         assertEquals(true, bundle.contains(".blogcard-css{}"));
         assertEquals(true, bundle.contains(".amazon-css{}"));
+    }
+
+    @Test
+    void buildCssBundle_projectId指定時はセレクタにプロジェクトのプリフィックスを付与する() {
+        CustomTag tag = new CustomTag();
+        tag.setTagName("alert");
+        tag.setCssContent(".alert { color: red; }\n.alert .icon { width: 1em; }");
+        when(customTagRepository.findByProjectIdOrProjectIdIsNull(5L)).thenReturn(List.of(tag));
+        stubEmbedTagCss(5L);
+        Project project = new Project();
+        project.setSlug("my-blog");
+        when(projectService.getProjectEntity(5L)).thenReturn(project);
+        when(projectService.resolveCssSelectorPrefix(project)).thenReturn("my-blog");
+
+        String bundle = service.buildCssBundle(5L);
+
+        assertEquals(true, bundle.contains(".my-blog .alert { color: red; }"));
+        assertEquals(true, bundle.contains(".my-blog .alert .icon { width: 1em; }"));
+    }
+
+    @Test
+    void buildProjectCssBundle_セレクタにプロジェクトのプリフィックスを付与する() {
+        CustomTag tag = new CustomTag();
+        tag.setTagName("alert");
+        tag.setCssContent(".alert { color: red; }");
+        when(customTagRepository.findByProjectId(5L)).thenReturn(List.of(tag));
+        stubEmbedTagCss(5L);
+        Project project = new Project();
+        project.setSlug("my-blog");
+        when(projectService.getProjectEntity(5L)).thenReturn(project);
+        when(projectService.resolveCssSelectorPrefix(project)).thenReturn("custom-prefix");
+
+        String bundle = service.buildProjectCssBundle(5L);
+
+        assertEquals(true, bundle.contains(".custom-prefix .alert { color: red; }"));
     }
 
     @Test

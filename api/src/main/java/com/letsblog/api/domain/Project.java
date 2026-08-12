@@ -43,6 +43,13 @@ public class Project {
     @Column(name = "github_repository", length = 255)
     private String githubRepository;
 
+    /**
+     * カスタムタグCSSのセレクタに自動付与するプリフィックス(issue #298)。未設定時はslugを使う
+     * (CustomTagService#resolveCssSelectorPrefixで解決)。
+     */
+    @Column(name = "css_selector_prefix", length = 100)
+    private String cssSelectorPrefix;
+
     @Column(name = "ollama_model", length = 255)
     private String ollamaModel;
 
