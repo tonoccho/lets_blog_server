@@ -1,8 +1,10 @@
 package com.letsblog.api.provisioning;
 
 import com.letsblog.api.service.ProvisioningException;
+import com.letsblog.api.service.SiteAlreadyProvisionedException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -33,6 +35,10 @@ public class WordPressProvisioningClient {
                     .body(command)
                     .retrieve()
                     .body(ProvisionResult.class);
+        } catch (HttpClientErrorException.Conflict e) {
+            // 409は「今回のリクエストでは何も作成していない」ことを意味するため、
+            // 呼び出し元が誤って既存サイトをdeprovisionしないよう専用の例外にする(issue #315)。
+            throw new SiteAlreadyProvisionedException("WordPressサイトは既に存在します: " + e.getMessage(), e);
         } catch (RestClientException e) {
             throw new ProvisioningException("WordPress自動構築に失敗しました: " + e.getMessage(), e);
         }

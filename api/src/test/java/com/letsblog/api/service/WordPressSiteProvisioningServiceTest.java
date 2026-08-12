@@ -199,6 +199,18 @@ class WordPressSiteProvisioningServiceTest {
     }
 
     @Test
+    void createManagedSite_サイトが既に存在する場合はdeprovisionせずに例外を伝播する() {
+        when(siteRepository.existsBySiteKey("main")).thenReturn(false);
+        when(provisioningClient.provision(any()))
+                .thenThrow(new SiteAlreadyProvisionedException("サイト 'main' は既に存在します", null));
+
+        assertThrows(SiteAlreadyProvisionedException.class, () -> service.createManagedSite(request(), 9L));
+
+        verify(provisioningClient, never()).deprovision(any(), any());
+        verify(siteService, never()).register(any(), any());
+    }
+
+    @Test
     void deleteSite_managedWordpressならインスタンスとDBも削除する() {
         Site site = new Site();
         site.setId(1L);
