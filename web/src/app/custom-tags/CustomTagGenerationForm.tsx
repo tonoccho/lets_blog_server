@@ -10,12 +10,15 @@ import type { Project } from "@/lib/apiClient";
 interface CustomTagGenerationFormProps {
   projects: Project[];
   currentProjectId: number | null;
+  /** 統合CSS生成時に実際に適用されるCSSセレクタのプリフィックス(未設定時はプロジェクトのslug)。プロジェクトに紐付かない場合はnull(issue #307) */
+  effectivePrefix?: string | null;
   onGenerationSuccess: (htmlTemplate: string, cssContent: string, tagName: string, description: string) => void;
 }
 
 export function CustomTagGenerationForm({
   projects,
   currentProjectId,
+  effectivePrefix,
   onGenerationSuccess,
 }: CustomTagGenerationFormProps) {
   const { data: session } = useSession();
@@ -167,6 +170,14 @@ export function CustomTagGenerationForm({
                 <pre className="overflow-x-auto rounded bg-neutral-50 dark:bg-neutral-800 p-2 font-mono text-xs text-neutral-600 dark:text-neutral-400">
                   {result.cssContent}
                 </pre>
+                {effectivePrefix && (
+                  <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                    上記はそのまま保存される内容です。実際に配信される統合CSSでは、各セレクタの先頭に自動でプリフィックス「
+                    <code>.{effectivePrefix}</code>」が付与されます(例: 先頭のセレクタは
+                    <code> .{effectivePrefix} {result.cssContent.trim().split(/[\s{]/)[0] || "..."}</code>
+                    のようになります)。
+                  </p>
+                )}
               </div>
             )}
           </div>

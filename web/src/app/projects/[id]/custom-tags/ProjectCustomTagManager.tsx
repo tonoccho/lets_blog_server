@@ -69,6 +69,7 @@ export function ProjectCustomTagManager({
       <CustomTagGenerationForm
         projects={[currentProject]}
         currentProjectId={projectId}
+        effectivePrefix={cssSelectorPrefix ?? projectSlug}
         onGenerationSuccess={(htmlTemplate, cssContent, tagName, description) => {
           setGeneratedContent({ htmlTemplate, cssContent, tagName, description });
           setEditing(null);
