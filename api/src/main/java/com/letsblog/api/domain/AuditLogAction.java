@@ -19,6 +19,7 @@ public enum AuditLogAction {
     CUSTOM_TAG_DELETED("カスタムタグ削除"),
     SITE_DELETED("サイト削除"),
     WORDPRESS_PROVISIONED("WordPress自動構築"),
+    WORDPRESS_ADOPTED("既存WordPressサイト取り込み"),
     PROJECT_CREATED("プロジェクト作成"),
     PROJECT_UPDATED("プロジェクト更新"),
     PROJECT_DELETED("プロジェクト削除"),

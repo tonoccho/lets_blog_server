@@ -281,6 +281,52 @@ if ($path === '/provision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     ]);
 }
 
+/**
+ * DBには登録されていないが、ディレクトリ・DBとしては既に構築済みのWordPressサイトを
+ * 取り込むためのエンドポイント(issue #317)。/provisionと異なり新規構築は行わず、
+ * 既存の管理ユーザーに対して新しいApplication Passwordを発行するのみ。
+ */
+if ($path === '/adopt' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    $adminUser = (string) ($input['adminUser'] ?? '');
+
+    if (!isValidSlug($slug) || $adminUser === '') {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = resolveExistingSitePath($slug);
+    if ($sitePath === null) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    [$code, $out, $err] = runWp(['user', 'list', "--search=$adminUser", '--fields=ID,user_login', '--format=json', "--path=$sitePath", '--allow-root']);
+    $existing = $code === 0 ? (json_decode($out, true) ?: []) : [];
+    $matched = false;
+    foreach ($existing as $user) {
+        if (strcasecmp((string) $user['user_login'], $adminUser) === 0) {
+            $matched = true;
+            break;
+        }
+    }
+    if (!$matched) {
+        respond(404, ['error' => "ユーザー '$adminUser' がサイト '$slug' に見つかりません"]);
+    }
+
+    [$code, $out, $err] = runWp([
+        'user', 'application-password', 'create',
+        "--path=$sitePath",
+        $adminUser, 'letsblog', '--porcelain', '--allow-root',
+    ]);
+    if ($code !== 0) {
+        respond(500, ['error' => 'アプリケーションパスワードの発行に失敗しました', 'detail' => combinedOutput($out, $err)]);
+    }
+
+    respond(200, [
+        'url' => "https://localhost/sites/$slug",
+        'adminUser' => $adminUser,
+        'applicationPassword' => $out,
+    ]);
+}
+
 const ALLOWED_SYNC_TARGETS = ['themes', 'plugins', 'media', 'db'];
 // mediaのみ実際のディレクトリ名(uploads)が公開名と異なるため、対応表を持つ
 const SYNC_TARGET_DIRS = ['themes' => 'themes', 'plugins' => 'plugins', 'media' => 'uploads'];

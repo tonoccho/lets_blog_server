@@ -4,6 +4,7 @@ import com.letsblog.api.aop.AuditLog;
 import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Site;
+import com.letsblog.api.dto.AdoptWordPressSiteRequest;
 import com.letsblog.api.dto.CreateManagedWordPressSiteRequest;
 import com.letsblog.api.dto.SiteRegisterRequest;
 import com.letsblog.api.dto.SiteResponse;
@@ -107,6 +108,52 @@ public class WordPressSiteProvisioningService {
         if (request.templateSiteId() != null) {
             cloneFromTemplate(request.templateSiteId(), site, slug, dbName);
         }
+
+        return new SiteResponse(
+                site.getId(), site.getName(), site.getSiteKey(), site.getCmsType(), site.getBaseUrl(),
+                site.getCreatedAt(), site.getUpdatedAt(), response.connectionCheckStatus(), true);
+    }
+
+    /**
+     * DBには未登録だが、provisioning agent側には実体(ディレクトリ・DB)が既に存在する
+     * WordPressサイトを取り込んで登録する(issue #317)。既存の管理ユーザーに対して新しい
+     * Application Passwordを発行するのみで、新規構築は行わない。
+     * このリクエストはサイト実体を作成していないため、途中で失敗してもdeprovisionは行わない
+     * (#315と同じ理由: このリクエストが作っていないものを消してはならない)。
+     */
+    @AuditLog(action = AuditLogAction.WORDPRESS_ADOPTED, resourceType = "SITE")
+    @Transactional
+    public SiteResponse adoptManagedSite(AdoptWordPressSiteRequest request, Long actorId) {
+        if (siteRepository.existsBySiteKey(request.siteKey())) {
+            throw new IllegalArgumentException("siteKey '" + request.siteKey() + "' は既に登録されています");
+        }
+
+        String slug = normalizeSlug(request.siteKey());
+        String dbName = "wp_" + slug;
+
+        WordPressProvisioningClient.ProvisionResult result = provisioningClient.adopt(
+                new WordPressProvisioningClient.AdoptCommand(slug, request.adminUser()));
+
+        String internalUrl = "http://wordpress/sites/" + slug;
+        Map<String, String> credentials = Map.of(
+                "baseUrl", internalUrl,
+                "username", result.adminUser(),
+                "appPassword", result.applicationPassword(),
+                "transport", "AGENT",
+                "wpSlug", slug);
+
+        SiteRegisterRequest registerRequest = new SiteRegisterRequest(
+                request.name(), request.siteKey(), CmsType.WORDPRESS, credentials);
+
+        SiteResponse response = siteService.register(registerRequest, actorId);
+
+        Site site = siteRepository.findBySiteKey(request.siteKey())
+                .orElseThrow(() -> new SiteNotFoundException("siteKey '" + request.siteKey() + "' は登録されていません"));
+        site.setManagedWordpress(true);
+        site.setWpSlug(slug);
+        site.setWpDbName(dbName);
+        site.setBaseUrl(result.url());
+        siteRepository.save(site);
 
         return new SiteResponse(
                 site.getId(), site.getName(), site.getSiteKey(), site.getCmsType(), site.getBaseUrl(),
