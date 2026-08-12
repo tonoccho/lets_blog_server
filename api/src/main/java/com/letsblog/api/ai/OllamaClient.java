@@ -24,11 +24,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * OllamaのREST API(/api/generate, /api/tags, /api/pull, /api/delete)を呼び出す薄いクライアント。
  */
 @Component
+@Slf4j
 public class OllamaClient {
 
     private static final Duration PULL_TIMEOUT = Duration.ofMinutes(30);
@@ -47,6 +49,7 @@ public class OllamaClient {
     private final String baseUrl;
     private final String model;
     private final ObjectMapper objectMapper;
+    private final long requestTimeoutSeconds;
 
     public OllamaClient(
             @Value("${app.ollama-base-url}") String baseUrl,
@@ -64,6 +67,7 @@ public class OllamaClient {
         this.baseUrl = baseUrl;
         this.model = model;
         this.objectMapper = objectMapper;
+        this.requestTimeoutSeconds = requestTimeoutSeconds;
     }
 
     public String generate(String prompt) {
@@ -71,7 +75,9 @@ public class OllamaClient {
     }
 
     public String generate(String prompt, String modelName) {
+        long startTime = System.currentTimeMillis();
         try {
+            log.debug("Ollama request starting for model: {}, timeout: {}s", modelName, requestTimeoutSeconds);
             JsonNode body = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode()
                     .put("model", modelName)
                     .put("prompt", prompt)
@@ -84,11 +90,21 @@ public class OllamaClient {
                     .retrieve()
                     .body(JsonNode.class);
 
+            long elapsedMs = System.currentTimeMillis() - startTime;
+            log.debug("Ollama request completed in {}ms for model: {}", elapsedMs, modelName);
             return stripThinkingBlocks(response.get("response").asText()).trim();
         } catch (RestClientResponseException e) {
+            long elapsedMs = System.currentTimeMillis() - startTime;
+            log.error("Ollama HTTP error after {}ms: {} {}", elapsedMs, e.getStatusCode(), e.getResponseBodyAsString());
             throw new AiServiceException("Ollama呼び出しに失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
         } catch (Exception e) {
-            throw new AiServiceException("Ollama呼び出し中にエラーが発生しました（タイムアウトまたはネットワークエラーの可能性があります）: " + e.getMessage(), e);
+            long elapsedMs = System.currentTimeMillis() - startTime;
+            log.error("Ollama error after {}ms: {} ({})", elapsedMs, e.getClass().getSimpleName(), e.getMessage());
+            String message = "Ollama呼び出し中にエラーが発生しました（タイムアウトまたはネットワークエラーの可能性があります）: " + e.getMessage();
+            if (elapsedMs >= requestTimeoutSeconds * 1000) {
+                message = "Ollama呼び出しがタイムアウトしました（" + requestTimeoutSeconds + "秒以上応答がありません）";
+            }
+            throw new AiServiceException(message, e);
         }
     }
 
