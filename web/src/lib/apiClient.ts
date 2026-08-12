@@ -1117,6 +1117,7 @@ export interface Project {
   productionSite: Site | null;
   masterEnvironment: "test" | "production";
   githubRepository: string | null;
+  cssSelectorPrefix: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1162,6 +1163,19 @@ export function updateProjectGithubRepository(
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ githubRepository }),
+    actor,
+  });
+}
+
+export function updateProjectCssSelectorPrefix(
+  id: number,
+  cssSelectorPrefix: string,
+  actor?: ActorInfo
+): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}/css-selector-prefix`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cssSelectorPrefix }),
     actor,
   });
 }

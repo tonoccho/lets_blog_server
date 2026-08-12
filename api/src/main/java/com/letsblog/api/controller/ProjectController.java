@@ -18,6 +18,7 @@ import com.letsblog.api.dto.TermComparisonPage;
 import com.letsblog.api.dto.TermNameRequest;
 import com.letsblog.api.dto.UpdateMasterEnvironmentRequest;
 import com.letsblog.api.dto.UpdatePostStatusRequest;
+import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
 import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
 import com.letsblog.api.dto.UpdateProjectUserRequest;
 import com.letsblog.api.ai.GeneratedImageStorageService;
@@ -143,6 +144,13 @@ public class ProjectController {
             @PathVariable Long id, @Valid @RequestBody UpdateProjectGithubRepositoryRequest request) {
         adminAuthorizationService.requireAdmin();
         return projectService.updateGithubRepository(id, request);
+    }
+
+    @PutMapping("/{id}/css-selector-prefix")
+    public ProjectResponse updateCssSelectorPrefix(
+            @PathVariable Long id, @Valid @RequestBody UpdateProjectCssSelectorPrefixRequest request) {
+        adminAuthorizationService.requireAdmin();
+        return projectService.updateCssSelectorPrefix(id, request);
     }
 
     @PostMapping("/{id}/environments/sync")

@@ -2,6 +2,7 @@ package com.letsblog.api.service;
 
 import com.letsblog.api.domain.CustomTag;
 import com.letsblog.api.domain.CustomTagFormat;
+import com.letsblog.api.markdown.MarkdownRenderer;
 import com.letsblog.api.repository.CustomTagRepository;
 import org.springframework.stereotype.Service;
 
@@ -41,9 +42,11 @@ public class CustomTagRenderService {
             Pattern.compile("\\{\\{attr:([a-zA-Z0-9_-]+)}}");
 
     private final CustomTagRepository customTagRepository;
+    private final MarkdownRenderer markdownRenderer;
 
-    public CustomTagRenderService(CustomTagRepository customTagRepository) {
+    public CustomTagRenderService(CustomTagRepository customTagRepository, MarkdownRenderer markdownRenderer) {
         this.customTagRepository = customTagRepository;
+        this.markdownRenderer = markdownRenderer;
     }
 
     public String render(String markdown) {
@@ -103,7 +106,7 @@ public class CustomTagRenderService {
     }
 
     private String applyTemplate(String template, String content, Map<String, String> attrs) {
-        String withContent = template.replace("{{content}}", content.trim());
+        String withContent = template.replace("{{content}}", renderContentMarkdown(content.trim()));
 
         Matcher placeholderMatcher = PLACEHOLDER_PATTERN.matcher(withContent);
         StringBuilder rendered = new StringBuilder();
@@ -114,6 +117,24 @@ public class CustomTagRenderService {
         placeholderMatcher.appendTail(rendered);
 
         return rendered.toString();
+    }
+
+    /**
+     * {{content}}に差し込む前にMarkdownをHTMLへ変換する。render()はテンプレート展開後の文字列を
+     * 丸ごとMarkdownRendererに渡す2段構えだが、テンプレートのHTML(例: `<div>{{content}}</div>`)は
+     * flexmarkにHTMLブロックと判定され、その内側はMarkdownとして解釈されない(CommonMarkの仕様)。
+     * そのためcontent単体を先にHTML化してから埋め込む必要がある。
+     * 1段落のみの内容は`<p>`で囲まずインライン要素だけを返す(タグテンプレート側の見た目を崩さないため)。
+     */
+    private String renderContentMarkdown(String content) {
+        if (content.isEmpty()) {
+            return content;
+        }
+        String html = markdownRenderer.render(content).strip();
+        if (html.startsWith("<p>") && html.endsWith("</p>") && html.indexOf("<p>", 3) == -1) {
+            return html.substring(3, html.length() - "</p>".length());
+        }
+        return html;
     }
 
     private Map<String, String> parseAttrs(String attrPart) {

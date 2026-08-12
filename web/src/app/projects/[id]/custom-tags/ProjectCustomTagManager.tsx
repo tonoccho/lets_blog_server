@@ -3,10 +3,17 @@
 import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import type { CustomTag, Project } from "@/lib/apiClient";
 import { CustomTagGenerationForm } from "@/app/custom-tags/CustomTagGenerationForm";
-import { TemplateEditor } from "@/app/custom-tags/CustomTagManager";
-import { upsertProjectCustomTagAction, deleteProjectCustomTagAction, type CustomTagFormState } from "./actions";
+import { TemplateEditor, buildPreviewSrcDoc } from "@/app/custom-tags/CustomTagManager";
+import {
+  upsertProjectCustomTagAction,
+  deleteProjectCustomTagAction,
+  updateProjectCssSelectorPrefixAction,
+  type CustomTagFormState,
+  type CssSelectorPrefixFormState,
+} from "./actions";
 
 const initialState: CustomTagFormState = {};
+const initialPrefixState: CssSelectorPrefixFormState = {};
 
 interface GeneratedContent {
   htmlTemplate: string;
@@ -23,10 +30,14 @@ function formatLabel(tagFormat: CustomTag["tagFormat"]): string {
 export function ProjectCustomTagManager({
   projectId,
   projectName,
+  projectSlug,
+  cssSelectorPrefix,
   tags,
 }: {
   projectId: number;
   projectName: string;
+  projectSlug: string;
+  cssSelectorPrefix: string | null;
   tags: CustomTag[];
 }) {
   const [editing, setEditing] = useState<CustomTag | null>(null);
@@ -35,6 +46,8 @@ export function ProjectCustomTagManager({
   const [isDeleting, startDeleteTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
   const [handledSuccess, setHandledSuccess] = useState(false);
+  const updatePrefixAction = updateProjectCssSelectorPrefixAction.bind(null, projectId);
+  const [prefixState, prefixFormAction, prefixPending] = useActionState(updatePrefixAction, initialPrefixState);
 
   const currentProject: Project = { id: projectId, name: projectName } as Project;
 
@@ -106,6 +119,34 @@ export function ProjectCustomTagManager({
         </div>
       </details>
 
+      <form
+        action={prefixFormAction}
+        className="flex flex-col gap-2 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 sm:flex-row sm:items-end sm:gap-3"
+      >
+        <label className="flex flex-1 flex-col gap-1 text-sm">
+          <span className="text-neutral-600 dark:text-neutral-400">
+            CSSセレクタのプリフィックス(任意、統合CSSダウンロード時に各セレクタへ自動付与されます。未指定時はプロジェクトのslug「{projectSlug}」を使用)
+          </span>
+          <input
+            name="cssSelectorPrefix"
+            key={cssSelectorPrefix ?? "unset"}
+            defaultValue={cssSelectorPrefix ?? ""}
+            placeholder={projectSlug}
+            pattern="[a-zA-Z][a-zA-Z0-9_\-]*"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
+          />
+        </label>
+        <button
+          type="submit"
+          disabled={prefixPending}
+          className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:bg-neutral-200 disabled:text-neutral-600"
+        >
+          {prefixPending ? "保存中…" : "プリフィックスを保存"}
+        </button>
+        {prefixState.error && <p className="text-sm text-red-600 sm:basis-full">{prefixState.error}</p>}
+        {prefixState.success && <p className="text-sm text-green-600 sm:basis-full">保存しました。</p>}
+      </form>
+
       <CustomTagGenerationForm
         projects={[currentProject]}
         currentProjectId={projectId}
@@ -122,15 +163,14 @@ export function ProjectCustomTagManager({
               <th className="px-4 py-2">タグ名</th>
               <th className="px-4 py-2">形式</th>
               <th className="px-4 py-2">説明</th>
-              <th className="px-4 py-2">HTMLテンプレート</th>
-              <th className="px-4 py-2">CSS</th>
+              <th className="px-4 py-2">表示サンプル</th>
               <th className="px-4 py-2"></th>
             </tr>
           </thead>
           <tbody>
             {tags.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center">
+                <td colSpan={5} className="px-4 py-8 text-center">
                   <div className="flex flex-col items-center gap-4">
                     <p className="text-neutral-600 dark:text-neutral-400">登録済みカスタムタグはありません</p>
                     <a
@@ -161,11 +201,13 @@ export function ProjectCustomTagManager({
                   </span>
                 </td>
                 <td className="px-4 py-2 text-neutral-600 dark:text-neutral-400">{tag.description}</td>
-                <td className="px-4 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-400">
-                  <code className="whitespace-pre-wrap break-all">{tag.htmlTemplate}</code>
-                </td>
-                <td className="px-4 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-400">
-                  {tag.cssContent && <code className="whitespace-pre-wrap break-all">{tag.cssContent}</code>}
+                <td className="px-4 py-2">
+                  <iframe
+                    title={`[${tag.tagName}]の表示サンプル`}
+                    srcDoc={buildPreviewSrcDoc(tag.htmlTemplate, tag.cssContent ?? "")}
+                    sandbox="allow-same-origin"
+                    className="h-24 w-full min-w-[220px] rounded border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
+                  />
                 </td>
                 <td className="px-4 py-2 text-right whitespace-nowrap">
                   <button type="button" onClick={() => setEditing(tag)} className="text-sm text-blue-600 hover:underline">

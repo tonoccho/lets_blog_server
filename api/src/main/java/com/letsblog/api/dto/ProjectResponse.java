@@ -13,6 +13,7 @@ public record ProjectResponse(
         SiteResponse productionSite,
         String masterEnvironment,
         String githubRepository,
+        String cssSelectorPrefix,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -27,6 +28,7 @@ public record ProjectResponse(
                 productionSite,
                 project.getMasterEnvironment(),
                 project.getGithubRepository(),
+                project.getCssSelectorPrefix(),
                 project.getCreatedAt(),
                 project.getUpdatedAt()
         );

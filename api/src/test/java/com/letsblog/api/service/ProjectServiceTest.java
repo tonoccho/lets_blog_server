@@ -2,6 +2,7 @@ package com.letsblog.api.service;
 
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.dto.ProjectResponse;
+import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
 import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
 import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.SiteRepository;
@@ -227,6 +228,51 @@ class ProjectServiceTest {
                 }
             });
         }
+    }
+
+    @Test
+    void updateCssSelectorPrefix_値が正常に保存される() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProjectResponse response = service.updateCssSelectorPrefix(
+                1L, new UpdateProjectCssSelectorPrefixRequest("custom-prefix"));
+
+        assertEquals("custom-prefix", response.cssSelectorPrefix());
+        assertEquals("custom-prefix", project.getCssSelectorPrefix());
+    }
+
+    @Test
+    void updateCssSelectorPrefix_空文字列はnullに変換される() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        project.setCssSelectorPrefix("custom-prefix");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProjectResponse response = service.updateCssSelectorPrefix(1L, new UpdateProjectCssSelectorPrefixRequest(""));
+
+        assertNull(response.cssSelectorPrefix());
+        assertNull(project.getCssSelectorPrefix());
+    }
+
+    @Test
+    void resolveCssSelectorPrefix_未設定時はslugを返す() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+
+        assertEquals("proj-a", service.resolveCssSelectorPrefix(project));
+    }
+
+    @Test
+    void resolveCssSelectorPrefix_設定済みならその値を返す() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        project.setCssSelectorPrefix("custom-prefix");
+
+        assertEquals("custom-prefix", service.resolveCssSelectorPrefix(project));
     }
 
     @Test

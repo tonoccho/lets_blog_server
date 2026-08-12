@@ -5,10 +5,13 @@ import { useEffect, useState } from "react";
 const SAMPLE_CONTENT = "サンプルテキストです。ここに本文が入ります。";
 const ATTR_PATTERN = /\{\{attr:([a-zA-Z0-9_]+)\}\}/g;
 
-/** プレビュー用に{{content}}をサンプルテキストへ、{{attr:xxx}}をサンプル値へ置換したHTMLを組み立てる。 */
-function buildPreviewSrcDoc(htmlTemplate: string, cssContent: string): string {
+/**
+ * プレビュー用に{{content}}をテスト用コンテンツへ、{{attr:xxx}}をサンプル値へ置換したHTMLを組み立てる。
+ * フォームのライブプレビュー(TemplateEditor)とタグ一覧の表示サンプル(issue #297)の両方で使う。
+ */
+export function buildPreviewSrcDoc(htmlTemplate: string, cssContent: string, testContent: string = SAMPLE_CONTENT): string {
   const html = htmlTemplate
-    .replaceAll("{{content}}", SAMPLE_CONTENT)
+    .replaceAll("{{content}}", testContent)
     .replace(ATTR_PATTERN, (_match, key: string) => `サンプル${key}`);
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${cssContent}</style></head><body>${html}</body></html>`;
 }
@@ -20,15 +23,18 @@ function buildPreviewSrcDoc(htmlTemplate: string, cssContent: string): string {
 export function TemplateEditor({ initialHtml, initialCss }: { initialHtml: string; initialCss: string }) {
   const [htmlTemplateValue, setHtmlTemplateValue] = useState(initialHtml);
   const [cssContentValue, setCssContentValue] = useState(initialCss);
-  const [previewSrcDoc, setPreviewSrcDoc] = useState(() => buildPreviewSrcDoc(initialHtml, initialCss));
+  const [testContent, setTestContent] = useState(SAMPLE_CONTENT);
+  const [previewSrcDoc, setPreviewSrcDoc] = useState(() =>
+    buildPreviewSrcDoc(initialHtml, initialCss, testContent)
+  );
 
-  // HTML/CSS変更のたびに即再描画すると入力のたびにiframeが再構築されカクつくため、300msデバウンスする
+  // HTML/CSS/テスト用コンテンツ変更のたびに即再描画すると入力のたびにiframeが再構築されカクつくため、300msデバウンスする
   useEffect(() => {
     const timer = setTimeout(() => {
-      setPreviewSrcDoc(buildPreviewSrcDoc(htmlTemplateValue, cssContentValue));
+      setPreviewSrcDoc(buildPreviewSrcDoc(htmlTemplateValue, cssContentValue, testContent));
     }, 300);
     return () => clearTimeout(timer);
-  }, [htmlTemplateValue, cssContentValue]);
+  }, [htmlTemplateValue, cssContentValue, testContent]);
 
   return (
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -57,16 +63,28 @@ export function TemplateEditor({ initialHtml, initialCss }: { initialHtml: strin
           />
         </label>
       </div>
-      <div className="flex flex-col gap-1 text-sm">
-        <span className="text-neutral-600 dark:text-neutral-400">
-          プレビュー({"{{content}}"}/{"{{attr:xxx}}"}はサンプル値に置き換えて表示、入力後300ms自動更新)
-        </span>
-        <iframe
-          title="カスタムタグプレビュー"
-          srcDoc={previewSrcDoc}
-          sandbox="allow-same-origin"
-          className="h-[268px] rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900"
-        />
+      <div className="flex flex-col gap-3 text-sm">
+        <label className="flex flex-col gap-1">
+          <span className="text-neutral-600 dark:text-neutral-400">
+            テスト用コンテンツ({"{{content}}"}に差し込んでプレビューします。{"{{attr:xxx}}"}は自動でサンプル値に置き換わります)
+          </span>
+          <textarea
+            value={testContent}
+            onChange={(e) => setTestContent(e.target.value)}
+            rows={2}
+            placeholder={SAMPLE_CONTENT}
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
+          />
+        </label>
+        <label className="flex flex-1 flex-col gap-1">
+          <span className="text-neutral-600 dark:text-neutral-400">プレビュー(入力後300ms自動更新)</span>
+          <iframe
+            title="カスタムタグプレビュー"
+            srcDoc={previewSrcDoc}
+            sandbox="allow-same-origin"
+            className="h-[220px] rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900"
+          />
+        </label>
       </div>
     </div>
   );

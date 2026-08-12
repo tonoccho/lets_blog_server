@@ -5,6 +5,7 @@ import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.ProjectResponse;
+import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
 import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
 import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.SiteRepository;
@@ -168,6 +169,26 @@ public class ProjectService {
                 : request.githubRepository();
         project.setGithubRepository(repo);
         return toResponse(projectRepository.save(project));
+    }
+
+    @AuditLog(action = AuditLogAction.PROJECT_UPDATED, resourceType = "PROJECT")
+    @Transactional
+    public ProjectResponse updateCssSelectorPrefix(Long projectId, UpdateProjectCssSelectorPrefixRequest request) {
+        Project project = getProjectEntity(projectId);
+        String prefix = request.cssSelectorPrefix() == null || request.cssSelectorPrefix().isBlank()
+                ? null
+                : request.cssSelectorPrefix();
+        project.setCssSelectorPrefix(prefix);
+        return toResponse(projectRepository.save(project));
+    }
+
+    /**
+     * カスタムタグCSSのセレクタに付与するプリフィックスを解決する。未設定時はプロジェクトのslugを使う(issue #298)。
+     */
+    public String resolveCssSelectorPrefix(Project project) {
+        return project.getCssSelectorPrefix() == null || project.getCssSelectorPrefix().isBlank()
+                ? project.getSlug()
+                : project.getCssSelectorPrefix();
     }
 
     private void requireValidEnvironment(String environment) {
