@@ -4,9 +4,16 @@ import { useActionState, useEffect, useRef, useState, useTransition } from "reac
 import type { CustomTag, Project } from "@/lib/apiClient";
 import { CustomTagGenerationForm } from "@/app/custom-tags/CustomTagGenerationForm";
 import { TemplateEditor } from "@/app/custom-tags/CustomTagManager";
-import { upsertProjectCustomTagAction, deleteProjectCustomTagAction, type CustomTagFormState } from "./actions";
+import {
+  upsertProjectCustomTagAction,
+  deleteProjectCustomTagAction,
+  updateProjectCssSelectorPrefixAction,
+  type CustomTagFormState,
+  type CssSelectorPrefixFormState,
+} from "./actions";
 
 const initialState: CustomTagFormState = {};
+const initialPrefixState: CssSelectorPrefixFormState = {};
 
 interface GeneratedContent {
   htmlTemplate: string;
@@ -23,10 +30,14 @@ function formatLabel(tagFormat: CustomTag["tagFormat"]): string {
 export function ProjectCustomTagManager({
   projectId,
   projectName,
+  projectSlug,
+  cssSelectorPrefix,
   tags,
 }: {
   projectId: number;
   projectName: string;
+  projectSlug: string;
+  cssSelectorPrefix: string | null;
   tags: CustomTag[];
 }) {
   const [editing, setEditing] = useState<CustomTag | null>(null);
@@ -35,6 +46,8 @@ export function ProjectCustomTagManager({
   const [isDeleting, startDeleteTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
   const [handledSuccess, setHandledSuccess] = useState(false);
+  const updatePrefixAction = updateProjectCssSelectorPrefixAction.bind(null, projectId);
+  const [prefixState, prefixFormAction, prefixPending] = useActionState(updatePrefixAction, initialPrefixState);
 
   const currentProject: Project = { id: projectId, name: projectName } as Project;
 
@@ -65,6 +78,34 @@ export function ProjectCustomTagManager({
       <p className="max-w-2xl text-sm text-neutral-600 dark:text-neutral-400">
         このプロジェクト専用のカスタムタグです。グローバルタグや他プロジェクトのタグは表示されません。
       </p>
+
+      <form
+        action={prefixFormAction}
+        className="flex flex-col gap-2 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 sm:flex-row sm:items-end sm:gap-3"
+      >
+        <label className="flex flex-1 flex-col gap-1 text-sm">
+          <span className="text-neutral-600 dark:text-neutral-400">
+            CSSセレクタのプリフィックス(任意、統合CSSダウンロード時に各セレクタへ自動付与されます。未指定時はプロジェクトのslug「{projectSlug}」を使用)
+          </span>
+          <input
+            name="cssSelectorPrefix"
+            key={cssSelectorPrefix ?? "unset"}
+            defaultValue={cssSelectorPrefix ?? ""}
+            placeholder={projectSlug}
+            pattern="[a-zA-Z][a-zA-Z0-9_\-]*"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
+          />
+        </label>
+        <button
+          type="submit"
+          disabled={prefixPending}
+          className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:bg-neutral-200 disabled:text-neutral-600"
+        >
+          {prefixPending ? "保存中…" : "プリフィックスを保存"}
+        </button>
+        {prefixState.error && <p className="text-sm text-red-600 sm:basis-full">{prefixState.error}</p>}
+        {prefixState.success && <p className="text-sm text-green-600 sm:basis-full">保存しました。</p>}
+      </form>
 
       <CustomTagGenerationForm
         projects={[currentProject]}

@@ -12,8 +12,10 @@ import com.letsblog.api.repository.CustomTagRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 public class CustomTagService {
@@ -24,19 +26,22 @@ public class CustomTagService {
     private final TocStyleRenderService tocStyleRenderService;
     private final BlogCardTagRenderService blogCardTagRenderService;
     private final AmazonTagRenderService amazonTagRenderService;
+    private final ProjectService projectService;
 
     public CustomTagService(CustomTagRepository customTagRepository,
                              AdminAuthorizationService adminAuthorizationService,
                              TagDesignSettingService tagDesignSettingService,
                              TocStyleRenderService tocStyleRenderService,
                              BlogCardTagRenderService blogCardTagRenderService,
-                             AmazonTagRenderService amazonTagRenderService) {
+                             AmazonTagRenderService amazonTagRenderService,
+                             ProjectService projectService) {
         this.customTagRepository = customTagRepository;
         this.adminAuthorizationService = adminAuthorizationService;
         this.tagDesignSettingService = tagDesignSettingService;
         this.tocStyleRenderService = tocStyleRenderService;
         this.blogCardTagRenderService = blogCardTagRenderService;
         this.amazonTagRenderService = amazonTagRenderService;
+        this.projectService = projectService;
     }
 
     @AuditLog(action = AuditLogAction.CUSTOM_TAG_CREATED, resourceType = "CUSTOM_TAG")
@@ -120,7 +125,8 @@ public class CustomTagService {
                 ? customTagRepository.findByProjectIdIsNull()
                 : customTagRepository.findByProjectIdOrProjectIdIsNull(projectId);
         String embedTagCss = projectId == null ? "" : buildEmbedTagCss(projectId);
-        return embedTagCss + buildCssFrom(tags);
+        String prefix = projectId == null ? null : resolveCssSelectorPrefix(projectId);
+        return embedTagCss + buildCssFrom(tags, prefix);
     }
 
     /**
@@ -138,7 +144,8 @@ public class CustomTagService {
      */
     @Transactional(readOnly = true)
     public String buildProjectCssBundle(Long projectId) {
-        return buildEmbedTagCss(projectId) + buildCssFrom(customTagRepository.findByProjectId(projectId));
+        return buildEmbedTagCss(projectId)
+                + buildCssFrom(customTagRepository.findByProjectId(projectId), resolveCssSelectorPrefix(projectId));
     }
 
     /**
@@ -161,16 +168,52 @@ public class CustomTagService {
         return sb.toString();
     }
 
-    private String buildCssFrom(List<CustomTag> tags) {
+    private String buildCssFrom(List<CustomTag> tags, String selectorPrefix) {
         StringBuilder sb = new StringBuilder();
         for (CustomTag tag : tags) {
             if (tag.getCssContent() == null || tag.getCssContent().isBlank()) {
                 continue;
             }
             sb.append("/* === ").append(tag.getTagName()).append(" === */\n");
-            sb.append(tag.getCssContent().strip()).append("\n\n");
+            sb.append(applySelectorPrefix(tag.getCssContent().strip(), selectorPrefix)).append("\n\n");
         }
         return sb.toString();
+    }
+
+    private String resolveCssSelectorPrefix(Long projectId) {
+        return projectService.resolveCssSelectorPrefix(projectService.getProjectEntity(projectId));
+    }
+
+    /**
+     * CSSの各セレクタ行の先頭に `.prefix ` を付与し、WordPressテーマ側のCSSとのクラス名衝突を防ぐ(issue #298)。
+     * CustomTagValidationServiceのCSS検証と同様、複雑なCSSパーサは使わず
+     * 「1行に1つのセレクタ宣言、`{`の直前まで」という簡易的な前提で処理する。
+     */
+    private String applySelectorPrefix(String css, String selectorPrefix) {
+        if (selectorPrefix == null || selectorPrefix.isBlank()) {
+            return css;
+        }
+        String[] lines = css.split("\n", -1);
+        for (int i = 0; i < lines.length; i++) {
+            String trimmed = lines[i].strip();
+            int braceIndex = trimmed.indexOf('{');
+            boolean isSelectorLine = braceIndex > 0
+                    && !trimmed.startsWith("@")
+                    && !trimmed.startsWith("/*")
+                    && !trimmed.startsWith("*");
+            if (!isSelectorLine) {
+                continue;
+            }
+            String selectors = trimmed.substring(0, braceIndex).strip();
+            String rest = trimmed.substring(braceIndex);
+            String prefixed = Arrays.stream(selectors.split(","))
+                    .map(String::strip)
+                    .filter(selector -> !selector.isEmpty())
+                    .map(selector -> "." + selectorPrefix + " " + selector)
+                    .collect(Collectors.joining(", "));
+            lines[i] = prefixed + " " + rest;
+        }
+        return String.join("\n", lines);
     }
 
     private Optional<CustomTag> findDuplicate(String tagName, Long projectId) {

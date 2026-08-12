@@ -41,7 +41,15 @@ export default async function ProjectTagsPage({ params }: { params: Promise<{ id
     {
       id: "custom-tags",
       label: "カスタムタグ管理",
-      content: <ProjectCustomTagManager projectId={projectId} projectName={project.name} tags={tags} />,
+      content: (
+        <ProjectCustomTagManager
+          projectId={projectId}
+          projectName={project.name}
+          projectSlug={project.slug}
+          cssSelectorPrefix={project.cssSelectorPrefix}
+          tags={tags}
+        />
+      ),
     },
     {
       id: "css-bundle",
