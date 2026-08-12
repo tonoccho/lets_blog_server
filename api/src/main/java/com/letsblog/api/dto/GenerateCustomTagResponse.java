@@ -8,7 +8,9 @@ public record GenerateCustomTagResponse(
     String htmlTemplate,
     String cssContent,
     String description,
-    Long projectId
+    Long projectId,
+    /** PenpotへのAIデザイン生成に成功した場合のみ設定される(ベストエフォート)。 */
+    String penpotFileUrl
 ) {
     public static GenerateCustomTagResponse from(CustomTag customTag) {
         return new GenerateCustomTagResponse(
@@ -17,7 +19,8 @@ public record GenerateCustomTagResponse(
             customTag.getHtmlTemplate(),
             customTag.getCssContent(),
             customTag.getDescription(),
-            customTag.getProjectId()
+            customTag.getProjectId(),
+            customTag.getPenpotFileUrl()
         );
     }
 }

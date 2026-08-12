@@ -80,6 +80,9 @@ app:
   brave-search-api-key: ${BRAVE_SEARCH_API_KEY:}
   plantuml-base-url: ${PLANTUML_BASE_URL:http://localhost:8085}
   penpot-base-url: ${PENPOT_BASE_URL:http://localhost:9001}
+  penpot-public-url: ${PENPOT_PUBLIC_URL:http://localhost:9001}
+  penpot-service-email: ${PENPOT_SERVICE_EMAIL:lbs-service@letsblog.local}
+  penpot-service-password: ${PENPOT_SERVICE_PASSWORD:}
   content-cache-ttl-hours: ${CONTENT_CACHE_TTL_HOURS:24}
   wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
   wordpress-provision-token: ${WP_PROVISION_TOKEN:}

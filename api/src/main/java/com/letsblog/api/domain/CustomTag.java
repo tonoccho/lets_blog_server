@@ -37,6 +37,10 @@ public class CustomTag {
     @Column(name = "project_id")
     private Long projectId;
 
+    /** AI生成時にOllamaへのリクエストを元にPenpotへ作成したデザインファイルのURL(ベストエフォート、失敗時はnull)。 */
+    @Column(name = "penpot_file_url", length = 500)
+    private String penpotFileUrl;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

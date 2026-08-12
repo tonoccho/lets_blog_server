@@ -169,7 +169,7 @@ public class ConnectedServiceStatusService {
         return checkHttpService(wordpressProvisioningClient, wordpressProvisionBaseUrl, "/health");
     }
 
-    /** Penpot frontend(nginx)のレディネスチェックルートで判定する。 */
+    /** Penpotフロントエンドが公開しているヘルスチェック用エンドポイントで判定する。 */
     private CheckOutcome checkPenpot() {
         return checkHttpService(penpotClient, penpotBaseUrl, "/readyz");
     }
