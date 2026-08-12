@@ -42,6 +42,7 @@ class ConnectedServiceStatusServiceTest {
     private static final String COMFYUI_URL = "http://comfyui.test";
     private static final String PLANTUML_URL = "http://plantuml.test";
     private static final String WORDPRESS_URL = "http://wordpress-provision.test";
+    private static final String PENPOT_URL = "http://penpot.test";
     private static final String PLANTUML_HEALTHCHECK_PATH =
             "/png/" + PlantUmlEncoder.encode("@startuml\nA->B\n@enduml");
 
@@ -56,6 +57,7 @@ class ConnectedServiceStatusServiceTest {
     private MockRestServiceServer comfyUiServer;
     private MockRestServiceServer plantUmlServer;
     private MockRestServiceServer wordpressServer;
+    private MockRestServiceServer penpotServer;
     private ConnectedServiceStatusService service;
 
     @BeforeEach
@@ -64,11 +66,13 @@ class ConnectedServiceStatusServiceTest {
         RestClient.Builder comfyUiBuilder = RestClient.builder().baseUrl(COMFYUI_URL);
         RestClient.Builder plantUmlBuilder = RestClient.builder().baseUrl(PLANTUML_URL);
         RestClient.Builder wordpressBuilder = RestClient.builder().baseUrl(WORDPRESS_URL);
+        RestClient.Builder penpotBuilder = RestClient.builder().baseUrl(PENPOT_URL);
 
         ollamaServer = MockRestServiceServer.bindTo(ollamaBuilder).build();
         comfyUiServer = MockRestServiceServer.bindTo(comfyUiBuilder).build();
         plantUmlServer = MockRestServiceServer.bindTo(plantUmlBuilder).build();
         wordpressServer = MockRestServiceServer.bindTo(wordpressBuilder).build();
+        penpotServer = MockRestServiceServer.bindTo(penpotBuilder).build();
 
         service = new ConnectedServiceStatusService(
                 dataSource,
@@ -76,6 +80,7 @@ class ConnectedServiceStatusServiceTest {
                 comfyUiBuilder, COMFYUI_URL,
                 plantUmlBuilder, PLANTUML_URL,
                 wordpressBuilder, WORDPRESS_URL,
+                penpotBuilder, PENPOT_URL,
                 systemSettingService);
     }
 
@@ -85,6 +90,7 @@ class ConnectedServiceStatusServiceTest {
         plantUmlServer.expect(requestTo(PLANTUML_URL + PLANTUML_HEALTHCHECK_PATH))
                 .andRespond(withSuccess(new byte[]{1, 2, 3}, MediaType.IMAGE_PNG));
         wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
+        penpotServer.expect(requestTo(PENPOT_URL + "/readyz")).andRespond(withSuccess());
     }
 
     @Test
@@ -104,6 +110,7 @@ class ConnectedServiceStatusServiceTest {
         assertEquals(Status.NORMAL, byId.get("comfyui"));
         assertEquals(Status.NORMAL, byId.get("plantuml"));
         assertEquals(Status.NORMAL, byId.get("wordpress-provisioning"));
+        assertEquals(Status.NORMAL, byId.get("penpot"));
         assertEquals(Status.NORMAL, byId.get("brave-search"));
     }
 
@@ -131,6 +138,7 @@ class ConnectedServiceStatusServiceTest {
         plantUmlServer.expect(requestTo(PLANTUML_URL + PLANTUML_HEALTHCHECK_PATH))
                 .andRespond(withSuccess(new byte[]{1, 2, 3}, MediaType.IMAGE_PNG));
         wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
+        penpotServer.expect(requestTo(PENPOT_URL + "/readyz")).andRespond(withSuccess());
         when(systemSettingService.getBraveSearchApiKeyStatus())
                 .thenReturn(new SystemSettingService.BraveSearchApiKeyStatus(
                         true, SystemSettingService.SettingSource.DATABASE));
@@ -149,6 +157,7 @@ class ConnectedServiceStatusServiceTest {
         plantUmlServer.expect(requestTo(PLANTUML_URL + PLANTUML_HEALTHCHECK_PATH))
                 .andRespond(withSuccess(new byte[]{1, 2, 3}, MediaType.IMAGE_PNG));
         wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
+        penpotServer.expect(requestTo(PENPOT_URL + "/readyz")).andRespond(withSuccess());
         when(systemSettingService.getBraveSearchApiKeyStatus())
                 .thenReturn(new SystemSettingService.BraveSearchApiKeyStatus(
                         true, SystemSettingService.SettingSource.DATABASE));
@@ -167,6 +176,7 @@ class ConnectedServiceStatusServiceTest {
         plantUmlServer.expect(requestTo(PLANTUML_URL + PLANTUML_HEALTHCHECK_PATH))
                 .andRespond(withSuccess(new byte[]{1, 2, 3}, MediaType.IMAGE_PNG));
         wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
+        penpotServer.expect(requestTo(PENPOT_URL + "/readyz")).andRespond(withSuccess());
         when(systemSettingService.getBraveSearchApiKeyStatus())
                 .thenReturn(new SystemSettingService.BraveSearchApiKeyStatus(
                         true, SystemSettingService.SettingSource.DATABASE));
@@ -185,6 +195,7 @@ class ConnectedServiceStatusServiceTest {
         plantUmlServer.expect(requestTo(PLANTUML_URL + PLANTUML_HEALTHCHECK_PATH))
                 .andRespond(withSuccess(new byte[0], MediaType.IMAGE_PNG));
         wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
+        penpotServer.expect(requestTo(PENPOT_URL + "/readyz")).andRespond(withSuccess());
         when(systemSettingService.getBraveSearchApiKeyStatus())
                 .thenReturn(new SystemSettingService.BraveSearchApiKeyStatus(
                         true, SystemSettingService.SettingSource.DATABASE));
@@ -192,6 +203,27 @@ class ConnectedServiceStatusServiceTest {
         List<ConnectedServiceStatusResponse> statuses = service.checkAll();
 
         assertEquals(Status.WARNING, toMapById(statuses).get("plantuml"));
+    }
+
+    @Test
+    void checkAll_Penpotが接続不可であればERRORを返す() throws SQLException {
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(true);
+        ollamaServer.expect(requestTo(OLLAMA_URL + "/api/tags")).andRespond(withSuccess());
+        comfyUiServer.expect(requestTo(COMFYUI_URL + "/system_stats")).andRespond(withSuccess());
+        plantUmlServer.expect(requestTo(PLANTUML_URL + PLANTUML_HEALTHCHECK_PATH))
+                .andRespond(withSuccess(new byte[]{1, 2, 3}, MediaType.IMAGE_PNG));
+        wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
+        penpotServer.expect(requestTo(PENPOT_URL + "/readyz")).andRespond(request -> {
+            throw new java.io.IOException("connection refused");
+        });
+        when(systemSettingService.getBraveSearchApiKeyStatus())
+                .thenReturn(new SystemSettingService.BraveSearchApiKeyStatus(
+                        true, SystemSettingService.SettingSource.DATABASE));
+
+        List<ConnectedServiceStatusResponse> statuses = service.checkAll();
+
+        assertEquals(Status.ERROR, toMapById(statuses).get("penpot"));
     }
 
     @Test
@@ -245,6 +277,7 @@ class ConnectedServiceStatusServiceTest {
         plantUmlServer.expect(requestTo(PLANTUML_URL + PLANTUML_HEALTHCHECK_PATH))
                 .andRespond(withSuccess(new byte[]{1, 2, 3}, MediaType.IMAGE_PNG));
         wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
+        penpotServer.expect(requestTo(PENPOT_URL + "/readyz")).andRespond(withSuccess());
         when(systemSettingService.getBraveSearchApiKeyStatus())
                 .thenReturn(new SystemSettingService.BraveSearchApiKeyStatus(
                         true, SystemSettingService.SettingSource.DATABASE));
