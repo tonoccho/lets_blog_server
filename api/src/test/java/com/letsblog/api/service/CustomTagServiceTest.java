@@ -283,6 +283,100 @@ class CustomTagServiceTest {
     }
 
     @Test
+    void buildProjectCssBundle_組み込みタグのデザインCSSにもプリフィックスを付与する() {
+        // TocStyleRenderService等の出力は改行なしで複数ルールが連結されている(issue #307)
+        when(customTagRepository.findByProjectId(5L)).thenReturn(List.of());
+        TagDesignColors colors = new TagDesignColors("#ffffff", "#1a1a1a", "#2563eb", null);
+        when(tagDesignSettingService.resolveColors(eq(5L), any(EmbedTagType.class))).thenReturn(colors);
+        when(tocStyleRenderService.buildStyle(colors)).thenReturn(".lb-toc-list{margin:1em;}.lb-toc-list a{color:red;}");
+        when(blogCardTagRenderService.buildStyle(colors)).thenReturn(".blogcard-css{}");
+        when(amazonTagRenderService.buildStyle(colors)).thenReturn(".amazon-css{}");
+        Project project = new Project();
+        project.setSlug("my-blog");
+        when(projectService.getProjectEntity(5L)).thenReturn(project);
+        when(projectService.resolveCssSelectorPrefix(project)).thenReturn("my-blog");
+
+        String bundle = service.buildProjectCssBundle(5L);
+
+        assertEquals(true, bundle.contains(".my-blog .lb-toc-list {margin:1em;}"));
+        assertEquals(true, bundle.contains(".my-blog .lb-toc-list a {color:red;}"));
+        assertEquals(true, bundle.contains(".my-blog .blogcard-css {}"));
+        assertEquals(true, bundle.contains(".my-blog .amazon-css {}"));
+    }
+
+    @Test
+    void buildCssBundle_組み込みタグのデザインCSSにもプリフィックスを付与する() {
+        when(customTagRepository.findByProjectIdOrProjectIdIsNull(5L)).thenReturn(List.of());
+        TagDesignColors colors = new TagDesignColors("#ffffff", "#1a1a1a", "#2563eb", null);
+        when(tagDesignSettingService.resolveColors(eq(5L), any(EmbedTagType.class))).thenReturn(colors);
+        when(tocStyleRenderService.buildStyle(colors)).thenReturn(".toc-css{}");
+        when(blogCardTagRenderService.buildStyle(colors)).thenReturn(".blogcard-css{}");
+        when(amazonTagRenderService.buildStyle(colors)).thenReturn(".amazon-css{}");
+        Project project = new Project();
+        project.setSlug("my-blog");
+        when(projectService.getProjectEntity(5L)).thenReturn(project);
+        when(projectService.resolveCssSelectorPrefix(project)).thenReturn("my-blog");
+
+        String bundle = service.buildCssBundle(5L);
+
+        assertEquals(true, bundle.contains(".my-blog .toc-css {}"));
+        assertEquals(true, bundle.contains(".my-blog .blogcard-css {}"));
+        assertEquals(true, bundle.contains(".my-blog .amazon-css {}"));
+    }
+
+    @Test
+    void buildProjectCssBundle_複数行にまたがるセレクタリストにもプリフィックスを付与する() {
+        CustomTag tag = new CustomTag();
+        tag.setTagName("alert");
+        tag.setCssContent(".alert,\n.warning {\n  color: red;\n}");
+        when(customTagRepository.findByProjectId(5L)).thenReturn(List.of(tag));
+        stubEmbedTagCss(5L);
+        Project project = new Project();
+        project.setSlug("my-blog");
+        when(projectService.getProjectEntity(5L)).thenReturn(project);
+        when(projectService.resolveCssSelectorPrefix(project)).thenReturn("my-blog");
+
+        String bundle = service.buildProjectCssBundle(5L);
+
+        assertEquals(true, bundle.contains(".my-blog .alert, .my-blog .warning {"));
+    }
+
+    @Test
+    void buildProjectCssBundle_media内のセレクタにもプリフィックスを付与しつつatルール自体は変更しない() {
+        CustomTag tag = new CustomTag();
+        tag.setTagName("alert");
+        tag.setCssContent("@media (max-width: 600px) { .alert { color: red; } }");
+        when(customTagRepository.findByProjectId(5L)).thenReturn(List.of(tag));
+        stubEmbedTagCss(5L);
+        Project project = new Project();
+        project.setSlug("my-blog");
+        when(projectService.getProjectEntity(5L)).thenReturn(project);
+        when(projectService.resolveCssSelectorPrefix(project)).thenReturn("my-blog");
+
+        String bundle = service.buildProjectCssBundle(5L);
+
+        assertEquals(true, bundle.contains("@media (max-width: 600px) {"));
+        assertEquals(true, bundle.contains(".my-blog .alert { color: red; }"));
+    }
+
+    @Test
+    void buildProjectCssBundle_keyframes内のパーセントセレクタにはプリフィックスを付与しない() {
+        CustomTag tag = new CustomTag();
+        tag.setTagName("spin");
+        tag.setCssContent("@keyframes spin { 0% { opacity: 0; } 100% { opacity: 1; } }");
+        when(customTagRepository.findByProjectId(5L)).thenReturn(List.of(tag));
+        stubEmbedTagCss(5L);
+        Project project = new Project();
+        project.setSlug("my-blog");
+        when(projectService.getProjectEntity(5L)).thenReturn(project);
+        when(projectService.resolveCssSelectorPrefix(project)).thenReturn("my-blog");
+
+        String bundle = service.buildProjectCssBundle(5L);
+
+        assertEquals(true, bundle.contains("@keyframes spin { 0% { opacity: 0; } 100% { opacity: 1; } }"));
+    }
+
+    @Test
     void listByProject_グローバルタグを含まずプロジェクトのタグのみ返す() {
         CustomTag tag = new CustomTag();
         tag.setId(1L);
