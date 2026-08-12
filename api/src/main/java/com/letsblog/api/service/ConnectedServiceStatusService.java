@@ -39,11 +39,13 @@ public class ConnectedServiceStatusService {
     private final RestClient comfyUiClient;
     private final RestClient plantUmlClient;
     private final RestClient wordpressProvisioningClient;
+    private final RestClient penpotClient;
     private final SystemSettingService systemSettingService;
     private final String ollamaBaseUrl;
     private final String comfyUiBaseUrl;
     private final String plantUmlBaseUrl;
     private final String wordpressProvisionBaseUrl;
+    private final String penpotBaseUrl;
 
     @Autowired
     public ConnectedServiceStatusService(
@@ -52,12 +54,14 @@ public class ConnectedServiceStatusService {
             @Value("${app.comfyui-base-url}") String comfyUiBaseUrl,
             @Value("${app.plantuml-base-url}") String plantUmlBaseUrl,
             @Value("${app.wordpress-provision-base-url}") String wordpressProvisionBaseUrl,
+            @Value("${app.penpot-base-url}") String penpotBaseUrl,
             SystemSettingService systemSettingService) {
         this(dataSource,
                 builderWithTimeout(ollamaBaseUrl), ollamaBaseUrl,
                 builderWithTimeout(comfyUiBaseUrl), comfyUiBaseUrl,
                 builderWithTimeout(plantUmlBaseUrl), plantUmlBaseUrl,
                 builderWithTimeout(wordpressProvisionBaseUrl), wordpressProvisionBaseUrl,
+                builderWithTimeout(penpotBaseUrl), penpotBaseUrl,
                 systemSettingService);
     }
 
@@ -68,17 +72,20 @@ public class ConnectedServiceStatusService {
             RestClient.Builder comfyUiBuilder, String comfyUiBaseUrl,
             RestClient.Builder plantUmlBuilder, String plantUmlBaseUrl,
             RestClient.Builder wordpressBuilder, String wordpressProvisionBaseUrl,
+            RestClient.Builder penpotBuilder, String penpotBaseUrl,
             SystemSettingService systemSettingService) {
         this.dataSource = dataSource;
         this.ollamaClient = ollamaBuilder.build();
         this.comfyUiClient = comfyUiBuilder.build();
         this.plantUmlClient = plantUmlBuilder.build();
         this.wordpressProvisioningClient = wordpressBuilder.build();
+        this.penpotClient = penpotBuilder.build();
         this.systemSettingService = systemSettingService;
         this.ollamaBaseUrl = ollamaBaseUrl;
         this.comfyUiBaseUrl = comfyUiBaseUrl;
         this.plantUmlBaseUrl = plantUmlBaseUrl;
         this.wordpressProvisionBaseUrl = wordpressProvisionBaseUrl;
+        this.penpotBaseUrl = penpotBaseUrl;
     }
 
     private static RestClient.Builder builderWithTimeout(String baseUrl) {
@@ -109,6 +116,8 @@ public class ConnectedServiceStatusService {
                 checkAsync("plantuml", "PlantUML", this::checkPlantUml);
         CompletableFuture<ConnectedServiceStatusDetailResponse> wordpressProvisioning =
                 checkAsync("wordpress-provisioning", "WordPress Provisioning Agent", this::checkWordpressProvisioning);
+        CompletableFuture<ConnectedServiceStatusDetailResponse> penpot =
+                checkAsync("penpot", "Penpot", this::checkPenpot);
 
         return List.of(
                 runTimed("database", "データベース", this::checkDatabase),
@@ -116,6 +125,7 @@ public class ConnectedServiceStatusService {
                 comfyUi.join(),
                 plantUml.join(),
                 wordpressProvisioning.join(),
+                penpot.join(),
                 runTimed("brave-search", "Brave Search API", this::checkBraveSearch));
     }
 
@@ -157,6 +167,11 @@ public class ConnectedServiceStatusService {
     /** provision-agentの専用ヘルスチェックルート(issue #197で追加)で判定する。 */
     private CheckOutcome checkWordpressProvisioning() {
         return checkHttpService(wordpressProvisioningClient, wordpressProvisionBaseUrl, "/health");
+    }
+
+    /** Penpot frontend(nginx)のレディネスチェックルートで判定する。 */
+    private CheckOutcome checkPenpot() {
+        return checkHttpService(penpotClient, penpotBaseUrl, "/readyz");
     }
 
     /**

@@ -79,6 +79,7 @@ app:
   brave-search-base-url: ${BRAVE_SEARCH_BASE_URL:https://api.search.brave.com}
   brave-search-api-key: ${BRAVE_SEARCH_API_KEY:}
   plantuml-base-url: ${PLANTUML_BASE_URL:http://localhost:8085}
+  penpot-base-url: ${PENPOT_BASE_URL:http://localhost:9001}
   content-cache-ttl-hours: ${CONTENT_CACHE_TTL_HOURS:24}
   wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
   wordpress-provision-token: ${WP_PROVISION_TOKEN:}
