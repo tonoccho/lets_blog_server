@@ -61,7 +61,9 @@ public class WordPressSiteProvisioningService {
                             slug, dbName, request.title(), request.adminUser(), request.adminEmail(),
                             request.adminPassword(), locale));
         } catch (ProvisioningException e) {
-            // エージェント側の自己クリーンアップが働かなかった場合(接続断など)の保険的な後始末
+            // エージェント側の自己クリーンアップが働かなかった場合(接続断など)の保険的な後始末。
+            // 「既に存在する」場合(SiteAlreadyProvisionedException)は今回のリクエストで
+            // 何も作成していないため、ここでは捕捉せずそのまま呼び出し元へ伝播する(issue #315)。
             provisioningClient.deprovision(slug, dbName);
             throw e;
         }

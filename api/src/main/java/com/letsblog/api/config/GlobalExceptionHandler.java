@@ -24,6 +24,7 @@ import com.letsblog.api.service.ProjectUserNotFoundException;
 import com.letsblog.api.service.ProvisioningException;
 import com.letsblog.api.service.QrCodeGenerationException;
 import com.letsblog.api.service.RoleNotFoundException;
+import com.letsblog.api.service.SiteAlreadyProvisionedException;
 import com.letsblog.api.service.SiteNotFoundException;
 import com.letsblog.api.service.TwoFactorSecretNotFoundException;
 import com.letsblog.api.exception.RateLimitExceededException;
@@ -147,6 +148,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ProvisioningException.class)
     public ResponseEntity<Map<String, String>> handleProvisioningException(ProvisioningException e) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(SiteAlreadyProvisionedException.class)
+    public ResponseEntity<Map<String, String>> handleSiteAlreadyProvisionedException(SiteAlreadyProvisionedException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", e.getMessage()));
     }
 
     @ExceptionHandler(SshOperationException.class)
