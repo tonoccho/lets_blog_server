@@ -81,7 +81,8 @@ public class OllamaClient {
             JsonNode body = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode()
                     .put("model", modelName)
                     .put("prompt", prompt)
-                    .put("stream", false);
+                    .put("stream", false)
+                    .put("keep_alive", 0);
 
             JsonNode response = client.post()
                     .uri("/api/generate")
