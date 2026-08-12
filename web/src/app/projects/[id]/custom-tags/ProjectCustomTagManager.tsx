@@ -3,7 +3,7 @@
 import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import type { CustomTag, Project } from "@/lib/apiClient";
 import { CustomTagGenerationForm } from "@/app/custom-tags/CustomTagGenerationForm";
-import { TemplateEditor } from "@/app/custom-tags/CustomTagManager";
+import { TemplateEditor, buildPreviewSrcDoc } from "@/app/custom-tags/CustomTagManager";
 import { upsertProjectCustomTagAction, deleteProjectCustomTagAction, type CustomTagFormState } from "./actions";
 
 const initialState: CustomTagFormState = {};
@@ -82,15 +82,14 @@ export function ProjectCustomTagManager({
               <th className="px-4 py-2">タグ名</th>
               <th className="px-4 py-2">形式</th>
               <th className="px-4 py-2">説明</th>
-              <th className="px-4 py-2">HTMLテンプレート</th>
-              <th className="px-4 py-2">CSS</th>
+              <th className="px-4 py-2">表示サンプル</th>
               <th className="px-4 py-2"></th>
             </tr>
           </thead>
           <tbody>
             {tags.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center">
+                <td colSpan={5} className="px-4 py-8 text-center">
                   <div className="flex flex-col items-center gap-4">
                     <p className="text-neutral-600 dark:text-neutral-400">登録済みカスタムタグはありません</p>
                     <a
@@ -121,11 +120,13 @@ export function ProjectCustomTagManager({
                   </span>
                 </td>
                 <td className="px-4 py-2 text-neutral-600 dark:text-neutral-400">{tag.description}</td>
-                <td className="px-4 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-400">
-                  <code className="whitespace-pre-wrap break-all">{tag.htmlTemplate}</code>
-                </td>
-                <td className="px-4 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-400">
-                  {tag.cssContent && <code className="whitespace-pre-wrap break-all">{tag.cssContent}</code>}
+                <td className="px-4 py-2">
+                  <iframe
+                    title={`[${tag.tagName}]の表示サンプル`}
+                    srcDoc={buildPreviewSrcDoc(tag.htmlTemplate, tag.cssContent ?? "")}
+                    sandbox="allow-same-origin"
+                    className="h-24 w-full min-w-[220px] rounded border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
+                  />
                 </td>
                 <td className="px-4 py-2 text-right whitespace-nowrap">
                   <button type="button" onClick={() => setEditing(tag)} className="text-sm text-blue-600 hover:underline">
