@@ -92,7 +92,16 @@ export interface SectionGenInitPayload {
 export type ArticleCreationInboundMessage =
   | WebviewMessageBase<'loadProjects'>
   | WebviewMessageBase<'close'>
+  | WebviewMessageBase<'cancel'>
   | (WebviewMessageBase<'loadCategories'> & { projectId: number })
+  | (WebviewMessageBase<'sendChat'> & {
+      projectId: number;
+      history: api.PlanChatMessage[];
+      message: string;
+      sessionId?: number;
+    })
+  | (WebviewMessageBase<'suggestMetadata'> & { projectId: number; history: api.PlanChatMessage[] })
+  | (WebviewMessageBase<'suggestStructure'> & { projectId: number; history: api.PlanChatMessage[] })
   | (WebviewMessageBase<'createArticle'> & {
       metadata: {
         projectId: number;
@@ -102,9 +111,18 @@ export type ArticleCreationInboundMessage =
         tags: string[];
         status: string;
       };
+      content?: string;
     });
 
-export type ArticleCreationOutboundCommand = 'projectList' | 'categoryList' | 'articleCreated' | 'error';
+export type ArticleCreationOutboundCommand =
+  | 'projectList'
+  | 'categoryList'
+  | 'chatResponse'
+  | 'metadataSuggestion'
+  | 'structureSuggestion'
+  | 'articleCreated'
+  | 'cancelled'
+  | 'error';
 
 // --- Image Gallery パネル ---
 

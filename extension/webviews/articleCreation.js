@@ -3,6 +3,9 @@
   let existingCategories = [];
   /** スラッグを利用者が手で編集したら、タイトルからの自動入力を止める。 */
   let slugEditedByUser = false;
+  /** AIブレインストーミングの会話履歴とセッションID(壁打ちチャットの継続に使う)。 */
+  let chatHistory = [];
+  let chatSessionId = undefined;
 
   function post(command, payload) {
     vscode.postMessage(Object.assign({ command }, payload || {}));
@@ -63,7 +66,7 @@
     post('loadCategories', { projectId: projectId });
   }
 
-  function renderCategories(categories) {
+  function renderCategories(categories, selected) {
     existingCategories = categories || [];
     const container = document.getElementById('categoryCheckboxes');
     container.textContent = '';
@@ -81,11 +84,131 @@
       checkbox.type = 'checkbox';
       checkbox.id = id;
       checkbox.value = name;
+      checkbox.checked = (selected || []).some(function (s) { return s.toLowerCase() === name.toLowerCase(); });
       label.setAttribute('for', id);
       label.appendChild(checkbox);
       label.appendChild(document.createTextNode(' ' + name));
       container.appendChild(label);
     });
+  }
+
+  /** AIブレインストーミングのメッセージを画面へ追加し、履歴にも積む。 */
+  function addBrainstormMessage(role, content) {
+    chatHistory.push({ role: role, content: content });
+    const messagesDiv = document.getElementById('brainstormMessages');
+    const msgEl = document.createElement('div');
+    msgEl.className = 'message ' + role;
+    msgEl.textContent = content;
+    messagesDiv.appendChild(msgEl);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+  }
+
+  function currentProjectId() {
+    return Number(document.getElementById('projectSelect').value) || undefined;
+  }
+
+  function sendBrainstormMessage() {
+    const input = document.getElementById('brainstormInput');
+    const text = input.value.trim();
+    const projectId = currentProjectId();
+    if (!text || LetsBlogLoading.isRunning()) return;
+    if (!projectId) {
+      showMessage('先にプロジェクトを選択してください。', 'error');
+      return;
+    }
+    addBrainstormMessage('user', text);
+    input.value = '';
+    LetsBlogLoading.begin({
+      buttonIds: ['brainstormSendButton', 'suggestMetadataButton', 'suggestStructureButton'],
+      text: 'AIの応答を待っています…',
+      kind: 'chat',
+      onCancel: function () { post('cancel'); },
+    });
+    post('sendChat', { projectId: projectId, history: chatHistory.slice(0, -1), message: text, sessionId: chatSessionId });
+  }
+
+  function requestMetadataSuggestion() {
+    if (LetsBlogLoading.isRunning()) return;
+    const projectId = currentProjectId();
+    if (!projectId) {
+      showMessage('先にプロジェクトを選択してください。', 'error');
+      return;
+    }
+    if (chatHistory.length === 0) {
+      showMessage('先にAIブレインストーミングで壁打ちしてください。', 'error');
+      return;
+    }
+    LetsBlogLoading.begin({
+      buttonIds: ['suggestMetadataButton', 'brainstormSendButton'],
+      text: 'タイトル・スラッグ・タグを提案しています…',
+      kind: 'metadata',
+      onCancel: function () { post('cancel'); },
+    });
+    post('suggestMetadata', { projectId: projectId, history: chatHistory });
+  }
+
+  function requestStructureSuggestion() {
+    if (LetsBlogLoading.isRunning()) return;
+    const projectId = currentProjectId();
+    if (!projectId) {
+      showMessage('先にプロジェクトを選択してください。', 'error');
+      return;
+    }
+    if (chatHistory.length === 0) {
+      showMessage('先にAIブレインストーミングで壁打ちしてください。', 'error');
+      return;
+    }
+    LetsBlogLoading.begin({
+      buttonIds: ['suggestStructureButton', 'brainstormSendButton'],
+      text: '記事構成を提案しています…',
+      kind: 'structure',
+      onCancel: function () { post('cancel'); },
+    });
+    post('suggestStructure', { projectId: projectId, history: chatHistory });
+  }
+
+  /** 候補一覧をselectへ描画し、選択時に対応する入力欄へ反映する。 */
+  function renderOptionList(selectId, targetInputId, options) {
+    const select = document.getElementById(selectId);
+    select.innerHTML = '';
+    if (!options || options.length === 0) {
+      const placeholder = document.createElement('option');
+      placeholder.textContent = '候補がありません。下欄に直接入力してください。';
+      placeholder.disabled = true;
+      placeholder.selected = true;
+      select.appendChild(placeholder);
+      return;
+    }
+    options.forEach(function (value) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = value;
+      select.appendChild(option);
+    });
+    select.onchange = function () {
+      document.getElementById(targetInputId).value = select.value;
+    };
+  }
+
+  function showMetadataSuggestion(suggestion) {
+    const titles = suggestion.titles || [];
+    const slugs = suggestion.slugs || [];
+    renderOptionList('titleOptions', 'titleInput', titles);
+    renderOptionList('slugOptions', 'slugInput', slugs);
+    if (titles.length > 0) {
+      document.getElementById('titleInput').value = titles[0];
+      slugEditedByUser = true;
+    }
+    if (slugs.length > 0) {
+      document.getElementById('slugInput').value = slugs[0];
+    }
+    const suggestedCategories = suggestion.categories || [];
+    renderCategories(existingCategories, suggestedCategories);
+    const unmatched = suggestedCategories.filter(function (c) {
+      return !existingCategories.some(function (e) { return e.toLowerCase() === c.toLowerCase(); });
+    });
+    document.getElementById('newCategoriesInput').value = unmatched.join(', ');
+    document.getElementById('tagsInput').value = (suggestion.tags || []).join(', ');
   }
 
   function collectMetadata() {
@@ -144,9 +267,10 @@
     if (LetsBlogLoading.isRunning()) return;
     const metadata = collectMetadata();
     if (!metadata) return;
+    const content = document.getElementById('structureTextarea').value;
     showMessage('', '');
     LetsBlogLoading.begin({ buttonIds: ['createButton'], text: '記事を作成しています…', kind: 'load' });
-    post('createArticle', { metadata: metadata });
+    post('createArticle', { metadata: metadata, content: content });
   }
 
   document.getElementById('titleInput').addEventListener('input', function (e) {
@@ -158,11 +282,19 @@
   });
   document.getElementById('projectSelect').addEventListener('change', loadCategoriesForSelectedProject);
   document.getElementById('createButton').addEventListener('click', createArticle);
+  document.getElementById('brainstormSendButton').addEventListener('click', sendBrainstormMessage);
+  document.getElementById('brainstormInput').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') sendBrainstormMessage();
+  });
+  document.getElementById('suggestMetadataButton').addEventListener('click', requestMetadataSuggestion);
+  document.getElementById('suggestStructureButton').addEventListener('click', requestStructureSuggestion);
 
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       createArticle();
+    } else if (e.key === 'Escape' && LetsBlogLoading.isRunning()) {
+      post('cancel');
     } else if (e.key === 'Escape' && !LetsBlogLoading.isRunning()) {
       // 作成をやめる場合の退避口。実行中は誤操作を防ぐため受け付けない。
       post('close');
@@ -180,9 +312,28 @@
       case 'categoryList':
         renderCategories(data.payload.categories);
         break;
+      case 'chatResponse':
+        LetsBlogLoading.end();
+        addBrainstormMessage('assistant', data.payload.reply);
+        chatSessionId = data.payload.sessionId;
+        break;
+      case 'metadataSuggestion':
+        LetsBlogLoading.end();
+        showMetadataSuggestion(data.payload);
+        showMessage('タイトル・スラッグ・タグを提案しました。候補から選ぶか、直接編集してください。', 'success');
+        break;
+      case 'structureSuggestion':
+        LetsBlogLoading.end();
+        document.getElementById('structureSection').style.display = 'block';
+        document.getElementById('structureTextarea').value = data.payload.structure || '';
+        break;
       case 'articleCreated':
         LetsBlogLoading.end();
         showMessage('articles/' + data.payload.slug + '/article.md を作成しました。', 'success');
+        break;
+      case 'cancelled':
+        LetsBlogLoading.end();
+        showMessage('操作をキャンセルしました。', '');
         break;
       case 'error':
         LetsBlogLoading.end();
@@ -190,6 +341,9 @@
         break;
     }
   });
+
+  renderOptionList('titleOptions', 'titleInput', []);
+  renderOptionList('slugOptions', 'slugInput', []);
 
   LetsBlogLoading.begin({ buttonIds: ['createButton'], text: 'プロジェクトを取得しています…', kind: 'load' });
   post('loadProjects');
