@@ -3,6 +3,7 @@ package com.letsblog.api.ai;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.letsblog.api.config.LegacyJacksonRestClientConfig;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
@@ -17,8 +18,10 @@ import java.util.UUID;
 /**
  * ComfyUIのAPI(/prompt, /history, /view, /object_info)を呼び出し、txt2img画像を生成するクライアント。
  * ComfyUIは非同期のキュー方式のため、/prompt投入後 /history をポーリングして完了を待つ。
+ * 処理完了後はVRAMをクリアし、メモリリークを防止する。
  */
 @Component
+@Slf4j
 public class ComfyUiClient {
 
     private static final int POLL_INTERVAL_MS = 1000;
@@ -43,6 +46,7 @@ public class ComfyUiClient {
     /**
      * batch_size枚分の画像を生成する。EmptyLatentImageのbatch_sizeに応じてComfyUI側のSaveImageノードが
      * 複数ファイルを出力するため、historyのoutputs.images配列を全件取得して1枚ずつ/viewで取得する。
+     * 処理完了後にVRAMをクリアする。
      */
     public List<ComfyUiImage> generateImage(ComfyUiGenerationParams params) {
         String clientId = UUID.randomUUID().toString();
@@ -83,6 +87,9 @@ public class ComfyUiClient {
 
             images.add(new ComfyUiImage(filename, data, "image/png"));
         }
+
+        clearMemory();
+
         return images;
     }
 
@@ -279,5 +286,21 @@ public class ComfyUiClient {
         graph.set("9", saveImage);
 
         return graph;
+    }
+
+    private void clearMemory() {
+        try {
+            log.debug("Clearing ComfyUI VRAM memory after generation completion");
+            ObjectNode body = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
+            client.post()
+                    .uri("/api/interrupt")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body)
+                    .retrieve()
+                    .toBodilessEntity();
+            log.debug("ComfyUI VRAM memory cleared successfully");
+        } catch (Exception e) {
+            log.warn("Failed to clear ComfyUI VRAM memory: {}", e.getMessage());
+        }
     }
 }
