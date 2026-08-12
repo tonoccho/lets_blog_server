@@ -171,6 +171,21 @@ export function CustomTagGenerationForm({
             )}
           </div>
           <ValidationPanel result={validationResult} isLoading={isValidating} error={validationError} />
+          {result.penpotFileUrl && (
+            <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 p-3 text-sm">
+              <p className="text-neutral-600 dark:text-neutral-400">
+                同じプロンプトを元に、Penpot上にデザイン作業用のファイルを作成しました。
+              </p>
+              <a
+                href={result.penpotFileUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-1 inline-block font-medium text-blue-600 hover:underline dark:text-blue-400"
+              >
+                Penpotで開く →
+              </a>
+            </div>
+          )}
           <button
             type="button"
             onClick={handleUseResult}

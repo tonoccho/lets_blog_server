@@ -725,6 +725,8 @@ export interface CustomTag {
   projectId: number | null;
   createdAt: string;
   updatedAt: string;
+  /** AI生成時にOllamaへのリクエストを元にPenpotへ作成したデザインファイルのURL(ベストエフォート、生成以外では常にnull)。 */
+  penpotFileUrl?: string | null;
 }
 
 export interface CustomTagInput {

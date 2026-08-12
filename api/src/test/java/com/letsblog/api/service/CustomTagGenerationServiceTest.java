@@ -1,6 +1,7 @@
 package com.letsblog.api.service;
 
 import com.letsblog.api.ai.OllamaClient;
+import com.letsblog.api.ai.PenpotClient;
 import com.letsblog.api.domain.CustomTag;
 import com.letsblog.api.dto.GenerateCustomTagRequest;
 import com.letsblog.api.dto.GenerateCustomTagResponse;
@@ -18,6 +19,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -25,6 +27,9 @@ class CustomTagGenerationServiceTest {
 
     @Mock
     private OllamaClient ollamaClient;
+
+    @Mock
+    private PenpotClient penpotClient;
 
     @Mock
     private CustomTagRepository customTagRepository;
@@ -185,6 +190,59 @@ class CustomTagGenerationServiceTest {
 
         GenerateCustomTagResponse result = customTagGenerationService.generate(request);
         assertTrue(result.htmlTemplate().contains("card"));
+    }
+
+    @Test
+    void testGenerateCustomTag_PenpotDesignFileCreated() {
+        String ollamaResponse = """
+            ```html
+            <button class="btn">クリック</button>
+            ```
+
+            ```css
+            .btn { padding: 10px; }
+            ```
+            """;
+
+        GenerateCustomTagRequest request = new GenerateCustomTagRequest(
+            "青いボタンコンポーネントを作成してください", "my-button", "説明", null
+        );
+
+        PenpotClient.DesignFile designFile = new PenpotClient.DesignFile(
+            "file-id", "project-id", "http://localhost:9001/#/workspace/project-id/file-id?page-id=page-id"
+        );
+
+        when(ollamaClient.generate(anyString())).thenReturn(ollamaResponse);
+        when(customTagRepository.findByTagNameAndProjectIdIsNull("my-button")).thenReturn(Optional.empty());
+        when(penpotClient.createDesignFile(anyString(), anyString())).thenReturn(designFile);
+        when(customTagRepository.save(any(CustomTag.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        GenerateCustomTagResponse response = customTagGenerationService.generate(request);
+
+        assertEquals(designFile.url(), response.penpotFileUrl());
+        verify(penpotClient).createDesignFile(eq("カスタムタグ: my-button"), anyString());
+    }
+
+    @Test
+    void testGenerateCustomTag_PenpotFailureDoesNotBlockGeneration() {
+        String ollamaResponse = """
+            ```html
+            <button class="btn">クリック</button>
+            ```
+            """;
+
+        GenerateCustomTagRequest request = new GenerateCustomTagRequest("テスト", "my-button", "説明", null);
+
+        when(ollamaClient.generate(anyString())).thenReturn(ollamaResponse);
+        when(customTagRepository.findByTagNameAndProjectIdIsNull("my-button")).thenReturn(Optional.empty());
+        when(penpotClient.createDesignFile(anyString(), anyString()))
+            .thenThrow(new com.letsblog.api.ai.AiServiceException("接続失敗", null));
+        when(customTagRepository.save(any(CustomTag.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        GenerateCustomTagResponse response = customTagGenerationService.generate(request);
+
+        assertNull(response.penpotFileUrl());
+        verify(customTagRepository).save(any(CustomTag.class));
     }
 
     @Test

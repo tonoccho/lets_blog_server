@@ -59,6 +59,10 @@ services:
       COMFYUI_MODELS_PATH: /comfyui-models
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY}
       PLANTUML_BASE_URL: http://plantuml:8080
+      PENPOT_BASE_URL: http://penpot-frontend:8080
+      PENPOT_PUBLIC_URL: ${PENPOT_PUBLIC_URL:-http://localhost:9001}
+      PENPOT_SERVICE_EMAIL: ${PENPOT_SERVICE_EMAIL:-lbs-service@letsblog.local}
+      PENPOT_SERVICE_PASSWORD: ${PENPOT_SERVICE_PASSWORD}
       WORDPRESS_PROVISION_BASE_URL: http://wordpress:9000
       WP_PROVISION_TOKEN: ${WP_PROVISION_TOKEN}
       BACKUP_MYSQL_HOST: mysql
