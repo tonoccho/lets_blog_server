@@ -329,7 +329,7 @@ public class CustomTagService {
         return selectors.stream()
                 .map(selector -> selector.strip().replaceAll("\\s+", " "))
                 .filter(selector -> !selector.isEmpty())
-                .map(selector -> "." + selectorPrefix + " " + selector)
+                .map(selector -> "." + selectorPrefix + selector)
                 .collect(Collectors.joining(", "));
     }
 

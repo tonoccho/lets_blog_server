@@ -261,8 +261,8 @@ class CustomTagServiceTest {
 
         String bundle = service.buildCssBundle(5L);
 
-        assertEquals(true, bundle.contains(".my-blog .alert { color: red; }"));
-        assertEquals(true, bundle.contains(".my-blog .alert .icon { width: 1em; }"));
+        assertEquals(true, bundle.contains(".my-blog.alert { color: red; }"));
+        assertEquals(true, bundle.contains(".my-blog.alert .icon { width: 1em; }"));
     }
 
     @Test
@@ -279,7 +279,7 @@ class CustomTagServiceTest {
 
         String bundle = service.buildProjectCssBundle(5L);
 
-        assertEquals(true, bundle.contains(".custom-prefix .alert { color: red; }"));
+        assertEquals(true, bundle.contains(".custom-prefix.alert { color: red; }"));
     }
 
     @Test
@@ -298,10 +298,10 @@ class CustomTagServiceTest {
 
         String bundle = service.buildProjectCssBundle(5L);
 
-        assertEquals(true, bundle.contains(".my-blog .lb-toc-list {margin:1em;}"));
-        assertEquals(true, bundle.contains(".my-blog .lb-toc-list a {color:red;}"));
-        assertEquals(true, bundle.contains(".my-blog .blogcard-css {}"));
-        assertEquals(true, bundle.contains(".my-blog .amazon-css {}"));
+        assertEquals(true, bundle.contains(".my-blog.lb-toc-list {margin:1em;}"));
+        assertEquals(true, bundle.contains(".my-blog.lb-toc-list a {color:red;}"));
+        assertEquals(true, bundle.contains(".my-blog.blogcard-css {}"));
+        assertEquals(true, bundle.contains(".my-blog.amazon-css {}"));
     }
 
     @Test
@@ -319,9 +319,9 @@ class CustomTagServiceTest {
 
         String bundle = service.buildCssBundle(5L);
 
-        assertEquals(true, bundle.contains(".my-blog .toc-css {}"));
-        assertEquals(true, bundle.contains(".my-blog .blogcard-css {}"));
-        assertEquals(true, bundle.contains(".my-blog .amazon-css {}"));
+        assertEquals(true, bundle.contains(".my-blog.toc-css {}"));
+        assertEquals(true, bundle.contains(".my-blog.blogcard-css {}"));
+        assertEquals(true, bundle.contains(".my-blog.amazon-css {}"));
     }
 
     @Test
@@ -338,7 +338,7 @@ class CustomTagServiceTest {
 
         String bundle = service.buildProjectCssBundle(5L);
 
-        assertEquals(true, bundle.contains(".my-blog .alert, .my-blog .warning {"));
+        assertEquals(true, bundle.contains(".my-blog.alert, .my-blog.warning {"));
     }
 
     @Test
@@ -356,7 +356,7 @@ class CustomTagServiceTest {
         String bundle = service.buildProjectCssBundle(5L);
 
         assertEquals(true, bundle.contains("@media (max-width: 600px) {"));
-        assertEquals(true, bundle.contains(".my-blog .alert { color: red; }"));
+        assertEquals(true, bundle.contains(".my-blog.alert { color: red; }"));
     }
 
     @Test
