@@ -54,7 +54,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.generateSection', () => commandGenerateSection(context)),
     vscode.commands.registerCommand('letsBlog.selectProject', () => commandSelectProject(context)),
     vscode.commands.registerCommand('letsBlog.planArticle', () => commandPlanArticle(context)),
-    vscode.commands.registerCommand('letsBlog.previewArticle', () => commandPreviewArticle(context))
+    vscode.commands.registerCommand('letsBlog.previewArticle', () => commandPreviewArticle(context)),
+    vscode.commands.registerCommand('letsBlog.previewDevTools', () => PreviewPanel.openDevTools())
   );
 }
 

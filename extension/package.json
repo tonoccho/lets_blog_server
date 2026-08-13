@@ -69,6 +69,10 @@
         "title": "Let's Blog: Preview Article"
       },
       {
+        "command": "letsBlog.previewDevTools",
+        "title": "Let's Blog: Open Preview DevTools"
+      },
+      {
         "command": "letsBlog.schedulePublication",
         "title": "Let's Blog: Schedule Publication"
       },
