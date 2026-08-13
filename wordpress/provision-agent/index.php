@@ -189,7 +189,11 @@ if ($path === '/provision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         respond(500, ['error' => 'データベース作成に失敗しました', 'detail' => combinedOutput($out, $err)]);
     }
 
-    [$code, $out, $err] = runWp(['core', 'download', "--path=$sitePath", "--locale=$locale", '--allow-root']);
+    // core downloadはロケール指定なし(デフォルトen_US)で行う。--locale=$localeを直接指定すると、
+    // 該当バージョンの翻訳済みコアパッケージがwordpress.org側にまだ存在しない場合に
+    // "The requested locale (...) was not found." で失敗することがあるため、
+    // 未翻訳コアのダウンロード → 言語パックの個別インストール(下記)の2段階に分離する。
+    [$code, $out, $err] = runWp(['core', 'download', "--path=$sitePath", '--allow-root']);
     if ($code !== 0) {
         cleanupAndRespond(500, ['error' => 'WordPressコアのダウンロードに失敗しました', 'detail' => combinedOutput($out, $err)], $sitePath, $dbName, $dbHost, $rootPassword);
     }
@@ -237,6 +241,17 @@ if ($path === '/provision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     ]);
     if ($code !== 0) {
         cleanupAndRespond(500, ['error' => 'WordPressのインストールに失敗しました', 'detail' => combinedOutput($out, $err)], $sitePath, $dbName, $dbHost, $rootPassword);
+    }
+
+    // 言語パックのインストール・有効化はcore install(DBテーブル作成)後に行う。wp language core install
+    // はサイトが導入済み(DBテーブルが存在する)であることを前提とするため、core install前には実行できない。
+    // core install自体の--localeは、対象言語パックが未導入だと黙って無視されてしまうため使わず、
+    // 導入後に--activateで確実に有効化する。
+    if ($locale !== 'en_US') {
+        [$code, $out, $err] = runWp(['language', 'core', 'install', $locale, '--activate', "--path=$sitePath", '--allow-root']);
+        if ($code !== 0) {
+            cleanupAndRespond(500, ['error' => '言語パックのインストールに失敗しました', 'detail' => combinedOutput($out, $err)], $sitePath, $dbName, $dbHost, $rootPassword);
+        }
     }
 
     // パーマリンクを「投稿名」構造にする(デフォルトの「基本」のままでは
