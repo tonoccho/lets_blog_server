@@ -6,6 +6,7 @@ import { Tabs, type TabItem } from "@/components/Tabs";
 import { ProjectSectionNav } from "../ProjectSectionNav";
 import { TagDesignSettingsPanel } from "../tag-design/TagDesignSettingsPanel";
 import { ProjectCustomTagManager } from "../custom-tags/ProjectCustomTagManager";
+import { CssBundleViewer } from "../custom-tags/CssBundleViewer";
 
 export default async function ProjectTagsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -53,20 +54,15 @@ export default async function ProjectTagsPage({ params }: { params: Promise<{ id
     },
     {
       id: "css-bundle",
-      label: "統合CSSダウンロード",
+      label: "統合CSSの取得",
       content: (
         <div className="space-y-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
           <p className="max-w-2xl text-sm text-neutral-600 dark:text-neutral-400">
-            組み込みタグ([toc]/[blogcard]/[amazon])のデザインと、このプロジェクトのカスタムタグのCSSをまとめた
-            1つのファイルをダウンロードできます。WordPress側のテーマCSSに追加することで、
+            組み込みタグ([toc]/[blogcard]/[amazon])のデザインと、このプロジェクトのカスタムタグのCSSをまとめて
+            表示します。コピーしてWordPress側のテーマCSSに追加することで、
             記事本文中のタグを装飾できます。
           </p>
-          <a
-            href={`/projects/${projectId}/custom-tags/css-bundle`}
-            className="inline-block rounded bg-neutral-900 px-4 py-2 text-sm text-white hover:bg-neutral-800"
-          >
-            統合CSSをダウンロード
-          </a>
+          <CssBundleViewer projectId={projectId} />
         </div>
       ),
     },
