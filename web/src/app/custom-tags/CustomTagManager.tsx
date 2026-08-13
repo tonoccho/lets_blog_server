@@ -2,39 +2,78 @@
 
 import { useEffect, useState } from "react";
 
-const SAMPLE_CONTENT = "サンプルテキストです。ここに本文が入ります。";
+export const SAMPLE_CONTENT = "サンプルテキストです。ここに本文が入ります。";
 const ATTR_PATTERN = /\{\{attr:([a-zA-Z0-9_]+)\}\}/g;
 
 /**
- * プレビュー用に{{content}}をテスト用コンテンツへ、{{attr:xxx}}をサンプル値へ置換したHTMLを組み立てる。
- * フォームのライブプレビュー(TemplateEditor)とタグ一覧の表示サンプル(issue #297)の両方で使う。
+ * プレビュー用に、サーバーでレンダリング済みのHTML({{content}}が実際の投稿と同じMarkdown変換済み、
+ * lets-blog-renderedラッパー・プレフィックス付きCSSも適用済み)の{{attr:xxx}}をサンプル値へ置換し、
+ * iframeのsrcDoc用に組み立てる。フォームのライブプレビュー(TemplateEditor)とタグ一覧の表示サンプル
+ * (issue #297, #335)の両方で使う。
  */
-export function buildPreviewSrcDoc(htmlTemplate: string, cssContent: string, testContent: string = SAMPLE_CONTENT): string {
-  const html = htmlTemplate
-    .replaceAll("{{content}}", testContent)
-    .replace(ATTR_PATTERN, (_match, key: string) => `サンプル${key}`);
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${cssContent}</style></head><body>${html}</body></html>`;
+export function buildPreviewSrcDoc(renderedHtml: string, css: string): string {
+  const html = renderedHtml.replace(ATTR_PATTERN, (_match, key: string) => `サンプル${key}`);
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${css}</style></head><body>${html}</body></html>`;
+}
+
+/** テンプレート編集画面向けのプレビュー取得。実際の投稿と同じレンダリング結果を得るため、常にサーバーに問い合わせる(issue #335)。 */
+export async function fetchPreview(
+  projectId: number,
+  htmlTemplate: string,
+  cssContent: string,
+  testContent: string
+): Promise<{ html: string; css: string }> {
+  const res = await fetch(`/projects/${projectId}/custom-tags/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ htmlTemplate, cssContent, testContent }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || `プレビューの取得に失敗しました (${res.status})`);
+  }
+  return res.json();
 }
 
 /**
  * HTMLテンプレート/CSS入力とライブプレビューを担当する。編集対象(editing)が変わるたびに
  * 親側で`key`を変えて再マウントさせることで初期値を切り替える(useEffectでのprops→state同期は避ける)。
  */
-export function TemplateEditor({ initialHtml, initialCss }: { initialHtml: string; initialCss: string }) {
+export function TemplateEditor({
+  projectId,
+  initialHtml,
+  initialCss,
+}: {
+  projectId: number;
+  initialHtml: string;
+  initialCss: string;
+}) {
   const [htmlTemplateValue, setHtmlTemplateValue] = useState(initialHtml);
   const [cssContentValue, setCssContentValue] = useState(initialCss);
   const [testContent, setTestContent] = useState(SAMPLE_CONTENT);
-  const [previewSrcDoc, setPreviewSrcDoc] = useState(() =>
-    buildPreviewSrcDoc(initialHtml, initialCss, testContent)
-  );
+  const [previewSrcDoc, setPreviewSrcDoc] = useState("");
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
-  // HTML/CSS/テスト用コンテンツ変更のたびに即再描画すると入力のたびにiframeが再構築されカクつくため、300msデバウンスする
+  // HTML/CSS/テスト用コンテンツ変更のたびに即再描画すると入力のたびにリクエストが飛びカクつくため、300msデバウンスする
   useEffect(() => {
+    let cancelled = false;
     const timer = setTimeout(() => {
-      setPreviewSrcDoc(buildPreviewSrcDoc(htmlTemplateValue, cssContentValue, testContent));
+      fetchPreview(projectId, htmlTemplateValue, cssContentValue, testContent)
+        .then((result) => {
+          if (cancelled) return;
+          setPreviewError(null);
+          setPreviewSrcDoc(buildPreviewSrcDoc(result.html, result.css));
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setPreviewError(err instanceof Error ? err.message : String(err));
+        });
     }, 300);
-    return () => clearTimeout(timer);
-  }, [htmlTemplateValue, cssContentValue, testContent]);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [projectId, htmlTemplateValue, cssContentValue, testContent]);
 
   return (
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -77,7 +116,8 @@ export function TemplateEditor({ initialHtml, initialCss }: { initialHtml: strin
           />
         </label>
         <label className="flex flex-1 flex-col gap-1">
-          <span className="text-neutral-600 dark:text-neutral-400">プレビュー(入力後300ms自動更新)</span>
+          <span className="text-neutral-600 dark:text-neutral-400">プレビュー(入力後300ms自動更新、実際の投稿と同じレンダリング結果)</span>
+          {previewError && <p className="text-sm text-red-600 dark:text-red-400">{previewError}</p>}
           <iframe
             title="カスタムタグプレビュー"
             srcDoc={previewSrcDoc}

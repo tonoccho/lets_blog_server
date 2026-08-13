@@ -209,6 +209,20 @@ class CustomTagRenderServiceTest {
     }
 
     @Test
+    void previewTemplate_contentのMarkdown記法をrenderと同じくHTMLへ変換して展開する() {
+        String html = service.previewTemplate("<div class=\"alert\">{{content}}</div>", "**bold** and *italic*");
+
+        assertEquals("<div class=\"alert\"><strong>bold</strong> and <em>italic</em></div>", html);
+    }
+
+    @Test
+    void previewTemplate_attrプレースホルダーは置換せずそのまま残す() {
+        String html = service.previewTemplate("<a href=\"{{attr:href}}\">{{content}}</a>", "こちら");
+
+        assertEquals("<a href=\"{{attr:href}}\">こちら</a>", html);
+    }
+
+    @Test
     void render_異なるプロジェクトのタグは対象外() {
         // プロジェクト2のタグはリポジトリ検索条件(findByProjectIdOrProjectIdIsNull(1L))に含まれないため、
         // クエリ自体が呼び出し対象外タグを返さないことを想定してスタブする。

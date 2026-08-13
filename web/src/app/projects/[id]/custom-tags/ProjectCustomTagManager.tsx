@@ -3,10 +3,43 @@
 import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import type { CustomTag, Project } from "@/lib/apiClient";
 import { CustomTagGenerationForm } from "@/app/custom-tags/CustomTagGenerationForm";
-import { TemplateEditor } from "@/app/custom-tags/CustomTagManager";
+import { SAMPLE_CONTENT, TemplateEditor, buildPreviewSrcDoc, fetchPreview } from "@/app/custom-tags/CustomTagManager";
 import { upsertProjectCustomTagAction, deleteProjectCustomTagAction, type CustomTagFormState } from "./actions";
 
 const initialState: CustomTagFormState = {};
+
+/** タグ一覧の表示サンプル列(issue #297)。実際の投稿と同じレンダリング結果をサーバーから取得する(issue #335)。 */
+function CustomTagPreviewCell({ projectId, tag }: { projectId: number; tag: CustomTag }) {
+  const [srcDoc, setSrcDoc] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchPreview(projectId, tag.htmlTemplate, tag.cssContent ?? "", SAMPLE_CONTENT)
+      .then((result) => {
+        if (!cancelled) setSrcDoc(buildPreviewSrcDoc(result.html, result.css));
+      })
+      .catch(() => {
+        if (!cancelled) setError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, tag.htmlTemplate, tag.cssContent]);
+
+  if (error) {
+    return <code className="whitespace-pre-wrap break-all text-xs text-neutral-500 dark:text-neutral-400">{tag.htmlTemplate}</code>;
+  }
+
+  return (
+    <iframe
+      title={`[${tag.tagName}]の表示サンプル`}
+      srcDoc={srcDoc ?? ""}
+      sandbox="allow-same-origin"
+      className="h-24 w-full min-w-[220px] rounded border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900"
+    />
+  );
+}
 
 interface GeneratedContent {
   htmlTemplate: string;
@@ -87,8 +120,7 @@ export function ProjectCustomTagManager({
               <th className="px-4 py-2">タグ名</th>
               <th className="px-4 py-2">形式</th>
               <th className="px-4 py-2">説明</th>
-              <th className="px-4 py-2">HTMLテンプレート</th>
-              <th className="px-4 py-2">CSS</th>
+              <th className="px-4 py-2">表示サンプル</th>
               <th className="px-4 py-2">Penpot</th>
               <th className="px-4 py-2"></th>
             </tr>
@@ -96,7 +128,7 @@ export function ProjectCustomTagManager({
           <tbody>
             {tags.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center">
+                <td colSpan={6} className="px-4 py-8 text-center">
                   <div className="flex flex-col items-center gap-4">
                     <p className="text-neutral-600 dark:text-neutral-400">登録済みカスタムタグはありません</p>
                     <a
@@ -127,11 +159,8 @@ export function ProjectCustomTagManager({
                   </span>
                 </td>
                 <td className="px-4 py-2 text-neutral-600 dark:text-neutral-400">{tag.description}</td>
-                <td className="px-4 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-400">
-                  <code className="whitespace-pre-wrap break-all">{tag.htmlTemplate}</code>
-                </td>
-                <td className="px-4 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-400">
-                  {tag.cssContent && <code className="whitespace-pre-wrap break-all">{tag.cssContent}</code>}
+                <td className="px-4 py-2">
+                  <CustomTagPreviewCell projectId={projectId} tag={tag} />
                 </td>
                 <td className="px-4 py-2 whitespace-nowrap">
                   {tag.penpotFileUrl && (
@@ -239,6 +268,7 @@ export function ProjectCustomTagManager({
         </div>
         <TemplateEditor
           key={editing?.id ?? generatedContent?.tagName ?? "new"}
+          projectId={projectId}
           initialHtml={editing?.htmlTemplate ?? generatedContent?.htmlTemplate ?? ""}
           initialCss={editing?.cssContent ?? generatedContent?.cssContent ?? ""}
         />

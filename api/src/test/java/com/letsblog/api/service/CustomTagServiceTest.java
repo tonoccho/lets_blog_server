@@ -417,4 +417,16 @@ class CustomTagServiceTest {
         assertEquals(true, bundle.contains(".blogcard-css{}"));
         assertEquals(true, bundle.contains(".amazon-css{}"));
     }
+
+    @Test
+    void previewCss_統合CSSバンドルと同じルールでプレフィックスを付与する() {
+        Project project = new Project();
+        project.setSlug("my-blog");
+        when(projectService.getProjectEntity(5L)).thenReturn(project);
+        when(projectService.resolveCssSelectorPrefix(project)).thenReturn("my-blog");
+
+        String css = service.previewCss(".alert { color: red; }", 5L);
+
+        assertEquals(".my-blog .alert { color: red; }", css);
+    }
 }
