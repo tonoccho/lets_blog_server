@@ -52,7 +52,7 @@ export function TemplateEditor({ initialHtml, initialCss }: { initialHtml: strin
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600 dark:text-neutral-400">CSS(任意、投稿本文には挿入されません。統合CSSダウンロードでのみ提供されます)</span>
+          <span className="text-neutral-600 dark:text-neutral-400">CSS(任意、投稿本文には挿入されません。統合CSSの取得でのみ提供されます)</span>
           <textarea
             name="cssContent"
             value={cssContentValue}
