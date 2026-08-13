@@ -55,6 +55,19 @@ export class PreviewPanel {
     this._panel.dispose();
   }
 
+  /**
+   * プレビューをフォーカスした上でWebview Developer Toolsを開く。
+   * プレビュー未表示の場合はエラーメッセージを表示するのみで、例外は投げない。
+   */
+  public static openDevTools(): void {
+    if (!PreviewPanel.currentPanel) {
+      vscode.window.showErrorMessage('プレビューを開いてから実行してください。');
+      return;
+    }
+    PreviewPanel.currentPanel._panel.reveal(vscode.ViewColumn.Beside);
+    void vscode.commands.executeCommand('workbench.action.webview.openDeveloperTools');
+  }
+
   private _update(
     html: string,
     css: string,
