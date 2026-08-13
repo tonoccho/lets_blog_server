@@ -920,6 +920,7 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
         }
 
         PreviewPanel.createOrShow(
+          context,
           bodyHtml,
           css,
           warning,

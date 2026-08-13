@@ -1,17 +1,24 @@
 import * as vscode from 'vscode';
-import { buildStaticCsp } from './webviewSecurity';
+import { buildPreviewCsp, createNonce } from './webviewSecurity';
+
+/** 拡張機能に同梱しているPrism.jsバンドル(コードブロックのシンタックスハイライト用)の配置パス。 */
+const PRISM_ASSET_PATH = ['webviews', 'vendor', 'prism', 'prism-bundle.min.js'];
 
 /**
  * 記事プレビュー用のシングルトンWebviewパネル。マスター環境サイトのCSSを<style>として埋め込み、
  * 変換済みHTMLをそのまま表示する(view-onlyで、Webviewからのメッセージは扱わない)。
+ * コードブロックは公開先テーマと同様にPrism.js(拡張機能へバンドル済み、nonce付きで実行)で
+ * シンタックスハイライトする。
  */
 export class PreviewPanel {
   /** 開いているプレビューパネル。プレビューは常に1枚に保つ。 */
   public static currentPanel: PreviewPanel | undefined;
   private readonly _panel: vscode.WebviewPanel;
+  private readonly _extensionUri: vscode.Uri;
 
   /**
    * プレビューを表示する。既に開いている場合は内容を差し替える。
+   * @param context 拡張機能のコンテキスト(同梱資材のURI解決に使う)
    * @param html サーバーで変換済みの記事HTML
    * @param css 適用するテーマCSS(取得できなかった場合は空文字)
    * @param warning CSSを取得できなかった場合などの警告文
@@ -19,6 +26,7 @@ export class PreviewPanel {
    * @param featuredImageDataUri front matterのfeatured_imageのdata URI(未設定/未検出の場合はundefined)
    */
   public static createOrShow(
+    context: vscode.ExtensionContext,
     html: string,
     css: string,
     warning: string | undefined,
@@ -30,21 +38,27 @@ export class PreviewPanel {
       PreviewPanel.currentPanel._update(html, css, warning, siteLabel, featuredImageDataUri);
       return;
     }
-    PreviewPanel.currentPanel = new PreviewPanel(html, css, warning, siteLabel, featuredImageDataUri);
+    PreviewPanel.currentPanel = new PreviewPanel(context, html, css, warning, siteLabel, featuredImageDataUri);
   }
 
   private constructor(
+    context: vscode.ExtensionContext,
     html: string,
     css: string,
     warning: string | undefined,
     siteLabel?: string,
     featuredImageDataUri?: string
   ) {
+    this._extensionUri = context.extensionUri;
     this._panel = vscode.window.createWebviewPanel(
       'letsBlog.articlePreview',
       'Article Preview',
       vscode.ViewColumn.Beside,
-      { enableScripts: false }
+      {
+        enableScripts: true,
+        // コードハイライト用に同梱したPrism.js以外のローカル資材は読み込ませない。
+        localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'webviews', 'vendor', 'prism')],
+      }
     );
     this._panel.onDidDispose(() => this.dispose(), null);
     this._update(html, css, warning, siteLabel, featuredImageDataUri);
@@ -100,11 +114,15 @@ export class PreviewPanel {
     const eyecatchBlock = featuredImageDataUri
       ? `<div class="letsblog-preview-eyecatch" style="margin:0 0 16px;"><img src="${escapeHtml(featuredImageDataUri)}" alt="" style="max-width:100%;height:auto;display:block;"></div>`
       : '';
+    const nonce = createNonce();
+    const prismUri = this._panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(this._extensionUri, ...PRISM_ASSET_PATH)
+    );
     return `<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="${buildStaticCsp()}">
+<meta http-equiv="Content-Security-Policy" content="${buildPreviewCsp(nonce)}">
 <title>Article Preview</title>
 <style>
 ${css}
@@ -117,6 +135,8 @@ ${warningBlock}
 ${eyecatchBlock}
 ${html}
 </main>
+<script nonce="${nonce}" src="${prismUri}"></script>
+<script nonce="${nonce}">Prism.highlightAll();</script>
 </body>
 </html>`;
   }
