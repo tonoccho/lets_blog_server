@@ -23,10 +23,14 @@ function formatLabel(tagFormat: CustomTag["tagFormat"]): string {
 export function ProjectCustomTagManager({
   projectId,
   projectName,
+  projectSlug,
+  cssSelectorPrefix,
   tags,
 }: {
   projectId: number;
   projectName: string;
+  projectSlug: string;
+  cssSelectorPrefix: string | null;
   tags: CustomTag[];
 }) {
   const [editing, setEditing] = useState<CustomTag | null>(null);
