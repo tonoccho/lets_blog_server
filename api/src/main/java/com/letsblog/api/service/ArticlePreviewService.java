@@ -61,6 +61,7 @@ public class ArticlePreviewService {
     private final BlogCardTagRenderService blogCardTagRenderService;
     private final AmazonTagRenderService amazonTagRenderService;
     private final TocStyleRenderService tocStyleRenderService;
+    private final RenderedContentWrapperService renderedContentWrapperService;
     private final MarkdownRenderer markdownRenderer;
     private final ProjectService projectService;
     private final SiteRepository siteRepository;
@@ -73,6 +74,7 @@ public class ArticlePreviewService {
             BlogCardTagRenderService blogCardTagRenderService,
             AmazonTagRenderService amazonTagRenderService,
             TocStyleRenderService tocStyleRenderService,
+            RenderedContentWrapperService renderedContentWrapperService,
             MarkdownRenderer markdownRenderer,
             ProjectService projectService,
             SiteRepository siteRepository,
@@ -83,6 +85,7 @@ public class ArticlePreviewService {
         this.blogCardTagRenderService = blogCardTagRenderService;
         this.amazonTagRenderService = amazonTagRenderService;
         this.tocStyleRenderService = tocStyleRenderService;
+        this.renderedContentWrapperService = renderedContentWrapperService;
         this.markdownRenderer = markdownRenderer;
         this.projectService = projectService;
         this.siteRepository = siteRepository;
@@ -100,9 +103,9 @@ public class ArticlePreviewService {
         String rendered = customTagRenderService.render(markdown, projectId);
         rendered = blogCardTagRenderService.render(rendered, projectId);
         rendered = amazonTagRenderService.render(rendered, projectId);
-        rendered = tocStyleRenderService.render(rendered, projectId);
         String html = markdownRenderer.render(rendered);
-        return tocStyleRenderService.applyHtmlTemplate(html, projectId);
+        html = tocStyleRenderService.applyHtmlTemplate(html, projectId);
+        return renderedContentWrapperService.wrap(html, projectId);
     }
 
     /**

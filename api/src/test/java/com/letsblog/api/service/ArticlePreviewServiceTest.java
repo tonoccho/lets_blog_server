@@ -45,6 +45,9 @@ class ArticlePreviewServiceTest {
     private TocStyleRenderService tocStyleRenderService;
 
     @Mock
+    private RenderedContentWrapperService renderedContentWrapperService;
+
+    @Mock
     private MarkdownRenderer markdownRenderer;
 
     @Mock
@@ -68,7 +71,8 @@ class ArticlePreviewServiceTest {
         server = MockRestServiceServer.bindTo(builder).build();
         service = new ArticlePreviewService(
                 customTagRenderService, blogCardTagRenderService, amazonTagRenderService, tocStyleRenderService,
-                markdownRenderer, projectService, siteRepository, siteService, builder, previewSkeletonFetcher);
+                renderedContentWrapperService, markdownRenderer, projectService, siteRepository, siteService,
+                builder, previewSkeletonFetcher);
     }
 
     private Project projectWithMaster(String masterEnvironment, Long testSiteId, Long productionSiteId) {
@@ -101,20 +105,21 @@ class ArticlePreviewServiceTest {
         when(customTagRenderService.render("**bold**", 1L)).thenReturn("**bold** rendered");
         when(blogCardTagRenderService.render("**bold** rendered", 1L)).thenReturn("**bold** rendered");
         when(amazonTagRenderService.render("**bold** rendered", 1L)).thenReturn("**bold** rendered");
-        when(tocStyleRenderService.render("**bold** rendered", 1L)).thenReturn("**bold** rendered");
         when(markdownRenderer.render("**bold** rendered")).thenReturn("<p><strong>bold</strong> rendered</p>");
         when(tocStyleRenderService.applyHtmlTemplate("<p><strong>bold</strong> rendered</p>", 1L))
                 .thenReturn("<p><strong>bold</strong> rendered</p>");
+        when(renderedContentWrapperService.wrap("<p><strong>bold</strong> rendered</p>", 1L))
+                .thenReturn("<div class=\"lets-blog-rendered\"><p><strong>bold</strong> rendered</p></div>");
 
         String html = service.renderHtml(1L, "**bold**");
 
-        assertEquals("<p><strong>bold</strong> rendered</p>", html);
+        assertEquals("<div class=\"lets-blog-rendered\"><p><strong>bold</strong> rendered</p></div>", html);
         verify(customTagRenderService).render("**bold**", 1L);
         verify(blogCardTagRenderService).render("**bold** rendered", 1L);
         verify(amazonTagRenderService).render("**bold** rendered", 1L);
-        verify(tocStyleRenderService).render("**bold** rendered", 1L);
         verify(markdownRenderer).render("**bold** rendered");
         verify(tocStyleRenderService).applyHtmlTemplate("<p><strong>bold</strong> rendered</p>", 1L);
+        verify(renderedContentWrapperService).wrap("<p><strong>bold</strong> rendered</p>", 1L);
     }
 
     @Test

@@ -58,6 +58,7 @@ public class PostPublishService {
     private final BlogCardTagRenderService blogCardTagRenderService;
     private final AmazonTagRenderService amazonTagRenderService;
     private final TocStyleRenderService tocStyleRenderService;
+    private final RenderedContentWrapperService renderedContentWrapperService;
     private final ProjectService projectService;
     private final CurrentActorService currentActorService;
     private final UserRepository userRepository;
@@ -71,6 +72,7 @@ public class PostPublishService {
                                BlogCardTagRenderService blogCardTagRenderService,
                                AmazonTagRenderService amazonTagRenderService,
                                TocStyleRenderService tocStyleRenderService,
+                               RenderedContentWrapperService renderedContentWrapperService,
                                ProjectService projectService,
                                CurrentActorService currentActorService,
                                UserRepository userRepository,
@@ -85,6 +87,7 @@ public class PostPublishService {
         this.blogCardTagRenderService = blogCardTagRenderService;
         this.amazonTagRenderService = amazonTagRenderService;
         this.tocStyleRenderService = tocStyleRenderService;
+        this.renderedContentWrapperService = renderedContentWrapperService;
         this.projectService = projectService;
         this.currentActorService = currentActorService;
         this.userRepository = userRepository;
@@ -108,9 +111,9 @@ public class PostPublishService {
         ImageReplacementResult imageResult = replaceImageReferences(
                 cmsAdapter, credentials, markdown, command.images(), command.imageReferences(),
                 command.slug(), command.title(), command.featuredImageFilename(), priorUploads);
-        String finalMarkdown = tocStyleRenderService.render(imageResult.markdown(), projectId);
-        String html = markdownRenderer.render(finalMarkdown);
+        String html = markdownRenderer.render(imageResult.markdown());
         html = tocStyleRenderService.applyHtmlTemplate(html, projectId);
+        html = renderedContentWrapperService.wrap(html, projectId);
 
         List<String> categoryIds = cmsAdapter.resolveCategories(credentials, command.categories());
         List<String> tagIds = cmsAdapter.resolveTags(credentials, command.tags());

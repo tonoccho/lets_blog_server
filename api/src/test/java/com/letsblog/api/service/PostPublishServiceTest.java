@@ -62,6 +62,8 @@ class PostPublishServiceTest {
     @Mock
     private TocStyleRenderService tocStyleRenderService;
     @Mock
+    private RenderedContentWrapperService renderedContentWrapperService;
+    @Mock
     private ProjectService projectService;
     @Mock
     private CurrentActorService currentActorService;
@@ -81,8 +83,8 @@ class PostPublishServiceTest {
     void setUp() {
         service = new PostPublishService(siteService, cmsAdapterFactory, markdownRenderer, postRepository,
                 plantUmlEmbedService, customTagRenderService, blogCardTagRenderService, amazonTagRenderService,
-                tocStyleRenderService, projectService, currentActorService, userRepository,
-                userSiteAuthorRepository, new com.fasterxml.jackson.databind.ObjectMapper());
+                tocStyleRenderService, renderedContentWrapperService, projectService, currentActorService,
+                userRepository, userSiteAuthorRepository, new com.fasterxml.jackson.databind.ObjectMapper());
 
         Site site = new Site();
         site.setId(1L);
@@ -96,10 +98,10 @@ class PostPublishServiceTest {
         lenient().when(customTagRenderService.render(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(blogCardTagRenderService.render(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(amazonTagRenderService.render(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
-        lenient().when(tocStyleRenderService.render(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(plantUmlEmbedService.embedDiagrams(any(), anyString())).thenAnswer(inv -> inv.getArgument(1));
         lenient().when(markdownRenderer.render(anyString())).thenAnswer(inv -> "<p>" + inv.getArgument(0) + "</p>");
         lenient().when(tocStyleRenderService.applyHtmlTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(renderedContentWrapperService.wrap(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(cmsAdapter.resolveCategories(any(), any())).thenReturn(List.of());
         lenient().when(cmsAdapter.resolveTags(any(), any())).thenReturn(List.of());
         lenient().when(postRepository.findBySiteIdAndWpPostId(any(), any())).thenReturn(Optional.empty());
@@ -181,6 +183,23 @@ class PostPublishServiceTest {
         service.publish(command("my-article", "My Article", images, null));
 
         verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.gif"), any(), any());
+    }
+
+    @Test
+    void publish_最終HTMLはRenderedContentWrapperServiceでラップされてPostContentへ渡される() {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        when(tocStyleRenderService.applyHtmlTemplate(anyString(), any()))
+                .thenAnswer(inv -> "[template]" + inv.getArgument(0));
+        when(renderedContentWrapperService.wrap(anyString(), any()))
+                .thenReturn("<div class=\"lets-blog-rendered\">wrapped</div>");
+
+        service.publish(command("my-article", "My Article", List.of(), null));
+
+        verify(renderedContentWrapperService).wrap("[template]<p>本文</p>", null);
+        ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
+        verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
+        assertEquals("<div class=\"lets-blog-rendered\">wrapped</div>", contentCaptor.getValue().htmlContent());
     }
 
     @Test
