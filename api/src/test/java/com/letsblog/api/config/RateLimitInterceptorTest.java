@@ -76,6 +76,39 @@ class RateLimitInterceptorTest {
     }
 
     @Test
+    @DisplayName("Should use global rate limiter for setup-status (read-only, not brute-force-able)")
+    void testSetupStatusUsesGlobalRateLimiter() {
+        when(request.getRequestURI()).thenReturn("/api/auth/setup-status");
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        interceptor.preHandle(request, response, null);
+
+        verify(rateLimiterRegistry).rateLimiter("api-global");
+    }
+
+    @Test
+    @DisplayName("Should use global rate limiter for totp/status (read-only, not brute-force-able)")
+    void testTotpStatusUsesGlobalRateLimiter() {
+        when(request.getRequestURI()).thenReturn("/api/auth/totp/status");
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        interceptor.preHandle(request, response, null);
+
+        verify(rateLimiterRegistry).rateLimiter("api-global");
+    }
+
+    @Test
+    @DisplayName("Should still use auth rate limiter for setup (creates a privileged account)")
+    void testSetupEndpointUsesAuthRateLimiter() {
+        when(request.getRequestURI()).thenReturn("/api/auth/setup");
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        interceptor.preHandle(request, response, null);
+
+        verify(rateLimiterRegistry).rateLimiter("auth-endpoint");
+    }
+
+    @Test
     @DisplayName("Should use upload rate limiter for upload endpoint")
     void testUploadEndpointUsesUploadRateLimiter() {
         when(request.getRequestURI()).thenReturn("/api/upload");
