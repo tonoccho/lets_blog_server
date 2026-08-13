@@ -120,6 +120,15 @@ public class CustomTagRenderService {
     }
 
     /**
+     * カスタムタグ管理画面のプレビュー用。DBに保存済みかどうかを問わず、テンプレート文字列に
+     * {{content}}を実際の投稿と同じMarkdownレンダリング結果で差し込んだHTMLを返す(issue #335)。
+     * {{attr:xxx}}はここでは置換しない(呼び出し側でサンプル値に置換する)。
+     */
+    public String previewTemplate(String htmlTemplate, String testContent) {
+        return htmlTemplate.replace("{{content}}", renderContentMarkdown(testContent.trim()));
+    }
+
+    /**
      * {{content}}に差し込む前にMarkdownをHTMLへ変換する。render()はテンプレート展開後の文字列を
      * 丸ごとMarkdownRendererに渡す2段構えだが、テンプレートのHTML(例: `<div>{{content}}</div>`)は
      * flexmarkにHTMLブロックと判定され、その内側はMarkdownとして解釈されない(CommonMarkの仕様)。

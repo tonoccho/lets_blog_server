@@ -192,6 +192,15 @@ public class CustomTagService {
     }
 
     /**
+     * カスタムタグ管理画面のプレビュー用。DBに保存済みかどうかを問わず、統合CSSバンドルと
+     * 同じプレフィックス付与ルールでCSSを変換する(issue #335)。
+     */
+    @Transactional(readOnly = true)
+    public String previewCss(String css, Long projectId) {
+        return applySelectorPrefix(css, resolveCssSelectorPrefix(projectId));
+    }
+
+    /**
      * CSSの各セレクタ宣言の先頭に `.prefix ` を付与し、WordPressテーマ側のCSSとのクラス名衝突を防ぐ(issue #298)。
      * 「1行に1つのセレクタ、`{`も同じ行」という単純な前提では、複数のルールが改行なしで連結されたCSS
      * (組み込みタグのデザインCSS等、issue #307)や、セレクタが複数行にまたがるCSSでプリフィックスが

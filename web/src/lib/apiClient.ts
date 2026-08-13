@@ -814,6 +814,34 @@ export function validateCustomTag(input: ValidateCustomTagRequest, actor: ActorI
   });
 }
 
+export interface CustomTagPreviewInput {
+  htmlTemplate: string;
+  cssContent?: string;
+  testContent: string;
+}
+
+export interface CustomTagPreviewResult {
+  html: string;
+  css: string;
+}
+
+/**
+ * プロジェクト詳細のカスタムタグ画面向けプレビュー。DB未保存のテンプレート/CSSでも、実際の投稿と
+ * 同じMarkdownレンダリングとCSSセレクタのプリフィックス付与を適用した結果を返す(issue #335)。
+ */
+export function previewProjectCustomTag(
+  projectId: number,
+  input: CustomTagPreviewInput,
+  actor: ActorInfo
+): Promise<CustomTagPreviewResult> {
+  return apiFetch<CustomTagPreviewResult>(`/api/projects/${projectId}/custom-tags/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
 /** プロジェクト詳細/プロジェクト一覧向け。グローバルタグを含めず、プロジェクトのタグのCSSのみを連結する。 */
 export async function downloadProjectCustomTagCssBundle(projectId: number, actor: ActorInfo): Promise<ArrayBuffer> {
   const res = await fetch(`${serverUrl()}/api/projects/${projectId}/custom-tags/css-bundle`, {
