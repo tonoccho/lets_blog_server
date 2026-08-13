@@ -1,6 +1,7 @@
 package com.letsblog.api.controller;
 
 import com.letsblog.api.cms.WpCliInstallResult;
+import com.letsblog.api.dto.AdoptWordPressSiteRequest;
 import com.letsblog.api.dto.CreateManagedWordPressSiteRequest;
 import com.letsblog.api.dto.SiteConnectionCheckResult;
 import com.letsblog.api.dto.SiteDetailResponse;
@@ -71,6 +72,20 @@ public class SiteController {
             @Valid @RequestBody CreateManagedWordPressSiteRequest request) {
         Long actorId = currentActorService.getCurrentActorId();
         SiteResponse response = wordPressSiteProvisioningService.createManagedSite(request, actorId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    @Operation(summary = "既存のマネージドWordPressサイトを取り込む",
+            description = "DBには未登録だがWordPress環境としては既に構築済みのサイトを取り込んで登録します")
+    @ApiResponse(responseCode = "201", description = "サイトが取り込まれました")
+    @ApiResponse(responseCode = "400", description = "リクエストボディが不正")
+    @ApiResponse(responseCode = "401", description = "認証ヘッダが無効")
+    @ApiResponse(responseCode = "404", description = "取り込み対象のWordPress環境が見つかりません")
+    @PostMapping("/managed-wordpress/adopt")
+    public ResponseEntity<SiteResponse> adoptManagedWordPress(
+            @Valid @RequestBody AdoptWordPressSiteRequest request) {
+        Long actorId = currentActorService.getCurrentActorId();
+        SiteResponse response = wordPressSiteProvisioningService.adoptManagedSite(request, actorId);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
