@@ -305,6 +305,9 @@ public class CustomTagService {
     /**
      * カンマ区切りのセレクタリスト(複数行にまたがっていてもよい)の各セレクタに `.prefix ` を付与する。
      * `:not(a, b)` のような関数擬似クラス内のカンマでは分割しないよう括弧の深さを見ながら分割する。
+     * 子孫結合子(スペース区切り)にするのは、実際にレンダリングされた要素自体にプリフィックスクラスを
+     * 付与するのではなく、記事本文全体を囲むRenderedContentWrapperServiceの&lt;div&gt;にプリフィックス
+     * クラスを持たせ、その祖先要素として一致させる設計のため。
      */
     private String prefixSelectorList(String selectorListText, String selectorPrefix) {
         List<String> selectors = new ArrayList<>();
@@ -329,7 +332,7 @@ public class CustomTagService {
         return selectors.stream()
                 .map(selector -> selector.strip().replaceAll("\\s+", " "))
                 .filter(selector -> !selector.isEmpty())
-                .map(selector -> "." + selectorPrefix + selector)
+                .map(selector -> "." + selectorPrefix + " " + selector)
                 .collect(Collectors.joining(", "));
     }
 
