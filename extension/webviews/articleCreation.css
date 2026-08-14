@@ -27,8 +27,8 @@
   .message { margin-bottom: 8px; padding: 8px; border-radius: 4px; white-space: pre-wrap; }
   .message.user { background: var(--vscode-list-activeSelectionBackground, #e3f2fd); text-align: right; }
   .message.assistant { background: var(--vscode-editorWidget-background, #f5f5f5); }
-  .chat-input { display: flex; gap: 5px; padding: 8px; border-top: 1px solid var(--vscode-panel-border, #ccc); }
-  .chat-input input { flex: 1; padding: 6px; }
+  .chat-input { display: flex; align-items: flex-end; gap: 5px; padding: 8px; border-top: 1px solid var(--vscode-panel-border, #ccc); }
+  .chat-input textarea { flex: 1; padding: 6px; resize: vertical; font-family: inherit; }
   .form-group select { margin-bottom: 6px; }
   .structure-textarea {
     width: 100%; min-height: 200px; padding: 8px; font-family: var(--vscode-editor-font-family, monospace);

@@ -167,7 +167,13 @@
   document.getElementById('addAsAssetButton').addEventListener('click', addAsAsset);
   document.getElementById('sendChatButton').addEventListener('click', sendChat);
   document.getElementById('chatInput').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') sendChat();
+    // 通常のEnterは改行(textarea既定の挙動)。Ctrl/Cmd+Enterで送信する(issue #290)。
+    // グローバルのCtrl+Enterハンドラ(画像生成)と重複発火しないようstopPropagationする。
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      sendChat();
+    }
   });
 
   window.addEventListener('message', (event) => {
