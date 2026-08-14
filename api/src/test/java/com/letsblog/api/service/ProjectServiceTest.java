@@ -2,6 +2,7 @@ package com.letsblog.api.service;
 
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.dto.ProjectResponse;
+import com.letsblog.api.dto.UpdateArticleImageResizeDefaultRequest;
 import com.letsblog.api.dto.UpdateImageGenerationPromptDefaultsRequest;
 import com.letsblog.api.dto.UpdateImageGenerationSizeDefaultsRequest;
 import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
@@ -48,7 +49,7 @@ class ProjectServiceTest {
         return new ProjectService(
                 projectRepository, siteRepository, bulkUploadStorageService,
                 "low quality, blurry, watermark, text", "high quality, highly detailed, sharp focus, masterpiece",
-                1920, 1080);
+                1920, 1080, 1300);
     }
 
     private Project buildProject(Long id, String slug) {
@@ -402,6 +403,51 @@ class ProjectServiceTest {
 
         assertEquals(1024, service.resolveDefaultGeneratedImageWidth(1L));
         assertEquals(768, service.resolveDefaultGeneratedImageHeight(1L));
+    }
+
+    @Test
+    void updateArticleImageResizeDefault_値が正常に保存される() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProjectResponse response = service.updateArticleImageResizeDefault(
+                1L, new UpdateArticleImageResizeDefaultRequest(800));
+
+        assertEquals(800, response.defaultArticleImageLongEdgePx());
+    }
+
+    @Test
+    void updateArticleImageResizeDefault_nullを渡すとグローバルデフォルトへ戻る() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        project.setDefaultArticleImageLongEdgePx(800);
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProjectResponse response = service.updateArticleImageResizeDefault(
+                1L, new UpdateArticleImageResizeDefaultRequest(null));
+
+        assertNull(response.defaultArticleImageLongEdgePx());
+        assertEquals(1300, service.resolveArticleImageLongEdgePx(1L));
+    }
+
+    @Test
+    void resolveArticleImageLongEdgePx_projectId未指定ならグローバルデフォルトを返す() {
+        ProjectService service = service();
+
+        assertEquals(1300, service.resolveArticleImageLongEdgePx(null));
+    }
+
+    @Test
+    void resolveArticleImageLongEdgePx_プロジェクト設定済みならその値を返す() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        project.setDefaultArticleImageLongEdgePx(800);
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        assertEquals(800, service.resolveArticleImageLongEdgePx(1L));
     }
 
     @Test

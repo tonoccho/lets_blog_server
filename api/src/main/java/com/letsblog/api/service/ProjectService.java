@@ -5,6 +5,7 @@ import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.ProjectResponse;
+import com.letsblog.api.dto.UpdateArticleImageResizeDefaultRequest;
 import com.letsblog.api.dto.UpdateImageGenerationPromptDefaultsRequest;
 import com.letsblog.api.dto.UpdateImageGenerationSizeDefaultsRequest;
 import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
@@ -31,6 +32,7 @@ public class ProjectService {
     private final String globalDefaultQualityPrompt;
     private final int globalDefaultGeneratedImageWidth;
     private final int globalDefaultGeneratedImageHeight;
+    private final int globalDefaultArticleImageLongEdgePx;
 
     public ProjectService(
             ProjectRepository projectRepository,
@@ -39,7 +41,8 @@ public class ProjectService {
             @Value("${app.default-negative-prompt}") String globalDefaultNegativePrompt,
             @Value("${app.default-quality-prompt}") String globalDefaultQualityPrompt,
             @Value("${app.default-generated-image-width}") int globalDefaultGeneratedImageWidth,
-            @Value("${app.default-generated-image-height}") int globalDefaultGeneratedImageHeight) {
+            @Value("${app.default-generated-image-height}") int globalDefaultGeneratedImageHeight,
+            @Value("${app.default-article-image-long-edge-px}") int globalDefaultArticleImageLongEdgePx) {
         this.projectRepository = projectRepository;
         this.siteRepository = siteRepository;
         this.bulkUploadStorageService = bulkUploadStorageService;
@@ -47,6 +50,7 @@ public class ProjectService {
         this.globalDefaultQualityPrompt = globalDefaultQualityPrompt;
         this.globalDefaultGeneratedImageWidth = globalDefaultGeneratedImageWidth;
         this.globalDefaultGeneratedImageHeight = globalDefaultGeneratedImageHeight;
+        this.globalDefaultArticleImageLongEdgePx = globalDefaultArticleImageLongEdgePx;
     }
 
     @AuditLog(action = AuditLogAction.PROJECT_CREATED, resourceType = "PROJECT")
@@ -276,6 +280,26 @@ public class ProjectService {
         }
         Integer projectValue = getProjectEntity(projectId).getDefaultGeneratedImageHeight();
         return projectValue == null ? globalDefaultGeneratedImageHeight : projectValue;
+    }
+
+    @AuditLog(action = AuditLogAction.PROJECT_UPDATED, resourceType = "PROJECT")
+    @Transactional
+    public ProjectResponse updateArticleImageResizeDefault(Long projectId, UpdateArticleImageResizeDefaultRequest request) {
+        Project project = getProjectEntity(projectId);
+        project.setDefaultArticleImageLongEdgePx(request.defaultArticleImageLongEdgePx());
+        return toResponse(projectRepository.save(project));
+    }
+
+    /**
+     * 記事投稿時に画像をリサイズする長編の目標pxを解決する。プロジェクト未設定時・projectId未指定時は
+     * アプリ全体のデフォルト(既定1300)にフォールバックする(issue #291)。
+     */
+    public int resolveArticleImageLongEdgePx(Long projectId) {
+        if (projectId == null) {
+            return globalDefaultArticleImageLongEdgePx;
+        }
+        Integer projectValue = getProjectEntity(projectId).getDefaultArticleImageLongEdgePx();
+        return projectValue == null ? globalDefaultArticleImageLongEdgePx : projectValue;
     }
 
     private void requireValidEnvironment(String environment) {

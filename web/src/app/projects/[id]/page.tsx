@@ -22,6 +22,7 @@ import { ProjectAiModelsPanel } from "./ProjectAiModelsPanel";
 import { ProjectAssetGenerationPanel } from "./ProjectAssetGenerationPanel";
 import { ProjectImageGenerationPromptDefaultsForm } from "./ProjectImageGenerationPromptDefaultsForm";
 import { ProjectImageGenerationSizeDefaultsForm } from "./ProjectImageGenerationSizeDefaultsForm";
+import { ProjectArticleImageResizeDefaultForm } from "./ProjectArticleImageResizeDefaultForm";
 import { ProjectNameForm } from "./ProjectNameForm";
 import { DeleteProjectButton } from "./DeleteProjectButton";
 import { ProjectUserManager } from "./ProjectUserManager";
@@ -151,6 +152,10 @@ export default async function ProjectDetailPage({
             projectId={project.id}
             defaultGeneratedImageWidth={project.defaultGeneratedImageWidth}
             defaultGeneratedImageHeight={project.defaultGeneratedImageHeight}
+          />
+          <ProjectArticleImageResizeDefaultForm
+            projectId={project.id}
+            defaultArticleImageLongEdgePx={project.defaultArticleImageLongEdgePx}
           />
         </div>
       ),
