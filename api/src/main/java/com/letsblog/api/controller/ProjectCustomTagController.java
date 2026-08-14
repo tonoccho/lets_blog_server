@@ -4,6 +4,8 @@ import com.letsblog.api.dto.CustomTagPreviewRequest;
 import com.letsblog.api.dto.CustomTagPreviewResponse;
 import com.letsblog.api.dto.CustomTagResponse;
 import com.letsblog.api.service.AdminAuthorizationService;
+import com.letsblog.api.service.AmazonTagRenderService;
+import com.letsblog.api.service.BlogCardTagRenderService;
 import com.letsblog.api.service.CustomTagRenderService;
 import com.letsblog.api.service.CustomTagService;
 import com.letsblog.api.service.RenderedContentWrapperService;
@@ -30,16 +32,22 @@ public class ProjectCustomTagController {
 
     private final CustomTagService customTagService;
     private final CustomTagRenderService customTagRenderService;
+    private final BlogCardTagRenderService blogCardTagRenderService;
+    private final AmazonTagRenderService amazonTagRenderService;
     private final RenderedContentWrapperService renderedContentWrapperService;
     private final AdminAuthorizationService adminAuthorizationService;
 
     public ProjectCustomTagController(
             CustomTagService customTagService,
             CustomTagRenderService customTagRenderService,
+            BlogCardTagRenderService blogCardTagRenderService,
+            AmazonTagRenderService amazonTagRenderService,
             RenderedContentWrapperService renderedContentWrapperService,
             AdminAuthorizationService adminAuthorizationService) {
         this.customTagService = customTagService;
         this.customTagRenderService = customTagRenderService;
+        this.blogCardTagRenderService = blogCardTagRenderService;
+        this.amazonTagRenderService = amazonTagRenderService;
         this.renderedContentWrapperService = renderedContentWrapperService;
         this.adminAuthorizationService = adminAuthorizationService;
     }
@@ -63,12 +71,16 @@ public class ProjectCustomTagController {
     /**
      * カスタムタグ管理画面のプレビュー用。DB保存前のテンプレート/CSSでも、実際の投稿と同じ
      * Markdownレンダリングとセレクタプリフィックス付与を適用した結果を返す(issue #335)。
+     * テスト本文中の組み込みタグ(`[blogcard URL]`、`[amazon URL]`)も、実際の投稿と同じ
+     * BlogCardTagRenderService/AmazonTagRenderServiceで展開してから{{content}}へ差し込む(issue #346)。
      */
     @PostMapping("/preview")
     public CustomTagPreviewResponse preview(
             @PathVariable Long projectId, @Valid @RequestBody CustomTagPreviewRequest request) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        String html = customTagRenderService.previewTemplate(request.htmlTemplate(), request.testContent());
+        String testContent = blogCardTagRenderService.render(request.testContent(), projectId);
+        testContent = amazonTagRenderService.render(testContent, projectId);
+        String html = customTagRenderService.previewTemplate(request.htmlTemplate(), testContent);
         String wrappedHtml = renderedContentWrapperService.wrap(html, projectId);
         String css = customTagService.previewCss(request.cssContent(), projectId);
         return new CustomTagPreviewResponse(wrappedHtml, css);
