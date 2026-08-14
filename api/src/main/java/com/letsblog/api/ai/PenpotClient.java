@@ -32,6 +32,11 @@ import java.time.Duration;
  * RPC呼び出し自体はDockerネットワーク内部URL(app.penpot-base-url、例: http://penpot-frontend:8080)
  * を使うが、ユーザーがブラウザで開くリンクはホストからアクセス可能な公開URL(app.penpot-public-url、
  * 例: http://localhost:9001)で組み立てる必要があるため、この2つを明確に分離している。
+ *
+ * 作成したファイルはサービスアカウント自身のチーム配下に存在するため、ワークスペースURL(/#/workspace/...)
+ * をそのまま渡すと、開く側がサービスアカウントと同じPenpotチームに所属していない限り404相当のアクセス拒否
+ * となる(issue #348)。そのため誰でも開けるshare-link(/api/rpc/command/create-share-link)を発行し、
+ * 閲覧用URL(/#/view/...?share-id=...)を組み立てる。
  */
 @Component
 public class PenpotClient {
@@ -108,8 +113,16 @@ public class PenpotClient {
             log.warn("Penpotファイル({})へのコメント作成に失敗しました(ファイル自体は作成済みのため続行します): {}", fileId, e.getMessage());
         }
 
-        String url = publicBaseUrl + "/#/workspace/" + activeSession.defaultProjectId() + "/" + fileId
-                + "?page-id=" + pageId;
+        String shareId;
+        try {
+            shareId = createShareLink(activeSession, fileId, pageId);
+        } catch (RestClientResponseException e) {
+            throw new AiServiceException("Penpot共有リンクの作成に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+        } catch (Exception e) {
+            throw new AiServiceException("Penpot共有リンクの作成中にエラーが発生しました（タイムアウトまたはネットワークエラーの可能性があります）: " + e.getMessage(), e);
+        }
+
+        String url = publicBaseUrl + "/#/view/" + fileId + "?page-id=" + pageId + "&share-id=" + shareId;
         return new DesignFile(fileId, activeSession.defaultProjectId(), url);
     }
 
@@ -118,6 +131,24 @@ public class PenpotClient {
         body.put("projectId", s.defaultProjectId());
         body.put("name", fileName);
         return callAuthenticated(s, "create-file", body);
+    }
+
+    /**
+     * 誰でも(サービスアカウントと同じPenpotチームに属していなくても)開けるshare-linkを発行する。
+     * who-comment/who-inspectは"team"(チームメンバーのみ)/"all"(リンクを知っていれば誰でも)のいずれかで、
+     * ここでは常に"all"を指定する(ハンドオフ先のデザイナーがサービスアカウントのチームに所属している保証がないため)。
+     */
+    private String createShareLink(Session s, String fileId, String pageId) {
+        com.fasterxml.jackson.databind.node.ArrayNode pages =
+                com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.arrayNode();
+        pages.add(pageId);
+
+        ObjectNode body = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
+        body.put("file-id", fileId);
+        body.put("who-comment", "all");
+        body.put("who-inspect", "all");
+        body.set("pages", pages);
+        return callAuthenticated(s, "create-share-link", body).get("id").asText();
     }
 
     private void createCommentThread(Session s, String fileId, String pageId, String content) {

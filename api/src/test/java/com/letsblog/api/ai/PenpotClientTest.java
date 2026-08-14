@@ -46,20 +46,26 @@ class PenpotClientTest {
                         .headers(headers));
     }
 
+    private void expectSuccessfulShareLink() {
+        server.expect(requestTo(BASE_URL + "/api/rpc/command/create-share-link"))
+                .andRespond(withSuccess("{\"id\":\"share-1\"}", MediaType.APPLICATION_JSON));
+    }
+
     @Test
-    void createDesignFile_ログイン済みならファイルとコメントを作成しURLを返す() {
+    void createDesignFile_ログイン済みならファイルとコメントを作成し誰でも開ける共有URLを返す() {
         expectSuccessfulLogin();
         server.expect(requestTo(BASE_URL + "/api/rpc/command/create-file"))
                 .andRespond(withSuccess(
                         "{\"id\":\"file-1\",\"data\":{\"pages\":[\"page-1\"]}}", MediaType.APPLICATION_JSON));
         server.expect(requestTo(BASE_URL + "/api/rpc/command/create-comment-thread"))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+        expectSuccessfulShareLink();
 
         PenpotClient.DesignFile result = client.createDesignFile("カスタムタグ: my-button", "Ollamaへのプロンプト");
 
         assertEquals("file-1", result.fileId());
         assertEquals("project-1", result.projectId());
-        assertEquals(PUBLIC_URL + "/#/workspace/project-1/file-1?page-id=page-1", result.url());
+        assertEquals(PUBLIC_URL + "/#/view/file-1?page-id=page-1&share-id=share-1", result.url());
     }
 
     @Test
@@ -77,6 +83,7 @@ class PenpotClientTest {
                         "{\"id\":\"file-1\",\"data\":{\"pages\":[\"page-1\"]}}", MediaType.APPLICATION_JSON));
         server.expect(requestTo(BASE_URL + "/api/rpc/command/create-comment-thread"))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+        expectSuccessfulShareLink();
 
         PenpotClient.DesignFile result = client.createDesignFile("カスタムタグ: my-button", "プロンプト");
 
@@ -92,10 +99,11 @@ class PenpotClientTest {
         server.expect(requestTo(BASE_URL + "/api/rpc/command/create-comment-thread"))
                 .andRespond(withStatus(HttpStatus.BAD_REQUEST).body("{\"code\":\"params-validation\"}")
                         .contentType(MediaType.APPLICATION_JSON));
+        expectSuccessfulShareLink();
 
         PenpotClient.DesignFile result = client.createDesignFile("カスタムタグ: my-button", "プロンプト");
 
-        assertEquals(PUBLIC_URL + "/#/workspace/project-1/file-1?page-id=page-1", result.url());
+        assertEquals(PUBLIC_URL + "/#/view/file-1?page-id=page-1&share-id=share-1", result.url());
     }
 
     @Test
@@ -109,5 +117,23 @@ class PenpotClientTest {
                 () -> client.createDesignFile("カスタムタグ: my-button", "プロンプト"));
 
         assertTrue(exception.getMessage().contains("Penpotデザインファイルの作成に失敗しました"));
+    }
+
+    @Test
+    void createDesignFile_共有リンク作成が失敗すればAiServiceExceptionを投げる() {
+        expectSuccessfulLogin();
+        server.expect(requestTo(BASE_URL + "/api/rpc/command/create-file"))
+                .andRespond(withSuccess(
+                        "{\"id\":\"file-1\",\"data\":{\"pages\":[\"page-1\"]}}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE_URL + "/api/rpc/command/create-comment-thread"))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE_URL + "/api/rpc/command/create-share-link"))
+                .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR).body("{}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        AiServiceException exception = assertThrows(AiServiceException.class,
+                () -> client.createDesignFile("カスタムタグ: my-button", "プロンプト"));
+
+        assertTrue(exception.getMessage().contains("Penpot共有リンクの作成に失敗しました"));
     }
 }
