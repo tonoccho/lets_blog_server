@@ -108,6 +108,41 @@ class AiAssistServiceTest {
     }
 
     @Test
+    void generateImage_タグ提案はバッチにつき1回だけ呼ばれ全画像へ適用される() {
+        List<ComfyUiImage> images = List.of(
+                new ComfyUiImage("a.png", new byte[]{1}, "image/png"),
+                new ComfyUiImage("b.png", new byte[]{2}, "image/png"));
+        when(comfyUiClient.generateImage(any())).thenReturn(images);
+        when(comfyUiModelService.getSelectedCheckpointOrGlobalDefault(any())).thenReturn("checkpoint.safetensors");
+        when(ollamaClient.generate(anyString())).thenReturn("{\"tags\": [\"猫\", \"かわいい\"]}");
+
+        ArgumentCaptor<GeneratedImage> captor = ArgumentCaptor.forClass(GeneratedImage.class);
+        service.generateImage(AiImageRequest.withDefaults("a cat"));
+
+        org.mockito.Mockito.verify(ollamaClient, org.mockito.Mockito.times(1)).generate(anyString());
+        org.mockito.Mockito.verify(generatedImageRepository, org.mockito.Mockito.times(2)).save(captor.capture());
+        for (GeneratedImage saved : captor.getAllValues()) {
+            assertTrue(saved.getTagsJson().contains("猫"));
+            assertTrue(saved.getTagsJson().contains("かわいい"));
+        }
+    }
+
+    @Test
+    void generateImage_タグ提案に失敗しても画像生成自体は続行する() {
+        when(comfyUiClient.generateImage(any())).thenReturn(
+                List.of(new ComfyUiImage("a.png", new byte[]{1}, "image/png")));
+        when(comfyUiModelService.getSelectedCheckpointOrGlobalDefault(any())).thenReturn("checkpoint.safetensors");
+        when(ollamaClient.generate(anyString())).thenThrow(new RuntimeException("Ollama unreachable"));
+
+        ArgumentCaptor<GeneratedImage> captor = ArgumentCaptor.forClass(GeneratedImage.class);
+        AiImageBatchResponse response = service.generateImage(AiImageRequest.withDefaults("a cat"));
+
+        assertEquals(1, response.images().size());
+        org.mockito.Mockito.verify(generatedImageRepository).save(captor.capture());
+        assertNull(captor.getValue().getTagsJson());
+    }
+
+    @Test
     void generateImage_画質プロンプトを本文プロンプトへ付加しnegative_prompt未指定時はプロジェクト解決値を使う() {
         when(comfyUiClient.generateImage(any())).thenReturn(
                 List.of(new ComfyUiImage("a.png", new byte[]{1}, "image/png")));

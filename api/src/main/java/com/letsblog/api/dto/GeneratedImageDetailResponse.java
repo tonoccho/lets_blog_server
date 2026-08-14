@@ -1,6 +1,7 @@
 package com.letsblog.api.dto;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 public record GeneratedImageDetailResponse(
         Long id,
@@ -18,6 +19,7 @@ public record GeneratedImageDetailResponse(
         String checkpoint,
         String loraName,
         Double loraWeight,
-        LocalDateTime createdAt
+        LocalDateTime createdAt,
+        List<String> tags
 ) {
 }
