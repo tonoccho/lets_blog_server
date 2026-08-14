@@ -26,8 +26,9 @@ import java.util.regex.Pattern;
 
 /**
  * VSCode拡張の記事プレビュー機能向けに、Markdown→HTML変換とプロジェクトのマスター環境サイトの
- * テーマCSS取得を行う。PostPublishServiceと異なり、実際のCMSへの投稿やPlantUML図の生成・画像アップロードは
- * 行わない(プレビューなので副作用のある外部呼び出しは避ける)。
+ * テーマCSS取得を行う。PostPublishServiceと異なり、実際のCMSへの投稿は行わない
+ * (プレビューなので副作用のある外部呼び出しは避ける)。PlantUML図はCMSへのアップロードは行わず、
+ * data URIとして本文に直接埋め込む({@link PlantUmlEmbedService#embedDiagramsForPreview}参照)。
  */
 @Service
 public class ArticlePreviewService {
@@ -62,6 +63,7 @@ public class ArticlePreviewService {
     private final BlogCardTagRenderService blogCardTagRenderService;
     private final AmazonTagRenderService amazonTagRenderService;
     private final RechartsTagRenderService rechartsTagRenderService;
+    private final PlantUmlEmbedService plantUmlEmbedService;
     private final TocStyleRenderService tocStyleRenderService;
     private final RenderedContentWrapperService renderedContentWrapperService;
     private final MarkdownRenderer markdownRenderer;
@@ -76,6 +78,7 @@ public class ArticlePreviewService {
             BlogCardTagRenderService blogCardTagRenderService,
             AmazonTagRenderService amazonTagRenderService,
             RechartsTagRenderService rechartsTagRenderService,
+            PlantUmlEmbedService plantUmlEmbedService,
             TocStyleRenderService tocStyleRenderService,
             RenderedContentWrapperService renderedContentWrapperService,
             MarkdownRenderer markdownRenderer,
@@ -88,6 +91,7 @@ public class ArticlePreviewService {
         this.blogCardTagRenderService = blogCardTagRenderService;
         this.amazonTagRenderService = amazonTagRenderService;
         this.rechartsTagRenderService = rechartsTagRenderService;
+        this.plantUmlEmbedService = plantUmlEmbedService;
         this.tocStyleRenderService = tocStyleRenderService;
         this.renderedContentWrapperService = renderedContentWrapperService;
         this.markdownRenderer = markdownRenderer;
@@ -100,8 +104,8 @@ public class ArticlePreviewService {
 
     /**
      * カスタムタグ展開 + 組み込みタグ展開 + Markdown→HTML変換を行う。PostPublishServiceと違い、
-     * PlantUML埋め込みや画像アップロードは行わない(プレビュー用の軽量処理。ローカル画像やPlantUML図は
-     * VSCode拡張側の責務)。
+     * 実際のCMSへの画像アップロードは行わない(プレビュー用の軽量処理)。PlantUML図はCMSアップロードの
+     * 代わりにdata URIとして直接埋め込むことで、投稿後と同じ図としてプレビューに表示する(Issue #345)。
      *
      * [recharts]タグの記法・データが不正な場合、他の組み込みタグと異なりInvalidRechartsTagExceptionを
      * 捕捉し、以降のレンダリングを中止してエラーメッセージのみを表示する(Issue #340)。
@@ -115,6 +119,7 @@ public class ArticlePreviewService {
         } catch (InvalidRechartsTagException e) {
             return renderRechartsError(e.getMessage());
         }
+        rendered = plantUmlEmbedService.embedDiagramsForPreview(rendered);
         String html = markdownRenderer.render(rendered);
         html = tocStyleRenderService.applyHtmlTemplate(html, projectId);
         return renderedContentWrapperService.wrap(html, projectId);

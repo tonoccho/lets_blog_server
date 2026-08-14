@@ -47,6 +47,9 @@ class ArticlePreviewServiceTest {
     private RechartsTagRenderService rechartsTagRenderService;
 
     @Mock
+    private PlantUmlEmbedService plantUmlEmbedService;
+
+    @Mock
     private TocStyleRenderService tocStyleRenderService;
 
     @Mock
@@ -76,11 +79,13 @@ class ArticlePreviewServiceTest {
         server = MockRestServiceServer.bindTo(builder).build();
         service = new ArticlePreviewService(
                 customTagRenderService, blogCardTagRenderService, amazonTagRenderService, rechartsTagRenderService,
-                tocStyleRenderService, renderedContentWrapperService, markdownRenderer, projectService,
-                siteRepository, siteService, builder, previewSkeletonFetcher);
-        // renderHtml()は必ずrechartsTagRenderServiceを経由するため、recharts自体を検証しないテストでは
-        // 素通しにしておく(未スタブだとnullが返り、以降のmarkdownRenderer呼び出しの引数が狂うため)。
+                plantUmlEmbedService, tocStyleRenderService, renderedContentWrapperService, markdownRenderer,
+                projectService, siteRepository, siteService, builder, previewSkeletonFetcher);
+        // renderHtml()は必ずrechartsTagRenderService/plantUmlEmbedServiceを経由するため、それら自体を
+        // 検証しないテストでは素通しにしておく(未スタブだとnullが返り、以降の呼び出しの引数が狂うため)。
         lenient().when(rechartsTagRenderService.render(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(plantUmlEmbedService.embedDiagramsForPreview(anyString()))
+                .thenAnswer(inv -> inv.getArgument(0));
     }
 
     private Project projectWithMaster(String masterEnvironment, Long testSiteId, Long productionSiteId) {
@@ -152,7 +157,8 @@ class ArticlePreviewServiceTest {
         String html = service.renderHtml(1L, "markdown");
 
         assertTrue(html.contains("type属性は必須です"));
-        verifyNoInteractions(markdownRenderer, tocStyleRenderService, renderedContentWrapperService);
+        verifyNoInteractions(plantUmlEmbedService, markdownRenderer, tocStyleRenderService,
+                renderedContentWrapperService);
     }
 
     @Test
@@ -170,6 +176,29 @@ class ArticlePreviewServiceTest {
         String html = service.renderHtml(1L, "markdown");
 
         assertEquals("<div class=\"lets-blog-rendered\"><p>markdown</p><div>chart</div></div>", html);
+    }
+
+    @Test
+    void renderHtml_plantumlフェンスをdataURI画像へ差し替えてからMarkdown変換する() {
+        when(customTagRenderService.render("```plantuml\n@startuml\n@enduml\n```", 1L))
+                .thenReturn("```plantuml\n@startuml\n@enduml\n```");
+        when(blogCardTagRenderService.render("```plantuml\n@startuml\n@enduml\n```", 1L))
+                .thenReturn("```plantuml\n@startuml\n@enduml\n```");
+        when(amazonTagRenderService.render("```plantuml\n@startuml\n@enduml\n```", 1L))
+                .thenReturn("```plantuml\n@startuml\n@enduml\n```");
+        when(plantUmlEmbedService.embedDiagramsForPreview("```plantuml\n@startuml\n@enduml\n```"))
+                .thenReturn("![diagram](data:image/png;base64,AAAA)");
+        when(markdownRenderer.render("![diagram](data:image/png;base64,AAAA)"))
+                .thenReturn("<img src=\"data:image/png;base64,AAAA\">");
+        when(tocStyleRenderService.applyHtmlTemplate("<img src=\"data:image/png;base64,AAAA\">", 1L))
+                .thenReturn("<img src=\"data:image/png;base64,AAAA\">");
+        when(renderedContentWrapperService.wrap("<img src=\"data:image/png;base64,AAAA\">", 1L))
+                .thenReturn("<div class=\"lets-blog-rendered\"><img src=\"data:image/png;base64,AAAA\"></div>");
+
+        String html = service.renderHtml(1L, "```plantuml\n@startuml\n@enduml\n```");
+
+        assertEquals("<div class=\"lets-blog-rendered\"><img src=\"data:image/png;base64,AAAA\"></div>", html);
+        verify(plantUmlEmbedService).embedDiagramsForPreview("```plantuml\n@startuml\n@enduml\n```");
     }
 
     @Test
