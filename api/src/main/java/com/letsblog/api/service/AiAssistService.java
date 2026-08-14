@@ -23,6 +23,8 @@ import com.letsblog.api.dto.AiTagsResponse;
 import com.letsblog.api.dto.ImageGenerationOptionsResponse;
 import com.letsblog.api.repository.GeneratedImageRepository;
 import com.letsblog.api.repository.GenerationJobRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -37,6 +39,8 @@ import java.util.Map;
  */
 @Service
 public class AiAssistService {
+
+    private static final Logger log = LoggerFactory.getLogger(AiAssistService.class);
 
     private static final Map<String, String> DRAFT_PROMPT_TEMPLATES = Map.of(
             "draft", """
@@ -111,6 +115,18 @@ public class AiAssistService {
             %s
             """;
 
+    /** issue #281: 生成画像の検索・分類用タグを、画像生成に使ったプロンプトから提案させる。 */
+    private static final String IMAGE_TAGS_PROMPT_TEMPLATE = """
+            以下は画像生成AIに渡したプロンプトです。この画像を検索・分類しやすくするための
+            短い日本語タグを3〜5個程度提案してください。
+            出力は必ず次のJSON形式のみとし、他の文章は一切含めないでください。
+
+            {"tags": ["タグ1", "タグ2", "タグ3"]}
+
+            画像生成プロンプト:
+            %s
+            """;
+
     private final OllamaClient ollamaClient;
     private final OllamaModelService ollamaModelService;
     private final ComfyUiClient comfyUiClient;
@@ -147,12 +163,14 @@ public class AiAssistService {
         try {
             ComfyUiGenerationParams params = resolveParams(request);
             List<ComfyUiImage> images = comfyUiClient.generateImage(params);
+            // バッチ内の全画像は同じprompt/negativePromptから生成されるため、タグ提案は1回で済ませて使い回す。
+            String tagsJson = suggestImageTagsJson(params.prompt());
             List<AiImageResponse> responses = new ArrayList<>();
             for (ComfyUiImage image : images) {
                 String base64 = Base64.getEncoder().encodeToString(image.data());
                 String filePath = generatedImageStorageService.store(request.projectId(), image.data());
                 GeneratedImage saved = generatedImageRepository.save(
-                        toEntity(request.projectId(), params, filePath, image.mimeType()));
+                        toEntity(request.projectId(), params, filePath, image.mimeType(), tagsJson));
                 responses.add(new AiImageResponse(saved.getId(), image.fileName(), base64, image.mimeType()));
             }
             completeJob(job, Map.of("count", String.valueOf(responses.size())));
@@ -160,6 +178,26 @@ public class AiAssistService {
         } catch (RuntimeException e) {
             failJob(job, e);
             throw e;
+        }
+    }
+
+    /**
+     * 画像生成プロンプトから検索・分類用のタグを提案し、JSON配列文字列として返す(issue #281)。
+     * タグ提案はあくまで補助機能のため、Ollama呼び出しの失敗で画像生成自体を失敗させない
+     * (取得できない場合はタグなし=nullを返す)。
+     */
+    private String suggestImageTagsJson(String prompt) {
+        try {
+            String raw = ollamaClient.generate(IMAGE_TAGS_PROMPT_TEMPLATE.formatted(prompt));
+            JsonNode node = objectMapper.readTree(extractJsonObject(raw));
+            List<String> tags = toStringList(node.get("tags"));
+            if (tags.isEmpty()) {
+                return null;
+            }
+            return objectMapper.writeValueAsString(tags);
+        } catch (Exception e) {
+            log.warn("生成画像のタグ提案に失敗しました(タグなしで保存を続行します): {}", e.getMessage());
+            return null;
         }
     }
 
@@ -239,7 +277,8 @@ public class AiAssistService {
         );
     }
 
-    private GeneratedImage toEntity(Long projectId, ComfyUiGenerationParams params, String filePath, String mimeType) {
+    private GeneratedImage toEntity(
+            Long projectId, ComfyUiGenerationParams params, String filePath, String mimeType, String tagsJson) {
         GeneratedImage entity = new GeneratedImage();
         entity.setProjectId(projectId);
         entity.setPrompt(params.prompt());
@@ -257,6 +296,7 @@ public class AiAssistService {
         entity.setLoraWeight(params.loraWeight() != null ? BigDecimal.valueOf(params.loraWeight()) : null);
         entity.setFilePath(filePath);
         entity.setMimeType(mimeType);
+        entity.setTagsJson(tagsJson);
         return entity;
     }
 

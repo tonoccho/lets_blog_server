@@ -73,6 +73,13 @@ public class GeneratedImage {
     @Column(name = "mime_type", nullable = false, length = 100)
     private String mimeType = "image/png";
 
+    /**
+     * 検索・分類用のタグ(issue #281)。JSON配列文字列として保持し、パース/組み立ては
+     * 呼び出し側(GeneratedImageController等)で行う(Post.uploadedImagesJsonと同じ方針)。
+     */
+    @Column(name = "tags_json", columnDefinition = "TEXT")
+    private String tagsJson;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

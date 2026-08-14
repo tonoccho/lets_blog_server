@@ -41,6 +41,7 @@ export interface GeneratedImageSummary {
   prompt: string;
   checkpoint: string;
   createdAt: string;
+  tags: string[];
 }
 
 export interface GeneratedImageDetail extends GeneratedImageSummary {
@@ -370,6 +371,15 @@ export function getGeneratedImage(id: number): Promise<GeneratedImageDetail> {
 
 export function deleteGeneratedImage(id: number): Promise<void> {
   return apiFetch<void>(`/api/generated-images/${id}`, { method: 'DELETE' });
+}
+
+/** 自動生成されたタグを手動で編集・追加する(issue #281)。 */
+export function updateGeneratedImageTags(id: number, tags: string[]): Promise<GeneratedImageDetail> {
+  return apiFetch<GeneratedImageDetail>(`/api/generated-images/${id}/tags`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tags }),
+  });
 }
 
 export async function downloadGeneratedImageFile(id: number): Promise<{ body: ArrayBuffer; mimeType: string }> {
