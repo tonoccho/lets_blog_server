@@ -58,6 +58,7 @@ public class PostPublishService {
     private final BlogCardTagRenderService blogCardTagRenderService;
     private final AmazonTagRenderService amazonTagRenderService;
     private final RechartsTagRenderService rechartsTagRenderService;
+    private final PlantUmlTagRenderService plantUmlTagRenderService;
     private final TocStyleRenderService tocStyleRenderService;
     private final RenderedContentWrapperService renderedContentWrapperService;
     private final ProjectService projectService;
@@ -74,6 +75,7 @@ public class PostPublishService {
                                BlogCardTagRenderService blogCardTagRenderService,
                                AmazonTagRenderService amazonTagRenderService,
                                RechartsTagRenderService rechartsTagRenderService,
+                               PlantUmlTagRenderService plantUmlTagRenderService,
                                TocStyleRenderService tocStyleRenderService,
                                RenderedContentWrapperService renderedContentWrapperService,
                                ProjectService projectService,
@@ -91,6 +93,7 @@ public class PostPublishService {
         this.blogCardTagRenderService = blogCardTagRenderService;
         this.amazonTagRenderService = amazonTagRenderService;
         this.rechartsTagRenderService = rechartsTagRenderService;
+        this.plantUmlTagRenderService = plantUmlTagRenderService;
         this.tocStyleRenderService = tocStyleRenderService;
         this.renderedContentWrapperService = renderedContentWrapperService;
         this.projectService = projectService;
@@ -115,6 +118,9 @@ public class PostPublishService {
         // [recharts]タグの記法・データが不正な場合はInvalidRechartsTagExceptionを未捕捉のまま伝播させ、
         // GlobalExceptionHandlerが400として返すことで投稿自体を拒否する(Issue #340)。
         markdown = rechartsTagRenderService.render(markdown);
+        // [plantuml]〜[/plantuml]組み込みタグも同じ方針(Issue #344)。既存の```plantumlフェンスコード
+        // ブロック記法(次行のplantUmlEmbedService)とは併存し、置き換えない。
+        markdown = plantUmlTagRenderService.render(credentials, markdown);
         markdown = plantUmlEmbedService.embedDiagrams(credentials, markdown);
         Map<String, UploadedImageInfo> priorUploads = loadPriorUploadedImages(site.getId(), command.wpPostId());
         ImageReplacementResult imageResult = replaceImageReferences(

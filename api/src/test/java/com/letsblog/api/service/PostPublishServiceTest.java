@@ -66,6 +66,8 @@ class PostPublishServiceTest {
     @Mock
     private RechartsTagRenderService rechartsTagRenderService;
     @Mock
+    private PlantUmlTagRenderService plantUmlTagRenderService;
+    @Mock
     private TocStyleRenderService tocStyleRenderService;
     @Mock
     private RenderedContentWrapperService renderedContentWrapperService;
@@ -89,8 +91,8 @@ class PostPublishServiceTest {
     void setUp() {
         service = new PostPublishService(siteService, cmsAdapterFactory, markdownRenderer, postRepository,
                 plantUmlEmbedService, customTagRenderService, blogCardTagRenderService, amazonTagRenderService,
-                rechartsTagRenderService, tocStyleRenderService, renderedContentWrapperService, projectService,
-                currentActorService, userRepository, userSiteAuthorRepository,
+                rechartsTagRenderService, plantUmlTagRenderService, tocStyleRenderService, renderedContentWrapperService,
+                projectService, currentActorService, userRepository, userSiteAuthorRepository,
                 new com.fasterxml.jackson.databind.ObjectMapper(), new ImageResizeService());
 
         Site site = new Site();
@@ -106,6 +108,7 @@ class PostPublishServiceTest {
         lenient().when(blogCardTagRenderService.render(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(amazonTagRenderService.render(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(rechartsTagRenderService.render(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(plantUmlTagRenderService.render(any(), anyString())).thenAnswer(inv -> inv.getArgument(1));
         lenient().when(plantUmlEmbedService.embedDiagrams(any(), anyString())).thenAnswer(inv -> inv.getArgument(1));
         lenient().when(markdownRenderer.render(anyString())).thenAnswer(inv -> "<p>" + inv.getArgument(0) + "</p>");
         lenient().when(tocStyleRenderService.applyHtmlTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
@@ -574,6 +577,30 @@ class PostPublishServiceTest {
                 InvalidRechartsTagException.class,
                 () -> service.publish(command("my-article", "My Article", List.of(), null)));
         assertTrue(e.getMessage().contains("type属性"));
+        verify(cmsAdapter, org.mockito.Mockito.never()).createOrUpdatePost(any(), any(), any());
+    }
+
+    @Test
+    void publish_plantumlタグをレンダリングしCMSへアップロードする() {
+        when(plantUmlTagRenderService.render(eq(credentials), anyString()))
+                .thenReturn("![diagram](https://example.com/plantuml-tag-1.png)");
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+
+        service.publish(command("my-article", "My Article", List.of(), null));
+
+        verify(plantUmlTagRenderService).render(eq(credentials), anyString());
+    }
+
+    @Test
+    void publish_plantumlタグが不正な場合は投稿を拒否する() {
+        when(plantUmlTagRenderService.render(eq(credentials), anyString()))
+                .thenThrow(new InvalidPlantUmlTagException("PlantUML図のレンダリングに失敗しました"));
+
+        InvalidPlantUmlTagException e = org.junit.jupiter.api.Assertions.assertThrows(
+                InvalidPlantUmlTagException.class,
+                () -> service.publish(command("my-article", "My Article", List.of(), null)));
+        assertTrue(e.getMessage().contains("PlantUML"));
         verify(cmsAdapter, org.mockito.Mockito.never()).createOrUpdatePost(any(), any(), any());
     }
 }

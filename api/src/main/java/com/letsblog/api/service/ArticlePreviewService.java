@@ -64,6 +64,7 @@ public class ArticlePreviewService {
     private final AmazonTagRenderService amazonTagRenderService;
     private final RechartsTagRenderService rechartsTagRenderService;
     private final PlantUmlEmbedService plantUmlEmbedService;
+    private final PlantUmlTagRenderService plantUmlTagRenderService;
     private final TocStyleRenderService tocStyleRenderService;
     private final RenderedContentWrapperService renderedContentWrapperService;
     private final MarkdownRenderer markdownRenderer;
@@ -79,6 +80,7 @@ public class ArticlePreviewService {
             AmazonTagRenderService amazonTagRenderService,
             RechartsTagRenderService rechartsTagRenderService,
             PlantUmlEmbedService plantUmlEmbedService,
+            PlantUmlTagRenderService plantUmlTagRenderService,
             TocStyleRenderService tocStyleRenderService,
             RenderedContentWrapperService renderedContentWrapperService,
             MarkdownRenderer markdownRenderer,
@@ -92,6 +94,7 @@ public class ArticlePreviewService {
         this.amazonTagRenderService = amazonTagRenderService;
         this.rechartsTagRenderService = rechartsTagRenderService;
         this.plantUmlEmbedService = plantUmlEmbedService;
+        this.plantUmlTagRenderService = plantUmlTagRenderService;
         this.tocStyleRenderService = tocStyleRenderService;
         this.renderedContentWrapperService = renderedContentWrapperService;
         this.markdownRenderer = markdownRenderer;
@@ -109,6 +112,9 @@ public class ArticlePreviewService {
      *
      * [recharts]タグの記法・データが不正な場合、他の組み込みタグと異なりInvalidRechartsTagExceptionを
      * 捕捉し、以降のレンダリングを中止してエラーメッセージのみを表示する(Issue #340)。
+     * [plantuml]〜[/plantuml]組み込みタグも同じ方針で、InvalidPlantUmlTagExceptionを捕捉して
+     * レンダリングを中止する(Issue #344)。既存の```plantumlフェンスコードブロック記法(下の
+     * plantUmlEmbedService呼び出し)とは併存し、置き換えない。
      */
     public String renderHtml(Long projectId, String markdown) {
         String rendered = customTagRenderService.render(markdown, projectId);
@@ -118,6 +124,11 @@ public class ArticlePreviewService {
             rendered = rechartsTagRenderService.render(rendered);
         } catch (InvalidRechartsTagException e) {
             return renderRechartsError(e.getMessage());
+        }
+        try {
+            rendered = plantUmlTagRenderService.renderForPreview(rendered);
+        } catch (InvalidPlantUmlTagException e) {
+            return renderPlantUmlError(e.getMessage());
         }
         rendered = plantUmlEmbedService.embedDiagramsForPreview(rendered);
         String html = markdownRenderer.render(rendered);
@@ -129,6 +140,12 @@ public class ArticlePreviewService {
         return "<div role=\"alert\" style=\"background:#f8d7da;color:#842029;padding:12px 16px;"
                 + "border-radius:4px;font-family:sans-serif;font-size:14px;\">"
                 + "<strong>チャートのレンダリングエラー:</strong> " + HtmlUtils.htmlEscape(message) + "</div>";
+    }
+
+    private String renderPlantUmlError(String message) {
+        return "<div role=\"alert\" style=\"background:#f8d7da;color:#842029;padding:12px 16px;"
+                + "border-radius:4px;font-family:sans-serif;font-size:14px;\">"
+                + "<strong>PlantUML図のレンダリングエラー:</strong> " + HtmlUtils.htmlEscape(message) + "</div>";
     }
 
     /**
