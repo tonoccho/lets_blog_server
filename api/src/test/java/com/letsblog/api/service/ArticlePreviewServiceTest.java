@@ -50,6 +50,9 @@ class ArticlePreviewServiceTest {
     private PlantUmlEmbedService plantUmlEmbedService;
 
     @Mock
+    private PlantUmlTagRenderService plantUmlTagRenderService;
+
+    @Mock
     private TocStyleRenderService tocStyleRenderService;
 
     @Mock
@@ -79,11 +82,13 @@ class ArticlePreviewServiceTest {
         server = MockRestServiceServer.bindTo(builder).build();
         service = new ArticlePreviewService(
                 customTagRenderService, blogCardTagRenderService, amazonTagRenderService, rechartsTagRenderService,
-                plantUmlEmbedService, tocStyleRenderService, renderedContentWrapperService, markdownRenderer,
-                projectService, siteRepository, siteService, builder, previewSkeletonFetcher);
-        // renderHtml()は必ずrechartsTagRenderService/plantUmlEmbedServiceを経由するため、それら自体を
-        // 検証しないテストでは素通しにしておく(未スタブだとnullが返り、以降の呼び出しの引数が狂うため)。
+                plantUmlEmbedService, plantUmlTagRenderService, tocStyleRenderService, renderedContentWrapperService,
+                markdownRenderer, projectService, siteRepository, siteService, builder, previewSkeletonFetcher);
+        // renderHtml()は必ずrechartsTagRenderService/plantUmlTagRenderService/plantUmlEmbedServiceを
+        // 経由するため、それら自体を検証しないテストでは素通しにしておく
+        // (未スタブだとnullが返り、以降の呼び出しの引数が狂うため)。
         lenient().when(rechartsTagRenderService.render(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(plantUmlTagRenderService.renderForPreview(anyString())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(plantUmlEmbedService.embedDiagramsForPreview(anyString()))
                 .thenAnswer(inv -> inv.getArgument(0));
     }
@@ -157,7 +162,7 @@ class ArticlePreviewServiceTest {
         String html = service.renderHtml(1L, "markdown");
 
         assertTrue(html.contains("type属性は必須です"));
-        verifyNoInteractions(plantUmlEmbedService, markdownRenderer, tocStyleRenderService,
+        verifyNoInteractions(plantUmlTagRenderService, plantUmlEmbedService, markdownRenderer, tocStyleRenderService,
                 renderedContentWrapperService);
     }
 
@@ -199,6 +204,42 @@ class ArticlePreviewServiceTest {
 
         assertEquals("<div class=\"lets-blog-rendered\"><img src=\"data:image/png;base64,AAAA\"></div>", html);
         verify(plantUmlEmbedService).embedDiagramsForPreview("```plantuml\n@startuml\n@enduml\n```");
+    }
+
+    @Test
+    void renderHtml_plantumlタグをdataURI画像へ差し替えてからMarkdown変換する() {
+        String markdown = "[plantuml]\nA->B\n[/plantuml]";
+        when(customTagRenderService.render(markdown, 1L)).thenReturn(markdown);
+        when(blogCardTagRenderService.render(markdown, 1L)).thenReturn(markdown);
+        when(amazonTagRenderService.render(markdown, 1L)).thenReturn(markdown);
+        when(plantUmlTagRenderService.renderForPreview(markdown))
+                .thenReturn("![diagram](data:image/png;base64,AAAA)");
+        when(markdownRenderer.render("![diagram](data:image/png;base64,AAAA)"))
+                .thenReturn("<img src=\"data:image/png;base64,AAAA\">");
+        when(tocStyleRenderService.applyHtmlTemplate("<img src=\"data:image/png;base64,AAAA\">", 1L))
+                .thenReturn("<img src=\"data:image/png;base64,AAAA\">");
+        when(renderedContentWrapperService.wrap("<img src=\"data:image/png;base64,AAAA\">", 1L))
+                .thenReturn("<div class=\"lets-blog-rendered\"><img src=\"data:image/png;base64,AAAA\"></div>");
+
+        String html = service.renderHtml(1L, markdown);
+
+        assertEquals("<div class=\"lets-blog-rendered\"><img src=\"data:image/png;base64,AAAA\"></div>", html);
+        verify(plantUmlTagRenderService).renderForPreview(markdown);
+    }
+
+    @Test
+    void renderHtml_plantumlタグが不正な場合はレンダリングを中止してエラーメッセージを返す() {
+        when(customTagRenderService.render("markdown", 1L)).thenReturn("markdown");
+        when(blogCardTagRenderService.render("markdown", 1L)).thenReturn("markdown");
+        when(amazonTagRenderService.render("markdown", 1L)).thenReturn("markdown");
+        when(plantUmlTagRenderService.renderForPreview("markdown"))
+                .thenThrow(new InvalidPlantUmlTagException("PlantUML図のレンダリングに失敗しました"));
+
+        String html = service.renderHtml(1L, "markdown");
+
+        assertTrue(html.contains("PlantUML図のレンダリングに失敗しました"));
+        verifyNoInteractions(plantUmlEmbedService, markdownRenderer, tocStyleRenderService,
+                renderedContentWrapperService);
     }
 
     @Test
