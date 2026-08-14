@@ -3,6 +3,7 @@ package com.letsblog.api.service;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.dto.ProjectResponse;
 import com.letsblog.api.dto.UpdateImageGenerationPromptDefaultsRequest;
+import com.letsblog.api.dto.UpdateImageGenerationSizeDefaultsRequest;
 import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
 import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
 import com.letsblog.api.repository.ProjectRepository;
@@ -46,7 +47,8 @@ class ProjectServiceTest {
     private ProjectService service() {
         return new ProjectService(
                 projectRepository, siteRepository, bulkUploadStorageService,
-                "low quality, blurry, watermark, text", "high quality, highly detailed, sharp focus, masterpiece");
+                "low quality, blurry, watermark, text", "high quality, highly detailed, sharp focus, masterpiece",
+                1920, 1080);
     }
 
     private Project buildProject(Long id, String slug) {
@@ -348,6 +350,58 @@ class ProjectServiceTest {
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
 
         assertEquals("vivid colors, cinematic lighting", service.resolveDefaultQualityPrompt(1L));
+    }
+
+    @Test
+    void updateImageGenerationSizeDefaults_値が正常に保存される() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProjectResponse response = service.updateImageGenerationSizeDefaults(
+                1L, new UpdateImageGenerationSizeDefaultsRequest(1024, 768));
+
+        assertEquals(1024, response.defaultGeneratedImageWidth());
+        assertEquals(768, response.defaultGeneratedImageHeight());
+    }
+
+    @Test
+    void updateImageGenerationSizeDefaults_nullを渡すとグローバルデフォルトへ戻る() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        project.setDefaultGeneratedImageWidth(1024);
+        project.setDefaultGeneratedImageHeight(768);
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProjectResponse response = service.updateImageGenerationSizeDefaults(
+                1L, new UpdateImageGenerationSizeDefaultsRequest(null, null));
+
+        assertNull(response.defaultGeneratedImageWidth());
+        assertNull(response.defaultGeneratedImageHeight());
+        assertEquals(1920, service.resolveDefaultGeneratedImageWidth(1L));
+        assertEquals(1080, service.resolveDefaultGeneratedImageHeight(1L));
+    }
+
+    @Test
+    void resolveDefaultGeneratedImageWidth_projectId未指定ならグローバルデフォルトを返す() {
+        ProjectService service = service();
+
+        assertEquals(1920, service.resolveDefaultGeneratedImageWidth(null));
+        assertEquals(1080, service.resolveDefaultGeneratedImageHeight(null));
+    }
+
+    @Test
+    void resolveDefaultGeneratedImageWidth_プロジェクト設定済みならその値を返す() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        project.setDefaultGeneratedImageWidth(1024);
+        project.setDefaultGeneratedImageHeight(768);
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        assertEquals(1024, service.resolveDefaultGeneratedImageWidth(1L));
+        assertEquals(768, service.resolveDefaultGeneratedImageHeight(1L));
     }
 
     @Test

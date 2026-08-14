@@ -98,6 +98,8 @@ app:
   docker-socket-proxy-base-url: ${DOCKER_SOCKET_PROXY_BASE_URL:http://localhost:2375}
   default-negative-prompt: ${DEFAULT_NEGATIVE_PROMPT:low quality, blurry, watermark, text}
   default-quality-prompt: ${DEFAULT_QUALITY_PROMPT:high quality, highly detailed, sharp focus, masterpiece}
+  default-generated-image-width: ${DEFAULT_GENERATED_IMAGE_WIDTH:1920}
+  default-generated-image-height: ${DEFAULT_GENERATED_IMAGE_HEIGHT:1080}
 
 resilience4j:
   ratelimiter:

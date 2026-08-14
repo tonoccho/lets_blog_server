@@ -60,6 +60,16 @@ public class Project {
     @Column(name = "default_quality_prompt", length = 500)
     private String defaultQualityPrompt;
 
+    /**
+     * 画像生成時に既定で使う生成サイズ(issue #292)。未設定時はアプリ全体のデフォルト(1920x1080)に
+     * フォールバックする(ProjectService#resolveDefaultGeneratedImageWidth等)。
+     */
+    @Column(name = "default_generated_image_width")
+    private Integer defaultGeneratedImageWidth;
+
+    @Column(name = "default_generated_image_height")
+    private Integer defaultGeneratedImageHeight;
+
     @Column(name = "ollama_model", length = 255)
     private String ollamaModel;
 

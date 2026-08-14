@@ -6,6 +6,7 @@ import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.ProjectResponse;
 import com.letsblog.api.dto.UpdateImageGenerationPromptDefaultsRequest;
+import com.letsblog.api.dto.UpdateImageGenerationSizeDefaultsRequest;
 import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
 import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
 import com.letsblog.api.repository.ProjectRepository;
@@ -28,18 +29,24 @@ public class ProjectService {
     private final BulkUploadStorageService bulkUploadStorageService;
     private final String globalDefaultNegativePrompt;
     private final String globalDefaultQualityPrompt;
+    private final int globalDefaultGeneratedImageWidth;
+    private final int globalDefaultGeneratedImageHeight;
 
     public ProjectService(
             ProjectRepository projectRepository,
             SiteRepository siteRepository,
             BulkUploadStorageService bulkUploadStorageService,
             @Value("${app.default-negative-prompt}") String globalDefaultNegativePrompt,
-            @Value("${app.default-quality-prompt}") String globalDefaultQualityPrompt) {
+            @Value("${app.default-quality-prompt}") String globalDefaultQualityPrompt,
+            @Value("${app.default-generated-image-width}") int globalDefaultGeneratedImageWidth,
+            @Value("${app.default-generated-image-height}") int globalDefaultGeneratedImageHeight) {
         this.projectRepository = projectRepository;
         this.siteRepository = siteRepository;
         this.bulkUploadStorageService = bulkUploadStorageService;
         this.globalDefaultNegativePrompt = globalDefaultNegativePrompt;
         this.globalDefaultQualityPrompt = globalDefaultQualityPrompt;
+        this.globalDefaultGeneratedImageWidth = globalDefaultGeneratedImageWidth;
+        this.globalDefaultGeneratedImageHeight = globalDefaultGeneratedImageHeight;
     }
 
     @AuditLog(action = AuditLogAction.PROJECT_CREATED, resourceType = "PROJECT")
@@ -235,6 +242,40 @@ public class ProjectService {
 
     private String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value;
+    }
+
+    @AuditLog(action = AuditLogAction.PROJECT_UPDATED, resourceType = "PROJECT")
+    @Transactional
+    public ProjectResponse updateImageGenerationSizeDefaults(
+            Long projectId, UpdateImageGenerationSizeDefaultsRequest request) {
+        Project project = getProjectEntity(projectId);
+        project.setDefaultGeneratedImageWidth(request.defaultGeneratedImageWidth());
+        project.setDefaultGeneratedImageHeight(request.defaultGeneratedImageHeight());
+        return toResponse(projectRepository.save(project));
+    }
+
+    /**
+     * 画像生成時のデフォルト幅を解決する。プロジェクト未設定時・projectId未指定時はアプリ全体の
+     * デフォルト(既定1920)にフォールバックする(issue #292)。
+     */
+    public int resolveDefaultGeneratedImageWidth(Long projectId) {
+        if (projectId == null) {
+            return globalDefaultGeneratedImageWidth;
+        }
+        Integer projectValue = getProjectEntity(projectId).getDefaultGeneratedImageWidth();
+        return projectValue == null ? globalDefaultGeneratedImageWidth : projectValue;
+    }
+
+    /**
+     * 画像生成時のデフォルト高さを解決する。プロジェクト未設定時・projectId未指定時はアプリ全体の
+     * デフォルト(既定1080)にフォールバックする(issue #292)。
+     */
+    public int resolveDefaultGeneratedImageHeight(Long projectId) {
+        if (projectId == null) {
+            return globalDefaultGeneratedImageHeight;
+        }
+        Integer projectValue = getProjectEntity(projectId).getDefaultGeneratedImageHeight();
+        return projectValue == null ? globalDefaultGeneratedImageHeight : projectValue;
     }
 
     private void requireValidEnvironment(String environment) {

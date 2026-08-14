@@ -7,6 +7,9 @@ public record ImageGenerationOptionsResponse(
         String selectedCheckpoint,
         List<String> samplers,
         List<String> schedulers,
-        List<String> loras
+        List<String> loras,
+        /** プロジェクトのデフォルト生成サイズ(issue #292)。フォームの初期値表示に使う。 */
+        int defaultWidth,
+        int defaultHeight
 ) {
 }

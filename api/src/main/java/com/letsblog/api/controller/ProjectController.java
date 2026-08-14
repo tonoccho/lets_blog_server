@@ -17,6 +17,7 @@ import com.letsblog.api.dto.SyncEnvironmentRequest;
 import com.letsblog.api.dto.TermComparisonPage;
 import com.letsblog.api.dto.TermNameRequest;
 import com.letsblog.api.dto.UpdateImageGenerationPromptDefaultsRequest;
+import com.letsblog.api.dto.UpdateImageGenerationSizeDefaultsRequest;
 import com.letsblog.api.dto.UpdateMasterEnvironmentRequest;
 import com.letsblog.api.dto.UpdatePostStatusRequest;
 import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
@@ -160,6 +161,14 @@ public class ProjectController {
             @PathVariable Long id, @Valid @RequestBody UpdateImageGenerationPromptDefaultsRequest request) {
         adminAuthorizationService.requireAdmin();
         return projectService.updateImageGenerationPromptDefaults(id, request);
+    }
+
+    /** issue #292: 画像生成時のデフォルトサイズ。 */
+    @PutMapping("/{id}/image-generation-size-defaults")
+    public ProjectResponse updateImageGenerationSizeDefaults(
+            @PathVariable Long id, @Valid @RequestBody UpdateImageGenerationSizeDefaultsRequest request) {
+        adminAuthorizationService.requireAdmin();
+        return projectService.updateImageGenerationSizeDefaults(id, request);
     }
 
     @PostMapping("/{id}/environments/sync")

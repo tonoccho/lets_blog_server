@@ -206,7 +206,9 @@ public class AiAssistService {
                 comfyUiModelService.getSelectedCheckpointOrGlobalDefault(projectId),
                 comfyUiClient.listSamplers(),
                 comfyUiClient.listSchedulers(),
-                comfyUiClient.listLoras());
+                comfyUiClient.listLoras(),
+                projectService.resolveDefaultGeneratedImageWidth(projectId),
+                projectService.resolveDefaultGeneratedImageHeight(projectId));
     }
 
     private ComfyUiGenerationParams resolveParams(AiImageRequest request) {
@@ -228,8 +230,8 @@ public class AiAssistService {
                 request.samplerName() != null ? request.samplerName() : "euler",
                 request.scheduler() != null ? request.scheduler() : "normal",
                 request.seed(),
-                request.width() != null ? request.width() : 512,
-                request.height() != null ? request.height() : 512,
+                request.width() != null ? request.width() : projectService.resolveDefaultGeneratedImageWidth(request.projectId()),
+                request.height() != null ? request.height() : projectService.resolveDefaultGeneratedImageHeight(request.projectId()),
                 request.batchSize() != null ? request.batchSize() : 1,
                 checkpoint,
                 request.loraName(),

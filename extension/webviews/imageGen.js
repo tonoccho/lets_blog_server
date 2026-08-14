@@ -28,6 +28,9 @@
     fillSelect(document.getElementById('samplerName'), options.samplers, 'euler');
     fillSelect(document.getElementById('scheduler'), options.schedulers, 'normal');
     fillSelect(document.getElementById('checkpoint'), options.checkpoints, options.selectedCheckpoint);
+    // プロジェクトのデフォルト生成サイズを初期値として反映する(issue #292)。
+    if (options.defaultWidth) document.getElementById('width').value = String(options.defaultWidth);
+    if (options.defaultHeight) document.getElementById('height').value = String(options.defaultHeight);
 
     const loraSelect = document.getElementById('loraName');
     loraSelect.innerHTML = '<option value="">なし</option>';
