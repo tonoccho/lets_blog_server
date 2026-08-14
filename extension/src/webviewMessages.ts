@@ -67,6 +67,7 @@ export type ImageGenOutboundCommand =
   | 'eyecatchSet'
   | 'assetAdded'
   | 'promptGenerated'
+  | 'prefill'
   | 'cancelled'
   | 'error';
 
@@ -132,7 +133,8 @@ export type ImageGalleryInboundMessage =
   | (WebviewMessageBase<'loadThumbnails'> & { imageIds: number[] })
   | (WebviewMessageBase<'insertImage'> & { imageId: number; prompt?: string })
   | (WebviewMessageBase<'setAsEyecatch'> & { imageId: number })
-  | (WebviewMessageBase<'deleteImage'> & { imageId: number });
+  | (WebviewMessageBase<'deleteImage'> & { imageId: number })
+  | (WebviewMessageBase<'regenerateWithSettings'> & { imageId: number });
 
 export type ImageGalleryOutboundCommand =
   | 'imageList'

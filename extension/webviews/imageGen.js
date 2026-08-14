@@ -42,6 +42,36 @@
     }
   }
 
+  /**
+   * Image Galleryの「この設定で画像生成」から開かれた場合に、選択画像の生成設定を
+   * フォームへ反映する(issue #294)。checkpoint/samplerName/scheduler/loraNameは
+   * renderOptions()でoptionが揃った後に届く(パネル側でoptions送信後にprefillを送るため)。
+   */
+  function applyPrefill(detail) {
+    if (!detail) return;
+    document.getElementById('prompt').value = detail.prompt || '';
+    document.getElementById('negativePrompt').value = detail.negativePrompt || '';
+    if (detail.steps != null) document.getElementById('steps').value = String(detail.steps);
+    if (detail.cfgScale != null) document.getElementById('cfgScale').value = String(detail.cfgScale);
+    if (detail.samplerName) document.getElementById('samplerName').value = detail.samplerName;
+    if (detail.scheduler) document.getElementById('scheduler').value = detail.scheduler;
+    document.getElementById('seed').value = detail.seed != null ? String(detail.seed) : '';
+    if (detail.width != null) document.getElementById('width').value = String(detail.width);
+    if (detail.height != null) document.getElementById('height').value = String(detail.height);
+    if (detail.batchSize != null) document.getElementById('batchSize').value = String(detail.batchSize);
+    if (detail.checkpoint) document.getElementById('checkpoint').value = detail.checkpoint;
+
+    const loraSelect = document.getElementById('loraName');
+    loraSelect.value = detail.loraName || '';
+    loraSelect.dispatchEvent(new Event('change'));
+    if (detail.loraName && detail.loraWeight != null) {
+      document.getElementById('loraWeight').value = String(detail.loraWeight);
+    }
+
+    showMessage('選択した画像の生成設定を反映しました。内容を確認して生成してください。', 'success');
+    document.getElementById('prompt').focus();
+  }
+
   document.getElementById('loraName').addEventListener('change', (e) => {
     const group = document.getElementById('loraWeightGroup');
     const enabled = Boolean(e.target.value);
@@ -185,6 +215,9 @@
       case 'options':
         LetsBlogLoading.end();
         renderOptions(payload);
+        break;
+      case 'prefill':
+        applyPrefill(payload);
         break;
       case 'generated':
         renderGenerated(payload);

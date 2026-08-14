@@ -18,13 +18,15 @@ const openPanels = new Map<string, { reveal(): void }>();
  * 「閉じたのに二度と開けない」状態になる。破棄時の後始末を基底クラス側へ寄せるため、
  * 生存管理をここへ集約している。
  */
-export function showSingletonPanel(viewType: string, create: () => { reveal(): void }): void {
-  const existing = openPanels.get(viewType);
+export function showSingletonPanel<T extends { reveal(): void }>(viewType: string, create: () => T): T {
+  const existing = openPanels.get(viewType) as T | undefined;
   if (existing) {
     existing.reveal();
-    return;
+    return existing;
   }
-  openPanels.set(viewType, create());
+  const created = create();
+  openPanels.set(viewType, created);
+  return created;
 }
 
 /** パネルの識別子・タイトル・使用する資材の指定。 */

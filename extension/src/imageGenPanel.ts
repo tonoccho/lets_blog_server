@@ -22,28 +22,52 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
   private _lastGenerated: api.AiImageResult | undefined;
   /** 直近の生成に使ったprompt(アセット挿入時のalt文言に使う)。 */
   private _lastPrompt: string | undefined;
-
+  /**
+   * Image Galleryの「この設定で画像生成」から開かれた際の反映待ちパラメータ(issue #294)。
+   * Webview側の初回loadOptionsに便乗して送る(生成直後でWebviewのスクリプトが
+   * まだメッセージ購読を終えていない可能性があるため、postMessageを直接叩かない)。
+   */
+  private _pendingPrefill: api.GeneratedImageDetail | undefined;
 
   /**
    * Generate Imageパネルを開く。既に開いていれば前面に出す。
    * @param baseDir 生成画像の保存先(この直下のassets/へ書き出す)
+   * @param prefill 指定時、その設定をフォームへ反映する(issue #294: Image Galleryからの再生成)。
    */
   static createOrShow(
     context: vscode.ExtensionContext,
     editor: vscode.TextEditor,
     baseDir: string,
-    projectId: number
+    projectId: number,
+    prefill?: api.GeneratedImageDetail
   ): void {
-    showSingletonPanel('letsBlog.imageGen', () => new ImageGenPanel(context, editor, baseDir, projectId));
+    const panel = showSingletonPanel(
+      'letsBlog.imageGen',
+      () => new ImageGenPanel(context, editor, baseDir, projectId, prefill)
+    );
+    if (prefill) {
+      panel.applyPrefill(prefill);
+    }
   }
 
   private constructor(
     context: vscode.ExtensionContext,
     private readonly _editor: vscode.TextEditor,
     private readonly _baseDir: string,
-    private readonly _projectId: number
+    private readonly _projectId: number,
+    prefill?: api.GeneratedImageDetail
   ) {
     super(context, { viewType: 'letsBlog.imageGen', title: 'Generate Image', assetName: 'imageGen' });
+    this._pendingPrefill = prefill;
+  }
+
+  /**
+   * 既に開いているパネルへ設定を反映する。パネルは読み込み済み(loadOptionsは受信済み)のため、
+   * 直接postMessageしてよい。新規作成時は_handleLoadOptions側でpendingPrefillとして送る。
+   */
+  private applyPrefill(prefill: api.GeneratedImageDetail): void {
+    this._pendingPrefill = undefined;
+    this.postMessage('prefill', prefill);
   }
 
   /** Webviewからのコマンドを対応する処理へ振り分ける。 */
@@ -69,6 +93,10 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
     const apiKey = await requireApiKey(this.context);
     const options = await api.getImageGenerationOptions(getServerUrl(), apiKey, this._projectId);
     this.postMessage('options', options);
+    if (this._pendingPrefill) {
+      this.postMessage('prefill', this._pendingPrefill);
+      this._pendingPrefill = undefined;
+    }
   }
 
   private async _handleGenerate(
