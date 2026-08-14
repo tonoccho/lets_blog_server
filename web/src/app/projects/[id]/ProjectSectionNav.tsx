@@ -1,11 +1,12 @@
 import Link from "next/link";
 
-export type ProjectSection = "detail" | "plan" | "tags";
+export type ProjectSection = "detail" | "plan" | "tags" | "posts";
 
 const SECTIONS: { id: ProjectSection; label: string; hrefSuffix: string }[] = [
   { id: "detail", label: "詳細", hrefSuffix: "" },
   { id: "plan", label: "計画", hrefSuffix: "/plan" },
   { id: "tags", label: "タグ", hrefSuffix: "/tags" },
+  { id: "posts", label: "投稿履歴", hrefSuffix: "/posts" },
 ];
 
 /** プロジェクトの詳細・計画・タグページ間を行き来するための共通ナビゲーション(issue #182)。 */

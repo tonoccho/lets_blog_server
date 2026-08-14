@@ -35,7 +35,6 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "ダッシュボード", icon: "Home" },
   { href: "/projects", label: "プロジェクト", icon: "Folder" },
   { href: "/sites", label: "サイト", icon: "Globe" },
-  { href: "/posts", label: "投稿履歴", icon: "FileText" },
   { href: "/image-gallery", label: "生成画像ギャラリー", icon: "Images" },
   { href: "/operation-logs", label: "操作ログ", icon: "History" },
 ];
