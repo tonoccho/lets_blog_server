@@ -210,6 +210,14 @@ export type ThemeSkeletonResult = z.infer<typeof ThemeSkeletonResultSchema>;
 /** 既存カテゴリ名の一覧。サイト未紐付け時は空配列。 */
 export const CategoryNameListSchema = z.array(z.string());
 
+/** 親カテゴリ名付きの既存カテゴリ一覧。子カテゴリ選択時の親カテゴリ自動選択に使う(issue #289)。 */
+export const CategoryOptionSchema = z.object({
+  name: z.string(),
+  parentName: z.string().nullable(),
+});
+export const CategoryOptionListSchema = z.array(CategoryOptionSchema);
+export type CategoryOption = z.infer<typeof CategoryOptionSchema>;
+
 export const ActorListSchema = z.array(ActorSchema);
 
 /**

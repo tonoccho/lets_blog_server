@@ -195,6 +195,15 @@
     post('suggestMetadata', { history: chatHistory });
   }
 
+  /** カテゴリ名(小文字)から{name, parentName}を探す。 */
+  function findCategoryOption(name) {
+    return existingCategories.find((o) => o.name.toLowerCase() === name.toLowerCase());
+  }
+
+  /**
+   * カテゴリ一覧を{name, parentName}のオブジェクト配列として描画する。
+   * 子カテゴリのチェックボックスは、存在すれば親カテゴリも辿って自動的にチェックする(issue #289)。
+   */
   function renderCategoryCheckboxes(selected) {
     const container = document.getElementById('categoryCheckboxes');
     container.innerHTML = '';
@@ -202,18 +211,43 @@
       container.innerHTML = '<span class="hint">既存カテゴリを取得できませんでした(サイト未紐付け等)。新規カテゴリ欄に直接入力してください。</span>';
       return;
     }
-    existingCategories.forEach((name, index) => {
+    const checkboxesByName = {};
+    existingCategories.forEach((option, index) => {
       const label = document.createElement('label');
+      if (option.parentName) {
+        label.style.paddingLeft = '1.25em';
+      }
       const checkbox = document.createElement('input');
       const id = 'category-' + index;
       checkbox.type = 'checkbox';
       checkbox.id = id;
-      checkbox.value = name;
-      checkbox.checked = (selected || []).some((s) => s.toLowerCase() === name.toLowerCase());
+      checkbox.value = option.name;
+      checkbox.checked = (selected || []).some((s) => s.toLowerCase() === option.name.toLowerCase());
       label.setAttribute('for', id);
       label.appendChild(checkbox);
-      label.appendChild(document.createTextNode(' ' + name));
+      label.appendChild(document.createTextNode(' ' + option.name));
       container.appendChild(label);
+      checkboxesByName[option.name.toLowerCase()] = checkbox;
+    });
+
+    const selectAncestors = (name) => {
+      let current = findCategoryOption(name);
+      let guard = 0;
+      while (current && current.parentName && guard < 20) {
+        const parentCheckbox = checkboxesByName[current.parentName.toLowerCase()];
+        if (parentCheckbox) parentCheckbox.checked = true;
+        current = findCategoryOption(current.parentName);
+        guard++;
+      }
+    };
+
+    existingCategories.forEach((option) => {
+      const checkbox = checkboxesByName[option.name.toLowerCase()];
+      if (!checkbox) return;
+      if (checkbox.checked) selectAncestors(option.name);
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) selectAncestors(option.name);
+      });
     });
   }
 
@@ -249,7 +283,7 @@
     const suggestedCategories = suggestion.categories || [];
     renderCategoryCheckboxes(suggestedCategories);
     const unmatched = suggestedCategories.filter(
-      (c) => !existingCategories.some((e) => e.toLowerCase() === c.toLowerCase())
+      (c) => !existingCategories.some((e) => e.name.toLowerCase() === c.toLowerCase())
     );
     document.getElementById('newCategoriesInput').value = unmatched.join(', ');
     document.getElementById('tagsInput').value = (suggestion.tags || []).join(', ');

@@ -319,6 +319,66 @@ class WordPressAdapterTest {
     }
 
     @Test
+    void testListCategoriesWithParents_RESTトランスポートは親カテゴリ名を解決する() {
+        server.expect(requestTo(containsString("/wp-json/wp/v2/categories?per_page=100")))
+                .andRespond(withSuccess(
+                        "[{\"id\":1,\"name\":\"技術\",\"parent\":0},"
+                                + "{\"id\":2,\"name\":\"Java\",\"parent\":1}]",
+                        MediaType.APPLICATION_JSON));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        List<CmsAdapter.CategoryOption> options = adapter.listCategoriesWithParents(creds);
+
+        assertEquals(List.of(
+                new CmsAdapter.CategoryOption("技術", null),
+                new CmsAdapter.CategoryOption("Java", "技術")), options);
+        server.verify();
+    }
+
+    @Test
+    void testListCategoriesWithParents_SSHトランスポートはparentSlugから親カテゴリ名を解決する() {
+        CmsCredentials.WordPressCredentials creds = sshCredentials();
+        when(sshOperations.listCategories(creds)).thenReturn(List.of(
+                new WordPressSshOperations.CategoryInfo("1", "技術", "tech", null, ""),
+                new WordPressSshOperations.CategoryInfo("2", "Java", "java", "tech", "")));
+
+        List<CmsAdapter.CategoryOption> options = adapter.listCategoriesWithParents(creds);
+
+        assertEquals(List.of(
+                new CmsAdapter.CategoryOption("技術", null),
+                new CmsAdapter.CategoryOption("Java", "技術")), options);
+    }
+
+    @Test
+    void testListCategoriesWithParents_AGENTトランスポートはparentSlugから親カテゴリ名を解決する() {
+        CmsCredentials.WordPressCredentials creds = agentCredentials();
+        when(bulkManagementClient.listCategories(creds.wpSlug())).thenReturn(List.of(
+                new WordPressBulkManagementClient.CategoryInfo("技術", "tech", null, ""),
+                new WordPressBulkManagementClient.CategoryInfo("Java", "java", "tech", "")));
+
+        List<CmsAdapter.CategoryOption> options = adapter.listCategoriesWithParents(creds);
+
+        assertEquals(List.of(
+                new CmsAdapter.CategoryOption("技術", null),
+                new CmsAdapter.CategoryOption("Java", "技術")), options);
+    }
+
+    @Test
+    void testListCategoriesWithParents_取得失敗時は空リストを返す() {
+        server.expect(requestTo(containsString("/wp-json/wp/v2/categories")))
+                .andRespond(withServerError());
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        List<CmsAdapter.CategoryOption> options = adapter.listCategoriesWithParents(creds);
+
+        assertEquals(List.of(), options);
+    }
+
+    @Test
     void testDeletePost_RESTトランスポートはforceパラメータなしでDELETEする() {
         server.expect(requestTo("http://example.com/wp-json/wp/v2/posts/123"))
                 .andExpect(method(DELETE))
