@@ -1148,6 +1148,8 @@ export interface Project {
   masterEnvironment: "test" | "production";
   githubRepository: string | null;
   cssSelectorPrefix: string | null;
+  defaultNegativePrompt: string | null;
+  defaultQualityPrompt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1206,6 +1208,21 @@ export function updateProjectCssSelectorPrefix(
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cssSelectorPrefix }),
+    actor,
+  });
+}
+
+/** 画像生成時のnegative prompt/画質プロンプトのデフォルト値(issue #293)。空文字はアプリ全体のデフォルトへ戻す。 */
+export function updateProjectImageGenerationPromptDefaults(
+  id: number,
+  defaultNegativePrompt: string,
+  defaultQualityPrompt: string,
+  actor?: ActorInfo
+): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}/image-generation-prompt-defaults`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ defaultNegativePrompt, defaultQualityPrompt }),
     actor,
   });
 }

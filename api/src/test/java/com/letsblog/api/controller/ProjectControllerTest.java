@@ -101,7 +101,9 @@ class ProjectControllerTest {
     }
 
     private ProjectResponse buildResponse() {
-        return new ProjectResponse(1L, "テスト", "test", null, null, null, "test", null, null, LocalDateTime.now(), LocalDateTime.now());
+        return new ProjectResponse(
+                1L, "テスト", "test", null, null, null, "test", null, null, null, null,
+                LocalDateTime.now(), LocalDateTime.now());
     }
 
     @Test

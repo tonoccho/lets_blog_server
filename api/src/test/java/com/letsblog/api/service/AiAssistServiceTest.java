@@ -3,6 +3,7 @@ package com.letsblog.api.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.ai.BraveSearchResult;
 import com.letsblog.api.ai.ComfyUiClient;
+import com.letsblog.api.ai.ComfyUiGenerationParams;
 import com.letsblog.api.ai.ComfyUiImage;
 import com.letsblog.api.ai.GeneratedImageStorageService;
 import com.letsblog.api.ai.OllamaClient;
@@ -58,6 +59,8 @@ class AiAssistServiceTest {
     private GenerationJobRepository generationJobRepository;
     @Mock
     private WebSearchService webSearchService;
+    @Mock
+    private ProjectService projectService;
 
     private AiAssistService service;
 
@@ -65,8 +68,11 @@ class AiAssistServiceTest {
     void setUp() {
         service = new AiAssistService(ollamaClient, ollamaModelService, comfyUiClient, comfyUiModelService,
                 generatedImageStorageService, generatedImageRepository, generationJobRepository,
-                webSearchService, new ObjectMapper());
+                webSearchService, new ObjectMapper(), projectService);
 
+        lenient().when(projectService.resolveDefaultNegativePrompt(any()))
+                .thenReturn("low quality, blurry, watermark, text");
+        lenient().when(projectService.resolveDefaultQualityPrompt(any())).thenReturn("");
         lenient().when(generationJobRepository.save(any())).thenAnswer(inv -> {
             GenerationJob job = inv.getArgument(0);
             if (job.getId() == null) {
@@ -98,6 +104,38 @@ class AiAssistServiceTest {
         assertEquals("a.png", response.images().get(0).fileName());
         assertEquals("d.png", response.images().get(3).fileName());
         org.mockito.Mockito.verify(generatedImageRepository, org.mockito.Mockito.times(4)).save(any());
+    }
+
+    @Test
+    void generateImage_画質プロンプトを本文プロンプトへ付加しnegative_prompt未指定時はプロジェクト解決値を使う() {
+        when(comfyUiClient.generateImage(any())).thenReturn(
+                List.of(new ComfyUiImage("a.png", new byte[]{1}, "image/png")));
+        when(comfyUiModelService.getSelectedCheckpointOrGlobalDefault(any())).thenReturn("checkpoint.safetensors");
+        when(projectService.resolveDefaultQualityPrompt(any())).thenReturn("high quality, detailed");
+        when(projectService.resolveDefaultNegativePrompt(any())).thenReturn("worst quality");
+
+        service.generateImage(AiImageRequest.withDefaults("a cat"));
+
+        ArgumentCaptor<ComfyUiGenerationParams> captor = ArgumentCaptor.forClass(ComfyUiGenerationParams.class);
+        org.mockito.Mockito.verify(comfyUiClient).generateImage(captor.capture());
+        assertEquals("a cat, high quality, detailed", captor.getValue().prompt());
+        assertEquals("worst quality", captor.getValue().negativePrompt());
+    }
+
+    @Test
+    void generateImage_リクエストにnegative_promptがあればプロジェクト解決値より優先する() {
+        when(comfyUiClient.generateImage(any())).thenReturn(
+                List.of(new ComfyUiImage("a.png", new byte[]{1}, "image/png")));
+        when(comfyUiModelService.getSelectedCheckpointOrGlobalDefault(any())).thenReturn("checkpoint.safetensors");
+        AiImageRequest request = new AiImageRequest(
+                "a cat", "custom negative", null, null, null, null, null, null, null, null, null, null, null, null);
+
+        service.generateImage(request);
+
+        ArgumentCaptor<ComfyUiGenerationParams> captor = ArgumentCaptor.forClass(ComfyUiGenerationParams.class);
+        org.mockito.Mockito.verify(comfyUiClient).generateImage(captor.capture());
+        assertEquals("custom negative", captor.getValue().negativePrompt());
+        org.mockito.Mockito.verify(projectService, org.mockito.Mockito.never()).resolveDefaultNegativePrompt(any());
     }
 
     @Test

@@ -14,6 +14,8 @@ public record ProjectResponse(
         String masterEnvironment,
         String githubRepository,
         String cssSelectorPrefix,
+        String defaultNegativePrompt,
+        String defaultQualityPrompt,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -29,6 +31,8 @@ public record ProjectResponse(
                 project.getMasterEnvironment(),
                 project.getGithubRepository(),
                 project.getCssSelectorPrefix(),
+                project.getDefaultNegativePrompt(),
+                project.getDefaultQualityPrompt(),
                 project.getCreatedAt(),
                 project.getUpdatedAt()
         );

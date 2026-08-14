@@ -20,6 +20,7 @@ import { EnvironmentSyncPanel } from "./EnvironmentSyncPanel";
 import { BulkManagementPanel } from "./BulkManagementPanel";
 import { ProjectAiModelsPanel } from "./ProjectAiModelsPanel";
 import { ProjectAssetGenerationPanel } from "./ProjectAssetGenerationPanel";
+import { ProjectImageGenerationPromptDefaultsForm } from "./ProjectImageGenerationPromptDefaultsForm";
 import { ProjectNameForm } from "./ProjectNameForm";
 import { DeleteProjectButton } from "./DeleteProjectButton";
 import { ProjectUserManager } from "./ProjectUserManager";
@@ -140,6 +141,11 @@ export default async function ProjectDetailPage({
         <div className="space-y-6">
           <ProjectAiModelsPanel projectId={project.id} />
           <ProjectAssetGenerationPanel projectId={project.id} />
+          <ProjectImageGenerationPromptDefaultsForm
+            projectId={project.id}
+            defaultNegativePrompt={project.defaultNegativePrompt}
+            defaultQualityPrompt={project.defaultQualityPrompt}
+          />
         </div>
       ),
     },
