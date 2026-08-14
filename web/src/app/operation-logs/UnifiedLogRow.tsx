@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { formatDateTime } from "@/lib/formatDate";
+import { formatOperationLogDateTime } from "@/lib/formatDate";
 import type { UnifiedLogEntry, UnifiedLogSourceType } from "@/lib/apiClient";
 import { copyOperationTraceAction } from "./actions";
 
@@ -42,7 +42,7 @@ export function UnifiedLogRow({ entry, timezone }: { entry: UnifiedLogEntry; tim
     <div className="flex items-center justify-between gap-3 border-b border-neutral-100 dark:border-neutral-800 px-4 py-3 last:border-0">
       <div className="flex flex-1 items-center gap-3 text-sm">
         <span className="w-36 shrink-0 text-neutral-600 dark:text-neutral-400">
-          {formatDateTime(entry.createdAt, timezone)}
+          {formatOperationLogDateTime(entry.createdAt, timezone)}
         </span>
         <span className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${SOURCE_BADGE_CLASS[entry.sourceType]}`}>
           {SOURCE_LABEL[entry.sourceType]}
