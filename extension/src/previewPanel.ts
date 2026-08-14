@@ -3,12 +3,19 @@ import { buildPreviewCsp, createNonce } from './webviewSecurity';
 
 /** 拡張機能に同梱しているPrism.jsバンドル(コードブロックのシンタックスハイライト用)の配置パス。 */
 const PRISM_ASSET_PATH = ['webviews', 'vendor', 'prism', 'prism-bundle.min.js'];
+/**
+ * 拡張機能に同梱しているPrism.jsのline-numbersプラグインの配置パス。公開先WordPressテーマ(JIN:R)が
+ * コードブロックに行番号ガターを表示するため、プレビューでも同様に再現する(Issue #334)。
+ */
+const PRISM_LINE_NUMBERS_ASSET_PATH = ['webviews', 'vendor', 'prism', 'prism-line-numbers.min.js'];
 
 /**
  * 記事プレビュー用のシングルトンWebviewパネル。マスター環境サイトのCSSを<style>として埋め込み、
  * 変換済みHTMLをそのまま表示する(view-onlyで、Webviewからのメッセージは扱わない)。
  * コードブロックは公開先テーマと同様にPrism.js(拡張機能へバンドル済み、nonce付きで実行)で
- * シンタックスハイライトする。
+ * シンタックスハイライトする。公開先テーマ(JIN:R)がline-numbersプラグインで行番号ガターを
+ * 表示しているため、プレビューでも同プラグインを読み込み、コードブロックの`<pre>`へ
+ * `line-numbers`クラスを付与して再現する(Issue #334)。
  */
 export class PreviewPanel {
   /** 開いているプレビューパネル。プレビューは常に1枚に保つ。 */
@@ -118,6 +125,9 @@ export class PreviewPanel {
     const prismUri = this._panel.webview.asWebviewUri(
       vscode.Uri.joinPath(this._extensionUri, ...PRISM_ASSET_PATH)
     );
+    const prismLineNumbersUri = this._panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(this._extensionUri, ...PRISM_LINE_NUMBERS_ASSET_PATH)
+    );
     return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -136,7 +146,11 @@ ${eyecatchBlock}
 ${html}
 </main>
 <script nonce="${nonce}" src="${prismUri}"></script>
-<script nonce="${nonce}">Prism.highlightAll();</script>
+<script nonce="${nonce}" src="${prismLineNumbersUri}"></script>
+<script nonce="${nonce}">
+document.querySelectorAll('pre > code').forEach((code) => code.parentElement.classList.add('line-numbers'));
+Prism.highlightAll();
+</script>
 </body>
 </html>`;
   }
