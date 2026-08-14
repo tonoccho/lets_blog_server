@@ -100,6 +100,7 @@ app:
   default-quality-prompt: ${DEFAULT_QUALITY_PROMPT:high quality, highly detailed, sharp focus, masterpiece}
   default-generated-image-width: ${DEFAULT_GENERATED_IMAGE_WIDTH:1920}
   default-generated-image-height: ${DEFAULT_GENERATED_IMAGE_HEIGHT:1080}
+  default-article-image-long-edge-px: ${DEFAULT_ARTICLE_IMAGE_LONG_EDGE_PX:1300}
 
 resilience4j:
   ratelimiter:

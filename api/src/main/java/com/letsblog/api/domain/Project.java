@@ -70,6 +70,13 @@ public class Project {
     @Column(name = "default_generated_image_height")
     private Integer defaultGeneratedImageHeight;
 
+    /**
+     * 記事投稿時に本文/アイキャッチ画像をリサイズする長編の目標px(issue #291)。未設定時は
+     * アプリ全体のデフォルト(既定1300)にフォールバックする(ProjectService#resolveArticleImageLongEdgePx)。
+     */
+    @Column(name = "default_article_image_long_edge_px")
+    private Integer defaultArticleImageLongEdgePx;
+
     @Column(name = "ollama_model", length = 255)
     private String ollamaModel;
 

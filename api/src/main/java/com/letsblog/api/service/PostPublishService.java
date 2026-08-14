@@ -65,6 +65,7 @@ public class PostPublishService {
     private final UserRepository userRepository;
     private final UserSiteAuthorRepository userSiteAuthorRepository;
     private final ObjectMapper objectMapper;
+    private final ImageResizeService imageResizeService;
 
     public PostPublishService(SiteService siteService, CmsAdapterFactory cmsAdapterFactory,
                                MarkdownRenderer markdownRenderer, PostRepository postRepository,
@@ -79,7 +80,8 @@ public class PostPublishService {
                                CurrentActorService currentActorService,
                                UserRepository userRepository,
                                UserSiteAuthorRepository userSiteAuthorRepository,
-                               ObjectMapper objectMapper) {
+                               ObjectMapper objectMapper,
+                               ImageResizeService imageResizeService) {
         this.siteService = siteService;
         this.cmsAdapterFactory = cmsAdapterFactory;
         this.markdownRenderer = markdownRenderer;
@@ -96,6 +98,7 @@ public class PostPublishService {
         this.userRepository = userRepository;
         this.userSiteAuthorRepository = userSiteAuthorRepository;
         this.objectMapper = objectMapper;
+        this.imageResizeService = imageResizeService;
     }
 
     @AuditLog(action = AuditLogAction.POST_PUBLISHED, resourceType = "POST")
@@ -116,7 +119,7 @@ public class PostPublishService {
         Map<String, UploadedImageInfo> priorUploads = loadPriorUploadedImages(site.getId(), command.wpPostId());
         ImageReplacementResult imageResult = replaceImageReferences(
                 cmsAdapter, credentials, markdown, command.images(), command.imageReferences(),
-                command.slug(), command.title(), command.featuredImageFilename(), priorUploads);
+                command.slug(), command.title(), command.featuredImageFilename(), priorUploads, projectId);
         String html = markdownRenderer.render(imageResult.markdown());
         html = tocStyleRenderService.applyHtmlTemplate(html, projectId);
         html = renderedContentWrapperService.wrap(html, projectId);
@@ -233,7 +236,7 @@ public class PostPublishService {
     private ImageReplacementResult replaceImageReferences(
             CmsAdapter cmsAdapter, CmsCredentials credentials, String markdown, List<MultipartFile> images,
             List<String> imageReferences, String slug, String title, String featuredImageFilename,
-            Map<String, UploadedImageInfo> priorUploads) {
+            Map<String, UploadedImageInfo> priorUploads, Long projectId) {
         Map<String, UploadedImageInfo> updatedUploads = new LinkedHashMap<>(priorUploads);
         log.info("アイキャッチ解決開始: featuredImageFilename={}, images={}件, imageReferences={}",
                 featuredImageFilename, images == null ? 0 : images.size(), imageReferences);
@@ -249,6 +252,7 @@ public class PostPublishService {
         String rewritten = markdown;
         Map<String, String> referenceToUrl = new LinkedHashMap<>();
         String featuredMediaId = null;
+        int articleImageLongEdgePx = projectService.resolveArticleImageLongEdgePx(projectId);
 
         for (int i = 0; i < images.size(); i++) {
             MultipartFile image = images.get(i);
@@ -262,7 +266,10 @@ public class PostPublishService {
                 continue;
             }
             try {
-                byte[] bytes = image.getBytes();
+                // アップロード前に長編基準でリサイズする(issue #291)。sha256計算より前に行うことで、
+                // 前回投稿時と同じリサイズ結果であれば再アップロードをスキップする再利用判定が働く。
+                byte[] bytes = imageResizeService.resizeToLongEdge(
+                        image.getBytes(), image.getContentType(), articleImageLongEdgePx);
                 String sha256 = sha256Hex(bytes);
                 UploadedImageInfo prior = priorUploads.get(reference);
                 UploadedImageInfo current;

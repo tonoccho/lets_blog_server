@@ -9,6 +9,7 @@ import {
   updateProjectGithubRepository,
   updateProjectImageGenerationPromptDefaults,
   updateProjectImageGenerationSizeDefaults,
+  updateProjectArticleImageResizeDefault,
   setProjectGithubToken,
   clearProjectGithubToken,
   setProjectBraveSearchApiKey,
@@ -238,6 +239,32 @@ export async function updateImageGenerationSizeDefaultsAction(
   try {
     await updateProjectImageGenerationSizeDefaults(
       projectId, defaultGeneratedImageWidth, defaultGeneratedImageHeight, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  return { success: true };
+}
+
+export interface UpdateArticleImageResizeDefaultState {
+  error?: string;
+  success?: boolean;
+}
+
+export async function updateArticleImageResizeDefaultAction(
+  projectId: number,
+  _prevState: UpdateArticleImageResizeDefaultState,
+  formData: FormData
+): Promise<UpdateArticleImageResizeDefaultState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const raw = String(formData.get("defaultArticleImageLongEdgePx") ?? "").trim();
+  const defaultArticleImageLongEdgePx = raw ? Number(raw) : null;
+
+  try {
+    await updateProjectArticleImageResizeDefault(projectId, defaultArticleImageLongEdgePx, actor);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

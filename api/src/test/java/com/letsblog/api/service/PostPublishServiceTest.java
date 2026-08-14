@@ -23,6 +23,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.multipart.MultipartFile;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.util.List;
 import java.util.Optional;
 
@@ -87,7 +91,7 @@ class PostPublishServiceTest {
                 plantUmlEmbedService, customTagRenderService, blogCardTagRenderService, amazonTagRenderService,
                 rechartsTagRenderService, tocStyleRenderService, renderedContentWrapperService, projectService,
                 currentActorService, userRepository, userSiteAuthorRepository,
-                new com.fasterxml.jackson.databind.ObjectMapper());
+                new com.fasterxml.jackson.databind.ObjectMapper(), new ImageResizeService());
 
         Site site = new Site();
         site.setId(1L);
@@ -358,6 +362,57 @@ class PostPublishServiceTest {
         ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
         verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
         assertNull(contentCaptor.getValue().authorId());
+    }
+
+    @Test
+    void publish_長編が閾値を超える画像はリサイズしてからアップロードする() throws Exception {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("1", "https://example.com/?p=1", "draft"));
+        ArgumentCaptor<byte[]> bytesCaptor = ArgumentCaptor.forClass(byte[].class);
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), bytesCaptor.capture()))
+                .thenReturn(new MediaUploadResult("1", "https://example.com/wp-content/uploads/1.png"));
+        when(projectService.resolveArticleImageLongEdgePx(any())).thenReturn(100);
+
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "eyecatch.png", "image/png", renderPng(400, 200)));
+        PostPublishCommand command = new PostPublishCommand(
+                "main", "My Article", "my-article", "draft", List.of(), List.of(), null, "本文", images, null,
+                List.of("assets/eyecatch.png"), null);
+
+        service.publish(command);
+
+        BufferedImage uploaded = ImageIO.read(new ByteArrayInputStream(bytesCaptor.getValue()));
+        assertEquals(100, uploaded.getWidth());
+        assertEquals(50, uploaded.getHeight());
+    }
+
+    @Test
+    void publish_長編が閾値以下の画像はリサイズしない() throws Exception {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("1", "https://example.com/?p=1", "draft"));
+        ArgumentCaptor<byte[]> bytesCaptor = ArgumentCaptor.forClass(byte[].class);
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), bytesCaptor.capture()))
+                .thenReturn(new MediaUploadResult("1", "https://example.com/wp-content/uploads/1.png"));
+        when(projectService.resolveArticleImageLongEdgePx(any())).thenReturn(1300);
+
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "eyecatch.png", "image/png", renderPng(400, 200)));
+        PostPublishCommand command = new PostPublishCommand(
+                "main", "My Article", "my-article", "draft", List.of(), List.of(), null, "本文", images, null,
+                List.of("assets/eyecatch.png"), null);
+
+        service.publish(command);
+
+        BufferedImage uploaded = ImageIO.read(new ByteArrayInputStream(bytesCaptor.getValue()));
+        assertEquals(400, uploaded.getWidth());
+        assertEquals(200, uploaded.getHeight());
+    }
+
+    private byte[] renderPng(int width, int height) throws Exception {
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ImageIO.write(image, "png", out);
+        return out.toByteArray();
     }
 
     private String sha256Hex(byte[] data) throws Exception {

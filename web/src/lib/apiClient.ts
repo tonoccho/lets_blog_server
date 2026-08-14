@@ -1154,6 +1154,7 @@ export interface Project {
   defaultQualityPrompt: string | null;
   defaultGeneratedImageWidth: number | null;
   defaultGeneratedImageHeight: number | null;
+  defaultArticleImageLongEdgePx: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1242,6 +1243,20 @@ export function updateProjectImageGenerationSizeDefaults(
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ defaultGeneratedImageWidth, defaultGeneratedImageHeight }),
+    actor,
+  });
+}
+
+/** 記事投稿時に画像をリサイズする長編の目標px(issue #291)。nullはアプリ全体のデフォルト(1300px)へ戻す。 */
+export function updateProjectArticleImageResizeDefault(
+  id: number,
+  defaultArticleImageLongEdgePx: number | null,
+  actor?: ActorInfo
+): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}/article-image-resize-default`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ defaultArticleImageLongEdgePx }),
     actor,
   });
 }

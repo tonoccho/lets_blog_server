@@ -18,6 +18,7 @@ public record ProjectResponse(
         String defaultQualityPrompt,
         Integer defaultGeneratedImageWidth,
         Integer defaultGeneratedImageHeight,
+        Integer defaultArticleImageLongEdgePx,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -37,6 +38,7 @@ public record ProjectResponse(
                 project.getDefaultQualityPrompt(),
                 project.getDefaultGeneratedImageWidth(),
                 project.getDefaultGeneratedImageHeight(),
+                project.getDefaultArticleImageLongEdgePx(),
                 project.getCreatedAt(),
                 project.getUpdatedAt()
         );

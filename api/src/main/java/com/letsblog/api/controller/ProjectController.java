@@ -5,6 +5,7 @@ import com.letsblog.api.dto.ApplyToEnvironmentRequest;
 import com.letsblog.api.dto.BulkOperationLogResponse;
 import com.letsblog.api.dto.DeleteSlugRequest;
 import com.letsblog.api.dto.EditTermRequest;
+import com.letsblog.api.dto.UpdateArticleImageResizeDefaultRequest;
 import com.letsblog.api.dto.ProjectCreateRequest;
 import com.letsblog.api.dto.ProjectEnvironmentBindRequest;
 import com.letsblog.api.dto.ProjectResponse;
@@ -169,6 +170,14 @@ public class ProjectController {
             @PathVariable Long id, @Valid @RequestBody UpdateImageGenerationSizeDefaultsRequest request) {
         adminAuthorizationService.requireAdmin();
         return projectService.updateImageGenerationSizeDefaults(id, request);
+    }
+
+    /** issue #291: 記事投稿時に画像をリサイズする長編の目標px。 */
+    @PutMapping("/{id}/article-image-resize-default")
+    public ProjectResponse updateArticleImageResizeDefault(
+            @PathVariable Long id, @Valid @RequestBody UpdateArticleImageResizeDefaultRequest request) {
+        adminAuthorizationService.requireAdmin();
+        return projectService.updateArticleImageResizeDefault(id, request);
     }
 
     @PostMapping("/{id}/environments/sync")
