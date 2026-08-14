@@ -21,6 +21,7 @@ import { SectionGenPanel } from './sectionGenPanel';
 import { resolveSectionContext } from './headingContext';
 import { logger } from './logger';
 import { messageOf, reportError } from './errorHandler';
+import { buildSmartCardTag, buildStandardLink, parseHttpUrl } from './urlPaste';
 
 /**
  * 拡張の有効化。ロガーの初期化と全コマンドの登録を行う。
@@ -55,7 +56,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.selectProject', () => commandSelectProject(context)),
     vscode.commands.registerCommand('letsBlog.planArticle', () => commandPlanArticle(context)),
     vscode.commands.registerCommand('letsBlog.previewArticle', () => commandPreviewArticle(context)),
-    vscode.commands.registerCommand('letsBlog.previewDevTools', () => PreviewPanel.openDevTools())
+    vscode.commands.registerCommand('letsBlog.previewDevTools', () => PreviewPanel.openDevTools()),
+    vscode.commands.registerCommand('letsBlog.pasteSmartCard', () => commandPasteSmartCard(context)),
+    vscode.commands.registerCommand('letsBlog.pasteAsLink', () => commandPasteAsLink(context))
   );
 }
 
@@ -92,6 +95,87 @@ async function replaceDocumentText(editor: vscode.TextEditor, newText: string): 
   );
   await editor.edit((builder) => builder.replace(fullRange, newText));
   await editor.document.save();
+}
+
+/** カーソル位置(または選択範囲)をtextで置き換える。通常の貼り付けと同様の挙動。 */
+async function insertTextAtSelection(editor: vscode.TextEditor, text: string): Promise<void> {
+  await editor.edit((builder) => {
+    if (editor.selection.isEmpty) {
+      builder.insert(editor.selection.active, text);
+    } else {
+      builder.replace(editor.selection, text);
+    }
+  });
+}
+
+/**
+ * [blogcard]/[amazon]組み込みタグのレンダリング時に再スクレイピングが発生しないよう、
+ * URLペースト時点でcontent-cache APIを先行呼び出ししてキャッシュを温めておく(Issue #339)。
+ * 挿入するタグ自体はこの結果を使わないため、失敗してもタグの挿入をやり直す必要はない
+ * (プレビュー/投稿時に改めて取得される)。
+ */
+async function warmContentCache(context: vscode.ExtensionContext, url: string): Promise<void> {
+  try {
+    const apiKey = await requireApiKey(context);
+    const actor = await getActor(context);
+    await api.resolveContentCache(getServerUrl(), apiKey, actor, url);
+  } catch (err) {
+    logger.debug(`貼り付け時のキャッシュ先行取得に失敗しました(プレビュー/投稿時に再取得されます): ${messageOf(err)}`);
+  }
+}
+
+/**
+ * Ctrl+Shift+V: クリップボードがURLの場合、そのURLに応じて[blogcard]/[amazon]組み込みタグを
+ * 挿入する。タグ自体はURLの種別だけで即座に組み立てられるため、実際の情報取得(タイトル・価格等)は
+ * 待たずにバックグラウンドでキャッシュを温めるだけに留める。URL以外の通常の貼り付けは
+ * 既定の動作にフォールバックする。
+ */
+async function commandPasteSmartCard(context: vscode.ExtensionContext): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  const clipboardText = await vscode.env.clipboard.readText();
+  const url = parseHttpUrl(clipboardText);
+  if (!url) {
+    await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
+    return;
+  }
+
+  await insertTextAtSelection(editor, buildSmartCardTag(url));
+  void warmContentCache(context, url.toString());
+}
+
+/**
+ * Ctrl+V: クリップボードがURLの場合、通常のMarkdownリンク`[Title | サイト名](URL)`として挿入する。
+ * タイトル・サイト名を埋め込む必要があるため、content-cache APIの応答を待ってから挿入する
+ * (これ自体がレンダリング時ではなく貼り付け時点での情報取得になる)。取得に失敗した場合は
+ * URLそのものを貼り付ける。URL以外の通常の貼り付けは既定の動作にフォールバックする。
+ */
+async function commandPasteAsLink(context: vscode.ExtensionContext): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  const clipboardText = await vscode.env.clipboard.readText();
+  const url = parseHttpUrl(clipboardText);
+  if (!url) {
+    await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
+    return;
+  }
+
+  try {
+    const apiKey = await requireApiKey(context);
+    const actor = await getActor(context);
+    const result = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'URLの情報を取得しています…' },
+      () => api.resolveContentCache(getServerUrl(), apiKey, actor, url.toString())
+    );
+    const title = result.type === 'AMAZON' ? result.data.productName : result.data.title;
+    const siteName = result.type === 'AMAZON' ? undefined : result.data.siteName;
+    await insertTextAtSelection(editor, buildStandardLink(url, title ?? undefined, siteName ?? undefined));
+  } catch (err) {
+    logger.debug(`URL情報の取得に失敗したため、URLそのものを貼り付けます: ${messageOf(err)}`);
+    await insertTextAtSelection(editor, url.toString());
+  }
 }
 
 /**

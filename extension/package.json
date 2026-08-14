@@ -79,6 +79,28 @@
       {
         "command": "letsBlog.imageGallery",
         "title": "Let's Blog: Image Gallery"
+      },
+      {
+        "command": "letsBlog.pasteSmartCard",
+        "title": "Let's Blog: Paste as Smart Card (Blog Card / Amazon)"
+      },
+      {
+        "command": "letsBlog.pasteAsLink",
+        "title": "Let's Blog: Paste as Link"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "letsBlog.pasteSmartCard",
+        "key": "ctrl+shift+v",
+        "mac": "cmd+shift+v",
+        "when": "editorTextFocus && !editorReadonly && resourceLangId == markdown"
+      },
+      {
+        "command": "letsBlog.pasteAsLink",
+        "key": "ctrl+v",
+        "mac": "cmd+v",
+        "when": "editorTextFocus && !editorReadonly && resourceLangId == markdown"
       }
     ],
     "menus": {

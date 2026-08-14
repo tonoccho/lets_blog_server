@@ -224,6 +224,7 @@ import type {
   AiSectionResult,
   AiTagsResult,
   AssignIssueResult,
+  ContentCacheResult,
   ImageGenerationOptions,
   LoginResult,
   PlanChatResult,
@@ -248,6 +249,7 @@ export type {
   AiSectionResult,
   AiTagsResult,
   AssignIssueResult,
+  ContentCacheResult,
   ImageGenerationOptions,
   LoginResult,
   PlanChatResult,
@@ -828,6 +830,26 @@ export async function getThemeCss(
     `/api/projects/${projectId}/preview/theme-css${query}`,
     { label: 'getThemeCss', headers: buildHeaders(apiKey, actor) },
     schemas.ThemeCssResultSchema
+  );
+}
+
+/**
+ * URLのOGP情報(ブログカード用)またはAmazon商品情報を取得する。[blogcard]/[amazon]組み込みタグの
+ * レンダリング時に使われるキャッシュと同一のもので、ここで呼んでおくとレンダリング時には
+ * 既にキャッシュ済みとなり再スクレイピングが発生しない(Issue #339: URLペースト時の先行取得)。
+ * 変換結果を返すだけでサーバー状態を変えないため、再試行して差し支えない。
+ */
+export async function resolveContentCache(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  url: string
+): Promise<schemas.ContentCacheResult> {
+  return requestJson(
+    serverUrl,
+    `/api/content-cache?url=${encodeURIComponent(url)}`,
+    { label: 'resolveContentCache', headers: buildHeaders(apiKey, actor), retryable: true },
+    schemas.ContentCacheResultSchema
   );
 }
 

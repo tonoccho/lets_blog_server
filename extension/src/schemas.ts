@@ -168,6 +168,18 @@ export const ThemeCssResultSchema = z.object({
 });
 export type ThemeCssResult = z.infer<typeof ThemeCssResultSchema>;
 
+/**
+ * URLペースト時のカード形式判定・組み込みタグ用情報取得API(/api/content-cache)のレスポンス。
+ * dataはtypeに応じてキーが異なる(BLOGCARD: title/description/imageUrl/siteName/url,
+ * AMAZON: productName/imageUrl/price/productUrl)。取得できなかった項目はnullになりうる。
+ */
+export const ContentCacheResultSchema = z.object({
+  url: z.string(),
+  type: z.enum(['BLOGCARD', 'AMAZON']),
+  data: z.record(z.string(), z.string().nullable()),
+});
+export type ContentCacheResult = z.infer<typeof ContentCacheResultSchema>;
+
 /** 記事構成の取得元となるIssue本文。未設定のIssueでは空文字が返る。 */
 export const IssueDescriptionSchema = z.object({
   body: z.string().nullish(),
