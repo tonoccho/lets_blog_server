@@ -430,6 +430,25 @@ public class ArticlePlanService {
         }
     }
 
+    /**
+     * プロジェクトのマスター環境サイトに既に存在するカテゴリ一覧を、親カテゴリ名付きで取得する。
+     * VSCode拡張の記事作成画面で、子カテゴリ選択時に親カテゴリを自動選択するために使う(issue #289)。
+     */
+    public List<CmsAdapter.CategoryOption> listExistingCategoriesWithParents(Long projectId) {
+        try {
+            Project project = projectService.getProjectEntity(projectId);
+            Site site = projectService.resolveMasterSite(project);
+            if (site == null) {
+                return List.of();
+            }
+            CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
+            CmsAdapter cmsAdapter = cmsAdapterFactory.resolve(credentials.cmsType());
+            return cmsAdapter.listCategoriesWithParents(credentials);
+        } catch (RuntimeException e) {
+            return List.of();
+        }
+    }
+
     private SuggestMetadataResponse filterToExistingCategories(
             SuggestMetadataResponse response, List<String> existingCategories) {
         List<String> filtered = response.categories().stream()

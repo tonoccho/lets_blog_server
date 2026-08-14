@@ -79,7 +79,7 @@ export class ArticleCreationPanel extends WebviewPanelBase<
       throw new Error('ログインしていません。「Let\'s Blog: Login」を先に実行してください。');
     }
     try {
-      const categories = await api.listExistingCategories(
+      const categories = await api.listExistingCategoriesWithParents(
         getServerUrl(),
         apiKey,
         actor,

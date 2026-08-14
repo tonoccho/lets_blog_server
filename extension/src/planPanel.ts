@@ -143,7 +143,7 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
 
   private async _handleLoadCategories(): Promise<void> {
     const { apiKey, actor, projectId } = await this._requireContext();
-    const categories = await api.listExistingCategories(getServerUrl(), apiKey, actor, projectId);
+    const categories = await api.listExistingCategoriesWithParents(getServerUrl(), apiKey, actor, projectId);
     this.postMessage('categoryList', { categories });
   }
 

@@ -658,6 +658,25 @@ export async function listExistingCategories(
 }
 
 /**
+ * プロジェクトのマスター環境サイトに既に存在するカテゴリ一覧を、親カテゴリ名付きで取得する。
+ * 子カテゴリ選択時に親カテゴリを自動選択するUIのために使う(issue #289)。
+ */
+export async function listExistingCategoriesWithParents(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor,
+  projectId: number
+): Promise<schemas.CategoryOption[]> {
+  return cachedRequestJson(
+    `project:${projectId}:categories:hierarchy`,
+    serverUrl,
+    `/api/projects/${projectId}/article-plan/categories/hierarchy`,
+    { label: 'listExistingCategoriesWithParents', headers: buildHeaders(apiKey, actor) },
+    schemas.CategoryOptionListSchema
+  );
+}
+
+/**
  * チャット履歴からタイトル/スラッグ/カテゴリ/タグの候補を提案させる。
  * @param signal 利用者によるキャンセル用。
  */

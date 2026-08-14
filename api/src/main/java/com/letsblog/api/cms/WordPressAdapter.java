@@ -20,8 +20,11 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * WordPress REST API(wp-json/wp/v2)を利用したCmsAdapter実装。
@@ -453,6 +456,53 @@ public class WordPressAdapter implements CmsAdapter {
             return names;
         } catch (RuntimeException e) {
             log.warn("カテゴリ一覧の取得に失敗しました: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    @Override
+    public List<CategoryOption> listCategoriesWithParents(CmsCredentials credentials) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        try {
+            if (creds.isSsh()) {
+                List<WordPressSshOperations.CategoryInfo> categories = sshOperations.listCategories(creds);
+                Map<String, String> nameBySlug = categories.stream()
+                        .collect(Collectors.toMap(WordPressSshOperations.CategoryInfo::slug,
+                                WordPressSshOperations.CategoryInfo::name, (a, b) -> a));
+                return categories.stream()
+                        .map(c -> new CategoryOption(c.name(), c.parentSlug() != null ? nameBySlug.get(c.parentSlug()) : null))
+                        .toList();
+            }
+            if (creds.isAgent()) {
+                List<WordPressBulkManagementClient.CategoryInfo> categories =
+                        bulkManagementClient.listCategories(creds.wpSlug());
+                Map<String, String> nameBySlug = categories.stream()
+                        .collect(Collectors.toMap(WordPressBulkManagementClient.CategoryInfo::slug,
+                                WordPressBulkManagementClient.CategoryInfo::name, (a, b) -> a));
+                return categories.stream()
+                        .map(c -> new CategoryOption(c.name(), c.parentSlug() != null ? nameBySlug.get(c.parentSlug()) : null))
+                        .toList();
+            }
+            RestClient client = buildClient(creds);
+            JsonNode response = client.get()
+                    .uri(uriBuilder -> uriBuilder.path("/wp-json/wp/v2/categories").queryParam("per_page", 100).build())
+                    .retrieve()
+                    .body(JsonNode.class);
+            List<CategoryOption> options = new ArrayList<>();
+            if (response != null) {
+                Map<String, String> nameById = new HashMap<>();
+                for (JsonNode item : response) {
+                    nameById.put(item.path("id").asText(), item.path("name").asText(""));
+                }
+                for (JsonNode item : response) {
+                    String parentId = item.path("parent").asText("0");
+                    String parentName = !"0".equals(parentId) ? nameById.get(parentId) : null;
+                    options.add(new CategoryOption(item.path("name").asText(""), parentName));
+                }
+            }
+            return options;
+        } catch (RuntimeException e) {
+            log.warn("カテゴリ一覧(親子関係付き)の取得に失敗しました: {}", e.getMessage());
             return List.of();
         }
     }

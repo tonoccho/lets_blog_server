@@ -66,6 +66,15 @@
     post('loadCategories', { projectId: projectId });
   }
 
+  /** カテゴリ名(小文字)から{name, parentName}を探す。 */
+  function findCategoryOption(name) {
+    return existingCategories.find(function (o) { return o.name.toLowerCase() === name.toLowerCase(); });
+  }
+
+  /**
+   * カテゴリ一覧を{name, parentName}のオブジェクト配列として描画する。
+   * 子カテゴリのチェックボックスは、存在すれば親カテゴリも辿って自動的にチェックする(issue #289)。
+   */
   function renderCategories(categories, selected) {
     existingCategories = categories || [];
     const container = document.getElementById('categoryCheckboxes');
@@ -77,18 +86,43 @@
       container.appendChild(hint);
       return;
     }
-    existingCategories.forEach(function (name, index) {
+    const checkboxesByName = {};
+    existingCategories.forEach(function (option, index) {
       const id = 'category-' + index;
       const label = document.createElement('label');
+      if (option.parentName) {
+        label.style.paddingLeft = '1.25em';
+      }
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.id = id;
-      checkbox.value = name;
-      checkbox.checked = (selected || []).some(function (s) { return s.toLowerCase() === name.toLowerCase(); });
+      checkbox.value = option.name;
+      checkbox.checked = (selected || []).some(function (s) { return s.toLowerCase() === option.name.toLowerCase(); });
       label.setAttribute('for', id);
       label.appendChild(checkbox);
-      label.appendChild(document.createTextNode(' ' + name));
+      label.appendChild(document.createTextNode(' ' + option.name));
       container.appendChild(label);
+      checkboxesByName[option.name.toLowerCase()] = checkbox;
+    });
+
+    function selectAncestors(name) {
+      let current = findCategoryOption(name);
+      let guard = 0;
+      while (current && current.parentName && guard < 20) {
+        const parentCheckbox = checkboxesByName[current.parentName.toLowerCase()];
+        if (parentCheckbox) parentCheckbox.checked = true;
+        current = findCategoryOption(current.parentName);
+        guard++;
+      }
+    }
+
+    existingCategories.forEach(function (option) {
+      const checkbox = checkboxesByName[option.name.toLowerCase()];
+      if (!checkbox) return;
+      if (checkbox.checked) selectAncestors(option.name);
+      checkbox.addEventListener('change', function () {
+        if (checkbox.checked) selectAncestors(option.name);
+      });
     });
   }
 
@@ -205,7 +239,7 @@
     const suggestedCategories = suggestion.categories || [];
     renderCategories(existingCategories, suggestedCategories);
     const unmatched = suggestedCategories.filter(function (c) {
-      return !existingCategories.some(function (e) { return e.toLowerCase() === c.toLowerCase(); });
+      return !existingCategories.some(function (e) { return e.name.toLowerCase() === c.toLowerCase(); });
     });
     document.getElementById('newCategoriesInput').value = unmatched.join(', ');
     document.getElementById('tagsInput').value = (suggestion.tags || []).join(', ');

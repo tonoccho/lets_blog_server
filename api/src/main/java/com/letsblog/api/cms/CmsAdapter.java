@@ -98,6 +98,21 @@ public interface CmsAdapter {
     }
 
     /**
+     * 既存カテゴリを親カテゴリ名付きで取得する(読み取り専用、新規作成は行わない)。
+     * VSCode拡張の記事作成画面で、子カテゴリ選択時に親カテゴリを自動選択するために使う(issue #289)。
+     * 親子関係を持たない、または取得できない場合は各カテゴリのparentNameをnullにして返す。
+     */
+    default List<CategoryOption> listCategoriesWithParents(CmsCredentials credentials) {
+        return listCategoryNames(credentials).stream().map(name -> new CategoryOption(name, null)).toList();
+    }
+
+    /**
+     * 親カテゴリ付きのカテゴリ一覧項目。parentNameは親カテゴリが無ければnull。
+     */
+    record CategoryOption(String name, String parentName) {
+    }
+
+    /**
      * 投稿(post)または固定ページ(page)の一覧を取得する(読み取り専用。プロジェクト管理画面の
      * ポスト/ページ管理タブで環境間比較に使う)。対応しないCMSはUnsupportedOperationExceptionを投げる。
      */
