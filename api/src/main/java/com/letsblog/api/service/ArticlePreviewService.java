@@ -16,6 +16,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.util.HtmlUtils;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -60,6 +61,7 @@ public class ArticlePreviewService {
     private final CustomTagRenderService customTagRenderService;
     private final BlogCardTagRenderService blogCardTagRenderService;
     private final AmazonTagRenderService amazonTagRenderService;
+    private final RechartsTagRenderService rechartsTagRenderService;
     private final TocStyleRenderService tocStyleRenderService;
     private final RenderedContentWrapperService renderedContentWrapperService;
     private final MarkdownRenderer markdownRenderer;
@@ -73,6 +75,7 @@ public class ArticlePreviewService {
             CustomTagRenderService customTagRenderService,
             BlogCardTagRenderService blogCardTagRenderService,
             AmazonTagRenderService amazonTagRenderService,
+            RechartsTagRenderService rechartsTagRenderService,
             TocStyleRenderService tocStyleRenderService,
             RenderedContentWrapperService renderedContentWrapperService,
             MarkdownRenderer markdownRenderer,
@@ -84,6 +87,7 @@ public class ArticlePreviewService {
         this.customTagRenderService = customTagRenderService;
         this.blogCardTagRenderService = blogCardTagRenderService;
         this.amazonTagRenderService = amazonTagRenderService;
+        this.rechartsTagRenderService = rechartsTagRenderService;
         this.tocStyleRenderService = tocStyleRenderService;
         this.renderedContentWrapperService = renderedContentWrapperService;
         this.markdownRenderer = markdownRenderer;
@@ -98,14 +102,28 @@ public class ArticlePreviewService {
      * カスタムタグ展開 + 組み込みタグ展開 + Markdown→HTML変換を行う。PostPublishServiceと違い、
      * PlantUML埋め込みや画像アップロードは行わない(プレビュー用の軽量処理。ローカル画像やPlantUML図は
      * VSCode拡張側の責務)。
+     *
+     * [recharts]タグの記法・データが不正な場合、他の組み込みタグと異なりInvalidRechartsTagExceptionを
+     * 捕捉し、以降のレンダリングを中止してエラーメッセージのみを表示する(Issue #340)。
      */
     public String renderHtml(Long projectId, String markdown) {
         String rendered = customTagRenderService.render(markdown, projectId);
         rendered = blogCardTagRenderService.render(rendered, projectId);
         rendered = amazonTagRenderService.render(rendered, projectId);
+        try {
+            rendered = rechartsTagRenderService.render(rendered);
+        } catch (InvalidRechartsTagException e) {
+            return renderRechartsError(e.getMessage());
+        }
         String html = markdownRenderer.render(rendered);
         html = tocStyleRenderService.applyHtmlTemplate(html, projectId);
         return renderedContentWrapperService.wrap(html, projectId);
+    }
+
+    private String renderRechartsError(String message) {
+        return "<div role=\"alert\" style=\"background:#f8d7da;color:#842029;padding:12px 16px;"
+                + "border-radius:4px;font-family:sans-serif;font-size:14px;\">"
+                + "<strong>チャートのレンダリングエラー:</strong> " + HtmlUtils.htmlEscape(message) + "</div>";
     }
 
     /**

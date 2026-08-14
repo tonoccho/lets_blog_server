@@ -57,6 +57,7 @@ public class PostPublishService {
     private final CustomTagRenderService customTagRenderService;
     private final BlogCardTagRenderService blogCardTagRenderService;
     private final AmazonTagRenderService amazonTagRenderService;
+    private final RechartsTagRenderService rechartsTagRenderService;
     private final TocStyleRenderService tocStyleRenderService;
     private final RenderedContentWrapperService renderedContentWrapperService;
     private final ProjectService projectService;
@@ -71,6 +72,7 @@ public class PostPublishService {
                                CustomTagRenderService customTagRenderService,
                                BlogCardTagRenderService blogCardTagRenderService,
                                AmazonTagRenderService amazonTagRenderService,
+                               RechartsTagRenderService rechartsTagRenderService,
                                TocStyleRenderService tocStyleRenderService,
                                RenderedContentWrapperService renderedContentWrapperService,
                                ProjectService projectService,
@@ -86,6 +88,7 @@ public class PostPublishService {
         this.customTagRenderService = customTagRenderService;
         this.blogCardTagRenderService = blogCardTagRenderService;
         this.amazonTagRenderService = amazonTagRenderService;
+        this.rechartsTagRenderService = rechartsTagRenderService;
         this.tocStyleRenderService = tocStyleRenderService;
         this.renderedContentWrapperService = renderedContentWrapperService;
         this.projectService = projectService;
@@ -106,6 +109,9 @@ public class PostPublishService {
         String markdown = customTagRenderService.render(command.markdown(), projectId);
         markdown = blogCardTagRenderService.render(markdown, projectId);
         markdown = amazonTagRenderService.render(markdown, projectId);
+        // [recharts]タグの記法・データが不正な場合はInvalidRechartsTagExceptionを未捕捉のまま伝播させ、
+        // GlobalExceptionHandlerが400として返すことで投稿自体を拒否する(Issue #340)。
+        markdown = rechartsTagRenderService.render(markdown);
         markdown = plantUmlEmbedService.embedDiagrams(credentials, markdown);
         Map<String, UploadedImageInfo> priorUploads = loadPriorUploadedImages(site.getId(), command.wpPostId());
         ImageReplacementResult imageResult = replaceImageReferences(

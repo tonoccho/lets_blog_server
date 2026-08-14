@@ -15,6 +15,7 @@ import com.letsblog.api.service.GeneratedImageNotFoundException;
 import com.letsblog.api.service.GenerationJobNotFoundException;
 import com.letsblog.api.service.InvalidCredentialsException;
 import com.letsblog.api.service.InvalidCustomTagContentException;
+import com.letsblog.api.service.InvalidRechartsTagException;
 import com.letsblog.api.service.InvalidRoleException;
 import com.letsblog.api.service.InvalidTokenException;
 import com.letsblog.api.service.InvalidTotpCodeException;
@@ -112,6 +113,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(InvalidCustomTagContentException.class)
     public ResponseEntity<Map<String, String>> handleInvalidCustomTagContent(InvalidCustomTagContentException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidRechartsTagException.class)
+    public ResponseEntity<Map<String, String>> handleInvalidRechartsTag(InvalidRechartsTagException e) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
     }
 

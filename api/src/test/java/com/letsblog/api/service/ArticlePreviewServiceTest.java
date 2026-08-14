@@ -21,6 +21,8 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -40,6 +42,9 @@ class ArticlePreviewServiceTest {
 
     @Mock
     private AmazonTagRenderService amazonTagRenderService;
+
+    @Mock
+    private RechartsTagRenderService rechartsTagRenderService;
 
     @Mock
     private TocStyleRenderService tocStyleRenderService;
@@ -70,9 +75,12 @@ class ArticlePreviewServiceTest {
         RestClient.Builder builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
         service = new ArticlePreviewService(
-                customTagRenderService, blogCardTagRenderService, amazonTagRenderService, tocStyleRenderService,
-                renderedContentWrapperService, markdownRenderer, projectService, siteRepository, siteService,
-                builder, previewSkeletonFetcher);
+                customTagRenderService, blogCardTagRenderService, amazonTagRenderService, rechartsTagRenderService,
+                tocStyleRenderService, renderedContentWrapperService, markdownRenderer, projectService,
+                siteRepository, siteService, builder, previewSkeletonFetcher);
+        // renderHtml()は必ずrechartsTagRenderServiceを経由するため、recharts自体を検証しないテストでは
+        // 素通しにしておく(未スタブだとnullが返り、以降のmarkdownRenderer呼び出しの引数が狂うため)。
+        lenient().when(rechartsTagRenderService.render(anyString())).thenAnswer(inv -> inv.getArgument(0));
     }
 
     private Project projectWithMaster(String masterEnvironment, Long testSiteId, Long productionSiteId) {
@@ -131,6 +139,37 @@ class ArticlePreviewServiceTest {
         verify(markdownRenderer).render("**bold** rendered");
         verify(tocStyleRenderService).applyHtmlTemplate("<p><strong>bold</strong> rendered</p>", 1L);
         verify(renderedContentWrapperService).wrap("<p><strong>bold</strong> rendered</p>", 1L);
+    }
+
+    @Test
+    void renderHtml_rechartsタグが不正な場合はレンダリングを中止してエラーメッセージを返す() {
+        when(customTagRenderService.render("markdown", 1L)).thenReturn("markdown");
+        when(blogCardTagRenderService.render("markdown", 1L)).thenReturn("markdown");
+        when(amazonTagRenderService.render("markdown", 1L)).thenReturn("markdown");
+        when(rechartsTagRenderService.render("markdown"))
+                .thenThrow(new InvalidRechartsTagException("type属性は必須です"));
+
+        String html = service.renderHtml(1L, "markdown");
+
+        assertTrue(html.contains("type属性は必須です"));
+        verifyNoInteractions(markdownRenderer, tocStyleRenderService, renderedContentWrapperService);
+    }
+
+    @Test
+    void renderHtml_recharts展開後の内容がMarkdown変換される() {
+        when(customTagRenderService.render("markdown", 1L)).thenReturn("markdown");
+        when(blogCardTagRenderService.render("markdown", 1L)).thenReturn("markdown");
+        when(amazonTagRenderService.render("markdown", 1L)).thenReturn("markdown");
+        when(rechartsTagRenderService.render("markdown")).thenReturn("markdown<div>chart</div>");
+        when(markdownRenderer.render("markdown<div>chart</div>")).thenReturn("<p>markdown</p><div>chart</div>");
+        when(tocStyleRenderService.applyHtmlTemplate("<p>markdown</p><div>chart</div>", 1L))
+                .thenReturn("<p>markdown</p><div>chart</div>");
+        when(renderedContentWrapperService.wrap("<p>markdown</p><div>chart</div>", 1L))
+                .thenReturn("<div class=\"lets-blog-rendered\"><p>markdown</p><div>chart</div></div>");
+
+        String html = service.renderHtml(1L, "markdown");
+
+        assertEquals("<div class=\"lets-blog-rendered\"><p>markdown</p><div>chart</div></div>", html);
     }
 
     @Test

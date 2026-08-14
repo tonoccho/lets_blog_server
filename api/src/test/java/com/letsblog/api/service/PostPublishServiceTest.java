@@ -60,6 +60,8 @@ class PostPublishServiceTest {
     @Mock
     private AmazonTagRenderService amazonTagRenderService;
     @Mock
+    private RechartsTagRenderService rechartsTagRenderService;
+    @Mock
     private TocStyleRenderService tocStyleRenderService;
     @Mock
     private RenderedContentWrapperService renderedContentWrapperService;
@@ -83,8 +85,9 @@ class PostPublishServiceTest {
     void setUp() {
         service = new PostPublishService(siteService, cmsAdapterFactory, markdownRenderer, postRepository,
                 plantUmlEmbedService, customTagRenderService, blogCardTagRenderService, amazonTagRenderService,
-                tocStyleRenderService, renderedContentWrapperService, projectService, currentActorService,
-                userRepository, userSiteAuthorRepository, new com.fasterxml.jackson.databind.ObjectMapper());
+                rechartsTagRenderService, tocStyleRenderService, renderedContentWrapperService, projectService,
+                currentActorService, userRepository, userSiteAuthorRepository,
+                new com.fasterxml.jackson.databind.ObjectMapper());
 
         Site site = new Site();
         site.setId(1L);
@@ -98,6 +101,7 @@ class PostPublishServiceTest {
         lenient().when(customTagRenderService.render(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(blogCardTagRenderService.render(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(amazonTagRenderService.render(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(rechartsTagRenderService.render(anyString())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(plantUmlEmbedService.embedDiagrams(any(), anyString())).thenAnswer(inv -> inv.getArgument(1));
         lenient().when(markdownRenderer.render(anyString())).thenAnswer(inv -> "<p>" + inv.getArgument(0) + "</p>");
         lenient().when(tocStyleRenderService.applyHtmlTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
@@ -504,5 +508,17 @@ class PostPublishServiceTest {
         verify(cmsAdapter).createOrUpdatePost(any(), captor.capture(), any());
         assertEquals("draft", captor.getValue().status());
         assertNull(captor.getValue().publishScheduledAt());
+    }
+
+    @Test
+    void publish_rechartsタグが不正な場合は投稿を拒否する() {
+        when(rechartsTagRenderService.render(anyString()))
+                .thenThrow(new InvalidRechartsTagException("type属性は必須です"));
+
+        InvalidRechartsTagException e = org.junit.jupiter.api.Assertions.assertThrows(
+                InvalidRechartsTagException.class,
+                () -> service.publish(command("my-article", "My Article", List.of(), null)));
+        assertTrue(e.getMessage().contains("type属性"));
+        verify(cmsAdapter, org.mockito.Mockito.never()).createOrUpdatePost(any(), any(), any());
     }
 }
