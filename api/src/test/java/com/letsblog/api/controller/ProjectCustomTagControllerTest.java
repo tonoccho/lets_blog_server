@@ -4,6 +4,8 @@ import com.letsblog.api.dto.CustomTagPreviewRequest;
 import com.letsblog.api.dto.CustomTagPreviewResponse;
 import com.letsblog.api.dto.CustomTagResponse;
 import com.letsblog.api.service.AdminAuthorizationService;
+import com.letsblog.api.service.AmazonTagRenderService;
+import com.letsblog.api.service.BlogCardTagRenderService;
 import com.letsblog.api.service.CustomTagRenderService;
 import com.letsblog.api.service.CustomTagService;
 import com.letsblog.api.service.ForbiddenException;
@@ -33,6 +35,12 @@ class ProjectCustomTagControllerTest {
     private CustomTagRenderService customTagRenderService;
 
     @Mock
+    private BlogCardTagRenderService blogCardTagRenderService;
+
+    @Mock
+    private AmazonTagRenderService amazonTagRenderService;
+
+    @Mock
     private RenderedContentWrapperService renderedContentWrapperService;
 
     @Mock
@@ -40,7 +48,8 @@ class ProjectCustomTagControllerTest {
 
     private ProjectCustomTagController controller() {
         return new ProjectCustomTagController(
-                customTagService, customTagRenderService, renderedContentWrapperService, adminAuthorizationService);
+                customTagService, customTagRenderService, blogCardTagRenderService, amazonTagRenderService,
+                renderedContentWrapperService, adminAuthorizationService);
     }
 
     @Test
@@ -89,6 +98,8 @@ class ProjectCustomTagControllerTest {
         ProjectCustomTagController controller = controller();
         CustomTagPreviewRequest request =
                 new CustomTagPreviewRequest("<div class=\"alert\">{{content}}</div>", ".alert { color: red; }", "**bold**");
+        when(blogCardTagRenderService.render(request.testContent(), 5L)).thenReturn(request.testContent());
+        when(amazonTagRenderService.render(request.testContent(), 5L)).thenReturn(request.testContent());
         when(customTagRenderService.previewTemplate(request.htmlTemplate(), request.testContent()))
                 .thenReturn("<div class=\"alert\"><strong>bold</strong></div>");
         when(renderedContentWrapperService.wrap("<div class=\"alert\"><strong>bold</strong></div>", 5L))
@@ -105,12 +116,38 @@ class ProjectCustomTagControllerTest {
     }
 
     @Test
+    void preview_組み込みタグを実際の投稿と同じくレンダリング後に差し込む() {
+        ProjectCustomTagController controller = controller();
+        CustomTagPreviewRequest request = new CustomTagPreviewRequest(
+                "<div>{{content}}</div>", null, "[blogcard https://example.com]\n\n[amazon https://amazon.co.jp/dp/X]");
+        when(blogCardTagRenderService.render(request.testContent(), 5L))
+                .thenReturn("<a class=\"lb-blogcard\">card</a>\n\n[amazon https://amazon.co.jp/dp/X]");
+        when(amazonTagRenderService.render(
+                        "<a class=\"lb-blogcard\">card</a>\n\n[amazon https://amazon.co.jp/dp/X]", 5L))
+                .thenReturn("<a class=\"lb-blogcard\">card</a>\n\n<a class=\"lb-amazon-card\">product</a>");
+        when(customTagRenderService.previewTemplate(
+                        request.htmlTemplate(),
+                        "<a class=\"lb-blogcard\">card</a>\n\n<a class=\"lb-amazon-card\">product</a>"))
+                .thenReturn("<div><a class=\"lb-blogcard\">card</a><a class=\"lb-amazon-card\">product</a></div>");
+        when(renderedContentWrapperService.wrap(
+                        "<div><a class=\"lb-blogcard\">card</a><a class=\"lb-amazon-card\">product</a></div>", 5L))
+                .thenReturn("<div class=\"lets-blog-rendered my-blog\">wrapped</div>");
+        when(customTagService.previewCss(null, 5L)).thenReturn("");
+
+        CustomTagPreviewResponse response = controller.preview(5L, request);
+
+        assertEquals("<div class=\"lets-blog-rendered my-blog\">wrapped</div>", response.html());
+    }
+
+    @Test
     void preview_認可拒否ならForbidden() {
         ProjectCustomTagController controller = controller();
         CustomTagPreviewRequest request = new CustomTagPreviewRequest("<div>{{content}}</div>", null, "本文");
         doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(5L);
 
         assertThrows(ForbiddenException.class, () -> controller.preview(5L, request));
+        verify(blogCardTagRenderService, never()).render(any(), any());
+        verify(amazonTagRenderService, never()).render(any(), any());
         verify(customTagRenderService, never()).previewTemplate(any(), any());
     }
 }
