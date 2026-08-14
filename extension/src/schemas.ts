@@ -235,3 +235,27 @@ export const GeneratedImageSummarySchema = z.object({
 });
 export type GeneratedImageSummary = z.infer<typeof GeneratedImageSummarySchema>;
 export const GeneratedImageSummaryListSchema = z.array(GeneratedImageSummarySchema);
+
+/**
+ * 生成画像の詳細(/api/generated-images/{id})。生成に使ったパラメータ一式を含む。
+ * Image Galleryの右クリックメニューから、その設定でGenerate Imageを開くために使う(issue #294)。
+ */
+export const GeneratedImageDetailSchema = z.object({
+  id: z.number(),
+  projectId: z.number().nullish(),
+  prompt: z.string().nullish(),
+  negativePrompt: z.string().nullish(),
+  steps: z.number().nullish(),
+  cfgScale: z.number().nullish(),
+  samplerName: z.string().nullish(),
+  scheduler: z.string().nullish(),
+  seed: z.number().nullish(),
+  width: z.number().nullish(),
+  height: z.number().nullish(),
+  batchSize: z.number().nullish(),
+  checkpoint: z.string().nullish(),
+  loraName: z.string().nullish(),
+  loraWeight: z.number().nullish(),
+  createdAt: z.string().nullish(),
+});
+export type GeneratedImageDetail = z.infer<typeof GeneratedImageDetailSchema>;

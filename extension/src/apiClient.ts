@@ -891,6 +891,21 @@ export async function listGeneratedImages(
   );
 }
 
+/** 生成画像の詳細(生成に使ったパラメータ一式)を取得する(issue #294)。 */
+export async function getGeneratedImageDetail(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  imageId: number
+): Promise<schemas.GeneratedImageDetail> {
+  return requestJson(
+    serverUrl,
+    `/api/generated-images/${imageId}`,
+    { label: 'getGeneratedImageDetail', headers: buildHeaders(apiKey, actor) },
+    schemas.GeneratedImageDetailSchema
+  );
+}
+
 /** 生成画像のバイナリを取得する。 */
 export async function downloadGeneratedImage(
   serverUrl: string,
@@ -918,4 +933,4 @@ export async function deleteGeneratedImage(
   });
 }
 
-export type { GeneratedImageSummary } from './schemas';
+export type { GeneratedImageSummary, GeneratedImageDetail } from './schemas';
