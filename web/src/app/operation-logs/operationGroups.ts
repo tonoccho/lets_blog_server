@@ -1,5 +1,5 @@
 import type { OperationLogEntry } from "@/lib/apiClient";
-import { formatDateTime } from "@/lib/formatDate";
+import { formatOperationLogDateTime } from "@/lib/formatDate";
 
 export interface OperationGroup {
   operationId: string;
@@ -37,14 +37,14 @@ export function groupOperationLogEntries(entries: OperationLogEntry[]): Operatio
 export function describeOperationTraceText(group: OperationGroup, timezone: string | null): string {
   const lines = [
     `操作ID: ${group.operationId}`,
-    `開始日時: ${formatDateTime(group.startedAt, timezone)}`,
+    `開始日時: ${formatOperationLogDateTime(group.startedAt, timezone)}`,
     `呼び出し件数: ${group.entries.length}`,
     `結果: ${group.success ? "成功" : "エラーあり"}`,
     "",
     "呼び出し一覧:",
   ];
   group.entries.forEach((entry, index) => {
-    lines.push(`${index + 1}. [${formatDateTime(entry.createdAt, timezone)}] ${entry.method} ${entry.path}`);
+    lines.push(`${index + 1}. [${formatOperationLogDateTime(entry.createdAt, timezone)}] ${entry.method} ${entry.path}`);
     lines.push(
       `   ステータス: ${entry.statusCode ?? "(応答なし)"} / ${entry.durationMs}ms / ${entry.success ? "成功" : "失敗"}`
     );
