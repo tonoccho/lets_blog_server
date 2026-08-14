@@ -26,8 +26,8 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
   const [seed, setSeed] = useState("");
   const [samplerName, setSamplerName] = useState("");
   const [scheduler, setScheduler] = useState("");
-  const [width, setWidth] = useState(512);
-  const [height, setHeight] = useState(512);
+  const [width, setWidth] = useState(1920);
+  const [height, setHeight] = useState(1080);
   const [batchSize, setBatchSize] = useState(4);
   const [checkpoint, setCheckpoint] = useState("");
   const [loraName, setLoraName] = useState("");
@@ -55,6 +55,9 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
       setSamplerName(opts.samplers[0] ?? "euler");
       setScheduler(opts.schedulers[0] ?? "normal");
       setCheckpoint(opts.selectedCheckpoint ?? "");
+      // プロジェクトのデフォルト生成サイズを初期値として反映する(issue #292)。
+      if (opts.defaultWidth) setWidth(opts.defaultWidth);
+      if (opts.defaultHeight) setHeight(opts.defaultHeight);
     } catch (err) {
       setMessage({ type: "error", text: err instanceof Error ? err.message : String(err) });
     } finally {

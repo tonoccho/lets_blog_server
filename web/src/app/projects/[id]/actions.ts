@@ -8,6 +8,7 @@ import {
   updateMasterEnvironment,
   updateProjectGithubRepository,
   updateProjectImageGenerationPromptDefaults,
+  updateProjectImageGenerationSizeDefaults,
   setProjectGithubToken,
   clearProjectGithubToken,
   setProjectBraveSearchApiKey,
@@ -208,6 +209,35 @@ export async function updateImageGenerationPromptDefaultsAction(
 
   try {
     await updateProjectImageGenerationPromptDefaults(projectId, defaultNegativePrompt, defaultQualityPrompt, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  return { success: true };
+}
+
+export interface UpdateImageGenerationSizeDefaultsState {
+  error?: string;
+  success?: boolean;
+}
+
+export async function updateImageGenerationSizeDefaultsAction(
+  projectId: number,
+  _prevState: UpdateImageGenerationSizeDefaultsState,
+  formData: FormData
+): Promise<UpdateImageGenerationSizeDefaultsState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const widthRaw = String(formData.get("defaultGeneratedImageWidth") ?? "").trim();
+  const heightRaw = String(formData.get("defaultGeneratedImageHeight") ?? "").trim();
+  const defaultGeneratedImageWidth = widthRaw ? Number(widthRaw) : null;
+  const defaultGeneratedImageHeight = heightRaw ? Number(heightRaw) : null;
+
+  try {
+    await updateProjectImageGenerationSizeDefaults(
+      projectId, defaultGeneratedImageWidth, defaultGeneratedImageHeight, actor);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

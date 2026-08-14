@@ -16,6 +16,8 @@ public record ProjectResponse(
         String cssSelectorPrefix,
         String defaultNegativePrompt,
         String defaultQualityPrompt,
+        Integer defaultGeneratedImageWidth,
+        Integer defaultGeneratedImageHeight,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -33,6 +35,8 @@ public record ProjectResponse(
                 project.getCssSelectorPrefix(),
                 project.getDefaultNegativePrompt(),
                 project.getDefaultQualityPrompt(),
+                project.getDefaultGeneratedImageWidth(),
+                project.getDefaultGeneratedImageHeight(),
                 project.getCreatedAt(),
                 project.getUpdatedAt()
         );

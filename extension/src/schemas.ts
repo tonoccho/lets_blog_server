@@ -75,6 +75,8 @@ export const ImageGenerationOptionsSchema = z.object({
   samplers: z.array(z.string()).default([]),
   schedulers: z.array(z.string()).default([]),
   loras: z.array(z.string()).default([]),
+  defaultWidth: z.number().default(1920),
+  defaultHeight: z.number().default(1080),
 });
 export type ImageGenerationOptions = z.infer<typeof ImageGenerationOptionsSchema>;
 

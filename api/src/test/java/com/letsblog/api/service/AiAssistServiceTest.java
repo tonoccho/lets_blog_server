@@ -15,6 +15,7 @@ import com.letsblog.api.dto.AiImageBatchResponse;
 import com.letsblog.api.dto.AiImagePromptResponse;
 import com.letsblog.api.dto.AiImageRequest;
 import com.letsblog.api.dto.AiSectionRequest;
+import com.letsblog.api.dto.ImageGenerationOptionsResponse;
 import com.letsblog.api.dto.AiSectionResponse;
 import com.letsblog.api.dto.PlanChatMessage;
 import com.letsblog.api.repository.GeneratedImageRepository;
@@ -136,6 +137,38 @@ class AiAssistServiceTest {
         org.mockito.Mockito.verify(comfyUiClient).generateImage(captor.capture());
         assertEquals("custom negative", captor.getValue().negativePrompt());
         org.mockito.Mockito.verify(projectService, org.mockito.Mockito.never()).resolveDefaultNegativePrompt(any());
+    }
+
+    @Test
+    void generateImage_widthとheightの未指定分はプロジェクト解決値を使う() {
+        when(comfyUiClient.generateImage(any())).thenReturn(
+                List.of(new ComfyUiImage("a.png", new byte[]{1}, "image/png")));
+        when(comfyUiModelService.getSelectedCheckpointOrGlobalDefault(any())).thenReturn("checkpoint.safetensors");
+        when(projectService.resolveDefaultGeneratedImageWidth(any())).thenReturn(1920);
+        when(projectService.resolveDefaultGeneratedImageHeight(any())).thenReturn(1080);
+
+        service.generateImage(AiImageRequest.withDefaults("a cat"));
+
+        ArgumentCaptor<ComfyUiGenerationParams> captor = ArgumentCaptor.forClass(ComfyUiGenerationParams.class);
+        org.mockito.Mockito.verify(comfyUiClient).generateImage(captor.capture());
+        assertEquals(1920, captor.getValue().width());
+        assertEquals(1080, captor.getValue().height());
+    }
+
+    @Test
+    void getImageOptions_プロジェクトのデフォルトサイズを含む() {
+        when(comfyUiModelService.getSelectedCheckpointOrGlobalDefault(1L)).thenReturn("checkpoint.safetensors");
+        when(comfyUiClient.listCheckpoints()).thenReturn(List.of("checkpoint.safetensors"));
+        when(comfyUiClient.listSamplers()).thenReturn(List.of("euler"));
+        when(comfyUiClient.listSchedulers()).thenReturn(List.of("normal"));
+        when(comfyUiClient.listLoras()).thenReturn(List.of());
+        when(projectService.resolveDefaultGeneratedImageWidth(1L)).thenReturn(1920);
+        when(projectService.resolveDefaultGeneratedImageHeight(1L)).thenReturn(1080);
+
+        ImageGenerationOptionsResponse response = service.getImageOptions(1L);
+
+        assertEquals(1920, response.defaultWidth());
+        assertEquals(1080, response.defaultHeight());
     }
 
     @Test

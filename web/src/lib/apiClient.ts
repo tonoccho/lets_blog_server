@@ -393,6 +393,8 @@ export interface ImageGenerationOptionsResponse {
   samplers: string[];
   schedulers: string[];
   loras: string[];
+  defaultWidth: number;
+  defaultHeight: number;
 }
 
 export function getImageGenerationOptions(projectId: number, actor?: ActorInfo): Promise<ImageGenerationOptionsResponse> {
@@ -1150,6 +1152,8 @@ export interface Project {
   cssSelectorPrefix: string | null;
   defaultNegativePrompt: string | null;
   defaultQualityPrompt: string | null;
+  defaultGeneratedImageWidth: number | null;
+  defaultGeneratedImageHeight: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1223,6 +1227,21 @@ export function updateProjectImageGenerationPromptDefaults(
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ defaultNegativePrompt, defaultQualityPrompt }),
+    actor,
+  });
+}
+
+/** 画像生成時のデフォルトサイズ(issue #292)。nullはアプリ全体のデフォルト(1920x1080)へ戻す。 */
+export function updateProjectImageGenerationSizeDefaults(
+  id: number,
+  defaultGeneratedImageWidth: number | null,
+  defaultGeneratedImageHeight: number | null,
+  actor?: ActorInfo
+): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}/image-generation-size-defaults`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ defaultGeneratedImageWidth, defaultGeneratedImageHeight }),
     actor,
   });
 }

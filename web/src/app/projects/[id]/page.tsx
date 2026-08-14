@@ -21,6 +21,7 @@ import { BulkManagementPanel } from "./BulkManagementPanel";
 import { ProjectAiModelsPanel } from "./ProjectAiModelsPanel";
 import { ProjectAssetGenerationPanel } from "./ProjectAssetGenerationPanel";
 import { ProjectImageGenerationPromptDefaultsForm } from "./ProjectImageGenerationPromptDefaultsForm";
+import { ProjectImageGenerationSizeDefaultsForm } from "./ProjectImageGenerationSizeDefaultsForm";
 import { ProjectNameForm } from "./ProjectNameForm";
 import { DeleteProjectButton } from "./DeleteProjectButton";
 import { ProjectUserManager } from "./ProjectUserManager";
@@ -145,6 +146,11 @@ export default async function ProjectDetailPage({
             projectId={project.id}
             defaultNegativePrompt={project.defaultNegativePrompt}
             defaultQualityPrompt={project.defaultQualityPrompt}
+          />
+          <ProjectImageGenerationSizeDefaultsForm
+            projectId={project.id}
+            defaultGeneratedImageWidth={project.defaultGeneratedImageWidth}
+            defaultGeneratedImageHeight={project.defaultGeneratedImageHeight}
           />
         </div>
       ),
