@@ -39,7 +39,7 @@
     border: 1px solid var(--vscode-panel-border, #ccc); padding: 8px; max-height: 140px; overflow-y: auto;
     background: var(--vscode-input-background, #fff); margin-bottom: 6px;
   }
-  .category-checkboxes label { display: block; font-weight: normal; margin-bottom: 4px; }
+  .category-checkboxes label { display: flex; align-items: center; font-weight: normal; margin-bottom: 4px; }
   .category-checkboxes input[type="checkbox"] { margin-right: 6px; }
   .accepted-badge { color: var(--vscode-testing-iconPassed, #2e7d32); margin-bottom: 8px; }
   #message.error { color: var(--vscode-errorForeground, #d32f2f); }
