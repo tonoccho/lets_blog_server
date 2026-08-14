@@ -82,8 +82,9 @@ test.describe('カスタムタグ生成フロー', () => {
     // HTML/CSSプレビュー(data-testidは存在しないため<pre>要素で判定)が表示される
     await expect(page.locator('pre').first()).toBeVisible();
 
-    // 下部の追加フォームに生成結果が自動反映されている(実装では手動の「保存する」ボタンは存在しない)
-    await expect(page.locator(`h2:has-text("カスタムタグを作成: [${tagName}]")`)).toBeVisible();
+    // 生成結果は生成時点で既にDB保存済みのため、下部フォームは編集モードで開く(issue #354)。
+    // 「追加」ボタンで再送信すると保存済みタグ名との重複エラーになるため、編集モード([更新]ボタン)にする。
+    await expect(page.locator(`h2:has-text("カスタムタグを編集: [${tagName}]")`)).toBeVisible();
 
     // 生成と同時にDB保存されているため、再読み込み後もタグ一覧に表示される
     await page.reload();

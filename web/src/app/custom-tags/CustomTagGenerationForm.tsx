@@ -5,14 +5,15 @@ import { useSession } from "next-auth/react";
 import { useCustomTagGeneration } from "@/lib/useCustomTagGeneration";
 import { useCustomTagValidation } from "@/lib/useCustomTagValidation";
 import { ValidationPanel } from "./ValidationPanel";
-import type { Project } from "@/lib/apiClient";
+import type { CustomTag, Project } from "@/lib/apiClient";
 
 interface CustomTagGenerationFormProps {
   projects: Project[];
   currentProjectId: number | null;
   /** 統合CSS生成時に実際に適用されるCSSセレクタのプリフィックス(未設定時はプロジェクトのslug)。プロジェクトに紐付かない場合はnull(issue #307) */
   effectivePrefix?: string | null;
-  onGenerationSuccess: (htmlTemplate: string, cssContent: string, tagName: string, description: string) => void;
+  /** 生成結果は生成時点で既にDB保存済みのため、idを含む保存済みタグをそのまま渡す(issue #354)。 */
+  onGenerationSuccess: (tag: CustomTag) => void;
 }
 
 export function CustomTagGenerationForm({
@@ -52,12 +53,7 @@ export function CustomTagGenerationForm({
         resetValidation();
         await validateContent(generatedTag.htmlTemplate, generatedTag.cssContent || "");
         setShowResults(true);
-        onGenerationSuccess(
-          generatedTag.htmlTemplate,
-          generatedTag.cssContent || "",
-          generatedTag.tagName,
-          generatedTag.description || ""
-        );
+        onGenerationSuccess(generatedTag);
       }
     } catch (err) {
       // エラーはstateに保存されている
@@ -147,7 +143,9 @@ export function CustomTagGenerationForm({
         <div className="space-y-3">
           <div className="rounded-lg bg-green-50 p-3 text-sm text-green-800">
             <p className="font-medium">生成完了！</p>
-            <p className="mt-1">生成されたHTMLとCSSを下のフォームに自動入力しました。確認して保存してください。</p>
+            <p className="mt-1">
+              生成と同時に保存済みです。内容は下の編集フォームに反映されているので、必要であれば修正して更新してください。
+            </p>
           </div>
           <div className="space-y-2">
             <div>
