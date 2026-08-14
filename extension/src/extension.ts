@@ -914,6 +914,13 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
             } else {
               logger.debug(`テーマ構造の再現をスキップしました: ${skeleton.reason ?? '不明な理由'}`);
             }
+            // トップページのクロールでは拾えない、投稿ページ限定で読み込まれるCSS(is_single()等)を
+            // 補うため、骨格取得時に実際のナビゲーション先で収集されたCSSがあればマージする。
+            // 本文の差し替え位置を特定できずavailableがfalseの場合でも、ナビゲーション自体には
+            // 成功していればcssは含まれ得るため、availableに関わらずマージする。
+            if (skeleton.css) {
+              css = css ? `${css}\n${skeleton.css}` : skeleton.css;
+            }
           } catch (skeletonError) {
             logger.debug(`テーマ構造の再現取得に失敗しました: ${messageOf(skeletonError)}`);
           }

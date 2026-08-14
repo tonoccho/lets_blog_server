@@ -181,12 +181,17 @@ export const RenderPreviewResultSchema = z.object({
 /**
  * サイト内の既存記事ページを骨格として流用し、タイトル/本文/アイキャッチを差し替えた
  * HTML断片(/api/projects/{projectId}/preview/skeleton)。
+ * cssは骨格として実際にナビゲートした投稿ページで読み込まれていたスタイルシートを連結したもの。
+ * 本文の差し替え位置を特定できずavailableがfalseの場合でも、ナビゲーション自体に成功していれば
+ * 含まれることがある(トップページ限定のCSS取得(getThemeCss)では拾えない、is_single()等で
+ * 投稿ページ限定で読み込まれるCSSを補うため)。呼び出し側でgetThemeCssの結果とマージすること。
  */
 export const ThemeSkeletonResultSchema = z.object({
   html: z.string().nullish(),
   available: z.boolean(),
   reason: z.string().nullish(),
   eyecatchSpliced: z.boolean(),
+  css: z.string().nullish(),
 });
 export type ThemeSkeletonResult = z.infer<typeof ThemeSkeletonResultSchema>;
 

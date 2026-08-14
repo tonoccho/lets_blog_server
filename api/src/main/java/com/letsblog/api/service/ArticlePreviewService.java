@@ -191,8 +191,79 @@ public class ArticlePreviewService {
             }
             css.append("/* inline <style> */\n").append(inlineStyle).append("\n");
         }
+        appendPostPageCss(css, fetchUrl, site, internalOrigin);
         String result = css.length() > MAX_CSS_LENGTH ? css.substring(0, MAX_CSS_LENGTH) : css.toString();
         return new ThemeCssResponse(result, true, null);
+    }
+
+    /**
+     * is_single()等でトップページには読み込まれず投稿ページ限定で読み込まれるCSS(Issue #337)を補うため、
+     * サイト内の最新投稿ページ(renderSkeletonの参照記事解決と同じWP REST APIクエリ)を対象にも
+     * stylesheet/インラインstyleを収集し、トップページ分のCSSへ追記する。
+     *
+     * renderSkeletonのようなPlaywrightナビゲーションを伴わない軽量な代替経路のため、参照記事の取得や
+     * ページ取得に失敗しても、既に得られているトップページのCSSは活かせるようベストエフォートで扱い、
+     * 例外はログのみで握りつぶす。
+     */
+    private void appendPostPageCss(StringBuilder css, String fetchOrigin, Site site, String internalOrigin) {
+        if (css.length() >= MAX_CSS_LENGTH) {
+            return;
+        }
+        String base = fetchOrigin.endsWith("/") ? fetchOrigin : fetchOrigin + "/";
+        JsonNode posts;
+        try {
+            posts = browserLikeClient().get()
+                    .uri(base + "wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc&_fields=id,link")
+                    .retrieve()
+                    .body(JsonNode.class);
+        } catch (Exception e) {
+            logger.debug("Failed to fetch reference post for post-page CSS fallback: {}", site.getSiteKey(), e);
+            return;
+        }
+        if (posts == null || posts.size() == 0) {
+            return;
+        }
+        String referenceLink = posts.get(0).path("link").asText(null);
+        if (referenceLink == null) {
+            return;
+        }
+        String publicOrigin = originOf(site.getBaseUrl());
+        String postPageUrl = internalOrigin != null
+                ? rewriteToInternalOrigin(referenceLink, publicOrigin, internalOrigin)
+                : referenceLink;
+
+        String postHtml;
+        try {
+            postHtml = browserLikeClient().get().uri(URI.create(postPageUrl)).retrieve().body(String.class);
+        } catch (Exception e) {
+            logger.debug("Failed to fetch post page for CSS fallback: {}", postPageUrl, e);
+            return;
+        }
+        if (postHtml == null || postHtml.isBlank()) {
+            return;
+        }
+
+        List<String> postStylesheetUrls = extractStylesheetUrls(postHtml, site.getBaseUrl());
+        List<String> postInlineStyles = extractInlineStyles(postHtml);
+        if (postStylesheetUrls.isEmpty() && postInlineStyles.isEmpty()) {
+            return;
+        }
+        logger.debug("Collected {} additional stylesheet URLs and {} inline <style> blocks from post page "
+                + "for site: {}", postStylesheetUrls.size(), postInlineStyles.size(), site.getSiteKey());
+        if (internalOrigin != null && !postStylesheetUrls.isEmpty()) {
+            postStylesheetUrls = rewriteToInternalOrigin(postStylesheetUrls, publicOrigin, internalOrigin);
+        }
+
+        String postCss = fetchAndConcatStylesheets(postStylesheetUrls);
+        if (!postCss.isEmpty() && css.length() + postCss.length() <= MAX_CSS_LENGTH) {
+            css.append(postCss);
+        }
+        for (String inlineStyle : postInlineStyles) {
+            if (css.length() >= MAX_CSS_LENGTH) {
+                break;
+            }
+            css.append("/* inline <style> (post page) */\n").append(inlineStyle).append("\n");
+        }
     }
 
     /**
@@ -210,7 +281,7 @@ public class ArticlePreviewService {
         Project project = projectService.getProjectEntity(projectId);
         SiteResolution resolution = resolveSiteForPreview(project, siteId);
         if (resolution.site() == null) {
-            return new ThemeSkeletonResponse(null, false, resolution.errorReason(), false);
+            return new ThemeSkeletonResponse(null, false, resolution.errorReason(), false, "");
         }
         Site site = resolution.site();
 
@@ -234,17 +305,17 @@ public class ArticlePreviewService {
                     .body(JsonNode.class);
         } catch (Exception e) {
             logger.warn("Failed to fetch reference post for skeleton preview: {}", site.getSiteKey(), e);
-            return new ThemeSkeletonResponse(null, false, "参照記事の取得に失敗しました: " + e.getMessage(), false);
+            return new ThemeSkeletonResponse(null, false, "参照記事の取得に失敗しました: " + e.getMessage(), false, "");
         }
         if (posts == null || posts.size() == 0) {
-            return new ThemeSkeletonResponse(null, false, "参照記事が見つかりませんでした", false);
+            return new ThemeSkeletonResponse(null, false, "参照記事が見つかりませんでした", false, "");
         }
         JsonNode reference = posts.get(0);
         String titleRendered = reference.path("title").path("rendered").asText("");
         String contentRendered = reference.path("content").path("rendered").asText("");
         String referenceLink = reference.path("link").asText(null);
         if (referenceLink == null) {
-            return new ThemeSkeletonResponse(null, false, "参照記事のURLを取得できませんでした", false);
+            return new ThemeSkeletonResponse(null, false, "参照記事のURLを取得できませんでした", false, "");
         }
 
         // 参照記事のlinkはWordPressのsiteurl設定(公開URL)を基準に絶対URLで出力されるため、
@@ -261,15 +332,18 @@ public class ArticlePreviewService {
                     navigateUrl, titleRendered, contentRendered, title, contentHtml, featuredImageDataUri);
         } catch (Exception e) {
             logger.warn("Failed to render skeleton preview for site: {}", site.getSiteKey(), e);
-            return new ThemeSkeletonResponse(null, false, "記事ページの取得に失敗しました: " + e.getMessage(), false);
+            return new ThemeSkeletonResponse(null, false, "記事ページの取得に失敗しました: " + e.getMessage(), false, "");
         }
+        // Playwright側で解決された絶対URL(img src/a href、CSS内のurl()等)は内部オリジン基準のため、
+        // Webviewから実際に読み込める公開オリジンへ戻してから返す。本文の差し替え位置を特定できず
+        // htmlがavailable=falseの場合でも、ナビゲーション自体には成功していればcssは収集できているため、
+        // 呼び出し側(拡張機能)がトップページのCSSとマージできるよう合わせて返す。
+        String css = internalOrigin != null ? spliced.css().replace(internalOrigin, publicOrigin) : spliced.css();
         if (!spliced.available() || spliced.html() == null) {
-            return spliced;
+            return new ThemeSkeletonResponse(spliced.html(), false, spliced.reason(), spliced.eyecatchSpliced(), css);
         }
-        // Playwright側で解決された絶対URL(img src/a href等)は内部オリジン基準のため、
-        // Webviewから実際に読み込める公開オリジンへ戻してから返す。
         String html = internalOrigin != null ? spliced.html().replace(internalOrigin, publicOrigin) : spliced.html();
-        return new ThemeSkeletonResponse(html, true, null, spliced.eyecatchSpliced());
+        return new ThemeSkeletonResponse(html, true, null, spliced.eyecatchSpliced(), css);
     }
 
     /**

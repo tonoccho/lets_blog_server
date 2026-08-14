@@ -88,7 +88,7 @@ class ArticlePreviewControllerTest {
         ArticlePreviewController controller = controller();
         RenderSkeletonRequest request = new RenderSkeletonRequest("タイトル", "<p>本文</p>", "data:image/png;base64,abc", 20L);
         when(articlePreviewService.renderSkeleton(1L, 20L, "タイトル", "<p>本文</p>", "data:image/png;base64,abc"))
-                .thenReturn(new ThemeSkeletonResponse("<article>spliced</article>", true, null, true));
+                .thenReturn(new ThemeSkeletonResponse("<article>spliced</article>", true, null, true, ""));
 
         ThemeSkeletonResponse response = controller.skeleton(1L, request);
 
