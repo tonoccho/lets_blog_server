@@ -100,6 +100,17 @@ class ArticlePreviewServiceTest {
         return site;
     }
 
+    /**
+     * fetchThemeCssは、トップページのCSSに加えて投稿ページ限定のCSS(Issue #337)も
+     * 補おうとするため、参照記事の有無をwp-json/wp/v2/postsへ問い合わせる。この問い合わせ自体を
+     * 検証しないテストでは、参照記事なしとして早期終了させるためにこのモックを併せて登録する。
+     */
+    private void expectNoReferencePostForCssFallback(String baseEndingWithSlash) {
+        server.expect(requestTo(
+                        baseEndingWithSlash + "wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc&_fields=id,link"))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+    }
+
     @Test
     void renderHtml_カスタムタグ展開後にMarkdownをHTML変換する() {
         when(customTagRenderService.render("**bold**", 1L)).thenReturn("**bold** rendered");
@@ -160,6 +171,7 @@ class ArticlePreviewServiceTest {
                         MediaType.TEXT_HTML));
         server.expect(requestTo("http://example.com/style.css"))
                 .andRespond(withSuccess("body { color: red; }", MediaType.valueOf("text/css")));
+        expectNoReferencePostForCssFallback("http://example.com/");
 
         ThemeCssResponse response = service.fetchMasterThemeCss(1L);
 
@@ -211,6 +223,7 @@ class ArticlePreviewServiceTest {
                 .andRespond(withSuccess("body { color: red; }", MediaType.valueOf("text/css")));
         server.expect(requestTo("http://example.com/huge.css"))
                 .andRespond(withSuccess(hugeCss, MediaType.valueOf("text/css")));
+        expectNoReferencePostForCssFallback("http://example.com/");
 
         ThemeCssResponse response = service.fetchMasterThemeCss(1L);
 
@@ -233,6 +246,7 @@ class ArticlePreviewServiceTest {
                         MediaType.TEXT_HTML));
         server.expect(requestTo("http://example.com/optimized.css"))
                 .andRespond(withSuccess("body { color: purple; }", MediaType.valueOf("text/css")));
+        expectNoReferencePostForCssFallback("http://example.com/");
 
         ThemeCssResponse response = service.fetchMasterThemeCss(1L);
 
@@ -252,6 +266,7 @@ class ArticlePreviewServiceTest {
                         + "<style id=\"critical-css\">.hero { color: orange; }</style>"
                         + "</head></html>",
                         MediaType.TEXT_HTML));
+        expectNoReferencePostForCssFallback("http://example.com/");
 
         ThemeCssResponse response = service.fetchMasterThemeCss(1L);
 
@@ -272,6 +287,7 @@ class ArticlePreviewServiceTest {
                 .andRespond(withSuccess(
                         "@font-face { src: url(fonts/foo.woff2); }",
                         MediaType.valueOf("text/css")));
+        expectNoReferencePostForCssFallback("http://example.com/");
 
         ThemeCssResponse response = service.fetchMasterThemeCss(1L);
 
@@ -292,6 +308,7 @@ class ArticlePreviewServiceTest {
                         MediaType.TEXT_HTML));
         server.expect(requestTo("http://local.example.com/local.css"))
                 .andRespond(withSuccess("body{color:red}", MediaType.valueOf("text/css")));
+        expectNoReferencePostForCssFallback("http://local.example.com/");
 
         ThemeCssResponse response = service.fetchThemeCss(1L, 20L);
 
@@ -315,6 +332,7 @@ class ArticlePreviewServiceTest {
                         MediaType.TEXT_HTML));
         server.expect(requestTo("http://wordpress/sites/local-site/wp-content/style.css"))
                 .andRespond(withSuccess("body { color: blue; }", MediaType.valueOf("text/css")));
+        expectNoReferencePostForCssFallback("http://wordpress/sites/local-site/");
 
         ThemeCssResponse response = service.fetchThemeCss(1L, 30L);
 
@@ -338,6 +356,7 @@ class ArticlePreviewServiceTest {
                         MediaType.TEXT_HTML));
         server.expect(requestTo("http://public.example.com/style.css"))
                 .andRespond(withSuccess("body { color: green; }", MediaType.valueOf("text/css")));
+        expectNoReferencePostForCssFallback("http://public.example.com/");
 
         ThemeCssResponse response = service.fetchThemeCss(1L, 30L);
 
@@ -359,6 +378,7 @@ class ArticlePreviewServiceTest {
         server.expect(requestTo("http://example.com/style.css"))
                 .andExpect(header("User-Agent", org.hamcrest.Matchers.containsString("Mozilla")))
                 .andRespond(withSuccess("body { color: red; }", MediaType.valueOf("text/css")));
+        expectNoReferencePostForCssFallback("http://example.com/");
 
         ThemeCssResponse response = service.fetchMasterThemeCss(1L);
 
@@ -387,6 +407,59 @@ class ArticlePreviewServiceTest {
 
         assertFalse(response.available());
         assertTrue(response.reason().contains("マスター環境"));
+    }
+
+    @Test
+    void fetchThemeCss_is_single限定でトップページには無い投稿ページ限定のstylesheetもマージする() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+
+        server.expect(requestTo("http://example.com"))
+                .andRespond(withSuccess(
+                        "<html><head><link rel=\"stylesheet\" href=\"/theme.css\"></head></html>",
+                        MediaType.TEXT_HTML));
+        server.expect(requestTo("http://example.com/theme.css"))
+                .andRespond(withSuccess("body { color: red; }", MediaType.valueOf("text/css")));
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc"
+                        + "&_fields=id,link"))
+                .andRespond(withSuccess(
+                        "[{\"id\":1,\"link\":\"http://example.com/hello-world/\"}]",
+                        MediaType.APPLICATION_JSON));
+        server.expect(requestTo("http://example.com/hello-world/"))
+                .andRespond(withSuccess(
+                        "<html><head><link rel=\"stylesheet\" href=\"/custom-tags.css\"></head></html>",
+                        MediaType.TEXT_HTML));
+        server.expect(requestTo("http://example.com/custom-tags.css"))
+                .andRespond(withSuccess(".custom-tag { color: hotpink; }", MediaType.valueOf("text/css")));
+
+        ThemeCssResponse response = service.fetchMasterThemeCss(1L);
+
+        assertTrue(response.available());
+        assertTrue(response.css().contains("body { color: red; }"));
+        assertTrue(response.css().contains(".custom-tag { color: hotpink; }"));
+        server.verify();
+    }
+
+    @Test
+    void fetchThemeCss_参照記事が存在しない場合はトップページのCSSのみ返す() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+
+        server.expect(requestTo("http://example.com"))
+                .andRespond(withSuccess(
+                        "<html><head><link rel=\"stylesheet\" href=\"/theme.css\"></head></html>",
+                        MediaType.TEXT_HTML));
+        server.expect(requestTo("http://example.com/theme.css"))
+                .andRespond(withSuccess("body { color: red; }", MediaType.valueOf("text/css")));
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc"
+                        + "&_fields=id,link"))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        ThemeCssResponse response = service.fetchMasterThemeCss(1L);
+
+        assertTrue(response.available());
+        assertEquals("/* http://example.com/theme.css */\nbody { color: red; }\n", response.css());
+        server.verify();
     }
 
     @Test
@@ -429,13 +502,15 @@ class ArticlePreviewServiceTest {
                         MediaType.APPLICATION_JSON));
         when(previewSkeletonFetcher.fetchAndSplice(
                 "http://example.com/hello-world/", "Hello World", "<p>Hi</p>", "新タイトル", "<p>新本文</p>", null))
-                .thenReturn(new ThemeSkeletonResponse("<article>spliced</article>", true, null, true));
+                .thenReturn(new ThemeSkeletonResponse(
+                        "<article>spliced</article>", true, null, true, "body { color: red; }"));
 
         ThemeSkeletonResponse response = service.renderSkeleton(1L, null, "新タイトル", "<p>新本文</p>", null);
 
         assertTrue(response.available());
         assertEquals("<article>spliced</article>", response.html());
         assertTrue(response.eyecatchSpliced());
+        assertEquals("body { color: red; }", response.css());
     }
 
     @Test
@@ -458,12 +533,14 @@ class ArticlePreviewServiceTest {
                 "新タイトル", "<p>新本文</p>", null))
                 .thenReturn(new ThemeSkeletonResponse(
                         "<article><img src=\"http://wordpress/sites/local-site/wp-content/uploads/x.png\"></article>",
-                        true, null, true));
+                        true, null, true,
+                        "body { background: url(http://wordpress/sites/local-site/wp-content/bg.png); }"));
 
         ThemeSkeletonResponse response = service.renderSkeleton(1L, 30L, "新タイトル", "<p>新本文</p>", null);
 
         assertTrue(response.available());
         assertTrue(response.html().contains("https://localhost/sites/local-site/wp-content/uploads/x.png"));
+        assertTrue(response.css().contains("https://localhost/sites/local-site/wp-content/bg.png"));
         server.verify();
     }
 
@@ -480,11 +557,37 @@ class ArticlePreviewServiceTest {
                         MediaType.APPLICATION_JSON));
         when(previewSkeletonFetcher.fetchAndSplice(
                 "http://example.com/hello-world/", "Hello World", "<p>Hi</p>", "新タイトル", "<p>新本文</p>", null))
-                .thenReturn(new ThemeSkeletonResponse(null, false, "本文の位置を特定できませんでした", false));
+                .thenReturn(new ThemeSkeletonResponse(
+                        null, false, "本文の位置を特定できませんでした", false, "body { color: teal; }"));
 
         ThemeSkeletonResponse response = service.renderSkeleton(1L, null, "新タイトル", "<p>新本文</p>", null);
 
         assertFalse(response.available());
         assertTrue(response.reason().contains("本文の位置を特定できませんでした"));
+        // ナビゲーション自体には成功しているため、本文の差し替えに失敗してもCSSは活かす。
+        assertEquals("body { color: teal; }", response.css());
+    }
+
+    @Test
+    void renderSkeleton_ナビゲーションに成功すれば投稿ページのCSSを収集して返す() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc"
+                        + "&_fields=id,link,title,content"))
+                .andRespond(withSuccess(
+                        "[{\"id\":1,\"link\":\"http://example.com/hello-world/\","
+                        + "\"title\":{\"rendered\":\"Hello World\"},\"content\":{\"rendered\":\"<p>Hi</p>\"}}]",
+                        MediaType.APPLICATION_JSON));
+        when(previewSkeletonFetcher.fetchAndSplice(
+                "http://example.com/hello-world/", "Hello World", "<p>Hi</p>", "新タイトル", "<p>新本文</p>", null))
+                .thenReturn(new ThemeSkeletonResponse(
+                        "<article>spliced</article>", true, null, true,
+                        "/* is_single()限定のCSS */\n.custom-tag { color: hotpink; }"));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(1L, null, "新タイトル", "<p>新本文</p>", null);
+
+        assertTrue(response.available());
+        assertTrue(response.css().contains(".custom-tag { color: hotpink; }"));
     }
 }

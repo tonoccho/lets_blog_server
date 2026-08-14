@@ -34,6 +34,22 @@ public class PreviewSkeletonFetcher {
      */
     private static final String SPLICE_SCRIPT = """
             (args) => {
+              function collectCss() {
+                const parts = [];
+                for (const sheet of Array.from(document.styleSheets)) {
+                  try {
+                    const rules = Array.from(sheet.cssRules).map((r) => r.cssText).join('\\n');
+                    if (rules) {
+                      parts.push('/* ' + (sheet.href || '<style>') + ' */\\n' + rules);
+                    }
+                  } catch (e) {
+                    // クロスオリジンのstylesheet(CORSヘッダー無し)はcssRulesへのアクセスがブロックされる。
+                    // その場合はスキップする(トップページ経由のCSS取得側で別途カバーされ得る)。
+                  }
+                }
+                return parts.join('\\n');
+              }
+              const css = collectCss();
               try {
                 const titleRendered = args.titleRendered;
                 const contentRendered = (args.contentRendered || '').trim();
@@ -57,7 +73,10 @@ public class PreviewSkeletonFetcher {
                   }
                 }
                 if (!contentEl) {
-                  return { available: false, reason: '本文の位置を特定できませんでした', html: null, eyecatchSpliced: false };
+                  return {
+                    available: false, reason: '本文の位置を特定できませんでした', html: null,
+                    eyecatchSpliced: false, css: css
+                  };
                 }
 
                 const titleText = textOf(titleRendered || '');
@@ -144,9 +163,15 @@ public class PreviewSkeletonFetcher {
                   el.setAttribute('style', rewritten);
                 });
 
-                return { available: true, reason: null, html: ancestor.outerHTML, eyecatchSpliced: eyecatchSpliced };
+                return {
+                  available: true, reason: null, html: ancestor.outerHTML,
+                  eyecatchSpliced: eyecatchSpliced, css: css
+                };
               } catch (e) {
-                return { available: false, reason: 'DOM解析に失敗しました: ' + e.message, html: null, eyecatchSpliced: false };
+                return {
+                  available: false, reason: 'DOM解析に失敗しました: ' + e.message, html: null,
+                  eyecatchSpliced: false, css: css
+                };
               }
             }
             """;
@@ -193,13 +218,14 @@ public class PreviewSkeletonFetcher {
     @SuppressWarnings("unchecked")
     private ThemeSkeletonResponse toResponse(Object result) {
         if (!(result instanceof Map)) {
-            return new ThemeSkeletonResponse(null, false, "予期しない結果形式です", false);
+            return new ThemeSkeletonResponse(null, false, "予期しない結果形式です", false, "");
         }
         Map<String, Object> map = (Map<String, Object>) result;
         boolean available = Boolean.TRUE.equals(map.get("available"));
         String html = (String) map.get("html");
         String reason = (String) map.get("reason");
         boolean eyecatchSpliced = Boolean.TRUE.equals(map.get("eyecatchSpliced"));
-        return new ThemeSkeletonResponse(html, available, reason, eyecatchSpliced);
+        String css = (String) map.get("css");
+        return new ThemeSkeletonResponse(html, available, reason, eyecatchSpliced, css != null ? css : "");
     }
 }
