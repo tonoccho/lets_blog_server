@@ -74,6 +74,7 @@ services:
       GENERATED_IMAGES_STORAGE_PATH: /app/data/generated-images
       VSCODE_EXTENSION_SOURCE_PATH: /app/extension-src
       VSCODE_EXTENSION_BUILD_PATH: /app/extension-build
+      DOCKER_SOCKET_PROXY_BASE_URL: http://docker-socket-proxy:2375
     volumes:
       - bulk_upload_files:/app/data/bulk-uploads
       - generated_images:/app/data/generated-images
@@ -86,6 +87,23 @@ services:
         condition: service_healthy
       mailhog:
         condition: service_started
+      docker-socket-proxy:
+        condition: service_started
+    networks:
+      - lbs-net
+
+  # apiコンテナからダッシュボードのコンテナ稼働状況(issue #280)取得のためだけにDocker Engine APIを
+  # 読み取り専用で中継する。apiコンテナ自体にはdocker.sockを渡さない(コンテナ作成/実行系のPOST操作は
+  # 一切許可しない=侵害時にDockerホストを乗っ取られるリスクを避ける)。
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: lbs-docker-socket-proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      POST: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - lbs-net
 

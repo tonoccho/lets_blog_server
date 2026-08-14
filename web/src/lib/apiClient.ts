@@ -2128,3 +2128,25 @@ export async function streamConnectedServiceStatuses(): Promise<Response> {
     cache: 'no-store',
   });
 }
+
+/** このアプリを構成するDockerコンテナ(lbs-*)の稼働状況(issue #280)。 */
+export interface ContainerStatus {
+  id: string;
+  name: string;
+  status: "NORMAL" | "WARNING" | "ERROR";
+  state: string;
+  detail: string;
+}
+
+export function getContainerStatuses(): Promise<ContainerStatus[]> {
+  return apiFetch<ContainerStatus[]>('/api/dashboard/container-status');
+}
+
+/** コンテナ稼働状況をSSEで受け取るためのアップストリーム接続(issue #280)。 */
+export async function streamContainerStatuses(): Promise<Response> {
+  const apiKey = await currentApiKey();
+  return fetch(`${serverUrl()}/api/dashboard/container-status/stream`, {
+    headers: { 'X-API-Key': apiKey, Accept: 'text/event-stream' },
+    cache: 'no-store',
+  });
+}
