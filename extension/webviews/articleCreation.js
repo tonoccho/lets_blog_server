@@ -318,7 +318,12 @@
   document.getElementById('createButton').addEventListener('click', createArticle);
   document.getElementById('brainstormSendButton').addEventListener('click', sendBrainstormMessage);
   document.getElementById('brainstormInput').addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') sendBrainstormMessage();
+    // 通常のEnterは改行(textarea既定の挙動)。Ctrl/Cmd+Enterで送信する(issue #290)。
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      sendBrainstormMessage();
+    }
   });
   document.getElementById('suggestMetadataButton').addEventListener('click', requestMetadataSuggestion);
   document.getElementById('suggestStructureButton').addEventListener('click', requestStructureSuggestion);

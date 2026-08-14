@@ -330,7 +330,11 @@
   document.getElementById('issueNextButton').addEventListener('click', () => changeIssuePage(1));
   document.getElementById('sendButton').addEventListener('click', sendMessage);
   document.getElementById('chatInput').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') sendMessage();
+    // 通常のEnterは改行(textarea既定の挙動)。Ctrl/Cmd+Enterで送信する(issue #290)。
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      sendMessage();
+    }
   });
   document.getElementById('suggestStructureButton').addEventListener('click', requestStructureSuggestion);
   document.getElementById('acceptStructureButton').addEventListener('click', acceptStructure);
