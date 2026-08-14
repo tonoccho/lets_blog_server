@@ -7,6 +7,7 @@ import {
   updateProject,
   updateMasterEnvironment,
   updateProjectGithubRepository,
+  updateProjectImageGenerationPromptDefaults,
   setProjectGithubToken,
   clearProjectGithubToken,
   setProjectBraveSearchApiKey,
@@ -181,6 +182,32 @@ export async function updateProjectGithubRepositoryAction(
 
   try {
     await updateProjectGithubRepository(projectId, githubRepository, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  return { success: true };
+}
+
+export interface UpdateImageGenerationPromptDefaultsState {
+  error?: string;
+  success?: boolean;
+}
+
+export async function updateImageGenerationPromptDefaultsAction(
+  projectId: number,
+  _prevState: UpdateImageGenerationPromptDefaultsState,
+  formData: FormData
+): Promise<UpdateImageGenerationPromptDefaultsState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const defaultNegativePrompt = String(formData.get("defaultNegativePrompt") ?? "").trim();
+  const defaultQualityPrompt = String(formData.get("defaultQualityPrompt") ?? "").trim();
+
+  try {
+    await updateProjectImageGenerationPromptDefaults(projectId, defaultNegativePrompt, defaultQualityPrompt, actor);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

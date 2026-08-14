@@ -96,6 +96,8 @@ app:
   backup-mysql-user: ${BACKUP_MYSQL_USER:lbs_app}
   backup-mysql-password: ${BACKUP_MYSQL_PASSWORD:lbs_app}
   docker-socket-proxy-base-url: ${DOCKER_SOCKET_PROXY_BASE_URL:http://localhost:2375}
+  default-negative-prompt: ${DEFAULT_NEGATIVE_PROMPT:low quality, blurry, watermark, text}
+  default-quality-prompt: ${DEFAULT_QUALITY_PROMPT:high quality, highly detailed, sharp focus, masterpiece}
 
 resilience4j:
   ratelimiter:

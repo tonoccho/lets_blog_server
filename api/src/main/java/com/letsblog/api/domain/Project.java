@@ -50,6 +50,16 @@ public class Project {
     @Column(name = "css_selector_prefix", length = 100)
     private String cssSelectorPrefix;
 
+    /**
+     * 画像生成時に既定で使うnegative prompt/画質プロンプト(issue #293)。未設定時はアプリ全体の
+     * デフォルト(application.yml)にフォールバックする(ProjectService#resolveDefaultNegativePrompt等)。
+     */
+    @Column(name = "default_negative_prompt", length = 1000)
+    private String defaultNegativePrompt;
+
+    @Column(name = "default_quality_prompt", length = 500)
+    private String defaultQualityPrompt;
+
     @Column(name = "ollama_model", length = 255)
     private String ollamaModel;
 

@@ -120,6 +120,7 @@ public class AiAssistService {
     private final GenerationJobRepository generationJobRepository;
     private final WebSearchService webSearchService;
     private final ObjectMapper objectMapper;
+    private final ProjectService projectService;
 
     public AiAssistService(OllamaClient ollamaClient, OllamaModelService ollamaModelService,
                            ComfyUiClient comfyUiClient,
@@ -127,7 +128,8 @@ public class AiAssistService {
                            GeneratedImageStorageService generatedImageStorageService,
                            GeneratedImageRepository generatedImageRepository,
                            GenerationJobRepository generationJobRepository,
-                           WebSearchService webSearchService, ObjectMapper objectMapper) {
+                           WebSearchService webSearchService, ObjectMapper objectMapper,
+                           ProjectService projectService) {
         this.ollamaClient = ollamaClient;
         this.ollamaModelService = ollamaModelService;
         this.comfyUiClient = comfyUiClient;
@@ -137,6 +139,7 @@ public class AiAssistService {
         this.generationJobRepository = generationJobRepository;
         this.webSearchService = webSearchService;
         this.objectMapper = objectMapper;
+        this.projectService = projectService;
     }
 
     public AiImageBatchResponse generateImage(AiImageRequest request) {
@@ -210,9 +213,16 @@ public class AiAssistService {
         String checkpoint = request.checkpoint() != null && !request.checkpoint().isBlank()
                 ? request.checkpoint()
                 : comfyUiModelService.getSelectedCheckpointOrGlobalDefault(request.projectId());
+        String negativePrompt = request.negativePrompt() != null && !request.negativePrompt().isBlank()
+                ? request.negativePrompt()
+                : projectService.resolveDefaultNegativePrompt(request.projectId());
+        String qualityPrompt = projectService.resolveDefaultQualityPrompt(request.projectId());
+        String prompt = qualityPrompt == null || qualityPrompt.isBlank()
+                ? request.prompt()
+                : request.prompt() + ", " + qualityPrompt;
         return new ComfyUiGenerationParams(
-                request.prompt(),
-                request.negativePrompt() != null ? request.negativePrompt() : "low quality, blurry, watermark, text",
+                prompt,
+                negativePrompt,
                 request.steps() != null ? request.steps() : 20,
                 request.cfgScale() != null ? request.cfgScale() : 7.0,
                 request.samplerName() != null ? request.samplerName() : "euler",

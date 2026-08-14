@@ -16,6 +16,7 @@ import com.letsblog.api.dto.StatusComparisonPage;
 import com.letsblog.api.dto.SyncEnvironmentRequest;
 import com.letsblog.api.dto.TermComparisonPage;
 import com.letsblog.api.dto.TermNameRequest;
+import com.letsblog.api.dto.UpdateImageGenerationPromptDefaultsRequest;
 import com.letsblog.api.dto.UpdateMasterEnvironmentRequest;
 import com.letsblog.api.dto.UpdatePostStatusRequest;
 import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
@@ -151,6 +152,14 @@ public class ProjectController {
             @PathVariable Long id, @Valid @RequestBody UpdateProjectCssSelectorPrefixRequest request) {
         adminAuthorizationService.requireAdmin();
         return projectService.updateCssSelectorPrefix(id, request);
+    }
+
+    /** issue #293: 画像生成時のnegative prompt/画質プロンプトのデフォルト値。 */
+    @PutMapping("/{id}/image-generation-prompt-defaults")
+    public ProjectResponse updateImageGenerationPromptDefaults(
+            @PathVariable Long id, @Valid @RequestBody UpdateImageGenerationPromptDefaultsRequest request) {
+        adminAuthorizationService.requireAdmin();
+        return projectService.updateImageGenerationPromptDefaults(id, request);
     }
 
     @PostMapping("/{id}/environments/sync")

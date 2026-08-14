@@ -2,6 +2,7 @@ package com.letsblog.api.service;
 
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.dto.ProjectResponse;
+import com.letsblog.api.dto.UpdateImageGenerationPromptDefaultsRequest;
 import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
 import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
 import com.letsblog.api.repository.ProjectRepository;
@@ -43,7 +44,9 @@ class ProjectServiceTest {
     private BulkUploadStorageService bulkUploadStorageService;
 
     private ProjectService service() {
-        return new ProjectService(projectRepository, siteRepository, bulkUploadStorageService);
+        return new ProjectService(
+                projectRepository, siteRepository, bulkUploadStorageService,
+                "low quality, blurry, watermark, text", "high quality, highly detailed, sharp focus, masterpiece");
     }
 
     private Project buildProject(Long id, String slug) {
@@ -273,6 +276,78 @@ class ProjectServiceTest {
         project.setCssSelectorPrefix("custom-prefix");
 
         assertEquals("custom-prefix", service.resolveCssSelectorPrefix(project));
+    }
+
+    @Test
+    void updateImageGenerationPromptDefaults_値が正常に保存される() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProjectResponse response = service.updateImageGenerationPromptDefaults(
+                1L, new UpdateImageGenerationPromptDefaultsRequest("bad hands, extra fingers", "vivid colors"));
+
+        assertEquals("bad hands, extra fingers", response.defaultNegativePrompt());
+        assertEquals("vivid colors", response.defaultQualityPrompt());
+    }
+
+    @Test
+    void updateImageGenerationPromptDefaults_空文字列はnullに変換される() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        project.setDefaultNegativePrompt("bad hands");
+        project.setDefaultQualityPrompt("vivid colors");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProjectResponse response = service.updateImageGenerationPromptDefaults(
+                1L, new UpdateImageGenerationPromptDefaultsRequest("", ""));
+
+        assertNull(response.defaultNegativePrompt());
+        assertNull(response.defaultQualityPrompt());
+    }
+
+    @Test
+    void resolveDefaultNegativePrompt_projectId未指定ならグローバルデフォルトを返す() {
+        ProjectService service = service();
+
+        assertEquals("low quality, blurry, watermark, text", service.resolveDefaultNegativePrompt(null));
+    }
+
+    @Test
+    void resolveDefaultNegativePrompt_プロジェクト未設定ならグローバルデフォルトを返す() {
+        ProjectService service = service();
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(buildProject(1L, "proj-a")));
+
+        assertEquals("low quality, blurry, watermark, text", service.resolveDefaultNegativePrompt(1L));
+    }
+
+    @Test
+    void resolveDefaultNegativePrompt_プロジェクト設定済みならその値を返す() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        project.setDefaultNegativePrompt("bad hands, extra fingers");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        assertEquals("bad hands, extra fingers", service.resolveDefaultNegativePrompt(1L));
+    }
+
+    @Test
+    void resolveDefaultQualityPrompt_projectId未指定ならグローバルデフォルトを返す() {
+        ProjectService service = service();
+
+        assertEquals("high quality, highly detailed, sharp focus, masterpiece", service.resolveDefaultQualityPrompt(null));
+    }
+
+    @Test
+    void resolveDefaultQualityPrompt_プロジェクト設定済みならその値を返す() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        project.setDefaultQualityPrompt("vivid colors, cinematic lighting");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        assertEquals("vivid colors, cinematic lighting", service.resolveDefaultQualityPrompt(1L));
     }
 
     @Test
