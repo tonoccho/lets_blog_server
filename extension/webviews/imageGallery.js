@@ -190,6 +190,18 @@
   document.getElementById('prevButton').addEventListener('click', function () { changePage(-1); });
   document.getElementById('nextButton').addEventListener('click', function () { changePage(1); });
 
+  /** 他パネルでの生成等により一覧が古くなっている場合に、パネルを開き直さず再取得する(issue #295)。 */
+  document.getElementById('refreshButton').addEventListener('click', function () {
+    if (LetsBlogLoading.isRunning()) return;
+    LetsBlogLoading.begin({
+      buttonIds: ['refreshButton', 'prevButton', 'nextButton'],
+      text: '画像一覧を再取得しています…',
+      kind: 'load',
+      onCancel: function () { post('cancel'); },
+    });
+    post('loadImages');
+  });
+
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && LetsBlogLoading.isRunning()) {
       post('cancel');
