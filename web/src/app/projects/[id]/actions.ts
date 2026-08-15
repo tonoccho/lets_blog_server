@@ -22,6 +22,8 @@ import {
   applyToAllEnvironments,
   setProjectGoogleAnalyticsCredentials,
   clearProjectGoogleAnalyticsCredentials,
+  setProjectAdSenseAccountId,
+  clearProjectAdSenseCredentials,
   syncCategoryToMaster,
   deleteCategoryEverywhere,
   syncTagToMaster,
@@ -372,6 +374,38 @@ export async function clearProjectGoogleAnalyticsCredentialsAction(projectId: nu
   const actor = { id: Number(session.user.id), role: session.user.role };
   await clearProjectGoogleAnalyticsCredentials(projectId, actor);
   revalidatePath(`/projects/${projectId}/settings/google-analytics`);
+  revalidatePath(`/projects/${projectId}/dashboard`);
+}
+
+export async function setProjectAdSenseAccountIdAction(
+  projectId: number,
+  _prevState: ProjectApiKeyFormState,
+  formData: FormData
+): Promise<ProjectApiKeyFormState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const accountId = String(formData.get("accountId") ?? "").trim();
+  if (!accountId) {
+    return { error: "AdSenseパブリッシャーIDを入力してください。" };
+  }
+
+  try {
+    await setProjectAdSenseAccountId(projectId, accountId, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}/settings/adsense`);
+  revalidatePath(`/projects/${projectId}/dashboard`);
+  return { success: true };
+}
+
+export async function clearProjectAdSenseCredentialsAction(projectId: number): Promise<void> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  await clearProjectAdSenseCredentials(projectId, actor);
+  revalidatePath(`/projects/${projectId}/settings/adsense`);
   revalidatePath(`/projects/${projectId}/dashboard`);
 }
 

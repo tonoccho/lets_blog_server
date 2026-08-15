@@ -1,7 +1,10 @@
 package com.letsblog.api.controller;
 
+import com.letsblog.api.dto.CompleteAdSenseOAuthRequest;
+import com.letsblog.api.dto.ProjectAdSenseStatusResponse;
 import com.letsblog.api.dto.ProjectApiKeyStatusResponse;
 import com.letsblog.api.dto.ProjectGoogleAnalyticsStatusResponse;
+import com.letsblog.api.dto.SetProjectAdSenseAccountIdRequest;
 import com.letsblog.api.dto.SetProjectBraveSearchApiKeyRequest;
 import com.letsblog.api.dto.SetProjectGithubTokenRequest;
 import com.letsblog.api.dto.SetProjectGoogleAnalyticsCredentialsRequest;
@@ -11,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -84,6 +88,38 @@ public class ProjectApiKeyController {
     @DeleteMapping("/google-analytics")
     public ResponseEntity<Void> clearGoogleAnalyticsCredentials(@PathVariable Long projectId) {
         projectApiKeyService.clearGoogleAnalyticsCredentials(projectId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/adsense")
+    public ProjectAdSenseStatusResponse getAdSenseStatus(@PathVariable Long projectId) {
+        return new ProjectAdSenseStatusResponse(
+                projectApiKeyService.isAdSenseConfigured(projectId),
+                projectApiKeyService.getAdSenseAccountId(projectId));
+    }
+
+    @PutMapping("/adsense")
+    public ResponseEntity<Void> setAdSenseAccountId(
+            @PathVariable Long projectId, @Valid @RequestBody SetProjectAdSenseAccountIdRequest request) {
+        projectApiKeyService.setAdSenseAccountId(projectId, request.accountId());
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/adsense")
+    public ResponseEntity<Void> clearAdSenseCredentials(@PathVariable Long projectId) {
+        projectApiKeyService.clearAdSenseCredentials(projectId);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Next.js側のOAuthコールバックルート(/connect/adsense/callback)から呼ばれる、認可コード交換の完了通知。
+     * ブラウザから直接叩かれるエンドポイントではない(nginxが/api/配下をSpring Bootへ直接転送するため、
+     * ブラウザ発のOAuthリダイレクトはNext.js側のRoute Handlerで受け、そこからここをサーバー間で呼び出す)。
+     */
+    @PostMapping("/adsense/oauth-callback")
+    public ResponseEntity<Void> completeAdSenseOAuth(
+            @PathVariable Long projectId, @Valid @RequestBody CompleteAdSenseOAuthRequest request) {
+        projectApiKeyService.completeAdSenseOAuth(projectId, request.code(), request.redirectUri());
         return ResponseEntity.noContent().build();
     }
 }

@@ -56,6 +56,10 @@ app:
   brave-search-api-key: test-key
   google-analytics-data-api-base-url: https://analyticsdata.googleapis.com
   google-analytics-oauth-token-uri: https://oauth2.googleapis.com/token
+  google-oauth-client-id: test-client-id
+  google-oauth-client-secret: test-client-secret
+  google-oauth-token-uri: https://oauth2.googleapis.com/token
+  adsense-data-api-base-url: https://adsense.googleapis.com
   plantuml-base-url: http://localhost:8085
   wordpress-provision-base-url: http://localhost:9000
   wordpress-provision-token: test-token

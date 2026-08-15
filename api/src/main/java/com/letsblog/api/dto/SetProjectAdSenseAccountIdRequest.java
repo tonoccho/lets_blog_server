@@ -1,0 +1,6 @@
+package com.letsblog.api.dto;
+
+import jakarta.validation.constraints.NotBlank;
+
+public record SetProjectAdSenseAccountIdRequest(@NotBlank String accountId) {
+}

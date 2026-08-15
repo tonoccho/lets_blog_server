@@ -26,6 +26,9 @@ services:
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
       # ブラウザから見える公開URL(認証コールバック等の生成に使用)
       NEXTAUTH_URL: https://localhost
+      # Google AdSense連携(issue #387)のOAuth同意画面リダイレクト用。クライアントシークレットは
+      # apiコンテナのみに渡し、webコンテナ(ブラウザに近い側)には置かない。
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID}
     # node_modules/.nextは匿名ボリュームにせず./web配下のbind mountに含める
     # (匿名ボリュームは/var/lib/docker配下、すなわちルートディスクに置かれるため、
     # 容量の大きいTurbopackキャッシュがルートディスクを圧迫していた)
@@ -66,6 +69,8 @@ services:
       COMFYUI_CHECKPOINT: ${COMFYUI_CHECKPOINT:-v1-5-pruned-emaonly.safetensors}
       COMFYUI_MODELS_PATH: /comfyui-models
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET}
       PLANTUML_BASE_URL: http://plantuml:8080
       PENPOT_BASE_URL: http://penpot-frontend:8080
       PENPOT_PUBLIC_URL: ${PENPOT_PUBLIC_URL:-http://localhost:9001}
