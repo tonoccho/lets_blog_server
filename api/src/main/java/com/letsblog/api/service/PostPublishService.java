@@ -67,6 +67,7 @@ public class PostPublishService {
     private final UserSiteAuthorRepository userSiteAuthorRepository;
     private final ObjectMapper objectMapper;
     private final ImageResizeService imageResizeService;
+    private final BufferNotificationService bufferNotificationService;
 
     public PostPublishService(SiteService siteService, CmsAdapterFactory cmsAdapterFactory,
                                MarkdownRenderer markdownRenderer, PostRepository postRepository,
@@ -83,7 +84,8 @@ public class PostPublishService {
                                UserRepository userRepository,
                                UserSiteAuthorRepository userSiteAuthorRepository,
                                ObjectMapper objectMapper,
-                               ImageResizeService imageResizeService) {
+                               ImageResizeService imageResizeService,
+                               BufferNotificationService bufferNotificationService) {
         this.siteService = siteService;
         this.cmsAdapterFactory = cmsAdapterFactory;
         this.markdownRenderer = markdownRenderer;
@@ -102,6 +104,7 @@ public class PostPublishService {
         this.userSiteAuthorRepository = userSiteAuthorRepository;
         this.objectMapper = objectMapper;
         this.imageResizeService = imageResizeService;
+        this.bufferNotificationService = bufferNotificationService;
     }
 
     @AuditLog(action = AuditLogAction.POST_PUBLISHED, resourceType = "POST")
@@ -156,9 +159,28 @@ public class PostPublishService {
         PostResult result = cmsAdapter.createOrUpdatePost(credentials, content, command.wpPostId());
         log.info("WordPress投稿完了: postId={}, status={}", result.id(), result.status());
 
-        upsertPostRecord(site.getId(), result, command.slug(), imageResult.uploadedImages());
+        Post post = upsertPostRecord(site.getId(), result, command.slug(), imageResult.uploadedImages());
+
+        if (shouldNotifySns(command, site, projectId, status)) {
+            bufferNotificationService.notifyAsync(post.getId(), site.getId(), command.title(), result.link());
+        }
 
         return new PostPublishResponse(result.id(), result.link(), result.status());
+    }
+
+    /**
+     * BufferによるSNS通知を行うかどうか。下書きや本番以外のサイトへの投稿では通知しない
+     * (issue #379の「プレビュー/下書きでは通知しない」という考慮事項に対応)。
+     * notifySns=falseが明示された場合は呼び出し元(投稿単位)の指定を優先する。
+     */
+    private boolean shouldNotifySns(PostPublishCommand command, Site site, Long projectId, String status) {
+        if (Boolean.FALSE.equals(command.notifySns())) {
+            return false;
+        }
+        if ("draft".equals(status)) {
+            return false;
+        }
+        return isProductionSite(site, projectId);
     }
 
     /** サイト+既存wpPostIdに紐づくPost行から、前回投稿時にアップロード済みの画像情報を読み込む。 */
@@ -347,7 +369,7 @@ public class PostPublishService {
         return slug + "-" + number + extension;
     }
 
-    private void upsertPostRecord(Long siteId, PostResult result, String slug, Map<String, UploadedImageInfo> uploadedImages) {
+    private Post upsertPostRecord(Long siteId, PostResult result, String slug, Map<String, UploadedImageInfo> uploadedImages) {
         Post post = postRepository.findBySiteIdAndWpPostId(siteId, result.id())
                 .orElseGet(Post::new);
 
@@ -359,6 +381,7 @@ public class PostPublishService {
         post.setUploadedImagesJson(serializeUploadedImages(uploadedImages));
 
         postRepository.save(post);
+        return post;
     }
 
     private record ImageReplacementResult(

@@ -106,6 +106,13 @@ app:
   default-generated-image-width: ${DEFAULT_GENERATED_IMAGE_WIDTH:1920}
   default-generated-image-height: ${DEFAULT_GENERATED_IMAGE_HEIGHT:1080}
   default-article-image-long-edge-px: ${DEFAULT_ARTICLE_IMAGE_LONG_EDGE_PX:1300}
+  buffer-enabled: ${BUFFER_ENABLED:false}
+  buffer-api-base-url: ${BUFFER_API_BASE_URL:https://api.bufferapp.com/1}
+  buffer-access-token: ${BUFFER_ACCESS_TOKEN:}
+  buffer-profile-ids: ${BUFFER_PROFILE_IDS:}
+  buffer-post-delay-minutes: ${BUFFER_POST_DELAY_MINUTES:5}
+  buffer-message-template: "${BUFFER_MESSAGE_TEMPLATE:{title} {url}}"
+  buffer-request-timeout-seconds: ${BUFFER_REQUEST_TIMEOUT_SECONDS:30}
 
 resilience4j:
   ratelimiter:
