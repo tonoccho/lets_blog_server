@@ -12,6 +12,7 @@ import java.util.List;
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.springframework.http.HttpMethod.GET;
 import static org.springframework.http.HttpMethod.POST;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
@@ -82,5 +83,57 @@ class BufferClientTest {
 
         assertThrows(BufferApiException.class,
                 () -> client.createUpdate(List.of("profile-1"), "Hello", Instant.now()));
+    }
+
+    @Test
+    void getUpdateStatistics_statisticsの各項目を取得する() {
+        server.expect(requestTo(BASE_URL + "/updates/upd-1.json?access_token=test-access-token"))
+                .andExpect(method(GET))
+                .andRespond(withSuccess(
+                        "{\"statistics\":{\"clicks\":5,\"favorites\":10,\"comments\":2,\"shares\":3}}",
+                        MediaType.APPLICATION_JSON));
+
+        BufferUpdateStatistics stats = client.getUpdateStatistics("upd-1");
+
+        assertEquals(5, stats.clicks());
+        assertEquals(10, stats.favorites());
+        assertEquals(2, stats.comments());
+        assertEquals(3, stats.shares());
+    }
+
+    @Test
+    void getUpdateStatistics_comments_sharesが無ければmentions_retweetsにフォールバックする() {
+        server.expect(requestTo(BASE_URL + "/updates/upd-1.json?access_token=test-access-token"))
+                .andExpect(method(GET))
+                .andRespond(withSuccess(
+                        "{\"statistics\":{\"clicks\":5,\"favorites\":10,\"mentions\":4,\"retweets\":6}}",
+                        MediaType.APPLICATION_JSON));
+
+        BufferUpdateStatistics stats = client.getUpdateStatistics("upd-1");
+
+        assertEquals(4, stats.comments());
+        assertEquals(6, stats.shares());
+    }
+
+    @Test
+    void getUpdateStatistics_statisticsが無ければ全て0() {
+        server.expect(requestTo(BASE_URL + "/updates/upd-1.json?access_token=test-access-token"))
+                .andExpect(method(GET))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        BufferUpdateStatistics stats = client.getUpdateStatistics("upd-1");
+
+        assertEquals(0, stats.clicks());
+        assertEquals(0, stats.favorites());
+        assertEquals(0, stats.comments());
+        assertEquals(0, stats.shares());
+    }
+
+    @Test
+    void getUpdateStatistics_5xx応答の場合は例外を投げる() {
+        server.expect(requestTo(BASE_URL + "/updates/upd-1.json?access_token=test-access-token"))
+                .andRespond(withServerError());
+
+        assertThrows(BufferApiException.class, () -> client.getUpdateStatistics("upd-1"));
     }
 }

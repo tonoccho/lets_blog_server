@@ -1406,6 +1406,20 @@ export function getProjectAdSenseReport(projectId: number, actor?: ActorInfo): P
   return apiFetch<AdSenseReport>(`/api/projects/${projectId}/dashboard/adsense`, { actor });
 }
 
+export interface SocialStats {
+  eligible: boolean;
+  postCount: number | null;
+  likes: number | null;
+  shares: number | null;
+  comments: number | null;
+  clicks: number | null;
+  errorMessage: string | null;
+}
+
+export function getProjectSocialStats(projectId: number, actor?: ActorInfo): Promise<SocialStats> {
+  return apiFetch<SocialStats>(`/api/projects/${projectId}/dashboard/social-stats`, { actor });
+}
+
 export interface PlanChatMessage {
   role: "user" | "assistant";
   content: string;

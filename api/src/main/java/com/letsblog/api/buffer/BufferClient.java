@@ -91,4 +91,41 @@ public class BufferClient {
                     "Buffer API呼び出し中にエラーが発生しました（タイムアウトまたはネットワークエラーの可能性があります）: " + e.getMessage(), e);
         }
     }
+
+    /**
+     * 指定したBuffer update(SNSプラットフォームごとの個別投稿)の統計を取得する(issue #390)。
+     * プラットフォームによってstatisticsのフィールド名が揺れる(例: shares/retweets、comments/mentions)
+     * ため、代表的なフィールド名をフォールバック付きで読む。
+     */
+    public BufferUpdateStatistics getUpdateStatistics(String updateId) {
+        try {
+            JsonNode response = client.get()
+                    .uri(uriBuilder -> uriBuilder.path("/updates/{id}.json")
+                            .queryParam("access_token", accessToken)
+                            .build(updateId))
+                    .retrieve()
+                    .body(JsonNode.class);
+            if (response == null) {
+                return new BufferUpdateStatistics(0, 0, 0, 0);
+            }
+            JsonNode stats = response.path("statistics");
+            return new BufferUpdateStatistics(
+                    stats.path("clicks").asLong(0),
+                    stats.path("favorites").asLong(0),
+                    firstPresent(stats, "comments", "mentions"),
+                    firstPresent(stats, "shares", "retweets"));
+        } catch (RestClientResponseException e) {
+            throw new BufferApiException(
+                    "Buffer統計取得に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+        } catch (Exception e) {
+            throw new BufferApiException("Buffer統計取得中にエラーが発生しました: " + e.getMessage(), e);
+        }
+    }
+
+    private long firstPresent(JsonNode node, String primaryField, String fallbackField) {
+        if (node.has(primaryField)) {
+            return node.path(primaryField).asLong(0);
+        }
+        return node.path(fallbackField).asLong(0);
+    }
 }
