@@ -25,4 +25,16 @@ public class AsyncJobConfig {
         executor.initialize();
         return executor;
     }
+
+    /** Buffer APIへのSNS投稿予約(issue #379)。記事公開のHTTPレスポンスをブロックせずに実行する。 */
+    @Bean(name = "bufferNotificationExecutor")
+    public Executor bufferNotificationExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(50);
+        executor.setThreadNamePrefix("buffer-notify-");
+        executor.initialize();
+        return executor;
+    }
 }
