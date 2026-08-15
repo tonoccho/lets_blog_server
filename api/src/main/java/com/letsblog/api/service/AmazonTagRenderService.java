@@ -43,7 +43,12 @@ public class AmazonTagRenderService {
         this.tagDesignSettingService = tagDesignSettingService;
     }
 
-    public String render(String markdown, Long projectId) {
+    /**
+     * isProductionSiteがfalseの場合(プロジェクトの本番サイト以外での表示/プレビュー)、商品リンクを
+     * 非活性化してレンダリングする(issue #389)。呼び出し側はPostPublishService.isProductionSiteと
+     * 同じ規約(Project.productionSiteIdとの比較)で判定すること。
+     */
+    public String render(String markdown, Long projectId, boolean isProductionSite) {
         if (markdown == null || markdown.isEmpty()) {
             return markdown;
         }
@@ -52,7 +57,8 @@ public class AmazonTagRenderService {
         StringBuilder result = new StringBuilder();
         while (matcher.find()) {
             String rawUrl = matcher.group(1);
-            matcher.appendReplacement(result, Matcher.quoteReplacement(renderCard(rawUrl, projectId)));
+            matcher.appendReplacement(
+                    result, Matcher.quoteReplacement(renderCard(rawUrl, projectId, isProductionSite)));
         }
         matcher.appendTail(result);
 
@@ -93,7 +99,7 @@ public class AmazonTagRenderService {
                 + ";border-radius:4px;padding:4px 10px;align-self:flex-start;margin-top:auto;}";
     }
 
-    private String renderCard(String rawUrl, Long projectId) {
+    private String renderCard(String rawUrl, Long projectId, boolean isProductionSite) {
         try {
             ContentCacheResponse response = contentCacheService.resolve(rawUrl);
             Map<String, String> data = response.data();
@@ -115,15 +121,20 @@ public class AmazonTagRenderService {
                 return EmbedTagTemplateRenderer.render(customTemplate, Map.of(
                         "productName", productName,
                         "price", price,
-                        "productUrl", escapedHref,
+                        "productUrl", isProductionSite ? escapedHref : "",
                         "imageUrl", escapedImageUrl,
                         "summary", summary,
                         "priceTimestamp", priceTimestamp));
             }
 
             StringBuilder html = new StringBuilder();
-            html.append("<a class=\"lb-amazon-card\" href=\"").append(escapedHref)
-                    .append("\" target=\"_blank\" rel=\"noopener noreferrer nofollow sponsored\">");
+            String tag = isProductionSite ? "a" : "div";
+            html.append("<").append(tag).append(" class=\"lb-amazon-card\"");
+            if (isProductionSite) {
+                html.append(" href=\"").append(escapedHref)
+                        .append("\" target=\"_blank\" rel=\"noopener noreferrer nofollow sponsored\"");
+            }
+            html.append(">");
             if (imageUrl != null) {
                 html.append("<div class=\"lb-amazon-card-thumb\" style=\"background-image:url('")
                         .append(escapedImageUrl).append("')\"></div>");
@@ -140,19 +151,20 @@ public class AmazonTagRenderService {
                 html.append("<div class=\"lb-amazon-card-timestamp\">").append(priceTimestamp).append("</div>");
             }
             html.append("<div class=\"lb-amazon-card-cta\">Amazonで見る</div>")
-                    .append("</div></a>");
+                    .append("</div></").append(tag).append(">");
             return html.toString();
         } catch (IllegalArgumentException | ContentScrapingException e) {
             log.warn("[amazon]の展開に失敗したため通常のリンクにフォールバックします: url={}, error={}",
                     rawUrl, e.getMessage());
-            return fallbackLink(rawUrl);
+            return fallbackLink(rawUrl, isProductionSite);
         }
     }
 
-    private String fallbackLink(String rawUrl) {
+    private String fallbackLink(String rawUrl, boolean isProductionSite) {
         String escaped = HtmlUtils.htmlEscape(rawUrl);
-        if (!isHttpUrl(rawUrl)) {
-            // http/https以外(javascript:等)はリンク化せずプレーンテキストとして出力する
+        if (!isProductionSite || !isHttpUrl(rawUrl)) {
+            // 非本番サイトではリンク化せずプレーンテキストとして出力する(issue #389)。
+            // http/https以外(javascript:等)は本番サイトでもリンク化しない。
             return escaped;
         }
         return "<a href=\"" + escaped + "\" target=\"_blank\" rel=\"noopener noreferrer nofollow sponsored\">"

@@ -56,7 +56,7 @@ class AmazonTagRenderServiceTest {
                 "price", "￥1,980",
                 "productUrl", url)));
 
-        String result = service.render("本文\n\n[amazon " + url + "]\n\n続き", PROJECT_ID);
+        String result = service.render("本文\n\n[amazon " + url + "]\n\n続き", PROJECT_ID, true);
 
         assertTrue(result.contains("<style>"), "スタイルブロックが含まれること");
         assertTrue(result.contains("サンプル商品"));
@@ -76,7 +76,7 @@ class AmazonTagRenderServiceTest {
         when(tagDesignSettingService.resolveColors(PROJECT_ID, EmbedTagType.AMAZON))
                 .thenReturn(new TagDesignColors("#ffffff", "#1a1a1a", "#2563eb", ".lb-amazon-card{font-weight:bold;}"));
 
-        String result = service.render("[amazon " + url + "]", PROJECT_ID);
+        String result = service.render("[amazon " + url + "]", PROJECT_ID, true);
 
         assertTrue(result.contains(".lb-amazon-card{font-weight:bold;}"));
         assertFalse(result.contains("background:#ffffff"), "色ベースの生成CSSは含まれないこと: " + result);
@@ -92,7 +92,7 @@ class AmazonTagRenderServiceTest {
         when(tagDesignSettingService.resolveHtmlTemplate(PROJECT_ID, EmbedTagType.AMAZON))
                 .thenReturn("<div class=\"custom\"><a href=\"{{productUrl}}\">{{productName}} - {{price}}</a></div>");
 
-        String result = service.render("[amazon " + url + "]", PROJECT_ID);
+        String result = service.render("[amazon " + url + "]", PROJECT_ID, true);
 
         assertEquals(
                 "<div class=\"custom\"><a href=\"" + url + "\">サンプル商品 - ￥1,980</a></div>",
@@ -110,7 +110,7 @@ class AmazonTagRenderServiceTest {
         when(tagDesignSettingService.resolveHtmlTemplate(PROJECT_ID, EmbedTagType.AMAZON))
                 .thenReturn("<div>{{productName}}: {{summary}} ({{priceTimestamp}})</div>");
 
-        String result = service.render("[amazon " + url + "]", PROJECT_ID);
+        String result = service.render("[amazon " + url + "]", PROJECT_ID, true);
 
         assertEquals("<div>サンプル商品: 軽量です (2026/08/15 14:30時点の価格です)</div>", result);
     }
@@ -119,7 +119,7 @@ class AmazonTagRenderServiceTest {
     void render_タグがなければ何も変更せずスタイルブロックも付与しない() {
         String markdown = "普通の本文です。";
 
-        String result = service.render(markdown, PROJECT_ID);
+        String result = service.render(markdown, PROJECT_ID, true);
 
         assertEquals(markdown, result);
     }
@@ -129,7 +129,7 @@ class AmazonTagRenderServiceTest {
         String url = "https://www.amazon.co.jp/dp/B000000000";
         when(contentCacheService.resolve(url)).thenReturn(response(Map.of("productName", "サンプル商品")));
 
-        String result = service.render("[amazon " + url + "]", PROJECT_ID);
+        String result = service.render("[amazon " + url + "]", PROJECT_ID, true);
 
         assertFalse(result.contains("class=\"lb-amazon-card-price\""));
         assertFalse(result.contains("class=\"lb-amazon-card-timestamp\""), "価格が無い場合は取得時刻も出さないこと");
@@ -142,7 +142,7 @@ class AmazonTagRenderServiceTest {
                 "productName", "サンプル商品",
                 "summary", "軽量で持ち運びやすい")));
 
-        String result = service.render("[amazon " + url + "]", PROJECT_ID);
+        String result = service.render("[amazon " + url + "]", PROJECT_ID, true);
 
         assertTrue(result.contains("class=\"lb-amazon-card-summary\""));
         assertTrue(result.contains("軽量で持ち運びやすい"));
@@ -155,7 +155,7 @@ class AmazonTagRenderServiceTest {
                 "productName", "サンプル商品",
                 "price", "1,980")));
 
-        String result = service.render("[amazon " + url + "]", PROJECT_ID);
+        String result = service.render("[amazon " + url + "]", PROJECT_ID, true);
 
         assertTrue(result.contains(">￥1,980<"));
     }
@@ -167,7 +167,7 @@ class AmazonTagRenderServiceTest {
                 "productName", "サンプル商品",
                 "price", "￥1,980")));
 
-        String result = service.render("[amazon " + url + "]", PROJECT_ID);
+        String result = service.render("[amazon " + url + "]", PROJECT_ID, true);
 
         assertTrue(result.contains(">￥1,980<"));
     }
@@ -181,7 +181,7 @@ class AmazonTagRenderServiceTest {
                 Map.of("productName", "サンプル商品", "price", "￥1,980"),
                 checkedAt, checkedAt));
 
-        String result = service.render("[amazon " + url + "]", PROJECT_ID);
+        String result = service.render("[amazon " + url + "]", PROJECT_ID, true);
 
         assertTrue(result.contains("class=\"lb-amazon-card-timestamp\""));
         assertTrue(result.contains("2026/08/15 14:30時点の価格です"));
@@ -194,7 +194,7 @@ class AmazonTagRenderServiceTest {
         when(contentCacheService.resolve(url1)).thenReturn(response(Map.of("productName", "商品A")));
         when(contentCacheService.resolve(url2)).thenReturn(response(Map.of("productName", "商品B")));
 
-        String result = service.render("[amazon " + url1 + "]\n\n[amazon " + url2 + "]", PROJECT_ID);
+        String result = service.render("[amazon " + url1 + "]\n\n[amazon " + url2 + "]", PROJECT_ID, true);
 
         assertTrue(result.contains("商品A"));
         assertTrue(result.contains("商品B"));
@@ -206,7 +206,7 @@ class AmazonTagRenderServiceTest {
         String url = "https://www.amazon.co.jp/dp/B000000000";
         when(contentCacheService.resolve(url)).thenThrow(new ContentScrapingException("失敗", new RuntimeException()));
 
-        String result = service.render("[amazon " + url + "]", PROJECT_ID);
+        String result = service.render("[amazon " + url + "]", PROJECT_ID, true);
 
         assertEquals("<a href=\"" + url + "\" target=\"_blank\" rel=\"noopener noreferrer nofollow sponsored\">"
                 + url + "</a>", result);
@@ -218,7 +218,7 @@ class AmazonTagRenderServiceTest {
         String url = "javascript:alert(1)";
         when(contentCacheService.resolve(url)).thenThrow(new IllegalArgumentException("不正なURL"));
 
-        String result = service.render("[amazon " + url + "]", PROJECT_ID);
+        String result = service.render("[amazon " + url + "]", PROJECT_ID, true);
 
         assertFalse(result.contains("<a "), "javascript:等はリンク化されないこと: " + result);
         assertFalse(result.contains("javascript:alert(1)\""), "属性値として埋め込まれないこと: " + result);
@@ -231,7 +231,7 @@ class AmazonTagRenderServiceTest {
                 "productName", "<script>alert(1)</script>",
                 "price", "\"onmouseover=\"alert(1)")));
 
-        String result = service.render("[amazon " + url + "]", PROJECT_ID);
+        String result = service.render("[amazon " + url + "]", PROJECT_ID, true);
 
         assertFalse(result.contains("<script>alert(1)</script>"), "scriptタグがエスケープされずに出力されないこと: " + result);
         assertTrue(result.contains("&lt;script&gt;"));
@@ -244,7 +244,7 @@ class AmazonTagRenderServiceTest {
                 "productName", "サンプル商品",
                 "productUrl", "javascript:alert(1)")));
 
-        String result = service.render("[amazon " + url + "]", PROJECT_ID);
+        String result = service.render("[amazon " + url + "]", PROJECT_ID, true);
 
         assertTrue(result.contains("href=\"" + url + "\""));
         assertFalse(result.contains("javascript:alert(1)"));
@@ -257,7 +257,7 @@ class AmazonTagRenderServiceTest {
                 "productName", "サンプル商品",
                 "imageUrl", "data:text/html,<script>alert(1)</script>")));
 
-        String result = service.render("[amazon " + url + "]", PROJECT_ID);
+        String result = service.render("[amazon " + url + "]", PROJECT_ID, true);
 
         assertFalse(result.contains("class=\"lb-amazon-card-thumb\""),
                 "無効な画像URLはサムネイル要素自体を出さないこと(CSS定義自体は含まれてよい): " + result);
@@ -265,8 +265,63 @@ class AmazonTagRenderServiceTest {
 
     @Test
     void render_nullとから文字列はそのまま返す() {
-        assertEquals(null, service.render(null, PROJECT_ID));
-        assertEquals("", service.render("", PROJECT_ID));
+        assertEquals(null, service.render(null, PROJECT_ID, true));
+        assertEquals("", service.render("", PROJECT_ID, true));
+    }
+
+    @Test
+    void render_本番サイト以外ではリンクを非活性化する() {
+        String url = "https://www.amazon.co.jp/dp/B000000000";
+        when(contentCacheService.resolve(url)).thenReturn(response(Map.of(
+                "productName", "サンプル商品",
+                "imageUrl", "https://m.media-amazon.com/images/large.jpg",
+                "price", "￥1,980",
+                "productUrl", url)));
+
+        String result = service.render("[amazon " + url + "]", PROJECT_ID, false);
+
+        assertFalse(result.contains("<a "), "リンク要素として出力しないこと: " + result);
+        assertFalse(result.contains("href="), "href属性を出力しないこと: " + result);
+        assertTrue(result.contains("class=\"lb-amazon-card\""), "カード自体は表示されること");
+        assertTrue(result.contains("サンプル商品"));
+        assertTrue(result.contains("￥1,980"));
+    }
+
+    @Test
+    void render_本番サイト以外ではカスタムHTMLテンプレートのproductUrlも空にする() {
+        String url = "https://www.amazon.co.jp/dp/B000000000";
+        when(contentCacheService.resolve(url)).thenReturn(response(Map.of(
+                "productName", "サンプル商品",
+                "price", "￥1,980",
+                "productUrl", url)));
+        when(tagDesignSettingService.resolveHtmlTemplate(PROJECT_ID, EmbedTagType.AMAZON))
+                .thenReturn("<div class=\"custom\"><a href=\"{{productUrl}}\">{{productName}} - {{price}}</a></div>");
+
+        String result = service.render("[amazon " + url + "]", PROJECT_ID, false);
+
+        assertEquals(
+                "<div class=\"custom\"><a href=\"\">サンプル商品 - ￥1,980</a></div>",
+                result);
+    }
+
+    @Test
+    void render_本番サイト以外ではスクレイピング失敗時のフォールバックもリンク化しない() {
+        String url = "https://www.amazon.co.jp/dp/B000000000";
+        when(contentCacheService.resolve(url)).thenThrow(new ContentScrapingException("失敗", new RuntimeException()));
+
+        String result = service.render("[amazon " + url + "]", PROJECT_ID, false);
+
+        assertEquals(url, result);
+    }
+
+    @Test
+    void render_本番サイトではリンクを活性化したまま維持する() {
+        String url = "https://www.amazon.co.jp/dp/B000000000";
+        when(contentCacheService.resolve(url)).thenReturn(response(Map.of("productName", "サンプル商品")));
+
+        String result = service.render("[amazon " + url + "]", PROJECT_ID, true);
+
+        assertTrue(result.contains("<a class=\"lb-amazon-card\" href=\"" + url + "\""));
     }
 
     private int countOccurrences(String text, String needle) {
