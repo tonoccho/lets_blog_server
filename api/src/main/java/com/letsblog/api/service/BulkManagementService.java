@@ -91,6 +91,38 @@ public class BulkManagementService {
                 categorySlug, categoryParentSlug, categoryDescription, categoryTargetSlug, actorId);
     }
 
+    /**
+     * slugベースのプラグイン/テーマインストールを、紐付いている全環境へ一括実行する(issue #393。
+     * 従来は{@link #applyToEnvironment}で環境を1つずつ選んで実行する必要があった)。
+     * {@link #executeFromUpload}と同様、1環境の失敗(REST/SSH未設定等)が他環境の実行を止めないよう、
+     * resolveSite/applyToSiteの失敗はFAILEDのBulkOperationLogとして記録し次の環境へ進む。
+     */
+    @Transactional
+    public List<BulkOperationLog> applyToAllEnvironments(
+            Long projectId, BulkOperationType type, String value, Long actorId) {
+        if (!type.supportsZipUpload()) {
+            throw new IllegalArgumentException("全環境への一括インストールはプラグイン/テーマのインストールのみ対応しています");
+        }
+        requireNonBlank(value, "slugを入力してください");
+        Project project = getProject(projectId);
+        List<BulkOperationLog> results = new ArrayList<>();
+        for (String environment : ENVIRONMENT_ORDER) {
+            if (siteIdOf(project, environment) == null) {
+                continue;
+            }
+            try {
+                Site site = resolveSite(project, environment, type);
+                results.add(applyToSite(projectId, environment, site, type, value,
+                        null, null, null, null, actorId));
+            } catch (IllegalArgumentException e) {
+                results.add(saveLog(projectId, type, BulkOperationSourceType.SLUG, value,
+                        null, null, null, null, null, null, null,
+                        environment, BulkOperationStatus.FAILED.name(), e.getMessage(), null, actorId));
+            }
+        }
+        return results;
+    }
+
     @Transactional
     public List<BulkOperationLog> executeFromUpload(
             Long projectId, BulkOperationType type, MultipartFile file, Long actorId) throws IOException {

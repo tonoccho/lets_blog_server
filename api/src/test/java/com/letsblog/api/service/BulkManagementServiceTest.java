@@ -320,6 +320,101 @@ class BulkManagementServiceTest {
         assertEquals("shinchaku", result.getCategorySlug());
     }
 
+    // ---- applyToAllEnvironments (issue #393) ----
+
+    @Test
+    void applyToAllEnvironments_カテゴリ系は例外() {
+        BulkManagementService service = service();
+
+        assertThrows(IllegalArgumentException.class, () -> service.applyToAllEnvironments(
+                1L, BulkOperationType.CATEGORY_CREATE, "お知らせ", 9L));
+    }
+
+    @Test
+    void applyToAllEnvironments_有効化等のアクションは例外() {
+        BulkManagementService service = service();
+
+        assertThrows(IllegalArgumentException.class, () -> service.applyToAllEnvironments(
+                1L, BulkOperationType.PLUGIN_ACTIVATE, "akismet", 9L));
+    }
+
+    @Test
+    void applyToAllEnvironments_slug未指定は例外() {
+        BulkManagementService service = service();
+
+        assertThrows(IllegalArgumentException.class, () -> service.applyToAllEnvironments(
+                1L, BulkOperationType.PLUGIN_INSTALL, "", 9L));
+    }
+
+    @Test
+    void applyToAllEnvironments_紐付いている全環境へインストールしログを保存する() {
+        BulkManagementService service = service();
+        Project project = buildProject(10L, 20L, 30L);
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site testSite = buildManagedSite(20L, "test-site");
+        Site productionSite = buildManagedSite(30L, "production-site");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+        when(siteRepository.findById(30L)).thenReturn(Optional.of(productionSite));
+        when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
+
+        List<BulkOperationLog> results = service.applyToAllEnvironments(
+                1L, BulkOperationType.PLUGIN_INSTALL, "akismet", 9L);
+
+        assertEquals(3, results.size());
+        assertEquals("local", results.get(0).getEnvironment());
+        assertEquals("test", results.get(1).getEnvironment());
+        assertEquals("production", results.get(2).getEnvironment());
+        results.forEach(r -> assertEquals(BulkOperationStatus.SUCCESS, r.getStatus()));
+        verify(bulkManagementClient).apply(new BulkApplyCommand(
+                "local-site", "plugin_install", "akismet", null, null, null, null));
+        verify(bulkManagementClient).apply(new BulkApplyCommand(
+                "test-site", "plugin_install", "akismet", null, null, null, null));
+        verify(bulkManagementClient).apply(new BulkApplyCommand(
+                "production-site", "plugin_install", "akismet", null, null, null, null));
+    }
+
+    @Test
+    void applyToAllEnvironments_紐付いていない環境はスキップする() {
+        BulkManagementService service = service();
+        Project project = buildProject(10L, null, null);
+        Site localSite = buildManagedSite(10L, "local-site");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
+
+        List<BulkOperationLog> results = service.applyToAllEnvironments(
+                1L, BulkOperationType.PLUGIN_INSTALL, "akismet", 9L);
+
+        assertEquals(1, results.size());
+        assertEquals("local", results.get(0).getEnvironment());
+    }
+
+    @Test
+    void applyToAllEnvironments_1環境が対象外でも他環境の実行を止めずFAILEDとして記録する() {
+        BulkManagementService service = service();
+        Project project = buildProject(10L, 20L, null);
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site externalSite = buildExternalSite(20L, "external-site");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(siteRepository.findById(20L)).thenReturn(Optional.of(externalSite));
+        when(siteService.resolveDataSource(externalSite)).thenReturn(new SiteService.SiteDataSource(false, null, null));
+        when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
+
+        List<BulkOperationLog> results = service.applyToAllEnvironments(
+                1L, BulkOperationType.PLUGIN_INSTALL, "akismet", 9L);
+
+        assertEquals(2, results.size());
+        assertEquals(BulkOperationStatus.SUCCESS, results.get(0).getStatus());
+        assertEquals("local", results.get(0).getEnvironment());
+        assertEquals(BulkOperationStatus.FAILED, results.get(1).getStatus());
+        assertEquals("test", results.get(1).getEnvironment());
+        verify(bulkManagementClient, never()).apply(new BulkApplyCommand(
+                "external-site", "plugin_install", "akismet", null, null, null, null));
+    }
+
     // ---- executeFromUpload ----
 
     @Test
