@@ -100,6 +100,22 @@ class AmazonTagRenderServiceTest {
     }
 
     @Test
+    void render_htmlTemplateにsummaryとpriceTimestampのプレースホルダを差し込める() {
+        String url = "https://www.amazon.co.jp/dp/B000000000";
+        LocalDateTime checkedAt = LocalDateTime.of(2026, 8, 15, 14, 30);
+        when(contentCacheService.resolve(url)).thenReturn(new ContentCacheResponse(
+                url, ContentType.AMAZON,
+                Map.of("productName", "サンプル商品", "price", "￥1,980", "summary", "軽量です"),
+                checkedAt, checkedAt));
+        when(tagDesignSettingService.resolveHtmlTemplate(PROJECT_ID, EmbedTagType.AMAZON))
+                .thenReturn("<div>{{productName}}: {{summary}} ({{priceTimestamp}})</div>");
+
+        String result = service.render("[amazon " + url + "]", PROJECT_ID);
+
+        assertEquals("<div>サンプル商品: 軽量です (2026/08/15 14:30時点の価格です)</div>", result);
+    }
+
+    @Test
     void render_タグがなければ何も変更せずスタイルブロックも付与しない() {
         String markdown = "普通の本文です。";
 
@@ -116,6 +132,59 @@ class AmazonTagRenderServiceTest {
         String result = service.render("[amazon " + url + "]", PROJECT_ID);
 
         assertFalse(result.contains("class=\"lb-amazon-card-price\""));
+        assertFalse(result.contains("class=\"lb-amazon-card-timestamp\""), "価格が無い場合は取得時刻も出さないこと");
+    }
+
+    @Test
+    void render_商品概要をカードに表示する() {
+        String url = "https://www.amazon.co.jp/dp/B000000000";
+        when(contentCacheService.resolve(url)).thenReturn(response(Map.of(
+                "productName", "サンプル商品",
+                "summary", "軽量で持ち運びやすい")));
+
+        String result = service.render("[amazon " + url + "]", PROJECT_ID);
+
+        assertTrue(result.contains("class=\"lb-amazon-card-summary\""));
+        assertTrue(result.contains("軽量で持ち運びやすい"));
+    }
+
+    @Test
+    void render_通貨記号が無い価格には円マークを補う() {
+        String url = "https://www.amazon.co.jp/dp/B000000000";
+        when(contentCacheService.resolve(url)).thenReturn(response(Map.of(
+                "productName", "サンプル商品",
+                "price", "1,980")));
+
+        String result = service.render("[amazon " + url + "]", PROJECT_ID);
+
+        assertTrue(result.contains(">￥1,980<"));
+    }
+
+    @Test
+    void render_既に円表記の価格は二重に付与しない() {
+        String url = "https://www.amazon.co.jp/dp/B000000000";
+        when(contentCacheService.resolve(url)).thenReturn(response(Map.of(
+                "productName", "サンプル商品",
+                "price", "￥1,980")));
+
+        String result = service.render("[amazon " + url + "]", PROJECT_ID);
+
+        assertTrue(result.contains(">￥1,980<"));
+    }
+
+    @Test
+    void render_価格がある場合は取得日時を表示する() {
+        String url = "https://www.amazon.co.jp/dp/B000000000";
+        LocalDateTime checkedAt = LocalDateTime.of(2026, 8, 15, 14, 30);
+        when(contentCacheService.resolve(url)).thenReturn(new ContentCacheResponse(
+                url, ContentType.AMAZON,
+                Map.of("productName", "サンプル商品", "price", "￥1,980"),
+                checkedAt, checkedAt));
+
+        String result = service.render("[amazon " + url + "]", PROJECT_ID);
+
+        assertTrue(result.contains("class=\"lb-amazon-card-timestamp\""));
+        assertTrue(result.contains("2026/08/15 14:30時点の価格です"));
     }
 
     @Test

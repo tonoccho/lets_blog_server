@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.util.HtmlUtils;
 
+import java.time.format.DateTimeFormatter;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -31,6 +32,7 @@ public class AmazonTagRenderService {
             Pattern.compile("\\[amazon\\s+(\\S+)\\s*]", Pattern.CASE_INSENSITIVE);
 
     private static final String CARD_CLASS_ATTR = "class=\"lb-amazon-card\"";
+    private static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm");
 
     private final ContentCacheService contentCacheService;
     private final TagDesignSettingService tagDesignSettingService;
@@ -83,7 +85,10 @@ public class AmazonTagRenderService {
                 + "flex-direction:column;gap:4px;}"
                 + ".lb-amazon-card-name{font-weight:600;font-size:1em;overflow:hidden;display:-webkit-box;"
                 + "-webkit-line-clamp:2;-webkit-box-orient:vertical;}"
+                + ".lb-amazon-card-summary{font-size:.85em;opacity:.75;overflow:hidden;display:-webkit-box;"
+                + "-webkit-line-clamp:2;-webkit-box-orient:vertical;}"
                 + ".lb-amazon-card-price{font-size:1.05em;font-weight:700;color:" + colors.accentColor() + ";}"
+                + ".lb-amazon-card-timestamp{font-size:.75em;opacity:.6;}"
                 + ".lb-amazon-card-cta{font-size:.8em;color:#fff;background:" + colors.accentColor()
                 + ";border-radius:4px;padding:4px 10px;align-self:flex-start;margin-top:auto;}";
     }
@@ -96,9 +101,14 @@ public class AmazonTagRenderService {
             String href = sanitizeUrl(data.get("productUrl"), rawUrl);
             String imageUrl = sanitizeUrl(data.get("imageUrl"), null);
             String productName = HtmlUtils.htmlEscape(firstNonBlank(data.get("productName"), href));
-            String price = HtmlUtils.htmlEscape(nullToEmpty(data.get("price")));
+            String price = HtmlUtils.htmlEscape(toYenPrice(data.get("price")));
+            String summary = HtmlUtils.htmlEscape(nullToEmpty(data.get("summary")));
             String escapedHref = HtmlUtils.htmlEscape(href);
             String escapedImageUrl = imageUrl == null ? "" : HtmlUtils.htmlEscape(imageUrl);
+            String fetchedAt = response.lastCheckedAt() == null
+                    ? "" : response.lastCheckedAt().format(TIMESTAMP_FORMATTER);
+            String priceTimestamp = fetchedAt.isEmpty() || price.isEmpty()
+                    ? "" : fetchedAt + "時点の価格です";
 
             String customTemplate = tagDesignSettingService.resolveHtmlTemplate(projectId, EmbedTagType.AMAZON);
             if (customTemplate != null) {
@@ -106,7 +116,9 @@ public class AmazonTagRenderService {
                         "productName", productName,
                         "price", price,
                         "productUrl", escapedHref,
-                        "imageUrl", escapedImageUrl));
+                        "imageUrl", escapedImageUrl,
+                        "summary", summary,
+                        "priceTimestamp", priceTimestamp));
             }
 
             StringBuilder html = new StringBuilder();
@@ -118,8 +130,14 @@ public class AmazonTagRenderService {
             }
             html.append("<div class=\"lb-amazon-card-body\">")
                     .append("<div class=\"lb-amazon-card-name\">").append(productName).append("</div>");
+            if (!summary.isEmpty()) {
+                html.append("<div class=\"lb-amazon-card-summary\">").append(summary).append("</div>");
+            }
             if (!price.isEmpty()) {
                 html.append("<div class=\"lb-amazon-card-price\">").append(price).append("</div>");
+            }
+            if (!priceTimestamp.isEmpty()) {
+                html.append("<div class=\"lb-amazon-card-timestamp\">").append(priceTimestamp).append("</div>");
             }
             html.append("<div class=\"lb-amazon-card-cta\">Amazonで見る</div>")
                     .append("</div></a>");
@@ -156,6 +174,20 @@ public class AmazonTagRenderService {
 
     private String nullToEmpty(String value) {
         return value == null ? "" : value;
+    }
+
+    /**
+     * 日本円であることを明示する(issue #347)。Amazon.co.jpの価格表示は既に円建てだが、
+     * セレクタによっては通貨記号が付かない場合があるため、¥/円のいずれも無ければ全角の￥を補う
+     * (Amazon.co.jpの価格表示自体が全角￥を使うため、それに揃える)。
+     * 半角¥はHtmlUtils.htmlEscapeでHTML実体参照(&yen;)に変換され、生の文字として出力されなくなるため使わない。
+     */
+    private String toYenPrice(String rawPrice) {
+        String price = nullToEmpty(rawPrice).trim();
+        if (price.isEmpty() || price.startsWith("¥") || price.startsWith("￥") || price.endsWith("円")) {
+            return price;
+        }
+        return "￥" + price;
     }
 
     private String firstNonBlank(String value, String fallback) {
