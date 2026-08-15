@@ -18,7 +18,7 @@ vi .env   # パスワード・APIキー・暗号化キー・NEXTAUTH_SECRET等�
 # 2. リバースプロキシ用の自己署名証明書を生成
 bash scripts/generate-certs.sh
 
-# 3. Docker Compose で全サービスを起動(reverse-proxy/web/api/mysql/phpmyadmin/ollama/comfyui/plantuml/mailhog)
+# 3. Docker Compose で全サービスを起動(reverse-proxy/web/api/mysql/phpmyadmin/ollama/comfyui/plantuml)
 docker compose up -d
 
 # 4. ブラウザで https://localhost にアクセス(自己署名証明書の警告は例外承認する)
@@ -44,6 +44,7 @@ docker compose up -d
 | `OLLAMA_MODEL` | 下書き/校正/要約・タグ提案で使うOllamaモデル | 既定値のままでも可 |
 | `COMFYUI_CHECKPOINT` | 画像生成に使うチェックポイントファイル名 | 既定値のままでも可 |
 | `APP_MAIL_FROM` / `APP_WEB_BASE_URL` | メール送信元・Web公開URL(メール内リンク生成に使用) | `APP_WEB_BASE_URL` は `https://localhost` を指定 |
+| `MAIL_HOST` / `MAIL_PORT` / `MAIL_USERNAME` / `MAIL_PASSWORD` | 外部メールサービス(SendGrid/Resend/AWS SES等)のSMTP接続情報 | 必須変更 |
 | `NEXTAUTH_SECRET` | Web管理画面(Auth.js)のセッション署名鍵。生成例: `openssl rand -hex 32` | 必須変更 |
 
 ## 2. TLS証明書の生成
@@ -64,7 +65,7 @@ bash scripts/generate-certs.sh
 docker compose up -d
 ```
 
-起動するサービス: `reverse-proxy`(nginx) / `web`(Next.js) / `api` / `mysql` / `phpmyadmin` / `ollama` / `comfyui` / `plantuml` / `mailhog`。
+起動するサービス: `reverse-proxy`(nginx) / `web`(Next.js) / `api` / `mysql` / `phpmyadmin` / `ollama` / `comfyui` / `plantuml`。
 
 Phase 6 以降、`reverse-proxy` の `80`(HTTP→HTTPSリダイレクト)・`443`(HTTPS)以外はホストにポート公開していない。
 各サービスへは直接ポートではなく、必ず `https://localhost/...` 経由でアクセスする。
@@ -89,7 +90,6 @@ docker compose logs -f web  # Web管理画面のログ確認
 | Ollama | https://localhost/ollama/ | ローカルLLM API(UIなし。`GET /ollama/api/tags` 等) |
 | ComfyUI | https://localhost/comfyui/ | 画像生成ワークフローUI |
 | PlantUML | https://localhost/plantuml/ | 図のプレビュー・検証用 |
-| Mailhog | https://localhost/mailhog/ | 開発時のメール送受信確認(送信先の実メールサーバーの代わり) |
 
 ### ブラウザの自己署名証明書警告について
 
