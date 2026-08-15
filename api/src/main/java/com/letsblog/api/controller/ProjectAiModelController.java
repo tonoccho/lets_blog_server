@@ -3,13 +3,12 @@ package com.letsblog.api.controller;
 import com.letsblog.api.dto.ComfyUiCheckpointListResponse;
 import com.letsblog.api.dto.GenerationJobResponse;
 import com.letsblog.api.dto.InstallComfyUiCheckpointRequest;
-import com.letsblog.api.dto.InstallOllamaModelRequest;
-import com.letsblog.api.dto.OllamaModelListResponse;
+import com.letsblog.api.dto.LlmModelListResponse;
 import com.letsblog.api.dto.SelectComfyUiCheckpointRequest;
-import com.letsblog.api.dto.SelectOllamaModelRequest;
+import com.letsblog.api.dto.SelectLlmModelRequest;
 import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.ComfyUiModelService;
-import com.letsblog.api.service.OllamaModelService;
+import com.letsblog.api.service.LlmModelService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,55 +17,40 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * プロジェクト画面から、そのプロジェクトが使うOllama/ComfyUIのモデルを
- * 一覧・切り替え・インストール・削除するためのAPI。
+ * プロジェクト画面から、そのプロジェクトが使うLLM/ComfyUIのモデルを一覧・切り替えするためのAPI。
+ * ComfyUIについては加えてインストール・削除も扱う(ローカルダウンロードが必要なため)。
  */
 @RestController
 @RequestMapping("/api/projects/{id}/ai-models")
 public class ProjectAiModelController {
 
-    private final OllamaModelService ollamaModelService;
+    private final LlmModelService llmModelService;
     private final ComfyUiModelService comfyUiModelService;
     private final AdminAuthorizationService adminAuthorizationService;
 
     public ProjectAiModelController(
-            OllamaModelService ollamaModelService,
+            LlmModelService llmModelService,
             ComfyUiModelService comfyUiModelService,
             AdminAuthorizationService adminAuthorizationService) {
-        this.ollamaModelService = ollamaModelService;
+        this.llmModelService = llmModelService;
         this.comfyUiModelService = comfyUiModelService;
         this.adminAuthorizationService = adminAuthorizationService;
     }
 
-    @GetMapping("/ollama/models")
-    public OllamaModelListResponse listOllamaModels(@PathVariable Long id) {
+    @GetMapping("/llm/models")
+    public LlmModelListResponse listLlmModels(@PathVariable Long id) {
         adminAuthorizationService.requireAdmin();
-        return ollamaModelService.listModelsForProject(id);
+        return llmModelService.listModelsForProject(id);
     }
 
-    @PutMapping("/ollama/models/selection")
-    public OllamaModelListResponse selectOllamaModel(
-            @PathVariable Long id, @Valid @RequestBody SelectOllamaModelRequest request) {
+    @PutMapping("/llm/models/selection")
+    public LlmModelListResponse selectLlmModel(
+            @PathVariable Long id, @Valid @RequestBody SelectLlmModelRequest request) {
         adminAuthorizationService.requireAdmin();
-        return ollamaModelService.selectModel(id, request.modelName());
-    }
-
-    @PostMapping("/ollama/models/install")
-    public GenerationJobResponse installOllamaModel(
-            @PathVariable Long id, @Valid @RequestBody InstallOllamaModelRequest request) {
-        adminAuthorizationService.requireAdmin();
-        return ollamaModelService.startPull(request.modelName());
-    }
-
-    @DeleteMapping("/ollama/models")
-    public GenerationJobResponse deleteOllamaModel(
-            @PathVariable Long id, @RequestParam String modelName) {
-        adminAuthorizationService.requireAdmin();
-        return ollamaModelService.startDelete(modelName);
+        return llmModelService.selectModel(id, request.modelName());
     }
 
     @GetMapping("/comfyui/checkpoints")

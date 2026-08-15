@@ -21,7 +21,7 @@ import java.time.Duration;
 /**
  * PenpotのRPC API(/api/rpc/command/*)を呼び出す薄いクライアント。
  * Penpotにはテキストプロンプトからデザインを自動生成するAPIが存在しないため、
- * 「カスタムタグ生成時にOllamaへ送ったプロンプトと生成結果を元に、Penpot上へ空のデザインファイルを
+ * 「カスタムタグ生成時にLLMへ送ったプロンプトと生成結果を元に、Penpot上へ空のデザインファイルを
  * 作成しコメントスレッドとして書き込む」ハンドオフ方式で連携する。以降はPenpot上でデザイナーが
  * 続きを視覚的に編集できる。
  *
@@ -88,7 +88,7 @@ public class PenpotClient {
 
     /**
      * 指定名のPenpotデザインファイルをサービスアカウントのデフォルトプロジェクト配下に作成し、
-     * promptContext(Ollamaへのプロンプトと生成結果の要約)をコメントスレッドとして書き込む。
+     * promptContext(LLMへのプロンプトと生成結果の要約)をコメントスレッドとして書き込む。
      */
     public synchronized DesignFile createDesignFile(String fileName, String promptContext) {
         Session activeSession;

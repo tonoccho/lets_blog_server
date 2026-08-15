@@ -7,7 +7,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import java.util.concurrent.Executor;
 
 /**
- * Ollama pull / ComfyUIチェックポイントダウンロード等、数分かかりうる処理を
+ * ComfyUIチェックポイントダウンロード等、数分かかりうる処理を
  * HTTPリクエストをブロックせずに実行するための専用スレッドプール。
  * デフォルトのSimpleAsyncTaskExecutorは無制限にスレッドを生成するため、
  * 同時ダウンロード数の上限を設けるために明示的なBeanを用意する。

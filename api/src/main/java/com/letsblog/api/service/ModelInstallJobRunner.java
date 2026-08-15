@@ -2,7 +2,6 @@ package com.letsblog.api.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.ai.ComfyUiCheckpointStorageService;
-import com.letsblog.api.ai.OllamaClient;
 import com.letsblog.api.domain.GenerationJob;
 import com.letsblog.api.repository.GenerationJobRepository;
 import org.slf4j.Logger;
@@ -13,9 +12,9 @@ import org.springframework.stereotype.Service;
 import java.util.Map;
 
 /**
- * Ollama pull / ComfyUIチェックポイントダウンロードなど、数分かかりうる処理をバックグラウンドスレッドで実行する。
+ * ComfyUIチェックポイントダウンロードなど、数分かかりうる処理をバックグラウンドスレッドで実行する。
  * Spring の {@code @Async} は同一クラス内の自己呼び出しには効かない(プロキシを経由しないため)ため、
- * ジョブを起動する {@link OllamaModelService}/{@link ComfyUiModelService} とは別クラスに分離している。
+ * ジョブを起動する {@link ComfyUiModelService} とは別クラスに分離している。
  */
 @Service
 public class ModelInstallJobRunner {
@@ -23,39 +22,17 @@ public class ModelInstallJobRunner {
     private static final Logger log = LoggerFactory.getLogger(ModelInstallJobRunner.class);
     private static final long PROGRESS_UPDATE_INTERVAL_MS = 500;
 
-    private final OllamaClient ollamaClient;
     private final ComfyUiCheckpointStorageService comfyUiCheckpointStorageService;
     private final GenerationJobRepository generationJobRepository;
     private final ObjectMapper objectMapper;
 
     public ModelInstallJobRunner(
-            OllamaClient ollamaClient,
             ComfyUiCheckpointStorageService comfyUiCheckpointStorageService,
             GenerationJobRepository generationJobRepository,
             ObjectMapper objectMapper) {
-        this.ollamaClient = ollamaClient;
         this.comfyUiCheckpointStorageService = comfyUiCheckpointStorageService;
         this.generationJobRepository = generationJobRepository;
         this.objectMapper = objectMapper;
-    }
-
-    @Async("modelInstallExecutor")
-    public void runOllamaPull(Long jobId, String modelName) {
-        runJob(jobId, reporter -> ollamaClient.pullModel(modelName, progress -> {
-            Integer percent = progress.total() > 0
-                    ? (int) Math.round(progress.completed() * 100.0 / progress.total())
-                    : null;
-            reporter.report(
-                    progress.status(),
-                    percent,
-                    progress.total() > 0 ? progress.completed() : null,
-                    progress.total() > 0 ? progress.total() : null);
-        }));
-    }
-
-    @Async("modelInstallExecutor")
-    public void runOllamaDelete(Long jobId, String modelName) {
-        runJob(jobId, reporter -> ollamaClient.deleteModel(modelName));
     }
 
     @Async("modelInstallExecutor")

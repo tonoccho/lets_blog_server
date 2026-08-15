@@ -3,7 +3,7 @@ package com.letsblog.api.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.api.ai.OllamaClient;
+import com.letsblog.api.ai.LlmClient;
 import com.letsblog.api.cms.CmsAdapter;
 import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsCredentials;
@@ -38,7 +38,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Ollamaを利用した記事企画の壁打ちチャットとタイトル提案。
+ * LLMを利用した記事企画の壁打ちチャットとタイトル提案。
  * 会話履歴はサーバー側で保持せず、呼び出しごとにフロントから全履歴を受け取る。
  */
 @Service
@@ -73,8 +73,8 @@ public class ArticlePlanService {
             + "}\n\n"
             + "出力はJSONオブジェクトのみとし、説明文は含めないでください。";
 
-    private final OllamaClient ollamaClient;
-    private final OllamaModelService ollamaModelService;
+    private final LlmClient llmClient;
+    private final LlmModelService llmModelService;
     private final WebSearchService webSearchService;
     private final GenerationJobRepository generationJobRepository;
     private final ObjectMapper objectMapper;
@@ -86,8 +86,8 @@ public class ArticlePlanService {
     private final CmsAdapterFactory cmsAdapterFactory;
 
     public ArticlePlanService(
-            OllamaClient ollamaClient,
-            OllamaModelService ollamaModelService,
+            LlmClient llmClient,
+            LlmModelService llmModelService,
             WebSearchService webSearchService,
             GenerationJobRepository generationJobRepository,
             ObjectMapper objectMapper,
@@ -97,8 +97,8 @@ public class ArticlePlanService {
             ArticlePlanSessionRepository articlePlanSessionRepository,
             SiteService siteService,
             CmsAdapterFactory cmsAdapterFactory) {
-        this.ollamaClient = ollamaClient;
-        this.ollamaModelService = ollamaModelService;
+        this.llmClient = llmClient;
+        this.llmModelService = llmModelService;
         this.webSearchService = webSearchService;
         this.generationJobRepository = generationJobRepository;
         this.objectMapper = objectMapper;
@@ -122,10 +122,10 @@ public class ArticlePlanService {
                 "historyLength", String.valueOf(history.size())
         ));
         try {
-            String model = ollamaModelService.getSelectedModel(projectId);
+            String model = llmModelService.getSelectedModel(projectId);
             WebSearchOutcome searchOutcome = webSearchService.searchSafely(message, projectId);
             String prompt = buildChatPrompt(history, message, searchOutcome);
-            String reply = ollamaClient.generate(prompt, model);
+            String reply = llmClient.generate(prompt, model);
             completeJob(job, Map.of(
                     "reply", reply,
                     "webSearchAttempted", "true",
@@ -181,7 +181,7 @@ public class ArticlePlanService {
         GenerationJob job = startJob("plan_session_title", Map.of("message", firstMessage));
         try {
             String prompt = "User: " + firstMessage + "\n\n" + TITLE_GENERATION_INSTRUCTION;
-            String raw = ollamaClient.generate(prompt, model);
+            String raw = llmClient.generate(prompt, model);
             String title = sanitizeTitle(raw);
             completeJob(job, Map.of("title", title));
             return title;
@@ -328,8 +328,8 @@ public class ArticlePlanService {
                 "historyLength", String.valueOf(history.size())
         ));
         try {
-            String model = ollamaModelService.getSelectedModel(projectId);
-            String raw = ollamaClient.generate(buildTitleSuggestionPrompt(history), model);
+            String model = llmModelService.getSelectedModel(projectId);
+            String raw = llmClient.generate(buildTitleSuggestionPrompt(history), model);
             List<String> titles = parseTitles(raw);
             completeJob(job, Map.of("titlesCount", String.valueOf(titles.size()), "raw", raw));
             return new SuggestTitlesResponse(titles);
@@ -348,8 +348,8 @@ public class ArticlePlanService {
                 "historyLength", String.valueOf(history.size())
         ));
         try {
-            String model = ollamaModelService.getSelectedModel(projectId);
-            String structure = ollamaClient.generate(buildStructureSuggestionPrompt(history), model).strip();
+            String model = llmModelService.getSelectedModel(projectId);
+            String structure = llmClient.generate(buildStructureSuggestionPrompt(history), model).strip();
             completeJob(job, Map.of("structureLength", String.valueOf(structure.length())));
             return new SuggestStructureResponse(structure);
         } catch (RuntimeException e) {
@@ -381,13 +381,13 @@ public class ArticlePlanService {
         ));
         try {
             List<String> existingCategories = listExistingCategories(projectId);
-            String model = ollamaModelService.getSelectedModel(projectId);
+            String model = llmModelService.getSelectedModel(projectId);
             String prompt = buildMetadataSuggestionPrompt(history, existingCategories);
 
             String raw = "";
             SuggestMetadataResponse response = new SuggestMetadataResponse(List.of(), List.of(), List.of(), List.of());
             for (int attempt = 1; attempt <= MAX_METADATA_ATTEMPTS; attempt++) {
-                raw = ollamaClient.generate(prompt, model);
+                raw = llmClient.generate(prompt, model);
                 response = parseMetadata(raw);
                 if (isUsableMetadata(response)) {
                     break;

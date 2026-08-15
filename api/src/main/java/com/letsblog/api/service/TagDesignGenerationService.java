@@ -1,6 +1,6 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.ai.OllamaClient;
+import com.letsblog.api.ai.LlmClient;
 import com.letsblog.api.domain.EmbedTagType;
 import com.letsblog.api.dto.GenerateTagDesignResponse;
 import org.springframework.stereotype.Service;
@@ -34,25 +34,25 @@ public class TagDesignGenerationService {
                     "Amazon商品カード", "[amazon URL]", ".lb-amazon-card",
                     "{{productName}}, {{price}}, {{productUrl}}, {{imageUrl}}"));
 
-    private final OllamaClient ollamaClient;
-    private final OllamaModelService ollamaModelService;
+    private final LlmClient llmClient;
+    private final LlmModelService llmModelService;
 
-    public TagDesignGenerationService(OllamaClient ollamaClient, OllamaModelService ollamaModelService) {
-        this.ollamaClient = ollamaClient;
-        this.ollamaModelService = ollamaModelService;
+    public TagDesignGenerationService(LlmClient llmClient, LlmModelService llmModelService) {
+        this.llmClient = llmClient;
+        this.llmModelService = llmModelService;
     }
 
     public GenerateTagDesignResponse generate(
             Long projectId, EmbedTagType tagType, String userPrompt, String currentHtmlTemplate) {
-        String model = ollamaModelService.getSelectedModel(projectId);
-        String response = ollamaClient.generate(buildPrompt(tagType, userPrompt, currentHtmlTemplate), model);
+        String model = llmModelService.getSelectedModel(projectId);
+        String response = llmClient.generate(buildPrompt(tagType, userPrompt, currentHtmlTemplate), model);
 
         String cssContent = extract(CSS_PATTERN, response);
         String htmlTemplate = extract(HTML_PATTERN, response);
 
         if (cssContent.isBlank()) {
             throw new InvalidCustomTagContentException(
-                    "OllamaレスポンスからCSSを抽出できませんでした。```css ... ``` の形式で返されることを確認してください。");
+                    "LLMレスポンスからCSSを抽出できませんでした。```css ... ``` の形式で返されることを確認してください。");
         }
 
         return new GenerateTagDesignResponse(htmlTemplate, cssContent);

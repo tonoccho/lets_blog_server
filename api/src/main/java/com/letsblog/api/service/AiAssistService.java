@@ -6,7 +6,7 @@ import com.letsblog.api.ai.ComfyUiClient;
 import com.letsblog.api.ai.ComfyUiGenerationParams;
 import com.letsblog.api.ai.ComfyUiImage;
 import com.letsblog.api.ai.GeneratedImageStorageService;
-import com.letsblog.api.ai.OllamaClient;
+import com.letsblog.api.ai.LlmClient;
 import com.letsblog.api.domain.GeneratedImage;
 import com.letsblog.api.domain.GenerationJob;
 import com.letsblog.api.dto.AiDraftRequest;
@@ -34,7 +34,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Ollama/ComfyUIを利用した記事執筆支援(下書き/校正/要約、タグ・カテゴリ提案、画像生成)。
+ * LLM/ComfyUIを利用した記事執筆支援(下書き/校正/要約、タグ・カテゴリ提案、画像生成)。
  * 呼び出しごとに generation_jobs テーブルへ履歴を記録する。
  */
 @Service
@@ -127,8 +127,8 @@ public class AiAssistService {
             %s
             """;
 
-    private final OllamaClient ollamaClient;
-    private final OllamaModelService ollamaModelService;
+    private final LlmClient llmClient;
+    private final LlmModelService llmModelService;
     private final ComfyUiClient comfyUiClient;
     private final ComfyUiModelService comfyUiModelService;
     private final GeneratedImageStorageService generatedImageStorageService;
@@ -138,7 +138,7 @@ public class AiAssistService {
     private final ObjectMapper objectMapper;
     private final ProjectService projectService;
 
-    public AiAssistService(OllamaClient ollamaClient, OllamaModelService ollamaModelService,
+    public AiAssistService(LlmClient llmClient, LlmModelService llmModelService,
                            ComfyUiClient comfyUiClient,
                            ComfyUiModelService comfyUiModelService,
                            GeneratedImageStorageService generatedImageStorageService,
@@ -146,8 +146,8 @@ public class AiAssistService {
                            GenerationJobRepository generationJobRepository,
                            WebSearchService webSearchService, ObjectMapper objectMapper,
                            ProjectService projectService) {
-        this.ollamaClient = ollamaClient;
-        this.ollamaModelService = ollamaModelService;
+        this.llmClient = llmClient;
+        this.llmModelService = llmModelService;
         this.comfyUiClient = comfyUiClient;
         this.comfyUiModelService = comfyUiModelService;
         this.generatedImageStorageService = generatedImageStorageService;
@@ -183,12 +183,12 @@ public class AiAssistService {
 
     /**
      * 画像生成プロンプトから検索・分類用のタグを提案し、JSON配列文字列として返す(issue #281)。
-     * タグ提案はあくまで補助機能のため、Ollama呼び出しの失敗で画像生成自体を失敗させない
+     * タグ提案はあくまで補助機能のため、LLM呼び出しの失敗で画像生成自体を失敗させない
      * (取得できない場合はタグなし=nullを返す)。
      */
     private String suggestImageTagsJson(String prompt) {
         try {
-            String raw = ollamaClient.generate(IMAGE_TAGS_PROMPT_TEMPLATE.formatted(prompt));
+            String raw = llmClient.generate(IMAGE_TAGS_PROMPT_TEMPLATE.formatted(prompt));
             JsonNode node = objectMapper.readTree(extractJsonObject(raw));
             List<String> tags = toStringList(node.get("tags"));
             if (tags.isEmpty()) {
@@ -202,18 +202,18 @@ public class AiAssistService {
     }
 
     /**
-     * チャットメッセージ(と任意の履歴)から、ComfyUIへ渡す画像生成プロンプト(英語)をOllamaで生成する。
+     * チャットメッセージ(と任意の履歴)から、ComfyUIへ渡す画像生成プロンプト(英語)をLLMで生成する。
      * ArticlePlanService.buildChatPromptと同様に「System+履歴+User」形式でプロンプトを組み立てる。
      */
     public AiImagePromptResponse generateImagePrompt(Long projectId, List<PlanChatMessage> history, String message) {
-        GenerationJob job = startJob("ollama_image_prompt", Map.of(
+        GenerationJob job = startJob("llm_image_prompt", Map.of(
                 "projectId", String.valueOf(projectId),
                 "message", message
         ));
         try {
-            String model = ollamaModelService.getSelectedModel(projectId);
+            String model = llmModelService.getSelectedModel(projectId);
             String prompt = buildImagePromptChat(history, message);
-            String result = ollamaClient.generate(prompt, model);
+            String result = llmClient.generate(prompt, model);
             completeJob(job, Map.of("result", result));
             return new AiImagePromptResponse(result);
         } catch (RuntimeException e) {
@@ -307,11 +307,11 @@ public class AiAssistService {
                     "mode は draft/proofread/summarize のいずれかを指定してください: " + request.mode());
         }
 
-        GenerationJob job = startJob("ollama_" + request.mode(), Map.of("mode", request.mode(), "text", request.text()));
+        GenerationJob job = startJob("llm_" + request.mode(), Map.of("mode", request.mode(), "text", request.text()));
         try {
             WebSearchOutcome searchOutcome = webSearchService.searchSafely(buildSearchQuery(request.text()));
             String prompt = WebSearchService.formatForPrompt(searchOutcome) + template.formatted(request.text());
-            String result = ollamaClient.generate(prompt);
+            String result = llmClient.generate(prompt);
             completeJob(job, Map.of("result", result));
             return new AiDraftResponse(result, WebSearchService.toSources(searchOutcome),
                     WebSearchService.buildSearchNote(searchOutcome));
@@ -343,7 +343,7 @@ public class AiAssistService {
         String searchQuery = buildSearchQuery(
                 (request.articleTitle() != null ? request.articleTitle() + " " : "") + heading);
 
-        GenerationJob job = startJob("ollama_section_" + request.mode(),
+        GenerationJob job = startJob("llm_section_" + request.mode(),
                 Map.of("mode", request.mode(), "heading", heading));
         try {
             WebSearchOutcome searchOutcome = webSearchService.searchSafely(searchQuery);
@@ -358,7 +358,7 @@ public class AiAssistService {
                     ? buildSectionChatPrompt(basePrompt, request.history(), request.message(), searchOutcome)
                     : WebSearchService.formatForPrompt(searchOutcome) + basePrompt;
 
-            String result = ollamaClient.generate(prompt);
+            String result = llmClient.generate(prompt);
             completeJob(job, Map.of("result", result));
             return new AiSectionResponse(result, WebSearchService.toSources(searchOutcome),
                     WebSearchService.buildSearchNote(searchOutcome));
@@ -412,9 +412,9 @@ public class AiAssistService {
     }
 
     public AiTagsResponse suggestTags(AiTagsRequest request) {
-        GenerationJob job = startJob("ollama_tags", Map.of("text", request.text()));
+        GenerationJob job = startJob("llm_tags", Map.of("text", request.text()));
         try {
-            String raw = ollamaClient.generate(TAGS_PROMPT_TEMPLATE.formatted(request.text()));
+            String raw = llmClient.generate(TAGS_PROMPT_TEMPLATE.formatted(request.text()));
             AiTagsResponse parsed = parseTagsResponse(raw);
             completeJob(job, Map.of("result", raw));
             return parsed;

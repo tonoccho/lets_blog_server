@@ -53,9 +53,11 @@ services:
       MAIL_PASSWORD: ${MAIL_PASSWORD}
       APP_MAIL_FROM: ${APP_MAIL_FROM:-noreply@letsblog.example.com}
       APP_WEB_BASE_URL: ${APP_WEB_BASE_URL:-https://localhost}
-      OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b-instruct}
-      OLLAMA_REQUEST_TIMEOUT_SECONDS: ${OLLAMA_REQUEST_TIMEOUT_SECONDS:-300}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_AVAILABLE_MODELS: ${LLM_AVAILABLE_MODELS:-gpt-4o-mini,gpt-4o,gpt-4.1-mini}
+      LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-120}
       COMFYUI_BASE_URL: http://comfyui:8188
       COMFYUI_CHECKPOINT: ${COMFYUI_CHECKPOINT:-v1-5-pruned-emaonly.safetensors}
       COMFYUI_MODELS_PATH: /comfyui-models
@@ -266,22 +268,6 @@ services:
     networks:
       - lbs-net
 
-  ollama:
-    image: ollama/ollama:latest
-    container_name: lbs-ollama
-    restart: unless-stopped
-    volumes:
-      - ollama_models:/root/.ollama
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    networks:
-      - lbs-net
-
   comfyui:
     image: ${COMFYUI_IMAGE:-yanwk/comfyui-boot:cu130-slim}
     container_name: lbs-comfyui
@@ -313,12 +299,10 @@ services:
   #   container_name: lbs-mcp-penpot
   #   restart: unless-stopped
   #   environment:
-  #     OLLAMA_BASE_URL: http://ollama:11434
-  #     OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b-instruct}
+  #     LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+  #     LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
   #     MCP_PORT: 3000
   #     MCP_LOG_LEVEL: ${MCP_LOG_LEVEL:-info}
-  #   depends_on:
-  #     - ollama
   #   networks:
   #     - lbs-net
   #   healthcheck:
@@ -356,7 +340,6 @@ volumes:
   mysql_data:
   penpot_postgres:
   penpot_assets:
-  ollama_models:
   comfyui_models:
   comfyui_output:
   wordpress_sites:

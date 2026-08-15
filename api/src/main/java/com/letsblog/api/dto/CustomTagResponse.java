@@ -15,7 +15,7 @@ public record CustomTagResponse(
         Long projectId,
         LocalDateTime createdAt,
         LocalDateTime updatedAt,
-        /** AI生成時にOllamaへのリクエストを元にPenpotへ作成したデザインファイルのURL(ベストエフォート、手動作成タグではnull)。 */
+        /** AI生成時にLLMへのリクエストを元にPenpotへ作成したデザインファイルのURL(ベストエフォート、手動作成タグではnull)。 */
         String penpotFileUrl
 ) {
     public static CustomTagResponse from(CustomTag tag) {
