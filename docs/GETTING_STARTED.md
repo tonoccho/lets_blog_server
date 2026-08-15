@@ -82,6 +82,12 @@ APP_ENCRYPTION_KEY=base64_encoded_32_byte_key_here
 APP_WEB_BASE_URL=https://localhost
 APP_MAIL_FROM=noreply@yourdomain.local
 
+# External email service (SendGrid/Resend/AWS SES/etc.) SMTP connection settings
+MAIL_HOST=smtp.sendgrid.net
+MAIL_PORT=587
+MAIL_USERNAME=apikey
+MAIL_PASSWORD=your_smtp_password_here
+
 # Authentication secret (generate with: openssl rand -hex 32)
 NEXTAUTH_SECRET=your_nextauth_secret_here
 

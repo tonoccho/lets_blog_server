@@ -47,8 +47,10 @@ services:
       SPRING_DATASOURCE_USERNAME: ${MYSQL_USER}
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
-      SPRING_MAIL_HOST: mailhog
-      SPRING_MAIL_PORT: 1025
+      MAIL_HOST: ${MAIL_HOST}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME}
+      MAIL_PASSWORD: ${MAIL_PASSWORD}
       APP_MAIL_FROM: ${APP_MAIL_FROM:-noreply@letsblog.example.com}
       APP_WEB_BASE_URL: ${APP_WEB_BASE_URL:-https://localhost}
       OLLAMA_BASE_URL: http://ollama:11434
@@ -85,8 +87,6 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-      mailhog:
-        condition: service_started
       docker-socket-proxy:
         condition: service_started
     networks:
@@ -104,13 +104,6 @@ services:
       POST: 0
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks:
-      - lbs-net
-
-  mailhog:
-    image: mailhog/mailhog:latest
-    container_name: lbs-mailhog
-    restart: unless-stopped
     networks:
       - lbs-net
 
