@@ -20,6 +20,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -99,7 +100,7 @@ class ProjectCustomTagControllerTest {
         CustomTagPreviewRequest request =
                 new CustomTagPreviewRequest("<div class=\"alert\">{{content}}</div>", ".alert { color: red; }", "**bold**");
         when(blogCardTagRenderService.render(request.testContent(), 5L)).thenReturn(request.testContent());
-        when(amazonTagRenderService.render(request.testContent(), 5L)).thenReturn(request.testContent());
+        when(amazonTagRenderService.render(request.testContent(), 5L, false)).thenReturn(request.testContent());
         when(customTagRenderService.previewTemplate(request.htmlTemplate(), request.testContent()))
                 .thenReturn("<div class=\"alert\"><strong>bold</strong></div>");
         when(renderedContentWrapperService.wrap("<div class=\"alert\"><strong>bold</strong></div>", 5L))
@@ -123,7 +124,7 @@ class ProjectCustomTagControllerTest {
         when(blogCardTagRenderService.render(request.testContent(), 5L))
                 .thenReturn("<a class=\"lb-blogcard\">card</a>\n\n[amazon https://amazon.co.jp/dp/X]");
         when(amazonTagRenderService.render(
-                        "<a class=\"lb-blogcard\">card</a>\n\n[amazon https://amazon.co.jp/dp/X]", 5L))
+                        "<a class=\"lb-blogcard\">card</a>\n\n[amazon https://amazon.co.jp/dp/X]", 5L, false))
                 .thenReturn("<a class=\"lb-blogcard\">card</a>\n\n<a class=\"lb-amazon-card\">product</a>");
         when(customTagRenderService.previewTemplate(
                         request.htmlTemplate(),
@@ -147,7 +148,7 @@ class ProjectCustomTagControllerTest {
 
         assertThrows(ForbiddenException.class, () -> controller.preview(5L, request));
         verify(blogCardTagRenderService, never()).render(any(), any());
-        verify(amazonTagRenderService, never()).render(any(), any());
+        verify(amazonTagRenderService, never()).render(any(), any(), anyBoolean());
         verify(customTagRenderService, never()).previewTemplate(any(), any());
     }
 }

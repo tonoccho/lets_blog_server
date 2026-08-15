@@ -34,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -108,7 +109,8 @@ class PostPublishServiceTest {
         lenient().when(projectService.findProjectIdBySiteId(1L)).thenReturn(null);
         lenient().when(customTagRenderService.render(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(blogCardTagRenderService.render(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
-        lenient().when(amazonTagRenderService.render(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(amazonTagRenderService.render(anyString(), any(), anyBoolean()))
+                .thenAnswer(inv -> inv.getArgument(0));
         lenient().when(rechartsTagRenderService.render(anyString())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(plantUmlTagRenderService.render(any(), anyString())).thenAnswer(inv -> inv.getArgument(1));
         lenient().when(plantUmlEmbedService.embedDiagrams(any(), anyString())).thenAnswer(inv -> inv.getArgument(1));
@@ -499,6 +501,28 @@ class PostPublishServiceTest {
         project.setProductionSiteId(99L);
         when(projectService.findProjectIdBySiteId(1L)).thenReturn(7L);
         when(projectService.getProjectEntity(7L)).thenReturn(project);
+    }
+
+    @Test
+    void publish_本番サイトへの投稿ではAmazonタグレンダリングにisProductionSite_trueを渡す() {
+        bindProductionSite();
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+
+        service.publish(command("slug", "title", List.of(), null));
+
+        verify(amazonTagRenderService).render(anyString(), eq(7L), eq(true));
+    }
+
+    @Test
+    void publish_本番以外のサイトへの投稿ではAmazonタグレンダリングにisProductionSite_falseを渡す() {
+        bindNonProductionSite();
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+
+        service.publish(command("slug", "title", List.of(), null));
+
+        verify(amazonTagRenderService).render(anyString(), eq(7L), eq(false));
     }
 
     @Test

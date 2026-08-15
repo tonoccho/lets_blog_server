@@ -133,7 +133,7 @@ class ArticlePreviewServiceTest {
     void renderHtml_カスタムタグ展開後にMarkdownをHTML変換する() {
         when(customTagRenderService.render("**bold**", 1L)).thenReturn("**bold** rendered");
         when(blogCardTagRenderService.render("**bold** rendered", 1L)).thenReturn("**bold** rendered");
-        when(amazonTagRenderService.render("**bold** rendered", 1L)).thenReturn("**bold** rendered");
+        when(amazonTagRenderService.render("**bold** rendered", 1L, false)).thenReturn("**bold** rendered");
         when(markdownRenderer.render("**bold** rendered")).thenReturn("<p><strong>bold</strong> rendered</p>");
         when(tocStyleRenderService.applyHtmlTemplate("<p><strong>bold</strong> rendered</p>", 1L))
                 .thenReturn("<p><strong>bold</strong> rendered</p>");
@@ -145,7 +145,7 @@ class ArticlePreviewServiceTest {
         assertEquals("<div class=\"lets-blog-rendered\"><p><strong>bold</strong> rendered</p></div>", html);
         verify(customTagRenderService).render("**bold**", 1L);
         verify(blogCardTagRenderService).render("**bold** rendered", 1L);
-        verify(amazonTagRenderService).render("**bold** rendered", 1L);
+        verify(amazonTagRenderService).render("**bold** rendered", 1L, false);
         verify(markdownRenderer).render("**bold** rendered");
         verify(tocStyleRenderService).applyHtmlTemplate("<p><strong>bold</strong> rendered</p>", 1L);
         verify(renderedContentWrapperService).wrap("<p><strong>bold</strong> rendered</p>", 1L);
@@ -155,7 +155,7 @@ class ArticlePreviewServiceTest {
     void renderHtml_rechartsタグが不正な場合はレンダリングを中止してエラーメッセージを返す() {
         when(customTagRenderService.render("markdown", 1L)).thenReturn("markdown");
         when(blogCardTagRenderService.render("markdown", 1L)).thenReturn("markdown");
-        when(amazonTagRenderService.render("markdown", 1L)).thenReturn("markdown");
+        when(amazonTagRenderService.render("markdown", 1L, false)).thenReturn("markdown");
         when(rechartsTagRenderService.render("markdown"))
                 .thenThrow(new InvalidRechartsTagException("type属性は必須です"));
 
@@ -170,7 +170,7 @@ class ArticlePreviewServiceTest {
     void renderHtml_recharts展開後の内容がMarkdown変換される() {
         when(customTagRenderService.render("markdown", 1L)).thenReturn("markdown");
         when(blogCardTagRenderService.render("markdown", 1L)).thenReturn("markdown");
-        when(amazonTagRenderService.render("markdown", 1L)).thenReturn("markdown");
+        when(amazonTagRenderService.render("markdown", 1L, false)).thenReturn("markdown");
         when(rechartsTagRenderService.render("markdown")).thenReturn("markdown<div>chart</div>");
         when(markdownRenderer.render("markdown<div>chart</div>")).thenReturn("<p>markdown</p><div>chart</div>");
         when(tocStyleRenderService.applyHtmlTemplate("<p>markdown</p><div>chart</div>", 1L))
@@ -189,7 +189,7 @@ class ArticlePreviewServiceTest {
                 .thenReturn("```plantuml\n@startuml\n@enduml\n```");
         when(blogCardTagRenderService.render("```plantuml\n@startuml\n@enduml\n```", 1L))
                 .thenReturn("```plantuml\n@startuml\n@enduml\n```");
-        when(amazonTagRenderService.render("```plantuml\n@startuml\n@enduml\n```", 1L))
+        when(amazonTagRenderService.render("```plantuml\n@startuml\n@enduml\n```", 1L, false))
                 .thenReturn("```plantuml\n@startuml\n@enduml\n```");
         when(plantUmlEmbedService.embedDiagramsForPreview("```plantuml\n@startuml\n@enduml\n```"))
                 .thenReturn("![diagram](data:image/png;base64,AAAA)");
@@ -211,7 +211,7 @@ class ArticlePreviewServiceTest {
         String markdown = "[plantuml]\nA->B\n[/plantuml]";
         when(customTagRenderService.render(markdown, 1L)).thenReturn(markdown);
         when(blogCardTagRenderService.render(markdown, 1L)).thenReturn(markdown);
-        when(amazonTagRenderService.render(markdown, 1L)).thenReturn(markdown);
+        when(amazonTagRenderService.render(markdown, 1L, false)).thenReturn(markdown);
         when(plantUmlTagRenderService.renderForPreview(markdown))
                 .thenReturn("![diagram](data:image/png;base64,AAAA)");
         when(markdownRenderer.render("![diagram](data:image/png;base64,AAAA)"))
@@ -231,7 +231,7 @@ class ArticlePreviewServiceTest {
     void renderHtml_plantumlタグが不正な場合はレンダリングを中止してエラーメッセージを返す() {
         when(customTagRenderService.render("markdown", 1L)).thenReturn("markdown");
         when(blogCardTagRenderService.render("markdown", 1L)).thenReturn("markdown");
-        when(amazonTagRenderService.render("markdown", 1L)).thenReturn("markdown");
+        when(amazonTagRenderService.render("markdown", 1L, false)).thenReturn("markdown");
         when(plantUmlTagRenderService.renderForPreview("markdown"))
                 .thenThrow(new InvalidPlantUmlTagException("PlantUML図のレンダリングに失敗しました"));
 

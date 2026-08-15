@@ -117,7 +117,7 @@ public class PostPublishService {
         Long projectId = projectService.findProjectIdBySiteId(site.getId());
         String markdown = customTagRenderService.render(command.markdown(), projectId);
         markdown = blogCardTagRenderService.render(markdown, projectId);
-        markdown = amazonTagRenderService.render(markdown, projectId);
+        markdown = amazonTagRenderService.render(markdown, projectId, isProductionSite(site, projectId));
         // [recharts]タグの記法・データが不正な場合はInvalidRechartsTagExceptionを未捕捉のまま伝播させ、
         // GlobalExceptionHandlerが400として返すことで投稿自体を拒否する(Issue #340)。
         markdown = rechartsTagRenderService.render(markdown);

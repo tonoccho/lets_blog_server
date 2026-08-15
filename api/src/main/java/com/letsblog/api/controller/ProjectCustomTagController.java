@@ -79,7 +79,8 @@ public class ProjectCustomTagController {
             @PathVariable Long projectId, @Valid @RequestBody CustomTagPreviewRequest request) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         String testContent = blogCardTagRenderService.render(request.testContent(), projectId);
-        testContent = amazonTagRenderService.render(testContent, projectId);
+        // プレビューは特定サイトに紐付かないため、本番サイト向けの実リンクは常に非活性化する(issue #389)。
+        testContent = amazonTagRenderService.render(testContent, projectId, false);
         String html = customTagRenderService.previewTemplate(request.htmlTemplate(), testContent);
         String wrappedHtml = renderedContentWrapperService.wrap(html, projectId);
         String css = customTagService.previewCss(request.cssContent(), projectId);

@@ -119,7 +119,8 @@ public class ArticlePreviewService {
     public String renderHtml(Long projectId, String markdown) {
         String rendered = customTagRenderService.render(markdown, projectId);
         rendered = blogCardTagRenderService.render(rendered, projectId);
-        rendered = amazonTagRenderService.render(rendered, projectId);
+        // プレビューは特定サイトに紐付かないため、本番サイト向けの実リンクは常に非活性化する(issue #389)。
+        rendered = amazonTagRenderService.render(rendered, projectId, false);
         try {
             rendered = rechartsTagRenderService.render(rendered);
         } catch (InvalidRechartsTagException e) {
