@@ -5,6 +5,7 @@ import com.letsblog.api.domain.BulkOperationSourceType;
 import com.letsblog.api.domain.BulkOperationStatus;
 import com.letsblog.api.domain.BulkOperationType;
 import com.letsblog.api.dto.AddProjectUserRequest;
+import com.letsblog.api.dto.ApplyToAllEnvironmentsRequest;
 import com.letsblog.api.dto.ApplyToEnvironmentRequest;
 import com.letsblog.api.dto.DeleteSlugRequest;
 import com.letsblog.api.dto.ProjectCreateRequest;
@@ -248,6 +249,30 @@ class ProjectControllerTest {
         doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
 
         assertThrows(ForbiddenException.class, () -> controller.applyBulkOperation(1L, request));
+    }
+
+    @Test
+    void applyBulkOperationToAllEnvironments_admin権限があれば全環境へ実行できる() {
+        ProjectController controller = controller();
+        ApplyToAllEnvironmentsRequest request =
+                new ApplyToAllEnvironmentsRequest(BulkOperationType.PLUGIN_INSTALL, "akismet");
+        when(bulkManagementService.applyToAllEnvironments(1L, BulkOperationType.PLUGIN_INSTALL, "akismet", 0L))
+                .thenReturn(List.of(buildLog()));
+
+        List<?> response = controller.applyBulkOperationToAllEnvironments(1L, request);
+
+        assertEquals(1, response.size());
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void applyBulkOperationToAllEnvironments_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        ApplyToAllEnvironmentsRequest request =
+                new ApplyToAllEnvironmentsRequest(BulkOperationType.PLUGIN_INSTALL, "akismet");
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.applyBulkOperationToAllEnvironments(1L, request));
     }
 
     @Test

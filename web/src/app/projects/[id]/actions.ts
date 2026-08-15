@@ -19,6 +19,7 @@ import {
   removeProjectUser,
   syncProjectEnvironment,
   applyToEnvironment,
+  applyToAllEnvironments,
   syncCategoryToMaster,
   deleteCategoryEverywhere,
   syncTagToMaster,
@@ -484,6 +485,33 @@ export async function applyToEnvironmentAction(
     );
     revalidatePath(`/projects/${projectId}`);
     return { success: true, results: [result] };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function applyToAllEnvironmentsAction(
+  projectId: number,
+  _prevState: BulkOperationState,
+  formData: FormData
+): Promise<BulkOperationState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const operationType = String(formData.get("operationType") ?? "") as BulkOperationType;
+  const value = String(formData.get("value") ?? "").trim();
+
+  if (operationType !== "PLUGIN_INSTALL" && operationType !== "THEME_INSTALL") {
+    return { error: "全環境への一括インストールはプラグイン/テーマのインストールのみ対応しています。" };
+  }
+  if (!value) {
+    return { error: "slugを入力してください。" };
+  }
+
+  try {
+    const results = await applyToAllEnvironments(projectId, { operationType, value }, actor);
+    revalidatePath(`/projects/${projectId}`);
+    return { success: true, results };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

@@ -1,6 +1,7 @@
 package com.letsblog.api.controller;
 
 import com.letsblog.api.dto.AddProjectUserRequest;
+import com.letsblog.api.dto.ApplyToAllEnvironmentsRequest;
 import com.letsblog.api.dto.ApplyToEnvironmentRequest;
 import com.letsblog.api.dto.BulkOperationLogResponse;
 import com.letsblog.api.dto.DeleteSlugRequest;
@@ -205,6 +206,19 @@ public class ProjectController {
                 request.categorySlug(), request.categoryParentSlug(), request.categoryDescription(),
                 request.categoryTargetSlug(), actorId);
         return BulkOperationLogResponse.from(log);
+    }
+
+    /**
+     * slugベースのプラグイン/テーマインストールを、紐付いている全環境へ一括実行する(issue #393)。
+     */
+    @PostMapping("/{id}/bulk-management/apply-all")
+    public List<BulkOperationLogResponse> applyBulkOperationToAllEnvironments(
+            @PathVariable Long id, @Valid @RequestBody ApplyToAllEnvironmentsRequest request) {
+        adminAuthorizationService.requireAdmin();
+        Long actorId = currentActorService.getCurrentActorId();
+        List<BulkOperationLog> logs = bulkManagementService.applyToAllEnvironments(
+                id, request.operationType(), request.value(), actorId);
+        return logs.stream().map(BulkOperationLogResponse::from).toList();
     }
 
     @PostMapping(value = "/{id}/bulk-management/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

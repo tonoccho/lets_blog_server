@@ -1665,6 +1665,22 @@ export function applyToEnvironment(
   });
 }
 
+export function applyToAllEnvironments(
+  projectId: number,
+  input: {
+    operationType: BulkOperationType;
+    value: string;
+  },
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/apply-all`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
 export function syncCategoryToMaster(
   projectId: number,
   slug: string,
