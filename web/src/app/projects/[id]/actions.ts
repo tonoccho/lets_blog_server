@@ -20,6 +20,8 @@ import {
   syncProjectEnvironment,
   applyToEnvironment,
   applyToAllEnvironments,
+  setProjectGoogleAnalyticsCredentials,
+  clearProjectGoogleAnalyticsCredentials,
   syncCategoryToMaster,
   deleteCategoryEverywhere,
   syncTagToMaster,
@@ -335,6 +337,42 @@ export async function clearProjectBraveSearchApiKeyAction(projectId: number): Pr
   const actor = { id: Number(session.user.id), role: session.user.role };
   await clearProjectBraveSearchApiKey(projectId, actor);
   revalidatePath(`/projects/${projectId}`);
+}
+
+export async function setProjectGoogleAnalyticsCredentialsAction(
+  projectId: number,
+  _prevState: ProjectApiKeyFormState,
+  formData: FormData
+): Promise<ProjectApiKeyFormState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const propertyId = String(formData.get("propertyId") ?? "").trim();
+  const serviceAccountJson = String(formData.get("serviceAccountJson") ?? "").trim();
+  if (!propertyId) {
+    return { error: "GA4プロパティIDを入力してください。" };
+  }
+  if (!serviceAccountJson) {
+    return { error: "サービスアカウントのJSON鍵を入力してください。" };
+  }
+
+  try {
+    await setProjectGoogleAnalyticsCredentials(projectId, { propertyId, serviceAccountJson }, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}/settings/google-analytics`);
+  revalidatePath(`/projects/${projectId}/dashboard`);
+  return { success: true };
+}
+
+export async function clearProjectGoogleAnalyticsCredentialsAction(projectId: number): Promise<void> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  await clearProjectGoogleAnalyticsCredentials(projectId, actor);
+  revalidatePath(`/projects/${projectId}/settings/google-analytics`);
+  revalidatePath(`/projects/${projectId}/dashboard`);
 }
 
 export interface AddProjectUserState {

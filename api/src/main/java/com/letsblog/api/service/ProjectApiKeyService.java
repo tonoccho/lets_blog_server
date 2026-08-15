@@ -1,5 +1,8 @@
 package com.letsblog.api.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.letsblog.api.analytics.GoogleServiceAccountKey;
 import com.letsblog.api.crypto.CredentialCipher;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.repository.ProjectRepository;
@@ -20,18 +23,21 @@ public class ProjectApiKeyService {
     private final UserService userService;
     private final SystemSettingService systemSettingService;
     private final AdminAuthorizationService adminAuthorizationService;
+    private final ObjectMapper objectMapper;
 
     public ProjectApiKeyService(
             ProjectRepository projectRepository,
             CredentialCipher credentialCipher,
             UserService userService,
             SystemSettingService systemSettingService,
-            AdminAuthorizationService adminAuthorizationService) {
+            AdminAuthorizationService adminAuthorizationService,
+            ObjectMapper objectMapper) {
         this.projectRepository = projectRepository;
         this.credentialCipher = credentialCipher;
         this.userService = userService;
         this.systemSettingService = systemSettingService;
         this.adminAuthorizationService = adminAuthorizationService;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional(readOnly = true)
@@ -76,6 +82,69 @@ public class ProjectApiKeyService {
         Project project = getProject(projectId);
         project.setBraveSearchApiKeyEncrypted(null);
         projectRepository.save(project);
+    }
+
+    @Transactional(readOnly = true)
+    public boolean isGoogleAnalyticsConfigured(Long projectId) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        return getProject(projectId).hasGoogleAnalyticsCredentials();
+    }
+
+    @Transactional(readOnly = true)
+    public String getGoogleAnalyticsPropertyId(Long projectId) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        return getProject(projectId).getGaPropertyId();
+    }
+
+    @Transactional
+    public void setGoogleAnalyticsCredentials(Long projectId, String propertyId, String serviceAccountJson) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        validateGoogleServiceAccountJson(serviceAccountJson);
+        Project project = getProject(projectId);
+        project.setGaPropertyId(propertyId);
+        project.setGaServiceAccountJsonEncrypted(credentialCipher.encrypt(serviceAccountJson));
+        projectRepository.save(project);
+    }
+
+    @Transactional
+    public void clearGoogleAnalyticsCredentials(Long projectId) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        Project project = getProject(projectId);
+        project.setGaPropertyId(null);
+        project.setGaServiceAccountJsonEncrypted(null);
+        projectRepository.save(project);
+    }
+
+    /**
+     * GoogleAnalyticsReportServiceから呼ばれる。GA未設定の場合はnullを返す(認可はここでは行わない。
+     * 呼び出し元がプロジェクトメンバー/adminであることを別途保証している。resolveGithubToken等と同じ方針)。
+     */
+    @Transactional(readOnly = true)
+    public GoogleServiceAccountKey resolveGoogleAnalyticsServiceAccountKey(Long projectId) {
+        Project project = getProject(projectId);
+        if (!project.hasGoogleAnalyticsCredentials()) {
+            return null;
+        }
+        String json = credentialCipher.decrypt(project.getGaServiceAccountJsonEncrypted());
+        try {
+            return objectMapper.readValue(json, GoogleServiceAccountKey.class);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("保存済みのサービスアカウントJSONの解析に失敗しました", e);
+        }
+    }
+
+    /** 保存前にJSONとして解析可能で、GA4 Data API呼び出しに必要な項目を含むことを確認する。 */
+    private void validateGoogleServiceAccountJson(String serviceAccountJson) {
+        GoogleServiceAccountKey key;
+        try {
+            key = objectMapper.readValue(serviceAccountJson, GoogleServiceAccountKey.class);
+        } catch (JsonProcessingException e) {
+            throw new IllegalArgumentException("サービスアカウントJSONの形式が正しくありません", e);
+        }
+        if (key.clientEmail() == null || key.clientEmail().isBlank()
+                || key.privateKey() == null || key.privateKey().isBlank()) {
+            throw new IllegalArgumentException("サービスアカウントJSONにclient_email/private_keyが含まれていません");
+        }
     }
 
     /**

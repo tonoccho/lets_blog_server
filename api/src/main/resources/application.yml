@@ -83,6 +83,8 @@ app:
   comfyui-models-path: ${COMFYUI_MODELS_PATH:/app/data/comfyui-models}
   brave-search-base-url: ${BRAVE_SEARCH_BASE_URL:https://api.search.brave.com}
   brave-search-api-key: ${BRAVE_SEARCH_API_KEY:}
+  google-analytics-data-api-base-url: ${GOOGLE_ANALYTICS_DATA_API_BASE_URL:https://analyticsdata.googleapis.com}
+  google-analytics-oauth-token-uri: ${GOOGLE_ANALYTICS_OAUTH_TOKEN_URI:https://oauth2.googleapis.com/token}
   plantuml-base-url: ${PLANTUML_BASE_URL:http://localhost:8085}
   penpot-base-url: ${PENPOT_BASE_URL:http://localhost:9001}
   penpot-public-url: ${PENPOT_PUBLIC_URL:http://localhost:9001}
