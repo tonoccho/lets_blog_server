@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useRef } from "react";
 import type { Project, ProjectEnvironment } from "@/lib/apiClient";
 import { syncEnvironmentAction, SyncEnvironmentState } from "./actions";
 
@@ -12,10 +12,12 @@ const ENVIRONMENT_LABEL: Record<ProjectEnvironment, string> = {
 
 const initialState: SyncEnvironmentState = {};
 
+/** issue #325: ローカル開発向けに、マスタ環境→ローカルの同期設定をワンクリックで入力できるようにする。 */
 export function EnvironmentSyncPanel({ projectId, project }: { projectId: number; project: Project }) {
   const action = (prevState: SyncEnvironmentState, formData: FormData) =>
     syncEnvironmentAction(projectId, prevState, formData);
   const [state, formAction, pending] = useActionState(action, initialState);
+  const formRef = useRef<HTMLFormElement>(null);
 
   const syncableEnvironments: { value: ProjectEnvironment; label: string }[] = (
     [
@@ -28,6 +30,21 @@ export function EnvironmentSyncPanel({ projectId, project }: { projectId: number
     .map(([environment]) => ({ value: environment, label: ENVIRONMENT_LABEL[environment] }));
 
   const syncSourceEnvironments = syncableEnvironments.filter((env) => env.value !== "local");
+
+  const masterEnvironment: ProjectEnvironment = project.masterEnvironment;
+  const canFillFromMaster =
+    syncableEnvironments.some((env) => env.value === "local")
+    && syncSourceEnvironments.some((env) => env.value === masterEnvironment);
+
+  function fillFromMasterToLocal() {
+    const form = formRef.current;
+    if (!form) return;
+    (form.elements.namedItem("from") as HTMLSelectElement).value = masterEnvironment;
+    (form.elements.namedItem("to") as HTMLSelectElement).value = "local";
+    form.querySelectorAll<HTMLInputElement>('input[name="targets"]').forEach((el) => {
+      el.checked = true;
+    });
+  }
 
   if (syncableEnvironments.length < 2 || syncSourceEnvironments.length === 0) {
     return (
@@ -56,8 +73,19 @@ export function EnvironmentSyncPanel({ projectId, project }: { projectId: number
 
   return (
     <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
-      <h3 className="mb-3 font-medium text-neutral-700 dark:text-neutral-300">環境同期</h3>
-      <form action={formAction} onSubmit={handleSubmit} className="space-y-3 text-sm">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-medium text-neutral-700 dark:text-neutral-300">環境同期</h3>
+        {canFillFromMaster && (
+          <button
+            type="button"
+            onClick={fillFromMasterToLocal}
+            className="text-sm text-blue-600 hover:underline dark:text-blue-400"
+          >
+            マスタ環境({ENVIRONMENT_LABEL[masterEnvironment]})→ローカルの設定を入力
+          </button>
+        )}
+      </div>
+      <form ref={formRef} action={formAction} onSubmit={handleSubmit} className="space-y-3 text-sm">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1">
             <span className="text-neutral-600 dark:text-neutral-400">同期元</span>
