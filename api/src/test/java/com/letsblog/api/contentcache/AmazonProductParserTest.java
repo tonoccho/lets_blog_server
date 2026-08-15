@@ -60,4 +60,39 @@ class AmazonProductParserTest {
         assertEquals("", data.get("price"));
         assertEquals("", data.get("imageUrl"));
     }
+
+    @Test
+    void parse_この商品についての箇条書きから概要を抽出する() {
+        String html = "<html><body>"
+                + "<span id=\"productTitle\">商品</span>"
+                + "<div id=\"feature-bullets\"><ul>"
+                + "<li><span class=\"a-list-item\">軽量で持ち運びやすい</span></li>"
+                + "<li><span class=\"a-list-item\">防水仕様</span></li>"
+                + "</ul></div>"
+                + "</body></html>";
+
+        Map<String, String> data = parser.parse(html, "https://www.amazon.co.jp/dp/B000000000");
+
+        assertEquals("軽量で持ち運びやすい / 防水仕様", data.get("summary"));
+    }
+
+    @Test
+    void parse_箇条書きが無ければmeta_descriptionへフォールバックする() {
+        String html = "<html><head>"
+                + "<meta name=\"description\" content=\"Amazon.co.jp: サンプル商品\">"
+                + "</head><body><span id=\"productTitle\">商品</span></body></html>";
+
+        Map<String, String> data = parser.parse(html, "https://www.amazon.co.jp/dp/B000000000");
+
+        assertEquals("Amazon.co.jp: サンプル商品", data.get("summary"));
+    }
+
+    @Test
+    void parse_概要が取得できない場合は空文字列を返す() {
+        String html = "<html><body><span id=\"productTitle\">商品</span></body></html>";
+
+        Map<String, String> data = parser.parse(html, "https://www.amazon.co.jp/dp/B000000000");
+
+        assertEquals("", data.get("summary"));
+    }
 }
