@@ -1,8 +1,9 @@
 import Link from "next/link";
 
-export type ProjectSection = "detail" | "plan" | "tags" | "posts";
+export type ProjectSection = "dashboard" | "detail" | "plan" | "tags" | "posts";
 
 const SECTIONS: { id: ProjectSection; label: string; hrefSuffix: string }[] = [
+  { id: "dashboard", label: "ダッシュボード", hrefSuffix: "/dashboard" },
   { id: "detail", label: "詳細", hrefSuffix: "" },
   { id: "plan", label: "計画", hrefSuffix: "/plan" },
   { id: "tags", label: "タグ", hrefSuffix: "/tags" },

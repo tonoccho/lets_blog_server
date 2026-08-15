@@ -77,7 +77,11 @@ export function ProjectsTable({ projects: initialProjects, timezone }: { project
           )}
           {sortedProjects.map((project) => (
             <tr key={project.id} className="border-b border-neutral-100 dark:border-neutral-800 last:border-0">
-              <td className="px-4 py-2">{project.name}</td>
+              <td className="px-4 py-2">
+                <Link href={`/projects/${project.id}/dashboard`} className="hover:underline">
+                  {project.name}
+                </Link>
+              </td>
               <td className="px-4 py-2 font-mono">{project.slug}</td>
               <td className="px-4 py-2">
                 <div className="flex gap-1">
