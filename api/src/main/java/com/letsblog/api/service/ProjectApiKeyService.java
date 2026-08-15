@@ -2,6 +2,8 @@ package com.letsblog.api.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.letsblog.api.adsense.AdSenseClient;
+import com.letsblog.api.adsense.GoogleOAuthTokens;
 import com.letsblog.api.analytics.GoogleServiceAccountKey;
 import com.letsblog.api.crypto.CredentialCipher;
 import com.letsblog.api.domain.Project;
@@ -24,6 +26,7 @@ public class ProjectApiKeyService {
     private final SystemSettingService systemSettingService;
     private final AdminAuthorizationService adminAuthorizationService;
     private final ObjectMapper objectMapper;
+    private final AdSenseClient adSenseClient;
 
     public ProjectApiKeyService(
             ProjectRepository projectRepository,
@@ -31,13 +34,15 @@ public class ProjectApiKeyService {
             UserService userService,
             SystemSettingService systemSettingService,
             AdminAuthorizationService adminAuthorizationService,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            AdSenseClient adSenseClient) {
         this.projectRepository = projectRepository;
         this.credentialCipher = credentialCipher;
         this.userService = userService;
         this.systemSettingService = systemSettingService;
         this.adminAuthorizationService = adminAuthorizationService;
         this.objectMapper = objectMapper;
+        this.adSenseClient = adSenseClient;
     }
 
     @Transactional(readOnly = true)
@@ -145,6 +150,62 @@ public class ProjectApiKeyService {
                 || key.privateKey() == null || key.privateKey().isBlank()) {
             throw new IllegalArgumentException("サービスアカウントJSONにclient_email/private_keyが含まれていません");
         }
+    }
+
+    @Transactional(readOnly = true)
+    public boolean isAdSenseConfigured(Long projectId) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        return getProject(projectId).hasAdsenseCredentials();
+    }
+
+    @Transactional(readOnly = true)
+    public String getAdSenseAccountId(Long projectId) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        return getProject(projectId).getAdsenseAccountId();
+    }
+
+    @Transactional
+    public void setAdSenseAccountId(Long projectId, String accountId) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        Project project = getProject(projectId);
+        project.setAdsenseAccountId(accountId);
+        projectRepository.save(project);
+    }
+
+    /**
+     * Next.js側のOAuthコールバックルート(/connect/adsense/callback)から呼ばれる。認可コードを
+     * リフレッシュトークンに交換して暗号化保存する(アカウントIDは別途setAdSenseAccountIdで設定済みの前提。
+     * OAuth同意自体はどのAdSenseアカウントかを教えてくれないため)。
+     */
+    @Transactional
+    public void completeAdSenseOAuth(Long projectId, String code, String redirectUri) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        GoogleOAuthTokens tokens = adSenseClient.exchangeAuthorizationCode(code, redirectUri);
+        Project project = getProject(projectId);
+        project.setAdsenseRefreshTokenEncrypted(credentialCipher.encrypt(tokens.refreshToken()));
+        projectRepository.save(project);
+    }
+
+    @Transactional
+    public void clearAdSenseCredentials(Long projectId) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        Project project = getProject(projectId);
+        project.setAdsenseAccountId(null);
+        project.setAdsenseRefreshTokenEncrypted(null);
+        projectRepository.save(project);
+    }
+
+    /**
+     * AdSenseReportServiceから呼ばれる。未設定の場合はnullを返す(認可はここでは行わない。
+     * 呼び出し元がプロジェクトメンバー/adminであることを別途保証している。resolveGithubToken等と同じ方針)。
+     */
+    @Transactional(readOnly = true)
+    public String resolveAdSenseRefreshToken(Long projectId) {
+        Project project = getProject(projectId);
+        if (!project.hasAdsenseCredentials()) {
+            return null;
+        }
+        return credentialCipher.decrypt(project.getAdsenseRefreshTokenEncrypted());
     }
 
     /**

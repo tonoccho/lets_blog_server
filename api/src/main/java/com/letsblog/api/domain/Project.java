@@ -99,6 +99,17 @@ public class Project {
     @Column(name = "ga_service_account_json_encrypted", columnDefinition = "VARBINARY(4096)")
     private byte[] gaServiceAccountJsonEncrypted;
 
+    /**
+     * Google AdSense連携(issue #387)。AdSense Management APIはサービスアカウント委任に対応していないため、
+     * GAとは異なり3-legged OAuth(認可コード→リフレッシュトークン)で取得したリフレッシュトークンを保持する。
+     * アカウントID(パブリッシャーID、例: pub-1234567890123456)自体は秘匿情報ではないので平文で保持する。
+     */
+    @Column(name = "adsense_account_id", length = 64)
+    private String adsenseAccountId;
+
+    @Column(name = "adsense_refresh_token_encrypted", columnDefinition = "VARBINARY(1024)")
+    private byte[] adsenseRefreshTokenEncrypted;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -120,6 +131,11 @@ public class Project {
     public boolean hasGoogleAnalyticsCredentials() {
         return gaPropertyId != null && !gaPropertyId.isBlank()
                 && gaServiceAccountJsonEncrypted != null && gaServiceAccountJsonEncrypted.length > 0;
+    }
+
+    public boolean hasAdsenseCredentials() {
+        return adsenseAccountId != null && !adsenseAccountId.isBlank()
+                && adsenseRefreshTokenEncrypted != null && adsenseRefreshTokenEncrypted.length > 0;
     }
 
     @PrePersist

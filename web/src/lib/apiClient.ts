@@ -1358,6 +1358,54 @@ export function getProjectGoogleAnalyticsReport(
   return apiFetch<GoogleAnalyticsReport>(`/api/projects/${projectId}/dashboard/google-analytics`, { actor });
 }
 
+export interface ProjectAdSenseStatus {
+  configured: boolean;
+  accountId: string | null;
+}
+
+export function getProjectAdSenseStatus(projectId: number, actor?: ActorInfo): Promise<ProjectAdSenseStatus> {
+  return apiFetch<ProjectAdSenseStatus>(`/api/projects/${projectId}/api-keys/adsense`, { actor });
+}
+
+export function setProjectAdSenseAccountId(projectId: number, accountId: string, actor: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/adsense`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accountId }),
+    actor,
+  });
+}
+
+export function clearProjectAdSenseCredentials(projectId: number, actor: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/adsense`, { method: 'DELETE', actor });
+}
+
+export function completeProjectAdSenseOAuth(
+  projectId: number,
+  input: { code: string; redirectUri: string },
+  actor: ActorInfo
+): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/adsense/oauth-callback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export interface AdSenseReport {
+  eligible: boolean;
+  estimatedEarnings: string | null;
+  clicks: number | null;
+  impressions: number | null;
+  periodLabel: string | null;
+  errorMessage: string | null;
+}
+
+export function getProjectAdSenseReport(projectId: number, actor?: ActorInfo): Promise<AdSenseReport> {
+  return apiFetch<AdSenseReport>(`/api/projects/${projectId}/dashboard/adsense`, { actor });
+}
+
 export interface PlanChatMessage {
   role: "user" | "assistant";
   content: string;
