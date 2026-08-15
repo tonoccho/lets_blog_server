@@ -1,7 +1,8 @@
 # Let's Blog Server
 
 VSCode上でMarkdownを執筆し、複数のWordPressサイトへ投稿できる自己ホスト型の仲介システム。
-AI執筆支援(Ollama)・アイキャッチ/挿絵の自動生成(ComfyUI)・図表レンダリング(PlantUML)を含む一式を
+AI執筆支援(Ollama)・チャットでの壁打ちからのプロンプト生成込みのアイキャッチ/挿絵の自動生成(ComfyUI)・
+図表レンダリング(PlantUML)を含む一式を
 Docker Composeでまとめて起動する。クライアントはVSCode拡張機能(執筆・投稿)とWeb管理画面
 (サイト管理・投稿履歴・ユーザー管理等)の2つ。
 
@@ -202,6 +203,7 @@ APIの認証にはX-API-Keyヘッダを使用します。APIキーはログイ�
 
 - [docs/setup.md](docs/setup.md) — 環境変数・起動手順・トラブルシューティングの詳細
 - [spec/phase1/00-overview.md](spec/phase1/00-overview.md) — 全体アーキテクチャ
+- [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) — リリースノート
 
 ## ライセンス
 

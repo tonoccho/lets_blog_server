@@ -214,45 +214,66 @@ The AI will generate options; select the one you prefer.
 
 ## Image Generation
 
-### Featured Image Generation
+Let's Blog generates images using a self-hosted ComfyUI instance. Both the VSCode extension and
+the Web Admin Panel expose the same underlying capability, with a chat-assisted workflow for
+turning a rough idea into a usable ComfyUI prompt before generating.
 
-Let's Blog automatically generates featured images for articles using ComfyUI:
+### Chat-to-Image Workflow
 
-1. Write your article
-2. In the VSCode extension, click **Generate Featured Image**
-3. Enter a description of desired visual (or use AI suggestion)
+Instead of hand-writing a ComfyUI-style prompt, you can describe what you want in plain language
+and let Ollama turn it into an English prompt:
 
-**Screenshot placeholder: Image generation interface**
+1. Open the image generation UI (VSCode: see below; Web Admin: the **AI・アセット** tab on a
+   project's detail page → **アセット画像生成** → **チャットでプロンプトを作成**).
+2. Type a description (e.g. "夕焼けの海辺を歩く猫") into the chat box and send it.
+3. The generated prompt automatically fills the **prompt** field of the parameter form below —
+   you can still hand-edit it, or send another chat message to refine it further.
+4. Adjust the remaining parameters (negative prompt, steps, CFG scale, seed, sampler, scheduler,
+   width/height, batch size, checkpoint, LoRA) as needed, then generate.
 
-4. The system generates 2-3 options
-5. Click to preview each
-6. Select your favorite
-7. Click **Use as Featured Image**
+This calls `POST /api/projects/{projectId}/ai/generate-image-prompt` with the chat history and
+your latest message, and returns `{ "prompt": "<generated prompt>" }`. Each call is recorded as a
+`generation_jobs` entry (type `ollama_image_prompt`) for auditing.
 
-### Supported Image Styles
+### Generating Images (VSCode Extension)
 
-- **Blog header** - Horizontal format for article headers
-- **Social media** - Square format for sharing
-- **Thumbnail** - Small format for lists
-- **Custom** - Specify dimensions (width × height in pixels)
+1. With a Markdown article open, run **Let's Blog: Generate Image** from the Command Palette, or
+   right-click in the editor and choose it from the context menu. There is no default keybinding
+   for this command.
+2. Optionally use the chat box (see above) to generate a starting prompt. Plain **Enter** in the
+   chat box inserts a newline; **Ctrl+Enter** (**Cmd+Enter** on macOS) sends the message.
+3. Review/adjust the parameter form, then click **生成** or press **Ctrl+Enter**/**Cmd+Enter**
+   anywhere else in the panel to generate (up to `batchSize`, max 4, images per request).
+4. On the result, click **アイキャッチとして設定** to save the image under `assets/` and set it as
+   the article's `featured_image` in front matter, or **アセットとして追加** to save it under
+   `assets/` and insert a Markdown image reference at the cursor.
+5. **Escape** cancels an in-flight chat or image-generation request.
 
-### Image Customization
+This calls `POST /api/ai/image` with the prompt and parameters (`projectId` is a field in the
+request body, not part of the URL), and returns up to `batchSize` base64-encoded images plus a
+persisted image ID for each.
 
-If the generated image isn't perfect:
+### Generating Images (Web Admin Panel)
 
-1. Click **Regenerate** for different variations
-2. Adjust the description and regenerate
-3. Download the image and edit manually
-
-**Screenshot placeholder: Image generation options grid**
+1. Open a project, go to the **AI・アセット** tab, and click **アセット画像生成** to expand the
+   panel (this also loads the checkpoint/sampler/scheduler/LoRA options and the project's default
+   image size).
+2. Use **チャットでプロンプトを作成** (see the chat-to-image workflow above) to fill the prompt,
+   or type one directly.
+3. Adjust parameters and click **生成**. Up to 4 result thumbnails appear in a grid; click one to
+   select it.
+4. Click **アセットとして追加(全環境へアップロード)** to upload the selected image as a project
+   asset to every configured environment (local/test/production).
 
 ### Managing Generated Images
 
-Generated images are stored in the article:
-
-1. Navigate to **Media** in the admin panel
-2. Filter by **Source** → **AI Generated**
-3. View, download, or delete images
+All generated images (from either the extension or the Web Admin Panel) are listed on the
+**生成画像ギャラリー** page (`/image-gallery` in the Web Admin Panel), which shows the prompt,
+auto-suggested tags, and generation date for each image, and lets you filter by tag, edit tags,
+or delete an image. The VSCode extension's **Let's Blog: Image Gallery** panel offers the same
+list for inserting a previously generated image into the current article, plus a right-click
+**「この設定で画像生成」** option that reopens the Generate Image panel pre-filled with that
+image's original settings.
 
 ## Multi-site Publishing
 
@@ -372,7 +393,7 @@ Monitor and maintain system health:
 |--------|---------------|-------|
 | New Article | `Ctrl+Alt+N` | `Cmd+Option+N` |
 | Publish | `Ctrl+Alt+P` | `Cmd+Option+P` |
-| AI Draft | `Ctrl+Shift+G` | `Cmd+Shift+G` |
+| Send chat / Generate image (Generate Image panel) | `Ctrl+Enter` | `Cmd+Enter` |
 | Proofread | `Ctrl+Shift+P` | `Cmd+Shift+P` |
 | Preview | `Ctrl+Shift+V` | `Cmd+Shift+V` |
 
