@@ -89,6 +89,16 @@ public class Project {
     @Column(name = "brave_search_api_key_encrypted", columnDefinition = "VARBINARY(1024)")
     private byte[] braveSearchApiKeyEncrypted;
 
+    /**
+     * Google Analytics連携(issue #386)。GA4プロパティID自体は秘匿情報ではないので平文で保持し、
+     * サービスアカウントの認証情報(JSON鍵ファイル全体)のみ暗号化して保持する。
+     */
+    @Column(name = "ga_property_id", length = 64)
+    private String gaPropertyId;
+
+    @Column(name = "ga_service_account_json_encrypted", columnDefinition = "VARBINARY(4096)")
+    private byte[] gaServiceAccountJsonEncrypted;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -105,6 +115,11 @@ public class Project {
 
     public boolean hasBraveSearchApiKey() {
         return braveSearchApiKeyEncrypted != null && braveSearchApiKeyEncrypted.length > 0;
+    }
+
+    public boolean hasGoogleAnalyticsCredentials() {
+        return gaPropertyId != null && !gaPropertyId.isBlank()
+                && gaServiceAccountJsonEncrypted != null && gaServiceAccountJsonEncrypted.length > 0;
     }
 
     @PrePersist

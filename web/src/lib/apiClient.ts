@@ -1313,6 +1313,51 @@ export function clearProjectBraveSearchApiKey(projectId: number, actor: ActorInf
   return apiFetch<void>(`/api/projects/${projectId}/api-keys/brave-search-api-key`, { method: 'DELETE', actor });
 }
 
+export interface ProjectGoogleAnalyticsStatus {
+  configured: boolean;
+  propertyId: string | null;
+}
+
+export function getProjectGoogleAnalyticsStatus(
+  projectId: number,
+  actor?: ActorInfo
+): Promise<ProjectGoogleAnalyticsStatus> {
+  return apiFetch<ProjectGoogleAnalyticsStatus>(`/api/projects/${projectId}/api-keys/google-analytics`, { actor });
+}
+
+export function setProjectGoogleAnalyticsCredentials(
+  projectId: number,
+  input: { propertyId: string; serviceAccountJson: string },
+  actor: ActorInfo
+): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/google-analytics`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function clearProjectGoogleAnalyticsCredentials(projectId: number, actor: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/google-analytics`, { method: 'DELETE', actor });
+}
+
+export interface GoogleAnalyticsReport {
+  eligible: boolean;
+  sessions: number | null;
+  activeUsers: number | null;
+  pageViews: number | null;
+  periodLabel: string | null;
+  errorMessage: string | null;
+}
+
+export function getProjectGoogleAnalyticsReport(
+  projectId: number,
+  actor?: ActorInfo
+): Promise<GoogleAnalyticsReport> {
+  return apiFetch<GoogleAnalyticsReport>(`/api/projects/${projectId}/dashboard/google-analytics`, { actor });
+}
+
 export interface PlanChatMessage {
   role: "user" | "assistant";
   content: string;

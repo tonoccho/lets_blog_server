@@ -1,8 +1,10 @@
 package com.letsblog.api.controller;
 
 import com.letsblog.api.dto.ProjectApiKeyStatusResponse;
+import com.letsblog.api.dto.ProjectGoogleAnalyticsStatusResponse;
 import com.letsblog.api.dto.SetProjectBraveSearchApiKeyRequest;
 import com.letsblog.api.dto.SetProjectGithubTokenRequest;
+import com.letsblog.api.dto.SetProjectGoogleAnalyticsCredentialsRequest;
 import com.letsblog.api.service.ProjectApiKeyService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -61,6 +63,27 @@ public class ProjectApiKeyController {
     @DeleteMapping("/brave-search-api-key")
     public ResponseEntity<Void> clearBraveSearchApiKey(@PathVariable Long projectId) {
         projectApiKeyService.clearBraveSearchApiKey(projectId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/google-analytics")
+    public ProjectGoogleAnalyticsStatusResponse getGoogleAnalyticsStatus(@PathVariable Long projectId) {
+        return new ProjectGoogleAnalyticsStatusResponse(
+                projectApiKeyService.isGoogleAnalyticsConfigured(projectId),
+                projectApiKeyService.getGoogleAnalyticsPropertyId(projectId));
+    }
+
+    @PutMapping("/google-analytics")
+    public ResponseEntity<Void> setGoogleAnalyticsCredentials(
+            @PathVariable Long projectId, @Valid @RequestBody SetProjectGoogleAnalyticsCredentialsRequest request) {
+        projectApiKeyService.setGoogleAnalyticsCredentials(
+                projectId, request.propertyId(), request.serviceAccountJson());
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/google-analytics")
+    public ResponseEntity<Void> clearGoogleAnalyticsCredentials(@PathVariable Long projectId) {
+        projectApiKeyService.clearGoogleAnalyticsCredentials(projectId);
         return ResponseEntity.noContent().build();
     }
 }

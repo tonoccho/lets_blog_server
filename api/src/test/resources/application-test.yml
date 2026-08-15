@@ -54,6 +54,8 @@ app:
   comfyui-models-path: /tmp/comfyui-models
   brave-search-base-url: https://api.search.brave.com
   brave-search-api-key: test-key
+  google-analytics-data-api-base-url: https://analyticsdata.googleapis.com
+  google-analytics-oauth-token-uri: https://oauth2.googleapis.com/token
   plantuml-base-url: http://localhost:8085
   wordpress-provision-base-url: http://localhost:9000
   wordpress-provision-token: test-token

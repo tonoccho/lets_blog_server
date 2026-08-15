@@ -1,9 +1,19 @@
 import { notFound } from "next/navigation";
-import { getProject } from "@/lib/apiClient";
+import { getProject, getProjectGoogleAnalyticsReport, type GoogleAnalyticsReport } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { ProjectSectionNav } from "../ProjectSectionNav";
 import { DashboardWidgetSlot } from "./DashboardWidgetSlot";
+import { GoogleAnalyticsWidget } from "./GoogleAnalyticsWidget";
+
+const NOT_ELIGIBLE_GA_REPORT: GoogleAnalyticsReport = {
+  eligible: false,
+  sessions: null,
+  activeUsers: null,
+  pageViews: null,
+  periodLabel: null,
+  errorMessage: null,
+};
 
 export default async function ProjectDashboardPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -11,7 +21,10 @@ export default async function ProjectDashboardPage({ params }: { params: Promise
   const actor = { id: Number(session.user.id), role: session.user.role };
   const projectId = Number(id);
 
-  const project = await getProject(projectId, actor).catch(() => null);
+  const [project, gaReport] = await Promise.all([
+    getProject(projectId, actor).catch(() => null),
+    getProjectGoogleAnalyticsReport(projectId, actor).catch(() => NOT_ELIGIBLE_GA_REPORT),
+  ]);
   if (!project) {
     notFound();
   }
@@ -36,10 +49,12 @@ export default async function ProjectDashboardPage({ params }: { params: Promise
         <DashboardWidgetSlot
           title="Google Analytics"
           description="本番サイトのアクセス状況(セッション数・ユーザー数・ページビュー等)を表示します。"
-          configured={false}
+          configured={gaReport.eligible}
           settingsHref={`/projects/${projectId}/settings/google-analytics`}
           settingsLabel="Google Analyticsを設定"
-        />
+        >
+          <GoogleAnalyticsWidget report={gaReport} />
+        </DashboardWidgetSlot>
         <DashboardWidgetSlot
           title="Google AdSense"
           description="本番サイトの広告収益レポート(推定収益・クリック数・表示回数等)を表示します。"
