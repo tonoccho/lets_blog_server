@@ -6,7 +6,7 @@ import com.letsblog.api.ai.ComfyUiClient;
 import com.letsblog.api.ai.ComfyUiGenerationParams;
 import com.letsblog.api.ai.ComfyUiImage;
 import com.letsblog.api.ai.GeneratedImageStorageService;
-import com.letsblog.api.ai.OllamaClient;
+import com.letsblog.api.ai.LlmClient;
 import com.letsblog.api.domain.GeneratedImage;
 import com.letsblog.api.domain.GenerationJob;
 import com.letsblog.api.dto.AiDraftRequest;
@@ -45,9 +45,9 @@ import static org.mockito.Mockito.when;
 class AiAssistServiceTest {
 
     @Mock
-    private OllamaClient ollamaClient;
+    private LlmClient llmClient;
     @Mock
-    private OllamaModelService ollamaModelService;
+    private LlmModelService llmModelService;
     @Mock
     private ComfyUiClient comfyUiClient;
     @Mock
@@ -67,7 +67,7 @@ class AiAssistServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AiAssistService(ollamaClient, ollamaModelService, comfyUiClient, comfyUiModelService,
+        service = new AiAssistService(llmClient, llmModelService, comfyUiClient, comfyUiModelService,
                 generatedImageStorageService, generatedImageRepository, generationJobRepository,
                 webSearchService, new ObjectMapper(), projectService);
 
@@ -114,12 +114,12 @@ class AiAssistServiceTest {
                 new ComfyUiImage("b.png", new byte[]{2}, "image/png"));
         when(comfyUiClient.generateImage(any())).thenReturn(images);
         when(comfyUiModelService.getSelectedCheckpointOrGlobalDefault(any())).thenReturn("checkpoint.safetensors");
-        when(ollamaClient.generate(anyString())).thenReturn("{\"tags\": [\"猫\", \"かわいい\"]}");
+        when(llmClient.generate(anyString())).thenReturn("{\"tags\": [\"猫\", \"かわいい\"]}");
 
         ArgumentCaptor<GeneratedImage> captor = ArgumentCaptor.forClass(GeneratedImage.class);
         service.generateImage(AiImageRequest.withDefaults("a cat"));
 
-        org.mockito.Mockito.verify(ollamaClient, org.mockito.Mockito.times(1)).generate(anyString());
+        org.mockito.Mockito.verify(llmClient, org.mockito.Mockito.times(1)).generate(anyString());
         org.mockito.Mockito.verify(generatedImageRepository, org.mockito.Mockito.times(2)).save(captor.capture());
         for (GeneratedImage saved : captor.getAllValues()) {
             assertTrue(saved.getTagsJson().contains("猫"));
@@ -132,7 +132,7 @@ class AiAssistServiceTest {
         when(comfyUiClient.generateImage(any())).thenReturn(
                 List.of(new ComfyUiImage("a.png", new byte[]{1}, "image/png")));
         when(comfyUiModelService.getSelectedCheckpointOrGlobalDefault(any())).thenReturn("checkpoint.safetensors");
-        when(ollamaClient.generate(anyString())).thenThrow(new RuntimeException("Ollama unreachable"));
+        when(llmClient.generate(anyString())).thenThrow(new RuntimeException("LLM unreachable"));
 
         ArgumentCaptor<GeneratedImage> captor = ArgumentCaptor.forClass(GeneratedImage.class);
         AiImageBatchResponse response = service.generateImage(AiImageRequest.withDefaults("a cat"));
@@ -210,7 +210,7 @@ class AiAssistServiceTest {
     void draft_検索成功時はsourcesを含み検索結果をプロンプトへ付加する() {
         when(webSearchService.searchSafely(anyString())).thenReturn(
                 WebSearchOutcome.success(List.of(new BraveSearchResult("Title", "Desc", "https://example.com"))));
-        when(ollamaClient.generate(anyString())).thenReturn("生成結果");
+        when(llmClient.generate(anyString())).thenReturn("生成結果");
 
         AiDraftResponse response = service.draft(new AiDraftRequest("draft", "AIブログについて"));
 
@@ -220,14 +220,14 @@ class AiAssistServiceTest {
         assertNull(response.searchNote());
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        org.mockito.Mockito.verify(ollamaClient).generate(promptCaptor.capture());
+        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture());
         assertTrue(promptCaptor.getValue().contains("参考のWeb検索結果"));
     }
 
     @Test
     void draft_検索失敗時はsourcesが空でsearchNoteが設定される() {
         when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.failure("APIキー未設定"));
-        when(ollamaClient.generate(anyString())).thenReturn("生成結果");
+        when(llmClient.generate(anyString())).thenReturn("生成結果");
 
         AiDraftResponse response = service.draft(new AiDraftRequest("draft", "AIブログについて"));
 
@@ -238,7 +238,7 @@ class AiAssistServiceTest {
     @Test
     void draft_検索成功だが0件の場合はその旨のsearchNoteになる() {
         when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.success(List.of()));
-        when(ollamaClient.generate(anyString())).thenReturn("生成結果");
+        when(llmClient.generate(anyString())).thenReturn("生成結果");
 
         AiDraftResponse response = service.draft(new AiDraftRequest("draft", "AIブログについて"));
 
@@ -255,14 +255,14 @@ class AiAssistServiceTest {
     @Test
     void generateSection_本文モードは直前の文脈を含むプロンプトを組み立てる() {
         when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.failure("未設定"));
-        when(ollamaClient.generate(anyString())).thenReturn("セクション本文");
+        when(llmClient.generate(anyString())).thenReturn("セクション本文");
 
         AiSectionResponse response = service.generateSection(
                 new AiSectionRequest("body", "導入部", "前の段落の文脈", "記事タイトル", null, null, null));
 
         assertEquals("セクション本文", response.result());
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        org.mockito.Mockito.verify(ollamaClient).generate(promptCaptor.capture());
+        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture());
         assertTrue(promptCaptor.getValue().contains("前の段落の文脈"));
         assertTrue(promptCaptor.getValue().contains("記事タイトル"));
         assertTrue(promptCaptor.getValue().contains("導入部"));
@@ -272,7 +272,7 @@ class AiAssistServiceTest {
     void generateSection_リード文モードは出典を含めて返す() {
         when(webSearchService.searchSafely(anyString())).thenReturn(
                 WebSearchOutcome.success(List.of(new BraveSearchResult("Title", "Desc", "https://example.com"))));
-        when(ollamaClient.generate(anyString())).thenReturn("リード文");
+        when(llmClient.generate(anyString())).thenReturn("リード文");
 
         AiSectionResponse response = service.generateSection(
                 new AiSectionRequest("lead", null, null, "記事タイトル", List.of("導入", "本編", "まとめ"), null, null));
@@ -282,7 +282,7 @@ class AiAssistServiceTest {
         assertNull(response.searchNote());
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        org.mockito.Mockito.verify(ollamaClient).generate(promptCaptor.capture());
+        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture());
         assertTrue(promptCaptor.getValue().contains("導入"));
         assertTrue(promptCaptor.getValue().contains("まとめ"));
     }
@@ -290,7 +290,7 @@ class AiAssistServiceTest {
     @Test
     void generateSection_サブセクション考慮モードは見出しとサブセクション一覧を含むプロンプトを組み立てる() {
         when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.failure("未設定"));
-        when(ollamaClient.generate(anyString())).thenReturn("セクションリード文");
+        when(llmClient.generate(anyString())).thenReturn("セクションリード文");
 
         AiSectionResponse response = service.generateSection(
                 new AiSectionRequest("lead-subsections", "第2章 実装編", null, "記事タイトル",
@@ -298,7 +298,7 @@ class AiAssistServiceTest {
 
         assertEquals("セクションリード文", response.result());
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        org.mockito.Mockito.verify(ollamaClient).generate(promptCaptor.capture());
+        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture());
         assertTrue(promptCaptor.getValue().contains("第2章 実装編"));
         assertTrue(promptCaptor.getValue().contains("設計"));
         assertTrue(promptCaptor.getValue().contains("テスト"));
@@ -307,7 +307,7 @@ class AiAssistServiceTest {
     @Test
     void generateSection_messageが指定されると壁打ち形式のプロンプトを組み立てる() {
         when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.failure("未設定"));
-        when(ollamaClient.generate(anyString())).thenReturn("再生成された本文");
+        when(llmClient.generate(anyString())).thenReturn("再生成された本文");
 
         List<PlanChatMessage> history = List.of(
                 new PlanChatMessage("assistant", "1回目の生成結果"));
@@ -318,7 +318,7 @@ class AiAssistServiceTest {
 
         assertEquals("再生成された本文", response.result());
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        org.mockito.Mockito.verify(ollamaClient).generate(promptCaptor.capture());
+        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture());
         String prompt = promptCaptor.getValue();
         assertTrue(prompt.contains("System:"));
         assertTrue(prompt.contains("1回目の生成結果"));
@@ -334,8 +334,8 @@ class AiAssistServiceTest {
 
     @Test
     void generateImagePrompt_プロジェクトの選択モデルでシステムプロンプトと履歴を含めて生成する() {
-        when(ollamaModelService.getSelectedModel(1L)).thenReturn("llama3");
-        when(ollamaClient.generate(anyString(), org.mockito.ArgumentMatchers.eq("llama3")))
+        when(llmModelService.getSelectedModel(1L)).thenReturn("llama3");
+        when(llmClient.generate(anyString(), org.mockito.ArgumentMatchers.eq("llama3")))
                 .thenReturn("a cute cat, studio lighting, high quality");
 
         List<PlanChatMessage> history = List.of(new PlanChatMessage("user", "猫の画像がほしい"));
@@ -345,7 +345,7 @@ class AiAssistServiceTest {
         assertEquals("a cute cat, studio lighting, high quality", response.prompt());
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        org.mockito.Mockito.verify(ollamaClient).generate(promptCaptor.capture(), org.mockito.ArgumentMatchers.eq("llama3"));
+        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture(), org.mockito.ArgumentMatchers.eq("llama3"));
         String prompt = promptCaptor.getValue();
         assertTrue(prompt.contains("System:"));
         assertTrue(prompt.contains("猫の画像がほしい"));
@@ -355,8 +355,8 @@ class AiAssistServiceTest {
 
     @Test
     void generateImagePrompt_履歴がnullでも生成できる() {
-        when(ollamaModelService.getSelectedModel(2L)).thenReturn("llama3");
-        when(ollamaClient.generate(anyString(), anyString())).thenReturn("a mountain landscape");
+        when(llmModelService.getSelectedModel(2L)).thenReturn("llama3");
+        when(llmClient.generate(anyString(), anyString())).thenReturn("a mountain landscape");
 
         AiImagePromptResponse response = service.generateImagePrompt(2L, null, "山の風景");
 
@@ -364,9 +364,9 @@ class AiAssistServiceTest {
     }
 
     @Test
-    void generateImagePrompt_Ollama呼び出し失敗時はジョブを失敗として記録し例外を伝播する() {
-        when(ollamaModelService.getSelectedModel(1L)).thenReturn("llama3");
-        when(ollamaClient.generate(anyString(), anyString()))
+    void generateImagePrompt_LLM呼び出し失敗時はジョブを失敗として記録し例外を伝播する() {
+        when(llmModelService.getSelectedModel(1L)).thenReturn("llama3");
+        when(llmClient.generate(anyString(), anyString()))
                 .thenThrow(new RuntimeException("接続エラー"));
 
         org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,

@@ -737,7 +737,7 @@ export interface CustomTag {
   projectId: number | null;
   createdAt: string;
   updatedAt: string;
-  /** AI生成時にOllamaへのリクエストを元にPenpotへ作成したデザインファイルのURL(ベストエフォート、生成以外では常にnull)。 */
+  /** AI生成時にLLMへのリクエストを元にPenpotへ作成したデザインファイルのURL(ベストエフォート、生成以外では常にnull)。 */
   penpotFileUrl?: string | null;
 }
 
@@ -2024,56 +2024,26 @@ export function getGenerationJob(id: number, actor?: ActorInfo): Promise<Generat
   return apiFetch<GenerationJobDetail>(`/api/generation-jobs/${id}`, { actor });
 }
 
-export interface OllamaModelInfo {
-  name: string;
-  sizeBytes: number;
-  modifiedAt: string | null;
-}
-
-export interface OllamaModelListResponse {
-  models: OllamaModelInfo[];
+export interface LlmModelListResponse {
+  availableModels: string[];
   selected: string;
 }
 
-export function listOllamaModels(projectId: number, actor?: ActorInfo): Promise<OllamaModelListResponse> {
-  return apiFetch<OllamaModelListResponse>(`/api/projects/${projectId}/ai-models/ollama/models`, { actor });
+export function listLlmModels(projectId: number, actor?: ActorInfo): Promise<LlmModelListResponse> {
+  return apiFetch<LlmModelListResponse>(`/api/projects/${projectId}/ai-models/llm/models`, { actor });
 }
 
-export function selectOllamaModel(
+export function selectLlmModel(
   projectId: number,
   modelName: string,
   actor?: ActorInfo
-): Promise<OllamaModelListResponse> {
-  return apiFetch<OllamaModelListResponse>(`/api/projects/${projectId}/ai-models/ollama/models/selection`, {
+): Promise<LlmModelListResponse> {
+  return apiFetch<LlmModelListResponse>(`/api/projects/${projectId}/ai-models/llm/models/selection`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ modelName }),
     actor,
   });
-}
-
-export function installOllamaModel(
-  projectId: number,
-  modelName: string,
-  actor?: ActorInfo
-): Promise<GenerationJob> {
-  return apiFetch<GenerationJob>(`/api/projects/${projectId}/ai-models/ollama/models/install`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ modelName }),
-    actor,
-  });
-}
-
-export function deleteOllamaModel(
-  projectId: number,
-  modelName: string,
-  actor?: ActorInfo
-): Promise<GenerationJob> {
-  return apiFetch<GenerationJob>(
-    `/api/projects/${projectId}/ai-models/ollama/models?modelName=${encodeURIComponent(modelName)}`,
-    { method: 'DELETE', actor }
-  );
 }
 
 export interface ComfyUiCheckpointListResponse {

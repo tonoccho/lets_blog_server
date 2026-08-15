@@ -77,8 +77,8 @@ public class Project {
     @Column(name = "default_article_image_long_edge_px")
     private Integer defaultArticleImageLongEdgePx;
 
-    @Column(name = "ollama_model", length = 255)
-    private String ollamaModel;
+    @Column(name = "llm_model", length = 255)
+    private String llmModel;
 
     @Column(name = "comfyui_checkpoint", length = 255)
     private String comfyuiCheckpoint;

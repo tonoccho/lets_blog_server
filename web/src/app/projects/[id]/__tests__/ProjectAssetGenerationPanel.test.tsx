@@ -79,7 +79,7 @@ describe('ProjectAssetGenerationPanel チャットでプロンプトを作成', 
 
   it('生成失敗時にエラーメッセージを表示する', async () => {
     ;(actions.generateImagePromptAction as jest.Mock).mockResolvedValue({
-      error: 'Ollamaへの接続に失敗しました',
+      error: 'AIサービスへの接続に失敗しました',
     })
     await openPanel()
     fireEvent.click(screen.getByText('開く'))
@@ -89,7 +89,7 @@ describe('ProjectAssetGenerationPanel チャットでプロンプトを作成', 
     fireEvent.click(screen.getByText('プロンプト生成'))
 
     await waitFor(() => {
-      expect(screen.getByText('Ollamaへの接続に失敗しました')).toBeInTheDocument()
+      expect(screen.getByText('AIサービスへの接続に失敗しました')).toBeInTheDocument()
     })
   })
 

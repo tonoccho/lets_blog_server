@@ -35,29 +35,28 @@ public class ConnectedServiceStatusService {
     private static final String PLANTUML_HEALTHCHECK_SOURCE = "@startuml\nA->B\n@enduml";
 
     private final DataSource dataSource;
-    private final RestClient ollamaClient;
     private final RestClient comfyUiClient;
     private final RestClient plantUmlClient;
     private final RestClient wordpressProvisioningClient;
     private final RestClient penpotClient;
     private final SystemSettingService systemSettingService;
-    private final String ollamaBaseUrl;
     private final String comfyUiBaseUrl;
     private final String plantUmlBaseUrl;
     private final String wordpressProvisionBaseUrl;
     private final String penpotBaseUrl;
+    private final String llmApiKey;
 
     @Autowired
     public ConnectedServiceStatusService(
             DataSource dataSource,
-            @Value("${app.ollama-base-url}") String ollamaBaseUrl,
+            @Value("${app.llm-api-key}") String llmApiKey,
             @Value("${app.comfyui-base-url}") String comfyUiBaseUrl,
             @Value("${app.plantuml-base-url}") String plantUmlBaseUrl,
             @Value("${app.wordpress-provision-base-url}") String wordpressProvisionBaseUrl,
             @Value("${app.penpot-base-url}") String penpotBaseUrl,
             SystemSettingService systemSettingService) {
         this(dataSource,
-                builderWithTimeout(ollamaBaseUrl), ollamaBaseUrl,
+                llmApiKey,
                 builderWithTimeout(comfyUiBaseUrl), comfyUiBaseUrl,
                 builderWithTimeout(plantUmlBaseUrl), plantUmlBaseUrl,
                 builderWithTimeout(wordpressProvisionBaseUrl), wordpressProvisionBaseUrl,
@@ -68,20 +67,19 @@ public class ConnectedServiceStatusService {
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
     ConnectedServiceStatusService(
             DataSource dataSource,
-            RestClient.Builder ollamaBuilder, String ollamaBaseUrl,
+            String llmApiKey,
             RestClient.Builder comfyUiBuilder, String comfyUiBaseUrl,
             RestClient.Builder plantUmlBuilder, String plantUmlBaseUrl,
             RestClient.Builder wordpressBuilder, String wordpressProvisionBaseUrl,
             RestClient.Builder penpotBuilder, String penpotBaseUrl,
             SystemSettingService systemSettingService) {
         this.dataSource = dataSource;
-        this.ollamaClient = ollamaBuilder.build();
+        this.llmApiKey = llmApiKey;
         this.comfyUiClient = comfyUiBuilder.build();
         this.plantUmlClient = plantUmlBuilder.build();
         this.wordpressProvisioningClient = wordpressBuilder.build();
         this.penpotClient = penpotBuilder.build();
         this.systemSettingService = systemSettingService;
-        this.ollamaBaseUrl = ollamaBaseUrl;
         this.comfyUiBaseUrl = comfyUiBaseUrl;
         this.plantUmlBaseUrl = plantUmlBaseUrl;
         this.wordpressProvisionBaseUrl = wordpressProvisionBaseUrl;
@@ -108,8 +106,6 @@ public class ConnectedServiceStatusService {
      * 直列実行だと最悪ケースでTIMEOUT×サービス数の遅延が生じうる問題を避ける)。
      */
     public List<ConnectedServiceStatusDetailResponse> checkAllDetailed() {
-        CompletableFuture<ConnectedServiceStatusDetailResponse> ollama =
-                checkAsync("ollama", "Ollama", this::checkOllama);
         CompletableFuture<ConnectedServiceStatusDetailResponse> comfyUi =
                 checkAsync("comfyui", "ComfyUI", this::checkComfyUi);
         CompletableFuture<ConnectedServiceStatusDetailResponse> plantUml =
@@ -121,7 +117,7 @@ public class ConnectedServiceStatusService {
 
         return List.of(
                 runTimed("database", "データベース", this::checkDatabase),
-                ollama.join(),
+                runTimed("llm", "LLM", this::checkLlm),
                 comfyUi.join(),
                 plantUml.join(),
                 wordpressProvisioning.join(),
@@ -154,9 +150,15 @@ public class ConnectedServiceStatusService {
         }
     }
 
-    /** モデル一覧を取得できるか(OllamaClient#listModelsが使うのと同じエンドポイント)で判定する。 */
-    private CheckOutcome checkOllama() {
-        return checkHttpService(ollamaClient, ollamaBaseUrl, "/api/tags");
+    /**
+     * 外部ホスト型LLM APIは第三者の有料APIのため、疎通確認のために定期的に実リクエストを送ることはせず、
+     * APIキーが設定されているかどうかを稼働状況の代わりとして扱う(Brave Searchと同じ方針)。
+     */
+    private CheckOutcome checkLlm() {
+        if (llmApiKey != null && !llmApiKey.isBlank()) {
+            return CheckOutcome.normal(null);
+        }
+        return new CheckOutcome(Status.WARNING, null, "APIキーが設定されていません", null);
     }
 
     /** ComfyUI公式の軽量なシステム状態エンドポイントで判定する。 */

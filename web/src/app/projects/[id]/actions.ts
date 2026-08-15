@@ -37,10 +37,8 @@ import {
   deletePluginEverywhere,
   deleteThemeEverywhere,
   runBulkOperationUpload,
-  listOllamaModels,
-  selectOllamaModel,
-  installOllamaModel,
-  deleteOllamaModel,
+  listLlmModels,
+  selectLlmModel,
   listComfyUiCheckpoints,
   selectComfyUiCheckpoint,
   installComfyUiCheckpoint,
@@ -66,7 +64,7 @@ import {
   TermComparisonPage,
   StatusComparisonPage,
   PluginThemeStatus,
-  OllamaModelListResponse,
+  LlmModelListResponse,
   ComfyUiCheckpointListResponse,
   GenerationJobDetail,
 } from "@/lib/apiClient";
@@ -663,13 +661,13 @@ export interface AiModelActionState {
   jobId?: number;
 }
 
-export async function fetchOllamaModelsAction(projectId: number): Promise<OllamaModelListResponse> {
+export async function fetchLlmModelsAction(projectId: number): Promise<LlmModelListResponse> {
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };
-  return listOllamaModels(projectId, actor);
+  return listLlmModels(projectId, actor);
 }
 
-export async function selectOllamaModelAction(
+export async function selectLlmModelAction(
   projectId: number,
   modelName: string
 ): Promise<{ error?: string }> {
@@ -677,42 +675,12 @@ export async function selectOllamaModelAction(
   const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
-    await selectOllamaModel(projectId, modelName, actor);
+    await selectLlmModel(projectId, modelName, actor);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
   revalidatePath(`/projects/${projectId}`);
   return {};
-}
-
-export async function installOllamaModelAction(
-  projectId: number,
-  modelName: string
-): Promise<AiModelActionState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-
-  try {
-    const job = await installOllamaModel(projectId, modelName, actor);
-    return { jobId: job.id };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-export async function deleteOllamaModelAction(
-  projectId: number,
-  modelName: string
-): Promise<AiModelActionState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-
-  try {
-    const job = await deleteOllamaModel(projectId, modelName, actor);
-    return { jobId: job.id };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
-  }
 }
 
 export async function fetchComfyUiCheckpointsAction(projectId: number): Promise<ComfyUiCheckpointListResponse> {

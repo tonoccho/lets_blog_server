@@ -116,7 +116,7 @@ export default async function ProjectDetailPage({
           <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
             <h2 className="font-medium">モデル設定</h2>
             <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-              壁打ちチャットで使うOllamaモデル・画像生成で使うComfyUIチェックポイントは、プロジェクトごとに
+              壁打ちチャットで使うLLMモデル・画像生成で使うComfyUIチェックポイントは、プロジェクトごとに
               「AI・アセット」タブから切り替えられます。
             </p>
           </div>

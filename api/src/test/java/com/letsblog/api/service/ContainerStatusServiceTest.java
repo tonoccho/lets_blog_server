@@ -80,7 +80,7 @@ class ContainerStatusServiceTest {
     void testListAll_停止中のコンテナはエラーと判定する() {
         server.expect(requestTo(DOCKER_URL + "/containers/json?all=true"))
                 .andRespond(withSuccess(
-                        "[{\"Names\":[\"/lbs-ollama\"],\"State\":\"exited\",\"Status\":\"Exited (1) 3 minutes ago\"}]",
+                        "[{\"Names\":[\"/lbs-wordpress\"],\"State\":\"exited\",\"Status\":\"Exited (1) 3 minutes ago\"}]",
                         MediaType.APPLICATION_JSON));
 
         List<ContainerStatusResponse> containers = service.listAll();

@@ -14,7 +14,7 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * Ollama/ComfyUI呼び出しジョブの履歴一覧(Web管理フロントエンドの表示用)。
+ * LLM/ComfyUI呼び出しジョブの履歴一覧(Web管理フロントエンドの表示用)。
  * ジョブの作成自体は06-ollama-integration / 07-comfyui-integration 側で行う。
  */
 @RestController

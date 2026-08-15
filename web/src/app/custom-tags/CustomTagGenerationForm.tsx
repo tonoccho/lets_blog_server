@@ -90,7 +90,7 @@ export function CustomTagGenerationForm({
       {!showResults ? (
         <>
           <p className="text-sm text-neutral-600 dark:text-neutral-400">
-            Ollamaに自然言語でUIコンポーネントのリクエストを送信すると、HTMLテンプレートとCSSが自動生成されます。
+            AIに自然言語でUIコンポーネントのリクエストを送信すると、HTMLテンプレートとCSSが自動生成されます。
           </p>
           <form ref={formRef} onSubmit={handleSubmit} className="space-y-3">
             <label className="flex flex-col gap-1 text-sm">

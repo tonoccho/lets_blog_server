@@ -1,18 +1,16 @@
 package com.letsblog.api.ai;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * OllamaClientの回帰テスト。Qwen3等の推論モデルが出力に混入させる<think>...</think>ブロックの
+ * LlmClientの回帰テスト。推論モデル経由で出力に混入しうる<think>...</think>ブロックの
  * 除去ロジックを中心に検証する(実HTTP呼び出しはモックせず、ロジック単体を検証する)。
  */
-class OllamaClientTest {
+class LlmClientTest {
 
-    private final OllamaClient client =
-            new OllamaClient("http://ollama:11434", "qwen3:14b", 120L, new ObjectMapper());
+    private final LlmClient client = new LlmClient("https://api.openai.com/v1", "test-key", "gpt-4o-mini", 120L);
 
     @Test
     void stripThinkingBlocks_thinkブロックを除去する() {

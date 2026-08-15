@@ -1,7 +1,7 @@
 # Let's Blog Server
 
 VSCode上でMarkdownを執筆し、複数のWordPressサイトへ投稿できる自己ホスト型の仲介システム。
-AI執筆支援(Ollama)・チャットでの壁打ちからのプロンプト生成込みのアイキャッチ/挿絵の自動生成(ComfyUI)・
+AI執筆支援(外部LLMサービス)・チャットでの壁打ちからのプロンプト生成込みのアイキャッチ/挿絵の自動生成(ComfyUI)・
 図表レンダリング(PlantUML)を含む一式を
 Docker Composeでまとめて起動する。クライアントはVSCode拡張機能(執筆・投稿)とWeb管理画面
 (サイト管理・投稿履歴・ユーザー管理等)の2つ。
@@ -30,10 +30,10 @@ Docker Composeでまとめて起動する。クライアントはVSCode拡張機
 
 | 項目 | 要件 |
 |---|---|
-| GPU | **NVIDIA GPU(VRAM 16GB以上)必須**。Ollama(LLM)とComfyUI(画像生成)がGPUを使用するため |
+| GPU | **NVIDIA GPU(VRAM 16GB以上)必須**。ComfyUI(画像生成)がGPUを使用するため |
 | GPUドライバ | NVIDIA GPUドライバ + NVIDIA Container Toolkit(Dockerコンテナへのパススルー用) |
-| メモリ | 8GB以上を推奨(MySQL・Spring Boot API・Next.js・Ollama・ComfyUI等の複数コンテナを同時起動するため) |
-| ディスク | Dockerイメージに加え、Ollama/ComfyUIのモデルファイルで数GB〜十数GB程度の空き容量が必要 |
+| メモリ | 8GB以上を推奨(MySQL・Spring Boot API・Next.js・ComfyUI等の複数コンテナを同時起動するため) |
+| ディスク | Dockerイメージに加え、ComfyUIのモデルファイルで数GB〜十数GB程度の空き容量が必要 |
 | ネットワーク | ホストの80番・443番ポートが空いていること(リバースプロキシが使用) |
 
 CPUのみでも動作するイメージタグ(`COMFYUI_IMAGE`をCPU向けタグに変更)にすれば起動は可能だが、
@@ -46,7 +46,7 @@ AI機能(下書き/校正支援・画像生成)が実用的な速度で動作し
 |---|---|
 | Git | リポジトリの取得 |
 | Docker Engine + Docker Compose(v2系) | 全サービスのコンテナ起動 |
-| NVIDIA Container Toolkit | Ollama/ComfyUIコンテナへのGPUパススルー |
+| NVIDIA Container Toolkit | ComfyUIコンテナへのGPUパススルー |
 | openssl | リバースプロキシ用の自己署名TLS証明書生成(Linux/macOSは標準搭載) |
 | Visual Studio Code | VSCode拡張機能(執筆・投稿)の利用 |
 
@@ -130,7 +130,7 @@ docker compose up -d
 初回アクセス時、まだユーザーが1人も存在しない場合は `/setup` にリダイレクトされ、
 セルフサインアップで最初のユーザー(管理者権限)を作成できる。
 
-環境変数の各項目の詳細、Ollamaモデルの事前pull、ComfyUIチェックポイントの配置、
+環境変数の各項目の詳細、ComfyUIチェックポイントの配置、
 トラブルシューティング等は [docs/setup.md](docs/setup.md) を参照。
 
 ## VSCode拡張機能の入手とインストール

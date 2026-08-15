@@ -1,6 +1,6 @@
 package com.letsblog.api.integration;
 
-import com.letsblog.api.ai.OllamaClient;
+import com.letsblog.api.ai.LlmClient;
 import com.letsblog.api.domain.CustomTag;
 import com.letsblog.api.dto.GenerateCustomTagRequest;
 import com.letsblog.api.dto.ValidateCustomTagRequest;
@@ -48,7 +48,7 @@ class CustomTagGenerationIntegrationTest {
     private ObjectMapper objectMapper;
 
     @MockitoBean
-    private OllamaClient ollamaClient;
+    private LlmClient llmClient;
 
     @MockitoBean
     private ApiKeyService apiKeyService;
@@ -62,10 +62,10 @@ class CustomTagGenerationIntegrationTest {
     }
 
     @Test
-    @DisplayName("正常系: Ollamaプロンプト入力からタグ生成・保存までの完全フロー")
+    @DisplayName("正常系: LLMプロンプト入力からタグ生成・保存までの完全フロー")
     void testCompleteCustomTagGenerationFlow() throws Exception {
         // Arrange
-        String ollamaResponse = """
+        String llmResponse = """
             こちらはボタンコンポーネントです：
 
             ```html
@@ -99,7 +99,7 @@ class CustomTagGenerationIntegrationTest {
             null
         );
 
-        when(ollamaClient.generate(anyString())).thenReturn(ollamaResponse);
+        when(llmClient.generate(anyString())).thenReturn(llmResponse);
 
         // Act & Assert
         MvcResult result = mockMvc.perform(
@@ -124,7 +124,7 @@ class CustomTagGenerationIntegrationTest {
     }
 
     @Test
-    @DisplayName("エラー系: OllamaレスポンスにHTMLがない場合の処理")
+    @DisplayName("エラー系: LLMレスポンスにHTMLがない場合の処理")
     void testGenerationFailsWhenHtmlNotInResponse() throws Exception {
         // Arrange
         String invalidResponse = "HTMLを含まないレスポンス";
@@ -136,7 +136,7 @@ class CustomTagGenerationIntegrationTest {
             null
         );
 
-        when(ollamaClient.generate(anyString())).thenReturn(invalidResponse);
+        when(llmClient.generate(anyString())).thenReturn(invalidResponse);
 
         // Act & Assert
         mockMvc.perform(
@@ -159,7 +159,7 @@ class CustomTagGenerationIntegrationTest {
         existingTag.setProjectId(null);
         customTagRepository.save(existingTag);
 
-        String ollamaResponse = """
+        String llmResponse = """
             ```html
             <div>New content</div>
             ```
@@ -172,7 +172,7 @@ class CustomTagGenerationIntegrationTest {
             null
         );
 
-        when(ollamaClient.generate(anyString())).thenReturn(ollamaResponse);
+        when(llmClient.generate(anyString())).thenReturn(llmResponse);
 
         // Act & Assert
         mockMvc.perform(
@@ -202,7 +202,7 @@ class CustomTagGenerationIntegrationTest {
             null
         );
 
-        when(ollamaClient.generate(anyString())).thenReturn(maliciousResponse);
+        when(llmClient.generate(anyString())).thenReturn(maliciousResponse);
 
         // Act & Assert
         mockMvc.perform(
@@ -232,7 +232,7 @@ class CustomTagGenerationIntegrationTest {
             null
         );
 
-        when(ollamaClient.generate(anyString())).thenReturn(maliciousResponse);
+        when(llmClient.generate(anyString())).thenReturn(maliciousResponse);
 
         // Act & Assert
         mockMvc.perform(
@@ -249,7 +249,7 @@ class CustomTagGenerationIntegrationTest {
     @DisplayName("複数プロジェクト間の独立性: グローバルおよびプロジェクト固有のタグが同時に存在可能")
     void testTagIndependenceBetweenProjects() throws Exception {
         // Arrange
-        String ollamaResponse = """
+        String llmResponse = """
             ```html
             <button>Global Button</button>
             ```
@@ -263,7 +263,7 @@ class CustomTagGenerationIntegrationTest {
             null
         );
 
-        when(ollamaClient.generate(anyString())).thenReturn(ollamaResponse);
+        when(llmClient.generate(anyString())).thenReturn(llmResponse);
 
         mockMvc.perform(
             post("/api/custom-tags/generate")
