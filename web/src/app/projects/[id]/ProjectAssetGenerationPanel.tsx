@@ -406,7 +406,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
                 <img
                   src={`data:${img.mimeType};base64,${img.dataBase64}`}
                   alt={img.fileName}
-                  className="aspect-square w-full rounded object-cover"
+                  className="aspect-square w-full rounded bg-neutral-100 object-contain dark:bg-neutral-800"
                 />
               </button>
             ))}
