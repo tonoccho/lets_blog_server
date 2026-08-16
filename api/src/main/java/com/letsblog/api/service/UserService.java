@@ -238,4 +238,21 @@ public class UserService {
             throw new InvalidRoleException("role は 'admin' または 'user' である必要があります");
         }
     }
+
+    /**
+     * ロックアウト時の運用用パスワードリセット(AdminPasswordResetRunnerから呼び出される想定)。
+     * メールでのセルフサービスリセットが使えない場合(SMTP未設定など)に、対象ユーザーを
+     * 特定して安全にパスワードだけを上書きする。他ユーザーには影響しない。
+     */
+    @AuditLog(action = AuditLogAction.USER_UPDATED, resourceType = "USER")
+    @Transactional
+    public UserResponse resetPassword(String email, String newPassword) {
+        if (newPassword == null || newPassword.length() < 8) {
+            throw new IllegalArgumentException("パスワードは8文字以上である必要があります");
+        }
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new UserNotFoundException("メールアドレス '" + email + "' のユーザーは登録されていません"));
+        user.setPasswordHash(passwordEncoder.encode(newPassword));
+        return UserResponse.from(userRepository.save(user));
+    }
 }
