@@ -158,19 +158,31 @@ export interface ArticleFrontMatterInput {
   githubRepository?: string;
 }
 
+/** publish_scheduled_atの既定値に使う、作成日からのオフセット(日数)。 */
+const DEFAULT_SCHEDULED_PUBLICATION_OFFSET_DAYS = 7;
+
 /**
  * 新規記事のfront matterを組み立てる。
  *
  * GitHub Issue起点(Article Plan)とコマンド起点(Create Article)で
  * 同じ項目・同じ既定値になるよう、生成をこの関数へ集約する。
  * 値が無い項目は省略し、front matterに空の項目が並ばないようにする。
+ *
+ * publish_scheduled_atは作成時点から7日後を既定値とする。validateScheduledPublicationが
+ * 未来日時のみを許可するため、作成直後の当日日付など短すぎる既定値では、公開先サイトを問わず
+ * 投稿処理そのものがすぐに失敗するようになってしまう。
  */
-export function buildArticleFrontMatter(input: ArticleFrontMatterInput): LetsBlogFrontMatter {
+export function buildArticleFrontMatter(
+  input: ArticleFrontMatterInput,
+  now: Date = new Date()
+): LetsBlogFrontMatter {
+  const scheduledAt = new Date(now.getTime() + DEFAULT_SCHEDULED_PUBLICATION_OFFSET_DAYS * 24 * 60 * 60 * 1000);
   const frontMatter: LetsBlogFrontMatter = {
     title: input.title,
     slug: input.slug,
     status: input.status ?? 'draft',
     project_id: input.projectId,
+    publish_scheduled_at: scheduledAt.toISOString(),
   };
   if (input.categories && input.categories.length > 0) {
     frontMatter.categories = input.categories;

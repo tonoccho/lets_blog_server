@@ -159,38 +159,54 @@ describe('guessImageMimeType', () => {
 });
 
 describe('buildArticleFrontMatter', () => {
+  const NOW = new Date('2026-06-01T00:00:00Z');
+
   it('必須項目とstatusの既定値を設定する', () => {
-    expect(buildArticleFrontMatter({ title: 'T', slug: 's', projectId: 3 })).toEqual({
+    expect(buildArticleFrontMatter({ title: 'T', slug: 's', projectId: 3 }, NOW)).toEqual({
       title: 'T',
       slug: 's',
       status: 'draft',
       project_id: 3,
+      publish_scheduled_at: '2026-06-08T00:00:00.000Z',
+    });
+  });
+
+  it('publish_scheduled_atの既定値は作成時点から7日後(未来日時)にする', () => {
+    const frontMatter = buildArticleFrontMatter({ title: 'T', slug: 's', projectId: 3 }, NOW);
+    expect(validateScheduledPublication(frontMatter.publish_scheduled_at, NOW)).toEqual({
+      value: '2026-06-08T00:00:00.000Z',
     });
   });
 
   it('空のカテゴリ・タグはfront matterへ書き込まない', () => {
-    const frontMatter = buildArticleFrontMatter({
-      title: 'T',
-      slug: 's',
-      projectId: 3,
-      categories: [],
-      tags: [],
-    });
+    const frontMatter = buildArticleFrontMatter(
+      {
+        title: 'T',
+        slug: 's',
+        projectId: 3,
+        categories: [],
+        tags: [],
+      },
+      NOW
+    );
     expect(frontMatter).not.toHaveProperty('categories');
     expect(frontMatter).not.toHaveProperty('tags');
   });
 
   it('GitHub Issue起点の情報を含められる', () => {
-    const frontMatter = buildArticleFrontMatter({
-      title: 'T',
-      slug: 's',
-      projectId: 3,
-      categories: ['技術'],
-      tags: ['docker'],
-      status: 'publish',
-      githubIssueNumber: 42,
-      githubRepository: 'https://github.com/o/r',
-    });
+    const frontMatter = buildArticleFrontMatter(
+      {
+        title: 'T',
+        slug: 's',
+        projectId: 3,
+        categories: ['技術'],
+        tags: ['docker'],
+        status: 'publish',
+        githubIssueNumber: 42,
+        githubRepository: 'https://github.com/o/r',
+      },
+      NOW
+    );
     expect(frontMatter).toEqual({
       title: 'T',
       slug: 's',
@@ -200,14 +216,16 @@ describe('buildArticleFrontMatter', () => {
       tags: ['docker'],
       github_issue_number: 42,
       github_repository: 'https://github.com/o/r',
+      publish_scheduled_at: '2026-06-08T00:00:00.000Z',
     });
   });
 
   it('生成したfront matterはそのまま記事として書き出せる', () => {
-    const frontMatter = buildArticleFrontMatter({ title: 'タイトル', slug: 'my-slug', projectId: 1 });
+    const frontMatter = buildArticleFrontMatter({ title: 'タイトル', slug: 'my-slug', projectId: 1 }, NOW);
     const reparsed = parseArticle(stringifyArticle({ data: frontMatter, content: '本文' }));
     expect(reparsed.data.title).toBe('タイトル');
     expect(reparsed.data.project_id).toBe(1);
+    expect(reparsed.data.publish_scheduled_at).toBe('2026-06-08T00:00:00.000Z');
   });
 });
 
