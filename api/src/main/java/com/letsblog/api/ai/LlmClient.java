@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.letsblog.api.config.LegacyJacksonRestClientConfig;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -19,6 +18,8 @@ import java.util.regex.Pattern;
  * OpenAI互換のChat Completions API(POST {baseUrl}/chat/completions)を呼び出す薄いクライアント。
  * OpenAI/Groq/OpenRouter等、同APIを提供する外部LLMサービスであればbaseUrlの変更のみで切り替えられる
  * (issue #375の調査に基づきissue #376でOllamaから置き換え)。
+ * 接続設定(baseUrl/APIキー/既定モデル/タイムアウト)はLlmConfigProviderから呼び出しの都度取得する
+ * (issue #403でWeb管理画面のシステム設定から変更可能になったため、構築時に固定値として保持しない)。
  */
 @Component
 public class LlmClient {
@@ -30,29 +31,39 @@ public class LlmClient {
      */
     private static final Pattern THINK_BLOCK_PATTERN = Pattern.compile("(?s)<think>.*?</think>");
 
-    private final RestClient client;
-    private final String model;
+    private final LlmConfigProvider configProvider;
 
-    public LlmClient(
-            @Value("${app.llm-base-url}") String baseUrl,
-            @Value("${app.llm-api-key}") String apiKey,
-            @Value("${app.llm-model}") String model,
-            @Value("${app.llm-request-timeout-seconds}") long requestTimeoutSeconds) {
-        Duration requestTimeout = Duration.ofSeconds(requestTimeoutSeconds);
-        JdkClientHttpRequestFactory requestFactory =
-                new JdkClientHttpRequestFactory(HttpClient.newBuilder().connectTimeout(requestTimeout).build());
-        requestFactory.setReadTimeout(requestTimeout);
-        RestClient.Builder builder = RestClient.builder()
-                .baseUrl(baseUrl)
-                .requestFactory(requestFactory)
-                .defaultHeader("Authorization", "Bearer " + apiKey);
-        LegacyJacksonRestClientConfig.preferJackson2(builder);
-        this.client = builder.build();
-        this.model = model;
+    public LlmClient(LlmConfigProvider configProvider) {
+        this.configProvider = configProvider;
+    }
+
+    /** テスト専用: stripThinkingBlocksのロジックのみを固定値で検証するためのコンストラクタ。 */
+    LlmClient(String baseUrl, String apiKey, String model, long requestTimeoutSeconds) {
+        this.configProvider = new LlmConfigProvider() {
+            @Override
+            public String baseUrl() {
+                return baseUrl;
+            }
+
+            @Override
+            public String apiKey() {
+                return apiKey;
+            }
+
+            @Override
+            public String defaultModel() {
+                return model;
+            }
+
+            @Override
+            public long requestTimeoutSeconds() {
+                return requestTimeoutSeconds;
+            }
+        };
     }
 
     public String generate(String prompt) {
-        return generate(prompt, model);
+        return generate(prompt, configProvider.defaultModel());
     }
 
     public String generate(String prompt, String modelName) {
@@ -64,7 +75,7 @@ public class LlmClient {
                     .put("stream", false)
                     .set("messages", messages);
 
-            JsonNode response = client.post()
+            JsonNode response = buildClient().post()
                     .uri("/chat/completions")
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
@@ -78,6 +89,19 @@ public class LlmClient {
         } catch (Exception e) {
             throw new AiServiceException("LLM呼び出し中にエラーが発生しました（タイムアウトまたはネットワークエラーの可能性があります）: " + e.getMessage(), e);
         }
+    }
+
+    private RestClient buildClient() {
+        Duration requestTimeout = Duration.ofSeconds(configProvider.requestTimeoutSeconds());
+        JdkClientHttpRequestFactory requestFactory =
+                new JdkClientHttpRequestFactory(HttpClient.newBuilder().connectTimeout(requestTimeout).build());
+        requestFactory.setReadTimeout(requestTimeout);
+        RestClient.Builder builder = RestClient.builder()
+                .baseUrl(configProvider.baseUrl())
+                .requestFactory(requestFactory)
+                .defaultHeader("Authorization", "Bearer " + configProvider.apiKey());
+        LegacyJacksonRestClientConfig.preferJackson2(builder);
+        return builder.build();
     }
 
     /** package-privateはテストから直接検証するため(HTTP呼び出しをモックせずロジックだけ確認できるように)。 */

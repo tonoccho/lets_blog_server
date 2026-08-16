@@ -1445,6 +1445,33 @@ export function clearProjectBufferSettings(projectId: number, actor: ActorInfo):
   return apiFetch<void>(`/api/projects/${projectId}/api-keys/buffer`, { method: 'DELETE', actor });
 }
 
+/**
+ * adminユーザー限定のシステム設定画面(issue #403)向け。プロジェクトに紐付かない業務系のアプリ全体設定
+ * (外部LLMサービス連携・メール送信・Google OAuthクライアント・Webフロントの公開URL)を扱う。
+ * 秘匿情報(secret=true)はvalueを含まない(設定済みかどうか・設定元のみ)。
+ */
+export interface AppSetting {
+  key: string;
+  label: string;
+  secret: boolean;
+  configured: boolean;
+  source: 'DATABASE' | 'ENVIRONMENT' | 'NONE';
+  value: string | null;
+}
+
+export function listAppSettings(actor?: ActorInfo): Promise<AppSetting[]> {
+  return apiFetch<AppSetting[]>('/api/system-settings/app-settings', { actor });
+}
+
+export function updateAppSettings(settings: Record<string, string>, actor: ActorInfo): Promise<void> {
+  return apiFetch<void>('/api/system-settings/app-settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+    actor,
+  });
+}
+
 export interface SocialStats {
   eligible: boolean;
   postCount: number | null;

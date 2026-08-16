@@ -8,6 +8,7 @@ import {
   Images,
   DatabaseBackup,
   History,
+  Settings,
   type LucideIcon,
 } from "lucide-react";
 
@@ -29,6 +30,7 @@ export const ICON_MAP: Record<string, LucideIcon> = {
   Images,
   DatabaseBackup,
   History,
+  Settings,
 };
 
 export const NAV_ITEMS: NavItem[] = [
@@ -43,4 +45,5 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
   { href: "/users", label: "ユーザー", icon: "Users", adminOnly: true, group: "admin" },
   { href: "/admin/roles", label: "ロール管理", icon: "Shield", adminOnly: true, group: "admin" },
   { href: "/admin/backup", label: "データバックアップ", icon: "DatabaseBackup", adminOnly: true, group: "admin" },
+  { href: "/admin/system-settings", label: "システム設定", icon: "Settings", adminOnly: true, group: "admin" },
 ];
