@@ -1,18 +1,23 @@
 package com.letsblog.api.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.aop.AuditLog;
 import com.letsblog.api.crypto.CredentialCipher;
 import com.letsblog.api.crypto.SshKeyGenerationService;
 import com.letsblog.api.domain.AuditLogAction;
+import com.letsblog.api.domain.Site;
 import com.letsblog.api.domain.SshKeyPair;
 import com.letsblog.api.dto.SshKeyPairCreateRequest;
 import com.letsblog.api.dto.SshKeyPairGeneratedResponse;
 import com.letsblog.api.dto.SshKeyPairSummaryResponse;
+import com.letsblog.api.repository.SiteRepository;
 import com.letsblog.api.repository.SshKeyPairRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 名前をつけて保存・管理するSSH鍵ペア(Ed25519)を扱う。鍵の生成自体は既存の
@@ -27,16 +32,22 @@ public class SshKeyPairService {
     private final SshKeyGenerationService sshKeyGenerationService;
     private final CredentialCipher credentialCipher;
     private final AdminAuthorizationService adminAuthorizationService;
+    private final SiteRepository siteRepository;
+    private final ObjectMapper objectMapper;
 
     public SshKeyPairService(
             SshKeyPairRepository repository,
             SshKeyGenerationService sshKeyGenerationService,
             CredentialCipher credentialCipher,
-            AdminAuthorizationService adminAuthorizationService) {
+            AdminAuthorizationService adminAuthorizationService,
+            SiteRepository siteRepository,
+            ObjectMapper objectMapper) {
         this.repository = repository;
         this.sshKeyGenerationService = sshKeyGenerationService;
         this.credentialCipher = credentialCipher;
         this.adminAuthorizationService = adminAuthorizationService;
+        this.siteRepository = siteRepository;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional(readOnly = true)
@@ -73,6 +84,33 @@ public class SshKeyPairService {
         if (!repository.existsById(id)) {
             throw new SshKeyPairNotFoundException("SSH鍵ペアが見つかりません: id=" + id);
         }
+        if (isReferencedBySite(id)) {
+            throw new IllegalArgumentException(
+                    "このSSH鍵ペアはサイトのSSH接続設定から参照されているため削除できません");
+        }
         repository.deleteById(id);
+    }
+
+    /**
+     * サイトのcredentialsEncrypted(暗号化JSON)内のsshKeyPairIdがこの鍵ペアを参照しているかを調べる
+     * (issue #415)。サイト数は少数想定のため、全件を復号して確認する簡易実装とする。
+     */
+    private boolean isReferencedBySite(Long id) {
+        String idAsString = String.valueOf(id);
+        return siteRepository.findAll().stream().anyMatch(site -> idAsString.equals(readSshKeyPairId(site)));
+    }
+
+    private String readSshKeyPairId(Site site) {
+        if (site.getCredentialsEncrypted() == null) {
+            return null;
+        }
+        try {
+            String json = credentialCipher.decrypt(site.getCredentialsEncrypted());
+            Map<String, String> credentials = objectMapper.readValue(json, new TypeReference<Map<String, String>>() {
+            });
+            return credentials.get("sshKeyPairId");
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

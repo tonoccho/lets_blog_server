@@ -25,7 +25,7 @@ const CREDENTIAL_FIELDS: Record<CmsType, string[]> = {
   MICROCMS: ["serviceId", "apiKey", "managementApiKey", "postsEndpoint", "categoriesEndpoint", "tagsEndpoint"],
 };
 
-const WORDPRESS_SSH_FIELDS = ["baseUrl", "sshHost", "sshUser", "wpPath", "sshPrivateKeyPem"];
+const WORDPRESS_SSH_FIELDS = ["baseUrl", "sshHost", "sshUser", "wpPath"];
 
 export async function registerSiteAction(
   _prevState: RegisterSiteState,
@@ -61,6 +61,16 @@ export async function registerSiteAction(
     const sshPort = String(formData.get("sshPort") ?? "").trim();
     if (sshPort) {
       credentials.sshPort = sshPort;
+    }
+
+    const sshKeyPairId = String(formData.get("sshKeyPairId") ?? "").trim();
+    const sshPrivateKeyPem = String(formData.get("sshPrivateKeyPem") ?? "").trim();
+    if (sshKeyPairId) {
+      credentials.sshKeyPairId = sshKeyPairId;
+    } else if (sshPrivateKeyPem) {
+      credentials.sshPrivateKeyPem = sshPrivateKeyPem;
+    } else {
+      return { error: "SSH秘密鍵を指定してください(保存済みの鍵ペアを選択するか、新しい鍵ペアを生成してください)。" };
     }
   }
 

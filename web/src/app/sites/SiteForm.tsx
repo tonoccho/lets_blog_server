@@ -2,17 +2,20 @@
 
 import { useActionState, useState, useTransition } from "react";
 import { useRef, useEffect } from "react";
+import type { SavedSshKeyPair } from "@/lib/apiClient";
 import { generateSshKeyPairAction, registerSiteAction, RegisterSiteState } from "./actions";
 
 const initialState: RegisterSiteState = {};
 
 type CmsType = "WORDPRESS" | "MICROCMS";
 type Transport = "REST" | "SSH";
+type SshKeyMode = "existing" | "new";
 
-export function SiteForm() {
+export function SiteForm({ sshKeyPairs }: { sshKeyPairs: SavedSshKeyPair[] }) {
   const [state, formAction, pending] = useActionState(registerSiteAction, initialState);
   const [cmsType, setCmsType] = useState<CmsType>("WORDPRESS");
   const [transport, setTransport] = useState<Transport>("REST");
+  const [sshKeyMode, setSshKeyMode] = useState<SshKeyMode>(sshKeyPairs.length > 0 ? "existing" : "new");
   const [privateKeyPem, setPrivateKeyPem] = useState("");
   const [publicKeyLine, setPublicKeyLine] = useState("");
   const [keyGenError, setKeyGenError] = useState<string | null>(null);
@@ -25,11 +28,12 @@ export function SiteForm() {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setCmsType("WORDPRESS");
       setTransport("REST");
+      setSshKeyMode(sshKeyPairs.length > 0 ? "existing" : "new");
       setPrivateKeyPem("");
       setPublicKeyLine("");
       setKeyGenError(null);
     }
-  }, [state.success]);
+  }, [state.success, sshKeyPairs.length]);
 
   function handleGenerateKeyPair() {
     setKeyGenError(null);
@@ -112,31 +116,75 @@ export function SiteForm() {
               </div>
 
               <div className="space-y-2">
-                <button
-                  type="button"
-                  onClick={handleGenerateKeyPair}
-                  disabled={keyGenPending}
-                  className="rounded bg-neutral-100 dark:bg-neutral-800 px-3 py-1.5 text-sm text-neutral-900 dark:text-neutral-50 hover:bg-neutral-200 dark:hover:bg-neutral-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:opacity-50"
-                >
-                  {keyGenPending ? "鍵ペアを生成中…" : "SSH鍵ペアを生成"}
-                </button>
-                {keyGenError && <p className="text-sm text-red-600">{keyGenError}</p>}
-                {publicKeyLine && (
-                  <div className="space-y-1">
-                    <p className="text-sm text-neutral-700 dark:text-neutral-300">
-                      以下の公開鍵をリモートサーバーの対象ユーザーの<code>~/.ssh/authorized_keys</code>
-                      へ手動で追記してから登録してください。
-                    </p>
-                    <textarea
-                      readOnly
-                      value={publicKeyLine}
-                      rows={2}
-                      onFocus={(e) => e.currentTarget.select()}
-                      className="w-full rounded border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 font-mono text-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
-                    />
+                {sshKeyPairs.length > 0 && (
+                  <div className="flex gap-4 text-sm">
+                    <label className="flex items-center gap-1.5">
+                      <input
+                        type="radio"
+                        checked={sshKeyMode === "existing"}
+                        onChange={() => setSshKeyMode("existing")}
+                      />
+                      保存済みの鍵ペアを使う
+                    </label>
+                    <label className="flex items-center gap-1.5">
+                      <input type="radio" checked={sshKeyMode === "new"} onChange={() => setSshKeyMode("new")} />
+                      新しい鍵ペアを生成する
+                    </label>
                   </div>
                 )}
-                <input type="hidden" name="sshPrivateKeyPem" value={privateKeyPem} />
+
+                {sshKeyMode === "existing" && sshKeyPairs.length > 0 ? (
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="text-neutral-700 dark:text-neutral-300 font-medium">SSH鍵ペア</span>
+                    <select
+                      name="sshKeyPairId"
+                      required
+                      className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+                    >
+                      {sshKeyPairs.map((keyPair) => (
+                        <option key={keyPair.id} value={keyPair.id}>
+                          {keyPair.name}
+                          {keyPair.comment ? `(${keyPair.comment})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                      公開鍵をリモートサーバーの対象ユーザーの<code>~/.ssh/authorized_keys</code>
+                      へ追記済みであることを確認してください(公開鍵は<a href="/admin/ssh-keys" className="underline">
+                        SSH鍵管理画面
+                      </a>
+                      で確認できます)。
+                    </p>
+                  </label>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleGenerateKeyPair}
+                      disabled={keyGenPending}
+                      className="rounded bg-neutral-100 dark:bg-neutral-800 px-3 py-1.5 text-sm text-neutral-900 dark:text-neutral-50 hover:bg-neutral-200 dark:hover:bg-neutral-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:opacity-50"
+                    >
+                      {keyGenPending ? "鍵ペアを生成中…" : "SSH鍵ペアを生成"}
+                    </button>
+                    {keyGenError && <p className="text-sm text-red-600">{keyGenError}</p>}
+                    {publicKeyLine && (
+                      <div className="space-y-1">
+                        <p className="text-sm text-neutral-700 dark:text-neutral-300">
+                          以下の公開鍵をリモートサーバーの対象ユーザーの<code>~/.ssh/authorized_keys</code>
+                          へ手動で追記してから登録してください。
+                        </p>
+                        <textarea
+                          readOnly
+                          value={publicKeyLine}
+                          rows={2}
+                          onFocus={(e) => e.currentTarget.select()}
+                          className="w-full rounded border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 font-mono text-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+                        />
+                      </div>
+                    )}
+                    <input type="hidden" name="sshPrivateKeyPem" value={privateKeyPem} />
+                  </>
+                )}
               </div>
             </div>
           )}

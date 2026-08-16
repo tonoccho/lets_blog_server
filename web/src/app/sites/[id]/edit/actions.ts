@@ -26,6 +26,7 @@ const CREDENTIAL_FIELDS = [
   "sshUser",
   "wpPath",
   "sshPrivateKeyPem",
+  "sshKeyPairId",
   "sshHostKeyFingerprint",
 ];
 
