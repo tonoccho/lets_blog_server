@@ -21,6 +21,10 @@
         "title": "Let's Blog: Create Article"
       },
       {
+        "command": "letsBlog.createArticleWithoutAi",
+        "title": "Let's Blog: Create Article (No AI)"
+      },
+      {
         "command": "letsBlog.login",
         "title": "Let's Blog: Login"
       },
