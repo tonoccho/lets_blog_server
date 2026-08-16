@@ -1,7 +1,16 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { getServerUrl, requireApiKey, setApiKey, getActor, setActor, getProjectId, setProjectId } from './config';
+import {
+  getServerUrl,
+  requireApiKey,
+  setApiKey,
+  getActor,
+  setActor,
+  getProjectId,
+  setProjectId,
+  requireProjectId,
+} from './config';
 import {
   parseArticle,
   stringifyArticle,
@@ -10,7 +19,10 @@ import {
   resolveExistingPostId,
   guessImageMimeType,
   validateScheduledPublication,
+  buildArticleFrontMatter,
+  suggestSlugFromTitle,
 } from './frontMatter';
+import { createArticleScaffold, openArticle, requireWorkspaceRoot } from './articleScaffold';
 import * as api from './apiClient';
 import { PlanPanel } from './planPanel';
 import { ArticleCreationPanel } from './articleCreationPanel';
@@ -42,6 +54,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('letsBlog.createArticle', () => commandCreateArticle(context)),
+    vscode.commands.registerCommand('letsBlog.createArticleWithoutAi', () => commandCreateArticleWithoutAi(context)),
     vscode.commands.registerCommand('letsBlog.schedulePublication', () => commandSchedulePublication()),
     vscode.commands.registerCommand('letsBlog.login', () => commandLogin(context)),
     vscode.commands.registerCommand('letsBlog.setApiKey', () => commandSetApiKey(context)),
@@ -668,6 +681,55 @@ async function commandCreateArticle(context: vscode.ExtensionContext): Promise<v
     ArticleCreationPanel.createOrShow(context);
   } catch (err) {
     reportError('記事作成パネルの起動に失敗しました', err);
+  }
+}
+
+/**
+ * AIチャットを介さず、タイトル・スラッグの直接入力だけで記事を新規作成する。
+ * 生成される記事の配置とfront matterはAI駆動のフロー(ArticleCreationPanel/PlanPanel)と
+ * 同じ(articleScaffold.ts / buildArticleFrontMatter に集約)。AIを一切使わないため
+ * APIキーは不要で、プロジェクトは「Let's Blog: Select Project」で選択済みのものを使う。
+ */
+async function commandCreateArticleWithoutAi(context: vscode.ExtensionContext): Promise<void> {
+  try {
+    const workspaceRoot = requireWorkspaceRoot();
+    const projectId = requireProjectId(context);
+
+    const title = await vscode.window.showInputBox({
+      prompt: 'タイトル',
+      ignoreFocusOut: true,
+      validateInput: (value) => (value.trim() ? undefined : 'タイトルは必須です。'),
+    });
+    if (!title) return;
+
+    const slug = await vscode.window.showInputBox({
+      prompt: 'スラッグ (articles/<slug>/ のディレクトリ名になります)',
+      value: suggestSlugFromTitle(title),
+      ignoreFocusOut: true,
+      // ディレクトリ名になるため、パス区切りなどが混入しないことを確認する(articleCreation.jsのslug検証と同じ規則)。
+      validateInput: (value) => {
+        const trimmed = value.trim();
+        if (!trimmed) return 'スラッグは必須です。';
+        if (!/^[a-z0-9][a-z0-9-]*$/.test(trimmed)) {
+          return 'スラッグは半角英数字とハイフンのみで入力してください(先頭は英数字)。';
+        }
+        return undefined;
+      },
+    });
+    if (!slug) return;
+
+    const result = await createArticleScaffold({
+      workspaceRoot,
+      slug: slug.trim(),
+      frontMatter: buildArticleFrontMatter({ title: title.trim(), slug: slug.trim(), projectId }),
+      content: '',
+    });
+    if (!result) return;
+
+    await openArticle(result.articlePath);
+    vscode.window.showInformationMessage(`articles/${slug.trim()}/article.md を作成しました。`);
+  } catch (err) {
+    reportError('記事の作成に失敗しました', err);
   }
 }
 
