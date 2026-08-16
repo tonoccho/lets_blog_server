@@ -58,7 +58,7 @@ export function ProjectBufferSettingsForm({
         <h2 className="font-medium">Buffer連携</h2>
         <p className="text-sm text-neutral-600 dark:text-neutral-400">
           本番サイトへの記事公開時、指定した時間後にBuffer経由でSNS(Twitter/Facebook/LinkedIn等)へ
-          予約投稿します。プロファイルIDはBuffer管理画面で確認できる各SNSアカウントのIDをカンマ区切りで指定してください。
+          予約投稿します。プロファイルID(Buffer用語では現在「チャンネルID」)は各SNSアカウントのIDをカンマ区切りで指定してください。
         </p>
       </div>
 
@@ -118,15 +118,18 @@ export function ProjectBufferSettingsForm({
       <form action={tokenFormAction} className="flex flex-col gap-2 border-t border-neutral-200 dark:border-neutral-800 pt-4 sm:flex-row sm:items-end">
         <label className="flex flex-1 flex-col gap-1 text-sm">
           <span className="text-neutral-600 dark:text-neutral-400">
-            アクセストークン{hasAccessToken ? "(設定済み。変更する場合のみ入力)" : ""}
+            APIキー{hasAccessToken ? "(設定済み。変更する場合のみ入力)" : ""}
           </span>
           <input
             name="accessToken"
             type="password"
-            placeholder={hasAccessToken ? "変更する場合のみ入力" : "Bufferのアクセストークン"}
+            placeholder={hasAccessToken ? "変更する場合のみ入力" : "BufferのAPIキー"}
             autoComplete="off"
             className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
           />
+          <span className="text-xs text-neutral-500 dark:text-neutral-500">
+            Buffer管理画面の「Settings &gt; API」から発行したAPIキーを入力してください(旧来のアクセストークンは利用できません)。
+          </span>
         </label>
         <button
           type="submit"

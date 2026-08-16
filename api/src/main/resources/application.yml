@@ -114,7 +114,8 @@ app:
   default-article-image-long-edge-px: ${DEFAULT_ARTICLE_IMAGE_LONG_EDGE_PX:1300}
   # Buffer連携(issue #379)。有効/無効・アクセストークン・プロファイルID等はプロジェクト単位の設定
   # (issue #402)のため、APIのベースURL/タイムアウトのみアプリ全体の環境変数として残す。
-  buffer-api-base-url: ${BUFFER_API_BASE_URL:https://api.bufferapp.com/1}
+  # レガシーREST APIは2027-02-01廃止予定のため、GraphQL APIの単一エンドポイントへ移行済み(issue #411)。
+  buffer-api-base-url: ${BUFFER_API_BASE_URL:https://api.buffer.com}
   buffer-request-timeout-seconds: ${BUFFER_REQUEST_TIMEOUT_SECONDS:30}
 
 resilience4j:
