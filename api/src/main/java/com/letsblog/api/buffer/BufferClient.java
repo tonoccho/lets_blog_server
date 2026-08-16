@@ -2,6 +2,7 @@ package com.letsblog.api.buffer;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.letsblog.api.config.LegacyJacksonRestClientConfig;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -29,6 +30,7 @@ public class BufferClient {
 
     private final RestClient client;
 
+    @Autowired
     public BufferClient(
             @Value("${app.buffer-api-base-url}") String baseUrl,
             @Value("${app.buffer-request-timeout-seconds}") long requestTimeoutSeconds) {

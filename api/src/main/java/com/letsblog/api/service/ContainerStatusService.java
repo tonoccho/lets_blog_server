@@ -6,6 +6,7 @@ import com.letsblog.api.dto.ConnectedServiceStatusResponse.Status;
 import com.letsblog.api.dto.ContainerStatusResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
@@ -33,6 +34,7 @@ public class ContainerStatusService {
 
     private final RestClient dockerClient;
 
+    @Autowired
     public ContainerStatusService(@Value("${app.docker-socket-proxy-base-url}") String dockerSocketProxyBaseUrl) {
         this(builderWithTimeout(dockerSocketProxyBaseUrl));
     }

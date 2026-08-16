@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.letsblog.api.config.LegacyJacksonRestClientConfig;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -33,6 +34,7 @@ public class LlmClient {
 
     private final LlmConfigProvider configProvider;
 
+    @Autowired
     public LlmClient(LlmConfigProvider configProvider) {
         this.configProvider = configProvider;
     }
