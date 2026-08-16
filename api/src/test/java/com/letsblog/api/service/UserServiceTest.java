@@ -288,4 +288,37 @@ class UserServiceTest {
 
         assertThrows(IllegalStateException.class, () -> service.getDecryptedGithubToken(1L));
     }
+
+    @Test
+    void resetPassword_新しいパスワードでハッシュが更新される() {
+        service = service();
+        User user = buildUser();
+        String oldHash = user.getPasswordHash();
+        when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        UserResponse response = service.resetPassword("user@example.com", "newpassword123");
+
+        assertEquals("user@example.com", response.email());
+        assertFalse(user.getPasswordHash().equals(oldHash));
+        assertTrue(new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder()
+                .matches("newpassword123", user.getPasswordHash()));
+    }
+
+    @Test
+    void resetPassword_存在しないユーザーは例外() {
+        service = service();
+        when(userRepository.findByEmail("missing@example.com")).thenReturn(Optional.empty());
+
+        assertThrows(UserNotFoundException.class,
+                () -> service.resetPassword("missing@example.com", "newpassword123"));
+    }
+
+    @Test
+    void resetPassword_パスワードが短すぎる場合は例外() {
+        service = service();
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.resetPassword("user@example.com", "short"));
+    }
 }
