@@ -31,9 +31,10 @@ public class SshKeyGenerationService {
             dir = Files.createTempDirectory("letsblog-sshkeygen",
                     PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
             Path keyFile = dir.resolve("id_ed25519");
+            String safeComment = comment == null ? "" : comment;
 
             Process process = new ProcessBuilder(
-                    "ssh-keygen", "-t", "ed25519", "-N", "", "-C", comment, "-f", keyFile.toString())
+                    "ssh-keygen", "-t", "ed25519", "-N", "", "-C", safeComment, "-f", keyFile.toString())
                     .redirectErrorStream(true)
                     .start();
             boolean finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);

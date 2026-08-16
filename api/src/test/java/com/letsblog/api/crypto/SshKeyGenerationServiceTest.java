@@ -24,6 +24,14 @@ class SshKeyGenerationServiceTest {
     }
 
     @Test
+    void generateEd25519_コメントがnullでも鍵ペアを生成できる() {
+        SshKeyPair keyPair = service.generateEd25519(null);
+
+        assertTrue(keyPair.privateKeyPem().contains("BEGIN OPENSSH PRIVATE KEY"));
+        assertTrue(keyPair.publicKeyLine().startsWith("ssh-ed25519 "));
+    }
+
+    @Test
     void generateEd25519_呼び出すたびに異なる鍵ペアを生成する() {
         SshKeyPair first = service.generateEd25519("a");
         SshKeyPair second = service.generateEd25519("b");
