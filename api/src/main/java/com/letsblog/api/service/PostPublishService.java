@@ -162,7 +162,7 @@ public class PostPublishService {
         Post post = upsertPostRecord(site.getId(), result, command.slug(), imageResult.uploadedImages());
 
         if (shouldNotifySns(command, site, projectId, status)) {
-            bufferNotificationService.notifyAsync(post.getId(), site.getId(), command.title(), result.link());
+            bufferNotificationService.notifyAsync(post.getId(), site.getId(), projectId, command.title(), result.link());
         }
 
         return new PostPublishResponse(result.id(), result.link(), result.status());

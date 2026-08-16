@@ -1406,6 +1406,45 @@ export function getProjectAdSenseReport(projectId: number, actor?: ActorInfo): P
   return apiFetch<AdSenseReport>(`/api/projects/${projectId}/dashboard/adsense`, { actor });
 }
 
+export interface ProjectBufferStatus {
+  configured: boolean;
+  enabled: boolean;
+  hasAccessToken: boolean;
+  profileIds: string | null;
+  delayMinutes: number | null;
+  messageTemplate: string | null;
+}
+
+export function getProjectBufferStatus(projectId: number, actor?: ActorInfo): Promise<ProjectBufferStatus> {
+  return apiFetch<ProjectBufferStatus>(`/api/projects/${projectId}/api-keys/buffer`, { actor });
+}
+
+export function setProjectBufferSettings(
+  projectId: number,
+  input: { enabled: boolean; profileIds: string; delayMinutes: number | null; messageTemplate: string },
+  actor: ActorInfo
+): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/buffer`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function setProjectBufferAccessToken(projectId: number, accessToken: string, actor: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/buffer/access-token`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accessToken }),
+    actor,
+  });
+}
+
+export function clearProjectBufferSettings(projectId: number, actor: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/buffer`, { method: 'DELETE', actor });
+}
+
 export interface SocialStats {
   eligible: boolean;
   postCount: number | null;

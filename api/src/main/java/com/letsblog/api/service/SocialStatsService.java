@@ -10,7 +10,6 @@ import com.letsblog.api.dto.SocialStatsResponse;
 import com.letsblog.api.repository.BufferPostRepository;
 import com.letsblog.api.repository.ProjectRepository;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,8 +20,8 @@ import java.util.List;
  * プロジェクトダッシュボードのソーシャル統計ウィジェット(issue #390)向けに、Buffer経由で送信済みの
  * 投稿(buffer_posts、issue #379)の統計を集計する。issue #390のコメントでスコープを
  * 「Buffer経由で投稿した記事の投稿別エンゲージメント統計(いいね/シェア/コメント/クリック)」に絞っており、
- * フォロワー数等アカウントレベルの統計は対象外。Buffer連携が無効、または対象の送信済み投稿が
- * (本番サイトに)無い場合はeligible=falseを返しBuffer APIへは問い合わせない
+ * フォロワー数等アカウントレベルの統計は対象外。Buffer連携が無効(プロジェクト単位の設定、issue #402)、
+ * または対象の送信済み投稿が(本番サイトに)無い場合はeligible=falseを返しBuffer APIへは問い合わせない
  * (GoogleAnalyticsReportService/AdSenseReportServiceと同じ、本番サイトのみを対象にするgatingの方針)。
  */
 @Service
@@ -34,30 +33,31 @@ public class SocialStatsService {
     private final ProjectRepository projectRepository;
     private final BufferPostRepository bufferPostRepository;
     private final BufferClient bufferClient;
+    private final ProjectApiKeyService projectApiKeyService;
     private final AdminAuthorizationService adminAuthorizationService;
     private final ObjectMapper objectMapper;
-    private final boolean bufferEnabled;
 
     public SocialStatsService(
             ProjectRepository projectRepository,
             BufferPostRepository bufferPostRepository,
             BufferClient bufferClient,
+            ProjectApiKeyService projectApiKeyService,
             AdminAuthorizationService adminAuthorizationService,
-            ObjectMapper objectMapper,
-            @Value("${app.buffer-enabled}") boolean bufferEnabled) {
+            ObjectMapper objectMapper) {
         this.projectRepository = projectRepository;
         this.bufferPostRepository = bufferPostRepository;
         this.bufferClient = bufferClient;
+        this.projectApiKeyService = projectApiKeyService;
         this.adminAuthorizationService = adminAuthorizationService;
         this.objectMapper = objectMapper;
-        this.bufferEnabled = bufferEnabled;
     }
 
     @Transactional(readOnly = true)
     public SocialStatsResponse getStats(Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         Project project = getProject(projectId);
-        if (!bufferEnabled || project.getProductionSiteId() == null) {
+        ProjectApiKeyService.BufferSettings settings = projectApiKeyService.resolveBufferSettings(projectId);
+        if (!settings.enabled() || project.getProductionSiteId() == null) {
             return SocialStatsResponse.notEligible();
         }
         List<BufferPost> posts = bufferPostRepository.findBySiteIdAndStatus(project.getProductionSiteId(), SENT_STATUS);
@@ -71,7 +71,7 @@ public class SocialStatsService {
             long clicks = 0;
             for (BufferPost post : posts) {
                 for (String updateId : extractUpdateIds(post)) {
-                    BufferUpdateStatistics stats = bufferClient.getUpdateStatistics(updateId);
+                    BufferUpdateStatistics stats = bufferClient.getUpdateStatistics(updateId, settings.accessToken());
                     likes += stats.favorites();
                     shares += stats.shares();
                     comments += stats.comments();
