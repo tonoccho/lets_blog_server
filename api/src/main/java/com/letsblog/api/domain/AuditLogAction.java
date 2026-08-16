@@ -30,7 +30,9 @@ public enum AuditLogAction {
     PROJECT_USER_REMOVED("プロジェクトユーザー削除"),
     DB_BACKUP_DOWNLOADED("DBバックアップダウンロード"),
     DB_RESTORED("DBリストア"),
-    SYSTEM_SETTING_UPDATED("システム設定更新");
+    SYSTEM_SETTING_UPDATED("システム設定更新"),
+    SSH_KEY_PAIR_CREATED("SSH鍵ペア作成"),
+    SSH_KEY_PAIR_DELETED("SSH鍵ペア削除");
 
     private final String displayName;
 

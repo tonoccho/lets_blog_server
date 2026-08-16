@@ -1,13 +1,21 @@
 "use client";
 
 import { useState } from "react";
-import type { AppUser, Site } from "@/lib/apiClient";
+import type { AppUser, SavedSshKeyPair, Site } from "@/lib/apiClient";
 import { SiteForm } from "./SiteForm";
 import { ManagedWordPressForm } from "./ManagedWordPressForm";
 
 type Mode = "external" | "managed-wordpress";
 
-export function SiteCreationPanel({ users, sites }: { users: AppUser[]; sites: Site[] }) {
+export function SiteCreationPanel({
+  users,
+  sites,
+  sshKeyPairs,
+}: {
+  users: AppUser[];
+  sites: Site[];
+  sshKeyPairs: SavedSshKeyPair[];
+}) {
   const [mode, setMode] = useState<Mode>("external");
   const templateCandidates = sites.filter((site) => site.managedWordpress);
 
@@ -34,7 +42,7 @@ export function SiteCreationPanel({ users, sites }: { users: AppUser[]; sites: S
         </button>
       </div>
       {mode === "external" ? (
-        <SiteForm />
+        <SiteForm sshKeyPairs={sshKeyPairs} />
       ) : (
         <ManagedWordPressForm users={users} templateCandidates={templateCandidates} />
       )}

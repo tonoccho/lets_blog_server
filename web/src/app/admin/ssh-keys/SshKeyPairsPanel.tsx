@@ -1,0 +1,180 @@
+"use client";
+
+import { useState, useTransition } from "react";
+import { GeneratedSshKeyPair, SavedSshKeyPair } from "@/lib/apiClient";
+import { createSshKeyPairAction, deleteSshKeyPairAction } from "./actions";
+
+export function SshKeyPairsPanel({ keyPairs }: { keyPairs: SavedSshKeyPair[] }) {
+  const [name, setName] = useState("");
+  const [comment, setComment] = useState("");
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [generated, setGenerated] = useState<GeneratedSshKeyPair | null>(null);
+  const [generatePending, startGenerateTransition] = useTransition();
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [deletePending, startDeleteTransition] = useTransition();
+
+  function handleGenerate(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setGenerateError(null);
+    startGenerateTransition(async () => {
+      const result = await createSshKeyPairAction(name, comment);
+      if (result.error) {
+        setGenerateError(result.error);
+        return;
+      }
+      setGenerated(result.keyPair ?? null);
+      setName("");
+      setComment("");
+    });
+  }
+
+  function handleDelete(id: number, keyName: string) {
+    if (!window.confirm(`SSH鍵ペア「${keyName}」を削除します。よろしいですか?`)) {
+      return;
+    }
+    setDeleteError(null);
+    setDeletingId(id);
+    startDeleteTransition(async () => {
+      const result = await deleteSshKeyPairAction(id);
+      if (result.error) {
+        setDeleteError(result.error);
+      }
+      setDeletingId(null);
+    });
+  }
+
+  return (
+    <div className="space-y-8">
+      <section className="space-y-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
+        <h2 className="font-medium">新しいSSH鍵ペアを生成</h2>
+        <form onSubmit={handleGenerate} className="space-y-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-neutral-600 dark:text-neutral-400">名前</span>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                maxLength={100}
+                placeholder="production-deploy"
+                className="rounded border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-neutral-600 dark:text-neutral-400">コメント(任意)</span>
+              <input
+                type="text"
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                maxLength={255}
+                placeholder="本番サーバーデプロイ用"
+                className="rounded border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm"
+              />
+            </label>
+          </div>
+          {generateError && <p className="text-sm text-red-600">{generateError}</p>}
+          <button
+            type="submit"
+            disabled={generatePending}
+            className="rounded bg-neutral-900 px-4 py-2 text-sm text-white hover:bg-neutral-700 disabled:opacity-50"
+          >
+            {generatePending ? "生成中…" : "SSH鍵ペアを生成"}
+          </button>
+        </form>
+
+        {generated && (
+          <div className="space-y-2 rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 p-3">
+            <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+              「{generated.name}」を生成しました。秘密鍵はこの画面でのみ表示され、閉じると二度と確認できません。
+              必要な場所へ今すぐコピーしてください。
+            </p>
+            <div className="space-y-1">
+              <p className="text-xs text-neutral-600 dark:text-neutral-400">公開鍵(対象サーバーの~/.ssh/authorized_keysへ追記)</p>
+              <textarea
+                readOnly
+                value={generated.publicKeyLine}
+                rows={2}
+                onFocus={(e) => e.currentTarget.select()}
+                className="w-full rounded border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 font-mono text-xs"
+              />
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-neutral-600 dark:text-neutral-400">秘密鍵</p>
+              <textarea
+                readOnly
+                value={generated.privateKeyPem}
+                rows={6}
+                onFocus={(e) => e.currentTarget.select()}
+                className="w-full rounded border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 font-mono text-xs"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setGenerated(null)}
+              className="rounded bg-neutral-100 dark:bg-neutral-800 px-3 py-1.5 text-sm text-neutral-900 dark:text-neutral-50 hover:bg-neutral-200 dark:hover:bg-neutral-700"
+            >
+              閉じる
+            </button>
+          </div>
+        )}
+      </section>
+
+      <section className="space-y-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
+        <h2 className="font-medium">保存済みのSSH鍵ペア</h2>
+        {deleteError && <p className="text-sm text-red-600">{deleteError}</p>}
+        {keyPairs.length === 0 ? (
+          <p className="text-sm text-neutral-600 dark:text-neutral-400">保存済みのSSH鍵ペアはありません。</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400">
+                  <th className="py-2 pr-4 font-medium">名前</th>
+                  <th className="py-2 pr-4 font-medium">公開鍵</th>
+                  <th className="py-2 pr-4 font-medium">作成日時</th>
+                  <th className="py-2 pr-4 font-medium" />
+                </tr>
+              </thead>
+              <tbody>
+                {keyPairs.map((keyPair) => (
+                  <tr key={keyPair.id} className="border-b border-neutral-100 dark:border-neutral-800/60 align-top">
+                    <td className="py-2 pr-4">
+                      <p className="font-medium">{keyPair.name}</p>
+                      {keyPair.comment && (
+                        <p className="text-xs text-neutral-500 dark:text-neutral-400">{keyPair.comment}</p>
+                      )}
+                    </td>
+                    <td className="py-2 pr-4">
+                      <textarea
+                        readOnly
+                        value={keyPair.publicKeyLine}
+                        rows={2}
+                        onFocus={(e) => e.currentTarget.select()}
+                        className="w-full min-w-[16rem] rounded border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-2 py-1 font-mono text-xs"
+                      />
+                    </td>
+                    <td className="py-2 pr-4 whitespace-nowrap text-neutral-600 dark:text-neutral-400">
+                      {new Date(keyPair.createdAt).toLocaleString("ja-JP")}
+                    </td>
+                    <td className="py-2 pr-4">
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(keyPair.id, keyPair.name)}
+                        disabled={deletePending && deletingId === keyPair.id}
+                        className="rounded bg-red-50 dark:bg-red-950/30 px-3 py-1.5 text-sm text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-950/60 disabled:opacity-50"
+                      >
+                        {deletePending && deletingId === keyPair.id ? "削除中…" : "削除"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
