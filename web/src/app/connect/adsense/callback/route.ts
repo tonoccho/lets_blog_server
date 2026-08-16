@@ -20,9 +20,10 @@ export async function GET(request: NextRequest) {
   const projectId = Number((state ?? "").split(".")[0]);
 
   function redirectToSettings(status: "connected" | "error", message?: string) {
+    const base = process.env.NEXTAUTH_URL;
     const target = projectId
-      ? new URL(`/projects/${projectId}/settings/adsense`, request.url)
-      : new URL("/projects", request.url);
+      ? new URL(`/projects/${projectId}/settings/adsense`, base)
+      : new URL("/projects", base);
     if (status === "connected") {
       target.searchParams.set("connected", "1");
     } else {
