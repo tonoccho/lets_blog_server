@@ -352,6 +352,42 @@ export function generateSshKeyPair(comment: string | undefined, actor?: ActorInf
   });
 }
 
+/**
+ * 名前をつけて保存・管理するSSH鍵ペア(issue #413)。admin限定。秘密鍵は生成直後の
+ * レスポンス(createSshKeyPair)でのみ返り、一覧(listSshKeyPairs)では公開鍵のみを返す。
+ */
+export interface SavedSshKeyPair {
+  id: number;
+  name: string;
+  comment: string | null;
+  publicKeyLine: string;
+  createdAt: string;
+}
+
+export interface GeneratedSshKeyPair extends SavedSshKeyPair {
+  privateKeyPem: string;
+}
+
+export function listSshKeyPairs(actor?: ActorInfo): Promise<SavedSshKeyPair[]> {
+  return apiFetch<SavedSshKeyPair[]>('/api/ssh-key-pairs', { actor });
+}
+
+export function createSshKeyPair(
+  input: { name: string; comment?: string },
+  actor: ActorInfo
+): Promise<GeneratedSshKeyPair> {
+  return apiFetch<GeneratedSshKeyPair>('/api/ssh-key-pairs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: input.name, comment: input.comment || null }),
+    actor,
+  });
+}
+
+export function deleteSshKeyPair(id: number, actor: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/ssh-key-pairs/${id}`, { method: 'DELETE', actor });
+}
+
 export function listPosts(): Promise<PostSummary[]> {
   return apiFetch<PostSummary[]>('/api/posts');
 }

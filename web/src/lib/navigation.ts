@@ -9,6 +9,7 @@ import {
   DatabaseBackup,
   History,
   Settings,
+  KeyRound,
   type LucideIcon,
 } from "lucide-react";
 
@@ -31,6 +32,7 @@ export const ICON_MAP: Record<string, LucideIcon> = {
   DatabaseBackup,
   History,
   Settings,
+  KeyRound,
 };
 
 export const NAV_ITEMS: NavItem[] = [
@@ -46,4 +48,5 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
   { href: "/admin/roles", label: "ロール管理", icon: "Shield", adminOnly: true, group: "admin" },
   { href: "/admin/backup", label: "データバックアップ", icon: "DatabaseBackup", adminOnly: true, group: "admin" },
   { href: "/admin/system-settings", label: "システム設定", icon: "Settings", adminOnly: true, group: "admin" },
+  { href: "/admin/ssh-keys", label: "SSH鍵管理", icon: "KeyRound", adminOnly: true, group: "admin" },
 ];
