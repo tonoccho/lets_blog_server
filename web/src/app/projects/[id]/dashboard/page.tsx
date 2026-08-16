@@ -96,13 +96,6 @@ export default async function ProjectDashboardPage({ params }: { params: Promise
           <AdSenseWidget report={adsenseReport} />
         </DashboardWidgetSlot>
         <DashboardWidgetSlot
-          title="Amazonアソシエイト"
-          description="本番サイトのAmazonアソシエイト成果(クリック数・成約数・報酬額等)を表示します。"
-          configured={false}
-          settingsHref={`/projects/${projectId}/settings/amazon-associates`}
-          settingsLabel="Amazonアソシエイトを設定"
-        />
-        <DashboardWidgetSlot
           title="ソーシャル統計"
           description="Buffer経由で送信済みの投稿のエンゲージメント統計(いいね・シェア・コメント・クリック)を表示します。
             Buffer連携が無効、または対象の送信済み投稿がまだない場合は表示されません(環境変数BUFFER_ENABLED/BUFFER_PROFILE_IDSで設定)。"
