@@ -1361,17 +1361,36 @@ export function getProjectGoogleAnalyticsReport(
 export interface ProjectAdSenseStatus {
   configured: boolean;
   accountId: string | null;
+  clientId: string | null;
+  hasClientSecret: boolean;
 }
 
 export function getProjectAdSenseStatus(projectId: number, actor?: ActorInfo): Promise<ProjectAdSenseStatus> {
   return apiFetch<ProjectAdSenseStatus>(`/api/projects/${projectId}/api-keys/adsense`, { actor });
 }
 
-export function setProjectAdSenseAccountId(projectId: number, accountId: string, actor: ActorInfo): Promise<void> {
+export function setProjectAdSenseSettings(
+  projectId: number,
+  input: { accountId: string; clientId: string },
+  actor: ActorInfo
+): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}/api-keys/adsense`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ accountId }),
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function setProjectAdSenseClientSecret(
+  projectId: number,
+  clientSecret: string,
+  actor: ActorInfo
+): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/adsense/client-secret`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientSecret }),
     actor,
   });
 }

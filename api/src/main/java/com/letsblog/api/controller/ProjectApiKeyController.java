@@ -5,7 +5,8 @@ import com.letsblog.api.dto.ProjectAdSenseStatusResponse;
 import com.letsblog.api.dto.ProjectApiKeyStatusResponse;
 import com.letsblog.api.dto.ProjectBufferStatusResponse;
 import com.letsblog.api.dto.ProjectGoogleAnalyticsStatusResponse;
-import com.letsblog.api.dto.SetProjectAdSenseAccountIdRequest;
+import com.letsblog.api.dto.SetProjectAdSenseClientSecretRequest;
+import com.letsblog.api.dto.SetProjectAdSenseSettingsRequest;
 import com.letsblog.api.dto.SetProjectBraveSearchApiKeyRequest;
 import com.letsblog.api.dto.SetProjectBufferAccessTokenRequest;
 import com.letsblog.api.dto.SetProjectBufferSettingsRequest;
@@ -96,15 +97,22 @@ public class ProjectApiKeyController {
 
     @GetMapping("/adsense")
     public ProjectAdSenseStatusResponse getAdSenseStatus(@PathVariable Long projectId) {
+        ProjectApiKeyService.AdSenseStatus status = projectApiKeyService.getAdSenseStatus(projectId);
         return new ProjectAdSenseStatusResponse(
-                projectApiKeyService.isAdSenseConfigured(projectId),
-                projectApiKeyService.getAdSenseAccountId(projectId));
+                status.configured(), status.accountId(), status.clientId(), status.hasClientSecret());
     }
 
     @PutMapping("/adsense")
-    public ResponseEntity<Void> setAdSenseAccountId(
-            @PathVariable Long projectId, @Valid @RequestBody SetProjectAdSenseAccountIdRequest request) {
-        projectApiKeyService.setAdSenseAccountId(projectId, request.accountId());
+    public ResponseEntity<Void> setAdSenseSettings(
+            @PathVariable Long projectId, @Valid @RequestBody SetProjectAdSenseSettingsRequest request) {
+        projectApiKeyService.setAdSenseSettings(projectId, request.accountId(), request.clientId());
+        return ResponseEntity.noContent().build();
+    }
+
+    @PutMapping("/adsense/client-secret")
+    public ResponseEntity<Void> setAdSenseClientSecret(
+            @PathVariable Long projectId, @Valid @RequestBody SetProjectAdSenseClientSecretRequest request) {
+        projectApiKeyService.setAdSenseClientSecret(projectId, request.clientSecret());
         return ResponseEntity.noContent().build();
     }
 

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { listAppSettings } from "@/lib/apiClient";
+import { getProjectAdSenseStatus } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 
 const STATE_COOKIE = "adsense_oauth_state";
@@ -13,8 +13,8 @@ const SCOPE = "https://www.googleapis.com/auth/adsense.readonly";
  * (downloads/vscode-extensionと同じ理由、詳細はそちらのコメント参照)。
  * stateパラメータにprojectIdとCSRF対策用nonceを埋め込み、nonceはHttpOnly cookieにも保存して
  * コールバック時に一致を確認する。
- * クライアントIDはシステム設定画面(issue #403)で管理者がDBに設定した値を使う
- * (APIコンテナ側のAdSenseClientと同じ設定元。詳細はAppSettingServiceのコメント参照)。
+ * クライアントIDはそのプロジェクトの設定(プロジェクト詳細画面のGoogle AdSense設定)で保存した値を使う
+ * (issue #407でアプリ全体のシステム設定からプロジェクト単位に変更。APIコンテナ側のAdSenseClientと同じ設定元)。
  */
 export async function GET(request: NextRequest) {
   const session = await requireAdminSession();
@@ -25,10 +25,13 @@ export async function GET(request: NextRequest) {
     return Response.json({ error: "projectIdが指定されていません。" }, { status: 400 });
   }
 
-  const settings = await listAppSettings(actor);
-  const clientId = settings.find((s) => s.key === "google_oauth_client_id")?.value;
-  if (!clientId) {
-    return Response.json({ error: "Google OAuthクライアントIDが設定されていません。" }, { status: 500 });
+  const status = await getProjectAdSenseStatus(Number(projectId), actor);
+  const clientId = status.clientId;
+  if (!clientId || !status.hasClientSecret) {
+    return Response.json(
+      { error: "このプロジェクトにはGoogle OAuthクライアントID/シークレットが設定されていません。" },
+      { status: 500 }
+    );
   }
 
   const nonce = randomUUID();

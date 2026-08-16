@@ -155,36 +155,53 @@ public class ProjectApiKeyService {
         }
     }
 
-    @Transactional(readOnly = true)
-    public boolean isAdSenseConfigured(Long projectId) {
-        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        return getProject(projectId).hasAdsenseCredentials();
+    public record AdSenseStatus(boolean configured, String accountId, String clientId, boolean hasClientSecret) {
     }
 
     @Transactional(readOnly = true)
-    public String getAdSenseAccountId(Long projectId) {
+    public AdSenseStatus getAdSenseStatus(Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        return getProject(projectId).getAdsenseAccountId();
+        Project project = getProject(projectId);
+        return new AdSenseStatus(
+                project.hasAdsenseCredentials(),
+                project.getAdsenseAccountId(),
+                project.getAdsenseOauthClientId(),
+                project.hasAdsenseOauthClientSecret());
     }
 
+    /** AdSenseパブリッシャーIDとGoogle OAuthクライアントID(秘匿情報ではない)をまとめて保存する。 */
     @Transactional
-    public void setAdSenseAccountId(Long projectId, String accountId) {
+    public void setAdSenseSettings(Long projectId, String accountId, String clientId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         Project project = getProject(projectId);
         project.setAdsenseAccountId(accountId);
+        project.setAdsenseOauthClientId(clientId);
+        projectRepository.save(project);
+    }
+
+    @Transactional
+    public void setAdSenseClientSecret(Long projectId, String clientSecret) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        Project project = getProject(projectId);
+        project.setAdsenseOauthClientSecretEncrypted(credentialCipher.encrypt(clientSecret));
         projectRepository.save(project);
     }
 
     /**
      * Next.js側のOAuthコールバックルート(/connect/adsense/callback)から呼ばれる。認可コードを
-     * リフレッシュトークンに交換して暗号化保存する(アカウントIDは別途setAdSenseAccountIdで設定済みの前提。
-     * OAuth同意自体はどのAdSenseアカウントかを教えてくれないため)。
+     * リフレッシュトークンに交換して暗号化保存する(アカウントIDは別途setAdSenseSettingsで設定済みの前提。
+     * OAuth同意自体はどのAdSenseアカウントかを教えてくれないため)。クライアントID/シークレットは
+     * このプロジェクトに保存されたもの(issue #407でプロジェクト単位に変更)を使う。
      */
     @Transactional
     public void completeAdSenseOAuth(Long projectId, String code, String redirectUri) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        GoogleOAuthTokens tokens = adSenseClient.exchangeAuthorizationCode(code, redirectUri);
         Project project = getProject(projectId);
+        String clientSecret = project.hasAdsenseOauthClientSecret()
+                ? credentialCipher.decrypt(project.getAdsenseOauthClientSecretEncrypted())
+                : null;
+        GoogleOAuthTokens tokens = adSenseClient.exchangeAuthorizationCode(
+                project.getAdsenseOauthClientId(), clientSecret, code, redirectUri);
         project.setAdsenseRefreshTokenEncrypted(credentialCipher.encrypt(tokens.refreshToken()));
         projectRepository.save(project);
     }
@@ -195,6 +212,8 @@ public class ProjectApiKeyService {
         Project project = getProject(projectId);
         project.setAdsenseAccountId(null);
         project.setAdsenseRefreshTokenEncrypted(null);
+        project.setAdsenseOauthClientId(null);
+        project.setAdsenseOauthClientSecretEncrypted(null);
         projectRepository.save(project);
     }
 
@@ -209,6 +228,19 @@ public class ProjectApiKeyService {
             return null;
         }
         return credentialCipher.decrypt(project.getAdsenseRefreshTokenEncrypted());
+    }
+
+    /**
+     * AdSenseReportServiceから呼ばれる。未設定の場合はnullを返す(認可はここでは行わない。
+     * 呼び出し元がプロジェクトメンバー/adminであることを別途保証している。resolveGithubToken等と同じ方針)。
+     */
+    @Transactional(readOnly = true)
+    public String resolveAdSenseOauthClientSecret(Long projectId) {
+        Project project = getProject(projectId);
+        if (!project.hasAdsenseOauthClientSecret()) {
+            return null;
+        }
+        return credentialCipher.decrypt(project.getAdsenseOauthClientSecretEncrypted());
     }
 
     /**

@@ -22,7 +22,8 @@ import {
   applyToAllEnvironments,
   setProjectGoogleAnalyticsCredentials,
   clearProjectGoogleAnalyticsCredentials,
-  setProjectAdSenseAccountId,
+  setProjectAdSenseSettings,
+  setProjectAdSenseClientSecret,
   clearProjectAdSenseCredentials,
   setProjectBufferSettings,
   setProjectBufferAccessToken,
@@ -380,7 +381,7 @@ export async function clearProjectGoogleAnalyticsCredentialsAction(projectId: nu
   revalidatePath(`/projects/${projectId}/dashboard`);
 }
 
-export async function setProjectAdSenseAccountIdAction(
+export async function setProjectAdSenseSettingsAction(
   projectId: number,
   _prevState: ProjectApiKeyFormState,
   formData: FormData
@@ -389,12 +390,20 @@ export async function setProjectAdSenseAccountIdAction(
   const actor = { id: Number(session.user.id), role: session.user.role };
 
   const accountId = String(formData.get("accountId") ?? "").trim();
+  const clientId = String(formData.get("clientId") ?? "").trim();
+  const clientSecret = String(formData.get("clientSecret") ?? "").trim();
   if (!accountId) {
     return { error: "AdSenseパブリッシャーIDを入力してください。" };
   }
+  if (!clientId) {
+    return { error: "Google OAuthクライアントIDを入力してください。" };
+  }
 
   try {
-    await setProjectAdSenseAccountId(projectId, accountId, actor);
+    await setProjectAdSenseSettings(projectId, { accountId, clientId }, actor);
+    if (clientSecret) {
+      await setProjectAdSenseClientSecret(projectId, clientSecret, actor);
+    }
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

@@ -50,6 +50,8 @@ class AdSenseReportServiceTest {
         project.setProductionSiteId(99L);
         project.setAdsenseAccountId("pub-1234567890123456");
         project.setAdsenseRefreshTokenEncrypted(new byte[]{1, 2, 3});
+        project.setAdsenseOauthClientId("client-id");
+        project.setAdsenseOauthClientSecretEncrypted(new byte[]{4, 5, 6});
         return project;
     }
 
@@ -83,7 +85,8 @@ class AdSenseReportServiceTest {
         Project project = configuredProject();
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(projectApiKeyService.resolveAdSenseRefreshToken(1L)).thenReturn("refresh-token");
-        when(adSenseClient.refreshAccessToken("refresh-token")).thenReturn("access-token");
+        when(projectApiKeyService.resolveAdSenseOauthClientSecret(1L)).thenReturn("client-secret");
+        when(adSenseClient.refreshAccessToken("client-id", "client-secret", "refresh-token")).thenReturn("access-token");
         when(adSenseClient.fetchReport("access-token", "pub-1234567890123456", "LAST_30_DAYS"))
                 .thenReturn(new AdSenseReport("12.34", 100, 5000));
 
@@ -101,7 +104,9 @@ class AdSenseReportServiceTest {
         Project project = configuredProject();
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(projectApiKeyService.resolveAdSenseRefreshToken(1L)).thenReturn("refresh-token");
-        when(adSenseClient.refreshAccessToken(anyString())).thenThrow(new AdSenseException("APIエラー", null));
+        when(projectApiKeyService.resolveAdSenseOauthClientSecret(1L)).thenReturn("client-secret");
+        when(adSenseClient.refreshAccessToken(anyString(), anyString(), anyString()))
+                .thenThrow(new AdSenseException("APIエラー", null));
 
         AdSenseReportResponse response = service().getReport(1L);
 

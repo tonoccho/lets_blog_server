@@ -42,7 +42,7 @@ class AppSettingServiceTest {
                 repository, credentialCipher, adminAuthorizationService,
                 "env-llm-key", "https://api.openai.com/v1", "gpt-4o-mini", "gpt-4o-mini,gpt-4o", "120",
                 "smtp.example.com", "587", "env-user", "env-pass", "noreply@example.com",
-                "env-client-id", "env-client-secret", "http://localhost:3000");
+                "http://localhost:3000");
     }
 
     @Test
@@ -80,15 +80,6 @@ class AppSettingServiceTest {
         assertEquals("env-llm-key", service.apiKey());
         assertEquals("gpt-4o-mini", service.defaultModel());
         assertEquals(120L, service.requestTimeoutSeconds());
-    }
-
-    @Test
-    void GoogleOAuthClientProviderとして委譲する() {
-        AppSettingService service = service();
-        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
-
-        assertEquals("env-client-id", service.clientId());
-        assertEquals("env-client-secret", service.clientSecret());
     }
 
     @Test

@@ -18,11 +18,6 @@ const GROUPS: { title: string; description: string; keys: string[] }[] = [
     keys: ["mail_host", "mail_port", "mail_username", "mail_password", "app_mail_from"],
   },
   {
-    title: "Google OAuthクライアント",
-    description: "Google AdSense連携で使用する、アプリ全体で1つのGoogle OAuthクライアントの設定です。",
-    keys: ["google_oauth_client_id", "google_oauth_client_secret"],
-  },
-  {
     title: "Webフロントの公開URL",
     description: "パスワード再設定メール内のリンク生成等に使用する、Web管理画面の公開URLです。",
     keys: ["app_web_base_url"],

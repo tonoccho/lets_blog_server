@@ -46,7 +46,9 @@ public class AdSenseReportService {
         }
         try {
             String refreshToken = projectApiKeyService.resolveAdSenseRefreshToken(projectId);
-            String accessToken = adSenseClient.refreshAccessToken(refreshToken);
+            String clientSecret = projectApiKeyService.resolveAdSenseOauthClientSecret(projectId);
+            String accessToken = adSenseClient.refreshAccessToken(
+                    project.getAdsenseOauthClientId(), clientSecret, refreshToken);
             AdSenseReport report = adSenseClient.fetchReport(accessToken, project.getAdsenseAccountId(), DATE_RANGE);
             return AdSenseReportResponse.of(report, PERIOD_LABEL);
         } catch (RuntimeException e) {

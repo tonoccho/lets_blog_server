@@ -111,6 +111,17 @@ public class Project {
     private byte[] adsenseRefreshTokenEncrypted;
 
     /**
+     * AdSense連携用のGoogle OAuthクライアント(issue #407)。以前はアプリ全体で1つの環境変数/システム設定
+     * (GOOGLE_OAUTH_CLIENT_ID/SECRET)だったが、プロジェクトごとに異なるGoogle Cloudプロジェクトを
+     * 使い分けられるようプロジェクト単位に変更した。client_idは秘匿情報ではないので平文で保持する。
+     */
+    @Column(name = "adsense_oauth_client_id", length = 255)
+    private String adsenseOauthClientId;
+
+    @Column(name = "adsense_oauth_client_secret_encrypted", columnDefinition = "VARBINARY(1024)")
+    private byte[] adsenseOauthClientSecretEncrypted;
+
+    /**
      * Buffer連携(issue #402)。以前はアプリ全体の環境変数(BUFFER_*)で1つだけ設定していたが、
      * プロジェクトごとに異なるBufferアカウント/SNSプロファイルへ投稿できるようプロジェクト単位に変更した。
      * アクセストークンのみ秘匿情報として暗号化保持し、他はプロジェクト単位の平文設定として保持する。
@@ -156,6 +167,14 @@ public class Project {
     public boolean hasAdsenseCredentials() {
         return adsenseAccountId != null && !adsenseAccountId.isBlank()
                 && adsenseRefreshTokenEncrypted != null && adsenseRefreshTokenEncrypted.length > 0;
+    }
+
+    public boolean hasAdsenseOauthClientSecret() {
+        return adsenseOauthClientSecretEncrypted != null && adsenseOauthClientSecretEncrypted.length > 0;
+    }
+
+    public boolean hasAdsenseOauthClient() {
+        return adsenseOauthClientId != null && !adsenseOauthClientId.isBlank() && hasAdsenseOauthClientSecret();
     }
 
     public boolean hasBufferAccessToken() {
