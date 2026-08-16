@@ -6,8 +6,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.boot.mail.autoconfigure.MailProperties;
+import org.springframework.mail.javamail.JavaMailSenderImpl;
 
 import java.util.Map;
 
@@ -16,25 +16,33 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * MailSenderServiceの回帰テスト。接続設定(ホスト/ポート等)と送信元アドレスはAppSettingServiceから
+ * 呼び出しの都度取得する(issue #403)ため、内部で構築されるJavaMailSenderImplをMockito spyで
+ * モックに差し替えて検証する。
+ */
 @ExtendWith(MockitoExtension.class)
 class MailSenderServiceTest {
 
     @Mock
-    private JavaMailSender mailSender;
-
-    @Mock
     private MailTemplateService mailTemplateService;
+    @Mock
+    private AppSettingService appSettingService;
+    @Mock
+    private JavaMailSenderImpl mailSender;
 
     private MailSenderService service;
 
     @BeforeEach
     void setUp() {
-        service = new MailSenderService(mailSender, mailTemplateService);
-        ReflectionTestUtils.setField(service, "fromEmail", "noreply@letsblog.example.com");
+        service = spy(new MailSenderService(mailTemplateService, appSettingService, new MailProperties()));
+        org.mockito.Mockito.lenient().doReturn(mailSender).when(service).buildMailSender();
+        org.mockito.Mockito.lenient().when(appSettingService.getMailFrom()).thenReturn("noreply@letsblog.example.com");
     }
 
     @Test

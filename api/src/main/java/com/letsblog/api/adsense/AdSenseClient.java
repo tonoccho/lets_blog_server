@@ -17,8 +17,9 @@ import java.util.List;
  * Google OAuth2の認可コード/リフレッシュトークンによるトークン取得と、AdSense Management API
  * (reports:generate)の呼び出しを行う薄いクライアント。GA4のGoogleAnalyticsClientと異なり、
  * AdSenseはサービスアカウント委任に対応していないため3-leggedフローの認可コード/リフレッシュトークンを使う。
- * クライアントID/シークレットはアプリ全体で1つ(Google Cloud Consoleに1回登録)なのでプロジェクト単位ではなく
- * このクライアントが直接保持する(プロジェクト単位のリフレッシュトークンは呼び出し側が渡す)。
+ * クライアントID/シークレットはアプリ全体で1つ(Google Cloud Consoleに1回登録)なのでプロジェクト単位ではなく、
+ * GoogleOAuthClientProviderから呼び出しの都度取得する(issue #403でWeb管理画面のシステム設定から
+ * 変更可能になったため、構築時に固定値として保持しない。プロジェクト単位のリフレッシュトークンは呼び出し側が渡す)。
  */
 @Component
 public class AdSenseClient {
@@ -30,27 +31,38 @@ public class AdSenseClient {
     private final RestClient client;
     private final String tokenUri;
     private final String dataApiBaseUrl;
-    private final String clientId;
-    private final String clientSecret;
+    private final GoogleOAuthClientProvider oauthClientProvider;
 
     @Autowired
     public AdSenseClient(
             @Value("${app.google-oauth-token-uri}") String tokenUri,
             @Value("${app.adsense-data-api-base-url}") String dataApiBaseUrl,
-            @Value("${app.google-oauth-client-id:}") String clientId,
-            @Value("${app.google-oauth-client-secret:}") String clientSecret) {
-        this(RestClient.builder(), tokenUri, dataApiBaseUrl, clientId, clientSecret);
+            GoogleOAuthClientProvider oauthClientProvider) {
+        this(RestClient.builder(), tokenUri, dataApiBaseUrl, oauthClientProvider);
     }
 
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
-    AdSenseClient(RestClient.Builder builder, String tokenUri, String dataApiBaseUrl,
-            String clientId, String clientSecret) {
+    AdSenseClient(RestClient.Builder builder, String tokenUri, String dataApiBaseUrl, String clientId, String clientSecret) {
+        this(builder, tokenUri, dataApiBaseUrl, new GoogleOAuthClientProvider() {
+            @Override
+            public String clientId() {
+                return clientId;
+            }
+
+            @Override
+            public String clientSecret() {
+                return clientSecret;
+            }
+        });
+    }
+
+    private AdSenseClient(RestClient.Builder builder, String tokenUri, String dataApiBaseUrl,
+            GoogleOAuthClientProvider oauthClientProvider) {
         LegacyJacksonRestClientConfig.preferJackson2(builder);
         this.client = builder.build();
         this.tokenUri = tokenUri;
         this.dataApiBaseUrl = dataApiBaseUrl;
-        this.clientId = clientId;
-        this.clientSecret = clientSecret;
+        this.oauthClientProvider = oauthClientProvider;
     }
 
     /** OAuth同意画面からの認可コードを、アクセストークン/リフレッシュトークンに交換する。 */
@@ -59,8 +71,8 @@ public class AdSenseClient {
         String body = "grant_type=" + GRANT_TYPE_AUTHORIZATION_CODE
                 + "&code=" + urlEncode(code)
                 + "&redirect_uri=" + urlEncode(redirectUri)
-                + "&client_id=" + urlEncode(clientId)
-                + "&client_secret=" + urlEncode(clientSecret);
+                + "&client_id=" + urlEncode(oauthClientProvider.clientId())
+                + "&client_secret=" + urlEncode(oauthClientProvider.clientSecret());
         GoogleOAuthTokens tokens = postForTokens(body);
         if (tokens.refreshToken() == null || tokens.refreshToken().isBlank()) {
             throw new AdSenseException(
@@ -75,8 +87,8 @@ public class AdSenseClient {
         requireClientCredentials();
         String body = "grant_type=" + GRANT_TYPE_REFRESH_TOKEN
                 + "&refresh_token=" + urlEncode(refreshToken)
-                + "&client_id=" + urlEncode(clientId)
-                + "&client_secret=" + urlEncode(clientSecret);
+                + "&client_id=" + urlEncode(oauthClientProvider.clientId())
+                + "&client_secret=" + urlEncode(oauthClientProvider.clientSecret());
         GoogleOAuthTokens tokens = postForTokens(body);
         if (tokens.accessToken() == null || tokens.accessToken().isBlank()) {
             throw new AdSenseException("Googleからアクセストークンを取得できませんでした", null);
@@ -85,10 +97,12 @@ public class AdSenseClient {
     }
 
     private void requireClientCredentials() {
+        String clientId = oauthClientProvider.clientId();
+        String clientSecret = oauthClientProvider.clientSecret();
         if (clientId == null || clientId.isBlank() || clientSecret == null || clientSecret.isBlank()) {
             throw new AdSenseException(
                     "Google OAuthクライアントID/シークレットが設定されていません"
-                            + "(GOOGLE_OAUTH_CLIENT_ID/GOOGLE_OAUTH_CLIENT_SECRET)",
+                            + "(GOOGLE_OAUTH_CLIENT_ID/GOOGLE_OAUTH_CLIENT_SECRET、またはWeb管理画面のシステム設定)",
                     null);
         }
     }

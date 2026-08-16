@@ -10,7 +10,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -40,12 +39,15 @@ class PasswordResetServiceTest {
     @Mock
     private MailSenderService mailSenderService;
 
+    @Mock
+    private AppSettingService appSettingService;
+
     private PasswordResetService service;
 
     @BeforeEach
     void setUp() {
-        service = new PasswordResetService(tokenRepository, userRepository, mailSenderService);
-        ReflectionTestUtils.setField(service, "baseUrl", "http://localhost:3000");
+        service = new PasswordResetService(tokenRepository, userRepository, mailSenderService, appSettingService);
+        org.mockito.Mockito.lenient().when(appSettingService.getAppWebBaseUrl()).thenReturn("http://localhost:3000");
     }
 
     private User buildUser() {

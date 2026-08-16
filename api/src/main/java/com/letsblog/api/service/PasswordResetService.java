@@ -7,7 +7,6 @@ import com.letsblog.api.domain.User;
 import com.letsblog.api.repository.PasswordResetTokenRepository;
 import com.letsblog.api.repository.UserRepository;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -27,17 +26,17 @@ public class PasswordResetService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
     private final MailSenderService mailSenderService;
-
-    @Value("${app.web.base-url:http://localhost:3000}")
-    private String baseUrl;
+    private final AppSettingService appSettingService;
 
     public PasswordResetService(
             PasswordResetTokenRepository tokenRepository,
             UserRepository userRepository,
-            MailSenderService mailSenderService) {
+            MailSenderService mailSenderService,
+            AppSettingService appSettingService) {
         this.tokenRepository = tokenRepository;
         this.userRepository = userRepository;
         this.mailSenderService = mailSenderService;
+        this.appSettingService = appSettingService;
     }
 
     /**
@@ -99,7 +98,7 @@ public class PasswordResetService {
     }
 
     private void sendResetEmail(String email, String token) {
-        String resetLink = baseUrl + "/login/password-reset?token=" + token;
+        String resetLink = appSettingService.getAppWebBaseUrl() + "/login/password-reset?token=" + token;
         mailSenderService.sendMail(email, "password-reset", Map.of("resetLink", resetLink));
         log.info("Reset email sent to: {}", email);
     }
