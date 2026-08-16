@@ -7,7 +7,6 @@ import com.letsblog.api.domain.BufferPost;
 import com.letsblog.api.repository.BufferPostRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -15,7 +14,6 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -25,6 +23,8 @@ import java.util.Map;
  * 遅延自体を当システムが待つ必要はなく、公開時に1回呼び出すだけでよい。
  * SNS通知の失敗で記事公開自体を失敗させないよう、呼び出し元(PostPublishService)から
  * 非同期(@Async)で呼ばれる想定。
+ * Buffer連携設定はプロジェクト単位(issue #402)のため、呼び出しの都度ProjectApiKeyServiceから
+ * 該当プロジェクトの設定を解決する。
  */
 @Service
 public class BufferNotificationService {
@@ -34,60 +34,47 @@ public class BufferNotificationService {
 
     private final BufferClient bufferClient;
     private final BufferPostRepository bufferPostRepository;
+    private final ProjectApiKeyService projectApiKeyService;
     private final ObjectMapper objectMapper;
-    private final boolean enabled;
-    private final List<String> profileIds;
-    private final int delayMinutes;
-    private final String messageTemplate;
     private final long retryBackoffMillis;
 
     public BufferNotificationService(
             BufferClient bufferClient,
             BufferPostRepository bufferPostRepository,
-            ObjectMapper objectMapper,
-            @Value("${app.buffer-enabled}") boolean enabled,
-            @Value("${app.buffer-profile-ids}") String profileIdsCsv,
-            @Value("${app.buffer-post-delay-minutes}") int delayMinutes,
-            @Value("${app.buffer-message-template}") String messageTemplate) {
-        this(bufferClient, bufferPostRepository, objectMapper, enabled, profileIdsCsv, delayMinutes,
-                messageTemplate, 2000L);
+            ProjectApiKeyService projectApiKeyService,
+            ObjectMapper objectMapper) {
+        this(bufferClient, bufferPostRepository, projectApiKeyService, objectMapper, 2000L);
     }
 
     /** テスト専用: リトライ間隔を短縮できるようにするコンストラクタ。 */
     BufferNotificationService(
             BufferClient bufferClient,
             BufferPostRepository bufferPostRepository,
+            ProjectApiKeyService projectApiKeyService,
             ObjectMapper objectMapper,
-            boolean enabled,
-            String profileIdsCsv,
-            int delayMinutes,
-            String messageTemplate,
             long retryBackoffMillis) {
         this.bufferClient = bufferClient;
         this.bufferPostRepository = bufferPostRepository;
+        this.projectApiKeyService = projectApiKeyService;
         this.objectMapper = objectMapper;
-        this.enabled = enabled;
-        this.profileIds = Arrays.stream(profileIdsCsv.split(","))
-                .map(String::trim)
-                .filter(s -> !s.isBlank())
-                .toList();
-        this.delayMinutes = delayMinutes;
-        this.messageTemplate = messageTemplate;
         this.retryBackoffMillis = retryBackoffMillis;
     }
 
     /**
-     * postId/siteIdに紐づく記事の公開をBufferへ通知する。Buffer未設定(APIキー/プロファイル未設定)の
-     * 場合は何もしない。呼び出し元のトランザクション/HTTPレスポンスをブロックしないよう非同期実行する。
+     * postId/siteIdに紐づく記事の公開をBufferへ通知する。プロジェクトでBuffer連携が未設定
+     * (有効化されていない/アクセストークンまたはプロファイル未設定)の場合は何もしない。
+     * 呼び出し元のトランザクション/HTTPレスポンスをブロックしないよう非同期実行する。
      */
     @Async("bufferNotificationExecutor")
-    public void notifyAsync(Long postId, Long siteId, String title, String url) {
-        if (!enabled || profileIds.isEmpty()) {
+    public void notifyAsync(Long postId, Long siteId, Long projectId, String title, String url) {
+        ProjectApiKeyService.BufferSettings settings = projectApiKeyService.resolveBufferSettings(projectId);
+        if (!settings.enabled() || settings.profileIds().isEmpty()) {
             return;
         }
+        List<String> profileIds = settings.profileIds();
 
-        Instant scheduledAt = Instant.now().plus(delayMinutes, ChronoUnit.MINUTES);
-        String text = buildMessage(title, url);
+        Instant scheduledAt = Instant.now().plus(settings.delayMinutes(), ChronoUnit.MINUTES);
+        String text = buildMessage(settings.messageTemplate(), title, url);
 
         BufferPost job = new BufferPost();
         job.setPostId(postId);
@@ -100,7 +87,8 @@ public class BufferNotificationService {
         RuntimeException lastError = null;
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
-                List<BufferUpdate> updates = bufferClient.createUpdate(profileIds, text, scheduledAt);
+                List<BufferUpdate> updates =
+                        bufferClient.createUpdate(profileIds, text, scheduledAt, settings.accessToken());
                 job.setStatus("sent");
                 job.setResultPayload(toJson(Map.of("bufferUpdateIds", updates.stream().map(BufferUpdate::id).toList())));
                 bufferPostRepository.save(job);
@@ -120,7 +108,7 @@ public class BufferNotificationService {
         bufferPostRepository.save(job);
     }
 
-    private String buildMessage(String title, String url) {
+    private String buildMessage(String messageTemplate, String title, String url) {
         return messageTemplate.replace("{title}", title == null ? "" : title).replace("{url}", url == null ? "" : url);
     }
 

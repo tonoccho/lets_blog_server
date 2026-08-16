@@ -21,26 +21,25 @@ import java.util.List;
  * Buffer REST API(/1/updates/create.json)を呼び出す薄いクライアント(issue #379)。
  * 複数SNSプラットフォームへの投稿は、Buffer側で各プラットフォームアカウントに対応付けられた
  * profile_idsを複数指定することでまとめて扱う。
+ * アクセストークンはプロジェクト単位の設定(issue #402)のため、呼び出し側(BufferNotificationService/
+ * SocialStatsService)が都度渡す(このクラス自体はどこから鍵を得るかを知らない、BraveSearchClientと同じ方針)。
  */
 @Component
 public class BufferClient {
 
     private final RestClient client;
-    private final String accessToken;
 
     public BufferClient(
             @Value("${app.buffer-api-base-url}") String baseUrl,
-            @Value("${app.buffer-access-token}") String accessToken,
             @Value("${app.buffer-request-timeout-seconds}") long requestTimeoutSeconds) {
-        this(builderFor(baseUrl, requestTimeoutSeconds), accessToken);
+        this(builderFor(baseUrl, requestTimeoutSeconds));
     }
 
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
-    BufferClient(RestClient.Builder restClientBuilder, String accessToken) {
+    BufferClient(RestClient.Builder restClientBuilder) {
         RestClient.Builder clonedBuilder = restClientBuilder.clone();
         LegacyJacksonRestClientConfig.preferJackson2(clonedBuilder);
         this.client = clonedBuilder.build();
-        this.accessToken = accessToken;
     }
 
     private static RestClient.Builder builderFor(String baseUrl, long requestTimeoutSeconds) {
@@ -54,7 +53,7 @@ public class BufferClient {
     /**
      * 指定したprofile_ids(SNSアカウント)へ、scheduledAt時刻に投稿されるようBufferへ予約する。
      */
-    public List<BufferUpdate> createUpdate(List<String> profileIds, String text, Instant scheduledAt) {
+    public List<BufferUpdate> createUpdate(List<String> profileIds, String text, Instant scheduledAt, String accessToken) {
         try {
             MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
             form.add("access_token", accessToken);
@@ -97,7 +96,7 @@ public class BufferClient {
      * プラットフォームによってstatisticsのフィールド名が揺れる(例: shares/retweets、comments/mentions)
      * ため、代表的なフィールド名をフォールバック付きで読む。
      */
-    public BufferUpdateStatistics getUpdateStatistics(String updateId) {
+    public BufferUpdateStatistics getUpdateStatistics(String updateId, String accessToken) {
         try {
             JsonNode response = client.get()
                     .uri(uriBuilder -> uriBuilder.path("/updates/{id}.json")

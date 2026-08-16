@@ -24,6 +24,9 @@ import {
   clearProjectGoogleAnalyticsCredentials,
   setProjectAdSenseAccountId,
   clearProjectAdSenseCredentials,
+  setProjectBufferSettings,
+  setProjectBufferAccessToken,
+  clearProjectBufferSettings,
   syncCategoryToMaster,
   deleteCategoryEverywhere,
   syncTagToMaster,
@@ -406,6 +409,63 @@ export async function clearProjectAdSenseCredentialsAction(projectId: number): P
   const actor = { id: Number(session.user.id), role: session.user.role };
   await clearProjectAdSenseCredentials(projectId, actor);
   revalidatePath(`/projects/${projectId}/settings/adsense`);
+  revalidatePath(`/projects/${projectId}/dashboard`);
+}
+
+export async function setProjectBufferSettingsAction(
+  projectId: number,
+  _prevState: ProjectApiKeyFormState,
+  formData: FormData
+): Promise<ProjectApiKeyFormState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const enabled = formData.get("enabled") === "on";
+  const profileIds = String(formData.get("profileIds") ?? "").trim();
+  const delayMinutesRaw = String(formData.get("delayMinutes") ?? "").trim();
+  const messageTemplate = String(formData.get("messageTemplate") ?? "").trim();
+  const delayMinutes = delayMinutesRaw ? Number(delayMinutesRaw) : null;
+
+  try {
+    await setProjectBufferSettings(projectId, { enabled, profileIds, delayMinutes, messageTemplate }, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}/settings/buffer`);
+  revalidatePath(`/projects/${projectId}/dashboard`);
+  return { success: true };
+}
+
+export async function setProjectBufferAccessTokenAction(
+  projectId: number,
+  _prevState: ProjectApiKeyFormState,
+  formData: FormData
+): Promise<ProjectApiKeyFormState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const accessToken = String(formData.get("accessToken") ?? "").trim();
+  if (!accessToken) {
+    return { error: "アクセストークンを入力してください。" };
+  }
+
+  try {
+    await setProjectBufferAccessToken(projectId, accessToken, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}/settings/buffer`);
+  revalidatePath(`/projects/${projectId}/dashboard`);
+  return { success: true };
+}
+
+export async function clearProjectBufferSettingsAction(projectId: number): Promise<void> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  await clearProjectBufferSettings(projectId, actor);
+  revalidatePath(`/projects/${projectId}/settings/buffer`);
   revalidatePath(`/projects/${projectId}/dashboard`);
 }
 

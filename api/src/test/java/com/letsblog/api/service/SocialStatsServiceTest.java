@@ -32,9 +32,13 @@ import static org.mockito.Mockito.when;
  * SocialStatsServiceの回帰テスト(issue #390)。Buffer連携無効/本番サイト未紐付け/送信済み投稿が無い場合に
  * eligible=falseを返しBuffer APIへ問い合わせないこと、複数投稿・複数update IDにまたがる統計を
  * 合算すること、取得失敗時にeligible=trueのままerrorMessageを設定することを検証する。
+ * Buffer連携設定はプロジェクト単位(issue #402)のため、ProjectApiKeyService#resolveBufferSettingsを
+ * モックして与える。
  */
 @ExtendWith(MockitoExtension.class)
 class SocialStatsServiceTest {
+
+    private static final String ACCESS_TOKEN = "test-access-token";
 
     @Mock
     private ProjectRepository projectRepository;
@@ -43,14 +47,21 @@ class SocialStatsServiceTest {
     @Mock
     private BufferClient bufferClient;
     @Mock
+    private ProjectApiKeyService projectApiKeyService;
+    @Mock
     private AdminAuthorizationService adminAuthorizationService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    private SocialStatsService service(boolean bufferEnabled) {
+    private SocialStatsService service() {
         return new SocialStatsService(
-                projectRepository, bufferPostRepository, bufferClient, adminAuthorizationService, objectMapper,
-                bufferEnabled);
+                projectRepository, bufferPostRepository, bufferClient, projectApiKeyService, adminAuthorizationService,
+                objectMapper);
+    }
+
+    private void stubBufferEnabled(boolean enabled) {
+        lenient().when(projectApiKeyService.resolveBufferSettings(1L)).thenReturn(
+                new ProjectApiKeyService.BufferSettings(enabled, ACCESS_TOKEN, List.of(), 5, "{title} {url}"));
     }
 
     private Project projectWithProductionSite(Long siteId) {
@@ -73,11 +84,12 @@ class SocialStatsServiceTest {
     void getStats_Buffer無効なら未対象でAPIを呼ばない() {
         Project project = projectWithProductionSite(99L);
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        stubBufferEnabled(false);
 
-        SocialStatsResponse response = service(false).getStats(1L);
+        SocialStatsResponse response = service().getStats(1L);
 
         assertFalse(response.eligible());
-        verify(bufferClient, never()).getUpdateStatistics(any());
+        verify(bufferClient, never()).getUpdateStatistics(any(), any());
     }
 
     @Test
@@ -85,8 +97,9 @@ class SocialStatsServiceTest {
         Project project = new Project();
         project.setId(1L);
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        stubBufferEnabled(true);
 
-        SocialStatsResponse response = service(true).getStats(1L);
+        SocialStatsResponse response = service().getStats(1L);
 
         assertFalse(response.eligible());
     }
@@ -95,9 +108,10 @@ class SocialStatsServiceTest {
     void getStats_送信済み投稿が無ければ未対象() {
         Project project = projectWithProductionSite(99L);
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        stubBufferEnabled(true);
         when(bufferPostRepository.findBySiteIdAndStatus(99L, "sent")).thenReturn(List.of());
 
-        SocialStatsResponse response = service(true).getStats(1L);
+        SocialStatsResponse response = service().getStats(1L);
 
         assertFalse(response.eligible());
     }
@@ -106,14 +120,15 @@ class SocialStatsServiceTest {
     void getStats_複数投稿_複数updateIdの統計を合算する() {
         Project project = projectWithProductionSite(99L);
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        stubBufferEnabled(true);
         BufferPost post1 = sentPost(1L, "upd-1", "upd-2");
         BufferPost post2 = sentPost(2L, "upd-3");
         when(bufferPostRepository.findBySiteIdAndStatus(99L, "sent")).thenReturn(List.of(post1, post2));
-        when(bufferClient.getUpdateStatistics("upd-1")).thenReturn(new BufferUpdateStatistics(1, 2, 3, 4));
-        when(bufferClient.getUpdateStatistics("upd-2")).thenReturn(new BufferUpdateStatistics(10, 20, 30, 40));
-        when(bufferClient.getUpdateStatistics("upd-3")).thenReturn(new BufferUpdateStatistics(100, 200, 300, 400));
+        when(bufferClient.getUpdateStatistics("upd-1", ACCESS_TOKEN)).thenReturn(new BufferUpdateStatistics(1, 2, 3, 4));
+        when(bufferClient.getUpdateStatistics("upd-2", ACCESS_TOKEN)).thenReturn(new BufferUpdateStatistics(10, 20, 30, 40));
+        when(bufferClient.getUpdateStatistics("upd-3", ACCESS_TOKEN)).thenReturn(new BufferUpdateStatistics(100, 200, 300, 400));
 
-        SocialStatsResponse response = service(true).getStats(1L);
+        SocialStatsResponse response = service().getStats(1L);
 
         assertTrue(response.eligible());
         assertEquals(2, response.postCount());
@@ -127,11 +142,12 @@ class SocialStatsServiceTest {
     void getStats_取得に失敗したら対象のままerrorMessageを設定する() {
         Project project = projectWithProductionSite(99L);
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        stubBufferEnabled(true);
         BufferPost post = sentPost(1L, "upd-1");
         when(bufferPostRepository.findBySiteIdAndStatus(99L, "sent")).thenReturn(List.of(post));
-        when(bufferClient.getUpdateStatistics("upd-1")).thenThrow(new BufferApiException("APIエラー"));
+        when(bufferClient.getUpdateStatistics("upd-1", ACCESS_TOKEN)).thenThrow(new BufferApiException("APIエラー"));
 
-        SocialStatsResponse response = service(true).getStats(1L);
+        SocialStatsResponse response = service().getStats(1L);
 
         assertTrue(response.eligible());
         assertEquals("APIエラー", response.errorMessage());
@@ -141,13 +157,14 @@ class SocialStatsServiceTest {
     void getStats_resultPayload解析に失敗した投稿はスキップする() {
         Project project = projectWithProductionSite(99L);
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        stubBufferEnabled(true);
         BufferPost invalidPost = new BufferPost();
         invalidPost.setId(1L);
         invalidPost.setStatus("sent");
         invalidPost.setResultPayload("not-json");
         when(bufferPostRepository.findBySiteIdAndStatus(99L, "sent")).thenReturn(List.of(invalidPost));
 
-        SocialStatsResponse response = service(true).getStats(1L);
+        SocialStatsResponse response = service().getStats(1L);
 
         assertTrue(response.eligible());
         assertEquals(1, response.postCount());
@@ -158,6 +175,6 @@ class SocialStatsServiceTest {
     void getStats_プロジェクトメンバーでなければForbidden() {
         doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
 
-        assertThrows(ForbiddenException.class, () -> service(true).getStats(1L));
+        assertThrows(ForbiddenException.class, () -> service().getStats(1L));
     }
 }

@@ -35,7 +35,7 @@ class BufferClientTest {
     void setUp() {
         RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
         server = MockRestServiceServer.bindTo(builder).build();
-        client = new BufferClient(builder, "test-access-token");
+        client = new BufferClient(builder);
     }
 
     @Test
@@ -55,7 +55,7 @@ class BufferClientTest {
                         MediaType.APPLICATION_JSON));
 
         List<BufferUpdate> updates = client.createUpdate(
-                List.of("profile-1", "profile-2"), "Hello", Instant.ofEpochSecond(1700000000L));
+                List.of("profile-1", "profile-2"), "Hello", Instant.ofEpochSecond(1700000000L), "test-access-token");
 
         assertEquals(2, updates.size());
         assertEquals("upd-1", updates.get(0).id());
@@ -72,7 +72,7 @@ class BufferClientTest {
                         "{\"success\":false,\"message\":\"Invalid access token\"}", MediaType.APPLICATION_JSON));
 
         BufferApiException e = assertThrows(BufferApiException.class,
-                () -> client.createUpdate(List.of("profile-1"), "Hello", Instant.now()));
+                () -> client.createUpdate(List.of("profile-1"), "Hello", Instant.now(), "test-access-token"));
 
         assertEquals("Bufferへの投稿予約に失敗しました: Invalid access token", e.getMessage());
     }
@@ -82,7 +82,7 @@ class BufferClientTest {
         server.expect(requestTo(BASE_URL + "/updates/create.json")).andRespond(withServerError());
 
         assertThrows(BufferApiException.class,
-                () -> client.createUpdate(List.of("profile-1"), "Hello", Instant.now()));
+                () -> client.createUpdate(List.of("profile-1"), "Hello", Instant.now(), "test-access-token"));
     }
 
     @Test
@@ -93,7 +93,7 @@ class BufferClientTest {
                         "{\"statistics\":{\"clicks\":5,\"favorites\":10,\"comments\":2,\"shares\":3}}",
                         MediaType.APPLICATION_JSON));
 
-        BufferUpdateStatistics stats = client.getUpdateStatistics("upd-1");
+        BufferUpdateStatistics stats = client.getUpdateStatistics("upd-1", "test-access-token");
 
         assertEquals(5, stats.clicks());
         assertEquals(10, stats.favorites());
@@ -109,7 +109,7 @@ class BufferClientTest {
                         "{\"statistics\":{\"clicks\":5,\"favorites\":10,\"mentions\":4,\"retweets\":6}}",
                         MediaType.APPLICATION_JSON));
 
-        BufferUpdateStatistics stats = client.getUpdateStatistics("upd-1");
+        BufferUpdateStatistics stats = client.getUpdateStatistics("upd-1", "test-access-token");
 
         assertEquals(4, stats.comments());
         assertEquals(6, stats.shares());
@@ -121,7 +121,7 @@ class BufferClientTest {
                 .andExpect(method(GET))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
-        BufferUpdateStatistics stats = client.getUpdateStatistics("upd-1");
+        BufferUpdateStatistics stats = client.getUpdateStatistics("upd-1", "test-access-token");
 
         assertEquals(0, stats.clicks());
         assertEquals(0, stats.favorites());
@@ -134,6 +134,6 @@ class BufferClientTest {
         server.expect(requestTo(BASE_URL + "/updates/upd-1.json?access_token=test-access-token"))
                 .andRespond(withServerError());
 
-        assertThrows(BufferApiException.class, () -> client.getUpdateStatistics("upd-1"));
+        assertThrows(BufferApiException.class, () -> client.getUpdateStatistics("upd-1", "test-access-token"));
     }
 }

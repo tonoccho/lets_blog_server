@@ -644,7 +644,7 @@ class PostPublishServiceTest {
 
         service.publish(commandWithStatusAndNotify("publish", null));
 
-        verify(bufferNotificationService).notifyAsync(any(), eq(1L), eq("My Article"), eq("https://example.com/?p=101"));
+        verify(bufferNotificationService).notifyAsync(any(), eq(1L), eq(7L), eq("My Article"), eq("https://example.com/?p=101"));
     }
 
     @Test
@@ -657,7 +657,7 @@ class PostPublishServiceTest {
 
         service.publish(scheduledCommand(scheduledAt));
 
-        verify(bufferNotificationService).notifyAsync(any(), eq(1L), eq("My Article"), eq("https://example.com/?p=101"));
+        verify(bufferNotificationService).notifyAsync(any(), eq(1L), eq(7L), eq("My Article"), eq("https://example.com/?p=101"));
     }
 
     @Test
@@ -668,7 +668,7 @@ class PostPublishServiceTest {
 
         service.publish(commandWithStatusAndNotify("draft", null));
 
-        verify(bufferNotificationService, org.mockito.Mockito.never()).notifyAsync(any(), any(), any(), any());
+        verify(bufferNotificationService, org.mockito.Mockito.never()).notifyAsync(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -679,7 +679,7 @@ class PostPublishServiceTest {
 
         service.publish(commandWithStatusAndNotify("publish", null));
 
-        verify(bufferNotificationService, org.mockito.Mockito.never()).notifyAsync(any(), any(), any(), any());
+        verify(bufferNotificationService, org.mockito.Mockito.never()).notifyAsync(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -690,6 +690,6 @@ class PostPublishServiceTest {
 
         service.publish(commandWithStatusAndNotify("publish", false));
 
-        verify(bufferNotificationService, org.mockito.Mockito.never()).notifyAsync(any(), any(), any(), any());
+        verify(bufferNotificationService, org.mockito.Mockito.never()).notifyAsync(any(), any(), any(), any(), any());
     }
 }

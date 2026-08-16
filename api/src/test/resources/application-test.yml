@@ -72,10 +72,5 @@ app:
   backup-mysql-database: lets_blog_test
   backup-mysql-user: test_user
   backup-mysql-password: test_pass
-  buffer-enabled: false
   buffer-api-base-url: http://buffer.test
-  buffer-access-token: test-buffer-token
-  buffer-profile-ids: profile-1,profile-2
-  buffer-post-delay-minutes: 5
-  buffer-message-template: "{title} {url}"
   buffer-request-timeout-seconds: 30

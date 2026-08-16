@@ -54,21 +54,26 @@ sequenceDiagram
 
 ## 設定
 
-`.env` (`docker-compose.yml`経由でAPIコンテナへ渡される):
+有効/無効・アクセストークン・投稿先プロファイルID・投稿までの遅延分数・投稿本文テンプレートは、
+**プロジェクトごとに**Web管理画面(プロジェクト詳細画面 > Buffer連携、`/projects/{id}/settings/buffer`)
+から設定する(issue #402。以前は環境変数でアプリ全体に1つだけ設定する方式だったが、プロジェクトごとに
+異なるBufferアカウント/SNSプロファイルへ投稿できるようプロジェクト単位に変更した)。
+アクセストークンは`CredentialCipher`でAES-256-GCM暗号化してprojectsテーブルに保存され、画面には
+「設定済みかどうか」のみが表示される。
 
-| 変数 | 説明 | 既定値 |
+| 項目 | 説明 | 既定値 |
 |---|---|---|
-| `BUFFER_ENABLED` | 機能全体の有効/無効。`false`の場合、他の設定に関わらず通知しない | `false` |
-| `BUFFER_ACCESS_TOKEN` | BufferのAPIアクセストークン | (空、必須) |
-| `BUFFER_PROFILE_IDS` | 投稿先プロファイル(SNSアカウント)IDのカンマ区切りリスト。空の場合は通知しない | (空、必須) |
-| `BUFFER_POST_DELAY_MINUTES` | 公開時刻から実際の投稿までの遅延(分) | `5` |
+| 有効/無効 | 機能全体の有効/無効。無効の場合、他の設定に関わらず通知しない | 無効 |
+| アクセストークン | BufferのAPIアクセストークン | (未設定、必須) |
+| プロファイルID | 投稿先プロファイル(SNSアカウント)IDのカンマ区切りリスト。空の場合は通知しない | (未設定、必須) |
+| 投稿までの遅延(分) | 公開時刻から実際の投稿までの遅延(分) | `5` |
+| メッセージテンプレート | 投稿本文テンプレート。`{title}`/`{url}`が記事タイトル/URLに置換される | `{title} {url}` |
 
-`application.yml`側にのみ存在し`.env.example`には含めていない詳細設定(通常は既定値のままで良い):
+`.env`(`application.yml`経由でAPIコンテナへ渡される、プロジェクト単位ではないAPIエンドポイント自体の設定):
 
 | プロパティ | 環境変数 | 説明 | 既定値 |
 |---|---|---|---|
 | `app.buffer-api-base-url` | `BUFFER_API_BASE_URL` | Buffer APIのベースURL | `https://api.bufferapp.com/1` |
-| `app.buffer-message-template` | `BUFFER_MESSAGE_TEMPLATE` | 投稿本文テンプレート。`{title}`/`{url}`が記事タイトル/URLに置換される | `{title} {url}` |
 | `app.buffer-request-timeout-seconds` | `BUFFER_REQUEST_TIMEOUT_SECONDS` | Buffer API呼び出しのタイムアウト(秒) | `30` |
 
 ## データモデル
