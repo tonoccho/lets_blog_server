@@ -1,4 +1,4 @@
-import { listSites, listProjects, listUsers } from "@/lib/apiClient";
+import { listSites, listProjects, listUsers, listSshKeyPairs } from "@/lib/apiClient";
 import { getSession, getViewerTimeZone } from "@/lib/session";
 import { SiteCreationPanel } from "./SiteCreationPanel";
 import { SiteListTable } from "./SiteListTable";
@@ -12,6 +12,8 @@ export default async function SitesPage() {
     getViewerTimeZone(),
   ]);
   const isAdmin = session?.user.role === "admin";
+  const actor = session ? { id: Number(session.user.id), role: session.user.role } : undefined;
+  const sshKeyPairs = isAdmin ? await listSshKeyPairs(actor).catch(() => []) : [];
 
   return (
     <div className="space-y-8">
@@ -20,7 +22,7 @@ export default async function SitesPage() {
       <SiteListTable sites={sites} projects={projects} isAdmin={isAdmin} timezone={timezone} />
 
       <div id="site-creation">
-        <SiteCreationPanel users={users} sites={sites} />
+        <SiteCreationPanel users={users} sites={sites} sshKeyPairs={sshKeyPairs} />
       </div>
     </div>
   );
