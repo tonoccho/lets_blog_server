@@ -142,7 +142,7 @@ export function ImageGalleryGrid({
               <img
                 src={`/image-gallery/${image.id}/file`}
                 alt={image.prompt}
-                className="aspect-square w-full object-cover group-hover:opacity-80"
+                className="aspect-square w-full bg-neutral-100 object-contain group-hover:opacity-80 dark:bg-neutral-800"
               />
               <div className="space-y-1 p-2 text-xs">
                 <p className="line-clamp-2 text-neutral-700 dark:text-neutral-300">{image.prompt}</p>
