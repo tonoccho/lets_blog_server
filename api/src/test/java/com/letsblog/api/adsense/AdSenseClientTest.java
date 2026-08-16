@@ -33,7 +33,7 @@ class AdSenseClientTest {
     void setUp() {
         RestClient.Builder builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
-        client = new AdSenseClient(builder, TOKEN_URI, DATA_API_BASE_URL, "client-id", "client-secret");
+        client = new AdSenseClient(builder, TOKEN_URI, DATA_API_BASE_URL);
     }
 
     @Test
@@ -43,7 +43,8 @@ class AdSenseClientTest {
                 .andRespond(withSuccess(
                         "{\"access_token\":\"access-abc\",\"refresh_token\":\"refresh-abc\"}", MediaType.APPLICATION_JSON));
 
-        GoogleOAuthTokens tokens = client.exchangeAuthorizationCode("auth-code", "https://example.com/callback");
+        GoogleOAuthTokens tokens = client.exchangeAuthorizationCode(
+                "client-id", "client-secret", "auth-code", "https://example.com/callback");
 
         assertEquals("access-abc", tokens.accessToken());
         assertEquals("refresh-abc", tokens.refreshToken());
@@ -57,7 +58,8 @@ class AdSenseClientTest {
                 .andRespond(withSuccess("{\"access_token\":\"access-abc\"}", MediaType.APPLICATION_JSON));
 
         assertThrows(AdSenseException.class,
-                () -> client.exchangeAuthorizationCode("auth-code", "https://example.com/callback"));
+                () -> client.exchangeAuthorizationCode(
+                        "client-id", "client-secret", "auth-code", "https://example.com/callback"));
     }
 
     @Test
@@ -69,7 +71,8 @@ class AdSenseClientTest {
                         .contentType(MediaType.APPLICATION_JSON));
 
         assertThrows(AdSenseException.class,
-                () -> client.exchangeAuthorizationCode("auth-code", "https://example.com/callback"));
+                () -> client.exchangeAuthorizationCode(
+                        "client-id", "client-secret", "auth-code", "https://example.com/callback"));
     }
 
     @Test
@@ -78,7 +81,7 @@ class AdSenseClientTest {
                 .andExpect(method(POST))
                 .andRespond(withSuccess("{\"access_token\":\"access-abc\"}", MediaType.APPLICATION_JSON));
 
-        String accessToken = client.refreshAccessToken("refresh-abc");
+        String accessToken = client.refreshAccessToken("client-id", "client-secret", "refresh-abc");
 
         assertEquals("access-abc", accessToken);
     }
@@ -131,11 +134,7 @@ class AdSenseClientTest {
 
     @Test
     void クライアント資格情報が未設定なら例外() {
-        RestClient.Builder builder = RestClient.builder();
-        MockRestServiceServer.bindTo(builder).build();
-        AdSenseClient unconfigured = new AdSenseClient(builder, TOKEN_URI, DATA_API_BASE_URL, "", "");
-
         assertThrows(AdSenseException.class,
-                () -> unconfigured.exchangeAuthorizationCode("code", "https://example.com/callback"));
+                () -> client.exchangeAuthorizationCode("", "", "code", "https://example.com/callback"));
     }
 }

@@ -19,7 +19,12 @@ export default async function ProjectAdSenseSettingsPage({
 
   const [project, status] = await Promise.all([
     getProject(projectId, actor).catch(() => null),
-    getProjectAdSenseStatus(projectId, actor).catch(() => ({ configured: false, accountId: null })),
+    getProjectAdSenseStatus(projectId, actor).catch(() => ({
+      configured: false,
+      accountId: null,
+      clientId: null,
+      hasClientSecret: false,
+    })),
   ]);
   if (!project) {
     notFound();
@@ -44,6 +49,8 @@ export default async function ProjectAdSenseSettingsPage({
         projectId={projectId}
         configured={status.configured}
         accountId={status.accountId}
+        clientId={status.clientId}
+        hasClientSecret={status.hasClientSecret}
         connectedBanner={connected === "1"}
         errorBanner={error}
       />

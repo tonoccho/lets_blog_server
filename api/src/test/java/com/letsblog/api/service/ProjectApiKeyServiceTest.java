@@ -227,25 +227,42 @@ class ProjectApiKeyServiceTest {
         assertEquals("svc@example.iam.gserviceaccount.com", key.clientEmail());
     }
 
-    // ---- AdSense (issue #387) ----
+    // ---- AdSense (issue #387、OAuthクライアントのプロジェクト単位化はissue #407) ----
 
     @Test
-    void setAdSenseAccountId_保存する() {
+    void setAdSenseSettings_アカウントIDとクライアントIDを保存する() {
         Project project = projectWithId(1L);
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
 
-        service().setAdSenseAccountId(1L, "pub-1234567890123456");
+        service().setAdSenseSettings(1L, "pub-1234567890123456", "client-id");
 
         ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
         verify(projectRepository).save(captor.capture());
         assertEquals("pub-1234567890123456", captor.getValue().getAdsenseAccountId());
+        assertEquals("client-id", captor.getValue().getAdsenseOauthClientId());
     }
 
     @Test
-    void completeAdSenseOAuth_認可コードをリフレッシュトークンに交換して暗号化保存する() {
+    void setAdSenseClientSecret_暗号化して保存する() {
         Project project = projectWithId(1L);
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(adSenseClient.exchangeAuthorizationCode("auth-code", "https://example.com/callback"))
+
+        service().setAdSenseClientSecret(1L, "client-secret");
+
+        ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
+        verify(projectRepository).save(captor.capture());
+        assertEquals("client-secret",
+                credentialCipher.decrypt(captor.getValue().getAdsenseOauthClientSecretEncrypted()));
+    }
+
+    @Test
+    void completeAdSenseOAuth_プロジェクトのクライアント資格情報で認可コードをリフレッシュトークンに交換して暗号化保存する() {
+        Project project = projectWithId(1L);
+        project.setAdsenseOauthClientId("client-id");
+        project.setAdsenseOauthClientSecretEncrypted(credentialCipher.encrypt("client-secret"));
+        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(adSenseClient.exchangeAuthorizationCode(
+                "client-id", "client-secret", "auth-code", "https://example.com/callback"))
                 .thenReturn(new GoogleOAuthTokens("access-token", "refresh-token"));
 
         service().completeAdSenseOAuth(1L, "auth-code", "https://example.com/callback");
@@ -257,29 +274,33 @@ class ProjectApiKeyServiceTest {
     }
 
     @Test
-    void isAdSenseConfigured_accountIdとrefreshTokenの両方が必要() {
+    void getAdSenseStatus_accountIdとrefreshTokenの両方が必要() {
         Project project = projectWithId(1L);
         project.setAdsenseAccountId("pub-1234567890123456");
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
 
-        assertFalse(service().isAdSenseConfigured(1L));
+        assertFalse(service().getAdSenseStatus(1L).configured());
 
         project.setAdsenseRefreshTokenEncrypted(credentialCipher.encrypt("refresh-token"));
-        assertTrue(service().isAdSenseConfigured(1L));
+        assertTrue(service().getAdSenseStatus(1L).configured());
     }
 
     @Test
-    void clearAdSenseCredentials_両方nullにして保存する() {
+    void clearAdSenseCredentials_全項目nullにして保存する() {
         Project project = projectWithId(1L);
         project.setAdsenseAccountId("pub-1234567890123456");
         project.setAdsenseRefreshTokenEncrypted(credentialCipher.encrypt("refresh-token"));
+        project.setAdsenseOauthClientId("client-id");
+        project.setAdsenseOauthClientSecretEncrypted(credentialCipher.encrypt("client-secret"));
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
 
         service().clearAdSenseCredentials(1L);
 
         ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
         verify(projectRepository).save(captor.capture());
-        assertFalse(captor.getValue().hasAdsenseCredentials());
+        Project saved = captor.getValue();
+        assertFalse(saved.hasAdsenseCredentials());
+        assertFalse(saved.hasAdsenseOauthClient());
     }
 
     @Test
@@ -301,10 +322,20 @@ class ProjectApiKeyServiceTest {
     }
 
     @Test
-    void setAdSenseAccountId_プロジェクトメンバーでなければForbidden() {
+    void resolveAdSenseOauthClientSecret_設定済みなら復号する() {
+        Project project = projectWithId(1L);
+        project.setAdsenseOauthClientSecretEncrypted(credentialCipher.encrypt("client-secret"));
+        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        assertEquals("client-secret", service().resolveAdSenseOauthClientSecret(1L));
+    }
+
+    @Test
+    void setAdSenseSettings_プロジェクトメンバーでなければForbidden() {
         doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
 
-        assertThrows(ForbiddenException.class, () -> service().setAdSenseAccountId(1L, "pub-1234567890123456"));
+        assertThrows(ForbiddenException.class,
+                () -> service().setAdSenseSettings(1L, "pub-1234567890123456", "client-id"));
     }
 
     // ---- Buffer(issue #402) ----

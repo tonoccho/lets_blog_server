@@ -1,6 +1,5 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.adsense.GoogleOAuthClientProvider;
 import com.letsblog.api.ai.LlmConfigProvider;
 import com.letsblog.api.aop.AuditLog;
 import com.letsblog.api.crypto.CredentialCipher;
@@ -23,12 +22,12 @@ import java.util.Map;
  * CredentialCipherでAES-256-GCM暗号化して保存し、未設定時は環境変数にフォールバック)を再利用するが、
  * DB接続情報・暗号化キー自体・NEXTAUTH_SECRET・Docker内部サービス間通信設定等のインフラ系設定は
  * 誤設定時にアプリが起動不能になるリスクが高いため対象外とし、このサービスが扱うキーのみを編集対象とする。
- * Buffer連携・Brave Search APIキーはプロジェクト単位の設定(issue #402、それ以前のissue)のため対象外。
- * LlmClient/AdSenseClientからはインターフェース経由(LlmConfigProvider/GoogleOAuthClientProvider)で
- * 参照される(ai/adsenseパッケージがserviceパッケージへ依存しないようにするため)。
+ * Buffer連携・Brave Search APIキー・Google AdSense OAuthクライアント(issue #407)はプロジェクト単位の
+ * 設定のため対象外。LlmClientからはインターフェース経由(LlmConfigProvider)で参照される
+ * (aiパッケージがserviceパッケージへ依存しないようにするため)。
  */
 @Service
-public class AppSettingService implements LlmConfigProvider, GoogleOAuthClientProvider {
+public class AppSettingService implements LlmConfigProvider {
 
     static final String LLM_API_KEY = "llm_api_key";
     static final String LLM_BASE_URL = "llm_base_url";
@@ -40,8 +39,6 @@ public class AppSettingService implements LlmConfigProvider, GoogleOAuthClientPr
     static final String MAIL_USERNAME = "mail_username";
     static final String MAIL_PASSWORD = "mail_password";
     static final String APP_MAIL_FROM = "app_mail_from";
-    static final String GOOGLE_OAUTH_CLIENT_ID = "google_oauth_client_id";
-    static final String GOOGLE_OAUTH_CLIENT_SECRET = "google_oauth_client_secret";
     static final String APP_WEB_BASE_URL = "app_web_base_url";
 
     public enum SettingSource {
@@ -66,8 +63,6 @@ public class AppSettingService implements LlmConfigProvider, GoogleOAuthClientPr
             new Definition(MAIL_USERNAME, "メール送信ユーザー名", false),
             new Definition(MAIL_PASSWORD, "メール送信パスワード", true),
             new Definition(APP_MAIL_FROM, "メール送信元アドレス", false),
-            new Definition(GOOGLE_OAUTH_CLIENT_ID, "Google OAuthクライアントID", false),
-            new Definition(GOOGLE_OAUTH_CLIENT_SECRET, "Google OAuthクライアントシークレット", true),
             new Definition(APP_WEB_BASE_URL, "Webフロントの公開URL", false));
 
     private final SystemSettingRepository repository;
@@ -89,8 +84,6 @@ public class AppSettingService implements LlmConfigProvider, GoogleOAuthClientPr
             @Value("${spring.mail.username:}") String mailUsernameEnvDefault,
             @Value("${spring.mail.password:}") String mailPasswordEnvDefault,
             @Value("${app.mail.from}") String appMailFromEnvDefault,
-            @Value("${app.google-oauth-client-id:}") String googleOAuthClientIdEnvDefault,
-            @Value("${app.google-oauth-client-secret:}") String googleOAuthClientSecretEnvDefault,
             @Value("${app.web.base-url}") String appWebBaseUrlEnvDefault) {
         this.repository = repository;
         this.credentialCipher = credentialCipher;
@@ -106,8 +99,6 @@ public class AppSettingService implements LlmConfigProvider, GoogleOAuthClientPr
         defaults.put(MAIL_USERNAME, mailUsernameEnvDefault);
         defaults.put(MAIL_PASSWORD, mailPasswordEnvDefault);
         defaults.put(APP_MAIL_FROM, appMailFromEnvDefault);
-        defaults.put(GOOGLE_OAUTH_CLIENT_ID, googleOAuthClientIdEnvDefault);
-        defaults.put(GOOGLE_OAUTH_CLIENT_SECRET, googleOAuthClientSecretEnvDefault);
         defaults.put(APP_WEB_BASE_URL, appWebBaseUrlEnvDefault);
         this.envDefaults = defaults;
     }
@@ -284,16 +275,6 @@ public class AppSettingService implements LlmConfigProvider, GoogleOAuthClientPr
     }
 
     @Transactional(readOnly = true)
-    public String getGoogleOAuthClientId() {
-        return resolve(GOOGLE_OAUTH_CLIENT_ID);
-    }
-
-    @Transactional(readOnly = true)
-    public String getGoogleOAuthClientSecret() {
-        return resolve(GOOGLE_OAUTH_CLIENT_SECRET);
-    }
-
-    @Transactional(readOnly = true)
     public String getAppWebBaseUrl() {
         return resolve(APP_WEB_BASE_URL);
     }
@@ -316,15 +297,5 @@ public class AppSettingService implements LlmConfigProvider, GoogleOAuthClientPr
     @Override
     public long requestTimeoutSeconds() {
         return getLlmRequestTimeoutSeconds();
-    }
-
-    @Override
-    public String clientId() {
-        return getGoogleOAuthClientId();
-    }
-
-    @Override
-    public String clientSecret() {
-        return getGoogleOAuthClientSecret();
     }
 }
