@@ -42,7 +42,7 @@ class AppSettingServiceTest {
                 repository, credentialCipher, adminAuthorizationService,
                 "env-llm-key", "https://api.openai.com/v1", "gpt-4o-mini", "gpt-4o-mini,gpt-4o", "120",
                 "smtp.example.com", "587", "env-user", "env-pass", "noreply@example.com",
-                "http://localhost:3000");
+                "http://localhost:3000", "10");
     }
 
     @Test
@@ -178,5 +178,59 @@ class AppSettingServiceTest {
 
         assertThrows(IllegalArgumentException.class,
                 () -> service.updateSettings(Map.of("app_mail_from", "not-an-email")));
+    }
+
+    @Test
+    void getUploadRateLimitRequests_DB未設定なら環境変数値にフォールバックする() {
+        AppSettingService service = service();
+        when(repository.findById("upload_rate_limit_requests")).thenReturn(Optional.empty());
+
+        assertEquals(10, service.getUploadRateLimitRequests());
+    }
+
+    @Test
+    void getUploadRateLimitRequests_DB設定があればそれを優先する() {
+        AppSettingService service = service();
+        when(repository.findById("upload_rate_limit_requests"))
+                .thenReturn(Optional.of(
+                        new SystemSetting("upload_rate_limit_requests", credentialCipher.encrypt("50"))));
+
+        assertEquals(50, service.getUploadRateLimitRequests());
+    }
+
+    @Test
+    void getUploadRateLimitRequests_無制限を表す値をそのまま返す() {
+        AppSettingService service = service();
+        when(repository.findById("upload_rate_limit_requests"))
+                .thenReturn(Optional.of(
+                        new SystemSetting("upload_rate_limit_requests", credentialCipher.encrypt("-1"))));
+
+        assertEquals(AppSettingService.UNLIMITED, service.getUploadRateLimitRequests());
+    }
+
+    @Test
+    void updateSettings_アップロードレート制限は0以下かつ無制限指定でなければ例外() {
+        AppSettingService service = service();
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.updateSettings(Map.of("upload_rate_limit_requests", "0")));
+    }
+
+    @Test
+    void updateSettings_アップロードレート制限は数値でなければ例外() {
+        AppSettingService service = service();
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.updateSettings(Map.of("upload_rate_limit_requests", "abc")));
+    }
+
+    @Test
+    void updateSettings_アップロードレート制限は無制限を表す値を許可する() {
+        AppSettingService service = service();
+        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
+
+        service.updateSettings(Map.of("upload_rate_limit_requests", "-1"));
+
+        verify(repository).save(any());
     }
 }

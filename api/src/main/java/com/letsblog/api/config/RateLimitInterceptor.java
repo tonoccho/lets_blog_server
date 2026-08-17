@@ -1,5 +1,6 @@
 package com.letsblog.api.config;
 
+import com.letsblog.api.service.AppSettingService;
 import io.github.resilience4j.ratelimiter.RateLimiter;
 import io.github.resilience4j.ratelimiter.RateLimiterRegistry;
 import jakarta.servlet.http.HttpServletRequest;
@@ -15,6 +16,8 @@ import java.util.Set;
 @Component
 @RequiredArgsConstructor
 public class RateLimitInterceptor implements HandlerInterceptor {
+
+    private static final String UPLOAD_ENDPOINT = "upload-endpoint";
 
     /**
      * 認証情報を扱わない読み取り専用の状態確認エンドポイント。ブルートフォース対策の
@@ -35,6 +38,7 @@ public class RateLimitInterceptor implements HandlerInterceptor {
             "/image-options", "/image-generation-prompt-defaults", "/image-generation-size-defaults");
 
     private final RateLimiterRegistry rateLimiterRegistry;
+    private final AppSettingService appSettingService;
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
@@ -42,6 +46,19 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         String rateLimiterName = getRateLimiterName(requestPath);
 
         RateLimiter rateLimiter = rateLimiterRegistry.rateLimiter(rateLimiterName);
+
+        /*
+         * upload-endpointのみ、管理画面(システム設定)からリクエスト数を変更できる(issue #444)。
+         * limitRefreshPeriod(期間)はResilience4jの制約により実行中のインスタンスへ安全に反映する
+         * 手段がないため対象外(env変数UPLOAD_RATE_LIMIT_PERIODのまま、再起動時のみ反映)。
+         */
+        if (UPLOAD_ENDPOINT.equals(rateLimiterName)) {
+            int limit = appSettingService.getUploadRateLimitRequests();
+            if (limit == AppSettingService.UNLIMITED) {
+                return true;
+            }
+            rateLimiter.changeLimitForPeriod(limit);
+        }
 
         if (!rateLimiter.acquirePermission()) {
             log.warn("Rate limit exceeded for {} (limiter: {})", requestPath, rateLimiterName);
@@ -61,7 +78,7 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         } else if (isLightweightImageMetadataPath(requestPath)) {
             return "api-global";
         } else if (requestPath.contains("/upload") || requestPath.contains("/image")) {
-            return "upload-endpoint";
+            return UPLOAD_ENDPOINT;
         }
         return "api-global";
     }

@@ -1,5 +1,6 @@
 package com.letsblog.api.config;
 
+import com.letsblog.api.service.AppSettingService;
 import io.github.resilience4j.ratelimiter.RateLimiter;
 import io.github.resilience4j.ratelimiter.RateLimiterRegistry;
 import jakarta.servlet.http.HttpServletRequest;
@@ -26,6 +27,9 @@ class RateLimitInterceptorTest {
     private RateLimiter rateLimiter;
 
     @Mock
+    private AppSettingService appSettingService;
+
+    @Mock
     private HttpServletRequest request;
 
     @Mock
@@ -35,7 +39,7 @@ class RateLimitInterceptorTest {
 
     @BeforeEach
     void setUp() {
-        interceptor = new RateLimitInterceptor(rateLimiterRegistry);
+        interceptor = new RateLimitInterceptor(rateLimiterRegistry, appSettingService);
         when(rateLimiterRegistry.rateLimiter(anyString())).thenReturn(rateLimiter);
     }
 
@@ -183,5 +187,43 @@ class RateLimitInterceptorTest {
         interceptor.preHandle(request, response, null);
 
         verify(rateLimiterRegistry).rateLimiter("upload-endpoint");
+    }
+
+    @Test
+    @DisplayName("Should apply the configured upload rate limit before checking permission (issue #444)")
+    void testUploadEndpointAppliesConfiguredLimit() {
+        when(request.getRequestURI()).thenReturn("/api/ai/image");
+        when(appSettingService.getUploadRateLimitRequests()).thenReturn(25);
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        boolean result = interceptor.preHandle(request, response, null);
+
+        assertTrue(result);
+        verify(rateLimiter).changeLimitForPeriod(25);
+        verify(rateLimiter).acquirePermission();
+    }
+
+    @Test
+    @DisplayName("Should bypass the rate limit entirely when upload rate limit is set to unlimited (issue #444)")
+    void testUploadEndpointBypassesCheckWhenUnlimited() {
+        when(request.getRequestURI()).thenReturn("/api/ai/image");
+        when(appSettingService.getUploadRateLimitRequests()).thenReturn(AppSettingService.UNLIMITED);
+
+        boolean result = interceptor.preHandle(request, response, null);
+
+        assertTrue(result);
+        verify(rateLimiter, never()).changeLimitForPeriod(anyInt());
+        verify(rateLimiter, never()).acquirePermission();
+    }
+
+    @Test
+    @DisplayName("Should not consult the upload rate limit setting for non-upload endpoints (issue #444)")
+    void testNonUploadEndpointDoesNotConsultUploadRateLimitSetting() {
+        when(request.getRequestURI()).thenReturn("/api/posts");
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        interceptor.preHandle(request, response, null);
+
+        verify(appSettingService, never()).getUploadRateLimitRequests();
     }
 }
