@@ -1,7 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import type { AiImageResult, GeneratedImageSummary, ImageGenerationOptionsResponse, PlanChatMessage } from "@/lib/apiClient";
+import type {
+  AiImageGenerationParams,
+  AiImageResult,
+  GeneratedImageSummary,
+  ImageGenerationOptionsResponse,
+  PlanChatMessage,
+} from "@/lib/apiClient";
 import {
   fetchGeneratedImagesAction,
   fetchImageGenerationOptionsAction,
@@ -103,6 +109,49 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
     }
     setImages(result.images ?? []);
     setMessage({ type: "success", text: "生成しました。アセットとして追加する画像を選択してください。" });
+  }
+
+  /**
+   * 生成画像ギャラリーの「この画像の設定をコピー」でコピーされたJSONをクリップボードから読み取り、
+   * フォームに反映する(issue #437)。
+   */
+  async function handleCreateFromClipboard() {
+    setMessage(null);
+    let text: string;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : String(err) });
+      return;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      setMessage({ type: "error", text: "クリップボードの内容が正しいJSON形式ではありません。" });
+      return;
+    }
+    if (typeof parsed !== "object" || parsed === null || typeof (parsed as { prompt?: unknown }).prompt !== "string") {
+      setMessage({ type: "error", text: "クリップボードの内容から生成設定を読み取れませんでした。" });
+      return;
+    }
+
+    const settings = parsed as Partial<AiImageGenerationParams>;
+    setPrompt(settings.prompt ?? "");
+    setNegativePrompt(settings.negativePrompt ?? "");
+    if (typeof settings.steps === "number") setSteps(settings.steps);
+    if (typeof settings.cfgScale === "number") setCfgScale(settings.cfgScale);
+    setSamplerName(settings.samplerName ?? "");
+    setScheduler(settings.scheduler ?? "");
+    setSeed(settings.seed != null ? String(settings.seed) : "");
+    if (typeof settings.width === "number") setWidth(settings.width);
+    if (typeof settings.height === "number") setHeight(settings.height);
+    if (typeof settings.batchSize === "number") setBatchSize(settings.batchSize);
+    setCheckpoint(settings.checkpoint ?? "");
+    setLoraName(settings.loraName ?? "");
+    if (typeof settings.loraWeight === "number") setLoraWeight(settings.loraWeight);
+    setMessage({ type: "success", text: "クリップボードの設定をフォームに反映しました。" });
   }
 
   async function handleChatSend() {
@@ -460,14 +509,23 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
             )}
           </div>
 
-          <button
-            type="button"
-            onClick={handleGenerate}
-            disabled={generating}
-            className="w-fit rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-          >
-            {generating ? "生成しています…" : "生成"}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleGenerate}
+              disabled={generating}
+              className="w-fit rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+            >
+              {generating ? "生成しています…" : "生成"}
+            </button>
+            <button
+              type="button"
+              onClick={handleCreateFromClipboard}
+              className="w-fit rounded border border-gray-400 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
+            >
+              クリップボードから作成
+            </button>
+          </div>
         </div>
       )}
 

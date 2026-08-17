@@ -194,3 +194,87 @@ describe('ProjectAssetGenerationPanel 生成画像ギャラリーから選択し
     })
   })
 })
+
+describe('ProjectAssetGenerationPanel クリップボードから作成 (issue #437)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    ;(actions.fetchImageGenerationOptionsAction as jest.Mock).mockResolvedValue(OPTIONS)
+    ;(actions.fetchGeneratedImagesAction as jest.Mock).mockResolvedValue([])
+  })
+
+  function mockClipboardReadText(text: string | (() => Promise<string>)) {
+    Object.assign(navigator, {
+      clipboard: {
+        readText:
+          typeof text === 'function' ? jest.fn(text) : jest.fn().mockResolvedValue(text),
+      },
+    })
+  }
+
+  it('クリップボードのJSONをフォーム項目に反映する', async () => {
+    mockClipboardReadText(
+      JSON.stringify({
+        prompt: 'a mountain landscape',
+        negativePrompt: 'blurry',
+        steps: 30,
+        cfgScale: 8.5,
+        samplerName: 'dpmpp_2m',
+        scheduler: 'karras',
+        seed: 999,
+        width: 1024,
+        height: 768,
+        batchSize: 2,
+        checkpoint: 'other-model.safetensors',
+        loraName: 'watercolor',
+        loraWeight: 0.6,
+      })
+    )
+    await openPanel()
+
+    fireEvent.click(screen.getByText('クリップボードから作成'))
+
+    await waitFor(() => {
+      expect((screen.getByPlaceholderText('生成したい画像の説明') as HTMLTextAreaElement).value).toBe(
+        'a mountain landscape'
+      )
+    })
+    expect(
+      (screen.getByPlaceholderText('low quality, blurry, watermark, text') as HTMLTextAreaElement).value
+    ).toBe('blurry')
+    expect(screen.getByText('クリップボードの設定をフォームに反映しました。')).toBeInTheDocument()
+  })
+
+  it('JSONとして解析できない内容の場合はエラーを表示しフォームを変更しない', async () => {
+    mockClipboardReadText('not json')
+    await openPanel()
+
+    fireEvent.click(screen.getByText('クリップボードから作成'))
+
+    await waitFor(() => {
+      expect(screen.getByText('クリップボードの内容が正しいJSON形式ではありません。')).toBeInTheDocument()
+    })
+    expect((screen.getByPlaceholderText('生成したい画像の説明') as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it('promptを含まないJSONの場合はエラーを表示する', async () => {
+    mockClipboardReadText(JSON.stringify({ steps: 10 }))
+    await openPanel()
+
+    fireEvent.click(screen.getByText('クリップボードから作成'))
+
+    await waitFor(() => {
+      expect(screen.getByText('クリップボードの内容から生成設定を読み取れませんでした。')).toBeInTheDocument()
+    })
+  })
+
+  it('クリップボードの読み取りに失敗した場合はエラーメッセージを表示する', async () => {
+    mockClipboardReadText(() => Promise.reject(new Error('クリップボードへのアクセスが拒否されました')))
+    await openPanel()
+
+    fireEvent.click(screen.getByText('クリップボードから作成'))
+
+    await waitFor(() => {
+      expect(screen.getByText('クリップボードへのアクセスが拒否されました')).toBeInTheDocument()
+    })
+  })
+})
