@@ -58,10 +58,17 @@ class BulkManagementServiceTest {
     @Mock
     private com.letsblog.api.cms.CmsAdapterFactory cmsAdapterFactory;
 
+    @Mock
+    private ProjectService projectService;
+
+    @Mock
+    private ImageResizeService imageResizeService;
+
     private BulkManagementService service() {
         return new BulkManagementService(
                 projectRepository, siteRepository, bulkManagementClient,
-                bulkUploadStorageService, siteService, sshOperations, restOperations, cmsAdapterFactory);
+                bulkUploadStorageService, siteService, sshOperations, restOperations, cmsAdapterFactory,
+                projectService, imageResizeService);
     }
 
     private Project buildProject(Long localSiteId, Long testSiteId, Long productionSiteId) {
@@ -544,15 +551,20 @@ class BulkManagementServiceTest {
         when(siteService.getCredentials("local-site")).thenReturn(localCreds);
         when(siteService.getCredentials("test-site")).thenReturn(testCreds);
 
+        byte[] originalData = new byte[]{1, 2, 3};
+        byte[] resizedData = new byte[]{9, 9, 9};
+        when(projectService.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
+        when(imageResizeService.resizeToLongEdge(originalData, "image/png", 1300)).thenReturn(resizedData);
+
         com.letsblog.api.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
         when(cmsAdapterFactory.resolve(com.letsblog.api.cms.CmsType.WORDPRESS)).thenReturn(adapter);
-        when(adapter.uploadMedia(eq(localCreds), eq("cat.png"), eq("image/png"), any()))
+        when(adapter.uploadMedia(eq(localCreds), eq("cat.png"), eq("image/png"), eq(resizedData)))
                 .thenReturn(new com.letsblog.api.cms.MediaUploadResult("1", "https://local.test/cat.png"));
-        when(adapter.uploadMedia(eq(testCreds), eq("cat.png"), eq("image/png"), any()))
+        when(adapter.uploadMedia(eq(testCreds), eq("cat.png"), eq("image/png"), eq(resizedData)))
                 .thenThrow(new RuntimeException("接続に失敗しました"));
 
         List<BulkOperationLog> results = service.uploadImageToAllEnvironments(
-                1L, new byte[]{1, 2, 3}, "cat.png", "image/png", 9L);
+                1L, originalData, "cat.png", "image/png", 9L);
 
         assertEquals(2, results.size());
         assertEquals("local", results.get(0).getEnvironment());
@@ -561,6 +573,7 @@ class BulkManagementServiceTest {
         assertEquals("test", results.get(1).getEnvironment());
         assertEquals(BulkOperationStatus.FAILED, results.get(1).getStatus());
         assertEquals("接続に失敗しました", results.get(1).getErrorMessage());
+        verify(adapter, never()).uploadMedia(any(), any(), any(), eq(originalData));
     }
 
     @Test
@@ -572,6 +585,8 @@ class BulkManagementServiceTest {
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(siteService.getCredentials("local-site")).thenReturn(
                 new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "pass"));
+        when(projectService.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
+        when(imageResizeService.resizeToLongEdge(any(), any(), eq(1300))).thenReturn(new byte[]{1});
         com.letsblog.api.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
         when(cmsAdapterFactory.resolve(any())).thenReturn(adapter);
         when(adapter.uploadMedia(any(), any(), any(), any()))
