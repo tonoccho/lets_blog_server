@@ -24,7 +24,12 @@ Rate limiting is configured in `application.yml` using Resilience4j. Three rate 
 #### 3. Upload Rate Limiter (`upload-endpoint`)
 - **Default Limit**: 10 requests per 1 hour
 - **Environment Variable**: `UPLOAD_RATE_LIMIT_REQUESTS` (default: 10)
-- **Applies to**: `/upload/*`, `/image/*` endpoints
+- **Applies to**: `/upload/*`, `/image/*` endpoints (actual file uploads and AI image generation)
+- **Does not apply to**: lightweight metadata/settings endpoints under the same paths, e.g.
+  `/api/ai/image-options`, `/api/projects/{id}/image-generation-prompt-defaults`,
+  `/api/projects/{id}/image-generation-size-defaults` — these use `api-global` instead so
+  that opening the asset-generation panel or changing defaults doesn't consume the same
+  quota as the actual upload/generation calls (see issue #442)
 - **Purpose**: Prevents resource exhaustion
 
 ### Response Codes

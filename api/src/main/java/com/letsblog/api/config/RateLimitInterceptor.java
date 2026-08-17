@@ -25,6 +25,15 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     private static final Set<String> AUTH_STATUS_CHECK_PATHS =
             Set.of("/api/auth/setup-status", "/api/auth/totp/status");
 
+    /**
+     * 実ファイルアップロードではなく、軽量なメタデータ取得/設定更新のエンドポイント。
+     * パス文字列に"/image"を含むためupload-endpointの厳しい制限(デフォルト10req/h、
+     * アプリ全体で共有)に巻き込まれると、パネルを開いたり設定を変更しただけで枠を
+     * 消費し、本来の画像生成(/api/ai/image)自体が429になってしまう(issue #442)。
+     */
+    private static final Set<String> LIGHTWEIGHT_IMAGE_METADATA_PATH_SUFFIXES = Set.of(
+            "/image-options", "/image-generation-prompt-defaults", "/image-generation-size-defaults");
+
     private final RateLimiterRegistry rateLimiterRegistry;
 
     @Override
@@ -49,9 +58,15 @@ public class RateLimitInterceptor implements HandlerInterceptor {
             return "api-global";
         } else if (requestPath.contains("/auth/") || requestPath.contains("/login") || requestPath.contains("/register")) {
             return "auth-endpoint";
+        } else if (isLightweightImageMetadataPath(requestPath)) {
+            return "api-global";
         } else if (requestPath.contains("/upload") || requestPath.contains("/image")) {
             return "upload-endpoint";
         }
         return "api-global";
+    }
+
+    private boolean isLightweightImageMetadataPath(String requestPath) {
+        return LIGHTWEIGHT_IMAGE_METADATA_PATH_SUFFIXES.stream().anyMatch(requestPath::endsWith);
     }
 }

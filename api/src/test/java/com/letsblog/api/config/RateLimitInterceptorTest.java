@@ -129,4 +129,59 @@ class RateLimitInterceptorTest {
 
         verify(rateLimiterRegistry).rateLimiter("api-global");
     }
+
+    @Test
+    @DisplayName("Should use upload rate limiter for AI image generation (issue #442)")
+    void testAiImageGenerationUsesUploadRateLimiter() {
+        when(request.getRequestURI()).thenReturn("/api/ai/image");
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        interceptor.preHandle(request, response, null);
+
+        verify(rateLimiterRegistry).rateLimiter("upload-endpoint");
+    }
+
+    @Test
+    @DisplayName("Should use global rate limiter for AI image options, not upload (issue #442)")
+    void testAiImageOptionsUsesGlobalRateLimiter() {
+        when(request.getRequestURI()).thenReturn("/api/ai/image-options");
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        interceptor.preHandle(request, response, null);
+
+        verify(rateLimiterRegistry).rateLimiter("api-global");
+    }
+
+    @Test
+    @DisplayName("Should use global rate limiter for image generation prompt defaults (issue #442)")
+    void testImageGenerationPromptDefaultsUsesGlobalRateLimiter() {
+        when(request.getRequestURI()).thenReturn("/api/projects/5/image-generation-prompt-defaults");
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        interceptor.preHandle(request, response, null);
+
+        verify(rateLimiterRegistry).rateLimiter("api-global");
+    }
+
+    @Test
+    @DisplayName("Should use global rate limiter for image generation size defaults (issue #442)")
+    void testImageGenerationSizeDefaultsUsesGlobalRateLimiter() {
+        when(request.getRequestURI()).thenReturn("/api/projects/5/image-generation-size-defaults");
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        interceptor.preHandle(request, response, null);
+
+        verify(rateLimiterRegistry).rateLimiter("api-global");
+    }
+
+    @Test
+    @DisplayName("Should still use upload rate limiter for asset image upload (issue #442)")
+    void testAssetImageUploadUsesUploadRateLimiter() {
+        when(request.getRequestURI()).thenReturn("/api/projects/5/asset-images/12/upload");
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        interceptor.preHandle(request, response, null);
+
+        verify(rateLimiterRegistry).rateLimiter("upload-endpoint");
+    }
 }
