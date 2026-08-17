@@ -198,14 +198,20 @@ public class BulkManagementService {
      * 環境単位で成否をBulkOperationLogへ記録する(1環境の失敗が他環境の実行を止めない)。
      * アップロード前に、記事本文画像と同じ長編px基準(ProjectService#resolveArticleImageLongEdgePx)で
      * リサイズする(issue #440。生成画像はデフォルト1920x1080等でリサイズされずにそのままアップロード
-     * されていた)。全環境で同じリサイズ結果を使い回すため、環境ループの前に1回だけ行う。
+     * されていた)。あわせて、透過を持たないPNGはJPEGへ変換してファイルサイズを削減する
+     * (issue #468。ComfyUI生成画像はPNGのため容量が大きい)。全環境で同じ結果を使い回すため、
+     * 環境ループの前に1回だけ行う。
      */
     @Transactional
     public List<BulkOperationLog> uploadImageToAllEnvironments(
             Long projectId, byte[] data, String filename, String contentType, Long actorId) {
         Project project = getProject(projectId);
         int longEdgePx = projectService.resolveArticleImageLongEdgePx(projectId);
-        byte[] resizedData = imageResizeService.resizeToLongEdge(data, contentType, longEdgePx);
+        ImageResizeService.ResizeResult resized =
+                imageResizeService.resizeToLongEdge(data, contentType, longEdgePx, true);
+        byte[] resizedData = resized.data();
+        String resizedContentType = resized.mimeType();
+        String resizedFilename = withExtensionFor(filename, resizedContentType);
         List<BulkOperationLog> results = new ArrayList<>();
         for (String environment : ENVIRONMENT_ORDER) {
             Long siteId = siteIdOf(project, environment);
@@ -223,21 +229,35 @@ public class BulkManagementService {
             try {
                 CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
                 CmsAdapter adapter = cmsAdapterFactory.resolve(credentials.cmsType());
-                MediaUploadResult result = adapter.uploadMedia(credentials, filename, contentType, resizedData);
+                MediaUploadResult result =
+                        adapter.uploadMedia(credentials, resizedFilename, resizedContentType, resizedData);
                 status = BulkOperationStatus.SUCCESS.name();
                 value = result.url();
             } catch (RuntimeException e) {
                 status = BulkOperationStatus.FAILED.name();
                 errorMessage = e.getMessage();
-                value = filename;
+                value = resizedFilename;
                 log.warn("アセット画像のアップロードに失敗しました(project={}, environment={}, site={}): {}",
                         projectId, environment, site.getSiteKey(), errorMessage);
             }
             results.add(saveLog(projectId, BulkOperationType.MEDIA_UPLOAD, BulkOperationSourceType.SLUG, value,
-                    null, null, null, null, filename, null, null,
+                    null, null, null, null, resizedFilename, null, null,
                     environment, status, errorMessage, null, actorId));
         }
         return results;
+    }
+
+    /** ファイル名の拡張子をmimeTypeに合わせて置き換える(JPEG変換時に.pngのまま送信しないため)。 */
+    private String withExtensionFor(String filename, String mimeType) {
+        String extension = "image/jpeg".equalsIgnoreCase(mimeType) ? ".jpg"
+                : "image/png".equalsIgnoreCase(mimeType) ? ".png"
+                : null;
+        if (extension == null) {
+            return filename;
+        }
+        int lastDot = filename.lastIndexOf('.');
+        String base = lastDot >= 0 ? filename.substring(0, lastDot) : filename;
+        return base + extension;
     }
 
     /**

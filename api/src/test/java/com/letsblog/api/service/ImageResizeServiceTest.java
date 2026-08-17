@@ -95,6 +95,50 @@ class ImageResizeServiceTest {
     }
 
     @Test
+    void resizeToLongEdge_convertOpaquePngToJpeg指定時は透過なしPNGをJPEGへ変換する() throws Exception {
+        byte[] original = renderPng(400, 200);
+
+        ImageResizeService.ResizeResult result = service.resizeToLongEdge(original, "image/png", 1300, true);
+
+        assertEquals("image/jpeg", result.mimeType());
+        BufferedImage image = ImageIO.read(new ByteArrayInputStream(result.data()));
+        assertEquals(400, image.getWidth());
+        assertEquals(200, image.getHeight());
+        assertTrue(isJpeg(result.data()), "エンコード結果がJPEGのマジックバイトで始まること");
+    }
+
+    @Test
+    void resizeToLongEdge_convertOpaquePngToJpeg指定時も透過ありPNGはPNGのまま維持する() throws Exception {
+        byte[] original = renderTransparentPng(400, 200);
+
+        ImageResizeService.ResizeResult result = service.resizeToLongEdge(original, "image/png", 1300, true);
+
+        assertEquals("image/png", result.mimeType());
+        BufferedImage image = ImageIO.read(new ByteArrayInputStream(result.data()));
+        assertTrue(image.getColorModel().hasAlpha());
+    }
+
+    @Test
+    void resizeToLongEdge_convertOpaquePngToJpeg未指定時はPNGのまま維持する() throws Exception {
+        byte[] original = renderPng(400, 200);
+
+        ImageResizeService.ResizeResult result = service.resizeToLongEdge(original, "image/png", 1300, false);
+
+        assertEquals("image/png", result.mimeType());
+    }
+
+    private boolean isJpeg(byte[] bytes) {
+        return bytes.length >= 2 && (bytes[0] & 0xFF) == 0xFF && (bytes[1] & 0xFF) == 0xD8;
+    }
+
+    private byte[] renderTransparentPng(int width, int height) throws Exception {
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ImageIO.write(image, "png", out);
+        return out.toByteArray();
+    }
+
+    @Test
     void stripMetadata_リサイズせずExifのみ削除する() throws Exception {
         byte[] withExif = insertExifApp1(renderJpeg(400, 300), 1);
 

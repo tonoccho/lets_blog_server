@@ -554,7 +554,8 @@ class BulkManagementServiceTest {
         byte[] originalData = new byte[]{1, 2, 3};
         byte[] resizedData = new byte[]{9, 9, 9};
         when(projectService.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
-        when(imageResizeService.resizeToLongEdge(originalData, "image/png", 1300)).thenReturn(resizedData);
+        when(imageResizeService.resizeToLongEdge(originalData, "image/png", 1300, true))
+                .thenReturn(new ImageResizeService.ResizeResult(resizedData, "image/png"));
 
         com.letsblog.api.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
         when(cmsAdapterFactory.resolve(com.letsblog.api.cms.CmsType.WORDPRESS)).thenReturn(adapter);
@@ -577,6 +578,38 @@ class BulkManagementServiceTest {
     }
 
     @Test
+    void uploadImageToAllEnvironments_JPEG変換された場合はファイル名拡張子とContentTypeもjpgに揃える() {
+        BulkManagementService service = service();
+        Project project = buildProject(10L, null, null);
+        Site localSite = buildManagedSite(10L, "local-site");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+
+        com.letsblog.api.cms.CmsCredentials.WordPressCredentials localCreds =
+                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "pass");
+        when(siteService.getCredentials("local-site")).thenReturn(localCreds);
+
+        byte[] originalData = new byte[]{1, 2, 3};
+        byte[] resizedData = new byte[]{9, 9, 9};
+        when(projectService.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
+        when(imageResizeService.resizeToLongEdge(originalData, "image/png", 1300, true))
+                .thenReturn(new ImageResizeService.ResizeResult(resizedData, "image/jpeg"));
+
+        com.letsblog.api.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(com.letsblog.api.cms.CmsType.WORDPRESS)).thenReturn(adapter);
+        when(adapter.uploadMedia(eq(localCreds), eq("comfyui-5.jpg"), eq("image/jpeg"), eq(resizedData)))
+                .thenReturn(new com.letsblog.api.cms.MediaUploadResult("1", "https://local.test/comfyui-5.jpg"));
+
+        List<BulkOperationLog> results = service.uploadImageToAllEnvironments(
+                1L, originalData, "comfyui-5.png", "image/png", 9L);
+
+        assertEquals(1, results.size());
+        assertEquals(BulkOperationStatus.SUCCESS, results.get(0).getStatus());
+        assertEquals("https://local.test/comfyui-5.jpg", results.get(0).getValue());
+        verify(adapter).uploadMedia(eq(localCreds), eq("comfyui-5.jpg"), eq("image/jpeg"), eq(resizedData));
+    }
+
+    @Test
     void uploadImageToAllEnvironments_サイト未紐付けの環境はスキップされる() {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
@@ -586,7 +619,8 @@ class BulkManagementServiceTest {
         when(siteService.getCredentials("local-site")).thenReturn(
                 new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "pass"));
         when(projectService.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
-        when(imageResizeService.resizeToLongEdge(any(), any(), eq(1300))).thenReturn(new byte[]{1});
+        when(imageResizeService.resizeToLongEdge(any(), any(), eq(1300), eq(true)))
+                .thenReturn(new ImageResizeService.ResizeResult(new byte[]{1}, "image/png"));
         com.letsblog.api.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
         when(cmsAdapterFactory.resolve(any())).thenReturn(adapter);
         when(adapter.uploadMedia(any(), any(), any(), any()))

@@ -4,13 +4,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
+import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageWriter;
+import javax.imageio.stream.ImageOutputStream;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.Iterator;
 
 /**
  * 記事投稿時に画像を長編基準でリサイズし(issue #291)、あわせてEXIF等の埋め込みメタ情報
@@ -27,15 +32,31 @@ public class ImageResizeService {
 
     private static final Logger log = LoggerFactory.getLogger(ImageResizeService.class);
     private static final int EXIF_ORIENTATION_TAG = 0x0112;
+    private static final float JPEG_QUALITY = 0.85f;
+
+    /** リサイズ/エンコード結果。convertOpaquePngToJpeg指定時はmimeTypeが元と変わりうる。 */
+    public record ResizeResult(byte[] data, String mimeType) {
+    }
 
     public byte[] resizeToLongEdge(byte[] originalBytes, String mimeType, int maxLongEdgePx) {
+        return resizeToLongEdge(originalBytes, mimeType, maxLongEdgePx, false).data();
+    }
+
+    /**
+     * convertOpaquePngToJpegがtrueの場合、透過を持たない非JPEG画像(PNG等)をJPEGへ変換して
+     * ファイルサイズを削減する(issue #468。ComfyUI生成画像はPNGで容量が大きいため、
+     * アイキャッチ/アセットとして追加する際にJPEG化する)。透過を持つ画像はJPEGが透過を
+     * 表現できないためPNGのまま維持する。
+     */
+    public ResizeResult resizeToLongEdge(
+            byte[] originalBytes, String mimeType, int maxLongEdgePx, boolean convertOpaquePngToJpeg) {
         if (mimeType != null && mimeType.equalsIgnoreCase("image/gif")) {
-            return originalBytes;
+            return new ResizeResult(originalBytes, mimeType);
         }
         try {
             BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(originalBytes));
             if (decoded == null) {
-                return originalBytes;
+                return new ResizeResult(originalBytes, mimeType);
             }
 
             int orientation = isJpeg(mimeType) ? readJpegOrientation(originalBytes) : 1;
@@ -56,11 +77,11 @@ public class ImageResizeService {
                 log.info("画像をリサイズしました: {}x{} -> {}x{}", width, height, targetWidth, targetHeight);
             }
 
-            byte[] encoded = encode(output, mimeType);
-            return encoded != null ? encoded : originalBytes;
+            ResizeResult encoded = encode(output, mimeType, convertOpaquePngToJpeg);
+            return encoded != null ? encoded : new ResizeResult(originalBytes, mimeType);
         } catch (IOException | RuntimeException e) {
             log.warn("画像のリサイズ/メタ情報削除に失敗したため、元のバイト列のままアップロードします: {}", e.getMessage());
-            return originalBytes;
+            return new ResizeResult(originalBytes, mimeType);
         }
     }
 
@@ -88,17 +109,55 @@ public class ImageResizeService {
         return resized;
     }
 
-    private byte[] encode(BufferedImage image, String mimeType) throws IOException {
+    private ResizeResult encode(BufferedImage image, String mimeType, boolean convertOpaquePngToJpeg) throws IOException {
+        boolean useJpeg = isJpeg(mimeType) || (convertOpaquePngToJpeg && !image.getColorModel().hasAlpha());
+        if (useJpeg) {
+            byte[] data = encodeJpeg(image);
+            return data != null ? new ResizeResult(data, "image/jpeg") : null;
+        }
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        boolean written = ImageIO.write(image, formatNameFor(mimeType), out);
-        return written ? out.toByteArray() : null;
+        boolean written = ImageIO.write(image, "png", out);
+        return written ? new ResizeResult(out.toByteArray(), "image/png") : null;
     }
 
-    private String formatNameFor(String mimeType) {
-        if (isJpeg(mimeType)) {
-            return "jpg";
+    private byte[] encodeJpeg(BufferedImage image) throws IOException {
+        Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpg");
+        if (!writers.hasNext()) {
+            return null;
         }
-        return "png";
+        ImageWriter writer = writers.next();
+        try {
+            ImageWriteParam param = writer.getDefaultWriteParam();
+            param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+            param.setCompressionQuality(JPEG_QUALITY);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            try (ImageOutputStream ios = ImageIO.createImageOutputStream(out)) {
+                writer.setOutput(ios);
+                writer.write(null, new IIOImage(ensureOpaqueRgb(image), null, null), param);
+            }
+            return out.toByteArray();
+        } finally {
+            writer.dispose();
+        }
+    }
+
+    /**
+     * JPEGエンコーダはインデックスカラー等の色モデルを受け付けない場合があるため、
+     * 常にTYPE_INT_RGBへ描画し直してから書き出す(呼び出し元でhasAlpha=falseの
+     * 画像のみに限定して呼ばれるため、透過情報の損失は発生しない)。
+     */
+    private BufferedImage ensureOpaqueRgb(BufferedImage image) {
+        if (image.getType() == BufferedImage.TYPE_INT_RGB) {
+            return image;
+        }
+        BufferedImage rgb = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = rgb.createGraphics();
+        try {
+            g.drawImage(image, 0, 0, null);
+        } finally {
+            g.dispose();
+        }
+        return rgb;
     }
 
     private int imageType(BufferedImage image) {
