@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import type { AiImageResult, ImageGenerationOptionsResponse, PlanChatMessage } from "@/lib/apiClient";
+import type { AiImageResult, GeneratedImageSummary, ImageGenerationOptionsResponse, PlanChatMessage } from "@/lib/apiClient";
 import {
+  fetchGeneratedImagesAction,
   fetchImageGenerationOptionsAction,
   generateImagePromptAction,
   generateProjectImagesAction,
@@ -44,6 +45,12 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState<string | undefined>(undefined);
+
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [galleryImages, setGalleryImages] = useState<GeneratedImageSummary[] | null>(null);
+  const [galleryLoading, setGalleryLoading] = useState(false);
+  const [gallerySelectedId, setGallerySelectedId] = useState<number | null>(null);
+  const [galleryUploading, setGalleryUploading] = useState(false);
 
   async function handleOpen() {
     setOpen(true);
@@ -115,12 +122,11 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
     setPrompt(generatedPrompt);
   }
 
-  async function handleUpload() {
-    if (selectedId == null) return;
-    setUploading(true);
+  async function uploadGeneratedImage(generatedImageId: number, setUploadingFlag: (v: boolean) => void) {
+    setUploadingFlag(true);
     setMessage(null);
-    const result = await uploadProjectAssetImageAction(projectId, selectedId);
-    setUploading(false);
+    const result = await uploadProjectAssetImageAction(projectId, generatedImageId);
+    setUploadingFlag(false);
     if (result.error) {
       setMessage({ type: "error", text: result.error });
       return;
@@ -135,6 +141,31 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
         text: `${failed.map((l) => l.environment).join(", ")}環境でアップロードに失敗しました。`,
       });
     }
+  }
+
+  async function handleUpload() {
+    if (selectedId == null) return;
+    await uploadGeneratedImage(selectedId, setUploading);
+  }
+
+  /** 生成画像ギャラリーに保存済みの画像を選択肢として読み込む(issue #436)。 */
+  async function handleGalleryToggle() {
+    setGalleryOpen((v) => !v);
+    if (galleryImages || galleryLoading) return;
+    setGalleryLoading(true);
+    try {
+      const imgs = await fetchGeneratedImagesAction();
+      setGalleryImages(imgs);
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setGalleryLoading(false);
+    }
+  }
+
+  async function handleGalleryUpload() {
+    if (gallerySelectedId == null) return;
+    await uploadGeneratedImage(gallerySelectedId, setGalleryUploading);
   }
 
   if (!open) {
@@ -158,6 +189,54 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
         <button type="button" onClick={() => setOpen(false)} className="text-sm text-gray-500 hover:underline">
           閉じる
         </button>
+      </div>
+
+      <div className="space-y-3 rounded border bg-gray-50 p-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold">生成画像ギャラリーから選択してアップロード</h3>
+          <button type="button" onClick={handleGalleryToggle} className="text-xs text-gray-500 hover:underline">
+            {galleryOpen ? "閉じる" : "開く"}
+          </button>
+        </div>
+        {galleryOpen && (
+          <>
+            {galleryLoading && <p className="text-xs text-gray-500">読み込んでいます…</p>}
+            {galleryImages && galleryImages.length === 0 && (
+              <p className="text-xs text-gray-500">生成画像ギャラリーに画像がありません。</p>
+            )}
+            {galleryImages && galleryImages.length > 0 && (
+              <>
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                  {galleryImages.map((img) => (
+                    <button
+                      type="button"
+                      key={img.id}
+                      onClick={() => setGallerySelectedId(img.id)}
+                      className={`rounded border-2 p-1 ${
+                        gallerySelectedId === img.id ? "border-blue-600" : "border-transparent"
+                      }`}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`/image-gallery/${img.id}/file`}
+                        alt={img.prompt}
+                        className="aspect-square w-full rounded bg-neutral-100 object-contain dark:bg-neutral-800"
+                      />
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleGalleryUpload}
+                  disabled={gallerySelectedId == null || galleryUploading}
+                  className="rounded bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-60"
+                >
+                  {galleryUploading ? "アップロードしています…" : "選択した画像をアセットとして追加(全環境へアップロード)"}
+                </button>
+              </>
+            )}
+          </>
+        )}
       </div>
 
       {loadingOptions ? (
