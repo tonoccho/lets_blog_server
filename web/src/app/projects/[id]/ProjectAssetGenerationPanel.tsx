@@ -358,6 +358,11 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
               onChange={(e) => setPrompt(e.target.value)}
               placeholder="生成したい画像の説明"
             />
+            {options?.defaultQualityPrompt && (
+              <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                生成時にpromptへ自動で追加されます: {options.defaultQualityPrompt}
+              </p>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium">negative prompt</label>
@@ -365,7 +370,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
               className="mt-1 w-full rounded border p-2 text-sm"
               value={negativePrompt}
               onChange={(e) => setNegativePrompt(e.target.value)}
-              placeholder="low quality, blurry, watermark, text"
+              placeholder={options?.defaultNegativePrompt ?? "low quality, blurry, watermark, text"}
             />
           </div>
           <div className="grid grid-cols-3 gap-3">

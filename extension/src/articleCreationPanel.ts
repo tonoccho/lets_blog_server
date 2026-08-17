@@ -35,6 +35,8 @@ export class ArticleCreationPanel extends WebviewPanelBase<
     switch (message.command) {
       case 'loadProjects':
         return this._handleLoadProjects();
+      case 'loadPostStatuses':
+        return this._handleLoadPostStatuses();
       case 'close':
         // 入力途中で中断したい場合の退避口(Escape)。
         this.close();
@@ -64,6 +66,25 @@ export class ArticleCreationPanel extends WebviewPanelBase<
       // 直前に選択していたプロジェクトを初期選択にする。
       selectedProjectId: getProjectId(this.context) ?? null,
     });
+  }
+
+  /**
+   * 投稿ステータスの選択肢を返す(サーバー側の正準リスト、issue #472)。
+   * 取得に失敗しても記事作成自体は続けられるよう、失敗時は従来のdraft/publishのみへ縮退する。
+   */
+  private async _handleLoadPostStatuses(): Promise<void> {
+    try {
+      const apiKey = await requireApiKey(this.context);
+      const statuses = await api.getPostStatuses(getServerUrl(), apiKey);
+      this.postMessage('postStatusList', { statuses });
+    } catch {
+      this.postMessage('postStatusList', {
+        statuses: [
+          { value: 'draft', label: '下書き (draft)' },
+          { value: 'publish', label: '公開 (publish)' },
+        ],
+      });
+    }
   }
 
   /**

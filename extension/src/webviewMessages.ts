@@ -92,6 +92,7 @@ export interface SectionGenInitPayload {
 
 export type ArticleCreationInboundMessage =
   | WebviewMessageBase<'loadProjects'>
+  | WebviewMessageBase<'loadPostStatuses'>
   | WebviewMessageBase<'close'>
   | WebviewMessageBase<'cancel'>
   | (WebviewMessageBase<'loadCategories'> & { projectId: number })
@@ -117,6 +118,7 @@ export type ArticleCreationInboundMessage =
 
 export type ArticleCreationOutboundCommand =
   | 'projectList'
+  | 'postStatusList'
   | 'categoryList'
   | 'chatResponse'
   | 'metadataSuggestion'

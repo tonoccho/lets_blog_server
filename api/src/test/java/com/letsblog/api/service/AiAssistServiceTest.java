@@ -207,6 +207,24 @@ class AiAssistServiceTest {
     }
 
     @Test
+    void getImageOptions_実際の生成時と同じ既定negative_quality_promptを含む() {
+        when(comfyUiModelService.getSelectedCheckpointOrGlobalDefault(1L)).thenReturn("checkpoint.safetensors");
+        when(comfyUiClient.listCheckpoints()).thenReturn(List.of("checkpoint.safetensors"));
+        when(comfyUiClient.listSamplers()).thenReturn(List.of("euler"));
+        when(comfyUiClient.listSchedulers()).thenReturn(List.of("normal"));
+        when(comfyUiClient.listLoras()).thenReturn(List.of());
+        when(projectService.resolveDefaultGeneratedImageWidth(1L)).thenReturn(1920);
+        when(projectService.resolveDefaultGeneratedImageHeight(1L)).thenReturn(1080);
+        when(projectService.resolveDefaultNegativePrompt(1L)).thenReturn("worst quality");
+        when(projectService.resolveDefaultQualityPrompt(1L)).thenReturn("high quality, detailed");
+
+        ImageGenerationOptionsResponse response = service.getImageOptions(1L);
+
+        assertEquals("worst quality", response.defaultNegativePrompt());
+        assertEquals("high quality, detailed", response.defaultQualityPrompt());
+    }
+
+    @Test
     void draft_検索成功時はsourcesを含み検索結果をプロンプトへ付加する() {
         when(webSearchService.searchSafely(anyString())).thenReturn(
                 WebSearchOutcome.success(List.of(new BraveSearchResult("Title", "Desc", "https://example.com"))));
