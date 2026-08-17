@@ -37,7 +37,7 @@ const mockSites: Site[] = [
     siteKey: 'test-site-2',
     name: 'Test Site 2',
     baseUrl: 'https://test2.example.com',
-    cmsType: 'MICROCMS',
+    cmsType: 'WORDPRESS',
     managedWordpress: false,
     createdAt: '2024-01-02T10:00:00Z',
     updatedAt: '2024-01-02T10:00:00Z',
@@ -91,21 +91,6 @@ describe('SiteListTable', () => {
     )
     const searchInput = screen.getByPlaceholderText(/サイトキー・表示名・URLで検索/)
     fireEvent.change(searchInput, { target: { value: 'Test Site 1' } })
-    expect(screen.getByText('Test Site 1')).toBeInTheDocument()
-    expect(screen.queryByText('Test Site 2')).not.toBeInTheDocument()
-  })
-
-  it('filters sites by CMS type', () => {
-    render(
-      <SiteListTable
-        sites={mockSites}
-        projects={mockProjects}
-        isAdmin={false}
-        timezone="Asia/Tokyo"
-      />
-    )
-    const cmsSelect = screen.getByDisplayValue(/CMS種別: すべて/)
-    fireEvent.change(cmsSelect, { target: { value: 'WORDPRESS' } })
     expect(screen.getByText('Test Site 1')).toBeInTheDocument()
     expect(screen.queryByText('Test Site 2')).not.toBeInTheDocument()
   })

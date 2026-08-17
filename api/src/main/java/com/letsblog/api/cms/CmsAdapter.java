@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * CMS(WordPress、microCMS等)への操作を抽象化するインターフェース。
+ * CMS(現在はWordPressのみ対応)への操作を抽象化するインターフェース。
  * 新しいCMSへ対応する場合は、この実装を追加した上でCmsAdapterFactoryに登録すればよい。
  */
 public interface CmsAdapter {

@@ -23,23 +23,10 @@ class CmsAdapterFactoryTest {
     }
 
     @Test
-    void testResolveMicroCms() {
-        WordPressAdapter wordPressAdapter = new WordPressAdapter(RestClient.builder(), null, null, null);
-        MicroCmsAdapter microCmsAdapter = new MicroCmsAdapter(RestClient.builder());
-        CmsAdapterFactory factory = new CmsAdapterFactory(List.of(wordPressAdapter, microCmsAdapter));
-
-        CmsAdapter resolved = factory.resolve(CmsType.MICROCMS);
-
-        assertNotNull(resolved);
-        assertEquals(CmsType.MICROCMS, resolved.supportedType());
-    }
-
-    @Test
     void testResolveUnsupportedType() {
-        WordPressAdapter wordPressAdapter = new WordPressAdapter(RestClient.builder(), null, null, null);
-        CmsAdapterFactory factory = new CmsAdapterFactory(List.of(wordPressAdapter));
+        CmsAdapterFactory factory = new CmsAdapterFactory(List.of());
 
         // アダプタ未登録のCMS種別を要求した場合は未対応として例外を投げる
-        assertThrows(CmsApiException.class, () -> factory.resolve(CmsType.MICROCMS));
+        assertThrows(CmsApiException.class, () -> factory.resolve(CmsType.WORDPRESS));
     }
 }
