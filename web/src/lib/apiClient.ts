@@ -441,6 +441,8 @@ export interface ImageGenerationOptionsResponse {
   loras: string[];
   defaultWidth: number;
   defaultHeight: number;
+  defaultNegativePrompt: string | null;
+  defaultQualityPrompt: string | null;
 }
 
 export function getImageGenerationOptions(projectId: number, actor?: ActorInfo): Promise<ImageGenerationOptionsResponse> {
@@ -743,6 +745,16 @@ export function assignRole(userId: number, roleName: string, actor: ActorInfo): 
 
 export function removeRole(userId: number, roleName: string, actor: ActorInfo): Promise<{ message: string }> {
   return apiFetch<{ message: string }>(`/api/users/${userId}/roles/${roleName}`, { method: 'DELETE', actor });
+}
+
+export interface PostStatusOption {
+  value: string;
+  label: string;
+}
+
+/** 投稿ステータスの正準リスト。VS Code拡張とサーバー側の選択肢を一致させるための共通取得元(issue #472)。 */
+export function getPostStatuses(actor?: ActorInfo): Promise<PostStatusOption[]> {
+  return apiFetch<PostStatusOption[]>('/api/metadata/post-statuses', { actor });
 }
 
 export function requestPasswordReset(email: string): Promise<{ message: string }> {

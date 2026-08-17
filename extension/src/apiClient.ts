@@ -418,6 +418,28 @@ export async function listSites(
   }, schemas.SiteSummaryListSchema);
 }
 
+/** 投稿ステータスの選択肢を取得する。UIのハードコードをサーバー側の正準リストへ統一する(issue #472)。 */
+export async function getPostStatuses(
+  serverUrl: string,
+  apiKey: string
+): Promise<schemas.PostStatusOption[]> {
+  return cachedRequestJson('post-statuses', serverUrl, '/api/metadata/post-statuses', {
+    label: 'getPostStatuses',
+    headers: buildHeaders(apiKey),
+  }, schemas.PostStatusOptionListSchema);
+}
+
+/** ロールの表示名一覧を取得する(issue #472)。 */
+export async function getRoles(
+  serverUrl: string,
+  apiKey: string
+): Promise<schemas.RoleOption[]> {
+  return cachedRequestJson('roles', serverUrl, '/api/metadata/roles', {
+    label: 'getRoles',
+    headers: buildHeaders(apiKey),
+  }, schemas.RoleOptionListSchema);
+}
+
 /**
  * 下書き生成・校正・要約をAIへ依頼する。
  * @param mode draft(下書き) / proofread(校正) / summarize(要約)

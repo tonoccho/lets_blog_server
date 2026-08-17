@@ -54,6 +54,22 @@
     loadCategoriesForSelectedProject();
   }
 
+  /** サーバーから取得した投稿ステータスの選択肢を描画する(issue #472)。 */
+  function renderPostStatuses(statuses) {
+    const select = document.getElementById('statusSelect');
+    const previousValue = select.value;
+    select.textContent = '';
+    (statuses || []).forEach(function (status) {
+      const option = document.createElement('option');
+      option.value = status.value;
+      option.textContent = status.label + ' (' + status.value + ')';
+      select.appendChild(option);
+    });
+    if (statuses.some(function (s) { return s.value === previousValue; })) {
+      select.value = previousValue;
+    }
+  }
+
   function loadCategoriesForSelectedProject() {
     const projectId = Number(document.getElementById('projectSelect').value);
     if (!projectId) return;
@@ -351,6 +367,9 @@
       case 'categoryList':
         renderCategories(data.payload.categories);
         break;
+      case 'postStatusList':
+        renderPostStatuses(data.payload.statuses);
+        break;
       case 'chatResponse':
         LetsBlogLoading.end();
         addBrainstormMessage('assistant', data.payload.reply);
@@ -386,4 +405,5 @@
 
   LetsBlogLoading.begin({ buttonIds: ['createButton'], text: 'プロジェクトを取得しています…', kind: 'load' });
   post('loadProjects');
+  post('loadPostStatuses');
 })();

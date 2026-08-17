@@ -32,6 +32,20 @@
     if (options.defaultWidth) document.getElementById('width').value = String(options.defaultWidth);
     if (options.defaultHeight) document.getElementById('height').value = String(options.defaultHeight);
 
+    // 生成時に実際に適用される既定値をUIへ反映する(issue #472)。
+    // negative promptは未入力時のフォールバックとしてplaceholderに、
+    // quality promptはpromptへ常に自動追加されるためヒントとして表示する。
+    if (options.defaultNegativePrompt) {
+      document.getElementById('negativePrompt').placeholder = options.defaultNegativePrompt;
+    }
+    const qualityPromptHint = document.getElementById('qualityPromptHint');
+    if (options.defaultQualityPrompt) {
+      qualityPromptHint.textContent = '生成時にpromptへ自動追加されます: ' + options.defaultQualityPrompt;
+      qualityPromptHint.style.display = 'block';
+    } else {
+      qualityPromptHint.style.display = 'none';
+    }
+
     const loraSelect = document.getElementById('loraName');
     loraSelect.innerHTML = '<option value="">なし</option>';
     for (const lora of options.loras) {

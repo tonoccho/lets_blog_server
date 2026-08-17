@@ -192,6 +192,23 @@ async function commandPasteAsLink(context: vscode.ExtensionContext): Promise<voi
 }
 
 /**
+ * ロール名(roleName)に対応する表示名を解決する。ログイン成功メッセージを分かりやすくするための
+ * 付加情報にすぎないため、取得に失敗してもログイン自体は失敗させず、undefinedを返す(issue #472)。
+ */
+async function resolveRoleDisplayName(
+  serverUrl: string,
+  apiKey: string,
+  roleName: string
+): Promise<string | undefined> {
+  try {
+    const roles = await api.getRoles(serverUrl, apiKey);
+    return roles.find((r) => r.roleName === roleName)?.displayName;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * メールアドレス/パスワード(必要なら2FAコード)でLet's Blogにログインし、
  * 発行されたAPIキーをSecretStorageに保存する。ログインしたユーザーがそのままActorになる
  * (以前の「Select User」QuickPickによるActor選択は廃止し、ログインに一本化した)。
@@ -235,7 +252,10 @@ async function commandLogin(context: vscode.ExtensionContext): Promise<void> {
     await setActor(context, result.user);
     // 別ユーザーでログインし直した場合に、前のユーザーの参照結果が残らないようにする。
     api.clearResponseCache();
-    vscode.window.showInformationMessage(`'${result.user.email}' としてログインしました。`);
+    const roleLabel = await resolveRoleDisplayName(serverUrl, apiKey, result.user.role);
+    vscode.window.showInformationMessage(
+      `'${result.user.email}'${roleLabel ? ` (${roleLabel})` : ''} としてログインしました。`
+    );
   } catch (err) {
     reportError('ログインに失敗しました', err);
   } finally {

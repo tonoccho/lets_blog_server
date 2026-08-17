@@ -77,6 +77,8 @@ export const ImageGenerationOptionsSchema = z.object({
   loras: z.array(z.string()).default([]),
   defaultWidth: z.number().default(1920),
   defaultHeight: z.number().default(1080),
+  defaultNegativePrompt: z.string().nullable().default(null),
+  defaultQualityPrompt: z.string().nullable().default(null),
 });
 export type ImageGenerationOptions = z.infer<typeof ImageGenerationOptionsSchema>;
 
@@ -87,6 +89,22 @@ export const SiteSummarySchema = z.object({
 });
 export type SiteSummary = z.infer<typeof SiteSummarySchema>;
 export const SiteSummaryListSchema = z.array(SiteSummarySchema);
+
+/** 投稿ステータスの選択肢。GET /api/metadata/post-statuses のレスポンス(issue #472)。 */
+export const PostStatusOptionSchema = z.object({
+  value: z.string(),
+  label: z.string(),
+});
+export type PostStatusOption = z.infer<typeof PostStatusOptionSchema>;
+export const PostStatusOptionListSchema = z.array(PostStatusOptionSchema);
+
+/** ロールの表示名。GET /api/metadata/roles のレスポンス(issue #472)。 */
+export const RoleOptionSchema = z.object({
+  roleName: z.string(),
+  displayName: z.string(),
+});
+export type RoleOption = z.infer<typeof RoleOptionSchema>;
+export const RoleOptionListSchema = z.array(RoleOptionSchema);
 
 export const ProjectSummarySchema = z.object({
   id: z.number(),

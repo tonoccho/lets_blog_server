@@ -61,6 +61,8 @@ import {
   listPostComparison,
   deletePostEverywhere,
   updatePostStatusEverywhere,
+  getPostStatuses,
+  PostStatusOption,
   ImageGenerationOptionsResponse,
   AiImageGenerationParams,
   AiImageResult,
@@ -957,6 +959,12 @@ export async function fetchPostComparisonAction(
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };
   return listPostComparison(projectId, postType, page, actor);
+}
+
+export async function fetchPostStatusesAction(): Promise<PostStatusOption[]> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  return getPostStatuses(actor);
 }
 
 export async function deletePostEverywhereAction(

@@ -246,7 +246,9 @@ public class AiAssistService {
                 comfyUiClient.listSchedulers(),
                 comfyUiClient.listLoras(),
                 projectService.resolveDefaultGeneratedImageWidth(projectId),
-                projectService.resolveDefaultGeneratedImageHeight(projectId));
+                projectService.resolveDefaultGeneratedImageHeight(projectId),
+                projectService.resolveDefaultNegativePrompt(projectId),
+                projectService.resolveDefaultQualityPrompt(projectId));
     }
 
     private ComfyUiGenerationParams resolveParams(AiImageRequest request) {
