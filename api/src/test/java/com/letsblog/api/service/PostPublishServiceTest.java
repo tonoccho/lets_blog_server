@@ -376,8 +376,9 @@ class PostPublishServiceTest {
         when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
                 .thenReturn(new PostResult("1", "https://example.com/?p=1", "draft"));
         ArgumentCaptor<byte[]> bytesCaptor = ArgumentCaptor.forClass(byte[].class);
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), bytesCaptor.capture()))
-                .thenReturn(new MediaUploadResult("1", "https://example.com/wp-content/uploads/1.png"));
+        // renderPng()は透過を持たないPNGのため、アップロード時にJPEGへ変換される(issue #468)。
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.jpg"), any(), bytesCaptor.capture()))
+                .thenReturn(new MediaUploadResult("1", "https://example.com/wp-content/uploads/1.jpg"));
         when(projectService.resolveArticleImageLongEdgePx(any())).thenReturn(100);
 
         List<MultipartFile> images = List.of(
@@ -398,8 +399,9 @@ class PostPublishServiceTest {
         when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
                 .thenReturn(new PostResult("1", "https://example.com/?p=1", "draft"));
         ArgumentCaptor<byte[]> bytesCaptor = ArgumentCaptor.forClass(byte[].class);
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), bytesCaptor.capture()))
-                .thenReturn(new MediaUploadResult("1", "https://example.com/wp-content/uploads/1.png"));
+        // renderPng()は透過を持たないPNGのため、アップロード時にJPEGへ変換される(issue #468)。
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.jpg"), any(), bytesCaptor.capture()))
+                .thenReturn(new MediaUploadResult("1", "https://example.com/wp-content/uploads/1.jpg"));
         when(projectService.resolveArticleImageLongEdgePx(any())).thenReturn(1300);
 
         List<MultipartFile> images = List.of(

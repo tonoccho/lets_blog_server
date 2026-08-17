@@ -294,10 +294,12 @@ public class PostPublishService {
                 continue;
             }
             try {
-                // アップロード前に長編基準でリサイズする(issue #291)。sha256計算より前に行うことで、
-                // 前回投稿時と同じリサイズ結果であれば再アップロードをスキップする再利用判定が働く。
-                byte[] bytes = imageResizeService.resizeToLongEdge(
-                        image.getBytes(), image.getContentType(), articleImageLongEdgePx);
+                // アップロード前に長編基準でリサイズする(issue #291)。あわせて、透過を持たないPNGは
+                // JPEGへ変換してファイルサイズを削減する(issue #468)。sha256計算より前に行うことで、
+                // 前回投稿時と同じリサイズ/変換結果であれば再アップロードをスキップする再利用判定が働く。
+                ImageResizeService.ResizeResult resized = imageResizeService.resizeToLongEdge(
+                        image.getBytes(), image.getContentType(), articleImageLongEdgePx, true);
+                byte[] bytes = resized.data();
                 String sha256 = sha256Hex(bytes);
                 UploadedImageInfo prior = priorUploads.get(reference);
                 UploadedImageInfo current;
@@ -309,9 +311,9 @@ public class PostPublishService {
                     log.info("画像 '{}' は前回投稿時と同一内容(sha256一致)のため再利用します: mediaId={}, url={}",
                             reference, current.mediaId(), current.url());
                 } else {
-                    String renamedFilename = renameImageFile(reference, finalSlug, i + 1);
+                    String renamedFilename = renameImageFile(reference, finalSlug, i + 1, resized.mimeType());
                     MediaUploadResult uploaded = cmsAdapter.uploadMedia(
-                            credentials, renamedFilename, image.getContentType(), bytes);
+                            credentials, renamedFilename, resized.mimeType(), bytes);
                     current = new UploadedImageInfo(sha256, uploaded.url(), uploaded.id());
                     log.info("画像 '{}' を新規アップロードしました: mediaId={}, url={}",
                             reference, current.mediaId(), current.url());
@@ -363,10 +365,25 @@ public class PostPublishService {
         return lastDot >= 0 ? originalFilename.substring(lastDot) : ".bin";
     }
 
-    private String renameImageFile(String originalFilename, String slug, int index) {
-        String extension = getFileExtension(originalFilename);
+    private String renameImageFile(String originalFilename, String slug, int index, String mimeType) {
+        String extension = extensionForMimeType(mimeType, originalFilename);
         String number = String.format("%04d", index);
         return slug + "-" + number + extension;
+    }
+
+    /**
+     * JPEG変換(issue #468)によりmimeTypeが元のファイル名の拡張子と異なりうるため、実際に
+     * アップロードするバイト列のmimeTypeを優先して拡張子を決める。未知のmimeTypeの場合は
+     * 元のファイル名から推測する(従来どおりの挙動)。
+     */
+    private String extensionForMimeType(String mimeType, String fallbackFilename) {
+        if ("image/jpeg".equalsIgnoreCase(mimeType)) {
+            return ".jpg";
+        }
+        if ("image/png".equalsIgnoreCase(mimeType)) {
+            return ".png";
+        }
+        return getFileExtension(fallbackFilename);
     }
 
     private Post upsertPostRecord(Long siteId, PostResult result, String slug, Map<String, UploadedImageInfo> uploadedImages) {
