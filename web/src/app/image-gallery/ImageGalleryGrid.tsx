@@ -21,6 +21,8 @@ export function ImageGalleryGrid({
   const [newTag, setNewTag] = useState("");
   /** タグ一覧を絞り込むフィルタ(issue #281)。nullは絞り込みなし。 */
   const [activeTag, setActiveTag] = useState<string | null>(null);
+  /** 「この画像の設定をコピー」ボタンの一時的なフィードバック表示(issue #437)。 */
+  const [settingsCopied, setSettingsCopied] = useState(false);
 
   const allTags = useMemo(() => {
     const set = new Set<string>();
@@ -93,6 +95,33 @@ export function ImageGalleryGrid({
   function handleRemoveTag(tag: string) {
     if (!detail) return;
     saveTags(detail.tags.filter((t) => t !== tag));
+  }
+
+  /** 生成パラメータをJSON形式でクリップボードにコピーする(issue #437)。アセット画像生成の「クリップボードから作成」で貼り付けられる。 */
+  async function handleCopySettings() {
+    if (!detail) return;
+    const settings = {
+      prompt: detail.prompt,
+      negativePrompt: detail.negativePrompt,
+      steps: detail.steps,
+      cfgScale: detail.cfgScale,
+      samplerName: detail.samplerName,
+      scheduler: detail.scheduler,
+      seed: detail.seed,
+      width: detail.width,
+      height: detail.height,
+      batchSize: detail.batchSize,
+      checkpoint: detail.checkpoint,
+      loraName: detail.loraName,
+      loraWeight: detail.loraWeight,
+    };
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(settings));
+      setSettingsCopied(true);
+      setTimeout(() => setSettingsCopied(false), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   return (
@@ -177,6 +206,15 @@ export function ImageGalleryGrid({
             <div className="mb-4 flex items-start justify-between gap-4">
               <h2 className="text-lg font-semibold">生成画像の詳細</h2>
               <div className="flex items-center gap-3">
+                {detail && (
+                  <button
+                    type="button"
+                    onClick={handleCopySettings}
+                    className="text-neutral-600 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-neutral-100"
+                  >
+                    {settingsCopied ? "コピーしました" : "この画像の設定をコピー"}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => handleDelete(selectedId)}
