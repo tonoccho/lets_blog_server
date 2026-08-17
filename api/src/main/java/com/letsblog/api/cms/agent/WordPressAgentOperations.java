@@ -147,10 +147,12 @@ public class WordPressAgentOperations {
         if (content.slug() != null && !content.slug().isBlank()) {
             payload.put("postSlug", content.slug());
         }
-        if (content.categoryIds() != null && !content.categoryIds().isEmpty()) {
+        if (content.categoryIds() != null) {
+            // 空リストも明示的に送る(frontmatterでカテゴリを全て外した変更を反映するため。issue #467)。
             payload.put("categoryIds", content.categoryIds());
         }
-        if (content.tagIds() != null && !content.tagIds().isEmpty()) {
+        if (content.tagIds() != null) {
+            // 同上(issue #467)。空リストでもタグをクリアする意図として送る。
             payload.put("tagIds", content.tagIds());
         }
         if (content.featuredMediaId() != null) {

@@ -74,11 +74,14 @@ public class WordPressAdapter implements CmsAdapter {
         if (content.slug() != null && !content.slug().isBlank()) {
             body.put("slug", content.slug());
         }
-        if (content.categoryIds() != null && !content.categoryIds().isEmpty()) {
+        if (content.categoryIds() != null) {
+            // 空リストも明示的に送る(frontmatterでカテゴリを全て外した変更を反映するため。issue #467)。
+            // フィールド自体を省略するとWordPress側は「変更なし」と解釈し、既存のカテゴリが残ってしまう。
             ArrayNode categories = body.putArray("categories");
             content.categoryIds().forEach(id -> categories.add(Integer.parseInt(id)));
         }
-        if (content.tagIds() != null && !content.tagIds().isEmpty()) {
+        if (content.tagIds() != null) {
+            // 同上(issue #467)。空リストでもタグをクリアする意図として送る。
             ArrayNode tags = body.putArray("tags");
             content.tagIds().forEach(id -> tags.add(Integer.parseInt(id)));
         }

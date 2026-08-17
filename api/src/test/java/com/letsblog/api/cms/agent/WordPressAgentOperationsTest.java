@@ -137,6 +137,22 @@ class WordPressAgentOperationsTest {
     }
 
     @Test
+    void createOrUpdatePost_カテゴリとタグを空リストにした更新はペイロードに空配列を含める() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/post"))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("\"categoryIds\":[]")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("\"tagIds\":[]")))
+                .andRespond(withSuccess(
+                        "{\"postId\":\"123\",\"guid\":\"http://wordpress/sites/main/?p=123\",\"status\":\"draft\"}",
+                        MediaType.APPLICATION_JSON));
+
+        PostContent content = new PostContent(
+                "Test Title", "test-slug", "<p>HTML</p>", "draft", List.of(), List.of(), null, null);
+        operations.createOrUpdatePost(creds(), content, "123");
+
+        server.verify();
+    }
+
+    @Test
     void findAuthorIdByEmail_見つかればIDを返す() {
         server.expect(requestTo("http://wordpress:9000/wp-cli/find-author"))
                 .andRespond(withSuccess("{\"userId\":\"11\"}", MediaType.APPLICATION_JSON));

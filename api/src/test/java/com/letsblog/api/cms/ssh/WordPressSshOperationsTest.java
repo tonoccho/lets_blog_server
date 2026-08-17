@@ -367,6 +367,23 @@ class WordPressSshOperationsTest {
     }
 
     @Test
+    void createOrUpdatePost_カテゴリとタグを空リストにした更新は明示的にクリアするコマンドを送る() {
+        when(executor.exec(any(SshConnectionParams.class), any(), notNull())).thenReturn(ok(""));
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"guid\":\"https://example.com/?p=42\",\"post_status\":\"draft\"}"));
+        PostContent clearedContent = new PostContent(
+                "Title", "my-slug", "<p>Hello</p>", "publish", List.of(), List.of(), null, null);
+
+        operations.createOrUpdatePost(creds(), clearedContent, "42");
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), notNull());
+        String updateCommand = commandCaptor.getValue();
+        assertEquals(true, updateCommand.contains("--post_category="));
+        assertEquals(true, updateCommand.contains("--tax_input="));
+    }
+
+    @Test
     void createOrUpdatePost_作成コマンドが失敗したら例外() {
         when(executor.exec(any(SshConnectionParams.class), any(), notNull())).thenReturn(fail("wp-cli error"));
 
