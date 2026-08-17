@@ -124,6 +124,29 @@ class ProjectEnvironmentSyncServiceTest {
     }
 
     @Test
+    void sync_同期先がproductionなら例外() {
+        ProjectEnvironmentSyncService service = service();
+
+        assertThrows(IllegalArgumentException.class, () -> service.sync(1L, "test", "production", List.of("db")));
+    }
+
+    @Test
+    void sync_同期元にproductionを指定するのは許可される() {
+        ProjectEnvironmentSyncService service = service();
+        Project project = buildProject(10L, 20L, 30L);
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site productionSite = buildManagedSite(30L, "production-site");
+
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(siteRepository.findById(30L)).thenReturn(Optional.of(productionSite));
+
+        service.sync(1L, "production", "local", List.of("db"));
+
+        verify(syncClient).sync(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
     void sync_同期元と同期先が同じ環境なら例外() {
         ProjectEnvironmentSyncService service = service();
 
@@ -150,7 +173,6 @@ class ProjectEnvironmentSyncServiceTest {
     void sync_非managedサイトが紐付いた環境は同期できない() {
         ProjectEnvironmentSyncService service = service();
         Project project = buildProject(10L, 20L, 30L);
-        Site testSite = buildManagedSite(20L, "test-site");
         Site externalSite = new Site();
         externalSite.setId(30L);
         externalSite.setSiteKey("external-site");
@@ -158,10 +180,9 @@ class ProjectEnvironmentSyncServiceTest {
         externalSite.setManagedWordpress(false);
 
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
         when(siteRepository.findById(30L)).thenReturn(Optional.of(externalSite));
 
-        assertThrows(IllegalArgumentException.class, () -> service.sync(1L, "test", "production", List.of("db")));
+        assertThrows(IllegalArgumentException.class, () -> service.sync(1L, "production", "test", List.of("db")));
     }
 
     @Test
