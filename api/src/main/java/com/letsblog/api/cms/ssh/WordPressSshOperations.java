@@ -648,10 +648,13 @@ public class WordPressSshOperations {
         if (content.slug() != null && !content.slug().isBlank()) {
             args.append(" --post_name=").append(ShellQuote.single(content.slug()));
         }
-        if (content.categoryIds() != null && !content.categoryIds().isEmpty()) {
+        if (content.categoryIds() != null) {
+            // 空リストも明示的に送る(frontmatterでカテゴリを全て外した変更を反映するため。issue #467)。
+            // 引数自体を省略するとwp-cliは既存のカテゴリをそのまま残してしまう。
             args.append(" --post_category=").append(ShellQuote.single(String.join(",", content.categoryIds())));
         }
-        if (content.tagIds() != null && !content.tagIds().isEmpty()) {
+        if (content.tagIds() != null) {
+            // 同上(issue #467)。空リストでもタグをクリアする意図として送る。
             String tagIds = String.join(",", content.tagIds());
             args.append(" --tax_input=").append(ShellQuote.single("{\"post_tag\":[" + tagIds + "]}"));
         }

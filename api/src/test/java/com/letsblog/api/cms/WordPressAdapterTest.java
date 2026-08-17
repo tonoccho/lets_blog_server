@@ -146,6 +146,26 @@ class WordPressAdapterTest {
     }
 
     @Test
+    void testUpdatePost_カテゴリとタグを空リストにすると明示的な空配列を送る() {
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/posts/123"))
+                .andExpect(method(POST))
+                .andExpect(content().string(containsString("\"categories\":[]")))
+                .andExpect(content().string(containsString("\"tags\":[]")))
+                .andRespond(withSuccess(
+                        "{\"id\":123,\"link\":\"http://example.com/posts/test\",\"status\":\"publish\"}",
+                        MediaType.APPLICATION_JSON));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+        PostContent content = new PostContent(
+                "Updated Title", "test-slug", "<p>Updated</p>", "publish", List.of(), List.of(), null, null);
+
+        adapter.createOrUpdatePost(creds, content, "123");
+
+        server.verify();
+    }
+
+    @Test
     void testUploadMedia() {
         server.expect(requestTo("http://example.com/wp-json/wp/v2/media"))
                 .andExpect(method(POST))
