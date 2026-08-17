@@ -125,7 +125,10 @@ resilience4j:
         registerHealthIndicator: false
         limitRefreshPeriod: 1m
         limitForPeriod: 100
-        timeoutDuration: 1s
+        # 枠が枯渇している間、acquirePermission()が許可待ちでリクエストスレッドを
+        # ブロックしないよう即時拒否にする(issue #464。以前は1sブロックしており、
+        # バースト時に複数リクエストが同時に足止めされ、サーバー全体が無応答に見えた)。
+        timeoutDuration: 0s
         allowHealthIndicatorToFail: true
     instances:
       api-global:
@@ -136,6 +139,13 @@ resilience4j:
         baseConfig: default
         limitForPeriod: ${AUTH_RATE_LIMIT_REQUESTS:5}
         limitRefreshPeriod: ${AUTH_RATE_LIMIT_PERIOD:1m}
+      # フロントエンドはapiFetch()のたびに監査ログを自動送信するため(web/src/lib/apiClient.ts)、
+      # api-globalと同じバケットを共有するとダッシュボード等の通常操作の枠まで消費してしまい、
+      # 無関係なAPI呼び出しが軒並み429になる(issue #464)。専用バケットに分離する。
+      operation-log-endpoint:
+        baseConfig: default
+        limitForPeriod: ${OPERATION_LOG_RATE_LIMIT_REQUESTS:300}
+        limitRefreshPeriod: ${OPERATION_LOG_RATE_LIMIT_PERIOD:1m}
       upload-endpoint:
         baseConfig: default
         limitForPeriod: ${UPLOAD_RATE_LIMIT_REQUESTS:10}

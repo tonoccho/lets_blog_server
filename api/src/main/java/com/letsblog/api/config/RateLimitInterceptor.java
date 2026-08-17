@@ -18,6 +18,14 @@ import java.util.Set;
 public class RateLimitInterceptor implements HandlerInterceptor {
 
     private static final String UPLOAD_ENDPOINT = "upload-endpoint";
+    private static final String OPERATION_LOG_ENDPOINT = "operation-log-endpoint";
+
+    /**
+     * フロントエンドがapiFetch()のたびに自動送信する監査ログエンドポイント。api-globalと
+     * バケットを共有すると、通常のAPI呼び出し1回につきログ送信1回が同じ枠を追加消費し、
+     * ダッシュボード等の無関係な呼び出しまで巻き添えで429になる(issue #464)。
+     */
+    private static final String OPERATION_LOG_PATH = "/api/operation-logs";
 
     /**
      * 認証情報を扱わない読み取り専用の状態確認エンドポイント。ブルートフォース対策の
@@ -71,7 +79,9 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     }
 
     private String getRateLimiterName(String requestPath) {
-        if (AUTH_STATUS_CHECK_PATHS.contains(requestPath)) {
+        if (requestPath.startsWith(OPERATION_LOG_PATH)) {
+            return OPERATION_LOG_ENDPOINT;
+        } else if (AUTH_STATUS_CHECK_PATHS.contains(requestPath)) {
             return "api-global";
         } else if (requestPath.contains("/auth/") || requestPath.contains("/login") || requestPath.contains("/register")) {
             return "auth-endpoint";

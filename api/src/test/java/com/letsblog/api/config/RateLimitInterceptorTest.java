@@ -190,6 +190,28 @@ class RateLimitInterceptorTest {
     }
 
     @Test
+    @DisplayName("Should use dedicated rate limiter for operation-logs, not api-global (issue #464)")
+    void testOperationLogsUsesDedicatedRateLimiter() {
+        when(request.getRequestURI()).thenReturn("/api/operation-logs");
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        interceptor.preHandle(request, response, null);
+
+        verify(rateLimiterRegistry).rateLimiter("operation-log-endpoint");
+    }
+
+    @Test
+    @DisplayName("Should use dedicated rate limiter for operation-logs sub-paths (issue #464)")
+    void testOperationLogsUnifiedUsesDedicatedRateLimiter() {
+        when(request.getRequestURI()).thenReturn("/api/operation-logs/unified");
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        interceptor.preHandle(request, response, null);
+
+        verify(rateLimiterRegistry).rateLimiter("operation-log-endpoint");
+    }
+
+    @Test
     @DisplayName("Should apply the configured upload rate limit before checking permission (issue #444)")
     void testUploadEndpointAppliesConfiguredLimit() {
         when(request.getRequestURI()).thenReturn("/api/ai/image");
