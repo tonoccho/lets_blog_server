@@ -57,6 +57,7 @@ import {
   generateProjectImages,
   generateImagePromptFromChat,
   uploadProjectAssetImage,
+  listGeneratedImages,
   listPostComparison,
   deletePostEverywhere,
   updatePostStatusEverywhere,
@@ -76,6 +77,7 @@ import {
   LlmModelListResponse,
   ComfyUiCheckpointListResponse,
   GenerationJobDetail,
+  GeneratedImageSummary,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 
@@ -990,6 +992,12 @@ export async function updatePostStatusEverywhereAction(
   }
   revalidatePath(`/projects/${projectId}`);
   return {};
+}
+
+/** アセット画像生成パネルから、生成画像ギャラリー全体を選択肢として表示するために取得する(issue #436)。 */
+export async function fetchGeneratedImagesAction(): Promise<GeneratedImageSummary[]> {
+  await requireAdminSession();
+  return listGeneratedImages();
 }
 
 export async function uploadProjectAssetImageAction(
