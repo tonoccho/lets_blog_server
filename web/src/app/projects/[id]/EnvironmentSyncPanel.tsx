@@ -30,6 +30,7 @@ export function EnvironmentSyncPanel({ projectId, project }: { projectId: number
     .map(([environment]) => ({ value: environment, label: ENVIRONMENT_LABEL[environment] }));
 
   const syncSourceEnvironments = syncableEnvironments.filter((env) => env.value !== "local");
+  const syncDestinationEnvironments = syncableEnvironments.filter((env) => env.value !== "production");
 
   const masterEnvironment: ProjectEnvironment = project.masterEnvironment;
   const canFillFromMaster =
@@ -46,12 +47,13 @@ export function EnvironmentSyncPanel({ projectId, project }: { projectId: number
     });
   }
 
-  if (syncableEnvironments.length < 2 || syncSourceEnvironments.length === 0) {
+  if (syncableEnvironments.length < 2 || syncSourceEnvironments.length === 0 || syncDestinationEnvironments.length === 0) {
     return (
       <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 text-sm text-neutral-500 dark:text-neutral-400">
         <h3 className="mb-2 font-medium text-neutral-700 dark:text-neutral-300">環境同期</h3>
         自動構築(managed)されたWordPress環境が2つ以上紐付いており、そのうちテスト環境または本番環境が
-        1つ以上ある場合に、テーマ・プラグイン・メディア・DBの同期が行えます(ローカル環境は同期元に指定できません)。
+        1つ以上ある場合に、テーマ・プラグイン・メディア・DBの同期が行えます
+        (ローカル環境は同期元に、本番環境は同期先に指定できません)。
       </div>
     );
   }
@@ -102,7 +104,7 @@ export function EnvironmentSyncPanel({ projectId, project }: { projectId: number
             <span className="text-neutral-600 dark:text-neutral-400">同期先</span>
             <select name="to" required className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm">
               <option value="">選択してください</option>
-              {syncableEnvironments.map((env) => (
+              {syncDestinationEnvironments.map((env) => (
                 <option key={env.value} value={env.value}>
                   {env.label}
                 </option>
