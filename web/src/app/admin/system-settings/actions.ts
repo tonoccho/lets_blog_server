@@ -13,6 +13,11 @@ export interface UpdateAppSettingsFormState {
  * フォームに含まれる全項目をまとめてPUTする(issue #403)。空欄の項目は「未設定に戻す(環境変数へ
  * フォールバック)」として送信する。APIサーバー側で1つのトランザクションとして扱われ、いずれかの値が
  * 不正な場合はこの保存操作での変更が全てロールバックされる。
+ *
+ * "$"始まりのキーは除外する。useActionStateでバインドされたフォームがJS介入なしのネイティブ送信
+ * (いわゆるMPAアクション)経路を通ると、Next.js/Reactが前回状態のエンコード等に使う内部制御フィールド
+ * (例: $ACTION_REF_1)が同じFormDataに混入することがあり、これを未知の設定項目としてそのままAPIに
+ * 送ってしまうと409エラーになるため(issue #444)。
  */
 export async function updateAppSettingsAction(
   _prevState: UpdateAppSettingsFormState,
@@ -23,6 +28,9 @@ export async function updateAppSettingsAction(
 
   const settings: Record<string, string> = {};
   for (const [key, value] of formData.entries()) {
+    if (key.startsWith("$")) {
+      continue;
+    }
     settings[key] = String(value).trim();
   }
 
