@@ -22,7 +22,6 @@ export interface RegisterSiteState {
 
 const CREDENTIAL_FIELDS: Record<CmsType, string[]> = {
   WORDPRESS: ["baseUrl", "username", "appPassword"],
-  MICROCMS: ["serviceId", "apiKey", "managementApiKey", "postsEndpoint", "categoriesEndpoint", "tagsEndpoint"],
 };
 
 const WORDPRESS_SSH_FIELDS = ["baseUrl", "sshHost", "sshUser", "wpPath"];
@@ -40,11 +39,11 @@ export async function registerSiteAction(
     return { error: "表示名とサイトキーは必須です。" };
   }
 
-  if (cmsType !== "WORDPRESS" && cmsType !== "MICROCMS") {
+  if (cmsType !== "WORDPRESS") {
     return { error: "CMS種別を選択してください。" };
   }
 
-  const useSsh = cmsType === "WORDPRESS" && transport === "SSH";
+  const useSsh = transport === "SSH";
   const fields = useSsh ? WORDPRESS_SSH_FIELDS : CREDENTIAL_FIELDS[cmsType];
 
   const credentials: Record<string, string> = {};

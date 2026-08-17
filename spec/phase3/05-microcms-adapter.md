@@ -1,5 +1,8 @@
 # 05. microCMS アダプタの実装・テスト・実機検証
 
+> **廃止済み(issue #374)**: 本ドキュメントが記述するmicroCMS対応(`MicroCmsAdapter`・`CmsType.MICROCMS`・関連UI/テスト)は、
+> WordPress専業化のためissue #374で削除された。以下は実装当時の記録として残す。
+
 ## 目的
 
 WordPress に続く2番目のCMS実装として、**microCMS** 向けの `CmsAdapter` 実装を追加する。microCMS は日本製ヘッドレスCMS で、WordPress と異なり以下の特徴を持つ:

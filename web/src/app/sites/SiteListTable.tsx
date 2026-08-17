@@ -131,7 +131,6 @@ export function SiteListTable({
         >
           <option value="ALL">CMS種別: すべて</option>
           <option value="WORDPRESS">WORDPRESS</option>
-          <option value="MICROCMS">MICROCMS</option>
         </select>
         <select
           value={projectFilter}

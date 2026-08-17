@@ -429,9 +429,6 @@ public class SiteService {
             case WORDPRESS -> isSshTransport(credentials)
                     ? List.of("baseUrl", "transport", "sshHost", "sshUser", "wpPath")
                     : List.of("baseUrl", "username", "appPassword");
-            case MICROCMS -> List.of(
-                    "serviceId", "apiKey", "managementApiKey",
-                    "postsEndpoint", "categoriesEndpoint", "tagsEndpoint");
         };
     }
 
@@ -479,7 +476,6 @@ public class SiteService {
     private String resolveDisplayBaseUrl(CmsType cmsType, Map<String, String> credentials) {
         return switch (cmsType) {
             case WORDPRESS -> credentials.get("baseUrl");
-            case MICROCMS -> "https://" + credentials.get("serviceId") + ".microcms.io";
         };
     }
 
@@ -497,13 +493,6 @@ public class SiteService {
                     resolveSshPrivateKeyPem(credentials),
                     credentials.get("sshHostKeyFingerprint"),
                     credentials.get("wpSlug"));
-            case MICROCMS -> new CmsCredentials.MicroCmsCredentials(
-                    credentials.get("serviceId"),
-                    credentials.get("apiKey"),
-                    credentials.get("managementApiKey"),
-                    credentials.get("postsEndpoint"),
-                    credentials.get("categoriesEndpoint"),
-                    credentials.get("tagsEndpoint"));
         };
     }
 

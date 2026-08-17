@@ -3,7 +3,7 @@ import { after } from 'next/server';
 import { cookies, headers } from 'next/headers';
 import { getToken } from 'next-auth/jwt';
 
-export type CmsType = "WORDPRESS" | "MICROCMS";
+export type CmsType = "WORDPRESS";
 
 export interface Site {
   id: number;

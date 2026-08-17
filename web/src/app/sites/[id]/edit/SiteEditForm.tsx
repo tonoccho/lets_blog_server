@@ -66,211 +66,168 @@ export function SiteEditForm({ site, sshKeyPairs }: { site: SiteDetail; sshKeyPa
           <legend className="text-sm font-medium text-neutral-600 dark:text-neutral-400">
             認証情報の変更(空欄のままなら変更されません)
           </legend>
-          {site.cmsType === "WORDPRESS" ? (
-            <div className="space-y-3">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Field
-                  name="baseUrl"
-                  label="WordPressのURL"
-                  placeholder="変更する場合のみ入力"
-                  defaultValue={site.credentials.baseUrl}
-                />
-                <Field
-                  name="username"
-                  label="WordPressユーザー名"
-                  placeholder="変更する場合のみ入力"
-                  defaultValue={site.credentials.username}
-                />
-                <Field
-                  name="appPassword"
-                  label="アプリケーションパスワード"
-                  placeholder="変更する場合のみ入力"
-                  type="password"
-                  wide
-                  configured={isSecretConfigured("appPassword")}
-                />
-              </div>
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field
+                name="baseUrl"
+                label="WordPressのURL"
+                placeholder="変更する場合のみ入力"
+                defaultValue={site.credentials.baseUrl}
+              />
+              <Field
+                name="username"
+                label="WordPressユーザー名"
+                placeholder="変更する場合のみ入力"
+                defaultValue={site.credentials.username}
+              />
+              <Field
+                name="appPassword"
+                label="アプリケーションパスワード"
+                placeholder="変更する場合のみ入力"
+                type="password"
+                wide
+                configured={isSecretConfigured("appPassword")}
+              />
+            </div>
 
-              <label className="flex items-center gap-2 text-sm text-neutral-600 dark:text-neutral-400">
-                <input
-                  type="checkbox"
-                  checked={sshEnabled}
-                  onChange={(e) => setSshEnabled(e.target.checked)}
-                />
-                SSH経由(wp-cli)での接続に切り替える/接続情報を変更する
-              </label>
+            <label className="flex items-center gap-2 text-sm text-neutral-600 dark:text-neutral-400">
+              <input
+                type="checkbox"
+                checked={sshEnabled}
+                onChange={(e) => setSshEnabled(e.target.checked)}
+              />
+              SSH経由(wp-cli)での接続に切り替える/接続情報を変更する
+            </label>
 
-              {sshEnabled && (
-                <div className="space-y-3 rounded border border-neutral-200 dark:border-neutral-800 p-3">
-                  <input type="hidden" name="transport" value="SSH" />
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <Field
-                      name="sshHost"
-                      label="SSHホスト"
-                      placeholder="変更する場合のみ入力"
-                      defaultValue={site.credentials.sshHost}
-                    />
-                    <Field
-                      name="sshPort"
-                      label="SSHポート(既定22)"
-                      placeholder="変更する場合のみ入力"
-                      defaultValue={site.credentials.sshPort}
-                    />
-                    <Field
-                      name="sshUser"
-                      label="SSHユーザー"
-                      placeholder="変更する場合のみ入力"
-                      defaultValue={site.credentials.sshUser}
-                    />
-                    <Field
-                      name="wpPath"
-                      label="WordPressインストール先ディレクトリ(wp-cliの--path)"
-                      placeholder="例: /home/deploy/public_html(wp-cli本体のパスではありません)"
-                      defaultValue={site.credentials.wpPath}
-                      wide
-                    />
-                    <Field
-                      name="sshHostKeyFingerprint"
-                      label="ホスト鍵fingerprint(上級者向け・通常は空欄)"
-                      placeholder="変更する場合のみ入力"
-                      defaultValue={site.credentials.sshHostKeyFingerprint}
-                      wide
-                    />
-                  </div>
+            {sshEnabled && (
+              <div className="space-y-3 rounded border border-neutral-200 dark:border-neutral-800 p-3">
+                <input type="hidden" name="transport" value="SSH" />
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Field
+                    name="sshHost"
+                    label="SSHホスト"
+                    placeholder="変更する場合のみ入力"
+                    defaultValue={site.credentials.sshHost}
+                  />
+                  <Field
+                    name="sshPort"
+                    label="SSHポート(既定22)"
+                    placeholder="変更する場合のみ入力"
+                    defaultValue={site.credentials.sshPort}
+                  />
+                  <Field
+                    name="sshUser"
+                    label="SSHユーザー"
+                    placeholder="変更する場合のみ入力"
+                    defaultValue={site.credentials.sshUser}
+                  />
+                  <Field
+                    name="wpPath"
+                    label="WordPressインストール先ディレクトリ(wp-cliの--path)"
+                    placeholder="例: /home/deploy/public_html(wp-cli本体のパスではありません)"
+                    defaultValue={site.credentials.wpPath}
+                    wide
+                  />
+                  <Field
+                    name="sshHostKeyFingerprint"
+                    label="ホスト鍵fingerprint(上級者向け・通常は空欄)"
+                    placeholder="変更する場合のみ入力"
+                    defaultValue={site.credentials.sshHostKeyFingerprint}
+                    wide
+                  />
+                </div>
 
-                  <div className="space-y-2">
-                    <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                      {currentKeyPairId
-                        ? `現在: 保存済み鍵ペア「${currentKeyPairName ?? currentKeyPairId}」を使用中`
-                        : isSecretConfigured("sshPrivateKeyPem")
-                          ? "現在: 個別に生成した秘密鍵が設定済みです"
-                          : "SSH秘密鍵は未設定です"}
-                    </p>
+                <div className="space-y-2">
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                    {currentKeyPairId
+                      ? `現在: 保存済み鍵ペア「${currentKeyPairName ?? currentKeyPairId}」を使用中`
+                      : isSecretConfigured("sshPrivateKeyPem")
+                        ? "現在: 個別に生成した秘密鍵が設定済みです"
+                        : "SSH秘密鍵は未設定です"}
+                  </p>
 
-                    <div className="flex flex-wrap gap-4 text-sm">
+                  <div className="flex flex-wrap gap-4 text-sm">
+                    <label className="flex items-center gap-1.5">
+                      <input
+                        type="radio"
+                        checked={sshKeyMode === "unchanged"}
+                        onChange={() => setSshKeyMode("unchanged")}
+                      />
+                      変更しない
+                    </label>
+                    {sshKeyPairs.length > 0 && (
                       <label className="flex items-center gap-1.5">
                         <input
                           type="radio"
-                          checked={sshKeyMode === "unchanged"}
-                          onChange={() => setSshKeyMode("unchanged")}
+                          checked={sshKeyMode === "existing"}
+                          onChange={() => setSshKeyMode("existing")}
                         />
-                        変更しない
+                        保存済みの鍵ペアに切り替える
                       </label>
-                      {sshKeyPairs.length > 0 && (
-                        <label className="flex items-center gap-1.5">
-                          <input
-                            type="radio"
-                            checked={sshKeyMode === "existing"}
-                            onChange={() => setSshKeyMode("existing")}
-                          />
-                          保存済みの鍵ペアに切り替える
-                        </label>
-                      )}
-                      <label className="flex items-center gap-1.5">
-                        <input type="radio" checked={sshKeyMode === "new"} onChange={() => setSshKeyMode("new")} />
-                        新しい鍵ペアを生成する
-                      </label>
-                    </div>
-
-                    {sshKeyMode === "existing" && sshKeyPairs.length > 0 && (
-                      <select
-                        name="sshKeyPairId"
-                        defaultValue={currentKeyPairId ?? String(sshKeyPairs[0].id)}
-                        className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-                      >
-                        {sshKeyPairs.map((keyPair) => (
-                          <option key={keyPair.id} value={keyPair.id}>
-                            {keyPair.name}
-                            {keyPair.comment ? `(${keyPair.comment})` : ""}
-                          </option>
-                        ))}
-                      </select>
                     )}
-
-                    {sshKeyMode === "new" && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={handleGenerateKeyPair}
-                          disabled={keyGenPending}
-                          className="rounded bg-neutral-100 dark:bg-neutral-800 px-3 py-1.5 text-sm text-neutral-700 dark:text-neutral-300 disabled:opacity-50"
-                        >
-                          {keyGenPending ? "鍵ペアを生成中…" : "SSH鍵ペアを新規生成"}
-                        </button>
-                        {keyGenError && <p className="text-sm text-red-600">{keyGenError}</p>}
-                        {publicKeyLine && (
-                          <div className="space-y-1">
-                            <p className="text-sm text-neutral-600 dark:text-neutral-400">
-                              以下の公開鍵をリモートサーバーの対象ユーザーの<code>~/.ssh/authorized_keys</code>
-                              へ手動で追記してから保存してください。
-                            </p>
-                            <textarea
-                              readOnly
-                              value={publicKeyLine}
-                              rows={2}
-                              onFocus={(e) => e.currentTarget.select()}
-                              className="w-full rounded border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 font-mono text-xs"
-                            />
-                          </div>
-                        )}
-                        <input type="hidden" name="sshPrivateKeyPem" value={privateKeyPem} />
-                      </>
-                    )}
+                    <label className="flex items-center gap-1.5">
+                      <input type="radio" checked={sshKeyMode === "new"} onChange={() => setSshKeyMode("new")} />
+                      新しい鍵ペアを生成する
+                    </label>
                   </div>
-                </div>
-              )}
 
-              {site.sshConfigured && (
-                <div className="rounded border border-neutral-200 dark:border-neutral-800 p-3">
-                  <p className="mb-2 text-sm text-neutral-600 dark:text-neutral-400">
-                    SSH接続が設定されています。wp-cliが未インストールの場合はここからインストールできます。
-                  </p>
-                  <InstallWpCliButton id={site.id} />
+                  {sshKeyMode === "existing" && sshKeyPairs.length > 0 && (
+                    <select
+                      name="sshKeyPairId"
+                      defaultValue={currentKeyPairId ?? String(sshKeyPairs[0].id)}
+                      className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
+                    >
+                      {sshKeyPairs.map((keyPair) => (
+                        <option key={keyPair.id} value={keyPair.id}>
+                          {keyPair.name}
+                          {keyPair.comment ? `(${keyPair.comment})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+
+                  {sshKeyMode === "new" && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleGenerateKeyPair}
+                        disabled={keyGenPending}
+                        className="rounded bg-neutral-100 dark:bg-neutral-800 px-3 py-1.5 text-sm text-neutral-700 dark:text-neutral-300 disabled:opacity-50"
+                      >
+                        {keyGenPending ? "鍵ペアを生成中…" : "SSH鍵ペアを新規生成"}
+                      </button>
+                      {keyGenError && <p className="text-sm text-red-600">{keyGenError}</p>}
+                      {publicKeyLine && (
+                        <div className="space-y-1">
+                          <p className="text-sm text-neutral-600 dark:text-neutral-400">
+                            以下の公開鍵をリモートサーバーの対象ユーザーの<code>~/.ssh/authorized_keys</code>
+                            へ手動で追記してから保存してください。
+                          </p>
+                          <textarea
+                            readOnly
+                            value={publicKeyLine}
+                            rows={2}
+                            onFocus={(e) => e.currentTarget.select()}
+                            className="w-full rounded border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 font-mono text-xs"
+                          />
+                        </div>
+                      )}
+                      <input type="hidden" name="sshPrivateKeyPem" value={privateKeyPem} />
+                    </>
+                  )}
                 </div>
-              )}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field
-                name="serviceId"
-                label="Service ID"
-                placeholder="変更する場合のみ入力"
-                defaultValue={site.credentials.serviceId}
-              />
-              <Field
-                name="apiKey"
-                label="API Key"
-                placeholder="変更する場合のみ入力"
-                type="password"
-                configured={isSecretConfigured("apiKey")}
-              />
-              <Field
-                name="managementApiKey"
-                label="Management API Key"
-                placeholder="変更する場合のみ入力"
-                type="password"
-                configured={isSecretConfigured("managementApiKey")}
-              />
-              <Field
-                name="postsEndpoint"
-                label="投稿用エンドポイント"
-                placeholder="変更する場合のみ入力"
-                defaultValue={site.credentials.postsEndpoint}
-              />
-              <Field
-                name="categoriesEndpoint"
-                label="カテゴリ用エンドポイント"
-                placeholder="変更する場合のみ入力"
-                defaultValue={site.credentials.categoriesEndpoint}
-              />
-              <Field
-                name="tagsEndpoint"
-                label="タグ用エンドポイント"
-                placeholder="変更する場合のみ入力"
-                defaultValue={site.credentials.tagsEndpoint}
-              />
-            </div>
-          )}
+              </div>
+            )}
+
+            {site.sshConfigured && (
+              <div className="rounded border border-neutral-200 dark:border-neutral-800 p-3">
+                <p className="mb-2 text-sm text-neutral-600 dark:text-neutral-400">
+                  SSH接続が設定されています。wp-cliが未インストールの場合はここからインストールできます。
+                </p>
+                <InstallWpCliButton id={site.id} />
+              </div>
+            )}
+          </div>
         </fieldset>
       )}
 

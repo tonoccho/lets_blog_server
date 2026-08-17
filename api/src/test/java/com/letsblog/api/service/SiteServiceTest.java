@@ -571,18 +571,4 @@ class SiteServiceTest {
         assertEquals(false, dataSource.hasRest());
         assertEquals(false, dataSource.hasSsh());
     }
-
-    @Test
-    void resolveDataSource_WordPress以外のCMS種別は両方false() {
-        Site site = new Site();
-        site.setId(1L);
-        site.setSiteKey("micro");
-        site.setCmsType(CmsType.MICROCMS);
-        site.setManagedWordpress(false);
-
-        SiteService.SiteDataSource dataSource = service.resolveDataSource(site);
-
-        assertEquals(false, dataSource.hasRest());
-        assertEquals(false, dataSource.hasSsh());
-    }
 }

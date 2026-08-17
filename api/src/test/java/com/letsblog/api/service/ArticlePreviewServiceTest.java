@@ -253,20 +253,6 @@ class ArticlePreviewServiceTest {
     }
 
     @Test
-    void fetchMasterThemeCss_WordPress以外のCMSの場合はavailableがfalse() {
-        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
-        Site microCmsSite = new Site();
-        microCmsSite.setId(10L);
-        microCmsSite.setCmsType(CmsType.MICROCMS);
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(microCmsSite));
-
-        ThemeCssResponse response = service.fetchMasterThemeCss(1L);
-
-        assertFalse(response.available());
-        assertTrue(response.reason().contains("WordPress以外"));
-    }
-
-    @Test
     void fetchMasterThemeCss_stylesheetリンクを取得し連結する() {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
         when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
