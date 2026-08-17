@@ -17,14 +17,14 @@ import java.util.Map;
 
 /**
  * プロジェクト/サイトに紐付かない、業務系のアプリ全体設定(外部LLMサービス連携・メール送信・
- * Google OAuthクライアント・Webフロントの公開URL)をWeb管理画面(システム設定画面、issue #403)から
- * 編集可能にする。SystemSettingService(Brave Search APIキー)と同じ仕組み(system_settingsテーブルに
- * CredentialCipherでAES-256-GCM暗号化して保存し、未設定時は環境変数にフォールバック)を再利用するが、
- * DB接続情報・暗号化キー自体・NEXTAUTH_SECRET・Docker内部サービス間通信設定等のインフラ系設定は
- * 誤設定時にアプリが起動不能になるリスクが高いため対象外とし、このサービスが扱うキーのみを編集対象とする。
- * Buffer連携・Brave Search APIキー・Google AdSense OAuthクライアント(issue #407)はプロジェクト単位の
- * 設定のため対象外。LlmClientからはインターフェース経由(LlmConfigProvider)で参照される
- * (aiパッケージがserviceパッケージへ依存しないようにするため)。
+ * Google OAuthクライアント・Webフロントの公開URL・画像生成/アップロードのレート制限)をWeb管理画面
+ * (システム設定画面、issue #403)から編集可能にする。SystemSettingService(Brave Search APIキー)と
+ * 同じ仕組み(system_settingsテーブルにCredentialCipherでAES-256-GCM暗号化して保存し、未設定時は
+ * 環境変数にフォールバック)を再利用するが、DB接続情報・暗号化キー自体・NEXTAUTH_SECRET・Docker内部
+ * サービス間通信設定等のインフラ系設定は誤設定時にアプリが起動不能になるリスクが高いため対象外とし、
+ * このサービスが扱うキーのみを編集対象とする。Buffer連携・Brave Search APIキー・Google AdSense OAuth
+ * クライアント(issue #407)はプロジェクト単位の設定のため対象外。LlmClientからはインターフェース経由
+ * (LlmConfigProvider)で参照される(aiパッケージがserviceパッケージへ依存しないようにするため)。
  */
 @Service
 public class AppSettingService implements LlmConfigProvider {
@@ -40,6 +40,14 @@ public class AppSettingService implements LlmConfigProvider {
     static final String MAIL_PASSWORD = "mail_password";
     static final String APP_MAIL_FROM = "app_mail_from";
     static final String APP_WEB_BASE_URL = "app_web_base_url";
+    static final String UPLOAD_RATE_LIMIT_REQUESTS = "upload_rate_limit_requests";
+
+    /**
+     * upload_rate_limit_requestsにこの値を指定すると、画像生成/アップロードのレート制限を
+     * 無制限にする(issue #444)。RateLimiter#changeLimitForPeriodは負の値を受け付けないため、
+     * この値はRateLimitInterceptor側で判定し、レート制限のチェック自体をスキップする。
+     */
+    public static final int UNLIMITED = -1;
 
     public enum SettingSource {
         DATABASE, ENVIRONMENT, NONE
@@ -63,7 +71,8 @@ public class AppSettingService implements LlmConfigProvider {
             new Definition(MAIL_USERNAME, "メール送信ユーザー名", false),
             new Definition(MAIL_PASSWORD, "メール送信パスワード", true),
             new Definition(APP_MAIL_FROM, "メール送信元アドレス", false),
-            new Definition(APP_WEB_BASE_URL, "Webフロントの公開URL", false));
+            new Definition(APP_WEB_BASE_URL, "Webフロントの公開URL", false),
+            new Definition(UPLOAD_RATE_LIMIT_REQUESTS, "画像生成/アップロードのレート制限(リクエスト数)", false));
 
     private final SystemSettingRepository repository;
     private final CredentialCipher credentialCipher;
@@ -84,7 +93,8 @@ public class AppSettingService implements LlmConfigProvider {
             @Value("${spring.mail.username:}") String mailUsernameEnvDefault,
             @Value("${spring.mail.password:}") String mailPasswordEnvDefault,
             @Value("${app.mail.from}") String appMailFromEnvDefault,
-            @Value("${app.web.base-url}") String appWebBaseUrlEnvDefault) {
+            @Value("${app.web.base-url}") String appWebBaseUrlEnvDefault,
+            @Value("${UPLOAD_RATE_LIMIT_REQUESTS:10}") String uploadRateLimitRequestsEnvDefault) {
         this.repository = repository;
         this.credentialCipher = credentialCipher;
         this.adminAuthorizationService = adminAuthorizationService;
@@ -100,6 +110,7 @@ public class AppSettingService implements LlmConfigProvider {
         defaults.put(MAIL_PASSWORD, mailPasswordEnvDefault);
         defaults.put(APP_MAIL_FROM, appMailFromEnvDefault);
         defaults.put(APP_WEB_BASE_URL, appWebBaseUrlEnvDefault);
+        defaults.put(UPLOAD_RATE_LIMIT_REQUESTS, uploadRateLimitRequestsEnvDefault);
         this.envDefaults = defaults;
     }
 
@@ -176,6 +187,7 @@ public class AppSettingService implements LlmConfigProvider {
             case LLM_REQUEST_TIMEOUT_SECONDS -> requirePositiveInt(key, value);
             case MAIL_PORT -> requirePort(key, value);
             case APP_MAIL_FROM -> requireEmailLike(key, value);
+            case UPLOAD_RATE_LIMIT_REQUESTS -> requirePositiveIntOrUnlimited(key, value);
             default -> {
                 // その他の項目(APIキー・ホスト名・モデル名等)は形式チェックを行わない。
             }
@@ -212,6 +224,18 @@ public class AppSettingService implements LlmConfigProvider {
     private void requireEmailLike(String key, String value) {
         if (!value.contains("@")) {
             throw new IllegalArgumentException(key + " はメールアドレスの形式で指定してください");
+        }
+    }
+
+    private void requirePositiveIntOrUnlimited(String key, String value) {
+        try {
+            int parsed = Integer.parseInt(value);
+            if (parsed != UNLIMITED && parsed <= 0) {
+                throw new NumberFormatException();
+            }
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(
+                    key + " は正の整数、または無制限を表す" + UNLIMITED + "を指定してください", e);
         }
     }
 
@@ -277,6 +301,15 @@ public class AppSettingService implements LlmConfigProvider {
     @Transactional(readOnly = true)
     public String getAppWebBaseUrl() {
         return resolve(APP_WEB_BASE_URL);
+    }
+
+    /**
+     * 画像生成/アップロードのレート制限のリクエスト数を返す(RateLimitInterceptorが呼び出す)。
+     * UNLIMITED(-1)の場合、呼び出し側はレート制限のチェック自体をスキップする(issue #444)。
+     */
+    @Transactional(readOnly = true)
+    public int getUploadRateLimitRequests() {
+        return Integer.parseInt(resolve(UPLOAD_RATE_LIMIT_REQUESTS));
     }
 
     @Override

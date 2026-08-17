@@ -31,6 +31,11 @@ Rate limiting is configured in `application.yml` using Resilience4j. Three rate 
   that opening the asset-generation panel or changing defaults doesn't consume the same
   quota as the actual upload/generation calls (see issue #442)
 - **Purpose**: Prevents resource exhaustion
+- **Admin-configurable request count**: the request-count limit (but not the period) can be
+  overridden from the admin Web UI at `/admin/system-settings` (`upload_rate_limit_requests`),
+  without restarting the API server. The override is stored in the `system_settings` table and
+  falls back to `UPLOAD_RATE_LIMIT_REQUESTS` when left blank. Setting it to `-1` disables this
+  rate limiter entirely (unlimited requests). See issue #444.
 
 ### Response Codes
 

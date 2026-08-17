@@ -22,6 +22,12 @@ const GROUPS: { title: string; description: string; keys: string[] }[] = [
     description: "パスワード再設定メール内のリンク生成等に使用する、Web管理画面の公開URLです。",
     keys: ["app_web_base_url"],
   },
+  {
+    title: "レート制限",
+    description:
+      "画像生成・ファイルアップロードの一定時間あたりの上限リクエスト数です。-1を指定すると無制限になります。",
+    keys: ["upload_rate_limit_requests"],
+  },
 ];
 
 function sourceLabel(source: AppSetting["source"]): string {
