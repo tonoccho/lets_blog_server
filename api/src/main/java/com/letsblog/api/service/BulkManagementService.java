@@ -54,6 +54,8 @@ public class BulkManagementService {
     private final WordPressSshOperations sshOperations;
     private final WordPressRestBulkManagementOperations restOperations;
     private final CmsAdapterFactory cmsAdapterFactory;
+    private final ProjectService projectService;
+    private final ImageResizeService imageResizeService;
 
     public BulkManagementService(
             ProjectRepository projectRepository,
@@ -63,7 +65,9 @@ public class BulkManagementService {
             SiteService siteService,
             WordPressSshOperations sshOperations,
             WordPressRestBulkManagementOperations restOperations,
-            CmsAdapterFactory cmsAdapterFactory) {
+            CmsAdapterFactory cmsAdapterFactory,
+            ProjectService projectService,
+            ImageResizeService imageResizeService) {
         this.projectRepository = projectRepository;
         this.siteRepository = siteRepository;
         this.bulkManagementClient = bulkManagementClient;
@@ -72,6 +76,8 @@ public class BulkManagementService {
         this.sshOperations = sshOperations;
         this.restOperations = restOperations;
         this.cmsAdapterFactory = cmsAdapterFactory;
+        this.projectService = projectService;
+        this.imageResizeService = imageResizeService;
     }
 
     /**
@@ -190,11 +196,16 @@ public class BulkManagementService {
      * アセットとしてアップロードする。CmsAdapter.uploadMediaは認証情報(managed/SSH/REST)に応じた
      * トランスポート選択を内部で行うため、applyToSite()のような分岐は不要でサイトごとに委譲するだけでよい。
      * 環境単位で成否をBulkOperationLogへ記録する(1環境の失敗が他環境の実行を止めない)。
+     * アップロード前に、記事本文画像と同じ長編px基準(ProjectService#resolveArticleImageLongEdgePx)で
+     * リサイズする(issue #440。生成画像はデフォルト1920x1080等でリサイズされずにそのままアップロード
+     * されていた)。全環境で同じリサイズ結果を使い回すため、環境ループの前に1回だけ行う。
      */
     @Transactional
     public List<BulkOperationLog> uploadImageToAllEnvironments(
             Long projectId, byte[] data, String filename, String contentType, Long actorId) {
         Project project = getProject(projectId);
+        int longEdgePx = projectService.resolveArticleImageLongEdgePx(projectId);
+        byte[] resizedData = imageResizeService.resizeToLongEdge(data, contentType, longEdgePx);
         List<BulkOperationLog> results = new ArrayList<>();
         for (String environment : ENVIRONMENT_ORDER) {
             Long siteId = siteIdOf(project, environment);
@@ -212,7 +223,7 @@ public class BulkManagementService {
             try {
                 CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
                 CmsAdapter adapter = cmsAdapterFactory.resolve(credentials.cmsType());
-                MediaUploadResult result = adapter.uploadMedia(credentials, filename, contentType, data);
+                MediaUploadResult result = adapter.uploadMedia(credentials, filename, contentType, resizedData);
                 status = BulkOperationStatus.SUCCESS.name();
                 value = result.url();
             } catch (RuntimeException e) {
