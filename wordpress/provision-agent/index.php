@@ -119,6 +119,42 @@ function resolveExistingSitePath(string $slug): ?string
 }
 
 /**
+ * WordPressコアはデフォルトでSVG(image/svg+xml)をupload_mimesに含めないため、
+ * SVG画像(記事投稿時にImageResizeServiceがImageIOでデコードできない形式として無変換で
+ * 送ってくる)がwp_check_filetype_and_ext()に拒否され「このファイルタイプをアップロードする
+ * 権限がありません」でメディアインポートが失敗する(issue #485)。他形式の挙動は変えず
+ * SVGのみ許可するmu-pluginを配置する(--execはWordPressロード前に評価されadd_filter()が
+ * 未定義のため使えない)。既に配置済みなら何もしない(冪等)。
+ */
+function ensureSvgUploadMuPlugin(string $sitePath): void
+{
+    $muPluginsDir = "$sitePath/wp-content/mu-plugins";
+    $muPluginFile = "$muPluginsDir/letsblog-allow-svg-upload.php";
+    if (file_exists($muPluginFile)) {
+        return;
+    }
+    if (!is_dir($muPluginsDir)) {
+        mkdir($muPluginsDir, 0755, true);
+    }
+    $contents = <<<'PHP'
+<?php
+add_filter('upload_mimes', function ($mimes) {
+    $mimes['svg'] = 'image/svg+xml';
+    return $mimes;
+});
+add_filter('wp_check_filetype_and_ext', function ($data, $file, $filename, $mimes) {
+    if (empty($data['type'])) {
+        $check = wp_check_filetype($filename, $mimes);
+        $data['ext'] = $check['ext'];
+        $data['type'] = $check['type'];
+    }
+    return $data;
+}, 10, 4);
+PHP;
+    file_put_contents($muPluginFile, $contents);
+}
+
+/**
  * core download以降の失敗時に呼び出す。既に作成済みのディレクトリ・DBを
  * (存在すれば)削除してから、通常のrespond()と同じ形式でエラーを返す。
  * rm -rf/DROP DATABASE IF EXISTSはいずれも冪等なため、/deprovisionとの二重実行でも問題ない。
@@ -1047,6 +1083,8 @@ if ($path === '/wp-cli/media-upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!move_uploaded_file($_FILES['file']['tmp_name'], $tmpPath)) {
         respond(500, ['error' => 'アップロードファイルの一時保存に失敗しました']);
     }
+
+    ensureSvgUploadMuPlugin($sitePath);
 
     [$code, $out, $err] = runWp(['media', 'import', $tmpPath, '--porcelain', "--path=$sitePath", '--allow-root']);
     runCommand(['rm', '-f', $tmpPath]);
