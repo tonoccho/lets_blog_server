@@ -826,6 +826,12 @@ export async function renderPreviewHtml(
  * アイキャッチ等)を保ったままプレビュー対象記事の内容へ差し替えたHTML断片を取得する。
  * 参照記事が無い・差し替え位置を特定できない等の場合はavailable:falseが返る
  * (呼び出し側は従来のプレーンな表示へフォールバックすること)。
+ *
+ * ローカル/テスト環境(managed WordPress)では、差し替えの代わりに実際に非公開(private)投稿を
+ * 作成/更新してその実ページを返す経路が使われることがある。existingPreviewPostIdに前回の
+ * ThemeSkeletonResult.previewPostIdを渡すと新規作成せず更新し、返り値のpreviewPostIdを
+ * 次回呼び出しへ渡すことでプレビュー用の投稿を積み上げずに済む
+ * (投稿の作成/更新という副作用を伴うため再試行はしない)。
  */
 export async function renderPreviewSkeleton(
   serverUrl: string,
@@ -835,7 +841,8 @@ export async function renderPreviewSkeleton(
   siteId: number | undefined,
   title: string,
   contentHtml: string,
-  featuredImageDataUri: string | undefined
+  featuredImageDataUri: string | undefined,
+  existingPreviewPostId: string | undefined
 ): Promise<schemas.ThemeSkeletonResult> {
   return requestJson(
     serverUrl,
@@ -844,11 +851,32 @@ export async function renderPreviewSkeleton(
       label: 'renderPreviewSkeleton',
       method: 'POST',
       headers: buildHeaders(apiKey, actor),
-      createBody: jsonBody({ title, contentHtml, featuredImageDataUri, siteId }),
-      // 変換結果を返すだけでサーバー状態を変えないため、再試行して差し支えない。
-      retryable: true,
+      createBody: jsonBody({ title, contentHtml, featuredImageDataUri, siteId, existingPreviewPostId }),
     },
     schemas.ThemeSkeletonResultSchema
+  );
+}
+
+/**
+ * renderPreviewSkeletonがローカル/テスト環境向けに作成した非公開プレビュー投稿を削除する
+ * (WordPressの既定挙動でゴミ箱へ移動する)。プレビューパネルを閉じた際に呼ばれる想定。
+ */
+export async function deletePreviewPost(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  projectId: number,
+  siteId: number,
+  postId: string
+): Promise<void> {
+  await request(
+    serverUrl,
+    `/api/projects/${projectId}/preview/preview-post?siteId=${siteId}&postId=${encodeURIComponent(postId)}`,
+    {
+      label: 'deletePreviewPost',
+      method: 'DELETE',
+      headers: buildHeaders(apiKey, actor),
+    }
   );
 }
 

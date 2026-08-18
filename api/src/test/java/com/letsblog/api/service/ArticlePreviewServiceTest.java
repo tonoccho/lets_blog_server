@@ -73,6 +73,9 @@ class ArticlePreviewServiceTest {
     @Mock
     private PreviewSkeletonFetcher previewSkeletonFetcher;
 
+    @Mock
+    private com.letsblog.api.cms.CmsAdapterFactory cmsAdapterFactory;
+
     private MockRestServiceServer server;
     private ArticlePreviewService service;
 
@@ -83,7 +86,8 @@ class ArticlePreviewServiceTest {
         service = new ArticlePreviewService(
                 customTagRenderService, blogCardTagRenderService, amazonTagRenderService, rechartsTagRenderService,
                 plantUmlEmbedService, plantUmlTagRenderService, tocStyleRenderService, renderedContentWrapperService,
-                markdownRenderer, projectService, siteRepository, siteService, builder, previewSkeletonFetcher);
+                markdownRenderer, projectService, siteRepository, siteService, builder, previewSkeletonFetcher,
+                cmsAdapterFactory);
         // renderHtml()は必ずrechartsTagRenderService/plantUmlTagRenderService/plantUmlEmbedServiceを
         // 経由するため、それら自体を検証しないテストでは素通しにしておく
         // (未スタブだとnullが返り、以降の呼び出しの引数が狂うため)。
@@ -561,7 +565,7 @@ class ArticlePreviewServiceTest {
     void renderSkeleton_マスター環境にサイトが紐づいていない場合はavailableがfalse() {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", null, null));
 
-        ThemeSkeletonResponse response = service.renderSkeleton(1L, null, "タイトル", "<p>本文</p>", null);
+        ThemeSkeletonResponse response = service.renderSkeleton(1L, null, "タイトル", "<p>本文</p>", null, null);
 
         assertFalse(response.available());
         assertTrue(response.reason().contains("紐づいていません"));
@@ -577,7 +581,7 @@ class ArticlePreviewServiceTest {
                         + "&_fields=id,link,title,content"))
                 .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
 
-        ThemeSkeletonResponse response = service.renderSkeleton(1L, null, "タイトル", "<p>本文</p>", null);
+        ThemeSkeletonResponse response = service.renderSkeleton(1L, null, "タイトル", "<p>本文</p>", null, null);
 
         assertFalse(response.available());
         assertTrue(response.reason().contains("参照記事"));
@@ -600,7 +604,7 @@ class ArticlePreviewServiceTest {
                 .thenReturn(new ThemeSkeletonResponse(
                         "<article>spliced</article>", true, null, true, "body { color: red; }"));
 
-        ThemeSkeletonResponse response = service.renderSkeleton(1L, null, "新タイトル", "<p>新本文</p>", null);
+        ThemeSkeletonResponse response = service.renderSkeleton(1L, null, "新タイトル", "<p>新本文</p>", null, null);
 
         assertTrue(response.available());
         assertEquals("<article>spliced</article>", response.html());
@@ -631,7 +635,7 @@ class ArticlePreviewServiceTest {
                         true, null, true,
                         "body { background: url(http://wordpress/sites/local-site/wp-content/bg.png); }"));
 
-        ThemeSkeletonResponse response = service.renderSkeleton(1L, 30L, "新タイトル", "<p>新本文</p>", null);
+        ThemeSkeletonResponse response = service.renderSkeleton(1L, 30L, "新タイトル", "<p>新本文</p>", null, null);
 
         assertTrue(response.available());
         assertTrue(response.html().contains("https://localhost/sites/local-site/wp-content/uploads/x.png"));
@@ -655,7 +659,7 @@ class ArticlePreviewServiceTest {
                 .thenReturn(new ThemeSkeletonResponse(
                         null, false, "本文の位置を特定できませんでした", false, "body { color: teal; }"));
 
-        ThemeSkeletonResponse response = service.renderSkeleton(1L, null, "新タイトル", "<p>新本文</p>", null);
+        ThemeSkeletonResponse response = service.renderSkeleton(1L, null, "新タイトル", "<p>新本文</p>", null, null);
 
         assertFalse(response.available());
         assertTrue(response.reason().contains("本文の位置を特定できませんでした"));
@@ -680,7 +684,7 @@ class ArticlePreviewServiceTest {
                         "<article>spliced</article>", true, null, true,
                         "/* is_single()限定のCSS */\n.custom-tag { color: hotpink; }"));
 
-        ThemeSkeletonResponse response = service.renderSkeleton(1L, null, "新タイトル", "<p>新本文</p>", null);
+        ThemeSkeletonResponse response = service.renderSkeleton(1L, null, "新タイトル", "<p>新本文</p>", null, null);
 
         assertTrue(response.available());
         assertTrue(response.css().contains(".custom-tag { color: hotpink; }"));

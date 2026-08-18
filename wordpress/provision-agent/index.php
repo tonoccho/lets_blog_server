@@ -997,6 +997,39 @@ if ($path === '/wp-cli/post-status-update' && $_SERVER['REQUEST_METHOD'] === 'PO
     respond(200, ['postId' => $postId, 'status' => $status]);
 }
 
+// 記事プレビュー(ローカル/テスト環境)で、非公開(private)投稿として作成したプレビュー記事の
+// 実ページをPlaywright側から閲覧するための認証Cookieを発行する。private投稿は未ログインの
+// 訪問者には表示されないため、指定ユーザー(サイト管理者)としてログイン済みと同等のCookieを
+// wp_generate_auth_cookie()で生成し、呼び出し側(Java)がブラウザコンテキストへ注入する。
+if ($path === '/wp-cli/generate-auth-cookie' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    $userLogin = (string) ($input['userLogin'] ?? '');
+
+    if (!isValidSlug($slug) || $userLogin === '') {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = resolveExistingSitePath($slug);
+    if ($sitePath === null) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    $userLoginLiteral = var_export($userLogin, true);
+    $phpCode = "\$u = get_user_by('login', $userLoginLiteral); "
+        . "if (!\$u) { echo json_encode(['error' => 'user_not_found']); exit; } "
+        . "echo json_encode(['name' => LOGGED_IN_COOKIE, "
+        . "'value' => wp_generate_auth_cookie(\$u->ID, time() + 3600, 'logged_in')]);";
+
+    [$code, $out, $err] = runWp(['eval', $phpCode, "--path=$sitePath", '--allow-root']);
+    if ($code !== 0) {
+        respond(500, ['error' => '認証Cookieの生成に失敗しました', 'detail' => combinedOutput($out, $err)]);
+    }
+    $result = json_decode($out, true);
+    if (!is_array($result) || isset($result['error']) || empty($result['name']) || empty($result['value'])) {
+        respond(404, ['error' => "ユーザー '$userLogin' が見つかりません"]);
+    }
+    respond(200, ['name' => $result['name'], 'value' => $result['value']]);
+}
+
 if ($path === '/wp-cli/media-upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = (string) ($_POST['slug'] ?? '');
     if (!isValidSlug($slug) || empty($_FILES['file'])) {

@@ -1,8 +1,14 @@
 package com.letsblog.api.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.letsblog.api.cms.AuthCookie;
+import com.letsblog.api.cms.CmsAdapter;
+import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.CmsType;
+import com.letsblog.api.cms.MediaUploadResult;
+import com.letsblog.api.cms.PostContent;
+import com.letsblog.api.cms.PostResult;
 import com.letsblog.api.config.LegacyJacksonRestClientConfig;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
@@ -20,6 +26,7 @@ import org.springframework.web.util.HtmlUtils;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -73,6 +80,7 @@ public class ArticlePreviewService {
     private final SiteService siteService;
     private final RestClient.Builder restClientBuilder;
     private final PreviewSkeletonFetcher previewSkeletonFetcher;
+    private final CmsAdapterFactory cmsAdapterFactory;
 
     public ArticlePreviewService(
             CustomTagRenderService customTagRenderService,
@@ -88,7 +96,8 @@ public class ArticlePreviewService {
             SiteRepository siteRepository,
             SiteService siteService,
             RestClient.Builder restClientBuilder,
-            PreviewSkeletonFetcher previewSkeletonFetcher) {
+            PreviewSkeletonFetcher previewSkeletonFetcher,
+            CmsAdapterFactory cmsAdapterFactory) {
         this.customTagRenderService = customTagRenderService;
         this.blogCardTagRenderService = blogCardTagRenderService;
         this.amazonTagRenderService = amazonTagRenderService;
@@ -103,6 +112,7 @@ public class ArticlePreviewService {
         this.siteService = siteService;
         this.restClientBuilder = restClientBuilder;
         this.previewSkeletonFetcher = previewSkeletonFetcher;
+        this.cmsAdapterFactory = cmsAdapterFactory;
     }
 
     /**
@@ -316,15 +326,29 @@ public class ArticlePreviewService {
      * 実際に描画されたDOM内から検索することで特定する({@link PreviewSkeletonFetcher}参照)。
      * 参照記事が存在しない、差し替え位置を特定できない等の場合はavailable=falseを返し、
      * 呼び出し側で従来の表示(テーマDOM構造を再現しないプレーンな表示)へフォールバックする。
+     *
+     * ただし対象サイトが本番以外(ローカル/テスト)かつmanaged WordPress(agent transport)の場合は、
+     * この差し替え探索を行わず、プレビュー対象記事そのものを非公開(private)投稿として実際に
+     * WordPressへ作成し、その実ページを直接閲覧する経路({@link #renderRealPrivatePost}参照)を使う。
+     * こちらは差し替え位置の特定が原理的に不要なため、上記のような特定失敗が発生しない。
      */
     public ThemeSkeletonResponse renderSkeleton(
-            Long projectId, Long siteId, String title, String contentHtml, String featuredImageDataUri) {
+            Long projectId, Long siteId, String title, String contentHtml, String featuredImageDataUri,
+            String existingPreviewPostId) {
         Project project = projectService.getProjectEntity(projectId);
         SiteResolution resolution = resolveSiteForPreview(project, siteId);
         if (resolution.site() == null) {
             return new ThemeSkeletonResponse(null, false, resolution.errorReason(), false, "");
         }
         Site site = resolution.site();
+
+        if (!isProductionSite(site, projectId)) {
+            CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
+            if (credentials instanceof CmsCredentials.WordPressCredentials wpCredentials && wpCredentials.isAgent()) {
+                return renderRealPrivatePost(
+                        site, credentials, title, contentHtml, featuredImageDataUri, existingPreviewPostId);
+            }
+        }
 
         String fetchOrigin = site.getBaseUrl();
         String internalOrigin = null;
@@ -385,6 +409,116 @@ public class ArticlePreviewService {
         }
         String html = internalOrigin != null ? spliced.html().replace(internalOrigin, publicOrigin) : spliced.html();
         return new ThemeSkeletonResponse(html, true, null, spliced.eyecatchSpliced(), css);
+    }
+
+    /**
+     * このサイトがプロジェクトの本番環境かどうか。{@link PostPublishService#isProductionSite}と
+     * 同じ規約(Project.productionSiteIdとの比較)。本番環境への書き込みを避けるための判定に使う。
+     */
+    private boolean isProductionSite(Site site, Long projectId) {
+        if (projectId == null) {
+            return false;
+        }
+        Project project = projectService.getProjectEntity(projectId);
+        return project != null && site.getId().equals(project.getProductionSiteId());
+    }
+
+    /**
+     * プレビュー対象記事そのものを非公開(private)投稿としてWordPressへ作成/更新し、その実ページを
+     * 認証Cookie付きで直接閲覧する。差し替え位置の探索を行わないため、{@link #renderSkeleton}の
+     * スクレイピング&amp;スプライス経路と異なり、本文の位置を特定できず失敗するケースが発生しない。
+     *
+     * managed WordPress(agent transport)のローカル/テスト環境限定({@link #renderSkeleton}のガード参照)。
+     * wp-cliをサーバー側で実行できる経路でのみ、閲覧用の認証Cookieをリモート発行できるため。
+     */
+    private ThemeSkeletonResponse renderRealPrivatePost(
+            Site site, CmsCredentials credentials, String title, String contentHtml,
+            String featuredImageDataUri, String existingPreviewPostId) {
+        CmsAdapter cmsAdapter = cmsAdapterFactory.resolve(credentials.cmsType());
+
+        String featuredMediaId = null;
+        if (StringUtils.hasText(featuredImageDataUri)) {
+            try {
+                DecodedDataUri decoded = decodeDataUri(featuredImageDataUri);
+                MediaUploadResult media = cmsAdapter.uploadMedia(
+                        credentials, "preview-featured-image", decoded.contentType(), decoded.data());
+                featuredMediaId = media.id();
+            } catch (Exception e) {
+                logger.warn("プレビュー用アイキャッチのアップロードに失敗しました: {}", site.getSiteKey(), e);
+            }
+        }
+
+        PostContent content = new PostContent(
+                title, null, contentHtml, "private", List.of(), List.of(), featuredMediaId, null);
+
+        PostResult result;
+        AuthCookie cookie;
+        try {
+            result = cmsAdapter.createOrUpdatePost(credentials, content, existingPreviewPostId);
+            cookie = cmsAdapter.generateAuthCookie(credentials);
+        } catch (Exception e) {
+            logger.warn("プレビュー用非公開投稿の作成/認証Cookie発行に失敗しました: {}", site.getSiteKey(), e);
+            return new ThemeSkeletonResponse(
+                    null, false, "非公開投稿の作成に失敗しました: " + e.getMessage(), false, "", existingPreviewPostId);
+        }
+
+        String publicOrigin = originOf(site.getBaseUrl());
+        String internalBaseUrl = resolveManagedInternalBaseUrl(site);
+        String internalOrigin = internalBaseUrl != null ? originOf(internalBaseUrl) : null;
+        String navigateUrl = internalOrigin != null
+                ? rewriteToInternalOrigin(result.link(), publicOrigin, internalOrigin)
+                : result.link();
+
+        ThemeSkeletonResponse fetched;
+        try {
+            fetched = previewSkeletonFetcher.fetchRealPost(navigateUrl, cookie.name(), cookie.value());
+        } catch (Exception e) {
+            logger.warn("プレビュー用投稿ページの取得に失敗しました: {}", site.getSiteKey(), e);
+            return new ThemeSkeletonResponse(
+                    null, false, "投稿ページの取得に失敗しました: " + e.getMessage(), false, "", result.id());
+        }
+
+        String css = internalOrigin != null ? fetched.css().replace(internalOrigin, publicOrigin) : fetched.css();
+        if (!fetched.available() || fetched.html() == null) {
+            return new ThemeSkeletonResponse(fetched.html(), false, fetched.reason(), false, css, result.id());
+        }
+        String html = internalOrigin != null ? fetched.html().replace(internalOrigin, publicOrigin) : fetched.html();
+        return new ThemeSkeletonResponse(html, true, null, false, css, result.id());
+    }
+
+    /** data URI(data:&lt;contentType&gt;;base64,&lt;data&gt;)をデコードした結果。 */
+    private record DecodedDataUri(String contentType, byte[] data) {
+    }
+
+    private DecodedDataUri decodeDataUri(String dataUri) {
+        int commaIndex = dataUri.indexOf(',');
+        if (!dataUri.startsWith("data:") || commaIndex < 0) {
+            throw new IllegalArgumentException("data URI形式が不正です");
+        }
+        String meta = dataUri.substring("data:".length(), commaIndex);
+        String contentType = meta.contains(";") ? meta.substring(0, meta.indexOf(';')) : meta;
+        byte[] data = Base64.getDecoder().decode(dataUri.substring(commaIndex + 1));
+        return new DecodedDataUri(contentType.isBlank() ? "application/octet-stream" : contentType, data);
+    }
+
+    /**
+     * {@link #renderRealPrivatePost}で作成したプレビュー用の非公開投稿を削除する
+     * (VSCode拡張側でプレビューパネルを閉じた際に呼ばれる。ゴミ箱への移動)。
+     */
+    public void deletePreviewPost(Long projectId, Long siteId, String postId) {
+        Project project = projectService.getProjectEntity(projectId);
+        SiteResolution resolution = resolveSiteForPreview(project, siteId);
+        if (resolution.site() == null) {
+            return;
+        }
+        Site site = resolution.site();
+        CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
+        CmsAdapter cmsAdapter = cmsAdapterFactory.resolve(credentials.cmsType());
+        try {
+            cmsAdapter.deletePost(credentials, postId);
+        } catch (Exception e) {
+            logger.warn("プレビュー用投稿の削除に失敗しました: site={}, postId={}", site.getSiteKey(), postId, e);
+        }
     }
 
     /**

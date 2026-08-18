@@ -1186,9 +1186,11 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
       // 参照記事が無い等で再現できない場合は、従来のプレーンな表示へフォールバックする。
       let bodyHtml = html;
       let usingSkeleton = false;
+      let previewPostId: string | undefined;
       if (targetSite.siteId != null) {
         progress.report({ message: `${targetSite.siteName} の実際のテーマ構造を再現しています…` });
         try {
+          const existingPreviewPostId = PreviewPanel.currentPanel?.getPreviewPostId(targetSite.siteId);
           const skeleton = await api.renderPreviewSkeleton(
             serverUrl,
             apiKey,
@@ -1197,7 +1199,8 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
             targetSite.siteId,
             title,
             html,
-            featuredImageDataUri
+            featuredImageDataUri,
+            existingPreviewPostId
           );
           if (skeleton.available && skeleton.html) {
             bodyHtml = skeleton.html;
@@ -1220,6 +1223,10 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
           if (skeleton.css) {
             css = css ? `${css}\n${skeleton.css}` : skeleton.css;
           }
+          // ローカル/テスト環境では非公開投稿として実表示している場合があり、その投稿IDが
+          // 返ってくる。次回同じ環境でのプレビューで使い回す/パネルを閉じた際に削除するため、
+          // パネル作成/更新後に保持する(この時点ではまだcurrentPanelが無いことがあるため)。
+          previewPostId = skeleton.previewPostId ?? undefined;
         } catch (skeletonError) {
           logger.debug(`テーマ構造の再現取得に失敗しました: ${messageOf(skeletonError)}`);
         }
@@ -1234,8 +1241,12 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
         usingSkeleton ? undefined : featuredImageDataUri,
         onPreviewMessage,
         availableSites,
-        targetSite.siteId ?? null
+        targetSite.siteId ?? null,
+        (siteId, postId) => api.deletePreviewPost(serverUrl, apiKey, actor, projectId, siteId, postId)
       );
+      if (previewPostId && targetSite.siteId != null) {
+        PreviewPanel.currentPanel?.recordPreviewPostId(targetSite.siteId, previewPostId);
+      }
     };
 
     /** パネル内のセレクトで環境が切り替えられたときに、その環境のCSS/骨格を再取得して描画し直す。 */
