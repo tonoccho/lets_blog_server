@@ -703,8 +703,8 @@ class ArticlePreviewServiceTest {
     }
 
     @Test
-    void renderSkeleton_SSHトランスポートのサイトは本番でも非公開投稿の実ページを返す() {
-        Project project = projectWithMaster("production", null, 40L);
+    void renderSkeleton_SSHトランスポートの非本番サイトは非公開投稿の実ページを返す() {
+        Project project = projectWithMaster("test", 40L, null);
         when(projectService.getProjectEntity(1L)).thenReturn(project);
         Site site = wordPressSite(40L, "http://production.example.com");
         site.setSiteKey("production-site");
@@ -736,8 +736,29 @@ class ArticlePreviewServiceTest {
     }
 
     @Test
-    void renderSkeleton_非公開投稿経路はfrontmatterのslug_categories_tagsを解決して投稿へ渡す() {
+    void renderSkeleton_本番サイトはSSH認証情報があっても非公開投稿経路を使わず従来経路にフォールバックする() {
         Project project = projectWithMaster("production", null, 40L);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteRepository.findById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+        server.expect(requestTo("http://production.example.com/wp-json/wp/v2/posts?per_page=1&orderby=date"
+                        + "&order=desc&_fields=id,link,title,content"))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 40L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+
+        assertFalse(response.available());
+        assertTrue(response.reason().contains("参照記事が見つかりませんでした"));
+        verifyNoInteractions(cmsAdapterFactory);
+        verifyNoInteractions(previewSkeletonFetcher);
+    }
+
+    @Test
+    void renderSkeleton_非公開投稿経路はfrontmatterのslug_categories_tagsを解決して投稿へ渡す() {
+        Project project = projectWithMaster("test", 40L, null);
         when(projectService.getProjectEntity(1L)).thenReturn(project);
         Site site = wordPressSite(40L, "http://production.example.com");
         site.setSiteKey("production-site");
@@ -773,7 +794,7 @@ class ArticlePreviewServiceTest {
 
     @Test
     void renderSkeleton_アイキャッチアップロード失敗時はavailableをtrueに保ったままwarningを返す() {
-        Project project = projectWithMaster("production", null, 40L);
+        Project project = projectWithMaster("test", 40L, null);
         when(projectService.getProjectEntity(1L)).thenReturn(project);
         Site site = wordPressSite(40L, "http://production.example.com");
         site.setSiteKey("production-site");
@@ -832,7 +853,7 @@ class ArticlePreviewServiceTest {
 
     @Test
     void renderSkeleton_投稿作成後にCookie発行が失敗しても投稿IDは呼び出し側へ返す() {
-        Project project = projectWithMaster("production", null, 40L);
+        Project project = projectWithMaster("test", 40L, null);
         when(projectService.getProjectEntity(1L)).thenReturn(project);
         Site site = wordPressSite(40L, "http://production.example.com");
         site.setSiteKey("production-site");

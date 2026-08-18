@@ -327,12 +327,19 @@ public class ArticlePreviewService {
      * 参照記事が存在しない、差し替え位置を特定できない等の場合はavailable=falseを返し、
      * 呼び出し側で従来の表示(テーマDOM構造を再現しないプレーンな表示)へフォールバックする。
      *
-     * ただし対象サイトの認証情報がサーバー側コード実行手段を持つ経路(managed WordPressのagent
-     * transport、またはSSH transport)の場合は、この差し替え探索を行わず、プレビュー対象記事そのものを
-     * 非公開(private)投稿として実際にWordPressへ作成し、その実ページを直接閲覧する経路
-     * ({@link #renderRealPrivatePost}参照)を使う(本番/非本番いずれも共通)。こちらは差し替え位置の
-     * 特定が原理的に不要なため、上記のような特定失敗が発生しない。REST(Application Password)のみの
+     * ただし対象サイトが本番以外、かつ認証情報がサーバー側コード実行手段を持つ経路(managed
+     * WordPressのagent transport、またはSSH transport)の場合は、この差し替え探索を行わず、
+     * プレビュー対象記事そのものを非公開(private)投稿として実際にWordPressへ作成し、その実ページを
+     * 直接閲覧する経路({@link #renderRealPrivatePost}参照)を使う。こちらは差し替え位置の特定が
+     * 原理的に不要なため、上記のような特定失敗が発生しない。REST(Application Password)のみの
      * 経路はサーバー側で認証Cookieを発行できないため、従来のスクレイプ&amp;スプライス経路を使う。
+     *
+     * 本番サイトは一旦この経路の対象から除外している(issue #483フォローアップ)。本番はCloudflare等の
+     * ボット対策(Managed Challenge)を経由することが多く、Playwrightのヘッドレスブラウザは自動化として
+     * 検知され、待っても自動突破できない対話式チャレンジへ誘導されてプレビューが常に空白になる上、
+     * 非公開投稿だけが実際のサイトに作成されてしまう(閲覧できないのに投稿だけは残る)。ボット対策側の
+     * 例外設定なしにコード側だけで確実に解消する手段が無いため、本番は安全側の従来経路(スクレイプ&splice、
+     * 参照記事が無ければavailable=false)へ戻す。
      */
     public ThemeSkeletonResponse renderSkeleton(
             Long projectId, Long siteId, String title, String contentHtml, String featuredImageDataUri,
@@ -343,13 +350,15 @@ public class ArticlePreviewService {
             return new ThemeSkeletonResponse(null, false, resolution.errorReason(), false, "");
         }
         Site site = resolution.site();
+        boolean isProductionSite = project.getProductionSiteId() != null
+                && project.getProductionSiteId().equals(site.getId());
 
         CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
         // usernameは閲覧用Cookie発行(generateAuthCookie)がなりすます対象のWordPressユーザーを
         // 特定するのに必須。無ければCookieを発行できず非公開投稿を閲覧できないため、その場合は
         // 投稿の作成自体を行わず(孤立した非公開投稿を残さないため)従来のスクレイプ&スプライス経路へ
         // フォールバックする(SSH transportではusernameがそもそも登録されていないサイトがありうる)。
-        if (credentials instanceof CmsCredentials.WordPressCredentials wpCredentials
+        if (!isProductionSite && credentials instanceof CmsCredentials.WordPressCredentials wpCredentials
                 && (wpCredentials.isAgent() || wpCredentials.isSsh())
                 && StringUtils.hasText(wpCredentials.username())) {
             return renderRealPrivatePost(site, credentials, title, contentHtml, featuredImageDataUri,
