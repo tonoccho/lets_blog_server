@@ -327,10 +327,12 @@ public class ArticlePreviewService {
      * 参照記事が存在しない、差し替え位置を特定できない等の場合はavailable=falseを返し、
      * 呼び出し側で従来の表示(テーマDOM構造を再現しないプレーンな表示)へフォールバックする。
      *
-     * ただし対象サイトが本番以外(ローカル/テスト)かつmanaged WordPress(agent transport)の場合は、
-     * この差し替え探索を行わず、プレビュー対象記事そのものを非公開(private)投稿として実際に
-     * WordPressへ作成し、その実ページを直接閲覧する経路({@link #renderRealPrivatePost}参照)を使う。
-     * こちらは差し替え位置の特定が原理的に不要なため、上記のような特定失敗が発生しない。
+     * ただし対象サイトの認証情報がサーバー側コード実行手段を持つ経路(managed WordPressのagent
+     * transport、またはSSH transport)の場合は、この差し替え探索を行わず、プレビュー対象記事そのものを
+     * 非公開(private)投稿として実際にWordPressへ作成し、その実ページを直接閲覧する経路
+     * ({@link #renderRealPrivatePost}参照)を使う(本番/非本番いずれも共通)。こちらは差し替え位置の
+     * 特定が原理的に不要なため、上記のような特定失敗が発生しない。REST(Application Password)のみの
+     * 経路はサーバー側で認証Cookieを発行できないため、従来のスクレイプ&amp;スプライス経路を使う。
      */
     public ThemeSkeletonResponse renderSkeleton(
             Long projectId, Long siteId, String title, String contentHtml, String featuredImageDataUri,
@@ -342,12 +344,16 @@ public class ArticlePreviewService {
         }
         Site site = resolution.site();
 
-        if (!isProductionSite(site, projectId)) {
-            CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
-            if (credentials instanceof CmsCredentials.WordPressCredentials wpCredentials && wpCredentials.isAgent()) {
-                return renderRealPrivatePost(
-                        site, credentials, title, contentHtml, featuredImageDataUri, existingPreviewPostId);
-            }
+        CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
+        // usernameは閲覧用Cookie発行(generateAuthCookie)がなりすます対象のWordPressユーザーを
+        // 特定するのに必須。無ければCookieを発行できず非公開投稿を閲覧できないため、その場合は
+        // 投稿の作成自体を行わず(孤立した非公開投稿を残さないため)従来のスクレイプ&スプライス経路へ
+        // フォールバックする(SSH transportではusernameがそもそも登録されていないサイトがありうる)。
+        if (credentials instanceof CmsCredentials.WordPressCredentials wpCredentials
+                && (wpCredentials.isAgent() || wpCredentials.isSsh())
+                && StringUtils.hasText(wpCredentials.username())) {
+            return renderRealPrivatePost(
+                    site, credentials, title, contentHtml, featuredImageDataUri, existingPreviewPostId);
         }
 
         String fetchOrigin = site.getBaseUrl();
@@ -412,24 +418,14 @@ public class ArticlePreviewService {
     }
 
     /**
-     * このサイトがプロジェクトの本番環境かどうか。{@link PostPublishService#isProductionSite}と
-     * 同じ規約(Project.productionSiteIdとの比較)。本番環境への書き込みを避けるための判定に使う。
-     */
-    private boolean isProductionSite(Site site, Long projectId) {
-        if (projectId == null) {
-            return false;
-        }
-        Project project = projectService.getProjectEntity(projectId);
-        return project != null && site.getId().equals(project.getProductionSiteId());
-    }
-
-    /**
      * プレビュー対象記事そのものを非公開(private)投稿としてWordPressへ作成/更新し、その実ページを
      * 認証Cookie付きで直接閲覧する。差し替え位置の探索を行わないため、{@link #renderSkeleton}の
      * スクレイピング&amp;スプライス経路と異なり、本文の位置を特定できず失敗するケースが発生しない。
      *
-     * managed WordPress(agent transport)のローカル/テスト環境限定({@link #renderSkeleton}のガード参照)。
-     * wp-cliをサーバー側で実行できる経路でのみ、閲覧用の認証Cookieをリモート発行できるため。
+     * サーバー側でwp-cliを実行できる経路(managed WordPressのagent transport、またはSSH transport)
+     * 限定({@link #renderSkeleton}のガード参照)。そうした経路でのみ、閲覧用の認証Cookieをリモート
+     * 発行できるため。本番環境であっても、対象サイトの認証情報がこれらの経路であれば同じ処理を使う
+     * (実データベースへ非公開投稿として書き込みが発生する点に注意)。
      */
     private ThemeSkeletonResponse renderRealPrivatePost(
             Site site, CmsCredentials credentials, String title, String contentHtml,
@@ -437,6 +433,10 @@ public class ArticlePreviewService {
         CmsAdapter cmsAdapter = cmsAdapterFactory.resolve(credentials.cmsType());
 
         String featuredMediaId = null;
+        // アップロード失敗はここでは中断せず、投稿自体はアイキャッチ無しで継続する
+        // (プレビューの本文確認自体は妨げないため)。ただし利用者がアイキャッチの欠落に
+        // 気付けるよう、成功レスポンスのwarningとして呼び出し側(拡張機能)へ伝える。
+        String eyecatchWarning = null;
         if (StringUtils.hasText(featuredImageDataUri)) {
             try {
                 DecodedDataUri decoded = decodeDataUri(featuredImageDataUri);
@@ -445,6 +445,7 @@ public class ArticlePreviewService {
                 featuredMediaId = media.id();
             } catch (Exception e) {
                 logger.warn("プレビュー用アイキャッチのアップロードに失敗しました: {}", site.getSiteKey(), e);
+                eyecatchWarning = "アイキャッチ画像のアップロードに失敗しました: " + e.getMessage();
             }
         }
 
@@ -452,14 +453,24 @@ public class ArticlePreviewService {
                 title, null, contentHtml, "private", List.of(), List.of(), featuredMediaId, null);
 
         PostResult result;
-        AuthCookie cookie;
         try {
             result = cmsAdapter.createOrUpdatePost(credentials, content, existingPreviewPostId);
-            cookie = cmsAdapter.generateAuthCookie(credentials);
         } catch (Exception e) {
-            logger.warn("プレビュー用非公開投稿の作成/認証Cookie発行に失敗しました: {}", site.getSiteKey(), e);
+            logger.warn("プレビュー用非公開投稿の作成に失敗しました: {}", site.getSiteKey(), e);
             return new ThemeSkeletonResponse(
                     null, false, "非公開投稿の作成に失敗しました: " + e.getMessage(), false, "", existingPreviewPostId);
+        }
+
+        // ここから先で失敗しても投稿自体は作成/更新済みのため、result.id()を返して呼び出し側
+        // (拡張機能)が追跡・削除できるようにする(existingPreviewPostIdのままだと、投稿がAPI側では
+        // 孤立し、パネルを閉じても削除できなくなる)。
+        AuthCookie cookie;
+        try {
+            cookie = cmsAdapter.generateAuthCookie(credentials);
+        } catch (Exception e) {
+            logger.warn("プレビュー用投稿の認証Cookie発行に失敗しました: {}", site.getSiteKey(), e);
+            return new ThemeSkeletonResponse(
+                    null, false, "認証Cookieの発行に失敗しました: " + e.getMessage(), false, "", result.id());
         }
 
         String publicOrigin = originOf(site.getBaseUrl());
@@ -483,7 +494,7 @@ public class ArticlePreviewService {
             return new ThemeSkeletonResponse(fetched.html(), false, fetched.reason(), false, css, result.id());
         }
         String html = internalOrigin != null ? fetched.html().replace(internalOrigin, publicOrigin) : fetched.html();
-        return new ThemeSkeletonResponse(html, true, null, false, css, result.id());
+        return new ThemeSkeletonResponse(html, true, null, false, css, result.id(), eyecatchWarning);
     }
 
     /** data URI(data:&lt;contentType&gt;;base64,&lt;data&gt;)をデコードした結果。 */

@@ -1205,6 +1205,11 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
           if (skeleton.available && skeleton.html) {
             bodyHtml = skeleton.html;
             usingSkeleton = true;
+            // available=trueでも、アイキャッチアップロード失敗等の非致命的な警告が
+            // 付随している場合がある(ローカル/テスト環境の非公開投稿経路)。
+            if (skeleton.warning) {
+              warning = appendWarning(warning, `${targetSite.siteName}: ${skeleton.warning}`);
+            }
           } else {
             // デバッグログのみだと、利用者は「なぜヘッダー/サイドバー等の実テーマ構造が
             // 表示されていないか」に気付けない(環境によって参照記事の有無が異なり、

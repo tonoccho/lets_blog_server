@@ -231,6 +231,11 @@ export const ThemeSkeletonResultSchema = z.object({
    * 従来のスクレイピング&スプライス経路(本番環境等)ではnull。
    */
   previewPostId: z.string().nullish(),
+  /**
+   * html自体は取得できた(available=true)ものの、アイキャッチのアップロード失敗等
+   * 付随処理の一部が失敗した場合の非致命的な警告文。呼び出し側でプレビューへ表示する。
+   */
+  warning: z.string().nullish(),
 });
 export type ThemeSkeletonResult = z.infer<typeof ThemeSkeletonResultSchema>;
 

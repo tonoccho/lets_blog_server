@@ -689,4 +689,126 @@ class ArticlePreviewServiceTest {
         assertTrue(response.available());
         assertTrue(response.css().contains(".custom-tag { color: hotpink; }"));
     }
+
+    private com.letsblog.api.cms.CmsCredentials.WordPressCredentials sshCredentials() {
+        return new com.letsblog.api.cms.CmsCredentials.WordPressCredentials(
+                "http://production.example.com", "admin", null,
+                "SSH", "ssh.example.com", 22, "deploy", "/var/www/html", "PRIVATE-KEY-PEM", null, null);
+    }
+
+    @Test
+    void renderSkeleton_SSHトランスポートのサイトは本番でも非公開投稿の実ページを返す() {
+        Project project = projectWithMaster("production", null, 40L);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteRepository.findById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+
+        com.letsblog.api.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.createOrUpdatePost(org.mockito.ArgumentMatchers.eq(sshCredentials()),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn(new com.letsblog.api.cms.PostResult(
+                        "99", "http://production.example.com/?p=99", "private"));
+        when(cmsAdapter.generateAuthCookie(sshCredentials()))
+                .thenReturn(new com.letsblog.api.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
+        when(previewSkeletonFetcher.fetchRealPost(
+                "http://production.example.com/?p=99", "wordpress_logged_in_x", "cookie-value"))
+                .thenReturn(new ThemeSkeletonResponse("<article>real page</article>", true, null, false, ""));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(1L, 40L, "新タイトル", "<p>新本文</p>", null, null);
+
+        assertTrue(response.available());
+        assertEquals("<article>real page</article>", response.html());
+        assertEquals("99", response.previewPostId());
+        verify(previewSkeletonFetcher, org.mockito.Mockito.never()).fetchAndSplice(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void renderSkeleton_アイキャッチアップロード失敗時はavailableをtrueに保ったままwarningを返す() {
+        Project project = projectWithMaster("production", null, 40L);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteRepository.findById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+
+        com.letsblog.api.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.uploadMedia(org.mockito.ArgumentMatchers.eq(sshCredentials()),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new RuntimeException("メディアのアップロードに失敗しました"));
+        org.mockito.ArgumentCaptor<com.letsblog.api.cms.PostContent> contentCaptor =
+                org.mockito.ArgumentCaptor.forClass(com.letsblog.api.cms.PostContent.class);
+        when(cmsAdapter.createOrUpdatePost(org.mockito.ArgumentMatchers.eq(sshCredentials()),
+                contentCaptor.capture(), org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn(new com.letsblog.api.cms.PostResult(
+                        "99", "http://production.example.com/?p=99", "private"));
+        when(cmsAdapter.generateAuthCookie(sshCredentials()))
+                .thenReturn(new com.letsblog.api.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
+        when(previewSkeletonFetcher.fetchRealPost(
+                "http://production.example.com/?p=99", "wordpress_logged_in_x", "cookie-value"))
+                .thenReturn(new ThemeSkeletonResponse("<article>real page</article>", true, null, false, ""));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 40L, "新タイトル", "<p>新本文</p>", "data:image/png;base64,AAAA", null);
+
+        assertTrue(response.available());
+        assertTrue(response.warning() != null && response.warning().contains("アイキャッチ"));
+        assertEquals(null, contentCaptor.getValue().featuredMediaId());
+    }
+
+    @Test
+    void renderSkeleton_SSH認証情報にusernameが無い場合は投稿を作成せず従来経路にフォールバックする() {
+        Project project = projectWithMaster("production", null, 40L);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteRepository.findById(40L)).thenReturn(Optional.of(site));
+        com.letsblog.api.cms.CmsCredentials.WordPressCredentials credsWithoutUsername =
+                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials(
+                        "http://production.example.com", null, null,
+                        "SSH", "ssh.example.com", 22, "deploy", "/var/www/html", "PRIVATE-KEY-PEM", null, null);
+        when(siteService.getCredentials("production-site")).thenReturn(credsWithoutUsername);
+        server.expect(requestTo("http://production.example.com/wp-json/wp/v2/posts?per_page=1&orderby=date"
+                        + "&order=desc&_fields=id,link,title,content"))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(1L, 40L, "新タイトル", "<p>新本文</p>", null, null);
+
+        assertFalse(response.available());
+        assertTrue(response.reason().contains("参照記事が見つかりませんでした"));
+        verifyNoInteractions(cmsAdapterFactory);
+    }
+
+    @Test
+    void renderSkeleton_投稿作成後にCookie発行が失敗しても投稿IDは呼び出し側へ返す() {
+        Project project = projectWithMaster("production", null, 40L);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteRepository.findById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+
+        com.letsblog.api.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.createOrUpdatePost(org.mockito.ArgumentMatchers.eq(sshCredentials()),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn(new com.letsblog.api.cms.PostResult(
+                        "99", "http://production.example.com/?p=99", "private"));
+        when(cmsAdapter.generateAuthCookie(sshCredentials()))
+                .thenThrow(new RuntimeException("ユーザー 'null' が見つかりません"));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(1L, 40L, "新タイトル", "<p>新本文</p>", null, null);
+
+        assertFalse(response.available());
+        // 投稿自体は作成済みのため、拡張機能側が追跡・削除できるようpreviewPostIdを返す
+        // (existingPreviewPostId(=null)のままだと投稿がAPI側では孤立し、削除できなくなる)。
+        assertEquals("99", response.previewPostId());
+    }
 }

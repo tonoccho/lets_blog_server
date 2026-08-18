@@ -107,6 +107,42 @@ class WordPressAdapterTest {
     }
 
     @Test
+    void testGenerateAuthCookie_SSHトランスポートはWordPressSshOperationsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = sshCredentials();
+        AuthCookie cookie = new AuthCookie("wordpress_logged_in_x", "value");
+        when(sshOperations.generateAuthCookie(creds)).thenReturn(cookie);
+
+        AuthCookie result = adapter.generateAuthCookie(creds);
+
+        assertEquals(cookie, result);
+        verify(sshOperations).generateAuthCookie(creds);
+        verify(agentOperations, never()).generateAuthCookie(any());
+    }
+
+    @Test
+    void testGenerateAuthCookie_AGENTトランスポートはWordPressAgentOperationsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = agentCredentials();
+        AuthCookie cookie = new AuthCookie("wordpress_logged_in_x", "value");
+        when(agentOperations.generateAuthCookie(creds)).thenReturn(cookie);
+
+        AuthCookie result = adapter.generateAuthCookie(creds);
+
+        assertEquals(cookie, result);
+        verify(agentOperations).generateAuthCookie(creds);
+        verify(sshOperations, never()).generateAuthCookie(any());
+    }
+
+    @Test
+    void testGenerateAuthCookie_RESTトランスポートは未対応で例外() {
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        assertThrows(UnsupportedOperationException.class, () -> adapter.generateAuthCookie(creds));
+        verify(sshOperations, never()).generateAuthCookie(any());
+        verify(agentOperations, never()).generateAuthCookie(any());
+    }
+
+    @Test
     void testCreatePost() {
         server.expect(requestTo("http://example.com/wp-json/wp/v2/posts"))
                 .andExpect(method(POST))

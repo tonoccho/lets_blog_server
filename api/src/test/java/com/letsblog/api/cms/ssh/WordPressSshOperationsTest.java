@@ -57,6 +57,12 @@ class WordPressSshOperationsTest {
                 "SSH", "203.0.113.5", 22, "deploy", wpPath, "PRIVATE-KEY-PEM", "SHA256:pinned", null);
     }
 
+    private WordPressCredentials credsWithUsername(String username) {
+        return new WordPressCredentials(
+                "https://example.com", username, null,
+                "SSH", "203.0.113.5", 22, "deploy", "/var/www/html", "PRIVATE-KEY-PEM", "SHA256:pinned", null);
+    }
+
     private SshCommandResult ok(String stdout) {
         return new SshCommandResult(0, stdout, "", "SHA256:observed");
     }
@@ -417,6 +423,38 @@ class WordPressSshOperationsTest {
         when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("post not found"));
 
         assertThrows(SshOperationException.class, () -> operations.deletePost(creds(), "99"));
+    }
+
+    @Test
+    void generateAuthCookie_wp_evalの結果からCookieを組み立てる() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"name\":\"wordpress_logged_in_abc\",\"value\":\"admin|123|token|hash\"}"));
+
+        com.letsblog.api.cms.AuthCookie cookie = operations.generateAuthCookie(credsWithUsername("admin"));
+
+        assertEquals("wordpress_logged_in_abc", cookie.name());
+        assertEquals("admin|123|token|hash", cookie.value());
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getValue().contains("eval"));
+        assertEquals(true, commandCaptor.getValue().contains("get_user_by"));
+    }
+
+    @Test
+    void generateAuthCookie_ユーザーが見つからない場合は例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"error\":\"user_not_found\"}"));
+
+        assertThrows(SshOperationException.class,
+                () -> operations.generateAuthCookie(credsWithUsername("nobody")));
+    }
+
+    @Test
+    void generateAuthCookie_wp_eval失敗時は例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("eval error"));
+
+        assertThrows(SshOperationException.class,
+                () -> operations.generateAuthCookie(credsWithUsername("admin")));
     }
 
     @Test
