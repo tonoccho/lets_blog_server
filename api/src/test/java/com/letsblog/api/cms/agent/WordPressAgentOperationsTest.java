@@ -182,6 +182,34 @@ class WordPressAgentOperationsTest {
     }
 
     @Test
+    void postExists_存在すればtrueを返す() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/post-exists"))
+                .andExpect(content().json("{\"slug\":\"main\",\"postId\":\"42\"}"))
+                .andRespond(withSuccess("{\"exists\":true}", MediaType.APPLICATION_JSON));
+
+        assertEquals(true, operations.postExists(creds(), "42"));
+        server.verify();
+    }
+
+    @Test
+    void postExists_存在しなければfalseを返す() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/post-exists"))
+                .andRespond(withSuccess("{\"exists\":false}", MediaType.APPLICATION_JSON));
+
+        assertEquals(false, operations.postExists(creds(), "42"));
+    }
+
+    @Test
+    void postExists_エージェント接続失敗時は判定不能としてtrueを返す() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/post-exists"))
+                .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"boom\"}"));
+
+        assertEquals(true, operations.postExists(creds(), "42"));
+    }
+
+    @Test
     void deletePost_成功時は例外を投げない() {
         server.expect(requestTo("http://wordpress:9000/wp-cli/post-delete"))
                 .andExpect(content().json("{\"slug\":\"main\",\"postId\":\"99\"}"))

@@ -125,7 +125,18 @@ public class PostPublishService {
         // ブロック記法(次行のplantUmlEmbedService)とは併存し、置き換えない。
         markdown = plantUmlTagRenderService.render(credentials, markdown);
         markdown = plantUmlEmbedService.embedDiagrams(credentials, markdown);
-        Map<String, UploadedImageInfo> priorUploads = loadPriorUploadedImages(site.getId(), command.wpPostId());
+        // 前回投稿時にアップロード済みの画像を再利用するキャッシュは、そのwpPostIdに紐づけて記憶している。
+        // wpPostId自体がCMS側で削除される等して実在しなくなっている場合、一緒にアップロードした画像も
+        // 削除されている可能性が高く、キャッシュされたURLが既にリンク切れであることがある(issue #493)。
+        // 投稿自体の作成/更新時のフォールバック(createOrUpdatePost実装内)とは別に、画像再利用の可否を
+        // 先に判定する必要がある(画像URLは投稿本文の組み立てに使うため、投稿作成より前に確定させるため)。
+        String wpPostIdForImageCache = command.wpPostId();
+        if (wpPostIdForImageCache != null && !cmsAdapter.postExists(credentials, wpPostIdForImageCache)) {
+            log.info("wpPostId={} はCMS側に存在しないため、前回アップロード画像の再利用キャッシュは使用しません",
+                    wpPostIdForImageCache);
+            wpPostIdForImageCache = null;
+        }
+        Map<String, UploadedImageInfo> priorUploads = loadPriorUploadedImages(site.getId(), wpPostIdForImageCache);
         ImageReplacementResult imageResult = replaceImageReferences(
                 cmsAdapter, credentials, markdown, command.images(), command.imageReferences(),
                 command.slug(), command.title(), command.featuredImageFilename(), priorUploads, projectId);

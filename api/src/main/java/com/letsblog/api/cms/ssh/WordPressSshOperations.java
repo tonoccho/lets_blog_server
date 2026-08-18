@@ -657,8 +657,11 @@ public class WordPressSshOperations {
         return fetchPostResult(creds, postId);
     }
 
-    /** 指定IDの投稿がWordPress側に実在するかを`wp post get`の終了ステータスで判定する。 */
-    private boolean postExists(WordPressCredentials creds, String postId) {
+    /**
+     * 指定IDの投稿がWordPress側に実在するかを`wp post get`の終了ステータスで判定する。
+     * WordPressAdapter.postExists(issue #493)からも呼ばれるためpublic。
+     */
+    public boolean postExists(WordPressCredentials creds, String postId) {
         return exec(creds, wpCli(creds, "post get " + ShellQuote.single(postId) + " --field=ID")).ok();
     }
 

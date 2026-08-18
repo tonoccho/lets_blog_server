@@ -125,6 +125,28 @@ public class WordPressAdapter implements CmsAdapter {
     }
 
     @Override
+    public boolean postExists(CmsCredentials credentials, String postId) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.postExists(creds, postId);
+        }
+        if (creds.isAgent()) {
+            return agentOperations.postExists(creds, postId);
+        }
+        RestClient client = buildClient(creds);
+        try {
+            client.get().uri("/wp-json/wp/v2/posts/" + postId).retrieve().toBodilessEntity();
+            return true;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                return false;
+            }
+            log.warn("投稿の実在確認に失敗しました (postId={}): {} {}", postId, e.getStatusCode(), e.getMessage());
+            return true;
+        }
+    }
+
+    @Override
     public MediaUploadResult uploadMedia(CmsCredentials credentials, String filename, String contentType, byte[] data) {
         CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
         if (creds.isSsh()) {
