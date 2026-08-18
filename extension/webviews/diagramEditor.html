@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="{{csp}}">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Diagram Editor</title>
+{{sharedStyles}}
+<link rel="stylesheet" href="{{styleUri}}">
+</head>
+<body>
+<div class="container">
+  <div class="toolbar">
+    <label for="nameInput">名前</label>
+    <input type="text" id="nameInput" placeholder="ダイアグラム名">
+    <div class="spacer"></div>
+    <button type="button" id="insertButton" class="primary" style="display: none;">記事に挿入</button>
+    <button type="button" id="overwriteButton" class="primary" style="display: none;">上書き保存</button>
+    <button type="button" id="saveAsNewButton" style="display: none;">新規保存として保存</button>
+    <button type="button" id="cancelButton">キャンセル</button>
+  </div>
+  <div id="message" role="status" aria-live="polite"></div>
+  <div class="frame-wrapper">
+    <iframe id="drawioFrame" title="draw.io エディタ"></iframe>
+  </div>
+</div>
+
+{{sharedScripts}}
+<script nonce="{{nonce}}" src="{{scriptUri}}"></script>
+</body>
+</html>
