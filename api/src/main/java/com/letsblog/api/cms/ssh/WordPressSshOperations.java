@@ -46,6 +46,23 @@ public class WordPressSshOperations {
     private final SshCommandExecutor executor;
     private final ObjectMapper objectMapper;
 
+    /** provision-agent(managed)側のletsblog-allow-svg-upload.phpと同内容(issue #489)。 */
+    private static final String SVG_UPLOAD_MU_PLUGIN = """
+            <?php
+            add_filter('upload_mimes', function ($mimes) {
+                $mimes['svg'] = 'image/svg+xml';
+                return $mimes;
+            });
+            add_filter('wp_check_filetype_and_ext', function ($data, $file, $filename, $mimes) {
+                if (empty($data['type'])) {
+                    $check = wp_check_filetype($filename, $mimes);
+                    $data['ext'] = $check['ext'];
+                    $data['type'] = $check['type'];
+                }
+                return $data;
+            }, 10, 4);
+            """;
+
     /**
      * 疎通確認を「1. SSH接続」「2. wp core versionの実行」の2段階で行い、
      * どちらの段階で失敗したかをfailureReasonに含めて返す。
@@ -768,6 +785,7 @@ public class WordPressSshOperations {
     public MediaUploadResult uploadMedia(WordPressCredentials creds, String filename, String contentType,
             byte[] data) {
         SshConnectionParams params = connectionParams(creds);
+        ensureSvgUploadMuPlugin(creds, params);
         String remotePath = "/tmp/letsblog-media-" + UUID.randomUUID() + "-" + sanitizeFilename(filename);
         executor.putFile(params, data, remotePath);
         try {
@@ -790,6 +808,24 @@ public class WordPressSshOperations {
         } finally {
             executor.removeFile(params, remotePath);
         }
+    }
+
+    /**
+     * WordPressコアはデフォルトでSVG(image/svg+xml)をupload_mimesに含めないため、SVG画像
+     * (記事投稿時にImageResizeServiceがImageIOでデコードできない形式として無変換で送ってくる)を
+     * `wp media import`で取り込もうとすると"Sorry, you are not allowed to upload this file
+     * type."(このファイルタイプをアップロードする権限がありません)で失敗する(issue #489。
+     * managed/provision-agent向けには#485で同様の対応済み)。他形式の挙動は変えずSVGのみ許可する
+     * mu-pluginをリモートへ配置する(未配置の場合のみ)。
+     */
+    private void ensureSvgUploadMuPlugin(WordPressCredentials creds, SshConnectionParams params) {
+        String muPluginPath = creds.wpPath() + "/wp-content/mu-plugins/letsblog-allow-svg-upload.php";
+        SshCommandResult checkResult = exec(creds, "test -f " + ShellQuote.single(muPluginPath));
+        if (checkResult.ok()) {
+            return;
+        }
+        exec(creds, "mkdir -p " + ShellQuote.single(creds.wpPath() + "/wp-content/mu-plugins"));
+        executor.putFile(params, SVG_UPLOAD_MU_PLUGIN.getBytes(StandardCharsets.UTF_8), muPluginPath);
     }
 
     private String sanitizeFilename(String filename) {
