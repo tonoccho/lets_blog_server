@@ -914,6 +914,19 @@ if ($path === '/wp-cli/post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         respond(404, ['error' => "サイト '$slug' が見つかりません"]);
     }
 
+    // existingPostIdはAPI側(lets_blog.posts)が前回投稿時に記憶したWordPress投稿IDだが、
+    // WordPress側のサイト再構築/DBリセット等で当該投稿が消失していると`post update`が
+    // 「無効な投稿 ID です」で失敗し、投稿自体ができなくなる(issue #487)。更新対象が実在するか
+    // 事前確認し、存在しなければ新規作成として扱う(自己修復。次回以降は新しいIDが記憶される)。
+    if ($existingPostId !== null) {
+        [$existsCode, , ] = runWp(['post', 'get', (string) $existingPostId, '--field=ID', "--path=$sitePath", '--allow-root']);
+        if ($existsCode !== 0) {
+            error_log("[wp-cli/post] existingPostId=" . var_export($existingPostId, true)
+                . " はWordPress側に存在しないため新規作成として扱います");
+            $existingPostId = null;
+        }
+    }
+
     $subArgs = $existingPostId !== null ? ['post', 'update', (string) $existingPostId, '-'] : ['post', 'create', '-'];
     $subArgs[] = "--post_title=$title";
     $subArgs[] = "--post_status=$status";
