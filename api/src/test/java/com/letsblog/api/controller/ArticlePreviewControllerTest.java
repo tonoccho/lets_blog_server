@@ -87,8 +87,10 @@ class ArticlePreviewControllerTest {
     void skeleton_認可後にサービスへ委譲する() {
         ArticlePreviewController controller = controller();
         RenderSkeletonRequest request =
-                new RenderSkeletonRequest("タイトル", "<p>本文</p>", "data:image/png;base64,abc", 20L, null);
-        when(articlePreviewService.renderSkeleton(1L, 20L, "タイトル", "<p>本文</p>", "data:image/png;base64,abc", null))
+                new RenderSkeletonRequest(
+                        "タイトル", "<p>本文</p>", "data:image/png;base64,abc", 20L, null, null, null, null);
+        when(articlePreviewService.renderSkeleton(
+                        1L, 20L, "タイトル", "<p>本文</p>", "data:image/png;base64,abc", null, null, null, null))
                 .thenReturn(new ThemeSkeletonResponse("<article>spliced</article>", true, null, true, ""));
 
         ThemeSkeletonResponse response = controller.skeleton(1L, request);
@@ -103,6 +105,7 @@ class ArticlePreviewControllerTest {
         doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
 
         assertThrows(ForbiddenException.class,
-                () -> controller.skeleton(1L, new RenderSkeletonRequest("タイトル", "<p>本文</p>", null, null, null)));
+                () -> controller.skeleton(1L,
+                        new RenderSkeletonRequest("タイトル", "<p>本文</p>", null, null, null, null, null, null)));
     }
 }

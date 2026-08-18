@@ -565,7 +565,8 @@ class ArticlePreviewServiceTest {
     void renderSkeleton_マスター環境にサイトが紐づいていない場合はavailableがfalse() {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", null, null));
 
-        ThemeSkeletonResponse response = service.renderSkeleton(1L, null, "タイトル", "<p>本文</p>", null, null);
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, null, "タイトル", "<p>本文</p>", null, null, null, null, null);
 
         assertFalse(response.available());
         assertTrue(response.reason().contains("紐づいていません"));
@@ -581,7 +582,8 @@ class ArticlePreviewServiceTest {
                         + "&_fields=id,link,title,content"))
                 .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
 
-        ThemeSkeletonResponse response = service.renderSkeleton(1L, null, "タイトル", "<p>本文</p>", null, null);
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, null, "タイトル", "<p>本文</p>", null, null, null, null, null);
 
         assertFalse(response.available());
         assertTrue(response.reason().contains("参照記事"));
@@ -604,7 +606,8 @@ class ArticlePreviewServiceTest {
                 .thenReturn(new ThemeSkeletonResponse(
                         "<article>spliced</article>", true, null, true, "body { color: red; }"));
 
-        ThemeSkeletonResponse response = service.renderSkeleton(1L, null, "新タイトル", "<p>新本文</p>", null, null);
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, null, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
 
         assertTrue(response.available());
         assertEquals("<article>spliced</article>", response.html());
@@ -635,7 +638,8 @@ class ArticlePreviewServiceTest {
                         true, null, true,
                         "body { background: url(http://wordpress/sites/local-site/wp-content/bg.png); }"));
 
-        ThemeSkeletonResponse response = service.renderSkeleton(1L, 30L, "新タイトル", "<p>新本文</p>", null, null);
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 30L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
 
         assertTrue(response.available());
         assertTrue(response.html().contains("https://localhost/sites/local-site/wp-content/uploads/x.png"));
@@ -659,7 +663,8 @@ class ArticlePreviewServiceTest {
                 .thenReturn(new ThemeSkeletonResponse(
                         null, false, "本文の位置を特定できませんでした", false, "body { color: teal; }"));
 
-        ThemeSkeletonResponse response = service.renderSkeleton(1L, null, "新タイトル", "<p>新本文</p>", null, null);
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, null, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
 
         assertFalse(response.available());
         assertTrue(response.reason().contains("本文の位置を特定できませんでした"));
@@ -684,7 +689,8 @@ class ArticlePreviewServiceTest {
                         "<article>spliced</article>", true, null, true,
                         "/* is_single()限定のCSS */\n.custom-tag { color: hotpink; }"));
 
-        ThemeSkeletonResponse response = service.renderSkeleton(1L, null, "新タイトル", "<p>新本文</p>", null, null);
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, null, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
 
         assertTrue(response.available());
         assertTrue(response.css().contains(".custom-tag { color: hotpink; }"));
@@ -717,7 +723,8 @@ class ArticlePreviewServiceTest {
                 "http://production.example.com/?p=99", "wordpress_logged_in_x", "cookie-value"))
                 .thenReturn(new ThemeSkeletonResponse("<article>real page</article>", true, null, false, ""));
 
-        ThemeSkeletonResponse response = service.renderSkeleton(1L, 40L, "新タイトル", "<p>新本文</p>", null, null);
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 40L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
 
         assertTrue(response.available());
         assertEquals("<article>real page</article>", response.html());
@@ -726,6 +733,42 @@ class ArticlePreviewServiceTest {
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void renderSkeleton_非公開投稿経路はfrontmatterのslug_categories_tagsを解決して投稿へ渡す() {
+        Project project = projectWithMaster("production", null, 40L);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteRepository.findById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+
+        com.letsblog.api.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.resolveCategories(sshCredentials(), java.util.List.of("お知らせ")))
+                .thenReturn(java.util.List.of("5"));
+        when(cmsAdapter.resolveTags(sshCredentials(), java.util.List.of("java", "spring")))
+                .thenReturn(java.util.List.of("11", "12"));
+        org.mockito.ArgumentCaptor<com.letsblog.api.cms.PostContent> contentCaptor =
+                org.mockito.ArgumentCaptor.forClass(com.letsblog.api.cms.PostContent.class);
+        when(cmsAdapter.createOrUpdatePost(org.mockito.ArgumentMatchers.eq(sshCredentials()),
+                contentCaptor.capture(), org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn(new com.letsblog.api.cms.PostResult(
+                        "99", "http://production.example.com/?p=99", "private"));
+        when(cmsAdapter.generateAuthCookie(sshCredentials()))
+                .thenReturn(new com.letsblog.api.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
+        when(previewSkeletonFetcher.fetchRealPost(
+                "http://production.example.com/?p=99", "wordpress_logged_in_x", "cookie-value"))
+                .thenReturn(new ThemeSkeletonResponse("<article>real page</article>", true, null, false, ""));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(1L, 40L, "新タイトル", "<p>新本文</p>", null, null,
+                "my-slug", java.util.List.of("お知らせ"), java.util.List.of("java", "spring"));
+
+        assertTrue(response.available());
+        assertEquals("my-slug", contentCaptor.getValue().slug());
+        assertEquals(java.util.List.of("5"), contentCaptor.getValue().categoryIds());
+        assertEquals(java.util.List.of("11", "12"), contentCaptor.getValue().tagIds());
     }
 
     @Test
@@ -756,7 +799,7 @@ class ArticlePreviewServiceTest {
                 .thenReturn(new ThemeSkeletonResponse("<article>real page</article>", true, null, false, ""));
 
         ThemeSkeletonResponse response = service.renderSkeleton(
-                1L, 40L, "新タイトル", "<p>新本文</p>", "data:image/png;base64,AAAA", null);
+                1L, 40L, "新タイトル", "<p>新本文</p>", "data:image/png;base64,AAAA", null, null, null, null);
 
         assertTrue(response.available());
         assertTrue(response.warning() != null && response.warning().contains("アイキャッチ"));
@@ -779,7 +822,8 @@ class ArticlePreviewServiceTest {
                         + "&order=desc&_fields=id,link,title,content"))
                 .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
 
-        ThemeSkeletonResponse response = service.renderSkeleton(1L, 40L, "新タイトル", "<p>新本文</p>", null, null);
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 40L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
 
         assertFalse(response.available());
         assertTrue(response.reason().contains("参照記事が見つかりませんでした"));
@@ -804,7 +848,8 @@ class ArticlePreviewServiceTest {
         when(cmsAdapter.generateAuthCookie(sshCredentials()))
                 .thenThrow(new RuntimeException("ユーザー 'null' が見つかりません"));
 
-        ThemeSkeletonResponse response = service.renderSkeleton(1L, 40L, "新タイトル", "<p>新本文</p>", null, null);
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 40L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
 
         assertFalse(response.available());
         // 投稿自体は作成済みのため、拡張機能側が追跡・削除できるようpreviewPostIdを返す

@@ -1200,7 +1200,10 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
             title,
             html,
             featuredImageDataUri,
-            existingPreviewPostId
+            existingPreviewPostId,
+            article.data.slug,
+            article.data.categories,
+            article.data.tags
           );
           if (skeleton.available && skeleton.html) {
             bodyHtml = skeleton.html;

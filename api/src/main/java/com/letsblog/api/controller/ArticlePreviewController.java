@@ -58,7 +58,7 @@ public class ArticlePreviewController {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         return articlePreviewService.renderSkeleton(
                 projectId, request.siteId(), request.title(), request.contentHtml(), request.featuredImageDataUri(),
-                request.existingPreviewPostId());
+                request.existingPreviewPostId(), request.slug(), request.categories(), request.tags());
     }
 
     /**

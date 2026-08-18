@@ -842,7 +842,10 @@ export async function renderPreviewSkeleton(
   title: string,
   contentHtml: string,
   featuredImageDataUri: string | undefined,
-  existingPreviewPostId: string | undefined
+  existingPreviewPostId: string | undefined,
+  slug?: string,
+  categories?: string[],
+  tags?: string[]
 ): Promise<schemas.ThemeSkeletonResult> {
   return requestJson(
     serverUrl,
@@ -851,7 +854,9 @@ export async function renderPreviewSkeleton(
       label: 'renderPreviewSkeleton',
       method: 'POST',
       headers: buildHeaders(apiKey, actor),
-      createBody: jsonBody({ title, contentHtml, featuredImageDataUri, siteId, existingPreviewPostId }),
+      createBody: jsonBody({
+        title, contentHtml, featuredImageDataUri, siteId, existingPreviewPostId, slug, categories, tags,
+      }),
     },
     schemas.ThemeSkeletonResultSchema
   );

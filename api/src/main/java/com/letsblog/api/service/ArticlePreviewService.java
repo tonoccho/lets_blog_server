@@ -336,7 +336,7 @@ public class ArticlePreviewService {
      */
     public ThemeSkeletonResponse renderSkeleton(
             Long projectId, Long siteId, String title, String contentHtml, String featuredImageDataUri,
-            String existingPreviewPostId) {
+            String existingPreviewPostId, String slug, List<String> categories, List<String> tags) {
         Project project = projectService.getProjectEntity(projectId);
         SiteResolution resolution = resolveSiteForPreview(project, siteId);
         if (resolution.site() == null) {
@@ -352,8 +352,8 @@ public class ArticlePreviewService {
         if (credentials instanceof CmsCredentials.WordPressCredentials wpCredentials
                 && (wpCredentials.isAgent() || wpCredentials.isSsh())
                 && StringUtils.hasText(wpCredentials.username())) {
-            return renderRealPrivatePost(
-                    site, credentials, title, contentHtml, featuredImageDataUri, existingPreviewPostId);
+            return renderRealPrivatePost(site, credentials, title, contentHtml, featuredImageDataUri,
+                    existingPreviewPostId, slug, categories, tags);
         }
 
         String fetchOrigin = site.getBaseUrl();
@@ -429,8 +429,14 @@ public class ArticlePreviewService {
      */
     private ThemeSkeletonResponse renderRealPrivatePost(
             Site site, CmsCredentials credentials, String title, String contentHtml,
-            String featuredImageDataUri, String existingPreviewPostId) {
+            String featuredImageDataUri, String existingPreviewPostId, String slug,
+            List<String> categories, List<String> tags) {
         CmsAdapter cmsAdapter = cmsAdapterFactory.resolve(credentials.cmsType());
+        // 通常の投稿(PostPublishService)と同様、front matterのcategories/tags(名前)をCMS側の
+        // IDへ解決してから渡す。ここを素通りさせるとプレビュー用の非公開投稿にカテゴリ/タグが
+        // 一切反映されない(issue #483 フィードバック)。
+        List<String> categoryIds = cmsAdapter.resolveCategories(credentials, categories != null ? categories : List.of());
+        List<String> tagIds = cmsAdapter.resolveTags(credentials, tags != null ? tags : List.of());
 
         String featuredMediaId = null;
         // アップロード失敗はここでは中断せず、投稿自体はアイキャッチ無しで継続する
@@ -450,7 +456,7 @@ public class ArticlePreviewService {
         }
 
         PostContent content = new PostContent(
-                title, null, contentHtml, "private", List.of(), List.of(), featuredMediaId, null);
+                title, slug, contentHtml, "private", categoryIds, tagIds, featuredMediaId, null);
 
         PostResult result;
         try {
