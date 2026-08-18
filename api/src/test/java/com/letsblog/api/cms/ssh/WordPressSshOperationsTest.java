@@ -373,6 +373,55 @@ class WordPressSshOperationsTest {
     }
 
     @Test
+    void createOrUpdatePost_existingPostIdがWordPress側に無ければ新規作成へフォールバックする() {
+        // 1回目のisNull()呼び出し = 実在確認(post get)を失敗させ、投稿が消えている状況を再現する。
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(fail("Error: Invalid post ID."))
+                .thenReturn(ok("{\"guid\":\"https://example.com/?p=99\",\"post_status\":\"publish\"}"));
+        when(executor.exec(any(SshConnectionParams.class), any(), notNull())).thenReturn(ok("99\n"));
+
+        PostResult result = operations.createOrUpdatePost(creds(), postContent(), "38");
+
+        assertEquals("99", result.id());
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), notNull());
+        assertEquals(true, commandCaptor.getValue().contains("post create -"));
+        assertEquals(false, commandCaptor.getValue().contains("post update"));
+    }
+
+    @Test
+    void createOrUpdatePost_テーマのPHP警告に隠れたwp_cliのエラーを抽出して例外メッセージにする() {
+        String themeNoise = """
+                Warning: Trying to access array offset on null in /home4/x/public_html/wp-content/themes/jinr/a.php on line 401
+                [18-Aug-2026 21:41:28 UTC] PHP Warning:  Trying to access array offset on null in /home4/x/b.php on line 1190
+                Warning: 無効な投稿 ID です。""";
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok("38"));
+        when(executor.exec(any(SshConnectionParams.class), any(), notNull()))
+                .thenReturn(new SshCommandResult(1, "", themeNoise, null));
+
+        SshOperationException thrown = assertThrows(SshOperationException.class,
+                () -> operations.createOrUpdatePost(creds(), postContent(), "38"));
+
+        assertEquals(true, thrown.getMessage().contains("無効な投稿 ID です。"));
+        assertEquals(false, thrown.getMessage().contains("box-design-setting"));
+        assertEquals(false, thrown.getMessage().contains("on line 401"));
+    }
+
+    @Test
+    void createOrUpdatePost_全てPHP警告なら情報を失わず先頭行を返す() {
+        String onlyNoise = "Warning: Trying to access array offset on null in /home4/x/a.php on line 401\n"
+                + "Warning: Trying to access array offset on null in /home4/x/a.php on line 406";
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok("38"));
+        when(executor.exec(any(SshConnectionParams.class), any(), notNull()))
+                .thenReturn(new SshCommandResult(1, "", onlyNoise, null));
+
+        SshOperationException thrown = assertThrows(SshOperationException.class,
+                () -> operations.createOrUpdatePost(creds(), postContent(), "38"));
+
+        assertEquals(true, thrown.getMessage().contains("on line 401"));
+    }
+
+    @Test
     void createOrUpdatePost_カテゴリとタグを空リストにした更新は明示的にクリアするコマンドを送る() {
         when(executor.exec(any(SshConnectionParams.class), any(), notNull())).thenReturn(ok(""));
         when(executor.exec(any(SshConnectionParams.class), any(), isNull()))

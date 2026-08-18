@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 
 /**
  * SSH+wp-cli経由でWordPressを操作する実装。WordPressAdapterからtransport=SSHの
@@ -45,6 +46,14 @@ public class WordPressSshOperations {
 
     private final SshCommandExecutor executor;
     private final ObjectMapper objectMapper;
+
+    /**
+     * PHP本体が出力する診断行(テーマ/プラグインのWarning/Notice等)の判定パターン。
+     * 「Warning: ... in /path/file.php on line 123」形式(先頭に「[日時] PHP 」が付く場合もある)に一致する。
+     * wp-cli自身のエラー(例:「Warning: 無効な投稿 ID です。」)はこの形式を取らないため一致しない。
+     */
+    private static final Pattern PHP_DIAGNOSTIC_LINE = Pattern.compile(
+            "^(?:\\[[^\\]]*\\]\\s*)?(?:PHP\\s+)?(?:Warning|Notice|Deprecated|Strict Standards):.* in .+ on line \\d+");
 
     /** provision-agent(managed)側のletsblog-allow-svg-upload.phpと同内容(issue #489)。 */
     private static final String SVG_UPLOAD_MU_PLUGIN = """
@@ -622,20 +631,35 @@ public class WordPressSshOperations {
         log.info("SSH投稿コマンド組み立て: existingPostId={}, featuredMediaId={}, args={}",
                 existingPostId, content.featuredMediaId(), fields);
 
-        String subcommand = existingPostId == null
+        // API側(lets_blog.posts)が記憶しているWordPress投稿IDは、WordPress側で当該投稿が
+        // 削除される等で実在しなくなることがある。その状態で`post update`すると
+        // 「無効な投稿 ID です」で失敗し投稿自体ができなくなるため、実在確認して
+        // 存在しなければ新規作成にフォールバックする(issue #491。managed側は#487で対応済み)。
+        String targetPostId = existingPostId;
+        if (targetPostId != null && !postExists(creds, targetPostId)) {
+            log.info("existingPostId={} はWordPress側に存在しないため新規作成として扱います", targetPostId);
+            targetPostId = null;
+        }
+
+        String subcommand = targetPostId == null
                 ? "post create - " + fields + " --porcelain"
-                : "post update " + existingPostId + " - " + fields + " --porcelain";
+                : "post update " + targetPostId + " - " + fields + " --porcelain";
 
         SshCommandResult result = exec(creds, wpCli(creds, subcommand), stdin);
         if (!result.ok()) {
             throw new SshOperationException("WordPress投稿の作成/更新に失敗しました: "
                     + firstLine(result.stderr(), result.stdout()));
         }
-        String postId = existingPostId != null ? existingPostId : result.stdout().strip();
+        String postId = targetPostId != null ? targetPostId : result.stdout().strip();
         if (content.featuredMediaId() != null) {
             setFeaturedMedia(creds, postId, content.featuredMediaId());
         }
         return fetchPostResult(creds, postId);
+    }
+
+    /** 指定IDの投稿がWordPress側に実在するかを`wp post get`の終了ステータスで判定する。 */
+    private boolean postExists(WordPressCredentials creds, String postId) {
+        return exec(creds, wpCli(creds, "post get " + ShellQuote.single(postId) + " --field=ID")).ok();
     }
 
     /**
@@ -855,7 +879,28 @@ public class WordPressSshOperations {
         return "wp --path=" + ShellQuote.single(creds.wpPath()) + " " + subcommand;
     }
 
+    /**
+     * エラー表示用にstderr/stdoutから最初の「意味のある」1行を取り出す。
+     * テーマ/プラグインが出力するPHPのWarning/Notice等は本来のwp-cliエラーより先に大量に出力され、
+     * 単純に先頭1行を取るとエラーの原因が完全に隠れてしまう(issue #491。実際に
+     * 「このファイルタイプをアップロードする権限がありません」「無効な投稿 ID です」が
+     * テーマのWarningに覆い隠され原因調査が難航した)。PHPが出力する診断行は
+     * 「... in /path/to/file.php on line 123」形式である一方、wp-cli自身のエラーは
+     * その形式を取らないため、これを手掛かりに読み飛ばす。
+     * 全行がPHP診断行だった場合は情報を失わないよう従来どおり先頭行を返す。
+     */
     private String firstLine(String... candidates) {
+        for (String candidate : candidates) {
+            if (candidate == null || candidate.isBlank()) {
+                continue;
+            }
+            for (String line : candidate.split("\n")) {
+                String stripped = line.strip();
+                if (!stripped.isEmpty() && !PHP_DIAGNOSTIC_LINE.matcher(stripped).find()) {
+                    return stripped;
+                }
+            }
+        }
         for (String candidate : candidates) {
             if (candidate != null && !candidate.isBlank()) {
                 int newline = candidate.indexOf('\n');
