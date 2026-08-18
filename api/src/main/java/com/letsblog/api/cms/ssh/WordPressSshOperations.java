@@ -659,7 +659,9 @@ public class WordPressSshOperations {
 
     /**
      * 指定IDの投稿がWordPress側に実在するかを`wp post get`の終了ステータスで判定する。
-     * WordPressAdapter.postExists(issue #493)からも呼ばれるためpublic。
+     * WordPressAdapter.postExists(issue #493)からも呼ばれるためpublic。メディア(添付ファイル)も
+     * post_type=attachmentのwp_postsレコードのため、WordPressAdapter.mediaExists(issue #495)
+     * からも同じ判定として再利用される。
      */
     public boolean postExists(WordPressCredentials creds, String postId) {
         return exec(creds, wpCli(creds, "post get " + ShellQuote.single(postId) + " --field=ID")).ok();

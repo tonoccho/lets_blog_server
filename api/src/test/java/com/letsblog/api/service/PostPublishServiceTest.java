@@ -121,6 +121,7 @@ class PostPublishServiceTest {
         lenient().when(cmsAdapter.resolveTags(any(), any())).thenReturn(List.of());
         lenient().when(postRepository.findBySiteIdAndWpPostId(any(), any())).thenReturn(Optional.empty());
         lenient().when(cmsAdapter.postExists(any(), any())).thenReturn(true);
+        lenient().when(cmsAdapter.mediaExists(any(), any())).thenReturn(true);
         lenient().when(currentActorService.getCurrentActorId()).thenReturn(null);
         lenient().when(userSiteAuthorRepository.findByUserIdAndSiteId(any(), any())).thenReturn(Optional.empty());
     }
@@ -513,6 +514,36 @@ class PostPublishServiceTest {
         // existingPostId自体はcreateOrUpdatePostへそのまま渡す(実在確認と作成/更新へのフォールバックは
         // createOrUpdatePost実装内で個別に行うため)。
         verify(cmsAdapter).createOrUpdatePost(any(), any(), eq("55"));
+    }
+
+    @Test
+    void publish_ハッシュが一致してもメディアがCMS側に実在しなければ再アップロードする() throws Exception {
+        // issue #495: 投稿自体は実在するが、その画像だけがメディアライブラリから個別に削除された
+        // ケース。sha256が一致していても、メディア単位の実在確認(mediaExists)がfalseなら
+        // キャッシュされたURLはリンク切れのため再利用してはならない。
+        com.letsblog.api.domain.Post existingPost = new com.letsblog.api.domain.Post();
+        existingPost.setSiteId(1L);
+        existingPost.setWpPostId("55");
+        String sha256 = sha256Hex(new byte[]{1});
+        existingPost.setUploadedImagesJson(
+                "{\"assets/eyecatch.png\":{\"sha256\":\"" + sha256 + "\","
+                        + "\"url\":\"https://example.com/wp-content/uploads/1.png\",\"mediaId\":\"11\"}}");
+        when(postRepository.findBySiteIdAndWpPostId(1L, "55")).thenReturn(Optional.of(existingPost));
+        when(cmsAdapter.mediaExists(credentials, "11")).thenReturn(false);
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
+                .thenReturn(new MediaUploadResult("22", "https://example.com/wp-content/uploads/2.png"));
+
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
+        PostPublishCommand command = new PostPublishCommand(
+                "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", images, null,
+                List.of("assets/eyecatch.png"), null, null);
+
+        service.publish(command);
+
+        verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.png"), any(), any());
     }
 
     private PostPublishCommand scheduledCommand(String publishScheduledAt) {

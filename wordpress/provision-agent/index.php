@@ -1000,6 +1000,10 @@ if ($path === '/wp-cli/post-delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 // API側(lets_blog.posts)が記憶している投稿IDが、WordPress側で削除される等で実在しなくなって
 // いないかを確認するための読み取り専用エンドポイント。API側はこれを使って、その投稿と一緒に
 // アップロードした画像の再利用キャッシュを信頼してよいか判断する(issue #493)。
+// メディア(添付ファイル)もpost_type=attachmentのwp_postsレコードとして保存されているため、
+// `wp post get`は投稿IDだけでなくメディアIDでも同じように動作する。API側はこれを利用して、
+// 個々のメディアがメディアライブラリから削除されていないかの確認にもこのエンドポイントを
+// 再利用している(issue #495)。
 if ($path === '/wp-cli/post-exists' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = (string) ($input['slug'] ?? '');
     $postId = (string) ($input['postId'] ?? '');

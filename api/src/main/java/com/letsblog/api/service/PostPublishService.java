@@ -314,7 +314,18 @@ public class PostPublishService {
                 String sha256 = sha256Hex(bytes);
                 UploadedImageInfo prior = priorUploads.get(reference);
                 UploadedImageInfo current;
-                if (prior != null && prior.sha256().equals(sha256)) {
+                boolean hashMatches = prior != null && prior.sha256().equals(sha256);
+                // ハッシュが一致しても、キャッシュされたメディアがCMS側で(メディアライブラリから
+                // 個別に)削除されている場合は再利用できない。#493は投稿単位の実在確認のみだったため、
+                // 投稿は残っているが特定の画像だけ削除されたケースでは404 URLが再利用されてしまっていた
+                // (issue #495)。sha256が一致した場合に限りメディア単位の実在確認を行う
+                // (常に確認すると再投稿のたびに全画像分のCMS問い合わせが発生してしまうため)。
+                boolean reusePrior = hashMatches && cmsAdapter.mediaExists(credentials, prior.mediaId());
+                if (hashMatches && !reusePrior) {
+                    log.info("画像 '{}' は前回投稿時と同一内容(sha256一致)ですが、CMS側のメディア(mediaId={})が"
+                            + "実在しないため再アップロードします", reference, prior.mediaId());
+                }
+                if (reusePrior) {
                     // 前回投稿時と内容(sha256)が同じ画像は再アップロードせず、既存のURL/media IDを再利用する
                     // (再投稿のたびに同じ画像が重複アップロードされWordPressのメディアライブラリが
                     // 肥大化するのを防ぐ)。
