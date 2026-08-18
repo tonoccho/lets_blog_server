@@ -79,7 +79,7 @@ export class DiagramEditorPanel extends WebviewPanelBase<
       mode: this._mode.kind,
       name: this._mode.kind === 'edit' ? this._mode.name : '無題のダイアグラム',
       xml: this._mode.kind === 'edit' ? this._mode.xml : '',
-      drawioUrl: `${getServerUrl()}/drawio/?embed=1&ui=min&spin=1&proto=json&noSaveBtn=1&noExitBtn=1`,
+      drawioUrl: `${getServerUrl()}/drawio/?embed=1&ui=min&spin=1&proto=json&configure=1&noSaveBtn=1&noExitBtn=1`,
     });
   }
 

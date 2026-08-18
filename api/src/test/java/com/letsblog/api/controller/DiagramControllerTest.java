@@ -143,12 +143,12 @@ class DiagramControllerTest {
     }
 
     @Test
-    void getSvg_content_typeがimage_svg_xml() {
+    void getSvg_content_typeがimage_svg_xmlでUTF8指定() {
         when(diagramRepository.findById(1L)).thenReturn(Optional.of(buildDiagram(1L, 10L, "フロー図")));
 
         ResponseEntity<String> result = controller.getSvg(1L);
 
-        assertEquals("image/svg+xml", result.getHeaders().getContentType().toString());
+        assertEquals("image/svg+xml;charset=UTF-8", result.getHeaders().getContentType().toString());
         assertEquals("<svg></svg>", result.getBody());
     }
 

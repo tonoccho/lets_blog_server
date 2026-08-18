@@ -53,7 +53,7 @@ public class DiagramController {
     public ResponseEntity<String> getSvg(@PathVariable Long id) {
         Diagram diagram = findOrThrow(id);
         return ResponseEntity.ok()
-                .contentType(MediaType.valueOf("image/svg+xml"))
+                .contentType(MediaType.valueOf("image/svg+xml;charset=UTF-8"))
                 .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=" + id + ".svg")
                 .body(diagram.getSvg());
     }

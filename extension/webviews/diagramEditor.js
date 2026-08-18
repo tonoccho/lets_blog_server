@@ -47,10 +47,17 @@
 
   function decodeSvgFromExport(data) {
     // data.data は "data:image/svg+xml;base64,...." 形式。
+    // atob()単体はbase64をバイト単位のバイナリ文字列(Latin1)にしか復元しないため、
+    // UTF-8の日本語ラベルを含むSVGが文字化けする。TextDecoderでUTF-8として復元する。
     const marker = 'base64,';
     const index = data.data.indexOf(marker);
     const base64 = index >= 0 ? data.data.slice(index + marker.length) : data.data;
-    return atob(base64);
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder('utf-8').decode(bytes);
   }
 
   function handleExportResult(data) {
@@ -98,6 +105,13 @@
       return;
     }
 
+    if (data.event === 'configure') {
+      // light-dark()によるアダプティブ配色を無効化する。エクスポートしたSVGは記事に
+      // 埋め込む静的画像であり、light-dark()未対応の描画環境ではfill/strokeが初期値の
+      // 黒にフォールバックし、図形が黒塗りになってしまうため(configure=1と対で必須)。
+      postToDrawio({ action: 'configure', config: { enableLightDarkColors: false } });
+      return;
+    }
     if (data.event === 'init') {
       drawioReady = true;
       postToDrawio({ action: 'load', xml: pendingLoadXml || EMPTY_MXGRAPH_XML, autosave: 1 });

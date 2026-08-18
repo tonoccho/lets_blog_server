@@ -164,6 +164,28 @@ APIキー(`Let's Blog: Set API Key` コマンドで `SERVER_API_KEY` と同じ�
 `NODE_EXTRA_CA_CERTS=/path/to/certs/localhost.crt` を設定してから `code .` 等で起動するか、
 OS/ブラウザの証明書ストアに `certs/localhost.crt` を信頼済み証明書として登録する。
 
+**ダイアグラム機能(draw.io統合)を使う場合は、OS/ブラウザの証明書ストアへの登録が必須。**
+`NODE_EXTRA_CA_CERTS` は拡張ホスト(Node.js)からのAPI呼び出しにのみ有効で、
+draw.ioエディタ画面はVSCode Webview内のiframeとして`https://localhost/drawio/`を
+Chromiumのレンダラープロセスで直接読み込むため、`NODE_EXTRA_CA_CERTS`ではなく
+Chromiumが参照する証明書ストアの信頼設定が必要になる(未登録の場合、証明書エラーで
+iframeの読み込みがブロックされ、パネルが白紙のまま表示される)。
+
+Linuxの場合、VSCode(Electron/Chromium)は `~/.pki/nssdb` のNSS証明書データベースを
+参照する。`libnss3-tools` パッケージの `certutil` で登録する。
+
+```bash
+# 初回のみ: NSSデータベースが無ければ作成する
+mkdir -p ~/.pki/nssdb && certutil -N -d sql:$HOME/.pki/nssdb --empty-password
+
+# 証明書を信頼済みCAとして登録
+certutil -A -d sql:$HOME/.pki/nssdb -t "C,," -n "LetsBlog Local Dev" -i /path/to/certs/localhost.crt
+```
+
+登録後、VSCodeを完全に再起動する(ウィンドウの再読み込みだけでは反映されない場合がある)。
+macOS/Windowsの場合はキーチェーンアクセス/証明書マネージャーへ登録する(OS標準の証明書ストアを
+Chromiumがそのまま参照するため、Linuxのような追加ツールは不要)。
+
 ## 8. ローカル環境へのマスタ環境データの同期(開発用)
 
 ローカルで開発する際、空のプレースホルダデータではなく実際に近いコンテンツ(記事・メディア・
