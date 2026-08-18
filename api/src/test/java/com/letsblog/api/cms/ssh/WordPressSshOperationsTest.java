@@ -461,6 +461,7 @@ class WordPressSshOperationsTest {
     void uploadMedia_成功時はSFTP転送してmedia_importで取り込み一時ファイルを削除する() {
         byte[] data = "image-bytes".getBytes(StandardCharsets.UTF_8);
         when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok(""))
                 .thenReturn(ok("55\n"))
                 .thenReturn(ok("{\"guid\":\"https://example.com/wp-content/uploads/photo.png\"}"));
 
@@ -475,11 +476,50 @@ class WordPressSshOperationsTest {
         assertEquals(true, remotePath.contains("photo.png"));
 
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
-        verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
-        assertEquals(true, commandCaptor.getAllValues().get(0).contains("media import"));
-        assertEquals(true, commandCaptor.getAllValues().get(1).contains("post get 55"));
+        verify(executor, times(3)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getAllValues().get(0).contains("test -f"));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("media import"));
+        assertEquals(true, commandCaptor.getAllValues().get(2).contains("post get 55"));
 
         verify(executor).removeFile(any(SshConnectionParams.class), eq(remotePath));
+    }
+
+    @Test
+    void uploadMedia_SVGアップロード許可mu_pluginが未配置なら配置してから取り込む() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(fail("No such file or directory"))
+                .thenReturn(ok("55\n"))
+                .thenReturn(ok("{\"guid\":\"https://example.com/wp-content/uploads/icon.svg\"}"));
+
+        operations.uploadMedia(creds(), "icon.svg", "image/svg+xml", new byte[]{1});
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(4)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getAllValues().get(0).contains("test -f"));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("mkdir -p"));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("mu-plugins"));
+
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<byte[]> dataCaptor = ArgumentCaptor.forClass(byte[].class);
+        verify(executor, times(2)).putFile(any(SshConnectionParams.class), dataCaptor.capture(), pathCaptor.capture());
+        int muPluginIndex = pathCaptor.getAllValues().indexOf(
+                "/var/www/html/wp-content/mu-plugins/letsblog-allow-svg-upload.php");
+        assertEquals(true, muPluginIndex >= 0);
+        String muPluginContent = new String(dataCaptor.getAllValues().get(muPluginIndex), StandardCharsets.UTF_8);
+        assertEquals(true, muPluginContent.contains("upload_mimes"));
+        assertEquals(true, muPluginContent.contains("image/svg+xml"));
+    }
+
+    @Test
+    void uploadMedia_SVGアップロード許可mu_pluginが配置済みなら再配置しない() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok(""))
+                .thenReturn(ok("55\n"))
+                .thenReturn(ok("{\"guid\":\"https://example.com/wp-content/uploads/icon.svg\"}"));
+
+        operations.uploadMedia(creds(), "icon.svg", "image/svg+xml", new byte[]{1});
+
+        verify(executor, times(1)).putFile(any(SshConnectionParams.class), any(), any());
     }
 
     @Test
@@ -495,6 +535,7 @@ class WordPressSshOperationsTest {
     @Test
     void uploadMedia_情報取得失敗時も一時ファイルを削除してから例外() {
         when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok(""))
                 .thenReturn(ok("55\n"))
                 .thenReturn(fail("not found"));
 
@@ -565,6 +606,7 @@ class WordPressSshOperationsTest {
     @Test
     void uploadMedia_ファイル名のパス区切り文字は除去される() {
         when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok(""))
                 .thenReturn(ok("55\n"))
                 .thenReturn(ok("{\"guid\":\"https://example.com/x.png\"}"));
 
