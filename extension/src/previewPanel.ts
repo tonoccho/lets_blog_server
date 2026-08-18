@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { logger } from './logger';
 import { buildPreviewCsp, createNonce } from './webviewSecurity';
 
 /** Webviewからのメッセージ型。 */
@@ -37,6 +38,13 @@ export class PreviewPanel {
   public static currentPanel: PreviewPanel | undefined;
   private readonly _panel: vscode.WebviewPanel;
   private readonly _extensionUri: vscode.Uri;
+  /**
+   * renderPreviewSkeletonがローカル/テスト環境向けに作成した非公開プレビュー投稿のID(環境=siteIdごと)。
+   * 環境を切り替えても削除せず保持し、次回同じ環境を選んだ際に更新して使い回す(投稿を積み上げない
+   * ため)。パネルを閉じた際にまとめて削除する({@link dispose}参照)。
+   */
+  private readonly _previewPostIdsBySiteId = new Map<number, string>();
+  private _deletePreviewPost?: (siteId: number, postId: string) => Promise<void>;
 
   /** Webviewからのメッセージハンドラー（環境切り替え等）。 */
   private _messageHandler: ((message: PreviewMessage) => void) | undefined;
@@ -52,6 +60,8 @@ export class PreviewPanel {
    * @param onMessage パネル内での環境切り替え等のメッセージハンドラー
    * @param availableSites パネル内の環境切り替えセレクトに表示する選択肢(2つ以上の場合のみセレクトを表示)
    * @param currentSiteId 現在表示中のサイトID(サイト未紐付けの場合はnull)
+   * @param deletePreviewPost ローカル/テスト環境向けの非公開プレビュー投稿を削除するコールバック。
+   *                          パネルを閉じた際、記録済みの投稿すべてに対して呼ばれる。
    */
   public static createOrShow(
     context: vscode.ExtensionContext,
@@ -62,17 +72,22 @@ export class PreviewPanel {
     featuredImageDataUri?: string,
     onMessage?: (message: PreviewMessage) => void,
     availableSites?: SiteOption[],
-    currentSiteId?: number | null
+    currentSiteId?: number | null,
+    deletePreviewPost?: (siteId: number, postId: string) => Promise<void>
   ): void {
     if (PreviewPanel.currentPanel) {
       PreviewPanel.currentPanel._panel.reveal(vscode.ViewColumn.Beside);
       PreviewPanel.currentPanel._messageHandler = onMessage;
       PreviewPanel.currentPanel._update(html, css, warning, siteLabel, featuredImageDataUri, availableSites, currentSiteId);
+      if (deletePreviewPost) {
+        PreviewPanel.currentPanel._deletePreviewPost = deletePreviewPost;
+      }
       return;
     }
     PreviewPanel.currentPanel = new PreviewPanel(
       context, html, css, warning, siteLabel, featuredImageDataUri, onMessage, availableSites, currentSiteId
     );
+    PreviewPanel.currentPanel._deletePreviewPost = deletePreviewPost;
   }
 
   private constructor(
@@ -109,9 +124,30 @@ export class PreviewPanel {
     }
   }
 
+  /** siteId(環境)に紐づく、作成済みのプレビュー用非公開投稿IDを返す(未作成ならundefined)。 */
+  public getPreviewPostId(siteId: number): string | undefined {
+    return this._previewPostIdsBySiteId.get(siteId);
+  }
+
+  /** siteId(環境)に紐づくプレビュー用非公開投稿IDを記録する。 */
+  public recordPreviewPostId(siteId: number, postId: string): void {
+    this._previewPostIdsBySiteId.set(siteId, postId);
+  }
+
   private dispose(): void {
     PreviewPanel.currentPanel = undefined;
     this._panel.dispose();
+    // onDidDisposeはVS Code側でawaitされないため、削除はfire-and-forgetで行う
+    // (失敗してもUIをブロックしない。非公開投稿のため残っても実害は小さい)。
+    if (this._deletePreviewPost) {
+      const deletePreviewPost = this._deletePreviewPost;
+      for (const [siteId, postId] of this._previewPostIdsBySiteId) {
+        deletePreviewPost(siteId, postId).catch((err: unknown) => {
+          logger.debug(`プレビュー用投稿の削除に失敗しました: siteId=${siteId}, postId=${postId}`, { err });
+        });
+      }
+      this._previewPostIdsBySiteId.clear();
+    }
   }
 
   /**

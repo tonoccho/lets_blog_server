@@ -11,7 +11,18 @@ package com.letsblog.api.dto;
  *            トップページのみを対象とする{@code /theme-css}では収集できない、投稿ページ限定で
  *            読み込まれるCSS(is_single()等)を補うためのもの。呼び出し側でトップページのCSSと
  *            マージして使うことを想定している。
+ * @param previewPostId ローカル/テスト環境で非公開投稿として実表示した場合の、作成/更新した
+ *                      WordPress投稿ID。次回呼び出し時にRenderSkeletonRequest.existingPreviewPostIdへ
+ *                      渡すことで同じ投稿を更新でき、プレビュー用の投稿を積み上げずに済む。
+ *                      また、プレビュー終了時にこのIDで投稿を削除できる。従来のスクレイピング&amp;
+ *                      スプライス経路(本番環境等)ではnull。
  */
 public record ThemeSkeletonResponse(String html, boolean available, String reason, boolean eyecatchSpliced,
-        String css) {
+        String css, String previewPostId) {
+
+    /** 従来のスクレイピング&amp;スプライス経路用(previewPostIdを持たない)。 */
+    public ThemeSkeletonResponse(String html, boolean available, String reason, boolean eyecatchSpliced,
+            String css) {
+        this(html, available, reason, eyecatchSpliced, css, null);
+    }
 }

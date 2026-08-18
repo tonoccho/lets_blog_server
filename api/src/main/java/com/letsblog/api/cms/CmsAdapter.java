@@ -136,4 +136,14 @@ public interface CmsAdapter {
     default void deletePost(CmsCredentials credentials, String postId, String postType) {
         deletePost(credentials, postId);
     }
+
+    /**
+     * 非公開(private)投稿を実際に表示するプレビュー用に、指定認証情報のユーザーとして
+     * ログイン済みと同等のCookieを発行する(記事プレビューでPlaywrightのブラウザコンテキストへ
+     * 注入するために使う)。wp-cli等でサーバー側のコード実行が可能な経路(managedサイトのagent
+     * transport等)でのみ対応可能なため、対応しない経路はUnsupportedOperationExceptionを投げる。
+     */
+    default AuthCookie generateAuthCookie(CmsCredentials credentials) {
+        throw new UnsupportedOperationException("このCMS/接続方式は認証Cookieの発行に対応していません");
+    }
 }

@@ -10,6 +10,12 @@ public record RenderSkeletonRequest(
         @NotNull String title,
         @NotNull String contentHtml,
         String featuredImageDataUri,
-        Long siteId
+        Long siteId,
+        /**
+         * ローカル/テスト環境で非公開投稿としてプレビューを表示する経路(renderRealPrivatePost)向け。
+         * 既に作成済みのプレビュー投稿があれば、新規作成せずそのIDを更新する(呼び出しの都度、
+         * 実投稿を積み上げないため)。未指定の場合は新規作成する。
+         */
+        String existingPreviewPostId
 ) {
 }

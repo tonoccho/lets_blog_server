@@ -1,6 +1,7 @@
 package com.letsblog.api.cms.agent;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.letsblog.api.cms.AuthCookie;
 import com.letsblog.api.cms.AuthorProvisioningRequest;
 import com.letsblog.api.cms.CmsCredentials.WordPressCredentials;
 import com.letsblog.api.cms.CmsPostSummary;
@@ -194,6 +195,20 @@ public class WordPressAgentOperations {
             post("/wp-cli/post-delete", Map.of("slug", creds.wpSlug(), "postId", postId));
         } catch (RestClientResponseException e) {
             throw new AgentOperationException("WordPress投稿の削除に失敗しました: " + agentErrorDetail(e), e);
+        } catch (ResourceAccessException e) {
+            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 記事プレビュー(非公開投稿の実表示)向けに、サイト管理者としてログイン済みと同等のCookieを発行する。
+     */
+    public AuthCookie generateAuthCookie(WordPressCredentials creds) {
+        try {
+            JsonNode body = post("/wp-cli/generate-auth-cookie", Map.of("slug", creds.wpSlug(), "userLogin", creds.username()));
+            return new AuthCookie(body.path("name").asText(), body.path("value").asText());
+        } catch (RestClientResponseException e) {
+            throw new AgentOperationException("認証Cookieの発行に失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
             throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
         }

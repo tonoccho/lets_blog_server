@@ -224,6 +224,13 @@ export const ThemeSkeletonResultSchema = z.object({
   reason: z.string().nullish(),
   eyecatchSpliced: z.boolean(),
   css: z.string().nullish(),
+  /**
+   * ローカル/テスト環境で非公開投稿として実表示した場合の、作成/更新したWordPress投稿ID。
+   * 次回のrenderPreviewSkeleton呼び出し時にexistingPreviewPostIdへ渡すことで同じ投稿を更新でき、
+   * プレビュー用の投稿を積み上げずに済む。また、プレビュー終了時にこのIDで投稿を削除できる。
+   * 従来のスクレイピング&スプライス経路(本番環境等)ではnull。
+   */
+  previewPostId: z.string().nullish(),
 });
 export type ThemeSkeletonResult = z.infer<typeof ThemeSkeletonResultSchema>;
 

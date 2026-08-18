@@ -8,6 +8,7 @@ import com.letsblog.api.dto.ThemeSkeletonResponse;
 import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.ArticlePreviewService;
 import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -56,6 +57,18 @@ public class ArticlePreviewController {
             @PathVariable Long projectId, @Valid @RequestBody RenderSkeletonRequest request) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         return articlePreviewService.renderSkeleton(
-                projectId, request.siteId(), request.title(), request.contentHtml(), request.featuredImageDataUri());
+                projectId, request.siteId(), request.title(), request.contentHtml(), request.featuredImageDataUri(),
+                request.existingPreviewPostId());
+    }
+
+    /**
+     * {@link #skeleton}がローカル/テスト環境向けに作成した非公開プレビュー投稿を削除する
+     * (VSCode拡張側でプレビューパネルを閉じた際に呼ばれる)。
+     */
+    @DeleteMapping("/preview-post")
+    public void deletePreviewPost(
+            @PathVariable Long projectId, @RequestParam Long siteId, @RequestParam String postId) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        articlePreviewService.deletePreviewPost(projectId, siteId, postId);
     }
 }

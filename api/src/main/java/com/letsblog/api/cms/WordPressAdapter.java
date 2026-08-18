@@ -419,6 +419,17 @@ public class WordPressAdapter implements CmsAdapter {
     }
 
     @Override
+    public AuthCookie generateAuthCookie(CmsCredentials credentials) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isAgent()) {
+            return agentOperations.generateAuthCookie(creds);
+        }
+        // SSH/REST(Application Password)経路はサーバー側コード実行手段を持たないため、
+        // 認証Cookieを生成できない(既定のUnsupportedOperationExceptionへ委譲)。
+        return CmsAdapter.super.generateAuthCookie(credentials);
+    }
+
+    @Override
     public Optional<String> findAuthorIdByEmail(CmsCredentials credentials, String email) {
         CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
         if (creds.isSsh()) {
