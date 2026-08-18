@@ -29,6 +29,8 @@ import { ArticleCreationPanel } from './articleCreationPanel';
 import { PreviewPanel } from './previewPanel';
 import { ImageGenPanel } from './imageGenPanel';
 import { ImageGalleryPanel } from './imageGalleryPanel';
+import { DiagramEditorPanel, DIAGRAM_REFERENCE_PATTERN } from './diagramEditorPanel';
+import { DiagramGalleryPanel } from './diagramGalleryPanel';
 import { SectionGenPanel } from './sectionGenPanel';
 import { resolveSectionContext } from './headingContext';
 import { logger } from './logger';
@@ -65,6 +67,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.suggestTags', () => commandSuggestTags(context)),
     vscode.commands.registerCommand('letsBlog.generateImage', () => commandGenerateImage(context)),
     vscode.commands.registerCommand('letsBlog.imageGallery', () => commandImageGallery(context)),
+    vscode.commands.registerCommand('letsBlog.addNewDiagram', () => commandAddNewDiagram(context)),
+    vscode.commands.registerCommand('letsBlog.editDiagram', () => commandEditDiagram(context)),
+    vscode.commands.registerCommand('letsBlog.diagramGallery', () => commandDiagramGallery(context)),
     vscode.commands.registerCommand('letsBlog.generateSection', () => commandGenerateSection(context)),
     vscode.commands.registerCommand('letsBlog.selectProject', () => commandSelectProject(context)),
     vscode.commands.registerCommand('letsBlog.planArticle', () => commandPlanArticle(context)),
@@ -73,6 +78,35 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.pasteSmartCard', () => commandPasteSmartCard(context)),
     vscode.commands.registerCommand('letsBlog.pasteAsLink', () => commandPasteAsLink(context))
   );
+
+  context.subscriptions.push(registerDiagramCursorContext());
+}
+
+/**
+ * カーソル行が挿入済みダイアグラム(assets/diagram-{id}-{timestamp}.svg)を参照しているかを
+ * letsBlog.cursorOnDiagram コンテキストキーへ反映する。「Edit Diagram」メニュー項目の
+ * 表示条件(package.jsonのwhen句)に使う。高頻度に発火するため、値が変化した場合のみ
+ * setContextを呼ぶ。
+ */
+function registerDiagramCursorContext(): vscode.Disposable {
+  let lastValue: boolean | undefined;
+
+  const update = (editor: vscode.TextEditor | undefined): void => {
+    let matched = false;
+    if (editor && editor.document.languageId === 'markdown') {
+      const line = editor.document.lineAt(editor.selection.active.line).text;
+      matched = DIAGRAM_REFERENCE_PATTERN.test(line);
+    }
+    if (matched !== lastValue) {
+      lastValue = matched;
+      void vscode.commands.executeCommand('setContext', 'letsBlog.cursorOnDiagram', matched);
+    }
+  };
+
+  update(vscode.window.activeTextEditor);
+  const selectionListener = vscode.window.onDidChangeTextEditorSelection((e) => update(e.textEditor));
+  const activeEditorListener = vscode.window.onDidChangeActiveTextEditor((editor) => update(editor));
+  return vscode.Disposable.from(selectionListener, activeEditorListener);
 }
 
 /** 拡張の無効化。破棄処理はcontext.subscriptionsに登録済みのため、ここでは何もしない。 */
@@ -674,6 +708,93 @@ async function commandImageGallery(context: vscode.ExtensionContext): Promise<vo
     ImageGalleryPanel.createOrShow(context, editor, baseDir, projectId);
   } catch (err) {
     reportError('画像ギャラリーの起動に失敗しました', err);
+  }
+}
+
+/** front matterのproject_idを解決する。未設定ならエラーを表示してundefinedを返す。 */
+function resolveDiagramProjectId(editor: vscode.TextEditor, context: vscode.ExtensionContext): number | undefined {
+  const article = parseArticle(editor.document.getText());
+  const projectId = (article.data.project_id as number | undefined) ?? getProjectId(context);
+  if (!projectId) {
+    vscode.window.showErrorMessage(
+      'プロジェクトが未選択です。front matterのproject_id、または「Let\'s Blog: Select Project」で設定してください。'
+    );
+    return undefined;
+  }
+  return projectId;
+}
+
+/** カーソル位置に空のdraw.ioエディタを開き、記事に新規ダイアグラムを挿入する(issue #476)。 */
+async function commandAddNewDiagram(context: vscode.ExtensionContext): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  try {
+    const projectId = resolveDiagramProjectId(editor, context);
+    if (!projectId) return;
+
+    const baseDir = path.dirname(editor.document.uri.fsPath);
+    DiagramEditorPanel.createOrShow(context, editor, baseDir, projectId, { kind: 'create' });
+  } catch (err) {
+    reportError('ダイアグラムエディタの起動に失敗しました', err);
+  }
+}
+
+/**
+ * カーソル行が参照している既存ダイアグラムをdraw.ioエディタで開く(issue #476)。
+ * 右クリックメニューの表示条件(letsBlog.cursorOnDiagram)は registerDiagramCursorContext が管理する。
+ */
+async function commandEditDiagram(context: vscode.ExtensionContext): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  try {
+    const line = editor.document.lineAt(editor.selection.active.line).text;
+    const match = DIAGRAM_REFERENCE_PATTERN.exec(line);
+    if (!match) {
+      vscode.window.showErrorMessage('カーソル行にダイアグラム参照が見つかりません。');
+      return;
+    }
+
+    const projectId = resolveDiagramProjectId(editor, context);
+    if (!projectId) return;
+
+    const existingFileName = match[1];
+    const diagramId = Number(match[2]);
+
+    const apiKey = await requireApiKey(context);
+    const actor = await getActor(context);
+    const detail = await api.getDiagramDetail(getServerUrl(), apiKey, actor, diagramId);
+
+    const baseDir = path.dirname(editor.document.uri.fsPath);
+    DiagramEditorPanel.createOrShow(context, editor, baseDir, projectId, {
+      kind: 'edit',
+      diagramId,
+      name: detail.name,
+      xml: detail.xml,
+      existingFileName,
+    });
+  } catch (err) {
+    reportError('ダイアグラムの読み込みに失敗しました', err);
+  }
+}
+
+/**
+ * サーバーに保存済みのダイアグラムを一覧し、記事へ取り込む。
+ * Diagram Editorで作ったダイアグラムを後から再利用するための入口(issue #476)。
+ */
+async function commandDiagramGallery(context: vscode.ExtensionContext): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  try {
+    const projectId = resolveDiagramProjectId(editor, context);
+    if (!projectId) return;
+
+    const baseDir = path.dirname(editor.document.uri.fsPath);
+    DiagramGalleryPanel.createOrShow(context, editor, baseDir, projectId);
+  } catch (err) {
+    reportError('ダイアグラムギャラリーの起動に失敗しました', err);
   }
 }
 

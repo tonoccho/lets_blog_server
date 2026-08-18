@@ -1,0 +1,20 @@
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font-family: var(--vscode-font-family, sans-serif); color: var(--vscode-foreground); display: flex; flex-direction: column; }
+  .container { display: flex; flex-direction: column; height: 100vh; padding: 8px; gap: 8px; }
+  .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .toolbar label { font-size: 0.9em; }
+  .toolbar input[type="text"] {
+    flex: 0 1 260px; padding: 4px 8px;
+    background: var(--vscode-input-background, #fff); color: var(--vscode-input-foreground, inherit);
+    border: 1px solid var(--vscode-input-border, #ccc);
+  }
+  .spacer { flex: 1; }
+  button { padding: 6px 14px; cursor: pointer; }
+  button.primary { background: var(--vscode-button-background, #007acc); color: var(--vscode-button-foreground, #fff); border: none; }
+  button:disabled { opacity: 0.6; cursor: not-allowed; }
+  #message { display: none; font-size: 0.9em; }
+  #message.error { color: var(--vscode-errorForeground, #d32f2f); display: block; }
+  #message.success { color: var(--vscode-testing-iconPassed, #2e7d32); display: block; }
+  .frame-wrapper { flex: 1; border: 1px solid var(--vscode-panel-border, #ccc); min-height: 0; }
+  #drawioFrame { width: 100%; height: 100%; border: none; background: #fff; }

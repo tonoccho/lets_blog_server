@@ -277,3 +277,19 @@ export const GeneratedImageDetailSchema = z.object({
   createdAt: z.string().nullish(),
 });
 export type GeneratedImageDetail = z.infer<typeof GeneratedImageDetailSchema>;
+
+export const DiagramSummarySchema = z.object({
+  id: z.number(),
+  projectId: z.number().nullish(),
+  name: z.string(),
+  createdAt: z.string().nullish(),
+  updatedAt: z.string().nullish(),
+});
+export type DiagramSummary = z.infer<typeof DiagramSummarySchema>;
+export const DiagramSummaryListSchema = z.array(DiagramSummarySchema);
+
+export const DiagramDetailSchema = DiagramSummarySchema.extend({
+  xml: z.string(),
+  svg: z.string(),
+});
+export type DiagramDetail = z.infer<typeof DiagramDetailSchema>;

@@ -8,6 +8,7 @@ import com.letsblog.api.github.GithubApiException;
 import com.letsblog.api.service.ArticlePlanSessionNotFoundException;
 import com.letsblog.api.service.BackupException;
 import com.letsblog.api.service.CustomTagNotFoundException;
+import com.letsblog.api.service.DiagramNotFoundException;
 import com.letsblog.api.service.EmailAlreadyExistsException;
 import com.letsblog.api.service.EmailSendException;
 import com.letsblog.api.service.ForbiddenException;
@@ -85,6 +86,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(GeneratedImageNotFoundException.class)
     public ResponseEntity<Map<String, String>> handleGeneratedImageNotFound(GeneratedImageNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(DiagramNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleDiagramNotFound(DiagramNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
     }
 
