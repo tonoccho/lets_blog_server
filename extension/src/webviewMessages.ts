@@ -147,3 +147,37 @@ export type ImageGalleryOutboundCommand =
   | 'deleteCancelled'
   | 'cancelled'
   | 'error';
+
+// --- Diagram Editor パネル ---
+
+export type DiagramEditorInboundMessage =
+  | WebviewMessageBase<'ready'>
+  | (WebviewMessageBase<'insertNew'> & { name: string; xml: string; svg: string })
+  | (WebviewMessageBase<'saveOverwrite'> & { xml: string; svg: string })
+  | (WebviewMessageBase<'saveAsNew'> & { name: string; xml: string; svg: string })
+  | WebviewMessageBase<'cancel'>;
+
+export type DiagramEditorOutboundCommand =
+  | 'init'
+  | 'inserted'
+  | 'saved'
+  | 'cancelled'
+  | 'error';
+
+// --- Diagram Gallery パネル ---
+
+export type DiagramGalleryInboundMessage =
+  | WebviewMessageBase<'loadDiagrams'>
+  | (WebviewMessageBase<'loadThumbnails'> & { diagramIds: number[] })
+  | (WebviewMessageBase<'insertDiagram'> & { diagramId: number; name: string })
+  | (WebviewMessageBase<'deleteDiagram'> & { diagramId: number })
+  | WebviewMessageBase<'cancel'>;
+
+export type DiagramGalleryOutboundCommand =
+  | 'diagramList'
+  | 'thumbnails'
+  | 'diagramInserted'
+  | 'diagramDeleted'
+  | 'deleteCancelled'
+  | 'cancelled'
+  | 'error';

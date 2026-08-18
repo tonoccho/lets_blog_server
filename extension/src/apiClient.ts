@@ -956,3 +956,112 @@ export async function deleteGeneratedImage(
 }
 
 export type { GeneratedImageSummary, GeneratedImageDetail } from './schemas';
+
+/** ダイアグラムの新規作成。 */
+export async function createDiagram(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  params: { projectId: number; name: string; xml: string; svg: string }
+): Promise<schemas.DiagramDetail> {
+  const result = await requestJson(
+    serverUrl,
+    '/api/diagrams',
+    {
+      label: 'createDiagram',
+      method: 'POST',
+      headers: buildHeaders(apiKey, actor),
+      createBody: jsonBody(params),
+    },
+    schemas.DiagramDetailSchema
+  );
+  invalidateProjectCache(params.projectId);
+  return result;
+}
+
+/** ダイアグラムの一覧。projectId未指定時は全件を返す。 */
+export async function listDiagrams(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  projectId: number
+): Promise<schemas.DiagramSummary[]> {
+  return cachedRequestJson(
+    `project:${projectId}:diagrams`,
+    serverUrl,
+    `/api/diagrams?projectId=${projectId}`,
+    { label: 'listDiagrams', headers: buildHeaders(apiKey, actor) },
+    schemas.DiagramSummaryListSchema
+  );
+}
+
+/** ダイアグラムの詳細(xml含む、再編集用)を取得する。 */
+export async function getDiagramDetail(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  diagramId: number
+): Promise<schemas.DiagramDetail> {
+  return requestJson(
+    serverUrl,
+    `/api/diagrams/${diagramId}`,
+    { label: 'getDiagramDetail', headers: buildHeaders(apiKey, actor) },
+    schemas.DiagramDetailSchema
+  );
+}
+
+/** ダイアグラムのSVG本体を取得する。 */
+export async function getDiagramSvg(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  diagramId: number
+): Promise<string> {
+  const buffer = await requestBinary(serverUrl, `/api/diagrams/${diagramId}/svg`, {
+    label: 'getDiagramSvg',
+    headers: buildHeaders(apiKey, actor),
+  });
+  return buffer.toString('utf-8');
+}
+
+/** ダイアグラムの上書き保存。 */
+export async function updateDiagram(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  diagramId: number,
+  params: { name: string; xml: string; svg: string },
+  projectId: number
+): Promise<schemas.DiagramDetail> {
+  const result = await requestJson(
+    serverUrl,
+    `/api/diagrams/${diagramId}`,
+    {
+      label: 'updateDiagram',
+      method: 'PUT',
+      headers: buildHeaders(apiKey, actor),
+      createBody: jsonBody(params),
+    },
+    schemas.DiagramDetailSchema
+  );
+  invalidateProjectCache(projectId);
+  return result;
+}
+
+/** ダイアグラムをサーバーから削除する。 */
+export async function deleteDiagram(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  diagramId: number,
+  projectId: number
+): Promise<void> {
+  await request(serverUrl, `/api/diagrams/${diagramId}`, {
+    label: 'deleteDiagram',
+    method: 'DELETE',
+    headers: buildHeaders(apiKey, actor),
+  });
+  invalidateProjectCache(projectId);
+}
+
+export type { DiagramSummary, DiagramDetail } from './schemas';

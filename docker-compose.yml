@@ -292,6 +292,13 @@ services:
     networks:
       - lbs-net
 
+  drawio:
+    image: ${DRAWIO_IMAGE:-jgraph/drawio:latest}
+    container_name: lbs-drawio
+    restart: unless-stopped
+    networks:
+      - lbs-net
+
   # mcp-penpot:
   #   build:
   #     context: ./mcp-server

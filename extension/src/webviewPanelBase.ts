@@ -37,6 +37,8 @@ export interface WebviewPanelOptions {
   title: string;
   /** webviews/配下の資材のベース名(例: 'plan' → plan.html / plan.css / plan.js)。 */
   assetName: string;
+  /** 追加で許可するCSPディレクティブ(例: draw.ioエディタのiframe埋め込み用のframe-src)。 */
+  extraCspDirectives?: string[];
 }
 
 /**
@@ -179,6 +181,7 @@ export abstract class WebviewPanelBase<TInbound extends WebviewMessageBase<strin
       `img-src ${webview.cspSource} data: https:`,
       `style-src ${webview.cspSource} 'unsafe-inline'`,
       `script-src 'nonce-${nonce}'`,
+      ...(this.options.extraCspDirectives ?? []),
     ].join('; ');
 
     const htmlPath = vscode.Uri.joinPath(
