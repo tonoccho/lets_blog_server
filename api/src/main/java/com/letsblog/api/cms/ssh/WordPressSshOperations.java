@@ -1,5 +1,6 @@
 package com.letsblog.api.cms.ssh;
 
+import com.letsblog.api.cms.AuthCookie;
 import com.letsblog.api.cms.AuthorProvisioningRequest;
 import com.letsblog.api.cms.WpCliInstallResult;
 import com.letsblog.api.cms.CmsCredentials.WordPressCredentials;
@@ -698,6 +699,36 @@ public class WordPressSshOperations {
             throw new SshOperationException("WordPress投稿の削除に失敗しました: "
                     + firstLine(result.stderr(), result.stdout()));
         }
+    }
+
+    /**
+     * 記事プレビュー(非公開投稿の実表示)向けに、サイト管理者としてログイン済みと同等のCookieを発行する。
+     * managed(agent)サイトのWordPressAgentOperations#generateAuthCookieと同じ仕組み(`wp eval`経由での
+     * wp_generate_auth_cookie()呼び出し)を、SSH経由のwp-cli実行で行う。
+     */
+    public AuthCookie generateAuthCookie(WordPressCredentials creds) {
+        String phpCode = "$u = get_user_by('login', " + phpSingleQuote(creds.username()) + "); "
+                + "if (!$u) { echo json_encode(['error' => 'user_not_found']); exit; } "
+                + "echo json_encode(['name' => LOGGED_IN_COOKIE, "
+                + "'value' => wp_generate_auth_cookie($u->ID, time() + 3600, 'logged_in')]);";
+        SshCommandResult result = exec(creds, wpCli(creds, "eval " + ShellQuote.single(phpCode)));
+        if (!result.ok()) {
+            throw new SshOperationException("認証Cookieの発行に失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+        JsonNode body = parseJsonObject(result.stdout());
+        if (body.has("error") || !body.hasNonNull("name") || !body.hasNonNull("value")) {
+            throw new SshOperationException("ユーザー '" + creds.username() + "' が見つかりません");
+        }
+        return new AuthCookie(body.path("name").asText(), body.path("value").asText());
+    }
+
+    /** PHPのシングルクォート文字列リテラルとして安全に埋め込むためのエスケープ(`\`と`'`のみ特殊)。 */
+    private String phpSingleQuote(String value) {
+        if (value == null) {
+            return "''";
+        }
+        return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'";
     }
 
     /**

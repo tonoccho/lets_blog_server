@@ -16,13 +16,23 @@ package com.letsblog.api.dto;
  *                      渡すことで同じ投稿を更新でき、プレビュー用の投稿を積み上げずに済む。
  *                      また、プレビュー終了時にこのIDで投稿を削除できる。従来のスクレイピング&amp;
  *                      スプライス経路(本番環境等)ではnull。
+ * @param warning html自体はavailable=trueで返せたものの、一部の付随処理(アイキャッチのアップロード等)が
+ *                失敗した場合の非致命的な警告文。呼び出し側でプレビューへ表示する
+ *                (Issue: ローカル/テスト環境でアイキャッチが投稿されないのに気付けない問題への対応)。
+ *                失敗が無ければnull。
  */
 public record ThemeSkeletonResponse(String html, boolean available, String reason, boolean eyecatchSpliced,
-        String css, String previewPostId) {
+        String css, String previewPostId, String warning) {
 
-    /** 従来のスクレイピング&amp;スプライス経路用(previewPostIdを持たない)。 */
+    /** 従来のスクレイピング&amp;スプライス経路用(previewPostId/warningを持たない)。 */
     public ThemeSkeletonResponse(String html, boolean available, String reason, boolean eyecatchSpliced,
             String css) {
-        this(html, available, reason, eyecatchSpliced, css, null);
+        this(html, available, reason, eyecatchSpliced, css, null, null);
+    }
+
+    /** previewPostIdは持つがwarningは無い場合用。 */
+    public ThemeSkeletonResponse(String html, boolean available, String reason, boolean eyecatchSpliced,
+            String css, String previewPostId) {
+        this(html, available, reason, eyecatchSpliced, css, previewPostId, null);
     }
 }

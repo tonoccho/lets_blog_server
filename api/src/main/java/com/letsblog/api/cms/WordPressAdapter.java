@@ -424,7 +424,10 @@ public class WordPressAdapter implements CmsAdapter {
         if (creds.isAgent()) {
             return agentOperations.generateAuthCookie(creds);
         }
-        // SSH/REST(Application Password)経路はサーバー側コード実行手段を持たないため、
+        if (creds.isSsh()) {
+            return sshOperations.generateAuthCookie(creds);
+        }
+        // REST(Application Password)経路はサーバー側コード実行手段を持たないため、
         // 認証Cookieを生成できない(既定のUnsupportedOperationExceptionへ委譲)。
         return CmsAdapter.super.generateAuthCookie(credentials);
     }

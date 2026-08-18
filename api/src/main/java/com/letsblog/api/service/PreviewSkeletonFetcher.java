@@ -6,8 +6,11 @@ import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.PlaywrightException;
+import com.microsoft.playwright.TimeoutError;
 import com.microsoft.playwright.options.Cookie;
 import com.microsoft.playwright.options.WaitUntilState;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
@@ -34,7 +37,29 @@ import java.util.Map;
 @Component
 public class PreviewSkeletonFetcher {
 
+    private static final Logger logger = LoggerFactory.getLogger(PreviewSkeletonFetcher.class);
+
     private static final double NAVIGATION_TIMEOUT_MS = 15_000;
+    /**
+     * {@link #fetchRealPost}専用のタイムアウト。本番サイトはCloudflare等のボット対策JSチャレンジを
+     * 経由することがあり、そのインタースティシャルページはDOMContentLoadedが即座に発火してしまう。
+     * チャレンジのJS計算自体はネットワーク要求を伴わないことが多く、単にwaitUntilを緩めるだけでは
+     * インタースティシャルの空のDOMを掴んでしまう(issue #483フィードバック: 本番プレビューが
+     * 常に真っ白になる)。{@link #waitForChallengeToClear}でチャレンジ特有のマーカーが消えるまで
+     * 追加で待つため、通常のナビゲーションタイムアウトより長めに取る。
+     */
+    private static final double REAL_POST_NAVIGATION_TIMEOUT_MS = 30_000;
+    /** 上記のうち、チャレンジ突破待ちに残す猶予(ナビゲーション自体の待ち時間と分けて確保する)。 */
+    private static final double CHALLENGE_CLEAR_TIMEOUT_MS = 15_000;
+    /**
+     * CloudflareのJSチャレンジ(「Just a moment...」インタースティシャル)によく見られるマーカー。
+     * 存在しなくなるまで待つことで、チャレンジ自動突破→リダイレクト後の実ページを掴む。
+     * 通常のWordPressページ(Cloudflare非経由、またはチャレンジ不要)では最初から存在しないため、
+     * このwaitForFunctionは即座に成立して待ち時間は発生しない。
+     */
+    private static final String CHALLENGE_CLEARED_CONDITION =
+            "() => !document.title.includes('Just a moment') "
+                    + "&& !document.querySelector('#challenge-running, #challenge-form')";
 
     /**
      * fetchAndSplice/fetchRealPost共通のJSヘルパー。CSS収集(collectCss)と、骨格取得部分の
@@ -287,13 +312,33 @@ public class PreviewSkeletonFetcher {
             context.addCookies(List.of(cookie));
             try (Page page = context.newPage()) {
                 page.navigate(url, new Page.NavigateOptions()
-                        .setTimeout(NAVIGATION_TIMEOUT_MS)
+                        .setTimeout(REAL_POST_NAVIGATION_TIMEOUT_MS)
                         .setWaitUntil(WaitUntilState.DOMCONTENTLOADED));
+                waitForChallengeToClear(page, url);
                 Object result = page.evaluate(REAL_POST_SCRIPT);
                 return toResponse(result);
             }
         } catch (PlaywrightException e) {
             throw new ContentScrapingException("記事ページの取得に失敗しました: " + url, e);
+        }
+    }
+
+    /**
+     * CloudflareのJSチャレンジのインタースティシャルが表示されている場合、それが自動突破されて
+     * 実ページへ遷移し終わるまで待つ。チャレンジのJS計算はタイマー待ちが主でネットワーク要求を
+     * 伴わないことが多いため、waitUntil(NETWORKIDLE等)だけではインタースティシャル自体を
+     * 「読み込み完了」と誤認して空のDOMを返してしまう。マーカーが最初から存在しない(チャレンジが
+     * 表示されていない)通常ページでは即座に成立するため、待ち時間は発生しない。
+     * チャレンジが{@link #CHALLENGE_CLEAR_TIMEOUT_MS}以内に消えない場合(ブロック/対話式CAPTCHA等、
+     * 待つだけでは突破できないケース)はベストエフォートで諦め、その時点のDOMをそのまま返す
+     * (呼び出し元は従来通りavailable=trueだが内容が空、というケースを受け取る)。
+     */
+    private void waitForChallengeToClear(Page page, String url) {
+        try {
+            page.waitForFunction(CHALLENGE_CLEARED_CONDITION, null,
+                    new Page.WaitForFunctionOptions().setTimeout(CHALLENGE_CLEAR_TIMEOUT_MS));
+        } catch (TimeoutError e) {
+            logger.warn("ボット対策チャレンジの突破待ちがタイムアウトしました: {}", url);
         }
     }
 
