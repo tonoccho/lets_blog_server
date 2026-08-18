@@ -997,6 +997,25 @@ if ($path === '/wp-cli/post-delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     respond(200, ['postId' => $postId]);
 }
 
+// API側(lets_blog.posts)が記憶している投稿IDが、WordPress側で削除される等で実在しなくなって
+// いないかを確認するための読み取り専用エンドポイント。API側はこれを使って、その投稿と一緒に
+// アップロードした画像の再利用キャッシュを信頼してよいか判断する(issue #493)。
+if ($path === '/wp-cli/post-exists' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    $postId = (string) ($input['postId'] ?? '');
+
+    if (!isValidSlug($slug) || $postId === '') {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = resolveExistingSitePath($slug);
+    if ($sitePath === null) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    [$code, , ] = runWp(['post', 'get', $postId, '--field=ID', "--path=$sitePath", '--allow-root']);
+    respond(200, ['exists' => $code === 0]);
+}
+
 if ($path === '/wp-cli/post-list' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = (string) ($input['slug'] ?? '');
     $postType = (string) ($input['postType'] ?? 'post');

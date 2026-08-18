@@ -178,6 +178,21 @@ public class WordPressAgentOperations {
         }
     }
 
+    /**
+     * 指定IDの投稿がWordPress側に実在するかを判定する(読み取り専用)。
+     * WordPressAdapter.postExists(issue #493)から呼ばれる。エージェントへの接続自体に失敗した
+     * 場合は判定不能として安全側(true=再利用を許容)を返す。
+     */
+    public boolean postExists(WordPressCredentials creds, String postId) {
+        try {
+            JsonNode body = post("/wp-cli/post-exists", Map.of("slug", creds.wpSlug(), "postId", postId));
+            return body.path("exists").asBoolean(true);
+        } catch (RestClientResponseException | ResourceAccessException e) {
+            log.warn("投稿の実在確認に失敗しました (wpSlug={}, postId={}): {}", creds.wpSlug(), postId, e.getMessage());
+            return true;
+        }
+    }
+
     /** メールアドレスに一致する既存WordPressユーザーIDを検索する(作成は行わない、読み取り専用)。 */
     public java.util.Optional<String> findAuthorIdByEmail(WordPressCredentials creds, String email) {
         try {

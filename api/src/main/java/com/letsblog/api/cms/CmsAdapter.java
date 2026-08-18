@@ -20,6 +20,18 @@ public interface CmsAdapter {
     PostResult createOrUpdatePost(CmsCredentials credentials, PostContent content, String existingPostId);
 
     /**
+     * 指定IDの投稿がCMS側に実在するかどうかを判定する(読み取り専用)。API側(lets_blog.posts)が
+     * 記憶している投稿IDは、CMS側で当該投稿(と、投稿時に一緒にアップロードした画像)が
+     * 削除されると実在しなくなることがある。呼び出し側はこれを使って、前回アップロード済み画像の
+     * 再利用キャッシュを信頼してよいか判断する(issue #493。投稿自体の作成/更新時のフォールバックは
+     * createOrUpdatePost実装内で個別に行う)。対応しないCMSやID未指定時は既定でtrueを返す
+     * (判定不能時は安全側=従来どおりの再利用を許容する)。
+     */
+    default boolean postExists(CmsCredentials credentials, String postId) {
+        return true;
+    }
+
+    /**
      * メディアライブラリへ画像をアップロードする。
      */
     MediaUploadResult uploadMedia(CmsCredentials credentials, String filename, String contentType, byte[] data);

@@ -120,6 +120,7 @@ class PostPublishServiceTest {
         lenient().when(cmsAdapter.resolveCategories(any(), any())).thenReturn(List.of());
         lenient().when(cmsAdapter.resolveTags(any(), any())).thenReturn(List.of());
         lenient().when(postRepository.findBySiteIdAndWpPostId(any(), any())).thenReturn(Optional.empty());
+        lenient().when(cmsAdapter.postExists(any(), any())).thenReturn(true);
         lenient().when(currentActorService.getCurrentActorId()).thenReturn(null);
         lenient().when(userSiteAuthorRepository.findByUserIdAndSiteId(any(), any())).thenReturn(Optional.empty());
     }
@@ -477,6 +478,41 @@ class PostPublishServiceTest {
         service.publish(command);
 
         verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.png"), any(), any());
+    }
+
+    @Test
+    void publish_既存投稿がCMS側に存在しない場合は画像キャッシュを再利用せず再アップロードする() throws Exception {
+        // issue #493: CMS側で投稿(および一緒にアップロードした画像)が削除された後にwpPostIdだけが
+        // ローカルDBに残っているケース。sha256が一致していても、投稿自体が実在しなければ
+        // キャッシュされたURLはリンク切れの可能性が高いため再利用してはならない。
+        com.letsblog.api.domain.Post existingPost = new com.letsblog.api.domain.Post();
+        existingPost.setSiteId(1L);
+        existingPost.setWpPostId("55");
+        String sha256 = sha256Hex(new byte[]{1});
+        existingPost.setUploadedImagesJson(
+                "{\"assets/eyecatch.png\":{\"sha256\":\"" + sha256 + "\","
+                        + "\"url\":\"https://example.com/wp-content/uploads/1.png\",\"mediaId\":\"11\"}}");
+        // 「投稿が消えても画像キャッシュを取りに行かない」ことを示すため敢えて存在するかのように
+        // スタブするが、postExists=falseの分岐で読み出し自体が起きないため未使用になる(意図通り)。
+        lenient().when(postRepository.findBySiteIdAndWpPostId(1L, "55")).thenReturn(Optional.of(existingPost));
+        when(cmsAdapter.postExists(credentials, "55")).thenReturn(false);
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("70", "https://example.com/?p=70", "draft"));
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
+                .thenReturn(new MediaUploadResult("22", "https://example.com/wp-content/uploads/2.png"));
+
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
+        PostPublishCommand command = new PostPublishCommand(
+                "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", images, null,
+                List.of("assets/eyecatch.png"), null, null);
+
+        service.publish(command);
+
+        verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.png"), any(), any());
+        // existingPostId自体はcreateOrUpdatePostへそのまま渡す(実在確認と作成/更新へのフォールバックは
+        // createOrUpdatePost実装内で個別に行うため)。
+        verify(cmsAdapter).createOrUpdatePost(any(), any(), eq("55"));
     }
 
     private PostPublishCommand scheduledCommand(String publishScheduledAt) {
