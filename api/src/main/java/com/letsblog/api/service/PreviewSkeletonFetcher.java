@@ -52,7 +52,7 @@ public class PreviewSkeletonFetcher {
               const css = collectCss();
               try {
                 const titleRendered = args.titleRendered;
-                const contentRendered = (args.contentRendered || '').trim();
+                const contentRenderedRaw = (args.contentRendered || '').trim();
                 const ourTitle = args.ourTitle;
                 const ourContentHtml = args.ourContentHtml;
                 const featuredImageDataUri = args.featuredImageDataUri;
@@ -62,6 +62,17 @@ public class PreviewSkeletonFetcher {
                   d.innerHTML = html;
                   return d.textContent.trim();
                 }
+
+                // WP REST APIのcontent.renderedは<img ... />のようなXHTML形式の自己終了タグを
+                // 含み得るが、ブラウザはinnerHTML読み出し時にvoid要素の自己終了スラッシュを除去して
+                // 再直列化する。生文字列のまま比較すると常に不一致になるため、比較対象も同じDOM
+                // 経由の直列化に通してから比較する(ブラウザ側の正規化と揃える)。
+                function normalizeHtml(html) {
+                  const d = document.createElement('div');
+                  d.innerHTML = html;
+                  return d.innerHTML;
+                }
+                const contentRendered = normalizeHtml(contentRenderedRaw);
 
                 const allEls = Array.from(document.querySelectorAll('body *'));
                 let contentEl = null;
