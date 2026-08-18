@@ -7,9 +7,12 @@ import {
   createManagedWordPressSite,
   deleteSite,
   generateSshKeyPair,
+  generateStaticContent,
   installWpCli,
   registerSite,
   SiteConnectionCheckResult,
+  StaticContent,
+  StaticContentType,
   WpCliInstallResult,
 } from "@/lib/apiClient";
 import { getSession, requireAdminSession } from "@/lib/session";
@@ -159,4 +162,23 @@ export async function installWpCliAction(id: number): Promise<WpCliInstallResult
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };
   return installWpCli(id, actor);
+}
+
+export interface GenerateStaticContentResult {
+  content?: StaticContent;
+  error?: string;
+}
+
+export async function generateStaticContentAction(
+  siteId: number,
+  contentType: StaticContentType
+): Promise<GenerateStaticContentResult> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  try {
+    const content = await generateStaticContent(siteId, contentType, actor);
+    return { content };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
 }

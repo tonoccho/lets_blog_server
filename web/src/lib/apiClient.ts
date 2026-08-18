@@ -351,6 +351,34 @@ export function installWpCli(id: number, actor?: ActorInfo): Promise<WpCliInstal
   return apiFetch<WpCliInstallResult>(`/api/sites/${id}/install-wp-cli`, { method: 'POST', actor });
 }
 
+export type StaticContentType = "PRIVACY_POLICY" | "OPERATOR_INFO";
+
+export interface StaticContent {
+  id: number;
+  siteId: number;
+  contentType: StaticContentType;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function listStaticContent(siteId: number, actor?: ActorInfo): Promise<StaticContent[]> {
+  return apiFetch<StaticContent[]>(`/api/sites/${siteId}/static-content`, { actor });
+}
+
+export function generateStaticContent(
+  siteId: number,
+  contentType: StaticContentType,
+  actor?: ActorInfo
+): Promise<StaticContent> {
+  return apiFetch<StaticContent>(`/api/sites/${siteId}/static-content/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contentType }),
+    actor,
+  });
+}
+
 export interface SshKeyPair {
   publicKeyLine: string;
   privateKeyPem: string;

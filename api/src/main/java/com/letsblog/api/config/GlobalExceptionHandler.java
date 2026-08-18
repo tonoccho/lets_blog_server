@@ -5,6 +5,7 @@ import com.letsblog.api.cms.agent.AgentOperationException;
 import com.letsblog.api.cms.ssh.SshOperationException;
 import com.letsblog.api.contentcache.ContentScrapingException;
 import com.letsblog.api.github.GithubApiException;
+import com.letsblog.api.service.AiServiceGenerationException;
 import com.letsblog.api.service.ArticlePlanSessionNotFoundException;
 import com.letsblog.api.service.BackupException;
 import com.letsblog.api.service.CustomTagNotFoundException;
@@ -161,6 +162,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(CmsApiException.class)
     public ResponseEntity<Map<String, String>> handleCmsApiException(CmsApiException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(AiServiceGenerationException.class)
+    public ResponseEntity<Map<String, String>> handleAiServiceGenerationException(AiServiceGenerationException e) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
     }
 
