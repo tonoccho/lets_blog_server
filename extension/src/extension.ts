@@ -26,7 +26,7 @@ import { createArticleScaffold, openArticle, requireWorkspaceRoot } from './arti
 import * as api from './apiClient';
 import { PlanPanel } from './planPanel';
 import { ArticleCreationPanel } from './articleCreationPanel';
-import { PreviewPanel } from './previewPanel';
+import { PreviewMessage, PreviewPanel, SiteOption } from './previewPanel';
 import { ImageGenPanel } from './imageGenPanel';
 import { ImageGalleryPanel } from './imageGalleryPanel';
 import { DiagramEditorPanel, DIAGRAM_REFERENCE_PATTERN } from './diagramEditorPanel';
@@ -1093,31 +1093,13 @@ function buildPreviewSiteChoices(project: api.ProjectDetail): PreviewSiteChoice[
   return choices;
 }
 
-async function pickPreviewSite(
-  serverUrl: string,
-  apiKey: string,
-  actor: api.Actor | undefined,
-  projectId: number
-): Promise<PreviewSiteChoice | undefined> {
-  const project = await api.getProject(serverUrl, apiKey, actor, projectId);
-  const choices = buildPreviewSiteChoices(project);
-
-  if (choices.length === 0) {
-    // サイト未紐付けでもプレビュー自体は可能(CSSなしで表示する)。
-    return { label: 'サイトなし', siteName: 'サイト未紐付け' };
-  }
-  if (choices.length === 1) {
-    return choices[0];
-  }
-  return vscode.window.showQuickPick(choices, {
-    placeHolder: 'プレビューに使うサイトのCSSを選択',
-  });
-}
-
 /** 複数の警告文を改行区切りでまとめる。 */
 function appendWarning(base: string | undefined, next: string): string {
   return base ? `${base}\n${next}` : next;
 }
+
+/** サイト未紐付け環境を表す選択肢。プロジェクトに紐づくサイトが1つも無くてもプレビュー自体は可能(CSSなしで表示する)。 */
+const NO_SITE_CHOICE: PreviewSiteChoice = { label: 'サイトなし', siteName: 'サイト未紐付け' };
 
 async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<void> {
   const editor = getActiveMarkdownEditor();
@@ -1137,91 +1119,141 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
     const actor = await getActor(context);
     const serverUrl = getServerUrl();
 
-    const site = await pickPreviewSite(serverUrl, apiKey, actor, projectId);
-    if (!site) return;
+    const project = await api.getProject(serverUrl, apiKey, actor, projectId);
+    const choices = buildPreviewSiteChoices(project);
+    // パネル内の環境切り替えセレクトに渡す選択肢。ローカル/テスト/本番の見た目を
+    // 記事ごとに開き直さず切り替えて比較できるようにする(要件: 環境間のCSS差分確認)。
+    const availableSites: SiteOption[] = choices.map((c) => ({
+      siteId: c.siteId ?? null,
+      label: c.label,
+      siteName: c.siteName,
+    }));
+
+    let initialSite: PreviewSiteChoice | undefined;
+    if (choices.length === 0) {
+      initialSite = NO_SITE_CHOICE;
+    } else if (choices.length === 1) {
+      initialSite = choices[0];
+    } else {
+      initialSite = await vscode.window.showQuickPick(choices, {
+        placeHolder: 'プレビューに使うサイトのCSSを選択',
+      });
+      if (!initialSite) return;
+    }
 
     const baseDir = path.dirname(editor.document.uri.fsPath);
     const markdown = inlineLocalImages(article.content, baseDir);
 
     const featuredImage = resolveFeaturedImageReference(article.data, baseDir);
     const featuredImageDataUri = featuredImage ? toDataUri(featuredImage.absolutePath) : undefined;
-    let warning: string | undefined;
-    if (featuredImage && !featuredImageDataUri) {
-      warning = `アイキャッチ画像が見つかりません: ${featuredImage.reference}`;
-    }
+    const baseWarning = featuredImage && !featuredImageDataUri
+      ? `アイキャッチ画像が見つかりません: ${featuredImage.reference}`
+      : undefined;
+    const title = (article.data.title as string | undefined) ?? '';
+
+    /** 指定サイトのCSS・テーマ構造を取得し、プレビューパネルへ描画する。環境切り替え時にも同じ経路を通す。 */
+    const renderForSite = async (
+      targetSite: PreviewSiteChoice,
+      progress: vscode.Progress<{ message?: string }>
+    ): Promise<void> => {
+      progress.report({ message: 'Markdownを変換しています…' });
+      const html = await api.renderPreviewHtml(serverUrl, apiKey, actor, projectId, markdown);
+
+      progress.report({ message: `${targetSite.siteName} のCSSを取得しています…` });
+      let css = '';
+      let warning = baseWarning;
+      if (targetSite.siteId == null) {
+        warning = appendWarning(warning, 'プロジェクトにサイトが紐づいていないため、CSSなしで表示しています。');
+      } else {
+        try {
+          const themeCss = await api.getThemeCss(serverUrl, apiKey, actor, projectId, targetSite.siteId);
+          if (themeCss.available) {
+            css = themeCss.css;
+          } else {
+            warning = appendWarning(
+              warning,
+              `${targetSite.siteName} のCSSを取得できませんでした: ${themeCss.reason ?? '不明なエラー'}`
+            );
+          }
+        } catch (cssError) {
+          warning = appendWarning(warning, `${targetSite.siteName} のCSS取得に失敗しました: ${messageOf(cssError)}`);
+        }
+      }
+
+      // サイト内の既存記事ページを骨格に、実テーマのDOM構造(タイトル/カテゴリ/日付/アイキャッチ等)を
+      // 保ったまま表示できるか試す。取得できた場合はアイキャッチも骨格側へ差し替え済みのため、
+      // PreviewPanel側の簡易アイキャッチ表示は使わない(二重表示を避ける)。
+      // 参照記事が無い等で再現できない場合は、従来のプレーンな表示へフォールバックする。
+      let bodyHtml = html;
+      let usingSkeleton = false;
+      if (targetSite.siteId != null) {
+        progress.report({ message: `${targetSite.siteName} の実際のテーマ構造を再現しています…` });
+        try {
+          const skeleton = await api.renderPreviewSkeleton(
+            serverUrl,
+            apiKey,
+            actor,
+            projectId,
+            targetSite.siteId,
+            title,
+            html,
+            featuredImageDataUri
+          );
+          if (skeleton.available && skeleton.html) {
+            bodyHtml = skeleton.html;
+            usingSkeleton = true;
+          } else {
+            // デバッグログのみだと、利用者は「なぜヘッダー/サイドバー等の実テーマ構造が
+            // 表示されていないか」に気付けない(環境によって参照記事の有無が異なり、
+            // 骨格が使える環境と使えない環境が混在しうるため)。プレビューへも明示する。
+            const reason = skeleton.reason ?? '不明な理由';
+            logger.debug(`テーマ構造の再現をスキップしました: ${reason}`);
+            warning = appendWarning(
+              warning,
+              `${targetSite.siteName} の実際のテーマ構造(ヘッダー/サイドバー等)は再現できませんでした: ${reason}`
+            );
+          }
+          // トップページのクロールでは拾えない、投稿ページ限定で読み込まれるCSS(is_single()等)を
+          // 補うため、骨格取得時に実際のナビゲーション先で収集されたCSSがあればマージする。
+          // 本文の差し替え位置を特定できずavailableがfalseの場合でも、ナビゲーション自体には
+          // 成功していればcssは含まれ得るため、availableに関わらずマージする。
+          if (skeleton.css) {
+            css = css ? `${css}\n${skeleton.css}` : skeleton.css;
+          }
+        } catch (skeletonError) {
+          logger.debug(`テーマ構造の再現取得に失敗しました: ${messageOf(skeletonError)}`);
+        }
+      }
+
+      PreviewPanel.createOrShow(
+        context,
+        bodyHtml,
+        css,
+        warning,
+        `${targetSite.label} / ${targetSite.siteName}`,
+        usingSkeleton ? undefined : featuredImageDataUri,
+        onPreviewMessage,
+        availableSites,
+        targetSite.siteId ?? null
+      );
+    };
+
+    /** パネル内のセレクトで環境が切り替えられたときに、その環境のCSS/骨格を再取得して描画し直す。 */
+    const onPreviewMessage = (message: PreviewMessage): void => {
+      if (message.type !== 'switchSite') return;
+      const nextSite =
+        choices.find((c) => (c.siteId ?? null) === message.siteId) ??
+        (message.siteId == null ? NO_SITE_CHOICE : undefined);
+      if (!nextSite) return;
+      void vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: `${nextSite.siteName} のプレビューを生成しています…` },
+        (progress) => renderForSite(nextSite, progress)
+      );
+    };
 
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'プレビューを生成しています…' },
-      async (progress) => {
-        progress.report({ message: 'Markdownを変換しています…' });
-        const html = await api.renderPreviewHtml(serverUrl, apiKey, actor, projectId, markdown);
-
-        progress.report({ message: `${site.siteName} のCSSを取得しています…` });
-        let css = '';
-        if (site.siteId == null) {
-          warning = appendWarning(warning, 'プロジェクトにサイトが紐づいていないため、CSSなしで表示しています。');
-        } else {
-          try {
-            const themeCss = await api.getThemeCss(serverUrl, apiKey, actor, projectId, site.siteId);
-            if (themeCss.available) {
-              css = themeCss.css;
-            } else {
-              warning = appendWarning(
-                warning,
-                `${site.siteName} のCSSを取得できませんでした: ${themeCss.reason ?? '不明なエラー'}`
-              );
-            }
-          } catch (cssError) {
-            warning = appendWarning(warning, `${site.siteName} のCSS取得に失敗しました: ${messageOf(cssError)}`);
-          }
-        }
-
-        // サイト内の既存記事ページを骨格に、実テーマのDOM構造(タイトル/カテゴリ/日付/アイキャッチ等)を
-        // 保ったまま表示できるか試す。取得できた場合はアイキャッチも骨格側へ差し替え済みのため、
-        // PreviewPanel側の簡易アイキャッチ表示は使わない(二重表示を避ける)。
-        // 参照記事が無い等で再現できない場合は、従来のプレーンな表示へフォールバックする。
-        let bodyHtml = html;
-        let usingSkeleton = false;
-        if (site.siteId != null) {
-          progress.report({ message: `${site.siteName} の実際のテーマ構造を再現しています…` });
-          try {
-            const skeleton = await api.renderPreviewSkeleton(
-              serverUrl,
-              apiKey,
-              actor,
-              projectId,
-              site.siteId,
-              (article.data.title as string | undefined) ?? '',
-              html,
-              featuredImageDataUri
-            );
-            if (skeleton.available && skeleton.html) {
-              bodyHtml = skeleton.html;
-              usingSkeleton = true;
-            } else {
-              logger.debug(`テーマ構造の再現をスキップしました: ${skeleton.reason ?? '不明な理由'}`);
-            }
-            // トップページのクロールでは拾えない、投稿ページ限定で読み込まれるCSS(is_single()等)を
-            // 補うため、骨格取得時に実際のナビゲーション先で収集されたCSSがあればマージする。
-            // 本文の差し替え位置を特定できずavailableがfalseの場合でも、ナビゲーション自体には
-            // 成功していればcssは含まれ得るため、availableに関わらずマージする。
-            if (skeleton.css) {
-              css = css ? `${css}\n${skeleton.css}` : skeleton.css;
-            }
-          } catch (skeletonError) {
-            logger.debug(`テーマ構造の再現取得に失敗しました: ${messageOf(skeletonError)}`);
-          }
-        }
-
-        PreviewPanel.createOrShow(
-          context,
-          bodyHtml,
-          css,
-          warning,
-          `${site.label} / ${site.siteName}`,
-          usingSkeleton ? undefined : featuredImageDataUri
-        );
-      }
+      (progress) => renderForSite(initialSite as PreviewSiteChoice, progress)
     );
   } catch (err) {
     reportError('プレビューの生成に失敗しました', err);
