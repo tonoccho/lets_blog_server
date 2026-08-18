@@ -147,6 +147,30 @@ public class WordPressAdapter implements CmsAdapter {
     }
 
     @Override
+    public boolean mediaExists(CmsCredentials credentials, String mediaId) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            // WordPressではメディア(添付ファイル)もpost_type=attachmentのwp_postsレコードとして
+            // 保存されているため、投稿の実在確認(`wp post get`)と同じ判定がそのまま使える。
+            return sshOperations.postExists(creds, mediaId);
+        }
+        if (creds.isAgent()) {
+            return agentOperations.postExists(creds, mediaId);
+        }
+        RestClient client = buildClient(creds);
+        try {
+            client.get().uri("/wp-json/wp/v2/media/" + mediaId).retrieve().toBodilessEntity();
+            return true;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                return false;
+            }
+            log.warn("メディアの実在確認に失敗しました (mediaId={}): {} {}", mediaId, e.getStatusCode(), e.getMessage());
+            return true;
+        }
+    }
+
+    @Override
     public MediaUploadResult uploadMedia(CmsCredentials credentials, String filename, String contentType, byte[] data) {
         CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
         if (creds.isSsh()) {

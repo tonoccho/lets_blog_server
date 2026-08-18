@@ -262,6 +262,66 @@ class WordPressAdapterTest {
     }
 
     @Test
+    void testMediaExists_SSHトランスポートはWordPressSshOperationsのpostExistsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = sshCredentials();
+        when(sshOperations.postExists(creds, "11")).thenReturn(false);
+
+        boolean result = adapter.mediaExists(creds, "11");
+
+        assertEquals(false, result);
+        verify(sshOperations).postExists(creds, "11");
+        verify(agentOperations, never()).postExists(any(), any());
+    }
+
+    @Test
+    void testMediaExists_AGENTトランスポートはWordPressAgentOperationsのpostExistsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = agentCredentials();
+        when(agentOperations.postExists(creds, "11")).thenReturn(true);
+
+        boolean result = adapter.mediaExists(creds, "11");
+
+        assertEquals(true, result);
+        verify(agentOperations).postExists(creds, "11");
+        verify(sshOperations, never()).postExists(any(), any());
+    }
+
+    @Test
+    void testMediaExists_RESTトランスポートは200ならtrueを返す() {
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/media/11"))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        assertEquals(true, adapter.mediaExists(creds, "11"));
+        server.verify();
+    }
+
+    @Test
+    void testMediaExists_RESTトランスポートは404ならfalseを返す() {
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/media/11"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        assertEquals(false, adapter.mediaExists(creds, "11"));
+        server.verify();
+    }
+
+    @Test
+    void testMediaExists_RESTトランスポートは404以外のエラーなら判定不能としてtrueを返す() {
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/media/11"))
+                .andRespond(withServerError());
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        assertEquals(true, adapter.mediaExists(creds, "11"));
+        server.verify();
+    }
+
+    @Test
     void testUploadMedia() {
         server.expect(requestTo("http://example.com/wp-json/wp/v2/media"))
                 .andExpect(method(POST))

@@ -32,6 +32,18 @@ public interface CmsAdapter {
     }
 
     /**
+     * 指定IDのメディア(添付ファイル)がCMS側に実在するかどうかを判定する(読み取り専用)。
+     * 前回アップロード済み画像の再利用キャッシュは、投稿本体の実在確認(postExists、issue #493)
+     * だけでは不十分で、投稿は残っていてもメディアライブラリから当該画像だけが個別に削除されている
+     * ケースを検知できない(issue #495)。呼び出し側はsha256が一致し再利用を検討する場合に限り
+     * これを使って再利用の可否を判断する。対応しないCMSやID未指定時は既定でtrueを返す
+     * (判定不能時は安全側=従来どおりの再利用を許容する)。
+     */
+    default boolean mediaExists(CmsCredentials credentials, String mediaId) {
+        return true;
+    }
+
+    /**
      * メディアライブラリへ画像をアップロードする。
      */
     MediaUploadResult uploadMedia(CmsCredentials credentials, String filename, String contentType, byte[] data);

@@ -181,7 +181,9 @@ public class WordPressAgentOperations {
     /**
      * 指定IDの投稿がWordPress側に実在するかを判定する(読み取り専用)。
      * WordPressAdapter.postExists(issue #493)から呼ばれる。エージェントへの接続自体に失敗した
-     * 場合は判定不能として安全側(true=再利用を許容)を返す。
+     * 場合は判定不能として安全側(true=再利用を許容)を返す。メディア(添付ファイル)も
+     * post_type=attachmentのwp_postsレコードのため、`wp post get`ベースのこのエンドポイントは
+     * WordPressAdapter.mediaExists(issue #495)からも同じ判定として再利用される。
      */
     public boolean postExists(WordPressCredentials creds, String postId) {
         try {
