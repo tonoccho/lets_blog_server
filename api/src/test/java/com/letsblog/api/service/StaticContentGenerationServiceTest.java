@@ -103,6 +103,22 @@ class StaticContentGenerationServiceTest {
     }
 
     @Test
+    void generate_termsOfService_persistsGeneratedBody() {
+        Site site = managedSite();
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
+        when(bulkManagementClient.listPlugins("managed-slug")).thenReturn(List.of());
+        when(llmClient.generate(anyString())).thenReturn("```text\n利用規約本文\n```");
+        when(staticContentRepository.findBySiteIdAndContentType(1L, StaticContentType.TERMS_OF_SERVICE))
+                .thenReturn(Optional.empty());
+        when(staticContentRepository.save(any(StaticContent.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        StaticContentResponse response = staticContentGenerationService.generate(1L, StaticContentType.TERMS_OF_SERVICE);
+
+        assertEquals("利用規約本文", response.body());
+        assertEquals(StaticContentType.TERMS_OF_SERVICE, response.contentType());
+    }
+
+    @Test
     void generate_sshSite_usesSshPluginsWhenRestUnavailable() {
         Site site = sshSite();
         when(siteRepository.findById(2L)).thenReturn(Optional.of(site));

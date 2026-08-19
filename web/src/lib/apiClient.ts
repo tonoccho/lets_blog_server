@@ -351,7 +351,7 @@ export function installWpCli(id: number, actor?: ActorInfo): Promise<WpCliInstal
   return apiFetch<WpCliInstallResult>(`/api/sites/${id}/install-wp-cli`, { method: 'POST', actor });
 }
 
-export type StaticContentType = "PRIVACY_POLICY" | "OPERATOR_INFO";
+export type StaticContentType = "PRIVACY_POLICY" | "OPERATOR_INFO" | "TERMS_OF_SERVICE";
 
 export interface StaticContent {
   id: number;

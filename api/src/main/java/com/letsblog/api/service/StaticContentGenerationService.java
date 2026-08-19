@@ -1,7 +1,6 @@
 package com.letsblog.api.service;
 
 import com.letsblog.api.ai.LlmClient;
-import com.letsblog.api.cms.CmsCredentials.WordPressCredentials;
 import com.letsblog.api.cms.rest.WordPressRestBulkManagementOperations;
 import com.letsblog.api.cms.ssh.WordPressSshOperations;
 import com.letsblog.api.domain.Site;
@@ -166,6 +165,23 @@ public class StaticContentGenerationService {
                        含まれる項目を記載してください
                     3. 個人が特定される固有の氏名・住所・電話番号などは実在するかのように断定せず、
                        「[運営者名を入力]」のようなプレースホルダーで示してください
+                    4. Markdown記法は使わず、見出しと本文のみのプレーンテキストで構成してください
+                    """.formatted(site.getName(), site.getBaseUrl(), pluginList);
+            case TERMS_OF_SERVICE -> """
+                    あなたは日本語のブログサイト向け利用規約を作成する専門家です。
+                    以下のサイト情報をもとに、コピー&ペーストしてそのまま公開ページに利用できる
+                    利用規約の本文を作成してください。
+
+                    サイト名: %s
+                    サイトURL: %s
+                    有効化されているプラグイン: %s
+
+                    要件:
+                    1. 本文は```text ... ```で囲んで出力してください(前置きや説明文は一切含めないこと)
+                    2. 有効化されているプラグインからコメント機能、会員登録、お問い合わせフォームなどの
+                       利用者とのやり取りが推測される場合は、該当する項目を具体的に含めてください
+                    3. 一般的な項目(適用範囲、禁止事項、知的財産権、免責事項、規約の変更、準拠法、お問い合わせ先)を
+                       条文形式(第1条、第2条…)で含めてください
                     4. Markdown記法は使わず、見出しと本文のみのプレーンテキストで構成してください
                     """.formatted(site.getName(), site.getBaseUrl(), pluginList);
         };

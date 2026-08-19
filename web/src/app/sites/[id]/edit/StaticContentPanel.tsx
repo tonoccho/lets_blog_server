@@ -7,7 +7,10 @@ import { generateStaticContentAction } from "../../actions";
 const LABELS: Record<StaticContentType, string> = {
   PRIVACY_POLICY: "プライバシーポリシー",
   OPERATOR_INFO: "運営者情報",
+  TERMS_OF_SERVICE: "利用規約",
 };
+
+const CONTENT_TYPES: StaticContentType[] = ["PRIVACY_POLICY", "OPERATOR_INFO", "TERMS_OF_SERVICE"];
 
 export function StaticContentPanel({
   siteId,
@@ -19,23 +22,21 @@ export function StaticContentPanel({
   const [contents, setContents] = useState<Record<StaticContentType, StaticContent | null>>({
     PRIVACY_POLICY: initialContents.find((c) => c.contentType === "PRIVACY_POLICY") ?? null,
     OPERATOR_INFO: initialContents.find((c) => c.contentType === "OPERATOR_INFO") ?? null,
+    TERMS_OF_SERVICE: initialContents.find((c) => c.contentType === "TERMS_OF_SERVICE") ?? null,
   });
 
   return (
     <section className="max-w-xl space-y-4 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
       <h2 className="text-sm font-medium text-neutral-600 dark:text-neutral-400">静的コンテンツ</h2>
-      <StaticContentItem
-        siteId={siteId}
-        contentType="PRIVACY_POLICY"
-        content={contents.PRIVACY_POLICY}
-        onGenerated={(content) => setContents((prev) => ({ ...prev, PRIVACY_POLICY: content }))}
-      />
-      <StaticContentItem
-        siteId={siteId}
-        contentType="OPERATOR_INFO"
-        content={contents.OPERATOR_INFO}
-        onGenerated={(content) => setContents((prev) => ({ ...prev, OPERATOR_INFO: content }))}
-      />
+      {CONTENT_TYPES.map((contentType) => (
+        <StaticContentItem
+          key={contentType}
+          siteId={siteId}
+          contentType={contentType}
+          content={contents[contentType]}
+          onGenerated={(content) => setContents((prev) => ({ ...prev, [contentType]: content }))}
+        />
+      ))}
     </section>
   );
 }
