@@ -44,7 +44,25 @@ export interface ParsedArticle {
 /** 記事テキストをfront matterと本文へ分離する。front matterが無い場合dataは空になる。 */
 export function parseArticle(text: string): ParsedArticle {
   const parsed = matter(text);
-  return { data: parsed.data as LetsBlogFrontMatter, content: parsed.content };
+  const data = parsed.data as LetsBlogFrontMatter;
+  normalizeCategoryKey(data);
+  return { data, content: parsed.content };
+}
+
+/**
+ * 単数形の `category` キー(想定されるキーは複数形の `categories`)で書かれたfront matterを、
+ * `categories` へ正規化する。投稿処理は `categories` のみを参照するため、`category` のまま
+ * 残っていると値が無視され、カテゴリの変更が投稿に反映されない。
+ */
+function normalizeCategoryKey(data: LetsBlogFrontMatter): void {
+  const legacy = data.category;
+  if (legacy === undefined) {
+    return;
+  }
+  if ((data.categories === undefined || data.categories.length === 0) && legacy !== null) {
+    data.categories = Array.isArray(legacy) ? legacy : [String(legacy)];
+  }
+  delete data.category;
 }
 
 /** front matterと本文を1つの記事テキストへ戻す。 */

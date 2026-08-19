@@ -18,6 +18,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -370,6 +371,26 @@ class WordPressSshOperationsTest {
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
         verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), notNull());
         assertEquals(true, commandCaptor.getValue().contains("post update 42 -"));
+    }
+
+    @Test
+    void createOrUpdatePost_publishScheduledAt指定時はpost_dateとpost_date_gmtの両方を送る() {
+        // `post update`は未指定フィールドを既存投稿の値のまま引き継ぐため、--post_date_gmtだけを
+        // 送ると post_date(サイトのローカル時刻。wp-admin等が表示する値)が更新されずに取り残される
+        // (issue #504)。両方が同じ日時で送られることを確認する。
+        when(executor.exec(any(SshConnectionParams.class), any(), notNull())).thenReturn(ok(""));
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"guid\":\"https://example.com/?p=42\",\"post_status\":\"future\"}"));
+        PostContent scheduled = new PostContent(
+                "Title", "my-slug", "<p>Hello</p>", "future", List.of("5"), List.of("7"), null, null,
+                Instant.parse("2026-12-25T09:00:00Z"));
+
+        operations.createOrUpdatePost(creds(), scheduled, "42");
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), notNull());
+        assertEquals(true, commandCaptor.getValue().contains("--post_date='2026-12-25 09:00:00'"));
+        assertEquals(true, commandCaptor.getValue().contains("--post_date_gmt='2026-12-25 09:00:00'"));
     }
 
     @Test

@@ -27,6 +27,20 @@ describe('parseArticle', () => {
     expect(article.data).toEqual({});
     expect(article.content).toBe('見出しのない本文だけ');
   });
+
+  it('単数形のcategoryキーをcategoriesへ正規化する', () => {
+    const article = parseArticle('---\ntitle: サンプル\ncategory: 技術\n---\n\n本文です。\n');
+    expect(article.data.categories).toEqual(['技術']);
+    expect(article.data.category).toBeUndefined();
+  });
+
+  it('categoriesが既にある場合はcategoryを無視する', () => {
+    const article = parseArticle(
+      '---\ntitle: サンプル\ncategories:\n  - 既存\ncategory: 技術\n---\n\n本文です。\n'
+    );
+    expect(article.data.categories).toEqual(['既存']);
+    expect(article.data.category).toBeUndefined();
+  });
 });
 
 describe('stringifyArticle', () => {
