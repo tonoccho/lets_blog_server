@@ -8,5 +8,7 @@ import java.util.Optional;
 public interface PostRepository extends JpaRepository<Post, Long> {
     Optional<Post> findBySiteIdAndWpPostId(Long siteId, String wpPostId);
 
+    Optional<Post> findFirstBySiteIdAndSlugOrderByUpdatedAtDesc(Long siteId, String slug);
+
     void deleteBySiteId(Long siteId);
 }

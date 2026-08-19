@@ -162,17 +162,16 @@ describe('buildArticleFrontMatter', () => {
   const NOW = new Date('2026-06-01T00:00:00Z');
 
   it('必須項目とstatusの既定値を設定する', () => {
-    expect(buildArticleFrontMatter({ title: 'T', slug: 's', projectId: 3 }, NOW)).toEqual({
+    expect(buildArticleFrontMatter({ title: 'T', slug: 's' }, NOW)).toEqual({
       title: 'T',
       slug: 's',
       status: 'draft',
-      project_id: 3,
       publish_scheduled_at: '2026-06-08T00:00:00.000Z',
     });
   });
 
   it('publish_scheduled_atの既定値は作成時点から7日後(未来日時)にする', () => {
-    const frontMatter = buildArticleFrontMatter({ title: 'T', slug: 's', projectId: 3 }, NOW);
+    const frontMatter = buildArticleFrontMatter({ title: 'T', slug: 's' }, NOW);
     expect(validateScheduledPublication(frontMatter.publish_scheduled_at, NOW)).toEqual({
       value: '2026-06-08T00:00:00.000Z',
     });
@@ -183,7 +182,6 @@ describe('buildArticleFrontMatter', () => {
       {
         title: 'T',
         slug: 's',
-        projectId: 3,
         categories: [],
         tags: [],
       },
@@ -193,17 +191,14 @@ describe('buildArticleFrontMatter', () => {
     expect(frontMatter).not.toHaveProperty('tags');
   });
 
-  it('GitHub Issue起点の情報を含められる', () => {
+  it('issue #505: project_id/github_issue_number/github_repositoryは書き込まない', () => {
     const frontMatter = buildArticleFrontMatter(
       {
         title: 'T',
         slug: 's',
-        projectId: 3,
         categories: ['技術'],
         tags: ['docker'],
         status: 'publish',
-        githubIssueNumber: 42,
-        githubRepository: 'https://github.com/o/r',
       },
       NOW
     );
@@ -211,20 +206,19 @@ describe('buildArticleFrontMatter', () => {
       title: 'T',
       slug: 's',
       status: 'publish',
-      project_id: 3,
       categories: ['技術'],
       tags: ['docker'],
-      github_issue_number: 42,
-      github_repository: 'https://github.com/o/r',
       publish_scheduled_at: '2026-06-08T00:00:00.000Z',
     });
+    expect(frontMatter).not.toHaveProperty('project_id');
+    expect(frontMatter).not.toHaveProperty('github_issue_number');
+    expect(frontMatter).not.toHaveProperty('github_repository');
   });
 
   it('生成したfront matterはそのまま記事として書き出せる', () => {
-    const frontMatter = buildArticleFrontMatter({ title: 'タイトル', slug: 'my-slug', projectId: 1 }, NOW);
+    const frontMatter = buildArticleFrontMatter({ title: 'タイトル', slug: 'my-slug' }, NOW);
     const reparsed = parseArticle(stringifyArticle({ data: frontMatter, content: '本文' }));
     expect(reparsed.data.title).toBe('タイトル');
-    expect(reparsed.data.project_id).toBe(1);
     expect(reparsed.data.publish_scheduled_at).toBe('2026-06-08T00:00:00.000Z');
   });
 });

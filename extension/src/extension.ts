@@ -411,8 +411,14 @@ async function publishToSite(
     return;
   }
 
-  const existingPostId = resolveExistingPostId(article.data, siteKey);
   const actor = await getActor(context);
+  // 後方互換: 既にfront matterにwp_post_ids等が残っている記事はそちらを優先する。
+  // 無い場合(issue #505以降の新規記事)は、DB(postsテーブル)側の情報をサーバーAPI経由で照会する。
+  let existingPostId = resolveExistingPostId(article.data, siteKey);
+  if (!existingPostId && article.data.slug) {
+    const found = await api.lookupExistingPost(serverUrl, apiKey, siteKey, article.data.slug, actor);
+    existingPostId = found?.wpPostId;
+  }
 
   const result = await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'WordPressへ投稿しています…' },
@@ -445,11 +451,10 @@ async function publishToSite(
     }
   );
 
-  article.data.site = siteKey;
-  article.data.wp_post_id = result.wpPostId;
+  // issue #505: site/wp_post_id/wp_post_idsはfront matterへ書き込まない(DB(postsテーブル)側で
+  // 管理し、次回投稿時はlookupExistingPost経由で参照する)。wp_post_url/statusは投稿の派生情報として残す。
   article.data.wp_post_url = result.wpPostUrl;
   article.data.status = result.status;
-  article.data.wp_post_ids = { ...(article.data.wp_post_ids ?? {}), [siteKey]: result.wpPostId };
   await replaceDocumentText(editor, stringifyArticle(article));
 
   const selection = await vscode.window.showInformationMessage(
@@ -529,8 +534,12 @@ async function commandPublish(context: vscode.ExtensionContext): Promise<void> {
 }
 
 /**
- * 現在の記事を、front matterのwp_post_idsに記録されているサイトから選んで削除する
+ * 現在の記事が投稿済みのサイトを選んで削除する
  * (WordPressの場合、既定でゴミ箱へ移動する。完全削除は行わない)。
+ *
+ * 後方互換: front matterにwp_post_idsが残っている記事(issue #505より前に投稿されたもの)は
+ * そちらから削除候補を求める。無い場合は、登録済みサイトそれぞれについてDB側の情報を
+ * サーバーAPI経由(lookupExistingPost)で照会し、実際に投稿済みのサイトを削除候補とする。
  */
 async function commandDeletePost(context: vscode.ExtensionContext): Promise<void> {
   const editor = getActiveMarkdownEditor();
@@ -538,51 +547,67 @@ async function commandDeletePost(context: vscode.ExtensionContext): Promise<void
 
   try {
     const article = parseArticle(editor.document.getText());
-    const wpPostIds = article.data.wp_post_ids ?? {};
-    const siteKeys = Object.keys(wpPostIds);
+    const apiKey = await requireApiKey(context);
+    const actor = await getActor(context);
 
-    if (siteKeys.length === 0) {
+    const legacyWpPostIds = article.data.wp_post_ids;
+    let candidates: { siteKey: string; wpPostId: string }[];
+    if (legacyWpPostIds && Object.keys(legacyWpPostIds).length > 0) {
+      candidates = Object.entries(legacyWpPostIds).map(([siteKey, wpPostId]) => ({ siteKey, wpPostId }));
+    } else if (article.data.slug) {
+      const sites = await api.listSites(getServerUrl(), apiKey, actor);
+      const found = await Promise.all(
+        sites.map(async (s) => {
+          const result = await api.lookupExistingPost(getServerUrl(), apiKey, s.siteKey, article.data.slug as string, actor);
+          return result ? { siteKey: s.siteKey, wpPostId: result.wpPostId } : undefined;
+        })
+      );
+      candidates = found.filter((c): c is { siteKey: string; wpPostId: string } => c != null);
+    } else {
+      candidates = [];
+    }
+
+    if (candidates.length === 0) {
       vscode.window.showErrorMessage('この記事はまだどのサイトにも投稿されていません。');
       return;
     }
 
-    let siteKey: string;
-    if (siteKeys.length === 1) {
-      siteKey = siteKeys[0];
+    let target: { siteKey: string; wpPostId: string };
+    if (candidates.length === 1) {
+      target = candidates[0];
     } else {
       const picked = await vscode.window.showQuickPick(
-        siteKeys.map((key) => ({ label: key, description: wpPostIds[key] })),
+        candidates.map((c) => ({ label: c.siteKey, description: c.wpPostId, candidate: c })),
         { placeHolder: '削除対象のサイトを選択' }
       );
       if (!picked) return;
-      siteKey = picked.label;
+      target = picked.candidate;
     }
 
-    const wpPostId = wpPostIds[siteKey];
     const confirmation = await vscode.window.showWarningMessage(
-      `サイト '${siteKey}' の投稿(ID: ${wpPostId})を削除します(WordPressの場合はゴミ箱へ移動します)。よろしいですか?`,
+      `サイト '${target.siteKey}' の投稿(ID: ${target.wpPostId})を削除します(WordPressの場合はゴミ箱へ移動します)。よろしいですか?`,
       { modal: true },
       '削除する'
     );
     if (confirmation !== '削除する') return;
 
-    const apiKey = await requireApiKey(context);
-    const actor = await getActor(context);
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: '投稿を削除しています…' },
-      () => api.deletePost(getServerUrl(), apiKey, actor, siteKey, wpPostId)
+      () => api.deletePost(getServerUrl(), apiKey, actor, target.siteKey, target.wpPostId)
     );
 
-    const remainingWpPostIds = { ...wpPostIds };
-    delete remainingWpPostIds[siteKey];
-    article.data.wp_post_ids = remainingWpPostIds;
-    if (article.data.site === siteKey) {
-      article.data.wp_post_id = null;
-      article.data.wp_post_url = null;
+    if (legacyWpPostIds) {
+      const remainingWpPostIds = { ...legacyWpPostIds };
+      delete remainingWpPostIds[target.siteKey];
+      article.data.wp_post_ids = remainingWpPostIds;
+      if (article.data.site === target.siteKey) {
+        article.data.wp_post_id = null;
+        article.data.wp_post_url = null;
+      }
+      await replaceDocumentText(editor, stringifyArticle(article));
     }
-    await replaceDocumentText(editor, stringifyArticle(article));
 
-    vscode.window.showInformationMessage(`サイト '${siteKey}' の投稿を削除しました。`);
+    vscode.window.showInformationMessage(`サイト '${target.siteKey}' の投稿を削除しました。`);
   } catch (err) {
     reportError('投稿の削除に失敗しました', err);
   }
@@ -834,7 +859,7 @@ async function commandCreateArticle(context: vscode.ExtensionContext): Promise<v
 async function commandCreateArticleWithoutAi(context: vscode.ExtensionContext): Promise<void> {
   try {
     const workspaceRoot = requireWorkspaceRoot();
-    const projectId = requireProjectId(context);
+    requireProjectId(context);
 
     const title = await vscode.window.showInputBox({
       prompt: 'タイトル',
@@ -862,7 +887,7 @@ async function commandCreateArticleWithoutAi(context: vscode.ExtensionContext): 
     const result = await createArticleScaffold({
       workspaceRoot,
       slug: slug.trim(),
-      frontMatter: buildArticleFrontMatter({ title: title.trim(), slug: slug.trim(), projectId }),
+      frontMatter: buildArticleFrontMatter({ title: title.trim(), slug: slug.trim() }),
       content: '',
     });
     if (!result) return;

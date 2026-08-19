@@ -32,6 +32,13 @@ export const PublishResultSchema = z.object({
 });
 export type PublishResult = z.infer<typeof PublishResultSchema>;
 
+/** サイト+スラッグに対応する既存投稿の照会結果(issue #505)。 */
+export const PostLookupResultSchema = z.object({
+  wpPostId: z.string(),
+  status: z.string(),
+});
+export type PostLookupResult = z.infer<typeof PostLookupResultSchema>;
+
 export const SourceReferenceSchema = z.object({
   title: z.string(),
   url: z.string(),
