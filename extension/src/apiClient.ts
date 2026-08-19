@@ -423,6 +423,37 @@ export async function deletePost(
   });
 }
 
+/**
+ * サイト+スラッグに対応する既存投稿を照会する(issue #505)。
+ * front matterのwp_post_ids(廃止)に頼らず、DB側の情報から既存投稿の有無・WordPress投稿IDを
+ * 取得するために使う。該当する投稿が無い場合(まだそのサイトへ投稿されていない)はundefinedを返す。
+ */
+export async function lookupExistingPost(
+  serverUrl: string,
+  apiKey: string,
+  siteKey: string,
+  slug: string,
+  actor?: Actor
+): Promise<schemas.PostLookupResult | undefined> {
+  try {
+    return await requestJson(
+      serverUrl,
+      `/api/posts/${encodeURIComponent(siteKey)}/by-slug/${encodeURIComponent(slug)}`,
+      {
+        label: 'lookupExistingPost',
+        method: 'GET',
+        headers: buildHeaders(apiKey, actor),
+      },
+      schemas.PostLookupResultSchema
+    );
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
 /** 登録済みサイトの一覧を取得する。 */
 export async function listSites(
   serverUrl: string,

@@ -13,9 +13,9 @@ export interface LetsBlogFrontMatter {
   wp_post_id?: string | null;
   wp_post_url?: string | null;
   /**
-   * 環境(サイトキー)ごとのWordPress投稿ID。ローカル/テスト/本番は別々のWordPressサイトのため、
-   * 単一のwp_post_idを使い回すと別サイトの投稿IDで更新しようとして失敗する。
-   * 投稿先を都度選べるようになった際に、サイトごとの投稿IDを個別に記録するために追加。
+   * 環境(サイトキー)ごとのWordPress投稿ID。issue #505以降、新規作成・投稿では書き込まなくなった
+   * (DB(postsテーブル)側の情報をサーバーAPI経由で参照する、resolveExistingPostId/apiClient.lookupExistingPost
+   * を参照)。既にこのフィールドを持つ古いarticle.mdとの後方互換のため、読み込みは引き続きサポートする。
    */
   wp_post_ids?: Record<string, string>;
   /**
@@ -23,8 +23,16 @@ export interface LetsBlogFrontMatter {
    * サーバー側でWordPressの予約投稿(status=future)として扱われる。
    */
   publish_scheduled_at?: string;
+  /**
+   * issue #505以降、新規作成では書き込まなくなった(GitHub Issueとの紐付けはArticlePlanSessionで
+   * サーバー側管理)。古いarticle.mdとの後方互換のため型としては残す。
+   */
   github_issue_number?: number;
   github_repository?: string;
+  /**
+   * issue #505以降、新規作成では書き込まなくなった(プロジェクトはワークスペース単位の選択
+   * (config.getProjectId)で解決する)。古いarticle.mdとの後方互換のため型としては残す。
+   */
   project_id?: number;
   [key: string]: unknown;
 }
@@ -148,14 +156,9 @@ export function resolveExistingPostId(data: LetsBlogFrontMatter, siteKey: string
 export interface ArticleFrontMatterInput {
   title: string;
   slug: string;
-  projectId: number;
   categories?: string[];
   tags?: string[];
   status?: string;
-  /** GitHub Issue起点で作成した場合のIssue番号。 */
-  githubIssueNumber?: number;
-  /** GitHub Issue起点で作成した場合のリポジトリURL。 */
-  githubRepository?: string;
 }
 
 /** publish_scheduled_atの既定値に使う、作成日からのオフセット(日数)。 */
@@ -181,7 +184,6 @@ export function buildArticleFrontMatter(
     title: input.title,
     slug: input.slug,
     status: input.status ?? 'draft',
-    project_id: input.projectId,
     publish_scheduled_at: scheduledAt.toISOString(),
   };
   if (input.categories && input.categories.length > 0) {
@@ -189,12 +191,6 @@ export function buildArticleFrontMatter(
   }
   if (input.tags && input.tags.length > 0) {
     frontMatter.tags = input.tags;
-  }
-  if (input.githubIssueNumber != null) {
-    frontMatter.github_issue_number = input.githubIssueNumber;
-  }
-  if (input.githubRepository) {
-    frontMatter.github_repository = input.githubRepository;
   }
   return frontMatter;
 }

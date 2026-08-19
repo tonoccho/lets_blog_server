@@ -23,6 +23,7 @@ import com.letsblog.api.service.InvalidRoleException;
 import com.letsblog.api.service.InvalidTokenException;
 import com.letsblog.api.service.InvalidTotpCodeException;
 import com.letsblog.api.service.MailTemplateNotFoundException;
+import com.letsblog.api.service.PostNotFoundException;
 import com.letsblog.api.service.ProjectNotFoundException;
 import com.letsblog.api.service.ProjectUserNotFoundException;
 import com.letsblog.api.service.ProvisioningException;
@@ -62,6 +63,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(SiteNotFoundException.class)
     public ResponseEntity<Map<String, String>> handleSiteNotFound(SiteNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(PostNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handlePostNotFound(PostNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
     }
 

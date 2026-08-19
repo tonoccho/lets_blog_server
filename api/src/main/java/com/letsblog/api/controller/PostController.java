@@ -5,13 +5,16 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.domain.Post;
 import com.letsblog.api.domain.Site;
+import com.letsblog.api.dto.PostLookupResponse;
 import com.letsblog.api.dto.PostPublishCommand;
 import com.letsblog.api.dto.PostPublishResponse;
 import com.letsblog.api.dto.PostSummaryResponse;
 import com.letsblog.api.repository.PostRepository;
 import com.letsblog.api.repository.SiteRepository;
 import com.letsblog.api.service.PostDeleteService;
+import com.letsblog.api.service.PostNotFoundException;
 import com.letsblog.api.service.PostPublishService;
+import com.letsblog.api.service.SiteNotFoundException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -139,6 +142,21 @@ public class PostController {
                 site, title, slug, status, categories, tags, wpPostId, markdown, images, featuredImageFilename,
                 imageReferences, publishScheduledAt, notifySns);
         return postPublishService.publish(command);
+    }
+
+    /**
+     * サイト+スラッグに対応する既存投稿を照会する(issue #505)。
+     * VSCode拡張がfront matterのwp_post_ids(廃止)に頼らず、DB側の情報から既存投稿の
+     * WordPress投稿IDを取得し、投稿の新規作成/更新を判断するために使う。該当が無ければ404。
+     */
+    @GetMapping("/{site}/by-slug/{slug}")
+    public PostLookupResponse lookupBySlug(@PathVariable String site, @PathVariable String slug) {
+        Site siteEntity = siteRepository.findBySiteKey(site)
+                .orElseThrow(() -> new SiteNotFoundException("siteKey '" + site + "' は登録されていません"));
+        Post post = postRepository.findFirstBySiteIdAndSlugOrderByUpdatedAtDesc(siteEntity.getId(), slug)
+                .orElseThrow(() -> new PostNotFoundException(
+                        "site '" + site + "', slug '" + slug + "' に対応する投稿は見つかりません"));
+        return new PostLookupResponse(post.getWpPostId(), post.getStatus());
     }
 
     /**
