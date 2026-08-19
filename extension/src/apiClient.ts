@@ -21,6 +21,17 @@ import * as schemas from './schemas';
 const DEFAULT_TIMEOUT_MS = 120_000;
 
 /**
+ * 記事公開(/api/posts/publish)が保証する最低タイムアウト。画像アップロードや
+ * PlantUML/Draw.ioダイアグラムのレンダリング、SSH経由のwp-cli呼び出しを伴い、既定の
+ * リクエストタイムアウト(120秒)を超えて処理が続くことがある。クライアント側が先に
+ * タイムアウトして中断すると、front matterへのwp_post_id反映前に失敗扱いとなり、
+ * 次回投稿時にwpPostIdが空のまま送られて新規投稿として扱われ、画像・ダイアグラムが
+ * 重複アップロードされる原因になっていた(issue #499)。サーバー側nginxのタイムアウト
+ * (1200秒、issue #497)を下回らないようにする。
+ */
+const PUBLISH_MIN_TIMEOUT_MS = 1_200_000;
+
+/**
  * TLS証明書の検証は既定で有効(allowInsecureTls=false)。
  * 検証を無効化すると中間者攻撃でAPIキーや記事内容を傍受・改竄されうるため、
  * 自己署名証明書のローカル環境へ接続する場合に限り、利用者が明示的に有効化する。
@@ -67,6 +78,11 @@ interface RequestSpec {
    */
   createBody?: () => { body: string | Buffer; headers?: Record<string, string> };
   /**
+   * このリクエストが最低限確保すべきタイムアウト(ミリ秒)。利用者設定(letsBlog.requestTimeoutMs)
+   * より長い場合のみ有効になる下限であり、利用者が明示的により長い値を設定していればそちらを尊重する。
+   */
+  minTimeoutMs?: number;
+  /**
    * 一時的な失敗を再試行してよいか。既定はGETのみ(サーバー状態を変更しないため安全)。
    * タイムアウト後にサーバー側で処理が完了していた場合、投稿や課題の割り当てのような
    * 変更系を再試行すると重複して実行されてしまうため、安全なものだけ明示的に有効化する。
@@ -86,7 +102,7 @@ interface RequestSpec {
 async function request(serverUrl: string, path: string, spec: RequestSpec): Promise<HttpResponse> {
   const url = `${serverUrl}${path}`;
   const method = spec.method ?? 'GET';
-  const timeoutMs = getTimeoutMs();
+  const timeoutMs = Math.max(getTimeoutMs(), spec.minTimeoutMs ?? 0);
 
   return withRetry(
     async () => {
@@ -349,6 +365,7 @@ export async function publishPost(
   return requestJson(serverUrl, '/api/posts/publish', {
     label: 'publishPost',
     method: 'POST',
+    minTimeoutMs: PUBLISH_MIN_TIMEOUT_MS,
     headers: buildHeaders(apiKey, actor),
     createBody: () => {
       const parts: MultipartPart[] = [

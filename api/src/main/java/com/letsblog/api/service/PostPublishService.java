@@ -121,15 +121,13 @@ public class PostPublishService {
         // [recharts]タグの記法・データが不正な場合はInvalidRechartsTagExceptionを未捕捉のまま伝播させ、
         // GlobalExceptionHandlerが400として返すことで投稿自体を拒否する(Issue #340)。
         markdown = rechartsTagRenderService.render(markdown);
-        // [plantuml]〜[/plantuml]組み込みタグも同じ方針(Issue #344)。既存の```plantumlフェンスコード
-        // ブロック記法(次行のplantUmlEmbedService)とは併存し、置き換えない。
-        markdown = plantUmlTagRenderService.render(credentials, markdown);
-        markdown = plantUmlEmbedService.embedDiagrams(credentials, markdown);
-        // 前回投稿時にアップロード済みの画像を再利用するキャッシュは、そのwpPostIdに紐づけて記憶している。
-        // wpPostId自体がCMS側で削除される等して実在しなくなっている場合、一緒にアップロードした画像も
-        // 削除されている可能性が高く、キャッシュされたURLが既にリンク切れであることがある(issue #493)。
-        // 投稿自体の作成/更新時のフォールバック(createOrUpdatePost実装内)とは別に、画像再利用の可否を
+        // 前回投稿時にアップロード済みの画像/ダイアグラムを再利用するキャッシュは、そのwpPostIdに紐づけて
+        // 記憶している。wpPostId自体がCMS側で削除される等して実在しなくなっている場合、一緒にアップロードした
+        // 画像も削除されている可能性が高く、キャッシュされたURLが既にリンク切れであることがある(issue #493)。
+        // 投稿自体の作成/更新時のフォールバック(createOrUpdatePost実装内)とは別に、再利用の可否を
         // 先に判定する必要がある(画像URLは投稿本文の組み立てに使うため、投稿作成より前に確定させるため)。
+        // PlantUMLダイアグラムの再利用判定(issue #499)にも同じキャッシュを使うため、
+        // plantUmlTagRenderService/plantUmlEmbedServiceの呼び出しより前にロードする。
         String wpPostIdForImageCache = command.wpPostId();
         if (wpPostIdForImageCache != null && !cmsAdapter.postExists(credentials, wpPostIdForImageCache)) {
             log.info("wpPostId={} はCMS側に存在しないため、前回アップロード画像の再利用キャッシュは使用しません",
@@ -137,9 +135,20 @@ public class PostPublishService {
             wpPostIdForImageCache = null;
         }
         Map<String, UploadedImageInfo> priorUploads = loadPriorUploadedImages(site.getId(), wpPostIdForImageCache);
+
+        // [plantuml]〜[/plantuml]組み込みタグも同じ方針(Issue #344)。既存の```plantumlフェンスコード
+        // ブロック記法(次行のplantUmlEmbedService)とは併存し、置き換えない。
+        // 同一内容のダイアグラムを再投稿のたびに再生成・再アップロードしないよう、通常画像と同じ
+        // sha256ベースの再利用キャッシュ(priorUploads)を共有する(issue #499)。
+        DiagramEmbedResult tagResult = plantUmlTagRenderService.render(credentials, markdown, priorUploads);
+        DiagramEmbedResult embedResult = plantUmlEmbedService.embedDiagrams(
+                credentials, tagResult.markdown(), tagResult.uploadedImages());
+        markdown = embedResult.markdown();
+
         ImageReplacementResult imageResult = replaceImageReferences(
                 cmsAdapter, credentials, markdown, command.images(), command.imageReferences(),
-                command.slug(), command.title(), command.featuredImageFilename(), priorUploads, projectId);
+                command.slug(), command.title(), command.featuredImageFilename(),
+                embedResult.uploadedImages(), projectId);
         String html = markdownRenderer.render(imageResult.markdown());
         html = tocStyleRenderService.applyHtmlTemplate(html, projectId);
         html = renderedContentWrapperService.wrap(html, projectId);
@@ -425,10 +434,6 @@ public class PostPublishService {
 
     private record ImageReplacementResult(
             String markdown, String featuredMediaId, Map<String, UploadedImageInfo> uploadedImages) {
-    }
-
-    /** アップロード済み画像1件分の情報。sha256は再投稿時に内容が変わっていないかの判定に使う。 */
-    private record UploadedImageInfo(String sha256, String url, String mediaId) {
     }
 
     /**

@@ -13,6 +13,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -104,14 +106,51 @@ class PlantUmlTagRenderServiceTest {
                 .thenReturn(new MediaUploadResult("11", "https://example.com/2.png"));
 
         String markdown = "[plantuml]\nA->B\n[/plantuml]\n本文\n[plantuml]\nC->D\n[/plantuml]";
-        String result = service.render(credentials, markdown);
+        DiagramEmbedResult result = service.render(credentials, markdown, Map.of());
 
-        assertEquals("![diagram](https://example.com/1.png)\n本文\n![diagram](https://example.com/2.png)", result);
+        assertEquals("![diagram](https://example.com/1.png)\n本文\n![diagram](https://example.com/2.png)",
+                result.markdown());
+        assertEquals(2, result.uploadedImages().size());
+    }
+
+    @Test
+    void render_前回と同一内容のダイアグラムはメディアが実在すれば再アップロードしない() {
+        // issue #499: 再投稿時に同じダイアグラムを何度も生成・アップロードしないための再利用判定。
+        String wrapped = "@startuml\nA->B\n@enduml";
+        String sha256 = sha256Hex(wrapped);
+        Map<String, UploadedImageInfo> priorUploads = Map.of(
+                "plantuml:" + sha256,
+                new UploadedImageInfo(sha256, "https://example.com/cached.png", "10"));
+        when(cmsAdapter.mediaExists(credentials, "10")).thenReturn(true);
+
+        DiagramEmbedResult result = service.render(credentials, "[plantuml]\nA->B\n[/plantuml]", priorUploads);
+
+        assertEquals("![diagram](https://example.com/cached.png)", result.markdown());
+        verifyNoInteractions(plantUmlClient);
+        verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
+    }
+
+    @Test
+    void render_内容が一致してもメディアがCMS側に実在しなければ再アップロードする() {
+        String wrapped = "@startuml\nA->B\n@enduml";
+        String sha256 = sha256Hex(wrapped);
+        Map<String, UploadedImageInfo> priorUploads = Map.of(
+                "plantuml:" + sha256,
+                new UploadedImageInfo(sha256, "https://example.com/old.png", "10"));
+        when(cmsAdapter.mediaExists(credentials, "10")).thenReturn(false);
+        when(plantUmlClient.renderPng(wrapped)).thenReturn(new byte[]{1});
+        when(cmsAdapter.uploadMedia(eq(credentials), eq("plantuml-tag-1.png"), eq("image/png"), any()))
+                .thenReturn(new MediaUploadResult("11", "https://example.com/new.png"));
+
+        DiagramEmbedResult result = service.render(credentials, "[plantuml]\nA->B\n[/plantuml]", priorUploads);
+
+        assertEquals("![diagram](https://example.com/new.png)", result.markdown());
+        verify(cmsAdapter).uploadMedia(eq(credentials), eq("plantuml-tag-1.png"), eq("image/png"), any());
     }
 
     @Test
     void render_アップロード対象が無ければPlantUMLサーバーへ問い合わせない() {
-        service.render(credentials, "タグなしの本文です。");
+        service.render(credentials, "タグなしの本文です。", Map.of());
 
         verifyNoInteractions(plantUmlClient);
     }
@@ -122,7 +161,17 @@ class PlantUmlTagRenderServiceTest {
                 .thenThrow(new AiServiceException("PlantUMLサーバーに接続できません", null));
 
         assertThrows(InvalidPlantUmlTagException.class,
-                () -> service.render(credentials, "[plantuml]\nA->B\n[/plantuml]"));
+                () -> service.render(credentials, "[plantuml]\nA->B\n[/plantuml]", Map.of()));
         verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
+    }
+
+    private String sha256Hex(String source) {
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            return java.util.HexFormat.of().formatHex(
+                    digest.digest(source.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 }
