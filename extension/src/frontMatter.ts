@@ -10,8 +10,6 @@ export interface LetsBlogFrontMatter {
   categories?: string[];
   tags?: string[];
   featured_image?: string;
-  wp_post_id?: string | null;
-  wp_post_url?: string | null;
   /**
    * 環境(サイトキー)ごとのWordPress投稿ID。issue #505以降、新規作成・投稿では書き込まなくなった
    * (DB(postsテーブル)側の情報をサーバーAPI経由で参照する、resolveExistingPostId/apiClient.lookupExistingPost
@@ -137,19 +135,11 @@ export function resolveFeaturedImageReference(
 
 /**
  * 投稿先サイト(siteKey)に対応する既存投稿IDを解決する。wp_post_idsに記録があればそれを使う。
- * wp_post_ids導入前に作成された記事(まだこのフィールドを持たない)は、front matterのsiteが
- * 投稿先と一致する場合に限り、従来のwp_post_idを既存投稿として扱う(異なるサイトのIDを
- * 誤って使い回さないよう、一致しない場合は新規投稿として扱う)。
+ * 記録が無い場合(issue #505以降の新規記事、またはwp_post_ids導入前の古い記事)は、
+ * 呼び出し元がapiClient.lookupExistingPost経由でDB側の情報を照会する。
  */
 export function resolveExistingPostId(data: LetsBlogFrontMatter, siteKey: string): string | undefined {
-  const mapped = data.wp_post_ids?.[siteKey];
-  if (mapped) {
-    return mapped;
-  }
-  if (data.site === siteKey && data.wp_post_id != null) {
-    return String(data.wp_post_id);
-  }
-  return undefined;
+  return data.wp_post_ids?.[siteKey];
 }
 
 /** 新規記事のfront matterを組み立てるための入力。 */

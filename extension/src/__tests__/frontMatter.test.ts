@@ -119,23 +119,13 @@ describe('resolveExistingPostId', () => {
     expect(resolveExistingPostId(data, 'production')).toBe('20');
   });
 
-  it('wp_post_ids未導入の記事は、siteが一致する場合のみwp_post_idを流用する', () => {
-    const data = { site: 'production', wp_post_id: '30' };
-    expect(resolveExistingPostId(data, 'production')).toBe('30');
-  });
-
   it('別サイトのIDを誤って使い回さない', () => {
-    const data = { site: 'local', wp_post_id: '30' };
+    const data = { wp_post_ids: { local: '30' } };
     expect(resolveExistingPostId(data, 'production')).toBeUndefined();
   });
 
-  it('どこにも記録が無ければundefinedを返す', () => {
+  it('記録が無ければundefinedを返す(呼び出し元がAPI照会でフォールバックする)', () => {
     expect(resolveExistingPostId({}, 'production')).toBeUndefined();
-    expect(resolveExistingPostId({ site: 'production', wp_post_id: null }, 'production')).toBeUndefined();
-  });
-
-  it('数値で保存されたwp_post_idも文字列として返す', () => {
-    expect(resolveExistingPostId({ site: 'local', wp_post_id: 42 as unknown as string }, 'local')).toBe('42');
   });
 });
 
