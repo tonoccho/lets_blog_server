@@ -71,8 +71,7 @@ public class StaticContentGenerationService {
         String body = extractText(llmClient.generate(prompt));
 
         if (body.isBlank()) {
-            throw new AiServiceGenerationException(
-                    "LLMレスポンスから本文を抽出できませんでした。```text ... ``` の形式で返されることを確認してください。");
+            throw new AiServiceGenerationException("LLMレスポンスが空でした。時間をおいて再度お試しください。");
         }
 
         StaticContent entity = staticContentRepository.findBySiteIdAndContentType(siteId, contentType)
@@ -172,11 +171,16 @@ public class StaticContentGenerationService {
         };
     }
 
+    /**
+     * ```text ... ```で囲まれていればその中身を、そうでなければレスポンス全体をそのまま本文として使う。
+     * ローカルLLM(Ollama等の指示追従性が低いモデル)ではフェンス形式の指示が守られないことがあるため、
+     * フェンス無しでも本文として扱えるようフォールバックする(<think>ブロックはLlmClient側で既に除去済み)。
+     */
     private String extractText(String response) {
         Matcher matcher = TEXT_PATTERN.matcher(response);
         if (matcher.find()) {
             return matcher.group(1).strip();
         }
-        return "";
+        return response.strip();
     }
 }

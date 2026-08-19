@@ -153,14 +153,31 @@ class StaticContentGenerationServiceTest {
         Site site = managedSite();
         when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
         when(bulkManagementClient.listPlugins("managed-slug")).thenReturn(List.of());
-        when(llmClient.generate(anyString())).thenReturn("前置きだけで本文なし");
+        when(llmClient.generate(anyString())).thenReturn("   ");
 
         AiServiceGenerationException exception = assertThrows(
                 AiServiceGenerationException.class,
                 () -> staticContentGenerationService.generate(1L, StaticContentType.PRIVACY_POLICY));
 
-        assertTrue(exception.getMessage().contains("抽出できません"));
+        assertTrue(exception.getMessage().contains("空でした"));
         verify(staticContentRepository, never()).save(any());
+    }
+
+    @Test
+    void generate_llmResponseWithoutFence_usesFullResponseAsBody() {
+        // 一部のローカルLLM(Ollama等)は```text ... ```フェンスの指示に従わないことがあるため、
+        // フェンスが無くてもレスポンス全体を本文として使えることを確認する。
+        Site site = managedSite();
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
+        when(bulkManagementClient.listPlugins("managed-slug")).thenReturn(List.of());
+        when(llmClient.generate(anyString())).thenReturn("フェンス無しの本文です。");
+        when(staticContentRepository.findBySiteIdAndContentType(1L, StaticContentType.PRIVACY_POLICY))
+                .thenReturn(Optional.empty());
+        when(staticContentRepository.save(any(StaticContent.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        StaticContentResponse response = staticContentGenerationService.generate(1L, StaticContentType.PRIVACY_POLICY);
+
+        assertEquals("フェンス無しの本文です。", response.body());
     }
 
     @Test
