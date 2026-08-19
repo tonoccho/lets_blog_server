@@ -11,12 +11,6 @@ export interface LetsBlogFrontMatter {
   tags?: string[];
   featured_image?: string;
   /**
-   * 環境(サイトキー)ごとのWordPress投稿ID。issue #505以降、新規作成・投稿では書き込まなくなった
-   * (DB(postsテーブル)側の情報をサーバーAPI経由で参照する、resolveExistingPostId/apiClient.lookupExistingPost
-   * を参照)。既にこのフィールドを持つ古いarticle.mdとの後方互換のため、読み込みは引き続きサポートする。
-   */
-  wp_post_ids?: Record<string, string>;
-  /**
    * 公開予定日時(ISO 8601)。本番(live)サイトへの投稿時のみ有効で、
    * サーバー側でWordPressの予約投稿(status=future)として扱われる。
    */
@@ -44,7 +38,37 @@ export interface ParsedArticle {
 /** 記事テキストをfront matterと本文へ分離する。front matterが無い場合dataは空になる。 */
 export function parseArticle(text: string): ParsedArticle {
   const parsed = matter(text);
-  return { data: parsed.data as LetsBlogFrontMatter, content: parsed.content };
+  const data = parsed.data as LetsBlogFrontMatter;
+  normalizeCategoryKey(data);
+  stripLegacyWordPressIdKeys(data);
+  return { data, content: parsed.content };
+}
+
+/**
+ * 投稿の識別はslugを用いてサーバー側DB(postsテーブル)で管理するため、front matter側の
+ * wp_post_id/wp_post_url/wp_post_idsは廃止した。issue #505より前に作成されたarticle.mdに
+ * これらのキーが残っている場合、読み込み時に取り除き、以後の保存で書き戻されないようにする。
+ */
+function stripLegacyWordPressIdKeys(data: LetsBlogFrontMatter): void {
+  delete data.wp_post_id;
+  delete data.wp_post_url;
+  delete data.wp_post_ids;
+}
+
+/**
+ * 単数形の `category` キー(想定されるキーは複数形の `categories`)で書かれたfront matterを、
+ * `categories` へ正規化する。投稿処理は `categories` のみを参照するため、`category` のまま
+ * 残っていると値が無視され、カテゴリの変更が投稿に反映されない。
+ */
+function normalizeCategoryKey(data: LetsBlogFrontMatter): void {
+  const legacy = data.category;
+  if (legacy === undefined) {
+    return;
+  }
+  if ((data.categories === undefined || data.categories.length === 0) && legacy !== null) {
+    data.categories = Array.isArray(legacy) ? legacy : [String(legacy)];
+  }
+  delete data.category;
 }
 
 /** front matterと本文を1つの記事テキストへ戻す。 */
@@ -131,15 +155,6 @@ export function resolveFeaturedImageReference(
     return undefined;
   }
   return { reference, absolutePath: resolveLocalImagePath(baseDir, reference) };
-}
-
-/**
- * 投稿先サイト(siteKey)に対応する既存投稿IDを解決する。wp_post_idsに記録があればそれを使う。
- * 記録が無い場合(issue #505以降の新規記事、またはwp_post_ids導入前の古い記事)は、
- * 呼び出し元がapiClient.lookupExistingPost経由でDB側の情報を照会する。
- */
-export function resolveExistingPostId(data: LetsBlogFrontMatter, siteKey: string): string | undefined {
-  return data.wp_post_ids?.[siteKey];
 }
 
 /** 新規記事のfront matterを組み立てるための入力。 */

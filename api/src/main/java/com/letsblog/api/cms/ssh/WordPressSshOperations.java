@@ -688,8 +688,13 @@ public class WordPressSshOperations {
         args.append(" --post_status=").append(ShellQuote.single(content.status()));
         if (content.publishScheduledAt() != null) {
             // wp-cliはUTCの日時を --post_date_gmt で受け取る(status=futureと組で予約投稿になる)。
+            // `post update` は未指定フィールドを既存投稿の値のまま引き継ぐため、--post_date_gmt
+            // だけを送ると post_date(サイトのローカル時刻。wp-adminや投稿画面はこちらを表示する)が
+            // 更新前の値に取り残され、予約日時を変更したのに画面上は変わって見えないままになる
+            // (このアプリはサイトのタイムゾーン設定を扱っていないため、--post_dateも同じUTC値で送る)。
             String scheduledAt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
                     .format(content.publishScheduledAt().atOffset(ZoneOffset.UTC));
+            args.append(" --post_date=").append(ShellQuote.single(scheduledAt));
             args.append(" --post_date_gmt=").append(ShellQuote.single(scheduledAt));
         }
         if (content.slug() != null && !content.slug().isBlank()) {
