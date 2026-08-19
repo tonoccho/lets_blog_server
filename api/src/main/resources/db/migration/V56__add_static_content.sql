@@ -1,0 +1,12 @@
+CREATE TABLE static_content (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    site_id BIGINT NOT NULL,
+    content_type VARCHAR(20) NOT NULL COMMENT 'PRIVACY_POLICY or OPERATOR_INFO',
+    body LONGTEXT NOT NULL COMMENT 'LLMで生成されたコピペ可能な本文',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_static_content_site FOREIGN KEY (site_id)
+        REFERENCES sites(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_static_content_site_type (site_id, content_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
