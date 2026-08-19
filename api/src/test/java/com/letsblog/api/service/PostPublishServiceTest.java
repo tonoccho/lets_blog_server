@@ -751,6 +751,43 @@ class PostPublishServiceTest {
         assertTrue(postCaptor.getValue().getUploadedImagesJson().contains("plantuml:diagram-hash"));
     }
 
+    @Test
+    void publish_categoriesがローカルDBのPostへ保存される() {
+        // issue #506: WordPressへ送信したカテゴリはposts.categoriesへJSON配列として保存され、
+        // 再投稿時にも失われないことを検証する。
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("201", "https://example.com/?p=201", "draft"));
+        PostPublishCommand command = new PostPublishCommand(
+                "main", "My Article", "my-article", "draft", List.of("技術", "お知らせ"), List.of(), null, "本文",
+                List.of(), null, List.of(), null, null);
+
+        service.publish(command);
+
+        ArgumentCaptor<com.letsblog.api.domain.Post> postCaptor =
+                ArgumentCaptor.forClass(com.letsblog.api.domain.Post.class);
+        verify(postRepository).save(postCaptor.capture());
+        assertTrue(postCaptor.getValue().getCategories().contains("技術"));
+        assertTrue(postCaptor.getValue().getCategories().contains("お知らせ"));
+    }
+
+    @Test
+    void publish_publishScheduledAtがローカルDBのPostへ保存される() {
+        // issue #506: 本番サイトへの予約投稿では、実際に適用された公開予定日時がposts.publish_scheduled_atへ保存される。
+        bindProductionSite();
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("202", "https://example.com/?p=202", "future"));
+        java.time.OffsetDateTime scheduledAt = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).plusDays(1)
+                .withNano(0);
+
+        service.publish(scheduledCommand(scheduledAt.toString()));
+
+        ArgumentCaptor<com.letsblog.api.domain.Post> postCaptor =
+                ArgumentCaptor.forClass(com.letsblog.api.domain.Post.class);
+        verify(postRepository).save(postCaptor.capture());
+        assertEquals(scheduledAt.toInstant(),
+                postCaptor.getValue().getPublishScheduledAt().toInstant(java.time.ZoneOffset.UTC));
+    }
+
     private PostPublishCommand commandWithStatusAndNotify(String status, Boolean notifySns) {
         return new PostPublishCommand(
                 "main", "My Article", "my-article", status, List.of(), List.of(), null, "本文", List.of(), null,

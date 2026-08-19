@@ -1,5 +1,8 @@
 package com.letsblog.api.controller;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.domain.Post;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.PostPublishCommand;
@@ -9,6 +12,7 @@ import com.letsblog.api.repository.PostRepository;
 import com.letsblog.api.repository.SiteRepository;
 import com.letsblog.api.service.PostDeleteService;
 import com.letsblog.api.service.PostPublishService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -26,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/posts")
 public class PostController {
@@ -34,13 +39,15 @@ public class PostController {
     private final PostDeleteService postDeleteService;
     private final PostRepository postRepository;
     private final SiteRepository siteRepository;
+    private final ObjectMapper objectMapper;
 
     public PostController(PostPublishService postPublishService, PostDeleteService postDeleteService,
-                           PostRepository postRepository, SiteRepository siteRepository) {
+                           PostRepository postRepository, SiteRepository siteRepository, ObjectMapper objectMapper) {
         this.postPublishService = postPublishService;
         this.postDeleteService = postDeleteService;
         this.postRepository = postRepository;
         this.siteRepository = siteRepository;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -64,9 +71,24 @@ public class PostController {
                         post.getWpPostId(),
                         post.getSlug(),
                         post.getStatus(),
-                        post.getLastPublishedAt()
+                        post.getLastPublishedAt(),
+                        deserializeCategories(post.getCategories()),
+                        post.getPublishScheduledAt()
                 ))
                 .toList();
+    }
+
+    private List<String> deserializeCategories(String categoriesJson) {
+        if (categoriesJson == null || categoriesJson.isBlank()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(categoriesJson, new TypeReference<List<String>>() {
+            });
+        } catch (JsonProcessingException e) {
+            log.warn("カテゴリ情報のパースに失敗しました: {}", e.getMessage());
+            return List.of();
+        }
     }
 
     private List<Post> sortPosts(List<Post> posts, String sortBy, String sortOrder) {

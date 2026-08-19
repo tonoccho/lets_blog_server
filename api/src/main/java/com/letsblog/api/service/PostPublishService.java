@@ -38,6 +38,7 @@ import java.util.List;
 import java.util.Map;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.Optional;
 
@@ -179,7 +180,8 @@ public class PostPublishService {
         PostResult result = cmsAdapter.createOrUpdatePost(credentials, content, command.wpPostId());
         log.info("WordPress投稿完了: postId={}, status={}", result.id(), result.status());
 
-        Post post = upsertPostRecord(site.getId(), result, command.slug(), imageResult.uploadedImages());
+        Post post = upsertPostRecord(site.getId(), result, command.slug(), imageResult.uploadedImages(),
+                command.categories(), publishScheduledAt);
 
         if (shouldNotifySns(command, site, projectId, status)) {
             bufferNotificationService.notifyAsync(post.getId(), site.getId(), projectId, command.title(), result.link());
@@ -417,7 +419,8 @@ public class PostPublishService {
         return getFileExtension(fallbackFilename);
     }
 
-    private Post upsertPostRecord(Long siteId, PostResult result, String slug, Map<String, UploadedImageInfo> uploadedImages) {
+    private Post upsertPostRecord(Long siteId, PostResult result, String slug, Map<String, UploadedImageInfo> uploadedImages,
+                                   List<String> categories, Instant publishScheduledAt) {
         Post post = postRepository.findBySiteIdAndWpPostId(siteId, result.id())
                 .orElseGet(Post::new);
 
@@ -427,9 +430,25 @@ public class PostPublishService {
         post.setStatus(result.status());
         post.setLastPublishedAt(LocalDateTime.now());
         post.setUploadedImagesJson(serializeUploadedImages(uploadedImages));
+        post.setCategories(serializeCategories(categories));
+        post.setPublishScheduledAt(publishScheduledAt == null
+                ? null
+                : LocalDateTime.ofInstant(publishScheduledAt, ZoneOffset.UTC));
 
         postRepository.save(post);
         return post;
+    }
+
+    private String serializeCategories(List<String> categories) {
+        if (categories == null || categories.isEmpty()) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(categories);
+        } catch (JsonProcessingException e) {
+            log.warn("カテゴリ情報のシリアライズに失敗しました: {}", e.getMessage());
+            return null;
+        }
     }
 
     private record ImageReplacementResult(
