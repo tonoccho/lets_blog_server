@@ -37,6 +37,14 @@ public class Post {
     @Column(name = "uploaded_images_json", columnDefinition = "TEXT")
     private String uploadedImagesJson;
 
+    /** WordPressへ送信したカテゴリ名のJSON配列(例: ["技術","お知らせ"])。 */
+    @Column(columnDefinition = "TEXT")
+    private String categories;
+
+    /** WordPressへ送信した予約投稿の公開予定日時。予約指定がない場合はnull。 */
+    @Column(name = "publish_scheduled_at")
+    private LocalDateTime publishScheduledAt;
+
     @Column(nullable = false, length = 20)
     private String status = "draft";
 

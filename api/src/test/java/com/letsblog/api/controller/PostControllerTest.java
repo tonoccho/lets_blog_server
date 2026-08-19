@@ -35,7 +35,8 @@ class PostControllerTest {
     private SiteRepository siteRepository;
 
     private PostController controller() {
-        return new PostController(postPublishService, postDeleteService, postRepository, siteRepository);
+        return new PostController(postPublishService, postDeleteService, postRepository, siteRepository,
+                new com.fasterxml.jackson.databind.ObjectMapper());
     }
 
     private Post buildPost(long id, LocalDateTime updatedAt) {

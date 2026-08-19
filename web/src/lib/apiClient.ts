@@ -25,6 +25,8 @@ export interface PostSummary {
   slug: string | null;
   status: string;
   lastPublishedAt: string | null;
+  categories: string[];
+  publishScheduledAt: string | null;
 }
 
 export interface GenerationJob {
