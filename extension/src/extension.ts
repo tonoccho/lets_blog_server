@@ -451,9 +451,8 @@ async function publishToSite(
     }
   );
 
-  // issue #505: site/wp_post_id/wp_post_idsはfront matterへ書き込まない(DB(postsテーブル)側で
-  // 管理し、次回投稿時はlookupExistingPost経由で参照する)。wp_post_url/statusは投稿の派生情報として残す。
-  article.data.wp_post_url = result.wpPostUrl;
+  // site/wp_post_id/wp_post_ids/wp_post_urlはfront matterへ書き込まない(DB(postsテーブル)側で
+  // 管理し、次回投稿時はlookupExistingPost経由で参照する)。statusのみ投稿の派生情報として残す。
   article.data.status = result.status;
   await replaceDocumentText(editor, stringifyArticle(article));
 
@@ -600,10 +599,6 @@ async function commandDeletePost(context: vscode.ExtensionContext): Promise<void
       const remainingWpPostIds = { ...legacyWpPostIds };
       delete remainingWpPostIds[target.siteKey];
       article.data.wp_post_ids = remainingWpPostIds;
-      if (article.data.site === target.siteKey) {
-        article.data.wp_post_id = null;
-        article.data.wp_post_url = null;
-      }
       await replaceDocumentText(editor, stringifyArticle(article));
     }
 
