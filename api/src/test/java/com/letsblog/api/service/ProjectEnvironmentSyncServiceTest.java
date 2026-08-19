@@ -270,8 +270,70 @@ class ProjectEnvironmentSyncServiceTest {
         service.sync(1L, "production", "local", List.of("db"));
 
         verify(sshOperations).exportDatabase(sshCredentials);
+        verify(sshOperations, never()).exportMedia(any());
         verify(syncClient).importDatabase("local-site", "wp_local-site", "https://prod.example.com", dump);
+        verify(syncClient, never()).importMedia(any(), any());
         verify(syncClient, never()).sync(any());
+    }
+
+    @Test
+    void sync_SSH管理サイトを同期元にDBとメディアを同期できる() {
+        ProjectEnvironmentSyncService service = service();
+        Project project = buildProject(10L, 20L, 30L);
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site sshSite = buildSshSite(30L, "production-site", "https://prod.example.com");
+        WordPressCredentials sshCredentials = buildSshCredentials();
+        byte[] dump = "-- dump --".getBytes();
+        byte[] media = "tar-gz-bytes".getBytes();
+
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(30L)).thenReturn(Optional.of(sshSite));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.resolveDataSource(sshSite))
+                .thenReturn(new SiteService.SiteDataSource(false, null, sshCredentials));
+        when(sshOperations.exportDatabase(sshCredentials)).thenReturn(dump);
+        when(sshOperations.exportMedia(sshCredentials)).thenReturn(media);
+
+        service.sync(1L, "production", "local", List.of("db", "media"));
+
+        verify(syncClient).importDatabase("local-site", "wp_local-site", "https://prod.example.com", dump);
+        verify(syncClient).importMedia("local-site", media);
+    }
+
+    @Test
+    void sync_SSH管理サイトのメディアが空なら同期先へインポートしない() {
+        ProjectEnvironmentSyncService service = service();
+        Project project = buildProject(10L, 20L, 30L);
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site sshSite = buildSshSite(30L, "production-site", "https://prod.example.com");
+        WordPressCredentials sshCredentials = buildSshCredentials();
+
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(30L)).thenReturn(Optional.of(sshSite));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.resolveDataSource(sshSite))
+                .thenReturn(new SiteService.SiteDataSource(false, null, sshCredentials));
+        when(sshOperations.exportMedia(sshCredentials)).thenReturn(new byte[0]);
+
+        service.sync(1L, "production", "local", List.of("media"));
+
+        verify(syncClient, never()).importMedia(any(), any());
+    }
+
+    @Test
+    void sync_SSH管理サイトを同期元にする場合pluginsを含むtargetsは例外() {
+        ProjectEnvironmentSyncService service = service();
+        Project project = buildProject(10L, 20L, 30L);
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site sshSite = buildSshSite(30L, "production-site", "https://prod.example.com");
+
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(30L)).thenReturn(Optional.of(sshSite));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.sync(1L, "production", "local", List.of("plugins", "media")));
+        verify(syncClient, never()).importMedia(any(), any());
     }
 
     @Test

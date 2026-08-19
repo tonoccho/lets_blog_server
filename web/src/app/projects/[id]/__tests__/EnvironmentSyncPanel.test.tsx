@@ -99,15 +99,32 @@ describe('EnvironmentSyncPanel SSH管理サイト(issue #511)', () => {
     expect(optionLabels).not.toContain('テスト')
   })
 
-  it('SSH管理サイトを同期元に選ぶとDB以外の同期対象が無効化される', () => {
+  it('SSH管理サイトを同期元に選ぶとテーマ・プラグイン以外の同期対象が無効化される', () => {
     render(<EnvironmentSyncPanel projectId={1} project={buildProjectWithSshProduction()} />)
 
     const fromSelect = getSelect('同期元')
     fireEvent.change(fromSelect, { target: { value: 'production' } })
 
     const themesCheckbox = screen.getByLabelText('テーマ') as HTMLInputElement
+    const pluginsCheckbox = screen.getByLabelText('プラグイン') as HTMLInputElement
+    const mediaCheckbox = screen.getByLabelText('メディア') as HTMLInputElement
     const dbCheckbox = screen.getByLabelText('DB') as HTMLInputElement
     expect(themesCheckbox.disabled).toBe(true)
+    expect(pluginsCheckbox.disabled).toBe(true)
+    expect(mediaCheckbox.disabled).toBe(false)
     expect(dbCheckbox.disabled).toBe(false)
+  })
+
+  it('SSH管理サイトを同期元に選ぶとチェック済みだったテーマ・プラグインは解除される', () => {
+    render(<EnvironmentSyncPanel projectId={1} project={buildProjectWithSshProduction()} />)
+
+    const themesCheckbox = screen.getByLabelText('テーマ') as HTMLInputElement
+    fireEvent.click(themesCheckbox)
+    expect(themesCheckbox.checked).toBe(true)
+
+    const fromSelect = getSelect('同期元')
+    fireEvent.change(fromSelect, { target: { value: 'production' } })
+
+    expect(themesCheckbox.checked).toBe(false)
   })
 })

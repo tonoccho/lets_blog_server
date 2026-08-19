@@ -26,7 +26,7 @@ export function EnvironmentSyncPanel({ projectId, project }: { projectId: number
     production: project.productionSite,
   };
 
-  // 同期元は自動構築(managed)環境に加え、SSH管理サイトも対象にする(issue #511。DBのみ対応)。
+  // 同期元は自動構築(managed)環境に加え、SSH管理サイトも対象にする(issue #511。DB・メディアのみ対応)。
   // 同期先はファイルシステム・DBへの直接アクセス手段が要るため、managed環境限定のまま変更しない。
   const syncSourceEnvironments = (["local", "test", "production"] as const)
     .filter((environment) => environment !== "local")
@@ -64,7 +64,7 @@ export function EnvironmentSyncPanel({ projectId, project }: { projectId: number
     const masterIsSshOnly = sitesByEnvironment[masterEnvironment]?.managedWordpress === false
       && sitesByEnvironment[masterEnvironment]?.sshConfigured === true;
     form.querySelectorAll<HTMLInputElement>('input[name="targets"]').forEach((el) => {
-      el.checked = !masterIsSshOnly || el.value === "db";
+      el.checked = !masterIsSshOnly || el.value === "db" || el.value === "media";
     });
   }
 
@@ -75,7 +75,7 @@ export function EnvironmentSyncPanel({ projectId, project }: { projectId: number
         自動構築(managed)されたWordPress環境が2つ以上紐付いており、そのうちテスト環境または本番環境が
         1つ以上ある場合に、テーマ・プラグイン・メディア・DBの同期が行えます
         (ローカル環境は同期元に、本番環境は同期先に指定できません)。
-        SSH管理の外部サイトはDBのみ同期元として指定できます。
+        SSH管理の外部サイトはDB・メディアのみ同期元として指定できます。
       </div>
     );
   }
@@ -124,7 +124,7 @@ export function EnvironmentSyncPanel({ projectId, project }: { projectId: number
                 const sshOnly = site != null && !site.managedWordpress && site.sshConfigured;
                 if (sshOnly) {
                   formRef.current?.querySelectorAll<HTMLInputElement>('input[name="targets"]').forEach((el) => {
-                    if (el.value !== "db") {
+                    if (el.value !== "db" && el.value !== "media") {
                       el.checked = false;
                     }
                   });
@@ -155,7 +155,7 @@ export function EnvironmentSyncPanel({ projectId, project }: { projectId: number
 
         <fieldset className="flex gap-4">
           <legend className="mb-1 text-neutral-600 dark:text-neutral-400">
-            同期対象{fromIsSshOnly && "(SSH管理サイトが同期元のためDBのみ選択できます)"}
+            同期対象{fromIsSshOnly && "(SSH管理サイトが同期元のためDB・メディアのみ選択できます)"}
           </legend>
           <label className="flex items-center gap-1.5">
             <input type="checkbox" name="targets" value="themes" disabled={fromIsSshOnly} />
@@ -166,7 +166,7 @@ export function EnvironmentSyncPanel({ projectId, project }: { projectId: number
             プラグイン
           </label>
           <label className="flex items-center gap-1.5">
-            <input type="checkbox" name="targets" value="media" disabled={fromIsSshOnly} />
+            <input type="checkbox" name="targets" value="media" />
             メディア
           </label>
           <label className="flex items-center gap-1.5">

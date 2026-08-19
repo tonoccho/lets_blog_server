@@ -463,7 +463,8 @@ if ($path === '/sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
  * DBへインポートする(issue #511)。SSH管理サイトはこのコンテナと同一ホストにいないため、
  * /syncのようにファイルパスを直接指定した`cp`/`mysqldump | mysql`パイプが使えず、
  * Java側で一度ダンプを取得しmultipartでアップロードする方式にしている。
- * DBのみ対応(テーマ/プラグイン/メディアはSSH管理サイトからは同期不可。ProjectEnvironmentSyncService参照)。
+ * DB/メディアのみ対応(テーマ/プラグインはSSH管理サイトからは同期不可。ProjectEnvironmentSyncService参照)。
+ * メディアは/media-importで別途扱う。
  */
 if ($path === '/db-import' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = (string) ($_POST['slug'] ?? '');
@@ -506,6 +507,48 @@ if ($path === '/db-import' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($code !== 0) {
             respond(500, ['error' => 'URL書き換え(search-replace)に失敗しました', 'detail' => combinedOutput($out, $err)]);
         }
+    }
+
+    runCommand(['chown', '-R', 'www-data:www-data', $sitePath]);
+    respond(200, ['status' => 'ok']);
+}
+
+/**
+ * SSH管理サイト(同期元)から取得したメディア(wp-content/uploads)のtar.gzをアップロードし、
+ * managedサイトへ展開する(issue #511)。/db-importと同じ理由でmultipartアップロード方式にしている。
+ * アーカイブは`tar -czf ... -C <wp-content> uploads`形式(先頭に"uploads/"を含む)を前提とする。
+ */
+if ($path === '/media-import' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($_POST['slug'] ?? '');
+
+    if (!isValidSlug($slug) || empty($_FILES['file'])) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = "/var/www/html/sites/$slug";
+    if (!is_dir($sitePath)) {
+        respond(404, ['error' => 'サイトが見つかりません']);
+    }
+
+    $tmpPath = '/tmp/letsblog-mediaimport-' . bin2hex(random_bytes(8)) . '.tar.gz';
+    if (!move_uploaded_file($_FILES['file']['tmp_name'], $tmpPath)) {
+        respond(500, ['error' => 'アップロードファイルの一時保存に失敗しました']);
+    }
+
+    $contentPath = "$sitePath/wp-content";
+    $uploadsPath = "$contentPath/uploads";
+    $backupDir = "/var/www/html/backups/$slug";
+    runCommand(['mkdir', '-p', $backupDir]);
+    $timestamp = date('Ymd-His');
+    if (is_dir($uploadsPath)) {
+        // 上書きされる側(同期先)のバックアップを先に取得しておく
+        runCommand(['tar', '-czf', "$backupDir/media-{$timestamp}.tar.gz", '-C', $contentPath, 'uploads']);
+        runCommand(['rm', '-rf', $uploadsPath]);
+    }
+
+    [$code, $out, $err] = runCommand(['tar', '-xzf', $tmpPath, '-C', $contentPath]);
+    runCommand(['rm', '-f', $tmpPath]);
+    if ($code !== 0) {
+        respond(500, ['error' => 'メディアのインポートに失敗しました', 'detail' => combinedOutput($out, $err)]);
     }
 
     runCommand(['chown', '-R', 'www-data:www-data', $sitePath]);

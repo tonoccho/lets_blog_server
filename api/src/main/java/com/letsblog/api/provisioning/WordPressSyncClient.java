@@ -72,6 +72,32 @@ public class WordPressSyncClient {
         }
     }
 
+    /**
+     * SSH管理サイトから取得したメディア(wp-content/uploads)のtar.gzを、managedサイトへインポートする
+     * (issue #511)。{@link #importDatabase}と同じくmultipart/form-dataでファイルとして送信する。
+     */
+    public void importMedia(String toSlug, byte[] mediaTarGz) {
+        try {
+            MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
+            form.add("slug", toSlug);
+            form.add("file", new ByteArrayResource(mediaTarGz) {
+                @Override
+                public String getFilename() {
+                    return "media.tar.gz";
+                }
+            });
+            client.post()
+                    .uri("/media-import")
+                    .header("X-Provision-Token", provisionToken)
+                    .contentType(MediaType.MULTIPART_FORM_DATA)
+                    .body(form)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientException e) {
+            throw new ProvisioningException("環境同期(メディアインポート)に失敗しました: " + e.getMessage(), e);
+        }
+    }
+
     public record SyncCommand(
             String fromSlug,
             String fromDbName,

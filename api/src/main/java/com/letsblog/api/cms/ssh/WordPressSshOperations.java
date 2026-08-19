@@ -892,6 +892,33 @@ public class WordPressSshOperations {
         return prefix.isEmpty() ? "wp_" : prefix;
     }
 
+    /**
+     * wp-content/uploadsをリモートでtar.gzにまとめSFTPでダウンロードする
+     * (環境同期の同期元がSSH管理サイトの場合に使用。issue #511)。uploadsディレクトリが存在しない
+     * (メディア未アップロード)場合は空バイト列を返し、呼び出し元でインポートをスキップする想定。
+     */
+    public byte[] exportMedia(WordPressCredentials creds) {
+        SshConnectionParams params = connectionParams(creds);
+        String contentPath = creds.wpPath() + "/wp-content";
+        String uploadsPath = contentPath + "/uploads";
+        SshCommandResult checkResult = exec(creds, "test -d " + ShellQuote.single(uploadsPath));
+        if (!checkResult.ok()) {
+            return new byte[0];
+        }
+        String remotePath = "/tmp/letsblog-media-" + UUID.randomUUID() + ".tar.gz";
+        SshCommandResult tarResult = exec(creds, "tar -czf " + ShellQuote.single(remotePath)
+                + " -C " + ShellQuote.single(contentPath) + " uploads");
+        if (!tarResult.ok()) {
+            throw new SshOperationException("メディアのエクスポートに失敗しました: "
+                    + firstLine(tarResult.stderr(), tarResult.stdout()));
+        }
+        try {
+            return executor.getFile(params, remotePath);
+        } finally {
+            executor.removeFile(params, remotePath);
+        }
+    }
+
     private String sanitizeFilename(String filename) {
         String base = filename != null ? filename : "upload";
         int slash = Math.max(base.lastIndexOf('/'), base.lastIndexOf('\\'));

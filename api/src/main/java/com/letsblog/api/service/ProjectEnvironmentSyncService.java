@@ -1,5 +1,6 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.cms.CmsCredentials.WordPressCredentials;
 import com.letsblog.api.cms.ssh.WordPressSshOperations;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
@@ -15,13 +16,14 @@ import java.util.Set;
 /**
  * プロジェクトに紐づく環境(ローカル/テスト/本番)間で、テーマ・プラグイン・メディア・DBを同期する。
  * 同期先は自動構築(managedWordpress)されたWordPress環境に限る(ファイルシステム・DBへの直接アクセス
- * 手段がないため)。同期元は、managedWordpress環境に加え、SSH/wp-cli管理の外部サイトもDBのみ対応する
- * (issue #511。テーマ/プラグイン/メディアは、SSH管理サイトがこのコンテナと同一ホストにいないため対象外)。
+ * 手段がないため)。同期元は、managedWordpress環境に加え、SSH/wp-cli管理の外部サイトもDB・メディアのみ
+ * 対応する(issue #511。テーマ/プラグインは、SSH管理サイトがこのコンテナと同一ホストにいないため対象外)。
  */
 @Service
 public class ProjectEnvironmentSyncService {
 
     private static final Set<String> VALID_ENVIRONMENTS = Set.of("local", "test", "production");
+    private static final Set<String> SSH_SOURCE_SUPPORTED_TARGETS = Set.of("db", "media");
 
     private final ProjectRepository projectRepository;
     private final SiteRepository siteRepository;
@@ -70,17 +72,28 @@ public class ProjectEnvironmentSyncService {
     }
 
     private void syncFromSshManagedSite(String fromEnvironment, Site fromSite, Site toSite, List<String> targets) {
-        if (!Set.copyOf(targets).equals(Set.of("db"))) {
+        Set<String> targetSet = Set.copyOf(targets);
+        if (!SSH_SOURCE_SUPPORTED_TARGETS.containsAll(targetSet)) {
             throw new IllegalArgumentException(
-                    fromEnvironment + "環境(" + fromSite.getSiteKey() + ")はSSH管理サイトのため、DBのみ同期できます");
+                    fromEnvironment + "環境(" + fromSite.getSiteKey() + ")はSSH管理サイトのため、DB・メディアのみ同期できます");
         }
         SiteService.SiteDataSource dataSource = siteService.resolveDataSource(fromSite);
         if (!dataSource.hasSsh()) {
             throw new IllegalArgumentException(
                     fromEnvironment + "環境(" + fromSite.getSiteKey() + ")はSSH接続が設定されていないため同期できません");
         }
-        byte[] dump = sshOperations.exportDatabase(dataSource.sshCredentials());
-        syncClient.importDatabase(toSite.getWpSlug(), toSite.getWpDbName(), fromSite.getBaseUrl(), dump);
+        WordPressCredentials creds = dataSource.sshCredentials();
+
+        if (targetSet.contains("db")) {
+            byte[] dump = sshOperations.exportDatabase(creds);
+            syncClient.importDatabase(toSite.getWpSlug(), toSite.getWpDbName(), fromSite.getBaseUrl(), dump);
+        }
+        if (targetSet.contains("media")) {
+            byte[] mediaArchive = sshOperations.exportMedia(creds);
+            if (mediaArchive.length > 0) {
+                syncClient.importMedia(toSite.getWpSlug(), mediaArchive);
+            }
+        }
     }
 
     private Site resolveSite(Project project, String environment) {
