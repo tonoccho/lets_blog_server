@@ -5,7 +5,6 @@ import {
   resolveLocalImagePath,
   extractLocalImageReferences,
   resolveFeaturedImageReference,
-  resolveExistingPostId,
   guessImageMimeType,
   buildArticleFrontMatter,
   suggestSlugFromTitle,
@@ -40,6 +39,26 @@ describe('parseArticle', () => {
     );
     expect(article.data.categories).toEqual(['既存']);
     expect(article.data.category).toBeUndefined();
+  });
+
+  it('廃止済みのwp_post_id/wp_post_url/wp_post_idsが残っていても取り除く', () => {
+    const article = parseArticle(
+      [
+        '---',
+        'title: サンプル',
+        "wp_post_id: '130'",
+        "wp_post_url: 'https://nzlife.tonoccho.com/?p=130'",
+        'wp_post_ids:',
+        "  local: '115'",
+        "  production: '130'",
+        '---',
+        '',
+        '本文です。',
+      ].join('\n')
+    );
+    expect(article.data.wp_post_id).toBeUndefined();
+    expect(article.data.wp_post_url).toBeUndefined();
+    expect(article.data.wp_post_ids).toBeUndefined();
   });
 });
 
@@ -124,22 +143,6 @@ describe('resolveFeaturedImageReference', () => {
     expect(resolveFeaturedImageReference({ featured_image: 'https://example.com/a.png' }, BASE_DIR)).toBeUndefined();
     expect(resolveFeaturedImageReference({ featured_image: '//example.com/a.png' }, BASE_DIR)).toBeUndefined();
     expect(resolveFeaturedImageReference({ featured_image: 'data:image/png;base64,AA' }, BASE_DIR)).toBeUndefined();
-  });
-});
-
-describe('resolveExistingPostId', () => {
-  it('wp_post_idsにサイトの記録があればそれを使う', () => {
-    const data = { wp_post_ids: { local: '10', production: '20' } };
-    expect(resolveExistingPostId(data, 'production')).toBe('20');
-  });
-
-  it('別サイトのIDを誤って使い回さない', () => {
-    const data = { wp_post_ids: { local: '30' } };
-    expect(resolveExistingPostId(data, 'production')).toBeUndefined();
-  });
-
-  it('記録が無ければundefinedを返す(呼び出し元がAPI照会でフォールバックする)', () => {
-    expect(resolveExistingPostId({}, 'production')).toBeUndefined();
   });
 });
 

@@ -16,7 +16,6 @@ import {
   stringifyArticle,
   extractLocalImageReferences,
   resolveFeaturedImageReference,
-  resolveExistingPostId,
   guessImageMimeType,
   validateScheduledPublication,
   buildArticleFrontMatter,
@@ -412,10 +411,9 @@ async function publishToSite(
   }
 
   const actor = await getActor(context);
-  // 後方互換: 既にfront matterにwp_post_ids等が残っている記事はそちらを優先する。
-  // 無い場合(issue #505以降の新規記事)は、DB(postsテーブル)側の情報をサーバーAPI経由で照会する。
-  let existingPostId = resolveExistingPostId(article.data, siteKey);
-  if (!existingPostId && article.data.slug) {
+  // 投稿の識別はslugを用いてサーバー側DB(postsテーブル)で管理する。
+  let existingPostId: string | undefined;
+  if (article.data.slug) {
     const found = await api.lookupExistingPost(serverUrl, apiKey, siteKey, article.data.slug, actor);
     existingPostId = found?.wpPostId;
   }
@@ -451,8 +449,8 @@ async function publishToSite(
     }
   );
 
-  // site/wp_post_id/wp_post_ids/wp_post_urlはfront matterへ書き込まない(DB(postsテーブル)側で
-  // 管理し、次回投稿時はlookupExistingPost経由で参照する)。statusのみ投稿の派生情報として残す。
+  // site/wp_post_id/wp_post_urlはfront matterへ書き込まない(DB(postsテーブル)側で
+  // slugをキーに管理し、次回投稿時はlookupExistingPost経由で参照する)。statusのみ投稿の派生情報として残す。
   article.data.status = result.status;
   await replaceDocumentText(editor, stringifyArticle(article));
 
@@ -536,9 +534,8 @@ async function commandPublish(context: vscode.ExtensionContext): Promise<void> {
  * 現在の記事が投稿済みのサイトを選んで削除する
  * (WordPressの場合、既定でゴミ箱へ移動する。完全削除は行わない)。
  *
- * 後方互換: front matterにwp_post_idsが残っている記事(issue #505より前に投稿されたもの)は
- * そちらから削除候補を求める。無い場合は、登録済みサイトそれぞれについてDB側の情報を
- * サーバーAPI経由(lookupExistingPost)で照会し、実際に投稿済みのサイトを削除候補とする。
+ * 登録済みサイトそれぞれについてDB側の情報をサーバーAPI経由(lookupExistingPost)で照会し、
+ * slugをキーに実際に投稿済みのサイトを削除候補とする。
  */
 async function commandDeletePost(context: vscode.ExtensionContext): Promise<void> {
   const editor = getActiveMarkdownEditor();
@@ -549,11 +546,8 @@ async function commandDeletePost(context: vscode.ExtensionContext): Promise<void
     const apiKey = await requireApiKey(context);
     const actor = await getActor(context);
 
-    const legacyWpPostIds = article.data.wp_post_ids;
     let candidates: { siteKey: string; wpPostId: string }[];
-    if (legacyWpPostIds && Object.keys(legacyWpPostIds).length > 0) {
-      candidates = Object.entries(legacyWpPostIds).map(([siteKey, wpPostId]) => ({ siteKey, wpPostId }));
-    } else if (article.data.slug) {
+    if (article.data.slug) {
       const sites = await api.listSites(getServerUrl(), apiKey, actor);
       const found = await Promise.all(
         sites.map(async (s) => {
@@ -594,13 +588,6 @@ async function commandDeletePost(context: vscode.ExtensionContext): Promise<void
       { location: vscode.ProgressLocation.Notification, title: '投稿を削除しています…' },
       () => api.deletePost(getServerUrl(), apiKey, actor, target.siteKey, target.wpPostId)
     );
-
-    if (legacyWpPostIds) {
-      const remainingWpPostIds = { ...legacyWpPostIds };
-      delete remainingWpPostIds[target.siteKey];
-      article.data.wp_post_ids = remainingWpPostIds;
-      await replaceDocumentText(editor, stringifyArticle(article));
-    }
 
     vscode.window.showInformationMessage(`サイト '${target.siteKey}' の投稿を削除しました。`);
   } catch (err) {
