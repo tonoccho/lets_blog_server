@@ -459,6 +459,60 @@ if ($path === '/sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 /**
+ * SSH管理サイト(同期元)から取得したDBダンプ(wp db export)をアップロードし、managedサイトの
+ * DBへインポートする(issue #511)。SSH管理サイトはこのコンテナと同一ホストにいないため、
+ * /syncのようにファイルパスを直接指定した`cp`/`mysqldump | mysql`パイプが使えず、
+ * Java側で一度ダンプを取得しmultipartでアップロードする方式にしている。
+ * DBのみ対応(テーマ/プラグイン/メディアはSSH管理サイトからは同期不可。ProjectEnvironmentSyncService参照)。
+ */
+if ($path === '/db-import' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($_POST['slug'] ?? '');
+    $dbName = (string) ($_POST['dbName'] ?? '');
+    $fromUrl = (string) ($_POST['fromUrl'] ?? '');
+
+    if (!isValidSlug($slug) || !isValidDbName($dbName) || empty($_FILES['file'])) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = "/var/www/html/sites/$slug";
+    if (!is_dir($sitePath)) {
+        respond(404, ['error' => 'サイトが見つかりません']);
+    }
+
+    $tmpPath = '/tmp/letsblog-dbimport-' . bin2hex(random_bytes(8)) . '.sql';
+    if (!move_uploaded_file($_FILES['file']['tmp_name'], $tmpPath)) {
+        respond(500, ['error' => 'アップロードファイルの一時保存に失敗しました']);
+    }
+
+    $backupDir = "/var/www/html/backups/$slug";
+    runCommand(['mkdir', '-p', $backupDir]);
+    $timestamp = date('Ymd-His');
+    // 上書きされる側(同期先)のバックアップを先に取得しておく
+    runCommand(['sh', '-c',
+        'mysqldump --skip-ssl -h' . escapeshellarg($dbHost) . ' -uroot -p' . escapeshellarg($rootPassword)
+            . ' ' . escapeshellarg($dbName) . ' > ' . escapeshellarg("$backupDir/db-{$timestamp}.sql")]);
+
+    $importCmd = 'mysql --skip-ssl -h' . escapeshellarg($dbHost) . ' -uroot -p' . escapeshellarg($rootPassword)
+        . ' ' . escapeshellarg($dbName) . ' < ' . escapeshellarg($tmpPath);
+    [$code, $out, $err] = runCommand(['sh', '-c', $importCmd]);
+    runCommand(['rm', '-f', $tmpPath]);
+    if ($code !== 0) {
+        respond(500, ['error' => 'DBのインポートに失敗しました', 'detail' => combinedOutput($out, $err)]);
+    }
+
+    // 同期元(SSH管理サイト)のURLがwp_options等に焼き込まれたままになるため、同期先自身のURLへ書き戻す
+    if ($fromUrl !== '') {
+        $toUrl = "https://localhost/sites/$slug";
+        [$code, $out, $err] = runWp(['search-replace', $fromUrl, $toUrl, '--all-tables', "--path=$sitePath", '--allow-root']);
+        if ($code !== 0) {
+            respond(500, ['error' => 'URL書き換え(search-replace)に失敗しました', 'detail' => combinedOutput($out, $err)]);
+        }
+    }
+
+    runCommand(['chown', '-R', 'www-data:www-data', $sitePath]);
+    respond(200, ['status' => 'ok']);
+}
+
+/**
  * サイトのカテゴリ一覧を取得し、parent(term_id)を対応するparentSlugへ解決したうえで返す。
  * 環境間のカテゴリ同一性・親子関係はterm_idではなくスラッグで判定するため、一括管理の
  * カテゴリ操作(作成/編集/削除)・一覧取得(/categories)はいずれもこの関数を経由する。

@@ -2,7 +2,11 @@ package com.letsblog.api.provisioning;
 
 import com.letsblog.api.service.ProvisioningException;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -36,6 +40,35 @@ public class WordPressSyncClient {
                     .toBodilessEntity();
         } catch (RestClientException e) {
             throw new ProvisioningException("環境同期に失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * SSH管理サイトから取得したDBダンプ(wp db export)を、managedサイトのDBへインポートする
+     * (issue #511)。managedサイト同士の同期({@link #sync})と異なりダンプがJava側に一度存在するため
+     * multipart/form-dataでファイルとして送信する(WordPressBulkManagementClient#applyZipと同じ方式)。
+     */
+    public void importDatabase(String toSlug, String toDbName, String fromUrl, byte[] sqlDump) {
+        try {
+            MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
+            form.add("slug", toSlug);
+            form.add("dbName", toDbName);
+            form.add("fromUrl", fromUrl);
+            form.add("file", new ByteArrayResource(sqlDump) {
+                @Override
+                public String getFilename() {
+                    return "dump.sql";
+                }
+            });
+            client.post()
+                    .uri("/db-import")
+                    .header("X-Provision-Token", provisionToken)
+                    .contentType(MediaType.MULTIPART_FORM_DATA)
+                    .body(form)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientException e) {
+            throw new ProvisioningException("環境同期(DBインポート)に失敗しました: " + e.getMessage(), e);
         }
     }
 

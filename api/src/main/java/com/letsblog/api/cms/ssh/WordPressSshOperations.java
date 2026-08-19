@@ -862,6 +862,36 @@ public class WordPressSshOperations {
         executor.putFile(params, SVG_UPLOAD_MU_PLUGIN.getBytes(StandardCharsets.UTF_8), muPluginPath);
     }
 
+    /**
+     * `wp db export`でリモートに書き出したダンプをSFTPでダウンロードする
+     * (環境同期の同期元がSSH管理サイトの場合に使用。issue #511)。各環境の管理者/プロジェクトメンバー
+     * アカウント(wp_users/wp_usermeta)はProjectUserSyncServiceが環境ごとに個別管理しているため、
+     * provision-agentの環境同期(/sync)と同様にダンプ対象から除外する。
+     */
+    public byte[] exportDatabase(WordPressCredentials creds) {
+        SshConnectionParams params = connectionParams(creds);
+        String prefix = tablePrefix(creds);
+        String remotePath = "/tmp/letsblog-dbexport-" + UUID.randomUUID() + ".sql";
+        SshCommandResult exportResult = exec(creds, wpCli(creds,
+                "db export " + ShellQuote.single(remotePath)
+                        + " --exclude_tables=" + ShellQuote.single(prefix + "users," + prefix + "usermeta")));
+        if (!exportResult.ok()) {
+            throw new SshOperationException("DBのエクスポートに失敗しました: "
+                    + firstLine(exportResult.stderr(), exportResult.stdout()));
+        }
+        try {
+            return executor.getFile(params, remotePath);
+        } finally {
+            executor.removeFile(params, remotePath);
+        }
+    }
+
+    private String tablePrefix(WordPressCredentials creds) {
+        SshCommandResult result = exec(creds, wpCli(creds, "config get table_prefix"));
+        String prefix = result.ok() ? result.stdout().strip() : "";
+        return prefix.isEmpty() ? "wp_" : prefix;
+    }
+
     private String sanitizeFilename(String filename) {
         String base = filename != null ? filename : "upload";
         int slash = Math.max(base.lastIndexOf('/'), base.lastIndexOf('\\'));

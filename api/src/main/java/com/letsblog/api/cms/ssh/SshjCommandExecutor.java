@@ -8,13 +8,16 @@ import net.schmizz.sshj.common.SecurityUtils;
 import net.schmizz.sshj.connection.channel.direct.Session;
 import net.schmizz.sshj.sftp.SFTPClient;
 import net.schmizz.sshj.transport.verification.HostKeyVerifier;
+import net.schmizz.sshj.xfer.InMemoryDestFile;
 import net.schmizz.sshj.xfer.InMemorySourceFile;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -77,6 +80,20 @@ public class SshjCommandExecutor implements SshCommandExecutor {
                 return null;
             } catch (IOException e) {
                 throw new SshOperationException("SFTP転送に失敗しました (host=" + params.host() + ", path=" + remotePath
+                        + "): " + e.getMessage(), e);
+            }
+        });
+    }
+
+    @Override
+    public byte[] getFile(SshConnectionParams params, String remotePath) {
+        return withConnection(params, client -> {
+            try (SFTPClient sftp = client.newSFTPClient()) {
+                ByteArrayDestFile dest = new ByteArrayDestFile();
+                sftp.get(remotePath, dest);
+                return dest.toByteArray();
+            } catch (IOException e) {
+                throw new SshOperationException("SFTPダウンロードに失敗しました (host=" + params.host() + ", path=" + remotePath
                         + "): " + e.getMessage(), e);
             }
         });
@@ -325,6 +342,29 @@ public class SshjCommandExecutor implements SshCommandExecutor {
         @Override
         public InputStream getInputStream() {
             return new ByteArrayInputStream(data);
+        }
+    }
+
+    private static final class ByteArrayDestFile extends InMemoryDestFile {
+        private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+
+        @Override
+        public long getLength() {
+            return buffer.size();
+        }
+
+        @Override
+        public OutputStream getOutputStream() {
+            return buffer;
+        }
+
+        @Override
+        public OutputStream getOutputStream(boolean append) {
+            return buffer;
+        }
+
+        byte[] toByteArray() {
+            return buffer.toByteArray();
         }
     }
 }

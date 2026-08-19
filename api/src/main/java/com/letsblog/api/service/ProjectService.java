@@ -27,6 +27,7 @@ public class ProjectService {
 
     private final ProjectRepository projectRepository;
     private final SiteRepository siteRepository;
+    private final SiteService siteService;
     private final BulkUploadStorageService bulkUploadStorageService;
     private final String globalDefaultNegativePrompt;
     private final String globalDefaultQualityPrompt;
@@ -37,6 +38,7 @@ public class ProjectService {
     public ProjectService(
             ProjectRepository projectRepository,
             SiteRepository siteRepository,
+            SiteService siteService,
             BulkUploadStorageService bulkUploadStorageService,
             @Value("${app.default-negative-prompt}") String globalDefaultNegativePrompt,
             @Value("${app.default-quality-prompt}") String globalDefaultQualityPrompt,
@@ -45,6 +47,7 @@ public class ProjectService {
             @Value("${app.default-article-image-long-edge-px}") int globalDefaultArticleImageLongEdgePx) {
         this.projectRepository = projectRepository;
         this.siteRepository = siteRepository;
+        this.siteService = siteService;
         this.bulkUploadStorageService = bulkUploadStorageService;
         this.globalDefaultNegativePrompt = globalDefaultNegativePrompt;
         this.globalDefaultQualityPrompt = globalDefaultQualityPrompt;
@@ -339,6 +342,8 @@ public class ProjectService {
         if (siteId == null) {
             return null;
         }
-        return siteRepository.findById(siteId).map(SiteResponse::from).orElse(null);
+        return siteRepository.findById(siteId)
+                .map(site -> SiteResponse.from(site, null, siteService.isSshConfigured(site)))
+                .orElse(null);
     }
 }

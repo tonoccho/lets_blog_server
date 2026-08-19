@@ -382,6 +382,18 @@ public class SiteService {
     }
 
     /**
+     * サイトがSSH transportで設定されているか(環境同期でSSH管理サイトを同期元として扱えるかの
+     * 判定に使用。issue #511)。認証情報の取得に失敗した場合はgetDetailの既存方針に合わせてfalseを返す。
+     */
+    public boolean isSshConfigured(Site site) {
+        try {
+            return isSshTransport(getRawCredentials(site));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
      * SSH接続が設定されているサイトに限り、wp-cliをリモートへインストールする。
      */
     @Transactional(readOnly = true)

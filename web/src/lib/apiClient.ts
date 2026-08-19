@@ -15,6 +15,7 @@ export interface Site {
   updatedAt: string;
   connectionCheckStatus: "SUCCESS" | "FAILED" | null;
   managedWordpress: boolean;
+  sshConfigured: boolean;
 }
 
 export interface PostSummary {

@@ -28,6 +28,11 @@ public interface SshCommandExecutor {
     void putFile(SshConnectionParams params, byte[] data, String remotePath);
 
     /**
+     * リモートの指定パスのファイルをバイト列としてダウンロードする(SFTP)。
+     */
+    byte[] getFile(SshConnectionParams params, String remotePath);
+
+    /**
      * リモートの指定パスのファイルを削除する。失敗しても例外は投げない(呼び出し側でログ出力する想定)。
      */
     void removeFile(SshConnectionParams params, String remotePath);
