@@ -1,10 +1,12 @@
 package com.letsblog.api.controller;
 
 import com.letsblog.api.dto.AddProjectUserRequest;
+import com.letsblog.api.dto.ApplyToAllEnvironmentsRequest;
 import com.letsblog.api.dto.ApplyToEnvironmentRequest;
 import com.letsblog.api.dto.BulkOperationLogResponse;
 import com.letsblog.api.dto.DeleteSlugRequest;
 import com.letsblog.api.dto.EditTermRequest;
+import com.letsblog.api.dto.UpdateArticleImageResizeDefaultRequest;
 import com.letsblog.api.dto.ProjectCreateRequest;
 import com.letsblog.api.dto.ProjectEnvironmentBindRequest;
 import com.letsblog.api.dto.ProjectResponse;
@@ -16,8 +18,11 @@ import com.letsblog.api.dto.StatusComparisonPage;
 import com.letsblog.api.dto.SyncEnvironmentRequest;
 import com.letsblog.api.dto.TermComparisonPage;
 import com.letsblog.api.dto.TermNameRequest;
+import com.letsblog.api.dto.UpdateImageGenerationPromptDefaultsRequest;
+import com.letsblog.api.dto.UpdateImageGenerationSizeDefaultsRequest;
 import com.letsblog.api.dto.UpdateMasterEnvironmentRequest;
 import com.letsblog.api.dto.UpdatePostStatusRequest;
+import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
 import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
 import com.letsblog.api.dto.UpdateProjectUserRequest;
 import com.letsblog.api.ai.GeneratedImageStorageService;
@@ -145,6 +150,37 @@ public class ProjectController {
         return projectService.updateGithubRepository(id, request);
     }
 
+    @PutMapping("/{id}/css-selector-prefix")
+    public ProjectResponse updateCssSelectorPrefix(
+            @PathVariable Long id, @Valid @RequestBody UpdateProjectCssSelectorPrefixRequest request) {
+        adminAuthorizationService.requireAdmin();
+        return projectService.updateCssSelectorPrefix(id, request);
+    }
+
+    /** issue #293: 画像生成時のnegative prompt/画質プロンプトのデフォルト値。 */
+    @PutMapping("/{id}/image-generation-prompt-defaults")
+    public ProjectResponse updateImageGenerationPromptDefaults(
+            @PathVariable Long id, @Valid @RequestBody UpdateImageGenerationPromptDefaultsRequest request) {
+        adminAuthorizationService.requireAdmin();
+        return projectService.updateImageGenerationPromptDefaults(id, request);
+    }
+
+    /** issue #292: 画像生成時のデフォルトサイズ。 */
+    @PutMapping("/{id}/image-generation-size-defaults")
+    public ProjectResponse updateImageGenerationSizeDefaults(
+            @PathVariable Long id, @Valid @RequestBody UpdateImageGenerationSizeDefaultsRequest request) {
+        adminAuthorizationService.requireAdmin();
+        return projectService.updateImageGenerationSizeDefaults(id, request);
+    }
+
+    /** issue #291: 記事投稿時に画像をリサイズする長編の目標px。 */
+    @PutMapping("/{id}/article-image-resize-default")
+    public ProjectResponse updateArticleImageResizeDefault(
+            @PathVariable Long id, @Valid @RequestBody UpdateArticleImageResizeDefaultRequest request) {
+        adminAuthorizationService.requireAdmin();
+        return projectService.updateArticleImageResizeDefault(id, request);
+    }
+
     @PostMapping("/{id}/environments/sync")
     public ResponseEntity<Void> syncEnvironment(
             @PathVariable Long id, @Valid @RequestBody SyncEnvironmentRequest request) {
@@ -170,6 +206,19 @@ public class ProjectController {
                 request.categorySlug(), request.categoryParentSlug(), request.categoryDescription(),
                 request.categoryTargetSlug(), actorId);
         return BulkOperationLogResponse.from(log);
+    }
+
+    /**
+     * slugベースのプラグイン/テーマインストールを、紐付いている全環境へ一括実行する(issue #393)。
+     */
+    @PostMapping("/{id}/bulk-management/apply-all")
+    public List<BulkOperationLogResponse> applyBulkOperationToAllEnvironments(
+            @PathVariable Long id, @Valid @RequestBody ApplyToAllEnvironmentsRequest request) {
+        adminAuthorizationService.requireAdmin();
+        Long actorId = currentActorService.getCurrentActorId();
+        List<BulkOperationLog> logs = bulkManagementService.applyToAllEnvironments(
+                id, request.operationType(), request.value(), actorId);
+        return logs.stream().map(BulkOperationLogResponse::from).toList();
     }
 
     @PostMapping(value = "/{id}/bulk-management/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

@@ -511,9 +511,25 @@ Invalid email or password
    - If no users, should redirect to `/setup`
    - If stuck on login, try `/setup` manually
 
-3. **Reset via direct database access**
+3. **Reset a locked-out user's password (safe, preferred)**
+
+   If the email-based self-service reset (`/login/forgot-password`) isn't usable
+   (e.g. SMTP isn't configured, or the mailbox is inaccessible), reset just that
+   user's password without touching any other data:
+
    ```bash
-   # This is destructive - only if you can't access setup
+   ./scripts/reset-admin-password.sh <email> <new-password>
+   ```
+
+   This runs inside the `api` container and reuses the application's own
+   `UserService`/`BCryptPasswordEncoder`, so the password hash is generated the
+   same way the app generates it at signup — no manual SQL/hash editing needed.
+   The target user must already exist; other users/data are untouched.
+
+4. **Reset via direct database access (destructive, last resort)**
+   ```bash
+   # Only if the above script can't be used (e.g. no known user to target).
+   # This wipes ALL users, not just one.
    docker compose exec mysql mysql -uroot -p$MYSQL_ROOT_PASSWORD \
      -D lets_blog -e "TRUNCATE users;" 2>/dev/null
    

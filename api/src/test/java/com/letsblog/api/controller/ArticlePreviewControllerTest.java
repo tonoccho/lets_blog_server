@@ -2,7 +2,9 @@ package com.letsblog.api.controller;
 
 import com.letsblog.api.dto.RenderPreviewRequest;
 import com.letsblog.api.dto.RenderPreviewResponse;
+import com.letsblog.api.dto.RenderSkeletonRequest;
 import com.letsblog.api.dto.ThemeCssResponse;
+import com.letsblog.api.dto.ThemeSkeletonResponse;
 import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.ArticlePreviewService;
 import com.letsblog.api.service.ForbiddenException;
@@ -79,5 +81,31 @@ class ArticlePreviewControllerTest {
         doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
 
         assertThrows(ForbiddenException.class, () -> controller.themeCss(1L, null));
+    }
+
+    @Test
+    void skeleton_認可後にサービスへ委譲する() {
+        ArticlePreviewController controller = controller();
+        RenderSkeletonRequest request =
+                new RenderSkeletonRequest(
+                        "タイトル", "<p>本文</p>", "data:image/png;base64,abc", 20L, null, null, null, null);
+        when(articlePreviewService.renderSkeleton(
+                        1L, 20L, "タイトル", "<p>本文</p>", "data:image/png;base64,abc", null, null, null, null))
+                .thenReturn(new ThemeSkeletonResponse("<article>spliced</article>", true, null, true, ""));
+
+        ThemeSkeletonResponse response = controller.skeleton(1L, request);
+
+        assertEquals("<article>spliced</article>", response.html());
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+    }
+
+    @Test
+    void skeleton_認可拒否ならForbidden() {
+        ArticlePreviewController controller = controller();
+        doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+
+        assertThrows(ForbiddenException.class,
+                () -> controller.skeleton(1L,
+                        new RenderSkeletonRequest("タイトル", "<p>本文</p>", null, null, null, null, null, null)));
     }
 }

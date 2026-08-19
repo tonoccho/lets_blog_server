@@ -7,9 +7,12 @@ import {
   createManagedWordPressSite,
   deleteSite,
   generateSshKeyPair,
+  generateStaticContent,
   installWpCli,
   registerSite,
   SiteConnectionCheckResult,
+  StaticContent,
+  StaticContentType,
   WpCliInstallResult,
 } from "@/lib/apiClient";
 import { getSession, requireAdminSession } from "@/lib/session";
@@ -22,10 +25,9 @@ export interface RegisterSiteState {
 
 const CREDENTIAL_FIELDS: Record<CmsType, string[]> = {
   WORDPRESS: ["baseUrl", "username", "appPassword"],
-  MICROCMS: ["serviceId", "apiKey", "managementApiKey", "postsEndpoint", "categoriesEndpoint", "tagsEndpoint"],
 };
 
-const WORDPRESS_SSH_FIELDS = ["baseUrl", "sshHost", "sshUser", "wpPath", "sshPrivateKeyPem"];
+const WORDPRESS_SSH_FIELDS = ["baseUrl", "sshHost", "sshUser", "wpPath"];
 
 export async function registerSiteAction(
   _prevState: RegisterSiteState,
@@ -40,11 +42,11 @@ export async function registerSiteAction(
     return { error: "表示名とサイトキーは必須です。" };
   }
 
-  if (cmsType !== "WORDPRESS" && cmsType !== "MICROCMS") {
+  if (cmsType !== "WORDPRESS") {
     return { error: "CMS種別を選択してください。" };
   }
 
-  const useSsh = cmsType === "WORDPRESS" && transport === "SSH";
+  const useSsh = transport === "SSH";
   const fields = useSsh ? WORDPRESS_SSH_FIELDS : CREDENTIAL_FIELDS[cmsType];
 
   const credentials: Record<string, string> = {};
@@ -61,6 +63,16 @@ export async function registerSiteAction(
     const sshPort = String(formData.get("sshPort") ?? "").trim();
     if (sshPort) {
       credentials.sshPort = sshPort;
+    }
+
+    const sshKeyPairId = String(formData.get("sshKeyPairId") ?? "").trim();
+    const sshPrivateKeyPem = String(formData.get("sshPrivateKeyPem") ?? "").trim();
+    if (sshKeyPairId) {
+      credentials.sshKeyPairId = sshKeyPairId;
+    } else if (sshPrivateKeyPem) {
+      credentials.sshPrivateKeyPem = sshPrivateKeyPem;
+    } else {
+      return { error: "SSH秘密鍵を指定してください(保存済みの鍵ペアを選択するか、新しい鍵ペアを生成してください)。" };
     }
   }
 
@@ -150,4 +162,23 @@ export async function installWpCliAction(id: number): Promise<WpCliInstallResult
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };
   return installWpCli(id, actor);
+}
+
+export interface GenerateStaticContentResult {
+  content?: StaticContent;
+  error?: string;
+}
+
+export async function generateStaticContentAction(
+  siteId: number,
+  contentType: StaticContentType
+): Promise<GenerateStaticContentResult> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  try {
+    const content = await generateStaticContent(siteId, contentType, actor);
+    return { content };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
 }

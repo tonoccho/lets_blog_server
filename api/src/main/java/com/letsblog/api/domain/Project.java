@@ -43,8 +43,42 @@ public class Project {
     @Column(name = "github_repository", length = 255)
     private String githubRepository;
 
-    @Column(name = "ollama_model", length = 255)
-    private String ollamaModel;
+    /**
+     * カスタムタグCSSのセレクタに自動付与するプリフィックス(issue #298)。未設定時はslugを使う
+     * (CustomTagService#resolveCssSelectorPrefixで解決)。
+     */
+    @Column(name = "css_selector_prefix", length = 100)
+    private String cssSelectorPrefix;
+
+    /**
+     * 画像生成時に既定で使うnegative prompt/画質プロンプト(issue #293)。未設定時はアプリ全体の
+     * デフォルト(application.yml)にフォールバックする(ProjectService#resolveDefaultNegativePrompt等)。
+     */
+    @Column(name = "default_negative_prompt", length = 1000)
+    private String defaultNegativePrompt;
+
+    @Column(name = "default_quality_prompt", length = 500)
+    private String defaultQualityPrompt;
+
+    /**
+     * 画像生成時に既定で使う生成サイズ(issue #292)。未設定時はアプリ全体のデフォルト(1920x1080)に
+     * フォールバックする(ProjectService#resolveDefaultGeneratedImageWidth等)。
+     */
+    @Column(name = "default_generated_image_width")
+    private Integer defaultGeneratedImageWidth;
+
+    @Column(name = "default_generated_image_height")
+    private Integer defaultGeneratedImageHeight;
+
+    /**
+     * 記事投稿時に本文/アイキャッチ画像をリサイズする長編の目標px(issue #291)。未設定時は
+     * アプリ全体のデフォルト(既定1300)にフォールバックする(ProjectService#resolveArticleImageLongEdgePx)。
+     */
+    @Column(name = "default_article_image_long_edge_px")
+    private Integer defaultArticleImageLongEdgePx;
+
+    @Column(name = "llm_model", length = 255)
+    private String llmModel;
 
     @Column(name = "comfyui_checkpoint", length = 255)
     private String comfyuiCheckpoint;
@@ -54,6 +88,58 @@ public class Project {
 
     @Column(name = "brave_search_api_key_encrypted", columnDefinition = "VARBINARY(1024)")
     private byte[] braveSearchApiKeyEncrypted;
+
+    /**
+     * Google Analytics連携(issue #386)。GA4プロパティID自体は秘匿情報ではないので平文で保持し、
+     * サービスアカウントの認証情報(JSON鍵ファイル全体)のみ暗号化して保持する。
+     */
+    @Column(name = "ga_property_id", length = 64)
+    private String gaPropertyId;
+
+    @Column(name = "ga_service_account_json_encrypted", columnDefinition = "VARBINARY(4096)")
+    private byte[] gaServiceAccountJsonEncrypted;
+
+    /**
+     * Google AdSense連携(issue #387)。AdSense Management APIはサービスアカウント委任に対応していないため、
+     * GAとは異なり3-legged OAuth(認可コード→リフレッシュトークン)で取得したリフレッシュトークンを保持する。
+     * アカウントID(パブリッシャーID、例: pub-1234567890123456)自体は秘匿情報ではないので平文で保持する。
+     */
+    @Column(name = "adsense_account_id", length = 64)
+    private String adsenseAccountId;
+
+    @Column(name = "adsense_refresh_token_encrypted", columnDefinition = "VARBINARY(1024)")
+    private byte[] adsenseRefreshTokenEncrypted;
+
+    /**
+     * AdSense連携用のGoogle OAuthクライアント(issue #407)。以前はアプリ全体で1つの環境変数/システム設定
+     * (GOOGLE_OAUTH_CLIENT_ID/SECRET)だったが、プロジェクトごとに異なるGoogle Cloudプロジェクトを
+     * 使い分けられるようプロジェクト単位に変更した。client_idは秘匿情報ではないので平文で保持する。
+     */
+    @Column(name = "adsense_oauth_client_id", length = 255)
+    private String adsenseOauthClientId;
+
+    @Column(name = "adsense_oauth_client_secret_encrypted", columnDefinition = "VARBINARY(1024)")
+    private byte[] adsenseOauthClientSecretEncrypted;
+
+    /**
+     * Buffer連携(issue #402)。以前はアプリ全体の環境変数(BUFFER_*)で1つだけ設定していたが、
+     * プロジェクトごとに異なるBufferアカウント/SNSプロファイルへ投稿できるようプロジェクト単位に変更した。
+     * アクセストークンのみ秘匿情報として暗号化保持し、他はプロジェクト単位の平文設定として保持する。
+     */
+    @Column(name = "buffer_enabled", nullable = false)
+    private boolean bufferEnabled = false;
+
+    @Column(name = "buffer_access_token_encrypted", columnDefinition = "VARBINARY(1024)")
+    private byte[] bufferAccessTokenEncrypted;
+
+    @Column(name = "buffer_profile_ids", length = 500)
+    private String bufferProfileIds;
+
+    @Column(name = "buffer_post_delay_minutes")
+    private Integer bufferPostDelayMinutes;
+
+    @Column(name = "buffer_message_template", length = 500)
+    private String bufferMessageTemplate;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -71,6 +157,36 @@ public class Project {
 
     public boolean hasBraveSearchApiKey() {
         return braveSearchApiKeyEncrypted != null && braveSearchApiKeyEncrypted.length > 0;
+    }
+
+    public boolean hasGoogleAnalyticsCredentials() {
+        return gaPropertyId != null && !gaPropertyId.isBlank()
+                && gaServiceAccountJsonEncrypted != null && gaServiceAccountJsonEncrypted.length > 0;
+    }
+
+    public boolean hasAdsenseCredentials() {
+        return adsenseAccountId != null && !adsenseAccountId.isBlank()
+                && adsenseRefreshTokenEncrypted != null && adsenseRefreshTokenEncrypted.length > 0;
+    }
+
+    public boolean hasAdsenseOauthClientSecret() {
+        return adsenseOauthClientSecretEncrypted != null && adsenseOauthClientSecretEncrypted.length > 0;
+    }
+
+    public boolean hasAdsenseOauthClient() {
+        return adsenseOauthClientId != null && !adsenseOauthClientId.isBlank() && hasAdsenseOauthClientSecret();
+    }
+
+    public boolean hasBufferAccessToken() {
+        return bufferAccessTokenEncrypted != null && bufferAccessTokenEncrypted.length > 0;
+    }
+
+    public boolean hasBufferProfileIds() {
+        return bufferProfileIds != null && !bufferProfileIds.isBlank();
+    }
+
+    public boolean isBufferConfigured() {
+        return bufferEnabled && hasBufferAccessToken() && hasBufferProfileIds();
     }
 
     @PrePersist

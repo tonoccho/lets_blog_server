@@ -1,5 +1,6 @@
   const vscode = acquireVsCodeApi();
   let currentImage = null;
+  let chatHistory = [];
 
   function post(command, payload) {
     vscode.postMessage(Object.assign({ command }, payload || {}));
@@ -27,6 +28,23 @@
     fillSelect(document.getElementById('samplerName'), options.samplers, 'euler');
     fillSelect(document.getElementById('scheduler'), options.schedulers, 'normal');
     fillSelect(document.getElementById('checkpoint'), options.checkpoints, options.selectedCheckpoint);
+    // プロジェクトのデフォルト生成サイズを初期値として反映する(issue #292)。
+    if (options.defaultWidth) document.getElementById('width').value = String(options.defaultWidth);
+    if (options.defaultHeight) document.getElementById('height').value = String(options.defaultHeight);
+
+    // 生成時に実際に適用される既定値をUIへ反映する(issue #472)。
+    // negative promptは未入力時のフォールバックとしてplaceholderに、
+    // quality promptはpromptへ常に自動追加されるためヒントとして表示する。
+    if (options.defaultNegativePrompt) {
+      document.getElementById('negativePrompt').placeholder = options.defaultNegativePrompt;
+    }
+    const qualityPromptHint = document.getElementById('qualityPromptHint');
+    if (options.defaultQualityPrompt) {
+      qualityPromptHint.textContent = '生成時にpromptへ自動追加されます: ' + options.defaultQualityPrompt;
+      qualityPromptHint.style.display = 'block';
+    } else {
+      qualityPromptHint.style.display = 'none';
+    }
 
     const loraSelect = document.getElementById('loraName');
     loraSelect.innerHTML = '<option value="">なし</option>';
@@ -36,6 +54,36 @@
       option.textContent = lora;
       loraSelect.appendChild(option);
     }
+  }
+
+  /**
+   * Image Galleryの「この設定で画像生成」から開かれた場合に、選択画像の生成設定を
+   * フォームへ反映する(issue #294)。checkpoint/samplerName/scheduler/loraNameは
+   * renderOptions()でoptionが揃った後に届く(パネル側でoptions送信後にprefillを送るため)。
+   */
+  function applyPrefill(detail) {
+    if (!detail) return;
+    document.getElementById('prompt').value = detail.prompt || '';
+    document.getElementById('negativePrompt').value = detail.negativePrompt || '';
+    if (detail.steps != null) document.getElementById('steps').value = String(detail.steps);
+    if (detail.cfgScale != null) document.getElementById('cfgScale').value = String(detail.cfgScale);
+    if (detail.samplerName) document.getElementById('samplerName').value = detail.samplerName;
+    if (detail.scheduler) document.getElementById('scheduler').value = detail.scheduler;
+    document.getElementById('seed').value = detail.seed != null ? String(detail.seed) : '';
+    if (detail.width != null) document.getElementById('width').value = String(detail.width);
+    if (detail.height != null) document.getElementById('height').value = String(detail.height);
+    if (detail.batchSize != null) document.getElementById('batchSize').value = String(detail.batchSize);
+    if (detail.checkpoint) document.getElementById('checkpoint').value = detail.checkpoint;
+
+    const loraSelect = document.getElementById('loraName');
+    loraSelect.value = detail.loraName || '';
+    loraSelect.dispatchEvent(new Event('change'));
+    if (detail.loraName && detail.loraWeight != null) {
+      document.getElementById('loraWeight').value = String(detail.loraWeight);
+    }
+
+    showMessage('選択した画像の生成設定を反映しました。内容を確認して生成してください。', 'success');
+    document.getElementById('prompt').focus();
   }
 
   document.getElementById('loraName').addEventListener('change', (e) => {
@@ -70,6 +118,32 @@
       loraName: loraName || undefined,
       loraWeight: loraName ? Number(document.getElementById('loraWeight').value) : undefined,
     };
+  }
+
+  function addChatMessage(role, content) {
+    chatHistory.push({ role, content });
+    const messagesDiv = document.getElementById('chatMessages');
+    const msgEl = document.createElement('div');
+    msgEl.className = 'message ' + role;
+    msgEl.textContent = content;
+    messagesDiv.appendChild(msgEl);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+  }
+
+  function sendChat() {
+    const input = document.getElementById('chatInput');
+    const text = input.value.trim();
+    if (!text || LetsBlogLoading.isRunning()) return;
+    addChatMessage('user', text);
+    input.value = '';
+    showMessage('', '');
+    LetsBlogLoading.begin({
+      buttonIds: ['sendChatButton', 'generateButton'],
+      text: 'プロンプトを生成しています…',
+      kind: 'chat',
+      onCancel: function () { post('cancel'); },
+    });
+    post('sendChat', { history: chatHistory.slice(0, -1), message: text });
   }
 
   function generate() {
@@ -138,6 +212,16 @@
   document.getElementById('generateButton').addEventListener('click', generate);
   document.getElementById('setAsEyecatchButton').addEventListener('click', setAsEyecatch);
   document.getElementById('addAsAssetButton').addEventListener('click', addAsAsset);
+  document.getElementById('sendChatButton').addEventListener('click', sendChat);
+  document.getElementById('chatInput').addEventListener('keydown', (e) => {
+    // 通常のEnterは改行(textarea既定の挙動)。Ctrl/Cmd+Enterで送信する(issue #290)。
+    // グローバルのCtrl+Enterハンドラ(画像生成)と重複発火しないようstopPropagationする。
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      sendChat();
+    }
+  });
 
   window.addEventListener('message', (event) => {
     const { command, payload } = event.data;
@@ -146,8 +230,16 @@
         LetsBlogLoading.end();
         renderOptions(payload);
         break;
+      case 'prefill':
+        applyPrefill(payload);
+        break;
       case 'generated':
         renderGenerated(payload);
+        break;
+      case 'promptGenerated':
+        LetsBlogLoading.end();
+        addChatMessage('assistant', payload.prompt);
+        document.getElementById('prompt').value = payload.prompt;
         break;
       case 'eyecatchSet':
       case 'assetAdded':

@@ -18,13 +18,15 @@ const openPanels = new Map<string, { reveal(): void }>();
  * 「閉じたのに二度と開けない」状態になる。破棄時の後始末を基底クラス側へ寄せるため、
  * 生存管理をここへ集約している。
  */
-export function showSingletonPanel(viewType: string, create: () => { reveal(): void }): void {
-  const existing = openPanels.get(viewType);
+export function showSingletonPanel<T extends { reveal(): void }>(viewType: string, create: () => T): T {
+  const existing = openPanels.get(viewType) as T | undefined;
   if (existing) {
     existing.reveal();
-    return;
+    return existing;
   }
-  openPanels.set(viewType, create());
+  const created = create();
+  openPanels.set(viewType, created);
+  return created;
 }
 
 /** パネルの識別子・タイトル・使用する資材の指定。 */
@@ -35,6 +37,8 @@ export interface WebviewPanelOptions {
   title: string;
   /** webviews/配下の資材のベース名(例: 'plan' → plan.html / plan.css / plan.js)。 */
   assetName: string;
+  /** 追加で許可するCSPディレクティブ(例: draw.ioエディタのiframe埋め込み用のframe-src)。 */
+  extraCspDirectives?: string[];
 }
 
 /**
@@ -177,6 +181,7 @@ export abstract class WebviewPanelBase<TInbound extends WebviewMessageBase<strin
       `img-src ${webview.cspSource} data: https:`,
       `style-src ${webview.cspSource} 'unsafe-inline'`,
       `script-src 'nonce-${nonce}'`,
+      ...(this.options.extraCspDirectives ?? []),
     ].join('; ');
 
     const htmlPath = vscode.Uri.joinPath(

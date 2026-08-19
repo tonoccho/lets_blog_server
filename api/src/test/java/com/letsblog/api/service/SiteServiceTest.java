@@ -7,12 +7,14 @@ import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.cms.ConnectionCheckResult;
 import com.letsblog.api.crypto.CredentialCipher;
 import com.letsblog.api.domain.Site;
+import com.letsblog.api.domain.SshKeyPair;
 import com.letsblog.api.domain.User;
 import com.letsblog.api.dto.SiteConnectionCheckResult;
 import com.letsblog.api.dto.SiteRegisterRequest;
 import com.letsblog.api.dto.SiteResponse;
 import com.letsblog.api.dto.SiteUpdateRequest;
 import com.letsblog.api.repository.SiteRepository;
+import com.letsblog.api.repository.SshKeyPairRepository;
 import com.letsblog.api.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -54,12 +56,15 @@ class SiteServiceTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private SshKeyPairRepository sshKeyPairRepository;
+
     private SiteService service;
 
     @BeforeEach
     void setUp() {
         service = new SiteService(siteRepository, credentialCipher, new ObjectMapper(), cmsAdapterFactory,
-                provisioningService, userRepository);
+                provisioningService, userRepository, sshKeyPairRepository);
         org.mockito.Mockito.lenient().when(provisioningService.provisionSite(any(), any(), any()))
                 .thenReturn(new ProvisioningService.ProvisioningResult());
     }
@@ -191,6 +196,83 @@ class SiteServiceTest {
                 Map.of("baseUrl", "https://example.com", "transport", "SSH", "sshHost", "203.0.113.5"));
 
         assertThrows(IllegalArgumentException.class, () -> service.register(request, null));
+    }
+
+    private SiteRegisterRequest sshKeyPairRefRequest() {
+        return new SiteRegisterRequest(
+                "SSH Blog", "ssh-ref", CmsType.WORDPRESS,
+                Map.of("baseUrl", "https://example.com", "transport", "SSH",
+                        "sshHost", "203.0.113.5", "sshUser", "deploy",
+                        "wpPath", "/var/www/html", "sshKeyPairId", "5"));
+    }
+
+    @Test
+    void register_保存済みSSH鍵ペアを参照して登録できる() {
+        when(siteRepository.existsBySiteKey("ssh-ref")).thenReturn(false);
+        when(credentialCipher.encrypt(any())).thenReturn(new byte[]{1, 2, 3});
+        when(siteRepository.save(any(Site.class))).thenAnswer(invocation -> {
+            Site s = invocation.getArgument(0);
+            s.setId(3L);
+            return s;
+        });
+        when(sshKeyPairRepository.existsById(5L)).thenReturn(true);
+        SshKeyPair keyPair = new SshKeyPair("deploy-key", null, "ssh-ed25519 AAAA...",
+                "encrypted-pem".getBytes());
+        when(sshKeyPairRepository.findById(5L)).thenReturn(Optional.of(keyPair));
+        when(credentialCipher.decrypt(keyPair.getPrivateKeyEncrypted())).thenReturn("RESOLVED-PEM");
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.testConnection(any())).thenReturn(ConnectionCheckResult.success());
+
+        SiteResponse response = service.register(sshKeyPairRefRequest(), null);
+
+        assertEquals("SUCCESS", response.connectionCheckStatus());
+    }
+
+    @Test
+    void register_存在しないSSH鍵ペアを参照すると例外() {
+        when(siteRepository.existsBySiteKey("ssh-ref")).thenReturn(false);
+        when(sshKeyPairRepository.existsById(5L)).thenReturn(false);
+
+        assertThrows(IllegalArgumentException.class, () -> service.register(sshKeyPairRefRequest(), null));
+        verify(siteRepository, never()).save(any());
+    }
+
+    @Test
+    void register_sshPrivateKeyPemとsshKeyPairIdの両方指定は例外() {
+        when(siteRepository.existsBySiteKey("ssh-both")).thenReturn(false);
+        SiteRegisterRequest request = new SiteRegisterRequest(
+                "SSH Blog", "ssh-both", CmsType.WORDPRESS,
+                Map.of("baseUrl", "https://example.com", "transport", "SSH",
+                        "sshHost", "203.0.113.5", "sshUser", "deploy", "wpPath", "/var/www/html",
+                        "sshPrivateKeyPem", "PEM", "sshKeyPairId", "5"));
+
+        assertThrows(IllegalArgumentException.class, () -> service.register(request, null));
+        verify(siteRepository, never()).save(any());
+    }
+
+    @Test
+    void update_sshKeyPairId指定で切り替えると既存のsshPrivateKeyPemは消える() {
+        Site site = buildExternalSite();
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
+        when(credentialCipher.decrypt(any())).thenReturn(
+                "{\"baseUrl\":\"https://example.com\",\"transport\":\"SSH\",\"sshHost\":\"203.0.113.5\","
+                        + "\"sshUser\":\"deploy\",\"wpPath\":\"/var/www/html\",\"sshPrivateKeyPem\":\"OLD-PEM\"}");
+        when(credentialCipher.encrypt(any())).thenReturn(new byte[]{9, 9, 9});
+        when(siteRepository.save(any(Site.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(sshKeyPairRepository.existsById(5L)).thenReturn(true);
+        SshKeyPair keyPair = new SshKeyPair("deploy-key", null, "ssh-ed25519 AAAA...",
+                "encrypted-pem".getBytes());
+        when(sshKeyPairRepository.findById(5L)).thenReturn(Optional.of(keyPair));
+        when(credentialCipher.decrypt(keyPair.getPrivateKeyEncrypted())).thenReturn("RESOLVED-PEM");
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.testConnection(any())).thenReturn(ConnectionCheckResult.success());
+
+        service.update(1L, new SiteUpdateRequest(null, Map.of("sshKeyPairId", "5")));
+
+        org.mockito.ArgumentCaptor<String> jsonCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(credentialCipher).encrypt(jsonCaptor.capture());
+        assertEquals(true, jsonCaptor.getValue().contains("\"sshKeyPairId\":\"5\""));
+        assertEquals(false, jsonCaptor.getValue().contains("sshPrivateKeyPem"));
     }
 
     @Test
@@ -483,20 +565,6 @@ class SiteServiceTest {
         site.setCredentialsEncrypted(new byte[]{1});
         when(siteRepository.findBySiteKey("broken")).thenReturn(Optional.of(site));
         when(credentialCipher.decrypt(site.getCredentialsEncrypted())).thenThrow(new RuntimeException("decrypt failed"));
-
-        SiteService.SiteDataSource dataSource = service.resolveDataSource(site);
-
-        assertEquals(false, dataSource.hasRest());
-        assertEquals(false, dataSource.hasSsh());
-    }
-
-    @Test
-    void resolveDataSource_WordPress以外のCMS種別は両方false() {
-        Site site = new Site();
-        site.setId(1L);
-        site.setSiteKey("micro");
-        site.setCmsType(CmsType.MICROCMS);
-        site.setManagedWordpress(false);
 
         SiteService.SiteDataSource dataSource = service.resolveDataSource(site);
 

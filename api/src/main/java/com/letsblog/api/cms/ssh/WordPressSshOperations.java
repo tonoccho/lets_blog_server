@@ -1,5 +1,6 @@
 package com.letsblog.api.cms.ssh;
 
+import com.letsblog.api.cms.AuthCookie;
 import com.letsblog.api.cms.AuthorProvisioningRequest;
 import com.letsblog.api.cms.WpCliInstallResult;
 import com.letsblog.api.cms.CmsCredentials.WordPressCredentials;
@@ -31,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 
 /**
  * SSH+wp-cli経由でWordPressを操作する実装。WordPressAdapterからtransport=SSHの
@@ -44,6 +46,31 @@ public class WordPressSshOperations {
 
     private final SshCommandExecutor executor;
     private final ObjectMapper objectMapper;
+
+    /**
+     * PHP本体が出力する診断行(テーマ/プラグインのWarning/Notice等)の判定パターン。
+     * 「Warning: ... in /path/file.php on line 123」形式(先頭に「[日時] PHP 」が付く場合もある)に一致する。
+     * wp-cli自身のエラー(例:「Warning: 無効な投稿 ID です。」)はこの形式を取らないため一致しない。
+     */
+    private static final Pattern PHP_DIAGNOSTIC_LINE = Pattern.compile(
+            "^(?:\\[[^\\]]*\\]\\s*)?(?:PHP\\s+)?(?:Warning|Notice|Deprecated|Strict Standards):.* in .+ on line \\d+");
+
+    /** provision-agent(managed)側のletsblog-allow-svg-upload.phpと同内容(issue #489)。 */
+    private static final String SVG_UPLOAD_MU_PLUGIN = """
+            <?php
+            add_filter('upload_mimes', function ($mimes) {
+                $mimes['svg'] = 'image/svg+xml';
+                return $mimes;
+            });
+            add_filter('wp_check_filetype_and_ext', function ($data, $file, $filename, $mimes) {
+                if (empty($data['type'])) {
+                    $check = wp_check_filetype($filename, $mimes);
+                    $data['ext'] = $check['ext'];
+                    $data['type'] = $check['type'];
+                }
+                return $data;
+            }, 10, 4);
+            """;
 
     /**
      * 疎通確認を「1. SSH接続」「2. wp core versionの実行」の2段階で行い、
@@ -604,20 +631,40 @@ public class WordPressSshOperations {
         log.info("SSH投稿コマンド組み立て: existingPostId={}, featuredMediaId={}, args={}",
                 existingPostId, content.featuredMediaId(), fields);
 
-        String subcommand = existingPostId == null
+        // API側(lets_blog.posts)が記憶しているWordPress投稿IDは、WordPress側で当該投稿が
+        // 削除される等で実在しなくなることがある。その状態で`post update`すると
+        // 「無効な投稿 ID です」で失敗し投稿自体ができなくなるため、実在確認して
+        // 存在しなければ新規作成にフォールバックする(issue #491。managed側は#487で対応済み)。
+        String targetPostId = existingPostId;
+        if (targetPostId != null && !postExists(creds, targetPostId)) {
+            log.info("existingPostId={} はWordPress側に存在しないため新規作成として扱います", targetPostId);
+            targetPostId = null;
+        }
+
+        String subcommand = targetPostId == null
                 ? "post create - " + fields + " --porcelain"
-                : "post update " + existingPostId + " - " + fields + " --porcelain";
+                : "post update " + targetPostId + " - " + fields + " --porcelain";
 
         SshCommandResult result = exec(creds, wpCli(creds, subcommand), stdin);
         if (!result.ok()) {
             throw new SshOperationException("WordPress投稿の作成/更新に失敗しました: "
                     + firstLine(result.stderr(), result.stdout()));
         }
-        String postId = existingPostId != null ? existingPostId : result.stdout().strip();
+        String postId = targetPostId != null ? targetPostId : result.stdout().strip();
         if (content.featuredMediaId() != null) {
             setFeaturedMedia(creds, postId, content.featuredMediaId());
         }
         return fetchPostResult(creds, postId);
+    }
+
+    /**
+     * 指定IDの投稿がWordPress側に実在するかを`wp post get`の終了ステータスで判定する。
+     * WordPressAdapter.postExists(issue #493)からも呼ばれるためpublic。メディア(添付ファイル)も
+     * post_type=attachmentのwp_postsレコードのため、WordPressAdapter.mediaExists(issue #495)
+     * からも同じ判定として再利用される。
+     */
+    public boolean postExists(WordPressCredentials creds, String postId) {
+        return exec(creds, wpCli(creds, "post get " + ShellQuote.single(postId) + " --field=ID")).ok();
     }
 
     /**
@@ -648,10 +695,13 @@ public class WordPressSshOperations {
         if (content.slug() != null && !content.slug().isBlank()) {
             args.append(" --post_name=").append(ShellQuote.single(content.slug()));
         }
-        if (content.categoryIds() != null && !content.categoryIds().isEmpty()) {
+        if (content.categoryIds() != null) {
+            // 空リストも明示的に送る(frontmatterでカテゴリを全て外した変更を反映するため。issue #467)。
+            // 引数自体を省略するとwp-cliは既存のカテゴリをそのまま残してしまう。
             args.append(" --post_category=").append(ShellQuote.single(String.join(",", content.categoryIds())));
         }
-        if (content.tagIds() != null && !content.tagIds().isEmpty()) {
+        if (content.tagIds() != null) {
+            // 同上(issue #467)。空リストでもタグをクリアする意図として送る。
             String tagIds = String.join(",", content.tagIds());
             args.append(" --tax_input=").append(ShellQuote.single("{\"post_tag\":[" + tagIds + "]}"));
         }
@@ -698,6 +748,36 @@ public class WordPressSshOperations {
     }
 
     /**
+     * 記事プレビュー(非公開投稿の実表示)向けに、サイト管理者としてログイン済みと同等のCookieを発行する。
+     * managed(agent)サイトのWordPressAgentOperations#generateAuthCookieと同じ仕組み(`wp eval`経由での
+     * wp_generate_auth_cookie()呼び出し)を、SSH経由のwp-cli実行で行う。
+     */
+    public AuthCookie generateAuthCookie(WordPressCredentials creds) {
+        String phpCode = "$u = get_user_by('login', " + phpSingleQuote(creds.username()) + "); "
+                + "if (!$u) { echo json_encode(['error' => 'user_not_found']); exit; } "
+                + "echo json_encode(['name' => LOGGED_IN_COOKIE, "
+                + "'value' => wp_generate_auth_cookie($u->ID, time() + 3600, 'logged_in')]);";
+        SshCommandResult result = exec(creds, wpCli(creds, "eval " + ShellQuote.single(phpCode)));
+        if (!result.ok()) {
+            throw new SshOperationException("認証Cookieの発行に失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+        JsonNode body = parseJsonObject(result.stdout());
+        if (body.has("error") || !body.hasNonNull("name") || !body.hasNonNull("value")) {
+            throw new SshOperationException("ユーザー '" + creds.username() + "' が見つかりません");
+        }
+        return new AuthCookie(body.path("name").asText(), body.path("value").asText());
+    }
+
+    /** PHPのシングルクォート文字列リテラルとして安全に埋め込むためのエスケープ(`\`と`'`のみ特殊)。 */
+    private String phpSingleQuote(String value) {
+        if (value == null) {
+            return "''";
+        }
+        return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'";
+    }
+
+    /**
      * 投稿/固定ページの一覧を取得する(ポスト/ページ管理タブの環境間比較に使用)。
      * `wp post list --post_type=post|page` はIDベースで投稿種別を問わず動作するwp-cliの標準コマンド。
      */
@@ -734,6 +814,7 @@ public class WordPressSshOperations {
     public MediaUploadResult uploadMedia(WordPressCredentials creds, String filename, String contentType,
             byte[] data) {
         SshConnectionParams params = connectionParams(creds);
+        ensureSvgUploadMuPlugin(creds, params);
         String remotePath = "/tmp/letsblog-media-" + UUID.randomUUID() + "-" + sanitizeFilename(filename);
         executor.putFile(params, data, remotePath);
         try {
@@ -756,6 +837,24 @@ public class WordPressSshOperations {
         } finally {
             executor.removeFile(params, remotePath);
         }
+    }
+
+    /**
+     * WordPressコアはデフォルトでSVG(image/svg+xml)をupload_mimesに含めないため、SVG画像
+     * (記事投稿時にImageResizeServiceがImageIOでデコードできない形式として無変換で送ってくる)を
+     * `wp media import`で取り込もうとすると"Sorry, you are not allowed to upload this file
+     * type."(このファイルタイプをアップロードする権限がありません)で失敗する(issue #489。
+     * managed/provision-agent向けには#485で同様の対応済み)。他形式の挙動は変えずSVGのみ許可する
+     * mu-pluginをリモートへ配置する(未配置の場合のみ)。
+     */
+    private void ensureSvgUploadMuPlugin(WordPressCredentials creds, SshConnectionParams params) {
+        String muPluginPath = creds.wpPath() + "/wp-content/mu-plugins/letsblog-allow-svg-upload.php";
+        SshCommandResult checkResult = exec(creds, "test -f " + ShellQuote.single(muPluginPath));
+        if (checkResult.ok()) {
+            return;
+        }
+        exec(creds, "mkdir -p " + ShellQuote.single(creds.wpPath() + "/wp-content/mu-plugins"));
+        executor.putFile(params, SVG_UPLOAD_MU_PLUGIN.getBytes(StandardCharsets.UTF_8), muPluginPath);
     }
 
     private String sanitizeFilename(String filename) {
@@ -785,7 +884,28 @@ public class WordPressSshOperations {
         return "wp --path=" + ShellQuote.single(creds.wpPath()) + " " + subcommand;
     }
 
+    /**
+     * エラー表示用にstderr/stdoutから最初の「意味のある」1行を取り出す。
+     * テーマ/プラグインが出力するPHPのWarning/Notice等は本来のwp-cliエラーより先に大量に出力され、
+     * 単純に先頭1行を取るとエラーの原因が完全に隠れてしまう(issue #491。実際に
+     * 「このファイルタイプをアップロードする権限がありません」「無効な投稿 ID です」が
+     * テーマのWarningに覆い隠され原因調査が難航した)。PHPが出力する診断行は
+     * 「... in /path/to/file.php on line 123」形式である一方、wp-cli自身のエラーは
+     * その形式を取らないため、これを手掛かりに読み飛ばす。
+     * 全行がPHP診断行だった場合は情報を失わないよう従来どおり先頭行を返す。
+     */
     private String firstLine(String... candidates) {
+        for (String candidate : candidates) {
+            if (candidate == null || candidate.isBlank()) {
+                continue;
+            }
+            for (String line : candidate.split("\n")) {
+                String stripped = line.strip();
+                if (!stripped.isEmpty() && !PHP_DIAGNOSTIC_LINE.matcher(stripped).find()) {
+                    return stripped;
+                }
+            }
+        }
         for (String candidate : candidates) {
             if (candidate != null && !candidate.isBlank()) {
                 int newline = candidate.indexOf('\n');

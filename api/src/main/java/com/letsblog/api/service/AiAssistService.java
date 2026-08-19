@@ -6,12 +6,13 @@ import com.letsblog.api.ai.ComfyUiClient;
 import com.letsblog.api.ai.ComfyUiGenerationParams;
 import com.letsblog.api.ai.ComfyUiImage;
 import com.letsblog.api.ai.GeneratedImageStorageService;
-import com.letsblog.api.ai.OllamaClient;
+import com.letsblog.api.ai.LlmClient;
 import com.letsblog.api.domain.GeneratedImage;
 import com.letsblog.api.domain.GenerationJob;
 import com.letsblog.api.dto.AiDraftRequest;
 import com.letsblog.api.dto.AiDraftResponse;
 import com.letsblog.api.dto.AiImageBatchResponse;
+import com.letsblog.api.dto.AiImagePromptResponse;
 import com.letsblog.api.dto.AiImageRequest;
 import com.letsblog.api.dto.AiImageResponse;
 import com.letsblog.api.dto.AiSectionRequest;
@@ -22,6 +23,8 @@ import com.letsblog.api.dto.AiTagsResponse;
 import com.letsblog.api.dto.ImageGenerationOptionsResponse;
 import com.letsblog.api.repository.GeneratedImageRepository;
 import com.letsblog.api.repository.GenerationJobRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -31,11 +34,13 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Ollama/ComfyUIを利用した記事執筆支援(下書き/校正/要約、タグ・カテゴリ提案、画像生成)。
+ * LLM/ComfyUIを利用した記事執筆支援(下書き/校正/要約、タグ・カテゴリ提案、画像生成)。
  * 呼び出しごとに generation_jobs テーブルへ履歴を記録する。
  */
 @Service
 public class AiAssistService {
+
+    private static final Logger log = LoggerFactory.getLogger(AiAssistService.class);
 
     private static final Map<String, String> DRAFT_PROMPT_TEMPLATES = Map.of(
             "draft", """
@@ -94,6 +99,12 @@ public class AiAssistService {
                     """
     );
 
+    private static final String IMAGE_PROMPT_SYSTEM_PROMPT =
+            "あなたは画像生成AI(Stable Diffusion)向けのプロンプトエンジニアです。"
+            + "ユーザーとの会話から生成したい画像の内容を理解し、Stable Diffusion用の英語のプロンプトを作成してください。"
+            + "被写体、構図、スタイル、雰囲気、画質に関する具体的なキーワードをカンマ区切りで含めてください。"
+            + "出力はプロンプト文字列のみとし、説明文や前置き、日本語は含めないでください。";
+
     private static final String TAGS_PROMPT_TEMPLATE = """
             以下のブログ記事本文を読み、適切なカテゴリ候補とタグ候補を提案してください。
             出力は必ず次のJSON形式のみとし、他の文章は一切含めないでください。
@@ -104,7 +115,20 @@ public class AiAssistService {
             %s
             """;
 
-    private final OllamaClient ollamaClient;
+    /** issue #281: 生成画像の検索・分類用タグを、画像生成に使ったプロンプトから提案させる。 */
+    private static final String IMAGE_TAGS_PROMPT_TEMPLATE = """
+            以下は画像生成AIに渡したプロンプトです。この画像を検索・分類しやすくするための
+            短い日本語タグを3〜5個程度提案してください。
+            出力は必ず次のJSON形式のみとし、他の文章は一切含めないでください。
+
+            {"tags": ["タグ1", "タグ2", "タグ3"]}
+
+            画像生成プロンプト:
+            %s
+            """;
+
+    private final LlmClient llmClient;
+    private final LlmModelService llmModelService;
     private final ComfyUiClient comfyUiClient;
     private final ComfyUiModelService comfyUiModelService;
     private final GeneratedImageStorageService generatedImageStorageService;
@@ -112,14 +136,18 @@ public class AiAssistService {
     private final GenerationJobRepository generationJobRepository;
     private final WebSearchService webSearchService;
     private final ObjectMapper objectMapper;
+    private final ProjectService projectService;
 
-    public AiAssistService(OllamaClient ollamaClient, ComfyUiClient comfyUiClient,
+    public AiAssistService(LlmClient llmClient, LlmModelService llmModelService,
+                           ComfyUiClient comfyUiClient,
                            ComfyUiModelService comfyUiModelService,
                            GeneratedImageStorageService generatedImageStorageService,
                            GeneratedImageRepository generatedImageRepository,
                            GenerationJobRepository generationJobRepository,
-                           WebSearchService webSearchService, ObjectMapper objectMapper) {
-        this.ollamaClient = ollamaClient;
+                           WebSearchService webSearchService, ObjectMapper objectMapper,
+                           ProjectService projectService) {
+        this.llmClient = llmClient;
+        this.llmModelService = llmModelService;
         this.comfyUiClient = comfyUiClient;
         this.comfyUiModelService = comfyUiModelService;
         this.generatedImageStorageService = generatedImageStorageService;
@@ -127,6 +155,7 @@ public class AiAssistService {
         this.generationJobRepository = generationJobRepository;
         this.webSearchService = webSearchService;
         this.objectMapper = objectMapper;
+        this.projectService = projectService;
     }
 
     public AiImageBatchResponse generateImage(AiImageRequest request) {
@@ -134,12 +163,14 @@ public class AiAssistService {
         try {
             ComfyUiGenerationParams params = resolveParams(request);
             List<ComfyUiImage> images = comfyUiClient.generateImage(params);
+            // バッチ内の全画像は同じprompt/negativePromptから生成されるため、タグ提案は1回で済ませて使い回す。
+            String tagsJson = suggestImageTagsJson(params.prompt());
             List<AiImageResponse> responses = new ArrayList<>();
             for (ComfyUiImage image : images) {
                 String base64 = Base64.getEncoder().encodeToString(image.data());
                 String filePath = generatedImageStorageService.store(request.projectId(), image.data());
                 GeneratedImage saved = generatedImageRepository.save(
-                        toEntity(request.projectId(), params, filePath, image.mimeType()));
+                        toEntity(request.projectId(), params, filePath, image.mimeType(), tagsJson));
                 responses.add(new AiImageResponse(saved.getId(), image.fileName(), base64, image.mimeType()));
             }
             completeJob(job, Map.of("count", String.valueOf(responses.size())));
@@ -150,29 +181,97 @@ public class AiAssistService {
         }
     }
 
+    /**
+     * 画像生成プロンプトから検索・分類用のタグを提案し、JSON配列文字列として返す(issue #281)。
+     * タグ提案はあくまで補助機能のため、LLM呼び出しの失敗で画像生成自体を失敗させない
+     * (取得できない場合はタグなし=nullを返す)。
+     */
+    private String suggestImageTagsJson(String prompt) {
+        try {
+            String raw = llmClient.generate(IMAGE_TAGS_PROMPT_TEMPLATE.formatted(prompt));
+            JsonNode node = objectMapper.readTree(extractJsonObject(raw));
+            List<String> tags = toStringList(node.get("tags"));
+            if (tags.isEmpty()) {
+                return null;
+            }
+            return objectMapper.writeValueAsString(tags);
+        } catch (Exception e) {
+            log.warn("生成画像のタグ提案に失敗しました(タグなしで保存を続行します): {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * チャットメッセージ(と任意の履歴)から、ComfyUIへ渡す画像生成プロンプト(英語)をLLMで生成する。
+     * ArticlePlanService.buildChatPromptと同様に「System+履歴+User」形式でプロンプトを組み立てる。
+     */
+    public AiImagePromptResponse generateImagePrompt(Long projectId, List<PlanChatMessage> history, String message) {
+        GenerationJob job = startJob("llm_image_prompt", Map.of(
+                "projectId", String.valueOf(projectId),
+                "message", message
+        ));
+        try {
+            String model = llmModelService.getSelectedModel(projectId);
+            String prompt = buildImagePromptChat(history, message);
+            String result = llmClient.generate(prompt, model);
+            completeJob(job, Map.of("result", result));
+            return new AiImagePromptResponse(result);
+        } catch (RuntimeException e) {
+            failJob(job, e);
+            throw e;
+        }
+    }
+
+    private String buildImagePromptChat(List<PlanChatMessage> history, String message) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("System: ").append(IMAGE_PROMPT_SYSTEM_PROMPT).append("\n\n");
+        if (history != null) {
+            for (PlanChatMessage msg : history) {
+                sb.append("user".equals(msg.role()) ? "User" : "Assistant")
+                        .append(": ")
+                        .append(msg.content())
+                        .append("\n");
+            }
+        }
+        sb.append("User: ").append(message).append("\n");
+        sb.append("Assistant: ");
+        return sb.toString();
+    }
+
     public ImageGenerationOptionsResponse getImageOptions(Long projectId) {
         return new ImageGenerationOptionsResponse(
                 comfyUiClient.listCheckpoints(),
                 comfyUiModelService.getSelectedCheckpointOrGlobalDefault(projectId),
                 comfyUiClient.listSamplers(),
                 comfyUiClient.listSchedulers(),
-                comfyUiClient.listLoras());
+                comfyUiClient.listLoras(),
+                projectService.resolveDefaultGeneratedImageWidth(projectId),
+                projectService.resolveDefaultGeneratedImageHeight(projectId),
+                projectService.resolveDefaultNegativePrompt(projectId),
+                projectService.resolveDefaultQualityPrompt(projectId));
     }
 
     private ComfyUiGenerationParams resolveParams(AiImageRequest request) {
         String checkpoint = request.checkpoint() != null && !request.checkpoint().isBlank()
                 ? request.checkpoint()
                 : comfyUiModelService.getSelectedCheckpointOrGlobalDefault(request.projectId());
+        String negativePrompt = request.negativePrompt() != null && !request.negativePrompt().isBlank()
+                ? request.negativePrompt()
+                : projectService.resolveDefaultNegativePrompt(request.projectId());
+        String qualityPrompt = projectService.resolveDefaultQualityPrompt(request.projectId());
+        String prompt = qualityPrompt == null || qualityPrompt.isBlank()
+                ? request.prompt()
+                : request.prompt() + ", " + qualityPrompt;
         return new ComfyUiGenerationParams(
-                request.prompt(),
-                request.negativePrompt() != null ? request.negativePrompt() : "low quality, blurry, watermark, text",
+                prompt,
+                negativePrompt,
                 request.steps() != null ? request.steps() : 20,
                 request.cfgScale() != null ? request.cfgScale() : 7.0,
                 request.samplerName() != null ? request.samplerName() : "euler",
                 request.scheduler() != null ? request.scheduler() : "normal",
                 request.seed(),
-                request.width() != null ? request.width() : 512,
-                request.height() != null ? request.height() : 512,
+                request.width() != null ? request.width() : projectService.resolveDefaultGeneratedImageWidth(request.projectId()),
+                request.height() != null ? request.height() : projectService.resolveDefaultGeneratedImageHeight(request.projectId()),
                 request.batchSize() != null ? request.batchSize() : 1,
                 checkpoint,
                 request.loraName(),
@@ -180,7 +279,8 @@ public class AiAssistService {
         );
     }
 
-    private GeneratedImage toEntity(Long projectId, ComfyUiGenerationParams params, String filePath, String mimeType) {
+    private GeneratedImage toEntity(
+            Long projectId, ComfyUiGenerationParams params, String filePath, String mimeType, String tagsJson) {
         GeneratedImage entity = new GeneratedImage();
         entity.setProjectId(projectId);
         entity.setPrompt(params.prompt());
@@ -198,6 +298,7 @@ public class AiAssistService {
         entity.setLoraWeight(params.loraWeight() != null ? BigDecimal.valueOf(params.loraWeight()) : null);
         entity.setFilePath(filePath);
         entity.setMimeType(mimeType);
+        entity.setTagsJson(tagsJson);
         return entity;
     }
 
@@ -208,11 +309,11 @@ public class AiAssistService {
                     "mode は draft/proofread/summarize のいずれかを指定してください: " + request.mode());
         }
 
-        GenerationJob job = startJob("ollama_" + request.mode(), Map.of("mode", request.mode(), "text", request.text()));
+        GenerationJob job = startJob("llm_" + request.mode(), Map.of("mode", request.mode(), "text", request.text()));
         try {
             WebSearchOutcome searchOutcome = webSearchService.searchSafely(buildSearchQuery(request.text()));
             String prompt = WebSearchService.formatForPrompt(searchOutcome) + template.formatted(request.text());
-            String result = ollamaClient.generate(prompt);
+            String result = llmClient.generate(prompt);
             completeJob(job, Map.of("result", result));
             return new AiDraftResponse(result, WebSearchService.toSources(searchOutcome),
                     WebSearchService.buildSearchNote(searchOutcome));
@@ -244,7 +345,7 @@ public class AiAssistService {
         String searchQuery = buildSearchQuery(
                 (request.articleTitle() != null ? request.articleTitle() + " " : "") + heading);
 
-        GenerationJob job = startJob("ollama_section_" + request.mode(),
+        GenerationJob job = startJob("llm_section_" + request.mode(),
                 Map.of("mode", request.mode(), "heading", heading));
         try {
             WebSearchOutcome searchOutcome = webSearchService.searchSafely(searchQuery);
@@ -259,7 +360,7 @@ public class AiAssistService {
                     ? buildSectionChatPrompt(basePrompt, request.history(), request.message(), searchOutcome)
                     : WebSearchService.formatForPrompt(searchOutcome) + basePrompt;
 
-            String result = ollamaClient.generate(prompt);
+            String result = llmClient.generate(prompt);
             completeJob(job, Map.of("result", result));
             return new AiSectionResponse(result, WebSearchService.toSources(searchOutcome),
                     WebSearchService.buildSearchNote(searchOutcome));
@@ -313,9 +414,9 @@ public class AiAssistService {
     }
 
     public AiTagsResponse suggestTags(AiTagsRequest request) {
-        GenerationJob job = startJob("ollama_tags", Map.of("text", request.text()));
+        GenerationJob job = startJob("llm_tags", Map.of("text", request.text()));
         try {
-            String raw = ollamaClient.generate(TAGS_PROMPT_TEMPLATE.formatted(request.text()));
+            String raw = llmClient.generate(TAGS_PROMPT_TEMPLATE.formatted(request.text()));
             AiTagsResponse parsed = parseTagsResponse(raw);
             completeJob(job, Map.of("result", raw));
             return parsed;

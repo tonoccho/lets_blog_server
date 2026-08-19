@@ -219,10 +219,12 @@ async function cachedRequestJson<S extends ZodType>(
 import type {
   AcceptStructureResult,
   AiDraftResult,
+  AiImagePromptResult,
   AiImageResult,
   AiSectionResult,
   AiTagsResult,
   AssignIssueResult,
+  ContentCacheResult,
   ImageGenerationOptions,
   LoginResult,
   PlanChatResult,
@@ -242,10 +244,12 @@ export type {
   Actor,
   AcceptStructureResult,
   AiDraftResult,
+  AiImagePromptResult,
   AiImageResult,
   AiSectionResult,
   AiTagsResult,
   AssignIssueResult,
+  ContentCacheResult,
   ImageGenerationOptions,
   LoginResult,
   PlanChatResult,
@@ -414,6 +418,28 @@ export async function listSites(
   }, schemas.SiteSummaryListSchema);
 }
 
+/** 投稿ステータスの選択肢を取得する。UIのハードコードをサーバー側の正準リストへ統一する(issue #472)。 */
+export async function getPostStatuses(
+  serverUrl: string,
+  apiKey: string
+): Promise<schemas.PostStatusOption[]> {
+  return cachedRequestJson('post-statuses', serverUrl, '/api/metadata/post-statuses', {
+    label: 'getPostStatuses',
+    headers: buildHeaders(apiKey),
+  }, schemas.PostStatusOptionListSchema);
+}
+
+/** ロールの表示名一覧を取得する(issue #472)。 */
+export async function getRoles(
+  serverUrl: string,
+  apiKey: string
+): Promise<schemas.RoleOption[]> {
+  return cachedRequestJson('roles', serverUrl, '/api/metadata/roles', {
+    label: 'getRoles',
+    headers: buildHeaders(apiKey),
+  }, schemas.RoleOptionListSchema);
+}
+
 /**
  * 下書き生成・校正・要約をAIへ依頼する。
  * @param mode draft(下書き) / proofread(校正) / summarize(要約)
@@ -485,13 +511,14 @@ export async function generateImage(
   signal?: AbortSignal
 ): Promise<AiImageResult> {
   // 生成画像はサーバー側に保存されるため、再試行すると重複した生成結果が残る。
-  return requestJson(serverUrl, '/api/ai/image', {
+  const batch = await requestJson(serverUrl, '/api/ai/image', {
     label: 'generateImage',
     signal,
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
     createBody: jsonBody({ projectId, ...params }),
-  }, schemas.AiImageResultSchema);
+  }, schemas.AiImageBatchResponseSchema);
+  return batch.images[0];
 }
 
 /** 画像生成で選択できるモデル/サンプラー/スケジューラ/LoRAの一覧を取得する。 */
@@ -597,6 +624,30 @@ export async function postPlanChat(
   }, schemas.PlanChatResultSchema);
 }
 
+/**
+ * チャットメッセージ(と任意の履歴)から画像生成プロンプトを作成する。
+ * サーバー側で状態を持たないため、再試行して差し支えない。
+ * @param signal 利用者によるキャンセル用。
+ */
+export async function generateImagePrompt(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  projectId: number,
+  history: PlanChatMessage[],
+  message: string,
+  signal?: AbortSignal
+): Promise<AiImagePromptResult> {
+  return requestJson(serverUrl, `/api/projects/${projectId}/ai/generate-image-prompt`, {
+    label: 'generateImagePrompt',
+    signal,
+    method: 'POST',
+    headers: buildHeaders(apiKey, actor),
+    createBody: jsonBody({ history, message }),
+    retryable: true,
+  }, schemas.AiImagePromptResultSchema);
+}
+
 /** GitHub Issueの本文を取得する。未記入のIssueでは空文字を返す。 */
 export async function getIssueDescription(
   serverUrl: string,
@@ -625,6 +676,25 @@ export async function listExistingCategories(
     `/api/projects/${projectId}/article-plan/categories`,
     { label: 'listExistingCategories', headers: buildHeaders(apiKey, actor) },
     schemas.CategoryNameListSchema
+  );
+}
+
+/**
+ * プロジェクトのマスター環境サイトに既に存在するカテゴリ一覧を、親カテゴリ名付きで取得する。
+ * 子カテゴリ選択時に親カテゴリを自動選択するUIのために使う(issue #289)。
+ */
+export async function listExistingCategoriesWithParents(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor,
+  projectId: number
+): Promise<schemas.CategoryOption[]> {
+  return cachedRequestJson(
+    `project:${projectId}:categories:hierarchy`,
+    serverUrl,
+    `/api/projects/${projectId}/article-plan/categories/hierarchy`,
+    { label: 'listExistingCategoriesWithParents', headers: buildHeaders(apiKey, actor) },
+    schemas.CategoryOptionListSchema
   );
 }
 
@@ -752,6 +822,70 @@ export async function renderPreviewHtml(
 }
 
 /**
+ * サイト内の既存記事ページを骨格として流用し、実テーマのDOM構造(タイトル/カテゴリ/日付/
+ * アイキャッチ等)を保ったままプレビュー対象記事の内容へ差し替えたHTML断片を取得する。
+ * 参照記事が無い・差し替え位置を特定できない等の場合はavailable:falseが返る
+ * (呼び出し側は従来のプレーンな表示へフォールバックすること)。
+ *
+ * ローカル/テスト環境(managed WordPress)では、差し替えの代わりに実際に非公開(private)投稿を
+ * 作成/更新してその実ページを返す経路が使われることがある。existingPreviewPostIdに前回の
+ * ThemeSkeletonResult.previewPostIdを渡すと新規作成せず更新し、返り値のpreviewPostIdを
+ * 次回呼び出しへ渡すことでプレビュー用の投稿を積み上げずに済む
+ * (投稿の作成/更新という副作用を伴うため再試行はしない)。
+ */
+export async function renderPreviewSkeleton(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  projectId: number,
+  siteId: number | undefined,
+  title: string,
+  contentHtml: string,
+  featuredImageDataUri: string | undefined,
+  existingPreviewPostId: string | undefined,
+  slug?: string,
+  categories?: string[],
+  tags?: string[]
+): Promise<schemas.ThemeSkeletonResult> {
+  return requestJson(
+    serverUrl,
+    `/api/projects/${projectId}/preview/skeleton`,
+    {
+      label: 'renderPreviewSkeleton',
+      method: 'POST',
+      headers: buildHeaders(apiKey, actor),
+      createBody: jsonBody({
+        title, contentHtml, featuredImageDataUri, siteId, existingPreviewPostId, slug, categories, tags,
+      }),
+    },
+    schemas.ThemeSkeletonResultSchema
+  );
+}
+
+/**
+ * renderPreviewSkeletonがローカル/テスト環境向けに作成した非公開プレビュー投稿を削除する
+ * (WordPressの既定挙動でゴミ箱へ移動する)。プレビューパネルを閉じた際に呼ばれる想定。
+ */
+export async function deletePreviewPost(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  projectId: number,
+  siteId: number,
+  postId: string
+): Promise<void> {
+  await request(
+    serverUrl,
+    `/api/projects/${projectId}/preview/preview-post?siteId=${siteId}&postId=${encodeURIComponent(postId)}`,
+    {
+      label: 'deletePreviewPost',
+      method: 'DELETE',
+      headers: buildHeaders(apiKey, actor),
+    }
+  );
+}
+
+/**
  * プレビューに適用するテーマCSSを取得する。siteIdを指定するとそのサイト、
  * 省略時はプロジェクトのマスター環境サイトのCSSを返す。
  * サイトのCSSは短時間で変わるものではないため、サイトごとにキャッシュする。
@@ -774,6 +908,26 @@ export async function getThemeCss(
 }
 
 /**
+ * URLのOGP情報(ブログカード用)またはAmazon商品情報を取得する。[blogcard]/[amazon]組み込みタグの
+ * レンダリング時に使われるキャッシュと同一のもので、ここで呼んでおくとレンダリング時には
+ * 既にキャッシュ済みとなり再スクレイピングが発生しない(Issue #339: URLペースト時の先行取得)。
+ * 変換結果を返すだけでサーバー状態を変えないため、再試行して差し支えない。
+ */
+export async function resolveContentCache(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  url: string
+): Promise<schemas.ContentCacheResult> {
+  return requestJson(
+    serverUrl,
+    `/api/content-cache?url=${encodeURIComponent(url)}`,
+    { label: 'resolveContentCache', headers: buildHeaders(apiKey, actor), retryable: true },
+    schemas.ContentCacheResultSchema
+  );
+}
+
+/**
  * サーバーに保存された生成画像の一覧を取得する。
  * projectId未指定時は全プロジェクトが対象になるため、通常はプロジェクトを指定して呼ぶ。
  */
@@ -789,6 +943,21 @@ export async function listGeneratedImages(
     `/api/generated-images?projectId=${projectId}`,
     { label: 'listGeneratedImages', headers: buildHeaders(apiKey, actor) },
     schemas.GeneratedImageSummaryListSchema
+  );
+}
+
+/** 生成画像の詳細(生成に使ったパラメータ一式)を取得する(issue #294)。 */
+export async function getGeneratedImageDetail(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  imageId: number
+): Promise<schemas.GeneratedImageDetail> {
+  return requestJson(
+    serverUrl,
+    `/api/generated-images/${imageId}`,
+    { label: 'getGeneratedImageDetail', headers: buildHeaders(apiKey, actor) },
+    schemas.GeneratedImageDetailSchema
   );
 }
 
@@ -819,4 +988,113 @@ export async function deleteGeneratedImage(
   });
 }
 
-export type { GeneratedImageSummary } from './schemas';
+export type { GeneratedImageSummary, GeneratedImageDetail } from './schemas';
+
+/** ダイアグラムの新規作成。 */
+export async function createDiagram(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  params: { projectId: number; name: string; xml: string; svg: string }
+): Promise<schemas.DiagramDetail> {
+  const result = await requestJson(
+    serverUrl,
+    '/api/diagrams',
+    {
+      label: 'createDiagram',
+      method: 'POST',
+      headers: buildHeaders(apiKey, actor),
+      createBody: jsonBody(params),
+    },
+    schemas.DiagramDetailSchema
+  );
+  invalidateProjectCache(params.projectId);
+  return result;
+}
+
+/** ダイアグラムの一覧。projectId未指定時は全件を返す。 */
+export async function listDiagrams(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  projectId: number
+): Promise<schemas.DiagramSummary[]> {
+  return cachedRequestJson(
+    `project:${projectId}:diagrams`,
+    serverUrl,
+    `/api/diagrams?projectId=${projectId}`,
+    { label: 'listDiagrams', headers: buildHeaders(apiKey, actor) },
+    schemas.DiagramSummaryListSchema
+  );
+}
+
+/** ダイアグラムの詳細(xml含む、再編集用)を取得する。 */
+export async function getDiagramDetail(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  diagramId: number
+): Promise<schemas.DiagramDetail> {
+  return requestJson(
+    serverUrl,
+    `/api/diagrams/${diagramId}`,
+    { label: 'getDiagramDetail', headers: buildHeaders(apiKey, actor) },
+    schemas.DiagramDetailSchema
+  );
+}
+
+/** ダイアグラムのSVG本体を取得する。 */
+export async function getDiagramSvg(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  diagramId: number
+): Promise<string> {
+  const buffer = await requestBinary(serverUrl, `/api/diagrams/${diagramId}/svg`, {
+    label: 'getDiagramSvg',
+    headers: buildHeaders(apiKey, actor),
+  });
+  return buffer.toString('utf-8');
+}
+
+/** ダイアグラムの上書き保存。 */
+export async function updateDiagram(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  diagramId: number,
+  params: { name: string; xml: string; svg: string },
+  projectId: number
+): Promise<schemas.DiagramDetail> {
+  const result = await requestJson(
+    serverUrl,
+    `/api/diagrams/${diagramId}`,
+    {
+      label: 'updateDiagram',
+      method: 'PUT',
+      headers: buildHeaders(apiKey, actor),
+      createBody: jsonBody(params),
+    },
+    schemas.DiagramDetailSchema
+  );
+  invalidateProjectCache(projectId);
+  return result;
+}
+
+/** ダイアグラムをサーバーから削除する。 */
+export async function deleteDiagram(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  diagramId: number,
+  projectId: number
+): Promise<void> {
+  await request(serverUrl, `/api/diagrams/${diagramId}`, {
+    label: 'deleteDiagram',
+    method: 'DELETE',
+    headers: buildHeaders(apiKey, actor),
+  });
+  invalidateProjectCache(projectId);
+}
+
+export type { DiagramSummary, DiagramDetail } from './schemas';

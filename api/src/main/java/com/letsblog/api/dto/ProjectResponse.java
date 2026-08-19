@@ -13,6 +13,12 @@ public record ProjectResponse(
         SiteResponse productionSite,
         String masterEnvironment,
         String githubRepository,
+        String cssSelectorPrefix,
+        String defaultNegativePrompt,
+        String defaultQualityPrompt,
+        Integer defaultGeneratedImageWidth,
+        Integer defaultGeneratedImageHeight,
+        Integer defaultArticleImageLongEdgePx,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -27,6 +33,12 @@ public record ProjectResponse(
                 productionSite,
                 project.getMasterEnvironment(),
                 project.getGithubRepository(),
+                project.getCssSelectorPrefix(),
+                project.getDefaultNegativePrompt(),
+                project.getDefaultQualityPrompt(),
+                project.getDefaultGeneratedImageWidth(),
+                project.getDefaultGeneratedImageHeight(),
+                project.getDefaultArticleImageLongEdgePx(),
                 project.getCreatedAt(),
                 project.getUpdatedAt()
         );

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as api from './apiClient';
-import { getActor, getProjectId, getServerUrl, requireApiKey, setProjectId } from './config';
+import { Actor, getActor, getProjectId, getServerUrl, requireApiKey, setProjectId } from './config';
 import { buildArticleFrontMatter } from './frontMatter';
 import { createArticleScaffold, openArticle, requireWorkspaceRoot } from './articleScaffold';
 import { showSingletonPanel, WebviewPanelBase } from './webviewPanelBase';
@@ -35,12 +35,23 @@ export class ArticleCreationPanel extends WebviewPanelBase<
     switch (message.command) {
       case 'loadProjects':
         return this._handleLoadProjects();
+      case 'loadPostStatuses':
+        return this._handleLoadPostStatuses();
       case 'close':
         // 入力途中で中断したい場合の退避口(Escape)。
         this.close();
         return;
+      case 'cancel':
+        this.cancelCurrentOperation();
+        return;
       case 'loadCategories':
         return this._handleLoadCategories(message);
+      case 'sendChat':
+        return this._handleSendChat(message);
+      case 'suggestMetadata':
+        return this._handleSuggestMetadata(message);
+      case 'suggestStructure':
+        return this._handleSuggestStructure(message);
       case 'createArticle':
         return this._handleCreateArticle(message);
     }
@@ -58,6 +69,25 @@ export class ArticleCreationPanel extends WebviewPanelBase<
   }
 
   /**
+   * 投稿ステータスの選択肢を返す(サーバー側の正準リスト、issue #472)。
+   * 取得に失敗しても記事作成自体は続けられるよう、失敗時は従来のdraft/publishのみへ縮退する。
+   */
+  private async _handleLoadPostStatuses(): Promise<void> {
+    try {
+      const apiKey = await requireApiKey(this.context);
+      const statuses = await api.getPostStatuses(getServerUrl(), apiKey);
+      this.postMessage('postStatusList', { statuses });
+    } catch {
+      this.postMessage('postStatusList', {
+        statuses: [
+          { value: 'draft', label: '下書き (draft)' },
+          { value: 'publish', label: '公開 (publish)' },
+        ],
+      });
+    }
+  }
+
+  /**
    * 選択中プロジェクトの既存カテゴリを返す。サイト未紐付け等で取得できない場合も
    * 記事作成自体は続けられるよう、失敗を通知して空一覧として扱う。
    */
@@ -70,7 +100,7 @@ export class ArticleCreationPanel extends WebviewPanelBase<
       throw new Error('ログインしていません。「Let\'s Blog: Login」を先に実行してください。');
     }
     try {
-      const categories = await api.listExistingCategories(
+      const categories = await api.listExistingCategoriesWithParents(
         getServerUrl(),
         apiKey,
         actor,
@@ -80,6 +110,57 @@ export class ArticleCreationPanel extends WebviewPanelBase<
     } catch {
       this.postMessage('categoryList', { categories: [] });
     }
+  }
+
+  /** チャットメッセージ(と履歴)からAIブレインストーミングの応答を返す。 */
+  private async _handleSendChat(
+    message: Extract<ArticleCreationInboundMessage, { command: 'sendChat' }>
+  ): Promise<void> {
+    const apiKey = await requireApiKey(this.context);
+    const actor = await this._requireActor();
+    const response = await this.runCancellable((signal) =>
+      api.postPlanChat(
+        getServerUrl(),
+        apiKey,
+        actor,
+        message.projectId,
+        { history: message.history, message: message.message, sessionId: message.sessionId },
+        signal
+      )
+    );
+    this.postMessage('chatResponse', response);
+  }
+
+  /** 壁打ちの会話履歴から、タイトル・スラッグ(各5件)・カテゴリ・タグを提案する。 */
+  private async _handleSuggestMetadata(
+    message: Extract<ArticleCreationInboundMessage, { command: 'suggestMetadata' }>
+  ): Promise<void> {
+    const apiKey = await requireApiKey(this.context);
+    const actor = await this._requireActor();
+    const suggestion = await this.runCancellable((signal) =>
+      api.suggestMetadata(getServerUrl(), apiKey, actor, message.projectId, message.history, signal)
+    );
+    this.postMessage('metadataSuggestion', suggestion);
+  }
+
+  /** 壁打ちの会話履歴から、記事の構成案(見出し構造)を提案する。 */
+  private async _handleSuggestStructure(
+    message: Extract<ArticleCreationInboundMessage, { command: 'suggestStructure' }>
+  ): Promise<void> {
+    const apiKey = await requireApiKey(this.context);
+    const actor = await this._requireActor();
+    const suggestion = await this.runCancellable((signal) =>
+      api.suggestArticleStructure(getServerUrl(), apiKey, actor, message.projectId, message.history, signal)
+    );
+    this.postMessage('structureSuggestion', suggestion);
+  }
+
+  private async _requireActor(): Promise<Actor> {
+    const actor = await getActor(this.context);
+    if (!actor) {
+      throw new Error('ログインしていません。「Let\'s Blog: Login」を先に実行してください。');
+    }
+    return actor;
   }
 
   private async _handleCreateArticle(
@@ -92,7 +173,7 @@ export class ArticleCreationPanel extends WebviewPanelBase<
       workspaceRoot,
       slug,
       frontMatter: buildArticleFrontMatter({ title, slug, projectId, categories, tags, status }),
-      content: '',
+      content: message.content ?? '',
     });
     if (!result) {
       this.postMessage('error', { error: 'キャンセルしました。' });

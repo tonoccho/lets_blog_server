@@ -11,15 +11,28 @@
 <body>
 <main class="container">
   <h1 class="visually-hidden">画像生成</h1>
+  <div class="section" id="chatSection" aria-labelledby="chatSectionTitle">
+    <h2 class="section-title" id="chatSectionTitle">チャットでプロンプトを作成</h2>
+    <p class="hint">作りたい画像の内容をチャットで伝えてください。生成されたプロンプトが下のprompt欄に反映されます。</p>
+    <div class="chat-container">
+      <div class="messages" id="chatMessages" role="log" aria-live="polite" aria-label="チャット履歴"></div>
+      <div class="chat-input">
+        <label class="visually-hidden" for="chatInput">メッセージ</label>
+        <textarea id="chatInput" rows="2" placeholder="例: 夕焼けの海辺を歩く猫(Enterで改行、Ctrl+Enterで送信)"></textarea>
+        <button type="button" id="sendChatButton">プロンプト生成</button>
+      </div>
+    </div>
+  </div>
   <div class="section">
     <h2 class="section-title">パラメータ</h2>
     <div class="form-group">
       <label for="prompt">prompt</label>
       <textarea id="prompt" placeholder="生成したい画像の説明"></textarea>
+      <p class="hint" id="qualityPromptHint" style="display: none;"></p>
     </div>
     <div class="form-group">
       <label for="negativePrompt">negative prompt</label>
-      <textarea id="negativePrompt" placeholder="low quality, blurry, watermark, text"></textarea>
+      <textarea id="negativePrompt"></textarea>
     </div>
     <div class="form-row">
       <div class="form-group">
@@ -48,11 +61,11 @@
     <div class="form-row">
       <div class="form-group">
         <label for="width">width</label>
-        <input type="number" id="width" min="64" max="2048" step="8" value="512">
+        <input type="number" id="width" min="64" max="2048" step="8" value="1920">
       </div>
       <div class="form-group">
         <label for="height">height</label>
-        <input type="number" id="height" min="64" max="2048" step="8" value="512">
+        <input type="number" id="height" min="64" max="2048" step="8" value="1080">
       </div>
       <div class="form-group">
         <label for="batchSize">batch size</label>

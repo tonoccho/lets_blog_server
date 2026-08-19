@@ -58,10 +58,17 @@ class BulkManagementServiceTest {
     @Mock
     private com.letsblog.api.cms.CmsAdapterFactory cmsAdapterFactory;
 
+    @Mock
+    private ProjectService projectService;
+
+    @Mock
+    private ImageResizeService imageResizeService;
+
     private BulkManagementService service() {
         return new BulkManagementService(
                 projectRepository, siteRepository, bulkManagementClient,
-                bulkUploadStorageService, siteService, sshOperations, restOperations, cmsAdapterFactory);
+                bulkUploadStorageService, siteService, sshOperations, restOperations, cmsAdapterFactory,
+                projectService, imageResizeService);
     }
 
     private Project buildProject(Long localSiteId, Long testSiteId, Long productionSiteId) {
@@ -320,6 +327,101 @@ class BulkManagementServiceTest {
         assertEquals("shinchaku", result.getCategorySlug());
     }
 
+    // ---- applyToAllEnvironments (issue #393) ----
+
+    @Test
+    void applyToAllEnvironments_カテゴリ系は例外() {
+        BulkManagementService service = service();
+
+        assertThrows(IllegalArgumentException.class, () -> service.applyToAllEnvironments(
+                1L, BulkOperationType.CATEGORY_CREATE, "お知らせ", 9L));
+    }
+
+    @Test
+    void applyToAllEnvironments_有効化等のアクションは例外() {
+        BulkManagementService service = service();
+
+        assertThrows(IllegalArgumentException.class, () -> service.applyToAllEnvironments(
+                1L, BulkOperationType.PLUGIN_ACTIVATE, "akismet", 9L));
+    }
+
+    @Test
+    void applyToAllEnvironments_slug未指定は例外() {
+        BulkManagementService service = service();
+
+        assertThrows(IllegalArgumentException.class, () -> service.applyToAllEnvironments(
+                1L, BulkOperationType.PLUGIN_INSTALL, "", 9L));
+    }
+
+    @Test
+    void applyToAllEnvironments_紐付いている全環境へインストールしログを保存する() {
+        BulkManagementService service = service();
+        Project project = buildProject(10L, 20L, 30L);
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site testSite = buildManagedSite(20L, "test-site");
+        Site productionSite = buildManagedSite(30L, "production-site");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+        when(siteRepository.findById(30L)).thenReturn(Optional.of(productionSite));
+        when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
+
+        List<BulkOperationLog> results = service.applyToAllEnvironments(
+                1L, BulkOperationType.PLUGIN_INSTALL, "akismet", 9L);
+
+        assertEquals(3, results.size());
+        assertEquals("local", results.get(0).getEnvironment());
+        assertEquals("test", results.get(1).getEnvironment());
+        assertEquals("production", results.get(2).getEnvironment());
+        results.forEach(r -> assertEquals(BulkOperationStatus.SUCCESS, r.getStatus()));
+        verify(bulkManagementClient).apply(new BulkApplyCommand(
+                "local-site", "plugin_install", "akismet", null, null, null, null));
+        verify(bulkManagementClient).apply(new BulkApplyCommand(
+                "test-site", "plugin_install", "akismet", null, null, null, null));
+        verify(bulkManagementClient).apply(new BulkApplyCommand(
+                "production-site", "plugin_install", "akismet", null, null, null, null));
+    }
+
+    @Test
+    void applyToAllEnvironments_紐付いていない環境はスキップする() {
+        BulkManagementService service = service();
+        Project project = buildProject(10L, null, null);
+        Site localSite = buildManagedSite(10L, "local-site");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
+
+        List<BulkOperationLog> results = service.applyToAllEnvironments(
+                1L, BulkOperationType.PLUGIN_INSTALL, "akismet", 9L);
+
+        assertEquals(1, results.size());
+        assertEquals("local", results.get(0).getEnvironment());
+    }
+
+    @Test
+    void applyToAllEnvironments_1環境が対象外でも他環境の実行を止めずFAILEDとして記録する() {
+        BulkManagementService service = service();
+        Project project = buildProject(10L, 20L, null);
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site externalSite = buildExternalSite(20L, "external-site");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(siteRepository.findById(20L)).thenReturn(Optional.of(externalSite));
+        when(siteService.resolveDataSource(externalSite)).thenReturn(new SiteService.SiteDataSource(false, null, null));
+        when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
+
+        List<BulkOperationLog> results = service.applyToAllEnvironments(
+                1L, BulkOperationType.PLUGIN_INSTALL, "akismet", 9L);
+
+        assertEquals(2, results.size());
+        assertEquals(BulkOperationStatus.SUCCESS, results.get(0).getStatus());
+        assertEquals("local", results.get(0).getEnvironment());
+        assertEquals(BulkOperationStatus.FAILED, results.get(1).getStatus());
+        assertEquals("test", results.get(1).getEnvironment());
+        verify(bulkManagementClient, never()).apply(new BulkApplyCommand(
+                "external-site", "plugin_install", "akismet", null, null, null, null));
+    }
+
     // ---- executeFromUpload ----
 
     @Test
@@ -449,15 +551,21 @@ class BulkManagementServiceTest {
         when(siteService.getCredentials("local-site")).thenReturn(localCreds);
         when(siteService.getCredentials("test-site")).thenReturn(testCreds);
 
+        byte[] originalData = new byte[]{1, 2, 3};
+        byte[] resizedData = new byte[]{9, 9, 9};
+        when(projectService.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
+        when(imageResizeService.resizeToLongEdge(originalData, "image/png", 1300, true))
+                .thenReturn(new ImageResizeService.ResizeResult(resizedData, "image/png"));
+
         com.letsblog.api.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
         when(cmsAdapterFactory.resolve(com.letsblog.api.cms.CmsType.WORDPRESS)).thenReturn(adapter);
-        when(adapter.uploadMedia(eq(localCreds), eq("cat.png"), eq("image/png"), any()))
+        when(adapter.uploadMedia(eq(localCreds), eq("cat.png"), eq("image/png"), eq(resizedData)))
                 .thenReturn(new com.letsblog.api.cms.MediaUploadResult("1", "https://local.test/cat.png"));
-        when(adapter.uploadMedia(eq(testCreds), eq("cat.png"), eq("image/png"), any()))
+        when(adapter.uploadMedia(eq(testCreds), eq("cat.png"), eq("image/png"), eq(resizedData)))
                 .thenThrow(new RuntimeException("接続に失敗しました"));
 
         List<BulkOperationLog> results = service.uploadImageToAllEnvironments(
-                1L, new byte[]{1, 2, 3}, "cat.png", "image/png", 9L);
+                1L, originalData, "cat.png", "image/png", 9L);
 
         assertEquals(2, results.size());
         assertEquals("local", results.get(0).getEnvironment());
@@ -466,6 +574,39 @@ class BulkManagementServiceTest {
         assertEquals("test", results.get(1).getEnvironment());
         assertEquals(BulkOperationStatus.FAILED, results.get(1).getStatus());
         assertEquals("接続に失敗しました", results.get(1).getErrorMessage());
+        verify(adapter, never()).uploadMedia(any(), any(), any(), eq(originalData));
+    }
+
+    @Test
+    void uploadImageToAllEnvironments_JPEG変換された場合はファイル名拡張子とContentTypeもjpgに揃える() {
+        BulkManagementService service = service();
+        Project project = buildProject(10L, null, null);
+        Site localSite = buildManagedSite(10L, "local-site");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+
+        com.letsblog.api.cms.CmsCredentials.WordPressCredentials localCreds =
+                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "pass");
+        when(siteService.getCredentials("local-site")).thenReturn(localCreds);
+
+        byte[] originalData = new byte[]{1, 2, 3};
+        byte[] resizedData = new byte[]{9, 9, 9};
+        when(projectService.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
+        when(imageResizeService.resizeToLongEdge(originalData, "image/png", 1300, true))
+                .thenReturn(new ImageResizeService.ResizeResult(resizedData, "image/jpeg"));
+
+        com.letsblog.api.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(com.letsblog.api.cms.CmsType.WORDPRESS)).thenReturn(adapter);
+        when(adapter.uploadMedia(eq(localCreds), eq("comfyui-5.jpg"), eq("image/jpeg"), eq(resizedData)))
+                .thenReturn(new com.letsblog.api.cms.MediaUploadResult("1", "https://local.test/comfyui-5.jpg"));
+
+        List<BulkOperationLog> results = service.uploadImageToAllEnvironments(
+                1L, originalData, "comfyui-5.png", "image/png", 9L);
+
+        assertEquals(1, results.size());
+        assertEquals(BulkOperationStatus.SUCCESS, results.get(0).getStatus());
+        assertEquals("https://local.test/comfyui-5.jpg", results.get(0).getValue());
+        verify(adapter).uploadMedia(eq(localCreds), eq("comfyui-5.jpg"), eq("image/jpeg"), eq(resizedData));
     }
 
     @Test
@@ -477,6 +618,9 @@ class BulkManagementServiceTest {
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(siteService.getCredentials("local-site")).thenReturn(
                 new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "pass"));
+        when(projectService.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
+        when(imageResizeService.resizeToLongEdge(any(), any(), eq(1300), eq(true)))
+                .thenReturn(new ImageResizeService.ResizeResult(new byte[]{1}, "image/png"));
         com.letsblog.api.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
         when(cmsAdapterFactory.resolve(any())).thenReturn(adapter);
         when(adapter.uploadMedia(any(), any(), any(), any()))

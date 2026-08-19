@@ -3,11 +3,13 @@ package com.letsblog.api.contentcache;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * [amazon]組み込みタグ向けに、Amazon商品ページのHTMLから商品情報を抽出する。
@@ -37,7 +39,26 @@ public class AmazonProductParser {
         data.put("imageUrl", imageUrl(doc));
         data.put("price", firstMatch(doc, PRICE_SELECTORS));
         data.put("productUrl", canonicalUrl(doc, pageUrl));
+        data.put("summary", summary(doc));
         return data;
+    }
+
+    /**
+     * 商品の概要(issue #347)。「この商品について」の箇条書きを優先し、
+     * 無ければmeta descriptionにフォールバックする。
+     */
+    private String summary(Document doc) {
+        Elements bullets = doc.select("#feature-bullets li span.a-list-item");
+        String fromBullets = bullets.stream()
+                .map(Element::text)
+                .map(String::trim)
+                .filter(text -> !text.isBlank())
+                .collect(Collectors.joining(" / "));
+        if (!fromBullets.isBlank()) {
+            return fromBullets;
+        }
+        Element meta = doc.selectFirst("meta[name=description]");
+        return meta == null ? "" : meta.attr("content").trim();
     }
 
     private String imageUrl(Document doc) {

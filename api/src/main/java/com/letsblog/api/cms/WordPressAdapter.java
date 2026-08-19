@@ -20,8 +20,11 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * WordPress REST API(wp-json/wp/v2)を利用したCmsAdapter実装。
@@ -71,11 +74,14 @@ public class WordPressAdapter implements CmsAdapter {
         if (content.slug() != null && !content.slug().isBlank()) {
             body.put("slug", content.slug());
         }
-        if (content.categoryIds() != null && !content.categoryIds().isEmpty()) {
+        if (content.categoryIds() != null) {
+            // 空リストも明示的に送る(frontmatterでカテゴリを全て外した変更を反映するため。issue #467)。
+            // フィールド自体を省略するとWordPress側は「変更なし」と解釈し、既存のカテゴリが残ってしまう。
             ArrayNode categories = body.putArray("categories");
             content.categoryIds().forEach(id -> categories.add(Integer.parseInt(id)));
         }
-        if (content.tagIds() != null && !content.tagIds().isEmpty()) {
+        if (content.tagIds() != null) {
+            // 同上(issue #467)。空リストでもタグをクリアする意図として送る。
             ArrayNode tags = body.putArray("tags");
             content.tagIds().forEach(id -> tags.add(Integer.parseInt(id)));
         }
@@ -115,6 +121,52 @@ public class WordPressAdapter implements CmsAdapter {
             );
         } catch (RestClientResponseException e) {
             throw new CmsApiException("WordPress投稿の作成/更新に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+        }
+    }
+
+    @Override
+    public boolean postExists(CmsCredentials credentials, String postId) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.postExists(creds, postId);
+        }
+        if (creds.isAgent()) {
+            return agentOperations.postExists(creds, postId);
+        }
+        RestClient client = buildClient(creds);
+        try {
+            client.get().uri("/wp-json/wp/v2/posts/" + postId).retrieve().toBodilessEntity();
+            return true;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                return false;
+            }
+            log.warn("投稿の実在確認に失敗しました (postId={}): {} {}", postId, e.getStatusCode(), e.getMessage());
+            return true;
+        }
+    }
+
+    @Override
+    public boolean mediaExists(CmsCredentials credentials, String mediaId) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            // WordPressではメディア(添付ファイル)もpost_type=attachmentのwp_postsレコードとして
+            // 保存されているため、投稿の実在確認(`wp post get`)と同じ判定がそのまま使える。
+            return sshOperations.postExists(creds, mediaId);
+        }
+        if (creds.isAgent()) {
+            return agentOperations.postExists(creds, mediaId);
+        }
+        RestClient client = buildClient(creds);
+        try {
+            client.get().uri("/wp-json/wp/v2/media/" + mediaId).retrieve().toBodilessEntity();
+            return true;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                return false;
+            }
+            log.warn("メディアの実在確認に失敗しました (mediaId={}): {} {}", mediaId, e.getStatusCode(), e.getMessage());
+            return true;
         }
     }
 
@@ -413,6 +465,20 @@ public class WordPressAdapter implements CmsAdapter {
     }
 
     @Override
+    public AuthCookie generateAuthCookie(CmsCredentials credentials) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isAgent()) {
+            return agentOperations.generateAuthCookie(creds);
+        }
+        if (creds.isSsh()) {
+            return sshOperations.generateAuthCookie(creds);
+        }
+        // REST(Application Password)経路はサーバー側コード実行手段を持たないため、
+        // 認証Cookieを生成できない(既定のUnsupportedOperationExceptionへ委譲)。
+        return CmsAdapter.super.generateAuthCookie(credentials);
+    }
+
+    @Override
     public Optional<String> findAuthorIdByEmail(CmsCredentials credentials, String email) {
         CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
         if (creds.isSsh()) {
@@ -453,6 +519,53 @@ public class WordPressAdapter implements CmsAdapter {
             return names;
         } catch (RuntimeException e) {
             log.warn("カテゴリ一覧の取得に失敗しました: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    @Override
+    public List<CategoryOption> listCategoriesWithParents(CmsCredentials credentials) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        try {
+            if (creds.isSsh()) {
+                List<WordPressSshOperations.CategoryInfo> categories = sshOperations.listCategories(creds);
+                Map<String, String> nameBySlug = categories.stream()
+                        .collect(Collectors.toMap(WordPressSshOperations.CategoryInfo::slug,
+                                WordPressSshOperations.CategoryInfo::name, (a, b) -> a));
+                return categories.stream()
+                        .map(c -> new CategoryOption(c.name(), c.parentSlug() != null ? nameBySlug.get(c.parentSlug()) : null))
+                        .toList();
+            }
+            if (creds.isAgent()) {
+                List<WordPressBulkManagementClient.CategoryInfo> categories =
+                        bulkManagementClient.listCategories(creds.wpSlug());
+                Map<String, String> nameBySlug = categories.stream()
+                        .collect(Collectors.toMap(WordPressBulkManagementClient.CategoryInfo::slug,
+                                WordPressBulkManagementClient.CategoryInfo::name, (a, b) -> a));
+                return categories.stream()
+                        .map(c -> new CategoryOption(c.name(), c.parentSlug() != null ? nameBySlug.get(c.parentSlug()) : null))
+                        .toList();
+            }
+            RestClient client = buildClient(creds);
+            JsonNode response = client.get()
+                    .uri(uriBuilder -> uriBuilder.path("/wp-json/wp/v2/categories").queryParam("per_page", 100).build())
+                    .retrieve()
+                    .body(JsonNode.class);
+            List<CategoryOption> options = new ArrayList<>();
+            if (response != null) {
+                Map<String, String> nameById = new HashMap<>();
+                for (JsonNode item : response) {
+                    nameById.put(item.path("id").asText(), item.path("name").asText(""));
+                }
+                for (JsonNode item : response) {
+                    String parentId = item.path("parent").asText("0");
+                    String parentName = !"0".equals(parentId) ? nameById.get(parentId) : null;
+                    options.add(new CategoryOption(item.path("name").asText(""), parentName));
+                }
+            }
+            return options;
+        } catch (RuntimeException e) {
+            log.warn("カテゴリ一覧(親子関係付き)の取得に失敗しました: {}", e.getMessage());
             return List.of();
         }
     }

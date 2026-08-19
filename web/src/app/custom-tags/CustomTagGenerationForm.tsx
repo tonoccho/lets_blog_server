@@ -5,17 +5,21 @@ import { useSession } from "next-auth/react";
 import { useCustomTagGeneration } from "@/lib/useCustomTagGeneration";
 import { useCustomTagValidation } from "@/lib/useCustomTagValidation";
 import { ValidationPanel } from "./ValidationPanel";
-import type { Project } from "@/lib/apiClient";
+import type { CustomTag, Project } from "@/lib/apiClient";
 
 interface CustomTagGenerationFormProps {
   projects: Project[];
   currentProjectId: number | null;
-  onGenerationSuccess: (htmlTemplate: string, cssContent: string, tagName: string, description: string) => void;
+  /** 統合CSS生成時に実際に適用されるCSSセレクタのプリフィックス(未設定時はプロジェクトのslug)。プロジェクトに紐付かない場合はnull(issue #307) */
+  effectivePrefix?: string | null;
+  /** 生成結果は生成時点で既にDB保存済みのため、idを含む保存済みタグをそのまま渡す(issue #354)。 */
+  onGenerationSuccess: (tag: CustomTag) => void;
 }
 
 export function CustomTagGenerationForm({
   projects,
   currentProjectId,
+  effectivePrefix,
   onGenerationSuccess,
 }: CustomTagGenerationFormProps) {
   const { data: session } = useSession();
@@ -49,12 +53,7 @@ export function CustomTagGenerationForm({
         resetValidation();
         await validateContent(generatedTag.htmlTemplate, generatedTag.cssContent || "");
         setShowResults(true);
-        onGenerationSuccess(
-          generatedTag.htmlTemplate,
-          generatedTag.cssContent || "",
-          generatedTag.tagName,
-          generatedTag.description || ""
-        );
+        onGenerationSuccess(generatedTag);
       }
     } catch (err) {
       // エラーはstateに保存されている
@@ -91,7 +90,7 @@ export function CustomTagGenerationForm({
       {!showResults ? (
         <>
           <p className="text-sm text-neutral-600 dark:text-neutral-400">
-            Ollamaに自然言語でUIコンポーネントのリクエストを送信すると、HTMLテンプレートとCSSが自動生成されます。
+            AIに自然言語でUIコンポーネントのリクエストを送信すると、HTMLテンプレートとCSSが自動生成されます。
           </p>
           <form ref={formRef} onSubmit={handleSubmit} className="space-y-3">
             <label className="flex flex-col gap-1 text-sm">
@@ -144,7 +143,9 @@ export function CustomTagGenerationForm({
         <div className="space-y-3">
           <div className="rounded-lg bg-green-50 p-3 text-sm text-green-800">
             <p className="font-medium">生成完了！</p>
-            <p className="mt-1">生成されたHTMLとCSSを下のフォームに自動入力しました。確認して保存してください。</p>
+            <p className="mt-1">
+              生成と同時に保存済みです。内容は下の編集フォームに反映されているので、必要であれば修正して更新してください。
+            </p>
           </div>
           <div className="space-y-2">
             <div>
@@ -167,10 +168,33 @@ export function CustomTagGenerationForm({
                 <pre className="overflow-x-auto rounded bg-neutral-50 dark:bg-neutral-800 p-2 font-mono text-xs text-neutral-600 dark:text-neutral-400">
                   {result.cssContent}
                 </pre>
+                {effectivePrefix && (
+                  <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                    上記はそのまま保存される内容です。実際に配信される統合CSSでは、各セレクタの先頭に自動でプリフィックス「
+                    <code>.{effectivePrefix}</code>」が付与されます(例: 先頭のセレクタは
+                    <code> .{effectivePrefix} {result.cssContent.trim().split(/[\s{]/)[0] || "..."}</code>
+                    のようになります)。
+                  </p>
+                )}
               </div>
             )}
           </div>
           <ValidationPanel result={validationResult} isLoading={isValidating} error={validationError} />
+          {result.penpotFileUrl && (
+            <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 p-3 text-sm">
+              <p className="text-neutral-600 dark:text-neutral-400">
+                同じプロンプトを元に、Penpot上にデザイン作業用のファイルを作成しました。
+              </p>
+              <a
+                href={result.penpotFileUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-1 inline-block font-medium text-blue-600 hover:underline dark:text-blue-400"
+              >
+                Penpotで開く →
+              </a>
+            </div>
+          )}
           <button
             type="button"
             onClick={handleUseResult}

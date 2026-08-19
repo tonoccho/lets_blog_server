@@ -57,6 +57,12 @@ class WordPressSshOperationsTest {
                 "SSH", "203.0.113.5", 22, "deploy", wpPath, "PRIVATE-KEY-PEM", "SHA256:pinned", null);
     }
 
+    private WordPressCredentials credsWithUsername(String username) {
+        return new WordPressCredentials(
+                "https://example.com", username, null,
+                "SSH", "203.0.113.5", 22, "deploy", "/var/www/html", "PRIVATE-KEY-PEM", "SHA256:pinned", null);
+    }
+
     private SshCommandResult ok(String stdout) {
         return new SshCommandResult(0, stdout, "", "SHA256:observed");
     }
@@ -367,6 +373,72 @@ class WordPressSshOperationsTest {
     }
 
     @Test
+    void createOrUpdatePost_existingPostIdがWordPress側に無ければ新規作成へフォールバックする() {
+        // 1回目のisNull()呼び出し = 実在確認(post get)を失敗させ、投稿が消えている状況を再現する。
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(fail("Error: Invalid post ID."))
+                .thenReturn(ok("{\"guid\":\"https://example.com/?p=99\",\"post_status\":\"publish\"}"));
+        when(executor.exec(any(SshConnectionParams.class), any(), notNull())).thenReturn(ok("99\n"));
+
+        PostResult result = operations.createOrUpdatePost(creds(), postContent(), "38");
+
+        assertEquals("99", result.id());
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), notNull());
+        assertEquals(true, commandCaptor.getValue().contains("post create -"));
+        assertEquals(false, commandCaptor.getValue().contains("post update"));
+    }
+
+    @Test
+    void createOrUpdatePost_テーマのPHP警告に隠れたwp_cliのエラーを抽出して例外メッセージにする() {
+        String themeNoise = """
+                Warning: Trying to access array offset on null in /home4/x/public_html/wp-content/themes/jinr/a.php on line 401
+                [18-Aug-2026 21:41:28 UTC] PHP Warning:  Trying to access array offset on null in /home4/x/b.php on line 1190
+                Warning: 無効な投稿 ID です。""";
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok("38"));
+        when(executor.exec(any(SshConnectionParams.class), any(), notNull()))
+                .thenReturn(new SshCommandResult(1, "", themeNoise, null));
+
+        SshOperationException thrown = assertThrows(SshOperationException.class,
+                () -> operations.createOrUpdatePost(creds(), postContent(), "38"));
+
+        assertEquals(true, thrown.getMessage().contains("無効な投稿 ID です。"));
+        assertEquals(false, thrown.getMessage().contains("box-design-setting"));
+        assertEquals(false, thrown.getMessage().contains("on line 401"));
+    }
+
+    @Test
+    void createOrUpdatePost_全てPHP警告なら情報を失わず先頭行を返す() {
+        String onlyNoise = "Warning: Trying to access array offset on null in /home4/x/a.php on line 401\n"
+                + "Warning: Trying to access array offset on null in /home4/x/a.php on line 406";
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok("38"));
+        when(executor.exec(any(SshConnectionParams.class), any(), notNull()))
+                .thenReturn(new SshCommandResult(1, "", onlyNoise, null));
+
+        SshOperationException thrown = assertThrows(SshOperationException.class,
+                () -> operations.createOrUpdatePost(creds(), postContent(), "38"));
+
+        assertEquals(true, thrown.getMessage().contains("on line 401"));
+    }
+
+    @Test
+    void createOrUpdatePost_カテゴリとタグを空リストにした更新は明示的にクリアするコマンドを送る() {
+        when(executor.exec(any(SshConnectionParams.class), any(), notNull())).thenReturn(ok(""));
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"guid\":\"https://example.com/?p=42\",\"post_status\":\"draft\"}"));
+        PostContent clearedContent = new PostContent(
+                "Title", "my-slug", "<p>Hello</p>", "publish", List.of(), List.of(), null, null);
+
+        operations.createOrUpdatePost(creds(), clearedContent, "42");
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), notNull());
+        String updateCommand = commandCaptor.getValue();
+        assertEquals(true, updateCommand.contains("--post_category="));
+        assertEquals(true, updateCommand.contains("--tax_input="));
+    }
+
+    @Test
     void createOrUpdatePost_作成コマンドが失敗したら例外() {
         when(executor.exec(any(SshConnectionParams.class), any(), notNull())).thenReturn(fail("wp-cli error"));
 
@@ -403,9 +475,42 @@ class WordPressSshOperationsTest {
     }
 
     @Test
+    void generateAuthCookie_wp_evalの結果からCookieを組み立てる() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"name\":\"wordpress_logged_in_abc\",\"value\":\"admin|123|token|hash\"}"));
+
+        com.letsblog.api.cms.AuthCookie cookie = operations.generateAuthCookie(credsWithUsername("admin"));
+
+        assertEquals("wordpress_logged_in_abc", cookie.name());
+        assertEquals("admin|123|token|hash", cookie.value());
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getValue().contains("eval"));
+        assertEquals(true, commandCaptor.getValue().contains("get_user_by"));
+    }
+
+    @Test
+    void generateAuthCookie_ユーザーが見つからない場合は例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"error\":\"user_not_found\"}"));
+
+        assertThrows(SshOperationException.class,
+                () -> operations.generateAuthCookie(credsWithUsername("nobody")));
+    }
+
+    @Test
+    void generateAuthCookie_wp_eval失敗時は例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("eval error"));
+
+        assertThrows(SshOperationException.class,
+                () -> operations.generateAuthCookie(credsWithUsername("admin")));
+    }
+
+    @Test
     void uploadMedia_成功時はSFTP転送してmedia_importで取り込み一時ファイルを削除する() {
         byte[] data = "image-bytes".getBytes(StandardCharsets.UTF_8);
         when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok(""))
                 .thenReturn(ok("55\n"))
                 .thenReturn(ok("{\"guid\":\"https://example.com/wp-content/uploads/photo.png\"}"));
 
@@ -420,11 +525,50 @@ class WordPressSshOperationsTest {
         assertEquals(true, remotePath.contains("photo.png"));
 
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
-        verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
-        assertEquals(true, commandCaptor.getAllValues().get(0).contains("media import"));
-        assertEquals(true, commandCaptor.getAllValues().get(1).contains("post get 55"));
+        verify(executor, times(3)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getAllValues().get(0).contains("test -f"));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("media import"));
+        assertEquals(true, commandCaptor.getAllValues().get(2).contains("post get 55"));
 
         verify(executor).removeFile(any(SshConnectionParams.class), eq(remotePath));
+    }
+
+    @Test
+    void uploadMedia_SVGアップロード許可mu_pluginが未配置なら配置してから取り込む() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(fail("No such file or directory"))
+                .thenReturn(ok("55\n"))
+                .thenReturn(ok("{\"guid\":\"https://example.com/wp-content/uploads/icon.svg\"}"));
+
+        operations.uploadMedia(creds(), "icon.svg", "image/svg+xml", new byte[]{1});
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(4)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getAllValues().get(0).contains("test -f"));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("mkdir -p"));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("mu-plugins"));
+
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<byte[]> dataCaptor = ArgumentCaptor.forClass(byte[].class);
+        verify(executor, times(2)).putFile(any(SshConnectionParams.class), dataCaptor.capture(), pathCaptor.capture());
+        int muPluginIndex = pathCaptor.getAllValues().indexOf(
+                "/var/www/html/wp-content/mu-plugins/letsblog-allow-svg-upload.php");
+        assertEquals(true, muPluginIndex >= 0);
+        String muPluginContent = new String(dataCaptor.getAllValues().get(muPluginIndex), StandardCharsets.UTF_8);
+        assertEquals(true, muPluginContent.contains("upload_mimes"));
+        assertEquals(true, muPluginContent.contains("image/svg+xml"));
+    }
+
+    @Test
+    void uploadMedia_SVGアップロード許可mu_pluginが配置済みなら再配置しない() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok(""))
+                .thenReturn(ok("55\n"))
+                .thenReturn(ok("{\"guid\":\"https://example.com/wp-content/uploads/icon.svg\"}"));
+
+        operations.uploadMedia(creds(), "icon.svg", "image/svg+xml", new byte[]{1});
+
+        verify(executor, times(1)).putFile(any(SshConnectionParams.class), any(), any());
     }
 
     @Test
@@ -440,6 +584,7 @@ class WordPressSshOperationsTest {
     @Test
     void uploadMedia_情報取得失敗時も一時ファイルを削除してから例外() {
         when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok(""))
                 .thenReturn(ok("55\n"))
                 .thenReturn(fail("not found"));
 
@@ -510,6 +655,7 @@ class WordPressSshOperationsTest {
     @Test
     void uploadMedia_ファイル名のパス区切り文字は除去される() {
         when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok(""))
                 .thenReturn(ok("55\n"))
                 .thenReturn(ok("{\"guid\":\"https://example.com/x.png\"}"));
 

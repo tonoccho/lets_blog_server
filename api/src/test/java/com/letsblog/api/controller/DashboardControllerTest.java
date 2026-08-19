@@ -3,9 +3,12 @@ package com.letsblog.api.controller;
 import com.letsblog.api.dto.ConnectedServiceStatusDetailResponse;
 import com.letsblog.api.dto.ConnectedServiceStatusResponse;
 import com.letsblog.api.dto.ConnectedServiceStatusResponse.Status;
+import com.letsblog.api.dto.ContainerStatusResponse;
 import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.ConnectedServiceStatusBroadcaster;
 import com.letsblog.api.service.ConnectedServiceStatusService;
+import com.letsblog.api.service.ContainerStatusBroadcaster;
+import com.letsblog.api.service.ContainerStatusService;
 import com.letsblog.api.service.ForbiddenException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -22,7 +25,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * DashboardControllerの回帰テスト(issue #199)。詳細診断エンドポイントがadmin限定であることを検証する。
+ * DashboardControllerの回帰テスト(issue #199, #280)。詳細診断エンドポイントがadmin限定であることと、
+ * コンテナ稼働状況エンドポイントがContainerStatusServiceへ委譲することを検証する。
  */
 @ExtendWith(MockitoExtension.class)
 class DashboardControllerTest {
@@ -34,11 +38,18 @@ class DashboardControllerTest {
     private ConnectedServiceStatusBroadcaster connectedServiceStatusBroadcaster;
 
     @Mock
+    private ContainerStatusService containerStatusService;
+
+    @Mock
+    private ContainerStatusBroadcaster containerStatusBroadcaster;
+
+    @Mock
     private AdminAuthorizationService adminAuthorizationService;
 
     private DashboardController controller() {
         return new DashboardController(
-                connectedServiceStatusService, connectedServiceStatusBroadcaster, adminAuthorizationService);
+                connectedServiceStatusService, connectedServiceStatusBroadcaster,
+                containerStatusService, containerStatusBroadcaster, adminAuthorizationService);
     }
 
     @Test
@@ -71,5 +82,16 @@ class DashboardControllerTest {
                 .when(adminAuthorizationService).requireAdmin();
 
         assertThrows(ForbiddenException.class, () -> controller().getServiceStatusDetail());
+    }
+
+    @Test
+    void getContainerStatus_ContainerStatusServiceの結果をそのまま返す() {
+        List<ContainerStatusResponse> containers =
+                List.of(new ContainerStatusResponse("api", "api", Status.NORMAL, "running", "Up 2 hours"));
+        when(containerStatusService.listAll()).thenReturn(containers);
+
+        List<ContainerStatusResponse> result = controller().getContainerStatus();
+
+        assertEquals(containers, result);
     }
 }

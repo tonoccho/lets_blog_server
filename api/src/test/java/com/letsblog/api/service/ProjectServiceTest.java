@@ -2,6 +2,10 @@ package com.letsblog.api.service;
 
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.dto.ProjectResponse;
+import com.letsblog.api.dto.UpdateArticleImageResizeDefaultRequest;
+import com.letsblog.api.dto.UpdateImageGenerationPromptDefaultsRequest;
+import com.letsblog.api.dto.UpdateImageGenerationSizeDefaultsRequest;
+import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
 import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
 import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.SiteRepository;
@@ -42,7 +46,10 @@ class ProjectServiceTest {
     private BulkUploadStorageService bulkUploadStorageService;
 
     private ProjectService service() {
-        return new ProjectService(projectRepository, siteRepository, bulkUploadStorageService);
+        return new ProjectService(
+                projectRepository, siteRepository, bulkUploadStorageService,
+                "low quality, blurry, watermark, text", "high quality, highly detailed, sharp focus, masterpiece",
+                1920, 1080, 1300);
     }
 
     private Project buildProject(Long id, String slug) {
@@ -227,6 +234,220 @@ class ProjectServiceTest {
                 }
             });
         }
+    }
+
+    @Test
+    void updateCssSelectorPrefix_値が正常に保存される() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProjectResponse response = service.updateCssSelectorPrefix(
+                1L, new UpdateProjectCssSelectorPrefixRequest("custom-prefix"));
+
+        assertEquals("custom-prefix", response.cssSelectorPrefix());
+        assertEquals("custom-prefix", project.getCssSelectorPrefix());
+    }
+
+    @Test
+    void updateCssSelectorPrefix_空文字列はnullに変換される() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        project.setCssSelectorPrefix("custom-prefix");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProjectResponse response = service.updateCssSelectorPrefix(1L, new UpdateProjectCssSelectorPrefixRequest(""));
+
+        assertNull(response.cssSelectorPrefix());
+        assertNull(project.getCssSelectorPrefix());
+    }
+
+    @Test
+    void resolveCssSelectorPrefix_未設定時はslugを返す() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+
+        assertEquals("proj-a", service.resolveCssSelectorPrefix(project));
+    }
+
+    @Test
+    void resolveCssSelectorPrefix_設定済みならその値を返す() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        project.setCssSelectorPrefix("custom-prefix");
+
+        assertEquals("custom-prefix", service.resolveCssSelectorPrefix(project));
+    }
+
+    @Test
+    void updateImageGenerationPromptDefaults_値が正常に保存される() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProjectResponse response = service.updateImageGenerationPromptDefaults(
+                1L, new UpdateImageGenerationPromptDefaultsRequest("bad hands, extra fingers", "vivid colors"));
+
+        assertEquals("bad hands, extra fingers", response.defaultNegativePrompt());
+        assertEquals("vivid colors", response.defaultQualityPrompt());
+    }
+
+    @Test
+    void updateImageGenerationPromptDefaults_空文字列はnullに変換される() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        project.setDefaultNegativePrompt("bad hands");
+        project.setDefaultQualityPrompt("vivid colors");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProjectResponse response = service.updateImageGenerationPromptDefaults(
+                1L, new UpdateImageGenerationPromptDefaultsRequest("", ""));
+
+        assertNull(response.defaultNegativePrompt());
+        assertNull(response.defaultQualityPrompt());
+    }
+
+    @Test
+    void resolveDefaultNegativePrompt_projectId未指定ならグローバルデフォルトを返す() {
+        ProjectService service = service();
+
+        assertEquals("low quality, blurry, watermark, text", service.resolveDefaultNegativePrompt(null));
+    }
+
+    @Test
+    void resolveDefaultNegativePrompt_プロジェクト未設定ならグローバルデフォルトを返す() {
+        ProjectService service = service();
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(buildProject(1L, "proj-a")));
+
+        assertEquals("low quality, blurry, watermark, text", service.resolveDefaultNegativePrompt(1L));
+    }
+
+    @Test
+    void resolveDefaultNegativePrompt_プロジェクト設定済みならその値を返す() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        project.setDefaultNegativePrompt("bad hands, extra fingers");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        assertEquals("bad hands, extra fingers", service.resolveDefaultNegativePrompt(1L));
+    }
+
+    @Test
+    void resolveDefaultQualityPrompt_projectId未指定ならグローバルデフォルトを返す() {
+        ProjectService service = service();
+
+        assertEquals("high quality, highly detailed, sharp focus, masterpiece", service.resolveDefaultQualityPrompt(null));
+    }
+
+    @Test
+    void resolveDefaultQualityPrompt_プロジェクト設定済みならその値を返す() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        project.setDefaultQualityPrompt("vivid colors, cinematic lighting");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        assertEquals("vivid colors, cinematic lighting", service.resolveDefaultQualityPrompt(1L));
+    }
+
+    @Test
+    void updateImageGenerationSizeDefaults_値が正常に保存される() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProjectResponse response = service.updateImageGenerationSizeDefaults(
+                1L, new UpdateImageGenerationSizeDefaultsRequest(1024, 768));
+
+        assertEquals(1024, response.defaultGeneratedImageWidth());
+        assertEquals(768, response.defaultGeneratedImageHeight());
+    }
+
+    @Test
+    void updateImageGenerationSizeDefaults_nullを渡すとグローバルデフォルトへ戻る() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        project.setDefaultGeneratedImageWidth(1024);
+        project.setDefaultGeneratedImageHeight(768);
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProjectResponse response = service.updateImageGenerationSizeDefaults(
+                1L, new UpdateImageGenerationSizeDefaultsRequest(null, null));
+
+        assertNull(response.defaultGeneratedImageWidth());
+        assertNull(response.defaultGeneratedImageHeight());
+        assertEquals(1920, service.resolveDefaultGeneratedImageWidth(1L));
+        assertEquals(1080, service.resolveDefaultGeneratedImageHeight(1L));
+    }
+
+    @Test
+    void resolveDefaultGeneratedImageWidth_projectId未指定ならグローバルデフォルトを返す() {
+        ProjectService service = service();
+
+        assertEquals(1920, service.resolveDefaultGeneratedImageWidth(null));
+        assertEquals(1080, service.resolveDefaultGeneratedImageHeight(null));
+    }
+
+    @Test
+    void resolveDefaultGeneratedImageWidth_プロジェクト設定済みならその値を返す() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        project.setDefaultGeneratedImageWidth(1024);
+        project.setDefaultGeneratedImageHeight(768);
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        assertEquals(1024, service.resolveDefaultGeneratedImageWidth(1L));
+        assertEquals(768, service.resolveDefaultGeneratedImageHeight(1L));
+    }
+
+    @Test
+    void updateArticleImageResizeDefault_値が正常に保存される() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProjectResponse response = service.updateArticleImageResizeDefault(
+                1L, new UpdateArticleImageResizeDefaultRequest(800));
+
+        assertEquals(800, response.defaultArticleImageLongEdgePx());
+    }
+
+    @Test
+    void updateArticleImageResizeDefault_nullを渡すとグローバルデフォルトへ戻る() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        project.setDefaultArticleImageLongEdgePx(800);
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProjectResponse response = service.updateArticleImageResizeDefault(
+                1L, new UpdateArticleImageResizeDefaultRequest(null));
+
+        assertNull(response.defaultArticleImageLongEdgePx());
+        assertEquals(1300, service.resolveArticleImageLongEdgePx(1L));
+    }
+
+    @Test
+    void resolveArticleImageLongEdgePx_projectId未指定ならグローバルデフォルトを返す() {
+        ProjectService service = service();
+
+        assertEquals(1300, service.resolveArticleImageLongEdgePx(null));
+    }
+
+    @Test
+    void resolveArticleImageLongEdgePx_プロジェクト設定済みならその値を返す() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        project.setDefaultArticleImageLongEdgePx(800);
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        assertEquals(800, service.resolveArticleImageLongEdgePx(1L));
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.ai.OllamaClient;
+import com.letsblog.api.ai.LlmClient;
+import com.letsblog.api.ai.PenpotClient;
 import com.letsblog.api.domain.CustomTag;
 import com.letsblog.api.dto.GenerateCustomTagRequest;
 import com.letsblog.api.dto.GenerateCustomTagResponse;
@@ -18,13 +19,17 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class CustomTagGenerationServiceTest {
 
     @Mock
-    private OllamaClient ollamaClient;
+    private LlmClient llmClient;
+
+    @Mock
+    private PenpotClient penpotClient;
 
     @Mock
     private CustomTagRepository customTagRepository;
@@ -46,7 +51,7 @@ class CustomTagGenerationServiceTest {
     @Test
     void testGenerateCustomTag_Success() {
         // Arrange
-        String ollamaResponse = """
+        String llmResponse = """
             こちらはボタンコンポーネントです：
 
             ```html
@@ -84,7 +89,7 @@ class CustomTagGenerationServiceTest {
         savedTag.setDescription("カスタムボタンコンポーネント");
         savedTag.setProjectId(null);
 
-        when(ollamaClient.generate(anyString())).thenReturn(ollamaResponse);
+        when(llmClient.generate(anyString())).thenReturn(llmResponse);
         when(customTagRepository.findByTagNameAndProjectIdIsNull("my-button")).thenReturn(Optional.empty());
         when(customTagRepository.save(any(CustomTag.class))).thenReturn(savedTag);
 
@@ -99,14 +104,14 @@ class CustomTagGenerationServiceTest {
         assertTrue(response.cssContent().contains("padding"));
         assertEquals("カスタムボタンコンポーネント", response.description());
 
-        verify(ollamaClient).generate(anyString());
+        verify(llmClient).generate(anyString());
         verify(customTagRepository).save(any(CustomTag.class));
     }
 
     @Test
     void testGenerateCustomTag_NoHtmlInResponse() {
         // Arrange
-        String ollamaResponse = "HTMLなしのレスポンス";
+        String llmResponse = "HTMLなしのレスポンス";
 
         GenerateCustomTagRequest request = new GenerateCustomTagRequest(
             "テスト",
@@ -115,7 +120,7 @@ class CustomTagGenerationServiceTest {
             null
         );
 
-        when(ollamaClient.generate(anyString())).thenReturn(ollamaResponse);
+        when(llmClient.generate(anyString())).thenReturn(llmResponse);
 
         // Act & Assert
         InvalidCustomTagContentException exception = assertThrows(
@@ -130,7 +135,7 @@ class CustomTagGenerationServiceTest {
     @Test
     void testGenerateCustomTag_DuplicateTagName() {
         // Arrange
-        String ollamaResponse = """
+        String llmResponse = """
             ```html
             <div>Test</div>
             ```
@@ -147,7 +152,7 @@ class CustomTagGenerationServiceTest {
         existingTag.setId(1L);
         existingTag.setTagName("existing-tag");
 
-        when(ollamaClient.generate(anyString())).thenReturn(ollamaResponse);
+        when(llmClient.generate(anyString())).thenReturn(llmResponse);
         when(customTagRepository.findByTagNameAndProjectIdIsNull("existing-tag"))
             .thenReturn(Optional.of(existingTag));
 
@@ -174,7 +179,7 @@ class CustomTagGenerationServiceTest {
             """;
 
         GenerateCustomTagRequest request = new GenerateCustomTagRequest("test", "tag", null, null);
-        when(ollamaClient.generate(anyString())).thenReturn(response);
+        when(llmClient.generate(anyString())).thenReturn(response);
         when(customTagRepository.findByTagNameAndProjectIdIsNull("tag")).thenReturn(Optional.empty());
 
         CustomTag savedTag = new CustomTag();
@@ -185,6 +190,59 @@ class CustomTagGenerationServiceTest {
 
         GenerateCustomTagResponse result = customTagGenerationService.generate(request);
         assertTrue(result.htmlTemplate().contains("card"));
+    }
+
+    @Test
+    void testGenerateCustomTag_PenpotDesignFileCreated() {
+        String llmResponse = """
+            ```html
+            <button class="btn">クリック</button>
+            ```
+
+            ```css
+            .btn { padding: 10px; }
+            ```
+            """;
+
+        GenerateCustomTagRequest request = new GenerateCustomTagRequest(
+            "青いボタンコンポーネントを作成してください", "my-button", "説明", null
+        );
+
+        PenpotClient.DesignFile designFile = new PenpotClient.DesignFile(
+            "file-id", "project-id", "http://localhost:9001/#/workspace/project-id/file-id?page-id=page-id"
+        );
+
+        when(llmClient.generate(anyString())).thenReturn(llmResponse);
+        when(customTagRepository.findByTagNameAndProjectIdIsNull("my-button")).thenReturn(Optional.empty());
+        when(penpotClient.createDesignFile(anyString(), anyString())).thenReturn(designFile);
+        when(customTagRepository.save(any(CustomTag.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        GenerateCustomTagResponse response = customTagGenerationService.generate(request);
+
+        assertEquals(designFile.url(), response.penpotFileUrl());
+        verify(penpotClient).createDesignFile(eq("カスタムタグ: my-button"), anyString());
+    }
+
+    @Test
+    void testGenerateCustomTag_PenpotFailureDoesNotBlockGeneration() {
+        String llmResponse = """
+            ```html
+            <button class="btn">クリック</button>
+            ```
+            """;
+
+        GenerateCustomTagRequest request = new GenerateCustomTagRequest("テスト", "my-button", "説明", null);
+
+        when(llmClient.generate(anyString())).thenReturn(llmResponse);
+        when(customTagRepository.findByTagNameAndProjectIdIsNull("my-button")).thenReturn(Optional.empty());
+        when(penpotClient.createDesignFile(anyString(), anyString()))
+            .thenThrow(new com.letsblog.api.ai.AiServiceException("接続失敗", null));
+        when(customTagRepository.save(any(CustomTag.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        GenerateCustomTagResponse response = customTagGenerationService.generate(request);
+
+        assertNull(response.penpotFileUrl());
+        verify(customTagRepository).save(any(CustomTag.class));
     }
 
     @Test
@@ -205,7 +263,7 @@ class CustomTagGenerationServiceTest {
             """;
 
         GenerateCustomTagRequest request = new GenerateCustomTagRequest("test", "tag", null, null);
-        when(ollamaClient.generate(anyString())).thenReturn(response);
+        when(llmClient.generate(anyString())).thenReturn(response);
         when(customTagRepository.findByTagNameAndProjectIdIsNull("tag")).thenReturn(Optional.empty());
 
         CustomTag savedTag = new CustomTag();

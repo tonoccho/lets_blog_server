@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { ProjectEnvironment, StatusComparisonPage, PluginThemeStatus } from "@/lib/apiClient";
 import {
   applyToEnvironmentAction,
+  applyToAllEnvironmentsAction,
   reconcileStateAction,
   deleteSlugEverywhereAction,
   fetchStatusComparisonAction,
@@ -22,6 +23,10 @@ const STATUS_LABEL: Record<PluginThemeStatus, string> = {
 };
 
 const ENVIRONMENTS: ProjectEnvironment[] = ["local", "test", "production"];
+
+// NewInstallFormの対象環境<select>で「全ての環境」を選んだ場合に使う特別値(issue #393)。
+// ProjectEnvironment("local"/"test"/"production")のいずれとも衝突しない値であればよい。
+const ALL_ENVIRONMENTS_VALUE = "__all__";
 
 type Kind = "plugin" | "theme";
 
@@ -299,7 +304,11 @@ function NewInstallForm({
     formData.set("operationType", kind === "plugin" ? "PLUGIN_INSTALL" : "THEME_INSTALL");
     setPending(true);
     setError(null);
-    const result = await applyToEnvironmentAction(projectId, {}, formData);
+    const environment = String(formData.get("environment") ?? "");
+    const result =
+      environment === ALL_ENVIRONMENTS_VALUE
+        ? await applyToAllEnvironmentsAction(projectId, {}, formData)
+        : await applyToEnvironmentAction(projectId, {}, formData);
     setPending(false);
     if (result.error) {
       setError(result.error);
@@ -317,6 +326,7 @@ function NewInstallForm({
         <span className="text-neutral-600 dark:text-neutral-400">対象環境</span>
         <select name="environment" required className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm">
           <option value="">選択してください</option>
+          <option value={ALL_ENVIRONMENTS_VALUE}>全ての環境</option>
           {managedEnvironments.map((env) => (
             <option key={env.value} value={env.value}>
               {env.label}

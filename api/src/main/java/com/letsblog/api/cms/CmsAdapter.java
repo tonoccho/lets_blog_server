@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * CMS(WordPress、microCMS等)への操作を抽象化するインターフェース。
+ * CMS(現在はWordPressのみ対応)への操作を抽象化するインターフェース。
  * 新しいCMSへ対応する場合は、この実装を追加した上でCmsAdapterFactoryに登録すればよい。
  */
 public interface CmsAdapter {
@@ -18,6 +18,30 @@ public interface CmsAdapter {
      * 投稿を新規作成、または既存投稿(existingPostId指定時)を更新する。
      */
     PostResult createOrUpdatePost(CmsCredentials credentials, PostContent content, String existingPostId);
+
+    /**
+     * 指定IDの投稿がCMS側に実在するかどうかを判定する(読み取り専用)。API側(lets_blog.posts)が
+     * 記憶している投稿IDは、CMS側で当該投稿(と、投稿時に一緒にアップロードした画像)が
+     * 削除されると実在しなくなることがある。呼び出し側はこれを使って、前回アップロード済み画像の
+     * 再利用キャッシュを信頼してよいか判断する(issue #493。投稿自体の作成/更新時のフォールバックは
+     * createOrUpdatePost実装内で個別に行う)。対応しないCMSやID未指定時は既定でtrueを返す
+     * (判定不能時は安全側=従来どおりの再利用を許容する)。
+     */
+    default boolean postExists(CmsCredentials credentials, String postId) {
+        return true;
+    }
+
+    /**
+     * 指定IDのメディア(添付ファイル)がCMS側に実在するかどうかを判定する(読み取り専用)。
+     * 前回アップロード済み画像の再利用キャッシュは、投稿本体の実在確認(postExists、issue #493)
+     * だけでは不十分で、投稿は残っていてもメディアライブラリから当該画像だけが個別に削除されている
+     * ケースを検知できない(issue #495)。呼び出し側はsha256が一致し再利用を検討する場合に限り
+     * これを使って再利用の可否を判断する。対応しないCMSやID未指定時は既定でtrueを返す
+     * (判定不能時は安全側=従来どおりの再利用を許容する)。
+     */
+    default boolean mediaExists(CmsCredentials credentials, String mediaId) {
+        return true;
+    }
 
     /**
      * メディアライブラリへ画像をアップロードする。
@@ -98,6 +122,21 @@ public interface CmsAdapter {
     }
 
     /**
+     * 既存カテゴリを親カテゴリ名付きで取得する(読み取り専用、新規作成は行わない)。
+     * VSCode拡張の記事作成画面で、子カテゴリ選択時に親カテゴリを自動選択するために使う(issue #289)。
+     * 親子関係を持たない、または取得できない場合は各カテゴリのparentNameをnullにして返す。
+     */
+    default List<CategoryOption> listCategoriesWithParents(CmsCredentials credentials) {
+        return listCategoryNames(credentials).stream().map(name -> new CategoryOption(name, null)).toList();
+    }
+
+    /**
+     * 親カテゴリ付きのカテゴリ一覧項目。parentNameは親カテゴリが無ければnull。
+     */
+    record CategoryOption(String name, String parentName) {
+    }
+
+    /**
      * 投稿(post)または固定ページ(page)の一覧を取得する(読み取り専用。プロジェクト管理画面の
      * ポスト/ページ管理タブで環境間比較に使う)。対応しないCMSはUnsupportedOperationExceptionを投げる。
      */
@@ -120,5 +159,15 @@ public interface CmsAdapter {
      */
     default void deletePost(CmsCredentials credentials, String postId, String postType) {
         deletePost(credentials, postId);
+    }
+
+    /**
+     * 非公開(private)投稿を実際に表示するプレビュー用に、指定認証情報のユーザーとして
+     * ログイン済みと同等のCookieを発行する(記事プレビューでPlaywrightのブラウザコンテキストへ
+     * 注入するために使う)。wp-cli等でサーバー側のコード実行が可能な経路(managedサイトのagent
+     * transport等)でのみ対応可能なため、対応しない経路はUnsupportedOperationExceptionを投げる。
+     */
+    default AuthCookie generateAuthCookie(CmsCredentials credentials) {
+        throw new UnsupportedOperationException("このCMS/接続方式は認証Cookieの発行に対応していません");
     }
 }

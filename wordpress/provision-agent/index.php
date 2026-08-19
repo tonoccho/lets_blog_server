@@ -119,6 +119,42 @@ function resolveExistingSitePath(string $slug): ?string
 }
 
 /**
+ * WordPressコアはデフォルトでSVG(image/svg+xml)をupload_mimesに含めないため、
+ * SVG画像(記事投稿時にImageResizeServiceがImageIOでデコードできない形式として無変換で
+ * 送ってくる)がwp_check_filetype_and_ext()に拒否され「このファイルタイプをアップロードする
+ * 権限がありません」でメディアインポートが失敗する(issue #485)。他形式の挙動は変えず
+ * SVGのみ許可するmu-pluginを配置する(--execはWordPressロード前に評価されadd_filter()が
+ * 未定義のため使えない)。既に配置済みなら何もしない(冪等)。
+ */
+function ensureSvgUploadMuPlugin(string $sitePath): void
+{
+    $muPluginsDir = "$sitePath/wp-content/mu-plugins";
+    $muPluginFile = "$muPluginsDir/letsblog-allow-svg-upload.php";
+    if (file_exists($muPluginFile)) {
+        return;
+    }
+    if (!is_dir($muPluginsDir)) {
+        mkdir($muPluginsDir, 0755, true);
+    }
+    $contents = <<<'PHP'
+<?php
+add_filter('upload_mimes', function ($mimes) {
+    $mimes['svg'] = 'image/svg+xml';
+    return $mimes;
+});
+add_filter('wp_check_filetype_and_ext', function ($data, $file, $filename, $mimes) {
+    if (empty($data['type'])) {
+        $check = wp_check_filetype($filename, $mimes);
+        $data['ext'] = $check['ext'];
+        $data['type'] = $check['type'];
+    }
+    return $data;
+}, 10, 4);
+PHP;
+    file_put_contents($muPluginFile, $contents);
+}
+
+/**
  * core download以降の失敗時に呼び出す。既に作成済みのディレクトリ・DBを
  * (存在すれば)削除してから、通常のrespond()と同じ形式でエラーを返す。
  * rm -rf/DROP DATABASE IF EXISTSはいずれも冪等なため、/deprovisionとの二重実行でも問題ない。
@@ -189,7 +225,11 @@ if ($path === '/provision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         respond(500, ['error' => 'データベース作成に失敗しました', 'detail' => combinedOutput($out, $err)]);
     }
 
-    [$code, $out, $err] = runWp(['core', 'download', "--path=$sitePath", "--locale=$locale", '--allow-root']);
+    // core downloadはロケール指定なし(デフォルトen_US)で行う。--locale=$localeを直接指定すると、
+    // 該当バージョンの翻訳済みコアパッケージがwordpress.org側にまだ存在しない場合に
+    // "The requested locale (...) was not found." で失敗することがあるため、
+    // 未翻訳コアのダウンロード → 言語パックの個別インストール(下記)の2段階に分離する。
+    [$code, $out, $err] = runWp(['core', 'download', "--path=$sitePath", '--allow-root']);
     if ($code !== 0) {
         cleanupAndRespond(500, ['error' => 'WordPressコアのダウンロードに失敗しました', 'detail' => combinedOutput($out, $err)], $sitePath, $dbName, $dbHost, $rootPassword);
     }
@@ -239,6 +279,17 @@ if ($path === '/provision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         cleanupAndRespond(500, ['error' => 'WordPressのインストールに失敗しました', 'detail' => combinedOutput($out, $err)], $sitePath, $dbName, $dbHost, $rootPassword);
     }
 
+    // 言語パックのインストール・有効化はcore install(DBテーブル作成)後に行う。wp language core install
+    // はサイトが導入済み(DBテーブルが存在する)であることを前提とするため、core install前には実行できない。
+    // core install自体の--localeは、対象言語パックが未導入だと黙って無視されてしまうため使わず、
+    // 導入後に--activateで確実に有効化する。
+    if ($locale !== 'en_US') {
+        [$code, $out, $err] = runWp(['language', 'core', 'install', $locale, '--activate', "--path=$sitePath", '--allow-root']);
+        if ($code !== 0) {
+            cleanupAndRespond(500, ['error' => '言語パックのインストールに失敗しました', 'detail' => combinedOutput($out, $err)], $sitePath, $dbName, $dbHost, $rootPassword);
+        }
+    }
+
     // パーマリンクを「投稿名」構造にする(デフォルトの「基本」のままでは
     // /wp-json/ のようなpretty permalink形式のREST APIパスが404になるため必須)。
     [$code, $out, $err] = runWp(['rewrite', 'structure', '/%postname%/', "--path=$sitePath", '--allow-root']);
@@ -278,6 +329,52 @@ if ($path === '/provision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         'url' => $siteUrl,
         'adminUser' => $adminUser,
         'applicationPassword' => $applicationPassword,
+    ]);
+}
+
+/**
+ * DBには登録されていないが、ディレクトリ・DBとしては既に構築済みのWordPressサイトを
+ * 取り込むためのエンドポイント(issue #317)。/provisionと異なり新規構築は行わず、
+ * 既存の管理ユーザーに対して新しいApplication Passwordを発行するのみ。
+ */
+if ($path === '/adopt' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    $adminUser = (string) ($input['adminUser'] ?? '');
+
+    if (!isValidSlug($slug) || $adminUser === '') {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = resolveExistingSitePath($slug);
+    if ($sitePath === null) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    [$code, $out, $err] = runWp(['user', 'list', "--search=$adminUser", '--fields=ID,user_login', '--format=json', "--path=$sitePath", '--allow-root']);
+    $existing = $code === 0 ? (json_decode($out, true) ?: []) : [];
+    $matched = false;
+    foreach ($existing as $user) {
+        if (strcasecmp((string) $user['user_login'], $adminUser) === 0) {
+            $matched = true;
+            break;
+        }
+    }
+    if (!$matched) {
+        respond(404, ['error' => "ユーザー '$adminUser' がサイト '$slug' に見つかりません"]);
+    }
+
+    [$code, $out, $err] = runWp([
+        'user', 'application-password', 'create',
+        "--path=$sitePath",
+        $adminUser, 'letsblog', '--porcelain', '--allow-root',
+    ]);
+    if ($code !== 0) {
+        respond(500, ['error' => 'アプリケーションパスワードの発行に失敗しました', 'detail' => combinedOutput($out, $err)]);
+    }
+
+    respond(200, [
+        'url' => "https://localhost/sites/$slug",
+        'adminUser' => $adminUser,
+        'applicationPassword' => $out,
     ]);
 }
 
@@ -817,6 +914,19 @@ if ($path === '/wp-cli/post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         respond(404, ['error' => "サイト '$slug' が見つかりません"]);
     }
 
+    // existingPostIdはAPI側(lets_blog.posts)が前回投稿時に記憶したWordPress投稿IDだが、
+    // WordPress側のサイト再構築/DBリセット等で当該投稿が消失していると`post update`が
+    // 「無効な投稿 ID です」で失敗し、投稿自体ができなくなる(issue #487)。更新対象が実在するか
+    // 事前確認し、存在しなければ新規作成として扱う(自己修復。次回以降は新しいIDが記憶される)。
+    if ($existingPostId !== null) {
+        [$existsCode, , ] = runWp(['post', 'get', (string) $existingPostId, '--field=ID', "--path=$sitePath", '--allow-root']);
+        if ($existsCode !== 0) {
+            error_log("[wp-cli/post] existingPostId=" . var_export($existingPostId, true)
+                . " はWordPress側に存在しないため新規作成として扱います");
+            $existingPostId = null;
+        }
+    }
+
     $subArgs = $existingPostId !== null ? ['post', 'update', (string) $existingPostId, '-'] : ['post', 'create', '-'];
     $subArgs[] = "--post_title=$title";
     $subArgs[] = "--post_status=$status";
@@ -887,6 +997,29 @@ if ($path === '/wp-cli/post-delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     respond(200, ['postId' => $postId]);
 }
 
+// API側(lets_blog.posts)が記憶している投稿IDが、WordPress側で削除される等で実在しなくなって
+// いないかを確認するための読み取り専用エンドポイント。API側はこれを使って、その投稿と一緒に
+// アップロードした画像の再利用キャッシュを信頼してよいか判断する(issue #493)。
+// メディア(添付ファイル)もpost_type=attachmentのwp_postsレコードとして保存されているため、
+// `wp post get`は投稿IDだけでなくメディアIDでも同じように動作する。API側はこれを利用して、
+// 個々のメディアがメディアライブラリから削除されていないかの確認にもこのエンドポイントを
+// 再利用している(issue #495)。
+if ($path === '/wp-cli/post-exists' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    $postId = (string) ($input['postId'] ?? '');
+
+    if (!isValidSlug($slug) || $postId === '') {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = resolveExistingSitePath($slug);
+    if ($sitePath === null) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    [$code, , ] = runWp(['post', 'get', $postId, '--field=ID', "--path=$sitePath", '--allow-root']);
+    respond(200, ['exists' => $code === 0]);
+}
+
 if ($path === '/wp-cli/post-list' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = (string) ($input['slug'] ?? '');
     $postType = (string) ($input['postType'] ?? 'post');
@@ -936,6 +1069,39 @@ if ($path === '/wp-cli/post-status-update' && $_SERVER['REQUEST_METHOD'] === 'PO
     respond(200, ['postId' => $postId, 'status' => $status]);
 }
 
+// 記事プレビュー(ローカル/テスト環境)で、非公開(private)投稿として作成したプレビュー記事の
+// 実ページをPlaywright側から閲覧するための認証Cookieを発行する。private投稿は未ログインの
+// 訪問者には表示されないため、指定ユーザー(サイト管理者)としてログイン済みと同等のCookieを
+// wp_generate_auth_cookie()で生成し、呼び出し側(Java)がブラウザコンテキストへ注入する。
+if ($path === '/wp-cli/generate-auth-cookie' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    $userLogin = (string) ($input['userLogin'] ?? '');
+
+    if (!isValidSlug($slug) || $userLogin === '') {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = resolveExistingSitePath($slug);
+    if ($sitePath === null) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    $userLoginLiteral = var_export($userLogin, true);
+    $phpCode = "\$u = get_user_by('login', $userLoginLiteral); "
+        . "if (!\$u) { echo json_encode(['error' => 'user_not_found']); exit; } "
+        . "echo json_encode(['name' => LOGGED_IN_COOKIE, "
+        . "'value' => wp_generate_auth_cookie(\$u->ID, time() + 3600, 'logged_in')]);";
+
+    [$code, $out, $err] = runWp(['eval', $phpCode, "--path=$sitePath", '--allow-root']);
+    if ($code !== 0) {
+        respond(500, ['error' => '認証Cookieの生成に失敗しました', 'detail' => combinedOutput($out, $err)]);
+    }
+    $result = json_decode($out, true);
+    if (!is_array($result) || isset($result['error']) || empty($result['name']) || empty($result['value'])) {
+        respond(404, ['error' => "ユーザー '$userLogin' が見つかりません"]);
+    }
+    respond(200, ['name' => $result['name'], 'value' => $result['value']]);
+}
+
 if ($path === '/wp-cli/media-upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = (string) ($_POST['slug'] ?? '');
     if (!isValidSlug($slug) || empty($_FILES['file'])) {
@@ -953,6 +1119,8 @@ if ($path === '/wp-cli/media-upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!move_uploaded_file($_FILES['file']['tmp_name'], $tmpPath)) {
         respond(500, ['error' => 'アップロードファイルの一時保存に失敗しました']);
     }
+
+    ensureSvgUploadMuPlugin($sitePath);
 
     [$code, $out, $err] = runWp(['media', 'import', $tmpPath, '--porcelain', "--path=$sitePath", '--allow-root']);
     runCommand(['rm', '-f', $tmpPath]);

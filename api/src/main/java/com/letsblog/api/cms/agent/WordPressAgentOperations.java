@@ -1,6 +1,7 @@
 package com.letsblog.api.cms.agent;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.letsblog.api.cms.AuthCookie;
 import com.letsblog.api.cms.AuthorProvisioningRequest;
 import com.letsblog.api.cms.CmsCredentials.WordPressCredentials;
 import com.letsblog.api.cms.CmsPostSummary;
@@ -147,10 +148,12 @@ public class WordPressAgentOperations {
         if (content.slug() != null && !content.slug().isBlank()) {
             payload.put("postSlug", content.slug());
         }
-        if (content.categoryIds() != null && !content.categoryIds().isEmpty()) {
+        if (content.categoryIds() != null) {
+            // 空リストも明示的に送る(frontmatterでカテゴリを全て外した変更を反映するため。issue #467)。
             payload.put("categoryIds", content.categoryIds());
         }
-        if (content.tagIds() != null && !content.tagIds().isEmpty()) {
+        if (content.tagIds() != null) {
+            // 同上(issue #467)。空リストでもタグをクリアする意図として送る。
             payload.put("tagIds", content.tagIds());
         }
         if (content.featuredMediaId() != null) {
@@ -175,6 +178,23 @@ public class WordPressAgentOperations {
         }
     }
 
+    /**
+     * 指定IDの投稿がWordPress側に実在するかを判定する(読み取り専用)。
+     * WordPressAdapter.postExists(issue #493)から呼ばれる。エージェントへの接続自体に失敗した
+     * 場合は判定不能として安全側(true=再利用を許容)を返す。メディア(添付ファイル)も
+     * post_type=attachmentのwp_postsレコードのため、`wp post get`ベースのこのエンドポイントは
+     * WordPressAdapter.mediaExists(issue #495)からも同じ判定として再利用される。
+     */
+    public boolean postExists(WordPressCredentials creds, String postId) {
+        try {
+            JsonNode body = post("/wp-cli/post-exists", Map.of("slug", creds.wpSlug(), "postId", postId));
+            return body.path("exists").asBoolean(true);
+        } catch (RestClientResponseException | ResourceAccessException e) {
+            log.warn("投稿の実在確認に失敗しました (wpSlug={}, postId={}): {}", creds.wpSlug(), postId, e.getMessage());
+            return true;
+        }
+    }
+
     /** メールアドレスに一致する既存WordPressユーザーIDを検索する(作成は行わない、読み取り専用)。 */
     public java.util.Optional<String> findAuthorIdByEmail(WordPressCredentials creds, String email) {
         try {
@@ -192,6 +212,20 @@ public class WordPressAgentOperations {
             post("/wp-cli/post-delete", Map.of("slug", creds.wpSlug(), "postId", postId));
         } catch (RestClientResponseException e) {
             throw new AgentOperationException("WordPress投稿の削除に失敗しました: " + agentErrorDetail(e), e);
+        } catch (ResourceAccessException e) {
+            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 記事プレビュー(非公開投稿の実表示)向けに、サイト管理者としてログイン済みと同等のCookieを発行する。
+     */
+    public AuthCookie generateAuthCookie(WordPressCredentials creds) {
+        try {
+            JsonNode body = post("/wp-cli/generate-auth-cookie", Map.of("slug", creds.wpSlug(), "userLogin", creds.username()));
+            return new AuthCookie(body.path("name").asText(), body.path("value").asText());
+        } catch (RestClientResponseException e) {
+            throw new AgentOperationException("認証Cookieの発行に失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
             throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
         }

@@ -1,12 +1,43 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createCustomTag, deleteCustomTag, updateCustomTag, type CustomTagFormat } from "@/lib/apiClient";
+import {
+  createCustomTag,
+  deleteCustomTag,
+  updateCustomTag,
+  updateProjectCssSelectorPrefix,
+  type CustomTagFormat,
+} from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 
 export interface CustomTagFormState {
   error?: string;
   success?: boolean;
+}
+
+export interface CssSelectorPrefixFormState {
+  error?: string;
+  success?: boolean;
+}
+
+/** CSSセレクタのプリフィックス設定(issue #298)。空欄で保存するとプロジェクトのslugに戻る。 */
+export async function updateProjectCssSelectorPrefixAction(
+  projectId: number,
+  _prevState: CssSelectorPrefixFormState,
+  formData: FormData
+): Promise<CssSelectorPrefixFormState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  const cssSelectorPrefix = String(formData.get("cssSelectorPrefix") ?? "").trim();
+
+  try {
+    await updateProjectCssSelectorPrefix(projectId, cssSelectorPrefix, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}/tags`);
+  return { success: true };
 }
 
 /** プロジェクト詳細のカスタムタグ画面向け。projectIdはフォームの隠しフィールドに固定値として埋め込まれる。 */

@@ -1,5 +1,6 @@
 package com.letsblog.api.config;
 
+import com.letsblog.api.service.AppSettingService;
 import io.github.resilience4j.ratelimiter.RateLimiter;
 import io.github.resilience4j.ratelimiter.RateLimiterRegistry;
 import jakarta.servlet.http.HttpServletRequest;
@@ -26,6 +27,9 @@ class RateLimitInterceptorTest {
     private RateLimiter rateLimiter;
 
     @Mock
+    private AppSettingService appSettingService;
+
+    @Mock
     private HttpServletRequest request;
 
     @Mock
@@ -35,7 +39,7 @@ class RateLimitInterceptorTest {
 
     @BeforeEach
     void setUp() {
-        interceptor = new RateLimitInterceptor(rateLimiterRegistry);
+        interceptor = new RateLimitInterceptor(rateLimiterRegistry, appSettingService);
         when(rateLimiterRegistry.rateLimiter(anyString())).thenReturn(rateLimiter);
     }
 
@@ -76,6 +80,39 @@ class RateLimitInterceptorTest {
     }
 
     @Test
+    @DisplayName("Should use global rate limiter for setup-status (read-only, not brute-force-able)")
+    void testSetupStatusUsesGlobalRateLimiter() {
+        when(request.getRequestURI()).thenReturn("/api/auth/setup-status");
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        interceptor.preHandle(request, response, null);
+
+        verify(rateLimiterRegistry).rateLimiter("api-global");
+    }
+
+    @Test
+    @DisplayName("Should use global rate limiter for totp/status (read-only, not brute-force-able)")
+    void testTotpStatusUsesGlobalRateLimiter() {
+        when(request.getRequestURI()).thenReturn("/api/auth/totp/status");
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        interceptor.preHandle(request, response, null);
+
+        verify(rateLimiterRegistry).rateLimiter("api-global");
+    }
+
+    @Test
+    @DisplayName("Should still use auth rate limiter for setup (creates a privileged account)")
+    void testSetupEndpointUsesAuthRateLimiter() {
+        when(request.getRequestURI()).thenReturn("/api/auth/setup");
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        interceptor.preHandle(request, response, null);
+
+        verify(rateLimiterRegistry).rateLimiter("auth-endpoint");
+    }
+
+    @Test
     @DisplayName("Should use upload rate limiter for upload endpoint")
     void testUploadEndpointUsesUploadRateLimiter() {
         when(request.getRequestURI()).thenReturn("/api/upload");
@@ -95,5 +132,120 @@ class RateLimitInterceptorTest {
         interceptor.preHandle(request, response, null);
 
         verify(rateLimiterRegistry).rateLimiter("api-global");
+    }
+
+    @Test
+    @DisplayName("Should use upload rate limiter for AI image generation (issue #442)")
+    void testAiImageGenerationUsesUploadRateLimiter() {
+        when(request.getRequestURI()).thenReturn("/api/ai/image");
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        interceptor.preHandle(request, response, null);
+
+        verify(rateLimiterRegistry).rateLimiter("upload-endpoint");
+    }
+
+    @Test
+    @DisplayName("Should use global rate limiter for AI image options, not upload (issue #442)")
+    void testAiImageOptionsUsesGlobalRateLimiter() {
+        when(request.getRequestURI()).thenReturn("/api/ai/image-options");
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        interceptor.preHandle(request, response, null);
+
+        verify(rateLimiterRegistry).rateLimiter("api-global");
+    }
+
+    @Test
+    @DisplayName("Should use global rate limiter for image generation prompt defaults (issue #442)")
+    void testImageGenerationPromptDefaultsUsesGlobalRateLimiter() {
+        when(request.getRequestURI()).thenReturn("/api/projects/5/image-generation-prompt-defaults");
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        interceptor.preHandle(request, response, null);
+
+        verify(rateLimiterRegistry).rateLimiter("api-global");
+    }
+
+    @Test
+    @DisplayName("Should use global rate limiter for image generation size defaults (issue #442)")
+    void testImageGenerationSizeDefaultsUsesGlobalRateLimiter() {
+        when(request.getRequestURI()).thenReturn("/api/projects/5/image-generation-size-defaults");
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        interceptor.preHandle(request, response, null);
+
+        verify(rateLimiterRegistry).rateLimiter("api-global");
+    }
+
+    @Test
+    @DisplayName("Should still use upload rate limiter for asset image upload (issue #442)")
+    void testAssetImageUploadUsesUploadRateLimiter() {
+        when(request.getRequestURI()).thenReturn("/api/projects/5/asset-images/12/upload");
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        interceptor.preHandle(request, response, null);
+
+        verify(rateLimiterRegistry).rateLimiter("upload-endpoint");
+    }
+
+    @Test
+    @DisplayName("Should use dedicated rate limiter for operation-logs, not api-global (issue #464)")
+    void testOperationLogsUsesDedicatedRateLimiter() {
+        when(request.getRequestURI()).thenReturn("/api/operation-logs");
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        interceptor.preHandle(request, response, null);
+
+        verify(rateLimiterRegistry).rateLimiter("operation-log-endpoint");
+    }
+
+    @Test
+    @DisplayName("Should use dedicated rate limiter for operation-logs sub-paths (issue #464)")
+    void testOperationLogsUnifiedUsesDedicatedRateLimiter() {
+        when(request.getRequestURI()).thenReturn("/api/operation-logs/unified");
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        interceptor.preHandle(request, response, null);
+
+        verify(rateLimiterRegistry).rateLimiter("operation-log-endpoint");
+    }
+
+    @Test
+    @DisplayName("Should apply the configured upload rate limit before checking permission (issue #444)")
+    void testUploadEndpointAppliesConfiguredLimit() {
+        when(request.getRequestURI()).thenReturn("/api/ai/image");
+        when(appSettingService.getUploadRateLimitRequests()).thenReturn(25);
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        boolean result = interceptor.preHandle(request, response, null);
+
+        assertTrue(result);
+        verify(rateLimiter).changeLimitForPeriod(25);
+        verify(rateLimiter).acquirePermission();
+    }
+
+    @Test
+    @DisplayName("Should bypass the rate limit entirely when upload rate limit is set to unlimited (issue #444)")
+    void testUploadEndpointBypassesCheckWhenUnlimited() {
+        when(request.getRequestURI()).thenReturn("/api/ai/image");
+        when(appSettingService.getUploadRateLimitRequests()).thenReturn(AppSettingService.UNLIMITED);
+
+        boolean result = interceptor.preHandle(request, response, null);
+
+        assertTrue(result);
+        verify(rateLimiter, never()).changeLimitForPeriod(anyInt());
+        verify(rateLimiter, never()).acquirePermission();
+    }
+
+    @Test
+    @DisplayName("Should not consult the upload rate limit setting for non-upload endpoints (issue #444)")
+    void testNonUploadEndpointDoesNotConsultUploadRateLimitSetting() {
+        when(request.getRequestURI()).thenReturn("/api/posts");
+        when(rateLimiter.acquirePermission()).thenReturn(true);
+
+        interceptor.preHandle(request, response, null);
+
+        verify(appSettingService, never()).getUploadRateLimitRequests();
     }
 }

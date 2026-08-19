@@ -17,6 +17,8 @@ public record PostPublishCommand(
         String featuredImageFilename,
         List<String> imageReferences,
         /** front matterのpublish_scheduled_at(ISO 8601)。予約投稿しない場合はnull。 */
-        String publishScheduledAt
+        String publishScheduledAt,
+        /** BufferによるSNS通知を行うか(issue #379)。未指定(null)時はtrue相当として扱う。 */
+        Boolean notifySns
 ) {
 }

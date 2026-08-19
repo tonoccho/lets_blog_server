@@ -19,6 +19,7 @@ public enum AuditLogAction {
     CUSTOM_TAG_DELETED("カスタムタグ削除"),
     SITE_DELETED("サイト削除"),
     WORDPRESS_PROVISIONED("WordPress自動構築"),
+    WORDPRESS_ADOPTED("既存WordPressサイト取り込み"),
     PROJECT_CREATED("プロジェクト作成"),
     PROJECT_UPDATED("プロジェクト更新"),
     PROJECT_DELETED("プロジェクト削除"),
@@ -29,7 +30,9 @@ public enum AuditLogAction {
     PROJECT_USER_REMOVED("プロジェクトユーザー削除"),
     DB_BACKUP_DOWNLOADED("DBバックアップダウンロード"),
     DB_RESTORED("DBリストア"),
-    SYSTEM_SETTING_UPDATED("システム設定更新");
+    SYSTEM_SETTING_UPDATED("システム設定更新"),
+    SSH_KEY_PAIR_CREATED("SSH鍵ペア作成"),
+    SSH_KEY_PAIR_DELETED("SSH鍵ペア削除");
 
     private final String displayName;
 

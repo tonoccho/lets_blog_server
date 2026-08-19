@@ -1,10 +1,10 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.ThemeCssResponse;
+import com.letsblog.api.dto.ThemeSkeletonResponse;
 import com.letsblog.api.markdown.MarkdownRenderer;
 import com.letsblog.api.repository.SiteRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,6 +21,8 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -42,7 +44,19 @@ class ArticlePreviewServiceTest {
     private AmazonTagRenderService amazonTagRenderService;
 
     @Mock
+    private RechartsTagRenderService rechartsTagRenderService;
+
+    @Mock
+    private PlantUmlEmbedService plantUmlEmbedService;
+
+    @Mock
+    private PlantUmlTagRenderService plantUmlTagRenderService;
+
+    @Mock
     private TocStyleRenderService tocStyleRenderService;
+
+    @Mock
+    private RenderedContentWrapperService renderedContentWrapperService;
 
     @Mock
     private MarkdownRenderer markdownRenderer;
@@ -56,6 +70,12 @@ class ArticlePreviewServiceTest {
     @Mock
     private SiteService siteService;
 
+    @Mock
+    private PreviewSkeletonFetcher previewSkeletonFetcher;
+
+    @Mock
+    private com.letsblog.api.cms.CmsAdapterFactory cmsAdapterFactory;
+
     private MockRestServiceServer server;
     private ArticlePreviewService service;
 
@@ -64,8 +84,17 @@ class ArticlePreviewServiceTest {
         RestClient.Builder builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
         service = new ArticlePreviewService(
-                customTagRenderService, blogCardTagRenderService, amazonTagRenderService, tocStyleRenderService,
-                markdownRenderer, projectService, siteRepository, siteService, builder);
+                customTagRenderService, blogCardTagRenderService, amazonTagRenderService, rechartsTagRenderService,
+                plantUmlEmbedService, plantUmlTagRenderService, tocStyleRenderService, renderedContentWrapperService,
+                markdownRenderer, projectService, siteRepository, siteService, builder, previewSkeletonFetcher,
+                cmsAdapterFactory);
+        // renderHtml()は必ずrechartsTagRenderService/plantUmlTagRenderService/plantUmlEmbedServiceを
+        // 経由するため、それら自体を検証しないテストでは素通しにしておく
+        // (未スタブだとnullが返り、以降の呼び出しの引数が狂うため)。
+        lenient().when(rechartsTagRenderService.render(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(plantUmlTagRenderService.renderForPreview(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(plantUmlEmbedService.embedDiagramsForPreview(anyString()))
+                .thenAnswer(inv -> inv.getArgument(0));
     }
 
     private Project projectWithMaster(String masterEnvironment, Long testSiteId, Long productionSiteId) {
@@ -85,32 +114,136 @@ class ArticlePreviewServiceTest {
         return site;
     }
 
-    private Site managedWordPressSite(Long id, String siteKey, String publicBaseUrl) {
+    private Site managedWordPressSite(Long id, String siteKey, String publicBaseUrl, String wpSlug) {
         Site site = wordPressSite(id, publicBaseUrl);
         site.setSiteKey(siteKey);
         site.setManagedWordpress(true);
+        site.setWpSlug(wpSlug);
         return site;
+    }
+
+    /**
+     * fetchThemeCssは、トップページのCSSに加えて投稿ページ限定のCSS(Issue #337)も
+     * 補おうとするため、参照記事の有無をwp-json/wp/v2/postsへ問い合わせる。この問い合わせ自体を
+     * 検証しないテストでは、参照記事なしとして早期終了させるためにこのモックを併せて登録する。
+     */
+    private void expectNoReferencePostForCssFallback(String baseEndingWithSlash) {
+        server.expect(requestTo(
+                        baseEndingWithSlash + "wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc&_fields=id,link"))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
     }
 
     @Test
     void renderHtml_カスタムタグ展開後にMarkdownをHTML変換する() {
         when(customTagRenderService.render("**bold**", 1L)).thenReturn("**bold** rendered");
         when(blogCardTagRenderService.render("**bold** rendered", 1L)).thenReturn("**bold** rendered");
-        when(amazonTagRenderService.render("**bold** rendered", 1L)).thenReturn("**bold** rendered");
-        when(tocStyleRenderService.render("**bold** rendered", 1L)).thenReturn("**bold** rendered");
+        when(amazonTagRenderService.render("**bold** rendered", 1L, false)).thenReturn("**bold** rendered");
         when(markdownRenderer.render("**bold** rendered")).thenReturn("<p><strong>bold</strong> rendered</p>");
         when(tocStyleRenderService.applyHtmlTemplate("<p><strong>bold</strong> rendered</p>", 1L))
                 .thenReturn("<p><strong>bold</strong> rendered</p>");
+        when(renderedContentWrapperService.wrap("<p><strong>bold</strong> rendered</p>", 1L))
+                .thenReturn("<div class=\"lets-blog-rendered\"><p><strong>bold</strong> rendered</p></div>");
 
         String html = service.renderHtml(1L, "**bold**");
 
-        assertEquals("<p><strong>bold</strong> rendered</p>", html);
+        assertEquals("<div class=\"lets-blog-rendered\"><p><strong>bold</strong> rendered</p></div>", html);
         verify(customTagRenderService).render("**bold**", 1L);
         verify(blogCardTagRenderService).render("**bold** rendered", 1L);
-        verify(amazonTagRenderService).render("**bold** rendered", 1L);
-        verify(tocStyleRenderService).render("**bold** rendered", 1L);
+        verify(amazonTagRenderService).render("**bold** rendered", 1L, false);
         verify(markdownRenderer).render("**bold** rendered");
         verify(tocStyleRenderService).applyHtmlTemplate("<p><strong>bold</strong> rendered</p>", 1L);
+        verify(renderedContentWrapperService).wrap("<p><strong>bold</strong> rendered</p>", 1L);
+    }
+
+    @Test
+    void renderHtml_rechartsタグが不正な場合はレンダリングを中止してエラーメッセージを返す() {
+        when(customTagRenderService.render("markdown", 1L)).thenReturn("markdown");
+        when(blogCardTagRenderService.render("markdown", 1L)).thenReturn("markdown");
+        when(amazonTagRenderService.render("markdown", 1L, false)).thenReturn("markdown");
+        when(rechartsTagRenderService.render("markdown"))
+                .thenThrow(new InvalidRechartsTagException("type属性は必須です"));
+
+        String html = service.renderHtml(1L, "markdown");
+
+        assertTrue(html.contains("type属性は必須です"));
+        verifyNoInteractions(plantUmlTagRenderService, plantUmlEmbedService, markdownRenderer, tocStyleRenderService,
+                renderedContentWrapperService);
+    }
+
+    @Test
+    void renderHtml_recharts展開後の内容がMarkdown変換される() {
+        when(customTagRenderService.render("markdown", 1L)).thenReturn("markdown");
+        when(blogCardTagRenderService.render("markdown", 1L)).thenReturn("markdown");
+        when(amazonTagRenderService.render("markdown", 1L, false)).thenReturn("markdown");
+        when(rechartsTagRenderService.render("markdown")).thenReturn("markdown<div>chart</div>");
+        when(markdownRenderer.render("markdown<div>chart</div>")).thenReturn("<p>markdown</p><div>chart</div>");
+        when(tocStyleRenderService.applyHtmlTemplate("<p>markdown</p><div>chart</div>", 1L))
+                .thenReturn("<p>markdown</p><div>chart</div>");
+        when(renderedContentWrapperService.wrap("<p>markdown</p><div>chart</div>", 1L))
+                .thenReturn("<div class=\"lets-blog-rendered\"><p>markdown</p><div>chart</div></div>");
+
+        String html = service.renderHtml(1L, "markdown");
+
+        assertEquals("<div class=\"lets-blog-rendered\"><p>markdown</p><div>chart</div></div>", html);
+    }
+
+    @Test
+    void renderHtml_plantumlフェンスをdataURI画像へ差し替えてからMarkdown変換する() {
+        when(customTagRenderService.render("```plantuml\n@startuml\n@enduml\n```", 1L))
+                .thenReturn("```plantuml\n@startuml\n@enduml\n```");
+        when(blogCardTagRenderService.render("```plantuml\n@startuml\n@enduml\n```", 1L))
+                .thenReturn("```plantuml\n@startuml\n@enduml\n```");
+        when(amazonTagRenderService.render("```plantuml\n@startuml\n@enduml\n```", 1L, false))
+                .thenReturn("```plantuml\n@startuml\n@enduml\n```");
+        when(plantUmlEmbedService.embedDiagramsForPreview("```plantuml\n@startuml\n@enduml\n```"))
+                .thenReturn("![diagram](data:image/png;base64,AAAA)");
+        when(markdownRenderer.render("![diagram](data:image/png;base64,AAAA)"))
+                .thenReturn("<img src=\"data:image/png;base64,AAAA\">");
+        when(tocStyleRenderService.applyHtmlTemplate("<img src=\"data:image/png;base64,AAAA\">", 1L))
+                .thenReturn("<img src=\"data:image/png;base64,AAAA\">");
+        when(renderedContentWrapperService.wrap("<img src=\"data:image/png;base64,AAAA\">", 1L))
+                .thenReturn("<div class=\"lets-blog-rendered\"><img src=\"data:image/png;base64,AAAA\"></div>");
+
+        String html = service.renderHtml(1L, "```plantuml\n@startuml\n@enduml\n```");
+
+        assertEquals("<div class=\"lets-blog-rendered\"><img src=\"data:image/png;base64,AAAA\"></div>", html);
+        verify(plantUmlEmbedService).embedDiagramsForPreview("```plantuml\n@startuml\n@enduml\n```");
+    }
+
+    @Test
+    void renderHtml_plantumlタグをdataURI画像へ差し替えてからMarkdown変換する() {
+        String markdown = "[plantuml]\nA->B\n[/plantuml]";
+        when(customTagRenderService.render(markdown, 1L)).thenReturn(markdown);
+        when(blogCardTagRenderService.render(markdown, 1L)).thenReturn(markdown);
+        when(amazonTagRenderService.render(markdown, 1L, false)).thenReturn(markdown);
+        when(plantUmlTagRenderService.renderForPreview(markdown))
+                .thenReturn("![diagram](data:image/png;base64,AAAA)");
+        when(markdownRenderer.render("![diagram](data:image/png;base64,AAAA)"))
+                .thenReturn("<img src=\"data:image/png;base64,AAAA\">");
+        when(tocStyleRenderService.applyHtmlTemplate("<img src=\"data:image/png;base64,AAAA\">", 1L))
+                .thenReturn("<img src=\"data:image/png;base64,AAAA\">");
+        when(renderedContentWrapperService.wrap("<img src=\"data:image/png;base64,AAAA\">", 1L))
+                .thenReturn("<div class=\"lets-blog-rendered\"><img src=\"data:image/png;base64,AAAA\"></div>");
+
+        String html = service.renderHtml(1L, markdown);
+
+        assertEquals("<div class=\"lets-blog-rendered\"><img src=\"data:image/png;base64,AAAA\"></div>", html);
+        verify(plantUmlTagRenderService).renderForPreview(markdown);
+    }
+
+    @Test
+    void renderHtml_plantumlタグが不正な場合はレンダリングを中止してエラーメッセージを返す() {
+        when(customTagRenderService.render("markdown", 1L)).thenReturn("markdown");
+        when(blogCardTagRenderService.render("markdown", 1L)).thenReturn("markdown");
+        when(amazonTagRenderService.render("markdown", 1L, false)).thenReturn("markdown");
+        when(plantUmlTagRenderService.renderForPreview("markdown"))
+                .thenThrow(new InvalidPlantUmlTagException("PlantUML図のレンダリングに失敗しました"));
+
+        String html = service.renderHtml(1L, "markdown");
+
+        assertTrue(html.contains("PlantUML図のレンダリングに失敗しました"));
+        verifyNoInteractions(plantUmlEmbedService, markdownRenderer, tocStyleRenderService,
+                renderedContentWrapperService);
     }
 
     @Test
@@ -121,20 +254,6 @@ class ArticlePreviewServiceTest {
 
         assertFalse(response.available());
         assertTrue(response.reason().contains("紐づいていません"));
-    }
-
-    @Test
-    void fetchMasterThemeCss_WordPress以外のCMSの場合はavailableがfalse() {
-        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
-        Site microCmsSite = new Site();
-        microCmsSite.setId(10L);
-        microCmsSite.setCmsType(CmsType.MICROCMS);
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(microCmsSite));
-
-        ThemeCssResponse response = service.fetchMasterThemeCss(1L);
-
-        assertFalse(response.available());
-        assertTrue(response.reason().contains("WordPress以外"));
     }
 
     @Test
@@ -151,6 +270,7 @@ class ArticlePreviewServiceTest {
                         MediaType.TEXT_HTML));
         server.expect(requestTo("http://example.com/style.css"))
                 .andRespond(withSuccess("body { color: red; }", MediaType.valueOf("text/css")));
+        expectNoReferencePostForCssFallback("http://example.com/");
 
         ThemeCssResponse response = service.fetchMasterThemeCss(1L);
 
@@ -185,6 +305,96 @@ class ArticlePreviewServiceTest {
     }
 
     @Test
+    void fetchMasterThemeCss_上限を超えるstylesheetは丸ごとスキップし他のCSSを壊さない() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+
+        String hugeCss = "a".repeat(3_000_100);
+
+        server.expect(requestTo("http://example.com"))
+                .andRespond(withSuccess(
+                        "<html><head>"
+                        + "<link rel=\"stylesheet\" href=\"/small.css\">"
+                        + "<link rel=\"stylesheet\" href=\"/huge.css\">"
+                        + "</head></html>",
+                        MediaType.TEXT_HTML));
+        server.expect(requestTo("http://example.com/small.css"))
+                .andRespond(withSuccess("body { color: red; }", MediaType.valueOf("text/css")));
+        server.expect(requestTo("http://example.com/huge.css"))
+                .andRespond(withSuccess(hugeCss, MediaType.valueOf("text/css")));
+        expectNoReferencePostForCssFallback("http://example.com/");
+
+        ThemeCssResponse response = service.fetchMasterThemeCss(1L);
+
+        assertTrue(response.available());
+        assertTrue(response.css().contains("body { color: red; }"));
+        assertFalse(response.css().contains(hugeCss.substring(0, 100)));
+    }
+
+    @Test
+    void fetchMasterThemeCss_preloadAsStyleのstylesheetも収集する() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+
+        server.expect(requestTo("http://example.com"))
+                .andRespond(withSuccess(
+                        "<html><head>"
+                        + "<link rel=\"preload\" as=\"style\" href=\"/optimized.css\" "
+                        + "onload=\"this.rel='stylesheet'\">"
+                        + "</head></html>",
+                        MediaType.TEXT_HTML));
+        server.expect(requestTo("http://example.com/optimized.css"))
+                .andRespond(withSuccess("body { color: purple; }", MediaType.valueOf("text/css")));
+        expectNoReferencePostForCssFallback("http://example.com/");
+
+        ThemeCssResponse response = service.fetchMasterThemeCss(1L);
+
+        assertTrue(response.available());
+        assertTrue(response.css().contains("body { color: purple; }"));
+        server.verify();
+    }
+
+    @Test
+    void fetchMasterThemeCss_インラインstyleブロックも収集する() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+
+        server.expect(requestTo("http://example.com"))
+                .andRespond(withSuccess(
+                        "<html><head>"
+                        + "<style id=\"critical-css\">.hero { color: orange; }</style>"
+                        + "</head></html>",
+                        MediaType.TEXT_HTML));
+        expectNoReferencePostForCssFallback("http://example.com/");
+
+        ThemeCssResponse response = service.fetchMasterThemeCss(1L);
+
+        assertTrue(response.available());
+        assertTrue(response.css().contains(".hero { color: orange; }"));
+    }
+
+    @Test
+    void fetchMasterThemeCss_stylesheet内のurl相対参照を絶対URLへ書き換える() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+
+        server.expect(requestTo("http://example.com"))
+                .andRespond(withSuccess(
+                        "<html><head><link rel=\"stylesheet\" href=\"/theme/style.css\"></head></html>",
+                        MediaType.TEXT_HTML));
+        server.expect(requestTo("http://example.com/theme/style.css"))
+                .andRespond(withSuccess(
+                        "@font-face { src: url(fonts/foo.woff2); }",
+                        MediaType.valueOf("text/css")));
+        expectNoReferencePostForCssFallback("http://example.com/");
+
+        ThemeCssResponse response = service.fetchMasterThemeCss(1L);
+
+        assertTrue(response.available());
+        assertTrue(response.css().contains("url(http://example.com/theme/fonts/foo.woff2)"));
+    }
+
+    @Test
     void fetchThemeCss_siteId指定でそのサイトのCSSを取得する() {
         Project project = projectWithMaster("test", 10L, null);
         project.setLocalSiteId(20L);
@@ -197,6 +407,7 @@ class ArticlePreviewServiceTest {
                         MediaType.TEXT_HTML));
         server.expect(requestTo("http://local.example.com/local.css"))
                 .andRespond(withSuccess("body{color:red}", MediaType.valueOf("text/css")));
+        expectNoReferencePostForCssFallback("http://local.example.com/");
 
         ThemeCssResponse response = service.fetchThemeCss(1L, 20L);
 
@@ -205,16 +416,13 @@ class ArticlePreviewServiceTest {
     }
 
     @Test
-    void fetchThemeCss_managedサイトは内部URLでテーマCSSを取得する() {
+    void fetchThemeCss_managedサイトはwpSlugから組み立てた内部URLでテーマCSSを取得する() {
         Project project = projectWithMaster("test", 10L, null);
         project.setLocalSiteId(30L);
         when(projectService.getProjectEntity(1L)).thenReturn(project);
 
-        Site site = managedWordPressSite(30L, "local-site", "https://localhost/sites/local-site");
+        Site site = managedWordPressSite(30L, "local-site", "https://localhost/sites/local-site", "local-site");
         when(siteRepository.findById(30L)).thenReturn(Optional.of(site));
-        when(siteService.getCredentials("local-site")).thenReturn(
-                new CmsCredentials.WordPressCredentials(
-                        "http://wordpress/sites/local-site", "admin", "app-password"));
 
         server.expect(requestTo("http://wordpress/sites/local-site/"))
                 .andRespond(withSuccess(
@@ -223,6 +431,7 @@ class ArticlePreviewServiceTest {
                         MediaType.TEXT_HTML));
         server.expect(requestTo("http://wordpress/sites/local-site/wp-content/style.css"))
                 .andRespond(withSuccess("body { color: blue; }", MediaType.valueOf("text/css")));
+        expectNoReferencePostForCssFallback("http://wordpress/sites/local-site/");
 
         ThemeCssResponse response = service.fetchThemeCss(1L, 30L);
 
@@ -232,14 +441,13 @@ class ArticlePreviewServiceTest {
     }
 
     @Test
-    void fetchThemeCss_managedサイトでも認証情報が取得できない場合は公開URLにフォールバックする() {
+    void fetchThemeCss_managedサイトでもwpSlug未設定の場合は公開URLにフォールバックする() {
         Project project = projectWithMaster("test", 10L, null);
         project.setLocalSiteId(30L);
         when(projectService.getProjectEntity(1L)).thenReturn(project);
 
-        Site site = managedWordPressSite(30L, "local-site", "http://public.example.com");
+        Site site = managedWordPressSite(30L, "local-site", "http://public.example.com", null);
         when(siteRepository.findById(30L)).thenReturn(Optional.of(site));
-        when(siteService.getCredentials("local-site")).thenThrow(new IllegalStateException("復号失敗"));
 
         server.expect(requestTo("http://public.example.com"))
                 .andRespond(withSuccess(
@@ -247,6 +455,7 @@ class ArticlePreviewServiceTest {
                         MediaType.TEXT_HTML));
         server.expect(requestTo("http://public.example.com/style.css"))
                 .andRespond(withSuccess("body { color: green; }", MediaType.valueOf("text/css")));
+        expectNoReferencePostForCssFallback("http://public.example.com/");
 
         ThemeCssResponse response = service.fetchThemeCss(1L, 30L);
 
@@ -268,6 +477,7 @@ class ArticlePreviewServiceTest {
         server.expect(requestTo("http://example.com/style.css"))
                 .andExpect(header("User-Agent", org.hamcrest.Matchers.containsString("Mozilla")))
                 .andRespond(withSuccess("body { color: red; }", MediaType.valueOf("text/css")));
+        expectNoReferencePostForCssFallback("http://example.com/");
 
         ThemeCssResponse response = service.fetchMasterThemeCss(1L);
 
@@ -296,5 +506,375 @@ class ArticlePreviewServiceTest {
 
         assertFalse(response.available());
         assertTrue(response.reason().contains("マスター環境"));
+    }
+
+    @Test
+    void fetchThemeCss_is_single限定でトップページには無い投稿ページ限定のstylesheetもマージする() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+
+        server.expect(requestTo("http://example.com"))
+                .andRespond(withSuccess(
+                        "<html><head><link rel=\"stylesheet\" href=\"/theme.css\"></head></html>",
+                        MediaType.TEXT_HTML));
+        server.expect(requestTo("http://example.com/theme.css"))
+                .andRespond(withSuccess("body { color: red; }", MediaType.valueOf("text/css")));
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc"
+                        + "&_fields=id,link"))
+                .andRespond(withSuccess(
+                        "[{\"id\":1,\"link\":\"http://example.com/hello-world/\"}]",
+                        MediaType.APPLICATION_JSON));
+        server.expect(requestTo("http://example.com/hello-world/"))
+                .andRespond(withSuccess(
+                        "<html><head><link rel=\"stylesheet\" href=\"/custom-tags.css\"></head></html>",
+                        MediaType.TEXT_HTML));
+        server.expect(requestTo("http://example.com/custom-tags.css"))
+                .andRespond(withSuccess(".custom-tag { color: hotpink; }", MediaType.valueOf("text/css")));
+
+        ThemeCssResponse response = service.fetchMasterThemeCss(1L);
+
+        assertTrue(response.available());
+        assertTrue(response.css().contains("body { color: red; }"));
+        assertTrue(response.css().contains(".custom-tag { color: hotpink; }"));
+        server.verify();
+    }
+
+    @Test
+    void fetchThemeCss_参照記事が存在しない場合はトップページのCSSのみ返す() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+
+        server.expect(requestTo("http://example.com"))
+                .andRespond(withSuccess(
+                        "<html><head><link rel=\"stylesheet\" href=\"/theme.css\"></head></html>",
+                        MediaType.TEXT_HTML));
+        server.expect(requestTo("http://example.com/theme.css"))
+                .andRespond(withSuccess("body { color: red; }", MediaType.valueOf("text/css")));
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc"
+                        + "&_fields=id,link"))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        ThemeCssResponse response = service.fetchMasterThemeCss(1L);
+
+        assertTrue(response.available());
+        assertEquals("/* http://example.com/theme.css */\nbody { color: red; }\n", response.css());
+        server.verify();
+    }
+
+    @Test
+    void renderSkeleton_マスター環境にサイトが紐づいていない場合はavailableがfalse() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", null, null));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, null, "タイトル", "<p>本文</p>", null, null, null, null, null);
+
+        assertFalse(response.available());
+        assertTrue(response.reason().contains("紐づいていません"));
+        verifyNoInteractions(previewSkeletonFetcher);
+    }
+
+    @Test
+    void renderSkeleton_参照記事が存在しない場合はavailableがfalse() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc"
+                        + "&_fields=id,link,title,content"))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, null, "タイトル", "<p>本文</p>", null, null, null, null, null);
+
+        assertFalse(response.available());
+        assertTrue(response.reason().contains("参照記事"));
+        verifyNoInteractions(previewSkeletonFetcher);
+    }
+
+    @Test
+    void renderSkeleton_参照記事のタイトルと本文で差し替え位置を検索しspliceした結果を返す() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc"
+                        + "&_fields=id,link,title,content"))
+                .andRespond(withSuccess(
+                        "[{\"id\":1,\"link\":\"http://example.com/hello-world/\","
+                        + "\"title\":{\"rendered\":\"Hello World\"},\"content\":{\"rendered\":\"<p>Hi</p>\"}}]",
+                        MediaType.APPLICATION_JSON));
+        when(previewSkeletonFetcher.fetchAndSplice(
+                "http://example.com/hello-world/", "Hello World", "<p>Hi</p>", "新タイトル", "<p>新本文</p>", null))
+                .thenReturn(new ThemeSkeletonResponse(
+                        "<article>spliced</article>", true, null, true, "body { color: red; }"));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, null, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+
+        assertTrue(response.available());
+        assertEquals("<article>spliced</article>", response.html());
+        assertTrue(response.eyecatchSpliced());
+        assertEquals("body { color: red; }", response.css());
+    }
+
+    @Test
+    void renderSkeleton_managedサイトは内部URLへナビゲートし結果は公開オリジンへ戻す() {
+        Project project = projectWithMaster("test", 10L, null);
+        project.setLocalSiteId(30L);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+
+        Site site = managedWordPressSite(30L, "local-site", "https://localhost/sites/local-site", "local-site");
+        when(siteRepository.findById(30L)).thenReturn(Optional.of(site));
+
+        server.expect(requestTo("http://wordpress/sites/local-site/wp-json/wp/v2/posts?per_page=1&orderby=date"
+                        + "&order=desc&_fields=id,link,title,content"))
+                .andRespond(withSuccess(
+                        "[{\"id\":1,\"link\":\"https://localhost/sites/local-site/hello-world/\","
+                        + "\"title\":{\"rendered\":\"Hello World\"},\"content\":{\"rendered\":\"<p>Hi</p>\"}}]",
+                        MediaType.APPLICATION_JSON));
+        when(previewSkeletonFetcher.fetchAndSplice(
+                "http://wordpress/sites/local-site/hello-world/", "Hello World", "<p>Hi</p>",
+                "新タイトル", "<p>新本文</p>", null))
+                .thenReturn(new ThemeSkeletonResponse(
+                        "<article><img src=\"http://wordpress/sites/local-site/wp-content/uploads/x.png\"></article>",
+                        true, null, true,
+                        "body { background: url(http://wordpress/sites/local-site/wp-content/bg.png); }"));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 30L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+
+        assertTrue(response.available());
+        assertTrue(response.html().contains("https://localhost/sites/local-site/wp-content/uploads/x.png"));
+        assertTrue(response.css().contains("https://localhost/sites/local-site/wp-content/bg.png"));
+        server.verify();
+    }
+
+    @Test
+    void renderSkeleton_splice側で位置を特定できない場合はavailableがfalseの結果をそのまま返す() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc"
+                        + "&_fields=id,link,title,content"))
+                .andRespond(withSuccess(
+                        "[{\"id\":1,\"link\":\"http://example.com/hello-world/\","
+                        + "\"title\":{\"rendered\":\"Hello World\"},\"content\":{\"rendered\":\"<p>Hi</p>\"}}]",
+                        MediaType.APPLICATION_JSON));
+        when(previewSkeletonFetcher.fetchAndSplice(
+                "http://example.com/hello-world/", "Hello World", "<p>Hi</p>", "新タイトル", "<p>新本文</p>", null))
+                .thenReturn(new ThemeSkeletonResponse(
+                        null, false, "本文の位置を特定できませんでした", false, "body { color: teal; }"));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, null, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+
+        assertFalse(response.available());
+        assertTrue(response.reason().contains("本文の位置を特定できませんでした"));
+        // ナビゲーション自体には成功しているため、本文の差し替えに失敗してもCSSは活かす。
+        assertEquals("body { color: teal; }", response.css());
+    }
+
+    @Test
+    void renderSkeleton_ナビゲーションに成功すれば投稿ページのCSSを収集して返す() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc"
+                        + "&_fields=id,link,title,content"))
+                .andRespond(withSuccess(
+                        "[{\"id\":1,\"link\":\"http://example.com/hello-world/\","
+                        + "\"title\":{\"rendered\":\"Hello World\"},\"content\":{\"rendered\":\"<p>Hi</p>\"}}]",
+                        MediaType.APPLICATION_JSON));
+        when(previewSkeletonFetcher.fetchAndSplice(
+                "http://example.com/hello-world/", "Hello World", "<p>Hi</p>", "新タイトル", "<p>新本文</p>", null))
+                .thenReturn(new ThemeSkeletonResponse(
+                        "<article>spliced</article>", true, null, true,
+                        "/* is_single()限定のCSS */\n.custom-tag { color: hotpink; }"));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, null, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+
+        assertTrue(response.available());
+        assertTrue(response.css().contains(".custom-tag { color: hotpink; }"));
+    }
+
+    private com.letsblog.api.cms.CmsCredentials.WordPressCredentials sshCredentials() {
+        return new com.letsblog.api.cms.CmsCredentials.WordPressCredentials(
+                "http://production.example.com", "admin", null,
+                "SSH", "ssh.example.com", 22, "deploy", "/var/www/html", "PRIVATE-KEY-PEM", null, null);
+    }
+
+    @Test
+    void renderSkeleton_SSHトランスポートの非本番サイトは非公開投稿の実ページを返す() {
+        Project project = projectWithMaster("test", 40L, null);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteRepository.findById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+
+        com.letsblog.api.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.createOrUpdatePost(org.mockito.ArgumentMatchers.eq(sshCredentials()),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn(new com.letsblog.api.cms.PostResult(
+                        "99", "http://production.example.com/?p=99", "private"));
+        when(cmsAdapter.generateAuthCookie(sshCredentials()))
+                .thenReturn(new com.letsblog.api.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
+        when(previewSkeletonFetcher.fetchRealPost(
+                "http://production.example.com/?p=99", "wordpress_logged_in_x", "cookie-value"))
+                .thenReturn(new ThemeSkeletonResponse("<article>real page</article>", true, null, false, ""));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 40L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+
+        assertTrue(response.available());
+        assertEquals("<article>real page</article>", response.html());
+        assertEquals("99", response.previewPostId());
+        verify(previewSkeletonFetcher, org.mockito.Mockito.never()).fetchAndSplice(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void renderSkeleton_本番サイトはSSH認証情報があっても非公開投稿経路を使わず従来経路にフォールバックする() {
+        Project project = projectWithMaster("production", null, 40L);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteRepository.findById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+        server.expect(requestTo("http://production.example.com/wp-json/wp/v2/posts?per_page=1&orderby=date"
+                        + "&order=desc&_fields=id,link,title,content"))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 40L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+
+        assertFalse(response.available());
+        assertTrue(response.reason().contains("参照記事が見つかりませんでした"));
+        verifyNoInteractions(cmsAdapterFactory);
+        verifyNoInteractions(previewSkeletonFetcher);
+    }
+
+    @Test
+    void renderSkeleton_非公開投稿経路はfrontmatterのslug_categories_tagsを解決して投稿へ渡す() {
+        Project project = projectWithMaster("test", 40L, null);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteRepository.findById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+
+        com.letsblog.api.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.resolveCategories(sshCredentials(), java.util.List.of("お知らせ")))
+                .thenReturn(java.util.List.of("5"));
+        when(cmsAdapter.resolveTags(sshCredentials(), java.util.List.of("java", "spring")))
+                .thenReturn(java.util.List.of("11", "12"));
+        org.mockito.ArgumentCaptor<com.letsblog.api.cms.PostContent> contentCaptor =
+                org.mockito.ArgumentCaptor.forClass(com.letsblog.api.cms.PostContent.class);
+        when(cmsAdapter.createOrUpdatePost(org.mockito.ArgumentMatchers.eq(sshCredentials()),
+                contentCaptor.capture(), org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn(new com.letsblog.api.cms.PostResult(
+                        "99", "http://production.example.com/?p=99", "private"));
+        when(cmsAdapter.generateAuthCookie(sshCredentials()))
+                .thenReturn(new com.letsblog.api.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
+        when(previewSkeletonFetcher.fetchRealPost(
+                "http://production.example.com/?p=99", "wordpress_logged_in_x", "cookie-value"))
+                .thenReturn(new ThemeSkeletonResponse("<article>real page</article>", true, null, false, ""));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(1L, 40L, "新タイトル", "<p>新本文</p>", null, null,
+                "my-slug", java.util.List.of("お知らせ"), java.util.List.of("java", "spring"));
+
+        assertTrue(response.available());
+        assertEquals("my-slug", contentCaptor.getValue().slug());
+        assertEquals(java.util.List.of("5"), contentCaptor.getValue().categoryIds());
+        assertEquals(java.util.List.of("11", "12"), contentCaptor.getValue().tagIds());
+    }
+
+    @Test
+    void renderSkeleton_アイキャッチアップロード失敗時はavailableをtrueに保ったままwarningを返す() {
+        Project project = projectWithMaster("test", 40L, null);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteRepository.findById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+
+        com.letsblog.api.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.uploadMedia(org.mockito.ArgumentMatchers.eq(sshCredentials()),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new RuntimeException("メディアのアップロードに失敗しました"));
+        org.mockito.ArgumentCaptor<com.letsblog.api.cms.PostContent> contentCaptor =
+                org.mockito.ArgumentCaptor.forClass(com.letsblog.api.cms.PostContent.class);
+        when(cmsAdapter.createOrUpdatePost(org.mockito.ArgumentMatchers.eq(sshCredentials()),
+                contentCaptor.capture(), org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn(new com.letsblog.api.cms.PostResult(
+                        "99", "http://production.example.com/?p=99", "private"));
+        when(cmsAdapter.generateAuthCookie(sshCredentials()))
+                .thenReturn(new com.letsblog.api.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
+        when(previewSkeletonFetcher.fetchRealPost(
+                "http://production.example.com/?p=99", "wordpress_logged_in_x", "cookie-value"))
+                .thenReturn(new ThemeSkeletonResponse("<article>real page</article>", true, null, false, ""));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 40L, "新タイトル", "<p>新本文</p>", "data:image/png;base64,AAAA", null, null, null, null);
+
+        assertTrue(response.available());
+        assertTrue(response.warning() != null && response.warning().contains("アイキャッチ"));
+        assertEquals(null, contentCaptor.getValue().featuredMediaId());
+    }
+
+    @Test
+    void renderSkeleton_SSH認証情報にusernameが無い場合は投稿を作成せず従来経路にフォールバックする() {
+        Project project = projectWithMaster("production", null, 40L);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteRepository.findById(40L)).thenReturn(Optional.of(site));
+        com.letsblog.api.cms.CmsCredentials.WordPressCredentials credsWithoutUsername =
+                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials(
+                        "http://production.example.com", null, null,
+                        "SSH", "ssh.example.com", 22, "deploy", "/var/www/html", "PRIVATE-KEY-PEM", null, null);
+        when(siteService.getCredentials("production-site")).thenReturn(credsWithoutUsername);
+        server.expect(requestTo("http://production.example.com/wp-json/wp/v2/posts?per_page=1&orderby=date"
+                        + "&order=desc&_fields=id,link,title,content"))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 40L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+
+        assertFalse(response.available());
+        assertTrue(response.reason().contains("参照記事が見つかりませんでした"));
+        verifyNoInteractions(cmsAdapterFactory);
+    }
+
+    @Test
+    void renderSkeleton_投稿作成後にCookie発行が失敗しても投稿IDは呼び出し側へ返す() {
+        Project project = projectWithMaster("test", 40L, null);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteRepository.findById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+
+        com.letsblog.api.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.createOrUpdatePost(org.mockito.ArgumentMatchers.eq(sshCredentials()),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn(new com.letsblog.api.cms.PostResult(
+                        "99", "http://production.example.com/?p=99", "private"));
+        when(cmsAdapter.generateAuthCookie(sshCredentials()))
+                .thenThrow(new RuntimeException("ユーザー 'null' が見つかりません"));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 40L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+
+        assertFalse(response.available());
+        // 投稿自体は作成済みのため、拡張機能側が追跡・削除できるようpreviewPostIdを返す
+        // (existingPreviewPostId(=null)のままだと投稿がAPI側では孤立し、削除できなくなる)。
+        assertEquals("99", response.previewPostId());
     }
 }

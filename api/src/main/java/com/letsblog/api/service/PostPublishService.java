@@ -57,12 +57,17 @@ public class PostPublishService {
     private final CustomTagRenderService customTagRenderService;
     private final BlogCardTagRenderService blogCardTagRenderService;
     private final AmazonTagRenderService amazonTagRenderService;
+    private final RechartsTagRenderService rechartsTagRenderService;
+    private final PlantUmlTagRenderService plantUmlTagRenderService;
     private final TocStyleRenderService tocStyleRenderService;
+    private final RenderedContentWrapperService renderedContentWrapperService;
     private final ProjectService projectService;
     private final CurrentActorService currentActorService;
     private final UserRepository userRepository;
     private final UserSiteAuthorRepository userSiteAuthorRepository;
     private final ObjectMapper objectMapper;
+    private final ImageResizeService imageResizeService;
+    private final BufferNotificationService bufferNotificationService;
 
     public PostPublishService(SiteService siteService, CmsAdapterFactory cmsAdapterFactory,
                                MarkdownRenderer markdownRenderer, PostRepository postRepository,
@@ -70,12 +75,17 @@ public class PostPublishService {
                                CustomTagRenderService customTagRenderService,
                                BlogCardTagRenderService blogCardTagRenderService,
                                AmazonTagRenderService amazonTagRenderService,
+                               RechartsTagRenderService rechartsTagRenderService,
+                               PlantUmlTagRenderService plantUmlTagRenderService,
                                TocStyleRenderService tocStyleRenderService,
+                               RenderedContentWrapperService renderedContentWrapperService,
                                ProjectService projectService,
                                CurrentActorService currentActorService,
                                UserRepository userRepository,
                                UserSiteAuthorRepository userSiteAuthorRepository,
-                               ObjectMapper objectMapper) {
+                               ObjectMapper objectMapper,
+                               ImageResizeService imageResizeService,
+                               BufferNotificationService bufferNotificationService) {
         this.siteService = siteService;
         this.cmsAdapterFactory = cmsAdapterFactory;
         this.markdownRenderer = markdownRenderer;
@@ -84,12 +94,17 @@ public class PostPublishService {
         this.customTagRenderService = customTagRenderService;
         this.blogCardTagRenderService = blogCardTagRenderService;
         this.amazonTagRenderService = amazonTagRenderService;
+        this.rechartsTagRenderService = rechartsTagRenderService;
+        this.plantUmlTagRenderService = plantUmlTagRenderService;
         this.tocStyleRenderService = tocStyleRenderService;
+        this.renderedContentWrapperService = renderedContentWrapperService;
         this.projectService = projectService;
         this.currentActorService = currentActorService;
         this.userRepository = userRepository;
         this.userSiteAuthorRepository = userSiteAuthorRepository;
         this.objectMapper = objectMapper;
+        this.imageResizeService = imageResizeService;
+        this.bufferNotificationService = bufferNotificationService;
     }
 
     @AuditLog(action = AuditLogAction.POST_PUBLISHED, resourceType = "POST")
@@ -102,15 +117,32 @@ public class PostPublishService {
         Long projectId = projectService.findProjectIdBySiteId(site.getId());
         String markdown = customTagRenderService.render(command.markdown(), projectId);
         markdown = blogCardTagRenderService.render(markdown, projectId);
-        markdown = amazonTagRenderService.render(markdown, projectId);
+        markdown = amazonTagRenderService.render(markdown, projectId, isProductionSite(site, projectId));
+        // [recharts]タグの記法・データが不正な場合はInvalidRechartsTagExceptionを未捕捉のまま伝播させ、
+        // GlobalExceptionHandlerが400として返すことで投稿自体を拒否する(Issue #340)。
+        markdown = rechartsTagRenderService.render(markdown);
+        // [plantuml]〜[/plantuml]組み込みタグも同じ方針(Issue #344)。既存の```plantumlフェンスコード
+        // ブロック記法(次行のplantUmlEmbedService)とは併存し、置き換えない。
+        markdown = plantUmlTagRenderService.render(credentials, markdown);
         markdown = plantUmlEmbedService.embedDiagrams(credentials, markdown);
-        Map<String, UploadedImageInfo> priorUploads = loadPriorUploadedImages(site.getId(), command.wpPostId());
+        // 前回投稿時にアップロード済みの画像を再利用するキャッシュは、そのwpPostIdに紐づけて記憶している。
+        // wpPostId自体がCMS側で削除される等して実在しなくなっている場合、一緒にアップロードした画像も
+        // 削除されている可能性が高く、キャッシュされたURLが既にリンク切れであることがある(issue #493)。
+        // 投稿自体の作成/更新時のフォールバック(createOrUpdatePost実装内)とは別に、画像再利用の可否を
+        // 先に判定する必要がある(画像URLは投稿本文の組み立てに使うため、投稿作成より前に確定させるため)。
+        String wpPostIdForImageCache = command.wpPostId();
+        if (wpPostIdForImageCache != null && !cmsAdapter.postExists(credentials, wpPostIdForImageCache)) {
+            log.info("wpPostId={} はCMS側に存在しないため、前回アップロード画像の再利用キャッシュは使用しません",
+                    wpPostIdForImageCache);
+            wpPostIdForImageCache = null;
+        }
+        Map<String, UploadedImageInfo> priorUploads = loadPriorUploadedImages(site.getId(), wpPostIdForImageCache);
         ImageReplacementResult imageResult = replaceImageReferences(
                 cmsAdapter, credentials, markdown, command.images(), command.imageReferences(),
-                command.slug(), command.title(), command.featuredImageFilename(), priorUploads);
-        String finalMarkdown = tocStyleRenderService.render(imageResult.markdown(), projectId);
-        String html = markdownRenderer.render(finalMarkdown);
+                command.slug(), command.title(), command.featuredImageFilename(), priorUploads, projectId);
+        String html = markdownRenderer.render(imageResult.markdown());
         html = tocStyleRenderService.applyHtmlTemplate(html, projectId);
+        html = renderedContentWrapperService.wrap(html, projectId);
 
         List<String> categoryIds = cmsAdapter.resolveCategories(credentials, command.categories());
         List<String> tagIds = cmsAdapter.resolveTags(credentials, command.tags());
@@ -138,9 +170,28 @@ public class PostPublishService {
         PostResult result = cmsAdapter.createOrUpdatePost(credentials, content, command.wpPostId());
         log.info("WordPress投稿完了: postId={}, status={}", result.id(), result.status());
 
-        upsertPostRecord(site.getId(), result, command.slug(), imageResult.uploadedImages());
+        Post post = upsertPostRecord(site.getId(), result, command.slug(), imageResult.uploadedImages());
+
+        if (shouldNotifySns(command, site, projectId, status)) {
+            bufferNotificationService.notifyAsync(post.getId(), site.getId(), projectId, command.title(), result.link());
+        }
 
         return new PostPublishResponse(result.id(), result.link(), result.status());
+    }
+
+    /**
+     * BufferによるSNS通知を行うかどうか。下書きや本番以外のサイトへの投稿では通知しない
+     * (issue #379の「プレビュー/下書きでは通知しない」という考慮事項に対応)。
+     * notifySns=falseが明示された場合は呼び出し元(投稿単位)の指定を優先する。
+     */
+    private boolean shouldNotifySns(PostPublishCommand command, Site site, Long projectId, String status) {
+        if (Boolean.FALSE.equals(command.notifySns())) {
+            return false;
+        }
+        if ("draft".equals(status)) {
+            return false;
+        }
+        return isProductionSite(site, projectId);
     }
 
     /** サイト+既存wpPostIdに紐づくPost行から、前回投稿時にアップロード済みの画像情報を読み込む。 */
@@ -224,7 +275,7 @@ public class PostPublishService {
     private ImageReplacementResult replaceImageReferences(
             CmsAdapter cmsAdapter, CmsCredentials credentials, String markdown, List<MultipartFile> images,
             List<String> imageReferences, String slug, String title, String featuredImageFilename,
-            Map<String, UploadedImageInfo> priorUploads) {
+            Map<String, UploadedImageInfo> priorUploads, Long projectId) {
         Map<String, UploadedImageInfo> updatedUploads = new LinkedHashMap<>(priorUploads);
         log.info("アイキャッチ解決開始: featuredImageFilename={}, images={}件, imageReferences={}",
                 featuredImageFilename, images == null ? 0 : images.size(), imageReferences);
@@ -240,6 +291,7 @@ public class PostPublishService {
         String rewritten = markdown;
         Map<String, String> referenceToUrl = new LinkedHashMap<>();
         String featuredMediaId = null;
+        int articleImageLongEdgePx = projectService.resolveArticleImageLongEdgePx(projectId);
 
         for (int i = 0; i < images.size(); i++) {
             MultipartFile image = images.get(i);
@@ -253,11 +305,27 @@ public class PostPublishService {
                 continue;
             }
             try {
-                byte[] bytes = image.getBytes();
+                // アップロード前に長編基準でリサイズする(issue #291)。あわせて、透過を持たないPNGは
+                // JPEGへ変換してファイルサイズを削減する(issue #468)。sha256計算より前に行うことで、
+                // 前回投稿時と同じリサイズ/変換結果であれば再アップロードをスキップする再利用判定が働く。
+                ImageResizeService.ResizeResult resized = imageResizeService.resizeToLongEdge(
+                        image.getBytes(), image.getContentType(), articleImageLongEdgePx, true);
+                byte[] bytes = resized.data();
                 String sha256 = sha256Hex(bytes);
                 UploadedImageInfo prior = priorUploads.get(reference);
                 UploadedImageInfo current;
-                if (prior != null && prior.sha256().equals(sha256)) {
+                boolean hashMatches = prior != null && prior.sha256().equals(sha256);
+                // ハッシュが一致しても、キャッシュされたメディアがCMS側で(メディアライブラリから
+                // 個別に)削除されている場合は再利用できない。#493は投稿単位の実在確認のみだったため、
+                // 投稿は残っているが特定の画像だけ削除されたケースでは404 URLが再利用されてしまっていた
+                // (issue #495)。sha256が一致した場合に限りメディア単位の実在確認を行う
+                // (常に確認すると再投稿のたびに全画像分のCMS問い合わせが発生してしまうため)。
+                boolean reusePrior = hashMatches && cmsAdapter.mediaExists(credentials, prior.mediaId());
+                if (hashMatches && !reusePrior) {
+                    log.info("画像 '{}' は前回投稿時と同一内容(sha256一致)ですが、CMS側のメディア(mediaId={})が"
+                            + "実在しないため再アップロードします", reference, prior.mediaId());
+                }
+                if (reusePrior) {
                     // 前回投稿時と内容(sha256)が同じ画像は再アップロードせず、既存のURL/media IDを再利用する
                     // (再投稿のたびに同じ画像が重複アップロードされWordPressのメディアライブラリが
                     // 肥大化するのを防ぐ)。
@@ -265,9 +333,9 @@ public class PostPublishService {
                     log.info("画像 '{}' は前回投稿時と同一内容(sha256一致)のため再利用します: mediaId={}, url={}",
                             reference, current.mediaId(), current.url());
                 } else {
-                    String renamedFilename = renameImageFile(reference, finalSlug, i + 1);
+                    String renamedFilename = renameImageFile(reference, finalSlug, i + 1, resized.mimeType());
                     MediaUploadResult uploaded = cmsAdapter.uploadMedia(
-                            credentials, renamedFilename, image.getContentType(), bytes);
+                            credentials, renamedFilename, resized.mimeType(), bytes);
                     current = new UploadedImageInfo(sha256, uploaded.url(), uploaded.id());
                     log.info("画像 '{}' を新規アップロードしました: mediaId={}, url={}",
                             reference, current.mediaId(), current.url());
@@ -319,13 +387,28 @@ public class PostPublishService {
         return lastDot >= 0 ? originalFilename.substring(lastDot) : ".bin";
     }
 
-    private String renameImageFile(String originalFilename, String slug, int index) {
-        String extension = getFileExtension(originalFilename);
+    private String renameImageFile(String originalFilename, String slug, int index, String mimeType) {
+        String extension = extensionForMimeType(mimeType, originalFilename);
         String number = String.format("%04d", index);
         return slug + "-" + number + extension;
     }
 
-    private void upsertPostRecord(Long siteId, PostResult result, String slug, Map<String, UploadedImageInfo> uploadedImages) {
+    /**
+     * JPEG変換(issue #468)によりmimeTypeが元のファイル名の拡張子と異なりうるため、実際に
+     * アップロードするバイト列のmimeTypeを優先して拡張子を決める。未知のmimeTypeの場合は
+     * 元のファイル名から推測する(従来どおりの挙動)。
+     */
+    private String extensionForMimeType(String mimeType, String fallbackFilename) {
+        if ("image/jpeg".equalsIgnoreCase(mimeType)) {
+            return ".jpg";
+        }
+        if ("image/png".equalsIgnoreCase(mimeType)) {
+            return ".png";
+        }
+        return getFileExtension(fallbackFilename);
+    }
+
+    private Post upsertPostRecord(Long siteId, PostResult result, String slug, Map<String, UploadedImageInfo> uploadedImages) {
         Post post = postRepository.findBySiteIdAndWpPostId(siteId, result.id())
                 .orElseGet(Post::new);
 
@@ -337,6 +420,7 @@ public class PostPublishService {
         post.setUploadedImagesJson(serializeUploadedImages(uploadedImages));
 
         postRepository.save(post);
+        return post;
     }
 
     private record ImageReplacementResult(

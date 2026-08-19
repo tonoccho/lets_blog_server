@@ -51,14 +51,17 @@ spring:
     # Flyway自身の ${...} プレースホルダー置換とぶつからないよう無効化する
     placeholder-replacement: false
   mail:
-    host: ${SPRING_MAIL_HOST:localhost}
-    port: ${SPRING_MAIL_PORT:1025}
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
     properties:
       mail:
         smtp:
-          auth: false
+          auth: ${MAIL_SMTP_AUTH:true}
           starttls:
-            enable: false
+            enable: ${MAIL_SMTP_STARTTLS_ENABLE:true}
+            required: ${MAIL_SMTP_STARTTLS_REQUIRED:true}
   servlet:
     multipart:
       max-file-size: 100MB
@@ -70,14 +73,27 @@ app:
     from: ${APP_MAIL_FROM:noreply@letsblog.example.com}
   web:
     base-url: ${APP_WEB_BASE_URL:http://localhost:3000}
-  ollama-base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
-  ollama-model: ${OLLAMA_MODEL:qwen2.5:7b-instruct}
+  llm-base-url: ${LLM_BASE_URL:https://api.openai.com/v1}
+  llm-api-key: ${LLM_API_KEY:}
+  llm-model: ${LLM_MODEL:gpt-4o-mini}
+  llm-available-models: ${LLM_AVAILABLE_MODELS:gpt-4o-mini,gpt-4o,gpt-4.1-mini}
+  llm-request-timeout-seconds: ${LLM_REQUEST_TIMEOUT_SECONDS:120}
   comfyui-base-url: ${COMFYUI_BASE_URL:http://localhost:8188}
   comfyui-checkpoint: ${COMFYUI_CHECKPOINT:v1-5-pruned-emaonly.safetensors}
   comfyui-models-path: ${COMFYUI_MODELS_PATH:/app/data/comfyui-models}
   brave-search-base-url: ${BRAVE_SEARCH_BASE_URL:https://api.search.brave.com}
   brave-search-api-key: ${BRAVE_SEARCH_API_KEY:}
+  google-analytics-data-api-base-url: ${GOOGLE_ANALYTICS_DATA_API_BASE_URL:https://analyticsdata.googleapis.com}
+  google-analytics-oauth-token-uri: ${GOOGLE_ANALYTICS_OAUTH_TOKEN_URI:https://oauth2.googleapis.com/token}
+  # AdSense連携(issue #387)。OAuthクライアントID/シークレットはプロジェクトごとに異なるため
+  # プロジェクト単位のDB設定(issue #407)で保持し、環境変数では扱わない。
+  google-oauth-token-uri: ${GOOGLE_OAUTH_TOKEN_URI:https://oauth2.googleapis.com/token}
+  adsense-data-api-base-url: ${ADSENSE_DATA_API_BASE_URL:https://adsense.googleapis.com}
   plantuml-base-url: ${PLANTUML_BASE_URL:http://localhost:8085}
+  penpot-base-url: ${PENPOT_BASE_URL:http://localhost:9001}
+  penpot-public-url: ${PENPOT_PUBLIC_URL:http://localhost:9001}
+  penpot-service-email: ${PENPOT_SERVICE_EMAIL:lbs-service@letsblog.local}
+  penpot-service-password: ${PENPOT_SERVICE_PASSWORD:}
   content-cache-ttl-hours: ${CONTENT_CACHE_TTL_HOURS:24}
   wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
   wordpress-provision-token: ${WP_PROVISION_TOKEN:}
@@ -90,6 +106,17 @@ app:
   backup-mysql-database: ${BACKUP_MYSQL_DATABASE:lets_blog}
   backup-mysql-user: ${BACKUP_MYSQL_USER:lbs_app}
   backup-mysql-password: ${BACKUP_MYSQL_PASSWORD:lbs_app}
+  docker-socket-proxy-base-url: ${DOCKER_SOCKET_PROXY_BASE_URL:http://localhost:2375}
+  default-negative-prompt: ${DEFAULT_NEGATIVE_PROMPT:low quality, blurry, watermark, text}
+  default-quality-prompt: ${DEFAULT_QUALITY_PROMPT:high quality, highly detailed, sharp focus, masterpiece}
+  default-generated-image-width: ${DEFAULT_GENERATED_IMAGE_WIDTH:1920}
+  default-generated-image-height: ${DEFAULT_GENERATED_IMAGE_HEIGHT:1080}
+  default-article-image-long-edge-px: ${DEFAULT_ARTICLE_IMAGE_LONG_EDGE_PX:1300}
+  # Buffer連携(issue #379)。有効/無効・アクセストークン・プロファイルID等はプロジェクト単位の設定
+  # (issue #402)のため、APIのベースURL/タイムアウトのみアプリ全体の環境変数として残す。
+  # レガシーREST APIは2027-02-01廃止予定のため、GraphQL APIの単一エンドポイントへ移行済み(issue #411)。
+  buffer-api-base-url: ${BUFFER_API_BASE_URL:https://api.buffer.com}
+  buffer-request-timeout-seconds: ${BUFFER_REQUEST_TIMEOUT_SECONDS:30}
 
 resilience4j:
   ratelimiter:
@@ -98,7 +125,10 @@ resilience4j:
         registerHealthIndicator: false
         limitRefreshPeriod: 1m
         limitForPeriod: 100
-        timeoutDuration: 1s
+        # 枠が枯渇している間、acquirePermission()が許可待ちでリクエストスレッドを
+        # ブロックしないよう即時拒否にする(issue #464。以前は1sブロックしており、
+        # バースト時に複数リクエストが同時に足止めされ、サーバー全体が無応答に見えた)。
+        timeoutDuration: 0s
         allowHealthIndicatorToFail: true
     instances:
       api-global:
@@ -109,6 +139,13 @@ resilience4j:
         baseConfig: default
         limitForPeriod: ${AUTH_RATE_LIMIT_REQUESTS:5}
         limitRefreshPeriod: ${AUTH_RATE_LIMIT_PERIOD:1m}
+      # フロントエンドはapiFetch()のたびに監査ログを自動送信するため(web/src/lib/apiClient.ts)、
+      # api-globalと同じバケットを共有するとダッシュボード等の通常操作の枠まで消費してしまい、
+      # 無関係なAPI呼び出しが軒並み429になる(issue #464)。専用バケットに分離する。
+      operation-log-endpoint:
+        baseConfig: default
+        limitForPeriod: ${OPERATION_LOG_RATE_LIMIT_REQUESTS:300}
+        limitRefreshPeriod: ${OPERATION_LOG_RATE_LIMIT_PERIOD:1m}
       upload-endpoint:
         baseConfig: default
         limitForPeriod: ${UPLOAD_RATE_LIMIT_REQUESTS:10}

@@ -72,7 +72,7 @@ public class PostController {
     private List<Post> sortPosts(List<Post> posts, String sortBy, String sortOrder) {
         boolean ascending = !"desc".equalsIgnoreCase(sortOrder);
 
-        Comparator<Post> comparator = switch (sortBy) {
+        Comparator<Post> comparator = switch (sortBy == null ? "" : sortBy) {
             case "siteName" -> Comparator.comparing(post -> {
                 Site site = siteRepository.findById(post.getSiteId()).orElse(null);
                 return site != null ? site.getName() : "";
@@ -110,11 +110,12 @@ public class PostController {
             @RequestParam(value = "images", required = false) List<MultipartFile> images,
             @RequestParam(value = "featuredImageFilename", required = false) String featuredImageFilename,
             @RequestParam(value = "imageReferences", required = false) List<String> imageReferences,
-            @RequestParam(value = "publishScheduledAt", required = false) String publishScheduledAt
+            @RequestParam(value = "publishScheduledAt", required = false) String publishScheduledAt,
+            @RequestParam(value = "notifySns", required = false) Boolean notifySns
     ) {
         PostPublishCommand command = new PostPublishCommand(
                 site, title, slug, status, categories, tags, wpPostId, markdown, images, featuredImageFilename,
-                imageReferences, publishScheduledAt);
+                imageReferences, publishScheduledAt, notifySns);
         return postPublishService.publish(command);
     }
 

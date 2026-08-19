@@ -6,7 +6,7 @@ import org.springframework.web.client.RestClient;
 
 /**
  * Boot 4ではRestClientの既定JSONコンバータがJackson3(tools.jackson)になったが、
- * 社内の外部API連携クライアント群(WordPress/microCMS/GitHub等)は引き続き
+ * 社内の外部API連携クライアント群(WordPress/GitHub等)は引き続き
  * com.fasterxml.jackson.databind.JsonNode/ObjectNodeでレスポンスを組み立てている。
  * Jackson3のコンバータはJsonNode.class(Jackson2)を誤って受理した上でデシリアライズに失敗するため、
  * 各クライアントの構築時にJackson3コンバータを外し、Jackson2コンバータへ差し替える。

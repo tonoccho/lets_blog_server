@@ -1,5 +1,6 @@
 package com.letsblog.api.controller;
 
+import com.letsblog.api.cms.CmsAdapter;
 import com.letsblog.api.dto.AcceptPlanRequest;
 import com.letsblog.api.dto.AcceptPlanResponse;
 import com.letsblog.api.dto.AcceptStructureRequest;
@@ -138,6 +139,17 @@ public class ArticlePlanController {
     public List<String> listCategories(@PathVariable Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         return articlePlanService.listExistingCategories(projectId);
+    }
+
+    /**
+     * 既存カテゴリ一覧を親カテゴリ名付きで返す(issue #289)。VSCode拡張が子カテゴリ選択時に
+     * 親カテゴリを自動選択できるようにするため、既存の{@link #listCategories}とは別に用意する
+     * (古いバージョンの拡張機能との互換性のため、既存エンドポイントの戻り値は変更しない)。
+     */
+    @GetMapping("/categories/hierarchy")
+    public List<CmsAdapter.CategoryOption> listCategoriesWithParents(@PathVariable Long projectId) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        return articlePlanService.listExistingCategoriesWithParents(projectId);
     }
 
     @PostMapping("/issues/{issueNumber}/assign")

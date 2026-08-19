@@ -13,6 +13,7 @@ import com.letsblog.api.cms.WpCliInstallResult;
 import com.letsblog.api.crypto.CredentialCipher;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Site;
+import com.letsblog.api.domain.SshKeyPair;
 import com.letsblog.api.domain.User;
 import com.letsblog.api.dto.SiteConnectionCheckResult;
 import com.letsblog.api.dto.SiteDetailResponse;
@@ -20,6 +21,7 @@ import com.letsblog.api.dto.SiteRegisterRequest;
 import com.letsblog.api.dto.SiteResponse;
 import com.letsblog.api.dto.SiteUpdateRequest;
 import com.letsblog.api.repository.SiteRepository;
+import com.letsblog.api.repository.SshKeyPairRepository;
 import com.letsblog.api.repository.UserRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -44,16 +46,18 @@ public class SiteService {
     private final CmsAdapterFactory cmsAdapterFactory;
     private final ProvisioningService provisioningService;
     private final UserRepository userRepository;
+    private final SshKeyPairRepository sshKeyPairRepository;
 
     public SiteService(SiteRepository siteRepository, CredentialCipher credentialCipher, ObjectMapper objectMapper,
                         CmsAdapterFactory cmsAdapterFactory, ProvisioningService provisioningService,
-                        UserRepository userRepository) {
+                        UserRepository userRepository, SshKeyPairRepository sshKeyPairRepository) {
         this.siteRepository = siteRepository;
         this.credentialCipher = credentialCipher;
         this.objectMapper = objectMapper;
         this.cmsAdapterFactory = cmsAdapterFactory;
         this.provisioningService = provisioningService;
         this.userRepository = userRepository;
+        this.sshKeyPairRepository = sshKeyPairRepository;
     }
 
     /**
@@ -296,6 +300,7 @@ public class SiteService {
             }
             Map<String, String> merged = new HashMap<>(getRawCredentials(site));
             merged.putAll(request.credentials());
+            clearSupersededSshKeyMaterial(merged, request.credentials());
             validateCredentials(site.getCmsType(), merged);
 
             ConnectionCheckResult connectionResult = runConnectionCheck(site.getCmsType(), merged);
@@ -414,17 +419,50 @@ public class SiteService {
                 throw new IllegalArgumentException(cmsType.displayName() + ": " + key + " は必須です");
             }
         }
+        if (cmsType == CmsType.WORDPRESS && isSshTransport(credentials)) {
+            validateSshKeyMaterial(credentials);
+        }
     }
 
     private List<String> requiredCredentialKeys(CmsType cmsType, Map<String, String> credentials) {
         return switch (cmsType) {
             case WORDPRESS -> isSshTransport(credentials)
-                    ? List.of("baseUrl", "transport", "sshHost", "sshUser", "wpPath", "sshPrivateKeyPem")
+                    ? List.of("baseUrl", "transport", "sshHost", "sshUser", "wpPath")
                     : List.of("baseUrl", "username", "appPassword");
-            case MICROCMS -> List.of(
-                    "serviceId", "apiKey", "managementApiKey",
-                    "postsEndpoint", "categoriesEndpoint", "tagsEndpoint");
         };
+    }
+
+    /**
+     * SSH秘密鍵は「その場で生成しcredentialsへ直接埋め込む(sshPrivateKeyPem)」
+     * または「/admin/ssh-keysで保存済みの名前付き鍵ペアを参照する(sshKeyPairId)」のいずれか
+     * 一方のみを許可する(issue #415)。両方/どちらもない状態は不正とする。
+     */
+    private void validateSshKeyMaterial(Map<String, String> credentials) {
+        boolean hasPrivateKey = StringUtils.hasText(credentials.get("sshPrivateKeyPem"));
+        boolean hasKeyPairId = StringUtils.hasText(credentials.get("sshKeyPairId"));
+        if (hasPrivateKey == hasKeyPairId) {
+            throw new IllegalArgumentException(
+                    "SSH秘密鍵は sshPrivateKeyPem(その場で生成) または sshKeyPairId(保存済み鍵ペアの参照) の"
+                            + "いずれか一方のみを指定してください");
+        }
+        if (hasKeyPairId) {
+            Long keyPairId = parseSshKeyPairId(credentials.get("sshKeyPairId"));
+            if (!sshKeyPairRepository.existsById(keyPairId)) {
+                throw new IllegalArgumentException("指定されたSSH鍵ペア(id=" + keyPairId + ")が見つかりません");
+            }
+        }
+    }
+
+    /**
+     * サイト編集(部分patch)時、リクエストで新たにsshPrivateKeyPem/sshKeyPairIdの一方が
+     * 明示指定された場合、既存値からもう一方を取り除く(どちらか一方のみが有効な状態を保つ)。
+     */
+    private void clearSupersededSshKeyMaterial(Map<String, String> merged, Map<String, String> patch) {
+        if (StringUtils.hasText(patch.get("sshPrivateKeyPem"))) {
+            merged.remove("sshKeyPairId");
+        } else if (StringUtils.hasText(patch.get("sshKeyPairId"))) {
+            merged.remove("sshPrivateKeyPem");
+        }
     }
 
     private boolean isSshTransport(Map<String, String> credentials) {
@@ -438,7 +476,6 @@ public class SiteService {
     private String resolveDisplayBaseUrl(CmsType cmsType, Map<String, String> credentials) {
         return switch (cmsType) {
             case WORDPRESS -> credentials.get("baseUrl");
-            case MICROCMS -> "https://" + credentials.get("serviceId") + ".microcms.io";
         };
     }
 
@@ -453,17 +490,38 @@ public class SiteService {
                     parseSshPort(credentials.get("sshPort")),
                     credentials.get("sshUser"),
                     credentials.get("wpPath"),
-                    credentials.get("sshPrivateKeyPem"),
+                    resolveSshPrivateKeyPem(credentials),
                     credentials.get("sshHostKeyFingerprint"),
                     credentials.get("wpSlug"));
-            case MICROCMS -> new CmsCredentials.MicroCmsCredentials(
-                    credentials.get("serviceId"),
-                    credentials.get("apiKey"),
-                    credentials.get("managementApiKey"),
-                    credentials.get("postsEndpoint"),
-                    credentials.get("categoriesEndpoint"),
-                    credentials.get("tagsEndpoint"));
         };
+    }
+
+    /**
+     * sshPrivateKeyPemが直接指定されていればそれを使い、なければsshKeyPairId経由で
+     * /admin/ssh-keysの保存済み鍵ペアを解決する(issue #415)。参照先が削除済みの場合はエラーとする。
+     */
+    private String resolveSshPrivateKeyPem(Map<String, String> credentials) {
+        String direct = credentials.get("sshPrivateKeyPem");
+        if (StringUtils.hasText(direct)) {
+            return direct;
+        }
+        String keyPairIdValue = credentials.get("sshKeyPairId");
+        if (!StringUtils.hasText(keyPairIdValue)) {
+            return null;
+        }
+        Long keyPairId = parseSshKeyPairId(keyPairIdValue);
+        SshKeyPair keyPair = sshKeyPairRepository.findById(keyPairId)
+                .orElseThrow(() -> new SshKeyPairNotFoundException(
+                        "参照先のSSH鍵ペアが見つかりません(id=" + keyPairId + ")"));
+        return credentialCipher.decrypt(keyPair.getPrivateKeyEncrypted());
+    }
+
+    private Long parseSshKeyPairId(String value) {
+        try {
+            return Long.valueOf(value);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("sshKeyPairIdは数値で指定してください: " + value);
+        }
     }
 
     private Integer parseSshPort(String value) {

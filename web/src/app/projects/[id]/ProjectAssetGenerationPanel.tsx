@@ -1,9 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import type { AiImageResult, ImageGenerationOptionsResponse } from "@/lib/apiClient";
+import type {
+  AiImageGenerationParams,
+  AiImageResult,
+  GeneratedImageSummary,
+  ImageGenerationOptionsResponse,
+  PlanChatMessage,
+} from "@/lib/apiClient";
 import {
+  fetchGeneratedImagesAction,
   fetchImageGenerationOptionsAction,
+  generateImagePromptAction,
   generateProjectImagesAction,
   uploadProjectAssetImageAction,
 } from "./actions";
@@ -25,8 +33,8 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
   const [seed, setSeed] = useState("");
   const [samplerName, setSamplerName] = useState("");
   const [scheduler, setScheduler] = useState("");
-  const [width, setWidth] = useState(512);
-  const [height, setHeight] = useState(512);
+  const [width, setWidth] = useState(1920);
+  const [height, setHeight] = useState(1080);
   const [batchSize, setBatchSize] = useState(4);
   const [checkpoint, setCheckpoint] = useState("");
   const [loraName, setLoraName] = useState("");
@@ -38,6 +46,18 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState<{ type: "error" | "success"; text: string } | null>(null);
 
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatHistory, setChatHistory] = useState<PlanChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState<string | undefined>(undefined);
+
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [galleryImages, setGalleryImages] = useState<GeneratedImageSummary[] | null>(null);
+  const [galleryLoading, setGalleryLoading] = useState(false);
+  const [gallerySelectedId, setGallerySelectedId] = useState<number | null>(null);
+  const [galleryUploading, setGalleryUploading] = useState(false);
+
   async function handleOpen() {
     setOpen(true);
     if (options) return;
@@ -48,6 +68,9 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
       setSamplerName(opts.samplers[0] ?? "euler");
       setScheduler(opts.schedulers[0] ?? "normal");
       setCheckpoint(opts.selectedCheckpoint ?? "");
+      // プロジェクトのデフォルト生成サイズを初期値として反映する(issue #292)。
+      if (opts.defaultWidth) setWidth(opts.defaultWidth);
+      if (opts.defaultHeight) setHeight(opts.defaultHeight);
     } catch (err) {
       setMessage({ type: "error", text: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -88,12 +111,71 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
     setMessage({ type: "success", text: "生成しました。アセットとして追加する画像を選択してください。" });
   }
 
-  async function handleUpload() {
-    if (selectedId == null) return;
-    setUploading(true);
+  /**
+   * 生成画像ギャラリーの「この画像の設定をコピー」でコピーされたJSONをクリップボードから読み取り、
+   * フォームに反映する(issue #437)。
+   */
+  async function handleCreateFromClipboard() {
     setMessage(null);
-    const result = await uploadProjectAssetImageAction(projectId, selectedId);
-    setUploading(false);
+    let text: string;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : String(err) });
+      return;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      setMessage({ type: "error", text: "クリップボードの内容が正しいJSON形式ではありません。" });
+      return;
+    }
+    if (typeof parsed !== "object" || parsed === null || typeof (parsed as { prompt?: unknown }).prompt !== "string") {
+      setMessage({ type: "error", text: "クリップボードの内容から生成設定を読み取れませんでした。" });
+      return;
+    }
+
+    const settings = parsed as Partial<AiImageGenerationParams>;
+    setPrompt(settings.prompt ?? "");
+    setNegativePrompt(settings.negativePrompt ?? "");
+    if (typeof settings.steps === "number") setSteps(settings.steps);
+    if (typeof settings.cfgScale === "number") setCfgScale(settings.cfgScale);
+    setSamplerName(settings.samplerName ?? "");
+    setScheduler(settings.scheduler ?? "");
+    setSeed(settings.seed != null ? String(settings.seed) : "");
+    if (typeof settings.width === "number") setWidth(settings.width);
+    if (typeof settings.height === "number") setHeight(settings.height);
+    if (typeof settings.batchSize === "number") setBatchSize(settings.batchSize);
+    setCheckpoint(settings.checkpoint ?? "");
+    setLoraName(settings.loraName ?? "");
+    if (typeof settings.loraWeight === "number") setLoraWeight(settings.loraWeight);
+    setMessage({ type: "success", text: "クリップボードの設定をフォームに反映しました。" });
+  }
+
+  async function handleChatSend() {
+    const chatMessage = chatInput.trim();
+    if (!chatMessage || chatLoading) return;
+    setChatInput("");
+    setChatLoading(true);
+    setChatError(undefined);
+    const result = await generateImagePromptAction(projectId, { history: chatHistory, message: chatMessage });
+    setChatLoading(false);
+    if (result.error) {
+      setChatError(result.error);
+      return;
+    }
+    const generatedPrompt = result.prompt ?? "";
+    setChatHistory((prev) => [...prev, { role: "user", content: chatMessage }, { role: "assistant", content: generatedPrompt }]);
+    setPrompt(generatedPrompt);
+  }
+
+  async function uploadGeneratedImage(generatedImageId: number, setUploadingFlag: (v: boolean) => void) {
+    setUploadingFlag(true);
+    setMessage(null);
+    const result = await uploadProjectAssetImageAction(projectId, generatedImageId);
+    setUploadingFlag(false);
     if (result.error) {
       setMessage({ type: "error", text: result.error });
       return;
@@ -108,6 +190,31 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
         text: `${failed.map((l) => l.environment).join(", ")}環境でアップロードに失敗しました。`,
       });
     }
+  }
+
+  async function handleUpload() {
+    if (selectedId == null) return;
+    await uploadGeneratedImage(selectedId, setUploading);
+  }
+
+  /** 生成画像ギャラリーに保存済みの画像を選択肢として読み込む(issue #436)。 */
+  async function handleGalleryToggle() {
+    setGalleryOpen((v) => !v);
+    if (galleryImages || galleryLoading) return;
+    setGalleryLoading(true);
+    try {
+      const imgs = await fetchGeneratedImagesAction();
+      setGalleryImages(imgs);
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setGalleryLoading(false);
+    }
+  }
+
+  async function handleGalleryUpload() {
+    if (gallerySelectedId == null) return;
+    await uploadGeneratedImage(gallerySelectedId, setGalleryUploading);
   }
 
   if (!open) {
@@ -133,10 +240,116 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
         </button>
       </div>
 
+      <div className="space-y-3 rounded border bg-gray-50 p-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold">生成画像ギャラリーから選択してアップロード</h3>
+          <button type="button" onClick={handleGalleryToggle} className="text-xs text-gray-500 hover:underline">
+            {galleryOpen ? "閉じる" : "開く"}
+          </button>
+        </div>
+        {galleryOpen && (
+          <>
+            {galleryLoading && <p className="text-xs text-gray-500">読み込んでいます…</p>}
+            {galleryImages && galleryImages.length === 0 && (
+              <p className="text-xs text-gray-500">生成画像ギャラリーに画像がありません。</p>
+            )}
+            {galleryImages && galleryImages.length > 0 && (
+              <>
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                  {galleryImages.map((img) => (
+                    <button
+                      type="button"
+                      key={img.id}
+                      onClick={() => setGallerySelectedId(img.id)}
+                      className={`rounded border-2 p-1 ${
+                        gallerySelectedId === img.id ? "border-blue-600" : "border-transparent"
+                      }`}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`/image-gallery/${img.id}/file`}
+                        alt={img.prompt}
+                        className="aspect-square w-full rounded bg-neutral-100 object-contain dark:bg-neutral-800"
+                      />
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleGalleryUpload}
+                  disabled={gallerySelectedId == null || galleryUploading}
+                  className="rounded bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-60"
+                >
+                  {galleryUploading ? "アップロードしています…" : "選択した画像をアセットとして追加(全環境へアップロード)"}
+                </button>
+              </>
+            )}
+          </>
+        )}
+      </div>
+
       {loadingOptions ? (
         <p className="text-sm text-gray-500">パラメータ選択肢を読み込んでいます…</p>
       ) : (
         <div className="grid gap-3">
+          <div className="space-y-2 rounded border bg-gray-50 p-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">チャットでプロンプトを作成</h3>
+              <button
+                type="button"
+                onClick={() => setChatOpen((v) => !v)}
+                className="text-xs text-gray-500 hover:underline"
+              >
+                {chatOpen ? "閉じる" : "開く"}
+              </button>
+            </div>
+            {chatOpen && (
+              <>
+                <div className="max-h-48 space-y-2 overflow-y-auto rounded bg-white p-2">
+                  {chatHistory.length === 0 ? (
+                    <p className="text-xs text-gray-500">
+                      作りたい画像の内容をチャットで伝えてください。生成されたプロンプトが下のprompt欄に反映されます。
+                    </p>
+                  ) : (
+                    chatHistory.map((msg, idx) => (
+                      <div
+                        key={idx}
+                        className={`rounded px-2 py-1 text-xs ${
+                          msg.role === "user" ? "bg-blue-100 text-blue-900" : "bg-gray-200 text-gray-900"
+                        }`}
+                      >
+                        <strong>{msg.role === "user" ? "あなた" : "生成プロンプト"}:</strong> {msg.content}
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !chatLoading) {
+                        handleChatSend();
+                      }
+                    }}
+                    placeholder="例: 夕焼けの海辺を歩く猫"
+                    disabled={chatLoading}
+                    className="flex-1 rounded border p-2 text-xs disabled:bg-gray-100"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleChatSend}
+                    disabled={chatLoading || !chatInput.trim()}
+                    className="rounded bg-neutral-900 px-3 py-2 text-xs text-white disabled:opacity-60"
+                  >
+                    {chatLoading ? "生成中…" : "プロンプト生成"}
+                  </button>
+                </div>
+                {chatError && <p className="text-xs text-red-600">{chatError}</p>}
+              </>
+            )}
+          </div>
           <div>
             <label className="block text-sm font-medium">prompt</label>
             <textarea
@@ -145,6 +358,11 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
               onChange={(e) => setPrompt(e.target.value)}
               placeholder="生成したい画像の説明"
             />
+            {options?.defaultQualityPrompt && (
+              <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                生成時にpromptへ自動で追加されます: {options.defaultQualityPrompt}
+              </p>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium">negative prompt</label>
@@ -152,7 +370,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
               className="mt-1 w-full rounded border p-2 text-sm"
               value={negativePrompt}
               onChange={(e) => setNegativePrompt(e.target.value)}
-              placeholder="low quality, blurry, watermark, text"
+              placeholder={options?.defaultNegativePrompt ?? "low quality, blurry, watermark, text"}
             />
           </div>
           <div className="grid grid-cols-3 gap-3">
@@ -296,14 +514,23 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
             )}
           </div>
 
-          <button
-            type="button"
-            onClick={handleGenerate}
-            disabled={generating}
-            className="w-fit rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-          >
-            {generating ? "生成しています…" : "生成"}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleGenerate}
+              disabled={generating}
+              className="w-fit rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+            >
+              {generating ? "生成しています…" : "生成"}
+            </button>
+            <button
+              type="button"
+              onClick={handleCreateFromClipboard}
+              className="w-fit rounded border border-gray-400 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
+            >
+              クリップボードから作成
+            </button>
+          </div>
         </div>
       )}
 
@@ -321,7 +548,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
                 <img
                   src={`data:${img.mimeType};base64,${img.dataBase64}`}
                   alt={img.fileName}
-                  className="aspect-square w-full rounded object-cover"
+                  className="aspect-square w-full rounded bg-neutral-100 object-contain dark:bg-neutral-800"
                 />
               </button>
             ))}

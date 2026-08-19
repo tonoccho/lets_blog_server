@@ -23,6 +23,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.multipart.MultipartFile;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.util.List;
 import java.util.Optional;
 
@@ -30,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -60,7 +65,13 @@ class PostPublishServiceTest {
     @Mock
     private AmazonTagRenderService amazonTagRenderService;
     @Mock
+    private RechartsTagRenderService rechartsTagRenderService;
+    @Mock
+    private PlantUmlTagRenderService plantUmlTagRenderService;
+    @Mock
     private TocStyleRenderService tocStyleRenderService;
+    @Mock
+    private RenderedContentWrapperService renderedContentWrapperService;
     @Mock
     private ProjectService projectService;
     @Mock
@@ -71,6 +82,8 @@ class PostPublishServiceTest {
     private UserSiteAuthorRepository userSiteAuthorRepository;
     @Mock
     private CmsAdapter cmsAdapter;
+    @Mock
+    private BufferNotificationService bufferNotificationService;
 
     private PostPublishService service;
 
@@ -81,8 +94,9 @@ class PostPublishServiceTest {
     void setUp() {
         service = new PostPublishService(siteService, cmsAdapterFactory, markdownRenderer, postRepository,
                 plantUmlEmbedService, customTagRenderService, blogCardTagRenderService, amazonTagRenderService,
-                tocStyleRenderService, projectService, currentActorService, userRepository,
-                userSiteAuthorRepository, new com.fasterxml.jackson.databind.ObjectMapper());
+                rechartsTagRenderService, plantUmlTagRenderService, tocStyleRenderService, renderedContentWrapperService,
+                projectService, currentActorService, userRepository, userSiteAuthorRepository,
+                new com.fasterxml.jackson.databind.ObjectMapper(), new ImageResizeService(), bufferNotificationService);
 
         Site site = new Site();
         site.setId(1L);
@@ -95,14 +109,19 @@ class PostPublishServiceTest {
         lenient().when(projectService.findProjectIdBySiteId(1L)).thenReturn(null);
         lenient().when(customTagRenderService.render(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(blogCardTagRenderService.render(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
-        lenient().when(amazonTagRenderService.render(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
-        lenient().when(tocStyleRenderService.render(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(amazonTagRenderService.render(anyString(), any(), anyBoolean()))
+                .thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(rechartsTagRenderService.render(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(plantUmlTagRenderService.render(any(), anyString())).thenAnswer(inv -> inv.getArgument(1));
         lenient().when(plantUmlEmbedService.embedDiagrams(any(), anyString())).thenAnswer(inv -> inv.getArgument(1));
         lenient().when(markdownRenderer.render(anyString())).thenAnswer(inv -> "<p>" + inv.getArgument(0) + "</p>");
         lenient().when(tocStyleRenderService.applyHtmlTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(renderedContentWrapperService.wrap(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(cmsAdapter.resolveCategories(any(), any())).thenReturn(List.of());
         lenient().when(cmsAdapter.resolveTags(any(), any())).thenReturn(List.of());
         lenient().when(postRepository.findBySiteIdAndWpPostId(any(), any())).thenReturn(Optional.empty());
+        lenient().when(cmsAdapter.postExists(any(), any())).thenReturn(true);
+        lenient().when(cmsAdapter.mediaExists(any(), any())).thenReturn(true);
         lenient().when(currentActorService.getCurrentActorId()).thenReturn(null);
         lenient().when(userSiteAuthorRepository.findByUserIdAndSiteId(any(), any())).thenReturn(Optional.empty());
     }
@@ -115,7 +134,7 @@ class PostPublishServiceTest {
             String featuredImageFilename, List<String> imageReferences) {
         return new PostPublishCommand(
                 "main", title, slug, "draft", List.of(), List.of(), null, "本文", images, featuredImageFilename,
-                imageReferences, null);
+                imageReferences, null, null);
     }
 
     @Test
@@ -181,6 +200,23 @@ class PostPublishServiceTest {
         service.publish(command("my-article", "My Article", images, null));
 
         verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.gif"), any(), any());
+    }
+
+    @Test
+    void publish_最終HTMLはRenderedContentWrapperServiceでラップされてPostContentへ渡される() {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        when(tocStyleRenderService.applyHtmlTemplate(anyString(), any()))
+                .thenAnswer(inv -> "[template]" + inv.getArgument(0));
+        when(renderedContentWrapperService.wrap(anyString(), any()))
+                .thenReturn("<div class=\"lets-blog-rendered\">wrapped</div>");
+
+        service.publish(command("my-article", "My Article", List.of(), null));
+
+        verify(renderedContentWrapperService).wrap("[template]<p>本文</p>", null);
+        ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
+        verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
+        assertEquals("<div class=\"lets-blog-rendered\">wrapped</div>", contentCaptor.getValue().htmlContent());
     }
 
     @Test
@@ -337,6 +373,59 @@ class PostPublishServiceTest {
         assertNull(contentCaptor.getValue().authorId());
     }
 
+    @Test
+    void publish_長編が閾値を超える画像はリサイズしてからアップロードする() throws Exception {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("1", "https://example.com/?p=1", "draft"));
+        ArgumentCaptor<byte[]> bytesCaptor = ArgumentCaptor.forClass(byte[].class);
+        // renderPng()は透過を持たないPNGのため、アップロード時にJPEGへ変換される(issue #468)。
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.jpg"), any(), bytesCaptor.capture()))
+                .thenReturn(new MediaUploadResult("1", "https://example.com/wp-content/uploads/1.jpg"));
+        when(projectService.resolveArticleImageLongEdgePx(any())).thenReturn(100);
+
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "eyecatch.png", "image/png", renderPng(400, 200)));
+        PostPublishCommand command = new PostPublishCommand(
+                "main", "My Article", "my-article", "draft", List.of(), List.of(), null, "本文", images, null,
+                List.of("assets/eyecatch.png"), null, null);
+
+        service.publish(command);
+
+        BufferedImage uploaded = ImageIO.read(new ByteArrayInputStream(bytesCaptor.getValue()));
+        assertEquals(100, uploaded.getWidth());
+        assertEquals(50, uploaded.getHeight());
+    }
+
+    @Test
+    void publish_長編が閾値以下の画像はリサイズしない() throws Exception {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("1", "https://example.com/?p=1", "draft"));
+        ArgumentCaptor<byte[]> bytesCaptor = ArgumentCaptor.forClass(byte[].class);
+        // renderPng()は透過を持たないPNGのため、アップロード時にJPEGへ変換される(issue #468)。
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.jpg"), any(), bytesCaptor.capture()))
+                .thenReturn(new MediaUploadResult("1", "https://example.com/wp-content/uploads/1.jpg"));
+        when(projectService.resolveArticleImageLongEdgePx(any())).thenReturn(1300);
+
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "eyecatch.png", "image/png", renderPng(400, 200)));
+        PostPublishCommand command = new PostPublishCommand(
+                "main", "My Article", "my-article", "draft", List.of(), List.of(), null, "本文", images, null,
+                List.of("assets/eyecatch.png"), null, null);
+
+        service.publish(command);
+
+        BufferedImage uploaded = ImageIO.read(new ByteArrayInputStream(bytesCaptor.getValue()));
+        assertEquals(400, uploaded.getWidth());
+        assertEquals(200, uploaded.getHeight());
+    }
+
+    private byte[] renderPng(int width, int height) throws Exception {
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ImageIO.write(image, "png", out);
+        return out.toByteArray();
+    }
+
     private String sha256Hex(byte[] data) throws Exception {
         java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
         return java.util.HexFormat.of().formatHex(digest.digest(data));
@@ -359,7 +448,7 @@ class PostPublishServiceTest {
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", images, null,
-                List.of("assets/eyecatch.png"), null);
+                List.of("assets/eyecatch.png"), null, null);
 
         service.publish(command);
 
@@ -385,7 +474,72 @@ class PostPublishServiceTest {
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", images, null,
-                List.of("assets/eyecatch.png"), null);
+                List.of("assets/eyecatch.png"), null, null);
+
+        service.publish(command);
+
+        verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.png"), any(), any());
+    }
+
+    @Test
+    void publish_既存投稿がCMS側に存在しない場合は画像キャッシュを再利用せず再アップロードする() throws Exception {
+        // issue #493: CMS側で投稿(および一緒にアップロードした画像)が削除された後にwpPostIdだけが
+        // ローカルDBに残っているケース。sha256が一致していても、投稿自体が実在しなければ
+        // キャッシュされたURLはリンク切れの可能性が高いため再利用してはならない。
+        com.letsblog.api.domain.Post existingPost = new com.letsblog.api.domain.Post();
+        existingPost.setSiteId(1L);
+        existingPost.setWpPostId("55");
+        String sha256 = sha256Hex(new byte[]{1});
+        existingPost.setUploadedImagesJson(
+                "{\"assets/eyecatch.png\":{\"sha256\":\"" + sha256 + "\","
+                        + "\"url\":\"https://example.com/wp-content/uploads/1.png\",\"mediaId\":\"11\"}}");
+        // 「投稿が消えても画像キャッシュを取りに行かない」ことを示すため敢えて存在するかのように
+        // スタブするが、postExists=falseの分岐で読み出し自体が起きないため未使用になる(意図通り)。
+        lenient().when(postRepository.findBySiteIdAndWpPostId(1L, "55")).thenReturn(Optional.of(existingPost));
+        when(cmsAdapter.postExists(credentials, "55")).thenReturn(false);
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("70", "https://example.com/?p=70", "draft"));
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
+                .thenReturn(new MediaUploadResult("22", "https://example.com/wp-content/uploads/2.png"));
+
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
+        PostPublishCommand command = new PostPublishCommand(
+                "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", images, null,
+                List.of("assets/eyecatch.png"), null, null);
+
+        service.publish(command);
+
+        verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.png"), any(), any());
+        // existingPostId自体はcreateOrUpdatePostへそのまま渡す(実在確認と作成/更新へのフォールバックは
+        // createOrUpdatePost実装内で個別に行うため)。
+        verify(cmsAdapter).createOrUpdatePost(any(), any(), eq("55"));
+    }
+
+    @Test
+    void publish_ハッシュが一致してもメディアがCMS側に実在しなければ再アップロードする() throws Exception {
+        // issue #495: 投稿自体は実在するが、その画像だけがメディアライブラリから個別に削除された
+        // ケース。sha256が一致していても、メディア単位の実在確認(mediaExists)がfalseなら
+        // キャッシュされたURLはリンク切れのため再利用してはならない。
+        com.letsblog.api.domain.Post existingPost = new com.letsblog.api.domain.Post();
+        existingPost.setSiteId(1L);
+        existingPost.setWpPostId("55");
+        String sha256 = sha256Hex(new byte[]{1});
+        existingPost.setUploadedImagesJson(
+                "{\"assets/eyecatch.png\":{\"sha256\":\"" + sha256 + "\","
+                        + "\"url\":\"https://example.com/wp-content/uploads/1.png\",\"mediaId\":\"11\"}}");
+        when(postRepository.findBySiteIdAndWpPostId(1L, "55")).thenReturn(Optional.of(existingPost));
+        when(cmsAdapter.mediaExists(credentials, "11")).thenReturn(false);
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
+                .thenReturn(new MediaUploadResult("22", "https://example.com/wp-content/uploads/2.png"));
+
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
+        PostPublishCommand command = new PostPublishCommand(
+                "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", images, null,
+                List.of("assets/eyecatch.png"), null, null);
 
         service.publish(command);
 
@@ -395,7 +549,7 @@ class PostPublishServiceTest {
     private PostPublishCommand scheduledCommand(String publishScheduledAt) {
         return new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), null, "本文", List.of(), null,
-                List.of(), publishScheduledAt);
+                List.of(), publishScheduledAt, null);
     }
 
     /** siteId=1 を本番サイトに持つプロジェクトを紐づける。 */
@@ -416,6 +570,28 @@ class PostPublishServiceTest {
         project.setProductionSiteId(99L);
         when(projectService.findProjectIdBySiteId(1L)).thenReturn(7L);
         when(projectService.getProjectEntity(7L)).thenReturn(project);
+    }
+
+    @Test
+    void publish_本番サイトへの投稿ではAmazonタグレンダリングにisProductionSite_trueを渡す() {
+        bindProductionSite();
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+
+        service.publish(command("slug", "title", List.of(), null));
+
+        verify(amazonTagRenderService).render(anyString(), eq(7L), eq(true));
+    }
+
+    @Test
+    void publish_本番以外のサイトへの投稿ではAmazonタグレンダリングにisProductionSite_falseを渡す() {
+        bindNonProductionSite();
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+
+        service.publish(command("slug", "title", List.of(), null));
+
+        verify(amazonTagRenderService).render(anyString(), eq(7L), eq(false));
     }
 
     @Test
@@ -485,5 +661,104 @@ class PostPublishServiceTest {
         verify(cmsAdapter).createOrUpdatePost(any(), captor.capture(), any());
         assertEquals("draft", captor.getValue().status());
         assertNull(captor.getValue().publishScheduledAt());
+    }
+
+    @Test
+    void publish_rechartsタグが不正な場合は投稿を拒否する() {
+        when(rechartsTagRenderService.render(anyString()))
+                .thenThrow(new InvalidRechartsTagException("type属性は必須です"));
+
+        InvalidRechartsTagException e = org.junit.jupiter.api.Assertions.assertThrows(
+                InvalidRechartsTagException.class,
+                () -> service.publish(command("my-article", "My Article", List.of(), null)));
+        assertTrue(e.getMessage().contains("type属性"));
+        verify(cmsAdapter, org.mockito.Mockito.never()).createOrUpdatePost(any(), any(), any());
+    }
+
+    @Test
+    void publish_plantumlタグをレンダリングしCMSへアップロードする() {
+        when(plantUmlTagRenderService.render(eq(credentials), anyString()))
+                .thenReturn("![diagram](https://example.com/plantuml-tag-1.png)");
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+
+        service.publish(command("my-article", "My Article", List.of(), null));
+
+        verify(plantUmlTagRenderService).render(eq(credentials), anyString());
+    }
+
+    @Test
+    void publish_plantumlタグが不正な場合は投稿を拒否する() {
+        when(plantUmlTagRenderService.render(eq(credentials), anyString()))
+                .thenThrow(new InvalidPlantUmlTagException("PlantUML図のレンダリングに失敗しました"));
+
+        InvalidPlantUmlTagException e = org.junit.jupiter.api.Assertions.assertThrows(
+                InvalidPlantUmlTagException.class,
+                () -> service.publish(command("my-article", "My Article", List.of(), null)));
+        assertTrue(e.getMessage().contains("PlantUML"));
+        verify(cmsAdapter, org.mockito.Mockito.never()).createOrUpdatePost(any(), any(), any());
+    }
+
+    private PostPublishCommand commandWithStatusAndNotify(String status, Boolean notifySns) {
+        return new PostPublishCommand(
+                "main", "My Article", "my-article", status, List.of(), List.of(), null, "本文", List.of(), null,
+                List.of(), null, notifySns);
+    }
+
+    @Test
+    void publish_本番サイトへの公開ではBuffer通知が呼ばれる() {
+        bindProductionSite();
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "publish"));
+
+        service.publish(commandWithStatusAndNotify("publish", null));
+
+        verify(bufferNotificationService).notifyAsync(any(), eq(1L), eq(7L), eq("My Article"), eq("https://example.com/?p=101"));
+    }
+
+    @Test
+    void publish_本番サイトへの予約投稿でもBuffer通知が呼ばれる() {
+        bindProductionSite();
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "future"));
+        String scheduledAt = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).plusDays(1)
+                .withNano(0).toString();
+
+        service.publish(scheduledCommand(scheduledAt));
+
+        verify(bufferNotificationService).notifyAsync(any(), eq(1L), eq(7L), eq("My Article"), eq("https://example.com/?p=101"));
+    }
+
+    @Test
+    void publish_下書きではBuffer通知が呼ばれない() {
+        bindProductionSite();
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+
+        service.publish(commandWithStatusAndNotify("draft", null));
+
+        verify(bufferNotificationService, org.mockito.Mockito.never()).notifyAsync(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void publish_本番以外のサイトではBuffer通知が呼ばれない() {
+        bindNonProductionSite();
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "publish"));
+
+        service.publish(commandWithStatusAndNotify("publish", null));
+
+        verify(bufferNotificationService, org.mockito.Mockito.never()).notifyAsync(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void publish_notifySnsがfalseならBuffer通知が呼ばれない() {
+        bindProductionSite();
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "publish"));
+
+        service.publish(commandWithStatusAndNotify("publish", false));
+
+        verify(bufferNotificationService, org.mockito.Mockito.never()).notifyAsync(any(), any(), any(), any(), any());
     }
 }

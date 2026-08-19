@@ -12,11 +12,19 @@ import com.letsblog.api.repository.CustomTagRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Service
 public class CustomTagService {
+
+    private static final Pattern OPAQUE_AT_RULE_PATTERN =
+            Pattern.compile("(?i)^@(-\\w+-)?(keyframes|font-face|page)\\b");
 
     private final CustomTagRepository customTagRepository;
     private final AdminAuthorizationService adminAuthorizationService;
@@ -24,19 +32,22 @@ public class CustomTagService {
     private final TocStyleRenderService tocStyleRenderService;
     private final BlogCardTagRenderService blogCardTagRenderService;
     private final AmazonTagRenderService amazonTagRenderService;
+    private final ProjectService projectService;
 
     public CustomTagService(CustomTagRepository customTagRepository,
                              AdminAuthorizationService adminAuthorizationService,
                              TagDesignSettingService tagDesignSettingService,
                              TocStyleRenderService tocStyleRenderService,
                              BlogCardTagRenderService blogCardTagRenderService,
-                             AmazonTagRenderService amazonTagRenderService) {
+                             AmazonTagRenderService amazonTagRenderService,
+                             ProjectService projectService) {
         this.customTagRepository = customTagRepository;
         this.adminAuthorizationService = adminAuthorizationService;
         this.tagDesignSettingService = tagDesignSettingService;
         this.tocStyleRenderService = tocStyleRenderService;
         this.blogCardTagRenderService = blogCardTagRenderService;
         this.amazonTagRenderService = amazonTagRenderService;
+        this.projectService = projectService;
     }
 
     @AuditLog(action = AuditLogAction.CUSTOM_TAG_CREATED, resourceType = "CUSTOM_TAG")
@@ -119,8 +130,9 @@ public class CustomTagService {
         List<CustomTag> tags = projectId == null
                 ? customTagRepository.findByProjectIdIsNull()
                 : customTagRepository.findByProjectIdOrProjectIdIsNull(projectId);
-        String embedTagCss = projectId == null ? "" : buildEmbedTagCss(projectId);
-        return embedTagCss + buildCssFrom(tags);
+        String prefix = projectId == null ? null : resolveCssSelectorPrefix(projectId);
+        String embedTagCss = projectId == null ? "" : applySelectorPrefix(buildEmbedTagCss(projectId), prefix);
+        return embedTagCss + buildCssFrom(tags, prefix);
     }
 
     /**
@@ -138,7 +150,9 @@ public class CustomTagService {
      */
     @Transactional(readOnly = true)
     public String buildProjectCssBundle(Long projectId) {
-        return buildEmbedTagCss(projectId) + buildCssFrom(customTagRepository.findByProjectId(projectId));
+        String prefix = resolveCssSelectorPrefix(projectId);
+        return applySelectorPrefix(buildEmbedTagCss(projectId), prefix)
+                + buildCssFrom(customTagRepository.findByProjectId(projectId), prefix);
     }
 
     /**
@@ -161,16 +175,174 @@ public class CustomTagService {
         return sb.toString();
     }
 
-    private String buildCssFrom(List<CustomTag> tags) {
+    private String buildCssFrom(List<CustomTag> tags, String selectorPrefix) {
         StringBuilder sb = new StringBuilder();
         for (CustomTag tag : tags) {
             if (tag.getCssContent() == null || tag.getCssContent().isBlank()) {
                 continue;
             }
             sb.append("/* === ").append(tag.getTagName()).append(" === */\n");
-            sb.append(tag.getCssContent().strip()).append("\n\n");
+            sb.append(applySelectorPrefix(tag.getCssContent().strip(), selectorPrefix)).append("\n\n");
         }
         return sb.toString();
+    }
+
+    private String resolveCssSelectorPrefix(Long projectId) {
+        return projectService.resolveCssSelectorPrefix(projectService.getProjectEntity(projectId));
+    }
+
+    /**
+     * カスタムタグ管理画面のプレビュー用。DBに保存済みかどうかを問わず、統合CSSバンドルと
+     * 同じプレフィックス付与ルールでCSSを変換する(issue #335)。
+     */
+    @Transactional(readOnly = true)
+    public String previewCss(String css, Long projectId) {
+        return applySelectorPrefix(css, resolveCssSelectorPrefix(projectId));
+    }
+
+    /**
+     * CSSの各セレクタ宣言の先頭に `.prefix ` を付与し、WordPressテーマ側のCSSとのクラス名衝突を防ぐ(issue #298)。
+     * 「1行に1つのセレクタ、`{`も同じ行」という単純な前提では、複数のルールが改行なしで連結されたCSS
+     * (組み込みタグのデザインCSS等、issue #307)や、セレクタが複数行にまたがるCSSでプリフィックスが
+     * 付与されない箇所が生じるため、コメント/文字列リテラル/波括弧の深さを追跡する1パスのスキャナで処理する。
+     * `@media`/`@supports` 等はネストしたセレクタにも引き続きプリフィックスを付与するが、
+     * `@keyframes`(ベンダープレフィックス含む)/`@font-face`/`@page` の中身はセレクタではないため対象外とする。
+     */
+    private String applySelectorPrefix(String css, String selectorPrefix) {
+        if (css == null || css.isEmpty() || selectorPrefix == null || selectorPrefix.isBlank()) {
+            return css == null ? "" : css;
+        }
+
+        StringBuilder output = new StringBuilder();
+        StringBuilder buffer = new StringBuilder();
+        // trueなら、次に現れる`{`の直前のbufferは「セレクタ」として扱いプリフィックスを付与する対象
+        Deque<Boolean> selectorContextStack = new ArrayDeque<>();
+        selectorContextStack.push(true);
+        boolean inComment = false;
+        boolean inString = false;
+        char stringDelimiter = 0;
+
+        int length = css.length();
+        for (int i = 0; i < length; i++) {
+            char c = css.charAt(i);
+
+            if (inComment) {
+                buffer.append(c);
+                if (c == '*' && i + 1 < length && css.charAt(i + 1) == '/') {
+                    buffer.append('/');
+                    i++;
+                    inComment = false;
+                }
+                continue;
+            }
+            if (inString) {
+                buffer.append(c);
+                if (c == '\\' && i + 1 < length) {
+                    buffer.append(css.charAt(i + 1));
+                    i++;
+                    continue;
+                }
+                if (c == stringDelimiter) {
+                    inString = false;
+                }
+                continue;
+            }
+            if (c == '/' && i + 1 < length && css.charAt(i + 1) == '*') {
+                // bufferがここまで空白のみ(=直前に選択子/at-ruleの文字が無い)なら、コメントは
+                // 独立したブロックコメントとみなし、セレクタ判定用のbufferを汚さないよう直接outputへ流す。
+                if (buffer.toString().isBlank()) {
+                    output.append(buffer);
+                    buffer.setLength(0);
+                    output.append(c);
+                    i++;
+                    output.append(css.charAt(i));
+                    i++;
+                    while (i < length) {
+                        char commentChar = css.charAt(i);
+                        output.append(commentChar);
+                        if (commentChar == '*' && i + 1 < length && css.charAt(i + 1) == '/') {
+                            output.append('/');
+                            i++;
+                            break;
+                        }
+                        i++;
+                    }
+                    continue;
+                }
+                inComment = true;
+                buffer.append(c);
+                continue;
+            }
+            if (c == '"' || c == '\'') {
+                inString = true;
+                stringDelimiter = c;
+                buffer.append(c);
+                continue;
+            }
+
+            if (c == '{') {
+                String text = buffer.toString();
+                boolean isSelectorContext = Boolean.TRUE.equals(selectorContextStack.peek());
+                String trimmed = text.strip();
+
+                if (!isSelectorContext || trimmed.isEmpty() || trimmed.startsWith("@")) {
+                    output.append(text).append(c);
+                    boolean opensOpaqueBlock = trimmed.startsWith("@") && OPAQUE_AT_RULE_PATTERN.matcher(trimmed).find();
+                    selectorContextStack.push(isSelectorContext && !trimmed.startsWith("@") ? false
+                            : isSelectorContext && !opensOpaqueBlock);
+                } else {
+                    output.append(prefixSelectorList(text, selectorPrefix)).append(' ').append(c);
+                    selectorContextStack.push(false);
+                }
+                buffer.setLength(0);
+                continue;
+            }
+            if (c == '}') {
+                output.append(buffer).append(c);
+                buffer.setLength(0);
+                if (selectorContextStack.size() > 1) {
+                    selectorContextStack.pop();
+                }
+                continue;
+            }
+            buffer.append(c);
+        }
+        output.append(buffer);
+        return output.toString();
+    }
+
+    /**
+     * カンマ区切りのセレクタリスト(複数行にまたがっていてもよい)の各セレクタに `.prefix ` を付与する。
+     * `:not(a, b)` のような関数擬似クラス内のカンマでは分割しないよう括弧の深さを見ながら分割する。
+     * 子孫結合子(スペース区切り)にするのは、実際にレンダリングされた要素自体にプリフィックスクラスを
+     * 付与するのではなく、記事本文全体を囲むRenderedContentWrapperServiceの&lt;div&gt;にプリフィックス
+     * クラスを持たせ、その祖先要素として一致させる設計のため。
+     */
+    private String prefixSelectorList(String selectorListText, String selectorPrefix) {
+        List<String> selectors = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        int parenDepth = 0;
+        for (int i = 0; i < selectorListText.length(); i++) {
+            char c = selectorListText.charAt(i);
+            if (c == '(') {
+                parenDepth++;
+            } else if (c == ')') {
+                parenDepth = Math.max(0, parenDepth - 1);
+            }
+            if (c == ',' && parenDepth == 0) {
+                selectors.add(current.toString());
+                current.setLength(0);
+            } else {
+                current.append(c);
+            }
+        }
+        selectors.add(current.toString());
+
+        return selectors.stream()
+                .map(selector -> selector.strip().replaceAll("\\s+", " "))
+                .filter(selector -> !selector.isEmpty())
+                .map(selector -> "." + selectorPrefix + " " + selector)
+                .collect(Collectors.joining(", "));
     }
 
     private Optional<CustomTag> findDuplicate(String tagName, Long projectId) {

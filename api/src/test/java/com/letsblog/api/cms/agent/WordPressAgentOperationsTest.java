@@ -137,6 +137,22 @@ class WordPressAgentOperationsTest {
     }
 
     @Test
+    void createOrUpdatePost_カテゴリとタグを空リストにした更新はペイロードに空配列を含める() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/post"))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("\"categoryIds\":[]")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("\"tagIds\":[]")))
+                .andRespond(withSuccess(
+                        "{\"postId\":\"123\",\"guid\":\"http://wordpress/sites/main/?p=123\",\"status\":\"draft\"}",
+                        MediaType.APPLICATION_JSON));
+
+        PostContent content = new PostContent(
+                "Test Title", "test-slug", "<p>HTML</p>", "draft", List.of(), List.of(), null, null);
+        operations.createOrUpdatePost(creds(), content, "123");
+
+        server.verify();
+    }
+
+    @Test
     void findAuthorIdByEmail_見つかればIDを返す() {
         server.expect(requestTo("http://wordpress:9000/wp-cli/find-author"))
                 .andRespond(withSuccess("{\"userId\":\"11\"}", MediaType.APPLICATION_JSON));
@@ -163,6 +179,34 @@ class WordPressAgentOperationsTest {
         PostContent content = new PostContent("Test Title", null, "<p>HTML</p>", "draft", null, null, null, null);
 
         assertThrows(AgentOperationException.class, () -> operations.createOrUpdatePost(creds(), content, null));
+    }
+
+    @Test
+    void postExists_存在すればtrueを返す() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/post-exists"))
+                .andExpect(content().json("{\"slug\":\"main\",\"postId\":\"42\"}"))
+                .andRespond(withSuccess("{\"exists\":true}", MediaType.APPLICATION_JSON));
+
+        assertEquals(true, operations.postExists(creds(), "42"));
+        server.verify();
+    }
+
+    @Test
+    void postExists_存在しなければfalseを返す() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/post-exists"))
+                .andRespond(withSuccess("{\"exists\":false}", MediaType.APPLICATION_JSON));
+
+        assertEquals(false, operations.postExists(creds(), "42"));
+    }
+
+    @Test
+    void postExists_エージェント接続失敗時は判定不能としてtrueを返す() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/post-exists"))
+                .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"boom\"}"));
+
+        assertEquals(true, operations.postExists(creds(), "42"));
     }
 
     @Test

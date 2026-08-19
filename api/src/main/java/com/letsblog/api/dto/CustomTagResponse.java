@@ -14,7 +14,9 @@ public record CustomTagResponse(
         CustomTagFormat tagFormat,
         Long projectId,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+        /** AI生成時にLLMへのリクエストを元にPenpotへ作成したデザインファイルのURL(ベストエフォート、手動作成タグではnull)。 */
+        String penpotFileUrl
 ) {
     public static CustomTagResponse from(CustomTag tag) {
         return new CustomTagResponse(
@@ -26,6 +28,7 @@ public record CustomTagResponse(
                 tag.getTagFormat(),
                 tag.getProjectId(),
                 tag.getCreatedAt(),
-                tag.getUpdatedAt());
+                tag.getUpdatedAt(),
+                tag.getPenpotFileUrl());
     }
 }

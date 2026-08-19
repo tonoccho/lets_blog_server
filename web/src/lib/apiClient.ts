@@ -3,7 +3,7 @@ import { after } from 'next/server';
 import { cookies, headers } from 'next/headers';
 import { getToken } from 'next-auth/jwt';
 
-export type CmsType = "WORDPRESS" | "MICROCMS";
+export type CmsType = "WORDPRESS";
 
 export interface Site {
   id: number;
@@ -41,6 +41,7 @@ export interface GeneratedImageSummary {
   prompt: string;
   checkpoint: string;
   createdAt: string;
+  tags: string[];
 }
 
 export interface GeneratedImageDetail extends GeneratedImageSummary {
@@ -55,6 +56,19 @@ export interface GeneratedImageDetail extends GeneratedImageSummary {
   batchSize: number;
   loraName: string | null;
   loraWeight: number | null;
+}
+
+export interface DiagramSummary {
+  id: number;
+  projectId: number | null;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DiagramDetail extends DiagramSummary {
+  xml: string;
+  svg: string;
 }
 
 export interface SiteRegisterInput {
@@ -337,6 +351,34 @@ export function installWpCli(id: number, actor?: ActorInfo): Promise<WpCliInstal
   return apiFetch<WpCliInstallResult>(`/api/sites/${id}/install-wp-cli`, { method: 'POST', actor });
 }
 
+export type StaticContentType = "PRIVACY_POLICY" | "OPERATOR_INFO" | "TERMS_OF_SERVICE";
+
+export interface StaticContent {
+  id: number;
+  siteId: number;
+  contentType: StaticContentType;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function listStaticContent(siteId: number, actor?: ActorInfo): Promise<StaticContent[]> {
+  return apiFetch<StaticContent[]>(`/api/sites/${siteId}/static-content`, { actor });
+}
+
+export function generateStaticContent(
+  siteId: number,
+  contentType: StaticContentType,
+  actor?: ActorInfo
+): Promise<StaticContent> {
+  return apiFetch<StaticContent>(`/api/sites/${siteId}/static-content/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contentType }),
+    actor,
+  });
+}
+
 export interface SshKeyPair {
   publicKeyLine: string;
   privateKeyPem: string;
@@ -349,6 +391,42 @@ export function generateSshKeyPair(comment: string | undefined, actor?: ActorInf
     body: JSON.stringify({ comment: comment || null }),
     actor,
   });
+}
+
+/**
+ * 名前をつけて保存・管理するSSH鍵ペア(issue #413)。admin限定。秘密鍵は生成直後の
+ * レスポンス(createSshKeyPair)でのみ返り、一覧(listSshKeyPairs)では公開鍵のみを返す。
+ */
+export interface SavedSshKeyPair {
+  id: number;
+  name: string;
+  comment: string | null;
+  publicKeyLine: string;
+  createdAt: string;
+}
+
+export interface GeneratedSshKeyPair extends SavedSshKeyPair {
+  privateKeyPem: string;
+}
+
+export function listSshKeyPairs(actor?: ActorInfo): Promise<SavedSshKeyPair[]> {
+  return apiFetch<SavedSshKeyPair[]>('/api/ssh-key-pairs', { actor });
+}
+
+export function createSshKeyPair(
+  input: { name: string; comment?: string },
+  actor: ActorInfo
+): Promise<GeneratedSshKeyPair> {
+  return apiFetch<GeneratedSshKeyPair>('/api/ssh-key-pairs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: input.name, comment: input.comment || null }),
+    actor,
+  });
+}
+
+export function deleteSshKeyPair(id: number, actor: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/ssh-key-pairs/${id}`, { method: 'DELETE', actor });
 }
 
 export function listPosts(): Promise<PostSummary[]> {
@@ -372,6 +450,15 @@ export function deleteGeneratedImage(id: number): Promise<void> {
   return apiFetch<void>(`/api/generated-images/${id}`, { method: 'DELETE' });
 }
 
+/** 自動生成されたタグを手動で編集・追加する(issue #281)。 */
+export function updateGeneratedImageTags(id: number, tags: string[]): Promise<GeneratedImageDetail> {
+  return apiFetch<GeneratedImageDetail>(`/api/generated-images/${id}/tags`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tags }),
+  });
+}
+
 export async function downloadGeneratedImageFile(id: number): Promise<{ body: ArrayBuffer; mimeType: string }> {
   const res = await fetch(`${serverUrl()}/api/generated-images/${id}/file`, {
     headers: { 'X-API-Key': await currentApiKey() },
@@ -387,12 +474,44 @@ export async function downloadGeneratedImageFile(id: number): Promise<{ body: Ar
   };
 }
 
+export function listDiagrams(projectId?: number): Promise<DiagramSummary[]> {
+  const query = projectId ? `?projectId=${projectId}` : '';
+  return apiFetch<DiagramSummary[]>(`/api/diagrams${query}`);
+}
+
+export function getDiagram(id: number): Promise<DiagramDetail> {
+  return apiFetch<DiagramDetail>(`/api/diagrams/${id}`);
+}
+
+export function deleteDiagram(id: number): Promise<void> {
+  return apiFetch<void>(`/api/diagrams/${id}`, { method: 'DELETE' });
+}
+
+export async function downloadDiagramSvg(id: number): Promise<{ body: ArrayBuffer; mimeType: string }> {
+  const res = await fetch(`${serverUrl()}/api/diagrams/${id}/svg`, {
+    headers: { 'X-API-Key': await currentApiKey() },
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
+  }
+  return {
+    body: await res.arrayBuffer(),
+    mimeType: res.headers.get('content-type') ?? 'image/svg+xml',
+  };
+}
+
 export interface ImageGenerationOptionsResponse {
   checkpoints: string[];
   selectedCheckpoint: string;
   samplers: string[];
   schedulers: string[];
   loras: string[];
+  defaultWidth: number;
+  defaultHeight: number;
+  defaultNegativePrompt: string | null;
+  defaultQualityPrompt: string | null;
 }
 
 export function getImageGenerationOptions(projectId: number, actor?: ActorInfo): Promise<ImageGenerationOptionsResponse> {
@@ -435,6 +554,23 @@ export function generateProjectImages(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
+    actor,
+  });
+}
+
+export interface AiImagePromptResponse {
+  prompt: string;
+}
+
+export function generateImagePromptFromChat(
+  projectId: number,
+  data: { history: PlanChatMessage[]; message: string },
+  actor?: ActorInfo
+): Promise<AiImagePromptResponse> {
+  return apiFetch<AiImagePromptResponse>(`/api/projects/${projectId}/ai/generate-image-prompt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
     actor,
   });
 }
@@ -680,6 +816,16 @@ export function removeRole(userId: number, roleName: string, actor: ActorInfo): 
   return apiFetch<{ message: string }>(`/api/users/${userId}/roles/${roleName}`, { method: 'DELETE', actor });
 }
 
+export interface PostStatusOption {
+  value: string;
+  label: string;
+}
+
+/** 投稿ステータスの正準リスト。VS Code拡張とサーバー側の選択肢を一致させるための共通取得元(issue #472)。 */
+export function getPostStatuses(actor?: ActorInfo): Promise<PostStatusOption[]> {
+  return apiFetch<PostStatusOption[]>('/api/metadata/post-statuses', { actor });
+}
+
 export function requestPasswordReset(email: string): Promise<{ message: string }> {
   return apiFetch<{ message: string }>('/api/auth/password-reset/request', {
     method: 'POST',
@@ -708,6 +854,8 @@ export interface CustomTag {
   projectId: number | null;
   createdAt: string;
   updatedAt: string;
+  /** AI生成時にLLMへのリクエストを元にPenpotへ作成したデザインファイルのURL(ベストエフォート、生成以外では常にnull)。 */
+  penpotFileUrl?: string | null;
 }
 
 export interface CustomTagInput {
@@ -788,6 +936,34 @@ export function generateCustomTag(input: GenerateCustomTagInput, actor: ActorInf
 
 export function validateCustomTag(input: ValidateCustomTagRequest, actor: ActorInfo): Promise<ValidationResult> {
   return apiFetch<ValidationResult>('/api/custom-tags/validate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export interface CustomTagPreviewInput {
+  htmlTemplate: string;
+  cssContent?: string;
+  testContent: string;
+}
+
+export interface CustomTagPreviewResult {
+  html: string;
+  css: string;
+}
+
+/**
+ * プロジェクト詳細のカスタムタグ画面向けプレビュー。DB未保存のテンプレート/CSSでも、実際の投稿と
+ * 同じMarkdownレンダリングとCSSセレクタのプリフィックス付与を適用した結果を返す(issue #335)。
+ */
+export function previewProjectCustomTag(
+  projectId: number,
+  input: CustomTagPreviewInput,
+  actor: ActorInfo
+): Promise<CustomTagPreviewResult> {
+  return apiFetch<CustomTagPreviewResult>(`/api/projects/${projectId}/custom-tags/preview`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
@@ -1100,6 +1276,12 @@ export interface Project {
   productionSite: Site | null;
   masterEnvironment: "test" | "production";
   githubRepository: string | null;
+  cssSelectorPrefix: string | null;
+  defaultNegativePrompt: string | null;
+  defaultQualityPrompt: string | null;
+  defaultGeneratedImageWidth: number | null;
+  defaultGeneratedImageHeight: number | null;
+  defaultArticleImageLongEdgePx: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1149,6 +1331,63 @@ export function updateProjectGithubRepository(
   });
 }
 
+export function updateProjectCssSelectorPrefix(
+  id: number,
+  cssSelectorPrefix: string,
+  actor?: ActorInfo
+): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}/css-selector-prefix`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cssSelectorPrefix }),
+    actor,
+  });
+}
+
+/** 画像生成時のnegative prompt/画質プロンプトのデフォルト値(issue #293)。空文字はアプリ全体のデフォルトへ戻す。 */
+export function updateProjectImageGenerationPromptDefaults(
+  id: number,
+  defaultNegativePrompt: string,
+  defaultQualityPrompt: string,
+  actor?: ActorInfo
+): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}/image-generation-prompt-defaults`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ defaultNegativePrompt, defaultQualityPrompt }),
+    actor,
+  });
+}
+
+/** 画像生成時のデフォルトサイズ(issue #292)。nullはアプリ全体のデフォルト(1920x1080)へ戻す。 */
+export function updateProjectImageGenerationSizeDefaults(
+  id: number,
+  defaultGeneratedImageWidth: number | null,
+  defaultGeneratedImageHeight: number | null,
+  actor?: ActorInfo
+): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}/image-generation-size-defaults`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ defaultGeneratedImageWidth, defaultGeneratedImageHeight }),
+    actor,
+  });
+}
+
+/** 記事投稿時に画像をリサイズする長編の目標px(issue #291)。nullはアプリ全体のデフォルト(1300px)へ戻す。 */
+export function updateProjectArticleImageResizeDefault(
+  id: number,
+  defaultArticleImageLongEdgePx: number | null,
+  actor?: ActorInfo
+): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}/article-image-resize-default`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ defaultArticleImageLongEdgePx }),
+    actor,
+  });
+}
+
 /** valueそのものは返さず、設定済みかどうかのみ返す(SiteDetailのconfiguredSecretFieldsと同じ方針)。 */
 export interface ProjectApiKeyStatus {
   configured: boolean;
@@ -1189,6 +1428,198 @@ export function setProjectBraveSearchApiKey(projectId: number, apiKey: string, a
 
 export function clearProjectBraveSearchApiKey(projectId: number, actor: ActorInfo): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}/api-keys/brave-search-api-key`, { method: 'DELETE', actor });
+}
+
+export interface ProjectGoogleAnalyticsStatus {
+  configured: boolean;
+  propertyId: string | null;
+}
+
+export function getProjectGoogleAnalyticsStatus(
+  projectId: number,
+  actor?: ActorInfo
+): Promise<ProjectGoogleAnalyticsStatus> {
+  return apiFetch<ProjectGoogleAnalyticsStatus>(`/api/projects/${projectId}/api-keys/google-analytics`, { actor });
+}
+
+export function setProjectGoogleAnalyticsCredentials(
+  projectId: number,
+  input: { propertyId: string; serviceAccountJson: string },
+  actor: ActorInfo
+): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/google-analytics`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function clearProjectGoogleAnalyticsCredentials(projectId: number, actor: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/google-analytics`, { method: 'DELETE', actor });
+}
+
+export interface GoogleAnalyticsReport {
+  eligible: boolean;
+  sessions: number | null;
+  activeUsers: number | null;
+  pageViews: number | null;
+  periodLabel: string | null;
+  errorMessage: string | null;
+}
+
+export function getProjectGoogleAnalyticsReport(
+  projectId: number,
+  actor?: ActorInfo
+): Promise<GoogleAnalyticsReport> {
+  return apiFetch<GoogleAnalyticsReport>(`/api/projects/${projectId}/dashboard/google-analytics`, { actor });
+}
+
+export interface ProjectAdSenseStatus {
+  configured: boolean;
+  accountId: string | null;
+  clientId: string | null;
+  hasClientSecret: boolean;
+}
+
+export function getProjectAdSenseStatus(projectId: number, actor?: ActorInfo): Promise<ProjectAdSenseStatus> {
+  return apiFetch<ProjectAdSenseStatus>(`/api/projects/${projectId}/api-keys/adsense`, { actor });
+}
+
+export function setProjectAdSenseSettings(
+  projectId: number,
+  input: { accountId: string; clientId: string },
+  actor: ActorInfo
+): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/adsense`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function setProjectAdSenseClientSecret(
+  projectId: number,
+  clientSecret: string,
+  actor: ActorInfo
+): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/adsense/client-secret`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientSecret }),
+    actor,
+  });
+}
+
+export function clearProjectAdSenseCredentials(projectId: number, actor: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/adsense`, { method: 'DELETE', actor });
+}
+
+export function completeProjectAdSenseOAuth(
+  projectId: number,
+  input: { code: string; redirectUri: string },
+  actor: ActorInfo
+): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/adsense/oauth-callback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export interface AdSenseReport {
+  eligible: boolean;
+  estimatedEarnings: string | null;
+  clicks: number | null;
+  impressions: number | null;
+  periodLabel: string | null;
+  errorMessage: string | null;
+}
+
+export function getProjectAdSenseReport(projectId: number, actor?: ActorInfo): Promise<AdSenseReport> {
+  return apiFetch<AdSenseReport>(`/api/projects/${projectId}/dashboard/adsense`, { actor });
+}
+
+export interface ProjectBufferStatus {
+  configured: boolean;
+  enabled: boolean;
+  hasAccessToken: boolean;
+  profileIds: string | null;
+  delayMinutes: number | null;
+  messageTemplate: string | null;
+}
+
+export function getProjectBufferStatus(projectId: number, actor?: ActorInfo): Promise<ProjectBufferStatus> {
+  return apiFetch<ProjectBufferStatus>(`/api/projects/${projectId}/api-keys/buffer`, { actor });
+}
+
+export function setProjectBufferSettings(
+  projectId: number,
+  input: { enabled: boolean; profileIds: string; delayMinutes: number | null; messageTemplate: string },
+  actor: ActorInfo
+): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/buffer`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function setProjectBufferAccessToken(projectId: number, accessToken: string, actor: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/buffer/access-token`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accessToken }),
+    actor,
+  });
+}
+
+export function clearProjectBufferSettings(projectId: number, actor: ActorInfo): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/buffer`, { method: 'DELETE', actor });
+}
+
+/**
+ * adminユーザー限定のシステム設定画面(issue #403)向け。プロジェクトに紐付かない業務系のアプリ全体設定
+ * (外部LLMサービス連携・メール送信・Google OAuthクライアント・Webフロントの公開URL)を扱う。
+ * 秘匿情報(secret=true)はvalueを含まない(設定済みかどうか・設定元のみ)。
+ */
+export interface AppSetting {
+  key: string;
+  label: string;
+  secret: boolean;
+  configured: boolean;
+  source: 'DATABASE' | 'ENVIRONMENT' | 'NONE';
+  value: string | null;
+}
+
+export function listAppSettings(actor?: ActorInfo): Promise<AppSetting[]> {
+  return apiFetch<AppSetting[]>('/api/system-settings/app-settings', { actor });
+}
+
+export function updateAppSettings(settings: Record<string, string>, actor: ActorInfo): Promise<void> {
+  return apiFetch<void>('/api/system-settings/app-settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+    actor,
+  });
+}
+
+export interface SocialStats {
+  eligible: boolean;
+  postCount: number | null;
+  likes: number | null;
+  shares: number | null;
+  comments: number | null;
+  clicks: number | null;
+  errorMessage: string | null;
+}
+
+export function getProjectSocialStats(projectId: number, actor?: ActorInfo): Promise<SocialStats> {
+  return apiFetch<SocialStats>(`/api/projects/${projectId}/dashboard/social-stats`, { actor });
 }
 
 export interface PlanChatMessage {
@@ -1536,6 +1967,22 @@ export function applyToEnvironment(
   actor?: ActorInfo
 ): Promise<BulkOperationLog> {
   return apiFetch<BulkOperationLog>(`/api/projects/${projectId}/bulk-management/apply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    actor,
+  });
+}
+
+export function applyToAllEnvironments(
+  projectId: number,
+  input: {
+    operationType: BulkOperationType;
+    value: string;
+  },
+  actor?: ActorInfo
+): Promise<BulkOperationLog[]> {
+  return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/apply-all`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
@@ -1902,56 +2349,26 @@ export function getGenerationJob(id: number, actor?: ActorInfo): Promise<Generat
   return apiFetch<GenerationJobDetail>(`/api/generation-jobs/${id}`, { actor });
 }
 
-export interface OllamaModelInfo {
-  name: string;
-  sizeBytes: number;
-  modifiedAt: string | null;
-}
-
-export interface OllamaModelListResponse {
-  models: OllamaModelInfo[];
+export interface LlmModelListResponse {
+  availableModels: string[];
   selected: string;
 }
 
-export function listOllamaModels(projectId: number, actor?: ActorInfo): Promise<OllamaModelListResponse> {
-  return apiFetch<OllamaModelListResponse>(`/api/projects/${projectId}/ai-models/ollama/models`, { actor });
+export function listLlmModels(projectId: number, actor?: ActorInfo): Promise<LlmModelListResponse> {
+  return apiFetch<LlmModelListResponse>(`/api/projects/${projectId}/ai-models/llm/models`, { actor });
 }
 
-export function selectOllamaModel(
+export function selectLlmModel(
   projectId: number,
   modelName: string,
   actor?: ActorInfo
-): Promise<OllamaModelListResponse> {
-  return apiFetch<OllamaModelListResponse>(`/api/projects/${projectId}/ai-models/ollama/models/selection`, {
+): Promise<LlmModelListResponse> {
+  return apiFetch<LlmModelListResponse>(`/api/projects/${projectId}/ai-models/llm/models/selection`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ modelName }),
     actor,
   });
-}
-
-export function installOllamaModel(
-  projectId: number,
-  modelName: string,
-  actor?: ActorInfo
-): Promise<GenerationJob> {
-  return apiFetch<GenerationJob>(`/api/projects/${projectId}/ai-models/ollama/models/install`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ modelName }),
-    actor,
-  });
-}
-
-export function deleteOllamaModel(
-  projectId: number,
-  modelName: string,
-  actor?: ActorInfo
-): Promise<GenerationJob> {
-  return apiFetch<GenerationJob>(
-    `/api/projects/${projectId}/ai-models/ollama/models?modelName=${encodeURIComponent(modelName)}`,
-    { method: 'DELETE', actor }
-  );
 }
 
 export interface ComfyUiCheckpointListResponse {
@@ -2063,6 +2480,28 @@ export function getConnectedServiceStatusDetail(actor?: ActorInfo): Promise<Conn
 export async function streamConnectedServiceStatuses(): Promise<Response> {
   const apiKey = await currentApiKey();
   return fetch(`${serverUrl()}/api/dashboard/service-status/stream`, {
+    headers: { 'X-API-Key': apiKey, Accept: 'text/event-stream' },
+    cache: 'no-store',
+  });
+}
+
+/** このアプリを構成するDockerコンテナ(lbs-*)の稼働状況(issue #280)。 */
+export interface ContainerStatus {
+  id: string;
+  name: string;
+  status: "NORMAL" | "WARNING" | "ERROR";
+  state: string;
+  detail: string;
+}
+
+export function getContainerStatuses(): Promise<ContainerStatus[]> {
+  return apiFetch<ContainerStatus[]>('/api/dashboard/container-status');
+}
+
+/** コンテナ稼働状況をSSEで受け取るためのアップストリーム接続(issue #280)。 */
+export async function streamContainerStatuses(): Promise<Response> {
+  const apiKey = await currentApiKey();
+  return fetch(`${serverUrl()}/api/dashboard/container-status/stream`, {
     headers: { 'X-API-Key': apiKey, Accept: 'text/event-stream' },
     cache: 'no-store',
   });

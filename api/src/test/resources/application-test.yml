@@ -45,13 +45,19 @@ app:
     from: test@letsblog.example.com
   web:
     base-url: http://localhost:3000
-  ollama-base-url: http://localhost:11434
-  ollama-model: qwen2.5:7b-instruct
+  llm-base-url: http://localhost:11434
+  llm-api-key: test-key
+  llm-model: gpt-4o-mini
+  llm-available-models: gpt-4o-mini,gpt-4o
   comfyui-base-url: http://localhost:8188
   comfyui-checkpoint: v1-5-pruned-emaonly.safetensors
   comfyui-models-path: /tmp/comfyui-models
   brave-search-base-url: https://api.search.brave.com
   brave-search-api-key: test-key
+  google-analytics-data-api-base-url: https://analyticsdata.googleapis.com
+  google-analytics-oauth-token-uri: https://oauth2.googleapis.com/token
+  google-oauth-token-uri: https://oauth2.googleapis.com/token
+  adsense-data-api-base-url: https://adsense.googleapis.com
   plantuml-base-url: http://localhost:8085
   wordpress-provision-base-url: http://localhost:9000
   wordpress-provision-token: test-token
@@ -64,3 +70,5 @@ app:
   backup-mysql-database: lets_blog_test
   backup-mysql-user: test_user
   backup-mysql-password: test_pass
+  buffer-api-base-url: http://buffer.test
+  buffer-request-timeout-seconds: 30

@@ -1,13 +1,22 @@
 package com.letsblog.api.controller;
 
+import com.letsblog.api.dto.CustomTagPreviewRequest;
+import com.letsblog.api.dto.CustomTagPreviewResponse;
 import com.letsblog.api.dto.CustomTagResponse;
 import com.letsblog.api.service.AdminAuthorizationService;
+import com.letsblog.api.service.AmazonTagRenderService;
+import com.letsblog.api.service.BlogCardTagRenderService;
+import com.letsblog.api.service.CustomTagRenderService;
 import com.letsblog.api.service.CustomTagService;
+import com.letsblog.api.service.RenderedContentWrapperService;
+import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -22,11 +31,24 @@ import java.util.List;
 public class ProjectCustomTagController {
 
     private final CustomTagService customTagService;
+    private final CustomTagRenderService customTagRenderService;
+    private final BlogCardTagRenderService blogCardTagRenderService;
+    private final AmazonTagRenderService amazonTagRenderService;
+    private final RenderedContentWrapperService renderedContentWrapperService;
     private final AdminAuthorizationService adminAuthorizationService;
 
     public ProjectCustomTagController(
-            CustomTagService customTagService, AdminAuthorizationService adminAuthorizationService) {
+            CustomTagService customTagService,
+            CustomTagRenderService customTagRenderService,
+            BlogCardTagRenderService blogCardTagRenderService,
+            AmazonTagRenderService amazonTagRenderService,
+            RenderedContentWrapperService renderedContentWrapperService,
+            AdminAuthorizationService adminAuthorizationService) {
         this.customTagService = customTagService;
+        this.customTagRenderService = customTagRenderService;
+        this.blogCardTagRenderService = blogCardTagRenderService;
+        this.amazonTagRenderService = amazonTagRenderService;
+        this.renderedContentWrapperService = renderedContentWrapperService;
         this.adminAuthorizationService = adminAuthorizationService;
     }
 
@@ -44,5 +66,24 @@ public class ProjectCustomTagController {
                 .contentType(MediaType.parseMediaType("text/css"))
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"custom-tags.css\"")
                 .body(css);
+    }
+
+    /**
+     * カスタムタグ管理画面のプレビュー用。DB保存前のテンプレート/CSSでも、実際の投稿と同じ
+     * Markdownレンダリングとセレクタプリフィックス付与を適用した結果を返す(issue #335)。
+     * テスト本文中の組み込みタグ(`[blogcard URL]`、`[amazon URL]`)も、実際の投稿と同じ
+     * BlogCardTagRenderService/AmazonTagRenderServiceで展開してから{{content}}へ差し込む(issue #346)。
+     */
+    @PostMapping("/preview")
+    public CustomTagPreviewResponse preview(
+            @PathVariable Long projectId, @Valid @RequestBody CustomTagPreviewRequest request) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        String testContent = blogCardTagRenderService.render(request.testContent(), projectId);
+        // プレビューは特定サイトに紐付かないため、本番サイト向けの実リンクは常に非活性化する(issue #389)。
+        testContent = amazonTagRenderService.render(testContent, projectId, false);
+        String html = customTagRenderService.previewTemplate(request.htmlTemplate(), testContent);
+        String wrappedHtml = renderedContentWrapperService.wrap(html, projectId);
+        String css = customTagService.previewCss(request.cssContent(), projectId);
+        return new CustomTagPreviewResponse(wrappedHtml, css);
     }
 }

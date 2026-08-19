@@ -25,6 +25,9 @@
       <span id="pageStatus" aria-live="polite"></span>
       <button type="button" id="nextButton" aria-label="次のページの画像を表示">次へ</button>
     </div>
+    <div class="pager" id="galleryRefreshBar">
+      <button type="button" id="refreshButton" aria-label="画像一覧を再取得">更新</button>
+    </div>
   </section>
 
   <section class="section preview-section" id="previewSection" style="display: none;" aria-labelledby="previewTitle">
@@ -39,6 +42,10 @@
   </section>
 
   <div id="message" role="status" aria-live="polite"></div>
+
+  <div id="galleryContextMenu" class="context-menu" role="menu" style="display: none;">
+    <button type="button" id="regenerateMenuItem" role="menuitem">この設定で画像生成</button>
+  </div>
 </main>
 
 {{sharedScripts}}

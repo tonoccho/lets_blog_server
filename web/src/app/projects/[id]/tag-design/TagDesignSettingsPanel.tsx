@@ -231,7 +231,7 @@ function TagDesignGenerationForm({
     <div className="space-y-2 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-4">
       <h3 className="text-sm font-medium">AIでデザインを生成</h3>
       <p className="text-xs text-neutral-600 dark:text-neutral-400">
-        Ollamaに自然言語で見た目の要望を送信すると、CSS(必要であればHTMLテンプレートも)が自動生成されます。
+        AIに自然言語で見た目の要望を送信すると、CSS(必要であればHTMLテンプレートも)が自動生成されます。
         生成結果はすぐには保存されません。内容を確認し、適用したうえで下のフォームから保存してください。
       </p>
       <textarea

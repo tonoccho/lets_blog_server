@@ -7,6 +7,9 @@ import {
   updateProject,
   updateMasterEnvironment,
   updateProjectGithubRepository,
+  updateProjectImageGenerationPromptDefaults,
+  updateProjectImageGenerationSizeDefaults,
+  updateProjectArticleImageResizeDefault,
   setProjectGithubToken,
   clearProjectGithubToken,
   setProjectBraveSearchApiKey,
@@ -16,6 +19,15 @@ import {
   removeProjectUser,
   syncProjectEnvironment,
   applyToEnvironment,
+  applyToAllEnvironments,
+  setProjectGoogleAnalyticsCredentials,
+  clearProjectGoogleAnalyticsCredentials,
+  setProjectAdSenseSettings,
+  setProjectAdSenseClientSecret,
+  clearProjectAdSenseCredentials,
+  setProjectBufferSettings,
+  setProjectBufferAccessToken,
+  clearProjectBufferSettings,
   syncCategoryToMaster,
   deleteCategoryEverywhere,
   syncTagToMaster,
@@ -34,10 +46,8 @@ import {
   deletePluginEverywhere,
   deleteThemeEverywhere,
   runBulkOperationUpload,
-  listOllamaModels,
-  selectOllamaModel,
-  installOllamaModel,
-  deleteOllamaModel,
+  listLlmModels,
+  selectLlmModel,
   listComfyUiCheckpoints,
   selectComfyUiCheckpoint,
   installComfyUiCheckpoint,
@@ -45,13 +55,18 @@ import {
   getGenerationJob,
   getImageGenerationOptions,
   generateProjectImages,
+  generateImagePromptFromChat,
   uploadProjectAssetImage,
+  listGeneratedImages,
   listPostComparison,
   deletePostEverywhere,
   updatePostStatusEverywhere,
+  getPostStatuses,
+  PostStatusOption,
   ImageGenerationOptionsResponse,
   AiImageGenerationParams,
   AiImageResult,
+  PlanChatMessage,
   PostComparisonPage,
   PostType,
   ProjectEnvironment,
@@ -61,9 +76,10 @@ import {
   TermComparisonPage,
   StatusComparisonPage,
   PluginThemeStatus,
-  OllamaModelListResponse,
+  LlmModelListResponse,
   ComfyUiCheckpointListResponse,
   GenerationJobDetail,
+  GeneratedImageSummary,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 
@@ -187,6 +203,87 @@ export async function updateProjectGithubRepositoryAction(
   return { success: true };
 }
 
+export interface UpdateImageGenerationPromptDefaultsState {
+  error?: string;
+  success?: boolean;
+}
+
+export async function updateImageGenerationPromptDefaultsAction(
+  projectId: number,
+  _prevState: UpdateImageGenerationPromptDefaultsState,
+  formData: FormData
+): Promise<UpdateImageGenerationPromptDefaultsState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const defaultNegativePrompt = String(formData.get("defaultNegativePrompt") ?? "").trim();
+  const defaultQualityPrompt = String(formData.get("defaultQualityPrompt") ?? "").trim();
+
+  try {
+    await updateProjectImageGenerationPromptDefaults(projectId, defaultNegativePrompt, defaultQualityPrompt, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  return { success: true };
+}
+
+export interface UpdateImageGenerationSizeDefaultsState {
+  error?: string;
+  success?: boolean;
+}
+
+export async function updateImageGenerationSizeDefaultsAction(
+  projectId: number,
+  _prevState: UpdateImageGenerationSizeDefaultsState,
+  formData: FormData
+): Promise<UpdateImageGenerationSizeDefaultsState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const widthRaw = String(formData.get("defaultGeneratedImageWidth") ?? "").trim();
+  const heightRaw = String(formData.get("defaultGeneratedImageHeight") ?? "").trim();
+  const defaultGeneratedImageWidth = widthRaw ? Number(widthRaw) : null;
+  const defaultGeneratedImageHeight = heightRaw ? Number(heightRaw) : null;
+
+  try {
+    await updateProjectImageGenerationSizeDefaults(
+      projectId, defaultGeneratedImageWidth, defaultGeneratedImageHeight, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  return { success: true };
+}
+
+export interface UpdateArticleImageResizeDefaultState {
+  error?: string;
+  success?: boolean;
+}
+
+export async function updateArticleImageResizeDefaultAction(
+  projectId: number,
+  _prevState: UpdateArticleImageResizeDefaultState,
+  formData: FormData
+): Promise<UpdateArticleImageResizeDefaultState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const raw = String(formData.get("defaultArticleImageLongEdgePx") ?? "").trim();
+  const defaultArticleImageLongEdgePx = raw ? Number(raw) : null;
+
+  try {
+    await updateProjectArticleImageResizeDefault(projectId, defaultArticleImageLongEdgePx, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  return { success: true };
+}
+
 export interface ProjectApiKeyFormState {
   error?: string;
   success?: boolean;
@@ -250,6 +347,139 @@ export async function clearProjectBraveSearchApiKeyAction(projectId: number): Pr
   const actor = { id: Number(session.user.id), role: session.user.role };
   await clearProjectBraveSearchApiKey(projectId, actor);
   revalidatePath(`/projects/${projectId}`);
+}
+
+export async function setProjectGoogleAnalyticsCredentialsAction(
+  projectId: number,
+  _prevState: ProjectApiKeyFormState,
+  formData: FormData
+): Promise<ProjectApiKeyFormState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const propertyId = String(formData.get("propertyId") ?? "").trim();
+  const serviceAccountJson = String(formData.get("serviceAccountJson") ?? "").trim();
+  if (!propertyId) {
+    return { error: "GA4プロパティIDを入力してください。" };
+  }
+  if (!serviceAccountJson) {
+    return { error: "サービスアカウントのJSON鍵を入力してください。" };
+  }
+
+  try {
+    await setProjectGoogleAnalyticsCredentials(projectId, { propertyId, serviceAccountJson }, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}/settings/google-analytics`);
+  revalidatePath(`/projects/${projectId}/dashboard`);
+  return { success: true };
+}
+
+export async function clearProjectGoogleAnalyticsCredentialsAction(projectId: number): Promise<void> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  await clearProjectGoogleAnalyticsCredentials(projectId, actor);
+  revalidatePath(`/projects/${projectId}/settings/google-analytics`);
+  revalidatePath(`/projects/${projectId}/dashboard`);
+}
+
+export async function setProjectAdSenseSettingsAction(
+  projectId: number,
+  _prevState: ProjectApiKeyFormState,
+  formData: FormData
+): Promise<ProjectApiKeyFormState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const accountId = String(formData.get("accountId") ?? "").trim();
+  const clientId = String(formData.get("clientId") ?? "").trim();
+  const clientSecret = String(formData.get("clientSecret") ?? "").trim();
+  if (!accountId) {
+    return { error: "AdSenseパブリッシャーIDを入力してください。" };
+  }
+  if (!clientId) {
+    return { error: "Google OAuthクライアントIDを入力してください。" };
+  }
+
+  try {
+    await setProjectAdSenseSettings(projectId, { accountId, clientId }, actor);
+    if (clientSecret) {
+      await setProjectAdSenseClientSecret(projectId, clientSecret, actor);
+    }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}/settings/adsense`);
+  revalidatePath(`/projects/${projectId}/dashboard`);
+  return { success: true };
+}
+
+export async function clearProjectAdSenseCredentialsAction(projectId: number): Promise<void> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  await clearProjectAdSenseCredentials(projectId, actor);
+  revalidatePath(`/projects/${projectId}/settings/adsense`);
+  revalidatePath(`/projects/${projectId}/dashboard`);
+}
+
+export async function setProjectBufferSettingsAction(
+  projectId: number,
+  _prevState: ProjectApiKeyFormState,
+  formData: FormData
+): Promise<ProjectApiKeyFormState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const enabled = formData.get("enabled") === "on";
+  const profileIds = String(formData.get("profileIds") ?? "").trim();
+  const delayMinutesRaw = String(formData.get("delayMinutes") ?? "").trim();
+  const messageTemplate = String(formData.get("messageTemplate") ?? "").trim();
+  const delayMinutes = delayMinutesRaw ? Number(delayMinutesRaw) : null;
+
+  try {
+    await setProjectBufferSettings(projectId, { enabled, profileIds, delayMinutes, messageTemplate }, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}/settings/buffer`);
+  revalidatePath(`/projects/${projectId}/dashboard`);
+  return { success: true };
+}
+
+export async function setProjectBufferAccessTokenAction(
+  projectId: number,
+  _prevState: ProjectApiKeyFormState,
+  formData: FormData
+): Promise<ProjectApiKeyFormState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const accessToken = String(formData.get("accessToken") ?? "").trim();
+  if (!accessToken) {
+    return { error: "アクセストークンを入力してください。" };
+  }
+
+  try {
+    await setProjectBufferAccessToken(projectId, accessToken, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}/settings/buffer`);
+  revalidatePath(`/projects/${projectId}/dashboard`);
+  return { success: true };
+}
+
+export async function clearProjectBufferSettingsAction(projectId: number): Promise<void> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  await clearProjectBufferSettings(projectId, actor);
+  revalidatePath(`/projects/${projectId}/settings/buffer`);
+  revalidatePath(`/projects/${projectId}/dashboard`);
 }
 
 export interface AddProjectUserState {
@@ -400,6 +630,33 @@ export async function applyToEnvironmentAction(
     );
     revalidatePath(`/projects/${projectId}`);
     return { success: true, results: [result] };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function applyToAllEnvironmentsAction(
+  projectId: number,
+  _prevState: BulkOperationState,
+  formData: FormData
+): Promise<BulkOperationState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const operationType = String(formData.get("operationType") ?? "") as BulkOperationType;
+  const value = String(formData.get("value") ?? "").trim();
+
+  if (operationType !== "PLUGIN_INSTALL" && operationType !== "THEME_INSTALL") {
+    return { error: "全環境への一括インストールはプラグイン/テーマのインストールのみ対応しています。" };
+  }
+  if (!value) {
+    return { error: "slugを入力してください。" };
+  }
+
+  try {
+    const results = await applyToAllEnvironments(projectId, { operationType, value }, actor);
+    revalidatePath(`/projects/${projectId}`);
+    return { success: true, results };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -577,13 +834,13 @@ export interface AiModelActionState {
   jobId?: number;
 }
 
-export async function fetchOllamaModelsAction(projectId: number): Promise<OllamaModelListResponse> {
+export async function fetchLlmModelsAction(projectId: number): Promise<LlmModelListResponse> {
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };
-  return listOllamaModels(projectId, actor);
+  return listLlmModels(projectId, actor);
 }
 
-export async function selectOllamaModelAction(
+export async function selectLlmModelAction(
   projectId: number,
   modelName: string
 ): Promise<{ error?: string }> {
@@ -591,42 +848,12 @@ export async function selectOllamaModelAction(
   const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
-    await selectOllamaModel(projectId, modelName, actor);
+    await selectLlmModel(projectId, modelName, actor);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
   revalidatePath(`/projects/${projectId}`);
   return {};
-}
-
-export async function installOllamaModelAction(
-  projectId: number,
-  modelName: string
-): Promise<AiModelActionState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-
-  try {
-    const job = await installOllamaModel(projectId, modelName, actor);
-    return { jobId: job.id };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-export async function deleteOllamaModelAction(
-  projectId: number,
-  modelName: string
-): Promise<AiModelActionState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-
-  try {
-    const job = await deleteOllamaModel(projectId, modelName, actor);
-    return { jobId: job.id };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
-  }
 }
 
 export async function fetchComfyUiCheckpointsAction(projectId: number): Promise<ComfyUiCheckpointListResponse> {
@@ -709,6 +936,21 @@ export async function generateProjectImagesAction(
   }
 }
 
+export async function generateImagePromptAction(
+  projectId: number,
+  data: { history: PlanChatMessage[]; message: string }
+): Promise<{ prompt?: string; error?: string }> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const result = await generateImagePromptFromChat(projectId, data, actor);
+    return { prompt: result.prompt };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export async function fetchPostComparisonAction(
   projectId: number,
   postType: PostType,
@@ -717,6 +959,12 @@ export async function fetchPostComparisonAction(
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };
   return listPostComparison(projectId, postType, page, actor);
+}
+
+export async function fetchPostStatusesAction(): Promise<PostStatusOption[]> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  return getPostStatuses(actor);
 }
 
 export async function deletePostEverywhereAction(
@@ -752,6 +1000,12 @@ export async function updatePostStatusEverywhereAction(
   }
   revalidatePath(`/projects/${projectId}`);
   return {};
+}
+
+/** アセット画像生成パネルから、生成画像ギャラリー全体を選択肢として表示するために取得する(issue #436)。 */
+export async function fetchGeneratedImagesAction(): Promise<GeneratedImageSummary[]> {
+  await requireAdminSession();
+  return listGeneratedImages();
 }
 
 export async function uploadProjectAssetImageAction(

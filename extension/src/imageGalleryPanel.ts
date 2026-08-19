@@ -61,6 +61,8 @@ export class ImageGalleryPanel extends WebviewPanelBase<
         return this._handleSetAsEyecatch(message);
       case 'deleteImage':
         return this._handleDeleteImage(message);
+      case 'regenerateWithSettings':
+        return this._handleRegenerateWithSettings(message);
       case 'cancel':
         this.cancelCurrentOperation();
         return;
@@ -159,6 +161,20 @@ export class ImageGalleryPanel extends WebviewPanelBase<
 
     this.postMessage('imageDeleted', { imageId: message.imageId });
     vscode.window.showInformationMessage(`生成画像(ID: ${message.imageId})を削除しました。`);
+  }
+
+  /**
+   * 右クリックメニューの「この設定で画像生成」(issue #294)。選択画像の生成パラメータを
+   * 取得し、それを反映した状態でGenerate Imageパネルを開く(既に開いていれば前面に出して反映)。
+   */
+  private async _handleRegenerateWithSettings(
+    message: Extract<ImageGalleryInboundMessage, { command: 'regenerateWithSettings' }>
+  ): Promise<void> {
+    const { apiKey, actor } = await this._requireCredentials();
+    const detail = await api.getGeneratedImageDetail(getServerUrl(), apiKey, actor, message.imageId);
+
+    const { ImageGenPanel } = await import('./imageGenPanel');
+    ImageGenPanel.createOrShow(this.context, this._editor, this._baseDir, this._projectId, detail);
   }
 
   /** サーバーから画像を取得し、{baseDir}/assets 配下へ保存してファイル名を返す。 */

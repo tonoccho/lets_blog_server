@@ -47,17 +47,26 @@ services:
       SPRING_DATASOURCE_USERNAME: ${MYSQL_USER}
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
-      SPRING_MAIL_HOST: mailhog
-      SPRING_MAIL_PORT: 1025
+      MAIL_HOST: ${MAIL_HOST}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME}
+      MAIL_PASSWORD: ${MAIL_PASSWORD}
       APP_MAIL_FROM: ${APP_MAIL_FROM:-noreply@letsblog.example.com}
       APP_WEB_BASE_URL: ${APP_WEB_BASE_URL:-https://localhost}
-      OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b-instruct}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_AVAILABLE_MODELS: ${LLM_AVAILABLE_MODELS:-gpt-4o-mini,gpt-4o,gpt-4.1-mini}
+      LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-120}
       COMFYUI_BASE_URL: http://comfyui:8188
       COMFYUI_CHECKPOINT: ${COMFYUI_CHECKPOINT:-v1-5-pruned-emaonly.safetensors}
       COMFYUI_MODELS_PATH: /comfyui-models
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY}
       PLANTUML_BASE_URL: http://plantuml:8080
+      PENPOT_BASE_URL: http://penpot-frontend:8080
+      PENPOT_PUBLIC_URL: ${PENPOT_PUBLIC_URL:-http://localhost:9001}
+      PENPOT_SERVICE_EMAIL: ${PENPOT_SERVICE_EMAIL:-lbs-service@letsblog.local}
+      PENPOT_SERVICE_PASSWORD: ${PENPOT_SERVICE_PASSWORD}
       WORDPRESS_PROVISION_BASE_URL: http://wordpress:9000
       WP_PROVISION_TOKEN: ${WP_PROVISION_TOKEN}
       BACKUP_MYSQL_HOST: mysql
@@ -69,6 +78,7 @@ services:
       GENERATED_IMAGES_STORAGE_PATH: /app/data/generated-images
       VSCODE_EXTENSION_SOURCE_PATH: /app/extension-src
       VSCODE_EXTENSION_BUILD_PATH: /app/extension-build
+      DOCKER_SOCKET_PROXY_BASE_URL: http://docker-socket-proxy:2375
     volumes:
       - bulk_upload_files:/app/data/bulk-uploads
       - generated_images:/app/data/generated-images
@@ -79,15 +89,23 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-      mailhog:
+      docker-socket-proxy:
         condition: service_started
     networks:
       - lbs-net
 
-  mailhog:
-    image: mailhog/mailhog:latest
-    container_name: lbs-mailhog
+  # apiコンテナからダッシュボードのコンテナ稼働状況(issue #280)取得のためだけにDocker Engine APIを
+  # 読み取り専用で中継する。apiコンテナ自体にはdocker.sockを渡さない(コンテナ作成/実行系のPOST操作は
+  # 一切許可しない=侵害時にDockerホストを乗っ取られるリスクを避ける)。
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: lbs-docker-socket-proxy
     restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      POST: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - lbs-net
 
@@ -125,50 +143,128 @@ services:
     networks:
       - lbs-net
 
-  penpot_postgres:
-    image: postgres:15-alpine
-    container_name: lbs-penpot-postgres
+  penpot-frontend:
+    image: "penpotapp/frontend:${PENPOT_VERSION:-2.16}"
+    container_name: lbs-penpot-frontend
     restart: unless-stopped
-    environment:
-      POSTGRES_DB: penpot
-      POSTGRES_USER: penpot_user
-      POSTGRES_PASSWORD: ${PENPOT_DB_PASSWORD}
+    ports:
+      - "9001:8080"
     volumes:
-      - penpot_postgres:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U penpot_user"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - penpot_assets:/opt/data/assets
+    depends_on:
+      - penpot-backend
+      - penpot-exporter
+      - penpot-mcp
     networks:
       - lbs-net
-
-  penpot:
-    image: penpot/penpot:latest
-    container_name: lbs-penpot
-    restart: unless-stopped
     environment:
-      PENPOT_POSTGRES_URI: "postgresql://penpot_user:${PENPOT_DB_PASSWORD}@penpot_postgres:5432/penpot"
-      PENPOT_PUBLIC_URI: "https://localhost/penpot"
+      PENPOT_FLAGS: disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp
+      PENPOT_PUBLIC_URI: http://localhost:9001
+      PENPOT_HTTP_SERVER_MAX_BODY_SIZE: 367001600
+      PENPOT_HTTP_SERVER_MAX_MULTIPART_BODY_SIZE: 367001600
+
+  penpot-backend:
+    image: "penpotapp/backend:${PENPOT_VERSION:-2.16}"
+    container_name: lbs-penpot-backend
+    restart: unless-stopped
+    volumes:
+      - penpot_assets:/opt/data/assets
     depends_on:
-      penpot_postgres:
+      penpot-postgres:
+        condition: service_healthy
+      penpot-valkey:
         condition: service_healthy
     networks:
       - lbs-net
+    environment:
+      PENPOT_FLAGS: disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp
+      PENPOT_PUBLIC_URI: http://localhost:9001
+      PENPOT_HTTP_SERVER_MAX_BODY_SIZE: 367001600
+      PENPOT_HTTP_SERVER_MAX_MULTIPART_BODY_SIZE: 367001600
+      PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY}
+      PENPOT_DATABASE_URI: postgresql://penpot-postgres/penpot
+      PENPOT_DATABASE_USERNAME: penpot
+      PENPOT_DATABASE_PASSWORD: penpot
+      PENPOT_REDIS_URI: redis://penpot-valkey/0
+      PENPOT_OBJECTS_STORAGE_BACKEND: fs
+      PENPOT_OBJECTS_STORAGE_FS_DIRECTORY: /opt/data/assets
+      PENPOT_TELEMETRY_ENABLED: "true"
+      PENPOT_TELEMETRY_REFERER: docker-compose
+      PENPOT_SMTP_DEFAULT_FROM: no-reply@example.com
+      PENPOT_SMTP_DEFAULT_REPLY_TO: no-reply@example.com
+      PENPOT_SMTP_HOST: penpot-mailcatch
+      PENPOT_SMTP_PORT: 1025
+      PENPOT_SMTP_USERNAME:
+      PENPOT_SMTP_PASSWORD:
+      PENPOT_SMTP_TLS: "false"
+      PENPOT_SMTP_SSL: "false"
 
-  ollama:
-    image: ollama/ollama:latest
-    container_name: lbs-ollama
+  penpot-mcp:
+    image: "penpotapp/mcp:${PENPOT_VERSION:-2.16}"
+    container_name: lbs-penpot-mcp
     restart: unless-stopped
+    networks:
+      - lbs-net
+
+  penpot-exporter:
+    image: "penpotapp/exporter:${PENPOT_VERSION:-2.16}"
+    container_name: lbs-penpot-exporter
+    restart: unless-stopped
+    depends_on:
+      penpot-valkey:
+        condition: service_healthy
+    networks:
+      - lbs-net
+    environment:
+      PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY}
+      PENPOT_PUBLIC_URI: http://localhost:9001
+      PENPOT_INTERNAL_URI: http://penpot-frontend:8080
+      PENPOT_REDIS_URI: redis://penpot-valkey/0
+
+  penpot-postgres:
+    image: "postgres:15"
+    container_name: lbs-penpot-postgres
+    restart: unless-stopped
+    stop_signal: SIGINT
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U penpot"]
+      interval: 2s
+      timeout: 10s
+      retries: 5
+      start_period: 2s
     volumes:
-      - ollama_models:/root/.ollama
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+      - penpot_postgres:/var/lib/postgresql/data
+    networks:
+      - lbs-net
+    environment:
+      - POSTGRES_INITDB_ARGS=--data-checksums
+      - POSTGRES_DB=penpot
+      - POSTGRES_USER=penpot
+      - POSTGRES_PASSWORD=penpot
+
+  penpot-valkey:
+    image: valkey/valkey:8.1
+    container_name: lbs-penpot-valkey
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli ping | grep PONG"]
+      interval: 1s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
+    networks:
+      - lbs-net
+    environment:
+      - VALKEY_EXTRA_FLAGS=--maxmemory 128mb --maxmemory-policy volatile-lfu
+
+  penpot-mailcatch:
+    image: sj26/mailcatcher:latest
+    container_name: lbs-penpot-mailcatch
+    restart: unless-stopped
+    expose:
+      - '1025'
+    ports:
+      - "1080:1080"
     networks:
       - lbs-net
 
@@ -196,27 +292,32 @@ services:
     networks:
       - lbs-net
 
-  mcp-penpot:
-    build:
-      context: ./mcp-server
-      dockerfile: Dockerfile
-    container_name: lbs-mcp-penpot
+  drawio:
+    image: ${DRAWIO_IMAGE:-jgraph/drawio:latest}
+    container_name: lbs-drawio
     restart: unless-stopped
-    environment:
-      OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b-instruct}
-      MCP_PORT: 3000
-      MCP_LOG_LEVEL: ${MCP_LOG_LEVEL:-info}
-    depends_on:
-      - ollama
     networks:
       - lbs-net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
+
+  # mcp-penpot:
+  #   build:
+  #     context: ./mcp-server
+  #     dockerfile: Dockerfile
+  #   container_name: lbs-mcp-penpot
+  #   restart: unless-stopped
+  #   environment:
+  #     LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+  #     LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+  #     MCP_PORT: 3000
+  #     MCP_LOG_LEVEL: ${MCP_LOG_LEVEL:-info}
+  #   networks:
+  #     - lbs-net
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 10s
 
   wordpress:
     build:
@@ -245,7 +346,7 @@ networks:
 volumes:
   mysql_data:
   penpot_postgres:
-  ollama_models:
+  penpot_assets:
   comfyui_models:
   comfyui_output:
   wordpress_sites:

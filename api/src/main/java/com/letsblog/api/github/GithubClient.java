@@ -15,7 +15,7 @@ import java.util.List;
 
 /**
  * GitHub REST API(issues)を利用したissue作成クライアント。
- * Octokit等のライブラリは導入せず、OllamaClient/WordPressAdapterと同様にRestClientの薄いラッパーとして実装する。
+ * Octokit等のライブラリは導入せず、LlmClient/WordPressAdapterと同様にRestClientの薄いラッパーとして実装する。
  */
 @Component
 public class GithubClient {

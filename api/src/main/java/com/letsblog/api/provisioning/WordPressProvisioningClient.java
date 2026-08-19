@@ -1,8 +1,11 @@
 package com.letsblog.api.provisioning;
 
 import com.letsblog.api.service.ProvisioningException;
+import com.letsblog.api.service.SiteAlreadyProvisionedException;
+import com.letsblog.api.service.SiteNotFoundException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -33,8 +36,32 @@ public class WordPressProvisioningClient {
                     .body(command)
                     .retrieve()
                     .body(ProvisionResult.class);
+        } catch (HttpClientErrorException.Conflict e) {
+            // 409は「今回のリクエストでは何も作成していない」ことを意味するため、
+            // 呼び出し元が誤って既存サイトをdeprovisionしないよう専用の例外にする(issue #315)。
+            throw new SiteAlreadyProvisionedException(
+                    "WordPressサイト '" + command.slug() + "' は既に構築済みですがDBには登録されていません。"
+                            + "既存のWordPress環境を保持したまま登録するには、サイトの取り込み機能を使用してください: " + e.getMessage(),
+                    e);
         } catch (RestClientException e) {
             throw new ProvisioningException("WordPress自動構築に失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /** DBには未登録だが実体が既に存在するWordPressサイトを取り込む(issue #317)。 */
+    public ProvisionResult adopt(AdoptCommand command) {
+        try {
+            return client.post()
+                    .uri("/adopt")
+                    .header("X-Provision-Token", provisionToken)
+                    .body(command)
+                    .retrieve()
+                    .body(ProvisionResult.class);
+        } catch (HttpClientErrorException.NotFound e) {
+            throw new SiteNotFoundException(
+                    "WordPressサイト '" + command.slug() + "' の取り込みに失敗しました: " + e.getMessage());
+        } catch (RestClientException e) {
+            throw new ProvisioningException("WordPressサイトの取り込みに失敗しました: " + e.getMessage(), e);
         }
     }
 
@@ -66,6 +93,12 @@ public class WordPressProvisioningClient {
             String url,
             String adminUser,
             String applicationPassword
+    ) {
+    }
+
+    public record AdoptCommand(
+            String slug,
+            String adminUser
     ) {
     }
 }

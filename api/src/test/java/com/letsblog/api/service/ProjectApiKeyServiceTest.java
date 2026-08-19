@@ -1,5 +1,9 @@
 package com.letsblog.api.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.letsblog.api.adsense.AdSenseClient;
+import com.letsblog.api.adsense.GoogleOAuthTokens;
+import com.letsblog.api.analytics.GoogleServiceAccountKey;
 import com.letsblog.api.crypto.CredentialCipher;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.repository.ProjectRepository;
@@ -13,6 +17,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doThrow;
@@ -35,14 +40,21 @@ class ProjectApiKeyServiceTest {
     private SystemSettingService systemSettingService;
     @Mock
     private AdminAuthorizationService adminAuthorizationService;
+    @Mock
+    private AdSenseClient adSenseClient;
 
     private final CredentialCipher credentialCipher = new CredentialCipher(
             java.util.Base64.getEncoder().encodeToString(new byte[32]));
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     private ProjectApiKeyService service() {
         return new ProjectApiKeyService(
-                projectRepository, credentialCipher, userService, systemSettingService, adminAuthorizationService);
+                projectRepository, credentialCipher, userService, systemSettingService, adminAuthorizationService,
+                objectMapper, adSenseClient);
     }
+
+    private static final String VALID_SERVICE_ACCOUNT_JSON =
+            "{\"client_email\":\"svc@example.iam.gserviceaccount.com\",\"private_key\":\"-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----\\n\"}";
 
     private Project projectWithId(Long id) {
         Project project = new Project();
@@ -133,5 +145,301 @@ class ProjectApiKeyServiceTest {
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
 
         assertTrue(service().isBraveSearchApiKeyConfigured(1L));
+    }
+
+    // ---- Google Analytics (issue #386) ----
+
+    @Test
+    void setGoogleAnalyticsCredentials_暗号化して保存する() {
+        Project project = projectWithId(1L);
+        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        service().setGoogleAnalyticsCredentials(1L, "123456789", VALID_SERVICE_ACCOUNT_JSON);
+
+        ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
+        verify(projectRepository).save(captor.capture());
+        assertEquals("123456789", captor.getValue().getGaPropertyId());
+        assertEquals(VALID_SERVICE_ACCOUNT_JSON,
+                credentialCipher.decrypt(captor.getValue().getGaServiceAccountJsonEncrypted()));
+    }
+
+    @Test
+    void setGoogleAnalyticsCredentials_JSONとして解析できなければ例外() {
+        assertThrows(IllegalArgumentException.class,
+                () -> service().setGoogleAnalyticsCredentials(1L, "123456789", "not-json"));
+    }
+
+    @Test
+    void setGoogleAnalyticsCredentials_client_emailやprivate_keyが無ければ例外() {
+        assertThrows(IllegalArgumentException.class,
+                () -> service().setGoogleAnalyticsCredentials(1L, "123456789", "{\"client_email\":\"a@b.com\"}"));
+    }
+
+    @Test
+    void setGoogleAnalyticsCredentials_プロジェクトメンバーでなければForbidden() {
+        doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+
+        assertThrows(ForbiddenException.class,
+                () -> service().setGoogleAnalyticsCredentials(1L, "123456789", VALID_SERVICE_ACCOUNT_JSON));
+    }
+
+    @Test
+    void isGoogleAnalyticsConfigured_設定有無を返す() {
+        Project project = projectWithId(1L);
+        project.setGaPropertyId("123456789");
+        project.setGaServiceAccountJsonEncrypted(credentialCipher.encrypt(VALID_SERVICE_ACCOUNT_JSON));
+        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        assertTrue(service().isGoogleAnalyticsConfigured(1L));
+    }
+
+    @Test
+    void clearGoogleAnalyticsCredentials_両方nullにして保存する() {
+        Project project = projectWithId(1L);
+        project.setGaPropertyId("123456789");
+        project.setGaServiceAccountJsonEncrypted(credentialCipher.encrypt(VALID_SERVICE_ACCOUNT_JSON));
+        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        service().clearGoogleAnalyticsCredentials(1L);
+
+        ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
+        verify(projectRepository).save(captor.capture());
+        assertFalse(captor.getValue().hasGoogleAnalyticsCredentials());
+    }
+
+    @Test
+    void resolveGoogleAnalyticsServiceAccountKey_未設定ならnull() {
+        Project project = projectWithId(1L);
+        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        assertNull(service().resolveGoogleAnalyticsServiceAccountKey(1L));
+    }
+
+    @Test
+    void resolveGoogleAnalyticsServiceAccountKey_設定済みなら復号して解析する() {
+        Project project = projectWithId(1L);
+        project.setGaPropertyId("123456789");
+        project.setGaServiceAccountJsonEncrypted(credentialCipher.encrypt(VALID_SERVICE_ACCOUNT_JSON));
+        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        GoogleServiceAccountKey key = service().resolveGoogleAnalyticsServiceAccountKey(1L);
+
+        assertEquals("svc@example.iam.gserviceaccount.com", key.clientEmail());
+    }
+
+    // ---- AdSense (issue #387、OAuthクライアントのプロジェクト単位化はissue #407) ----
+
+    @Test
+    void setAdSenseSettings_アカウントIDとクライアントIDを保存する() {
+        Project project = projectWithId(1L);
+        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        service().setAdSenseSettings(1L, "pub-1234567890123456", "client-id");
+
+        ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
+        verify(projectRepository).save(captor.capture());
+        assertEquals("pub-1234567890123456", captor.getValue().getAdsenseAccountId());
+        assertEquals("client-id", captor.getValue().getAdsenseOauthClientId());
+    }
+
+    @Test
+    void setAdSenseClientSecret_暗号化して保存する() {
+        Project project = projectWithId(1L);
+        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        service().setAdSenseClientSecret(1L, "client-secret");
+
+        ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
+        verify(projectRepository).save(captor.capture());
+        assertEquals("client-secret",
+                credentialCipher.decrypt(captor.getValue().getAdsenseOauthClientSecretEncrypted()));
+    }
+
+    @Test
+    void completeAdSenseOAuth_プロジェクトのクライアント資格情報で認可コードをリフレッシュトークンに交換して暗号化保存する() {
+        Project project = projectWithId(1L);
+        project.setAdsenseOauthClientId("client-id");
+        project.setAdsenseOauthClientSecretEncrypted(credentialCipher.encrypt("client-secret"));
+        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(adSenseClient.exchangeAuthorizationCode(
+                "client-id", "client-secret", "auth-code", "https://example.com/callback"))
+                .thenReturn(new GoogleOAuthTokens("access-token", "refresh-token"));
+
+        service().completeAdSenseOAuth(1L, "auth-code", "https://example.com/callback");
+
+        ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
+        verify(projectRepository).save(captor.capture());
+        assertEquals("refresh-token",
+                credentialCipher.decrypt(captor.getValue().getAdsenseRefreshTokenEncrypted()));
+    }
+
+    @Test
+    void getAdSenseStatus_accountIdとrefreshTokenの両方が必要() {
+        Project project = projectWithId(1L);
+        project.setAdsenseAccountId("pub-1234567890123456");
+        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        assertFalse(service().getAdSenseStatus(1L).configured());
+
+        project.setAdsenseRefreshTokenEncrypted(credentialCipher.encrypt("refresh-token"));
+        assertTrue(service().getAdSenseStatus(1L).configured());
+    }
+
+    @Test
+    void clearAdSenseCredentials_全項目nullにして保存する() {
+        Project project = projectWithId(1L);
+        project.setAdsenseAccountId("pub-1234567890123456");
+        project.setAdsenseRefreshTokenEncrypted(credentialCipher.encrypt("refresh-token"));
+        project.setAdsenseOauthClientId("client-id");
+        project.setAdsenseOauthClientSecretEncrypted(credentialCipher.encrypt("client-secret"));
+        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        service().clearAdSenseCredentials(1L);
+
+        ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
+        verify(projectRepository).save(captor.capture());
+        Project saved = captor.getValue();
+        assertFalse(saved.hasAdsenseCredentials());
+        assertFalse(saved.hasAdsenseOauthClient());
+    }
+
+    @Test
+    void resolveAdSenseRefreshToken_未設定ならnull() {
+        Project project = projectWithId(1L);
+        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        assertNull(service().resolveAdSenseRefreshToken(1L));
+    }
+
+    @Test
+    void resolveAdSenseRefreshToken_設定済みなら復号する() {
+        Project project = projectWithId(1L);
+        project.setAdsenseAccountId("pub-1234567890123456");
+        project.setAdsenseRefreshTokenEncrypted(credentialCipher.encrypt("refresh-token"));
+        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        assertEquals("refresh-token", service().resolveAdSenseRefreshToken(1L));
+    }
+
+    @Test
+    void resolveAdSenseOauthClientSecret_設定済みなら復号する() {
+        Project project = projectWithId(1L);
+        project.setAdsenseOauthClientSecretEncrypted(credentialCipher.encrypt("client-secret"));
+        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        assertEquals("client-secret", service().resolveAdSenseOauthClientSecret(1L));
+    }
+
+    @Test
+    void setAdSenseSettings_プロジェクトメンバーでなければForbidden() {
+        doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+
+        assertThrows(ForbiddenException.class,
+                () -> service().setAdSenseSettings(1L, "pub-1234567890123456", "client-id"));
+    }
+
+    // ---- Buffer(issue #402) ----
+
+    @Test
+    void setBufferAccessToken_暗号化して保存する() {
+        Project project = projectWithId(1L);
+        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        service().setBufferAccessToken(1L, "buffer-token");
+
+        ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
+        verify(projectRepository).save(captor.capture());
+        assertEquals("buffer-token", credentialCipher.decrypt(captor.getValue().getBufferAccessTokenEncrypted()));
+    }
+
+    @Test
+    void setBufferSettings_未指定の遅延分数とメッセージテンプレートは既定値になる() {
+        Project project = projectWithId(1L);
+        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        service().setBufferSettings(1L, true, "profile-1, profile-2", null, null);
+
+        ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
+        verify(projectRepository).save(captor.capture());
+        Project saved = captor.getValue();
+        assertTrue(saved.isBufferEnabled());
+        assertEquals("profile-1, profile-2", saved.getBufferProfileIds());
+        assertEquals(5, saved.getBufferPostDelayMinutes());
+        assertEquals("{title} {url}", saved.getBufferMessageTemplate());
+    }
+
+    @Test
+    void getBufferSettingsStatus_有効かつトークン_プロファイル設定済みならconfigured() {
+        Project project = projectWithId(1L);
+        project.setBufferEnabled(true);
+        project.setBufferAccessTokenEncrypted(credentialCipher.encrypt("buffer-token"));
+        project.setBufferProfileIds("profile-1");
+        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        ProjectApiKeyService.BufferSettingsStatus status = service().getBufferSettingsStatus(1L);
+
+        assertTrue(status.configured());
+        assertTrue(status.enabled());
+        assertTrue(status.hasAccessToken());
+        assertEquals("profile-1", status.profileIds());
+    }
+
+    @Test
+    void clearBufferSettings_全項目をクリアする() {
+        Project project = projectWithId(1L);
+        project.setBufferEnabled(true);
+        project.setBufferAccessTokenEncrypted(credentialCipher.encrypt("buffer-token"));
+        project.setBufferProfileIds("profile-1");
+        project.setBufferPostDelayMinutes(10);
+        project.setBufferMessageTemplate("{title}");
+        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        service().clearBufferSettings(1L);
+
+        ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
+        verify(projectRepository).save(captor.capture());
+        Project saved = captor.getValue();
+        assertFalse(saved.isBufferEnabled());
+        assertFalse(saved.hasBufferAccessToken());
+        assertNull(saved.getBufferProfileIds());
+        assertNull(saved.getBufferPostDelayMinutes());
+        assertNull(saved.getBufferMessageTemplate());
+    }
+
+    @Test
+    void resolveBufferSettings_未設定ならenabled_falseを返す() {
+        Project project = projectWithId(1L);
+        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        ProjectApiKeyService.BufferSettings settings = service().resolveBufferSettings(1L);
+
+        assertFalse(settings.enabled());
+        assertTrue(settings.profileIds().isEmpty());
+    }
+
+    @Test
+    void resolveBufferSettings_設定済みならプロファイルIDをカンマ分割して復号する() {
+        Project project = projectWithId(1L);
+        project.setBufferEnabled(true);
+        project.setBufferAccessTokenEncrypted(credentialCipher.encrypt("buffer-token"));
+        project.setBufferProfileIds("profile-1, profile-2");
+        project.setBufferPostDelayMinutes(15);
+        project.setBufferMessageTemplate("{title}のみ");
+        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        ProjectApiKeyService.BufferSettings settings = service().resolveBufferSettings(1L);
+
+        assertTrue(settings.enabled());
+        assertEquals("buffer-token", settings.accessToken());
+        assertEquals(java.util.List.of("profile-1", "profile-2"), settings.profileIds());
+        assertEquals(15, settings.delayMinutes());
+        assertEquals("{title}のみ", settings.messageTemplate());
+    }
+
+    @Test
+    void setBufferAccessToken_プロジェクトメンバーでなければForbidden() {
+        doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+
+        assertThrows(ForbiddenException.class, () -> service().setBufferAccessToken(1L, "buffer-token"));
     }
 }

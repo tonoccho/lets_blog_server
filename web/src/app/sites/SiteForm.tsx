@@ -2,17 +2,18 @@
 
 import { useActionState, useState, useTransition } from "react";
 import { useRef, useEffect } from "react";
+import type { SavedSshKeyPair } from "@/lib/apiClient";
 import { generateSshKeyPairAction, registerSiteAction, RegisterSiteState } from "./actions";
 
 const initialState: RegisterSiteState = {};
 
-type CmsType = "WORDPRESS" | "MICROCMS";
 type Transport = "REST" | "SSH";
+type SshKeyMode = "existing" | "new";
 
-export function SiteForm() {
+export function SiteForm({ sshKeyPairs }: { sshKeyPairs: SavedSshKeyPair[] }) {
   const [state, formAction, pending] = useActionState(registerSiteAction, initialState);
-  const [cmsType, setCmsType] = useState<CmsType>("WORDPRESS");
   const [transport, setTransport] = useState<Transport>("REST");
+  const [sshKeyMode, setSshKeyMode] = useState<SshKeyMode>(sshKeyPairs.length > 0 ? "existing" : "new");
   const [privateKeyPem, setPrivateKeyPem] = useState("");
   const [publicKeyLine, setPublicKeyLine] = useState("");
   const [keyGenError, setKeyGenError] = useState<string | null>(null);
@@ -23,13 +24,13 @@ export function SiteForm() {
     if (state.success) {
       formRef.current?.reset();
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setCmsType("WORDPRESS");
       setTransport("REST");
+      setSshKeyMode(sshKeyPairs.length > 0 ? "existing" : "new");
       setPrivateKeyPem("");
       setPublicKeyLine("");
       setKeyGenError(null);
     }
-  }, [state.success]);
+  }, [state.success, sshKeyPairs.length]);
 
   function handleGenerateKeyPair() {
     setKeyGenError(null);
@@ -48,111 +49,131 @@ export function SiteForm() {
     <form ref={formRef} action={formAction} className="space-y-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
       <h2 className="font-medium">サイトを登録</h2>
       <p className="text-sm text-neutral-700 dark:text-neutral-300">
-        サイト登録は既存のWordPress/microCMSサイトの認証情報を保存するだけです。サーバー側で新規にサイトや
+        サイト登録は既存のWordPressサイトの認証情報を保存するだけです。サーバー側で新規にサイトや
         リソースを作成する「プロビジョニング」は行いません。登録時に入力内容で疎通確認を行いますが、
         失敗した場合も登録自体は完了します(後から認証情報を見直してください)。
       </p>
+      <input type="hidden" name="cmsType" value="WORDPRESS" />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-700 dark:text-neutral-300 font-medium">CMS種別</span>
-          <select
-            name="cmsType"
-            value={cmsType}
-            onChange={(e) => setCmsType(e.target.value as CmsType)}
-            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
-          >
-            <option value="WORDPRESS">WordPress</option>
-            <option value="MICROCMS">microCMS</option>
-          </select>
-        </label>
         <Field name="name" label="表示名" placeholder="My Blog" />
         <Field name="siteKey" label="サイトキー" placeholder="main" />
       </div>
 
-      {cmsType === "WORDPRESS" && (
-        <div className="space-y-3">
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-neutral-700 dark:text-neutral-300 font-medium">接続方式</span>
-            <select
-              name="transport"
-              value={transport}
-              onChange={(e) => setTransport(e.target.value as Transport)}
-              className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm sm:max-w-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
-            >
-              <option value="REST">REST API(通常はこちら)</option>
-              <option value="SSH">SSH経由(wp-cli。REST APIがブロックされているサイト向け)</option>
-            </select>
-          </label>
+      <div className="space-y-3">
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-neutral-700 dark:text-neutral-300 font-medium">接続方式</span>
+          <select
+            name="transport"
+            value={transport}
+            onChange={(e) => setTransport(e.target.value as Transport)}
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm sm:max-w-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+          >
+            <option value="REST">REST API(通常はこちら)</option>
+            <option value="SSH">SSH経由(wp-cli。REST APIがブロックされているサイト向け)</option>
+          </select>
+        </label>
 
-          {transport === "REST" ? (
+        {transport === "REST" ? (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field name="baseUrl" label="WordPressのURL" placeholder="https://example.com" />
+            <Field name="username" label="WordPressユーザー名" placeholder="admin" />
+            <Field
+              name="appPassword"
+              label="アプリケーションパスワード"
+              placeholder="xxxx xxxx xxxx xxxx xxxx xxxx"
+              type="password"
+              wide
+            />
+          </div>
+        ) : (
+          <div className="space-y-3 rounded border border-neutral-200 dark:border-neutral-800 p-3">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field name="baseUrl" label="WordPressのURL" placeholder="https://example.com" />
-              <Field name="username" label="WordPressユーザー名" placeholder="admin" />
+              <Field name="baseUrl" label="WordPressの公開URL" placeholder="https://example.com" />
+              <Field name="sshHost" label="SSHホスト" placeholder="203.0.113.5" />
+              <Field name="sshPort" label="SSHポート(既定22)" placeholder="22" required={false} />
+              <Field name="sshUser" label="SSHユーザー" placeholder="deploy" />
               <Field
-                name="appPassword"
-                label="アプリケーションパスワード"
-                placeholder="xxxx xxxx xxxx xxxx xxxx xxxx"
-                type="password"
+                name="wpPath"
+                label="WordPressインストール先ディレクトリ(wp-cliの--path)"
+                placeholder="/home/deploy/public_html (wp-cli本体のパスではありません)"
                 wide
               />
             </div>
-          ) : (
-            <div className="space-y-3 rounded border border-neutral-200 dark:border-neutral-800 p-3">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Field name="baseUrl" label="WordPressの公開URL" placeholder="https://example.com" />
-                <Field name="sshHost" label="SSHホスト" placeholder="203.0.113.5" />
-                <Field name="sshPort" label="SSHポート(既定22)" placeholder="22" required={false} />
-                <Field name="sshUser" label="SSHユーザー" placeholder="deploy" />
-                <Field
-                  name="wpPath"
-                  label="WordPressインストール先ディレクトリ(wp-cliの--path)"
-                  placeholder="/home/deploy/public_html (wp-cli本体のパスではありません)"
-                  wide
-                />
-              </div>
 
-              <div className="space-y-2">
-                <button
-                  type="button"
-                  onClick={handleGenerateKeyPair}
-                  disabled={keyGenPending}
-                  className="rounded bg-neutral-100 dark:bg-neutral-800 px-3 py-1.5 text-sm text-neutral-900 dark:text-neutral-50 hover:bg-neutral-200 dark:hover:bg-neutral-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:opacity-50"
-                >
-                  {keyGenPending ? "鍵ペアを生成中…" : "SSH鍵ペアを生成"}
-                </button>
-                {keyGenError && <p className="text-sm text-red-600">{keyGenError}</p>}
-                {publicKeyLine && (
-                  <div className="space-y-1">
-                    <p className="text-sm text-neutral-700 dark:text-neutral-300">
-                      以下の公開鍵をリモートサーバーの対象ユーザーの<code>~/.ssh/authorized_keys</code>
-                      へ手動で追記してから登録してください。
-                    </p>
-                    <textarea
-                      readOnly
-                      value={publicKeyLine}
-                      rows={2}
-                      onFocus={(e) => e.currentTarget.select()}
-                      className="w-full rounded border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 font-mono text-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+            <div className="space-y-2">
+              {sshKeyPairs.length > 0 && (
+                <div className="flex gap-4 text-sm">
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="radio"
+                      checked={sshKeyMode === "existing"}
+                      onChange={() => setSshKeyMode("existing")}
                     />
-                  </div>
-                )}
-                <input type="hidden" name="sshPrivateKeyPem" value={privateKeyPem} />
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+                    保存済みの鍵ペアを使う
+                  </label>
+                  <label className="flex items-center gap-1.5">
+                    <input type="radio" checked={sshKeyMode === "new"} onChange={() => setSshKeyMode("new")} />
+                    新しい鍵ペアを生成する
+                  </label>
+                </div>
+              )}
 
-      {cmsType === "MICROCMS" && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field name="serviceId" label="Service ID" placeholder="my-service" />
-          <Field name="apiKey" label="API Key" placeholder="xxxxxxxxxxxxxxxx" type="password" />
-          <Field name="managementApiKey" label="Management API Key" placeholder="xxxxxxxxxxxxxxxx" type="password" />
-          <Field name="postsEndpoint" label="投稿用エンドポイント" placeholder="posts" />
-          <Field name="categoriesEndpoint" label="カテゴリ用エンドポイント" placeholder="categories" />
-          <Field name="tagsEndpoint" label="タグ用エンドポイント" placeholder="tags" />
-        </div>
-      )}
+              {sshKeyMode === "existing" && sshKeyPairs.length > 0 ? (
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="text-neutral-700 dark:text-neutral-300 font-medium">SSH鍵ペア</span>
+                  <select
+                    name="sshKeyPairId"
+                    required
+                    className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+                  >
+                    {sshKeyPairs.map((keyPair) => (
+                      <option key={keyPair.id} value={keyPair.id}>
+                        {keyPair.name}
+                        {keyPair.comment ? `(${keyPair.comment})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                    公開鍵をリモートサーバーの対象ユーザーの<code>~/.ssh/authorized_keys</code>
+                    へ追記済みであることを確認してください(公開鍵は<a href="/admin/ssh-keys" className="underline">
+                      SSH鍵管理画面
+                    </a>
+                    で確認できます)。
+                  </p>
+                </label>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleGenerateKeyPair}
+                    disabled={keyGenPending}
+                    className="rounded bg-neutral-100 dark:bg-neutral-800 px-3 py-1.5 text-sm text-neutral-900 dark:text-neutral-50 hover:bg-neutral-200 dark:hover:bg-neutral-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:opacity-50"
+                  >
+                    {keyGenPending ? "鍵ペアを生成中…" : "SSH鍵ペアを生成"}
+                  </button>
+                  {keyGenError && <p className="text-sm text-red-600">{keyGenError}</p>}
+                  {publicKeyLine && (
+                    <div className="space-y-1">
+                      <p className="text-sm text-neutral-700 dark:text-neutral-300">
+                        以下の公開鍵をリモートサーバーの対象ユーザーの<code>~/.ssh/authorized_keys</code>
+                        へ手動で追記してから登録してください。
+                      </p>
+                      <textarea
+                        readOnly
+                        value={publicKeyLine}
+                        rows={2}
+                        onFocus={(e) => e.currentTarget.select()}
+                        className="w-full rounded border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 font-mono text-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+                      />
+                    </div>
+                  )}
+                  <input type="hidden" name="sshPrivateKeyPem" value={privateKeyPem} />
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
 
       {state.error && <p className="text-sm text-red-700 font-medium">{state.error}</p>}
       {state.success && (

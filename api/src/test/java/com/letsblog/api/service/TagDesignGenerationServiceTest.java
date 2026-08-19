@@ -1,6 +1,6 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.ai.OllamaClient;
+import com.letsblog.api.ai.LlmClient;
 import com.letsblog.api.domain.EmbedTagType;
 import com.letsblog.api.dto.GenerateTagDesignResponse;
 import org.junit.jupiter.api.Test;
@@ -25,17 +25,17 @@ import static org.mockito.Mockito.when;
 class TagDesignGenerationServiceTest {
 
     @Mock
-    private OllamaClient ollamaClient;
+    private LlmClient llmClient;
 
     @Mock
-    private OllamaModelService ollamaModelService;
+    private LlmModelService llmModelService;
 
     @InjectMocks
     private TagDesignGenerationService tagDesignGenerationService;
 
     @Test
     void generate_プロジェクトの選択中モデルでCSSとHTMLを抽出する() {
-        when(ollamaModelService.getSelectedModel(42L)).thenReturn("qwen2.5:14b");
+        when(llmModelService.getSelectedModel(42L)).thenReturn("qwen2.5:14b");
         String response = """
                 ```css
                 .lb-toc-list{background:#fff;}
@@ -45,25 +45,25 @@ class TagDesignGenerationServiceTest {
                 {{toc}}
                 ```
                 """;
-        when(ollamaClient.generate(anyString(), eq("qwen2.5:14b"))).thenReturn(response);
+        when(llmClient.generate(anyString(), eq("qwen2.5:14b"))).thenReturn(response);
 
         GenerateTagDesignResponse result =
                 tagDesignGenerationService.generate(42L, EmbedTagType.TOC, "背景を白にして", null);
 
         assertTrue(result.cssContent().contains("lb-toc-list"));
         assertTrue(result.htmlTemplate().contains("{{toc}}"));
-        verify(ollamaClient).generate(anyString(), eq("qwen2.5:14b"));
+        verify(llmClient).generate(anyString(), eq("qwen2.5:14b"));
     }
 
     @Test
     void generate_HTMLブロックが省略された場合は空文字を返す() {
-        when(ollamaModelService.getSelectedModel(42L)).thenReturn("qwen2.5:14b");
+        when(llmModelService.getSelectedModel(42L)).thenReturn("qwen2.5:14b");
         String response = """
                 ```css
                 .lb-blogcard{border-radius:12px;}
                 ```
                 """;
-        when(ollamaClient.generate(anyString(), eq("qwen2.5:14b"))).thenReturn(response);
+        when(llmClient.generate(anyString(), eq("qwen2.5:14b"))).thenReturn(response);
 
         GenerateTagDesignResponse result =
                 tagDesignGenerationService.generate(42L, EmbedTagType.BLOGCARD, "角を丸く", "<div>{{title}}</div>");
@@ -74,8 +74,8 @@ class TagDesignGenerationServiceTest {
 
     @Test
     void generate_CSSを抽出できなければ例外を投げる() {
-        when(ollamaModelService.getSelectedModel(42L)).thenReturn("qwen2.5:14b");
-        when(ollamaClient.generate(anyString(), eq("qwen2.5:14b"))).thenReturn("CSSブロックなしの応答");
+        when(llmModelService.getSelectedModel(42L)).thenReturn("qwen2.5:14b");
+        when(llmClient.generate(anyString(), eq("qwen2.5:14b"))).thenReturn("CSSブロックなしの応答");
 
         InvalidCustomTagContentException exception = assertThrows(
                 InvalidCustomTagContentException.class,

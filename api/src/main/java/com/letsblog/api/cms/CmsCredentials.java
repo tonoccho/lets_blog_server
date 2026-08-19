@@ -42,18 +42,4 @@ public sealed interface CmsCredentials {
             return "AGENT".equalsIgnoreCase(transport);
         }
     }
-
-    record MicroCmsCredentials(
-            String serviceId,
-            String apiKey,
-            String managementApiKey,
-            String postsEndpoint,
-            String categoriesEndpoint,
-            String tagsEndpoint
-    ) implements CmsCredentials {
-        @Override
-        public CmsType cmsType() {
-            return CmsType.MICROCMS;
-        }
-    }
 }

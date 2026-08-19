@@ -21,6 +21,10 @@
         "title": "Let's Blog: Create Article"
       },
       {
+        "command": "letsBlog.createArticleWithoutAi",
+        "title": "Let's Blog: Create Article (No AI)"
+      },
+      {
         "command": "letsBlog.login",
         "title": "Let's Blog: Login"
       },
@@ -69,12 +73,50 @@
         "title": "Let's Blog: Preview Article"
       },
       {
+        "command": "letsBlog.previewDevTools",
+        "title": "Let's Blog: Open Preview DevTools"
+      },
+      {
         "command": "letsBlog.schedulePublication",
         "title": "Let's Blog: Schedule Publication"
       },
       {
         "command": "letsBlog.imageGallery",
         "title": "Let's Blog: Image Gallery"
+      },
+      {
+        "command": "letsBlog.addNewDiagram",
+        "title": "Let's Blog: Add New Diagram"
+      },
+      {
+        "command": "letsBlog.editDiagram",
+        "title": "Let's Blog: Edit Diagram"
+      },
+      {
+        "command": "letsBlog.diagramGallery",
+        "title": "Let's Blog: Diagram Gallery"
+      },
+      {
+        "command": "letsBlog.pasteSmartCard",
+        "title": "Let's Blog: Paste as Smart Card (Blog Card / Amazon)"
+      },
+      {
+        "command": "letsBlog.pasteAsLink",
+        "title": "Let's Blog: Paste as Link"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "letsBlog.pasteSmartCard",
+        "key": "ctrl+shift+v",
+        "mac": "cmd+shift+v",
+        "when": "editorTextFocus && !editorReadonly && resourceLangId == markdown"
+      },
+      {
+        "command": "letsBlog.pasteAsLink",
+        "key": "ctrl+v",
+        "mac": "cmd+v",
+        "when": "editorTextFocus && !editorReadonly && resourceLangId == markdown"
       }
     ],
     "menus": {
@@ -98,6 +140,21 @@
           "command": "letsBlog.imageGallery",
           "when": "editorTextFocus && resourceLangId == markdown",
           "group": "letsBlog@3"
+        },
+        {
+          "command": "letsBlog.addNewDiagram",
+          "when": "editorTextFocus && resourceLangId == markdown",
+          "group": "letsBlog@4"
+        },
+        {
+          "command": "letsBlog.editDiagram",
+          "when": "editorTextFocus && resourceLangId == markdown && letsBlog.cursorOnDiagram",
+          "group": "letsBlog@5"
+        },
+        {
+          "command": "letsBlog.diagramGallery",
+          "when": "editorTextFocus && resourceLangId == markdown",
+          "group": "letsBlog@6"
         }
       ]
     },

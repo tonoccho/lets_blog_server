@@ -18,7 +18,7 @@ vi .env   # パスワード・APIキー・暗号化キー・NEXTAUTH_SECRET等�
 # 2. リバースプロキシ用の自己署名証明書を生成
 bash scripts/generate-certs.sh
 
-# 3. Docker Compose で全サービスを起動(reverse-proxy/web/api/mysql/phpmyadmin/ollama/comfyui/plantuml/mailhog)
+# 3. Docker Compose で全サービスを起動(reverse-proxy/web/api/mysql/phpmyadmin/comfyui/plantuml)
 docker compose up -d
 
 # 4. ブラウザで https://localhost にアクセス(自己署名証明書の警告は例外承認する)
@@ -28,7 +28,8 @@ docker compose up -d
 
 - Docker / Docker Compose(Compose v2 系。`docker compose version` で確認)
 - openssl(証明書生成に使用。Linux/macOSは標準搭載)
-- NVIDIA GPU + NVIDIA Container Toolkit(Ollama・ComfyUIのGPU利用に推奨。CPUのみでも動作するイメージタグに変更すれば起動は可能だが低速)
+- NVIDIA GPU + NVIDIA Container Toolkit(ComfyUIのGPU利用に推奨。CPUのみでも動作するイメージタグに変更すれば起動は可能だが低速)
+- 外部LLMサービス(既定: OpenAI)のAPIキー(下書き/校正/要約支援・タグ提案・記事プランニングに使用)
 - ホストの 80番・443番ポートが空いていること(リバースプロキシが使用)
 
 ## 1. `.env` の設定
@@ -41,9 +42,11 @@ docker compose up -d
 | `SERVER_API_KEY` | Web管理画面・VSCode拡張が使う固定APIキー(`X-API-Key`ヘッダ) | 必須変更 |
 | `APP_ENCRYPTION_KEY` | CMS認証情報暗号化キー(Base64, 32バイト)。生成例: `openssl rand -base64 32` | 必須変更 |
 | `COMFYUI_IMAGE` | ComfyUIイメージ(GPU種別に応じて変更。既定はNVIDIA CUDA13系) | 環境に応じて変更 |
-| `OLLAMA_MODEL` | 下書き/校正/要約・タグ提案で使うOllamaモデル | 既定値のままでも可 |
+| `LLM_API_KEY` | 下書き/校正/要約・タグ提案・記事プランニングで使う外部LLMサービス(既定: OpenAI)のAPIキー | 必須変更 |
+| `LLM_MODEL` | 使用するモデル名(既定: `gpt-4o-mini`) | 既定値のままでも可 |
 | `COMFYUI_CHECKPOINT` | 画像生成に使うチェックポイントファイル名 | 既定値のままでも可 |
 | `APP_MAIL_FROM` / `APP_WEB_BASE_URL` | メール送信元・Web公開URL(メール内リンク生成に使用) | `APP_WEB_BASE_URL` は `https://localhost` を指定 |
+| `MAIL_HOST` / `MAIL_PORT` / `MAIL_USERNAME` / `MAIL_PASSWORD` | 外部メールサービス(SendGrid/Resend/AWS SES等)のSMTP接続情報 | 必須変更 |
 | `NEXTAUTH_SECRET` | Web管理画面(Auth.js)のセッション署名鍵。生成例: `openssl rand -hex 32` | 必須変更 |
 
 ## 2. TLS証明書の生成
@@ -64,7 +67,7 @@ bash scripts/generate-certs.sh
 docker compose up -d
 ```
 
-起動するサービス: `reverse-proxy`(nginx) / `web`(Next.js) / `api` / `mysql` / `phpmyadmin` / `ollama` / `comfyui` / `plantuml` / `mailhog`。
+起動するサービス: `reverse-proxy`(nginx) / `web`(Next.js) / `api` / `mysql` / `phpmyadmin` / `comfyui` / `plantuml`。
 
 Phase 6 以降、`reverse-proxy` の `80`(HTTP→HTTPSリダイレクト)・`443`(HTTPS)以外はホストにポート公開していない。
 各サービスへは直接ポートではなく、必ず `https://localhost/...` 経由でアクセスする。
@@ -86,10 +89,8 @@ docker compose logs -f web  # Web管理画面のログ確認
 | Web管理画面 | https://localhost/ | サイト管理・投稿履歴・AIジョブ・ユーザー管理等(Next.js) |
 | 仲介APIサーバー | https://localhost/api/ | REST API(VSCode拡張・Web管理画面が使用) |
 | phpMyAdmin | https://localhost/phpmyadmin/ | MySQLデータベース管理 |
-| Ollama | https://localhost/ollama/ | ローカルLLM API(UIなし。`GET /ollama/api/tags` 等) |
 | ComfyUI | https://localhost/comfyui/ | 画像生成ワークフローUI |
 | PlantUML | https://localhost/plantuml/ | 図のプレビュー・検証用 |
-| Mailhog | https://localhost/mailhog/ | 開発時のメール送受信確認(送信先の実メールサーバーの代わり) |
 
 ### ブラウザの自己署名証明書警告について
 
@@ -97,19 +98,7 @@ docker compose logs -f web  # Web管理画面のログ確認
 「この接続ではプライバシーが保護されません」等の警告が表示される。「詳細設定」→
 「localhost にアクセスする(安全ではありません)」等から例外承認して進める(表記はブラウザにより異なる)。
 
-## 4. Ollamaモデルの準備
-
-`.env` の `OLLAMA_MODEL`(既定: `qwen2.5:7b-instruct`)に対応するモデルを事前にpullする。
-
-```bash
-docker exec lbs-ollama ollama pull qwen2.5:7b-instruct
-docker exec lbs-ollama ollama list   # 取得済みモデルの確認
-```
-
-`OLLAMA_MODEL` を別モデルに変更する場合は、そのモデルも同様にpullしてから `.env` を変更し
-`docker compose up -d api` で反映する。
-
-## 5. ComfyUIチェックポイントの配置
+## 4. ComfyUIチェックポイントの配置
 
 `comfyui_models` はDocker管理の名前付きボリュームであり、ホストの特定ディレクトリに
 直接バインドされていない。チェックポイントファイルは `docker cp` でコンテナ内にコピーする。
@@ -125,7 +114,7 @@ docker cp <ダウンロードしたcheckpointファイル> lbs-comfyui:/root/Com
 docker exec lbs-comfyui ls /root/ComfyUI/models/checkpoints/
 ```
 
-## 6. Web管理画面(Next.js)について
+## 5. Web管理画面(Next.js)について
 
 `docker compose up -d` に含まれる `web` サービスが自動的に起動する。設定は
 `docker-compose.yml` の `web.environment` で以下のように渡される(`.env` の値を参照)。
@@ -160,12 +149,12 @@ npm run dev
 経由するため、`.env.local` で `NODE_EXTRA_CA_CERTS=../certs/localhost.crt` の指定が必須
 (未設定だと `DEPTH_ZERO_SELF_SIGNED_CERT` エラーで失敗する)。
 
-## 7. 初回管理者アカウントの作成
+## 6. 初回管理者アカウントの作成
 
 初回アクセス時、まだユーザーが1人も存在しない場合は `/setup` にリダイレクトされ、
 セルフサインアップで最初のユーザー(管理者権限)を作成できる。
 
-## 8. VSCode拡張の設定
+## 7. VSCode拡張の設定
 
 拡張の設定 `letsBlog.serverUrl`(既定値: `https://localhost`)と、
 APIキー(`Let's Blog: Set API Key` コマンドで `SERVER_API_KEY` と同じ値を設定)が必要。
@@ -174,6 +163,58 @@ APIキー(`Let's Blog: Set API Key` コマンドで `SERVER_API_KEY` と同じ�
 自己署名証明書の検証が行われるため、VSCodeを起動するシェルで
 `NODE_EXTRA_CA_CERTS=/path/to/certs/localhost.crt` を設定してから `code .` 等で起動するか、
 OS/ブラウザの証明書ストアに `certs/localhost.crt` を信頼済み証明書として登録する。
+
+**ダイアグラム機能(draw.io統合)を使う場合は、OS/ブラウザの証明書ストアへの登録が必須。**
+`NODE_EXTRA_CA_CERTS` は拡張ホスト(Node.js)からのAPI呼び出しにのみ有効で、
+draw.ioエディタ画面はVSCode Webview内のiframeとして`https://localhost/drawio/`を
+Chromiumのレンダラープロセスで直接読み込むため、`NODE_EXTRA_CA_CERTS`ではなく
+Chromiumが参照する証明書ストアの信頼設定が必要になる(未登録の場合、証明書エラーで
+iframeの読み込みがブロックされ、パネルが白紙のまま表示される)。
+
+Linuxの場合、VSCode(Electron/Chromium)は `~/.pki/nssdb` のNSS証明書データベースを
+参照する。`libnss3-tools` パッケージの `certutil` で登録する。
+
+```bash
+# 初回のみ: NSSデータベースが無ければ作成する
+mkdir -p ~/.pki/nssdb && certutil -N -d sql:$HOME/.pki/nssdb --empty-password
+
+# 証明書を信頼済みCAとして登録
+certutil -A -d sql:$HOME/.pki/nssdb -t "C,," -n "LetsBlog Local Dev" -i /path/to/certs/localhost.crt
+```
+
+登録後、VSCodeを完全に再起動する(ウィンドウの再読み込みだけでは反映されない場合がある)。
+macOS/Windowsの場合はキーチェーンアクセス/証明書マネージャーへ登録する(OS標準の証明書ストアを
+Chromiumがそのまま参照するため、Linuxのような追加ツールは不要)。
+
+## 8. ローカル環境へのマスタ環境データの同期(開発用)
+
+ローカルで開発する際、空のプレースホルダデータではなく実際に近いコンテンツ(記事・メディア・
+テーマ/プラグイン設定)で動作確認したい場合、プロジェクトの「マスタ環境」(テストまたは本番)から
+ローカル環境へデータを同期できる(issue #325)。
+
+**前提条件**: 同期元(マスタ環境)・同期先(ローカル)の両方が、このアプリで自動構築(managed)した
+WordPress環境である必要がある。SSH接続/REST接続で外部のWordPressホスティングを紐付けている
+プロジェクトでは、この方法によるDB・メディアの一括同期は現時点では未対応(将来の拡張予定)。
+
+**手順**:
+
+1. プロジェクト詳細画面の「概要」タブで、マスタ環境(テスト/本番のどちらか)が設定済みであることを確認する。
+2. 「設定」タブの「環境同期」パネルを開く。
+3. 「マスタ環境(テスト/本番)→ローカルの設定を入力」ボタンをクリックすると、
+   同期元にマスタ環境、同期先にローカル、同期対象(テーマ/プラグイン/メディア/DB)が
+   すべて選択された状態になる(手動で個別に選び直すことも可能)。
+4. 内容を確認し「同期する」をクリックする(確認ダイアログが出るので、同期先の内容が
+   上書きされることを理解した上で承諾する)。
+5. 同期完了後、ローカル環境のWordPress管理画面・記事一覧などで反映内容を確認できる。
+
+**同期される内容・されない内容**:
+
+- DB同期は `wp_users` / `wp_usermeta` を除外するため、ローカル環境の管理者アカウントは
+  上書きされない。
+- DB内のサイトURLは、マスタ環境のURLからローカル環境のURLへ自動的に書き換えられる
+  (`wp search-replace` 相当の処理)。
+- メディア(`wp-content/uploads`)・テーマ・プラグインは、同期先の既存ファイルをバックアップした上で
+  マスタ環境の内容で置き換えられる。
 
 ## トラブルシューティング
 
@@ -194,13 +235,14 @@ LISTENしているかを確認する(環境変数変更後はプロセス再起�
 
 **GPU (NVIDIA) が認識されない**
 ホスト側で `nvidia-smi` が動作するか、NVIDIA Container Toolkitが導入済みか確認する。
-`docker compose logs ollama` / `docker compose logs comfyui` でGPU認識ログを確認できる。
+`docker compose logs comfyui` でGPU認識ログを確認できる。
 
-**Ollamaでモデルが見つからないと言われる**
-`docker exec lbs-ollama ollama list` でpull済みか確認し、未取得なら
-`docker exec lbs-ollama ollama pull <モデル名>` を実行する。
+**下書き/校正/要約・タグ提案・記事プランニングが失敗する(LLM呼び出しエラー)**
+`.env` の `LLM_API_KEY` が正しく設定されているか確認する。ダッシュボードの接続サービス状況
+(admin限定)で `LLM` がWARNINGの場合はAPIキー未設定、ERRORの場合は`docker compose logs api`で
+詳細なエラー内容(レート制限・認証エラー等)を確認する。
 
-**個別ポート(8080/8081/11434/8188/8085等)に直接アクセスできない**
+**個別ポート(8080/8081/8188/8085等)に直接アクセスできない**
 Phase 6以降は意図した仕様(すべて `https://localhost/...` 経由に一本化)。
 デバッグ目的で一時的に直接アクセスしたい場合は、該当サービスの `docker-compose.yml` に
 一時的に `ports:` を追加する(恒久的な変更はしないこと)。

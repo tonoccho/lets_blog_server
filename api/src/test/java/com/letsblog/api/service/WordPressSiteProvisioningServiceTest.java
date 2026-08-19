@@ -2,6 +2,7 @@ package com.letsblog.api.service;
 
 import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.domain.Site;
+import com.letsblog.api.dto.AdoptWordPressSiteRequest;
 import com.letsblog.api.dto.CreateManagedWordPressSiteRequest;
 import com.letsblog.api.dto.SiteResponse;
 import com.letsblog.api.provisioning.WordPressProvisioningClient;
@@ -54,6 +55,10 @@ class WordPressSiteProvisioningServiceTest {
     private CreateManagedWordPressSiteRequest request() {
         return new CreateManagedWordPressSiteRequest(
                 "My Blog", "main", "My Blog", "admin", "admin@example.com", "s3cret-pass", null, null);
+    }
+
+    private AdoptWordPressSiteRequest adoptRequest() {
+        return new AdoptWordPressSiteRequest("My Blog", "main", "admin");
     }
 
     private CreateManagedWordPressSiteRequest requestWithTemplate(Long templateSiteId) {
@@ -196,6 +201,74 @@ class WordPressSiteProvisioningServiceTest {
 
         verify(provisioningClient).deprovision("main", "wp_main");
         verify(siteService, never()).register(any(), any());
+    }
+
+    @Test
+    void createManagedSite_サイトが既に存在する場合はdeprovisionせずに例外を伝播する() {
+        when(siteRepository.existsBySiteKey("main")).thenReturn(false);
+        when(provisioningClient.provision(any()))
+                .thenThrow(new SiteAlreadyProvisionedException("サイト 'main' は既に存在します", null));
+
+        assertThrows(SiteAlreadyProvisionedException.class, () -> service.createManagedSite(request(), 9L));
+
+        verify(provisioningClient, never()).deprovision(any(), any());
+        verify(siteService, never()).register(any(), any());
+    }
+
+    @Test
+    void adoptManagedSite_取り込みに成功しsiteServiceへ登録しフラグを保存する() {
+        when(siteRepository.existsBySiteKey("main")).thenReturn(false);
+        when(provisioningClient.adopt(any())).thenReturn(new WordPressProvisioningClient.ProvisionResult(
+                "https://localhost/sites/main", "admin", "app-pass-1234"));
+        SiteResponse response = new SiteResponse(1L, "My Blog", "main", CmsType.WORDPRESS,
+                "https://localhost/sites/main", LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false);
+        when(siteService.register(any(), eq(9L))).thenReturn(response);
+        Site site = new Site();
+        site.setId(1L);
+        site.setSiteKey("main");
+        when(siteRepository.findBySiteKey("main")).thenReturn(Optional.of(site));
+
+        SiteResponse result = service.adoptManagedSite(adoptRequest(), 9L);
+
+        assertEquals(1L, result.id());
+        assertTrue(site.isManagedWordpress());
+        assertEquals("main", site.getWpSlug());
+        assertEquals("wp_main", site.getWpDbName());
+        verify(siteRepository).save(site);
+        verify(provisioningClient, never()).deprovision(any(), any());
+    }
+
+    @Test
+    void adoptManagedSite_siteKeyが重複していれば取り込まずに例外() {
+        when(siteRepository.existsBySiteKey("main")).thenReturn(true);
+
+        assertThrows(IllegalArgumentException.class, () -> service.adoptManagedSite(adoptRequest(), 9L));
+
+        verify(provisioningClient, never()).adopt(any());
+    }
+
+    @Test
+    void adoptManagedSite_取り込み先が見つからない場合は例外を伝播しdeprovisionしない() {
+        when(siteRepository.existsBySiteKey("main")).thenReturn(false);
+        when(provisioningClient.adopt(any()))
+                .thenThrow(new SiteNotFoundException("サイト 'main' が見つかりません"));
+
+        assertThrows(SiteNotFoundException.class, () -> service.adoptManagedSite(adoptRequest(), 9L));
+
+        verify(provisioningClient, never()).deprovision(any(), any());
+        verify(siteService, never()).register(any(), any());
+    }
+
+    @Test
+    void adoptManagedSite_サイト登録失敗時もdeprovisionしない() {
+        when(siteRepository.existsBySiteKey("main")).thenReturn(false);
+        when(provisioningClient.adopt(any())).thenReturn(new WordPressProvisioningClient.ProvisionResult(
+                "https://localhost/sites/main", "admin", "app-pass-1234"));
+        when(siteService.register(any(), eq(9L))).thenThrow(new IllegalStateException("boom"));
+
+        assertThrows(IllegalStateException.class, () -> service.adoptManagedSite(adoptRequest(), 9L));
+
+        verify(provisioningClient, never()).deprovision(any(), any());
     }
 
     @Test

@@ -79,6 +79,10 @@
           moveFocus(thumb, e.key === 'ArrowRight' ? 1 : -1);
         }
       });
+      thumb.addEventListener('contextmenu', function (e) {
+        e.preventDefault();
+        openContextMenu(image, e.clientX, e.clientY);
+      });
       gallery.appendChild(thumb);
     });
 
@@ -90,6 +94,22 @@
     const items = Array.from(document.querySelectorAll('.thumb'));
     const next = items[items.indexOf(current) + delta];
     if (next) next.focus();
+  }
+
+  /** 右クリックした画像を対象に、次の「この設定で画像生成」用に保持する(issue #294)。 */
+  let contextMenuTarget = null;
+
+  function openContextMenu(image, x, y) {
+    contextMenuTarget = image;
+    const menu = document.getElementById('galleryContextMenu');
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+    menu.style.display = 'block';
+  }
+
+  function closeContextMenu() {
+    contextMenuTarget = null;
+    document.getElementById('galleryContextMenu').style.display = 'none';
   }
 
   /** 表示中ページのうち、まだ読み込んでいないサムネイルだけを要求する。 */
@@ -190,8 +210,38 @@
   document.getElementById('prevButton').addEventListener('click', function () { changePage(-1); });
   document.getElementById('nextButton').addEventListener('click', function () { changePage(1); });
 
+  /** 他パネルでの生成等により一覧が古くなっている場合に、パネルを開き直さず再取得する(issue #295)。 */
+  document.getElementById('refreshButton').addEventListener('click', function () {
+    if (LetsBlogLoading.isRunning()) return;
+    LetsBlogLoading.begin({
+      buttonIds: ['refreshButton', 'prevButton', 'nextButton'],
+      text: '画像一覧を再取得しています…',
+      kind: 'load',
+      onCancel: function () { post('cancel'); },
+    });
+    post('loadImages');
+  });
+
+  document.getElementById('regenerateMenuItem').addEventListener('click', function () {
+    if (!contextMenuTarget) return;
+    post('regenerateWithSettings', { imageId: contextMenuTarget.id });
+    showMessage('Generate Imageパネルにこの設定を反映しています…', '');
+    closeContextMenu();
+  });
+
+  // メニュー外のクリック/スクロール/Escapeでコンテキストメニューを閉じる。
+  document.addEventListener('click', function (e) {
+    const menu = document.getElementById('galleryContextMenu');
+    if (menu.style.display !== 'none' && !menu.contains(e.target)) {
+      closeContextMenu();
+    }
+  });
+  document.addEventListener('scroll', closeContextMenu, true);
+
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && LetsBlogLoading.isRunning()) {
+    if (e.key === 'Escape' && document.getElementById('galleryContextMenu').style.display !== 'none') {
+      closeContextMenu();
+    } else if (e.key === 'Escape' && LetsBlogLoading.isRunning()) {
       post('cancel');
     }
   });

@@ -2,6 +2,7 @@ package com.letsblog.api.service;
 
 import com.letsblog.api.domain.CustomTag;
 import com.letsblog.api.domain.CustomTagFormat;
+import com.letsblog.api.markdown.MarkdownRenderer;
 import com.letsblog.api.repository.CustomTagRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,7 +25,7 @@ class CustomTagRenderServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new CustomTagRenderService(customTagRepository);
+        service = new CustomTagRenderService(customTagRepository, new MarkdownRenderer());
     }
 
     private CustomTag tag(String name, String template) {
@@ -181,6 +182,44 @@ class CustomTagRenderServiceTest {
         String result = service.render(markdown, 1L);
 
         assertEquals("<div class=\"alert\">注意</div>", result);
+    }
+
+    @Test
+    void render_contentのMarkdown記法がHTMLに変換されて展開される() {
+        when(customTagRepository.findByProjectIdIsNull()).thenReturn(
+                List.of(tag("alert", "<div class=\"alert\">{{content}}</div>")));
+
+        String markdown = "[alert]\n**bold** and *italic*\n[/alert]";
+
+        String result = service.render(markdown);
+
+        assertEquals("<div class=\"alert\"><strong>bold</strong> and <em>italic</em></div>", result);
+    }
+
+    @Test
+    void render_content内の複数段落は段落タグを維持したまま展開される() {
+        when(customTagRepository.findByProjectIdIsNull()).thenReturn(
+                List.of(tag("alert", "<div class=\"alert\">{{content}}</div>")));
+
+        String markdown = "[alert]\n1段落目\n\n2段落目\n[/alert]";
+
+        String result = service.render(markdown);
+
+        assertEquals("<div class=\"alert\"><p>1段落目</p>\n<p>2段落目</p></div>", result);
+    }
+
+    @Test
+    void previewTemplate_contentのMarkdown記法をrenderと同じくHTMLへ変換して展開する() {
+        String html = service.previewTemplate("<div class=\"alert\">{{content}}</div>", "**bold** and *italic*");
+
+        assertEquals("<div class=\"alert\"><strong>bold</strong> and <em>italic</em></div>", html);
+    }
+
+    @Test
+    void previewTemplate_attrプレースホルダーは置換せずそのまま残す() {
+        String html = service.previewTemplate("<a href=\"{{attr:href}}\">{{content}}</a>", "こちら");
+
+        assertEquals("<a href=\"{{attr:href}}\">こちら</a>", html);
     }
 
     @Test

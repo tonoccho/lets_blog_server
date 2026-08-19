@@ -58,13 +58,16 @@ export type ImageGenInboundMessage =
   // 生成画像の実体(base64)はパネル側が保持し、Webviewからは送り返さない。
   // 数MBの文字列をWebview境界で往復させると、その都度コピーが作られるため。
   | WebviewMessageBase<'setAsEyecatch'>
-  | WebviewMessageBase<'addAsAsset'>;
+  | WebviewMessageBase<'addAsAsset'>
+  | (WebviewMessageBase<'sendChat'> & { history: api.PlanChatMessage[]; message: string });
 
 export type ImageGenOutboundCommand =
   | 'options'
   | 'generated'
   | 'eyecatchSet'
   | 'assetAdded'
+  | 'promptGenerated'
+  | 'prefill'
   | 'cancelled'
   | 'error';
 
@@ -89,8 +92,18 @@ export interface SectionGenInitPayload {
 
 export type ArticleCreationInboundMessage =
   | WebviewMessageBase<'loadProjects'>
+  | WebviewMessageBase<'loadPostStatuses'>
   | WebviewMessageBase<'close'>
+  | WebviewMessageBase<'cancel'>
   | (WebviewMessageBase<'loadCategories'> & { projectId: number })
+  | (WebviewMessageBase<'sendChat'> & {
+      projectId: number;
+      history: api.PlanChatMessage[];
+      message: string;
+      sessionId?: number;
+    })
+  | (WebviewMessageBase<'suggestMetadata'> & { projectId: number; history: api.PlanChatMessage[] })
+  | (WebviewMessageBase<'suggestStructure'> & { projectId: number; history: api.PlanChatMessage[] })
   | (WebviewMessageBase<'createArticle'> & {
       metadata: {
         projectId: number;
@@ -100,9 +113,19 @@ export type ArticleCreationInboundMessage =
         tags: string[];
         status: string;
       };
+      content?: string;
     });
 
-export type ArticleCreationOutboundCommand = 'projectList' | 'categoryList' | 'articleCreated' | 'error';
+export type ArticleCreationOutboundCommand =
+  | 'projectList'
+  | 'postStatusList'
+  | 'categoryList'
+  | 'chatResponse'
+  | 'metadataSuggestion'
+  | 'structureSuggestion'
+  | 'articleCreated'
+  | 'cancelled'
+  | 'error';
 
 // --- Image Gallery パネル ---
 
@@ -112,7 +135,8 @@ export type ImageGalleryInboundMessage =
   | (WebviewMessageBase<'loadThumbnails'> & { imageIds: number[] })
   | (WebviewMessageBase<'insertImage'> & { imageId: number; prompt?: string })
   | (WebviewMessageBase<'setAsEyecatch'> & { imageId: number })
-  | (WebviewMessageBase<'deleteImage'> & { imageId: number });
+  | (WebviewMessageBase<'deleteImage'> & { imageId: number })
+  | (WebviewMessageBase<'regenerateWithSettings'> & { imageId: number });
 
 export type ImageGalleryOutboundCommand =
   | 'imageList'
@@ -120,6 +144,40 @@ export type ImageGalleryOutboundCommand =
   | 'imageInserted'
   | 'eyecatchSet'
   | 'imageDeleted'
+  | 'deleteCancelled'
+  | 'cancelled'
+  | 'error';
+
+// --- Diagram Editor パネル ---
+
+export type DiagramEditorInboundMessage =
+  | WebviewMessageBase<'ready'>
+  | (WebviewMessageBase<'insertNew'> & { name: string; xml: string; svg: string })
+  | (WebviewMessageBase<'saveOverwrite'> & { xml: string; svg: string })
+  | (WebviewMessageBase<'saveAsNew'> & { name: string; xml: string; svg: string })
+  | WebviewMessageBase<'cancel'>;
+
+export type DiagramEditorOutboundCommand =
+  | 'init'
+  | 'inserted'
+  | 'saved'
+  | 'cancelled'
+  | 'error';
+
+// --- Diagram Gallery パネル ---
+
+export type DiagramGalleryInboundMessage =
+  | WebviewMessageBase<'loadDiagrams'>
+  | (WebviewMessageBase<'loadThumbnails'> & { diagramIds: number[] })
+  | (WebviewMessageBase<'insertDiagram'> & { diagramId: number; name: string })
+  | (WebviewMessageBase<'deleteDiagram'> & { diagramId: number })
+  | WebviewMessageBase<'cancel'>;
+
+export type DiagramGalleryOutboundCommand =
+  | 'diagramList'
+  | 'thumbnails'
+  | 'diagramInserted'
+  | 'diagramDeleted'
   | 'deleteCancelled'
   | 'cancelled'
   | 'error';

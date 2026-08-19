@@ -20,6 +20,9 @@ import { EnvironmentSyncPanel } from "./EnvironmentSyncPanel";
 import { BulkManagementPanel } from "./BulkManagementPanel";
 import { ProjectAiModelsPanel } from "./ProjectAiModelsPanel";
 import { ProjectAssetGenerationPanel } from "./ProjectAssetGenerationPanel";
+import { ProjectImageGenerationPromptDefaultsForm } from "./ProjectImageGenerationPromptDefaultsForm";
+import { ProjectImageGenerationSizeDefaultsForm } from "./ProjectImageGenerationSizeDefaultsForm";
+import { ProjectArticleImageResizeDefaultForm } from "./ProjectArticleImageResizeDefaultForm";
 import { ProjectNameForm } from "./ProjectNameForm";
 import { DeleteProjectButton } from "./DeleteProjectButton";
 import { ProjectUserManager } from "./ProjectUserManager";
@@ -113,7 +116,7 @@ export default async function ProjectDetailPage({
           <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
             <h2 className="font-medium">モデル設定</h2>
             <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-              壁打ちチャットで使うOllamaモデル・画像生成で使うComfyUIチェックポイントは、プロジェクトごとに
+              壁打ちチャットで使うLLMモデル・画像生成で使うComfyUIチェックポイントは、プロジェクトごとに
               「AI・アセット」タブから切り替えられます。
             </p>
           </div>
@@ -140,6 +143,20 @@ export default async function ProjectDetailPage({
         <div className="space-y-6">
           <ProjectAiModelsPanel projectId={project.id} />
           <ProjectAssetGenerationPanel projectId={project.id} />
+          <ProjectImageGenerationPromptDefaultsForm
+            projectId={project.id}
+            defaultNegativePrompt={project.defaultNegativePrompt}
+            defaultQualityPrompt={project.defaultQualityPrompt}
+          />
+          <ProjectImageGenerationSizeDefaultsForm
+            projectId={project.id}
+            defaultGeneratedImageWidth={project.defaultGeneratedImageWidth}
+            defaultGeneratedImageHeight={project.defaultGeneratedImageHeight}
+          />
+          <ProjectArticleImageResizeDefaultForm
+            projectId={project.id}
+            defaultArticleImageLongEdgePx={project.defaultArticleImageLongEdgePx}
+          />
         </div>
       ),
     },

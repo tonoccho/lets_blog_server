@@ -5,10 +5,15 @@ import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.ProjectResponse;
+import com.letsblog.api.dto.UpdateArticleImageResizeDefaultRequest;
+import com.letsblog.api.dto.UpdateImageGenerationPromptDefaultsRequest;
+import com.letsblog.api.dto.UpdateImageGenerationSizeDefaultsRequest;
+import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
 import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
 import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.SiteRepository;
 import com.letsblog.api.dto.SiteResponse;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,14 +28,29 @@ public class ProjectService {
     private final ProjectRepository projectRepository;
     private final SiteRepository siteRepository;
     private final BulkUploadStorageService bulkUploadStorageService;
+    private final String globalDefaultNegativePrompt;
+    private final String globalDefaultQualityPrompt;
+    private final int globalDefaultGeneratedImageWidth;
+    private final int globalDefaultGeneratedImageHeight;
+    private final int globalDefaultArticleImageLongEdgePx;
 
     public ProjectService(
             ProjectRepository projectRepository,
             SiteRepository siteRepository,
-            BulkUploadStorageService bulkUploadStorageService) {
+            BulkUploadStorageService bulkUploadStorageService,
+            @Value("${app.default-negative-prompt}") String globalDefaultNegativePrompt,
+            @Value("${app.default-quality-prompt}") String globalDefaultQualityPrompt,
+            @Value("${app.default-generated-image-width}") int globalDefaultGeneratedImageWidth,
+            @Value("${app.default-generated-image-height}") int globalDefaultGeneratedImageHeight,
+            @Value("${app.default-article-image-long-edge-px}") int globalDefaultArticleImageLongEdgePx) {
         this.projectRepository = projectRepository;
         this.siteRepository = siteRepository;
         this.bulkUploadStorageService = bulkUploadStorageService;
+        this.globalDefaultNegativePrompt = globalDefaultNegativePrompt;
+        this.globalDefaultQualityPrompt = globalDefaultQualityPrompt;
+        this.globalDefaultGeneratedImageWidth = globalDefaultGeneratedImageWidth;
+        this.globalDefaultGeneratedImageHeight = globalDefaultGeneratedImageHeight;
+        this.globalDefaultArticleImageLongEdgePx = globalDefaultArticleImageLongEdgePx;
     }
 
     @AuditLog(action = AuditLogAction.PROJECT_CREATED, resourceType = "PROJECT")
@@ -168,6 +188,118 @@ public class ProjectService {
                 : request.githubRepository();
         project.setGithubRepository(repo);
         return toResponse(projectRepository.save(project));
+    }
+
+    @AuditLog(action = AuditLogAction.PROJECT_UPDATED, resourceType = "PROJECT")
+    @Transactional
+    public ProjectResponse updateCssSelectorPrefix(Long projectId, UpdateProjectCssSelectorPrefixRequest request) {
+        Project project = getProjectEntity(projectId);
+        String prefix = request.cssSelectorPrefix() == null || request.cssSelectorPrefix().isBlank()
+                ? null
+                : request.cssSelectorPrefix();
+        project.setCssSelectorPrefix(prefix);
+        return toResponse(projectRepository.save(project));
+    }
+
+    /**
+     * カスタムタグCSSのセレクタに付与するプリフィックスを解決する。未設定時はプロジェクトのslugを使う(issue #298)。
+     */
+    public String resolveCssSelectorPrefix(Project project) {
+        return project.getCssSelectorPrefix() == null || project.getCssSelectorPrefix().isBlank()
+                ? project.getSlug()
+                : project.getCssSelectorPrefix();
+    }
+
+    @AuditLog(action = AuditLogAction.PROJECT_UPDATED, resourceType = "PROJECT")
+    @Transactional
+    public ProjectResponse updateImageGenerationPromptDefaults(
+            Long projectId, UpdateImageGenerationPromptDefaultsRequest request) {
+        Project project = getProjectEntity(projectId);
+        project.setDefaultNegativePrompt(blankToNull(request.defaultNegativePrompt()));
+        project.setDefaultQualityPrompt(blankToNull(request.defaultQualityPrompt()));
+        return toResponse(projectRepository.save(project));
+    }
+
+    /**
+     * 画像生成時のnegative promptを解決する。プロジェクト未設定時・projectId未指定時はアプリ全体の
+     * デフォルトにフォールバックする(issue #293)。
+     */
+    public String resolveDefaultNegativePrompt(Long projectId) {
+        if (projectId == null) {
+            return globalDefaultNegativePrompt;
+        }
+        String projectValue = getProjectEntity(projectId).getDefaultNegativePrompt();
+        return projectValue == null || projectValue.isBlank() ? globalDefaultNegativePrompt : projectValue;
+    }
+
+    /**
+     * 画像生成時に本文プロンプトへ追加する画質プロンプトを解決する(issue #293)。
+     * 呼び出し元でprompt末尾へカンマ区切りで追加することを想定する。
+     */
+    public String resolveDefaultQualityPrompt(Long projectId) {
+        if (projectId == null) {
+            return globalDefaultQualityPrompt;
+        }
+        String projectValue = getProjectEntity(projectId).getDefaultQualityPrompt();
+        return projectValue == null || projectValue.isBlank() ? globalDefaultQualityPrompt : projectValue;
+    }
+
+    private String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
+    }
+
+    @AuditLog(action = AuditLogAction.PROJECT_UPDATED, resourceType = "PROJECT")
+    @Transactional
+    public ProjectResponse updateImageGenerationSizeDefaults(
+            Long projectId, UpdateImageGenerationSizeDefaultsRequest request) {
+        Project project = getProjectEntity(projectId);
+        project.setDefaultGeneratedImageWidth(request.defaultGeneratedImageWidth());
+        project.setDefaultGeneratedImageHeight(request.defaultGeneratedImageHeight());
+        return toResponse(projectRepository.save(project));
+    }
+
+    /**
+     * 画像生成時のデフォルト幅を解決する。プロジェクト未設定時・projectId未指定時はアプリ全体の
+     * デフォルト(既定1920)にフォールバックする(issue #292)。
+     */
+    public int resolveDefaultGeneratedImageWidth(Long projectId) {
+        if (projectId == null) {
+            return globalDefaultGeneratedImageWidth;
+        }
+        Integer projectValue = getProjectEntity(projectId).getDefaultGeneratedImageWidth();
+        return projectValue == null ? globalDefaultGeneratedImageWidth : projectValue;
+    }
+
+    /**
+     * 画像生成時のデフォルト高さを解決する。プロジェクト未設定時・projectId未指定時はアプリ全体の
+     * デフォルト(既定1080)にフォールバックする(issue #292)。
+     */
+    public int resolveDefaultGeneratedImageHeight(Long projectId) {
+        if (projectId == null) {
+            return globalDefaultGeneratedImageHeight;
+        }
+        Integer projectValue = getProjectEntity(projectId).getDefaultGeneratedImageHeight();
+        return projectValue == null ? globalDefaultGeneratedImageHeight : projectValue;
+    }
+
+    @AuditLog(action = AuditLogAction.PROJECT_UPDATED, resourceType = "PROJECT")
+    @Transactional
+    public ProjectResponse updateArticleImageResizeDefault(Long projectId, UpdateArticleImageResizeDefaultRequest request) {
+        Project project = getProjectEntity(projectId);
+        project.setDefaultArticleImageLongEdgePx(request.defaultArticleImageLongEdgePx());
+        return toResponse(projectRepository.save(project));
+    }
+
+    /**
+     * 記事投稿時に画像をリサイズする長編の目標pxを解決する。プロジェクト未設定時・projectId未指定時は
+     * アプリ全体のデフォルト(既定1300)にフォールバックする(issue #291)。
+     */
+    public int resolveArticleImageLongEdgePx(Long projectId) {
+        if (projectId == null) {
+            return globalDefaultArticleImageLongEdgePx;
+        }
+        Integer projectValue = getProjectEntity(projectId).getDefaultArticleImageLongEdgePx();
+        return projectValue == null ? globalDefaultArticleImageLongEdgePx : projectValue;
     }
 
     private void requireValidEnvironment(String environment) {

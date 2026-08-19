@@ -1,8 +1,9 @@
 import { notFound } from "next/navigation";
-import { getSiteDetail } from "@/lib/apiClient";
+import { getSiteDetail, listSshKeyPairs, listStaticContent } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { SiteEditForm } from "./SiteEditForm";
+import { StaticContentPanel } from "./StaticContentPanel";
 
 export default async function SiteEditPage({
   params,
@@ -13,7 +14,11 @@ export default async function SiteEditPage({
   const actor = { id: Number(session.user.id), role: session.user.role };
   const { id } = await params;
 
-  const site = await getSiteDetail(Number(id), actor).catch(() => null);
+  const [site, sshKeyPairs, staticContents] = await Promise.all([
+    getSiteDetail(Number(id), actor).catch(() => null),
+    listSshKeyPairs(actor).catch(() => []),
+    listStaticContent(Number(id), actor).catch(() => []),
+  ]);
   if (!site) {
     notFound();
   }
@@ -28,7 +33,8 @@ export default async function SiteEditPage({
         ]}
       />
       <h1 className="text-xl font-semibold">サイト管理</h1>
-      <SiteEditForm site={site} />
+      <SiteEditForm site={site} sshKeyPairs={sshKeyPairs} />
+      <StaticContentPanel siteId={site.id} initialContents={staticContents} />
     </div>
   );
 }

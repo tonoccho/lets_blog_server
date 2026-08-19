@@ -5,9 +5,11 @@ import com.letsblog.api.cms.agent.AgentOperationException;
 import com.letsblog.api.cms.ssh.SshOperationException;
 import com.letsblog.api.contentcache.ContentScrapingException;
 import com.letsblog.api.github.GithubApiException;
+import com.letsblog.api.service.AiServiceGenerationException;
 import com.letsblog.api.service.ArticlePlanSessionNotFoundException;
 import com.letsblog.api.service.BackupException;
 import com.letsblog.api.service.CustomTagNotFoundException;
+import com.letsblog.api.service.DiagramNotFoundException;
 import com.letsblog.api.service.EmailAlreadyExistsException;
 import com.letsblog.api.service.EmailSendException;
 import com.letsblog.api.service.ForbiddenException;
@@ -15,6 +17,8 @@ import com.letsblog.api.service.GeneratedImageNotFoundException;
 import com.letsblog.api.service.GenerationJobNotFoundException;
 import com.letsblog.api.service.InvalidCredentialsException;
 import com.letsblog.api.service.InvalidCustomTagContentException;
+import com.letsblog.api.service.InvalidPlantUmlTagException;
+import com.letsblog.api.service.InvalidRechartsTagException;
 import com.letsblog.api.service.InvalidRoleException;
 import com.letsblog.api.service.InvalidTokenException;
 import com.letsblog.api.service.InvalidTotpCodeException;
@@ -24,7 +28,9 @@ import com.letsblog.api.service.ProjectUserNotFoundException;
 import com.letsblog.api.service.ProvisioningException;
 import com.letsblog.api.service.QrCodeGenerationException;
 import com.letsblog.api.service.RoleNotFoundException;
+import com.letsblog.api.service.SiteAlreadyProvisionedException;
 import com.letsblog.api.service.SiteNotFoundException;
+import com.letsblog.api.service.SshKeyPairNotFoundException;
 import com.letsblog.api.service.TwoFactorSecretNotFoundException;
 import com.letsblog.api.exception.RateLimitExceededException;
 import com.letsblog.api.service.UserNotFoundException;
@@ -84,6 +90,11 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
     }
 
+    @ExceptionHandler(DiagramNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleDiagramNotFound(DiagramNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    }
+
     @ExceptionHandler(ProjectUserNotFoundException.class)
     public ResponseEntity<Map<String, String>> handleProjectUserNotFound(ProjectUserNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
@@ -111,6 +122,16 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(InvalidCustomTagContentException.class)
     public ResponseEntity<Map<String, String>> handleInvalidCustomTagContent(InvalidCustomTagContentException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidRechartsTagException.class)
+    public ResponseEntity<Map<String, String>> handleInvalidRechartsTag(InvalidRechartsTagException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidPlantUmlTagException.class)
+    public ResponseEntity<Map<String, String>> handleInvalidPlantUmlTag(InvalidPlantUmlTagException e) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
     }
 
@@ -144,9 +165,19 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
     }
 
+    @ExceptionHandler(AiServiceGenerationException.class)
+    public ResponseEntity<Map<String, String>> handleAiServiceGenerationException(AiServiceGenerationException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
+    }
+
     @ExceptionHandler(ProvisioningException.class)
     public ResponseEntity<Map<String, String>> handleProvisioningException(ProvisioningException e) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(SiteAlreadyProvisionedException.class)
+    public ResponseEntity<Map<String, String>> handleSiteAlreadyProvisionedException(SiteAlreadyProvisionedException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", e.getMessage()));
     }
 
     @ExceptionHandler(SshOperationException.class)
@@ -187,6 +218,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BackupException.class)
     public ResponseEntity<Map<String, String>> handleBackupException(BackupException e) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(SshKeyPairNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleSshKeyPairNotFound(SshKeyPairNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

@@ -107,6 +107,42 @@ class WordPressAdapterTest {
     }
 
     @Test
+    void testGenerateAuthCookie_SSHトランスポートはWordPressSshOperationsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = sshCredentials();
+        AuthCookie cookie = new AuthCookie("wordpress_logged_in_x", "value");
+        when(sshOperations.generateAuthCookie(creds)).thenReturn(cookie);
+
+        AuthCookie result = adapter.generateAuthCookie(creds);
+
+        assertEquals(cookie, result);
+        verify(sshOperations).generateAuthCookie(creds);
+        verify(agentOperations, never()).generateAuthCookie(any());
+    }
+
+    @Test
+    void testGenerateAuthCookie_AGENTトランスポートはWordPressAgentOperationsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = agentCredentials();
+        AuthCookie cookie = new AuthCookie("wordpress_logged_in_x", "value");
+        when(agentOperations.generateAuthCookie(creds)).thenReturn(cookie);
+
+        AuthCookie result = adapter.generateAuthCookie(creds);
+
+        assertEquals(cookie, result);
+        verify(agentOperations).generateAuthCookie(creds);
+        verify(sshOperations, never()).generateAuthCookie(any());
+    }
+
+    @Test
+    void testGenerateAuthCookie_RESTトランスポートは未対応で例外() {
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        assertThrows(UnsupportedOperationException.class, () -> adapter.generateAuthCookie(creds));
+        verify(sshOperations, never()).generateAuthCookie(any());
+        verify(agentOperations, never()).generateAuthCookie(any());
+    }
+
+    @Test
     void testCreatePost() {
         server.expect(requestTo("http://example.com/wp-json/wp/v2/posts"))
                 .andExpect(method(POST))
@@ -142,6 +178,146 @@ class WordPressAdapterTest {
 
         assertEquals("123", result.id());
         assertEquals("publish", result.status());
+        server.verify();
+    }
+
+    @Test
+    void testUpdatePost_カテゴリとタグを空リストにすると明示的な空配列を送る() {
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/posts/123"))
+                .andExpect(method(POST))
+                .andExpect(content().string(containsString("\"categories\":[]")))
+                .andExpect(content().string(containsString("\"tags\":[]")))
+                .andRespond(withSuccess(
+                        "{\"id\":123,\"link\":\"http://example.com/posts/test\",\"status\":\"publish\"}",
+                        MediaType.APPLICATION_JSON));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+        PostContent content = new PostContent(
+                "Updated Title", "test-slug", "<p>Updated</p>", "publish", List.of(), List.of(), null, null);
+
+        adapter.createOrUpdatePost(creds, content, "123");
+
+        server.verify();
+    }
+
+    @Test
+    void testPostExists_SSHトランスポートはWordPressSshOperationsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = sshCredentials();
+        when(sshOperations.postExists(creds, "42")).thenReturn(false);
+
+        boolean result = adapter.postExists(creds, "42");
+
+        assertEquals(false, result);
+        verify(sshOperations).postExists(creds, "42");
+        verify(agentOperations, never()).postExists(any(), any());
+    }
+
+    @Test
+    void testPostExists_AGENTトランスポートはWordPressAgentOperationsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = agentCredentials();
+        when(agentOperations.postExists(creds, "42")).thenReturn(true);
+
+        boolean result = adapter.postExists(creds, "42");
+
+        assertEquals(true, result);
+        verify(agentOperations).postExists(creds, "42");
+        verify(sshOperations, never()).postExists(any(), any());
+    }
+
+    @Test
+    void testPostExists_RESTトランスポートは200ならtrueを返す() {
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/posts/42"))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        assertEquals(true, adapter.postExists(creds, "42"));
+        server.verify();
+    }
+
+    @Test
+    void testPostExists_RESTトランスポートは404ならfalseを返す() {
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/posts/42"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        assertEquals(false, adapter.postExists(creds, "42"));
+        server.verify();
+    }
+
+    @Test
+    void testPostExists_RESTトランスポートは404以外のエラーなら判定不能としてtrueを返す() {
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/posts/42"))
+                .andRespond(withServerError());
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        assertEquals(true, adapter.postExists(creds, "42"));
+        server.verify();
+    }
+
+    @Test
+    void testMediaExists_SSHトランスポートはWordPressSshOperationsのpostExistsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = sshCredentials();
+        when(sshOperations.postExists(creds, "11")).thenReturn(false);
+
+        boolean result = adapter.mediaExists(creds, "11");
+
+        assertEquals(false, result);
+        verify(sshOperations).postExists(creds, "11");
+        verify(agentOperations, never()).postExists(any(), any());
+    }
+
+    @Test
+    void testMediaExists_AGENTトランスポートはWordPressAgentOperationsのpostExistsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = agentCredentials();
+        when(agentOperations.postExists(creds, "11")).thenReturn(true);
+
+        boolean result = adapter.mediaExists(creds, "11");
+
+        assertEquals(true, result);
+        verify(agentOperations).postExists(creds, "11");
+        verify(sshOperations, never()).postExists(any(), any());
+    }
+
+    @Test
+    void testMediaExists_RESTトランスポートは200ならtrueを返す() {
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/media/11"))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        assertEquals(true, adapter.mediaExists(creds, "11"));
+        server.verify();
+    }
+
+    @Test
+    void testMediaExists_RESTトランスポートは404ならfalseを返す() {
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/media/11"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        assertEquals(false, adapter.mediaExists(creds, "11"));
+        server.verify();
+    }
+
+    @Test
+    void testMediaExists_RESTトランスポートは404以外のエラーなら判定不能としてtrueを返す() {
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/media/11"))
+                .andRespond(withServerError());
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        assertEquals(true, adapter.mediaExists(creds, "11"));
         server.verify();
     }
 
@@ -316,6 +492,66 @@ class WordPressAdapterTest {
         List<String> names = adapter.listCategoryNames(creds);
 
         assertEquals(List.of("技術"), names);
+    }
+
+    @Test
+    void testListCategoriesWithParents_RESTトランスポートは親カテゴリ名を解決する() {
+        server.expect(requestTo(containsString("/wp-json/wp/v2/categories?per_page=100")))
+                .andRespond(withSuccess(
+                        "[{\"id\":1,\"name\":\"技術\",\"parent\":0},"
+                                + "{\"id\":2,\"name\":\"Java\",\"parent\":1}]",
+                        MediaType.APPLICATION_JSON));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        List<CmsAdapter.CategoryOption> options = adapter.listCategoriesWithParents(creds);
+
+        assertEquals(List.of(
+                new CmsAdapter.CategoryOption("技術", null),
+                new CmsAdapter.CategoryOption("Java", "技術")), options);
+        server.verify();
+    }
+
+    @Test
+    void testListCategoriesWithParents_SSHトランスポートはparentSlugから親カテゴリ名を解決する() {
+        CmsCredentials.WordPressCredentials creds = sshCredentials();
+        when(sshOperations.listCategories(creds)).thenReturn(List.of(
+                new WordPressSshOperations.CategoryInfo("1", "技術", "tech", null, ""),
+                new WordPressSshOperations.CategoryInfo("2", "Java", "java", "tech", "")));
+
+        List<CmsAdapter.CategoryOption> options = adapter.listCategoriesWithParents(creds);
+
+        assertEquals(List.of(
+                new CmsAdapter.CategoryOption("技術", null),
+                new CmsAdapter.CategoryOption("Java", "技術")), options);
+    }
+
+    @Test
+    void testListCategoriesWithParents_AGENTトランスポートはparentSlugから親カテゴリ名を解決する() {
+        CmsCredentials.WordPressCredentials creds = agentCredentials();
+        when(bulkManagementClient.listCategories(creds.wpSlug())).thenReturn(List.of(
+                new WordPressBulkManagementClient.CategoryInfo("技術", "tech", null, ""),
+                new WordPressBulkManagementClient.CategoryInfo("Java", "java", "tech", "")));
+
+        List<CmsAdapter.CategoryOption> options = adapter.listCategoriesWithParents(creds);
+
+        assertEquals(List.of(
+                new CmsAdapter.CategoryOption("技術", null),
+                new CmsAdapter.CategoryOption("Java", "技術")), options);
+    }
+
+    @Test
+    void testListCategoriesWithParents_取得失敗時は空リストを返す() {
+        server.expect(requestTo(containsString("/wp-json/wp/v2/categories")))
+                .andRespond(withServerError());
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        List<CmsAdapter.CategoryOption> options = adapter.listCategoriesWithParents(creds);
+
+        assertEquals(List.of(), options);
     }
 
     @Test

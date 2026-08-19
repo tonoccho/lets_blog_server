@@ -5,13 +5,11 @@ import com.letsblog.api.dto.TagDesignColors;
 import com.letsblog.api.markdown.MarkdownRenderer;
 import org.springframework.stereotype.Service;
 
-import java.util.regex.Pattern;
-
 /**
  * [toc]組み込みタグ(#146、flexmark-ext-tocが解釈する)向けに、プロジェクトごとにカスタマイズされた
- * デザイン(#150)のCSSを注入する。[toc]自体の展開はflexmarkが行う(MarkdownRenderer)ため、
- * このサービスはMarkdown文字列に[toc]が含まれるかだけを判定し、含まれていれば対応するCSSを
- * 本文冒頭に追加する(CustomTagRenderService等と同じ「使われている場合のみ注入」パターン)。
+ * デザイン(#150)のCSSをCustomTagServiceの統合CSSバンドルへ提供する(buildStyle)。[toc]自体の展開は
+ * flexmarkが行う(MarkdownRenderer)。CSSは統合CSSバンドル経由でのみ提供し、記事本文へは注入しない
+ * (CustomTagRenderServiceと同じ方針)。
  *
  * カスタムHTMLテンプレート(issue #165)は、flexmarkが目次を展開した後のHTML全体に対して
  * 後処理で適用する(applyHtmlTemplate)。目次はH2〜H4の見出し構造から動的に生成される
@@ -21,26 +19,12 @@ import java.util.regex.Pattern;
 @Service
 public class TocStyleRenderService {
 
-    // flexmarkのTocBlockParserが認識する行(大文字小文字を区別しない[toc]、オプション文字列付きも許容)と
-    // 同等の判定を行う。実際の展開はflexmark自身が行うため、ここでは「含まれるか」の判定のみで良い。
-    private static final Pattern TOC_TAG_PATTERN =
-            Pattern.compile("(?im)^\\[toc(?:\\s+[^\\]]*)?]\\s*$");
-
     private static final String TOC_LIST_OPEN_TAG = "<ul class=\"" + MarkdownRenderer.TOC_LIST_CLASS + "\">";
 
     private final TagDesignSettingService tagDesignSettingService;
 
     public TocStyleRenderService(TagDesignSettingService tagDesignSettingService) {
         this.tagDesignSettingService = tagDesignSettingService;
-    }
-
-    public String render(String markdown, Long projectId) {
-        if (markdown == null || markdown.isEmpty() || !TOC_TAG_PATTERN.matcher(markdown).find()) {
-            return markdown;
-        }
-
-        TagDesignColors colors = tagDesignSettingService.resolveColors(projectId, EmbedTagType.TOC);
-        return "<style>\n" + buildStyle(colors) + "\n</style>\n\n" + markdown;
     }
 
     /**

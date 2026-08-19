@@ -2,10 +2,13 @@ package com.letsblog.api.cms;
 
 /**
  * 対応するCMSの種別。CmsAdapterFactoryが実装を選択する際のキーとして使う。
+ *
+ * WordPress以外のCMS対応(旧: microCMS)はissue #374で廃止された。新たなCMSに対応する場合は
+ * このenumへ値を追加し、CmsAdapter実装を1つ追加してCmsAdapterFactoryに登録すればよい
+ * (アーキテクチャ自体は複数CMS対応を前提として維持している)。
  */
 public enum CmsType {
-    WORDPRESS("WordPress"),
-    MICROCMS("microCMS");
+    WORDPRESS("WordPress");
 
     private final String displayName;
 

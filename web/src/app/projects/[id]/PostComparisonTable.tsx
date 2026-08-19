@@ -1,19 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import type { PostComparisonPage, PostType } from "@/lib/apiClient";
+import { useEffect, useState } from "react";
+import type { PostComparisonPage, PostStatusOption, PostType } from "@/lib/apiClient";
 import {
   fetchPostComparisonAction,
+  fetchPostStatusesAction,
   deletePostEverywhereAction,
   updatePostStatusEverywhereAction,
 } from "./actions";
-
-const STATUS_OPTIONS = [
-  { value: "publish", label: "公開" },
-  { value: "draft", label: "下書き" },
-  { value: "pending", label: "レビュー待ち" },
-  { value: "private", label: "非公開" },
-];
 
 const ENVIRONMENTS: ("local" | "test" | "production")[] = ["local", "test", "production"];
 
@@ -35,6 +29,11 @@ export function PostComparisonTable({
   const [message, setMessage] = useState<{ type: "error" | "success"; text: string } | null>(null);
   const [statusSelections, setStatusSelections] = useState<Record<string, string>>({});
   const [pendingAction, setPendingAction] = useState<{ slug: string; type: "status" | "delete" } | null>(null);
+  const [statusOptions, setStatusOptions] = useState<PostStatusOption[]>([]);
+
+  useEffect(() => {
+    fetchPostStatusesAction().then(setStatusOptions);
+  }, []);
 
   const totalPages = Math.max(1, Math.ceil(pageData.totalCount / pageData.size));
 
@@ -180,7 +179,7 @@ export function PostComparisonTable({
                           className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-xs"
                         >
                           <option value="">ステータス変更…</option>
-                          {STATUS_OPTIONS.map((opt) => (
+                          {statusOptions.map((opt) => (
                             <option key={opt.value} value={opt.value}>
                               {opt.label}
                             </option>

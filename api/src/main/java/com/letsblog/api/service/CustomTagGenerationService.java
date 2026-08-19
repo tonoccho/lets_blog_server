@@ -1,12 +1,15 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.ai.OllamaClient;
+import com.letsblog.api.ai.LlmClient;
+import com.letsblog.api.ai.PenpotClient;
 import com.letsblog.api.domain.CustomTag;
 import com.letsblog.api.dto.GenerateCustomTagRequest;
 import com.letsblog.api.dto.GenerateCustomTagResponse;
 import com.letsblog.api.dto.ValidationError;
 import com.letsblog.api.dto.ValidationResult;
 import com.letsblog.api.repository.CustomTagRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,7 +21,10 @@ import java.util.stream.Collectors;
 @Service
 public class CustomTagGenerationService {
 
-    private final OllamaClient ollamaClient;
+    private static final Logger log = LoggerFactory.getLogger(CustomTagGenerationService.class);
+
+    private final LlmClient llmClient;
+    private final PenpotClient penpotClient;
     private final CustomTagRepository customTagRepository;
     private final AdminAuthorizationService adminAuthorizationService;
     private final CustomTagValidationService customTagValidationService;
@@ -27,11 +33,13 @@ public class CustomTagGenerationService {
     private static final Pattern CSS_PATTERN = Pattern.compile("```css\\s*\\n([\\s\\S]*?)\\n```");
 
     public CustomTagGenerationService(
-            OllamaClient ollamaClient,
+            LlmClient llmClient,
+            PenpotClient penpotClient,
             CustomTagRepository customTagRepository,
             AdminAuthorizationService adminAuthorizationService,
             CustomTagValidationService customTagValidationService) {
-        this.ollamaClient = ollamaClient;
+        this.llmClient = llmClient;
+        this.penpotClient = penpotClient;
         this.customTagRepository = customTagRepository;
         this.adminAuthorizationService = adminAuthorizationService;
         this.customTagValidationService = customTagValidationService;
@@ -41,17 +49,17 @@ public class CustomTagGenerationService {
     public GenerateCustomTagResponse generate(GenerateCustomTagRequest request) {
         adminAuthorizationService.requireAdmin();
 
-        // プロンプトをOllamaに送信
-        String ollamaResponse = ollamaClient.generate(buildPrompt(request.prompt()));
+        // プロンプトをLLMに送信
+        String llmResponse = llmClient.generate(buildPrompt(request.prompt()));
 
         // HTMLとCSSを抽出
-        String htmlTemplate = extractHtml(ollamaResponse);
-        String cssContent = extractCss(ollamaResponse);
+        String htmlTemplate = extractHtml(llmResponse);
+        String cssContent = extractCss(llmResponse);
 
         // バリデーション
         if (htmlTemplate.isBlank()) {
             throw new InvalidCustomTagContentException(
-                    "OllamaレスポンスからHTMLを抽出できませんでした。```html ... ``` の形式で返されることを確認してください。");
+                    "LLMレスポンスからHTMLを抽出できませんでした。```html ... ``` の形式で返されることを確認してください。");
         }
 
         ValidationResult validationResult = customTagValidationService.validate(htmlTemplate, cssContent);
@@ -75,9 +83,29 @@ public class CustomTagGenerationService {
         tag.setCssContent(cssContent);
         tag.setDescription(request.description());
         tag.setProjectId(projectId);
+        tag.setPenpotFileUrl(tryCreatePenpotDesignFile(request.tagName(), request.prompt(), htmlTemplate, cssContent));
 
         CustomTag savedTag = customTagRepository.save(tag);
         return GenerateCustomTagResponse.from(savedTag);
+    }
+
+    /**
+     * LLMへ送ったプロンプトと生成結果を元に、Penpot上へハンドオフ用のデザインファイルを作成する。
+     * Penpotへの接続失敗はカスタムタグ生成そのものを失敗させないベストエフォート扱いとする
+     * (Penpotが未起動/未設定でもタグ生成というコア機能は継続できるべきため)。
+     */
+    private String tryCreatePenpotDesignFile(String tagName, String prompt, String htmlTemplate, String cssContent) {
+        try {
+            String promptContext = "LLMへのプロンプト:\n" + prompt
+                    + "\n\n生成されたHTML:\n" + htmlTemplate
+                    + "\n\n生成されたCSS:\n" + cssContent;
+            PenpotClient.DesignFile designFile =
+                    penpotClient.createDesignFile("カスタムタグ: " + tagName, promptContext);
+            return designFile.url();
+        } catch (RuntimeException e) {
+            log.warn("Penpotデザインファイルの作成に失敗しました(タグ生成は継続します): {}", e.getMessage());
+            return null;
+        }
     }
 
     private String buildPrompt(String userPrompt) {

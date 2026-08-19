@@ -8,7 +8,7 @@ import java.util.Map;
 /**
  * [blogcard]/[amazon] 組み込みタグ向けキャッシュAPIのレスポンス。
  * dataはtypeに応じてキーが異なる(BLOGCARD: title/description/imageUrl/siteName/url,
- * AMAZON: productName/imageUrl/price/productUrl)。
+ * AMAZON: productName/imageUrl/price/productUrl/summary)。
  */
 public record ContentCacheResponse(
         String url,

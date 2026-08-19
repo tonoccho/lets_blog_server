@@ -1,7 +1,16 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { getServerUrl, requireApiKey, setApiKey, getActor, setActor, getProjectId, setProjectId } from './config';
+import {
+  getServerUrl,
+  requireApiKey,
+  setApiKey,
+  getActor,
+  setActor,
+  getProjectId,
+  setProjectId,
+  requireProjectId,
+} from './config';
 import {
   parseArticle,
   stringifyArticle,
@@ -10,17 +19,23 @@ import {
   resolveExistingPostId,
   guessImageMimeType,
   validateScheduledPublication,
+  buildArticleFrontMatter,
+  suggestSlugFromTitle,
 } from './frontMatter';
+import { createArticleScaffold, openArticle, requireWorkspaceRoot } from './articleScaffold';
 import * as api from './apiClient';
 import { PlanPanel } from './planPanel';
 import { ArticleCreationPanel } from './articleCreationPanel';
-import { PreviewPanel } from './previewPanel';
+import { PreviewMessage, PreviewPanel, SiteOption } from './previewPanel';
 import { ImageGenPanel } from './imageGenPanel';
 import { ImageGalleryPanel } from './imageGalleryPanel';
+import { DiagramEditorPanel, DIAGRAM_REFERENCE_PATTERN } from './diagramEditorPanel';
+import { DiagramGalleryPanel } from './diagramGalleryPanel';
 import { SectionGenPanel } from './sectionGenPanel';
 import { resolveSectionContext } from './headingContext';
 import { logger } from './logger';
 import { messageOf, reportError } from './errorHandler';
+import { buildSmartCardTag, buildStandardLink, parseHttpUrl } from './urlPaste';
 
 /**
  * 拡張の有効化。ロガーの初期化と全コマンドの登録を行う。
@@ -41,6 +56,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('letsBlog.createArticle', () => commandCreateArticle(context)),
+    vscode.commands.registerCommand('letsBlog.createArticleWithoutAi', () => commandCreateArticleWithoutAi(context)),
     vscode.commands.registerCommand('letsBlog.schedulePublication', () => commandSchedulePublication()),
     vscode.commands.registerCommand('letsBlog.login', () => commandLogin(context)),
     vscode.commands.registerCommand('letsBlog.setApiKey', () => commandSetApiKey(context)),
@@ -51,11 +67,46 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.suggestTags', () => commandSuggestTags(context)),
     vscode.commands.registerCommand('letsBlog.generateImage', () => commandGenerateImage(context)),
     vscode.commands.registerCommand('letsBlog.imageGallery', () => commandImageGallery(context)),
+    vscode.commands.registerCommand('letsBlog.addNewDiagram', () => commandAddNewDiagram(context)),
+    vscode.commands.registerCommand('letsBlog.editDiagram', () => commandEditDiagram(context)),
+    vscode.commands.registerCommand('letsBlog.diagramGallery', () => commandDiagramGallery(context)),
     vscode.commands.registerCommand('letsBlog.generateSection', () => commandGenerateSection(context)),
     vscode.commands.registerCommand('letsBlog.selectProject', () => commandSelectProject(context)),
     vscode.commands.registerCommand('letsBlog.planArticle', () => commandPlanArticle(context)),
-    vscode.commands.registerCommand('letsBlog.previewArticle', () => commandPreviewArticle(context))
+    vscode.commands.registerCommand('letsBlog.previewArticle', () => commandPreviewArticle(context)),
+    vscode.commands.registerCommand('letsBlog.previewDevTools', () => PreviewPanel.openDevTools()),
+    vscode.commands.registerCommand('letsBlog.pasteSmartCard', () => commandPasteSmartCard(context)),
+    vscode.commands.registerCommand('letsBlog.pasteAsLink', () => commandPasteAsLink(context))
   );
+
+  context.subscriptions.push(registerDiagramCursorContext());
+}
+
+/**
+ * カーソル行が挿入済みダイアグラム(assets/diagram-{id}-{timestamp}.svg)を参照しているかを
+ * letsBlog.cursorOnDiagram コンテキストキーへ反映する。「Edit Diagram」メニュー項目の
+ * 表示条件(package.jsonのwhen句)に使う。高頻度に発火するため、値が変化した場合のみ
+ * setContextを呼ぶ。
+ */
+function registerDiagramCursorContext(): vscode.Disposable {
+  let lastValue: boolean | undefined;
+
+  const update = (editor: vscode.TextEditor | undefined): void => {
+    let matched = false;
+    if (editor && editor.document.languageId === 'markdown') {
+      const line = editor.document.lineAt(editor.selection.active.line).text;
+      matched = DIAGRAM_REFERENCE_PATTERN.test(line);
+    }
+    if (matched !== lastValue) {
+      lastValue = matched;
+      void vscode.commands.executeCommand('setContext', 'letsBlog.cursorOnDiagram', matched);
+    }
+  };
+
+  update(vscode.window.activeTextEditor);
+  const selectionListener = vscode.window.onDidChangeTextEditorSelection((e) => update(e.textEditor));
+  const activeEditorListener = vscode.window.onDidChangeActiveTextEditor((editor) => update(editor));
+  return vscode.Disposable.from(selectionListener, activeEditorListener);
 }
 
 /** 拡張の無効化。破棄処理はcontext.subscriptionsに登録済みのため、ここでは何もしない。 */
@@ -91,6 +142,104 @@ async function replaceDocumentText(editor: vscode.TextEditor, newText: string): 
   );
   await editor.edit((builder) => builder.replace(fullRange, newText));
   await editor.document.save();
+}
+
+/** カーソル位置(または選択範囲)をtextで置き換える。通常の貼り付けと同様の挙動。 */
+async function insertTextAtSelection(editor: vscode.TextEditor, text: string): Promise<void> {
+  await editor.edit((builder) => {
+    if (editor.selection.isEmpty) {
+      builder.insert(editor.selection.active, text);
+    } else {
+      builder.replace(editor.selection, text);
+    }
+  });
+}
+
+/**
+ * [blogcard]/[amazon]組み込みタグのレンダリング時に再スクレイピングが発生しないよう、
+ * URLペースト時点でcontent-cache APIを先行呼び出ししてキャッシュを温めておく(Issue #339)。
+ * 挿入するタグ自体はこの結果を使わないため、失敗してもタグの挿入をやり直す必要はない
+ * (プレビュー/投稿時に改めて取得される)。
+ */
+async function warmContentCache(context: vscode.ExtensionContext, url: string): Promise<void> {
+  try {
+    const apiKey = await requireApiKey(context);
+    const actor = await getActor(context);
+    await api.resolveContentCache(getServerUrl(), apiKey, actor, url);
+  } catch (err) {
+    logger.debug(`貼り付け時のキャッシュ先行取得に失敗しました(プレビュー/投稿時に再取得されます): ${messageOf(err)}`);
+  }
+}
+
+/**
+ * Ctrl+Shift+V: クリップボードがURLの場合、そのURLに応じて[blogcard]/[amazon]組み込みタグを
+ * 挿入する。タグ自体はURLの種別だけで即座に組み立てられるため、実際の情報取得(タイトル・価格等)は
+ * 待たずにバックグラウンドでキャッシュを温めるだけに留める。URL以外の通常の貼り付けは
+ * 既定の動作にフォールバックする。
+ */
+async function commandPasteSmartCard(context: vscode.ExtensionContext): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  const clipboardText = await vscode.env.clipboard.readText();
+  const url = parseHttpUrl(clipboardText);
+  if (!url) {
+    await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
+    return;
+  }
+
+  await insertTextAtSelection(editor, buildSmartCardTag(url));
+  void warmContentCache(context, url.toString());
+}
+
+/**
+ * Ctrl+V: クリップボードがURLの場合、通常のMarkdownリンク`[Title | サイト名](URL)`として挿入する。
+ * タイトル・サイト名を埋め込む必要があるため、content-cache APIの応答を待ってから挿入する
+ * (これ自体がレンダリング時ではなく貼り付け時点での情報取得になる)。取得に失敗した場合は
+ * URLそのものを貼り付ける。URL以外の通常の貼り付けは既定の動作にフォールバックする。
+ */
+async function commandPasteAsLink(context: vscode.ExtensionContext): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  const clipboardText = await vscode.env.clipboard.readText();
+  const url = parseHttpUrl(clipboardText);
+  if (!url) {
+    await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
+    return;
+  }
+
+  try {
+    const apiKey = await requireApiKey(context);
+    const actor = await getActor(context);
+    const result = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'URLの情報を取得しています…' },
+      () => api.resolveContentCache(getServerUrl(), apiKey, actor, url.toString())
+    );
+    const title = result.type === 'AMAZON' ? result.data.productName : result.data.title;
+    const siteName = result.type === 'AMAZON' ? undefined : result.data.siteName;
+    await insertTextAtSelection(editor, buildStandardLink(url, title ?? undefined, siteName ?? undefined));
+  } catch (err) {
+    logger.debug(`URL情報の取得に失敗したため、URLそのものを貼り付けます: ${messageOf(err)}`);
+    await insertTextAtSelection(editor, url.toString());
+  }
+}
+
+/**
+ * ロール名(roleName)に対応する表示名を解決する。ログイン成功メッセージを分かりやすくするための
+ * 付加情報にすぎないため、取得に失敗してもログイン自体は失敗させず、undefinedを返す(issue #472)。
+ */
+async function resolveRoleDisplayName(
+  serverUrl: string,
+  apiKey: string,
+  roleName: string
+): Promise<string | undefined> {
+  try {
+    const roles = await api.getRoles(serverUrl, apiKey);
+    return roles.find((r) => r.roleName === roleName)?.displayName;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -137,7 +286,10 @@ async function commandLogin(context: vscode.ExtensionContext): Promise<void> {
     await setActor(context, result.user);
     // 別ユーザーでログインし直した場合に、前のユーザーの参照結果が残らないようにする。
     api.clearResponseCache();
-    vscode.window.showInformationMessage(`'${result.user.email}' としてログインしました。`);
+    const roleLabel = await resolveRoleDisplayName(serverUrl, apiKey, result.user.role);
+    vscode.window.showInformationMessage(
+      `'${result.user.email}'${roleLabel ? ` (${roleLabel})` : ''} としてログインしました。`
+    );
   } catch (err) {
     reportError('ログインに失敗しました', err);
   } finally {
@@ -559,6 +711,93 @@ async function commandImageGallery(context: vscode.ExtensionContext): Promise<vo
   }
 }
 
+/** front matterのproject_idを解決する。未設定ならエラーを表示してundefinedを返す。 */
+function resolveDiagramProjectId(editor: vscode.TextEditor, context: vscode.ExtensionContext): number | undefined {
+  const article = parseArticle(editor.document.getText());
+  const projectId = (article.data.project_id as number | undefined) ?? getProjectId(context);
+  if (!projectId) {
+    vscode.window.showErrorMessage(
+      'プロジェクトが未選択です。front matterのproject_id、または「Let\'s Blog: Select Project」で設定してください。'
+    );
+    return undefined;
+  }
+  return projectId;
+}
+
+/** カーソル位置に空のdraw.ioエディタを開き、記事に新規ダイアグラムを挿入する(issue #476)。 */
+async function commandAddNewDiagram(context: vscode.ExtensionContext): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  try {
+    const projectId = resolveDiagramProjectId(editor, context);
+    if (!projectId) return;
+
+    const baseDir = path.dirname(editor.document.uri.fsPath);
+    DiagramEditorPanel.createOrShow(context, editor, baseDir, projectId, { kind: 'create' });
+  } catch (err) {
+    reportError('ダイアグラムエディタの起動に失敗しました', err);
+  }
+}
+
+/**
+ * カーソル行が参照している既存ダイアグラムをdraw.ioエディタで開く(issue #476)。
+ * 右クリックメニューの表示条件(letsBlog.cursorOnDiagram)は registerDiagramCursorContext が管理する。
+ */
+async function commandEditDiagram(context: vscode.ExtensionContext): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  try {
+    const line = editor.document.lineAt(editor.selection.active.line).text;
+    const match = DIAGRAM_REFERENCE_PATTERN.exec(line);
+    if (!match) {
+      vscode.window.showErrorMessage('カーソル行にダイアグラム参照が見つかりません。');
+      return;
+    }
+
+    const projectId = resolveDiagramProjectId(editor, context);
+    if (!projectId) return;
+
+    const existingFileName = match[1];
+    const diagramId = Number(match[2]);
+
+    const apiKey = await requireApiKey(context);
+    const actor = await getActor(context);
+    const detail = await api.getDiagramDetail(getServerUrl(), apiKey, actor, diagramId);
+
+    const baseDir = path.dirname(editor.document.uri.fsPath);
+    DiagramEditorPanel.createOrShow(context, editor, baseDir, projectId, {
+      kind: 'edit',
+      diagramId,
+      name: detail.name,
+      xml: detail.xml,
+      existingFileName,
+    });
+  } catch (err) {
+    reportError('ダイアグラムの読み込みに失敗しました', err);
+  }
+}
+
+/**
+ * サーバーに保存済みのダイアグラムを一覧し、記事へ取り込む。
+ * Diagram Editorで作ったダイアグラムを後から再利用するための入口(issue #476)。
+ */
+async function commandDiagramGallery(context: vscode.ExtensionContext): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  try {
+    const projectId = resolveDiagramProjectId(editor, context);
+    if (!projectId) return;
+
+    const baseDir = path.dirname(editor.document.uri.fsPath);
+    DiagramGalleryPanel.createOrShow(context, editor, baseDir, projectId);
+  } catch (err) {
+    reportError('ダイアグラムギャラリーの起動に失敗しました', err);
+  }
+}
+
 async function commandGenerateSection(context: vscode.ExtensionContext): Promise<void> {
   const editor = getActiveMarkdownEditor();
   if (!editor) return;
@@ -583,6 +822,55 @@ async function commandCreateArticle(context: vscode.ExtensionContext): Promise<v
     ArticleCreationPanel.createOrShow(context);
   } catch (err) {
     reportError('記事作成パネルの起動に失敗しました', err);
+  }
+}
+
+/**
+ * AIチャットを介さず、タイトル・スラッグの直接入力だけで記事を新規作成する。
+ * 生成される記事の配置とfront matterはAI駆動のフロー(ArticleCreationPanel/PlanPanel)と
+ * 同じ(articleScaffold.ts / buildArticleFrontMatter に集約)。AIを一切使わないため
+ * APIキーは不要で、プロジェクトは「Let's Blog: Select Project」で選択済みのものを使う。
+ */
+async function commandCreateArticleWithoutAi(context: vscode.ExtensionContext): Promise<void> {
+  try {
+    const workspaceRoot = requireWorkspaceRoot();
+    const projectId = requireProjectId(context);
+
+    const title = await vscode.window.showInputBox({
+      prompt: 'タイトル',
+      ignoreFocusOut: true,
+      validateInput: (value) => (value.trim() ? undefined : 'タイトルは必須です。'),
+    });
+    if (!title) return;
+
+    const slug = await vscode.window.showInputBox({
+      prompt: 'スラッグ (articles/<slug>/ のディレクトリ名になります)',
+      value: suggestSlugFromTitle(title),
+      ignoreFocusOut: true,
+      // ディレクトリ名になるため、パス区切りなどが混入しないことを確認する(articleCreation.jsのslug検証と同じ規則)。
+      validateInput: (value) => {
+        const trimmed = value.trim();
+        if (!trimmed) return 'スラッグは必須です。';
+        if (!/^[a-z0-9][a-z0-9-]*$/.test(trimmed)) {
+          return 'スラッグは半角英数字とハイフンのみで入力してください(先頭は英数字)。';
+        }
+        return undefined;
+      },
+    });
+    if (!slug) return;
+
+    const result = await createArticleScaffold({
+      workspaceRoot,
+      slug: slug.trim(),
+      frontMatter: buildArticleFrontMatter({ title: title.trim(), slug: slug.trim(), projectId }),
+      content: '',
+    });
+    if (!result) return;
+
+    await openArticle(result.articlePath);
+    vscode.window.showInformationMessage(`articles/${slug.trim()}/article.md を作成しました。`);
+  } catch (err) {
+    reportError('記事の作成に失敗しました', err);
   }
 }
 
@@ -756,16 +1044,25 @@ async function commandSelectProject(context: vscode.ExtensionContext): Promise<v
 }
 
 /**
+ * ローカル画像ファイルをbase64データURIへ変換する。ファイルが存在しない、または
+ * 拡張子からMIMEタイプを判定できない場合はundefinedを返す。
+ */
+function toDataUri(absolutePath: string): string | undefined {
+  if (!fs.existsSync(absolutePath)) return undefined;
+  const mimeType = guessImageMimeType(absolutePath);
+  if (!mimeType) return undefined;
+  return `data:${mimeType};base64,${fs.readFileSync(absolutePath).toString('base64')}`;
+}
+
+/**
  * Markdown本文中のローカル画像参照をbase64データURIへ置換する。プレビューはWebviewの外(APIサーバー)で
  * HTML化するため、投稿先を持たないローカル画像をそのまま渡すと壊れたリンクになってしまうのを防ぐ。
  */
 function inlineLocalImages(content: string, baseDir: string): string {
   let rewritten = content;
   for (const image of extractLocalImageReferences(content, baseDir)) {
-    if (!fs.existsSync(image.absolutePath)) continue;
-    const mimeType = guessImageMimeType(image.absolutePath);
-    if (!mimeType) continue;
-    const dataUri = `data:${mimeType};base64,${fs.readFileSync(image.absolutePath).toString('base64')}`;
+    const dataUri = toDataUri(image.absolutePath);
+    if (!dataUri) continue;
     rewritten = rewritten.split(image.reference).join(dataUri);
   }
   return rewritten;
@@ -796,26 +1093,13 @@ function buildPreviewSiteChoices(project: api.ProjectDetail): PreviewSiteChoice[
   return choices;
 }
 
-async function pickPreviewSite(
-  serverUrl: string,
-  apiKey: string,
-  actor: api.Actor | undefined,
-  projectId: number
-): Promise<PreviewSiteChoice | undefined> {
-  const project = await api.getProject(serverUrl, apiKey, actor, projectId);
-  const choices = buildPreviewSiteChoices(project);
-
-  if (choices.length === 0) {
-    // サイト未紐付けでもプレビュー自体は可能(CSSなしで表示する)。
-    return { label: 'サイトなし', siteName: 'サイト未紐付け' };
-  }
-  if (choices.length === 1) {
-    return choices[0];
-  }
-  return vscode.window.showQuickPick(choices, {
-    placeHolder: 'プレビューに使うサイトのCSSを選択',
-  });
+/** 複数の警告文を改行区切りでまとめる。 */
+function appendWarning(base: string | undefined, next: string): string {
+  return base ? `${base}\n${next}` : next;
 }
+
+/** サイト未紐付け環境を表す選択肢。プロジェクトに紐づくサイトが1つも無くてもプレビュー自体は可能(CSSなしで表示する)。 */
+const NO_SITE_CHOICE: PreviewSiteChoice = { label: 'サイトなし', siteName: 'サイト未紐付け' };
 
 async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<void> {
   const editor = getActiveMarkdownEditor();
@@ -835,38 +1119,160 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
     const actor = await getActor(context);
     const serverUrl = getServerUrl();
 
-    const site = await pickPreviewSite(serverUrl, apiKey, actor, projectId);
-    if (!site) return;
+    const project = await api.getProject(serverUrl, apiKey, actor, projectId);
+    const choices = buildPreviewSiteChoices(project);
+    // パネル内の環境切り替えセレクトに渡す選択肢。ローカル/テスト/本番の見た目を
+    // 記事ごとに開き直さず切り替えて比較できるようにする(要件: 環境間のCSS差分確認)。
+    const availableSites: SiteOption[] = choices.map((c) => ({
+      siteId: c.siteId ?? null,
+      label: c.label,
+      siteName: c.siteName,
+    }));
+
+    let initialSite: PreviewSiteChoice | undefined;
+    if (choices.length === 0) {
+      initialSite = NO_SITE_CHOICE;
+    } else if (choices.length === 1) {
+      initialSite = choices[0];
+    } else {
+      initialSite = await vscode.window.showQuickPick(choices, {
+        placeHolder: 'プレビューに使うサイトのCSSを選択',
+      });
+      if (!initialSite) return;
+    }
 
     const baseDir = path.dirname(editor.document.uri.fsPath);
     const markdown = inlineLocalImages(article.content, baseDir);
 
+    const featuredImage = resolveFeaturedImageReference(article.data, baseDir);
+    const featuredImageDataUri = featuredImage ? toDataUri(featuredImage.absolutePath) : undefined;
+    const baseWarning = featuredImage && !featuredImageDataUri
+      ? `アイキャッチ画像が見つかりません: ${featuredImage.reference}`
+      : undefined;
+    const title = (article.data.title as string | undefined) ?? '';
+
+    /** 指定サイトのCSS・テーマ構造を取得し、プレビューパネルへ描画する。環境切り替え時にも同じ経路を通す。 */
+    const renderForSite = async (
+      targetSite: PreviewSiteChoice,
+      progress: vscode.Progress<{ message?: string }>
+    ): Promise<void> => {
+      progress.report({ message: 'Markdownを変換しています…' });
+      const html = await api.renderPreviewHtml(serverUrl, apiKey, actor, projectId, markdown);
+
+      progress.report({ message: `${targetSite.siteName} のCSSを取得しています…` });
+      let css = '';
+      let warning = baseWarning;
+      if (targetSite.siteId == null) {
+        warning = appendWarning(warning, 'プロジェクトにサイトが紐づいていないため、CSSなしで表示しています。');
+      } else {
+        try {
+          const themeCss = await api.getThemeCss(serverUrl, apiKey, actor, projectId, targetSite.siteId);
+          if (themeCss.available) {
+            css = themeCss.css;
+          } else {
+            warning = appendWarning(
+              warning,
+              `${targetSite.siteName} のCSSを取得できませんでした: ${themeCss.reason ?? '不明なエラー'}`
+            );
+          }
+        } catch (cssError) {
+          warning = appendWarning(warning, `${targetSite.siteName} のCSS取得に失敗しました: ${messageOf(cssError)}`);
+        }
+      }
+
+      // サイト内の既存記事ページを骨格に、実テーマのDOM構造(タイトル/カテゴリ/日付/アイキャッチ等)を
+      // 保ったまま表示できるか試す。取得できた場合はアイキャッチも骨格側へ差し替え済みのため、
+      // PreviewPanel側の簡易アイキャッチ表示は使わない(二重表示を避ける)。
+      // 参照記事が無い等で再現できない場合は、従来のプレーンな表示へフォールバックする。
+      let bodyHtml = html;
+      let usingSkeleton = false;
+      let previewPostId: string | undefined;
+      if (targetSite.siteId != null) {
+        progress.report({ message: `${targetSite.siteName} の実際のテーマ構造を再現しています…` });
+        try {
+          const existingPreviewPostId = PreviewPanel.currentPanel?.getPreviewPostId(targetSite.siteId);
+          const skeleton = await api.renderPreviewSkeleton(
+            serverUrl,
+            apiKey,
+            actor,
+            projectId,
+            targetSite.siteId,
+            title,
+            html,
+            featuredImageDataUri,
+            existingPreviewPostId,
+            article.data.slug,
+            article.data.categories,
+            article.data.tags
+          );
+          if (skeleton.available && skeleton.html) {
+            bodyHtml = skeleton.html;
+            usingSkeleton = true;
+            // available=trueでも、アイキャッチアップロード失敗等の非致命的な警告が
+            // 付随している場合がある(ローカル/テスト環境の非公開投稿経路)。
+            if (skeleton.warning) {
+              warning = appendWarning(warning, `${targetSite.siteName}: ${skeleton.warning}`);
+            }
+          } else {
+            // デバッグログのみだと、利用者は「なぜヘッダー/サイドバー等の実テーマ構造が
+            // 表示されていないか」に気付けない(環境によって参照記事の有無が異なり、
+            // 骨格が使える環境と使えない環境が混在しうるため)。プレビューへも明示する。
+            const reason = skeleton.reason ?? '不明な理由';
+            logger.debug(`テーマ構造の再現をスキップしました: ${reason}`);
+            warning = appendWarning(
+              warning,
+              `${targetSite.siteName} の実際のテーマ構造(ヘッダー/サイドバー等)は再現できませんでした: ${reason}`
+            );
+          }
+          // トップページのクロールでは拾えない、投稿ページ限定で読み込まれるCSS(is_single()等)を
+          // 補うため、骨格取得時に実際のナビゲーション先で収集されたCSSがあればマージする。
+          // 本文の差し替え位置を特定できずavailableがfalseの場合でも、ナビゲーション自体には
+          // 成功していればcssは含まれ得るため、availableに関わらずマージする。
+          if (skeleton.css) {
+            css = css ? `${css}\n${skeleton.css}` : skeleton.css;
+          }
+          // ローカル/テスト環境では非公開投稿として実表示している場合があり、その投稿IDが
+          // 返ってくる。次回同じ環境でのプレビューで使い回す/パネルを閉じた際に削除するため、
+          // パネル作成/更新後に保持する(この時点ではまだcurrentPanelが無いことがあるため)。
+          previewPostId = skeleton.previewPostId ?? undefined;
+        } catch (skeletonError) {
+          logger.debug(`テーマ構造の再現取得に失敗しました: ${messageOf(skeletonError)}`);
+        }
+      }
+
+      PreviewPanel.createOrShow(
+        context,
+        bodyHtml,
+        css,
+        warning,
+        `${targetSite.label} / ${targetSite.siteName}`,
+        usingSkeleton ? undefined : featuredImageDataUri,
+        onPreviewMessage,
+        availableSites,
+        targetSite.siteId ?? null,
+        (siteId, postId) => api.deletePreviewPost(serverUrl, apiKey, actor, projectId, siteId, postId)
+      );
+      if (previewPostId && targetSite.siteId != null) {
+        PreviewPanel.currentPanel?.recordPreviewPostId(targetSite.siteId, previewPostId);
+      }
+    };
+
+    /** パネル内のセレクトで環境が切り替えられたときに、その環境のCSS/骨格を再取得して描画し直す。 */
+    const onPreviewMessage = (message: PreviewMessage): void => {
+      if (message.type !== 'switchSite') return;
+      const nextSite =
+        choices.find((c) => (c.siteId ?? null) === message.siteId) ??
+        (message.siteId == null ? NO_SITE_CHOICE : undefined);
+      if (!nextSite) return;
+      void vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: `${nextSite.siteName} のプレビューを生成しています…` },
+        (progress) => renderForSite(nextSite, progress)
+      );
+    };
+
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'プレビューを生成しています…' },
-      async (progress) => {
-        progress.report({ message: 'Markdownを変換しています…' });
-        const html = await api.renderPreviewHtml(serverUrl, apiKey, actor, projectId, markdown);
-
-        progress.report({ message: `${site.siteName} のCSSを取得しています…` });
-        let css = '';
-        let warning: string | undefined;
-        if (site.siteId == null) {
-          warning = 'プロジェクトにサイトが紐づいていないため、CSSなしで表示しています。';
-        } else {
-          try {
-            const themeCss = await api.getThemeCss(serverUrl, apiKey, actor, projectId, site.siteId);
-            if (themeCss.available) {
-              css = themeCss.css;
-            } else {
-              warning = `${site.siteName} のCSSを取得できませんでした: ${themeCss.reason ?? '不明なエラー'}`;
-            }
-          } catch (cssError) {
-            warning = `${site.siteName} のCSS取得に失敗しました: ${messageOf(cssError)}`;
-          }
-        }
-
-        PreviewPanel.createOrShow(html, css, warning, `${site.label} / ${site.siteName}`);
-      }
+      (progress) => renderForSite(initialSite as PreviewSiteChoice, progress)
     );
   } catch (err) {
     reportError('プレビューの生成に失敗しました', err);

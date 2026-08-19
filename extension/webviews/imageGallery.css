@@ -35,3 +35,19 @@
   #message { margin-top: 16px; display: none; }
   #message.error { color: var(--vscode-errorForeground, #d32f2f); }
   #message.success { color: var(--vscode-testing-iconPassed, #2e7d32); }
+  .context-menu {
+    position: fixed; z-index: 100; min-width: 200px; padding: 4px;
+    background: var(--vscode-menu-background, var(--vscode-editorWidget-background, #f5f5f5));
+    color: var(--vscode-menu-foreground, var(--vscode-foreground));
+    border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border, #ccc));
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+  .context-menu button {
+    display: block; width: 100%; text-align: left; padding: 6px 10px; border: none;
+    background: transparent; color: inherit; cursor: pointer;
+  }
+  .context-menu button:hover, .context-menu button:focus {
+    background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground, #eee));
+    color: var(--vscode-menu-selectionForeground, inherit);
+    outline: none;
+  }

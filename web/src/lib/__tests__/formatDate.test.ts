@@ -1,4 +1,4 @@
-import { formatDateTime } from '../formatDate'
+import { formatDateTime, formatOperationLogDateTime } from '../formatDate'
 
 describe('formatDateTime', () => {
   it('formats ISO string to Japanese locale', () => {
@@ -9,11 +9,11 @@ describe('formatDateTime', () => {
     expect(result).toContain('15')
   })
 
-  it('uses Tokyo timezone by default', () => {
+  it('uses browser timezone when timeZone is not specified', () => {
     const iso = '2024-01-15T10:30:00Z'
-    const resultDefault = formatDateTime(iso)
-    const resultTokyo = formatDateTime(iso, 'Asia/Tokyo')
-    expect(resultDefault).toBe(resultTokyo)
+    const result = formatDateTime(iso)
+    expect(typeof result).toBe('string')
+    expect(result.length).toBeGreaterThan(0)
   })
 
   it('handles different timezones', () => {
@@ -23,16 +23,46 @@ describe('formatDateTime', () => {
     expect(resultTokyo).not.toBe(resultUTC)
   })
 
-  it('handles null timezone', () => {
+  it('handles null timezone by using browser timezone', () => {
     const iso = '2024-01-15T10:30:00Z'
     const result = formatDateTime(iso, null)
-    const resultDefault = formatDateTime(iso, 'Asia/Tokyo')
-    expect(result).toBe(resultDefault)
+    expect(typeof result).toBe('string')
+    expect(result.length).toBeGreaterThan(0)
   })
 
-  it('formats dates correctly', () => {
+  it('formats dates correctly with explicit timezone', () => {
     const iso = '2024-01-15T10:30:00Z'
     const result = formatDateTime(iso, 'Asia/Tokyo')
+    expect(typeof result).toBe('string')
+    expect(result.length).toBeGreaterThan(0)
+  })
+
+  it('respects user-specified timezone over browser timezone', () => {
+    const iso = '2024-01-15T10:30:00Z'
+    const resultUserTZ = formatDateTime(iso, 'UTC')
+    const resultBrowserTZ = formatDateTime(iso)
+    expect(resultUserTZ).toBeDefined()
+    expect(resultBrowserTZ).toBeDefined()
+  })
+})
+
+describe('formatOperationLogDateTime', () => {
+  it('formats time in zero-padded 24-hour notation (HH:mm:ss)', () => {
+    const iso = '2024-01-15T15:05:07Z'
+    const result = formatOperationLogDateTime(iso, 'Asia/Tokyo')
+    expect(result).toContain('00:05:07')
+    expect(result).not.toMatch(/AM|PM|午前|午後/)
+  })
+
+  it('zero-pads single-digit hours instead of showing a bare digit', () => {
+    const iso = '2024-01-15T15:05:07Z'
+    const result = formatOperationLogDateTime(iso, 'Asia/Tokyo')
+    expect(result).not.toMatch(/(^|\s)0:05:07/)
+  })
+
+  it('uses browser timezone when timeZone is not specified', () => {
+    const iso = '2024-01-15T10:30:00Z'
+    const result = formatOperationLogDateTime(iso)
     expect(typeof result).toBe('string')
     expect(result.length).toBeGreaterThan(0)
   })

@@ -1,8 +1,30 @@
-// タイムゾーン未指定時のフォールバック。個人設定が未保存のユーザーはこの値で表示される。
-// タイムゾーンを常に明示することで、サーバー(SSR)とブラウザ(ハイドレーション)の実行環境の
-// タイムゾーンが異なっていても表示が一致するようにする(未指定だとハイドレーション不整合になる)。
-const DEFAULT_TIME_ZONE = "Asia/Tokyo";
+function getDefaultTimeZone(): string {
+  if (typeof Intl !== "undefined" && Intl.DateTimeFormat) {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch {
+      return "UTC";
+    }
+  }
+  return "UTC";
+}
 
 export function formatDateTime(iso: string, timeZone?: string | null): string {
-  return new Date(iso).toLocaleString("ja-JP", { timeZone: timeZone ?? DEFAULT_TIME_ZONE });
+  const tz = timeZone ?? getDefaultTimeZone();
+  return new Date(iso).toLocaleString("ja-JP", { timeZone: tz });
+}
+
+/** 操作ログの日時表示を24時間表記(HH:mm:ss、ゼロ埋め)に統一する(issue #282)。 */
+export function formatOperationLogDateTime(iso: string, timeZone?: string | null): string {
+  const tz = timeZone ?? getDefaultTimeZone();
+  return new Date(iso).toLocaleString("ja-JP", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
 }
