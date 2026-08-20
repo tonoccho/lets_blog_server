@@ -403,8 +403,11 @@ async function publishToSite(
     }
   }
 
-  // 予約投稿は本番サイトでのみ有効。送信前に形式と未来日時であることを確認する。
-  const scheduled = validateScheduledPublication(article.data.publish_scheduled_at);
+  // 送信前に形式のみ確認する。過去日時は投稿自体を拒否せず、API側の判定
+  // (環境・statusに応じて無視して通常投稿する。issue #520)に委ねる。
+  const scheduled = validateScheduledPublication(article.data.publish_scheduled_at, new Date(), {
+    requireFuture: false,
+  });
   if (scheduled.error) {
     vscode.window.showErrorMessage(scheduled.error);
     return;

@@ -225,14 +225,18 @@ export interface ScheduledPublicationValidation {
 /**
  * front matterのpublish_scheduled_atを検証する。
  *
- * 過去の日時を許可しないのは、投稿しても即時公開扱いになり、利用者の意図
- * (予約したつもり)と結果が食い違うため。サーバー側でも同じ検証を行うが、
- * 送信前に気付ける方が手戻りが少ないため拡張側でも確認する。
+ * 対話的にスケジュールを設定する操作(commandSchedulePublication)では、
+ * 過去の日時を選んでも予約にならず利用者の意図と食い違うため、requireFuture(既定true)
+ * で未来日時であることを要求する。一方、投稿送信前のチェック(commandPublish等)では
+ * 既にfront matterに書かれている過去日時をエラーにせずAPI側の判定(issue #520)に
+ * 委ねたいため、requireFuture: falseを指定して形式検証のみ行う。
  */
 export function validateScheduledPublication(
   value: unknown,
-  now: Date = new Date()
+  now: Date = new Date(),
+  options: { requireFuture?: boolean } = {}
 ): ScheduledPublicationValidation {
+  const requireFuture = options.requireFuture ?? true;
   if (value == null || value === '') {
     return {};
   }
@@ -251,7 +255,7 @@ export function validateScheduledPublication(
   if (Number.isNaN(parsed.getTime())) {
     return { error: `publish_scheduled_at を日時として解釈できません: ${trimmed}` };
   }
-  if (parsed.getTime() <= now.getTime()) {
+  if (requireFuture && parsed.getTime() <= now.getTime()) {
     return { error: `publish_scheduled_at には未来の日時を指定してください: ${trimmed}` };
   }
   return { value: trimmed };

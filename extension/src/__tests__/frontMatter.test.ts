@@ -317,4 +317,14 @@ describe('validateScheduledPublication', () => {
     expect(validateScheduledPublication(future)).toEqual({ value: future });
     expect(validateScheduledPublication('2000-01-01T00:00:00Z').error).toContain('未来の日時');
   });
+
+  it('requireFuture: falseの場合は過去の日時も形式が正しければ受け付ける(issue #520)', () => {
+    const result = validateScheduledPublication('2020-01-01T00:00:00Z', NOW, { requireFuture: false });
+    expect(result).toEqual({ value: '2020-01-01T00:00:00Z' });
+  });
+
+  it('requireFuture: falseでも形式不正は引き続き拒否する', () => {
+    const result = validateScheduledPublication('2026/12/25 09:00', NOW, { requireFuture: false });
+    expect(result.error).toContain('ISO 8601');
+  });
 });
