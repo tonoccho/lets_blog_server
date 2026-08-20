@@ -460,8 +460,9 @@ public class PostPublishService {
      *
      * 予約投稿は本番(live)サイトでのみ有効とする。ローカル/テスト環境は動作確認用途で
      * 即時に結果を見たいため、予約指定があっても無視して通常どおり投稿する。
-     * 形式不正や過去日時は、利用者が意図と異なる公開状態に気付けないまま進むのを防ぐため
-     * エラーとして扱う。
+     * 形式不正は、利用者が意図と異なる公開状態に気付けないまま進むのを防ぐためエラーとして扱う。
+     * 一方で過去日時は、記事側の日付が経過しただけの正常なケースであり得るため、エラーにはせず
+     * 予約指定を無視して指定のstatus(publish/draft等)どおりに投稿する(issue #520)。
      */
     private Instant resolvePublishScheduledAt(String raw, Site site, Long projectId) {
         if (raw == null || raw.isBlank()) {
@@ -475,12 +476,15 @@ public class PostPublishService {
             throw new IllegalArgumentException(
                     "publish_scheduled_at はISO 8601形式(例: 2026-12-25T09:00:00Z)で指定してください: " + raw);
         }
-        if (!scheduledAt.isAfter(Instant.now())) {
-            throw new IllegalArgumentException("publish_scheduled_at には未来の日時を指定してください: " + raw);
-        }
 
         if (!isProductionSite(site, projectId)) {
             log.info("本番サイト以外への投稿のため、publish_scheduled_at({})を無視します: siteKey={}",
+                    raw, site.getSiteKey());
+            return null;
+        }
+
+        if (!scheduledAt.isAfter(Instant.now())) {
+            log.info("publish_scheduled_at({})が過去日時のため無視し、指定のstatusで投稿します: siteKey={}",
                     raw, site.getSiteKey());
             return null;
         }
