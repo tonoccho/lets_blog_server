@@ -93,10 +93,13 @@ public class TocStyleRenderService {
         if (customCss != null && !customCss.isBlank()) {
             return customCss.trim();
         }
-        return "." + MarkdownRenderer.TOC_LIST_CLASS + "{list-style:none;margin:1em 0;padding:12px 16px;"
+        return "." + MarkdownRenderer.TOC_LIST_CLASS
+                + "{list-style:disc;list-style-position:inside;margin:1em 0;padding:12px 16px;"
                 + "border-radius:8px;background:" + colors.backgroundColor() + ";}"
-                + "." + MarkdownRenderer.TOC_LIST_CLASS + " ul{list-style:none;}"
+                + "." + MarkdownRenderer.TOC_LIST_CLASS
+                + " ul{list-style:disc;list-style-position:inside;margin:0;padding-left:20px;}"
                 + "." + MarkdownRenderer.TOC_LIST_CLASS + " li{margin:4px 0;}"
+                + "." + MarkdownRenderer.TOC_LIST_CLASS + " li::marker{color:#000;}"
                 + "." + MarkdownRenderer.TOC_LIST_CLASS + " a{color:" + colors.textColor()
                 + ";text-decoration:none;}"
                 + "." + MarkdownRenderer.TOC_LIST_CLASS + " a:hover{color:" + colors.accentColor()
