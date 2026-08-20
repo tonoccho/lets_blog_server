@@ -18,6 +18,8 @@ import java.util.Set;
  * 同期先は自動構築(managedWordpress)されたWordPress環境に限る(ファイルシステム・DBへの直接アクセス
  * 手段がないため)。同期元は、managedWordpress環境に加え、SSH/wp-cli管理の外部サイトもDB・メディア・
  * テーマのみ対応する(issue #511。プラグインは、SSH管理サイトがこのコンテナと同一ホストにいないため対象外)。
+ * DBを同期対象に含む場合、同期先サイトのWordPressユーザーロールが同期処理によって書き換わりうるため、
+ * 同期完了後にproject_usersの内容でロールを強制的に上書きし整合性を回復する(issue #514)。
  */
 @Service
 public class ProjectEnvironmentSyncService {
@@ -30,18 +32,21 @@ public class ProjectEnvironmentSyncService {
     private final SiteService siteService;
     private final WordPressSyncClient syncClient;
     private final WordPressSshOperations sshOperations;
+    private final ProjectUserSyncService projectUserSyncService;
 
     public ProjectEnvironmentSyncService(
             ProjectRepository projectRepository, SiteRepository siteRepository, SiteService siteService,
-            WordPressSyncClient syncClient, WordPressSshOperations sshOperations) {
+            WordPressSyncClient syncClient, WordPressSshOperations sshOperations,
+            ProjectUserSyncService projectUserSyncService) {
         this.projectRepository = projectRepository;
         this.siteRepository = siteRepository;
         this.siteService = siteService;
         this.syncClient = syncClient;
         this.sshOperations = sshOperations;
+        this.projectUserSyncService = projectUserSyncService;
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public void sync(Long projectId, String fromEnvironment, String toEnvironment, List<String> targets) {
         requireValidEnvironment(fromEnvironment);
         requireValidEnvironment(toEnvironment);
@@ -65,10 +70,13 @@ public class ProjectEnvironmentSyncService {
             syncClient.sync(new WordPressSyncClient.SyncCommand(
                     fromSite.getWpSlug(), fromSite.getWpDbName(),
                     toSite.getWpSlug(), toSite.getWpDbName(), targets));
-            return;
+        } else {
+            syncFromSshManagedSite(fromEnvironment, fromSite, toSite, targets);
         }
 
-        syncFromSshManagedSite(fromEnvironment, fromSite, toSite, targets);
+        if (targets.contains("db")) {
+            projectUserSyncService.reconcileRolesForSite(project.getId(), toSite.getId());
+        }
     }
 
     private void syncFromSshManagedSite(String fromEnvironment, Site fromSite, Site toSite, List<String> targets) {
