@@ -551,8 +551,12 @@ class PostPublishServiceTest {
     }
 
     private PostPublishCommand scheduledCommand(String publishScheduledAt) {
+        return scheduledCommand(publishScheduledAt, "draft");
+    }
+
+    private PostPublishCommand scheduledCommand(String publishScheduledAt, String status) {
         return new PostPublishCommand(
-                "main", "My Article", "my-article", "draft", List.of(), List.of(), null, "本文", List.of(), null,
+                "main", "My Article", "my-article", status, List.of(), List.of(), null, "本文", List.of(), null,
                 List.of(), publishScheduledAt, null);
     }
 
@@ -561,7 +565,7 @@ class PostPublishServiceTest {
         com.letsblog.api.domain.Project project = new com.letsblog.api.domain.Project();
         project.setId(7L);
         project.setProductionSiteId(1L);
-        // 形式不正・過去日時は本番判定より前に弾かれるため、この経路を通らないことがある。
+        // 形式不正は本番判定より前に弾かれるため、この経路を通らないことがある。
         lenient().when(projectService.findProjectIdBySiteId(1L)).thenReturn(7L);
         lenient().when(projectService.getProjectEntity(7L)).thenReturn(project);
     }
@@ -634,13 +638,51 @@ class PostPublishServiceTest {
     }
 
     @Test
-    void publish_過去の公開予定日時は拒否する() {
+    void publish_本番サイトで過去の公開予定日時かつstatus_publishの場合は無視して即時公開する() {
         bindProductionSite();
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "publish"));
         String past = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).minusDays(1).toString();
 
-        IllegalArgumentException e = org.junit.jupiter.api.Assertions.assertThrows(
-                IllegalArgumentException.class, () -> service.publish(scheduledCommand(past)));
-        assertTrue(e.getMessage().contains("未来の日時"));
+        service.publish(scheduledCommand(past, "publish"));
+
+        org.mockito.ArgumentCaptor<PostContent> captor =
+                org.mockito.ArgumentCaptor.forClass(PostContent.class);
+        verify(cmsAdapter).createOrUpdatePost(any(), captor.capture(), any());
+        assertEquals("publish", captor.getValue().status());
+        assertNull(captor.getValue().publishScheduledAt());
+    }
+
+    @Test
+    void publish_本番サイトで過去の公開予定日時かつstatus_publish以外の場合は無視して非公開のまま投稿する() {
+        bindProductionSite();
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        String past = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).minusDays(1).toString();
+
+        service.publish(scheduledCommand(past, "draft"));
+
+        org.mockito.ArgumentCaptor<PostContent> captor =
+                org.mockito.ArgumentCaptor.forClass(PostContent.class);
+        verify(cmsAdapter).createOrUpdatePost(any(), captor.capture(), any());
+        assertEquals("draft", captor.getValue().status());
+        assertNull(captor.getValue().publishScheduledAt());
+    }
+
+    @Test
+    void publish_本番以外のサイトでは過去の公開予定日時も無視する() {
+        bindNonProductionSite();
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        String past = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).minusDays(1).toString();
+
+        service.publish(scheduledCommand(past));
+
+        org.mockito.ArgumentCaptor<PostContent> captor =
+                org.mockito.ArgumentCaptor.forClass(PostContent.class);
+        verify(cmsAdapter).createOrUpdatePost(any(), captor.capture(), any());
+        assertEquals("draft", captor.getValue().status());
+        assertNull(captor.getValue().publishScheduledAt());
     }
 
     @Test
