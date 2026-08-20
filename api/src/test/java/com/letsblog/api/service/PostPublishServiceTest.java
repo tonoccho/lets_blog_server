@@ -162,6 +162,34 @@ class PostPublishServiceTest {
     }
 
     @Test
+    void publish_既存スラッグのwpPostIdを渡して再投稿すると同じPost行が更新され重複作成されない() {
+        // issue #529: VSCode拡張はスラッグから既存投稿を照会(lookupExistingPost)し、
+        // 見つかったwpPostIdをcommand.wpPostId()として渡してくる。この場合、DB(posts)側は
+        // 新しい行を追加するのではなく、既存の行を更新しなければ同じスラッグの記事が
+        // 再投稿のたびに重複投稿されてしまう。
+        com.letsblog.api.domain.Post existingPost = new com.letsblog.api.domain.Post();
+        existingPost.setId(9L);
+        existingPost.setSiteId(1L);
+        existingPost.setWpPostId("55");
+        existingPost.setSlug("my-article");
+        when(postRepository.findBySiteIdAndWpPostId(1L, "55")).thenReturn(Optional.of(existingPost));
+        when(cmsAdapter.createOrUpdatePost(any(), any(), eq("55")))
+                .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
+
+        PostPublishCommand command = new PostPublishCommand(
+                "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", List.of(), null,
+                null, null, null);
+
+        service.publish(command);
+
+        ArgumentCaptor<com.letsblog.api.domain.Post> savedCaptor =
+                ArgumentCaptor.forClass(com.letsblog.api.domain.Post.class);
+        verify(postRepository).save(savedCaptor.capture());
+        assertEquals(9L, savedCaptor.getValue().getId());
+        assertEquals("55", savedCaptor.getValue().getWpPostId());
+    }
+
+    @Test
     void publish_slug未指定時はtitleから簡易スラッグ化される() {
         when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
                 .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));

@@ -666,9 +666,35 @@ public class WordPressSshOperations {
      * WordPressAdapter.postExists(issue #493)からも呼ばれるためpublic。メディア(添付ファイル)も
      * post_type=attachmentのwp_postsレコードのため、WordPressAdapter.mediaExists(issue #495)
      * からも同じ判定として再利用される。
+     *
+     * コマンドが失敗した場合、「投稿IDが無効(=実在しない)」と断定できるのは`wp post get`が
+     * その旨のエラーを返したときだけである。一時的なSSH/wp-cliの不調など、実在しないと断定
+     * できない失敗まで「実在しない」(false)扱いにすると、createOrUpdatePostが本来更新すべき
+     * 投稿を新規作成してしまい、同じスラッグの記事が再投稿のたびに重複投稿されてしまう
+     * (issue #529)。REST版(WordPressAdapter#postExists)・managed版
+     * (WordPressAgentOperations#postExists)は既にこの安全側(true=実在するとみなす)の方針を
+     * 採っており、SSH版も揃える。
      */
     public boolean postExists(WordPressCredentials creds, String postId) {
-        return exec(creds, wpCli(creds, "post get " + ShellQuote.single(postId) + " --field=ID")).ok();
+        SshCommandResult result = exec(creds, wpCli(creds, "post get " + ShellQuote.single(postId) + " --field=ID"));
+        if (result.ok()) {
+            return true;
+        }
+        if (isPostNotFoundError(result)) {
+            return false;
+        }
+        log.warn("投稿の実在確認が実在しないと断定できない理由で失敗したため、安全側(実在する)とみなします: "
+                + "postId={}, exitStatus={}, detail={}",
+                postId, result.exitStatus(), firstLine(result.stderr(), result.stdout()));
+        return true;
+    }
+
+    private static final Pattern POST_NOT_FOUND_PATTERN = Pattern.compile(
+            "Invalid post ID|Could not find the post|無効な投稿\\s*ID\\s*です", Pattern.CASE_INSENSITIVE);
+
+    /** `wp post get`が「指定IDの投稿が存在しない」ことを理由に失敗したかどうかを判定する。 */
+    private boolean isPostNotFoundError(SshCommandResult result) {
+        return POST_NOT_FOUND_PATTERN.matcher(result.stderr() + "\n" + result.stdout()).find();
     }
 
     /**
