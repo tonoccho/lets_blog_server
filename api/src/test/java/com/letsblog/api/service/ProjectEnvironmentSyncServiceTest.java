@@ -42,9 +42,12 @@ class ProjectEnvironmentSyncServiceTest {
     @Mock
     private WordPressSshOperations sshOperations;
 
+    @Mock
+    private ProjectUserSyncService projectUserSyncService;
+
     private ProjectEnvironmentSyncService service() {
         return new ProjectEnvironmentSyncService(
-                projectRepository, siteRepository, siteService, syncClient, sshOperations);
+                projectRepository, siteRepository, siteService, syncClient, sshOperations, projectUserSyncService);
     }
 
     private Site buildSshSite(Long id, String slug, String baseUrl) {
@@ -374,5 +377,59 @@ class ProjectEnvironmentSyncServiceTest {
         when(projectRepository.findById(99L)).thenReturn(Optional.empty());
 
         assertThrows(ProjectNotFoundException.class, () -> service.sync(99L, "test", "local", List.of("db")));
+    }
+
+    @Test
+    void sync_DBを同期対象に含む場合は同期先サイトのユーザーロールを整合させる() {
+        ProjectEnvironmentSyncService service = service();
+        Project project = buildProject(10L, 20L, null);
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site testSite = buildManagedSite(20L, "test-site");
+
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+
+        service.sync(1L, "test", "local", List.of("themes", "db"));
+
+        verify(projectUserSyncService).reconcileRolesForSite(1L, 10L);
+    }
+
+    @Test
+    void sync_DBを同期対象に含まない場合はユーザーロールを整合させない() {
+        ProjectEnvironmentSyncService service = service();
+        Project project = buildProject(10L, 20L, null);
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site testSite = buildManagedSite(20L, "test-site");
+
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+
+        service.sync(1L, "test", "local", List.of("themes"));
+
+        verify(projectUserSyncService, never()).reconcileRolesForSite(any(), any());
+    }
+
+    @Test
+    void sync_SSH管理サイトを同期元にDBを同期した場合もユーザーロールを整合させる() {
+        ProjectEnvironmentSyncService service = service();
+        Project project = buildProject(10L, 20L, 30L);
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site sshSite = buildSshSite(30L, "production-site", "https://prod.example.com");
+        WordPressCredentials sshCredentials = buildSshCredentials();
+        byte[] dump = "-- dump --".getBytes();
+
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(30L)).thenReturn(Optional.of(sshSite));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.resolveDataSource(sshSite))
+                .thenReturn(new SiteService.SiteDataSource(false, null, sshCredentials));
+        when(sshOperations.exportDatabase(sshCredentials))
+                .thenReturn(new WordPressSshOperations.DatabaseExport("jI7_", dump));
+
+        service.sync(1L, "production", "local", List.of("db"));
+
+        verify(projectUserSyncService).reconcileRolesForSite(1L, 10L);
     }
 }

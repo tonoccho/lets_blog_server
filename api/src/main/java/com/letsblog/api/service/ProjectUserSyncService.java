@@ -110,7 +110,31 @@ public class ProjectUserSyncService {
                 .toList();
     }
 
+    /**
+     * 環境同期(ProjectEnvironmentSyncService)がDBを同期対象に含む場合、同期先サイトのWordPress
+     * ユーザーロールが同期処理によって書き換わりうる(#514)。project_usersに記録された意図した
+     * ロールで、同期先サイトに参加中の全ユーザーのロールを強制的に上書きし、整合性を回復する。
+     */
+    @Transactional
+    public void reconcileRolesForSite(Long projectId, Long siteId) {
+        Site site = siteRepository.findById(siteId)
+                .orElseThrow(() -> new SiteNotFoundException("id " + siteId + " のサイトは登録されていません"));
+        for (ProjectUser projectUser : projectUserRepository.findByProjectId(projectId)) {
+            User user = userRepository.findById(projectUser.getUserId()).orElse(null);
+            if (user == null) {
+                continue;
+            }
+            provisionUserOnSite(site, user, projectUser.getWpRole());
+        }
+    }
+
     private void syncToProjectSites(Project project, User user, String wpRole) {
+        for (Site site : getProjectSites(project)) {
+            provisionUserOnSite(site, user, wpRole);
+        }
+    }
+
+    private void provisionUserOnSite(Site site, User user, String wpRole) {
         AuthorProvisioningRequest request = new AuthorProvisioningRequest(
                 user.getEmail(),
                 wpRole,
@@ -121,17 +145,15 @@ public class ProjectUserSyncService {
                 user.getBio(),
                 user.getLocale());
 
-        for (Site site : getProjectSites(project)) {
-            CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
-            CmsAdapter adapter = cmsAdapterFactory.resolve(site.getCmsType());
-            if (!adapter.hasAuthorProvisioningCapability(credentials)) {
-                throw new CmsApiException(
-                        "サイト '" + site.getSiteKey() + "' の登録済み認証情報に、ユーザー作成に必要な管理者権限が"
-                                + "ありません。サイト管理画面から認証情報を更新してください。");
-            }
-            String cmsAuthorId = adapter.provisionAuthor(credentials, request);
-            saveAuthorMapping(user.getId(), site.getId(), cmsAuthorId);
+        CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
+        CmsAdapter adapter = cmsAdapterFactory.resolve(site.getCmsType());
+        if (!adapter.hasAuthorProvisioningCapability(credentials)) {
+            throw new CmsApiException(
+                    "サイト '" + site.getSiteKey() + "' の登録済み認証情報に、ユーザー作成に必要な管理者権限が"
+                            + "ありません。サイト管理画面から認証情報を更新してください。");
         }
+        String cmsAuthorId = adapter.provisionAuthor(credentials, request);
+        saveAuthorMapping(user.getId(), site.getId(), cmsAuthorId);
     }
 
     /**
