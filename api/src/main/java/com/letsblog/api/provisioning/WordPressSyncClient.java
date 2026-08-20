@@ -47,13 +47,16 @@ public class WordPressSyncClient {
      * SSH管理サイトから取得したDBダンプ(wp db export)を、managedサイトのDBへインポートする
      * (issue #511)。managedサイト同士の同期({@link #sync})と異なりダンプがJava側に一度存在するため
      * multipart/form-dataでファイルとして送信する(WordPressBulkManagementClient#applyZipと同じ方式)。
+     * fromPrefixは同期元のテーブルプレフィックス(WordPressインストーラがランダム生成することがあり、
+     * 同期先と異なりうる)。provision-agent側で同期先のプレフィックスへ変換してからインポートするために使う。
      */
-    public void importDatabase(String toSlug, String toDbName, String fromUrl, byte[] sqlDump) {
+    public void importDatabase(String toSlug, String toDbName, String fromUrl, String fromPrefix, byte[] sqlDump) {
         try {
             MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
             form.add("slug", toSlug);
             form.add("dbName", toDbName);
             form.add("fromUrl", fromUrl);
+            form.add("fromPrefix", fromPrefix);
             form.add("file", new ByteArrayResource(sqlDump) {
                 @Override
                 public String getFilename() {
@@ -77,24 +80,37 @@ public class WordPressSyncClient {
      * (issue #511)。{@link #importDatabase}と同じくmultipart/form-dataでファイルとして送信する。
      */
     public void importMedia(String toSlug, byte[] mediaTarGz) {
+        importContentDirectory(toSlug, "/media-import", "media.tar.gz", mediaTarGz, "メディア");
+    }
+
+    /**
+     * SSH管理サイトから取得したテーマ(wp-content/themes)のtar.gzを、managedサイトへインポートする
+     * (issue #511)。{@link #importMedia}と同じ方式。プラグインは対象外(ProjectEnvironmentSyncService参照)。
+     */
+    public void importThemes(String toSlug, byte[] themesTarGz) {
+        importContentDirectory(toSlug, "/theme-import", "themes.tar.gz", themesTarGz, "テーマ");
+    }
+
+    private void importContentDirectory(
+            String toSlug, String uri, String filename, byte[] tarGz, String label) {
         try {
             MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
             form.add("slug", toSlug);
-            form.add("file", new ByteArrayResource(mediaTarGz) {
+            form.add("file", new ByteArrayResource(tarGz) {
                 @Override
                 public String getFilename() {
-                    return "media.tar.gz";
+                    return filename;
                 }
             });
             client.post()
-                    .uri("/media-import")
+                    .uri(uri)
                     .header("X-Provision-Token", provisionToken)
                     .contentType(MediaType.MULTIPART_FORM_DATA)
                     .body(form)
                     .retrieve()
                     .toBodilessEntity();
         } catch (RestClientException e) {
-            throw new ProvisioningException("環境同期(メディアインポート)に失敗しました: " + e.getMessage(), e);
+            throw new ProvisioningException("環境同期(" + label + "インポート)に失敗しました: " + e.getMessage(), e);
         }
     }
 

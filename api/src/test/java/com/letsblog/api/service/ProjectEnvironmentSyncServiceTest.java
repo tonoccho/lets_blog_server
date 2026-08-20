@@ -232,23 +232,53 @@ class ProjectEnvironmentSyncServiceTest {
                 .thenReturn(new SiteService.SiteDataSource(false, null, null));
 
         assertThrows(IllegalArgumentException.class, () -> service.sync(1L, "production", "local", List.of("db")));
-        verify(syncClient, never()).importDatabase(any(), any(), any(), any());
+        verify(syncClient, never()).importDatabase(any(), any(), any(), any(), any());
     }
 
     @Test
-    void sync_SSH管理サイトを同期元にする場合dbを含まないtargetsは例外() {
+    void sync_SSH管理サイトを同期元にテーマを含めて同期できる() {
         ProjectEnvironmentSyncService service = service();
         Project project = buildProject(10L, 20L, 30L);
         Site localSite = buildManagedSite(10L, "local-site");
         Site sshSite = buildSshSite(30L, "production-site", "https://prod.example.com");
+        WordPressCredentials sshCredentials = buildSshCredentials();
+        byte[] dump = "-- dump --".getBytes();
+        byte[] themes = "themes-tar-gz-bytes".getBytes();
 
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(siteRepository.findById(30L)).thenReturn(Optional.of(sshSite));
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.resolveDataSource(sshSite))
+                .thenReturn(new SiteService.SiteDataSource(false, null, sshCredentials));
+        when(sshOperations.exportDatabase(sshCredentials))
+                .thenReturn(new WordPressSshOperations.DatabaseExport("jI7_", dump));
+        when(sshOperations.exportThemes(sshCredentials)).thenReturn(themes);
 
-        assertThrows(IllegalArgumentException.class,
-                () -> service.sync(1L, "production", "local", List.of("themes", "db")));
-        verify(syncClient, never()).importDatabase(any(), any(), any(), any());
+        service.sync(1L, "production", "local", List.of("themes", "db"));
+
+        verify(syncClient).importDatabase("local-site", "wp_local-site", "https://prod.example.com", "jI7_", dump);
+        verify(syncClient).importThemes("local-site", themes);
+        verify(sshOperations, never()).exportMedia(any());
+    }
+
+    @Test
+    void sync_SSH管理サイトのテーマが空なら同期先へインポートしない() {
+        ProjectEnvironmentSyncService service = service();
+        Project project = buildProject(10L, 20L, 30L);
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site sshSite = buildSshSite(30L, "production-site", "https://prod.example.com");
+        WordPressCredentials sshCredentials = buildSshCredentials();
+
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(siteRepository.findById(30L)).thenReturn(Optional.of(sshSite));
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.resolveDataSource(sshSite))
+                .thenReturn(new SiteService.SiteDataSource(false, null, sshCredentials));
+        when(sshOperations.exportThemes(sshCredentials)).thenReturn(new byte[0]);
+
+        service.sync(1L, "production", "local", List.of("themes"));
+
+        verify(syncClient, never()).importThemes(any(), any());
     }
 
     @Test
@@ -265,13 +295,14 @@ class ProjectEnvironmentSyncServiceTest {
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(siteService.resolveDataSource(sshSite))
                 .thenReturn(new SiteService.SiteDataSource(false, null, sshCredentials));
-        when(sshOperations.exportDatabase(sshCredentials)).thenReturn(dump);
+        when(sshOperations.exportDatabase(sshCredentials))
+                .thenReturn(new WordPressSshOperations.DatabaseExport("jI7_", dump));
 
         service.sync(1L, "production", "local", List.of("db"));
 
         verify(sshOperations).exportDatabase(sshCredentials);
         verify(sshOperations, never()).exportMedia(any());
-        verify(syncClient).importDatabase("local-site", "wp_local-site", "https://prod.example.com", dump);
+        verify(syncClient).importDatabase("local-site", "wp_local-site", "https://prod.example.com", "jI7_", dump);
         verify(syncClient, never()).importMedia(any(), any());
         verify(syncClient, never()).sync(any());
     }
@@ -291,12 +322,13 @@ class ProjectEnvironmentSyncServiceTest {
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(siteService.resolveDataSource(sshSite))
                 .thenReturn(new SiteService.SiteDataSource(false, null, sshCredentials));
-        when(sshOperations.exportDatabase(sshCredentials)).thenReturn(dump);
+        when(sshOperations.exportDatabase(sshCredentials))
+                .thenReturn(new WordPressSshOperations.DatabaseExport("jI7_", dump));
         when(sshOperations.exportMedia(sshCredentials)).thenReturn(media);
 
         service.sync(1L, "production", "local", List.of("db", "media"));
 
-        verify(syncClient).importDatabase("local-site", "wp_local-site", "https://prod.example.com", dump);
+        verify(syncClient).importDatabase("local-site", "wp_local-site", "https://prod.example.com", "jI7_", dump);
         verify(syncClient).importMedia("local-site", media);
     }
 

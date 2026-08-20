@@ -940,9 +940,10 @@ class WordPressSshOperationsTest {
                 .thenReturn(ok(""));
         when(executor.getFile(any(SshConnectionParams.class), any())).thenReturn(dump);
 
-        byte[] result = operations.exportDatabase(creds());
+        WordPressSshOperations.DatabaseExport result = operations.exportDatabase(creds());
 
-        assertArrayEquals(dump, result);
+        assertEquals("wp_", result.tablePrefix());
+        assertArrayEquals(dump, result.dump());
 
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
         verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
@@ -1018,6 +1019,49 @@ class WordPressSshOperationsTest {
                 .thenReturn(fail("tar failed"));
 
         assertThrows(SshOperationException.class, () -> operations.exportMedia(creds()));
+        verify(executor, never()).getFile(any(), any());
+    }
+
+    @Test
+    void exportThemes_themesディレクトリが無ければ空バイト列を返しダウンロードしない() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("not found"));
+
+        byte[] result = operations.exportThemes(creds());
+
+        assertArrayEquals(new byte[0], result);
+        verify(executor, never()).getFile(any(), any());
+        verify(executor, never()).removeFile(any(), any());
+    }
+
+    @Test
+    void exportThemes_成功時はthemesをtarで固めてダウンロード後に一時ファイルを削除する() {
+        byte[] archive = "themes-tar-gz-bytes".getBytes(StandardCharsets.UTF_8);
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok(""))
+                .thenReturn(ok(""));
+        when(executor.getFile(any(SshConnectionParams.class), any())).thenReturn(archive);
+
+        byte[] result = operations.exportThemes(creds());
+
+        assertArrayEquals(archive, result);
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("tar -czf"));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("themes"));
+
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).getFile(any(SshConnectionParams.class), pathCaptor.capture());
+        verify(executor).removeFile(any(SshConnectionParams.class), eq(pathCaptor.getValue()));
+    }
+
+    @Test
+    void exportThemes_tar失敗時は例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok(""))
+                .thenReturn(fail("tar failed"));
+
+        assertThrows(SshOperationException.class, () -> operations.exportThemes(creds()));
         verify(executor, never()).getFile(any(), any());
     }
 }

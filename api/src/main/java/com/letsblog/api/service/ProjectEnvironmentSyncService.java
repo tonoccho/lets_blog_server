@@ -16,14 +16,14 @@ import java.util.Set;
 /**
  * プロジェクトに紐づく環境(ローカル/テスト/本番)間で、テーマ・プラグイン・メディア・DBを同期する。
  * 同期先は自動構築(managedWordpress)されたWordPress環境に限る(ファイルシステム・DBへの直接アクセス
- * 手段がないため)。同期元は、managedWordpress環境に加え、SSH/wp-cli管理の外部サイトもDB・メディアのみ
- * 対応する(issue #511。テーマ/プラグインは、SSH管理サイトがこのコンテナと同一ホストにいないため対象外)。
+ * 手段がないため)。同期元は、managedWordpress環境に加え、SSH/wp-cli管理の外部サイトもDB・メディア・
+ * テーマのみ対応する(issue #511。プラグインは、SSH管理サイトがこのコンテナと同一ホストにいないため対象外)。
  */
 @Service
 public class ProjectEnvironmentSyncService {
 
     private static final Set<String> VALID_ENVIRONMENTS = Set.of("local", "test", "production");
-    private static final Set<String> SSH_SOURCE_SUPPORTED_TARGETS = Set.of("db", "media");
+    private static final Set<String> SSH_SOURCE_SUPPORTED_TARGETS = Set.of("db", "media", "themes");
 
     private final ProjectRepository projectRepository;
     private final SiteRepository siteRepository;
@@ -75,7 +75,7 @@ public class ProjectEnvironmentSyncService {
         Set<String> targetSet = Set.copyOf(targets);
         if (!SSH_SOURCE_SUPPORTED_TARGETS.containsAll(targetSet)) {
             throw new IllegalArgumentException(
-                    fromEnvironment + "環境(" + fromSite.getSiteKey() + ")はSSH管理サイトのため、DB・メディアのみ同期できます");
+                    fromEnvironment + "環境(" + fromSite.getSiteKey() + ")はSSH管理サイトのため、DB・メディア・テーマのみ同期できます");
         }
         SiteService.SiteDataSource dataSource = siteService.resolveDataSource(fromSite);
         if (!dataSource.hasSsh()) {
@@ -85,13 +85,20 @@ public class ProjectEnvironmentSyncService {
         WordPressCredentials creds = dataSource.sshCredentials();
 
         if (targetSet.contains("db")) {
-            byte[] dump = sshOperations.exportDatabase(creds);
-            syncClient.importDatabase(toSite.getWpSlug(), toSite.getWpDbName(), fromSite.getBaseUrl(), dump);
+            WordPressSshOperations.DatabaseExport export = sshOperations.exportDatabase(creds);
+            syncClient.importDatabase(toSite.getWpSlug(), toSite.getWpDbName(), fromSite.getBaseUrl(),
+                    export.tablePrefix(), export.dump());
         }
         if (targetSet.contains("media")) {
             byte[] mediaArchive = sshOperations.exportMedia(creds);
             if (mediaArchive.length > 0) {
                 syncClient.importMedia(toSite.getWpSlug(), mediaArchive);
+            }
+        }
+        if (targetSet.contains("themes")) {
+            byte[] themesArchive = sshOperations.exportThemes(creds);
+            if (themesArchive.length > 0) {
+                syncClient.importThemes(toSite.getWpSlug(), themesArchive);
             }
         }
     }

@@ -552,6 +552,10 @@ public class WordPressSshOperations {
     public record PluginThemeInfo(String name, String status) {
     }
 
+    /** {@link #exportDatabase}の戻り値。tablePrefixは同期元のWordPressテーブルプレフィックス。 */
+    public record DatabaseExport(String tablePrefix, byte[] dump) {
+    }
+
     public record SshApplyResult(String status, String errorMessage, String stackTrace) {
         public static SshApplyResult success() {
             return new SshApplyResult("SUCCESS", null, null);
@@ -867,8 +871,15 @@ public class WordPressSshOperations {
      * (環境同期の同期元がSSH管理サイトの場合に使用。issue #511)。各環境の管理者/プロジェクトメンバー
      * アカウント(wp_users/wp_usermeta)はProjectUserSyncServiceが環境ごとに個別管理しているため、
      * provision-agentの環境同期(/sync)と同様にダンプ対象から除外する。
+     * <p>
+     * テーブルプレフィックス(WordPressのインストーラがセキュリティのためランダム生成することがあり、
+     * 同期元と同期先で異なりうる。例: {@code jI7_} vs {@code wp_})を戻り値に含める。
+     * ダンプのCREATE TABLE/INSERT INTO等は同期元のプレフィックスのまま書き出されるため、
+     * 呼び出し元(provision-agentの/db-import)で同期先のwp-config.phpのtable_prefixを
+     * このプレフィックスへ合わせないと、同期先のWordPressがインポートされたテーブルを
+     * 読まないままになってしまう(issue #511のバグ対応)。
      */
-    public byte[] exportDatabase(WordPressCredentials creds) {
+    public DatabaseExport exportDatabase(WordPressCredentials creds) {
         SshConnectionParams params = connectionParams(creds);
         String prefix = tablePrefix(creds);
         String remotePath = "/tmp/letsblog-dbexport-" + UUID.randomUUID() + ".sql";
@@ -880,7 +891,7 @@ public class WordPressSshOperations {
                     + firstLine(exportResult.stderr(), exportResult.stdout()));
         }
         try {
-            return executor.getFile(params, remotePath);
+            return new DatabaseExport(prefix, executor.getFile(params, remotePath));
         } finally {
             executor.removeFile(params, remotePath);
         }
@@ -898,18 +909,31 @@ public class WordPressSshOperations {
      * (メディア未アップロード)場合は空バイト列を返し、呼び出し元でインポートをスキップする想定。
      */
     public byte[] exportMedia(WordPressCredentials creds) {
+        return exportContentDirectory(creds, "uploads", "メディア");
+    }
+
+    /**
+     * wp-content/themesをリモートでtar.gzにまとめSFTPでダウンロードする
+     * (環境同期の同期元がSSH管理サイトの場合に使用。issue #511)。プラグインは対象外
+     * (ProjectEnvironmentSyncService参照)。themesディレクトリが存在しない場合は空バイト列を返す。
+     */
+    public byte[] exportThemes(WordPressCredentials creds) {
+        return exportContentDirectory(creds, "themes", "テーマ");
+    }
+
+    private byte[] exportContentDirectory(WordPressCredentials creds, String dirName, String label) {
         SshConnectionParams params = connectionParams(creds);
         String contentPath = creds.wpPath() + "/wp-content";
-        String uploadsPath = contentPath + "/uploads";
-        SshCommandResult checkResult = exec(creds, "test -d " + ShellQuote.single(uploadsPath));
+        String targetPath = contentPath + "/" + dirName;
+        SshCommandResult checkResult = exec(creds, "test -d " + ShellQuote.single(targetPath));
         if (!checkResult.ok()) {
             return new byte[0];
         }
-        String remotePath = "/tmp/letsblog-media-" + UUID.randomUUID() + ".tar.gz";
+        String remotePath = "/tmp/letsblog-" + dirName + "-" + UUID.randomUUID() + ".tar.gz";
         SshCommandResult tarResult = exec(creds, "tar -czf " + ShellQuote.single(remotePath)
-                + " -C " + ShellQuote.single(contentPath) + " uploads");
+                + " -C " + ShellQuote.single(contentPath) + " " + dirName);
         if (!tarResult.ok()) {
-            throw new SshOperationException("メディアのエクスポートに失敗しました: "
+            throw new SshOperationException(label + "のエクスポートに失敗しました: "
                     + firstLine(tarResult.stderr(), tarResult.stdout()));
         }
         try {
