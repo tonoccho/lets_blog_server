@@ -432,18 +432,49 @@ if ($path === '/sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             'mysqldump --skip-ssl -h' . escapeshellarg($dbHost) . ' -uroot -p' . escapeshellarg($rootPassword)
                 . ' ' . escapeshellarg($toDbName) . ' > ' . escapeshellarg("$backupDir/db-{$timestamp}.sql")]);
 
-        // 各環境の管理者・プロジェクトメンバーアカウント(wp_users/wp_usermeta)は
+        // 同期元・同期先で異なりうるテーブルプレフィックスを解決する(issue #516)。
+        // WordPressのプレフィックスはインストール時にランダム化されることがあり、また
+        // SSH管理サイトからの/db-importで同期先のプレフィックスが同期元に合わせて後から
+        // 変更されていることもあるため、同期元・同期先で実際のテーブル名が異なりうる。
+        [$fromPrefixCode, $fromPrefixOut, ] = runWp(['config', 'get', 'table_prefix', "--path=$fromPath", '--allow-root']);
+        $fromPrefix = ($fromPrefixCode === 0 && preg_match('/^[A-Za-z0-9_]+$/', trim($fromPrefixOut)))
+            ? trim($fromPrefixOut) : 'wp_';
+        [$toPrefixCode, $toPrefixOut, ] = runWp(['config', 'get', 'table_prefix', "--path=$toPath", '--allow-root']);
+        $toPrefix = ($toPrefixCode === 0 && preg_match('/^[A-Za-z0-9_]+$/', trim($toPrefixOut)))
+            ? trim($toPrefixOut) : 'wp_';
+
+        // 各環境の管理者・プロジェクトメンバーアカウント(users/usermeta)は
         // ProjectUserSyncServiceが環境ごとに個別管理しているため、DB同期の対象から除外する
         $dumpCmd = 'mysqldump --skip-ssl -h' . escapeshellarg($dbHost) . ' -uroot -p' . escapeshellarg($rootPassword)
-            . ' --ignore-table=' . escapeshellarg("$fromDbName.wp_users")
-            . ' --ignore-table=' . escapeshellarg("$fromDbName.wp_usermeta")
+            . ' --ignore-table=' . escapeshellarg("$fromDbName.{$fromPrefix}users")
+            . ' --ignore-table=' . escapeshellarg("$fromDbName.{$fromPrefix}usermeta")
             . ' ' . escapeshellarg($fromDbName);
         $importCmd = 'mysql --skip-ssl -h' . escapeshellarg($dbHost) . ' -uroot -p' . escapeshellarg($rootPassword)
             . ' ' . escapeshellarg($toDbName);
-        [$code, $out, $err] = runCommand(['sh', '-c', "$dumpCmd | $importCmd"]);
+
+        // dashにはpipefailがなく、"$dumpCmd | $importCmd"のようにパイプで直結すると
+        // mysqldump側が失敗してもmysql側の終了コードで上書きされ、失敗が握りつぶされる(issue #516)。
+        // ダンプを一旦ファイルに書き出し、export/importそれぞれの終了コードを個別に検証する。
+        $dumpFile = "$backupDir/db-sync-{$timestamp}.sql";
+        [$code, $out, $err] = runCommand(['sh', '-c', $dumpCmd . ' > ' . escapeshellarg($dumpFile)]);
         if ($code !== 0) {
-            respond(500, ['error' => 'DBの同期に失敗しました', 'detail' => combinedOutput($out, $err)]);
+            respond(500, ['error' => 'DBのエクスポートに失敗しました', 'detail' => combinedOutput($out, $err)]);
         }
+
+        // ダンプは同期元のテーブルプレフィックスのまま(CREATE TABLE等を書き換えていない)出力される。
+        // プレフィックスが異なると、インポート時に同期先が実際に読んでいるテーブル(例: wp_options)ではなく
+        // 別名の新規テーブル(例: jI7_options)が追加で作られるだけになり、WordPress側は何も変わって見えない
+        // (issue #516)。同期先が実際に使用しているプレフィックスへ書き換えてからインポートする。
+        if ($fromPrefix !== $toPrefix) {
+            runCommand(['sed', '-i', "s/`{$fromPrefix}/`{$toPrefix}/g", $dumpFile]);
+        }
+
+        [$code, $out, $err] = runCommand(['sh', '-c', $importCmd . ' < ' . escapeshellarg($dumpFile)]);
+        if ($code !== 0) {
+            respond(500, ['error' => 'DBのインポートに失敗しました', 'detail' => combinedOutput($out, $err)]);
+        }
+
+        runCommand(['rm', '-f', $dumpFile]);
 
         // コピー元のURLがwp_options等に焼き込まれたままになるため、コピー先自身のURLへ書き戻す
         $fromUrl = "https://localhost/sites/$fromSlug";
