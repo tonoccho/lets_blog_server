@@ -53,7 +53,7 @@ class SiteControllerTest {
 
     private SiteResponse buildResponse() {
         return new SiteResponse(1L, "My Blog", "main", CmsType.WORDPRESS, "https://example.com",
-                LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false);
+                LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false);
     }
 
     @Test

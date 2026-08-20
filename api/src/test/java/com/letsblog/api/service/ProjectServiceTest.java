@@ -43,11 +43,14 @@ class ProjectServiceTest {
     private SiteRepository siteRepository;
 
     @Mock
+    private SiteService siteService;
+
+    @Mock
     private BulkUploadStorageService bulkUploadStorageService;
 
     private ProjectService service() {
         return new ProjectService(
-                projectRepository, siteRepository, bulkUploadStorageService,
+                projectRepository, siteRepository, siteService, bulkUploadStorageService,
                 "low quality, blurry, watermark, text", "high quality, highly detailed, sharp focus, masterpiece",
                 1920, 1080, 1300);
     }

@@ -111,7 +111,7 @@ public class WordPressSiteProvisioningService {
 
         return new SiteResponse(
                 site.getId(), site.getName(), site.getSiteKey(), site.getCmsType(), site.getBaseUrl(),
-                site.getCreatedAt(), site.getUpdatedAt(), response.connectionCheckStatus(), true);
+                site.getCreatedAt(), site.getUpdatedAt(), response.connectionCheckStatus(), true, false);
     }
 
     /**
@@ -157,7 +157,7 @@ public class WordPressSiteProvisioningService {
 
         return new SiteResponse(
                 site.getId(), site.getName(), site.getSiteKey(), site.getCmsType(), site.getBaseUrl(),
-                site.getCreatedAt(), site.getUpdatedAt(), response.connectionCheckStatus(), true);
+                site.getCreatedAt(), site.getUpdatedAt(), response.connectionCheckStatus(), true, false);
     }
 
     @AuditLog(action = AuditLogAction.SITE_DELETED, resourceType = "SITE")
