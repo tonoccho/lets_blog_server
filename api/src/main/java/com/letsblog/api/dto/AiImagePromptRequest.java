@@ -11,6 +11,11 @@ import java.util.List;
  */
 public record AiImagePromptRequest(
         @Valid List<PlanChatMessage> history,
-        @NotBlank String message
+        @NotBlank String message,
+        /**
+         * OLLAMA/OPENAI/CLAUDEのいずれか(任意)。指定時はプロジェクト単位の既定プロバイダーより優先する
+         * (issue #530)。未指定時はプロジェクト単位の既定→システム設定の既定の順にフォールバックする。
+         */
+        String provider
 ) {
 }

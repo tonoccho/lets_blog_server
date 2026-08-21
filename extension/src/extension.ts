@@ -10,6 +10,8 @@ import {
   getProjectId,
   setProjectId,
   requireProjectId,
+  getConfiguredAiProvider,
+  setConfiguredAiProvider,
 } from './config';
 import {
   parseArticle,
@@ -64,6 +66,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.deletePost', () => commandDeletePost(context)),
     vscode.commands.registerCommand('letsBlog.askAi', () => commandAskAi(context)),
     vscode.commands.registerCommand('letsBlog.suggestTags', () => commandSuggestTags(context)),
+    vscode.commands.registerCommand('letsBlog.switchAiProvider', () => commandSwitchAiProvider()),
     vscode.commands.registerCommand('letsBlog.generateImage', () => commandGenerateImage(context)),
     vscode.commands.registerCommand('letsBlog.imageGallery', () => commandImageGallery(context)),
     vscode.commands.registerCommand('letsBlog.addNewDiagram', () => commandAddNewDiagram(context)),
@@ -598,6 +601,41 @@ async function commandDeletePost(context: vscode.ExtensionContext): Promise<void
   }
 }
 
+/** letsBlog.aiProviderのメニュー選択肢。値''は「サーバー(プロジェクト/システム設定)の既定値を使用」。 */
+const AI_PROVIDER_ITEMS: { label: string; value: string }[] = [
+  { label: 'サーバー既定値を使用', value: '' },
+  { label: 'Ollama', value: 'OLLAMA' },
+  { label: 'OpenAI (ChatGPT)', value: 'OPENAI' },
+  { label: 'Claude (Anthropic)', value: 'CLAUDE' },
+];
+
+/**
+ * AIを呼び出すコマンドの実行時に必ずプロバイダーを選ばせるための共通クイックピック(issue #530)。
+ * letsBlog.aiProvider設定の現在値をチェックマークで示し、そのままEnterすれば現在値が選び直される。
+ * 戻り値undefinedはEscapeによるキャンセル、空文字はサーバー既定値を使う選択。
+ */
+async function pickAiProvider(placeHolder: string): Promise<string | undefined> {
+  const current = getConfiguredAiProvider();
+  const items = AI_PROVIDER_ITEMS.map((item) => ({
+    label: item.value === current ? `$(check) ${item.label}` : item.label,
+    value: item.value,
+  }));
+  const picked = await vscode.window.showQuickPick(items, { placeHolder });
+  return picked?.value;
+}
+
+/**
+ * 「Let's Blog: AIプロバイダーを切り替える」コマンド。letsBlog.aiProvider設定を書き換え、
+ * 以降のAskAi/Suggest Tags/Generate Section/Generate Imageの既定選択に反映される。
+ */
+async function commandSwitchAiProvider(): Promise<void> {
+  const provider = await pickAiProvider('作業中に使うAIプロバイダーを選択');
+  if (provider === undefined) return;
+  await setConfiguredAiProvider(provider);
+  const label = AI_PROVIDER_ITEMS.find((item) => item.value === provider)?.label ?? provider;
+  vscode.window.showInformationMessage(`AIプロバイダーを「${label}」に切り替えました。`);
+}
+
 async function commandAskAi(context: vscode.ExtensionContext): Promise<void> {
   const editor = getActiveMarkdownEditor();
   if (!editor) return;
@@ -612,6 +650,10 @@ async function commandAskAi(context: vscode.ExtensionContext): Promise<void> {
   );
   if (!mode) return;
 
+  // 必ずAIプロバイダーを選ばせる(issue #530)。同じクイックピックフローの続きとして提示する。
+  const provider = await pickAiProvider('使用するAIプロバイダーを選択');
+  if (provider === undefined) return;
+
   try {
     const apiKey = await requireApiKey(context);
     const article = parseArticle(editor.document.getText());
@@ -620,7 +662,7 @@ async function commandAskAi(context: vscode.ExtensionContext): Promise<void> {
 
     const result = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'AIに問い合わせています…' },
-      () => api.askAi(getServerUrl(), apiKey, mode.value, text)
+      () => api.askAi(getServerUrl(), apiKey, mode.value, text, undefined, provider)
     );
 
     const content = result.result + buildSourcesSection(result.sources, result.searchNote);
@@ -635,13 +677,17 @@ async function commandSuggestTags(context: vscode.ExtensionContext): Promise<voi
   const editor = getActiveMarkdownEditor();
   if (!editor) return;
 
+  // 必ずAIプロバイダーを選ばせる(issue #530)。
+  const provider = await pickAiProvider('使用するAIプロバイダーを選択');
+  if (provider === undefined) return;
+
   try {
     const apiKey = await requireApiKey(context);
     const article = parseArticle(editor.document.getText());
 
     const suggestion = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'タグ/カテゴリを提案中…' },
-      () => api.suggestTags(getServerUrl(), apiKey, article.content)
+      () => api.suggestTags(getServerUrl(), apiKey, article.content, undefined, provider)
     );
 
     const items = [

@@ -4,8 +4,10 @@ import com.letsblog.api.dto.ComfyUiCheckpointListResponse;
 import com.letsblog.api.dto.GenerationJobResponse;
 import com.letsblog.api.dto.InstallComfyUiCheckpointRequest;
 import com.letsblog.api.dto.LlmModelListResponse;
+import com.letsblog.api.dto.LlmProviderListResponse;
 import com.letsblog.api.dto.SelectComfyUiCheckpointRequest;
 import com.letsblog.api.dto.SelectLlmModelRequest;
+import com.letsblog.api.dto.SelectLlmProviderRequest;
 import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.ComfyUiModelService;
 import com.letsblog.api.service.LlmModelService;
@@ -51,6 +53,19 @@ public class ProjectAiModelController {
             @PathVariable Long id, @Valid @RequestBody SelectLlmModelRequest request) {
         adminAuthorizationService.requireAdmin();
         return llmModelService.selectModel(id, request.modelName());
+    }
+
+    @GetMapping("/llm/provider")
+    public LlmProviderListResponse listLlmProvider(@PathVariable Long id) {
+        adminAuthorizationService.requireAdmin();
+        return llmModelService.listProvidersForProject(id);
+    }
+
+    @PutMapping("/llm/provider/selection")
+    public LlmProviderListResponse selectLlmProvider(
+            @PathVariable Long id, @RequestBody SelectLlmProviderRequest request) {
+        adminAuthorizationService.requireAdmin();
+        return llmModelService.selectProvider(id, request.provider());
     }
 
     @GetMapping("/comfyui/checkpoints")

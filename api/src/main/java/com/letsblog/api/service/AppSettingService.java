@@ -1,5 +1,7 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.ai.AiProvider;
+import com.letsblog.api.ai.LlmClient;
 import com.letsblog.api.ai.LlmConfigProvider;
 import com.letsblog.api.aop.AuditLog;
 import com.letsblog.api.crypto.CredentialCipher;
@@ -34,6 +36,9 @@ public class AppSettingService implements LlmConfigProvider {
     static final String LLM_MODEL = "llm_model";
     static final String LLM_AVAILABLE_MODELS = "llm_available_models";
     static final String LLM_REQUEST_TIMEOUT_SECONDS = "llm_request_timeout_seconds";
+    static final String LLM_PROVIDER = "llm_provider";
+    static final String LLM_CLAUDE_API_KEY = "llm_claude_api_key";
+    static final String LLM_CLAUDE_MODEL = "llm_claude_model";
     static final String MAIL_HOST = "mail_host";
     static final String MAIL_PORT = "mail_port";
     static final String MAIL_USERNAME = "mail_username";
@@ -61,11 +66,14 @@ public class AppSettingService implements LlmConfigProvider {
     }
 
     private static final List<Definition> DEFINITIONS = List.of(
-            new Definition(LLM_API_KEY, "LLM APIキー", true),
-            new Definition(LLM_BASE_URL, "LLM ベースURL", false),
-            new Definition(LLM_MODEL, "LLM 既定モデル", false),
-            new Definition(LLM_AVAILABLE_MODELS, "LLM 選択可能モデル(カンマ区切り)", false),
+            new Definition(LLM_PROVIDER, "AIプロバイダー(OLLAMA/OPENAI/CLAUDEのいずれか)", false),
+            new Definition(LLM_API_KEY, "LLM APIキー(Ollama/OpenAI用)", true),
+            new Definition(LLM_BASE_URL, "LLM ベースURL(Ollama/OpenAI用)", false),
+            new Definition(LLM_MODEL, "LLM 既定モデル(Ollama/OpenAI用)", false),
+            new Definition(LLM_AVAILABLE_MODELS, "LLM 選択可能モデル(カンマ区切り、Ollama/OpenAI用)", false),
             new Definition(LLM_REQUEST_TIMEOUT_SECONDS, "LLM リクエストタイムアウト(秒)", false),
+            new Definition(LLM_CLAUDE_API_KEY, "Claude APIキー", true),
+            new Definition(LLM_CLAUDE_MODEL, "Claude 既定モデル", false),
             new Definition(MAIL_HOST, "メール送信ホスト", false),
             new Definition(MAIL_PORT, "メール送信ポート", false),
             new Definition(MAIL_USERNAME, "メール送信ユーザー名", false),
@@ -88,6 +96,9 @@ public class AppSettingService implements LlmConfigProvider {
             @Value("${app.llm-model}") String llmModelEnvDefault,
             @Value("${app.llm-available-models}") String llmAvailableModelsEnvDefault,
             @Value("${app.llm-request-timeout-seconds}") String llmRequestTimeoutSecondsEnvDefault,
+            @Value("${app.llm-provider:OPENAI}") String llmProviderEnvDefault,
+            @Value("${app.llm-claude-api-key:}") String llmClaudeApiKeyEnvDefault,
+            @Value("${app.llm-claude-model:claude-3-5-haiku-20241022}") String llmClaudeModelEnvDefault,
             @Value("${spring.mail.host}") String mailHostEnvDefault,
             @Value("${spring.mail.port}") String mailPortEnvDefault,
             @Value("${spring.mail.username:}") String mailUsernameEnvDefault,
@@ -104,6 +115,9 @@ public class AppSettingService implements LlmConfigProvider {
         defaults.put(LLM_MODEL, llmModelEnvDefault);
         defaults.put(LLM_AVAILABLE_MODELS, llmAvailableModelsEnvDefault);
         defaults.put(LLM_REQUEST_TIMEOUT_SECONDS, llmRequestTimeoutSecondsEnvDefault);
+        defaults.put(LLM_PROVIDER, llmProviderEnvDefault);
+        defaults.put(LLM_CLAUDE_API_KEY, llmClaudeApiKeyEnvDefault);
+        defaults.put(LLM_CLAUDE_MODEL, llmClaudeModelEnvDefault);
         defaults.put(MAIL_HOST, mailHostEnvDefault);
         defaults.put(MAIL_PORT, mailPortEnvDefault);
         defaults.put(MAIL_USERNAME, mailUsernameEnvDefault);
@@ -183,6 +197,7 @@ public class AppSettingService implements LlmConfigProvider {
             return;
         }
         switch (key) {
+            case LLM_PROVIDER -> requireValidProvider(key, value);
             case LLM_BASE_URL, APP_WEB_BASE_URL -> requireUrl(key, value);
             case LLM_REQUEST_TIMEOUT_SECONDS -> requirePositiveInt(key, value);
             case MAIL_PORT -> requirePort(key, value);
@@ -191,6 +206,14 @@ public class AppSettingService implements LlmConfigProvider {
             default -> {
                 // その他の項目(APIキー・ホスト名・モデル名等)は形式チェックを行わない。
             }
+        }
+    }
+
+    private void requireValidProvider(String key, String value) {
+        try {
+            AiProvider.fromString(value);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(key + " はOLLAMA/OPENAI/CLAUDEのいずれかを指定してください", e);
         }
     }
 
@@ -273,6 +296,23 @@ public class AppSettingService implements LlmConfigProvider {
         return Long.parseLong(resolve(LLM_REQUEST_TIMEOUT_SECONDS));
     }
 
+    /** 未設定(空文字)はOPENAIにフォールバックする(既存の環境変数既定値がOpenAIのため)。 */
+    @Transactional(readOnly = true)
+    public AiProvider getLlmProvider() {
+        AiProvider provider = AiProvider.fromString(resolve(LLM_PROVIDER));
+        return provider != null ? provider : AiProvider.OPENAI;
+    }
+
+    @Transactional(readOnly = true)
+    public String getLlmClaudeApiKey() {
+        return resolve(LLM_CLAUDE_API_KEY);
+    }
+
+    @Transactional(readOnly = true)
+    public String getLlmClaudeModel() {
+        return resolve(LLM_CLAUDE_MODEL);
+    }
+
     @Transactional(readOnly = true)
     public String getMailHost() {
         return resolve(MAIL_HOST);
@@ -314,21 +354,41 @@ public class AppSettingService implements LlmConfigProvider {
 
     @Override
     public String baseUrl() {
-        return getLlmBaseUrl();
+        return baseUrlFor(provider());
     }
 
     @Override
     public String apiKey() {
-        return getLlmApiKey();
+        return apiKeyFor(provider());
     }
 
     @Override
     public String defaultModel() {
-        return getLlmModel();
+        return defaultModelFor(provider());
     }
 
     @Override
     public long requestTimeoutSeconds() {
         return getLlmRequestTimeoutSeconds();
+    }
+
+    @Override
+    public AiProvider provider() {
+        return getLlmProvider();
+    }
+
+    @Override
+    public String apiKeyFor(AiProvider provider) {
+        return provider == AiProvider.CLAUDE ? getLlmClaudeApiKey() : getLlmApiKey();
+    }
+
+    @Override
+    public String defaultModelFor(AiProvider provider) {
+        return provider == AiProvider.CLAUDE ? getLlmClaudeModel() : getLlmModel();
+    }
+
+    @Override
+    public String baseUrlFor(AiProvider provider) {
+        return provider == AiProvider.CLAUDE ? LlmClient.ANTHROPIC_BASE_URL : getLlmBaseUrl();
     }
 }

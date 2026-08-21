@@ -41,11 +41,11 @@ class AiControllerTest {
     void generateImagePrompt_認可後にサービスへ委譲する() {
         AiController controller = controller();
         List<PlanChatMessage> history = List.of(new PlanChatMessage("user", "猫の画像がほしい"));
-        when(aiAssistService.generateImagePrompt(1L, history, "もっと可愛くして"))
+        when(aiAssistService.generateImagePrompt(1L, history, "もっと可愛くして", null))
                 .thenReturn(new AiImagePromptResponse("a cute cat, high quality"));
 
         AiImagePromptResponse response =
-                controller.generateImagePrompt(1L, new AiImagePromptRequest(history, "もっと可愛くして"));
+                controller.generateImagePrompt(1L, new AiImagePromptRequest(history, "もっと可愛くして", null));
 
         assertEquals("a cute cat, high quality", response.prompt());
         verify(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
@@ -57,8 +57,10 @@ class AiControllerTest {
         doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
 
         assertThrows(ForbiddenException.class,
-                () -> controller.generateImagePrompt(1L, new AiImagePromptRequest(List.of(), "犬の画像")));
+                () -> controller.generateImagePrompt(1L, new AiImagePromptRequest(List.of(), "犬の画像", null)));
 
-        verify(aiAssistService, never()).generateImagePrompt(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString());
+        verify(aiAssistService, never()).generateImagePrompt(
+                org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
     }
 }

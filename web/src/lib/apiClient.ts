@@ -567,7 +567,7 @@ export interface AiImagePromptResponse {
 
 export function generateImagePromptFromChat(
   projectId: number,
-  data: { history: PlanChatMessage[]; message: string },
+  data: { history: PlanChatMessage[]; message: string; provider?: string },
   actor?: ActorInfo
 ): Promise<AiImagePromptResponse> {
   return apiFetch<AiImagePromptResponse>(`/api/projects/${projectId}/ai/generate-image-prompt`, {
@@ -2370,6 +2370,30 @@ export function selectLlmModel(
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ modelName }),
+    actor,
+  });
+}
+
+/** selectedはプロジェクト単位の上書き値(未設定時null)。resolvedのグローバル既定への解決はサーバー側で行う。 */
+export interface LlmProviderListResponse {
+  availableProviders: string[];
+  selected: string | null;
+}
+
+export function listLlmProvider(projectId: number, actor?: ActorInfo): Promise<LlmProviderListResponse> {
+  return apiFetch<LlmProviderListResponse>(`/api/projects/${projectId}/ai-models/llm/provider`, { actor });
+}
+
+/** provider未指定(空文字)はプロジェクト単位の上書きを解除し、グローバル既定へ戻す。 */
+export function selectLlmProvider(
+  projectId: number,
+  provider: string,
+  actor?: ActorInfo
+): Promise<LlmProviderListResponse> {
+  return apiFetch<LlmProviderListResponse>(`/api/projects/${projectId}/ai-models/llm/provider/selection`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider: provider || null }),
     actor,
   });
 }

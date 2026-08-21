@@ -48,6 +48,8 @@ import {
   runBulkOperationUpload,
   listLlmModels,
   selectLlmModel,
+  listLlmProvider,
+  selectLlmProvider,
   listComfyUiCheckpoints,
   selectComfyUiCheckpoint,
   installComfyUiCheckpoint,
@@ -77,6 +79,7 @@ import {
   StatusComparisonPage,
   PluginThemeStatus,
   LlmModelListResponse,
+  LlmProviderListResponse,
   ComfyUiCheckpointListResponse,
   GenerationJobDetail,
   GeneratedImageSummary,
@@ -856,6 +859,28 @@ export async function selectLlmModelAction(
   return {};
 }
 
+export async function fetchLlmProviderAction(projectId: number): Promise<LlmProviderListResponse> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  return listLlmProvider(projectId, actor);
+}
+
+export async function selectLlmProviderAction(
+  projectId: number,
+  provider: string
+): Promise<{ error?: string }> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    await selectLlmProvider(projectId, provider, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+  revalidatePath(`/projects/${projectId}`);
+  return {};
+}
+
 export async function fetchComfyUiCheckpointsAction(projectId: number): Promise<ComfyUiCheckpointListResponse> {
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };
@@ -938,7 +963,7 @@ export async function generateProjectImagesAction(
 
 export async function generateImagePromptAction(
   projectId: number,
-  data: { history: PlanChatMessage[]; message: string }
+  data: { history: PlanChatMessage[]; message: string; provider?: string }
 ): Promise<{ prompt?: string; error?: string }> {
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };

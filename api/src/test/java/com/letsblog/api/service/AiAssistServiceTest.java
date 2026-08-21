@@ -1,6 +1,7 @@
 package com.letsblog.api.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.letsblog.api.ai.AiProvider;
 import com.letsblog.api.ai.BraveSearchResult;
 import com.letsblog.api.ai.ComfyUiClient;
 import com.letsblog.api.ai.ComfyUiGenerationParams;
@@ -228,9 +229,9 @@ class AiAssistServiceTest {
     void draft_検索成功時はsourcesを含み検索結果をプロンプトへ付加する() {
         when(webSearchService.searchSafely(anyString())).thenReturn(
                 WebSearchOutcome.success(List.of(new BraveSearchResult("Title", "Desc", "https://example.com"))));
-        when(llmClient.generate(anyString())).thenReturn("生成結果");
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("生成結果");
 
-        AiDraftResponse response = service.draft(new AiDraftRequest("draft", "AIブログについて"));
+        AiDraftResponse response = service.draft(new AiDraftRequest("draft", "AIブログについて", null));
 
         assertEquals("生成結果", response.result());
         assertEquals(1, response.sources().size());
@@ -238,16 +239,16 @@ class AiAssistServiceTest {
         assertNull(response.searchNote());
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture());
+        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture(), any(), any());
         assertTrue(promptCaptor.getValue().contains("参考のWeb検索結果"));
     }
 
     @Test
     void draft_検索失敗時はsourcesが空でsearchNoteが設定される() {
         when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.failure("APIキー未設定"));
-        when(llmClient.generate(anyString())).thenReturn("生成結果");
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("生成結果");
 
-        AiDraftResponse response = service.draft(new AiDraftRequest("draft", "AIブログについて"));
+        AiDraftResponse response = service.draft(new AiDraftRequest("draft", "AIブログについて", null));
 
         assertEquals(List.of(), response.sources());
         assertEquals("Web検索を利用できなかったため、出典なしで生成しています", response.searchNote());
@@ -256,9 +257,9 @@ class AiAssistServiceTest {
     @Test
     void draft_検索成功だが0件の場合はその旨のsearchNoteになる() {
         when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.success(List.of()));
-        when(llmClient.generate(anyString())).thenReturn("生成結果");
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("生成結果");
 
-        AiDraftResponse response = service.draft(new AiDraftRequest("draft", "AIブログについて"));
+        AiDraftResponse response = service.draft(new AiDraftRequest("draft", "AIブログについて", null));
 
         assertEquals(List.of(), response.sources());
         assertEquals("関連する検索結果が見つかりませんでした", response.searchNote());
@@ -267,20 +268,20 @@ class AiAssistServiceTest {
     @Test
     void draft_不正なmodeは例外() {
         org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
-                () -> service.draft(new AiDraftRequest("invalid", "text")));
+                () -> service.draft(new AiDraftRequest("invalid", "text", null)));
     }
 
     @Test
     void generateSection_本文モードは直前の文脈を含むプロンプトを組み立てる() {
         when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.failure("未設定"));
-        when(llmClient.generate(anyString())).thenReturn("セクション本文");
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("セクション本文");
 
         AiSectionResponse response = service.generateSection(
-                new AiSectionRequest("body", "導入部", "前の段落の文脈", "記事タイトル", null, null, null));
+                new AiSectionRequest("body", "導入部", "前の段落の文脈", "記事タイトル", null, null, null, null));
 
         assertEquals("セクション本文", response.result());
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture());
+        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture(), any(), any());
         assertTrue(promptCaptor.getValue().contains("前の段落の文脈"));
         assertTrue(promptCaptor.getValue().contains("記事タイトル"));
         assertTrue(promptCaptor.getValue().contains("導入部"));
@@ -290,17 +291,17 @@ class AiAssistServiceTest {
     void generateSection_リード文モードは出典を含めて返す() {
         when(webSearchService.searchSafely(anyString())).thenReturn(
                 WebSearchOutcome.success(List.of(new BraveSearchResult("Title", "Desc", "https://example.com"))));
-        when(llmClient.generate(anyString())).thenReturn("リード文");
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("リード文");
 
         AiSectionResponse response = service.generateSection(
-                new AiSectionRequest("lead", null, null, "記事タイトル", List.of("導入", "本編", "まとめ"), null, null));
+                new AiSectionRequest("lead", null, null, "記事タイトル", List.of("導入", "本編", "まとめ"), null, null, null));
 
         assertEquals("リード文", response.result());
         assertEquals(1, response.sources().size());
         assertNull(response.searchNote());
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture());
+        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture(), any(), any());
         assertTrue(promptCaptor.getValue().contains("導入"));
         assertTrue(promptCaptor.getValue().contains("まとめ"));
     }
@@ -308,15 +309,15 @@ class AiAssistServiceTest {
     @Test
     void generateSection_サブセクション考慮モードは見出しとサブセクション一覧を含むプロンプトを組み立てる() {
         when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.failure("未設定"));
-        when(llmClient.generate(anyString())).thenReturn("セクションリード文");
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("セクションリード文");
 
         AiSectionResponse response = service.generateSection(
                 new AiSectionRequest("lead-subsections", "第2章 実装編", null, "記事タイトル",
-                        List.of("設計", "実装", "テスト"), null, null));
+                        List.of("設計", "実装", "テスト"), null, null, null));
 
         assertEquals("セクションリード文", response.result());
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture());
+        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture(), any(), any());
         assertTrue(promptCaptor.getValue().contains("第2章 実装編"));
         assertTrue(promptCaptor.getValue().contains("設計"));
         assertTrue(promptCaptor.getValue().contains("テスト"));
@@ -325,18 +326,18 @@ class AiAssistServiceTest {
     @Test
     void generateSection_messageが指定されると壁打ち形式のプロンプトを組み立てる() {
         when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.failure("未設定"));
-        when(llmClient.generate(anyString())).thenReturn("再生成された本文");
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("再生成された本文");
 
         List<PlanChatMessage> history = List.of(
                 new PlanChatMessage("assistant", "1回目の生成結果"));
 
         AiSectionResponse response = service.generateSection(
                 new AiSectionRequest("body", "導入部", "前の段落の文脈", "記事タイトル", null,
-                        history, "もっと短くして"));
+                        history, "もっと短くして", null));
 
         assertEquals("再生成された本文", response.result());
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture());
+        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture(), any(), any());
         String prompt = promptCaptor.getValue();
         assertTrue(prompt.contains("System:"));
         assertTrue(prompt.contains("1回目の生成結果"));
@@ -347,23 +348,25 @@ class AiAssistServiceTest {
     @Test
     void generateSection_不正なmodeは例外() {
         org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
-                () -> service.generateSection(new AiSectionRequest("invalid", "見出し", null, null, null, null, null)));
+                () -> service.generateSection(
+                        new AiSectionRequest("invalid", "見出し", null, null, null, null, null, null)));
     }
 
     @Test
     void generateImagePrompt_プロジェクトの選択モデルでシステムプロンプトと履歴を含めて生成する() {
         when(llmModelService.getSelectedModel(1L)).thenReturn("llama3");
-        when(llmClient.generate(anyString(), org.mockito.ArgumentMatchers.eq("llama3")))
+        when(llmClient.generate(anyString(), org.mockito.ArgumentMatchers.eq("llama3"), any()))
                 .thenReturn("a cute cat, studio lighting, high quality");
 
         List<PlanChatMessage> history = List.of(new PlanChatMessage("user", "猫の画像がほしい"));
 
-        AiImagePromptResponse response = service.generateImagePrompt(1L, history, "もっと可愛くして");
+        AiImagePromptResponse response = service.generateImagePrompt(1L, history, "もっと可愛くして", null);
 
         assertEquals("a cute cat, studio lighting, high quality", response.prompt());
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture(), org.mockito.ArgumentMatchers.eq("llama3"));
+        org.mockito.Mockito.verify(llmClient)
+                .generate(promptCaptor.capture(), org.mockito.ArgumentMatchers.eq("llama3"), any());
         String prompt = promptCaptor.getValue();
         assertTrue(prompt.contains("System:"));
         assertTrue(prompt.contains("猫の画像がほしい"));
@@ -374,20 +377,34 @@ class AiAssistServiceTest {
     @Test
     void generateImagePrompt_履歴がnullでも生成できる() {
         when(llmModelService.getSelectedModel(2L)).thenReturn("llama3");
-        when(llmClient.generate(anyString(), anyString())).thenReturn("a mountain landscape");
+        when(llmClient.generate(anyString(), anyString(), any())).thenReturn("a mountain landscape");
 
-        AiImagePromptResponse response = service.generateImagePrompt(2L, null, "山の風景");
+        AiImagePromptResponse response = service.generateImagePrompt(2L, null, "山の風景", null);
 
         assertEquals("a mountain landscape", response.prompt());
     }
 
     @Test
+    void generateImagePrompt_リクエストのproviderがプロジェクト既定より優先される() {
+        when(llmModelService.getSelectedModel(1L)).thenReturn("llama3");
+        when(llmClient.generate(anyString(), anyString(), org.mockito.ArgumentMatchers.eq(AiProvider.CLAUDE)))
+                .thenReturn("a cute cat");
+
+        AiImagePromptResponse response = service.generateImagePrompt(1L, List.of(), "猫", "claude");
+
+        assertEquals("a cute cat", response.prompt());
+        org.mockito.Mockito.verify(llmClient)
+                .generate(anyString(), anyString(), org.mockito.ArgumentMatchers.eq(AiProvider.CLAUDE));
+        org.mockito.Mockito.verify(llmModelService, org.mockito.Mockito.never()).getSelectedProvider(any());
+    }
+
+    @Test
     void generateImagePrompt_LLM呼び出し失敗時はジョブを失敗として記録し例外を伝播する() {
         when(llmModelService.getSelectedModel(1L)).thenReturn("llama3");
-        when(llmClient.generate(anyString(), anyString()))
+        when(llmClient.generate(anyString(), anyString(), any()))
                 .thenThrow(new RuntimeException("接続エラー"));
 
         org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
-                () -> service.generateImagePrompt(1L, List.of(), "犬の画像"));
+                () -> service.generateImagePrompt(1L, List.of(), "犬の画像", null));
     }
 }

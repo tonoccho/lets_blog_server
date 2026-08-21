@@ -1,5 +1,6 @@
 package com.letsblog.api.config;
 
+import com.letsblog.api.ai.AiServiceException;
 import com.letsblog.api.cms.CmsApiException;
 import com.letsblog.api.cms.agent.AgentOperationException;
 import com.letsblog.api.cms.ssh.SshOperationException;
@@ -168,6 +169,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(CmsApiException.class)
     public ResponseEntity<Map<String, String>> handleCmsApiException(CmsApiException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(AiServiceException.class)
+    public ResponseEntity<Map<String, String>> handleAiServiceException(AiServiceException e) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
     }
 

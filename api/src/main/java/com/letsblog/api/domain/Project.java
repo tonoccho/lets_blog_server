@@ -80,6 +80,13 @@ public class Project {
     @Column(name = "llm_model", length = 255)
     private String llmModel;
 
+    /**
+     * プロジェクト単位のAIプロバイダー既定値(OLLAMA/OPENAI/CLAUDE、issue #530)。未設定時はシステム設定の
+     * 既定プロバイダーにフォールバックする(LlmModelService#getSelectedProvider)。
+     */
+    @Column(name = "llm_provider", length = 20)
+    private String llmProvider;
+
     @Column(name = "comfyui_checkpoint", length = 255)
     private String comfyuiCheckpoint;
 

@@ -309,6 +309,8 @@ export interface AiSectionParams {
   subsectionHeadings?: string[];
   history?: PlanChatMessage[];
   message?: string;
+  /** OLLAMA/OPENAI/CLAUDEのいずれか(任意)。未指定時はサーバー側の既定プロバイダーを使う(issue #530)。 */
+  provider?: string;
 }
 
 /** 画像生成のパラメータ。automatic1111相当の項目をそのまま受け渡す。 */
@@ -497,13 +499,14 @@ export async function askAi(
   apiKey: string,
   mode: 'draft' | 'proofread' | 'summarize',
   text: string,
-  actor?: Actor
+  actor?: Actor,
+  provider?: string
 ): Promise<AiDraftResult> {
   return requestJson(serverUrl, '/api/ai/draft', {
     label: 'askAi',
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
-    createBody: jsonBody({ mode, text }),
+    createBody: jsonBody({ mode, text, provider: provider || undefined }),
     // 生成結果を返すだけでサーバー状態を変えないため、再試行して差し支えない。
     retryable: true,
   }, schemas.AiGenerationResultSchema);
@@ -535,13 +538,14 @@ export async function suggestTags(
   serverUrl: string,
   apiKey: string,
   text: string,
-  actor?: Actor
+  actor?: Actor,
+  provider?: string
 ): Promise<AiTagsResult> {
   return requestJson(serverUrl, '/api/ai/tags', {
     label: 'suggestTags',
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
-    createBody: jsonBody({ text }),
+    createBody: jsonBody({ text, provider: provider || undefined }),
     retryable: true,
   }, schemas.AiTagsResultSchema);
 }
@@ -684,14 +688,15 @@ export async function generateImagePrompt(
   projectId: number,
   history: PlanChatMessage[],
   message: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  provider?: string
 ): Promise<AiImagePromptResult> {
   return requestJson(serverUrl, `/api/projects/${projectId}/ai/generate-image-prompt`, {
     label: 'generateImagePrompt',
     signal,
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
-    createBody: jsonBody({ history, message }),
+    createBody: jsonBody({ history, message, provider: provider || undefined }),
     retryable: true,
   }, schemas.AiImagePromptResultSchema);
 }

@@ -16,6 +16,22 @@ export function getServerUrl(): string {
   return (url ?? 'https://localhost').replace(/\/+$/, '');
 }
 
+/**
+ * 現在選択中のAIプロバイダー(OLLAMA/OPENAI/CLAUDE)。空文字は「サーバー(プロジェクト/システム設定)の
+ * 既定値を使う」ことを意味する(issue #530)。「Let's Blog: Switch AI Provider」コマンドや各AI画面の
+ * プロバイダー選択メニューから随時切り替えられるようにするための設定値。
+ */
+export function getConfiguredAiProvider(): string {
+  return vscode.workspace.getConfiguration('letsBlog').get<string>('aiProvider', '');
+}
+
+/** アクティブなワークスペースのuser設定へAIプロバイダーを書き込む。 */
+export async function setConfiguredAiProvider(provider: string): Promise<void> {
+  await vscode.workspace
+    .getConfiguration('letsBlog')
+    .update('aiProvider', provider, vscode.ConfigurationTarget.Global);
+}
+
 /** SecretStorageに保管されたAPIキーを取得する。未設定ならundefined。 */
 export async function getApiKey(context: vscode.ExtensionContext): Promise<string | undefined> {
   return context.secrets.get(API_KEY_SECRET);
