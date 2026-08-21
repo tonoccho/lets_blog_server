@@ -10,6 +10,7 @@ import {
   updateProjectImageGenerationPromptDefaults,
   updateProjectImageGenerationSizeDefaults,
   updateProjectArticleImageResizeDefault,
+  updateProjectImageContentFilterSettings,
   setProjectGithubToken,
   clearProjectGithubToken,
   setProjectBraveSearchApiKey,
@@ -256,6 +257,35 @@ export async function updateImageGenerationSizeDefaultsAction(
   try {
     await updateProjectImageGenerationSizeDefaults(
       projectId, defaultGeneratedImageWidth, defaultGeneratedImageHeight, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  return { success: true };
+}
+
+export interface UpdateImageContentFilterSettingsState {
+  error?: string;
+  success?: boolean;
+}
+
+/** 画像生成の不適切コンテンツフィルタ設定(issue #532)。未チェックのカテゴリは禁止解除として保存する。 */
+export async function updateImageContentFilterSettingsAction(
+  projectId: number,
+  _prevState: UpdateImageContentFilterSettingsState,
+  formData: FormData
+): Promise<UpdateImageContentFilterSettingsState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const blockSexualContent = formData.get("blockSexualContent") === "on";
+  const blockViolentContent = formData.get("blockViolentContent") === "on";
+  const blockDiscriminatoryContent = formData.get("blockDiscriminatoryContent") === "on";
+
+  try {
+    await updateProjectImageContentFilterSettings(
+      projectId, blockSexualContent, blockViolentContent, blockDiscriminatoryContent, actor);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

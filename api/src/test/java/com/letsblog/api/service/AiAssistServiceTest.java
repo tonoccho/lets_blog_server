@@ -77,7 +77,7 @@ class AiAssistServiceTest {
         service = new AiAssistService(llmClient, llmModelService, comfyUiClient, chatGptImageClient,
                 imageModelService, comfyUiModelService,
                 generatedImageStorageService, generatedImageRepository, generationJobRepository,
-                webSearchService, new ObjectMapper(), projectService);
+                webSearchService, new ObjectMapper(), projectService, new ProhibitedContentFilterService());
 
         lenient().when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.COMFYUI);
         lenient().when(projectService.resolveDefaultNegativePrompt(any()))
@@ -146,6 +146,32 @@ class AiAssistServiceTest {
         ArgumentCaptor<GeneratedImage> captor = ArgumentCaptor.forClass(GeneratedImage.class);
         org.mockito.Mockito.verify(generatedImageRepository).save(captor.capture());
         assertEquals("COMFYUI", captor.getValue().getProvider());
+    }
+
+    @Test
+    void generateImage_性的コンテンツ禁止設定が有効で該当キーワードを含む場合は例外をスローしプロバイダーを呼ばない() {
+        when(comfyUiModelService.getSelectedCheckpointOrGlobalDefault(any())).thenReturn("checkpoint.safetensors");
+        when(projectService.resolveBlockSexualContent(any())).thenReturn(true);
+
+        AiImageRequest request = AiImageRequest.withDefaults("nude portrait");
+        org.junit.jupiter.api.Assertions.assertThrows(
+                ProhibitedContentException.class, () -> service.generateImage(request));
+
+        org.mockito.Mockito.verifyNoInteractions(comfyUiClient);
+        org.mockito.Mockito.verifyNoInteractions(chatGptImageClient);
+    }
+
+    @Test
+    void generateImage_不適切コンテンツ設定が無効なら該当キーワードを含んでいても生成できる() {
+        when(comfyUiClient.generateImage(any())).thenReturn(
+                List.of(new ComfyUiImage("a.png", new byte[]{1}, "image/png")));
+        when(comfyUiModelService.getSelectedCheckpointOrGlobalDefault(any())).thenReturn("checkpoint.safetensors");
+        when(projectService.resolveBlockSexualContent(any())).thenReturn(false);
+
+        AiImageBatchResponse response = service.generateImage(AiImageRequest.withDefaults("nude portrait"));
+
+        assertEquals(1, response.images().size());
+        org.mockito.Mockito.verify(comfyUiClient).generateImage(any());
     }
 
     @Test

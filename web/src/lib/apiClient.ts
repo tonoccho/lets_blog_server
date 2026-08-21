@@ -1286,6 +1286,9 @@ export interface Project {
   defaultGeneratedImageWidth: number | null;
   defaultGeneratedImageHeight: number | null;
   defaultArticleImageLongEdgePx: number | null;
+  blockSexualContent: boolean | null;
+  blockViolentContent: boolean | null;
+  blockDiscriminatoryContent: boolean | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1388,6 +1391,22 @@ export function updateProjectArticleImageResizeDefault(
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ defaultArticleImageLongEdgePx }),
+    actor,
+  });
+}
+
+/** 画像生成時の不適切コンテンツ(性的/暴力的/差別的表現)のカテゴリ別禁止設定(issue #532)。 */
+export function updateProjectImageContentFilterSettings(
+  id: number,
+  blockSexualContent: boolean,
+  blockViolentContent: boolean,
+  blockDiscriminatoryContent: boolean,
+  actor?: ActorInfo
+): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}/image-content-filter-settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ blockSexualContent, blockViolentContent, blockDiscriminatoryContent }),
     actor,
   });
 }

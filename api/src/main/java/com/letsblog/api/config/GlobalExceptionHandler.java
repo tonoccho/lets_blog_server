@@ -25,6 +25,7 @@ import com.letsblog.api.service.InvalidTokenException;
 import com.letsblog.api.service.InvalidTotpCodeException;
 import com.letsblog.api.service.MailTemplateNotFoundException;
 import com.letsblog.api.service.PostNotFoundException;
+import com.letsblog.api.service.ProhibitedContentException;
 import com.letsblog.api.service.ProjectNotFoundException;
 import com.letsblog.api.service.ProjectUserNotFoundException;
 import com.letsblog.api.service.ProvisioningException;
@@ -139,6 +140,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(InvalidPlantUmlTagException.class)
     public ResponseEntity<Map<String, String>> handleInvalidPlantUmlTag(InvalidPlantUmlTagException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
+    }
+
+    @ExceptionHandler(ProhibitedContentException.class)
+    public ResponseEntity<Map<String, String>> handleProhibitedContent(ProhibitedContentException e) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
     }
 
