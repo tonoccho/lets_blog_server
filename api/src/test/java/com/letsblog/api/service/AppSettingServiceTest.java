@@ -43,6 +43,7 @@ class AppSettingServiceTest {
                 repository, credentialCipher, adminAuthorizationService,
                 "env-llm-key", "https://api.openai.com/v1", "gpt-4o-mini", "gpt-4o-mini,gpt-4o", "120",
                 "OPENAI", "env-claude-key", "claude-3-5-haiku-20241022",
+                "http://localhost:8188", "env-image-key", "https://api.openai.com/v1",
                 "smtp.example.com", "587", "env-user", "env-pass", "noreply@example.com",
                 "http://localhost:3000", "10");
     }
@@ -110,6 +111,58 @@ class AppSettingServiceTest {
         assertEquals("env-claude-key", service.apiKeyFor(AiProvider.CLAUDE));
         assertEquals("env-llm-key", service.apiKeyFor(AiProvider.OPENAI));
         assertEquals("env-llm-key", service.apiKeyFor(AiProvider.OLLAMA));
+    }
+
+    @Test
+    void getComfyUiBaseUrl_DB設定があればそれを優先する() {
+        AppSettingService service = service();
+        when(repository.findById("comfyui_base_url")).thenReturn(Optional.of(
+                new SystemSetting("comfyui_base_url", credentialCipher.encrypt("https://comfyui.example.com"))));
+
+        assertEquals("https://comfyui.example.com", service.getComfyUiBaseUrl());
+        assertEquals("https://comfyui.example.com", service.comfyUiBaseUrl());
+    }
+
+    @Test
+    void getComfyUiBaseUrl_DB未設定なら環境変数値にフォールバックする() {
+        AppSettingService service = service();
+        when(repository.findById("comfyui_base_url")).thenReturn(Optional.empty());
+
+        assertEquals("http://localhost:8188", service.getComfyUiBaseUrl());
+    }
+
+    @Test
+    void chatGptApiKey_ImageGenerationConfigProviderとして委譲する() {
+        AppSettingService service = service();
+        when(repository.findById("image_llm_api_key")).thenReturn(Optional.of(
+                new SystemSetting("image_llm_api_key", credentialCipher.encrypt("db-image-key"))));
+
+        assertEquals("db-image-key", service.chatGptApiKey());
+        assertEquals("db-image-key", service.getImageLlmApiKey());
+    }
+
+    @Test
+    void chatGptBaseUrl_DB未設定なら環境変数値にフォールバックする() {
+        AppSettingService service = service();
+        when(repository.findById("image_llm_base_url")).thenReturn(Optional.empty());
+
+        assertEquals("https://api.openai.com/v1", service.chatGptBaseUrl());
+    }
+
+    @Test
+    void updateSettings_comfyui_base_urlはURL形式でなければ例外() {
+        AppSettingService service = service();
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.updateSettings(Map.of("comfyui_base_url", "not-a-url")));
+    }
+
+    @Test
+    void updateSettings_image_llm_base_urlはURL形式でなければ例外() {
+        AppSettingService service = service();
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.updateSettings(Map.of("image_llm_base_url", "not-a-url")));
     }
 
     @Test

@@ -33,9 +33,25 @@ class ComfyUiClientTest {
 
     @BeforeEach
     void setUp() {
-        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+        RestClient.Builder builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
-        client = new ComfyUiClient(builder, "default-checkpoint.safetensors");
+        ImageGenerationConfigProvider configProvider = new ImageGenerationConfigProvider() {
+            @Override
+            public String comfyUiBaseUrl() {
+                return BASE_URL;
+            }
+
+            @Override
+            public String chatGptApiKey() {
+                return "";
+            }
+
+            @Override
+            public String chatGptBaseUrl() {
+                return "";
+            }
+        };
+        client = new ComfyUiClient(builder, configProvider, "default-checkpoint.safetensors");
     }
 
     private void expectPromptAndHistory(String expectedBodyFragment) {

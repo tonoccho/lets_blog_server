@@ -57,7 +57,8 @@ public class GeneratedImageController {
         return images.stream()
                 .map(image -> new GeneratedImageSummaryResponse(
                         image.getId(), image.getProjectId(), image.getPrompt(),
-                        image.getCheckpoint(), image.getCreatedAt(), parseTags(image.getTagsJson())))
+                        image.getCheckpoint(), image.getCreatedAt(), parseTags(image.getTagsJson()),
+                        image.getProvider()))
                 .filter(response -> tag == null || response.tags().stream().anyMatch(t -> t.equalsIgnoreCase(tag)))
                 .toList();
     }
@@ -101,7 +102,7 @@ public class GeneratedImageController {
                 image.getSamplerName(), image.getScheduler(), image.getSeed(),
                 image.getWidth(), image.getHeight(), image.getBatchSize(), image.getCheckpoint(),
                 image.getLoraName(), image.getLoraWeight() != null ? image.getLoraWeight().doubleValue() : null,
-                image.getCreatedAt(), parseTags(image.getTagsJson()));
+                image.getCreatedAt(), parseTags(image.getTagsJson()), image.getProvider());
     }
 
     private GeneratedImage findOrThrow(Long id) {

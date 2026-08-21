@@ -1,6 +1,7 @@
 package com.letsblog.api.service;
 
 import com.letsblog.api.ai.AiProvider;
+import com.letsblog.api.ai.ImageGenerationConfigProvider;
 import com.letsblog.api.ai.LlmClient;
 import com.letsblog.api.ai.LlmConfigProvider;
 import com.letsblog.api.aop.AuditLog;
@@ -29,7 +30,7 @@ import java.util.Map;
  * (LlmConfigProvider)で参照される(aiパッケージがserviceパッケージへ依存しないようにするため)。
  */
 @Service
-public class AppSettingService implements LlmConfigProvider {
+public class AppSettingService implements LlmConfigProvider, ImageGenerationConfigProvider {
 
     static final String LLM_API_KEY = "llm_api_key";
     static final String LLM_BASE_URL = "llm_base_url";
@@ -39,6 +40,9 @@ public class AppSettingService implements LlmConfigProvider {
     static final String LLM_PROVIDER = "llm_provider";
     static final String LLM_CLAUDE_API_KEY = "llm_claude_api_key";
     static final String LLM_CLAUDE_MODEL = "llm_claude_model";
+    static final String COMFYUI_BASE_URL = "comfyui_base_url";
+    static final String IMAGE_LLM_API_KEY = "image_llm_api_key";
+    static final String IMAGE_LLM_BASE_URL = "image_llm_base_url";
     static final String MAIL_HOST = "mail_host";
     static final String MAIL_PORT = "mail_port";
     static final String MAIL_USERNAME = "mail_username";
@@ -74,6 +78,9 @@ public class AppSettingService implements LlmConfigProvider {
             new Definition(LLM_REQUEST_TIMEOUT_SECONDS, "LLM リクエストタイムアウト(秒)", false),
             new Definition(LLM_CLAUDE_API_KEY, "Claude APIキー", true),
             new Definition(LLM_CLAUDE_MODEL, "Claude 既定モデル", false),
+            new Definition(COMFYUI_BASE_URL, "ComfyUI ベースURL", false),
+            new Definition(IMAGE_LLM_API_KEY, "画像生成 APIキー(ChatGPT用)", true),
+            new Definition(IMAGE_LLM_BASE_URL, "画像生成 ベースURL(ChatGPT用)", false),
             new Definition(MAIL_HOST, "メール送信ホスト", false),
             new Definition(MAIL_PORT, "メール送信ポート", false),
             new Definition(MAIL_USERNAME, "メール送信ユーザー名", false),
@@ -99,6 +106,9 @@ public class AppSettingService implements LlmConfigProvider {
             @Value("${app.llm-provider:OPENAI}") String llmProviderEnvDefault,
             @Value("${app.llm-claude-api-key:}") String llmClaudeApiKeyEnvDefault,
             @Value("${app.llm-claude-model:claude-3-5-haiku-20241022}") String llmClaudeModelEnvDefault,
+            @Value("${app.comfyui-base-url}") String comfyUiBaseUrlEnvDefault,
+            @Value("${app.image-llm-api-key:}") String imageLlmApiKeyEnvDefault,
+            @Value("${app.image-llm-base-url:https://api.openai.com/v1}") String imageLlmBaseUrlEnvDefault,
             @Value("${spring.mail.host}") String mailHostEnvDefault,
             @Value("${spring.mail.port}") String mailPortEnvDefault,
             @Value("${spring.mail.username:}") String mailUsernameEnvDefault,
@@ -118,6 +128,9 @@ public class AppSettingService implements LlmConfigProvider {
         defaults.put(LLM_PROVIDER, llmProviderEnvDefault);
         defaults.put(LLM_CLAUDE_API_KEY, llmClaudeApiKeyEnvDefault);
         defaults.put(LLM_CLAUDE_MODEL, llmClaudeModelEnvDefault);
+        defaults.put(COMFYUI_BASE_URL, comfyUiBaseUrlEnvDefault);
+        defaults.put(IMAGE_LLM_API_KEY, imageLlmApiKeyEnvDefault);
+        defaults.put(IMAGE_LLM_BASE_URL, imageLlmBaseUrlEnvDefault);
         defaults.put(MAIL_HOST, mailHostEnvDefault);
         defaults.put(MAIL_PORT, mailPortEnvDefault);
         defaults.put(MAIL_USERNAME, mailUsernameEnvDefault);
@@ -198,7 +211,7 @@ public class AppSettingService implements LlmConfigProvider {
         }
         switch (key) {
             case LLM_PROVIDER -> requireValidProvider(key, value);
-            case LLM_BASE_URL, APP_WEB_BASE_URL -> requireUrl(key, value);
+            case LLM_BASE_URL, APP_WEB_BASE_URL, COMFYUI_BASE_URL, IMAGE_LLM_BASE_URL -> requireUrl(key, value);
             case LLM_REQUEST_TIMEOUT_SECONDS -> requirePositiveInt(key, value);
             case MAIL_PORT -> requirePort(key, value);
             case APP_MAIL_FROM -> requireEmailLike(key, value);
@@ -314,6 +327,21 @@ public class AppSettingService implements LlmConfigProvider {
     }
 
     @Transactional(readOnly = true)
+    public String getComfyUiBaseUrl() {
+        return resolve(COMFYUI_BASE_URL);
+    }
+
+    @Transactional(readOnly = true)
+    public String getImageLlmApiKey() {
+        return resolve(IMAGE_LLM_API_KEY);
+    }
+
+    @Transactional(readOnly = true)
+    public String getImageLlmBaseUrl() {
+        return resolve(IMAGE_LLM_BASE_URL);
+    }
+
+    @Transactional(readOnly = true)
     public String getMailHost() {
         return resolve(MAIL_HOST);
     }
@@ -390,5 +418,20 @@ public class AppSettingService implements LlmConfigProvider {
     @Override
     public String baseUrlFor(AiProvider provider) {
         return provider == AiProvider.CLAUDE ? LlmClient.ANTHROPIC_BASE_URL : getLlmBaseUrl();
+    }
+
+    @Override
+    public String comfyUiBaseUrl() {
+        return getComfyUiBaseUrl();
+    }
+
+    @Override
+    public String chatGptApiKey() {
+        return getImageLlmApiKey();
+    }
+
+    @Override
+    public String chatGptBaseUrl() {
+        return getImageLlmBaseUrl();
     }
 }

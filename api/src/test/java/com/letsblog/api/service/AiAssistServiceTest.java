@@ -3,10 +3,12 @@ package com.letsblog.api.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.ai.AiProvider;
 import com.letsblog.api.ai.BraveSearchResult;
+import com.letsblog.api.ai.ChatGptImageClient;
 import com.letsblog.api.ai.ComfyUiClient;
 import com.letsblog.api.ai.ComfyUiGenerationParams;
 import com.letsblog.api.ai.ComfyUiImage;
 import com.letsblog.api.ai.GeneratedImageStorageService;
+import com.letsblog.api.ai.ImageProvider;
 import com.letsblog.api.ai.LlmClient;
 import com.letsblog.api.domain.GeneratedImage;
 import com.letsblog.api.domain.GenerationJob;
@@ -52,6 +54,10 @@ class AiAssistServiceTest {
     @Mock
     private ComfyUiClient comfyUiClient;
     @Mock
+    private ChatGptImageClient chatGptImageClient;
+    @Mock
+    private ImageModelService imageModelService;
+    @Mock
     private ComfyUiModelService comfyUiModelService;
     @Mock
     private GeneratedImageStorageService generatedImageStorageService;
@@ -68,10 +74,12 @@ class AiAssistServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AiAssistService(llmClient, llmModelService, comfyUiClient, comfyUiModelService,
+        service = new AiAssistService(llmClient, llmModelService, comfyUiClient, chatGptImageClient,
+                imageModelService, comfyUiModelService,
                 generatedImageStorageService, generatedImageRepository, generationJobRepository,
                 webSearchService, new ObjectMapper(), projectService);
 
+        lenient().when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.COMFYUI);
         lenient().when(projectService.resolveDefaultNegativePrompt(any()))
                 .thenReturn("low quality, blurry, watermark, text");
         lenient().when(projectService.resolveDefaultQualityPrompt(any())).thenReturn("");
@@ -105,7 +113,39 @@ class AiAssistServiceTest {
         assertEquals(4, response.images().size());
         assertEquals("a.png", response.images().get(0).fileName());
         assertEquals("d.png", response.images().get(3).fileName());
+        org.mockito.Mockito.verify(comfyUiClient).generateImage(any());
+        org.mockito.Mockito.verifyNoInteractions(chatGptImageClient);
         org.mockito.Mockito.verify(generatedImageRepository, org.mockito.Mockito.times(4)).save(any());
+    }
+
+    @Test
+    void generateImage_プロジェクトの画像生成AIがCHATGPTの場合はChatGptImageClientを使いproviderをCHATGPTで保存する() {
+        when(imageModelService.getSelectedProvider(1L)).thenReturn(ImageProvider.CHATGPT);
+        when(chatGptImageClient.generateImage(any())).thenReturn(
+                List.of(new ComfyUiImage("chatgpt_1.png", new byte[]{1}, "image/png")));
+
+        AiImageRequest request = new AiImageRequest(
+                "a cat", null, null, null, null, null, null, null, null, null, null, null, null, 1L);
+        service.generateImage(request);
+
+        org.mockito.Mockito.verify(chatGptImageClient).generateImage(any());
+        org.mockito.Mockito.verifyNoInteractions(comfyUiClient);
+        ArgumentCaptor<GeneratedImage> captor = ArgumentCaptor.forClass(GeneratedImage.class);
+        org.mockito.Mockito.verify(generatedImageRepository).save(captor.capture());
+        assertEquals("CHATGPT", captor.getValue().getProvider());
+    }
+
+    @Test
+    void generateImage_プロジェクトの画像生成AIが未選択の場合はComfyUiClientを使いproviderをCOMFYUIで保存する() {
+        when(comfyUiClient.generateImage(any())).thenReturn(
+                List.of(new ComfyUiImage("a.png", new byte[]{1}, "image/png")));
+        when(comfyUiModelService.getSelectedCheckpointOrGlobalDefault(any())).thenReturn("checkpoint.safetensors");
+
+        service.generateImage(AiImageRequest.withDefaults("a cat"));
+
+        ArgumentCaptor<GeneratedImage> captor = ArgumentCaptor.forClass(GeneratedImage.class);
+        org.mockito.Mockito.verify(generatedImageRepository).save(captor.capture());
+        assertEquals("COMFYUI", captor.getValue().getProvider());
     }
 
     @Test

@@ -10,7 +10,9 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.util.UriComponentsBuilder;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -19,27 +21,31 @@ import java.util.UUID;
  * ComfyUIのAPI(/prompt, /history, /view, /object_info)を呼び出し、txt2img画像を生成するクライアント。
  * ComfyUIは非同期のキュー方式のため、/prompt投入後 /history をポーリングして完了を待つ。
  * 処理完了後はVRAMをクリアし、メモリリークを防止する。
+ * baseUrlはImageGenerationConfigProviderから呼び出しの都度取得する(issue #531でWeb管理画面の
+ * システム設定から変更可能になったため、LlmClientと同様に構築時に固定値として保持しない)。
  */
 @Component
 @Slf4j
-public class ComfyUiClient {
+public class ComfyUiClient implements ImageGenerationProvider {
 
     private static final int POLL_INTERVAL_MS = 1000;
     private static final int MAX_POLL_ATTEMPTS = 120;
 
     private final RestClient client;
+    private final ImageGenerationConfigProvider configProvider;
     private final String checkpointName;
 
     @Autowired
-    public ComfyUiClient(@Value("${app.comfyui-base-url}") String baseUrl,
+    public ComfyUiClient(ImageGenerationConfigProvider configProvider,
                           @Value("${app.comfyui-checkpoint}") String checkpointName) {
-        this(RestClient.builder().baseUrl(baseUrl), checkpointName);
+        this(RestClient.builder(), configProvider, checkpointName);
     }
 
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
-    ComfyUiClient(RestClient.Builder builder, String checkpointName) {
+    ComfyUiClient(RestClient.Builder builder, ImageGenerationConfigProvider configProvider, String checkpointName) {
         LegacyJacksonRestClientConfig.preferJackson2(builder);
         this.client = builder.build();
+        this.configProvider = configProvider;
         this.checkpointName = checkpointName;
     }
 
@@ -48,7 +54,9 @@ public class ComfyUiClient {
      * 複数ファイルを出力するため、historyのoutputs.images配列を全件取得して1枚ずつ/viewで取得する。
      * 処理完了後にVRAMをクリアする。
      */
+    @Override
     public List<ComfyUiImage> generateImage(ComfyUiGenerationParams params) {
+        String baseUrl = configProvider.comfyUiBaseUrl();
         String clientId = UUID.randomUUID().toString();
         ObjectNode workflow = buildWorkflow(params);
 
@@ -59,7 +67,7 @@ public class ComfyUiClient {
         String promptId;
         try {
             JsonNode submitResponse = client.post()
-                    .uri("/prompt")
+                    .uri(baseUrl + "/prompt")
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(requestBody)
                     .retrieve()
@@ -69,33 +77,36 @@ public class ComfyUiClient {
             throw new AiServiceException("ComfyUIへのジョブ投入に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
         }
 
-        List<JsonNode> outputImages = pollForResult(promptId);
+        List<JsonNode> outputImages = pollForResult(baseUrl, promptId);
         List<ComfyUiImage> images = new ArrayList<>();
         for (JsonNode outputImage : outputImages) {
             String filename = outputImage.get("filename").asText();
             String subfolder = outputImage.has("subfolder") ? outputImage.get("subfolder").asText() : "";
             String type = outputImage.has("type") ? outputImage.get("type").asText() : "output";
 
+            URI viewUri = UriComponentsBuilder.fromUriString(baseUrl)
+                    .path("/view")
+                    .queryParam("filename", filename)
+                    .queryParam("subfolder", subfolder)
+                    .queryParam("type", type)
+                    .build()
+                    .toUri();
             byte[] data = client.get()
-                    .uri(uriBuilder -> uriBuilder.path("/view")
-                            .queryParam("filename", filename)
-                            .queryParam("subfolder", subfolder)
-                            .queryParam("type", type)
-                            .build())
+                    .uri(viewUri)
                     .retrieve()
                     .body(byte[].class);
 
             images.add(new ComfyUiImage(filename, data, "image/png"));
         }
 
-        clearMemory();
+        clearMemory(baseUrl);
 
         return images;
     }
 
-    private List<JsonNode> pollForResult(String promptId) {
+    private List<JsonNode> pollForResult(String baseUrl, String promptId) {
         for (int attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
-            JsonNode history = client.get().uri("/history/" + promptId).retrieve().body(JsonNode.class);
+            JsonNode history = client.get().uri(baseUrl + "/history/" + promptId).retrieve().body(JsonNode.class);
             JsonNode entry = history != null ? history.get(promptId) : null;
 
             if (entry != null && entry.has("outputs")) {
@@ -123,7 +134,9 @@ public class ComfyUiClient {
      */
     public List<String> listCheckpoints() {
         try {
-            JsonNode response = client.get().uri("/object_info/CheckpointLoaderSimple").retrieve().body(JsonNode.class);
+            JsonNode response = client.get()
+                    .uri(configProvider.comfyUiBaseUrl() + "/object_info/CheckpointLoaderSimple")
+                    .retrieve().body(JsonNode.class);
             List<String> checkpoints = new ArrayList<>();
             if (response == null) {
                 return checkpoints;
@@ -144,7 +157,9 @@ public class ComfyUiClient {
      */
     public List<String> listSamplers() {
         try {
-            JsonNode response = client.get().uri("/object_info/KSampler").retrieve().body(JsonNode.class);
+            JsonNode response = client.get()
+                    .uri(configProvider.comfyUiBaseUrl() + "/object_info/KSampler")
+                    .retrieve().body(JsonNode.class);
             List<String> samplers = new ArrayList<>();
             if (response == null) {
                 return samplers;
@@ -165,7 +180,9 @@ public class ComfyUiClient {
      */
     public List<String> listSchedulers() {
         try {
-            JsonNode response = client.get().uri("/object_info/KSampler").retrieve().body(JsonNode.class);
+            JsonNode response = client.get()
+                    .uri(configProvider.comfyUiBaseUrl() + "/object_info/KSampler")
+                    .retrieve().body(JsonNode.class);
             List<String> schedulers = new ArrayList<>();
             if (response == null) {
                 return schedulers;
@@ -187,7 +204,9 @@ public class ComfyUiClient {
      */
     public List<String> listLoras() {
         try {
-            JsonNode response = client.get().uri("/object_info/LoraLoader").retrieve().body(JsonNode.class);
+            JsonNode response = client.get()
+                    .uri(configProvider.comfyUiBaseUrl() + "/object_info/LoraLoader")
+                    .retrieve().body(JsonNode.class);
             List<String> loras = new ArrayList<>();
             if (response == null) {
                 return loras;
@@ -288,12 +307,12 @@ public class ComfyUiClient {
         return graph;
     }
 
-    private void clearMemory() {
+    private void clearMemory(String baseUrl) {
         try {
             log.debug("Clearing ComfyUI VRAM memory after generation completion");
             ObjectNode body = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
             client.post()
-                    .uri("/api/interrupt")
+                    .uri(baseUrl + "/api/interrupt")
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
                     .retrieve()

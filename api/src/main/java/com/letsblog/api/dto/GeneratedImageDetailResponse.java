@@ -20,6 +20,7 @@ public record GeneratedImageDetailResponse(
         String loraName,
         Double loraWeight,
         LocalDateTime createdAt,
-        List<String> tags
+        List<String> tags,
+        String provider
 ) {
 }
