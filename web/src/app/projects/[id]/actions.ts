@@ -50,6 +50,8 @@ import {
   selectLlmModel,
   listLlmProvider,
   selectLlmProvider,
+  listImageProvider,
+  selectImageProvider,
   listComfyUiCheckpoints,
   selectComfyUiCheckpoint,
   installComfyUiCheckpoint,
@@ -80,6 +82,7 @@ import {
   PluginThemeStatus,
   LlmModelListResponse,
   LlmProviderListResponse,
+  ImageProviderListResponse,
   ComfyUiCheckpointListResponse,
   GenerationJobDetail,
   GeneratedImageSummary,
@@ -874,6 +877,28 @@ export async function selectLlmProviderAction(
 
   try {
     await selectLlmProvider(projectId, provider, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+  revalidatePath(`/projects/${projectId}`);
+  return {};
+}
+
+export async function fetchImageProviderAction(projectId: number): Promise<ImageProviderListResponse> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  return listImageProvider(projectId, actor);
+}
+
+export async function selectImageProviderAction(
+  projectId: number,
+  provider: string
+): Promise<{ error?: string }> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    await selectImageProvider(projectId, provider, actor);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

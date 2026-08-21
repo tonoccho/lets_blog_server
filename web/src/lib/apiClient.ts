@@ -45,6 +45,7 @@ export interface GeneratedImageSummary {
   checkpoint: string;
   createdAt: string;
   tags: string[];
+  provider: string;
 }
 
 export interface GeneratedImageDetail extends GeneratedImageSummary {
@@ -2391,6 +2392,30 @@ export function selectLlmProvider(
   actor?: ActorInfo
 ): Promise<LlmProviderListResponse> {
   return apiFetch<LlmProviderListResponse>(`/api/projects/${projectId}/ai-models/llm/provider/selection`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider: provider || null }),
+    actor,
+  });
+}
+
+/** selectedはプロジェクト単位の上書き値(未設定時null)。未設定時はComfyUIとして扱われる。 */
+export interface ImageProviderListResponse {
+  availableProviders: string[];
+  selected: string | null;
+}
+
+export function listImageProvider(projectId: number, actor?: ActorInfo): Promise<ImageProviderListResponse> {
+  return apiFetch<ImageProviderListResponse>(`/api/projects/${projectId}/ai-models/image/provider`, { actor });
+}
+
+/** provider未指定(空文字)はプロジェクト単位の上書きを解除し、ComfyUIへ戻す。 */
+export function selectImageProvider(
+  projectId: number,
+  provider: string,
+  actor?: ActorInfo
+): Promise<ImageProviderListResponse> {
+  return apiFetch<ImageProviderListResponse>(`/api/projects/${projectId}/ai-models/image/provider/selection`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ provider: provider || null }),

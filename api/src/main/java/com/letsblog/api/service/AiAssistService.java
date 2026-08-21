@@ -3,10 +3,13 @@ package com.letsblog.api.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.ai.AiProvider;
+import com.letsblog.api.ai.ChatGptImageClient;
 import com.letsblog.api.ai.ComfyUiClient;
 import com.letsblog.api.ai.ComfyUiGenerationParams;
 import com.letsblog.api.ai.ComfyUiImage;
 import com.letsblog.api.ai.GeneratedImageStorageService;
+import com.letsblog.api.ai.ImageGenerationProvider;
+import com.letsblog.api.ai.ImageProvider;
 import com.letsblog.api.ai.LlmClient;
 import com.letsblog.api.domain.GeneratedImage;
 import com.letsblog.api.domain.GenerationJob;
@@ -131,6 +134,8 @@ public class AiAssistService {
     private final LlmClient llmClient;
     private final LlmModelService llmModelService;
     private final ComfyUiClient comfyUiClient;
+    private final ChatGptImageClient chatGptImageClient;
+    private final ImageModelService imageModelService;
     private final ComfyUiModelService comfyUiModelService;
     private final GeneratedImageStorageService generatedImageStorageService;
     private final GeneratedImageRepository generatedImageRepository;
@@ -141,6 +146,8 @@ public class AiAssistService {
 
     public AiAssistService(LlmClient llmClient, LlmModelService llmModelService,
                            ComfyUiClient comfyUiClient,
+                           ChatGptImageClient chatGptImageClient,
+                           ImageModelService imageModelService,
                            ComfyUiModelService comfyUiModelService,
                            GeneratedImageStorageService generatedImageStorageService,
                            GeneratedImageRepository generatedImageRepository,
@@ -150,6 +157,8 @@ public class AiAssistService {
         this.llmClient = llmClient;
         this.llmModelService = llmModelService;
         this.comfyUiClient = comfyUiClient;
+        this.chatGptImageClient = chatGptImageClient;
+        this.imageModelService = imageModelService;
         this.comfyUiModelService = comfyUiModelService;
         this.generatedImageStorageService = generatedImageStorageService;
         this.generatedImageRepository = generatedImageRepository;
@@ -160,10 +169,14 @@ public class AiAssistService {
     }
 
     public AiImageBatchResponse generateImage(AiImageRequest request) {
-        GenerationJob job = startJob("comfyui_image", Map.of("prompt", request.prompt()));
+        ImageProvider provider = imageModelService.getSelectedProvider(request.projectId());
+        ImageGenerationProvider generator = provider == ImageProvider.CHATGPT ? chatGptImageClient : comfyUiClient;
+        GenerationJob job = startJob(
+                provider == ImageProvider.CHATGPT ? "chatgpt_image" : "comfyui_image",
+                Map.of("prompt", request.prompt()));
         try {
             ComfyUiGenerationParams params = resolveParams(request);
-            List<ComfyUiImage> images = comfyUiClient.generateImage(params);
+            List<ComfyUiImage> images = generator.generateImage(params);
             // バッチ内の全画像は同じprompt/negativePromptから生成されるため、タグ提案は1回で済ませて使い回す。
             String tagsJson = suggestImageTagsJson(params.prompt());
             List<AiImageResponse> responses = new ArrayList<>();
@@ -171,7 +184,7 @@ public class AiAssistService {
                 String base64 = Base64.getEncoder().encodeToString(image.data());
                 String filePath = generatedImageStorageService.store(request.projectId(), image.data());
                 GeneratedImage saved = generatedImageRepository.save(
-                        toEntity(request.projectId(), params, filePath, image.mimeType(), tagsJson));
+                        toEntity(request.projectId(), params, filePath, image.mimeType(), tagsJson, provider));
                 responses.add(new AiImageResponse(saved.getId(), image.fileName(), base64, image.mimeType()));
             }
             completeJob(job, Map.of("count", String.valueOf(responses.size())));
@@ -288,9 +301,11 @@ public class AiAssistService {
     }
 
     private GeneratedImage toEntity(
-            Long projectId, ComfyUiGenerationParams params, String filePath, String mimeType, String tagsJson) {
+            Long projectId, ComfyUiGenerationParams params, String filePath, String mimeType, String tagsJson,
+            ImageProvider provider) {
         GeneratedImage entity = new GeneratedImage();
         entity.setProjectId(projectId);
+        entity.setProvider(provider.name());
         entity.setPrompt(params.prompt());
         entity.setNegativePrompt(params.negativePrompt());
         entity.setSteps(params.steps());

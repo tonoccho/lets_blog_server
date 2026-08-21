@@ -84,6 +84,8 @@ app:
   comfyui-base-url: ${COMFYUI_BASE_URL:http://localhost:8188}
   comfyui-checkpoint: ${COMFYUI_CHECKPOINT:v1-5-pruned-emaonly.safetensors}
   comfyui-models-path: ${COMFYUI_MODELS_PATH:/app/data/comfyui-models}
+  image-llm-api-key: ${IMAGE_LLM_API_KEY:}
+  image-llm-base-url: ${IMAGE_LLM_BASE_URL:https://api.openai.com/v1}
   brave-search-base-url: ${BRAVE_SEARCH_BASE_URL:https://api.search.brave.com}
   brave-search-api-key: ${BRAVE_SEARCH_API_KEY:}
   google-analytics-data-api-base-url: ${GOOGLE_ANALYTICS_DATA_API_BASE_URL:https://analyticsdata.googleapis.com}

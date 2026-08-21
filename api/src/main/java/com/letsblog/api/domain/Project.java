@@ -90,6 +90,13 @@ public class Project {
     @Column(name = "comfyui_checkpoint", length = 255)
     private String comfyuiCheckpoint;
 
+    /**
+     * プロジェクト単位の画像生成AI既定値(COMFYUI/CHATGPT、issue #531)。未設定時はCOMFYUIとして扱う
+     * (ImageModelService#getSelectedProvider、既存の動作を維持するため)。
+     */
+    @Column(name = "image_provider", length = 20)
+    private String imageProvider;
+
     @Column(name = "github_token_encrypted", columnDefinition = "VARBINARY(1024)")
     private byte[] githubTokenEncrypted;
 
