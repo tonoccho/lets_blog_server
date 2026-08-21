@@ -2,6 +2,7 @@ package com.letsblog.api.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.letsblog.api.ai.AiProvider;
 import com.letsblog.api.ai.ComfyUiClient;
 import com.letsblog.api.ai.ComfyUiGenerationParams;
 import com.letsblog.api.ai.ComfyUiImage;
@@ -205,15 +206,22 @@ public class AiAssistService {
      * チャットメッセージ(と任意の履歴)から、ComfyUIへ渡す画像生成プロンプト(英語)をLLMで生成する。
      * ArticlePlanService.buildChatPromptと同様に「System+履歴+User」形式でプロンプトを組み立てる。
      */
-    public AiImagePromptResponse generateImagePrompt(Long projectId, List<PlanChatMessage> history, String message) {
+    public AiImagePromptResponse generateImagePrompt(
+            Long projectId, List<PlanChatMessage> history, String message, String providerOverride) {
         GenerationJob job = startJob("llm_image_prompt", Map.of(
                 "projectId", String.valueOf(projectId),
                 "message", message
         ));
         try {
             String model = llmModelService.getSelectedModel(projectId);
+            // リクエストでプロバイダーが明示された場合はそれを優先し、なければプロジェクト単位の既定へ
+            // フォールバックする(issue #530)。
+            AiProvider provider = AiProvider.fromString(providerOverride);
+            if (provider == null) {
+                provider = llmModelService.getSelectedProvider(projectId);
+            }
             String prompt = buildImagePromptChat(history, message);
-            String result = llmClient.generate(prompt, model);
+            String result = llmClient.generate(prompt, model, provider);
             completeJob(job, Map.of("result", result));
             return new AiImagePromptResponse(result);
         } catch (RuntimeException e) {
@@ -313,7 +321,7 @@ public class AiAssistService {
         try {
             WebSearchOutcome searchOutcome = webSearchService.searchSafely(buildSearchQuery(request.text()));
             String prompt = WebSearchService.formatForPrompt(searchOutcome) + template.formatted(request.text());
-            String result = llmClient.generate(prompt);
+            String result = llmClient.generate(prompt, null, AiProvider.fromString(request.provider()));
             completeJob(job, Map.of("result", result));
             return new AiDraftResponse(result, WebSearchService.toSources(searchOutcome),
                     WebSearchService.buildSearchNote(searchOutcome));
@@ -360,7 +368,7 @@ public class AiAssistService {
                     ? buildSectionChatPrompt(basePrompt, request.history(), request.message(), searchOutcome)
                     : WebSearchService.formatForPrompt(searchOutcome) + basePrompt;
 
-            String result = llmClient.generate(prompt);
+            String result = llmClient.generate(prompt, null, AiProvider.fromString(request.provider()));
             completeJob(job, Map.of("result", result));
             return new AiSectionResponse(result, WebSearchService.toSources(searchOutcome),
                     WebSearchService.buildSearchNote(searchOutcome));
@@ -416,7 +424,8 @@ public class AiAssistService {
     public AiTagsResponse suggestTags(AiTagsRequest request) {
         GenerationJob job = startJob("llm_tags", Map.of("text", request.text()));
         try {
-            String raw = llmClient.generate(TAGS_PROMPT_TEMPLATE.formatted(request.text()));
+            String raw = llmClient.generate(
+                    TAGS_PROMPT_TEMPLATE.formatted(request.text()), null, AiProvider.fromString(request.provider()));
             AiTagsResponse parsed = parseTagsResponse(raw);
             completeJob(job, Map.of("result", raw));
             return parsed;

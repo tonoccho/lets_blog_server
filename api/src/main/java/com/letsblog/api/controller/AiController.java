@@ -61,6 +61,6 @@ public class AiController {
     public AiImagePromptResponse generateImagePrompt(
             @PathVariable Long projectId, @Valid @RequestBody AiImagePromptRequest request) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        return aiAssistService.generateImagePrompt(projectId, request.history(), request.message());
+        return aiAssistService.generateImagePrompt(projectId, request.history(), request.message(), request.provider());
     }
 }

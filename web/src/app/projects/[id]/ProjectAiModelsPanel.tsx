@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { LlmModelListResponse, ComfyUiCheckpointListResponse } from "@/lib/apiClient";
-import { fetchLlmModelsAction, fetchComfyUiCheckpointsAction } from "./actions";
+import type { LlmModelListResponse, LlmProviderListResponse, ComfyUiCheckpointListResponse } from "@/lib/apiClient";
+import { fetchLlmModelsAction, fetchLlmProviderAction, fetchComfyUiCheckpointsAction } from "./actions";
 import { LlmModelPanel } from "./LlmModelPanel";
+import { LlmProviderPanel } from "./LlmProviderPanel";
 import { ComfyUiCheckpointTable } from "./ComfyUiCheckpointTable";
 
 type Tab = "LLM" | "COMFYUI";
@@ -18,6 +19,7 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
   // タブを初めて開いたときにクライアント側から取得する(初期表示でLLM/ComfyUI双方への
   // 疎通を待たせないため。一括管理パネルのプラグイン/テーマタブと同じ方針)。
   const [llmData, setLlmData] = useState<LlmModelListResponse | null>(null);
+  const [llmProviderData, setLlmProviderData] = useState<LlmProviderListResponse | null>(null);
   const [comfyuiData, setComfyuiData] = useState<ComfyUiCheckpointListResponse | null>(null);
   const [loadingTab, setLoadingTab] = useState<Tab | null>(null);
 
@@ -26,6 +28,7 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
     if (nextTab === "LLM" && llmData === null) {
       setLoadingTab(nextTab);
       setLlmData(await fetchLlmModelsAction(projectId));
+      setLlmProviderData(await fetchLlmProviderAction(projectId));
       setLoadingTab(null);
     } else if (nextTab === "COMFYUI" && comfyuiData === null) {
       setLoadingTab(nextTab);
@@ -37,6 +40,7 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
   // 初回マウント時に、デフォルト表示のLLMタブ分だけ取得しておく
   useEffect(() => {
     fetchLlmModelsAction(projectId).then(setLlmData);
+    fetchLlmProviderAction(projectId).then(setLlmProviderData);
   }, [projectId]);
 
   return (
@@ -62,7 +66,10 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
 
       {tab === "LLM" &&
         (llmData ? (
-          <LlmModelPanel projectId={projectId} initialData={llmData} />
+          <div className="space-y-4">
+            {llmProviderData && <LlmProviderPanel projectId={projectId} initialData={llmProviderData} />}
+            <LlmModelPanel projectId={projectId} initialData={llmData} />
+          </div>
         ) : (
           <TabLoading loading={loadingTab === "LLM"} />
         ))}

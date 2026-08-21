@@ -51,6 +51,8 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState<string | undefined>(undefined);
+  // このチャットで使うAIプロバイダー(空文字はプロジェクト/グローバル既定を使用、issue #530)。
+  const [chatProvider, setChatProvider] = useState("");
 
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [galleryImages, setGalleryImages] = useState<GeneratedImageSummary[] | null>(null);
@@ -160,7 +162,11 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
     setChatInput("");
     setChatLoading(true);
     setChatError(undefined);
-    const result = await generateImagePromptAction(projectId, { history: chatHistory, message: chatMessage });
+    const result = await generateImagePromptAction(projectId, {
+      history: chatHistory,
+      message: chatMessage,
+      provider: chatProvider || undefined,
+    });
     setChatLoading(false);
     if (result.error) {
       setChatError(result.error);
@@ -305,6 +311,20 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
             </div>
             {chatOpen && (
               <>
+                <label className="flex items-center gap-2 text-xs text-gray-600">
+                  <span>AIプロバイダー</span>
+                  <select
+                    value={chatProvider}
+                    onChange={(e) => setChatProvider(e.target.value)}
+                    disabled={chatLoading}
+                    className="rounded border p-1 text-xs disabled:bg-gray-100"
+                  >
+                    <option value="">(プロジェクト/グローバル既定を使用)</option>
+                    <option value="OLLAMA">Ollama</option>
+                    <option value="OPENAI">OpenAI (ChatGPT)</option>
+                    <option value="CLAUDE">Claude (Anthropic)</option>
+                  </select>
+                </label>
                 <div className="max-h-48 space-y-2 overflow-y-auto rounded bg-white p-2">
                   {chatHistory.length === 0 ? (
                     <p className="text-xs text-gray-500">

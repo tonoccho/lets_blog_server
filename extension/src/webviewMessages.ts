@@ -59,7 +59,7 @@ export type ImageGenInboundMessage =
   // 数MBの文字列をWebview境界で往復させると、その都度コピーが作られるため。
   | WebviewMessageBase<'setAsEyecatch'>
   | WebviewMessageBase<'addAsAsset'>
-  | (WebviewMessageBase<'sendChat'> & { history: api.PlanChatMessage[]; message: string });
+  | (WebviewMessageBase<'sendChat'> & { history: api.PlanChatMessage[]; message: string; provider?: string });
 
 export type ImageGenOutboundCommand =
   | 'options'
@@ -86,6 +86,8 @@ export interface SectionGenInitPayload {
   articleTitle: string;
   selectedText: string;
   sectionContext: SectionContext;
+  /** letsBlog.aiProviderの現在値(issue #530)。空文字は「サーバー既定値を使用」。 */
+  defaultAiProvider: string;
 }
 
 // --- Create Article パネル ---
