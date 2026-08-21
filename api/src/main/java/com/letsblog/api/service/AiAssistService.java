@@ -13,6 +13,8 @@ import com.letsblog.api.ai.ImageProvider;
 import com.letsblog.api.ai.LlmClient;
 import com.letsblog.api.domain.GeneratedImage;
 import com.letsblog.api.domain.GenerationJob;
+import com.letsblog.api.dto.AiAskRequest;
+import com.letsblog.api.dto.AiAskResponse;
 import com.letsblog.api.dto.AiDraftRequest;
 import com.letsblog.api.dto.AiDraftResponse;
 import com.letsblog.api.dto.AiImageBatchResponse;
@@ -128,6 +130,16 @@ public class AiAssistService {
             {"tags": ["タグ1", "タグ2", "タグ3"]}
 
             画像生成プロンプト:
+            %s
+            """;
+
+    /** issue #526: エディタ右クリックメニュー「Ask AI」からの質問に、Web検索結果を踏まえて回答する。 */
+    private static final String ASK_PROMPT_TEMPLATE = """
+            あなたはブログ執筆アシスタントです。以下の質問についてWeb検索結果を参考にしながら調査し、
+            日本語で簡潔に要約してください。説明や前置きは不要で、要約文のみをMarkdown形式で出力してください。
+            出典URLは要約文に含めないでください(別途一覧として表示します)。
+
+            質問:
             %s
             """;
 
@@ -331,6 +343,25 @@ public class AiAssistService {
         entity.setMimeType(mimeType);
         entity.setTagsJson(tagsJson);
         return entity;
+    }
+
+    /**
+     * エディタ右クリックメニュー「Ask AI」からの質問に、Web検索結果を踏まえて回答する(issue #526)。
+     */
+    public AiAskResponse ask(AiAskRequest request) {
+        GenerationJob job = startJob("llm_ask", Map.of("question", request.question()));
+        try {
+            WebSearchOutcome searchOutcome = webSearchService.searchSafely(buildSearchQuery(request.question()));
+            String prompt = WebSearchService.formatForPrompt(searchOutcome)
+                    + ASK_PROMPT_TEMPLATE.formatted(request.question());
+            String result = llmClient.generate(prompt, null, AiProvider.fromString(request.provider()));
+            completeJob(job, Map.of("result", result));
+            return new AiAskResponse(result, WebSearchService.toSources(searchOutcome),
+                    WebSearchService.buildSearchNote(searchOutcome));
+        } catch (RuntimeException e) {
+            failJob(job, e);
+            throw e;
+        }
     }
 
     public AiDraftResponse draft(AiDraftRequest request) {

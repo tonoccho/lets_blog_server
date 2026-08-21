@@ -1,5 +1,7 @@
 package com.letsblog.api.controller;
 
+import com.letsblog.api.dto.AiAskRequest;
+import com.letsblog.api.dto.AiAskResponse;
 import com.letsblog.api.dto.AiDraftRequest;
 import com.letsblog.api.dto.AiDraftResponse;
 import com.letsblog.api.dto.AiImageBatchResponse;
@@ -35,6 +37,12 @@ public class AiController {
     @PostMapping("/api/ai/draft")
     public AiDraftResponse draft(@Valid @RequestBody AiDraftRequest request) {
         return aiAssistService.draft(request);
+    }
+
+    /** issue #526: エディタ右クリックメニュー「Ask AI」からの質問に、Web検索結果を踏まえて回答する。 */
+    @PostMapping("/api/ai/ask")
+    public AiAskResponse ask(@Valid @RequestBody AiAskRequest request) {
+        return aiAssistService.ask(request);
     }
 
     @PostMapping("/api/ai/tags")

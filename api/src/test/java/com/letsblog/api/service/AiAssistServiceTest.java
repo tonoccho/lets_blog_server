@@ -12,6 +12,8 @@ import com.letsblog.api.ai.ImageProvider;
 import com.letsblog.api.ai.LlmClient;
 import com.letsblog.api.domain.GeneratedImage;
 import com.letsblog.api.domain.GenerationJob;
+import com.letsblog.api.dto.AiAskRequest;
+import com.letsblog.api.dto.AiAskResponse;
 import com.letsblog.api.dto.AiDraftRequest;
 import com.letsblog.api.dto.AiDraftResponse;
 import com.letsblog.api.dto.AiImageBatchResponse;
@@ -289,6 +291,47 @@ class AiAssistServiceTest {
 
         assertEquals("worst quality", response.defaultNegativePrompt());
         assertEquals("high quality, detailed", response.defaultQualityPrompt());
+    }
+
+    @Test
+    void ask_検索成功時はsourcesを含み検索結果をプロンプトへ付加する() {
+        when(webSearchService.searchSafely(anyString())).thenReturn(
+                WebSearchOutcome.success(List.of(new BraveSearchResult("Title", "Desc", "https://example.com"))));
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("回答結果");
+
+        AiAskResponse response = service.ask(new AiAskRequest("Next.js 16の新機能は?", null));
+
+        assertEquals("回答結果", response.result());
+        assertEquals(1, response.sources().size());
+        assertEquals("https://example.com", response.sources().get(0).url());
+        assertNull(response.searchNote());
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture(), any(), any());
+        assertTrue(promptCaptor.getValue().contains("参考のWeb検索結果"));
+        assertTrue(promptCaptor.getValue().contains("Next.js 16の新機能は?"));
+    }
+
+    @Test
+    void ask_検索失敗時はsourcesが空でsearchNoteが設定される() {
+        when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.failure("APIキー未設定"));
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("回答結果");
+
+        AiAskResponse response = service.ask(new AiAskRequest("質問", null));
+
+        assertEquals(List.of(), response.sources());
+        assertEquals("Web検索を利用できなかったため、出典なしで生成しています", response.searchNote());
+    }
+
+    @Test
+    void ask_検索成功だが0件の場合はその旨のsearchNoteになる() {
+        when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.success(List.of()));
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("回答結果");
+
+        AiAskResponse response = service.ask(new AiAskRequest("質問", null));
+
+        assertEquals(List.of(), response.sources());
+        assertEquals("関連する検索結果が見つかりませんでした", response.searchNote());
     }
 
     @Test

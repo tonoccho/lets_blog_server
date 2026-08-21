@@ -234,6 +234,7 @@ async function cachedRequestJson<S extends ZodType>(
  */
 import type {
   AcceptStructureResult,
+  AiAskResult,
   AiDraftResult,
   AiImagePromptResult,
   AiImageResult,
@@ -259,6 +260,7 @@ import type {
 export type {
   Actor,
   AcceptStructureResult,
+  AiAskResult,
   AiDraftResult,
   AiImagePromptResult,
   AiImageResult,
@@ -508,6 +510,28 @@ export async function askAi(
     headers: buildHeaders(apiKey, actor),
     createBody: jsonBody({ mode, text, provider: provider || undefined }),
     // 生成結果を返すだけでサーバー状態を変えないため、再試行して差し支えない。
+    retryable: true,
+  }, schemas.AiGenerationResultSchema);
+}
+
+/**
+ * エディタ右クリックメニュー「Ask AI」からの質問に、Web検索結果を踏まえて回答する(issue #526)。
+ * @param signal 利用者によるキャンセル用。中断時はCancelledErrorが投げられる。
+ */
+export async function askAiSearch(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  question: string,
+  provider?: string,
+  signal?: AbortSignal
+): Promise<AiAskResult> {
+  return requestJson(serverUrl, '/api/ai/ask', {
+    label: 'askAiSearch',
+    signal,
+    method: 'POST',
+    headers: buildHeaders(apiKey, actor),
+    createBody: jsonBody({ question, provider: provider || undefined }),
     retryable: true,
   }, schemas.AiGenerationResultSchema);
 }
