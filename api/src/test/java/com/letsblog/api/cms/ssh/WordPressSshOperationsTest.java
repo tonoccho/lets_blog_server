@@ -412,6 +412,33 @@ class WordPressSshOperationsTest {
     }
 
     @Test
+    void createOrUpdatePost_実在確認が投稿不在と断定できない理由で失敗しても更新コマンドを実行する() {
+        // issue #529: 一時的なSSH/wp-cliの不調など「投稿が実在しない」と断定できない理由で
+        // 実在確認(post get)が失敗した場合にfalse(実在しない)扱いにすると、本来更新すべき
+        // 投稿が新規作成され、同じスラッグの記事が再投稿のたびに重複投稿されてしまう。
+        // 実在しないと断定できない失敗は安全側(実在する)とみなし、post updateを実行すべき。
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(fail("Error: The site is currently being updated."))
+                .thenReturn(ok("{\"guid\":\"https://example.com/?p=42\",\"post_status\":\"draft\"}"));
+        when(executor.exec(any(SshConnectionParams.class), any(), notNull())).thenReturn(ok(""));
+
+        PostResult result = operations.createOrUpdatePost(creds(), postContent(), "42");
+
+        assertEquals("42", result.id());
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), notNull());
+        assertEquals(true, commandCaptor.getValue().contains("post update 42 -"));
+    }
+
+    @Test
+    void postExists_無効な投稿IDの日本語エラーは実在しないと判定する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(fail("Warning: 無効な投稿 ID です。"));
+
+        assertEquals(false, operations.postExists(creds(), "38"));
+    }
+
+    @Test
     void createOrUpdatePost_テーマのPHP警告に隠れたwp_cliのエラーを抽出して例外メッセージにする() {
         String themeNoise = """
                 Warning: Trying to access array offset on null in /home4/x/public_html/wp-content/themes/jinr/a.php on line 401
