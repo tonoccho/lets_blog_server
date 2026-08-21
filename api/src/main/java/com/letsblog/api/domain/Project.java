@@ -91,6 +91,20 @@ public class Project {
     private String comfyuiCheckpoint;
 
     /**
+     * 画像生成時の不適切コンテンツフィルタ設定(issue #532)。カテゴリごとに生成を禁止するかどうかを保持する。
+     * 未設定(null)時はアプリ全体のデフォルト(application.yml、既定は全カテゴリ禁止=true)にフォールバックする
+     * (ProjectService#resolveBlockSexualContent等)。
+     */
+    @Column(name = "block_sexual_content")
+    private Boolean blockSexualContent;
+
+    @Column(name = "block_violent_content")
+    private Boolean blockViolentContent;
+
+    @Column(name = "block_discriminatory_content")
+    private Boolean blockDiscriminatoryContent;
+
+    /**
      * プロジェクト単位の画像生成AI既定値(COMFYUI/CHATGPT、issue #531)。未設定時はCOMFYUIとして扱う
      * (ImageModelService#getSelectedProvider、既存の動作を維持するため)。
      */

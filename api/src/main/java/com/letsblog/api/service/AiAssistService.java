@@ -143,6 +143,7 @@ public class AiAssistService {
     private final WebSearchService webSearchService;
     private final ObjectMapper objectMapper;
     private final ProjectService projectService;
+    private final ProhibitedContentFilterService prohibitedContentFilterService;
 
     public AiAssistService(LlmClient llmClient, LlmModelService llmModelService,
                            ComfyUiClient comfyUiClient,
@@ -153,7 +154,8 @@ public class AiAssistService {
                            GeneratedImageRepository generatedImageRepository,
                            GenerationJobRepository generationJobRepository,
                            WebSearchService webSearchService, ObjectMapper objectMapper,
-                           ProjectService projectService) {
+                           ProjectService projectService,
+                           ProhibitedContentFilterService prohibitedContentFilterService) {
         this.llmClient = llmClient;
         this.llmModelService = llmModelService;
         this.comfyUiClient = comfyUiClient;
@@ -166,6 +168,7 @@ public class AiAssistService {
         this.webSearchService = webSearchService;
         this.objectMapper = objectMapper;
         this.projectService = projectService;
+        this.prohibitedContentFilterService = prohibitedContentFilterService;
     }
 
     public AiImageBatchResponse generateImage(AiImageRequest request) {
@@ -176,6 +179,11 @@ public class AiAssistService {
                 Map.of("prompt", request.prompt()));
         try {
             ComfyUiGenerationParams params = resolveParams(request);
+            prohibitedContentFilterService.check(
+                    params.prompt(),
+                    projectService.resolveBlockSexualContent(request.projectId()),
+                    projectService.resolveBlockViolentContent(request.projectId()),
+                    projectService.resolveBlockDiscriminatoryContent(request.projectId()));
             List<ComfyUiImage> images = generator.generateImage(params);
             // バッチ内の全画像は同じprompt/negativePromptから生成されるため、タグ提案は1回で済ませて使い回す。
             String tagsJson = suggestImageTagsJson(params.prompt());

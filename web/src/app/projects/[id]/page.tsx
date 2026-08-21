@@ -23,6 +23,7 @@ import { ProjectAssetGenerationPanel } from "./ProjectAssetGenerationPanel";
 import { ProjectImageGenerationPromptDefaultsForm } from "./ProjectImageGenerationPromptDefaultsForm";
 import { ProjectImageGenerationSizeDefaultsForm } from "./ProjectImageGenerationSizeDefaultsForm";
 import { ProjectArticleImageResizeDefaultForm } from "./ProjectArticleImageResizeDefaultForm";
+import { ProjectImageContentFilterSettingsForm } from "./ProjectImageContentFilterSettingsForm";
 import { ProjectNameForm } from "./ProjectNameForm";
 import { DeleteProjectButton } from "./DeleteProjectButton";
 import { ProjectUserManager } from "./ProjectUserManager";
@@ -156,6 +157,12 @@ export default async function ProjectDetailPage({
           <ProjectArticleImageResizeDefaultForm
             projectId={project.id}
             defaultArticleImageLongEdgePx={project.defaultArticleImageLongEdgePx}
+          />
+          <ProjectImageContentFilterSettingsForm
+            projectId={project.id}
+            blockSexualContent={project.blockSexualContent}
+            blockViolentContent={project.blockViolentContent}
+            blockDiscriminatoryContent={project.blockDiscriminatoryContent}
           />
         </div>
       ),
