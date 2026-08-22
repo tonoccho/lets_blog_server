@@ -11,6 +11,7 @@ Docker Composeでまとめて起動する。クライアントはVSCode拡張機
 ## CI/CD & Quality
 
 [![API Tests and Coverage](https://github.com/tonoccho/lets_blog_server/actions/workflows/api-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/api-test.yml)
+[![Log Writer Tests](https://github.com/tonoccho/lets_blog_server/actions/workflows/log-writer-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/log-writer-test.yml)
 [![Frontend Tests](https://github.com/tonoccho/lets_blog_server/actions/workflows/frontend-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/frontend-test.yml)
 [![Extension Build](https://github.com/tonoccho/lets_blog_server/actions/workflows/extension-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/extension-test.yml)
 
