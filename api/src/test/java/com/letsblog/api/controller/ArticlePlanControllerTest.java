@@ -283,6 +283,25 @@ class ArticlePlanControllerTest {
     }
 
     @Test
+    void listTags_認可後にサービスへ委譲する() {
+        ArticlePlanController controller = controller();
+        when(articlePlanService.listExistingTags(1L)).thenReturn(List.of("Java", "AWS"));
+
+        List<String> result = controller.listTags(1L);
+
+        assertEquals(List.of("Java", "AWS"), result);
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+    }
+
+    @Test
+    void listTags_認可拒否ならForbidden() {
+        ArticlePlanController controller = controller();
+        doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+
+        assertThrows(ForbiddenException.class, () -> controller.listTags(1L));
+    }
+
+    @Test
     void assignIssue_認可後にサービスへ委譲する() {
         ArticlePlanController controller = controller();
         when(articlePlanService.assignIssueToActor(1L, 10L, 42))

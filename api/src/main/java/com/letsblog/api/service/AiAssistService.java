@@ -36,6 +36,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
@@ -156,6 +157,7 @@ public class AiAssistService {
     private final ObjectMapper objectMapper;
     private final ProjectService projectService;
     private final ProhibitedContentFilterService prohibitedContentFilterService;
+    private final ArticlePlanService articlePlanService;
 
     public AiAssistService(LlmClient llmClient, LlmModelService llmModelService,
                            ComfyUiClient comfyUiClient,
@@ -167,7 +169,8 @@ public class AiAssistService {
                            GenerationJobRepository generationJobRepository,
                            WebSearchService webSearchService, ObjectMapper objectMapper,
                            ProjectService projectService,
-                           ProhibitedContentFilterService prohibitedContentFilterService) {
+                           ProhibitedContentFilterService prohibitedContentFilterService,
+                           ArticlePlanService articlePlanService) {
         this.llmClient = llmClient;
         this.llmModelService = llmModelService;
         this.comfyUiClient = comfyUiClient;
@@ -181,6 +184,7 @@ public class AiAssistService {
         this.objectMapper = objectMapper;
         this.projectService = projectService;
         this.prohibitedContentFilterService = prohibitedContentFilterService;
+        this.articlePlanService = articlePlanService;
     }
 
     public AiImageBatchResponse generateImage(AiImageRequest request) {
@@ -478,15 +482,48 @@ public class AiAssistService {
     public AiTagsResponse suggestTags(AiTagsRequest request) {
         GenerationJob job = startJob("llm_tags", Map.of("text", request.text()));
         try {
-            String raw = llmClient.generate(
-                    TAGS_PROMPT_TEMPLATE.formatted(request.text()), null, AiProvider.fromString(request.provider()));
+            List<String> existingTags = request.projectId() != null
+                    ? articlePlanService.listExistingTags(request.projectId())
+                    : List.of();
+            String prompt = buildTagsPrompt(request.text(), existingTags);
+            String raw = llmClient.generate(prompt, null, AiProvider.fromString(request.provider()));
             AiTagsResponse parsed = parseTagsResponse(raw);
+            AiTagsResponse prioritized = prioritizeExistingTags(parsed, existingTags);
             completeJob(job, Map.of("result", raw));
-            return parsed;
+            return prioritized;
         } catch (RuntimeException e) {
             failJob(job, e);
             throw e;
         }
+    }
+
+    /**
+     * 既存タグ一覧がある場合、新しいタグを作る前にまずそちらから選ぶようAIへ指示を追加する(issue #525)。
+     */
+    private String buildTagsPrompt(String text, List<String> existingTags) {
+        String prompt = TAGS_PROMPT_TEMPLATE.formatted(text);
+        if (existingTags.isEmpty()) {
+            return prompt;
+        }
+        return prompt
+                + "\ntagsは新しいタグを作る前に、必ず次の既存タグ一覧の中に記事に合うものがないか確認し、"
+                + "あればそちらを優先して選んでください(一覧にない新しいタグも、本文の内容から必要であれば追加してかまいません): "
+                + String.join(", ", existingTags) + "\n";
+    }
+
+    /**
+     * 既存タグに一致する提案を先頭へ並べ替える(issue #525)。プロンプトでの指示に加えて、
+     * 表示順でも既存タグが優先されることをプログラム側で保証する。
+     */
+    private AiTagsResponse prioritizeExistingTags(AiTagsResponse response, List<String> existingTags) {
+        if (existingTags.isEmpty()) {
+            return response;
+        }
+        List<String> sortedTags = response.tags().stream()
+                .sorted(Comparator.comparing(
+                        tag -> existingTags.stream().noneMatch(existing -> existing.equalsIgnoreCase(tag))))
+                .toList();
+        return new AiTagsResponse(response.categories(), sortedTags);
     }
 
     private AiTagsResponse parseTagsResponse(String raw) {

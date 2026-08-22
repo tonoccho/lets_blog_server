@@ -622,6 +622,43 @@ class ArticlePlanServiceTest {
     }
 
     @Test
+    void listExistingTags_マスターサイトのタグ名一覧を返す() {
+        ArticlePlanService service = service();
+        com.letsblog.api.domain.Project project = new com.letsblog.api.domain.Project();
+        project.setId(1L);
+        project.setMasterEnvironment("test");
+        project.setTestSiteId(5L);
+        com.letsblog.api.domain.Site site = new com.letsblog.api.domain.Site();
+        site.setId(5L);
+        site.setSiteKey("test-site");
+        com.letsblog.api.cms.CmsCredentials.WordPressCredentials credentials =
+                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://example.com", "admin", "secret");
+        com.letsblog.api.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(projectService.resolveMasterSite(project)).thenReturn(site);
+        when(siteService.getCredentials("test-site")).thenReturn(credentials);
+        when(cmsAdapterFactory.resolve(any())).thenReturn(cmsAdapter);
+        when(cmsAdapter.listTagNames(credentials)).thenReturn(List.of("Java", "AWS"));
+
+        List<String> tags = service.listExistingTags(1L);
+
+        assertEquals(List.of("Java", "AWS"), tags);
+    }
+
+    @Test
+    void listExistingTags_マスターサイト未紐付けなら空リストを返す() {
+        ArticlePlanService service = service();
+        com.letsblog.api.domain.Project project = new com.letsblog.api.domain.Project();
+        project.setId(1L);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(projectService.resolveMasterSite(project)).thenReturn(null);
+
+        List<String> tags = service.listExistingTags(1L);
+
+        assertEquals(List.of(), tags);
+    }
+
+    @Test
     void suggestMetadata_不正なJSONの場合はすべて空のレスポンスを返す() {
         ArticlePlanService service = service();
         when(llmClient.generate(anyString(), anyString())).thenReturn("JSONではない応答です");

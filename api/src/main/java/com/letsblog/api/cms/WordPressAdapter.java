@@ -524,6 +524,38 @@ public class WordPressAdapter implements CmsAdapter {
     }
 
     @Override
+    public List<String> listTagNames(CmsCredentials credentials) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        try {
+            if (creds.isSsh()) {
+                return sshOperations.listTags(creds).stream()
+                        .map(WordPressSshOperations.CategoryInfo::name)
+                        .toList();
+            }
+            if (creds.isAgent()) {
+                return bulkManagementClient.listTags(creds.wpSlug()).stream()
+                        .map(WordPressBulkManagementClient.CategoryInfo::name)
+                        .toList();
+            }
+            RestClient client = buildClient(creds);
+            JsonNode response = client.get()
+                    .uri(uriBuilder -> uriBuilder.path("/wp-json/wp/v2/tags").queryParam("per_page", 100).build())
+                    .retrieve()
+                    .body(JsonNode.class);
+            List<String> names = new ArrayList<>();
+            if (response != null) {
+                for (JsonNode item : response) {
+                    names.add(item.path("name").asText(""));
+                }
+            }
+            return names;
+        } catch (RuntimeException e) {
+            log.warn("タグ一覧の取得に失敗しました: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    @Override
     public List<CategoryOption> listCategoriesWithParents(CmsCredentials credentials) {
         CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
         try {

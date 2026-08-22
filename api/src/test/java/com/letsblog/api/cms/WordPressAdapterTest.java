@@ -495,6 +495,56 @@ class WordPressAdapterTest {
     }
 
     @Test
+    void testListTagNames_RESTトランスポートは名前一覧を返す() {
+        server.expect(requestTo(containsString("/wp-json/wp/v2/tags?per_page=100")))
+                .andRespond(withSuccess(
+                        "[{\"id\":1,\"name\":\"Java\"},{\"id\":2,\"name\":\"AWS\"}]", MediaType.APPLICATION_JSON));
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        List<String> names = adapter.listTagNames(creds);
+
+        assertEquals(List.of("Java", "AWS"), names);
+        server.verify();
+    }
+
+    @Test
+    void testListTagNames_取得失敗時は空リストを返す() {
+        server.expect(requestTo(containsString("/wp-json/wp/v2/tags")))
+                .andRespond(withServerError());
+
+        CmsCredentials.WordPressCredentials creds = new CmsCredentials.WordPressCredentials(
+                "http://example.com", "admin", "apppass123");
+
+        List<String> names = adapter.listTagNames(creds);
+
+        assertEquals(List.of(), names);
+    }
+
+    @Test
+    void testListTagNames_SSHトランスポートはWordPressSshOperationsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = sshCredentials();
+        when(sshOperations.listTags(creds)).thenReturn(List.of(
+                new WordPressSshOperations.CategoryInfo("1", "Java", "java", null, "")));
+
+        List<String> names = adapter.listTagNames(creds);
+
+        assertEquals(List.of("Java"), names);
+    }
+
+    @Test
+    void testListTagNames_AGENTトランスポートはWordPressBulkManagementClientに委譲する() {
+        CmsCredentials.WordPressCredentials creds = agentCredentials();
+        when(bulkManagementClient.listTags(creds.wpSlug())).thenReturn(List.of(
+                new WordPressBulkManagementClient.CategoryInfo("AWS", "aws", null, "")));
+
+        List<String> names = adapter.listTagNames(creds);
+
+        assertEquals(List.of("AWS"), names);
+    }
+
+    @Test
     void testListCategoriesWithParents_RESTトランスポートは親カテゴリ名を解決する() {
         server.expect(requestTo(containsString("/wp-json/wp/v2/categories?per_page=100")))
                 .andRespond(withSuccess(

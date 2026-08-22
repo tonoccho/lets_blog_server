@@ -675,15 +675,27 @@ async function commandSuggestTags(context: vscode.ExtensionContext): Promise<voi
   try {
     const apiKey = await requireApiKey(context);
     const article = parseArticle(editor.document.getText());
+    // issue #525: プロジェクトのマスター環境サイトに既存のタグを優先して提案させる。
+    const projectId = (article.data.project_id as number | undefined) ?? getProjectId(context);
 
-    const suggestion = await vscode.window.withProgress(
+    const [suggestion, existingTags] = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'タグ/カテゴリを提案中…' },
-      () => api.suggestTags(getServerUrl(), apiKey, article.content, undefined, provider)
+      () => Promise.all([
+        api.suggestTags(getServerUrl(), apiKey, article.content, undefined, provider, projectId),
+        projectId
+          ? api.listExistingTags(getServerUrl(), apiKey, undefined, projectId)
+          : Promise.resolve<string[]>([]),
+      ])
     );
+    const existingTagSet = new Set(existingTags.map((t) => t.toLowerCase()));
 
     const items = [
       ...suggestion.categories.map((c) => ({ label: c, description: 'カテゴリ', itemType: 'category' as const })),
-      ...suggestion.tags.map((t) => ({ label: t, description: 'タグ', itemType: 'tag' as const })),
+      ...suggestion.tags.map((t) => ({
+        label: t,
+        description: existingTagSet.has(t.toLowerCase()) ? 'タグ (既存)' : 'タグ',
+        itemType: 'tag' as const,
+      })),
     ];
     if (items.length === 0) {
       vscode.window.showInformationMessage('提案はありませんでした。');

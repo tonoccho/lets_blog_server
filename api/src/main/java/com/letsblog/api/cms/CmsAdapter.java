@@ -131,6 +131,15 @@ public interface CmsAdapter {
     }
 
     /**
+     * 既存のタグ名一覧を取得する(読み取り専用、新規作成は行わない)。
+     * AIタグ提案時に、既存タグを優先して提案させるために使う(issue #525)。
+     * 取得できない、またはCMSがタグの概念を持たない場合は空リストを返す(例外は投げない)。
+     */
+    default List<String> listTagNames(CmsCredentials credentials) {
+        return List.of();
+    }
+
+    /**
      * 親カテゴリ付きのカテゴリ一覧項目。parentNameは親カテゴリが無ければnull。
      */
     record CategoryOption(String name, String parentName) {

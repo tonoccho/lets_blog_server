@@ -20,6 +20,8 @@ import com.letsblog.api.dto.AiImageBatchResponse;
 import com.letsblog.api.dto.AiImagePromptResponse;
 import com.letsblog.api.dto.AiImageRequest;
 import com.letsblog.api.dto.AiSectionRequest;
+import com.letsblog.api.dto.AiTagsRequest;
+import com.letsblog.api.dto.AiTagsResponse;
 import com.letsblog.api.dto.ImageGenerationOptionsResponse;
 import com.letsblog.api.dto.AiSectionResponse;
 import com.letsblog.api.dto.PlanChatMessage;
@@ -71,6 +73,8 @@ class AiAssistServiceTest {
     private WebSearchService webSearchService;
     @Mock
     private ProjectService projectService;
+    @Mock
+    private ArticlePlanService articlePlanService;
 
     private AiAssistService service;
 
@@ -79,7 +83,8 @@ class AiAssistServiceTest {
         service = new AiAssistService(llmClient, llmModelService, comfyUiClient, chatGptImageClient,
                 imageModelService, comfyUiModelService,
                 generatedImageStorageService, generatedImageRepository, generationJobRepository,
-                webSearchService, new ObjectMapper(), projectService, new ProhibitedContentFilterService());
+                webSearchService, new ObjectMapper(), projectService, new ProhibitedContentFilterService(),
+                articlePlanService);
 
         lenient().when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.COMFYUI);
         lenient().when(projectService.resolveDefaultNegativePrompt(any()))
@@ -515,5 +520,48 @@ class AiAssistServiceTest {
 
         org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
                 () -> service.generateImagePrompt(1L, List.of(), "犬の画像", null));
+    }
+
+    @Test
+    void suggestTags_projectId未指定なら既存タグを問い合わせずプロンプトはそのまま() {
+        when(llmClient.generate(anyString(), any(), any()))
+                .thenReturn("{\"categories\": [\"技術\"], \"tags\": [\"Java\", \"Spring\"]}");
+
+        AiTagsResponse response = service.suggestTags(new AiTagsRequest("記事本文", null, null));
+
+        assertEquals(List.of("技術"), response.categories());
+        assertEquals(List.of("Java", "Spring"), response.tags());
+        org.mockito.Mockito.verify(articlePlanService, org.mockito.Mockito.never()).listExistingTags(any());
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture(), any(), any());
+        assertTrue(promptCaptor.getValue().contains("記事本文"));
+        assertTrue(!promptCaptor.getValue().contains("既存タグ一覧"));
+    }
+
+    @Test
+    void suggestTags_既存タグがあればプロンプトへ追加され結果も既存タグ優先で並び替えられる() {
+        when(articlePlanService.listExistingTags(1L)).thenReturn(List.of("Java", "AWS"));
+        when(llmClient.generate(anyString(), any(), any()))
+                .thenReturn("{\"categories\": [], \"tags\": [\"Kotlin\", \"Java\", \"AWS\", \"Docker\"]}");
+
+        AiTagsResponse response = service.suggestTags(new AiTagsRequest("記事本文", null, 1L));
+
+        assertEquals(List.of("Java", "AWS", "Kotlin", "Docker"), response.tags());
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture(), any(), any());
+        assertTrue(promptCaptor.getValue().contains("既存タグ一覧"));
+        assertTrue(promptCaptor.getValue().contains("Java, AWS"));
+    }
+
+    @Test
+    void suggestTags_不正なJSON応答は空のcategories_tagsにフォールバックする() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("これはJSONではありません");
+
+        AiTagsResponse response = service.suggestTags(new AiTagsRequest("記事本文", null, null));
+
+        assertEquals(List.of(), response.categories());
+        assertEquals(List.of(), response.tags());
     }
 }

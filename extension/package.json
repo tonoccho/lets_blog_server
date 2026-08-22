@@ -168,6 +168,11 @@
           "command": "letsBlog.askAiSearch",
           "when": "editorTextFocus && resourceLangId == markdown",
           "group": "letsBlog@7"
+        },
+        {
+          "command": "letsBlog.suggestTags",
+          "when": "editorTextFocus && resourceLangId == markdown",
+          "group": "letsBlog@8"
         }
       ]
     },
