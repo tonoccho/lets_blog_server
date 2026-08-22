@@ -23,6 +23,8 @@ const NOT_ELIGIBLE_GA_REPORT: GoogleAnalyticsReport = {
   pageViews: null,
   periodLabel: null,
   errorMessage: null,
+  dailyDataPoints: [],
+  channelBreakdown: [],
 };
 
 const NOT_ELIGIBLE_ADSENSE_REPORT: AdSenseReport = {
@@ -32,6 +34,8 @@ const NOT_ELIGIBLE_ADSENSE_REPORT: AdSenseReport = {
   impressions: null,
   periodLabel: null,
   errorMessage: null,
+  dailyDataPoints: [],
+  platformBreakdown: [],
 };
 
 const NOT_ELIGIBLE_SOCIAL_STATS: SocialStats = {
