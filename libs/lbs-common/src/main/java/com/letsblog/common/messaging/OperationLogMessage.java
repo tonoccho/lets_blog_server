@@ -1,6 +1,8 @@
-package com.letsblog.logwriter.messaging;
+package com.letsblog.common.messaging;
 
-/** apiサーバーがRabbitMQへ送信する操作ログのペイロード(issue #466)。 */
+import java.io.Serializable;
+
+/** RabbitMQ経由でlog-writerサービスへ送信する操作ログのペイロード(issue #466)。 */
 public record OperationLogMessage(
         String operationId,
         Long userId,
@@ -11,5 +13,5 @@ public record OperationLogMessage(
         boolean success,
         String errorMessage,
         String createdAt
-) {
+) implements Serializable {
 }

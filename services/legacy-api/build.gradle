@@ -9,6 +9,8 @@ plugins {
 }
 
 dependencies {
+    implementation project(':libs:lbs-common')
+
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-restclient'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'

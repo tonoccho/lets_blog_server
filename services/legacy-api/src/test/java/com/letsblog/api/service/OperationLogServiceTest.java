@@ -1,8 +1,8 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.config.RabbitMqConfig;
+import com.letsblog.common.messaging.LogExchanges;
 import com.letsblog.api.domain.OperationLog;
-import com.letsblog.api.messaging.OperationLogMessage;
+import com.letsblog.common.messaging.OperationLogMessage;
 import com.letsblog.api.repository.OperationLogRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -53,7 +53,7 @@ class OperationLogServiceTest {
 
         ArgumentCaptor<OperationLogMessage> captor = ArgumentCaptor.forClass(OperationLogMessage.class);
         verify(rabbitTemplate).convertAndSend(
-                eq(RabbitMqConfig.LOG_EXCHANGE), eq(RabbitMqConfig.OPERATION_LOG_ROUTING_KEY), captor.capture());
+                eq(LogExchanges.LOG_EXCHANGE), eq(LogExchanges.OPERATION_LOG_ROUTING_KEY), captor.capture());
         OperationLogMessage message = captor.getValue();
         assertEquals(1L, message.userId());
         assertEquals("op-1", message.operationId());

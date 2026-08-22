@@ -1,8 +1,8 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.config.RabbitMqConfig;
+import com.letsblog.common.messaging.LogExchanges;
 import com.letsblog.api.domain.FrontendErrorLog;
-import com.letsblog.api.messaging.ErrorLogMessage;
+import com.letsblog.common.messaging.ErrorLogMessage;
 import com.letsblog.api.repository.FrontendErrorLogRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.AmqpException;
@@ -50,7 +50,7 @@ public class FrontendErrorLogService {
 
         try {
             rabbitTemplate.convertAndSend(
-                    RabbitMqConfig.LOG_EXCHANGE, RabbitMqConfig.ERROR_LOG_ROUTING_KEY, message);
+                    LogExchanges.LOG_EXCHANGE, LogExchanges.ERROR_LOG_ROUTING_KEY, message);
         } catch (AmqpException e) {
             log.warn("フロントエンドエラーログのキュー発行に失敗したため、同期DB書き込みへフォールバックします", e);
             repository.save(errorLog);

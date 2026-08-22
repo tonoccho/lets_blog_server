@@ -5,7 +5,7 @@ import com.letsblog.api.ai.ImageGenerationConfigProvider;
 import com.letsblog.api.ai.LlmClient;
 import com.letsblog.api.ai.LlmConfigProvider;
 import com.letsblog.api.aop.AuditLog;
-import com.letsblog.api.crypto.CredentialCipher;
+import com.letsblog.common.crypto.CredentialCipher;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.SystemSetting;
 import com.letsblog.api.repository.SystemSettingRepository;

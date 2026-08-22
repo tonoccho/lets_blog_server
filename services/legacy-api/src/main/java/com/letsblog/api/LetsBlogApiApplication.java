@@ -5,7 +5,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = {"com.letsblog.api", "com.letsblog.common"})
 @EnableScheduling
 @EnableAsync
 public class LetsBlogApiApplication {

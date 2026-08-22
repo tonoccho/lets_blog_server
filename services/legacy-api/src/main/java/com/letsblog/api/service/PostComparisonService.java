@@ -13,7 +13,7 @@ import com.letsblog.api.dto.PostComparisonRow;
 import com.letsblog.api.dto.PostEnvironmentValue;
 import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.SiteRepository;
-import com.letsblog.api.util.StackTraceUtil;
+import com.letsblog.common.util.StackTraceUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

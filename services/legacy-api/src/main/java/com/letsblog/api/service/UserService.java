@@ -1,7 +1,7 @@
 package com.letsblog.api.service;
 
 import com.letsblog.api.aop.AuditLog;
-import com.letsblog.api.crypto.CredentialCipher;
+import com.letsblog.common.crypto.CredentialCipher;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.User;
 import com.letsblog.api.dto.LoginResponse;

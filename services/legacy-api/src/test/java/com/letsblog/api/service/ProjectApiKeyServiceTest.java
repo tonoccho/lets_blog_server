@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.adsense.AdSenseClient;
 import com.letsblog.api.adsense.GoogleOAuthTokens;
 import com.letsblog.api.analytics.GoogleServiceAccountKey;
-import com.letsblog.api.crypto.CredentialCipher;
+import com.letsblog.common.crypto.CredentialCipher;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.repository.ProjectRepository;
 import org.junit.jupiter.api.Test;

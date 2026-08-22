@@ -1,4 +1,4 @@
-package com.letsblog.api.crypto;
+package com.letsblog.common.crypto;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -13,6 +13,7 @@ import java.util.Base64;
 /**
  * WordPressアプリケーションパスワード等の秘匿情報をAES-256-GCMで暗号化/復号する。
  * 鍵は APP_ENCRYPTION_KEY(Base64エンコードされた32バイト値)から取得する。
+ * 全サービスが同じ鍵で復号できるよう、サービス間で共有する。
  */
 @Component
 public class CredentialCipher {

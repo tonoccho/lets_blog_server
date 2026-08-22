@@ -16,7 +16,7 @@ import com.letsblog.api.cms.ReferencePost;
 import com.letsblog.api.cms.ssh.SshCommandExecutor.SshCommandResult;
 import com.letsblog.api.cms.ssh.SshCommandExecutor.SshConnectionParams;
 import com.letsblog.api.domain.BulkOperationType;
-import com.letsblog.api.util.StackTraceUtil;
+import com.letsblog.common.util.StackTraceUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
