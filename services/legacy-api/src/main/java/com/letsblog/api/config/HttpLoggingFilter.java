@@ -128,7 +128,7 @@ public class HttpLoggingFilter extends OncePerRequestFilter {
         String path = request.getRequestURI();
         return path.startsWith("/api/health") ||
                path.startsWith("/api/metrics") ||
-               path.startsWith("/api-docs") ||
+               path.startsWith("/v3/api-docs") ||
                path.startsWith("/swagger-ui") ||
                path.equals("/") ||
                path.isEmpty() ||

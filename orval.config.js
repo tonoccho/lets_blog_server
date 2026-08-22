@@ -1,15 +1,37 @@
+// マルチサービス構成向けのorval設定(#555)。各サービスは springdoc の既定パス
+// (/v3/api-docs)でOpenAPI specを公開し、scripts/generate-api-client.sh がそれぞれを
+// openapi/<サービス名>.json として取得したうえで、このファイル1回の実行(`npx orval`)で
+// 全ターゲットをまとめて生成する。
+//
+// この Issue (#555) の時点ではサービスは legacy-api のみ。将来のサービス抽出Issue
+// (Phase 19)で、下のコメント例のようにターゲットを追加していく
+// (docs/API_CLIENT_GENERATION.md 参照)。
+const commonOutput = {
+  client: 'fetch',
+  mode: 'tags-split',
+  prettier: true,
+  httpClient: 'fetch',
+};
+
 module.exports = {
-  api: {
+  legacyApi: {
     input: {
-      target: './openapi.json',
+      target: './openapi/legacy-api.json',
     },
     output: {
-      target: './sdk/api-client/src/generated',
-      client: 'fetch',
-      mode: 'tags-split',
+      ...commonOutput,
+      target: './sdk/api-client/src/generated/legacy-api',
       baseUrl: 'http://localhost:8080',
-      prettier: true,
-      httpClient: 'fetch',
     },
   },
+
+  // 将来のサービス抽出Issueで追加する例(identity-serviceの場合):
+  // identity: {
+  //   input: { target: './openapi/identity.json' },
+  //   output: {
+  //     ...commonOutput,
+  //     target: './sdk/api-client/src/generated/identity',
+  //     baseUrl: 'http://localhost:8080/identity',
+  //   },
+  // },
 };

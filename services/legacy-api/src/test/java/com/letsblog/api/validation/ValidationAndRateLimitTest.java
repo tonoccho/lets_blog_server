@@ -24,7 +24,7 @@ class ValidationAndRateLimitTest {
     @Test
     @DisplayName("Should return 200 for valid request to accessible endpoint")
     void testValidRequest() throws Exception {
-        mockMvc.perform(get("/api-docs")
+        mockMvc.perform(get("/v3/api-docs")
                 .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk());
     }
@@ -50,7 +50,7 @@ class ValidationAndRateLimitTest {
     void testRateLimitErrorFormat() throws Exception {
         // Note: This test is a structure test
         // Actual rate limiting requires multiple rapid requests
-        mockMvc.perform(get("/api-docs"))
+        mockMvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON));
     }
