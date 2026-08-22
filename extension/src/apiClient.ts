@@ -557,21 +557,41 @@ export async function generateSection(
   }, schemas.AiGenerationResultSchema);
 }
 
-/** 本文からカテゴリ/タグの候補を提案させる。 */
+/**
+ * 本文からカテゴリ/タグの候補を提案させる。projectId指定時は、そのプロジェクトのマスター環境サイトに
+ * 既存のタグを優先して提案する(issue #525)。
+ */
 export async function suggestTags(
   serverUrl: string,
   apiKey: string,
   text: string,
   actor?: Actor,
-  provider?: string
+  provider?: string,
+  projectId?: number
 ): Promise<AiTagsResult> {
   return requestJson(serverUrl, '/api/ai/tags', {
     label: 'suggestTags',
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
-    createBody: jsonBody({ text, provider: provider || undefined }),
+    createBody: jsonBody({ text, provider: provider || undefined, projectId }),
     retryable: true,
   }, schemas.AiTagsResultSchema);
+}
+
+/** プロジェクトのマスター環境サイトに既に存在するタグ名一覧。サイト未紐付け等の場合は空配列(issue #525)。 */
+export async function listExistingTags(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  projectId: number
+): Promise<string[]> {
+  return cachedRequestJson(
+    `project:${projectId}:tags`,
+    serverUrl,
+    `/api/projects/${projectId}/article-plan/tags`,
+    { label: 'listExistingTags', headers: buildHeaders(apiKey, actor) },
+    schemas.TagNameListSchema
+  );
 }
 
 /**

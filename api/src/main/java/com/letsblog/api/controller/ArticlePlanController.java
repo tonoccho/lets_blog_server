@@ -152,6 +152,16 @@ public class ArticlePlanController {
         return articlePlanService.listExistingCategoriesWithParents(projectId);
     }
 
+    /**
+     * プロジェクトのマスター環境サイトに既に存在するタグ名一覧(issue #525)。VSCode拡張がAIタグ提案時に
+     * 既存タグを優先表示できるようにするために使う。
+     */
+    @GetMapping("/tags")
+    public List<String> listTags(@PathVariable Long projectId) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        return articlePlanService.listExistingTags(projectId);
+    }
+
     @PostMapping("/issues/{issueNumber}/assign")
     public AssignIssueResponse assignIssue(
             @PathVariable Long projectId, @PathVariable Integer issueNumber) {
