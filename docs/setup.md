@@ -18,7 +18,8 @@ vi .env   # パスワード・APIキー・暗号化キー・NEXTAUTH_SECRET等�
 # 2. リバースプロキシ用の自己署名証明書を生成
 bash scripts/generate-certs.sh
 
-# 3. Docker Compose で全サービスを起動(reverse-proxy/web/api/mysql/phpmyadmin/comfyui/plantuml)
+# 3. Docker Compose で全サービスを起動(reverse-proxy/web/api/log-writer/mysql/rabbitmq/
+#    phpmyadmin/comfyui/plantuml/drawio/wordpress/Penpotスイート。計19コンテナ)
 docker compose up -d
 
 # 4. ブラウザで https://localhost にアクセス(自己署名証明書の警告は例外承認する)
@@ -67,20 +68,65 @@ bash scripts/generate-certs.sh
 docker compose up -d
 ```
 
-起動するサービス: `reverse-proxy`(nginx) / `web`(Next.js) / `api` / `mysql` / `phpmyadmin` / `comfyui` / `plantuml`。
+起動するサービス: `reverse-proxy`(nginx) / `web`(Next.js) / `api` / `log-writer` / `mysql` /
+`rabbitmq` / `phpmyadmin` / `comfyui` / `plantuml` / `drawio` / `wordpress` /
+`penpot-*`(デザイン生成スイート、6コンテナ)/ `docker-socket-proxy`。
+アーキテクチャ・ポート割当・全サービスの起動時メモリ実測値は
+[docs/DOCKER_COMPOSE_ARCHITECTURE.md](DOCKER_COMPOSE_ARCHITECTURE.md) を参照。
 
 Phase 6 以降、`reverse-proxy` の `80`(HTTP→HTTPSリダイレクト)・`443`(HTTPS)以外はホストにポート公開していない。
 各サービスへは直接ポートではなく、必ず `https://localhost/...` 経由でアクセスする。
+
+サービスによってはヘルスチェックが設定されており(`api` / `log-writer` / `mysql` / `rabbitmq` /
+`penpot-postgres` / `penpot-valkey`)、依存先が healthy になるまで起動を待つため、初回起動や
+複数コンテナの一括再作成時は数十秒〜数分かかることがある。`docker compose ps` の `STATUS`
+列が `Up` ではなく `Up (healthy)` になっているかを確認する。
 
 `web` サービスはソースディレクトリ(`./web`)をコンテナにバインドマウントしているため、
 コード変更は再ビルドなしでホットリロードされる。`package.json` の依存関係を変更した場合は
 `docker compose up -d --build web` でイメージを再ビルドする。
 
 ```bash
-docker compose ps           # 起動状況確認
+docker compose ps           # 起動状況確認(healthyかどうかも表示される)
 docker compose logs -f api  # 個別サービスのログ確認
 docker compose logs -f web  # Web管理画面のログ確認
 ```
+
+### 個別サービスの再起動・再ビルド
+
+コード変更後、全サービスを再作成する必要はない。変更したサービスだけを対象にする。
+
+```bash
+# 環境変数変更など、再ビルド不要な場合
+docker compose restart api
+
+# コード変更を反映する場合(イメージの再ビルドが必要)
+docker compose build api
+docker compose up -d api
+```
+
+`api` / `log-writer` は `services/legacy-api` / `services/log-writer` のGradleビルド成果物を
+イメージに焼き込む構成のため、ソース変更後は必ず `docker compose build` からやり直す
+(コンテナ再起動だけでは反映されない)。
+
+### サービス間の疎通確認
+
+現状は `reverse-proxy`(nginx)が唯一の外部窓口。個別サービスの単体疎通確認にはコンテナ内から
+直接アクセスする。
+
+```bash
+# reverse-proxy経由(通常のアクセス経路)
+curl -k https://localhost/api/health
+
+# api単体の疎通確認(コンテナ内から直接。curlは#556で追加済み)
+docker exec lbs-api curl -sf http://localhost:8080/actuator/health
+
+# log-writerも同様
+docker exec lbs-log-writer curl -sf http://localhost:8080/actuator/health
+```
+
+将来のapi-gateway導入後は、gateway経由の疎通確認に置き換わる予定
+([spec/phase17/00-overview.md](../spec/phase17/00-overview.md) 参照)。
 
 ### アクセスURL一覧
 
@@ -242,10 +288,11 @@ LISTENしているかを確認する(環境変数変更後はプロセス再起�
 (admin限定)で `LLM` がWARNINGの場合はAPIキー未設定、ERRORの場合は`docker compose logs api`で
 詳細なエラー内容(レート制限・認証エラー等)を確認する。
 
-**個別ポート(8080/8081/8188/8085等)に直接アクセスできない**
-Phase 6以降は意図した仕様(すべて `https://localhost/...` 経由に一本化)。
-デバッグ目的で一時的に直接アクセスしたい場合は、該当サービスの `docker-compose.yml` に
-一時的に `ports:` を追加する(恒久的な変更はしないこと)。
+**各サービスの個別ポート(内部8080等)に直接アクセスできない**
+Phase 6以降は意図した仕様(すべて `https://localhost/...` 経由に一本化。内部ポートは#556で
+全サービス8080に統一済み)。デバッグ目的で一時的に直接アクセスしたい場合は、
+`docker exec <コンテナ名> curl ...` でコンテナ内から確認するか、該当サービスの
+`docker-compose.yml` に一時的に `ports:` を追加する(恒久的な変更はしないこと)。
 
 ## 関連ドキュメント
 
