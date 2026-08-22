@@ -135,12 +135,11 @@ public class PostController {
             @RequestParam(value = "images", required = false) List<MultipartFile> images,
             @RequestParam(value = "featuredImageFilename", required = false) String featuredImageFilename,
             @RequestParam(value = "imageReferences", required = false) List<String> imageReferences,
-            @RequestParam(value = "publishScheduledAt", required = false) String publishScheduledAt,
-            @RequestParam(value = "notifySns", required = false) Boolean notifySns
+            @RequestParam(value = "publishScheduledAt", required = false) String publishScheduledAt
     ) {
         PostPublishCommand command = new PostPublishCommand(
                 site, title, slug, status, categories, tags, wpPostId, markdown, images, featuredImageFilename,
-                imageReferences, publishScheduledAt, notifySns);
+                imageReferences, publishScheduledAt);
         return postPublishService.publish(command);
     }
 

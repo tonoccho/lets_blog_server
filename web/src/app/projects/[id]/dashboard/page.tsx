@@ -3,10 +3,8 @@ import {
   getProject,
   getProjectGoogleAnalyticsReport,
   getProjectAdSenseReport,
-  getProjectSocialStats,
   type GoogleAnalyticsReport,
   type AdSenseReport,
-  type SocialStats,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -14,7 +12,6 @@ import { ProjectSectionNav } from "../ProjectSectionNav";
 import { DashboardWidgetSlot } from "./DashboardWidgetSlot";
 import { GoogleAnalyticsWidget } from "./GoogleAnalyticsWidget";
 import { AdSenseWidget } from "./AdSenseWidget";
-import { SocialStatsWidget } from "./SocialStatsWidget";
 
 const NOT_ELIGIBLE_GA_REPORT: GoogleAnalyticsReport = {
   eligible: false,
@@ -38,27 +35,16 @@ const NOT_ELIGIBLE_ADSENSE_REPORT: AdSenseReport = {
   platformBreakdown: [],
 };
 
-const NOT_ELIGIBLE_SOCIAL_STATS: SocialStats = {
-  eligible: false,
-  postCount: null,
-  likes: null,
-  shares: null,
-  comments: null,
-  clicks: null,
-  errorMessage: null,
-};
-
 export default async function ProjectDashboardPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };
   const projectId = Number(id);
 
-  const [project, gaReport, adsenseReport, socialStats] = await Promise.all([
+  const [project, gaReport, adsenseReport] = await Promise.all([
     getProject(projectId, actor).catch(() => null),
     getProjectGoogleAnalyticsReport(projectId, actor).catch(() => NOT_ELIGIBLE_GA_REPORT),
     getProjectAdSenseReport(projectId, actor).catch(() => NOT_ELIGIBLE_ADSENSE_REPORT),
-    getProjectSocialStats(projectId, actor).catch(() => NOT_ELIGIBLE_SOCIAL_STATS),
   ]);
   if (!project) {
     notFound();
@@ -98,16 +84,6 @@ export default async function ProjectDashboardPage({ params }: { params: Promise
           settingsLabel="Google AdSenseを設定"
         >
           <AdSenseWidget report={adsenseReport} />
-        </DashboardWidgetSlot>
-        <DashboardWidgetSlot
-          title="ソーシャル統計"
-          description="Buffer経由で送信済みの投稿のエンゲージメント統計(いいね・シェア・コメント・クリック)を表示します。
-            Buffer連携が無効、または対象の送信済み投稿がまだない場合は表示されません。"
-          configured={socialStats.eligible}
-          settingsHref={`/projects/${projectId}/settings/buffer`}
-          settingsLabel="Buffer連携を設定"
-        >
-          <SocialStatsWidget stats={socialStats} />
         </DashboardWidgetSlot>
       </div>
     </div>

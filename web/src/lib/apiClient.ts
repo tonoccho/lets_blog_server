@@ -1597,45 +1597,6 @@ export function getProjectAdSenseReport(projectId: number, actor?: ActorInfo): P
   return apiFetch<AdSenseReport>(`/api/projects/${projectId}/dashboard/adsense`, { actor });
 }
 
-export interface ProjectBufferStatus {
-  configured: boolean;
-  enabled: boolean;
-  hasAccessToken: boolean;
-  profileIds: string | null;
-  delayMinutes: number | null;
-  messageTemplate: string | null;
-}
-
-export function getProjectBufferStatus(projectId: number, actor?: ActorInfo): Promise<ProjectBufferStatus> {
-  return apiFetch<ProjectBufferStatus>(`/api/projects/${projectId}/api-keys/buffer`, { actor });
-}
-
-export function setProjectBufferSettings(
-  projectId: number,
-  input: { enabled: boolean; profileIds: string; delayMinutes: number | null; messageTemplate: string },
-  actor: ActorInfo
-): Promise<void> {
-  return apiFetch<void>(`/api/projects/${projectId}/api-keys/buffer`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-    actor,
-  });
-}
-
-export function setProjectBufferAccessToken(projectId: number, accessToken: string, actor: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/projects/${projectId}/api-keys/buffer/access-token`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ accessToken }),
-    actor,
-  });
-}
-
-export function clearProjectBufferSettings(projectId: number, actor: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/projects/${projectId}/api-keys/buffer`, { method: 'DELETE', actor });
-}
-
 /**
  * adminユーザー限定のシステム設定画面(issue #403)向け。プロジェクトに紐付かない業務系のアプリ全体設定
  * (外部LLMサービス連携・メール送信・Google OAuthクライアント・Webフロントの公開URL)を扱う。
@@ -1661,20 +1622,6 @@ export function updateAppSettings(settings: Record<string, string>, actor: Actor
     body: JSON.stringify(settings),
     actor,
   });
-}
-
-export interface SocialStats {
-  eligible: boolean;
-  postCount: number | null;
-  likes: number | null;
-  shares: number | null;
-  comments: number | null;
-  clicks: number | null;
-  errorMessage: string | null;
-}
-
-export function getProjectSocialStats(projectId: number, actor?: ActorInfo): Promise<SocialStats> {
-  return apiFetch<SocialStats>(`/api/projects/${projectId}/dashboard/social-stats`, { actor });
 }
 
 export interface PlanChatMessage {

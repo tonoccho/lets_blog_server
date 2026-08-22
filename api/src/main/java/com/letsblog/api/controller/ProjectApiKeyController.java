@@ -3,13 +3,10 @@ package com.letsblog.api.controller;
 import com.letsblog.api.dto.CompleteAdSenseOAuthRequest;
 import com.letsblog.api.dto.ProjectAdSenseStatusResponse;
 import com.letsblog.api.dto.ProjectApiKeyStatusResponse;
-import com.letsblog.api.dto.ProjectBufferStatusResponse;
 import com.letsblog.api.dto.ProjectGoogleAnalyticsStatusResponse;
 import com.letsblog.api.dto.SetProjectAdSenseClientSecretRequest;
 import com.letsblog.api.dto.SetProjectAdSenseSettingsRequest;
 import com.letsblog.api.dto.SetProjectBraveSearchApiKeyRequest;
-import com.letsblog.api.dto.SetProjectBufferAccessTokenRequest;
-import com.letsblog.api.dto.SetProjectBufferSettingsRequest;
 import com.letsblog.api.dto.SetProjectGithubTokenRequest;
 import com.letsblog.api.dto.SetProjectGoogleAnalyticsCredentialsRequest;
 import com.letsblog.api.service.ProjectApiKeyService;
@@ -119,39 +116,6 @@ public class ProjectApiKeyController {
     @DeleteMapping("/adsense")
     public ResponseEntity<Void> clearAdSenseCredentials(@PathVariable Long projectId) {
         projectApiKeyService.clearAdSenseCredentials(projectId);
-        return ResponseEntity.noContent().build();
-    }
-
-    @GetMapping("/buffer")
-    public ProjectBufferStatusResponse getBufferStatus(@PathVariable Long projectId) {
-        ProjectApiKeyService.BufferSettingsStatus status = projectApiKeyService.getBufferSettingsStatus(projectId);
-        return new ProjectBufferStatusResponse(
-                status.configured(),
-                status.enabled(),
-                status.hasAccessToken(),
-                status.profileIds(),
-                status.delayMinutes(),
-                status.messageTemplate());
-    }
-
-    @PutMapping("/buffer")
-    public ResponseEntity<Void> setBufferSettings(
-            @PathVariable Long projectId, @Valid @RequestBody SetProjectBufferSettingsRequest request) {
-        projectApiKeyService.setBufferSettings(
-                projectId, request.enabled(), request.profileIds(), request.delayMinutes(), request.messageTemplate());
-        return ResponseEntity.noContent().build();
-    }
-
-    @PutMapping("/buffer/access-token")
-    public ResponseEntity<Void> setBufferAccessToken(
-            @PathVariable Long projectId, @Valid @RequestBody SetProjectBufferAccessTokenRequest request) {
-        projectApiKeyService.setBufferAccessToken(projectId, request.accessToken());
-        return ResponseEntity.noContent().build();
-    }
-
-    @DeleteMapping("/buffer")
-    public ResponseEntity<Void> clearBufferSettings(@PathVariable Long projectId) {
-        projectApiKeyService.clearBufferSettings(projectId);
         return ResponseEntity.noContent().build();
     }
 

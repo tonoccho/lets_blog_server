@@ -149,26 +149,6 @@ public class Project {
     @Column(name = "adsense_oauth_client_secret_encrypted", columnDefinition = "VARBINARY(1024)")
     private byte[] adsenseOauthClientSecretEncrypted;
 
-    /**
-     * Buffer連携(issue #402)。以前はアプリ全体の環境変数(BUFFER_*)で1つだけ設定していたが、
-     * プロジェクトごとに異なるBufferアカウント/SNSプロファイルへ投稿できるようプロジェクト単位に変更した。
-     * アクセストークンのみ秘匿情報として暗号化保持し、他はプロジェクト単位の平文設定として保持する。
-     */
-    @Column(name = "buffer_enabled", nullable = false)
-    private boolean bufferEnabled = false;
-
-    @Column(name = "buffer_access_token_encrypted", columnDefinition = "VARBINARY(1024)")
-    private byte[] bufferAccessTokenEncrypted;
-
-    @Column(name = "buffer_profile_ids", length = 500)
-    private String bufferProfileIds;
-
-    @Column(name = "buffer_post_delay_minutes")
-    private Integer bufferPostDelayMinutes;
-
-    @Column(name = "buffer_message_template", length = 500)
-    private String bufferMessageTemplate;
-
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -203,18 +183,6 @@ public class Project {
 
     public boolean hasAdsenseOauthClient() {
         return adsenseOauthClientId != null && !adsenseOauthClientId.isBlank() && hasAdsenseOauthClientSecret();
-    }
-
-    public boolean hasBufferAccessToken() {
-        return bufferAccessTokenEncrypted != null && bufferAccessTokenEncrypted.length > 0;
-    }
-
-    public boolean hasBufferProfileIds() {
-        return bufferProfileIds != null && !bufferProfileIds.isBlank();
-    }
-
-    public boolean isBufferConfigured() {
-        return bufferEnabled && hasBufferAccessToken() && hasBufferProfileIds();
     }
 
     @PrePersist
