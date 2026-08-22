@@ -197,56 +197,43 @@ public class SiteService {
 
     /**
      * 一括管理(カテゴリ/タグ/プラグイン/テーマ比較)で、非managedサイトをどの経路で扱えるかを判定する。
-     * WordPress以外のCMS種別・認証情報の復号失敗の場合はどちらもfalseになる
+     * WordPress以外のCMS種別・認証情報の復号失敗の場合はfalseになる
      * (呼び出し元でエラーにせず「対象外」表示にフォールバックするため)。
-     * <p>
-     * REST(Application Password)経路は現時点では常に利用不可として返す(フィードバック対応により、
-     * 一括管理はSSHのみを使う方針に一時的に変更したため)。{@link com.letsblog.api.cms.rest.WordPressRestBulkManagementOperations}
-     * 自体や呼び出し側のREST利用コードは削除していないため、再度REST経路を有効化する場合はここを戻すだけでよい。
      */
     @Transactional(readOnly = true)
     public SiteDataSource resolveDataSource(Site site) {
         if (site.isManagedWordpress()) {
-            return new SiteDataSource(true, null, null);
+            return new SiteDataSource(true, null);
         }
         if (site.getCmsType() != CmsType.WORDPRESS) {
-            return new SiteDataSource(false, null, null);
+            return new SiteDataSource(false, null);
         }
         try {
             CmsCredentials credentials = getCredentials(site.getSiteKey());
             if (credentials instanceof CmsCredentials.WordPressCredentials wp) {
-                return new SiteDataSource(false, null, wp.isSsh() ? wp : null);
+                return new SiteDataSource(false, wp.isSsh() ? wp : null);
             }
         } catch (RuntimeException e) {
             log.warn("サイト '{}' の認証情報取得に失敗しました(一括管理の対象外として扱います): {}",
                     site.getSiteKey(), e.getMessage());
         }
-        return new SiteDataSource(false, null, null);
+        return new SiteDataSource(false, null);
     }
 
     /**
-     * REST(Application Password)はtransport設定に関わらず、baseUrl/username/appPasswordが
-     * 揃っていれば利用可能とみなす(SSH用に登録されたサイトでもREST側の資格情報が入っていれば使える)。
-     * REST/SSHの両方が利用可能な場合、呼び出し元は原則SSH優先で扱う(REST APIはロール権限不足等で
-     * 拒否されるケースがあるため)。SSHでの実行に失敗した場合はRESTへフォールバックする。
-     * ただしテーマのインストール/有効化/削除はWordPressコアのREST APIに書き込みエンドポイントが無いため、
-     * この場合に限りSSHのみが対象になる(SSH失敗時のRESTフォールバックも行わない)。
+     * 非managedサイトはSSH接続情報(transport=SSH)が設定されていれば一括管理の対象にできる。
+     * テーマのインストール/有効化/削除を含め、書き込み系の操作はすべてSSH経由(wp-cli)で行う。
      */
     public record SiteDataSource(
             boolean managed,
-            CmsCredentials.WordPressCredentials restCredentials,
             CmsCredentials.WordPressCredentials sshCredentials
     ) {
-        public boolean hasRest() {
-            return restCredentials != null;
-        }
-
         public boolean hasSsh() {
             return sshCredentials != null;
         }
 
         public boolean isUnavailable() {
-            return !managed && restCredentials == null && sshCredentials == null;
+            return !managed && sshCredentials == null;
         }
     }
 
@@ -438,9 +425,11 @@ public class SiteService {
 
     private List<String> requiredCredentialKeys(CmsType cmsType, Map<String, String> credentials) {
         return switch (cmsType) {
-            case WORDPRESS -> isSshTransport(credentials)
-                    ? List.of("baseUrl", "transport", "sshHost", "sshUser", "wpPath")
-                    : List.of("baseUrl", "username", "appPassword");
+            // 自動構築(managed)サイトはtransport=AGENTで登録される(WordPressSiteProvisioningService)。
+            // それ以外はSSH接続情報が必須(REST(Application Password)による登録は廃止した。issue #518)。
+            case WORDPRESS -> isAgentTransport(credentials)
+                    ? List.of("baseUrl", "username", "appPassword")
+                    : List.of("baseUrl", "transport", "sshHost", "sshUser", "wpPath");
         };
     }
 
@@ -496,8 +485,7 @@ public class SiteService {
             case WORDPRESS -> new CmsCredentials.WordPressCredentials(
                     credentials.get("baseUrl"),
                     credentials.get("username"),
-                    credentials.get("appPassword"),
-                    credentials.getOrDefault("transport", "REST"),
+                    credentials.get("transport"),
                     credentials.get("sshHost"),
                     parseSshPort(credentials.get("sshPort")),
                     credentials.get("sshUser"),

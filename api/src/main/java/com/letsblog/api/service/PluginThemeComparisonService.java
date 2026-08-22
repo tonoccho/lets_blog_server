@@ -1,8 +1,6 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.cms.CmsApiException;
 import com.letsblog.api.cms.CmsCredentials;
-import com.letsblog.api.cms.rest.WordPressRestBulkManagementOperations;
 import com.letsblog.api.cms.ssh.WordPressSshOperations;
 import com.letsblog.api.domain.BulkOperationLog;
 import com.letsblog.api.domain.BulkOperationType;
@@ -15,7 +13,6 @@ import com.letsblog.api.dto.StatusEnvironmentValue;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient;
 import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.SiteRepository;
-import com.letsblog.api.util.StackTraceUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,13 +30,13 @@ import java.util.Set;
  * 環境単位で希望状態(未インストール/無効/有効)へ反映する({@link #reconcilePlugin}/{@link #reconcileTheme})、
  * または全環境から削除する({@link #deletePluginEverywhere}/{@link #deleteThemeEverywhere})。
  * カテゴリ/タグの{@link TermComparisonService}と異なり、slugそのものが環境間で共通のwordpress.org識別子のため
- * 名寄せの曖昧さはない。実際のwp-cli/REST呼び出し・ログ記録は{@link BulkManagementService#applyToEnvironment}に
- * 委譲する(書き込み時のREST/SSH優先順位・テーマ書き込みのSSH限定はBulkManagementService側で判定する)。
+ * 名寄せの曖昧さはない。実際のwp-cli呼び出し・ログ記録は{@link BulkManagementService#applyToEnvironment}に
+ * 委譲する。
  * <p>
  * 読み取り(一覧取得)は{@link #resolveInfosByEnvironment}に集約する。managedサイトは内部エージェント、
- * 非managedサイトはREST優先・無ければSSH(テーマの一覧取得はコアREST APIでも可能)、SSHのみで解決する
- * 環境が同一ホストを共有していれば{@link WordPressSshOperations#fetchPluginsOrThemesForEnvironments}で
- * 1回の接続にまとめる。取得に失敗した環境は「対象外」ではなく「エラー」として扱い、作業ログにも記録する。
+ * 非managedサイトはSSH経由で取得する。SSHのみで解決する環境が同一ホストを共有していれば
+ * {@link WordPressSshOperations#fetchPluginsOrThemesForEnvironments}で1回の接続にまとめる。
+ * 取得に失敗した環境は「対象外」ではなく「エラー」として扱い、作業ログにも記録する。
  */
 @Service
 @Slf4j
@@ -56,7 +53,6 @@ public class PluginThemeComparisonService {
     private final BulkManagementService bulkManagementService;
     private final SiteService siteService;
     private final WordPressSshOperations sshOperations;
-    private final WordPressRestBulkManagementOperations restOperations;
 
     public PluginThemeComparisonService(
             ProjectRepository projectRepository,
@@ -64,15 +60,13 @@ public class PluginThemeComparisonService {
             WordPressBulkManagementClient bulkManagementClient,
             BulkManagementService bulkManagementService,
             SiteService siteService,
-            WordPressSshOperations sshOperations,
-            WordPressRestBulkManagementOperations restOperations) {
+            WordPressSshOperations sshOperations) {
         this.projectRepository = projectRepository;
         this.siteRepository = siteRepository;
         this.bulkManagementClient = bulkManagementClient;
         this.bulkManagementService = bulkManagementService;
         this.siteService = siteService;
         this.sshOperations = sshOperations;
-        this.restOperations = restOperations;
     }
 
     @Transactional(readOnly = true)
@@ -165,7 +159,7 @@ public class PluginThemeComparisonService {
             EnvironmentInfos envInfos = byEnvironment.get(change.environment());
             if (envInfos == null || envInfos.infos() == null) {
                 throw new IllegalArgumentException(
-                        change.environment() + "環境は対象外です(自動構築サイト・REST・SSHのいずれも利用できません)");
+                        change.environment() + "環境は対象外です(自動構築サイト・SSHのいずれも利用できません)");
             }
             String currentStatus = toValue(slug, envInfos).status();
             for (BulkOperationType step : stepsFor(currentStatus, change.desiredStatus(), isTheme)) {
@@ -227,7 +221,7 @@ public class PluginThemeComparisonService {
     }
 
     /**
-     * 3環境分のプラグイン/テーマ一覧を、環境ごとの経路(managed=内部エージェント、REST優先、無ければSSH)で
+     * 3環境分のプラグイン/テーマ一覧を、環境ごとの経路(managed=内部エージェント、非managedはSSH)で
      * 解決する。SSHのみで解決する環境が複数あり同一ホスト(sshHost:sshPort)を共有している場合は、
      * ホストごとにまとめて{@link WordPressSshOperations#fetchPluginsOrThemesForEnvironments}で
      * 1回の接続にする。取得に失敗した環境は{@link EnvironmentInfos#error}にし、作業ログにも記録する。
@@ -247,10 +241,6 @@ public class PluginThemeComparisonService {
                 continue;
             }
             SiteService.SiteDataSource dataSource = siteService.resolveDataSource(site);
-            if (dataSource.hasRest()) {
-                result.put(environment, fetchViaRest(project, environment, dataSource.restCredentials(), isTheme));
-                continue;
-            }
             if (dataSource.hasSsh()) {
                 String hostKey = hostKeyOf(dataSource.sshCredentials());
                 sshGroupsByHost.computeIfAbsent(hostKey, k -> new LinkedHashMap<>())
@@ -287,21 +277,6 @@ public class PluginThemeComparisonService {
         return EnvironmentInfos.of(infos.stream()
                 .map(info -> new PluginThemeInfo(info.name(), info.status()))
                 .toList());
-    }
-
-    private EnvironmentInfos fetchViaRest(
-            Project project, String environment, CmsCredentials.WordPressCredentials creds, boolean isTheme) {
-        try {
-            List<WordPressRestBulkManagementOperations.PluginThemeInfo> infos = isTheme
-                    ? restOperations.listThemes(creds)
-                    : restOperations.listPlugins(creds);
-            return EnvironmentInfos.of(infos.stream()
-                    .map(info -> new PluginThemeInfo(info.name(), info.status()))
-                    .toList());
-        } catch (CmsApiException e) {
-            logFetchError(project, environment, isTheme, e.getMessage(), StackTraceUtil.toString(e));
-            return EnvironmentInfos.error(e.getMessage());
-        }
     }
 
     private String hostKeyOf(CmsCredentials.WordPressCredentials creds) {

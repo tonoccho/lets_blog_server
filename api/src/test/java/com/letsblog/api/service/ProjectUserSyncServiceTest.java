@@ -101,7 +101,7 @@ class ProjectUserSyncServiceTest {
         User user = buildUser();
         Site localSite = buildSite(10L, "local-site");
         Site testSite = buildSite(20L, "test-site");
-        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "pass");
+        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
 
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(userRepository.findById(2L)).thenReturn(Optional.of(user));
@@ -140,7 +140,7 @@ class ProjectUserSyncServiceTest {
         Project project = buildProject(10L, null, null);
         User user = buildUser();
         Site localSite = buildSite(10L, "local-site");
-        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "pass");
+        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
 
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(userRepository.findById(2L)).thenReturn(Optional.of(user));
@@ -163,7 +163,7 @@ class ProjectUserSyncServiceTest {
         Project project = buildProject(10L, null, null);
         User user = buildUser();
         Site localSite = buildSite(10L, "local-site");
-        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "editor", "pass");
+        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "editor", "SSH");
 
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(userRepository.findById(2L)).thenReturn(Optional.of(user));
@@ -185,7 +185,7 @@ class ProjectUserSyncServiceTest {
         Project project = buildProject(10L, null, null);
         User user = buildUser();
         Site localSite = buildSite(10L, "local-site");
-        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "pass");
+        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
 
         when(projectUserRepository.findByProjectIdAndUserId(1L, 2L)).thenReturn(Optional.of(projectUser));
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
@@ -246,7 +246,7 @@ class ProjectUserSyncServiceTest {
         owner.setDisplayName("オーナー");
         ProjectUser memberLink = new ProjectUser(1L, 2L, "author");
         ProjectUser ownerLink = new ProjectUser(1L, 3L, "administrator");
-        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "pass");
+        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
 
         when(siteRepository.findById(10L)).thenReturn(Optional.of(site));
         when(projectUserRepository.findByProjectId(1L)).thenReturn(List.of(memberLink, ownerLink));

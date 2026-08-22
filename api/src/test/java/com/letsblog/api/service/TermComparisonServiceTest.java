@@ -49,13 +49,10 @@ class TermComparisonServiceTest {
     @Mock
     private com.letsblog.api.cms.ssh.WordPressSshOperations sshOperations;
 
-    @Mock
-    private com.letsblog.api.cms.rest.WordPressRestBulkManagementOperations restOperations;
-
     private TermComparisonService service() {
         return new TermComparisonService(
                 projectRepository, siteRepository, bulkManagementClient, bulkManagementService, siteService,
-                sshOperations, restOperations);
+                sshOperations);
     }
 
     private Project buildProject(Long localSiteId, Long testSiteId, Long productionSiteId, String masterEnvironment) {
@@ -388,7 +385,7 @@ class TermComparisonServiceTest {
                 1L, "local", BulkOperationType.TAG_CREATE, "新着", "shinchaku", null, null, null, 9L);
     }
 
-    // ---- 非managedサイト: REST優先・SSHホスト単位まとめ取得・エラー ----
+    // ---- 非managedサイト: SSHホスト単位まとめ取得・エラー ----
 
     private Site buildExternalSite(Long id, String slug) {
         Site site = new Site();
@@ -399,37 +396,9 @@ class TermComparisonServiceTest {
         return site;
     }
 
-    private com.letsblog.api.cms.CmsCredentials.WordPressCredentials restCreds() {
-        return new com.letsblog.api.cms.CmsCredentials.WordPressCredentials(
-                "https://example.com", "admin", "app-pass", "REST", null, null, null, null, null, null, null);
-    }
-
     private com.letsblog.api.cms.CmsCredentials.WordPressCredentials sshCreds(String wpPath) {
         return new com.letsblog.api.cms.CmsCredentials.WordPressCredentials(
-                "https://example.com", null, null, "SSH", "203.0.113.5", 22, "deploy", wpPath, "PEM", null, null);
-    }
-
-    @Test
-    void listCategoryComparison_RESTが使える非managedサイトはRESTを優先して取得する() {
-        TermComparisonService service = service();
-        Project project = buildProject(10L, 20L, null, "local");
-        Site localSite = buildManagedSite(10L, "local-site");
-        Site testSite = buildExternalSite(20L, "test-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
-        when(bulkManagementClient.listCategories("local-site")).thenReturn(List.of());
-        when(siteService.resolveDataSource(testSite)).thenReturn(new SiteService.SiteDataSource(false, restCreds(), null));
-        when(restOperations.listCategories(restCreds())).thenReturn(List.of(
-                new com.letsblog.api.cms.rest.WordPressRestBulkManagementOperations.CategoryInfo(
-                        "1", "News", "news", null, "")));
-
-        TermComparisonPage page = service.listCategoryComparison(1L, 0, 20);
-
-        assertEquals(1, page.items().size());
-        assertEquals(true, page.items().get(0).test().available());
-        assertEquals("news", page.items().get(0).test().slug());
-        verify(sshOperations, never()).fetchTermsForEnvironments(any(), any());
+                "https://example.com", null, "SSH", "203.0.113.5", 22, "deploy", wpPath, "PEM", null, null);
     }
 
     @Test
@@ -442,9 +411,9 @@ class TermComparisonServiceTest {
         when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
         when(siteRepository.findById(30L)).thenReturn(Optional.of(productionSite));
         when(siteService.resolveDataSource(testSite))
-                .thenReturn(new SiteService.SiteDataSource(false, null, sshCreds("/var/www/html/test")));
+                .thenReturn(new SiteService.SiteDataSource(false, sshCreds("/var/www/html/test")));
         when(siteService.resolveDataSource(productionSite))
-                .thenReturn(new SiteService.SiteDataSource(false, null, sshCreds("/var/www/html/production")));
+                .thenReturn(new SiteService.SiteDataSource(false, sshCreds("/var/www/html/production")));
         when(sshOperations.fetchTermsForEnvironments(eq("category"), any())).thenReturn(
                 new com.letsblog.api.cms.ssh.WordPressSshOperations.EnvironmentFetchResult<>(
                         java.util.Map.of(
@@ -473,7 +442,7 @@ class TermComparisonServiceTest {
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
         when(siteService.resolveDataSource(testSite))
-                .thenReturn(new SiteService.SiteDataSource(false, null, sshCreds("/var/www/html/test")));
+                .thenReturn(new SiteService.SiteDataSource(false, sshCreds("/var/www/html/test")));
         when(sshOperations.fetchTermsForEnvironments(eq("category"), any())).thenReturn(
                 new com.letsblog.api.cms.ssh.WordPressSshOperations.EnvironmentFetchResult<>(
                         java.util.Map.of(), java.util.Map.of("test", "Connection refused"),

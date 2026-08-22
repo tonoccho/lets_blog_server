@@ -90,7 +90,7 @@ class PostPublishServiceTest {
     private PostPublishService service;
 
     private final CmsCredentials.WordPressCredentials credentials =
-            new CmsCredentials.WordPressCredentials("https://example.com", "admin", "secret");
+            new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
 
     @BeforeEach
     void setUp() {

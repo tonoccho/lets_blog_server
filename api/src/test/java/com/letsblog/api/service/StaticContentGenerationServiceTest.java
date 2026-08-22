@@ -2,7 +2,6 @@ package com.letsblog.api.service;
 
 import com.letsblog.api.ai.LlmClient;
 import com.letsblog.api.cms.CmsCredentials.WordPressCredentials;
-import com.letsblog.api.cms.rest.WordPressRestBulkManagementOperations;
 import com.letsblog.api.cms.ssh.WordPressSshOperations;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.domain.StaticContent;
@@ -36,9 +35,6 @@ class StaticContentGenerationServiceTest {
 
     @Mock
     private WordPressBulkManagementClient bulkManagementClient;
-
-    @Mock
-    private WordPressRestBulkManagementOperations restOperations;
 
     @Mock
     private WordPressSshOperations sshOperations;
@@ -119,14 +115,14 @@ class StaticContentGenerationServiceTest {
     }
 
     @Test
-    void generate_sshSite_usesSshPluginsWhenRestUnavailable() {
+    void generate_sshSite_usesSshPlugins() {
         Site site = sshSite();
         when(siteRepository.findById(2L)).thenReturn(Optional.of(site));
 
         WordPressCredentials sshCreds = new WordPressCredentials(
-                "https://ssh.example.com", null, null, "SSH", "host", 22, "user", "/var/www/html",
+                "https://ssh.example.com", null, "SSH", "host", 22, "user", "/var/www/html",
                 "pem", "fingerprint", null);
-        SiteService.SiteDataSource dataSource = new SiteService.SiteDataSource(false, null, sshCreds);
+        SiteService.SiteDataSource dataSource = new SiteService.SiteDataSource(false, sshCreds);
         when(siteService.resolveDataSource(site)).thenReturn(dataSource);
         when(sshOperations.listPlugins(sshCreds)).thenReturn(List.of(
                 new WordPressSshOperations.PluginThemeInfo("contact-form-7", "active")
@@ -139,7 +135,6 @@ class StaticContentGenerationServiceTest {
         StaticContentResponse response = staticContentGenerationService.generate(2L, StaticContentType.OPERATOR_INFO);
 
         assertEquals("運営者情報本文", response.body());
-        verify(restOperations, never()).listPlugins(any());
     }
 
     @Test
@@ -208,7 +203,7 @@ class StaticContentGenerationServiceTest {
     void generate_noAvailableDataSource_throwsAiServiceGenerationException() {
         Site site = sshSite();
         when(siteRepository.findById(2L)).thenReturn(Optional.of(site));
-        SiteService.SiteDataSource unavailable = new SiteService.SiteDataSource(false, null, null);
+        SiteService.SiteDataSource unavailable = new SiteService.SiteDataSource(false, null);
         when(siteService.resolveDataSource(site)).thenReturn(unavailable);
 
         AiServiceGenerationException exception = assertThrows(

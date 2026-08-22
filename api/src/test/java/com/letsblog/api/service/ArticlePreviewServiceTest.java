@@ -572,7 +572,7 @@ class ArticlePreviewServiceTest {
 
     private com.letsblog.api.cms.CmsCredentials.WordPressCredentials agentCredentials(String wpSlug) {
         return new com.letsblog.api.cms.CmsCredentials.WordPressCredentials(
-                "https://localhost/sites/" + wpSlug, "admin", null,
+                "https://localhost/sites/" + wpSlug, "admin",
                 "AGENT", null, null, null, null, null, null, wpSlug);
     }
 
@@ -828,7 +828,7 @@ class ArticlePreviewServiceTest {
 
     private com.letsblog.api.cms.CmsCredentials.WordPressCredentials sshCredentials() {
         return new com.letsblog.api.cms.CmsCredentials.WordPressCredentials(
-                "http://production.example.com", "admin", null,
+                "http://production.example.com", "admin",
                 "SSH", "ssh.example.com", 22, "deploy", "/var/www/html", "PRIVATE-KEY-PEM", null, null);
     }
 
@@ -967,7 +967,7 @@ class ArticlePreviewServiceTest {
         when(siteRepository.findById(40L)).thenReturn(Optional.of(site));
         com.letsblog.api.cms.CmsCredentials.WordPressCredentials credsWithoutUsername =
                 new com.letsblog.api.cms.CmsCredentials.WordPressCredentials(
-                        "http://production.example.com", null, null,
+                        "http://production.example.com", null,
                         "SSH", "ssh.example.com", 22, "deploy", "/var/www/html", "PRIVATE-KEY-PEM", null, null);
         when(siteService.getCredentials("production-site")).thenReturn(credsWithoutUsername);
         when(wordPressSshOperations.getLatestPost(credsWithoutUsername)).thenReturn(Optional.empty());

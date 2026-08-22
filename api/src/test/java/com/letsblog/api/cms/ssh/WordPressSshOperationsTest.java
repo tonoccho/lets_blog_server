@@ -55,13 +55,13 @@ class WordPressSshOperationsTest {
 
     private WordPressCredentials creds(String wpPath) {
         return new WordPressCredentials(
-                "https://example.com", null, null,
+                "https://example.com", null,
                 "SSH", "203.0.113.5", 22, "deploy", wpPath, "PRIVATE-KEY-PEM", "SHA256:pinned", null);
     }
 
     private WordPressCredentials credsWithUsername(String username) {
         return new WordPressCredentials(
-                "https://example.com", username, null,
+                "https://example.com", username,
                 "SSH", "203.0.113.5", 22, "deploy", "/var/www/html", "PRIVATE-KEY-PEM", "SHA256:pinned", null);
     }
 

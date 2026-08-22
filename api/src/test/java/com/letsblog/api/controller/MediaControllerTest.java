@@ -48,7 +48,7 @@ class MediaControllerTest {
     @Test
     void upload_JPEGのExifメタ情報を削除してからアップロードする() throws Exception {
         CmsCredentials credentials = new CmsCredentials.WordPressCredentials(
-                "https://example.com", "user", "app-password");
+                "https://example.com", "user", "SSH");
         when(siteService.getCredentials("my-site")).thenReturn(credentials);
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
         when(cmsAdapter.uploadMedia(any(), anyString(), anyString(), any()))

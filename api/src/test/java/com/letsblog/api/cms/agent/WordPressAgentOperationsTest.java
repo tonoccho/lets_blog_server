@@ -42,7 +42,7 @@ class WordPressAgentOperationsTest {
 
     private WordPressCredentials creds() {
         return new WordPressCredentials(
-                "http://wordpress/sites/main", "admin", "app-pass",
+                "http://wordpress/sites/main", "admin",
                 "AGENT", null, null, null, null, null, null, "main");
     }
 
