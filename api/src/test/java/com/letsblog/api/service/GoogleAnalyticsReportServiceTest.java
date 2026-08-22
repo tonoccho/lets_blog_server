@@ -93,7 +93,9 @@ class GoogleAnalyticsReportServiceTest {
         GoogleServiceAccountKey key = new GoogleServiceAccountKey("svc@example.com", "key", null);
         when(projectApiKeyService.resolveGoogleAnalyticsServiceAccountKey(1L)).thenReturn(key);
         when(googleAnalyticsClient.fetchReport(eq(key), eq("123456789"), anyInt()))
-                .thenReturn(new GoogleAnalyticsReport(120, 80, 300));
+                .thenReturn(new GoogleAnalyticsReport(120, 80, 300,
+                        java.util.List.of(new com.letsblog.api.analytics.GoogleAnalyticsDailyDataPoint("2024-01-01", 10, 5, 20)),
+                        java.util.List.of(new com.letsblog.api.analytics.GoogleAnalyticsChannelBreakdown("Organic Search", 120, 80, 300))));
 
         GoogleAnalyticsReportResponse response = service().getReport(1L);
 
@@ -102,6 +104,10 @@ class GoogleAnalyticsReportServiceTest {
         assertEquals(80L, response.activeUsers());
         assertEquals(300L, response.pageViews());
         assertNotNull(response.periodLabel());
+        assertEquals(1, response.dailyDataPoints().size());
+        assertEquals("2024-01-01", response.dailyDataPoints().get(0).date());
+        assertEquals(1, response.channelBreakdown().size());
+        assertEquals("Organic Search", response.channelBreakdown().get(0).channel());
     }
 
     @Test

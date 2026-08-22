@@ -1482,6 +1482,20 @@ export function clearProjectGoogleAnalyticsCredentials(projectId: number, actor:
   return apiFetch<void>(`/api/projects/${projectId}/api-keys/google-analytics`, { method: 'DELETE', actor });
 }
 
+export interface GoogleAnalyticsDailyDataPoint {
+  date: string;
+  sessions: number;
+  activeUsers: number;
+  pageViews: number;
+}
+
+export interface GoogleAnalyticsChannelBreakdown {
+  channel: string;
+  sessions: number;
+  activeUsers: number;
+  pageViews: number;
+}
+
 export interface GoogleAnalyticsReport {
   eligible: boolean;
   sessions: number | null;
@@ -1489,6 +1503,8 @@ export interface GoogleAnalyticsReport {
   pageViews: number | null;
   periodLabel: string | null;
   errorMessage: string | null;
+  dailyDataPoints: GoogleAnalyticsDailyDataPoint[];
+  channelBreakdown: GoogleAnalyticsChannelBreakdown[];
 }
 
 export function getProjectGoogleAnalyticsReport(
@@ -1552,6 +1568,20 @@ export function completeProjectAdSenseOAuth(
   });
 }
 
+export interface AdSenseDailyDataPoint {
+  date: string;
+  estimatedEarnings: string;
+  clicks: number;
+  impressions: number;
+}
+
+export interface AdSensePlatformBreakdown {
+  platform: string;
+  estimatedEarnings: string;
+  clicks: number;
+  impressions: number;
+}
+
 export interface AdSenseReport {
   eligible: boolean;
   estimatedEarnings: string | null;
@@ -1559,6 +1589,8 @@ export interface AdSenseReport {
   impressions: number | null;
   periodLabel: string | null;
   errorMessage: string | null;
+  dailyDataPoints: AdSenseDailyDataPoint[];
+  platformBreakdown: AdSensePlatformBreakdown[];
 }
 
 export function getProjectAdSenseReport(projectId: number, actor?: ActorInfo): Promise<AdSenseReport> {

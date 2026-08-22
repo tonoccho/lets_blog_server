@@ -31,7 +31,9 @@ class ProjectDashboardControllerTest {
     @Test
     void getGoogleAnalyticsReport_サービスの結果をそのまま返す() {
         GoogleAnalyticsReportResponse expected =
-                GoogleAnalyticsReportResponse.of(new com.letsblog.api.analytics.GoogleAnalyticsReport(1, 2, 3), "過去28日間");
+                GoogleAnalyticsReportResponse.of(
+                        new com.letsblog.api.analytics.GoogleAnalyticsReport(1, 2, 3, java.util.List.of(), java.util.List.of()),
+                        "過去28日間");
         when(googleAnalyticsReportService.getReport(1L)).thenReturn(expected);
 
         GoogleAnalyticsReportResponse response = controller().getGoogleAnalyticsReport(1L);
@@ -42,7 +44,9 @@ class ProjectDashboardControllerTest {
     @Test
     void getAdSenseReport_サービスの結果をそのまま返す() {
         AdSenseReportResponse expected =
-                AdSenseReportResponse.of(new com.letsblog.api.adsense.AdSenseReport("12.34", 100, 5000), "過去30日間");
+                AdSenseReportResponse.of(
+                        new com.letsblog.api.adsense.AdSenseReport("12.34", 100, 5000, java.util.List.of(), java.util.List.of()),
+                        "過去30日間");
         when(adSenseReportService.getReport(1L)).thenReturn(expected);
 
         AdSenseReportResponse response = controller().getAdSenseReport(1L);
