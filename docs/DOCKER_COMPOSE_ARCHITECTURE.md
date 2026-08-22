@@ -32,6 +32,8 @@ Keycloak / 各ドメインサービス)を見据えた構成に整えた(#556)�
 | `mysql` | 3306 | 非公開 | |
 | `rabbitmq` | 5672 (+管理UI 15672) | 非公開 | |
 | `phpmyadmin` | 80 | reverse-proxy経由のみ(`/phpmyadmin/`) | |
+| `keycloak` | 8080(管理/ヘルスチェックは9000) | reverse-proxy経由のみ(`/auth/`) | `KC_HTTP_RELATIVE_PATH=/auth`。#559 |
+| `keycloak-postgres` | 5432 | 非公開 | Keycloak専用PostgreSQL。#559 |
 | `penpot-frontend` | 8080 | `9001:8080`(直接公開。ハンドオフURL生成のため) | |
 | `comfyui` | 8188 | 非公開(api経由) | GPU必須 |
 | `plantuml` | 8080 | 非公開(api経由) | |
@@ -102,3 +104,6 @@ reverse-proxy経由のみ、という原則を踏襲する。
 - 上記はアイドル時の実測値であり、ビルド時(`docker compose build`実行中)やAI機能利用時は
   瞬間的にこれを上回る。ホストOS自体の消費分も含め、実測値(約10.3GiB)に対して
   余裕を見て16GB以上を推奨する(README参照)。
+- この表は#556時点(19コンテナ)の実測。#559でKeycloak(`keycloak` 約1.4GiB /
+  `keycloak-postgres` 約43MiB)が追加され、現在は21コンテナ構成。表全体の再実測は
+  今後のリソース監査でまとめて行う。
