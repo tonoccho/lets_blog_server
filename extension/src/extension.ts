@@ -33,7 +33,9 @@ import { ImageGalleryPanel } from './imageGalleryPanel';
 import { DiagramEditorPanel, DIAGRAM_REFERENCE_PATTERN } from './diagramEditorPanel';
 import { DiagramGalleryPanel } from './diagramGalleryPanel';
 import { SectionGenPanel } from './sectionGenPanel';
+import { AskAiPanel } from './askAiPanel';
 import { resolveSectionContext } from './headingContext';
+import { buildSourcesSection } from './markdownSources';
 import { logger } from './logger';
 import { messageOf, reportError } from './errorHandler';
 import { buildSmartCardTag, buildStandardLink, parseHttpUrl } from './urlPaste';
@@ -73,6 +75,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.editDiagram', () => commandEditDiagram(context)),
     vscode.commands.registerCommand('letsBlog.diagramGallery', () => commandDiagramGallery(context)),
     vscode.commands.registerCommand('letsBlog.generateSection', () => commandGenerateSection(context)),
+    vscode.commands.registerCommand('letsBlog.askAiSearch', () => commandAskAiSearch(context)),
     vscode.commands.registerCommand('letsBlog.selectProject', () => commandSelectProject(context)),
     vscode.commands.registerCommand('letsBlog.planArticle', () => commandPlanArticle(context)),
     vscode.commands.registerCommand('letsBlog.previewArticle', () => commandPreviewArticle(context)),
@@ -123,18 +126,6 @@ function getActiveMarkdownEditor(): vscode.TextEditor | undefined {
     return undefined;
   }
   return editor;
-}
-
-/**
- * AI生成結果末尾に付加する出典セクション。出典があるかのように装わないよう、
- * 検索失敗/未設定/0件時はsearchNoteでその旨を明示する。
- */
-function buildSourcesSection(sources: api.SourceReference[], searchNote: string | null): string {
-  if (sources.length === 0) {
-    return searchNote ? `\n\n---\n*${searchNote}*\n` : '';
-  }
-  const list = sources.map((s) => `- [${s.title}](${s.url})`).join('\n');
-  return `\n\n---\n**出典:**\n${list}\n`;
 }
 
 async function replaceDocumentText(editor: vscode.TextEditor, newText: string): Promise<void> {
@@ -865,6 +856,21 @@ async function commandGenerateSection(context: vscode.ExtensionContext): Promise
     SectionGenPanel.createOrShow(context, editor, articleTitle, sectionContext);
   } catch (err) {
     reportError('セクション生成パネルの起動に失敗しました', err);
+  }
+}
+
+/**
+ * エディタ右クリックメニューの「Ask AI」。Web検索を踏まえた質問応答パネルを開く(issue #526)。
+ * 右クリック時点の選択範囲(無ければカーソル位置)がApply時の挿入先になる。
+ */
+async function commandAskAiSearch(context: vscode.ExtensionContext): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  try {
+    AskAiPanel.createOrShow(context, editor);
+  } catch (err) {
+    reportError('Ask AIパネルの起動に失敗しました', err);
   }
 }
 

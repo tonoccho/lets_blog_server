@@ -90,6 +90,22 @@ export interface SectionGenInitPayload {
   defaultAiProvider: string;
 }
 
+// --- Ask AI (Web検索) パネル ---
+
+export type AskAiInboundMessage =
+  | WebviewMessageBase<'init'>
+  | WebviewMessageBase<'cancel'>
+  | (WebviewMessageBase<'ask'> & { question: string; provider?: string })
+  | (WebviewMessageBase<'insert'> & { text: string });
+
+export type AskAiOutboundCommand = 'init' | 'answered' | 'inserted' | 'cancelled' | 'error';
+
+/** Ask AI パネルの初期化ペイロード。 */
+export interface AskAiInitPayload {
+  /** letsBlog.aiProviderの現在値(issue #530)。空文字は「サーバー既定値を使用」。 */
+  defaultAiProvider: string;
+}
+
 // --- Create Article パネル ---
 
 export type ArticleCreationInboundMessage =

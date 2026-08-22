@@ -56,6 +56,8 @@ export const AiGenerationResultSchema = z.object({
 });
 export type AiDraftResult = z.infer<typeof AiGenerationResultSchema>;
 export type AiSectionResult = z.infer<typeof AiGenerationResultSchema>;
+/** issue #526: エディタ右クリックメニュー「Ask AI」の質問応答結果。 */
+export type AiAskResult = z.infer<typeof AiGenerationResultSchema>;
 
 export const AiTagsResultSchema = z.object({
   categories: z.array(z.string()).default([]),

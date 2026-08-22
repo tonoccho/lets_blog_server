@@ -65,6 +65,10 @@
         "title": "Let's Blog: Generate Section"
       },
       {
+        "command": "letsBlog.askAiSearch",
+        "title": "Let's Blog: Ask AI (Web Search)"
+      },
+      {
         "command": "letsBlog.selectProject",
         "title": "Let's Blog: Select Project"
       },
@@ -159,6 +163,11 @@
           "command": "letsBlog.diagramGallery",
           "when": "editorTextFocus && resourceLangId == markdown",
           "group": "letsBlog@6"
+        },
+        {
+          "command": "letsBlog.askAiSearch",
+          "when": "editorTextFocus && resourceLangId == markdown",
+          "group": "letsBlog@7"
         }
       ]
     },
