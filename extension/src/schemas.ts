@@ -65,6 +65,20 @@ export const AiTagsResultSchema = z.object({
 });
 export type AiTagsResult = z.infer<typeof AiTagsResultSchema>;
 
+/** 校正チェックで検出した1件の指摘。POST /api/ai/proofread のレスポンス(issue #523)。 */
+export const ProofreadIssueSchema = z.object({
+  type: z.enum(['typo', 'readability', 'unnecessary']),
+  originalText: z.string(),
+  message: z.string(),
+  suggestion: z.string().nullable().default(null),
+});
+export type ProofreadIssue = z.infer<typeof ProofreadIssueSchema>;
+
+export const ProofreadResultSchema = z.object({
+  issues: z.array(ProofreadIssueSchema).default([]),
+});
+export type ProofreadResult = z.infer<typeof ProofreadResultSchema>;
+
 export const AiImageResultSchema = z.object({
   id: z.number(),
   fileName: z.string(),

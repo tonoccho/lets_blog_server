@@ -39,6 +39,7 @@ import { buildSourcesSection } from './markdownSources';
 import { logger } from './logger';
 import { messageOf, reportError } from './errorHandler';
 import { buildSmartCardTag, buildStandardLink, parseHttpUrl } from './urlPaste';
+import { ProofreadController } from './proofreadDiagnostics';
 
 /**
  * 拡張の有効化。ロガーの初期化と全コマンドの登録を行う。
@@ -55,6 +56,19 @@ export function activate(context: vscode.ExtensionContext): void {
         logger.refreshFromConfiguration();
       }
     })
+  );
+
+  // issue #523: front matter検証(publish_scheduled_at/status/categories)は常時、本文のAI校正は
+  // letsBlog.proofreadEnabled(既定false)でオプトインした場合のみ、編集の都度デバウンスして実行する。
+  const proofreadController = new ProofreadController(context);
+  context.subscriptions.push(
+    proofreadController,
+    vscode.languages.registerCodeActionsProvider({ language: 'markdown' }, proofreadController, {
+      providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
+    }),
+    vscode.workspace.onDidChangeTextDocument((event) => proofreadController.scheduleCheck(event.document)),
+    vscode.workspace.onDidOpenTextDocument((document) => proofreadController.scheduleCheck(document)),
+    vscode.workspace.onDidCloseTextDocument((document) => proofreadController.clearDocument(document))
   );
 
   context.subscriptions.push(
@@ -81,7 +95,14 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.previewArticle', () => commandPreviewArticle(context)),
     vscode.commands.registerCommand('letsBlog.previewDevTools', () => PreviewPanel.openDevTools()),
     vscode.commands.registerCommand('letsBlog.pasteSmartCard', () => commandPasteSmartCard(context)),
-    vscode.commands.registerCommand('letsBlog.pasteAsLink', () => commandPasteAsLink(context))
+    vscode.commands.registerCommand('letsBlog.pasteAsLink', () => commandPasteAsLink(context)),
+    vscode.commands.registerCommand('letsBlog.proofreadNow', () => commandProofreadNow(proofreadController)),
+    vscode.commands.registerCommand('letsBlog.fixInvalidStatus', (uri: vscode.Uri) =>
+      commandFixInvalidStatus(context, uri)
+    ),
+    vscode.commands.registerCommand('letsBlog.removeInvalidCategory', (uri: vscode.Uri, category: string) =>
+      commandRemoveInvalidCategory(uri, category)
+    )
   );
 
   context.subscriptions.push(registerDiagramCursorContext());
@@ -721,6 +742,56 @@ async function commandSuggestTags(context: vscode.ExtensionContext): Promise<voi
     vscode.window.showInformationMessage('front matterに反映しました。');
   } catch (err) {
     reportError('タグ提案に失敗しました', err);
+  }
+}
+
+/**
+ * issue #523: front matter検証と本文のAI校正を即時実行する。letsBlog.proofreadEnabledが
+ * 無効(既定)でも、このコマンドは常に本文のAI校正まで実行する。
+ */
+async function commandProofreadNow(proofreadController: ProofreadController): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  try {
+    await proofreadController.runManual(editor.document);
+  } catch (err) {
+    reportError('校正チェックに失敗しました', err);
+  }
+}
+
+/** issue #523: front matterのstatusが不正な値だった際のクイックフィックス。有効な値から選び直す。 */
+async function commandFixInvalidStatus(context: vscode.ExtensionContext, uri: vscode.Uri): Promise<void> {
+  try {
+    const document = await vscode.workspace.openTextDocument(uri);
+    const editor = await vscode.window.showTextDocument(document);
+    const apiKey = await requireApiKey(context);
+    const statuses = await api.getPostStatuses(getServerUrl(), apiKey);
+
+    const picked = await vscode.window.showQuickPick(
+      statuses.map((s) => ({ label: s.label, description: s.value, value: s.value })),
+      { placeHolder: '有効なステータスを選択' }
+    );
+    if (!picked) return;
+
+    const article = parseArticle(editor.document.getText());
+    article.data.status = picked.value;
+    await replaceDocumentText(editor, stringifyArticle(article));
+  } catch (err) {
+    reportError('ステータスの修正に失敗しました', err);
+  }
+}
+
+/** issue #523: front matterのcategoriesにサイトへ存在しない項目があった際のクイックフィックス。 */
+async function commandRemoveInvalidCategory(uri: vscode.Uri, category: string): Promise<void> {
+  try {
+    const document = await vscode.workspace.openTextDocument(uri);
+    const editor = await vscode.window.showTextDocument(document);
+    const article = parseArticle(editor.document.getText());
+    article.data.categories = (article.data.categories ?? []).filter((c) => c !== category);
+    await replaceDocumentText(editor, stringifyArticle(article));
+  } catch (err) {
+    reportError('カテゴリの削除に失敗しました', err);
   }
 }
 

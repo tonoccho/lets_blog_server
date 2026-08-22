@@ -19,6 +19,8 @@ import com.letsblog.api.dto.AiDraftResponse;
 import com.letsblog.api.dto.AiImageBatchResponse;
 import com.letsblog.api.dto.AiImagePromptResponse;
 import com.letsblog.api.dto.AiImageRequest;
+import com.letsblog.api.dto.AiProofreadRequest;
+import com.letsblog.api.dto.AiProofreadResponse;
 import com.letsblog.api.dto.AiSectionRequest;
 import com.letsblog.api.dto.AiTagsRequest;
 import com.letsblog.api.dto.AiTagsResponse;
@@ -563,5 +565,44 @@ class AiAssistServiceTest {
 
         assertEquals(List.of(), response.categories());
         assertEquals(List.of(), response.tags());
+    }
+
+    @Test
+    void proofreadContent_正常なJSON配列応答を指摘一覧として返す() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(
+                "[{\"type\": \"typo\", \"originalText\": \"こんちには\", "
+                        + "\"message\": \"誤字です\", \"suggestion\": \"こんにちは\"}]");
+
+        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんちには世界", null));
+
+        assertEquals(1, response.issues().size());
+        assertEquals("typo", response.issues().get(0).type());
+        assertEquals("こんちには", response.issues().get(0).originalText());
+        assertEquals("誤字です", response.issues().get(0).message());
+        assertEquals("こんにちは", response.issues().get(0).suggestion());
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture(), any(), any());
+        assertTrue(promptCaptor.getValue().contains("こんちには世界"));
+    }
+
+    @Test
+    void proofreadContent_本文に存在しないoriginalTextの指摘は除外する() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(
+                "[{\"type\": \"typo\", \"originalText\": \"本文に無い文字列\", "
+                        + "\"message\": \"誤字です\", \"suggestion\": null}]");
+
+        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null));
+
+        assertEquals(List.of(), response.issues());
+    }
+
+    @Test
+    void proofreadContent_不正なJSON応答は空の指摘一覧にフォールバックする() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("これはJSONではありません");
+
+        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null));
+
+        assertEquals(List.of(), response.issues());
     }
 }

@@ -21,12 +21,15 @@ import com.letsblog.api.dto.AiImageBatchResponse;
 import com.letsblog.api.dto.AiImagePromptResponse;
 import com.letsblog.api.dto.AiImageRequest;
 import com.letsblog.api.dto.AiImageResponse;
+import com.letsblog.api.dto.AiProofreadRequest;
+import com.letsblog.api.dto.AiProofreadResponse;
 import com.letsblog.api.dto.AiSectionRequest;
 import com.letsblog.api.dto.AiSectionResponse;
 import com.letsblog.api.dto.AiTagsRequest;
 import com.letsblog.api.dto.PlanChatMessage;
 import com.letsblog.api.dto.AiTagsResponse;
 import com.letsblog.api.dto.ImageGenerationOptionsResponse;
+import com.letsblog.api.dto.ProofreadIssue;
 import com.letsblog.api.repository.GeneratedImageRepository;
 import com.letsblog.api.repository.GenerationJobRepository;
 import org.slf4j.Logger;
@@ -131,6 +134,27 @@ public class AiAssistService {
             {"tags": ["タグ1", "タグ2", "タグ3"]}
 
             画像生成プロンプト:
+            %s
+            """;
+
+    /**
+     * issue #523: エディタでのリアルタイム校正チェック用。DRAFT_PROMPT_TEMPLATESの"proofread"
+     * (全文を校正済みの本文に書き換えて返す)とは異なり、指摘一覧をJSON配列で返させ、
+     * エディタ側で該当箇所に波線(赤色)の指摘として表示する。
+     */
+    private static final String PROOFREAD_CHECK_PROMPT_TEMPLATE = """
+            あなたは日本語のプロの校正者です。以下のブログ記事本文を読み、次の観点で問題があれば指摘してください。
+            - typo: 誤字脱字・変換ミス
+            - readability: 読みにくい・分かりにくい表現
+            - unnecessary: 冗長で削ってよい表現
+
+            出力は必ず次のJSON配列の形式のみとし、他の文章は一切含めないでください。問題が無ければ空配列 [] を返してください。
+            originalTextには本文中の該当箇所を、一字一句変えずにそのまま引用してください(位置の特定に使うため)。
+            suggestionには置き換え案を入れてください。直接の置き換え案が無い指摘(readabilityなど)ではnullにしてください。
+
+            [{"type": "typo", "originalText": "本文中の該当箇所", "message": "指摘内容", "suggestion": "置き換え案またはnull"}]
+
+            本文:
             %s
             """;
 
@@ -541,6 +565,61 @@ public class AiAssistService {
     private String extractJsonObject(String raw) {
         int start = raw.indexOf('{');
         int end = raw.lastIndexOf('}');
+        if (start < 0 || end < 0 || end < start) {
+            return raw;
+        }
+        return raw.substring(start, end + 1);
+    }
+
+    /**
+     * issue #523: リアルタイム校正チェック。本文中の問題点をtypo/readability/unnecessaryの
+     * 3種類で検出し、エディタ側で該当箇所へ波線表示するための一覧を返す。
+     */
+    public AiProofreadResponse proofreadContent(AiProofreadRequest request) {
+        GenerationJob job = startJob("llm_proofread_check", Map.of("text", request.text()));
+        try {
+            String prompt = PROOFREAD_CHECK_PROMPT_TEMPLATE.formatted(request.text());
+            String raw = llmClient.generate(prompt, null, AiProvider.fromString(request.provider()));
+            List<ProofreadIssue> issues = parseProofreadResponse(raw, request.text());
+            completeJob(job, Map.of("result", raw));
+            return new AiProofreadResponse(issues);
+        } catch (RuntimeException e) {
+            failJob(job, e);
+            throw e;
+        }
+    }
+
+    private List<ProofreadIssue> parseProofreadResponse(String raw, String sourceText) {
+        String jsonPart = extractJsonArray(raw);
+        try {
+            JsonNode node = objectMapper.readTree(jsonPart);
+            if (!node.isArray()) {
+                return List.of();
+            }
+            List<ProofreadIssue> issues = new ArrayList<>();
+            for (JsonNode item : node) {
+                String originalText = item.path("originalText").asText(null);
+                // originalTextが本文中に実在しない指摘は、エディタ側で位置特定ができず表示できないため除外する
+                // (LLMの引用ミス・幻覚に対する防御)。
+                if (originalText == null || originalText.isEmpty() || !sourceText.contains(originalText)) {
+                    continue;
+                }
+                String type = item.path("type").asText(null);
+                String message = item.path("message").asText(null);
+                JsonNode suggestionNode = item.get("suggestion");
+                String suggestion = suggestionNode == null || suggestionNode.isNull()
+                        ? null : suggestionNode.asText();
+                issues.add(new ProofreadIssue(type, originalText, message, suggestion));
+            }
+            return issues;
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    private String extractJsonArray(String raw) {
+        int start = raw.indexOf('[');
+        int end = raw.lastIndexOf(']');
         if (start < 0 || end < 0 || end < start) {
             return raw;
         }
