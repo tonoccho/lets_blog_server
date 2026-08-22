@@ -79,6 +79,10 @@ services:
       VSCODE_EXTENSION_SOURCE_PATH: /app/extension-src
       VSCODE_EXTENSION_BUILD_PATH: /app/extension-build
       DOCKER_SOCKET_PROXY_BASE_URL: http://docker-socket-proxy:2375
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
     volumes:
       - bulk_upload_files:/app/data/bulk-uploads
       - generated_images:/app/data/generated-images
@@ -89,8 +93,52 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
       docker-socket-proxy:
         condition: service_started
+    networks:
+      - lbs-net
+
+  # ログメッセージキューイング(issue #466)のコンシューマー。apiサーバーがRabbitMQへ発行した
+  # エラーログ/操作ログ/監査ログのメッセージを受信し、apiと共有するDB(既存のFlywayマイグレーション
+  # 済みスキーマ)へ書き込む。スキーマの所有権・マイグレーションはapiサーバー側のFlywayのみが持つ。
+  log-writer:
+    build:
+      context: ./log-writer
+      dockerfile: Dockerfile
+    container_name: lbs-log-writer
+    restart: unless-stopped
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - lbs-net
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: lbs-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - lbs-net
 
@@ -345,6 +393,7 @@ networks:
 
 volumes:
   mysql_data:
+  rabbitmq_data:
   penpot_postgres:
   penpot_assets:
   comfyui_models:

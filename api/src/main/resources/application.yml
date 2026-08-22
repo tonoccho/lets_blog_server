@@ -66,6 +66,16 @@ spring:
     multipart:
       max-file-size: 100MB
       max-request-size: 100MB
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    # ログ発行(issue #466)はキュー障害時に同期DB書き込みへフォールバックする方針のため、
+    # 接続不可時にリクエストスレッドを長く塞がないよう短めのタイムアウトにする。
+    connection-timeout: 3000ms
+    template:
+      reply-timeout: 3000
 
 app:
   encryption-key: ${APP_ENCRYPTION_KEY:}
