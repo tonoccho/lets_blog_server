@@ -341,6 +341,79 @@ ERROR: error running exit hooks: error removing container: <container_id>
 
 ---
 
+### Multi-Service Startup Failures
+
+**Problem:** `docker compose up -d` starts ~19 containers, and a container never becomes
+`healthy`, or a dependent service (e.g. `api`) never starts.
+
+**Symptoms:**
+```bash
+$ docker compose ps
+NAME          STATUS
+lbs-api       Created            # never transitions to "Up"/"Starting"
+lbs-mysql     Up (unhealthy)
+```
+
+**Cause:** Since #556, `api` / `log-writer` `depends_on` `mysql` and `rabbitmq` with
+`condition: service_healthy` — they won't even start until both report healthy. If `mysql`
+or `rabbitmq` never becomes healthy, everything that depends on them stays stuck too.
+
+**Solution:**
+
+1. **Find which upstream dependency is actually unhealthy**
+   ```bash
+   docker compose ps
+   # Look for a service stuck as "starting" or "unhealthy" rather than "healthy"
+   ```
+
+2. **Check that specific service's logs and healthcheck history**
+   ```bash
+   docker compose logs mysql        # or rabbitmq, whichever is stuck
+   docker inspect <container-name> --format '{{json .State.Health}}' | jq .
+   ```
+
+3. **Common root causes:**
+   - `mysql` unhealthy: often a bad/missing `MYSQL_ROOT_PASSWORD` in `.env`, or a corrupted
+     data volume from an interrupted previous startup. As a last resort (destroys local
+     data), `docker compose down -v` and start fresh.
+   - `rabbitmq` unhealthy or `api`/`log-writer` crash-looping with an `AuthenticationFailureException`/
+     `ACCESS_REFUSED` in their logs: `RABBITMQ_USER`/`RABBITMQ_PASSWORD` aren't set in `.env`
+     (they're referenced in `docker-compose.yml` but have no default). Set them, then
+     `docker compose up -d rabbitmq api log-writer` to recreate with the new credentials.
+   - `api`/`log-writer` themselves unhealthy (`docker compose ps` shows `Up (unhealthy)`):
+     their healthcheck hits `/actuator/health` — check
+     `docker exec <container> curl -s http://localhost:8080/actuator/health` for the
+     failing component (mail, datasource, etc.) rather than assuming the whole app is down.
+
+4. **A dependency's schema/user init script didn't run**
+   The per-service MySQL schemas/users (#570, `mysql/init/`) only get created on a *fresh*
+   MySQL data volume — recreating the `mysql` container alone does not re-run them. If a
+   service errors with "Access denied" for its own schema user, you likely need
+   `docker compose down -v` (destroys the MySQL volume — only do this in a disposable dev
+   environment) followed by `docker compose up -d`.
+
+**Problem:** A container fails to start with `port is already allocated` / `bind: address already in use`.
+
+**Cause:** With 19 containers, more host ports are in play than just 80/443 — `9001`
+(Penpot frontend), `1080` (Penpot mailcatcher UI), `3306` (if you've temporarily published
+MySQL for local `./gradlew test` runs, per [docs/setup.md](setup.md)), etc.
+
+**Solution:**
+
+```bash
+# Find what's already using a given port
+sudo ss -ltnp | grep :9001
+
+# Or ask Docker directly which of *its own* containers holds a port
+docker ps --filter "publish=9001"
+```
+
+If it's a stale container from a previous `docker compose up` under a different Compose
+project name (e.g. you ran `docker compose` from a different working directory), stop that
+one rather than changing this project's ports.
+
+---
+
 ### Cannot Access Docker Services
 
 **Problem:** Cannot reach service at expected URL

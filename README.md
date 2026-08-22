@@ -6,7 +6,108 @@ AI執筆支援(外部LLMサービス)・チャットでの壁打ちからのプ�
 Docker Composeでまとめて起動する。クライアントはVSCode拡張機能(執筆・投稿)とWeb管理画面
 (サイト管理・投稿履歴・ユーザー管理等)の2つ。
 
-詳細なアーキテクチャは [spec/phase1/00-overview.md](spec/phase1/00-overview.md) を参照。
+詳細なアーキテクチャは [spec/phase1/00-overview.md](spec/phase1/00-overview.md)(初期構築時点)を参照。
+現在はマイクロサービス化 + Keycloak認証基盤への移行(Epic #551)を進行中で、以下はその現状と目標。
+
+## アーキテクチャ
+
+### 現状(2026年8月時点)
+
+`api`(`services/legacy-api`)がドメインロジックの大半を担う単一サービスに、認証以外の周辺コンポーネント
+(RabbitMQ経由の非同期ログ書き込み・Penpotによるデザイン生成・PlantUML/drawioレンダリング・WordPress
+プロビジョニング)が接続する構成。
+
+```mermaid
+flowchart LR
+    subgraph Client
+        VSCode["VSCode拡張"]
+        Web["Web管理画面<br/>(Next.js)"]
+    end
+
+    RP["reverse-proxy<br/>(nginx)"]
+
+    subgraph Server["Docker Compose"]
+        API["api<br/>(legacy-api, Spring Boot)"]
+        LW["log-writer"]
+        MySQL[(MySQL<br/>単一スキーマ)]
+        RMQ[["RabbitMQ<br/>letsblog.logs"]]
+        Penpot["Penpotスイート<br/>(デザイン生成)"]
+        ComfyUI["ComfyUI<br/>(画像生成, GPU)"]
+        PlantUML["PlantUML"]
+        Drawio["drawio"]
+    end
+
+    WP[("WordPress サイト群")]
+
+    VSCode -- "X-API-Key" --> RP
+    Web -- "X-API-Key + X-Actor-*" --> RP
+    RP --> API
+    RP --> Web
+    API --> MySQL
+    API -- "ログ発行" --> RMQ
+    RMQ -- "非同期コンシューム" --> LW
+    LW --> MySQL
+    API --> Penpot
+    API --> ComfyUI
+    API --> PlantUML
+    API --> Drawio
+    API -- "REST API + アプリケーションパスワード" --> WP
+```
+
+認証は `X-API-Key` + BFF(Web)が付与する `X-Actor-Id`/`X-Actor-Role` ヘッダを信頼する方式であり、
+これがなりすましを許す構造的弱点になっている([ADR-0002](docs/adr/0002-keycloak-oidc.md) の Context 参照)。
+
+### 目標構成(マイグレーション後)
+
+[ADR-0001](docs/adr/0001-domain-based-microservices.md)〜[ADR-0004](docs/adr/0004-schema-per-service.md) の
+決定に基づき、ドメイン単位の完全なマイクロサービス化と Keycloak (OIDC) 認証基盤への一括切り替えを行う。
+
+```mermaid
+flowchart LR
+    subgraph Client
+        VSCode["VSCode拡張<br/>(Device Code)"]
+        Web["Web管理画面<br/>(Auth Code + PKCE)"]
+    end
+
+    RP["reverse-proxy<br/>(nginx)"]
+    GW["api-gateway<br/>(JWT検証/ルーティング/レート制限/相関ID)"]
+    KC["Keycloak<br/>(OIDC IdP) + PostgreSQL"]
+
+    subgraph Services["ドメインサービス群(各サービス専用MySQLスキーマ)"]
+        Identity["identity-service"]
+        Project["project-service"]
+        Content["content-service"]
+        Media["media-service"]
+        AI["ai-service"]
+        Publishing["publishing-service"]
+        Analytics["analytics-service"]
+        Platform["platform-service"]
+        LogW["log-writer"]
+    end
+
+    Events[["RabbitMQ<br/>letsblog.events / letsblog.logs"]]
+
+    VSCode -- OIDCトークン --> RP
+    Web -- OIDCトークン --> RP
+    RP --> GW
+    GW -- JWT検証 --> KC
+    GW --> Identity
+    GW --> Project
+    GW --> Content
+    GW --> Media
+    GW --> AI
+    GW --> Publishing
+    GW --> Analytics
+    GW --> Platform
+    Services -- 発行/購読 --> Events
+    Events --> LogW
+```
+
+サービス間の同期呼び出しは Client Credentials Grant で相互認証する(図では省略。
+サービス数が多く全組み合わせを描くと見づらいため)。
+
+移行の詳細な意思決定は [docs/adr/](docs/adr/README.md)、実行計画は
+[spec/phase17/00-overview.md](spec/phase17/00-overview.md) 以降の各phaseを参照。
 
 ## CI/CD & Quality
 
@@ -21,6 +122,7 @@ Docker Composeでまとめて起動する。クライアントはVSCode拡張機
 
 ## 目次
 
+- [アーキテクチャ](#アーキテクチャ)
 - [ハードウェア要件](#ハードウェア要件)
 - [前提ソフトウェア要件](#前提ソフトウェア要件)
 - [前提ソフトウェアのインストール](#前提ソフトウェアのインストール)
