@@ -1,0 +1,139 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: gateway
+
+# ルーティング(#560)。Spring Cloud Gatewayはこの環境のSpring Boot 4.1系と非互換のため
+# (services/gateway/build.gradleのコメント参照)、独自のプロパティ構造(RouteProperties)
+# として定義し、com.letsblog.gateway.config.ProxyHandler がWebClientで転送する。
+#
+# 実サービスはまだlegacy-apiのみのため、全ルートが暫定的にlegacy-apiを指す。
+# 各サービス抽出Issue(Phase 19)で、対応する環境変数のURIを新サービスへ向け直すだけで
+# 移行できる。リストは先頭から順に評価され、最初にマッチしたルートが使われる
+# (先勝ち。特定度の高いパスを先に置くこと)。
+app:
+  gateway:
+    # 既定は60秒(旧nginxの暗黙のproxy_read_timeoutと同等)。個別に長い処理が
+    # 必要なルートはresponse-timeoutで上書きする(下記)。
+    default-response-timeout: 60s
+    # 移行期間中、どのルートにもマッチしなかったパスのフォールバック先。
+    fallback-uri: ${LEGACY_API_URI:http://api:8080}
+    routes:
+      # 以下の3つは、旧nginx設定で個別にタイムアウト延長していたエンドポイントの移設(#560)。
+      # より広いプレフィックスにマッチする下のルートより先に評価されるよう、
+      # 特定度の高いものを先に置く。
+      - id: project-environment-sync
+        uri: ${PROJECT_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/projects/*/environments/sync
+        response-timeout: 300s
+      - id: project-bulk-management
+        uri: ${PROJECT_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/projects/*/bulk-management
+          - /api/projects/*/bulk-management/upload
+          - /api/projects/*/bulk-management/replay
+        response-timeout: 300s
+      - id: content-posts-publish
+        uri: ${CONTENT_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/posts/publish
+        response-timeout: 1200s
+      # SSEエンドポイント(#560)。ダッシュボードの常時接続ストリームのため、応答自体は
+      # すぐ返る(ボディはFlux<DataBuffer>として遅延ストリーミングされ、この
+      # response-timeoutには縛られない。ProxyHandlerのJavadoc参照)。
+      - id: analytics-dashboard-stream
+        uri: ${ANALYTICS_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/dashboard/service-status/stream
+          - /api/dashboard/container-status/stream
+
+      - id: identity
+        uri: ${IDENTITY_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/auth/**
+          - /api/users/**
+          - /api/roles/**
+      - id: project
+        uri: ${PROJECT_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/projects/**
+          - /api/sites/**
+          - /api/ssh-keys/**
+      - id: content
+        uri: ${CONTENT_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/posts/**
+          - /api/custom-tags/**
+      - id: media
+        uri: ${MEDIA_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/images/**
+          - /api/diagrams/**
+          - /api/render/**
+      - id: ai
+        uri: ${AI_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/ai/**
+          - /api/generation-jobs/**
+          - /api/article-plan/**
+      - id: publishing
+        uri: ${PUBLISHING_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/publish/**
+          - /api/bulk-management/**
+      - id: analytics
+        uri: ${ANALYTICS_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/analytics/**
+          - /api/dashboard/**
+      - id: platform
+        uri: ${PLATFORM_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/system/**
+          - /api/backup/**
+          - /api/vscode-extension/**
+      - id: log
+        uri: ${LOG_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/logs/**
+          - /api/audit-logs/**
+  # レート制限(現行legacy-apiのRateLimitInterceptorから移設。#560)。
+  # 管理画面からのアップロード系エンドポイント制限値の動的変更(旧AppSettingService経由)は
+  # gatewayがDBを持たないため未対応(静的デフォルト値のみ)。follow-up issueで再検討する。
+  rate-limit:
+    api-global:
+      limit-for-period: ${API_RATE_LIMIT_REQUESTS:100}
+      limit-refresh-period: ${API_RATE_LIMIT_PERIOD:60s}
+    auth-endpoint:
+      limit-for-period: ${AUTH_RATE_LIMIT_REQUESTS:5}
+      limit-refresh-period: ${AUTH_RATE_LIMIT_PERIOD:60s}
+    operation-log-endpoint:
+      limit-for-period: ${OPERATION_LOG_RATE_LIMIT_REQUESTS:300}
+      limit-refresh-period: ${OPERATION_LOG_RATE_LIMIT_PERIOD:60s}
+    upload-endpoint:
+      limit-for-period: ${UPLOAD_RATE_LIMIT_REQUESTS:10}
+      limit-refresh-period: ${UPLOAD_RATE_LIMIT_PERIOD:3600s}
+
+# JWT検証(#560)。jwk-set-uriはコンテナ間通信で実際に到達可能な内部アドレス、
+# issuerはブラウザ経由で発行されるトークンのiss claim(#559でKC_HOSTNAME固定済みの
+# 公開URL)。この2つが異なる(内部アドレス経由でもissは常に公開URL値になる)ため、
+# Spring Bootの spring.security.oauth2.resourceserver.jwt.issuer-uri
+# (フェッチ先とissuerの一致を前提とする自動設定)は使えず、
+# com.letsblog.gateway.config.JwtDecoderConfig で個別にJwtDecoderを組み立てている。
+keycloak:
+  jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/certs}
+  issuer: ${KEYCLOAK_ISSUER:https://localhost/auth/realms/letsblog}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      # 下流サービスの状態を/actuator/healthに集約する(#560)。現時点では
+      # legacy-apiのみを見る(将来のサービス抽出に伴いprobesを追加していく)。
+      show-details: always

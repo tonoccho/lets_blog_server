@@ -34,6 +34,7 @@ jobs:
       lbs-common: ${{ steps.filter.outputs.lbs-common }}
       legacy-api: ${{ steps.filter.outputs.legacy-api }}
       log-writer: ${{ steps.filter.outputs.log-writer }}
+      gateway: ${{ steps.filter.outputs.gateway }}
     steps:
       - uses: actions/checkout@v7
 
@@ -61,19 +62,27 @@ jobs:
               - 'gradle/**'
               - 'gradlew'
               - 'services/log-writer/**'
+            gateway:
+              - 'libs/**'
+              - 'build.gradle'
+              - 'settings.gradle'
+              - 'gradle/**'
+              - 'gradlew'
+              - 'services/gateway/**'
 
   test:
     needs: detect-changes
     if: |
       (matrix.service == 'lbs-common' && needs.detect-changes.outputs.lbs-common == 'true') ||
       (matrix.service == 'legacy-api' && needs.detect-changes.outputs.legacy-api == 'true') ||
-      (matrix.service == 'log-writer' && needs.detect-changes.outputs.log-writer == 'true')
+      (matrix.service == 'log-writer' && needs.detect-changes.outputs.log-writer == 'true') ||
+      (matrix.service == 'gateway' && needs.detect-changes.outputs.gateway == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        service: [lbs-common, legacy-api, log-writer]
+        service: [lbs-common, legacy-api, log-writer, gateway]
 
     # legacy-apiのテストのみMySQLを使う(#570のスキーマ分離が完了するまでは共有DBのまま)。
     # lbs-common/log-writerには不要だが、マトリクスジョブ単位でしか services: を定義できない

@@ -135,6 +135,21 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  # 単一入口(#560)。/api/**のルーティング・JWT検証・レート制限・相関ID付与を担う。
+  # ルーティング先の実サービスはまだlegacy-apiのみのため、全ルートが暫定的にapiを指す
+  # (services/gateway/src/main/resources/application.yml参照)。
+  gateway:
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    container_name: lbs-gateway
+    <<: [*common-service, *actuator-healthcheck]
+    depends_on:
+      api:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+
   rabbitmq:
     image: rabbitmq:3-management-alpine
     container_name: lbs-rabbitmq
@@ -240,9 +255,14 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
       # reverse-proxy配下の /auth/ サブパスで配信するため
       KC_HTTP_RELATIVE_PATH: /auth
-      KC_HOSTNAME_STRICT: "false"
+      # 固定のissuer/公開URLを明示する(#560)。KC_HOSTNAME_STRICT=false +
+      # X-Forwarded-*ヘッダ頼みの動的検出だと、gatewayがコンテナ間通信で
+      # 直接keycloak:8080を叩いた際に issuer が http://keycloak/auth/... になり、
+      # ブラウザ経由で発行されたトークンの iss (https://localhost/auth/...) と
+      # 一致せずJWT検証が失敗する。ローカル開発のホスト名は固定(localhost)のため、
+      # 固定URLで両経路の issuer を一致させる。
+      KC_HOSTNAME: https://localhost/auth
       KC_HTTP_ENABLED: "true"
-      KC_PROXY_HEADERS: xforwarded
       KC_HEALTH_ENABLED: "true"
     volumes:
       - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
