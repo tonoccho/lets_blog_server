@@ -2529,6 +2529,51 @@ export function deleteComfyUiCheckpoint(
   );
 }
 
+/** ガベージコレクション画面(issue #500)の一覧行。 */
+export interface UnreferencedMediaItem {
+  mediaId: string;
+  guid: string;
+  title: string;
+  mimeType: string;
+  uploadedAt: string;
+}
+
+export interface MediaGarbageCollectionScanResponse {
+  environment: ProjectEnvironment;
+  items: UnreferencedMediaItem[];
+  totalMediaCount: number;
+  referencedMediaCount: number;
+  unreferencedMediaCount: number;
+}
+
+export function scanMediaGarbage(
+  projectId: number,
+  environment: ProjectEnvironment,
+  actor?: ActorInfo
+): Promise<MediaGarbageCollectionScanResponse> {
+  return apiFetch<MediaGarbageCollectionScanResponse>(
+    `/api/projects/${projectId}/media-garbage-collection/scan?environment=${environment}`,
+    { actor }
+  );
+}
+
+export function deleteMediaGarbage(
+  projectId: number,
+  environment: ProjectEnvironment,
+  mediaIds: string[],
+  actor?: ActorInfo
+): Promise<GenerationJob> {
+  return apiFetch<GenerationJob>(
+    `/api/projects/${projectId}/media-garbage-collection/delete?environment=${environment}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mediaIds }),
+      actor,
+    }
+  );
+}
+
 /**
  * VSCode拡張機能(.vsix)をAPIサーバーからダウンロードする。APIサーバー側で
  * オンデマンドビルド(初回は数十秒かかる場合がある)されるため、apiFetchのJSON前提の

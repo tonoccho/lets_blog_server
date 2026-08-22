@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.letsblog.api.cms.AuthCookie;
 import com.letsblog.api.cms.AuthorProvisioningRequest;
 import com.letsblog.api.cms.CmsCredentials.WordPressCredentials;
+import com.letsblog.api.cms.CmsMediaReferenceScan;
+import com.letsblog.api.cms.CmsMediaSummary;
+import com.letsblog.api.cms.CmsPostContentSummary;
 import com.letsblog.api.cms.CmsPostSummary;
 import com.letsblog.api.cms.ConnectionCheckResult;
 import com.letsblog.api.cms.MediaUploadResult;
@@ -274,6 +277,65 @@ public class WordPressAgentOperations {
             post("/wp-cli/post-status-update", Map.of("slug", creds.wpSlug(), "postId", postId, "status", status));
         } catch (RestClientResponseException e) {
             throw new AgentOperationException("投稿/ページのステータス変更に失敗しました: " + agentErrorDetail(e), e);
+        } catch (ResourceAccessException e) {
+            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    private static final List<String> SETTINGS_MEDIA_KEYS =
+            List.of("site_icon", "custom_logo", "header_image", "background_image");
+
+    /** ガベージコレクション画面(issue #500)向けにメディアライブラリの一覧を取得する。 */
+    public List<CmsMediaSummary> listMedia(WordPressCredentials creds) {
+        try {
+            JsonNode body = post("/wp-cli/media-list", Map.of("slug", creds.wpSlug()));
+            List<CmsMediaSummary> results = new ArrayList<>();
+            body.path("media").forEach(item -> results.add(new CmsMediaSummary(
+                    item.path("id").asText(), item.path("guid").asText(), item.path("title").asText(),
+                    item.path("mimeType").asText(), item.path("uploadedAt").asText())));
+            return results;
+        } catch (RestClientResponseException e) {
+            throw new AgentOperationException("メディア一覧の取得に失敗しました: " + agentErrorDetail(e), e);
+        } catch (ResourceAccessException e) {
+            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * ガベージコレクション画面(issue #500)向けに、公開投稿タイプ全件の本文/アイキャッチと
+     * 主要なサイト設定が参照する添付ファイルIDをまとめて取得する。SSH版
+     * (WordPressSshOperations#scanMediaReferences)と同じJSON形状をエージェント側(wp-cli evalの
+     * PHPコードもSSH版と同一、provision-agentの/wp-cli/media-reference-scan参照)から受け取る。
+     */
+    public CmsMediaReferenceScan scanMediaReferences(WordPressCredentials creds) {
+        try {
+            JsonNode body = post("/wp-cli/media-reference-scan", Map.of("slug", creds.wpSlug()));
+            List<CmsPostContentSummary> posts = new ArrayList<>();
+            body.path("posts").forEach(item -> posts.add(new CmsPostContentSummary(
+                    item.path("id").asText(), item.path("postType").asText(), item.path("status").asText(),
+                    item.path("content").asText(), item.path("thumbnailId").asText())));
+            JsonNode settingsNode = body.path("settings");
+            Map<String, String> settings = new java.util.LinkedHashMap<>();
+            for (String key : SETTINGS_MEDIA_KEYS) {
+                settings.put(key, settingsNode.path(key).asText(""));
+            }
+            return new CmsMediaReferenceScan(posts, settings);
+        } catch (RestClientResponseException e) {
+            throw new AgentOperationException("メディア参照スキャンに失敗しました: " + agentErrorDetail(e), e);
+        } catch (ResourceAccessException e) {
+            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * メディア(添付ファイル)を完全に削除する(issue #500)。{@link #deletePost}と異なり
+     * ゴミ箱を経由せず物理削除する(provision-agent側で`wp post delete --force`を実行する)。
+     */
+    public void deleteMedia(WordPressCredentials creds, String mediaId) {
+        try {
+            post("/wp-cli/media-delete", Map.of("slug", creds.wpSlug(), "mediaId", mediaId));
+        } catch (RestClientResponseException e) {
+            throw new AgentOperationException("メディアの削除に失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
             throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
         }

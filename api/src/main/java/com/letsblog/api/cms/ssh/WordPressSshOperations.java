@@ -4,6 +4,9 @@ import com.letsblog.api.cms.AuthCookie;
 import com.letsblog.api.cms.AuthorProvisioningRequest;
 import com.letsblog.api.cms.WpCliInstallResult;
 import com.letsblog.api.cms.CmsCredentials.WordPressCredentials;
+import com.letsblog.api.cms.CmsMediaReferenceScan;
+import com.letsblog.api.cms.CmsMediaSummary;
+import com.letsblog.api.cms.CmsPostContentSummary;
 import com.letsblog.api.cms.CmsPostSummary;
 import com.letsblog.api.cms.ConnectionCheckResult;
 import com.letsblog.api.cms.MediaUploadResult;
@@ -870,6 +873,92 @@ public class WordPressSshOperations {
                 "post update " + postId + " --post_status=" + ShellQuote.single(status)));
         if (!result.ok()) {
             throw new SshOperationException("投稿/ページのステータス変更に失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+    }
+
+    /**
+     * ガベージコレクション画面(issue #500)向けにメディアライブラリの一覧を取得する。
+     * 添付ファイルもpost_type=attachmentのwp_postsレコードのため`wp post list`で取得できる。
+     * ゴミ箱にあるメディアも「蓄積した不要メディア」の掃除対象に含めるため、
+     * 既定(inherit)に加えprivate/trashも明示的に対象とする。
+     */
+    public List<CmsMediaSummary> listMedia(WordPressCredentials creds) {
+        SshCommandResult result = exec(creds, wpCli(creds,
+                "post list --post_type=attachment --post_status=inherit,private,trash"
+                        + " --fields=ID,post_title,guid,post_mime_type,post_date --format=json"));
+        if (!result.ok()) {
+            throw new SshOperationException("メディア一覧の取得に失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+        return parseJsonArray(result.stdout()).stream()
+                .map(item -> new CmsMediaSummary(
+                        item.path("ID").asText(), item.path("guid").asText(), item.path("post_title").asText(),
+                        item.path("post_mime_type").asText(), item.path("post_date").asText()))
+                .toList();
+    }
+
+    /**
+     * ガベージコレクション画面(issue #500)向けに、公開投稿タイプ全件の本文/アイキャッチと、
+     * 主要なサイト設定(サイトアイコン・カスタムロゴ・ヘッダー/背景画像)が参照する添付ファイルIDを
+     * 1回のwp eval呼び出しでまとめて取得する(getLatestPost/generateAuthCookieと同じ「PHP文字列
+     * 組み立て→eval→JSON parse」方式)。投稿タイプを['post','page']に固定せず動的に取得するのは、
+     * カスタム投稿タイプに埋め込まれたメディアを誤って「未参照」と判定し削除してしまう
+     * (=データ消失)リスクを避けるため。
+     */
+    public CmsMediaReferenceScan scanMediaReferences(WordPressCredentials creds) {
+        String phpCode = "$types = get_post_types(['public' => true], 'names'); "
+                + "unset($types['attachment']); $types = array_values($types); "
+                + "$posts = get_posts(['post_type' => $types, "
+                + "'post_status' => ['publish','future','draft','pending','private'], 'numberposts' => -1]); "
+                + "$items = array_map(function($p) { return ['id' => (string) $p->ID, "
+                + "'postType' => $p->post_type, 'status' => $p->post_status, 'content' => $p->post_content, "
+                + "'thumbnailId' => (string) get_post_thumbnail_id($p->ID)]; }, $posts); "
+                + "$headerData = get_theme_mod('header_image_data'); "
+                + "$headerUrl = get_theme_mod('header_image'); "
+                + "$headerId = (is_object($headerData) && isset($headerData->attachment_id)) "
+                + "? (string) $headerData->attachment_id "
+                + ": ($headerUrl ? (string) attachment_url_to_postid($headerUrl) : ''); "
+                + "$bgUrl = get_theme_mod('background_image'); "
+                + "$bgId = $bgUrl ? (string) attachment_url_to_postid($bgUrl) : ''; "
+                + "$settings = ['site_icon' => (string) get_option('site_icon'), "
+                + "'custom_logo' => (string) get_theme_mod('custom_logo'), "
+                + "'header_image' => $headerId, 'background_image' => $bgId]; "
+                + "echo json_encode(['posts' => $items, 'settings' => $settings]);";
+        SshCommandResult result = exec(creds, wpCli(creds, "eval " + ShellQuote.single(phpCode)));
+        if (!result.ok()) {
+            throw new SshOperationException("メディア参照スキャンに失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+        JsonNode body = parseJsonObject(result.stdout());
+        List<CmsPostContentSummary> posts = new ArrayList<>();
+        body.path("posts").forEach(item -> posts.add(new CmsPostContentSummary(
+                item.path("id").asText(), item.path("postType").asText(), item.path("status").asText(),
+                item.path("content").asText(), item.path("thumbnailId").asText())));
+        Map<String, String> settings = extractSettingsMediaIds(body.path("settings"));
+        return new CmsMediaReferenceScan(posts, settings);
+    }
+
+    private static final List<String> SETTINGS_MEDIA_KEYS =
+            List.of("site_icon", "custom_logo", "header_image", "background_image");
+
+    private Map<String, String> extractSettingsMediaIds(JsonNode settingsNode) {
+        Map<String, String> settings = new LinkedHashMap<>();
+        for (String key : SETTINGS_MEDIA_KEYS) {
+            settings.put(key, settingsNode.path(key).asText(""));
+        }
+        return settings;
+    }
+
+    /**
+     * メディア(添付ファイル)を完全に削除する(issue #500)。添付ファイルもpost_type=attachmentの
+     * wp_postsレコードのため`wp post delete`で削除できるが、{@link #deletePost}と異なり
+     * `--force`を付けてゴミ箱を経由せず物理削除する(アップロード済みファイルも合わせて削除される)。
+     */
+    public void deleteMedia(WordPressCredentials creds, String mediaId) {
+        SshCommandResult result = exec(creds, wpCli(creds, "post delete " + mediaId + " --force --yes"));
+        if (!result.ok()) {
+            throw new SshOperationException("メディアの削除に失敗しました: "
                     + firstLine(result.stderr(), result.stdout()));
         }
     }
