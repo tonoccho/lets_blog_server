@@ -1,8 +1,32 @@
+# サービス定義のテンプレート化(#556)。共通のrestart/networks、Spring Bootサービス共通の
+# actuatorヘルスチェック、RabbitMQ接続情報を各サービス定義から参照する。
+# 新しいサービス(gateway/Keycloak/各ドメインサービス等)を追加する際もこれらを再利用する。
+# ポート割当は内部8080に統一し(docs/DOCKER_COMPOSE_ARCHITECTURE.md参照)、外部公開は
+# reverse-proxy(nginx)経由のみとする。
+x-common-service: &common-service
+  restart: unless-stopped
+  networks:
+    - lbs-net
+
+x-actuator-healthcheck: &actuator-healthcheck
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 30s
+
+x-rabbitmq-env: &rabbitmq-env
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_PORT: "5672"
+  RABBITMQ_USER: ${RABBITMQ_USER}
+  RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+
 services:
   reverse-proxy:
     image: nginx:alpine
     container_name: lbs-reverse-proxy
-    restart: unless-stopped
+    <<: *common-service
     ports:
       - "80:80"
       - "443:443"
@@ -10,15 +34,13 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./certs:/etc/nginx/certs:ro
-    networks:
-      - lbs-net
 
   web:
     build:
       context: ./web
       dockerfile: Dockerfile
     container_name: lbs-web
-    restart: unless-stopped
+    <<: *common-service
     environment:
       # コンテナ間通信のためlbs-net内部でapiへ直接到達させる(自己署名証明書を経由しないため
       # NODE_EXTRA_CA_CERTSは不要)
@@ -33,16 +55,15 @@ services:
       - ./web:/app
     depends_on:
       - api
-    networks:
-      - lbs-net
 
   api:
     build:
       context: .
       dockerfile: services/legacy-api/Dockerfile
     container_name: lbs-api
-    restart: unless-stopped
+    <<: [*common-service, *actuator-healthcheck]
     environment:
+      <<: *rabbitmq-env
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: ${MYSQL_USER}
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
@@ -79,10 +100,6 @@ services:
       VSCODE_EXTENSION_SOURCE_PATH: /app/extension-src
       VSCODE_EXTENSION_BUILD_PATH: /app/extension-build
       DOCKER_SOCKET_PROXY_BASE_URL: http://docker-socket-proxy:2375
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: "5672"
-      RABBITMQ_USER: ${RABBITMQ_USER}
-      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
     volumes:
       - bulk_upload_files:/app/data/bulk-uploads
       - generated_images:/app/data/generated-images
@@ -97,8 +114,6 @@ services:
         condition: service_healthy
       docker-socket-proxy:
         condition: service_started
-    networks:
-      - lbs-net
 
   # ログメッセージキューイング(issue #466)のコンシューマー。apiサーバーがRabbitMQへ発行した
   # エラーログ/操作ログ/監査ログのメッセージを受信し、apiと共有するDB(既存のFlywayマイグレーション
@@ -108,27 +123,22 @@ services:
       context: .
       dockerfile: services/log-writer/Dockerfile
     container_name: lbs-log-writer
-    restart: unless-stopped
+    <<: [*common-service, *actuator-healthcheck]
     environment:
+      <<: *rabbitmq-env
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: ${MYSQL_USER}
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: "5672"
-      RABBITMQ_USER: ${RABBITMQ_USER}
-      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
     depends_on:
       mysql:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-    networks:
-      - lbs-net
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
     container_name: lbs-rabbitmq
-    restart: unless-stopped
+    <<: *common-service
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
@@ -139,8 +149,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - lbs-net
 
   # apiコンテナからダッシュボードのコンテナ稼働状況(issue #280)取得のためだけにDocker Engine APIを
   # 読み取り専用で中継する。apiコンテナ自体にはdocker.sockを渡さない(コンテナ作成/実行系のPOST操作は
@@ -148,19 +156,17 @@ services:
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:latest
     container_name: lbs-docker-socket-proxy
-    restart: unless-stopped
+    <<: *common-service
     environment:
       CONTAINERS: 1
       POST: 0
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks:
-      - lbs-net
 
   mysql:
     image: mysql:8.0
     container_name: lbs-mysql
-    restart: unless-stopped
+    <<: *common-service
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -185,13 +191,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - lbs-net
 
   phpmyadmin:
     image: phpmyadmin/phpmyadmin
     container_name: lbs-phpmyadmin
-    restart: unless-stopped
+    <<: *common-service
     environment:
       PMA_HOST: mysql
       PMA_USER: ${MYSQL_USER}
@@ -200,13 +204,11 @@ services:
       PMA_ABSOLUTE_URI: https://localhost/phpmyadmin/
     depends_on:
       - mysql
-    networks:
-      - lbs-net
 
   penpot-frontend:
     image: "penpotapp/frontend:${PENPOT_VERSION:-2.16}"
     container_name: lbs-penpot-frontend
-    restart: unless-stopped
+    <<: *common-service
     ports:
       - "9001:8080"
     volumes:
@@ -215,8 +217,6 @@ services:
       - penpot-backend
       - penpot-exporter
       - penpot-mcp
-    networks:
-      - lbs-net
     environment:
       PENPOT_FLAGS: disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp
       PENPOT_PUBLIC_URI: http://localhost:9001
@@ -226,7 +226,7 @@ services:
   penpot-backend:
     image: "penpotapp/backend:${PENPOT_VERSION:-2.16}"
     container_name: lbs-penpot-backend
-    restart: unless-stopped
+    <<: *common-service
     volumes:
       - penpot_assets:/opt/data/assets
     depends_on:
@@ -234,8 +234,6 @@ services:
         condition: service_healthy
       penpot-valkey:
         condition: service_healthy
-    networks:
-      - lbs-net
     environment:
       PENPOT_FLAGS: disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp
       PENPOT_PUBLIC_URI: http://localhost:9001
@@ -262,19 +260,15 @@ services:
   penpot-mcp:
     image: "penpotapp/mcp:${PENPOT_VERSION:-2.16}"
     container_name: lbs-penpot-mcp
-    restart: unless-stopped
-    networks:
-      - lbs-net
+    <<: *common-service
 
   penpot-exporter:
     image: "penpotapp/exporter:${PENPOT_VERSION:-2.16}"
     container_name: lbs-penpot-exporter
-    restart: unless-stopped
+    <<: *common-service
     depends_on:
       penpot-valkey:
         condition: service_healthy
-    networks:
-      - lbs-net
     environment:
       PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY}
       PENPOT_PUBLIC_URI: http://localhost:9001
@@ -284,7 +278,7 @@ services:
   penpot-postgres:
     image: "postgres:15"
     container_name: lbs-penpot-postgres
-    restart: unless-stopped
+    <<: *common-service
     stop_signal: SIGINT
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U penpot"]
@@ -294,8 +288,6 @@ services:
       start_period: 2s
     volumes:
       - penpot_postgres:/var/lib/postgresql/data
-    networks:
-      - lbs-net
     environment:
       - POSTGRES_INITDB_ARGS=--data-checksums
       - POSTGRES_DB=penpot
@@ -305,33 +297,29 @@ services:
   penpot-valkey:
     image: valkey/valkey:8.1
     container_name: lbs-penpot-valkey
-    restart: unless-stopped
+    <<: *common-service
     healthcheck:
       test: ["CMD-SHELL", "valkey-cli ping | grep PONG"]
       interval: 1s
       timeout: 3s
       retries: 5
       start_period: 3s
-    networks:
-      - lbs-net
     environment:
       - VALKEY_EXTRA_FLAGS=--maxmemory 128mb --maxmemory-policy volatile-lfu
 
   penpot-mailcatch:
     image: sj26/mailcatcher:latest
     container_name: lbs-penpot-mailcatch
-    restart: unless-stopped
+    <<: *common-service
     expose:
       - '1025'
     ports:
       - "1080:1080"
-    networks:
-      - lbs-net
 
   comfyui:
     image: ${COMFYUI_IMAGE:-yanwk/comfyui-boot:cu130-slim}
     container_name: lbs-comfyui
-    restart: unless-stopped
+    <<: *common-service
     volumes:
       - comfyui_models:/root/ComfyUI/models
       - comfyui_output:/root/ComfyUI/output
@@ -342,22 +330,16 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    networks:
-      - lbs-net
 
   plantuml:
     image: plantuml/plantuml-server:jetty
     container_name: lbs-plantuml
-    restart: unless-stopped
-    networks:
-      - lbs-net
+    <<: *common-service
 
   drawio:
     image: ${DRAWIO_IMAGE:-jgraph/drawio:latest}
     container_name: lbs-drawio
-    restart: unless-stopped
-    networks:
-      - lbs-net
+    <<: *common-service
 
   # mcp-penpot:
   #   build:
@@ -384,7 +366,7 @@ services:
       context: ./wordpress
       dockerfile: Dockerfile
     container_name: lbs-wordpress
-    restart: unless-stopped
+    <<: *common-service
     environment:
       WP_PROVISION_TOKEN: ${WP_PROVISION_TOKEN}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
@@ -396,8 +378,6 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-    networks:
-      - lbs-net
 
 networks:
   lbs-net:
