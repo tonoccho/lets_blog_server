@@ -556,6 +556,39 @@ class WordPressSshOperationsTest {
     }
 
     @Test
+    void getLatestPost_wp_evalの結果から参照記事を組み立てる() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"found\":true,\"id\":\"1\",\"link\":\"https://example.com/hello-world/\","
+                        + "\"title\":\"Hello World\",\"content\":\"<p>Hi</p>\"}"));
+
+        com.letsblog.api.cms.ReferencePost referencePost = operations.getLatestPost(creds()).orElseThrow();
+
+        assertEquals("1", referencePost.id());
+        assertEquals("https://example.com/hello-world/", referencePost.link());
+        assertEquals("Hello World", referencePost.title());
+        assertEquals("<p>Hi</p>", referencePost.content());
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getValue().contains("eval"));
+        assertEquals(true, commandCaptor.getValue().contains("get_posts"));
+    }
+
+    @Test
+    void getLatestPost_公開記事が無い場合は空を返す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"found\":false}"));
+
+        assertEquals(true, operations.getLatestPost(creds()).isEmpty());
+    }
+
+    @Test
+    void getLatestPost_wp_eval失敗時は例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("eval error"));
+
+        assertThrows(SshOperationException.class, () -> operations.getLatestPost(creds()));
+    }
+
+    @Test
     void uploadMedia_成功時はSFTP転送してmedia_importで取り込み一時ファイルを削除する() {
         byte[] data = "image-bytes".getBytes(StandardCharsets.UTF_8);
         when(executor.exec(any(SshConnectionParams.class), any(), isNull()))

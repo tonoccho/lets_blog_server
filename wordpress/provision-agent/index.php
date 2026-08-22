@@ -1358,6 +1358,43 @@ if ($path === '/wp-cli/generate-auth-cookie' && $_SERVER['REQUEST_METHOD'] === '
     respond(200, ['name' => $result['name'], 'value' => $result['value']]);
 }
 
+// 記事プレビュー(ArticlePreviewService)のテーマCSS/DOM取得(スクレイプ&スプライス)向けに、
+// サイト内の最新公開記事を「参照記事」として返す。従来は認証なしのWordPress REST API
+// (wp-json/wp/v2/posts)を直接叩いていたが、managed WordPressサイトは他の全操作と同じく
+// wp-cli経由に揃える(issue #519)。title/contentはREST版のtitle.rendered/content.rendered相当
+// (the_title/the_contentフィルタ適用後)になるよう、wp-cliのpost系コマンドではなくwp evalで
+// WordPressコアのAPI(get_posts/get_permalink/apply_filters)を直接呼び出す。
+if ($path === '/wp-cli/reference-post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+
+    if (!isValidSlug($slug)) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = resolveExistingSitePath($slug);
+    if ($sitePath === null) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    $phpCode = "\$posts = get_posts(['numberposts' => 1, 'post_status' => 'publish', "
+        . "'orderby' => 'date', 'order' => 'DESC']); "
+        . "if (empty(\$posts)) { echo json_encode(['found' => false]); exit; } "
+        . "\$post = \$posts[0]; "
+        . "echo json_encode(['found' => true, 'id' => (string) \$post->ID, "
+        . "'link' => get_permalink(\$post->ID), "
+        . "'title' => apply_filters('the_title', \$post->post_title, \$post->ID), "
+        . "'content' => apply_filters('the_content', \$post->post_content)]);";
+
+    [$code, $out, $err] = runWp(['eval', $phpCode, "--path=$sitePath", '--allow-root']);
+    if ($code !== 0) {
+        respond(500, ['error' => '参照記事の取得に失敗しました', 'detail' => combinedOutput($out, $err)]);
+    }
+    $result = json_decode($out, true);
+    if (!is_array($result)) {
+        respond(500, ['error' => '参照記事の取得結果を解析できませんでした', 'detail' => $out]);
+    }
+    respond(200, $result);
+}
+
 if ($path === '/wp-cli/media-upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = (string) ($_POST['slug'] ?? '');
     if (!isValidSlug($slug) || empty($_FILES['file'])) {
