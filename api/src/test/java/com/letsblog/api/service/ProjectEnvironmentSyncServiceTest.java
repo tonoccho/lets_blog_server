@@ -62,7 +62,7 @@ class ProjectEnvironmentSyncServiceTest {
 
     private WordPressCredentials buildSshCredentials() {
         return new WordPressCredentials(
-                "https://prod.example.com", null, null, "SSH",
+                "https://prod.example.com", null, "SSH",
                 "prod.example.com", 22, "deploy", "/var/www/prod", "PRIVATE_KEY_PEM", null, null);
     }
 
@@ -232,7 +232,7 @@ class ProjectEnvironmentSyncServiceTest {
         when(siteRepository.findById(30L)).thenReturn(Optional.of(externalSite));
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(siteService.resolveDataSource(externalSite))
-                .thenReturn(new SiteService.SiteDataSource(false, null, null));
+                .thenReturn(new SiteService.SiteDataSource(false, null));
 
         assertThrows(IllegalArgumentException.class, () -> service.sync(1L, "production", "local", List.of("db")));
         verify(syncClient, never()).importDatabase(any(), any(), any(), any(), any());
@@ -252,7 +252,7 @@ class ProjectEnvironmentSyncServiceTest {
         when(siteRepository.findById(30L)).thenReturn(Optional.of(sshSite));
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(siteService.resolveDataSource(sshSite))
-                .thenReturn(new SiteService.SiteDataSource(false, null, sshCredentials));
+                .thenReturn(new SiteService.SiteDataSource(false, sshCredentials));
         when(sshOperations.exportDatabase(sshCredentials))
                 .thenReturn(new WordPressSshOperations.DatabaseExport("jI7_", dump));
         when(sshOperations.exportThemes(sshCredentials)).thenReturn(themes);
@@ -276,7 +276,7 @@ class ProjectEnvironmentSyncServiceTest {
         when(siteRepository.findById(30L)).thenReturn(Optional.of(sshSite));
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(siteService.resolveDataSource(sshSite))
-                .thenReturn(new SiteService.SiteDataSource(false, null, sshCredentials));
+                .thenReturn(new SiteService.SiteDataSource(false, sshCredentials));
         when(sshOperations.exportThemes(sshCredentials)).thenReturn(new byte[0]);
 
         service.sync(1L, "production", "local", List.of("themes"));
@@ -297,7 +297,7 @@ class ProjectEnvironmentSyncServiceTest {
         when(siteRepository.findById(30L)).thenReturn(Optional.of(sshSite));
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(siteService.resolveDataSource(sshSite))
-                .thenReturn(new SiteService.SiteDataSource(false, null, sshCredentials));
+                .thenReturn(new SiteService.SiteDataSource(false, sshCredentials));
         when(sshOperations.exportDatabase(sshCredentials))
                 .thenReturn(new WordPressSshOperations.DatabaseExport("jI7_", dump));
 
@@ -324,7 +324,7 @@ class ProjectEnvironmentSyncServiceTest {
         when(siteRepository.findById(30L)).thenReturn(Optional.of(sshSite));
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(siteService.resolveDataSource(sshSite))
-                .thenReturn(new SiteService.SiteDataSource(false, null, sshCredentials));
+                .thenReturn(new SiteService.SiteDataSource(false, sshCredentials));
         when(sshOperations.exportDatabase(sshCredentials))
                 .thenReturn(new WordPressSshOperations.DatabaseExport("jI7_", dump));
         when(sshOperations.exportMedia(sshCredentials)).thenReturn(media);
@@ -347,7 +347,7 @@ class ProjectEnvironmentSyncServiceTest {
         when(siteRepository.findById(30L)).thenReturn(Optional.of(sshSite));
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(siteService.resolveDataSource(sshSite))
-                .thenReturn(new SiteService.SiteDataSource(false, null, sshCredentials));
+                .thenReturn(new SiteService.SiteDataSource(false, sshCredentials));
         when(sshOperations.exportMedia(sshCredentials)).thenReturn(new byte[0]);
 
         service.sync(1L, "production", "local", List.of("media"));
@@ -424,7 +424,7 @@ class ProjectEnvironmentSyncServiceTest {
         when(siteRepository.findById(30L)).thenReturn(Optional.of(sshSite));
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(siteService.resolveDataSource(sshSite))
-                .thenReturn(new SiteService.SiteDataSource(false, null, sshCredentials));
+                .thenReturn(new SiteService.SiteDataSource(false, sshCredentials));
         when(sshOperations.exportDatabase(sshCredentials))
                 .thenReturn(new WordPressSshOperations.DatabaseExport("jI7_", dump));
 

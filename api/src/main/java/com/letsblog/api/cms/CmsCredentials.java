@@ -10,7 +10,6 @@ public sealed interface CmsCredentials {
     record WordPressCredentials(
             String baseUrl,
             String username,
-            String appPassword,
             String transport,
             String sshHost,
             Integer sshPort,
@@ -25,8 +24,8 @@ public sealed interface CmsCredentials {
             return CmsType.WORDPRESS;
         }
 
-        public WordPressCredentials(String baseUrl, String username, String appPassword) {
-            this(baseUrl, username, appPassword, "REST", null, null, null, null, null, null, null);
+        public WordPressCredentials(String baseUrl, String username, String transport) {
+            this(baseUrl, username, transport, null, null, null, null, null, null, null);
         }
 
         public boolean isSsh() {

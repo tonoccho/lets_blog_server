@@ -71,7 +71,7 @@ class PostComparisonServiceTest {
     }
 
     private CmsCredentials.WordPressCredentials creds(String baseUrl) {
-        return new CmsCredentials.WordPressCredentials(baseUrl, "admin", "pass");
+        return new CmsCredentials.WordPressCredentials(baseUrl, "admin", "SSH");
     }
 
     @Test

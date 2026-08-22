@@ -30,7 +30,7 @@ class ProvisioningServiceTest {
 
     // CmsCredentialsはsealed interfaceのためモック化できず、実インスタンスを使う
     private final CmsCredentials credentials =
-            new CmsCredentials.WordPressCredentials("https://example.com", "admin", "apppass");
+            new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
 
     private ProvisioningService service;
 

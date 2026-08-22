@@ -4,7 +4,6 @@ import com.letsblog.api.cms.CmsAdapter;
 import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.MediaUploadResult;
-import com.letsblog.api.cms.rest.WordPressRestBulkManagementOperations;
 import com.letsblog.api.cms.ssh.WordPressSshOperations;
 import com.letsblog.api.domain.BulkOperationLog;
 import com.letsblog.api.domain.BulkOperationSourceType;
@@ -52,7 +51,6 @@ public class BulkManagementService {
     private final BulkUploadStorageService bulkUploadStorageService;
     private final SiteService siteService;
     private final WordPressSshOperations sshOperations;
-    private final WordPressRestBulkManagementOperations restOperations;
     private final CmsAdapterFactory cmsAdapterFactory;
     private final ProjectService projectService;
     private final ImageResizeService imageResizeService;
@@ -64,7 +62,6 @@ public class BulkManagementService {
             BulkUploadStorageService bulkUploadStorageService,
             SiteService siteService,
             WordPressSshOperations sshOperations,
-            WordPressRestBulkManagementOperations restOperations,
             CmsAdapterFactory cmsAdapterFactory,
             ProjectService projectService,
             ImageResizeService imageResizeService) {
@@ -74,7 +71,6 @@ public class BulkManagementService {
         this.bulkUploadStorageService = bulkUploadStorageService;
         this.siteService = siteService;
         this.sshOperations = sshOperations;
-        this.restOperations = restOperations;
         this.cmsAdapterFactory = cmsAdapterFactory;
         this.projectService = projectService;
         this.imageResizeService = imageResizeService;
@@ -92,7 +88,7 @@ public class BulkManagementService {
             String categoryTargetSlug, Long actorId) {
         String effectiveValue = requireFields(type, value, categorySlug, categoryTargetSlug);
         Project project = getProject(projectId);
-        Site site = resolveSite(project, environment, type);
+        Site site = resolveSite(project, environment);
         return applyToSite(projectId, environment, site, type, effectiveValue,
                 categorySlug, categoryParentSlug, categoryDescription, categoryTargetSlug, actorId);
     }
@@ -100,7 +96,7 @@ public class BulkManagementService {
     /**
      * slugベースのプラグイン/テーマインストールを、紐付いている全環境へ一括実行する(issue #393。
      * 従来は{@link #applyToEnvironment}で環境を1つずつ選んで実行する必要があった)。
-     * {@link #executeFromUpload}と同様、1環境の失敗(REST/SSH未設定等)が他環境の実行を止めないよう、
+     * {@link #executeFromUpload}と同様、1環境の失敗(SSH未設定等)が他環境の実行を止めないよう、
      * resolveSite/applyToSiteの失敗はFAILEDのBulkOperationLogとして記録し次の環境へ進む。
      */
     @Transactional
@@ -117,7 +113,7 @@ public class BulkManagementService {
                 continue;
             }
             try {
-                Site site = resolveSite(project, environment, type);
+                Site site = resolveSite(project, environment);
                 results.add(applyToSite(projectId, environment, site, type, value,
                         null, null, null, null, actorId));
             } catch (IllegalArgumentException e) {
@@ -156,8 +152,7 @@ public class BulkManagementService {
 
     /**
      * zipアップロードは、managed環境(内部プロビジョニングエージェント経由)に加え、
-     * SSH接続情報が設定された非managed環境も対象にする(REST APIにはzipインストールに
-     * 相当するエンドポイントが無いため、非managedはSSHが設定されている場合のみ対応)。
+     * SSH接続情報が設定された非managed環境も対象にする。
      */
     private List<Map.Entry<String, Site>> resolveZipUploadEnvironments(Project project) {
         List<Map.Entry<String, Site>> result = new ArrayList<>();
@@ -193,7 +188,7 @@ public class BulkManagementService {
 
     /**
      * 生成画像をプロジェクトのlocal/test/production環境(サイトが紐付けられているもののみ)へ
-     * アセットとしてアップロードする。CmsAdapter.uploadMediaは認証情報(managed/SSH/REST)に応じた
+     * アセットとしてアップロードする。CmsAdapter.uploadMediaは認証情報(managed/SSH)に応じた
      * トランスポート選択を内部で行うため、applyToSite()のような分岐は不要でサイトごとに委譲するだけでよい。
      * 環境単位で成否をBulkOperationLogへ記録する(1環境の失敗が他環境の実行を止めない)。
      * アップロード前に、記事本文画像と同じ長編px基準(ProjectService#resolveArticleImageLongEdgePx)で
@@ -263,7 +258,7 @@ public class BulkManagementService {
     /**
      * 指定環境の1投稿/ページを削除する(PostComparisonService#deleteEverywhereが環境ごとに呼ぶ)。
      * カテゴリ/タグ/プラグイン/テーマのようなwp-cliアクション文字列を経由せず、CmsAdapterへ直接委譲する
-     * (投稿一覧取得(listPosts)と同じCmsAdapter経由でmanaged/SSH/RESTが解決される)。
+     * (投稿一覧取得(listPosts)と同じCmsAdapter経由でmanaged/SSHが解決される)。
      */
     @Transactional
     public BulkOperationLog deletePostAtEnvironment(
@@ -327,41 +322,18 @@ public class BulkManagementService {
             stackTrace = result.stackTrace();
             transportLabel = "内部エージェント";
         } else {
-            // resolveSite()がREST/SSH経由適用可能と判定した(managedでない)サイトはここに到達する。
-            // SSHが設定されていれば優先して使う(REST APIはロール権限不足等で拒否されるケースがあるため)。
-            // SSHでの実行が失敗した場合、テーマの書き込み以外はRESTが設定されていればフォールバックする
-            // (テーマの作成/有効化/削除はコアのREST APIに書き込みエンドポイントが無いため対象外)。
-            // SSHが設定されていなければRESTのみで実行する。
+            // resolveSite()がSSH経由適用可能と判定した(managedでない)サイトはここに到達する。
             SiteService.SiteDataSource dataSource = siteService.resolveDataSource(site);
-            WordPressSshOperations.SshApplyResult result;
-            if (dataSource.hasSsh()) {
-                result = isCategoryOrTag(type)
-                        ? sshOperations.applyTerm(dataSource.sshCredentials(), type, value, categorySlug,
-                                categoryParentSlug, categoryDescription, categoryTargetSlug)
-                        : sshOperations.applyPluginTheme(dataSource.sshCredentials(), type, value);
-                transportLabel = "SSH";
-                if (BulkOperationStatus.FAILED.name().equals(result.status())
-                        && !isThemeWrite(type) && dataSource.hasRest()) {
-                    log.warn("SSH経由の操作に失敗したためREST APIにフォールバックします"
-                                    + "(project={}, environment={}, site={}, type={}): {}",
-                            projectId, environment, site.getSiteKey(), type, result.errorMessage());
-                    result = isCategoryOrTag(type)
-                            ? restOperations.applyTerm(dataSource.restCredentials(), type, value, categorySlug,
-                                    categoryParentSlug, categoryDescription, categoryTargetSlug)
-                            : restOperations.applyPlugin(dataSource.restCredentials(), type, value);
-                    transportLabel = "REST API(SSH失敗によるフォールバック)";
-                }
-            } else if (!isThemeWrite(type) && dataSource.hasRest()) {
-                result = isCategoryOrTag(type)
-                        ? restOperations.applyTerm(dataSource.restCredentials(), type, value, categorySlug,
-                                categoryParentSlug, categoryDescription, categoryTargetSlug)
-                        : restOperations.applyPlugin(dataSource.restCredentials(), type, value);
-                transportLabel = "REST API";
-            } else {
+            if (!dataSource.hasSsh()) {
                 // resolveSite()が事前に検証しているため通常到達しない
                 throw new IllegalArgumentException(
-                        environment + "環境(" + site.getSiteKey() + ")はREST/SSHのいずれでも操作できません");
+                        environment + "環境(" + site.getSiteKey() + ")はSSH接続が設定されていないため操作できません");
             }
+            WordPressSshOperations.SshApplyResult result = isCategoryOrTag(type)
+                    ? sshOperations.applyTerm(dataSource.sshCredentials(), type, value, categorySlug,
+                            categoryParentSlug, categoryDescription, categoryTargetSlug)
+                    : sshOperations.applyPluginTheme(dataSource.sshCredentials(), type, value);
+            transportLabel = "SSH";
             status = result.status();
             errorMessage = result.errorMessage();
             stackTrace = result.stackTrace();
@@ -378,7 +350,7 @@ public class BulkManagementService {
     /**
      * カテゴリ/タグ/プラグイン/テーマの一覧取得(読み取り)が失敗した際に、アプリケーションログへ
      * 警告として記録するだけの軽量な経路。resolveSite/applyToSiteのような解決・適用処理は行わない
-     * (TermComparisonService/PluginThemeComparisonServiceがREST/SSH取得の失敗を検知した時点で呼ぶ)。
+     * (TermComparisonService/PluginThemeComparisonServiceがSSH取得の失敗を検知した時点で呼ぶ)。
      */
     public void logFetchFailure(
             Long projectId, BulkOperationType type, String environment, String errorMessage, String stackTrace) {
@@ -476,30 +448,19 @@ public class BulkManagementService {
     }
 
     /**
-     * managedサイトに加え、非managedサイトでもREST(Application Password)またはSSHが設定されていれば
-     * 許可する(適用は{@link #applyToSite}が担う)。ただしテーマの作成/有効化/削除はコアのREST APIに
-     * 書き込みエンドポイントが無いため、SSHが設定されている場合のみ許可する。
+     * managedサイトに加え、非managedサイトでもSSHが設定されていれば許可する(適用は{@link #applyToSite}が担う)。
      */
-    private Site resolveSite(Project project, String environment, BulkOperationType type) {
+    private Site resolveSite(Project project, String environment) {
         Site site = requireSiteBound(project, environment);
         if (site.isManagedWordpress()) {
             return site;
         }
         SiteService.SiteDataSource dataSource = siteService.resolveDataSource(site);
-        boolean usable = isThemeWrite(type) ? dataSource.hasSsh() : (dataSource.hasRest() || dataSource.hasSsh());
-        if (usable) {
+        if (dataSource.hasSsh()) {
             return site;
         }
-        String reason = isThemeWrite(type)
-                ? "はテーマのインストール/有効化/削除に対応するSSH接続設定がないため対象外です"
-                        + "(REST APIにはテーマ書き込み用のエンドポイントがありません)"
-                : "は自動構築サイトでもREST/SSH接続設定済みサイトでもないため対象外です";
-        throw new IllegalArgumentException(environment + "環境(" + site.getSiteKey() + ")" + reason);
-    }
-
-    private boolean isThemeWrite(BulkOperationType type) {
-        return type == BulkOperationType.THEME_INSTALL || type == BulkOperationType.THEME_ACTIVATE
-                || type == BulkOperationType.THEME_DELETE;
+        throw new IllegalArgumentException(
+                environment + "環境(" + site.getSiteKey() + ")は自動構築サイトでもSSH接続設定済みサイトでもないため対象外です");
     }
 
     private boolean isCategoryOrTag(BulkOperationType type) {
