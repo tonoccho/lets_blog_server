@@ -8,8 +8,6 @@ import { extractIssueOutline, formatOutlineAsMarkdown } from './issueParser';
 import { showSingletonPanel, WebviewPanelBase } from './webviewPanelBase';
 import { PlanInboundMessage, PlanOutboundCommand } from './webviewMessages';
 
-const GITHUB_ISSUE_URL_PATTERN = /^(https:\/\/github\.com\/[^/]+\/[^/]+)\/issues\/\d+$/;
-
 /**
  * 「Let's Blog: Plan Article」用のWebviewパネル。
  * GitHub Issueを起点に、壁打ちチャット → 記事構成の提案とIssueへの反映 →
@@ -164,7 +162,6 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
     const { issue, metadata } = message;
 
     const description = await api.getIssueDescription(getServerUrl(), apiKey, actor, projectId, issue.number);
-    const githubRepositoryMatch = issue.htmlUrl.match(GITHUB_ISSUE_URL_PATTERN);
 
     const scaffold = await createArticleScaffold({
       workspaceRoot: requireWorkspaceRoot(),
@@ -172,11 +169,8 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
       frontMatter: buildArticleFrontMatter({
         title: metadata.title,
         slug: metadata.slug,
-        projectId,
         categories: metadata.categories,
         tags: metadata.tags,
-        githubIssueNumber: issue.number,
-        githubRepository: githubRepositoryMatch?.[1],
       }),
       content: description,
     });

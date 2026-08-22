@@ -172,7 +172,7 @@ export class ArticleCreationPanel extends WebviewPanelBase<
     const result = await createArticleScaffold({
       workspaceRoot,
       slug,
-      frontMatter: buildArticleFrontMatter({ title, slug, projectId, categories, tags, status }),
+      frontMatter: buildArticleFrontMatter({ title, slug, categories, tags, status }),
       content: message.content ?? '',
     });
     if (!result) {

@@ -1,7 +1,6 @@
 package com.letsblog.api.cms;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.web.client.RestClient;
 
 import java.util.List;
 
@@ -13,7 +12,7 @@ class CmsAdapterFactoryTest {
 
     @Test
     void testResolveWordPress() {
-        WordPressAdapter wordPressAdapter = new WordPressAdapter(RestClient.builder(), null, null, null);
+        WordPressAdapter wordPressAdapter = new WordPressAdapter(null, null, null);
         CmsAdapterFactory factory = new CmsAdapterFactory(List.of(wordPressAdapter));
 
         CmsAdapter resolved = factory.resolve(CmsType.WORDPRESS);

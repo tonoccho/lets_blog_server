@@ -38,6 +38,7 @@ import java.util.List;
 import java.util.Map;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.Optional;
 
@@ -67,7 +68,6 @@ public class PostPublishService {
     private final UserSiteAuthorRepository userSiteAuthorRepository;
     private final ObjectMapper objectMapper;
     private final ImageResizeService imageResizeService;
-    private final BufferNotificationService bufferNotificationService;
 
     public PostPublishService(SiteService siteService, CmsAdapterFactory cmsAdapterFactory,
                                MarkdownRenderer markdownRenderer, PostRepository postRepository,
@@ -84,8 +84,7 @@ public class PostPublishService {
                                UserRepository userRepository,
                                UserSiteAuthorRepository userSiteAuthorRepository,
                                ObjectMapper objectMapper,
-                               ImageResizeService imageResizeService,
-                               BufferNotificationService bufferNotificationService) {
+                               ImageResizeService imageResizeService) {
         this.siteService = siteService;
         this.cmsAdapterFactory = cmsAdapterFactory;
         this.markdownRenderer = markdownRenderer;
@@ -104,7 +103,6 @@ public class PostPublishService {
         this.userSiteAuthorRepository = userSiteAuthorRepository;
         this.objectMapper = objectMapper;
         this.imageResizeService = imageResizeService;
-        this.bufferNotificationService = bufferNotificationService;
     }
 
     @AuditLog(action = AuditLogAction.POST_PUBLISHED, resourceType = "POST")
@@ -121,15 +119,13 @@ public class PostPublishService {
         // [recharts]タグの記法・データが不正な場合はInvalidRechartsTagExceptionを未捕捉のまま伝播させ、
         // GlobalExceptionHandlerが400として返すことで投稿自体を拒否する(Issue #340)。
         markdown = rechartsTagRenderService.render(markdown);
-        // [plantuml]〜[/plantuml]組み込みタグも同じ方針(Issue #344)。既存の```plantumlフェンスコード
-        // ブロック記法(次行のplantUmlEmbedService)とは併存し、置き換えない。
-        markdown = plantUmlTagRenderService.render(credentials, markdown);
-        markdown = plantUmlEmbedService.embedDiagrams(credentials, markdown);
-        // 前回投稿時にアップロード済みの画像を再利用するキャッシュは、そのwpPostIdに紐づけて記憶している。
-        // wpPostId自体がCMS側で削除される等して実在しなくなっている場合、一緒にアップロードした画像も
-        // 削除されている可能性が高く、キャッシュされたURLが既にリンク切れであることがある(issue #493)。
-        // 投稿自体の作成/更新時のフォールバック(createOrUpdatePost実装内)とは別に、画像再利用の可否を
+        // 前回投稿時にアップロード済みの画像/ダイアグラムを再利用するキャッシュは、そのwpPostIdに紐づけて
+        // 記憶している。wpPostId自体がCMS側で削除される等して実在しなくなっている場合、一緒にアップロードした
+        // 画像も削除されている可能性が高く、キャッシュされたURLが既にリンク切れであることがある(issue #493)。
+        // 投稿自体の作成/更新時のフォールバック(createOrUpdatePost実装内)とは別に、再利用の可否を
         // 先に判定する必要がある(画像URLは投稿本文の組み立てに使うため、投稿作成より前に確定させるため)。
+        // PlantUMLダイアグラムの再利用判定(issue #499)にも同じキャッシュを使うため、
+        // plantUmlTagRenderService/plantUmlEmbedServiceの呼び出しより前にロードする。
         String wpPostIdForImageCache = command.wpPostId();
         if (wpPostIdForImageCache != null && !cmsAdapter.postExists(credentials, wpPostIdForImageCache)) {
             log.info("wpPostId={} はCMS側に存在しないため、前回アップロード画像の再利用キャッシュは使用しません",
@@ -137,9 +133,20 @@ public class PostPublishService {
             wpPostIdForImageCache = null;
         }
         Map<String, UploadedImageInfo> priorUploads = loadPriorUploadedImages(site.getId(), wpPostIdForImageCache);
+
+        // [plantuml]〜[/plantuml]組み込みタグも同じ方針(Issue #344)。既存の```plantumlフェンスコード
+        // ブロック記法(次行のplantUmlEmbedService)とは併存し、置き換えない。
+        // 同一内容のダイアグラムを再投稿のたびに再生成・再アップロードしないよう、通常画像と同じ
+        // sha256ベースの再利用キャッシュ(priorUploads)を共有する(issue #499)。
+        DiagramEmbedResult tagResult = plantUmlTagRenderService.render(credentials, markdown, priorUploads);
+        DiagramEmbedResult embedResult = plantUmlEmbedService.embedDiagrams(
+                credentials, tagResult.markdown(), tagResult.uploadedImages());
+        markdown = embedResult.markdown();
+
         ImageReplacementResult imageResult = replaceImageReferences(
                 cmsAdapter, credentials, markdown, command.images(), command.imageReferences(),
-                command.slug(), command.title(), command.featuredImageFilename(), priorUploads, projectId);
+                command.slug(), command.title(), command.featuredImageFilename(),
+                embedResult.uploadedImages(), projectId);
         String html = markdownRenderer.render(imageResult.markdown());
         html = tocStyleRenderService.applyHtmlTemplate(html, projectId);
         html = renderedContentWrapperService.wrap(html, projectId);
@@ -170,28 +177,10 @@ public class PostPublishService {
         PostResult result = cmsAdapter.createOrUpdatePost(credentials, content, command.wpPostId());
         log.info("WordPress投稿完了: postId={}, status={}", result.id(), result.status());
 
-        Post post = upsertPostRecord(site.getId(), result, command.slug(), imageResult.uploadedImages());
-
-        if (shouldNotifySns(command, site, projectId, status)) {
-            bufferNotificationService.notifyAsync(post.getId(), site.getId(), projectId, command.title(), result.link());
-        }
+        upsertPostRecord(site.getId(), result, command.slug(), imageResult.uploadedImages(),
+                command.categories(), publishScheduledAt);
 
         return new PostPublishResponse(result.id(), result.link(), result.status());
-    }
-
-    /**
-     * BufferによるSNS通知を行うかどうか。下書きや本番以外のサイトへの投稿では通知しない
-     * (issue #379の「プレビュー/下書きでは通知しない」という考慮事項に対応)。
-     * notifySns=falseが明示された場合は呼び出し元(投稿単位)の指定を優先する。
-     */
-    private boolean shouldNotifySns(PostPublishCommand command, Site site, Long projectId, String status) {
-        if (Boolean.FALSE.equals(command.notifySns())) {
-            return false;
-        }
-        if ("draft".equals(status)) {
-            return false;
-        }
-        return isProductionSite(site, projectId);
     }
 
     /** サイト+既存wpPostIdに紐づくPost行から、前回投稿時にアップロード済みの画像情報を読み込む。 */
@@ -408,7 +397,8 @@ public class PostPublishService {
         return getFileExtension(fallbackFilename);
     }
 
-    private Post upsertPostRecord(Long siteId, PostResult result, String slug, Map<String, UploadedImageInfo> uploadedImages) {
+    private Post upsertPostRecord(Long siteId, PostResult result, String slug, Map<String, UploadedImageInfo> uploadedImages,
+                                   List<String> categories, Instant publishScheduledAt) {
         Post post = postRepository.findBySiteIdAndWpPostId(siteId, result.id())
                 .orElseGet(Post::new);
 
@@ -418,17 +408,29 @@ public class PostPublishService {
         post.setStatus(result.status());
         post.setLastPublishedAt(LocalDateTime.now());
         post.setUploadedImagesJson(serializeUploadedImages(uploadedImages));
+        post.setCategories(serializeCategories(categories));
+        post.setPublishScheduledAt(publishScheduledAt == null
+                ? null
+                : LocalDateTime.ofInstant(publishScheduledAt, ZoneOffset.UTC));
 
         postRepository.save(post);
         return post;
     }
 
-    private record ImageReplacementResult(
-            String markdown, String featuredMediaId, Map<String, UploadedImageInfo> uploadedImages) {
+    private String serializeCategories(List<String> categories) {
+        if (categories == null || categories.isEmpty()) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(categories);
+        } catch (JsonProcessingException e) {
+            log.warn("カテゴリ情報のシリアライズに失敗しました: {}", e.getMessage());
+            return null;
+        }
     }
 
-    /** アップロード済み画像1件分の情報。sha256は再投稿時に内容が変わっていないかの判定に使う。 */
-    private record UploadedImageInfo(String sha256, String url, String mediaId) {
+    private record ImageReplacementResult(
+            String markdown, String featuredMediaId, Map<String, UploadedImageInfo> uploadedImages) {
     }
 
     /**
@@ -436,8 +438,9 @@ public class PostPublishService {
      *
      * 予約投稿は本番(live)サイトでのみ有効とする。ローカル/テスト環境は動作確認用途で
      * 即時に結果を見たいため、予約指定があっても無視して通常どおり投稿する。
-     * 形式不正や過去日時は、利用者が意図と異なる公開状態に気付けないまま進むのを防ぐため
-     * エラーとして扱う。
+     * 形式不正は、利用者が意図と異なる公開状態に気付けないまま進むのを防ぐためエラーとして扱う。
+     * 一方で過去日時は、記事側の日付が経過しただけの正常なケースであり得るため、エラーにはせず
+     * 予約指定を無視して指定のstatus(publish/draft等)どおりに投稿する(issue #520)。
      */
     private Instant resolvePublishScheduledAt(String raw, Site site, Long projectId) {
         if (raw == null || raw.isBlank()) {
@@ -451,12 +454,15 @@ public class PostPublishService {
             throw new IllegalArgumentException(
                     "publish_scheduled_at はISO 8601形式(例: 2026-12-25T09:00:00Z)で指定してください: " + raw);
         }
-        if (!scheduledAt.isAfter(Instant.now())) {
-            throw new IllegalArgumentException("publish_scheduled_at には未来の日時を指定してください: " + raw);
-        }
 
         if (!isProductionSite(site, projectId)) {
             log.info("本番サイト以外への投稿のため、publish_scheduled_at({})を無視します: siteKey={}",
+                    raw, site.getSiteKey());
+            return null;
+        }
+
+        if (!scheduledAt.isAfter(Instant.now())) {
+            log.info("publish_scheduled_at({})が過去日時のため無視し、指定のstatusで投稿します: siteKey={}",
                     raw, site.getSiteKey());
             return null;
         }

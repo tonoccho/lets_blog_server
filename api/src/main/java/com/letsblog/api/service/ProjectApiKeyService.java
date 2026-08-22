@@ -11,9 +11,6 @@ import com.letsblog.api.repository.ProjectRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Arrays;
-import java.util.List;
-
 /**
  * プロジェクト単位のGitHubトークン/Brave Search APIキーを管理する(issue #184)。
  * プロジェクトに値が設定されていればそれを優先し、未設定の場合は
@@ -268,92 +265,6 @@ public class ProjectApiKeyService {
             return credentialCipher.decrypt(project.getBraveSearchApiKeyEncrypted());
         }
         return systemSettingService.getBraveSearchApiKey();
-    }
-
-    private static final int DEFAULT_BUFFER_DELAY_MINUTES = 5;
-    private static final String DEFAULT_BUFFER_MESSAGE_TEMPLATE = "{title} {url}";
-
-    public record BufferSettings(
-            boolean enabled, String accessToken, List<String> profileIds, int delayMinutes, String messageTemplate) {
-    }
-
-    public record BufferSettingsStatus(
-            boolean configured,
-            boolean enabled,
-            boolean hasAccessToken,
-            String profileIds,
-            Integer delayMinutes,
-            String messageTemplate) {
-    }
-
-    @Transactional(readOnly = true)
-    public BufferSettingsStatus getBufferSettingsStatus(Long projectId) {
-        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        Project project = getProject(projectId);
-        return new BufferSettingsStatus(
-                project.isBufferConfigured(),
-                project.isBufferEnabled(),
-                project.hasBufferAccessToken(),
-                project.getBufferProfileIds(),
-                project.getBufferPostDelayMinutes(),
-                project.getBufferMessageTemplate());
-    }
-
-    @Transactional
-    public void setBufferAccessToken(Long projectId, String accessToken) {
-        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        Project project = getProject(projectId);
-        project.setBufferAccessTokenEncrypted(credentialCipher.encrypt(accessToken));
-        projectRepository.save(project);
-    }
-
-    @Transactional
-    public void setBufferSettings(
-            Long projectId, boolean enabled, String profileIds, Integer delayMinutes, String messageTemplate) {
-        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        Project project = getProject(projectId);
-        project.setBufferEnabled(enabled);
-        project.setBufferProfileIds(profileIds == null || profileIds.isBlank() ? null : profileIds.trim());
-        project.setBufferPostDelayMinutes(delayMinutes != null ? delayMinutes : DEFAULT_BUFFER_DELAY_MINUTES);
-        project.setBufferMessageTemplate(
-                messageTemplate == null || messageTemplate.isBlank() ? DEFAULT_BUFFER_MESSAGE_TEMPLATE : messageTemplate);
-        projectRepository.save(project);
-    }
-
-    @Transactional
-    public void clearBufferSettings(Long projectId) {
-        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        Project project = getProject(projectId);
-        project.setBufferEnabled(false);
-        project.setBufferAccessTokenEncrypted(null);
-        project.setBufferProfileIds(null);
-        project.setBufferPostDelayMinutes(null);
-        project.setBufferMessageTemplate(null);
-        projectRepository.save(project);
-    }
-
-    /**
-     * BufferNotificationService/SocialStatsServiceから呼ばれる。プロジェクトにBuffer連携が
-     * 設定されていない場合はenabled=falseを返す(認可はここでは行わない。呼び出し元が
-     * プロジェクトメンバー/adminであることを別途保証している。resolveGithubToken等と同じ方針)。
-     */
-    @Transactional(readOnly = true)
-    public BufferSettings resolveBufferSettings(Long projectId) {
-        Project project = getProject(projectId);
-        if (!project.isBufferConfigured()) {
-            return new BufferSettings(false, null, List.of(), DEFAULT_BUFFER_DELAY_MINUTES, DEFAULT_BUFFER_MESSAGE_TEMPLATE);
-        }
-        String accessToken = credentialCipher.decrypt(project.getBufferAccessTokenEncrypted());
-        List<String> profileIds = Arrays.stream(project.getBufferProfileIds().split(","))
-                .map(String::trim)
-                .filter(value -> !value.isBlank())
-                .toList();
-        int delayMinutes =
-                project.getBufferPostDelayMinutes() != null ? project.getBufferPostDelayMinutes() : DEFAULT_BUFFER_DELAY_MINUTES;
-        String messageTemplate = project.getBufferMessageTemplate() != null && !project.getBufferMessageTemplate().isBlank()
-                ? project.getBufferMessageTemplate()
-                : DEFAULT_BUFFER_MESSAGE_TEMPLATE;
-        return new BufferSettings(true, accessToken, profileIds, delayMinutes, messageTemplate);
     }
 
     private Project getProject(Long projectId) {

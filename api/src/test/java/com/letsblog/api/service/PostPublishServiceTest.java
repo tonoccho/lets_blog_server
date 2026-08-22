@@ -28,6 +28,7 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -35,6 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -82,13 +84,11 @@ class PostPublishServiceTest {
     private UserSiteAuthorRepository userSiteAuthorRepository;
     @Mock
     private CmsAdapter cmsAdapter;
-    @Mock
-    private BufferNotificationService bufferNotificationService;
 
     private PostPublishService service;
 
     private final CmsCredentials.WordPressCredentials credentials =
-            new CmsCredentials.WordPressCredentials("https://example.com", "admin", "secret");
+            new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
 
     @BeforeEach
     void setUp() {
@@ -96,7 +96,7 @@ class PostPublishServiceTest {
                 plantUmlEmbedService, customTagRenderService, blogCardTagRenderService, amazonTagRenderService,
                 rechartsTagRenderService, plantUmlTagRenderService, tocStyleRenderService, renderedContentWrapperService,
                 projectService, currentActorService, userRepository, userSiteAuthorRepository,
-                new com.fasterxml.jackson.databind.ObjectMapper(), new ImageResizeService(), bufferNotificationService);
+                new com.fasterxml.jackson.databind.ObjectMapper(), new ImageResizeService());
 
         Site site = new Site();
         site.setId(1L);
@@ -112,8 +112,10 @@ class PostPublishServiceTest {
         lenient().when(amazonTagRenderService.render(anyString(), any(), anyBoolean()))
                 .thenAnswer(inv -> inv.getArgument(0));
         lenient().when(rechartsTagRenderService.render(anyString())).thenAnswer(inv -> inv.getArgument(0));
-        lenient().when(plantUmlTagRenderService.render(any(), anyString())).thenAnswer(inv -> inv.getArgument(1));
-        lenient().when(plantUmlEmbedService.embedDiagrams(any(), anyString())).thenAnswer(inv -> inv.getArgument(1));
+        lenient().when(plantUmlTagRenderService.render(any(), anyString(), anyMap()))
+                .thenAnswer(inv -> new DiagramEmbedResult(inv.getArgument(1), inv.getArgument(2)));
+        lenient().when(plantUmlEmbedService.embedDiagrams(any(), anyString(), anyMap()))
+                .thenAnswer(inv -> new DiagramEmbedResult(inv.getArgument(1), inv.getArgument(2)));
         lenient().when(markdownRenderer.render(anyString())).thenAnswer(inv -> "<p>" + inv.getArgument(0) + "</p>");
         lenient().when(tocStyleRenderService.applyHtmlTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(renderedContentWrapperService.wrap(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
@@ -134,7 +136,7 @@ class PostPublishServiceTest {
             String featuredImageFilename, List<String> imageReferences) {
         return new PostPublishCommand(
                 "main", title, slug, "draft", List.of(), List.of(), null, "本文", images, featuredImageFilename,
-                imageReferences, null, null);
+                imageReferences, null);
     }
 
     @Test
@@ -155,6 +157,34 @@ class PostPublishServiceTest {
         assertEquals("101", response.wpPostId());
         verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.png"), eq("image/png"), any());
         verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0002.jpg"), eq("image/jpeg"), any());
+    }
+
+    @Test
+    void publish_既存スラッグのwpPostIdを渡して再投稿すると同じPost行が更新され重複作成されない() {
+        // issue #529: VSCode拡張はスラッグから既存投稿を照会(lookupExistingPost)し、
+        // 見つかったwpPostIdをcommand.wpPostId()として渡してくる。この場合、DB(posts)側は
+        // 新しい行を追加するのではなく、既存の行を更新しなければ同じスラッグの記事が
+        // 再投稿のたびに重複投稿されてしまう。
+        com.letsblog.api.domain.Post existingPost = new com.letsblog.api.domain.Post();
+        existingPost.setId(9L);
+        existingPost.setSiteId(1L);
+        existingPost.setWpPostId("55");
+        existingPost.setSlug("my-article");
+        when(postRepository.findBySiteIdAndWpPostId(1L, "55")).thenReturn(Optional.of(existingPost));
+        when(cmsAdapter.createOrUpdatePost(any(), any(), eq("55")))
+                .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
+
+        PostPublishCommand command = new PostPublishCommand(
+                "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", List.of(), null,
+                null, null);
+
+        service.publish(command);
+
+        ArgumentCaptor<com.letsblog.api.domain.Post> savedCaptor =
+                ArgumentCaptor.forClass(com.letsblog.api.domain.Post.class);
+        verify(postRepository).save(savedCaptor.capture());
+        assertEquals(9L, savedCaptor.getValue().getId());
+        assertEquals("55", savedCaptor.getValue().getWpPostId());
     }
 
     @Test
@@ -387,7 +417,7 @@ class PostPublishServiceTest {
                 new MockMultipartFile("images", "eyecatch.png", "image/png", renderPng(400, 200)));
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), null, "本文", images, null,
-                List.of("assets/eyecatch.png"), null, null);
+                List.of("assets/eyecatch.png"), null);
 
         service.publish(command);
 
@@ -410,7 +440,7 @@ class PostPublishServiceTest {
                 new MockMultipartFile("images", "eyecatch.png", "image/png", renderPng(400, 200)));
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), null, "本文", images, null,
-                List.of("assets/eyecatch.png"), null, null);
+                List.of("assets/eyecatch.png"), null);
 
         service.publish(command);
 
@@ -448,7 +478,7 @@ class PostPublishServiceTest {
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", images, null,
-                List.of("assets/eyecatch.png"), null, null);
+                List.of("assets/eyecatch.png"), null);
 
         service.publish(command);
 
@@ -474,7 +504,7 @@ class PostPublishServiceTest {
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", images, null,
-                List.of("assets/eyecatch.png"), null, null);
+                List.of("assets/eyecatch.png"), null);
 
         service.publish(command);
 
@@ -506,7 +536,7 @@ class PostPublishServiceTest {
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", images, null,
-                List.of("assets/eyecatch.png"), null, null);
+                List.of("assets/eyecatch.png"), null);
 
         service.publish(command);
 
@@ -539,7 +569,7 @@ class PostPublishServiceTest {
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", images, null,
-                List.of("assets/eyecatch.png"), null, null);
+                List.of("assets/eyecatch.png"), null);
 
         service.publish(command);
 
@@ -547,9 +577,13 @@ class PostPublishServiceTest {
     }
 
     private PostPublishCommand scheduledCommand(String publishScheduledAt) {
+        return scheduledCommand(publishScheduledAt, "draft");
+    }
+
+    private PostPublishCommand scheduledCommand(String publishScheduledAt, String status) {
         return new PostPublishCommand(
-                "main", "My Article", "my-article", "draft", List.of(), List.of(), null, "本文", List.of(), null,
-                List.of(), publishScheduledAt, null);
+                "main", "My Article", "my-article", status, List.of(), List.of(), null, "本文", List.of(), null,
+                List.of(), publishScheduledAt);
     }
 
     /** siteId=1 を本番サイトに持つプロジェクトを紐づける。 */
@@ -557,7 +591,7 @@ class PostPublishServiceTest {
         com.letsblog.api.domain.Project project = new com.letsblog.api.domain.Project();
         project.setId(7L);
         project.setProductionSiteId(1L);
-        // 形式不正・過去日時は本番判定より前に弾かれるため、この経路を通らないことがある。
+        // 形式不正は本番判定より前に弾かれるため、この経路を通らないことがある。
         lenient().when(projectService.findProjectIdBySiteId(1L)).thenReturn(7L);
         lenient().when(projectService.getProjectEntity(7L)).thenReturn(project);
     }
@@ -630,13 +664,51 @@ class PostPublishServiceTest {
     }
 
     @Test
-    void publish_過去の公開予定日時は拒否する() {
+    void publish_本番サイトで過去の公開予定日時かつstatus_publishの場合は無視して即時公開する() {
         bindProductionSite();
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "publish"));
         String past = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).minusDays(1).toString();
 
-        IllegalArgumentException e = org.junit.jupiter.api.Assertions.assertThrows(
-                IllegalArgumentException.class, () -> service.publish(scheduledCommand(past)));
-        assertTrue(e.getMessage().contains("未来の日時"));
+        service.publish(scheduledCommand(past, "publish"));
+
+        org.mockito.ArgumentCaptor<PostContent> captor =
+                org.mockito.ArgumentCaptor.forClass(PostContent.class);
+        verify(cmsAdapter).createOrUpdatePost(any(), captor.capture(), any());
+        assertEquals("publish", captor.getValue().status());
+        assertNull(captor.getValue().publishScheduledAt());
+    }
+
+    @Test
+    void publish_本番サイトで過去の公開予定日時かつstatus_publish以外の場合は無視して非公開のまま投稿する() {
+        bindProductionSite();
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        String past = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).minusDays(1).toString();
+
+        service.publish(scheduledCommand(past, "draft"));
+
+        org.mockito.ArgumentCaptor<PostContent> captor =
+                org.mockito.ArgumentCaptor.forClass(PostContent.class);
+        verify(cmsAdapter).createOrUpdatePost(any(), captor.capture(), any());
+        assertEquals("draft", captor.getValue().status());
+        assertNull(captor.getValue().publishScheduledAt());
+    }
+
+    @Test
+    void publish_本番以外のサイトでは過去の公開予定日時も無視する() {
+        bindNonProductionSite();
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        String past = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).minusDays(1).toString();
+
+        service.publish(scheduledCommand(past));
+
+        org.mockito.ArgumentCaptor<PostContent> captor =
+                org.mockito.ArgumentCaptor.forClass(PostContent.class);
+        verify(cmsAdapter).createOrUpdatePost(any(), captor.capture(), any());
+        assertEquals("draft", captor.getValue().status());
+        assertNull(captor.getValue().publishScheduledAt());
     }
 
     @Test
@@ -677,19 +749,19 @@ class PostPublishServiceTest {
 
     @Test
     void publish_plantumlタグをレンダリングしCMSへアップロードする() {
-        when(plantUmlTagRenderService.render(eq(credentials), anyString()))
-                .thenReturn("![diagram](https://example.com/plantuml-tag-1.png)");
+        when(plantUmlTagRenderService.render(eq(credentials), anyString(), anyMap()))
+                .thenReturn(new DiagramEmbedResult("![diagram](https://example.com/plantuml-tag-1.png)", Map.of()));
         when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
                 .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
 
         service.publish(command("my-article", "My Article", List.of(), null));
 
-        verify(plantUmlTagRenderService).render(eq(credentials), anyString());
+        verify(plantUmlTagRenderService).render(eq(credentials), anyString(), anyMap());
     }
 
     @Test
     void publish_plantumlタグが不正な場合は投稿を拒否する() {
-        when(plantUmlTagRenderService.render(eq(credentials), anyString()))
+        when(plantUmlTagRenderService.render(eq(credentials), anyString(), anyMap()))
                 .thenThrow(new InvalidPlantUmlTagException("PlantUML図のレンダリングに失敗しました"));
 
         InvalidPlantUmlTagException e = org.junit.jupiter.api.Assertions.assertThrows(
@@ -699,66 +771,89 @@ class PostPublishServiceTest {
         verify(cmsAdapter, org.mockito.Mockito.never()).createOrUpdatePost(any(), any(), any());
     }
 
-    private PostPublishCommand commandWithStatusAndNotify(String status, Boolean notifySns) {
-        return new PostPublishCommand(
-                "main", "My Article", "my-article", status, List.of(), List.of(), null, "本文", List.of(), null,
-                List.of(), null, notifySns);
+    @Test
+    void publish_前回投稿時のPlantUMLキャッシュはtagRenderServiceとembedServiceへ引き継がれる() {
+        // issue #499: PlantUMLダイアグラムの再利用判定に使うキャッシュは、通常画像と同じPostの
+        // uploadedImagesJsonに保存されている。plantUmlTagRenderService→plantUmlEmbedServiceの順で
+        // 呼び出す際、前段の戻り値(更新後のキャッシュ)が次段にそのまま引き継がれることを検証する。
+        com.letsblog.api.domain.Post existingPost = new com.letsblog.api.domain.Post();
+        existingPost.setSiteId(1L);
+        existingPost.setWpPostId("55");
+        existingPost.setUploadedImagesJson(
+                "{\"plantuml:tag-hash\":{\"sha256\":\"tag-hash\","
+                        + "\"url\":\"https://example.com/plantuml-tag-1.png\",\"mediaId\":\"9\"}}");
+        when(postRepository.findBySiteIdAndWpPostId(1L, "55")).thenReturn(Optional.of(existingPost));
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
+
+        PostPublishCommand command = new PostPublishCommand(
+                "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", List.of(), null,
+                List.of(), null);
+        service.publish(command);
+
+        ArgumentCaptor<Map> tagPriorUploadsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(plantUmlTagRenderService).render(eq(credentials), anyString(), tagPriorUploadsCaptor.capture());
+        assertTrue(tagPriorUploadsCaptor.getValue().containsKey("plantuml:tag-hash"));
+
+        ArgumentCaptor<Map> embedPriorUploadsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(plantUmlEmbedService).embedDiagrams(eq(credentials), anyString(), embedPriorUploadsCaptor.capture());
+        assertTrue(embedPriorUploadsCaptor.getValue().containsKey("plantuml:tag-hash"));
     }
 
     @Test
-    void publish_本番サイトへの公開ではBuffer通知が呼ばれる() {
+    void publish_PlantUMLダイアグラムのアップロード結果がPost保存時のキャッシュに含まれる() {
+        // issue #499: plantUmlEmbedServiceが返した更新後キャッシュ(通常画像+ダイアグラム双方)が、
+        // 次回投稿時の再利用判定のためPostのuploadedImagesJsonへ保存されることを検証する。
+        when(plantUmlEmbedService.embedDiagrams(any(), anyString(), anyMap()))
+                .thenReturn(new DiagramEmbedResult("本文",
+                        Map.of("plantuml:diagram-hash", new UploadedImageInfo(
+                                "diagram-hash", "https://example.com/plantuml-1.png", "12"))));
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("200", "https://example.com/?p=200", "draft"));
+
+        service.publish(command("my-article", "My Article", List.of(), null));
+
+        ArgumentCaptor<com.letsblog.api.domain.Post> postCaptor =
+                ArgumentCaptor.forClass(com.letsblog.api.domain.Post.class);
+        verify(postRepository).save(postCaptor.capture());
+        assertTrue(postCaptor.getValue().getUploadedImagesJson().contains("plantuml:diagram-hash"));
+    }
+
+    @Test
+    void publish_categoriesがローカルDBのPostへ保存される() {
+        // issue #506: WordPressへ送信したカテゴリはposts.categoriesへJSON配列として保存され、
+        // 再投稿時にも失われないことを検証する。
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("201", "https://example.com/?p=201", "draft"));
+        PostPublishCommand command = new PostPublishCommand(
+                "main", "My Article", "my-article", "draft", List.of("技術", "お知らせ"), List.of(), null, "本文",
+                List.of(), null, List.of(), null);
+
+        service.publish(command);
+
+        ArgumentCaptor<com.letsblog.api.domain.Post> postCaptor =
+                ArgumentCaptor.forClass(com.letsblog.api.domain.Post.class);
+        verify(postRepository).save(postCaptor.capture());
+        assertTrue(postCaptor.getValue().getCategories().contains("技術"));
+        assertTrue(postCaptor.getValue().getCategories().contains("お知らせ"));
+    }
+
+    @Test
+    void publish_publishScheduledAtがローカルDBのPostへ保存される() {
+        // issue #506: 本番サイトへの予約投稿では、実際に適用された公開予定日時がposts.publish_scheduled_atへ保存される。
         bindProductionSite();
         when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "publish"));
+                .thenReturn(new PostResult("202", "https://example.com/?p=202", "future"));
+        java.time.OffsetDateTime scheduledAt = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).plusDays(1)
+                .withNano(0);
 
-        service.publish(commandWithStatusAndNotify("publish", null));
+        service.publish(scheduledCommand(scheduledAt.toString()));
 
-        verify(bufferNotificationService).notifyAsync(any(), eq(1L), eq(7L), eq("My Article"), eq("https://example.com/?p=101"));
+        ArgumentCaptor<com.letsblog.api.domain.Post> postCaptor =
+                ArgumentCaptor.forClass(com.letsblog.api.domain.Post.class);
+        verify(postRepository).save(postCaptor.capture());
+        assertEquals(scheduledAt.toInstant(),
+                postCaptor.getValue().getPublishScheduledAt().toInstant(java.time.ZoneOffset.UTC));
     }
 
-    @Test
-    void publish_本番サイトへの予約投稿でもBuffer通知が呼ばれる() {
-        bindProductionSite();
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "future"));
-        String scheduledAt = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).plusDays(1)
-                .withNano(0).toString();
-
-        service.publish(scheduledCommand(scheduledAt));
-
-        verify(bufferNotificationService).notifyAsync(any(), eq(1L), eq(7L), eq("My Article"), eq("https://example.com/?p=101"));
-    }
-
-    @Test
-    void publish_下書きではBuffer通知が呼ばれない() {
-        bindProductionSite();
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-
-        service.publish(commandWithStatusAndNotify("draft", null));
-
-        verify(bufferNotificationService, org.mockito.Mockito.never()).notifyAsync(any(), any(), any(), any(), any());
-    }
-
-    @Test
-    void publish_本番以外のサイトではBuffer通知が呼ばれない() {
-        bindNonProductionSite();
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "publish"));
-
-        service.publish(commandWithStatusAndNotify("publish", null));
-
-        verify(bufferNotificationService, org.mockito.Mockito.never()).notifyAsync(any(), any(), any(), any(), any());
-    }
-
-    @Test
-    void publish_notifySnsがfalseならBuffer通知が呼ばれない() {
-        bindProductionSite();
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "publish"));
-
-        service.publish(commandWithStatusAndNotify("publish", false));
-
-        verify(bufferNotificationService, org.mockito.Mockito.never()).notifyAsync(any(), any(), any(), any(), any());
-    }
 }

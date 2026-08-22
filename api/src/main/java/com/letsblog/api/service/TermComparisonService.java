@@ -1,8 +1,6 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.cms.CmsApiException;
 import com.letsblog.api.cms.CmsCredentials;
-import com.letsblog.api.cms.rest.WordPressRestBulkManagementOperations;
 import com.letsblog.api.cms.ssh.WordPressSshOperations;
 import com.letsblog.api.domain.BulkOperationLog;
 import com.letsblog.api.domain.BulkOperationType;
@@ -14,7 +12,6 @@ import com.letsblog.api.dto.TermEnvironmentValue;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient;
 import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.SiteRepository;
-import com.letsblog.api.util.StackTraceUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,18 +27,17 @@ import java.util.Objects;
 /**
  * カテゴリ・タグを3環境(ローカル/テスト/本番)で横断比較し、マスター環境(Project#masterEnvironment)の
  * 値を基準に、非マスター環境への同期・全環境からの削除をオーケストレーションする。
- * 実際のwp-cli/REST呼び出し・ログ記録は{@link BulkManagementService#applyToEnvironment}に委譲する
+ * 実際のwp-cli呼び出し・ログ記録は{@link BulkManagementService#applyToEnvironment}に委譲する
  * (1環境=1操作=1ログという既存の粒度をそのまま使う)。
  * 項目の同一性はスラッグ(大文字小文字を無視した完全一致)で判定する。名前は環境間で表記が
  * 揺れうる(空白・全角半角・リネーム等)一方、WordPressの内部識別としてはスラッグが安定しているため
  * (Phase12フィードバックで、名前基準の名寄せだと同一スラッグでも行が分裂する不具合を修正した)。
  * <p>
  * 環境の値取得は{@link #resolveTermsByEnvironment}に集約する: managed(自動構築)サイトは内部エージェント
- * ({@link WordPressBulkManagementClient})経由、非managedサイトはREST(Application Password)が
- * 利用可能ならそちらを優先し({@link WordPressRestBulkManagementOperations})、無ければSSH接続情報
- * (transport=SSH)があれば{@link WordPressSshOperations}経由で取得する。SSHのみで解決する環境が
- * 複数あり同一ホストを共有している場合は、{@link WordPressSshOperations#fetchTermsForEnvironments}で
- * 1回の接続にまとめる。取得に失敗した環境は「対象外」ではなく「エラー」として扱い、作業ログにも記録する。
+ * ({@link WordPressBulkManagementClient})経由、非managedサイトはSSH接続情報(transport=SSH)があれば
+ * {@link WordPressSshOperations}経由で取得する。SSHのみで解決する環境が複数あり同一ホストを共有している
+ * 場合は、{@link WordPressSshOperations#fetchTermsForEnvironments}で1回の接続にまとめる。
+ * 取得に失敗した環境は「対象外」ではなく「エラー」として扱い、作業ログにも記録する。
  */
 @Service
 @Slf4j
@@ -55,7 +51,6 @@ public class TermComparisonService {
     private final BulkManagementService bulkManagementService;
     private final SiteService siteService;
     private final WordPressSshOperations sshOperations;
-    private final WordPressRestBulkManagementOperations restOperations;
 
     public TermComparisonService(
             ProjectRepository projectRepository,
@@ -63,15 +58,13 @@ public class TermComparisonService {
             WordPressBulkManagementClient bulkManagementClient,
             BulkManagementService bulkManagementService,
             SiteService siteService,
-            WordPressSshOperations sshOperations,
-            WordPressRestBulkManagementOperations restOperations) {
+            WordPressSshOperations sshOperations) {
         this.projectRepository = projectRepository;
         this.siteRepository = siteRepository;
         this.bulkManagementClient = bulkManagementClient;
         this.bulkManagementService = bulkManagementService;
         this.siteService = siteService;
         this.sshOperations = sshOperations;
-        this.restOperations = restOperations;
     }
 
     @Transactional(readOnly = true)
@@ -361,7 +354,7 @@ public class TermComparisonService {
     }
 
     /**
-     * 3環境分のカテゴリ/タグ一覧を、環境ごとの経路(managed=内部エージェント、REST優先、無ければSSH)で
+     * 3環境分のカテゴリ/タグ一覧を、環境ごとの経路(managed=内部エージェント、非managedはSSH)で
      * 解決する。SSHのみで解決する環境が複数あり同一ホスト(sshHost:sshPort)を共有している場合は、
      * ホストごとにまとめて{@link WordPressSshOperations#fetchTermsForEnvironments}で1回の接続にする。
      * 取得に失敗した環境は{@link EnvironmentTerms#error}にし、作業ログにも記録する。
@@ -381,10 +374,6 @@ public class TermComparisonService {
                 continue;
             }
             SiteService.SiteDataSource dataSource = siteService.resolveDataSource(site);
-            if (dataSource.hasRest()) {
-                result.put(environment, fetchViaRest(project, environment, dataSource.restCredentials(), isCategory));
-                continue;
-            }
             if (dataSource.hasSsh()) {
                 String hostKey = hostKeyOf(dataSource.sshCredentials());
                 sshGroupsByHost.computeIfAbsent(hostKey, k -> new LinkedHashMap<>())
@@ -421,21 +410,6 @@ public class TermComparisonService {
         return EnvironmentTerms.of(infos.stream()
                 .map(info -> new CategoryInfo(info.name(), info.slug(), info.parentSlug(), info.description()))
                 .toList());
-    }
-
-    private EnvironmentTerms fetchViaRest(
-            Project project, String environment, CmsCredentials.WordPressCredentials creds, boolean isCategory) {
-        try {
-            List<WordPressRestBulkManagementOperations.CategoryInfo> infos = isCategory
-                    ? restOperations.listCategories(creds)
-                    : restOperations.listTags(creds);
-            return EnvironmentTerms.of(infos.stream()
-                    .map(info -> new CategoryInfo(info.name(), info.slug(), info.parentSlug(), info.description()))
-                    .toList());
-        } catch (CmsApiException e) {
-            logFetchError(project, environment, isCategory, e.getMessage(), StackTraceUtil.toString(e));
-            return EnvironmentTerms.error(e.getMessage());
-        }
     }
 
     private String hostKeyOf(CmsCredentials.WordPressCredentials creds) {

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="{{csp}}">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ask AI</title>
+{{sharedStyles}}
+<link rel="stylesheet" href="{{styleUri}}">
+</head>
+<body>
+<main class="container">
+  <h1 class="visually-hidden">Ask AI(Web検索)</h1>
+  <div class="form-group">
+    <label for="question">質問</label>
+    <textarea id="question" placeholder="調べたいことを入力してください(例: Next.js 16のproxy.tsとは何ですか?)"></textarea>
+  </div>
+  <div class="form-group">
+    <label for="aiProvider">AIプロバイダー</label>
+    <select id="aiProvider">
+      <option value="">(サーバー既定値を使用)</option>
+      <option value="OLLAMA">Ollama</option>
+      <option value="OPENAI">OpenAI (ChatGPT)</option>
+      <option value="CLAUDE">Claude (Anthropic)</option>
+    </select>
+  </div>
+  <button type="button" id="askButton" class="primary">質問する</button>
+
+  <section class="result" id="result" aria-labelledby="resultTitle">
+    <h2 class="visually-hidden" id="resultTitle">回答</h2>
+    <div id="answerArea" role="log" aria-live="polite" aria-label="回答"></div>
+    <div class="sources" id="sourcesArea" aria-label="出典"></div>
+    <div class="search-note" id="searchNoteArea"></div>
+    <div class="button-group">
+      <button type="button" id="applyButton" class="primary">結果を適用</button>
+    </div>
+  </section>
+
+  <div id="message" role="status" aria-live="polite"></div>
+</main>
+{{sharedScripts}}
+<script nonce="{{nonce}}" src="{{scriptUri}}"></script>
+</body>
+</html>

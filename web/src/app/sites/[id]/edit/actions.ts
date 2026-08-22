@@ -13,7 +13,6 @@ export interface UpdateSiteState {
 const CREDENTIAL_FIELDS = [
   "baseUrl",
   "username",
-  "appPassword",
   "serviceId",
   "apiKey",
   "managementApiKey",

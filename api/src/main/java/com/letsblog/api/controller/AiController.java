@@ -1,11 +1,15 @@
 package com.letsblog.api.controller;
 
+import com.letsblog.api.dto.AiAskRequest;
+import com.letsblog.api.dto.AiAskResponse;
 import com.letsblog.api.dto.AiDraftRequest;
 import com.letsblog.api.dto.AiDraftResponse;
 import com.letsblog.api.dto.AiImageBatchResponse;
 import com.letsblog.api.dto.AiImagePromptRequest;
 import com.letsblog.api.dto.AiImagePromptResponse;
 import com.letsblog.api.dto.AiImageRequest;
+import com.letsblog.api.dto.AiProofreadRequest;
+import com.letsblog.api.dto.AiProofreadResponse;
 import com.letsblog.api.dto.AiSectionRequest;
 import com.letsblog.api.dto.AiSectionResponse;
 import com.letsblog.api.dto.AiTagsRequest;
@@ -37,9 +41,21 @@ public class AiController {
         return aiAssistService.draft(request);
     }
 
+    /** issue #526: エディタ右クリックメニュー「Ask AI」からの質問に、Web検索結果を踏まえて回答する。 */
+    @PostMapping("/api/ai/ask")
+    public AiAskResponse ask(@Valid @RequestBody AiAskRequest request) {
+        return aiAssistService.ask(request);
+    }
+
     @PostMapping("/api/ai/tags")
     public AiTagsResponse tags(@Valid @RequestBody AiTagsRequest request) {
         return aiAssistService.suggestTags(request);
+    }
+
+    /** issue #523: エディタでのリアルタイム校正チェック。 */
+    @PostMapping("/api/ai/proofread")
+    public AiProofreadResponse proofread(@Valid @RequestBody AiProofreadRequest request) {
+        return aiAssistService.proofreadContent(request);
     }
 
     @PostMapping("/api/ai/image")
@@ -61,6 +77,6 @@ public class AiController {
     public AiImagePromptResponse generateImagePrompt(
             @PathVariable Long projectId, @Valid @RequestBody AiImagePromptRequest request) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        return aiAssistService.generateImagePrompt(projectId, request.history(), request.message());
+        return aiAssistService.generateImagePrompt(projectId, request.history(), request.message(), request.provider());
     }
 }

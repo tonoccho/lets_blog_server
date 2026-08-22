@@ -12,7 +12,9 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:markdown"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -53,12 +55,20 @@
         "title": "Let's Blog: Suggest Tags"
       },
       {
+        "command": "letsBlog.switchAiProvider",
+        "title": "Let's Blog: AIプロバイダーを切り替える"
+      },
+      {
         "command": "letsBlog.generateImage",
         "title": "Let's Blog: Generate Image"
       },
       {
         "command": "letsBlog.generateSection",
         "title": "Let's Blog: Generate Section"
+      },
+      {
+        "command": "letsBlog.askAiSearch",
+        "title": "Let's Blog: Ask AI (Web Search)"
       },
       {
         "command": "letsBlog.selectProject",
@@ -103,6 +113,10 @@
       {
         "command": "letsBlog.pasteAsLink",
         "title": "Let's Blog: Paste as Link"
+      },
+      {
+        "command": "letsBlog.proofreadNow",
+        "title": "Let's Blog: 校正チェックを今すぐ実行"
       }
     ],
     "keybindings": [
@@ -155,6 +169,21 @@
           "command": "letsBlog.diagramGallery",
           "when": "editorTextFocus && resourceLangId == markdown",
           "group": "letsBlog@6"
+        },
+        {
+          "command": "letsBlog.askAiSearch",
+          "when": "editorTextFocus && resourceLangId == markdown",
+          "group": "letsBlog@7"
+        },
+        {
+          "command": "letsBlog.suggestTags",
+          "when": "editorTextFocus && resourceLangId == markdown",
+          "group": "letsBlog@8"
+        },
+        {
+          "command": "letsBlog.proofreadNow",
+          "when": "editorTextFocus && resourceLangId == markdown",
+          "group": "letsBlog@9"
         }
       ]
     },
@@ -181,6 +210,29 @@
           "default": 120000,
           "minimum": 1000,
           "description": "APIリクエストのタイムアウト時間(ミリ秒)。AI生成など時間のかかる処理でタイムアウトする場合は延ばしてください。"
+        },
+        "letsBlog.aiProvider": {
+          "type": "string",
+          "enum": ["", "OLLAMA", "OPENAI", "CLAUDE"],
+          "enumDescriptions": [
+            "サーバー(プロジェクト/システム設定)の既定値を使用",
+            "Ollama",
+            "OpenAI (ChatGPT)",
+            "Claude (Anthropic)"
+          ],
+          "default": "",
+          "description": "文章提案AIに使うプロバイダー。「Let's Blog: AIプロバイダーを切り替える」コマンドや各AI生成画面のメニューからも切り替えられます。空欄はサーバー側の既定値(プロジェクト設定、未設定ならシステム設定)を使用します。"
+        },
+        "letsBlog.proofreadEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "編集の都度、本文をletsBlog.aiProviderで設定したAIへ自動送信して校正チェック(誤字脱字・読みやすさ・冗長表現)を行い、エディタに波線で表示する。既定はfalse(無効)。front matterの検証(公開予定日時・ステータス・カテゴリ)はこの設定に関わらず常に行われる。「Let's Blog: 校正チェックを今すぐ実行」コマンドは、この設定が無効でも都度AI校正を実行できる。"
+        },
+        "letsBlog.proofreadDebounceMs": {
+          "type": "number",
+          "default": 2000,
+          "minimum": 500,
+          "description": "letsBlog.proofreadEnabled有効時、入力が止まってから本文のAI校正を実行するまでの待機時間(ミリ秒)。"
         }
       }
     }

@@ -83,12 +83,29 @@ class GoogleAnalyticsClientTest {
                 .andRespond(withSuccess(
                         "{\"rows\":[{\"metricValues\":[{\"value\":\"120\"},{\"value\":\"80\"},{\"value\":\"300\"}]}]}",
                         MediaType.APPLICATION_JSON));
+        server.expect(requestTo(DATA_API_BASE_URL + "/v1beta/properties/123456789:runReport"))
+                .andExpect(method(POST))
+                .andRespond(withSuccess(
+                        "{\"rows\":[{\"dimensionValues\":[{\"value\":\"20240101\"}],"
+                                + "\"metricValues\":[{\"value\":\"60\"},{\"value\":\"40\"},{\"value\":\"150\"}]}]}",
+                        MediaType.APPLICATION_JSON));
+        server.expect(requestTo(DATA_API_BASE_URL + "/v1beta/properties/123456789:runReport"))
+                .andExpect(method(POST))
+                .andRespond(withSuccess(
+                        "{\"rows\":[{\"dimensionValues\":[{\"value\":\"Organic Search\"}],"
+                                + "\"metricValues\":[{\"value\":\"120\"},{\"value\":\"80\"},{\"value\":\"300\"}]}]}",
+                        MediaType.APPLICATION_JSON));
 
         GoogleAnalyticsReport report = client.fetchReport(testKey(), "123456789", 28);
 
         assertEquals(120, report.sessions());
         assertEquals(80, report.activeUsers());
         assertEquals(300, report.pageViews());
+        assertEquals(1, report.dailyDataPoints().size());
+        assertEquals("2024-01-01", report.dailyDataPoints().get(0).date());
+        assertEquals(60, report.dailyDataPoints().get(0).sessions());
+        assertEquals(1, report.channelBreakdown().size());
+        assertEquals("Organic Search", report.channelBreakdown().get(0).channel());
         server.verify();
     }
 
@@ -100,12 +117,20 @@ class GoogleAnalyticsClientTest {
         server.expect(requestTo(DATA_API_BASE_URL + "/v1beta/properties/123456789:runReport"))
                 .andExpect(method(POST))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(DATA_API_BASE_URL + "/v1beta/properties/123456789:runReport"))
+                .andExpect(method(POST))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(DATA_API_BASE_URL + "/v1beta/properties/123456789:runReport"))
+                .andExpect(method(POST))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
         GoogleAnalyticsReport report = client.fetchReport(testKey(), "123456789", 28);
 
         assertEquals(0, report.sessions());
         assertEquals(0, report.activeUsers());
         assertEquals(0, report.pageViews());
+        assertEquals(0, report.dailyDataPoints().size());
+        assertEquals(0, report.channelBreakdown().size());
     }
 
     @Test

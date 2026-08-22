@@ -1,12 +1,16 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.config.RabbitMqConfig;
 import com.letsblog.api.domain.OperationLog;
+import com.letsblog.api.messaging.OperationLogMessage;
 import com.letsblog.api.repository.OperationLogRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.amqp.AmqpException;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 
 import java.lang.reflect.Method;
@@ -15,6 +19,9 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -25,11 +32,43 @@ class OperationLogServiceTest {
     @Mock
     private OperationLogRepository repository;
 
+    @Mock
+    private RabbitTemplate rabbitTemplate;
+
     private OperationLogService service;
 
     @Test
-    void record_操作ログを保存する() {
-        service = new OperationLogService(repository);
+    void record_キューへ発行できればDBへは直接書き込まない() {
+        service = new OperationLogService(repository, rabbitTemplate);
+        OperationLog entry = new OperationLog();
+        entry.setUserId(1L);
+        entry.setOperationId("op-1");
+        entry.setMethod("GET");
+        entry.setPath("/api/sites");
+        entry.setStatusCode(200);
+        entry.setDurationMs(42L);
+        entry.setSuccess(true);
+
+        service.record(entry);
+
+        ArgumentCaptor<OperationLogMessage> captor = ArgumentCaptor.forClass(OperationLogMessage.class);
+        verify(rabbitTemplate).convertAndSend(
+                eq(RabbitMqConfig.LOG_EXCHANGE), eq(RabbitMqConfig.OPERATION_LOG_ROUTING_KEY), captor.capture());
+        OperationLogMessage message = captor.getValue();
+        assertEquals(1L, message.userId());
+        assertEquals("op-1", message.operationId());
+        assertEquals("GET", message.method());
+        assertEquals("/api/sites", message.path());
+        assertEquals(200, message.statusCode());
+        assertEquals(42L, message.durationMs());
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void record_キュー発行に失敗したら同期DB書き込みへフォールバックする() {
+        service = new OperationLogService(repository, rabbitTemplate);
+        doThrow(new AmqpException("キュー接続エラー"))
+                .when(rabbitTemplate).convertAndSend(any(String.class), any(String.class), any(Object.class));
         OperationLog entry = new OperationLog();
         entry.setUserId(1L);
         entry.setOperationId("op-1");
@@ -54,7 +93,7 @@ class OperationLogServiceTest {
 
     @Test
     void deleteOldLogs_30日以上前のログのみ削除する() {
-        service = new OperationLogService(repository);
+        service = new OperationLogService(repository, rabbitTemplate);
         OperationLog oldLog = new OperationLog();
         when(repository.findByCreatedAtBefore(any(LocalDateTime.class)))
                 .thenReturn(List.of(oldLog));
@@ -66,7 +105,7 @@ class OperationLogServiceTest {
 
     @Test
     void deleteOldLogs_対象が無ければ削除処理を呼ばない() {
-        service = new OperationLogService(repository);
+        service = new OperationLogService(repository, rabbitTemplate);
         when(repository.findByCreatedAtBefore(any(LocalDateTime.class)))
                 .thenReturn(List.of());
 

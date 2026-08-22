@@ -1,8 +1,12 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.config.RabbitMqConfig;
 import com.letsblog.api.domain.OperationLog;
+import com.letsblog.api.messaging.OperationLogMessage;
 import com.letsblog.api.repository.OperationLogRepository;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.AmqpException;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -26,18 +30,39 @@ public class OperationLogService {
     private static final int RETENTION_DAYS = 30;
 
     private final OperationLogRepository repository;
+    private final RabbitTemplate rabbitTemplate;
 
-    public OperationLogService(OperationLogRepository repository) {
+    public OperationLogService(OperationLogRepository repository, RabbitTemplate rabbitTemplate) {
         this.repository = repository;
+        this.rabbitTemplate = rabbitTemplate;
     }
 
     /**
-     * REQUIRES_NEWで独立した書き込みトランザクションとして実行する。
-     * 呼び出し元のAPIリクエスト処理が失敗・ロールバックしてもログ記録自体は成功させる必要があるため。
+     * ログメッセージキューイング(issue #466)。キューへの発行を優先し、記録自体はlog-writer
+     * サービスに委譲する。発行に失敗した場合のみ、ログ欠落を防ぐためこのAPIサーバー自身が
+     * 従来通り同期的にDBへ書き込む(REQUIRES_NEWで独立した書き込みトランザクションとして実行し、
+     * 呼び出し元のAPIリクエスト処理が失敗・ロールバックしてもログ記録自体は成功させる)。
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void record(OperationLog entry) {
-        repository.save(entry);
+        OperationLogMessage message = new OperationLogMessage(
+                entry.getOperationId(),
+                entry.getUserId(),
+                entry.getMethod(),
+                entry.getPath(),
+                entry.getStatusCode(),
+                entry.getDurationMs(),
+                entry.isSuccess(),
+                entry.getErrorMessage(),
+                LocalDateTime.now().toString());
+
+        try {
+            rabbitTemplate.convertAndSend(
+                    RabbitMqConfig.LOG_EXCHANGE, RabbitMqConfig.OPERATION_LOG_ROUTING_KEY, message);
+        } catch (AmqpException e) {
+            log.warn("操作ログのキュー発行に失敗したため、同期DB書き込みへフォールバックします", e);
+            repository.save(entry);
+        }
     }
 
     @Transactional(readOnly = true)

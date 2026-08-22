@@ -5,6 +5,11 @@ import type { GeneratedImageDetail, GeneratedImageSummary } from "@/lib/apiClien
 import { formatDateTime } from "@/lib/formatDate";
 import { deleteGeneratedImageAction, getGeneratedImageAction, updateGeneratedImageTagsAction } from "./actions";
 
+const PROVIDER_LABEL: Record<string, string> = {
+  COMFYUI: "ComfyUI",
+  CHATGPT: "ChatGPT",
+};
+
 export function ImageGalleryGrid({
   images,
   timezone,
@@ -310,6 +315,10 @@ export function ImageGalleryGrid({
                   </dd>
                   <dt className="font-semibold">batch size</dt>
                   <dd className="text-neutral-600 dark:text-neutral-400">{detail.batchSize}</dd>
+                  <dt className="font-semibold">画像生成AI</dt>
+                  <dd className="text-neutral-600 dark:text-neutral-400">
+                    {PROVIDER_LABEL[detail.provider] ?? detail.provider}
+                  </dd>
                   <dt className="font-semibold">checkpoint</dt>
                   <dd className="text-neutral-600 dark:text-neutral-400">{detail.checkpoint}</dd>
                   <dt className="font-semibold">LoRA</dt>

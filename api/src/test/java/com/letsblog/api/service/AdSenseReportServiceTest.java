@@ -88,7 +88,9 @@ class AdSenseReportServiceTest {
         when(projectApiKeyService.resolveAdSenseOauthClientSecret(1L)).thenReturn("client-secret");
         when(adSenseClient.refreshAccessToken("client-id", "client-secret", "refresh-token")).thenReturn("access-token");
         when(adSenseClient.fetchReport("access-token", "pub-1234567890123456", "LAST_30_DAYS"))
-                .thenReturn(new AdSenseReport("12.34", 100, 5000));
+                .thenReturn(new AdSenseReport("12.34", 100, 5000,
+                        java.util.List.of(new com.letsblog.api.adsense.AdSenseDailyDataPoint("2024-01-01", "1.23", 10, 500)),
+                        java.util.List.of(new com.letsblog.api.adsense.AdSensePlatformBreakdown("Desktop", "12.34", 100, 5000))));
 
         AdSenseReportResponse response = service().getReport(1L);
 
@@ -97,6 +99,10 @@ class AdSenseReportServiceTest {
         assertEquals(100L, response.clicks());
         assertEquals(5000L, response.impressions());
         assertNotNull(response.periodLabel());
+        assertEquals(1, response.dailyDataPoints().size());
+        assertEquals("2024-01-01", response.dailyDataPoints().get(0).date());
+        assertEquals(1, response.platformBreakdown().size());
+        assertEquals("Desktop", response.platformBreakdown().get(0).platform());
     }
 
     @Test

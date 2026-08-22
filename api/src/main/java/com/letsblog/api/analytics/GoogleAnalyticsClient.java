@@ -1,6 +1,7 @@
 package com.letsblog.api.analytics;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.MissingNode;
 import com.letsblog.api.config.LegacyJacksonRestClientConfig;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -11,6 +12,7 @@ import org.springframework.web.client.RestClientResponseException;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -51,7 +53,11 @@ public class GoogleAnalyticsClient {
 
     public GoogleAnalyticsReport fetchReport(GoogleServiceAccountKey key, String propertyId, int periodDays) {
         String accessToken = fetchAccessToken(key);
-        return runReport(accessToken, propertyId, periodDays);
+        GoogleAnalyticsReport totals = runReport(accessToken, propertyId, periodDays);
+        List<GoogleAnalyticsDailyDataPoint> dailyDataPoints = fetchDailyDataPoints(accessToken, propertyId, periodDays);
+        List<GoogleAnalyticsChannelBreakdown> channelBreakdown = fetchChannelBreakdown(accessToken, propertyId, periodDays);
+        return new GoogleAnalyticsReport(
+                totals.sessions(), totals.activeUsers(), totals.pageViews(), dailyDataPoints, channelBreakdown);
     }
 
     private String fetchAccessToken(GoogleServiceAccountKey key) {
@@ -100,16 +106,80 @@ public class GoogleAnalyticsClient {
 
     private GoogleAnalyticsReport parseReport(JsonNode response) {
         if (response == null) {
-            return new GoogleAnalyticsReport(0, 0, 0);
+            return new GoogleAnalyticsReport(0, 0, 0, List.of(), List.of());
         }
         JsonNode rows = response.path("rows");
         if (!rows.isArray() || rows.isEmpty()) {
-            return new GoogleAnalyticsReport(0, 0, 0);
+            return new GoogleAnalyticsReport(0, 0, 0, List.of(), List.of());
         }
         JsonNode values = rows.get(0).path("metricValues");
         return new GoogleAnalyticsReport(
                 values.path(0).path("value").asLong(0),
                 values.path(1).path("value").asLong(0),
-                values.path(2).path("value").asLong(0));
+                values.path(2).path("value").asLong(0),
+                List.of(),
+                List.of());
+    }
+
+    /** 日次推移グラフ用に、dateディメンションを指定してrunReportを呼び出す(issue #426)。 */
+    private List<GoogleAnalyticsDailyDataPoint> fetchDailyDataPoints(String accessToken, String propertyId, int periodDays) {
+        JsonNode response = runReportWithDimension(accessToken, propertyId, periodDays, "date");
+        List<GoogleAnalyticsDailyDataPoint> points = new ArrayList<>();
+        for (JsonNode row : response.path("rows")) {
+            JsonNode values = row.path("metricValues");
+            points.add(new GoogleAnalyticsDailyDataPoint(
+                    formatGaDate(row.path("dimensionValues").path(0).path("value").asText(null)),
+                    values.path(0).path("value").asLong(0),
+                    values.path(1).path("value").asLong(0),
+                    values.path(2).path("value").asLong(0)));
+        }
+        return points;
+    }
+
+    /** トラフィックソース別内訳の円グラフ用に、sessionDefaultChannelGroupディメンションで取得する(issue #426)。 */
+    private List<GoogleAnalyticsChannelBreakdown> fetchChannelBreakdown(String accessToken, String propertyId, int periodDays) {
+        JsonNode response = runReportWithDimension(accessToken, propertyId, periodDays, "sessionDefaultChannelGroup");
+        List<GoogleAnalyticsChannelBreakdown> breakdown = new ArrayList<>();
+        for (JsonNode row : response.path("rows")) {
+            JsonNode values = row.path("metricValues");
+            breakdown.add(new GoogleAnalyticsChannelBreakdown(
+                    row.path("dimensionValues").path(0).path("value").asText(null),
+                    values.path(0).path("value").asLong(0),
+                    values.path(1).path("value").asLong(0),
+                    values.path(2).path("value").asLong(0)));
+        }
+        return breakdown;
+    }
+
+    private JsonNode runReportWithDimension(String accessToken, String propertyId, int periodDays, String dimension) {
+        Map<String, Object> body = Map.of(
+                "dateRanges", List.of(Map.of("startDate", periodDays + "daysAgo", "endDate", "today")),
+                "dimensions", List.of(Map.of("name", dimension)),
+                "metrics", List.of(
+                        Map.of("name", "sessions"),
+                        Map.of("name", "activeUsers"),
+                        Map.of("name", "screenPageViews")));
+        try {
+            JsonNode response = client.post()
+                    .uri(dataApiBaseUrl + "/v1beta/properties/" + propertyId + ":runReport")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .header("Authorization", "Bearer " + accessToken)
+                    .body(body)
+                    .retrieve()
+                    .body(JsonNode.class);
+            return response == null ? MissingNode.getInstance() : response;
+        } catch (RestClientResponseException e) {
+            throw new GoogleAnalyticsException(
+                    "Google Analytics Data APIの呼び出しに失敗しました: " + e.getStatusCode() + " "
+                            + e.getResponseBodyAsString(), e);
+        }
+    }
+
+    /** GA4のdateディメンションはデフォルトで"yyyyMMdd"形式のため、表示用に"yyyy-MM-dd"へ変換する。 */
+    private static String formatGaDate(String raw) {
+        if (raw == null || raw.length() != 8) {
+            return raw;
+        }
+        return raw.substring(0, 4) + "-" + raw.substring(4, 6) + "-" + raw.substring(6, 8);
     }
 }

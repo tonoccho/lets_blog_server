@@ -432,18 +432,49 @@ if ($path === '/sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             'mysqldump --skip-ssl -h' . escapeshellarg($dbHost) . ' -uroot -p' . escapeshellarg($rootPassword)
                 . ' ' . escapeshellarg($toDbName) . ' > ' . escapeshellarg("$backupDir/db-{$timestamp}.sql")]);
 
-        // 各環境の管理者・プロジェクトメンバーアカウント(wp_users/wp_usermeta)は
+        // 同期元・同期先で異なりうるテーブルプレフィックスを解決する(issue #516)。
+        // WordPressのプレフィックスはインストール時にランダム化されることがあり、また
+        // SSH管理サイトからの/db-importで同期先のプレフィックスが同期元に合わせて後から
+        // 変更されていることもあるため、同期元・同期先で実際のテーブル名が異なりうる。
+        [$fromPrefixCode, $fromPrefixOut, ] = runWp(['config', 'get', 'table_prefix', "--path=$fromPath", '--allow-root']);
+        $fromPrefix = ($fromPrefixCode === 0 && preg_match('/^[A-Za-z0-9_]+$/', trim($fromPrefixOut)))
+            ? trim($fromPrefixOut) : 'wp_';
+        [$toPrefixCode, $toPrefixOut, ] = runWp(['config', 'get', 'table_prefix', "--path=$toPath", '--allow-root']);
+        $toPrefix = ($toPrefixCode === 0 && preg_match('/^[A-Za-z0-9_]+$/', trim($toPrefixOut)))
+            ? trim($toPrefixOut) : 'wp_';
+
+        // 各環境の管理者・プロジェクトメンバーアカウント(users/usermeta)は
         // ProjectUserSyncServiceが環境ごとに個別管理しているため、DB同期の対象から除外する
         $dumpCmd = 'mysqldump --skip-ssl -h' . escapeshellarg($dbHost) . ' -uroot -p' . escapeshellarg($rootPassword)
-            . ' --ignore-table=' . escapeshellarg("$fromDbName.wp_users")
-            . ' --ignore-table=' . escapeshellarg("$fromDbName.wp_usermeta")
+            . ' --ignore-table=' . escapeshellarg("$fromDbName.{$fromPrefix}users")
+            . ' --ignore-table=' . escapeshellarg("$fromDbName.{$fromPrefix}usermeta")
             . ' ' . escapeshellarg($fromDbName);
         $importCmd = 'mysql --skip-ssl -h' . escapeshellarg($dbHost) . ' -uroot -p' . escapeshellarg($rootPassword)
             . ' ' . escapeshellarg($toDbName);
-        [$code, $out, $err] = runCommand(['sh', '-c', "$dumpCmd | $importCmd"]);
+
+        // dashにはpipefailがなく、"$dumpCmd | $importCmd"のようにパイプで直結すると
+        // mysqldump側が失敗してもmysql側の終了コードで上書きされ、失敗が握りつぶされる(issue #516)。
+        // ダンプを一旦ファイルに書き出し、export/importそれぞれの終了コードを個別に検証する。
+        $dumpFile = "$backupDir/db-sync-{$timestamp}.sql";
+        [$code, $out, $err] = runCommand(['sh', '-c', $dumpCmd . ' > ' . escapeshellarg($dumpFile)]);
         if ($code !== 0) {
-            respond(500, ['error' => 'DBの同期に失敗しました', 'detail' => combinedOutput($out, $err)]);
+            respond(500, ['error' => 'DBのエクスポートに失敗しました', 'detail' => combinedOutput($out, $err)]);
         }
+
+        // ダンプは同期元のテーブルプレフィックスのまま(CREATE TABLE等を書き換えていない)出力される。
+        // プレフィックスが異なると、インポート時に同期先が実際に読んでいるテーブル(例: wp_options)ではなく
+        // 別名の新規テーブル(例: jI7_options)が追加で作られるだけになり、WordPress側は何も変わって見えない
+        // (issue #516)。同期先が実際に使用しているプレフィックスへ書き換えてからインポートする。
+        if ($fromPrefix !== $toPrefix) {
+            runCommand(['sed', '-i', "s/`{$fromPrefix}/`{$toPrefix}/g", $dumpFile]);
+        }
+
+        [$code, $out, $err] = runCommand(['sh', '-c', $importCmd . ' < ' . escapeshellarg($dumpFile)]);
+        if ($code !== 0) {
+            respond(500, ['error' => 'DBのインポートに失敗しました', 'detail' => combinedOutput($out, $err)]);
+        }
+
+        runCommand(['rm', '-f', $dumpFile]);
 
         // コピー元のURLがwp_options等に焼き込まれたままになるため、コピー先自身のURLへ書き戻す
         $fromUrl = "https://localhost/sites/$fromSlug";
@@ -455,6 +486,231 @@ if ($path === '/sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     runCommand(['chown', '-R', 'www-data:www-data', $toPath]);
+    respond(200, ['status' => 'ok']);
+}
+
+/**
+ * SSH管理サイト(同期元)から取得したDBダンプ(wp db export)をアップロードし、managedサイトの
+ * DBへインポートする(issue #511)。SSH管理サイトはこのコンテナと同一ホストにいないため、
+ * /syncのようにファイルパスを直接指定した`cp`/`mysqldump | mysql`パイプが使えず、
+ * Java側で一度ダンプを取得しmultipartでアップロードする方式にしている。
+ * DB/メディアのみ対応(テーマ/プラグインはSSH管理サイトからは同期不可。ProjectEnvironmentSyncService参照)。
+ * メディアは/media-importで別途扱う。
+ */
+if ($path === '/db-import' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($_POST['slug'] ?? '');
+    $dbName = (string) ($_POST['dbName'] ?? '');
+    $fromUrl = (string) ($_POST['fromUrl'] ?? '');
+    $fromPrefix = (string) ($_POST['fromPrefix'] ?? '');
+
+    if (!isValidSlug($slug) || !isValidDbName($dbName) || empty($_FILES['file'])) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    if ($fromPrefix !== '' && !preg_match('/^[A-Za-z0-9_]+$/', $fromPrefix)) {
+        respond(400, ['error' => 'fromPrefixが不正です']);
+    }
+    $sitePath = "/var/www/html/sites/$slug";
+    if (!is_dir($sitePath)) {
+        respond(404, ['error' => 'サイトが見つかりません']);
+    }
+
+    $tmpPath = '/tmp/letsblog-dbimport-' . bin2hex(random_bytes(8)) . '.sql';
+    if (!move_uploaded_file($_FILES['file']['tmp_name'], $tmpPath)) {
+        respond(500, ['error' => 'アップロードファイルの一時保存に失敗しました']);
+    }
+
+    $backupDir = "/var/www/html/backups/$slug";
+    runCommand(['mkdir', '-p', $backupDir]);
+    $timestamp = date('Ymd-His');
+    // 上書きされる側(同期先)のバックアップを先に取得しておく。
+    // db reset/db import/db exportはWordPressの$wpdb(mysqli)を経由せずmysql/mysqldumpコマンドへ直接
+    // シェルアウトするため、他のwp-cliコマンド(search-replace等)と異なりコンテナのmysqlクライアント既定
+    // (SSL優先)の影響を受け自己署名証明書で失敗する。--defaultsで/root/.my.cnf(skip-ssl)を読み込ませる。
+    runWp(['db', 'export', "$backupDir/db-{$timestamp}.sql", "--path=$sitePath", '--allow-root', '--defaults']);
+
+    // 同期先自身のアカウント(wp_users/wp_usermeta相当)を退避する。各環境の管理者/プロジェクト
+    // メンバーアカウントはProjectUserSyncServiceが環境ごとに個別管理しており、同期元のダンプは
+    // 意図的にusers/usermetaを除外している(exportDatabase参照)。しかしdb resetはDB全体を削除するため、
+    // 退避せずに進めると同期先には有効なアカウントテーブルが一つも残らなくなってしまう(issue #511)。
+    [$origPrefixCode, $origPrefixOut, ] = runWp(['config', 'get', 'table_prefix', "--path=$sitePath", '--allow-root']);
+    $originalPrefix = $origPrefixCode === 0 ? trim($origPrefixOut) : 'wp_';
+    if (!preg_match('/^[A-Za-z0-9_]+$/', $originalPrefix)) {
+        $originalPrefix = 'wp_';
+    }
+    $effectivePrefix = $fromPrefix !== '' ? $fromPrefix : $originalPrefix;
+    $userBackupPath = '/tmp/letsblog-dbimport-users-' . bin2hex(random_bytes(8)) . '.sql';
+    runWp(['db', 'export', $userBackupPath,
+        '--tables=' . $originalPrefix . 'users,' . $originalPrefix . 'usermeta',
+        "--path=$sitePath", '--allow-root', '--defaults']);
+
+    // 同期先を完全にリセットしてからインポートする(旧テーブルを残さない)。
+    [$resetCode, $resetOut, $resetErr] =
+        runWp(['db', 'reset', '--yes', "--path=$sitePath", '--allow-root', '--defaults']);
+    if ($resetCode !== 0) {
+        respond(500, ['error' => 'DBのリセットに失敗しました', 'detail' => combinedOutput($resetOut, $resetErr)]);
+    }
+
+    [$code, $out, $err] = runWp(['db', 'import', $tmpPath, "--path=$sitePath", '--allow-root', '--defaults']);
+    runCommand(['rm', '-f', $tmpPath]);
+    if ($code !== 0) {
+        respond(500, ['error' => 'DBのインポートに失敗しました', 'detail' => combinedOutput($out, $err)]);
+    }
+
+    // 退避したアカウントを、これから有効になるプレフィックス($effectivePrefix)へ付け替えて復元する。
+    if (is_file($userBackupPath) && filesize($userBackupPath) > 0) {
+        if ($effectivePrefix !== $originalPrefix) {
+            // PHPのダブルクォート文字列内で`\``と書くとバックスラッシュが残ったまま(`\`\`)になり
+            // sedのパターンが一致しなくなるため、バッククォートはエスケープせず生で書く。
+            runCommand(['sed', '-i', "s/`{$originalPrefix}/`{$effectivePrefix}/g", $userBackupPath]);
+        }
+        [$userCode, $userOut, $userErr] =
+            runWp(['db', 'import', $userBackupPath, "--path=$sitePath", '--allow-root', '--defaults']);
+        if ($userCode !== 0) {
+            respond(500, ['error' => '同期先アカウントの復元に失敗しました', 'detail' => combinedOutput($userOut, $userErr)]);
+        }
+
+        // usermetaの行はテーブル名だけでなく、meta_key自体にも旧プレフィックスが埋め込まれている
+        // (例: wp_capabilities/wp_user_level)。WordPressは$wpdb->prefix(=新プレフィックス)を
+        // 前置したmeta_keyを参照して権限判定するため、書き換えないとログインはできても権限が
+        // 認識されずwp-adminが403になる(issue #511)。
+        if ($effectivePrefix !== $originalPrefix) {
+            $usermetaTable = $effectivePrefix . 'usermeta';
+            $renameMetaKeysSql = 'UPDATE `' . $usermetaTable . '` SET meta_key = CONCAT('
+                . "'" . $effectivePrefix . "', SUBSTRING(meta_key, LENGTH('" . $originalPrefix . "')+1)) "
+                . "WHERE LEFT(meta_key, LENGTH('" . $originalPrefix . "')) = '" . $originalPrefix . "'";
+            runCommand(['sh', '-c',
+                'mysql --skip-ssl -h' . escapeshellarg($dbHost) . ' -uroot -p' . escapeshellarg($rootPassword)
+                    . ' ' . escapeshellarg($dbName) . ' -e ' . escapeshellarg($renameMetaKeysSql)]);
+        }
+    }
+    runCommand(['rm', '-f', $userBackupPath]);
+
+    // ダンプは同期元のテーブルプレフィックスのまま(CREATE TABLE等を書き換えていない)インポートされる。
+    // WordPressのインストーラはセキュリティのためプレフィックスをランダム生成することがあり、
+    // 同期元と同期先で異なりうるため、同期先のwp-config.phpのtable_prefixを同期元に合わせる
+    // (ダンプ側のテーブル名やoption_name等のデータを書き換えるより単純で安全。issue #511)。
+    if ($effectivePrefix !== $originalPrefix) {
+        [$code, $out, $err] = runWp(['config', 'set', 'table_prefix', $effectivePrefix, "--path=$sitePath", '--allow-root']);
+        if ($code !== 0) {
+            respond(500, ['error' => 'テーブルプレフィックスの設定に失敗しました', 'detail' => combinedOutput($out, $err)]);
+        }
+    }
+
+    $toUrl = "https://localhost/sites/$slug";
+    // 同期元(SSH管理サイト)のURLがwp_options等に焼き込まれたままになるため、同期先自身のURLへ書き戻す。
+    // 末尾スラッシュの有無でsearch-replaceの完全一致に漏れが出ることがあるため両方の形で試す。
+    if ($fromUrl !== '') {
+        foreach (array_unique([$fromUrl, rtrim($fromUrl, '/')]) as $fromUrlVariant) {
+            if ($fromUrlVariant === '') {
+                continue;
+            }
+            [$code, $out, $err] = runWp(['search-replace', $fromUrlVariant, $toUrl, '--all-tables', "--path=$sitePath", '--allow-root']);
+            if ($code !== 0) {
+                respond(500, ['error' => 'URL書き換え(search-replace)に失敗しました', 'detail' => combinedOutput($out, $err)]);
+            }
+        }
+    }
+    // siteurl/homeはサイトの同一性(管理画面URL・ログインリダイレクト等)に直結するため、
+    // search-replaceの一致漏れに関わらず必ず同期先自身のURLへ強制的に合わせる。
+    runWp(['option', 'update', 'siteurl', $toUrl, "--path=$sitePath", '--allow-root']);
+    runWp(['option', 'update', 'home', $toUrl, "--path=$sitePath", '--allow-root']);
+
+    // 同期先はローカル/テスト環境に限られ本番になることはない(ProjectEnvironmentSyncServiceが
+    // 同期先=productionを常に拒否する)ため、同期元の下書き・予約投稿・限定公開の状態を
+    // そのまま持ち込むと確認しづらい。投稿・固定ページは一律公開状態にする。
+    $postsTable = $effectivePrefix . 'posts';
+    $publishSql = 'UPDATE `' . $postsTable . "` SET post_status = 'publish' "
+        . "WHERE post_type IN ('post','page') AND post_status NOT IN ('publish','trash','auto-draft')";
+    runCommand(['sh', '-c',
+        'mysql --skip-ssl -h' . escapeshellarg($dbHost) . ' -uroot -p' . escapeshellarg($rootPassword)
+            . ' ' . escapeshellarg($dbName) . ' -e ' . escapeshellarg($publishSql)]);
+
+    runCommand(['chown', '-R', 'www-data:www-data', $sitePath]);
+    respond(200, ['status' => 'ok']);
+}
+
+/**
+ * SSH管理サイト(同期元)から取得したメディア(wp-content/uploads)のtar.gzをアップロードし、
+ * managedサイトへ展開する(issue #511)。/db-importと同じ理由でmultipartアップロード方式にしている。
+ * アーカイブは`tar -czf ... -C <wp-content> uploads`形式(先頭に"uploads/"を含む)を前提とする。
+ */
+if ($path === '/media-import' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($_POST['slug'] ?? '');
+
+    if (!isValidSlug($slug) || empty($_FILES['file'])) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = "/var/www/html/sites/$slug";
+    if (!is_dir($sitePath)) {
+        respond(404, ['error' => 'サイトが見つかりません']);
+    }
+
+    $tmpPath = '/tmp/letsblog-mediaimport-' . bin2hex(random_bytes(8)) . '.tar.gz';
+    if (!move_uploaded_file($_FILES['file']['tmp_name'], $tmpPath)) {
+        respond(500, ['error' => 'アップロードファイルの一時保存に失敗しました']);
+    }
+
+    $contentPath = "$sitePath/wp-content";
+    $uploadsPath = "$contentPath/uploads";
+    $backupDir = "/var/www/html/backups/$slug";
+    runCommand(['mkdir', '-p', $backupDir]);
+    $timestamp = date('Ymd-His');
+    if (is_dir($uploadsPath)) {
+        // 上書きされる側(同期先)のバックアップを先に取得しておく
+        runCommand(['tar', '-czf', "$backupDir/media-{$timestamp}.tar.gz", '-C', $contentPath, 'uploads']);
+        runCommand(['rm', '-rf', $uploadsPath]);
+    }
+
+    [$code, $out, $err] = runCommand(['tar', '-xzf', $tmpPath, '-C', $contentPath]);
+    runCommand(['rm', '-f', $tmpPath]);
+    if ($code !== 0) {
+        respond(500, ['error' => 'メディアのインポートに失敗しました', 'detail' => combinedOutput($out, $err)]);
+    }
+
+    runCommand(['chown', '-R', 'www-data:www-data', $sitePath]);
+    respond(200, ['status' => 'ok']);
+}
+
+/**
+ * SSH管理サイト(同期元)から取得したテーマ(wp-content/themes)のtar.gzをアップロードし、
+ * managedサイトへ展開する(issue #511)。/media-importと同じ理由・同じ方式。プラグインは対象外
+ * (ProjectEnvironmentSyncService参照)。アーカイブは`tar -czf ... -C <wp-content> themes`形式
+ * (先頭に"themes/"を含む)を前提とする。
+ */
+if ($path === '/theme-import' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($_POST['slug'] ?? '');
+
+    if (!isValidSlug($slug) || empty($_FILES['file'])) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = "/var/www/html/sites/$slug";
+    if (!is_dir($sitePath)) {
+        respond(404, ['error' => 'サイトが見つかりません']);
+    }
+
+    $tmpPath = '/tmp/letsblog-themeimport-' . bin2hex(random_bytes(8)) . '.tar.gz';
+    if (!move_uploaded_file($_FILES['file']['tmp_name'], $tmpPath)) {
+        respond(500, ['error' => 'アップロードファイルの一時保存に失敗しました']);
+    }
+
+    $contentPath = "$sitePath/wp-content";
+    $themesPath = "$contentPath/themes";
+    $backupDir = "/var/www/html/backups/$slug";
+    runCommand(['mkdir', '-p', $backupDir]);
+    $timestamp = date('Ymd-His');
+    if (is_dir($themesPath)) {
+        // 上書きされる側(同期先)のバックアップを先に取得しておく
+        runCommand(['tar', '-czf', "$backupDir/themes-{$timestamp}.tar.gz", '-C', $contentPath, 'themes']);
+        runCommand(['rm', '-rf', $themesPath]);
+    }
+
+    [$code, $out, $err] = runCommand(['tar', '-xzf', $tmpPath, '-C', $contentPath]);
+    runCommand(['rm', '-f', $tmpPath]);
+    if ($code !== 0) {
+        respond(500, ['error' => 'テーマのインポートに失敗しました', 'detail' => combinedOutput($out, $err)]);
+    }
+
+    runCommand(['chown', '-R', 'www-data:www-data', $sitePath]);
     respond(200, ['status' => 'ok']);
 }
 
@@ -1100,6 +1356,143 @@ if ($path === '/wp-cli/generate-auth-cookie' && $_SERVER['REQUEST_METHOD'] === '
         respond(404, ['error' => "ユーザー '$userLogin' が見つかりません"]);
     }
     respond(200, ['name' => $result['name'], 'value' => $result['value']]);
+}
+
+// 記事プレビュー(ArticlePreviewService)のテーマCSS/DOM取得(スクレイプ&スプライス)向けに、
+// サイト内の最新公開記事を「参照記事」として返す。従来は認証なしのWordPress REST API
+// (wp-json/wp/v2/posts)を直接叩いていたが、managed WordPressサイトは他の全操作と同じく
+// wp-cli経由に揃える(issue #519)。title/contentはREST版のtitle.rendered/content.rendered相当
+// (the_title/the_contentフィルタ適用後)になるよう、wp-cliのpost系コマンドではなくwp evalで
+// WordPressコアのAPI(get_posts/get_permalink/apply_filters)を直接呼び出す。
+if ($path === '/wp-cli/reference-post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+
+    if (!isValidSlug($slug)) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = resolveExistingSitePath($slug);
+    if ($sitePath === null) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    $phpCode = "\$posts = get_posts(['numberposts' => 1, 'post_status' => 'publish', "
+        . "'orderby' => 'date', 'order' => 'DESC']); "
+        . "if (empty(\$posts)) { echo json_encode(['found' => false]); exit; } "
+        . "\$post = \$posts[0]; "
+        . "echo json_encode(['found' => true, 'id' => (string) \$post->ID, "
+        . "'link' => get_permalink(\$post->ID), "
+        . "'title' => apply_filters('the_title', \$post->post_title, \$post->ID), "
+        . "'content' => apply_filters('the_content', \$post->post_content)]);";
+
+    [$code, $out, $err] = runWp(['eval', $phpCode, "--path=$sitePath", '--allow-root']);
+    if ($code !== 0) {
+        respond(500, ['error' => '参照記事の取得に失敗しました', 'detail' => combinedOutput($out, $err)]);
+    }
+    $result = json_decode($out, true);
+    if (!is_array($result)) {
+        respond(500, ['error' => '参照記事の取得結果を解析できませんでした', 'detail' => $out]);
+    }
+    respond(200, $result);
+}
+
+// ガベージコレクション画面(issue #500)向けにメディアライブラリの一覧を取得する。添付ファイルも
+// post_type=attachmentのwp_postsレコードのため`wp post list`で取得できる。ゴミ箱にあるメディアも
+// 「蓄積した不要メディア」の掃除対象に含めるため、既定(inherit)に加えprivate/trashも対象とする。
+if ($path === '/wp-cli/media-list' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+
+    if (!isValidSlug($slug)) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = resolveExistingSitePath($slug);
+    if ($sitePath === null) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    [$code, $out, $err] = runWp(['post', 'list', '--post_type=attachment',
+        '--post_status=inherit,private,trash',
+        '--fields=ID,post_title,guid,post_mime_type,post_date', '--format=json', "--path=$sitePath", '--allow-root']);
+    if ($code !== 0) {
+        respond(500, ['error' => 'メディア一覧の取得に失敗しました', 'detail' => combinedOutput($out, $err)]);
+    }
+    $items = json_decode($out, true) ?: [];
+    $media = array_map(function ($item) {
+        return [
+            'id' => (string) ($item['ID'] ?? ''),
+            'title' => $item['post_title'] ?? '',
+            'guid' => $item['guid'] ?? '',
+            'mimeType' => $item['post_mime_type'] ?? '',
+            'uploadedAt' => $item['post_date'] ?? '',
+        ];
+    }, $items);
+    respond(200, ['media' => $media]);
+}
+
+// ガベージコレクション画面(issue #500)向けに、公開投稿タイプ全件の本文/アイキャッチと、
+// 主要なサイト設定(サイトアイコン・カスタムロゴ・ヘッダー/背景画像)が参照する添付ファイルIDを
+// 1回のwp eval呼び出しでまとめて取得する。SSH側(WordPressSshOperations#scanMediaReferences)と
+// 同一のPHPコードで、投稿タイプは['post','page']に固定せず動的に取得する(カスタム投稿タイプに
+// 埋め込まれたメディアを誤って「未参照」と判定し削除してしまうリスクを避けるため)。
+if ($path === '/wp-cli/media-reference-scan' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+
+    if (!isValidSlug($slug)) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = resolveExistingSitePath($slug);
+    if ($sitePath === null) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    $phpCode = "\$types = get_post_types(['public' => true], 'names'); "
+        . "unset(\$types['attachment']); \$types = array_values(\$types); "
+        . "\$posts = get_posts(['post_type' => \$types, "
+        . "'post_status' => ['publish','future','draft','pending','private'], 'numberposts' => -1]); "
+        . "\$items = array_map(function(\$p) { return ['id' => (string) \$p->ID, "
+        . "'postType' => \$p->post_type, 'status' => \$p->post_status, 'content' => \$p->post_content, "
+        . "'thumbnailId' => (string) get_post_thumbnail_id(\$p->ID)]; }, \$posts); "
+        . "\$headerData = get_theme_mod('header_image_data'); "
+        . "\$headerUrl = get_theme_mod('header_image'); "
+        . "\$headerId = (is_object(\$headerData) && isset(\$headerData->attachment_id)) "
+        . "? (string) \$headerData->attachment_id "
+        . ": (\$headerUrl ? (string) attachment_url_to_postid(\$headerUrl) : ''); "
+        . "\$bgUrl = get_theme_mod('background_image'); "
+        . "\$bgId = \$bgUrl ? (string) attachment_url_to_postid(\$bgUrl) : ''; "
+        . "\$settings = ['site_icon' => (string) get_option('site_icon'), "
+        . "'custom_logo' => (string) get_theme_mod('custom_logo'), "
+        . "'header_image' => \$headerId, 'background_image' => \$bgId]; "
+        . "echo json_encode(['posts' => \$items, 'settings' => \$settings]);";
+
+    [$code, $out, $err] = runWp(['eval', $phpCode, "--path=$sitePath", '--allow-root']);
+    if ($code !== 0) {
+        respond(500, ['error' => 'メディア参照スキャンに失敗しました', 'detail' => combinedOutput($out, $err)]);
+    }
+    $result = json_decode($out, true);
+    if (!is_array($result)) {
+        respond(500, ['error' => 'メディア参照スキャン結果を解析できませんでした', 'detail' => $out]);
+    }
+    respond(200, $result);
+}
+
+// メディア(添付ファイル)を完全に削除する(issue #500)。post-deleteと異なり`--force`を付けて
+// ゴミ箱を経由せず物理削除する(アップロード済みファイルも合わせて削除される)。
+if ($path === '/wp-cli/media-delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    $mediaId = (string) ($input['mediaId'] ?? '');
+
+    if (!isValidSlug($slug) || $mediaId === '') {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = resolveExistingSitePath($slug);
+    if ($sitePath === null) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    [$code, $out, $err] = runWp(['post', 'delete', $mediaId, '--force', '--yes', "--path=$sitePath", '--allow-root']);
+    if ($code !== 0) {
+        respond(500, ['error' => 'メディアの削除に失敗しました', 'detail' => combinedOutput($out, $err)]);
+    }
+    respond(200, ['mediaId' => $mediaId]);
 }
 
 if ($path === '/wp-cli/media-upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {

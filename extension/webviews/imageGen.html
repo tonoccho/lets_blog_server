@@ -14,6 +14,15 @@
   <div class="section" id="chatSection" aria-labelledby="chatSectionTitle">
     <h2 class="section-title" id="chatSectionTitle">チャットでプロンプトを作成</h2>
     <p class="hint">作りたい画像の内容をチャットで伝えてください。生成されたプロンプトが下のprompt欄に反映されます。</p>
+    <div class="form-group">
+      <label for="aiProvider">AIプロバイダー</label>
+      <select id="aiProvider">
+        <option value="">(サーバー既定値を使用)</option>
+        <option value="OLLAMA">Ollama</option>
+        <option value="OPENAI">OpenAI (ChatGPT)</option>
+        <option value="CLAUDE">Claude (Anthropic)</option>
+      </select>
+    </div>
     <div class="chat-container">
       <div class="messages" id="chatMessages" role="log" aria-live="polite" aria-label="チャット履歴"></div>
       <div class="chat-input">

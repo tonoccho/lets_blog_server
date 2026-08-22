@@ -71,7 +71,7 @@ class WordPressSiteProvisioningServiceTest {
         when(provisioningClient.provision(any())).thenReturn(new WordPressProvisioningClient.ProvisionResult(
                 "https://localhost/sites/main", "admin", "app-pass-1234"));
         SiteResponse response = new SiteResponse(1L, "My Blog", "main", CmsType.WORDPRESS,
-                "https://localhost/sites/main", LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false);
+                "https://localhost/sites/main", LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false);
         when(siteService.register(any(), eq(9L))).thenReturn(response);
         Site site = new Site();
         site.setId(1L);
@@ -86,7 +86,7 @@ class WordPressSiteProvisioningServiceTest {
                 "https://localhost/sites/main", "admin", "app-pass-1234"));
 
         SiteResponse response = new SiteResponse(1L, "My Blog", "main", CmsType.WORDPRESS,
-                "https://localhost/sites/main", LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false);
+                "https://localhost/sites/main", LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false);
         when(siteService.register(any(), eq(9L))).thenReturn(response);
 
         Site site = new Site();
@@ -110,7 +110,7 @@ class WordPressSiteProvisioningServiceTest {
         when(provisioningClient.provision(any())).thenReturn(new WordPressProvisioningClient.ProvisionResult(
                 "https://localhost/sites/main", "admin", "app-pass-1234"));
         SiteResponse response = new SiteResponse(1L, "My Blog", "main", CmsType.WORDPRESS,
-                "https://localhost/sites/main", LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false);
+                "https://localhost/sites/main", LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false);
         ArgumentCaptor<com.letsblog.api.dto.SiteRegisterRequest> registerCaptor =
                 ArgumentCaptor.forClass(com.letsblog.api.dto.SiteRegisterRequest.class);
         when(siteService.register(registerCaptor.capture(), eq(9L))).thenReturn(response);
@@ -153,7 +153,7 @@ class WordPressSiteProvisioningServiceTest {
         when(provisioningClient.provision(any())).thenReturn(new WordPressProvisioningClient.ProvisionResult(
                 "https://localhost/sites/main", "admin", "app-pass-1234"));
         SiteResponse response = new SiteResponse(1L, "My Blog", "main", CmsType.WORDPRESS,
-                "https://localhost/sites/main", LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false);
+                "https://localhost/sites/main", LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false);
         when(siteService.register(any(), eq(9L))).thenReturn(response);
         Site site = new Site();
         site.setId(1L);
@@ -174,7 +174,7 @@ class WordPressSiteProvisioningServiceTest {
         when(provisioningClient.provision(any())).thenReturn(new WordPressProvisioningClient.ProvisionResult(
                 "https://localhost/sites/main", "admin", "app-pass-1234"));
         SiteResponse response = new SiteResponse(1L, "My Blog", "main", CmsType.WORDPRESS,
-                "https://localhost/sites/main", LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false);
+                "https://localhost/sites/main", LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false);
         when(siteService.register(any(), eq(9L))).thenReturn(response);
         Site site = new Site();
         site.setId(1L);
@@ -221,7 +221,7 @@ class WordPressSiteProvisioningServiceTest {
         when(provisioningClient.adopt(any())).thenReturn(new WordPressProvisioningClient.ProvisionResult(
                 "https://localhost/sites/main", "admin", "app-pass-1234"));
         SiteResponse response = new SiteResponse(1L, "My Blog", "main", CmsType.WORDPRESS,
-                "https://localhost/sites/main", LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false);
+                "https://localhost/sites/main", LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false);
         when(siteService.register(any(), eq(9L))).thenReturn(response);
         Site site = new Site();
         site.setId(1L);

@@ -24,10 +24,8 @@ export interface RegisterSiteState {
 }
 
 const CREDENTIAL_FIELDS: Record<CmsType, string[]> = {
-  WORDPRESS: ["baseUrl", "username", "appPassword"],
+  WORDPRESS: ["baseUrl", "sshHost", "sshUser", "wpPath"],
 };
-
-const WORDPRESS_SSH_FIELDS = ["baseUrl", "sshHost", "sshUser", "wpPath"];
 
 export async function registerSiteAction(
   _prevState: RegisterSiteState,
@@ -36,7 +34,6 @@ export async function registerSiteAction(
   const name = String(formData.get("name") ?? "").trim();
   const siteKey = String(formData.get("siteKey") ?? "").trim();
   const cmsType = String(formData.get("cmsType") ?? "") as CmsType;
-  const transport = String(formData.get("transport") ?? "REST").trim();
 
   if (!name || !siteKey) {
     return { error: "表示名とサイトキーは必須です。" };
@@ -46,10 +43,9 @@ export async function registerSiteAction(
     return { error: "CMS種別を選択してください。" };
   }
 
-  const useSsh = transport === "SSH";
-  const fields = useSsh ? WORDPRESS_SSH_FIELDS : CREDENTIAL_FIELDS[cmsType];
+  const fields = CREDENTIAL_FIELDS[cmsType];
 
-  const credentials: Record<string, string> = {};
+  const credentials: Record<string, string> = { transport: "SSH" };
   for (const field of fields) {
     const value = String(formData.get(field) ?? "").trim();
     if (!value) {
@@ -58,22 +54,19 @@ export async function registerSiteAction(
     credentials[field] = value;
   }
 
-  if (useSsh) {
-    credentials.transport = "SSH";
-    const sshPort = String(formData.get("sshPort") ?? "").trim();
-    if (sshPort) {
-      credentials.sshPort = sshPort;
-    }
+  const sshPort = String(formData.get("sshPort") ?? "").trim();
+  if (sshPort) {
+    credentials.sshPort = sshPort;
+  }
 
-    const sshKeyPairId = String(formData.get("sshKeyPairId") ?? "").trim();
-    const sshPrivateKeyPem = String(formData.get("sshPrivateKeyPem") ?? "").trim();
-    if (sshKeyPairId) {
-      credentials.sshKeyPairId = sshKeyPairId;
-    } else if (sshPrivateKeyPem) {
-      credentials.sshPrivateKeyPem = sshPrivateKeyPem;
-    } else {
-      return { error: "SSH秘密鍵を指定してください(保存済みの鍵ペアを選択するか、新しい鍵ペアを生成してください)。" };
-    }
+  const sshKeyPairId = String(formData.get("sshKeyPairId") ?? "").trim();
+  const sshPrivateKeyPem = String(formData.get("sshPrivateKeyPem") ?? "").trim();
+  if (sshKeyPairId) {
+    credentials.sshKeyPairId = sshKeyPairId;
+  } else if (sshPrivateKeyPem) {
+    credentials.sshPrivateKeyPem = sshPrivateKeyPem;
+  } else {
+    return { error: "SSH秘密鍵を指定してください(保存済みの鍵ペアを選択するか、新しい鍵ペアを生成してください)。" };
   }
 
   const session = await getSession();

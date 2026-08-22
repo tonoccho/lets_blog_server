@@ -1,0 +1,22 @@
+  * { box-sizing: border-box; }
+  body { font-family: var(--vscode-font-family, sans-serif); padding: 16px; color: var(--vscode-foreground); }
+  .container { max-width: 640px; }
+  .form-group { margin-bottom: 10px; }
+  .form-group label { display: block; margin-bottom: 4px; }
+  .form-group input, .form-group select, .form-group textarea {
+    width: 100%; padding: 6px; background: var(--vscode-input-background, #fff);
+    color: var(--vscode-input-foreground, inherit); border: 1px solid var(--vscode-panel-border, #ccc);
+  }
+  #question { min-height: 100px; font-family: inherit; }
+  button { padding: 6px 14px; cursor: pointer; }
+  button.primary { background: var(--vscode-button-background, #007acc); color: var(--vscode-button-foreground, #fff); border: none; }
+  button:disabled { opacity: 0.6; cursor: not-allowed; }
+  .result { display: none; border: 1px solid var(--vscode-panel-border, #ccc); padding: 10px; margin-top: 16px; }
+  #answerArea { white-space: pre-wrap; margin-bottom: 10px; }
+  .sources { font-size: 0.85em; opacity: 0.95; margin-bottom: 8px; }
+  .sources a { color: var(--vscode-textLink-foreground, #3794ff); }
+  .search-note { font-size: 0.85em; opacity: 0.85; font-style: italic; margin-bottom: 8px; }
+  .button-group { display: flex; gap: 10px; margin-top: 10px; }
+  #message { margin-top: 16px; display: none; }
+  #message.error { color: var(--vscode-errorForeground, #d32f2f); }
+  #message.success { color: var(--vscode-testing-iconPassed, #2e7d32); }

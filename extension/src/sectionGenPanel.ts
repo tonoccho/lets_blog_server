@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as api from './apiClient';
-import { getActor, getServerUrl, requireApiKey } from './config';
+import { getActor, getConfiguredAiProvider, getServerUrl, requireApiKey } from './config';
 import { SectionContext } from './headingContext';
 import { showSingletonPanel, WebviewPanelBase } from './webviewPanelBase';
 import {
@@ -62,6 +62,7 @@ export class SectionGenPanel extends WebviewPanelBase<SectionGenInboundMessage, 
       articleTitle: this._articleTitle ?? '',
       selectedText: this._editor.document.getText(this._editor.selection),
       sectionContext: this._sectionContext,
+      defaultAiProvider: getConfiguredAiProvider(),
     };
     this.postMessage('init', payload);
   }

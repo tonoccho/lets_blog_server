@@ -131,6 +131,15 @@ public interface CmsAdapter {
     }
 
     /**
+     * 既存のタグ名一覧を取得する(読み取り専用、新規作成は行わない)。
+     * AIタグ提案時に、既存タグを優先して提案させるために使う(issue #525)。
+     * 取得できない、またはCMSがタグの概念を持たない場合は空リストを返す(例外は投げない)。
+     */
+    default List<String> listTagNames(CmsCredentials credentials) {
+        return List.of();
+    }
+
+    /**
      * 親カテゴリ付きのカテゴリ一覧項目。parentNameは親カテゴリが無ければnull。
      */
     record CategoryOption(String name, String parentName) {
@@ -169,5 +178,29 @@ public interface CmsAdapter {
      */
     default AuthCookie generateAuthCookie(CmsCredentials credentials) {
         throw new UnsupportedOperationException("このCMS/接続方式は認証Cookieの発行に対応していません");
+    }
+
+    /**
+     * メディアライブラリの一覧を取得する(読み取り専用、ガベージコレクション画面向け。issue #500)。
+     * 対応しないCMSはUnsupportedOperationExceptionを投げる。
+     */
+    default List<CmsMediaSummary> listMedia(CmsCredentials credentials) {
+        throw new UnsupportedOperationException("このCMSはメディア一覧取得に対応していません");
+    }
+
+    /**
+     * 全投稿の本文・アイキャッチ・主要サイト設定からのメディア参照を収集する(読み取り専用、
+     * ガベージコレクション画面向け。issue #500)。対応しないCMSはUnsupportedOperationExceptionを投げる。
+     */
+    default CmsMediaReferenceScan scanMediaReferences(CmsCredentials credentials) {
+        throw new UnsupportedOperationException("このCMSはメディア参照スキャンに対応していません");
+    }
+
+    /**
+     * 指定IDのメディア(添付ファイル)を完全に削除する(ゴミ箱を経由しない物理削除、issue #500)。
+     * 対応しないCMSはUnsupportedOperationExceptionを投げる。
+     */
+    default void deleteMedia(CmsCredentials credentials, String mediaId) {
+        throw new UnsupportedOperationException("このCMSはメディア削除に対応していません");
     }
 }

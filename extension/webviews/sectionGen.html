@@ -24,6 +24,15 @@
     <label for="articleTitle">記事タイトル</label>
     <input type="text" id="articleTitle">
   </div>
+  <div class="form-group">
+    <label for="aiProvider">AIプロバイダー</label>
+    <select id="aiProvider">
+      <option value="">(サーバー既定値を使用)</option>
+      <option value="OLLAMA">Ollama</option>
+      <option value="OPENAI">OpenAI (ChatGPT)</option>
+      <option value="CLAUDE">Claude (Anthropic)</option>
+    </select>
+  </div>
   <div class="form-group" id="headingGroup">
     <label for="heading">見出し</label>
     <input type="text" id="heading" placeholder="このセクションの見出し">

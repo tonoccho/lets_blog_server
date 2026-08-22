@@ -18,6 +18,7 @@ import com.letsblog.api.dto.StatusComparisonPage;
 import com.letsblog.api.dto.SyncEnvironmentRequest;
 import com.letsblog.api.dto.TermComparisonPage;
 import com.letsblog.api.dto.TermNameRequest;
+import com.letsblog.api.dto.UpdateImageContentFilterSettingsRequest;
 import com.letsblog.api.dto.UpdateImageGenerationPromptDefaultsRequest;
 import com.letsblog.api.dto.UpdateImageGenerationSizeDefaultsRequest;
 import com.letsblog.api.dto.UpdateMasterEnvironmentRequest;
@@ -179,6 +180,14 @@ public class ProjectController {
             @PathVariable Long id, @Valid @RequestBody UpdateArticleImageResizeDefaultRequest request) {
         adminAuthorizationService.requireAdmin();
         return projectService.updateArticleImageResizeDefault(id, request);
+    }
+
+    /** issue #532: 画像生成時の不適切コンテンツ(性的/暴力的/差別的表現)のカテゴリ別禁止設定。 */
+    @PutMapping("/{id}/image-content-filter-settings")
+    public ProjectResponse updateImageContentFilterSettings(
+            @PathVariable Long id, @Valid @RequestBody UpdateImageContentFilterSettingsRequest request) {
+        adminAuthorizationService.requireAdmin();
+        return projectService.updateImageContentFilterSettings(id, request);
     }
 
     @PostMapping("/{id}/environments/sync")

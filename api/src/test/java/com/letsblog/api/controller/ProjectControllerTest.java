@@ -18,6 +18,7 @@ import com.letsblog.api.dto.StatusComparisonPage;
 import com.letsblog.api.dto.SyncEnvironmentRequest;
 import com.letsblog.api.dto.TermComparisonPage;
 import com.letsblog.api.dto.TermNameRequest;
+import com.letsblog.api.dto.UpdateImageContentFilterSettingsRequest;
 import com.letsblog.api.dto.UpdateMasterEnvironmentRequest;
 import com.letsblog.api.dto.UpdateProjectUserRequest;
 import com.letsblog.api.service.AdminAuthorizationService;
@@ -104,6 +105,7 @@ class ProjectControllerTest {
     private ProjectResponse buildResponse() {
         return new ProjectResponse(
                 1L, "テスト", "test", null, null, null, "test", null, null, null, null, null, null, null,
+                null, null, null,
                 LocalDateTime.now(), LocalDateTime.now());
     }
 
@@ -160,6 +162,19 @@ class ProjectControllerTest {
 
         verify(adminAuthorizationService).requireAdmin();
         verify(projectService).updateMasterEnvironment(1L, "production");
+    }
+
+    @Test
+    void updateImageContentFilterSettings_admin権限があれば更新できる() {
+        ProjectController controller = controller();
+        UpdateImageContentFilterSettingsRequest request =
+                new UpdateImageContentFilterSettingsRequest(false, true, true);
+        when(projectService.updateImageContentFilterSettings(1L, request)).thenReturn(buildResponse());
+
+        controller.updateImageContentFilterSettings(1L, request);
+
+        verify(adminAuthorizationService).requireAdmin();
+        verify(projectService).updateImageContentFilterSettings(1L, request);
     }
 
     @Test

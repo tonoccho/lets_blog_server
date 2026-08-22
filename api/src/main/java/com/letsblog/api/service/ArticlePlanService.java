@@ -449,6 +449,26 @@ public class ArticlePlanService {
         }
     }
 
+    /**
+     * プロジェクトのマスター環境サイトに既に存在するタグ名一覧を取得する。
+     * サイト未紐付け・非WordPress・取得失敗時は空リストを返す(例外は投げない。
+     * AIタグ提案(issue #525)で既存タグを優先提示するための補助情報のため)。
+     */
+    public List<String> listExistingTags(Long projectId) {
+        try {
+            Project project = projectService.getProjectEntity(projectId);
+            Site site = projectService.resolveMasterSite(project);
+            if (site == null) {
+                return List.of();
+            }
+            CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
+            CmsAdapter cmsAdapter = cmsAdapterFactory.resolve(credentials.cmsType());
+            return cmsAdapter.listTagNames(credentials);
+        } catch (RuntimeException e) {
+            return List.of();
+        }
+    }
+
     private SuggestMetadataResponse filterToExistingCategories(
             SuggestMetadataResponse response, List<String> existingCategories) {
         List<String> filtered = response.categories().stream()

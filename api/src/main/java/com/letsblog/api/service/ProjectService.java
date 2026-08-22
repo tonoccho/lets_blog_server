@@ -6,6 +6,7 @@ import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.ProjectResponse;
 import com.letsblog.api.dto.UpdateArticleImageResizeDefaultRequest;
+import com.letsblog.api.dto.UpdateImageContentFilterSettingsRequest;
 import com.letsblog.api.dto.UpdateImageGenerationPromptDefaultsRequest;
 import com.letsblog.api.dto.UpdateImageGenerationSizeDefaultsRequest;
 import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
@@ -27,30 +28,42 @@ public class ProjectService {
 
     private final ProjectRepository projectRepository;
     private final SiteRepository siteRepository;
+    private final SiteService siteService;
     private final BulkUploadStorageService bulkUploadStorageService;
     private final String globalDefaultNegativePrompt;
     private final String globalDefaultQualityPrompt;
     private final int globalDefaultGeneratedImageWidth;
     private final int globalDefaultGeneratedImageHeight;
     private final int globalDefaultArticleImageLongEdgePx;
+    private final boolean globalDefaultBlockSexualContent;
+    private final boolean globalDefaultBlockViolentContent;
+    private final boolean globalDefaultBlockDiscriminatoryContent;
 
     public ProjectService(
             ProjectRepository projectRepository,
             SiteRepository siteRepository,
+            SiteService siteService,
             BulkUploadStorageService bulkUploadStorageService,
             @Value("${app.default-negative-prompt}") String globalDefaultNegativePrompt,
             @Value("${app.default-quality-prompt}") String globalDefaultQualityPrompt,
             @Value("${app.default-generated-image-width}") int globalDefaultGeneratedImageWidth,
             @Value("${app.default-generated-image-height}") int globalDefaultGeneratedImageHeight,
-            @Value("${app.default-article-image-long-edge-px}") int globalDefaultArticleImageLongEdgePx) {
+            @Value("${app.default-article-image-long-edge-px}") int globalDefaultArticleImageLongEdgePx,
+            @Value("${app.default-block-sexual-content}") boolean globalDefaultBlockSexualContent,
+            @Value("${app.default-block-violent-content}") boolean globalDefaultBlockViolentContent,
+            @Value("${app.default-block-discriminatory-content}") boolean globalDefaultBlockDiscriminatoryContent) {
         this.projectRepository = projectRepository;
         this.siteRepository = siteRepository;
+        this.siteService = siteService;
         this.bulkUploadStorageService = bulkUploadStorageService;
         this.globalDefaultNegativePrompt = globalDefaultNegativePrompt;
         this.globalDefaultQualityPrompt = globalDefaultQualityPrompt;
         this.globalDefaultGeneratedImageWidth = globalDefaultGeneratedImageWidth;
         this.globalDefaultGeneratedImageHeight = globalDefaultGeneratedImageHeight;
         this.globalDefaultArticleImageLongEdgePx = globalDefaultArticleImageLongEdgePx;
+        this.globalDefaultBlockSexualContent = globalDefaultBlockSexualContent;
+        this.globalDefaultBlockViolentContent = globalDefaultBlockViolentContent;
+        this.globalDefaultBlockDiscriminatoryContent = globalDefaultBlockDiscriminatoryContent;
     }
 
     @AuditLog(action = AuditLogAction.PROJECT_CREATED, resourceType = "PROJECT")
@@ -302,6 +315,51 @@ public class ProjectService {
         return projectValue == null ? globalDefaultArticleImageLongEdgePx : projectValue;
     }
 
+    @AuditLog(action = AuditLogAction.PROJECT_UPDATED, resourceType = "PROJECT")
+    @Transactional
+    public ProjectResponse updateImageContentFilterSettings(
+            Long projectId, UpdateImageContentFilterSettingsRequest request) {
+        Project project = getProjectEntity(projectId);
+        project.setBlockSexualContent(request.blockSexualContent());
+        project.setBlockViolentContent(request.blockViolentContent());
+        project.setBlockDiscriminatoryContent(request.blockDiscriminatoryContent());
+        return toResponse(projectRepository.save(project));
+    }
+
+    /**
+     * 画像生成時に性的コンテンツをブロックするかどうかを解決する。プロジェクト未設定時・projectId未指定時は
+     * アプリ全体のデフォルト(既定true)にフォールバックする(issue #532)。
+     */
+    public boolean resolveBlockSexualContent(Long projectId) {
+        if (projectId == null) {
+            return globalDefaultBlockSexualContent;
+        }
+        Boolean projectValue = getProjectEntity(projectId).getBlockSexualContent();
+        return projectValue == null ? globalDefaultBlockSexualContent : projectValue;
+    }
+
+    /**
+     * 画像生成時に暴力的コンテンツをブロックするかどうかを解決する(issue #532)。
+     */
+    public boolean resolveBlockViolentContent(Long projectId) {
+        if (projectId == null) {
+            return globalDefaultBlockViolentContent;
+        }
+        Boolean projectValue = getProjectEntity(projectId).getBlockViolentContent();
+        return projectValue == null ? globalDefaultBlockViolentContent : projectValue;
+    }
+
+    /**
+     * 画像生成時に差別的表現をブロックするかどうかを解決する(issue #532)。
+     */
+    public boolean resolveBlockDiscriminatoryContent(Long projectId) {
+        if (projectId == null) {
+            return globalDefaultBlockDiscriminatoryContent;
+        }
+        Boolean projectValue = getProjectEntity(projectId).getBlockDiscriminatoryContent();
+        return projectValue == null ? globalDefaultBlockDiscriminatoryContent : projectValue;
+    }
+
     private void requireValidEnvironment(String environment) {
         if (!VALID_ENVIRONMENTS.contains(environment)) {
             throw new IllegalArgumentException("environment は local/test/production のいずれかを指定してください");
@@ -339,6 +397,8 @@ public class ProjectService {
         if (siteId == null) {
             return null;
         }
-        return siteRepository.findById(siteId).map(SiteResponse::from).orElse(null);
+        return siteRepository.findById(siteId)
+                .map(site -> SiteResponse.from(site, null, siteService.isSshConfigured(site)))
+                .orElse(null);
     }
 }

@@ -1,7 +1,6 @@
 package com.letsblog.api.service;
 
 import com.letsblog.api.ai.LlmClient;
-import com.letsblog.api.cms.rest.WordPressRestBulkManagementOperations;
 import com.letsblog.api.cms.ssh.WordPressSshOperations;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.domain.StaticContent;
@@ -31,7 +30,6 @@ public class StaticContentGenerationService {
     private final SiteRepository siteRepository;
     private final SiteService siteService;
     private final WordPressBulkManagementClient bulkManagementClient;
-    private final WordPressRestBulkManagementOperations restOperations;
     private final WordPressSshOperations sshOperations;
     private final LlmClient llmClient;
     private final StaticContentRepository staticContentRepository;
@@ -40,14 +38,12 @@ public class StaticContentGenerationService {
             SiteRepository siteRepository,
             SiteService siteService,
             WordPressBulkManagementClient bulkManagementClient,
-            WordPressRestBulkManagementOperations restOperations,
             WordPressSshOperations sshOperations,
             LlmClient llmClient,
             StaticContentRepository staticContentRepository) {
         this.siteRepository = siteRepository;
         this.siteService = siteService;
         this.bulkManagementClient = bulkManagementClient;
-        this.restOperations = restOperations;
         this.sshOperations = sshOperations;
         this.llmClient = llmClient;
         this.staticContentRepository = staticContentRepository;
@@ -87,26 +83,23 @@ public class StaticContentGenerationService {
     }
 
     /**
-     * サイトの経路(managed=内部エージェント、REST優先、無ければSSH)に沿って有効化済みプラグイン名を取得する。
-     * 取得経路の優先順位はPluginThemeComparisonServiceと同じ(現状REST経路は常に無効だが、将来の再有効化に備えて残す)。
+     * サイトの経路(managed=内部エージェント、非managedはSSH)に沿って有効化済みプラグイン名を取得する。
+     * 取得経路の優先順位はPluginThemeComparisonServiceと同じ。
      */
     private List<String> fetchActivePluginNames(Site site) {
         List<WordPressBulkManagementClient.PluginThemeInfo> agentInfos = null;
-        List<WordPressRestBulkManagementOperations.PluginThemeInfo> restInfos = null;
         List<WordPressSshOperations.PluginThemeInfo> sshInfos = null;
 
         if (site.isManagedWordpress()) {
             agentInfos = bulkManagementClient.listPlugins(site.getWpSlug());
         } else {
             SiteService.SiteDataSource dataSource = siteService.resolveDataSource(site);
-            if (dataSource.hasRest()) {
-                restInfos = restOperations.listPlugins(dataSource.restCredentials());
-            } else if (dataSource.hasSsh()) {
+            if (dataSource.hasSsh()) {
                 sshInfos = sshOperations.listPlugins(dataSource.sshCredentials());
             } else {
                 throw new AiServiceGenerationException(
                         "サイト '" + site.getSiteKey() + "' のプラグイン情報を取得できません(認証情報が未設定、"
-                                + "またはREST/SSHのいずれも利用できません)");
+                                + "またはSSHが利用できません)");
             }
         }
 
@@ -114,12 +107,6 @@ public class StaticContentGenerationService {
             return agentInfos.stream()
                     .filter(info -> "active".equalsIgnoreCase(info.status()))
                     .map(WordPressBulkManagementClient.PluginThemeInfo::name)
-                    .toList();
-        }
-        if (restInfos != null) {
-            return restInfos.stream()
-                    .filter(info -> "active".equalsIgnoreCase(info.status()))
-                    .map(WordPressRestBulkManagementOperations.PluginThemeInfo::name)
                     .toList();
         }
         return sshInfos.stream()

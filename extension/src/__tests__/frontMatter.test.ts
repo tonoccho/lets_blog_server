@@ -5,7 +5,6 @@ import {
   resolveLocalImagePath,
   extractLocalImageReferences,
   resolveFeaturedImageReference,
-  resolveExistingPostId,
   guessImageMimeType,
   buildArticleFrontMatter,
   suggestSlugFromTitle,
@@ -26,6 +25,40 @@ describe('parseArticle', () => {
     const article = parseArticle('見出しのない本文だけ');
     expect(article.data).toEqual({});
     expect(article.content).toBe('見出しのない本文だけ');
+  });
+
+  it('単数形のcategoryキーをcategoriesへ正規化する', () => {
+    const article = parseArticle('---\ntitle: サンプル\ncategory: 技術\n---\n\n本文です。\n');
+    expect(article.data.categories).toEqual(['技術']);
+    expect(article.data.category).toBeUndefined();
+  });
+
+  it('categoriesが既にある場合はcategoryを無視する', () => {
+    const article = parseArticle(
+      '---\ntitle: サンプル\ncategories:\n  - 既存\ncategory: 技術\n---\n\n本文です。\n'
+    );
+    expect(article.data.categories).toEqual(['既存']);
+    expect(article.data.category).toBeUndefined();
+  });
+
+  it('廃止済みのwp_post_id/wp_post_url/wp_post_idsが残っていても取り除く', () => {
+    const article = parseArticle(
+      [
+        '---',
+        'title: サンプル',
+        "wp_post_id: '130'",
+        "wp_post_url: 'https://nzlife.tonoccho.com/?p=130'",
+        'wp_post_ids:',
+        "  local: '115'",
+        "  production: '130'",
+        '---',
+        '',
+        '本文です。',
+      ].join('\n')
+    );
+    expect(article.data.wp_post_id).toBeUndefined();
+    expect(article.data.wp_post_url).toBeUndefined();
+    expect(article.data.wp_post_ids).toBeUndefined();
   });
 });
 
@@ -113,32 +146,6 @@ describe('resolveFeaturedImageReference', () => {
   });
 });
 
-describe('resolveExistingPostId', () => {
-  it('wp_post_idsにサイトの記録があればそれを使う', () => {
-    const data = { wp_post_ids: { local: '10', production: '20' } };
-    expect(resolveExistingPostId(data, 'production')).toBe('20');
-  });
-
-  it('wp_post_ids未導入の記事は、siteが一致する場合のみwp_post_idを流用する', () => {
-    const data = { site: 'production', wp_post_id: '30' };
-    expect(resolveExistingPostId(data, 'production')).toBe('30');
-  });
-
-  it('別サイトのIDを誤って使い回さない', () => {
-    const data = { site: 'local', wp_post_id: '30' };
-    expect(resolveExistingPostId(data, 'production')).toBeUndefined();
-  });
-
-  it('どこにも記録が無ければundefinedを返す', () => {
-    expect(resolveExistingPostId({}, 'production')).toBeUndefined();
-    expect(resolveExistingPostId({ site: 'production', wp_post_id: null }, 'production')).toBeUndefined();
-  });
-
-  it('数値で保存されたwp_post_idも文字列として返す', () => {
-    expect(resolveExistingPostId({ site: 'local', wp_post_id: 42 as unknown as string }, 'local')).toBe('42');
-  });
-});
-
 describe('guessImageMimeType', () => {
   it.each([
     ['a.png', 'image/png'],
@@ -162,17 +169,16 @@ describe('buildArticleFrontMatter', () => {
   const NOW = new Date('2026-06-01T00:00:00Z');
 
   it('必須項目とstatusの既定値を設定する', () => {
-    expect(buildArticleFrontMatter({ title: 'T', slug: 's', projectId: 3 }, NOW)).toEqual({
+    expect(buildArticleFrontMatter({ title: 'T', slug: 's' }, NOW)).toEqual({
       title: 'T',
       slug: 's',
       status: 'draft',
-      project_id: 3,
       publish_scheduled_at: '2026-06-08T00:00:00.000Z',
     });
   });
 
   it('publish_scheduled_atの既定値は作成時点から7日後(未来日時)にする', () => {
-    const frontMatter = buildArticleFrontMatter({ title: 'T', slug: 's', projectId: 3 }, NOW);
+    const frontMatter = buildArticleFrontMatter({ title: 'T', slug: 's' }, NOW);
     expect(validateScheduledPublication(frontMatter.publish_scheduled_at, NOW)).toEqual({
       value: '2026-06-08T00:00:00.000Z',
     });
@@ -183,7 +189,6 @@ describe('buildArticleFrontMatter', () => {
       {
         title: 'T',
         slug: 's',
-        projectId: 3,
         categories: [],
         tags: [],
       },
@@ -193,17 +198,14 @@ describe('buildArticleFrontMatter', () => {
     expect(frontMatter).not.toHaveProperty('tags');
   });
 
-  it('GitHub Issue起点の情報を含められる', () => {
+  it('issue #505: project_id/github_issue_number/github_repositoryは書き込まない', () => {
     const frontMatter = buildArticleFrontMatter(
       {
         title: 'T',
         slug: 's',
-        projectId: 3,
         categories: ['技術'],
         tags: ['docker'],
         status: 'publish',
-        githubIssueNumber: 42,
-        githubRepository: 'https://github.com/o/r',
       },
       NOW
     );
@@ -211,20 +213,19 @@ describe('buildArticleFrontMatter', () => {
       title: 'T',
       slug: 's',
       status: 'publish',
-      project_id: 3,
       categories: ['技術'],
       tags: ['docker'],
-      github_issue_number: 42,
-      github_repository: 'https://github.com/o/r',
       publish_scheduled_at: '2026-06-08T00:00:00.000Z',
     });
+    expect(frontMatter).not.toHaveProperty('project_id');
+    expect(frontMatter).not.toHaveProperty('github_issue_number');
+    expect(frontMatter).not.toHaveProperty('github_repository');
   });
 
   it('生成したfront matterはそのまま記事として書き出せる', () => {
-    const frontMatter = buildArticleFrontMatter({ title: 'タイトル', slug: 'my-slug', projectId: 1 }, NOW);
+    const frontMatter = buildArticleFrontMatter({ title: 'タイトル', slug: 'my-slug' }, NOW);
     const reparsed = parseArticle(stringifyArticle({ data: frontMatter, content: '本文' }));
     expect(reparsed.data.title).toBe('タイトル');
-    expect(reparsed.data.project_id).toBe(1);
     expect(reparsed.data.publish_scheduled_at).toBe('2026-06-08T00:00:00.000Z');
   });
 });
@@ -315,5 +316,15 @@ describe('validateScheduledPublication', () => {
     const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     expect(validateScheduledPublication(future)).toEqual({ value: future });
     expect(validateScheduledPublication('2000-01-01T00:00:00Z').error).toContain('未来の日時');
+  });
+
+  it('requireFuture: falseの場合は過去の日時も形式が正しければ受け付ける(issue #520)', () => {
+    const result = validateScheduledPublication('2020-01-01T00:00:00Z', NOW, { requireFuture: false });
+    expect(result).toEqual({ value: '2020-01-01T00:00:00Z' });
+  });
+
+  it('requireFuture: falseでも形式不正は引き続き拒否する', () => {
+    const result = validateScheduledPublication('2026/12/25 09:00', NOW, { requireFuture: false });
+    expect(result.error).toContain('ISO 8601');
   });
 });

@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as api from './apiClient';
-import { getActor, getServerUrl, requireApiKey } from './config';
+import { getActor, getConfiguredAiProvider, getServerUrl, requireApiKey } from './config';
 import { parseArticle, stringifyArticle } from './frontMatter';
 import { showSingletonPanel, WebviewPanelBase } from './webviewPanelBase';
 import { ImageGenInboundMessage, ImageGenOutboundCommand } from './webviewMessages';
@@ -92,7 +92,9 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
   private async _handleLoadOptions(): Promise<void> {
     const apiKey = await requireApiKey(this.context);
     const options = await api.getImageGenerationOptions(getServerUrl(), apiKey, this._projectId);
-    this.postMessage('options', options);
+    // letsBlog.aiProviderの現在値をWebview初期表示へ反映する(issue #530)。サーバー側の
+    // ImageGenerationOptionsResponseには含まれない値のため、ここで拡張機能側の設定を合成して渡す。
+    this.postMessage('options', { ...options, defaultAiProvider: getConfiguredAiProvider() });
     if (this._pendingPrefill) {
       this.postMessage('prefill', this._pendingPrefill);
       this._pendingPrefill = undefined;
@@ -126,7 +128,8 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
         this._projectId,
         message.history,
         message.message,
-        signal
+        signal,
+        message.provider
       )
     );
     this.postMessage('promptGenerated', result);

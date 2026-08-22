@@ -18,11 +18,13 @@ import { ProjectGithubRepositoryForm } from "./ProjectGithubRepositoryForm";
 import { ProjectApiKeysForm } from "./ProjectApiKeysForm";
 import { EnvironmentSyncPanel } from "./EnvironmentSyncPanel";
 import { BulkManagementPanel } from "./BulkManagementPanel";
+import { GarbageCollectionPanel } from "./GarbageCollectionPanel";
 import { ProjectAiModelsPanel } from "./ProjectAiModelsPanel";
 import { ProjectAssetGenerationPanel } from "./ProjectAssetGenerationPanel";
 import { ProjectImageGenerationPromptDefaultsForm } from "./ProjectImageGenerationPromptDefaultsForm";
 import { ProjectImageGenerationSizeDefaultsForm } from "./ProjectImageGenerationSizeDefaultsForm";
 import { ProjectArticleImageResizeDefaultForm } from "./ProjectArticleImageResizeDefaultForm";
+import { ProjectImageContentFilterSettingsForm } from "./ProjectImageContentFilterSettingsForm";
 import { ProjectNameForm } from "./ProjectNameForm";
 import { DeleteProjectButton } from "./DeleteProjectButton";
 import { ProjectUserManager } from "./ProjectUserManager";
@@ -137,6 +139,11 @@ export default async function ProjectDetailPage({
       ),
     },
     {
+      id: "garbage-collection",
+      label: "ガベージコレクション",
+      content: <GarbageCollectionPanel projectId={project.id} project={project} />,
+    },
+    {
       id: "ai-models",
       label: "AI・アセット",
       content: (
@@ -156,6 +163,12 @@ export default async function ProjectDetailPage({
           <ProjectArticleImageResizeDefaultForm
             projectId={project.id}
             defaultArticleImageLongEdgePx={project.defaultArticleImageLongEdgePx}
+          />
+          <ProjectImageContentFilterSettingsForm
+            projectId={project.id}
+            blockSexualContent={project.blockSexualContent}
+            blockViolentContent={project.blockViolentContent}
+            blockDiscriminatoryContent={project.blockDiscriminatoryContent}
           />
         </div>
       ),
