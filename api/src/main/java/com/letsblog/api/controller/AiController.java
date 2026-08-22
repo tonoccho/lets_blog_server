@@ -8,6 +8,8 @@ import com.letsblog.api.dto.AiImageBatchResponse;
 import com.letsblog.api.dto.AiImagePromptRequest;
 import com.letsblog.api.dto.AiImagePromptResponse;
 import com.letsblog.api.dto.AiImageRequest;
+import com.letsblog.api.dto.AiProofreadRequest;
+import com.letsblog.api.dto.AiProofreadResponse;
 import com.letsblog.api.dto.AiSectionRequest;
 import com.letsblog.api.dto.AiSectionResponse;
 import com.letsblog.api.dto.AiTagsRequest;
@@ -48,6 +50,12 @@ public class AiController {
     @PostMapping("/api/ai/tags")
     public AiTagsResponse tags(@Valid @RequestBody AiTagsRequest request) {
         return aiAssistService.suggestTags(request);
+    }
+
+    /** issue #523: エディタでのリアルタイム校正チェック。 */
+    @PostMapping("/api/ai/proofread")
+    public AiProofreadResponse proofread(@Valid @RequestBody AiProofreadRequest request) {
+        return aiAssistService.proofreadContent(request);
     }
 
     @PostMapping("/api/ai/image")

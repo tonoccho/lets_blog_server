@@ -2,7 +2,10 @@ package com.letsblog.api.controller;
 
 import com.letsblog.api.dto.AiImagePromptRequest;
 import com.letsblog.api.dto.AiImagePromptResponse;
+import com.letsblog.api.dto.AiProofreadRequest;
+import com.letsblog.api.dto.AiProofreadResponse;
 import com.letsblog.api.dto.PlanChatMessage;
+import com.letsblog.api.dto.ProofreadIssue;
 import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.AiAssistService;
 import com.letsblog.api.service.ForbiddenException;
@@ -62,5 +65,18 @@ class AiControllerTest {
         verify(aiAssistService, never()).generateImagePrompt(
                 org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void proofread_サービスへ委譲する() {
+        AiController controller = controller();
+        AiProofreadRequest request = new AiProofreadRequest("記事本文", null);
+        AiProofreadResponse expected = new AiProofreadResponse(
+                List.of(new ProofreadIssue("typo", "誤字", "指摘内容", "修正案")));
+        when(aiAssistService.proofreadContent(request)).thenReturn(expected);
+
+        AiProofreadResponse response = controller.proofread(request);
+
+        assertEquals(expected, response);
     }
 }
