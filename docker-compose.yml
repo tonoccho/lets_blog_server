@@ -166,8 +166,20 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE}
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      # サービス別スキーマ分離(#570)。mysql/init/01-create-service-schemas.sh が
+      # 初回起動時にこれらの値でスキーマ/ユーザーを作成する。
+      LBS_IDENTITY_DB_PASSWORD: ${LBS_IDENTITY_DB_PASSWORD}
+      LBS_PROJECT_DB_PASSWORD: ${LBS_PROJECT_DB_PASSWORD}
+      LBS_CONTENT_DB_PASSWORD: ${LBS_CONTENT_DB_PASSWORD}
+      LBS_MEDIA_DB_PASSWORD: ${LBS_MEDIA_DB_PASSWORD}
+      LBS_AI_DB_PASSWORD: ${LBS_AI_DB_PASSWORD}
+      LBS_PUBLISHING_DB_PASSWORD: ${LBS_PUBLISHING_DB_PASSWORD}
+      LBS_ANALYTICS_DB_PASSWORD: ${LBS_ANALYTICS_DB_PASSWORD}
+      LBS_PLATFORM_DB_PASSWORD: ${LBS_PLATFORM_DB_PASSWORD}
+      LBS_LOG_DB_PASSWORD: ${LBS_LOG_DB_PASSWORD}
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./mysql/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
