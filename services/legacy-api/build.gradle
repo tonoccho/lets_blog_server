@@ -8,19 +8,6 @@ plugins {
     id 'checkstyle'
 }
 
-group = 'com.letsblog'
-version = '0.1.0'
-
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
-    }
-}
-
-repositories {
-    mavenCentral()
-}
-
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-restclient'
@@ -78,10 +65,6 @@ tasks.named('test') {
     finalizedBy jacocoTestReport
 }
 
-jacoco {
-    toolVersion = '0.8.11'
-}
-
 jacocoTestReport {
     dependsOn test
     afterEvaluate {
@@ -102,26 +85,6 @@ jacocoTestReport {
     }
 }
 
-checkstyle {
-    configFile = file('checkstyle.xml')
-    ignoreFailures = false
-    showViolations = true
-}
-
-tasks.named('checkstyleMain') {
-    reports {
-        xml.required = true
-        html.required = true
-    }
-}
-
-task lint {
-    dependsOn checkstyleMain
-    doLast {
-        println "✓ Lint check passed"
-    }
-}
-
 task coverageCheck {
     dependsOn jacocoTestReport
     doLast {
@@ -130,12 +93,6 @@ task coverageCheck {
             println "✓ JaCoCo coverage report generated at: ${xmlFile}"
         }
     }
-}
-
-dependencyCheck {
-    format = 'HTML'
-    suppressionFile = 'dependency-check-suppression.xml'
-    failBuildOnCVSS = 7.0
 }
 
 // Dockerイメージのビルド時、実行時クラスパスのjarを一時的に取り出してPlaywrightのブラウザ

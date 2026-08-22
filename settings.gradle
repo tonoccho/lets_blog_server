@@ -1,0 +1,5 @@
+rootProject.name = 'lets-blog-server'
+
+include 'libs:lbs-common'
+include 'services:legacy-api'
+include 'services:log-writer'

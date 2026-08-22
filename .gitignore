@@ -5,14 +5,12 @@
 .claude/scheduled_tasks.lock
 
 # Java / Gradle
-api/.gradle/
-api/build/
-log-writer/.gradle/
-log-writer/build/
+.gradle/
+build/
+bin/
 *.class
 *.jar
-!api/gradle/wrapper/gradle-wrapper.jar
-!log-writer/gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.jar
 
 # Node
 node_modules/
@@ -39,4 +37,4 @@ docker-data/
 
 # リバースプロキシ用TLS証明書(scripts/generate-certs.sh で生成、秘密鍵のためコミットしない)
 certs/
-api/logs/application.log
+services/legacy-api/logs/application.log

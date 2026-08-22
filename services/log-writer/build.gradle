@@ -5,19 +5,6 @@ plugins {
     id 'checkstyle'
 }
 
-group = 'com.letsblog'
-version = '0.1.0'
-
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
-    }
-}
-
-repositories {
-    mavenCentral()
-}
-
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-amqp'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
@@ -37,22 +24,3 @@ tasks.named('test') {
     useJUnitPlatform()
 }
 
-checkstyle {
-    configFile = file('checkstyle.xml')
-    ignoreFailures = false
-    showViolations = true
-}
-
-tasks.named('checkstyleMain') {
-    reports {
-        xml.required = true
-        html.required = true
-    }
-}
-
-task lint {
-    dependsOn checkstyleMain
-    doLast {
-        println "✓ Lint check passed"
-    }
-}
