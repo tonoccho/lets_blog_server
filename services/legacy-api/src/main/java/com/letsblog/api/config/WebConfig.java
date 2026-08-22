@@ -18,7 +18,7 @@ public class WebConfig implements WebMvcConfigurer {
                 .excludePathPatterns(
                         "/api/health",
                         "/api/metrics",
-                        "/api-docs",
+                        "/v3/api-docs",
                         "/swagger-ui.html"
                 );
     }

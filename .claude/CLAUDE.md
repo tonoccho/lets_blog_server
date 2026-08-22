@@ -449,22 +449,34 @@ The objective is to make the **smallest correct, tested, reviewable change that 
 
 # 18. API Client Code Generation
 
-The API client for TypeScript/JavaScript projects is auto-generated from the OpenAPI specification.
+The API client for TypeScript/JavaScript projects is auto-generated from each service's
+OpenAPI specification. Since #555, the generation pipeline is multi-target: each backend
+service gets its own entry, and `sdk/api-client/src/index.ts` re-exports everything under
+the same top-level symbols so `web`/`extension` never need to know which service a given
+type/function came from.
 
 ## Workflow
 
-1. **OpenAPI Spec**: The Spring Boot API server generates an OpenAPI 3.0 spec at `/v3/api-docs` using `springdoc-openapi`.
+1. **OpenAPI Spec per service**: Every service publishes its spec at springdoc's default
+   path, `/v3/api-docs` — services must not override `springdoc.api-docs.path`, since the
+   multi-target fetch/generation convention below depends on every service using the same
+   path. (As of #555 there is only one service, `legacy-api`; future service-extraction
+   issues in Phase 19 add more.)
 
-2. **Client Generation**: Use `orval` to generate a type-safe TypeScript client:
+2. **Client Generation**: `orval.config.js` defines one target per service (see the
+   `legacyApi` entry and the commented example for adding a new one). Running orval once
+   processes every target in the file:
 
    ```bash
    # From project root:
    npx orval --config orval.config.js
    ```
 
-3. **Output**: Generated client code is placed in `sdk/api-client/src/generated/`.
+3. **Output**: Generated client code is placed in
+   `sdk/api-client/src/generated/<service>/` (e.g. `sdk/api-client/src/generated/legacy-api/`).
 
-4. **Usage**: Import and use from `@api-client` path alias:
+4. **Usage**: Import and use from `@api-client` path alias, same as before — the re-export
+   in `sdk/api-client/src/index.ts` means callers never reference the per-service subpath:
 
    ```typescript
    import { listSites, type Site } from '@api-client';
@@ -472,11 +484,25 @@ The API client for TypeScript/JavaScript projects is auto-generated from the Ope
 
 ## Setup
 
-* **orval.config.js**: Main configuration file (root directory)
-* **openapi.json**: Downloaded OpenAPI spec (regenerated before running orval)
-* **sdk/api-client/**: Generated client library package
+* **orval.config.js**: Main configuration file (root directory). One entry per service.
+* **`openapi/<service>.json`**: Downloaded OpenAPI spec per service (regenerated before
+  running orval; e.g. `openapi/legacy-api.json`).
+* **`sdk/api-client/src/generated/<service>/`**: Per-service generated output.
+* **sdk/api-client/src/index.ts**: Re-exports every service's generated symbols under the
+  same names as before the multi-target split — add a new `export * from
+  './generated/<service>/...'` block here when adding a service target.
 * **web/tsconfig.json**: Includes path alias `@api-client` → `../sdk/api-client/src`
 * **extension/tsconfig.json**: Includes path alias `@api-client` → `../sdk/api-client/src`
+
+## Adding a new service target (Phase 19 service extractions)
+
+1. Add an entry to `orval.config.js` (see the commented example) pointing at
+   `openapi/<service>.json` and outputting to `sdk/api-client/src/generated/<service>`.
+2. Add the service to the `SERVICES` list in `scripts/generate-api-client.sh`, as
+   `<service>|<base-url>`.
+3. Add the corresponding `export * from './generated/<service>/...'` lines to
+   `sdk/api-client/src/index.ts`.
+4. Make sure the new service doesn't override `springdoc.api-docs.path`.
 
 ## Regenerating the Client
 
@@ -487,7 +513,10 @@ After API changes, regenerate the client:
 npm run generate:api-client
 ```
 
-This script fetches the latest OpenAPI spec and regenerates client code.
+This fetches every configured service's OpenAPI spec (retrying while the service starts
+up) and regenerates all targets in one `orval` invocation. If a service never comes up
+within the retry window, the script fails with a clear error naming that service and its
+expected spec URL, rather than a generic timeout.
 
 ---
 

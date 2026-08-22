@@ -177,7 +177,7 @@ code --install-extension letsblog-vscode-<バージョン>.vsix
 REST APIは以下のエンドポイントで公開しています:
 
 - **Swagger UI (対話的ドキュメント)**: `https://localhost/api/swagger-ui.html`
-- **OpenAPI JSON スペック**: `https://localhost/api-docs`
+- **OpenAPI JSON スペック**: `https://localhost/v3/api-docs`
 
 APIの認証にはX-API-Keyヘッダを使用します。APIキーはログイン(`/api/auth/login`)またはTOTP認証(`/api/auth/totp/verify`)成功時にレスポンスのheadersに含まれます。
 

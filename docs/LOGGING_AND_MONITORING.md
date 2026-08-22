@@ -148,7 +148,7 @@ The `HttpLoggingFilter` automatically logs all HTTP requests and responses with 
 The following paths are not logged to reduce noise:
 - `/api/health`
 - `/api/metrics`
-- `/api-docs`
+- `/v3/api-docs`
 - `/swagger-ui`
 
 ### Example Log Output

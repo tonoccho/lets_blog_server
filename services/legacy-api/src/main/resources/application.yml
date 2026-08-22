@@ -31,8 +31,9 @@ management:
       logback: true
 
 springdoc:
-  api-docs:
-    path: /api-docs
+  # api-docsのpathは既定値(/v3/api-docs)のまま使う(#555。サービス別OpenAPI公開の
+  # 規約として、各サービスがこのpathを個別に上書きしないことで、orvalのマルチターゲット
+  # 生成(orval.config.js)が全サービス共通の取得先規約に乗れるようにする)。
   swagger-ui:
     path: /swagger-ui.html
     operations-sorter: method
