@@ -18,6 +18,11 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+  health:
+    # メール送信はオプショナルな下流依存(未設定でも起動・利用可能)のため、
+    # SMTP到達性をコンテナのヘルスチェック(#556)のゲート条件にはしない。
+    mail:
+      enabled: false
   metrics:
     enable:
       jvm: true

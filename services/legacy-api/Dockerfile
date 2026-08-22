@@ -23,7 +23,8 @@ FROM eclipse-temurin:21-jre
 # default-mysql-client: DBバックアップ/リストア用(mysqldump/mysqlコマンド、BackupServiceが利用)。
 # Debian/Ubuntu系のdefault-mysql-clientはMariaDBクライアント実体だが、MySQL 8.0サーバーに対する
 # mysqldump/mysqlの基本的な読み書きには互換性がある。
-RUN apt-get update && apt-get install -y --no-install-recommends openssh-client nodejs npm default-mysql-client \
+# curl: docker-compose healthcheckがactuatorの/actuator/healthを叩くために使用(#556)。
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-client nodejs npm default-mysql-client curl \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /workspace/services/legacy-api/build/libs/*.jar app.jar

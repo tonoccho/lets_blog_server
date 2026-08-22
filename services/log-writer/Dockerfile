@@ -14,7 +14,10 @@ COPY services/legacy-api/build.gradle ./services/legacy-api/build.gradle
 RUN ./gradlew :services:log-writer:bootJar --no-daemon
 
 FROM eclipse-temurin:21-jre
+# curl: docker-compose healthcheckがactuatorの/actuator/healthを叩くために使用(#556)。
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /workspace/services/log-writer/build/libs/*.jar app.jar
-EXPOSE 8081
+EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]

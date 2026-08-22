@@ -33,7 +33,7 @@ Docker Composeでまとめて起動する。クライアントはVSCode拡張機
 |---|---|
 | GPU | **NVIDIA GPU(VRAM 16GB以上)必須**。ComfyUI(画像生成)がGPUを使用するため |
 | GPUドライバ | NVIDIA GPUドライバ + NVIDIA Container Toolkit(Dockerコンテナへのパススルー用) |
-| メモリ | 8GB以上を推奨(MySQL・Spring Boot API・Next.js・ComfyUI等の複数コンテナを同時起動するため) |
+| メモリ | **16GB以上を推奨**(全19コンテナをアイドル状態で起動した実測値で約10.3GiB。ホストOS分の余裕や、ComfyUIでの画像生成時のスパイクを考慮すると16GB以上が安全。詳細は[docs/DOCKER_COMPOSE_ARCHITECTURE.md](docs/DOCKER_COMPOSE_ARCHITECTURE.md#リソース実測)参照) |
 | ディスク | Dockerイメージに加え、ComfyUIのモデルファイルで数GB〜十数GB程度の空き容量が必要 |
 | ネットワーク | ホストの80番・443番ポートが空いていること(リバースプロキシが使用) |
 
