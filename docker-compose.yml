@@ -205,6 +205,64 @@ services:
     depends_on:
       - mysql
 
+  # 認証基盤(ADR-0002, #559)。realm定義はGit管理された ./keycloak/realm-export.json から
+  # 起動時にimportする(--import-realm)。GUIでの手作業設定はしない。
+  keycloak-postgres:
+    image: postgres:15
+    container_name: lbs-keycloak-postgres
+    <<: *common-service
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    volumes:
+      - keycloak_postgres:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+
+  keycloak:
+    image: "quay.io/keycloak/keycloak:${KEYCLOAK_VERSION:-26.7.2}"
+    container_name: lbs-keycloak
+    <<: *common-service
+    command: ["start", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      # 初回起動時のみ有効。一度adminユーザーが作成された後は無視される
+      # (パスワードローテーションはKeycloak管理コンソール側で行う)。
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      # reverse-proxy配下の /auth/ サブパスで配信するため
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    depends_on:
+      keycloak-postgres:
+        condition: service_healthy
+    # イメージにcurl/wgetが無いため、bashの/dev/tcpでヘルスチェックエンドポイント
+    # (KC_HEALTH_ENABLEDが公開する管理ポート9000の/health/ready)を直接叩く。
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          echo -e 'GET /auth/health/ready HTTP/1.1\r\nhost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          cat <&3 | grep -q '"status": "UP"'
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
   penpot-frontend:
     image: "penpotapp/frontend:${PENPOT_VERSION:-2.16}"
     container_name: lbs-penpot-frontend
@@ -386,6 +444,7 @@ networks:
 volumes:
   mysql_data:
   rabbitmq_data:
+  keycloak_postgres:
   penpot_postgres:
   penpot_assets:
   comfyui_models:
