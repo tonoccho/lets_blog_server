@@ -5,6 +5,7 @@ import {
   getServerUrl,
   requireApiKey,
   setApiKey,
+  getApiKey,
   getActor,
   setActor,
   getProjectId,
@@ -975,11 +976,13 @@ async function commandCreateArticle(context: vscode.ExtensionContext): Promise<v
  * 生成される記事の配置とfront matterはAI駆動のフロー(ArticleCreationPanel/PlanPanel)と
  * 同じ(articleScaffold.ts / buildArticleFrontMatter に集約)。AIを一切使わないため
  * APIキーは不要で、プロジェクトは「Let's Blog: Select Project」で選択済みのものを使う。
+ * カテゴリ選択(issue #524)はAPIキー設定済みの場合のみ行い、未設定/取得失敗時は
+ * 選択せずに作成を続行する。
  */
 async function commandCreateArticleWithoutAi(context: vscode.ExtensionContext): Promise<void> {
   try {
     const workspaceRoot = requireWorkspaceRoot();
-    requireProjectId(context);
+    const projectId = requireProjectId(context);
 
     const title = await vscode.window.showInputBox({
       prompt: 'タイトル',
@@ -1004,10 +1007,12 @@ async function commandCreateArticleWithoutAi(context: vscode.ExtensionContext): 
     });
     if (!slug) return;
 
+    const categories = await pickCategoriesForNewArticle(context, projectId);
+
     const result = await createArticleScaffold({
       workspaceRoot,
       slug: slug.trim(),
-      frontMatter: buildArticleFrontMatter({ title: title.trim(), slug: slug.trim() }),
+      frontMatter: buildArticleFrontMatter({ title: title.trim(), slug: slug.trim(), categories }),
       content: '',
     });
     if (!result) return;
@@ -1016,6 +1021,38 @@ async function commandCreateArticleWithoutAi(context: vscode.ExtensionContext): 
     vscode.window.showInformationMessage(`articles/${slug.trim()}/article.md を作成しました。`);
   } catch (err) {
     reportError('記事の作成に失敗しました', err);
+  }
+}
+
+/**
+ * サイトの既存カテゴリ(親カテゴリ名付き)を取得し、複数選択のQuickPickで選ばせる(issue #524)。
+ * APIキー/actor未設定、プロジェクト未紐付け、取得失敗など、カテゴリを提示できない場合は
+ * 静かに空配列を返し、記事作成そのものは(No AIコマンドの通り)継続させる。
+ */
+async function pickCategoriesForNewArticle(
+  context: vscode.ExtensionContext,
+  projectId: number
+): Promise<string[]> {
+  try {
+    const apiKey = await getApiKey(context);
+    const actor = await getActor(context);
+    if (!apiKey || !actor) return [];
+
+    const categories = await api.listExistingCategoriesWithParents(getServerUrl(), apiKey, actor, projectId);
+    if (categories.length === 0) return [];
+
+    const items = categories.map((category) => ({
+      label: category.name,
+      description: category.parentName ? `親: ${category.parentName}` : undefined,
+    }));
+    const picked = await vscode.window.showQuickPick(items, {
+      canPickMany: true,
+      placeHolder: 'カテゴリを選択(複数選択可、未選択のまま確定すると設定しません)',
+    });
+    return (picked ?? []).map((item) => item.label);
+  } catch (err) {
+    logger.warn('カテゴリ一覧の取得に失敗しました(カテゴリ選択をスキップします)', { reason: messageOf(err) });
+    return [];
   }
 }
 
