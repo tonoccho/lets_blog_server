@@ -120,11 +120,6 @@ app:
   default-block-sexual-content: ${DEFAULT_BLOCK_SEXUAL_CONTENT:true}
   default-block-violent-content: ${DEFAULT_BLOCK_VIOLENT_CONTENT:true}
   default-block-discriminatory-content: ${DEFAULT_BLOCK_DISCRIMINATORY_CONTENT:true}
-  # Buffer連携(issue #379)。有効/無効・アクセストークン・プロファイルID等はプロジェクト単位の設定
-  # (issue #402)のため、APIのベースURL/タイムアウトのみアプリ全体の環境変数として残す。
-  # レガシーREST APIは2027-02-01廃止予定のため、GraphQL APIの単一エンドポイントへ移行済み(issue #411)。
-  buffer-api-base-url: ${BUFFER_API_BASE_URL:https://api.buffer.com}
-  buffer-request-timeout-seconds: ${BUFFER_REQUEST_TIMEOUT_SECONDS:30}
 
 resilience4j:
   ratelimiter:

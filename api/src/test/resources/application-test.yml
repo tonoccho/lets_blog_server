@@ -70,5 +70,3 @@ app:
   backup-mysql-database: lets_blog_test
   backup-mysql-user: test_user
   backup-mysql-password: test_pass
-  buffer-api-base-url: http://buffer.test
-  buffer-request-timeout-seconds: 30

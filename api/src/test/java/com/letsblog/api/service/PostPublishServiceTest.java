@@ -84,8 +84,6 @@ class PostPublishServiceTest {
     private UserSiteAuthorRepository userSiteAuthorRepository;
     @Mock
     private CmsAdapter cmsAdapter;
-    @Mock
-    private BufferNotificationService bufferNotificationService;
 
     private PostPublishService service;
 
@@ -98,7 +96,7 @@ class PostPublishServiceTest {
                 plantUmlEmbedService, customTagRenderService, blogCardTagRenderService, amazonTagRenderService,
                 rechartsTagRenderService, plantUmlTagRenderService, tocStyleRenderService, renderedContentWrapperService,
                 projectService, currentActorService, userRepository, userSiteAuthorRepository,
-                new com.fasterxml.jackson.databind.ObjectMapper(), new ImageResizeService(), bufferNotificationService);
+                new com.fasterxml.jackson.databind.ObjectMapper(), new ImageResizeService());
 
         Site site = new Site();
         site.setId(1L);
@@ -138,7 +136,7 @@ class PostPublishServiceTest {
             String featuredImageFilename, List<String> imageReferences) {
         return new PostPublishCommand(
                 "main", title, slug, "draft", List.of(), List.of(), null, "本文", images, featuredImageFilename,
-                imageReferences, null, null);
+                imageReferences, null);
     }
 
     @Test
@@ -178,7 +176,7 @@ class PostPublishServiceTest {
 
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", List.of(), null,
-                null, null, null);
+                null, null);
 
         service.publish(command);
 
@@ -419,7 +417,7 @@ class PostPublishServiceTest {
                 new MockMultipartFile("images", "eyecatch.png", "image/png", renderPng(400, 200)));
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), null, "本文", images, null,
-                List.of("assets/eyecatch.png"), null, null);
+                List.of("assets/eyecatch.png"), null);
 
         service.publish(command);
 
@@ -442,7 +440,7 @@ class PostPublishServiceTest {
                 new MockMultipartFile("images", "eyecatch.png", "image/png", renderPng(400, 200)));
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), null, "本文", images, null,
-                List.of("assets/eyecatch.png"), null, null);
+                List.of("assets/eyecatch.png"), null);
 
         service.publish(command);
 
@@ -480,7 +478,7 @@ class PostPublishServiceTest {
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", images, null,
-                List.of("assets/eyecatch.png"), null, null);
+                List.of("assets/eyecatch.png"), null);
 
         service.publish(command);
 
@@ -506,7 +504,7 @@ class PostPublishServiceTest {
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", images, null,
-                List.of("assets/eyecatch.png"), null, null);
+                List.of("assets/eyecatch.png"), null);
 
         service.publish(command);
 
@@ -538,7 +536,7 @@ class PostPublishServiceTest {
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", images, null,
-                List.of("assets/eyecatch.png"), null, null);
+                List.of("assets/eyecatch.png"), null);
 
         service.publish(command);
 
@@ -571,7 +569,7 @@ class PostPublishServiceTest {
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", images, null,
-                List.of("assets/eyecatch.png"), null, null);
+                List.of("assets/eyecatch.png"), null);
 
         service.publish(command);
 
@@ -585,7 +583,7 @@ class PostPublishServiceTest {
     private PostPublishCommand scheduledCommand(String publishScheduledAt, String status) {
         return new PostPublishCommand(
                 "main", "My Article", "my-article", status, List.of(), List.of(), null, "本文", List.of(), null,
-                List.of(), publishScheduledAt, null);
+                List.of(), publishScheduledAt);
     }
 
     /** siteId=1 を本番サイトに持つプロジェクトを紐づける。 */
@@ -790,7 +788,7 @@ class PostPublishServiceTest {
 
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", List.of(), null,
-                List.of(), null, null);
+                List.of(), null);
         service.publish(command);
 
         ArgumentCaptor<Map> tagPriorUploadsCaptor = ArgumentCaptor.forClass(Map.class);
@@ -829,7 +827,7 @@ class PostPublishServiceTest {
                 .thenReturn(new PostResult("201", "https://example.com/?p=201", "draft"));
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of("技術", "お知らせ"), List.of(), null, "本文",
-                List.of(), null, List.of(), null, null);
+                List.of(), null, List.of(), null);
 
         service.publish(command);
 
@@ -858,66 +856,4 @@ class PostPublishServiceTest {
                 postCaptor.getValue().getPublishScheduledAt().toInstant(java.time.ZoneOffset.UTC));
     }
 
-    private PostPublishCommand commandWithStatusAndNotify(String status, Boolean notifySns) {
-        return new PostPublishCommand(
-                "main", "My Article", "my-article", status, List.of(), List.of(), null, "本文", List.of(), null,
-                List.of(), null, notifySns);
-    }
-
-    @Test
-    void publish_本番サイトへの公開ではBuffer通知が呼ばれる() {
-        bindProductionSite();
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "publish"));
-
-        service.publish(commandWithStatusAndNotify("publish", null));
-
-        verify(bufferNotificationService).notifyAsync(any(), eq(1L), eq(7L), eq("My Article"), eq("https://example.com/?p=101"));
-    }
-
-    @Test
-    void publish_本番サイトへの予約投稿でもBuffer通知が呼ばれる() {
-        bindProductionSite();
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "future"));
-        String scheduledAt = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).plusDays(1)
-                .withNano(0).toString();
-
-        service.publish(scheduledCommand(scheduledAt));
-
-        verify(bufferNotificationService).notifyAsync(any(), eq(1L), eq(7L), eq("My Article"), eq("https://example.com/?p=101"));
-    }
-
-    @Test
-    void publish_下書きではBuffer通知が呼ばれない() {
-        bindProductionSite();
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-
-        service.publish(commandWithStatusAndNotify("draft", null));
-
-        verify(bufferNotificationService, org.mockito.Mockito.never()).notifyAsync(any(), any(), any(), any(), any());
-    }
-
-    @Test
-    void publish_本番以外のサイトではBuffer通知が呼ばれない() {
-        bindNonProductionSite();
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "publish"));
-
-        service.publish(commandWithStatusAndNotify("publish", null));
-
-        verify(bufferNotificationService, org.mockito.Mockito.never()).notifyAsync(any(), any(), any(), any(), any());
-    }
-
-    @Test
-    void publish_notifySnsがfalseならBuffer通知が呼ばれない() {
-        bindProductionSite();
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "publish"));
-
-        service.publish(commandWithStatusAndNotify("publish", false));
-
-        verify(bufferNotificationService, org.mockito.Mockito.never()).notifyAsync(any(), any(), any(), any(), any());
-    }
 }

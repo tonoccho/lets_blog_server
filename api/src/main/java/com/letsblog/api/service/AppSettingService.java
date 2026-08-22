@@ -25,7 +25,7 @@ import java.util.Map;
  * 同じ仕組み(system_settingsテーブルにCredentialCipherでAES-256-GCM暗号化して保存し、未設定時は
  * 環境変数にフォールバック)を再利用するが、DB接続情報・暗号化キー自体・NEXTAUTH_SECRET・Docker内部
  * サービス間通信設定等のインフラ系設定は誤設定時にアプリが起動不能になるリスクが高いため対象外とし、
- * このサービスが扱うキーのみを編集対象とする。Buffer連携・Brave Search APIキー・Google AdSense OAuth
+ * このサービスが扱うキーのみを編集対象とする。Brave Search APIキー・Google AdSense OAuth
  * クライアント(issue #407)はプロジェクト単位の設定のため対象外。LlmClientからはインターフェース経由
  * (LlmConfigProvider)で参照される(aiパッケージがserviceパッケージへ依存しないようにするため)。
  */
