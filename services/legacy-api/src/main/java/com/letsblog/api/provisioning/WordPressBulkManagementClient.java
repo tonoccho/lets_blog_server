@@ -10,7 +10,7 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
-import com.letsblog.api.util.StackTraceUtil;
+import com.letsblog.common.util.StackTraceUtil;
 
 import java.util.List;
 import java.util.Map;

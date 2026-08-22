@@ -1,19 +1,39 @@
-// サービス間で共有する共通ライブラリのビルド構成。
-// この Issue (#553) では器のみを用意する。中身の実装は #554 (A3) で追加する。
+// サービス間で共有する共通ライブラリ。ドメインロジックは置かず、暗号化・エラー応答規約・
+// ログメッセージ型・相関IDフィルタ等の横断的な部品のみを置く(#554)。
+// Spring Bootアプリではなく通常のライブラリとしてビルドする(bootJar無効 / jar有効)。
 plugins {
     id 'java-library'
+    id 'org.springframework.boot' version '4.1.0'
+    id 'io.spring.dependency-management' version '1.1.7'
     id 'checkstyle'
 }
 
 dependencies {
-    compileOnly 'org.projectlombok:lombok:1.18.46'
-    annotationProcessor 'org.projectlombok:lombok:1.18.46'
+    api 'org.springframework:spring-context'
+    api 'org.springframework:spring-web'
+    api 'com.fasterxml.jackson.core:jackson-annotations'
+    api 'org.slf4j:slf4j-api'
+    compileOnly 'jakarta.servlet:jakarta.servlet-api'
 
-    testImplementation platform('org.junit:junit-bom:5.13.3')
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
     testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation 'org.springframework:spring-test'
+    testImplementation 'jakarta.servlet:jakarta.servlet-api'
+    testRuntimeOnly 'ch.qos.logback:logback-classic'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 tasks.named('test') {
     useJUnitPlatform()
+}
+
+tasks.named('bootJar') {
+    enabled = false
+}
+
+tasks.named('jar') {
+    enabled = true
+    archiveClassifier = ''
 }

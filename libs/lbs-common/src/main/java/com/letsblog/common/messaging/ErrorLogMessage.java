@@ -1,4 +1,4 @@
-package com.letsblog.api.messaging;
+package com.letsblog.common.messaging;
 
 import java.io.Serializable;
 

@@ -1,8 +1,8 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.config.RabbitMqConfig;
+import com.letsblog.common.messaging.LogExchanges;
 import com.letsblog.api.domain.FrontendErrorLog;
-import com.letsblog.api.messaging.ErrorLogMessage;
+import com.letsblog.common.messaging.ErrorLogMessage;
 import com.letsblog.api.repository.FrontendErrorLogRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -48,7 +48,7 @@ class FrontendErrorLogServiceTest {
 
         ArgumentCaptor<ErrorLogMessage> captor = ArgumentCaptor.forClass(ErrorLogMessage.class);
         verify(rabbitTemplate).convertAndSend(
-                eq(RabbitMqConfig.LOG_EXCHANGE), eq(RabbitMqConfig.ERROR_LOG_ROUTING_KEY), captor.capture());
+                eq(LogExchanges.LOG_EXCHANGE), eq(LogExchanges.ERROR_LOG_ROUTING_KEY), captor.capture());
         ErrorLogMessage message = captor.getValue();
         assertEquals("boom", message.message());
         assertEquals("ERROR", message.level());

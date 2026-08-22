@@ -1,4 +1,4 @@
-package com.letsblog.api.util;
+package com.letsblog.common.util;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;

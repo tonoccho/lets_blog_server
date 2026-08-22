@@ -10,7 +10,7 @@ import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.cms.ConnectionCheckResult;
 import com.letsblog.api.cms.WpCliInstallResult;
-import com.letsblog.api.crypto.CredentialCipher;
+import com.letsblog.common.crypto.CredentialCipher;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.domain.SshKeyPair;

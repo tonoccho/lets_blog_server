@@ -1,9 +1,9 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.config.RabbitMqConfig;
+import com.letsblog.common.messaging.LogExchanges;
 import com.letsblog.api.domain.AuditLog;
 import com.letsblog.api.domain.AuditLogAction;
-import com.letsblog.api.messaging.AuditLogMessage;
+import com.letsblog.common.messaging.AuditLogMessage;
 import com.letsblog.api.repository.AuditLogRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.AmqpException;
@@ -47,7 +47,7 @@ public class AuditLogService {
                 LocalDateTime.now().toString());
 
         try {
-            rabbitTemplate.convertAndSend(RabbitMqConfig.LOG_EXCHANGE, RabbitMqConfig.AUDIT_LOG_ROUTING_KEY, message);
+            rabbitTemplate.convertAndSend(LogExchanges.LOG_EXCHANGE, LogExchanges.AUDIT_LOG_ROUTING_KEY, message);
             log.info("Audit log published to queue: action={}, userId={}, resource={}/{}",
                     action, userId, resourceType, resourceId);
         } catch (AmqpException e) {

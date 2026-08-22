@@ -1,7 +1,7 @@
 package com.letsblog.api.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.api.crypto.CredentialCipher;
+import com.letsblog.common.crypto.CredentialCipher;
 import com.letsblog.api.crypto.SshKeyGenerationService;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.domain.SshKeyPair;

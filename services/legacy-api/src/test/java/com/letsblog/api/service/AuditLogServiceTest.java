@@ -1,9 +1,9 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.config.RabbitMqConfig;
+import com.letsblog.common.messaging.LogExchanges;
 import com.letsblog.api.domain.AuditLog;
 import com.letsblog.api.domain.AuditLogAction;
-import com.letsblog.api.messaging.AuditLogMessage;
+import com.letsblog.common.messaging.AuditLogMessage;
 import com.letsblog.api.repository.AuditLogRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -46,7 +46,7 @@ class AuditLogServiceTest {
 
         ArgumentCaptor<AuditLogMessage> captor = ArgumentCaptor.forClass(AuditLogMessage.class);
         verify(rabbitTemplate).convertAndSend(
-                eq(RabbitMqConfig.LOG_EXCHANGE), eq(RabbitMqConfig.AUDIT_LOG_ROUTING_KEY), captor.capture());
+                eq(LogExchanges.LOG_EXCHANGE), eq(LogExchanges.AUDIT_LOG_ROUTING_KEY), captor.capture());
         AuditLogMessage message = captor.getValue();
         assertEquals(1L, message.userId());
         assertEquals(AuditLogAction.USER_CREATED.name(), message.action());

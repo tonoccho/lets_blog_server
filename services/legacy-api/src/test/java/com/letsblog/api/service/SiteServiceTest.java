@@ -5,7 +5,7 @@ import com.letsblog.api.cms.CmsAdapter;
 import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.cms.ConnectionCheckResult;
-import com.letsblog.api.crypto.CredentialCipher;
+import com.letsblog.common.crypto.CredentialCipher;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.domain.SshKeyPair;
 import com.letsblog.api.domain.User;

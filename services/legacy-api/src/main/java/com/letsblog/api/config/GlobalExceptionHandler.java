@@ -37,6 +37,7 @@ import com.letsblog.api.service.SshKeyPairNotFoundException;
 import com.letsblog.api.service.TwoFactorSecretNotFoundException;
 import com.letsblog.api.exception.RateLimitExceededException;
 import com.letsblog.api.service.UserNotFoundException;
+import com.letsblog.common.web.ErrorResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -44,7 +45,6 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -54,197 +54,197 @@ import java.util.stream.Collectors;
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<Map<String, String>> handleIllegalArgument(IllegalArgumentException e) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleIllegalArgument(IllegalArgumentException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<Map<String, String>> handleIllegalState(IllegalStateException e) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleIllegalState(IllegalStateException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(SiteNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleSiteNotFound(SiteNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleSiteNotFound(SiteNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(PostNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handlePostNotFound(PostNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handlePostNotFound(PostNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(CustomTagNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleCustomTagNotFound(CustomTagNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleCustomTagNotFound(CustomTagNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(ProjectNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleProjectNotFound(ProjectNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleProjectNotFound(ProjectNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(ArticlePlanSessionNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleArticlePlanSessionNotFound(ArticlePlanSessionNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleArticlePlanSessionNotFound(ArticlePlanSessionNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(GenerationJobNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleGenerationJobNotFound(GenerationJobNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleGenerationJobNotFound(GenerationJobNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(GeneratedImageNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleGeneratedImageNotFound(GeneratedImageNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleGeneratedImageNotFound(GeneratedImageNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(DiagramNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleDiagramNotFound(DiagramNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleDiagramNotFound(DiagramNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(ProjectUserNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleProjectUserNotFound(ProjectUserNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleProjectUserNotFound(ProjectUserNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(RoleNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleRoleNotFound(RoleNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleRoleNotFound(RoleNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(UserNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleUserNotFound(UserNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleUserNotFound(UserNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(EmailAlreadyExistsException.class)
-    public ResponseEntity<Map<String, String>> handleEmailAlreadyExists(EmailAlreadyExistsException e) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleEmailAlreadyExists(EmailAlreadyExistsException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(InvalidRoleException.class)
-    public ResponseEntity<Map<String, String>> handleInvalidRole(InvalidRoleException e) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleInvalidRole(InvalidRoleException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(InvalidCustomTagContentException.class)
-    public ResponseEntity<Map<String, String>> handleInvalidCustomTagContent(InvalidCustomTagContentException e) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleInvalidCustomTagContent(InvalidCustomTagContentException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(InvalidRechartsTagException.class)
-    public ResponseEntity<Map<String, String>> handleInvalidRechartsTag(InvalidRechartsTagException e) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleInvalidRechartsTag(InvalidRechartsTagException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(InvalidPlantUmlTagException.class)
-    public ResponseEntity<Map<String, String>> handleInvalidPlantUmlTag(InvalidPlantUmlTagException e) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleInvalidPlantUmlTag(InvalidPlantUmlTagException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(ProhibitedContentException.class)
-    public ResponseEntity<Map<String, String>> handleProhibitedContent(ProhibitedContentException e) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleProhibitedContent(ProhibitedContentException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(InvalidCredentialsException.class)
-    public ResponseEntity<Map<String, String>> handleInvalidCredentials(InvalidCredentialsException e) {
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleInvalidCredentials(InvalidCredentialsException e) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(ForbiddenException.class)
-    public ResponseEntity<Map<String, String>> handleForbidden(ForbiddenException e) {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleForbidden(ForbiddenException e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(InvalidTokenException.class)
-    public ResponseEntity<Map<String, String>> handleInvalidToken(InvalidTokenException e) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleInvalidToken(InvalidTokenException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(EmailSendException.class)
-    public ResponseEntity<Map<String, String>> handleEmailSendError(EmailSendException e) {
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleEmailSendError(EmailSendException e) {
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(MailTemplateNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleMailTemplateNotFound(MailTemplateNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleMailTemplateNotFound(MailTemplateNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(CmsApiException.class)
-    public ResponseEntity<Map<String, String>> handleCmsApiException(CmsApiException e) {
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleCmsApiException(CmsApiException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(AiServiceException.class)
-    public ResponseEntity<Map<String, String>> handleAiServiceException(AiServiceException e) {
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleAiServiceException(AiServiceException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(AiServiceGenerationException.class)
-    public ResponseEntity<Map<String, String>> handleAiServiceGenerationException(AiServiceGenerationException e) {
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleAiServiceGenerationException(AiServiceGenerationException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(ProvisioningException.class)
-    public ResponseEntity<Map<String, String>> handleProvisioningException(ProvisioningException e) {
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleProvisioningException(ProvisioningException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(SiteAlreadyProvisionedException.class)
-    public ResponseEntity<Map<String, String>> handleSiteAlreadyProvisionedException(SiteAlreadyProvisionedException e) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleSiteAlreadyProvisionedException(SiteAlreadyProvisionedException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(SshOperationException.class)
-    public ResponseEntity<Map<String, String>> handleSshOperationException(SshOperationException e) {
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleSshOperationException(SshOperationException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(AgentOperationException.class)
-    public ResponseEntity<Map<String, String>> handleAgentOperationException(AgentOperationException e) {
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleAgentOperationException(AgentOperationException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(GithubApiException.class)
-    public ResponseEntity<Map<String, String>> handleGithubApiException(GithubApiException e) {
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleGithubApiException(GithubApiException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(ContentScrapingException.class)
-    public ResponseEntity<Map<String, String>> handleContentScrapingException(ContentScrapingException e) {
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleContentScrapingException(ContentScrapingException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(TwoFactorSecretNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleTwoFactorSecretNotFound(TwoFactorSecretNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleTwoFactorSecretNotFound(TwoFactorSecretNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(InvalidTotpCodeException.class)
-    public ResponseEntity<Map<String, String>> handleInvalidTotpCode(InvalidTotpCodeException e) {
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleInvalidTotpCode(InvalidTotpCodeException e) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(QrCodeGenerationException.class)
-    public ResponseEntity<Map<String, String>> handleQrCodeGeneration(QrCodeGenerationException e) {
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleQrCodeGeneration(QrCodeGenerationException e) {
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(BackupException.class)
-    public ResponseEntity<Map<String, String>> handleBackupException(BackupException e) {
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleBackupException(BackupException e) {
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(SshKeyPairNotFoundException.class)
-    public ResponseEntity<Map<String, String>> handleSshKeyPairNotFound(SshKeyPairNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> handleSshKeyPairNotFound(SshKeyPairNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Map<String, Object>> handleValidation(MethodArgumentNotValidException e) {
+    public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException e) {
         List<Map<String, String>> errors = e.getBindingResult().getFieldErrors().stream()
                 .map(fe -> Map.of(
                         "field", fe.getField(),
@@ -252,11 +252,7 @@ public class GlobalExceptionHandler {
                 ))
                 .collect(Collectors.toList());
 
-        Map<String, Object> response = new HashMap<>();
-        response.put("error", "Validation failed");
-        response.put("details", errors);
-
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of("Validation failed", errors));
     }
 
     @ExceptionHandler(RateLimitExceededException.class)
