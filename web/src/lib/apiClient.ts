@@ -15,6 +15,7 @@ export interface Site {
   updatedAt: string;
   connectionCheckStatus: "SUCCESS" | "FAILED" | null;
   managedWordpress: boolean;
+  sshConfigured: boolean;
 }
 
 export interface PostSummary {
@@ -25,6 +26,8 @@ export interface PostSummary {
   slug: string | null;
   status: string;
   lastPublishedAt: string | null;
+  categories: string[];
+  publishScheduledAt: string | null;
 }
 
 export interface GenerationJob {
@@ -42,6 +45,7 @@ export interface GeneratedImageSummary {
   checkpoint: string;
   createdAt: string;
   tags: string[];
+  provider: string;
 }
 
 export interface GeneratedImageDetail extends GeneratedImageSummary {
@@ -564,7 +568,7 @@ export interface AiImagePromptResponse {
 
 export function generateImagePromptFromChat(
   projectId: number,
-  data: { history: PlanChatMessage[]; message: string },
+  data: { history: PlanChatMessage[]; message: string; provider?: string },
   actor?: ActorInfo
 ): Promise<AiImagePromptResponse> {
   return apiFetch<AiImagePromptResponse>(`/api/projects/${projectId}/ai/generate-image-prompt`, {
@@ -1282,6 +1286,9 @@ export interface Project {
   defaultGeneratedImageWidth: number | null;
   defaultGeneratedImageHeight: number | null;
   defaultArticleImageLongEdgePx: number | null;
+  blockSexualContent: boolean | null;
+  blockViolentContent: boolean | null;
+  blockDiscriminatoryContent: boolean | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1388,6 +1395,22 @@ export function updateProjectArticleImageResizeDefault(
   });
 }
 
+/** 画像生成時の不適切コンテンツ(性的/暴力的/差別的表現)のカテゴリ別禁止設定(issue #532)。 */
+export function updateProjectImageContentFilterSettings(
+  id: number,
+  blockSexualContent: boolean,
+  blockViolentContent: boolean,
+  blockDiscriminatoryContent: boolean,
+  actor?: ActorInfo
+): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}/image-content-filter-settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ blockSexualContent, blockViolentContent, blockDiscriminatoryContent }),
+    actor,
+  });
+}
+
 /** valueそのものは返さず、設定済みかどうかのみ返す(SiteDetailのconfiguredSecretFieldsと同じ方針)。 */
 export interface ProjectApiKeyStatus {
   configured: boolean;
@@ -1459,6 +1482,20 @@ export function clearProjectGoogleAnalyticsCredentials(projectId: number, actor:
   return apiFetch<void>(`/api/projects/${projectId}/api-keys/google-analytics`, { method: 'DELETE', actor });
 }
 
+export interface GoogleAnalyticsDailyDataPoint {
+  date: string;
+  sessions: number;
+  activeUsers: number;
+  pageViews: number;
+}
+
+export interface GoogleAnalyticsChannelBreakdown {
+  channel: string;
+  sessions: number;
+  activeUsers: number;
+  pageViews: number;
+}
+
 export interface GoogleAnalyticsReport {
   eligible: boolean;
   sessions: number | null;
@@ -1466,6 +1503,8 @@ export interface GoogleAnalyticsReport {
   pageViews: number | null;
   periodLabel: string | null;
   errorMessage: string | null;
+  dailyDataPoints: GoogleAnalyticsDailyDataPoint[];
+  channelBreakdown: GoogleAnalyticsChannelBreakdown[];
 }
 
 export function getProjectGoogleAnalyticsReport(
@@ -1529,6 +1568,20 @@ export function completeProjectAdSenseOAuth(
   });
 }
 
+export interface AdSenseDailyDataPoint {
+  date: string;
+  estimatedEarnings: string;
+  clicks: number;
+  impressions: number;
+}
+
+export interface AdSensePlatformBreakdown {
+  platform: string;
+  estimatedEarnings: string;
+  clicks: number;
+  impressions: number;
+}
+
 export interface AdSenseReport {
   eligible: boolean;
   estimatedEarnings: string | null;
@@ -1536,49 +1589,12 @@ export interface AdSenseReport {
   impressions: number | null;
   periodLabel: string | null;
   errorMessage: string | null;
+  dailyDataPoints: AdSenseDailyDataPoint[];
+  platformBreakdown: AdSensePlatformBreakdown[];
 }
 
 export function getProjectAdSenseReport(projectId: number, actor?: ActorInfo): Promise<AdSenseReport> {
   return apiFetch<AdSenseReport>(`/api/projects/${projectId}/dashboard/adsense`, { actor });
-}
-
-export interface ProjectBufferStatus {
-  configured: boolean;
-  enabled: boolean;
-  hasAccessToken: boolean;
-  profileIds: string | null;
-  delayMinutes: number | null;
-  messageTemplate: string | null;
-}
-
-export function getProjectBufferStatus(projectId: number, actor?: ActorInfo): Promise<ProjectBufferStatus> {
-  return apiFetch<ProjectBufferStatus>(`/api/projects/${projectId}/api-keys/buffer`, { actor });
-}
-
-export function setProjectBufferSettings(
-  projectId: number,
-  input: { enabled: boolean; profileIds: string; delayMinutes: number | null; messageTemplate: string },
-  actor: ActorInfo
-): Promise<void> {
-  return apiFetch<void>(`/api/projects/${projectId}/api-keys/buffer`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-    actor,
-  });
-}
-
-export function setProjectBufferAccessToken(projectId: number, accessToken: string, actor: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/projects/${projectId}/api-keys/buffer/access-token`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ accessToken }),
-    actor,
-  });
-}
-
-export function clearProjectBufferSettings(projectId: number, actor: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/projects/${projectId}/api-keys/buffer`, { method: 'DELETE', actor });
 }
 
 /**
@@ -1606,20 +1622,6 @@ export function updateAppSettings(settings: Record<string, string>, actor: Actor
     body: JSON.stringify(settings),
     actor,
   });
-}
-
-export interface SocialStats {
-  eligible: boolean;
-  postCount: number | null;
-  likes: number | null;
-  shares: number | null;
-  comments: number | null;
-  clicks: number | null;
-  errorMessage: string | null;
-}
-
-export function getProjectSocialStats(projectId: number, actor?: ActorInfo): Promise<SocialStats> {
-  return apiFetch<SocialStats>(`/api/projects/${projectId}/dashboard/social-stats`, { actor });
 }
 
 export interface PlanChatMessage {
@@ -2371,6 +2373,54 @@ export function selectLlmModel(
   });
 }
 
+/** selectedはプロジェクト単位の上書き値(未設定時null)。resolvedのグローバル既定への解決はサーバー側で行う。 */
+export interface LlmProviderListResponse {
+  availableProviders: string[];
+  selected: string | null;
+}
+
+export function listLlmProvider(projectId: number, actor?: ActorInfo): Promise<LlmProviderListResponse> {
+  return apiFetch<LlmProviderListResponse>(`/api/projects/${projectId}/ai-models/llm/provider`, { actor });
+}
+
+/** provider未指定(空文字)はプロジェクト単位の上書きを解除し、グローバル既定へ戻す。 */
+export function selectLlmProvider(
+  projectId: number,
+  provider: string,
+  actor?: ActorInfo
+): Promise<LlmProviderListResponse> {
+  return apiFetch<LlmProviderListResponse>(`/api/projects/${projectId}/ai-models/llm/provider/selection`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider: provider || null }),
+    actor,
+  });
+}
+
+/** selectedはプロジェクト単位の上書き値(未設定時null)。未設定時はComfyUIとして扱われる。 */
+export interface ImageProviderListResponse {
+  availableProviders: string[];
+  selected: string | null;
+}
+
+export function listImageProvider(projectId: number, actor?: ActorInfo): Promise<ImageProviderListResponse> {
+  return apiFetch<ImageProviderListResponse>(`/api/projects/${projectId}/ai-models/image/provider`, { actor });
+}
+
+/** provider未指定(空文字)はプロジェクト単位の上書きを解除し、ComfyUIへ戻す。 */
+export function selectImageProvider(
+  projectId: number,
+  provider: string,
+  actor?: ActorInfo
+): Promise<ImageProviderListResponse> {
+  return apiFetch<ImageProviderListResponse>(`/api/projects/${projectId}/ai-models/image/provider/selection`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider: provider || null }),
+    actor,
+  });
+}
+
 export interface ComfyUiCheckpointListResponse {
   checkpoints: string[];
   selected: string;
@@ -2423,6 +2473,51 @@ export function deleteComfyUiCheckpoint(
   return apiFetch<GenerationJob>(
     `/api/projects/${projectId}/ai-models/comfyui/checkpoints/${encodeURIComponent(fileName)}`,
     { method: 'DELETE', actor }
+  );
+}
+
+/** ガベージコレクション画面(issue #500)の一覧行。 */
+export interface UnreferencedMediaItem {
+  mediaId: string;
+  guid: string;
+  title: string;
+  mimeType: string;
+  uploadedAt: string;
+}
+
+export interface MediaGarbageCollectionScanResponse {
+  environment: ProjectEnvironment;
+  items: UnreferencedMediaItem[];
+  totalMediaCount: number;
+  referencedMediaCount: number;
+  unreferencedMediaCount: number;
+}
+
+export function scanMediaGarbage(
+  projectId: number,
+  environment: ProjectEnvironment,
+  actor?: ActorInfo
+): Promise<MediaGarbageCollectionScanResponse> {
+  return apiFetch<MediaGarbageCollectionScanResponse>(
+    `/api/projects/${projectId}/media-garbage-collection/scan?environment=${environment}`,
+    { actor }
+  );
+}
+
+export function deleteMediaGarbage(
+  projectId: number,
+  environment: ProjectEnvironment,
+  mediaIds: string[],
+  actor?: ActorInfo
+): Promise<GenerationJob> {
+  return apiFetch<GenerationJob>(
+    `/api/projects/${projectId}/media-garbage-collection/delete?environment=${environment}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mediaIds }),
+      actor,
+    }
   );
 }
 

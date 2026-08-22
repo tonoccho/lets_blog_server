@@ -53,9 +53,6 @@ class BulkManagementServiceTest {
     private com.letsblog.api.cms.ssh.WordPressSshOperations sshOperations;
 
     @Mock
-    private com.letsblog.api.cms.rest.WordPressRestBulkManagementOperations restOperations;
-
-    @Mock
     private com.letsblog.api.cms.CmsAdapterFactory cmsAdapterFactory;
 
     @Mock
@@ -67,7 +64,7 @@ class BulkManagementServiceTest {
     private BulkManagementService service() {
         return new BulkManagementService(
                 projectRepository, siteRepository, bulkManagementClient,
-                bulkUploadStorageService, siteService, sshOperations, restOperations, cmsAdapterFactory,
+                bulkUploadStorageService, siteService, sshOperations, cmsAdapterFactory,
                 projectService, imageResizeService);
     }
 
@@ -125,7 +122,7 @@ class BulkManagementServiceTest {
         externalSite.setManagedWordpress(false);
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(siteRepository.findById(10L)).thenReturn(Optional.of(externalSite));
-        when(siteService.resolveDataSource(externalSite)).thenReturn(new SiteService.SiteDataSource(false, null, null));
+        when(siteService.resolveDataSource(externalSite)).thenReturn(new SiteService.SiteDataSource(false, null));
 
         assertThrows(IllegalArgumentException.class, () -> service.applyToEnvironment(
                 1L, "local", BulkOperationType.CATEGORY_CREATE, "お知らせ", "oshirase", null, null, null, 9L));
@@ -407,7 +404,7 @@ class BulkManagementServiceTest {
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(siteRepository.findById(20L)).thenReturn(Optional.of(externalSite));
-        when(siteService.resolveDataSource(externalSite)).thenReturn(new SiteService.SiteDataSource(false, null, null));
+        when(siteService.resolveDataSource(externalSite)).thenReturn(new SiteService.SiteDataSource(false, null));
         when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
 
         List<BulkOperationLog> results = service.applyToAllEnvironments(
@@ -491,7 +488,7 @@ class BulkManagementServiceTest {
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(siteRepository.findById(20L)).thenReturn(Optional.of(externalSite));
         when(siteService.resolveDataSource(externalSite))
-                .thenReturn(new SiteService.SiteDataSource(false, null, sshCreds()));
+                .thenReturn(new SiteService.SiteDataSource(false, sshCreds()));
         when(bulkUploadStorageService.store(eq(1L), any(byte[].class), eq("custom-theme.zip")))
                 .thenReturn(new BulkUploadStorageService.StoredZip("1/abc.zip", "abc", "custom-theme.zip"));
         when(bulkManagementClient.applyZip(any(), eq("theme_install"), any(byte[].class), eq("custom-theme.zip")))
@@ -507,7 +504,7 @@ class BulkManagementServiceTest {
     }
 
     @Test
-    void executeFromUpload_REST接続のみでSSHが無い非managed環境は対象外() throws IOException {
+    void executeFromUpload_SSHが無い非managed環境は対象外() throws IOException {
         BulkManagementService service = service();
         Project project = buildProject(10L, 20L, null);
         Site localSite = buildManagedSite(10L, "local-site");
@@ -519,7 +516,7 @@ class BulkManagementServiceTest {
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(siteRepository.findById(20L)).thenReturn(Optional.of(externalSite));
         when(siteService.resolveDataSource(externalSite))
-                .thenReturn(new SiteService.SiteDataSource(false, restCreds(), null));
+                .thenReturn(new SiteService.SiteDataSource(false, null));
         when(bulkUploadStorageService.store(eq(1L), any(byte[].class), eq("custom-theme.zip")))
                 .thenReturn(new BulkUploadStorageService.StoredZip("1/abc.zip", "abc", "custom-theme.zip"));
         when(bulkManagementClient.applyZip(any(), eq("theme_install"), any(byte[].class), eq("custom-theme.zip")))
@@ -545,9 +542,9 @@ class BulkManagementServiceTest {
         when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
 
         com.letsblog.api.cms.CmsCredentials.WordPressCredentials localCreds =
-                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "pass");
+                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "SSH");
         com.letsblog.api.cms.CmsCredentials.WordPressCredentials testCreds =
-                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://test.test", "admin", "pass");
+                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://test.test", "admin", "SSH");
         when(siteService.getCredentials("local-site")).thenReturn(localCreds);
         when(siteService.getCredentials("test-site")).thenReturn(testCreds);
 
@@ -586,7 +583,7 @@ class BulkManagementServiceTest {
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
 
         com.letsblog.api.cms.CmsCredentials.WordPressCredentials localCreds =
-                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "pass");
+                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "SSH");
         when(siteService.getCredentials("local-site")).thenReturn(localCreds);
 
         byte[] originalData = new byte[]{1, 2, 3};
@@ -617,7 +614,7 @@ class BulkManagementServiceTest {
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
         when(siteService.getCredentials("local-site")).thenReturn(
-                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "pass"));
+                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "SSH"));
         when(projectService.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
         when(imageResizeService.resizeToLongEdge(any(), any(), eq(1300), eq(true)))
                 .thenReturn(new ImageResizeService.ResizeResult(new byte[]{1}, "image/png"));
@@ -640,7 +637,7 @@ class BulkManagementServiceTest {
         BulkManagementService service = service();
         Site site = buildManagedSite(10L, "local-site");
         com.letsblog.api.cms.CmsCredentials.WordPressCredentials creds =
-                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "pass");
+                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "SSH");
         when(siteService.getCredentials("local-site")).thenReturn(creds);
         com.letsblog.api.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(adapter);
@@ -658,7 +655,7 @@ class BulkManagementServiceTest {
         BulkManagementService service = service();
         Site site = buildManagedSite(10L, "local-site");
         when(siteService.getCredentials("local-site")).thenReturn(
-                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "pass"));
+                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "SSH"));
         com.letsblog.api.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(adapter);
         org.mockito.Mockito.doThrow(new RuntimeException("削除に失敗しました"))
@@ -675,7 +672,7 @@ class BulkManagementServiceTest {
         BulkManagementService service = service();
         Site site = buildManagedSite(10L, "local-site");
         com.letsblog.api.cms.CmsCredentials.WordPressCredentials creds =
-                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "pass");
+                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "SSH");
         when(siteService.getCredentials("local-site")).thenReturn(creds);
         com.letsblog.api.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(adapter);
@@ -689,7 +686,7 @@ class BulkManagementServiceTest {
         verify(adapter).updatePostStatus(creds, "101", "post", "publish");
     }
 
-    // ---- 非managedサイト: REST/SSHの優先順位 ----
+    // ---- 非managedサイト: SSH経由での適用 ----
 
     private Site buildExternalSite(Long id, String slug) {
         Site site = new Site();
@@ -700,46 +697,21 @@ class BulkManagementServiceTest {
         return site;
     }
 
-    private com.letsblog.api.cms.CmsCredentials.WordPressCredentials restCreds() {
-        return new com.letsblog.api.cms.CmsCredentials.WordPressCredentials(
-                "https://example.com", "admin", "app-pass", "REST", null, null, null, null, null, null, null);
-    }
-
     private com.letsblog.api.cms.CmsCredentials.WordPressCredentials sshCreds() {
         return new com.letsblog.api.cms.CmsCredentials.WordPressCredentials(
-                "https://example.com", null, null, "SSH", "203.0.113.5", 22, "deploy",
+                "https://example.com", null, "SSH", "203.0.113.5", 22, "deploy",
                 "/var/www/html", "PEM", null, null);
     }
 
     @Test
-    void applyToEnvironment_RESTのみが使える非managedサイトはREST経由で適用する() {
+    void applyToEnvironment_非managedサイトはSSH経由で適用する() {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site externalSite = buildExternalSite(10L, "external-site");
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(siteRepository.findById(10L)).thenReturn(Optional.of(externalSite));
         when(siteService.resolveDataSource(externalSite))
-                .thenReturn(new SiteService.SiteDataSource(false, restCreds(), null));
-        when(restOperations.applyPlugin(restCreds(), BulkOperationType.PLUGIN_ACTIVATE, "akismet"))
-                .thenReturn(com.letsblog.api.cms.ssh.WordPressSshOperations.SshApplyResult.success());
-
-        BulkOperationLog result = service.applyToEnvironment(
-                1L, "local", BulkOperationType.PLUGIN_ACTIVATE, "akismet", null, null, null, null, 9L);
-
-        assertEquals(BulkOperationStatus.SUCCESS, result.getStatus());
-        verify(restOperations).applyPlugin(restCreds(), BulkOperationType.PLUGIN_ACTIVATE, "akismet");
-        verify(sshOperations, never()).applyPluginTheme(any(), any(), any());
-    }
-
-    @Test
-    void applyToEnvironment_RESTとSSH両方使える非managedサイトはSSHを優先する() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        Site externalSite = buildExternalSite(10L, "external-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(externalSite));
-        when(siteService.resolveDataSource(externalSite))
-                .thenReturn(new SiteService.SiteDataSource(false, restCreds(), sshCreds()));
+                .thenReturn(new SiteService.SiteDataSource(false, sshCreds()));
         when(sshOperations.applyPluginTheme(sshCreds(), BulkOperationType.PLUGIN_ACTIVATE, "akismet"))
                 .thenReturn(com.letsblog.api.cms.ssh.WordPressSshOperations.SshApplyResult.success());
 
@@ -748,22 +720,18 @@ class BulkManagementServiceTest {
 
         assertEquals(BulkOperationStatus.SUCCESS, result.getStatus());
         verify(sshOperations).applyPluginTheme(sshCreds(), BulkOperationType.PLUGIN_ACTIVATE, "akismet");
-        verify(restOperations, never()).applyPlugin(any(), any(), any());
     }
 
     @Test
-    void applyToEnvironment_RESTとSSH両方使える非managedサイトでSSHが失敗したらRESTにフォールバックする() {
+    void applyToEnvironment_非managedサイトのカテゴリ削除もSSH経由で適用する() {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site externalSite = buildExternalSite(10L, "external-site");
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(siteRepository.findById(10L)).thenReturn(Optional.of(externalSite));
         when(siteService.resolveDataSource(externalSite))
-                .thenReturn(new SiteService.SiteDataSource(false, restCreds(), sshCreds()));
+                .thenReturn(new SiteService.SiteDataSource(false, sshCreds()));
         when(sshOperations.applyTerm(eq(sshCreds()), eq(BulkOperationType.CATEGORY_DELETE), eq("oshirase"),
-                any(), any(), any(), eq("oshirase")))
-                .thenReturn(com.letsblog.api.cms.ssh.WordPressSshOperations.SshApplyResult.failed(new RuntimeException("SSH接続に失敗しました")));
-        when(restOperations.applyTerm(eq(restCreds()), eq(BulkOperationType.CATEGORY_DELETE), eq("oshirase"),
                 any(), any(), any(), eq("oshirase")))
                 .thenReturn(com.letsblog.api.cms.ssh.WordPressSshOperations.SshApplyResult.success());
 
@@ -773,19 +741,17 @@ class BulkManagementServiceTest {
         assertEquals(BulkOperationStatus.SUCCESS, result.getStatus());
         verify(sshOperations).applyTerm(eq(sshCreds()), eq(BulkOperationType.CATEGORY_DELETE), eq("oshirase"),
                 any(), any(), any(), eq("oshirase"));
-        verify(restOperations).applyTerm(eq(restCreds()), eq(BulkOperationType.CATEGORY_DELETE), eq("oshirase"),
-                any(), any(), any(), eq("oshirase"));
     }
 
     @Test
-    void applyToEnvironment_テーマ書き込みでSSHが失敗してもRESTにフォールバックしない() {
+    void applyToEnvironment_SSHが失敗したらFAILEDを記録する() {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site externalSite = buildExternalSite(10L, "external-site");
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(siteRepository.findById(10L)).thenReturn(Optional.of(externalSite));
         when(siteService.resolveDataSource(externalSite))
-                .thenReturn(new SiteService.SiteDataSource(false, restCreds(), sshCreds()));
+                .thenReturn(new SiteService.SiteDataSource(false, sshCreds()));
         when(sshOperations.applyPluginTheme(sshCreds(), BulkOperationType.THEME_ACTIVATE, "twentytwentyfour"))
                 .thenReturn(com.letsblog.api.cms.ssh.WordPressSshOperations.SshApplyResult.failed(new RuntimeException("SSH接続に失敗しました")));
 
@@ -793,61 +759,6 @@ class BulkManagementServiceTest {
                 1L, "local", BulkOperationType.THEME_ACTIVATE, "twentytwentyfour", null, null, null, null, 9L);
 
         assertEquals(BulkOperationStatus.FAILED, result.getStatus());
-        verify(restOperations, never()).applyPlugin(any(), any(), any());
-    }
-
-    @Test
-    void applyToEnvironment_RESTが無くSSHのみの非managedサイトはSSH経由で適用する() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        Site externalSite = buildExternalSite(10L, "external-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(externalSite));
-        when(siteService.resolveDataSource(externalSite))
-                .thenReturn(new SiteService.SiteDataSource(false, null, sshCreds()));
-        when(sshOperations.applyPluginTheme(sshCreds(), BulkOperationType.PLUGIN_ACTIVATE, "akismet"))
-                .thenReturn(com.letsblog.api.cms.ssh.WordPressSshOperations.SshApplyResult.success());
-
-        BulkOperationLog result = service.applyToEnvironment(
-                1L, "local", BulkOperationType.PLUGIN_ACTIVATE, "akismet", null, null, null, null, 9L);
-
-        assertEquals(BulkOperationStatus.SUCCESS, result.getStatus());
-        verify(sshOperations).applyPluginTheme(sshCreds(), BulkOperationType.PLUGIN_ACTIVATE, "akismet");
-        verify(restOperations, never()).applyPlugin(any(), any(), any());
-    }
-
-    @Test
-    void applyToEnvironment_テーマ書き込みはRESTがあってもSSHを使う() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        Site externalSite = buildExternalSite(10L, "external-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(externalSite));
-        when(siteService.resolveDataSource(externalSite))
-                .thenReturn(new SiteService.SiteDataSource(false, restCreds(), sshCreds()));
-        when(sshOperations.applyPluginTheme(sshCreds(), BulkOperationType.THEME_ACTIVATE, "twentytwentyfour"))
-                .thenReturn(com.letsblog.api.cms.ssh.WordPressSshOperations.SshApplyResult.success());
-
-        BulkOperationLog result = service.applyToEnvironment(
-                1L, "local", BulkOperationType.THEME_ACTIVATE, "twentytwentyfour", null, null, null, null, 9L);
-
-        assertEquals(BulkOperationStatus.SUCCESS, result.getStatus());
-        verify(sshOperations).applyPluginTheme(sshCreds(), BulkOperationType.THEME_ACTIVATE, "twentytwentyfour");
-        verify(restOperations, never()).applyPlugin(any(), any(), any());
-    }
-
-    @Test
-    void applyToEnvironment_テーマ書き込みでRESTのみでSSHが無ければ例外() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        Site externalSite = buildExternalSite(10L, "external-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(externalSite));
-        when(siteService.resolveDataSource(externalSite))
-                .thenReturn(new SiteService.SiteDataSource(false, restCreds(), null));
-
-        assertThrows(IllegalArgumentException.class, () -> service.applyToEnvironment(
-                1L, "local", BulkOperationType.THEME_ACTIVATE, "twentytwentyfour", null, null, null, null, 9L));
     }
 
     @Test

@@ -95,10 +95,11 @@ function buildDefaultCss(tagType: EmbedTagType, colors: Colors): string {
   switch (tagType) {
     case "TOC":
       return (
-        `.${TAG_CLASS.TOC}{list-style:none;margin:1em 0;padding:12px 16px;border-radius:8px;` +
-        `background:${colors.backgroundColor};}\n` +
-        `.${TAG_CLASS.TOC} ul{list-style:none;}\n` +
+        `.${TAG_CLASS.TOC}{list-style:disc;list-style-position:inside;margin:1em 0;padding:12px 16px;` +
+        `border-radius:8px;background:${colors.backgroundColor};}\n` +
+        `.${TAG_CLASS.TOC} ul{list-style:disc;list-style-position:inside;margin:0;padding-left:20px;}\n` +
         `.${TAG_CLASS.TOC} li{margin:4px 0;}\n` +
+        `.${TAG_CLASS.TOC} li::marker{color:#000;}\n` +
         `.${TAG_CLASS.TOC} a{color:${colors.textColor};text-decoration:none;}\n` +
         `.${TAG_CLASS.TOC} a:hover{color:${colors.accentColor};text-decoration:underline;}`
       );

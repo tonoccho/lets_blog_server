@@ -101,7 +101,7 @@ class ProjectUserSyncServiceTest {
         User user = buildUser();
         Site localSite = buildSite(10L, "local-site");
         Site testSite = buildSite(20L, "test-site");
-        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "pass");
+        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
 
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(userRepository.findById(2L)).thenReturn(Optional.of(user));
@@ -140,7 +140,7 @@ class ProjectUserSyncServiceTest {
         Project project = buildProject(10L, null, null);
         User user = buildUser();
         Site localSite = buildSite(10L, "local-site");
-        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "pass");
+        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
 
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(userRepository.findById(2L)).thenReturn(Optional.of(user));
@@ -163,7 +163,7 @@ class ProjectUserSyncServiceTest {
         Project project = buildProject(10L, null, null);
         User user = buildUser();
         Site localSite = buildSite(10L, "local-site");
-        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "editor", "pass");
+        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "editor", "SSH");
 
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(userRepository.findById(2L)).thenReturn(Optional.of(user));
@@ -185,7 +185,7 @@ class ProjectUserSyncServiceTest {
         Project project = buildProject(10L, null, null);
         User user = buildUser();
         Site localSite = buildSite(10L, "local-site");
-        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "pass");
+        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
 
         when(projectUserRepository.findByProjectIdAndUserId(1L, 2L)).thenReturn(Optional.of(projectUser));
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
@@ -233,6 +233,62 @@ class ProjectUserSyncServiceTest {
         assertEquals(1, response.size());
         assertEquals("member@example.com", response.get(0).email());
         assertEquals("editor", response.get(0).wpRole());
+    }
+
+    @Test
+    void reconcileRolesForSite_参加中の全ユーザーのロールをproject_usersの内容で上書きする() {
+        ProjectUserSyncService service = service();
+        Site site = buildSite(10L, "local-site");
+        User member = buildUser();
+        User owner = new User();
+        owner.setId(3L);
+        owner.setEmail("owner@example.com");
+        owner.setDisplayName("オーナー");
+        ProjectUser memberLink = new ProjectUser(1L, 2L, "author");
+        ProjectUser ownerLink = new ProjectUser(1L, 3L, "administrator");
+        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
+
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(site));
+        when(projectUserRepository.findByProjectId(1L)).thenReturn(List.of(memberLink, ownerLink));
+        when(userRepository.findById(2L)).thenReturn(Optional.of(member));
+        when(userRepository.findById(3L)).thenReturn(Optional.of(owner));
+        when(siteService.getCredentials("local-site")).thenReturn(credentials);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.hasAuthorProvisioningCapability(credentials)).thenReturn(true);
+
+        service.reconcileRolesForSite(1L, 10L);
+
+        ArgumentCaptor<AuthorProvisioningRequest> captor = ArgumentCaptor.forClass(AuthorProvisioningRequest.class);
+        verify(cmsAdapter, times(2)).provisionAuthor(eq(credentials), captor.capture());
+        List<AuthorProvisioningRequest> requests = captor.getAllValues();
+        assertEquals("author", requests.get(0).wpRole());
+        assertEquals("member@example.com", requests.get(0).email());
+        assertEquals("administrator", requests.get(1).wpRole());
+        assertEquals("owner@example.com", requests.get(1).email());
+    }
+
+    @Test
+    void reconcileRolesForSite_存在しないユーザーはスキップする() {
+        ProjectUserSyncService service = service();
+        Site site = buildSite(10L, "local-site");
+        ProjectUser staleLink = new ProjectUser(1L, 99L, "editor");
+
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(site));
+        when(projectUserRepository.findByProjectId(1L)).thenReturn(List.of(staleLink));
+        when(userRepository.findById(99L)).thenReturn(Optional.empty());
+
+        service.reconcileRolesForSite(1L, 10L);
+
+        verify(cmsAdapterFactory, never()).resolve(any());
+    }
+
+    @Test
+    void reconcileRolesForSite_サイトが存在しなければ例外() {
+        ProjectUserSyncService service = service();
+        when(siteRepository.findById(10L)).thenReturn(Optional.empty());
+
+        assertThrows(SiteNotFoundException.class, () -> service.reconcileRolesForSite(1L, 10L));
+        verify(projectUserRepository, never()).findByProjectId(any());
     }
 
     @Test

@@ -10,6 +10,7 @@ import {
   updateProjectImageGenerationPromptDefaults,
   updateProjectImageGenerationSizeDefaults,
   updateProjectArticleImageResizeDefault,
+  updateProjectImageContentFilterSettings,
   setProjectGithubToken,
   clearProjectGithubToken,
   setProjectBraveSearchApiKey,
@@ -25,9 +26,6 @@ import {
   setProjectAdSenseSettings,
   setProjectAdSenseClientSecret,
   clearProjectAdSenseCredentials,
-  setProjectBufferSettings,
-  setProjectBufferAccessToken,
-  clearProjectBufferSettings,
   syncCategoryToMaster,
   deleteCategoryEverywhere,
   syncTagToMaster,
@@ -48,10 +46,16 @@ import {
   runBulkOperationUpload,
   listLlmModels,
   selectLlmModel,
+  listLlmProvider,
+  selectLlmProvider,
+  listImageProvider,
+  selectImageProvider,
   listComfyUiCheckpoints,
   selectComfyUiCheckpoint,
   installComfyUiCheckpoint,
   deleteComfyUiCheckpoint,
+  scanMediaGarbage,
+  deleteMediaGarbage,
   getGenerationJob,
   getImageGenerationOptions,
   generateProjectImages,
@@ -77,9 +81,12 @@ import {
   StatusComparisonPage,
   PluginThemeStatus,
   LlmModelListResponse,
+  LlmProviderListResponse,
+  ImageProviderListResponse,
   ComfyUiCheckpointListResponse,
   GenerationJobDetail,
   GeneratedImageSummary,
+  MediaGarbageCollectionScanResponse,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 
@@ -258,6 +265,35 @@ export async function updateImageGenerationSizeDefaultsAction(
   return { success: true };
 }
 
+export interface UpdateImageContentFilterSettingsState {
+  error?: string;
+  success?: boolean;
+}
+
+/** 画像生成の不適切コンテンツフィルタ設定(issue #532)。未チェックのカテゴリは禁止解除として保存する。 */
+export async function updateImageContentFilterSettingsAction(
+  projectId: number,
+  _prevState: UpdateImageContentFilterSettingsState,
+  formData: FormData
+): Promise<UpdateImageContentFilterSettingsState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  const blockSexualContent = formData.get("blockSexualContent") === "on";
+  const blockViolentContent = formData.get("blockViolentContent") === "on";
+  const blockDiscriminatoryContent = formData.get("blockDiscriminatoryContent") === "on";
+
+  try {
+    await updateProjectImageContentFilterSettings(
+      projectId, blockSexualContent, blockViolentContent, blockDiscriminatoryContent, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  return { success: true };
+}
+
 export interface UpdateArticleImageResizeDefaultState {
   error?: string;
   success?: boolean;
@@ -422,63 +458,6 @@ export async function clearProjectAdSenseCredentialsAction(projectId: number): P
   const actor = { id: Number(session.user.id), role: session.user.role };
   await clearProjectAdSenseCredentials(projectId, actor);
   revalidatePath(`/projects/${projectId}/settings/adsense`);
-  revalidatePath(`/projects/${projectId}/dashboard`);
-}
-
-export async function setProjectBufferSettingsAction(
-  projectId: number,
-  _prevState: ProjectApiKeyFormState,
-  formData: FormData
-): Promise<ProjectApiKeyFormState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-
-  const enabled = formData.get("enabled") === "on";
-  const profileIds = String(formData.get("profileIds") ?? "").trim();
-  const delayMinutesRaw = String(formData.get("delayMinutes") ?? "").trim();
-  const messageTemplate = String(formData.get("messageTemplate") ?? "").trim();
-  const delayMinutes = delayMinutesRaw ? Number(delayMinutesRaw) : null;
-
-  try {
-    await setProjectBufferSettings(projectId, { enabled, profileIds, delayMinutes, messageTemplate }, actor);
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
-  }
-
-  revalidatePath(`/projects/${projectId}/settings/buffer`);
-  revalidatePath(`/projects/${projectId}/dashboard`);
-  return { success: true };
-}
-
-export async function setProjectBufferAccessTokenAction(
-  projectId: number,
-  _prevState: ProjectApiKeyFormState,
-  formData: FormData
-): Promise<ProjectApiKeyFormState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-
-  const accessToken = String(formData.get("accessToken") ?? "").trim();
-  if (!accessToken) {
-    return { error: "アクセストークンを入力してください。" };
-  }
-
-  try {
-    await setProjectBufferAccessToken(projectId, accessToken, actor);
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
-  }
-
-  revalidatePath(`/projects/${projectId}/settings/buffer`);
-  revalidatePath(`/projects/${projectId}/dashboard`);
-  return { success: true };
-}
-
-export async function clearProjectBufferSettingsAction(projectId: number): Promise<void> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-  await clearProjectBufferSettings(projectId, actor);
-  revalidatePath(`/projects/${projectId}/settings/buffer`);
   revalidatePath(`/projects/${projectId}/dashboard`);
 }
 
@@ -856,6 +835,50 @@ export async function selectLlmModelAction(
   return {};
 }
 
+export async function fetchLlmProviderAction(projectId: number): Promise<LlmProviderListResponse> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  return listLlmProvider(projectId, actor);
+}
+
+export async function selectLlmProviderAction(
+  projectId: number,
+  provider: string
+): Promise<{ error?: string }> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    await selectLlmProvider(projectId, provider, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+  revalidatePath(`/projects/${projectId}`);
+  return {};
+}
+
+export async function fetchImageProviderAction(projectId: number): Promise<ImageProviderListResponse> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  return listImageProvider(projectId, actor);
+}
+
+export async function selectImageProviderAction(
+  projectId: number,
+  provider: string
+): Promise<{ error?: string }> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    await selectImageProvider(projectId, provider, actor);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+  revalidatePath(`/projects/${projectId}`);
+  return {};
+}
+
 export async function fetchComfyUiCheckpointsAction(projectId: number): Promise<ComfyUiCheckpointListResponse> {
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };
@@ -915,6 +938,37 @@ export async function fetchGenerationJobAction(jobId: number): Promise<Generatio
   return getGenerationJob(jobId, actor);
 }
 
+export async function fetchMediaGarbageScanAction(
+  projectId: number,
+  environment: ProjectEnvironment
+): Promise<{ data?: MediaGarbageCollectionScanResponse; error?: string }> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const data = await scanMediaGarbage(projectId, environment, actor);
+    return { data };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function deleteMediaGarbageAction(
+  projectId: number,
+  environment: ProjectEnvironment,
+  mediaIds: string[]
+): Promise<AiModelActionState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const job = await deleteMediaGarbage(projectId, environment, mediaIds, actor);
+    return { jobId: job.id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export async function fetchImageGenerationOptionsAction(projectId: number): Promise<ImageGenerationOptionsResponse> {
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };
@@ -938,7 +992,7 @@ export async function generateProjectImagesAction(
 
 export async function generateImagePromptAction(
   projectId: number,
-  data: { history: PlanChatMessage[]; message: string }
+  data: { history: PlanChatMessage[]; message: string; provider?: string }
 ): Promise<{ prompt?: string; error?: string }> {
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };

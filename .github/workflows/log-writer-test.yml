@@ -1,0 +1,46 @@
+name: Log Writer Tests
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'log-writer/**'
+      - '.github/workflows/log-writer-test.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'log-writer/**'
+
+jobs:
+  log-writer-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Make gradlew executable
+        run: chmod +x log-writer/gradlew
+
+      - name: Run linter
+        working-directory: log-writer
+        run: ./gradlew lint
+
+      - name: Run unit tests
+        working-directory: log-writer
+        run: ./gradlew test
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: log-writer-test-results
+          path: log-writer/build/test-results/
+          retention-days: 30

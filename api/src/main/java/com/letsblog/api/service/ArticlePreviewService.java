@@ -9,6 +9,9 @@ import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.cms.MediaUploadResult;
 import com.letsblog.api.cms.PostContent;
 import com.letsblog.api.cms.PostResult;
+import com.letsblog.api.cms.ReferencePost;
+import com.letsblog.api.cms.agent.WordPressAgentOperations;
+import com.letsblog.api.cms.ssh.WordPressSshOperations;
 import com.letsblog.api.config.LegacyJacksonRestClientConfig;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
@@ -81,6 +84,8 @@ public class ArticlePreviewService {
     private final RestClient.Builder restClientBuilder;
     private final PreviewSkeletonFetcher previewSkeletonFetcher;
     private final CmsAdapterFactory cmsAdapterFactory;
+    private final WordPressAgentOperations wordPressAgentOperations;
+    private final WordPressSshOperations wordPressSshOperations;
 
     public ArticlePreviewService(
             CustomTagRenderService customTagRenderService,
@@ -97,7 +102,9 @@ public class ArticlePreviewService {
             SiteService siteService,
             RestClient.Builder restClientBuilder,
             PreviewSkeletonFetcher previewSkeletonFetcher,
-            CmsAdapterFactory cmsAdapterFactory) {
+            CmsAdapterFactory cmsAdapterFactory,
+            WordPressAgentOperations wordPressAgentOperations,
+            WordPressSshOperations wordPressSshOperations) {
         this.customTagRenderService = customTagRenderService;
         this.blogCardTagRenderService = blogCardTagRenderService;
         this.amazonTagRenderService = amazonTagRenderService;
@@ -113,6 +120,8 @@ public class ArticlePreviewService {
         this.restClientBuilder = restClientBuilder;
         this.previewSkeletonFetcher = previewSkeletonFetcher;
         this.cmsAdapterFactory = cmsAdapterFactory;
+        this.wordPressAgentOperations = wordPressAgentOperations;
+        this.wordPressSshOperations = wordPressSshOperations;
     }
 
     /**
@@ -242,41 +251,52 @@ public class ArticlePreviewService {
             }
             css.append("/* inline <style> */\n").append(inlineStyle).append("\n");
         }
-        appendPostPageCss(css, fetchUrl, site, internalOrigin);
+        CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
+        appendPostPageCss(css, fetchUrl, site, internalOrigin, credentials);
         String result = css.length() > MAX_CSS_LENGTH ? css.substring(0, MAX_CSS_LENGTH) : css.toString();
         return new ThemeCssResponse(result, true, null);
     }
 
     /**
      * is_single()等でトップページには読み込まれず投稿ページ限定で読み込まれるCSS(Issue #337)を補うため、
-     * サイト内の最新投稿ページ(renderSkeletonの参照記事解決と同じWP REST APIクエリ)を対象にも
+     * サイト内の最新投稿ページ(renderSkeletonの参照記事解決と同じ参照記事)を対象にも
      * stylesheet/インラインstyleを収集し、トップページ分のCSSへ追記する。
      *
      * renderSkeletonのようなPlaywrightナビゲーションを伴わない軽量な代替経路のため、参照記事の取得や
      * ページ取得に失敗しても、既に得られているトップページのCSSは活かせるようベストエフォートで扱い、
      * 例外はログのみで握りつぶす。
      */
-    private void appendPostPageCss(StringBuilder css, String fetchOrigin, Site site, String internalOrigin) {
+    private void appendPostPageCss(
+            StringBuilder css, String fetchOrigin, Site site, String internalOrigin, CmsCredentials credentials) {
         if (css.length() >= MAX_CSS_LENGTH) {
             return;
         }
-        String base = fetchOrigin.endsWith("/") ? fetchOrigin : fetchOrigin + "/";
-        JsonNode posts;
-        try {
-            posts = browserLikeClient().get()
-                    .uri(base + "wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc&_fields=id,link")
-                    .retrieve()
-                    .body(JsonNode.class);
-        } catch (Exception e) {
-            logger.debug("Failed to fetch reference post for post-page CSS fallback: {}", site.getSiteKey(), e);
-            return;
-        }
-        if (posts == null || posts.size() == 0) {
-            return;
-        }
-        String referenceLink = posts.get(0).path("link").asText(null);
-        if (referenceLink == null) {
-            return;
+        String referenceLink;
+        WpCliReferencePostLookup lookup = lookupReferencePostViaWpCli(credentials, site);
+        if (lookup.supported()) {
+            if (lookup.referencePost() == null) {
+                return;
+            }
+            referenceLink = lookup.referencePost().link();
+        } else {
+            String base = fetchOrigin.endsWith("/") ? fetchOrigin : fetchOrigin + "/";
+            JsonNode posts;
+            try {
+                posts = browserLikeClient().get()
+                        .uri(base + "wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc&_fields=id,link")
+                        .retrieve()
+                        .body(JsonNode.class);
+            } catch (Exception e) {
+                logger.debug("Failed to fetch reference post for post-page CSS fallback: {}", site.getSiteKey(), e);
+                return;
+            }
+            if (posts == null || posts.size() == 0) {
+                return;
+            }
+            referenceLink = posts.get(0).path("link").asText(null);
+            if (referenceLink == null) {
+                return;
+            }
         }
         String publicOrigin = originOf(site.getBaseUrl());
         String postPageUrl = internalOrigin != null
@@ -376,26 +396,39 @@ public class ArticlePreviewService {
         }
         String base = fetchOrigin.endsWith("/") ? fetchOrigin : fetchOrigin + "/";
 
-        JsonNode posts;
-        try {
-            posts = browserLikeClient().get()
-                    .uri(base + "wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc"
-                            + "&_fields=id,link,title,content")
-                    .retrieve()
-                    .body(JsonNode.class);
-        } catch (Exception e) {
-            logger.warn("Failed to fetch reference post for skeleton preview: {}", site.getSiteKey(), e);
-            return new ThemeSkeletonResponse(null, false, "参照記事の取得に失敗しました: " + e.getMessage(), false, "");
-        }
-        if (posts == null || posts.size() == 0) {
-            return new ThemeSkeletonResponse(null, false, "参照記事が見つかりませんでした", false, "");
-        }
-        JsonNode reference = posts.get(0);
-        String titleRendered = reference.path("title").path("rendered").asText("");
-        String contentRendered = reference.path("content").path("rendered").asText("");
-        String referenceLink = reference.path("link").asText(null);
-        if (referenceLink == null) {
-            return new ThemeSkeletonResponse(null, false, "参照記事のURLを取得できませんでした", false, "");
+        String titleRendered;
+        String contentRendered;
+        String referenceLink;
+        WpCliReferencePostLookup lookup = lookupReferencePostViaWpCli(credentials, site);
+        if (lookup.supported()) {
+            if (lookup.referencePost() == null) {
+                return new ThemeSkeletonResponse(null, false, "参照記事が見つかりませんでした", false, "");
+            }
+            titleRendered = lookup.referencePost().title();
+            contentRendered = lookup.referencePost().content();
+            referenceLink = lookup.referencePost().link();
+        } else {
+            JsonNode posts;
+            try {
+                posts = browserLikeClient().get()
+                        .uri(base + "wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc"
+                                + "&_fields=id,link,title,content")
+                        .retrieve()
+                        .body(JsonNode.class);
+            } catch (Exception e) {
+                logger.warn("Failed to fetch reference post for skeleton preview: {}", site.getSiteKey(), e);
+                return new ThemeSkeletonResponse(null, false, "参照記事の取得に失敗しました: " + e.getMessage(), false, "");
+            }
+            if (posts == null || posts.size() == 0) {
+                return new ThemeSkeletonResponse(null, false, "参照記事が見つかりませんでした", false, "");
+            }
+            JsonNode reference = posts.get(0);
+            titleRendered = reference.path("title").path("rendered").asText("");
+            contentRendered = reference.path("content").path("rendered").asText("");
+            referenceLink = reference.path("link").asText(null);
+            if (referenceLink == null) {
+                return new ThemeSkeletonResponse(null, false, "参照記事のURLを取得できませんでした", false, "");
+            }
         }
 
         // 参照記事のlinkはWordPressのsiteurl設定(公開URL)を基準に絶対URLで出力されるため、
@@ -545,6 +578,41 @@ public class ArticlePreviewService {
         } catch (Exception e) {
             logger.warn("プレビュー用投稿の削除に失敗しました: site={}, postId={}", site.getSiteKey(), postId, e);
         }
+    }
+
+    /**
+     * wp-cliが実行できる経路(managed WordPressのagent transport、またはSSH transport)であれば、
+     * その経路(WordPressAgentOperations/WordPressSshOperations)経由で参照記事を取得する。
+     * 従来はfetchThemeCss(投稿ページ限定CSSの補完)・renderSkeleton(スクレイプ&amp;スプライスの
+     * 差し替え位置探索)の両方が、認証なしのWordPress REST API(wp-json/wp/v2/posts)を
+     * CmsAdapterを経由しない独立した経路として直接叩いていたが、managed/SSH管理サイトは
+     * 他の全操作と同じくwp-cli経由に揃える(issue #519)。
+     *
+     * supported=falseは、RESTトランスポート(Application Password)等、wp-cliに対応しない
+     * 認証情報だったことを示す。呼び出し元はこの場合に限り、従来のREST直接呼び出しへ
+     * フォールバックする(REST専用サイトにはwp-cliで代替する手段がないため)。
+     */
+    private WpCliReferencePostLookup lookupReferencePostViaWpCli(CmsCredentials credentials, Site site) {
+        if (!(credentials instanceof CmsCredentials.WordPressCredentials wpCredentials)) {
+            return new WpCliReferencePostLookup(false, null);
+        }
+        if (wpCredentials.isAgent()) {
+            return new WpCliReferencePostLookup(true, wordPressAgentOperations.getLatestPost(wpCredentials)
+                    .orElse(null));
+        }
+        if (wpCredentials.isSsh()) {
+            return new WpCliReferencePostLookup(true, wordPressSshOperations.getLatestPost(wpCredentials)
+                    .orElse(null));
+        }
+        return new WpCliReferencePostLookup(false, null);
+    }
+
+    /**
+     * {@link #lookupReferencePostViaWpCli}の結果。supported=falseの場合、referencePostは常にnull
+     * (呼び出し元はREST直接呼び出しへフォールバックする)。supported=trueでreferencePost==nullは、
+     * wp-cli経由で参照記事が0件だったこと(サイトに公開済み投稿が無い)を示す。
+     */
+    private record WpCliReferencePostLookup(boolean supported, ReferencePost referencePost) {
     }
 
     /**

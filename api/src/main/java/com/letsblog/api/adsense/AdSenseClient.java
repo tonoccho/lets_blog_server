@@ -1,6 +1,7 @@
 package com.letsblog.api.adsense;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.MissingNode;
 import com.letsblog.api.config.LegacyJacksonRestClientConfig;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -11,6 +12,7 @@ import org.springframework.web.client.RestClientResponseException;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -120,7 +122,11 @@ public class AdSenseClient {
                     .header("Authorization", "Bearer " + accessToken)
                     .retrieve()
                     .body(JsonNode.class);
-            return parseReport(response);
+            AdSenseReport totals = parseReport(response);
+            List<AdSenseDailyDataPoint> dailyDataPoints = fetchDailyDataPoints(accessToken, accountId, dateRange);
+            List<AdSensePlatformBreakdown> platformBreakdown = fetchPlatformBreakdown(accessToken, accountId, dateRange);
+            return new AdSenseReport(
+                    totals.estimatedEarnings(), totals.clicks(), totals.impressions(), dailyDataPoints, platformBreakdown);
         } catch (RestClientResponseException e) {
             throw new AdSenseException(
                     "AdSense Management APIの呼び出しに失敗しました: " + e.getStatusCode() + " "
@@ -130,15 +136,57 @@ public class AdSenseClient {
 
     private AdSenseReport parseReport(JsonNode response) {
         if (response == null) {
-            return new AdSenseReport("0", 0, 0);
+            return new AdSenseReport("0", 0, 0, List.of(), List.of());
         }
         JsonNode cells = response.path("totals").path("cells");
         if (!cells.isArray() || cells.isEmpty()) {
-            return new AdSenseReport("0", 0, 0);
+            return new AdSenseReport("0", 0, 0, List.of(), List.of());
         }
         String estimatedEarnings = cells.path(0).path("value").asText("0");
         long clicks = cells.path(1).path("value").asLong(0);
         long impressions = cells.path(2).path("value").asLong(0);
-        return new AdSenseReport(estimatedEarnings, clicks, impressions);
+        return new AdSenseReport(estimatedEarnings, clicks, impressions, List.of(), List.of());
+    }
+
+    /** 日次推移グラフ用に、DATEディメンションを指定してreports:generateを呼び出す(issue #426)。 */
+    private List<AdSenseDailyDataPoint> fetchDailyDataPoints(String accessToken, String accountId, String dateRange) {
+        List<AdSenseDailyDataPoint> points = new ArrayList<>();
+        for (JsonNode row : fetchRowsWithDimension(accessToken, accountId, dateRange, "DATE")) {
+            JsonNode cells = row.path("cells");
+            points.add(new AdSenseDailyDataPoint(
+                    cells.path(0).path("value").asText(null),
+                    cells.path(1).path("value").asText("0"),
+                    cells.path(2).path("value").asLong(0),
+                    cells.path(3).path("value").asLong(0)));
+        }
+        return points;
+    }
+
+    /** 収益内訳の円グラフ用に、PLATFORM_TYPE_NAMEディメンションで取得する(issue #426)。 */
+    private List<AdSensePlatformBreakdown> fetchPlatformBreakdown(String accessToken, String accountId, String dateRange) {
+        List<AdSensePlatformBreakdown> breakdown = new ArrayList<>();
+        for (JsonNode row : fetchRowsWithDimension(accessToken, accountId, dateRange, "PLATFORM_TYPE_NAME")) {
+            JsonNode cells = row.path("cells");
+            breakdown.add(new AdSensePlatformBreakdown(
+                    cells.path(0).path("value").asText(null),
+                    cells.path(1).path("value").asText("0"),
+                    cells.path(2).path("value").asLong(0),
+                    cells.path(3).path("value").asLong(0)));
+        }
+        return breakdown;
+    }
+
+    private JsonNode fetchRowsWithDimension(String accessToken, String accountId, String dateRange, String dimension) {
+        StringBuilder uri = new StringBuilder(dataApiBaseUrl)
+                .append("/v2/accounts/").append(urlEncode(accountId)).append("/reports:generate")
+                .append("?dateRange=").append(urlEncode(dateRange))
+                .append("&dimensions=").append(urlEncode(dimension));
+        METRICS.forEach(metric -> uri.append("&metrics=").append(urlEncode(metric)));
+        JsonNode response = client.get()
+                .uri(uri.toString())
+                .header("Authorization", "Bearer " + accessToken)
+                .retrieve()
+                .body(JsonNode.class);
+        return response == null ? MissingNode.getInstance() : response.path("rows");
     }
 }

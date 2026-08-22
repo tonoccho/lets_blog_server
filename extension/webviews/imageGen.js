@@ -25,6 +25,9 @@
   }
 
   function renderOptions(options) {
+    if (options.defaultAiProvider) {
+      document.getElementById('aiProvider').value = options.defaultAiProvider;
+    }
     fillSelect(document.getElementById('samplerName'), options.samplers, 'euler');
     fillSelect(document.getElementById('scheduler'), options.schedulers, 'normal');
     fillSelect(document.getElementById('checkpoint'), options.checkpoints, options.selectedCheckpoint);
@@ -143,7 +146,11 @@
       kind: 'chat',
       onCancel: function () { post('cancel'); },
     });
-    post('sendChat', { history: chatHistory.slice(0, -1), message: text });
+    post('sendChat', {
+      history: chatHistory.slice(0, -1),
+      message: text,
+      provider: document.getElementById('aiProvider').value || undefined,
+    });
   }
 
   function generate() {

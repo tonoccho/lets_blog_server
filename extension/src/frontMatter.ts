@@ -10,21 +10,21 @@ export interface LetsBlogFrontMatter {
   categories?: string[];
   tags?: string[];
   featured_image?: string;
-  wp_post_id?: string | null;
-  wp_post_url?: string | null;
-  /**
-   * 環境(サイトキー)ごとのWordPress投稿ID。ローカル/テスト/本番は別々のWordPressサイトのため、
-   * 単一のwp_post_idを使い回すと別サイトの投稿IDで更新しようとして失敗する。
-   * 投稿先を都度選べるようになった際に、サイトごとの投稿IDを個別に記録するために追加。
-   */
-  wp_post_ids?: Record<string, string>;
   /**
    * 公開予定日時(ISO 8601)。本番(live)サイトへの投稿時のみ有効で、
    * サーバー側でWordPressの予約投稿(status=future)として扱われる。
    */
   publish_scheduled_at?: string;
+  /**
+   * issue #505以降、新規作成では書き込まなくなった(GitHub Issueとの紐付けはArticlePlanSessionで
+   * サーバー側管理)。古いarticle.mdとの後方互換のため型としては残す。
+   */
   github_issue_number?: number;
   github_repository?: string;
+  /**
+   * issue #505以降、新規作成では書き込まなくなった(プロジェクトはワークスペース単位の選択
+   * (config.getProjectId)で解決する)。古いarticle.mdとの後方互換のため型としては残す。
+   */
   project_id?: number;
   [key: string]: unknown;
 }
@@ -38,7 +38,37 @@ export interface ParsedArticle {
 /** 記事テキストをfront matterと本文へ分離する。front matterが無い場合dataは空になる。 */
 export function parseArticle(text: string): ParsedArticle {
   const parsed = matter(text);
-  return { data: parsed.data as LetsBlogFrontMatter, content: parsed.content };
+  const data = parsed.data as LetsBlogFrontMatter;
+  normalizeCategoryKey(data);
+  stripLegacyWordPressIdKeys(data);
+  return { data, content: parsed.content };
+}
+
+/**
+ * 投稿の識別はslugを用いてサーバー側DB(postsテーブル)で管理するため、front matter側の
+ * wp_post_id/wp_post_url/wp_post_idsは廃止した。issue #505より前に作成されたarticle.mdに
+ * これらのキーが残っている場合、読み込み時に取り除き、以後の保存で書き戻されないようにする。
+ */
+function stripLegacyWordPressIdKeys(data: LetsBlogFrontMatter): void {
+  delete data.wp_post_id;
+  delete data.wp_post_url;
+  delete data.wp_post_ids;
+}
+
+/**
+ * 単数形の `category` キー(想定されるキーは複数形の `categories`)で書かれたfront matterを、
+ * `categories` へ正規化する。投稿処理は `categories` のみを参照するため、`category` のまま
+ * 残っていると値が無視され、カテゴリの変更が投稿に反映されない。
+ */
+function normalizeCategoryKey(data: LetsBlogFrontMatter): void {
+  const legacy = data.category;
+  if (legacy === undefined) {
+    return;
+  }
+  if ((data.categories === undefined || data.categories.length === 0) && legacy !== null) {
+    data.categories = Array.isArray(legacy) ? legacy : [String(legacy)];
+  }
+  delete data.category;
 }
 
 /** front matterと本文を1つの記事テキストへ戻す。 */
@@ -127,35 +157,13 @@ export function resolveFeaturedImageReference(
   return { reference, absolutePath: resolveLocalImagePath(baseDir, reference) };
 }
 
-/**
- * 投稿先サイト(siteKey)に対応する既存投稿IDを解決する。wp_post_idsに記録があればそれを使う。
- * wp_post_ids導入前に作成された記事(まだこのフィールドを持たない)は、front matterのsiteが
- * 投稿先と一致する場合に限り、従来のwp_post_idを既存投稿として扱う(異なるサイトのIDを
- * 誤って使い回さないよう、一致しない場合は新規投稿として扱う)。
- */
-export function resolveExistingPostId(data: LetsBlogFrontMatter, siteKey: string): string | undefined {
-  const mapped = data.wp_post_ids?.[siteKey];
-  if (mapped) {
-    return mapped;
-  }
-  if (data.site === siteKey && data.wp_post_id != null) {
-    return String(data.wp_post_id);
-  }
-  return undefined;
-}
-
 /** 新規記事のfront matterを組み立てるための入力。 */
 export interface ArticleFrontMatterInput {
   title: string;
   slug: string;
-  projectId: number;
   categories?: string[];
   tags?: string[];
   status?: string;
-  /** GitHub Issue起点で作成した場合のIssue番号。 */
-  githubIssueNumber?: number;
-  /** GitHub Issue起点で作成した場合のリポジトリURL。 */
-  githubRepository?: string;
 }
 
 /** publish_scheduled_atの既定値に使う、作成日からのオフセット(日数)。 */
@@ -181,7 +189,6 @@ export function buildArticleFrontMatter(
     title: input.title,
     slug: input.slug,
     status: input.status ?? 'draft',
-    project_id: input.projectId,
     publish_scheduled_at: scheduledAt.toISOString(),
   };
   if (input.categories && input.categories.length > 0) {
@@ -189,12 +196,6 @@ export function buildArticleFrontMatter(
   }
   if (input.tags && input.tags.length > 0) {
     frontMatter.tags = input.tags;
-  }
-  if (input.githubIssueNumber != null) {
-    frontMatter.github_issue_number = input.githubIssueNumber;
-  }
-  if (input.githubRepository) {
-    frontMatter.github_repository = input.githubRepository;
   }
   return frontMatter;
 }
@@ -224,14 +225,18 @@ export interface ScheduledPublicationValidation {
 /**
  * front matterのpublish_scheduled_atを検証する。
  *
- * 過去の日時を許可しないのは、投稿しても即時公開扱いになり、利用者の意図
- * (予約したつもり)と結果が食い違うため。サーバー側でも同じ検証を行うが、
- * 送信前に気付ける方が手戻りが少ないため拡張側でも確認する。
+ * 対話的にスケジュールを設定する操作(commandSchedulePublication)では、
+ * 過去の日時を選んでも予約にならず利用者の意図と食い違うため、requireFuture(既定true)
+ * で未来日時であることを要求する。一方、投稿送信前のチェック(commandPublish等)では
+ * 既にfront matterに書かれている過去日時をエラーにせずAPI側の判定(issue #520)に
+ * 委ねたいため、requireFuture: falseを指定して形式検証のみ行う。
  */
 export function validateScheduledPublication(
   value: unknown,
-  now: Date = new Date()
+  now: Date = new Date(),
+  options: { requireFuture?: boolean } = {}
 ): ScheduledPublicationValidation {
+  const requireFuture = options.requireFuture ?? true;
   if (value == null || value === '') {
     return {};
   }
@@ -250,7 +255,7 @@ export function validateScheduledPublication(
   if (Number.isNaN(parsed.getTime())) {
     return { error: `publish_scheduled_at を日時として解釈できません: ${trimmed}` };
   }
-  if (parsed.getTime() <= now.getTime()) {
+  if (requireFuture && parsed.getTime() <= now.getTime()) {
     return { error: `publish_scheduled_at には未来の日時を指定してください: ${trimmed}` };
   }
   return { value: trimmed };

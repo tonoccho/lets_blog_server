@@ -46,6 +46,7 @@
       articleTitle: document.getElementById('articleTitle').value || undefined,
       precedingContext: document.getElementById('precedingContext').value || undefined,
       subsectionHeadings: subsectionHeadings.length > 0 ? subsectionHeadings : undefined,
+      provider: document.getElementById('aiProvider').value || undefined,
     };
   }
 
@@ -160,6 +161,9 @@
     switch (command) {
       case 'init': {
         document.getElementById('articleTitle').value = payload.articleTitle || '';
+        if (payload.defaultAiProvider) {
+          document.getElementById('aiProvider').value = payload.defaultAiProvider;
+        }
         const ctx = payload.sectionContext || {};
         document.getElementById('mode').value = ctx.mode || 'body';
         if (ctx.heading) {

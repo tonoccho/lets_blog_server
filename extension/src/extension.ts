@@ -5,18 +5,20 @@ import {
   getServerUrl,
   requireApiKey,
   setApiKey,
+  getApiKey,
   getActor,
   setActor,
   getProjectId,
   setProjectId,
   requireProjectId,
+  getConfiguredAiProvider,
+  setConfiguredAiProvider,
 } from './config';
 import {
   parseArticle,
   stringifyArticle,
   extractLocalImageReferences,
   resolveFeaturedImageReference,
-  resolveExistingPostId,
   guessImageMimeType,
   validateScheduledPublication,
   buildArticleFrontMatter,
@@ -32,10 +34,15 @@ import { ImageGalleryPanel } from './imageGalleryPanel';
 import { DiagramEditorPanel, DIAGRAM_REFERENCE_PATTERN } from './diagramEditorPanel';
 import { DiagramGalleryPanel } from './diagramGalleryPanel';
 import { SectionGenPanel } from './sectionGenPanel';
+import { AskAiPanel } from './askAiPanel';
 import { resolveSectionContext } from './headingContext';
+import { buildSourcesSection } from './markdownSources';
 import { logger } from './logger';
 import { messageOf, reportError } from './errorHandler';
 import { buildSmartCardTag, buildStandardLink, parseHttpUrl } from './urlPaste';
+import { ProofreadController } from './proofreadDiagnostics';
+import { FrontMatterCompletionProvider } from './frontMatterCompletionProvider';
+import { BodyCustomTagCompletionProvider } from './bodyCustomTagCompletionProvider';
 
 /**
  * 拡張の有効化。ロガーの初期化と全コマンドの登録を行う。
@@ -54,6 +61,19 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
+  // issue #523: front matter検証(publish_scheduled_at/status/categories)は常時、本文のAI校正は
+  // letsBlog.proofreadEnabled(既定false)でオプトインした場合のみ、編集の都度デバウンスして実行する。
+  const proofreadController = new ProofreadController(context);
+  context.subscriptions.push(
+    proofreadController,
+    vscode.languages.registerCodeActionsProvider({ language: 'markdown' }, proofreadController, {
+      providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
+    }),
+    vscode.workspace.onDidChangeTextDocument((event) => proofreadController.scheduleCheck(event.document)),
+    vscode.workspace.onDidOpenTextDocument((document) => proofreadController.scheduleCheck(document)),
+    vscode.workspace.onDidCloseTextDocument((document) => proofreadController.clearDocument(document))
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand('letsBlog.createArticle', () => commandCreateArticle(context)),
     vscode.commands.registerCommand('letsBlog.createArticleWithoutAi', () => commandCreateArticleWithoutAi(context)),
@@ -65,21 +85,50 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.deletePost', () => commandDeletePost(context)),
     vscode.commands.registerCommand('letsBlog.askAi', () => commandAskAi(context)),
     vscode.commands.registerCommand('letsBlog.suggestTags', () => commandSuggestTags(context)),
+    vscode.commands.registerCommand('letsBlog.switchAiProvider', () => commandSwitchAiProvider()),
     vscode.commands.registerCommand('letsBlog.generateImage', () => commandGenerateImage(context)),
     vscode.commands.registerCommand('letsBlog.imageGallery', () => commandImageGallery(context)),
     vscode.commands.registerCommand('letsBlog.addNewDiagram', () => commandAddNewDiagram(context)),
     vscode.commands.registerCommand('letsBlog.editDiagram', () => commandEditDiagram(context)),
     vscode.commands.registerCommand('letsBlog.diagramGallery', () => commandDiagramGallery(context)),
     vscode.commands.registerCommand('letsBlog.generateSection', () => commandGenerateSection(context)),
+    vscode.commands.registerCommand('letsBlog.askAiSearch', () => commandAskAiSearch(context)),
     vscode.commands.registerCommand('letsBlog.selectProject', () => commandSelectProject(context)),
     vscode.commands.registerCommand('letsBlog.planArticle', () => commandPlanArticle(context)),
     vscode.commands.registerCommand('letsBlog.previewArticle', () => commandPreviewArticle(context)),
     vscode.commands.registerCommand('letsBlog.previewDevTools', () => PreviewPanel.openDevTools()),
     vscode.commands.registerCommand('letsBlog.pasteSmartCard', () => commandPasteSmartCard(context)),
-    vscode.commands.registerCommand('letsBlog.pasteAsLink', () => commandPasteAsLink(context))
+    vscode.commands.registerCommand('letsBlog.pasteAsLink', () => commandPasteAsLink(context)),
+    vscode.commands.registerCommand('letsBlog.proofreadNow', () => commandProofreadNow(proofreadController)),
+    vscode.commands.registerCommand('letsBlog.fixInvalidStatus', (uri: vscode.Uri) =>
+      commandFixInvalidStatus(context, uri)
+    ),
+    vscode.commands.registerCommand('letsBlog.removeInvalidCategory', (uri: vscode.Uri, category: string) =>
+      commandRemoveInvalidCategory(uri, category)
+    )
   );
 
   context.subscriptions.push(registerDiagramCursorContext());
+
+  // issue #521: frontmatterのstatus/categories/tagsへコード補完を提供する。
+  context.subscriptions.push(
+    vscode.languages.registerCompletionItemProvider(
+      { language: 'markdown' },
+      new FrontMatterCompletionProvider(context),
+      ' ',
+      '-',
+      ':'
+    )
+  );
+
+  // issue #522: 本文中のカスタムタグ(`[tagname]〜[/tagname]`)へコード補完を提供する。
+  context.subscriptions.push(
+    vscode.languages.registerCompletionItemProvider(
+      { language: 'markdown' },
+      new BodyCustomTagCompletionProvider(context),
+      '['
+    )
+  );
 }
 
 /**
@@ -121,18 +170,6 @@ function getActiveMarkdownEditor(): vscode.TextEditor | undefined {
     return undefined;
   }
   return editor;
-}
-
-/**
- * AI生成結果末尾に付加する出典セクション。出典があるかのように装わないよう、
- * 検索失敗/未設定/0件時はsearchNoteでその旨を明示する。
- */
-function buildSourcesSection(sources: api.SourceReference[], searchNote: string | null): string {
-  if (sources.length === 0) {
-    return searchNote ? `\n\n---\n*${searchNote}*\n` : '';
-  }
-  const list = sources.map((s) => `- [${s.title}](${s.url})`).join('\n');
-  return `\n\n---\n**出典:**\n${list}\n`;
 }
 
 async function replaceDocumentText(editor: vscode.TextEditor, newText: string): Promise<void> {
@@ -404,15 +441,23 @@ async function publishToSite(
     }
   }
 
-  // 予約投稿は本番サイトでのみ有効。送信前に形式と未来日時であることを確認する。
-  const scheduled = validateScheduledPublication(article.data.publish_scheduled_at);
+  // 送信前に形式のみ確認する。過去日時は投稿自体を拒否せず、API側の判定
+  // (環境・statusに応じて無視して通常投稿する。issue #520)に委ねる。
+  const scheduled = validateScheduledPublication(article.data.publish_scheduled_at, new Date(), {
+    requireFuture: false,
+  });
   if (scheduled.error) {
     vscode.window.showErrorMessage(scheduled.error);
     return;
   }
 
-  const existingPostId = resolveExistingPostId(article.data, siteKey);
   const actor = await getActor(context);
+  // 投稿の識別はslugを用いてサーバー側DB(postsテーブル)で管理する。
+  let existingPostId: string | undefined;
+  if (article.data.slug) {
+    const found = await api.lookupExistingPost(serverUrl, apiKey, siteKey, article.data.slug, actor);
+    existingPostId = found?.wpPostId;
+  }
 
   const result = await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'WordPressへ投稿しています…' },
@@ -445,11 +490,9 @@ async function publishToSite(
     }
   );
 
-  article.data.site = siteKey;
-  article.data.wp_post_id = result.wpPostId;
-  article.data.wp_post_url = result.wpPostUrl;
+  // site/wp_post_id/wp_post_urlはfront matterへ書き込まない(DB(postsテーブル)側で
+  // slugをキーに管理し、次回投稿時はlookupExistingPost経由で参照する)。statusのみ投稿の派生情報として残す。
   article.data.status = result.status;
-  article.data.wp_post_ids = { ...(article.data.wp_post_ids ?? {}), [siteKey]: result.wpPostId };
   await replaceDocumentText(editor, stringifyArticle(article));
 
   const selection = await vscode.window.showInformationMessage(
@@ -529,8 +572,11 @@ async function commandPublish(context: vscode.ExtensionContext): Promise<void> {
 }
 
 /**
- * 現在の記事を、front matterのwp_post_idsに記録されているサイトから選んで削除する
+ * 現在の記事が投稿済みのサイトを選んで削除する
  * (WordPressの場合、既定でゴミ箱へ移動する。完全削除は行わない)。
+ *
+ * 登録済みサイトそれぞれについてDB側の情報をサーバーAPI経由(lookupExistingPost)で照会し、
+ * slugをキーに実際に投稿済みのサイトを削除候補とする。
  */
 async function commandDeletePost(context: vscode.ExtensionContext): Promise<void> {
   const editor = getActiveMarkdownEditor();
@@ -538,54 +584,91 @@ async function commandDeletePost(context: vscode.ExtensionContext): Promise<void
 
   try {
     const article = parseArticle(editor.document.getText());
-    const wpPostIds = article.data.wp_post_ids ?? {};
-    const siteKeys = Object.keys(wpPostIds);
+    const apiKey = await requireApiKey(context);
+    const actor = await getActor(context);
 
-    if (siteKeys.length === 0) {
+    let candidates: { siteKey: string; wpPostId: string }[];
+    if (article.data.slug) {
+      const sites = await api.listSites(getServerUrl(), apiKey, actor);
+      const found = await Promise.all(
+        sites.map(async (s) => {
+          const result = await api.lookupExistingPost(getServerUrl(), apiKey, s.siteKey, article.data.slug as string, actor);
+          return result ? { siteKey: s.siteKey, wpPostId: result.wpPostId } : undefined;
+        })
+      );
+      candidates = found.filter((c): c is { siteKey: string; wpPostId: string } => c != null);
+    } else {
+      candidates = [];
+    }
+
+    if (candidates.length === 0) {
       vscode.window.showErrorMessage('この記事はまだどのサイトにも投稿されていません。');
       return;
     }
 
-    let siteKey: string;
-    if (siteKeys.length === 1) {
-      siteKey = siteKeys[0];
+    let target: { siteKey: string; wpPostId: string };
+    if (candidates.length === 1) {
+      target = candidates[0];
     } else {
       const picked = await vscode.window.showQuickPick(
-        siteKeys.map((key) => ({ label: key, description: wpPostIds[key] })),
+        candidates.map((c) => ({ label: c.siteKey, description: c.wpPostId, candidate: c })),
         { placeHolder: '削除対象のサイトを選択' }
       );
       if (!picked) return;
-      siteKey = picked.label;
+      target = picked.candidate;
     }
 
-    const wpPostId = wpPostIds[siteKey];
     const confirmation = await vscode.window.showWarningMessage(
-      `サイト '${siteKey}' の投稿(ID: ${wpPostId})を削除します(WordPressの場合はゴミ箱へ移動します)。よろしいですか?`,
+      `サイト '${target.siteKey}' の投稿(ID: ${target.wpPostId})を削除します(WordPressの場合はゴミ箱へ移動します)。よろしいですか?`,
       { modal: true },
       '削除する'
     );
     if (confirmation !== '削除する') return;
 
-    const apiKey = await requireApiKey(context);
-    const actor = await getActor(context);
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: '投稿を削除しています…' },
-      () => api.deletePost(getServerUrl(), apiKey, actor, siteKey, wpPostId)
+      () => api.deletePost(getServerUrl(), apiKey, actor, target.siteKey, target.wpPostId)
     );
 
-    const remainingWpPostIds = { ...wpPostIds };
-    delete remainingWpPostIds[siteKey];
-    article.data.wp_post_ids = remainingWpPostIds;
-    if (article.data.site === siteKey) {
-      article.data.wp_post_id = null;
-      article.data.wp_post_url = null;
-    }
-    await replaceDocumentText(editor, stringifyArticle(article));
-
-    vscode.window.showInformationMessage(`サイト '${siteKey}' の投稿を削除しました。`);
+    vscode.window.showInformationMessage(`サイト '${target.siteKey}' の投稿を削除しました。`);
   } catch (err) {
     reportError('投稿の削除に失敗しました', err);
   }
+}
+
+/** letsBlog.aiProviderのメニュー選択肢。値''は「サーバー(プロジェクト/システム設定)の既定値を使用」。 */
+const AI_PROVIDER_ITEMS: { label: string; value: string }[] = [
+  { label: 'サーバー既定値を使用', value: '' },
+  { label: 'Ollama', value: 'OLLAMA' },
+  { label: 'OpenAI (ChatGPT)', value: 'OPENAI' },
+  { label: 'Claude (Anthropic)', value: 'CLAUDE' },
+];
+
+/**
+ * AIを呼び出すコマンドの実行時に必ずプロバイダーを選ばせるための共通クイックピック(issue #530)。
+ * letsBlog.aiProvider設定の現在値をチェックマークで示し、そのままEnterすれば現在値が選び直される。
+ * 戻り値undefinedはEscapeによるキャンセル、空文字はサーバー既定値を使う選択。
+ */
+async function pickAiProvider(placeHolder: string): Promise<string | undefined> {
+  const current = getConfiguredAiProvider();
+  const items = AI_PROVIDER_ITEMS.map((item) => ({
+    label: item.value === current ? `$(check) ${item.label}` : item.label,
+    value: item.value,
+  }));
+  const picked = await vscode.window.showQuickPick(items, { placeHolder });
+  return picked?.value;
+}
+
+/**
+ * 「Let's Blog: AIプロバイダーを切り替える」コマンド。letsBlog.aiProvider設定を書き換え、
+ * 以降のAskAi/Suggest Tags/Generate Section/Generate Imageの既定選択に反映される。
+ */
+async function commandSwitchAiProvider(): Promise<void> {
+  const provider = await pickAiProvider('作業中に使うAIプロバイダーを選択');
+  if (provider === undefined) return;
+  await setConfiguredAiProvider(provider);
+  const label = AI_PROVIDER_ITEMS.find((item) => item.value === provider)?.label ?? provider;
+  vscode.window.showInformationMessage(`AIプロバイダーを「${label}」に切り替えました。`);
 }
 
 async function commandAskAi(context: vscode.ExtensionContext): Promise<void> {
@@ -602,6 +685,10 @@ async function commandAskAi(context: vscode.ExtensionContext): Promise<void> {
   );
   if (!mode) return;
 
+  // 必ずAIプロバイダーを選ばせる(issue #530)。同じクイックピックフローの続きとして提示する。
+  const provider = await pickAiProvider('使用するAIプロバイダーを選択');
+  if (provider === undefined) return;
+
   try {
     const apiKey = await requireApiKey(context);
     const article = parseArticle(editor.document.getText());
@@ -610,7 +697,7 @@ async function commandAskAi(context: vscode.ExtensionContext): Promise<void> {
 
     const result = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'AIに問い合わせています…' },
-      () => api.askAi(getServerUrl(), apiKey, mode.value, text)
+      () => api.askAi(getServerUrl(), apiKey, mode.value, text, undefined, provider)
     );
 
     const content = result.result + buildSourcesSection(result.sources, result.searchNote);
@@ -625,18 +712,34 @@ async function commandSuggestTags(context: vscode.ExtensionContext): Promise<voi
   const editor = getActiveMarkdownEditor();
   if (!editor) return;
 
+  // 必ずAIプロバイダーを選ばせる(issue #530)。
+  const provider = await pickAiProvider('使用するAIプロバイダーを選択');
+  if (provider === undefined) return;
+
   try {
     const apiKey = await requireApiKey(context);
     const article = parseArticle(editor.document.getText());
+    // issue #525: プロジェクトのマスター環境サイトに既存のタグを優先して提案させる。
+    const projectId = (article.data.project_id as number | undefined) ?? getProjectId(context);
 
-    const suggestion = await vscode.window.withProgress(
+    const [suggestion, existingTags] = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'タグ/カテゴリを提案中…' },
-      () => api.suggestTags(getServerUrl(), apiKey, article.content)
+      () => Promise.all([
+        api.suggestTags(getServerUrl(), apiKey, article.content, undefined, provider, projectId),
+        projectId
+          ? api.listExistingTags(getServerUrl(), apiKey, undefined, projectId)
+          : Promise.resolve<string[]>([]),
+      ])
     );
+    const existingTagSet = new Set(existingTags.map((t) => t.toLowerCase()));
 
     const items = [
       ...suggestion.categories.map((c) => ({ label: c, description: 'カテゴリ', itemType: 'category' as const })),
-      ...suggestion.tags.map((t) => ({ label: t, description: 'タグ', itemType: 'tag' as const })),
+      ...suggestion.tags.map((t) => ({
+        label: t,
+        description: existingTagSet.has(t.toLowerCase()) ? 'タグ (既存)' : 'タグ',
+        itemType: 'tag' as const,
+      })),
     ];
     if (items.length === 0) {
       vscode.window.showInformationMessage('提案はありませんでした。');
@@ -662,6 +765,56 @@ async function commandSuggestTags(context: vscode.ExtensionContext): Promise<voi
     vscode.window.showInformationMessage('front matterに反映しました。');
   } catch (err) {
     reportError('タグ提案に失敗しました', err);
+  }
+}
+
+/**
+ * issue #523: front matter検証と本文のAI校正を即時実行する。letsBlog.proofreadEnabledが
+ * 無効(既定)でも、このコマンドは常に本文のAI校正まで実行する。
+ */
+async function commandProofreadNow(proofreadController: ProofreadController): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  try {
+    await proofreadController.runManual(editor.document);
+  } catch (err) {
+    reportError('校正チェックに失敗しました', err);
+  }
+}
+
+/** issue #523: front matterのstatusが不正な値だった際のクイックフィックス。有効な値から選び直す。 */
+async function commandFixInvalidStatus(context: vscode.ExtensionContext, uri: vscode.Uri): Promise<void> {
+  try {
+    const document = await vscode.workspace.openTextDocument(uri);
+    const editor = await vscode.window.showTextDocument(document);
+    const apiKey = await requireApiKey(context);
+    const statuses = await api.getPostStatuses(getServerUrl(), apiKey);
+
+    const picked = await vscode.window.showQuickPick(
+      statuses.map((s) => ({ label: s.label, description: s.value, value: s.value })),
+      { placeHolder: '有効なステータスを選択' }
+    );
+    if (!picked) return;
+
+    const article = parseArticle(editor.document.getText());
+    article.data.status = picked.value;
+    await replaceDocumentText(editor, stringifyArticle(article));
+  } catch (err) {
+    reportError('ステータスの修正に失敗しました', err);
+  }
+}
+
+/** issue #523: front matterのcategoriesにサイトへ存在しない項目があった際のクイックフィックス。 */
+async function commandRemoveInvalidCategory(uri: vscode.Uri, category: string): Promise<void> {
+  try {
+    const document = await vscode.workspace.openTextDocument(uri);
+    const editor = await vscode.window.showTextDocument(document);
+    const article = parseArticle(editor.document.getText());
+    article.data.categories = (article.data.categories ?? []).filter((c) => c !== category);
+    await replaceDocumentText(editor, stringifyArticle(article));
+  } catch (err) {
+    reportError('カテゴリの削除に失敗しました', err);
   }
 }
 
@@ -813,6 +966,21 @@ async function commandGenerateSection(context: vscode.ExtensionContext): Promise
 }
 
 /**
+ * エディタ右クリックメニューの「Ask AI」。Web検索を踏まえた質問応答パネルを開く(issue #526)。
+ * 右クリック時点の選択範囲(無ければカーソル位置)がApply時の挿入先になる。
+ */
+async function commandAskAiSearch(context: vscode.ExtensionContext): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  try {
+    AskAiPanel.createOrShow(context, editor);
+  } catch (err) {
+    reportError('Ask AIパネルの起動に失敗しました', err);
+  }
+}
+
+/**
  * GitHub Issueを起点にせず、コマンドから直接記事を作成する。
  * Issueが無い記事(単発の告知や覚書など)を書き始めるための入口。
  */
@@ -830,6 +998,8 @@ async function commandCreateArticle(context: vscode.ExtensionContext): Promise<v
  * 生成される記事の配置とfront matterはAI駆動のフロー(ArticleCreationPanel/PlanPanel)と
  * 同じ(articleScaffold.ts / buildArticleFrontMatter に集約)。AIを一切使わないため
  * APIキーは不要で、プロジェクトは「Let's Blog: Select Project」で選択済みのものを使う。
+ * カテゴリ選択(issue #524)はAPIキー設定済みの場合のみ行い、未設定/取得失敗時は
+ * 選択せずに作成を続行する。
  */
 async function commandCreateArticleWithoutAi(context: vscode.ExtensionContext): Promise<void> {
   try {
@@ -859,10 +1029,12 @@ async function commandCreateArticleWithoutAi(context: vscode.ExtensionContext): 
     });
     if (!slug) return;
 
+    const categories = await pickCategoriesForNewArticle(context, projectId);
+
     const result = await createArticleScaffold({
       workspaceRoot,
       slug: slug.trim(),
-      frontMatter: buildArticleFrontMatter({ title: title.trim(), slug: slug.trim(), projectId }),
+      frontMatter: buildArticleFrontMatter({ title: title.trim(), slug: slug.trim(), categories }),
       content: '',
     });
     if (!result) return;
@@ -871,6 +1043,38 @@ async function commandCreateArticleWithoutAi(context: vscode.ExtensionContext): 
     vscode.window.showInformationMessage(`articles/${slug.trim()}/article.md を作成しました。`);
   } catch (err) {
     reportError('記事の作成に失敗しました', err);
+  }
+}
+
+/**
+ * サイトの既存カテゴリ(親カテゴリ名付き)を取得し、複数選択のQuickPickで選ばせる(issue #524)。
+ * APIキー/actor未設定、プロジェクト未紐付け、取得失敗など、カテゴリを提示できない場合は
+ * 静かに空配列を返し、記事作成そのものは(No AIコマンドの通り)継続させる。
+ */
+async function pickCategoriesForNewArticle(
+  context: vscode.ExtensionContext,
+  projectId: number
+): Promise<string[]> {
+  try {
+    const apiKey = await getApiKey(context);
+    const actor = await getActor(context);
+    if (!apiKey || !actor) return [];
+
+    const categories = await api.listExistingCategoriesWithParents(getServerUrl(), apiKey, actor, projectId);
+    if (categories.length === 0) return [];
+
+    const items = categories.map((category) => ({
+      label: category.name,
+      description: category.parentName ? `親: ${category.parentName}` : undefined,
+    }));
+    const picked = await vscode.window.showQuickPick(items, {
+      canPickMany: true,
+      placeHolder: 'カテゴリを選択(複数選択可、未選択のまま確定すると設定しません)',
+    });
+    return (picked ?? []).map((item) => item.label);
+  } catch (err) {
+    logger.warn('カテゴリ一覧の取得に失敗しました(カテゴリ選択をスキップします)', { reason: messageOf(err) });
+    return [];
   }
 }
 

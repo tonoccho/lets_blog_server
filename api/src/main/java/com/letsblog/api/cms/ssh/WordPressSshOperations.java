@@ -4,11 +4,15 @@ import com.letsblog.api.cms.AuthCookie;
 import com.letsblog.api.cms.AuthorProvisioningRequest;
 import com.letsblog.api.cms.WpCliInstallResult;
 import com.letsblog.api.cms.CmsCredentials.WordPressCredentials;
+import com.letsblog.api.cms.CmsMediaReferenceScan;
+import com.letsblog.api.cms.CmsMediaSummary;
+import com.letsblog.api.cms.CmsPostContentSummary;
 import com.letsblog.api.cms.CmsPostSummary;
 import com.letsblog.api.cms.ConnectionCheckResult;
 import com.letsblog.api.cms.MediaUploadResult;
 import com.letsblog.api.cms.PostContent;
 import com.letsblog.api.cms.PostResult;
+import com.letsblog.api.cms.ReferencePost;
 import com.letsblog.api.cms.ssh.SshCommandExecutor.SshCommandResult;
 import com.letsblog.api.cms.ssh.SshCommandExecutor.SshConnectionParams;
 import com.letsblog.api.domain.BulkOperationType;
@@ -552,6 +556,10 @@ public class WordPressSshOperations {
     public record PluginThemeInfo(String name, String status) {
     }
 
+    /** {@link #exportDatabase}の戻り値。tablePrefixは同期元のWordPressテーブルプレフィックス。 */
+    public record DatabaseExport(String tablePrefix, byte[] dump) {
+    }
+
     public record SshApplyResult(String status, String errorMessage, String stackTrace) {
         public static SshApplyResult success() {
             return new SshApplyResult("SUCCESS", null, null);
@@ -662,9 +670,35 @@ public class WordPressSshOperations {
      * WordPressAdapter.postExists(issue #493)からも呼ばれるためpublic。メディア(添付ファイル)も
      * post_type=attachmentのwp_postsレコードのため、WordPressAdapter.mediaExists(issue #495)
      * からも同じ判定として再利用される。
+     *
+     * コマンドが失敗した場合、「投稿IDが無効(=実在しない)」と断定できるのは`wp post get`が
+     * その旨のエラーを返したときだけである。一時的なSSH/wp-cliの不調など、実在しないと断定
+     * できない失敗まで「実在しない」(false)扱いにすると、createOrUpdatePostが本来更新すべき
+     * 投稿を新規作成してしまい、同じスラッグの記事が再投稿のたびに重複投稿されてしまう
+     * (issue #529)。REST版(WordPressAdapter#postExists)・managed版
+     * (WordPressAgentOperations#postExists)は既にこの安全側(true=実在するとみなす)の方針を
+     * 採っており、SSH版も揃える。
      */
     public boolean postExists(WordPressCredentials creds, String postId) {
-        return exec(creds, wpCli(creds, "post get " + ShellQuote.single(postId) + " --field=ID")).ok();
+        SshCommandResult result = exec(creds, wpCli(creds, "post get " + ShellQuote.single(postId) + " --field=ID"));
+        if (result.ok()) {
+            return true;
+        }
+        if (isPostNotFoundError(result)) {
+            return false;
+        }
+        log.warn("投稿の実在確認が実在しないと断定できない理由で失敗したため、安全側(実在する)とみなします: "
+                + "postId={}, exitStatus={}, detail={}",
+                postId, result.exitStatus(), firstLine(result.stderr(), result.stdout()));
+        return true;
+    }
+
+    private static final Pattern POST_NOT_FOUND_PATTERN = Pattern.compile(
+            "Invalid post ID|Could not find the post|無効な投稿\\s*ID\\s*です", Pattern.CASE_INSENSITIVE);
+
+    /** `wp post get`が「指定IDの投稿が存在しない」ことを理由に失敗したかどうかを判定する。 */
+    private boolean isPostNotFoundError(SshCommandResult result) {
+        return POST_NOT_FOUND_PATTERN.matcher(result.stderr() + "\n" + result.stdout()).find();
     }
 
     /**
@@ -688,8 +722,13 @@ public class WordPressSshOperations {
         args.append(" --post_status=").append(ShellQuote.single(content.status()));
         if (content.publishScheduledAt() != null) {
             // wp-cliはUTCの日時を --post_date_gmt で受け取る(status=futureと組で予約投稿になる)。
+            // `post update` は未指定フィールドを既存投稿の値のまま引き継ぐため、--post_date_gmt
+            // だけを送ると post_date(サイトのローカル時刻。wp-adminや投稿画面はこちらを表示する)が
+            // 更新前の値に取り残され、予約日時を変更したのに画面上は変わって見えないままになる
+            // (このアプリはサイトのタイムゾーン設定を扱っていないため、--post_dateも同じUTC値で送る)。
             String scheduledAt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
                     .format(content.publishScheduledAt().atOffset(ZoneOffset.UTC));
+            args.append(" --post_date=").append(ShellQuote.single(scheduledAt));
             args.append(" --post_date_gmt=").append(ShellQuote.single(scheduledAt));
         }
         if (content.slug() != null && !content.slug().isBlank()) {
@@ -769,6 +808,38 @@ public class WordPressSshOperations {
         return new AuthCookie(body.path("name").asText(), body.path("value").asText());
     }
 
+    /**
+     * 記事プレビュー(ArticlePreviewService)のテーマCSS/DOM取得向けに、サイト内の最新公開記事を
+     * 「参照記事」として返す(読み取り専用)。従来はArticlePreviewServiceが認証なしのWordPress
+     * REST APIを直接叩いていたが、SSH管理サイトも他の全操作と同じくwp-cli経由へ揃える(issue #519)。
+     * title/contentはREST版のtitle.rendered/content.rendered相当(the_title/the_contentフィルタ
+     * 適用後)になるよう、wp-cliのpost系コマンドではなくwp evalでWordPressコアのAPI
+     * (get_posts/get_permalink/apply_filters)を直接呼び出す(generateAuthCookieと同じ方針)。
+     * 参照記事が存在しない場合は空を返す。
+     */
+    public java.util.Optional<ReferencePost> getLatestPost(WordPressCredentials creds) {
+        String phpCode = "$posts = get_posts(['numberposts' => 1, 'post_status' => 'publish', "
+                + "'orderby' => 'date', 'order' => 'DESC']); "
+                + "if (empty($posts)) { echo json_encode(['found' => false]); exit; } "
+                + "$post = $posts[0]; "
+                + "echo json_encode(['found' => true, 'id' => (string) $post->ID, "
+                + "'link' => get_permalink($post->ID), "
+                + "'title' => apply_filters('the_title', $post->post_title, $post->ID), "
+                + "'content' => apply_filters('the_content', $post->post_content)]);";
+        SshCommandResult result = exec(creds, wpCli(creds, "eval " + ShellQuote.single(phpCode)));
+        if (!result.ok()) {
+            throw new SshOperationException("参照記事の取得に失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+        JsonNode body = parseJsonObject(result.stdout());
+        if (!body.path("found").asBoolean(false)) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(new ReferencePost(
+                body.path("id").asText(), body.path("link").asText(),
+                body.path("title").asText(), body.path("content").asText()));
+    }
+
     /** PHPのシングルクォート文字列リテラルとして安全に埋め込むためのエスケープ(`\`と`'`のみ特殊)。 */
     private String phpSingleQuote(String value) {
         if (value == null) {
@@ -802,6 +873,92 @@ public class WordPressSshOperations {
                 "post update " + postId + " --post_status=" + ShellQuote.single(status)));
         if (!result.ok()) {
             throw new SshOperationException("投稿/ページのステータス変更に失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+    }
+
+    /**
+     * ガベージコレクション画面(issue #500)向けにメディアライブラリの一覧を取得する。
+     * 添付ファイルもpost_type=attachmentのwp_postsレコードのため`wp post list`で取得できる。
+     * ゴミ箱にあるメディアも「蓄積した不要メディア」の掃除対象に含めるため、
+     * 既定(inherit)に加えprivate/trashも明示的に対象とする。
+     */
+    public List<CmsMediaSummary> listMedia(WordPressCredentials creds) {
+        SshCommandResult result = exec(creds, wpCli(creds,
+                "post list --post_type=attachment --post_status=inherit,private,trash"
+                        + " --fields=ID,post_title,guid,post_mime_type,post_date --format=json"));
+        if (!result.ok()) {
+            throw new SshOperationException("メディア一覧の取得に失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+        return parseJsonArray(result.stdout()).stream()
+                .map(item -> new CmsMediaSummary(
+                        item.path("ID").asText(), item.path("guid").asText(), item.path("post_title").asText(),
+                        item.path("post_mime_type").asText(), item.path("post_date").asText()))
+                .toList();
+    }
+
+    /**
+     * ガベージコレクション画面(issue #500)向けに、公開投稿タイプ全件の本文/アイキャッチと、
+     * 主要なサイト設定(サイトアイコン・カスタムロゴ・ヘッダー/背景画像)が参照する添付ファイルIDを
+     * 1回のwp eval呼び出しでまとめて取得する(getLatestPost/generateAuthCookieと同じ「PHP文字列
+     * 組み立て→eval→JSON parse」方式)。投稿タイプを['post','page']に固定せず動的に取得するのは、
+     * カスタム投稿タイプに埋め込まれたメディアを誤って「未参照」と判定し削除してしまう
+     * (=データ消失)リスクを避けるため。
+     */
+    public CmsMediaReferenceScan scanMediaReferences(WordPressCredentials creds) {
+        String phpCode = "$types = get_post_types(['public' => true], 'names'); "
+                + "unset($types['attachment']); $types = array_values($types); "
+                + "$posts = get_posts(['post_type' => $types, "
+                + "'post_status' => ['publish','future','draft','pending','private'], 'numberposts' => -1]); "
+                + "$items = array_map(function($p) { return ['id' => (string) $p->ID, "
+                + "'postType' => $p->post_type, 'status' => $p->post_status, 'content' => $p->post_content, "
+                + "'thumbnailId' => (string) get_post_thumbnail_id($p->ID)]; }, $posts); "
+                + "$headerData = get_theme_mod('header_image_data'); "
+                + "$headerUrl = get_theme_mod('header_image'); "
+                + "$headerId = (is_object($headerData) && isset($headerData->attachment_id)) "
+                + "? (string) $headerData->attachment_id "
+                + ": ($headerUrl ? (string) attachment_url_to_postid($headerUrl) : ''); "
+                + "$bgUrl = get_theme_mod('background_image'); "
+                + "$bgId = $bgUrl ? (string) attachment_url_to_postid($bgUrl) : ''; "
+                + "$settings = ['site_icon' => (string) get_option('site_icon'), "
+                + "'custom_logo' => (string) get_theme_mod('custom_logo'), "
+                + "'header_image' => $headerId, 'background_image' => $bgId]; "
+                + "echo json_encode(['posts' => $items, 'settings' => $settings]);";
+        SshCommandResult result = exec(creds, wpCli(creds, "eval " + ShellQuote.single(phpCode)));
+        if (!result.ok()) {
+            throw new SshOperationException("メディア参照スキャンに失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+        JsonNode body = parseJsonObject(result.stdout());
+        List<CmsPostContentSummary> posts = new ArrayList<>();
+        body.path("posts").forEach(item -> posts.add(new CmsPostContentSummary(
+                item.path("id").asText(), item.path("postType").asText(), item.path("status").asText(),
+                item.path("content").asText(), item.path("thumbnailId").asText())));
+        Map<String, String> settings = extractSettingsMediaIds(body.path("settings"));
+        return new CmsMediaReferenceScan(posts, settings);
+    }
+
+    private static final List<String> SETTINGS_MEDIA_KEYS =
+            List.of("site_icon", "custom_logo", "header_image", "background_image");
+
+    private Map<String, String> extractSettingsMediaIds(JsonNode settingsNode) {
+        Map<String, String> settings = new LinkedHashMap<>();
+        for (String key : SETTINGS_MEDIA_KEYS) {
+            settings.put(key, settingsNode.path(key).asText(""));
+        }
+        return settings;
+    }
+
+    /**
+     * メディア(添付ファイル)を完全に削除する(issue #500)。添付ファイルもpost_type=attachmentの
+     * wp_postsレコードのため`wp post delete`で削除できるが、{@link #deletePost}と異なり
+     * `--force`を付けてゴミ箱を経由せず物理削除する(アップロード済みファイルも合わせて削除される)。
+     */
+    public void deleteMedia(WordPressCredentials creds, String mediaId) {
+        SshCommandResult result = exec(creds, wpCli(creds, "post delete " + mediaId + " --force --yes"));
+        if (!result.ok()) {
+            throw new SshOperationException("メディアの削除に失敗しました: "
                     + firstLine(result.stderr(), result.stdout()));
         }
     }
@@ -855,6 +1012,83 @@ public class WordPressSshOperations {
         }
         exec(creds, "mkdir -p " + ShellQuote.single(creds.wpPath() + "/wp-content/mu-plugins"));
         executor.putFile(params, SVG_UPLOAD_MU_PLUGIN.getBytes(StandardCharsets.UTF_8), muPluginPath);
+    }
+
+    /**
+     * `wp db export`でリモートに書き出したダンプをSFTPでダウンロードする
+     * (環境同期の同期元がSSH管理サイトの場合に使用。issue #511)。各環境の管理者/プロジェクトメンバー
+     * アカウント(wp_users/wp_usermeta)はProjectUserSyncServiceが環境ごとに個別管理しているため、
+     * provision-agentの環境同期(/sync)と同様にダンプ対象から除外する。
+     * <p>
+     * テーブルプレフィックス(WordPressのインストーラがセキュリティのためランダム生成することがあり、
+     * 同期元と同期先で異なりうる。例: {@code jI7_} vs {@code wp_})を戻り値に含める。
+     * ダンプのCREATE TABLE/INSERT INTO等は同期元のプレフィックスのまま書き出されるため、
+     * 呼び出し元(provision-agentの/db-import)で同期先のwp-config.phpのtable_prefixを
+     * このプレフィックスへ合わせないと、同期先のWordPressがインポートされたテーブルを
+     * 読まないままになってしまう(issue #511のバグ対応)。
+     */
+    public DatabaseExport exportDatabase(WordPressCredentials creds) {
+        SshConnectionParams params = connectionParams(creds);
+        String prefix = tablePrefix(creds);
+        String remotePath = "/tmp/letsblog-dbexport-" + UUID.randomUUID() + ".sql";
+        SshCommandResult exportResult = exec(creds, wpCli(creds,
+                "db export " + ShellQuote.single(remotePath)
+                        + " --exclude_tables=" + ShellQuote.single(prefix + "users," + prefix + "usermeta")));
+        if (!exportResult.ok()) {
+            throw new SshOperationException("DBのエクスポートに失敗しました: "
+                    + firstLine(exportResult.stderr(), exportResult.stdout()));
+        }
+        try {
+            return new DatabaseExport(prefix, executor.getFile(params, remotePath));
+        } finally {
+            executor.removeFile(params, remotePath);
+        }
+    }
+
+    private String tablePrefix(WordPressCredentials creds) {
+        SshCommandResult result = exec(creds, wpCli(creds, "config get table_prefix"));
+        String prefix = result.ok() ? result.stdout().strip() : "";
+        return prefix.isEmpty() ? "wp_" : prefix;
+    }
+
+    /**
+     * wp-content/uploadsをリモートでtar.gzにまとめSFTPでダウンロードする
+     * (環境同期の同期元がSSH管理サイトの場合に使用。issue #511)。uploadsディレクトリが存在しない
+     * (メディア未アップロード)場合は空バイト列を返し、呼び出し元でインポートをスキップする想定。
+     */
+    public byte[] exportMedia(WordPressCredentials creds) {
+        return exportContentDirectory(creds, "uploads", "メディア");
+    }
+
+    /**
+     * wp-content/themesをリモートでtar.gzにまとめSFTPでダウンロードする
+     * (環境同期の同期元がSSH管理サイトの場合に使用。issue #511)。プラグインは対象外
+     * (ProjectEnvironmentSyncService参照)。themesディレクトリが存在しない場合は空バイト列を返す。
+     */
+    public byte[] exportThemes(WordPressCredentials creds) {
+        return exportContentDirectory(creds, "themes", "テーマ");
+    }
+
+    private byte[] exportContentDirectory(WordPressCredentials creds, String dirName, String label) {
+        SshConnectionParams params = connectionParams(creds);
+        String contentPath = creds.wpPath() + "/wp-content";
+        String targetPath = contentPath + "/" + dirName;
+        SshCommandResult checkResult = exec(creds, "test -d " + ShellQuote.single(targetPath));
+        if (!checkResult.ok()) {
+            return new byte[0];
+        }
+        String remotePath = "/tmp/letsblog-" + dirName + "-" + UUID.randomUUID() + ".tar.gz";
+        SshCommandResult tarResult = exec(creds, "tar -czf " + ShellQuote.single(remotePath)
+                + " -C " + ShellQuote.single(contentPath) + " " + dirName);
+        if (!tarResult.ok()) {
+            throw new SshOperationException(label + "のエクスポートに失敗しました: "
+                    + firstLine(tarResult.stderr(), tarResult.stdout()));
+        }
+        try {
+            return executor.getFile(params, remotePath);
+        } finally {
+            executor.removeFile(params, remotePath);
+        }
     }
 
     private String sanitizeFilename(String filename) {

@@ -9,6 +9,7 @@ public record GeneratedImageSummaryResponse(
         String prompt,
         String checkpoint,
         LocalDateTime createdAt,
-        List<String> tags
+        List<String> tags,
+        String provider
 ) {
 }

@@ -50,13 +50,10 @@ class PluginThemeComparisonServiceTest {
     @Mock
     private com.letsblog.api.cms.ssh.WordPressSshOperations sshOperations;
 
-    @Mock
-    private com.letsblog.api.cms.rest.WordPressRestBulkManagementOperations restOperations;
-
     private PluginThemeComparisonService service() {
         return new PluginThemeComparisonService(
                 projectRepository, siteRepository, bulkManagementClient, bulkManagementService, siteService,
-                sshOperations, restOperations);
+                sshOperations);
     }
 
     private Project buildProject(Long localSiteId, Long testSiteId, Long productionSiteId, String masterEnvironment) {
@@ -192,7 +189,7 @@ class PluginThemeComparisonServiceTest {
         assertThrows(IllegalArgumentException.class, () -> service.deletePluginEverywhere(1L, "akismet", 9L));
     }
 
-    // ---- 非managedサイト: REST優先・SSHホスト単位まとめ取得・エラー ----
+    // ---- 非managedサイト: SSHホスト単位まとめ取得・エラー ----
 
     private Site buildExternalSite(Long id, String slug) {
         Site site = new Site();
@@ -203,35 +200,9 @@ class PluginThemeComparisonServiceTest {
         return site;
     }
 
-    private com.letsblog.api.cms.CmsCredentials.WordPressCredentials restCreds() {
-        return new com.letsblog.api.cms.CmsCredentials.WordPressCredentials(
-                "https://example.com", "admin", "app-pass", "REST", null, null, null, null, null, null, null);
-    }
-
     private com.letsblog.api.cms.CmsCredentials.WordPressCredentials sshCreds(String wpPath) {
         return new com.letsblog.api.cms.CmsCredentials.WordPressCredentials(
-                "https://example.com", null, null, "SSH", "203.0.113.5", 22, "deploy", wpPath, "PEM", null, null);
-    }
-
-    @Test
-    void listPluginComparison_RESTが使える非managedサイトはRESTを優先して取得する() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(10L, 20L, null, "local");
-        Site localSite = buildManagedSite(10L, "local-site");
-        Site testSite = buildExternalSite(20L, "test-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
-        when(bulkManagementClient.listPlugins("local-site")).thenReturn(List.of());
-        when(siteService.resolveDataSource(testSite)).thenReturn(new SiteService.SiteDataSource(false, restCreds(), null));
-        when(restOperations.listPlugins(restCreds())).thenReturn(List.of(
-                new com.letsblog.api.cms.rest.WordPressRestBulkManagementOperations.PluginThemeInfo("akismet", "active")));
-
-        StatusComparisonPage page = service.listPluginComparison(1L, 0, 20);
-
-        assertEquals(1, page.items().size());
-        assertEquals("ACTIVE", page.items().get(0).test().status());
-        verify(sshOperations, never()).fetchPluginsOrThemesForEnvironments(any(), any());
+                "https://example.com", null, "SSH", "203.0.113.5", 22, "deploy", wpPath, "PEM", null, null);
     }
 
     @Test
@@ -244,9 +215,9 @@ class PluginThemeComparisonServiceTest {
         when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
         when(siteRepository.findById(30L)).thenReturn(Optional.of(productionSite));
         when(siteService.resolveDataSource(testSite))
-                .thenReturn(new SiteService.SiteDataSource(false, null, sshCreds("/var/www/html/test")));
+                .thenReturn(new SiteService.SiteDataSource(false, sshCreds("/var/www/html/test")));
         when(siteService.resolveDataSource(productionSite))
-                .thenReturn(new SiteService.SiteDataSource(false, null, sshCreds("/var/www/html/production")));
+                .thenReturn(new SiteService.SiteDataSource(false, sshCreds("/var/www/html/production")));
         when(sshOperations.fetchPluginsOrThemesForEnvironments(eq("plugin"), any())).thenReturn(
                 new com.letsblog.api.cms.ssh.WordPressSshOperations.EnvironmentFetchResult<>(
                         java.util.Map.of(
@@ -273,7 +244,7 @@ class PluginThemeComparisonServiceTest {
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
         when(siteService.resolveDataSource(testSite))
-                .thenReturn(new SiteService.SiteDataSource(false, null, sshCreds("/var/www/html/test")));
+                .thenReturn(new SiteService.SiteDataSource(false, sshCreds("/var/www/html/test")));
         when(sshOperations.fetchPluginsOrThemesForEnvironments(eq("plugin"), any())).thenReturn(
                 new com.letsblog.api.cms.ssh.WordPressSshOperations.EnvironmentFetchResult<>(
                         java.util.Map.of(), java.util.Map.of("test", "Connection refused"),

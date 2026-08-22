@@ -9,8 +9,26 @@ const initialState: UpdateAppSettingsFormState = {};
 const GROUPS: { title: string; description: string; keys: string[] }[] = [
   {
     title: "外部LLMサービス連携",
-    description: "下書き/校正/要約支援・タグ提案・記事プランニングに使用するOpenAI互換のLLM APIの接続設定です。",
-    keys: ["llm_api_key", "llm_base_url", "llm_model", "llm_available_models", "llm_request_timeout_seconds"],
+    description:
+      "下書き/校正/要約支援・タグ提案・記事プランニングに使用するAIプロバイダーの接続設定です。" +
+      "llm_providerでOLLAMA/OPENAI/CLAUDEのいずれかを選択してください(OLLAMA/OPENAIはllm_base_url/llm_api_keyを共用します)。",
+    keys: [
+      "llm_provider",
+      "llm_api_key",
+      "llm_base_url",
+      "llm_model",
+      "llm_available_models",
+      "llm_request_timeout_seconds",
+      "llm_claude_api_key",
+      "llm_claude_model",
+    ],
+  },
+  {
+    title: "画像生成AI連携",
+    description:
+      "ComfyUI/ChatGPTのベースURLと、ChatGPT画像生成用のAPIキーの接続設定です。" +
+      "どちらのプロバイダーを使うかはプロジェクト単位の設定(プロジェクト画面のAIモデル管理)で切り替えます。",
+    keys: ["comfyui_base_url", "image_llm_api_key", "image_llm_base_url"],
   },
   {
     title: "メール送信",
@@ -41,21 +59,48 @@ function sourceLabel(source: AppSetting["source"]): string {
   }
 }
 
+/** llm_providerは固定の3値(OLLAMA/OPENAI/CLAUDE)から選ばせ、誤入力による設定ミスを防ぐ。 */
+const AI_PROVIDER_OPTIONS = ["OLLAMA", "OPENAI", "CLAUDE"];
+
 function SettingField({ setting }: { setting: AppSetting }) {
+  const labelRow = (
+    <span className="flex items-center justify-between text-neutral-600 dark:text-neutral-400">
+      <span>{setting.label}</span>
+      <span
+        className={
+          setting.configured
+            ? "text-xs text-neutral-500 dark:text-neutral-400"
+            : "text-xs text-neutral-400 dark:text-neutral-600"
+        }
+      >
+        {sourceLabel(setting.source)}
+      </span>
+    </span>
+  );
+
+  if (setting.key === "llm_provider") {
+    return (
+      <label className="flex flex-col gap-1 text-sm">
+        {labelRow}
+        <select
+          name={setting.key}
+          defaultValue={setting.value ?? ""}
+          className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm"
+        >
+          <option value="">(未設定のまま)</option>
+          {AI_PROVIDER_OPTIONS.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
   return (
     <label className="flex flex-col gap-1 text-sm">
-      <span className="flex items-center justify-between text-neutral-600 dark:text-neutral-400">
-        <span>{setting.label}</span>
-        <span
-          className={
-            setting.configured
-              ? "text-xs text-neutral-500 dark:text-neutral-400"
-              : "text-xs text-neutral-400 dark:text-neutral-600"
-          }
-        >
-          {sourceLabel(setting.source)}
-        </span>
-      </span>
+      {labelRow}
       <input
         name={setting.key}
         type={setting.secret ? "password" : "text"}

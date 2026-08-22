@@ -18,10 +18,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -53,13 +55,13 @@ class WordPressSshOperationsTest {
 
     private WordPressCredentials creds(String wpPath) {
         return new WordPressCredentials(
-                "https://example.com", null, null,
+                "https://example.com", null,
                 "SSH", "203.0.113.5", 22, "deploy", wpPath, "PRIVATE-KEY-PEM", "SHA256:pinned", null);
     }
 
     private WordPressCredentials credsWithUsername(String username) {
         return new WordPressCredentials(
-                "https://example.com", username, null,
+                "https://example.com", username,
                 "SSH", "203.0.113.5", 22, "deploy", "/var/www/html", "PRIVATE-KEY-PEM", "SHA256:pinned", null);
     }
 
@@ -373,6 +375,26 @@ class WordPressSshOperationsTest {
     }
 
     @Test
+    void createOrUpdatePost_publishScheduledAt指定時はpost_dateとpost_date_gmtの両方を送る() {
+        // `post update`は未指定フィールドを既存投稿の値のまま引き継ぐため、--post_date_gmtだけを
+        // 送ると post_date(サイトのローカル時刻。wp-admin等が表示する値)が更新されずに取り残される
+        // (issue #504)。両方が同じ日時で送られることを確認する。
+        when(executor.exec(any(SshConnectionParams.class), any(), notNull())).thenReturn(ok(""));
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"guid\":\"https://example.com/?p=42\",\"post_status\":\"future\"}"));
+        PostContent scheduled = new PostContent(
+                "Title", "my-slug", "<p>Hello</p>", "future", List.of("5"), List.of("7"), null, null,
+                Instant.parse("2026-12-25T09:00:00Z"));
+
+        operations.createOrUpdatePost(creds(), scheduled, "42");
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), notNull());
+        assertEquals(true, commandCaptor.getValue().contains("--post_date='2026-12-25 09:00:00'"));
+        assertEquals(true, commandCaptor.getValue().contains("--post_date_gmt='2026-12-25 09:00:00'"));
+    }
+
+    @Test
     void createOrUpdatePost_existingPostIdがWordPress側に無ければ新規作成へフォールバックする() {
         // 1回目のisNull()呼び出し = 実在確認(post get)を失敗させ、投稿が消えている状況を再現する。
         when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
@@ -387,6 +409,33 @@ class WordPressSshOperationsTest {
         verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), notNull());
         assertEquals(true, commandCaptor.getValue().contains("post create -"));
         assertEquals(false, commandCaptor.getValue().contains("post update"));
+    }
+
+    @Test
+    void createOrUpdatePost_実在確認が投稿不在と断定できない理由で失敗しても更新コマンドを実行する() {
+        // issue #529: 一時的なSSH/wp-cliの不調など「投稿が実在しない」と断定できない理由で
+        // 実在確認(post get)が失敗した場合にfalse(実在しない)扱いにすると、本来更新すべき
+        // 投稿が新規作成され、同じスラッグの記事が再投稿のたびに重複投稿されてしまう。
+        // 実在しないと断定できない失敗は安全側(実在する)とみなし、post updateを実行すべき。
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(fail("Error: The site is currently being updated."))
+                .thenReturn(ok("{\"guid\":\"https://example.com/?p=42\",\"post_status\":\"draft\"}"));
+        when(executor.exec(any(SshConnectionParams.class), any(), notNull())).thenReturn(ok(""));
+
+        PostResult result = operations.createOrUpdatePost(creds(), postContent(), "42");
+
+        assertEquals("42", result.id());
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), notNull());
+        assertEquals(true, commandCaptor.getValue().contains("post update 42 -"));
+    }
+
+    @Test
+    void postExists_無効な投稿IDの日本語エラーは実在しないと判定する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(fail("Warning: 無効な投稿 ID です。"));
+
+        assertEquals(false, operations.postExists(creds(), "38"));
     }
 
     @Test
@@ -504,6 +553,39 @@ class WordPressSshOperationsTest {
 
         assertThrows(SshOperationException.class,
                 () -> operations.generateAuthCookie(credsWithUsername("admin")));
+    }
+
+    @Test
+    void getLatestPost_wp_evalの結果から参照記事を組み立てる() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"found\":true,\"id\":\"1\",\"link\":\"https://example.com/hello-world/\","
+                        + "\"title\":\"Hello World\",\"content\":\"<p>Hi</p>\"}"));
+
+        com.letsblog.api.cms.ReferencePost referencePost = operations.getLatestPost(creds()).orElseThrow();
+
+        assertEquals("1", referencePost.id());
+        assertEquals("https://example.com/hello-world/", referencePost.link());
+        assertEquals("Hello World", referencePost.title());
+        assertEquals("<p>Hi</p>", referencePost.content());
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getValue().contains("eval"));
+        assertEquals(true, commandCaptor.getValue().contains("get_posts"));
+    }
+
+    @Test
+    void getLatestPost_公開記事が無い場合は空を返す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"found\":false}"));
+
+        assertEquals(true, operations.getLatestPost(creds()).isEmpty());
+    }
+
+    @Test
+    void getLatestPost_wp_eval失敗時は例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("eval error"));
+
+        assertThrows(SshOperationException.class, () -> operations.getLatestPost(creds()));
     }
 
     @Test
@@ -908,5 +990,138 @@ class WordPressSshOperationsTest {
         assertEquals("active", result.byEnvironment().get("test").get(0).status());
         assertEquals("inactive", result.byEnvironment().get("production").get(0).status());
         verify(executor, times(1)).execAll(any(SshConnectionParams.class), any());
+    }
+
+    @Test
+    void exportDatabase_成功時はテーブルプレフィックスを除外指定してdb_exportしダウンロード後に一時ファイルを削除する() {
+        byte[] dump = "-- dump --".getBytes(StandardCharsets.UTF_8);
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("wp_"))
+                .thenReturn(ok(""));
+        when(executor.getFile(any(SshConnectionParams.class), any())).thenReturn(dump);
+
+        WordPressSshOperations.DatabaseExport result = operations.exportDatabase(creds());
+
+        assertEquals("wp_", result.tablePrefix());
+        assertArrayEquals(dump, result.dump());
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("db export"));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("--exclude_tables='wp_users,wp_usermeta'"));
+
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).getFile(any(SshConnectionParams.class), pathCaptor.capture());
+        verify(executor).removeFile(any(SshConnectionParams.class), eq(pathCaptor.getValue()));
+    }
+
+    @Test
+    void exportDatabase_プレフィックス取得に失敗した場合はwp_をデフォルトに使う() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(fail("config not found"))
+                .thenReturn(ok(""));
+        when(executor.getFile(any(SshConnectionParams.class), any())).thenReturn(new byte[0]);
+
+        operations.exportDatabase(creds());
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("--exclude_tables='wp_users,wp_usermeta'"));
+    }
+
+    @Test
+    void exportDatabase_エクスポート失敗時は例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("wp_"))
+                .thenReturn(fail("export failed"));
+
+        assertThrows(SshOperationException.class, () -> operations.exportDatabase(creds()));
+        verify(executor, never()).getFile(any(), any());
+    }
+
+    @Test
+    void exportMedia_uploadsディレクトリが無ければ空バイト列を返しダウンロードしない() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("not found"));
+
+        byte[] result = operations.exportMedia(creds());
+
+        assertArrayEquals(new byte[0], result);
+        verify(executor, never()).getFile(any(), any());
+        verify(executor, never()).removeFile(any(), any());
+    }
+
+    @Test
+    void exportMedia_成功時はuploadsをtarで固めてダウンロード後に一時ファイルを削除する() {
+        byte[] archive = "tar-gz-bytes".getBytes(StandardCharsets.UTF_8);
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok(""))
+                .thenReturn(ok(""));
+        when(executor.getFile(any(SshConnectionParams.class), any())).thenReturn(archive);
+
+        byte[] result = operations.exportMedia(creds());
+
+        assertArrayEquals(archive, result);
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("tar -czf"));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("uploads"));
+
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).getFile(any(SshConnectionParams.class), pathCaptor.capture());
+        verify(executor).removeFile(any(SshConnectionParams.class), eq(pathCaptor.getValue()));
+    }
+
+    @Test
+    void exportMedia_tar失敗時は例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok(""))
+                .thenReturn(fail("tar failed"));
+
+        assertThrows(SshOperationException.class, () -> operations.exportMedia(creds()));
+        verify(executor, never()).getFile(any(), any());
+    }
+
+    @Test
+    void exportThemes_themesディレクトリが無ければ空バイト列を返しダウンロードしない() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("not found"));
+
+        byte[] result = operations.exportThemes(creds());
+
+        assertArrayEquals(new byte[0], result);
+        verify(executor, never()).getFile(any(), any());
+        verify(executor, never()).removeFile(any(), any());
+    }
+
+    @Test
+    void exportThemes_成功時はthemesをtarで固めてダウンロード後に一時ファイルを削除する() {
+        byte[] archive = "themes-tar-gz-bytes".getBytes(StandardCharsets.UTF_8);
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok(""))
+                .thenReturn(ok(""));
+        when(executor.getFile(any(SshConnectionParams.class), any())).thenReturn(archive);
+
+        byte[] result = operations.exportThemes(creds());
+
+        assertArrayEquals(archive, result);
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("tar -czf"));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("themes"));
+
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).getFile(any(SshConnectionParams.class), pathCaptor.capture());
+        verify(executor).removeFile(any(SshConnectionParams.class), eq(pathCaptor.getValue()));
+    }
+
+    @Test
+    void exportThemes_tar失敗時は例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok(""))
+                .thenReturn(fail("tar failed"));
+
+        assertThrows(SshOperationException.class, () -> operations.exportThemes(creds()));
+        verify(executor, never()).getFile(any(), any());
     }
 }

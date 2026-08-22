@@ -73,6 +73,10 @@ public class GeneratedImage {
     @Column(name = "mime_type", nullable = false, length = 100)
     private String mimeType = "image/png";
 
+    /** どの画像生成AIで生成したか(COMFYUI/CHATGPT、issue #531)。 */
+    @Column(nullable = false, length = 20)
+    private String provider = "COMFYUI";
+
     /**
      * 検索・分類用のタグ(issue #281)。JSON配列文字列として保持し、パース/組み立ては
      * 呼び出し側(GeneratedImageController等)で行う(Post.uploadedImagesJsonと同じ方針)。

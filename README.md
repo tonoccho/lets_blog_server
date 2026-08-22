@@ -11,6 +11,7 @@ Docker Composeでまとめて起動する。クライアントはVSCode拡張機
 ## CI/CD & Quality
 
 [![API Tests and Coverage](https://github.com/tonoccho/lets_blog_server/actions/workflows/api-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/api-test.yml)
+[![Log Writer Tests](https://github.com/tonoccho/lets_blog_server/actions/workflows/log-writer-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/log-writer-test.yml)
 [![Frontend Tests](https://github.com/tonoccho/lets_blog_server/actions/workflows/frontend-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/frontend-test.yml)
 [![Extension Build](https://github.com/tonoccho/lets_blog_server/actions/workflows/extension-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/extension-test.yml)
 
@@ -204,7 +205,6 @@ APIの認証にはX-API-Keyヘッダを使用します。APIキーはログイ�
 - [docs/setup.md](docs/setup.md) — 環境変数・起動手順・トラブルシューティングの詳細
 - [spec/phase1/00-overview.md](spec/phase1/00-overview.md) — 全体アーキテクチャ
 - [docs/AI_SERVICE_PROVIDER_RESEARCH.md](docs/AI_SERVICE_PROVIDER_RESEARCH.md) — 外部AIサービス移行の調査・比較
-- [docs/BUFFER_SNS_INTEGRATION.md](docs/BUFFER_SNS_INTEGRATION.md) — Buffer連携によるSNS予約投稿のワークフロー
 - [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) — リリースノート
 
 ## ライセンス

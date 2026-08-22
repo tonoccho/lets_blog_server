@@ -38,6 +38,14 @@ spring:
     multipart:
       max-file-size: 100MB
       max-request-size: 100MB
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+    connection-timeout: 1000ms
+    template:
+      reply-timeout: 1000
 
 app:
   encryption-key: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
@@ -70,5 +78,3 @@ app:
   backup-mysql-database: lets_blog_test
   backup-mysql-user: test_user
   backup-mysql-password: test_pass
-  buffer-api-base-url: http://buffer.test
-  buffer-request-timeout-seconds: 30

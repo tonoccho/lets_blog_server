@@ -66,6 +66,16 @@ spring:
     multipart:
       max-file-size: 100MB
       max-request-size: 100MB
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    # ログ発行(issue #466)はキュー障害時に同期DB書き込みへフォールバックする方針のため、
+    # 接続不可時にリクエストスレッドを長く塞がないよう短めのタイムアウトにする。
+    connection-timeout: 3000ms
+    template:
+      reply-timeout: 3000
 
 app:
   encryption-key: ${APP_ENCRYPTION_KEY:}
@@ -78,9 +88,14 @@ app:
   llm-model: ${LLM_MODEL:gpt-4o-mini}
   llm-available-models: ${LLM_AVAILABLE_MODELS:gpt-4o-mini,gpt-4o,gpt-4.1-mini}
   llm-request-timeout-seconds: ${LLM_REQUEST_TIMEOUT_SECONDS:120}
+  llm-provider: ${LLM_PROVIDER:OPENAI}
+  llm-claude-api-key: ${LLM_CLAUDE_API_KEY:}
+  llm-claude-model: ${LLM_CLAUDE_MODEL:claude-3-5-haiku-20241022}
   comfyui-base-url: ${COMFYUI_BASE_URL:http://localhost:8188}
   comfyui-checkpoint: ${COMFYUI_CHECKPOINT:v1-5-pruned-emaonly.safetensors}
   comfyui-models-path: ${COMFYUI_MODELS_PATH:/app/data/comfyui-models}
+  image-llm-api-key: ${IMAGE_LLM_API_KEY:}
+  image-llm-base-url: ${IMAGE_LLM_BASE_URL:https://api.openai.com/v1}
   brave-search-base-url: ${BRAVE_SEARCH_BASE_URL:https://api.search.brave.com}
   brave-search-api-key: ${BRAVE_SEARCH_API_KEY:}
   google-analytics-data-api-base-url: ${GOOGLE_ANALYTICS_DATA_API_BASE_URL:https://analyticsdata.googleapis.com}
@@ -112,11 +127,9 @@ app:
   default-generated-image-width: ${DEFAULT_GENERATED_IMAGE_WIDTH:1920}
   default-generated-image-height: ${DEFAULT_GENERATED_IMAGE_HEIGHT:1080}
   default-article-image-long-edge-px: ${DEFAULT_ARTICLE_IMAGE_LONG_EDGE_PX:1300}
-  # Buffer連携(issue #379)。有効/無効・アクセストークン・プロファイルID等はプロジェクト単位の設定
-  # (issue #402)のため、APIのベースURL/タイムアウトのみアプリ全体の環境変数として残す。
-  # レガシーREST APIは2027-02-01廃止予定のため、GraphQL APIの単一エンドポイントへ移行済み(issue #411)。
-  buffer-api-base-url: ${BUFFER_API_BASE_URL:https://api.buffer.com}
-  buffer-request-timeout-seconds: ${BUFFER_REQUEST_TIMEOUT_SECONDS:30}
+  default-block-sexual-content: ${DEFAULT_BLOCK_SEXUAL_CONTENT:true}
+  default-block-violent-content: ${DEFAULT_BLOCK_VIOLENT_CONTENT:true}
+  default-block-discriminatory-content: ${DEFAULT_BLOCK_DISCRIMINATORY_CONTENT:true}
 
 resilience4j:
   ratelimiter:

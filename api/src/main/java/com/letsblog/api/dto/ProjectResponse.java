@@ -19,6 +19,9 @@ public record ProjectResponse(
         Integer defaultGeneratedImageWidth,
         Integer defaultGeneratedImageHeight,
         Integer defaultArticleImageLongEdgePx,
+        Boolean blockSexualContent,
+        Boolean blockViolentContent,
+        Boolean blockDiscriminatoryContent,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -39,6 +42,9 @@ public record ProjectResponse(
                 project.getDefaultGeneratedImageWidth(),
                 project.getDefaultGeneratedImageHeight(),
                 project.getDefaultArticleImageLongEdgePx(),
+                project.getBlockSexualContent(),
+                project.getBlockViolentContent(),
+                project.getBlockDiscriminatoryContent(),
                 project.getCreatedAt(),
                 project.getUpdatedAt()
         );

@@ -21,6 +21,17 @@ import * as schemas from './schemas';
 const DEFAULT_TIMEOUT_MS = 120_000;
 
 /**
+ * 記事公開(/api/posts/publish)が保証する最低タイムアウト。画像アップロードや
+ * PlantUML/Draw.ioダイアグラムのレンダリング、SSH経由のwp-cli呼び出しを伴い、既定の
+ * リクエストタイムアウト(120秒)を超えて処理が続くことがある。クライアント側が先に
+ * タイムアウトして中断すると、サーバーの投稿処理自体は完了していても呼び出し元は失敗扱いとなり、
+ * 次回投稿時にwpPostIdが空のまま送られて新規投稿として扱われ、画像・ダイアグラムが
+ * 重複アップロードされる原因になっていた(issue #499)。サーバー側nginxのタイムアウト
+ * (1200秒、issue #497)を下回らないようにする。
+ */
+const PUBLISH_MIN_TIMEOUT_MS = 1_200_000;
+
+/**
  * TLS証明書の検証は既定で有効(allowInsecureTls=false)。
  * 検証を無効化すると中間者攻撃でAPIキーや記事内容を傍受・改竄されうるため、
  * 自己署名証明書のローカル環境へ接続する場合に限り、利用者が明示的に有効化する。
@@ -67,6 +78,11 @@ interface RequestSpec {
    */
   createBody?: () => { body: string | Buffer; headers?: Record<string, string> };
   /**
+   * このリクエストが最低限確保すべきタイムアウト(ミリ秒)。利用者設定(letsBlog.requestTimeoutMs)
+   * より長い場合のみ有効になる下限であり、利用者が明示的により長い値を設定していればそちらを尊重する。
+   */
+  minTimeoutMs?: number;
+  /**
    * 一時的な失敗を再試行してよいか。既定はGETのみ(サーバー状態を変更しないため安全)。
    * タイムアウト後にサーバー側で処理が完了していた場合、投稿や課題の割り当てのような
    * 変更系を再試行すると重複して実行されてしまうため、安全なものだけ明示的に有効化する。
@@ -86,7 +102,7 @@ interface RequestSpec {
 async function request(serverUrl: string, path: string, spec: RequestSpec): Promise<HttpResponse> {
   const url = `${serverUrl}${path}`;
   const method = spec.method ?? 'GET';
-  const timeoutMs = getTimeoutMs();
+  const timeoutMs = Math.max(getTimeoutMs(), spec.minTimeoutMs ?? 0);
 
   return withRetry(
     async () => {
@@ -218,6 +234,7 @@ async function cachedRequestJson<S extends ZodType>(
  */
 import type {
   AcceptStructureResult,
+  AiAskResult,
   AiDraftResult,
   AiImagePromptResult,
   AiImageResult,
@@ -231,6 +248,7 @@ import type {
   ProjectDetail,
   ProjectSite,
   ProjectSummary,
+  ProofreadResult,
   PublishResult,
   RepositoryIssue,
   SiteSummary,
@@ -243,6 +261,7 @@ import type {
 export type {
   Actor,
   AcceptStructureResult,
+  AiAskResult,
   AiDraftResult,
   AiImagePromptResult,
   AiImageResult,
@@ -256,6 +275,7 @@ export type {
   ProjectDetail,
   ProjectSite,
   ProjectSummary,
+  ProofreadResult,
   PublishResult,
   RepositoryIssue,
   SiteSummary,
@@ -293,6 +313,8 @@ export interface AiSectionParams {
   subsectionHeadings?: string[];
   history?: PlanChatMessage[];
   message?: string;
+  /** OLLAMA/OPENAI/CLAUDEのいずれか(任意)。未指定時はサーバー側の既定プロバイダーを使う(issue #530)。 */
+  provider?: string;
 }
 
 /** 画像生成のパラメータ。automatic1111相当の項目をそのまま受け渡す。 */
@@ -349,6 +371,7 @@ export async function publishPost(
   return requestJson(serverUrl, '/api/posts/publish', {
     label: 'publishPost',
     method: 'POST',
+    minTimeoutMs: PUBLISH_MIN_TIMEOUT_MS,
     headers: buildHeaders(apiKey, actor),
     createBody: () => {
       const parts: MultipartPart[] = [
@@ -406,6 +429,37 @@ export async function deletePost(
   });
 }
 
+/**
+ * サイト+スラッグに対応する既存投稿を照会する(issue #505)。
+ * front matterのwp_post_ids(廃止)に頼らず、DB側の情報から既存投稿の有無・WordPress投稿IDを
+ * 取得するために使う。該当する投稿が無い場合(まだそのサイトへ投稿されていない)はundefinedを返す。
+ */
+export async function lookupExistingPost(
+  serverUrl: string,
+  apiKey: string,
+  siteKey: string,
+  slug: string,
+  actor?: Actor
+): Promise<schemas.PostLookupResult | undefined> {
+  try {
+    return await requestJson(
+      serverUrl,
+      `/api/posts/${encodeURIComponent(siteKey)}/by-slug/${encodeURIComponent(slug)}`,
+      {
+        label: 'lookupExistingPost',
+        method: 'GET',
+        headers: buildHeaders(apiKey, actor),
+      },
+      schemas.PostLookupResultSchema
+    );
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
 /** 登録済みサイトの一覧を取得する。 */
 export async function listSites(
   serverUrl: string,
@@ -449,14 +503,37 @@ export async function askAi(
   apiKey: string,
   mode: 'draft' | 'proofread' | 'summarize',
   text: string,
-  actor?: Actor
+  actor?: Actor,
+  provider?: string
 ): Promise<AiDraftResult> {
   return requestJson(serverUrl, '/api/ai/draft', {
     label: 'askAi',
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
-    createBody: jsonBody({ mode, text }),
+    createBody: jsonBody({ mode, text, provider: provider || undefined }),
     // 生成結果を返すだけでサーバー状態を変えないため、再試行して差し支えない。
+    retryable: true,
+  }, schemas.AiGenerationResultSchema);
+}
+
+/**
+ * エディタ右クリックメニュー「Ask AI」からの質問に、Web検索結果を踏まえて回答する(issue #526)。
+ * @param signal 利用者によるキャンセル用。中断時はCancelledErrorが投げられる。
+ */
+export async function askAiSearch(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  question: string,
+  provider?: string,
+  signal?: AbortSignal
+): Promise<AiAskResult> {
+  return requestJson(serverUrl, '/api/ai/ask', {
+    label: 'askAiSearch',
+    signal,
+    method: 'POST',
+    headers: buildHeaders(apiKey, actor),
+    createBody: jsonBody({ question, provider: provider || undefined }),
     retryable: true,
   }, schemas.AiGenerationResultSchema);
 }
@@ -482,20 +559,82 @@ export async function generateSection(
   }, schemas.AiGenerationResultSchema);
 }
 
-/** 本文からカテゴリ/タグの候補を提案させる。 */
+/**
+ * 本文からカテゴリ/タグの候補を提案させる。projectId指定時は、そのプロジェクトのマスター環境サイトに
+ * 既存のタグを優先して提案する(issue #525)。
+ */
 export async function suggestTags(
   serverUrl: string,
   apiKey: string,
   text: string,
-  actor?: Actor
+  actor?: Actor,
+  provider?: string,
+  projectId?: number
 ): Promise<AiTagsResult> {
   return requestJson(serverUrl, '/api/ai/tags', {
     label: 'suggestTags',
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
-    createBody: jsonBody({ text }),
+    createBody: jsonBody({ text, provider: provider || undefined, projectId }),
     retryable: true,
   }, schemas.AiTagsResultSchema);
+}
+
+/**
+ * 本文の校正チェックをAIへ依頼する。エディタでの波線表示に使うため、超過した指摘によって
+ * 誤って古い結果を表示し続けないよう、呼び出し元でsignalによるキャンセルを行える。
+ * @param signal 再入力等で古いリクエストを打ち切るためのキャンセル用(issue #523)。
+ */
+export async function proofreadContent(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  text: string,
+  provider?: string,
+  signal?: AbortSignal
+): Promise<ProofreadResult> {
+  return requestJson(serverUrl, '/api/ai/proofread', {
+    label: 'proofreadContent',
+    signal,
+    method: 'POST',
+    headers: buildHeaders(apiKey, actor),
+    createBody: jsonBody({ text, provider: provider || undefined }),
+    retryable: true,
+  }, schemas.ProofreadResultSchema);
+}
+
+/** プロジェクトのマスター環境サイトに既に存在するタグ名一覧。サイト未紐付け等の場合は空配列(issue #525)。 */
+export async function listExistingTags(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  projectId: number
+): Promise<string[]> {
+  return cachedRequestJson(
+    `project:${projectId}:tags`,
+    serverUrl,
+    `/api/projects/${projectId}/article-plan/tags`,
+    { label: 'listExistingTags', headers: buildHeaders(apiKey, actor) },
+    schemas.TagNameListSchema
+  );
+}
+
+/**
+ * 本文中に埋め込めるカスタムタグ一覧(プロジェクト固有 + グローバル)。本文でのコード補完に使う(issue #522)。
+ */
+export async function listCustomTags(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  projectId: number
+): Promise<schemas.CustomTagSummary[]> {
+  return cachedRequestJson(
+    `project:${projectId}:custom-tags`,
+    serverUrl,
+    `/api/custom-tags?projectId=${projectId}`,
+    { label: 'listCustomTags', headers: buildHeaders(apiKey, actor) },
+    schemas.CustomTagSummaryListSchema
+  );
 }
 
 /**
@@ -636,14 +775,15 @@ export async function generateImagePrompt(
   projectId: number,
   history: PlanChatMessage[],
   message: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  provider?: string
 ): Promise<AiImagePromptResult> {
   return requestJson(serverUrl, `/api/projects/${projectId}/ai/generate-image-prompt`, {
     label: 'generateImagePrompt',
     signal,
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
-    createBody: jsonBody({ history, message }),
+    createBody: jsonBody({ history, message, provider: provider || undefined }),
     retryable: true,
   }, schemas.AiImagePromptResultSchema);
 }

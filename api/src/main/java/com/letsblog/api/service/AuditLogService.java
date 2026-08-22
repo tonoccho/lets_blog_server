@@ -1,9 +1,13 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.config.RabbitMqConfig;
 import com.letsblog.api.domain.AuditLog;
 import com.letsblog.api.domain.AuditLogAction;
+import com.letsblog.api.messaging.AuditLogMessage;
 import com.letsblog.api.repository.AuditLogRepository;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.AmqpException;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -21,30 +25,43 @@ public class AuditLogService {
     private static final int RETENTION_DAYS = 365;
 
     private final AuditLogRepository auditLogRepository;
+    private final RabbitTemplate rabbitTemplate;
 
-    public AuditLogService(AuditLogRepository auditLogRepository) {
+    public AuditLogService(AuditLogRepository auditLogRepository, RabbitTemplate rabbitTemplate) {
         this.auditLogRepository = auditLogRepository;
+        this.rabbitTemplate = rabbitTemplate;
     }
 
     /**
-     * REQUIRES_NEWで独立した書き込みトランザクションとして実行する。
-     * 呼び出し元(@AuditLogが付いたメソッド)が読み取り専用トランザクション中でも
-     * 監査ログの記録自体は書き込みとして成功させる必要があるため。
+     * ログメッセージキューイング(issue #466)。キューへの発行を優先し、記録自体はlog-writer
+     * サービスに委譲する。発行に失敗した場合のみ、ログ欠落を防ぐためこのAPIサーバー自身が
+     * 従来通り同期的にDBへ書き込む(REQUIRES_NEWで独立した書き込みトランザクションとして実行し、
+     * 呼び出し元(@AuditLogが付いたメソッド)が読み取り専用トランザクション中でも記録自体は
+     * 書き込みとして成功させる)。
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void log(Long userId, AuditLogAction action, String resourceType,
                      Long resourceId, String changes, String remoteIp, String userAgent) {
-        AuditLog auditLog = new AuditLog();
-        auditLog.setUserId(userId);
-        auditLog.setAction(action);
-        auditLog.setResourceType(resourceType);
-        auditLog.setResourceId(resourceId);
-        auditLog.setChanges(changes);
-        auditLog.setRemoteIp(remoteIp);
-        auditLog.setUserAgent(userAgent);
+        AuditLogMessage message = new AuditLogMessage(
+                userId, action.name(), resourceType, resourceId, changes, remoteIp, userAgent,
+                LocalDateTime.now().toString());
 
-        auditLogRepository.save(auditLog);
-        log.info("Audit log recorded: action={}, userId={}, resource={}/{}", action, userId, resourceType, resourceId);
+        try {
+            rabbitTemplate.convertAndSend(RabbitMqConfig.LOG_EXCHANGE, RabbitMqConfig.AUDIT_LOG_ROUTING_KEY, message);
+            log.info("Audit log published to queue: action={}, userId={}, resource={}/{}",
+                    action, userId, resourceType, resourceId);
+        } catch (AmqpException e) {
+            log.warn("監査ログのキュー発行に失敗したため、同期DB書き込みへフォールバックします", e);
+            AuditLog auditLog = new AuditLog();
+            auditLog.setUserId(userId);
+            auditLog.setAction(action);
+            auditLog.setResourceType(resourceType);
+            auditLog.setResourceId(resourceId);
+            auditLog.setChanges(changes);
+            auditLog.setRemoteIp(remoteIp);
+            auditLog.setUserAgent(userAgent);
+            auditLogRepository.save(auditLog);
+        }
     }
 
     @Transactional(readOnly = true)

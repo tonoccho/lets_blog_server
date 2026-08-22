@@ -1,34 +1,19 @@
 package com.letsblog.api.cms;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.letsblog.api.cms.agent.WordPressAgentOperations;
 import com.letsblog.api.cms.ssh.WordPressSshOperations;
-import com.letsblog.api.config.LegacyJacksonRestClientConfig;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.ResourceAccessException;
-import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientResponseException;
 
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
- * WordPress REST API(wp-json/wp/v2)を利用したCmsAdapter実装。
- * 認証はサイトごとの Basic認証(ユーザー名 + アプリケーションパスワード)を使う。
+ * WordPress向けCmsAdapter実装。SSH(wp-cli)または自動構築(managed)サイトのプロビジョニングエージェント
+ * 経由のいずれかのトランスポートで操作する。
  */
 @Component
 @Slf4j
@@ -37,15 +22,12 @@ public class WordPressAdapter implements CmsAdapter {
     private static final String DEFAULT_CATEGORY_NAME = "Uncategorized";
     private static final String DEFAULT_TAG_NAME = "Let's Blog";
 
-    private final RestClient.Builder restClientBuilder;
     private final WordPressSshOperations sshOperations;
     private final WordPressAgentOperations agentOperations;
     private final WordPressBulkManagementClient bulkManagementClient;
 
-    public WordPressAdapter(RestClient.Builder restClientBuilder, WordPressSshOperations sshOperations,
+    public WordPressAdapter(WordPressSshOperations sshOperations,
             WordPressAgentOperations agentOperations, WordPressBulkManagementClient bulkManagementClient) {
-        LegacyJacksonRestClientConfig.preferJackson2(restClientBuilder);
-        this.restClientBuilder = restClientBuilder;
         this.sshOperations = sshOperations;
         this.agentOperations = agentOperations;
         this.bulkManagementClient = bulkManagementClient;
@@ -65,63 +47,7 @@ public class WordPressAdapter implements CmsAdapter {
         if (creds.isAgent()) {
             return agentOperations.createOrUpdatePost(creds, content, existingPostId);
         }
-        RestClient client = buildClient(creds);
-
-        ObjectNode body = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
-        body.put("title", content.title());
-        body.put("content", content.htmlContent());
-        body.put("status", content.status());
-        if (content.slug() != null && !content.slug().isBlank()) {
-            body.put("slug", content.slug());
-        }
-        if (content.categoryIds() != null) {
-            // 空リストも明示的に送る(frontmatterでカテゴリを全て外した変更を反映するため。issue #467)。
-            // フィールド自体を省略するとWordPress側は「変更なし」と解釈し、既存のカテゴリが残ってしまう。
-            ArrayNode categories = body.putArray("categories");
-            content.categoryIds().forEach(id -> categories.add(Integer.parseInt(id)));
-        }
-        if (content.tagIds() != null) {
-            // 同上(issue #467)。空リストでもタグをクリアする意図として送る。
-            ArrayNode tags = body.putArray("tags");
-            content.tagIds().forEach(id -> tags.add(Integer.parseInt(id)));
-        }
-        if (content.featuredMediaId() != null) {
-            body.put("featured_media", Long.parseLong(content.featuredMediaId()));
-        } else {
-            log.info("REST投稿リクエストにfeatured_mediaを含めません(content.featuredMediaId()=null)");
-        }
-        if (content.authorId() != null) {
-            body.put("author", Long.parseLong(content.authorId()));
-        }
-        if (content.publishScheduledAt() != null) {
-            // WordPressはstatus=futureとdate_gmtの組で予約投稿を扱う。
-            // date_gmtはタイムゾーン指定子を含まないUTCのローカル日時形式で渡す。
-            body.put("date_gmt", DateTimeFormatter.ISO_LOCAL_DATE_TIME
-                    .format(content.publishScheduledAt().atOffset(ZoneOffset.UTC)));
-        }
-
-        String path = existingPostId == null ? "/wp-json/wp/v2/posts" : "/wp-json/wp/v2/posts/" + existingPostId;
-        log.info("REST投稿リクエスト: path={}, featured_media={}", path, content.featuredMediaId());
-
-        try {
-            JsonNode response = client.post()
-                    .uri(path)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(body)
-                    .retrieve()
-                    .body(JsonNode.class);
-
-            log.info("REST投稿レスポンス: id={}, status={}, featured_media={}",
-                    response.get("id").asText(), response.get("status").asText(),
-                    response.has("featured_media") ? response.get("featured_media").asText() : null);
-            return new PostResult(
-                    response.get("id").asText(),
-                    response.get("link").asText(),
-                    response.get("status").asText()
-            );
-        } catch (RestClientResponseException e) {
-            throw new CmsApiException("WordPress投稿の作成/更新に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
-        }
+        throw unsupportedTransport(creds);
     }
 
     @Override
@@ -133,17 +59,7 @@ public class WordPressAdapter implements CmsAdapter {
         if (creds.isAgent()) {
             return agentOperations.postExists(creds, postId);
         }
-        RestClient client = buildClient(creds);
-        try {
-            client.get().uri("/wp-json/wp/v2/posts/" + postId).retrieve().toBodilessEntity();
-            return true;
-        } catch (RestClientResponseException e) {
-            if (e.getStatusCode().value() == 404) {
-                return false;
-            }
-            log.warn("投稿の実在確認に失敗しました (postId={}): {} {}", postId, e.getStatusCode(), e.getMessage());
-            return true;
-        }
+        throw unsupportedTransport(creds);
     }
 
     @Override
@@ -157,17 +73,7 @@ public class WordPressAdapter implements CmsAdapter {
         if (creds.isAgent()) {
             return agentOperations.postExists(creds, mediaId);
         }
-        RestClient client = buildClient(creds);
-        try {
-            client.get().uri("/wp-json/wp/v2/media/" + mediaId).retrieve().toBodilessEntity();
-            return true;
-        } catch (RestClientResponseException e) {
-            if (e.getStatusCode().value() == 404) {
-                return false;
-            }
-            log.warn("メディアの実在確認に失敗しました (mediaId={}): {} {}", mediaId, e.getStatusCode(), e.getMessage());
-            return true;
-        }
+        throw unsupportedTransport(creds);
     }
 
     @Override
@@ -179,21 +85,7 @@ public class WordPressAdapter implements CmsAdapter {
         if (creds.isAgent()) {
             return agentOperations.uploadMedia(creds, filename, contentType, data);
         }
-        RestClient client = buildClient(creds);
-
-        try {
-            JsonNode response = client.post()
-                    .uri("/wp-json/wp/v2/media")
-                    .contentType(MediaType.parseMediaType(contentType))
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
-                    .body(data)
-                    .retrieve()
-                    .body(JsonNode.class);
-
-            return new MediaUploadResult(response.get("id").asText(), response.get("source_url").asText());
-        } catch (RestClientResponseException e) {
-            throw new CmsApiException("WordPressメディアのアップロードに失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
-        }
+        throw unsupportedTransport(creds);
     }
 
     @Override
@@ -205,7 +97,7 @@ public class WordPressAdapter implements CmsAdapter {
         if (creds.isAgent()) {
             return agentOperations.resolveCategories(creds, names);
         }
-        return resolveTerms(creds, "/wp-json/wp/v2/categories", names);
+        throw unsupportedTransport(creds);
     }
 
     @Override
@@ -217,51 +109,7 @@ public class WordPressAdapter implements CmsAdapter {
         if (creds.isAgent()) {
             return agentOperations.resolveTags(creds, names);
         }
-        return resolveTerms(creds, "/wp-json/wp/v2/tags", names);
-    }
-
-    private List<String> resolveTerms(CmsCredentials.WordPressCredentials credentials, String path, List<String> names) {
-        if (names == null || names.isEmpty()) {
-            return List.of();
-        }
-        RestClient client = buildClient(credentials);
-        List<String> ids = new ArrayList<>();
-
-        for (String name : names) {
-            ids.add(findOrCreateTerm(client, path, name));
-        }
-        return ids;
-    }
-
-    private String findOrCreateTerm(RestClient client, String path, String name) {
-        try {
-            JsonNode searchResult = client.get()
-                    .uri(uriBuilder -> uriBuilder.path(path).queryParam("search", name).build())
-                    .retrieve()
-                    .body(JsonNode.class);
-
-            if (searchResult != null && searchResult.isArray()) {
-                for (JsonNode term : searchResult) {
-                    if (term.get("name").asText().equalsIgnoreCase(name)) {
-                        return term.get("id").asText();
-                    }
-                }
-            }
-
-            ObjectNode createBody = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
-            createBody.put("name", name);
-
-            JsonNode created = client.post()
-                    .uri(path)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(createBody)
-                    .retrieve()
-                    .body(JsonNode.class);
-
-            return created.get("id").asText();
-        } catch (RestClientResponseException e) {
-            throw new CmsApiException("カテゴリ/タグ '" + name + "' の解決に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
-        }
+        throw unsupportedTransport(creds);
     }
 
     @Override
@@ -283,113 +131,7 @@ public class WordPressAdapter implements CmsAdapter {
         if (creds.isAgent()) {
             return agentOperations.provisionAuthor(creds, request);
         }
-        RestClient client = buildClient(creds);
-        String email = request.email();
-
-        String existingId = findExistingAuthorId(client, email);
-        if (existingId != null) {
-            return updateAuthor(client, existingId, request);
-        }
-
-        ObjectNode body = profileBody(request);
-        body.put("username", email.substring(0, email.indexOf('@')));
-        body.put("email", email);
-        // このパスワードはLet's Blog側では保持・利用しない(WordPress側にauthorレコードを
-        // 作成するために必須の項目のため、ランダム値を生成して使い捨てる)
-        body.put("password", generateRandomPassword());
-
-        try {
-            JsonNode created = client.post()
-                    .uri("/wp-json/wp/v2/users")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(body)
-                    .retrieve()
-                    .body(JsonNode.class);
-            return created.get("id").asText();
-        } catch (RestClientResponseException e) {
-            if (e.getStatusCode().value() == 409) {
-                String fallbackId = findExistingAuthorId(client, email);
-                if (fallbackId != null) {
-                    return updateAuthor(client, fallbackId, request);
-                }
-            }
-            throw new CmsApiException(authorErrorMessage("作成", e), e);
-        }
-    }
-
-    private String updateAuthor(RestClient client, String userId, AuthorProvisioningRequest request) {
-        ObjectNode body = profileBody(request);
-        try {
-            JsonNode updated = client.put()
-                    .uri("/wp-json/wp/v2/users/" + userId)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(body)
-                    .retrieve()
-                    .body(JsonNode.class);
-            return updated.get("id").asText();
-        } catch (RestClientResponseException e) {
-            throw new CmsApiException(authorErrorMessage("更新", e), e);
-        }
-    }
-
-    /**
-     * 403 Forbiddenの場合、登録済み認証情報の管理者権限不足が原因である可能性が高いため、
-     * 生のWordPressエラーの前に分かりやすい案内文を付加する。
-     */
-    private String authorErrorMessage(String action, RestClientResponseException e) {
-        String detail = e.getStatusCode() + " " + e.getResponseBodyAsString();
-        if (e.getStatusCode().value() == 403) {
-            return "WordPress著者の" + action + "に失敗しました: サイトに登録されている認証情報のWordPress"
-                    + "アカウントにユーザー作成・更新権限(Administrator)がない可能性があります。"
-                    + "サイト管理画面の編集機能で、管理者権限を持つアカウントのアプリケーションパスワードに"
-                    + "更新してください。(詳細: " + detail + ")";
-        }
-        return "WordPress著者の" + action + "に失敗しました: " + detail;
-    }
-
-    private ObjectNode profileBody(AuthorProvisioningRequest request) {
-        ObjectNode body = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
-        if (request.firstName() != null) {
-            body.put("first_name", request.firstName());
-        }
-        if (request.lastName() != null) {
-            body.put("last_name", request.lastName());
-        }
-        if (request.displayName() != null) {
-            body.put("name", request.displayName());
-        }
-        if (request.websiteUrl() != null) {
-            body.put("url", request.websiteUrl());
-        }
-        if (request.bio() != null) {
-            body.put("description", request.bio());
-        }
-        // localeはWordPress側にインストールされている言語パックのenumでしか許容されず、
-        // 未インストールの言語(既定インストールのja_JPなど)を送ると400エラーになるため送信しない。
-        ArrayNode roles = body.putArray("roles");
-        roles.add(request.wpRole() != null ? request.wpRole() : "author");
-        return body;
-    }
-
-    private String findExistingAuthorId(RestClient client, String email) {
-        try {
-            JsonNode searchResult = client.get()
-                    .uri(uriBuilder -> uriBuilder.path("/wp-json/wp/v2/users").queryParam("search", email).build())
-                    .retrieve()
-                    .body(JsonNode.class);
-            if (searchResult != null && searchResult.isArray() && !searchResult.isEmpty()) {
-                return searchResult.get(0).get("id").asText();
-            }
-        } catch (RestClientResponseException | ResourceAccessException e) {
-            // 検索に失敗した場合は新規作成を試みる(呼び出し元でハンドリング)
-        }
-        return null;
-    }
-
-    private String generateRandomPassword() {
-        byte[] bytes = new byte[24];
-        new java.security.SecureRandom().nextBytes(bytes);
-        return Base64.getEncoder().encodeToString(bytes);
+        throw unsupportedTransport(creds);
     }
 
     @Override
@@ -401,19 +143,7 @@ public class WordPressAdapter implements CmsAdapter {
         if (creds.isAgent()) {
             return agentOperations.testConnection(creds);
         }
-        RestClient client = buildClient(creds);
-        try {
-            client.get().uri("/wp-json/wp/v2/users/me").retrieve().toBodilessEntity();
-            return ConnectionCheckResult.success();
-        } catch (RestClientResponseException e) {
-            log.warn("WordPress疎通確認に失敗しました (baseUrl={}, username={}): {} {}",
-                    creds.baseUrl(), creds.username(), e.getStatusCode(), e.getResponseBodyAsString());
-            return ConnectionCheckResult.failure("HTTP " + e.getStatusCode().value() + " " + e.getStatusText());
-        } catch (ResourceAccessException e) {
-            log.warn("WordPress疎通確認に失敗しました (baseUrl={}, username={}): {}",
-                    creds.baseUrl(), creds.username(), e.getMessage());
-            return ConnectionCheckResult.failure(e.getMessage());
-        }
+        throw unsupportedTransport(creds);
     }
 
     @Override
@@ -425,23 +155,7 @@ public class WordPressAdapter implements CmsAdapter {
         if (creds.isAgent()) {
             return agentOperations.hasAuthorProvisioningCapability(creds);
         }
-        RestClient client = buildClient(creds);
-        try {
-            JsonNode me = client.get()
-                    .uri("/wp-json/wp/v2/users/me?context=edit")
-                    .retrieve()
-                    .body(JsonNode.class);
-            JsonNode capabilities = me != null ? me.get("capabilities") : null;
-            return capabilities != null && capabilities.path("create_users").asBoolean(false);
-        } catch (RestClientResponseException e) {
-            log.warn("WordPress管理者権限確認に失敗しました (baseUrl={}, username={}): {} {}",
-                    creds.baseUrl(), creds.username(), e.getStatusCode(), e.getResponseBodyAsString());
-            return false;
-        } catch (ResourceAccessException e) {
-            log.warn("WordPress管理者権限確認に失敗しました (baseUrl={}, username={}): {}",
-                    creds.baseUrl(), creds.username(), e.getMessage());
-            return false;
-        }
+        throw unsupportedTransport(creds);
     }
 
     @Override
@@ -455,13 +169,7 @@ public class WordPressAdapter implements CmsAdapter {
             agentOperations.deletePost(creds, postId);
             return;
         }
-        RestClient client = buildClient(creds);
-        try {
-            // forceパラメータなし = ゴミ箱対応の投稿タイプは既定でゴミ箱へ移動される
-            client.delete().uri("/wp-json/wp/v2/posts/" + postId).retrieve().toBodilessEntity();
-        } catch (RestClientResponseException e) {
-            throw new CmsApiException("WordPress投稿の削除に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
-        }
+        throw unsupportedTransport(creds);
     }
 
     @Override
@@ -473,9 +181,7 @@ public class WordPressAdapter implements CmsAdapter {
         if (creds.isSsh()) {
             return sshOperations.generateAuthCookie(creds);
         }
-        // REST(Application Password)経路はサーバー側コード実行手段を持たないため、
-        // 認証Cookieを生成できない(既定のUnsupportedOperationExceptionへ委譲)。
-        return CmsAdapter.super.generateAuthCookie(credentials);
+        throw unsupportedTransport(creds);
     }
 
     @Override
@@ -487,8 +193,7 @@ public class WordPressAdapter implements CmsAdapter {
         if (creds.isAgent()) {
             return agentOperations.findAuthorIdByEmail(creds, email);
         }
-        RestClient client = buildClient(creds);
-        return Optional.ofNullable(findExistingAuthorId(client, email));
+        throw unsupportedTransport(creds);
     }
 
     @Override
@@ -505,20 +210,30 @@ public class WordPressAdapter implements CmsAdapter {
                         .map(WordPressBulkManagementClient.CategoryInfo::name)
                         .toList();
             }
-            RestClient client = buildClient(creds);
-            JsonNode response = client.get()
-                    .uri(uriBuilder -> uriBuilder.path("/wp-json/wp/v2/categories").queryParam("per_page", 100).build())
-                    .retrieve()
-                    .body(JsonNode.class);
-            List<String> names = new ArrayList<>();
-            if (response != null) {
-                for (JsonNode item : response) {
-                    names.add(item.path("name").asText(""));
-                }
-            }
-            return names;
+            throw unsupportedTransport(creds);
         } catch (RuntimeException e) {
             log.warn("カテゴリ一覧の取得に失敗しました: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    @Override
+    public List<String> listTagNames(CmsCredentials credentials) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        try {
+            if (creds.isSsh()) {
+                return sshOperations.listTags(creds).stream()
+                        .map(WordPressSshOperations.CategoryInfo::name)
+                        .toList();
+            }
+            if (creds.isAgent()) {
+                return bulkManagementClient.listTags(creds.wpSlug()).stream()
+                        .map(WordPressBulkManagementClient.CategoryInfo::name)
+                        .toList();
+            }
+            throw unsupportedTransport(creds);
+        } catch (RuntimeException e) {
+            log.warn("タグ一覧の取得に失敗しました: {}", e.getMessage());
             return List.of();
         }
     }
@@ -546,24 +261,7 @@ public class WordPressAdapter implements CmsAdapter {
                         .map(c -> new CategoryOption(c.name(), c.parentSlug() != null ? nameBySlug.get(c.parentSlug()) : null))
                         .toList();
             }
-            RestClient client = buildClient(creds);
-            JsonNode response = client.get()
-                    .uri(uriBuilder -> uriBuilder.path("/wp-json/wp/v2/categories").queryParam("per_page", 100).build())
-                    .retrieve()
-                    .body(JsonNode.class);
-            List<CategoryOption> options = new ArrayList<>();
-            if (response != null) {
-                Map<String, String> nameById = new HashMap<>();
-                for (JsonNode item : response) {
-                    nameById.put(item.path("id").asText(), item.path("name").asText(""));
-                }
-                for (JsonNode item : response) {
-                    String parentId = item.path("parent").asText("0");
-                    String parentName = !"0".equals(parentId) ? nameById.get(parentId) : null;
-                    options.add(new CategoryOption(item.path("name").asText(""), parentName));
-                }
-            }
-            return options;
+            throw unsupportedTransport(creds);
         } catch (RuntimeException e) {
             log.warn("カテゴリ一覧(親子関係付き)の取得に失敗しました: {}", e.getMessage());
             return List.of();
@@ -579,47 +277,7 @@ public class WordPressAdapter implements CmsAdapter {
         if (creds.isAgent()) {
             return agentOperations.listPosts(creds, postType);
         }
-        RestClient client = buildClient(creds);
-        String path = "page".equals(postType) ? "/wp-json/wp/v2/pages" : "/wp-json/wp/v2/posts";
-        List<CmsPostSummary> results = new ArrayList<>();
-        int page = 1;
-        while (true) {
-            int currentPage = page;
-            JsonNode response;
-            try {
-                response = client.get()
-                        .uri(uriBuilder -> uriBuilder.path(path)
-                                .queryParam("per_page", 100)
-                                .queryParam("page", currentPage)
-                                .queryParam("status", "publish,future,draft,pending,private")
-                                .queryParam("context", "edit")
-                                .build())
-                        .retrieve()
-                        .body(JsonNode.class);
-            } catch (RestClientResponseException e) {
-                if (e.getStatusCode().value() == 400) {
-                    break;
-                }
-                throw new CmsApiException(
-                        "WordPress投稿/ページ一覧の取得に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
-            }
-            if (response == null || !response.isArray() || response.isEmpty()) {
-                break;
-            }
-            for (JsonNode item : response) {
-                results.add(new CmsPostSummary(
-                        item.path("id").asText(),
-                        item.path("title").path("rendered").asText(""),
-                        item.path("slug").asText(""),
-                        item.path("status").asText(""),
-                        postType));
-            }
-            if (response.size() < 100) {
-                break;
-            }
-            page++;
-        }
-        return results;
+        throw unsupportedTransport(creds);
     }
 
     @Override
@@ -633,33 +291,50 @@ public class WordPressAdapter implements CmsAdapter {
             agentOperations.updatePostStatus(creds, postId, status);
             return;
         }
-        RestClient client = buildClient(creds);
-        String path = ("page".equals(postType) ? "/wp-json/wp/v2/pages/" : "/wp-json/wp/v2/posts/") + postId;
-        ObjectNode body = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
-        body.put("status", status);
-        try {
-            client.post().uri(path).contentType(MediaType.APPLICATION_JSON).body(body).retrieve().toBodilessEntity();
-        } catch (RestClientResponseException e) {
-            throw new CmsApiException(
-                    "WordPress投稿/ページのステータス変更に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
-        }
+        throw unsupportedTransport(creds);
     }
 
     @Override
     public void deletePost(CmsCredentials credentials, String postId, String postType) {
+        deletePost(credentials, postId);
+    }
+
+    @Override
+    public List<CmsMediaSummary> listMedia(CmsCredentials credentials) {
         CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
-        if (creds.isSsh() || creds.isAgent()) {
-            deletePost(credentials, postId);
+        if (creds.isSsh()) {
+            return sshOperations.listMedia(creds);
+        }
+        if (creds.isAgent()) {
+            return agentOperations.listMedia(creds);
+        }
+        throw unsupportedTransport(creds);
+    }
+
+    @Override
+    public CmsMediaReferenceScan scanMediaReferences(CmsCredentials credentials) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.scanMediaReferences(creds);
+        }
+        if (creds.isAgent()) {
+            return agentOperations.scanMediaReferences(creds);
+        }
+        throw unsupportedTransport(creds);
+    }
+
+    @Override
+    public void deleteMedia(CmsCredentials credentials, String mediaId) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            sshOperations.deleteMedia(creds, mediaId);
             return;
         }
-        RestClient client = buildClient(creds);
-        String path = ("page".equals(postType) ? "/wp-json/wp/v2/pages/" : "/wp-json/wp/v2/posts/") + postId;
-        try {
-            client.delete().uri(path).retrieve().toBodilessEntity();
-        } catch (RestClientResponseException e) {
-            throw new CmsApiException(
-                    "WordPress投稿/ページの削除に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+        if (creds.isAgent()) {
+            agentOperations.deleteMedia(creds, mediaId);
+            return;
         }
+        throw unsupportedTransport(creds);
     }
 
     @Override
@@ -671,21 +346,7 @@ public class WordPressAdapter implements CmsAdapter {
         return sshOperations.installWpCli(creds);
     }
 
-    /**
-     * デフォルトのJDK HttpClientが送るUser-Agent(例: "Java-http-client/21")やAcceptヘッダ未指定は、
-     * 一部レンタルサーバーのMod_Security(WAF)に「406 Not Acceptable」でブロックされることがあるため、
-     * ブラウザ相当のUser-AgentとAcceptヘッダを明示的に付与する。
-     */
-    private RestClient buildClient(CmsCredentials.WordPressCredentials credentials) {
-        String token = Base64.getEncoder().encodeToString(
-                (credentials.username() + ":" + credentials.appPassword()).getBytes(StandardCharsets.UTF_8));
-
-        return restClientBuilder.clone()
-                .baseUrl(credentials.baseUrl())
-                .defaultHeader(HttpHeaders.AUTHORIZATION, "Basic " + token)
-                .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
-                .defaultHeader(HttpHeaders.USER_AGENT,
-                        "Mozilla/5.0 (compatible; LetsBlogBulkManagement/1.0; +https://letsblog.local)")
-                .build();
+    private IllegalStateException unsupportedTransport(CmsCredentials.WordPressCredentials creds) {
+        return new IllegalStateException("サポートされていないWordPress接続方式です(transport=" + creds.transport() + ")");
     }
 }

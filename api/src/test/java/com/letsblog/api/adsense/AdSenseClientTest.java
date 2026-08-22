@@ -96,12 +96,33 @@ class AdSenseClientTest {
                 .andRespond(withSuccess(
                         "{\"totals\":{\"cells\":[{\"value\":\"12.34\"},{\"value\":\"100\"},{\"value\":\"5000\"}]}}",
                         MediaType.APPLICATION_JSON));
+        server.expect(requestTo(DATA_API_BASE_URL
+                        + "/v2/accounts/pub-123/reports:generate?dateRange=LAST_30_DAYS&dimensions=DATE"
+                        + "&metrics=ESTIMATED_EARNINGS&metrics=CLICKS&metrics=IMPRESSIONS"))
+                .andExpect(method(GET))
+                .andRespond(withSuccess(
+                        "{\"rows\":[{\"cells\":[{\"value\":\"2024-01-01\"},{\"value\":\"1.23\"},"
+                                + "{\"value\":\"10\"},{\"value\":\"500\"}]}]}",
+                        MediaType.APPLICATION_JSON));
+        server.expect(requestTo(DATA_API_BASE_URL
+                        + "/v2/accounts/pub-123/reports:generate?dateRange=LAST_30_DAYS&dimensions=PLATFORM_TYPE_NAME"
+                        + "&metrics=ESTIMATED_EARNINGS&metrics=CLICKS&metrics=IMPRESSIONS"))
+                .andExpect(method(GET))
+                .andRespond(withSuccess(
+                        "{\"rows\":[{\"cells\":[{\"value\":\"Desktop\"},{\"value\":\"12.34\"},"
+                                + "{\"value\":\"100\"},{\"value\":\"5000\"}]}]}",
+                        MediaType.APPLICATION_JSON));
 
         AdSenseReport report = client.fetchReport("access-abc", "pub-123", "LAST_30_DAYS");
 
         assertEquals("12.34", report.estimatedEarnings());
         assertEquals(100, report.clicks());
         assertEquals(5000, report.impressions());
+        assertEquals(1, report.dailyDataPoints().size());
+        assertEquals("2024-01-01", report.dailyDataPoints().get(0).date());
+        assertEquals("1.23", report.dailyDataPoints().get(0).estimatedEarnings());
+        assertEquals(1, report.platformBreakdown().size());
+        assertEquals("Desktop", report.platformBreakdown().get(0).platform());
     }
 
     @Test
@@ -111,12 +132,24 @@ class AdSenseClientTest {
                         + "&metrics=ESTIMATED_EARNINGS&metrics=CLICKS&metrics=IMPRESSIONS"))
                 .andExpect(method(GET))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(DATA_API_BASE_URL
+                        + "/v2/accounts/pub-123/reports:generate?dateRange=LAST_30_DAYS&dimensions=DATE"
+                        + "&metrics=ESTIMATED_EARNINGS&metrics=CLICKS&metrics=IMPRESSIONS"))
+                .andExpect(method(GET))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(DATA_API_BASE_URL
+                        + "/v2/accounts/pub-123/reports:generate?dateRange=LAST_30_DAYS&dimensions=PLATFORM_TYPE_NAME"
+                        + "&metrics=ESTIMATED_EARNINGS&metrics=CLICKS&metrics=IMPRESSIONS"))
+                .andExpect(method(GET))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
         AdSenseReport report = client.fetchReport("access-abc", "pub-123", "LAST_30_DAYS");
 
         assertEquals("0", report.estimatedEarnings());
         assertEquals(0, report.clicks());
         assertEquals(0, report.impressions());
+        assertEquals(0, report.dailyDataPoints().size());
+        assertEquals(0, report.platformBreakdown().size());
     }
 
     @Test

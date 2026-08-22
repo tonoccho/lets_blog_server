@@ -1,0 +1,41 @@
+server:
+  port: 8081
+
+logging:
+  level:
+    root: INFO
+    com.letsblog.logwriter: DEBUG
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+spring:
+  application:
+    name: lets-blog-log-writer
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lets_blog?useSSL=false&serverTimezone=UTC}
+    username: ${SPRING_DATASOURCE_USERNAME:lbs_app}
+    password: ${SPRING_DATASOURCE_PASSWORD:lbs_app}
+  jpa:
+    hibernate:
+      # スキーマの所有権・マイグレーションはapiサーバー側のFlywayにあるため検証しない
+      # (log-writer起動時にapiサーバーのマイグレーション未実行でも起動を妨げないため)。
+      ddl-auto: none
+    open-in-view: false
+  # このアプリケーションはFlywayマイグレーションを持たない(apiサーバー側の履歴を共有する)。
+  flyway:
+    enabled: false
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    listener:
+      simple:
+        # メッセージ処理(DB書き込み)に失敗した場合は自動リトライせず、キューにrequeueして
+        # 別インスタンス/後続の受信で再試行させる(issue #466: 受信側の一時的なDB障害等でも
+        # ログを欠落させない)。
+        default-requeue-rejected: true

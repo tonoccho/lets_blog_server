@@ -3,6 +3,7 @@ package com.letsblog.api.service;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.dto.ProjectResponse;
 import com.letsblog.api.dto.UpdateArticleImageResizeDefaultRequest;
+import com.letsblog.api.dto.UpdateImageContentFilterSettingsRequest;
 import com.letsblog.api.dto.UpdateImageGenerationPromptDefaultsRequest;
 import com.letsblog.api.dto.UpdateImageGenerationSizeDefaultsRequest;
 import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
@@ -43,13 +44,16 @@ class ProjectServiceTest {
     private SiteRepository siteRepository;
 
     @Mock
+    private SiteService siteService;
+
+    @Mock
     private BulkUploadStorageService bulkUploadStorageService;
 
     private ProjectService service() {
         return new ProjectService(
-                projectRepository, siteRepository, bulkUploadStorageService,
+                projectRepository, siteRepository, siteService, bulkUploadStorageService,
                 "low quality, blurry, watermark, text", "high quality, highly detailed, sharp focus, masterpiece",
-                1920, 1080, 1300);
+                1920, 1080, 1300, true, true, true);
     }
 
     private Project buildProject(Long id, String slug) {
@@ -448,6 +452,68 @@ class ProjectServiceTest {
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
 
         assertEquals(800, service.resolveArticleImageLongEdgePx(1L));
+    }
+
+    @Test
+    void updateImageContentFilterSettings_値が正常に保存される() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProjectResponse response = service.updateImageContentFilterSettings(
+                1L, new UpdateImageContentFilterSettingsRequest(false, true, false));
+
+        assertEquals(false, response.blockSexualContent());
+        assertEquals(true, response.blockViolentContent());
+        assertEquals(false, response.blockDiscriminatoryContent());
+    }
+
+    @Test
+    void resolveBlockSexualContent_projectId未指定ならグローバルデフォルトtrueを返す() {
+        ProjectService service = service();
+
+        assertTrue(service.resolveBlockSexualContent(null));
+    }
+
+    @Test
+    void resolveBlockSexualContent_プロジェクト未設定ならグローバルデフォルトtrueを返す() {
+        ProjectService service = service();
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(buildProject(1L, "proj-a")));
+
+        assertTrue(service.resolveBlockSexualContent(1L));
+    }
+
+    @Test
+    void resolveBlockSexualContent_プロジェクト設定済みならその値を返す() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        project.setBlockSexualContent(false);
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        assertFalse(service.resolveBlockSexualContent(1L));
+    }
+
+    @Test
+    void resolveBlockViolentContent_プロジェクト設定済みならその値を返す() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        project.setBlockViolentContent(false);
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        assertFalse(service.resolveBlockViolentContent(1L));
+        assertTrue(service.resolveBlockViolentContent(null));
+    }
+
+    @Test
+    void resolveBlockDiscriminatoryContent_プロジェクト設定済みならその値を返す() {
+        ProjectService service = service();
+        Project project = buildProject(1L, "proj-a");
+        project.setBlockDiscriminatoryContent(false);
+        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+
+        assertFalse(service.resolveBlockDiscriminatoryContent(1L));
+        assertTrue(service.resolveBlockDiscriminatoryContent(null));
     }
 
     @Test

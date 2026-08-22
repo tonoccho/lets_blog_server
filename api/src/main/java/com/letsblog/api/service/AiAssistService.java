@@ -2,25 +2,34 @@ package com.letsblog.api.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.letsblog.api.ai.AiProvider;
+import com.letsblog.api.ai.ChatGptImageClient;
 import com.letsblog.api.ai.ComfyUiClient;
 import com.letsblog.api.ai.ComfyUiGenerationParams;
 import com.letsblog.api.ai.ComfyUiImage;
 import com.letsblog.api.ai.GeneratedImageStorageService;
+import com.letsblog.api.ai.ImageGenerationProvider;
+import com.letsblog.api.ai.ImageProvider;
 import com.letsblog.api.ai.LlmClient;
 import com.letsblog.api.domain.GeneratedImage;
 import com.letsblog.api.domain.GenerationJob;
+import com.letsblog.api.dto.AiAskRequest;
+import com.letsblog.api.dto.AiAskResponse;
 import com.letsblog.api.dto.AiDraftRequest;
 import com.letsblog.api.dto.AiDraftResponse;
 import com.letsblog.api.dto.AiImageBatchResponse;
 import com.letsblog.api.dto.AiImagePromptResponse;
 import com.letsblog.api.dto.AiImageRequest;
 import com.letsblog.api.dto.AiImageResponse;
+import com.letsblog.api.dto.AiProofreadRequest;
+import com.letsblog.api.dto.AiProofreadResponse;
 import com.letsblog.api.dto.AiSectionRequest;
 import com.letsblog.api.dto.AiSectionResponse;
 import com.letsblog.api.dto.AiTagsRequest;
 import com.letsblog.api.dto.PlanChatMessage;
 import com.letsblog.api.dto.AiTagsResponse;
 import com.letsblog.api.dto.ImageGenerationOptionsResponse;
+import com.letsblog.api.dto.ProofreadIssue;
 import com.letsblog.api.repository.GeneratedImageRepository;
 import com.letsblog.api.repository.GenerationJobRepository;
 import org.slf4j.Logger;
@@ -30,6 +39,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
@@ -127,9 +137,42 @@ public class AiAssistService {
             %s
             """;
 
+    /**
+     * issue #523: エディタでのリアルタイム校正チェック用。DRAFT_PROMPT_TEMPLATESの"proofread"
+     * (全文を校正済みの本文に書き換えて返す)とは異なり、指摘一覧をJSON配列で返させ、
+     * エディタ側で該当箇所に波線(赤色)の指摘として表示する。
+     */
+    private static final String PROOFREAD_CHECK_PROMPT_TEMPLATE = """
+            あなたは日本語のプロの校正者です。以下のブログ記事本文を読み、次の観点で問題があれば指摘してください。
+            - typo: 誤字脱字・変換ミス
+            - readability: 読みにくい・分かりにくい表現
+            - unnecessary: 冗長で削ってよい表現
+
+            出力は必ず次のJSON配列の形式のみとし、他の文章は一切含めないでください。問題が無ければ空配列 [] を返してください。
+            originalTextには本文中の該当箇所を、一字一句変えずにそのまま引用してください(位置の特定に使うため)。
+            suggestionには置き換え案を入れてください。直接の置き換え案が無い指摘(readabilityなど)ではnullにしてください。
+
+            [{"type": "typo", "originalText": "本文中の該当箇所", "message": "指摘内容", "suggestion": "置き換え案またはnull"}]
+
+            本文:
+            %s
+            """;
+
+    /** issue #526: エディタ右クリックメニュー「Ask AI」からの質問に、Web検索結果を踏まえて回答する。 */
+    private static final String ASK_PROMPT_TEMPLATE = """
+            あなたはブログ執筆アシスタントです。以下の質問についてWeb検索結果を参考にしながら調査し、
+            日本語で簡潔に要約してください。説明や前置きは不要で、要約文のみをMarkdown形式で出力してください。
+            出典URLは要約文に含めないでください(別途一覧として表示します)。
+
+            質問:
+            %s
+            """;
+
     private final LlmClient llmClient;
     private final LlmModelService llmModelService;
     private final ComfyUiClient comfyUiClient;
+    private final ChatGptImageClient chatGptImageClient;
+    private final ImageModelService imageModelService;
     private final ComfyUiModelService comfyUiModelService;
     private final GeneratedImageStorageService generatedImageStorageService;
     private final GeneratedImageRepository generatedImageRepository;
@@ -137,18 +180,26 @@ public class AiAssistService {
     private final WebSearchService webSearchService;
     private final ObjectMapper objectMapper;
     private final ProjectService projectService;
+    private final ProhibitedContentFilterService prohibitedContentFilterService;
+    private final ArticlePlanService articlePlanService;
 
     public AiAssistService(LlmClient llmClient, LlmModelService llmModelService,
                            ComfyUiClient comfyUiClient,
+                           ChatGptImageClient chatGptImageClient,
+                           ImageModelService imageModelService,
                            ComfyUiModelService comfyUiModelService,
                            GeneratedImageStorageService generatedImageStorageService,
                            GeneratedImageRepository generatedImageRepository,
                            GenerationJobRepository generationJobRepository,
                            WebSearchService webSearchService, ObjectMapper objectMapper,
-                           ProjectService projectService) {
+                           ProjectService projectService,
+                           ProhibitedContentFilterService prohibitedContentFilterService,
+                           ArticlePlanService articlePlanService) {
         this.llmClient = llmClient;
         this.llmModelService = llmModelService;
         this.comfyUiClient = comfyUiClient;
+        this.chatGptImageClient = chatGptImageClient;
+        this.imageModelService = imageModelService;
         this.comfyUiModelService = comfyUiModelService;
         this.generatedImageStorageService = generatedImageStorageService;
         this.generatedImageRepository = generatedImageRepository;
@@ -156,13 +207,24 @@ public class AiAssistService {
         this.webSearchService = webSearchService;
         this.objectMapper = objectMapper;
         this.projectService = projectService;
+        this.prohibitedContentFilterService = prohibitedContentFilterService;
+        this.articlePlanService = articlePlanService;
     }
 
     public AiImageBatchResponse generateImage(AiImageRequest request) {
-        GenerationJob job = startJob("comfyui_image", Map.of("prompt", request.prompt()));
+        ImageProvider provider = imageModelService.getSelectedProvider(request.projectId());
+        ImageGenerationProvider generator = provider == ImageProvider.CHATGPT ? chatGptImageClient : comfyUiClient;
+        GenerationJob job = startJob(
+                provider == ImageProvider.CHATGPT ? "chatgpt_image" : "comfyui_image",
+                Map.of("prompt", request.prompt()));
         try {
             ComfyUiGenerationParams params = resolveParams(request);
-            List<ComfyUiImage> images = comfyUiClient.generateImage(params);
+            prohibitedContentFilterService.check(
+                    params.prompt(),
+                    projectService.resolveBlockSexualContent(request.projectId()),
+                    projectService.resolveBlockViolentContent(request.projectId()),
+                    projectService.resolveBlockDiscriminatoryContent(request.projectId()));
+            List<ComfyUiImage> images = generator.generateImage(params);
             // バッチ内の全画像は同じprompt/negativePromptから生成されるため、タグ提案は1回で済ませて使い回す。
             String tagsJson = suggestImageTagsJson(params.prompt());
             List<AiImageResponse> responses = new ArrayList<>();
@@ -170,7 +232,7 @@ public class AiAssistService {
                 String base64 = Base64.getEncoder().encodeToString(image.data());
                 String filePath = generatedImageStorageService.store(request.projectId(), image.data());
                 GeneratedImage saved = generatedImageRepository.save(
-                        toEntity(request.projectId(), params, filePath, image.mimeType(), tagsJson));
+                        toEntity(request.projectId(), params, filePath, image.mimeType(), tagsJson, provider));
                 responses.add(new AiImageResponse(saved.getId(), image.fileName(), base64, image.mimeType()));
             }
             completeJob(job, Map.of("count", String.valueOf(responses.size())));
@@ -205,15 +267,22 @@ public class AiAssistService {
      * チャットメッセージ(と任意の履歴)から、ComfyUIへ渡す画像生成プロンプト(英語)をLLMで生成する。
      * ArticlePlanService.buildChatPromptと同様に「System+履歴+User」形式でプロンプトを組み立てる。
      */
-    public AiImagePromptResponse generateImagePrompt(Long projectId, List<PlanChatMessage> history, String message) {
+    public AiImagePromptResponse generateImagePrompt(
+            Long projectId, List<PlanChatMessage> history, String message, String providerOverride) {
         GenerationJob job = startJob("llm_image_prompt", Map.of(
                 "projectId", String.valueOf(projectId),
                 "message", message
         ));
         try {
             String model = llmModelService.getSelectedModel(projectId);
+            // リクエストでプロバイダーが明示された場合はそれを優先し、なければプロジェクト単位の既定へ
+            // フォールバックする(issue #530)。
+            AiProvider provider = AiProvider.fromString(providerOverride);
+            if (provider == null) {
+                provider = llmModelService.getSelectedProvider(projectId);
+            }
             String prompt = buildImagePromptChat(history, message);
-            String result = llmClient.generate(prompt, model);
+            String result = llmClient.generate(prompt, model, provider);
             completeJob(job, Map.of("result", result));
             return new AiImagePromptResponse(result);
         } catch (RuntimeException e) {
@@ -280,9 +349,11 @@ public class AiAssistService {
     }
 
     private GeneratedImage toEntity(
-            Long projectId, ComfyUiGenerationParams params, String filePath, String mimeType, String tagsJson) {
+            Long projectId, ComfyUiGenerationParams params, String filePath, String mimeType, String tagsJson,
+            ImageProvider provider) {
         GeneratedImage entity = new GeneratedImage();
         entity.setProjectId(projectId);
+        entity.setProvider(provider.name());
         entity.setPrompt(params.prompt());
         entity.setNegativePrompt(params.negativePrompt());
         entity.setSteps(params.steps());
@@ -302,6 +373,25 @@ public class AiAssistService {
         return entity;
     }
 
+    /**
+     * エディタ右クリックメニュー「Ask AI」からの質問に、Web検索結果を踏まえて回答する(issue #526)。
+     */
+    public AiAskResponse ask(AiAskRequest request) {
+        GenerationJob job = startJob("llm_ask", Map.of("question", request.question()));
+        try {
+            WebSearchOutcome searchOutcome = webSearchService.searchSafely(buildSearchQuery(request.question()));
+            String prompt = WebSearchService.formatForPrompt(searchOutcome)
+                    + ASK_PROMPT_TEMPLATE.formatted(request.question());
+            String result = llmClient.generate(prompt, null, AiProvider.fromString(request.provider()));
+            completeJob(job, Map.of("result", result));
+            return new AiAskResponse(result, WebSearchService.toSources(searchOutcome),
+                    WebSearchService.buildSearchNote(searchOutcome));
+        } catch (RuntimeException e) {
+            failJob(job, e);
+            throw e;
+        }
+    }
+
     public AiDraftResponse draft(AiDraftRequest request) {
         String template = DRAFT_PROMPT_TEMPLATES.get(request.mode());
         if (template == null) {
@@ -313,7 +403,7 @@ public class AiAssistService {
         try {
             WebSearchOutcome searchOutcome = webSearchService.searchSafely(buildSearchQuery(request.text()));
             String prompt = WebSearchService.formatForPrompt(searchOutcome) + template.formatted(request.text());
-            String result = llmClient.generate(prompt);
+            String result = llmClient.generate(prompt, null, AiProvider.fromString(request.provider()));
             completeJob(job, Map.of("result", result));
             return new AiDraftResponse(result, WebSearchService.toSources(searchOutcome),
                     WebSearchService.buildSearchNote(searchOutcome));
@@ -360,7 +450,7 @@ public class AiAssistService {
                     ? buildSectionChatPrompt(basePrompt, request.history(), request.message(), searchOutcome)
                     : WebSearchService.formatForPrompt(searchOutcome) + basePrompt;
 
-            String result = llmClient.generate(prompt);
+            String result = llmClient.generate(prompt, null, AiProvider.fromString(request.provider()));
             completeJob(job, Map.of("result", result));
             return new AiSectionResponse(result, WebSearchService.toSources(searchOutcome),
                     WebSearchService.buildSearchNote(searchOutcome));
@@ -416,14 +506,48 @@ public class AiAssistService {
     public AiTagsResponse suggestTags(AiTagsRequest request) {
         GenerationJob job = startJob("llm_tags", Map.of("text", request.text()));
         try {
-            String raw = llmClient.generate(TAGS_PROMPT_TEMPLATE.formatted(request.text()));
+            List<String> existingTags = request.projectId() != null
+                    ? articlePlanService.listExistingTags(request.projectId())
+                    : List.of();
+            String prompt = buildTagsPrompt(request.text(), existingTags);
+            String raw = llmClient.generate(prompt, null, AiProvider.fromString(request.provider()));
             AiTagsResponse parsed = parseTagsResponse(raw);
+            AiTagsResponse prioritized = prioritizeExistingTags(parsed, existingTags);
             completeJob(job, Map.of("result", raw));
-            return parsed;
+            return prioritized;
         } catch (RuntimeException e) {
             failJob(job, e);
             throw e;
         }
+    }
+
+    /**
+     * 既存タグ一覧がある場合、新しいタグを作る前にまずそちらから選ぶようAIへ指示を追加する(issue #525)。
+     */
+    private String buildTagsPrompt(String text, List<String> existingTags) {
+        String prompt = TAGS_PROMPT_TEMPLATE.formatted(text);
+        if (existingTags.isEmpty()) {
+            return prompt;
+        }
+        return prompt
+                + "\ntagsは新しいタグを作る前に、必ず次の既存タグ一覧の中に記事に合うものがないか確認し、"
+                + "あればそちらを優先して選んでください(一覧にない新しいタグも、本文の内容から必要であれば追加してかまいません): "
+                + String.join(", ", existingTags) + "\n";
+    }
+
+    /**
+     * 既存タグに一致する提案を先頭へ並べ替える(issue #525)。プロンプトでの指示に加えて、
+     * 表示順でも既存タグが優先されることをプログラム側で保証する。
+     */
+    private AiTagsResponse prioritizeExistingTags(AiTagsResponse response, List<String> existingTags) {
+        if (existingTags.isEmpty()) {
+            return response;
+        }
+        List<String> sortedTags = response.tags().stream()
+                .sorted(Comparator.comparing(
+                        tag -> existingTags.stream().noneMatch(existing -> existing.equalsIgnoreCase(tag))))
+                .toList();
+        return new AiTagsResponse(response.categories(), sortedTags);
     }
 
     private AiTagsResponse parseTagsResponse(String raw) {
@@ -441,6 +565,61 @@ public class AiAssistService {
     private String extractJsonObject(String raw) {
         int start = raw.indexOf('{');
         int end = raw.lastIndexOf('}');
+        if (start < 0 || end < 0 || end < start) {
+            return raw;
+        }
+        return raw.substring(start, end + 1);
+    }
+
+    /**
+     * issue #523: リアルタイム校正チェック。本文中の問題点をtypo/readability/unnecessaryの
+     * 3種類で検出し、エディタ側で該当箇所へ波線表示するための一覧を返す。
+     */
+    public AiProofreadResponse proofreadContent(AiProofreadRequest request) {
+        GenerationJob job = startJob("llm_proofread_check", Map.of("text", request.text()));
+        try {
+            String prompt = PROOFREAD_CHECK_PROMPT_TEMPLATE.formatted(request.text());
+            String raw = llmClient.generate(prompt, null, AiProvider.fromString(request.provider()));
+            List<ProofreadIssue> issues = parseProofreadResponse(raw, request.text());
+            completeJob(job, Map.of("result", raw));
+            return new AiProofreadResponse(issues);
+        } catch (RuntimeException e) {
+            failJob(job, e);
+            throw e;
+        }
+    }
+
+    private List<ProofreadIssue> parseProofreadResponse(String raw, String sourceText) {
+        String jsonPart = extractJsonArray(raw);
+        try {
+            JsonNode node = objectMapper.readTree(jsonPart);
+            if (!node.isArray()) {
+                return List.of();
+            }
+            List<ProofreadIssue> issues = new ArrayList<>();
+            for (JsonNode item : node) {
+                String originalText = item.path("originalText").asText(null);
+                // originalTextが本文中に実在しない指摘は、エディタ側で位置特定ができず表示できないため除外する
+                // (LLMの引用ミス・幻覚に対する防御)。
+                if (originalText == null || originalText.isEmpty() || !sourceText.contains(originalText)) {
+                    continue;
+                }
+                String type = item.path("type").asText(null);
+                String message = item.path("message").asText(null);
+                JsonNode suggestionNode = item.get("suggestion");
+                String suggestion = suggestionNode == null || suggestionNode.isNull()
+                        ? null : suggestionNode.asText();
+                issues.add(new ProofreadIssue(type, originalText, message, suggestion));
+            }
+            return issues;
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    private String extractJsonArray(String raw) {
+        int start = raw.indexOf('[');
+        int end = raw.lastIndexOf(']');
         if (start < 0 || end < 0 || end < start) {
             return raw;
         }

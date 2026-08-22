@@ -59,15 +59,17 @@ export function PostsTable({ posts: initialPosts, timezone }: { posts: PostSumma
             <th className="cursor-pointer px-4 py-2 hover:bg-neutral-100 dark:hover:bg-neutral-800" onClick={() => handleColumnSort("status")}>
               ステータス{renderSortIndicator("status")}
             </th>
+            <th className="px-4 py-2">カテゴリ</th>
             <th className="cursor-pointer px-4 py-2 hover:bg-neutral-100 dark:hover:bg-neutral-800" onClick={() => handleColumnSort("lastPublishedAt")}>
               最終投稿日時{renderSortIndicator("lastPublishedAt")}
             </th>
+            <th className="px-4 py-2">公開予定日時</th>
           </tr>
         </thead>
         <tbody>
           {sortedPosts.length === 0 && (
             <tr>
-              <td colSpan={5} className="px-4 py-6 text-center text-neutral-600 dark:text-neutral-400">
+              <td colSpan={7} className="px-4 py-6 text-center text-neutral-600 dark:text-neutral-400">
                 投稿履歴はまだありません(VSCode拡張から投稿すると表示されます)
               </td>
             </tr>
@@ -80,8 +82,12 @@ export function PostsTable({ posts: initialPosts, timezone }: { posts: PostSumma
               <td className="px-4 py-2">
                 <span className="rounded-full bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 text-xs">{post.status}</span>
               </td>
+              <td className="px-4 py-2">{post.categories.length > 0 ? post.categories.join(", ") : "-"}</td>
               <td className="px-4 py-2 text-neutral-500 dark:text-neutral-400">
                 {post.lastPublishedAt ? formatDateTime(post.lastPublishedAt, timezone) : "-"}
+              </td>
+              <td className="px-4 py-2 text-neutral-500 dark:text-neutral-400">
+                {post.publishScheduledAt ? formatDateTime(post.publishScheduledAt, timezone) : "-"}
               </td>
             </tr>
           ))}

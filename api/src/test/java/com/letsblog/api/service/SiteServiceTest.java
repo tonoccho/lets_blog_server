@@ -72,7 +72,9 @@ class SiteServiceTest {
     private SiteRegisterRequest wordPressRequest() {
         return new SiteRegisterRequest(
                 "My Blog", "main", CmsType.WORDPRESS,
-                Map.of("baseUrl", "https://example.com", "username", "admin", "appPassword", "secret"));
+                Map.of("baseUrl", "https://example.com", "transport", "SSH",
+                        "sshHost", "203.0.113.5", "sshUser", "deploy",
+                        "wpPath", "/var/www/html", "sshPrivateKeyPem", "PRIVATE-KEY-PEM"));
     }
 
     private void stubSaveSuccess() {
@@ -345,20 +347,21 @@ class SiteServiceTest {
     void update_credentialsは指定フィールドのみ上書きし既存値を保持する() {
         Site site = buildExternalSite();
         when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
-        when(credentialCipher.decrypt(any()))
-                .thenReturn("{\"baseUrl\":\"https://example.com\",\"username\":\"admin\",\"appPassword\":\"old-pass\"}");
+        when(credentialCipher.decrypt(any())).thenReturn(
+                "{\"baseUrl\":\"https://example.com\",\"transport\":\"SSH\",\"sshHost\":\"203.0.113.5\","
+                        + "\"sshUser\":\"old-deploy\",\"wpPath\":\"/var/www/html\",\"sshPrivateKeyPem\":\"OLD-PEM\"}");
         when(credentialCipher.encrypt(any())).thenReturn(new byte[]{9, 9, 9});
         when(siteRepository.save(any(Site.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
         when(cmsAdapter.testConnection(any())).thenReturn(ConnectionCheckResult.success());
 
-        SiteResponse response = service.update(1L, new SiteUpdateRequest(null, Map.of("appPassword", "new-pass")));
+        SiteResponse response = service.update(1L, new SiteUpdateRequest(null, Map.of("sshUser", "new-deploy")));
 
         assertEquals("SUCCESS", response.connectionCheckStatus());
         org.mockito.ArgumentCaptor<String> jsonCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
         verify(credentialCipher).encrypt(jsonCaptor.capture());
         assertEquals(true, jsonCaptor.getValue().contains("\"baseUrl\":\"https://example.com\""));
-        assertEquals(true, jsonCaptor.getValue().contains("\"appPassword\":\"new-pass\""));
+        assertEquals(true, jsonCaptor.getValue().contains("\"sshUser\":\"new-deploy\""));
     }
 
     @Test
@@ -368,7 +371,7 @@ class SiteServiceTest {
         when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
 
         assertThrows(IllegalArgumentException.class,
-                () -> service.update(1L, new SiteUpdateRequest(null, Map.of("appPassword", "x"))));
+                () -> service.update(1L, new SiteUpdateRequest(null, Map.of("sshUser", "x"))));
     }
 
     @Test
@@ -499,39 +502,11 @@ class SiteServiceTest {
         SiteService.SiteDataSource dataSource = service.resolveDataSource(site);
 
         assertEquals(true, dataSource.managed());
-        assertEquals(false, dataSource.hasRest());
         assertEquals(false, dataSource.hasSsh());
     }
 
     @Test
-    void resolveDataSource_baseUrlUsernameAppPasswordが揃っていてもRESTは現在常に利用不可() {
-        // フィードバック対応により一括管理はSSHのみを使う方針のため、REST資格情報があってもhasRest()はfalseになる
-        Site site = siteWithCredentials("s",
-                Map.of("baseUrl", "https://example.com", "username", "admin", "appPassword", "secret"), false);
-
-        SiteService.SiteDataSource dataSource = service.resolveDataSource(site);
-
-        assertEquals(false, dataSource.managed());
-        assertEquals(false, dataSource.hasRest());
-        assertEquals(false, dataSource.hasSsh());
-        assertEquals(true, dataSource.isUnavailable());
-    }
-
-    @Test
-    void resolveDataSource_transportSSHでRESTの資格情報もあればSSHのみtrueになる() {
-        Site site = siteWithCredentials("s", Map.of(
-                "baseUrl", "https://example.com", "username", "admin", "appPassword", "secret",
-                "transport", "SSH", "sshHost", "203.0.113.5", "sshUser", "deploy",
-                "wpPath", "/var/www/html", "sshPrivateKeyPem", "PEM"), false);
-
-        SiteService.SiteDataSource dataSource = service.resolveDataSource(site);
-
-        assertEquals(false, dataSource.hasRest());
-        assertEquals(true, dataSource.hasSsh());
-    }
-
-    @Test
-    void resolveDataSource_SSH設定済みならRESTは常に利用不可でSSHのみ() {
+    void resolveDataSource_transportSSHならSSHのみtrueになる() {
         Site site = siteWithCredentials("s", Map.of(
                 "baseUrl", "https://example.com",
                 "transport", "SSH", "sshHost", "203.0.113.5", "sshUser", "deploy",
@@ -539,24 +514,23 @@ class SiteServiceTest {
 
         SiteService.SiteDataSource dataSource = service.resolveDataSource(site);
 
-        assertEquals(false, dataSource.hasRest());
+        assertEquals(false, dataSource.managed());
         assertEquals(true, dataSource.hasSsh());
         assertEquals(false, dataSource.isUnavailable());
     }
 
     @Test
-    void resolveDataSource_RESTもSSHも設定されていなければ両方false() {
+    void resolveDataSource_transportSSHでなければ利用不可() {
         Site site = siteWithCredentials("s", Map.of("baseUrl", "https://example.com"), false);
 
         SiteService.SiteDataSource dataSource = service.resolveDataSource(site);
 
-        assertEquals(false, dataSource.hasRest());
         assertEquals(false, dataSource.hasSsh());
         assertEquals(true, dataSource.isUnavailable());
     }
 
     @Test
-    void resolveDataSource_認証情報の復号に失敗したら両方falseで例外を投げない() {
+    void resolveDataSource_認証情報の復号に失敗したらhasSsh_falseで例外を投げない() {
         Site site = new Site();
         site.setId(1L);
         site.setSiteKey("broken");
@@ -568,7 +542,6 @@ class SiteServiceTest {
 
         SiteService.SiteDataSource dataSource = service.resolveDataSource(site);
 
-        assertEquals(false, dataSource.hasRest());
         assertEquals(false, dataSource.hasSsh());
     }
 }

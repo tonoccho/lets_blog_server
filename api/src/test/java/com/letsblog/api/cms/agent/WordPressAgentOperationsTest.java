@@ -6,6 +6,7 @@ import com.letsblog.api.cms.ConnectionCheckResult;
 import com.letsblog.api.cms.MediaUploadResult;
 import com.letsblog.api.cms.PostContent;
 import com.letsblog.api.cms.PostResult;
+import com.letsblog.api.cms.ReferencePost;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -41,7 +42,7 @@ class WordPressAgentOperationsTest {
 
     private WordPressCredentials creds() {
         return new WordPressCredentials(
-                "http://wordpress/sites/main", "admin", "app-pass",
+                "http://wordpress/sites/main", "admin",
                 "AGENT", null, null, null, null, null, null, "main");
     }
 
@@ -254,5 +255,41 @@ class WordPressAgentOperationsTest {
     @Test
     void installWpCli_未対応操作として例外を投げる() {
         assertThrows(UnsupportedOperationException.class, () -> operations.installWpCli(creds()));
+    }
+
+    @Test
+    void getLatestPost_参照記事を返す() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/reference-post"))
+                .andExpect(content().json("{\"slug\":\"main\"}"))
+                .andRespond(withSuccess(
+                        "{\"found\":true,\"id\":\"1\",\"link\":\"http://wordpress/sites/main/hello-world/\","
+                        + "\"title\":\"Hello World\",\"content\":\"<p>Hi</p>\"}",
+                        MediaType.APPLICATION_JSON));
+
+        ReferencePost referencePost = operations.getLatestPost(creds()).orElseThrow();
+
+        assertEquals("1", referencePost.id());
+        assertEquals("http://wordpress/sites/main/hello-world/", referencePost.link());
+        assertEquals("Hello World", referencePost.title());
+        assertEquals("<p>Hi</p>", referencePost.content());
+        server.verify();
+    }
+
+    @Test
+    void getLatestPost_参照記事が存在しない場合は空を返す() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/reference-post"))
+                .andRespond(withSuccess("{\"found\":false}", MediaType.APPLICATION_JSON));
+
+        assertTrue(operations.getLatestPost(creds()).isEmpty());
+    }
+
+    @Test
+    void getLatestPost_失敗時は例外を投げる() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/reference-post"))
+                .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"参照記事の取得に失敗しました\",\"detail\":\"boom\"}"));
+
+        assertThrows(AgentOperationException.class, () -> operations.getLatestPost(creds()));
     }
 }

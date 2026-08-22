@@ -32,6 +32,13 @@ export const PublishResultSchema = z.object({
 });
 export type PublishResult = z.infer<typeof PublishResultSchema>;
 
+/** サイト+スラッグに対応する既存投稿の照会結果(issue #505)。 */
+export const PostLookupResultSchema = z.object({
+  wpPostId: z.string(),
+  status: z.string(),
+});
+export type PostLookupResult = z.infer<typeof PostLookupResultSchema>;
+
 export const SourceReferenceSchema = z.object({
   title: z.string(),
   url: z.string(),
@@ -49,12 +56,28 @@ export const AiGenerationResultSchema = z.object({
 });
 export type AiDraftResult = z.infer<typeof AiGenerationResultSchema>;
 export type AiSectionResult = z.infer<typeof AiGenerationResultSchema>;
+/** issue #526: エディタ右クリックメニュー「Ask AI」の質問応答結果。 */
+export type AiAskResult = z.infer<typeof AiGenerationResultSchema>;
 
 export const AiTagsResultSchema = z.object({
   categories: z.array(z.string()).default([]),
   tags: z.array(z.string()).default([]),
 });
 export type AiTagsResult = z.infer<typeof AiTagsResultSchema>;
+
+/** 校正チェックで検出した1件の指摘。POST /api/ai/proofread のレスポンス(issue #523)。 */
+export const ProofreadIssueSchema = z.object({
+  type: z.enum(['typo', 'readability', 'unnecessary']),
+  originalText: z.string(),
+  message: z.string(),
+  suggestion: z.string().nullable().default(null),
+});
+export type ProofreadIssue = z.infer<typeof ProofreadIssueSchema>;
+
+export const ProofreadResultSchema = z.object({
+  issues: z.array(ProofreadIssueSchema).default([]),
+});
+export type ProofreadResult = z.infer<typeof ProofreadResultSchema>;
 
 export const AiImageResultSchema = z.object({
   id: z.number(),
@@ -241,6 +264,18 @@ export type ThemeSkeletonResult = z.infer<typeof ThemeSkeletonResultSchema>;
 
 /** 既存カテゴリ名の一覧。サイト未紐付け時は空配列。 */
 export const CategoryNameListSchema = z.array(z.string());
+
+/** 既存タグ名の一覧。サイト未紐付け時は空配列(issue #525)。 */
+export const TagNameListSchema = z.array(z.string());
+
+/** 本文中に埋め込めるカスタムタグ(`[tagname]〜[/tagname]`記法)の一覧(issue #522)。 */
+export const CustomTagSummarySchema = z.object({
+  tagName: z.string(),
+  description: z.string().nullable(),
+  tagFormat: z.enum(['INLINE', 'BLOCK']),
+});
+export type CustomTagSummary = z.infer<typeof CustomTagSummarySchema>;
+export const CustomTagSummaryListSchema = z.array(CustomTagSummarySchema);
 
 /** 親カテゴリ名付きの既存カテゴリ一覧。子カテゴリ選択時の親カテゴリ自動選択に使う(issue #289)。 */
 export const CategoryOptionSchema = z.object({

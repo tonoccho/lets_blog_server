@@ -7,10 +7,12 @@
 # Java / Gradle
 api/.gradle/
 api/build/
-!api/gradle/wrapper/gradle-wrapper.jar
+log-writer/.gradle/
+log-writer/build/
 *.class
 *.jar
 !api/gradle/wrapper/gradle-wrapper.jar
+!log-writer/gradle/wrapper/gradle-wrapper.jar
 
 # Node
 node_modules/
