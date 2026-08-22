@@ -6,7 +6,7 @@
  * frontMatterCompletionProvider.ts側で行う。
  */
 
-const FRONT_MATTER_DELIMITER = '---';
+export const FRONT_MATTER_DELIMITER = '---';
 
 export type FrontMatterCompletionField = 'status' | 'categories' | 'tags';
 
@@ -73,7 +73,8 @@ export function detectFrontMatterCompletionContext(
   return undefined;
 }
 
-function findClosingDelimiterLine(lines: string[]): number {
+/** frontmatterの終端の`---`が現れる行番号を返す。無ければ-1。 */
+export function findClosingDelimiterLine(lines: string[]): number {
   for (let i = 1; i < lines.length; i++) {
     if (lines[i] === FRONT_MATTER_DELIMITER) {
       return i;

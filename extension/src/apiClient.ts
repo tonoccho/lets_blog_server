@@ -620,6 +620,24 @@ export async function listExistingTags(
 }
 
 /**
+ * 本文中に埋め込めるカスタムタグ一覧(プロジェクト固有 + グローバル)。本文でのコード補完に使う(issue #522)。
+ */
+export async function listCustomTags(
+  serverUrl: string,
+  apiKey: string,
+  actor: Actor | undefined,
+  projectId: number
+): Promise<schemas.CustomTagSummary[]> {
+  return cachedRequestJson(
+    `project:${projectId}:custom-tags`,
+    serverUrl,
+    `/api/custom-tags?projectId=${projectId}`,
+    { label: 'listCustomTags', headers: buildHeaders(apiKey, actor) },
+    schemas.CustomTagSummaryListSchema
+  );
+}
+
+/**
  * ComfyUIで画像を生成する。生成結果はサーバー側にも保存される。
  * @param signal 利用者によるキャンセル用。
  */

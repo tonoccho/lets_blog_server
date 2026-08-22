@@ -268,6 +268,15 @@ export const CategoryNameListSchema = z.array(z.string());
 /** 既存タグ名の一覧。サイト未紐付け時は空配列(issue #525)。 */
 export const TagNameListSchema = z.array(z.string());
 
+/** 本文中に埋め込めるカスタムタグ(`[tagname]〜[/tagname]`記法)の一覧(issue #522)。 */
+export const CustomTagSummarySchema = z.object({
+  tagName: z.string(),
+  description: z.string().nullable(),
+  tagFormat: z.enum(['INLINE', 'BLOCK']),
+});
+export type CustomTagSummary = z.infer<typeof CustomTagSummarySchema>;
+export const CustomTagSummaryListSchema = z.array(CustomTagSummarySchema);
+
 /** 親カテゴリ名付きの既存カテゴリ一覧。子カテゴリ選択時の親カテゴリ自動選択に使う(issue #289)。 */
 export const CategoryOptionSchema = z.object({
   name: z.string(),
