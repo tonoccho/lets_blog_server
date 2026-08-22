@@ -179,4 +179,28 @@ public interface CmsAdapter {
     default AuthCookie generateAuthCookie(CmsCredentials credentials) {
         throw new UnsupportedOperationException("このCMS/接続方式は認証Cookieの発行に対応していません");
     }
+
+    /**
+     * メディアライブラリの一覧を取得する(読み取り専用、ガベージコレクション画面向け。issue #500)。
+     * 対応しないCMSはUnsupportedOperationExceptionを投げる。
+     */
+    default List<CmsMediaSummary> listMedia(CmsCredentials credentials) {
+        throw new UnsupportedOperationException("このCMSはメディア一覧取得に対応していません");
+    }
+
+    /**
+     * 全投稿の本文・アイキャッチ・主要サイト設定からのメディア参照を収集する(読み取り専用、
+     * ガベージコレクション画面向け。issue #500)。対応しないCMSはUnsupportedOperationExceptionを投げる。
+     */
+    default CmsMediaReferenceScan scanMediaReferences(CmsCredentials credentials) {
+        throw new UnsupportedOperationException("このCMSはメディア参照スキャンに対応していません");
+    }
+
+    /**
+     * 指定IDのメディア(添付ファイル)を完全に削除する(ゴミ箱を経由しない物理削除、issue #500)。
+     * 対応しないCMSはUnsupportedOperationExceptionを投げる。
+     */
+    default void deleteMedia(CmsCredentials credentials, String mediaId) {
+        throw new UnsupportedOperationException("このCMSはメディア削除に対応していません");
+    }
 }

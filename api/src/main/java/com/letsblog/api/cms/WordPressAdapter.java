@@ -300,6 +300,44 @@ public class WordPressAdapter implements CmsAdapter {
     }
 
     @Override
+    public List<CmsMediaSummary> listMedia(CmsCredentials credentials) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.listMedia(creds);
+        }
+        if (creds.isAgent()) {
+            return agentOperations.listMedia(creds);
+        }
+        throw unsupportedTransport(creds);
+    }
+
+    @Override
+    public CmsMediaReferenceScan scanMediaReferences(CmsCredentials credentials) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.scanMediaReferences(creds);
+        }
+        if (creds.isAgent()) {
+            return agentOperations.scanMediaReferences(creds);
+        }
+        throw unsupportedTransport(creds);
+    }
+
+    @Override
+    public void deleteMedia(CmsCredentials credentials, String mediaId) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            sshOperations.deleteMedia(creds, mediaId);
+            return;
+        }
+        if (creds.isAgent()) {
+            agentOperations.deleteMedia(creds, mediaId);
+            return;
+        }
+        throw unsupportedTransport(creds);
+    }
+
+    @Override
     public WpCliInstallResult installWpCli(CmsCredentials credentials) {
         CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
         if (!creds.isSsh()) {

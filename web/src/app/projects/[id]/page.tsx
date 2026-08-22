@@ -18,6 +18,7 @@ import { ProjectGithubRepositoryForm } from "./ProjectGithubRepositoryForm";
 import { ProjectApiKeysForm } from "./ProjectApiKeysForm";
 import { EnvironmentSyncPanel } from "./EnvironmentSyncPanel";
 import { BulkManagementPanel } from "./BulkManagementPanel";
+import { GarbageCollectionPanel } from "./GarbageCollectionPanel";
 import { ProjectAiModelsPanel } from "./ProjectAiModelsPanel";
 import { ProjectAssetGenerationPanel } from "./ProjectAssetGenerationPanel";
 import { ProjectImageGenerationPromptDefaultsForm } from "./ProjectImageGenerationPromptDefaultsForm";
@@ -136,6 +137,11 @@ export default async function ProjectDetailPage({
           timezone={timezone}
         />
       ),
+    },
+    {
+      id: "garbage-collection",
+      label: "ガベージコレクション",
+      content: <GarbageCollectionPanel projectId={project.id} project={project} />,
     },
     {
       id: "ai-models",

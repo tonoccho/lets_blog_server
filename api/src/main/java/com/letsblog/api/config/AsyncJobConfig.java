@@ -37,4 +37,19 @@ public class AsyncJobConfig {
         executor.initialize();
         return executor;
     }
+
+    /**
+     * メディアガベージコレクションの一括削除(issue #500)。1サイトへの削除は逐次SSH/エージェント
+     * 接続になるため並列度を上げても速くならず、小さいプールで十分。
+     */
+    @Bean(name = "mediaGarbageCollectionExecutor")
+    public Executor mediaGarbageCollectionExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(20);
+        executor.setThreadNamePrefix("media-gc-");
+        executor.initialize();
+        return executor;
+    }
 }

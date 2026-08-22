@@ -57,6 +57,8 @@ import {
   selectComfyUiCheckpoint,
   installComfyUiCheckpoint,
   deleteComfyUiCheckpoint,
+  scanMediaGarbage,
+  deleteMediaGarbage,
   getGenerationJob,
   getImageGenerationOptions,
   generateProjectImages,
@@ -87,6 +89,7 @@ import {
   ComfyUiCheckpointListResponse,
   GenerationJobDetail,
   GeneratedImageSummary,
+  MediaGarbageCollectionScanResponse,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 
@@ -993,6 +996,37 @@ export async function fetchGenerationJobAction(jobId: number): Promise<Generatio
   const session = await requireAdminSession();
   const actor = { id: Number(session.user.id), role: session.user.role };
   return getGenerationJob(jobId, actor);
+}
+
+export async function fetchMediaGarbageScanAction(
+  projectId: number,
+  environment: ProjectEnvironment
+): Promise<{ data?: MediaGarbageCollectionScanResponse; error?: string }> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const data = await scanMediaGarbage(projectId, environment, actor);
+    return { data };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function deleteMediaGarbageAction(
+  projectId: number,
+  environment: ProjectEnvironment,
+  mediaIds: string[]
+): Promise<AiModelActionState> {
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+
+  try {
+    const job = await deleteMediaGarbage(projectId, environment, mediaIds, actor);
+    return { jobId: job.id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 export async function fetchImageGenerationOptionsAction(projectId: number): Promise<ImageGenerationOptionsResponse> {
