@@ -1,6 +1,9 @@
 package com.letsblog.api.service;
 
 import com.letsblog.api.cms.CmsType;
+import com.letsblog.api.cms.ReferencePost;
+import com.letsblog.api.cms.agent.WordPressAgentOperations;
+import com.letsblog.api.cms.ssh.WordPressSshOperations;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.ThemeCssResponse;
@@ -76,6 +79,12 @@ class ArticlePreviewServiceTest {
     @Mock
     private com.letsblog.api.cms.CmsAdapterFactory cmsAdapterFactory;
 
+    @Mock
+    private WordPressAgentOperations wordPressAgentOperations;
+
+    @Mock
+    private WordPressSshOperations wordPressSshOperations;
+
     private MockRestServiceServer server;
     private ArticlePreviewService service;
 
@@ -87,7 +96,7 @@ class ArticlePreviewServiceTest {
                 customTagRenderService, blogCardTagRenderService, amazonTagRenderService, rechartsTagRenderService,
                 plantUmlEmbedService, plantUmlTagRenderService, tocStyleRenderService, renderedContentWrapperService,
                 markdownRenderer, projectService, siteRepository, siteService, builder, previewSkeletonFetcher,
-                cmsAdapterFactory);
+                cmsAdapterFactory, wordPressAgentOperations, wordPressSshOperations);
         // renderHtml()は必ずrechartsTagRenderService/plantUmlTagRenderService/plantUmlEmbedServiceを
         // 経由するため、それら自体を検証しないテストでは素通しにしておく
         // (未スタブだとnullが返り、以降の呼び出しの引数が狂うため)。
@@ -561,6 +570,80 @@ class ArticlePreviewServiceTest {
         server.verify();
     }
 
+    private com.letsblog.api.cms.CmsCredentials.WordPressCredentials agentCredentials(String wpSlug) {
+        return new com.letsblog.api.cms.CmsCredentials.WordPressCredentials(
+                "https://localhost/sites/" + wpSlug, "admin", null,
+                "AGENT", null, null, null, null, null, null, wpSlug);
+    }
+
+    /**
+     * managedサイト(agent transport)は、投稿ページ限定CSSの参照記事取得もREST(wp-json)ではなく
+     * provision-agentのwp-cli経由(WordPressAgentOperations)に切り替わる(issue #519)。
+     */
+    @Test
+    void fetchThemeCss_managedサイトは投稿ページ限定CSSの参照記事をwp_cli経由で取得する() {
+        Project project = projectWithMaster("test", 10L, null);
+        project.setLocalSiteId(30L);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+
+        Site site = managedWordPressSite(30L, "local-site", "https://localhost/sites/local-site", "local-site");
+        when(siteRepository.findById(30L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("local-site")).thenReturn(agentCredentials("local-site"));
+
+        server.expect(requestTo("http://wordpress/sites/local-site/"))
+                .andRespond(withSuccess(
+                        "<html><head><link rel=\"stylesheet\" "
+                        + "href=\"https://localhost/sites/local-site/wp-content/theme.css\"></head></html>",
+                        MediaType.TEXT_HTML));
+        server.expect(requestTo("http://wordpress/sites/local-site/wp-content/theme.css"))
+                .andRespond(withSuccess("body { color: red; }", MediaType.valueOf("text/css")));
+        when(wordPressAgentOperations.getLatestPost(agentCredentials("local-site")))
+                .thenReturn(Optional.of(new ReferencePost(
+                        "1", "https://localhost/sites/local-site/hello-world/", "Hello World", "<p>Hi</p>")));
+        server.expect(requestTo("http://wordpress/sites/local-site/hello-world/"))
+                .andRespond(withSuccess(
+                        "<html><head><link rel=\"stylesheet\" "
+                        + "href=\"https://localhost/sites/local-site/wp-content/post.css\"></head></html>",
+                        MediaType.TEXT_HTML));
+        server.expect(requestTo("http://wordpress/sites/local-site/wp-content/post.css"))
+                .andRespond(withSuccess(".post { color: hotpink; }", MediaType.valueOf("text/css")));
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 30L);
+
+        assertTrue(response.available());
+        assertTrue(response.css().contains("body { color: red; }"));
+        assertTrue(response.css().contains(".post { color: hotpink; }"));
+        // REST(wp-json)は一切叩かないこと(叩けばMockRestServiceServerが未登録リクエストとして失敗する)
+        server.verify();
+    }
+
+    /**
+     * SSH管理サイトも、投稿ページ限定CSSの参照記事取得がREST(wp-json)ではなくwp-cli経由
+     * (WordPressSshOperations)に切り替わる(issue #519)。
+     */
+    @Test
+    void fetchThemeCss_SSH管理サイトは投稿ページ限定CSSの参照記事をwp_cli経由で取得する() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        Site site = wordPressSite(10L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteRepository.findById(10L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+
+        server.expect(requestTo("http://production.example.com"))
+                .andRespond(withSuccess(
+                        "<html><head><link rel=\"stylesheet\" href=\"/theme.css\"></head></html>",
+                        MediaType.TEXT_HTML));
+        server.expect(requestTo("http://production.example.com/theme.css"))
+                .andRespond(withSuccess("body { color: red; }", MediaType.valueOf("text/css")));
+        when(wordPressSshOperations.getLatestPost(sshCredentials())).thenReturn(Optional.empty());
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertTrue(response.available());
+        assertEquals("/* http://production.example.com/theme.css */\nbody { color: red; }\n", response.css());
+        server.verify();
+    }
+
     @Test
     void renderSkeleton_マスター環境にサイトが紐づいていない場合はavailableがfalse() {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", null, null));
@@ -615,14 +698,60 @@ class ArticlePreviewServiceTest {
         assertEquals("body { color: red; }", response.css());
     }
 
+    /**
+     * managedサイト(agent transport)は、参照記事の解決自体がREST(wp-json)ではなく
+     * provision-agentのwp-cli経由(WordPressAgentOperations)になる(issue #519)。
+     * 参照記事解決後のnavigateUrl組み立て(内部URLへのナビゲート・結果の公開オリジンへの巻き戻し)は
+     * 従来通り。本番サイトを使うのは、非本番サイトだとusername付きのagent認証情報は
+     * renderRealPrivatePost(非公開投稿の実ページ経路)へ分岐してしまい、このスクレイプ&amp;スプライス
+     * 経路(参照記事解決)を検証できないため({@link #renderSkeleton}のガード参照)。
+     */
     @Test
-    void renderSkeleton_managedサイトは内部URLへナビゲートし結果は公開オリジンへ戻す() {
+    void renderSkeleton_managedサイトは参照記事をwp_cli経由で取得し内部URLへナビゲートした結果を公開オリジンへ戻す() {
+        Project project = projectWithMaster("production", null, 30L);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+
+        Site site = managedWordPressSite(30L, "local-site", "https://localhost/sites/local-site", "local-site");
+        when(siteRepository.findById(30L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("local-site")).thenReturn(agentCredentials("local-site"));
+
+        when(wordPressAgentOperations.getLatestPost(agentCredentials("local-site")))
+                .thenReturn(Optional.of(new ReferencePost(
+                        "1", "https://localhost/sites/local-site/hello-world/", "Hello World", "<p>Hi</p>")));
+        when(previewSkeletonFetcher.fetchAndSplice(
+                "http://wordpress/sites/local-site/hello-world/", "Hello World", "<p>Hi</p>",
+                "新タイトル", "<p>新本文</p>", null))
+                .thenReturn(new ThemeSkeletonResponse(
+                        "<article><img src=\"http://wordpress/sites/local-site/wp-content/uploads/x.png\"></article>",
+                        true, null, true,
+                        "body { background: url(http://wordpress/sites/local-site/wp-content/bg.png); }"));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 30L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+
+        assertTrue(response.available());
+        assertTrue(response.html().contains("https://localhost/sites/local-site/wp-content/uploads/x.png"));
+        assertTrue(response.css().contains("https://localhost/sites/local-site/wp-content/bg.png"));
+        // REST(wp-json)は一切叩かないこと(叩けばMockRestServiceServerが未登録リクエストとして失敗する)
+        server.verify();
+    }
+
+    /**
+     * managed/SSHいずれでもない(REST/Application Password)サイトは、wp-cliに対応しないため
+     * 従来通りREST(wp-json)による参照記事解決へフォールバックする(issue #519の対象外。
+     * WordPressAdapterのREST分岐と同様、#518で扱う別の課題)。
+     */
+    @Test
+    void renderSkeleton_REST専用サイトは従来通りwp_jsonで参照記事を解決する() {
         Project project = projectWithMaster("test", 10L, null);
         project.setLocalSiteId(30L);
         when(projectService.getProjectEntity(1L)).thenReturn(project);
 
         Site site = managedWordPressSite(30L, "local-site", "https://localhost/sites/local-site", "local-site");
         when(siteRepository.findById(30L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("local-site")).thenReturn(
+                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials(
+                        "https://localhost/sites/local-site", "admin", "app-pass"));
 
         server.expect(requestTo("http://wordpress/sites/local-site/wp-json/wp/v2/posts?per_page=1&orderby=date"
                         + "&order=desc&_fields=id,link,title,content"))
@@ -644,6 +773,7 @@ class ArticlePreviewServiceTest {
         assertTrue(response.available());
         assertTrue(response.html().contains("https://localhost/sites/local-site/wp-content/uploads/x.png"));
         assertTrue(response.css().contains("https://localhost/sites/local-site/wp-content/bg.png"));
+        verifyNoInteractions(wordPressAgentOperations, wordPressSshOperations);
         server.verify();
     }
 
@@ -736,16 +866,17 @@ class ArticlePreviewServiceTest {
     }
 
     @Test
-    void renderSkeleton_本番サイトはSSH認証情報があっても非公開投稿経路を使わず従来経路にフォールバックする() {
+    void renderSkeleton_本番サイトはSSH認証情報があっても非公開投稿経路を使わずwp_cli経由の参照記事取得にフォールバックする() {
         Project project = projectWithMaster("production", null, 40L);
         when(projectService.getProjectEntity(1L)).thenReturn(project);
         Site site = wordPressSite(40L, "http://production.example.com");
         site.setSiteKey("production-site");
         when(siteRepository.findById(40L)).thenReturn(Optional.of(site));
         when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
-        server.expect(requestTo("http://production.example.com/wp-json/wp/v2/posts?per_page=1&orderby=date"
-                        + "&order=desc&_fields=id,link,title,content"))
-                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+        // 本番サイトは(SSH認証情報があっても)非公開投稿の実ページ経路を使わないため、参照記事取得は
+        // 従来のスクレイプ&スプライス経路のまま。ただしissue #519により、その参照記事取得自体は
+        // wp-cli(WordPressSshOperations)経由になり、REST(wp-json)は叩かない。
+        when(wordPressSshOperations.getLatestPost(sshCredentials())).thenReturn(Optional.empty());
 
         ThemeSkeletonResponse response = service.renderSkeleton(
                 1L, 40L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
@@ -839,15 +970,42 @@ class ArticlePreviewServiceTest {
                         "http://production.example.com", null, null,
                         "SSH", "ssh.example.com", 22, "deploy", "/var/www/html", "PRIVATE-KEY-PEM", null, null);
         when(siteService.getCredentials("production-site")).thenReturn(credsWithoutUsername);
-        server.expect(requestTo("http://production.example.com/wp-json/wp/v2/posts?per_page=1&orderby=date"
-                        + "&order=desc&_fields=id,link,title,content"))
-                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+        when(wordPressSshOperations.getLatestPost(credsWithoutUsername)).thenReturn(Optional.empty());
 
         ThemeSkeletonResponse response = service.renderSkeleton(
                 1L, 40L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
 
         assertFalse(response.available());
         assertTrue(response.reason().contains("参照記事が見つかりませんでした"));
+        verifyNoInteractions(cmsAdapterFactory);
+    }
+
+    /**
+     * SSH管理サイトのスクレイプ&amp;スプライス経路(非公開投稿の実ページ経路を使わないケース)でも、
+     * 参照記事はREST(wp-json)ではなくwp-cli経由(WordPressSshOperations)で取得する(issue #519)。
+     */
+    @Test
+    void renderSkeleton_SSH管理サイトは参照記事をwp_cli経由で取得しspliceした結果を返す() {
+        Project project = projectWithMaster("production", null, 40L);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteRepository.findById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+
+        when(wordPressSshOperations.getLatestPost(sshCredentials())).thenReturn(Optional.of(
+                new ReferencePost("1", "http://production.example.com/hello-world/", "Hello World", "<p>Hi</p>")));
+        when(previewSkeletonFetcher.fetchAndSplice(
+                "http://production.example.com/hello-world/", "Hello World", "<p>Hi</p>",
+                "新タイトル", "<p>新本文</p>", null))
+                .thenReturn(new ThemeSkeletonResponse(
+                        "<article>spliced</article>", true, null, true, "body { color: red; }"));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 40L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+
+        assertTrue(response.available());
+        assertEquals("<article>spliced</article>", response.html());
         verifyNoInteractions(cmsAdapterFactory);
     }
 

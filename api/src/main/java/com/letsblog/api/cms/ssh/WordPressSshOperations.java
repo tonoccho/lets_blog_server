@@ -9,6 +9,7 @@ import com.letsblog.api.cms.ConnectionCheckResult;
 import com.letsblog.api.cms.MediaUploadResult;
 import com.letsblog.api.cms.PostContent;
 import com.letsblog.api.cms.PostResult;
+import com.letsblog.api.cms.ReferencePost;
 import com.letsblog.api.cms.ssh.SshCommandExecutor.SshCommandResult;
 import com.letsblog.api.cms.ssh.SshCommandExecutor.SshConnectionParams;
 import com.letsblog.api.domain.BulkOperationType;
@@ -802,6 +803,38 @@ public class WordPressSshOperations {
             throw new SshOperationException("ユーザー '" + creds.username() + "' が見つかりません");
         }
         return new AuthCookie(body.path("name").asText(), body.path("value").asText());
+    }
+
+    /**
+     * 記事プレビュー(ArticlePreviewService)のテーマCSS/DOM取得向けに、サイト内の最新公開記事を
+     * 「参照記事」として返す(読み取り専用)。従来はArticlePreviewServiceが認証なしのWordPress
+     * REST APIを直接叩いていたが、SSH管理サイトも他の全操作と同じくwp-cli経由へ揃える(issue #519)。
+     * title/contentはREST版のtitle.rendered/content.rendered相当(the_title/the_contentフィルタ
+     * 適用後)になるよう、wp-cliのpost系コマンドではなくwp evalでWordPressコアのAPI
+     * (get_posts/get_permalink/apply_filters)を直接呼び出す(generateAuthCookieと同じ方針)。
+     * 参照記事が存在しない場合は空を返す。
+     */
+    public java.util.Optional<ReferencePost> getLatestPost(WordPressCredentials creds) {
+        String phpCode = "$posts = get_posts(['numberposts' => 1, 'post_status' => 'publish', "
+                + "'orderby' => 'date', 'order' => 'DESC']); "
+                + "if (empty($posts)) { echo json_encode(['found' => false]); exit; } "
+                + "$post = $posts[0]; "
+                + "echo json_encode(['found' => true, 'id' => (string) $post->ID, "
+                + "'link' => get_permalink($post->ID), "
+                + "'title' => apply_filters('the_title', $post->post_title, $post->ID), "
+                + "'content' => apply_filters('the_content', $post->post_content)]);";
+        SshCommandResult result = exec(creds, wpCli(creds, "eval " + ShellQuote.single(phpCode)));
+        if (!result.ok()) {
+            throw new SshOperationException("参照記事の取得に失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+        JsonNode body = parseJsonObject(result.stdout());
+        if (!body.path("found").asBoolean(false)) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(new ReferencePost(
+                body.path("id").asText(), body.path("link").asText(),
+                body.path("title").asText(), body.path("content").asText()));
     }
 
     /** PHPのシングルクォート文字列リテラルとして安全に埋め込むためのエスケープ(`\`と`'`のみ特殊)。 */

@@ -9,6 +9,7 @@ import com.letsblog.api.cms.ConnectionCheckResult;
 import com.letsblog.api.cms.MediaUploadResult;
 import com.letsblog.api.cms.PostContent;
 import com.letsblog.api.cms.PostResult;
+import com.letsblog.api.cms.ReferencePost;
 import com.letsblog.api.cms.WpCliInstallResult;
 import com.letsblog.api.config.LegacyJacksonRestClientConfig;
 import lombok.extern.slf4j.Slf4j;
@@ -212,6 +213,28 @@ public class WordPressAgentOperations {
             post("/wp-cli/post-delete", Map.of("slug", creds.wpSlug(), "postId", postId));
         } catch (RestClientResponseException e) {
             throw new AgentOperationException("WordPress投稿の削除に失敗しました: " + agentErrorDetail(e), e);
+        } catch (ResourceAccessException e) {
+            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 記事プレビュー(ArticlePreviewService)のテーマCSS/DOM取得向けに、サイト内の最新公開記事を
+     * 「参照記事」として返す(読み取り専用)。従来はArticlePreviewServiceが認証なしのWordPress
+     * REST APIを直接叩いていたが、managedサイトは他の全操作と同じくエージェント経由のwp-cliへ揃える
+     * (issue #519)。参照記事が存在しない場合は空を返す。
+     */
+    public java.util.Optional<ReferencePost> getLatestPost(WordPressCredentials creds) {
+        try {
+            JsonNode body = post("/wp-cli/reference-post", Map.of("slug", creds.wpSlug()));
+            if (!body.path("found").asBoolean(false)) {
+                return java.util.Optional.empty();
+            }
+            return java.util.Optional.of(new ReferencePost(
+                    body.path("id").asText(), body.path("link").asText(),
+                    body.path("title").asText(), body.path("content").asText()));
+        } catch (RestClientResponseException e) {
+            throw new AgentOperationException("参照記事の取得に失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
             throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
         }
