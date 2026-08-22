@@ -204,6 +204,7 @@ APIの認証にはX-API-Keyヘッダを使用します。APIキーはログイ�
 
 - [docs/setup.md](docs/setup.md) — 環境変数・起動手順・トラブルシューティングの詳細
 - [spec/phase1/00-overview.md](spec/phase1/00-overview.md) — 全体アーキテクチャ
+- [docs/adr/](docs/adr/README.md) — アーキテクチャ意思決定記録 (ADR)
 - [docs/AI_SERVICE_PROVIDER_RESEARCH.md](docs/AI_SERVICE_PROVIDER_RESEARCH.md) — 外部AIサービス移行の調査・比較
 - [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) — リリースノート
 
