@@ -10,12 +10,13 @@ Docker Composeでまとめて起動する。クライアントはVSCode拡張機
 
 ## CI/CD & Quality
 
-[![API Tests and Coverage](https://github.com/tonoccho/lets_blog_server/actions/workflows/api-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/api-test.yml)
-[![Log Writer Tests](https://github.com/tonoccho/lets_blog_server/actions/workflows/log-writer-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/log-writer-test.yml)
+[![API Services Tests](https://github.com/tonoccho/lets_blog_server/actions/workflows/api-services-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/api-services-test.yml)
 [![Frontend Tests](https://github.com/tonoccho/lets_blog_server/actions/workflows/frontend-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/frontend-test.yml)
 [![Extension Build](https://github.com/tonoccho/lets_blog_server/actions/workflows/extension-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/extension-test.yml)
 
-[![codecov](https://codecov.io/gh/tonoccho/lets_blog_server/graph/badge.svg?flag=api)](https://codecov.io/gh/tonoccho/lets_blog_server)
+[![codecov](https://codecov.io/gh/tonoccho/lets_blog_server/graph/badge.svg?flag=legacy-api)](https://codecov.io/gh/tonoccho/lets_blog_server)
+[![codecov](https://codecov.io/gh/tonoccho/lets_blog_server/graph/badge.svg?flag=log-writer)](https://codecov.io/gh/tonoccho/lets_blog_server)
+[![codecov](https://codecov.io/gh/tonoccho/lets_blog_server/graph/badge.svg?flag=lbs-common)](https://codecov.io/gh/tonoccho/lets_blog_server)
 [![codecov](https://codecov.io/gh/tonoccho/lets_blog_server/graph/badge.svg?flag=frontend)](https://codecov.io/gh/tonoccho/lets_blog_server)
 
 ## 目次

@@ -26,19 +26,18 @@ jobs:
           cache: gradle
 
       - name: Make gradlew executable
-        run: chmod +x api/gradlew
+        run: chmod +x gradlew
 
       - name: Run JMH Benchmarks
-        working-directory: api
-        run: ./gradlew jmh --info
+        run: ./gradlew :services:legacy-api:jmh --info
         continue-on-error: true
 
       - name: Parse benchmark results
         if: always()
         run: |
-          if [ -f "api/build/results/jmh/results.json" ]; then
+          if [ -f "services/legacy-api/build/results/jmh/results.json" ]; then
             echo "Benchmark Results:"
-            cat api/build/results/jmh/results.json | jq .
+            cat services/legacy-api/build/results/jmh/results.json | jq .
           else
             echo "No benchmark results found"
           fi
@@ -48,7 +47,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: jmh-results
-          path: api/build/results/jmh/
+          path: services/legacy-api/build/results/jmh/
           retention-days: 30
 
   k6-load-tests:
@@ -59,7 +58,7 @@ jobs:
       api:
         image: openjdk:21-jdk
         options: >-
-          -v ${{ github.workspace }}/api:/app
+          -v ${{ github.workspace }}:/app
           -w /app
           --health-cmd="curl -f http://localhost:8080/actuator/health || exit 1"
           --health-interval=10s
@@ -93,16 +92,15 @@ jobs:
           distribution: 'temurin'
 
       - name: Build API
-        working-directory: api
         run: |
           chmod +x gradlew
-          ./gradlew clean build -DskipTests=true
-          java -jar build/libs/api-*.jar > api.log 2>&1 &
+          ./gradlew :services:legacy-api:build -DskipTests=true
+          java -jar services/legacy-api/build/libs/legacy-api-*.jar > api.log 2>&1 &
           sleep 30
           curl -f http://localhost:8080/actuator/health || (cat api.log && exit 1)
 
       - name: Run k6 Render Endpoint Load Test
-        working-directory: api/performance-tests
+        working-directory: services/legacy-api/performance-tests
         env:
           API_BASE_URL: http://localhost:8080
         run: |
@@ -111,7 +109,7 @@ jobs:
         continue-on-error: true
 
       - name: Run k6 Database Queries Load Test
-        working-directory: api/performance-tests
+        working-directory: services/legacy-api/performance-tests
         env:
           API_BASE_URL: http://localhost:8080
         run: |
@@ -120,7 +118,7 @@ jobs:
         continue-on-error: true
 
       - name: Run k6 Spike Test
-        working-directory: api/performance-tests
+        working-directory: services/legacy-api/performance-tests
         env:
           API_BASE_URL: http://localhost:8080
         run: |
@@ -133,7 +131,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: k6-results
-          path: api/performance-tests/*-results.json
+          path: services/legacy-api/performance-tests/*-results.json
           retention-days: 30
 
       - name: Comment results on PR

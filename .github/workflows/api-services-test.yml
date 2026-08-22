@@ -1,0 +1,162 @@
+name: API Services Tests
+
+# マルチサービス構成向けのCI(#557)。libs/lbs-common と services/* が同じGradle
+# マルチプロジェクトビルド(ルートのsettings.gradle/build.gradle)にまとまったため、
+# サービス単位のマトリクスで、変更のあったサービスだけをビルド・テストする。
+# GitHub Actions自体は現状意図的に無効化されている(README/CLAUDE.md参照)。本ワークフローは
+# 定義の更新のみが目的で、有効化の是非は別スコープ。
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'services/**'
+      - 'libs/**'
+      - 'build.gradle'
+      - 'settings.gradle'
+      - 'gradle/**'
+      - 'gradlew'
+      - '.github/workflows/api-services-test.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'services/**'
+      - 'libs/**'
+      - 'build.gradle'
+      - 'settings.gradle'
+      - 'gradle/**'
+      - 'gradlew'
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      lbs-common: ${{ steps.filter.outputs.lbs-common }}
+      legacy-api: ${{ steps.filter.outputs.legacy-api }}
+      log-writer: ${{ steps.filter.outputs.log-writer }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            lbs-common:
+              - 'libs/**'
+              - 'build.gradle'
+              - 'settings.gradle'
+              - 'gradle/**'
+              - 'gradlew'
+            legacy-api:
+              - 'libs/**'
+              - 'build.gradle'
+              - 'settings.gradle'
+              - 'gradle/**'
+              - 'gradlew'
+              - 'services/legacy-api/**'
+            log-writer:
+              - 'libs/**'
+              - 'build.gradle'
+              - 'settings.gradle'
+              - 'gradle/**'
+              - 'gradlew'
+              - 'services/log-writer/**'
+
+  test:
+    needs: detect-changes
+    if: |
+      (matrix.service == 'lbs-common' && needs.detect-changes.outputs.lbs-common == 'true') ||
+      (matrix.service == 'legacy-api' && needs.detect-changes.outputs.legacy-api == 'true') ||
+      (matrix.service == 'log-writer' && needs.detect-changes.outputs.log-writer == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [lbs-common, legacy-api, log-writer]
+
+    # legacy-apiのテストのみMySQLを使う(#570のスキーマ分離が完了するまでは共有DBのまま)。
+    # lbs-common/log-writerには不要だが、マトリクスジョブ単位でしか services: を定義できない
+    # ため、無害な待機コストとして許容する。
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: testpass
+          MYSQL_DATABASE: lets_blog_test
+          MYSQL_USER: test_user
+          MYSQL_PASSWORD: test_pass
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+        ports:
+          - 3306:3306
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Resolve Gradle project path and build directory
+        id: project
+        run: |
+          if [ "${{ matrix.service }}" = "lbs-common" ]; then
+            echo "path=:libs:lbs-common" >> "$GITHUB_OUTPUT"
+            echo "dir=libs/lbs-common" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=:services:${{ matrix.service }}" >> "$GITHUB_OUTPUT"
+            echo "dir=services/${{ matrix.service }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run linter
+        run: ./gradlew ${{ steps.project.outputs.path }}:lint
+
+      - name: Run unit tests with coverage
+        run: |
+          if [ "${{ matrix.service }}" = "legacy-api" ]; then
+            ./gradlew ${{ steps.project.outputs.path }}:test ${{ steps.project.outputs.path }}:jacocoTestReport \
+              -Dspring.datasource.url=jdbc:mysql://localhost:3306/lets_blog_test?useSSL=false&serverTimezone=UTC \
+              -Dspring.datasource.username=test_user \
+              -Dspring.datasource.password=test_pass \
+              -Dspring.test.database.replace=any
+          else
+            ./gradlew ${{ steps.project.outputs.path }}:test ${{ steps.project.outputs.path }}:jacocoTestReport
+          fi
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./${{ steps.project.outputs.dir }}/build/reports/jacoco/test/jacocoTestReport.xml
+          flags: ${{ matrix.service }}
+          name: ${{ matrix.service }}-coverage
+        continue-on-error: true
+
+      - name: Generate coverage badge data
+        if: always()
+        run: |
+          REPORT="${{ steps.project.outputs.dir }}/build/reports/jacoco/test/jacocoTestReport.xml"
+          if [ -f "$REPORT" ]; then
+            echo "✓ JaCoCo coverage report generated"
+            COVERAGE=$(grep -oP 'covered="\K[^"]*' "$REPORT" | head -1)
+            echo "Coverage: $COVERAGE%"
+          fi
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.service }}-test-results
+          path: |
+            ${{ steps.project.outputs.dir }}/build/test-results/
+            ${{ steps.project.outputs.dir }}/build/reports/jacoco/test/
+          retention-days: 30

@@ -522,24 +522,35 @@ expected spec URL, rather than a generic timeout.
 
 ## 19. GitHub Actions CI/CD Workflows
 
-This repository uses GitHub Actions to automate testing, linting, and validation on every push and pull request.
+This repository uses GitHub Actions to automate testing, linting, and validation on every
+push and pull request. **GitHub Actions is currently intentionally disabled for this repo**
+(no CI checks run on PRs) — that's expected, not a problem; rely on running the same checks
+locally instead. This section only describes what the workflow *definitions* do.
 
 ### Workflow Overview
 
 | Workflow | Trigger | Purpose |
 | --- | --- | --- |
-| **API Tests and Coverage** | Push to main/develop; API path changes | Run unit tests with JaCoCo coverage, lint checks, and upload coverage to Codecov |
+| **API Services Tests** | Push to main/develop; changes under `services/**`, `libs/**`, or the root Gradle files | Service-level matrix (`lbs-common`, `legacy-api`, `log-writer`) — only the services actually affected by the diff run. A change under `libs/**` (or the root Gradle files) is treated as affecting every service, so all three run. Each matrix entry runs lint + unit tests with JaCoCo coverage, uploaded to Codecov under a flag matching the service name (`lbs-common`/`legacy-api`/`log-writer`). |
 | **Frontend Tests** | Push to main/develop; web path changes | TypeScript type checking, Next.js build, linting, unit tests, and E2E tests |
 | **Extension Build** | Push to main/develop; extension path changes | TypeScript compilation and extension manifest validation |
+
+As more services are extracted (Phase 19 issues), add them to the `service:` matrix and the
+`dorny/paths-filter` filters in `.github/workflows/api-services-test.yml` — they'll pick up
+the `libs/lbs-common`-changes-affect-everyone behavior automatically as long as their filter
+includes the same shared paths (`libs/**`, `build.gradle`, `settings.gradle`, `gradle/**`,
+`gradlew`) that `legacy-api`/`log-writer` already do.
 
 #### Running Locally
 
 Before pushing, run the same checks locally to catch issues early:
 
 ```bash
-# API
-cd api
+# All API services (root Gradle multi-project build)
 ./gradlew lint test
+
+# Just one service, e.g. legacy-api
+./gradlew :services:legacy-api:lint :services:legacy-api:test
 
 # Frontend
 cd web
