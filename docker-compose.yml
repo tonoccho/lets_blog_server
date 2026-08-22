@@ -38,8 +38,8 @@ services:
 
   api:
     build:
-      context: ./api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/legacy-api/Dockerfile
     container_name: lbs-api
     restart: unless-stopped
     environment:
@@ -105,8 +105,8 @@ services:
   # 済みスキーマ)へ書き込む。スキーマの所有権・マイグレーションはapiサーバー側のFlywayのみが持つ。
   log-writer:
     build:
-      context: ./log-writer
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/log-writer/Dockerfile
     container_name: lbs-log-writer
     restart: unless-stopped
     environment:

@@ -1,16 +1,21 @@
 FROM eclipse-temurin:21-jdk AS build
 WORKDIR /workspace
 
-COPY gradlew settings.gradle build.gradle ./
+# ルートのマルチプロジェクトGradleビルドの一部としてビルドするため、
+# ビルドコンテキストはリポジトリルート。
+COPY gradlew settings.gradle build.gradle checkstyle.xml dependency-check-suppression.xml ./
 COPY gradle ./gradle
 RUN chmod +x gradlew && ./gradlew --version
 
-COPY src ./src
-RUN ./gradlew bootJar --no-daemon
+COPY libs ./libs
+COPY services/legacy-api ./services/legacy-api
+COPY services/log-writer/build.gradle ./services/log-writer/build.gradle
+
+RUN ./gradlew :services:legacy-api:bootJar --no-daemon
 # app.jarはSpring Bootのfat jar(依存jarがBOOT-INF/lib配下にネストされる)のため、
 # `java -cp app.jar com.microsoft.playwright.CLI ...` では依存クラスを解決できない。
 # ブラウザインストールCLIの実行だけのために、実行時クラスパスのjarをフラットに展開しておく。
-RUN ./gradlew copyRuntimeLibs --no-daemon
+RUN ./gradlew :services:legacy-api:copyRuntimeLibs --no-daemon
 
 FROM eclipse-temurin:21-jre
 # openssh-client: WordPress SSHトランスポート用(phase10)。nodejs/npm: VSCode拡張機能(.vsix)の
@@ -21,12 +26,12 @@ FROM eclipse-temurin:21-jre
 RUN apt-get update && apt-get install -y --no-install-recommends openssh-client nodejs npm default-mysql-client \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY --from=build /workspace/build/libs/*.jar app.jar
+COPY --from=build /workspace/services/legacy-api/build/libs/*.jar app.jar
 # [blogcard]/[amazon]組み込みタグのスクレイピング(ContentCacheService)用にChromiumと、
 # それが動作するために必要なOS共有ライブラリ(--with-deps)をインストールする。
 # 一時的にコピーしたruntime-libsはブラウザインストール後は不要なため、同じレイヤーで削除する
 # (別レイヤーで消すとイメージサイズには残ってしまうため)。
-COPY --from=build /workspace/build/runtime-libs ./runtime-libs
+COPY --from=build /workspace/services/legacy-api/build/runtime-libs ./runtime-libs
 RUN apt-get update \
     && java -cp "runtime-libs/*" com.microsoft.playwright.CLI install --with-deps chromium \
     && rm -rf ./runtime-libs /var/lib/apt/lists/*

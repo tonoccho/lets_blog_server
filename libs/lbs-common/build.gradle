@@ -1,0 +1,19 @@
+// サービス間で共有する共通ライブラリのビルド構成。
+// この Issue (#553) では器のみを用意する。中身の実装は #554 (A3) で追加する。
+plugins {
+    id 'java-library'
+    id 'checkstyle'
+}
+
+dependencies {
+    compileOnly 'org.projectlombok:lombok:1.18.46'
+    annotationProcessor 'org.projectlombok:lombok:1.18.46'
+
+    testImplementation platform('org.junit:junit-bom:5.13.3')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
