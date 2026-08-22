@@ -10,6 +10,7 @@ RUN chmod +x gradlew && ./gradlew --version
 COPY libs ./libs
 COPY services/legacy-api ./services/legacy-api
 COPY services/log-writer/build.gradle ./services/log-writer/build.gradle
+COPY services/gateway/build.gradle ./services/gateway/build.gradle
 
 RUN ./gradlew :services:legacy-api:bootJar --no-daemon
 # app.jarはSpring Bootのfat jar(依存jarがBOOT-INF/lib配下にネストされる)のため、

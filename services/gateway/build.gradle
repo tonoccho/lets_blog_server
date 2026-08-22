@@ -1,0 +1,43 @@
+// api-gateway(#560)。Spring Cloud Gatewayはこの環境のSpring Boot 4.1系と非互換のため
+// (spring-cloud 2024.0.0系のオートコンフィグがBoot 3.x時代の
+// org.springframework.boot.autoconfigure.web.ServerProperties等、Boot 4.1では
+// 再編されクラスパスから無くなったクラスを前提にしており、起動時にNoClassDefFoundErrorになる。
+// 実機検証で確認済み)、Spring Cloudには依存せず、素のWebFlux + WebClientで
+// ルーティング/JWT検証/レート制限/相関IDを実装している。
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.1.0'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'jacoco'
+    id 'checkstyle'
+}
+
+dependencies {
+    implementation project(':libs:lbs-common')
+
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'io.github.resilience4j:resilience4j-ratelimiter:2.4.0'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'io.projectreactor:reactor-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    finalizedBy jacocoTestReport
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+    }
+}
