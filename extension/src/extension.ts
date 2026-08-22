@@ -42,6 +42,7 @@ import { messageOf, reportError } from './errorHandler';
 import { buildSmartCardTag, buildStandardLink, parseHttpUrl } from './urlPaste';
 import { ProofreadController } from './proofreadDiagnostics';
 import { FrontMatterCompletionProvider } from './frontMatterCompletionProvider';
+import { BodyCustomTagCompletionProvider } from './bodyCustomTagCompletionProvider';
 
 /**
  * 拡張の有効化。ロガーの初期化と全コマンドの登録を行う。
@@ -117,6 +118,15 @@ export function activate(context: vscode.ExtensionContext): void {
       ' ',
       '-',
       ':'
+    )
+  );
+
+  // issue #522: 本文中のカスタムタグ(`[tagname]〜[/tagname]`)へコード補完を提供する。
+  context.subscriptions.push(
+    vscode.languages.registerCompletionItemProvider(
+      { language: 'markdown' },
+      new BodyCustomTagCompletionProvider(context),
+      '['
     )
   );
 }
