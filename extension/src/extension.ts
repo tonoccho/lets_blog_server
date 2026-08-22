@@ -41,6 +41,7 @@ import { logger } from './logger';
 import { messageOf, reportError } from './errorHandler';
 import { buildSmartCardTag, buildStandardLink, parseHttpUrl } from './urlPaste';
 import { ProofreadController } from './proofreadDiagnostics';
+import { FrontMatterCompletionProvider } from './frontMatterCompletionProvider';
 
 /**
  * 拡張の有効化。ロガーの初期化と全コマンドの登録を行う。
@@ -107,6 +108,17 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(registerDiagramCursorContext());
+
+  // issue #521: frontmatterのstatus/categories/tagsへコード補完を提供する。
+  context.subscriptions.push(
+    vscode.languages.registerCompletionItemProvider(
+      { language: 'markdown' },
+      new FrontMatterCompletionProvider(context),
+      ' ',
+      '-',
+      ':'
+    )
+  );
 }
 
 /**
