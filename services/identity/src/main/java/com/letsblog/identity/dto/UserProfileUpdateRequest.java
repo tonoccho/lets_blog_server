@@ -1,7 +1,7 @@
-package com.letsblog.api.dto;
+package com.letsblog.identity.dto;
 
-import com.letsblog.api.domain.CustomLink;
-import com.letsblog.api.domain.SocialLinks;
+import com.letsblog.identity.domain.CustomLink;
+import com.letsblog.identity.domain.SocialLinks;
 
 import java.util.List;
 

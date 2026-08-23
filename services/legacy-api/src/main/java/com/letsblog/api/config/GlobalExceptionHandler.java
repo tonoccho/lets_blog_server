@@ -30,7 +30,6 @@ import com.letsblog.api.service.ProjectNotFoundException;
 import com.letsblog.api.service.ProjectUserNotFoundException;
 import com.letsblog.api.service.ProvisioningException;
 import com.letsblog.api.service.QrCodeGenerationException;
-import com.letsblog.api.service.RoleNotFoundException;
 import com.letsblog.api.service.SiteAlreadyProvisionedException;
 import com.letsblog.api.service.SiteNotFoundException;
 import com.letsblog.api.service.SshKeyPairNotFoundException;
@@ -105,11 +104,6 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ProjectUserNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleProjectUserNotFound(ProjectUserNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
-    }
-
-    @ExceptionHandler(RoleNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleRoleNotFound(RoleNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 

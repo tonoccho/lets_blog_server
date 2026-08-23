@@ -1,0 +1,45 @@
+server:
+  port: 8080
+
+logging:
+  level:
+    root: INFO
+    com.letsblog.identity: DEBUG
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+
+spring:
+  application:
+    name: identity
+  # ユーザー/ロール管理を扱う(#561)。現時点ではlegacy-apiと同一の物理スキーマ(lets_blog)上の
+  # users/roles/role_permissions/user_rolesテーブルを直接参照する(ADR-0004が求める
+  # スキーマ分離自体は本Issueのスコープ外。両サービスが同一テーブルを直接参照する状態は
+  # 移行期間中の暫定措置であり、将来のスキーマ分離Issueで解消する)。
+  # そのためFlywayは持たず(移行管理は引き続きlegacy-api側が担う)、ddl-auto: validateで
+  # 既存スキーマとの整合のみ確認する。
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lets_blog?useSSL=false&serverTimezone=UTC}
+    username: ${SPRING_DATASOURCE_USERNAME:lbs_app}
+    password: ${SPRING_DATASOURCE_PASSWORD:lbs_app}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+# GitHubトークンの暗号化(user.githubTokenEncrypted)に使う。legacy-apiと同じ物理カラムを
+# 参照するため、legacy-apiと同一のAPP_ENCRYPTION_KEYを共有する必要がある。
+app:
+  encryption-key: ${APP_ENCRYPTION_KEY:}

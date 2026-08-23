@@ -5,13 +5,8 @@ import com.letsblog.common.crypto.CredentialCipher;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.User;
 import com.letsblog.api.dto.LoginResponse;
-import com.letsblog.api.dto.UpdateGithubTokenRequest;
-import com.letsblog.api.dto.UpdateUserPreferencesRequest;
 import com.letsblog.api.dto.UserCreateRequest;
-import com.letsblog.api.dto.UserProfileResponse;
-import com.letsblog.api.dto.UserProfileUpdateRequest;
 import com.letsblog.api.dto.UserResponse;
-import com.letsblog.api.dto.UserUpdateRequest;
 import com.letsblog.api.repository.RoleRepository;
 import com.letsblog.api.repository.TwoFactorSecretRepository;
 import com.letsblog.api.repository.UserRepository;
@@ -20,12 +15,18 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.DateTimeException;
-import java.time.ZoneId;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * ログイン(パスワード照合・2FA・APIキー発行)、セルフサインアップ、初回セットアップを扱う。
+ * ユーザーのCRUD・プロフィール管理はidentity-serviceに移設した(#561)。現行の認証機構自体は
+ * カットオーバー計画(#591)を経てから撤去する方針のため、このクラスでは引き続き
+ * password_hash等の資格情報を直接扱う(ADR-0003参照)。
+ *
+ * <p>identity-serviceと同一の物理スキーマ(lets_blog)上のusers/rolesテーブルを参照する
+ * (ADR-0004が求めるスキーマ分離は将来のIssueで対応する)。
+ */
 @Service
 public class UserService {
 
@@ -83,11 +84,6 @@ public class UserService {
         return new LoginResponse(UserResponse.from(user), false, apiKey);
     }
 
-    @Transactional(readOnly = true)
-    public List<UserResponse> list() {
-        return userRepository.findAll().stream().map(UserResponse::from).toList();
-    }
-
     @AuditLog(action = AuditLogAction.USER_CREATED, resourceType = "USER")
     @Transactional
     public UserResponse create(UserCreateRequest request) {
@@ -109,82 +105,6 @@ public class UserService {
         return UserResponse.from(userRepository.save(user));
     }
 
-    @AuditLog(action = AuditLogAction.USER_UPDATED, resourceType = "USER")
-    @Transactional
-    public UserResponse update(Long id, UserUpdateRequest request) {
-        User user = userRepository.findById(id)
-                .orElseThrow(() -> new UserNotFoundException("id " + id + " のユーザーは登録されていません"));
-
-        if (request.role() != null) {
-            validateRole(request.role());
-            user.setRole(request.role());
-        }
-        if (request.password() != null && !request.password().isBlank()) {
-            user.setPasswordHash(passwordEncoder.encode(request.password()));
-        }
-
-        return UserResponse.from(userRepository.save(user));
-    }
-
-    @Transactional(readOnly = true)
-    public UserProfileResponse findUserWithProfile(Long id) {
-        User user = userRepository.findById(id)
-                .orElseThrow(() -> new UserNotFoundException("id " + id + " のユーザーは登録されていません"));
-        return UserProfileResponse.from(user);
-    }
-
-    @AuditLog(action = AuditLogAction.USER_UPDATED, resourceType = "USER")
-    @Transactional
-    public UserProfileResponse updateUserProfile(Long id, UserProfileUpdateRequest request) {
-        User user = userRepository.findById(id)
-                .orElseThrow(() -> new UserNotFoundException("id " + id + " のユーザーは登録されていません"));
-
-        user.setFirstName(request.firstName());
-        user.setLastName(request.lastName());
-        user.setDisplayName(request.displayName());
-        user.setNickname(request.nickname());
-        user.setWebsiteUrl(request.websiteUrl());
-        user.setBio(request.bio());
-        user.setLocale(request.locale());
-        user.setAvatarUrl(request.avatarUrl());
-        user.setDepartment(request.department());
-        user.setPosition(request.position());
-        user.setSocialLinks(request.socialLinks());
-        user.setCustomLinks(request.customLinks());
-
-        return UserProfileResponse.from(userRepository.save(user));
-    }
-
-    @AuditLog(action = AuditLogAction.USER_UPDATED, resourceType = "USER")
-    @Transactional
-    public UserProfileResponse updateUserPreferences(Long id, UpdateUserPreferencesRequest request) {
-        User user = userRepository.findById(id)
-                .orElseThrow(() -> new UserNotFoundException("id " + id + " のユーザーは登録されていません"));
-
-        try {
-            ZoneId.of(request.timezone());
-        } catch (DateTimeException e) {
-            throw new IllegalArgumentException("不正なタイムゾーンです: " + request.timezone());
-        }
-
-        user.setLocale(request.locale());
-        user.setTimezone(request.timezone());
-
-        return UserProfileResponse.from(userRepository.save(user));
-    }
-
-    @AuditLog(action = AuditLogAction.USER_UPDATED, resourceType = "USER")
-    @Transactional
-    public UserProfileResponse updateGithubToken(Long id, UpdateGithubTokenRequest request) {
-        User user = userRepository.findById(id)
-                .orElseThrow(() -> new UserNotFoundException("id " + id + " のユーザーは登録されていません"));
-
-        byte[] encrypted = credentialCipher.encrypt(request.githubToken());
-        user.setGithubTokenEncrypted(encrypted);
-
-        return UserProfileResponse.from(userRepository.save(user));
-    }
-
     /**
      * 内部利用のみ。ArticlePlanServiceからGitHub issue作成時に呼び出す想定。
      */
@@ -196,15 +116,6 @@ public class UserService {
             throw new IllegalStateException("ユーザーの GitHub トークンが設定されていません");
         }
         return credentialCipher.decrypt(user.getGithubTokenEncrypted());
-    }
-
-    @AuditLog(action = AuditLogAction.USER_DELETED, resourceType = "USER")
-    @Transactional
-    public void delete(Long id) {
-        if (!userRepository.existsById(id)) {
-            throw new UserNotFoundException("id " + id + " のユーザーは登録されていません");
-        }
-        userRepository.deleteById(id);
     }
 
     /**

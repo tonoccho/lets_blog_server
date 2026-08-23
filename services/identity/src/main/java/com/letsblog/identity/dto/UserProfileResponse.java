@@ -1,9 +1,9 @@
-package com.letsblog.api.dto;
+package com.letsblog.identity.dto;
 
-import com.letsblog.api.domain.CustomLink;
-import com.letsblog.api.domain.Role;
-import com.letsblog.api.domain.SocialLinks;
-import com.letsblog.api.domain.User;
+import com.letsblog.identity.domain.CustomLink;
+import com.letsblog.identity.domain.Role;
+import com.letsblog.identity.domain.SocialLinks;
+import com.letsblog.identity.domain.User;
 
 import java.time.LocalDateTime;
 import java.util.List;
