@@ -12,15 +12,20 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * プロジェクト単位のGitHubトークン/Brave Search APIキーを管理する(issue #184)。
+ * プロジェクト単位のGitHubトークン/Brave Search APIキー/Google Analytics/AdSense連携情報を管理する(issue #184)。
  * プロジェクトに値が設定されていればそれを優先し、未設定の場合は
  * GitHubトークンは操作者本人のユーザー設定(UserService)、Brave Search APIキーは
  * システム全体設定(SystemSettingService)へフォールバックする(既存の動作を壊さないため)。
+ * projects god-tableの分割(issue #571)により、GitHubトークンはprojects自体、Brave Search APIキーは
+ * project_ai_settings(ProjectAiSettingsService)、GA/AdSenseはanalytics_credentials(AnalyticsCredentialsService)
+ * にそれぞれ保持する。
  */
 @Service
 public class ProjectApiKeyService {
 
     private final ProjectRepository projectRepository;
+    private final ProjectAiSettingsService projectAiSettingsService;
+    private final AnalyticsCredentialsService analyticsCredentialsService;
     private final CredentialCipher credentialCipher;
     private final UserService userService;
     private final SystemSettingService systemSettingService;
@@ -30,6 +35,8 @@ public class ProjectApiKeyService {
 
     public ProjectApiKeyService(
             ProjectRepository projectRepository,
+            ProjectAiSettingsService projectAiSettingsService,
+            AnalyticsCredentialsService analyticsCredentialsService,
             CredentialCipher credentialCipher,
             UserService userService,
             SystemSettingService systemSettingService,
@@ -37,6 +44,8 @@ public class ProjectApiKeyService {
             ObjectMapper objectMapper,
             AdSenseClient adSenseClient) {
         this.projectRepository = projectRepository;
+        this.projectAiSettingsService = projectAiSettingsService;
+        this.analyticsCredentialsService = analyticsCredentialsService;
         this.credentialCipher = credentialCipher;
         this.userService = userService;
         this.systemSettingService = systemSettingService;
@@ -54,7 +63,8 @@ public class ProjectApiKeyService {
     @Transactional(readOnly = true)
     public boolean isBraveSearchApiKeyConfigured(Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        return getProject(projectId).hasBraveSearchApiKey();
+        requireProjectExists(projectId);
+        return projectAiSettingsService.hasBraveSearchApiKey(projectId);
     }
 
     @Transactional
@@ -76,48 +86,45 @@ public class ProjectApiKeyService {
     @Transactional
     public void setBraveSearchApiKey(Long projectId, String apiKey) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        Project project = getProject(projectId);
-        project.setBraveSearchApiKeyEncrypted(credentialCipher.encrypt(apiKey));
-        projectRepository.save(project);
+        requireProjectExists(projectId);
+        projectAiSettingsService.setBraveSearchApiKeyEncrypted(projectId, credentialCipher.encrypt(apiKey));
     }
 
     @Transactional
     public void clearBraveSearchApiKey(Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        Project project = getProject(projectId);
-        project.setBraveSearchApiKeyEncrypted(null);
-        projectRepository.save(project);
+        requireProjectExists(projectId);
+        projectAiSettingsService.setBraveSearchApiKeyEncrypted(projectId, null);
     }
 
     @Transactional(readOnly = true)
     public boolean isGoogleAnalyticsConfigured(Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        return getProject(projectId).hasGoogleAnalyticsCredentials();
+        requireProjectExists(projectId);
+        return analyticsCredentialsService.hasGoogleAnalyticsCredentials(projectId);
     }
 
     @Transactional(readOnly = true)
     public String getGoogleAnalyticsPropertyId(Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        return getProject(projectId).getGaPropertyId();
+        requireProjectExists(projectId);
+        return analyticsCredentialsService.getGaPropertyId(projectId);
     }
 
     @Transactional
     public void setGoogleAnalyticsCredentials(Long projectId, String propertyId, String serviceAccountJson) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         validateGoogleServiceAccountJson(serviceAccountJson);
-        Project project = getProject(projectId);
-        project.setGaPropertyId(propertyId);
-        project.setGaServiceAccountJsonEncrypted(credentialCipher.encrypt(serviceAccountJson));
-        projectRepository.save(project);
+        requireProjectExists(projectId);
+        analyticsCredentialsService.setGoogleAnalyticsCredentials(
+                projectId, propertyId, credentialCipher.encrypt(serviceAccountJson));
     }
 
     @Transactional
     public void clearGoogleAnalyticsCredentials(Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        Project project = getProject(projectId);
-        project.setGaPropertyId(null);
-        project.setGaServiceAccountJsonEncrypted(null);
-        projectRepository.save(project);
+        requireProjectExists(projectId);
+        analyticsCredentialsService.clearGoogleAnalyticsCredentials(projectId);
     }
 
     /**
@@ -126,11 +133,11 @@ public class ProjectApiKeyService {
      */
     @Transactional(readOnly = true)
     public GoogleServiceAccountKey resolveGoogleAnalyticsServiceAccountKey(Long projectId) {
-        Project project = getProject(projectId);
-        if (!project.hasGoogleAnalyticsCredentials()) {
+        requireProjectExists(projectId);
+        if (!analyticsCredentialsService.hasGoogleAnalyticsCredentials(projectId)) {
             return null;
         }
-        String json = credentialCipher.decrypt(project.getGaServiceAccountJsonEncrypted());
+        String json = credentialCipher.decrypt(analyticsCredentialsService.getGaServiceAccountJsonEncrypted(projectId));
         try {
             return objectMapper.readValue(json, GoogleServiceAccountKey.class);
         } catch (JsonProcessingException e) {
@@ -158,30 +165,27 @@ public class ProjectApiKeyService {
     @Transactional(readOnly = true)
     public AdSenseStatus getAdSenseStatus(Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        Project project = getProject(projectId);
+        requireProjectExists(projectId);
         return new AdSenseStatus(
-                project.hasAdsenseCredentials(),
-                project.getAdsenseAccountId(),
-                project.getAdsenseOauthClientId(),
-                project.hasAdsenseOauthClientSecret());
+                analyticsCredentialsService.hasAdsenseCredentials(projectId),
+                analyticsCredentialsService.getAdsenseAccountId(projectId),
+                analyticsCredentialsService.getAdsenseOauthClientId(projectId),
+                analyticsCredentialsService.hasAdsenseOauthClientSecret(projectId));
     }
 
     /** AdSenseパブリッシャーIDとGoogle OAuthクライアントID(秘匿情報ではない)をまとめて保存する。 */
     @Transactional
     public void setAdSenseSettings(Long projectId, String accountId, String clientId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        Project project = getProject(projectId);
-        project.setAdsenseAccountId(accountId);
-        project.setAdsenseOauthClientId(clientId);
-        projectRepository.save(project);
+        requireProjectExists(projectId);
+        analyticsCredentialsService.setAdSenseSettings(projectId, accountId, clientId);
     }
 
     @Transactional
     public void setAdSenseClientSecret(Long projectId, String clientSecret) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        Project project = getProject(projectId);
-        project.setAdsenseOauthClientSecretEncrypted(credentialCipher.encrypt(clientSecret));
-        projectRepository.save(project);
+        requireProjectExists(projectId);
+        analyticsCredentialsService.setAdSenseClientSecretEncrypted(projectId, credentialCipher.encrypt(clientSecret));
     }
 
     /**
@@ -193,25 +197,20 @@ public class ProjectApiKeyService {
     @Transactional
     public void completeAdSenseOAuth(Long projectId, String code, String redirectUri) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        Project project = getProject(projectId);
-        String clientSecret = project.hasAdsenseOauthClientSecret()
-                ? credentialCipher.decrypt(project.getAdsenseOauthClientSecretEncrypted())
+        requireProjectExists(projectId);
+        String clientSecret = analyticsCredentialsService.hasAdsenseOauthClientSecret(projectId)
+                ? credentialCipher.decrypt(analyticsCredentialsService.getAdsenseOauthClientSecretEncrypted(projectId))
                 : null;
         GoogleOAuthTokens tokens = adSenseClient.exchangeAuthorizationCode(
-                project.getAdsenseOauthClientId(), clientSecret, code, redirectUri);
-        project.setAdsenseRefreshTokenEncrypted(credentialCipher.encrypt(tokens.refreshToken()));
-        projectRepository.save(project);
+                analyticsCredentialsService.getAdsenseOauthClientId(projectId), clientSecret, code, redirectUri);
+        analyticsCredentialsService.setAdsenseRefreshTokenEncrypted(projectId, credentialCipher.encrypt(tokens.refreshToken()));
     }
 
     @Transactional
     public void clearAdSenseCredentials(Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        Project project = getProject(projectId);
-        project.setAdsenseAccountId(null);
-        project.setAdsenseRefreshTokenEncrypted(null);
-        project.setAdsenseOauthClientId(null);
-        project.setAdsenseOauthClientSecretEncrypted(null);
-        projectRepository.save(project);
+        requireProjectExists(projectId);
+        analyticsCredentialsService.clearAdSenseCredentials(projectId);
     }
 
     /**
@@ -220,11 +219,11 @@ public class ProjectApiKeyService {
      */
     @Transactional(readOnly = true)
     public String resolveAdSenseRefreshToken(Long projectId) {
-        Project project = getProject(projectId);
-        if (!project.hasAdsenseCredentials()) {
+        requireProjectExists(projectId);
+        if (!analyticsCredentialsService.hasAdsenseCredentials(projectId)) {
             return null;
         }
-        return credentialCipher.decrypt(project.getAdsenseRefreshTokenEncrypted());
+        return credentialCipher.decrypt(analyticsCredentialsService.getAdsenseRefreshTokenEncrypted(projectId));
     }
 
     /**
@@ -233,11 +232,11 @@ public class ProjectApiKeyService {
      */
     @Transactional(readOnly = true)
     public String resolveAdSenseOauthClientSecret(Long projectId) {
-        Project project = getProject(projectId);
-        if (!project.hasAdsenseOauthClientSecret()) {
+        requireProjectExists(projectId);
+        if (!analyticsCredentialsService.hasAdsenseOauthClientSecret(projectId)) {
             return null;
         }
-        return credentialCipher.decrypt(project.getAdsenseOauthClientSecretEncrypted());
+        return credentialCipher.decrypt(analyticsCredentialsService.getAdsenseOauthClientSecretEncrypted(projectId));
     }
 
     /**
@@ -260,9 +259,9 @@ public class ProjectApiKeyService {
      */
     @Transactional(readOnly = true)
     public String resolveBraveSearchApiKey(Long projectId) {
-        Project project = getProject(projectId);
-        if (project.hasBraveSearchApiKey()) {
-            return credentialCipher.decrypt(project.getBraveSearchApiKeyEncrypted());
+        requireProjectExists(projectId);
+        if (projectAiSettingsService.hasBraveSearchApiKey(projectId)) {
+            return credentialCipher.decrypt(projectAiSettingsService.getBraveSearchApiKeyEncrypted(projectId));
         }
         return systemSettingService.getBraveSearchApiKey();
     }
@@ -270,5 +269,9 @@ public class ProjectApiKeyService {
     private Project getProject(Long projectId) {
         return projectRepository.findById(projectId)
                 .orElseThrow(() -> new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません"));
+    }
+
+    private void requireProjectExists(Long projectId) {
+        getProject(projectId);
     }
 }

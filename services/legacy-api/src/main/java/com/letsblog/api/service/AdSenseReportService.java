@@ -23,16 +23,19 @@ public class AdSenseReportService {
 
     private final ProjectRepository projectRepository;
     private final ProjectApiKeyService projectApiKeyService;
+    private final AnalyticsCredentialsService analyticsCredentialsService;
     private final AdSenseClient adSenseClient;
     private final AdminAuthorizationService adminAuthorizationService;
 
     public AdSenseReportService(
             ProjectRepository projectRepository,
             ProjectApiKeyService projectApiKeyService,
+            AnalyticsCredentialsService analyticsCredentialsService,
             AdSenseClient adSenseClient,
             AdminAuthorizationService adminAuthorizationService) {
         this.projectRepository = projectRepository;
         this.projectApiKeyService = projectApiKeyService;
+        this.analyticsCredentialsService = analyticsCredentialsService;
         this.adSenseClient = adSenseClient;
         this.adminAuthorizationService = adminAuthorizationService;
     }
@@ -41,15 +44,16 @@ public class AdSenseReportService {
     public AdSenseReportResponse getReport(Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         Project project = getProject(projectId);
-        if (!project.hasAdsenseCredentials() || project.getProductionSiteId() == null) {
+        if (!analyticsCredentialsService.hasAdsenseCredentials(projectId) || project.getProductionSiteId() == null) {
             return AdSenseReportResponse.notEligible();
         }
         try {
             String refreshToken = projectApiKeyService.resolveAdSenseRefreshToken(projectId);
             String clientSecret = projectApiKeyService.resolveAdSenseOauthClientSecret(projectId);
-            String accessToken = adSenseClient.refreshAccessToken(
-                    project.getAdsenseOauthClientId(), clientSecret, refreshToken);
-            AdSenseReport report = adSenseClient.fetchReport(accessToken, project.getAdsenseAccountId(), DATE_RANGE);
+            String clientId = analyticsCredentialsService.getAdsenseOauthClientId(projectId);
+            String accessToken = adSenseClient.refreshAccessToken(clientId, clientSecret, refreshToken);
+            String accountId = analyticsCredentialsService.getAdsenseAccountId(projectId);
+            AdSenseReport report = adSenseClient.fetchReport(accessToken, accountId, DATE_RANGE);
             return AdSenseReportResponse.of(report, PERIOD_LABEL);
         } catch (RuntimeException e) {
             log.warn("AdSenseレポートの取得に失敗しました(project={}): {}", projectId, e.getMessage());

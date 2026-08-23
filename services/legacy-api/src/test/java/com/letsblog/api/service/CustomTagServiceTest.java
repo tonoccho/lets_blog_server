@@ -2,7 +2,6 @@ package com.letsblog.api.service;
 
 import com.letsblog.api.domain.CustomTag;
 import com.letsblog.api.domain.EmbedTagType;
-import com.letsblog.api.domain.Project;
 import com.letsblog.api.dto.CustomTagRequest;
 import com.letsblog.api.dto.CustomTagResponse;
 import com.letsblog.api.dto.TagDesignColors;
@@ -254,10 +253,7 @@ class CustomTagServiceTest {
         tag.setCssContent(".alert { color: red; }\n.alert .icon { width: 1em; }");
         when(customTagRepository.findByProjectIdOrProjectIdIsNull(5L)).thenReturn(List.of(tag));
         stubEmbedTagCss(5L);
-        Project project = new Project();
-        project.setSlug("my-blog");
-        when(projectService.getProjectEntity(5L)).thenReturn(project);
-        when(projectService.resolveCssSelectorPrefix(project)).thenReturn("my-blog");
+        when(projectService.resolveCssSelectorPrefix(5L)).thenReturn("my-blog");
 
         String bundle = service.buildCssBundle(5L);
 
@@ -272,10 +268,7 @@ class CustomTagServiceTest {
         tag.setCssContent(".alert { color: red; }");
         when(customTagRepository.findByProjectId(5L)).thenReturn(List.of(tag));
         stubEmbedTagCss(5L);
-        Project project = new Project();
-        project.setSlug("my-blog");
-        when(projectService.getProjectEntity(5L)).thenReturn(project);
-        when(projectService.resolveCssSelectorPrefix(project)).thenReturn("custom-prefix");
+        when(projectService.resolveCssSelectorPrefix(5L)).thenReturn("custom-prefix");
 
         String bundle = service.buildProjectCssBundle(5L);
 
@@ -291,10 +284,7 @@ class CustomTagServiceTest {
         when(tocStyleRenderService.buildStyle(colors)).thenReturn(".lb-toc-list{margin:1em;}.lb-toc-list a{color:red;}");
         when(blogCardTagRenderService.buildStyle(colors)).thenReturn(".blogcard-css{}");
         when(amazonTagRenderService.buildStyle(colors)).thenReturn(".amazon-css{}");
-        Project project = new Project();
-        project.setSlug("my-blog");
-        when(projectService.getProjectEntity(5L)).thenReturn(project);
-        when(projectService.resolveCssSelectorPrefix(project)).thenReturn("my-blog");
+        when(projectService.resolveCssSelectorPrefix(5L)).thenReturn("my-blog");
 
         String bundle = service.buildProjectCssBundle(5L);
 
@@ -312,10 +302,7 @@ class CustomTagServiceTest {
         when(tocStyleRenderService.buildStyle(colors)).thenReturn(".toc-css{}");
         when(blogCardTagRenderService.buildStyle(colors)).thenReturn(".blogcard-css{}");
         when(amazonTagRenderService.buildStyle(colors)).thenReturn(".amazon-css{}");
-        Project project = new Project();
-        project.setSlug("my-blog");
-        when(projectService.getProjectEntity(5L)).thenReturn(project);
-        when(projectService.resolveCssSelectorPrefix(project)).thenReturn("my-blog");
+        when(projectService.resolveCssSelectorPrefix(5L)).thenReturn("my-blog");
 
         String bundle = service.buildCssBundle(5L);
 
@@ -331,10 +318,7 @@ class CustomTagServiceTest {
         tag.setCssContent(".alert,\n.warning {\n  color: red;\n}");
         when(customTagRepository.findByProjectId(5L)).thenReturn(List.of(tag));
         stubEmbedTagCss(5L);
-        Project project = new Project();
-        project.setSlug("my-blog");
-        when(projectService.getProjectEntity(5L)).thenReturn(project);
-        when(projectService.resolveCssSelectorPrefix(project)).thenReturn("my-blog");
+        when(projectService.resolveCssSelectorPrefix(5L)).thenReturn("my-blog");
 
         String bundle = service.buildProjectCssBundle(5L);
 
@@ -348,10 +332,7 @@ class CustomTagServiceTest {
         tag.setCssContent("@media (max-width: 600px) { .alert { color: red; } }");
         when(customTagRepository.findByProjectId(5L)).thenReturn(List.of(tag));
         stubEmbedTagCss(5L);
-        Project project = new Project();
-        project.setSlug("my-blog");
-        when(projectService.getProjectEntity(5L)).thenReturn(project);
-        when(projectService.resolveCssSelectorPrefix(project)).thenReturn("my-blog");
+        when(projectService.resolveCssSelectorPrefix(5L)).thenReturn("my-blog");
 
         String bundle = service.buildProjectCssBundle(5L);
 
@@ -366,10 +347,7 @@ class CustomTagServiceTest {
         tag.setCssContent("@keyframes spin { 0% { opacity: 0; } 100% { opacity: 1; } }");
         when(customTagRepository.findByProjectId(5L)).thenReturn(List.of(tag));
         stubEmbedTagCss(5L);
-        Project project = new Project();
-        project.setSlug("my-blog");
-        when(projectService.getProjectEntity(5L)).thenReturn(project);
-        when(projectService.resolveCssSelectorPrefix(project)).thenReturn("my-blog");
+        when(projectService.resolveCssSelectorPrefix(5L)).thenReturn("my-blog");
 
         String bundle = service.buildProjectCssBundle(5L);
 
@@ -420,10 +398,7 @@ class CustomTagServiceTest {
 
     @Test
     void previewCss_統合CSSバンドルと同じルールでプレフィックスを付与する() {
-        Project project = new Project();
-        project.setSlug("my-blog");
-        when(projectService.getProjectEntity(5L)).thenReturn(project);
-        when(projectService.resolveCssSelectorPrefix(project)).thenReturn("my-blog");
+        when(projectService.resolveCssSelectorPrefix(5L)).thenReturn("my-blog");
 
         String css = service.previewCss(".alert { color: red; }", 5L);
 

@@ -41,30 +41,30 @@ class GoogleAnalyticsReportServiceTest {
     @Mock
     private ProjectApiKeyService projectApiKeyService;
     @Mock
+    private AnalyticsCredentialsService analyticsCredentialsService;
+    @Mock
     private GoogleAnalyticsClient googleAnalyticsClient;
     @Mock
     private AdminAuthorizationService adminAuthorizationService;
 
     private GoogleAnalyticsReportService service() {
         return new GoogleAnalyticsReportService(
-                projectRepository, projectApiKeyService, googleAnalyticsClient, adminAuthorizationService);
+                projectRepository, projectApiKeyService, analyticsCredentialsService, googleAnalyticsClient,
+                adminAuthorizationService);
     }
 
-    private Project configuredProject() {
+    private Project projectWithProductionSite() {
         Project project = new Project();
         project.setId(1L);
         project.setProductionSiteId(99L);
-        project.setGaPropertyId("123456789");
-        project.setGaServiceAccountJsonEncrypted(new byte[]{1, 2, 3});
         return project;
     }
 
     @Test
     void getReport_GA未設定なら未対象でAPIを呼ばない() {
-        Project project = new Project();
-        project.setId(1L);
-        project.setProductionSiteId(99L);
+        Project project = projectWithProductionSite();
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(false);
 
         GoogleAnalyticsReportResponse response = service().getReport(1L);
 
@@ -76,9 +76,8 @@ class GoogleAnalyticsReportServiceTest {
     void getReport_本番サイト未紐付けなら未対象でAPIを呼ばない() {
         Project project = new Project();
         project.setId(1L);
-        project.setGaPropertyId("123456789");
-        project.setGaServiceAccountJsonEncrypted(new byte[]{1, 2, 3});
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
 
         GoogleAnalyticsReportResponse response = service().getReport(1L);
 
@@ -88,8 +87,10 @@ class GoogleAnalyticsReportServiceTest {
 
     @Test
     void getReport_設定済みかつ本番サイトありならレポートを取得する() {
-        Project project = configuredProject();
+        Project project = projectWithProductionSite();
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
+        when(analyticsCredentialsService.getGaPropertyId(1L)).thenReturn("123456789");
         GoogleServiceAccountKey key = new GoogleServiceAccountKey("svc@example.com", "key", null);
         when(projectApiKeyService.resolveGoogleAnalyticsServiceAccountKey(1L)).thenReturn(key);
         when(googleAnalyticsClient.fetchReport(eq(key), eq("123456789"), anyInt()))
@@ -112,8 +113,10 @@ class GoogleAnalyticsReportServiceTest {
 
     @Test
     void getReport_取得に失敗したら対象のままerrorMessageを設定する() {
-        Project project = configuredProject();
+        Project project = projectWithProductionSite();
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
+        when(analyticsCredentialsService.getGaPropertyId(1L)).thenReturn("123456789");
         GoogleServiceAccountKey key = new GoogleServiceAccountKey("svc@example.com", "key", null);
         when(projectApiKeyService.resolveGoogleAnalyticsServiceAccountKey(1L)).thenReturn(key);
         when(googleAnalyticsClient.fetchReport(eq(key), eq("123456789"), anyInt()))

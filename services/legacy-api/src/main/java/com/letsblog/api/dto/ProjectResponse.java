@@ -1,9 +1,15 @@
 package com.letsblog.api.dto;
 
 import com.letsblog.api.domain.Project;
+import com.letsblog.api.domain.ProjectContentSettings;
+import com.letsblog.api.domain.ProjectImageSettings;
 
 import java.time.LocalDateTime;
 
+/**
+ * projectsの縮小と、project_image_settings(media)/project_content_settings(content)への
+ * 設定分割後も、Webの画面には従来どおり1つのレスポンスとしてまとめて返す(issue #571)。
+ */
 public record ProjectResponse(
         Long id,
         String name,
@@ -26,7 +32,8 @@ public record ProjectResponse(
         LocalDateTime updatedAt
 ) {
     public static ProjectResponse from(
-            Project project, SiteResponse localSite, SiteResponse testSite, SiteResponse productionSite) {
+            Project project, SiteResponse localSite, SiteResponse testSite, SiteResponse productionSite,
+            ProjectImageSettings imageSettings, ProjectContentSettings contentSettings) {
         return new ProjectResponse(
                 project.getId(),
                 project.getName(),
@@ -36,15 +43,15 @@ public record ProjectResponse(
                 productionSite,
                 project.getMasterEnvironment(),
                 project.getGithubRepository(),
-                project.getCssSelectorPrefix(),
-                project.getDefaultNegativePrompt(),
-                project.getDefaultQualityPrompt(),
-                project.getDefaultGeneratedImageWidth(),
-                project.getDefaultGeneratedImageHeight(),
-                project.getDefaultArticleImageLongEdgePx(),
-                project.getBlockSexualContent(),
-                project.getBlockViolentContent(),
-                project.getBlockDiscriminatoryContent(),
+                contentSettings == null ? null : contentSettings.getCssSelectorPrefix(),
+                imageSettings == null ? null : imageSettings.getDefaultNegativePrompt(),
+                imageSettings == null ? null : imageSettings.getDefaultQualityPrompt(),
+                imageSettings == null ? null : imageSettings.getDefaultGeneratedImageWidth(),
+                imageSettings == null ? null : imageSettings.getDefaultGeneratedImageHeight(),
+                imageSettings == null ? null : imageSettings.getDefaultArticleImageLongEdgePx(),
+                imageSettings == null ? null : imageSettings.getBlockSexualContent(),
+                imageSettings == null ? null : imageSettings.getBlockViolentContent(),
+                imageSettings == null ? null : imageSettings.getBlockDiscriminatoryContent(),
                 project.getCreatedAt(),
                 project.getUpdatedAt()
         );

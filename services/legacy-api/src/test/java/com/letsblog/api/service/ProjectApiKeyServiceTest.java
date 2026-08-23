@@ -27,13 +27,19 @@ import static org.mockito.Mockito.when;
 
 /**
  * ProjectApiKeyServiceの回帰テスト(issue #184)。プロジェクト設定の優先とユーザー/システム全体設定への
- * フォールバック、暗号化保存、admin権限ゲートを検証する。
+ * フォールバック、暗号化保存、admin権限ゲートを検証する。GitHubトークンはprojects自体、
+ * Brave Search APIキーはproject_ai_settings(ProjectAiSettingsService)、GA/AdSenseはanalytics_credentials
+ * (AnalyticsCredentialsService)に保持する(issue #571のprojects god-table分割)。
  */
 @ExtendWith(MockitoExtension.class)
 class ProjectApiKeyServiceTest {
 
     @Mock
     private ProjectRepository projectRepository;
+    @Mock
+    private ProjectAiSettingsService projectAiSettingsService;
+    @Mock
+    private AnalyticsCredentialsService analyticsCredentialsService;
     @Mock
     private UserService userService;
     @Mock
@@ -49,8 +55,8 @@ class ProjectApiKeyServiceTest {
 
     private ProjectApiKeyService service() {
         return new ProjectApiKeyService(
-                projectRepository, credentialCipher, userService, systemSettingService, adminAuthorizationService,
-                objectMapper, adSenseClient);
+                projectRepository, projectAiSettingsService, analyticsCredentialsService, credentialCipher,
+                userService, systemSettingService, adminAuthorizationService, objectMapper, adSenseClient);
     }
 
     private static final String VALID_SERVICE_ACCOUNT_JSON =
@@ -87,8 +93,9 @@ class ProjectApiKeyServiceTest {
     @Test
     void resolveBraveSearchApiKey_プロジェクト設定があればそれを優先する() {
         Project project = projectWithId(1L);
-        project.setBraveSearchApiKeyEncrypted(credentialCipher.encrypt("project-key"));
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectAiSettingsService.hasBraveSearchApiKey(1L)).thenReturn(true);
+        when(projectAiSettingsService.getBraveSearchApiKeyEncrypted(1L)).thenReturn(credentialCipher.encrypt("project-key"));
 
         String key = service().resolveBraveSearchApiKey(1L);
 
@@ -99,6 +106,7 @@ class ProjectApiKeyServiceTest {
     void resolveBraveSearchApiKey_未設定ならシステム全体設定にフォールバックする() {
         Project project = projectWithId(1L);
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectAiSettingsService.hasBraveSearchApiKey(1L)).thenReturn(false);
         when(systemSettingService.getBraveSearchApiKey()).thenReturn("system-key");
 
         String key = service().resolveBraveSearchApiKey(1L);
@@ -141,8 +149,8 @@ class ProjectApiKeyServiceTest {
     @Test
     void isBraveSearchApiKeyConfigured_設定有無を返す() {
         Project project = projectWithId(1L);
-        project.setBraveSearchApiKeyEncrypted(credentialCipher.encrypt("key"));
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectAiSettingsService.hasBraveSearchApiKey(1L)).thenReturn(true);
 
         assertTrue(service().isBraveSearchApiKeyConfigured(1L));
     }
@@ -156,11 +164,10 @@ class ProjectApiKeyServiceTest {
 
         service().setGoogleAnalyticsCredentials(1L, "123456789", VALID_SERVICE_ACCOUNT_JSON);
 
-        ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
-        verify(projectRepository).save(captor.capture());
-        assertEquals("123456789", captor.getValue().getGaPropertyId());
-        assertEquals(VALID_SERVICE_ACCOUNT_JSON,
-                credentialCipher.decrypt(captor.getValue().getGaServiceAccountJsonEncrypted()));
+        ArgumentCaptor<byte[]> captor = ArgumentCaptor.forClass(byte[].class);
+        verify(analyticsCredentialsService).setGoogleAnalyticsCredentials(org.mockito.ArgumentMatchers.eq(1L),
+                org.mockito.ArgumentMatchers.eq("123456789"), captor.capture());
+        assertEquals(VALID_SERVICE_ACCOUNT_JSON, credentialCipher.decrypt(captor.getValue()));
     }
 
     @Test
@@ -186,31 +193,27 @@ class ProjectApiKeyServiceTest {
     @Test
     void isGoogleAnalyticsConfigured_設定有無を返す() {
         Project project = projectWithId(1L);
-        project.setGaPropertyId("123456789");
-        project.setGaServiceAccountJsonEncrypted(credentialCipher.encrypt(VALID_SERVICE_ACCOUNT_JSON));
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
 
         assertTrue(service().isGoogleAnalyticsConfigured(1L));
     }
 
     @Test
-    void clearGoogleAnalyticsCredentials_両方nullにして保存する() {
+    void clearGoogleAnalyticsCredentials_サービス側のクリアを呼ぶ() {
         Project project = projectWithId(1L);
-        project.setGaPropertyId("123456789");
-        project.setGaServiceAccountJsonEncrypted(credentialCipher.encrypt(VALID_SERVICE_ACCOUNT_JSON));
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
 
         service().clearGoogleAnalyticsCredentials(1L);
 
-        ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
-        verify(projectRepository).save(captor.capture());
-        assertFalse(captor.getValue().hasGoogleAnalyticsCredentials());
+        verify(analyticsCredentialsService).clearGoogleAnalyticsCredentials(1L);
     }
 
     @Test
     void resolveGoogleAnalyticsServiceAccountKey_未設定ならnull() {
         Project project = projectWithId(1L);
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(false);
 
         assertNull(service().resolveGoogleAnalyticsServiceAccountKey(1L));
     }
@@ -218,9 +221,10 @@ class ProjectApiKeyServiceTest {
     @Test
     void resolveGoogleAnalyticsServiceAccountKey_設定済みなら復号して解析する() {
         Project project = projectWithId(1L);
-        project.setGaPropertyId("123456789");
-        project.setGaServiceAccountJsonEncrypted(credentialCipher.encrypt(VALID_SERVICE_ACCOUNT_JSON));
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
+        when(analyticsCredentialsService.getGaServiceAccountJsonEncrypted(1L))
+                .thenReturn(credentialCipher.encrypt(VALID_SERVICE_ACCOUNT_JSON));
 
         GoogleServiceAccountKey key = service().resolveGoogleAnalyticsServiceAccountKey(1L);
 
@@ -236,10 +240,7 @@ class ProjectApiKeyServiceTest {
 
         service().setAdSenseSettings(1L, "pub-1234567890123456", "client-id");
 
-        ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
-        verify(projectRepository).save(captor.capture());
-        assertEquals("pub-1234567890123456", captor.getValue().getAdsenseAccountId());
-        assertEquals("client-id", captor.getValue().getAdsenseOauthClientId());
+        verify(analyticsCredentialsService).setAdSenseSettings(1L, "pub-1234567890123456", "client-id");
     }
 
     @Test
@@ -249,64 +250,58 @@ class ProjectApiKeyServiceTest {
 
         service().setAdSenseClientSecret(1L, "client-secret");
 
-        ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
-        verify(projectRepository).save(captor.capture());
-        assertEquals("client-secret",
-                credentialCipher.decrypt(captor.getValue().getAdsenseOauthClientSecretEncrypted()));
+        ArgumentCaptor<byte[]> captor = ArgumentCaptor.forClass(byte[].class);
+        verify(analyticsCredentialsService).setAdSenseClientSecretEncrypted(
+                org.mockito.ArgumentMatchers.eq(1L), captor.capture());
+        assertEquals("client-secret", credentialCipher.decrypt(captor.getValue()));
     }
 
     @Test
     void completeAdSenseOAuth_プロジェクトのクライアント資格情報で認可コードをリフレッシュトークンに交換して暗号化保存する() {
         Project project = projectWithId(1L);
-        project.setAdsenseOauthClientId("client-id");
-        project.setAdsenseOauthClientSecretEncrypted(credentialCipher.encrypt("client-secret"));
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(analyticsCredentialsService.hasAdsenseOauthClientSecret(1L)).thenReturn(true);
+        when(analyticsCredentialsService.getAdsenseOauthClientSecretEncrypted(1L))
+                .thenReturn(credentialCipher.encrypt("client-secret"));
+        when(analyticsCredentialsService.getAdsenseOauthClientId(1L)).thenReturn("client-id");
         when(adSenseClient.exchangeAuthorizationCode(
                 "client-id", "client-secret", "auth-code", "https://example.com/callback"))
                 .thenReturn(new GoogleOAuthTokens("access-token", "refresh-token"));
 
         service().completeAdSenseOAuth(1L, "auth-code", "https://example.com/callback");
 
-        ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
-        verify(projectRepository).save(captor.capture());
-        assertEquals("refresh-token",
-                credentialCipher.decrypt(captor.getValue().getAdsenseRefreshTokenEncrypted()));
+        ArgumentCaptor<byte[]> captor = ArgumentCaptor.forClass(byte[].class);
+        verify(analyticsCredentialsService).setAdsenseRefreshTokenEncrypted(
+                org.mockito.ArgumentMatchers.eq(1L), captor.capture());
+        assertEquals("refresh-token", credentialCipher.decrypt(captor.getValue()));
     }
 
     @Test
     void getAdSenseStatus_accountIdとrefreshTokenの両方が必要() {
         Project project = projectWithId(1L);
-        project.setAdsenseAccountId("pub-1234567890123456");
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(analyticsCredentialsService.hasAdsenseCredentials(1L)).thenReturn(false, true);
+        when(analyticsCredentialsService.getAdsenseAccountId(1L)).thenReturn("pub-1234567890123456");
 
         assertFalse(service().getAdSenseStatus(1L).configured());
-
-        project.setAdsenseRefreshTokenEncrypted(credentialCipher.encrypt("refresh-token"));
         assertTrue(service().getAdSenseStatus(1L).configured());
     }
 
     @Test
-    void clearAdSenseCredentials_全項目nullにして保存する() {
+    void clearAdSenseCredentials_サービス側のクリアを呼ぶ() {
         Project project = projectWithId(1L);
-        project.setAdsenseAccountId("pub-1234567890123456");
-        project.setAdsenseRefreshTokenEncrypted(credentialCipher.encrypt("refresh-token"));
-        project.setAdsenseOauthClientId("client-id");
-        project.setAdsenseOauthClientSecretEncrypted(credentialCipher.encrypt("client-secret"));
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
 
         service().clearAdSenseCredentials(1L);
 
-        ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
-        verify(projectRepository).save(captor.capture());
-        Project saved = captor.getValue();
-        assertFalse(saved.hasAdsenseCredentials());
-        assertFalse(saved.hasAdsenseOauthClient());
+        verify(analyticsCredentialsService).clearAdSenseCredentials(1L);
     }
 
     @Test
     void resolveAdSenseRefreshToken_未設定ならnull() {
         Project project = projectWithId(1L);
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(analyticsCredentialsService.hasAdsenseCredentials(1L)).thenReturn(false);
 
         assertNull(service().resolveAdSenseRefreshToken(1L));
     }
@@ -314,9 +309,10 @@ class ProjectApiKeyServiceTest {
     @Test
     void resolveAdSenseRefreshToken_設定済みなら復号する() {
         Project project = projectWithId(1L);
-        project.setAdsenseAccountId("pub-1234567890123456");
-        project.setAdsenseRefreshTokenEncrypted(credentialCipher.encrypt("refresh-token"));
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(analyticsCredentialsService.hasAdsenseCredentials(1L)).thenReturn(true);
+        when(analyticsCredentialsService.getAdsenseRefreshTokenEncrypted(1L))
+                .thenReturn(credentialCipher.encrypt("refresh-token"));
 
         assertEquals("refresh-token", service().resolveAdSenseRefreshToken(1L));
     }
@@ -324,8 +320,10 @@ class ProjectApiKeyServiceTest {
     @Test
     void resolveAdSenseOauthClientSecret_設定済みなら復号する() {
         Project project = projectWithId(1L);
-        project.setAdsenseOauthClientSecretEncrypted(credentialCipher.encrypt("client-secret"));
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(analyticsCredentialsService.hasAdsenseOauthClientSecret(1L)).thenReturn(true);
+        when(analyticsCredentialsService.getAdsenseOauthClientSecretEncrypted(1L))
+                .thenReturn(credentialCipher.encrypt("client-secret"));
 
         assertEquals("client-secret", service().resolveAdSenseOauthClientSecret(1L));
     }

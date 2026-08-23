@@ -32,7 +32,7 @@ public class RenderedContentWrapperService {
         }
         String className = projectId == null
                 ? WRAPPER_CLASS
-                : WRAPPER_CLASS + " " + projectService.resolveCssSelectorPrefix(projectService.getProjectEntity(projectId));
+                : WRAPPER_CLASS + " " + projectService.resolveCssSelectorPrefix(projectId);
         return "<div class=\"" + className + "\">" + html + "</div>";
     }
 }
