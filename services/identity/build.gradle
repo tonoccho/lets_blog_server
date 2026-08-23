@@ -24,6 +24,8 @@ dependencies {
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.security:spring-security-test'
+    // JWTを必要とするテストの共通フィクスチャ(#587)。
+    testImplementation testFixtures(project(':libs:lbs-common'))
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
