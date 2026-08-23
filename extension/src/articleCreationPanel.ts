@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as api from './apiClient';
-import { Actor, getActor, getProjectId, getServerUrl, requireApiKey, setProjectId } from './config';
+import { Actor, getActor, getProjectId, getServerUrl, requireAccessToken, setProjectId } from './config';
 import { buildArticleFrontMatter } from './frontMatter';
 import { createArticleScaffold, openArticle, requireWorkspaceRoot } from './articleScaffold';
 import { showSingletonPanel, WebviewPanelBase } from './webviewPanelBase';
@@ -58,7 +58,7 @@ export class ArticleCreationPanel extends WebviewPanelBase<
   }
 
   private async _handleLoadProjects(): Promise<void> {
-    const apiKey = await requireApiKey(this.context);
+    const apiKey = await requireAccessToken(this.context);
     const actor = await getActor(this.context);
     const projects = await api.listProjects(getServerUrl(), apiKey, actor);
     this.postMessage('projectList', {
@@ -74,7 +74,7 @@ export class ArticleCreationPanel extends WebviewPanelBase<
    */
   private async _handleLoadPostStatuses(): Promise<void> {
     try {
-      const apiKey = await requireApiKey(this.context);
+      const apiKey = await requireAccessToken(this.context);
       const statuses = await api.getPostStatuses(getServerUrl(), apiKey);
       this.postMessage('postStatusList', { statuses });
     } catch {
@@ -94,7 +94,7 @@ export class ArticleCreationPanel extends WebviewPanelBase<
   private async _handleLoadCategories(
     message: Extract<ArticleCreationInboundMessage, { command: 'loadCategories' }>
   ): Promise<void> {
-    const apiKey = await requireApiKey(this.context);
+    const apiKey = await requireAccessToken(this.context);
     const actor = await getActor(this.context);
     if (!actor) {
       throw new Error('ログインしていません。「Let\'s Blog: Login」を先に実行してください。');
@@ -116,7 +116,7 @@ export class ArticleCreationPanel extends WebviewPanelBase<
   private async _handleSendChat(
     message: Extract<ArticleCreationInboundMessage, { command: 'sendChat' }>
   ): Promise<void> {
-    const apiKey = await requireApiKey(this.context);
+    const apiKey = await requireAccessToken(this.context);
     const actor = await this._requireActor();
     const response = await this.runCancellable((signal) =>
       api.postPlanChat(
@@ -135,7 +135,7 @@ export class ArticleCreationPanel extends WebviewPanelBase<
   private async _handleSuggestMetadata(
     message: Extract<ArticleCreationInboundMessage, { command: 'suggestMetadata' }>
   ): Promise<void> {
-    const apiKey = await requireApiKey(this.context);
+    const apiKey = await requireAccessToken(this.context);
     const actor = await this._requireActor();
     const suggestion = await this.runCancellable((signal) =>
       api.suggestMetadata(getServerUrl(), apiKey, actor, message.projectId, message.history, signal)
@@ -147,7 +147,7 @@ export class ArticleCreationPanel extends WebviewPanelBase<
   private async _handleSuggestStructure(
     message: Extract<ArticleCreationInboundMessage, { command: 'suggestStructure' }>
   ): Promise<void> {
-    const apiKey = await requireApiKey(this.context);
+    const apiKey = await requireAccessToken(this.context);
     const actor = await this._requireActor();
     const suggestion = await this.runCancellable((signal) =>
       api.suggestArticleStructure(getServerUrl(), apiKey, actor, message.projectId, message.history, signal)

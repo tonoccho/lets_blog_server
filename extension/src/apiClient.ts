@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { z, ZodType } from 'zod';
 import { LocalImageReference, guessImageMimeType } from './frontMatter';
-import { Actor } from './config';
+import { Actor, allowsInsecureTls } from './config';
 import {
   ApiError,
   CancelledError,
@@ -32,28 +32,15 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 const PUBLISH_MIN_TIMEOUT_MS = 1_200_000;
 
 /**
- * TLS証明書の検証は既定で有効(allowInsecureTls=false)。
- * 検証を無効化すると中間者攻撃でAPIキーや記事内容を傍受・改竄されうるため、
- * 自己署名証明書のローカル環境へ接続する場合に限り、利用者が明示的に有効化する。
- * 危険な設定であることに気付けるよう、有効な間は警告としてログに残す。
+ * リクエストヘッダを組み立てる。issue #565(Device Authorization Grantへの移行)により、
+ * 「誰であるか」の判定はサーバー側がAuthorization: Bearerで送られたアクセストークン(JWT)を
+ * 検証して行うため、従来の個別ヘッダによる自己申告(APIキー/実行者ID/実行者ロール)は廃止した。
+ * actor引数は、この関数を呼ぶ~30個のエンドポイント関数(とその呼び出し元)のシグネチャを
+ * 一括で変更する大きな機械的差分を避けるため#565時点では残しているが、ヘッダ組み立てには
+ * 使わない(呼び出し元シグネチャの整理は#566のスコープとする)。
  */
-function allowsInsecureTls(): boolean {
-  const allowed = vscode.workspace.getConfiguration('letsBlog').get<boolean>('allowInsecureTls', false);
-  if (allowed) {
-    logger.warn(
-      'letsBlog.allowInsecureTlsが有効なため、TLS証明書の検証をスキップします。' +
-        '信頼できるネットワーク上のローカル環境でのみ使用してください。'
-    );
-  }
-  return allowed;
-}
-
-function buildHeaders(apiKey: string, actor?: Actor, contentType?: string): Record<string, string> {
-  const headers: Record<string, string> = { 'X-API-Key': apiKey };
-  if (actor) {
-    headers['X-Actor-Id'] = String(actor.id);
-    headers['X-Actor-Role'] = actor.role;
-  }
+function buildHeaders(accessToken: string, actor?: Actor, contentType?: string): Record<string, string> {
+  const headers: Record<string, string> = { Authorization: `Bearer ${accessToken}` };
   if (contentType) {
     headers['Content-Type'] = contentType;
   }
@@ -335,9 +322,10 @@ export interface ImageGenerationParams {
 }
 
 /**
- * メールアドレス/パスワードでログインする。ログイン前はAPIキーを持たないため、
- * このエンドポイントはサーバー側でX-API-Keyヘッダなしでの呼び出しが許可されている。
- * 2FA未設定ユーザーはこの時点でapiKeyが発行される。
+ * メールアドレス/パスワードでログインする。issue #565(Device Authorization Grantへの移行)
+ * 以降、拡張からは呼び出していない未使用のエクスポート(撤去は#566のスコープ)。
+ * ログイン前は認証ヘッダを持たないため、このエンドポイントはサーバー側で認証ヘッダなしでの
+ * 呼び出しが許可されている。2FA未設定ユーザーはこの時点でapiKeyが発行される。
  */
 export async function login(serverUrl: string, email: string, password: string): Promise<LoginResult> {
   return requestJson(serverUrl, '/api/auth/login', {

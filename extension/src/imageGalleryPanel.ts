@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as api from './apiClient';
-import { getActor, getServerUrl, requireApiKey } from './config';
+import { getActor, getServerUrl, requireAccessToken } from './config';
 import { showSingletonPanel, WebviewPanelBase } from './webviewPanelBase';
 import { ImageGalleryInboundMessage, ImageGalleryOutboundCommand } from './webviewMessages';
 
@@ -70,7 +70,7 @@ export class ImageGalleryPanel extends WebviewPanelBase<
   }
 
   private async _requireCredentials(): Promise<{ apiKey: string; actor: api.Actor | undefined }> {
-    const apiKey = await requireApiKey(this.context);
+    const apiKey = await requireAccessToken(this.context);
     const actor = await getActor(this.context);
     return { apiKey, actor };
   }

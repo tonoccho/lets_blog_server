@@ -14,12 +14,14 @@
 
 | ヘッダ | 内容 | 付与される呼び出し |
 | --- | --- | --- |
-| `X-API-Key` | SecretStorageに保管されたAPIキー | ログイン系以外のすべて |
-| `X-Actor-Id` | 操作の実行者のユーザーID | actorを渡した呼び出し |
-| `X-Actor-Role` | 実行者のロール | actorを渡した呼び出し |
+| `Authorization` | `Bearer <アクセストークン>`。SecretStorageに保管されたKeycloak発行のJWT | Keycloakのトークン/デバイス認可エンドポイント以外のすべて |
 
-`/api/auth/login` と `/api/auth/totp/verify` は、APIキーを取得する前に呼ぶため
-`X-API-Key` なしでの呼び出しがサーバー側で許可されています。
+issue #565(Device Authorization Grantへの移行)により、「誰であるか」の判定はサーバー側が
+アクセストークン(JWT)を検証して行うようになったため、従来の`X-API-Key`/`X-Actor-Id`/`X-Actor-Role`は
+廃止しました。アクセストークンの取得・自動更新は`src/config.ts`の`requireAccessToken`が担い、
+Device Authorization Grantそのもの(デバイス認可リクエスト・ポーリング・リフレッシュ)の実装は
+`src/deviceAuth.ts`にあります(Keycloakの`/protocol/openid-connect/auth/device` /
+`/protocol/openid-connect/token`を直接呼び出すため、上記のエンドポイント一覧には含まれません)。
 
 ### リトライ
 
@@ -31,16 +33,23 @@
 
 「キャッシュ」列に記載のあるものは5分間キャッシュされます。
 `assignIssue` / `acceptArticleStructure` / `deleteGeneratedImage` の直後は該当プロジェクトのキャッシュを、
-ログイン・APIキー変更時は全キャッシュを破棄します。
+ログイン時は全キャッシュを破棄します。
 
 ---
 
 ## 認証
 
+Device Authorization Grantへの移行(issue #565)により、ログインは仲介APIサーバーではなく
+Keycloakへ直接行うようになりました(`src/deviceAuth.ts`、上記「認証ヘッダ」参照)。
+
+以前使っていたメールアドレス/パスワードログイン用のエンドポイントは、`src/apiClient.ts`に
+関数(`login` / `verifyTotpLogin`)としては残していますが、**拡張からは呼び出していません**
+(未使用のエクスポート。撤去はissue #566のスコープ)。
+
 | メソッド | パス | 関数 | リトライ | 説明 |
 | --- | --- | --- | --- | --- |
-| POST | `/api/auth/login` | `login` | - | メールアドレス/パスワードでログイン。2FA未設定ならこの時点でAPIキーが発行される。 |
-| POST | `/api/auth/totp/verify` | `verifyTotpLogin` | - | `login` が `twoFactorRequired=true` を返した場合にTOTPコードを検証し、APIキーを取得する。 |
+| POST | `/api/auth/login` | `login`(未使用) | - | メールアドレス/パスワードでログイン。2FA未設定ならこの時点でAPIキーが発行される。 |
+| POST | `/api/auth/totp/verify` | `verifyTotpLogin`(未使用) | - | `login` が `twoFactorRequired=true` を返した場合にTOTPコードを検証し、APIキーを取得する。 |
 
 **レスポンス** (`LoginResult`): `user` / `twoFactorRequired` / `apiKey`
 
@@ -143,7 +152,7 @@
 | --- | --- |
 | 2xx | Zodスキーマで検証。不一致なら `ResponseValidationError` |
 | 400 / 403 / 404 / 409 / 413 | `ApiError`。リトライせず、ステータス別の対応策を添えて通知 |
-| 401 | `ApiError`。再ログイン/APIキー再設定を促す |
+| 401 | `ApiError`。通常はアクセストークンの自動リフレッシュで防げるはずのため、リフレッシュも失敗した場合に発生する。再ログインを促す |
 | 429 / 5xx | `ApiError`。冪等な呼び出しのみリトライ |
 | 接続不可 | `NetworkError`。serverUrl・サーバー状態・証明書設定の確認を促す |
 | タイムアウト | `TimeoutError`。`letsBlog.requestTimeoutMs` の調整を促す |

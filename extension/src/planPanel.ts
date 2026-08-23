@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as api from './apiClient';
-import { Actor, getActor, getProjectId, getServerUrl, requireApiKey } from './config';
+import { Actor, getActor, getProjectId, getServerUrl, requireAccessToken } from './config';
 import { buildArticleFrontMatter } from './frontMatter';
 import { createArticleScaffold, openArticle, requireWorkspaceRoot } from './articleScaffold';
 import { messageOf } from './errorHandler';
@@ -61,7 +61,7 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
         'ユーザーまたはプロジェクトが未選択です。「Let\'s Blog: Login」「Let\'s Blog: Select Project」を先に実行してください。'
       );
     }
-    const apiKey = await requireApiKey(this.context);
+    const apiKey = await requireAccessToken(this.context);
     return { apiKey, actor, projectId };
   }
 
