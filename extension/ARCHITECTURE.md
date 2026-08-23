@@ -50,6 +50,9 @@ articles/
       │ httpClient.ts  ネイティブfetch / node:https           │
       │ errorHandler.ts (例外型・リトライ) / logger.ts        │
       └──────────────────────────────────────────────────────┘
+
+config.ts(資格情報・設定値)は deviceAuth.ts 経由でKeycloakのデバイス認可/トークン
+エンドポイントを呼び、httpClient.ts を共有する(apiClient.ts とは独立した経路)。
 ```
 
 **依存の向きは上から下の一方向**です。下位モジュール(`httpClient` / `logger` / `frontMatter` など)は
@@ -81,7 +84,9 @@ articles/
 | --- | --- |
 | `errorHandler.ts` | 例外型(`ApiError` / `NetworkError` / `TimeoutError` / `ResponseValidationError` / `CancelledError`)の定義、原因と対応策を含むメッセージへの整形、指数バックオフによるリトライ。 |
 | `logger.ts` | 構造化ログ。出力パネル「Let's Blog」へ書き出す。認証情報らしいキーの値はマスクする。 |
-| `config.ts` | 設定値と資格情報の読み書き。**SecretStorageに触れるのはこのファイルだけ**。 |
+| `config.ts` | 設定値と資格情報の読み書き。**SecretStorageに触れるのはこのファイルだけ**。アクセストークンの期限管理・自動リフレッシュ(`requireAccessToken`)もここに置く。 |
+| `deviceAuth.ts` | Device Authorization Grant(issue #565)のプロトコル部分。デバイス認可/トークンエンドポイントへのリクエストと、応答の解釈(成功/pending/slow_down/denied/expired)。`config.ts`から呼ばれる。 |
+| `jwtClaims.ts` | アクセストークン(JWT)のペイロードを署名検証なしでデコードし、表示用のemail/roleを取り出す純粋関数(issue #565)。 |
 
 ### 3.4 ドメインロジック(vscode APIに依存しない純粋関数)
 
@@ -193,6 +198,12 @@ front matterの`wp_post_ids`は**サイトキーごとに投稿IDを持ちます
 
 新しいエンドポイントを呼ぶときの型です。
 
+> **issue #565での変更**: `buildHeaders`は`Authorization: Bearer <apiKey引数>`を送るようになり、
+> `actor`引数はヘッダ組み立てには使いません(サーバーがJWTから実行者を判定するため)。
+> 以下のコード例にある`apiKey`という変数名/引数名は歴史的な名残で、実体はKeycloak発行の
+> アクセストークンです(全呼び出し箇所の一括リネームは#566のスコープとして見送っています)。
+> `actor`引数自体は既存の呼び出し元シグネチャを変えない目的で残していますが、値としては未使用です。
+
 ### 参照系(キャッシュあり・リトライあり)
 
 ```ts
@@ -260,7 +271,7 @@ const result = await this.runCancellable((signal) =>
 
 ```ts
 try {
-  const apiKey = await requireApiKey(context);   // 未設定なら対応方法付きの例外
+  const apiKey = await requireAccessToken(context); // 未ログイン/リフレッシュ失敗なら対応方法付きの例外
   const actor = await getActor(context);
   const sites = await api.listSites(getServerUrl(), apiKey, actor);
   // ...

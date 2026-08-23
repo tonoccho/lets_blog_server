@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { getApiKey, getActor, getProjectId, getServerUrl } from './config';
+import { getAccessToken, getActor, getProjectId, getServerUrl } from './config';
 import * as api from './apiClient';
 import { detectFrontMatterCompletionContext, FrontMatterCompletionField } from './frontMatterCompletionLogic';
 import { logger } from './logger';
@@ -29,7 +29,7 @@ export class FrontMatterCompletionProvider implements vscode.CompletionItemProvi
       return undefined;
     }
 
-    const apiKey = await getApiKey(this.context);
+    const apiKey = await getAccessToken(this.context);
     if (!apiKey) {
       return undefined;
     }

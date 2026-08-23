@@ -271,16 +271,19 @@ code --install-extension letsblog-vscode-1.0.0.vsix
 
 ### Configure the Extension
 
-1. Open VSCode command palette: `Ctrl+Shift+P`
-2. Search for: `Let's Blog: Login`
-3. When prompted, enter:
-   - **Server URL**: `https://localhost` (or your server's URL)
-   - **Email**: Your admin account email
-   - **Password**: Your admin account password
+1. Set `letsBlog.serverUrl` in your VSCode settings if it differs from the default
+   (`https://localhost`).
+2. Open VSCode command palette: `Ctrl+Shift+P`
+3. Search for: `Let's Blog: Login`
+4. Your default browser opens automatically to Keycloak's device verification page, and a
+   progress notification shows a short code (e.g. `ABCD-1234`). Enter that code (it's usually
+   pre-filled from the URL) and approve the login with your account.
 
-**Screenshot placeholder: VSCode extension login dialog**
+**Screenshot placeholder: VSCode extension login progress notification**
 
-The extension will automatically save your API key for future sessions.
+The extension stores the access/refresh tokens it receives in VSCode's Secret Storage and
+refreshes them automatically for future sessions — you won't be prompted for a password. This
+is a Device Authorization Grant flow (RFC 8628): the extension never sees your password.
 
 ### Handling SSL Certificate Warning
 

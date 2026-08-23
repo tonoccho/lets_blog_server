@@ -3,9 +3,10 @@ import * as path from 'path';
 import * as fs from 'fs';
 import {
   getServerUrl,
-  requireApiKey,
-  setApiKey,
-  getApiKey,
+  allowsInsecureTls,
+  requireAccessToken,
+  storeTokens,
+  getAccessToken,
   getActor,
   setActor,
   getProjectId,
@@ -14,6 +15,8 @@ import {
   getConfiguredAiProvider,
   setConfiguredAiProvider,
 } from './config';
+import * as deviceAuth from './deviceAuth';
+import { decodeJwtPayload, extractEmail, extractPrimaryRoleName } from './jwtClaims';
 import {
   parseArticle,
   stringifyArticle,
@@ -38,7 +41,7 @@ import { AskAiPanel } from './askAiPanel';
 import { resolveSectionContext } from './headingContext';
 import { buildSourcesSection } from './markdownSources';
 import { logger } from './logger';
-import { messageOf, reportError } from './errorHandler';
+import { CancelledError, messageOf, reportError } from './errorHandler';
 import { buildSmartCardTag, buildStandardLink, parseHttpUrl } from './urlPaste';
 import { ProofreadController } from './proofreadDiagnostics';
 import { FrontMatterCompletionProvider } from './frontMatterCompletionProvider';
@@ -79,7 +82,6 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.createArticleWithoutAi', () => commandCreateArticleWithoutAi(context)),
     vscode.commands.registerCommand('letsBlog.schedulePublication', () => commandSchedulePublication()),
     vscode.commands.registerCommand('letsBlog.login', () => commandLogin(context)),
-    vscode.commands.registerCommand('letsBlog.setApiKey', () => commandSetApiKey(context)),
     vscode.commands.registerCommand('letsBlog.selectSite', () => commandSelectSite(context)),
     vscode.commands.registerCommand('letsBlog.publish', () => commandPublish(context)),
     vscode.commands.registerCommand('letsBlog.deletePost', () => commandDeletePost(context)),
@@ -200,7 +202,7 @@ async function insertTextAtSelection(editor: vscode.TextEditor, text: string): P
  */
 async function warmContentCache(context: vscode.ExtensionContext, url: string): Promise<void> {
   try {
-    const apiKey = await requireApiKey(context);
+    const apiKey = await requireAccessToken(context);
     const actor = await getActor(context);
     await api.resolveContentCache(getServerUrl(), apiKey, actor, url);
   } catch (err) {
@@ -247,7 +249,7 @@ async function commandPasteAsLink(context: vscode.ExtensionContext): Promise<voi
   }
 
   try {
-    const apiKey = await requireApiKey(context);
+    const apiKey = await requireAccessToken(context);
     const actor = await getActor(context);
     const result = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'URLの情報を取得しています…' },
@@ -268,106 +270,162 @@ async function commandPasteAsLink(context: vscode.ExtensionContext): Promise<voi
  */
 async function resolveRoleDisplayName(
   serverUrl: string,
-  apiKey: string,
+  accessToken: string,
   roleName: string
 ): Promise<string | undefined> {
   try {
-    const roles = await api.getRoles(serverUrl, apiKey);
+    const roles = await api.getRoles(serverUrl, accessToken);
     return roles.find((r) => r.roleName === roleName)?.displayName;
   } catch {
     return undefined;
   }
 }
 
+/** デバイス認可リクエスト自体のタイムアウト(ミリ秒)。ポーリングの総待ち時間(expires_in)とは別。 */
+const DEVICE_AUTHORIZATION_REQUEST_TIMEOUT_MS = 30_000;
+
+/** slow_down応答を受けた際、ポーリング間隔へ上乗せする時間(RFC 8628が推奨する挙動)。 */
+const POLL_SLOW_DOWN_INCREMENT_MS = 5_000;
+
 /**
- * メールアドレス/パスワード(必要なら2FAコード)でLet's Blogにログインし、
- * 発行されたAPIキーをSecretStorageに保存する。ログインしたユーザーがそのままActorになる
- * (以前の「Select User」QuickPickによるActor選択は廃止し、ログインに一本化した)。
+ * Device Authorization Grant(RFC 8628)でログインする(issue #565)。
+ * VSCode拡張はOAuthのリダイレクト先を持てないため、Authorization Codeではなくこのフローを使う。
+ *
+ * 1. Keycloakへデバイス認可をリクエストする
+ * 2. user_codeを提示し、検証URLを既定ブラウザで自動的に開く
+ * 3. 承認されるまでトークンエンドポイントをポーリングする(進捗通知から利用者がキャンセル可能)
+ * 4. 取得したaccess_token/refresh_tokenをSecretStorageへ保存する
+ *
+ * 拡張がメールアドレス/パスワードを扱っていた以前の方式は廃止した(「誰であるか」を拡張が
+ * 自己申告するのではなく、Keycloakが発行したJWTをサーバー側で検証する方式へ移行するため)。
+ * ログイン中のユーザー表示(Actor)はJWTのクレーム(email/realm_access.roles)から復元する。
  */
 async function commandLogin(context: vscode.ExtensionContext): Promise<void> {
-  const email = await vscode.window.showInputBox({ prompt: 'メールアドレス', ignoreFocusOut: true });
-  if (!email) return;
-
   const serverUrl = getServerUrl();
-  if (!(await confirmCredentialTransport(serverUrl))) return;
+  const insecure = allowsInsecureTls();
 
-  let password = await vscode.window.showInputBox({
-    prompt: 'パスワード',
-    password: true,
-    ignoreFocusOut: true,
-  });
-  if (!password) return;
-
-  let apiKey: string | null = null;
   try {
-    let result = await api.login(serverUrl, email, password);
-    // 送信済みの資格情報はこれ以降使わないため、保持し続けないよう参照を切る。
-    password = '';
-
-    if (result.twoFactorRequired) {
-      let code = await vscode.window.showInputBox({
-        prompt: '2段階認証コードを入力してください',
-        ignoreFocusOut: true,
-      });
-      if (!code) return;
-      result = await api.verifyTotpLogin(serverUrl, result.user.id, code);
-      code = '';
+    const requestController = new AbortController();
+    const requestTimer = setTimeout(() => requestController.abort(), DEVICE_AUTHORIZATION_REQUEST_TIMEOUT_MS);
+    let authorization: deviceAuth.DeviceAuthorization;
+    try {
+      authorization = await deviceAuth.requestDeviceAuthorization(serverUrl, insecure, requestController.signal);
+    } finally {
+      clearTimeout(requestTimer);
     }
 
-    apiKey = result.apiKey;
-    if (!apiKey) {
-      throw new Error('APIキーの取得に失敗しました。');
-    }
+    const verificationUrl = authorization.verificationUriComplete ?? authorization.verificationUri;
+    void vscode.env.openExternal(vscode.Uri.parse(verificationUrl));
 
-    await setApiKey(context, apiKey);
-    await setActor(context, result.user);
+    const tokens = await vscode.window.withProgress<deviceAuth.TokenResult>(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: `ブラウザで開いた画面にコード「${authorization.userCode}」を入力して承認してください…`,
+        cancellable: true,
+      },
+      (progress, cancellationToken) => pollForDeviceToken(serverUrl, insecure, authorization, progress, cancellationToken)
+    );
+
+    await storeTokens(context, tokens);
     // 別ユーザーでログインし直した場合に、前のユーザーの参照結果が残らないようにする。
     api.clearResponseCache();
-    const roleLabel = await resolveRoleDisplayName(serverUrl, apiKey, result.user.role);
+
+    const claims = decodeJwtPayload(tokens.accessToken);
+    const email = extractEmail(claims);
+    const roleName = extractPrimaryRoleName(claims);
+    await setActor(context, { email, role: roleName ?? '' });
+
+    const roleLabel = roleName ? await resolveRoleDisplayName(serverUrl, tokens.accessToken, roleName) : undefined;
     vscode.window.showInformationMessage(
-      `'${result.user.email}'${roleLabel ? ` (${roleLabel})` : ''} としてログインしました。`
+      `'${email}'${roleLabel ? ` (${roleLabel})` : ''} としてログインしました。`
     );
   } catch (err) {
     reportError('ログインに失敗しました', err);
-  } finally {
-    // 例外時も含め、平文の資格情報をこの関数のスコープに残さない。
-    password = '';
-    apiKey = null;
-  }
-}
-
-async function commandSetApiKey(context: vscode.ExtensionContext): Promise<void> {
-  let value = await vscode.window.showInputBox({
-    prompt: "仲介APIサーバーのAPIキーを入力してください",
-    password: true,
-    ignoreFocusOut: true,
-  });
-  if (!value) {
-    return;
-  }
-  try {
-    await setApiKey(context, value);
-    api.clearResponseCache();
-    vscode.window.showInformationMessage('APIキーを保存しました。');
-  } finally {
-    value = '';
   }
 }
 
 /**
- * 資格情報を送信する前に、通信経路が保護されているかを確認する。
- * 平文HTTPではパスワードとAPIキーが傍受されうるため、利用者へ明示的な同意を求める。
+ * トークンエンドポイントを、承認されるかタイムアウト/拒否されるまでポーリングする。
+ * 進捗通知(withProgress)がキャンセルされた場合はCancelledErrorへ変換し、
+ * errorHandler.reportErrorが「操作をキャンセルしました」として扱えるようにする。
  */
-async function confirmCredentialTransport(serverUrl: string): Promise<boolean> {
-  if (serverUrl.startsWith('https://')) {
-    return true;
+async function pollForDeviceToken(
+  serverUrl: string,
+  allowInsecureTls: boolean,
+  authorization: deviceAuth.DeviceAuthorization,
+  progress: vscode.Progress<{ message?: string }>,
+  cancellationToken: vscode.CancellationToken
+): Promise<deviceAuth.TokenResult> {
+  const controller = new AbortController();
+  const cancelListener = cancellationToken.onCancellationRequested(() => controller.abort());
+  try {
+    let intervalMs = Math.max(authorization.interval, 1) * 1000;
+    const deadline = Date.now() + authorization.expiresIn * 1000;
+
+    for (;;) {
+      if (cancellationToken.isCancellationRequested) {
+        throw new CancelledError('ログインをキャンセルしました');
+      }
+      const remainingSec = Math.max(0, Math.round((deadline - Date.now()) / 1000));
+      progress.report({
+        message: `コード: ${authorization.userCode} ・ 承認を待っています…(あと約${remainingSec}秒で期限切れ)`,
+      });
+
+      await sleepOrAbort(intervalMs, controller.signal);
+      if (cancellationToken.isCancellationRequested) {
+        throw new CancelledError('ログインをキャンセルしました');
+      }
+      if (Date.now() >= deadline) {
+        throw new Error("認可コードの有効期限が切れました。「Let's Blog: Login」をやり直してください。");
+      }
+
+      let outcome: deviceAuth.PollOutcome;
+      try {
+        outcome = await deviceAuth.pollForToken(serverUrl, authorization.deviceCode, allowInsecureTls, controller.signal);
+      } catch (error) {
+        if (controller.signal.aborted) {
+          throw new CancelledError('ログインをキャンセルしました');
+        }
+        throw error;
+      }
+
+      switch (outcome.kind) {
+        case 'success':
+          return outcome.tokens;
+        case 'pending':
+          continue;
+        case 'slow_down':
+          // RFC 8628: slow_downを受けたらポーリング間隔を広げる。
+          intervalMs += POLL_SLOW_DOWN_INCREMENT_MS;
+          continue;
+        case 'denied':
+          throw new Error("ログインが拒否されました。「Let's Blog: Login」をやり直してください。");
+        case 'expired':
+          throw new Error("認可コードの有効期限が切れました。「Let's Blog: Login」をやり直してください。");
+      }
+    }
+  } finally {
+    cancelListener.dispose();
   }
-  const proceed = await vscode.window.showWarningMessage(
-    `接続先 '${serverUrl}' はHTTPS ではありません。パスワードとAPIキーが平文で送信されます。続行しますか?`,
-    { modal: true },
-    '続行する'
-  );
-  return proceed === '続行する';
+}
+
+/** ms待機する。signalがabortされた場合は即座にCancelledErrorで抜ける(進捗キャンセル時の応答性のため)。 */
+function sleepOrAbort(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new CancelledError('ログインをキャンセルしました'));
+      return;
+    }
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(new CancelledError('ログインをキャンセルしました'));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 async function commandSelectSite(context: vscode.ExtensionContext): Promise<void> {
@@ -375,7 +433,7 @@ async function commandSelectSite(context: vscode.ExtensionContext): Promise<void
   if (!editor) return;
 
   try {
-    const apiKey = await requireApiKey(context);
+    const apiKey = await requireAccessToken(context);
     const sites = await api.listSites(getServerUrl(), apiKey);
     if (sites.length === 0) {
       vscode.window.showWarningMessage('登録済みのサイトがありません。先にWeb管理画面またはAPIでサイトを登録してください。');
@@ -407,7 +465,7 @@ async function publishToSite(
   siteKey: string,
   forceStatus?: string
 ): Promise<void> {
-  const apiKey = await requireApiKey(context);
+  const apiKey = await requireAccessToken(context);
   const serverUrl = getServerUrl();
   const article = parseArticle(editor.document.getText());
 
@@ -552,7 +610,7 @@ async function commandPublish(context: vscode.ExtensionContext): Promise<void> {
       return;
     }
 
-    const apiKey = await requireApiKey(context);
+    const apiKey = await requireAccessToken(context);
     const actor = await getActor(context);
     const project = await api.getProject(getServerUrl(), apiKey, actor, projectId);
 
@@ -584,7 +642,7 @@ async function commandDeletePost(context: vscode.ExtensionContext): Promise<void
 
   try {
     const article = parseArticle(editor.document.getText());
-    const apiKey = await requireApiKey(context);
+    const apiKey = await requireAccessToken(context);
     const actor = await getActor(context);
 
     let candidates: { siteKey: string; wpPostId: string }[];
@@ -690,7 +748,7 @@ async function commandAskAi(context: vscode.ExtensionContext): Promise<void> {
   if (provider === undefined) return;
 
   try {
-    const apiKey = await requireApiKey(context);
+    const apiKey = await requireAccessToken(context);
     const article = parseArticle(editor.document.getText());
     const selectedText = editor.document.getText(editor.selection);
     const text = selectedText.trim().length > 0 ? selectedText : article.content;
@@ -717,7 +775,7 @@ async function commandSuggestTags(context: vscode.ExtensionContext): Promise<voi
   if (provider === undefined) return;
 
   try {
-    const apiKey = await requireApiKey(context);
+    const apiKey = await requireAccessToken(context);
     const article = parseArticle(editor.document.getText());
     // issue #525: プロジェクトのマスター環境サイトに既存のタグを優先して提案させる。
     const projectId = (article.data.project_id as number | undefined) ?? getProjectId(context);
@@ -788,7 +846,7 @@ async function commandFixInvalidStatus(context: vscode.ExtensionContext, uri: vs
   try {
     const document = await vscode.workspace.openTextDocument(uri);
     const editor = await vscode.window.showTextDocument(document);
-    const apiKey = await requireApiKey(context);
+    const apiKey = await requireAccessToken(context);
     const statuses = await api.getPostStatuses(getServerUrl(), apiKey);
 
     const picked = await vscode.window.showQuickPick(
@@ -915,7 +973,7 @@ async function commandEditDiagram(context: vscode.ExtensionContext): Promise<voi
     const existingFileName = match[1];
     const diagramId = Number(match[2]);
 
-    const apiKey = await requireApiKey(context);
+    const apiKey = await requireAccessToken(context);
     const actor = await getActor(context);
     const detail = await api.getDiagramDetail(getServerUrl(), apiKey, actor, diagramId);
 
@@ -986,7 +1044,7 @@ async function commandAskAiSearch(context: vscode.ExtensionContext): Promise<voi
  */
 async function commandCreateArticle(context: vscode.ExtensionContext): Promise<void> {
   try {
-    await requireApiKey(context);
+    await requireAccessToken(context);
     ArticleCreationPanel.createOrShow(context);
   } catch (err) {
     reportError('記事作成パネルの起動に失敗しました', err);
@@ -1056,7 +1114,7 @@ async function pickCategoriesForNewArticle(
   projectId: number
 ): Promise<string[]> {
   try {
-    const apiKey = await getApiKey(context);
+    const apiKey = await getAccessToken(context);
     const actor = await getActor(context);
     if (!apiKey || !actor) return [];
 
@@ -1217,7 +1275,7 @@ async function commandPlanArticle(context: vscode.ExtensionContext): Promise<voi
 
 async function commandSelectProject(context: vscode.ExtensionContext): Promise<void> {
   try {
-    const apiKey = await requireApiKey(context);
+    const apiKey = await requireAccessToken(context);
     const actor = await getActor(context);
     const projects = await api.listProjects(getServerUrl(), apiKey, actor);
 
@@ -1319,7 +1377,7 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
       return;
     }
 
-    const apiKey = await requireApiKey(context);
+    const apiKey = await requireAccessToken(context);
     const actor = await getActor(context);
     const serverUrl = getServerUrl();
 

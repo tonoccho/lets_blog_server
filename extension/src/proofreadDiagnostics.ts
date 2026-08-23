@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { getActor, getApiKey, getConfiguredAiProvider, getProjectId, getServerUrl } from './config';
+import { getActor, getAccessToken, getConfiguredAiProvider, getProjectId, getServerUrl } from './config';
 import { parseArticle, validateScheduledPublication } from './frontMatter';
 import * as api from './apiClient';
 import { CancelledError, messageOf } from './errorHandler';
@@ -186,7 +186,7 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
       }
     }
 
-    const apiKey = await getApiKey(this.context);
+    const apiKey = await getAccessToken(this.context);
     if (apiKey) {
       try {
         const statuses = await api.getPostStatuses(getServerUrl(), apiKey);
@@ -260,7 +260,7 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
     this.contentAbortControllers.set(key, controller);
 
     try {
-      const apiKey = await getApiKey(this.context);
+      const apiKey = await getAccessToken(this.context);
       if (!apiKey) {
         if (options.manual) {
           throw new Error("APIキーが未設定です。「Let's Blog: Set API Key」を先に実行してください。");

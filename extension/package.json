@@ -43,10 +43,6 @@
         "title": "Let's Blog: Select Site"
       },
       {
-        "command": "letsBlog.setApiKey",
-        "title": "Let's Blog: Set API Key"
-      },
-      {
         "command": "letsBlog.askAi",
         "title": "Let's Blog: Ask AI (Draft/Proofread/Summarize)"
       },
