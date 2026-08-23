@@ -11,6 +11,8 @@ public record UserResponse(
         String email,
         String role,
         List<String> roleNames,
+        boolean enabled,
+        boolean keycloakLinked,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
@@ -20,6 +22,8 @@ public record UserResponse(
                 user.getEmail(),
                 user.getRole(),
                 user.getRoles().stream().map(Role::getRoleName).sorted().toList(),
+                user.isEnabled(),
+                user.getKeycloakSub() != null,
                 user.getCreatedAt(),
                 user.getUpdatedAt()
         );
