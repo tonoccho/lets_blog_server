@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 
-const PUBLIC_PATHS = ["/login", "/signup", "/setup"];
+// /signupはissue #564でKeycloakのregistrationAllowed=false(自己登録オフ)に伴い削除した。
+const PUBLIC_PATHS = ["/login", "/setup"];
 const ADMIN_ONLY_PREFIXES = ["/users", "/admin"];
 
 async function needsInitialSetup(): Promise<boolean> {
@@ -45,7 +46,10 @@ export async function proxy(request: NextRequest) {
 
   const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET });
 
-  if (!token) {
+  // token.errorは"RefreshAccessTokenError"(アクセストークンのリフレッシュ失敗。auth.tsのjwt
+  // コールバック参照)。リフレッシュ済みの生きたアクセストークンが無い状態なので、未ログインと
+  // 同様に扱いKeycloakへの再ログインを促す。
+  if (!token || token.error) {
     if (await needsInitialSetup()) {
       return NextResponse.redirect(new URL("/setup", request.url));
     }

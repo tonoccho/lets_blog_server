@@ -1,11 +1,10 @@
 import { redirect } from "next/navigation";
-import { getUserProfile, getTwoFactorStatus } from "@/lib/apiClient";
+import { getUserProfile } from "@/lib/apiClient";
 import { requireSession } from "@/lib/session";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { Tabs, type TabItem } from "@/components/Tabs";
 import { UserProfileForm } from "./UserProfileForm";
 import { PersonalPreferencesForm } from "./PersonalPreferencesForm";
-import { TwoFactorSettings } from "./TwoFactorSettings";
 
 // Node/ブラウザがIntl.supportedValuesOfに対応していない場合のフォールバック。
 const FALLBACK_TIMEZONES = [
@@ -53,11 +52,10 @@ export default async function UserProfileEditPage({
     redirect(isSelf ? "/" : "/users");
   }
 
-  // 個人設定(言語・タイムゾーン)・2FAは本人のみが対象(セッションに紐付く操作のため、
+  // 個人設定(言語・タイムゾーン)は本人のみが対象(セッションに紐付く操作のため、
   // adminが他ユーザーの画面を開いても代理設定はできない)。
-  const twoFactorStatus = isSelf
-    ? await getTwoFactorStatus(actor).catch(() => ({ enabled: false }))
-    : null;
+  // 2FA(TOTP)設定画面はissue #564でKeycloakへの移行に伴い削除した(認証自体をKeycloakへ
+  // 委譲したため、TOTPの要否・設定はKeycloak側で管理する)。
 
   const tabs: TabItem[] = [
     {
@@ -78,11 +76,6 @@ export default async function UserProfileEditPage({
           timezoneOptions={getTimezoneOptions()}
         />
       ),
-    });
-    tabs.push({
-      id: "security",
-      label: "セキュリティ",
-      content: <TwoFactorSettings initialEnabled={twoFactorStatus?.enabled ?? false} />,
     });
   }
 

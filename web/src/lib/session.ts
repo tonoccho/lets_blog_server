@@ -29,11 +29,13 @@ export async function getViewerTimeZone(): Promise<string | null> {
 
 /**
  * ログイン済みであることのみを要求する(role不問)。
- * 2FA設定など、本人が自分自身を操作する画面で使う。
+ * 個人設定(言語・タイムゾーン)など、本人が自分自身を操作する画面で使う。
  */
 export async function requireSession(): Promise<Session> {
   const session = await getServerSession(authOptions);
-  if (!session) {
+  // session.errorは"RefreshAccessTokenError"(auth.tsのjwtコールバック参照)。生きたアクセストークン
+  // が無い状態なので、未ログインと同様に再ログインへ誘導する。
+  if (!session || session.error) {
     redirect("/login");
   }
   return session;
@@ -46,7 +48,7 @@ export async function requireSession(): Promise<Session> {
  */
 export async function requireAdminSession(): Promise<Session> {
   const session = await getServerSession(authOptions);
-  if (!session) {
+  if (!session || session.error) {
     redirect("/login");
   }
   if (session.user.role !== "admin") {
