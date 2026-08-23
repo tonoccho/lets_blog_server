@@ -36,3 +36,4 @@ ADR には以下のセクションを含める。
 | [ADR-0003](0003-cutover-migration.md) | 旧認証機構は並行運用せず一括で切り替える |
 | [ADR-0004](0004-schema-per-service.md) | サービスごとに MySQL スキーマを分離し、跨ぎ JOIN と FK を禁止する |
 | [ADR-0005](0005-service-to-service-client-credentials.md) | サービス間通信は Client Credentials によるサービストークン＋元ユーザーIDヘッダーで認証する |
+| [ADR-0006](0006-per-service-test-strategy.md) | サービス別のテスト戦略(DB・JWTフィクスチャ・契約テスト・モック方針)を確立する |

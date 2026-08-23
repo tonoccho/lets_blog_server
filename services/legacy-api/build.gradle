@@ -49,9 +49,9 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-webmvc-test'
     testImplementation 'org.springframework.boot:spring-boot-jdbc-test'
     testImplementation 'org.springframework.security:spring-security-test'
-    testImplementation 'org.testcontainers:testcontainers:1.19.3'
-    testImplementation 'org.testcontainers:mysql:1.19.3'
-    testImplementation 'org.testcontainers:junit-jupiter:1.19.3'
+    // JWTを必要とするテストの共通フィクスチャ(#587)。実DBはTestcontainersではなく
+    // application-test.yml経由の実MySQLを使う(docs/adr/0006-per-service-test-strategy.md参照)。
+    testImplementation testFixtures(project(':libs:lbs-common'))
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
     // JMH for benchmarking

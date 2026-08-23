@@ -4,10 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
+import com.letsblog.common.testfixtures.JwtTestFixtures;
 import com.letsblog.identity.domain.User;
 import com.letsblog.identity.repository.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
-import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -19,7 +19,6 @@ import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
 @ExtendWith(MockitoExtension.class)
@@ -121,24 +120,11 @@ class CurrentActorServiceTest {
     }
 
     private JwtAuthenticationToken jwtAuthenticationToken(String subject) {
-        Jwt jwt = Jwt.withTokenValue("token")
-                .header("alg", "RS256")
-                .subject(subject)
-                .claim("sub", subject)
-                .issuedAt(Instant.now())
-                .expiresAt(Instant.now().plusSeconds(60))
-                .build();
-        return new JwtAuthenticationToken(jwt);
+        return new JwtAuthenticationToken(JwtTestFixtures.jwt(subject));
     }
 
     /** 実際にKeycloakのクライアント設定次第でsubクレームが欠落したトークンが返るケースを再現する。 */
     private JwtAuthenticationToken jwtAuthenticationTokenWithoutSubject() {
-        Jwt jwt = Jwt.withTokenValue("token")
-                .header("alg", "RS256")
-                .claim("azp", "admin-cli")
-                .issuedAt(Instant.now())
-                .expiresAt(Instant.now().plusSeconds(60))
-                .build();
-        return new JwtAuthenticationToken(jwt);
+        return new JwtAuthenticationToken(JwtTestFixtures.serviceJwt("admin-cli"));
     }
 }

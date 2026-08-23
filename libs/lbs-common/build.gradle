@@ -3,6 +3,7 @@
 // Spring Bootアプリではなく通常のライブラリとしてビルドする(bootJar無効 / jar有効)。
 plugins {
     id 'java-library'
+    id 'java-test-fixtures'
     id 'org.springframework.boot' version '4.1.0'
     id 'io.spring.dependency-management' version '1.1.7'
     id 'jacoco'
@@ -30,6 +31,13 @@ dependencies {
     testImplementation 'org.hamcrest:hamcrest'
     testRuntimeOnly 'ch.qos.logback:logback-classic'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    // JwtTestFixtures(#587)がJwt/SecurityMockMvcRequestPostProcessorsを組み立てるために必要。
+    // Jwtクラス自体はoauth2-resource-serverではなくoauth2-jose(その推移的依存)が提供する。
+    // legacy-api/identity-serviceは既にこれらへ依存しているため、ここではテストフィクスチャの
+    // 利用側(testFixtures(project(...)))へ推移的に公開するためtestFixturesApiとして宣言する。
+    testFixturesApi 'org.springframework.security:spring-security-oauth2-jose'
+    testFixturesApi 'org.springframework.security:spring-security-test'
 }
 
 tasks.named('test') {

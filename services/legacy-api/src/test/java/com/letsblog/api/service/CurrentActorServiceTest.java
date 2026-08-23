@@ -6,6 +6,7 @@ import static org.mockito.Mockito.when;
 
 import com.letsblog.api.domain.User;
 import com.letsblog.api.repository.UserRepository;
+import com.letsblog.common.testfixtures.JwtTestFixtures;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.HashMap;
 import java.util.Map;
@@ -17,7 +18,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
 @ExtendWith(MockitoExtension.class)
@@ -145,24 +145,11 @@ class CurrentActorServiceTest {
     }
 
     private JwtAuthenticationToken jwtAuthenticationToken(String subject) {
-        Jwt jwt = Jwt.withTokenValue("token")
-                .header("alg", "RS256")
-                .subject(subject)
-                .claim("sub", subject)
-                .issuedAt(java.time.Instant.now())
-                .expiresAt(java.time.Instant.now().plusSeconds(60))
-                .build();
-        return new JwtAuthenticationToken(jwt);
+        return new JwtAuthenticationToken(JwtTestFixtures.jwt(subject));
     }
 
     /** 実際にKeycloakのクライアント設定次第でsubクレームが欠落したトークンが返るケースを再現する。 */
     private JwtAuthenticationToken jwtAuthenticationTokenWithoutSubject() {
-        Jwt jwt = Jwt.withTokenValue("token")
-                .header("alg", "RS256")
-                .claim("azp", "admin-cli")
-                .issuedAt(java.time.Instant.now())
-                .expiresAt(java.time.Instant.now().plusSeconds(60))
-                .build();
-        return new JwtAuthenticationToken(jwt);
+        return new JwtAuthenticationToken(JwtTestFixtures.serviceJwt("admin-cli"));
     }
 }
