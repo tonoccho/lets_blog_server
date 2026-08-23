@@ -26,6 +26,7 @@ dependencies {
     implementation 'org.flywaydb:flyway-mysql'
 
     implementation 'org.springframework.security:spring-security-crypto'
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
 
     implementation 'com.vladsch.flexmark:flexmark-all:0.64.8'
 

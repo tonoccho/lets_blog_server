@@ -26,6 +26,13 @@ public class User {
     @Column(nullable = false, unique = true)
     private String email;
 
+    /**
+     * KeycloakのユーザーID(sub claim)。identity-service(#562)がユーザー同期時に設定する。
+     * JWTベースのactor解決(#563)で、JWTのsubからこのユーザーを引き当てるために使う。
+     */
+    @Column(name = "keycloak_sub", unique = true, length = 255)
+    private String keycloakSub;
+
     @Column(name = "password_hash", nullable = false)
     private String passwordHash;
 

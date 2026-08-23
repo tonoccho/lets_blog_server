@@ -83,6 +83,14 @@ spring:
     template:
       reply-timeout: 3000
 
+# KeycloakのJWT検証(#563)。gatewayを経由しない直接アクセスに対しても、Bearerトークンが
+# 付与されていれば独立して検証する(gatewayのbypassを許さない)。値の意味・JWKS取得先と
+# issuerを分けて指定している理由はservices/gateway/src/main/resources/application.ymlの
+# コメント、および services/legacy-api/.../config/JwtDecoderConfig.java を参照。
+keycloak:
+  jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/certs}
+  issuer: ${KEYCLOAK_ISSUER:https://localhost/auth/realms/letsblog}
+
 app:
   encryption-key: ${APP_ENCRYPTION_KEY:}
   mail:
