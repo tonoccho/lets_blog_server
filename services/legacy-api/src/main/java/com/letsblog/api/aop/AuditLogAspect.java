@@ -41,11 +41,13 @@ public class AuditLogAspect {
 
         try {
             Long actorId = currentActorService.getCurrentActorId();
+            String actorKeycloakSub = currentActorService.getCurrentActorKeycloakSub();
             Long resourceId = extractResourceId(result, joinPoint.getArgs());
             String changes = toJson(result);
 
             auditLogService.log(
                     actorId,
+                    actorKeycloakSub,
                     annotation.action(),
                     annotation.resourceType(),
                     resourceId,

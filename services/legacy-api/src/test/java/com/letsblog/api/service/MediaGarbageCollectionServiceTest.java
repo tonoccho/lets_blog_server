@@ -200,7 +200,7 @@ class MediaGarbageCollectionServiceTest {
             return job;
         });
 
-        GenerationJobResponse response = service.startDelete(1L, "local", List.of("10", "20"), 9L);
+        GenerationJobResponse response = service.startDelete(1L, "local", List.of("10", "20"), 9L, "keycloak-sub-1");
 
         assertEquals(123L, response.id());
         assertEquals("running", response.status());
@@ -212,7 +212,7 @@ class MediaGarbageCollectionServiceTest {
         assertEquals("running", jobCaptor.getValue().getStatus());
 
         verify(mediaGarbageCollectionJobRunner)
-                .runDelete(eq(123L), eq(10L), eq("local"), eq(1L), eq(List.of("10", "20")), eq(9L));
+                .runDelete(eq(123L), eq(10L), eq("local"), eq(1L), eq(List.of("10", "20")), eq(9L), eq("keycloak-sub-1"));
     }
 
     @Test
@@ -222,6 +222,6 @@ class MediaGarbageCollectionServiceTest {
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
 
         assertThrows(IllegalArgumentException.class,
-                () -> service.startDelete(1L, "local", List.of("10"), 9L));
+                () -> service.startDelete(1L, "local", List.of("10"), 9L, "keycloak-sub-1"));
     }
 }

@@ -1206,6 +1206,8 @@ export interface OperationLogEntry {
   id: number;
   operationId: string;
   userId: number | null;
+  /** JWTのsubクレーム(issue #569)。X-Actor-Idヘッダー経由の操作や未認証の場合はnull。 */
+  actorKeycloakSub: string | null;
   method: string;
   path: string;
   statusCode: number | null;
@@ -1249,6 +1251,12 @@ export interface UnifiedLogEntry {
   detail: string | null;
   status: string | null;
   operationId: string | null;
+  /**
+   * JWTのsubクレーム(issue #569)。OPERATION/AUDITでJWT認証時のみ値を持つ。
+   * X-Actor-Idヘッダー経由の操作、AI_JOB、未認証の場合はnull
+   * (2026-08時点ではWeb/VSCode拡張がまだKeycloakトークンを送っていないため、常にnullが基本)。
+   */
+  actorKeycloakSub: string | null;
 }
 
 export interface UnifiedLogPage {

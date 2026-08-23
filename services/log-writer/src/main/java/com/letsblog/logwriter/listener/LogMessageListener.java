@@ -45,6 +45,8 @@ public class LogMessageListener {
         entity.setStack(message.stack());
         entity.setComponentStack(message.componentStack());
         entity.setLevel(message.level());
+        entity.setUserId(message.userId());
+        entity.setActorKeycloakSub(message.actorKeycloakSub());
         entity.setContext(message.context());
         entity.setUrl(message.url());
         entity.setUserAgent(message.userAgent());
@@ -59,6 +61,7 @@ public class LogMessageListener {
         OperationLog entity = new OperationLog();
         entity.setOperationId(message.operationId());
         entity.setUserId(message.userId());
+        entity.setActorKeycloakSub(message.actorKeycloakSub());
         entity.setMethod(message.method());
         entity.setPath(message.path());
         entity.setStatusCode(message.statusCode());
@@ -74,6 +77,7 @@ public class LogMessageListener {
     public void onAuditLog(AuditLogMessage message) {
         AuditLog entity = new AuditLog();
         entity.setUserId(message.userId());
+        entity.setActorKeycloakSub(message.actorKeycloakSub());
         entity.setAction(message.action());
         entity.setResourceType(message.resourceType());
         entity.setResourceId(message.resourceId());

@@ -60,7 +60,7 @@ public class MediaGarbageCollectionJobRunner {
 
     @Async("mediaGarbageCollectionExecutor")
     public void runDelete(Long jobId, Long siteId, String environment, Long projectId, List<String> mediaIds,
-            Long actorId) {
+            Long actorId, String actorKeycloakSub) {
         long[] lastReportedAt = {0L};
         List<String> deleted = new ArrayList<>();
         Map<String, String> failures = new LinkedHashMap<>();
@@ -82,7 +82,7 @@ public class MediaGarbageCollectionJobRunner {
                 reportProgress(jobId, lastReportedAt, i + 1, mediaIds.size());
             }
 
-            auditLogService.log(actorId, AuditLogAction.MEDIA_GARBAGE_COLLECTED, "PROJECT", projectId,
+            auditLogService.log(actorId, actorKeycloakSub, AuditLogAction.MEDIA_GARBAGE_COLLECTED, "PROJECT", projectId,
                     toJson(Map.of(
                             "environment", environment,
                             "requestedMediaIds", mediaIds,

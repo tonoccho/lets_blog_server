@@ -43,7 +43,7 @@ public class OperationLogController {
         if (userId == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
-        service.record(request.toDomain(userId));
+        service.record(request.toDomain(userId, currentActorService.getCurrentActorKeycloakSub()));
         return ResponseEntity.status(HttpStatus.CREATED).build();
     }
 

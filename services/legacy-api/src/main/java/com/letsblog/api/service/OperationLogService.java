@@ -48,6 +48,7 @@ public class OperationLogService {
         OperationLogMessage message = new OperationLogMessage(
                 entry.getOperationId(),
                 entry.getUserId(),
+                entry.getActorKeycloakSub(),
                 entry.getMethod(),
                 entry.getPath(),
                 entry.getStatusCode(),

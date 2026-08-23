@@ -47,6 +47,7 @@ class OperationLogControllerTest {
     void record_ログイン中ユーザーIDで保存する() {
         OperationLogController controller = controller();
         when(currentActorService.getCurrentActorId()).thenReturn(1L);
+        when(currentActorService.getCurrentActorKeycloakSub()).thenReturn("keycloak-sub-1");
         OperationLogRequest request = new OperationLogRequest("op-1", "GET", "/api/sites", 200, 42L, true, null);
 
         ResponseEntity<Void> response = controller.record(request);
@@ -55,6 +56,7 @@ class OperationLogControllerTest {
         ArgumentCaptor<OperationLog> captor = ArgumentCaptor.forClass(OperationLog.class);
         verify(service, times(1)).record(captor.capture());
         assertEquals(1L, captor.getValue().getUserId());
+        assertEquals("keycloak-sub-1", captor.getValue().getActorKeycloakSub());
         assertEquals("op-1", captor.getValue().getOperationId());
     }
 

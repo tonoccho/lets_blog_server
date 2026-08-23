@@ -31,6 +31,22 @@ public class FrontendErrorLog {
     @Column(name = "component_stack", columnDefinition = "TEXT")
     private String componentStack;
 
+    /**
+     * JWTから解決したローカルUser id(issue #569)。フロントエンドエラーログは従来actor概念を
+     * 持たなかったが、監査ログ・操作ログと同様に追加する。X-Actor-Idヘッダー経由の操作、
+     * 未認証の場合、およびV66マイグレーション以前の既存行はnull。
+     */
+    @Column(name = "user_id")
+    private Long userId;
+
+    /**
+     * JWTのsubクレーム(issue #569)。ローカルUser解決(userId)とは独立に保持し、
+     * User未同期・削除済みでも監査証跡の追跡性を保つ。X-Actor-Idヘッダー経由の操作、
+     * 未認証の場合、およびV66マイグレーション以前の既存行はnull。
+     */
+    @Column(name = "actor_keycloak_sub", length = 255)
+    private String actorKeycloakSub;
+
     @Column(name = "level", nullable = false, length = 20)
     @Enumerated(EnumType.STRING)
     private ErrorLevel level;

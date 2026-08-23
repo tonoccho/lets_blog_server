@@ -52,6 +52,7 @@ class UnifiedOperationLogServiceTest {
         log.setId(id);
         log.setOperationId("op-" + id);
         log.setUserId(10L);
+        log.setActorKeycloakSub("keycloak-sub-op");
         log.setMethod("GET");
         log.setPath("/api/sites");
         log.setDurationMs(5L);
@@ -73,6 +74,7 @@ class UnifiedOperationLogServiceTest {
         AuditLog log = new AuditLog();
         log.setId(id);
         log.setUserId(99L);
+        log.setActorKeycloakSub("keycloak-sub-audit");
         log.setAction(AuditLogAction.LOGIN);
         log.setCreatedAt(createdAt);
         return log;
@@ -101,8 +103,11 @@ class UnifiedOperationLogServiceTest {
 
         assertEquals(3, result.getTotalElements());
         assertEquals("AI_JOB", result.getContent().get(0).sourceType());
+        assertEquals(null, result.getContent().get(0).actorKeycloakSub());
         assertEquals("AUDIT", result.getContent().get(1).sourceType());
+        assertEquals("keycloak-sub-audit", result.getContent().get(1).actorKeycloakSub());
         assertEquals("OPERATION", result.getContent().get(2).sourceType());
+        assertEquals("keycloak-sub-op", result.getContent().get(2).actorKeycloakSub());
     }
 
     @Test

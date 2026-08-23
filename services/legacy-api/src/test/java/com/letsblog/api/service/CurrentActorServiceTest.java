@@ -105,6 +105,31 @@ class CurrentActorServiceTest {
     }
 
     @Test
+    void getCurrentActorKeycloakSub_JWTが無い場合はnullを返しヘッダーへフォールバックしない() {
+        assertThat(service.getCurrentActorKeycloakSub()).isNull();
+        org.mockito.Mockito.verify(request, org.mockito.Mockito.never()).getHeader("X-Actor-Id");
+    }
+
+    @Test
+    void getCurrentActorKeycloakSub_JWTがある場合はローカルUser解決の成否に関わらずsubを返す() {
+        // ローカルUserが見つからない場合でも、getCurrentActorId()とは異なりnullにはならない
+        // (issue #569: ローカルUser未同期・削除済みでもJWT起点の追跡性を保つため)。
+        // getCurrentActorKeycloakSub()はローカルUser解決を経由しないため、userRepositoryは
+        // 一切呼ばれない。
+        SecurityContextHolder.getContext().setAuthentication(jwtAuthenticationToken("unknown-sub"));
+
+        assertThat(service.getCurrentActorKeycloakSub()).isEqualTo("unknown-sub");
+        org.mockito.Mockito.verify(userRepository, org.mockito.Mockito.never()).findByKeycloakSub(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void getCurrentActorKeycloakSub_JWTにsubクレームが無い場合はnullを返す() {
+        SecurityContextHolder.getContext().setAuthentication(jwtAuthenticationTokenWithoutSubject());
+
+        assertThat(service.getCurrentActorKeycloakSub()).isNull();
+    }
+
+    @Test
     void JWT解決結果は1リクエストにつき1回だけDBへ問い合わせる() {
         User user = new User();
         user.setId(1L);

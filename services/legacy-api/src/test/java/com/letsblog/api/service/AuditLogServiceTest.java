@@ -42,13 +42,14 @@ class AuditLogServiceTest {
     void log_キューへ発行できればDBへは直接書き込まない() {
         service = new AuditLogService(auditLogRepository, rabbitTemplate);
 
-        service.log(1L, AuditLogAction.USER_CREATED, "USER", 2L, "{}", "127.0.0.1", "test-agent");
+        service.log(1L, "keycloak-sub-1", AuditLogAction.USER_CREATED, "USER", 2L, "{}", "127.0.0.1", "test-agent");
 
         ArgumentCaptor<AuditLogMessage> captor = ArgumentCaptor.forClass(AuditLogMessage.class);
         verify(rabbitTemplate).convertAndSend(
                 eq(LogExchanges.LOG_EXCHANGE), eq(LogExchanges.AUDIT_LOG_ROUTING_KEY), captor.capture());
         AuditLogMessage message = captor.getValue();
         assertEquals(1L, message.userId());
+        assertEquals("keycloak-sub-1", message.actorKeycloakSub());
         assertEquals(AuditLogAction.USER_CREATED.name(), message.action());
         assertEquals("USER", message.resourceType());
         assertEquals(2L, message.resourceId());
@@ -62,12 +63,13 @@ class AuditLogServiceTest {
         doThrow(new AmqpException("キュー接続エラー"))
                 .when(rabbitTemplate).convertAndSend(any(String.class), any(String.class), any(Object.class));
 
-        service.log(1L, AuditLogAction.USER_CREATED, "USER", 2L, "{}", "127.0.0.1", "test-agent");
+        service.log(1L, "keycloak-sub-1", AuditLogAction.USER_CREATED, "USER", 2L, "{}", "127.0.0.1", "test-agent");
 
         ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
         verify(auditLogRepository, times(1)).save(captor.capture());
         AuditLog saved = captor.getValue();
         assertEquals(1L, saved.getUserId());
+        assertEquals("keycloak-sub-1", saved.getActorKeycloakSub());
         assertEquals(AuditLogAction.USER_CREATED, saved.getAction());
         assertEquals("USER", saved.getResourceType());
         assertEquals(2L, saved.getResourceId());

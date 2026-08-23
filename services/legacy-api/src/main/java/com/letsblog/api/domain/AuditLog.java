@@ -26,6 +26,14 @@ public class AuditLog {
     @Column(name = "user_id")
     private Long userId;
 
+    /**
+     * JWTのsubクレーム(issue #569)。ローカルUser解決(userId)とは独立に保持し、
+     * User未同期・削除済みでも監査証跡の追跡性を保つ。X-Actor-Idヘッダー経由の操作、および
+     * V66マイグレーション以前の既存行はnull。
+     */
+    @Column(name = "actor_keycloak_sub", length = 255)
+    private String actorKeycloakSub;
+
     @Column(name = "action", nullable = false, length = 50)
     @Enumerated(EnumType.STRING)
     private AuditLogAction action;

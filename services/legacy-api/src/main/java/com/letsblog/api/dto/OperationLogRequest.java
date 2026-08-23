@@ -11,9 +11,10 @@ public record OperationLogRequest(
         boolean success,
         String errorMessage
 ) {
-    public OperationLog toDomain(Long userId) {
+    public OperationLog toDomain(Long userId, String actorKeycloakSub) {
         OperationLog log = new OperationLog();
         log.setUserId(userId);
+        log.setActorKeycloakSub(actorKeycloakSub);
         log.setOperationId(operationId);
         log.setMethod(method);
         log.setPath(path);

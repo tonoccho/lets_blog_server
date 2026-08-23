@@ -58,10 +58,11 @@ class ProjectMediaGarbageCollectionControllerTest {
     @Test
     void delete_actorIdを取得してサービスへ委譲する() {
         when(currentActorService.getCurrentActorId()).thenReturn(9L);
+        when(currentActorService.getCurrentActorKeycloakSub()).thenReturn("keycloak-sub-1");
         GenerationJobResponse response =
                 new GenerationJobResponse(123L, "media_garbage_collection_delete", "running",
                         LocalDateTime.now(), LocalDateTime.now());
-        when(mediaGarbageCollectionService.startDelete(1L, "local", List.of("10", "20"), 9L))
+        when(mediaGarbageCollectionService.startDelete(1L, "local", List.of("10", "20"), 9L, "keycloak-sub-1"))
                 .thenReturn(response);
 
         GenerationJobResponse result = controller()

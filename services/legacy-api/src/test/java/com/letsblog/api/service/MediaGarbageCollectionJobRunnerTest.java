@@ -82,7 +82,7 @@ class MediaGarbageCollectionJobRunnerTest {
         when(generationJobRepository.findById(123L)).thenReturn(Optional.of(job));
         when(generationJobRepository.save(any(GenerationJob.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        runner().runDelete(123L, 10L, "local", 1L, List.of("10", "20"), 9L);
+        runner().runDelete(123L, 10L, "local", 1L, List.of("10", "20"), 9L, "keycloak-sub-1");
 
         verify(cmsAdapter).deleteMedia(creds, "10");
         verify(cmsAdapter).deleteMedia(creds, "20");
@@ -90,7 +90,7 @@ class MediaGarbageCollectionJobRunnerTest {
         assertTrue(job.getResultPayload().contains("\"deletedCount\":2"));
         assertTrue(job.getResultPayload().contains("\"failedCount\":0"));
 
-        verify(auditLogService).log(eq(9L), eq(AuditLogAction.MEDIA_GARBAGE_COLLECTED), eq("PROJECT"), eq(1L),
+        verify(auditLogService).log(eq(9L), eq("keycloak-sub-1"), eq(AuditLogAction.MEDIA_GARBAGE_COLLECTED), eq("PROJECT"), eq(1L),
                 any(String.class), eq(null), eq(null));
     }
 
@@ -108,12 +108,12 @@ class MediaGarbageCollectionJobRunnerTest {
         doNothing().when(cmsAdapter).deleteMedia(creds, "10");
         doThrow(new RuntimeException("削除エラー")).when(cmsAdapter).deleteMedia(creds, "20");
 
-        runner().runDelete(123L, 10L, "local", 1L, List.of("10", "20"), 9L);
+        runner().runDelete(123L, 10L, "local", 1L, List.of("10", "20"), 9L, "keycloak-sub-1");
 
         assertEquals("done", job.getStatus());
         assertTrue(job.getResultPayload().contains("\"deletedCount\":1"));
         assertTrue(job.getResultPayload().contains("\"failedCount\":1"));
-        verify(auditLogService).log(eq(9L), eq(AuditLogAction.MEDIA_GARBAGE_COLLECTED), eq("PROJECT"), eq(1L),
+        verify(auditLogService).log(eq(9L), eq("keycloak-sub-1"), eq(AuditLogAction.MEDIA_GARBAGE_COLLECTED), eq("PROJECT"), eq(1L),
                 any(String.class), eq(null), eq(null));
     }
 
@@ -130,7 +130,7 @@ class MediaGarbageCollectionJobRunnerTest {
 
         doThrow(new RuntimeException("削除エラー")).when(cmsAdapter).deleteMedia(creds, "10");
 
-        runner().runDelete(123L, 10L, "local", 1L, List.of("10"), 9L);
+        runner().runDelete(123L, 10L, "local", 1L, List.of("10"), 9L, "keycloak-sub-1");
 
         assertEquals("failed", job.getStatus());
         assertTrue(job.getResultPayload().contains("\"failedCount\":1"));
@@ -143,9 +143,9 @@ class MediaGarbageCollectionJobRunnerTest {
         when(generationJobRepository.findById(123L)).thenReturn(Optional.of(job));
         when(generationJobRepository.save(any(GenerationJob.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        runner().runDelete(123L, 10L, "local", 1L, List.of("10"), 9L);
+        runner().runDelete(123L, 10L, "local", 1L, List.of("10"), 9L, "keycloak-sub-1");
 
         assertEquals("failed", job.getStatus());
-        verify(auditLogService, never()).log(anyLong(), any(), any(), any(), any(), any(), any());
+        verify(auditLogService, never()).log(anyLong(), any(), any(), any(), any(), any(), any(), any());
     }
 }
