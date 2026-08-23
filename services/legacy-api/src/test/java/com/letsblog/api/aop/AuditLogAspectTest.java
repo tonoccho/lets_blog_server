@@ -62,13 +62,14 @@ class AuditLogAspectTest {
         when(joinPoint.proceed()).thenReturn(new SampleResult(42L, "test"));
         when(joinPoint.getArgs()).thenReturn(new Object[]{});
         when(currentActorService.getCurrentActorId()).thenReturn(10L);
+        when(currentActorService.getCurrentActorKeycloakSub()).thenReturn("keycloak-sub-1");
         when(currentActorService.getRemoteIp()).thenReturn("127.0.0.1");
         when(currentActorService.getUserAgent()).thenReturn("agent");
 
         Object result = aspect.auditLogAdvice(joinPoint);
 
         assertEquals(new SampleResult(42L, "test"), result);
-        verify(auditLogService).log(eq(10L), eq(AuditLogAction.USER_CREATED), eq("USER"), eq(42L), any(), eq("127.0.0.1"), eq("agent"));
+        verify(auditLogService).log(eq(10L), eq("keycloak-sub-1"), eq(AuditLogAction.USER_CREATED), eq("USER"), eq(42L), any(), eq("127.0.0.1"), eq("agent"));
     }
 
     @Test
@@ -83,7 +84,7 @@ class AuditLogAspectTest {
 
         aspect.auditLogAdvice(joinPoint);
 
-        verify(auditLogService).log(eq(10L), eq(AuditLogAction.USER_DELETED), eq("USER"), eq(99L), any(), any(), any());
+        verify(auditLogService).log(eq(10L), any(), eq(AuditLogAction.USER_DELETED), eq("USER"), eq(99L), any(), any(), any());
     }
 
     @Test
@@ -97,7 +98,7 @@ class AuditLogAspectTest {
         when(currentActorService.getRemoteIp()).thenReturn("ip");
         when(currentActorService.getUserAgent()).thenReturn("ua");
         doThrow(new RuntimeException("db down"))
-                .when(auditLogService).log(any(), any(), any(), any(), any(), any(), any());
+                .when(auditLogService).log(any(), any(), any(), any(), any(), any(), any(), any());
 
         Object result = aspect.auditLogAdvice(joinPoint);
 

@@ -40,7 +40,7 @@ class LogMessageListenerTest {
     void onErrorLog_メッセージの内容をそのままエンティティへ保存する() {
         LocalDateTime now = LocalDateTime.now();
         ErrorLogMessage message = new ErrorLogMessage(
-                "boom", "stack-trace", "component-stack", "ERROR", "{}",
+                "boom", "stack-trace", "component-stack", "ERROR", 5L, "keycloak-sub-1", "{}",
                 "https://example.com", "agent", now.toString(), now.toString());
 
         listener().onErrorLog(message);
@@ -51,6 +51,8 @@ class LogMessageListenerTest {
         assertEquals("boom", saved.getMessage());
         assertEquals("ERROR", saved.getLevel());
         assertEquals("https://example.com", saved.getUrl());
+        assertEquals(5L, saved.getUserId());
+        assertEquals("keycloak-sub-1", saved.getActorKeycloakSub());
         assertEquals(now, saved.getTimestamp());
         assertEquals(now, saved.getCreatedAt());
     }
@@ -59,7 +61,7 @@ class LogMessageListenerTest {
     void onOperationLog_メッセージの内容をそのままエンティティへ保存する() {
         LocalDateTime now = LocalDateTime.now();
         OperationLogMessage message = new OperationLogMessage(
-                "op-1", 1L, "GET", "/api/sites", 200, 42L, true, null, now.toString());
+                "op-1", 1L, "keycloak-sub-1", "GET", "/api/sites", 200, 42L, true, null, now.toString());
 
         listener().onOperationLog(message);
 
@@ -68,6 +70,7 @@ class LogMessageListenerTest {
         OperationLog saved = captor.getValue();
         assertEquals("op-1", saved.getOperationId());
         assertEquals(1L, saved.getUserId());
+        assertEquals("keycloak-sub-1", saved.getActorKeycloakSub());
         assertEquals("GET", saved.getMethod());
         assertEquals(42L, saved.getDurationMs());
         assertEquals(now, saved.getCreatedAt());
@@ -77,7 +80,7 @@ class LogMessageListenerTest {
     void onAuditLog_メッセージの内容をそのままエンティティへ保存する() {
         LocalDateTime now = LocalDateTime.now();
         AuditLogMessage message = new AuditLogMessage(
-                1L, "USER_CREATED", "USER", 2L, "{}", "127.0.0.1", "agent", now.toString());
+                1L, "keycloak-sub-1", "USER_CREATED", "USER", 2L, "{}", "127.0.0.1", "agent", now.toString());
 
         listener().onAuditLog(message);
 
@@ -85,6 +88,7 @@ class LogMessageListenerTest {
         verify(auditLogRepository).save(captor.capture());
         AuditLog saved = captor.getValue();
         assertEquals(1L, saved.getUserId());
+        assertEquals("keycloak-sub-1", saved.getActorKeycloakSub());
         assertEquals("USER_CREATED", saved.getAction());
         assertEquals("USER", saved.getResourceType());
         assertEquals(2L, saved.getResourceId());

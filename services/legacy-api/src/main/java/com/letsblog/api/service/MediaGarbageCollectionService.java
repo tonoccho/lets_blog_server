@@ -89,7 +89,8 @@ public class MediaGarbageCollectionService {
     }
 
     @Transactional
-    public GenerationJobResponse startDelete(Long projectId, String environment, List<String> mediaIds, Long actorId) {
+    public GenerationJobResponse startDelete(Long projectId, String environment, List<String> mediaIds, Long actorId,
+            String actorKeycloakSub) {
         Project project = getProject(projectId);
         Site site = resolveSite(project, environment);
 
@@ -100,7 +101,8 @@ public class MediaGarbageCollectionService {
                 "projectId", projectId, "environment", environment, "mediaIds", mediaIds)));
         generationJobRepository.save(job);
 
-        mediaGarbageCollectionJobRunner.runDelete(job.getId(), site.getId(), environment, projectId, mediaIds, actorId);
+        mediaGarbageCollectionJobRunner.runDelete(
+                job.getId(), site.getId(), environment, projectId, mediaIds, actorId, actorKeycloakSub);
         return toResponse(job);
     }
 

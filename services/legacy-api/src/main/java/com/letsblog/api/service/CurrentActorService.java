@@ -61,6 +61,27 @@ public class CurrentActorService {
         }
     }
 
+    /**
+     * 監査ログ(issue #569)のために、JWTのsubクレームを生の文字列のまま返す。
+     *
+     * <p>{@link #getCurrentActorId()}はsubをローカルUserへ解決できた場合のみ値を返す(解決できなければ
+     * nullまたはヘッダーへフォールバックする)ため、ローカルUser未同期・削除済みなどapp内部の
+     * userIdが失われるケースでは、監査証跡から「誰が」の手がかりが消えてしまう。この値は
+     * ローカルUser解決の成否と切り離して、JWTが提示されている限り常にKeycloak側のsubクレームを
+     * そのまま保持することで、監査ログの追跡性をローカルUser同期状況に依存させないために用いる。
+     *
+     * <p>JWTが提示されていない場合(2026-08時点の実運用はこちらが唯一の経路。X-Actor-Idヘッダー
+     * 経由の操作にはKeycloak subに相当するものが存在しない)はnullを返す。ヘッダーへのフォール
+     * バックは行わない。
+     */
+    public String getCurrentActorKeycloakSub() {
+        if (!(SecurityContextHolder.getContext().getAuthentication() instanceof JwtAuthenticationToken token)) {
+            return null;
+        }
+        String subject = token.getToken().getSubject();
+        return (subject == null || subject.isBlank()) ? null : subject;
+    }
+
     public String getCurrentActorRole() {
         Optional<User> jwtActor = resolveJwtActor();
         if (jwtActor.isPresent()) {

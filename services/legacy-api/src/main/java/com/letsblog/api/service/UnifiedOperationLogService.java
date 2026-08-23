@@ -98,12 +98,13 @@ public class UnifiedOperationLogService {
                 log.getMethod() + " " + log.getPath(),
                 log.getErrorMessage(),
                 log.isSuccess() ? "SUCCESS" : "FAILED",
-                log.getOperationId());
+                log.getOperationId(),
+                log.getActorKeycloakSub());
     }
 
     private UnifiedLogEntryResponse fromGenerationJob(GenerationJob job) {
         return new UnifiedLogEntryResponse(
-                "AI_JOB", job.getId(), job.getCreatedAt(), job.getType(), null, job.getStatus(), null);
+                "AI_JOB", job.getId(), job.getCreatedAt(), job.getType(), null, job.getStatus(), null, null);
     }
 
     private UnifiedLogEntryResponse fromAuditLog(AuditLog auditLog) {
@@ -115,6 +116,7 @@ public class UnifiedOperationLogService {
             }
         }
         return new UnifiedLogEntryResponse(
-                "AUDIT", auditLog.getId(), auditLog.getCreatedAt(), title, auditLog.getRemoteIp(), null, null);
+                "AUDIT", auditLog.getId(), auditLog.getCreatedAt(), title, auditLog.getRemoteIp(), null, null,
+                auditLog.getActorKeycloakSub());
     }
 }

@@ -48,6 +48,7 @@ public class ProjectMediaGarbageCollectionController {
             @Valid @RequestBody MediaGarbageCollectionDeleteRequest request) {
         adminAuthorizationService.requireAdmin();
         Long actorId = currentActorService.getCurrentActorId();
-        return mediaGarbageCollectionService.startDelete(id, environment, request.mediaIds(), actorId);
+        String actorKeycloakSub = currentActorService.getCurrentActorKeycloakSub();
+        return mediaGarbageCollectionService.startDelete(id, environment, request.mediaIds(), actorId, actorKeycloakSub);
     }
 }

@@ -42,6 +42,7 @@ class OperationLogServiceTest {
         service = new OperationLogService(repository, rabbitTemplate);
         OperationLog entry = new OperationLog();
         entry.setUserId(1L);
+        entry.setActorKeycloakSub("keycloak-sub-1");
         entry.setOperationId("op-1");
         entry.setMethod("GET");
         entry.setPath("/api/sites");
@@ -56,6 +57,7 @@ class OperationLogServiceTest {
                 eq(LogExchanges.LOG_EXCHANGE), eq(LogExchanges.OPERATION_LOG_ROUTING_KEY), captor.capture());
         OperationLogMessage message = captor.getValue();
         assertEquals(1L, message.userId());
+        assertEquals("keycloak-sub-1", message.actorKeycloakSub());
         assertEquals("op-1", message.operationId());
         assertEquals("GET", message.method());
         assertEquals("/api/sites", message.path());
@@ -71,6 +73,7 @@ class OperationLogServiceTest {
                 .when(rabbitTemplate).convertAndSend(any(String.class), any(String.class), any(Object.class));
         OperationLog entry = new OperationLog();
         entry.setUserId(1L);
+        entry.setActorKeycloakSub("keycloak-sub-1");
         entry.setOperationId("op-1");
         entry.setMethod("GET");
         entry.setPath("/api/sites");
@@ -84,6 +87,7 @@ class OperationLogServiceTest {
         verify(repository, times(1)).save(captor.capture());
         OperationLog saved = captor.getValue();
         assertEquals(1L, saved.getUserId());
+        assertEquals("keycloak-sub-1", saved.getActorKeycloakSub());
         assertEquals("op-1", saved.getOperationId());
         assertEquals("GET", saved.getMethod());
         assertEquals("/api/sites", saved.getPath());

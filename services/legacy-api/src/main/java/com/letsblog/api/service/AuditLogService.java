@@ -40,10 +40,10 @@ public class AuditLogService {
      * 書き込みとして成功させる)。
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void log(Long userId, AuditLogAction action, String resourceType,
+    public void log(Long userId, String actorKeycloakSub, AuditLogAction action, String resourceType,
                      Long resourceId, String changes, String remoteIp, String userAgent) {
         AuditLogMessage message = new AuditLogMessage(
-                userId, action.name(), resourceType, resourceId, changes, remoteIp, userAgent,
+                userId, actorKeycloakSub, action.name(), resourceType, resourceId, changes, remoteIp, userAgent,
                 LocalDateTime.now().toString());
 
         try {
@@ -54,6 +54,7 @@ public class AuditLogService {
             log.warn("監査ログのキュー発行に失敗したため、同期DB書き込みへフォールバックします", e);
             AuditLog auditLog = new AuditLog();
             auditLog.setUserId(userId);
+            auditLog.setActorKeycloakSub(actorKeycloakSub);
             auditLog.setAction(action);
             auditLog.setResourceType(resourceType);
             auditLog.setResourceId(resourceId);

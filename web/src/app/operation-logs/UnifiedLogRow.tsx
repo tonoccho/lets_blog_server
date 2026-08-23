@@ -51,6 +51,14 @@ export function UnifiedLogRow({ entry, timezone }: { entry: UnifiedLogEntry; tim
         {entry.detail && (
           <span className="truncate text-xs text-neutral-500 dark:text-neutral-400">{entry.detail}</span>
         )}
+        {entry.actorKeycloakSub && (
+          <span
+            className="shrink-0 truncate rounded bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 font-mono text-xs text-neutral-500 dark:text-neutral-400"
+            title={`Keycloak Sub: ${entry.actorKeycloakSub}`}
+          >
+            Keycloak: {entry.actorKeycloakSub}
+          </span>
+        )}
         {entry.status && (
           <span className={`shrink-0 rounded px-2 py-0.5 text-xs ${statusBadgeClass(entry.status)}`}>
             {entry.status}
