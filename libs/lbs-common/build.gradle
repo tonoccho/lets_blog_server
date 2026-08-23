@@ -15,6 +15,10 @@ dependencies {
     api 'com.fasterxml.jackson.core:jackson-annotations'
     api 'org.slf4j:slf4j-api'
     compileOnly 'jakarta.servlet:jakarta.servlet-api'
+    // ServiceTokenClient(#567)がKeycloakAdminClient等と同じ流儀でJsonNode(Jackson2)を
+    // 使ってトークンエンドポイントのレスポンスを読むために必要
+    // (Boot 4の既定Jackson3コンバータはJsonNode.classのデシリアライズに失敗するため)。
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
 
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
@@ -23,6 +27,7 @@ dependencies {
     testImplementation 'org.springframework:spring-test'
     testImplementation 'jakarta.servlet:jakarta.servlet-api'
     testImplementation 'com.h2database:h2'
+    testImplementation 'org.hamcrest:hamcrest'
     testRuntimeOnly 'ch.qos.logback:logback-classic'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
