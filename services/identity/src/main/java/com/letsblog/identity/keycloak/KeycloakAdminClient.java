@@ -1,38 +1,33 @@
 package com.letsblog.identity.keycloak;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.letsblog.common.auth.ServiceTokenClient;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.AbstractJacksonHttpMessageConverter;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
-
-import java.time.Instant;
 
 /**
  * identity-serviceからKeycloak Admin REST APIを呼び出す薄いクライアント(#562)。
  * GithubClient/AdSenseClient等と同様、専用SDKは導入せずRestClientの薄いラッパーとして実装する。
  *
- * <p>クライアントクレデンシャルズグラントでアクセストークンを取得し、有効期限内はキャッシュして再利用する
- * (Keycloakへのリクエストのたびにトークンエンドポイントを叩かない)。
+ * <p>アクセストークンの取得・キャッシュ・期限前更新は{@link ServiceTokenClient}(#567でlbs-commonに
+ * 一般化された共通部品)に委譲する。元々このクラスに実装していたロジック(#562)と同じ
+ * {@code letsblog-services}クライアントクレデンシャルズグラントを使い、挙動は変わらない
+ * (併せて連続失敗時のサーキットブレーカーが働くようになる)。
  *
  * <p>すべてのメソッドは、Keycloakへの到達不可・エラーレスポンスを問わず{@link KeycloakUserSyncException}
  * に変換して送出する(#562の受入基準: Keycloak停止時に明確なエラーを返し、暗黙に成功しない)。
  */
 public class KeycloakAdminClient {
 
-    private final RestClient tokenClient;
+    private final ServiceTokenClient serviceTokenClient;
     private final RestClient adminClient;
-    private final KeycloakAdminProperties properties;
-
-    private volatile CachedToken cachedToken;
 
     /**
      * restClientBuilderには、接続断/無応答時に長時間ハングしないよう
@@ -42,11 +37,8 @@ public class KeycloakAdminClient {
      * 責務とすることで、テストでMockRestServiceServerを差し込めるようにしている)。
      */
     public KeycloakAdminClient(RestClient.Builder restClientBuilder, KeycloakAdminProperties properties) {
-        this.properties = properties;
-
-        RestClient.Builder tokenBuilder = restClientBuilder.clone().baseUrl(properties.getTokenUri());
-        preferJackson2(tokenBuilder);
-        this.tokenClient = tokenBuilder.build();
+        this.serviceTokenClient = new ServiceTokenClient(
+                restClientBuilder, properties.getTokenUri(), properties.getClientId(), properties.getClientSecret());
 
         RestClient.Builder adminBuilder = restClientBuilder.clone().baseUrl(properties.getAdminBaseUri());
         preferJackson2(adminBuilder);
@@ -95,7 +87,7 @@ public class KeycloakAdminClient {
         try {
             HttpHeaders headers = adminClient.post()
                     .uri("/users")
-                    .header("Authorization", "Bearer " + fetchAccessToken())
+                    .header("Authorization", "Bearer " + serviceTokenClient.getAccessToken())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
                     .retrieve()
@@ -140,7 +132,7 @@ public class KeycloakAdminClient {
         try {
             adminClient.delete()
                     .uri("/users/{id}", keycloakSub)
-                    .header("Authorization", "Bearer " + fetchAccessToken())
+                    .header("Authorization", "Bearer " + serviceTokenClient.getAccessToken())
                     .retrieve()
                     .toBodilessEntity();
         } catch (RestClientResponseException e) {
@@ -162,7 +154,7 @@ public class KeycloakAdminClient {
         try {
             adminClient.put()
                     .uri("/users/{id}/execute-actions-email", keycloakSub)
-                    .header("Authorization", "Bearer " + fetchAccessToken())
+                    .header("Authorization", "Bearer " + serviceTokenClient.getAccessToken())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(actions)
                     .retrieve()
@@ -183,7 +175,7 @@ public class KeycloakAdminClient {
         try {
             adminClient.get()
                     .uri("/users/{id}", keycloakSub)
-                    .header("Authorization", "Bearer " + fetchAccessToken())
+                    .header("Authorization", "Bearer " + serviceTokenClient.getAccessToken())
                     .retrieve()
                     .toBodilessEntity();
             return true;
@@ -201,7 +193,7 @@ public class KeycloakAdminClient {
         try {
             adminClient.put()
                     .uri("/users/{id}", keycloakSub)
-                    .header("Authorization", "Bearer " + fetchAccessToken())
+                    .header("Authorization", "Bearer " + serviceTokenClient.getAccessToken())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
                     .retrieve()
@@ -210,45 +202,6 @@ public class KeycloakAdminClient {
             throw new KeycloakUserSyncException(errorMessage(action + "(sub=" + keycloakSub + ")", e), e);
         } catch (Exception e) {
             throw connectionFailure(action + "(sub=" + keycloakSub + ")", e);
-        }
-    }
-
-    private synchronized String fetchAccessToken() {
-        CachedToken current = this.cachedToken;
-        if (current != null && !current.isExpiring()) {
-            return current.accessToken();
-        }
-
-        MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
-        form.add("grant_type", "client_credentials");
-        form.add("client_id", properties.getClientId());
-        form.add("client_secret", properties.getClientSecret());
-
-        try {
-            JsonNode response = tokenClient.post()
-                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                    .body(form)
-                    .retrieve()
-                    .body(JsonNode.class);
-            if (response == null || !response.has("access_token")) {
-                throw new KeycloakUserSyncException("Keycloak管理APIのトークン取得レスポンスが不正です");
-            }
-            String accessToken = response.get("access_token").asText();
-            long expiresInSeconds = response.path("expires_in").asLong(60);
-            // 早めに更新して境界での失効を避ける(最低5秒は先読みしない)。
-            long safetyMarginSeconds = Math.min(10, Math.max(expiresInSeconds - 5, 0));
-            Instant expiresAt = Instant.now().plusSeconds(expiresInSeconds - safetyMarginSeconds);
-            CachedToken token = new CachedToken(accessToken, expiresAt);
-            this.cachedToken = token;
-            return accessToken;
-        } catch (RestClientResponseException e) {
-            throw new KeycloakUserSyncException(
-                    "Keycloak管理APIのトークン取得に失敗しました(client_id=" + properties.getClientId() + "): "
-                            + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
-        } catch (KeycloakUserSyncException e) {
-            throw e;
-        } catch (Exception e) {
-            throw connectionFailure("トークン取得", e);
         }
     }
 
@@ -268,11 +221,5 @@ public class KeycloakAdminClient {
             return "Keycloak側に同一のユーザー(email/username)が既に存在します: " + action;
         }
         return "Keycloak " + action + "に失敗しました: " + status + " " + e.getResponseBodyAsString();
-    }
-
-    private record CachedToken(String accessToken, Instant expiresAt) {
-        boolean isExpiring() {
-            return Instant.now().isAfter(expiresAt);
-        }
     }
 }
