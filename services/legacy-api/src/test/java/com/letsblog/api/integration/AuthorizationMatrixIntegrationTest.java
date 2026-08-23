@@ -7,6 +7,7 @@ import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.ProjectUserRepository;
 import com.letsblog.api.repository.UserRepository;
 import com.letsblog.api.service.ApiKeyService;
+import com.letsblog.common.testfixtures.JwtTestFixtures;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -16,6 +17,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.oauth2.jwt.BadJwtException;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -25,6 +29,7 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -70,6 +75,9 @@ class AuthorizationMatrixIntegrationTest {
     @MockitoBean
     private ApiKeyService apiKeyService;
 
+    @MockitoBean
+    private JwtDecoder jwtDecoder;
+
     @Autowired
     private ProjectRepository projectRepository;
 
@@ -82,6 +90,8 @@ class AuthorizationMatrixIntegrationTest {
     @BeforeEach
     void setUpApiKeyAuth() {
         when(apiKeyService.resolveUserId(TEST_API_KEY)).thenReturn(Optional.of(1L));
+        // jwtDecoderは(a)の401網羅テスト等Authorizationヘッダーを送らないテストでは一切呼ばれない
+        // ため、ここではスタブせず各JWT関連テストで個別に振る舞いを定義する。
     }
 
     // =====================================================================================
@@ -364,6 +374,47 @@ class AuthorizationMatrixIntegrationTest {
     void everyProtectedEndpoint_returns401WithoutApiKey(Endpoint endpoint) throws Exception {
         mockMvc.perform(request(HttpMethod.valueOf(endpoint.method()), endpoint.path()))
                 .andExpect(status().isUnauthorized());
+    }
+
+    // =====================================================================================
+    // (a2) issue #564: Authorizationヘッダーの検証済みJWTをX-API-Keyの代替として受理する
+    //
+    // ApiKeyAuthFilterがX-API-Key・JWTのどちらも欠けている場合にのみ401を返すことを検証する。
+    // (a)の401網羅がAuthorizationヘッダーを送らずX-API-Keyのみで判定しているのに対し、
+    // こちらはBearerトークンだけで(X-API-Key無しで)通ることを見る。上のPUBLIC_AUTH_PATHSと
+    // 同じ理由で/api/healthとPUBLIC_AUTH_PATHSは対象外。
+    // =====================================================================================
+
+    @Test
+    @DisplayName("有効なAuthorization: Bearer JWTがあればX-API-Key無しでも401にならない")
+    void 有効なBearerトークンならAPIキー無しでも401にならない() throws Exception {
+        when(jwtDecoder.decode("valid-jwt")).thenReturn(JwtTestFixtures.jwt("keycloak-sub-1", "user"));
+
+        mockMvc.perform(request(HttpMethod.GET, "/api/metadata/post-statuses")
+                        .header("Authorization", "Bearer valid-jwt"))
+                .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(401));
+    }
+
+    @Test
+    @DisplayName("不正なJWTかつX-API-Key無しなら401(JWT経路はX-API-Key経路を弱体化しない)")
+    void 不正なBearerトークンかつAPIキー無しは401のまま() throws Exception {
+        // NimbusJwtDecoderが実際に不正/期限切れトークンで投げるのはBadJwtException(JwtExceptionの
+        // サブタイプ)。JwtAuthenticationProviderはBadJwtExceptionをInvalidBearerTokenException
+        // (401)へ変換するが、より汎用的なJwtExceptionはAuthenticationServiceException(実装エラー
+        // 扱い)へ変換されてしまうため、実挙動に忠実になるようBadJwtExceptionでスタブする。
+        when(jwtDecoder.decode("invalid-jwt")).thenThrow(new BadJwtException("invalid token"));
+
+        mockMvc.perform(request(HttpMethod.GET, "/api/metadata/post-statuses")
+                        .header("Authorization", "Bearer invalid-jwt"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("X-API-Keyでの既存アクセスは、JWT検証機構の追加後も引き続き成功する(VSCode拡張の継続利用)")
+    void 既存のAPIキー経路はJWT追加後も引き続き成功する() throws Exception {
+        mockMvc.perform(request(HttpMethod.GET, "/api/metadata/post-statuses")
+                        .header(API_KEY_HEADER, TEST_API_KEY))
+                .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(401));
     }
 
     // =====================================================================================

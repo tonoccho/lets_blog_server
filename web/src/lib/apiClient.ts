@@ -99,17 +99,6 @@ export interface AuthenticatedUser {
   role: "admin" | "user";
 }
 
-export interface LoginResult {
-  user: AuthenticatedUser;
-  twoFactorRequired: boolean;
-  apiKey: string | null;
-}
-
-export interface TwoFactorSetup {
-  qrCodeDataUrl: string;
-  backupCodes: string[];
-}
-
 export interface AppUser {
   id: number;
   email: string;
@@ -141,6 +130,11 @@ function serverUrl(): string {
  * next-auth/jwtのgetToken()はreq.cookies/req.headersしか参照しないため、
  * NextRequestが無いServer Component/Server Actionからでもnext/headersのcookies()/headers()を
  * そのまま渡せる(型定義上はNextRequest等を期待しているため as any で吸収する)。
+ *
+ * 注意: ここで読むCookieは、SessionProvider(web/src/app/SessionProvider.tsx)のrefetchIntervalに
+ * よってブラウザが定期的に/api/auth/sessionを叩くことでjwtコールバックのリフレッシュが走り、
+ * 更新され続けている前提。getToken()自体はjwtコールバックを再実行しない生のCookieデコードのため、
+ * ここで読むaccessTokenが失効間際でないかはSessionProvider側の更新頻度に依存する。
  */
 async function currentToken() {
   return getToken({
@@ -149,27 +143,18 @@ async function currentToken() {
   });
 }
 
-/** ログイン中ユーザーのAPIキーをNextAuthのJWT(HttpOnly cookie)から取得する。 */
-async function currentApiKey(): Promise<string> {
+/** ログイン中ユーザーのKeycloakアクセストークンをNextAuthのJWT(HttpOnly cookie)から取得する。 */
+async function currentAccessToken(): Promise<string> {
   const token = await currentToken();
-  if (!token?.apiKey) {
-    throw new Error('ログインしていないか、APIキーが未取得です。再度ログインしてください。');
+  if (!token?.accessToken) {
+    throw new Error('ログインしていないか、アクセストークンが未取得です。再度ログインしてください。');
   }
-  return token.apiKey;
+  return token.accessToken;
 }
 
 export interface ActorInfo {
   id: number;
   role: "admin" | "user";
-}
-
-/** actorが明示指定されなかった呼び出しでも操作ログにユーザーを紐付けられるよう、JWTから補完する。 */
-async function currentTokenActor(): Promise<ActorInfo | undefined> {
-  const token = await currentToken();
-  if (!token?.id || !token?.role) {
-    return undefined;
-  }
-  return { id: Number(token.id), role: token.role };
 }
 
 const OPERATION_ID_HEADER = 'x-operation-id';
@@ -195,14 +180,13 @@ interface OperationLogEntryInput {
  * 無限再帰を避けるためにapiFetch()を経由せず直接fetchする(=この記録リクエスト自体はログされない)。
  * 記録の失敗が本来のAPI呼び出しに影響しないよう例外は握りつぶす。
  */
-async function recordOperationLog(apiKey: string, actor: ActorInfo | undefined, entry: OperationLogEntryInput): Promise<void> {
+async function recordOperationLog(accessToken: string, entry: OperationLogEntryInput): Promise<void> {
   try {
     await fetch(`${serverUrl()}/api/operation-logs`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-API-Key': apiKey,
-        ...(actor ? { 'X-Actor-Id': String(actor.id), 'X-Actor-Role': actor.role } : {}),
+        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify(entry),
       cache: 'no-store',
@@ -213,23 +197,28 @@ async function recordOperationLog(apiKey: string, actor: ActorInfo | undefined, 
 }
 
 interface ApiFetchInit extends RequestInit {
+  /**
+   * (issue #564以前の名残)呼び出し元がactorを明示できるフィールド。認可・監査ログの紐付けは
+   * Authorizationヘッダーの検証済みJWTでサーバー側が判定するようになったため、この値自体は
+   * もう使われない。~150箇所ある個々のAPIラッパー関数のシグネチャを変更しないためにフィールド
+   * としてだけ残している(fetch()には渡らない未使用の値として無害に無視される)。
+   */
   actor?: ActorInfo;
   /** ログイン前でも呼べる公開エンドポイント(signup/setup/setup-status)向け。既定はtrue。 */
   requiresAuth?: boolean;
 }
 
 async function apiFetch<T>(path: string, init?: ApiFetchInit): Promise<T> {
-  const { actor, requiresAuth = true, ...requestInit } = init ?? {};
-  const apiKey = requiresAuth ? await currentApiKey() : undefined;
+  const { requiresAuth = true, ...requestInit } = init ?? {};
+  const accessToken = requiresAuth ? await currentAccessToken() : undefined;
   const method = (requestInit.method ?? 'GET').toString().toUpperCase();
   const startedAt = Date.now();
   // after()内ではRequest-time API(headers/cookies)を呼べないため、レンダリング中に読んでおく。
-  const operationId = apiKey ? await currentOperationId() : null;
-  const logActor = actor ?? (apiKey ? await currentTokenActor() : undefined);
+  const operationId = accessToken ? await currentOperationId() : null;
 
   const scheduleLog = (entry: OperationLogEntryInput) => {
-    if (apiKey && operationId) {
-      after(() => recordOperationLog(apiKey, logActor, entry));
+    if (accessToken && operationId) {
+      after(() => recordOperationLog(accessToken, entry));
     }
   };
 
@@ -238,8 +227,7 @@ async function apiFetch<T>(path: string, init?: ApiFetchInit): Promise<T> {
     res = await fetch(`${serverUrl()}${path}`, {
       ...requestInit,
       headers: {
-        ...(apiKey ? { 'X-API-Key': apiKey } : {}),
-        ...(actor ? { 'X-Actor-Id': String(actor.id), 'X-Actor-Role': actor.role } : {}),
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...(requestInit.headers ?? {}),
       },
       cache: 'no-store',
@@ -465,7 +453,7 @@ export function updateGeneratedImageTags(id: number, tags: string[]): Promise<Ge
 
 export async function downloadGeneratedImageFile(id: number): Promise<{ body: ArrayBuffer; mimeType: string }> {
   const res = await fetch(`${serverUrl()}/api/generated-images/${id}/file`, {
-    headers: { 'X-API-Key': await currentApiKey() },
+    headers: { Authorization: `Bearer ${await currentAccessToken()}` },
     cache: 'no-store',
   });
   if (!res.ok) {
@@ -493,7 +481,7 @@ export function deleteDiagram(id: number): Promise<void> {
 
 export async function downloadDiagramSvg(id: number): Promise<{ body: ArrayBuffer; mimeType: string }> {
   const res = await fetch(`${serverUrl()}/api/diagrams/${id}/svg`, {
-    headers: { 'X-API-Key': await currentApiKey() },
+    headers: { Authorization: `Bearer ${await currentAccessToken()}` },
     cache: 'no-store',
   });
   if (!res.ok) {
@@ -590,83 +578,8 @@ export function uploadProjectAssetImage(
   });
 }
 
-export async function login(email: string, password: string): Promise<LoginResult | null> {
-  const res = await fetch(`${serverUrl()}/api/auth/login`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ email, password, label: 'web' }),
-    cache: 'no-store',
-  });
-
-  if (res.status === 401) {
-    return null;
-  }
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
-  }
-  return (await res.json()) as LoginResult;
-}
-
-/**
- * ログイン2段階目。login()でtwoFactorRequired=trueだった場合に、
- * TOTPコード(またはバックアップコード)を検証してログインを完了する。
- * 401の場合はコードが無効なのでnullを返す。
- */
-export async function verifyTotpLogin(userId: number, code: string): Promise<LoginResult | null> {
-  const res = await fetch(`${serverUrl()}/api/auth/totp/verify`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ userId, code, label: 'web' }),
-    cache: 'no-store',
-  });
-
-  if (res.status === 401) {
-    return null;
-  }
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
-  }
-  return (await res.json()) as LoginResult;
-}
-
-export function getTwoFactorStatus(actor: ActorInfo): Promise<{ enabled: boolean }> {
-  return apiFetch<{ enabled: boolean }>('/api/auth/totp/status', { actor });
-}
-
-export function setupTwoFactor(actor: ActorInfo): Promise<TwoFactorSetup> {
-  return apiFetch<TwoFactorSetup>('/api/auth/totp/setup', { method: 'POST', actor });
-}
-
-export function verifyTwoFactorSetup(code: string, actor: ActorInfo): Promise<{ message: string }> {
-  return apiFetch<{ message: string }>('/api/auth/totp/verify-setup', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code }),
-    actor,
-  });
-}
-
-export function disableTwoFactor(actor: ActorInfo): Promise<{ message: string }> {
-  return apiFetch<{ message: string }>('/api/auth/totp/disable', { method: 'POST', actor });
-}
-
 export function listUsers(): Promise<AppUser[]> {
   return apiFetch<AppUser[]>('/api/users');
-}
-
-export function signup(email: string, password: string): Promise<AuthenticatedUser> {
-  return apiFetch<AuthenticatedUser>('/api/auth/signup', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-    requiresAuth: false,
-  });
 }
 
 export function getSetupStatus(): Promise<{ needsSetup: boolean }> {
@@ -830,22 +743,6 @@ export function getPostStatuses(actor?: ActorInfo): Promise<PostStatusOption[]> 
   return apiFetch<PostStatusOption[]>('/api/metadata/post-statuses', { actor });
 }
 
-export function requestPasswordReset(email: string): Promise<{ message: string }> {
-  return apiFetch<{ message: string }>('/api/auth/password-reset/request', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email }),
-  });
-}
-
-export function confirmPasswordReset(token: string, newPassword: string): Promise<{ message: string }> {
-  return apiFetch<{ message: string }>('/api/auth/password-reset/confirm', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token, newPassword }),
-  });
-}
-
 export type CustomTagFormat = 'INLINE' | 'BLOCK';
 
 export interface CustomTag {
@@ -975,14 +872,18 @@ export function previewProjectCustomTag(
   });
 }
 
-/** プロジェクト詳細/プロジェクト一覧向け。グローバルタグを含めず、プロジェクトのタグのCSSのみを連結する。 */
-export async function downloadProjectCustomTagCssBundle(projectId: number, actor: ActorInfo): Promise<ArrayBuffer> {
+/**
+ * プロジェクト詳細/プロジェクト一覧向け。グローバルタグを含めず、プロジェクトのタグのCSSのみを連結する。
+ * actor引数は呼び出し元シグネチャ互換のために残しているが、認可はAuthorizationヘッダーのJWTで
+ * サーバー側が判定するため実際には使わない。
+ */
+export async function downloadProjectCustomTagCssBundle(
+  projectId: number,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- 呼び出し元シグネチャ互換のために残す
+  actor: ActorInfo
+): Promise<ArrayBuffer> {
   const res = await fetch(`${serverUrl()}/api/projects/${projectId}/custom-tags/css-bundle`, {
-    headers: {
-      'X-API-Key': await currentApiKey(),
-      'X-Actor-Id': String(actor.id),
-      'X-Actor-Role': actor.role,
-    },
+    headers: { Authorization: `Bearer ${await currentAccessToken()}` },
     cache: 'no-store',
   });
   if (!res.ok) {
@@ -1168,7 +1069,7 @@ export function getMyCustomTagTemplates(actor: ActorInfo): Promise<CustomTagTemp
  */
 export async function downloadBackupFile(): Promise<{ body: ArrayBuffer; filename: string }> {
   const res = await fetch(`${serverUrl()}/api/backup/download`, {
-    headers: { 'X-API-Key': await currentApiKey() },
+    headers: { Authorization: `Bearer ${await currentAccessToken()}` },
     cache: 'no-store',
   });
   if (!res.ok) {
@@ -1206,7 +1107,7 @@ export interface OperationLogEntry {
   id: number;
   operationId: string;
   userId: number | null;
-  /** JWTのsubクレーム(issue #569)。X-Actor-Idヘッダー経由の操作や未認証の場合はnull。 */
+  /** JWTのsubクレーム(issue #569)。旧ヘッダーベース(廃止済み)の操作や未認証の場合はnull。 */
   actorKeycloakSub: string | null;
   method: string;
   path: string;
@@ -1253,8 +1154,9 @@ export interface UnifiedLogEntry {
   operationId: string | null;
   /**
    * JWTのsubクレーム(issue #569)。OPERATION/AUDITでJWT認証時のみ値を持つ。
-   * X-Actor-Idヘッダー経由の操作、AI_JOB、未認証の場合はnull
-   * (2026-08時点ではWeb/VSCode拡張がまだKeycloakトークンを送っていないため、常にnullが基本)。
+   * 旧ヘッダーベース(廃止済み)の操作、AI_JOB、未認証の場合はnull
+   * (issue #564でWebはKeycloakのアクセストークンを送るようになったため、Web発の操作は
+   * 基本的に値を持つ。VSCode拡張は#565が未着手のため、そちらの操作は引き続きnullになる)。
    */
   actorKeycloakSub: string | null;
 }
@@ -2536,7 +2438,7 @@ export function deleteMediaGarbage(
  */
 export async function downloadVscodeExtension(): Promise<{ body: ArrayBuffer; filename: string }> {
   const res = await fetch(`${serverUrl()}/api/system/vscode-extension`, {
-    headers: { 'X-API-Key': await currentApiKey() },
+    headers: { Authorization: `Bearer ${await currentAccessToken()}` },
     cache: 'no-store',
   });
   if (!res.ok) {
@@ -2581,9 +2483,9 @@ export function getConnectedServiceStatusDetail(actor?: ActorInfo): Promise<Conn
  * 呼び出し元(Route Handler)がbodyをそのままブラウザへ中継する。
  */
 export async function streamConnectedServiceStatuses(): Promise<Response> {
-  const apiKey = await currentApiKey();
+  const accessToken = await currentAccessToken();
   return fetch(`${serverUrl()}/api/dashboard/service-status/stream`, {
-    headers: { 'X-API-Key': apiKey, Accept: 'text/event-stream' },
+    headers: { Authorization: `Bearer ${accessToken}`, Accept: 'text/event-stream' },
     cache: 'no-store',
   });
 }
@@ -2603,9 +2505,9 @@ export function getContainerStatuses(): Promise<ContainerStatus[]> {
 
 /** コンテナ稼働状況をSSEで受け取るためのアップストリーム接続(issue #280)。 */
 export async function streamContainerStatuses(): Promise<Response> {
-  const apiKey = await currentApiKey();
+  const accessToken = await currentAccessToken();
   return fetch(`${serverUrl()}/api/dashboard/container-status/stream`, {
-    headers: { 'X-API-Key': apiKey, Accept: 'text/event-stream' },
+    headers: { Authorization: `Bearer ${accessToken}`, Accept: 'text/event-stream' },
     cache: 'no-store',
   });
 }

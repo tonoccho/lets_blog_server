@@ -1,160 +1,87 @@
 import { test, expect } from '@playwright/test';
+import { loginViaKeycloak } from './helpers';
 
-test.describe('User Authentication Flow', () => {
-  const testEmail = `test-${Date.now()}@example.com`;
-  const testPassword = 'TestPassword123!';
+/**
+ * issue #564: NextAuthのCredentialsプロバイダを廃止しKeycloak(Authorization Code + PKCE)へ
+ * 移行したことに伴い、Web自前のログイン/サインアップフォームを対象にしていた旧テストを
+ * 全面的に書き換えた。/loginはマウント時にsignIn("keycloak")を呼んで即座にKeycloakのホスト型
+ * ログイン画面へリダイレクトするだけの画面になったため、実際のフォーム操作はKeycloak側の
+ * ページ(nginx経由でhttps://localhost/auth/realms/letsblog/...として提供される)に対して行う。
+ * モックではなく実際に起動しているKeycloak/legacy-api/gatewayスタックへ疎通する
+ * (playwright.config.tsのbaseURLがdocker composeのreverse-proxyを指すよう変更済み)。
+ *
+ * 使用するアカウントは、実ユーザー(s.tonouchi@gmail.com)ではなくこのテスト専用に
+ * 発行した合成アカウント(identity-serviceのPOST /api/usersで作成し、Keycloak Admin APIで
+ * パスワードを設定済み)。
+ *   - e2e-test@letsblog.local  (role: user。非admin側の検証用)
+ *   - e2e-admin@letsblog.local (role: admin。realmロールadminを付与済み。admin側の検証用)
+ * パスワードはCI/ローンチ環境の環境変数E2E_TEST_PASSWORD/E2E_ADMIN_PASSWORDで注入する
+ * (このリポジトリの.envには含めない。値はテスト account発行時のみ知りうる)。
+ */
 
-  test('Complete signup and login flow', async ({ page }) => {
-    // Step 1: Navigate to signup page
-    await page.goto('/signup');
+const TEST_EMAIL = 'e2e-test@letsblog.local';
+const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD ?? '';
+const ADMIN_EMAIL = 'e2e-admin@letsblog.local';
+const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? '';
 
-    // Step 2: Verify signup form is visible
-    const emailInput = page.locator('input[name="email"]');
-    const passwordInput = page.locator('input[name="password"]');
-    const submitButton = page.locator('button:has-text("登録")');
+test.describe('Keycloak経由の認証フロー(issue #564)', () => {
+  test.skip(!TEST_PASSWORD || !ADMIN_PASSWORD, 'E2E_TEST_PASSWORD/E2E_ADMIN_PASSWORDが未設定のためスキップ');
 
-    await expect(emailInput).toBeVisible();
-    await expect(passwordInput).toBeVisible();
-    await expect(submitButton).toBeVisible();
+  test('ログイン画面にアクセスするとKeycloakのホスト型ログイン画面へリダイレクトされる', async ({ page }) => {
+    await page.goto('/login');
+    await page.waitForURL(/\/auth\/realms\/letsblog\//, { timeout: 15000 });
+    await expect(page.locator('#username')).toBeVisible();
+    await expect(page.locator('#password')).toBeVisible();
+  });
 
-    // Step 3: Fill in signup form
-    await emailInput.fill(testEmail);
-    await passwordInput.fill(testPassword);
+  test('Keycloakで正しい資格情報を入力するとログインでき、セッションが確立する', async ({ page }) => {
+    await loginViaKeycloak(page, TEST_EMAIL, TEST_PASSWORD);
 
-    // Step 4: Submit signup form
-    await submitButton.click();
-
-    // Step 5: Verify redirect to home page after successful signup
-    await expect(page).toHaveURL('/', { timeout: 10000 });
-
-    // Step 6: Verify user is logged in (logout button should be visible)
     const logoutButton = page.locator('button:has-text("ログアウト")');
     await expect(logoutButton).toBeVisible({ timeout: 5000 });
   });
 
-  test('Login with registered credentials', async ({ page }) => {
-    // This test assumes a user already exists from the previous test
-    // In a real scenario, you would use a beforeAll hook or setup data
-
-    // Step 1: Navigate to login page
+  test('誤ったパスワードではKeycloak側でエラーになりログインできない', async ({ page }) => {
     await page.goto('/login');
+    await page.waitForURL(/\/auth\/realms\/letsblog\//, { timeout: 15000 });
 
-    // Step 2: Verify login form is visible
-    const emailInput = page.locator('input[name="email"]');
-    const passwordInput = page.locator('input[name="password"]');
-    const loginButton = page.locator('button:has-text("ログイン")');
+    await page.locator('#username').fill(TEST_EMAIL);
+    await page.locator('#password').fill('WrongPassword123!');
+    await page.locator('#kc-login').click();
 
-    await expect(emailInput).toBeVisible();
-    await expect(passwordInput).toBeVisible();
-    await expect(loginButton).toBeVisible();
-
-    // Step 3: Fill in login form
-    await emailInput.fill(testEmail);
-    await passwordInput.fill(testPassword);
-
-    // Step 4: Submit login form
-    await loginButton.click();
-
-    // Step 5: Verify redirect to home page after successful login
-    await expect(page).toHaveURL('/', { timeout: 10000 });
-
-    // Step 6: Verify user is logged in
-    const logoutButton = page.locator('button:has-text("ログアウト")');
-    await expect(logoutButton).toBeVisible({ timeout: 5000 });
+    // Keycloak側のエラー表示のまま留まり、Webのコールバックへは遷移しない。
+    await expect(page).toHaveURL(/\/auth\/realms\/letsblog\//);
+    await expect(page.getByText('Invalid username or password')).toBeVisible({ timeout: 5000 });
   });
 
-  test('Signup validation: password minimum length', async ({ page }) => {
-    // Step 1: Navigate to signup page
-    await page.goto('/signup');
+  test('非管理者は管理者専用ページ(/users)へアクセスすると拒否される', async ({ page }) => {
+    await loginViaKeycloak(page, TEST_EMAIL, TEST_PASSWORD);
 
-    // Step 2: Fill in form with short password
-    const emailInput = page.locator('input[name="email"]');
-    const passwordInput = page.locator('input[name="password"]');
-
-    await emailInput.fill(`short-${Date.now()}@example.com`);
-    await passwordInput.fill('short');  // Less than 8 characters
-
-    // Step 3: Try to submit (button should be disabled or form should not submit)
-    const submitButton = page.locator('button:has-text("登録")');
-
-    // Check if button is disabled or if validation fails
-    const isDisabled = await submitButton.isDisabled();
-    if (isDisabled) {
-      await expect(submitButton).toBeDisabled();
-    }
+    await page.goto('/users');
+    // proxy.tsのADMIN_ONLY_PREFIXESにより"/"へリダイレクトされる。
+    await expect(page).toHaveURL('/', { timeout: 5000 });
   });
 
-  test('Login with invalid credentials shows error', async ({ page }) => {
-    // Step 1: Navigate to login page
-    await page.goto('/login');
+  test('管理者は管理者専用ページ(/users)へアクセスできる', async ({ page }) => {
+    await loginViaKeycloak(page, ADMIN_EMAIL, ADMIN_PASSWORD);
 
-    // Step 2: Fill in login form with invalid credentials
-    const emailInput = page.locator('input[name="email"]');
-    const passwordInput = page.locator('input[name="password"]');
-    const loginButton = page.locator('button:has-text("ログイン")');
-
-    await emailInput.fill('invalid@example.com');
-    await passwordInput.fill('WrongPassword123!');
-
-    // Step 3: Submit form
-    await loginButton.click();
-
-    // Step 4: Verify error message is displayed
-    const errorMessage = page.locator('text=メールアドレスまたはパスワードが正しくありません');
-    await expect(errorMessage).toBeVisible({ timeout: 5000 });
-
-    // Step 5: Verify we're still on login page
-    await expect(page).toHaveURL('/login');
+    await page.goto('/users');
+    await expect(page).toHaveURL(/\/users$/, { timeout: 5000 });
   });
 
-  test('Signup with duplicate email shows error', async ({ page }) => {
-    // Step 1: Navigate to signup page
-    await page.goto('/signup');
+  test('ログアウトするとセッションが破棄され、保護ページアクセス時にログイン画面へ戻る', async ({ page }) => {
+    await loginViaKeycloak(page, TEST_EMAIL, TEST_PASSWORD);
 
-    // Step 2: Fill in signup form with duplicate email
-    const emailInput = page.locator('input[name="email"]');
-    const passwordInput = page.locator('input[name="password"]');
-    const submitButton = page.locator('button:has-text("登録")');
-
-    await emailInput.fill(testEmail);  // Reuse email from previous test
-    await passwordInput.fill('AnotherPassword123!');
-
-    // Step 3: Submit form
-    await submitButton.click();
-
-    // Step 4: Verify error message is displayed
-    const errorMessage = page.locator('text=すでに登録済みです');
-    await expect(errorMessage).toBeVisible({ timeout: 5000 });
-
-    // Step 5: Verify we're still on signup page
-    await expect(page).toHaveURL('/signup');
-  });
-
-  test('Logout functionality', async ({ page }) => {
-    // Step 1: First login
-    await page.goto('/login');
-    const emailInput = page.locator('input[name="email"]');
-    const passwordInput = page.locator('input[name="password"]');
-    const loginButton = page.locator('button:has-text("ログイン")');
-
-    await emailInput.fill(testEmail);
-    await passwordInput.fill(testPassword);
-    await loginButton.click();
-
-    // Wait for login to complete
-    await expect(page).toHaveURL('/', { timeout: 10000 });
-
-    // Step 2: Verify logout button is visible
     const logoutButton = page.locator('button:has-text("ログアウト")');
     await expect(logoutButton).toBeVisible();
-
-    // Step 3: Click logout button
     await logoutButton.click();
 
-    // Step 4: Verify redirect to login page (or home if public)
-    await expect(page).toHaveURL(/\/(login|)/, { timeout: 5000 });
+    await expect(page).toHaveURL(/\/login/, { timeout: 5000 });
 
-    // Step 5: Verify logout button is no longer visible
-    await expect(logoutButton).not.toBeVisible({ timeout: 5000 });
+    // ログアウト後に保護ページへ直接アクセスすると、再度Keycloakへリダイレクトされる
+    // (events.signOutでKeycloak側のSSOセッションも終了させているため、資格情報の再入力を
+    // 求めるホスト型ログイン画面が表示されるはず。ここではリダイレクト自体の発生のみ検証する)。
+    await page.goto('/');
+    await page.waitForURL(/\/(login|auth\/realms\/letsblog)/, { timeout: 10000 });
   });
 });

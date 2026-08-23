@@ -1,13 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { signIn } from "next-auth/react";
 import { setupAction } from "./actions";
 
+/**
+ * issue #564でCredentialsプロバイダを廃止したため、このフォームが作成する管理者アカウント
+ * (legacy-apiの/api/auth/setupが直接ローカルDBへ作成するのみで、Keycloak側にはアカウントを
+ * 作らない)は、作成しても自動ログインできない(KeycloakにログインできるアカウントではないためsignIn("keycloak")の対象にならない)。
+ * この画面自体は元々「ユーザーが1人も居ない場合のみ」到達する初回セットアップ専用の画面であり、
+ * 本Issueのスコープ(ログイン/サインアップ/パスワードリセット/2FA画面)には含まれないため、
+ * 応急的に自動ログイン部分だけを外して「作成後はログイン画面へ」の案内に変更する
+ * (Keycloak連携した初回セットアップ動線の整備は別Issueで扱う。詳細はPR説明を参照)。
+ */
 export function SetupForm() {
-  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
   const [pending, setPending] = useState(false);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -16,26 +23,26 @@ export function SetupForm() {
     setError(null);
 
     const formData = new FormData(event.currentTarget);
-    const email = String(formData.get("email") ?? "");
-    const password = String(formData.get("password") ?? "");
-
     const setupResult = await setupAction({}, formData);
-    if (setupResult.error) {
-      setError(setupResult.error);
-      setPending(false);
-      return;
-    }
-
-    const signInResult = await signIn("credentials", { email, password, redirect: false });
     setPending(false);
 
-    if (!signInResult || signInResult.error) {
-      setError("管理者アカウントは作成されましたが、自動ログインに失敗しました。ログイン画面からお試しください。");
+    if (setupResult.error) {
+      setError(setupResult.error);
       return;
     }
 
-    router.push("/");
-    router.refresh();
+    setSuccess(true);
+  }
+
+  if (success) {
+    return (
+      <div className="space-y-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 text-sm">
+        <p className="text-green-600">管理者アカウントを作成しました。</p>
+        <p className="text-neutral-600 dark:text-neutral-400">
+          ログインするには別途Keycloakへのアカウント登録が必要です。管理者にお問い合わせください。
+        </p>
+      </div>
+    );
   }
 
   return (

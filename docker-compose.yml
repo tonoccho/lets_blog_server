@@ -48,6 +48,9 @@ services:
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
       # ブラウザから見える公開URL(認証コールバック等の生成に使用)
       NEXTAUTH_URL: https://localhost
+      # Keycloakのletsblog-webクライアント(confidential client)のシークレット(#564)。
+      # web/src/lib/auth.tsがトークン交換・リフレッシュ・ログアウトのサーバー間通信で使う。
+      KEYCLOAK_WEB_CLIENT_SECRET: ${KEYCLOAK_WEB_CLIENT_SECRET}
     # node_modules/.nextは匿名ボリュームにせず./web配下のbind mountに含める
     # (匿名ボリュームは/var/lib/docker配下、すなわちルートディスクに置かれるため、
     # 容量の大きいTurbopackキャッシュがルートディスクを圧迫していた)

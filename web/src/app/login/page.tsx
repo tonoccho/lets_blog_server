@@ -1,133 +1,27 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 import { signIn } from "next-auth/react";
-import Link from "next/link";
 
+/**
+ * ログイン画面。issue #564でCredentialsプロバイダ(自前フォーム)を廃止し、Keycloakへ
+ * Authorization Code + PKCEでリダイレクトする方式へ移行した。このページ自体はUIを持たず、
+ * マウント時にsignIn("keycloak")を呼んでKeycloakのホスト型ログイン画面へ即座に遷移させる
+ * (パスワード再設定もKeycloak側のホスト型UIが担うため、ここには「パスワードをお忘れの方」
+ * リンクも不要。自己登録はKeycloakのregistrationAllowed=falseで無効化されているため
+ * 「新規登録」リンクも同様に不要)。
+ *
+ * pages.signIn(auth.ts)は引き続き"/login"を指す必要がある(NextAuthが未ログイン時の
+ * 遷移先として使う)ため、このページ自体は消せない。
+ */
 export default function LoginPage() {
-  const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [needsTotp, setNeedsTotp] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
-
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setPending(true);
-    setError(null);
-
-    const formData = new FormData(event.currentTarget);
-    const emailValue = needsTotp ? email : String(formData.get("email") ?? "");
-    const passwordValue = needsTotp ? password : String(formData.get("password") ?? "");
-    // signIn()にundefinedを渡すと内部で文字列"undefined"にシリアライズされてしまうため、
-    // 未入力時は明示的に空文字列を渡す(サーバー側は空文字列をfalsyとして「未入力」判定する)
-    const totpCode = needsTotp ? String(formData.get("totpCode") ?? "") : "";
-
-    const result = await signIn("credentials", {
-      email: emailValue,
-      password: passwordValue,
-      totpCode,
-      redirect: false,
-    });
-
-    setPending(false);
-
-    if (!result || result.error) {
-      if (result?.error === "2FA_REQUIRED") {
-        setEmail(emailValue);
-        setPassword(passwordValue);
-        setNeedsTotp(true);
-        return;
-      }
-      if (result?.error === "2FA_INVALID") {
-        setError("認証コードが正しくありません。もう一度入力してください。");
-        return;
-      }
-      setError("メールアドレスまたはパスワードが正しくありません。");
-      return;
-    }
-
-    router.push("/");
-    router.refresh();
-  }
+  useEffect(() => {
+    void signIn("keycloak", { callbackUrl: "/" });
+  }, []);
 
   return (
-    <div className="mx-auto max-w-sm">
-      <h1 className="mb-6 text-xl font-semibold">ログイン</h1>
-      <form onSubmit={handleSubmit} className="space-y-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
-        {!needsTotp && (
-          <>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-neutral-600 dark:text-neutral-400">メールアドレス</span>
-              <input
-                name="email"
-                type="email"
-                required
-                className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-neutral-600 dark:text-neutral-400">パスワード</span>
-              <input
-                name="password"
-                type="password"
-                required
-                className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-              />
-            </label>
-          </>
-        )}
-        {needsTotp && (
-          <>
-            <p className="text-sm text-neutral-600 dark:text-neutral-400">
-              認証アプリに表示されている6桁のコード(またはバックアップコード)を入力してください。
-            </p>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-neutral-600 dark:text-neutral-400">認証コード</span>
-              <input
-                name="totpCode"
-                type="text"
-                inputMode="numeric"
-                autoFocus
-                required
-                className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-              />
-            </label>
-          </>
-        )}
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <button
-          type="submit"
-          disabled={pending}
-          className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:bg-neutral-200 disabled:text-neutral-600"
-        >
-          {pending ? "確認中…" : needsTotp ? "認証コードを確認" : "ログイン"}
-        </button>
-        {!needsTotp && (
-          <div className="flex justify-between text-sm">
-            <Link href="/login/forgot-password" className="text-blue-600 hover:underline">
-              パスワードをお忘れの方
-            </Link>
-            <Link href="/signup" className="text-blue-600 hover:underline">
-              新規登録
-            </Link>
-          </div>
-        )}
-        {needsTotp && (
-          <button
-            type="button"
-            onClick={() => {
-              setNeedsTotp(false);
-              setError(null);
-            }}
-            className="text-sm text-blue-600 hover:underline"
-          >
-            メールアドレス・パスワード入力に戻る
-          </button>
-        )}
-      </form>
+    <div className="mx-auto max-w-sm text-center text-sm text-neutral-600 dark:text-neutral-400">
+      ログイン画面へリダイレクトしています…
     </div>
   );
 }
