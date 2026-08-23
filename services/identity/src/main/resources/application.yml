@@ -43,3 +43,15 @@ spring:
 # 参照するため、legacy-apiと同一のAPP_ENCRYPTION_KEYを共有する必要がある。
 app:
   encryption-key: ${APP_ENCRYPTION_KEY:}
+
+# Keycloakユーザー同期(#562)。letsblog-services(#560で定義済みのサービス間通信用confidentialクライアント)
+# のクライアントクレデンシャルズグラントでKeycloak Admin REST APIを呼び出す。事前にrealm側で
+# このクライアントのサービスアカウントにrealm-management#manage-usersロールを付与しておく必要がある
+# (keycloak/realm-export.json参照)。token-uri/admin-base-uriはコンテナ間通信で到達可能な内部アドレス
+# (gatewayのkeycloak.jwk-set-uriと同様の考え方。services/gateway/src/main/resources/application.yml参照)。
+keycloak:
+  admin:
+    token-uri: ${KEYCLOAK_TOKEN_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/token}
+    admin-base-uri: ${KEYCLOAK_ADMIN_BASE_URI:http://keycloak:8080/auth/admin/realms/letsblog}
+    client-id: ${KEYCLOAK_SERVICES_CLIENT_ID:letsblog-services}
+    client-secret: ${KEYCLOAK_SERVICES_CLIENT_SECRET:}

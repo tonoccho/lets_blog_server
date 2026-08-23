@@ -29,6 +29,14 @@ public class User {
     @Column(name = "keycloak_sub", unique = true, length = 255)
     private String keycloakSub;
 
+    /**
+     * Keycloak側での無効化、および孤児検出(#562)による論理無効化を反映する列。
+     * JPAのINSERTは全カラムを明示するため、DBカラムのDEFAULT句は新規作成時に効かない。
+     * ここでのフィールド初期値が実質的なデフォルト値になる。
+     */
+    @Column(name = "enabled", nullable = false)
+    private boolean enabled = true;
+
     @Column(name = "password_hash", nullable = false)
     private String passwordHash;
 

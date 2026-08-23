@@ -994,6 +994,19 @@
       ]
     }
   ],
+  "users": [
+    {
+      "username": "service-account-letsblog-services",
+      "enabled": true,
+      "serviceAccountClientId": "letsblog-services",
+      "clientRoles": {
+        "realm-management": [
+          "manage-users",
+          "view-users"
+        ]
+      }
+    }
+  ],
   "clientScopes": [
     {
       "id": "08296e25-cdc3-4b9a-910f-06686429b25c",

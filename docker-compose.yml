@@ -163,8 +163,14 @@ services:
       SPRING_DATASOURCE_USERNAME: ${MYSQL_USER}
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
+      # Keycloakユーザー同期(#562)。letsblog-servicesクライアントのシークレット
+      # (keycloak/realm-export.jsonで定義済み)。他の値(token-uri等)はコンテナ間の既定URLで
+      # 足りるためservices/identity/src/main/resources/application.ymlの既定値に委ねる。
+      KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
     depends_on:
       mysql:
+        condition: service_healthy
+      keycloak:
         condition: service_healthy
 
   rabbitmq:

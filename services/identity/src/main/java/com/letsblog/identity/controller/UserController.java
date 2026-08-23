@@ -1,6 +1,9 @@
 package com.letsblog.identity.controller;
 
 import com.letsblog.identity.domain.Permission;
+import com.letsblog.identity.dto.MigrateToKeycloakRequest;
+import com.letsblog.identity.dto.MigrationSummaryResponse;
+import com.letsblog.identity.dto.ReconciliationSummaryResponse;
 import com.letsblog.identity.dto.UpdateGithubTokenRequest;
 import com.letsblog.identity.dto.UpdateUserPreferencesRequest;
 import com.letsblog.identity.dto.UserCreateRequest;
@@ -84,6 +87,59 @@ public class UserController {
     public ResponseEntity<Void> delete(@Parameter(description = "ユーザーID") @PathVariable Long id) {
         userService.delete(id);
         return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "ユーザーを無効化", description = "指定されたユーザーを無効化します(Keycloak登録済みの場合はKeycloak側も無効化)")
+    @ApiResponse(responseCode = "200", description = "ユーザーが無効化されました")
+    @ApiResponse(responseCode = "401", description = "認証ヘッダが無効")
+    @ApiResponse(responseCode = "403", description = "admin権限がありません")
+    @ApiResponse(responseCode = "404", description = "ユーザーが見つかりません")
+    @ApiResponse(responseCode = "502", description = "Keycloak Admin APIの呼び出しに失敗しました")
+    @PostMapping("/{id}/deactivate")
+    public UserResponse deactivate(@Parameter(description = "ユーザーID") @PathVariable Long id) {
+        adminAuthorizationService.requireAdmin();
+        return userService.deactivate(id);
+    }
+
+    @Operation(summary = "ユーザーを再有効化", description = "無効化されたユーザーを再度有効化します")
+    @ApiResponse(responseCode = "200", description = "ユーザーが有効化されました")
+    @ApiResponse(responseCode = "401", description = "認証ヘッダが無効")
+    @ApiResponse(responseCode = "403", description = "admin権限がありません")
+    @ApiResponse(responseCode = "404", description = "ユーザーが見つかりません")
+    @ApiResponse(responseCode = "502", description = "Keycloak Admin APIの呼び出しに失敗しました")
+    @PostMapping("/{id}/reactivate")
+    public UserResponse reactivate(@Parameter(description = "ユーザーID") @PathVariable Long id) {
+        adminAuthorizationService.requireAdmin();
+        return userService.reactivate(id);
+    }
+
+    @Operation(
+            summary = "既存ユーザーをKeycloakへ一括移行",
+            description = "keycloak_sub未設定のユーザーをKeycloakへ登録し、パスワード再設定を要求します。"
+                    + "userIdsを指定しない場合は対象全ユーザーが移行されます。")
+    @ApiResponse(responseCode = "200", description = "移行結果(成功/失敗の内訳)を返す")
+    @ApiResponse(responseCode = "401", description = "認証ヘッダが無効")
+    @ApiResponse(responseCode = "403", description = "admin権限がありません")
+    @PostMapping("/migrate-to-keycloak")
+    public MigrationSummaryResponse migrateToKeycloak(
+            @RequestBody(required = false) MigrateToKeycloakRequest request) {
+        adminAuthorizationService.requireAdmin();
+        List<Long> userIds = request != null ? request.userIds() : null;
+        return userService.migrateToKeycloak(userIds);
+    }
+
+    @Operation(
+            summary = "Keycloakとの整合を確認し孤児ユーザーを無効化",
+            description = "keycloak_sub設定済みのユーザーについてKeycloak側の存在を確認し、"
+                    + "存在しなくなっていたユーザーを論理無効化します。")
+    @ApiResponse(responseCode = "200", description = "無効化されたユーザーIDの一覧を返す")
+    @ApiResponse(responseCode = "401", description = "認証ヘッダが無効")
+    @ApiResponse(responseCode = "403", description = "admin権限がありません")
+    @ApiResponse(responseCode = "502", description = "Keycloak Admin APIの呼び出しに失敗しました")
+    @PostMapping("/reconcile-keycloak")
+    public ReconciliationSummaryResponse reconcileKeycloak() {
+        adminAuthorizationService.requireAdmin();
+        return userService.reconcileWithKeycloak();
     }
 
     @Operation(summary = "ユーザープロフィール取得", description = "指定されたユーザーのプロフィール情報を取得します")
