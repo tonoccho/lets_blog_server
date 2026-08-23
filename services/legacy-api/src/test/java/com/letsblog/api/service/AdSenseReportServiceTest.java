@@ -36,31 +36,36 @@ class AdSenseReportServiceTest {
     @Mock
     private ProjectApiKeyService projectApiKeyService;
     @Mock
+    private AnalyticsCredentialsService analyticsCredentialsService;
+    @Mock
     private AdSenseClient adSenseClient;
     @Mock
     private AdminAuthorizationService adminAuthorizationService;
 
     private AdSenseReportService service() {
-        return new AdSenseReportService(projectRepository, projectApiKeyService, adSenseClient, adminAuthorizationService);
+        return new AdSenseReportService(
+                projectRepository, projectApiKeyService, analyticsCredentialsService, adSenseClient,
+                adminAuthorizationService);
     }
 
-    private Project configuredProject() {
+    private Project projectWithProductionSite() {
         Project project = new Project();
         project.setId(1L);
         project.setProductionSiteId(99L);
-        project.setAdsenseAccountId("pub-1234567890123456");
-        project.setAdsenseRefreshTokenEncrypted(new byte[]{1, 2, 3});
-        project.setAdsenseOauthClientId("client-id");
-        project.setAdsenseOauthClientSecretEncrypted(new byte[]{4, 5, 6});
         return project;
+    }
+
+    private void stubConfiguredCredentials() {
+        lenient().when(analyticsCredentialsService.hasAdsenseCredentials(1L)).thenReturn(true);
+        lenient().when(analyticsCredentialsService.getAdsenseAccountId(1L)).thenReturn("pub-1234567890123456");
+        lenient().when(analyticsCredentialsService.getAdsenseOauthClientId(1L)).thenReturn("client-id");
     }
 
     @Test
     void getReport_AdSense未設定なら未対象でAPIを呼ばない() {
-        Project project = new Project();
-        project.setId(1L);
-        project.setProductionSiteId(99L);
+        Project project = projectWithProductionSite();
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(analyticsCredentialsService.hasAdsenseCredentials(1L)).thenReturn(false);
 
         AdSenseReportResponse response = service().getReport(1L);
 
@@ -71,9 +76,8 @@ class AdSenseReportServiceTest {
     void getReport_本番サイト未紐付けなら未対象でAPIを呼ばない() {
         Project project = new Project();
         project.setId(1L);
-        project.setAdsenseAccountId("pub-1234567890123456");
-        project.setAdsenseRefreshTokenEncrypted(new byte[]{1, 2, 3});
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(analyticsCredentialsService.hasAdsenseCredentials(1L)).thenReturn(true);
 
         AdSenseReportResponse response = service().getReport(1L);
 
@@ -82,8 +86,9 @@ class AdSenseReportServiceTest {
 
     @Test
     void getReport_設定済みかつ本番サイトありならレポートを取得する() {
-        Project project = configuredProject();
+        Project project = projectWithProductionSite();
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        stubConfiguredCredentials();
         when(projectApiKeyService.resolveAdSenseRefreshToken(1L)).thenReturn("refresh-token");
         when(projectApiKeyService.resolveAdSenseOauthClientSecret(1L)).thenReturn("client-secret");
         when(adSenseClient.refreshAccessToken("client-id", "client-secret", "refresh-token")).thenReturn("access-token");
@@ -107,8 +112,9 @@ class AdSenseReportServiceTest {
 
     @Test
     void getReport_取得に失敗したら対象のままerrorMessageを設定する() {
-        Project project = configuredProject();
+        Project project = projectWithProductionSite();
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        stubConfiguredCredentials();
         when(projectApiKeyService.resolveAdSenseRefreshToken(1L)).thenReturn("refresh-token");
         when(projectApiKeyService.resolveAdSenseOauthClientSecret(1L)).thenReturn("client-secret");
         when(adSenseClient.refreshAccessToken(anyString(), anyString(), anyString()))

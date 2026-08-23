@@ -188,7 +188,7 @@ public class CustomTagService {
     }
 
     private String resolveCssSelectorPrefix(Long projectId) {
-        return projectService.resolveCssSelectorPrefix(projectService.getProjectEntity(projectId));
+        return projectService.resolveCssSelectorPrefix(projectId);
     }
 
     /**

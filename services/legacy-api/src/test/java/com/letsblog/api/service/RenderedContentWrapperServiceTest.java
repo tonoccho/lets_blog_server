@@ -1,6 +1,5 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.domain.Project;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -27,10 +26,7 @@ class RenderedContentWrapperServiceTest {
 
     @Test
     void wrap_projectId指定時はcssSelectorPrefixもクラスに含める() {
-        Project project = new Project();
-        project.setSlug("my-blog");
-        when(projectService.getProjectEntity(5L)).thenReturn(project);
-        when(projectService.resolveCssSelectorPrefix(project)).thenReturn("my-blog");
+        when(projectService.resolveCssSelectorPrefix(5L)).thenReturn("my-blog");
 
         String result = service.wrap("<p>本文</p>", 5L);
 

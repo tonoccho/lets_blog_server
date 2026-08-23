@@ -3,7 +3,6 @@ package com.letsblog.api.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.ai.ComfyUiClient;
 import com.letsblog.api.domain.GenerationJob;
-import com.letsblog.api.domain.Project;
 import com.letsblog.api.dto.ComfyUiCheckpointListResponse;
 import com.letsblog.api.dto.GenerationJobResponse;
 import com.letsblog.api.repository.GenerationJobRepository;
@@ -18,6 +17,7 @@ import java.util.Map;
  * プロジェクトごとのComfyUI利用チェックポイントの一覧・選択・インストール・削除を扱う。
  * 実チェックポイントファイルはComfyUIサーバー全体で共有され、プロジェクトは「どのチェックポイントを使うか」のみを選択する。
  * (Phase14時点では選択状態の保持のみで、実際の画像生成呼び出しへの反映は将来の拡張ポイント)
+ * データはprojects god-tableの分割(issue #571)によりproject_image_settings(ProjectImageSettingsService)が保持する。
  */
 @Service
 public class ComfyUiModelService {
@@ -25,6 +25,7 @@ public class ComfyUiModelService {
     private final ComfyUiClient comfyUiClient;
     private final ModelInstallJobRunner modelInstallJobRunner;
     private final ProjectRepository projectRepository;
+    private final ProjectImageSettingsService projectImageSettingsService;
     private final GenerationJobRepository generationJobRepository;
     private final ObjectMapper objectMapper;
     private final String globalDefaultCheckpoint;
@@ -33,12 +34,14 @@ public class ComfyUiModelService {
             ComfyUiClient comfyUiClient,
             ModelInstallJobRunner modelInstallJobRunner,
             ProjectRepository projectRepository,
+            ProjectImageSettingsService projectImageSettingsService,
             GenerationJobRepository generationJobRepository,
             ObjectMapper objectMapper,
             @Value("${app.comfyui-checkpoint}") String globalDefaultCheckpoint) {
         this.comfyUiClient = comfyUiClient;
         this.modelInstallJobRunner = modelInstallJobRunner;
         this.projectRepository = projectRepository;
+        this.projectImageSettingsService = projectImageSettingsService;
         this.generationJobRepository = generationJobRepository;
         this.objectMapper = objectMapper;
         this.globalDefaultCheckpoint = globalDefaultCheckpoint;
@@ -52,8 +55,8 @@ public class ComfyUiModelService {
      * プロジェクトの選択中チェックポイントを返す。未選択(null)ならグローバルデフォルトにフォールバックする。
      */
     public String getSelectedCheckpoint(Long projectId) {
-        Project project = getProjectEntity(projectId);
-        String selected = project.getComfyuiCheckpoint();
+        requireProjectExists(projectId);
+        String selected = projectImageSettingsService.getComfyuiCheckpoint(projectId);
         return selected == null || selected.isBlank() ? globalDefaultCheckpoint : selected;
     }
 
@@ -66,13 +69,12 @@ public class ComfyUiModelService {
     }
 
     public ComfyUiCheckpointListResponse selectCheckpoint(Long projectId, String checkpointName) {
-        Project project = getProjectEntity(projectId);
+        requireProjectExists(projectId);
         boolean exists = comfyUiClient.listCheckpoints().contains(checkpointName);
         if (!exists) {
             throw new IllegalArgumentException("チェックポイント '" + checkpointName + "' は見つかりません");
         }
-        project.setComfyuiCheckpoint(checkpointName);
-        projectRepository.save(project);
+        projectImageSettingsService.setComfyuiCheckpoint(projectId, checkpointName);
         return listCheckpointsForProject(projectId);
     }
 
@@ -97,9 +99,10 @@ public class ComfyUiModelService {
         }
     }
 
-    private Project getProjectEntity(Long projectId) {
-        return projectRepository.findById(projectId)
-                .orElseThrow(() -> new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません"));
+    private void requireProjectExists(Long projectId) {
+        if (!projectRepository.existsById(projectId)) {
+            throw new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません");
+        }
     }
 
     private GenerationJob startJob(String type, Map<String, String> requestPayload) {

@@ -3,6 +3,8 @@ package com.letsblog.api.service;
 import com.letsblog.api.aop.AuditLog;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Project;
+import com.letsblog.api.domain.ProjectContentSettings;
+import com.letsblog.api.domain.ProjectImageSettings;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.ProjectResponse;
 import com.letsblog.api.dto.UpdateArticleImageResizeDefaultRequest;
@@ -30,6 +32,8 @@ public class ProjectService {
     private final SiteRepository siteRepository;
     private final SiteService siteService;
     private final BulkUploadStorageService bulkUploadStorageService;
+    private final ProjectImageSettingsService projectImageSettingsService;
+    private final ProjectContentSettingsService projectContentSettingsService;
     private final String globalDefaultNegativePrompt;
     private final String globalDefaultQualityPrompt;
     private final int globalDefaultGeneratedImageWidth;
@@ -44,6 +48,8 @@ public class ProjectService {
             SiteRepository siteRepository,
             SiteService siteService,
             BulkUploadStorageService bulkUploadStorageService,
+            ProjectImageSettingsService projectImageSettingsService,
+            ProjectContentSettingsService projectContentSettingsService,
             @Value("${app.default-negative-prompt}") String globalDefaultNegativePrompt,
             @Value("${app.default-quality-prompt}") String globalDefaultQualityPrompt,
             @Value("${app.default-generated-image-width}") int globalDefaultGeneratedImageWidth,
@@ -56,6 +62,8 @@ public class ProjectService {
         this.siteRepository = siteRepository;
         this.siteService = siteService;
         this.bulkUploadStorageService = bulkUploadStorageService;
+        this.projectImageSettingsService = projectImageSettingsService;
+        this.projectContentSettingsService = projectContentSettingsService;
         this.globalDefaultNegativePrompt = globalDefaultNegativePrompt;
         this.globalDefaultQualityPrompt = globalDefaultQualityPrompt;
         this.globalDefaultGeneratedImageWidth = globalDefaultGeneratedImageWidth;
@@ -126,7 +134,8 @@ public class ProjectService {
         if (!projectRepository.existsById(projectId)) {
             throw new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません");
         }
-        // project_users・bulk_operation_logsはDB側のON DELETE CASCADEで連動削除される
+        // project_users・bulk_operation_logs・project_ai_settings・project_image_settings・
+        // analytics_credentials・project_content_settingsはDB側のON DELETE CASCADEで連動削除される
         projectRepository.deleteById(projectId);
         // 一括管理でアップロードされたzipファイルはDBのCASCADEでは消えないため、明示的に削除する
         bulkUploadStorageService.deleteAll(projectId);
@@ -207,20 +216,18 @@ public class ProjectService {
     @Transactional
     public ProjectResponse updateCssSelectorPrefix(Long projectId, UpdateProjectCssSelectorPrefixRequest request) {
         Project project = getProjectEntity(projectId);
-        String prefix = request.cssSelectorPrefix() == null || request.cssSelectorPrefix().isBlank()
-                ? null
-                : request.cssSelectorPrefix();
-        project.setCssSelectorPrefix(prefix);
-        return toResponse(projectRepository.save(project));
+        String prefix = blankToNull(request.cssSelectorPrefix());
+        projectContentSettingsService.updateCssSelectorPrefix(projectId, prefix);
+        return toResponse(project);
     }
 
     /**
      * カスタムタグCSSのセレクタに付与するプリフィックスを解決する。未設定時はプロジェクトのslugを使う(issue #298)。
      */
-    public String resolveCssSelectorPrefix(Project project) {
-        return project.getCssSelectorPrefix() == null || project.getCssSelectorPrefix().isBlank()
-                ? project.getSlug()
-                : project.getCssSelectorPrefix();
+    public String resolveCssSelectorPrefix(Long projectId) {
+        Project project = getProjectEntity(projectId);
+        String prefix = projectContentSettingsService.getCssSelectorPrefix(projectId);
+        return prefix == null || prefix.isBlank() ? project.getSlug() : prefix;
     }
 
     @AuditLog(action = AuditLogAction.PROJECT_UPDATED, resourceType = "PROJECT")
@@ -228,9 +235,9 @@ public class ProjectService {
     public ProjectResponse updateImageGenerationPromptDefaults(
             Long projectId, UpdateImageGenerationPromptDefaultsRequest request) {
         Project project = getProjectEntity(projectId);
-        project.setDefaultNegativePrompt(blankToNull(request.defaultNegativePrompt()));
-        project.setDefaultQualityPrompt(blankToNull(request.defaultQualityPrompt()));
-        return toResponse(projectRepository.save(project));
+        projectImageSettingsService.updateImageGenerationPromptDefaults(
+                projectId, blankToNull(request.defaultNegativePrompt()), blankToNull(request.defaultQualityPrompt()));
+        return toResponse(project);
     }
 
     /**
@@ -241,7 +248,9 @@ public class ProjectService {
         if (projectId == null) {
             return globalDefaultNegativePrompt;
         }
-        String projectValue = getProjectEntity(projectId).getDefaultNegativePrompt();
+        getProjectEntity(projectId);
+        String projectValue = projectImageSettingsService.findByProjectId(projectId)
+                .map(ProjectImageSettings::getDefaultNegativePrompt).orElse(null);
         return projectValue == null || projectValue.isBlank() ? globalDefaultNegativePrompt : projectValue;
     }
 
@@ -253,7 +262,9 @@ public class ProjectService {
         if (projectId == null) {
             return globalDefaultQualityPrompt;
         }
-        String projectValue = getProjectEntity(projectId).getDefaultQualityPrompt();
+        getProjectEntity(projectId);
+        String projectValue = projectImageSettingsService.findByProjectId(projectId)
+                .map(ProjectImageSettings::getDefaultQualityPrompt).orElse(null);
         return projectValue == null || projectValue.isBlank() ? globalDefaultQualityPrompt : projectValue;
     }
 
@@ -266,9 +277,9 @@ public class ProjectService {
     public ProjectResponse updateImageGenerationSizeDefaults(
             Long projectId, UpdateImageGenerationSizeDefaultsRequest request) {
         Project project = getProjectEntity(projectId);
-        project.setDefaultGeneratedImageWidth(request.defaultGeneratedImageWidth());
-        project.setDefaultGeneratedImageHeight(request.defaultGeneratedImageHeight());
-        return toResponse(projectRepository.save(project));
+        projectImageSettingsService.updateImageGenerationSizeDefaults(
+                projectId, request.defaultGeneratedImageWidth(), request.defaultGeneratedImageHeight());
+        return toResponse(project);
     }
 
     /**
@@ -279,7 +290,9 @@ public class ProjectService {
         if (projectId == null) {
             return globalDefaultGeneratedImageWidth;
         }
-        Integer projectValue = getProjectEntity(projectId).getDefaultGeneratedImageWidth();
+        getProjectEntity(projectId);
+        Integer projectValue = projectImageSettingsService.findByProjectId(projectId)
+                .map(ProjectImageSettings::getDefaultGeneratedImageWidth).orElse(null);
         return projectValue == null ? globalDefaultGeneratedImageWidth : projectValue;
     }
 
@@ -291,7 +304,9 @@ public class ProjectService {
         if (projectId == null) {
             return globalDefaultGeneratedImageHeight;
         }
-        Integer projectValue = getProjectEntity(projectId).getDefaultGeneratedImageHeight();
+        getProjectEntity(projectId);
+        Integer projectValue = projectImageSettingsService.findByProjectId(projectId)
+                .map(ProjectImageSettings::getDefaultGeneratedImageHeight).orElse(null);
         return projectValue == null ? globalDefaultGeneratedImageHeight : projectValue;
     }
 
@@ -299,8 +314,8 @@ public class ProjectService {
     @Transactional
     public ProjectResponse updateArticleImageResizeDefault(Long projectId, UpdateArticleImageResizeDefaultRequest request) {
         Project project = getProjectEntity(projectId);
-        project.setDefaultArticleImageLongEdgePx(request.defaultArticleImageLongEdgePx());
-        return toResponse(projectRepository.save(project));
+        projectImageSettingsService.updateArticleImageResizeDefault(projectId, request.defaultArticleImageLongEdgePx());
+        return toResponse(project);
     }
 
     /**
@@ -311,7 +326,9 @@ public class ProjectService {
         if (projectId == null) {
             return globalDefaultArticleImageLongEdgePx;
         }
-        Integer projectValue = getProjectEntity(projectId).getDefaultArticleImageLongEdgePx();
+        getProjectEntity(projectId);
+        Integer projectValue = projectImageSettingsService.findByProjectId(projectId)
+                .map(ProjectImageSettings::getDefaultArticleImageLongEdgePx).orElse(null);
         return projectValue == null ? globalDefaultArticleImageLongEdgePx : projectValue;
     }
 
@@ -320,10 +337,10 @@ public class ProjectService {
     public ProjectResponse updateImageContentFilterSettings(
             Long projectId, UpdateImageContentFilterSettingsRequest request) {
         Project project = getProjectEntity(projectId);
-        project.setBlockSexualContent(request.blockSexualContent());
-        project.setBlockViolentContent(request.blockViolentContent());
-        project.setBlockDiscriminatoryContent(request.blockDiscriminatoryContent());
-        return toResponse(projectRepository.save(project));
+        projectImageSettingsService.updateImageContentFilterSettings(
+                projectId, request.blockSexualContent(), request.blockViolentContent(),
+                request.blockDiscriminatoryContent());
+        return toResponse(project);
     }
 
     /**
@@ -334,7 +351,9 @@ public class ProjectService {
         if (projectId == null) {
             return globalDefaultBlockSexualContent;
         }
-        Boolean projectValue = getProjectEntity(projectId).getBlockSexualContent();
+        getProjectEntity(projectId);
+        Boolean projectValue = projectImageSettingsService.findByProjectId(projectId)
+                .map(ProjectImageSettings::getBlockSexualContent).orElse(null);
         return projectValue == null ? globalDefaultBlockSexualContent : projectValue;
     }
 
@@ -345,7 +364,9 @@ public class ProjectService {
         if (projectId == null) {
             return globalDefaultBlockViolentContent;
         }
-        Boolean projectValue = getProjectEntity(projectId).getBlockViolentContent();
+        getProjectEntity(projectId);
+        Boolean projectValue = projectImageSettingsService.findByProjectId(projectId)
+                .map(ProjectImageSettings::getBlockViolentContent).orElse(null);
         return projectValue == null ? globalDefaultBlockViolentContent : projectValue;
     }
 
@@ -356,7 +377,9 @@ public class ProjectService {
         if (projectId == null) {
             return globalDefaultBlockDiscriminatoryContent;
         }
-        Boolean projectValue = getProjectEntity(projectId).getBlockDiscriminatoryContent();
+        getProjectEntity(projectId);
+        Boolean projectValue = projectImageSettingsService.findByProjectId(projectId)
+                .map(ProjectImageSettings::getBlockDiscriminatoryContent).orElse(null);
         return projectValue == null ? globalDefaultBlockDiscriminatoryContent : projectValue;
     }
 
@@ -386,11 +409,17 @@ public class ProjectService {
     }
 
     private ProjectResponse toResponse(Project project) {
+        ProjectImageSettings imageSettings =
+                projectImageSettingsService.findByProjectId(project.getId()).orElse(null);
+        ProjectContentSettings contentSettings =
+                projectContentSettingsService.findByProjectId(project.getId()).orElse(null);
         return ProjectResponse.from(
                 project,
                 resolveSite(project.getLocalSiteId()),
                 resolveSite(project.getTestSiteId()),
-                resolveSite(project.getProductionSiteId()));
+                resolveSite(project.getProductionSiteId()),
+                imageSettings,
+                contentSettings);
     }
 
     private SiteResponse resolveSite(Long siteId) {

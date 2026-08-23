@@ -25,16 +25,19 @@ public class GoogleAnalyticsReportService {
 
     private final ProjectRepository projectRepository;
     private final ProjectApiKeyService projectApiKeyService;
+    private final AnalyticsCredentialsService analyticsCredentialsService;
     private final GoogleAnalyticsClient googleAnalyticsClient;
     private final AdminAuthorizationService adminAuthorizationService;
 
     public GoogleAnalyticsReportService(
             ProjectRepository projectRepository,
             ProjectApiKeyService projectApiKeyService,
+            AnalyticsCredentialsService analyticsCredentialsService,
             GoogleAnalyticsClient googleAnalyticsClient,
             AdminAuthorizationService adminAuthorizationService) {
         this.projectRepository = projectRepository;
         this.projectApiKeyService = projectApiKeyService;
+        this.analyticsCredentialsService = analyticsCredentialsService;
         this.googleAnalyticsClient = googleAnalyticsClient;
         this.adminAuthorizationService = adminAuthorizationService;
     }
@@ -43,13 +46,14 @@ public class GoogleAnalyticsReportService {
     public GoogleAnalyticsReportResponse getReport(Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         Project project = getProject(projectId);
-        if (!project.hasGoogleAnalyticsCredentials() || project.getProductionSiteId() == null) {
+        if (!analyticsCredentialsService.hasGoogleAnalyticsCredentials(projectId) || project.getProductionSiteId() == null) {
             return GoogleAnalyticsReportResponse.notEligible();
         }
         try {
             GoogleServiceAccountKey key = projectApiKeyService.resolveGoogleAnalyticsServiceAccountKey(projectId);
+            String gaPropertyId = analyticsCredentialsService.getGaPropertyId(projectId);
             GoogleAnalyticsReport report =
-                    googleAnalyticsClient.fetchReport(key, project.getGaPropertyId(), REPORT_PERIOD_DAYS);
+                    googleAnalyticsClient.fetchReport(key, gaPropertyId, REPORT_PERIOD_DAYS);
             return GoogleAnalyticsReportResponse.of(report, PERIOD_LABEL);
         } catch (RuntimeException e) {
             log.warn("Google Analyticsレポートの取得に失敗しました(project={}): {}", projectId, e.getMessage());
