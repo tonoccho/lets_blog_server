@@ -8,4 +8,7 @@ import java.util.Optional;
 public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByEmail(String email);
     boolean existsByEmail(String email);
+
+    /** JWTベースのactor解決(#563)。KeycloakのsubからローカルUserを引き当てる。 */
+    Optional<User> findByKeycloakSub(String keycloakSub);
 }
