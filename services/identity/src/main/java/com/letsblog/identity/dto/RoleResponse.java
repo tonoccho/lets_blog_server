@@ -1,7 +1,7 @@
-package com.letsblog.api.dto;
+package com.letsblog.identity.dto;
 
-import com.letsblog.api.domain.Permission;
-import com.letsblog.api.domain.Role;
+import com.letsblog.identity.domain.Permission;
+import com.letsblog.identity.domain.Role;
 
 import java.util.Set;
 

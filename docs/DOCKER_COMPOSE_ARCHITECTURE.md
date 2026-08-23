@@ -27,8 +27,9 @@ Keycloak / 各ドメインサービス)を見据えた構成に整えた(#556)�
 |---|---|---|---|
 | `reverse-proxy` (nginx) | 80, 443 | ○ (80, 443) | 唯一の外部窓口 |
 | `web` | 3000 | reverse-proxy経由のみ | |
-| `gateway` | 8080 | reverse-proxy経由のみ(`/api/`) | #560。JWT検証・レート制限・相関ID・下流ルーティングを一手に引き受けるAPIゲートウェイ。`/actuator/health`で下流(現状legacy-apiのみ)の状態を集約 |
-| `api` | 8080 | gateway経由のみ | `/actuator/health`をヘルスチェックに使用。#560でreverse-proxyからの直接ルーティングをgatewayに置き換えた |
+| `gateway` | 8080 | reverse-proxy経由のみ(`/api/`) | #560。JWT検証・レート制限・相関ID・下流ルーティングを一手に引き受けるAPIゲートウェイ。`/actuator/health`で下流(legacy-api・identity)の状態を集約 |
+| `identity` | 8080 | gateway経由のみ(`/api/identity/`, `/api/users/`, `/api/roles/`) | #561。ユーザー・ロール管理。現時点ではlegacy-apiと同一の物理スキーマ(lets_blogのusers/roles/role_permissions/user_rolesテーブル)を参照する暫定構成(スキーマ分離自体は#570で対応) |
+| `api` | 8080 | gateway経由のみ | `/actuator/health`をヘルスチェックに使用。#560でreverse-proxyからの直接ルーティングをgatewayに置き換えた。ログイン・2FA・APIキー発行は引き続きここが担う(#561でユーザーCRUD/ロール管理のみidentityへ移設) |
 | `log-writer` | 8080 | 非公開(RabbitMQコンシューマー) | 旧8081から統一 |
 | `mysql` | 3306 | 非公開 | |
 | `rabbitmq` | 5672 (+管理UI 15672) | 非公開 | |

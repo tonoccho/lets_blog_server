@@ -11,8 +11,8 @@ import reactor.core.publisher.Mono;
 import java.time.Duration;
 
 /**
- * 下流サービスの状態を{@code /actuator/health}に集約する(#560)。現時点では
- * legacy-apiのみを見る。将来のサービス抽出に伴い、対応するprobeを追加していく。
+ * 下流サービスの状態を{@code /actuator/health}に集約する(#560)。将来のサービス抽出に伴い、
+ * 対応するprobeを追加していく(#561でidentity-serviceを追加)。
  */
 @Configuration
 public class DownstreamHealthConfig {
@@ -21,8 +21,19 @@ public class DownstreamHealthConfig {
     public ReactiveHealthIndicator legacyApiHealthIndicator(
             WebClient gatewayWebClient,
             @Value("${app.gateway.fallback-uri}") String legacyApiUri) {
+        return downstreamHealthIndicator(gatewayWebClient, legacyApiUri);
+    }
+
+    @Bean
+    public ReactiveHealthIndicator identityServiceHealthIndicator(
+            WebClient gatewayWebClient,
+            @Value("${IDENTITY_SERVICE_URI:http://identity:8080}") String identityServiceUri) {
+        return downstreamHealthIndicator(gatewayWebClient, identityServiceUri);
+    }
+
+    private ReactiveHealthIndicator downstreamHealthIndicator(WebClient gatewayWebClient, String uri) {
         return () -> gatewayWebClient.get()
-                .uri(legacyApiUri + "/actuator/health")
+                .uri(uri + "/actuator/health")
                 .retrieve()
                 .toBodilessEntity()
                 .map(response -> Health.up().withDetail("statusCode", response.getStatusCode().value()).build())

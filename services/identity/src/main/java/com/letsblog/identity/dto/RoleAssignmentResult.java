@@ -1,4 +1,4 @@
-package com.letsblog.api.dto;
+package com.letsblog.identity.dto;
 
 /**
  * ロール割り当て/削除の監査ログ("changes")に、対象ユーザーIDとロール名の両方を残すためのDTO。

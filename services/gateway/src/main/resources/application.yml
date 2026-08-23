@@ -50,10 +50,17 @@ app:
           - /api/dashboard/service-status/stream
           - /api/dashboard/container-status/stream
 
-      - id: identity
-        uri: ${IDENTITY_SERVICE_URI:http://api:8080}
+      # ログイン・サインアップ・2FA・APIキー発行は現行の認証機構のまま legacy-api に残る
+      # (カットオーバー計画(#591)を経てから撤去する方針。ADR-0003参照)。
+      - id: auth
+        uri: ${LEGACY_API_URI:http://api:8080}
         paths:
           - /api/auth/**
+      # ユーザー/ロール管理は identity-service に移設した(#561)。
+      - id: identity
+        uri: ${IDENTITY_SERVICE_URI:http://identity:8080}
+        paths:
+          - /api/identity/**
           - /api/users/**
           - /api/roles/**
       - id: project

@@ -1,9 +1,9 @@
-package com.letsblog.api.controller;
+package com.letsblog.identity.controller;
 
-import com.letsblog.api.domain.Permission;
-import com.letsblog.api.dto.RoleResponse;
-import com.letsblog.api.service.PermissionAuthorizationService;
-import com.letsblog.api.service.RoleService;
+import com.letsblog.identity.domain.Permission;
+import com.letsblog.identity.dto.RoleResponse;
+import com.letsblog.identity.service.PermissionAuthorizationService;
+import com.letsblog.identity.service.RoleService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
