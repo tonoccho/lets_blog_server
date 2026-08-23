@@ -11,23 +11,40 @@ management:
     web:
       exposure:
         include: health
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+  # 明示的なproducesを持たないGET(Page<T>を返すログ検索系)がOpenAPI上`*/*`として記録されると、
+  # orvalが生成するTypeScriptクライアントがres.text()の結果をJSON.parseせず生文字列のまま
+  # 型付きレスポンスへ代入してしまい型エラーになる(#572で実際に踏んだ)。既定の応答Content-Typeを
+  # 明示することでこれを避ける。
+  default-produces-media-type: application/json
 
 spring:
   application:
     name: lets-blog-log-writer
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lets_blog?useSSL=false&serverTimezone=UTC}
-    username: ${SPRING_DATASOURCE_USERNAME:lbs_app}
-    password: ${SPRING_DATASOURCE_PASSWORD:lbs_app}
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lbs_log?useSSL=false&serverTimezone=UTC}
+    username: ${SPRING_DATASOURCE_USERNAME:lbs_log}
+    password: ${SPRING_DATASOURCE_PASSWORD:lbs_log}
   jpa:
     hibernate:
-      # スキーマの所有権・マイグレーションはapiサーバー側のFlywayにあるため検証しない
-      # (log-writer起動時にapiサーバーのマイグレーション未実行でも起動を妨げないため)。
-      ddl-auto: none
+      ddl-auto: validate
     open-in-view: false
-  # このアプリケーションはFlywayマイグレーションを持たない(apiサーバー側の履歴を共有する)。
+  # ログ4テーブル(audit_logs/operation_logs/frontend_error_logs)のスキーマ所有権をlog-writer
+  # 自身のFlywayへ完全移管した(#572)。専用スキーマ(lbs_log、ADR-0004)なので、legacy-api側の
+  # V1〜V71とは無関係の独立したマイグレーション履歴として V1 から開始する。既存データの移行は
+  # scripts/migrate-log-tables-to-lbs-log.sql を参照(V1適用後・legacy-api側の旧テーブル
+  # 削除マイグレーション適用前に実行する運用)。
   flyway:
-    enabled: false
+    enabled: true
+    locations: classpath:db/migration
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
@@ -39,3 +56,22 @@ spring:
         # 別インスタンス/後続の受信で再試行させる(issue #466: 受信側の一時的なDB障害等でも
         # ログを欠落させない)。
         default-requeue-rejected: true
+
+# ログ読み取りAPIのadmin判定・自分自身のuserId解決のため、呼び出し元のBearerトークンをそのまま
+# identity-serviceの/api/identity/meへ転送して問い合わせる(#572)。lbs_logスキーマは
+# usersテーブルへクロススキーマアクセスできない(ADR-0004)ための暫定策。C12(#581)でサービス間
+# 同期呼び出しの標準クライアント(タイムアウト/リトライ/サーキットブレーカー)が定まったら
+# そちらへ寄せる想定(現時点は短いタイムアウトのみの素朴な同期呼び出し)。
+app:
+  identity-service-uri: ${IDENTITY_SERVICE_URI:http://identity:8080}
+  # 統合操作ログ(/api/operation-logs/unified)のAIジョブソースを、引き続きlegacy-apiが
+  # 所有するgeneration_jobsテーブルから同期HTTP呼び出しで取得する(同上の暫定策)。
+  legacy-api-uri: ${LEGACY_API_URI:http://api:8080}
+
+# KeycloakのJWT検証(#572)。identity-serviceのSecurityConfig/JwtDecoderConfigと同じ理由により、
+# issuer-uriによる自動設定は使わずJWKS取得先と期待issuerを個別に指定して組み立てている。
+# gatewayを経由しない直接アクセスでも、gateway経由と同一の検証(署名・有効期限・issuer)が
+# 独立して行われる。
+keycloak:
+  jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/certs}
+  issuer: ${KEYCLOAK_ISSUER:https://localhost/auth/realms/letsblog}

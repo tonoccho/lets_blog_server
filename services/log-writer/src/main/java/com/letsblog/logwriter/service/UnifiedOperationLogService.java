@@ -1,12 +1,16 @@
-package com.letsblog.api.service;
+package com.letsblog.logwriter.service;
 
-import com.letsblog.api.domain.AuditLog;
-import com.letsblog.api.domain.GenerationJob;
-import com.letsblog.api.domain.OperationLog;
-import com.letsblog.api.dto.UnifiedLogEntryResponse;
-import com.letsblog.api.repository.AuditLogRepository;
-import com.letsblog.api.repository.GenerationJobRepository;
-import com.letsblog.api.repository.OperationLogRepository;
+import com.letsblog.logwriter.client.GenerationJobClient;
+import com.letsblog.logwriter.client.GenerationJobSummary;
+import com.letsblog.logwriter.domain.AuditLog;
+import com.letsblog.logwriter.domain.OperationLog;
+import com.letsblog.logwriter.dto.UnifiedLogEntryResponse;
+import com.letsblog.logwriter.repository.AuditLogRepository;
+import com.letsblog.logwriter.repository.OperationLogRepository;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Locale;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -14,20 +18,20 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Locale;
-
 /**
- * 操作ログ・AIジョブ・監査ログを1画面に統合表示するための集約サービス(issue #187)。
- * 3つのテーブルは記録方法・アクセス権限が異なる別々のドメインのまま残し(既存の記録経路・
- * ジョブ進捗ポーリング・監査AOPには一切手を入れない)、表示層でのみ集約する。
+ * 操作ログ・AIジョブ・監査ログを1画面に統合表示するための集約サービス(issue #187、
+ * #572でlog-writerへ移設)。
+ *
+ * <p>OPERATION/AUDITはlog-writer自身が所有するlbs_logスキーマから直接取得する。AI_JOBのみ、
+ * issue #572の時点でも引き続きlegacy-apiが所有するgeneration_jobsテーブル(lets_blogスキーマ)に
+ * 由来するため、{@link GenerationJobClient}経由の同期HTTP呼び出しで取得する(AIサービス抽出は
+ * Phase 19の別Issueで行う。ADR-0004によりlbs_logスキーマからのクロススキーマ参照はできない)。
+ * AIジョブは利用者に紐付く情報を持たないため全員に表示する(既存の/ai-jobs画面も同様に全件表示)。
  * 監査ログは元々admin限定のため、adminでない利用者には含めない。操作ログは元々本人限定のため、
- * 常に閲覧者本人の分のみを含める。AIジョブは利用者に紐付く情報を持たないため全員に表示する
- * (既存の/ai-jobs画面も同様に全件表示だった)。
- * 3種類のテーブルを1クエリでページングできないため、各ソースから直近分を取得して
- * メモリ上でマージ・ソート・ページングする(このアプリの利用規模では十分な精度)。
+ * 常に閲覧者本人の分のみを含める。
+ * 3種類のソースを1クエリでページングできないため、各ソースから直近分を取得してメモリ上で
+ * マージ・ソート・ページングする(このアプリの利用規模では十分な精度。元のUnifiedOperationLogService
+ * のJavadoc参照)。
  */
 @Service
 public class UnifiedOperationLogService {
@@ -35,21 +39,26 @@ public class UnifiedOperationLogService {
     private static final int SOURCE_FETCH_LIMIT = 200;
 
     private final OperationLogRepository operationLogRepository;
-    private final GenerationJobRepository generationJobRepository;
+    private final GenerationJobClient generationJobClient;
     private final AuditLogRepository auditLogRepository;
 
     public UnifiedOperationLogService(
             OperationLogRepository operationLogRepository,
-            GenerationJobRepository generationJobRepository,
+            GenerationJobClient generationJobClient,
             AuditLogRepository auditLogRepository) {
         this.operationLogRepository = operationLogRepository;
-        this.generationJobRepository = generationJobRepository;
+        this.generationJobClient = generationJobClient;
         this.auditLogRepository = auditLogRepository;
     }
 
+    /**
+     * @param bearerToken 呼び出し元の{@code Authorization}ヘッダー(AI_JOBソース取得のため
+     *                    legacy-apiへ転送する。GenerationJobClientのJavadoc参照)。
+     */
     @Transactional(readOnly = true)
     public Page<UnifiedLogEntryResponse> list(
-            Long viewerUserId, boolean viewerIsAdmin, String sourceType, String query, Pageable pageable) {
+            Long viewerUserId, boolean viewerIsAdmin, String sourceType, String query, Pageable pageable,
+            String bearerToken) {
         List<UnifiedLogEntryResponse> entries = new ArrayList<>();
         PageRequest fetchWindow = PageRequest.of(0, SOURCE_FETCH_LIMIT);
 
@@ -58,7 +67,8 @@ public class UnifiedOperationLogService {
                     .forEach(log -> entries.add(fromOperationLog(log)));
         }
         if (includeSource(sourceType, "AI_JOB")) {
-            generationJobRepository.findAllByOrderByCreatedAtDesc(fetchWindow)
+            generationJobClient.listRecent(bearerToken).stream()
+                    .limit(SOURCE_FETCH_LIMIT)
                     .forEach(job -> entries.add(fromGenerationJob(job)));
         }
         if (viewerIsAdmin && includeSource(sourceType, "AUDIT")) {
@@ -102,13 +112,13 @@ public class UnifiedOperationLogService {
                 log.getActorKeycloakSub());
     }
 
-    private UnifiedLogEntryResponse fromGenerationJob(GenerationJob job) {
+    private UnifiedLogEntryResponse fromGenerationJob(GenerationJobSummary job) {
         return new UnifiedLogEntryResponse(
-                "AI_JOB", job.getId(), job.getCreatedAt(), job.getType(), null, job.getStatus(), null, null);
+                "AI_JOB", job.id(), job.createdAt(), job.type(), null, job.status(), null, null);
     }
 
     private UnifiedLogEntryResponse fromAuditLog(AuditLog auditLog) {
-        String title = auditLog.getAction().name();
+        String title = auditLog.getAction();
         if (auditLog.getResourceType() != null) {
             title += " " + auditLog.getResourceType();
             if (auditLog.getResourceId() != null) {

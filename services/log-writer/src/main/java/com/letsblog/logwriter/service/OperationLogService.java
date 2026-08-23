@@ -1,9 +1,12 @@
-package com.letsblog.api.service;
+package com.letsblog.logwriter.service;
 
 import com.letsblog.common.messaging.LogExchanges;
-import com.letsblog.api.domain.OperationLog;
 import com.letsblog.common.messaging.OperationLogMessage;
-import com.letsblog.api.repository.OperationLogRepository;
+import com.letsblog.logwriter.domain.OperationLog;
+import com.letsblog.logwriter.repository.OperationLogRepository;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.AmqpException;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -11,17 +14,21 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
-import java.time.temporal.ChronoUnit;
-import java.util.List;
-
 /**
- * Web BFF(Next.js)がバックエンドAPIへ行った全リクエストの技術的な操作ログを記録する。
- * ユーザー自身がデバッグ・サポート/AIへの共有のためにトレースを閲覧・コピーする用途であり、
- * 業務監査用のAuditLogとは目的が異なる。
+ * Web BFF(Next.js)がバックエンドAPIへ行った全リクエストの技術的な操作ログを記録・読み取りする
+ * (#572でlegacy-apiから移設)。
+ *
+ * <p>書き込み経路(issue #466由来)は、legacy-apiが他サービスのコントローラーに分散していた頃と
+ * 同じくキューへの発行を優先し、実際の永続化は{@link com.letsblog.logwriter.listener.LogMessageListener}
+ * (同一サービス内のRabbitMQコンシューマー)に委ねる。以前は「apiサーバーが発行、log-writerが
+ * 消費」という別サービス間の非同期化だったが、#572で両方が同一サービスへ集約された後も、
+ * リクエストスレッドを長時間ブロックしないためのfire-and-forget的な利点を維持する目的で
+ * あえてこの構成を残す。発行に失敗した場合のみ、ログ欠落を防ぐため同期DB書き込みへ
+ * フォールバックする(REQUIRES_NEWではなく通常のトランザクションで良い。呼び出し元は
+ * このサービス自身のコントローラーであり、legacy-api時代のような別トランザクション文脈からの
+ * 呼び出しではないため)。
  */
 @Service
 @Slf4j
@@ -37,13 +44,7 @@ public class OperationLogService {
         this.rabbitTemplate = rabbitTemplate;
     }
 
-    /**
-     * ログメッセージキューイング(issue #466)。キューへの発行を優先し、記録自体はlog-writer
-     * サービスに委譲する。発行に失敗した場合のみ、ログ欠落を防ぐためこのAPIサーバー自身が
-     * 従来通り同期的にDBへ書き込む(REQUIRES_NEWで独立した書き込みトランザクションとして実行し、
-     * 呼び出し元のAPIリクエスト処理が失敗・ロールバックしてもログ記録自体は成功させる)。
-     */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional
     public void record(OperationLog entry) {
         OperationLogMessage message = new OperationLogMessage(
                 entry.getOperationId(),

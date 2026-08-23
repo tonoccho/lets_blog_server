@@ -11,4 +11,10 @@ export * from './generated/legacy-api/posts/posts';
 export * from './generated/legacy-api/sites/sites';
 export * from './generated/legacy-api/users/users';
 
+// log-writer(ログの所有権を完全移管、#572)
+export * from './generated/log-writer/openAPIDefinition.schemas';
+export * from './generated/log-writer/audit-log-controller/audit-log-controller';
+export * from './generated/log-writer/operation-log-controller/operation-log-controller';
+export * from './generated/log-writer/frontend-error-log-controller/frontend-error-log-controller';
+
 // 将来のサービス抽出Issueで追加するターゲットも、ここに re-export を追加していく。

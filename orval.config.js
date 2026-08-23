@@ -25,6 +25,19 @@ module.exports = {
     },
   },
 
+  // ログの所有権をlog-writerへ完全移管(#572)。読み取りAPI(監査ログ・操作ログ・
+  // フロントエンドエラーログ)をlog-writerへ移設したことに伴うターゲット追加。
+  logWriter: {
+    input: {
+      target: './openapi/log-writer.json',
+    },
+    output: {
+      ...commonOutput,
+      target: './sdk/api-client/src/generated/log-writer',
+      baseUrl: 'http://localhost:8080',
+    },
+  },
+
   // 将来のサービス抽出Issueで追加する例(identity-serviceの場合):
   // identity: {
   //   input: { target: './openapi/identity.json' },

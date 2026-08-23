@@ -1,9 +1,10 @@
-package com.letsblog.api.dto;
+package com.letsblog.logwriter.dto;
 
-import com.letsblog.api.domain.FrontendErrorLog;
-
+import com.letsblog.logwriter.domain.FrontendErrorLog;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Locale;
+import java.util.Set;
 
 public record FrontendErrorLogRequest(
         String message,
@@ -15,12 +16,14 @@ public record FrontendErrorLogRequest(
         String userAgent,
         String timestamp
 ) {
+    private static final Set<String> VALID_LEVELS = Set.of("ERROR", "WARN");
+
     public FrontendErrorLog toDomain() {
         FrontendErrorLog log = new FrontendErrorLog();
         log.setMessage(message);
         log.setStack(stack);
         log.setComponentStack(componentStack);
-        log.setLevel(FrontendErrorLog.ErrorLevel.valueOf(level.toUpperCase()));
+        log.setLevel(normalizeLevel(level));
         log.setContext(context != null ? context.toString() : null);
         log.setUrl(url);
         log.setUserAgent(userAgent);
@@ -36,5 +39,13 @@ public record FrontendErrorLogRequest(
         }
 
         return log;
+    }
+
+    private static String normalizeLevel(String level) {
+        String normalized = level != null ? level.toUpperCase(Locale.ROOT) : null;
+        if (!VALID_LEVELS.contains(normalized)) {
+            throw new IllegalArgumentException("levelはERRORまたはWARNである必要があります: " + level);
+        }
+        return normalized;
     }
 }

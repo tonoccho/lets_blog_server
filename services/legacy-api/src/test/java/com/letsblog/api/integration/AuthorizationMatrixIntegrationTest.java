@@ -97,9 +97,10 @@ class AuthorizationMatrixIntegrationTest {
     // =====================================================================================
     // (a) 全エンドポイント(health・認証系公開パスを除く)の401網羅
     //
-    // services/legacy-api/src/main/java/com/letsblog/api/controller/ の33ファイル・191エンドポイント
-    // (@GetMapping/@PostMapping/@PutMapping/@DeleteMapping/@PatchMappingの合計、grepで確認済み)から、
-    // ApiKeyAuthFilter.PUBLIC_AUTH_PATHS(7パス)と/api/healthを除いた183件を列挙する。
+    // services/legacy-api/src/main/java/com/letsblog/api/controller/ の30ファイル・184エンドポイント
+    // (#572でAuditLogController/OperationLogController/FrontendErrorLogControllerの3ファイル・
+    // 7エンドポイントをlog-writerサービスへ移設した後の数)から、
+    // ApiKeyAuthFilter.PUBLIC_AUTH_PATHS(7パス)と/api/healthを除いた176件を列挙する。
     // パスパラメータには存在確認不要な適当な値(1、"slug"等)を埋める。X-API-Keyの有無だけで
     // ApiKeyAuthFilterが401を返すため、リクエストボディ/クエリパラメータの妥当性は問わない。
     // =====================================================================================
@@ -150,8 +151,7 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("POST", "/api/projects/1/preview/skeleton"),
                 new Endpoint("DELETE", "/api/projects/1/preview/preview-post"),
 
-                // -- AuditLogController (1) --
-                new Endpoint("GET", "/api/audit-logs"),
+                // (AuditLogControllerは#572でlog-writerサービスへ移設したため対象外)
 
                 // -- AuthController (11件中、公開パス7件を除く4件) --
                 new Endpoint("GET", "/api/auth/totp/status"),
@@ -201,9 +201,7 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("PUT", "/api/diagrams/1"),
                 new Endpoint("DELETE", "/api/diagrams/1"),
 
-                // -- FrontendErrorLogController (2) --
-                new Endpoint("POST", "/api/logs/errors"),
-                new Endpoint("GET", "/api/logs/errors"),
+                // (FrontendErrorLogControllerは#572でlog-writerサービスへ移設したため対象外)
 
                 // -- GeneratedImageController (5) --
                 new Endpoint("GET", "/api/generated-images"),
@@ -225,11 +223,7 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("GET", "/api/metadata/post-statuses"),
                 new Endpoint("GET", "/api/metadata/roles"),
 
-                // -- OperationLogController (4) --
-                new Endpoint("POST", "/api/operation-logs"),
-                new Endpoint("GET", "/api/operation-logs"),
-                new Endpoint("GET", "/api/operation-logs/op-1"),
-                new Endpoint("GET", "/api/operation-logs/unified"),
+                // (OperationLogControllerは#572でlog-writerサービスへ移設したため対象外)
 
                 // -- PostController (4) --
                 new Endpoint("GET", "/api/posts"),
@@ -421,25 +415,9 @@ class AuthorizationMatrixIntegrationTest {
     // (b) requireAdmin()で保護された代表的なエンドポイントの403検証(実HTTP)
     // =====================================================================================
 
-    @Test
-    @DisplayName("GET /api/audit-logs: admin以外のactorは403")
-    void auditLogs_admin以外は403() throws Exception {
-        mockMvc.perform(request(HttpMethod.GET, "/api/audit-logs")
-                        .header(API_KEY_HEADER, TEST_API_KEY)
-                        .header(ACTOR_ID_HEADER, "1")
-                        .header(ACTOR_ROLE_HEADER, "editor"))
-                .andExpect(status().isForbidden());
-    }
-
-    @Test
-    @DisplayName("GET /api/audit-logs: adminなら403にならない")
-    void auditLogs_adminなら403にならない() throws Exception {
-        mockMvc.perform(request(HttpMethod.GET, "/api/audit-logs")
-                        .header(API_KEY_HEADER, TEST_API_KEY)
-                        .header(ACTOR_ID_HEADER, "1")
-                        .header(ACTOR_ROLE_HEADER, "admin"))
-                .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(403));
-    }
+    // GET /api/audit-logsのrequireAdmin()検証は#572でlog-writerサービスへ移設したため、
+    // このクラスの対象外(代表的なrequireAdmin()検証は下のproject-users/site-static-contentで
+    // 引き続きカバーする)。
 
     @Test
     @DisplayName("GET /api/project-users: admin以外のactorは403")

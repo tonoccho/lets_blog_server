@@ -1,18 +1,26 @@
-package com.letsblog.api.controller;
+package com.letsblog.logwriter.controller;
 
-import com.letsblog.api.domain.FrontendErrorLog;
-import com.letsblog.api.dto.FrontendErrorLogRequest;
-import com.letsblog.api.service.AdminAuthorizationService;
-import com.letsblog.api.service.FrontendErrorLogService;
+import com.letsblog.logwriter.domain.FrontendErrorLog;
+import com.letsblog.logwriter.dto.FrontendErrorLogRequest;
+import com.letsblog.logwriter.service.AdminAuthorizationService;
+import com.letsblog.logwriter.service.FrontendErrorLogService;
+import java.time.LocalDateTime;
+import java.util.Locale;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
-import java.time.LocalDateTime;
-
+/**
+ * フロントエンドエラーログの記録・読み取りAPI(#572でlegacy-apiから移設)。読み取りはadmin限定。
+ */
 @RestController
 @RequestMapping("/api/logs")
 public class FrontendErrorLogController {
@@ -20,7 +28,8 @@ public class FrontendErrorLogController {
     private final FrontendErrorLogService service;
     private final AdminAuthorizationService adminAuthorizationService;
 
-    public FrontendErrorLogController(FrontendErrorLogService service, AdminAuthorizationService adminAuthorizationService) {
+    public FrontendErrorLogController(
+            FrontendErrorLogService service, AdminAuthorizationService adminAuthorizationService) {
         this.service = service;
         this.adminAuthorizationService = adminAuthorizationService;
     }
@@ -34,7 +43,7 @@ public class FrontendErrorLogController {
 
     @GetMapping("/errors")
     public Page<FrontendErrorLog> getErrors(
-            @RequestParam(required = false) FrontendErrorLog.ErrorLevel level,
+            @RequestParam(required = false) String level,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate,
             @RequestParam(required = false) String url,
@@ -43,7 +52,7 @@ public class FrontendErrorLogController {
         adminAuthorizationService.requireAdmin();
 
         if (level != null) {
-            return service.findByLevel(level, pageable);
+            return service.findByLevel(level.toUpperCase(Locale.ROOT), pageable);
         }
         if (startDate != null && endDate != null) {
             return service.findByDateRange(startDate, endDate, pageable);
