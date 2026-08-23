@@ -1,9 +1,10 @@
-package com.letsblog.api.service;
+package com.letsblog.logwriter.service;
 
-import com.letsblog.common.messaging.LogExchanges;
-import com.letsblog.api.domain.FrontendErrorLog;
 import com.letsblog.common.messaging.ErrorLogMessage;
-import com.letsblog.api.repository.FrontendErrorLogRepository;
+import com.letsblog.common.messaging.LogExchanges;
+import com.letsblog.logwriter.domain.FrontendErrorLog;
+import com.letsblog.logwriter.repository.FrontendErrorLogRepository;
+import java.time.LocalDateTime;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.AmqpException;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -12,8 +13,14 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
-
+/**
+ * フロントエンドエラーログの記録・読み取り(#572でlegacy-apiから移設)。書き込み経路の設計は
+ * {@link OperationLogService}と同じ(OperationLogServiceのJavadoc参照)。
+ *
+ * <p>actorの解決には{@link CurrentActorService#tryGetCurrentActorId()}を使い、
+ * identity-serviceが落ちていてもエラーログの記録自体は失わせない(userIdがnullになるのみ)。
+ * actorKeycloakSubはJWTから直接取れるため、identity-service障害の影響を受けない。
+ */
 @Service
 @Transactional
 @Slf4j
@@ -30,29 +37,18 @@ public class FrontendErrorLogService {
         this.currentActorService = currentActorService;
     }
 
-    /**
-     * ログメッセージキューイング(issue #466)。キューへの発行を優先し、記録自体はlog-writer
-     * サービスに委譲する。発行に失敗した場合のみ、ログ欠落を防ぐためこのAPIサーバー自身が
-     * 従来通り同期的にDBへ書き込む。
-     *
-     * <p>フロントエンドエラーログは従来actor概念を持たなかったが、issue #569でJWTベースの
-     * actor解決を{@link CurrentActorService}経由で追加する({@link com.letsblog.api.aop.AuditLogAspect}
-     * と同じDIパターン)。呼び出し元({@link com.letsblog.api.controller.FrontendErrorLogController})が
-     * 構築する{@code errorLog}にactor情報は含まれないため、ここでリクエストスコープの
-     * actorを解決して設定する。
-     */
     public void logError(FrontendErrorLog errorLog) {
         if (errorLog.getCreatedAt() == null) {
             errorLog.setCreatedAt(LocalDateTime.now());
         }
-        errorLog.setUserId(currentActorService.getCurrentActorId());
+        errorLog.setUserId(currentActorService.tryGetCurrentActorId());
         errorLog.setActorKeycloakSub(currentActorService.getCurrentActorKeycloakSub());
 
         ErrorLogMessage message = new ErrorLogMessage(
                 errorLog.getMessage(),
                 errorLog.getStack(),
                 errorLog.getComponentStack(),
-                errorLog.getLevel() != null ? errorLog.getLevel().name() : null,
+                errorLog.getLevel(),
                 errorLog.getUserId(),
                 errorLog.getActorKeycloakSub(),
                 errorLog.getContext(),
@@ -76,7 +72,7 @@ public class FrontendErrorLogService {
     }
 
     @Transactional(readOnly = true)
-    public Page<FrontendErrorLog> findByLevel(FrontendErrorLog.ErrorLevel level, Pageable pageable) {
+    public Page<FrontendErrorLog> findByLevel(String level, Pageable pageable) {
         return repository.findByLevel(level, pageable);
     }
 

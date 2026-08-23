@@ -13,9 +13,9 @@ import lombok.Setter;
 import java.time.LocalDateTime;
 
 /**
- * apiサーバーのFrontendErrorLogエンティティと同じ`frontend_error_logs`テーブルを共有する
- * (スキーマ自体の所有権・マイグレーションはapiサーバー側にある。issue #466)。
- * levelはapi側ではenumだが、ここでは受信したメッセージの文字列をそのまま保存するだけのため
+ * `frontend_error_logs`テーブルのエンティティ。スキーマ自体の所有権・マイグレーション
+ * (lbs_logスキーマ、ADR-0004)は本サービスが持つ(issue #466で導入、#572でlegacy-apiから完全移管)。
+ * levelはlegacy-api側ではenumだが、ここでは受信したメッセージの文字列をそのまま保存するだけのため
  * 単純なStringとして扱う。
  */
 @Entity

@@ -17,7 +17,8 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDateTime;
 
 /**
- * RabbitMQからログメッセージを受信し、apiサーバーと共有するDBへ記録する(issue #466)。
+ * RabbitMQからログメッセージを受信し、自身が所有するlbs_logスキーマへ記録する
+ * (issue #466、スキーマ所有権は#572で本サービスへ完全移管)。
  * リスナーが例外を投げるとキュー側でメッセージが再配送(requeue)されるため、
  * 個々のメッセージ処理失敗はここで握りつぶさずそのまま伝播させる。
  */

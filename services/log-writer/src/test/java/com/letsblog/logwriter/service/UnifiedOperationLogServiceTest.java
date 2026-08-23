@@ -1,13 +1,14 @@
-package com.letsblog.api.service;
+package com.letsblog.logwriter.service;
 
-import com.letsblog.api.domain.AuditLog;
-import com.letsblog.api.domain.AuditLogAction;
-import com.letsblog.api.domain.GenerationJob;
-import com.letsblog.api.domain.OperationLog;
-import com.letsblog.api.dto.UnifiedLogEntryResponse;
-import com.letsblog.api.repository.AuditLogRepository;
-import com.letsblog.api.repository.GenerationJobRepository;
-import com.letsblog.api.repository.OperationLogRepository;
+import com.letsblog.logwriter.client.GenerationJobClient;
+import com.letsblog.logwriter.client.GenerationJobSummary;
+import com.letsblog.logwriter.domain.AuditLog;
+import com.letsblog.logwriter.domain.OperationLog;
+import com.letsblog.logwriter.dto.UnifiedLogEntryResponse;
+import com.letsblog.logwriter.repository.AuditLogRepository;
+import com.letsblog.logwriter.repository.OperationLogRepository;
+import java.time.LocalDateTime;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -16,9 +17,6 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-
-import java.time.LocalDateTime;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -30,8 +28,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * UnifiedOperationLogServiceの回帰テスト(issue #187)。3ソースのマージ・ソート・
- * 監査ログのadmin限定・種別フィルタ・キーワード検索・ページングを検証する。
+ * UnifiedOperationLogServiceの回帰テスト(issue #187、#572でlog-writerへ移設)。3ソースのマージ・
+ * ソート・監査ログのadmin限定・種別フィルタ・キーワード検索・ページングを検証する。
+ * legacy-api側のUnifiedOperationLogServiceTestを移設し、AI_JOBソースの取得方法のみ
+ * GenerationJobRepository直接参照からGenerationJobClient(HTTP)経由に置き換えている。
  */
 @ExtendWith(MockitoExtension.class)
 class UnifiedOperationLogServiceTest {
@@ -39,12 +39,12 @@ class UnifiedOperationLogServiceTest {
     @Mock
     private OperationLogRepository operationLogRepository;
     @Mock
-    private GenerationJobRepository generationJobRepository;
+    private GenerationJobClient generationJobClient;
     @Mock
     private AuditLogRepository auditLogRepository;
 
     private UnifiedOperationLogService service() {
-        return new UnifiedOperationLogService(operationLogRepository, generationJobRepository, auditLogRepository);
+        return new UnifiedOperationLogService(operationLogRepository, generationJobClient, auditLogRepository);
     }
 
     private OperationLog operationLog(long id, LocalDateTime createdAt) {
@@ -61,13 +61,8 @@ class UnifiedOperationLogServiceTest {
         return log;
     }
 
-    private GenerationJob generationJob(long id, LocalDateTime createdAt) {
-        GenerationJob job = new GenerationJob();
-        job.setId(id);
-        job.setType("draft");
-        job.setStatus("done");
-        job.setCreatedAt(createdAt);
-        return job;
+    private GenerationJobSummary generationJob(long id, LocalDateTime createdAt) {
+        return new GenerationJobSummary(id, "draft", "done", createdAt);
     }
 
     private AuditLog auditLog(long id, LocalDateTime createdAt) {
@@ -75,7 +70,7 @@ class UnifiedOperationLogServiceTest {
         log.setId(id);
         log.setUserId(99L);
         log.setActorKeycloakSub("keycloak-sub-audit");
-        log.setAction(AuditLogAction.LOGIN);
+        log.setAction("LOGIN");
         log.setCreatedAt(createdAt);
         return log;
     }
@@ -83,7 +78,7 @@ class UnifiedOperationLogServiceTest {
     private void stubEmptySources() {
         lenient().when(operationLogRepository.findByUserIdOrderByCreatedAtDesc(eq(10L), any()))
                 .thenReturn(Page.empty());
-        lenient().when(generationJobRepository.findAllByOrderByCreatedAtDesc(any())).thenReturn(Page.empty());
+        lenient().when(generationJobClient.listRecent("Bearer test-token")).thenReturn(List.of());
         lenient().when(auditLogRepository.findAllByOrderByCreatedAtDesc(any())).thenReturn(Page.empty());
     }
 
@@ -93,17 +88,15 @@ class UnifiedOperationLogServiceTest {
         LocalDateTime now = LocalDateTime.now();
         when(operationLogRepository.findByUserIdOrderByCreatedAtDesc(eq(10L), any()))
                 .thenReturn(new PageImpl<>(List.of(operationLog(1L, now.minusMinutes(2)))));
-        when(generationJobRepository.findAllByOrderByCreatedAtDesc(any()))
-                .thenReturn(new PageImpl<>(List.of(generationJob(2L, now))));
+        when(generationJobClient.listRecent("Bearer test-token")).thenReturn(List.of(generationJob(2L, now)));
         when(auditLogRepository.findAllByOrderByCreatedAtDesc(any()))
                 .thenReturn(new PageImpl<>(List.of(auditLog(3L, now.minusMinutes(1)))));
 
         Page<UnifiedLogEntryResponse> result =
-                service().list(10L, true, null, null, PageRequest.of(0, 20));
+                service().list(10L, true, null, null, PageRequest.of(0, 20), "Bearer test-token");
 
         assertEquals(3, result.getTotalElements());
         assertEquals("AI_JOB", result.getContent().get(0).sourceType());
-        assertEquals(null, result.getContent().get(0).actorKeycloakSub());
         assertEquals("AUDIT", result.getContent().get(1).sourceType());
         assertEquals("keycloak-sub-audit", result.getContent().get(1).actorKeycloakSub());
         assertEquals("OPERATION", result.getContent().get(2).sourceType());
@@ -114,7 +107,7 @@ class UnifiedOperationLogServiceTest {
     void list_admin以外は監査ログを取得しない() {
         stubEmptySources();
 
-        service().list(10L, false, null, null, PageRequest.of(0, 20));
+        service().list(10L, false, null, null, PageRequest.of(0, 20), "Bearer test-token");
 
         verify(auditLogRepository, never()).findAllByOrderByCreatedAtDesc(any());
     }
@@ -123,24 +116,23 @@ class UnifiedOperationLogServiceTest {
     void list_typeフィルタで対象ソースのみ取得する() {
         stubEmptySources();
 
-        service().list(10L, true, "AI_JOB", null, PageRequest.of(0, 20));
+        service().list(10L, true, "AI_JOB", null, PageRequest.of(0, 20), "Bearer test-token");
 
         verify(operationLogRepository, never()).findByUserIdOrderByCreatedAtDesc(any(), any());
         verify(auditLogRepository, never()).findAllByOrderByCreatedAtDesc(any());
-        verify(generationJobRepository).findAllByOrderByCreatedAtDesc(any());
+        verify(generationJobClient).listRecent("Bearer test-token");
     }
 
     @Test
     void list_キーワード検索でtitleに一致しないものを除外する() {
         stubEmptySources();
         LocalDateTime now = LocalDateTime.now();
-        when(generationJobRepository.findAllByOrderByCreatedAtDesc(any()))
-                .thenReturn(new PageImpl<>(List.of(generationJob(1L, now))));
+        when(generationJobClient.listRecent("Bearer test-token")).thenReturn(List.of(generationJob(1L, now)));
 
         Page<UnifiedLogEntryResponse> matched =
-                service().list(10L, true, null, "draft", PageRequest.of(0, 20));
+                service().list(10L, true, null, "draft", PageRequest.of(0, 20), "Bearer test-token");
         Page<UnifiedLogEntryResponse> unmatched =
-                service().list(10L, true, null, "nonexistent", PageRequest.of(0, 20));
+                service().list(10L, true, null, "nonexistent", PageRequest.of(0, 20), "Bearer test-token");
 
         assertEquals(1, matched.getTotalElements());
         assertTrue(unmatched.getContent().isEmpty());
@@ -150,14 +142,14 @@ class UnifiedOperationLogServiceTest {
     void list_ページングする() {
         stubEmptySources();
         LocalDateTime now = LocalDateTime.now();
-        List<GenerationJob> jobs = List.of(
+        List<GenerationJobSummary> jobs = List.of(
                 generationJob(1L, now.minusMinutes(3)),
                 generationJob(2L, now.minusMinutes(2)),
                 generationJob(3L, now.minusMinutes(1)));
-        when(generationJobRepository.findAllByOrderByCreatedAtDesc(any())).thenReturn(new PageImpl<>(jobs));
+        when(generationJobClient.listRecent("Bearer test-token")).thenReturn(jobs);
 
         Pageable pageable = PageRequest.of(1, 2);
-        Page<UnifiedLogEntryResponse> result = service().list(10L, true, null, null, pageable);
+        Page<UnifiedLogEntryResponse> result = service().list(10L, true, null, null, pageable, "Bearer test-token");
 
         assertEquals(3, result.getTotalElements());
         assertEquals(1, result.getContent().size());

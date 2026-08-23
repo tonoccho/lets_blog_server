@@ -102,11 +102,13 @@ app:
           - /api/system/**
           - /api/backup/**
           - /api/vscode-extension/**
+      # ログ読み取り・記録APIはlog-writerへ移設した(#572)。
       - id: log
         uri: ${LOG_SERVICE_URI:http://api:8080}
         paths:
           - /api/logs/**
           - /api/audit-logs/**
+          - /api/operation-logs/**
   # レート制限(現行legacy-apiのRateLimitInterceptorから移設。#560)。
   # 管理画面からのアップロード系エンドポイント制限値の動的変更(旧AppSettingService経由)は
   # gatewayがDBを持たないため未対応(静的デフォルト値のみ)。follow-up issueで再検討する。

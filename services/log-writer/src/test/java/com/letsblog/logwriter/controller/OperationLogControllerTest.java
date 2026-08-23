@@ -1,12 +1,13 @@
-package com.letsblog.api.controller;
+package com.letsblog.logwriter.controller;
 
-import com.letsblog.api.domain.OperationLog;
-import com.letsblog.api.dto.OperationLogRequest;
-import com.letsblog.api.dto.UnifiedLogEntryResponse;
-import com.letsblog.api.service.CurrentActorService;
-import com.letsblog.api.service.ForbiddenException;
-import com.letsblog.api.service.OperationLogService;
-import com.letsblog.api.service.UnifiedOperationLogService;
+import com.letsblog.logwriter.domain.OperationLog;
+import com.letsblog.logwriter.dto.OperationLogRequest;
+import com.letsblog.logwriter.dto.UnifiedLogEntryResponse;
+import com.letsblog.logwriter.service.CurrentActorService;
+import com.letsblog.logwriter.service.ForbiddenException;
+import com.letsblog.logwriter.service.OperationLogService;
+import com.letsblog.logwriter.service.UnifiedOperationLogService;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -18,8 +19,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -44,9 +43,9 @@ class OperationLogControllerTest {
     }
 
     @Test
-    void record_ログイン中ユーザーIDで保存する() {
+    void record_actorが解決できればuserIdで保存する() {
         OperationLogController controller = controller();
-        when(currentActorService.getCurrentActorId()).thenReturn(1L);
+        when(currentActorService.tryGetCurrentActorId()).thenReturn(1L);
         when(currentActorService.getCurrentActorKeycloakSub()).thenReturn("keycloak-sub-1");
         OperationLogRequest request = new OperationLogRequest("op-1", "GET", "/api/sites", 200, 42L, true, null);
 
@@ -63,7 +62,7 @@ class OperationLogControllerTest {
     @Test
     void record_未ログインならUnauthorizedを返す() {
         OperationLogController controller = controller();
-        when(currentActorService.getCurrentActorId()).thenReturn(null);
+        when(currentActorService.tryGetCurrentActorId()).thenReturn(null);
         OperationLogRequest request = new OperationLogRequest("op-1", "GET", "/api/sites", 200, 42L, true, null);
 
         ResponseEntity<Void> response = controller.record(request);
@@ -111,9 +110,11 @@ class OperationLogControllerTest {
         OperationLogController controller = controller();
         when(currentActorService.getCurrentActorId()).thenReturn(1L);
         when(currentActorService.isAdmin()).thenReturn(true);
+        when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer test-token");
         Pageable pageable = PageRequest.of(0, 20);
         Page<UnifiedLogEntryResponse> page = new PageImpl<>(List.of());
-        when(unifiedOperationLogService.list(1L, true, "AI_JOB", "draft", pageable)).thenReturn(page);
+        when(unifiedOperationLogService.list(1L, true, "AI_JOB", "draft", pageable, "Bearer test-token"))
+                .thenReturn(page);
 
         Page<UnifiedLogEntryResponse> result = controller.listUnified("AI_JOB", "draft", pageable);
 

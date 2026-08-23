@@ -1,6 +1,6 @@
-package com.letsblog.api.dto;
+package com.letsblog.logwriter.dto;
 
-import com.letsblog.api.domain.OperationLog;
+import com.letsblog.logwriter.domain.OperationLog;
 
 public record OperationLogRequest(
         String operationId,

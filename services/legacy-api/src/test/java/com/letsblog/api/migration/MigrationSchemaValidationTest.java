@@ -17,10 +17,11 @@ class MigrationSchemaValidationTest extends MigrationTestBase {
         try (Connection conn = getConnection()) {
             var metaData = conn.getMetaData();
 
+            // audit_logsは#572でlog-writerサービス(lbs_logスキーマ)へ完全移管したため、
+            // このスキーマ(lets_blog)には存在しない前提のテーブル一覧から除外した。
             var requiredTables = new String[]{
                     "users",
                     "sites",
-                    "audit_logs",
                     "custom_tags",
                     "projects",
                     "api_keys"

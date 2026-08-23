@@ -118,9 +118,10 @@ services:
       docker-socket-proxy:
         condition: service_started
 
-  # ログメッセージキューイング(issue #466)のコンシューマー。apiサーバーがRabbitMQへ発行した
-  # エラーログ/操作ログ/監査ログのメッセージを受信し、apiと共有するDB(既存のFlywayマイグレーション
-  # 済みスキーマ)へ書き込む。スキーマの所有権・マイグレーションはapiサーバー側のFlywayのみが持つ。
+  # ログの所有権をlog-writerへ完全移管(#572)。RabbitMQ経由でエラーログ/操作ログ/監査ログの
+  # メッセージを受信して書き込むのに加え、読み取りAPI(監査ログ・操作ログ・フロントエンドエラー
+  # ログ)もここへ移設した。スキーマ・Flywayマイグレーションは専用の lbs_log スキーマ
+  # (ADR-0004)で本サービスが所有する。
   log-writer:
     build:
       context: .
@@ -129,9 +130,17 @@ services:
     <<: [*common-service, *actuator-healthcheck]
     environment:
       <<: *rabbitmq-env
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
-      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER}
-      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_log?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: lbs_log
+      SPRING_DATASOURCE_PASSWORD: ${LBS_LOG_DB_PASSWORD}
+      # 読み取りAPIのadmin判定・自分自身のuserId解決のため、呼び出し元のBearerトークンを
+      # そのままidentity-serviceの/api/identity/meへ転送して問い合わせる(#572の暫定策。
+      # lbs_logスキーマはusersテーブルへアクセスできない=ADR-0004のクロススキーマ禁止のため。
+      # C12(#581)でサービス間同期呼び出しの標準クライアントが定まったらそちらへ寄せる)。
+      IDENTITY_SERVICE_URI: http://identity:8080
+      # 統合操作ログ(/api/operation-logs/unified)のAIジョブソースを、引き続きlegacy-apiが
+      # 所有するgeneration_jobsから同期HTTP呼び出しで取得するため(同上、C12までの暫定策)。
+      LEGACY_API_URI: http://api:8080
     depends_on:
       mysql:
         condition: service_healthy
@@ -140,19 +149,24 @@ services:
 
   # 単一入口(#560)。/api/**のルーティング・JWT検証・レート制限・相関ID付与を担う。
   # ルーティング先の実サービスはまだlegacy-apiのみのため、全ルートが暫定的にapiを指す
-  # (services/gateway/src/main/resources/application.yml参照)。
+  # (services/gateway/src/main/resources/application.yml参照)。ログ関連ルートのみ#572で
+  # log-writerへ向けている。
   gateway:
     build:
       context: .
       dockerfile: services/gateway/Dockerfile
     container_name: lbs-gateway
     <<: [*common-service, *actuator-healthcheck]
+    environment:
+      LOG_SERVICE_URI: http://log-writer:8080
     depends_on:
       api:
         condition: service_healthy
       identity:
         condition: service_healthy
       keycloak:
+        condition: service_healthy
+      log-writer:
         condition: service_healthy
 
   identity:

@@ -9,6 +9,7 @@ set -e
 # (orval.config.js側にも対応するターゲット定義の追加が必要)。
 SERVICES=(
   "legacy-api|${LETS_BLOG_API_URL:-http://localhost:8080}"
+  "log-writer|${LOG_WRITER_URL:-http://localhost:8080}"
 )
 
 OPENAPI_DIR="openapi"

@@ -5,9 +5,11 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 /**
  * ログメッセージキューイング(issue #466)のコンシューマー側サーバー。RabbitMQからエラーログ・
- * 操作ログ・監査ログのメッセージを受信し、apiサーバーと共有するDB(既存のFlywayマイグレーション済み
- * スキーマ)へ書き込む。スキーマ自体の所有権はapiサーバー側のFlywayマイグレーションにあるため、
- * このアプリケーションはFlywayを実行しない(application.ymlでspring.flyway.enabled=false)。
+ * 操作ログ・監査ログのメッセージを受信し、自身が所有するlbs_logスキーマへ書き込む。
+ *
+ * <p>issue #572でログの所有権をlegacy-apiから完全移管し、スキーマ(lbs_log、ADR-0004)・
+ * Flywayマイグレーション・読み取りAPI(監査ログ・操作ログ・フロントエンドエラーログ)の
+ * すべてを本サービスが持つようになった。
  */
 @SpringBootApplication
 public class LogWriterApplication {

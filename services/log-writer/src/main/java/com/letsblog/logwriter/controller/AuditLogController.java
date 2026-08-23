@@ -1,9 +1,9 @@
-package com.letsblog.api.controller;
+package com.letsblog.logwriter.controller;
 
-import com.letsblog.api.domain.AuditLog;
-import com.letsblog.api.domain.AuditLogAction;
-import com.letsblog.api.service.AdminAuthorizationService;
-import com.letsblog.api.service.AuditLogService;
+import com.letsblog.logwriter.domain.AuditLog;
+import com.letsblog.logwriter.service.AdminAuthorizationService;
+import com.letsblog.logwriter.service.AuditLogService;
+import java.time.LocalDateTime;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -12,8 +12,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.time.LocalDateTime;
-
+/**
+ * 監査ログの読み取りAPI(#572でlegacy-apiから移設)。admin限定。
+ */
 @RestController
 @RequestMapping("/api/audit-logs")
 public class AuditLogController {
@@ -29,7 +30,7 @@ public class AuditLogController {
     @GetMapping
     public Page<AuditLog> list(
             @RequestParam(required = false) Long userId,
-            @RequestParam(required = false) AuditLogAction action,
+            @RequestParam(required = false) String action,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate,
             Pageable pageable) {

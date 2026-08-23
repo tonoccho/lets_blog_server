@@ -1,10 +1,8 @@
 package com.letsblog.api.service;
 
 import com.letsblog.common.messaging.LogExchanges;
-import com.letsblog.api.domain.AuditLog;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.common.messaging.AuditLogMessage;
-import com.letsblog.api.repository.AuditLogRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -12,26 +10,20 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.amqp.AmqpException;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
 
-import java.lang.reflect.Method;
-import java.time.LocalDateTime;
-import java.util.List;
-
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
+/**
+ * #572で読み取り・保持期間管理をlog-writerへ移設したため、このテストは記録(書き込み)経路のみを
+ * 検証する(移設した読み取り・保持期間管理のテストはservices/log-writer側へ移設済み)。
+ */
 @ExtendWith(MockitoExtension.class)
 class AuditLogServiceTest {
-
-    @Mock
-    private AuditLogRepository auditLogRepository;
 
     @Mock
     private RabbitTemplate rabbitTemplate;
@@ -39,8 +31,8 @@ class AuditLogServiceTest {
     private AuditLogService service;
 
     @Test
-    void log_キューへ発行できればDBへは直接書き込まない() {
-        service = new AuditLogService(auditLogRepository, rabbitTemplate);
+    void log_キューへ発行できる() {
+        service = new AuditLogService(rabbitTemplate);
 
         service.log(1L, "keycloak-sub-1", AuditLogAction.USER_CREATED, "USER", 2L, "{}", "127.0.0.1", "test-agent");
 
@@ -54,57 +46,15 @@ class AuditLogServiceTest {
         assertEquals("USER", message.resourceType());
         assertEquals(2L, message.resourceId());
         assertEquals("127.0.0.1", message.remoteIp());
-        verify(auditLogRepository, never()).save(any());
     }
 
     @Test
-    void log_キュー発行に失敗したら同期DB書き込みへフォールバックする() {
-        service = new AuditLogService(auditLogRepository, rabbitTemplate);
+    void log_キュー発行に失敗しても例外を投げずログへ記録するだけに留める() {
+        service = new AuditLogService(rabbitTemplate);
         doThrow(new AmqpException("キュー接続エラー"))
                 .when(rabbitTemplate).convertAndSend(any(String.class), any(String.class), any(Object.class));
 
-        service.log(1L, "keycloak-sub-1", AuditLogAction.USER_CREATED, "USER", 2L, "{}", "127.0.0.1", "test-agent");
-
-        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
-        verify(auditLogRepository, times(1)).save(captor.capture());
-        AuditLog saved = captor.getValue();
-        assertEquals(1L, saved.getUserId());
-        assertEquals("keycloak-sub-1", saved.getActorKeycloakSub());
-        assertEquals(AuditLogAction.USER_CREATED, saved.getAction());
-        assertEquals("USER", saved.getResourceType());
-        assertEquals(2L, saved.getResourceId());
-        assertEquals("127.0.0.1", saved.getRemoteIp());
-    }
-
-    @Test
-    void deleteOldLogs_1年以上前のログのみ削除する() {
-        service = new AuditLogService(auditLogRepository, rabbitTemplate);
-        AuditLog oldLog = new AuditLog();
-        when(auditLogRepository.findByCreatedAtBefore(any(LocalDateTime.class)))
-                .thenReturn(List.of(oldLog));
-
-        service.deleteOldLogs();
-
-        verify(auditLogRepository, times(1)).deleteAll(List.of(oldLog));
-    }
-
-    @Test
-    void deleteOldLogs_対象が無ければ削除処理を呼ばない() {
-        service = new AuditLogService(auditLogRepository, rabbitTemplate);
-        when(auditLogRepository.findByCreatedAtBefore(any(LocalDateTime.class)))
-                .thenReturn(List.of());
-
-        service.deleteOldLogs();
-
-        verify(auditLogRepository, times(0)).deleteAll(any());
-    }
-
-    @Test
-    void deleteOldLogs_毎日UTC午前2時にスケジュール実行される() throws NoSuchMethodException {
-        Method method = AuditLogService.class.getMethod("deleteOldLogs");
-        Scheduled scheduled = method.getAnnotation(Scheduled.class);
-
-        assertEquals("0 0 2 * * *", scheduled.cron());
-        assertEquals("UTC", scheduled.zone());
+        assertDoesNotThrow(() -> service.log(
+                1L, "keycloak-sub-1", AuditLogAction.USER_CREATED, "USER", 2L, "{}", "127.0.0.1", "test-agent"));
     }
 }
