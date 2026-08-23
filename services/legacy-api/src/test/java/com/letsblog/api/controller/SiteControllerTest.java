@@ -145,4 +145,85 @@ class SiteControllerTest {
 
         assertThrows(ForbiddenException.class, () -> controller.generateSshKeyPair(null));
     }
+
+    // issue #568: 認可マトリクス整備に伴う、requireAdmin()を呼ぶ全メソッドのForbiddenパス網羅
+    @Test
+    void getDetail_admin権限があれば詳細を返す() {
+        SiteController controller = controller();
+        com.letsblog.api.dto.SiteDetailResponse detail = new com.letsblog.api.dto.SiteDetailResponse(
+                1L, "My Blog", "main", CmsType.WORDPRESS, "https://example.com",
+                LocalDateTime.now(), LocalDateTime.now(), false, false, Map.of(), java.util.List.of());
+        when(siteService.getDetail(1L)).thenReturn(detail);
+
+        com.letsblog.api.dto.SiteDetailResponse response = controller.getDetail(1L);
+
+        assertEquals("My Blog", response.name());
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void getDetail_admin権限がなければForbidden() {
+        SiteController controller = controller();
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.getDetail(1L));
+    }
+
+    @Test
+    void delete_admin権限があれば削除できる() {
+        SiteController controller = controller();
+
+        var response = controller.delete(1L);
+
+        assertEquals(204, response.getStatusCode().value());
+        verify(adminAuthorizationService).requireAdmin();
+        verify(wordPressSiteProvisioningService).deleteSite(1L);
+    }
+
+    @Test
+    void delete_admin権限がなければForbidden() {
+        SiteController controller = controller();
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.delete(1L));
+    }
+
+    @Test
+    void installWpCli_admin権限があれば実行できる() {
+        SiteController controller = controller();
+        when(siteService.installWpCli(1L)).thenReturn(new com.letsblog.api.cms.WpCliInstallResult("インストールしました"));
+
+        var response = controller.installWpCli(1L);
+
+        assertEquals("インストールしました", response.message());
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void installWpCli_admin権限がなければForbidden() {
+        SiteController controller = controller();
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.installWpCli(1L));
+    }
+
+    @Test
+    void reprovision_admin権限があれば実行できる() {
+        SiteController controller = controller();
+        when(siteService.reprovision(1L, 0L))
+                .thenReturn(new com.letsblog.api.service.ProvisioningService.ProvisioningResult());
+
+        var response = controller.reprovision(1L);
+
+        assertEquals(200, response.getStatusCode().value());
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void reprovision_admin権限がなければForbidden() {
+        SiteController controller = controller();
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.reprovision(1L));
+    }
 }

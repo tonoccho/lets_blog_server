@@ -108,4 +108,23 @@ class ArticlePreviewControllerTest {
                 () -> controller.skeleton(1L,
                         new RenderSkeletonRequest("タイトル", "<p>本文</p>", null, null, null, null, null, null)));
     }
+
+    // issue #568: 認可マトリクス整備に伴う、requireProjectMemberOrAdmin()を呼ぶ全メソッドのForbiddenパス網羅
+    @Test
+    void deletePreviewPost_認可後にサービスへ委譲する() {
+        ArticlePreviewController controller = controller();
+
+        controller.deletePreviewPost(1L, 20L, "123");
+
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+        verify(articlePreviewService).deletePreviewPost(1L, 20L, "123");
+    }
+
+    @Test
+    void deletePreviewPost_認可拒否ならForbidden() {
+        ArticlePreviewController controller = controller();
+        doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+
+        assertThrows(ForbiddenException.class, () -> controller.deletePreviewPost(1L, 20L, "123"));
+    }
 }

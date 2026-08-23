@@ -8,6 +8,8 @@ import com.letsblog.api.dto.AddProjectUserRequest;
 import com.letsblog.api.dto.ApplyToAllEnvironmentsRequest;
 import com.letsblog.api.dto.ApplyToEnvironmentRequest;
 import com.letsblog.api.dto.DeleteSlugRequest;
+import com.letsblog.api.dto.EditTermRequest;
+import com.letsblog.api.dto.PostComparisonPage;
 import com.letsblog.api.dto.ProjectCreateRequest;
 import com.letsblog.api.dto.ProjectEnvironmentBindRequest;
 import com.letsblog.api.dto.ProjectResponse;
@@ -18,8 +20,14 @@ import com.letsblog.api.dto.StatusComparisonPage;
 import com.letsblog.api.dto.SyncEnvironmentRequest;
 import com.letsblog.api.dto.TermComparisonPage;
 import com.letsblog.api.dto.TermNameRequest;
+import com.letsblog.api.dto.UpdateArticleImageResizeDefaultRequest;
 import com.letsblog.api.dto.UpdateImageContentFilterSettingsRequest;
+import com.letsblog.api.dto.UpdateImageGenerationPromptDefaultsRequest;
+import com.letsblog.api.dto.UpdateImageGenerationSizeDefaultsRequest;
 import com.letsblog.api.dto.UpdateMasterEnvironmentRequest;
+import com.letsblog.api.dto.UpdatePostStatusRequest;
+import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
+import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
 import com.letsblog.api.dto.UpdateProjectUserRequest;
 import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.BulkManagementService;
@@ -472,5 +480,304 @@ class ProjectControllerTest {
 
         assertEquals(204, response.getStatusCode().value());
         verify(projectUserSyncService).removeUserFromProject(1L, 2L);
+    }
+
+    // ---- issue #568: 認可マトリクス整備に伴う、requireAdmin()を呼ぶ全メソッドのForbiddenパス網羅 ----
+
+    @Test
+    void update_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        ProjectUpdateRequest request = new ProjectUpdateRequest("新しい名前");
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.update(1L, request));
+    }
+
+    @Test
+    void delete_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.delete(1L));
+    }
+
+    @Test
+    void bindEnvironment_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        ProjectEnvironmentBindRequest request = new ProjectEnvironmentBindRequest("local", 10L);
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.bindEnvironment(1L, request));
+    }
+
+    @Test
+    void unbindEnvironment_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.unbindEnvironment(1L, "local"));
+    }
+
+    @Test
+    void updateMasterEnvironment_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        UpdateMasterEnvironmentRequest request = new UpdateMasterEnvironmentRequest("production");
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.updateMasterEnvironment(1L, request));
+    }
+
+    @Test
+    void updateGithubRepository_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        UpdateProjectGithubRepositoryRequest request = new UpdateProjectGithubRepositoryRequest("owner/repo");
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.updateGithubRepository(1L, request));
+    }
+
+    @Test
+    void updateCssSelectorPrefix_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        UpdateProjectCssSelectorPrefixRequest request = new UpdateProjectCssSelectorPrefixRequest("prefix");
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.updateCssSelectorPrefix(1L, request));
+    }
+
+    @Test
+    void updateImageGenerationPromptDefaults_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        UpdateImageGenerationPromptDefaultsRequest request =
+                new UpdateImageGenerationPromptDefaultsRequest("negative", "quality");
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class,
+                () -> controller.updateImageGenerationPromptDefaults(1L, request));
+    }
+
+    @Test
+    void updateImageGenerationSizeDefaults_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        UpdateImageGenerationSizeDefaultsRequest request =
+                new UpdateImageGenerationSizeDefaultsRequest(512, 512);
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class,
+                () -> controller.updateImageGenerationSizeDefaults(1L, request));
+    }
+
+    @Test
+    void updateArticleImageResizeDefault_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        UpdateArticleImageResizeDefaultRequest request = new UpdateArticleImageResizeDefaultRequest(1200);
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class,
+                () -> controller.updateArticleImageResizeDefault(1L, request));
+    }
+
+    @Test
+    void updateImageContentFilterSettings_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        UpdateImageContentFilterSettingsRequest request =
+                new UpdateImageContentFilterSettingsRequest(false, true, true);
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class,
+                () -> controller.updateImageContentFilterSettings(1L, request));
+    }
+
+    @Test
+    void runBulkOperationUpload_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        MockMultipartFile file = new MockMultipartFile("file", "custom-plugin.zip", "application/zip", new byte[]{1, 2, 3});
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class,
+                () -> controller.runBulkOperationUpload(1L, BulkOperationType.PLUGIN_INSTALL, file));
+    }
+
+    @Test
+    void uploadAssetImage_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.uploadAssetImage(1L, 5L));
+    }
+
+    @Test
+    void tagComparison_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.tagComparison(1L, 0));
+    }
+
+    @Test
+    void syncCategory_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        TermNameRequest request = new TermNameRequest("お知らせ");
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.syncCategory(1L, request));
+    }
+
+    @Test
+    void deleteCategoryEverywhere_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        TermNameRequest request = new TermNameRequest("お知らせ");
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.deleteCategoryEverywhere(1L, request));
+    }
+
+    @Test
+    void editCategoryAndSync_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        EditTermRequest request = new EditTermRequest("old-slug", "新しい名前", "new-slug", null, null);
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.editCategoryAndSync(1L, request));
+    }
+
+    @Test
+    void syncAllCategoriesToMaster_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.syncAllCategoriesToMaster(1L));
+    }
+
+    @Test
+    void syncTag_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        TermNameRequest request = new TermNameRequest("お知らせ");
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.syncTag(1L, request));
+    }
+
+    @Test
+    void deleteTagEverywhere_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        TermNameRequest request = new TermNameRequest("お知らせ");
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.deleteTagEverywhere(1L, request));
+    }
+
+    @Test
+    void editTagAndSync_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        EditTermRequest request = new EditTermRequest("old-slug", "新しい名前", "new-slug", null, null);
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.editTagAndSync(1L, request));
+    }
+
+    @Test
+    void syncAllTagsToMaster_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.syncAllTagsToMaster(1L));
+    }
+
+    @Test
+    void reconcilePlugin_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        ReconcileStateRequest request = new ReconcileStateRequest(
+                "akismet", List.of(new ReconcileStateRequest.StateChangeRequest("local", "ACTIVE")));
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.reconcilePlugin(1L, request));
+    }
+
+    @Test
+    void deletePluginEverywhere_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        DeleteSlugRequest request = new DeleteSlugRequest("akismet");
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.deletePluginEverywhere(1L, request));
+    }
+
+    @Test
+    void themeComparison_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.themeComparison(1L, 0));
+    }
+
+    @Test
+    void reconcileTheme_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        ReconcileStateRequest request = new ReconcileStateRequest(
+                "twentytwentyfour", List.of(new ReconcileStateRequest.StateChangeRequest("local", "ACTIVE")));
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.reconcileTheme(1L, request));
+    }
+
+    @Test
+    void deleteThemeEverywhere_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        DeleteSlugRequest request = new DeleteSlugRequest("twentytwentyfour");
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.deleteThemeEverywhere(1L, request));
+    }
+
+    @Test
+    void postComparison_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.postComparison(1L, "post", 0));
+    }
+
+    @Test
+    void deletePostEverywhere_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        DeleteSlugRequest request = new DeleteSlugRequest("some-post");
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.deletePostEverywhere(1L, "post", request));
+    }
+
+    @Test
+    void updatePostStatusEverywhere_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        UpdatePostStatusRequest request = new UpdatePostStatusRequest("some-post", "publish");
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.updatePostStatusEverywhere(1L, "post", request));
+    }
+
+    @Test
+    void listUsers_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.listUsers(1L));
+    }
+
+    @Test
+    void updateUserRole_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        UpdateProjectUserRequest request = new UpdateProjectUserRequest("author");
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.updateUserRole(1L, 2L, request));
+    }
+
+    @Test
+    void removeUser_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.removeUser(1L, 2L));
     }
 }

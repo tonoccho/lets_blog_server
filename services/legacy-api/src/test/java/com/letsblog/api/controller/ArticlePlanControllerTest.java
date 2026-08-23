@@ -301,6 +301,46 @@ class ArticlePlanControllerTest {
         assertThrows(ForbiddenException.class, () -> controller.listTags(1L));
     }
 
+    // issue #568: 認可マトリクス整備に伴う、requireProjectMemberOrAdmin()を呼ぶ全メソッドのForbiddenパス網羅
+    @Test
+    void listCategories_認可後にサービスへ委譲する() {
+        ArticlePlanController controller = controller();
+        when(articlePlanService.listExistingCategories(1L)).thenReturn(List.of("お知らせ", "技術"));
+
+        List<String> result = controller.listCategories(1L);
+
+        assertEquals(List.of("お知らせ", "技術"), result);
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+    }
+
+    @Test
+    void listCategories_認可拒否ならForbidden() {
+        ArticlePlanController controller = controller();
+        doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+
+        assertThrows(ForbiddenException.class, () -> controller.listCategories(1L));
+    }
+
+    @Test
+    void listCategoriesWithParents_認可後にサービスへ委譲する() {
+        ArticlePlanController controller = controller();
+        when(articlePlanService.listExistingCategoriesWithParents(1L))
+                .thenReturn(List.of(new com.letsblog.api.cms.CmsAdapter.CategoryOption("技術", "お知らせ")));
+
+        List<com.letsblog.api.cms.CmsAdapter.CategoryOption> result = controller.listCategoriesWithParents(1L);
+
+        assertEquals(1, result.size());
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+    }
+
+    @Test
+    void listCategoriesWithParents_認可拒否ならForbidden() {
+        ArticlePlanController controller = controller();
+        doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+
+        assertThrows(ForbiddenException.class, () -> controller.listCategoriesWithParents(1L));
+    }
+
     @Test
     void assignIssue_認可後にサービスへ委譲する() {
         ArticlePlanController controller = controller();
