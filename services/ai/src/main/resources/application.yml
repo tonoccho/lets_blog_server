@@ -45,6 +45,9 @@ spring:
     locations: classpath:db/migration
 
 app:
+  # project_ai_settings.brave_search_api_key_encryptedの暗号化/復号(CredentialCipher、lbs-common)。
+  # 全サービス共通のAES-256-GCM鍵(legacy-api/media-serviceと同じ値を使う)。
+  encryption-key: ${APP_ENCRYPTION_KEY:}
   # 呼び出し元のBearerトークンをそのまま転送してlegacy-api/identity-serviceへ問い合わせる
   # 暫定策(log-writer(#572)/media-service(#573)と同じ。issue #574)。
   legacy-api-uri: ${LEGACY_API_URI:http://api:8080}

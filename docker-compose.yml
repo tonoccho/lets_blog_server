@@ -190,6 +190,9 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_ai?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: lbs_ai
       SPRING_DATASOURCE_PASSWORD: ${LBS_AI_DB_PASSWORD}
+      # project_ai_settings.brave_search_api_key_encryptedの暗号化/復号(CredentialCipher)。
+      # 全サービス共通の鍵(legacy-api/media-serviceと同じ値)。
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
       # 実効LLM接続設定(システム設定でDB上書き可能、AppSettingServiceが正)・GitHubトークン解決・
       # マスター環境サイトの既存カテゴリ/タグ取得・プロジェクトメンバー判定・システム全体既定の
       # Brave Search APIキーの呼び出し先(AiBridgeController、legacy-apiが所有。issue #574)。

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.adsense.AdSenseClient;
 import com.letsblog.api.adsense.GoogleOAuthTokens;
 import com.letsblog.api.analytics.GoogleServiceAccountKey;
+import com.letsblog.api.client.AiProjectSettingsClient;
 import com.letsblog.common.crypto.CredentialCipher;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.repository.ProjectRepository;
@@ -26,10 +27,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * ProjectApiKeyServiceの回帰テスト(issue #184)。プロジェクト設定の優先とユーザー/システム全体設定への
+ * ProjectApiKeyServiceの回帰テスト(issue #184)。プロジェクト設定の優先とユーザー設定への
  * フォールバック、暗号化保存、admin権限ゲートを検証する。GitHubトークンはprojects自体、
- * Brave Search APIキーはproject_ai_settings(ProjectAiSettingsService)、GA/AdSenseはanalytics_credentials
- * (AnalyticsCredentialsService)に保持する(issue #571のprojects god-table分割)。
+ * GA/AdSenseはanalytics_credentials(AnalyticsCredentialsService)に保持する(issue #571のprojects
+ * god-table分割)。Brave Search APIキー(project_ai_settings)はissue #574でai-serviceへ移管され、
+ * {@link AiProjectSettingsClient}経由の内部ブリッジ呼び出しに変わったため、その回帰テストは
+ * AiProjectSettingsClientのモックで委譲を検証する形にしている。
  */
 @ExtendWith(MockitoExtension.class)
 class ProjectApiKeyServiceTest {
@@ -37,13 +40,11 @@ class ProjectApiKeyServiceTest {
     @Mock
     private ProjectRepository projectRepository;
     @Mock
-    private ProjectAiSettingsService projectAiSettingsService;
+    private AiProjectSettingsClient aiProjectSettingsClient;
     @Mock
     private AnalyticsCredentialsService analyticsCredentialsService;
     @Mock
     private UserService userService;
-    @Mock
-    private SystemSettingService systemSettingService;
     @Mock
     private AdminAuthorizationService adminAuthorizationService;
     @Mock
@@ -55,8 +56,8 @@ class ProjectApiKeyServiceTest {
 
     private ProjectApiKeyService service() {
         return new ProjectApiKeyService(
-                projectRepository, projectAiSettingsService, analyticsCredentialsService, credentialCipher,
-                userService, systemSettingService, adminAuthorizationService, objectMapper, adSenseClient);
+                projectRepository, aiProjectSettingsClient, analyticsCredentialsService, credentialCipher,
+                userService, adminAuthorizationService, objectMapper, adSenseClient);
     }
 
     private static final String VALID_SERVICE_ACCOUNT_JSON =
@@ -91,27 +92,23 @@ class ProjectApiKeyServiceTest {
     }
 
     @Test
-    void resolveBraveSearchApiKey_プロジェクト設定があればそれを優先する() {
+    void setBraveSearchApiKey_ai_serviceへ委譲する() {
         Project project = projectWithId(1L);
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(projectAiSettingsService.hasBraveSearchApiKey(1L)).thenReturn(true);
-        when(projectAiSettingsService.getBraveSearchApiKeyEncrypted(1L)).thenReturn(credentialCipher.encrypt("project-key"));
 
-        String key = service().resolveBraveSearchApiKey(1L);
+        service().setBraveSearchApiKey(1L, "project-key");
 
-        assertEquals("project-key", key);
+        verify(aiProjectSettingsClient).setBraveSearchApiKey(1L, "project-key");
     }
 
     @Test
-    void resolveBraveSearchApiKey_未設定ならシステム全体設定にフォールバックする() {
+    void clearBraveSearchApiKey_ai_serviceへ委譲する() {
         Project project = projectWithId(1L);
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(projectAiSettingsService.hasBraveSearchApiKey(1L)).thenReturn(false);
-        when(systemSettingService.getBraveSearchApiKey()).thenReturn("system-key");
 
-        String key = service().resolveBraveSearchApiKey(1L);
+        service().clearBraveSearchApiKey(1L);
 
-        assertEquals("system-key", key);
+        verify(aiProjectSettingsClient).clearBraveSearchApiKey(1L);
     }
 
     @Test
@@ -150,7 +147,7 @@ class ProjectApiKeyServiceTest {
     void isBraveSearchApiKeyConfigured_設定有無を返す() {
         Project project = projectWithId(1L);
         lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(projectAiSettingsService.hasBraveSearchApiKey(1L)).thenReturn(true);
+        when(aiProjectSettingsClient.isBraveSearchApiKeyConfigured(1L)).thenReturn(true);
 
         assertTrue(service().isBraveSearchApiKeyConfigured(1L));
     }

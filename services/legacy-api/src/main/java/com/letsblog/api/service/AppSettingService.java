@@ -398,6 +398,19 @@ public class AppSettingService implements ImageGenerationConfigProvider {
         return getLlmProvider();
     }
 
+    /** システム設定の既定プロバイダーにおける実効baseUrl/apiKey/defaultModel。 */
+    public String baseUrl() {
+        return baseUrlFor(provider());
+    }
+
+    public String apiKey() {
+        return apiKeyFor(provider());
+    }
+
+    public String defaultModel() {
+        return defaultModelFor(provider());
+    }
+
     public String apiKeyFor(AiProvider provider) {
         return provider == AiProvider.CLAUDE ? getLlmClaudeApiKey() : getLlmApiKey();
     }

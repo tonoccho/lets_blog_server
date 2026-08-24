@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.adsense.AdSenseClient;
 import com.letsblog.api.adsense.GoogleOAuthTokens;
 import com.letsblog.api.analytics.GoogleServiceAccountKey;
+import com.letsblog.api.client.AiProjectSettingsClient;
 import com.letsblog.common.crypto.CredentialCipher;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.repository.ProjectRepository;
@@ -14,41 +15,38 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * プロジェクト単位のGitHubトークン/Brave Search APIキー/Google Analytics/AdSense連携情報を管理する(issue #184)。
  * プロジェクトに値が設定されていればそれを優先し、未設定の場合は
- * GitHubトークンは操作者本人のユーザー設定(UserService)、Brave Search APIキーは
- * システム全体設定(SystemSettingService)へフォールバックする(既存の動作を壊さないため)。
+ * GitHubトークンは操作者本人のユーザー設定(UserService)へフォールバックする(既存の動作を壊さないため)。
  * projects god-tableの分割(issue #571)により、GitHubトークンはprojects自体、Brave Search APIキーは
- * project_ai_settings(ProjectAiSettingsService)、GA/AdSenseはanalytics_credentials(AnalyticsCredentialsService)
- * にそれぞれ保持する。
+ * project_ai_settings、GA/AdSenseはanalytics_credentials(AnalyticsCredentialsService)にそれぞれ保持する。
+ * project_ai_settingsはissue #574でai-serviceへ移管されたため、Brave Search APIキーの読み書きは
+ * {@link AiProjectSettingsClient}経由の内部ブリッジに委ねる。
  */
 @Service
 public class ProjectApiKeyService {
 
     private final ProjectRepository projectRepository;
-    private final ProjectAiSettingsService projectAiSettingsService;
+    private final AiProjectSettingsClient aiProjectSettingsClient;
     private final AnalyticsCredentialsService analyticsCredentialsService;
     private final CredentialCipher credentialCipher;
     private final UserService userService;
-    private final SystemSettingService systemSettingService;
     private final AdminAuthorizationService adminAuthorizationService;
     private final ObjectMapper objectMapper;
     private final AdSenseClient adSenseClient;
 
     public ProjectApiKeyService(
             ProjectRepository projectRepository,
-            ProjectAiSettingsService projectAiSettingsService,
+            AiProjectSettingsClient aiProjectSettingsClient,
             AnalyticsCredentialsService analyticsCredentialsService,
             CredentialCipher credentialCipher,
             UserService userService,
-            SystemSettingService systemSettingService,
             AdminAuthorizationService adminAuthorizationService,
             ObjectMapper objectMapper,
             AdSenseClient adSenseClient) {
         this.projectRepository = projectRepository;
-        this.projectAiSettingsService = projectAiSettingsService;
+        this.aiProjectSettingsClient = aiProjectSettingsClient;
         this.analyticsCredentialsService = analyticsCredentialsService;
         this.credentialCipher = credentialCipher;
         this.userService = userService;
-        this.systemSettingService = systemSettingService;
         this.adminAuthorizationService = adminAuthorizationService;
         this.objectMapper = objectMapper;
         this.adSenseClient = adSenseClient;
@@ -64,7 +62,7 @@ public class ProjectApiKeyService {
     public boolean isBraveSearchApiKeyConfigured(Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         requireProjectExists(projectId);
-        return projectAiSettingsService.hasBraveSearchApiKey(projectId);
+        return aiProjectSettingsClient.isBraveSearchApiKeyConfigured(projectId);
     }
 
     @Transactional
@@ -87,14 +85,14 @@ public class ProjectApiKeyService {
     public void setBraveSearchApiKey(Long projectId, String apiKey) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         requireProjectExists(projectId);
-        projectAiSettingsService.setBraveSearchApiKeyEncrypted(projectId, credentialCipher.encrypt(apiKey));
+        aiProjectSettingsClient.setBraveSearchApiKey(projectId, apiKey);
     }
 
     @Transactional
     public void clearBraveSearchApiKey(Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         requireProjectExists(projectId);
-        projectAiSettingsService.setBraveSearchApiKeyEncrypted(projectId, null);
+        aiProjectSettingsClient.clearBraveSearchApiKey(projectId);
     }
 
     @Transactional(readOnly = true)
@@ -251,19 +249,6 @@ public class ProjectApiKeyService {
             return credentialCipher.decrypt(project.getGithubTokenEncrypted());
         }
         return userService.getDecryptedGithubToken(actorUserId);
-    }
-
-    /**
-     * WebSearchServiceから呼ばれる。プロジェクトにキーが設定されていればそれを優先し、
-     * 未設定ならシステム全体設定へフォールバックする。
-     */
-    @Transactional(readOnly = true)
-    public String resolveBraveSearchApiKey(Long projectId) {
-        requireProjectExists(projectId);
-        if (projectAiSettingsService.hasBraveSearchApiKey(projectId)) {
-            return credentialCipher.decrypt(projectAiSettingsService.getBraveSearchApiKeyEncrypted(projectId));
-        }
-        return systemSettingService.getBraveSearchApiKey();
     }
 
     private Project getProject(Long projectId) {

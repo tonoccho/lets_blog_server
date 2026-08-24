@@ -89,6 +89,11 @@ public class LlmClient {
             public String baseUrlFor(AiProvider provider) {
                 return baseUrl;
             }
+
+            @Override
+            public java.util.List<String> availableModels() {
+                return java.util.List.of(model);
+            }
         };
     }
 

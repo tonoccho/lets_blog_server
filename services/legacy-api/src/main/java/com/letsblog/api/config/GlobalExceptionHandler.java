@@ -5,15 +5,12 @@ import com.letsblog.api.cms.CmsApiException;
 import com.letsblog.api.cms.agent.AgentOperationException;
 import com.letsblog.api.cms.ssh.SshOperationException;
 import com.letsblog.api.contentcache.ContentScrapingException;
-import com.letsblog.api.github.GithubApiException;
 import com.letsblog.api.service.AiServiceGenerationException;
-import com.letsblog.api.service.ArticlePlanSessionNotFoundException;
 import com.letsblog.api.service.BackupException;
 import com.letsblog.api.service.CustomTagNotFoundException;
 import com.letsblog.api.service.EmailAlreadyExistsException;
 import com.letsblog.api.service.EmailSendException;
 import com.letsblog.api.service.ForbiddenException;
-import com.letsblog.api.service.GenerationJobNotFoundException;
 import com.letsblog.api.service.InvalidCredentialsException;
 import com.letsblog.api.service.InvalidCustomTagContentException;
 import com.letsblog.api.service.InvalidPlantUmlTagException;
@@ -77,16 +74,6 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ProjectNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleProjectNotFound(ProjectNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
-    }
-
-    @ExceptionHandler(ArticlePlanSessionNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleArticlePlanSessionNotFound(ArticlePlanSessionNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
-    }
-
-    @ExceptionHandler(GenerationJobNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleGenerationJobNotFound(GenerationJobNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 
@@ -187,11 +174,6 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(AgentOperationException.class)
     public ResponseEntity<ErrorResponse> handleAgentOperationException(AgentOperationException e) {
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
-    }
-
-    @ExceptionHandler(GithubApiException.class)
-    public ResponseEntity<ErrorResponse> handleGithubApiException(GithubApiException e) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 
