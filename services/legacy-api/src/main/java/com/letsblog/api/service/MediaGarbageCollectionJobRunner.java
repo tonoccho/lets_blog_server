@@ -23,7 +23,7 @@ import java.util.Map;
  * メディアガベージコレクションの一括削除をバックグラウンドスレッドで実行する(issue #500)。
  * Spring の {@code @Async} は同一クラス内の自己呼び出しには効かない(プロキシを経由しないため)ため、
  * ジョブを起動する{@link MediaGarbageCollectionService}とは別クラスに分離している
- * ({@link ModelInstallJobRunner}と同じ構成)。
+ * (media-serviceへ移設済みの{@code ModelInstallJobRunner}と同じ構成、issue #573 stage2)。
  * <p>
  * 監査ログ記録に必要な{@link CurrentActorService}はHTTPリクエストにスコープされるため、
  * リクエストの終わったこの非同期スレッドからは使えない。そのため宣言的な{@code @AuditLog}

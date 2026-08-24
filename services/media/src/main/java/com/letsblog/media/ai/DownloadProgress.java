@@ -1,4 +1,4 @@
-package com.letsblog.api.ai;
+package com.letsblog.media.ai;
 
 /**
  * チェックポイントダウンロードの進捗。totalBytesが-1の場合はサーバーがContent-Lengthを返していない。

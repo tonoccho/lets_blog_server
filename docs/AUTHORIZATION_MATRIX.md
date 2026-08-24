@@ -1,11 +1,12 @@
 # 認可マトリクス (legacy-api)
 
 issue #568。`services/legacy-api` の全REST APIエンドポイント(`@GetMapping`/`@PostMapping`/
-`@PutMapping`/`@DeleteMapping`/`@PatchMapping` の合計179件、30コントローラファイル31クラス
+`@PutMapping`/`@DeleteMapping`/`@PatchMapping` の合計180件、30コントローラファイル31クラス
 [`HealthController`を含む]。`grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' controller/*.java | wc -l`
 で確認)について、現行の認可チェックと実際に返るステータスを一覧化する。#573でDiagramController/
 GeneratedImageController/RenderController(3ファイル、計12エンドポイント)をmedia-serviceへ移設した
-ため、当初の191件・33ファイルから減少している(このマトリクス自体は移設時に更新した)。
+ため、当初の191件・33ファイルから減少している(このマトリクス自体は移設時に更新した)。stage2で
+GenerationJobControllerに`PATCH /api/generation-jobs/{id}`を追加したため179→180件。
 
 対応する統合テストは
 `services/legacy-api/src/test/java/com/letsblog/api/integration/AuthorizationMatrixIntegrationTest.java`。
@@ -194,12 +195,13 @@ legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行して�
 | POST /api/logs/errors | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | Web BFFからのフロントエンドエラー記録。書き込みのみ |
 | GET /api/logs/errors | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
 
-## GenerationJobController (2エンドポイント、ベースパス `/api/generation-jobs`)
+## GenerationJobController (3エンドポイント、ベースパス `/api/generation-jobs`)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
 | GET /api/generation-jobs | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | 全プロジェクト横断のジョブ履歴一覧 |
 | GET /api/generation-jobs/{id} | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | |
+| PATCH /api/generation-jobs/{id} | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | #573 stage2で追加。media-service側の非同期ジョブランナーがBearerトークンを転送して呼ぶ内部向け更新API |
 
 ## HealthController (1エンドポイント、ベースパスなし)
 
@@ -426,7 +428,8 @@ legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行して�
   `GET /api/dashboard/service-status/stream`, `GET /api/dashboard/container-status`,
   `GET /api/dashboard/container-status/stream`
 - `FrontendErrorLogController`: `POST /api/logs/errors`
-- `GenerationJobController`: `GET /api/generation-jobs`, `GET /api/generation-jobs/{id}`
+- `GenerationJobController`: `GET /api/generation-jobs`, `GET /api/generation-jobs/{id}`,
+  `PATCH /api/generation-jobs/{id}`(#573 stage2で追加)
 - `MediaController`: `POST /api/media/upload`(任意のsiteへアップロード可能)
 - `OperationLogController`: 全4エンドポイント(ただし自己スコープ設計。備考参照)
 - `PostController`: 全4エンドポイント。WordPressへの投稿公開・削除を含む、影響の大きい操作

@@ -146,6 +146,10 @@ services:
       PENPOT_SERVICE_EMAIL: ${PENPOT_SERVICE_EMAIL:-lbs-service@letsblog.local}
       PENPOT_SERVICE_PASSWORD: ${PENPOT_SERVICE_PASSWORD}
       GENERATED_IMAGES_STORAGE_PATH: /app/data/generated-images
+      # ComfyUIチェックポイントのダウンロード/削除ジョブ(GenerationJob、legacy-apiが所有)の進捗を
+      # 反映するための呼び出し先(#573 stage2)。起動時の依存関係(depends_on)には含めない
+      # (apiがmediaのhealthyを待つため、循環させないよう実行時呼び出し先としてのみ設定する)。
+      LEGACY_API_URI: http://api:8080
     volumes:
       - generated_images:/app/data/generated-images
       - comfyui_models:/comfyui-models

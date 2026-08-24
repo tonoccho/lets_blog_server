@@ -62,6 +62,9 @@ app:
   penpot-service-email: ${PENPOT_SERVICE_EMAIL:lbs-service@letsblog.local}
   penpot-service-password: ${PENPOT_SERVICE_PASSWORD:}
   generated-images-storage-path: ${GENERATED_IMAGES_STORAGE_PATH:/app/data/generated-images}
+  # ComfyUIチェックポイントのダウンロード/削除ジョブ(GenerationJob、legacy-apiが所有)の進捗を
+  # 反映するための呼び出し先(#573 stage2、GenerationJobClient参照)。
+  legacy-api-uri: ${LEGACY_API_URI:http://api:8080}
 
 # KeycloakのJWT検証(#573)。identity-service/log-writerのSecurityConfig/JwtDecoderConfigと同じ理由
 # により、issuer-uriによる自動設定は使わずJWKS取得先と期待issuerを個別に指定して組み立てている。
