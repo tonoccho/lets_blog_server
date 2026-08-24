@@ -17,7 +17,6 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -51,50 +50,6 @@ class PlantUmlTagRenderServiceTest {
     void setUp() {
         service = new PlantUmlTagRenderService(mediaRenderClient, cmsAdapterFactory);
         lenient().when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
-    }
-
-    @Test
-    void renderForPreview_タグが無ければ何もしない() {
-        assertEquals("普通の本文です。", service.renderForPreview("普通の本文です。"));
-        verifyNoInteractions(mediaRenderClient);
-    }
-
-    @Test
-    void renderForPreview_PNGをdata_URIとして埋め込む() {
-        when(mediaRenderClient.renderPlantUml(anyString())).thenReturn(new byte[]{1, 2, 3});
-
-        String result = service.renderForPreview("本文\n[plantuml]\n@startuml\nA->B\n@enduml\n[/plantuml]\n続き");
-
-        assertTrue(result.contains("![diagram](data:image/png;base64,"));
-        assertTrue(result.contains("続き"));
-    }
-
-    @Test
-    void renderForPreview_startumlが無い場合は自動的に補う() {
-        when(mediaRenderClient.renderPlantUml(anyString())).thenReturn(new byte[]{1});
-
-        service.renderForPreview("[plantuml]\nA->B\n[/plantuml]");
-
-        verify(mediaRenderClient).renderPlantUml(eq("@startuml\nA->B\n@enduml"));
-    }
-
-    @Test
-    void renderForPreview_既にstartumlがある場合は二重に包まない() {
-        when(mediaRenderClient.renderPlantUml(anyString())).thenReturn(new byte[]{1});
-
-        service.renderForPreview("[plantuml]\n@startuml\nA->B\n@enduml\n[/plantuml]");
-
-        verify(mediaRenderClient).renderPlantUml(eq("@startuml\nA->B\n@enduml"));
-    }
-
-    @Test
-    void renderForPreview_レンダリング失敗時はInvalidPlantUmlTagExceptionを投げる() {
-        when(mediaRenderClient.renderPlantUml(anyString()))
-                .thenThrow(new AiServiceException("PlantUMLサーバーに接続できません", null));
-
-        InvalidPlantUmlTagException e = assertThrows(InvalidPlantUmlTagException.class,
-                () -> service.renderForPreview("[plantuml]\nA->B\n[/plantuml]"));
-        assertTrue(e.getMessage().contains("PlantUMLサーバーに接続できません"));
     }
 
     @Test

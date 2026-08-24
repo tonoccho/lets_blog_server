@@ -53,11 +53,38 @@ app:
         uri: ${AI_SERVICE_URI:http://api:8080}
         paths:
           - /api/projects/*/ai-models/llm/**
-      - id: content-posts-publish
+      # ProjectCustomTagController(プロジェクト詳細のカスタムタグ画面)はcontent-serviceへ移設した
+      # (#576)。パス自体は/api/projects/**配下のまま(既存フロントのURLを変えないため)。より広い
+      # /api/projects/**(下のprojectルート、project-serviceが未抽出のためlegacy-apiのまま)より
+      # 先にここでマッチさせる。
+      - id: project-custom-tags
         uri: ${CONTENT_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/projects/*/custom-tags/**
+      # ArticlePreviewControllerのうち、記事本文のレンダリング(/render、CMSへの依存を持たない)のみ
+      # content-serviceへ移設した(#576)。テーマCSS取得(/theme-css)・骨格差し替え(/skeleton)・
+      # プレビュー用投稿削除(/preview-post)はSite/CMSアダプタへの深い依存がありlegacy-apiに残した
+      # (下のprojectルートへフォールスルーする)ため、/renderだけをここで先にマッチさせる。
+      - id: project-preview-render
+        uri: ${CONTENT_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/projects/*/preview/render
+      # PostController#publish/#deleteは、投稿(posts)テーブルの所有権がcontent-serviceへ移った(#576)
+      # 後もCMSアダプタ(CmsAdapter等)への深い依存のためlegacy-apiに残っている(issue #575
+      # publishing-serviceの対象。PostPublishService/PostDeleteServiceはpostsテーブルの読み書きを
+      # content-serviceへの内部ブリッジ経由で行う)。より広い/api/posts/**(下のcontentルート、
+      # content-serviceへ向く)より先に評価されるよう、ここでlegacy-apiへマッチさせる
+      # (#576移設時の発見: このルートは元々CONTENT_SERVICE_URIを指していたが、publish/deleteは
+      # 本Issueの移設対象ではないためlegacy-apiのままにする必要があった)。
+      - id: posts-publish-legacy
+        uri: ${LEGACY_API_URI:http://api:8080}
         paths:
           - /api/posts/publish
         response-timeout: 1200s
+      - id: posts-delete-legacy
+        uri: ${LEGACY_API_URI:http://api:8080}
+        paths:
+          - /api/posts/*/*
       # SSEエンドポイント(#560)。ダッシュボードの常時接続ストリームのため、応答自体は
       # すぐ返る(ボディはFlux<DataBuffer>として遅延ストリーミングされ、この
       # response-timeoutには縛られない。ProxyHandlerのJavadoc参照)。
@@ -91,6 +118,14 @@ app:
         paths:
           - /api/posts/**
           - /api/custom-tags/**
+          # CustomTagTemplateController/ContentCacheController/MetadataControllerもcontent-serviceへ
+          # 移設した(#576)。実際のマッピングは/api/custom-tag-templates/**・/api/content-cache/**・
+          # /api/metadata/**であり、既存のこのルートエントリ(/api/posts/**・/api/custom-tags/**のみ)は
+          # これらの実パスをカバーしていなかったため追加した(#573のGeneratedImageController発見と
+          # 同じパターン)。
+          - /api/custom-tag-templates/**
+          - /api/content-cache/**
+          - /api/metadata/**
       - id: media
         uri: ${MEDIA_SERVICE_URI:http://api:8080}
         paths:

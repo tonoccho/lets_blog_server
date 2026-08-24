@@ -1,5 +1,6 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.client.ContentServiceClient;
 import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.AdoptWordPressSiteRequest;
@@ -7,7 +8,6 @@ import com.letsblog.api.dto.CreateManagedWordPressSiteRequest;
 import com.letsblog.api.dto.SiteResponse;
 import com.letsblog.api.provisioning.WordPressProvisioningClient;
 import com.letsblog.api.provisioning.WordPressSyncClient;
-import com.letsblog.api.repository.PostRepository;
 import com.letsblog.api.repository.SiteRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,14 +42,14 @@ class WordPressSiteProvisioningServiceTest {
     private SiteRepository siteRepository;
 
     @Mock
-    private PostRepository postRepository;
+    private ContentServiceClient contentServiceClient;
 
     private WordPressSiteProvisioningService service;
 
     @BeforeEach
     void setUp() {
         service = new WordPressSiteProvisioningService(
-                provisioningClient, syncClient, siteService, siteRepository, postRepository);
+                provisioningClient, syncClient, siteService, siteRepository, contentServiceClient);
     }
 
     private CreateManagedWordPressSiteRequest request() {
@@ -283,7 +283,7 @@ class WordPressSiteProvisioningServiceTest {
         service.deleteSite(1L);
 
         verify(provisioningClient).deprovision("main", "wp_main");
-        verify(postRepository).deleteBySiteId(1L);
+        verify(contentServiceClient).deletePostsBySite(1L);
         verify(siteRepository).delete(site);
     }
 
@@ -297,7 +297,7 @@ class WordPressSiteProvisioningServiceTest {
         service.deleteSite(2L);
 
         verify(provisioningClient, never()).deprovision(any(), any());
-        verify(postRepository).deleteBySiteId(2L);
+        verify(contentServiceClient).deletePostsBySite(2L);
         verify(siteRepository).delete(site);
     }
 

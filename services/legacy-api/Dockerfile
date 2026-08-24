@@ -14,12 +14,9 @@ COPY services/gateway/build.gradle ./services/gateway/build.gradle
 COPY services/identity/build.gradle ./services/identity/build.gradle
 COPY services/media/build.gradle ./services/media/build.gradle
 COPY services/ai/build.gradle ./services/ai/build.gradle
+COPY services/content/build.gradle ./services/content/build.gradle
 
 RUN ./gradlew :services:legacy-api:bootJar --no-daemon
-# app.jarはSpring Bootのfat jar(依存jarがBOOT-INF/lib配下にネストされる)のため、
-# `java -cp app.jar com.microsoft.playwright.CLI ...` では依存クラスを解決できない。
-# ブラウザインストールCLIの実行だけのために、実行時クラスパスのjarをフラットに展開しておく。
-RUN ./gradlew :services:legacy-api:copyRuntimeLibs --no-daemon
 
 FROM eclipse-temurin:21-jre
 # openssh-client: WordPress SSHトランスポート用(phase10)。nodejs/npm: VSCode拡張機能(.vsix)の
@@ -32,13 +29,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssh-client 
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /workspace/services/legacy-api/build/libs/*.jar app.jar
-# [blogcard]/[amazon]組み込みタグのスクレイピング(ContentCacheService)用にChromiumと、
-# それが動作するために必要なOS共有ライブラリ(--with-deps)をインストールする。
-# 一時的にコピーしたruntime-libsはブラウザインストール後は不要なため、同じレイヤーで削除する
-# (別レイヤーで消すとイメージサイズには残ってしまうため)。
-COPY --from=build /workspace/services/legacy-api/build/runtime-libs ./runtime-libs
-RUN apt-get update \
-    && java -cp "runtime-libs/*" com.microsoft.playwright.CLI install --with-deps chromium \
-    && rm -rf ./runtime-libs /var/lib/apt/lists/*
+# [blogcard]/[amazon]組み込みタグのスクレイピング・記事プレビューのテーマ骨格取得(Playwright/
+# Chromium)はcontent-serviceへ移設した(issue #576)。legacy-apiはもうヘッドレスブラウザを
+# 必要としない。
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]

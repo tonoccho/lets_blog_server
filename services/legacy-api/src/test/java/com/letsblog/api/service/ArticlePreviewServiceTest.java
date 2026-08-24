@@ -1,5 +1,6 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.client.ContentServiceClient;
 import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.cms.ReferencePost;
 import com.letsblog.api.cms.agent.WordPressAgentOperations;
@@ -8,7 +9,6 @@ import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.ThemeCssResponse;
 import com.letsblog.api.dto.ThemeSkeletonResponse;
-import com.letsblog.api.markdown.MarkdownRenderer;
 import com.letsblog.api.repository.SiteRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,8 +24,6 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -34,35 +32,14 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+/**
+ * legacy-apiのArticlePreviewServiceのうち残っているfetchThemeCss/renderSkeleton/deletePreviewPostのみを
+ * 検証する(issue #576)。記事本文レンダリング(renderHtml)はcontent-serviceへ移設したため、その振る舞いは
+ * content-service側のArticlePreviewServiceTestで検証する。テーマ骨格取得(旧PreviewSkeletonFetcher)は
+ * content-serviceへの内部ブリッジ(ContentServiceClient)経由になったため、モックをそちらへ差し替えている。
+ */
 @ExtendWith(MockitoExtension.class)
 class ArticlePreviewServiceTest {
-
-    @Mock
-    private CustomTagRenderService customTagRenderService;
-
-    @Mock
-    private BlogCardTagRenderService blogCardTagRenderService;
-
-    @Mock
-    private AmazonTagRenderService amazonTagRenderService;
-
-    @Mock
-    private RechartsTagRenderService rechartsTagRenderService;
-
-    @Mock
-    private PlantUmlEmbedService plantUmlEmbedService;
-
-    @Mock
-    private PlantUmlTagRenderService plantUmlTagRenderService;
-
-    @Mock
-    private TocStyleRenderService tocStyleRenderService;
-
-    @Mock
-    private RenderedContentWrapperService renderedContentWrapperService;
-
-    @Mock
-    private MarkdownRenderer markdownRenderer;
 
     @Mock
     private ProjectService projectService;
@@ -74,7 +51,7 @@ class ArticlePreviewServiceTest {
     private SiteService siteService;
 
     @Mock
-    private PreviewSkeletonFetcher previewSkeletonFetcher;
+    private ContentServiceClient contentServiceClient;
 
     @Mock
     private com.letsblog.api.cms.CmsAdapterFactory cmsAdapterFactory;
@@ -93,17 +70,8 @@ class ArticlePreviewServiceTest {
         RestClient.Builder builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
         service = new ArticlePreviewService(
-                customTagRenderService, blogCardTagRenderService, amazonTagRenderService, rechartsTagRenderService,
-                plantUmlEmbedService, plantUmlTagRenderService, tocStyleRenderService, renderedContentWrapperService,
-                markdownRenderer, projectService, siteRepository, siteService, builder, previewSkeletonFetcher,
+                projectService, siteRepository, siteService, builder, contentServiceClient,
                 cmsAdapterFactory, wordPressAgentOperations, wordPressSshOperations);
-        // renderHtml()は必ずrechartsTagRenderService/plantUmlTagRenderService/plantUmlEmbedServiceを
-        // 経由するため、それら自体を検証しないテストでは素通しにしておく
-        // (未スタブだとnullが返り、以降の呼び出しの引数が狂うため)。
-        lenient().when(rechartsTagRenderService.render(anyString())).thenAnswer(inv -> inv.getArgument(0));
-        lenient().when(plantUmlTagRenderService.renderForPreview(anyString())).thenAnswer(inv -> inv.getArgument(0));
-        lenient().when(plantUmlEmbedService.embedDiagramsForPreview(anyString()))
-                .thenAnswer(inv -> inv.getArgument(0));
     }
 
     private Project projectWithMaster(String masterEnvironment, Long testSiteId, Long productionSiteId) {
@@ -140,119 +108,6 @@ class ArticlePreviewServiceTest {
         server.expect(requestTo(
                         baseEndingWithSlash + "wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc&_fields=id,link"))
                 .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
-    }
-
-    @Test
-    void renderHtml_カスタムタグ展開後にMarkdownをHTML変換する() {
-        when(customTagRenderService.render("**bold**", 1L)).thenReturn("**bold** rendered");
-        when(blogCardTagRenderService.render("**bold** rendered", 1L)).thenReturn("**bold** rendered");
-        when(amazonTagRenderService.render("**bold** rendered", 1L, false)).thenReturn("**bold** rendered");
-        when(markdownRenderer.render("**bold** rendered")).thenReturn("<p><strong>bold</strong> rendered</p>");
-        when(tocStyleRenderService.applyHtmlTemplate("<p><strong>bold</strong> rendered</p>", 1L))
-                .thenReturn("<p><strong>bold</strong> rendered</p>");
-        when(renderedContentWrapperService.wrap("<p><strong>bold</strong> rendered</p>", 1L))
-                .thenReturn("<div class=\"lets-blog-rendered\"><p><strong>bold</strong> rendered</p></div>");
-
-        String html = service.renderHtml(1L, "**bold**");
-
-        assertEquals("<div class=\"lets-blog-rendered\"><p><strong>bold</strong> rendered</p></div>", html);
-        verify(customTagRenderService).render("**bold**", 1L);
-        verify(blogCardTagRenderService).render("**bold** rendered", 1L);
-        verify(amazonTagRenderService).render("**bold** rendered", 1L, false);
-        verify(markdownRenderer).render("**bold** rendered");
-        verify(tocStyleRenderService).applyHtmlTemplate("<p><strong>bold</strong> rendered</p>", 1L);
-        verify(renderedContentWrapperService).wrap("<p><strong>bold</strong> rendered</p>", 1L);
-    }
-
-    @Test
-    void renderHtml_rechartsタグが不正な場合はレンダリングを中止してエラーメッセージを返す() {
-        when(customTagRenderService.render("markdown", 1L)).thenReturn("markdown");
-        when(blogCardTagRenderService.render("markdown", 1L)).thenReturn("markdown");
-        when(amazonTagRenderService.render("markdown", 1L, false)).thenReturn("markdown");
-        when(rechartsTagRenderService.render("markdown"))
-                .thenThrow(new InvalidRechartsTagException("type属性は必須です"));
-
-        String html = service.renderHtml(1L, "markdown");
-
-        assertTrue(html.contains("type属性は必須です"));
-        verifyNoInteractions(plantUmlTagRenderService, plantUmlEmbedService, markdownRenderer, tocStyleRenderService,
-                renderedContentWrapperService);
-    }
-
-    @Test
-    void renderHtml_recharts展開後の内容がMarkdown変換される() {
-        when(customTagRenderService.render("markdown", 1L)).thenReturn("markdown");
-        when(blogCardTagRenderService.render("markdown", 1L)).thenReturn("markdown");
-        when(amazonTagRenderService.render("markdown", 1L, false)).thenReturn("markdown");
-        when(rechartsTagRenderService.render("markdown")).thenReturn("markdown<div>chart</div>");
-        when(markdownRenderer.render("markdown<div>chart</div>")).thenReturn("<p>markdown</p><div>chart</div>");
-        when(tocStyleRenderService.applyHtmlTemplate("<p>markdown</p><div>chart</div>", 1L))
-                .thenReturn("<p>markdown</p><div>chart</div>");
-        when(renderedContentWrapperService.wrap("<p>markdown</p><div>chart</div>", 1L))
-                .thenReturn("<div class=\"lets-blog-rendered\"><p>markdown</p><div>chart</div></div>");
-
-        String html = service.renderHtml(1L, "markdown");
-
-        assertEquals("<div class=\"lets-blog-rendered\"><p>markdown</p><div>chart</div></div>", html);
-    }
-
-    @Test
-    void renderHtml_plantumlフェンスをdataURI画像へ差し替えてからMarkdown変換する() {
-        when(customTagRenderService.render("```plantuml\n@startuml\n@enduml\n```", 1L))
-                .thenReturn("```plantuml\n@startuml\n@enduml\n```");
-        when(blogCardTagRenderService.render("```plantuml\n@startuml\n@enduml\n```", 1L))
-                .thenReturn("```plantuml\n@startuml\n@enduml\n```");
-        when(amazonTagRenderService.render("```plantuml\n@startuml\n@enduml\n```", 1L, false))
-                .thenReturn("```plantuml\n@startuml\n@enduml\n```");
-        when(plantUmlEmbedService.embedDiagramsForPreview("```plantuml\n@startuml\n@enduml\n```"))
-                .thenReturn("![diagram](data:image/png;base64,AAAA)");
-        when(markdownRenderer.render("![diagram](data:image/png;base64,AAAA)"))
-                .thenReturn("<img src=\"data:image/png;base64,AAAA\">");
-        when(tocStyleRenderService.applyHtmlTemplate("<img src=\"data:image/png;base64,AAAA\">", 1L))
-                .thenReturn("<img src=\"data:image/png;base64,AAAA\">");
-        when(renderedContentWrapperService.wrap("<img src=\"data:image/png;base64,AAAA\">", 1L))
-                .thenReturn("<div class=\"lets-blog-rendered\"><img src=\"data:image/png;base64,AAAA\"></div>");
-
-        String html = service.renderHtml(1L, "```plantuml\n@startuml\n@enduml\n```");
-
-        assertEquals("<div class=\"lets-blog-rendered\"><img src=\"data:image/png;base64,AAAA\"></div>", html);
-        verify(plantUmlEmbedService).embedDiagramsForPreview("```plantuml\n@startuml\n@enduml\n```");
-    }
-
-    @Test
-    void renderHtml_plantumlタグをdataURI画像へ差し替えてからMarkdown変換する() {
-        String markdown = "[plantuml]\nA->B\n[/plantuml]";
-        when(customTagRenderService.render(markdown, 1L)).thenReturn(markdown);
-        when(blogCardTagRenderService.render(markdown, 1L)).thenReturn(markdown);
-        when(amazonTagRenderService.render(markdown, 1L, false)).thenReturn(markdown);
-        when(plantUmlTagRenderService.renderForPreview(markdown))
-                .thenReturn("![diagram](data:image/png;base64,AAAA)");
-        when(markdownRenderer.render("![diagram](data:image/png;base64,AAAA)"))
-                .thenReturn("<img src=\"data:image/png;base64,AAAA\">");
-        when(tocStyleRenderService.applyHtmlTemplate("<img src=\"data:image/png;base64,AAAA\">", 1L))
-                .thenReturn("<img src=\"data:image/png;base64,AAAA\">");
-        when(renderedContentWrapperService.wrap("<img src=\"data:image/png;base64,AAAA\">", 1L))
-                .thenReturn("<div class=\"lets-blog-rendered\"><img src=\"data:image/png;base64,AAAA\"></div>");
-
-        String html = service.renderHtml(1L, markdown);
-
-        assertEquals("<div class=\"lets-blog-rendered\"><img src=\"data:image/png;base64,AAAA\"></div>", html);
-        verify(plantUmlTagRenderService).renderForPreview(markdown);
-    }
-
-    @Test
-    void renderHtml_plantumlタグが不正な場合はレンダリングを中止してエラーメッセージを返す() {
-        when(customTagRenderService.render("markdown", 1L)).thenReturn("markdown");
-        when(blogCardTagRenderService.render("markdown", 1L)).thenReturn("markdown");
-        when(amazonTagRenderService.render("markdown", 1L, false)).thenReturn("markdown");
-        when(plantUmlTagRenderService.renderForPreview("markdown"))
-                .thenThrow(new InvalidPlantUmlTagException("PlantUML図のレンダリングに失敗しました"));
-
-        String html = service.renderHtml(1L, "markdown");
-
-        assertTrue(html.contains("PlantUML図のレンダリングに失敗しました"));
-        verifyNoInteractions(plantUmlEmbedService, markdownRenderer, tocStyleRenderService,
-                renderedContentWrapperService);
     }
 
     @Test
@@ -644,6 +499,11 @@ class ArticlePreviewServiceTest {
         server.verify();
     }
 
+    private ContentServiceClient.ThemeSkeletonBridgeResponse bridged(
+            String html, boolean available, String reason, boolean eyecatchSpliced, String css) {
+        return new ContentServiceClient.ThemeSkeletonBridgeResponse(html, available, reason, eyecatchSpliced, css);
+    }
+
     @Test
     void renderSkeleton_マスター環境にサイトが紐づいていない場合はavailableがfalse() {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", null, null));
@@ -653,7 +513,7 @@ class ArticlePreviewServiceTest {
 
         assertFalse(response.available());
         assertTrue(response.reason().contains("紐づいていません"));
-        verifyNoInteractions(previewSkeletonFetcher);
+        verifyNoInteractions(contentServiceClient);
     }
 
     @Test
@@ -670,7 +530,7 @@ class ArticlePreviewServiceTest {
 
         assertFalse(response.available());
         assertTrue(response.reason().contains("参照記事"));
-        verifyNoInteractions(previewSkeletonFetcher);
+        verifyNoInteractions(contentServiceClient);
     }
 
     @Test
@@ -684,10 +544,9 @@ class ArticlePreviewServiceTest {
                         "[{\"id\":1,\"link\":\"http://example.com/hello-world/\","
                         + "\"title\":{\"rendered\":\"Hello World\"},\"content\":{\"rendered\":\"<p>Hi</p>\"}}]",
                         MediaType.APPLICATION_JSON));
-        when(previewSkeletonFetcher.fetchAndSplice(
+        when(contentServiceClient.fetchAndSplice(
                 "http://example.com/hello-world/", "Hello World", "<p>Hi</p>", "新タイトル", "<p>新本文</p>", null))
-                .thenReturn(new ThemeSkeletonResponse(
-                        "<article>spliced</article>", true, null, true, "body { color: red; }"));
+                .thenReturn(bridged("<article>spliced</article>", true, null, true, "body { color: red; }"));
 
         ThemeSkeletonResponse response = service.renderSkeleton(
                 1L, null, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
@@ -718,10 +577,10 @@ class ArticlePreviewServiceTest {
         when(wordPressAgentOperations.getLatestPost(agentCredentials("local-site")))
                 .thenReturn(Optional.of(new ReferencePost(
                         "1", "https://localhost/sites/local-site/hello-world/", "Hello World", "<p>Hi</p>")));
-        when(previewSkeletonFetcher.fetchAndSplice(
+        when(contentServiceClient.fetchAndSplice(
                 "http://wordpress/sites/local-site/hello-world/", "Hello World", "<p>Hi</p>",
                 "新タイトル", "<p>新本文</p>", null))
-                .thenReturn(new ThemeSkeletonResponse(
+                .thenReturn(bridged(
                         "<article><img src=\"http://wordpress/sites/local-site/wp-content/uploads/x.png\"></article>",
                         true, null, true,
                         "body { background: url(http://wordpress/sites/local-site/wp-content/bg.png); }"));
@@ -759,10 +618,10 @@ class ArticlePreviewServiceTest {
                         "[{\"id\":1,\"link\":\"https://localhost/sites/local-site/hello-world/\","
                         + "\"title\":{\"rendered\":\"Hello World\"},\"content\":{\"rendered\":\"<p>Hi</p>\"}}]",
                         MediaType.APPLICATION_JSON));
-        when(previewSkeletonFetcher.fetchAndSplice(
+        when(contentServiceClient.fetchAndSplice(
                 "http://wordpress/sites/local-site/hello-world/", "Hello World", "<p>Hi</p>",
                 "新タイトル", "<p>新本文</p>", null))
-                .thenReturn(new ThemeSkeletonResponse(
+                .thenReturn(bridged(
                         "<article><img src=\"http://wordpress/sites/local-site/wp-content/uploads/x.png\"></article>",
                         true, null, true,
                         "body { background: url(http://wordpress/sites/local-site/wp-content/bg.png); }"));
@@ -788,9 +647,9 @@ class ArticlePreviewServiceTest {
                         "[{\"id\":1,\"link\":\"http://example.com/hello-world/\","
                         + "\"title\":{\"rendered\":\"Hello World\"},\"content\":{\"rendered\":\"<p>Hi</p>\"}}]",
                         MediaType.APPLICATION_JSON));
-        when(previewSkeletonFetcher.fetchAndSplice(
+        when(contentServiceClient.fetchAndSplice(
                 "http://example.com/hello-world/", "Hello World", "<p>Hi</p>", "新タイトル", "<p>新本文</p>", null))
-                .thenReturn(new ThemeSkeletonResponse(
+                .thenReturn(bridged(
                         null, false, "本文の位置を特定できませんでした", false, "body { color: teal; }"));
 
         ThemeSkeletonResponse response = service.renderSkeleton(
@@ -813,9 +672,9 @@ class ArticlePreviewServiceTest {
                         "[{\"id\":1,\"link\":\"http://example.com/hello-world/\","
                         + "\"title\":{\"rendered\":\"Hello World\"},\"content\":{\"rendered\":\"<p>Hi</p>\"}}]",
                         MediaType.APPLICATION_JSON));
-        when(previewSkeletonFetcher.fetchAndSplice(
+        when(contentServiceClient.fetchAndSplice(
                 "http://example.com/hello-world/", "Hello World", "<p>Hi</p>", "新タイトル", "<p>新本文</p>", null))
-                .thenReturn(new ThemeSkeletonResponse(
+                .thenReturn(bridged(
                         "<article>spliced</article>", true, null, true,
                         "/* is_single()限定のCSS */\n.custom-tag { color: hotpink; }"));
 
@@ -849,9 +708,9 @@ class ArticlePreviewServiceTest {
                         "99", "http://production.example.com/?p=99", "private"));
         when(cmsAdapter.generateAuthCookie(sshCredentials()))
                 .thenReturn(new com.letsblog.api.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
-        when(previewSkeletonFetcher.fetchRealPost(
+        when(contentServiceClient.fetchRealPost(
                 "http://production.example.com/?p=99", "wordpress_logged_in_x", "cookie-value"))
-                .thenReturn(new ThemeSkeletonResponse("<article>real page</article>", true, null, false, ""));
+                .thenReturn(bridged("<article>real page</article>", true, null, false, ""));
 
         ThemeSkeletonResponse response = service.renderSkeleton(
                 1L, 40L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
@@ -859,7 +718,7 @@ class ArticlePreviewServiceTest {
         assertTrue(response.available());
         assertEquals("<article>real page</article>", response.html());
         assertEquals("99", response.previewPostId());
-        verify(previewSkeletonFetcher, org.mockito.Mockito.never()).fetchAndSplice(
+        verify(contentServiceClient, org.mockito.Mockito.never()).fetchAndSplice(
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
@@ -884,7 +743,7 @@ class ArticlePreviewServiceTest {
         assertFalse(response.available());
         assertTrue(response.reason().contains("参照記事が見つかりませんでした"));
         verifyNoInteractions(cmsAdapterFactory);
-        verifyNoInteractions(previewSkeletonFetcher);
+        verifyNoInteractions(contentServiceClient);
     }
 
     @Test
@@ -910,9 +769,9 @@ class ArticlePreviewServiceTest {
                         "99", "http://production.example.com/?p=99", "private"));
         when(cmsAdapter.generateAuthCookie(sshCredentials()))
                 .thenReturn(new com.letsblog.api.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
-        when(previewSkeletonFetcher.fetchRealPost(
+        when(contentServiceClient.fetchRealPost(
                 "http://production.example.com/?p=99", "wordpress_logged_in_x", "cookie-value"))
-                .thenReturn(new ThemeSkeletonResponse("<article>real page</article>", true, null, false, ""));
+                .thenReturn(bridged("<article>real page</article>", true, null, false, ""));
 
         ThemeSkeletonResponse response = service.renderSkeleton(1L, 40L, "新タイトル", "<p>新本文</p>", null, null,
                 "my-slug", java.util.List.of("お知らせ"), java.util.List.of("java", "spring"));
@@ -946,9 +805,9 @@ class ArticlePreviewServiceTest {
                         "99", "http://production.example.com/?p=99", "private"));
         when(cmsAdapter.generateAuthCookie(sshCredentials()))
                 .thenReturn(new com.letsblog.api.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
-        when(previewSkeletonFetcher.fetchRealPost(
+        when(contentServiceClient.fetchRealPost(
                 "http://production.example.com/?p=99", "wordpress_logged_in_x", "cookie-value"))
-                .thenReturn(new ThemeSkeletonResponse("<article>real page</article>", true, null, false, ""));
+                .thenReturn(bridged("<article>real page</article>", true, null, false, ""));
 
         ThemeSkeletonResponse response = service.renderSkeleton(
                 1L, 40L, "新タイトル", "<p>新本文</p>", "data:image/png;base64,AAAA", null, null, null, null);
@@ -995,11 +854,10 @@ class ArticlePreviewServiceTest {
 
         when(wordPressSshOperations.getLatestPost(sshCredentials())).thenReturn(Optional.of(
                 new ReferencePost("1", "http://production.example.com/hello-world/", "Hello World", "<p>Hi</p>")));
-        when(previewSkeletonFetcher.fetchAndSplice(
+        when(contentServiceClient.fetchAndSplice(
                 "http://production.example.com/hello-world/", "Hello World", "<p>Hi</p>",
                 "新タイトル", "<p>新本文</p>", null))
-                .thenReturn(new ThemeSkeletonResponse(
-                        "<article>spliced</article>", true, null, true, "body { color: red; }"));
+                .thenReturn(bridged("<article>spliced</article>", true, null, true, "body { color: red; }"));
 
         ThemeSkeletonResponse response = service.renderSkeleton(
                 1L, 40L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);

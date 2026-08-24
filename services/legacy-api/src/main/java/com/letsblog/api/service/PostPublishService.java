@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.aop.AuditLog;
+import com.letsblog.api.client.ContentServiceClient;
 import com.letsblog.api.cms.CmsAdapter;
 import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsApiException;
@@ -12,15 +13,12 @@ import com.letsblog.api.cms.MediaUploadResult;
 import com.letsblog.api.cms.PostContent;
 import com.letsblog.api.cms.PostResult;
 import com.letsblog.api.domain.AuditLogAction;
-import com.letsblog.api.domain.Post;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.domain.User;
 import com.letsblog.api.domain.UserSiteAuthor;
 import com.letsblog.api.dto.PostPublishCommand;
 import com.letsblog.api.dto.PostPublishResponse;
-import com.letsblog.api.markdown.MarkdownRenderer;
-import com.letsblog.api.repository.PostRepository;
 import com.letsblog.api.repository.UserRepository;
 import com.letsblog.api.repository.UserSiteAuthorRepository;
 import lombok.extern.slf4j.Slf4j;
@@ -45,6 +43,13 @@ import java.util.Optional;
 /**
  * Markdown記事の投稿パイプライン:
  * 画像リネーム・アップロード → Markdown内の画像参照差し替え → HTML変換 → カテゴリ/タグ解決 → WordPress投稿 → posts テーブル反映
+ *
+ * <p>カスタムタグ・組み込みタグ(blogcard/amazon/recharts)の展開、Markdown→HTML変換、[toc]カスタム
+ * HTMLテンプレート適用、統合CSSラッパー適用は、それらを担うクラス群(CustomTagRenderService等)の
+ * 所有権がcontent-serviceへ移った(issue #576)ため、{@link ContentServiceClient}経由の内部ブリッジで
+ * 行う。[plantuml]/```plantumlの埋め込み(CMSメディアライブラリへのアップロードを伴う)は、
+ * CmsAdapter/CmsCredentialsへの依存が強いため引き続きこのクラス自身が行う(issue #575の対象になる
+ * まで)。postsテーブルの読み書きも同じ内部ブリッジ経由で行う。
  */
 @Service
 @Slf4j
@@ -52,16 +57,9 @@ public class PostPublishService {
 
     private final SiteService siteService;
     private final CmsAdapterFactory cmsAdapterFactory;
-    private final MarkdownRenderer markdownRenderer;
-    private final PostRepository postRepository;
+    private final ContentServiceClient contentServiceClient;
     private final PlantUmlEmbedService plantUmlEmbedService;
-    private final CustomTagRenderService customTagRenderService;
-    private final BlogCardTagRenderService blogCardTagRenderService;
-    private final AmazonTagRenderService amazonTagRenderService;
-    private final RechartsTagRenderService rechartsTagRenderService;
     private final PlantUmlTagRenderService plantUmlTagRenderService;
-    private final TocStyleRenderService tocStyleRenderService;
-    private final RenderedContentWrapperService renderedContentWrapperService;
     private final ProjectService projectService;
     private final CurrentActorService currentActorService;
     private final UserRepository userRepository;
@@ -70,15 +68,9 @@ public class PostPublishService {
     private final ImageResizeService imageResizeService;
 
     public PostPublishService(SiteService siteService, CmsAdapterFactory cmsAdapterFactory,
-                               MarkdownRenderer markdownRenderer, PostRepository postRepository,
+                               ContentServiceClient contentServiceClient,
                                PlantUmlEmbedService plantUmlEmbedService,
-                               CustomTagRenderService customTagRenderService,
-                               BlogCardTagRenderService blogCardTagRenderService,
-                               AmazonTagRenderService amazonTagRenderService,
-                               RechartsTagRenderService rechartsTagRenderService,
                                PlantUmlTagRenderService plantUmlTagRenderService,
-                               TocStyleRenderService tocStyleRenderService,
-                               RenderedContentWrapperService renderedContentWrapperService,
                                ProjectService projectService,
                                CurrentActorService currentActorService,
                                UserRepository userRepository,
@@ -87,16 +79,9 @@ public class PostPublishService {
                                ImageResizeService imageResizeService) {
         this.siteService = siteService;
         this.cmsAdapterFactory = cmsAdapterFactory;
-        this.markdownRenderer = markdownRenderer;
-        this.postRepository = postRepository;
+        this.contentServiceClient = contentServiceClient;
         this.plantUmlEmbedService = plantUmlEmbedService;
-        this.customTagRenderService = customTagRenderService;
-        this.blogCardTagRenderService = blogCardTagRenderService;
-        this.amazonTagRenderService = amazonTagRenderService;
-        this.rechartsTagRenderService = rechartsTagRenderService;
         this.plantUmlTagRenderService = plantUmlTagRenderService;
-        this.tocStyleRenderService = tocStyleRenderService;
-        this.renderedContentWrapperService = renderedContentWrapperService;
         this.projectService = projectService;
         this.currentActorService = currentActorService;
         this.userRepository = userRepository;
@@ -113,12 +98,12 @@ public class PostPublishService {
         CmsAdapter cmsAdapter = cmsAdapterFactory.resolve(credentials.cmsType());
 
         Long projectId = projectService.findProjectIdBySiteId(site.getId());
-        String markdown = customTagRenderService.render(command.markdown(), projectId);
-        markdown = blogCardTagRenderService.render(markdown, projectId);
-        markdown = amazonTagRenderService.render(markdown, projectId, isProductionSite(site, projectId));
-        // [recharts]タグの記法・データが不正な場合はInvalidRechartsTagExceptionを未捕捉のまま伝播させ、
-        // GlobalExceptionHandlerが400として返すことで投稿自体を拒否する(Issue #340)。
-        markdown = rechartsTagRenderService.render(markdown);
+        // カスタムタグ→[blogcard]→[amazon]→[recharts]の展開はcontent-serviceへ委譲する(issue #576)。
+        // [recharts]タグの記法・データが不正な場合はInvalidRechartsTagExceptionが未捕捉のまま伝播し、
+        // GlobalExceptionHandlerが400として返すことで投稿自体を拒否する(Issue #340、ContentServiceClient
+        // が content-service側の400応答をこの例外へ変換して再送出する)。
+        String markdown = contentServiceClient.renderPreImage(
+                command.markdown(), projectId, isProductionSite(site, projectId));
         // 前回投稿時にアップロード済みの画像/ダイアグラムを再利用するキャッシュは、そのwpPostIdに紐づけて
         // 記憶している。wpPostId自体がCMS側で削除される等して実在しなくなっている場合、一緒にアップロードした
         // 画像も削除されている可能性が高く、キャッシュされたURLが既にリンク切れであることがある(issue #493)。
@@ -147,9 +132,9 @@ public class PostPublishService {
                 cmsAdapter, credentials, markdown, command.images(), command.imageReferences(),
                 command.slug(), command.title(), command.featuredImageFilename(),
                 embedResult.uploadedImages(), projectId);
-        String html = markdownRenderer.render(imageResult.markdown());
-        html = tocStyleRenderService.applyHtmlTemplate(html, projectId);
-        html = renderedContentWrapperService.wrap(html, projectId);
+        // Markdown→HTML変換 + [toc]カスタムHTMLテンプレート適用 + 統合CSSラッパー適用もcontent-service
+        // へ委譲する(issue #576)。
+        String html = contentServiceClient.finalizeHtml(imageResult.markdown(), projectId);
 
         List<String> categoryIds = cmsAdapter.resolveCategories(credentials, command.categories());
         List<String> tagIds = cmsAdapter.resolveTags(credentials, command.tags());
@@ -188,8 +173,8 @@ public class PostPublishService {
         if (wpPostId == null) {
             return Map.of();
         }
-        return postRepository.findBySiteIdAndWpPostId(siteId, wpPostId)
-                .map(Post::getUploadedImagesJson)
+        return contentServiceClient.findPost(siteId, wpPostId)
+                .map(ContentServiceClient.PostBridgeResponse::uploadedImagesJson)
                 .map(this::parseUploadedImages)
                 .orElse(Map.of());
     }
@@ -397,24 +382,16 @@ public class PostPublishService {
         return getFileExtension(fallbackFilename);
     }
 
-    private Post upsertPostRecord(Long siteId, PostResult result, String slug, Map<String, UploadedImageInfo> uploadedImages,
+    private void upsertPostRecord(Long siteId, PostResult result, String slug, Map<String, UploadedImageInfo> uploadedImages,
                                    List<String> categories, Instant publishScheduledAt) {
-        Post post = postRepository.findBySiteIdAndWpPostId(siteId, result.id())
-                .orElseGet(Post::new);
-
-        post.setSiteId(siteId);
-        post.setWpPostId(result.id());
-        post.setSlug(slug);
-        post.setStatus(result.status());
-        post.setLastPublishedAt(LocalDateTime.now());
-        post.setUploadedImagesJson(serializeUploadedImages(uploadedImages));
-        post.setCategories(serializeCategories(categories));
-        post.setPublishScheduledAt(publishScheduledAt == null
-                ? null
-                : LocalDateTime.ofInstant(publishScheduledAt, ZoneOffset.UTC));
-
-        postRepository.save(post);
-        return post;
+        contentServiceClient.upsertPost(
+                siteId,
+                result.id(),
+                slug,
+                result.status(),
+                serializeUploadedImages(uploadedImages),
+                serializeCategories(categories),
+                publishScheduledAt == null ? null : LocalDateTime.ofInstant(publishScheduledAt, ZoneOffset.UTC));
     }
 
     private String serializeCategories(List<String> categories) {

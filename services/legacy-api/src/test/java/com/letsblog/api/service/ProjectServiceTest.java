@@ -1,5 +1,6 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.client.ContentServiceClient;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.ProjectImageSettings;
 import com.letsblog.api.dto.ProjectResponse;
@@ -55,12 +56,12 @@ class ProjectServiceTest {
     private ProjectImageSettingsService projectImageSettingsService;
 
     @Mock
-    private ProjectContentSettingsService projectContentSettingsService;
+    private ContentServiceClient contentServiceClient;
 
     private ProjectService service() {
         return new ProjectService(
                 projectRepository, siteRepository, siteService, bulkUploadStorageService,
-                projectImageSettingsService, projectContentSettingsService,
+                projectImageSettingsService, contentServiceClient,
                 "low quality, blurry, watermark, text", "high quality, highly detailed, sharp focus, masterpiece",
                 1920, 1080, 1300, true, true, true);
     }
@@ -78,7 +79,7 @@ class ProjectServiceTest {
     /** ProjectServiceのtoResponse()はimage/content設定を都度取得するため、既定でempty(未設定)を返すよう緩くstubする。 */
     private void stubEmptySettings() {
         lenient().when(projectImageSettingsService.findByProjectId(any())).thenReturn(Optional.empty());
-        lenient().when(projectContentSettingsService.findByProjectId(any())).thenReturn(Optional.empty());
+        lenient().when(contentServiceClient.getCssSelectorPrefix(any())).thenReturn(null);
     }
 
     @Test
@@ -271,7 +272,7 @@ class ProjectServiceTest {
         ProjectResponse response = service.updateCssSelectorPrefix(
                 1L, new UpdateProjectCssSelectorPrefixRequest("custom-prefix"));
 
-        verify(projectContentSettingsService).updateCssSelectorPrefix(1L, "custom-prefix");
+        verify(contentServiceClient).updateCssSelectorPrefix(1L, "custom-prefix");
     }
 
     @Test
@@ -283,28 +284,13 @@ class ProjectServiceTest {
 
         service.updateCssSelectorPrefix(1L, new UpdateProjectCssSelectorPrefixRequest(""));
 
-        verify(projectContentSettingsService).updateCssSelectorPrefix(1L, null);
+        verify(contentServiceClient).updateCssSelectorPrefix(1L, null);
     }
 
-    @Test
-    void resolveCssSelectorPrefix_未設定時はslugを返す() {
-        ProjectService service = service();
-        Project project = buildProject(1L, "proj-a");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(projectContentSettingsService.getCssSelectorPrefix(1L)).thenReturn(null);
-
-        assertEquals("proj-a", service.resolveCssSelectorPrefix(1L));
-    }
-
-    @Test
-    void resolveCssSelectorPrefix_設定済みならその値を返す() {
-        ProjectService service = service();
-        Project project = buildProject(1L, "proj-a");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(projectContentSettingsService.getCssSelectorPrefix(1L)).thenReturn("custom-prefix");
-
-        assertEquals("custom-prefix", service.resolveCssSelectorPrefix(1L));
-    }
+    // resolveCssSelectorPrefix(カスタムタグCSSのセレクタプリフィックス解決)は、唯一の呼び出し元
+    // だったCustomTagService/RenderedContentWrapperServiceがcontent-serviceへ移設されたため
+    // ProjectServiceから削除した(issue #576)。同等のロジックのテストはcontent-service側の
+    // ProjectContentSettingsServiceTestで検証する。
 
     @Test
     void updateImageGenerationPromptDefaults_値が正常に保存される() {

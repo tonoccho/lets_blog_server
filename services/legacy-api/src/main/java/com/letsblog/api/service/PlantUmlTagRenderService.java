@@ -11,7 +11,6 @@ import org.springframework.stereotype.Service;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.Base64;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -19,16 +18,19 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Markdown本文中の組み込みタグ`[plantuml]`〜`[/plantuml]`(本文はPlantUML記法)を画像に展開する(issue #344)。
- * 既存の ```plantuml フェンスコードブロック記法({@link PlantUmlEmbedService}が処理)とは併存し、
- * 置き換えない。
+ * Markdown本文中の組み込みタグ`[plantuml]`〜`[/plantuml]`(本文はPlantUML記法)を画像に展開する
+ * (issue #344、投稿パイプライン向け)。既存の ```plantuml フェンスコードブロック記法
+ * ({@link PlantUmlEmbedService}が処理)とは併存し、置き換えない。
+ *
+ * <p>プレビュー向け(CMS認証情報を必要としないrenderForPreview)はcontent-serviceへ移設した
+ * (issue #576、{@link com.letsblog.content.service.PlantUmlTagRenderService}参照)。こちらはCMS
+ * メディアライブラリへのアップロードを伴うためCmsAdapter/CmsCredentialsへの依存が強く、
+ * issue #575(publishing-service)の対象になるまで引き続きlegacy-apiに残す。
  *
  * [recharts]タグ(issue #340)と同じ方針で、記法エラー・レンダリング失敗は
- * {@link InvalidPlantUmlTagException}として投げる:
- * - プレビュー({@link ArticlePreviewService#renderHtml})はこれを捕捉し、レンダリングを中止して
- *   エラーメッセージのみを表示する。
- * - 投稿({@link PostPublishService#publish})はこれを未捕捉のまま伝播させ、投稿自体を拒否する
- *   ({@link com.letsblog.api.config.GlobalExceptionHandler}が400として返す)。
+ * {@link InvalidPlantUmlTagException}として投げる。投稿({@link PostPublishService#publish})は
+ * これを未捕捉のまま伝播させ、投稿自体を拒否する({@link com.letsblog.api.config.GlobalExceptionHandler}が
+ * 400として返す)。
  */
 @Service
 public class PlantUmlTagRenderService {
@@ -42,28 +44,6 @@ public class PlantUmlTagRenderService {
     public PlantUmlTagRenderService(MediaRenderClient mediaRenderClient, CmsAdapterFactory cmsAdapterFactory) {
         this.mediaRenderClient = mediaRenderClient;
         this.cmsAdapterFactory = cmsAdapterFactory;
-    }
-
-    /**
-     * プレビュー向け: PNGをdata URIとして直接埋め込む。CMS認証情報を必要とせず、
-     * メディアアップロードも行わない(プレビューは副作用のある外部呼び出しを避けるため)。
-     *
-     * @throws InvalidPlantUmlTagException レンダリングに失敗した場合
-     */
-    public String renderForPreview(String markdown) {
-        if (markdown == null || markdown.isEmpty()) {
-            return markdown;
-        }
-        Matcher matcher = PLANTUML_TAG_PATTERN.matcher(markdown);
-        StringBuilder result = new StringBuilder();
-        while (matcher.find()) {
-            String wrapped = wrapWithMarkers(matcher.group(1).trim());
-            byte[] png = renderPng(wrapped);
-            String dataUri = "data:image/png;base64," + Base64.getEncoder().encodeToString(png);
-            matcher.appendReplacement(result, Matcher.quoteReplacement("![diagram](" + dataUri + ")"));
-        }
-        matcher.appendTail(result);
-        return result.toString();
     }
 
     /**

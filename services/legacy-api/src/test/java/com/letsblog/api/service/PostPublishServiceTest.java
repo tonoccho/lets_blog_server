@@ -1,5 +1,6 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.client.ContentServiceClient;
 import com.letsblog.api.cms.CmsAdapter;
 import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsCredentials;
@@ -10,8 +11,6 @@ import com.letsblog.api.cms.PostResult;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.PostPublishCommand;
 import com.letsblog.api.dto.PostPublishResponse;
-import com.letsblog.api.markdown.MarkdownRenderer;
-import com.letsblog.api.repository.PostRepository;
 import com.letsblog.api.repository.UserRepository;
 import com.letsblog.api.repository.UserSiteAuthorRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,7 +44,11 @@ import static org.mockito.Mockito.when;
 
 /**
  * PostPublishServiceの回帰テスト。画像ファイル名リネーム({slug}-{4桁連番}.{拡張子})と
- * featured_image指定時のfeatured_media解決を中心に検証する。
+ * featured_image指定時のfeatured_media解決を中心に検証する。カスタムタグ/組み込みタグの展開・
+ * Markdown→HTML変換・postsテーブルの読み書きはcontent-serviceへの内部ブリッジ(ContentServiceClient)
+ * 経由になったため(issue #576)、それらのモックをそちらへ差し替えている。[plantuml]/```plantumlの
+ * 埋め込み(CMSアップロードを伴う)は引き続きこのクラス自身が行うため、plantUmlEmbedService/
+ * plantUmlTagRenderServiceのモックは変更していない。
  */
 @ExtendWith(MockitoExtension.class)
 class PostPublishServiceTest {
@@ -55,25 +58,11 @@ class PostPublishServiceTest {
     @Mock
     private CmsAdapterFactory cmsAdapterFactory;
     @Mock
-    private MarkdownRenderer markdownRenderer;
-    @Mock
-    private PostRepository postRepository;
+    private ContentServiceClient contentServiceClient;
     @Mock
     private PlantUmlEmbedService plantUmlEmbedService;
     @Mock
-    private CustomTagRenderService customTagRenderService;
-    @Mock
-    private BlogCardTagRenderService blogCardTagRenderService;
-    @Mock
-    private AmazonTagRenderService amazonTagRenderService;
-    @Mock
-    private RechartsTagRenderService rechartsTagRenderService;
-    @Mock
     private PlantUmlTagRenderService plantUmlTagRenderService;
-    @Mock
-    private TocStyleRenderService tocStyleRenderService;
-    @Mock
-    private RenderedContentWrapperService renderedContentWrapperService;
     @Mock
     private ProjectService projectService;
     @Mock
@@ -92,9 +81,8 @@ class PostPublishServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new PostPublishService(siteService, cmsAdapterFactory, markdownRenderer, postRepository,
-                plantUmlEmbedService, customTagRenderService, blogCardTagRenderService, amazonTagRenderService,
-                rechartsTagRenderService, plantUmlTagRenderService, tocStyleRenderService, renderedContentWrapperService,
+        service = new PostPublishService(siteService, cmsAdapterFactory, contentServiceClient,
+                plantUmlEmbedService, plantUmlTagRenderService,
                 projectService, currentActorService, userRepository, userSiteAuthorRepository,
                 new com.fasterxml.jackson.databind.ObjectMapper(), new ImageResizeService());
 
@@ -107,21 +95,17 @@ class PostPublishServiceTest {
         lenient().when(siteService.getCredentials("main")).thenReturn(credentials);
         lenient().when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
         lenient().when(projectService.findProjectIdBySiteId(1L)).thenReturn(null);
-        lenient().when(customTagRenderService.render(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
-        lenient().when(blogCardTagRenderService.render(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
-        lenient().when(amazonTagRenderService.render(anyString(), any(), anyBoolean()))
+        lenient().when(contentServiceClient.renderPreImage(anyString(), any(), anyBoolean()))
                 .thenAnswer(inv -> inv.getArgument(0));
-        lenient().when(rechartsTagRenderService.render(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(contentServiceClient.finalizeHtml(anyString(), any()))
+                .thenAnswer(inv -> "<p>" + inv.getArgument(0) + "</p>");
         lenient().when(plantUmlTagRenderService.render(any(), anyString(), anyMap()))
                 .thenAnswer(inv -> new DiagramEmbedResult(inv.getArgument(1), inv.getArgument(2)));
         lenient().when(plantUmlEmbedService.embedDiagrams(any(), anyString(), anyMap()))
                 .thenAnswer(inv -> new DiagramEmbedResult(inv.getArgument(1), inv.getArgument(2)));
-        lenient().when(markdownRenderer.render(anyString())).thenAnswer(inv -> "<p>" + inv.getArgument(0) + "</p>");
-        lenient().when(tocStyleRenderService.applyHtmlTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
-        lenient().when(renderedContentWrapperService.wrap(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(cmsAdapter.resolveCategories(any(), any())).thenReturn(List.of());
         lenient().when(cmsAdapter.resolveTags(any(), any())).thenReturn(List.of());
-        lenient().when(postRepository.findBySiteIdAndWpPostId(any(), any())).thenReturn(Optional.empty());
+        lenient().when(contentServiceClient.findPost(any(), any())).thenReturn(Optional.empty());
         lenient().when(cmsAdapter.postExists(any(), any())).thenReturn(true);
         lenient().when(cmsAdapter.mediaExists(any(), any())).thenReturn(true);
         lenient().when(currentActorService.getCurrentActorId()).thenReturn(null);
@@ -137,6 +121,11 @@ class PostPublishServiceTest {
         return new PostPublishCommand(
                 "main", title, slug, "draft", List.of(), List.of(), null, "本文", images, featuredImageFilename,
                 imageReferences, null);
+    }
+
+    private ContentServiceClient.PostBridgeResponse bridgePost(String wpPostId, String uploadedImagesJson) {
+        return new ContentServiceClient.PostBridgeResponse(
+                1L, wpPostId, "my-article", "draft", uploadedImagesJson, null, null, null);
     }
 
     @Test
@@ -160,17 +149,13 @@ class PostPublishServiceTest {
     }
 
     @Test
-    void publish_既存スラッグのwpPostIdを渡して再投稿すると同じPost行が更新され重複作成されない() {
+    void publish_既存スラッグのwpPostIdを渡して再投稿するとcontent_serviceへ同じwpPostIdで反映を依頼する() {
         // issue #529: VSCode拡張はスラッグから既存投稿を照会(lookupExistingPost)し、
-        // 見つかったwpPostIdをcommand.wpPostId()として渡してくる。この場合、DB(posts)側は
-        // 新しい行を追加するのではなく、既存の行を更新しなければ同じスラッグの記事が
-        // 再投稿のたびに重複投稿されてしまう。
-        com.letsblog.api.domain.Post existingPost = new com.letsblog.api.domain.Post();
-        existingPost.setId(9L);
-        existingPost.setSiteId(1L);
-        existingPost.setWpPostId("55");
-        existingPost.setSlug("my-article");
-        when(postRepository.findBySiteIdAndWpPostId(1L, "55")).thenReturn(Optional.of(existingPost));
+        // 見つかったwpPostIdをcommand.wpPostId()として渡してくる。この場合、postsテーブル側は
+        // 新しい行を追加するのではなく既存の行を更新しなければ同じスラッグの記事が
+        // 再投稿のたびに重複投稿されてしまう(実際の新規作成/更新判定はcontent-service側の
+        // InternalPostBridgeController#upsertが担う。issue #576)。
+        when(contentServiceClient.findPost(1L, "55")).thenReturn(Optional.of(bridgePost("55", null)));
         when(cmsAdapter.createOrUpdatePost(any(), any(), eq("55")))
                 .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
 
@@ -180,11 +165,8 @@ class PostPublishServiceTest {
 
         service.publish(command);
 
-        ArgumentCaptor<com.letsblog.api.domain.Post> savedCaptor =
-                ArgumentCaptor.forClass(com.letsblog.api.domain.Post.class);
-        verify(postRepository).save(savedCaptor.capture());
-        assertEquals(9L, savedCaptor.getValue().getId());
-        assertEquals("55", savedCaptor.getValue().getWpPostId());
+        verify(contentServiceClient).upsertPost(
+                eq(1L), eq("55"), eq("my-article"), eq("draft"), any(), any(), any());
     }
 
     @Test
@@ -233,17 +215,15 @@ class PostPublishServiceTest {
     }
 
     @Test
-    void publish_最終HTMLはRenderedContentWrapperServiceでラップされてPostContentへ渡される() {
+    void publish_最終HTMLはcontent_serviceのfinalizeHtml結果がPostContentへ渡される() {
         when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
                 .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        when(tocStyleRenderService.applyHtmlTemplate(anyString(), any()))
-                .thenAnswer(inv -> "[template]" + inv.getArgument(0));
-        when(renderedContentWrapperService.wrap(anyString(), any()))
+        when(contentServiceClient.finalizeHtml("本文", null))
                 .thenReturn("<div class=\"lets-blog-rendered\">wrapped</div>");
 
         service.publish(command("my-article", "My Article", List.of(), null));
 
-        verify(renderedContentWrapperService).wrap("[template]<p>本文</p>", null);
+        verify(contentServiceClient).finalizeHtml("本文", null);
         ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
         verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
         assertEquals("<div class=\"lets-blog-rendered\">wrapped</div>", contentCaptor.getValue().htmlContent());
@@ -287,14 +267,14 @@ class PostPublishServiceTest {
                 .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
         when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
                 .thenReturn(new MediaUploadResult("11", "https://example.com/wp-content/uploads/1.png"));
-        when(customTagRenderService.render(anyString(), any())).thenReturn("![alt](eyecatch.png)");
+        when(contentServiceClient.renderPreImage(anyString(), any(), anyBoolean())).thenReturn("![alt](eyecatch.png)");
 
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
 
         service.publish(command("my-article", "My Article", images, null));
 
-        verify(markdownRenderer).render("![alt](https://example.com/wp-content/uploads/1.png)");
+        verify(contentServiceClient).finalizeHtml("![alt](https://example.com/wp-content/uploads/1.png)", null);
     }
 
     @Test
@@ -306,7 +286,8 @@ class PostPublishServiceTest {
                 .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
         when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
                 .thenReturn(new MediaUploadResult("11", "https://example.com/wp-content/uploads/1.png"));
-        when(customTagRenderService.render(anyString(), any())).thenReturn("![alt](assets/eyecatch.png)");
+        when(contentServiceClient.renderPreImage(anyString(), any(), anyBoolean()))
+                .thenReturn("![alt](assets/eyecatch.png)");
 
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
@@ -314,7 +295,7 @@ class PostPublishServiceTest {
         service.publish(command("my-article", "My Article", images, "assets/eyecatch.png",
                 List.of("assets/eyecatch.png")));
 
-        verify(markdownRenderer).render("![alt](https://example.com/wp-content/uploads/1.png)");
+        verify(contentServiceClient).finalizeHtml("![alt](https://example.com/wp-content/uploads/1.png)", null);
         ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
         verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
         assertEquals("11", contentCaptor.getValue().featuredMediaId());
@@ -463,14 +444,10 @@ class PostPublishServiceTest {
 
     @Test
     void publish_再投稿時に内容が同じ画像は再アップロードしない() throws Exception {
-        com.letsblog.api.domain.Post existingPost = new com.letsblog.api.domain.Post();
-        existingPost.setSiteId(1L);
-        existingPost.setWpPostId("55");
         String sha256 = sha256Hex(new byte[]{1});
-        existingPost.setUploadedImagesJson(
-                "{\"assets/eyecatch.png\":{\"sha256\":\"" + sha256 + "\","
-                        + "\"url\":\"https://example.com/wp-content/uploads/1.png\",\"mediaId\":\"11\"}}");
-        when(postRepository.findBySiteIdAndWpPostId(1L, "55")).thenReturn(Optional.of(existingPost));
+        String uploadedImagesJson = "{\"assets/eyecatch.png\":{\"sha256\":\"" + sha256 + "\","
+                        + "\"url\":\"https://example.com/wp-content/uploads/1.png\",\"mediaId\":\"11\"}}";
+        when(contentServiceClient.findPost(1L, "55")).thenReturn(Optional.of(bridgePost("55", uploadedImagesJson)));
         when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
                 .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
 
@@ -487,14 +464,10 @@ class PostPublishServiceTest {
 
     @Test
     void publish_再投稿時に内容が異なる画像は再アップロードされる() throws Exception {
-        com.letsblog.api.domain.Post existingPost = new com.letsblog.api.domain.Post();
-        existingPost.setSiteId(1L);
-        existingPost.setWpPostId("55");
         String oldSha256 = sha256Hex(new byte[]{9, 9, 9});
-        existingPost.setUploadedImagesJson(
-                "{\"assets/eyecatch.png\":{\"sha256\":\"" + oldSha256 + "\","
-                        + "\"url\":\"https://example.com/old.png\",\"mediaId\":\"1\"}}");
-        when(postRepository.findBySiteIdAndWpPostId(1L, "55")).thenReturn(Optional.of(existingPost));
+        String uploadedImagesJson = "{\"assets/eyecatch.png\":{\"sha256\":\"" + oldSha256 + "\","
+                        + "\"url\":\"https://example.com/old.png\",\"mediaId\":\"1\"}}";
+        when(contentServiceClient.findPost(1L, "55")).thenReturn(Optional.of(bridgePost("55", uploadedImagesJson)));
         when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
                 .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
         when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
@@ -516,16 +489,13 @@ class PostPublishServiceTest {
         // issue #493: CMS側で投稿(および一緒にアップロードした画像)が削除された後にwpPostIdだけが
         // ローカルDBに残っているケース。sha256が一致していても、投稿自体が実在しなければ
         // キャッシュされたURLはリンク切れの可能性が高いため再利用してはならない。
-        com.letsblog.api.domain.Post existingPost = new com.letsblog.api.domain.Post();
-        existingPost.setSiteId(1L);
-        existingPost.setWpPostId("55");
         String sha256 = sha256Hex(new byte[]{1});
-        existingPost.setUploadedImagesJson(
-                "{\"assets/eyecatch.png\":{\"sha256\":\"" + sha256 + "\","
-                        + "\"url\":\"https://example.com/wp-content/uploads/1.png\",\"mediaId\":\"11\"}}");
+        String uploadedImagesJson = "{\"assets/eyecatch.png\":{\"sha256\":\"" + sha256 + "\","
+                        + "\"url\":\"https://example.com/wp-content/uploads/1.png\",\"mediaId\":\"11\"}}";
         // 「投稿が消えても画像キャッシュを取りに行かない」ことを示すため敢えて存在するかのように
         // スタブするが、postExists=falseの分岐で読み出し自体が起きないため未使用になる(意図通り)。
-        lenient().when(postRepository.findBySiteIdAndWpPostId(1L, "55")).thenReturn(Optional.of(existingPost));
+        lenient().when(contentServiceClient.findPost(1L, "55"))
+                .thenReturn(Optional.of(bridgePost("55", uploadedImagesJson)));
         when(cmsAdapter.postExists(credentials, "55")).thenReturn(false);
         when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
                 .thenReturn(new PostResult("70", "https://example.com/?p=70", "draft"));
@@ -551,14 +521,10 @@ class PostPublishServiceTest {
         // issue #495: 投稿自体は実在するが、その画像だけがメディアライブラリから個別に削除された
         // ケース。sha256が一致していても、メディア単位の実在確認(mediaExists)がfalseなら
         // キャッシュされたURLはリンク切れのため再利用してはならない。
-        com.letsblog.api.domain.Post existingPost = new com.letsblog.api.domain.Post();
-        existingPost.setSiteId(1L);
-        existingPost.setWpPostId("55");
         String sha256 = sha256Hex(new byte[]{1});
-        existingPost.setUploadedImagesJson(
-                "{\"assets/eyecatch.png\":{\"sha256\":\"" + sha256 + "\","
-                        + "\"url\":\"https://example.com/wp-content/uploads/1.png\",\"mediaId\":\"11\"}}");
-        when(postRepository.findBySiteIdAndWpPostId(1L, "55")).thenReturn(Optional.of(existingPost));
+        String uploadedImagesJson = "{\"assets/eyecatch.png\":{\"sha256\":\"" + sha256 + "\","
+                        + "\"url\":\"https://example.com/wp-content/uploads/1.png\",\"mediaId\":\"11\"}}";
+        when(contentServiceClient.findPost(1L, "55")).thenReturn(Optional.of(bridgePost("55", uploadedImagesJson)));
         when(cmsAdapter.mediaExists(credentials, "11")).thenReturn(false);
         when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
                 .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
@@ -607,25 +573,25 @@ class PostPublishServiceTest {
     }
 
     @Test
-    void publish_本番サイトへの投稿ではAmazonタグレンダリングにisProductionSite_trueを渡す() {
+    void publish_本番サイトへの投稿ではcontent_serviceへisProductionSite_trueを渡す() {
         bindProductionSite();
         when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
                 .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
 
         service.publish(command("slug", "title", List.of(), null));
 
-        verify(amazonTagRenderService).render(anyString(), eq(7L), eq(true));
+        verify(contentServiceClient).renderPreImage(anyString(), eq(7L), eq(true));
     }
 
     @Test
-    void publish_本番以外のサイトへの投稿ではAmazonタグレンダリングにisProductionSite_falseを渡す() {
+    void publish_本番以外のサイトへの投稿ではcontent_serviceへisProductionSite_falseを渡す() {
         bindNonProductionSite();
         when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
                 .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
 
         service.publish(command("slug", "title", List.of(), null));
 
-        verify(amazonTagRenderService).render(anyString(), eq(7L), eq(false));
+        verify(contentServiceClient).renderPreImage(anyString(), eq(7L), eq(false));
     }
 
     @Test
@@ -737,7 +703,7 @@ class PostPublishServiceTest {
 
     @Test
     void publish_rechartsタグが不正な場合は投稿を拒否する() {
-        when(rechartsTagRenderService.render(anyString()))
+        when(contentServiceClient.renderPreImage(anyString(), any(), anyBoolean()))
                 .thenThrow(new InvalidRechartsTagException("type属性は必須です"));
 
         InvalidRechartsTagException e = org.junit.jupiter.api.Assertions.assertThrows(
@@ -776,13 +742,9 @@ class PostPublishServiceTest {
         // issue #499: PlantUMLダイアグラムの再利用判定に使うキャッシュは、通常画像と同じPostの
         // uploadedImagesJsonに保存されている。plantUmlTagRenderService→plantUmlEmbedServiceの順で
         // 呼び出す際、前段の戻り値(更新後のキャッシュ)が次段にそのまま引き継がれることを検証する。
-        com.letsblog.api.domain.Post existingPost = new com.letsblog.api.domain.Post();
-        existingPost.setSiteId(1L);
-        existingPost.setWpPostId("55");
-        existingPost.setUploadedImagesJson(
-                "{\"plantuml:tag-hash\":{\"sha256\":\"tag-hash\","
-                        + "\"url\":\"https://example.com/plantuml-tag-1.png\",\"mediaId\":\"9\"}}");
-        when(postRepository.findBySiteIdAndWpPostId(1L, "55")).thenReturn(Optional.of(existingPost));
+        String uploadedImagesJson = "{\"plantuml:tag-hash\":{\"sha256\":\"tag-hash\","
+                        + "\"url\":\"https://example.com/plantuml-tag-1.png\",\"mediaId\":\"9\"}}";
+        when(contentServiceClient.findPost(1L, "55")).thenReturn(Optional.of(bridgePost("55", uploadedImagesJson)));
         when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
                 .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
 
@@ -801,9 +763,9 @@ class PostPublishServiceTest {
     }
 
     @Test
-    void publish_PlantUMLダイアグラムのアップロード結果がPost保存時のキャッシュに含まれる() {
+    void publish_PlantUMLダイアグラムのアップロード結果がcontent_service反映時のキャッシュに含まれる() {
         // issue #499: plantUmlEmbedServiceが返した更新後キャッシュ(通常画像+ダイアグラム双方)が、
-        // 次回投稿時の再利用判定のためPostのuploadedImagesJsonへ保存されることを検証する。
+        // 次回投稿時の再利用判定のためcontent-serviceへのupsertPost呼び出しへ含まれることを検証する。
         when(plantUmlEmbedService.embedDiagrams(any(), anyString(), anyMap()))
                 .thenReturn(new DiagramEmbedResult("本文",
                         Map.of("plantuml:diagram-hash", new UploadedImageInfo(
@@ -813,16 +775,16 @@ class PostPublishServiceTest {
 
         service.publish(command("my-article", "My Article", List.of(), null));
 
-        ArgumentCaptor<com.letsblog.api.domain.Post> postCaptor =
-                ArgumentCaptor.forClass(com.letsblog.api.domain.Post.class);
-        verify(postRepository).save(postCaptor.capture());
-        assertTrue(postCaptor.getValue().getUploadedImagesJson().contains("plantuml:diagram-hash"));
+        ArgumentCaptor<String> uploadedImagesJsonCaptor = ArgumentCaptor.forClass(String.class);
+        verify(contentServiceClient).upsertPost(
+                any(), eq("200"), any(), any(), uploadedImagesJsonCaptor.capture(), any(), any());
+        assertTrue(uploadedImagesJsonCaptor.getValue().contains("plantuml:diagram-hash"));
     }
 
     @Test
-    void publish_categoriesがローカルDBのPostへ保存される() {
+    void publish_categoriesがcontent_serviceへの反映呼び出しに含まれる() {
         // issue #506: WordPressへ送信したカテゴリはposts.categoriesへJSON配列として保存され、
-        // 再投稿時にも失われないことを検証する。
+        // 再投稿時にも失われないことを検証する(実際の保存はcontent-service側の責務)。
         when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
                 .thenReturn(new PostResult("201", "https://example.com/?p=201", "draft"));
         PostPublishCommand command = new PostPublishCommand(
@@ -831,16 +793,17 @@ class PostPublishServiceTest {
 
         service.publish(command);
 
-        ArgumentCaptor<com.letsblog.api.domain.Post> postCaptor =
-                ArgumentCaptor.forClass(com.letsblog.api.domain.Post.class);
-        verify(postRepository).save(postCaptor.capture());
-        assertTrue(postCaptor.getValue().getCategories().contains("技術"));
-        assertTrue(postCaptor.getValue().getCategories().contains("お知らせ"));
+        ArgumentCaptor<String> categoriesCaptor = ArgumentCaptor.forClass(String.class);
+        verify(contentServiceClient).upsertPost(
+                any(), eq("201"), any(), any(), any(), categoriesCaptor.capture(), any());
+        assertTrue(categoriesCaptor.getValue().contains("技術"));
+        assertTrue(categoriesCaptor.getValue().contains("お知らせ"));
     }
 
     @Test
-    void publish_publishScheduledAtがローカルDBのPostへ保存される() {
-        // issue #506: 本番サイトへの予約投稿では、実際に適用された公開予定日時がposts.publish_scheduled_atへ保存される。
+    void publish_publishScheduledAtがcontent_serviceへの反映呼び出しに含まれる() {
+        // issue #506: 本番サイトへの予約投稿では、実際に適用された公開予定日時がposts.publish_scheduled_atへ
+        // 保存される(実際の保存はcontent-service側の責務)。
         bindProductionSite();
         when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
                 .thenReturn(new PostResult("202", "https://example.com/?p=202", "future"));
@@ -849,11 +812,10 @@ class PostPublishServiceTest {
 
         service.publish(scheduledCommand(scheduledAt.toString()));
 
-        ArgumentCaptor<com.letsblog.api.domain.Post> postCaptor =
-                ArgumentCaptor.forClass(com.letsblog.api.domain.Post.class);
-        verify(postRepository).save(postCaptor.capture());
-        assertEquals(scheduledAt.toInstant(),
-                postCaptor.getValue().getPublishScheduledAt().toInstant(java.time.ZoneOffset.UTC));
+        ArgumentCaptor<java.time.LocalDateTime> scheduledAtCaptor =
+                ArgumentCaptor.forClass(java.time.LocalDateTime.class);
+        verify(contentServiceClient).upsertPost(
+                any(), eq("202"), any(), any(), any(), any(), scheduledAtCaptor.capture());
+        assertEquals(scheduledAt.toInstant(), scheduledAtCaptor.getValue().toInstant(java.time.ZoneOffset.UTC));
     }
-
 }

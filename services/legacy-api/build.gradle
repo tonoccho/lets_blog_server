@@ -28,11 +28,6 @@ dependencies {
     implementation 'org.springframework.security:spring-security-crypto'
     implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
 
-    implementation 'com.vladsch.flexmark:flexmark-all:0.64.8'
-
-    // [blogcard]/[amazon] 組み込みタグ向けのヘッドレスブラウザスクレイピングに使用
-    implementation 'com.microsoft.playwright:playwright:1.62.0'
-
     implementation 'com.hierynomus:sshj:0.38.0'
 
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0'
@@ -92,15 +87,6 @@ task coverageCheck {
             println "✓ JaCoCo coverage report generated at: ${xmlFile}"
         }
     }
-}
-
-// Dockerイメージのビルド時、実行時クラスパスのjarを一時的に取り出してPlaywrightのブラウザ
-// インストールCLI(com.microsoft.playwright.CLI)を`java -cp`で実行するために使う。
-// app.jar自体はSpring Bootのfat jar(BOOT-INF/lib配下にネストされる)のため、
-// 単純に `java -cp app.jar ...` ではCLIの依存クラスを解決できない。
-tasks.register('copyRuntimeLibs', Copy) {
-    from configurations.runtimeClasspath
-    into "$buildDir/runtime-libs"
 }
 
 jmh {

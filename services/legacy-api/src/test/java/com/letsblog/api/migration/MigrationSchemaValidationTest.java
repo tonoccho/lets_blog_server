@@ -19,10 +19,12 @@ class MigrationSchemaValidationTest extends MigrationTestBase {
 
             // audit_logsは#572でlog-writerサービス(lbs_logスキーマ)へ完全移管したため、
             // このスキーマ(lets_blog)には存在しない前提のテーブル一覧から除外した。
+            // custom_tagsは#576でcontent-service(lbs_contentスキーマ)へ完全移管したため、
+            // 同様にこのスキーマ(lets_blog)には存在しない前提のテーブル一覧から除外した
+            // (V75__drop_content_service_tables.sqlでdropされる)。
             var requiredTables = new String[]{
                     "users",
                     "sites",
-                    "custom_tags",
                     "projects",
                     "api_keys"
             };
