@@ -56,4 +56,34 @@ export type {
   listResponseSuccess,
 } from './generated/log-writer/operation-log-controller/operation-log-controller';
 
+// ai(LLM呼び出し・記事プラン・generation_jobsの所有権をai-serviceへ移管、#574)。
+// InternalAiGenerationController/InternalProjectAiSettingsControllerはlegacy-api→ai-serviceの
+// 内部ブリッジ専用(/api/ai/internal/**、/api/internal/ai/**)で、gatewayからは到達不能かつ
+// web/extensionが呼ぶ想定もないため、他サービスと同様にopenAPIDefinition.schemas経由でスキーマは
+// 共有されるが、コントローラ自体はここでは再エクスポートしない。
+export * from './generated/ai/openAPIDefinition.schemas';
+export * from './generated/ai/ai-controller/ai-controller';
+export * from './generated/ai/article-plan-controller/article-plan-controller';
+export * from './generated/ai/project-llm-model-controller/project-llm-model-controller';
+
+// GenerationJobController(ai)のlist/get/create/updateは、log-writer/mediaのlist集約と同様に
+// 汎用的な関数名がAuditLogController/OperationLogController/GeneratedImageController等と衝突しうる
+// ため、明示的に再エクスポートして曖昧性を防ぐ(既存のlist衝突解消コメント参照)。
+export {
+  list as listGenerationJobs,
+  get as getGenerationJob,
+  create as createGenerationJob,
+  update as updateGenerationJob,
+  getListUrl as getListGenerationJobsUrl,
+  getGetUrl as getGetGenerationJobUrl,
+  getCreateUrl as getCreateGenerationJobUrl,
+  getUpdateUrl as getUpdateGenerationJobUrl,
+} from './generated/ai/generation-job-controller/generation-job-controller';
+export type {
+  listResponse as listGenerationJobsResponse,
+  getResponse as getGenerationJobResponse,
+  createResponse as createGenerationJobResponse,
+  updateResponse as updateGenerationJobResponse,
+} from './generated/ai/generation-job-controller/generation-job-controller';
+
 // 将来のサービス抽出Issueで追加するターゲットも、ここに re-export を追加していく。

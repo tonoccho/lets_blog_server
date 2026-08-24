@@ -128,6 +128,9 @@ app:
   # 引き続きこのサービス(PlantUmlEmbedService/PlantUmlTagRenderService/RechartsTagRenderService/
   # CustomTagGenerationService)が行う。
   media-service-uri: ${MEDIA_SERVICE_URI:http://localhost:8080}
+  # LLMテキスト生成(AiGenerationClient)・generation_jobsのジョブ作成/進捗更新(GenerationJobClient)を
+  # ai-serviceへ委譲する(issue #574)。
+  ai-service-uri: ${AI_SERVICE_URI:http://localhost:8080}
   content-cache-ttl-hours: ${CONTENT_CACHE_TTL_HOURS:24}
   wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
   wordpress-provision-token: ${WP_PROVISION_TOKEN:}

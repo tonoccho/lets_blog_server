@@ -3,9 +3,9 @@ package com.letsblog.api.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.ai.ComfyUiClient;
 import com.letsblog.api.ai.MediaComfyUiClient;
-import com.letsblog.api.domain.GenerationJob;
+import com.letsblog.api.client.GenerationJobClient;
+import com.letsblog.api.client.GenerationJobSummary;
 import com.letsblog.api.dto.GenerationJobResponse;
-import com.letsblog.api.repository.GenerationJobRepository;
 import com.letsblog.api.repository.ProjectRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -13,6 +13,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -23,10 +25,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * ComfyUiModelServiceの回帰テスト。#573 stage2で、実際のチェックポイントダウンロード/削除の実行
- * (旧ModelInstallJobRunner)がmedia-serviceへ移設されたのに伴い、startInstall/startDeleteが
- * legacy-api側でGenerationJobを作成した上でMediaComfyUiClient経由で起動をトリガーするだけに
- * なったことを検証する(ジョブ自体の作成・所有はlegacy-apiに残る)。
+ * ComfyUiModelServiceの回帰テスト。issue #574でgeneration_jobsテーブルの所有権がai-serviceへ
+ * 移管されたことに伴い、startInstall/startDeleteがGenerationJobClient経由でai-serviceへ
+ * ジョブ作成を委譲したうえでMediaComfyUiClient経由で起動をトリガーすることを検証する
+ * (以前はGenerationJobRepositoryへ直接保存していた)。
  */
 @ExtendWith(MockitoExtension.class)
 class ComfyUiModelServiceTest {
@@ -40,7 +42,7 @@ class ComfyUiModelServiceTest {
     @Mock
     private ProjectImageSettingsService projectImageSettingsService;
     @Mock
-    private GenerationJobRepository generationJobRepository;
+    private GenerationJobClient generationJobClient;
 
     private ComfyUiModelService service;
 
@@ -48,16 +50,14 @@ class ComfyUiModelServiceTest {
     void setUp() {
         service = new ComfyUiModelService(
                 comfyUiClient, mediaComfyUiClient, projectRepository, projectImageSettingsService,
-                generationJobRepository, new ObjectMapper(), "v1-5-pruned-emaonly.safetensors");
+                generationJobClient, new ObjectMapper(), "v1-5-pruned-emaonly.safetensors");
     }
 
     @Test
-    void startInstall_ジョブをlegacyApi側で作成しmediaComfyUiClient経由で起動する() {
-        when(generationJobRepository.save(any(GenerationJob.class))).thenAnswer(invocation -> {
-            GenerationJob job = invocation.getArgument(0);
-            job.setId(42L);
-            return job;
-        });
+    void startInstall_ジョブをai_service経由で作成しmediaComfyUiClient経由で起動する() {
+        when(generationJobClient.create(anyString(), anyString())).thenReturn(
+                new GenerationJobSummary(42L, "comfyui_checkpoint_download", "running",
+                        LocalDateTime.now(), LocalDateTime.now()));
 
         GenerationJobResponse response = service.startInstall("https://example.com/model.safetensors", "model.safetensors");
 
@@ -65,9 +65,9 @@ class ComfyUiModelServiceTest {
         assertEquals("comfyui_checkpoint_download", response.type());
         assertEquals("running", response.status());
 
-        ArgumentCaptor<GenerationJob> savedJob = ArgumentCaptor.forClass(GenerationJob.class);
-        verify(generationJobRepository).save(savedJob.capture());
-        assertEquals("comfyui_checkpoint_download", savedJob.getValue().getType());
+        ArgumentCaptor<String> typeCaptor = ArgumentCaptor.forClass(String.class);
+        verify(generationJobClient).create(typeCaptor.capture(), anyString());
+        assertEquals("comfyui_checkpoint_download", typeCaptor.getValue());
 
         verify(mediaComfyUiClient).startInstall(42L, "https://example.com/model.safetensors", "model.safetensors");
     }
@@ -75,17 +75,15 @@ class ComfyUiModelServiceTest {
     @Test
     void startInstall_httpsでないURLはIllegalArgumentException_mediaComfyUiClientは呼ばれない() {
         assertThrows(IllegalArgumentException.class, () -> service.startInstall("ftp://example.com/model.safetensors", "model.safetensors"));
-        verify(generationJobRepository, never()).save(any());
+        verify(generationJobClient, never()).create(any(), any());
         verify(mediaComfyUiClient, never()).startInstall(any(), any(), any());
     }
 
     @Test
-    void startDelete_ジョブをlegacyApi側で作成しmediaComfyUiClient経由で起動する() {
-        when(generationJobRepository.save(any(GenerationJob.class))).thenAnswer(invocation -> {
-            GenerationJob job = invocation.getArgument(0);
-            job.setId(7L);
-            return job;
-        });
+    void startDelete_ジョブをai_service経由で作成しmediaComfyUiClient経由で起動する() {
+        when(generationJobClient.create(anyString(), anyString())).thenReturn(
+                new GenerationJobSummary(7L, "comfyui_checkpoint_delete", "running",
+                        LocalDateTime.now(), LocalDateTime.now()));
 
         GenerationJobResponse response = service.startDelete("model.safetensors");
 

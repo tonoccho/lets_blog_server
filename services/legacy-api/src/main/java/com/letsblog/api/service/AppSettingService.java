@@ -2,8 +2,6 @@ package com.letsblog.api.service;
 
 import com.letsblog.api.ai.AiProvider;
 import com.letsblog.api.ai.ImageGenerationConfigProvider;
-import com.letsblog.api.ai.LlmClient;
-import com.letsblog.api.ai.LlmConfigProvider;
 import com.letsblog.api.aop.AuditLog;
 import com.letsblog.common.crypto.CredentialCipher;
 import com.letsblog.api.domain.AuditLogAction;
@@ -26,11 +24,13 @@ import java.util.Map;
  * 環境変数にフォールバック)を再利用するが、DB接続情報・暗号化キー自体・NEXTAUTH_SECRET・Docker内部
  * サービス間通信設定等のインフラ系設定は誤設定時にアプリが起動不能になるリスクが高いため対象外とし、
  * このサービスが扱うキーのみを編集対象とする。Brave Search APIキー・Google AdSense OAuth
- * クライアント(issue #407)はプロジェクト単位の設定のため対象外。LlmClientからはインターフェース経由
- * (LlmConfigProvider)で参照される(aiパッケージがserviceパッケージへ依存しないようにするため)。
+ * クライアント(issue #407)はプロジェクト単位の設定のため対象外。issue #574でLlmClient自体は
+ * ai-serviceへ移設したため、実効LLM接続設定(provider/apiKeyFor/defaultModelFor/baseUrlFor/
+ * requestTimeoutSeconds)は{@link com.letsblog.api.controller.AiBridgeController#llmConfig}
+ * 経由でai-serviceへ公開する内部ブリッジとして参照される。
  */
 @Service
-public class AppSettingService implements LlmConfigProvider, ImageGenerationConfigProvider {
+public class AppSettingService implements ImageGenerationConfigProvider {
 
     static final String LLM_API_KEY = "llm_api_key";
     static final String LLM_BASE_URL = "llm_base_url";
@@ -380,44 +380,51 @@ public class AppSettingService implements LlmConfigProvider, ImageGenerationConf
         return Integer.parseInt(resolve(UPLOAD_RATE_LIMIT_REQUESTS));
     }
 
-    @Override
-    public String baseUrl() {
-        return baseUrlFor(provider());
-    }
+    /**
+     * Claude(Anthropic)はOllama/OpenAIと異なり自前ホスト型のbaseUrl差し替えに対応していないため、
+     * 固定のエンドポイントを使う(issue #530)。旧ai/LlmClient.ANTHROPIC_BASE_URLと同じ値
+     * (issue #574でLlmClient自体はai-serviceへ移設したが、AppSettingServiceはこの内部ブリッジ
+     * (AiBridgeController#llmConfig)向けに実効baseUrlを解決する責務を引き続き持つ)。
+     */
+    private static final String ANTHROPIC_BASE_URL = "https://api.anthropic.com";
 
-    @Override
-    public String apiKey() {
-        return apiKeyFor(provider());
-    }
-
-    @Override
-    public String defaultModel() {
-        return defaultModelFor(provider());
-    }
-
-    @Override
-    public long requestTimeoutSeconds() {
-        return getLlmRequestTimeoutSeconds();
-    }
-
-    @Override
+    /**
+     * ai-serviceのRemoteLlmConfigProvider(内部ブリッジAiBridgeController#llmConfig経由)、および
+     * legacy-apiに残るLLM呼び出し元(AiGenerationClient経由でai-serviceへ委譲する前段)が、
+     * システム設定として決まる実効LLM接続設定を得るために呼ぶ(issue #574。以前はLlmConfigProvider
+     * インターフェース実装として、ai/パッケージのLlmClientから直接呼ばれていた)。
+     */
     public AiProvider provider() {
         return getLlmProvider();
     }
 
-    @Override
+    /** システム設定の既定プロバイダーにおける実効baseUrl/apiKey/defaultModel。 */
+    public String baseUrl() {
+        return baseUrlFor(provider());
+    }
+
+    public String apiKey() {
+        return apiKeyFor(provider());
+    }
+
+    public String defaultModel() {
+        return defaultModelFor(provider());
+    }
+
     public String apiKeyFor(AiProvider provider) {
         return provider == AiProvider.CLAUDE ? getLlmClaudeApiKey() : getLlmApiKey();
     }
 
-    @Override
     public String defaultModelFor(AiProvider provider) {
         return provider == AiProvider.CLAUDE ? getLlmClaudeModel() : getLlmModel();
     }
 
-    @Override
     public String baseUrlFor(AiProvider provider) {
-        return provider == AiProvider.CLAUDE ? LlmClient.ANTHROPIC_BASE_URL : getLlmBaseUrl();
+        return provider == AiProvider.CLAUDE ? ANTHROPIC_BASE_URL : getLlmBaseUrl();
+    }
+
+    public long requestTimeoutSeconds() {
+        return getLlmRequestTimeoutSeconds();
     }
 
     @Override

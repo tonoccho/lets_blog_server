@@ -95,6 +95,9 @@ services:
       WP_PROVISION_TOKEN: ${WP_PROVISION_TOKEN}
       # PlantUML/Recharts/Penpotの実際のレンダリング呼び出しをmedia-serviceへ委譲する(#573)。
       MEDIA_SERVICE_URI: http://media:8080
+      # LLMテキスト生成(AiGenerationClient)・generation_jobsのジョブ作成/進捗更新
+      # (GenerationJobClient)をai-serviceへ委譲する(issue #574)。
+      AI_SERVICE_URI: http://ai:8080
       BACKUP_MYSQL_HOST: mysql
       BACKUP_MYSQL_PORT: "3306"
       BACKUP_MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -121,6 +124,8 @@ services:
         condition: service_started
       media:
         condition: service_healthy
+      ai:
+        condition: service_healthy
 
   # ComfyUI画像生成・draw.ioダイアグラム・PlantUML/Recharts/Penpotレンダリングの所有権をmedia-serviceへ
   # 移管(#573)。スキーマ・Flywayマイグレーションは専用のlbs_mediaスキーマ(ADR-0004)で本サービスが
@@ -146,11 +151,15 @@ services:
       PENPOT_SERVICE_EMAIL: ${PENPOT_SERVICE_EMAIL:-lbs-service@letsblog.local}
       PENPOT_SERVICE_PASSWORD: ${PENPOT_SERVICE_PASSWORD}
       GENERATED_IMAGES_STORAGE_PATH: /app/data/generated-images
-      # ComfyUIチェックポイントのダウンロード/削除ジョブ・メディアガベージコレクションのCMS
-      # ブリッジ(GenerationJob/CmsMediaBridgeController、legacy-apiが所有)の呼び出し先
-      # (#573 stage2/stage3)。起動時の依存関係(depends_on)には含めない(apiがmediaのhealthyを
+      # メディアガベージコレクションのCMSブリッジ(CmsMediaBridgeController、legacy-apiが所有)の
+      # 呼び出し先(#573 stage3)。起動時の依存関係(depends_on)には含めない(apiがmediaのhealthyを
       # 待つため、循環させないよう実行時呼び出し先としてのみ設定する)。
       LEGACY_API_URI: http://api:8080
+      # ComfyUIチェックポイントのダウンロード/削除ジョブ(GenerationJob、ai-serviceが所有)の
+      # 進捗反映先。#573 stage2ではlegacy-apiが所有していたため上のLEGACY_API_URIを共用していたが、
+      # issue #574でgeneration_jobsの所有権がai-serviceへ移ったため、GenerationJobClientの向き先を
+      # ここへ切り替えた(同じくdepends_onには含めない。理由は上のコメントと同じ)。
+      AI_SERVICE_URI: http://ai:8080
       <<: *rabbitmq-env
       # メディアガベージコレクションのrequireAdmin/自分自身のuserId解決のため、呼び出し元の
       # Bearerトークンをそのままidentity-serviceへ転送して問い合わせる(#573 stage3)。
@@ -164,6 +173,38 @@ services:
       keycloak:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+
+  # LLM呼び出し(下書き/校正/要約/タグ提案/セクション生成/Ask AI)・記事プラン(壁打ち)・
+  # generation_jobs(LLM/ComfyUIジョブ履歴)の所有権をai-serviceへ移管(#574)。スキーマ・Flyway
+  # マイグレーションは専用のlbs_aiスキーマ(ADR-0004)で本サービスが所有する。
+  ai:
+    build:
+      context: .
+      dockerfile: services/ai/Dockerfile
+    container_name: lbs-ai
+    <<: [*common-service, *actuator-healthcheck]
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_ai?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: lbs_ai
+      SPRING_DATASOURCE_PASSWORD: ${LBS_AI_DB_PASSWORD}
+      # project_ai_settings.brave_search_api_key_encryptedの暗号化/復号(CredentialCipher)。
+      # 全サービス共通の鍵(legacy-api/media-serviceと同じ値)。
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
+      # 実効LLM接続設定(システム設定でDB上書き可能、AppSettingServiceが正)・GitHubトークン解決・
+      # マスター環境サイトの既存カテゴリ/タグ取得・プロジェクトメンバー判定・システム全体既定の
+      # Brave Search APIキーの呼び出し先(AiBridgeController、legacy-apiが所有。issue #574)。
+      LEGACY_API_URI: http://api:8080
+      # AdminAuthorizationServiceのrequireAdmin/requireProjectMemberOrAdmin・自分自身のuserId解決の
+      # ため、呼び出し元のBearerトークンをそのままidentity-serviceへ転送して問い合わせる
+      # (log-writer(#572)/media-service(#573)と同じ暫定策)。
+      IDENTITY_SERVICE_URI: http://identity:8080
+    depends_on:
+      mysql:
+        condition: service_healthy
+      keycloak:
         condition: service_healthy
       identity:
         condition: service_healthy
@@ -211,6 +252,8 @@ services:
       LOG_SERVICE_URI: http://log-writer:8080
       # 画像生成・ダイアグラム・PlantUML/Recharts/Penpotレンダリングのルーティング先(#573)。
       MEDIA_SERVICE_URI: http://media:8080
+      # LLM呼び出し・記事プラン(壁打ち)・generation_jobsのルーティング先(#574)。
+      AI_SERVICE_URI: http://ai:8080
     depends_on:
       api:
         condition: service_healthy
@@ -221,6 +264,8 @@ services:
       log-writer:
         condition: service_healthy
       media:
+        condition: service_healthy
+      ai:
         condition: service_healthy
 
   identity:

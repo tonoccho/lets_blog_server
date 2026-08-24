@@ -67,10 +67,13 @@ app:
   penpot-service-email: ${PENPOT_SERVICE_EMAIL:lbs-service@letsblog.local}
   penpot-service-password: ${PENPOT_SERVICE_PASSWORD:}
   generated-images-storage-path: ${GENERATED_IMAGES_STORAGE_PATH:/app/data/generated-images}
-  # ComfyUIチェックポイントのダウンロード/削除ジョブ(GenerationJob、legacy-apiが所有)の進捗、
-  # および メディアガベージコレクションのCMSブリッジ(/api/internal/cms/**、CmsBridgeClient参照)の
-  # 呼び出し先(#573 stage2/stage3)。
+  # メディアガベージコレクションのCMSブリッジ(/api/internal/cms/**、CmsBridgeClient参照)の
+  # 呼び出し先(#573 stage3)。
   legacy-api-uri: ${LEGACY_API_URI:http://api:8080}
+  # ComfyUIチェックポイントのダウンロード/削除ジョブ(GenerationJob)の進捗反映先。#573 stage2では
+  # legacy-apiが所有していたためlegacy-api-uriを共用していたが、issue #574でgeneration_jobsの
+  # 所有権がai-serviceへ移ったため、GenerationJobClientの向き先をこちらへ切り替えた。
+  ai-service-uri: ${AI_SERVICE_URI:http://api:8080}
   # メディアガベージコレクション(ProjectMediaGarbageCollectionController)のrequireAdmin/
   # 自分自身のuserId解決のため、呼び出し元のBearerトークンをそのままidentity-serviceの
   # /api/identity/meへ転送して問い合わせる(#573 stage3、log-writer(#572)と同じ暫定策。

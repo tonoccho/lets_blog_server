@@ -1,6 +1,6 @@
 package com.letsblog.api.integration;
 
-import com.letsblog.api.ai.LlmClient;
+import com.letsblog.api.client.AiGenerationClient;
 import com.letsblog.api.domain.CustomTag;
 import com.letsblog.api.dto.GenerateCustomTagRequest;
 import com.letsblog.api.dto.ValidateCustomTagRequest;
@@ -24,6 +24,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -48,7 +49,7 @@ class CustomTagGenerationIntegrationTest {
     private ObjectMapper objectMapper;
 
     @MockitoBean
-    private LlmClient llmClient;
+    private AiGenerationClient aiGenerationClient;
 
     @MockitoBean
     private ApiKeyService apiKeyService;
@@ -99,7 +100,7 @@ class CustomTagGenerationIntegrationTest {
             null
         );
 
-        when(llmClient.generate(anyString())).thenReturn(llmResponse);
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn(llmResponse);
 
         // Act & Assert
         MvcResult result = mockMvc.perform(
@@ -136,7 +137,7 @@ class CustomTagGenerationIntegrationTest {
             null
         );
 
-        when(llmClient.generate(anyString())).thenReturn(invalidResponse);
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn(invalidResponse);
 
         // Act & Assert
         mockMvc.perform(
@@ -172,7 +173,7 @@ class CustomTagGenerationIntegrationTest {
             null
         );
 
-        when(llmClient.generate(anyString())).thenReturn(llmResponse);
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn(llmResponse);
 
         // Act & Assert
         mockMvc.perform(
@@ -202,7 +203,7 @@ class CustomTagGenerationIntegrationTest {
             null
         );
 
-        when(llmClient.generate(anyString())).thenReturn(maliciousResponse);
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn(maliciousResponse);
 
         // Act & Assert
         mockMvc.perform(
@@ -232,7 +233,7 @@ class CustomTagGenerationIntegrationTest {
             null
         );
 
-        when(llmClient.generate(anyString())).thenReturn(maliciousResponse);
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn(maliciousResponse);
 
         // Act & Assert
         mockMvc.perform(
@@ -263,7 +264,7 @@ class CustomTagGenerationIntegrationTest {
             null
         );
 
-        when(llmClient.generate(anyString())).thenReturn(llmResponse);
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn(llmResponse);
 
         mockMvc.perform(
             post("/api/custom-tags/generate")

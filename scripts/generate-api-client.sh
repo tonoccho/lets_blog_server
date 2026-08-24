@@ -11,6 +11,7 @@ SERVICES=(
   "legacy-api|${LETS_BLOG_API_URL:-http://localhost:8080}"
   "log-writer|${LOG_WRITER_URL:-http://localhost:8080}"
   "media|${MEDIA_SERVICE_URL:-http://localhost:8080}"
+  "ai|${AI_SERVICE_URL:-http://localhost:8080}"
 )
 
 OPENAPI_DIR="openapi"

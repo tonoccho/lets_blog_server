@@ -1,6 +1,6 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.ai.LlmClient;
+import com.letsblog.api.client.AiGenerationClient;
 import com.letsblog.api.domain.EmbedTagType;
 import com.letsblog.api.dto.GenerateTagDesignResponse;
 import org.springframework.stereotype.Service;
@@ -34,18 +34,17 @@ public class TagDesignGenerationService {
                     "Amazon商品カード", "[amazon URL]", ".lb-amazon-card",
                     "{{productName}}, {{price}}, {{productUrl}}, {{imageUrl}}"));
 
-    private final LlmClient llmClient;
-    private final LlmModelService llmModelService;
+    private final AiGenerationClient aiGenerationClient;
 
-    public TagDesignGenerationService(LlmClient llmClient, LlmModelService llmModelService) {
-        this.llmClient = llmClient;
-        this.llmModelService = llmModelService;
+    public TagDesignGenerationService(AiGenerationClient aiGenerationClient) {
+        this.aiGenerationClient = aiGenerationClient;
     }
 
     public GenerateTagDesignResponse generate(
             Long projectId, EmbedTagType tagType, String userPrompt, String currentHtmlTemplate) {
-        String model = llmModelService.getSelectedModel(projectId);
-        String response = llmClient.generate(buildPrompt(tagType, userPrompt, currentHtmlTemplate), model);
+        // issue #574: プロジェクトの選択中モデル解決も含めai-serviceへ委譲する。
+        String response = aiGenerationClient.generate(
+                projectId, buildPrompt(tagType, userPrompt, currentHtmlTemplate), null);
 
         String cssContent = extract(CSS_PATTERN, response);
         String htmlTemplate = extract(HTML_PATTERN, response);

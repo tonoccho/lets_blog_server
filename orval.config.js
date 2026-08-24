@@ -51,6 +51,19 @@ module.exports = {
     },
   },
 
+  // LLM呼び出し(下書き/校正/要約/タグ提案/セクション生成/Ask AI)・記事プラン(壁打ち)・
+  // generation_jobsをai-serviceへ移設(#574)。
+  ai: {
+    input: {
+      target: './openapi/ai.json',
+    },
+    output: {
+      ...commonOutput,
+      target: './sdk/api-client/src/generated/ai',
+      baseUrl: 'http://localhost:8080',
+    },
+  },
+
   // 将来のサービス抽出Issueで追加する例(identity-serviceの場合):
   // identity: {
   //   input: { target: './openapi/identity.json' },

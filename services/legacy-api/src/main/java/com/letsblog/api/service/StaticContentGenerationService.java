@@ -1,6 +1,6 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.ai.LlmClient;
+import com.letsblog.api.client.AiGenerationClient;
 import com.letsblog.api.cms.ssh.WordPressSshOperations;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.domain.StaticContent;
@@ -18,9 +18,9 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * サイトに導入済みのプラグインを確認したうえで、LLM(LlmClient経由。issue #501時点ではOllamaを含む
- * OpenAI互換エンドポイントに対応)を使ってプライバシーポリシー・運営者情報をコピペ可能なテキストとして
- * 生成し、静的コンテンツとして保存する。
+ * サイトに導入済みのプラグインを確認したうえで、LLM(issue #574でai-serviceへ移設したLlmClientへ
+ * {@link AiGenerationClient}経由で委譲。issue #501時点ではOllamaを含むOpenAI互換エンドポイントに対応)を
+ * 使ってプライバシーポリシー・運営者情報をコピペ可能なテキストとして生成し、静的コンテンツとして保存する。
  */
 @Service
 public class StaticContentGenerationService {
@@ -31,7 +31,7 @@ public class StaticContentGenerationService {
     private final SiteService siteService;
     private final WordPressBulkManagementClient bulkManagementClient;
     private final WordPressSshOperations sshOperations;
-    private final LlmClient llmClient;
+    private final AiGenerationClient aiGenerationClient;
     private final StaticContentRepository staticContentRepository;
 
     public StaticContentGenerationService(
@@ -39,13 +39,13 @@ public class StaticContentGenerationService {
             SiteService siteService,
             WordPressBulkManagementClient bulkManagementClient,
             WordPressSshOperations sshOperations,
-            LlmClient llmClient,
+            AiGenerationClient aiGenerationClient,
             StaticContentRepository staticContentRepository) {
         this.siteRepository = siteRepository;
         this.siteService = siteService;
         this.bulkManagementClient = bulkManagementClient;
         this.sshOperations = sshOperations;
-        this.llmClient = llmClient;
+        this.aiGenerationClient = aiGenerationClient;
         this.staticContentRepository = staticContentRepository;
     }
 
@@ -63,7 +63,8 @@ public class StaticContentGenerationService {
 
         List<String> activePluginNames = fetchActivePluginNames(site);
         String prompt = buildPrompt(contentType, site, activePluginNames);
-        String body = extractText(llmClient.generate(prompt));
+        // issue #574: LLM呼び出しはai-serviceへ委譲する。
+        String body = extractText(aiGenerationClient.generate(null, prompt, null));
 
         if (body.isBlank()) {
             throw new AiServiceGenerationException("LLMレスポンスが空でした。時間をおいて再度お試しください。");
@@ -177,7 +178,8 @@ public class StaticContentGenerationService {
     /**
      * ```text ... ```で囲まれていればその中身を、そうでなければレスポンス全体をそのまま本文として使う。
      * ローカルLLM(Ollama等の指示追従性が低いモデル)ではフェンス形式の指示が守られないことがあるため、
-     * フェンス無しでも本文として扱えるようフォールバックする(<think>ブロックはLlmClient側で既に除去済み)。
+     * フェンス無しでも本文として扱えるようフォールバックする(<think>ブロックはai-service側のLlmClientで
+     * 既に除去済み)。
      */
     private String extractText(String response) {
         Matcher matcher = TEXT_PATTERN.matcher(response);
