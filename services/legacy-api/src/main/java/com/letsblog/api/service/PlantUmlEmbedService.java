@@ -4,7 +4,7 @@ import com.letsblog.api.cms.CmsAdapter;
 import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.MediaUploadResult;
-import com.letsblog.api.render.PlantUmlClient;
+import com.letsblog.api.render.MediaRenderClient;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -27,11 +27,11 @@ public class PlantUmlEmbedService {
     private static final Pattern PLANTUML_BLOCK_PATTERN =
             Pattern.compile("```plantuml\\s*\\n(.*?)```", Pattern.DOTALL);
 
-    private final PlantUmlClient plantUmlClient;
+    private final MediaRenderClient mediaRenderClient;
     private final CmsAdapterFactory cmsAdapterFactory;
 
-    public PlantUmlEmbedService(PlantUmlClient plantUmlClient, CmsAdapterFactory cmsAdapterFactory) {
-        this.plantUmlClient = plantUmlClient;
+    public PlantUmlEmbedService(MediaRenderClient mediaRenderClient, CmsAdapterFactory cmsAdapterFactory) {
+        this.mediaRenderClient = mediaRenderClient;
         this.cmsAdapterFactory = cmsAdapterFactory;
     }
 
@@ -59,7 +59,7 @@ public class PlantUmlEmbedService {
             if (reusePrior) {
                 current = prior;
             } else {
-                byte[] png = plantUmlClient.renderPng(wrapped);
+                byte[] png = mediaRenderClient.renderPlantUml(wrapped);
                 String fileName = "plantuml-" + (++index) + ".png";
                 MediaUploadResult uploaded = cmsAdapter.uploadMedia(credentials, fileName, "image/png", png);
                 current = new UploadedImageInfo(sha256, uploaded.url(), uploaded.id());
@@ -84,7 +84,7 @@ public class PlantUmlEmbedService {
 
         while (matcher.find()) {
             String diagramSource = matcher.group(1).trim();
-            byte[] png = plantUmlClient.renderPng(wrapWithMarkers(diagramSource));
+            byte[] png = mediaRenderClient.renderPlantUml(wrapWithMarkers(diagramSource));
             String dataUri = "data:image/png;base64," + Base64.getEncoder().encodeToString(png);
 
             matcher.appendReplacement(result, Matcher.quoteReplacement("![diagram](" + dataUri + ")"));

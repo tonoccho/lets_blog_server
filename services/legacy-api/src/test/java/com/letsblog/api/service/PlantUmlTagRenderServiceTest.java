@@ -6,7 +6,7 @@ import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.cms.MediaUploadResult;
-import com.letsblog.api.render.PlantUmlClient;
+import com.letsblog.api.render.MediaRenderClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -36,7 +36,7 @@ import static org.mockito.Mockito.when;
 class PlantUmlTagRenderServiceTest {
 
     @Mock
-    private PlantUmlClient plantUmlClient;
+    private MediaRenderClient mediaRenderClient;
     @Mock
     private CmsAdapterFactory cmsAdapterFactory;
     @Mock
@@ -49,19 +49,19 @@ class PlantUmlTagRenderServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new PlantUmlTagRenderService(plantUmlClient, cmsAdapterFactory);
+        service = new PlantUmlTagRenderService(mediaRenderClient, cmsAdapterFactory);
         lenient().when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
     }
 
     @Test
     void renderForPreview_タグが無ければ何もしない() {
         assertEquals("普通の本文です。", service.renderForPreview("普通の本文です。"));
-        verifyNoInteractions(plantUmlClient);
+        verifyNoInteractions(mediaRenderClient);
     }
 
     @Test
     void renderForPreview_PNGをdata_URIとして埋め込む() {
-        when(plantUmlClient.renderPng(anyString())).thenReturn(new byte[]{1, 2, 3});
+        when(mediaRenderClient.renderPlantUml(anyString())).thenReturn(new byte[]{1, 2, 3});
 
         String result = service.renderForPreview("本文\n[plantuml]\n@startuml\nA->B\n@enduml\n[/plantuml]\n続き");
 
@@ -71,25 +71,25 @@ class PlantUmlTagRenderServiceTest {
 
     @Test
     void renderForPreview_startumlが無い場合は自動的に補う() {
-        when(plantUmlClient.renderPng(anyString())).thenReturn(new byte[]{1});
+        when(mediaRenderClient.renderPlantUml(anyString())).thenReturn(new byte[]{1});
 
         service.renderForPreview("[plantuml]\nA->B\n[/plantuml]");
 
-        verify(plantUmlClient).renderPng(eq("@startuml\nA->B\n@enduml"));
+        verify(mediaRenderClient).renderPlantUml(eq("@startuml\nA->B\n@enduml"));
     }
 
     @Test
     void renderForPreview_既にstartumlがある場合は二重に包まない() {
-        when(plantUmlClient.renderPng(anyString())).thenReturn(new byte[]{1});
+        when(mediaRenderClient.renderPlantUml(anyString())).thenReturn(new byte[]{1});
 
         service.renderForPreview("[plantuml]\n@startuml\nA->B\n@enduml\n[/plantuml]");
 
-        verify(plantUmlClient).renderPng(eq("@startuml\nA->B\n@enduml"));
+        verify(mediaRenderClient).renderPlantUml(eq("@startuml\nA->B\n@enduml"));
     }
 
     @Test
     void renderForPreview_レンダリング失敗時はInvalidPlantUmlTagExceptionを投げる() {
-        when(plantUmlClient.renderPng(anyString()))
+        when(mediaRenderClient.renderPlantUml(anyString()))
                 .thenThrow(new AiServiceException("PlantUMLサーバーに接続できません", null));
 
         InvalidPlantUmlTagException e = assertThrows(InvalidPlantUmlTagException.class,
@@ -99,7 +99,7 @@ class PlantUmlTagRenderServiceTest {
 
     @Test
     void render_複数タグをそれぞれ連番ファイル名でアップロードする() {
-        when(plantUmlClient.renderPng(anyString())).thenReturn(new byte[]{1});
+        when(mediaRenderClient.renderPlantUml(anyString())).thenReturn(new byte[]{1});
         when(cmsAdapter.uploadMedia(eq(credentials), eq("plantuml-tag-1.png"), eq("image/png"), any()))
                 .thenReturn(new MediaUploadResult("10", "https://example.com/1.png"));
         when(cmsAdapter.uploadMedia(eq(credentials), eq("plantuml-tag-2.png"), eq("image/png"), any()))
@@ -126,7 +126,7 @@ class PlantUmlTagRenderServiceTest {
         DiagramEmbedResult result = service.render(credentials, "[plantuml]\nA->B\n[/plantuml]", priorUploads);
 
         assertEquals("![diagram](https://example.com/cached.png)", result.markdown());
-        verifyNoInteractions(plantUmlClient);
+        verifyNoInteractions(mediaRenderClient);
         verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
     }
 
@@ -138,7 +138,7 @@ class PlantUmlTagRenderServiceTest {
                 "plantuml:" + sha256,
                 new UploadedImageInfo(sha256, "https://example.com/old.png", "10"));
         when(cmsAdapter.mediaExists(credentials, "10")).thenReturn(false);
-        when(plantUmlClient.renderPng(wrapped)).thenReturn(new byte[]{1});
+        when(mediaRenderClient.renderPlantUml(wrapped)).thenReturn(new byte[]{1});
         when(cmsAdapter.uploadMedia(eq(credentials), eq("plantuml-tag-1.png"), eq("image/png"), any()))
                 .thenReturn(new MediaUploadResult("11", "https://example.com/new.png"));
 
@@ -152,12 +152,12 @@ class PlantUmlTagRenderServiceTest {
     void render_アップロード対象が無ければPlantUMLサーバーへ問い合わせない() {
         service.render(credentials, "タグなしの本文です。", Map.of());
 
-        verifyNoInteractions(plantUmlClient);
+        verifyNoInteractions(mediaRenderClient);
     }
 
     @Test
     void render_レンダリング失敗時はInvalidPlantUmlTagExceptionを投げアップロードしない() {
-        when(plantUmlClient.renderPng(anyString()))
+        when(mediaRenderClient.renderPlantUml(anyString()))
                 .thenThrow(new AiServiceException("PlantUMLサーバーに接続できません", null));
 
         assertThrows(InvalidPlantUmlTagException.class,

@@ -4,9 +4,8 @@ import com.letsblog.api.domain.ChartType;
 import com.letsblog.api.markdown.MarkdownTable;
 import com.letsblog.api.markdown.MarkdownTableParseException;
 import com.letsblog.api.markdown.MarkdownTableParser;
-import com.letsblog.api.render.RechartsChartConfig;
+import com.letsblog.api.render.MediaRenderClient;
 import com.letsblog.api.render.RechartsRenderException;
-import com.letsblog.api.render.RechartsRenderer;
 import org.springframework.stereotype.Service;
 import org.springframework.web.util.HtmlUtils;
 
@@ -55,10 +54,10 @@ public class RechartsTagRenderService {
             "#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f",
             "#edc948", "#b07aa1", "#ff9da7", "#9c755f", "#bab0ac");
 
-    private final RechartsRenderer rechartsRenderer;
+    private final MediaRenderClient mediaRenderClient;
 
-    public RechartsTagRenderService(RechartsRenderer rechartsRenderer) {
-        this.rechartsRenderer = rechartsRenderer;
+    public RechartsTagRenderService(MediaRenderClient mediaRenderClient) {
+        this.mediaRenderClient = mediaRenderClient;
     }
 
     /**
@@ -100,14 +99,12 @@ public class RechartsTagRenderService {
         String gridColor = dark ? "#555555" : "#e0e0e0";
         String yAxisLabel = attrs.get("yAxis");
 
-        RechartsChartConfig config = new RechartsChartConfig(
-                type.name().toLowerCase(Locale.ROOT), data, xAxisKey, seriesKeys, DEFAULT_PALETTE,
-                stacked, width, height, textColor, gridColor,
-                type == ChartType.PIE ? null : yAxisLabel);
-
         String chartHtml;
         try {
-            chartHtml = rechartsRenderer.render(config);
+            chartHtml = mediaRenderClient.renderRecharts(
+                    type.name().toLowerCase(Locale.ROOT), data, xAxisKey, seriesKeys, DEFAULT_PALETTE,
+                    stacked, width, height, textColor, gridColor,
+                    type == ChartType.PIE ? null : yAxisLabel);
         } catch (RechartsRenderException e) {
             throw new InvalidRechartsTagException(e.getMessage());
         }

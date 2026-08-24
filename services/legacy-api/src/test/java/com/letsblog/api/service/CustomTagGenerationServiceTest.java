@@ -1,7 +1,7 @@
 package com.letsblog.api.service;
 
 import com.letsblog.api.ai.LlmClient;
-import com.letsblog.api.ai.PenpotClient;
+import com.letsblog.api.render.MediaRenderClient;
 import com.letsblog.api.domain.CustomTag;
 import com.letsblog.api.dto.GenerateCustomTagRequest;
 import com.letsblog.api.dto.GenerateCustomTagResponse;
@@ -29,7 +29,7 @@ class CustomTagGenerationServiceTest {
     private LlmClient llmClient;
 
     @Mock
-    private PenpotClient penpotClient;
+    private MediaRenderClient mediaRenderClient;
 
     @Mock
     private CustomTagRepository customTagRepository;
@@ -208,19 +208,19 @@ class CustomTagGenerationServiceTest {
             "青いボタンコンポーネントを作成してください", "my-button", "説明", null
         );
 
-        PenpotClient.DesignFile designFile = new PenpotClient.DesignFile(
+        MediaRenderClient.DesignFile designFile = new MediaRenderClient.DesignFile(
             "file-id", "project-id", "http://localhost:9001/#/workspace/project-id/file-id?page-id=page-id"
         );
 
         when(llmClient.generate(anyString())).thenReturn(llmResponse);
         when(customTagRepository.findByTagNameAndProjectIdIsNull("my-button")).thenReturn(Optional.empty());
-        when(penpotClient.createDesignFile(anyString(), anyString())).thenReturn(designFile);
+        when(mediaRenderClient.createPenpotDesignFile(anyString(), anyString())).thenReturn(designFile);
         when(customTagRepository.save(any(CustomTag.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         GenerateCustomTagResponse response = customTagGenerationService.generate(request);
 
         assertEquals(designFile.url(), response.penpotFileUrl());
-        verify(penpotClient).createDesignFile(eq("カスタムタグ: my-button"), anyString());
+        verify(mediaRenderClient).createPenpotDesignFile(eq("カスタムタグ: my-button"), anyString());
     }
 
     @Test
@@ -235,7 +235,7 @@ class CustomTagGenerationServiceTest {
 
         when(llmClient.generate(anyString())).thenReturn(llmResponse);
         when(customTagRepository.findByTagNameAndProjectIdIsNull("my-button")).thenReturn(Optional.empty());
-        when(penpotClient.createDesignFile(anyString(), anyString()))
+        when(mediaRenderClient.createPenpotDesignFile(anyString(), anyString()))
             .thenThrow(new com.letsblog.api.ai.AiServiceException("接続失敗", null));
         when(customTagRepository.save(any(CustomTag.class))).thenAnswer(invocation -> invocation.getArgument(0));
 

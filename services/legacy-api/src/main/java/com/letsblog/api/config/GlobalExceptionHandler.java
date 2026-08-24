@@ -10,7 +10,6 @@ import com.letsblog.api.service.AiServiceGenerationException;
 import com.letsblog.api.service.ArticlePlanSessionNotFoundException;
 import com.letsblog.api.service.BackupException;
 import com.letsblog.api.service.CustomTagNotFoundException;
-import com.letsblog.api.service.DiagramNotFoundException;
 import com.letsblog.api.service.EmailAlreadyExistsException;
 import com.letsblog.api.service.EmailSendException;
 import com.letsblog.api.service.ForbiddenException;
@@ -92,13 +91,14 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 
+    /**
+     * GeneratedImageは#573でmedia-serviceへ移設したが、AiAssistService/ProjectControllerが
+     * 生成画像の保存・読み込みに引き続きこのentity/repositoryのローカルコピーを使うため
+     * (media-serviceへの委譲はAiAssistService側の書き換えを伴う#573 stage4で行う)、
+     * このハンドラも当面残す。
+     */
     @ExceptionHandler(GeneratedImageNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleGeneratedImageNotFound(GeneratedImageNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
-    }
-
-    @ExceptionHandler(DiagramNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleDiagramNotFound(DiagramNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 

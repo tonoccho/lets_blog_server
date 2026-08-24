@@ -1,8 +1,7 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.render.RechartsChartConfig;
+import com.letsblog.api.render.MediaRenderClient;
 import com.letsblog.api.render.RechartsRenderException;
-import com.letsblog.api.render.RechartsRenderer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -18,24 +17,35 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+/**
+ * RechartsTagRenderServiceの回帰テスト。#573でレンダリング実処理をmedia-service
+ * ({@code MediaRenderClient#renderRecharts})へ委譲するよう書き換えたのに伴い、
+ * 以前は{@code RechartsChartConfig}を1つのオブジェクトとしてキャプチャしていた検証を、
+ * 個々の引数をキャプチャする方式へ変更した(挙動自体は変わらない)。
+ */
 @ExtendWith(MockitoExtension.class)
 class RechartsTagRenderServiceTest {
 
     @Mock
-    private RechartsRenderer rechartsRenderer;
+    private MediaRenderClient mediaRenderClient;
 
     private RechartsTagRenderService service;
 
     @BeforeEach
     void setUp() {
-        service = new RechartsTagRenderService(rechartsRenderer);
-        lenient().when(rechartsRenderer.render(any())).thenReturn("<div class=\"recharts-wrapper\" "
-                + "style=\"position: relative; width: 700px; height: 300px;\"><svg></svg></div>");
+        service = new RechartsTagRenderService(mediaRenderClient);
+        lenient()
+                .when(mediaRenderClient.renderRecharts(
+                        any(), any(), any(), any(), any(), anyBoolean(), anyInt(), anyInt(), any(), any(), any()))
+                .thenReturn("<div class=\"recharts-wrapper\" "
+                        + "style=\"position: relative; width: 700px; height: 300px;\"><svg></svg></div>");
     }
 
     private String barTag(String attrs, String table) {
@@ -45,6 +55,33 @@ class RechartsTagRenderServiceTest {
     private static final String SIMPLE_TABLE =
             "| month | revenue |\n|-------|---------|\n| 2024-01 | 100000 |\n| 2024-02 | 120000 |";
 
+    @SuppressWarnings("unchecked")
+    private CapturedCall captureRenderRechartsCall() {
+        ArgumentCaptor<String> type = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<List<Map<String, Object>>> data = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<String> xAxisKey = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<List<String>> seriesKeys = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<List<String>> colors = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<Boolean> stacked = ArgumentCaptor.forClass(Boolean.class);
+        ArgumentCaptor<Integer> width = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<Integer> height = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<String> textColor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> gridColor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> yAxisLabel = ArgumentCaptor.forClass(String.class);
+        verify(mediaRenderClient).renderRecharts(type.capture(), data.capture(), xAxisKey.capture(),
+                seriesKeys.capture(), colors.capture(), stacked.capture(), width.capture(), height.capture(),
+                textColor.capture(), gridColor.capture(), yAxisLabel.capture());
+        return new CapturedCall(type.getValue(), data.getValue(), xAxisKey.getValue(), seriesKeys.getValue(),
+                colors.getValue(), stacked.getValue(), width.getValue(), height.getValue(), textColor.getValue(),
+                gridColor.getValue(), yAxisLabel.getValue());
+    }
+
+    private record CapturedCall(
+            String type, List<Map<String, Object>> data, String xAxisKey, List<String> seriesKeys,
+            List<String> colors, boolean stacked, int width, int height, String textColor, String gridColor,
+            String yAxisLabel) {
+    }
+
     @Test
     void render_rechartsタグが無い場合はそのまま返す() {
         String markdown = "普通の本文です。";
@@ -52,7 +89,7 @@ class RechartsTagRenderServiceTest {
         String result = service.render(markdown);
 
         assertEquals(markdown, result);
-        verifyNoInteractions(rechartsRenderer);
+        verifyNoInteractions(mediaRenderClient);
     }
 
     @Test
@@ -153,13 +190,11 @@ class RechartsTagRenderServiceTest {
 
         service.render(markdown);
 
-        ArgumentCaptor<RechartsChartConfig> captor = ArgumentCaptor.forClass(RechartsChartConfig.class);
-        verify(rechartsRenderer).render(captor.capture());
-        RechartsChartConfig config = captor.getValue();
-        assertEquals("pie", config.type());
-        assertEquals(List.of("device", "users"), config.seriesKeys());
-        assertEquals("Desktop", config.data().get(0).get("device"));
-        assertEquals(45000.0, config.data().get(0).get("users"));
+        CapturedCall captured = captureRenderRechartsCall();
+        assertEquals("pie", captured.type());
+        assertEquals(List.of("device", "users"), captured.seriesKeys());
+        assertEquals("Desktop", captured.data().get(0).get("device"));
+        assertEquals(45000.0, captured.data().get(0).get("users"));
     }
 
     @Test
@@ -180,9 +215,8 @@ class RechartsTagRenderServiceTest {
 
         service.render(markdown);
 
-        ArgumentCaptor<RechartsChartConfig> captor = ArgumentCaptor.forClass(RechartsChartConfig.class);
-        verify(rechartsRenderer).render(captor.capture());
-        assertEquals(1_000_000.0, captor.getValue().data().get(0).get("revenue"));
+        CapturedCall captured = captureRenderRechartsCall();
+        assertEquals(1_000_000.0, captured.data().get(0).get("revenue"));
     }
 
     @Test
@@ -203,9 +237,8 @@ class RechartsTagRenderServiceTest {
 
         service.render(markdown);
 
-        ArgumentCaptor<RechartsChartConfig> captor = ArgumentCaptor.forClass(RechartsChartConfig.class);
-        verify(rechartsRenderer).render(captor.capture());
-        assertTrue(captor.getValue().stacked());
+        CapturedCall captured = captureRenderRechartsCall();
+        assertTrue(captured.stacked());
     }
 
     @Test
@@ -214,9 +247,8 @@ class RechartsTagRenderServiceTest {
 
         service.render(markdown);
 
-        ArgumentCaptor<RechartsChartConfig> captor = ArgumentCaptor.forClass(RechartsChartConfig.class);
-        verify(rechartsRenderer).render(captor.capture());
-        assertEquals("#e0e0e0", captor.getValue().textColor());
+        CapturedCall captured = captureRenderRechartsCall();
+        assertEquals("#e0e0e0", captured.textColor());
     }
 
     @Test
@@ -225,10 +257,9 @@ class RechartsTagRenderServiceTest {
 
         service.render(markdown);
 
-        ArgumentCaptor<RechartsChartConfig> captor = ArgumentCaptor.forClass(RechartsChartConfig.class);
-        verify(rechartsRenderer).render(captor.capture());
-        assertEquals(500, captor.getValue().width());
-        assertEquals(250, captor.getValue().height());
+        CapturedCall captured = captureRenderRechartsCall();
+        assertEquals(500, captured.width());
+        assertEquals(250, captured.height());
     }
 
     @Test
@@ -237,9 +268,8 @@ class RechartsTagRenderServiceTest {
 
         service.render(markdown);
 
-        ArgumentCaptor<RechartsChartConfig> captor = ArgumentCaptor.forClass(RechartsChartConfig.class);
-        verify(rechartsRenderer).render(captor.capture());
-        assertEquals(700, captor.getValue().width());
+        CapturedCall captured = captureRenderRechartsCall();
+        assertEquals(700, captured.width());
     }
 
     @Test
@@ -273,7 +303,9 @@ class RechartsTagRenderServiceTest {
 
     @Test
     void render_レンダリングに失敗した場合はInvalidRechartsTagExceptionへ変換する() {
-        when(rechartsRenderer.render(any())).thenThrow(new RechartsRenderException("タイムアウトしました"));
+        when(mediaRenderClient.renderRecharts(
+                        any(), any(), any(), any(), any(), anyBoolean(), anyInt(), anyInt(), any(), any(), any()))
+                .thenThrow(new RechartsRenderException("タイムアウトしました"));
         String markdown = barTag("", SIMPLE_TABLE);
 
         InvalidRechartsTagException e = assertThrows(InvalidRechartsTagException.class,
@@ -287,11 +319,10 @@ class RechartsTagRenderServiceTest {
 
         service.render(markdown);
 
-        ArgumentCaptor<RechartsChartConfig> captor = ArgumentCaptor.forClass(RechartsChartConfig.class);
-        verify(rechartsRenderer).render(captor.capture());
-        Map<String, Object> firstRow = captor.getValue().data().get(0);
+        CapturedCall captured = captureRenderRechartsCall();
+        Map<String, Object> firstRow = captured.data().get(0);
         assertEquals("2024-01", firstRow.get("month"));
         assertEquals(100000.0, firstRow.get("revenue"));
-        assertEquals(List.of("revenue"), captor.getValue().seriesKeys());
+        assertEquals(List.of("revenue"), captured.seriesKeys());
     }
 }

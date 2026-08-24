@@ -17,4 +17,40 @@ export * from './generated/log-writer/audit-log-controller/audit-log-controller'
 export * from './generated/log-writer/operation-log-controller/operation-log-controller';
 export * from './generated/log-writer/frontend-error-log-controller/frontend-error-log-controller';
 
+// media(ComfyUI画像生成・draw.ioダイアグラム・PlantUML/Recharts/Penpotレンダリングの所有権を
+// media-serviceへ移管、#573 stage1)
+export * from './generated/media/openAPIDefinition.schemas';
+export * from './generated/media/generated-image-controller/generated-image-controller';
+export * from './generated/media/diagram-controller/diagram-controller';
+export * from './generated/media/render-controller/render-controller';
+
+// mediaのGeneratedImageController.list/DiagramController.listと、log-writerのAuditLogController.list/
+// OperationLogController.listは、いずれもJavaのメソッド名が単に"list"であるため、orvalの汎用命名
+// (関数名・クエリパラメータ型・レスポンス型・URL組み立て関数)が偶然一致し衝突する(サービスをまたいだ
+// 名前空間を持たないorvalのマルチターゲット生成の既知の制約、#573で最初に顕在化)。現時点でこれらの
+// シンボルを`@api-client`から名前で直接importしている呼び出し元は無いため、明示的にlog-writer側を正として
+// 再エクスポートし曖昧性を解消する(将来他サービスでも同名衝突が起きた場合は同じパターンで解消すること)。
+export type {
+  ListParams,
+  List1Params,
+} from './generated/log-writer/openAPIDefinition.schemas';
+export {
+  list1,
+  getList1Url,
+} from './generated/log-writer/audit-log-controller/audit-log-controller';
+export type {
+  list1Response,
+  list1Response200,
+  list1ResponseSuccess,
+} from './generated/log-writer/audit-log-controller/audit-log-controller';
+export {
+  list,
+  getListUrl,
+} from './generated/log-writer/operation-log-controller/operation-log-controller';
+export type {
+  listResponse,
+  listResponse200,
+  listResponseSuccess,
+} from './generated/log-writer/operation-log-controller/operation-log-controller';
+
 // 将来のサービス抽出Issueで追加するターゲットも、ここに re-export を追加していく。

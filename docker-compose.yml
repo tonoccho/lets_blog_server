@@ -93,6 +93,8 @@ services:
       PENPOT_SERVICE_PASSWORD: ${PENPOT_SERVICE_PASSWORD}
       WORDPRESS_PROVISION_BASE_URL: http://wordpress:9000
       WP_PROVISION_TOKEN: ${WP_PROVISION_TOKEN}
+      # PlantUML/Recharts/Penpotの実際のレンダリング呼び出しをmedia-serviceへ委譲する(#573)。
+      MEDIA_SERVICE_URI: http://media:8080
       BACKUP_MYSQL_HOST: mysql
       BACKUP_MYSQL_PORT: "3306"
       BACKUP_MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -117,6 +119,41 @@ services:
         condition: service_healthy
       docker-socket-proxy:
         condition: service_started
+      media:
+        condition: service_healthy
+
+  # ComfyUI画像生成・draw.ioダイアグラム・PlantUML/Recharts/Penpotレンダリングの所有権をmedia-serviceへ
+  # 移管(#573)。スキーマ・Flywayマイグレーションは専用のlbs_mediaスキーマ(ADR-0004)で本サービスが
+  # 所有する。generated_images/comfyui_models volumeはapiと共有マウントする(#573 stage1時点では
+  # comfyui_modelsはまだ未使用だが、stage2でComfyUiModelService/ModelInstallJobRunnerを移設した際に
+  # そのまま使えるよう先にマウントしておく)。
+  media:
+    build:
+      context: .
+      dockerfile: services/media/Dockerfile
+    container_name: lbs-media
+    <<: [*common-service, *actuator-healthcheck]
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_media?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: lbs_media
+      SPRING_DATASOURCE_PASSWORD: ${LBS_MEDIA_DB_PASSWORD}
+      COMFYUI_BASE_URL: http://comfyui:8188
+      COMFYUI_CHECKPOINT: ${COMFYUI_CHECKPOINT:-v1-5-pruned-emaonly.safetensors}
+      COMFYUI_MODELS_PATH: /comfyui-models
+      PLANTUML_BASE_URL: http://plantuml:8080
+      PENPOT_BASE_URL: http://penpot-frontend:8080
+      PENPOT_PUBLIC_URL: ${PENPOT_PUBLIC_URL:-http://localhost:9001}
+      PENPOT_SERVICE_EMAIL: ${PENPOT_SERVICE_EMAIL:-lbs-service@letsblog.local}
+      PENPOT_SERVICE_PASSWORD: ${PENPOT_SERVICE_PASSWORD}
+      GENERATED_IMAGES_STORAGE_PATH: /app/data/generated-images
+    volumes:
+      - generated_images:/app/data/generated-images
+      - comfyui_models:/comfyui-models
+    depends_on:
+      mysql:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
 
   # ログの所有権をlog-writerへ完全移管(#572)。RabbitMQ経由でエラーログ/操作ログ/監査ログの
   # メッセージを受信して書き込むのに加え、読み取りAPI(監査ログ・操作ログ・フロントエンドエラー
@@ -159,6 +196,8 @@ services:
     <<: [*common-service, *actuator-healthcheck]
     environment:
       LOG_SERVICE_URI: http://log-writer:8080
+      # 画像生成・ダイアグラム・PlantUML/Recharts/Penpotレンダリングのルーティング先(#573)。
+      MEDIA_SERVICE_URI: http://media:8080
     depends_on:
       api:
         condition: service_healthy
@@ -167,6 +206,8 @@ services:
       keycloak:
         condition: service_healthy
       log-writer:
+        condition: service_healthy
+      media:
         condition: service_healthy
 
   identity:

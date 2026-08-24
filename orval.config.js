@@ -38,6 +38,19 @@ module.exports = {
     },
   },
 
+  // ComfyUI画像生成・draw.ioダイアグラム・PlantUML/Recharts/Penpotレンダリングをmedia-serviceへ
+  // 移設(#573)。
+  media: {
+    input: {
+      target: './openapi/media.json',
+    },
+    output: {
+      ...commonOutput,
+      target: './sdk/api-client/src/generated/media',
+      baseUrl: 'http://localhost:8080',
+    },
+  },
+
   // 将来のサービス抽出Issueで追加する例(identity-serviceの場合):
   // identity: {
   //   input: { target: './openapi/identity.json' },

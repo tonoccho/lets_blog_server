@@ -1,0 +1,70 @@
+server:
+  port: 8080
+
+logging:
+  level:
+    root: INFO
+    com.letsblog.media: DEBUG
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+  # log-writer(#572)と同じ理由: 明示的なproducesを持たないエンドポイントがOpenAPI上`*/*`として
+  # 記録されると、orvalが生成するTypeScriptクライアントの型付けが崩れる。既定の応答Content-Typeを
+  # 明示することでこれを避ける。
+  default-produces-media-type: application/json
+
+spring:
+  application:
+    name: lets-blog-media
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 20MB
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lbs_media?useSSL=false&serverTimezone=UTC}
+    username: ${SPRING_DATASOURCE_USERNAME:lbs_media}
+    password: ${SPRING_DATASOURCE_PASSWORD:lbs_media}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  # generated_images/generated_image_sequences/diagrams/project_image_settingsのスキーマ所有権を
+  # media-serviceへ移管した(#573)。専用スキーマ(lbs_media、ADR-0004)なので、legacy-api側の
+  # V1〜とは無関係の独立したマイグレーション履歴としてV1から開始する。既存データの移行は
+  # scripts/migrate-media-tables-to-lbs-media.sqlを参照(V1適用後に実行する運用)。
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+# ComfyUI/PlantUML/Penpotへの接続情報。legacy-apiのapplication.ymlから該当プロパティをそのまま
+# 移設した(#573)。stage1時点ではRenderController(PlantUML/Recharts/Penpot)のみが実際にこれらを
+# 使う。ComfyUI関連プロパティ自体はstage2(ComfyUiModelService移設)まで未使用だが、legacy-api側の
+# 既定値と揃えておく。
+app:
+  comfyui-base-url: ${COMFYUI_BASE_URL:http://localhost:8188}
+  comfyui-checkpoint: ${COMFYUI_CHECKPOINT:v1-5-pruned-emaonly.safetensors}
+  comfyui-models-path: ${COMFYUI_MODELS_PATH:/app/data/comfyui-models}
+  plantuml-base-url: ${PLANTUML_BASE_URL:http://localhost:8085}
+  penpot-base-url: ${PENPOT_BASE_URL:http://localhost:9001}
+  penpot-public-url: ${PENPOT_PUBLIC_URL:http://localhost:9001}
+  penpot-service-email: ${PENPOT_SERVICE_EMAIL:lbs-service@letsblog.local}
+  penpot-service-password: ${PENPOT_SERVICE_PASSWORD:}
+  generated-images-storage-path: ${GENERATED_IMAGES_STORAGE_PATH:/app/data/generated-images}
+
+# KeycloakのJWT検証(#573)。identity-service/log-writerのSecurityConfig/JwtDecoderConfigと同じ理由
+# により、issuer-uriによる自動設定は使わずJWKS取得先と期待issuerを個別に指定して組み立てている。
+keycloak:
+  jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/certs}
+  issuer: ${KEYCLOAK_ISSUER:https://localhost/auth/realms/letsblog}
