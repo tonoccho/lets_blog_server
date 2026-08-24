@@ -2,6 +2,7 @@ package com.letsblog.api.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.ai.ComfyUiClient;
+import com.letsblog.api.ai.MediaComfyUiClient;
 import com.letsblog.api.domain.GenerationJob;
 import com.letsblog.api.dto.ComfyUiCheckpointListResponse;
 import com.letsblog.api.dto.GenerationJobResponse;
@@ -23,7 +24,7 @@ import java.util.Map;
 public class ComfyUiModelService {
 
     private final ComfyUiClient comfyUiClient;
-    private final ModelInstallJobRunner modelInstallJobRunner;
+    private final MediaComfyUiClient mediaComfyUiClient;
     private final ProjectRepository projectRepository;
     private final ProjectImageSettingsService projectImageSettingsService;
     private final GenerationJobRepository generationJobRepository;
@@ -32,14 +33,14 @@ public class ComfyUiModelService {
 
     public ComfyUiModelService(
             ComfyUiClient comfyUiClient,
-            ModelInstallJobRunner modelInstallJobRunner,
+            MediaComfyUiClient mediaComfyUiClient,
             ProjectRepository projectRepository,
             ProjectImageSettingsService projectImageSettingsService,
             GenerationJobRepository generationJobRepository,
             ObjectMapper objectMapper,
             @Value("${app.comfyui-checkpoint}") String globalDefaultCheckpoint) {
         this.comfyUiClient = comfyUiClient;
-        this.modelInstallJobRunner = modelInstallJobRunner;
+        this.mediaComfyUiClient = mediaComfyUiClient;
         this.projectRepository = projectRepository;
         this.projectImageSettingsService = projectImageSettingsService;
         this.generationJobRepository = generationJobRepository;
@@ -81,13 +82,13 @@ public class ComfyUiModelService {
     public GenerationJobResponse startInstall(String downloadUrl, String fileName) {
         requireHttpUrl(downloadUrl);
         GenerationJob job = startJob("comfyui_checkpoint_download", Map.of("url", downloadUrl, "fileName", fileName));
-        modelInstallJobRunner.runComfyUiDownload(job.getId(), downloadUrl, fileName);
+        mediaComfyUiClient.startInstall(job.getId(), downloadUrl, fileName);
         return toResponse(job);
     }
 
     public GenerationJobResponse startDelete(String fileName) {
         GenerationJob job = startJob("comfyui_checkpoint_delete", Map.of("fileName", fileName));
-        modelInstallJobRunner.runComfyUiDelete(job.getId(), fileName);
+        mediaComfyUiClient.startDelete(job.getId(), fileName);
         return toResponse(job);
     }
 

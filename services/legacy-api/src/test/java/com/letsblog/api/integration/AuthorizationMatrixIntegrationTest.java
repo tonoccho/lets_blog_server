@@ -199,6 +199,7 @@ class AuthorizationMatrixIntegrationTest {
                 // -- GenerationJobController (2) --
                 new Endpoint("GET", "/api/generation-jobs"),
                 new Endpoint("GET", "/api/generation-jobs/1"),
+                new Endpoint("PATCH", "/api/generation-jobs/1"),
 
                 // (HealthController /api/health は公開パスのため対象外)
 
