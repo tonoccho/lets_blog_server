@@ -163,6 +163,13 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("GET", "/api/backup/download"),
                 new Endpoint("POST", "/api/backup/restore"),
 
+                // -- CmsMediaBridgeController (3、#573 stage3で追加) --
+                // media-service専用の内部ブリッジ(AUTHORIZATION_MATRIX.mdの一覧表からは省略しているが、
+                // ApiKeyAuthFilterの対象からは除外していないため、ここでの401チェック対象には含める)。
+                new Endpoint("POST", "/api/internal/cms/sites/my-site/media"),
+                new Endpoint("GET", "/api/internal/cms/projects/1/media-scan"),
+                new Endpoint("DELETE", "/api/internal/cms/projects/1/media/1"),
+
                 // -- ContentCacheController (1) --
                 new Endpoint("GET", "/api/content-cache"),
 
@@ -196,15 +203,14 @@ class AuthorizationMatrixIntegrationTest {
                 // (DiagramController/GeneratedImageControllerは#573でmedia-serviceへ移設したため対象外)
                 // (FrontendErrorLogControllerは#572でlog-writerサービスへ移設したため対象外)
 
-                // -- GenerationJobController (2) --
+                // -- GenerationJobController (3) --
                 new Endpoint("GET", "/api/generation-jobs"),
+                new Endpoint("POST", "/api/generation-jobs"),
                 new Endpoint("GET", "/api/generation-jobs/1"),
                 new Endpoint("PATCH", "/api/generation-jobs/1"),
 
                 // (HealthController /api/health は公開パスのため対象外)
-
-                // -- MediaController (1) --
-                new Endpoint("POST", "/api/media/upload"),
+                // (MediaControllerは#573 stage3でmedia-serviceへ移設したため対象外)
 
                 // -- MetadataController (2) --
                 new Endpoint("GET", "/api/metadata/post-statuses"),
@@ -299,9 +305,7 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("GET", "/api/projects/1/dashboard/google-analytics"),
                 new Endpoint("GET", "/api/projects/1/dashboard/adsense"),
 
-                // -- ProjectMediaGarbageCollectionController (2) --
-                new Endpoint("GET", "/api/projects/1/media-garbage-collection/scan"),
-                new Endpoint("POST", "/api/projects/1/media-garbage-collection/delete"),
+                // (ProjectMediaGarbageCollectionControllerは#573 stage3でmedia-serviceへ移設したため対象外)
 
                 // -- ProjectUserController (1) --
                 new Endpoint("GET", "/api/project-users"),

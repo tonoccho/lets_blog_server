@@ -1,16 +1,20 @@
 package com.letsblog.api.controller;
 
 import com.letsblog.api.domain.GenerationJob;
+import com.letsblog.api.dto.CreateGenerationJobRequest;
 import com.letsblog.api.dto.GenerationJobDetailResponse;
 import com.letsblog.api.dto.GenerationJobResponse;
 import com.letsblog.api.dto.UpdateGenerationJobRequest;
 import com.letsblog.api.repository.GenerationJobRepository;
 import com.letsblog.api.service.GenerationJobNotFoundException;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Comparator;
@@ -56,6 +60,23 @@ public class GenerationJobController {
                 job.getId(), job.getType(), job.getStatus(),
                 job.getRequestPayload(), job.getResultPayload(),
                 job.getCreatedAt(), job.getUpdatedAt());
+    }
+
+    /**
+     * media-service側で、legacy-apiに残らなくなったコントローラ(ProjectMediaGarbageCollectionController
+     * 等)からジョブを起動するために呼ぶ(#573 stage3)。作成直後のstatusは常に"running"
+     * (既存のComfyUiModelService/MediaGarbageCollectionServiceの挙動を踏襲)。
+     */
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public GenerationJobResponse create(@RequestBody CreateGenerationJobRequest request) {
+        GenerationJob job = new GenerationJob();
+        job.setType(request.type());
+        job.setStatus("running");
+        job.setRequestPayload(request.requestPayload());
+        GenerationJob saved = generationJobRepository.save(job);
+        return new GenerationJobResponse(
+                saved.getId(), saved.getType(), saved.getStatus(), saved.getCreatedAt(), saved.getUpdatedAt());
     }
 
     /**

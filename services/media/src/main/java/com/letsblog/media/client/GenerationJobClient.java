@@ -1,5 +1,6 @@
 package com.letsblog.media.client;
 
+import com.letsblog.media.service.GenerationJobBridgeException;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.Map;
@@ -40,6 +41,34 @@ public class GenerationJobClient {
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(READ_TIMEOUT);
         this.restClient = builder.baseUrl(legacyApiUri).requestFactory(requestFactory).build();
+    }
+
+    /**
+     * ジョブを作成する(#573 stage3、legacy-apiに残らなくなったコントローラからの起動用)。
+     * ジョブID無しでは非同期処理を開始できないため、進捗更新と異なり失敗はベストエフォートでは
+     * 扱わず{@link GenerationJobBridgeException}として伝播させる。
+     *
+     * @param bearerToken 呼び出し元の{@code Authorization}ヘッダーの値(例: {@code "Bearer xxx"}）。
+     */
+    public GenerationJobSummary create(String type, String requestPayload, String bearerToken) {
+        try {
+            GenerationJobSummary created = restClient.post()
+                    .uri("/api/generation-jobs")
+                    .headers(headers -> {
+                        if (bearerToken != null && !bearerToken.isBlank()) {
+                            headers.set(HttpHeaders.AUTHORIZATION, bearerToken);
+                        }
+                    })
+                    .body(Map.of("type", type, "requestPayload", requestPayload == null ? "" : requestPayload))
+                    .retrieve()
+                    .body(GenerationJobSummary.class);
+            if (created == null) {
+                throw new GenerationJobBridgeException("legacy-apiから空の応答を受け取りました", null);
+            }
+            return created;
+        } catch (RestClientException e) {
+            throw new GenerationJobBridgeException("legacy-apiの/api/generation-jobs作成呼び出しに失敗しました: " + e.getMessage(), e);
+        }
     }
 
     /**
