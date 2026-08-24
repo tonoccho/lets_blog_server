@@ -82,11 +82,86 @@ export interface PenpotDesignFileResponse {
   url?: string;
 }
 
+export interface MediaGarbageCollectionDeleteRequest {
+  /**
+     * @minItems 1
+     * @items.minLength 1
+     */
+  mediaIds: string[];
+}
+
+export interface GenerationJobSummary {
+  id?: number;
+  type?: string;
+  status?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface MediaUploadResult {
+  id?: string;
+  url?: string;
+}
+
+export interface CreateGeneratedImageRequest {
+  projectId?: number;
+  /** @minLength 1 */
+  prompt: string;
+  negativePrompt?: string;
+  steps?: number;
+  cfgScale?: number;
+  samplerName?: string;
+  scheduler?: string;
+  seed?: number;
+  width?: number;
+  height?: number;
+  batchSize?: number;
+  checkpoint?: string;
+  loraName?: string;
+  loraWeight?: number;
+  /** @minLength 1 */
+  mimeType: string;
+  /** @minLength 1 */
+  provider: string;
+  tagsJson?: string;
+  imageData: string;
+}
+
 export interface CreateDiagramRequest {
   projectId?: number;
   name?: string;
   xml?: string;
   svg?: string;
+}
+
+export interface InstallComfyUiCheckpointCommand {
+  jobId: number;
+  /** @minLength 1 */
+  downloadUrl: string;
+  /** @minLength 1 */
+  fileName: string;
+}
+
+export interface DeleteComfyUiCheckpointCommand {
+  jobId: number;
+  /** @minLength 1 */
+  fileName: string;
+}
+
+export interface UnreferencedMediaItem {
+  mediaId?: string;
+  guid?: string;
+  title?: string;
+  mimeType?: string;
+  uploadedAt?: string;
+}
+
+export interface MediaGarbageCollectionScanResponse {
+  environment?: string;
+  items?: UnreferencedMediaItem[];
+  totalMediaCount?: number;
+  referencedMediaCount?: number;
+  unreferencedMediaCount?: number;
 }
 
 export interface GeneratedImageSummaryResponse {
@@ -107,12 +182,28 @@ export interface DiagramSummaryResponse {
   updatedAt?: string;
 }
 
+export type Delete1Params = {
+environment: string;
+};
+
+export type UploadParams = {
+site: string;
+};
+
+export type UploadBody = {
+  file: Blob;
+};
+
 export type ListParams = {
 projectId?: number;
+tag?: string;
 };
 
 export type List1Params = {
 projectId?: number;
-tag?: string;
+};
+
+export type ScanParams = {
+environment: string;
 };
 

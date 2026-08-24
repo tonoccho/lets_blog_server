@@ -3,6 +3,7 @@ package com.letsblog.media.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.media.ai.GeneratedImageStorageService;
 import com.letsblog.media.domain.GeneratedImage;
+import com.letsblog.media.dto.CreateGeneratedImageRequest;
 import com.letsblog.media.dto.GeneratedImageDetailResponse;
 import com.letsblog.media.dto.GeneratedImageSummaryResponse;
 import com.letsblog.media.dto.UpdateGeneratedImageTagsRequest;
@@ -11,6 +12,7 @@ import com.letsblog.media.service.GeneratedImageNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -22,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -139,5 +142,38 @@ class GeneratedImageControllerTest {
                 1L, new UpdateGeneratedImageTagsRequest(List.of()));
 
         assertEquals(List.of(), result.tags());
+    }
+
+    /**
+     * legacy-apiのAiAssistService#generateImageが、実際の画像生成(引き続きlegacy-api側で行う)の
+     * 後に呼ぶ新設エンドポイント(issue #573 stage4)。ファイル保存とDB行作成が両方行われることを
+     * 検証する。
+     */
+    @Test
+    void create_ファイルを保存しパラメータ込みで画像行を作成する() {
+        byte[] imageData = new byte[]{1, 2, 3};
+        when(generatedImageStorageService.store(1L, imageData)).thenReturn("1/0001.png");
+        when(generatedImageRepository.save(any(GeneratedImage.class))).thenAnswer(inv -> {
+            GeneratedImage image = inv.getArgument(0);
+            image.setId(42L);
+            image.setCreatedAt(LocalDateTime.now());
+            return image;
+        });
+
+        CreateGeneratedImageRequest request = new CreateGeneratedImageRequest(
+                1L, "a cat", "blurry", 20, 7.0, "euler", "normal", 123L, 512, 512, 1,
+                "checkpoint.safetensors", null, null, "image/png", "COMFYUI", "[\"猫\"]", imageData);
+
+        GeneratedImageDetailResponse response = controller.create(request);
+
+        assertEquals(42L, response.id());
+        assertEquals("a cat", response.prompt());
+        assertEquals("COMFYUI", response.provider());
+        assertEquals(List.of("猫"), response.tags());
+
+        ArgumentCaptor<GeneratedImage> savedCaptor = ArgumentCaptor.forClass(GeneratedImage.class);
+        verify(generatedImageRepository).save(savedCaptor.capture());
+        assertEquals("1/0001.png", savedCaptor.getValue().getFilePath());
+        assertEquals(1L, savedCaptor.getValue().getProjectId());
     }
 }

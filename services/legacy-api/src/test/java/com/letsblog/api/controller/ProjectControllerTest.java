@@ -85,17 +85,14 @@ class ProjectControllerTest {
     private CurrentActorService currentActorService;
 
     @Mock
-    private com.letsblog.api.repository.GeneratedImageRepository generatedImageRepository;
-
-    @Mock
-    private com.letsblog.api.ai.GeneratedImageStorageService generatedImageStorageService;
+    private com.letsblog.api.ai.MediaGeneratedImageClient mediaGeneratedImageClient;
 
     private ProjectController controller() {
         return new ProjectController(
                 projectService, projectUserSyncService, projectEnvironmentSyncService, bulkManagementService,
                 termComparisonService, pluginThemeComparisonService, postComparisonService,
                 adminAuthorizationService, currentActorService,
-                generatedImageRepository, generatedImageStorageService);
+                mediaGeneratedImageClient);
     }
 
     private BulkOperationLog buildLog() {
@@ -314,12 +311,7 @@ class ProjectControllerTest {
     @Test
     void uploadAssetImage_admin権限があれば全環境アップロードを実行できる() {
         ProjectController controller = controller();
-        com.letsblog.api.domain.GeneratedImage image = new com.letsblog.api.domain.GeneratedImage();
-        image.setId(5L);
-        image.setFilePath("global/0001.png");
-        image.setMimeType("image/png");
-        when(generatedImageRepository.findById(5L)).thenReturn(java.util.Optional.of(image));
-        when(generatedImageStorageService.load("global/0001.png")).thenReturn(new byte[]{1, 2, 3});
+        when(mediaGeneratedImageClient.fetchImageFile(5L)).thenReturn(new byte[]{1, 2, 3});
         when(bulkManagementService.uploadImageToAllEnvironments(1L, new byte[]{1, 2, 3}, "comfyui-5.png", "image/png", 0L))
                 .thenReturn(List.of(buildLog()));
 
@@ -332,9 +324,10 @@ class ProjectControllerTest {
     @Test
     void uploadAssetImage_存在しない画像は例外() {
         ProjectController controller = controller();
-        when(generatedImageRepository.findById(99L)).thenReturn(java.util.Optional.empty());
+        when(mediaGeneratedImageClient.fetchImageFile(99L))
+                .thenThrow(new com.letsblog.api.ai.AiServiceException("media-serviceの生成画像取得呼び出しに失敗しました", null));
 
-        assertThrows(com.letsblog.api.service.GeneratedImageNotFoundException.class,
+        assertThrows(com.letsblog.api.ai.AiServiceException.class,
                 () -> controller.uploadAssetImage(1L, 99L));
     }
 

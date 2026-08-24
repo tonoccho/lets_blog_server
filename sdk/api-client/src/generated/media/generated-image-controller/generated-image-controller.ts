@@ -5,9 +5,10 @@
  * OpenAPI spec version: v0
  */
 import type {
+  CreateGeneratedImageRequest,
   GeneratedImageDetailResponse,
   GeneratedImageSummaryResponse,
-  List1Params,
+  ListParams,
   UpdateGeneratedImageTagsRequest
 } from '../openAPIDefinition.schemas';
 
@@ -58,19 +59,19 @@ const res = await fetch(getUpdateTagsUrl(id),
 }
 
 
-export type list1Response200 = {
+export type listResponse200 = {
   data: GeneratedImageSummaryResponse[]
   status: 200
 }
 
-export type list1ResponseSuccess = (list1Response200) & {
+export type listResponseSuccess = (listResponse200) & {
   headers: Headers;
 };
 ;
 
-export type list1Response = (list1ResponseSuccess)
+export type listResponse = (listResponseSuccess)
 
-export const getList1Url = (params?: List1Params,) => {
+export const getListUrl = (params?: ListParams,) => {
   const normalizedParams = new URLSearchParams();
 
   Object.entries(params || {}).forEach(([key, value]) => {
@@ -85,9 +86,9 @@ export const getList1Url = (params?: List1Params,) => {
   return stringifiedParams.length > 0 ? `http://localhost:8080/api/generated-images?${stringifiedParams}` : `http://localhost:8080/api/generated-images`
 }
 
-export const list1 = async (params?: List1Params, options?: RequestInit): Promise<list1Response> => {
+export const list = async (params?: ListParams, options?: RequestInit): Promise<listResponse> => {
 
-  const res = await fetch(getList1Url(params),
+  const res = await fetch(getListUrl(params),
   {
     ...options,
     method: 'GET'
@@ -99,8 +100,53 @@ export const list1 = async (params?: List1Params, options?: RequestInit): Promis
 
   const body = [204, 205, 304].includes(res.status) ? null : await res.text();
 
-  const data: list1Response['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as list1Response
+  const data: listResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as listResponse
+}
+
+
+export type createResponse201 = {
+  data: GeneratedImageDetailResponse
+  status: 201
+}
+
+export type createResponseSuccess = (createResponse201) & {
+  headers: Headers;
+};
+;
+
+export type createResponse = (createResponseSuccess)
+
+export const getCreateUrl = () => {
+
+
+
+
+  return `http://localhost:8080/api/generated-images`
+}
+
+export const create = async (createGeneratedImageRequest: CreateGeneratedImageRequest, options?: RequestInit): Promise<createResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+const res = await fetch(getCreateUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createGeneratedImageRequest)
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: createResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as createResponse
 }
 
 
@@ -143,19 +189,19 @@ export const get1 = async (id: number, options?: RequestInit): Promise<get1Respo
 }
 
 
-export type delete1Response200 = {
+export type delete3Response200 = {
   data: void
   status: 200
 }
 
-export type delete1ResponseSuccess = (delete1Response200) & {
+export type delete3ResponseSuccess = (delete3Response200) & {
   headers: Headers;
 };
 ;
 
-export type delete1Response = (delete1ResponseSuccess)
+export type delete3Response = (delete3ResponseSuccess)
 
-export const getDelete1Url = (id: number,) => {
+export const getDelete3Url = (id: number,) => {
 
 
 
@@ -163,9 +209,9 @@ export const getDelete1Url = (id: number,) => {
   return `http://localhost:8080/api/generated-images/${id}`
 }
 
-export const delete1 = async (id: number, options?: RequestInit): Promise<delete1Response> => {
+export const delete3 = async (id: number, options?: RequestInit): Promise<delete3Response> => {
 
-  const res = await fetch(getDelete1Url(id),
+  const res = await fetch(getDelete3Url(id),
   {
     ...options,
     method: 'DELETE'
@@ -177,8 +223,8 @@ export const delete1 = async (id: number, options?: RequestInit): Promise<delete
 
   const body = [204, 205, 304].includes(res.status) ? null : await res.text();
 
-  const data: delete1Response['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as delete1Response
+  const data: delete3Response['data'] = body ? JSON.parse(body) : undefined
+  return { data, status: res.status, headers: res.headers } as delete3Response
 }
 
 

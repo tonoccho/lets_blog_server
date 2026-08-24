@@ -7,10 +7,9 @@ import com.letsblog.api.ai.ChatGptImageClient;
 import com.letsblog.api.ai.ComfyUiClient;
 import com.letsblog.api.ai.ComfyUiGenerationParams;
 import com.letsblog.api.ai.ComfyUiImage;
-import com.letsblog.api.ai.GeneratedImageStorageService;
 import com.letsblog.api.ai.ImageProvider;
 import com.letsblog.api.ai.LlmClient;
-import com.letsblog.api.domain.GeneratedImage;
+import com.letsblog.api.ai.MediaGeneratedImageClient;
 import com.letsblog.api.domain.GenerationJob;
 import com.letsblog.api.dto.AiAskRequest;
 import com.letsblog.api.dto.AiAskResponse;
@@ -27,7 +26,6 @@ import com.letsblog.api.dto.AiTagsResponse;
 import com.letsblog.api.dto.ImageGenerationOptionsResponse;
 import com.letsblog.api.dto.AiSectionResponse;
 import com.letsblog.api.dto.PlanChatMessage;
-import com.letsblog.api.repository.GeneratedImageRepository;
 import com.letsblog.api.repository.GenerationJobRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -66,9 +64,7 @@ class AiAssistServiceTest {
     @Mock
     private ComfyUiModelService comfyUiModelService;
     @Mock
-    private GeneratedImageStorageService generatedImageStorageService;
-    @Mock
-    private GeneratedImageRepository generatedImageRepository;
+    private MediaGeneratedImageClient mediaGeneratedImageClient;
     @Mock
     private GenerationJobRepository generationJobRepository;
     @Mock
@@ -80,11 +76,14 @@ class AiAssistServiceTest {
 
     private AiAssistService service;
 
+    private final java.util.concurrent.atomic.AtomicLong nextGeneratedImageId =
+            new java.util.concurrent.atomic.AtomicLong(1L);
+
     @BeforeEach
     void setUp() {
         service = new AiAssistService(llmClient, llmModelService, comfyUiClient, chatGptImageClient,
                 imageModelService, comfyUiModelService,
-                generatedImageStorageService, generatedImageRepository, generationJobRepository,
+                mediaGeneratedImageClient, generationJobRepository,
                 webSearchService, new ObjectMapper(), projectService, new ProhibitedContentFilterService(),
                 articlePlanService);
 
@@ -99,12 +98,10 @@ class AiAssistServiceTest {
             }
             return job;
         });
-        lenient().when(generatedImageStorageService.store(any(), any())).thenReturn("global/0001.png");
-        lenient().when(generatedImageRepository.save(any())).thenAnswer(inv -> {
-            GeneratedImage image = inv.getArgument(0);
-            image.setId(image.getId() == null ? 1L : image.getId() + 1);
-            return image;
-        });
+        lenient().when(mediaGeneratedImageClient.create(
+                        any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                        any(), any(), any(), any(), any(), any(), any()))
+                .thenAnswer(inv -> nextGeneratedImageId.getAndIncrement());
     }
 
     @Test
@@ -124,7 +121,9 @@ class AiAssistServiceTest {
         assertEquals("d.png", response.images().get(3).fileName());
         org.mockito.Mockito.verify(comfyUiClient).generateImage(any());
         org.mockito.Mockito.verifyNoInteractions(chatGptImageClient);
-        org.mockito.Mockito.verify(generatedImageRepository, org.mockito.Mockito.times(4)).save(any());
+        org.mockito.Mockito.verify(mediaGeneratedImageClient, org.mockito.Mockito.times(4)).create(
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -139,9 +138,11 @@ class AiAssistServiceTest {
 
         org.mockito.Mockito.verify(chatGptImageClient).generateImage(any());
         org.mockito.Mockito.verifyNoInteractions(comfyUiClient);
-        ArgumentCaptor<GeneratedImage> captor = ArgumentCaptor.forClass(GeneratedImage.class);
-        org.mockito.Mockito.verify(generatedImageRepository).save(captor.capture());
-        assertEquals("CHATGPT", captor.getValue().getProvider());
+        ArgumentCaptor<String> providerCaptor = ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(mediaGeneratedImageClient).create(
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), providerCaptor.capture(), any(), any());
+        assertEquals("CHATGPT", providerCaptor.getValue());
     }
 
     @Test
@@ -152,9 +153,11 @@ class AiAssistServiceTest {
 
         service.generateImage(AiImageRequest.withDefaults("a cat"));
 
-        ArgumentCaptor<GeneratedImage> captor = ArgumentCaptor.forClass(GeneratedImage.class);
-        org.mockito.Mockito.verify(generatedImageRepository).save(captor.capture());
-        assertEquals("COMFYUI", captor.getValue().getProvider());
+        ArgumentCaptor<String> providerCaptor = ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(mediaGeneratedImageClient).create(
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), providerCaptor.capture(), any(), any());
+        assertEquals("COMFYUI", providerCaptor.getValue());
     }
 
     @Test
@@ -192,14 +195,16 @@ class AiAssistServiceTest {
         when(comfyUiModelService.getSelectedCheckpointOrGlobalDefault(any())).thenReturn("checkpoint.safetensors");
         when(llmClient.generate(anyString())).thenReturn("{\"tags\": [\"猫\", \"かわいい\"]}");
 
-        ArgumentCaptor<GeneratedImage> captor = ArgumentCaptor.forClass(GeneratedImage.class);
+        ArgumentCaptor<String> tagsJsonCaptor = ArgumentCaptor.forClass(String.class);
         service.generateImage(AiImageRequest.withDefaults("a cat"));
 
         org.mockito.Mockito.verify(llmClient, org.mockito.Mockito.times(1)).generate(anyString());
-        org.mockito.Mockito.verify(generatedImageRepository, org.mockito.Mockito.times(2)).save(captor.capture());
-        for (GeneratedImage saved : captor.getAllValues()) {
-            assertTrue(saved.getTagsJson().contains("猫"));
-            assertTrue(saved.getTagsJson().contains("かわいい"));
+        org.mockito.Mockito.verify(mediaGeneratedImageClient, org.mockito.Mockito.times(2)).create(
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), tagsJsonCaptor.capture(), any());
+        for (String tagsJson : tagsJsonCaptor.getAllValues()) {
+            assertTrue(tagsJson.contains("猫"));
+            assertTrue(tagsJson.contains("かわいい"));
         }
     }
 
@@ -210,12 +215,14 @@ class AiAssistServiceTest {
         when(comfyUiModelService.getSelectedCheckpointOrGlobalDefault(any())).thenReturn("checkpoint.safetensors");
         when(llmClient.generate(anyString())).thenThrow(new RuntimeException("LLM unreachable"));
 
-        ArgumentCaptor<GeneratedImage> captor = ArgumentCaptor.forClass(GeneratedImage.class);
+        ArgumentCaptor<String> tagsJsonCaptor = ArgumentCaptor.forClass(String.class);
         AiImageBatchResponse response = service.generateImage(AiImageRequest.withDefaults("a cat"));
 
         assertEquals(1, response.images().size());
-        org.mockito.Mockito.verify(generatedImageRepository).save(captor.capture());
-        assertNull(captor.getValue().getTagsJson());
+        org.mockito.Mockito.verify(mediaGeneratedImageClient).create(
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), tagsJsonCaptor.capture(), any());
+        assertNull(tagsJsonCaptor.getValue());
     }
 
     @Test
