@@ -163,14 +163,24 @@ public class AiAssistService {
     }
 
     /**
-     * issue #574: legacy-apiに残った画像生成(AiAssistService#generateImage/generateImagePrompt)からの
-     * テキスト生成呼び出しを受ける内部ブリッジ({@code POST /api/ai/internal/generate}が呼ぶ)。
-     * projectIdが指定されればそのプロジェクトの選択中モデルを使い、未指定ならシステム既定モデルを使う
-     * (元のAiAssistService#suggestImageTagsJson/generateImagePromptと同じ解決順)。
+     * issue #574: legacy-apiに残った画像生成・タグ/静的コンテンツ生成(AiAssistService#generateImage/
+     * #generateImagePrompt/#suggestImageTagsJson、CustomTagGenerationService、
+     * TagDesignGenerationService、StaticContentGenerationService)からのテキスト生成呼び出しを受ける
+     * 内部ブリッジ({@code POST /api/ai/internal/generate}が呼ぶ)。
+     *
+     * <p>projectIdが指定されればそのプロジェクトの選択中モデルを使い、未指定ならシステム既定モデルを使う。
+     * プロバイダーはproviderOverride(指定時は最優先) → projectIdが指定されていればそのプロジェクトの
+     * 選択中プロバイダー → (いずれも無ければ)LlmClient側でシステム既定プロバイダーへフォールバックする
+     * 順に解決する(元のAiAssistService#generateImagePromptと同じ解決順)。
+     * 呼び出し元がプロジェクト非依存の解決を望む場合(suggestImageTagsJson等)はprojectIdにnullを渡す。
      */
     public String generateForBridge(Long projectId, String prompt, String providerOverride) {
         String model = projectId != null ? llmModelService.getSelectedModel(projectId) : null;
-        return llmClient.generate(prompt, model, AiProvider.fromString(providerOverride));
+        AiProvider provider = AiProvider.fromString(providerOverride);
+        if (provider == null && projectId != null) {
+            provider = llmModelService.getSelectedProvider(projectId);
+        }
+        return llmClient.generate(prompt, model, provider);
     }
 
     /**

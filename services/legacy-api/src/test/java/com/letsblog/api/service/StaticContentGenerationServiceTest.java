@@ -1,6 +1,6 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.ai.LlmClient;
+import com.letsblog.api.client.AiGenerationClient;
 import com.letsblog.api.cms.CmsCredentials.WordPressCredentials;
 import com.letsblog.api.cms.ssh.WordPressSshOperations;
 import com.letsblog.api.domain.Site;
@@ -40,7 +40,7 @@ class StaticContentGenerationServiceTest {
     private WordPressSshOperations sshOperations;
 
     @Mock
-    private LlmClient llmClient;
+    private AiGenerationClient aiGenerationClient;
 
     @Mock
     private StaticContentRepository staticContentRepository;
@@ -77,7 +77,7 @@ class StaticContentGenerationServiceTest {
                 new WordPressBulkManagementClient.PluginThemeInfo("akismet", "active"),
                 new WordPressBulkManagementClient.PluginThemeInfo("hello-dolly", "inactive")
         ));
-        when(llmClient.generate(anyString())).thenReturn("```text\nプライバシーポリシー本文\n```");
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn("```text\nプライバシーポリシー本文\n```");
         when(staticContentRepository.findBySiteIdAndContentType(1L, StaticContentType.PRIVACY_POLICY))
                 .thenReturn(Optional.empty());
         when(staticContentRepository.save(any(StaticContent.class))).thenAnswer(invocation -> {
@@ -93,7 +93,7 @@ class StaticContentGenerationServiceTest {
         assertEquals(StaticContentType.PRIVACY_POLICY, response.contentType());
 
         var promptCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
-        verify(llmClient).generate(promptCaptor.capture());
+        verify(aiGenerationClient).generate(any(), promptCaptor.capture(), any());
         assertTrue(promptCaptor.getValue().contains("akismet"));
         assertFalse(promptCaptor.getValue().contains("hello-dolly"));
     }
@@ -103,7 +103,7 @@ class StaticContentGenerationServiceTest {
         Site site = managedSite();
         when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
         when(bulkManagementClient.listPlugins("managed-slug")).thenReturn(List.of());
-        when(llmClient.generate(anyString())).thenReturn("```text\n利用規約本文\n```");
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn("```text\n利用規約本文\n```");
         when(staticContentRepository.findBySiteIdAndContentType(1L, StaticContentType.TERMS_OF_SERVICE))
                 .thenReturn(Optional.empty());
         when(staticContentRepository.save(any(StaticContent.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -127,7 +127,7 @@ class StaticContentGenerationServiceTest {
         when(sshOperations.listPlugins(sshCreds)).thenReturn(List.of(
                 new WordPressSshOperations.PluginThemeInfo("contact-form-7", "active")
         ));
-        when(llmClient.generate(anyString())).thenReturn("```text\n運営者情報本文\n```");
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn("```text\n運営者情報本文\n```");
         when(staticContentRepository.findBySiteIdAndContentType(2L, StaticContentType.OPERATOR_INFO))
                 .thenReturn(Optional.empty());
         when(staticContentRepository.save(any(StaticContent.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -142,7 +142,7 @@ class StaticContentGenerationServiceTest {
         Site site = managedSite();
         when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
         when(bulkManagementClient.listPlugins("managed-slug")).thenReturn(List.of());
-        when(llmClient.generate(anyString())).thenReturn("```text\n更新後の本文\n```");
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn("```text\n更新後の本文\n```");
 
         StaticContent existing = new StaticContent();
         existing.setId(5L);
@@ -164,7 +164,7 @@ class StaticContentGenerationServiceTest {
         Site site = managedSite();
         when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
         when(bulkManagementClient.listPlugins("managed-slug")).thenReturn(List.of());
-        when(llmClient.generate(anyString())).thenReturn("   ");
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn("   ");
 
         AiServiceGenerationException exception = assertThrows(
                 AiServiceGenerationException.class,
@@ -181,7 +181,7 @@ class StaticContentGenerationServiceTest {
         Site site = managedSite();
         when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
         when(bulkManagementClient.listPlugins("managed-slug")).thenReturn(List.of());
-        when(llmClient.generate(anyString())).thenReturn("フェンス無しの本文です。");
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn("フェンス無しの本文です。");
         when(staticContentRepository.findBySiteIdAndContentType(1L, StaticContentType.PRIVACY_POLICY))
                 .thenReturn(Optional.empty());
         when(staticContentRepository.save(any(StaticContent.class))).thenAnswer(invocation -> invocation.getArgument(0));

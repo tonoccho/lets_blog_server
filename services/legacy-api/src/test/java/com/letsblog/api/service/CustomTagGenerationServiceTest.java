@@ -1,6 +1,6 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.ai.LlmClient;
+import com.letsblog.api.client.AiGenerationClient;
 import com.letsblog.api.render.MediaRenderClient;
 import com.letsblog.api.domain.CustomTag;
 import com.letsblog.api.dto.GenerateCustomTagRequest;
@@ -26,7 +26,7 @@ import static org.mockito.Mockito.*;
 class CustomTagGenerationServiceTest {
 
     @Mock
-    private LlmClient llmClient;
+    private AiGenerationClient aiGenerationClient;
 
     @Mock
     private MediaRenderClient mediaRenderClient;
@@ -89,7 +89,7 @@ class CustomTagGenerationServiceTest {
         savedTag.setDescription("カスタムボタンコンポーネント");
         savedTag.setProjectId(null);
 
-        when(llmClient.generate(anyString())).thenReturn(llmResponse);
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn(llmResponse);
         when(customTagRepository.findByTagNameAndProjectIdIsNull("my-button")).thenReturn(Optional.empty());
         when(customTagRepository.save(any(CustomTag.class))).thenReturn(savedTag);
 
@@ -104,7 +104,7 @@ class CustomTagGenerationServiceTest {
         assertTrue(response.cssContent().contains("padding"));
         assertEquals("カスタムボタンコンポーネント", response.description());
 
-        verify(llmClient).generate(anyString());
+        verify(aiGenerationClient).generate(any(), anyString(), any());
         verify(customTagRepository).save(any(CustomTag.class));
     }
 
@@ -120,7 +120,7 @@ class CustomTagGenerationServiceTest {
             null
         );
 
-        when(llmClient.generate(anyString())).thenReturn(llmResponse);
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn(llmResponse);
 
         // Act & Assert
         InvalidCustomTagContentException exception = assertThrows(
@@ -152,7 +152,7 @@ class CustomTagGenerationServiceTest {
         existingTag.setId(1L);
         existingTag.setTagName("existing-tag");
 
-        when(llmClient.generate(anyString())).thenReturn(llmResponse);
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn(llmResponse);
         when(customTagRepository.findByTagNameAndProjectIdIsNull("existing-tag"))
             .thenReturn(Optional.of(existingTag));
 
@@ -179,7 +179,7 @@ class CustomTagGenerationServiceTest {
             """;
 
         GenerateCustomTagRequest request = new GenerateCustomTagRequest("test", "tag", null, null);
-        when(llmClient.generate(anyString())).thenReturn(response);
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn(response);
         when(customTagRepository.findByTagNameAndProjectIdIsNull("tag")).thenReturn(Optional.empty());
 
         CustomTag savedTag = new CustomTag();
@@ -212,7 +212,7 @@ class CustomTagGenerationServiceTest {
             "file-id", "project-id", "http://localhost:9001/#/workspace/project-id/file-id?page-id=page-id"
         );
 
-        when(llmClient.generate(anyString())).thenReturn(llmResponse);
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn(llmResponse);
         when(customTagRepository.findByTagNameAndProjectIdIsNull("my-button")).thenReturn(Optional.empty());
         when(mediaRenderClient.createPenpotDesignFile(anyString(), anyString())).thenReturn(designFile);
         when(customTagRepository.save(any(CustomTag.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -233,7 +233,7 @@ class CustomTagGenerationServiceTest {
 
         GenerateCustomTagRequest request = new GenerateCustomTagRequest("テスト", "my-button", "説明", null);
 
-        when(llmClient.generate(anyString())).thenReturn(llmResponse);
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn(llmResponse);
         when(customTagRepository.findByTagNameAndProjectIdIsNull("my-button")).thenReturn(Optional.empty());
         when(mediaRenderClient.createPenpotDesignFile(anyString(), anyString()))
             .thenThrow(new com.letsblog.api.ai.AiServiceException("接続失敗", null));
@@ -263,7 +263,7 @@ class CustomTagGenerationServiceTest {
             """;
 
         GenerateCustomTagRequest request = new GenerateCustomTagRequest("test", "tag", null, null);
-        when(llmClient.generate(anyString())).thenReturn(response);
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn(response);
         when(customTagRepository.findByTagNameAndProjectIdIsNull("tag")).thenReturn(Optional.empty());
 
         CustomTag savedTag = new CustomTag();

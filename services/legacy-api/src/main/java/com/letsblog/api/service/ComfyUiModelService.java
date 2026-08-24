@@ -3,10 +3,10 @@ package com.letsblog.api.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.ai.ComfyUiClient;
 import com.letsblog.api.ai.MediaComfyUiClient;
-import com.letsblog.api.domain.GenerationJob;
+import com.letsblog.api.client.GenerationJobClient;
+import com.letsblog.api.client.GenerationJobSummary;
 import com.letsblog.api.dto.ComfyUiCheckpointListResponse;
 import com.letsblog.api.dto.GenerationJobResponse;
-import com.letsblog.api.repository.GenerationJobRepository;
 import com.letsblog.api.repository.ProjectRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -19,6 +19,10 @@ import java.util.Map;
  * 実チェックポイントファイルはComfyUIサーバー全体で共有され、プロジェクトは「どのチェックポイントを使うか」のみを選択する。
  * (Phase14時点では選択状態の保持のみで、実際の画像生成呼び出しへの反映は将来の拡張ポイント)
  * データはprojects god-tableの分割(issue #571)によりproject_image_settings(ProjectImageSettingsService)が保持する。
+ *
+ * <p>issue #574でgeneration_jobsテーブルの所有権がai-serviceへ移管されたため、ジョブの作成は
+ * {@link GenerationJobClient}経由でai-serviceへ委譲する(以前はGenerationJobRepositoryで直接
+ * 書き込んでいた)。
  */
 @Service
 public class ComfyUiModelService {
@@ -27,7 +31,7 @@ public class ComfyUiModelService {
     private final MediaComfyUiClient mediaComfyUiClient;
     private final ProjectRepository projectRepository;
     private final ProjectImageSettingsService projectImageSettingsService;
-    private final GenerationJobRepository generationJobRepository;
+    private final GenerationJobClient generationJobClient;
     private final ObjectMapper objectMapper;
     private final String globalDefaultCheckpoint;
 
@@ -36,14 +40,14 @@ public class ComfyUiModelService {
             MediaComfyUiClient mediaComfyUiClient,
             ProjectRepository projectRepository,
             ProjectImageSettingsService projectImageSettingsService,
-            GenerationJobRepository generationJobRepository,
+            GenerationJobClient generationJobClient,
             ObjectMapper objectMapper,
             @Value("${app.comfyui-checkpoint}") String globalDefaultCheckpoint) {
         this.comfyUiClient = comfyUiClient;
         this.mediaComfyUiClient = mediaComfyUiClient;
         this.projectRepository = projectRepository;
         this.projectImageSettingsService = projectImageSettingsService;
-        this.generationJobRepository = generationJobRepository;
+        this.generationJobClient = generationJobClient;
         this.objectMapper = objectMapper;
         this.globalDefaultCheckpoint = globalDefaultCheckpoint;
     }
@@ -81,14 +85,14 @@ public class ComfyUiModelService {
 
     public GenerationJobResponse startInstall(String downloadUrl, String fileName) {
         requireHttpUrl(downloadUrl);
-        GenerationJob job = startJob("comfyui_checkpoint_download", Map.of("url", downloadUrl, "fileName", fileName));
-        mediaComfyUiClient.startInstall(job.getId(), downloadUrl, fileName);
+        GenerationJobSummary job = startJob("comfyui_checkpoint_download", Map.of("url", downloadUrl, "fileName", fileName));
+        mediaComfyUiClient.startInstall(job.id(), downloadUrl, fileName);
         return toResponse(job);
     }
 
     public GenerationJobResponse startDelete(String fileName) {
-        GenerationJob job = startJob("comfyui_checkpoint_delete", Map.of("fileName", fileName));
-        mediaComfyUiClient.startDelete(job.getId(), fileName);
+        GenerationJobSummary job = startJob("comfyui_checkpoint_delete", Map.of("fileName", fileName));
+        mediaComfyUiClient.startDelete(job.id(), fileName);
         return toResponse(job);
     }
 
@@ -106,16 +110,12 @@ public class ComfyUiModelService {
         }
     }
 
-    private GenerationJob startJob(String type, Map<String, String> requestPayload) {
-        GenerationJob job = new GenerationJob();
-        job.setType(type);
-        job.setStatus("running");
-        job.setRequestPayload(toJson(requestPayload));
-        return generationJobRepository.save(job);
+    private GenerationJobSummary startJob(String type, Map<String, String> requestPayload) {
+        return generationJobClient.create(type, toJson(requestPayload));
     }
 
-    private GenerationJobResponse toResponse(GenerationJob job) {
-        return new GenerationJobResponse(job.getId(), job.getType(), job.getStatus(), job.getCreatedAt(), job.getUpdatedAt());
+    private GenerationJobResponse toResponse(GenerationJobSummary job) {
+        return new GenerationJobResponse(job.id(), job.type(), job.status(), job.createdAt(), job.updatedAt());
     }
 
     private String toJson(Object value) {

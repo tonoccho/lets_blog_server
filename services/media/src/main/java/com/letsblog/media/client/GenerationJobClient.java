@@ -12,14 +12,16 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 /**
- * legacy-apiの{@code PATCH /api/generation-jobs/{id}}を呼び出し、ジョブの状態・結果を更新する
- * クライアント(#573 stage2)。
+ * ai-serviceの{@code POST /api/generation-jobs}・{@code PATCH /api/generation-jobs/{id}}を
+ * 呼び出し、ジョブの作成・状態/結果を更新するクライアント(#573 stage2)。
  *
  * <p>GenerationJob自体はmedia-serviceへ移設していない(generation_jobsテーブルはComfyUiModelService/
- * MediaGarbageCollectionServiceに加え、AiAssistService/ArticlePlanService(LLM機能、legacy-apiに
- * 残る)も書き込む共有インフラのため)。ジョブの作成はlegacy-api側(呼び出し元の同期リクエスト内、
- * 例: ComfyUiModelService#startInstall)が引き続き行い、media-service側の非同期ジョブランナー
- * (ModelInstallJobRunner)は進捗・完了・失敗の反映のみをこのクライアント経由で行う。
+ * MediaGarbageCollectionServiceに加え、AiAssistService/ArticlePlanService(LLM機能)も書き込む
+ * 共有インフラのため)。所有権は#573時点ではlegacy-apiにあったが、issue #574でai-serviceへ移管された
+ * ため、この呼び出し先も{@code app.legacy-api-uri}から{@code app.ai-service-uri}へ変更した。
+ * ジョブの作成はlegacy-api側(呼び出し元の同期リクエスト内、例: ComfyUiModelService#startInstall)が
+ * 引き続き行い(legacy-api側は自身のGenerationJobClientでai-serviceへ委譲する)、media-service側の
+ * 非同期ジョブランナー(ModelInstallJobRunner)は進捗・完了・失敗の反映のみをこのクライアント経由で行う。
  *
  * <p>認証は、呼び出し元(legacy-api)が起動トリガーの呼び出し時に転送したBearerトークンを、
  * legacy-apiのMediaRenderClientと同じ暫定策でそのまま使う。ただしこのクライアントは
@@ -36,11 +38,11 @@ public class GenerationJobClient {
 
     private final RestClient restClient;
 
-    public GenerationJobClient(RestClient.Builder builder, @Value("${app.legacy-api-uri}") String legacyApiUri) {
+    public GenerationJobClient(RestClient.Builder builder, @Value("${app.ai-service-uri}") String aiServiceUri) {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(READ_TIMEOUT);
-        this.restClient = builder.baseUrl(legacyApiUri).requestFactory(requestFactory).build();
+        this.restClient = builder.baseUrl(aiServiceUri).requestFactory(requestFactory).build();
     }
 
     /**

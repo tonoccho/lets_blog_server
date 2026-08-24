@@ -4,16 +4,11 @@ import com.letsblog.api.dto.ComfyUiCheckpointListResponse;
 import com.letsblog.api.dto.GenerationJobResponse;
 import com.letsblog.api.dto.ImageProviderListResponse;
 import com.letsblog.api.dto.InstallComfyUiCheckpointRequest;
-import com.letsblog.api.dto.LlmModelListResponse;
-import com.letsblog.api.dto.LlmProviderListResponse;
 import com.letsblog.api.dto.SelectComfyUiCheckpointRequest;
 import com.letsblog.api.dto.SelectImageProviderRequest;
-import com.letsblog.api.dto.SelectLlmModelRequest;
-import com.letsblog.api.dto.SelectLlmProviderRequest;
 import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.ComfyUiModelService;
 import com.letsblog.api.service.ImageModelService;
-import com.letsblog.api.service.LlmModelService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,53 +20,29 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * プロジェクト画面から、そのプロジェクトが使うLLM/ComfyUIのモデルを一覧・切り替えするためのAPI。
+ * プロジェクト画面から、そのプロジェクトが使う画像生成AI/ComfyUIのモデルを一覧・切り替えするためのAPI。
  * ComfyUIについては加えてインストール・削除も扱う(ローカルダウンロードが必要なため)。
+ *
+ * <p>issue #574で{@code /llm/**}部分(LlmModelService)をai-serviceの{@code ProjectLlmModelController}
+ * へ分割した。同じ{@code /api/projects/{id}/ai-models/**}配下だが、gateway側で{@code /llm/**}のみ
+ * 先にai-serviceへマッチさせるルートを追加している(services/gateway/src/main/resources/
+ * application.yml参照)。
  */
 @RestController
 @RequestMapping("/api/projects/{id}/ai-models")
 public class ProjectAiModelController {
 
-    private final LlmModelService llmModelService;
     private final ComfyUiModelService comfyUiModelService;
     private final ImageModelService imageModelService;
     private final AdminAuthorizationService adminAuthorizationService;
 
     public ProjectAiModelController(
-            LlmModelService llmModelService,
             ComfyUiModelService comfyUiModelService,
             ImageModelService imageModelService,
             AdminAuthorizationService adminAuthorizationService) {
-        this.llmModelService = llmModelService;
         this.comfyUiModelService = comfyUiModelService;
         this.imageModelService = imageModelService;
         this.adminAuthorizationService = adminAuthorizationService;
-    }
-
-    @GetMapping("/llm/models")
-    public LlmModelListResponse listLlmModels(@PathVariable Long id) {
-        adminAuthorizationService.requireAdmin();
-        return llmModelService.listModelsForProject(id);
-    }
-
-    @PutMapping("/llm/models/selection")
-    public LlmModelListResponse selectLlmModel(
-            @PathVariable Long id, @Valid @RequestBody SelectLlmModelRequest request) {
-        adminAuthorizationService.requireAdmin();
-        return llmModelService.selectModel(id, request.modelName());
-    }
-
-    @GetMapping("/llm/provider")
-    public LlmProviderListResponse listLlmProvider(@PathVariable Long id) {
-        adminAuthorizationService.requireAdmin();
-        return llmModelService.listProvidersForProject(id);
-    }
-
-    @PutMapping("/llm/provider/selection")
-    public LlmProviderListResponse selectLlmProvider(
-            @PathVariable Long id, @RequestBody SelectLlmProviderRequest request) {
-        adminAuthorizationService.requireAdmin();
-        return llmModelService.selectProvider(id, request.provider());
     }
 
     @GetMapping("/image/provider")

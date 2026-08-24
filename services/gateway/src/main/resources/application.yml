@@ -44,6 +44,15 @@ app:
         paths:
           - /api/projects/*/media-garbage-collection/scan
           - /api/projects/*/media-garbage-collection/delete
+      # ProjectAiModelControllerを分割し、LLMモデル/プロバイダー選択(ProjectLlmModelController)を
+      # ai-serviceへ移設した(issue #574)。パス自体は/api/projects/**配下のまま(既存フロントのURLを
+      # 変えないため)。同じ/api/projects/{id}/ai-models/**配下でも、画像生成AI/ComfyUI部分
+      # (ImageModelService/ComfyUiModelService)はlegacy-apiに残るため、より広い/api/projects/**
+      # (下のprojectルート)より先にここでLLM部分だけをai-serviceへマッチさせる。
+      - id: project-ai-models-llm
+        uri: ${AI_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/projects/*/ai-models/llm/**
       - id: content-posts-publish
         uri: ${CONTENT_SERVICE_URI:http://api:8080}
         paths:
@@ -94,12 +103,25 @@ app:
           - /api/render/**
           # MediaControllerの実際のマッピングは/api/media/**(#573 stage3でmedia-serviceへ移設)。
           - /api/media/**
+      # 画像生成(AiController#image/#imageOptions)はissue #574でもai-serviceへ移設せずlegacy-apiに
+      # 残した(PR説明参照)。/api/ai/**の大半(テキスト生成)はai-serviceへ移ったため、この2エンドポイント
+      # だけを下の広い/api/ai/**ルートより先にlegacy-apiへマッチさせる。
+      - id: ai-image-legacy
+        uri: ${LEGACY_API_URI:http://api:8080}
+        paths:
+          - /api/ai/image
+          - /api/ai/image-options
+      # LLM呼び出しはLLM_REQUEST_TIMEOUT_SECONDS(既定120秒)まで掛かりうり、記事プランの壁打ちは
+      # Web検索+LLM呼び出しでさらに長くなりうるため、既定の60秒(default-response-timeout)より
+      # 長いタイムアウトを設定する(issue #574の受入基準)。AiGenerationClient/GenerationJobClientの
+      # READ_TIMEOUT(180秒)と揃えている。
       - id: ai
         uri: ${AI_SERVICE_URI:http://api:8080}
         paths:
           - /api/ai/**
           - /api/generation-jobs/**
           - /api/article-plan/**
+        response-timeout: 180s
       - id: publishing
         uri: ${PUBLISHING_SERVICE_URI:http://api:8080}
         paths:

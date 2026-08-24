@@ -1,6 +1,6 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.ai.LlmClient;
+import com.letsblog.api.client.AiGenerationClient;
 import com.letsblog.api.domain.CustomTag;
 import com.letsblog.api.dto.GenerateCustomTagRequest;
 import com.letsblog.api.dto.GenerateCustomTagResponse;
@@ -23,7 +23,7 @@ public class CustomTagGenerationService {
 
     private static final Logger log = LoggerFactory.getLogger(CustomTagGenerationService.class);
 
-    private final LlmClient llmClient;
+    private final AiGenerationClient aiGenerationClient;
     private final MediaRenderClient mediaRenderClient;
     private final CustomTagRepository customTagRepository;
     private final AdminAuthorizationService adminAuthorizationService;
@@ -33,12 +33,12 @@ public class CustomTagGenerationService {
     private static final Pattern CSS_PATTERN = Pattern.compile("```css\\s*\\n([\\s\\S]*?)\\n```");
 
     public CustomTagGenerationService(
-            LlmClient llmClient,
+            AiGenerationClient aiGenerationClient,
             MediaRenderClient mediaRenderClient,
             CustomTagRepository customTagRepository,
             AdminAuthorizationService adminAuthorizationService,
             CustomTagValidationService customTagValidationService) {
-        this.llmClient = llmClient;
+        this.aiGenerationClient = aiGenerationClient;
         this.mediaRenderClient = mediaRenderClient;
         this.customTagRepository = customTagRepository;
         this.adminAuthorizationService = adminAuthorizationService;
@@ -49,8 +49,8 @@ public class CustomTagGenerationService {
     public GenerateCustomTagResponse generate(GenerateCustomTagRequest request) {
         adminAuthorizationService.requireAdmin();
 
-        // プロンプトをLLMに送信
-        String llmResponse = llmClient.generate(buildPrompt(request.prompt()));
+        // プロンプトをLLMに送信(ai-serviceへ委譲、issue #574)
+        String llmResponse = aiGenerationClient.generate(null, buildPrompt(request.prompt()), null);
 
         // HTMLとCSSを抽出
         String htmlTemplate = extractHtml(llmResponse);
