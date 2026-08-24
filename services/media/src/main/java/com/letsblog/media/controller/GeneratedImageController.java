@@ -4,24 +4,30 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.media.ai.GeneratedImageStorageService;
 import com.letsblog.media.domain.GeneratedImage;
+import com.letsblog.media.dto.CreateGeneratedImageRequest;
 import com.letsblog.media.dto.GeneratedImageDetailResponse;
 import com.letsblog.media.dto.GeneratedImageSummaryResponse;
 import com.letsblog.media.dto.UpdateGeneratedImageTagsRequest;
 import com.letsblog.media.repository.GeneratedImageRepository;
 import com.letsblog.media.service.GeneratedImageNotFoundException;
+import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 /**
@@ -66,6 +72,37 @@ public class GeneratedImageController {
     @GetMapping("/api/generated-images/{id}")
     public GeneratedImageDetailResponse get(@PathVariable Long id) {
         return toDetailResponse(findOrThrow(id));
+    }
+
+    /**
+     * legacy-apiの{@code AiAssistService#generateImage}が、実際の画像生成(ComfyUI/ChatGPT呼び出し、
+     * 引き続きlegacy-api側で行う)の後に呼ぶ(issue #573 stage4)。ファイル保存とDB行作成を
+     * まとめて行う。
+     */
+    @PostMapping("/api/generated-images")
+    @ResponseStatus(HttpStatus.CREATED)
+    public GeneratedImageDetailResponse create(@Valid @RequestBody CreateGeneratedImageRequest request) {
+        String filePath = generatedImageStorageService.store(request.projectId(), request.imageData());
+        GeneratedImage image = new GeneratedImage();
+        image.setProjectId(request.projectId());
+        image.setPrompt(request.prompt());
+        image.setNegativePrompt(request.negativePrompt());
+        image.setSteps(request.steps());
+        image.setCfgScale(request.cfgScale() != null ? BigDecimal.valueOf(request.cfgScale()) : null);
+        image.setSamplerName(request.samplerName());
+        image.setScheduler(request.scheduler());
+        image.setSeed(request.seed());
+        image.setWidth(request.width());
+        image.setHeight(request.height());
+        image.setBatchSize(request.batchSize());
+        image.setCheckpoint(request.checkpoint());
+        image.setLoraName(request.loraName());
+        image.setLoraWeight(request.loraWeight() != null ? BigDecimal.valueOf(request.loraWeight()) : null);
+        image.setFilePath(filePath);
+        image.setMimeType(request.mimeType());
+        image.setProvider(request.provider());
+        image.setTagsJson(request.tagsJson());
+        return toDetailResponse(generatedImageRepository.save(image));
     }
 
     /** 自動生成されたタグを手動で編集・追加する(issue #281)。 */

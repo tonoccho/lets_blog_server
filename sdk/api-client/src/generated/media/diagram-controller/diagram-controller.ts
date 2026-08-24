@@ -8,7 +8,7 @@ import type {
   CreateDiagramRequest,
   DiagramDetailResponse,
   DiagramSummaryResponse,
-  ListParams,
+  List1Params,
   UpdateDiagramRequest
 } from '../openAPIDefinition.schemas';
 
@@ -137,19 +137,19 @@ export const _delete = async (id: number, options?: RequestInit): Promise<_delet
 }
 
 
-export type listResponse200 = {
+export type list1Response200 = {
   data: DiagramSummaryResponse[]
   status: 200
 }
 
-export type listResponseSuccess = (listResponse200) & {
+export type list1ResponseSuccess = (list1Response200) & {
   headers: Headers;
 };
 ;
 
-export type listResponse = (listResponseSuccess)
+export type list1Response = (list1ResponseSuccess)
 
-export const getListUrl = (params?: ListParams,) => {
+export const getList1Url = (params?: List1Params,) => {
   const normalizedParams = new URLSearchParams();
 
   Object.entries(params || {}).forEach(([key, value]) => {
@@ -164,9 +164,9 @@ export const getListUrl = (params?: ListParams,) => {
   return stringifiedParams.length > 0 ? `http://localhost:8080/api/diagrams?${stringifiedParams}` : `http://localhost:8080/api/diagrams`
 }
 
-export const list = async (params?: ListParams, options?: RequestInit): Promise<listResponse> => {
+export const list1 = async (params?: List1Params, options?: RequestInit): Promise<list1Response> => {
 
-  const res = await fetch(getListUrl(params),
+  const res = await fetch(getList1Url(params),
   {
     ...options,
     method: 'GET'
@@ -178,24 +178,24 @@ export const list = async (params?: ListParams, options?: RequestInit): Promise<
 
   const body = [204, 205, 304].includes(res.status) ? null : await res.text();
 
-  const data: listResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listResponse
+  const data: list1Response['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as list1Response
 }
 
 
-export type createResponse200 = {
+export type create1Response200 = {
   data: DiagramDetailResponse
   status: 200
 }
 
-export type createResponseSuccess = (createResponse200) & {
+export type create1ResponseSuccess = (create1Response200) & {
   headers: Headers;
 };
 ;
 
-export type createResponse = (createResponseSuccess)
+export type create1Response = (create1ResponseSuccess)
 
-export const getCreateUrl = () => {
+export const getCreate1Url = () => {
 
 
 
@@ -203,7 +203,7 @@ export const getCreateUrl = () => {
   return `http://localhost:8080/api/diagrams`
 }
 
-export const create = async (createDiagramRequest: CreateDiagramRequest, options?: RequestInit): Promise<createResponse> => {
+export const create1 = async (createDiagramRequest: CreateDiagramRequest, options?: RequestInit): Promise<create1Response> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -211,7 +211,7 @@ export const create = async (createDiagramRequest: CreateDiagramRequest, options
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-const res = await fetch(getCreateUrl(),
+const res = await fetch(getCreate1Url(),
   {
     ...options,
     method: 'POST',
@@ -223,8 +223,8 @@ const res = await fetch(getCreateUrl(),
 
   const body = [204, 205, 304].includes(res.status) ? null : await res.text();
 
-  const data: createResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as createResponse
+  const data: create1Response['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as create1Response
 }
 
 

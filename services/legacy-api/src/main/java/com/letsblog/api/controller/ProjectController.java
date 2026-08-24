@@ -26,15 +26,12 @@ import com.letsblog.api.dto.UpdatePostStatusRequest;
 import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
 import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
 import com.letsblog.api.dto.UpdateProjectUserRequest;
-import com.letsblog.api.ai.GeneratedImageStorageService;
+import com.letsblog.api.ai.MediaGeneratedImageClient;
 import com.letsblog.api.domain.BulkOperationLog;
 import com.letsblog.api.domain.BulkOperationType;
-import com.letsblog.api.domain.GeneratedImage;
-import com.letsblog.api.repository.GeneratedImageRepository;
 import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.BulkManagementService;
 import com.letsblog.api.service.CurrentActorService;
-import com.letsblog.api.service.GeneratedImageNotFoundException;
 import com.letsblog.api.service.PluginThemeComparisonService;
 import com.letsblog.api.service.PostComparisonService;
 import com.letsblog.api.service.ProjectEnvironmentSyncService;
@@ -64,8 +61,7 @@ public class ProjectController {
     private final PostComparisonService postComparisonService;
     private final AdminAuthorizationService adminAuthorizationService;
     private final CurrentActorService currentActorService;
-    private final GeneratedImageRepository generatedImageRepository;
-    private final GeneratedImageStorageService generatedImageStorageService;
+    private final MediaGeneratedImageClient mediaGeneratedImageClient;
 
     public ProjectController(
             ProjectService projectService,
@@ -77,8 +73,7 @@ public class ProjectController {
             PostComparisonService postComparisonService,
             AdminAuthorizationService adminAuthorizationService,
             CurrentActorService currentActorService,
-            GeneratedImageRepository generatedImageRepository,
-            GeneratedImageStorageService generatedImageStorageService) {
+            MediaGeneratedImageClient mediaGeneratedImageClient) {
         this.projectService = projectService;
         this.projectUserSyncService = projectUserSyncService;
         this.projectEnvironmentSyncService = projectEnvironmentSyncService;
@@ -88,8 +83,7 @@ public class ProjectController {
         this.postComparisonService = postComparisonService;
         this.adminAuthorizationService = adminAuthorizationService;
         this.currentActorService = currentActorService;
-        this.generatedImageRepository = generatedImageRepository;
-        this.generatedImageStorageService = generatedImageStorageService;
+        this.mediaGeneratedImageClient = mediaGeneratedImageClient;
     }
 
     @PostMapping
@@ -242,20 +236,20 @@ public class ProjectController {
     }
 
     /**
-     * ComfyUIで生成済みの画像(generated_images)を、プロジェクトのlocal/test/production
-     * 全環境へアセットとしてアップロードする(プロジェクト管理画面の画像生成パネル用)。
+     * ComfyUIで生成済みの画像(generated_images、media-serviceが所有。issue #573)を、
+     * プロジェクトのlocal/test/production全環境へアセットとしてアップロードする
+     * (プロジェクト管理画面の画像生成パネル用)。画像バイト列はmedia-service経由で取得する
+     * (常にimage/pngとして保存されている前提、既存の挙動を踏襲)。
      */
     @PostMapping("/{id}/asset-images/{generatedImageId}/upload")
     public List<BulkOperationLogResponse> uploadAssetImage(
             @PathVariable Long id, @PathVariable Long generatedImageId) {
         adminAuthorizationService.requireAdmin();
-        GeneratedImage image = generatedImageRepository.findById(generatedImageId)
-                .orElseThrow(() -> new GeneratedImageNotFoundException("id: " + generatedImageId));
-        byte[] data = generatedImageStorageService.load(image.getFilePath());
+        byte[] data = mediaGeneratedImageClient.fetchImageFile(generatedImageId);
         String filename = "comfyui-" + generatedImageId + ".png";
         Long actorId = currentActorService.getCurrentActorId();
         List<BulkOperationLog> logs = bulkManagementService.uploadImageToAllEnvironments(
-                id, data, filename, image.getMimeType(), actorId);
+                id, data, filename, "image/png", actorId);
         return logs.stream().map(BulkOperationLogResponse::from).toList();
     }
 

@@ -23,6 +23,9 @@ export * from './generated/media/openAPIDefinition.schemas';
 export * from './generated/media/generated-image-controller/generated-image-controller';
 export * from './generated/media/diagram-controller/diagram-controller';
 export * from './generated/media/render-controller/render-controller';
+export * from './generated/media/comfy-ui-checkpoint-controller/comfy-ui-checkpoint-controller';
+export * from './generated/media/media-controller/media-controller';
+export * from './generated/media/project-media-garbage-collection-controller/project-media-garbage-collection-controller';
 
 // mediaのGeneratedImageController.list/DiagramController.listと、log-writerのAuditLogController.list/
 // OperationLogController.listは、いずれもJavaのメソッド名が単に"list"であるため、orvalの汎用命名

@@ -7,11 +7,10 @@ import com.letsblog.api.ai.ChatGptImageClient;
 import com.letsblog.api.ai.ComfyUiClient;
 import com.letsblog.api.ai.ComfyUiGenerationParams;
 import com.letsblog.api.ai.ComfyUiImage;
-import com.letsblog.api.ai.GeneratedImageStorageService;
 import com.letsblog.api.ai.ImageGenerationProvider;
 import com.letsblog.api.ai.ImageProvider;
 import com.letsblog.api.ai.LlmClient;
-import com.letsblog.api.domain.GeneratedImage;
+import com.letsblog.api.ai.MediaGeneratedImageClient;
 import com.letsblog.api.domain.GenerationJob;
 import com.letsblog.api.dto.AiAskRequest;
 import com.letsblog.api.dto.AiAskResponse;
@@ -30,13 +29,11 @@ import com.letsblog.api.dto.PlanChatMessage;
 import com.letsblog.api.dto.AiTagsResponse;
 import com.letsblog.api.dto.ImageGenerationOptionsResponse;
 import com.letsblog.api.dto.ProofreadIssue;
-import com.letsblog.api.repository.GeneratedImageRepository;
 import com.letsblog.api.repository.GenerationJobRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
@@ -174,8 +171,7 @@ public class AiAssistService {
     private final ChatGptImageClient chatGptImageClient;
     private final ImageModelService imageModelService;
     private final ComfyUiModelService comfyUiModelService;
-    private final GeneratedImageStorageService generatedImageStorageService;
-    private final GeneratedImageRepository generatedImageRepository;
+    private final MediaGeneratedImageClient mediaGeneratedImageClient;
     private final GenerationJobRepository generationJobRepository;
     private final WebSearchService webSearchService;
     private final ObjectMapper objectMapper;
@@ -188,8 +184,7 @@ public class AiAssistService {
                            ChatGptImageClient chatGptImageClient,
                            ImageModelService imageModelService,
                            ComfyUiModelService comfyUiModelService,
-                           GeneratedImageStorageService generatedImageStorageService,
-                           GeneratedImageRepository generatedImageRepository,
+                           MediaGeneratedImageClient mediaGeneratedImageClient,
                            GenerationJobRepository generationJobRepository,
                            WebSearchService webSearchService, ObjectMapper objectMapper,
                            ProjectService projectService,
@@ -201,8 +196,7 @@ public class AiAssistService {
         this.chatGptImageClient = chatGptImageClient;
         this.imageModelService = imageModelService;
         this.comfyUiModelService = comfyUiModelService;
-        this.generatedImageStorageService = generatedImageStorageService;
-        this.generatedImageRepository = generatedImageRepository;
+        this.mediaGeneratedImageClient = mediaGeneratedImageClient;
         this.generationJobRepository = generationJobRepository;
         this.webSearchService = webSearchService;
         this.objectMapper = objectMapper;
@@ -230,10 +224,13 @@ public class AiAssistService {
             List<AiImageResponse> responses = new ArrayList<>();
             for (ComfyUiImage image : images) {
                 String base64 = Base64.getEncoder().encodeToString(image.data());
-                String filePath = generatedImageStorageService.store(request.projectId(), image.data());
-                GeneratedImage saved = generatedImageRepository.save(
-                        toEntity(request.projectId(), params, filePath, image.mimeType(), tagsJson, provider));
-                responses.add(new AiImageResponse(saved.getId(), image.fileName(), base64, image.mimeType()));
+                Long savedId = mediaGeneratedImageClient.create(
+                        request.projectId(), params.prompt(), params.negativePrompt(), params.steps(),
+                        params.cfgScale(), params.samplerName(), params.scheduler(), params.seed(),
+                        params.width(), params.height(), params.batchSize(), params.checkpoint(),
+                        params.loraName(), params.loraWeight(), image.mimeType(), provider.name(), tagsJson,
+                        image.data());
+                responses.add(new AiImageResponse(savedId, image.fileName(), base64, image.mimeType()));
             }
             completeJob(job, Map.of("count", String.valueOf(responses.size())));
             return new AiImageBatchResponse(responses);
@@ -346,31 +343,6 @@ public class AiAssistService {
                 request.loraName(),
                 request.loraWeight()
         );
-    }
-
-    private GeneratedImage toEntity(
-            Long projectId, ComfyUiGenerationParams params, String filePath, String mimeType, String tagsJson,
-            ImageProvider provider) {
-        GeneratedImage entity = new GeneratedImage();
-        entity.setProjectId(projectId);
-        entity.setProvider(provider.name());
-        entity.setPrompt(params.prompt());
-        entity.setNegativePrompt(params.negativePrompt());
-        entity.setSteps(params.steps());
-        entity.setCfgScale(params.cfgScale() != null ? BigDecimal.valueOf(params.cfgScale()) : null);
-        entity.setSamplerName(params.samplerName());
-        entity.setScheduler(params.scheduler());
-        entity.setSeed(params.seed());
-        entity.setWidth(params.width());
-        entity.setHeight(params.height());
-        entity.setBatchSize(params.batchSize());
-        entity.setCheckpoint(params.checkpoint());
-        entity.setLoraName(params.loraName());
-        entity.setLoraWeight(params.loraWeight() != null ? BigDecimal.valueOf(params.loraWeight()) : null);
-        entity.setFilePath(filePath);
-        entity.setMimeType(mimeType);
-        entity.setTagsJson(tagsJson);
-        return entity;
     }
 
     /**

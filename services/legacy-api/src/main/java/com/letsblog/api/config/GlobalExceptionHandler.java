@@ -13,7 +13,6 @@ import com.letsblog.api.service.CustomTagNotFoundException;
 import com.letsblog.api.service.EmailAlreadyExistsException;
 import com.letsblog.api.service.EmailSendException;
 import com.letsblog.api.service.ForbiddenException;
-import com.letsblog.api.service.GeneratedImageNotFoundException;
 import com.letsblog.api.service.GenerationJobNotFoundException;
 import com.letsblog.api.service.InvalidCredentialsException;
 import com.letsblog.api.service.InvalidCustomTagContentException;
@@ -88,17 +87,6 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(GenerationJobNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleGenerationJobNotFound(GenerationJobNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
-    }
-
-    /**
-     * GeneratedImageは#573でmedia-serviceへ移設したが、AiAssistService/ProjectControllerが
-     * 生成画像の保存・読み込みに引き続きこのentity/repositoryのローカルコピーを使うため
-     * (media-serviceへの委譲はAiAssistService側の書き換えを伴う#573 stage4で行う)、
-     * このハンドラも当面残す。
-     */
-    @ExceptionHandler(GeneratedImageNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleGeneratedImageNotFound(GeneratedImageNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 
