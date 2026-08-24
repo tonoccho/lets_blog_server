@@ -1,12 +1,19 @@
 # 認可マトリクス (legacy-api)
 
 issue #568。`services/legacy-api` の全REST APIエンドポイント(`@GetMapping`/`@PostMapping`/
-`@PutMapping`/`@DeleteMapping`/`@PatchMapping` の合計180件、30コントローラファイル31クラス
+`@PutMapping`/`@DeleteMapping`/`@PatchMapping` の合計174件、28コントローラファイル
 [`HealthController`を含む]。`grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' controller/*.java | wc -l`
 で確認)について、現行の認可チェックと実際に返るステータスを一覧化する。#573でDiagramController/
-GeneratedImageController/RenderController(3ファイル、計12エンドポイント)をmedia-serviceへ移設した
-ため、当初の191件・33ファイルから減少している(このマトリクス自体は移設時に更新した)。stage2で
-GenerationJobControllerに`PATCH /api/generation-jobs/{id}`を追加したため179→180件。
+GeneratedImageController/RenderControllerをmedia-serviceへ移設し、当初の191件・33ファイルから
+減少している(このマトリクス自体は各stageの移設時に更新した)。stage3でMediaController/
+ProjectMediaGarbageCollectionControllerをmedia-serviceへ移設した一方、GenerationJobControllerに
+`POST /api/generation-jobs`を追加し、新設の内部ブリッジ`CmsMediaBridgeController`
+(`POST /api/internal/cms/sites/{site}/media`、`GET .../projects/{projectId}/media-scan`、
+`DELETE .../projects/{projectId}/media/{mediaId}`、計3エンドポイント)を追加した。
+`CmsMediaBridgeController`はmedia-service専用の内部呼び出しであり、gatewayを経由した
+既存フロントエンドから直接到達可能な経路ではないため、下表の一覧からは省略しているが、
+`ApiKeyAuthFilter`の対象からは除外していない(未認証では401になる。統合テストの
+X-API-Keyなし401チェックの対象には含めている)。
 
 対応する統合テストは
 `services/legacy-api/src/test/java/com/letsblog/api/integration/AuthorizationMatrixIntegrationTest.java`。
@@ -209,12 +216,6 @@ legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行して�
 | --- | --- | --- | --- | --- | --- | --- |
 | GET /api/health | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | ApiKeyAuthFilterの`shouldNotFilter`で明示的に除外 |
 
-## MediaController (1エンドポイント、ベースパスなし)
-
-| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
-| --- | --- | --- | --- | --- | --- | --- |
-| POST /api/media/upload | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | site識別子を渡せば任意のサイトへメディアをアップロード可能 |
-
 ## MetadataController (2エンドポイント、ベースパス `/api/metadata`)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
@@ -336,13 +337,6 @@ legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行して�
 | GET .../google-analytics | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `GoogleAnalyticsReportService.getReport()`内 |
 | GET .../adsense | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `AdSenseReportService.getReport()`内 |
 
-## ProjectMediaGarbageCollectionController (2エンドポイント、ベースパス `/api/projects/{id}/media-garbage-collection`)
-
-| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
-| --- | --- | --- | --- | --- | --- | --- |
-| GET .../scan | requireAdmin | 401 | 403 | 認可OK | 現状維持 | プロジェクト単位のパスだが、requireProjectMemberOrAdminではなくrequireAdmin |
-| POST .../delete | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 同上 |
-
 ## ProjectUserController (1エンドポイント、ベースパス `/api/project-users`)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
@@ -429,8 +423,7 @@ legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行して�
   `GET /api/dashboard/container-status/stream`
 - `FrontendErrorLogController`: `POST /api/logs/errors`
 - `GenerationJobController`: `GET /api/generation-jobs`, `GET /api/generation-jobs/{id}`,
-  `PATCH /api/generation-jobs/{id}`(#573 stage2で追加)
-- `MediaController`: `POST /api/media/upload`(任意のsiteへアップロード可能)
+  `PATCH /api/generation-jobs/{id}`(#573 stage2で追加), `POST /api/generation-jobs`(#573 stage3で追加)
 - `OperationLogController`: 全4エンドポイント(ただし自己スコープ設計。備考参照)
 - `PostController`: 全4エンドポイント。WordPressへの投稿公開・削除を含む、影響の大きい操作
 - `ProjectController`: `GET /api/projects`(一覧), `GET /api/projects/{id}`(詳細)

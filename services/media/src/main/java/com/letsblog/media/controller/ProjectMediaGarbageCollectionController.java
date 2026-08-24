@@ -1,11 +1,11 @@
-package com.letsblog.api.controller;
+package com.letsblog.media.controller;
 
-import com.letsblog.api.dto.GenerationJobResponse;
-import com.letsblog.api.dto.MediaGarbageCollectionDeleteRequest;
-import com.letsblog.api.dto.MediaGarbageCollectionScanResponse;
-import com.letsblog.api.service.AdminAuthorizationService;
-import com.letsblog.api.service.CurrentActorService;
-import com.letsblog.api.service.MediaGarbageCollectionService;
+import com.letsblog.media.client.GenerationJobSummary;
+import com.letsblog.media.dto.MediaGarbageCollectionDeleteRequest;
+import com.letsblog.media.dto.MediaGarbageCollectionScanResponse;
+import com.letsblog.media.service.AdminAuthorizationService;
+import com.letsblog.media.service.CurrentActorService;
+import com.letsblog.media.service.MediaGarbageCollectionService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -16,9 +16,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * プロジェクト画面の「ガベージコレクション」タブ向けAPI(issue #500)。
- * 選択した環境のWordPressサイトから、投稿本文・アイキャッチ・主要サイト設定のいずれからも
- * 参照されていないメディアを検出(scan)し、選択削除(delete、非同期ジョブ)する。
+ * legacy-apiから移設(issue #573 stage3)。プロジェクト画面の「ガベージコレクション」タブ向けAPI
+ * (issue #500)。パスはlegacy-api時代と同一(gatewayに新規ルート
+ * "/api/projects/{id}/media-garbage-collection/scan,delete" を追加してmedia-serviceへ向けた。
+ * 通常の "/api/projects/**" は"project"グループでlegacy-apiのまま)。
  */
 @RestController
 @RequestMapping("/api/projects/{id}/media-garbage-collection")
@@ -40,15 +41,17 @@ public class ProjectMediaGarbageCollectionController {
     @GetMapping("/scan")
     public MediaGarbageCollectionScanResponse scan(@PathVariable Long id, @RequestParam String environment) {
         adminAuthorizationService.requireAdmin();
-        return mediaGarbageCollectionService.scan(id, environment);
+        return mediaGarbageCollectionService.scan(id, environment, currentActorService.getAuthorizationHeader());
     }
 
     @PostMapping("/delete")
-    public GenerationJobResponse delete(@PathVariable Long id, @RequestParam String environment,
+    public GenerationJobSummary delete(@PathVariable Long id, @RequestParam String environment,
             @Valid @RequestBody MediaGarbageCollectionDeleteRequest request) {
         adminAuthorizationService.requireAdmin();
         Long actorId = currentActorService.getCurrentActorId();
         String actorKeycloakSub = currentActorService.getCurrentActorKeycloakSub();
-        return mediaGarbageCollectionService.startDelete(id, environment, request.mediaIds(), actorId, actorKeycloakSub);
+        return mediaGarbageCollectionService.startDelete(
+                id, environment, request.mediaIds(), actorId, actorKeycloakSub,
+                currentActorService.getAuthorizationHeader());
     }
 }

@@ -1,23 +1,16 @@
-package com.letsblog.api.service;
+package com.letsblog.media.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.api.cms.CmsAdapter;
-import com.letsblog.api.cms.CmsAdapterFactory;
-import com.letsblog.api.cms.CmsCredentials;
-import com.letsblog.api.cms.CmsMediaReferenceScan;
-import com.letsblog.api.cms.CmsMediaSummary;
-import com.letsblog.api.cms.CmsPostContentSummary;
-import com.letsblog.api.domain.GenerationJob;
-import com.letsblog.api.domain.Project;
-import com.letsblog.api.domain.Site;
-import com.letsblog.api.dto.GenerationJobResponse;
-import com.letsblog.api.dto.MediaGarbageCollectionScanResponse;
-import com.letsblog.api.dto.UnreferencedMediaItem;
-import com.letsblog.api.repository.GenerationJobRepository;
-import com.letsblog.api.repository.ProjectRepository;
-import com.letsblog.api.repository.SiteRepository;
+import com.letsblog.media.client.CmsBridgeClient;
+import com.letsblog.media.client.CmsMediaReferenceScan;
+import com.letsblog.media.client.CmsMediaSummary;
+import com.letsblog.media.client.CmsPostContentSummary;
+import com.letsblog.media.client.GenerationJobClient;
+import com.letsblog.media.client.GenerationJobSummary;
+import com.letsblog.media.client.MediaGcScanResult;
+import com.letsblog.media.dto.MediaGarbageCollectionScanResponse;
+import com.letsblog.media.dto.UnreferencedMediaItem;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -29,49 +22,40 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * プロジェクトが持つ環境(local/test/production)のWordPressサイトから、投稿本文・アイキャッチ・
- * 主要サイト設定のいずれからも参照されていないメディアを検出し、選択削除する(issue #500)。
- * 検出(scan)はそのサイトへの読み取りアクセスのみで完結するため同期実行、削除(startDelete)は
- * 件数次第で時間がかかりうるため{@link GenerationJob}+{@link MediaGarbageCollectionJobRunner}の
- * 非同期ジョブとして実行しフロントエンドがポーリングで進捗を追う({@link ComfyUiModelService}と同じ構成)。
+ * legacy-apiから移設(issue #573 stage3)。プロジェクトが持つ環境(local/test/production)の
+ * WordPressサイトから、投稿本文・アイキャッチ・主要サイト設定のいずれからも参照されていない
+ * メディアを検出し、選択削除する(issue #500)。
+ *
+ * <p>元の実装は{@code Project}/{@code Site}/{@code CmsAdapter}へ直接アクセスしていたが、これらは
+ * このissueの移設対象ではない(project-service、C8/#577が未着手)ため、実際のCMS(WordPress)との
+ * やり取り(メディア一覧・参照スキャン・削除の実行)は{@link CmsBridgeClient}経由でlegacy-apiへ
+ * 委譲する。未参照判定の実際のロジック(正規表現によるコンテンツ参照抽出、
+ * {@link #extractReferencedIds}/{@link #extractContentReferences})はmedia-serviceが引き続き
+ * 所有する(このメディア関連の判断ロジック自体はCMS接続情報を必要としないため)。
  */
 @Service
 public class MediaGarbageCollectionService {
 
-    private final ProjectRepository projectRepository;
-    private final SiteRepository siteRepository;
-    private final SiteService siteService;
-    private final CmsAdapterFactory cmsAdapterFactory;
-    private final GenerationJobRepository generationJobRepository;
+    private final CmsBridgeClient cmsBridgeClient;
+    private final GenerationJobClient generationJobClient;
     private final MediaGarbageCollectionJobRunner mediaGarbageCollectionJobRunner;
     private final ObjectMapper objectMapper;
 
     public MediaGarbageCollectionService(
-            ProjectRepository projectRepository,
-            SiteRepository siteRepository,
-            SiteService siteService,
-            CmsAdapterFactory cmsAdapterFactory,
-            GenerationJobRepository generationJobRepository,
+            CmsBridgeClient cmsBridgeClient,
+            GenerationJobClient generationJobClient,
             MediaGarbageCollectionJobRunner mediaGarbageCollectionJobRunner,
             ObjectMapper objectMapper) {
-        this.projectRepository = projectRepository;
-        this.siteRepository = siteRepository;
-        this.siteService = siteService;
-        this.cmsAdapterFactory = cmsAdapterFactory;
-        this.generationJobRepository = generationJobRepository;
+        this.cmsBridgeClient = cmsBridgeClient;
+        this.generationJobClient = generationJobClient;
         this.mediaGarbageCollectionJobRunner = mediaGarbageCollectionJobRunner;
         this.objectMapper = objectMapper;
     }
 
-    @Transactional(readOnly = true)
-    public MediaGarbageCollectionScanResponse scan(Long projectId, String environment) {
-        Project project = getProject(projectId);
-        Site site = resolveSite(project, environment);
-        CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
-        CmsAdapter adapter = cmsAdapterFactory.resolve(credentials.cmsType());
-
-        List<CmsMediaSummary> allMedia = adapter.listMedia(credentials);
-        CmsMediaReferenceScan refs = adapter.scanMediaReferences(credentials);
+    public MediaGarbageCollectionScanResponse scan(Long projectId, String environment, String bearerToken) {
+        MediaGcScanResult result = cmsBridgeClient.scanMedia(projectId, environment, bearerToken);
+        List<CmsMediaSummary> allMedia = result.media();
+        CmsMediaReferenceScan refs = result.refs();
         Set<String> referencedIds = extractReferencedIds(refs);
 
         List<CmsMediaSummary> unreferenced = allMedia.stream()
@@ -88,22 +72,16 @@ public class MediaGarbageCollectionService {
                 environment, items, allMedia.size(), allMedia.size() - unreferenced.size(), unreferenced.size());
     }
 
-    @Transactional
-    public GenerationJobResponse startDelete(Long projectId, String environment, List<String> mediaIds, Long actorId,
-            String actorKeycloakSub) {
-        Project project = getProject(projectId);
-        Site site = resolveSite(project, environment);
-
-        GenerationJob job = new GenerationJob();
-        job.setType("media_garbage_collection_delete");
-        job.setStatus("running");
-        job.setRequestPayload(toJson(Map.of(
-                "projectId", projectId, "environment", environment, "mediaIds", mediaIds)));
-        generationJobRepository.save(job);
+    public GenerationJobSummary startDelete(Long projectId, String environment, List<String> mediaIds, Long actorId,
+            String actorKeycloakSub, String bearerToken) {
+        GenerationJobSummary job = generationJobClient.create(
+                "media_garbage_collection_delete",
+                toJson(Map.of("projectId", projectId, "environment", environment, "mediaIds", mediaIds)),
+                bearerToken);
 
         mediaGarbageCollectionJobRunner.runDelete(
-                job.getId(), site.getId(), environment, projectId, mediaIds, actorId, actorKeycloakSub);
-        return toResponse(job);
+                job.id(), projectId, environment, mediaIds, actorId, actorKeycloakSub, bearerToken);
+        return job;
     }
 
     /**
@@ -171,30 +149,6 @@ public class MediaGarbageCollectionService {
         if (value != null && !value.isBlank() && !value.equals("0")) {
             ids.add(value);
         }
-    }
-
-    private Site resolveSite(Project project, String environment) {
-        Long siteId = switch (environment) {
-            case "local" -> project.getLocalSiteId();
-            case "test" -> project.getTestSiteId();
-            case "production" -> project.getProductionSiteId();
-            default -> throw new IllegalArgumentException("不正な環境です: " + environment);
-        };
-        if (siteId == null) {
-            throw new IllegalArgumentException("環境 '" + environment + "' にはサイトが設定されていません");
-        }
-        return siteRepository.findById(siteId)
-                .orElseThrow(() -> new IllegalArgumentException("環境 '" + environment + "' にはサイトが設定されていません"));
-    }
-
-    private Project getProject(Long projectId) {
-        return projectRepository.findById(projectId)
-                .orElseThrow(() -> new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません"));
-    }
-
-    private GenerationJobResponse toResponse(GenerationJob job) {
-        return new GenerationJobResponse(
-                job.getId(), job.getType(), job.getStatus(), job.getCreatedAt(), job.getUpdatedAt());
     }
 
     private String toJson(Object value) {

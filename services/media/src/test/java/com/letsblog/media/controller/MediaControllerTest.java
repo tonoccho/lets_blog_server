@@ -1,17 +1,15 @@
-package com.letsblog.api.controller;
+package com.letsblog.media.controller;
 
-import com.letsblog.api.cms.CmsAdapter;
-import com.letsblog.api.cms.CmsAdapterFactory;
-import com.letsblog.api.cms.CmsCredentials;
-import com.letsblog.api.cms.CmsType;
-import com.letsblog.api.cms.MediaUploadResult;
-import com.letsblog.api.service.ImageResizeService;
-import com.letsblog.api.service.SiteService;
+import com.letsblog.media.client.CmsBridgeClient;
+import com.letsblog.media.client.MediaUploadResult;
+import com.letsblog.media.service.ImageResizeService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpHeaders;
 import org.springframework.mock.web.MockMultipartFile;
 
 import javax.imageio.ImageIO;
@@ -25,33 +23,28 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * /api/media/upload がアップロード前にEXIF等のメタ情報を削除することを検証する(issue #432)。
+ * legacy-apiから移設(issue #573 stage3)。/api/media/upload がアップロード前にEXIF等のメタ情報を
+ * 削除すること(issue #432、ImageResizeServiceのロジック自体は変更していない)と、
+ * Bearerトークンをlegacy-apiのCMSブリッジへ転送することを検証する。
  */
 @ExtendWith(MockitoExtension.class)
 class MediaControllerTest {
 
     @Mock
-    private SiteService siteService;
-
+    private CmsBridgeClient cmsBridgeClient;
     @Mock
-    private CmsAdapterFactory cmsAdapterFactory;
-
-    @Mock
-    private CmsAdapter cmsAdapter;
+    private HttpServletRequest request;
 
     private final ImageResizeService imageResizeService = new ImageResizeService();
 
     private MediaController controller() {
-        return new MediaController(siteService, cmsAdapterFactory, imageResizeService);
+        return new MediaController(cmsBridgeClient, imageResizeService, request);
     }
 
     @Test
-    void upload_JPEGのExifメタ情報を削除してからアップロードする() throws Exception {
-        CmsCredentials credentials = new CmsCredentials.WordPressCredentials(
-                "https://example.com", "user", "SSH");
-        when(siteService.getCredentials("my-site")).thenReturn(credentials);
-        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
-        when(cmsAdapter.uploadMedia(any(), anyString(), anyString(), any()))
+    void upload_JPEGのExifメタ情報を削除してからアップロードしBearerトークンを転送する() throws Exception {
+        when(request.getHeader(HttpHeaders.AUTHORIZATION)).thenReturn("Bearer token-abc");
+        when(cmsBridgeClient.uploadMedia(any(), anyString(), anyString(), any(), any()))
                 .thenReturn(new MediaUploadResult("1", "https://example.com/media/1.jpg"));
 
         byte[] withExif = insertExifApp1(renderJpeg(100, 80));
@@ -60,7 +53,9 @@ class MediaControllerTest {
         controller().upload("my-site", file);
 
         ArgumentCaptor<byte[]> bytesCaptor = ArgumentCaptor.forClass(byte[].class);
-        verify(cmsAdapter).uploadMedia(any(), anyString(), anyString(), bytesCaptor.capture());
+        verify(cmsBridgeClient).uploadMedia(
+                org.mockito.ArgumentMatchers.eq("my-site"), anyString(), anyString(), bytesCaptor.capture(),
+                org.mockito.ArgumentMatchers.eq("Bearer token-abc"));
         assertFalse(containsApp1Marker(bytesCaptor.getValue()), "CMSへ送信されるバイト列からAPP1(Exif)セグメントが削除されていること");
     }
 

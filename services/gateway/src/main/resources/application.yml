@@ -36,6 +36,14 @@ app:
           - /api/projects/*/bulk-management/upload
           - /api/projects/*/bulk-management/replay
         response-timeout: 300s
+      # ProjectMediaGarbageCollectionControllerはmedia-serviceへ移設した(#573 stage3)が、パス自体は
+      # /api/projects/**配下のまま(既存フロントのURLを変えないため)。より広い/api/projects/**
+      # (下のprojectルート、legacy-apiへ向く)より先に評価されるよう、ここに置く。
+      - id: project-media-garbage-collection
+        uri: ${MEDIA_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/projects/*/media-garbage-collection/scan
+          - /api/projects/*/media-garbage-collection/delete
       - id: content-posts-publish
         uri: ${CONTENT_SERVICE_URI:http://api:8080}
         paths:
@@ -84,6 +92,8 @@ app:
           - /api/generated-images/**
           - /api/diagrams/**
           - /api/render/**
+          # MediaControllerの実際のマッピングは/api/media/**(#573 stage3でmedia-serviceへ移設)。
+          - /api/media/**
       - id: ai
         uri: ${AI_SERVICE_URI:http://api:8080}
         paths:

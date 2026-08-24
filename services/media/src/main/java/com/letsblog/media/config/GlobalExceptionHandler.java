@@ -3,8 +3,12 @@ package com.letsblog.media.config;
 import com.letsblog.common.web.ErrorResponse;
 import com.letsblog.media.ai.AiServiceException;
 import com.letsblog.media.render.RechartsRenderException;
+import com.letsblog.media.service.CmsBridgeException;
 import com.letsblog.media.service.DiagramNotFoundException;
+import com.letsblog.media.service.ForbiddenException;
 import com.letsblog.media.service.GeneratedImageNotFoundException;
+import com.letsblog.media.service.GenerationJobBridgeException;
+import com.letsblog.media.service.IdentityServiceUnavailableException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -49,6 +53,36 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(RechartsRenderException.class)
     public ResponseEntity<ErrorResponse> handleRechartsRenderException(RechartsRenderException e) {
         log.warn("Rechartsのレンダリングに失敗しました", e);
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    @ExceptionHandler(ForbiddenException.class)
+    public ResponseEntity<ErrorResponse> handleForbidden(ForbiddenException e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /**
+     * identity-service/legacy-apiへの同期呼び出し(#573 stage3、C12(#581)までの暫定策)の失敗。
+     * log-writer(#572)のIdentityServiceUnavailableExceptionハンドリングと同じ方針。
+     */
+    @ExceptionHandler(IdentityServiceUnavailableException.class)
+    public ResponseEntity<ErrorResponse> handleIdentityServiceUnavailable(IdentityServiceUnavailableException e) {
+        log.error("依存サービスとの同期呼び出しに失敗しました", e);
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /**
+     * legacy-apiのCMSブリッジ(/api/internal/cms/**、#573 stage3)呼び出しの失敗。
+     */
+    @ExceptionHandler(CmsBridgeException.class)
+    public ResponseEntity<ErrorResponse> handleCmsBridgeException(CmsBridgeException e) {
+        log.error("legacy-apiのCMSブリッジ呼び出しに失敗しました", e);
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    @ExceptionHandler(GenerationJobBridgeException.class)
+    public ResponseEntity<ErrorResponse> handleGenerationJobBridgeException(GenerationJobBridgeException e) {
+        log.error("legacy-apiのGenerationJob呼び出しに失敗しました", e);
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 }

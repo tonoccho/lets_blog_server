@@ -1,4 +1,4 @@
-package com.letsblog.api.dto;
+package com.letsblog.media.dto;
 
 import java.util.List;
 
