@@ -10,7 +10,6 @@ import org.springframework.stereotype.Service;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.Base64;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -19,7 +18,12 @@ import java.util.regex.Pattern;
 
 /**
  * Markdown本文中の ```plantuml フェンスコードブロックをPlantUMLサーバーでPNGにレンダリングし、
- * CMSのメディアライブラリへアップロードして画像参照に差し替える。
+ * CMSのメディアライブラリへアップロードして画像参照に差し替える(投稿パイプライン向け)。
+ *
+ * <p>プレビュー向け(CMS認証情報を必要としないembedDiagramsForPreview)はcontent-serviceへ移設した
+ * (issue #576、{@link com.letsblog.content.service.PlantUmlEmbedService}参照)。こちらはCMS
+ * メディアライブラリへのアップロードを伴うためCmsAdapter/CmsCredentialsへの依存が強く、
+ * issue #575(publishing-service)の対象になるまで引き続きlegacy-apiに残す。
  */
 @Service
 public class PlantUmlEmbedService {
@@ -71,27 +75,6 @@ public class PlantUmlEmbedService {
         matcher.appendTail(result);
 
         return new DiagramEmbedResult(result.toString(), updatedUploads);
-    }
-
-    /**
-     * プレビュー向けに```plantumlフェンスコードブロックをPNGへレンダリングし、data URIとして
-     * 画像参照に差し替える。embedDiagramsと異なりCMS認証情報を必要とせず、メディアアップロードも
-     * 行わない(プレビューは副作用のある外部呼び出しを避けるため)。
-     */
-    public String embedDiagramsForPreview(String markdown) {
-        Matcher matcher = PLANTUML_BLOCK_PATTERN.matcher(markdown);
-        StringBuilder result = new StringBuilder();
-
-        while (matcher.find()) {
-            String diagramSource = matcher.group(1).trim();
-            byte[] png = mediaRenderClient.renderPlantUml(wrapWithMarkers(diagramSource));
-            String dataUri = "data:image/png;base64," + Base64.getEncoder().encodeToString(png);
-
-            matcher.appendReplacement(result, Matcher.quoteReplacement("![diagram](" + dataUri + ")"));
-        }
-        matcher.appendTail(result);
-
-        return result.toString();
     }
 
     private String wrapWithMarkers(String diagramSource) {

@@ -33,6 +33,11 @@ export * from './generated/media/project-media-garbage-collection-controller/pro
 // 名前空間を持たないorvalのマルチターゲット生成の既知の制約、#573で最初に顕在化)。現時点でこれらの
 // シンボルを`@api-client`から名前で直接importしている呼び出し元は無いため、明示的にlog-writer側を正として
 // 再エクスポートし曖昧性を解消する(将来他サービスでも同名衝突が起きた場合は同じパターンで解消すること)。
+// 同様にmediaのDiagramController.deleteも、Javaのメソッド名が単に"delete"であるため生成名(_delete/
+// getDeleteUrl)がorvalの命名衝突を起こしうる(#576でcontent-serviceのCustomTagController.deleteを
+// 追加した際に顕在化)。こちらは_delete/getDeleteUrlという識別子を`@api-client`から名前でimportしている
+// 呼び出し元が無いため、明示的にmedia側を正として再エクスポートし曖昧性を解消する
+// (content側はcustom-tagセクションでdeleteCustomTagとして別名エクスポートする)。
 export type {
   ListParams,
   List1Params,
@@ -55,6 +60,48 @@ export type {
   listResponse200,
   listResponseSuccess,
 } from './generated/log-writer/operation-log-controller/operation-log-controller';
+export {
+  _delete,
+  getDeleteUrl,
+} from './generated/media/diagram-controller/diagram-controller';
+export type {
+  _deleteResponse,
+  _deleteResponse200,
+  _deleteResponseSuccess,
+} from './generated/media/diagram-controller/diagram-controller';
+// 同じ理由(Javaのメソッド名が単に"create"/"create1"/"delete1"であることによる衝突)で、mediaの
+// GeneratedImageController.create/DiagramController.create(diagramの新規作成)/
+// ProjectMediaGarbageCollectionController.delete(GC実行)も、#576でcontent-serviceの
+// CustomTagController.create/CustomTagTemplateController.create/CustomTagTemplateController.deleteを
+// 追加した際に生成名(create/create1/delete1等)が衝突した。既存(media)側を正として再エクスポートし、
+// content側は各セクションで別名エクスポートする。
+export {
+  create,
+  getCreateUrl,
+} from './generated/media/generated-image-controller/generated-image-controller';
+export type {
+  createResponse,
+  createResponse201,
+  createResponseSuccess,
+} from './generated/media/generated-image-controller/generated-image-controller';
+export {
+  create1,
+  getCreate1Url,
+} from './generated/media/diagram-controller/diagram-controller';
+export type {
+  create1Response,
+  create1Response200,
+  create1ResponseSuccess,
+} from './generated/media/diagram-controller/diagram-controller';
+export {
+  delete1,
+  getDelete1Url,
+} from './generated/media/project-media-garbage-collection-controller/project-media-garbage-collection-controller';
+export type {
+  delete1Response,
+  delete1Response200,
+  delete1ResponseSuccess,
+} from './generated/media/project-media-garbage-collection-controller/project-media-garbage-collection-controller';
 
 // ai(LLM呼び出し・記事プラン・generation_jobsの所有権をai-serviceへ移管、#574)。
 // InternalAiGenerationController/InternalProjectAiSettingsControllerはlegacy-api→ai-serviceの
@@ -85,5 +132,51 @@ export type {
   createResponse as createGenerationJobResponse,
   updateResponse as updateGenerationJobResponse,
 } from './generated/ai/generation-job-controller/generation-job-controller';
+
+// content(記事本文(posts)・カスタムタグ・Markdownレンダリング・記事プレビュー・コンテンツキャッシュの
+// 所有権をcontent-serviceへ移管、#576)。InternalPostBridgeController/InternalPreviewSkeletonController/
+// InternalProjectContentSettingsController/InternalPublishPipelineControllerはlegacy-api↔content-service
+// の内部ブリッジ専用(/api/internal/content/**)で、gatewayからは到達不能かつweb/extensionが呼ぶ想定も
+// ないため、他サービスの内部ブリッジコントローラと同様にここでは再エクスポートしない。
+export * from './generated/content/openAPIDefinition.schemas';
+export * from './generated/content/article-preview-controller/article-preview-controller';
+export * from './generated/content/content-cache-controller/content-cache-controller';
+export * from './generated/content/custom-tag-controller/custom-tag-controller';
+export * from './generated/content/custom-tag-template-controller/custom-tag-template-controller';
+export * from './generated/content/metadata/metadata';
+export * from './generated/content/post-controller/post-controller';
+export * from './generated/content/project-custom-tag-controller/project-custom-tag-controller';
+
+// content-service内で複数コントローラの"list"系メソッドがorvalによりlist/list1/list2/list3として
+// 生成され(既存のlist衝突解消コメント参照)、うちlist/list1はlog-writerが既に正としているシンボルと
+// 衝突する。同様にCustomTagController.deleteはJavaのメソッド名が単に"delete"であるため、mediaの
+// DiagramController.deleteと生成名(_delete/getDeleteUrl)が衝突する。明示的に別名で再エクスポートして
+// 曖昧性を解消する。
+export {
+  list as listCustomTags,
+  getListUrl as getListCustomTagsUrl,
+  _delete as deleteCustomTag,
+  getDeleteUrl as getDeleteCustomTagUrl,
+  create as createCustomTag,
+  getCreateUrl as getCreateCustomTagUrl,
+} from './generated/content/custom-tag-controller/custom-tag-controller';
+export type {
+  listResponse as listCustomTagsResponse,
+  _deleteResponse as deleteCustomTagResponse,
+  createResponse as createCustomTagResponse,
+} from './generated/content/custom-tag-controller/custom-tag-controller';
+export {
+  list1 as listCustomTagTemplates,
+  getList1Url as getListCustomTagTemplatesUrl,
+  create1 as createCustomTagTemplate,
+  getCreate1Url as getCreateCustomTagTemplateUrl,
+  delete1 as deleteCustomTagTemplate,
+  getDelete1Url as getDeleteCustomTagTemplateUrl,
+} from './generated/content/custom-tag-template-controller/custom-tag-template-controller';
+export type {
+  list1Response as listCustomTagTemplatesResponse,
+  create1Response as createCustomTagTemplateResponse,
+  delete1Response as deleteCustomTagTemplateResponse,
+} from './generated/content/custom-tag-template-controller/custom-tag-template-controller';
 
 // 将来のサービス抽出Issueで追加するターゲットも、ここに re-export を追加していく。

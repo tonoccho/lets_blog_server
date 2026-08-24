@@ -4,10 +4,8 @@ import com.letsblog.api.ai.AiServiceException;
 import com.letsblog.api.cms.CmsApiException;
 import com.letsblog.api.cms.agent.AgentOperationException;
 import com.letsblog.api.cms.ssh.SshOperationException;
-import com.letsblog.api.contentcache.ContentScrapingException;
 import com.letsblog.api.service.AiServiceGenerationException;
 import com.letsblog.api.service.BackupException;
-import com.letsblog.api.service.CustomTagNotFoundException;
 import com.letsblog.api.service.EmailAlreadyExistsException;
 import com.letsblog.api.service.EmailSendException;
 import com.letsblog.api.service.ForbiddenException;
@@ -19,7 +17,6 @@ import com.letsblog.api.service.InvalidRoleException;
 import com.letsblog.api.service.InvalidTokenException;
 import com.letsblog.api.service.InvalidTotpCodeException;
 import com.letsblog.api.service.MailTemplateNotFoundException;
-import com.letsblog.api.service.PostNotFoundException;
 import com.letsblog.api.service.ProhibitedContentException;
 import com.letsblog.api.service.ProjectNotFoundException;
 import com.letsblog.api.service.ProjectUserNotFoundException;
@@ -59,16 +56,6 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(SiteNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleSiteNotFound(SiteNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
-    }
-
-    @ExceptionHandler(PostNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handlePostNotFound(PostNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
-    }
-
-    @ExceptionHandler(CustomTagNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleCustomTagNotFound(CustomTagNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 
@@ -174,11 +161,6 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(AgentOperationException.class)
     public ResponseEntity<ErrorResponse> handleAgentOperationException(AgentOperationException e) {
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
-    }
-
-    @ExceptionHandler(ContentScrapingException.class)
-    public ResponseEntity<ErrorResponse> handleContentScrapingException(ContentScrapingException e) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 

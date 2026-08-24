@@ -1,7 +1,6 @@
 package com.letsblog.api.dto;
 
 import com.letsblog.api.domain.Project;
-import com.letsblog.api.domain.ProjectContentSettings;
 import com.letsblog.api.domain.ProjectImageSettings;
 
 import java.time.LocalDateTime;
@@ -9,6 +8,9 @@ import java.time.LocalDateTime;
 /**
  * projectsの縮小と、project_image_settings(media)/project_content_settings(content)への
  * 設定分割後も、Webの画面には従来どおり1つのレスポンスとしてまとめて返す(issue #571)。
+ * project_content_settingsの所有権はcontent-serviceへ移った(issue #576)ため、cssSelectorPrefixは
+ * ProjectContentSettingsエンティティではなく、内部ブリッジ(ContentServiceClient)経由で取得した
+ * 文字列をそのまま受け取る。
  */
 public record ProjectResponse(
         Long id,
@@ -33,7 +35,7 @@ public record ProjectResponse(
 ) {
     public static ProjectResponse from(
             Project project, SiteResponse localSite, SiteResponse testSite, SiteResponse productionSite,
-            ProjectImageSettings imageSettings, ProjectContentSettings contentSettings) {
+            ProjectImageSettings imageSettings, String cssSelectorPrefix) {
         return new ProjectResponse(
                 project.getId(),
                 project.getName(),
@@ -43,7 +45,7 @@ public record ProjectResponse(
                 productionSite,
                 project.getMasterEnvironment(),
                 project.getGithubRepository(),
-                contentSettings == null ? null : contentSettings.getCssSelectorPrefix(),
+                cssSelectorPrefix,
                 imageSettings == null ? null : imageSettings.getDefaultNegativePrompt(),
                 imageSettings == null ? null : imageSettings.getDefaultQualityPrompt(),
                 imageSettings == null ? null : imageSettings.getDefaultGeneratedImageWidth(),

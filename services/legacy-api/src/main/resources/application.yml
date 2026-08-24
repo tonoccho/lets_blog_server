@@ -131,7 +131,10 @@ app:
   # LLMテキスト生成(AiGenerationClient)・generation_jobsのジョブ作成/進捗更新(GenerationJobClient)を
   # ai-serviceへ委譲する(issue #574)。
   ai-service-uri: ${AI_SERVICE_URI:http://localhost:8080}
-  content-cache-ttl-hours: ${CONTENT_CACHE_TTL_HOURS:24}
+  # 公開パイプライン中のカスタムタグ/組み込みタグ展開・Markdown→HTML変換、posts/
+  # project_content_settingsの読み書き、記事プレビューのテーマ骨格取得(Playwright)をcontent-service
+  # へ委譲する(issue #576、com.letsblog.api.client.ContentServiceClient参照)。
+  content-service-uri: ${CONTENT_SERVICE_URI:http://localhost:8080}
   wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
   wordpress-provision-token: ${WP_PROVISION_TOKEN:}
   bulk-upload-storage-path: ${BULK_UPLOAD_STORAGE_PATH:/app/data/bulk-uploads}

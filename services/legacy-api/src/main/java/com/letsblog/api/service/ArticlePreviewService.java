@@ -1,6 +1,7 @@
 package com.letsblog.api.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.letsblog.api.client.ContentServiceClient;
 import com.letsblog.api.cms.AuthCookie;
 import com.letsblog.api.cms.CmsAdapter;
 import com.letsblog.api.cms.CmsAdapterFactory;
@@ -17,7 +18,6 @@ import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.ThemeCssResponse;
 import com.letsblog.api.dto.ThemeSkeletonResponse;
-import com.letsblog.api.markdown.MarkdownRenderer;
 import com.letsblog.api.repository.SiteRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,7 +25,6 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.util.HtmlUtils;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -35,10 +34,17 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * VSCode拡張の記事プレビュー機能向けに、Markdown→HTML変換とプロジェクトのマスター環境サイトの
- * テーマCSS取得を行う。PostPublishServiceと異なり、実際のCMSへの投稿は行わない
- * (プレビューなので副作用のある外部呼び出しは避ける)。PlantUML図はCMSへのアップロードは行わず、
- * data URIとして本文に直接埋め込む({@link PlantUmlEmbedService#embedDiagramsForPreview}参照)。
+ * VSCode拡張の記事プレビュー機能向けに、プロジェクトのマスター環境サイトのテーマCSS取得・実テーマの
+ * DOM構造を保った骨格差し替えを行う。legacy-apiのArticlePreviewServiceのうち、Markdown→HTML変換
+ * パイプライン(renderHtml、CMSへの依存を持たない)はcontent-serviceへ移設した(issue #576、
+ * {@link com.letsblog.content.service.ArticlePreviewService}参照)。
+ *
+ * <p>このクラスに残るfetchThemeCss/renderSkeleton/deletePreviewPostは、CmsAdapter/
+ * WordPressAgentOperations/WordPressSshOperations/Project/Site(project-service/publishing-service
+ * がまだ抽出されていないドメイン)への深い依存があり、issue #575(publishing-service)の対象になる
+ * まで引き続きlegacy-apiに残る。Playwrightを持つのはcontent-serviceになった(issueの注記どおり)ため、
+ * 実際のヘッドレスブラウザ操作(旧PreviewSkeletonFetcher)は{@link ContentServiceClient}経由の
+ * 内部ブリッジへ委譲する(CMS認証情報自体は転送せず、解決済みのnavigateUrl・認証Cookieのみ渡す)。
  */
 @Service
 public class ArticlePreviewService {
@@ -69,103 +75,32 @@ public class ArticlePreviewService {
     private static final Pattern CSS_URL_PATTERN =
             Pattern.compile("url\\(\\s*(['\"]?)([^'\")]+)\\1\\s*\\)", Pattern.CASE_INSENSITIVE);
 
-    private final CustomTagRenderService customTagRenderService;
-    private final BlogCardTagRenderService blogCardTagRenderService;
-    private final AmazonTagRenderService amazonTagRenderService;
-    private final RechartsTagRenderService rechartsTagRenderService;
-    private final PlantUmlEmbedService plantUmlEmbedService;
-    private final PlantUmlTagRenderService plantUmlTagRenderService;
-    private final TocStyleRenderService tocStyleRenderService;
-    private final RenderedContentWrapperService renderedContentWrapperService;
-    private final MarkdownRenderer markdownRenderer;
     private final ProjectService projectService;
     private final SiteRepository siteRepository;
     private final SiteService siteService;
     private final RestClient.Builder restClientBuilder;
-    private final PreviewSkeletonFetcher previewSkeletonFetcher;
+    private final ContentServiceClient contentServiceClient;
     private final CmsAdapterFactory cmsAdapterFactory;
     private final WordPressAgentOperations wordPressAgentOperations;
     private final WordPressSshOperations wordPressSshOperations;
 
     public ArticlePreviewService(
-            CustomTagRenderService customTagRenderService,
-            BlogCardTagRenderService blogCardTagRenderService,
-            AmazonTagRenderService amazonTagRenderService,
-            RechartsTagRenderService rechartsTagRenderService,
-            PlantUmlEmbedService plantUmlEmbedService,
-            PlantUmlTagRenderService plantUmlTagRenderService,
-            TocStyleRenderService tocStyleRenderService,
-            RenderedContentWrapperService renderedContentWrapperService,
-            MarkdownRenderer markdownRenderer,
             ProjectService projectService,
             SiteRepository siteRepository,
             SiteService siteService,
             RestClient.Builder restClientBuilder,
-            PreviewSkeletonFetcher previewSkeletonFetcher,
+            ContentServiceClient contentServiceClient,
             CmsAdapterFactory cmsAdapterFactory,
             WordPressAgentOperations wordPressAgentOperations,
             WordPressSshOperations wordPressSshOperations) {
-        this.customTagRenderService = customTagRenderService;
-        this.blogCardTagRenderService = blogCardTagRenderService;
-        this.amazonTagRenderService = amazonTagRenderService;
-        this.rechartsTagRenderService = rechartsTagRenderService;
-        this.plantUmlEmbedService = plantUmlEmbedService;
-        this.plantUmlTagRenderService = plantUmlTagRenderService;
-        this.tocStyleRenderService = tocStyleRenderService;
-        this.renderedContentWrapperService = renderedContentWrapperService;
-        this.markdownRenderer = markdownRenderer;
         this.projectService = projectService;
         this.siteRepository = siteRepository;
         this.siteService = siteService;
         this.restClientBuilder = restClientBuilder;
-        this.previewSkeletonFetcher = previewSkeletonFetcher;
+        this.contentServiceClient = contentServiceClient;
         this.cmsAdapterFactory = cmsAdapterFactory;
         this.wordPressAgentOperations = wordPressAgentOperations;
         this.wordPressSshOperations = wordPressSshOperations;
-    }
-
-    /**
-     * カスタムタグ展開 + 組み込みタグ展開 + Markdown→HTML変換を行う。PostPublishServiceと違い、
-     * 実際のCMSへの画像アップロードは行わない(プレビュー用の軽量処理)。PlantUML図はCMSアップロードの
-     * 代わりにdata URIとして直接埋め込むことで、投稿後と同じ図としてプレビューに表示する(Issue #345)。
-     *
-     * [recharts]タグの記法・データが不正な場合、他の組み込みタグと異なりInvalidRechartsTagExceptionを
-     * 捕捉し、以降のレンダリングを中止してエラーメッセージのみを表示する(Issue #340)。
-     * [plantuml]〜[/plantuml]組み込みタグも同じ方針で、InvalidPlantUmlTagExceptionを捕捉して
-     * レンダリングを中止する(Issue #344)。既存の```plantumlフェンスコードブロック記法(下の
-     * plantUmlEmbedService呼び出し)とは併存し、置き換えない。
-     */
-    public String renderHtml(Long projectId, String markdown) {
-        String rendered = customTagRenderService.render(markdown, projectId);
-        rendered = blogCardTagRenderService.render(rendered, projectId);
-        // プレビューは特定サイトに紐付かないため、本番サイト向けの実リンクは常に非活性化する(issue #389)。
-        rendered = amazonTagRenderService.render(rendered, projectId, false);
-        try {
-            rendered = rechartsTagRenderService.render(rendered);
-        } catch (InvalidRechartsTagException e) {
-            return renderRechartsError(e.getMessage());
-        }
-        try {
-            rendered = plantUmlTagRenderService.renderForPreview(rendered);
-        } catch (InvalidPlantUmlTagException e) {
-            return renderPlantUmlError(e.getMessage());
-        }
-        rendered = plantUmlEmbedService.embedDiagramsForPreview(rendered);
-        String html = markdownRenderer.render(rendered);
-        html = tocStyleRenderService.applyHtmlTemplate(html, projectId);
-        return renderedContentWrapperService.wrap(html, projectId);
-    }
-
-    private String renderRechartsError(String message) {
-        return "<div role=\"alert\" style=\"background:#f8d7da;color:#842029;padding:12px 16px;"
-                + "border-radius:4px;font-family:sans-serif;font-size:14px;\">"
-                + "<strong>チャートのレンダリングエラー:</strong> " + HtmlUtils.htmlEscape(message) + "</div>";
-    }
-
-    private String renderPlantUmlError(String message) {
-        return "<div role=\"alert\" style=\"background:#f8d7da;color:#842029;padding:12px 16px;"
-                + "border-radius:4px;font-family:sans-serif;font-size:14px;\">"
-                + "<strong>PlantUML図のレンダリングエラー:</strong> " + HtmlUtils.htmlEscape(message) + "</div>";
     }
 
     /**
@@ -343,9 +278,10 @@ public class ArticlePreviewService {
      * 差し替えたHTML断片を返す。
      *
      * 差し替え位置は、サイト内の最新記事をWP REST APIで取得し、そのtitle.rendered/content.renderedを
-     * 実際に描画されたDOM内から検索することで特定する({@link PreviewSkeletonFetcher}参照)。
-     * 参照記事が存在しない、差し替え位置を特定できない等の場合はavailable=falseを返し、
-     * 呼び出し側で従来の表示(テーマDOM構造を再現しないプレーンな表示)へフォールバックする。
+     * 実際に描画されたDOM内から検索することで特定する(Playwrightを持つcontent-serviceへの
+     * 内部ブリッジ、{@link ContentServiceClient#fetchAndSplice}参照)。参照記事が存在しない、
+     * 差し替え位置を特定できない等の場合はavailable=falseを返し、呼び出し側で従来の表示
+     * (テーマDOM構造を再現しないプレーンな表示)へフォールバックする。
      *
      * ただし対象サイトが本番以外、かつ認証情報がサーバー側コード実行手段を持つ経路(managed
      * WordPressのagent transport、またはSSH transport)の場合は、この差し替え探索を行わず、
@@ -441,8 +377,10 @@ public class ArticlePreviewService {
 
         ThemeSkeletonResponse spliced;
         try {
-            spliced = previewSkeletonFetcher.fetchAndSplice(
+            ContentServiceClient.ThemeSkeletonBridgeResponse bridged = contentServiceClient.fetchAndSplice(
                     navigateUrl, titleRendered, contentRendered, title, contentHtml, featuredImageDataUri);
+            spliced = new ThemeSkeletonResponse(
+                    bridged.html(), bridged.available(), bridged.reason(), bridged.eyecatchSpliced(), bridged.css());
         } catch (Exception e) {
             logger.warn("Failed to render skeleton preview for site: {}", site.getSiteKey(), e);
             return new ThemeSkeletonResponse(null, false, "記事ページの取得に失敗しました: " + e.getMessage(), false, "");
@@ -530,7 +468,10 @@ public class ArticlePreviewService {
 
         ThemeSkeletonResponse fetched;
         try {
-            fetched = previewSkeletonFetcher.fetchRealPost(navigateUrl, cookie.name(), cookie.value());
+            ContentServiceClient.ThemeSkeletonBridgeResponse bridged =
+                    contentServiceClient.fetchRealPost(navigateUrl, cookie.name(), cookie.value());
+            fetched = new ThemeSkeletonResponse(
+                    bridged.html(), bridged.available(), bridged.reason(), bridged.eyecatchSpliced(), bridged.css());
         } catch (Exception e) {
             logger.warn("プレビュー用投稿ページの取得に失敗しました: {}", site.getSiteKey(), e);
             return new ThemeSkeletonResponse(

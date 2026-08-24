@@ -1,0 +1,78 @@
+server:
+  port: 8080
+
+logging:
+  level:
+    root: INFO
+    com.letsblog.content: DEBUG
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+  # log-writer(#572)/media-service(#573)/ai-service(#574)と同じ理由: 明示的なproducesを持たない
+  # エンドポイントがOpenAPI上`*/*`として記録されると、orvalが生成するTypeScriptクライアントの
+  # 型付けが崩れる。既定の応答Content-Typeを明示することでこれを避ける。
+  default-produces-media-type: application/json
+
+spring:
+  application:
+    name: lets-blog-content
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 20MB
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lbs_content?useSSL=false&serverTimezone=UTC}
+    username: ${SPRING_DATASOURCE_USERNAME:lbs_content}
+    password: ${SPRING_DATASOURCE_PASSWORD:lbs_content}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  # posts/custom_tags/custom_tag_templates/content_cache/project_content_settingsのスキーマ所有権を
+  # content-serviceへ移管した(#576)。専用スキーマ(lbs_content、ADR-0004)なので、legacy-api側の
+  # V1〜とは無関係の独立したマイグレーション履歴としてV1から開始する。既存データの移行は
+  # scripts/migrate-content-tables-to-lbs-content.sqlを参照(V1適用後に実行する運用)。
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+
+app:
+  # まだlegacy-apiに残るドメイン(Project/Site/CMS、project_user、roles)への内部ブリッジ
+  # (LegacyApiBridgeClient)の呼び出し先。また、legacy-api側のPostPublishService/PostDeleteService/
+  # ArticlePreviewService(公開・削除・テーマ骨格取得。#575で切り出されるまでlegacy-apiに残る)が
+  # posts/レンダリングパイプライン/PreviewSkeletonFetcherへアクセスするための内部ブリッジ
+  # (ContentBridgeController)も、認証はここへの同一の呼び出し元Bearerトークン転送方式に揃える。
+  legacy-api-uri: ${LEGACY_API_URI:http://api:8080}
+  identity-service-uri: ${IDENTITY_SERVICE_URI:http://identity:8080}
+  # 組み込みタグ展開時のPlantUML/Rechartsダイアグラム描画はmedia-serviceへ同期呼び出しする
+  # (issueの注記。Playwrightを持つのはcontent-serviceになったが、実際のレンダリング処理自体は
+  # 引き続きmedia-serviceに委譲する。legacy-api/media-serviceのMediaRenderClientと同じ構成)。
+  media-service-uri: ${MEDIA_SERVICE_URI:http://api:8080}
+  # CustomTagGenerationService(カスタムタグのAI生成)/TagDesignGenerationService相当の呼び出し先。
+  ai-service-uri: ${AI_SERVICE_URI:http://api:8080}
+  # [blogcard]/[amazon]組み込みタグ向けスクレイピング結果のキャッシュTTL。legacy-apiの既定値と同じ。
+  content-cache-ttl-hours: ${CONTENT_CACHE_TTL_HOURS:24}
+
+# KeycloakのJWT検証。identity-service/log-writer/media-service/ai-serviceのSecurityConfig/
+# JwtDecoderConfigと同じ理由により、issuer-uriによる自動設定は使わずJWKS取得先と期待issuerを
+# 個別に指定して組み立てている。
+keycloak:
+  jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/certs}
+  issuer: ${KEYCLOAK_ISSUER:https://localhost/auth/realms/letsblog}

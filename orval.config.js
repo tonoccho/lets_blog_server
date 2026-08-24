@@ -64,6 +64,19 @@ module.exports = {
     },
   },
 
+  // 記事本文(posts)・カスタムタグ・Markdownレンダリング・記事プレビュー・コンテンツキャッシュを
+  // content-serviceへ移設(#576)。
+  content: {
+    input: {
+      target: './openapi/content.json',
+    },
+    output: {
+      ...commonOutput,
+      target: './sdk/api-client/src/generated/content',
+      baseUrl: 'http://localhost:8080',
+    },
+  },
+
   // 将来のサービス抽出Issueで追加する例(identity-serviceの場合):
   // identity: {
   //   input: { target: './openapi/identity.json' },

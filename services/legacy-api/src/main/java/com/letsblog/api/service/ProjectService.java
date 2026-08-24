@@ -1,9 +1,9 @@
 package com.letsblog.api.service;
 
 import com.letsblog.api.aop.AuditLog;
+import com.letsblog.api.client.ContentServiceClient;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Project;
-import com.letsblog.api.domain.ProjectContentSettings;
 import com.letsblog.api.domain.ProjectImageSettings;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.ProjectResponse;
@@ -33,7 +33,7 @@ public class ProjectService {
     private final SiteService siteService;
     private final BulkUploadStorageService bulkUploadStorageService;
     private final ProjectImageSettingsService projectImageSettingsService;
-    private final ProjectContentSettingsService projectContentSettingsService;
+    private final ContentServiceClient contentServiceClient;
     private final String globalDefaultNegativePrompt;
     private final String globalDefaultQualityPrompt;
     private final int globalDefaultGeneratedImageWidth;
@@ -49,7 +49,7 @@ public class ProjectService {
             SiteService siteService,
             BulkUploadStorageService bulkUploadStorageService,
             ProjectImageSettingsService projectImageSettingsService,
-            ProjectContentSettingsService projectContentSettingsService,
+            ContentServiceClient contentServiceClient,
             @Value("${app.default-negative-prompt}") String globalDefaultNegativePrompt,
             @Value("${app.default-quality-prompt}") String globalDefaultQualityPrompt,
             @Value("${app.default-generated-image-width}") int globalDefaultGeneratedImageWidth,
@@ -63,7 +63,7 @@ public class ProjectService {
         this.siteService = siteService;
         this.bulkUploadStorageService = bulkUploadStorageService;
         this.projectImageSettingsService = projectImageSettingsService;
-        this.projectContentSettingsService = projectContentSettingsService;
+        this.contentServiceClient = contentServiceClient;
         this.globalDefaultNegativePrompt = globalDefaultNegativePrompt;
         this.globalDefaultQualityPrompt = globalDefaultQualityPrompt;
         this.globalDefaultGeneratedImageWidth = globalDefaultGeneratedImageWidth;
@@ -217,18 +217,17 @@ public class ProjectService {
     public ProjectResponse updateCssSelectorPrefix(Long projectId, UpdateProjectCssSelectorPrefixRequest request) {
         Project project = getProjectEntity(projectId);
         String prefix = blankToNull(request.cssSelectorPrefix());
-        projectContentSettingsService.updateCssSelectorPrefix(projectId, prefix);
+        // project_content_settingsの所有権はcontent-serviceへ移った(issue #576)ため、内部ブリッジ
+        // (ContentServiceClient)経由で更新する。
+        contentServiceClient.updateCssSelectorPrefix(projectId, prefix);
         return toResponse(project);
     }
 
-    /**
-     * カスタムタグCSSのセレクタに付与するプリフィックスを解決する。未設定時はプロジェクトのslugを使う(issue #298)。
-     */
-    public String resolveCssSelectorPrefix(Long projectId) {
-        Project project = getProjectEntity(projectId);
-        String prefix = projectContentSettingsService.getCssSelectorPrefix(projectId);
-        return prefix == null || prefix.isBlank() ? project.getSlug() : prefix;
-    }
+    // resolveCssSelectorPrefix(カスタムタグCSSのセレクタプリフィックス解決、issue #298)は、唯一の
+    // 呼び出し元だったCustomTagService/RenderedContentWrapperServiceがcontent-serviceへ移設された
+    // ため削除した(issue #576)。同等のロジックはcontent-service側の
+    // ProjectContentSettingsService#resolveCssSelectorPrefixへ移設し、未設定時のフォールバック
+    // (プロジェクトのslug)はContentBridgeController#projectSlug経由でこちらへ問い合わせる。
 
     @AuditLog(action = AuditLogAction.PROJECT_UPDATED, resourceType = "PROJECT")
     @Transactional
@@ -411,15 +410,16 @@ public class ProjectService {
     private ProjectResponse toResponse(Project project) {
         ProjectImageSettings imageSettings =
                 projectImageSettingsService.findByProjectId(project.getId()).orElse(null);
-        ProjectContentSettings contentSettings =
-                projectContentSettingsService.findByProjectId(project.getId()).orElse(null);
+        // project_content_settingsの所有権はcontent-serviceへ移った(issue #576)ため、内部ブリッジ
+        // (ContentServiceClient)経由で取得する。
+        String cssSelectorPrefix = contentServiceClient.getCssSelectorPrefix(project.getId());
         return ProjectResponse.from(
                 project,
                 resolveSite(project.getLocalSiteId()),
                 resolveSite(project.getTestSiteId()),
                 resolveSite(project.getProductionSiteId()),
                 imageSettings,
-                contentSettings);
+                cssSelectorPrefix);
     }
 
     private SiteResponse resolveSite(Long siteId) {

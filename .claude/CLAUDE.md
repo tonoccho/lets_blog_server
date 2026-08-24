@@ -460,8 +460,9 @@ type/function came from.
 1. **OpenAPI Spec per service**: Every service publishes its spec at springdoc's default
    path, `/v3/api-docs` — services must not override `springdoc.api-docs.path`, since the
    multi-target fetch/generation convention below depends on every service using the same
-   path. (As of #555 there is only one service, `legacy-api`; future service-extraction
-   issues in Phase 19 add more.)
+   path. (As of #555 there was only one service, `legacy-api`; Phase 19 service-extraction
+   issues have since added `log-writer` (#572), `media` (#573), `ai` (#574), and `content`
+   (#576), with more to follow.)
 
 2. **Client Generation**: `orval.config.js` defines one target per service (see the
    `legacyApi` entry and the commented example for adding a new one). Running orval once

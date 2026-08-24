@@ -98,6 +98,10 @@ services:
       # LLMテキスト生成(AiGenerationClient)・generation_jobsのジョブ作成/進捗更新
       # (GenerationJobClient)をai-serviceへ委譲する(issue #574)。
       AI_SERVICE_URI: http://ai:8080
+      # 公開パイプライン中のカスタムタグ/組み込みタグ展開・Markdown→HTML変換(ContentServiceClient)、
+      # posts/project_content_settingsの読み書き、記事プレビューのテーマ骨格取得(Playwright)を
+      # content-serviceへ委譲する(issue #576)。
+      CONTENT_SERVICE_URI: http://content:8080
       BACKUP_MYSQL_HOST: mysql
       BACKUP_MYSQL_PORT: "3306"
       BACKUP_MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -125,6 +129,8 @@ services:
       media:
         condition: service_healthy
       ai:
+        condition: service_healthy
+      content:
         condition: service_healthy
 
   # ComfyUI画像生成・draw.ioダイアグラム・PlantUML/Recharts/Penpotレンダリングの所有権をmedia-serviceへ
@@ -209,6 +215,48 @@ services:
       identity:
         condition: service_healthy
 
+  # 記事本文(posts)・カスタムタグ・Markdownレンダリング・記事プレビュー・ブログカード/Amazonタグの
+  # コンテンツキャッシュの所有権をcontent-serviceへ移管(#576)。スキーマ・Flywayマイグレーションは
+  # 専用のlbs_contentスキーマ(ADR-0004)で本サービスが所有する。[blogcard]/[amazon]タグの
+  # スクレイピング・記事プレビューのテーマ骨格取得用のヘッドレスブラウザ(Playwright)は本サービスが持つ。
+  content:
+    build:
+      context: .
+      dockerfile: services/content/Dockerfile
+    container_name: lbs-content
+    <<: [*common-service, *actuator-healthcheck]
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_content?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: lbs_content
+      SPRING_DATASOURCE_PASSWORD: ${LBS_CONTENT_DB_PASSWORD}
+      <<: *rabbitmq-env
+      # まだlegacy-apiに残るドメイン(Project/Site、project_user、roles、tag_design_settings)への
+      # 内部ブリッジ(ContentBridgeController、legacy-apiが所有)の呼び出し先。また、legacy-api側の
+      # PostPublishService/PostDeleteService/ArticlePreviewService(公開・削除・テーマ骨格取得。
+      # #575で切り出されるまでlegacy-apiに残る)がposts/レンダリングパイプライン/
+      # PreviewSkeletonFetcherへアクセスするための内部ブリッジの認証にも同じ呼び出し元Bearer
+      # トークン転送方式を使う(起動時の依存関係(depends_on)には含めない。apiがcontentのhealthyを
+      # 待つため、循環させないよう実行時呼び出し先としてのみ設定する)。
+      LEGACY_API_URI: http://api:8080
+      # 埋め込みタグ(PlantUML/Recharts)展開・カスタムタグAI生成のPenpotデザインファイル作成の
+      # 呼び出し先(issueの注記どおり、実際のダイアグラム描画はmedia-serviceへ委譲する)。
+      MEDIA_SERVICE_URI: http://media:8080
+      # カスタムタグのAI生成(CustomTagGenerationService)の呼び出し先。
+      AI_SERVICE_URI: http://ai:8080
+      # AdminAuthorizationServiceのrequireAdmin/requireProjectMemberOrAdmin・自分自身のuserId解決の
+      # ため、呼び出し元のBearerトークンをそのままidentity-serviceへ転送して問い合わせる
+      # (log-writer/media-service/ai-serviceと同じ暫定策)。
+      IDENTITY_SERVICE_URI: http://identity:8080
+    depends_on:
+      mysql:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+
   # ログの所有権をlog-writerへ完全移管(#572)。RabbitMQ経由でエラーログ/操作ログ/監査ログの
   # メッセージを受信して書き込むのに加え、読み取りAPI(監査ログ・操作ログ・フロントエンドエラー
   # ログ)もここへ移設した。スキーマ・Flywayマイグレーションは専用の lbs_log スキーマ
@@ -254,6 +302,8 @@ services:
       MEDIA_SERVICE_URI: http://media:8080
       # LLM呼び出し・記事プラン(壁打ち)・generation_jobsのルーティング先(#574)。
       AI_SERVICE_URI: http://ai:8080
+      # 記事本文(posts)・カスタムタグ・記事プレビュー・コンテンツキャッシュのルーティング先(#576)。
+      CONTENT_SERVICE_URI: http://content:8080
     depends_on:
       api:
         condition: service_healthy
@@ -266,6 +316,8 @@ services:
       media:
         condition: service_healthy
       ai:
+        condition: service_healthy
+      content:
         condition: service_healthy
 
   identity:

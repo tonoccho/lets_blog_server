@@ -1,6 +1,7 @@
 package com.letsblog.api.service;
 
 import com.letsblog.api.aop.AuditLog;
+import com.letsblog.api.client.ContentServiceClient;
 import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Site;
@@ -10,7 +11,6 @@ import com.letsblog.api.dto.SiteRegisterRequest;
 import com.letsblog.api.dto.SiteResponse;
 import com.letsblog.api.provisioning.WordPressProvisioningClient;
 import com.letsblog.api.provisioning.WordPressSyncClient;
-import com.letsblog.api.repository.PostRepository;
 import com.letsblog.api.repository.SiteRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,18 +30,18 @@ public class WordPressSiteProvisioningService {
     private final WordPressSyncClient syncClient;
     private final SiteService siteService;
     private final SiteRepository siteRepository;
-    private final PostRepository postRepository;
+    private final ContentServiceClient contentServiceClient;
 
     public WordPressSiteProvisioningService(WordPressProvisioningClient provisioningClient,
                                              WordPressSyncClient syncClient,
                                              SiteService siteService,
                                              SiteRepository siteRepository,
-                                             PostRepository postRepository) {
+                                             ContentServiceClient contentServiceClient) {
         this.provisioningClient = provisioningClient;
         this.syncClient = syncClient;
         this.siteService = siteService;
         this.siteRepository = siteRepository;
-        this.postRepository = postRepository;
+        this.contentServiceClient = contentServiceClient;
     }
 
     @AuditLog(action = AuditLogAction.WORDPRESS_PROVISIONED, resourceType = "SITE")
@@ -169,7 +169,7 @@ public class WordPressSiteProvisioningService {
         if (site.isManagedWordpress()) {
             provisioningClient.deprovision(site.getWpSlug(), site.getWpDbName());
         }
-        postRepository.deleteBySiteId(siteId);
+        contentServiceClient.deletePostsBySite(siteId);
         siteRepository.delete(site);
     }
 

@@ -19,7 +19,6 @@ import java.util.HexFormat;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -110,16 +109,6 @@ class PlantUmlEmbedServiceTest {
 
         assertEquals("![diagram](https://example.com/new.png)", result.markdown());
         verify(cmsAdapter).uploadMedia(eq(credentials), eq("plantuml-1.png"), eq("image/png"), any());
-    }
-
-    @Test
-    void embedDiagramsForPreview_data_URIとして埋め込みアップロードしない() {
-        when(mediaRenderClient.renderPlantUml(any())).thenReturn(new byte[]{1, 2, 3});
-
-        String result = service.embedDiagramsForPreview("```plantuml\nA->B\n```");
-
-        assertTrue(result.contains("![diagram](data:image/png;base64,"));
-        verifyNoInteractions(cmsAdapterFactory);
     }
 
     private String sha256Hex(String source) {

@@ -479,21 +479,24 @@ class AuthorizationMatrixIntegrationTest {
         projectUserRepository.save(membership);
 
         // User1(プロジェクトAのメンバー)がプロジェクトAのエンドポイントへアクセス -> 403にならない
-        mockMvc.perform(request(HttpMethod.GET, "/api/projects/" + projectA.getId() + "/custom-tags")
+        // (issue #576でProjectCustomTagController(/api/projects/{id}/custom-tags)はcontent-serviceへ
+        // 移管されたため、legacy-api側に残るrequireProjectMemberOrAdmin採用エンドポイントである
+        // TagDesignSettingController(/api/projects/{id}/tag-design-settings)で検証する)
+        mockMvc.perform(request(HttpMethod.GET, "/api/projects/" + projectA.getId() + "/tag-design-settings")
                         .header(API_KEY_HEADER, TEST_API_KEY)
                         .header(ACTOR_ID_HEADER, String.valueOf(user1.getId()))
                         .header(ACTOR_ROLE_HEADER, "user"))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(403));
 
         // User1がプロジェクトB(非所属)のエンドポイントへアクセス -> 403
-        mockMvc.perform(request(HttpMethod.GET, "/api/projects/" + projectB.getId() + "/custom-tags")
+        mockMvc.perform(request(HttpMethod.GET, "/api/projects/" + projectB.getId() + "/tag-design-settings")
                         .header(API_KEY_HEADER, TEST_API_KEY)
                         .header(ACTOR_ID_HEADER, String.valueOf(user1.getId()))
                         .header(ACTOR_ROLE_HEADER, "user"))
                 .andExpect(status().isForbidden());
 
         // adminはプロジェクトB(User1は非所属)でも403にならない(admin全プロジェクト横断バイパス)
-        mockMvc.perform(request(HttpMethod.GET, "/api/projects/" + projectB.getId() + "/custom-tags")
+        mockMvc.perform(request(HttpMethod.GET, "/api/projects/" + projectB.getId() + "/tag-design-settings")
                         .header(API_KEY_HEADER, TEST_API_KEY)
                         .header(ACTOR_ID_HEADER, String.valueOf(user1.getId()))
                         .header(ACTOR_ROLE_HEADER, "admin"))

@@ -1,7 +1,5 @@
 package com.letsblog.api.controller;
 
-import com.letsblog.api.dto.RenderPreviewRequest;
-import com.letsblog.api.dto.RenderPreviewResponse;
 import com.letsblog.api.dto.RenderSkeletonRequest;
 import com.letsblog.api.dto.ThemeCssResponse;
 import com.letsblog.api.dto.ThemeSkeletonResponse;
@@ -19,6 +17,11 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * legacy-apiのArticlePreviewControllerのうち残っているtheme-css/skeleton/preview-postのみを検証する
+ * (issue #576)。記事本文レンダリング(/render)はcontent-serviceへ移設したため、その振る舞いは
+ * content-service側のArticlePreviewControllerTestで検証する。
+ */
 @ExtendWith(MockitoExtension.class)
 class ArticlePreviewControllerTest {
 
@@ -30,25 +33,6 @@ class ArticlePreviewControllerTest {
 
     private ArticlePreviewController controller() {
         return new ArticlePreviewController(articlePreviewService, adminAuthorizationService);
-    }
-
-    @Test
-    void render_認可後にサービスへ委譲する() {
-        ArticlePreviewController controller = controller();
-        when(articlePreviewService.renderHtml(1L, "# タイトル")).thenReturn("<h1>タイトル</h1>");
-
-        RenderPreviewResponse response = controller.render(1L, new RenderPreviewRequest("# タイトル"));
-
-        assertEquals("<h1>タイトル</h1>", response.html());
-        verify(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
-    }
-
-    @Test
-    void render_認可拒否ならForbidden() {
-        ArticlePreviewController controller = controller();
-        doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
-
-        assertThrows(ForbiddenException.class, () -> controller.render(1L, new RenderPreviewRequest("markdown")));
     }
 
     @Test

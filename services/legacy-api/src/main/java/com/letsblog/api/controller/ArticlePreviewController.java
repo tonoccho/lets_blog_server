@@ -1,7 +1,5 @@
 package com.letsblog.api.controller;
 
-import com.letsblog.api.dto.RenderPreviewRequest;
-import com.letsblog.api.dto.RenderPreviewResponse;
 import com.letsblog.api.dto.RenderSkeletonRequest;
 import com.letsblog.api.dto.ThemeCssResponse;
 import com.letsblog.api.dto.ThemeSkeletonResponse;
@@ -17,6 +15,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * legacy-apiのArticlePreviewControllerのうち、テーマCSS取得(/theme-css)・骨格差し替え(/skeleton)・
+ * プレビュー用投稿削除(/preview-post)のみを残す(issue #576)。記事本文のレンダリング(/render)は
+ * content-serviceへ移設した(同じ{@code /api/projects/{projectId}/preview}配下のパスを
+ * content-service側のArticlePreviewControllerが引き続き提供する)。
+ */
 @RestController
 @RequestMapping("/api/projects/{projectId}/preview")
 public class ArticlePreviewController {
@@ -28,13 +32,6 @@ public class ArticlePreviewController {
             ArticlePreviewService articlePreviewService, AdminAuthorizationService adminAuthorizationService) {
         this.articlePreviewService = articlePreviewService;
         this.adminAuthorizationService = adminAuthorizationService;
-    }
-
-    @PostMapping("/render")
-    public RenderPreviewResponse render(
-            @PathVariable Long projectId, @Valid @RequestBody RenderPreviewRequest request) {
-        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        return new RenderPreviewResponse(articlePreviewService.renderHtml(projectId, request.markdown()));
     }
 
     /**
