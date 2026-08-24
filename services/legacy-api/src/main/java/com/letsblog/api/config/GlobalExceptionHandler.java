@@ -11,7 +11,6 @@ import com.letsblog.api.service.EmailAlreadyExistsException;
 import com.letsblog.api.service.EmailSendException;
 import com.letsblog.api.service.ForbiddenException;
 import com.letsblog.api.service.InvalidCredentialsException;
-import com.letsblog.api.service.InvalidCustomTagContentException;
 import com.letsblog.api.service.InvalidPlantUmlTagException;
 import com.letsblog.api.service.InvalidRechartsTagException;
 import com.letsblog.api.service.InvalidRoleException;
@@ -82,11 +81,6 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(InvalidRoleException.class)
     public ResponseEntity<ErrorResponse> handleInvalidRole(InvalidRoleException e) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
-    }
-
-    @ExceptionHandler(InvalidCustomTagContentException.class)
-    public ResponseEntity<ErrorResponse> handleInvalidCustomTagContent(InvalidCustomTagContentException e) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
     }
 

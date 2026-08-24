@@ -90,6 +90,19 @@ module.exports = {
     },
   },
 
+  // 名前をつけて保存・管理するSSH鍵ペア(Ed25519)、[toc]/[blogcard]/[amazon]組み込みタグの
+  // デザインカスタマイズ(プロジェクト単位)をproject-serviceへ移設(#577 stage 1)。
+  project: {
+    input: {
+      target: './openapi/project.json',
+    },
+    output: {
+      ...commonOutput,
+      target: './sdk/api-client/src/generated/project',
+      baseUrl: 'http://localhost:8080',
+    },
+  },
+
   // 将来のサービス抽出Issueで追加する例(identity-serviceの場合):
   // identity: {
   //   input: { target: './openapi/identity.json' },

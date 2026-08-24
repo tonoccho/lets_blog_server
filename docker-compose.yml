@@ -301,6 +301,44 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  # 名前をつけて保存・管理するSSH鍵ペア(Ed25519)、[toc]/[blogcard]/[amazon]組み込みタグの
+  # デザインカスタマイズ(プロジェクト単位)をlegacy-apiから抽出した(#577 stage 1)。より大きな
+  # Project/Site(CMS/WordPress自動プロビジョニング)ドメインは後続stageの対象で、まだlegacy-apiに残る。
+  project:
+    build:
+      context: .
+      dockerfile: services/project/Dockerfile
+    container_name: lbs-project
+    <<: [*common-service, *actuator-healthcheck]
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_project?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: lbs_project
+      SPRING_DATASOURCE_PASSWORD: ${LBS_PROJECT_DB_PASSWORD}
+      <<: *rabbitmq-env
+      # まだlegacy-apiに残るドメイン(project_user、プロジェクトメンバー判定)への内部ブリッジ
+      # (LegacyApiBridgeClient、legacy-api側のContentBridgeControllerを再利用)の呼び出し先
+      # (起動時の依存関係(depends_on)には含めない。apiがprojectのhealthyを待つため、循環させないよう
+      # 実行時呼び出し先としてのみ設定する)。
+      LEGACY_API_URI: http://api:8080
+      # 組み込みタグのデザインCSS/HTMLテンプレートのAI生成(TagDesignGenerationService)の呼び出し先。
+      AI_SERVICE_URI: http://ai:8080
+      # AdminAuthorizationServiceのrequireAdmin/requireProjectMemberOrAdmin・自分自身のuserId解決の
+      # ため、呼び出し元のBearerトークンをそのままidentity-serviceへ転送して問い合わせる
+      # (log-writer/media-service/ai-service/content-serviceと同じ暫定策)。
+      IDENTITY_SERVICE_URI: http://identity:8080
+      # ssh_key_pairs.private_key_encryptedの暗号化/復号(CredentialCipher、lbs-common)。
+      # 全サービス共通のAES-256-GCM鍵。
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
   # ログの所有権をlog-writerへ完全移管(#572)。RabbitMQ経由でエラーログ/操作ログ/監査ログの
   # メッセージを受信して書き込むのに加え、読み取りAPI(監査ログ・操作ログ・フロントエンドエラー
   # ログ)もここへ移設した。スキーマ・Flywayマイグレーションは専用の lbs_log スキーマ
@@ -350,6 +388,12 @@ services:
       CONTENT_SERVICE_URI: http://content:8080
       # プロジェクトダッシュボードのGA/AdSenseレポート取得のルーティング先(#578)。
       ANALYTICS_SERVICE_URI: http://analytics:8080
+      # SSH鍵ペア管理・組み込みタグのデザインカスタマイズのルーティング先(#577 stage 1、
+      # project-ssh-key-pairs/project-tag-design-settingsルート)。Project/Site本体
+      # (/api/projects/**・/api/sites/**、下のprojectルート)はまだlegacy-apiに残るため、
+      # このstageではLEGACY_API_URIに明示固定してあり、この変数の影響を受けない
+      # (services/gateway/src/main/resources/application.ymlのコメント参照)。
+      PROJECT_SERVICE_URI: http://project:8080
     depends_on:
       api:
         condition: service_healthy
@@ -366,6 +410,8 @@ services:
       content:
         condition: service_healthy
       analytics:
+        condition: service_healthy
+      project:
         condition: service_healthy
 
   identity:

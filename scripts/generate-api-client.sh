@@ -14,6 +14,7 @@ SERVICES=(
   "ai|${AI_SERVICE_URL:-http://localhost:8080}"
   "content|${CONTENT_SERVICE_URL:-http://localhost:8080}"
   "analytics|${ANALYTICS_SERVICE_URL:-http://localhost:8080}"
+  "project|${PROJECT_SERVICE_URL:-http://localhost:8080}"
 )
 
 OPENAPI_DIR="openapi"

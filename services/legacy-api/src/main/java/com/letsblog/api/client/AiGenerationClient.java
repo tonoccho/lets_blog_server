@@ -20,9 +20,12 @@ import org.springframework.web.client.RestClient;
  *
  * <p>LlmClient/LlmConfigProvider/AiProvider(ai/パッケージ)はissue #574でai-serviceへ移管されたため、
  * legacy-apiに残るLLM呼び出し元(AiAssistService#generateImagePrompt/#suggestImageTagsJson(画像生成、
- * このIssueの移設対象外)、CustomTagGenerationService/TagDesignGenerationService/
- * StaticContentGenerationService)は、自身ではLLMを直接呼び出さず、このクライアント経由で
- * ai-serviceへ委譲する。
+ * このIssueの移設対象外)、StaticContentGenerationService(StaticContent等、まだ抽出されていない
+ * site/CMSドメインのテーブルへ直接書き込む、または深くSite/CMS操作へ依存しているため、このIssueでは
+ * ai-serviceへ移設せずlegacy-apiに残す判断とした。PR説明参照))は、自身ではLLMを直接呼び出さず、
+ * このクライアント経由でai-serviceへ委譲する(CustomTagGenerationServiceは#576でcontent-serviceへ、
+ * TagDesignGenerationServiceは#577 stage1でproject-serviceへ、StaticContentGenerationServiceも
+ * #577 stage2でproject-serviceへ、それぞれ同種のクライアントと共に移設済み)。
  *
  * <p>projectIdを渡すとai-service側でそのプロジェクトの選択中モデル/プロバイダーを解決して使う
  * (未指定時はシステム既定)。認証は呼び出し元ユーザーのBearerトークンをそのまま転送する。

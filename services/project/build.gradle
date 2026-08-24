@@ -1,0 +1,62 @@
+// project-service (#577 stage 1): 名前をつけて保存・管理するSSH鍵ペア(Ed25519)、
+// [toc]/[blogcard]/[amazon]組み込みタグのデザインカスタマイズ(プロジェクト単位)をlegacy-apiから
+// 抽出した。より大きなProject/Site(CMS/WordPress自動プロビジョニング)ドメインは後続stageの対象で、
+// このstageではまだ実装しない。スキーマ分離(lbs_project)により他サービスから独立する。
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.1.0'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'jacoco'
+    id 'checkstyle'
+}
+
+dependencies {
+    implementation project(':libs:lbs-common')
+
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-restclient'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-amqp'
+    // AiGenerationClient/LegacyApiBridgeClient/IdentityClient等がcom.fasterxml.jackson.databind.
+    // ObjectMapper/JsonNodeを直接使うため明示的に追加する(Boot 4の既定JSONコンバータ・既定
+    // ObjectMapperはJackson3系(tools.jackson)に変わったため。legacy-api/media-service/ai-service/
+    // content-serviceと同じ構成)。
+    implementation 'org.springframework.boot:spring-boot-jackson2'
+
+    // sites/projects/ssh_key_pairs/static_content/tag_design_settingsのスキーマ所有権(#577)。
+    implementation 'org.springframework.boot:spring-boot-starter-flyway'
+    implementation 'org.flywaydb:flyway-mysql'
+
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    // @AuditLog(SshKeyPairService)のAOP実装(AuditLogAspect)に使う。legacy-api/content-serviceと
+    // 同じ構成。
+    implementation 'org.springframework.boot:spring-boot-starter-aspectj'
+
+    implementation 'com.mysql:mysql-connector-j'
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-webmvc-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+    testImplementation testFixtures(project(':libs:lbs-common'))
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    finalizedBy jacocoTestReport
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+    }
+}

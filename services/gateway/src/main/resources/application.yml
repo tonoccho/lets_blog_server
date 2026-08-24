@@ -122,12 +122,30 @@ app:
           - /api/identity/**
           - /api/users/**
           - /api/roles/**
-      - id: project
+      # SSH鍵ペア管理・組み込みタグのデザインカスタマイズをproject-serviceへ移設した(#577 stage 1)。
+      # Project/Site本体(下のprojectルート)はまだlegacy-apiに残っているため、この2つだけを
+      # 先にproject-serviceへマッチさせる(より広い/api/projects/**より先に評価される必要がある)。
+      # 元のこのルートエントリのpaths(/api/ssh-keys/**)は実際のSshKeyPairControllerの
+      # @RequestMapping(/api/ssh-key-pairs)と一致していなかった(#577移設時の発見)ため、
+      # 実パスに修正した上でこちらへ分離した。
+      - id: project-ssh-key-pairs
         uri: ${PROJECT_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/ssh-key-pairs/**
+      - id: project-tag-design-settings
+        uri: ${PROJECT_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/projects/*/tag-design-settings/**
+      # Project/Site(CMS/WordPress自動プロビジョニング)は#577の後続stageで移設予定のため、
+      # このstageではまだlegacy-apiに残る。PROJECT_SERVICE_URIを共有する上のssh-key-pairs/
+      # tag-design-settingsルートとは異なり、明示的にLEGACY_API_URIへ固定する
+      # (PROJECT_SERVICE_URIが設定されても、Project/Site本体がまだ実装されていない
+      # project-serviceへ誤って転送されないようにするため)。
+      - id: project
+        uri: ${LEGACY_API_URI:http://api:8080}
         paths:
           - /api/projects/**
           - /api/sites/**
-          - /api/ssh-keys/**
       - id: content
         uri: ${CONTENT_SERVICE_URI:http://api:8080}
         paths:
