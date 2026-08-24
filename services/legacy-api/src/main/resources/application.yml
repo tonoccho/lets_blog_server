@@ -123,6 +123,11 @@ app:
   penpot-public-url: ${PENPOT_PUBLIC_URL:http://localhost:9001}
   penpot-service-email: ${PENPOT_SERVICE_EMAIL:lbs-service@letsblog.local}
   penpot-service-password: ${PENPOT_SERVICE_PASSWORD:}
+  # PlantUML/Recharts/Penpotの実際のレンダリング呼び出しをmedia-serviceへ委譲する(#573、
+  # com.letsblog.api.render.MediaRenderClient参照)。CMSアップロード等のオーケストレーション自体は
+  # 引き続きこのサービス(PlantUmlEmbedService/PlantUmlTagRenderService/RechartsTagRenderService/
+  # CustomTagGenerationService)が行う。
+  media-service-uri: ${MEDIA_SERVICE_URI:http://localhost:8080}
   content-cache-ttl-hours: ${CONTENT_CACHE_TTL_HOURS:24}
   wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
   wordpress-provision-token: ${WP_PROVISION_TOKEN:}

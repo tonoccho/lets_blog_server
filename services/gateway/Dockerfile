@@ -12,6 +12,7 @@ COPY services/gateway ./services/gateway
 COPY services/legacy-api/build.gradle ./services/legacy-api/build.gradle
 COPY services/log-writer/build.gradle ./services/log-writer/build.gradle
 COPY services/identity/build.gradle ./services/identity/build.gradle
+COPY services/media/build.gradle ./services/media/build.gradle
 
 RUN ./gradlew :services:gateway:bootJar --no-daemon
 

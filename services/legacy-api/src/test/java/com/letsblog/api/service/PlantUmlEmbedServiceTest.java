@@ -5,7 +5,7 @@ import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.cms.MediaUploadResult;
-import com.letsblog.api.render.PlantUmlClient;
+import com.letsblog.api.render.MediaRenderClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -36,7 +36,7 @@ import static org.mockito.Mockito.when;
 class PlantUmlEmbedServiceTest {
 
     @Mock
-    private PlantUmlClient plantUmlClient;
+    private MediaRenderClient mediaRenderClient;
     @Mock
     private CmsAdapterFactory cmsAdapterFactory;
     @Mock
@@ -49,7 +49,7 @@ class PlantUmlEmbedServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new PlantUmlEmbedService(plantUmlClient, cmsAdapterFactory);
+        service = new PlantUmlEmbedService(mediaRenderClient, cmsAdapterFactory);
         lenient().when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
     }
 
@@ -58,12 +58,12 @@ class PlantUmlEmbedServiceTest {
         DiagramEmbedResult result = service.embedDiagrams(credentials, "普通の本文です。", Map.of());
 
         assertEquals("普通の本文です。", result.markdown());
-        verifyNoInteractions(plantUmlClient);
+        verifyNoInteractions(mediaRenderClient);
     }
 
     @Test
     void embedDiagrams_複数ブロックをそれぞれ連番ファイル名でアップロードする() {
-        when(plantUmlClient.renderPng(any())).thenReturn(new byte[]{1});
+        when(mediaRenderClient.renderPlantUml(any())).thenReturn(new byte[]{1});
         when(cmsAdapter.uploadMedia(eq(credentials), eq("plantuml-1.png"), eq("image/png"), any()))
                 .thenReturn(new MediaUploadResult("10", "https://example.com/1.png"));
         when(cmsAdapter.uploadMedia(eq(credentials), eq("plantuml-2.png"), eq("image/png"), any()))
@@ -90,7 +90,7 @@ class PlantUmlEmbedServiceTest {
         DiagramEmbedResult result = service.embedDiagrams(credentials, "```plantuml\nA->B\n```", priorUploads);
 
         assertEquals("![diagram](https://example.com/cached.png)", result.markdown());
-        verifyNoInteractions(plantUmlClient);
+        verifyNoInteractions(mediaRenderClient);
         verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
     }
 
@@ -102,7 +102,7 @@ class PlantUmlEmbedServiceTest {
                 "plantuml:" + sha256,
                 new UploadedImageInfo(sha256, "https://example.com/old.png", "10"));
         when(cmsAdapter.mediaExists(credentials, "10")).thenReturn(false);
-        when(plantUmlClient.renderPng(wrapped)).thenReturn(new byte[]{1});
+        when(mediaRenderClient.renderPlantUml(wrapped)).thenReturn(new byte[]{1});
         when(cmsAdapter.uploadMedia(eq(credentials), eq("plantuml-1.png"), eq("image/png"), any()))
                 .thenReturn(new MediaUploadResult("11", "https://example.com/new.png"));
 
@@ -114,7 +114,7 @@ class PlantUmlEmbedServiceTest {
 
     @Test
     void embedDiagramsForPreview_data_URIとして埋め込みアップロードしない() {
-        when(plantUmlClient.renderPng(any())).thenReturn(new byte[]{1, 2, 3});
+        when(mediaRenderClient.renderPlantUml(any())).thenReturn(new byte[]{1, 2, 3});
 
         String result = service.embedDiagramsForPreview("```plantuml\nA->B\n```");
 

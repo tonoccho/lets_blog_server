@@ -193,22 +193,8 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("GET", "/api/dashboard/container-status"),
                 new Endpoint("GET", "/api/dashboard/container-status/stream"),
 
-                // -- DiagramController (6) --
-                new Endpoint("POST", "/api/diagrams"),
-                new Endpoint("GET", "/api/diagrams"),
-                new Endpoint("GET", "/api/diagrams/1"),
-                new Endpoint("GET", "/api/diagrams/1/svg"),
-                new Endpoint("PUT", "/api/diagrams/1"),
-                new Endpoint("DELETE", "/api/diagrams/1"),
-
+                // (DiagramController/GeneratedImageControllerは#573でmedia-serviceへ移設したため対象外)
                 // (FrontendErrorLogControllerは#572でlog-writerサービスへ移設したため対象外)
-
-                // -- GeneratedImageController (5) --
-                new Endpoint("GET", "/api/generated-images"),
-                new Endpoint("GET", "/api/generated-images/1"),
-                new Endpoint("PUT", "/api/generated-images/1/tags"),
-                new Endpoint("GET", "/api/generated-images/1/file"),
-                new Endpoint("DELETE", "/api/generated-images/1"),
 
                 // -- GenerationJobController (2) --
                 new Endpoint("GET", "/api/generation-jobs"),
@@ -319,8 +305,7 @@ class AuthorizationMatrixIntegrationTest {
                 // -- ProjectUserController (1) --
                 new Endpoint("GET", "/api/project-users"),
 
-                // -- RenderController (1) --
-                new Endpoint("POST", "/api/render/plantuml"),
+                // (RenderControllerは#573でmedia-serviceへ移設したため対象外)
 
                 // -- SiteController (11) --
                 new Endpoint("POST", "/api/sites"),

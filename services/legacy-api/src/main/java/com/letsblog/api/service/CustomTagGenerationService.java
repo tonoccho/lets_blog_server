@@ -1,12 +1,12 @@
 package com.letsblog.api.service;
 
 import com.letsblog.api.ai.LlmClient;
-import com.letsblog.api.ai.PenpotClient;
 import com.letsblog.api.domain.CustomTag;
 import com.letsblog.api.dto.GenerateCustomTagRequest;
 import com.letsblog.api.dto.GenerateCustomTagResponse;
 import com.letsblog.api.dto.ValidationError;
 import com.letsblog.api.dto.ValidationResult;
+import com.letsblog.api.render.MediaRenderClient;
 import com.letsblog.api.repository.CustomTagRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,7 +24,7 @@ public class CustomTagGenerationService {
     private static final Logger log = LoggerFactory.getLogger(CustomTagGenerationService.class);
 
     private final LlmClient llmClient;
-    private final PenpotClient penpotClient;
+    private final MediaRenderClient mediaRenderClient;
     private final CustomTagRepository customTagRepository;
     private final AdminAuthorizationService adminAuthorizationService;
     private final CustomTagValidationService customTagValidationService;
@@ -34,12 +34,12 @@ public class CustomTagGenerationService {
 
     public CustomTagGenerationService(
             LlmClient llmClient,
-            PenpotClient penpotClient,
+            MediaRenderClient mediaRenderClient,
             CustomTagRepository customTagRepository,
             AdminAuthorizationService adminAuthorizationService,
             CustomTagValidationService customTagValidationService) {
         this.llmClient = llmClient;
-        this.penpotClient = penpotClient;
+        this.mediaRenderClient = mediaRenderClient;
         this.customTagRepository = customTagRepository;
         this.adminAuthorizationService = adminAuthorizationService;
         this.customTagValidationService = customTagValidationService;
@@ -99,8 +99,8 @@ public class CustomTagGenerationService {
             String promptContext = "LLMへのプロンプト:\n" + prompt
                     + "\n\n生成されたHTML:\n" + htmlTemplate
                     + "\n\n生成されたCSS:\n" + cssContent;
-            PenpotClient.DesignFile designFile =
-                    penpotClient.createDesignFile("カスタムタグ: " + tagName, promptContext);
+            MediaRenderClient.DesignFile designFile =
+                    mediaRenderClient.createPenpotDesignFile("カスタムタグ: " + tagName, promptContext);
             return designFile.url();
         } catch (RuntimeException e) {
             log.warn("Penpotデザインファイルの作成に失敗しました(タグ生成は継続します): {}", e.getMessage());

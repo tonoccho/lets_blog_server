@@ -5,7 +5,7 @@ import com.letsblog.api.cms.CmsAdapter;
 import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.MediaUploadResult;
-import com.letsblog.api.render.PlantUmlClient;
+import com.letsblog.api.render.MediaRenderClient;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -36,11 +36,11 @@ public class PlantUmlTagRenderService {
     private static final Pattern PLANTUML_TAG_PATTERN =
             Pattern.compile("\\[plantuml]\\r?\\n(.*?)\\[/plantuml]", Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
 
-    private final PlantUmlClient plantUmlClient;
+    private final MediaRenderClient mediaRenderClient;
     private final CmsAdapterFactory cmsAdapterFactory;
 
-    public PlantUmlTagRenderService(PlantUmlClient plantUmlClient, CmsAdapterFactory cmsAdapterFactory) {
-        this.plantUmlClient = plantUmlClient;
+    public PlantUmlTagRenderService(MediaRenderClient mediaRenderClient, CmsAdapterFactory cmsAdapterFactory) {
+        this.mediaRenderClient = mediaRenderClient;
         this.cmsAdapterFactory = cmsAdapterFactory;
     }
 
@@ -108,7 +108,7 @@ public class PlantUmlTagRenderService {
 
     private byte[] renderPng(String wrappedDiagramSource) {
         try {
-            return plantUmlClient.renderPng(wrappedDiagramSource);
+            return mediaRenderClient.renderPlantUml(wrappedDiagramSource);
         } catch (AiServiceException e) {
             throw new InvalidPlantUmlTagException("PlantUML図のレンダリングに失敗しました: " + e.getMessage(), e);
         }

@@ -78,6 +78,10 @@ app:
         uri: ${MEDIA_SERVICE_URI:http://api:8080}
         paths:
           - /api/images/**
+          # GeneratedImageControllerの実際のマッピングは/api/generated-images/**(/api/images/**
+          # ではない)。#573で移設した際、既存のこのルートエントリが実パスをカバーしていなかったため
+          # 追加した(このコメント自体も#573移設時の発見の記録)。
+          - /api/generated-images/**
           - /api/diagrams/**
           - /api/render/**
       - id: ai
