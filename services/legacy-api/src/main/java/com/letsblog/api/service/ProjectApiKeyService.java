@@ -1,11 +1,10 @@
 package com.letsblog.api.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.api.adsense.AdSenseClient;
-import com.letsblog.api.adsense.GoogleOAuthTokens;
-import com.letsblog.api.analytics.GoogleServiceAccountKey;
 import com.letsblog.api.client.AiProjectSettingsClient;
+import com.letsblog.api.client.AnalyticsProjectSettingsClient;
 import com.letsblog.common.crypto.CredentialCipher;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.repository.ProjectRepository;
@@ -14,42 +13,40 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * プロジェクト単位のGitHubトークン/Brave Search APIキー/Google Analytics/AdSense連携情報を管理する(issue #184)。
- * プロジェクトに値が設定されていればそれを優先し、未設定の場合は
- * GitHubトークンは操作者本人のユーザー設定(UserService)へフォールバックする(既存の動作を壊さないため)。
- * projects god-tableの分割(issue #571)により、GitHubトークンはprojects自体、Brave Search APIキーは
- * project_ai_settings、GA/AdSenseはanalytics_credentials(AnalyticsCredentialsService)にそれぞれ保持する。
- * project_ai_settingsはissue #574でai-serviceへ移管されたため、Brave Search APIキーの読み書きは
- * {@link AiProjectSettingsClient}経由の内部ブリッジに委ねる。
+ * プロジェクトに値が設定されていればそれを優先し、未設定の場合はGitHubトークンは操作者本人のユーザー設定
+ * (UserService)へフォールバックする(既存の動作を壊さないため)。projects god-tableの分割
+ * (issue #571)により、GitHubトークンはprojects自体、Brave Search APIキーはproject_ai_settings、
+ * GA/AdSenseはanalytics_credentialsにそれぞれ保持する。project_ai_settingsはissue #574でai-serviceへ、
+ * analytics_credentialsはissue #578でanalytics-serviceへそれぞれ移管されたため、Brave Search APIキー/
+ * GA/AdSenseの読み書きはいずれも内部ブリッジ({@link AiProjectSettingsClient}/
+ * {@link AnalyticsProjectSettingsClient})経由に委ねる。
  */
 @Service
 public class ProjectApiKeyService {
 
     private final ProjectRepository projectRepository;
     private final AiProjectSettingsClient aiProjectSettingsClient;
-    private final AnalyticsCredentialsService analyticsCredentialsService;
+    private final AnalyticsProjectSettingsClient analyticsProjectSettingsClient;
     private final CredentialCipher credentialCipher;
     private final UserService userService;
     private final AdminAuthorizationService adminAuthorizationService;
     private final ObjectMapper objectMapper;
-    private final AdSenseClient adSenseClient;
 
     public ProjectApiKeyService(
             ProjectRepository projectRepository,
             AiProjectSettingsClient aiProjectSettingsClient,
-            AnalyticsCredentialsService analyticsCredentialsService,
+            AnalyticsProjectSettingsClient analyticsProjectSettingsClient,
             CredentialCipher credentialCipher,
             UserService userService,
             AdminAuthorizationService adminAuthorizationService,
-            ObjectMapper objectMapper,
-            AdSenseClient adSenseClient) {
+            ObjectMapper objectMapper) {
         this.projectRepository = projectRepository;
         this.aiProjectSettingsClient = aiProjectSettingsClient;
-        this.analyticsCredentialsService = analyticsCredentialsService;
+        this.analyticsProjectSettingsClient = analyticsProjectSettingsClient;
         this.credentialCipher = credentialCipher;
         this.userService = userService;
         this.adminAuthorizationService = adminAuthorizationService;
         this.objectMapper = objectMapper;
-        this.adSenseClient = adSenseClient;
     }
 
     @Transactional(readOnly = true)
@@ -99,14 +96,14 @@ public class ProjectApiKeyService {
     public boolean isGoogleAnalyticsConfigured(Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         requireProjectExists(projectId);
-        return analyticsCredentialsService.hasGoogleAnalyticsCredentials(projectId);
+        return analyticsProjectSettingsClient.getGoogleAnalyticsStatus(projectId).configured();
     }
 
     @Transactional(readOnly = true)
     public String getGoogleAnalyticsPropertyId(Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         requireProjectExists(projectId);
-        return analyticsCredentialsService.getGaPropertyId(projectId);
+        return analyticsProjectSettingsClient.getGoogleAnalyticsStatus(projectId).propertyId();
     }
 
     @Transactional
@@ -114,45 +111,30 @@ public class ProjectApiKeyService {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         validateGoogleServiceAccountJson(serviceAccountJson);
         requireProjectExists(projectId);
-        analyticsCredentialsService.setGoogleAnalyticsCredentials(
-                projectId, propertyId, credentialCipher.encrypt(serviceAccountJson));
+        analyticsProjectSettingsClient.setGoogleAnalyticsCredentials(projectId, propertyId, serviceAccountJson);
     }
 
     @Transactional
     public void clearGoogleAnalyticsCredentials(Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         requireProjectExists(projectId);
-        analyticsCredentialsService.clearGoogleAnalyticsCredentials(projectId);
+        analyticsProjectSettingsClient.clearGoogleAnalyticsCredentials(projectId);
     }
 
     /**
-     * GoogleAnalyticsReportServiceから呼ばれる。GA未設定の場合はnullを返す(認可はここでは行わない。
-     * 呼び出し元がプロジェクトメンバー/adminであることを別途保証している。resolveGithubToken等と同じ方針)。
+     * 保存前にJSONとして解析可能で、GA4 Data API呼び出しに必要な項目を含むことを確認する
+     * (analytics-service側(InternalAnalyticsProjectSettingsController)でも同じ検証を行うが、
+     * 明らかに不正な入力は内部ブリッジ呼び出し前にここで弾く)。
      */
-    @Transactional(readOnly = true)
-    public GoogleServiceAccountKey resolveGoogleAnalyticsServiceAccountKey(Long projectId) {
-        requireProjectExists(projectId);
-        if (!analyticsCredentialsService.hasGoogleAnalyticsCredentials(projectId)) {
-            return null;
-        }
-        String json = credentialCipher.decrypt(analyticsCredentialsService.getGaServiceAccountJsonEncrypted(projectId));
-        try {
-            return objectMapper.readValue(json, GoogleServiceAccountKey.class);
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("保存済みのサービスアカウントJSONの解析に失敗しました", e);
-        }
-    }
-
-    /** 保存前にJSONとして解析可能で、GA4 Data API呼び出しに必要な項目を含むことを確認する。 */
     private void validateGoogleServiceAccountJson(String serviceAccountJson) {
-        GoogleServiceAccountKey key;
+        JsonNode json;
         try {
-            key = objectMapper.readValue(serviceAccountJson, GoogleServiceAccountKey.class);
+            json = objectMapper.readTree(serviceAccountJson);
         } catch (JsonProcessingException e) {
             throw new IllegalArgumentException("サービスアカウントJSONの形式が正しくありません", e);
         }
-        if (key.clientEmail() == null || key.clientEmail().isBlank()
-                || key.privateKey() == null || key.privateKey().isBlank()) {
+        if (!json.hasNonNull("client_email") || json.path("client_email").asText().isBlank()
+                || !json.hasNonNull("private_key") || json.path("private_key").asText().isBlank()) {
             throw new IllegalArgumentException("サービスアカウントJSONにclient_email/private_keyが含まれていません");
         }
     }
@@ -164,11 +146,8 @@ public class ProjectApiKeyService {
     public AdSenseStatus getAdSenseStatus(Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         requireProjectExists(projectId);
-        return new AdSenseStatus(
-                analyticsCredentialsService.hasAdsenseCredentials(projectId),
-                analyticsCredentialsService.getAdsenseAccountId(projectId),
-                analyticsCredentialsService.getAdsenseOauthClientId(projectId),
-                analyticsCredentialsService.hasAdsenseOauthClientSecret(projectId));
+        AnalyticsProjectSettingsClient.AdSenseStatus status = analyticsProjectSettingsClient.getAdSenseStatus(projectId);
+        return new AdSenseStatus(status.configured(), status.accountId(), status.clientId(), status.hasClientSecret());
     }
 
     /** AdSenseパブリッシャーIDとGoogle OAuthクライアントID(秘匿情報ではない)をまとめて保存する。 */
@@ -176,65 +155,33 @@ public class ProjectApiKeyService {
     public void setAdSenseSettings(Long projectId, String accountId, String clientId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         requireProjectExists(projectId);
-        analyticsCredentialsService.setAdSenseSettings(projectId, accountId, clientId);
+        analyticsProjectSettingsClient.setAdSenseSettings(projectId, accountId, clientId);
     }
 
     @Transactional
     public void setAdSenseClientSecret(Long projectId, String clientSecret) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         requireProjectExists(projectId);
-        analyticsCredentialsService.setAdSenseClientSecretEncrypted(projectId, credentialCipher.encrypt(clientSecret));
+        analyticsProjectSettingsClient.setAdSenseClientSecret(projectId, clientSecret);
     }
 
     /**
      * Next.js側のOAuthコールバックルート(/connect/adsense/callback)から呼ばれる。認可コードを
-     * リフレッシュトークンに交換して暗号化保存する(アカウントIDは別途setAdSenseSettingsで設定済みの前提。
-     * OAuth同意自体はどのAdSenseアカウントかを教えてくれないため)。クライアントID/シークレットは
-     * このプロジェクトに保存されたもの(issue #407でプロジェクト単位に変更)を使う。
+     * リフレッシュトークンに交換して暗号化保存する処理自体はanalytics-service側(このプロジェクトに
+     * 保存済みのアカウントID/クライアントID/シークレットを使う)で行う。
      */
     @Transactional
     public void completeAdSenseOAuth(Long projectId, String code, String redirectUri) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         requireProjectExists(projectId);
-        String clientSecret = analyticsCredentialsService.hasAdsenseOauthClientSecret(projectId)
-                ? credentialCipher.decrypt(analyticsCredentialsService.getAdsenseOauthClientSecretEncrypted(projectId))
-                : null;
-        GoogleOAuthTokens tokens = adSenseClient.exchangeAuthorizationCode(
-                analyticsCredentialsService.getAdsenseOauthClientId(projectId), clientSecret, code, redirectUri);
-        analyticsCredentialsService.setAdsenseRefreshTokenEncrypted(projectId, credentialCipher.encrypt(tokens.refreshToken()));
+        analyticsProjectSettingsClient.completeAdSenseOAuth(projectId, code, redirectUri);
     }
 
     @Transactional
     public void clearAdSenseCredentials(Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         requireProjectExists(projectId);
-        analyticsCredentialsService.clearAdSenseCredentials(projectId);
-    }
-
-    /**
-     * AdSenseReportServiceから呼ばれる。未設定の場合はnullを返す(認可はここでは行わない。
-     * 呼び出し元がプロジェクトメンバー/adminであることを別途保証している。resolveGithubToken等と同じ方針)。
-     */
-    @Transactional(readOnly = true)
-    public String resolveAdSenseRefreshToken(Long projectId) {
-        requireProjectExists(projectId);
-        if (!analyticsCredentialsService.hasAdsenseCredentials(projectId)) {
-            return null;
-        }
-        return credentialCipher.decrypt(analyticsCredentialsService.getAdsenseRefreshTokenEncrypted(projectId));
-    }
-
-    /**
-     * AdSenseReportServiceから呼ばれる。未設定の場合はnullを返す(認可はここでは行わない。
-     * 呼び出し元がプロジェクトメンバー/adminであることを別途保証している。resolveGithubToken等と同じ方針)。
-     */
-    @Transactional(readOnly = true)
-    public String resolveAdSenseOauthClientSecret(Long projectId) {
-        requireProjectExists(projectId);
-        if (!analyticsCredentialsService.hasAdsenseOauthClientSecret(projectId)) {
-            return null;
-        }
-        return credentialCipher.decrypt(analyticsCredentialsService.getAdsenseOauthClientSecretEncrypted(projectId));
+        analyticsProjectSettingsClient.clearAdSenseCredentials(projectId);
     }
 
     /**

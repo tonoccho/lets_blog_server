@@ -13,6 +13,7 @@ SERVICES=(
   "media|${MEDIA_SERVICE_URL:-http://localhost:8080}"
   "ai|${AI_SERVICE_URL:-http://localhost:8080}"
   "content|${CONTENT_SERVICE_URL:-http://localhost:8080}"
+  "analytics|${ANALYTICS_SERVICE_URL:-http://localhost:8080}"
 )
 
 OPENAPI_DIR="openapi"

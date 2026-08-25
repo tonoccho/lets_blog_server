@@ -112,12 +112,6 @@ app:
   image-llm-base-url: ${IMAGE_LLM_BASE_URL:https://api.openai.com/v1}
   brave-search-base-url: ${BRAVE_SEARCH_BASE_URL:https://api.search.brave.com}
   brave-search-api-key: ${BRAVE_SEARCH_API_KEY:}
-  google-analytics-data-api-base-url: ${GOOGLE_ANALYTICS_DATA_API_BASE_URL:https://analyticsdata.googleapis.com}
-  google-analytics-oauth-token-uri: ${GOOGLE_ANALYTICS_OAUTH_TOKEN_URI:https://oauth2.googleapis.com/token}
-  # AdSense連携(issue #387)。OAuthクライアントID/シークレットはプロジェクトごとに異なるため
-  # プロジェクト単位のDB設定(issue #407)で保持し、環境変数では扱わない。
-  google-oauth-token-uri: ${GOOGLE_OAUTH_TOKEN_URI:https://oauth2.googleapis.com/token}
-  adsense-data-api-base-url: ${ADSENSE_DATA_API_BASE_URL:https://adsense.googleapis.com}
   plantuml-base-url: ${PLANTUML_BASE_URL:http://localhost:8085}
   penpot-base-url: ${PENPOT_BASE_URL:http://localhost:9001}
   penpot-public-url: ${PENPOT_PUBLIC_URL:http://localhost:9001}
@@ -135,6 +129,10 @@ app:
   # project_content_settingsの読み書き、記事プレビューのテーマ骨格取得(Playwright)をcontent-service
   # へ委譲する(issue #576、com.letsblog.api.client.ContentServiceClient参照)。
   content-service-uri: ${CONTENT_SERVICE_URI:http://localhost:8080}
+  # プロジェクト単位のGoogle Analytics/AdSense連携設定(analytics_credentials)のCRUD・AdSense OAuth
+  # コード交換をanalytics-serviceへ委譲する(issue #578、com.letsblog.api.client.
+  # AnalyticsProjectSettingsClient参照)。
+  analytics-service-uri: ${ANALYTICS_SERVICE_URI:http://localhost:8080}
   wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
   wordpress-provision-token: ${WP_PROVISION_TOKEN:}
   bulk-upload-storage-path: ${BULK_UPLOAD_STORAGE_PATH:/app/data/bulk-uploads}

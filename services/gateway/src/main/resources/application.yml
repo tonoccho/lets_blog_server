@@ -53,6 +53,16 @@ app:
         uri: ${AI_SERVICE_URI:http://api:8080}
         paths:
           - /api/projects/*/ai-models/llm/**
+      # ProjectDashboardController(プロジェクトダッシュボードのGA/AdSenseレポート取得)は
+      # analytics-serviceへ移設した(#578)。パス自体は/api/projects/**配下のまま(既存フロントのURLを
+      # 変えないため)。より広い/api/projects/**(下のprojectルート)より先にここでマッチさせる
+      # (project-ai-models-llmと同じパターン)。DashboardController(コンテナ状態SSE・接続サービス状態、
+      # /api/dashboard/**配下でこれとはパスが異なる)は分析ではないためlegacy-apiに残る
+      # (下のanalyticsルートのコメント参照)。
+      - id: project-dashboard-analytics
+        uri: ${ANALYTICS_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/projects/*/dashboard/**
       # ProjectCustomTagController(プロジェクト詳細のカスタムタグ画面)はcontent-serviceへ移設した
       # (#576)。パス自体は/api/projects/**配下のまま(既存フロントのURLを変えないため)。より広い
       # /api/projects/**(下のprojectルート、project-serviceが未抽出のためlegacy-apiのまま)より
@@ -87,9 +97,14 @@ app:
           - /api/posts/*/*
       # SSEエンドポイント(#560)。ダッシュボードの常時接続ストリームのため、応答自体は
       # すぐ返る(ボディはFlux<DataBuffer>として遅延ストリーミングされ、この
-      # response-timeoutには縛られない。ProxyHandlerのJavadoc参照)。
-      - id: analytics-dashboard-stream
-        uri: ${ANALYTICS_SERVICE_URI:http://api:8080}
+      # response-timeoutには縛られない。ProxyHandlerのJavadoc参照)。DashboardController
+      # (コンテナ状態SSE・接続サービス状態、/api/dashboard/**配下)はGA/AdSenseレポート
+      # (ProjectDashboardController、/api/projects/*/dashboard/**配下、上のanalyticsルート参照)とは
+      # 別物で分析ドメインではないため、C10(platform-service、まだ存在しない)が抽出されるまで
+      # legacy-apiに残る(#578の注記どおり)。下の広い/api/dashboard/**(analyticsルート)ではなく
+      # ここでlegacy-apiへ先にマッチさせる。
+      - id: dashboard-status-stream
+        uri: ${LEGACY_API_URI:http://api:8080}
         paths:
           - /api/dashboard/service-status/stream
           - /api/dashboard/container-status/stream
@@ -162,11 +177,17 @@ app:
         paths:
           - /api/publish/**
           - /api/bulk-management/**
+      # GA/AdSense連携の実体(ProjectDashboardController・ProjectApiKeyControllerのGA/AdSense部分)は
+      # /api/projects/*/dashboard/**(上のproject-dashboard-analyticsルート)・/api/projects/*/
+      # api-keys/**(legacy-apiに残るProjectApiKeyController経由でこのサービスへブリッジ、下の
+      # projectルート)配下にあり、/api/analytics/**を直接叩くコントローラーはまだ無い
+      # (将来直接公開する場合に備えたルート)。/api/dashboard/**(DashboardController、コンテナ状態
+      # SSE・接続サービス状態)は分析ドメインではないため、ここに含めない(上のdashboard-status-stream
+      # ルートのコメント参照。legacy-apiへはfallback-uri経由でルーティングされる)。
       - id: analytics
         uri: ${ANALYTICS_SERVICE_URI:http://api:8080}
         paths:
           - /api/analytics/**
-          - /api/dashboard/**
       - id: platform
         uri: ${PLATFORM_SERVICE_URI:http://api:8080}
         paths:

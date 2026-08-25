@@ -301,9 +301,7 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("GET", "/api/projects/1/custom-tags/css-bundle"),
                 new Endpoint("POST", "/api/projects/1/custom-tags/preview"),
 
-                // -- ProjectDashboardController (2) --
-                new Endpoint("GET", "/api/projects/1/dashboard/google-analytics"),
-                new Endpoint("GET", "/api/projects/1/dashboard/adsense"),
+                // (ProjectDashboardControllerは#578でanalytics-serviceへ移設したため対象外)
 
                 // (ProjectMediaGarbageCollectionControllerは#573 stage3でmedia-serviceへ移設したため対象外)
 
