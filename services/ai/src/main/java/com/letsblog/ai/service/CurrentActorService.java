@@ -1,7 +1,8 @@
 package com.letsblog.ai.service;
 
-import com.letsblog.ai.client.ActorProfile;
-import com.letsblog.ai.client.IdentityClient;
+import com.letsblog.common.client.ActorProfile;
+import com.letsblog.common.client.IdentityClient;
+import com.letsblog.common.client.SyncServiceException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Optional;
 import org.springframework.http.HttpHeaders;
@@ -85,6 +86,11 @@ public class CurrentActorService {
         if (bearerToken == null || bearerToken.isBlank()) {
             return Optional.empty();
         }
-        return Optional.of(identityClient.fetchProfile(bearerToken));
+        try {
+            return Optional.of(identityClient.fetchProfile(bearerToken));
+        } catch (SyncServiceException e) {
+            throw new IdentityServiceUnavailableException(
+                    "identity-serviceの/api/identity/me呼び出しに失敗しました: " + e.getMessage(), e);
+        }
     }
 }

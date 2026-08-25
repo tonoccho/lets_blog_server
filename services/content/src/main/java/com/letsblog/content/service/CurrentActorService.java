@@ -1,7 +1,8 @@
 package com.letsblog.content.service;
 
-import com.letsblog.content.client.ActorProfile;
-import com.letsblog.content.client.IdentityClient;
+import com.letsblog.common.client.ActorProfile;
+import com.letsblog.common.client.IdentityClient;
+import com.letsblog.common.client.SyncServiceException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Optional;
 import org.springframework.http.HttpHeaders;
@@ -13,11 +14,16 @@ import org.springframework.stereotype.Service;
  * 操作者(actor)情報を取得する。media-service/ai-serviceのCurrentActorServiceと同じ理由で、
  * 本サービス(lbs_contentスキーマ)はusersテーブルへクロススキーマアクセスできない(ADR-0004)ため、
  * JWTのsubクレームからローカルでuserIdを解決することができない。そのため「自分自身のuserId」の
- * 解決は、常にidentity-serviceの{@code GET /api/identity/me}への同期呼び出し({@link IdentityClient}）
- * に委ねる。
+ * 解決は、常にidentity-serviceの{@code GET /api/identity/me}への同期呼び出し({@link IdentityClient}、
+ * issue #581(C12)でlbs-commonの共通実装へ置き換え済み）に委ねる。
  *
  * <p>identity-serviceへの問い合わせ結果は1リクエストにつき最大1回になるよう、
  * リクエストスコープ(HttpServletRequestの属性)でキャッシュする。
+ *
+ * <p>identity-serviceへの呼び出し失敗({@link SyncServiceException}、タイムアウト・5xx・通信断・
+ * サーキットブレーカー作動中のいずれか)は、認可判定に使う情報のため機能縮退(admin判定をfalse扱いに
+ * する等)せず、常に{@link IdentityServiceUnavailableException}として上位(GlobalExceptionHandler、
+ * 502マッピング)へ伝播させる("fail open"にしない。docs/SYNC_SERVICE_CALLS.md参照)。
  */
 @Service
 public class CurrentActorService {
@@ -98,6 +104,11 @@ public class CurrentActorService {
         if (bearerToken == null || bearerToken.isBlank()) {
             return Optional.empty();
         }
-        return Optional.of(identityClient.fetchProfile(bearerToken));
+        try {
+            return Optional.of(identityClient.fetchProfile(bearerToken));
+        } catch (SyncServiceException e) {
+            throw new IdentityServiceUnavailableException(
+                    "identity-serviceの/api/identity/me呼び出しに失敗しました: " + e.getMessage(), e);
+        }
     }
 }
