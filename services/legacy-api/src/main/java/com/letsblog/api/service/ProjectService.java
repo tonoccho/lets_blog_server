@@ -13,6 +13,7 @@ import com.letsblog.api.dto.UpdateImageGenerationPromptDefaultsRequest;
 import com.letsblog.api.dto.UpdateImageGenerationSizeDefaultsRequest;
 import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
 import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
+import com.letsblog.api.messaging.DomainEventPublisher;
 import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.SiteRepository;
 import com.letsblog.api.dto.SiteResponse;
@@ -34,6 +35,7 @@ public class ProjectService {
     private final BulkUploadStorageService bulkUploadStorageService;
     private final ProjectImageSettingsService projectImageSettingsService;
     private final ContentServiceClient contentServiceClient;
+    private final DomainEventPublisher domainEventPublisher;
     private final String globalDefaultNegativePrompt;
     private final String globalDefaultQualityPrompt;
     private final int globalDefaultGeneratedImageWidth;
@@ -50,6 +52,7 @@ public class ProjectService {
             BulkUploadStorageService bulkUploadStorageService,
             ProjectImageSettingsService projectImageSettingsService,
             ContentServiceClient contentServiceClient,
+            DomainEventPublisher domainEventPublisher,
             @Value("${app.default-negative-prompt}") String globalDefaultNegativePrompt,
             @Value("${app.default-quality-prompt}") String globalDefaultQualityPrompt,
             @Value("${app.default-generated-image-width}") int globalDefaultGeneratedImageWidth,
@@ -64,6 +67,7 @@ public class ProjectService {
         this.bulkUploadStorageService = bulkUploadStorageService;
         this.projectImageSettingsService = projectImageSettingsService;
         this.contentServiceClient = contentServiceClient;
+        this.domainEventPublisher = domainEventPublisher;
         this.globalDefaultNegativePrompt = globalDefaultNegativePrompt;
         this.globalDefaultQualityPrompt = globalDefaultQualityPrompt;
         this.globalDefaultGeneratedImageWidth = globalDefaultGeneratedImageWidth;
@@ -134,11 +138,18 @@ public class ProjectService {
         if (!projectRepository.existsById(projectId)) {
             throw new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません");
         }
-        // project_users・bulk_operation_logs・project_ai_settings・project_image_settings・
-        // analytics_credentials・project_content_settingsはDB側のON DELETE CASCADEで連動削除される
+        // project_users・bulk_operation_logs・project_image_settingsはlegacy-api(lets_blogスキーマ)
+        // 内の同一スキーマFKによりDB側のON DELETE CASCADEで連動削除される。
+        // project_ai_settings(ai-service)・analytics_credentials(analytics-service)・
+        // project_content_settings(content-service)は、スキーマ分割(ADR-0004)でlegacy-apiとは
+        // 別スキーマへ抽出済みのためクロススキーマFKを持てず、DB側のCASCADEは効かない
+        // (かつてはここに同じ説明でCASCADEされる旨のコメントがあったが、各サービスへの抽出後は
+        // 誤りになっていた)。project.deletedイベント(letsblog.events、issue #580)経由で
+        // 各サービスが自スキーマ内の該当行を非同期に削除する。
         projectRepository.deleteById(projectId);
         // 一括管理でアップロードされたzipファイルはDBのCASCADEでは消えないため、明示的に削除する
         bulkUploadStorageService.deleteAll(projectId);
+        domainEventPublisher.publishProjectDeleted(projectId);
     }
 
     @AuditLog(action = AuditLogAction.PROJECT_ENVIRONMENT_BOUND, resourceType = "PROJECT")

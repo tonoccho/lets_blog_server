@@ -6,6 +6,7 @@ import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.AdoptWordPressSiteRequest;
 import com.letsblog.api.dto.CreateManagedWordPressSiteRequest;
 import com.letsblog.api.dto.SiteResponse;
+import com.letsblog.api.messaging.DomainEventPublisher;
 import com.letsblog.api.provisioning.WordPressProvisioningClient;
 import com.letsblog.api.provisioning.WordPressSyncClient;
 import com.letsblog.api.repository.SiteRepository;
@@ -44,12 +45,16 @@ class WordPressSiteProvisioningServiceTest {
     @Mock
     private ContentServiceClient contentServiceClient;
 
+    @Mock
+    private DomainEventPublisher domainEventPublisher;
+
     private WordPressSiteProvisioningService service;
 
     @BeforeEach
     void setUp() {
         service = new WordPressSiteProvisioningService(
-                provisioningClient, syncClient, siteService, siteRepository, contentServiceClient);
+                provisioningClient, syncClient, siteService, siteRepository, contentServiceClient,
+                domainEventPublisher);
     }
 
     private CreateManagedWordPressSiteRequest request() {
@@ -285,6 +290,7 @@ class WordPressSiteProvisioningServiceTest {
         verify(provisioningClient).deprovision("main", "wp_main");
         verify(contentServiceClient).deletePostsBySite(1L);
         verify(siteRepository).delete(site);
+        verify(domainEventPublisher).publishSiteDeleted(1L);
     }
 
     @Test
@@ -299,6 +305,7 @@ class WordPressSiteProvisioningServiceTest {
         verify(provisioningClient, never()).deprovision(any(), any());
         verify(contentServiceClient).deletePostsBySite(2L);
         verify(siteRepository).delete(site);
+        verify(domainEventPublisher).publishSiteDeleted(2L);
     }
 
     @Test

@@ -9,6 +9,7 @@ import com.letsblog.api.dto.AdoptWordPressSiteRequest;
 import com.letsblog.api.dto.CreateManagedWordPressSiteRequest;
 import com.letsblog.api.dto.SiteRegisterRequest;
 import com.letsblog.api.dto.SiteResponse;
+import com.letsblog.api.messaging.DomainEventPublisher;
 import com.letsblog.api.provisioning.WordPressProvisioningClient;
 import com.letsblog.api.provisioning.WordPressSyncClient;
 import com.letsblog.api.repository.SiteRepository;
@@ -31,17 +32,20 @@ public class WordPressSiteProvisioningService {
     private final SiteService siteService;
     private final SiteRepository siteRepository;
     private final ContentServiceClient contentServiceClient;
+    private final DomainEventPublisher domainEventPublisher;
 
     public WordPressSiteProvisioningService(WordPressProvisioningClient provisioningClient,
                                              WordPressSyncClient syncClient,
                                              SiteService siteService,
                                              SiteRepository siteRepository,
-                                             ContentServiceClient contentServiceClient) {
+                                             ContentServiceClient contentServiceClient,
+                                             DomainEventPublisher domainEventPublisher) {
         this.provisioningClient = provisioningClient;
         this.syncClient = syncClient;
         this.siteService = siteService;
         this.siteRepository = siteRepository;
         this.contentServiceClient = contentServiceClient;
+        this.domainEventPublisher = domainEventPublisher;
     }
 
     @AuditLog(action = AuditLogAction.WORDPRESS_PROVISIONED, resourceType = "SITE")
@@ -169,8 +173,13 @@ public class WordPressSiteProvisioningService {
         if (site.isManagedWordpress()) {
             provisioningClient.deprovision(site.getWpSlug(), site.getWpDbName());
         }
+        // 投稿の一括削除は既存の同期内部ブリッジで即時反映しつつ、site.deletedイベント
+        // (letsblog.events、issue #580)も並行発行する(将来の追加購読者・同期呼び出し失敗時の
+        // 非同期フォールバック用。content-service側はどちらの経路でも同じdeleteBySiteIdに
+        // 帰着するため冪等)。
         contentServiceClient.deletePostsBySite(siteId);
         siteRepository.delete(site);
+        domainEventPublisher.publishSiteDeleted(siteId);
     }
 
     /**

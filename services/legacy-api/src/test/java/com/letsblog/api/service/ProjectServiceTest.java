@@ -10,6 +10,7 @@ import com.letsblog.api.dto.UpdateImageGenerationPromptDefaultsRequest;
 import com.letsblog.api.dto.UpdateImageGenerationSizeDefaultsRequest;
 import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
 import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
+import com.letsblog.api.messaging.DomainEventPublisher;
 import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.SiteRepository;
 import jakarta.validation.ConstraintViolationException;
@@ -58,10 +59,13 @@ class ProjectServiceTest {
     @Mock
     private ContentServiceClient contentServiceClient;
 
+    @Mock
+    private DomainEventPublisher domainEventPublisher;
+
     private ProjectService service() {
         return new ProjectService(
                 projectRepository, siteRepository, siteService, bulkUploadStorageService,
-                projectImageSettingsService, contentServiceClient,
+                projectImageSettingsService, contentServiceClient, domainEventPublisher,
                 "low quality, blurry, watermark, text", "high quality, highly detailed, sharp focus, masterpiece",
                 1920, 1080, 1300, true, true, true);
     }
@@ -214,6 +218,7 @@ class ProjectServiceTest {
 
         verify(projectRepository, times(1)).deleteById(1L);
         verify(bulkUploadStorageService).deleteAll(1L);
+        verify(domainEventPublisher).publishProjectDeleted(1L);
     }
 
     @Test
