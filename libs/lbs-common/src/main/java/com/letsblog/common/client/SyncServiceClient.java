@@ -1,5 +1,6 @@
 package com.letsblog.common.client;
 
+import com.letsblog.common.web.CorrelationIdFilter;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
@@ -11,6 +12,7 @@ import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import org.slf4j.MDC;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -154,8 +156,21 @@ public final class SyncServiceClient {
         });
     }
 
+    /**
+     * 呼び出し元スレッドのMDCにある相関ID(issue #582)を、呼び出し元が指定したヘッダーより先に
+     * 設定する。同期呼び出し先サービスのログにも同じ相関IDが現れるようにするための横断的処理で、
+     * 各呼び出しメソッドの{@code Consumer<HttpHeaders>}引数を変更する必要は無い。
+     */
     private Consumer<HttpHeaders> applyHeaders(Consumer<HttpHeaders> headers) {
-        return headers != null ? headers : h -> { };
+        return h -> {
+            String correlationId = MDC.get(CorrelationIdFilter.MDC_KEY);
+            if (correlationId != null && !correlationId.isBlank()) {
+                h.set(CorrelationIdFilter.CORRELATION_ID_HEADER, correlationId);
+            }
+            if (headers != null) {
+                headers.accept(h);
+            }
+        };
     }
 
     /** 呼び出し先サービス名(サーキットブレーカー名。ログ・監視での識別に使う)。 */

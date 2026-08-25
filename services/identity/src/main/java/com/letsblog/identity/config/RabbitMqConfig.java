@@ -1,5 +1,6 @@
 package com.letsblog.identity.config;
 
+import com.letsblog.common.messaging.CorrelationIdMessagePostProcessor;
 import com.letsblog.common.messaging.EventExchanges;
 import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
@@ -31,6 +32,8 @@ public class RabbitMqConfig {
     public RabbitTemplate rabbitTemplate(ConnectionFactory connectionFactory, JacksonJsonMessageConverter converter) {
         RabbitTemplate template = new RabbitTemplate(connectionFactory);
         template.setMessageConverter(converter);
+        // 発行元スレッドのMDCにある相関ID(issue #582)をメッセージヘッダへ付与する。
+        template.setBeforePublishPostProcessors(new CorrelationIdMessagePostProcessor());
         return template;
     }
 }

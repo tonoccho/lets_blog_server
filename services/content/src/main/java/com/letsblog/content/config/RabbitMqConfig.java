@@ -1,5 +1,7 @@
 package com.letsblog.content.config;
 
+import com.letsblog.common.messaging.CorrelationIdListenerAdvice;
+import com.letsblog.common.messaging.CorrelationIdMessagePostProcessor;
 import com.letsblog.common.messaging.EventExchanges;
 import com.letsblog.common.messaging.LogExchanges;
 import org.springframework.amqp.core.Binding;
@@ -225,6 +227,8 @@ public class RabbitMqConfig {
     public RabbitTemplate rabbitTemplate(ConnectionFactory connectionFactory, JacksonJsonMessageConverter converter) {
         RabbitTemplate template = new RabbitTemplate(connectionFactory);
         template.setMessageConverter(converter);
+        // 発行元スレッドのMDCにある相関ID(issue #582)をメッセージヘッダへ付与する。
+        template.setBeforePublishPostProcessors(new CorrelationIdMessagePostProcessor());
         return template;
     }
 
@@ -241,6 +245,8 @@ public class RabbitMqConfig {
         SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
         configurer.configure(factory, connectionFactory);
         factory.setMessageConverter(converter);
+        // メッセージヘッダの相関ID(issue #582)をMDCへ設定してからリスナーメソッドを呼び出す。
+        factory.setAdviceChain(new CorrelationIdListenerAdvice());
         return factory;
     }
 }

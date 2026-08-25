@@ -1,9 +1,11 @@
 package com.letsblog.common.client;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.letsblog.common.web.CorrelationIdFilter;
 import com.sun.net.httpserver.HttpServer;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
@@ -18,9 +20,11 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
@@ -63,6 +67,39 @@ class SyncServiceClientTest {
         Value result = client.get("/api/value", new Object[0], Value.class, h -> { });
 
         assertEquals("ok", result.value());
+    }
+
+    @Test
+    void 呼び出し元スレッドのMDCにある相関IDを下流へヘッダとして転送する() throws IOException {
+        AtomicReference<String> receivedHeader = new AtomicReference<>();
+        httpServer = startHttpServer(exchange -> {
+            receivedHeader.set(exchange.getRequestHeaders().getFirst(CorrelationIdFilter.CORRELATION_ID_HEADER));
+            respond(exchange, 200, "{\"value\":\"ok\"}");
+        });
+        SyncServiceClient client = freshBuilder(baseUrl(httpServer)).profile(SyncCallProfile.SHORT).build();
+
+        MDC.put(CorrelationIdFilter.MDC_KEY, "test-correlation-id");
+        try {
+            client.get("/api/value", new Object[0], Value.class, h -> { });
+        } finally {
+            MDC.remove(CorrelationIdFilter.MDC_KEY);
+        }
+
+        assertEquals("test-correlation-id", receivedHeader.get());
+    }
+
+    @Test
+    void MDCに相関IDが無ければヘッダを付与しない() throws IOException {
+        AtomicReference<String> receivedHeader = new AtomicReference<>();
+        httpServer = startHttpServer(exchange -> {
+            receivedHeader.set(exchange.getRequestHeaders().getFirst(CorrelationIdFilter.CORRELATION_ID_HEADER));
+            respond(exchange, 200, "{\"value\":\"ok\"}");
+        });
+        SyncServiceClient client = freshBuilder(baseUrl(httpServer)).profile(SyncCallProfile.SHORT).build();
+
+        client.get("/api/value", new Object[0], Value.class, h -> { });
+
+        assertNull(receivedHeader.get());
     }
 
     @Test

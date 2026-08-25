@@ -1,5 +1,7 @@
 package com.letsblog.gateway.config;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.server.reactive.ServerHttpRequest;
@@ -20,10 +22,18 @@ import java.util.UUID;
  * ここで一箇所に採番を集約できる(lbs-commonのCorrelationIdFilterはServlet
  * ベースのため、reactive(WebFlux)実装のgatewayではそのまま使えず、同等の実装を
  * ここに個別に用意している)。
+ *
+ * <p>相関IDでリクエストの全経路をgrepで追えるようにする(issue #582の受入基準)には、
+ * gateway自身のログにも相関IDが必要なため、リクエスト完了時に最小限のアクセスログを
+ * 出力する。WebFluxはリクエストごとにスレッドが固定されないため、下流サービスのように
+ * MDC(ThreadLocal)には頼らず、ログ出力に必要な値をこのフィルタのローカル変数として
+ * 直接渡す。
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class CorrelationIdWebFilter implements WebFilter {
+
+    private static final Logger log = LoggerFactory.getLogger(CorrelationIdWebFilter.class);
 
     public static final String CORRELATION_ID_HEADER = "X-Correlation-Id";
 
@@ -43,6 +53,25 @@ public class CorrelationIdWebFilter implements WebFilter {
         response.getHeaders().set(CORRELATION_ID_HEADER, resolvedCorrelationId);
 
         ServerWebExchange mutatedExchange = exchange.mutate().request(mutatedRequest).build();
-        return chain.filter(mutatedExchange);
+        long startTime = System.currentTimeMillis();
+        String method = request.getMethod() != null ? request.getMethod().name() : "UNKNOWN";
+        String path = request.getPath().value();
+        return chain.filter(mutatedExchange)
+                .doFinally(signalType -> logAccess(method, path, response, resolvedCorrelationId, startTime));
+    }
+
+    private void logAccess(
+            String method, String path, ServerHttpResponse response, String correlationId, long startTime) {
+        if (isSkipLogging(path)) {
+            return;
+        }
+        long durationMs = System.currentTimeMillis() - startTime;
+        Integer status = response.getStatusCode() != null ? response.getStatusCode().value() : null;
+        log.info("gateway request: method={} path={} status={} duration_ms={} correlation_id={}",
+                method, path, status, durationMs, correlationId);
+    }
+
+    private boolean isSkipLogging(String path) {
+        return path.startsWith("/actuator") || path.endsWith("/stream");
     }
 }
