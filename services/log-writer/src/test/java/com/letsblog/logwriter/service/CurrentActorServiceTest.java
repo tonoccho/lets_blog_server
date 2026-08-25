@@ -1,8 +1,8 @@
 package com.letsblog.logwriter.service;
 
+import com.letsblog.common.client.ActorProfile;
+import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
-import com.letsblog.logwriter.client.ActorProfile;
-import com.letsblog.logwriter.client.IdentityClient;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.HashMap;
 import java.util.Map;

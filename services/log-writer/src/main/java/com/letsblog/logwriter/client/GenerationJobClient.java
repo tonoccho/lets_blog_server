@@ -1,24 +1,25 @@
 package com.letsblog.logwriter.client;
 
+import com.letsblog.common.client.ServiceAuthHeaders;
+import com.letsblog.common.client.SyncCallProfile;
+import com.letsblog.common.client.SyncServiceClient;
+import com.letsblog.common.client.SyncServiceException;
 import com.letsblog.logwriter.service.IdentityServiceUnavailableException;
-import java.net.http.HttpClient;
-import java.time.Duration;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientException;
 
 /**
- * legacy-apiの{@code GET /api/generation-jobs}を問い合わせるクライアント(#572)。
+ * legacy-apiの{@code GET /api/generation-jobs}を問い合わせるクライアント(#572)。issue #581(C12)で
+ * lbs-commonの{@link SyncServiceClient}(タイムアウト・リトライ・サーキットブレーカーの共通実装)へ
+ * 移行した。方針の詳細はdocs/SYNC_SERVICE_CALLS.md参照。
  *
  * <p>統合操作ログ(/api/operation-logs/unified)のAI_JOBソースは、issue #572の時点では
  * legacy-apiが引き続き所有するgeneration_jobsテーブルに由来する(AIサービス抽出はPhase 19の
  * 別Issueで行う)。lbs_logスキーマからは直接参照できないため、IdentityClientと同様の
- * 暫定的な同期HTTP呼び出しで取得する。
+ * 同期HTTP呼び出しで取得する。
  *
  * <p>GenerationJobController自体はadmin限定等の追加認可を課さないが、legacy-apiの
  * {@code ApiKeyAuthFilter}がX-API-Key/有効なBearer JWTのいずれも無いリクエストをコントローラの
@@ -29,17 +30,11 @@ import org.springframework.web.client.RestClientException;
 @Component
 public class GenerationJobClient {
 
-    private static final Duration TIMEOUT = Duration.ofSeconds(3);
-
-    private final RestClient restClient;
+    private final SyncServiceClient client;
 
     public GenerationJobClient(RestClient.Builder builder, @Value("${app.legacy-api-uri}") String legacyApiUri) {
-        HttpClient httpClient = HttpClient.newBuilder().connectTimeout(TIMEOUT).build();
-        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
-        requestFactory.setReadTimeout(TIMEOUT);
-        this.restClient = builder
-                .baseUrl(legacyApiUri)
-                .requestFactory(requestFactory)
+        this.client = SyncServiceClient.builder(builder, "legacy-api", legacyApiUri)
+                .profile(SyncCallProfile.SHORT)
                 .build();
     }
 
@@ -49,18 +44,12 @@ public class GenerationJobClient {
      */
     public List<GenerationJobSummary> listRecent(String bearerToken) {
         try {
-            List<GenerationJobSummary> jobs = restClient.get()
-                    .uri("/api/generation-jobs")
-                    .headers(headers -> {
-                        if (bearerToken != null && !bearerToken.isBlank()) {
-                            headers.set(HttpHeaders.AUTHORIZATION, bearerToken);
-                        }
-                    })
-                    .retrieve()
-                    .body(new ParameterizedTypeReference<List<GenerationJobSummary>>() {
-                    });
+            List<GenerationJobSummary> jobs = client.get(
+                    "/api/generation-jobs", new Object[0],
+                    new ParameterizedTypeReference<List<GenerationJobSummary>>() { },
+                    ServiceAuthHeaders.forwardedBearer(bearerToken));
             return jobs != null ? jobs : List.of();
-        } catch (RestClientException e) {
+        } catch (SyncServiceException e) {
             throw new IdentityServiceUnavailableException("legacy-apiの/api/generation-jobs呼び出しに失敗しました", e);
         }
     }

@@ -20,6 +20,12 @@ dependencies {
     // 使ってトークンエンドポイントのレスポンスを読むために必要
     // (Boot 4の既定Jackson3コンバータはJsonNode.classのデシリアライズに失敗するため)。
     implementation 'com.fasterxml.jackson.core:jackson-databind'
+    // SyncServiceClient(#581)のリトライ・サーキットブレーカー実装。gatewayのresilience4j-ratelimiter
+    // (#560)と同じバージョン系列。Spring Bootのオートコンフィグ(resilience4j-spring-boot3)は使わず、
+    // コアライブラリをコードで組み立てる(lbs-commonはBootアプリでは無く、各サービスへ配布される
+    // 素のライブラリのため)。
+    api 'io.github.resilience4j:resilience4j-circuitbreaker:2.4.0'
+    api 'io.github.resilience4j:resilience4j-retry:2.4.0'
 
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'

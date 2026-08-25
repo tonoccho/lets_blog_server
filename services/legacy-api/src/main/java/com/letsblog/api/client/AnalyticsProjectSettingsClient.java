@@ -1,49 +1,45 @@
 package com.letsblog.api.client;
 
+import com.letsblog.common.client.ServiceAuthHeaders;
+import com.letsblog.common.client.SyncCallProfile;
+import com.letsblog.common.client.SyncServiceClient;
+import com.letsblog.common.client.SyncServiceClientErrorException;
+import com.letsblog.common.client.SyncServiceException;
 import jakarta.servlet.http.HttpServletRequest;
-import java.net.http.HttpClient;
-import java.time.Duration;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestClientResponseException;
 
 /**
  * analytics-serviceの{@code /api/internal/analytics/projects/{projectId}/**}を呼び出すクライアント
- * (issue #578)。
+ * (issue #578)。issue #581(C12)でlbs-commonの{@link SyncServiceClient}(タイムアウト・リトライ・
+ * サーキットブレーカーの共通実装)へ移行した。方針の詳細はdocs/SYNC_SERVICE_CALLS.md参照。
  *
  * <p>ProjectApiKeyController(Web管理画面向け、プロジェクト単位のAPIキー設定)は、GitHubトークン/
  * Brave Search APIキー等project-service/ai-serviceが所有するデータもまとめて扱っているが、
  * analytics_credentialsテーブル自体はanalytics-serviceが所有するため、Google Analytics/AdSense
  * 部分だけanalytics-serviceへのブリッジ経由にする(ai-service(#574)のAiProjectSettingsClientと
- * 同じ暫定策。呼び出し元ユーザーのBearerトークンをそのまま転送する)。
+ * 同じ方式。呼び出し元ユーザーのBearerトークンをそのまま転送する)。
  *
  * <p>入力値検証(サービスアカウントJSON形式等)はanalytics-service側(InternalAnalyticsProjectSettings
- * Controller)で行い、その結果(4xx)はそのままIllegalArgumentException(呼び出し元コントローラーの
- * 既存の@Validと同じ409マッピング)として再送出する。5xx・通信断は{@link AnalyticsServiceException}
- * (502マッピング)として区別する(ai-service(#574)のLegacyApiBridgeClient#resolveGithubAccessと
- * 同じ方針)。
+ * Controller)で行い、その結果(4xx、{@link SyncServiceClientErrorException}）はそのまま
+ * IllegalArgumentException(呼び出し元コントローラーの既存の@Validと同じ409マッピング)として
+ * 再送出する(明確なエラー)。5xx・通信断・サーキットオープンは{@link AnalyticsServiceException}
+ * (502マッピング)として区別する。
  */
 @Component
 public class AnalyticsProjectSettingsClient {
 
-    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(3);
-    private static final Duration READ_TIMEOUT = Duration.ofSeconds(10);
-
-    private final RestClient restClient;
+    private final SyncServiceClient client;
     private final HttpServletRequest request;
 
     public AnalyticsProjectSettingsClient(
             RestClient.Builder builder, @Value("${app.analytics-service-uri}") String analyticsServiceUri,
             HttpServletRequest request) {
-        HttpClient httpClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
-        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
-        requestFactory.setReadTimeout(READ_TIMEOUT);
-        this.restClient = builder.baseUrl(analyticsServiceUri).requestFactory(requestFactory).build();
+        this.client = SyncServiceClient.builder(builder, "analytics-service", analyticsServiceUri)
+                .profile(SyncCallProfile.STANDARD)
+                .build();
         this.request = request;
     }
 
@@ -94,80 +90,43 @@ public class AnalyticsProjectSettingsClient {
 
     public void completeAdSenseOAuth(Long projectId, String code, String redirectUri) {
         try {
-            restClient.post()
-                    .uri("/api/internal/analytics/projects/{projectId}/adsense/oauth-callback", projectId)
-                    .headers(this::setAuthorization)
-                    .body(Map.of("code", code, "redirectUri", redirectUri))
-                    .retrieve()
-                    .toBodilessEntity();
-        } catch (RestClientResponseException e) {
+            client.postNoBody(
+                    "/api/internal/analytics/projects/{projectId}/adsense/oauth-callback", new Object[] {projectId},
+                    Map.of("code", code, "redirectUri", redirectUri), ServiceAuthHeaders.forwardedBearer(request));
+        } catch (SyncServiceException e) {
             throw translate(e);
-        } catch (RestClientException e) {
-            throw new AnalyticsServiceException(
-                    "analytics-serviceのadsense/oauth-callback呼び出しに失敗しました: " + e.getMessage(), e);
         }
     }
 
     private <T> T get(String uriTemplate, Long projectId, Class<T> type) {
         try {
-            return restClient.get()
-                    .uri(uriTemplate, projectId)
-                    .headers(this::setAuthorization)
-                    .retrieve()
-                    .body(type);
-        } catch (RestClientResponseException e) {
+            return client.get(uriTemplate, new Object[] {projectId}, type, ServiceAuthHeaders.forwardedBearer(request));
+        } catch (SyncServiceException e) {
             throw translate(e);
-        } catch (RestClientException e) {
-            throw new AnalyticsServiceException("analytics-serviceの呼び出しに失敗しました: " + e.getMessage(), e);
         }
     }
 
     private void put(String uriTemplate, Long projectId, Map<String, String> body) {
         try {
-            restClient.put()
-                    .uri(uriTemplate, projectId)
-                    .headers(this::setAuthorization)
-                    .body(body)
-                    .retrieve()
-                    .toBodilessEntity();
-        } catch (RestClientResponseException e) {
+            client.put(uriTemplate, new Object[] {projectId}, body, ServiceAuthHeaders.forwardedBearer(request));
+        } catch (SyncServiceException e) {
             throw translate(e);
-        } catch (RestClientException e) {
-            throw new AnalyticsServiceException("analytics-serviceの呼び出しに失敗しました: " + e.getMessage(), e);
         }
     }
 
     private void delete(String uriTemplate, Long projectId) {
         try {
-            restClient.delete()
-                    .uri(uriTemplate, projectId)
-                    .headers(this::setAuthorization)
-                    .retrieve()
-                    .toBodilessEntity();
-        } catch (RestClientResponseException e) {
+            client.delete(uriTemplate, new Object[] {projectId}, ServiceAuthHeaders.forwardedBearer(request));
+        } catch (SyncServiceException e) {
             throw translate(e);
-        } catch (RestClientException e) {
-            throw new AnalyticsServiceException("analytics-serviceの呼び出しに失敗しました: " + e.getMessage(), e);
         }
     }
 
     /** 4xx(analytics-service側の入力値検証等)はIllegalArgumentExceptionとして呼び出し元へ再送出する。 */
-    private RuntimeException translate(RestClientResponseException e) {
-        if (e.getStatusCode().is4xxClientError()) {
-            return new IllegalArgumentException(bodyOrMessage(e));
+    private RuntimeException translate(SyncServiceException e) {
+        if (e instanceof SyncServiceClientErrorException clientError) {
+            return new IllegalArgumentException(clientError.responseBody());
         }
-        return new AnalyticsServiceException("analytics-serviceの呼び出しに失敗しました: " + bodyOrMessage(e), e);
-    }
-
-    private String bodyOrMessage(RestClientResponseException e) {
-        String body = e.getResponseBodyAsString();
-        return (body != null && !body.isBlank()) ? body : e.getMessage();
-    }
-
-    private void setAuthorization(HttpHeaders headers) {
-        String bearerToken = request.getHeader(HttpHeaders.AUTHORIZATION);
-        if (bearerToken != null && !bearerToken.isBlank()) {
-            headers.set(HttpHeaders.AUTHORIZATION, bearerToken);
-        }
+        return new AnalyticsServiceException("analytics-serviceの呼び出しに失敗しました: " + e.getMessage(), e);
     }
 }
