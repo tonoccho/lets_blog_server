@@ -18,6 +18,12 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
+    // project.deletedドメインイベント購読(letsblog.events、issue #580)。project_ai_settingsの
+    // クリーンアップに使う。
+    implementation 'org.springframework.boot:spring-boot-starter-amqp'
+    // リトライ→DLQ(spring.rabbitmq.listener.simple.retry)。Spring BootのBOMがバージョンを
+    // 管理しないため明示指定する(content-serviceと同じ)。
+    implementation 'org.springframework.retry:spring-retry:2.0.11'
     // LlmClient/GithubClient/BraveSearchClient/LegacyApiBridgeClient等がcom.fasterxml.jackson.databind.
     // ObjectMapper/JsonNodeを直接使うため明示的に追加する(Boot 4の既定JSONコンバータ・既定ObjectMapperは
     // Jackson3系(tools.jackson)に変わったため、com.fasterxml.jackson.databind.ObjectMapperのBean定義には
