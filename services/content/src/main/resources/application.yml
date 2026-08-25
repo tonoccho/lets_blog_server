@@ -52,6 +52,19 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USER:guest}
     password: ${RABBITMQ_PASSWORD:guest}
+    # letsblog.eventsコンシューマー(EventMessageListener)のリトライ→DLQポリシー(issue #580)。
+    # 3回まで再試行(1秒→2秒→4秒のバックオフ)し、それでも失敗したメッセージはrequeueされず
+    # (default-requeue-rejected: false)、各キューのx-dead-letter-exchange設定によりletsblog.events.dlx
+    # 経由でDLQへ配送される(RabbitMqConfig参照)。
+    listener:
+      simple:
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1000
+          multiplier: 2.0
+          max-interval: 10000
+        default-requeue-rejected: false
 
 app:
   # まだlegacy-apiに残るドメイン(Project/Site/CMS、project_user、roles)への内部ブリッジ
