@@ -1,10 +1,12 @@
 package com.letsblog.api.config;
 
+import com.letsblog.common.web.CorrelationIdFilter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.ContentCachingRequestWrapper;
@@ -52,6 +54,7 @@ public class HttpLoggingFilter extends OncePerRequestFilter {
             int status = response.getStatus();
 
             Map<String, Object> logContext = new HashMap<>();
+            logContext.put("correlation_id", MDC.get(CorrelationIdFilter.MDC_KEY));
             logContext.put("method", method);
             logContext.put("path", path);
             logContext.put("query", queryString);

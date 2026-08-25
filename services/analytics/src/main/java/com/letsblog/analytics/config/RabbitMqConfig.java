@@ -1,5 +1,6 @@
 package com.letsblog.analytics.config;
 
+import com.letsblog.common.messaging.CorrelationIdListenerAdvice;
 import com.letsblog.common.messaging.EventExchanges;
 import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.BindingBuilder;
@@ -75,6 +76,8 @@ public class RabbitMqConfig {
         SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
         configurer.configure(factory, connectionFactory);
         factory.setMessageConverter(converter);
+        // メッセージヘッダの相関ID(issue #582)をMDCへ設定してからリスナーメソッドを呼び出す。
+        factory.setAdviceChain(new CorrelationIdListenerAdvice());
         return factory;
     }
 }
