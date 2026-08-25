@@ -77,6 +77,19 @@ module.exports = {
     },
   },
 
+  // Google Analytics/AdSense連携(OAuth資格情報の保管、GA4 Data API/AdSense Management APIの
+  // レポート取得)をanalytics-serviceへ移設(#578)。
+  analytics: {
+    input: {
+      target: './openapi/analytics.json',
+    },
+    output: {
+      ...commonOutput,
+      target: './sdk/api-client/src/generated/analytics',
+      baseUrl: 'http://localhost:8080',
+    },
+  },
+
   // 将来のサービス抽出Issueで追加する例(identity-serviceの場合):
   // identity: {
   //   input: { target: './openapi/identity.json' },
