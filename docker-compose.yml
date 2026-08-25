@@ -102,6 +102,9 @@ services:
       # posts/project_content_settingsの読み書き、記事プレビューのテーマ骨格取得(Playwright)を
       # content-serviceへ委譲する(issue #576)。
       CONTENT_SERVICE_URI: http://content:8080
+      # プロジェクト単位のGoogle Analytics/AdSense連携設定(analytics_credentials)のCRUD・AdSense
+      # OAuthコード交換をanalytics-serviceへ委譲する(issue #578、AnalyticsProjectSettingsClient参照)。
+      ANALYTICS_SERVICE_URI: http://analytics:8080
       BACKUP_MYSQL_HOST: mysql
       BACKUP_MYSQL_PORT: "3306"
       BACKUP_MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -131,6 +134,8 @@ services:
       ai:
         condition: service_healthy
       content:
+        condition: service_healthy
+      analytics:
         condition: service_healthy
 
   # ComfyUI画像生成・draw.ioダイアグラム・PlantUML/Recharts/Penpotレンダリングの所有権をmedia-serviceへ
@@ -257,6 +262,39 @@ services:
       identity:
         condition: service_healthy
 
+  # Google Analytics/AdSense連携(OAuth資格情報の保管、GA4 Data API/AdSense Management APIの
+  # レポート取得)の所有権をanalytics-serviceへ移管(#578)。OAuthの資格情報を扱うため、他ドメインから
+  # 分離して保管する。スキーマ・Flywayマイグレーションは専用のlbs_analyticsスキーマ(ADR-0004)で
+  # 本サービスが所有する。
+  analytics:
+    build:
+      context: .
+      dockerfile: services/analytics/Dockerfile
+    container_name: lbs-analytics
+    <<: [*common-service, *actuator-healthcheck]
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_analytics?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: lbs_analytics
+      SPRING_DATASOURCE_PASSWORD: ${LBS_ANALYTICS_DB_PASSWORD}
+      # analytics_credentialsの各暗号化カラム(GAサービスアカウントJSON/AdSenseリフレッシュトークン/
+      # AdSense OAuthクライアントシークレット)の暗号化/復号(CredentialCipher)。全サービス共通の鍵
+      # (legacy-api/ai-serviceと同じ値)。
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
+      # レポート取得可否判定(本番サイトが紐付いているか)・プロジェクトメンバー判定の呼び出し先
+      # (AnalyticsBridgeController、legacy-apiが所有。issue #578)。
+      LEGACY_API_URI: http://api:8080
+      # AdminAuthorizationServiceのrequireProjectMemberOrAdmin・自分自身のuserId解決のため、
+      # 呼び出し元のBearerトークンをそのままidentity-serviceへ転送して問い合わせる
+      # (log-writer(#572)/media-service(#573)/ai-service(#574)と同じ暫定策)。
+      IDENTITY_SERVICE_URI: http://identity:8080
+    depends_on:
+      mysql:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+
   # ログの所有権をlog-writerへ完全移管(#572)。RabbitMQ経由でエラーログ/操作ログ/監査ログの
   # メッセージを受信して書き込むのに加え、読み取りAPI(監査ログ・操作ログ・フロントエンドエラー
   # ログ)もここへ移設した。スキーマ・Flywayマイグレーションは専用の lbs_log スキーマ
@@ -304,6 +342,8 @@ services:
       AI_SERVICE_URI: http://ai:8080
       # 記事本文(posts)・カスタムタグ・記事プレビュー・コンテンツキャッシュのルーティング先(#576)。
       CONTENT_SERVICE_URI: http://content:8080
+      # プロジェクトダッシュボードのGA/AdSenseレポート取得のルーティング先(#578)。
+      ANALYTICS_SERVICE_URI: http://analytics:8080
     depends_on:
       api:
         condition: service_healthy
@@ -318,6 +358,8 @@ services:
       ai:
         condition: service_healthy
       content:
+        condition: service_healthy
+      analytics:
         condition: service_healthy
 
   identity:
