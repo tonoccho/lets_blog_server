@@ -14,6 +14,9 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    // user.deactivatedドメインイベント発行(letsblog.events、issue #580)。プロデューサー側のみを
+    // 担うため、コンシューマー側(spring-retry等)は不要。
+    implementation 'org.springframework.boot:spring-boot-starter-amqp'
     implementation 'org.springframework.security:spring-security-crypto'
     implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0'

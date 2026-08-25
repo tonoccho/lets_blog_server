@@ -13,6 +13,7 @@ import com.letsblog.identity.dto.UserResponse;
 import com.letsblog.identity.dto.UserUpdateRequest;
 import com.letsblog.identity.keycloak.KeycloakAdminClient;
 import com.letsblog.identity.keycloak.KeycloakUserSyncException;
+import com.letsblog.identity.messaging.DomainEventPublisher;
 import com.letsblog.identity.repository.RoleRepository;
 import com.letsblog.identity.repository.UserRepository;
 import org.slf4j.Logger;
@@ -67,17 +68,20 @@ public class UserService {
     private final RoleRepository roleRepository;
     private final CredentialCipher credentialCipher;
     private final KeycloakAdminClient keycloakAdminClient;
+    private final DomainEventPublisher domainEventPublisher;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     public UserService(
             UserRepository userRepository,
             RoleRepository roleRepository,
             CredentialCipher credentialCipher,
-            KeycloakAdminClient keycloakAdminClient) {
+            KeycloakAdminClient keycloakAdminClient,
+            DomainEventPublisher domainEventPublisher) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.credentialCipher = credentialCipher;
         this.keycloakAdminClient = keycloakAdminClient;
+        this.domainEventPublisher = domainEventPublisher;
     }
 
     @Transactional(readOnly = true)
@@ -223,7 +227,10 @@ public class UserService {
             keycloakAdminClient.setEnabled(user.getKeycloakSub(), false);
         }
         user.setEnabled(false);
-        return UserResponse.from(userRepository.save(user));
+        UserResponse response = UserResponse.from(userRepository.save(user));
+        // user.deactivatedイベント(letsblog.events、issue #580)。各サービスの権限キャッシュ破棄用。
+        domainEventPublisher.publishUserDeactivated(user.getId(), user.getKeycloakSub());
+        return response;
     }
 
     /** {@link #deactivate(Long)}の逆操作。無効化されたユーザーを再度有効化する。 */

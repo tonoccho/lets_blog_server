@@ -12,6 +12,7 @@ import com.letsblog.identity.dto.UserProfileUpdateRequest;
 import com.letsblog.identity.dto.UserResponse;
 import com.letsblog.identity.keycloak.KeycloakAdminClient;
 import com.letsblog.identity.keycloak.KeycloakUserSyncException;
+import com.letsblog.identity.messaging.DomainEventPublisher;
 import com.letsblog.identity.repository.RoleRepository;
 import com.letsblog.identity.repository.UserRepository;
 import org.junit.jupiter.api.Test;
@@ -43,11 +44,15 @@ class UserServiceTest {
     @Mock
     private KeycloakAdminClient keycloakAdminClient;
 
+    @Mock
+    private DomainEventPublisher domainEventPublisher;
+
     private final CredentialCipher credentialCipher = new CredentialCipher(
             java.util.Base64.getEncoder().encodeToString(new byte[32]));
 
     private UserService service() {
-        return new UserService(userRepository, roleRepository, credentialCipher, keycloakAdminClient);
+        return new UserService(
+                userRepository, roleRepository, credentialCipher, keycloakAdminClient, domainEventPublisher);
     }
 
     @Test
@@ -217,6 +222,7 @@ class UserServiceTest {
 
         assertFalse(response.enabled());
         verify(keycloakAdminClient).setEnabled("kc-sub-5", false);
+        verify(domainEventPublisher).publishUserDeactivated(1L, "kc-sub-5");
     }
 
     @Test

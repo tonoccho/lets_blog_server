@@ -38,6 +38,13 @@ spring:
     hibernate:
       ddl-auto: validate
     open-in-view: false
+  # user.deactivatedドメインイベント発行(letsblog.events、issue #580)。プロデューサー側のみを
+  # 担うため、リトライ/DLQ設定は不要(コンシューマー側の設定はcontent-service等を参照)。
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
 
 # GitHubトークンの暗号化(user.githubTokenEncrypted)に使う。legacy-apiと同じ物理カラムを
 # 参照するため、legacy-apiと同一のAPP_ENCRYPTION_KEYを共有する必要がある。
