@@ -1,6 +1,7 @@
 package com.letsblog.api.config;
 
 import com.letsblog.api.ai.AiServiceException;
+import com.letsblog.api.client.AnalyticsServiceException;
 import com.letsblog.api.cms.CmsApiException;
 import com.letsblog.api.cms.agent.AgentOperationException;
 import com.letsblog.api.cms.ssh.SshOperationException;
@@ -141,6 +142,13 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(AiServiceGenerationException.class)
     public ResponseEntity<ErrorResponse> handleAiServiceGenerationException(AiServiceGenerationException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /** analytics-serviceへの内部ブリッジ呼び出しの失敗(issue #578、#572/#573/#574と同じ方針)。 */
+    @ExceptionHandler(AnalyticsServiceException.class)
+    public ResponseEntity<ErrorResponse> handleAnalyticsServiceException(AnalyticsServiceException e) {
+        log.warn("analytics-serviceへのブリッジ呼び出しに失敗しました: {}", e.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 
