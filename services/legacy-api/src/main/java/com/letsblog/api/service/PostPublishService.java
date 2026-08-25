@@ -19,6 +19,7 @@ import com.letsblog.api.domain.User;
 import com.letsblog.api.domain.UserSiteAuthor;
 import com.letsblog.api.dto.PostPublishCommand;
 import com.letsblog.api.dto.PostPublishResponse;
+import com.letsblog.api.messaging.DomainEventPublisher;
 import com.letsblog.api.repository.UserRepository;
 import com.letsblog.api.repository.UserSiteAuthorRepository;
 import lombok.extern.slf4j.Slf4j;
@@ -66,6 +67,7 @@ public class PostPublishService {
     private final UserSiteAuthorRepository userSiteAuthorRepository;
     private final ObjectMapper objectMapper;
     private final ImageResizeService imageResizeService;
+    private final DomainEventPublisher domainEventPublisher;
 
     public PostPublishService(SiteService siteService, CmsAdapterFactory cmsAdapterFactory,
                                ContentServiceClient contentServiceClient,
@@ -76,7 +78,8 @@ public class PostPublishService {
                                UserRepository userRepository,
                                UserSiteAuthorRepository userSiteAuthorRepository,
                                ObjectMapper objectMapper,
-                               ImageResizeService imageResizeService) {
+                               ImageResizeService imageResizeService,
+                               DomainEventPublisher domainEventPublisher) {
         this.siteService = siteService;
         this.cmsAdapterFactory = cmsAdapterFactory;
         this.contentServiceClient = contentServiceClient;
@@ -88,6 +91,7 @@ public class PostPublishService {
         this.userSiteAuthorRepository = userSiteAuthorRepository;
         this.objectMapper = objectMapper;
         this.imageResizeService = imageResizeService;
+        this.domainEventPublisher = domainEventPublisher;
     }
 
     @AuditLog(action = AuditLogAction.POST_PUBLISHED, resourceType = "POST")
@@ -164,6 +168,7 @@ public class PostPublishService {
 
         upsertPostRecord(site.getId(), result, command.slug(), imageResult.uploadedImages(),
                 command.categories(), publishScheduledAt);
+        domainEventPublisher.publishPostPublished(site.getId(), projectId, result.id(), result.link(), result.status());
 
         return new PostPublishResponse(result.id(), result.link(), result.status());
     }

@@ -7,6 +7,7 @@ import com.letsblog.media.dto.CreateGeneratedImageRequest;
 import com.letsblog.media.dto.GeneratedImageDetailResponse;
 import com.letsblog.media.dto.GeneratedImageSummaryResponse;
 import com.letsblog.media.dto.UpdateGeneratedImageTagsRequest;
+import com.letsblog.media.messaging.DomainEventPublisher;
 import com.letsblog.media.repository.GeneratedImageRepository;
 import com.letsblog.media.service.GeneratedImageNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,13 +39,15 @@ class GeneratedImageControllerTest {
     private GeneratedImageRepository generatedImageRepository;
     @Mock
     private GeneratedImageStorageService generatedImageStorageService;
+    @Mock
+    private DomainEventPublisher domainEventPublisher;
 
     private GeneratedImageController controller;
 
     @BeforeEach
     void setUp() {
         controller = new GeneratedImageController(
-                generatedImageRepository, generatedImageStorageService, new ObjectMapper());
+                generatedImageRepository, generatedImageStorageService, new ObjectMapper(), domainEventPublisher);
     }
 
     private GeneratedImage buildImage(Long id, String prompt, String tagsJson) {
@@ -175,5 +178,6 @@ class GeneratedImageControllerTest {
         verify(generatedImageRepository).save(savedCaptor.capture());
         assertEquals("1/0001.png", savedCaptor.getValue().getFilePath());
         assertEquals(1L, savedCaptor.getValue().getProjectId());
+        verify(domainEventPublisher).publishImageGenerated(42L, 1L);
     }
 }

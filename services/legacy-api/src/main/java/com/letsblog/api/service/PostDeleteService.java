@@ -7,6 +7,7 @@ import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Site;
+import com.letsblog.api.messaging.DomainEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,12 +22,15 @@ public class PostDeleteService {
     private final SiteService siteService;
     private final CmsAdapterFactory cmsAdapterFactory;
     private final ContentServiceClient contentServiceClient;
+    private final DomainEventPublisher domainEventPublisher;
 
     public PostDeleteService(SiteService siteService, CmsAdapterFactory cmsAdapterFactory,
-                              ContentServiceClient contentServiceClient) {
+                              ContentServiceClient contentServiceClient,
+                              DomainEventPublisher domainEventPublisher) {
         this.siteService = siteService;
         this.cmsAdapterFactory = cmsAdapterFactory;
         this.contentServiceClient = contentServiceClient;
+        this.domainEventPublisher = domainEventPublisher;
     }
 
     @AuditLog(action = AuditLogAction.POST_DELETED, resourceType = "POST")
@@ -39,5 +43,6 @@ public class PostDeleteService {
         cmsAdapter.deletePost(credentials, wpPostId);
 
         contentServiceClient.markTrashed(site.getId(), wpPostId);
+        domainEventPublisher.publishPostDeleted(site.getId(), wpPostId);
     }
 }

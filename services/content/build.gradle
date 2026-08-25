@@ -21,6 +21,9 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-amqp'
+    // letsblog.eventsコンシューマーのリトライ→DLQ(spring.rabbitmq.listener.simple.retry、issue #580)。
+    // Spring BootのBOM(dependency-management)がバージョンを管理しないため明示指定する。
+    implementation 'org.springframework.retry:spring-retry:2.0.11'
     // MediaRenderClient/LegacyApiBridgeClient/IdentityClient/OgpMetadataParser等がcom.fasterxml.jackson.
     // databind.ObjectMapper/JsonNodeを直接使うため明示的に追加する(Boot 4の既定JSONコンバータ・既定
     // ObjectMapperはJackson3系(tools.jackson)に変わったため。legacy-api/media-service/ai-serviceと同じ構成)。

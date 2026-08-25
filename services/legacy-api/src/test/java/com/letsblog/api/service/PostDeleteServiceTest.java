@@ -6,6 +6,7 @@ import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.cms.CmsType;
 import com.letsblog.api.domain.Site;
+import com.letsblog.api.messaging.DomainEventPublisher;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -30,6 +31,8 @@ class PostDeleteServiceTest {
     private ContentServiceClient contentServiceClient;
     @Mock
     private CmsAdapter cmsAdapter;
+    @Mock
+    private DomainEventPublisher domainEventPublisher;
 
     private PostDeleteService service;
 
@@ -38,7 +41,7 @@ class PostDeleteServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new PostDeleteService(siteService, cmsAdapterFactory, contentServiceClient);
+        service = new PostDeleteService(siteService, cmsAdapterFactory, contentServiceClient, domainEventPublisher);
 
         Site site = new Site();
         site.setId(1L);
@@ -56,10 +59,11 @@ class PostDeleteServiceTest {
 
         verify(cmsAdapter).deletePost(credentials, "99");
         verify(contentServiceClient).markTrashed(1L, "99");
+        verify(domainEventPublisher).publishPostDeleted(1L, "99");
     }
 
     @Test
-    void delete_CmsAdapterが例外を投げたらcontent_serviceへの反映は行われない() {
+    void delete_CmsAdapterが例外を投げたらcontent_serviceへの反映もイベント発行も行われない() {
         Mockito.doThrow(new RuntimeException("failed"))
                 .when(cmsAdapter).deletePost(any(), any());
 
@@ -70,5 +74,6 @@ class PostDeleteServiceTest {
         }
 
         verify(contentServiceClient, never()).markTrashed(ArgumentMatchers.anyLong(), ArgumentMatchers.anyString());
+        verify(domainEventPublisher, never()).publishPostDeleted(ArgumentMatchers.anyLong(), ArgumentMatchers.anyString());
     }
 }

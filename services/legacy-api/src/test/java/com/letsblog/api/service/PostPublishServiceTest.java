@@ -11,6 +11,7 @@ import com.letsblog.api.cms.PostResult;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.PostPublishCommand;
 import com.letsblog.api.dto.PostPublishResponse;
+import com.letsblog.api.messaging.DomainEventPublisher;
 import com.letsblog.api.repository.UserRepository;
 import com.letsblog.api.repository.UserSiteAuthorRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -73,6 +74,8 @@ class PostPublishServiceTest {
     private UserSiteAuthorRepository userSiteAuthorRepository;
     @Mock
     private CmsAdapter cmsAdapter;
+    @Mock
+    private DomainEventPublisher domainEventPublisher;
 
     private PostPublishService service;
 
@@ -84,7 +87,7 @@ class PostPublishServiceTest {
         service = new PostPublishService(siteService, cmsAdapterFactory, contentServiceClient,
                 plantUmlEmbedService, plantUmlTagRenderService,
                 projectService, currentActorService, userRepository, userSiteAuthorRepository,
-                new com.fasterxml.jackson.databind.ObjectMapper(), new ImageResizeService());
+                new com.fasterxml.jackson.databind.ObjectMapper(), new ImageResizeService(), domainEventPublisher);
 
         Site site = new Site();
         site.setId(1L);
@@ -167,6 +170,8 @@ class PostPublishServiceTest {
 
         verify(contentServiceClient).upsertPost(
                 eq(1L), eq("55"), eq("my-article"), eq("draft"), any(), any(), any());
+        verify(domainEventPublisher).publishPostPublished(
+                eq(1L), any(), eq("55"), eq("https://example.com/?p=55"), eq("draft"));
     }
 
     @Test

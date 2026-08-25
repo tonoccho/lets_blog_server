@@ -8,6 +8,7 @@ import com.letsblog.media.dto.CreateGeneratedImageRequest;
 import com.letsblog.media.dto.GeneratedImageDetailResponse;
 import com.letsblog.media.dto.GeneratedImageSummaryResponse;
 import com.letsblog.media.dto.UpdateGeneratedImageTagsRequest;
+import com.letsblog.media.messaging.DomainEventPublisher;
 import com.letsblog.media.repository.GeneratedImageRepository;
 import com.letsblog.media.service.GeneratedImageNotFoundException;
 import jakarta.validation.Valid;
@@ -41,13 +42,16 @@ public class GeneratedImageController {
     private final GeneratedImageRepository generatedImageRepository;
     private final GeneratedImageStorageService generatedImageStorageService;
     private final ObjectMapper objectMapper;
+    private final DomainEventPublisher domainEventPublisher;
 
     public GeneratedImageController(GeneratedImageRepository generatedImageRepository,
                                      GeneratedImageStorageService generatedImageStorageService,
-                                     ObjectMapper objectMapper) {
+                                     ObjectMapper objectMapper,
+                                     DomainEventPublisher domainEventPublisher) {
         this.generatedImageRepository = generatedImageRepository;
         this.generatedImageStorageService = generatedImageStorageService;
         this.objectMapper = objectMapper;
+        this.domainEventPublisher = domainEventPublisher;
     }
 
     /**
@@ -102,7 +106,9 @@ public class GeneratedImageController {
         image.setMimeType(request.mimeType());
         image.setProvider(request.provider());
         image.setTagsJson(request.tagsJson());
-        return toDetailResponse(generatedImageRepository.save(image));
+        GeneratedImage saved = generatedImageRepository.save(image);
+        domainEventPublisher.publishImageGenerated(saved.getId(), saved.getProjectId());
+        return toDetailResponse(saved);
     }
 
     /** 自動生成されたタグを手動で編集・追加する(issue #281)。 */

@@ -212,12 +212,15 @@ services:
       # ため、呼び出し元のBearerトークンをそのままidentity-serviceへ転送して問い合わせる
       # (log-writer(#572)/media-service(#573)と同じ暫定策)。
       IDENTITY_SERVICE_URI: http://identity:8080
+      <<: *rabbitmq-env
     depends_on:
       mysql:
         condition: service_healthy
       keycloak:
         condition: service_healthy
       identity:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   # 記事本文(posts)・カスタムタグ・Markdownレンダリング・記事プレビュー・ブログカード/Amazonタグの
@@ -287,12 +290,15 @@ services:
       # 呼び出し元のBearerトークンをそのままidentity-serviceへ転送して問い合わせる
       # (log-writer(#572)/media-service(#573)/ai-service(#574)と同じ暫定策)。
       IDENTITY_SERVICE_URI: http://identity:8080
+      <<: *rabbitmq-env
     depends_on:
       mysql:
         condition: service_healthy
       keycloak:
         condition: service_healthy
       identity:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   # ログの所有権をlog-writerへ完全移管(#572)。RabbitMQ経由でエラーログ/操作ログ/監査ログの
@@ -377,10 +383,13 @@ services:
       # (keycloak/realm-export.jsonで定義済み)。他の値(token-uri等)はコンテナ間の既定URLで
       # 足りるためservices/identity/src/main/resources/application.ymlの既定値に委ねる。
       KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
+      <<: *rabbitmq-env
     depends_on:
       mysql:
         condition: service_healthy
       keycloak:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   rabbitmq:
