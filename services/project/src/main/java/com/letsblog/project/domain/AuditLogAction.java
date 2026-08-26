@@ -6,7 +6,16 @@ package com.letsblog.project.domain;
  */
 public enum AuditLogAction {
     SSH_KEY_PAIR_CREATED("SSH鍵ペア作成"),
-    SSH_KEY_PAIR_DELETED("SSH鍵ペア削除");
+    SSH_KEY_PAIR_DELETED("SSH鍵ペア削除"),
+    SITE_REGISTERED("サイト登録"),
+    SITE_DELETED("サイト削除"),
+    WORDPRESS_PROVISIONED("WordPress自動構築"),
+    WORDPRESS_ADOPTED("既存WordPressサイト取り込み"),
+    PROJECT_CREATED("プロジェクト作成"),
+    PROJECT_UPDATED("プロジェクト更新"),
+    PROJECT_DELETED("プロジェクト削除"),
+    PROJECT_ENVIRONMENT_BOUND("プロジェクト環境紐付け"),
+    PROJECT_ENVIRONMENT_UNBOUND("プロジェクト環境切離し");
 
     private final String displayName;
 

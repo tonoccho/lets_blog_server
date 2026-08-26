@@ -1,7 +1,7 @@
-// project-service (#577 stage 1): 名前をつけて保存・管理するSSH鍵ペア(Ed25519)、
+// project-service (#577): stage1で名前をつけて保存・管理するSSH鍵ペア(Ed25519)、
 // [toc]/[blogcard]/[amazon]組み込みタグのデザインカスタマイズ(プロジェクト単位)をlegacy-apiから
-// 抽出した。より大きなProject/Site(CMS/WordPress自動プロビジョニング)ドメインは後続stageの対象で、
-// このstageではまだ実装しない。スキーマ分離(lbs_project)により他サービスから独立する。
+// 抽出した。stage2でProject/Site(CMS/WordPress自動プロビジョニング・環境同期)ドメインを追加移設した。
+// スキーマ分離(lbs_project)により他サービスから独立する。
 plugins {
     id 'java'
     id 'org.springframework.boot' version '4.1.0'

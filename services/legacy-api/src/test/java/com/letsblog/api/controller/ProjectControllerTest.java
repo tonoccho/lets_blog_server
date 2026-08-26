@@ -10,31 +10,24 @@ import com.letsblog.api.dto.ApplyToEnvironmentRequest;
 import com.letsblog.api.dto.DeleteSlugRequest;
 import com.letsblog.api.dto.EditTermRequest;
 import com.letsblog.api.dto.PostComparisonPage;
-import com.letsblog.api.dto.ProjectCreateRequest;
-import com.letsblog.api.dto.ProjectEnvironmentBindRequest;
 import com.letsblog.api.dto.ProjectResponse;
-import com.letsblog.api.dto.ProjectUpdateRequest;
 import com.letsblog.api.dto.ProjectUserResponse;
 import com.letsblog.api.dto.ReconcileStateRequest;
 import com.letsblog.api.dto.StatusComparisonPage;
-import com.letsblog.api.dto.SyncEnvironmentRequest;
 import com.letsblog.api.dto.TermComparisonPage;
 import com.letsblog.api.dto.TermNameRequest;
 import com.letsblog.api.dto.UpdateArticleImageResizeDefaultRequest;
 import com.letsblog.api.dto.UpdateImageContentFilterSettingsRequest;
 import com.letsblog.api.dto.UpdateImageGenerationPromptDefaultsRequest;
 import com.letsblog.api.dto.UpdateImageGenerationSizeDefaultsRequest;
-import com.letsblog.api.dto.UpdateMasterEnvironmentRequest;
 import com.letsblog.api.dto.UpdatePostStatusRequest;
 import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
-import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
 import com.letsblog.api.dto.UpdateProjectUserRequest;
 import com.letsblog.api.service.AdminAuthorizationService;
 import com.letsblog.api.service.BulkManagementService;
 import com.letsblog.api.service.CurrentActorService;
 import com.letsblog.api.service.ForbiddenException;
 import com.letsblog.api.service.PluginThemeComparisonService;
-import com.letsblog.api.service.ProjectEnvironmentSyncService;
 import com.letsblog.api.service.ProjectService;
 import com.letsblog.api.service.ProjectUserSyncService;
 import com.letsblog.api.service.TermComparisonService;
@@ -54,6 +47,15 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * issue #577 stage2でプロジェクトのCRUD・環境紐付け・環境同期がproject-serviceへ移設されたことに伴い、
+ * それらのコントローラメソッド(create/get/update/delete/bindEnvironment/unbindEnvironment/
+ * updateMasterEnvironment/updateGithubRepository/updateCssSelectorPrefix/
+ * updateImageGenerationPromptDefaults/updateImageGenerationSizeDefaults/
+ * updateArticleImageResizeDefault/updateImageContentFilterSettings/syncEnvironment)に対応する
+ * テストは削除した(それらのテストはservices/project側へ移設)。一括管理・プロジェクトユーザー管理の
+ * テストのみ残す。
+ */
 @ExtendWith(MockitoExtension.class)
 class ProjectControllerTest {
 
@@ -62,9 +64,6 @@ class ProjectControllerTest {
 
     @Mock
     private ProjectUserSyncService projectUserSyncService;
-
-    @Mock
-    private ProjectEnvironmentSyncService projectEnvironmentSyncService;
 
     @Mock
     private BulkManagementService bulkManagementService;
@@ -89,7 +88,7 @@ class ProjectControllerTest {
 
     private ProjectController controller() {
         return new ProjectController(
-                projectService, projectUserSyncService, projectEnvironmentSyncService, bulkManagementService,
+                projectService, projectUserSyncService, bulkManagementService,
                 termComparisonService, pluginThemeComparisonService, postComparisonService,
                 adminAuthorizationService, currentActorService,
                 mediaGeneratedImageClient);
@@ -115,58 +114,94 @@ class ProjectControllerTest {
     }
 
     @Test
-    void create_admin権限があれば作成できる() {
+    void updateCssSelectorPrefix_admin権限があれば更新できる() {
         ProjectController controller = controller();
-        ProjectCreateRequest request = new ProjectCreateRequest("テスト", "test");
-        when(projectService.createProject("テスト", "test")).thenReturn(buildResponse());
+        UpdateProjectCssSelectorPrefixRequest request = new UpdateProjectCssSelectorPrefixRequest("prefix");
+        when(projectService.updateCssSelectorPrefix(1L, request)).thenReturn(buildResponse());
 
-        ResponseEntity<ProjectResponse> response = controller.create(request);
+        controller.updateCssSelectorPrefix(1L, request);
 
-        assertEquals(201, response.getStatusCode().value());
         verify(adminAuthorizationService).requireAdmin();
+        verify(projectService).updateCssSelectorPrefix(1L, request);
     }
 
     @Test
-    void create_admin権限がなければForbidden() {
+    void updateCssSelectorPrefix_admin権限がなければForbidden() {
         ProjectController controller = controller();
-        ProjectCreateRequest request = new ProjectCreateRequest("テスト", "test");
+        UpdateProjectCssSelectorPrefixRequest request = new UpdateProjectCssSelectorPrefixRequest("prefix");
         doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
 
-        assertThrows(ForbiddenException.class, () -> controller.create(request));
+        assertThrows(ForbiddenException.class, () -> controller.updateCssSelectorPrefix(1L, request));
     }
 
     @Test
-    void get_権限チェックなしで取得できる() {
+    void updateImageGenerationPromptDefaults_admin権限があれば更新できる() {
         ProjectController controller = controller();
-        when(projectService.getProject(1L)).thenReturn(buildResponse());
+        UpdateImageGenerationPromptDefaultsRequest request =
+                new UpdateImageGenerationPromptDefaultsRequest("negative", "quality");
+        when(projectService.updateImageGenerationPromptDefaults(1L, request)).thenReturn(buildResponse());
 
-        ProjectResponse response = controller.get(1L);
-
-        assertEquals("test", response.slug());
-    }
-
-    @Test
-    void update_admin権限があれば更新できる() {
-        ProjectController controller = controller();
-        ProjectUpdateRequest request = new ProjectUpdateRequest("新しい名前");
-        when(projectService.updateProject(1L, "新しい名前")).thenReturn(buildResponse());
-
-        controller.update(1L, request);
+        controller.updateImageGenerationPromptDefaults(1L, request);
 
         verify(adminAuthorizationService).requireAdmin();
-        verify(projectService).updateProject(1L, "新しい名前");
+        verify(projectService).updateImageGenerationPromptDefaults(1L, request);
     }
 
     @Test
-    void updateMasterEnvironment_admin権限があれば更新できる() {
+    void updateImageGenerationPromptDefaults_admin権限がなければForbidden() {
         ProjectController controller = controller();
-        UpdateMasterEnvironmentRequest request = new UpdateMasterEnvironmentRequest("production");
-        when(projectService.updateMasterEnvironment(1L, "production")).thenReturn(buildResponse());
+        UpdateImageGenerationPromptDefaultsRequest request =
+                new UpdateImageGenerationPromptDefaultsRequest("negative", "quality");
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
 
-        controller.updateMasterEnvironment(1L, request);
+        assertThrows(ForbiddenException.class,
+                () -> controller.updateImageGenerationPromptDefaults(1L, request));
+    }
+
+    @Test
+    void updateImageGenerationSizeDefaults_admin権限があれば更新できる() {
+        ProjectController controller = controller();
+        UpdateImageGenerationSizeDefaultsRequest request =
+                new UpdateImageGenerationSizeDefaultsRequest(512, 512);
+        when(projectService.updateImageGenerationSizeDefaults(1L, request)).thenReturn(buildResponse());
+
+        controller.updateImageGenerationSizeDefaults(1L, request);
 
         verify(adminAuthorizationService).requireAdmin();
-        verify(projectService).updateMasterEnvironment(1L, "production");
+        verify(projectService).updateImageGenerationSizeDefaults(1L, request);
+    }
+
+    @Test
+    void updateImageGenerationSizeDefaults_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        UpdateImageGenerationSizeDefaultsRequest request =
+                new UpdateImageGenerationSizeDefaultsRequest(512, 512);
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class,
+                () -> controller.updateImageGenerationSizeDefaults(1L, request));
+    }
+
+    @Test
+    void updateArticleImageResizeDefault_admin権限があれば更新できる() {
+        ProjectController controller = controller();
+        UpdateArticleImageResizeDefaultRequest request = new UpdateArticleImageResizeDefaultRequest(1200);
+        when(projectService.updateArticleImageResizeDefault(1L, request)).thenReturn(buildResponse());
+
+        controller.updateArticleImageResizeDefault(1L, request);
+
+        verify(adminAuthorizationService).requireAdmin();
+        verify(projectService).updateArticleImageResizeDefault(1L, request);
+    }
+
+    @Test
+    void updateArticleImageResizeDefault_admin権限がなければForbidden() {
+        ProjectController controller = controller();
+        UpdateArticleImageResizeDefaultRequest request = new UpdateArticleImageResizeDefaultRequest(1200);
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class,
+                () -> controller.updateArticleImageResizeDefault(1L, request));
     }
 
     @Test
@@ -183,57 +218,14 @@ class ProjectControllerTest {
     }
 
     @Test
-    void delete_admin権限があれば削除できる() {
+    void updateImageContentFilterSettings_admin権限がなければForbidden() {
         ProjectController controller = controller();
-
-        ResponseEntity<Void> response = controller.delete(1L);
-
-        assertEquals(204, response.getStatusCode().value());
-        verify(projectService).deleteProject(1L);
-    }
-
-    @Test
-    void bindEnvironment_admin権限があれば紐付できる() {
-        ProjectController controller = controller();
-        ProjectEnvironmentBindRequest request = new ProjectEnvironmentBindRequest("local", 10L);
-        when(projectService.bindEnvironment(1L, "local", 10L)).thenReturn(buildResponse());
-
-        controller.bindEnvironment(1L, request);
-
-        verify(adminAuthorizationService).requireAdmin();
-        verify(projectService).bindEnvironment(1L, "local", 10L);
-    }
-
-    @Test
-    void unbindEnvironment_admin権限があれば切離しできる() {
-        ProjectController controller = controller();
-        when(projectService.unbindEnvironment(1L, "local")).thenReturn(buildResponse());
-
-        controller.unbindEnvironment(1L, "local");
-
-        verify(adminAuthorizationService).requireAdmin();
-        verify(projectService).unbindEnvironment(1L, "local");
-    }
-
-    @Test
-    void syncEnvironment_admin権限があれば同期できる() {
-        ProjectController controller = controller();
-        SyncEnvironmentRequest request = new SyncEnvironmentRequest("local", "test", List.of("themes", "db"));
-
-        ResponseEntity<Void> response = controller.syncEnvironment(1L, request);
-
-        assertEquals(204, response.getStatusCode().value());
-        verify(adminAuthorizationService).requireAdmin();
-        verify(projectEnvironmentSyncService).sync(1L, "local", "test", List.of("themes", "db"));
-    }
-
-    @Test
-    void syncEnvironment_admin権限がなければForbidden() {
-        ProjectController controller = controller();
-        SyncEnvironmentRequest request = new SyncEnvironmentRequest("local", "test", List.of("db"));
+        UpdateImageContentFilterSettingsRequest request =
+                new UpdateImageContentFilterSettingsRequest(false, true, true);
         doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
 
-        assertThrows(ForbiddenException.class, () -> controller.syncEnvironment(1L, request));
+        assertThrows(ForbiddenException.class,
+                () -> controller.updateImageContentFilterSettings(1L, request));
     }
 
     @Test
@@ -476,110 +468,6 @@ class ProjectControllerTest {
     }
 
     // ---- issue #568: 認可マトリクス整備に伴う、requireAdmin()を呼ぶ全メソッドのForbiddenパス網羅 ----
-
-    @Test
-    void update_admin権限がなければForbidden() {
-        ProjectController controller = controller();
-        ProjectUpdateRequest request = new ProjectUpdateRequest("新しい名前");
-        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
-
-        assertThrows(ForbiddenException.class, () -> controller.update(1L, request));
-    }
-
-    @Test
-    void delete_admin権限がなければForbidden() {
-        ProjectController controller = controller();
-        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
-
-        assertThrows(ForbiddenException.class, () -> controller.delete(1L));
-    }
-
-    @Test
-    void bindEnvironment_admin権限がなければForbidden() {
-        ProjectController controller = controller();
-        ProjectEnvironmentBindRequest request = new ProjectEnvironmentBindRequest("local", 10L);
-        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
-
-        assertThrows(ForbiddenException.class, () -> controller.bindEnvironment(1L, request));
-    }
-
-    @Test
-    void unbindEnvironment_admin権限がなければForbidden() {
-        ProjectController controller = controller();
-        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
-
-        assertThrows(ForbiddenException.class, () -> controller.unbindEnvironment(1L, "local"));
-    }
-
-    @Test
-    void updateMasterEnvironment_admin権限がなければForbidden() {
-        ProjectController controller = controller();
-        UpdateMasterEnvironmentRequest request = new UpdateMasterEnvironmentRequest("production");
-        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
-
-        assertThrows(ForbiddenException.class, () -> controller.updateMasterEnvironment(1L, request));
-    }
-
-    @Test
-    void updateGithubRepository_admin権限がなければForbidden() {
-        ProjectController controller = controller();
-        UpdateProjectGithubRepositoryRequest request = new UpdateProjectGithubRepositoryRequest("owner/repo");
-        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
-
-        assertThrows(ForbiddenException.class, () -> controller.updateGithubRepository(1L, request));
-    }
-
-    @Test
-    void updateCssSelectorPrefix_admin権限がなければForbidden() {
-        ProjectController controller = controller();
-        UpdateProjectCssSelectorPrefixRequest request = new UpdateProjectCssSelectorPrefixRequest("prefix");
-        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
-
-        assertThrows(ForbiddenException.class, () -> controller.updateCssSelectorPrefix(1L, request));
-    }
-
-    @Test
-    void updateImageGenerationPromptDefaults_admin権限がなければForbidden() {
-        ProjectController controller = controller();
-        UpdateImageGenerationPromptDefaultsRequest request =
-                new UpdateImageGenerationPromptDefaultsRequest("negative", "quality");
-        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
-
-        assertThrows(ForbiddenException.class,
-                () -> controller.updateImageGenerationPromptDefaults(1L, request));
-    }
-
-    @Test
-    void updateImageGenerationSizeDefaults_admin権限がなければForbidden() {
-        ProjectController controller = controller();
-        UpdateImageGenerationSizeDefaultsRequest request =
-                new UpdateImageGenerationSizeDefaultsRequest(512, 512);
-        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
-
-        assertThrows(ForbiddenException.class,
-                () -> controller.updateImageGenerationSizeDefaults(1L, request));
-    }
-
-    @Test
-    void updateArticleImageResizeDefault_admin権限がなければForbidden() {
-        ProjectController controller = controller();
-        UpdateArticleImageResizeDefaultRequest request = new UpdateArticleImageResizeDefaultRequest(1200);
-        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
-
-        assertThrows(ForbiddenException.class,
-                () -> controller.updateArticleImageResizeDefault(1L, request));
-    }
-
-    @Test
-    void updateImageContentFilterSettings_admin権限がなければForbidden() {
-        ProjectController controller = controller();
-        UpdateImageContentFilterSettingsRequest request =
-                new UpdateImageContentFilterSettingsRequest(false, true, true);
-        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
-
-        assertThrows(ForbiddenException.class,
-                () -> controller.updateImageContentFilterSettings(1L, request));
-    }
 
     @Test
     void runBulkOperationUpload_admin権限がなければForbidden() {

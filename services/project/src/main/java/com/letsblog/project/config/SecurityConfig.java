@@ -12,6 +12,11 @@ import org.springframework.security.web.SecurityFilterChain;
  * SecurityConfigをテンプレートにしている(#563/#572/#573/#574/#576)。認可判定そのものは、まだ簡易な
  * もの(全経路permitAll、JWTが提示されていればその検証のみ行う)に留める。gatewayが実際の
  * エンドユーザートラフィックの検証を担う想定(他サービスと同じ二段構え)。
+ *
+ * <p>{@code /api/internal/**}(SiteCredentialsInternalController等、サービス間専用のブリッジAPI)は
+ * サイトのCMS認証情報のようにセンシティブな内容を返すため、匿名アクセスを拒否し有効なJWTを必須とする
+ * (issue #577受入基準の「サービス間認証付き」の最小限の実装。呼び出し元が実際にサービス自身か
+ * ユーザーかまでは検証しない。この区別の強制はB10(#568)またはpublishing-service抽出時のfollow-up)。
  */
 @Configuration
 @EnableWebSecurity
@@ -20,7 +25,9 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http.csrf(csrf -> csrf.disable())
-                .authorizeHttpRequests(authorize -> authorize.anyRequest().permitAll())
+                .authorizeHttpRequests(authorize -> authorize
+                        .requestMatchers("/api/internal/**").authenticated()
+                        .anyRequest().permitAll())
                 .oauth2ResourceServer(
                         oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())))
                 .build();

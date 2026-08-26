@@ -326,9 +326,14 @@ services:
       # ため、呼び出し元のBearerトークンをそのままidentity-serviceへ転送して問い合わせる
       # (log-writer/media-service/ai-service/content-serviceと同じ暫定策)。
       IDENTITY_SERVICE_URI: http://identity:8080
-      # ssh_key_pairs.private_key_encryptedの暗号化/復号(CredentialCipher、lbs-common)。
-      # 全サービス共通のAES-256-GCM鍵。
+      # ssh_key_pairs.private_key_encrypted / sites.credentials_encryptedの暗号化/復号
+      # (CredentialCipher、lbs-common)。全サービス共通のAES-256-GCM鍵。
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
+      # 常駐wordpressコンテナ内の内部限定プロビジョニングエージェント(issue #577 stage2)。
+      # apiと同じ値(同一エージェントを共有する)。wordpressにヘルスチェックが無いため、apiと同様
+      # 起動時の依存関係(depends_on)には含めず、実行時呼び出し先としてのみ設定する。
+      WORDPRESS_PROVISION_BASE_URL: http://wordpress:9000
+      WP_PROVISION_TOKEN: ${WP_PROVISION_TOKEN}
     depends_on:
       mysql:
         condition: service_healthy

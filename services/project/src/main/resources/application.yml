@@ -56,9 +56,14 @@ app:
   identity-service-uri: ${IDENTITY_SERVICE_URI:http://identity:8080}
   # 組み込みタグのデザインCSS/HTMLテンプレートのAI生成(TagDesignGenerationService)の呼び出し先。
   ai-service-uri: ${AI_SERVICE_URI:http://api:8080}
-  # ssh_key_pairs.private_key_encryptedの暗号化/復号(CredentialCipher、lbs-common)。
-  # 全サービス共通のAES-256-GCM鍵(legacy-api/ai-service/media-serviceと同じ値を使う)。
+  # ssh_key_pairs.private_key_encrypted / sites.credentials_encryptedの暗号化/復号(CredentialCipher、
+  # lbs-common)。全サービス共通のAES-256-GCM鍵(legacy-api/ai-service/media-serviceと同じ値を使う)。
   encryption-key: ${APP_ENCRYPTION_KEY:}
+  # 常駐wordpressコンテナ内の内部限定プロビジョニングエージェント(issue #577 stage2、
+  # WordPressProvisioningClient/WordPressSyncClient/WordPressAgentPluginsClientが使う)。
+  # legacy-apiと同じ値(同一エージェントを共有する)。
+  wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
+  wordpress-provision-token: ${WP_PROVISION_TOKEN:}
 
 # KeycloakのJWT検証。identity-service/log-writer/media-service/ai-service/content-serviceの
 # SecurityConfig/JwtDecoderConfigと同じ理由により、issuer-uriによる自動設定は使わずJWKS取得先と
