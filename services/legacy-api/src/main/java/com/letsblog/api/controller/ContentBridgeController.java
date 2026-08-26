@@ -79,7 +79,7 @@ public class ContentBridgeController {
     }
 
     /**
-     * TocStyleRenderService/BlogCardTagRenderService/AmazonTagRenderService(content-service)が使う、
+     * TocStyleRenderService/BlogCardTagRenderService/AmazonTagRenderService(content-service)が使っていた、
      * [toc]/[blogcard]/[amazon]組み込みタグのデザイン(色+カスタムHTMLテンプレート)。
      * tag_design_settingsドメインの所有権はproject-serviceへ移設済み(issue #577 stage1)のため、
      * {@link ProjectServiceClient}経由でproject-serviceへ問い合わせる(issue #577 stage3)。
