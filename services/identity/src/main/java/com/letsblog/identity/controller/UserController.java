@@ -54,8 +54,10 @@ public class UserController {
     @Operation(summary = "全ユーザー一覧を取得", description = "システムに登録されているすべてのユーザーを取得します")
     @ApiResponse(responseCode = "200", description = "ユーザー一覧を返す")
     @ApiResponse(responseCode = "401", description = "認証ヘッダが無効")
+    @ApiResponse(responseCode = "403", description = "admin権限がありません")
     @GetMapping
     public List<UserResponse> list() {
+        adminAuthorizationService.requireAdmin();
         return userService.list();
     }
 
