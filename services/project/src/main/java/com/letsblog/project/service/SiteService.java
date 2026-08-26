@@ -340,6 +340,21 @@ public class SiteService {
         }
     }
 
+    /**
+     * サイトのCMS接続情報(sshKeyPairId参照を実際の秘密鍵PEMへ解決済み、すぐ使える状態)を返す
+     * (issue #577受入基準: サイトのCMS認証情報の取得APIをpublishing-serviceから利用できるようにする)。
+     * {@link com.letsblog.project.controller.SiteCredentialsInternalController}経由で内部ブリッジとして公開する。
+     */
+    @Transactional(readOnly = true)
+    public ResolvedSiteCredentials getResolvedCredentials(String siteKey) {
+        Site site = getBySiteKey(siteKey);
+        Map<String, String> credentials = resolveSshKeyMaterial(getRawCredentials(site));
+        return new ResolvedSiteCredentials(site.getId(), site.getCmsType(), credentials);
+    }
+
+    public record ResolvedSiteCredentials(Long siteId, CmsType cmsType, Map<String, String> credentials) {
+    }
+
     /** SSH接続が設定されているサイトに限り、wp-cliをリモートへインストールする。 */
     @Transactional(readOnly = true)
     public WpCliInstallResult installWpCli(Long id) {

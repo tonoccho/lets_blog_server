@@ -141,6 +141,25 @@ class SiteServiceTest {
     }
 
     @Test
+    void getResolvedCredentials_sshKeyPairId参照を解決して返す() {
+        Site site = new Site();
+        site.setId(1L);
+        site.setSiteKey("my-site");
+        site.setCmsType(CmsType.WORDPRESS);
+        site.setCredentialsEncrypted(credentialCipher.encrypt(
+                "{\"baseUrl\":\"https://x.example.com\",\"transport\":\"SSH\",\"sshKeyPairId\":\"1\"}"));
+        when(siteRepository.findBySiteKey("my-site")).thenReturn(Optional.of(site));
+        SshKeyPair keyPair = new SshKeyPair("deploy-key", "comment", "ssh-ed25519 AAAA...",
+                credentialCipher.encrypt("PRIVATE-PEM"));
+        when(sshKeyPairRepository.findById(1L)).thenReturn(Optional.of(keyPair));
+
+        SiteService.ResolvedSiteCredentials result = service().getResolvedCredentials("my-site");
+
+        assertEquals(1L, result.siteId());
+        assertEquals("PRIVATE-PEM", result.credentials().get("sshPrivateKeyPem"));
+    }
+
+    @Test
     void getBySiteKey_存在しなければNotFound() {
         when(siteRepository.findBySiteKey("missing")).thenReturn(Optional.empty());
 
