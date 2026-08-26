@@ -1,15 +1,12 @@
 package com.letsblog.api.controller;
 
-import com.letsblog.api.domain.EmbedTagType;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.RoleOptionResponse;
-import com.letsblog.api.dto.TagDesignColors;
 import com.letsblog.api.repository.ProjectUserRepository;
 import com.letsblog.api.repository.SiteRepository;
 import com.letsblog.api.service.ProjectService;
 import com.letsblog.api.service.RoleService;
-import com.letsblog.api.service.TagDesignSettingService;
 import java.util.List;
 import java.util.stream.Collectors;
 import org.springframework.http.ResponseEntity;
@@ -21,33 +18,34 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * content-service向けの内部ブリッジ(issue #576)。CustomTagService/RenderedContentWrapperService
  * (cssSelectorPrefix解決フォールバック)、AdminAuthorizationService(プロジェクトメンバー判定)、
- * MetadataController(ロール一覧)、PostController(site key⇔id解決、サイト名一覧)、
- * TocStyleRenderService/BlogCardTagRenderService/AmazonTagRenderService(組み込みタグのデザイン色/
- * カスタムHTMLテンプレート)は、いずれもProject/Site/project_user/roles/tag_design_settings
- * (project-service/publishing-serviceがまだ抽出されていないドメイン)への依存が強いため、
- * content-service側で直接持たず、このブリッジ経由でlegacy-apiへ問い合わせる(media-service(#573)の
- * CmsBridgeController/ai-service(#574)のAiBridgeControllerと同じ方針。認可は呼び出し元
- * (content-service)が既にrequireAdmin/requireProjectMemberOrAdmin等を済ませたリクエストの
- * トークンをそのまま転送してもらう想定で、ここでは追加の認可チェックは行わない)。
+ * MetadataController(ロール一覧)、PostController(site key⇔id解決、サイト名一覧)は、いずれも
+ * Project/Site/project_user/roles(project-service/publishing-serviceがまだ抽出されていない
+ * ドメイン)への依存が強いため、content-service側で直接持たず、このブリッジ経由でlegacy-apiへ
+ * 問い合わせる(media-service(#573)のCmsBridgeController/ai-service(#574)のAiBridgeControllerと
+ * 同じ方針。認可は呼び出し元(content-service)が既にrequireAdmin/requireProjectMemberOrAdmin等を
+ * 済ませたリクエストのトークンをそのまま転送してもらう想定で、ここでは追加の認可チェックは行わない)。
+ *
+ * <p>組み込みタグ([toc]/[blogcard]/[amazon])のデザイン色/カスタムHTMLテンプレート
+ * (TocStyleRenderService/BlogCardTagRenderService/AmazonTagRenderService向け)は、tag_design_settings
+ * ドメインがproject-serviceへ抽出された(issue #577 stage 1)ことに伴い、このブリッジからは提供しない。
+ * TODO(#577 stage 3): content-serviceのLegacyApiBridgeClient#resolveTagDesign相当を
+ * project-service直接呼び出しへ切り替え、legacy-api側のこのエンドポイントを削除する。
  */
 @RestController
 public class ContentBridgeController {
 
     private final ProjectUserRepository projectUserRepository;
     private final RoleService roleService;
-    private final TagDesignSettingService tagDesignSettingService;
     private final ProjectService projectService;
     private final SiteRepository siteRepository;
 
     public ContentBridgeController(
             ProjectUserRepository projectUserRepository,
             RoleService roleService,
-            TagDesignSettingService tagDesignSettingService,
             ProjectService projectService,
             SiteRepository siteRepository) {
         this.projectUserRepository = projectUserRepository;
         this.roleService = roleService;
-        this.tagDesignSettingService = tagDesignSettingService;
         this.projectService = projectService;
         this.siteRepository = siteRepository;
     }
@@ -69,17 +67,19 @@ public class ContentBridgeController {
     }
 
     /**
-     * TocStyleRenderService/BlogCardTagRenderService/AmazonTagRenderService(content-service)が使う、
+     * TocStyleRenderService/BlogCardTagRenderService/AmazonTagRenderService(content-service)が使っていた、
      * [toc]/[blogcard]/[amazon]組み込みタグのデザイン(色+カスタムHTMLテンプレート)。
+     *
+     * <p>tag_design_settingsドメインはproject-serviceへ移設された(issue #577 stage 1)ため、
+     * legacy-api側にはもう実データが無い。TODO(#577 stage 3): content-service側の呼び出し元を
+     * project-serviceへの直接ブリッジに切り替えた上で、このエンドポイント自体を削除する。
+     * それまでの間は、誤って空のデフォルト値を返して不整合を隠すよりも、明示的に失敗させる。
      */
     @GetMapping("/api/internal/content/tag-design/{tagType}")
     public TagDesignResponse tagDesign(@PathVariable String tagType, @RequestParam Long projectId) {
-        EmbedTagType type = EmbedTagType.valueOf(tagType);
-        TagDesignColors colors = tagDesignSettingService.resolveColors(projectId, type);
-        String htmlTemplate = tagDesignSettingService.resolveHtmlTemplate(projectId, type);
-        return new TagDesignResponse(
-                colors.backgroundColor(), colors.textColor(), colors.accentColor(), colors.customCss(),
-                htmlTemplate);
+        throw new UnsupportedOperationException(
+                "tag-design-settingsはproject-serviceへ移設されました(#577)。"
+                        + "呼び出し元をproject-serviceへの直接ブリッジに切り替えてください(#577 stage 3)。");
     }
 
     public record SlugResponse(String slug) {
