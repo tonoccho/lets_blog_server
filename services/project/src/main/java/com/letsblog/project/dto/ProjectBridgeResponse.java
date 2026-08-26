@@ -1,6 +1,7 @@
 package com.letsblog.project.dto;
 
 import com.letsblog.project.domain.Project;
+import java.time.LocalDateTime;
 
 /**
  * legacy-apiに残るドメイン(一括管理/環境間比較・投稿publish・記事プレビュー等、CMSアダプタ/SSH実行への
@@ -9,12 +10,13 @@ import com.letsblog.project.domain.Project;
  */
 public record ProjectBridgeResponse(
         Long id, String name, String slug, String masterEnvironment,
-        Long localSiteId, Long testSiteId, Long productionSiteId, String githubRepository) {
+        Long localSiteId, Long testSiteId, Long productionSiteId, String githubRepository,
+        LocalDateTime createdAt, LocalDateTime updatedAt) {
 
     public static ProjectBridgeResponse from(Project project) {
         return new ProjectBridgeResponse(
                 project.getId(), project.getName(), project.getSlug(), project.getMasterEnvironment(),
                 project.getLocalSiteId(), project.getTestSiteId(), project.getProductionSiteId(),
-                project.getGithubRepository());
+                project.getGithubRepository(), project.getCreatedAt(), project.getUpdatedAt());
     }
 }

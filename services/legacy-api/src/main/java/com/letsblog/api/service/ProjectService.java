@@ -311,6 +311,8 @@ public class ProjectService {
         project.setTestSiteId(bridge.testSiteId());
         project.setProductionSiteId(bridge.productionSiteId());
         project.setGithubRepository(bridge.githubRepository());
+        project.setCreatedAt(bridge.createdAt());
+        project.setUpdatedAt(bridge.updatedAt());
         return project;
     }
 }

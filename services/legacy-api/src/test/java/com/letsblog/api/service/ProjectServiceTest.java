@@ -20,6 +20,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.Set;
 
@@ -63,7 +64,8 @@ class ProjectServiceTest {
     }
 
     private ProjectServiceClient.ProjectBridge buildProjectBridge(Long id, String slug) {
-        return new ProjectServiceClient.ProjectBridge(id, "テストプロジェクト", slug, "test", null, null, null, null);
+        LocalDateTime now = LocalDateTime.now();
+        return new ProjectServiceClient.ProjectBridge(id, "テストプロジェクト", slug, "test", null, null, null, null, now, now);
     }
 
     /** ProjectServiceのtoResponse()はimage/content設定を都度取得するため、既定でempty(未設定)を返すよう緩くstubする。 */

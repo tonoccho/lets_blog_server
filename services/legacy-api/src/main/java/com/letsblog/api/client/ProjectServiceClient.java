@@ -55,7 +55,8 @@ public class ProjectServiceClient {
 
     public record ProjectBridge(
             Long id, String name, String slug, String masterEnvironment,
-            Long localSiteId, Long testSiteId, Long productionSiteId, String githubRepository) {
+            Long localSiteId, Long testSiteId, Long productionSiteId, String githubRepository,
+            LocalDateTime createdAt, LocalDateTime updatedAt) {
     }
 
     public record SiteBridge(
