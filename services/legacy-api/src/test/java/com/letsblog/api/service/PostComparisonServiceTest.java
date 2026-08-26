@@ -12,8 +12,6 @@ import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.PostComparisonPage;
 import com.letsblog.api.dto.PostEnvironmentValue;
-import com.letsblog.api.repository.ProjectRepository;
-import com.letsblog.api.repository.SiteRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -34,11 +32,9 @@ import static org.mockito.Mockito.when;
 class PostComparisonServiceTest {
 
     @Mock
-    private ProjectRepository projectRepository;
-    @Mock
-    private SiteRepository siteRepository;
-    @Mock
     private SiteService siteService;
+    @Mock
+    private ProjectService projectService;
     @Mock
     private CmsAdapterFactory cmsAdapterFactory;
     @Mock
@@ -48,7 +44,7 @@ class PostComparisonServiceTest {
 
     private PostComparisonService service() {
         return new PostComparisonService(
-                projectRepository, siteRepository, siteService, cmsAdapterFactory, bulkManagementService);
+                siteService, projectService, cmsAdapterFactory, bulkManagementService);
     }
 
     private Project buildProject(Long localSiteId, Long testSiteId, Long productionSiteId) {
@@ -80,9 +76,9 @@ class PostComparisonServiceTest {
         Project project = buildProject(10L, 20L, null);
         Site localSite = buildSite(10L, "local-site");
         Site testSite = buildSite(20L, "test-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
 
         CmsCredentials.WordPressCredentials localCreds = creds("https://local.test");
         CmsCredentials.WordPressCredentials testCreds = creds("https://test.test");
@@ -113,8 +109,8 @@ class PostComparisonServiceTest {
         PostComparisonService service = service();
         Project project = buildProject(10L, null, null);
         Site localSite = buildSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
         when(siteService.getCredentials("local-site")).thenReturn(creds("https://local.test"));
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
         when(cmsAdapter.listPosts(any(), eq("post"))).thenThrow(new RuntimeException("接続エラー"));
@@ -132,9 +128,9 @@ class PostComparisonServiceTest {
         Project project = buildProject(10L, 20L, null);
         Site localSite = buildSite(10L, "local-site");
         Site testSite = buildSite(20L, "test-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
         CmsCredentials.WordPressCredentials localCreds = creds("https://local.test");
         CmsCredentials.WordPressCredentials testCreds = creds("https://test.test");
         when(siteService.getCredentials("local-site")).thenReturn(localCreds);
@@ -160,8 +156,8 @@ class PostComparisonServiceTest {
         PostComparisonService service = service();
         Project project = buildProject(10L, null, null);
         Site localSite = buildSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
         when(siteService.getCredentials("local-site")).thenReturn(creds("https://local.test"));
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
         when(cmsAdapter.listPosts(any(), eq("post"))).thenReturn(List.of());
@@ -174,8 +170,8 @@ class PostComparisonServiceTest {
         PostComparisonService service = service();
         Project project = buildProject(10L, null, null);
         Site localSite = buildSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
         CmsCredentials.WordPressCredentials localCreds = creds("https://local.test");
         when(siteService.getCredentials("local-site")).thenReturn(localCreds);
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);

@@ -10,9 +10,8 @@ import com.letsblog.api.cms.MediaUploadResult;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.MediaGcScanBridgeResponse;
-import com.letsblog.api.repository.ProjectRepository;
-import com.letsblog.api.repository.SiteRepository;
 import com.letsblog.api.service.ProjectNotFoundException;
+import com.letsblog.api.service.ProjectService;
 import com.letsblog.api.service.SiteService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,9 +38,7 @@ import static org.mockito.Mockito.when;
 class CmsMediaBridgeControllerTest {
 
     @Mock
-    private ProjectRepository projectRepository;
-    @Mock
-    private SiteRepository siteRepository;
+    private ProjectService projectService;
     @Mock
     private SiteService siteService;
     @Mock
@@ -53,7 +50,7 @@ class CmsMediaBridgeControllerTest {
 
     @BeforeEach
     void setUp() {
-        controller = new CmsMediaBridgeController(projectRepository, siteRepository, siteService, cmsAdapterFactory);
+        controller = new CmsMediaBridgeController(projectService, siteService, cmsAdapterFactory);
     }
 
     private Project buildProject(Long localSiteId) {
@@ -92,8 +89,8 @@ class CmsMediaBridgeControllerTest {
     void scanMedia_プロジェクトのサイト情報からCMSデータを取得する() {
         Project project = buildProject(10L);
         Site site = buildSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(site));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(site));
         CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://local.test", "admin", "SSH");
         when(siteService.getCredentials("local-site")).thenReturn(credentials);
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
@@ -111,14 +108,14 @@ class CmsMediaBridgeControllerTest {
     @Test
     void scanMedia_環境にサイトが未設定なら例外() {
         Project project = buildProject(null);
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
 
         assertThrows(IllegalArgumentException.class, () -> controller.scanMedia(1L, "local"));
     }
 
     @Test
     void scanMedia_存在しないプロジェクトはProjectNotFoundException() {
-        when(projectRepository.findById(99L)).thenReturn(Optional.empty());
+        when(projectService.getProjectEntity(99L)).thenThrow(new ProjectNotFoundException("id 99 のプロジェクトは登録されていません"));
 
         assertThrows(ProjectNotFoundException.class, () -> controller.scanMedia(99L, "local"));
     }
@@ -127,8 +124,8 @@ class CmsMediaBridgeControllerTest {
     void deleteMedia_CmsAdapter経由で削除し204を返す() {
         Project project = buildProject(10L);
         Site site = buildSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(site));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(site));
         CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://local.test", "admin", "SSH");
         when(siteService.getCredentials("local-site")).thenReturn(credentials);
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);

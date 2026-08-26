@@ -1,6 +1,7 @@
 package com.letsblog.api.service;
 
 import com.letsblog.api.client.ContentServiceClient;
+import com.letsblog.api.client.ProjectServiceClient;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.ProjectImageSettings;
 import com.letsblog.api.dto.ProjectResponse;
@@ -10,9 +11,6 @@ import com.letsblog.api.dto.UpdateImageGenerationPromptDefaultsRequest;
 import com.letsblog.api.dto.UpdateImageGenerationSizeDefaultsRequest;
 import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
 import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
-import com.letsblog.api.messaging.DomainEventPublisher;
-import com.letsblog.api.repository.ProjectRepository;
-import com.letsblog.api.repository.SiteRepository;
 import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -22,7 +20,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.Set;
 
@@ -33,25 +30,23 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * ProjectServiceの回帰テスト(issue #577 stage3)。プロジェクトのCRUD・環境紐付け・環境同期は
+ * project-service側のProjectService(issue #577 stage2)が正となったため、legacy-api側のこのクラスは
+ * project-serviceへの内部ブリッジ({@link ProjectServiceClient})経由でプロジェクトの基本情報を取得しつつ、
+ * project-serviceには無い設定(CSSセレクタプリフィックス・画像生成デフォルト設定)の読み書きのみを担う。
+ */
 @ExtendWith(MockitoExtension.class)
 class ProjectServiceTest {
 
     @Mock
-    private ProjectRepository projectRepository;
-
-    @Mock
-    private SiteRepository siteRepository;
+    private ProjectServiceClient projectServiceClient;
 
     @Mock
     private SiteService siteService;
-
-    @Mock
-    private BulkUploadStorageService bulkUploadStorageService;
 
     @Mock
     private ProjectImageSettingsService projectImageSettingsService;
@@ -59,25 +54,16 @@ class ProjectServiceTest {
     @Mock
     private ContentServiceClient contentServiceClient;
 
-    @Mock
-    private DomainEventPublisher domainEventPublisher;
-
     private ProjectService service() {
         return new ProjectService(
-                projectRepository, siteRepository, siteService, bulkUploadStorageService,
-                projectImageSettingsService, contentServiceClient, domainEventPublisher,
+                projectServiceClient, siteService,
+                projectImageSettingsService, contentServiceClient,
                 "low quality, blurry, watermark, text", "high quality, highly detailed, sharp focus, masterpiece",
                 1920, 1080, 1300, true, true, true);
     }
 
-    private Project buildProject(Long id, String slug) {
-        Project project = new Project();
-        project.setId(id);
-        project.setName("テストプロジェクト");
-        project.setSlug(slug);
-        project.setCreatedAt(LocalDateTime.now());
-        project.setUpdatedAt(LocalDateTime.now());
-        return project;
+    private ProjectServiceClient.ProjectBridge buildProjectBridge(Long id, String slug) {
+        return new ProjectServiceClient.ProjectBridge(id, "テストプロジェクト", slug, "test", null, null, null, null);
     }
 
     /** ProjectServiceのtoResponse()はimage/content設定を都度取得するため、既定でempty(未設定)を返すよう緩くstubする。 */
@@ -87,168 +73,36 @@ class ProjectServiceTest {
     }
 
     @Test
-    void createProject_正常に作成できる() {
+    void getProject_project_serviceの基本情報を転写する() {
         ProjectService service = service();
         stubEmptySettings();
-        when(projectRepository.existsBySlug("my-project")).thenReturn(false);
-        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> {
-            Project p = invocation.getArgument(0);
-            p.setId(1L);
-            p.setCreatedAt(LocalDateTime.now());
-            p.setUpdatedAt(LocalDateTime.now());
-            return p;
-        });
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProjectBridge(1L, "my-project"));
 
-        ProjectResponse response = service.createProject("マイプロジェクト", "my-project");
+        ProjectResponse response = service.getProject(1L);
 
-        assertEquals("マイプロジェクト", response.name());
+        assertEquals("テストプロジェクト", response.name());
         assertEquals("my-project", response.slug());
+        assertEquals("test", response.masterEnvironment());
         assertNull(response.localSite());
     }
 
     @Test
-    void createProject_slug重複は例外() {
+    void getProject_未登録ならProjectNotFoundException() {
         ProjectService service = service();
-        when(projectRepository.existsBySlug("dup")).thenReturn(true);
+        when(projectServiceClient.getProject(99L)).thenThrow(new ProjectNotFoundException("id 99 のプロジェクトは登録されていません"));
 
-        assertThrows(IllegalArgumentException.class, () -> service.createProject("重複", "dup"));
+        assertThrows(ProjectNotFoundException.class, () -> service.getProject(99L));
     }
 
     @Test
-    void bindEnvironment_未使用サイトなら紐付できる() {
-        ProjectService service = service();
-        stubEmptySettings();
-        Project project = buildProject(1L, "proj-a");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.existsById(10L)).thenReturn(true);
-        when(projectRepository.findByLocalSiteIdOrTestSiteIdOrProductionSiteId(10L, 10L, 10L))
-                .thenReturn(Optional.empty());
-        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(siteRepository.findById(10L)).thenReturn(Optional.empty());
+    void updateGithubRepository_owner_repo形式は制約違反にならない() {
+        try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
+            Validator validator = factory.getValidator();
+            Set<jakarta.validation.ConstraintViolation<UpdateProjectGithubRepositoryRequest>> violations =
+                    validator.validate(new UpdateProjectGithubRepositoryRequest("owner/repo"));
 
-        ProjectResponse response = service.bindEnvironment(1L, "local", 10L);
-
-        assertEquals(10L, project.getLocalSiteId());
-        assertNull(response.localSite());
-    }
-
-    @Test
-    void bindEnvironment_他プロジェクトが使用中のサイトは紐付できない() {
-        ProjectService service = service();
-        Project project = buildProject(1L, "proj-a");
-        Project otherProject = buildProject(2L, "proj-b");
-        otherProject.setLocalSiteId(10L);
-
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.existsById(10L)).thenReturn(true);
-        when(projectRepository.findByLocalSiteIdOrTestSiteIdOrProductionSiteId(10L, 10L, 10L))
-                .thenReturn(Optional.of(otherProject));
-
-        assertThrows(IllegalArgumentException.class, () -> service.bindEnvironment(1L, "local", 10L));
-        verify(projectRepository, never()).save(any(Project.class));
-    }
-
-    @Test
-    void bindEnvironment_不正なenvironmentは例外() {
-        ProjectService service = service();
-        Project project = buildProject(1L, "proj-a");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-
-        assertThrows(IllegalArgumentException.class, () -> service.bindEnvironment(1L, "staging", 10L));
-    }
-
-    @Test
-    void unbindEnvironment_紐付を解除できる() {
-        ProjectService service = service();
-        stubEmptySettings();
-        Project project = buildProject(1L, "proj-a");
-        project.setTestSiteId(20L);
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
-        ProjectResponse response = service.unbindEnvironment(1L, "test");
-
-        assertNull(response.testSite());
-        assertNull(project.getTestSiteId());
-    }
-
-    @Test
-    void updateMasterEnvironment_testまたはproductionを設定できる() {
-        ProjectService service = service();
-        stubEmptySettings();
-        Project project = buildProject(1L, "proj-a");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
-        ProjectResponse response = service.updateMasterEnvironment(1L, "production");
-
-        assertEquals("production", response.masterEnvironment());
-        assertEquals("production", project.getMasterEnvironment());
-    }
-
-    @Test
-    void updateMasterEnvironment_localは指定できない() {
-        ProjectService service = service();
-
-        assertThrows(IllegalArgumentException.class, () -> service.updateMasterEnvironment(1L, "local"));
-        verify(projectRepository, never()).save(any(Project.class));
-    }
-
-    @Test
-    void updateMasterEnvironment_不正な値は例外() {
-        ProjectService service = service();
-
-        assertThrows(IllegalArgumentException.class, () -> service.updateMasterEnvironment(1L, "invalid"));
-    }
-
-    @Test
-    void deleteProject_存在しないプロジェクトは例外() {
-        ProjectService service = service();
-        when(projectRepository.existsById(99L)).thenReturn(false);
-
-        assertThrows(ProjectNotFoundException.class, () -> service.deleteProject(99L));
-    }
-
-    @Test
-    void deleteProject_存在すれば削除される() {
-        ProjectService service = service();
-        when(projectRepository.existsById(1L)).thenReturn(true);
-
-        service.deleteProject(1L);
-
-        verify(projectRepository, times(1)).deleteById(1L);
-        verify(bulkUploadStorageService).deleteAll(1L);
-        verify(domainEventPublisher).publishProjectDeleted(1L);
-    }
-
-    @Test
-    void updateGithubRepository_owner_repo形式の値が正常に保存される() {
-        ProjectService service = service();
-        stubEmptySettings();
-        Project project = buildProject(1L, "proj-a");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
-        ProjectResponse response = service.updateGithubRepository(
-                1L, new UpdateProjectGithubRepositoryRequest("anthropics/prompt-library"));
-
-        assertEquals("anthropics/prompt-library", response.githubRepository());
-        assertEquals("anthropics/prompt-library", project.getGithubRepository());
-    }
-
-    @Test
-    void updateGithubRepository_空文字列はnullに変換される() {
-        ProjectService service = service();
-        stubEmptySettings();
-        Project project = buildProject(1L, "proj-a");
-        project.setGithubRepository("owner/repo");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
-        ProjectResponse response = service.updateGithubRepository(1L, new UpdateProjectGithubRepositoryRequest(""));
-
-        assertNull(response.githubRepository());
-        assertNull(project.getGithubRepository());
+            assertTrue(violations.isEmpty());
+        }
     }
 
     @Test
@@ -271,11 +125,9 @@ class ProjectServiceTest {
     void updateCssSelectorPrefix_値が正常に保存される() {
         ProjectService service = service();
         stubEmptySettings();
-        Project project = buildProject(1L, "proj-a");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProjectBridge(1L, "proj-a"));
 
-        ProjectResponse response = service.updateCssSelectorPrefix(
-                1L, new UpdateProjectCssSelectorPrefixRequest("custom-prefix"));
+        service.updateCssSelectorPrefix(1L, new UpdateProjectCssSelectorPrefixRequest("custom-prefix"));
 
         verify(contentServiceClient).updateCssSelectorPrefix(1L, "custom-prefix");
     }
@@ -284,8 +136,7 @@ class ProjectServiceTest {
     void updateCssSelectorPrefix_空文字列はnullに変換される() {
         ProjectService service = service();
         stubEmptySettings();
-        Project project = buildProject(1L, "proj-a");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProjectBridge(1L, "proj-a"));
 
         service.updateCssSelectorPrefix(1L, new UpdateProjectCssSelectorPrefixRequest(""));
 
@@ -301,8 +152,7 @@ class ProjectServiceTest {
     void updateImageGenerationPromptDefaults_値が正常に保存される() {
         ProjectService service = service();
         stubEmptySettings();
-        Project project = buildProject(1L, "proj-a");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProjectBridge(1L, "proj-a"));
         ProjectImageSettings saved = new ProjectImageSettings(1L);
         saved.setDefaultNegativePrompt("bad hands, extra fingers");
         saved.setDefaultQualityPrompt("vivid colors");
@@ -321,8 +171,7 @@ class ProjectServiceTest {
     void updateImageGenerationPromptDefaults_空文字列はnullに変換される() {
         ProjectService service = service();
         stubEmptySettings();
-        Project project = buildProject(1L, "proj-a");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProjectBridge(1L, "proj-a"));
 
         service.updateImageGenerationPromptDefaults(
                 1L, new UpdateImageGenerationPromptDefaultsRequest("", ""));
@@ -340,7 +189,7 @@ class ProjectServiceTest {
     @Test
     void resolveDefaultNegativePrompt_プロジェクト未設定ならグローバルデフォルトを返す() {
         ProjectService service = service();
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(buildProject(1L, "proj-a")));
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProjectBridge(1L, "proj-a"));
         when(projectImageSettingsService.findByProjectId(1L)).thenReturn(Optional.empty());
 
         assertEquals("low quality, blurry, watermark, text", service.resolveDefaultNegativePrompt(1L));
@@ -349,7 +198,7 @@ class ProjectServiceTest {
     @Test
     void resolveDefaultNegativePrompt_プロジェクト設定済みならその値を返す() {
         ProjectService service = service();
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(buildProject(1L, "proj-a")));
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProjectBridge(1L, "proj-a"));
         ProjectImageSettings settings = new ProjectImageSettings(1L);
         settings.setDefaultNegativePrompt("bad hands, extra fingers");
         when(projectImageSettingsService.findByProjectId(1L)).thenReturn(Optional.of(settings));
@@ -367,7 +216,7 @@ class ProjectServiceTest {
     @Test
     void resolveDefaultQualityPrompt_プロジェクト設定済みならその値を返す() {
         ProjectService service = service();
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(buildProject(1L, "proj-a")));
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProjectBridge(1L, "proj-a"));
         ProjectImageSettings settings = new ProjectImageSettings(1L);
         settings.setDefaultQualityPrompt("vivid colors, cinematic lighting");
         when(projectImageSettingsService.findByProjectId(1L)).thenReturn(Optional.of(settings));
@@ -379,8 +228,7 @@ class ProjectServiceTest {
     void updateImageGenerationSizeDefaults_値が正常に保存される() {
         ProjectService service = service();
         stubEmptySettings();
-        Project project = buildProject(1L, "proj-a");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProjectBridge(1L, "proj-a"));
         ProjectImageSettings saved = new ProjectImageSettings(1L);
         saved.setDefaultGeneratedImageWidth(1024);
         saved.setDefaultGeneratedImageHeight(768);
@@ -398,8 +246,7 @@ class ProjectServiceTest {
     void updateImageGenerationSizeDefaults_nullを渡すとグローバルデフォルトへ戻る() {
         ProjectService service = service();
         stubEmptySettings();
-        Project project = buildProject(1L, "proj-a");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProjectBridge(1L, "proj-a"));
 
         ProjectResponse response = service.updateImageGenerationSizeDefaults(
                 1L, new UpdateImageGenerationSizeDefaultsRequest(null, null));
@@ -422,7 +269,7 @@ class ProjectServiceTest {
     @Test
     void resolveDefaultGeneratedImageWidth_プロジェクト設定済みならその値を返す() {
         ProjectService service = service();
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(buildProject(1L, "proj-a")));
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProjectBridge(1L, "proj-a"));
         ProjectImageSettings settings = new ProjectImageSettings(1L);
         settings.setDefaultGeneratedImageWidth(1024);
         settings.setDefaultGeneratedImageHeight(768);
@@ -436,8 +283,7 @@ class ProjectServiceTest {
     void updateArticleImageResizeDefault_値が正常に保存される() {
         ProjectService service = service();
         stubEmptySettings();
-        Project project = buildProject(1L, "proj-a");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProjectBridge(1L, "proj-a"));
         ProjectImageSettings saved = new ProjectImageSettings(1L);
         saved.setDefaultArticleImageLongEdgePx(800);
         when(projectImageSettingsService.updateArticleImageResizeDefault(1L, 800)).thenReturn(saved);
@@ -453,8 +299,7 @@ class ProjectServiceTest {
     void updateArticleImageResizeDefault_nullを渡すとグローバルデフォルトへ戻る() {
         ProjectService service = service();
         stubEmptySettings();
-        Project project = buildProject(1L, "proj-a");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProjectBridge(1L, "proj-a"));
 
         ProjectResponse response = service.updateArticleImageResizeDefault(
                 1L, new UpdateArticleImageResizeDefaultRequest(null));
@@ -474,7 +319,7 @@ class ProjectServiceTest {
     @Test
     void resolveArticleImageLongEdgePx_プロジェクト設定済みならその値を返す() {
         ProjectService service = service();
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(buildProject(1L, "proj-a")));
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProjectBridge(1L, "proj-a"));
         ProjectImageSettings settings = new ProjectImageSettings(1L);
         settings.setDefaultArticleImageLongEdgePx(800);
         when(projectImageSettingsService.findByProjectId(1L)).thenReturn(Optional.of(settings));
@@ -486,8 +331,7 @@ class ProjectServiceTest {
     void updateImageContentFilterSettings_値が正常に保存される() {
         ProjectService service = service();
         stubEmptySettings();
-        Project project = buildProject(1L, "proj-a");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProjectBridge(1L, "proj-a"));
         ProjectImageSettings saved = new ProjectImageSettings(1L);
         saved.setBlockSexualContent(false);
         saved.setBlockViolentContent(true);
@@ -513,7 +357,7 @@ class ProjectServiceTest {
     @Test
     void resolveBlockSexualContent_プロジェクト未設定ならグローバルデフォルトtrueを返す() {
         ProjectService service = service();
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(buildProject(1L, "proj-a")));
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProjectBridge(1L, "proj-a"));
         when(projectImageSettingsService.findByProjectId(1L)).thenReturn(Optional.empty());
 
         assertTrue(service.resolveBlockSexualContent(1L));
@@ -522,7 +366,7 @@ class ProjectServiceTest {
     @Test
     void resolveBlockSexualContent_プロジェクト設定済みならその値を返す() {
         ProjectService service = service();
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(buildProject(1L, "proj-a")));
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProjectBridge(1L, "proj-a"));
         ProjectImageSettings settings = new ProjectImageSettings(1L);
         settings.setBlockSexualContent(false);
         when(projectImageSettingsService.findByProjectId(1L)).thenReturn(Optional.of(settings));
@@ -533,7 +377,7 @@ class ProjectServiceTest {
     @Test
     void resolveBlockViolentContent_プロジェクト設定済みならその値を返す() {
         ProjectService service = service();
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(buildProject(1L, "proj-a")));
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProjectBridge(1L, "proj-a"));
         ProjectImageSettings settings = new ProjectImageSettings(1L);
         settings.setBlockViolentContent(false);
         when(projectImageSettingsService.findByProjectId(1L)).thenReturn(Optional.of(settings));
@@ -545,7 +389,7 @@ class ProjectServiceTest {
     @Test
     void resolveBlockDiscriminatoryContent_プロジェクト設定済みならその値を返す() {
         ProjectService service = service();
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(buildProject(1L, "proj-a")));
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProjectBridge(1L, "proj-a"));
         ProjectImageSettings settings = new ProjectImageSettings(1L);
         settings.setBlockDiscriminatoryContent(false);
         when(projectImageSettingsService.findByProjectId(1L)).thenReturn(Optional.of(settings));
@@ -555,13 +399,36 @@ class ProjectServiceTest {
     }
 
     @Test
-    void updateGithubRepository_owner_repo形式は制約違反にならない() {
-        try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
-            Validator validator = factory.getValidator();
-            Set<jakarta.validation.ConstraintViolation<UpdateProjectGithubRepositoryRequest>> violations =
-                    validator.validate(new UpdateProjectGithubRepositoryRequest("owner/repo"));
+    void findProjectIdBySiteId_project_serviceの逆引き結果を転写する() {
+        ProjectService service = service();
+        when(projectServiceClient.findProjectIdBySiteId(10L)).thenReturn(1L);
 
-            assertTrue(violations.isEmpty());
-        }
+        assertEquals(1L, service.findProjectIdBySiteId(10L));
+    }
+
+    @Test
+    void resolveMasterSite_マスター環境に紐づくサイトを解決する() {
+        ProjectService service = service();
+        Project project = new Project();
+        project.setId(1L);
+        project.setMasterEnvironment("production");
+        project.setProductionSiteId(30L);
+        com.letsblog.api.domain.Site site = new com.letsblog.api.domain.Site();
+        site.setId(30L);
+        when(siteService.getById(30L)).thenReturn(Optional.of(site));
+
+        com.letsblog.api.domain.Site result = service.resolveMasterSite(project);
+
+        assertEquals(30L, result.getId());
+    }
+
+    @Test
+    void resolveMasterSite_未紐付けならnull() {
+        ProjectService service = service();
+        Project project = new Project();
+        project.setId(1L);
+        project.setMasterEnvironment("production");
+
+        assertNull(service.resolveMasterSite(project));
     }
 }

@@ -4,8 +4,8 @@ import java.io.Serializable;
 import java.time.Instant;
 
 /**
- * プロジェクトが削除された(issue #580)。発行元: project-service(未抽出の間はlegacy-apiのProjectServiceが
- * 代行)。購読: 全サービス(project_id を外部キーとして保持する設定・データを持つサービスは、この
+ * プロジェクトが削除された(issue #580)。発行元: project-service(issue #577で抽出済み)。購読: 全サービス
+ * (project_id を外部キーとして保持する設定・データを持つサービスは、この
  * イベントを受けて自スキーマ内の該当行を削除する)。
  *
  * <p>ADR-0004によりproject_ai_settings(ai-service)/analytics_credentials(analytics-service)/

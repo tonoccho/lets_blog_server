@@ -3,13 +3,11 @@ package com.letsblog.api.repository;
 import com.letsblog.api.domain.Project;
 import org.springframework.data.jpa.repository.JpaRepository;
 
-import java.util.List;
-import java.util.Optional;
-
+/**
+ * プロジェクトのGitHubトークン(project.githubTokenEncrypted)の読み書き専用(issue #577スコープ外の
+ * {@link com.letsblog.api.service.ProjectApiKeyService}が使う。issue #577 stage3で、プロジェクトの
+ * 基本情報の読み取りは{@code ProjectServiceClient}経由のproject-service参照へ切り替えたため、
+ * それ以外の用途では使わない)。
+ */
 public interface ProjectRepository extends JpaRepository<Project, Long> {
-    Optional<Project> findBySlug(String slug);
-    boolean existsBySlug(String slug);
-    List<Project> findAllByOrderByCreatedAtDesc();
-    Optional<Project> findByLocalSiteIdOrTestSiteIdOrProductionSiteId(
-            Long localSiteId, Long testSiteId, Long productionSiteId);
 }

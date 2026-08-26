@@ -11,8 +11,6 @@ import com.letsblog.api.dto.StatusComparisonPage;
 import com.letsblog.api.dto.StatusComparisonRow;
 import com.letsblog.api.dto.StatusEnvironmentValue;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient;
-import com.letsblog.api.repository.ProjectRepository;
-import com.letsblog.api.repository.SiteRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,25 +45,22 @@ public class PluginThemeComparisonService {
     private static final String INACTIVE = "INACTIVE";
     private static final String ACTIVE = "ACTIVE";
 
-    private final ProjectRepository projectRepository;
-    private final SiteRepository siteRepository;
     private final WordPressBulkManagementClient bulkManagementClient;
     private final BulkManagementService bulkManagementService;
     private final SiteService siteService;
+    private final ProjectService projectService;
     private final WordPressSshOperations sshOperations;
 
     public PluginThemeComparisonService(
-            ProjectRepository projectRepository,
-            SiteRepository siteRepository,
             WordPressBulkManagementClient bulkManagementClient,
             BulkManagementService bulkManagementService,
             SiteService siteService,
+            ProjectService projectService,
             WordPressSshOperations sshOperations) {
-        this.projectRepository = projectRepository;
-        this.siteRepository = siteRepository;
         this.bulkManagementClient = bulkManagementClient;
         this.bulkManagementService = bulkManagementService;
         this.siteService = siteService;
+        this.projectService = projectService;
         this.sshOperations = sshOperations;
     }
 
@@ -302,12 +297,11 @@ public class PluginThemeComparisonService {
             case "production" -> project.getProductionSiteId();
             default -> null;
         };
-        return siteId == null ? null : siteRepository.findById(siteId).orElse(null);
+        return siteId == null ? null : siteService.getById(siteId).orElse(null);
     }
 
     private Project getProject(Long projectId) {
-        return projectRepository.findById(projectId)
-                .orElseThrow(() -> new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません"));
+        return projectService.getProjectEntity(projectId);
     }
 
     private record PluginThemeInfo(String name, String status) {

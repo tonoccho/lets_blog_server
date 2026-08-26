@@ -18,7 +18,6 @@ import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.ThemeCssResponse;
 import com.letsblog.api.dto.ThemeSkeletonResponse;
-import com.letsblog.api.repository.SiteRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -76,7 +75,6 @@ public class ArticlePreviewService {
             Pattern.compile("url\\(\\s*(['\"]?)([^'\")]+)\\1\\s*\\)", Pattern.CASE_INSENSITIVE);
 
     private final ProjectService projectService;
-    private final SiteRepository siteRepository;
     private final SiteService siteService;
     private final RestClient.Builder restClientBuilder;
     private final ContentServiceClient contentServiceClient;
@@ -86,7 +84,6 @@ public class ArticlePreviewService {
 
     public ArticlePreviewService(
             ProjectService projectService,
-            SiteRepository siteRepository,
             SiteService siteService,
             RestClient.Builder restClientBuilder,
             ContentServiceClient contentServiceClient,
@@ -94,7 +91,6 @@ public class ArticlePreviewService {
             WordPressAgentOperations wordPressAgentOperations,
             WordPressSshOperations wordPressSshOperations) {
         this.projectService = projectService;
-        this.siteRepository = siteRepository;
         this.siteService = siteService;
         this.restClientBuilder = restClientBuilder;
         this.contentServiceClient = contentServiceClient;
@@ -610,7 +606,7 @@ public class ArticlePreviewService {
             if (!isProjectSite(project, siteId)) {
                 return new SiteResolution(null, "指定されたサイトはこのプロジェクトに紐づいていません");
             }
-            site = siteRepository.findById(siteId).orElse(null);
+            site = siteService.getById(siteId).orElse(null);
             if (site == null) {
                 return new SiteResolution(null, "指定されたサイトが見つかりません");
             }
@@ -634,7 +630,7 @@ public class ArticlePreviewService {
             case "production" -> project.getProductionSiteId();
             default -> null;
         };
-        return siteId == null ? null : siteRepository.findById(siteId).orElse(null);
+        return siteId == null ? null : siteService.getById(siteId).orElse(null);
     }
 
     private List<String> extractStylesheetUrls(String html, String baseUrl) {

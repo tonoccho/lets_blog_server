@@ -11,9 +11,7 @@ import com.letsblog.api.domain.ProjectUser;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.domain.User;
 import com.letsblog.api.dto.ProjectUserResponse;
-import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.ProjectUserRepository;
-import com.letsblog.api.repository.SiteRepository;
 import com.letsblog.api.repository.UserRepository;
 import com.letsblog.api.repository.UserSiteAuthorRepository;
 import org.junit.jupiter.api.Test;
@@ -38,16 +36,13 @@ import static org.mockito.Mockito.when;
 class ProjectUserSyncServiceTest {
 
     @Mock
-    private ProjectRepository projectRepository;
+    private ProjectService projectService;
 
     @Mock
     private ProjectUserRepository projectUserRepository;
 
     @Mock
     private UserRepository userRepository;
-
-    @Mock
-    private SiteRepository siteRepository;
 
     @Mock
     private SiteService siteService;
@@ -63,7 +58,7 @@ class ProjectUserSyncServiceTest {
 
     private ProjectUserSyncService service() {
         return new ProjectUserSyncService(
-                projectRepository, projectUserRepository, userRepository, siteRepository, siteService,
+                projectService, projectUserRepository, userRepository, siteService,
                 cmsAdapterFactory, userSiteAuthorRepository);
     }
 
@@ -103,9 +98,9 @@ class ProjectUserSyncServiceTest {
         Site testSite = buildSite(20L, "test-site");
         CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
 
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
         when(userRepository.findById(2L)).thenReturn(Optional.of(user));
-        when(siteRepository.findAllById(List.of(10L, 20L))).thenReturn(List.of(localSite, testSite));
+        when(siteService.getAllById(List.of(10L, 20L))).thenReturn(List.of(localSite, testSite));
         when(siteService.getCredentials(any())).thenReturn(credentials);
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
         when(cmsAdapter.hasAuthorProvisioningCapability(any())).thenReturn(true);
@@ -125,7 +120,7 @@ class ProjectUserSyncServiceTest {
         Project project = buildProject(null, null, null);
         User user = buildUser();
 
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
         when(userRepository.findById(2L)).thenReturn(Optional.of(user));
 
         service.addUserToProject(1L, 2L, "editor");
@@ -142,9 +137,9 @@ class ProjectUserSyncServiceTest {
         Site localSite = buildSite(10L, "local-site");
         CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
 
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
         when(userRepository.findById(2L)).thenReturn(Optional.of(user));
-        when(siteRepository.findAllById(List.of(10L))).thenReturn(List.of(localSite));
+        when(siteService.getAllById(List.of(10L))).thenReturn(List.of(localSite));
         when(siteService.getCredentials("local-site")).thenReturn(credentials);
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
         when(cmsAdapter.hasAuthorProvisioningCapability(any())).thenReturn(true);
@@ -165,9 +160,9 @@ class ProjectUserSyncServiceTest {
         Site localSite = buildSite(10L, "local-site");
         CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "editor", "SSH");
 
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
         when(userRepository.findById(2L)).thenReturn(Optional.of(user));
-        when(siteRepository.findAllById(List.of(10L))).thenReturn(List.of(localSite));
+        when(siteService.getAllById(List.of(10L))).thenReturn(List.of(localSite));
         when(siteService.getCredentials("local-site")).thenReturn(credentials);
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
         when(cmsAdapter.hasAuthorProvisioningCapability(credentials)).thenReturn(false);
@@ -188,9 +183,9 @@ class ProjectUserSyncServiceTest {
         CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
 
         when(projectUserRepository.findByProjectIdAndUserId(1L, 2L)).thenReturn(Optional.of(projectUser));
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
         when(userRepository.findById(2L)).thenReturn(Optional.of(user));
-        when(siteRepository.findAllById(List.of(10L))).thenReturn(List.of(localSite));
+        when(siteService.getAllById(List.of(10L))).thenReturn(List.of(localSite));
         when(siteService.getCredentials("local-site")).thenReturn(credentials);
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
         when(cmsAdapter.hasAuthorProvisioningCapability(any())).thenReturn(true);
@@ -248,7 +243,7 @@ class ProjectUserSyncServiceTest {
         ProjectUser ownerLink = new ProjectUser(1L, 3L, "administrator");
         CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
 
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(site));
+        when(siteService.getById(10L)).thenReturn(Optional.of(site));
         when(projectUserRepository.findByProjectId(1L)).thenReturn(List.of(memberLink, ownerLink));
         when(userRepository.findById(2L)).thenReturn(Optional.of(member));
         when(userRepository.findById(3L)).thenReturn(Optional.of(owner));
@@ -273,7 +268,7 @@ class ProjectUserSyncServiceTest {
         Site site = buildSite(10L, "local-site");
         ProjectUser staleLink = new ProjectUser(1L, 99L, "editor");
 
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(site));
+        when(siteService.getById(10L)).thenReturn(Optional.of(site));
         when(projectUserRepository.findByProjectId(1L)).thenReturn(List.of(staleLink));
         when(userRepository.findById(99L)).thenReturn(Optional.empty());
 
@@ -285,7 +280,7 @@ class ProjectUserSyncServiceTest {
     @Test
     void reconcileRolesForSite_サイトが存在しなければ例外() {
         ProjectUserSyncService service = service();
-        when(siteRepository.findById(10L)).thenReturn(Optional.empty());
+        when(siteService.getById(10L)).thenReturn(Optional.empty());
 
         assertThrows(SiteNotFoundException.class, () -> service.reconcileRolesForSite(1L, 10L));
         verify(projectUserRepository, never()).findByProjectId(any());

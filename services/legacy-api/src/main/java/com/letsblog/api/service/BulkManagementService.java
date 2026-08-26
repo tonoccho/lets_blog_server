@@ -13,8 +13,6 @@ import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient.BulkApplyCommand;
-import com.letsblog.api.repository.ProjectRepository;
-import com.letsblog.api.repository.SiteRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,8 +43,6 @@ public class BulkManagementService {
     private static final List<String> ENVIRONMENT_ORDER = List.of("local", "test", "production");
     private static final Set<String> VALID_ENVIRONMENTS = Set.of("local", "test", "production");
 
-    private final ProjectRepository projectRepository;
-    private final SiteRepository siteRepository;
     private final WordPressBulkManagementClient bulkManagementClient;
     private final BulkUploadStorageService bulkUploadStorageService;
     private final SiteService siteService;
@@ -56,8 +52,6 @@ public class BulkManagementService {
     private final ImageResizeService imageResizeService;
 
     public BulkManagementService(
-            ProjectRepository projectRepository,
-            SiteRepository siteRepository,
             WordPressBulkManagementClient bulkManagementClient,
             BulkUploadStorageService bulkUploadStorageService,
             SiteService siteService,
@@ -65,8 +59,6 @@ public class BulkManagementService {
             CmsAdapterFactory cmsAdapterFactory,
             ProjectService projectService,
             ImageResizeService imageResizeService) {
-        this.projectRepository = projectRepository;
-        this.siteRepository = siteRepository;
         this.bulkManagementClient = bulkManagementClient;
         this.bulkUploadStorageService = bulkUploadStorageService;
         this.siteService = siteService;
@@ -161,7 +153,7 @@ public class BulkManagementService {
             if (siteId == null) {
                 continue;
             }
-            Site site = siteRepository.findById(siteId).orElse(null);
+            Site site = siteService.getById(siteId).orElse(null);
             if (site == null) {
                 continue;
             }
@@ -213,7 +205,7 @@ public class BulkManagementService {
             if (siteId == null) {
                 continue;
             }
-            Site site = siteRepository.findById(siteId).orElse(null);
+            Site site = siteService.getById(siteId).orElse(null);
             if (site == null) {
                 continue;
             }
@@ -443,7 +435,7 @@ public class BulkManagementService {
         if (siteId == null) {
             throw new IllegalArgumentException(environment + "環境にはサイトが紐付けられていません");
         }
-        return siteRepository.findById(siteId)
+        return siteService.getById(siteId)
                 .orElseThrow(() -> new SiteNotFoundException("id " + siteId + " のサイトは登録されていません"));
     }
 
@@ -494,7 +486,6 @@ public class BulkManagementService {
     }
 
     private Project getProject(Long projectId) {
-        return projectRepository.findById(projectId)
-                .orElseThrow(() -> new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません"));
+        return projectService.getProjectEntity(projectId);
     }
 }

@@ -8,9 +8,7 @@ import com.letsblog.api.cms.MediaUploadResult;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.MediaGcScanBridgeResponse;
-import com.letsblog.api.repository.ProjectRepository;
-import com.letsblog.api.repository.SiteRepository;
-import com.letsblog.api.service.ProjectNotFoundException;
+import com.letsblog.api.service.ProjectService;
 import com.letsblog.api.service.SiteService;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -32,28 +30,28 @@ import java.io.IOException;
  * アップロード/一覧取得/削除を実行してほしい」という操作の依頼のみを受け取り、legacy-api側で
  * {@link CmsAdapter}を解決して実行する。
  *
- * <p>{@code Project}/{@code Site}はこのissueの移設対象ではなく(project-service、C8/#577が未着手)、
- * 元々{@link com.letsblog.api.controller.MediaController}/
+ * <p>元々{@link com.letsblog.api.controller.MediaController}/
  * {@link com.letsblog.api.service.MediaGarbageCollectionService}が持っていたのと同じロジックを
  * ここへ引き継いだ。認可は、media-service側で既にrequireAdmin等のチェックを済ませたリクエストの
  * Bearerトークンをそのまま転送してもらう想定で、ここでは追加の認可チェックは行わない
  * (元のMediaController.uploadも認可チェックなしだった。AUTHORIZATION_MATRIX.md参照)。
+ *
+ * <p>{@code Project}/{@code Site}本体の所有権はproject-serviceへ移った(issue #577 stage2)。
+ * {@link ProjectService}/{@link SiteService}がproject-serviceへの内部ブリッジ経由でプロジェクト/
+ * サイトの基本情報を取得する(issue #577 stage3。ローカルJPAエンティティへの直接アクセスは廃止した)。
  */
 @RestController
 public class CmsMediaBridgeController {
 
-    private final ProjectRepository projectRepository;
-    private final SiteRepository siteRepository;
+    private final ProjectService projectService;
     private final SiteService siteService;
     private final CmsAdapterFactory cmsAdapterFactory;
 
     public CmsMediaBridgeController(
-            ProjectRepository projectRepository,
-            SiteRepository siteRepository,
+            ProjectService projectService,
             SiteService siteService,
             CmsAdapterFactory cmsAdapterFactory) {
-        this.projectRepository = projectRepository;
-        this.siteRepository = siteRepository;
+        this.projectService = projectService;
         this.siteService = siteService;
         this.cmsAdapterFactory = cmsAdapterFactory;
     }
@@ -99,12 +97,11 @@ public class CmsMediaBridgeController {
         if (siteId == null) {
             throw new IllegalArgumentException("環境 '" + environment + "' にはサイトが設定されていません");
         }
-        return siteRepository.findById(siteId)
+        return siteService.getById(siteId)
                 .orElseThrow(() -> new IllegalArgumentException("環境 '" + environment + "' にはサイトが設定されていません"));
     }
 
     private Project getProject(Long projectId) {
-        return projectRepository.findById(projectId)
-                .orElseThrow(() -> new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません"));
+        return projectService.getProjectEntity(projectId);
     }
 }

@@ -11,8 +11,6 @@ import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.PostComparisonPage;
 import com.letsblog.api.dto.PostComparisonRow;
 import com.letsblog.api.dto.PostEnvironmentValue;
-import com.letsblog.api.repository.ProjectRepository;
-import com.letsblog.api.repository.SiteRepository;
 import com.letsblog.common.util.StackTraceUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -43,21 +41,18 @@ public class PostComparisonService {
 
     private static final List<String> ENVIRONMENT_ORDER = List.of("local", "test", "production");
 
-    private final ProjectRepository projectRepository;
-    private final SiteRepository siteRepository;
     private final SiteService siteService;
+    private final ProjectService projectService;
     private final CmsAdapterFactory cmsAdapterFactory;
     private final BulkManagementService bulkManagementService;
 
     public PostComparisonService(
-            ProjectRepository projectRepository,
-            SiteRepository siteRepository,
             SiteService siteService,
+            ProjectService projectService,
             CmsAdapterFactory cmsAdapterFactory,
             BulkManagementService bulkManagementService) {
-        this.projectRepository = projectRepository;
-        this.siteRepository = siteRepository;
         this.siteService = siteService;
+        this.projectService = projectService;
         this.cmsAdapterFactory = cmsAdapterFactory;
         this.bulkManagementService = bulkManagementService;
     }
@@ -200,12 +195,11 @@ public class PostComparisonService {
             case "production" -> project.getProductionSiteId();
             default -> null;
         };
-        return siteId == null ? null : siteRepository.findById(siteId).orElse(null);
+        return siteId == null ? null : siteService.getById(siteId).orElse(null);
     }
 
     private Project getProject(Long projectId) {
-        return projectRepository.findById(projectId)
-                .orElseThrow(() -> new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません"));
+        return projectService.getProjectEntity(projectId);
     }
 
     private record EnvironmentPosts(List<CmsPostSummary> posts, boolean error, String errorMessage) {
