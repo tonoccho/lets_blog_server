@@ -67,18 +67,15 @@ import static org.junit.jupiter.api.DynamicTest.dynamicTest;
  * <p>{@link #NON_GATEWAY_ROUTED_PATHS}も参照。{@code /api/internal/**}の命名規則に従わない、
  * gateway非経由のサービス間直接呼び出しエンドポイントが1件だけ存在するため個別に除外している。
  *
- * <p><b>既知の失敗(2026-08時点、issue #642実装時に本テストで新規発見。本Issueはテストのみが
- * スコープのため、ここでは修正せず記録だけ残す)</b>: ArticlePlanController(ai-service、実パスは
- * {@code /api/projects/{projectId}/article-plan/**})は、application.ymlのルート表では
- * {@code /api/article-plan/**}(プロジェクトIDを含まない別パス)としてしか登録されておらず、
- * 実際のリクエストは、より先に評価される{@code project}ルート({@code /api/projects/**}、
- * PROJECT_SERVICE_URI宛)に先勝ちでマッチしてしまい、ai-serviceではなくproject-serviceへ
- * 誤ってルーティングされる。web/src/lib/apiClient.tsは実際に
- * {@code /api/projects/{projectId}/article-plan/...}を呼んでおり、記事プラン(壁打ちチャット・
- * 提案受け入れ等)の機能がgateway経由では到達不能になっている可能性が高い(現状のdocker-compose
- * ではproject-serviceコンテナ自体が未起動のため実機未検証)。修正案:
- * {@code project-ai-models-llm}等と同様に、{@code /api/projects/*&#47;article-plan/**}を
- * AI_SERVICE_URI向けの専用ルートとして、広い{@code project}ルートより前に追加する。
+ * <p><b>修正済みの実バグ(issue #642実装時に本テストで新規発見、同ブランチで修正済み)</b>:
+ * ArticlePlanController(ai-service、実パスは{@code /api/projects/{projectId}/article-plan/**})
+ * は、application.ymlのルート表に対応するエントリが無く、より先に評価される{@code project}ルート
+ * ({@code /api/projects/**}、PROJECT_SERVICE_URI宛)に先勝ちでマッチし、ai-serviceではなく
+ * project-serviceへ誤ってルーティングされていた(web/src/lib/apiClient.tsが実際に
+ * {@code /api/projects/{projectId}/article-plan/...}を呼ぶため、記事プラン機能がgateway経由で
+ * 到達不能になっていた)。{@code project-ai-models-llm}と同じパターンで
+ * {@code project-article-plan}ルート({@code /api/projects/*&#47;article-plan/**} →
+ * AI_SERVICE_URI)を広い{@code project}ルートより前に追加して修正した(issue #659に記録)。
  */
 class RouteControllerContractTest {
 
