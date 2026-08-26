@@ -56,6 +56,9 @@ dependencies {
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.boot:spring-boot-webmvc-test'
+    // InternalPostBridgeControllerDeleteBySiteIntegrationTest(issue #641)が使う@AutoConfigureTestDatabase。
+    // legacy-api/build.gradleと同じ依存(ADR-0006: 実MySQLに接続する方式、Testcontainersは使わない)。
+    testImplementation 'org.springframework.boot:spring-boot-jdbc-test'
     testImplementation 'org.springframework.security:spring-security-test'
     testImplementation testFixtures(project(':libs:lbs-common'))
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
