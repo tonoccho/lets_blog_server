@@ -52,6 +52,24 @@ public class LegacyApiBridgeClient {
         }
     }
 
+    /**
+     * ProjectEnvironmentSyncService#syncがDB同期後に呼ぶ、project_user(legacy-apiに残る、issue #577
+     * stage2ではまだ移設しない)の内容でのサイト向けWordPressユーザーロール再整合の依頼。
+     */
+    public void reconcileRolesForSite(Long projectId, Long siteId, String bearerToken) {
+        try {
+            restClient.post()
+                    .uri("/api/internal/project/project-users/{projectId}/sites/{siteId}/reconcile-roles",
+                            projectId, siteId)
+                    .headers(headers -> setAuthorization(headers, bearerToken))
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientException e) {
+            throw new IdentityServiceUnavailableException(
+                    "legacy-apiのユーザーロール再整合呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+    }
+
     private void setAuthorization(HttpHeaders headers, String bearerToken) {
         if (bearerToken != null && !bearerToken.isBlank()) {
             headers.set(HttpHeaders.AUTHORIZATION, bearerToken);

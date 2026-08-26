@@ -58,6 +58,14 @@ public class CurrentActorService {
     }
 
     /**
+     * サイト登録時の著者プロビジョニング(SiteService#register)向け。identity-serviceが解決した
+     * ローカルUserのメールアドレスを返す。JWTが提示されていない場合はnull。
+     */
+    public String getCurrentActorEmail() {
+        return resolveProfile().map(ActorProfile::email).orElse(null);
+    }
+
+    /**
      * 呼び出し元が送ってきた{@code Authorization}ヘッダーの値をそのまま返す(例:
      * {@code "Bearer xxx"}）。identity-service以外のサービス間同期呼び出し
      * ({@link com.letsblog.project.client.LegacyApiBridgeClient}等)へも同じトークンを

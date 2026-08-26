@@ -1,9 +1,14 @@
 package com.letsblog.project.config;
 
 import com.letsblog.project.client.AiServiceException;
+import com.letsblog.project.service.AiServiceGenerationException;
 import com.letsblog.project.service.ForbiddenException;
 import com.letsblog.project.service.IdentityServiceUnavailableException;
 import com.letsblog.project.service.InvalidCustomTagContentException;
+import com.letsblog.project.service.ProjectNotFoundException;
+import com.letsblog.project.service.ProvisioningException;
+import com.letsblog.project.service.SiteAlreadyProvisionedException;
+import com.letsblog.project.service.SiteNotFoundException;
 import com.letsblog.project.service.SshKeyPairNotFoundException;
 import com.letsblog.common.web.ErrorResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -39,6 +44,31 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(SshKeyPairNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleSshKeyPairNotFound(SshKeyPairNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    @ExceptionHandler(SiteNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleSiteNotFound(SiteNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    @ExceptionHandler(ProjectNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleProjectNotFound(ProjectNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    @ExceptionHandler(ProvisioningException.class)
+    public ResponseEntity<ErrorResponse> handleProvisioningException(ProvisioningException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    @ExceptionHandler(SiteAlreadyProvisionedException.class)
+    public ResponseEntity<ErrorResponse> handleSiteAlreadyProvisionedException(SiteAlreadyProvisionedException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    @ExceptionHandler(AiServiceGenerationException.class)
+    public ResponseEntity<ErrorResponse> handleAiServiceGenerationException(AiServiceGenerationException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(InvalidCustomTagContentException.class)

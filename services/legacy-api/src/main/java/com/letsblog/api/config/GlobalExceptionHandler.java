@@ -5,7 +5,6 @@ import com.letsblog.api.client.AnalyticsServiceException;
 import com.letsblog.api.cms.CmsApiException;
 import com.letsblog.api.cms.agent.AgentOperationException;
 import com.letsblog.api.cms.ssh.SshOperationException;
-import com.letsblog.api.service.AiServiceGenerationException;
 import com.letsblog.api.service.BackupException;
 import com.letsblog.api.service.EmailAlreadyExistsException;
 import com.letsblog.api.service.EmailSendException;
@@ -22,7 +21,6 @@ import com.letsblog.api.service.ProjectNotFoundException;
 import com.letsblog.api.service.ProjectUserNotFoundException;
 import com.letsblog.api.service.ProvisioningException;
 import com.letsblog.api.service.QrCodeGenerationException;
-import com.letsblog.api.service.SiteAlreadyProvisionedException;
 import com.letsblog.api.service.SiteNotFoundException;
 import com.letsblog.api.service.SshKeyPairNotFoundException;
 import com.letsblog.api.service.TwoFactorSecretNotFoundException;
@@ -134,11 +132,6 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 
-    @ExceptionHandler(AiServiceGenerationException.class)
-    public ResponseEntity<ErrorResponse> handleAiServiceGenerationException(AiServiceGenerationException e) {
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
-    }
-
     /** analytics-serviceへの内部ブリッジ呼び出しの失敗(issue #578、#572/#573/#574と同じ方針)。 */
     @ExceptionHandler(AnalyticsServiceException.class)
     public ResponseEntity<ErrorResponse> handleAnalyticsServiceException(AnalyticsServiceException e) {
@@ -149,11 +142,6 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ProvisioningException.class)
     public ResponseEntity<ErrorResponse> handleProvisioningException(ProvisioningException e) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
-    }
-
-    @ExceptionHandler(SiteAlreadyProvisionedException.class)
-    public ResponseEntity<ErrorResponse> handleSiteAlreadyProvisionedException(SiteAlreadyProvisionedException e) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(SshOperationException.class)

@@ -6,25 +6,19 @@ import com.letsblog.api.dto.ApplyToEnvironmentRequest;
 import com.letsblog.api.dto.BulkOperationLogResponse;
 import com.letsblog.api.dto.DeleteSlugRequest;
 import com.letsblog.api.dto.EditTermRequest;
-import com.letsblog.api.dto.UpdateArticleImageResizeDefaultRequest;
-import com.letsblog.api.dto.ProjectCreateRequest;
-import com.letsblog.api.dto.ProjectEnvironmentBindRequest;
-import com.letsblog.api.dto.ProjectResponse;
-import com.letsblog.api.dto.ProjectUpdateRequest;
 import com.letsblog.api.dto.PostComparisonPage;
+import com.letsblog.api.dto.ProjectResponse;
 import com.letsblog.api.dto.ProjectUserResponse;
 import com.letsblog.api.dto.ReconcileStateRequest;
 import com.letsblog.api.dto.StatusComparisonPage;
-import com.letsblog.api.dto.SyncEnvironmentRequest;
 import com.letsblog.api.dto.TermComparisonPage;
 import com.letsblog.api.dto.TermNameRequest;
+import com.letsblog.api.dto.UpdateArticleImageResizeDefaultRequest;
 import com.letsblog.api.dto.UpdateImageContentFilterSettingsRequest;
 import com.letsblog.api.dto.UpdateImageGenerationPromptDefaultsRequest;
 import com.letsblog.api.dto.UpdateImageGenerationSizeDefaultsRequest;
-import com.letsblog.api.dto.UpdateMasterEnvironmentRequest;
 import com.letsblog.api.dto.UpdatePostStatusRequest;
 import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
-import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
 import com.letsblog.api.dto.UpdateProjectUserRequest;
 import com.letsblog.api.ai.MediaGeneratedImageClient;
 import com.letsblog.api.domain.BulkOperationLog;
@@ -34,12 +28,10 @@ import com.letsblog.api.service.BulkManagementService;
 import com.letsblog.api.service.CurrentActorService;
 import com.letsblog.api.service.PluginThemeComparisonService;
 import com.letsblog.api.service.PostComparisonService;
-import com.letsblog.api.service.ProjectEnvironmentSyncService;
 import com.letsblog.api.service.ProjectService;
 import com.letsblog.api.service.ProjectUserSyncService;
 import com.letsblog.api.service.TermComparisonService;
 import jakarta.validation.Valid;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -48,13 +40,24 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.util.List;
 
+/**
+ * プロジェクトの一括管理(bulk-management: カテゴリ/タグ/プラグイン/テーマ/投稿の環境間比較・同期)・
+ * プロジェクトユーザー管理API。
+ *
+ * <p>プロジェクトのCRUD・環境紐付け・環境同期(/api/projects の基本操作)はproject-serviceへ移設した
+ * (issue #577 stage2)。本コントローラは、project-serviceへ移設していないドメイン
+ * (BulkManagementService/TermComparisonService/PluginThemeComparisonService/PostComparisonService/
+ * ProjectUserSyncServiceは、いずれも本stageのスコープ外)向けのサブリソースのみを引き続き提供する。
+ * gateway側は、これらのサブパス({@code /bulk-management/**}・{@code /users/**}・
+ * {@code /asset-images/**})のみlegacy-apiへ、それ以外の{@code /api/projects/**}はproject-serviceへ
+ * ルーティングする(PR説明を参照)。
+ */
 @RestController
 @RequestMapping("/api/projects")
 public class ProjectController {
 
     private final ProjectService projectService;
     private final ProjectUserSyncService projectUserSyncService;
-    private final ProjectEnvironmentSyncService projectEnvironmentSyncService;
     private final BulkManagementService bulkManagementService;
     private final TermComparisonService termComparisonService;
     private final PluginThemeComparisonService pluginThemeComparisonService;
@@ -66,7 +69,6 @@ public class ProjectController {
     public ProjectController(
             ProjectService projectService,
             ProjectUserSyncService projectUserSyncService,
-            ProjectEnvironmentSyncService projectEnvironmentSyncService,
             BulkManagementService bulkManagementService,
             TermComparisonService termComparisonService,
             PluginThemeComparisonService pluginThemeComparisonService,
@@ -76,7 +78,6 @@ public class ProjectController {
             MediaGeneratedImageClient mediaGeneratedImageClient) {
         this.projectService = projectService;
         this.projectUserSyncService = projectUserSyncService;
-        this.projectEnvironmentSyncService = projectEnvironmentSyncService;
         this.bulkManagementService = bulkManagementService;
         this.termComparisonService = termComparisonService;
         this.pluginThemeComparisonService = pluginThemeComparisonService;
@@ -86,65 +87,13 @@ public class ProjectController {
         this.mediaGeneratedImageClient = mediaGeneratedImageClient;
     }
 
-    @PostMapping
-    public ResponseEntity<ProjectResponse> create(@Valid @RequestBody ProjectCreateRequest request) {
-        adminAuthorizationService.requireAdmin();
-        ProjectResponse response = projectService.createProject(request.name(), request.slug());
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
-    }
-
-    @GetMapping
-    public List<ProjectResponse> list(
-            @RequestParam(required = false) String sortBy,
-            @RequestParam(required = false) String sortOrder) {
-        return projectService.listProjects(sortBy, sortOrder);
-    }
-
-    @GetMapping("/{id}")
-    public ProjectResponse get(@PathVariable Long id) {
-        return projectService.getProject(id);
-    }
-
-    @PutMapping("/{id}")
-    public ProjectResponse update(@PathVariable Long id, @Valid @RequestBody ProjectUpdateRequest request) {
-        adminAuthorizationService.requireAdmin();
-        return projectService.updateProject(id, request.name());
-    }
-
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable Long id) {
-        adminAuthorizationService.requireAdmin();
-        projectService.deleteProject(id);
-        return ResponseEntity.noContent().build();
-    }
-
-    @PostMapping("/{id}/environments")
-    public ProjectResponse bindEnvironment(
-            @PathVariable Long id, @Valid @RequestBody ProjectEnvironmentBindRequest request) {
-        adminAuthorizationService.requireAdmin();
-        return projectService.bindEnvironment(id, request.environment(), request.siteId());
-    }
-
-    @DeleteMapping("/{id}/environments/{environment}")
-    public ProjectResponse unbindEnvironment(@PathVariable Long id, @PathVariable String environment) {
-        adminAuthorizationService.requireAdmin();
-        return projectService.unbindEnvironment(id, environment);
-    }
-
-    @PutMapping("/{id}/master-environment")
-    public ProjectResponse updateMasterEnvironment(
-            @PathVariable Long id, @Valid @RequestBody UpdateMasterEnvironmentRequest request) {
-        adminAuthorizationService.requireAdmin();
-        return projectService.updateMasterEnvironment(id, request.masterEnvironment());
-    }
-
-    @PutMapping("/{id}/github-repository")
-    public ProjectResponse updateGithubRepository(
-            @PathVariable Long id, @Valid @RequestBody UpdateProjectGithubRepositoryRequest request) {
-        adminAuthorizationService.requireAdmin();
-        return projectService.updateGithubRepository(id, request);
-    }
-
+    /**
+     * css-selector-prefix・画像生成デフォルト設定は、project_content_settings(content-service)・
+     * project_image_settings(概念上media-service所有だがlegacy-apiのローカルテーブルのまま、issue #571)
+     * への内部ブリッジ/委譲を伴い、project-serviceへ移設したProjectService(#577 stage2)には無い
+     * 依存(ContentServiceClient/ProjectImageSettingsService)のため、legacy-api側のProjectServiceに
+     * 残したこれらのメソッドをそのまま呼び出す(#577の既知の制限。PR説明を参照)。
+     */
     @PutMapping("/{id}/css-selector-prefix")
     public ProjectResponse updateCssSelectorPrefix(
             @PathVariable Long id, @Valid @RequestBody UpdateProjectCssSelectorPrefixRequest request) {
@@ -155,7 +104,8 @@ public class ProjectController {
     /** issue #293: 画像生成時のnegative prompt/画質プロンプトのデフォルト値。 */
     @PutMapping("/{id}/image-generation-prompt-defaults")
     public ProjectResponse updateImageGenerationPromptDefaults(
-            @PathVariable Long id, @Valid @RequestBody UpdateImageGenerationPromptDefaultsRequest request) {
+            @PathVariable Long id,
+            @Valid @RequestBody UpdateImageGenerationPromptDefaultsRequest request) {
         adminAuthorizationService.requireAdmin();
         return projectService.updateImageGenerationPromptDefaults(id, request);
     }
@@ -163,7 +113,8 @@ public class ProjectController {
     /** issue #292: 画像生成時のデフォルトサイズ。 */
     @PutMapping("/{id}/image-generation-size-defaults")
     public ProjectResponse updateImageGenerationSizeDefaults(
-            @PathVariable Long id, @Valid @RequestBody UpdateImageGenerationSizeDefaultsRequest request) {
+            @PathVariable Long id,
+            @Valid @RequestBody UpdateImageGenerationSizeDefaultsRequest request) {
         adminAuthorizationService.requireAdmin();
         return projectService.updateImageGenerationSizeDefaults(id, request);
     }
@@ -171,7 +122,8 @@ public class ProjectController {
     /** issue #291: 記事投稿時に画像をリサイズする長編の目標px。 */
     @PutMapping("/{id}/article-image-resize-default")
     public ProjectResponse updateArticleImageResizeDefault(
-            @PathVariable Long id, @Valid @RequestBody UpdateArticleImageResizeDefaultRequest request) {
+            @PathVariable Long id,
+            @Valid @RequestBody UpdateArticleImageResizeDefaultRequest request) {
         adminAuthorizationService.requireAdmin();
         return projectService.updateArticleImageResizeDefault(id, request);
     }
@@ -179,17 +131,10 @@ public class ProjectController {
     /** issue #532: 画像生成時の不適切コンテンツ(性的/暴力的/差別的表現)のカテゴリ別禁止設定。 */
     @PutMapping("/{id}/image-content-filter-settings")
     public ProjectResponse updateImageContentFilterSettings(
-            @PathVariable Long id, @Valid @RequestBody UpdateImageContentFilterSettingsRequest request) {
+            @PathVariable Long id,
+            @Valid @RequestBody UpdateImageContentFilterSettingsRequest request) {
         adminAuthorizationService.requireAdmin();
         return projectService.updateImageContentFilterSettings(id, request);
-    }
-
-    @PostMapping("/{id}/environments/sync")
-    public ResponseEntity<Void> syncEnvironment(
-            @PathVariable Long id, @Valid @RequestBody SyncEnvironmentRequest request) {
-        adminAuthorizationService.requireAdmin();
-        projectEnvironmentSyncService.sync(id, request.from(), request.to(), request.targets());
-        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{id}/bulk-management/apply")

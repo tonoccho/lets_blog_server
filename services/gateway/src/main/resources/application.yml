@@ -21,21 +21,38 @@ app:
     # 移行期間中、どのルートにもマッチしなかったパスのフォールバック先。
     fallback-uri: ${LEGACY_API_URI:http://api:8080}
     routes:
-      # 以下の3つは、旧nginx設定で個別にタイムアウト延長していたエンドポイントの移設(#560)。
+      # 以下は、旧nginx設定で個別にタイムアウト延長していたエンドポイントの移設(#560)。
       # より広いプレフィックスにマッチする下のルートより先に評価されるよう、
       # 特定度の高いものを先に置く。
+      #
+      # プロジェクトのCRUD・環境紐付け・環境同期はproject-serviceへ移設した(issue #577 stage2)。
+      # environments/syncはenvironmentsSyncのタイムアウト延長対象のためproject-serviceへの専用ルートを残す。
       - id: project-environment-sync
         uri: ${PROJECT_SERVICE_URI:http://api:8080}
         paths:
           - /api/projects/*/environments/sync
         response-timeout: 300s
-      - id: project-bulk-management
-        uri: ${PROJECT_SERVICE_URI:http://api:8080}
+      # 一括管理(bulk-management: カテゴリ/タグ/プラグイン/テーマ/投稿の環境間比較・同期)は
+      # BulkManagementService/TermComparisonService/PluginThemeComparisonService/PostComparisonServiceが
+      # project-serviceへ移設されていない(issue #577 stage2のスコープ外)ため、引き続きlegacy-apiへ
+      # ルーティングする(#577移設時の発見: 元のこのルートエントリはPROJECT_SERVICE_URIを指しており、
+      # 実際のエンドポイント(/bulk-management/apply・/apply-all・/categories/**等)をカバーしていな
+      # かった。実パスを網羅する/**へ修正した上でLEGACY_API_URIへ固定する)。
+      - id: project-bulk-management-legacy
+        uri: ${LEGACY_API_URI:http://api:8080}
         paths:
-          - /api/projects/*/bulk-management
-          - /api/projects/*/bulk-management/upload
-          - /api/projects/*/bulk-management/replay
+          - /api/projects/*/bulk-management/**
         response-timeout: 300s
+      # プロジェクトユーザー管理(ProjectUserSyncService)・ComfyUI生成画像のアセットアップロード
+      # (BulkManagementService)も同じ理由でlegacy-apiに残る。
+      - id: project-users-legacy
+        uri: ${LEGACY_API_URI:http://api:8080}
+        paths:
+          - /api/projects/*/users/**
+      - id: project-asset-images-legacy
+        uri: ${LEGACY_API_URI:http://api:8080}
+        paths:
+          - /api/projects/*/asset-images/**
       # ProjectMediaGarbageCollectionControllerはmedia-serviceへ移設した(#573 stage3)が、パス自体は
       # /api/projects/**配下のまま(既存フロントのURLを変えないため)。より広い/api/projects/**
       # (下のprojectルート、legacy-apiへ向く)より先に評価されるよう、ここに置く。
@@ -63,6 +80,19 @@ app:
         uri: ${ANALYTICS_SERVICE_URI:http://api:8080}
         paths:
           - /api/projects/*/dashboard/**
+      # 画像生成AI/ComfyUI部分(ImageModelService/ComfyUiModelService、上のLLM部分を除く
+      # /api/projects/*/ai-models/**の残り)・プロジェクト単位のGitHubトークン/Brave Search APIキー/
+      # GA/AdSense連携(ProjectApiKeyController、issue #577の「B8と重複しないか要確認」の検討の結果、
+      # ProjectApiKeyServiceは分析/AI資格情報のドメインに深く依存しており本stageでは移設しない判断
+      # とした。PR説明参照)は、いずれもproject-serviceへ移設していないためlegacy-apiに残る。
+      - id: project-ai-models-legacy
+        uri: ${LEGACY_API_URI:http://api:8080}
+        paths:
+          - /api/projects/*/ai-models/**
+      - id: project-api-keys-legacy
+        uri: ${LEGACY_API_URI:http://api:8080}
+        paths:
+          - /api/projects/*/api-keys/**
       # ProjectCustomTagController(プロジェクト詳細のカスタムタグ画面)はcontent-serviceへ移設した
       # (#576)。パス自体は/api/projects/**配下のまま(既存フロントのURLを変えないため)。より広い
       # /api/projects/**(下のprojectルート、project-serviceが未抽出のためlegacy-apiのまま)より
@@ -136,13 +166,12 @@ app:
         uri: ${PROJECT_SERVICE_URI:http://api:8080}
         paths:
           - /api/projects/*/tag-design-settings/**
-      # Project/Site(CMS/WordPress自動プロビジョニング)は#577の後続stageで移設予定のため、
-      # このstageではまだlegacy-apiに残る。PROJECT_SERVICE_URIを共有する上のssh-key-pairs/
-      # tag-design-settingsルートとは異なり、明示的にLEGACY_API_URIへ固定する
-      # (PROJECT_SERVICE_URIが設定されても、Project/Site本体がまだ実装されていない
-      # project-serviceへ誤って転送されないようにするため)。
+      # Project/Site本体(CRUD・環境紐付け・CMS/WordPress自動プロビジョニング・サイト管理)を
+      # project-serviceへ移設した(issue #577 stage2)。上記の、project-serviceへ移設していない
+      # サブパス(bulk-management/users/asset-images/ai-models(LLM以外)/dashboard/api-keys)は
+      # より先に評価されるため、ここへは落ちてこない。
       - id: project
-        uri: ${LEGACY_API_URI:http://api:8080}
+        uri: ${PROJECT_SERVICE_URI:http://api:8080}
         paths:
           - /api/projects/**
           - /api/sites/**
