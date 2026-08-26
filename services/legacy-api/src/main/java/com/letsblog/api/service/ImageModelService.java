@@ -1,8 +1,8 @@
 package com.letsblog.api.service;
 
 import com.letsblog.api.ai.ImageProvider;
+import com.letsblog.api.client.ProjectServiceClient;
 import com.letsblog.api.dto.ImageProviderListResponse;
-import com.letsblog.api.repository.ProjectRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.Arrays;
@@ -13,15 +13,18 @@ import java.util.List;
  * LlmModelServiceと異なり画像生成にはシステム全体の既定プロバイダー設定がないため、
  * 未選択(null)時はCOMFYUIにフォールバックする(既存の動作を維持するため)。
  * データはprojects god-tableの分割(issue #571)によりproject_image_settings(ProjectImageSettingsService)が保持する。
+ * プロジェクトの存在確認はproject-serviceへ内部ブリッジ({@link ProjectServiceClient})経由で行う
+ * (issue #577 stage3。legacy-apiローカルの{@code ProjectRepository}への直接アクセスを廃止した)。
  */
 @Service
 public class ImageModelService {
 
-    private final ProjectRepository projectRepository;
+    private final ProjectServiceClient projectServiceClient;
     private final ProjectImageSettingsService projectImageSettingsService;
 
-    public ImageModelService(ProjectRepository projectRepository, ProjectImageSettingsService projectImageSettingsService) {
-        this.projectRepository = projectRepository;
+    public ImageModelService(
+            ProjectServiceClient projectServiceClient, ProjectImageSettingsService projectImageSettingsService) {
+        this.projectServiceClient = projectServiceClient;
         this.projectImageSettingsService = projectImageSettingsService;
     }
 
@@ -57,8 +60,6 @@ public class ImageModelService {
     }
 
     private void requireProjectExists(Long projectId) {
-        if (!projectRepository.existsById(projectId)) {
-            throw new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません");
-        }
+        projectServiceClient.getProject(projectId);
     }
 }

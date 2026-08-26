@@ -1,9 +1,7 @@
 package com.letsblog.api.integration;
 
-import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.ProjectUser;
 import com.letsblog.api.domain.User;
-import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.ProjectUserRepository;
 import com.letsblog.api.repository.UserRepository;
 import com.letsblog.api.service.ApiKeyService;
@@ -77,9 +75,6 @@ class AuthorizationMatrixIntegrationTest {
 
     @MockitoBean
     private JwtDecoder jwtDecoder;
-
-    @Autowired
-    private ProjectRepository projectRepository;
 
     @Autowired
     private UserRepository userRepository;
@@ -454,15 +449,12 @@ class AuthorizationMatrixIntegrationTest {
     @Test
     @DisplayName("プロジェクトメンバーシップ: 所属プロジェクトはOK、非所属プロジェクトは403、adminは所属不問でOK")
     void projectMembership_プロジェクト間の分離を検証する() throws Exception {
-        Project projectA = new Project();
-        projectA.setName("Project A");
-        projectA.setSlug("project-a-" + System.nanoTime());
-        projectA = projectRepository.save(projectA);
-
-        Project projectB = new Project();
-        projectB.setName("Project B");
-        projectB.setSlug("project-b-" + System.nanoTime());
-        projectB = projectRepository.save(projectB);
+        // requireProjectMemberOrAdmin()はproject_users(このテストが検証するもの)のみを見ており、
+        // projectsテーブルの実在は問わない。projects本体の所有権はproject-serviceへ移った(issue #577)
+        // ため、legacy-apiのローカルProjectRepositoryはもう存在しない。ここではproject_usersの
+        // projectId外部キー相当として一意なIDを直接払い出すだけでよい。
+        long projectAId = System.nanoTime();
+        long projectBId = projectAId + 1;
 
         User user1 = new User();
         user1.setEmail("member-" + System.nanoTime() + "@example.com");
@@ -471,30 +463,33 @@ class AuthorizationMatrixIntegrationTest {
         user1 = userRepository.save(user1);
 
         ProjectUser membership = new ProjectUser();
-        membership.setProjectId(projectA.getId());
+        membership.setProjectId(projectAId);
         membership.setUserId(user1.getId());
         membership.setWpRole("editor");
         projectUserRepository.save(membership);
 
         // User1(プロジェクトAのメンバー)がプロジェクトAのエンドポイントへアクセス -> 403にならない
-        // (issue #576でProjectCustomTagController(/api/projects/{id}/custom-tags)はcontent-serviceへ
-        // 移管されたため、legacy-api側に残るrequireProjectMemberOrAdmin採用エンドポイントである
-        // TagDesignSettingController(/api/projects/{id}/tag-design-settings)で検証する)
-        mockMvc.perform(request(HttpMethod.GET, "/api/projects/" + projectA.getId() + "/tag-design-settings")
+        // (issue #576でProjectCustomTagController(/api/projects/{id}/custom-tags)はcontent-serviceへ、
+        // issue #577 stage1でTagDesignSettingController(/api/projects/{id}/tag-design-settings)は
+        // project-serviceへ移管されたため、legacy-api側に残るrequireProjectMemberOrAdmin採用エンドポイント
+        // であるArticlePreviewController(/api/projects/{id}/preview/theme-css)で検証する。認可チェックは
+        // 後続のプロジェクト参照より先に行われるため、projectId自体がproject-serviceに実在しなくても
+        // 403判定の検証には影響しない)。
+        mockMvc.perform(request(HttpMethod.GET, "/api/projects/" + projectAId + "/preview/theme-css")
                         .header(API_KEY_HEADER, TEST_API_KEY)
                         .header(ACTOR_ID_HEADER, String.valueOf(user1.getId()))
                         .header(ACTOR_ROLE_HEADER, "user"))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(403));
 
         // User1がプロジェクトB(非所属)のエンドポイントへアクセス -> 403
-        mockMvc.perform(request(HttpMethod.GET, "/api/projects/" + projectB.getId() + "/tag-design-settings")
+        mockMvc.perform(request(HttpMethod.GET, "/api/projects/" + projectBId + "/preview/theme-css")
                         .header(API_KEY_HEADER, TEST_API_KEY)
                         .header(ACTOR_ID_HEADER, String.valueOf(user1.getId()))
                         .header(ACTOR_ROLE_HEADER, "user"))
                 .andExpect(status().isForbidden());
 
         // adminはプロジェクトB(User1は非所属)でも403にならない(admin全プロジェクト横断バイパス)
-        mockMvc.perform(request(HttpMethod.GET, "/api/projects/" + projectB.getId() + "/tag-design-settings")
+        mockMvc.perform(request(HttpMethod.GET, "/api/projects/" + projectBId + "/preview/theme-css")
                         .header(API_KEY_HEADER, TEST_API_KEY)
                         .header(ACTOR_ID_HEADER, String.valueOf(user1.getId()))
                         .header(ACTOR_ROLE_HEADER, "admin"))

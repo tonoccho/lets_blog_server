@@ -1,13 +1,18 @@
 package com.letsblog.project.controller;
 
+import com.letsblog.project.dto.GithubTokenBridgeResponse;
 import com.letsblog.project.dto.ProjectBridgeResponse;
+import com.letsblog.project.dto.SetGithubTokenBridgeRequest;
 import com.letsblog.project.dto.SiteBridgeResponse;
 import com.letsblog.project.repository.SiteRepository;
 import com.letsblog.project.service.ProjectService;
 import java.util.List;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -32,6 +37,23 @@ public class ProjectInternalController {
     @GetMapping("/api/internal/project/projects/{projectId}")
     public ProjectBridgeResponse project(@PathVariable Long projectId) {
         return ProjectBridgeResponse.from(projectService.getProjectEntity(projectId));
+    }
+
+    /** legacy-apiのProjectApiKeyServiceが使う、GitHubトークン(暗号化済みバイト列)の取得。 */
+    @GetMapping("/api/internal/project/projects/{projectId}/github-token")
+    public GithubTokenBridgeResponse githubToken(@PathVariable Long projectId) {
+        byte[] encryptedToken = projectService.getGithubTokenEncrypted(projectId);
+        return new GithubTokenBridgeResponse(encryptedToken != null && encryptedToken.length > 0, encryptedToken);
+    }
+
+    @PutMapping("/api/internal/project/projects/{projectId}/github-token")
+    public void setGithubToken(@PathVariable Long projectId, @RequestBody SetGithubTokenBridgeRequest request) {
+        projectService.setGithubTokenEncrypted(projectId, request.encryptedToken());
+    }
+
+    @DeleteMapping("/api/internal/project/projects/{projectId}/github-token")
+    public void clearGithubToken(@PathVariable Long projectId) {
+        projectService.setGithubTokenEncrypted(projectId, null);
     }
 
     public record ProjectIdResponse(Long projectId) {

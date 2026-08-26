@@ -27,9 +27,9 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p>プロジェクトの基本情報(存在確認・masterEnvironment・環境ごとのsiteId・githubRepository等)自体は、
  * {@link ProjectServiceClient}経由でproject-serviceから取得する(issue #577 stage3。旧
- * {@code ProjectRepository}(ローカルJPA)への直接アクセスは、ここでは廃止した。ただし
- * {@link ProjectApiKeyService}はGitHubトークン(project.githubTokenEncrypted)の読み書きのため、
- * 別途{@code ProjectRepository}を直接使い続ける。分析/AI資格情報ドメインのため#577スコープ外)。
+ * {@code ProjectRepository}(ローカルJPA)は削除した。{@link ProjectApiKeyService}のGitHubトークン
+ * 読み書きも、同じ{@link ProjectServiceClient}の専用ブリッジ({@code getGithubToken}/{@code setGithubToken})
+ * 経由に切り替えた。分析/AI資格情報ドメインのためProjectApiKeyService自体は#577スコープ外)。
  */
 @Service
 public class ProjectService {

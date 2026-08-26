@@ -5,8 +5,8 @@ import com.letsblog.api.ai.ComfyUiClient;
 import com.letsblog.api.ai.MediaComfyUiClient;
 import com.letsblog.api.client.GenerationJobClient;
 import com.letsblog.api.client.GenerationJobSummary;
+import com.letsblog.api.client.ProjectServiceClient;
 import com.letsblog.api.dto.GenerationJobResponse;
-import com.letsblog.api.repository.ProjectRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -38,7 +38,7 @@ class ComfyUiModelServiceTest {
     @Mock
     private MediaComfyUiClient mediaComfyUiClient;
     @Mock
-    private ProjectRepository projectRepository;
+    private ProjectServiceClient projectServiceClient;
     @Mock
     private ProjectImageSettingsService projectImageSettingsService;
     @Mock
@@ -49,8 +49,13 @@ class ComfyUiModelServiceTest {
     @BeforeEach
     void setUp() {
         service = new ComfyUiModelService(
-                comfyUiClient, mediaComfyUiClient, projectRepository, projectImageSettingsService,
+                comfyUiClient, mediaComfyUiClient, projectServiceClient, projectImageSettingsService,
                 generationJobClient, new ObjectMapper(), "v1-5-pruned-emaonly.safetensors");
+    }
+
+    private ProjectServiceClient.ProjectBridge existingProject(Long id) {
+        LocalDateTime now = LocalDateTime.now();
+        return new ProjectServiceClient.ProjectBridge(id, "テストプロジェクト", "test", "test", null, null, null, null, now, now);
     }
 
     @Test
@@ -94,7 +99,7 @@ class ComfyUiModelServiceTest {
 
     @Test
     void getSelectedCheckpoint_未選択ならグローバルデフォルトにフォールバックする() {
-        when(projectRepository.existsById(1L)).thenReturn(true);
+        when(projectServiceClient.getProject(1L)).thenReturn(existingProject(1L));
         when(projectImageSettingsService.getComfyuiCheckpoint(1L)).thenReturn(null);
 
         assertEquals("v1-5-pruned-emaonly.safetensors", service.getSelectedCheckpoint(1L));
@@ -103,6 +108,6 @@ class ComfyUiModelServiceTest {
     @Test
     void getSelectedCheckpointOrGlobalDefault_projectId未指定ならプロジェクト存在確認せずグローバルデフォルトを返す() {
         assertEquals("v1-5-pruned-emaonly.safetensors", service.getSelectedCheckpointOrGlobalDefault(null));
-        verify(projectRepository, never()).existsById(any());
+        verify(projectServiceClient, never()).getProject(any());
     }
 }

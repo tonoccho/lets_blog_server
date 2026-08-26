@@ -5,9 +5,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.client.AiProjectSettingsClient;
 import com.letsblog.api.client.AnalyticsProjectSettingsClient;
+import com.letsblog.api.client.ProjectServiceClient;
 import com.letsblog.common.crypto.CredentialCipher;
-import com.letsblog.api.domain.Project;
-import com.letsblog.api.repository.ProjectRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,12 +18,16 @@ import org.springframework.transaction.annotation.Transactional;
  * GA/AdSenseはanalytics_credentialsにそれぞれ保持する。project_ai_settingsはissue #574でai-serviceへ、
  * analytics_credentialsはissue #578でanalytics-serviceへそれぞれ移管されたため、Brave Search APIキー/
  * GA/AdSenseの読み書きはいずれも内部ブリッジ({@link AiProjectSettingsClient}/
- * {@link AnalyticsProjectSettingsClient})経由に委ねる。
+ * {@link AnalyticsProjectSettingsClient})経由に委ねる。GitHubトークン(projects.github_token_encrypted)
+ * の所有権はproject-serviceへ移った(issue #577 stage2)ため、{@link ProjectServiceClient}経由の内部
+ * ブリッジで読み書きする(stage3で、legacy-apiローカルの{@code ProjectRepository}への直接アクセスを廃止した。
+ * project-service側で新規作成されたプロジェクトはlegacy-apiのローカルprojectsテーブルに行を持たないため、
+ * ローカル参照のままでは全ての新規プロジェクトでNotFoundになっていた欠陥の修正でもある)。
  */
 @Service
 public class ProjectApiKeyService {
 
-    private final ProjectRepository projectRepository;
+    private final ProjectServiceClient projectServiceClient;
     private final AiProjectSettingsClient aiProjectSettingsClient;
     private final AnalyticsProjectSettingsClient analyticsProjectSettingsClient;
     private final CredentialCipher credentialCipher;
@@ -33,14 +36,14 @@ public class ProjectApiKeyService {
     private final ObjectMapper objectMapper;
 
     public ProjectApiKeyService(
-            ProjectRepository projectRepository,
+            ProjectServiceClient projectServiceClient,
             AiProjectSettingsClient aiProjectSettingsClient,
             AnalyticsProjectSettingsClient analyticsProjectSettingsClient,
             CredentialCipher credentialCipher,
             UserService userService,
             AdminAuthorizationService adminAuthorizationService,
             ObjectMapper objectMapper) {
-        this.projectRepository = projectRepository;
+        this.projectServiceClient = projectServiceClient;
         this.aiProjectSettingsClient = aiProjectSettingsClient;
         this.analyticsProjectSettingsClient = analyticsProjectSettingsClient;
         this.credentialCipher = credentialCipher;
@@ -52,7 +55,7 @@ public class ProjectApiKeyService {
     @Transactional(readOnly = true)
     public boolean isGithubTokenConfigured(Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        return getProject(projectId).hasGithubToken();
+        return projectServiceClient.getGithubToken(projectId).configured();
     }
 
     @Transactional(readOnly = true)
@@ -65,17 +68,13 @@ public class ProjectApiKeyService {
     @Transactional
     public void setGithubToken(Long projectId, String token) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        Project project = getProject(projectId);
-        project.setGithubTokenEncrypted(credentialCipher.encrypt(token));
-        projectRepository.save(project);
+        projectServiceClient.setGithubToken(projectId, credentialCipher.encrypt(token));
     }
 
     @Transactional
     public void clearGithubToken(Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        Project project = getProject(projectId);
-        project.setGithubTokenEncrypted(null);
-        projectRepository.save(project);
+        projectServiceClient.setGithubToken(projectId, null);
     }
 
     @Transactional
@@ -191,19 +190,14 @@ public class ProjectApiKeyService {
      */
     @Transactional(readOnly = true)
     public String resolveGithubToken(Long projectId, Long actorUserId) {
-        Project project = getProject(projectId);
-        if (project.hasGithubToken()) {
-            return credentialCipher.decrypt(project.getGithubTokenEncrypted());
+        ProjectServiceClient.GithubTokenBridge token = projectServiceClient.getGithubToken(projectId);
+        if (token.configured()) {
+            return credentialCipher.decrypt(token.encryptedToken());
         }
         return userService.getDecryptedGithubToken(actorUserId);
     }
 
-    private Project getProject(Long projectId) {
-        return projectRepository.findById(projectId)
-                .orElseThrow(() -> new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません"));
-    }
-
     private void requireProjectExists(Long projectId) {
-        getProject(projectId);
+        projectServiceClient.getProject(projectId);
     }
 }

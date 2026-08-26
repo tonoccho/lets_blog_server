@@ -29,7 +29,13 @@ import org.springframework.stereotype.Component;
  * 基本情報・CMS認証情報を取得する({@link com.letsblog.api.service.ProjectService}/
  * {@link com.letsblog.api.service.SiteService}がこのクライアントを内部で使い、legacy-apiの
  * ローカルJPAエンティティ(旧{@code ProjectRepository}/{@code SiteRepository})を置き換える。
- * issue #577 stage3)。
+ * issue #577 stage3)。{@link com.letsblog.api.service.ProjectApiKeyService}/
+ * {@link com.letsblog.api.service.AdSenseReportService}/{@link com.letsblog.api.service.GoogleAnalyticsReportService}/
+ * {@code ImageModelService}/{@code ComfyUiModelService}(いずれも分析/AI資格情報ドメインのため#577
+ * スコープ外)も、プロジェクトの存在確認・GitHubトークンの読み書きにこのクライアントを使う(stage3で、
+ * これらが個別に持っていたローカル{@code ProjectRepository}参照を置き換えた。project-service側で
+ * 新規作成されたプロジェクトはlegacy-apiのローカルprojectsテーブルに行を持たないため、ローカル
+ * 参照のままでは全ての新規プロジェクトでNotFoundになっていた欠陥の修正でもある)。
  *
  * <p>認証は、project-service側の他の内部ブリッジ({@link com.letsblog.project.client.LegacyApiBridgeClient}等)
  * と同じ暫定策(呼び出し元のBearerトークンをそのまま転送する)。
@@ -65,6 +71,12 @@ public class ProjectServiceClient {
     }
 
     public record SiteCredentialsBridge(Long siteId, CmsType cmsType, Map<String, String> credentials) {
+    }
+
+    public record GithubTokenBridge(boolean configured, byte[] encryptedToken) {
+    }
+
+    private record SetGithubTokenRequest(byte[] encryptedToken) {
     }
 
     public record TagDesignBridge(
@@ -166,6 +178,47 @@ public class ProjectServiceClient {
                     "project-serviceのサイト認証情報照会呼び出しに失敗しました: " + bodyOrMessage(e), e);
         } catch (RestClientException e) {
             throw new IllegalStateException("project-serviceのサイト認証情報照会呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /** {@code ProjectApiKeyService}が使う。未登録なら{@link ProjectNotFoundException}。 */
+    public GithubTokenBridge getGithubToken(Long projectId) {
+        try {
+            GithubTokenBridge result = authorized(restClient.get()
+                    .uri("/api/internal/project/projects/{projectId}/github-token", projectId))
+                    .retrieve()
+                    .body(GithubTokenBridge.class);
+            if (result == null) {
+                throw new IllegalStateException("project-serviceから空の応答を受け取りました");
+            }
+            return result;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode() == HttpStatus.NOT_FOUND) {
+                throw new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません");
+            }
+            throw new IllegalStateException(
+                    "project-serviceのGitHubトークン照会呼び出しに失敗しました: " + bodyOrMessage(e), e);
+        } catch (RestClientException e) {
+            throw new IllegalStateException("project-serviceのGitHubトークン照会呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /** {@code ProjectApiKeyService}が使う。 */
+    public void setGithubToken(Long projectId, byte[] encryptedToken) {
+        try {
+            authorized(restClient.put()
+                    .uri("/api/internal/project/projects/{projectId}/github-token", projectId)
+                    .body(new SetGithubTokenRequest(encryptedToken)))
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode() == HttpStatus.NOT_FOUND) {
+                throw new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません");
+            }
+            throw new IllegalStateException(
+                    "project-serviceのGitHubトークン更新呼び出しに失敗しました: " + bodyOrMessage(e), e);
+        } catch (RestClientException e) {
+            throw new IllegalStateException("project-serviceのGitHubトークン更新呼び出しに失敗しました: " + e.getMessage(), e);
         }
     }
 

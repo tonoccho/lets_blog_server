@@ -5,9 +5,9 @@ import com.letsblog.api.ai.ComfyUiClient;
 import com.letsblog.api.ai.MediaComfyUiClient;
 import com.letsblog.api.client.GenerationJobClient;
 import com.letsblog.api.client.GenerationJobSummary;
+import com.letsblog.api.client.ProjectServiceClient;
 import com.letsblog.api.dto.ComfyUiCheckpointListResponse;
 import com.letsblog.api.dto.GenerationJobResponse;
-import com.letsblog.api.repository.ProjectRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -22,14 +22,15 @@ import java.util.Map;
  *
  * <p>issue #574でgeneration_jobsテーブルの所有権がai-serviceへ移管されたため、ジョブの作成は
  * {@link GenerationJobClient}経由でai-serviceへ委譲する(以前はGenerationJobRepositoryで直接
- * 書き込んでいた)。
+ * 書き込んでいた)。プロジェクトの存在確認はproject-serviceへ内部ブリッジ({@link ProjectServiceClient})
+ * 経由で行う(issue #577 stage3。legacy-apiローカルの{@code ProjectRepository}への直接アクセスを廃止した)。
  */
 @Service
 public class ComfyUiModelService {
 
     private final ComfyUiClient comfyUiClient;
     private final MediaComfyUiClient mediaComfyUiClient;
-    private final ProjectRepository projectRepository;
+    private final ProjectServiceClient projectServiceClient;
     private final ProjectImageSettingsService projectImageSettingsService;
     private final GenerationJobClient generationJobClient;
     private final ObjectMapper objectMapper;
@@ -38,14 +39,14 @@ public class ComfyUiModelService {
     public ComfyUiModelService(
             ComfyUiClient comfyUiClient,
             MediaComfyUiClient mediaComfyUiClient,
-            ProjectRepository projectRepository,
+            ProjectServiceClient projectServiceClient,
             ProjectImageSettingsService projectImageSettingsService,
             GenerationJobClient generationJobClient,
             ObjectMapper objectMapper,
             @Value("${app.comfyui-checkpoint}") String globalDefaultCheckpoint) {
         this.comfyUiClient = comfyUiClient;
         this.mediaComfyUiClient = mediaComfyUiClient;
-        this.projectRepository = projectRepository;
+        this.projectServiceClient = projectServiceClient;
         this.projectImageSettingsService = projectImageSettingsService;
         this.generationJobClient = generationJobClient;
         this.objectMapper = objectMapper;
@@ -105,9 +106,7 @@ public class ComfyUiModelService {
     }
 
     private void requireProjectExists(Long projectId) {
-        if (!projectRepository.existsById(projectId)) {
-            throw new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません");
-        }
+        projectServiceClient.getProject(projectId);
     }
 
     private GenerationJobSummary startJob(String type, Map<String, String> requestPayload) {
