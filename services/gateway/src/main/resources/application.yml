@@ -175,10 +175,20 @@ app:
         uri: ${PROJECT_SERVICE_URI:http://api:8080}
         paths:
           - /api/projects/*/tag-design-settings/**
+      # ArticlePlanController(記事プラン壁打ちチャット・セッション管理)はai-serviceへ移設済み
+      # (issue #574)。パス自体は/api/projects/**配下のまま(既存フロントのURLを変えないため)。
+      # より広い/api/projects/**(下のprojectルート)より先にここでマッチさせる
+      # (project-ai-models-llmと同じパターン)。このルートが欠けていたため、記事プラン関連の
+      # 全リクエストがprojectルートへ誤って先勝ちマッチし、project-serviceに存在しない
+      # エンドポイントとして到達不能になっていた(issue #642のcontract testで検出)。
+      - id: project-article-plan
+        uri: ${AI_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/projects/*/article-plan/**
       # Project/Site本体(CRUD・環境紐付け・CMS/WordPress自動プロビジョニング・サイト管理)を
       # project-serviceへ移設した(issue #577 stage2)。上記の、project-serviceへ移設していない
-      # サブパス(bulk-management/users/asset-images/ai-models(LLM以外)/dashboard/api-keys)は
-      # より先に評価されるため、ここへは落ちてこない。
+      # サブパス(bulk-management/users/asset-images/ai-models(LLM以外)/dashboard/api-keys/
+      # article-plan)はより先に評価されるため、ここへは落ちてこない。
       - id: project
         uri: ${PROJECT_SERVICE_URI:http://api:8080}
         paths:
