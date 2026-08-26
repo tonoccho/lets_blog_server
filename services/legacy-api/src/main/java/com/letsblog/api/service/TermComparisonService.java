@@ -10,8 +10,6 @@ import com.letsblog.api.dto.TermComparisonPage;
 import com.letsblog.api.dto.TermComparisonRow;
 import com.letsblog.api.dto.TermEnvironmentValue;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient;
-import com.letsblog.api.repository.ProjectRepository;
-import com.letsblog.api.repository.SiteRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,25 +43,22 @@ public class TermComparisonService {
 
     private static final List<String> ENVIRONMENT_ORDER = List.of("local", "test", "production");
 
-    private final ProjectRepository projectRepository;
-    private final SiteRepository siteRepository;
     private final WordPressBulkManagementClient bulkManagementClient;
     private final BulkManagementService bulkManagementService;
     private final SiteService siteService;
+    private final ProjectService projectService;
     private final WordPressSshOperations sshOperations;
 
     public TermComparisonService(
-            ProjectRepository projectRepository,
-            SiteRepository siteRepository,
             WordPressBulkManagementClient bulkManagementClient,
             BulkManagementService bulkManagementService,
             SiteService siteService,
+            ProjectService projectService,
             WordPressSshOperations sshOperations) {
-        this.projectRepository = projectRepository;
-        this.siteRepository = siteRepository;
         this.bulkManagementClient = bulkManagementClient;
         this.bulkManagementService = bulkManagementService;
         this.siteService = siteService;
+        this.projectService = projectService;
         this.sshOperations = sshOperations;
     }
 
@@ -435,12 +430,11 @@ public class TermComparisonService {
             case "production" -> project.getProductionSiteId();
             default -> null;
         };
-        return siteId == null ? null : siteRepository.findById(siteId).orElse(null);
+        return siteId == null ? null : siteService.getById(siteId).orElse(null);
     }
 
     private Project getProject(Long projectId) {
-        return projectRepository.findById(projectId)
-                .orElseThrow(() -> new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません"));
+        return projectService.getProjectEntity(projectId);
     }
 
     private record CategoryInfo(String name, String slug, String parentSlug, String description) {

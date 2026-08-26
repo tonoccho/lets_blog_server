@@ -41,10 +41,10 @@ public final class EventExchanges {
     /** 生成画像の利用可能化。発行元: media。購読: content。 */
     public static final String IMAGE_GENERATED_ROUTING_KEY = "image.generated";
 
-    /** プロジェクト削除に伴う各サービスの設定・データ削除。発行元: project(現状はlegacy-apiが代行)。購読: 全サービス。 */
+    /** プロジェクト削除に伴う各サービスの設定・データ削除。発行元: project(issue #577で抽出済み)。購読: 全サービス。 */
     public static final String PROJECT_DELETED_ROUTING_KEY = "project.deleted";
 
-    /** サイト削除に伴う参照整理。発行元: project(現状はlegacy-apiが代行)。購読: publishing, content。 */
+    /** サイト削除に伴う参照整理。発行元: project(issue #577で抽出済み)。購読: publishing, content。 */
     public static final String SITE_DELETED_ROUTING_KEY = "site.deleted";
 
     /** ユーザー無効化に伴う権限キャッシュの破棄。発行元: identity。購読: 全サービス。 */

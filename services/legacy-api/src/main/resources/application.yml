@@ -133,6 +133,11 @@ app:
   # コード交換をanalytics-serviceへ委譲する(issue #578、com.letsblog.api.client.
   # AnalyticsProjectSettingsClient参照)。
   analytics-service-uri: ${ANALYTICS_SERVICE_URI:http://localhost:8080}
+  # Project/Site本体の所有権がproject-serviceへ移った(issue #577 stage2)ことに伴い、legacy-apiに残る
+  # 一括管理/環境間比較・投稿publish/delete・記事プレビュー等(いずれもCMSアダプタ・SSH実行への深い依存の
+  # ため#577では移設せずlegacy-apiに残る)が、プロジェクト/サイトの基本情報・CMS認証情報を
+  # 参照するための内部ブリッジ(issue #577 stage3、com.letsblog.api.client.ProjectServiceClient参照)。
+  project-service-uri: ${PROJECT_SERVICE_URI:http://localhost:8080}
   wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
   wordpress-provision-token: ${WP_PROVISION_TOKEN:}
   bulk-upload-storage-path: ${BULK_UPLOAD_STORAGE_PATH:/app/data/bulk-uploads}

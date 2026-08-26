@@ -2,40 +2,42 @@ package com.letsblog.api.service;
 
 import com.letsblog.api.aop.AuditLog;
 import com.letsblog.api.client.ContentServiceClient;
+import com.letsblog.api.client.ProjectServiceClient;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.ProjectImageSettings;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.ProjectResponse;
+import com.letsblog.api.dto.SiteResponse;
 import com.letsblog.api.dto.UpdateArticleImageResizeDefaultRequest;
 import com.letsblog.api.dto.UpdateImageContentFilterSettingsRequest;
 import com.letsblog.api.dto.UpdateImageGenerationPromptDefaultsRequest;
 import com.letsblog.api.dto.UpdateImageGenerationSizeDefaultsRequest;
 import com.letsblog.api.dto.UpdateProjectCssSelectorPrefixRequest;
-import com.letsblog.api.dto.UpdateProjectGithubRepositoryRequest;
-import com.letsblog.api.messaging.DomainEventPublisher;
-import com.letsblog.api.repository.ProjectRepository;
-import com.letsblog.api.repository.SiteRepository;
-import com.letsblog.api.dto.SiteResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
-import java.util.Set;
-
+/**
+ * プロジェクトの一部の設定(CSSセレクタプリフィックス・画像生成デフォルト設定)の読み書き。
+ * プロジェクトのCRUD・環境紐付け・環境同期はproject-serviceへ移設した(issue #577 stage2)。
+ * これらの設定は、project-serviceの{@code ProjectService}には無い依存
+ * (content-serviceへの内部ブリッジ、legacy-apiローカルの{@code ProjectImageSettingsService})を伴うため、
+ * legacy-api側に残った(#577の既知の制限、{@code ProjectController}のjavadoc参照)。
+ *
+ * <p>プロジェクトの基本情報(存在確認・masterEnvironment・環境ごとのsiteId・githubRepository等)自体は、
+ * {@link ProjectServiceClient}経由でproject-serviceから取得する(issue #577 stage3。旧
+ * {@code ProjectRepository}(ローカルJPA)は削除した。{@link ProjectApiKeyService}のGitHubトークン
+ * 読み書きも、同じ{@link ProjectServiceClient}の専用ブリッジ({@code getGithubToken}/{@code setGithubToken})
+ * 経由に切り替えた。分析/AI資格情報ドメインのためProjectApiKeyService自体は#577スコープ外)。
+ */
 @Service
 public class ProjectService {
 
-    private static final Set<String> VALID_ENVIRONMENTS = Set.of("local", "test", "production");
-
-    private final ProjectRepository projectRepository;
-    private final SiteRepository siteRepository;
+    private final ProjectServiceClient projectServiceClient;
     private final SiteService siteService;
-    private final BulkUploadStorageService bulkUploadStorageService;
     private final ProjectImageSettingsService projectImageSettingsService;
     private final ContentServiceClient contentServiceClient;
-    private final DomainEventPublisher domainEventPublisher;
     private final String globalDefaultNegativePrompt;
     private final String globalDefaultQualityPrompt;
     private final int globalDefaultGeneratedImageWidth;
@@ -46,13 +48,10 @@ public class ProjectService {
     private final boolean globalDefaultBlockDiscriminatoryContent;
 
     public ProjectService(
-            ProjectRepository projectRepository,
-            SiteRepository siteRepository,
+            ProjectServiceClient projectServiceClient,
             SiteService siteService,
-            BulkUploadStorageService bulkUploadStorageService,
             ProjectImageSettingsService projectImageSettingsService,
             ContentServiceClient contentServiceClient,
-            DomainEventPublisher domainEventPublisher,
             @Value("${app.default-negative-prompt}") String globalDefaultNegativePrompt,
             @Value("${app.default-quality-prompt}") String globalDefaultQualityPrompt,
             @Value("${app.default-generated-image-width}") int globalDefaultGeneratedImageWidth,
@@ -61,13 +60,10 @@ public class ProjectService {
             @Value("${app.default-block-sexual-content}") boolean globalDefaultBlockSexualContent,
             @Value("${app.default-block-violent-content}") boolean globalDefaultBlockViolentContent,
             @Value("${app.default-block-discriminatory-content}") boolean globalDefaultBlockDiscriminatoryContent) {
-        this.projectRepository = projectRepository;
-        this.siteRepository = siteRepository;
+        this.projectServiceClient = projectServiceClient;
         this.siteService = siteService;
-        this.bulkUploadStorageService = bulkUploadStorageService;
         this.projectImageSettingsService = projectImageSettingsService;
         this.contentServiceClient = contentServiceClient;
-        this.domainEventPublisher = domainEventPublisher;
         this.globalDefaultNegativePrompt = globalDefaultNegativePrompt;
         this.globalDefaultQualityPrompt = globalDefaultQualityPrompt;
         this.globalDefaultGeneratedImageWidth = globalDefaultGeneratedImageWidth;
@@ -78,149 +74,10 @@ public class ProjectService {
         this.globalDefaultBlockDiscriminatoryContent = globalDefaultBlockDiscriminatoryContent;
     }
 
-    @AuditLog(action = AuditLogAction.PROJECT_CREATED, resourceType = "PROJECT")
-    @Transactional
-    public ProjectResponse createProject(String name, String slug) {
-        if (projectRepository.existsBySlug(slug)) {
-            throw new IllegalArgumentException("slug '" + slug + "' は既に使用されています");
-        }
-        Project project = new Project();
-        project.setName(name);
-        project.setSlug(slug);
-        return toResponse(projectRepository.save(project));
-    }
-
+    /** {@code ProjectController#applyBulkOperation}が使う、マスター環境の判定用。 */
     @Transactional(readOnly = true)
     public ProjectResponse getProject(Long projectId) {
         return toResponse(getProjectEntity(projectId));
-    }
-
-    @Transactional(readOnly = true)
-    public List<ProjectResponse> listProjects(String sortBy, String sortOrder) {
-        List<Project> projects = projectRepository.findAll();
-
-        if (sortBy != null && !sortBy.isBlank()) {
-            projects = sortProjects(projects, sortBy, sortOrder);
-        } else {
-            projects = sortProjects(projects, "createdAt", "desc");
-        }
-
-        return projects.stream().map(this::toResponse).toList();
-    }
-
-    private List<Project> sortProjects(List<Project> projects, String sortBy, String sortOrder) {
-        boolean ascending = !"desc".equalsIgnoreCase(sortOrder);
-
-        projects.sort((a, b) -> {
-            int result = switch (sortBy) {
-                case "name" -> a.getName().compareToIgnoreCase(b.getName());
-                case "slug" -> a.getSlug().compareToIgnoreCase(b.getSlug());
-                case "createdAt" -> a.getCreatedAt().compareTo(b.getCreatedAt());
-                default -> 0;
-            };
-            return ascending ? result : -result;
-        });
-
-        return projects;
-    }
-
-    @AuditLog(action = AuditLogAction.PROJECT_UPDATED, resourceType = "PROJECT")
-    @Transactional
-    public ProjectResponse updateProject(Long projectId, String name) {
-        Project project = getProjectEntity(projectId);
-        project.setName(name);
-        return toResponse(projectRepository.save(project));
-    }
-
-    @AuditLog(action = AuditLogAction.PROJECT_DELETED, resourceType = "PROJECT")
-    @Transactional
-    public void deleteProject(Long projectId) {
-        if (!projectRepository.existsById(projectId)) {
-            throw new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません");
-        }
-        // project_users・bulk_operation_logs・project_image_settingsはlegacy-api(lets_blogスキーマ)
-        // 内の同一スキーマFKによりDB側のON DELETE CASCADEで連動削除される。
-        // project_ai_settings(ai-service)・analytics_credentials(analytics-service)・
-        // project_content_settings(content-service)は、スキーマ分割(ADR-0004)でlegacy-apiとは
-        // 別スキーマへ抽出済みのためクロススキーマFKを持てず、DB側のCASCADEは効かない
-        // (かつてはここに同じ説明でCASCADEされる旨のコメントがあったが、各サービスへの抽出後は
-        // 誤りになっていた)。project.deletedイベント(letsblog.events、issue #580)経由で
-        // 各サービスが自スキーマ内の該当行を非同期に削除する。
-        projectRepository.deleteById(projectId);
-        // 一括管理でアップロードされたzipファイルはDBのCASCADEでは消えないため、明示的に削除する
-        bulkUploadStorageService.deleteAll(projectId);
-        domainEventPublisher.publishProjectDeleted(projectId);
-    }
-
-    @AuditLog(action = AuditLogAction.PROJECT_ENVIRONMENT_BOUND, resourceType = "PROJECT")
-    @Transactional
-    public ProjectResponse bindEnvironment(Long projectId, String environment, Long siteId) {
-        Project project = getProjectEntity(projectId);
-        requireValidEnvironment(environment);
-        if (!siteRepository.existsById(siteId)) {
-            throw new SiteNotFoundException("id " + siteId + " のサイトは登録されていません");
-        }
-        projectRepository.findByLocalSiteIdOrTestSiteIdOrProductionSiteId(siteId, siteId, siteId)
-                .filter(p -> !p.getId().equals(projectId))
-                .ifPresent(p -> {
-                    throw new IllegalArgumentException(
-                            "このサイトは既にプロジェクト「" + p.getName() + "」に紐付けられています");
-                });
-
-        switch (environment) {
-            case "local" -> project.setLocalSiteId(siteId);
-            case "test" -> project.setTestSiteId(siteId);
-            case "production" -> project.setProductionSiteId(siteId);
-            default -> throw new IllegalArgumentException("environment は local/test/production のいずれかを指定してください");
-        }
-        return toResponse(projectRepository.save(project));
-    }
-
-    @AuditLog(action = AuditLogAction.PROJECT_ENVIRONMENT_UNBOUND, resourceType = "PROJECT")
-    @Transactional
-    public ProjectResponse unbindEnvironment(Long projectId, String environment) {
-        Project project = getProjectEntity(projectId);
-        requireValidEnvironment(environment);
-        switch (environment) {
-            case "local" -> project.setLocalSiteId(null);
-            case "test" -> project.setTestSiteId(null);
-            case "production" -> project.setProductionSiteId(null);
-            default -> throw new IllegalArgumentException("environment は local/test/production のいずれかを指定してください");
-        }
-        return toResponse(projectRepository.save(project));
-    }
-
-    @AuditLog(action = AuditLogAction.PROJECT_UPDATED, resourceType = "PROJECT")
-    @Transactional
-    public ProjectResponse updateMasterEnvironment(Long projectId, String masterEnvironment) {
-        if (!Set.of("test", "production").contains(masterEnvironment)) {
-            throw new IllegalArgumentException("マスター環境はtest/productionのいずれかを指定してください");
-        }
-        Project project = getProjectEntity(projectId);
-        project.setMasterEnvironment(masterEnvironment);
-        return toResponse(projectRepository.save(project));
-    }
-
-    /**
-     * 指定サイトが所属するプロジェクトのIDを返す(いずれの環境にも紐付いていなければnull)。
-     * カスタムタグのプロジェクトスコープ判定(投稿レンダリング時)に使う。
-     */
-    @Transactional(readOnly = true)
-    public Long findProjectIdBySiteId(Long siteId) {
-        return projectRepository.findByLocalSiteIdOrTestSiteIdOrProductionSiteId(siteId, siteId, siteId)
-                .map(Project::getId)
-                .orElse(null);
-    }
-
-    @AuditLog(action = AuditLogAction.PROJECT_UPDATED, resourceType = "PROJECT")
-    @Transactional
-    public ProjectResponse updateGithubRepository(Long projectId, UpdateProjectGithubRepositoryRequest request) {
-        Project project = getProjectEntity(projectId);
-        String repo = request.githubRepository() == null || request.githubRepository().isBlank()
-                ? null
-                : request.githubRepository();
-        project.setGithubRepository(repo);
-        return toResponse(projectRepository.save(project));
     }
 
     @AuditLog(action = AuditLogAction.PROJECT_UPDATED, resourceType = "PROJECT")
@@ -393,20 +250,22 @@ public class ProjectService {
         return projectValue == null ? globalDefaultBlockDiscriminatoryContent : projectValue;
     }
 
-    private void requireValidEnvironment(String environment) {
-        if (!VALID_ENVIRONMENTS.contains(environment)) {
-            throw new IllegalArgumentException("environment は local/test/production のいずれかを指定してください");
-        }
+    /**
+     * 指定サイトが所属するプロジェクトのIDを返す(いずれの環境にも紐付いていなければnull)。
+     * カスタムタグのプロジェクトスコープ判定(投稿レンダリング時)に使う。
+     */
+    public Long findProjectIdBySiteId(Long siteId) {
+        return projectServiceClient.findProjectIdBySiteId(siteId);
     }
 
+    /** {@link ProjectNotFoundException}を投げる、project-service経由のプロジェクト存在確認+取得。 */
     public Project getProjectEntity(Long projectId) {
-        return projectRepository.findById(projectId)
-                .orElseThrow(() -> new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません"));
+        return toProject(projectServiceClient.getProject(projectId));
     }
 
     /**
      * プロジェクトのマスター環境(test/production)に紐づくサイトを解決する。未紐付けの場合はnullを返す。
-     * テーマCSS取得(ArticlePreviewService)・既存カテゴリ一覧取得(ArticlePlanService)など、
+     * テーマCSS取得(ArticlePreviewService)・既存カテゴリ一覧取得(AiBridgeController)など、
      * 「複数環境のうちどれを基準にするか」を要する機能から共通で利用する。
      */
     public Site resolveMasterSite(Project project) {
@@ -415,7 +274,7 @@ public class ProjectService {
             case "production" -> project.getProductionSiteId();
             default -> null;
         };
-        return siteId == null ? null : siteRepository.findById(siteId).orElse(null);
+        return siteId == null ? null : siteService.getById(siteId).orElse(null);
     }
 
     private ProjectResponse toResponse(Project project) {
@@ -437,8 +296,23 @@ public class ProjectService {
         if (siteId == null) {
             return null;
         }
-        return siteRepository.findById(siteId)
+        return siteService.getById(siteId)
                 .map(site -> SiteResponse.from(site, null, siteService.isSshConfigured(site)))
                 .orElse(null);
+    }
+
+    private Project toProject(ProjectServiceClient.ProjectBridge bridge) {
+        Project project = new Project();
+        project.setId(bridge.id());
+        project.setName(bridge.name());
+        project.setSlug(bridge.slug());
+        project.setMasterEnvironment(bridge.masterEnvironment());
+        project.setLocalSiteId(bridge.localSiteId());
+        project.setTestSiteId(bridge.testSiteId());
+        project.setProductionSiteId(bridge.productionSiteId());
+        project.setGithubRepository(bridge.githubRepository());
+        project.setCreatedAt(bridge.createdAt());
+        project.setUpdatedAt(bridge.updatedAt());
+        return project;
     }
 }

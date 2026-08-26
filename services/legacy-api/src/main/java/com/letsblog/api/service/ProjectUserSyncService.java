@@ -14,9 +14,7 @@ import com.letsblog.api.domain.User;
 import com.letsblog.api.domain.UserSiteAuthor;
 import com.letsblog.api.dto.ProjectUserResponse;
 import com.letsblog.api.dto.ProjectUserSummaryResponse;
-import com.letsblog.api.repository.ProjectRepository;
 import com.letsblog.api.repository.ProjectUserRepository;
-import com.letsblog.api.repository.SiteRepository;
 import com.letsblog.api.repository.UserRepository;
 import com.letsblog.api.repository.UserSiteAuthorRepository;
 import org.springframework.stereotype.Service;
@@ -35,26 +33,23 @@ import java.util.stream.Stream;
 @Service
 public class ProjectUserSyncService {
 
-    private final ProjectRepository projectRepository;
+    private final ProjectService projectService;
     private final ProjectUserRepository projectUserRepository;
     private final UserRepository userRepository;
-    private final SiteRepository siteRepository;
     private final SiteService siteService;
     private final CmsAdapterFactory cmsAdapterFactory;
     private final UserSiteAuthorRepository userSiteAuthorRepository;
 
     public ProjectUserSyncService(
-            ProjectRepository projectRepository,
+            ProjectService projectService,
             ProjectUserRepository projectUserRepository,
             UserRepository userRepository,
-            SiteRepository siteRepository,
             SiteService siteService,
             CmsAdapterFactory cmsAdapterFactory,
             UserSiteAuthorRepository userSiteAuthorRepository) {
-        this.projectRepository = projectRepository;
+        this.projectService = projectService;
         this.projectUserRepository = projectUserRepository;
         this.userRepository = userRepository;
-        this.siteRepository = siteRepository;
         this.siteService = siteService;
         this.cmsAdapterFactory = cmsAdapterFactory;
         this.userSiteAuthorRepository = userSiteAuthorRepository;
@@ -117,7 +112,7 @@ public class ProjectUserSyncService {
      */
     @Transactional
     public void reconcileRolesForSite(Long projectId, Long siteId) {
-        Site site = siteRepository.findById(siteId)
+        Site site = siteService.getById(siteId)
                 .orElseThrow(() -> new SiteNotFoundException("id " + siteId + " のサイトは登録されていません"));
         for (ProjectUser projectUser : projectUserRepository.findByProjectId(projectId)) {
             User user = userRepository.findById(projectUser.getUserId()).orElse(null);
@@ -175,12 +170,11 @@ public class ProjectUserSyncService {
         List<Long> siteIds = Stream.of(project.getLocalSiteId(), project.getTestSiteId(), project.getProductionSiteId())
                 .filter(Objects::nonNull)
                 .toList();
-        return siteIds.isEmpty() ? List.of() : siteRepository.findAllById(siteIds);
+        return siteIds.isEmpty() ? List.of() : siteService.getAllById(siteIds);
     }
 
     private Project getProject(Long projectId) {
-        return projectRepository.findById(projectId)
-                .orElseThrow(() -> new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません"));
+        return projectService.getProjectEntity(projectId);
     }
 
     private User getUser(Long userId) {

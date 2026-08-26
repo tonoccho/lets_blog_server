@@ -1,8 +1,9 @@
 package com.letsblog.api.service;
 
 import com.letsblog.api.ai.ImageProvider;
+import com.letsblog.api.client.ProjectServiceClient;
 import com.letsblog.api.dto.ImageProviderListResponse;
-import com.letsblog.api.repository.ProjectRepository;
+import java.time.LocalDateTime;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -21,12 +22,17 @@ import static org.mockito.Mockito.when;
 class ImageModelServiceTest {
 
     @Mock
-    private ProjectRepository projectRepository;
+    private ProjectServiceClient projectServiceClient;
     @Mock
     private ProjectImageSettingsService projectImageSettingsService;
 
     private ImageModelService service() {
-        return new ImageModelService(projectRepository, projectImageSettingsService);
+        return new ImageModelService(projectServiceClient, projectImageSettingsService);
+    }
+
+    private ProjectServiceClient.ProjectBridge existingProject(Long id) {
+        LocalDateTime now = LocalDateTime.now();
+        return new ProjectServiceClient.ProjectBridge(id, "テストプロジェクト", "test", "test", null, null, null, null, now, now);
     }
 
     @Test
@@ -36,7 +42,7 @@ class ImageModelServiceTest {
 
     @Test
     void getSelectedProvider_未選択ならCOMFYUIを返す() {
-        when(projectRepository.existsById(1L)).thenReturn(true);
+        when(projectServiceClient.getProject(1L)).thenReturn(existingProject(1L));
         when(projectImageSettingsService.getImageProvider(1L)).thenReturn(null);
 
         assertEquals(ImageProvider.COMFYUI, service().getSelectedProvider(1L));
@@ -44,7 +50,7 @@ class ImageModelServiceTest {
 
     @Test
     void getSelectedProvider_選択済みならその値を返す() {
-        when(projectRepository.existsById(1L)).thenReturn(true);
+        when(projectServiceClient.getProject(1L)).thenReturn(existingProject(1L));
         when(projectImageSettingsService.getImageProvider(1L)).thenReturn("CHATGPT");
 
         assertEquals(ImageProvider.CHATGPT, service().getSelectedProvider(1L));
@@ -52,14 +58,15 @@ class ImageModelServiceTest {
 
     @Test
     void getSelectedProvider_存在しないプロジェクトは例外() {
-        when(projectRepository.existsById(99L)).thenReturn(false);
+        when(projectServiceClient.getProject(99L))
+                .thenThrow(new ProjectNotFoundException("id 99 のプロジェクトは登録されていません"));
 
         assertThrows(ProjectNotFoundException.class, () -> service().getSelectedProvider(99L));
     }
 
     @Test
     void selectProvider_ProjectImageSettingsServiceへ保存する() {
-        when(projectRepository.existsById(1L)).thenReturn(true);
+        when(projectServiceClient.getProject(1L)).thenReturn(existingProject(1L));
         when(projectImageSettingsService.getImageProvider(1L)).thenReturn("CHATGPT");
 
         ImageProviderListResponse response = service().selectProvider(1L, "CHATGPT");

@@ -3,16 +3,15 @@ package com.letsblog.api.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.api.client.AiProjectSettingsClient;
 import com.letsblog.api.client.AnalyticsProjectSettingsClient;
+import com.letsblog.api.client.ProjectServiceClient;
 import com.letsblog.common.crypto.CredentialCipher;
-import com.letsblog.api.domain.Project;
-import com.letsblog.api.repository.ProjectRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.Optional;
+import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -25,20 +24,21 @@ import static org.mockito.Mockito.when;
 
 /**
  * ProjectApiKeyServiceの回帰テスト(issue #184)。プロジェクト設定の優先とユーザー設定への
- * フォールバック、暗号化保存、admin権限ゲートを検証する。GitHubトークンはprojects自体に保持する
- * (issue #571のprojects god-table分割)。Brave Search APIキー(project_ai_settings)はissue #574で
- * ai-serviceへ、GA/AdSense(analytics_credentials)はissue #578でanalytics-serviceへそれぞれ移管され、
- * いずれも内部ブリッジ呼び出しに変わったため、その回帰テストは{@link AiProjectSettingsClient}/
- * {@link AnalyticsProjectSettingsClient}のモックで委譲を検証する形にしている。レポート取得可否判定に
- * 使うresolveGoogleAnalyticsServiceAccountKey/resolveAdSenseRefreshToken/resolveAdSenseOauthClientSecret
- * は、GoogleAnalyticsReportService/AdSenseReportServiceごとanalytics-serviceへ移設されたため
- * このサービスからは削除された。
+ * フォールバック、暗号化保存、admin権限ゲートを検証する。Brave Search APIキー(project_ai_settings)は
+ * issue #574でai-serviceへ、GA/AdSense(analytics_credentials)はissue #578でanalytics-serviceへ
+ * それぞれ移管され、いずれも内部ブリッジ呼び出しに変わったため、その回帰テストは
+ * {@link AiProjectSettingsClient}/{@link AnalyticsProjectSettingsClient}のモックで委譲を検証する形に
+ * している。レポート取得可否判定に使うresolveGoogleAnalyticsServiceAccountKey/resolveAdSenseRefreshToken/
+ * resolveAdSenseOauthClientSecretは、GoogleAnalyticsReportService/AdSenseReportServiceごと
+ * analytics-serviceへ移設されたためこのサービスからは削除された。GitHubトークン(projects.
+ * github_token_encrypted)の所有権はproject-serviceへ移った(issue #577 stage2)ため、
+ * {@link ProjectServiceClient}経由の内部ブリッジ(モック)で読み書きを検証する(issue #577 stage3)。
  */
 @ExtendWith(MockitoExtension.class)
 class ProjectApiKeyServiceTest {
 
     @Mock
-    private ProjectRepository projectRepository;
+    private ProjectServiceClient projectServiceClient;
     @Mock
     private AiProjectSettingsClient aiProjectSettingsClient;
     @Mock
@@ -54,24 +54,26 @@ class ProjectApiKeyServiceTest {
 
     private ProjectApiKeyService service() {
         return new ProjectApiKeyService(
-                projectRepository, aiProjectSettingsClient, analyticsProjectSettingsClient, credentialCipher,
+                projectServiceClient, aiProjectSettingsClient, analyticsProjectSettingsClient, credentialCipher,
                 userService, adminAuthorizationService, objectMapper);
     }
 
     private static final String VALID_SERVICE_ACCOUNT_JSON =
             "{\"client_email\":\"svc@example.iam.gserviceaccount.com\",\"private_key\":\"-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----\\n\"}";
 
-    private Project projectWithId(Long id) {
-        Project project = new Project();
-        project.setId(id);
-        return project;
+    private ProjectServiceClient.ProjectBridge existingProject(Long id) {
+        LocalDateTime now = LocalDateTime.now();
+        return new ProjectServiceClient.ProjectBridge(id, "テストプロジェクト", "test", "test", null, null, null, null, now, now);
+    }
+
+    private void stubProjectExists() {
+        lenient().when(projectServiceClient.getProject(1L)).thenReturn(existingProject(1L));
     }
 
     @Test
     void resolveGithubToken_プロジェクト設定があればそれを優先する() {
-        Project project = projectWithId(1L);
-        project.setGithubTokenEncrypted(credentialCipher.encrypt("project-token"));
-        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        lenient().when(projectServiceClient.getGithubToken(1L))
+                .thenReturn(new ProjectServiceClient.GithubTokenBridge(true, credentialCipher.encrypt("project-token")));
 
         String token = service().resolveGithubToken(1L, 10L);
 
@@ -80,8 +82,8 @@ class ProjectApiKeyServiceTest {
 
     @Test
     void resolveGithubToken_未設定ならユーザー設定にフォールバックする() {
-        Project project = projectWithId(1L);
-        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        lenient().when(projectServiceClient.getGithubToken(1L))
+                .thenReturn(new ProjectServiceClient.GithubTokenBridge(false, null));
         when(userService.getDecryptedGithubToken(10L)).thenReturn("user-token");
 
         String token = service().resolveGithubToken(1L, 10L);
@@ -91,8 +93,7 @@ class ProjectApiKeyServiceTest {
 
     @Test
     void setBraveSearchApiKey_ai_serviceへ委譲する() {
-        Project project = projectWithId(1L);
-        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        stubProjectExists();
 
         service().setBraveSearchApiKey(1L, "project-key");
 
@@ -101,8 +102,7 @@ class ProjectApiKeyServiceTest {
 
     @Test
     void clearBraveSearchApiKey_ai_serviceへ委譲する() {
-        Project project = projectWithId(1L);
-        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        stubProjectExists();
 
         service().clearBraveSearchApiKey(1L);
 
@@ -111,14 +111,11 @@ class ProjectApiKeyServiceTest {
 
     @Test
     void setGithubToken_暗号化して保存する() {
-        Project project = projectWithId(1L);
-        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-
         service().setGithubToken(1L, "new-token");
 
-        ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
-        verify(projectRepository).save(captor.capture());
-        assertEquals("new-token", credentialCipher.decrypt(captor.getValue().getGithubTokenEncrypted()));
+        ArgumentCaptor<byte[]> captor = ArgumentCaptor.forClass(byte[].class);
+        verify(projectServiceClient).setGithubToken(org.mockito.ArgumentMatchers.eq(1L), captor.capture());
+        assertEquals("new-token", credentialCipher.decrypt(captor.getValue()));
     }
 
     @Test
@@ -130,21 +127,14 @@ class ProjectApiKeyServiceTest {
 
     @Test
     void clearGithubToken_nullにして保存する() {
-        Project project = projectWithId(1L);
-        project.setGithubTokenEncrypted(credentialCipher.encrypt("old-token"));
-        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-
         service().clearGithubToken(1L);
 
-        ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
-        verify(projectRepository).save(captor.capture());
-        assertFalse(captor.getValue().hasGithubToken());
+        verify(projectServiceClient).setGithubToken(1L, null);
     }
 
     @Test
     void isBraveSearchApiKeyConfigured_設定有無を返す() {
-        Project project = projectWithId(1L);
-        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        stubProjectExists();
         when(aiProjectSettingsClient.isBraveSearchApiKeyConfigured(1L)).thenReturn(true);
 
         assertTrue(service().isBraveSearchApiKeyConfigured(1L));
@@ -154,8 +144,7 @@ class ProjectApiKeyServiceTest {
 
     @Test
     void setGoogleAnalyticsCredentials_analytics_serviceへ委譲する() {
-        Project project = projectWithId(1L);
-        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        stubProjectExists();
 
         service().setGoogleAnalyticsCredentials(1L, "123456789", VALID_SERVICE_ACCOUNT_JSON);
 
@@ -185,8 +174,7 @@ class ProjectApiKeyServiceTest {
 
     @Test
     void isGoogleAnalyticsConfigured_設定有無を返す() {
-        Project project = projectWithId(1L);
-        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        stubProjectExists();
         when(analyticsProjectSettingsClient.getGoogleAnalyticsStatus(1L))
                 .thenReturn(new AnalyticsProjectSettingsClient.GoogleAnalyticsStatus(true, "123456789"));
 
@@ -195,8 +183,7 @@ class ProjectApiKeyServiceTest {
 
     @Test
     void clearGoogleAnalyticsCredentials_サービス側のクリアを呼ぶ() {
-        Project project = projectWithId(1L);
-        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        stubProjectExists();
 
         service().clearGoogleAnalyticsCredentials(1L);
 
@@ -207,8 +194,7 @@ class ProjectApiKeyServiceTest {
 
     @Test
     void setAdSenseSettings_アカウントIDとクライアントIDをanalytics_serviceへ委譲する() {
-        Project project = projectWithId(1L);
-        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        stubProjectExists();
 
         service().setAdSenseSettings(1L, "pub-1234567890123456", "client-id");
 
@@ -217,8 +203,7 @@ class ProjectApiKeyServiceTest {
 
     @Test
     void setAdSenseClientSecret_analytics_serviceへ委譲する() {
-        Project project = projectWithId(1L);
-        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        stubProjectExists();
 
         service().setAdSenseClientSecret(1L, "client-secret");
 
@@ -227,8 +212,7 @@ class ProjectApiKeyServiceTest {
 
     @Test
     void completeAdSenseOAuth_analytics_serviceへ委譲する() {
-        Project project = projectWithId(1L);
-        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        stubProjectExists();
 
         service().completeAdSenseOAuth(1L, "auth-code", "https://example.com/callback");
 
@@ -238,8 +222,7 @@ class ProjectApiKeyServiceTest {
 
     @Test
     void getAdSenseStatus_analytics_serviceの応答をそのまま返す() {
-        Project project = projectWithId(1L);
-        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        stubProjectExists();
         when(analyticsProjectSettingsClient.getAdSenseStatus(1L)).thenReturn(
                 new AnalyticsProjectSettingsClient.AdSenseStatus(true, "pub-1234567890123456", "client-id", true));
 
@@ -251,8 +234,7 @@ class ProjectApiKeyServiceTest {
 
     @Test
     void clearAdSenseCredentials_サービス側のクリアを呼ぶ() {
-        Project project = projectWithId(1L);
-        lenient().when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        stubProjectExists();
 
         service().clearAdSenseCredentials(1L);
 

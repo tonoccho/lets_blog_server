@@ -10,8 +10,6 @@ import com.letsblog.api.domain.Site;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient.BulkApplyCommand;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient.BulkApplyResult;
-import com.letsblog.api.repository.ProjectRepository;
-import com.letsblog.api.repository.SiteRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -33,12 +31,6 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class BulkManagementServiceTest {
-
-    @Mock
-    private ProjectRepository projectRepository;
-
-    @Mock
-    private SiteRepository siteRepository;
 
     @Mock
     private WordPressBulkManagementClient bulkManagementClient;
@@ -63,7 +55,7 @@ class BulkManagementServiceTest {
 
     private BulkManagementService service() {
         return new BulkManagementService(
-                projectRepository, siteRepository, bulkManagementClient,
+                bulkManagementClient,
                 bulkUploadStorageService, siteService, sshOperations, cmsAdapterFactory,
                 projectService, imageResizeService);
     }
@@ -86,7 +78,6 @@ class BulkManagementServiceTest {
         site.setCmsType(CmsType.WORDPRESS);
         site.setManagedWordpress(true);
         site.setWpSlug(slug);
-        site.setWpDbName("wp_" + slug);
         return site;
     }
 
@@ -104,7 +95,7 @@ class BulkManagementServiceTest {
     void applyToEnvironment_categoryCreate_環境にサイトが紐付いていなければ例外() {
         BulkManagementService service = service();
         Project project = buildProject(null, null, null);
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
 
         assertThrows(IllegalArgumentException.class, () -> service.applyToEnvironment(
                 1L, "local", BulkOperationType.CATEGORY_CREATE, "お知らせ", "oshirase", null, null, null, 9L));
@@ -120,8 +111,8 @@ class BulkManagementServiceTest {
         externalSite.setSiteKey("external-site");
         externalSite.setCmsType(CmsType.WORDPRESS);
         externalSite.setManagedWordpress(false);
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(externalSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(externalSite));
         when(siteService.resolveDataSource(externalSite)).thenReturn(new SiteService.SiteDataSource(false, null));
 
         assertThrows(IllegalArgumentException.class, () -> service.applyToEnvironment(
@@ -133,8 +124,8 @@ class BulkManagementServiceTest {
         BulkManagementService service = service();
         Project project = buildProject(10L, 20L, null);
         Site localSite = buildManagedSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
         when(bulkManagementClient.apply(new BulkApplyCommand(
                 "local-site", "category_create", "お知らせ", "oshirase", null, null, null)))
                 .thenReturn(BulkApplyResult.success());
@@ -146,7 +137,7 @@ class BulkManagementServiceTest {
         assertEquals(BulkOperationStatus.SUCCESS, result.getStatus());
         assertEquals(BulkOperationSourceType.SLUG, result.getSourceType());
         assertEquals("oshirase", result.getCategorySlug());
-        verify(siteRepository, never()).findById(20L);
+        verify(siteService, never()).getById(20L);
     }
 
     @Test
@@ -154,8 +145,8 @@ class BulkManagementServiceTest {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site localSite = buildManagedSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
         when(bulkManagementClient.apply(new BulkApplyCommand(
                 "local-site", "category_create", "サブお知らせ", "sub-oshirase", "oshirase", "説明文", null)))
                 .thenReturn(BulkApplyResult.success());
@@ -174,8 +165,8 @@ class BulkManagementServiceTest {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site localSite = buildManagedSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
         when(bulkManagementClient.apply(new BulkApplyCommand(
                 "local-site", "plugin_install", "akismet", null, null, null, null)))
                 .thenReturn(BulkApplyResult.failed(new RuntimeException("接続に失敗しました")));
@@ -192,8 +183,8 @@ class BulkManagementServiceTest {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site localSite = buildManagedSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
         when(bulkManagementClient.apply(new BulkApplyCommand(
                 "local-site", "theme_install", "twentytwentyfour", null, null, null, null)))
                 .thenReturn(BulkApplyResult.skipped());
@@ -217,8 +208,8 @@ class BulkManagementServiceTest {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site localSite = buildManagedSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
         when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
 
         service.applyToEnvironment(1L, "local", BulkOperationType.PLUGIN_ACTIVATE, "akismet", null, null, null, null, 9L);
@@ -238,8 +229,8 @@ class BulkManagementServiceTest {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site localSite = buildManagedSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
         when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
 
         service.applyToEnvironment(1L, "local", BulkOperationType.THEME_ACTIVATE, "twentytwentyfour", null, null, null, null, 9L);
@@ -266,8 +257,8 @@ class BulkManagementServiceTest {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site localSite = buildManagedSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
         when(bulkManagementClient.apply(new BulkApplyCommand(
                 "local-site", "category_edit", "新お知らせ", "new-oshirase", "parent-slug", "更新後の説明", "old-oshirase")))
                 .thenReturn(BulkApplyResult.success());
@@ -293,8 +284,8 @@ class BulkManagementServiceTest {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site localSite = buildManagedSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
         when(bulkManagementClient.apply(new BulkApplyCommand(
                 "local-site", "category_delete", "oshirase", null, null, null, "oshirase")))
                 .thenReturn(BulkApplyResult.success());
@@ -311,8 +302,8 @@ class BulkManagementServiceTest {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site localSite = buildManagedSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
         when(bulkManagementClient.apply(new BulkApplyCommand(
                 "local-site", "tag_create", "新着", "shinchaku", null, null, null)))
                 .thenReturn(BulkApplyResult.success());
@@ -357,10 +348,10 @@ class BulkManagementServiceTest {
         Site localSite = buildManagedSite(10L, "local-site");
         Site testSite = buildManagedSite(20L, "test-site");
         Site productionSite = buildManagedSite(30L, "production-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
-        when(siteRepository.findById(30L)).thenReturn(Optional.of(productionSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
+        when(siteService.getById(30L)).thenReturn(Optional.of(productionSite));
         when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
 
         List<BulkOperationLog> results = service.applyToAllEnvironments(
@@ -384,8 +375,8 @@ class BulkManagementServiceTest {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site localSite = buildManagedSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
         when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
 
         List<BulkOperationLog> results = service.applyToAllEnvironments(
@@ -401,9 +392,9 @@ class BulkManagementServiceTest {
         Project project = buildProject(10L, 20L, null);
         Site localSite = buildManagedSite(10L, "local-site");
         Site externalSite = buildExternalSite(20L, "external-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(externalSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(externalSite));
         when(siteService.resolveDataSource(externalSite)).thenReturn(new SiteService.SiteDataSource(false, null));
         when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
 
@@ -457,9 +448,9 @@ class BulkManagementServiceTest {
         byte[] content = new byte[]{1, 2, 3};
         MockMultipartFile file = new MockMultipartFile("file", "custom-theme.zip", "application/zip", content);
 
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
         when(bulkUploadStorageService.store(eq(1L), any(byte[].class), eq("custom-theme.zip")))
                 .thenReturn(new BulkUploadStorageService.StoredZip("1/abc.zip", "abc", "custom-theme.zip"));
         when(bulkManagementClient.applyZip(any(), eq("theme_install"), any(byte[].class), eq("custom-theme.zip")))
@@ -484,9 +475,9 @@ class BulkManagementServiceTest {
         byte[] content = new byte[]{1, 2, 3};
         MockMultipartFile file = new MockMultipartFile("file", "custom-theme.zip", "application/zip", content);
 
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(externalSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(externalSite));
         when(siteService.resolveDataSource(externalSite))
                 .thenReturn(new SiteService.SiteDataSource(false, sshCreds()));
         when(bulkUploadStorageService.store(eq(1L), any(byte[].class), eq("custom-theme.zip")))
@@ -512,9 +503,9 @@ class BulkManagementServiceTest {
         byte[] content = new byte[]{1, 2, 3};
         MockMultipartFile file = new MockMultipartFile("file", "custom-theme.zip", "application/zip", content);
 
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(externalSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(externalSite));
         when(siteService.resolveDataSource(externalSite))
                 .thenReturn(new SiteService.SiteDataSource(false, null));
         when(bulkUploadStorageService.store(eq(1L), any(byte[].class), eq("custom-theme.zip")))
@@ -537,9 +528,9 @@ class BulkManagementServiceTest {
         Project project = buildProject(10L, 20L, null);
         Site localSite = buildManagedSite(10L, "local-site");
         Site testSite = buildManagedSite(20L, "test-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
 
         com.letsblog.api.cms.CmsCredentials.WordPressCredentials localCreds =
                 new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "SSH");
@@ -579,8 +570,8 @@ class BulkManagementServiceTest {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site localSite = buildManagedSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
 
         com.letsblog.api.cms.CmsCredentials.WordPressCredentials localCreds =
                 new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "SSH");
@@ -611,8 +602,8 @@ class BulkManagementServiceTest {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site localSite = buildManagedSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
         when(siteService.getCredentials("local-site")).thenReturn(
                 new com.letsblog.api.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "SSH"));
         when(projectService.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
@@ -708,8 +699,8 @@ class BulkManagementServiceTest {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site externalSite = buildExternalSite(10L, "external-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(externalSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(externalSite));
         when(siteService.resolveDataSource(externalSite))
                 .thenReturn(new SiteService.SiteDataSource(false, sshCreds()));
         when(sshOperations.applyPluginTheme(sshCreds(), BulkOperationType.PLUGIN_ACTIVATE, "akismet"))
@@ -727,8 +718,8 @@ class BulkManagementServiceTest {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site externalSite = buildExternalSite(10L, "external-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(externalSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(externalSite));
         when(siteService.resolveDataSource(externalSite))
                 .thenReturn(new SiteService.SiteDataSource(false, sshCreds()));
         when(sshOperations.applyTerm(eq(sshCreds()), eq(BulkOperationType.CATEGORY_DELETE), eq("oshirase"),
@@ -748,8 +739,8 @@ class BulkManagementServiceTest {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);
         Site externalSite = buildExternalSite(10L, "external-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(externalSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(externalSite));
         when(siteService.resolveDataSource(externalSite))
                 .thenReturn(new SiteService.SiteDataSource(false, sshCreds()));
         when(sshOperations.applyPluginTheme(sshCreds(), BulkOperationType.THEME_ACTIVATE, "twentytwentyfour"))

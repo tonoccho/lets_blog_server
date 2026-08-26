@@ -195,6 +195,22 @@ public class ProjectService {
     }
 
     /**
+     * legacy-apiの{@code ProjectApiKeyService}が使う、GitHubトークン(暗号化済みバイト列)の取得。
+     * 復号はしない(暗号鍵は全サービス共通のAPP_ENCRYPTION_KEYで、呼び出し元が復号する。issue #577 stage3)。
+     */
+    @Transactional(readOnly = true)
+    public byte[] getGithubTokenEncrypted(Long projectId) {
+        return getProjectEntity(projectId).getGithubTokenEncrypted();
+    }
+
+    @Transactional
+    public void setGithubTokenEncrypted(Long projectId, byte[] encryptedToken) {
+        Project project = getProjectEntity(projectId);
+        project.setGithubTokenEncrypted(encryptedToken);
+        projectRepository.save(project);
+    }
+
+    /**
      * プロジェクトのマスター環境(test/production)に紐づくサイトを解決する。未紐付けの場合はnullを返す。
      */
     public Site resolveMasterSite(Project project) {

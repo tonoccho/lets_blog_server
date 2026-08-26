@@ -9,7 +9,6 @@ import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.ThemeCssResponse;
 import com.letsblog.api.dto.ThemeSkeletonResponse;
-import com.letsblog.api.repository.SiteRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -45,9 +44,6 @@ class ArticlePreviewServiceTest {
     private ProjectService projectService;
 
     @Mock
-    private SiteRepository siteRepository;
-
-    @Mock
     private SiteService siteService;
 
     @Mock
@@ -70,7 +66,7 @@ class ArticlePreviewServiceTest {
         RestClient.Builder builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
         service = new ArticlePreviewService(
-                projectService, siteRepository, siteService, builder, contentServiceClient,
+                projectService, siteService, builder, contentServiceClient,
                 cmsAdapterFactory, wordPressAgentOperations, wordPressSshOperations);
     }
 
@@ -123,7 +119,7 @@ class ArticlePreviewServiceTest {
     @Test
     void fetchMasterThemeCss_stylesheetリンクを取得し連結する() {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
 
         server.expect(requestTo("http://example.com"))
                 .andRespond(withSuccess(
@@ -146,7 +142,7 @@ class ArticlePreviewServiceTest {
     @Test
     void fetchMasterThemeCss_サイト接続失敗時はavailableがfalse() {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
 
         server.expect(requestTo("http://example.com")).andRespond(withServerError());
 
@@ -158,7 +154,7 @@ class ArticlePreviewServiceTest {
     @Test
     void fetchMasterThemeCss_stylesheetリンクが見つからない場合はavailableがfalse() {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
 
         server.expect(requestTo("http://example.com"))
                 .andRespond(withSuccess("<html><head></head></html>", MediaType.TEXT_HTML));
@@ -171,7 +167,7 @@ class ArticlePreviewServiceTest {
     @Test
     void fetchMasterThemeCss_上限を超えるstylesheetは丸ごとスキップし他のCSSを壊さない() {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
 
         String hugeCss = "a".repeat(3_000_100);
 
@@ -198,7 +194,7 @@ class ArticlePreviewServiceTest {
     @Test
     void fetchMasterThemeCss_preloadAsStyleのstylesheetも収集する() {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
 
         server.expect(requestTo("http://example.com"))
                 .andRespond(withSuccess(
@@ -221,7 +217,7 @@ class ArticlePreviewServiceTest {
     @Test
     void fetchMasterThemeCss_インラインstyleブロックも収集する() {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
 
         server.expect(requestTo("http://example.com"))
                 .andRespond(withSuccess(
@@ -240,7 +236,7 @@ class ArticlePreviewServiceTest {
     @Test
     void fetchMasterThemeCss_stylesheet内のurl相対参照を絶対URLへ書き換える() {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
 
         server.expect(requestTo("http://example.com"))
                 .andRespond(withSuccess(
@@ -263,7 +259,7 @@ class ArticlePreviewServiceTest {
         Project project = projectWithMaster("test", 10L, null);
         project.setLocalSiteId(20L);
         when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(wordPressSite(20L, "http://local.example.com")));
+        when(siteService.getById(20L)).thenReturn(Optional.of(wordPressSite(20L, "http://local.example.com")));
 
         server.expect(requestTo("http://local.example.com"))
                 .andRespond(withSuccess(
@@ -286,7 +282,7 @@ class ArticlePreviewServiceTest {
         when(projectService.getProjectEntity(1L)).thenReturn(project);
 
         Site site = managedWordPressSite(30L, "local-site", "https://localhost/sites/local-site", "local-site");
-        when(siteRepository.findById(30L)).thenReturn(Optional.of(site));
+        when(siteService.getById(30L)).thenReturn(Optional.of(site));
 
         server.expect(requestTo("http://wordpress/sites/local-site/"))
                 .andRespond(withSuccess(
@@ -311,7 +307,7 @@ class ArticlePreviewServiceTest {
         when(projectService.getProjectEntity(1L)).thenReturn(project);
 
         Site site = managedWordPressSite(30L, "local-site", "http://public.example.com", null);
-        when(siteRepository.findById(30L)).thenReturn(Optional.of(site));
+        when(siteService.getById(30L)).thenReturn(Optional.of(site));
 
         server.expect(requestTo("http://public.example.com"))
                 .andRespond(withSuccess(
@@ -331,7 +327,7 @@ class ArticlePreviewServiceTest {
     @Test
     void fetchMasterThemeCss_ブラウザ相当のUser_Agentヘッダーを付与してリクエストする() {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
 
         server.expect(requestTo("http://example.com"))
                 .andExpect(header("User-Agent", org.hamcrest.Matchers.containsString("Mozilla")))
@@ -358,8 +354,8 @@ class ArticlePreviewServiceTest {
 
         assertFalse(response.available());
         assertTrue(response.reason().contains("このプロジェクトに紐づいていません"));
-        // 紐づかないサイトはリポジトリ参照すら行わない(他プロジェクトのサイトを覗けないようにする)。
-        verifyNoInteractions(siteRepository);
+        // 紐づかないサイトは参照すら行わない(他プロジェクトのサイトを覗けないようにする)。
+        verifyNoInteractions(siteService);
     }
 
     @Test
@@ -375,7 +371,7 @@ class ArticlePreviewServiceTest {
     @Test
     void fetchThemeCss_is_single限定でトップページには無い投稿ページ限定のstylesheetもマージする() {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
 
         server.expect(requestTo("http://example.com"))
                 .andRespond(withSuccess(
@@ -406,7 +402,7 @@ class ArticlePreviewServiceTest {
     @Test
     void fetchThemeCss_参照記事が存在しない場合はトップページのCSSのみ返す() {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
 
         server.expect(requestTo("http://example.com"))
                 .andRespond(withSuccess(
@@ -442,7 +438,7 @@ class ArticlePreviewServiceTest {
         when(projectService.getProjectEntity(1L)).thenReturn(project);
 
         Site site = managedWordPressSite(30L, "local-site", "https://localhost/sites/local-site", "local-site");
-        when(siteRepository.findById(30L)).thenReturn(Optional.of(site));
+        when(siteService.getById(30L)).thenReturn(Optional.of(site));
         when(siteService.getCredentials("local-site")).thenReturn(agentCredentials("local-site"));
 
         server.expect(requestTo("http://wordpress/sites/local-site/"))
@@ -481,7 +477,7 @@ class ArticlePreviewServiceTest {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
         Site site = wordPressSite(10L, "http://production.example.com");
         site.setSiteKey("production-site");
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(site));
+        when(siteService.getById(10L)).thenReturn(Optional.of(site));
         when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
 
         server.expect(requestTo("http://production.example.com"))
@@ -519,7 +515,7 @@ class ArticlePreviewServiceTest {
     @Test
     void renderSkeleton_参照記事が存在しない場合はavailableがfalse() {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
 
         server.expect(requestTo("http://example.com/wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc"
                         + "&_fields=id,link,title,content"))
@@ -536,7 +532,7 @@ class ArticlePreviewServiceTest {
     @Test
     void renderSkeleton_参照記事のタイトルと本文で差し替え位置を検索しspliceした結果を返す() {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
 
         server.expect(requestTo("http://example.com/wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc"
                         + "&_fields=id,link,title,content"))
@@ -571,7 +567,7 @@ class ArticlePreviewServiceTest {
         when(projectService.getProjectEntity(1L)).thenReturn(project);
 
         Site site = managedWordPressSite(30L, "local-site", "https://localhost/sites/local-site", "local-site");
-        when(siteRepository.findById(30L)).thenReturn(Optional.of(site));
+        when(siteService.getById(30L)).thenReturn(Optional.of(site));
         when(siteService.getCredentials("local-site")).thenReturn(agentCredentials("local-site"));
 
         when(wordPressAgentOperations.getLatestPost(agentCredentials("local-site")))
@@ -607,7 +603,7 @@ class ArticlePreviewServiceTest {
         when(projectService.getProjectEntity(1L)).thenReturn(project);
 
         Site site = managedWordPressSite(30L, "local-site", "https://localhost/sites/local-site", "local-site");
-        when(siteRepository.findById(30L)).thenReturn(Optional.of(site));
+        when(siteService.getById(30L)).thenReturn(Optional.of(site));
         when(siteService.getCredentials("local-site")).thenReturn(
                 new com.letsblog.api.cms.CmsCredentials.WordPressCredentials(
                         "https://localhost/sites/local-site", "admin", "app-pass"));
@@ -639,7 +635,7 @@ class ArticlePreviewServiceTest {
     @Test
     void renderSkeleton_splice側で位置を特定できない場合はavailableがfalseの結果をそのまま返す() {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
 
         server.expect(requestTo("http://example.com/wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc"
                         + "&_fields=id,link,title,content"))
@@ -664,7 +660,7 @@ class ArticlePreviewServiceTest {
     @Test
     void renderSkeleton_ナビゲーションに成功すれば投稿ページのCSSを収集して返す() {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
 
         server.expect(requestTo("http://example.com/wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc"
                         + "&_fields=id,link,title,content"))
@@ -697,7 +693,7 @@ class ArticlePreviewServiceTest {
         when(projectService.getProjectEntity(1L)).thenReturn(project);
         Site site = wordPressSite(40L, "http://production.example.com");
         site.setSiteKey("production-site");
-        when(siteRepository.findById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getById(40L)).thenReturn(Optional.of(site));
         when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
 
         com.letsblog.api.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
@@ -730,7 +726,7 @@ class ArticlePreviewServiceTest {
         when(projectService.getProjectEntity(1L)).thenReturn(project);
         Site site = wordPressSite(40L, "http://production.example.com");
         site.setSiteKey("production-site");
-        when(siteRepository.findById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getById(40L)).thenReturn(Optional.of(site));
         when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
         // 本番サイトは(SSH認証情報があっても)非公開投稿の実ページ経路を使わないため、参照記事取得は
         // 従来のスクレイプ&スプライス経路のまま。ただしissue #519により、その参照記事取得自体は
@@ -752,7 +748,7 @@ class ArticlePreviewServiceTest {
         when(projectService.getProjectEntity(1L)).thenReturn(project);
         Site site = wordPressSite(40L, "http://production.example.com");
         site.setSiteKey("production-site");
-        when(siteRepository.findById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getById(40L)).thenReturn(Optional.of(site));
         when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
 
         com.letsblog.api.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
@@ -788,7 +784,7 @@ class ArticlePreviewServiceTest {
         when(projectService.getProjectEntity(1L)).thenReturn(project);
         Site site = wordPressSite(40L, "http://production.example.com");
         site.setSiteKey("production-site");
-        when(siteRepository.findById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getById(40L)).thenReturn(Optional.of(site));
         when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
 
         com.letsblog.api.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
@@ -823,7 +819,7 @@ class ArticlePreviewServiceTest {
         when(projectService.getProjectEntity(1L)).thenReturn(project);
         Site site = wordPressSite(40L, "http://production.example.com");
         site.setSiteKey("production-site");
-        when(siteRepository.findById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getById(40L)).thenReturn(Optional.of(site));
         com.letsblog.api.cms.CmsCredentials.WordPressCredentials credsWithoutUsername =
                 new com.letsblog.api.cms.CmsCredentials.WordPressCredentials(
                         "http://production.example.com", null,
@@ -849,7 +845,7 @@ class ArticlePreviewServiceTest {
         when(projectService.getProjectEntity(1L)).thenReturn(project);
         Site site = wordPressSite(40L, "http://production.example.com");
         site.setSiteKey("production-site");
-        when(siteRepository.findById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getById(40L)).thenReturn(Optional.of(site));
         when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
 
         when(wordPressSshOperations.getLatestPost(sshCredentials())).thenReturn(Optional.of(
@@ -873,7 +869,7 @@ class ArticlePreviewServiceTest {
         when(projectService.getProjectEntity(1L)).thenReturn(project);
         Site site = wordPressSite(40L, "http://production.example.com");
         site.setSiteKey("production-site");
-        when(siteRepository.findById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getById(40L)).thenReturn(Optional.of(site));
         when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
 
         com.letsblog.api.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);

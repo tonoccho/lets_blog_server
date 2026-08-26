@@ -4,13 +4,12 @@ import java.io.Serializable;
 import java.time.Instant;
 
 /**
- * サイトが削除された(issue #580)。発行元: project-service(未抽出の間はlegacy-apiの
- * WordPressSiteProvisioningServiceが代行)。購読: publishing(未抽出の間は対象外), content-service。
+ * サイトが削除された(issue #580)。発行元: project-service(issue #577で抽出済み)。購読: publishing
+ * (未抽出の間は対象外), content-service。
  *
- * <p>content-serviceは既に{@code ContentServiceClient#deletePostsBySite}経由の同期内部ブリッジで
- * サイト削除時の投稿一括削除を受けているが、このイベントはその非同期版(将来的な追加購読者・
- * 同期呼び出し失敗時のフォールバック経路)として並行して発行する。両経路とも
- * {@code postRepository.deleteBySiteId}へ帰着するため冪等(再実行しても副作用なし)。
+ * <p>project-serviceにcontent-serviceへの同期内部ブリッジがまだ無いため(issue #577の既知の制限)、
+ * 現状はこのイベント配送のみが投稿一括削除の経路(将来、同期ブリッジを追加する場合は
+ * {@code postRepository.deleteBySiteId}へ帰着させ、このイベント経路と冪等にすること)。
  */
 public record SiteDeletedEvent(
         String eventId,

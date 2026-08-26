@@ -3,8 +3,6 @@ package com.letsblog.api.messaging;
 import com.letsblog.common.messaging.EventExchanges;
 import com.letsblog.common.messaging.PostDeletedEvent;
 import com.letsblog.common.messaging.PostPublishedEvent;
-import com.letsblog.common.messaging.ProjectDeletedEvent;
-import com.letsblog.common.messaging.SiteDeletedEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.AmqpException;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -14,9 +12,11 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * letsblog.events exchange(issue #580)へのドメインイベント発行。project-service/publishing-serviceは
- * まだ抽出されていないため(ADR-0001)、それらのドメインロジックが引き続き存在するlegacy-apiが
- * project.deleted/site.deleted/post.published/post.deletedの発行元を代行する。
+ * letsblog.events exchange(issue #580)へのドメインイベント発行。publishing-serviceはまだ抽出されて
+ * いないため(ADR-0001)、そのドメインロジックが引き続き存在するlegacy-apiがpost.published/post.deleted
+ * の発行元を代行する。project.deleted/site.deletedは、project-serviceの抽出(issue #577)完了に伴い
+ * こちらから削除し、project-service自身の{@code DomainEventPublisher}へ発行元を切り替えた
+ * (legacy-api側はもうProject/Siteの削除処理自体を持たない)。
  *
  * <p>発行失敗(ブローカー未接続等)は、監査ログ発行(AuditLogService)と同じ方針でログに記録した上で
  * 呼び出し元の処理自体は失敗させない(fire-and-forget)。イベント配送そのものの信頼性は
@@ -31,18 +31,6 @@ public class DomainEventPublisher {
 
     public DomainEventPublisher(RabbitTemplate rabbitTemplate) {
         this.rabbitTemplate = rabbitTemplate;
-    }
-
-    /** project-service(未抽出のためProjectServiceが代行)がプロジェクト削除時に発行する。 */
-    public void publishProjectDeleted(Long projectId) {
-        publish(EventExchanges.PROJECT_DELETED_ROUTING_KEY,
-                new ProjectDeletedEvent(newEventId(), Instant.now(), projectId));
-    }
-
-    /** project-service(未抽出のためWordPressSiteProvisioningServiceが代行)がサイト削除時に発行する。 */
-    public void publishSiteDeleted(Long siteId) {
-        publish(EventExchanges.SITE_DELETED_ROUTING_KEY,
-                new SiteDeletedEvent(newEventId(), Instant.now(), siteId));
     }
 
     /** publishing-service(未抽出のためPostPublishServiceが代行)が投稿公開時に発行する。 */

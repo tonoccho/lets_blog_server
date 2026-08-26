@@ -8,8 +8,6 @@ import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.TermComparisonPage;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient.CategoryInfo;
-import com.letsblog.api.repository.ProjectRepository;
-import com.letsblog.api.repository.SiteRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -32,12 +30,6 @@ import static org.mockito.Mockito.when;
 class TermComparisonServiceTest {
 
     @Mock
-    private ProjectRepository projectRepository;
-
-    @Mock
-    private SiteRepository siteRepository;
-
-    @Mock
     private WordPressBulkManagementClient bulkManagementClient;
 
     @Mock
@@ -47,11 +39,14 @@ class TermComparisonServiceTest {
     private SiteService siteService;
 
     @Mock
+    private ProjectService projectService;
+
+    @Mock
     private com.letsblog.api.cms.ssh.WordPressSshOperations sshOperations;
 
     private TermComparisonService service() {
         return new TermComparisonService(
-                projectRepository, siteRepository, bulkManagementClient, bulkManagementService, siteService,
+                bulkManagementClient, bulkManagementService, siteService, projectService,
                 sshOperations);
     }
 
@@ -74,7 +69,6 @@ class TermComparisonServiceTest {
         site.setCmsType(CmsType.WORDPRESS);
         site.setManagedWordpress(true);
         site.setWpSlug(slug);
-        site.setWpDbName("wp_" + slug);
         return site;
     }
 
@@ -86,9 +80,9 @@ class TermComparisonServiceTest {
         Project project = buildProject(10L, 20L, null, "test");
         Site localSite = buildManagedSite(10L, "local-site");
         Site testSite = buildManagedSite(20L, "test-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
         when(bulkManagementClient.listCategories("local-site"))
                 .thenReturn(List.of(new CategoryInfo("お知らせ(旧)", "oshirase", null, null)));
         when(bulkManagementClient.listCategories("test-site"))
@@ -114,9 +108,9 @@ class TermComparisonServiceTest {
         Project project = buildProject(10L, 20L, null, "test");
         Site localSite = buildManagedSite(10L, "local-site");
         Site testSite = buildManagedSite(20L, "test-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
         when(bulkManagementClient.listCategories("local-site"))
                 .thenReturn(List.of(new CategoryInfo("お知らせ", "oshirase-old", null, null)));
         when(bulkManagementClient.listCategories("test-site"))
@@ -133,9 +127,9 @@ class TermComparisonServiceTest {
         Project project = buildProject(10L, 20L, null, "test");
         Site localSite = buildManagedSite(10L, "local-site");
         Site testSite = buildManagedSite(20L, "test-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
         when(bulkManagementClient.listCategories("local-site"))
                 .thenReturn(List.of(new CategoryInfo("ローカル限定", "local-only", null, null)));
         when(bulkManagementClient.listCategories("test-site")).thenReturn(List.of());
@@ -153,8 +147,8 @@ class TermComparisonServiceTest {
         TermComparisonService service = service();
         Project project = buildProject(10L, null, null, "test");
         Site localSite = buildManagedSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
         List<CategoryInfo> categories = java.util.stream.IntStream.range(0, 25)
                 .mapToObj(i -> new CategoryInfo(String.format("cat-%02d", i), "slug-" + i, null, null))
                 .toList();
@@ -176,9 +170,9 @@ class TermComparisonServiceTest {
         Project project = buildProject(10L, 20L, null, "test");
         Site localSite = buildManagedSite(10L, "local-site");
         Site testSite = buildManagedSite(20L, "test-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
         when(bulkManagementClient.listCategories(any())).thenReturn(List.of());
 
         assertThrows(IllegalArgumentException.class, () -> service.syncCategory(1L, "oshirase", 9L));
@@ -191,10 +185,10 @@ class TermComparisonServiceTest {
         Site localSite = buildManagedSite(10L, "local-site");
         Site testSite = buildManagedSite(20L, "test-site");
         Site productionSite = buildManagedSite(30L, "production-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
-        when(siteRepository.findById(30L)).thenReturn(Optional.of(productionSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
+        when(siteService.getById(30L)).thenReturn(Optional.of(productionSite));
 
         CategoryInfo master = new CategoryInfo("お知らせ", "oshirase", null, "説明");
         when(bulkManagementClient.listCategories("test-site")).thenReturn(List.of(master));
@@ -223,9 +217,9 @@ class TermComparisonServiceTest {
         Project project = buildProject(10L, 20L, null, "test");
         Site localSite = buildManagedSite(10L, "local-site");
         Site testSite = buildManagedSite(20L, "test-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
         when(bulkManagementClient.listCategories("local-site")).thenReturn(List.of());
         when(bulkManagementClient.listCategories("test-site"))
                 .thenReturn(List.of(new CategoryInfo("お知らせ", "oshirase", null, null)));
@@ -246,8 +240,8 @@ class TermComparisonServiceTest {
         TermComparisonService service = service();
         Project project = buildProject(10L, null, null, "test");
         Site localSite = buildManagedSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
         when(bulkManagementClient.listCategories("local-site")).thenReturn(List.of());
 
         assertThrows(IllegalArgumentException.class, () -> service.deleteCategoryEverywhere(1L, "oshirase", 9L));
@@ -261,9 +255,9 @@ class TermComparisonServiceTest {
         Project project = buildProject(10L, 20L, null, "test");
         Site localSite = buildManagedSite(10L, "local-site");
         Site testSite = buildManagedSite(20L, "test-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
         when(bulkManagementClient.listCategories(any())).thenReturn(List.of());
         when(bulkManagementService.applyToEnvironment(eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L)))
                 .thenReturn(new BulkOperationLog());
@@ -285,10 +279,10 @@ class TermComparisonServiceTest {
         Site localSite = buildManagedSite(10L, "local-site");
         Site testSite = buildManagedSite(20L, "test-site");
         Site productionSite = buildManagedSite(30L, "production-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
-        when(siteRepository.findById(30L)).thenReturn(Optional.of(productionSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
+        when(siteService.getById(30L)).thenReturn(Optional.of(productionSite));
 
         CategoryInfo master = new CategoryInfo("お知らせ", "oshirase", null, "旧説明");
         when(bulkManagementClient.listCategories("test-site")).thenReturn(List.of(master));
@@ -322,9 +316,9 @@ class TermComparisonServiceTest {
         Project project = buildProject(10L, 20L, null, "test");
         Site localSite = buildManagedSite(10L, "local-site");
         Site testSite = buildManagedSite(20L, "test-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
 
         CategoryInfo masterDiff = new CategoryInfo("お知らせ", "oshirase", null, "説明");
         CategoryInfo masterSame = new CategoryInfo("イベント", "event", null, null);
@@ -348,9 +342,9 @@ class TermComparisonServiceTest {
         Project project = buildProject(10L, 20L, null, "test");
         Site localSite = buildManagedSite(10L, "local-site");
         Site testSite = buildManagedSite(20L, "test-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
         CategoryInfo same = new CategoryInfo("イベント", "event", null, null);
         when(bulkManagementClient.listCategories("test-site")).thenReturn(List.of(same));
         when(bulkManagementClient.listCategories("local-site")).thenReturn(List.of(same));
@@ -370,9 +364,9 @@ class TermComparisonServiceTest {
         Project project = buildProject(10L, 20L, null, "test");
         Site localSite = buildManagedSite(10L, "local-site");
         Site testSite = buildManagedSite(20L, "test-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
         CategoryInfo master = new CategoryInfo("新着", "shinchaku", null, null);
         when(bulkManagementClient.listTags("test-site")).thenReturn(List.of(master));
         when(bulkManagementClient.listTags("local-site")).thenReturn(List.of());
@@ -407,9 +401,9 @@ class TermComparisonServiceTest {
         Project project = buildProject(null, 20L, 30L, "test");
         Site testSite = buildExternalSite(20L, "test-site");
         Site productionSite = buildExternalSite(30L, "production-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
-        when(siteRepository.findById(30L)).thenReturn(Optional.of(productionSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
+        when(siteService.getById(30L)).thenReturn(Optional.of(productionSite));
         when(siteService.resolveDataSource(testSite))
                 .thenReturn(new SiteService.SiteDataSource(false, sshCreds("/var/www/html/test")));
         when(siteService.resolveDataSource(productionSite))
@@ -439,8 +433,8 @@ class TermComparisonServiceTest {
         TermComparisonService service = service();
         Project project = buildProject(null, 20L, null, "test");
         Site testSite = buildExternalSite(20L, "test-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
         when(siteService.resolveDataSource(testSite))
                 .thenReturn(new SiteService.SiteDataSource(false, sshCreds("/var/www/html/test")));
         when(sshOperations.fetchTermsForEnvironments(eq("category"), any())).thenReturn(

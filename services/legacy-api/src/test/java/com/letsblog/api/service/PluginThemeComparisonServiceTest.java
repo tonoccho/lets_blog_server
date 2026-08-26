@@ -9,8 +9,6 @@ import com.letsblog.api.dto.ReconcileStateRequest.StateChangeRequest;
 import com.letsblog.api.dto.StatusComparisonPage;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient;
 import com.letsblog.api.provisioning.WordPressBulkManagementClient.PluginThemeInfo;
-import com.letsblog.api.repository.ProjectRepository;
-import com.letsblog.api.repository.SiteRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -33,12 +31,6 @@ import static org.mockito.Mockito.when;
 class PluginThemeComparisonServiceTest {
 
     @Mock
-    private ProjectRepository projectRepository;
-
-    @Mock
-    private SiteRepository siteRepository;
-
-    @Mock
     private WordPressBulkManagementClient bulkManagementClient;
 
     @Mock
@@ -48,11 +40,14 @@ class PluginThemeComparisonServiceTest {
     private SiteService siteService;
 
     @Mock
+    private ProjectService projectService;
+
+    @Mock
     private com.letsblog.api.cms.ssh.WordPressSshOperations sshOperations;
 
     private PluginThemeComparisonService service() {
         return new PluginThemeComparisonService(
-                projectRepository, siteRepository, bulkManagementClient, bulkManagementService, siteService,
+                bulkManagementClient, bulkManagementService, siteService, projectService,
                 sshOperations);
     }
 
@@ -75,7 +70,6 @@ class PluginThemeComparisonServiceTest {
         site.setCmsType(CmsType.WORDPRESS);
         site.setManagedWordpress(true);
         site.setWpSlug(slug);
-        site.setWpDbName("wp_" + slug);
         return site;
     }
 
@@ -85,9 +79,9 @@ class PluginThemeComparisonServiceTest {
         Project project = buildProject(10L, 20L, null, "test");
         Site localSite = buildManagedSite(10L, "local-site");
         Site testSite = buildManagedSite(20L, "test-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
         when(bulkManagementClient.listPlugins("local-site")).thenReturn(List.of());
         when(bulkManagementClient.listPlugins("test-site"))
                 .thenReturn(List.of(new PluginThemeInfo("akismet", "active")));
@@ -108,8 +102,8 @@ class PluginThemeComparisonServiceTest {
         PluginThemeComparisonService service = service();
         Project project = buildProject(10L, null, null, "test");
         Site localSite = buildManagedSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
         when(bulkManagementClient.listPlugins("local-site")).thenReturn(List.of());
         when(bulkManagementService.applyToEnvironment(eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L)))
                 .thenReturn(new BulkOperationLog());
@@ -127,8 +121,8 @@ class PluginThemeComparisonServiceTest {
         PluginThemeComparisonService service = service();
         Project project = buildProject(10L, null, null, "test");
         Site localSite = buildManagedSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
         when(bulkManagementClient.listPlugins("local-site"))
                 .thenReturn(List.of(new PluginThemeInfo("akismet", "active")));
 
@@ -144,8 +138,8 @@ class PluginThemeComparisonServiceTest {
         PluginThemeComparisonService service = service();
         Project project = buildProject(10L, null, null, "test");
         Site localSite = buildManagedSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
         when(bulkManagementClient.listThemes("local-site"))
                 .thenReturn(List.of(new PluginThemeInfo("twentytwentyfour", "active")));
 
@@ -159,9 +153,9 @@ class PluginThemeComparisonServiceTest {
         Project project = buildProject(10L, 20L, null, "test");
         Site localSite = buildManagedSite(10L, "local-site");
         Site testSite = buildManagedSite(20L, "test-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
         when(bulkManagementClient.listPlugins("local-site")).thenReturn(List.of());
         when(bulkManagementClient.listPlugins("test-site"))
                 .thenReturn(List.of(new PluginThemeInfo("akismet", "inactive")));
@@ -182,8 +176,8 @@ class PluginThemeComparisonServiceTest {
         PluginThemeComparisonService service = service();
         Project project = buildProject(10L, null, null, "test");
         Site localSite = buildManagedSite(10L, "local-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(10L)).thenReturn(Optional.of(localSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
         when(bulkManagementClient.listPlugins("local-site")).thenReturn(List.of());
 
         assertThrows(IllegalArgumentException.class, () -> service.deletePluginEverywhere(1L, "akismet", 9L));
@@ -211,9 +205,9 @@ class PluginThemeComparisonServiceTest {
         Project project = buildProject(null, 20L, 30L, "test");
         Site testSite = buildExternalSite(20L, "test-site");
         Site productionSite = buildExternalSite(30L, "production-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
-        when(siteRepository.findById(30L)).thenReturn(Optional.of(productionSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
+        when(siteService.getById(30L)).thenReturn(Optional.of(productionSite));
         when(siteService.resolveDataSource(testSite))
                 .thenReturn(new SiteService.SiteDataSource(false, sshCreds("/var/www/html/test")));
         when(siteService.resolveDataSource(productionSite))
@@ -241,8 +235,8 @@ class PluginThemeComparisonServiceTest {
         PluginThemeComparisonService service = service();
         Project project = buildProject(null, 20L, null, "test");
         Site testSite = buildExternalSite(20L, "test-site");
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(siteRepository.findById(20L)).thenReturn(Optional.of(testSite));
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
         when(siteService.resolveDataSource(testSite))
                 .thenReturn(new SiteService.SiteDataSource(false, sshCreds("/var/www/html/test")));
         when(sshOperations.fetchPluginsOrThemesForEnvironments(eq("plugin"), any())).thenReturn(
