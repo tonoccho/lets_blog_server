@@ -62,19 +62,6 @@ export interface GeneratedImageDetail extends GeneratedImageSummary {
   loraWeight: number | null;
 }
 
-export interface DiagramSummary {
-  id: number;
-  projectId: number | null;
-  name: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface DiagramDetail extends DiagramSummary {
-  xml: string;
-  svg: string;
-}
-
 export interface SiteRegisterInput {
   name: string;
   siteKey: string;
@@ -463,34 +450,6 @@ export async function downloadGeneratedImageFile(id: number): Promise<{ body: Ar
   return {
     body: await res.arrayBuffer(),
     mimeType: res.headers.get('content-type') ?? 'image/png',
-  };
-}
-
-export function listDiagrams(projectId?: number): Promise<DiagramSummary[]> {
-  const query = projectId ? `?projectId=${projectId}` : '';
-  return apiFetch<DiagramSummary[]>(`/api/diagrams${query}`);
-}
-
-export function getDiagram(id: number): Promise<DiagramDetail> {
-  return apiFetch<DiagramDetail>(`/api/diagrams/${id}`);
-}
-
-export function deleteDiagram(id: number): Promise<void> {
-  return apiFetch<void>(`/api/diagrams/${id}`, { method: 'DELETE' });
-}
-
-export async function downloadDiagramSvg(id: number): Promise<{ body: ArrayBuffer; mimeType: string }> {
-  const res = await fetch(`${serverUrl()}/api/diagrams/${id}/svg`, {
-    headers: { Authorization: `Bearer ${await currentAccessToken()}` },
-    cache: 'no-store',
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
-  }
-  return {
-    body: await res.arrayBuffer(),
-    mimeType: res.headers.get('content-type') ?? 'image/svg+xml',
   };
 }
 
