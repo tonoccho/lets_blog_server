@@ -110,7 +110,16 @@ public class ProxyHandler {
                         e -> ServerResponse.status(HttpStatus.GATEWAY_TIMEOUT).build());
     }
 
-    private RouteProperties.Route resolveRoute(String path) {
+    /**
+     * ルート表を先頭から順に評価し、最初にマッチしたルートを返す(先勝ち。パスパターンの
+     * 特定度による自動優先付けは行わないため、ルート表側で順序を意識する必要がある)。
+     *
+     * <p>package-privateなのは、ユニットテスト(ProxyHandlerRoutingTest)・ルート表と
+     * 各下流サービスの実{@code @RequestMapping}との整合性を検証するコントラクトテスト
+     * (RouteControllerContractTest、issue #642)から、このロジックの複製を作らず直接
+     * 呼び出すため。
+     */
+    RouteProperties.Route resolveRoute(String path) {
         for (RouteProperties.Route route : routeProperties.getRoutes()) {
             for (String pattern : route.getPaths()) {
                 if (PATH_MATCHER.match(pattern, path)) {
@@ -121,7 +130,8 @@ public class ProxyHandler {
         return null;
     }
 
-    private String buildTargetUri(RouteProperties.Route route, ServerRequest request) {
+    /** package-privateな理由はresolveRoute(String)のJavadoc参照(issue #642)。 */
+    String buildTargetUri(RouteProperties.Route route, ServerRequest request) {
         String baseUri = route != null ? route.getUri() : routeProperties.getFallbackUri();
         String query = request.uri().getRawQuery();
         String path = request.path();
