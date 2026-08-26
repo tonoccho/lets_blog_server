@@ -7,10 +7,16 @@ import { loginViaKeycloak } from './helpers';
  * (「接続テスト」の待機処理も`.catch(() => null)`/`.catch(() => {...})`で例外を握りつぶしていた)。
  * beforeAllでManagedWordPressサイト(外部のSSHホストを必要としない自己完結型のフィクスチャ、
  * SiteCreationPanel.tsx/ManagedWordPressForm.tsx参照)を1件だけ構築し、以降の各テストが
- * このフィクスチャサイトを前提とした確定的な検証を行うようにする。
- * サイト登録操作(既存サイト登録・WordPress新規構築どちらも)はrequireAdminSession()で
- * 保護されているため、ログインにはadmin権限を持つe2e-admin@letsblog.local
- * (helpers.ts/auth-flow.spec.ts参照)を使う。
+ * このフィクスチャサイトを前提とした確定的な検証を行うようにする(afterAllで削除する)。
+ * /sitesページ自体はproxy.tsによりログイン必須(未ログインは/loginへリダイレクト)であり、
+ * サイト削除(deleteSiteAction)はrequireAdminSession()で保護されているため、
+ * ログインにはadmin権限を持つe2e-admin@letsblog.local(helpers.ts/auth-flow.spec.ts参照)を使う。
+ * (registerSiteAction/createManagedWordPressSiteAction自体はgetSession()のみでrequireAdminSession()
+ * までは要求しないが、admin権限はその上位互換なのでここでの選択に影響しない。actions.ts参照)。
+ *
+ * beforeAll/afterAllの内部waitはWordPressの自動構築・削除で数分かかりうるため、
+ * Playwrightのデフォルトフックタイムアウト(30秒)を超える。test.setTimeout()で
+ * 各フック自体のタイムアウトを明示的に延長している。
  */
 const ADMIN_EMAIL = 'e2e-admin@letsblog.local';
 const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? '';
@@ -20,8 +26,16 @@ test.describe('Site Registration and Connection Flow', () => {
 
   let fixtureSiteKey: string;
   let fixtureSiteName: string;
+  // 「構築しました。」を確認できた場合のみtrueにする(単に変数へ値を代入しただけでは、
+  // beforeAllがログイン等で失敗した場合に実際には存在しないサイトをafterAllが削除しようと
+  // してしまうため)。
+  let fixtureSiteCreated = false;
 
   test.beforeAll(async ({ browser }) => {
+    // WordPressの自動構築は数分かかりうるため、このフック自体のタイムアウトを
+    // デフォルトの30秒から延長する(下の240秒waitより十分大きい値)。
+    test.setTimeout(300_000);
+
     const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     fixtureSiteKey = `e2efix-${unique}`;
     fixtureSiteName = `E2E Fixture Site ${unique}`;
@@ -46,6 +60,35 @@ test.describe('Site Registration and Connection Flow', () => {
       // WordPressの自動構築は完了まで数分かかる場合がある(ManagedWordPressForm.tsx参照)。
       await page.locator('button:has-text("構築する")').click();
       await expect(page.getByText('構築しました。')).toBeVisible({ timeout: 240000 });
+      fixtureSiteCreated = true;
+    } finally {
+      await context.close();
+    }
+  });
+
+  test.afterAll(async ({ browser }) => {
+    // サイト削除(WordPressコンテナ・専用DBの削除を伴いうる)にも時間がかかりうるため延長する。
+    test.setTimeout(180_000);
+
+    if (!fixtureSiteCreated) {
+      // beforeAllがサイト構築の完了前に失敗した場合は、削除対象が存在しないため何もしない。
+      return;
+    }
+
+    const context = await browser.newContext({ ignoreHTTPSErrors: true });
+    const page = await context.newPage();
+    try {
+      await loginViaKeycloak(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+      await page.goto('/sites');
+
+      const fixtureRow = page.locator(`tr:has-text("${fixtureSiteKey}")`);
+      if ((await fixtureRow.count()) === 0) {
+        return;
+      }
+
+      page.once('dialog', (dialog) => dialog.accept());
+      await fixtureRow.locator('button:has-text("削除")').click();
+      await expect(fixtureRow).toHaveCount(0, { timeout: 30000 });
     } finally {
       await context.close();
     }

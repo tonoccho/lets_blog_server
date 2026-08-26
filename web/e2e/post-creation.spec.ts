@@ -13,6 +13,10 @@ import { loginViaKeycloak } from './helpers';
  * なお、検索・フィルタ機能や一覧上の削除ボタンは/projectsの現在の実装には存在しない
  * (issue #645の調査で確認、ProjectsTable.tsxは定義されているがpage.tsxからは未使用のdead code)。
  * これらは「未実装であること」自体を確定的に固定するテストに置き換えている。
+ *
+ * 各テストで作成したfixtureプロジェクト(および「Create a new project...」テストが追加で
+ * 作成するプロジェクト)は、afterEachで(/projects/{id}の「プロジェクトを削除」ボタン、
+ * DeleteProjectButton.tsx参照)確実に削除する。実行のたびにプロジェクトが増え続けるのを防ぐため。
  */
 const ADMIN_EMAIL = 'e2e-admin@letsblog.local';
 const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? '';
@@ -21,19 +25,41 @@ test.describe('Article/Post Creation Workflow', () => {
   test.skip(!ADMIN_PASSWORD, 'E2E_ADMIN_PASSWORDが未設定のためスキップ');
 
   let fixtureProjectName: string;
+  // beforeEachがログイン等で失敗した場合でもafterEachが安全にno-opできるよう、
+  // 空配列で初期化しておく(ログイン成功後にfixture作成分を追加する)。
+  let createdProjectNames: string[] = [];
 
   test.beforeEach(async ({ page }) => {
+    createdProjectNames = [];
     await loginViaKeycloak(page, ADMIN_EMAIL, ADMIN_PASSWORD);
 
     // Fixture: 各テストの実行前に、プロジェクト一覧へ必ず1件のプロジェクトが存在する状態を作る。
     const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     fixtureProjectName = `E2E Fixture Project ${unique}`;
+    createdProjectNames.push(fixtureProjectName);
     await page.goto('/projects');
     await page.locator('#project-form input[name="name"]').fill(fixtureProjectName);
     await page.locator('#project-form input[name="slug"]').fill(`e2e-fixture-${unique}`);
     await page.locator('#project-form button:has-text("作成")').click();
     await expect(page.getByText('作成しました。')).toBeVisible({ timeout: 10000 });
     await page.reload();
+  });
+
+  test.afterEach(async ({ page }) => {
+    // このテストが作成した全プロジェクト(fixture + テスト自身が追加作成したもの)を後始末する。
+    for (const name of createdProjectNames) {
+      await page.goto('/projects');
+      const row = page.locator(`tbody tr:has-text("${name}")`);
+      if ((await row.count()) === 0) {
+        continue;
+      }
+      await row.locator('a:has-text("詳細")').click();
+      await expect(page).toHaveURL(/\/projects\/\d+$/, { timeout: 10000 });
+
+      page.once('dialog', (dialog) => dialog.accept());
+      await page.locator('button:has-text("プロジェクトを削除")').click();
+      await expect(page).toHaveURL(/\/projects$/, { timeout: 10000 });
+    }
   });
 
   test('Navigate to projects page and view project list', async ({ page }) => {
@@ -68,6 +94,7 @@ test.describe('Article/Post Creation Workflow', () => {
     // Step 2: Fill project form fields
     const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const projectTitle = `Test Project ${unique}`;
+    createdProjectNames.push(projectTitle); // afterEachで後始末する対象に追加する
     await page.locator('#project-form input[name="name"]').fill(projectTitle);
     await page.locator('#project-form input[name="slug"]').fill(`test-project-${unique}`);
 

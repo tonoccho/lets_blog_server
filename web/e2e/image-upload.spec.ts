@@ -19,6 +19,12 @@ import { loginViaKeycloak } from './helpers';
  *
  * 削除テストがこのフィクスチャ画像自体を削除するため、フルパラレル実行時に他のテストと
  * 競合しないようこのdescribe全体をserialモードで実行する。
+ *
+ * ComfyUI生成は数分かかりうるため、beforeAll自体のタイムアウトをPlaywrightのデフォルト30秒から
+ * 延長している(test.setTimeout())。また、画像のalt属性(prompt文字列)はlegacy-apiの
+ * AiAssistService.resolveParams()でapp.default-quality-prompt(既定で
+ * "high quality, highly detailed, sharp focus, masterpiece")が自動的に末尾へ連結されるため、
+ * fixturePromptとの完全一致ではなく前方一致で照合する。
  */
 const ADMIN_EMAIL = 'e2e-admin@letsblog.local';
 const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? '';
@@ -29,8 +35,13 @@ test.describe('Image Gallery Workflow', () => {
 
   let fixturePrompt: string;
   let fixtureReady = false;
+  let fixtureProjectId: string | null = null;
 
   test.beforeAll(async ({ browser }) => {
+    // プロジェクト作成+ComfyUI生成(最大120秒待つ)を合わせて数分かかりうるため、
+    // このフック自体のタイムアウトをデフォルトの30秒から延長する。
+    test.setTimeout(200_000);
+
     const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     fixturePrompt = `E2E fixture image ${unique}`;
 
@@ -49,6 +60,7 @@ test.describe('Image Gallery Workflow', () => {
       await page.reload();
       await page.locator(`tbody tr:has-text("${projectName}") a:has-text("詳細")`).click();
       await expect(page).toHaveURL(/\/projects\/\d+$/, { timeout: 10000 });
+      fixtureProjectId = page.url().match(/\/projects\/(\d+)$/)?.[1] ?? null;
 
       // アセット画像生成パネルを開き、低steps・小サイズ・1枚のみの最小構成で生成する。
       await page.locator('button:has-text("アセット画像生成")').click();
@@ -65,6 +77,28 @@ test.describe('Image Gallery Workflow', () => {
       const errorMessage = page.locator('p.text-red-600');
       await expect(successMessage.or(errorMessage)).toBeVisible({ timeout: 120000 });
       fixtureReady = await successMessage.isVisible();
+    } finally {
+      await context.close();
+    }
+  });
+
+  test.afterAll(async ({ browser }) => {
+    test.setTimeout(60_000);
+
+    if (!fixtureProjectId) {
+      // beforeAllがプロジェクト作成の完了前に失敗した場合は、削除対象が存在しないため何もしない。
+      return;
+    }
+
+    const context = await browser.newContext({ ignoreHTTPSErrors: true });
+    const page = await context.newPage();
+    try {
+      await loginViaKeycloak(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+      await page.goto(`/projects/${fixtureProjectId}`);
+
+      page.once('dialog', (dialog) => dialog.accept());
+      await page.locator('button:has-text("プロジェクトを削除")').click();
+      await expect(page).toHaveURL(/\/projects$/, { timeout: 15000 });
     } finally {
       await context.close();
     }
@@ -88,14 +122,14 @@ test.describe('Image Gallery Workflow', () => {
   test('Image gallery displays the fixture generated image', async ({ page }) => {
     test.skip(!fixtureReady, 'ComfyUIでの画像生成に失敗したため実行をスキップ');
 
-    const fixtureImage = page.locator(`img[alt="${fixturePrompt}"]`);
+    const fixtureImage = page.locator(`img[alt^="${fixturePrompt}"]`);
     await expect(fixtureImage).toBeVisible();
   });
 
   test('Image detail modal opens and shows generation parameters', async ({ page }) => {
     test.skip(!fixtureReady, 'ComfyUIでの画像生成に失敗したため実行をスキップ');
 
-    const fixtureImage = page.locator(`img[alt="${fixturePrompt}"]`);
+    const fixtureImage = page.locator(`img[alt^="${fixturePrompt}"]`);
     await fixtureImage.click();
 
     await expect(page.getByText('生成画像の詳細')).toBeVisible({ timeout: 5000 });
@@ -129,7 +163,7 @@ test.describe('Image Gallery Workflow', () => {
   test('Image deletion removes the fixture image from the gallery', async ({ page }) => {
     test.skip(!fixtureReady, 'ComfyUIでの画像生成に失敗したため実行をスキップ');
 
-    const fixtureImage = page.locator(`img[alt="${fixturePrompt}"]`);
+    const fixtureImage = page.locator(`img[alt^="${fixturePrompt}"]`);
     await fixtureImage.click();
     await expect(page.getByText('生成画像の詳細')).toBeVisible();
 
