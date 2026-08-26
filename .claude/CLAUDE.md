@@ -175,6 +175,9 @@ An issue may be considered complete only when:
 - Required validation has completed
 - Review has no blocking issues
 - QA confirms the expected behavior
+- A Pull Request was opened and the user has confirmed it was merged
+
+Passing QA opens a Pull Request; it does not mark the issue Done. Done happens only after the user confirms the merge, at which point the working branch is deleted locally and remotely.
 
 ---
 

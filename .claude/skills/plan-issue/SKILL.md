@@ -61,7 +61,7 @@ Ask the user only the necessary questions.
 
 Do not create a Ready Issue while blocking questions remain unresolved.
 
-The Issue may remain in Inbox or Backlog.
+The Issue remains in Inbox.
 
 ---
 
@@ -91,18 +91,25 @@ Use the repository's existing Issue conventions if they exist.
 
 The default status after creation is:
 
-`Backlog`
+`Inbox`
 
-Do not automatically move an Issue to `Ready` unless:
+Every newly created Issue starts in `Inbox`, no matter how well-defined it already looks.
 
-- The user explicitly requested it, or
-- The project workflow explicitly allows the planner to mark it Ready.
+Promotion out of `Inbox` is intentionally a separate, later step, not part of registration:
+
+- `Inbox → Backlog` is decided by the `triage-backlog` skill.
+- `Backlog → Ready` is decided by the `ready-issue` skill.
+
+Do not automatically move a newly created Issue to `Backlog` or `Ready` unless:
+
+- The user explicitly requested that specific target status for this Issue in the same request, or
+- The project workflow explicitly allows the planner to skip a stage.
 
 ---
 
-### Step 6: Readiness check
+### Step 6: Readiness signal (informational only)
 
-Before recommending `Ready`, verify:
+Even though the Issue stays in `Inbox`, record a readiness signal to help the later triage/ready steps prioritize:
 
 - [ ] Goal is clear
 - [ ] Requirements are understandable
@@ -118,7 +125,9 @@ If all conditions are satisfied, report:
 
 Otherwise report:
 
-`Backlog`
+`Needs clarification`
+
+This signal does not change the Issue's actual GitHub status.
 
 ---
 
@@ -132,11 +141,14 @@ The Issue number and title.
 
 ### Status
 
+`Inbox`
+
+### Readiness Signal
+
 One of:
 
-- Inbox
-- Backlog
 - Ready candidate
+- Needs clarification
 
 ### Summary
 
@@ -169,3 +181,11 @@ Prefer small, independently deliverable Issues.
 If the request is too large, propose splitting it.
 
 The GitHub Issue is the source of truth for the implementation.
+
+---
+
+## Related skills
+
+- `discover-issues` — reuses this skill's Issue template when registering multiple Issues found from a full-repository review.
+- `triage-backlog` — moves Issues this skill created from `Inbox` to `Backlog`.
+- `ready-issue` — moves Issues from `Backlog` to `Ready`.

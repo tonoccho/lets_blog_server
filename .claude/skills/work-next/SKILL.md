@@ -1,21 +1,25 @@
 ---
 name: work-next
-description: Select the highest-priority Ready GitHub Issue and drive it through implementation, review, and QA. Use this skill when the user asks Claude Code to find the next piece of work or continue the development workflow.
+description: Select the highest-priority Ready GitHub Issue and drive it through branch creation, implementation, review, QA, and Pull Request creation. Use this skill when the user asks Claude Code to find the next piece of work, implement the next task, or continue the development workflow (e.g. "次のタスクを実装して").
 ---
 
 # Work Next
 
 You are the orchestrator of the project's AI development workflow.
 
-Your responsibility is to select the next Ready GitHub Issue and move it through the development pipeline.
+Your responsibility is to select the next Ready GitHub Issue and drive it all the way to an open Pull Request awaiting the user's merge.
 
 You do not directly implement application code.
 
 You coordinate:
 
+- git-workflow (branch creation, commit, push)
 - implement-issue
 - review-issue
 - qa-issue
+- pull-request
+
+Finishing the Issue (`Done` + branch cleanup) happens separately, via `complete-issue`, once the user confirms the Pull Request was merged. This skill's run ends when the Pull Request is opened — it does not wait for the merge.
 
 The GitHub Issue status is the source of truth.
 
@@ -105,12 +109,14 @@ Invoke the `implement-issue` skill.
 The implementation workflow must:
 
 1. Change the Issue to `In Progress`.
-2. Invoke the `implementer` agent.
-3. Investigate the codebase.
-4. Create an implementation plan.
-5. Implement the change.
-6. Run tests.
-7. Verify acceptance criteria.
+2. Create the working branch from `develop` via `git-workflow`.
+3. Invoke the `implementer` agent.
+4. Investigate the codebase.
+5. Create an implementation plan.
+6. Implement the change.
+7. Run tests.
+8. Verify acceptance criteria.
+9. Commit and push via `git-workflow`.
 
 If implementation fails:
 
@@ -185,9 +191,7 @@ If QA returns:
 
 `PASS`
 
-change:
-
-`QA → Done`
+The `qa-issue` skill itself invokes `pull-request` to open the Pull Request. The Issue status remains `QA` — do not move it to `Done` here. Report the Pull Request URL and ask the user to review and merge it. Then stop; this workflow's job is done once the PR is open.
 
 If QA returns:
 
@@ -215,16 +219,33 @@ Then stop.
 
 Report:
 
-## Completed Issue
+## Issue
 
 - Issue number
 - Title
 
-## Workflow
+## Workflow so far
 
 ```text
 Ready
 → In Progress
 → Review
 → QA
-→ Done
+→ Pull Request opened (awaiting merge)
+```
+
+## Next Step
+
+Tell the user: once the Pull Request is merged, say so (e.g. "PRをマージしました") to trigger `complete-issue`, which moves the Issue to `Done` and deletes the working branch locally and remotely.
+
+---
+
+# Rules
+
+Never mark an Issue `Done` from this skill — that requires a confirmed merge via `complete-issue`.
+
+Never skip branch creation (`git-workflow`) before invoking the `implementer` agent.
+
+Never create a Pull Request before QA has passed.
+
+If any stage stops the workflow (implementation failure, changes required, requirement clarification, QA failure, QA blocked), do not silently continue to the next stage.

@@ -78,7 +78,19 @@ Record the Issue number being worked on.
 
 ---
 
-## Step 4: Invoke implementer
+## Step 4: Create the working branch
+
+Invoke the `git-workflow` skill to:
+
+1. Inspect repository state (stop if there are unrelated uncommitted changes).
+2. Determine and update the base branch (this project branches from `develop`, not `main`).
+3. Create the Issue branch (`<type>/<issue-number>-<short-description>`).
+
+Do not invoke the `implementer` agent until the correct branch is checked out and confirmed.
+
+---
+
+## Step 5: Invoke implementer
 
 Ask the `implementer` agent to:
 
@@ -93,7 +105,7 @@ Ask the `implementer` agent to:
 
 ---
 
-## Step 5: Validate implementation result
+## Step 6: Validate implementation result
 
 Check the implementer's report.
 
@@ -109,7 +121,20 @@ Do not trust a statement such as "all tests pass" without evidence from the tool
 
 ---
 
-## Step 6: Move to Review
+## Step 7: Commit and push
+
+Invoke the `git-workflow` skill to:
+
+1. Inspect the diff and confirm every change belongs to this Issue.
+2. Run project validation (formatter, lint, typecheck, tests) if not already confirmed in Step 6.
+3. Commit with a message following the repository's convention.
+4. Push the branch (`git push -u origin <branch-name>`).
+
+Do not skip this step — implementation is not usable by later stages (Review, QA, Pull Request) until it is committed and pushed.
+
+---
+
+## Step 8: Move to Review
 
 If implementation is complete and validation is successful:
 

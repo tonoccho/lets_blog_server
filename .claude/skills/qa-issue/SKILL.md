@@ -77,7 +77,7 @@ All required acceptance criteria are verified.
 
 No significant regression is found.
 
-Proceed to Done.
+Proceed to Pull Request creation (Step 5a) — do not move straight to Done. A human still has to merge the branch.
 
 ### FAIL
 
@@ -95,10 +95,6 @@ Keep the Issue in QA and report exactly what is missing.
 
 ## Step 5: Update status
 
-If PASS:
-
-`QA → Done`
-
 If FAIL:
 
 `QA → In Progress`
@@ -108,6 +104,24 @@ If BLOCKED:
 remain:
 
 `QA`
+
+If PASS: do not change status yet — continue to Step 5a first.
+
+---
+
+## Step 5a: Create the Pull Request (PASS only)
+
+QA passing means the work is behaviorally correct, not that it is done — nothing has been merged yet.
+
+Invoke the `pull-request` skill to open (or confirm an existing) Pull Request for the Issue's branch.
+
+The Issue's GitHub status remains:
+
+`QA`
+
+Do not move it to `Done` here. `Done` is reserved for after the user confirms the Pull Request was actually merged — see the `complete-issue` skill.
+
+Report the Pull Request URL to the user and explicitly ask them to review and merge it. Then stop this workflow; do not poll for the merge.
 
 ---
 
@@ -149,7 +163,9 @@ Current GitHub status.
 
 ### Next Step
 
-Done / Implementation / Blocked
+`Awaiting PR merge` (PASS) / `Implementation` (FAIL) / `Blocked`
+
+If PASS, include the Pull Request URL from Step 5a and state that the Issue moves to `Done` only after the user confirms the merge (see `complete-issue`).
 
 ---
 
@@ -162,5 +178,7 @@ Never ignore failed acceptance criteria.
 Never modify production code.
 
 Do not mark Done merely because automated tests pass.
+
+Never move an Issue to `Done` from this skill — `Done` requires a confirmed merge, handled by `complete-issue`.
 
 The user's expected behavior is the final authority.
