@@ -36,6 +36,7 @@ jobs:
       log-writer: ${{ steps.filter.outputs.log-writer }}
       gateway: ${{ steps.filter.outputs.gateway }}
       identity: ${{ steps.filter.outputs.identity }}
+      content: ${{ steps.filter.outputs.content }}
     steps:
       - uses: actions/checkout@v7
 
@@ -77,6 +78,13 @@ jobs:
               - 'gradle/**'
               - 'gradlew'
               - 'services/identity/**'
+            content:
+              - 'libs/**'
+              - 'build.gradle'
+              - 'settings.gradle'
+              - 'gradle/**'
+              - 'gradlew'
+              - 'services/content/**'
 
   test:
     needs: detect-changes
@@ -85,17 +93,19 @@ jobs:
       (matrix.service == 'legacy-api' && needs.detect-changes.outputs.legacy-api == 'true') ||
       (matrix.service == 'log-writer' && needs.detect-changes.outputs.log-writer == 'true') ||
       (matrix.service == 'gateway' && needs.detect-changes.outputs.gateway == 'true') ||
-      (matrix.service == 'identity' && needs.detect-changes.outputs.identity == 'true')
+      (matrix.service == 'identity' && needs.detect-changes.outputs.identity == 'true') ||
+      (matrix.service == 'content' && needs.detect-changes.outputs.content == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        service: [lbs-common, legacy-api, log-writer, gateway, identity]
+        service: [lbs-common, legacy-api, log-writer, gateway, identity, content]
 
-    # legacy-apiのテストのみMySQLを使う(#570のスキーマ分離が完了するまでは共有DBのまま)。
-    # lbs-common/log-writerには不要だが、マトリクスジョブ単位でしか services: を定義できない
-    # ため、無害な待機コストとして許容する。
+    # legacy-api/contentのテストのみMySQLを使う(#570のスキーマ分離が完了するまではlegacy-apiは
+    # 共有DBのまま。contentは#576でスキーマ分離済みの専用DB lbs_content_test を使う)。
+    # lbs-common/log-writer/gateway/identityには不要だが、マトリクスジョブ単位でしか services: を
+    # 定義できないため、無害な待機コストとして許容する。
     services:
       mysql:
         image: mysql:8.0
@@ -138,6 +148,14 @@ jobs:
 
       - name: Run linter
         run: ./gradlew ${{ steps.project.outputs.path }}:lint
+
+      - name: Create content test schema
+        if: matrix.service == 'content'
+        run: |
+          mysql -h 127.0.0.1 -P 3306 -u root -ptestpass -e "
+            CREATE DATABASE IF NOT EXISTS lbs_content_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+            GRANT ALL PRIVILEGES ON lbs_content_test.* TO 'test_user'@'%';
+            FLUSH PRIVILEGES;"
 
       - name: Run unit tests with coverage
         run: |
