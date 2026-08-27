@@ -322,12 +322,30 @@ docker exec lbs-gateway curl -s -X POST \
   `unmigrated = 0` を確認)。
 - 移行対象と同数のユーザーがKeycloakへ作成されていること。この時点では
   reverse-proxyが停止中でKeycloak管理コンソール(ブラウザ)へはアクセスできないため、
-  3.1と同様に `gateway` コンテナから Admin REST API を `docker exec` 経由で叩いて件数を確認する
+  `gateway` コンテナから Keycloak Admin REST API を `docker exec` 経由で叩いて件数を確認する
   (ブラウザでの目視確認は、[6. 全サービスの起動順序](#6-全サービスの起動順序)でreverse-proxyを
   再起動した後に改めて行ってもよい)。
 
+  **注意: `/auth/admin/realms/letsblog/users` はKeycloak自身のAdmin REST APIであり、
+  letsblog realmの業務用ロール(`admin`。`identity-service`の`requireAdmin()`が見るロール)
+  とは別物である。letsblog realmの`admin`ロール(`keycloak/realm-export.json`参照。
+  `composite: false`で`realm-management`クライアントロールを持たない)から発行された
+  [3.1](#31-管理者トークンの取得)の `$ADMIN_TOKEN` では権限不足(403)になる。
+  このAPIを呼ぶには、`docker-compose.yml` の `keycloak` サービスに設定されている
+  bootstrap admin(`KC_BOOTSTRAP_ADMIN_USERNAME` / `KC_BOOTSTRAP_ADMIN_PASSWORD`。
+  実体は `.env` の `KEYCLOAK_ADMIN_USERNAME` / `KEYCLOAK_ADMIN_PASSWORD`)でmaster realmから
+  トークンを取得する必要がある(bootstrap adminはデフォルトで全realmに対する管理権限を持つ)。
+  以降、このトークンを `$KC_BOOTSTRAP_TOKEN` と表記し、`$ADMIN_TOKEN`(業務API用)とは
+  明確に区別する。**
+
   ```bash
-  docker exec lbs-gateway curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
+  KC_BOOTSTRAP_TOKEN=$(docker exec lbs-gateway curl -s \
+    -d "client_id=admin-cli" -d "grant_type=password" \
+    -d "username=$KEYCLOAK_ADMIN_USERNAME" -d "password=$KEYCLOAK_ADMIN_PASSWORD" \
+    http://keycloak:8080/auth/realms/master/protocol/openid-connect/token \
+    | jq -r .access_token)
+
+  docker exec lbs-gateway curl -s -H "Authorization: Bearer $KC_BOOTSTRAP_TOKEN" \
     "http://keycloak:8080/auth/admin/realms/letsblog/users?max=1000" \
     | jq 'length'
   # 期待: 3.2で確認した unmigrated の件数と一致する
@@ -383,13 +401,27 @@ docker compose logs keycloak | grep -i realm
 curl -sk https://localhost/auth/realms/letsblog/.well-known/openid-configuration | jq .issuer
 # 期待: "https://localhost/auth/realms/letsblog"
 
-# クライアント定義の存在確認(管理者トークンが必要。3.1で取得したものを使い回せる)
-curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
+# クライアント/ロール一覧の確認にはKeycloak Admin REST APIへのアクセスが必要。
+# letsblog realmの業務用`admin`ロール([3.1](#31-管理者トークンの取得)の$ADMIN_TOKEN)は
+# realm-management権限を持たないため使えない(3.4の注意書き参照)。ここでも
+# bootstrap admin(master realm)のトークンが必要。
+#
+# また、このタイミングは[フェーズ2](#フェーズ2-残りサービスの完全停止)の全停止
+# ([6. 全サービスの起動順序](#6-全サービスの起動順序))を経た後であり、3.1/3.4で
+# 取得したトークンは`accessTokenLifespan`(realm-export.jsonで300秒=5分)を
+# 超えて失効している可能性が高い。使い回さず、必ずここで新規に取得し直す。
+KC_BOOTSTRAP_TOKEN=$(curl -sk \
+  -d "client_id=admin-cli" -d "grant_type=password" \
+  -d "username=$KEYCLOAK_ADMIN_USERNAME" -d "password=$KEYCLOAK_ADMIN_PASSWORD" \
+  https://localhost/auth/realms/master/protocol/openid-connect/token \
+  | jq -r .access_token)
+
+curl -sk -H "Authorization: Bearer $KC_BOOTSTRAP_TOKEN" \
   https://localhost/auth/admin/realms/letsblog/clients \
   | jq -r '.[].clientId'
 # 期待: letsblog-web, letsblog-vscode, letsblog-services を含む
 
-curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
+curl -sk -H "Authorization: Bearer $KC_BOOTSTRAP_TOKEN" \
   https://localhost/auth/admin/realms/letsblog/roles \
   | jq -r '.[].name'
 # 期待: admin, editor, viewer を含む
@@ -419,8 +451,10 @@ curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
    前提としており、[6. 全サービスの起動順序](#6-全サービスの起動順序)でreverse-proxyを
    再起動した後にのみ到達可能。**カットオーバー当日、reverse-proxy再起動前([3. データ移行
    スクリプトの実行順序と検証ポイント](#3-データ移行スクリプトの実行順序と検証ポイント)の
-   段階)で同等の操作が必要になった場合は、[3.1](#31-管理者トークンの取得)と同じ
-   `docker exec` 経由のAdmin REST API呼び出しで代替する。
+   段階)で同等の操作が必要になった場合は、[3.4](#34-検証ポイント)と同じ
+   bootstrap adminトークン(`$KC_BOOTSTRAP_TOKEN`)による `docker exec` 経由のKeycloak
+   Admin REST API呼び出しで代替する(letsblog realmの業務用`$ADMIN_TOKEN`では
+   権限不足になるため使えない点に注意)。
 
 ---
 
