@@ -168,6 +168,33 @@ public class KeycloakAdminClient {
     }
 
     /**
+     * 管理者が指定した平文パスワードを即時設定する(temporary=false、次回ログイン時の強制変更なし)。
+     * {@link #sendPasswordResetEmail(String)}(セルフサービスの再設定メール送信)とは別用途であり、
+     * legacy-apiの初回セットアップ(/api/auth/setup)・緊急復旧(AdminPasswordResetRunner)導線が
+     * 呼び出す想定(#681)。legacy-apiはこのモジュールに依存できないため、legacy-api側には
+     * 同じ流儀の別クライアント実装(services/legacy-api/.../keycloak/KeycloakAdminClient)を置く。
+     */
+    public void setPassword(String keycloakSub, String newPassword) {
+        ObjectNode body = JsonNodeFactory.instance.objectNode();
+        body.put("type", "password");
+        body.put("value", newPassword);
+        body.put("temporary", false);
+        try {
+            adminClient.put()
+                    .uri("/users/{id}/reset-password", keycloakSub)
+                    .header("Authorization", "Bearer " + serviceTokenClient.getAccessToken())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientResponseException e) {
+            throw new KeycloakUserSyncException(errorMessage("パスワード即時設定(sub=" + keycloakSub + ")", e), e);
+        } catch (Exception e) {
+            throw connectionFailure("パスワード即時設定(sub=" + keycloakSub + ")", e);
+        }
+    }
+
+    /**
      * Keycloak側にsubに対応するユーザーが存在するかを確認する(#562の孤児検出)。
      * 404は「存在しない」として正常にfalseを返す。それ以外の失敗は接続不可等とみなし例外を投げる。
      */

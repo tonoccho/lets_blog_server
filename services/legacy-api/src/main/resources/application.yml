@@ -83,11 +83,20 @@ spring:
     template:
       reply-timeout: 3000
 
-# KeycloakのJWT検証(#563)。gatewayを経由しない直接アクセスに対しても、Bearerトークンが
-# 付与されていれば独立して検証する(gatewayのbypassを許さない)。値の意味・JWKS取得先と
-# issuerを分けて指定している理由はservices/gateway/src/main/resources/application.ymlの
-# コメント、および services/legacy-api/.../config/JwtDecoderConfig.java を参照。
+# Keycloak Admin REST API呼び出し(初回セットアップ/api/auth/setup・緊急復旧AdminPasswordResetRunner、
+# issue #681)。services/identity/.../keycloak/KeycloakAdminClientと同じ"letsblog-services"
+# クライアントクレデンシャルズグラントを使う。事前にrealm側でこのクライアントのサービスアカウントに
+# realm-management#manage-usersロールを付与しておく必要がある(keycloak/realm-export.json参照)。
 keycloak:
+  admin:
+    token-uri: ${KEYCLOAK_TOKEN_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/token}
+    admin-base-uri: ${KEYCLOAK_ADMIN_BASE_URI:http://keycloak:8080/auth/admin/realms/letsblog}
+    client-id: ${KEYCLOAK_SERVICES_CLIENT_ID:letsblog-services}
+    client-secret: ${KEYCLOAK_SERVICES_CLIENT_SECRET:}
+  # KeycloakのJWT検証(#563)。gatewayを経由しない直接アクセスに対しても、Bearerトークンが
+  # 付与されていれば独立して検証する(gatewayのbypassを許さない)。値の意味・JWKS取得先と
+  # issuerを分けて指定している理由はservices/gateway/src/main/resources/application.ymlの
+  # コメント、および services/legacy-api/.../config/JwtDecoderConfig.java を参照。
   jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/certs}
   issuer: ${KEYCLOAK_ISSUER:https://localhost/auth/realms/letsblog}
 

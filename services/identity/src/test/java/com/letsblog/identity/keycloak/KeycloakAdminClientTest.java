@@ -166,6 +166,37 @@ class KeycloakAdminClientTest {
     }
 
     @Test
+    void setPassword_type_value_temporary_falseで即時設定する() {
+        expectTokenRequest();
+        server.expect(requestTo(ADMIN_BASE_URI + "/users/sub-4/reset-password"))
+                .andExpect(method(PUT))
+                .andExpect(content().string("{\"type\":\"password\",\"value\":\"NewPassw0rd!\",\"temporary\":false}"))
+                .andRespond(withSuccess());
+
+        client.setPassword("sub-4", "NewPassw0rd!");
+
+        server.verify();
+    }
+
+    @Test
+    void setPassword_失敗レスポンスは例外になる() {
+        expectTokenRequest();
+        server.expect(requestTo(ADMIN_BASE_URI + "/users/sub-5/reset-password"))
+                .andRespond(withStatus(HttpStatus.BAD_REQUEST));
+
+        assertThrows(KeycloakUserSyncException.class, () -> client.setPassword("sub-5", "bad"));
+    }
+
+    @Test
+    void setPassword_対象ユーザーが存在しない場合は例外になる() {
+        expectTokenRequest();
+        server.expect(requestTo(ADMIN_BASE_URI + "/users/missing-sub/reset-password"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        assertThrows(KeycloakUserSyncException.class, () -> client.setPassword("missing-sub", "whatever123"));
+    }
+
+    @Test
     void exists_404なら存在しないとみなしfalse() {
         expectTokenRequest();
         server.expect(requestTo(ADMIN_BASE_URI + "/users/missing-sub"))

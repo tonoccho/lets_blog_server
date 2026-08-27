@@ -19,6 +19,7 @@ import com.letsblog.api.service.ProjectUserNotFoundException;
 import com.letsblog.api.service.ProvisioningException;
 import com.letsblog.api.service.SiteNotFoundException;
 import com.letsblog.api.exception.RateLimitExceededException;
+import com.letsblog.api.keycloak.KeycloakAdminException;
 import com.letsblog.api.service.UserNotFoundException;
 import com.letsblog.common.web.ErrorResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -125,6 +126,16 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ProvisioningException.class)
     public ResponseEntity<ErrorResponse> handleProvisioningException(ProvisioningException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /**
+     * Keycloak Admin APIとの呼び出し失敗(#681)。初回セットアップ・緊急復旧でKeycloak側の操作に
+     * 失敗した場合、暗黙に成功させず明確なエラー(502 Bad Gateway)として呼び出し元に伝える。
+     */
+    @ExceptionHandler(KeycloakAdminException.class)
+    public ResponseEntity<ErrorResponse> handleKeycloakAdminException(KeycloakAdminException e) {
+        log.error("Keycloak Admin APIとの呼び出しに失敗しました", e);
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 
