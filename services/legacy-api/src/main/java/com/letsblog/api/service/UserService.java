@@ -144,18 +144,18 @@ public class UserService {
             throw e;
         }
 
-        User user = new User();
-        user.setEmail(email);
-        user.setPasswordHash(passwordEncoder.encode(password));
-        user.setRole("admin");
-        user.setKeycloakSub(keycloakSub);
-
-        String defaultRoleName = LEGACY_ROLE_TO_ROLE_NAME.get("admin");
-        if (defaultRoleName != null) {
-            roleRepository.findByRoleName(defaultRoleName).ifPresent(role -> user.getRoles().add(role));
-        }
-
         try {
+            User user = new User();
+            user.setEmail(email);
+            user.setPasswordHash(passwordEncoder.encode(password));
+            user.setRole("admin");
+            user.setKeycloakSub(keycloakSub);
+
+            String defaultRoleName = LEGACY_ROLE_TO_ROLE_NAME.get("admin");
+            if (defaultRoleName != null) {
+                roleRepository.findByRoleName(defaultRoleName).ifPresent(role -> user.getRoles().add(role));
+            }
+
             return UserResponse.from(userRepository.save(user));
         } catch (RuntimeException e) {
             compensateKeycloakUser(keycloakSub);

@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -159,6 +160,32 @@ class UserServiceTest {
 
         verify(keycloakAdminClient).deleteUser("kc-sub-2");
         verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void setupInitialAdmin_ローカルに既に同一メールが存在すれば例外でKeycloakは呼ばれない() {
+        service = service();
+        when(userRepository.count()).thenReturn(0L);
+        when(userRepository.existsByEmail("admin@example.com")).thenReturn(true);
+
+        assertThrows(EmailAlreadyExistsException.class,
+                () -> service.setupInitialAdmin("admin@example.com", "password123"));
+        verifyNoInteractions(keycloakAdminClient);
+    }
+
+    @Test
+    void setupInitialAdmin_ローカル保存失敗時はKeycloakユーザーを補償削除する() {
+        service = service();
+        when(userRepository.count()).thenReturn(0L);
+        when(userRepository.existsByEmail("admin@example.com")).thenReturn(false);
+        when(keycloakAdminClient.createUser("admin@example.com")).thenReturn("kc-sub-3");
+        when(userRepository.save(any(User.class))).thenThrow(new RuntimeException("DB接続エラー"));
+
+        assertThrows(RuntimeException.class,
+                () -> service.setupInitialAdmin("admin@example.com", "password123"));
+
+        verify(keycloakAdminClient).setPassword("kc-sub-3", "password123");
+        verify(keycloakAdminClient).deleteUser("kc-sub-3");
     }
 
     private User buildUser() {
