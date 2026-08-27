@@ -1,6 +1,9 @@
 # Env / secrets
 .env
 
+# DB/Keycloakバックアップダンプ(実データを含むためコミット対象外)
+backups/
+
 # Claude Code セッション固有のランタイム状態(CLAUDE.md 等の規約ファイルはコミット対象)
 .claude/scheduled_tasks.lock
 

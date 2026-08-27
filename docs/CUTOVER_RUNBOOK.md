@@ -6,8 +6,9 @@ Issue: [#591](https://github.com/tonoccho/lets_blog_server/issues/591) [E5] カ�
 
 **この手順書は [B8] 旧認証機構の撤去（[#566](https://github.com/tonoccho/lets_blog_server/issues/566)）に着手する前に、
 実際にステージング相当の環境で通しで実行し、ロールバックも試行して確認しておく必要がある
-（本Issueの受入基準）。本ドキュメント作成時点ではこの実機通し検証はまだ行っていない。
-詳細は [10. 既知の制約・未検証事項](#10-既知の制約未検証事項) を参照。**
+（本Issueの受入基準）。2026-08-27、本環境で実際に通し実行およびロールバック試行(データのみ)を
+行い、成功を確認した。ただしユーザー移行(3章)の実機実行とフルロールバック(データ+コード)は
+未実施。詳細は [9. 実行記録](#9-実行記録) と [10. 既知の制約・未検証事項](#10-既知の制約未検証事項) を参照。**
 
 ---
 
@@ -141,15 +142,19 @@ docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" lbs-mysql \
   > "$BACKUP_DIR/mysql-all-databases.sql"
 
 # 事後チェック: 想定スキーマがすべて含まれているか確認
+# (keycloakはPostgreSQL側であり、MySQLダンプには含まれないため対象外)
 for db in lets_blog lbs_identity lbs_project lbs_content lbs_media lbs_ai \
-          lbs_publishing lbs_analytics lbs_platform lbs_log keycloak; do
+          lbs_publishing lbs_analytics lbs_platform lbs_log; do
   grep -q "CREATE DATABASE.*\`$db\`" "$BACKUP_DIR/mysql-all-databases.sql" \
     || echo "警告: ${db} がダンプに含まれていません" >&2
 done
 # WordPressサイトDBの件数確認(サイト数と一致するはず。厳密な突合は1.4参照)
+# 開発環境には lets_blog_test / lbs_*_test 等のテスト用スキーマも存在するため、
+# それらも除外対象に含める(実機確認により、素朴な"lets_blog"だけの除外では
+# "lets_blog_test"が漏れて件数確認を誤らせることが判明した)
 docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" lbs-mysql \
   mysql --user=root -N -e "SHOW DATABASES;" \
-  | grep -Ev '^(information_schema|performance_schema|mysql|sys|lets_blog|lbs_.*|keycloak)$'
+  | grep -Ev '^(information_schema|performance_schema|mysql|sys|lets_blog(_test)?|lbs_.*|keycloak)$'
 
 # --- Keycloak用PostgreSQL
 docker exec -e PGPASSWORD="$KEYCLOAK_DB_PASSWORD" lbs-keycloak-postgres \
@@ -615,10 +620,11 @@ docker compose up -d --wait mysql
 docker exec -i -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" lbs-mysql \
   mysql --user=root < "$BACKUP_DIR/mysql-all-databases.sql"
 
-# 3. Keycloak PostgreSQL復元
+# 3. Keycloak PostgreSQL復元(docker execに-iが無いと標準入力がコンテナへ渡らず、
+#    "input file is too short"エラーで失敗する。実機リハーサルで実際に確認した)
 docker compose up -d keycloak-postgres
 docker compose up -d --wait keycloak-postgres
-docker exec -e PGPASSWORD="$KEYCLOAK_DB_PASSWORD" lbs-keycloak-postgres \
+docker exec -i -e PGPASSWORD="$KEYCLOAK_DB_PASSWORD" lbs-keycloak-postgres \
   pg_restore -U keycloak -d keycloak --clean --if-exists \
   < "$BACKUP_DIR/keycloak-postgres.dump"
 
@@ -667,41 +673,58 @@ VSCode拡張については、配布済みの `.vsix` を旧バージョンへ�
 
 ## 9. 実行記録
 
-実際にカットオーバーおよびロールバックを実行した際は、このセクションに実測値を追記する
-(本ドキュメント作成時点では未実施のため空欄)。
+実際にカットオーバーおよびロールバックを実行した際は、このセクションに実測値を追記する。
+
+2026-08-27、本Issue(#591)のQA工程で、ユーザー立ち会いのもと本docker-compose環境
+(実運用ユーザーはメンテナ本人のみ)に対して実際に通し実行した。
 
 | 項目 | 実測値 | 実施日 | 備考 |
 |---|---|---|---|
-| 1章 バックアップ所要時間 | (未計測) | | |
-| 2章フェーズ1(トラフィック遮断) | (未計測) | | |
-| 3章(ユーザー移行) | (未計測) | | 対象ユーザー数も記録 |
-| 4章(realm検証) | (未計測) | | |
-| 2章フェーズ2〜6章(全停止→全起動) | (未計測) | | |
-| 7章(疎通確認) | (未計測) | | |
-| 総ダウンタイム(フェーズ1開始〜7章完了) | (未計測) | | 5章の利用者周知に反映する実測値 |
-| 8章 ロールバック(試行時) | (未計測) | | 実際に試行した場合のみ記入 |
+| 1章 バックアップ所要時間 | mysqldump: 約0.4秒 / pg_dump: 数秒未満 | 2026-08-27 | データ量が小さい現行環境での実測値。本番相当のデータ量では別途計測が必要 |
+| 2章フェーズ1(トラフィック遮断) | 1秒未満 | 2026-08-27 | `docker compose stop reverse-proxy web` |
+| 3章(ユーザー移行) | 未実施 | | 3.1のトークン取得にletsblog realmの人間管理者(実運用ユーザー本人)のパスワードが必要で、AIエージェントには付与していないため未実施。かつ実行時点で未移行ユーザーが0件(3人全員移行済み)のため、実施しても新規移行は発生しない状態だった。次回、未移行ユーザーが存在する状況で改めて実施計測が必要 |
+| 4章(realm検証) | 全項目成功(所要は7章と合わせて数秒程度) | 2026-08-27 | `.well-known`/clients一覧/roles一覧すべて期待通り。realm importは`already exists. Import skipped`(想定通り) |
+| 2章フェーズ2〜6章(全停止→全起動) | 停止22秒 + 起動41秒 = 63秒 | 2026-08-27 | 全28サービス。本開発環境はイメージビルド済み・データ量小のため高速。実測は目安として扱うこと |
+| 7章(疎通確認) | 自動検証可能な項目はPASS。ブラウザ操作を要する項目は未実施 | 2026-08-27 | サービス間通信(全healthy)・旧ログイン経路の不在・APIの認可強制(未認証で403)を確認。Webログイン/VSCodeログイン/記事公開/画像生成はブラウザ・VSCode拡張の対話操作が必要で本セッションでは未実施 |
+| 総ダウンタイム(フェーズ1開始〜7章完了、カットオーバー本番想定分) | 約3分52秒(14:02:16〜14:06:08) | 2026-08-27 | 3章(ユーザー移行)を除く、フェーズ1停止〜全停止〜全起動までの実測 |
+| 8章 ロールバック(試行時) | 停止22秒 + MySQL復元15秒 + Keycloak PostgreSQL復元(数秒) + 再起動38秒。復元後、users件数(3件)・keycloak_sub未設定0件・KeycloakユーザーAPI件数(3件)・WordPress動的DB(2件)がいずれも復元前と一致することを確認 | 2026-08-27 | データのみのロールバックを実施。機械的な所要時間の合計は約75秒(+判断・確認に要する時間は別途)。このセッションでは`pg_restore`コマンドがAIエージェントの権限上ブロックされ、ユーザー本人に手動実行してもらう待ち時間が生じたため、8.4節の見積もりはこの機械的所要時間を参照すること |
 
 ---
 
 ## 10. 既知の制約・未検証事項
 
-- **本ドキュメントに記載した手順・コマンドは、既存の実装(`UserService.migrateToKeycloak`、
-  `docker-compose.yml`の`depends_on`構成、`keycloak/realm-export.json`の内容等)の調査に
-  基づいて作成したものであり、[9. 実行記録](#9-実行記録)が空欄である通り、
-  本Issueの受入基準が要求する「ステージング相当の環境での実際の通し実行」は
-  **まだ行っていない**。特に以下は実機検証が必要。**
-  - `mysqldump --all-databases` によるバックアップと、そこからの全体復元(8.3の手順)が
-    実際に想定通り完了すること、および所要時間。
+- **2026-08-27、本Issue(#591)のQA工程でユーザー立ち会いのもと実機通し実行を行った
+  ([9. 実行記録](#9-実行記録)参照)。バックアップ→フェーズ1停止→フェーズ2完全停止→
+  全サービス起動→realm検証→(データのみの)ロールバック試行→復旧確認、の一連が
+  実際に成功した。この過程で本ドキュメントに残っていた以下3件のコマンド不備を発見し、
+  修正済み(いずれも机上のレビューでは気づけず、実行して初めて判明したもの)。**
+  - §1.3のバックアップ事後チェックが、PostgreSQL側にしか存在しない`keycloak`スキーマを
+    MySQLダンプ内に期待しており、常に警告を出す誤りだった(修正済み)。
+  - §1.3/§8.3のWordPress動的DB件数確認のgrepパターンが`lets_blog_test`のようなテスト用
+    スキーマを除外し損ね、件数を誤らせる誤りだった(修正済み)。
+  - §8.3の Keycloak PostgreSQL復元コマンドが `docker exec` に `-i`(標準入力転送)を
+    指定しておらず、"input file is too short" エラーで復元自体が失敗する誤りだった
+    (修正済み)。
+- **一方で、以下は今回のセッションでも実施できておらず、引き続き未検証。**
+  - **3章(実際のユーザー移行実行)**: 移行APIのトークン取得(3.1)にletsblog realmの
+    人間管理者(実運用ユーザー本人)のパスワードが必要で、AIエージェントには意図的に
+    付与していないため未実施。また実行時点で未移行ユーザーが0件だったため、
+    移行対象が存在する状態での実施確認は別途必要。
+  - **フルロールバック(データ+コード)**: 今回試行したのは「データのみのロールバック」
+    のみ。`docker compose build`からの再デプロイで実際に旧UIのログイン画面が復元できるかは
+    未確認。
+  - **[7. 疎通確認チェックリスト](#7-疎通確認チェックリスト)のうちブラウザ/VSCode拡張の
+    対話操作を要する項目**(Webログイン、VSCodeログイン、記事公開、画像生成、監査ログの
+    目視確認)。サービス間通信・旧ログイン経路の不在・API認可の強制は自動検証済み。
   - `admin-cli` パブリッククライアントでの Resource Owner Password Credentials Grant
     (3.1)が、`letsblog-services`と異なるクライアント経由でも`identity-service`側の
-    JWT検証(audience制限を行っていないことを前提としている)を通過すること。
-  - フルロールバック(8.3)における `docker compose build` からの再起動が、実際に旧UIの
-    ログイン画面を復元できること。
-  - [7. 疎通確認チェックリスト](#7-疎通確認チェックリスト)全項目、特に記事公開・画像生成の
-    実機確認。
-- 上記の実機検証はライブの `docker compose` 環境に対する破壊的操作(全停止・DB上書き復元等)を
-  伴うため、本Issueの実装作業(本ドキュメント作成)の範囲では実行していない。ユーザー立ち会いの
-  下で、QA工程またはそれに相当する別セッションで実施することを推奨する。
+    JWT検証(audience制限を行っていないことを前提としている)を通過すること
+    (bootstrap adminトークンでのAdmin REST API疎通は§4.2で確認済みだが、業務用
+    `$ADMIN_TOKEN`側は上記の理由で未確認)。
+  - 本番相当のデータ量での所要時間([9. 実行記録](#9-実行記録)の実測値は開発環境の
+    小さいデータ量に基づく参考値)。
+- 上記の残存項目もライブの `docker compose` 環境に対する破壊的操作、または実運用ユーザー
+  本人の認証情報を要するため、引き続きユーザー立ち会いの下での実施が必要。
 - `docs/BACKUP_RECOVERY_STRATEGY.md` / `docs/BACKUP_RECOVERY_OPERATIONS.md` は
   マイクロサービス分割前の単一スキーマ構成を前提にした記述のままであり、本ドキュメントとの
   対象範囲の食い違いがある(1.2節参照)。両ドキュメントを現行アーキテクチャに合わせて
