@@ -314,12 +314,10 @@ public class UserService {
      * 作成する。emailが一致する既存ユーザー(移行スクリプト未実行でkeycloak_subがまだ無いユーザーを含む)
      * があれば、新規作成せずそのユーザーにsubを紐付ける。
      *
-     * <p>現時点ではこのメソッドは実リクエスト経路には配線していない。identity-serviceは
-     * 依然としてX-Actor-Id/X-Actor-Roleヘッダ(BFF転送)を信頼するモデルのままであり
-     * (CurrentActorService参照)、KeycloakのJWTクレームを直接検証する経路が無い。
-     * gateway/identity-serviceのどちらかをOAuth2 Resource Server化してこのメソッドを
-     * 「初回ログイン時」に呼び出す配線は、実ユーザーのKeycloakログイン経路そのもの(#564/#565)の
-     * スコープであり、ADR-0003(新旧認証機構の並行運用はしない)にも関わるため本Issueでは行わない。
+     * <p>現時点ではこのメソッドは実リクエスト経路には配線していない。identity-serviceの
+     * CurrentActorServiceはissue #566でKeycloak JWTのsubクレームのみを信頼する実装へ
+     * 一本化済みだが、「初回ログイン時にこのメソッドを呼び出す」配線自体は別途必要であり、
+     * 本Issueのスコープでは行わない。
      */
     @Transactional
     public UserResponse provisionFromKeycloak(String keycloakSub, String email, String firstName, String lastName) {

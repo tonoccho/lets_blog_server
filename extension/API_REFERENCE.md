@@ -17,8 +17,9 @@
 | `Authorization` | `Bearer <アクセストークン>`。SecretStorageに保管されたKeycloak発行のJWT | Keycloakのトークン/デバイス認可エンドポイント以外のすべて |
 
 issue #565(Device Authorization Grantへの移行)により、「誰であるか」の判定はサーバー側が
-アクセストークン(JWT)を検証して行うようになったため、従来の`X-API-Key`/`X-Actor-Id`/`X-Actor-Role`は
-廃止しました。アクセストークンの取得・自動更新は`src/config.ts`の`requireAccessToken`が担い、
+アクセストークン(JWT)を検証して行うようになったため、従来の個別ヘッダによる自己申告
+(APIキー/実行者ID/実行者ロール)は廃止しました(サーバー側の対応する実装もissue #566で
+完全撤去済み)。アクセストークンの取得・自動更新は`src/config.ts`の`requireAccessToken`が担い、
 Device Authorization Grantそのもの(デバイス認可リクエスト・ポーリング・リフレッシュ)の実装は
 `src/deviceAuth.ts`にあります(Keycloakの`/protocol/openid-connect/auth/device` /
 `/protocol/openid-connect/token`を直接呼び出すため、上記のエンドポイント一覧には含まれません)。

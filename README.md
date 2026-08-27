@@ -39,8 +39,8 @@ flowchart LR
 
     WP[("WordPress サイト群")]
 
-    VSCode -- "X-API-Key" --> RP
-    Web -- "X-API-Key + X-Actor-*" --> RP
+    VSCode -- "Bearer JWT (Keycloak)" --> RP
+    Web -- "Bearer JWT (Keycloak)" --> RP
     RP --> API
     RP --> Web
     API --> MySQL
@@ -54,8 +54,11 @@ flowchart LR
     API -- "REST API + アプリケーションパスワード" --> WP
 ```
 
-認証は `X-API-Key` + BFF(Web)が付与する `X-Actor-Id`/`X-Actor-Role` ヘッダを信頼する方式であり、
-これがなりすましを許す構造的弱点になっている([ADR-0002](docs/adr/0002-keycloak-oidc.md) の Context 参照)。
+認証はKeycloak(OIDC)発行のJWTへ一括切り替え済み(issue #566)で、旧来のヘッダベースの
+自己申告方式([ADR-0002](docs/adr/0002-keycloak-oidc.md) の Context 参照)は撤去した。
+このアーキテクチャ図自体は、ドメイン単位のマイクロサービス分割(Phase 19)がまだ進行中の
+時点のものであり、api-gateway/identity-service/Keycloakは実際には既に導入済み
+(下記「目標構成」の一部を先取りして稼働している)。
 
 ### 目標構成(マイグレーション後)
 
@@ -282,7 +285,7 @@ REST APIは以下のエンドポイントで公開しています:
 - **Swagger UI (対話的ドキュメント)**: `https://localhost/api/swagger-ui.html`
 - **OpenAPI JSON スペック**: `https://localhost/v3/api-docs`
 
-APIの認証にはX-API-Keyヘッダを使用します。APIキーはログイン(`/api/auth/login`)またはTOTP認証(`/api/auth/totp/verify`)成功時にレスポンスのheadersに含まれます。
+APIの認証にはKeycloakが発行するアクセストークンを`Authorization: Bearer`ヘッダーで使用します(issue #566で旧ヘッダベースのAPIキー認証から移行済み)。
 
 ## Code Quality & Coverage Details
 

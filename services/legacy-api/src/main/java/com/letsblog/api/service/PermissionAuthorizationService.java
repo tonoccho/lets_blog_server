@@ -7,9 +7,8 @@ import org.springframework.stereotype.Service;
 
 /**
  * 細粒度権限(Permission)のチェックを行う。
- * このAPIサーバーはBFF(Next.js)から転送されるX-Actor-Id/X-Actor-Roleヘッダを信頼するモデルのため、
- * 「誰がリクエストしているか」はヘッダのactorIdのみを信頼し、実際に持つ権限はDB上のUser.rolesを
- * サーバー側で都度検索して判定する(ヘッダのroleは admin/非admin の一次判定にのみ用いる)。
+ * 「誰がリクエストしているか」はCurrentActorServiceが解決するKeycloak JWTのsubクレーム起点の
+ * actorIdのみを信頼し、実際に持つ権限はDB上のUser.rolesをサーバー側で都度検索して判定する。
  */
 @Service
 public class PermissionAuthorizationService {

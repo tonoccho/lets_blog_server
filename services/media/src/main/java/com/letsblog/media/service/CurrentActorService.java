@@ -20,9 +20,10 @@ import org.springframework.stereotype.Service;
  * 委ねる(呼び出し元のBearerトークンをそのまま転送する。IdentityClientのJavadoc参照)。
  *
  * <p>gateway経由のトラフィックは既にWeb(#564)・VSCode拡張(#565)ともKeycloakトークンを
- * 送るようになっているため、legacy-api/identity-serviceが今も保持するX-Actor-Idヘッダー
- * フォールバックは持たない(log-writerは本Issueで初めて公開する新規REST APIサーフェスであり、
- * ヘッダー経由の既存クライアントが存在しないため)。
+ * 送るようになっており、legacy-api/identity-serviceもissue #566でヘッダーベースの
+ * フォールバックを撤去しJWT一本化済みのため、本サービスも元々ヘッダー経由のフォールバックは
+ * 持たない(media-serviceは新規REST APIサーフェスであり、ヘッダー経由の既存クライアントが
+ * 存在しないため)。
  *
  * <p>identity-serviceへの問い合わせ結果は1リクエストにつき最大1回になるよう、
  * リクエストスコープ(HttpServletRequestの属性)でキャッシュする。

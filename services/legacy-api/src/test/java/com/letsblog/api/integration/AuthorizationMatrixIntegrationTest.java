@@ -4,9 +4,7 @@ import com.letsblog.api.domain.ProjectUser;
 import com.letsblog.api.domain.User;
 import com.letsblog.api.repository.ProjectUserRepository;
 import com.letsblog.api.repository.UserRepository;
-import com.letsblog.api.service.ApiKeyService;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -16,29 +14,29 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.oauth2.jwt.BadJwtException;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Optional;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * issue #568: 認可マトリクスの整備に伴う統合テスト。
+ * issue #568: 認可マトリクスの整備に伴う統合テスト。issue #566で{@code ApiKeyAuthFilter}
+ * (旧ヘッダベースのAPIキー認証)を撤去したことに伴い、認証はKeycloakのJWTのみを情報源とする
+ * モデルへ全面移行した。
  *
- * <p>現行(#591カットオーバー前)の認可モデルは2層構造。
+ * <p>現行の認可モデルは2層構造。
  * <ol>
- *   <li>{@link com.letsblog.api.config.ApiKeyAuthFilter} — X-API-Keyが無い/不正なら、コントローラ
- *       に到達する前に401を返す({@code /api/health}と一部の認証系公開パスを除く全{@code /api/**}が対象)。</li>
+ *   <li>{@link com.letsblog.api.config.SecurityConfig} — 有効なKeycloak JWT(Bearerトークン)が
+ *       無ければ、コントローラに到達する前に401を返す({@code /api/health}と一部の公開パスを
+ *       除く全{@code /api/**}が対象)。</li>
  *   <li>コントローラメソッドが呼ぶ{@code AdminAuthorizationService.requireAdmin()} /
  *       {@code requireProjectMemberOrAdmin(projectId)} — 満たさなければ403({@link
  *       com.letsblog.api.service.ForbiddenException}を{@code GlobalExceptionHandler}が403へ変換)。</li>
@@ -46,8 +44,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>本クラスは3点を検証する。
  * <ul>
- *   <li>(a) {@code docs/AUTHORIZATION_MATRIX.md}に列挙した全エンドポイント(health・認証系公開パスを除く)
- *       について、X-API-Keyなしでは例外なく401になること。</li>
+ *   <li>(a) {@code docs/AUTHORIZATION_MATRIX.md}に列挙した全エンドポイント(health・公開パスを除く)
+ *       について、Authorizationヘッダーなしでは例外なく401になること。</li>
  *   <li>(b) requireAdmin()で保護された代表的なエンドポイントについて、非adminは403・adminは403にならない
  *       ことを実HTTPで検証する(requireAdmin()自体の網羅的な単体テストは{@code
  *       AdminAuthorizationServiceTest}に既にあるため、ここでは重複させない)。</li>
@@ -62,16 +60,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @DisplayName("認可マトリクス統合テスト(issue #568)")
 class AuthorizationMatrixIntegrationTest {
 
-    private static final String API_KEY_HEADER = "X-API-Key";
-    private static final String TEST_API_KEY = "lb_test-key";
-    private static final String ACTOR_ID_HEADER = "X-Actor-Id";
-    private static final String ACTOR_ROLE_HEADER = "X-Actor-Role";
-
     @Autowired
     private MockMvc mockMvc;
-
-    @MockitoBean
-    private ApiKeyService apiKeyService;
 
     @MockitoBean
     private JwtDecoder jwtDecoder;
@@ -82,22 +72,16 @@ class AuthorizationMatrixIntegrationTest {
     @Autowired
     private ProjectUserRepository projectUserRepository;
 
-    @BeforeEach
-    void setUpApiKeyAuth() {
-        when(apiKeyService.resolveUserId(TEST_API_KEY)).thenReturn(Optional.of(1L));
-        // jwtDecoderは(a)の401網羅テスト等Authorizationヘッダーを送らないテストでは一切呼ばれない
-        // ため、ここではスタブせず各JWT関連テストで個別に振る舞いを定義する。
-    }
-
     // =====================================================================================
-    // (a) 全エンドポイント(health・認証系公開パスを除く)の401網羅
+    // (a) 全エンドポイント(health・公開パスを除く)の401網羅
     //
-    // services/legacy-api/src/main/java/com/letsblog/api/controller/ の30ファイル・184エンドポイント
+    // services/legacy-api/src/main/java/com/letsblog/api/controller/ の30ファイル・180エンドポイント
     // (#572でAuditLogController/OperationLogController/FrontendErrorLogControllerの3ファイル・
-    // 7エンドポイントをlog-writerサービスへ移設した後の数)から、
-    // ApiKeyAuthFilter.PUBLIC_AUTH_PATHS(7パス)と/api/healthを除いた176件を列挙する。
-    // パスパラメータには存在確認不要な適当な値(1、"slug"等)を埋める。X-API-Keyの有無だけで
-    // ApiKeyAuthFilterが401を返すため、リクエストボディ/クエリパラメータの妥当性は問わない。
+    // 7エンドポイントをlog-writerサービスへ移設した後、#566でAuthControllerのログイン・2FA・
+    // パスワードリセット系8エンドポイントを撤去した後の数)から、SecurityConfigのPUBLIC_PATHS
+    // (health・auth/signup・auth/setup・auth/setup-status)を除いた176件を列挙する。
+    // パスパラメータには存在確認不要な適当な値(1、"slug"等)を埋める。Authorizationヘッダーの
+    // 有無だけでSecurityConfigが401を返すため、リクエストボディ/クエリパラメータの妥当性は問わない。
     // =====================================================================================
 
     record Endpoint(String method, String path) {
@@ -148,11 +132,9 @@ class AuthorizationMatrixIntegrationTest {
 
                 // (AuditLogControllerは#572でlog-writerサービスへ移設したため対象外)
 
-                // -- AuthController (11件中、公開パス7件を除く4件) --
-                new Endpoint("GET", "/api/auth/totp/status"),
-                new Endpoint("POST", "/api/auth/totp/setup"),
-                new Endpoint("POST", "/api/auth/totp/verify-setup"),
-                new Endpoint("POST", "/api/auth/totp/disable"),
+                // (AuthControllerのログイン・2FA・パスワードリセット系エンドポイントはissue #566で
+                // 撤去したため対象外。残るsignup/setup/setup-statusはSecurityConfigのPUBLIC_PATHS
+                // であり対象外)
 
                 // -- BackupController (2) --
                 new Endpoint("GET", "/api/backup/download"),
@@ -160,7 +142,7 @@ class AuthorizationMatrixIntegrationTest {
 
                 // -- CmsMediaBridgeController (3、#573 stage3で追加) --
                 // media-service専用の内部ブリッジ(AUTHORIZATION_MATRIX.mdの一覧表からは省略しているが、
-                // ApiKeyAuthFilterの対象からは除外していないため、ここでの401チェック対象には含める)。
+                // SecurityConfigの対象からは除外していないため、ここでの401チェック対象には含める)。
                 new Endpoint("POST", "/api/internal/cms/sites/my-site/media"),
                 new Endpoint("GET", "/api/internal/cms/projects/1/media-scan"),
                 new Endpoint("DELETE", "/api/internal/cms/projects/1/media/1"),
@@ -347,24 +329,19 @@ class AuthorizationMatrixIntegrationTest {
 
     @ParameterizedTest(name = "[{index}] {0}")
     @MethodSource("allProtectedEndpoints")
-    @DisplayName("X-API-Keyなしなら例外なく401")
-    void everyProtectedEndpoint_returns401WithoutApiKey(Endpoint endpoint) throws Exception {
+    @DisplayName("Authorizationヘッダーなしなら例外なく401")
+    void everyProtectedEndpoint_returns401WithoutAuthorization(Endpoint endpoint) throws Exception {
         mockMvc.perform(request(HttpMethod.valueOf(endpoint.method()), endpoint.path()))
                 .andExpect(status().isUnauthorized());
     }
 
     // =====================================================================================
-    // (a2) issue #564: Authorizationヘッダーの検証済みJWTをX-API-Keyの代替として受理する
-    //
-    // ApiKeyAuthFilterがX-API-Key・JWTのどちらも欠けている場合にのみ401を返すことを検証する。
-    // (a)の401網羅がAuthorizationヘッダーを送らずX-API-Keyのみで判定しているのに対し、
-    // こちらはBearerトークンだけで(X-API-Key無しで)通ることを見る。上のPUBLIC_AUTH_PATHSと
-    // 同じ理由で/api/healthとPUBLIC_AUTH_PATHSは対象外。
+    // (a2) issue #566: 有効なKeycloak JWTのみが認証情報として受理される
     // =====================================================================================
 
     @Test
-    @DisplayName("有効なAuthorization: Bearer JWTがあればX-API-Key無しでも401にならない")
-    void 有効なBearerトークンならAPIキー無しでも401にならない() throws Exception {
+    @DisplayName("有効なAuthorization: Bearer JWTがあれば401にならない")
+    void 有効なBearerトークンなら401にならない() throws Exception {
         when(jwtDecoder.decode("valid-jwt")).thenReturn(JwtTestFixtures.jwt("keycloak-sub-1", "user"));
 
         mockMvc.perform(request(HttpMethod.GET, "/api/metadata/post-statuses")
@@ -373,8 +350,8 @@ class AuthorizationMatrixIntegrationTest {
     }
 
     @Test
-    @DisplayName("不正なJWTかつX-API-Key無しなら401(JWT経路はX-API-Key経路を弱体化しない)")
-    void 不正なBearerトークンかつAPIキー無しは401のまま() throws Exception {
+    @DisplayName("不正なJWTは401")
+    void 不正なBearerトークンは401() throws Exception {
         // NimbusJwtDecoderが実際に不正/期限切れトークンで投げるのはBadJwtException(JwtExceptionの
         // サブタイプ)。JwtAuthenticationProviderはBadJwtExceptionをInvalidBearerTokenException
         // (401)へ変換するが、より汎用的なJwtExceptionはAuthenticationServiceException(実装エラー
@@ -386,59 +363,66 @@ class AuthorizationMatrixIntegrationTest {
                 .andExpect(status().isUnauthorized());
     }
 
-    @Test
-    @DisplayName("X-API-Keyでの既存アクセスは、JWT検証機構の追加後も引き続き成功する(VSCode拡張の継続利用)")
-    void 既存のAPIキー経路はJWT追加後も引き続き成功する() throws Exception {
-        mockMvc.perform(request(HttpMethod.GET, "/api/metadata/post-statuses")
-                        .header(API_KEY_HEADER, TEST_API_KEY))
-                .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(401));
-    }
-
     // =====================================================================================
     // (b) requireAdmin()で保護された代表的なエンドポイントの403検証(実HTTP)
     // =====================================================================================
 
     // GET /api/audit-logsのrequireAdmin()検証は#572でlog-writerサービスへ移設したため、
-    // このクラスの対象外(代表的なrequireAdmin()検証は下のproject-users/site-static-contentで
+    // このクラスの対象外(代表的なrequireAdmin()検証は下のproject-users/dashboard/service-status/detailで
     // 引き続きカバーする)。
+
+    private User persistUser(String role) {
+        User user = new User();
+        user.setEmail("actor-" + System.nanoTime() + "@example.com");
+        user.setPasswordHash("dummy-hash");
+        user.setRole(role);
+        user.setKeycloakSub("keycloak-sub-" + System.nanoTime());
+        return userRepository.save(user);
+    }
 
     @Test
     @DisplayName("GET /api/project-users: admin以外のactorは403")
     void projectUsers_admin以外は403() throws Exception {
+        User editor = persistUser("editor");
+
         mockMvc.perform(request(HttpMethod.GET, "/api/project-users")
-                        .header(API_KEY_HEADER, TEST_API_KEY)
-                        .header(ACTOR_ID_HEADER, "1")
-                        .header(ACTOR_ROLE_HEADER, "editor"))
+                        .with(JwtTestFixtures.jwtRequestPostProcessor(editor.getKeycloakSub())))
                 .andExpect(status().isForbidden());
     }
 
     @Test
     @DisplayName("GET /api/project-users: adminなら403にならない")
     void projectUsers_adminなら403にならない() throws Exception {
+        User admin = persistUser("admin");
+
         mockMvc.perform(request(HttpMethod.GET, "/api/project-users")
-                        .header(API_KEY_HEADER, TEST_API_KEY)
-                        .header(ACTOR_ID_HEADER, "1")
-                        .header(ACTOR_ROLE_HEADER, "admin"))
+                        .with(JwtTestFixtures.jwtRequestPostProcessor(admin.getKeycloakSub())))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(403));
     }
 
+    // 元々ここはSiteStaticContentController(GET /api/sites/{siteId}/static-content)で
+    // requireAdmin()を検証していたが、当該コントローラは#577でproject-serviceへ移管済みで
+    // legacy-apiにはもう存在しない(このIssue以前からの既存の陳腐化であり、本Issueで新たに
+    // rewriteするにあたって発覚したため、legacy-apiに残る別のrequireAdmin()採用エンドポイント
+    // であるDashboardController(/api/dashboard/service-status/detail)に差し替える)。
+
     @Test
-    @DisplayName("GET /api/sites/{siteId}/static-content: admin以外のactorは403")
-    void siteStaticContent_admin以外は403() throws Exception {
-        mockMvc.perform(request(HttpMethod.GET, "/api/sites/1/static-content")
-                        .header(API_KEY_HEADER, TEST_API_KEY)
-                        .header(ACTOR_ID_HEADER, "1")
-                        .header(ACTOR_ROLE_HEADER, "editor"))
+    @DisplayName("GET /api/dashboard/service-status/detail: admin以外のactorは403")
+    void serviceStatusDetail_admin以外は403() throws Exception {
+        User editor = persistUser("editor");
+
+        mockMvc.perform(request(HttpMethod.GET, "/api/dashboard/service-status/detail")
+                        .with(JwtTestFixtures.jwtRequestPostProcessor(editor.getKeycloakSub())))
                 .andExpect(status().isForbidden());
     }
 
     @Test
-    @DisplayName("GET /api/sites/{siteId}/static-content: adminなら403にならない")
-    void siteStaticContent_adminなら403にならない() throws Exception {
-        mockMvc.perform(request(HttpMethod.GET, "/api/sites/1/static-content")
-                        .header(API_KEY_HEADER, TEST_API_KEY)
-                        .header(ACTOR_ID_HEADER, "1")
-                        .header(ACTOR_ROLE_HEADER, "admin"))
+    @DisplayName("GET /api/dashboard/service-status/detail: adminなら403にならない")
+    void serviceStatusDetail_adminなら403にならない() throws Exception {
+        User admin = persistUser("admin");
+
+        mockMvc.perform(request(HttpMethod.GET, "/api/dashboard/service-status/detail")
+                        .with(JwtTestFixtures.jwtRequestPostProcessor(admin.getKeycloakSub())))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(403));
     }
 
@@ -456,11 +440,7 @@ class AuthorizationMatrixIntegrationTest {
         long projectAId = System.nanoTime();
         long projectBId = projectAId + 1;
 
-        User user1 = new User();
-        user1.setEmail("member-" + System.nanoTime() + "@example.com");
-        user1.setPasswordHash("dummy-hash");
-        user1.setRole("user");
-        user1 = userRepository.save(user1);
+        User user1 = persistUser("user");
 
         ProjectUser membership = new ProjectUser();
         membership.setProjectId(projectAId);
@@ -476,23 +456,18 @@ class AuthorizationMatrixIntegrationTest {
         // 後続のプロジェクト参照より先に行われるため、projectId自体がproject-serviceに実在しなくても
         // 403判定の検証には影響しない)。
         mockMvc.perform(request(HttpMethod.GET, "/api/projects/" + projectAId + "/preview/theme-css")
-                        .header(API_KEY_HEADER, TEST_API_KEY)
-                        .header(ACTOR_ID_HEADER, String.valueOf(user1.getId()))
-                        .header(ACTOR_ROLE_HEADER, "user"))
+                        .with(JwtTestFixtures.jwtRequestPostProcessor(user1.getKeycloakSub())))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(403));
 
         // User1がプロジェクトB(非所属)のエンドポイントへアクセス -> 403
         mockMvc.perform(request(HttpMethod.GET, "/api/projects/" + projectBId + "/preview/theme-css")
-                        .header(API_KEY_HEADER, TEST_API_KEY)
-                        .header(ACTOR_ID_HEADER, String.valueOf(user1.getId()))
-                        .header(ACTOR_ROLE_HEADER, "user"))
+                        .with(JwtTestFixtures.jwtRequestPostProcessor(user1.getKeycloakSub())))
                 .andExpect(status().isForbidden());
 
         // adminはプロジェクトB(User1は非所属)でも403にならない(admin全プロジェクト横断バイパス)
+        User admin = persistUser("admin");
         mockMvc.perform(request(HttpMethod.GET, "/api/projects/" + projectBId + "/preview/theme-css")
-                        .header(API_KEY_HEADER, TEST_API_KEY)
-                        .header(ACTOR_ID_HEADER, String.valueOf(user1.getId()))
-                        .header(ACTOR_ROLE_HEADER, "admin"))
+                        .with(JwtTestFixtures.jwtRequestPostProcessor(admin.getKeycloakSub())))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(403));
     }
 }

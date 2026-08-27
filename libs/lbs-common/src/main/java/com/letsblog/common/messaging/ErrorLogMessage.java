@@ -8,7 +8,7 @@ import java.io.Serializable;
  * <p>{@code userId}/{@code actorKeycloakSub}はissue #569で追加。従来フロントエンドエラーログは
  * actor概念を持たなかったが、監査ログ・操作ログと同様にJWTから解決したローカルUser id(userId)と、
  * ローカルUser解決とは独立にJWTのsubクレームをそのまま保持するactorKeycloakSubの両方を持たせる。
- * X-Actor-Idヘッダー経由で記録された場合、あるいは未認証の場合はいずれもnullになる。
+ * 未認証の場合はいずれもnullになる。
  */
 public record ErrorLogMessage(
         String message,

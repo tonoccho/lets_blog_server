@@ -15,8 +15,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
  * リクエストをルーティング表({@link RouteProperties})に従って下流サービスへ転送する
@@ -43,37 +41,18 @@ public class ProxyHandler {
     private static final Set<String> EXCLUDED_RESPONSE_HEADERS =
             Set.of("transfer-encoding", "connection", "content-length");
 
-    /** 下流への転送時に除外する接続用ヘッダー(WebClientが接続に応じて再設定するため)。 */
-    private static final Set<String> EXCLUDED_CONNECTION_HEADERS =
-            Set.of("host", "content-length");
-
     /**
-     * 下流への転送時に除外する、内部専用のアクター詐称可能ヘッダー(issue #639)。
+     * 下流への転送時に除外するヘッダー(WebClientが接続に応じて再設定する接続用ヘッダーのみ)。
      *
-     * <p>legacy-api/identity-serviceのCurrentActorServiceは、JWT認証が無い場合にこれらのヘッダーを
-     * そのまま信頼する(元々はWeb BFF(Next.js)がNextAuthセッションの内容を転送する専用の経路として
-     * 導入されたもの)。gatewayは全サービスへのリクエストが通過する唯一のエントリポイントであり、
-     * nginx({@code nginx/conf.d/default.conf}の{@code /api/}ロケーション)もこのgateway以外の
-     * ダウンストリームへは転送しないため、ここでクライアントが直接送信したこれらのヘッダーを
-     * 強制的に除去すれば、有効なAPIキー保有者(legacy-api)や未認証リクエスト(identity-service。
-     * SecurityConfigがpermitAllのため)が{@code X-Actor-Role: admin}等を自己申告して
-     * admin限定APIへ到達する経路を遮断できる。
-     *
-     * <p>Web(web/src/lib/apiClient.ts)・VSCode拡張(extension/src/apiClient.ts)は、いずれも
-     * 既にKeycloak発行JWT(Authorizationヘッダー)のみを送信しており、これらのヘッダーには
-     * 依存していないことを確認済み(#564/#565は完了済み。legacy-api/identity-serviceの
-     * CurrentActorService/SecurityConfigのJavadocコメントは2026-08時点で「未着手」と記載しているが、
-     * 実際のクライアント実装は既に移行済みであり、この点はコメントが古くなっている)。そのため、
-     * 正規の経路(Authorizationヘッダー)を壊すことなく全面的に除去できる。gatewayと
-     * legacy-api/identity-service間に、このヘッダーへ依存する内部専用の代替経路は無い。
+     * <p>issue #639時点では、クライアントが直接送信したactor詐称可能ヘッダー(旧
+     * 実行者ID/実行者ロールの自己申告用ヘッダー)もここで強制除去していた。legacy-api/
+     * identity-serviceのCurrentActorServiceがJWT認証の無い場合にこれらをそのまま信頼していた
+     * ためだが、issue #566でその信頼(ヘッダーベースのフォールバック)自体を撤去し、KeycloakのJWTの
+     * みを信頼するよう全面移行した。これにより、これらのヘッダーはどのサービスにとっても
+     * 何の意味も持たない単なる任意ヘッダーとなり、gateway側での特別な除去は不要になったため撤去した。
      */
-    private static final Set<String> EXCLUDED_ACTOR_HEADERS =
-            Set.of("x-actor-id", "x-actor-role");
-
-    /** 下流への転送時に除外するヘッダー全体。 */
     private static final Set<String> EXCLUDED_REQUEST_HEADERS =
-            Stream.concat(EXCLUDED_CONNECTION_HEADERS.stream(), EXCLUDED_ACTOR_HEADERS.stream())
-                    .collect(Collectors.toUnmodifiableSet());
+            Set.of("host", "content-length");
 
     private final WebClient webClient;
     private final RouteProperties routeProperties;

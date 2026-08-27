@@ -10,12 +10,15 @@ import org.springframework.security.web.SecurityFilterChain;
 /**
  * KeycloakのJWT検証設定(#563)。
  *
- * <p>本サービスの認可は現時点でも各サービスクラスから手続き的に呼ばれる
+ * <p>本サービスの認可は各サービスクラスから手続き的に呼ばれる
  * {@code AdminAuthorizationService}/{@code PermissionAuthorizationService}
- * (X-Actor-Id/X-Actor-Role。Web BFFがNextAuthセッションを転送する前提のモデル)が担っている。
- * Web/VSCode拡張はまだKeycloakトークンを送っていない(#564/#565が未着手)ため、この設定は
- * 「Bearerトークンが送られてきた場合は検証する」までに留め、認可判定そのものは既存の仕組みを
- * 変更しない。トークン無しのリクエストは既存の仕組みのまま素通しする。
+ * (CurrentActorServiceが解決するKeycloak JWTのsubクレーム起点のactorId)が担っている。
+ * issue #566でCurrentActorServiceの旧ヘッダベースのフォールバックは撤去済みで、
+ * JWTが無ければ「操作者なし」を返す(admin/権限系のチェックは自動的に拒否される)。
+ * ただし、そもそも上記チェックを呼ばないエンドポイント全体を対象にした宣言的認可
+ * (@PreAuthorize)へのフル移行・deny-by-defaultへの転換は、認可マトリクス整備(#568、B10)の
+ * スコープであり本サービスでは未実施のため、この設定は引き続き「Bearerトークンが送られてきた
+ * 場合は検証する」までに留める。
  *
  * <p>oauth2ResourceServer().jwt()を設定した時点で、Bearerトークンが実際に送られてきた場合は
  * Spring Securityの標準動作により無条件に検証される(permitAllのパスであっても、
@@ -26,12 +29,6 @@ import org.springframework.security.web.SecurityFilterChain;
  * <p>realm roleのSpring Security authorityへのマッピング(ROLE_&lt;大文字&gt;)はここで
  * 用意しておくが、CurrentActorServiceでの実際の権限判定は(#562時点でKeycloak側への
  * ロール同期が未実装のため)JWTのクレームではなくローカルDBのRole/Permissionを正とする。
- *
- * <p>全エンドポイントを対象にした宣言的認可(@PreAuthorize)へのフル移行、
- * X-Actor-*ヘッダを無視する既定拒否化は、Web(#564)・VSCode拡張(#565)の
- * Keycloakトークン送信対応、およびカットオーバー手順の確定(#591)より前に行うと
- * 唯一の実ユーザーアカウントを含む全クライアントを即座にログアウトさせてしまうため、
- * 本Issueでは実施しない(詳細はPRの説明を参照)。
  */
 @Configuration
 @EnableWebSecurity

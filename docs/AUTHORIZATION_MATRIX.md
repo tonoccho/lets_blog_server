@@ -12,8 +12,10 @@ ProjectMediaGarbageCollectionControllerをmedia-serviceへ移設した一方、G
 `DELETE .../projects/{projectId}/media/{mediaId}`、計3エンドポイント)を追加した。
 `CmsMediaBridgeController`はmedia-service専用の内部呼び出しであり、gatewayを経由した
 既存フロントエンドから直接到達可能な経路ではないため、下表の一覧からは省略しているが、
-`ApiKeyAuthFilter`の対象からは除外していない(未認証では401になる。統合テストの
-X-API-Keyなし401チェックの対象には含めている)。
+`SecurityConfig`の対象からは除外していない(未認証では401になる。統合テストの
+Authorizationヘッダーなし401チェックの対象には含めている)。issue #566でAuthControllerの
+ログイン・2FA・パスワードリセット系8エンドポイントを撤去したため、現在の総数は上記174件から
+8件減った166件(公開パスの`signup`/`setup`/`setup-status`3件を含む)。
 
 対応する統合テストは
 `services/legacy-api/src/test/java/com/letsblog/api/integration/AuthorizationMatrixIntegrationTest.java`。
@@ -21,30 +23,29 @@ X-API-Keyなし401チェックの対象には含めている)。
 ## 現行の認可モデル(2層構造)
 
 legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行していない
-(`SecurityConfig`のjavadoc参照。移行はWeb/VSCode拡張のKeycloakトークン対応(#564/#565)と
-カットオーバー手順の確定(#591)より後に行う予定)。現行は以下の2層で認可を行っている。
+(`SecurityConfig`のjavadoc参照。移行は認可マトリクス整備(#568、B10)のスコープであり、
+本Issue(#566)では実施しない)。現行は以下の2層で認可を行っている。
 
-1. **認証ゲート(→401)**: `com.letsblog.api.config.ApiKeyAuthFilter`(`OncePerRequestFilter`。
-   Spring MVCのディスパッチより前に動く)が、`/api/` で始まる全パスに対して `X-API-Key` ヘッダを
-   要求する。キーが無い、または`ApiKeyService.resolveUserId(...)`で解決できない不正なキーの場合、
-   コントローラメソッドや `@Valid` によるボディ検証に到達する前に即座に401を返す。
-   例外として以下は`X-API-Key`なしでも到達できる(`PUBLIC_AUTH_PATHS`):
+1. **認証ゲート(→401)**: `com.letsblog.api.config.SecurityConfig`が、公開パスを除く
+   全`/api/**`パスに対してKeycloak発行の有効なJWT(`Authorization: Bearer`ヘッダー)を要求する
+   (issue #566で`ApiKeyAuthFilter`によるヘッダーベースのAPIキー認証を撤去し、Resource Server
+   のJWT検証へ全面移行した)。JWTが無い、または不正・期限切れ・署名不正の場合、コントローラ
+   メソッドや `@Valid` によるボディ検証に到達する前に即座に401を返す。
+   例外として以下はJWTなしでも到達できる(`SecurityConfig.PUBLIC_PATHS`):
    - `GET /api/health`
-   - `POST /api/auth/login`
-   - `POST /api/auth/totp/verify`
    - `POST /api/auth/signup`
    - `POST /api/auth/setup`
    - `GET /api/auth/setup-status`
-   - `POST /api/auth/password-reset/request`
-   - `POST /api/auth/password-reset/confirm`
+   - Actuator (`/actuator/**`)・APIドキュメント (`/v3/api-docs/**`、`/swagger-ui/**`)
 
    上記以外の全エンドポイントは、リクエストボディやパスパラメータの妥当性に関わらず、
-   `X-API-Key` が無い/不正であれば必ず401を返す。
+   有効なJWTが無ければ必ず401を返す。
 
 2. **ロール/所有権ゲート(→403)**: コントローラメソッド(または委譲先のサービスメソッド)の
    先頭付近で `AdminAuthorizationService` の以下いずれかを呼ぶ場合がある。
-   - `requireAdmin()` — 呼び出し元が `X-Actor-Role: admin`(またはJWT解決結果がadmin)であることを
-     要求する。満たさなければ `ForbiddenException` を投げ、`GlobalExceptionHandler` が403へ変換する。
+   - `requireAdmin()` — 呼び出し元のactorがadminロール(`CurrentActorService`がJWTのsub
+     クレームから解決したローカルUserのrole)であることを要求する。満たさなければ
+     `ForbiddenException` を投げ、`GlobalExceptionHandler` が403へ変換する。
    - `requireProjectMemberOrAdmin(projectId)` — 呼び出し元がadmin、またはそのプロジェクトの
      メンバー(`ProjectUserRepository.findByProjectIdAndUserId`で判定)であることを要求する。
      別プロジェクトのメンバーであっても、対象プロジェクトのメンバーでなければ403。
@@ -57,14 +58,14 @@ legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行して�
    複数ある(表の「認可チェック」列に「(service層)」と注記)。挙動としては同じくコントローラの
    処理が実行される前に例外が投げられる。
 
-   **いずれのチェックも呼ばないエンドポイント**は、有効な `X-API-Key` さえ持っていれば
-   ロール・プロジェクト所属に関わらず到達できる。これは既知のギャップであり、本Issueでは
+   **いずれのチェックも呼ばないエンドポイント**は、有効なJWTさえ持っていればロール・
+   プロジェクト所属に関わらず到達できる。これは既知のギャップであり、本Issueでは
    修正せず、末尾の「既知のギャップ」節に事実として列挙するに留める。
 
 ## 表の見方
 
-- **現行: 未認証**: `X-API-Key` なし/不正の場合に実際に返るステータス。公開エンドポイントは
-  「該当なし(公開エンドポイント)」。
+- **現行: 未認証**: 有効なJWT(Authorization: Bearer)なし/不正の場合に実際に返るステータス。
+  公開エンドポイントは「該当なし(公開エンドポイント)」。
 - **現行: 権限不足**: ロール/所有権チェックがある場合に、それを満たさない認証済みactorが
   実際に返されるステータス。チェックが無いエンドポイントは「該当なし」。
 - **現行: 権限あり**: チェックを満たす場合(またはチェックが無い場合の認証済みactor)に、
@@ -130,21 +131,19 @@ legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行して�
 | --- | --- | --- | --- | --- | --- | --- |
 | GET /api/audit-logs | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 統合テストで代表検証済み(b) |
 
-## AuthController (11エンドポイント、ベースパス `/api/auth`)
+## AuthController (3エンドポイント、ベースパス `/api/auth`)
+
+issue #566でログイン(`POST /api/auth/login`)・2FA(`GET/POST /api/auth/totp/*`)・
+パスワードリセット(`POST /api/auth/password-reset/*`)の計8エンドポイントはKeycloakへ
+全面移行し撤去した。残る3エンドポイントは、Keycloak上にまだアカウントが1つも存在しない
+状態からのWeb管理画面初回セットアップ専用で、いずれも`SecurityConfig.PUBLIC_PATHS`により
+公開されている。
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
-| POST /api/auth/login | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | PUBLIC_AUTH_PATHS |
-| POST /api/auth/password-reset/request | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | PUBLIC_AUTH_PATHS |
-| POST /api/auth/password-reset/confirm | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | PUBLIC_AUTH_PATHS |
-| POST /api/auth/signup | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | PUBLIC_AUTH_PATHS |
-| GET /api/auth/setup-status | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | PUBLIC_AUTH_PATHS |
-| POST /api/auth/setup | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | PUBLIC_AUTH_PATHS。初期管理者セットアップ用 |
-| GET /api/auth/totp/status | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | ログイン中actor自身の2FA状態。自己参照のみで他者情報は返さない設計だが、明示的なチェックは無い |
-| POST /api/auth/totp/setup | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | 同上(自己のみ操作) |
-| POST /api/auth/totp/verify-setup | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | 同上 |
-| POST /api/auth/totp/disable | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | 同上 |
-| POST /api/auth/totp/verify | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | PUBLIC_AUTH_PATHS。ログイン2段階目、まだAPIキーを持たない |
+| POST /api/auth/signup | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | PUBLIC_PATHS。Web側の自己登録UIは既にKeycloakのregistrationAllowed=falseで撤去済みのため、2026-08時点で呼び出し元は無い |
+| GET /api/auth/setup-status | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | PUBLIC_PATHS |
+| POST /api/auth/setup | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | PUBLIC_PATHS。初期管理者セットアップ用(ローカルDB直書きのみでKeycloak側にはアカウントを作らない) |
 
 ## BackupController (2エンドポイント、ベースパス `/api/backup`)
 
@@ -214,7 +213,7 @@ legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行して�
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
-| GET /api/health | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | ApiKeyAuthFilterの`shouldNotFilter`で明示的に除外 |
+| GET /api/health | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | `SecurityConfig.PUBLIC_PATHS`で明示的に除外 |
 
 ## MetadataController (2エンドポイント、ベースパス `/api/metadata`)
 
@@ -406,7 +405,7 @@ legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行して�
 
 ## 既知のギャップ(認可チェックが無いエンドポイント、本Issueでは修正せず事実列挙のみ)
 
-以下は有効な `X-API-Key` さえあれば、ロール・プロジェクト所属に関わらず到達できる
+以下は有効なJWTさえあれば、ロール・プロジェクト所属に関わらず到達できる
 (`requireAdmin`/`requireProjectMemberOrAdmin`のいずれも呼ばれない)エンドポイント。
 修正は本Issueのスコープ外であり、別Issueでの対応を推奨する。
 
@@ -433,9 +432,6 @@ legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行して�
 - `SystemSettingController`: `GET /api/system-settings/brave-search-api-key`
 - `TaxonomyController`: `POST /api/taxonomy/resolve`
 - `VscodeExtensionController`: `GET /api/system/vscode-extension`
-
-`AuthController`の`GET/POST /api/auth/totp/*`(自身の2FA操作)は自己参照のみを扱う設計であり、
-上記とは性質が異なる(他ユーザーの情報には触れない)ため、別掲として本節末尾に注記するに留める。
 
 ### 未使用の認可プリミティブ
 

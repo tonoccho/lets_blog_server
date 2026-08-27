@@ -19,7 +19,6 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-mail'
     implementation 'org.springframework.boot:spring-boot-starter-aspectj'
     implementation 'org.thymeleaf:thymeleaf'
-    implementation 'dev.samstevens.totp:totp:1.7.1'
 
     implementation 'com.mysql:mysql-connector-j'
     implementation 'org.springframework.boot:spring-boot-starter-flyway'
