@@ -105,7 +105,7 @@ while true; do
   NOW="$(date +%s)"
   ELAPSED=$((NOW - START_TIME))
 
-  STATUS_JSON="$(docker compose ps --format json)"
+  STATUS_JSON="$(docker compose ps --all --format json)"
   PENDING="$(echo "$STATUS_JSON" | python3 -c '
 import sys, json
 
