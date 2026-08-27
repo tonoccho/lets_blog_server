@@ -12,7 +12,6 @@ import com.letsblog.api.service.ForbiddenException;
 import com.letsblog.api.service.InvalidPlantUmlTagException;
 import com.letsblog.api.service.InvalidRechartsTagException;
 import com.letsblog.api.service.InvalidRoleException;
-import com.letsblog.api.service.MailTemplateNotFoundException;
 import com.letsblog.api.service.ProhibitedContentException;
 import com.letsblog.api.service.ProjectNotFoundException;
 import com.letsblog.api.service.ProjectUserNotFoundException;
@@ -100,11 +99,6 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(EmailSendException.class)
     public ResponseEntity<ErrorResponse> handleEmailSendError(EmailSendException e) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ErrorResponse.of(e.getMessage()));
-    }
-
-    @ExceptionHandler(MailTemplateNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleMailTemplateNotFound(MailTemplateNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(CmsApiException.class)
