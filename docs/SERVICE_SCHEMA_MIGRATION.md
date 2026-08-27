@@ -27,12 +27,52 @@
 (例: `lbs_identity`@`%`)を作成する。各ユーザーは自分のスキーマにしかアクセスできない
 (`GRANT ALL PRIVILEGES ON <schema>.* TO '<schema>'@'%'`)。
 
-**既存のMySQLデータボリュームがある環境では自動適用されない**(MySQL公式イメージの仕様)。
-新規に反映するにはボリュームの再作成が必要(`docker compose down -v` 等。既存データを
-消してよいことを確認してから実行すること)。
+**既存のMySQLデータボリュームがある環境では自動適用されない**(MySQL公式イメージの仕様。
+`docker-entrypoint-initdb.d` 配下のスクリプトはデータボリュームが空の場合のみ実行される)。
+新しいスキーマ自体を追加で反映するにはボリュームの再作成が必要(`docker compose down -v` 等。
+既存データを消してよいことを確認してから実行すること)。
 
 各ユーザーのパスワードは `.env` の `LBS_<SCHEMA>_DB_PASSWORD` 系変数で設定する
 (`.env.example` 参照)。
+
+### `.env` のDBパスワードを変更した場合(#667)
+
+既にMySQLのデータボリュームが初期化済みの環境で `.env` の `LBS_<SCHEMA>_DB_PASSWORD` を
+変更しても、**MySQL上の該当ユーザーのパスワードは自動的には更新されない**。コンテナを
+`docker compose up -d` で再作成しても、`01-create-service-schemas.sh` は初回起動時にしか
+実行されないため無反応に見える。この状態のまま気づかずにいると、アプリ側の接続文字列
+(新しいパスワード)とDB側の実際のパスワード(古いまま)が食い違い、対象サービスが
+`Access denied for user '<schema>'@'...' (using password: YES)` でクラッシュループする
+(#654の調査時に `lbs-project` で実際に発生)。
+
+対応方法は次の2通り。データを消さずに直したい場合はAを推奨する。
+
+#### A. パスワードだけをMySQL側に同期する(データを消さない、推奨)
+
+`01-create-service-schemas.sh` は `CREATE USER IF NOT EXISTS` に加えて
+`ALTER USER IF EXISTS ... IDENTIFIED BY ...` を実行するため、複数回実行しても安全(冪等)。
+`.env` 変更後、次の手順でMySQL上のパスワードを最新の `.env` の値に同期できる。
+
+```bash
+# 1. .envの新しい値でmysqlコンテナを再作成(環境変数を反映させるため)
+docker compose up -d mysql
+
+# 2. 初期化スクリプトを手動で再実行してMySQL上のパスワードをALTER USERで更新する
+docker compose exec mysql bash /docker-entrypoint-initdb.d/01-create-service-schemas.sh
+
+# 3. パスワード変更対象のサービスコンテナを再起動する
+docker compose up -d <service>
+```
+
+#### B. ボリュームごと作り直す(既存データを破棄してよい場合のみ)
+
+```bash
+docker compose down -v   # mysql_dataボリュームを含め破棄される点に注意
+docker compose up -d
+```
+
+いずれの場合も、`.env` を編集しただけでは反映されない(コンテナ再作成またはAの手順が必要)
+ことを常に念頭に置くこと。
 
 ## サービス跨ぎのJOIN/FKの禁止
 

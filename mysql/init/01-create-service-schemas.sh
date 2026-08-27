@@ -5,8 +5,16 @@
 # アクセスできない(サービス跨ぎのJOIN/FKは禁止 - ADR-0004)。
 #
 # 注意: 既存のMySQLデータボリュームが既にある環境では、コンテナを再作成しても
-# このスクリプトは実行されない(MySQL公式イメージの仕様)。適用するにはボリュームの
-# 再作成が必要(docs/adr/0004-schema-per-service.md, docs/MIGRATION_TESTING.md 参照)。
+# このスクリプト自体は自動実行されない(MySQL公式イメージの仕様)。新しいスキーマを
+# 追加した場合に反映するにはボリュームの再作成が必要(docs/adr/0004-schema-per-service.md,
+# docs/MIGRATION_TESTING.md 参照)。
+#
+# パスワード変更時(#667): 本スクリプトはCREATE USERに加えてALTER USERも実行するため
+# 冪等(何度実行しても安全)。`.env`のLBS_*_DB_PASSWORDを変更した場合、ボリュームを
+# 再作成しなくても、コンテナ再作成後に本スクリプトを手動で再実行すればMySQL側の
+# パスワードを新しい値に同期できる。手順はdocs/SERVICE_SCHEMA_MIGRATION.mdを参照:
+#   docker compose up -d mysql
+#   docker compose exec mysql bash /docker-entrypoint-initdb.d/01-create-service-schemas.sh
 set -euo pipefail
 
 # schema名 => パスワードを渡す環境変数名
@@ -33,9 +41,10 @@ for schema in "${!SCHEMA_PASSWORD_ENV[@]}"; do
   mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
     CREATE DATABASE IF NOT EXISTS \`${schema}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
     CREATE USER IF NOT EXISTS '${schema}'@'%' IDENTIFIED BY '${password}';
+    ALTER USER IF EXISTS '${schema}'@'%' IDENTIFIED BY '${password}';
     GRANT ALL PRIVILEGES ON \`${schema}\`.* TO '${schema}'@'%';
 EOSQL
-  echo "スキーマ ${schema} とユーザー ${schema}@% を作成しました"
+  echo "スキーマ ${schema} とユーザー ${schema}@% を作成/同期しました"
 done
 
 mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "FLUSH PRIVILEGES;"
