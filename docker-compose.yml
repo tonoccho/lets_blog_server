@@ -137,6 +137,11 @@ services:
         condition: service_healthy
       analytics:
         condition: service_healthy
+      # Flyway自体の適用はlegacy-schema-migrateに委ねて先に完了させる(#668。詳細は
+      # legacy-schema-migrateサービス定義のコメント参照。apiコンテナ自身も起動時に同じ
+      # マイグレーションをSpring Boot Flywayで実行するが、既に適用済みのためno-opになる)。
+      legacy-schema-migrate:
+        condition: service_completed_successfully
 
   # ComfyUI画像生成・draw.ioダイアグラム・PlantUML/Recharts/Penpotレンダリングの所有権をmedia-serviceへ
   # 移管(#573)。スキーマ・Flywayマイグレーションは専用のlbs_mediaスキーマ(ADR-0004)で本サービスが
@@ -419,6 +424,37 @@ services:
       project:
         condition: service_healthy
 
+  # legacy-api(api)が所有するFlywayマイグレーション(lets_blogスキーマ)を、apiコンテナ自体の
+  # 起動より前に一回限り適用するための専用ジョブ(#668)。identityはこのスキーマのrole_permissions
+  # 等のテーブルをddl-auto: validateで前提にしているが、以前はapiの起動(=Flyway適用)を経由
+  # せずidentityが先に起動できてしまい、かつapiはmedia/ai/content/analytics(いずれもidentityの
+  # healthyを待つ)の起動待ちで、identityはapiの移行を待たずクラッシュループする循環デッドロックが
+  # 空のMySQLボリュームから発生していた。identity/apiの双方がこのジョブの完了(exit 0)を
+  # 待ってから起動するようにし、apiコンテナ自体への依存に置き換えることで循環を断つ
+  # (apiは起動時に自身のSpring Boot Flywayでも同じマイグレーションを実行するが、既に適用済みの
+  # ため実質no-opになる。Flyway自体は同時実行に対して安全だが、決定的な順序にするためここで
+  # 明示的に先に完了させる)。マイグレーションSQL本体はapi(legacy-api)が引き続き所有し
+  # (services/legacy-api/src/main/resources/db/migration)、ここでは読み取り専用でマウントするのみ。
+  legacy-schema-migrate:
+    image: flyway/flyway:11-alpine
+    container_name: lbs-legacy-schema-migrate
+    <<: *common-service
+    restart: "no"
+    environment:
+      FLYWAY_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      FLYWAY_USER: ${MYSQL_USER}
+      FLYWAY_PASSWORD: ${MYSQL_PASSWORD}
+      # V6__add_mail_templates.sqlがメールテンプレート内でThymeleaf構文 [[${var}]] を使うため、
+      # Flyway自身の ${...} プレースホルダー置換とぶつからないよう無効化する
+      # (services/legacy-api/src/main/resources/application.ymlのplaceholder-replacement: falseと同じ)。
+      FLYWAY_PLACEHOLDER_REPLACEMENT: "false"
+    volumes:
+      - ./services/legacy-api/src/main/resources/db/migration:/flyway/sql:ro
+    command: ["migrate"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+
   identity:
     build:
       context: .
@@ -442,6 +478,10 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      # legacy-api所有のFlywayマイグレーション(role_permissions等)が適用済みであることを保証する
+      # (#668。上のlegacy-schema-migrateサービスのコメント参照)。
+      legacy-schema-migrate:
+        condition: service_completed_successfully
 
   rabbitmq:
     image: rabbitmq:3-management-alpine

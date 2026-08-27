@@ -22,7 +22,6 @@ import com.letsblog.api.service.ProjectUserNotFoundException;
 import com.letsblog.api.service.ProvisioningException;
 import com.letsblog.api.service.QrCodeGenerationException;
 import com.letsblog.api.service.SiteNotFoundException;
-import com.letsblog.api.service.SshKeyPairNotFoundException;
 import com.letsblog.api.service.TwoFactorSecretNotFoundException;
 import com.letsblog.api.exception.RateLimitExceededException;
 import com.letsblog.api.service.UserNotFoundException;
@@ -172,11 +171,6 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BackupException.class)
     public ResponseEntity<ErrorResponse> handleBackupException(BackupException e) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ErrorResponse.of(e.getMessage()));
-    }
-
-    @ExceptionHandler(SshKeyPairNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleSshKeyPairNotFound(SshKeyPairNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

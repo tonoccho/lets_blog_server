@@ -22,10 +22,12 @@ class MigrationSchemaValidationTest extends MigrationTestBase {
             // custom_tagsは#576でcontent-service(lbs_contentスキーマ)へ完全移管したため、
             // 同様にこのスキーマ(lets_blog)には存在しない前提のテーブル一覧から除外した
             // (V75__drop_content_service_tables.sqlでdropされる)。
+            // sites/projectsは#577でproject-service(lbs_projectスキーマ)へ完全移管したため、
+            // 同様にこのスキーマ(lets_blog)には存在しない前提のテーブル一覧から除外した
+            // (V77__drop_project_service_tables.sqlでdropされる。バージョン番号の衝突で
+            // 一度も実行されていなかったが#668で修正され、実際にdropされるようになった)。
             var requiredTables = new String[]{
                     "users",
-                    "sites",
-                    "projects",
                     "api_keys"
             };
 
