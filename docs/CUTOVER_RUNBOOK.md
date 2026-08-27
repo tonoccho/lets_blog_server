@@ -595,9 +595,19 @@ Keycloakから取り消す、等)は推奨しない。**
 **データのみのロールバック**
 
 ```bash
-# 1. 全サービス停止(2章フェーズ2と同じ手順)
-docker compose stop gateway api project analytics content ai media log-writer identity \
-  keycloak keycloak-postgres mysql rabbitmq docker-socket-proxy web reverse-proxy
+# 1. 全サービス停止(2章フェーズ1+フェーズ2と同じ手順。フェーズ1のreverse-proxy/webと
+#    フェーズ2の残り全サービスを合わせて完全停止する)
+docker compose stop reverse-proxy web
+docker compose stop gateway
+docker compose stop api project analytics content ai media
+docker compose stop log-writer
+docker compose stop identity
+docker compose stop keycloak
+docker compose stop keycloak-postgres mysql rabbitmq docker-socket-proxy
+docker compose stop wordpress phpmyadmin
+docker compose stop penpot-frontend penpot-backend penpot-exporter penpot-mcp \
+  penpot-postgres penpot-valkey penpot-mailcatch
+docker compose stop comfyui plantuml drawio
 
 # 2. MySQL復元(全データベースを一度作り直してから流し込む)
 docker compose up -d mysql
