@@ -29,7 +29,9 @@ Issue: [#591](https://github.com/tonoccho/lets_blog_server/issues/591) [E5] カ�
   1. **クライアントのログイン経路の切り替え**: これはコードレベルで既に完了している
      (#564/#565)。本手順書が新たに実行する対象ではない。
   2. **既存ユーザーのKeycloakへの登録(データ移行)**: [B4]/#562 で実装された
-     `identity-service` の一括移行API (`POST /api/identity/users/migrate-to-keycloak`) を
+     `identity-service` の一括移行API (`POST /api/users/migrate-to-keycloak`。
+     `UserController`が`@RequestMapping("/api/users")`配下に持つ。`/api/identity/**`は
+     `IdentityController`(`/me`等)であり移行系エンドポイントは存在しない点に注意)を
      使って、`keycloak_sub` が未設定の既存ユーザーをKeycloakへ登録し、パスワード再設定を
      要求する。**本手順書が「カットオーバー」として主に実行する対象はこちら。**
 - 本プロジェクトはステージング環境と本番環境が分離された構成を持たない。単一の
@@ -60,15 +62,15 @@ Issue: [#591](https://github.com/tonoccho/lets_blog_server/issues/591) [E5] カ�
    │
 3. データ移行スクリプトの実行順序と検証ポイント
    │
-4. Keycloak realm の import と検証
-   │
-   ├─ 失敗 → 8. ロールバック方針 へ
-   │
 5. 既存ユーザーのKeycloak登録とパスワードリセット通知
    │
 2. 全サービス停止順序(フェーズ2: 残りサービスの完全停止)
    │
 6. 全サービスの起動順序
+   │
+4. Keycloak realm の import と検証(フルスクラッチ起動での再確認。詳細は4.2参照)
+   │
+   ├─ 失敗 → 8. ロールバック方針 へ
    │
 7. 疎通確認チェックリスト
    │
@@ -252,6 +254,13 @@ docker compose ps   # 全コンテナがExited/Stoppedになっていること�
 [フェーズ1](#フェーズ1-外部トラフィック遮断)実行後、
 `gateway` / `identity` / `keycloak` / `mysql` はまだ稼働している状態で行う。
 
+**この時点では `reverse-proxy`(唯一の外部窓口)は停止済みであり、ホストから
+`https://localhost/...` へアクセスすることはできない([6. 全サービスの起動順序](#6-全サービスの起動順序)まで再起動しない)。
+そのため本章のAPI呼び出しはすべて、`lbs-net` に参加している別コンテナ(`gateway`。
+実際に`curl`が入っている。healthcheckでも使用)から `docker exec` して
+コンテナ名解決(`gateway:8080` 自身宛、あるいは `keycloak:8080`)で叩く形に統一する。
+`https://localhost/...` は使わない。**
+
 ### 3.1 管理者トークンの取得
 
 移行APIは `identity-service` の `AdminAuthorizationService.requireAdmin()` で保護されている
@@ -262,16 +271,19 @@ docker compose ps   # 全コンテナがExited/Stoppedになっていること�
 実際の管理者アカウント(Keycloakへ登録済みのadminユーザー、例: s.tonouchi@gmail.com)の
 認証情報からトークンを取得する。
 
+**`lbs-keycloak` コンテナのイメージには `curl`/`wget` が入っていない
+(`docker-compose.yml` の `keycloak` サービス定義のコメント参照)ため、
+`docker exec lbs-keycloak curl ...` は使わないこと。** 代わりに、同じ `lbs-net` 上にいて
+実際に `curl` が入っている `gateway` コンテナ(`services/gateway/Dockerfile` でhealthcheck用に
+インストール済み)から、コンテナ名解決(`keycloak:8080`)でリクエストを送る。
+
 ```bash
-ADMIN_TOKEN=$(docker exec lbs-keycloak curl -s \
+ADMIN_TOKEN=$(docker exec lbs-gateway curl -s \
   -d "client_id=admin-cli" -d "grant_type=password" \
   -d "username=<Keycloak管理者ユーザー名>" -d "password=<Keycloak管理者パスワード>" \
-  http://localhost:8080/auth/realms/letsblog/protocol/openid-connect/token \
+  http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/token \
   | jq -r .access_token)
 ```
-
-(Keycloakコンテナ内には `curl` が無い場合、`gateway` コンテナ等 `lbs-net` に参加している
-別コンテナから `docker exec` して同様のリクエストを送ってもよい。)
 
 ### 3.2 移行前の状態確認
 
@@ -283,11 +295,17 @@ docker exec -e MYSQL_PWD="$MYSQL_PASSWORD" lbs-mysql \
 
 ### 3.3 移行実行
 
+`gateway` はまだ `lbs-net` 内部でのみ到達可能な状態(reverse-proxy停止中)なので、
+`gateway` コンテナ自身に `docker exec` し、`localhost:8080`(=`gateway`自身の待受ポート)宛に
+リクエストする。`gateway`のルーティング設定(`app.gateway.routes`)により
+`/api/users/**` は内部で `identity` サービスへ転送される
+(reverse-proxy稼働時に外部から `https://localhost/api/users/...` を叩いた場合と同じ経路)。
+
 ```bash
-curl -s -X POST \
+docker exec lbs-gateway curl -s -X POST \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  https://localhost/api/identity/users/migrate-to-keycloak \
+  http://localhost:8080/api/users/migrate-to-keycloak \
   -d '{}' | jq .
 ```
 
@@ -302,14 +320,25 @@ curl -s -X POST \
   [8. ロールバック方針](#8-ロールバック方針)の判断基準に照らして続行可否を判断する。
 - 移行後、`users.keycloak_sub` が全件で非NULLになっていること(3.2と同じクエリを再実行し
   `unmigrated = 0` を確認)。
-- Keycloak管理コンソール(`https://localhost/auth/admin/master/console/#/letsblog/users`)で、
-  移行対象と同数のユーザーが作成されていること。
+- 移行対象と同数のユーザーがKeycloakへ作成されていること。この時点では
+  reverse-proxyが停止中でKeycloak管理コンソール(ブラウザ)へはアクセスできないため、
+  3.1と同様に `gateway` コンテナから Admin REST API を `docker exec` 経由で叩いて件数を確認する
+  (ブラウザでの目視確認は、[6. 全サービスの起動順序](#6-全サービスの起動順序)でreverse-proxyを
+  再起動した後に改めて行ってもよい)。
+
+  ```bash
+  docker exec lbs-gateway curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
+    "http://keycloak:8080/auth/admin/realms/letsblog/users?max=1000" \
+    | jq 'length'
+  # 期待: 3.2で確認した unmigrated の件数と一致する
+  ```
+
 - 孤児検出の整合性確認として `reconcile-keycloak` を実行し、`deactivated` が空であること
   (直後に実行しているため、Keycloak側に存在しないユーザーは無いはず)。
 
 ```bash
-curl -s -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
-  https://localhost/api/identity/users/reconcile-keycloak | jq .
+docker exec lbs-gateway curl -s -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  http://localhost:8080/api/users/reconcile-keycloak | jq .
 ```
 
 - 移行された各ユーザー宛にパスワード再設定メールが実際に届いていること
@@ -386,7 +415,12 @@ curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
 3. パスワード再設定メールが届かない/紛失した場合の代替経路として、Keycloak管理コンソールから
    管理者が対象ユーザーのパスワードリセットメールを再送できることを伝える
    (`https://localhost/auth/admin/master/console/#/letsblog/users` → 対象ユーザー →
-   Credentials タブ → Reset password)。
+   Credentials タブ → Reset password)。**このURLは reverse-proxy 経由での外部アクセスを
+   前提としており、[6. 全サービスの起動順序](#6-全サービスの起動順序)でreverse-proxyを
+   再起動した後にのみ到達可能。**カットオーバー当日、reverse-proxy再起動前([3. データ移行
+   スクリプトの実行順序と検証ポイント](#3-データ移行スクリプトの実行順序と検証ポイント)の
+   段階)で同等の操作が必要になった場合は、[3.1](#31-管理者トークンの取得)と同じ
+   `docker exec` 経由のAdmin REST API呼び出しで代替する。
 
 ---
 
