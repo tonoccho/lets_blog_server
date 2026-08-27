@@ -54,6 +54,34 @@ Keycloak / 各ドメインサービス)を見据えた構成に整えた(#556)�
 将来これらに依存する新サービス(gateway等)も `condition: service_healthy` で
 正しく待ち合わせできるようになった。
 
+### `legacy-schema-migrate`(#668。空のMySQLボリュームからの起動デッドロック解消)
+
+`identity` は独自のFlywayを持たず、`api`(legacy-api)がFlywayで管理する `lets_blog`
+スキーマ(`role_permissions` 等)の存在を `ddl-auto: validate` で前提にしている
+(services/identity/src/main/resources/application.yml参照。ADR-0004のスキーマ分離が
+`identity` にはまだ適用されていない暫定状態)。一方 `api` は `media`/`ai`/`content`/
+`analytics` の healthy を待ち、それら4サービスは全て `identity` の healthy を待つ。
+
+そのため、以前は `identity` の `depends_on` に `api` を含めることができなかった
+(`identity` → `api` → `media`/`ai`/`content`/`analytics` → `identity` という循環になる)。
+結果として空のMySQLボリュームからの起動では、`api` のFlyway移行が実行される機会がないまま
+`identity` がスキーマ検証に失敗してクラッシュループし、スタック全体が起動不能になっていた。
+
+この循環を断つため、`api` 本体のFlyway移行とは別に、`flyway/flyway` 公式イメージで
+`lets_blog` スキーマへのマイグレーションだけを一回限り実行する `legacy-schema-migrate`
+サービスを追加した(マイグレーションSQL自体は引き続き `api` が所有し、
+`services/legacy-api/src/main/resources/db/migration` を読み取り専用でマウントするのみ)。
+`identity` と `api` はいずれも `api` コンテナ自体ではなく、この
+`legacy-schema-migrate` の完了(`condition: service_completed_successfully`)を
+待ってから起動する。`api` コンテナ自身も起動時に組み込みのSpring Boot Flywayで
+同じマイグレーションを実行するが、`legacy-schema-migrate` で既に適用済みのため
+no-opになる(Flywayは同時実行に対しても安全だが、起動順序を決定的にするため
+明示的に先に完了させている)。
+
+再現手順は `scripts/verify-clean-volume-boot.sh` としてスクリプト化してある
+(`lets_blog_server_mysql_data` ボリュームを削除し、クリーンな状態から
+`docker compose up -d gateway` して全サービスがhealthyになることを確認する)。
+
 ## GPU/メモリを満たさない環境向けの縮退起動(検討結果)
 
 **結論: 本Issueでは新たなcompose profileは導入しない。**

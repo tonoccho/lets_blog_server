@@ -17,8 +17,11 @@
 --      状態にしてから本スクリプトを実行すること(本スクリプト実行後もlegacy-apiが書き込みを続けると、
 --      その変更はlbs_project側に反映されないまま失われる)。
 --   3. 本スクリプト実行後、services/legacy-api/src/main/resources/db/migration/
---      V76__drop_project_service_tables.sqlを適用し、legacy-api(lets_blogスキーマ)側の
---      該当テーブルを削除すること。
+--      V77__drop_project_service_tables.sqlを適用し、legacy-api(lets_blogスキーマ)側の
+--      該当テーブルを削除すること(#668で、analytics-service抽出(#578)が同時に追加した
+--      V76__drop_analytics_service_tables.sqlとバージョン番号が衝突していたため、
+--      本ファイルはV76からV77へリネームした。lets_blogスキーマにはまだ適用されていない
+--      ことを確認済み)。
 --
 -- 実行方法(root権限が必要。スキーマ名はデフォルト値。実際の値は.envのMYSQL_DATABASEを確認して
 -- 必要に応じて置き換えること):
