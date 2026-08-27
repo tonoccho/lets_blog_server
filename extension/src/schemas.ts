@@ -24,13 +24,6 @@ export const ActorSchema = z.object({
 });
 export type Actor = z.infer<typeof ActorSchema>;
 
-export const LoginResultSchema = z.object({
-  user: ActorSchema,
-  twoFactorRequired: z.boolean(),
-  apiKey: z.string().nullable(),
-});
-export type LoginResult = z.infer<typeof LoginResultSchema>;
-
 export const PublishResultSchema = z.object({
   wpPostId: z.string(),
   wpPostUrl: z.string(),

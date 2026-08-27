@@ -21,13 +21,14 @@ public class OpenApiConfig {
                         .contact(new Contact()
                                 .name("Let's Blog Project")
                                 .url("https://github.com/tonoccho/lets_blog_server")))
-                .addSecurityItem(new SecurityRequirement().addList("ApiKeyAuth"))
+                .addSecurityItem(new SecurityRequirement().addList("BearerAuth"))
                 .components(new io.swagger.v3.oas.models.Components()
-                        .addSecuritySchemes("ApiKeyAuth",
+                        .addSecuritySchemes("BearerAuth",
                                 new SecurityScheme()
-                                        .type(SecurityScheme.Type.APIKEY)
-                                        .in(SecurityScheme.In.HEADER)
-                                        .name("X-API-Key")
-                                        .description("APIキーはログイン(/api/auth/login)またはTOTP認証(/api/auth/totp/verify)成功時にレスポンスのheadersに含まれます。")));
+                                        .type(SecurityScheme.Type.HTTP)
+                                        .scheme("bearer")
+                                        .bearerFormat("JWT")
+                                        .description("Keycloakが発行するアクセストークンをAuthorization: Bearerヘッダーで送ってください"
+                                                + "(issue #566で旧ヘッダベースの認証方式から移行済み)。")));
     }
 }

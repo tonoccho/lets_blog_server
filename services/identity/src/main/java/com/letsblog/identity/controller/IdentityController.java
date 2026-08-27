@@ -14,7 +14,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * ゲートウェイで検証済みのアクター(X-Actor-Id)を起点に、自分自身の情報・権限を返すAPI(#561)。
+ * CurrentActorServiceが解決するアクター(Keycloak JWTのsubクレーム起点)を起点に、
+ * 自分自身の情報・権限を返すAPI(#561)。
  */
 @RestController
 @RequestMapping("/api/identity")

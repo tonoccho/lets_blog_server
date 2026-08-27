@@ -219,7 +219,7 @@ public class PostPublishService {
     }
 
     /**
-     * 投稿者(X-Actor-Idヘッダで識別されるLet's Blogユーザー)に対応する、投稿先サイト上の
+     * 投稿者(CurrentActorServiceが解決するLet's Blogユーザー)に対応する、投稿先サイト上の
      * 既存WordPressユーザーIDを解決する。まずuser_site_authors(ProjectUserSyncServiceが
      * プロジェクトメンバー追加/ロール変更のたびにprovisionAuthorの結果を書き込む対応表)を参照し、
      * 無ければ従来通りメールアドレスでの動的検索にフォールバックする(見つかればその場でキャッシュする)。

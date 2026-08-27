@@ -8,40 +8,47 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
- * KeycloakのJWT検証設定(#563)。
+ * KeycloakのJWT検証設定。
  *
- * <p>本サービスの認可は現時点でも{@link ApiKeyAuthFilter}(X-API-Key)と、各サービスクラスから
- * 手続き的に呼ばれる{@code AdminAuthorizationService}/{@code PermissionAuthorizationService}
- * (X-Actor-Id/X-Actor-Role。Web BFFがNextAuthセッションを転送する前提のモデル)が担っている。
- * Web/VSCode拡張はまだKeycloakトークンを送っていない(#564/#565が未着手)ため、この設定は
- * 「Bearerトークンが送られてきた場合は検証する」までに留め、認可判定そのものは既存の仕組みを
- * 変更しない。トークン無しのリクエストは(既存のApiKeyAuthFilter等はそのまま機能する前提で)
- * 素通しする。
+ * <p>issue #566で{@code ApiKeyAuthFilter}(旧ヘッダベースのAPIキー認証)を撤去したのに伴い、このサービスの
+ * 認証ゲート(「有効な資格情報が無ければ401」)はここへ一本化した。旧{@code ApiKeyAuthFilter}が
+ * {@code /api/health}と一部の認証系公開パスを除く全{@code /api/**}を対象にしていたのと同じ範囲を、
+ * {@code anyRequest().authenticated()}(有効なKeycloak JWTを要求)で置き換える。
  *
- * <p>oauth2ResourceServer().jwt()を設定した時点で、Bearerトークンが実際に送られてきた場合は
- * Spring Securityの標準動作により無条件に検証される(permitAllのパスであっても、
- * Authorizationヘッダにトークンが付いていれば解決・検証を試み、不正/期限切れ/署名不正で
- * あれば401を返す)。これにより「gatewayを経由せず直接サービスを叩いた場合もJWT検証が働く」
- * という受入基準を、実際に認可をJWTへ全面移行することなく満たす。
+ * <p>permitAllとして残すのは、(1) まだ資格情報を持ちようがない初回セットアップ導線
+ * ({@code /api/auth/signup} / {@code /api/auth/setup} / {@code /api/auth/setup-status}。
+ * AuthControllerのJavadoc参照)、(2) ヘルスチェック({@code /api/health}、Actuator)、
+ * (3) 元々ApiKeyAuthFilterの対象外だったAPIドキュメント({@code /v3/api-docs/**}、
+ * {@code /swagger-ui/**}、{@code /swagger-ui.html})のみ。認可判定自体(admin/プロジェクト
+ * メンバー等)は引き続きコントローラから呼ばれる{@code AdminAuthorizationService}/
+ * {@code PermissionAuthorizationService}(CurrentActorServiceが解決するJWTのsubクレーム起点)が
+ * 担う。
  *
  * <p>realm roleのSpring Security authorityへのマッピング(ROLE_&lt;大文字&gt;)はここで
  * 用意しておくが、CurrentActorServiceでの実際の権限判定は(#562時点でKeycloak側への
  * ロール同期が未実装のため)JWTのクレームではなくローカルDBのRole/Permissionを正とする。
- *
- * <p>全エンドポイントを対象にした宣言的認可(@PreAuthorize)へのフル移行、
- * X-Actor-*ヘッダを無視する既定拒否化は、Web(#564)・VSCode拡張(#565)の
- * Keycloakトークン送信対応、およびカットオーバー手順の確定(#591)より前に行うと
- * 唯一の実ユーザーアカウントを含む全クライアントを即座にログアウトさせてしまうため、
- * 本Issueでは実施しない(詳細はPRの説明を参照)。
  */
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
 
+    private static final String[] PUBLIC_PATHS = {
+            "/api/health",
+            "/api/auth/signup",
+            "/api/auth/setup",
+            "/api/auth/setup-status",
+            "/actuator/**",
+            "/v3/api-docs/**",
+            "/swagger-ui/**",
+            "/swagger-ui.html"
+    };
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http.csrf(csrf -> csrf.disable())
-                .authorizeHttpRequests(authorize -> authorize.anyRequest().permitAll())
+                .authorizeHttpRequests(authorize -> authorize
+                        .requestMatchers(PUBLIC_PATHS).permitAll()
+                        .anyRequest().authenticated())
                 .oauth2ResourceServer(
                         oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())))
                 .build();

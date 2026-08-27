@@ -1,12 +1,9 @@
 package com.letsblog.api.service;
 
 import com.letsblog.common.crypto.CredentialCipher;
-import com.letsblog.api.domain.TwoFactorSecret;
 import com.letsblog.api.domain.User;
-import com.letsblog.api.dto.LoginResponse;
 import com.letsblog.api.dto.UserResponse;
 import com.letsblog.api.repository.RoleRepository;
-import com.letsblog.api.repository.TwoFactorSecretRepository;
 import com.letsblog.api.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,13 +26,7 @@ class UserServiceTest {
     private UserRepository userRepository;
 
     @Mock
-    private TwoFactorSecretRepository twoFactorSecretRepository;
-
-    @Mock
     private RoleRepository roleRepository;
-
-    @Mock
-    private ApiKeyService apiKeyService;
 
     private final CredentialCipher credentialCipher = new CredentialCipher(
             java.util.Base64.getEncoder().encodeToString(new byte[32]));
@@ -43,7 +34,7 @@ class UserServiceTest {
     private UserService service;
 
     private UserService service() {
-        return new UserService(userRepository, twoFactorSecretRepository, roleRepository, credentialCipher, apiKeyService);
+        return new UserService(userRepository, roleRepository, credentialCipher);
     }
 
     @Test
@@ -136,41 +127,6 @@ class UserServiceTest {
         user.setPasswordHash(new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder().encode("password123"));
         user.setRole("user");
         return user;
-    }
-
-    @Test
-    void login_2FA未設定ユーザーはtwoFactorRequiredがfalse() {
-        service = service();
-        when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(buildUser()));
-        when(twoFactorSecretRepository.findByUserIdAndIsEnabledTrue(1L)).thenReturn(Optional.empty());
-        when(apiKeyService.issue(any(User.class), any())).thenReturn("lb_test");
-
-        LoginResponse response = service.login("user@example.com", "password123", "test");
-
-        assertFalse(response.twoFactorRequired());
-        assertEquals("user@example.com", response.user().email());
-        assertEquals("lb_test", response.apiKey());
-    }
-
-    @Test
-    void login_2FA有効ユーザーはtwoFactorRequiredがtrue() {
-        service = service();
-        when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(buildUser()));
-        when(twoFactorSecretRepository.findByUserIdAndIsEnabledTrue(1L))
-                .thenReturn(Optional.of(new TwoFactorSecret()));
-
-        LoginResponse response = service.login("user@example.com", "password123", "test");
-
-        assertTrue(response.twoFactorRequired());
-    }
-
-    @Test
-    void login_パスワード不一致は例外() {
-        service = service();
-        when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(buildUser()));
-
-        assertThrows(InvalidCredentialsException.class,
-                () -> service.login("user@example.com", "wrong-password", "test"));
     }
 
     @Test

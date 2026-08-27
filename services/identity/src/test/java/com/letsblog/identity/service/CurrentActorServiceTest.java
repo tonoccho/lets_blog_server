@@ -54,17 +54,14 @@ class CurrentActorServiceTest {
     }
 
     @Test
-    void JWTが無い場合はX_Actor_Idヘッダーへフォールバックする() {
-        when(request.getHeader("X-Actor-Id")).thenReturn("42");
-        when(request.getHeader("X-Actor-Role")).thenReturn("admin");
-
-        assertThat(service.getCurrentActorId()).isEqualTo(42L);
-        assertThat(service.getCurrentActorRole()).isEqualTo("admin");
-        assertThat(service.isAdmin()).isTrue();
+    void JWTが無い場合は操作者なしを返す() {
+        assertThat(service.getCurrentActorId()).isNull();
+        assertThat(service.getCurrentActorRole()).isNull();
+        assertThat(service.isAdmin()).isFalse();
     }
 
     @Test
-    void 有効なJWTがありローカルUserが見つかる場合はJWTを優先する() {
+    void 有効なJWTがありローカルUserが見つかる場合はそのUserを返す() {
         User user = new User();
         user.setId(99L);
         user.setRole("admin");
@@ -73,21 +70,16 @@ class CurrentActorServiceTest {
 
         assertThat(service.getCurrentActorId()).isEqualTo(99L);
         assertThat(service.getCurrentActorRole()).isEqualTo("admin");
-        Mockito.verify(request, Mockito.never()).getHeader("X-Actor-Id");
-        Mockito.verify(request, Mockito.never()).getHeader("X-Actor-Role");
     }
 
     @Test
-    void JWTはあるが対応するローカルUserが無い場合はヘッダーへフォールバックしない() {
+    void JWTはあるが対応するローカルUserが無い場合は操作者なしを返す() {
         when(userRepository.findByKeycloakSub("unknown-sub")).thenReturn(Optional.empty());
         SecurityContextHolder.getContext().setAuthentication(jwtAuthenticationToken("unknown-sub"));
 
         assertThat(service.getCurrentActorId()).isNull();
         assertThat(service.getCurrentActorRole()).isNull();
         assertThat(service.isAdmin()).isFalse();
-        // ローカルUserが無くてもヘッダーへはフォールバックしない(JWT提示者へのなりすまし防止)。
-        Mockito.verify(request, Mockito.never()).getHeader("X-Actor-Id");
-        Mockito.verify(request, Mockito.never()).getHeader("X-Actor-Role");
     }
 
     @Test

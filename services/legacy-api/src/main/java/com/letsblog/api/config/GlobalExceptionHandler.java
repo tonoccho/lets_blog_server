@@ -9,20 +9,15 @@ import com.letsblog.api.service.BackupException;
 import com.letsblog.api.service.EmailAlreadyExistsException;
 import com.letsblog.api.service.EmailSendException;
 import com.letsblog.api.service.ForbiddenException;
-import com.letsblog.api.service.InvalidCredentialsException;
 import com.letsblog.api.service.InvalidPlantUmlTagException;
 import com.letsblog.api.service.InvalidRechartsTagException;
 import com.letsblog.api.service.InvalidRoleException;
-import com.letsblog.api.service.InvalidTokenException;
-import com.letsblog.api.service.InvalidTotpCodeException;
 import com.letsblog.api.service.MailTemplateNotFoundException;
 import com.letsblog.api.service.ProhibitedContentException;
 import com.letsblog.api.service.ProjectNotFoundException;
 import com.letsblog.api.service.ProjectUserNotFoundException;
 import com.letsblog.api.service.ProvisioningException;
-import com.letsblog.api.service.QrCodeGenerationException;
 import com.letsblog.api.service.SiteNotFoundException;
-import com.letsblog.api.service.TwoFactorSecretNotFoundException;
 import com.letsblog.api.exception.RateLimitExceededException;
 import com.letsblog.api.service.UserNotFoundException;
 import com.letsblog.common.web.ErrorResponse;
@@ -96,19 +91,9 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
     }
 
-    @ExceptionHandler(InvalidCredentialsException.class)
-    public ResponseEntity<ErrorResponse> handleInvalidCredentials(InvalidCredentialsException e) {
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ErrorResponse.of(e.getMessage()));
-    }
-
     @ExceptionHandler(ForbiddenException.class)
     public ResponseEntity<ErrorResponse> handleForbidden(ForbiddenException e) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ErrorResponse.of(e.getMessage()));
-    }
-
-    @ExceptionHandler(InvalidTokenException.class)
-    public ResponseEntity<ErrorResponse> handleInvalidToken(InvalidTokenException e) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(EmailSendException.class)
@@ -151,21 +136,6 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AgentOperationException.class)
     public ResponseEntity<ErrorResponse> handleAgentOperationException(AgentOperationException e) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
-    }
-
-    @ExceptionHandler(TwoFactorSecretNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleTwoFactorSecretNotFound(TwoFactorSecretNotFoundException e) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
-    }
-
-    @ExceptionHandler(InvalidTotpCodeException.class)
-    public ResponseEntity<ErrorResponse> handleInvalidTotpCode(InvalidTotpCodeException e) {
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ErrorResponse.of(e.getMessage()));
-    }
-
-    @ExceptionHandler(QrCodeGenerationException.class)
-    public ResponseEntity<ErrorResponse> handleQrCodeGeneration(QrCodeGenerationException e) {
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(BackupException.class)

@@ -40,7 +40,6 @@ docker compose up -d
 | 項目 | 説明 | 変更要否 |
 |---|---|---|
 | `MYSQL_ROOT_PASSWORD` / `MYSQL_PASSWORD` | MySQLのパスワード | 必須変更 |
-| `SERVER_API_KEY` | Web管理画面・VSCode拡張が使う固定APIキー(`X-API-Key`ヘッダ) | 必須変更 |
 | `APP_ENCRYPTION_KEY` | CMS認証情報暗号化キー(Base64, 32バイト)。生成例: `openssl rand -base64 32` | 必須変更 |
 | `COMFYUI_IMAGE` | ComfyUIイメージ(GPU種別に応じて変更。既定はNVIDIA CUDA13系) | 環境に応じて変更 |
 | `LLM_API_KEY` | 下書き/校正/要約・タグ提案・記事プランニングで使う外部LLMサービス(既定: OpenAI)のAPIキー | 必須変更 |

@@ -22,10 +22,11 @@ import org.springframework.web.client.RestClient;
  * 同期HTTP呼び出しで取得する。
  *
  * <p>GenerationJobController自体はadmin限定等の追加認可を課さないが、legacy-apiの
- * {@code ApiKeyAuthFilter}がX-API-Key/有効なBearer JWTのいずれも無いリクエストをコントローラの
- * 手前で一律401にする(docs/AUTHORIZATION_MATRIX.md、AuthorizationMatrixIntegrationTest参照)。
- * そのため、この呼び出しも呼び出し元(統合ログAPIの実際の利用者)のBearerトークンを
- * そのまま転送する(IdentityClientと同じ理由・パターン)。
+ * SecurityConfig(issue #566で全面Keycloak JWT必須化)が有効なBearer JWTの無いリクエストを
+ * コントローラの手前で一律401にする(docs/AUTHORIZATION_MATRIX.md、
+ * AuthorizationMatrixIntegrationTest参照)。そのため、この呼び出しも呼び出し元
+ * (統合ログAPIの実際の利用者)のBearerトークンをそのまま転送する(IdentityClientと同じ
+ * 理由・パターン)。
  */
 @Component
 public class GenerationJobClient {

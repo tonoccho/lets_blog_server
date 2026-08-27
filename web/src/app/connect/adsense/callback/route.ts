@@ -6,8 +6,9 @@ const STATE_COOKIE = "adsense_oauth_state";
 
 /**
  * Google AdSense連携(issue #387)のOAuthコールバック着地点。stateがstart側で発行したcookieの値と
- * 一致することを確認してからSpring Boot APIへ認可コードを渡す(サーバー間通信、X-API-Key認証)。
- * 詳細は/connect/adsense/start/route.tsのコメント参照。
+ * 一致することを確認してからSpring Boot APIへ認可コードを渡す(サーバー間通信、Authorization: Bearer
+ * トークン認証。issue #566で旧ヘッダベースのAPIキー認証から移行済み)。詳細は
+ * /connect/adsense/start/route.tsのコメント参照。
  */
 export async function GET(request: NextRequest) {
   const session = await requireAdminSession();

@@ -26,9 +26,11 @@ class MigrationSchemaValidationTest extends MigrationTestBase {
             // 同様にこのスキーマ(lets_blog)には存在しない前提のテーブル一覧から除外した
             // (V77__drop_project_service_tables.sqlでdropされる。バージョン番号の衝突で
             // 一度も実行されていなかったが#668で修正され、実際にdropされるようになった)。
+            // api_keys/two_factor_secrets/password_reset_tokensは#566で旧認証機構の撤去に伴い
+            // 削除したため、同様にこのスキーマには存在しない前提のテーブル一覧から除外した
+            // (V78__drop_legacy_auth_tables.sqlでdropされる)。
             var requiredTables = new String[]{
-                    "users",
-                    "api_keys"
+                    "users"
             };
 
             for (String table : requiredTables) {

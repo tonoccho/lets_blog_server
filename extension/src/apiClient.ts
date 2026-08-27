@@ -36,8 +36,10 @@ const PUBLISH_MIN_TIMEOUT_MS = 1_200_000;
  * 「誰であるか」の判定はサーバー側がAuthorization: Bearerで送られたアクセストークン(JWT)を
  * 検証して行うため、従来の個別ヘッダによる自己申告(APIキー/実行者ID/実行者ロール)は廃止した。
  * actor引数は、この関数を呼ぶ~30個のエンドポイント関数(とその呼び出し元)のシグネチャを
- * 一括で変更する大きな機械的差分を避けるため#565時点では残しているが、ヘッダ組み立てには
- * 使わない(呼び出し元シグネチャの整理は#566のスコープとする)。
+ * 一括で変更する大きな機械的差分を避けるため#565時点では残しており、ヘッダ組み立てには
+ * 使わない。issue #566(旧認証機構の撤去)でも、この引数自体は明示的なスコープに含まれて
+ * いなかったため意図的に手を付けていない(呼び出し元シグネチャの整理は別途Issueを起票して
+ * 対応する想定)。
  */
 function buildHeaders(accessToken: string, actor?: Actor, contentType?: string): Record<string, string> {
   const headers: Record<string, string> = { Authorization: `Bearer ${accessToken}` };
@@ -230,7 +232,6 @@ import type {
   AssignIssueResult,
   ContentCacheResult,
   ImageGenerationOptions,
-  LoginResult,
   PlanChatResult,
   ProjectDetail,
   ProjectSite,
@@ -257,7 +258,6 @@ export type {
   AssignIssueResult,
   ContentCacheResult,
   ImageGenerationOptions,
-  LoginResult,
   PlanChatResult,
   ProjectDetail,
   ProjectSite,
@@ -321,28 +321,10 @@ export interface ImageGenerationParams {
   loraWeight?: number;
 }
 
-/**
- * メールアドレス/パスワードでログインする。issue #565(Device Authorization Grantへの移行)
- * 以降、拡張からは呼び出していない未使用のエクスポート(撤去は#566のスコープ)。
- * ログイン前は認証ヘッダを持たないため、このエンドポイントはサーバー側で認証ヘッダなしでの
- * 呼び出しが許可されている。2FA未設定ユーザーはこの時点でapiKeyが発行される。
- */
-export async function login(serverUrl: string, email: string, password: string): Promise<LoginResult> {
-  return requestJson(serverUrl, '/api/auth/login', {
-    label: 'login',
-    method: 'POST',
-    createBody: jsonBody({ email, password, label: 'vscode' }),
-  }, schemas.LoginResultSchema);
-}
-
-/** ログイン2段階目。login()でtwoFactorRequired=trueだった場合にTOTPコードを検証し、apiKeyを取得する。 */
-export async function verifyTotpLogin(serverUrl: string, userId: number, code: string): Promise<LoginResult> {
-  return requestJson(serverUrl, '/api/auth/totp/verify', {
-    label: 'verifyTotpLogin',
-    method: 'POST',
-    createBody: jsonBody({ userId, code, label: 'vscode' }),
-  }, schemas.LoginResultSchema);
-}
+// メールアドレス/パスワードでのログイン(login()/verifyTotpLogin())は、issue #565で
+// Device Authorization Grantへ移行した時点で拡張からは呼び出さなくなり、issue #566で
+// サーバー側の対応エンドポイント(/api/auth/login、/api/auth/totp/verify)自体も撤去された
+// ため、ここから削除した(詳細はgit history参照)。
 
 /**
  * Markdown記事をCMSへ投稿する(既存投稿がある場合は更新)。

@@ -4,11 +4,9 @@ import com.letsblog.api.aop.AuditLog;
 import com.letsblog.common.crypto.CredentialCipher;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.User;
-import com.letsblog.api.dto.LoginResponse;
 import com.letsblog.api.dto.UserCreateRequest;
 import com.letsblog.api.dto.UserResponse;
 import com.letsblog.api.repository.RoleRepository;
-import com.letsblog.api.repository.TwoFactorSecretRepository;
 import com.letsblog.api.repository.UserRepository;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -19,10 +17,11 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * ログイン(パスワード照合・2FA・APIキー発行)、セルフサインアップ、初回セットアップを扱う。
- * ユーザーのCRUD・プロフィール管理はidentity-serviceに移設した(#561)。現行の認証機構自体は
- * カットオーバー計画(#591)を経てから撤去する方針のため、このクラスでは引き続き
- * password_hash等の資格情報を直接扱う(ADR-0003参照)。
+ * セルフサインアップ、初回セットアップを扱う。ユーザーのCRUD・プロフィール管理はidentity-serviceに
+ * 移設した(#561)。ログイン(パスワード照合・2FA・APIキー発行)はissue #566でKeycloakへ全面移行し
+ * 撤去した。このクラスは初回セットアップ(Keycloak上にまだアカウントが存在しない状態からの
+ * ローカルDB直書き)のためにpassword_hash等の資格情報を引き続き扱う
+ * (AuthController/SetupForm.tsxのコメント参照)。
  *
  * <p>identity-serviceと同一の物理スキーマ(lets_blog)上のusers/rolesテーブルを参照する
  * (ADR-0004が求めるスキーマ分離は将来のIssueで対応する)。
@@ -41,47 +40,17 @@ public class UserService {
             "user", "ROLE_VIEWER");
 
     private final UserRepository userRepository;
-    private final TwoFactorSecretRepository twoFactorSecretRepository;
     private final RoleRepository roleRepository;
     private final CredentialCipher credentialCipher;
-    private final ApiKeyService apiKeyService;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     public UserService(
             UserRepository userRepository,
-            TwoFactorSecretRepository twoFactorSecretRepository,
             RoleRepository roleRepository,
-            CredentialCipher credentialCipher,
-            ApiKeyService apiKeyService) {
+            CredentialCipher credentialCipher) {
         this.userRepository = userRepository;
-        this.twoFactorSecretRepository = twoFactorSecretRepository;
         this.roleRepository = roleRepository;
         this.credentialCipher = credentialCipher;
-        this.apiKeyService = apiKeyService;
-    }
-
-    /**
-     * パスワード認証を行う。2FAが有効なユーザーはtwoFactorRequired=trueのみを返し、
-     * この時点ではAPIキーを発行しない。呼び出し元はTOTPコード入力を経て
-     * /api/auth/totp/verify でログインを完了させ、そこでキーを取得する。
-     * 2FAが無効なユーザーはこの時点で認証完了とみなし、APIキーを発行して返す。
-     */
-    @AuditLog(action = AuditLogAction.LOGIN, resourceType = "USER")
-    @Transactional
-    public LoginResponse login(String email, String password, String label) {
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new InvalidCredentialsException("メールアドレスまたはパスワードが正しくありません"));
-
-        if (!passwordEncoder.matches(password, user.getPasswordHash())) {
-            throw new InvalidCredentialsException("メールアドレスまたはパスワードが正しくありません");
-        }
-
-        boolean twoFactorRequired = twoFactorSecretRepository.findByUserIdAndIsEnabledTrue(user.getId()).isPresent();
-        if (twoFactorRequired) {
-            return new LoginResponse(UserResponse.from(user), true, null);
-        }
-        String apiKey = apiKeyService.issue(user, label);
-        return new LoginResponse(UserResponse.from(user), false, apiKey);
     }
 
     @AuditLog(action = AuditLogAction.USER_CREATED, resourceType = "USER")
