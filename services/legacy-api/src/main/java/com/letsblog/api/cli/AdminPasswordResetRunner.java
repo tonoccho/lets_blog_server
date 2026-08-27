@@ -14,6 +14,11 @@ import org.springframework.stereotype.Component;
  * ログイン不能(ロックアウト)時に、対象ユーザーのパスワードを安全にリセットするための運用コマンド。
  * {@code admin-password-reset} プロファイルでのみ有効になり、通常のアプリケーション起動時には動作しない。
  * 使い方は scripts/reset-admin-password.sh 及び docs/COMPREHENSIVE_TROUBLESHOOTING.md を参照。
+ *
+ * <p>issue #681: ログインはKeycloakへ一本化されているため、実体は
+ * {@link UserService#resetPassword(String, String)}経由でKeycloak Admin REST APIを呼び出し、
+ * Keycloak上のパスワードを即時変更する(temporary=false)。対象ユーザーがKeycloak上に存在しない
+ * 場合はエラー終了し(exit code 1)、DBのみを操作して成功したように見せることはない。
  */
 @Component
 @Profile("admin-password-reset")

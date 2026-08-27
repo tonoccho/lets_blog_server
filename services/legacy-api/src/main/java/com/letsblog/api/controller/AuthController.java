@@ -17,10 +17,11 @@ import java.util.Map;
 
 /**
  * ログイン・2FA・パスワードリセットはissue #566でKeycloakへ全面移行し撤去した
- * (旧実装はgit historyを参照)。ここに残るのは、Keycloak上にまだアカウントが1つも
- * 存在しない状態からWeb管理画面の初回セットアップ(/setup)が使うローカルDB直書きの
- * エンドポイントのみで、Keycloak連携した初回セットアップ動線の整備は別Issueで扱う
- * (web/src/app/setup/SetupForm.tsxのコメント参照)。
+ * (旧実装はgit historyを参照)。ここに残るのは、Web管理画面の初回セットアップ(/setup)が使う
+ * エンドポイントのみ。setupはKeycloak上にまだアカウントが1つも存在しない状態からの初回管理者
+ * 作成専用であり、issue #681でKeycloak Admin REST API経由の実装に置き換えた
+ * (UserService#setupInitialAdmin参照。作成されたアカウントはKeycloak経由のログイン
+ * (NextAuth Keycloakプロバイダ)が即座に可能)。
  */
 @Tag(name = "Authentication", description = "初回セットアップ関連API")
 @RestController

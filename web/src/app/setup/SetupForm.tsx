@@ -4,13 +4,11 @@ import { useState } from "react";
 import { setupAction } from "./actions";
 
 /**
- * issue #564でCredentialsプロバイダを廃止したため、このフォームが作成する管理者アカウント
- * (legacy-apiの/api/auth/setupが直接ローカルDBへ作成するのみで、Keycloak側にはアカウントを
- * 作らない)は、作成しても自動ログインできない(KeycloakにログインできるアカウントではないためsignIn("keycloak")の対象にならない)。
- * この画面自体は元々「ユーザーが1人も居ない場合のみ」到達する初回セットアップ専用の画面であり、
- * 本Issueのスコープ(ログイン/サインアップ/パスワードリセット/2FA画面)には含まれないため、
- * 応急的に自動ログイン部分だけを外して「作成後はログイン画面へ」の案内に変更する
- * (Keycloak連携した初回セットアップ動線の整備は別Issueで扱う。詳細はPR説明を参照)。
+ * issue #564でCredentialsプロバイダを廃止したため、このフォームは自動ログイン(signIn("keycloak")の
+ * 即時呼び出し)を行わず、「作成後はログイン画面へ」の案内にとどめる。issue #681でlegacy-apiの
+ * /api/auth/setupをKeycloak Admin REST API経由の実装に置き換えたため、ここで作成される管理者
+ * アカウントは実際にKeycloak側にも作成され、指定したメールアドレス・パスワードでログイン画面から
+ * すぐにログイン可能になる。
  */
 export function SetupForm() {
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +37,7 @@ export function SetupForm() {
       <div className="space-y-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 text-sm">
         <p className="text-green-600">管理者アカウントを作成しました。</p>
         <p className="text-neutral-600 dark:text-neutral-400">
-          ログインするには別途Keycloakへのアカウント登録が必要です。管理者にお問い合わせください。
+          入力したメールアドレスとパスワードでログイン画面からログインできます。
         </p>
       </div>
     );

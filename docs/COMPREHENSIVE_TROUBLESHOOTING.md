@@ -586,27 +586,43 @@ Invalid email or password
 
 3. **Reset a locked-out user's password (safe, preferred)**
 
-   If the email-based self-service reset (`/login/forgot-password`) isn't usable
-   (e.g. SMTP isn't configured, or the mailbox is inaccessible), reset just that
-   user's password without touching any other data:
+   Login is fully migrated to Keycloak; the local `users.password_hash` column
+   is no longer consulted at login time. Resetting it alone does **not**
+   restore access. Use the emergency reset script instead, which calls the
+   **Keycloak Admin REST API** to set the user's password immediately
+   (`temporary=false`, no forced change on next login):
 
    ```bash
    ./scripts/reset-admin-password.sh <email> <new-password>
    ```
 
-   This runs inside the `api` container and reuses the application's own
-   `UserService`/`BCryptPasswordEncoder`, so the password hash is generated the
-   same way the app generates it at signup — no manual SQL/hash editing needed.
-   The target user must already exist; other users/data are untouched.
+   This runs inside the `api` container with the `admin-password-reset`
+   Spring profile (`AdminPasswordResetRunner`), which:
+   - looks up the target user's Keycloak account (by the locally-stored
+     `keycloak_sub`, or by email if not yet linked),
+   - sets the new password on that Keycloak account via the Admin API,
+   - and only then updates the local `password_hash` column for consistency.
+
+   **The target user must already exist in Keycloak.** If it does not
+   (e.g. it was never migrated to Keycloak), the command fails with a clear
+   error instead of silently touching only the local database — you'll need
+   to create the Keycloak account first (see identity-service's
+   `/api/users/migrate-to-keycloak`, or `/api/auth/setup` if this is the very
+   first admin account).
 
 4. **Reset via direct database access (destructive, last resort)**
    ```bash
    # Only if the above script can't be used (e.g. no known user to target).
-   # This wipes ALL users, not just one.
+   # This wipes ALL LOCAL users, not just one. Note: it does NOT remove any
+   # accounts already created in Keycloak, so if Keycloak already has a user,
+   # /api/auth/setup below will be rejected until that Keycloak-side account
+   # is also removed.
    docker compose exec mysql mysql -uroot -p$MYSQL_ROOT_PASSWORD \
      -D lets_blog -e "TRUNCATE users;" 2>/dev/null
    
-   # Then visit /setup to create new admin
+   # Then visit /setup to create a new admin. /api/auth/setup now creates the
+   # admin account directly in Keycloak too (issue #681), so it is immediately
+   # usable via the Keycloak login screen.
    ```
 
 ---

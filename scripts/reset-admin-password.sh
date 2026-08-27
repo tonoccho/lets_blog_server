@@ -3,7 +3,11 @@
 # 対象ユーザーのパスワードだけを安全にリセットする運用スクリプト。
 # 実行中のapiコンテナ内で一時的な別プロセスとしてSpring Bootアプリを起動し
 # (admin-password-resetプロファイルによりWebサーバーは起動しない)、
-# 既存のUserService/BCryptPasswordEncoderを使ってパスワードハッシュを更新するため、
+# AdminPasswordResetRunner経由でKeycloak Admin REST APIを呼び出し、対象ユーザーのKeycloak側
+# パスワードを即時変更する(temporary=false、次回ログイン時の強制変更なし。issue #681)。
+# ログインはKeycloakへ一本化されているため、ローカルDBのpassword_hashのみを更新しても
+# 実際にはログインできない(#564由来のギャップ)。対象ユーザーがKeycloak上に存在しない場合は
+# エラーで終了し、DBのみを操作して成功したように見せることはない。
 # 手動でのSQL操作や全ユーザー削除(TRUNCATE)は不要。
 #
 # 使い方: ./scripts/reset-admin-password.sh <email> <new-password>

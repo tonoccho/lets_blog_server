@@ -71,6 +71,10 @@ services:
       SPRING_DATASOURCE_USERNAME: ${MYSQL_USER}
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
+      # 初回セットアップ(/api/auth/setup)・緊急復旧(AdminPasswordResetRunner)がKeycloak Admin REST
+      # API経由の実装になった(#681)ため、identity-serviceと同じletsblog-servicesクライアントの
+      # シークレットが必要(他の値は既定値で足りるためservices/legacy-api/.../application.ymlに委ねる)。
+      KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
       MAIL_HOST: ${MAIL_HOST}
       MAIL_PORT: ${MAIL_PORT:-587}
       MAIL_USERNAME: ${MAIL_USERNAME}
