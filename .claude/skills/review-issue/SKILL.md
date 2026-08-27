@@ -78,6 +78,10 @@ Are the tests sufficient?
 
 Did implementation exceed the Issue?
 
+### Unrelated findings
+
+Any pre-existing problem noticed that is unrelated to this Issue. File it as a new Issue in `Inbox` immediately, without asking the user first.
+
 ---
 
 ## Step 4: Classify result
@@ -153,6 +157,12 @@ List findings with severity:
 ### Acceptance Criteria
 
 PASS / FAIL / UNCERTAIN
+
+### Unrelated Issues Filed
+
+New Issue numbers created in `Inbox` for unrelated problems noticed during review. If none:
+
+`None`
 
 ### Status Change
 

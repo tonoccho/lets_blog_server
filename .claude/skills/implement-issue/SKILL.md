@@ -178,6 +178,12 @@ Commands executed and results.
 
 PASS / FAIL / NOT VERIFIED.
 
+### Unrelated Issues Filed
+
+Any new Issue numbers created in `Inbox` for unrelated problems discovered during implementation. If none:
+
+`None`
+
 ### Next Step
 
 Usually:
@@ -196,4 +202,4 @@ Never silently change requirements.
 
 Never fix unrelated problems discovered during implementation.
 
-If unrelated problems are discovered, recommend separate Issues.
+If unrelated problems are discovered, immediately create a separate Issue in `Inbox` for each (using the `plan-issue` template) — do not ask the user for judgment on whether to file it. Report the new Issue number(s) in the final output.

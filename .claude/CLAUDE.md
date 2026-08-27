@@ -155,12 +155,14 @@ If a problem outside the issue is discovered:
 
 Do not silently fix it.
 
-Instead report:
+Do not wait for the user's judgment on whether it is worth filing.
+
+Immediately create a new GitHub Issue for it in `Inbox`, using the `project-planner` Issue template (Title, Background, Problem, Goal, Requirements, Acceptance Criteria, Scope, Out of Scope, Dependencies). Then report:
 
 - What was discovered
 - Why it matters
 - Whether it blocks the current issue
-- A recommended separate issue
+- The new Issue number created for it
 
 ---
 

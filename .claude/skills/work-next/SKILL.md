@@ -234,6 +234,12 @@ Ready
 → Pull Request opened (awaiting merge)
 ```
 
+## Unrelated Issues Filed
+
+Aggregate any new Issue numbers reported by `implement-issue`, `review-issue`, or `qa-issue` for unrelated problems discovered along the way. If none:
+
+`None`
+
 ## Next Step
 
 Tell the user: once the Pull Request is merged, say so (e.g. "PRをマージしました") to trigger `complete-issue`, which moves the Issue to `Done` and deletes the working branch locally and remotely.

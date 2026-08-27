@@ -148,6 +148,12 @@ Explain the evidence.
 
 Describe relevant existing behavior checked.
 
+## Unrelated Findings
+
+If a problem unrelated to this Issue's acceptance criteria is noticed while testing, do not merely mention it in passing. Create a new GitHub Issue for it in `Inbox` immediately — do not wait for the user's judgment on whether it is worth filing — and list the new Issue number here. If none:
+
+`None`
+
 ## Limitations
 
 Describe anything that could not be tested.

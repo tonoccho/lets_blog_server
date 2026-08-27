@@ -189,6 +189,12 @@ Explain why.
 
 State whether unrelated scope expansion occurred.
 
+## Unrelated Findings
+
+If a pre-existing problem unrelated to this Issue is noticed while reviewing (not something the implementation introduced), do not merely mention it in passing. Create a new GitHub Issue for it in `Inbox` immediately — do not wait for the user's judgment on whether it is worth filing — and list the new Issue number here. If none:
+
+`None`
+
 ## Validation Review
 
 State what evidence was found.

@@ -132,10 +132,13 @@ If a blocking problem is discovered:
 
 Stop.
 
+Immediately create a new GitHub Issue in `Inbox` describing the problem — do not wait for user judgment on whether it is worth filing.
+
 Report:
 
 - The problem
 - Why it blocks implementation
+- The new Issue number created for it
 - Possible options
 - Your recommendation
 

@@ -153,6 +153,12 @@ List tested scenarios.
 
 PASS / FAIL / NOT VERIFIED
 
+### Unrelated Issues Filed
+
+New Issue numbers created in `Inbox` for unrelated problems noticed during QA. If none:
+
+`None`
+
 ### Evidence
 
 Explain how the result was established.
