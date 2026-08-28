@@ -126,10 +126,15 @@ Phase 19の各抽出Issueが暫定策として実装していた「呼び出し�
 | 呼び出し元 | エンドポイント | プロファイル | リトライ | サーキットブレーカー | フォールバック | 移行 |
 |---|---|---|---|---|---|---|
 | log-writer(`GenerationJobClient`) | `GET /api/generation-jobs` | SHORT(5秒) | あり(GET) | あり(`legacy-api`) | 明確なエラー(502) | 済 |
-| media(`CmsBridgeClient`) | `POST /api/internal/cms/sites/{site}/media`(multipart)・`GET .../media-scan`・`DELETE .../media/{id}` | RENDER(30秒、大きめのメディア転送のため) | GETのみ | あり(`legacy-api`) | 明確なエラー(CMS操作の成否を呼び出し元へ確実に伝える必要があるため) | 済 |
 | content(`LegacyApiBridgeClient`) | `/api/internal/content/**`(プロジェクトメンバー判定・ロール一覧・タグデザイン・site解決等) | (未移行、既存は10秒) | - | - | (未整理、現状は明確なエラー) | 未 |
 | ai(`LegacyApiBridgeClient`) | `/api/internal/ai/**`(GitHubアクセス・既存カテゴリ/タグ・プロジェクトメンバー判定・LLM設定等) | (未移行、既存は10秒) | - | - | (未整理) | 未 |
 | analytics(`LegacyApiBridgeClient`) | `/api/internal/analytics/**`(本番サイト有無・プロジェクトメンバー判定) | (未移行、既存は10秒) | - | - | (未整理) | 未 |
+
+### publishing-service向け
+
+| 呼び出し元 | エンドポイント | プロファイル | リトライ | サーキットブレーカー | フォールバック | 移行 |
+|---|---|---|---|---|---|---|
+| media(`CmsBridgeClient`) | `POST /api/internal/cms/sites/{site}/media`(multipart)・`GET .../media-scan`・`DELETE .../media/{id}` | RENDER(30秒、大きめのメディア転送のため) | GETのみ | あり(`publishing-service`) | 明確なエラー(CMS操作の成否を呼び出し元へ確実に伝える必要があるため) | 済(issue #709でlegacy-apiからpublishing-serviceへ呼び出し先を切り替え、C12対応は維持) |
 
 ### media-service向け
 

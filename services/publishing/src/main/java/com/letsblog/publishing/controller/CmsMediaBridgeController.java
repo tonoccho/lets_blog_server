@@ -1,15 +1,15 @@
-package com.letsblog.api.controller;
+package com.letsblog.publishing.controller;
 
-import com.letsblog.api.cms.CmsAdapter;
-import com.letsblog.api.cms.CmsAdapterFactory;
-import com.letsblog.api.cms.CmsApiException;
-import com.letsblog.api.cms.CmsCredentials;
-import com.letsblog.api.cms.MediaUploadResult;
-import com.letsblog.api.domain.Project;
-import com.letsblog.api.domain.Site;
-import com.letsblog.api.dto.MediaGcScanBridgeResponse;
-import com.letsblog.api.service.ProjectService;
-import com.letsblog.api.service.SiteService;
+import com.letsblog.publishing.cms.CmsAdapter;
+import com.letsblog.publishing.cms.CmsAdapterFactory;
+import com.letsblog.publishing.cms.CmsApiException;
+import com.letsblog.publishing.cms.CmsCredentials;
+import com.letsblog.publishing.cms.MediaUploadResult;
+import com.letsblog.publishing.domain.Project;
+import com.letsblog.publishing.domain.Site;
+import com.letsblog.publishing.dto.MediaGcScanBridgeResponse;
+import com.letsblog.publishing.service.ProjectService;
+import com.letsblog.publishing.service.SiteService;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -24,21 +24,21 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 
 /**
- * media-service向けの内部CMSブリッジ(issue #573 stage3)。CMS(現状WordPressのみ)への実際の
- * 接続情報({@link CmsCredentials}、SSH鍵等の秘匿情報を含む)は{@link SiteService}が復号して
- * 保持したままlegacy-apiの外へは一切出さず、media-serviceからは「このsite/projectに対して
- * アップロード/一覧取得/削除を実行してほしい」という操作の依頼のみを受け取り、legacy-api側で
+ * media-service向けの内部CMSブリッジ(issue #573 stage3で新設、issue #709でlegacy-apiから
+ * publishing-serviceへ移管、Epic #551 C6-3)。CMS(現状WordPressのみ)への実際の接続情報
+ * ({@link CmsCredentials}、SSH鍵等の秘匿情報を含む)は{@link SiteService}が復号して保持したまま
+ * publishing-serviceの外へは一切出さず、media-serviceからは「このsite/projectに対して
+ * アップロード/一覧取得/削除を実行してほしい」という操作の依頼のみを受け取り、ここで
  * {@link CmsAdapter}を解決して実行する。
  *
- * <p>元々{@link com.letsblog.api.controller.MediaController}/
- * {@link com.letsblog.api.service.MediaGarbageCollectionService}が持っていたのと同じロジックを
- * ここへ引き継いだ。認可は、media-service側で既にrequireAdmin等のチェックを済ませたリクエストの
- * Bearerトークンをそのまま転送してもらう想定で、ここでは追加の認可チェックは行わない
- * (元のMediaController.uploadも認可チェックなしだった。AUTHORIZATION_MATRIX.md参照)。
+ * <p>認可は、media-service側で既にrequireAdmin等のチェックを済ませたリクエストのBearerトークンを
+ * そのまま転送してもらう想定で、ここでは追加の認可チェックは行わない(移管元のlegacy-api版と同じ、
+ * AUTHORIZATION_MATRIX.md参照)。パスは移管元と同じ{@code /api/internal/cms/**}のまま維持する
+ * (media-serviceの{@code CmsBridgeClient}呼び出し契約を変更しないため)。
  *
- * <p>{@code Project}/{@code Site}本体の所有権はproject-serviceへ移った(issue #577 stage2)。
+ * <p>{@code Project}/{@code Site}本体の所有権はproject-serviceにある(issue #577 stage2)。
  * {@link ProjectService}/{@link SiteService}がproject-serviceへの内部ブリッジ経由でプロジェクト/
- * サイトの基本情報を取得する(issue #577 stage3。ローカルJPAエンティティへの直接アクセスは廃止した)。
+ * サイトの基本情報を取得する(issue #708でpublishing-serviceへ移設済み)。
  */
 @RestController
 public class CmsMediaBridgeController {

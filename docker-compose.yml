@@ -167,10 +167,11 @@ services:
       PENPOT_SERVICE_EMAIL: ${PENPOT_SERVICE_EMAIL:-lbs-service@letsblog.local}
       PENPOT_SERVICE_PASSWORD: ${PENPOT_SERVICE_PASSWORD}
       GENERATED_IMAGES_STORAGE_PATH: /app/data/generated-images
-      # メディアガベージコレクションのCMSブリッジ(CmsMediaBridgeController、legacy-apiが所有)の
-      # 呼び出し先(#573 stage3)。起動時の依存関係(depends_on)には含めない(apiがmediaのhealthyを
-      # 待つため、循環させないよう実行時呼び出し先としてのみ設定する)。
-      LEGACY_API_URI: http://api:8080
+      # メディアガベージコレクションのCMSブリッジ(CmsMediaBridgeController)の呼び出し先。
+      # #573 stage3ではlegacy-apiが所有していたが、issue #709でpublishing-serviceへ移管された
+      # (Epic #551 C6-3)。起動時の依存関係(depends_on)には含めない(publishingがmediaのhealthyを
+      # 待つ構成にはしていないため、循環させないよう実行時呼び出し先としてのみ設定する)。
+      PUBLISHING_SERVICE_URI: http://publishing:8080
       # ComfyUIチェックポイントのダウンロード/削除ジョブ(GenerationJob、ai-serviceが所有)の
       # 進捗反映先。#573 stage2ではlegacy-apiが所有していたため上のLEGACY_API_URIを共用していたが、
       # issue #574でgeneration_jobsの所有権がai-serviceへ移ったため、GenerationJobClientの向き先を
