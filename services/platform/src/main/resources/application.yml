@@ -97,3 +97,30 @@ keycloak:
     admin-base-uri: ${KEYCLOAK_ADMIN_BASE_URI:http://keycloak:8080/auth/admin/realms/letsblog}
     client-id: ${KEYCLOAK_SERVICES_CLIENT_ID:letsblog-services}
     client-secret: ${KEYCLOAK_SERVICES_CLIENT_SECRET:}
+
+---
+# admin-password-resetプロファイル専用設定(issue #697)。AdminPasswordResetRunnerは
+# @Profile("admin-password-reset")によりコンポーネント自体は有効化されるが、それだけでは
+# Webサーバーの起動有無は制御されない(server.port: 8080は上のデフォルト設定のまま固定される)。
+# 稼働中のplatformコンテナ(既に8080を使用中)に対してこのプロファイルで追加起動すると、
+# ポート競合(Web server failed to start. Port 8080 was already in use.)で失敗する
+# (#693で新規に混入したものではなく、legacy-api版から同一構造で存在していたバグ)。
+#
+# spring.main.web-application-type: none(Webサーバー自体を起動しない)は、当初この用途に最小の
+# 変更として検討したが、AuditLogAspect(@Aspect @Component、issue #693で移設した@AuditLog
+# ADVICEの実装)がリクエストスコープのCurrentActorService(HttpServletRequestに依存)を
+# コンストラクタ注入しており、web application context自体が無いとこの依存を解決できずアプリ
+# 起動そのものが失敗する(#697のQAで確認)。AdminPasswordResetRunnerは@AuditLogを使わないが、
+# AuditLogAspectはコンポーネントスキャンで無条件にBean化されるため、web-application-typeでは
+# 対応できない。
+#
+# 代わりにserver.port: 0(OSに空いているポートを動的に割り当てる)を使う。Webサーバー自体は
+# 引き続き起動する(HttpServletRequestのBeanスコープは維持される)が、稼働中コンテナのポート8080とは
+# 衝突しない。QAで動作確認済み(issue #697のコメント参照)。
+spring:
+  config:
+    activate:
+      on-profile: admin-password-reset
+
+server:
+  port: 0

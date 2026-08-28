@@ -18,6 +18,17 @@ import org.springframework.stereotype.Component;
  * legacy-apiから移設(issue #693)。使い方は scripts/reset-admin-password.sh 及び
  * docs/COMPREHENSIVE_TROUBLESHOOTING.md を参照。
  *
+ * <p>issue #697: {@code @Profile("admin-password-reset")}はこのコンポーネント自体の有効化条件に
+ * 過ぎず、Webサーバーの起動有無は制御しない。稼働中のplatformコンテナ(既にポート8080を使用中)へ
+ * 追加のプロセスとしてこのプロファイルで起動すると、application.ymlの{@code server.port: 8080}が
+ * プロファイルに関わらず固定のままだとポート競合({@code Web server failed to start. Port 8080
+ * was already in use.})で失敗する。application.ymlの{@code admin-password-reset}プロファイル専用
+ * セクションで{@code server.port: 0}(OSが空いているポートを動的に割り当てる)を指定し、この競合を
+ * 回避している({@code spring.main.web-application-type: none}でWebサーバー自体を止める案も検討したが、
+ * AuditLogAspect(コンポーネントスキャンで無条件にBean化される)がリクエストスコープの
+ * CurrentActorServiceに依存しており、web application contextが無いとBean生成自体に失敗するため
+ * 採用しなかった)。
+ *
  * <p>issue #681: ログインはKeycloakへ一本化されているため、Keycloak Admin REST API
  * ({@link KeycloakAdminClient})を直接呼び出し、Keycloak上のパスワードを即時変更する
  * (temporary=false)。対象ユーザーがKeycloak上に存在しない場合はエラー終了し(exit code 1)、
