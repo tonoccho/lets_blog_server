@@ -71,6 +71,18 @@ class ComfyUiClientTest {
                         "letsblog_00001_.png", "", "output"))
                 .andExpect(method(GET))
                 .andRespond(withSuccess(new byte[] {1, 2, 3}, MediaType.IMAGE_PNG));
+
+        expectClearMemory();
+    }
+
+    /**
+     * generateImage()は画像取得後にComfyUIのVRAMを解放するため、必ずPOST /api/interruptを1回発行する
+     * (issue #703参照 / VRAMメモリリーク対策コミット0b476c75で追加された挙動)。
+     */
+    private void expectClearMemory() {
+        server.expect(requestTo(BASE_URL + "/api/interrupt"))
+                .andExpect(method(POST))
+                .andRespond(withSuccess());
     }
 
     @Test
@@ -107,6 +119,7 @@ class ComfyUiClientTest {
                     .andExpect(method(GET))
                     .andRespond(withSuccess(new byte[] {(byte) i}, MediaType.IMAGE_PNG));
         }
+        expectClearMemory();
 
         ComfyUiGenerationParams params = new ComfyUiGenerationParams(
                 "a cat", "bad", 20, 7.0, "euler", "normal", null, 512, 512, 4, null, null, null);
@@ -152,6 +165,7 @@ class ComfyUiClientTest {
         server.expect(requestToUriTemplate(BASE_URL + "/view?filename={filename}&subfolder={subfolder}&type={type}",
                         "letsblog_00002_.png", "", "output"))
                 .andRespond(withSuccess(new byte[] {1}, MediaType.IMAGE_PNG));
+        expectClearMemory();
 
         client.generateImage(params);
 
@@ -173,6 +187,7 @@ class ComfyUiClientTest {
         server.expect(requestToUriTemplate(BASE_URL + "/view?filename={filename}&subfolder={subfolder}&type={type}",
                         "out.png", "", "output"))
                 .andRespond(withSuccess(new byte[] {1}, MediaType.IMAGE_PNG));
+        expectClearMemory();
 
         ComfyUiGenerationParams params = new ComfyUiGenerationParams(
                 "a cat", "bad", 20, 7.0, "euler", "normal", null, 512, 512, 1,
@@ -195,6 +210,7 @@ class ComfyUiClientTest {
         server.expect(requestToUriTemplate(BASE_URL + "/view?filename={filename}&subfolder={subfolder}&type={type}",
                         "out.png", "", "output"))
                 .andRespond(withSuccess(new byte[] {1}, MediaType.IMAGE_PNG));
+        expectClearMemory();
 
         client.generateImage(ComfyUiGenerationParams.withDefaults("a cat"));
 
@@ -214,6 +230,7 @@ class ComfyUiClientTest {
         server.expect(requestToUriTemplate(BASE_URL + "/view?filename={filename}&subfolder={subfolder}&type={type}",
                         "out.png", "", "output"))
                 .andRespond(withSuccess(new byte[] {1}, MediaType.IMAGE_PNG));
+        expectClearMemory();
 
         ComfyUiGenerationParams params = new ComfyUiGenerationParams(
                 "a cat", "bad", 20, 7.0, "euler", "normal", -1L, 512, 512, 1, null, null, null);
