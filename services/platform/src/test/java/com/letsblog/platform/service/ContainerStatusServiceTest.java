@@ -1,7 +1,7 @@
-package com.letsblog.api.service;
+package com.letsblog.platform.service;
 
-import com.letsblog.api.dto.ConnectedServiceStatusResponse.Status;
-import com.letsblog.api.dto.ContainerStatusResponse;
+import com.letsblog.platform.dto.ConnectedServiceStatusResponse.Status;
+import com.letsblog.platform.dto.ContainerStatusResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -17,9 +17,10 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /**
- * ContainerStatusServiceの回帰テスト(issue #280)。docker-socket-proxy(Docker Engine API互換)の
- * GET /containers/json レスポンスから、lbs-プレフィックスのコンテナのみを抽出し、
- * State/Statusから正常/警告/エラーを判定できることを検証する。
+ * legacy-apiから移設(issue #695、C10-3)。ContainerStatusServiceの回帰テスト(元は issue #280)。
+ * docker-socket-proxy(Docker Engine API互換)のGET /containers/json レスポンスから、
+ * lbs-プレフィックスのコンテナのみを抽出し、State/Statusから正常/警告/エラーを判定できることを
+ * 検証する。
  */
 class ContainerStatusServiceTest {
 

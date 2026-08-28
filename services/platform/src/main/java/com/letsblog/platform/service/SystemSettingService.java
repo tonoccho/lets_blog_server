@@ -83,11 +83,16 @@ public class SystemSettingService {
     }
 
     /**
-     * {@link #getBraveSearchApiKeyStatus()}と同じ値を、認可チェック無しで返す。サービス間の内部呼び出し
-     * (認証コンテキストを持たない、issue #693のレビュー指摘)専用。呼び出し元が
-     * {@link com.letsblog.platform.controller.InternalPlatformSettingsController}経由(本サービスの
-     * SecurityConfigが全経路permitAllのため到達可能)であることを前提とし、ユーザー向けControllerからは
-     * 呼ばないこと。
+     * {@link #getBraveSearchApiKeyStatus()}と同じ値を、認可チェック無しで返す。認証コンテキストを
+     * 持たない内部呼び出し専用(issue #693のレビュー指摘)。{@link ConnectedServiceStatusService}
+     * (issue #695、C10-3でlegacy-apiから本サービスへ移設)の定期疎通チェックが同一プロセス内から
+     * 呼ぶ。ユーザー向けControllerからは呼ばないこと。
+     *
+     * <p>移設前(#693〜#695の間)は、legacy-apiに残っていたConnectedServiceStatusServiceが
+     * PlatformServiceClient経由のHTTPブリッジ({@code InternalPlatformSettingsController}の
+     * {@code /api/internal/platform/system-settings/brave-search-api-key-status})を介して
+     * このメソッドを呼んでいたが、#695でConnectedServiceStatusService自体が本サービスへ移設された
+     * ことで不要になり、当該ブリッジエンドポイントは撤去した。
      */
     @Transactional(readOnly = true)
     public BraveSearchApiKeyStatus getBraveSearchApiKeyStatusInternal() {

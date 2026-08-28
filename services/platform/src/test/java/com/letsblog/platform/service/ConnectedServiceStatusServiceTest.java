@@ -1,10 +1,11 @@
-package com.letsblog.api.service;
+package com.letsblog.platform.service;
 
-import com.letsblog.api.client.PlatformServiceClient;
-import com.letsblog.api.dto.ConnectedServiceStatusDetailResponse;
-import com.letsblog.api.dto.ConnectedServiceStatusResponse;
-import com.letsblog.api.dto.ConnectedServiceStatusResponse.Status;
-import com.letsblog.api.render.PlantUmlEncoder;
+import com.letsblog.platform.dto.ConnectedServiceStatusDetailResponse;
+import com.letsblog.platform.dto.ConnectedServiceStatusResponse;
+import com.letsblog.platform.dto.ConnectedServiceStatusResponse.Status;
+import com.letsblog.platform.render.PlantUmlEncoder;
+import com.letsblog.platform.service.SystemSettingService.BraveSearchApiKeyStatus;
+import com.letsblog.platform.service.SystemSettingService.SettingSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -32,10 +33,14 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /**
- * ConnectedServiceStatusServiceの回帰テスト(issue #181, #197)。DB疎通確認と、外部連携3サービスへの
- * 専用ヘルスチェックエンドポイントでの到達確認(正常/5xx/接続不可)、LLM/Brave Search APIキー設定有無の
- * 判定を検証する。LLM(issue #376で外部ホスト型APIに置き換え)は、Brave Searchと同様にAPIキーが
- * 設定されているかどうかを稼働状況の代わりとして扱う。
+ * legacy-apiから移設(issue #695、C10-3)。ConnectedServiceStatusServiceの回帰テスト
+ * (元は issue #181, #197)。DB疎通確認と、外部連携3サービスへの専用ヘルスチェックエンドポイントでの
+ * 到達確認(正常/5xx/接続不可)、LLM/Brave Search APIキー設定有無の判定を検証する。
+ * LLM(issue #376で外部ホスト型APIに置き換え)は、Brave Searchと同様にAPIキーが設定されているか
+ * どうかを稼働状況の代わりとして扱う。
+ *
+ * <p>移設に伴い、Brave Search APIキー設定有無の問い合わせ先はPlatformServiceClient(サービス間HTTP
+ * ブリッジ)から、同一プロセス内の{@link SystemSettingService}へ変わった(クラスJavadoc参照)。
  */
 @ExtendWith(MockitoExtension.class)
 class ConnectedServiceStatusServiceTest {
@@ -50,7 +55,7 @@ class ConnectedServiceStatusServiceTest {
     @Mock
     private DataSource dataSource;
     @Mock
-    private PlatformServiceClient platformServiceClient;
+    private SystemSettingService systemSettingService;
     @Mock
     private Connection connection;
 
@@ -78,7 +83,7 @@ class ConnectedServiceStatusServiceTest {
                 plantUmlBuilder, PLANTUML_URL,
                 wordpressBuilder, WORDPRESS_URL,
                 penpotBuilder, PENPOT_URL,
-                platformServiceClient);
+                systemSettingService);
     }
 
     @BeforeEach
@@ -94,12 +99,17 @@ class ConnectedServiceStatusServiceTest {
         penpotServer.expect(requestTo(PENPOT_URL + "/readyz")).andRespond(withSuccess());
     }
 
+    private void mockBraveSearchConfigured(boolean configured) {
+        when(systemSettingService.getBraveSearchApiKeyStatusInternal()).thenReturn(
+                new BraveSearchApiKeyStatus(configured, configured ? SettingSource.DATABASE : SettingSource.NONE));
+    }
+
     @Test
     void checkAll_全サービスが正常に応答すればNORMALを返す() throws SQLException {
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.isValid(3)).thenReturn(true);
         respondSuccessToAll();
-        when(platformServiceClient.isBraveSearchApiKeyConfigured()).thenReturn(true);
+        mockBraveSearchConfigured(true);
 
         List<ConnectedServiceStatusResponse> statuses = service.checkAll();
 
@@ -117,7 +127,7 @@ class ConnectedServiceStatusServiceTest {
     void checkAll_DB接続でSQLExceptionが発生すればERRORを返す() throws SQLException {
         when(dataSource.getConnection()).thenThrow(new SQLException("connection refused"));
         respondSuccessToAll();
-        when(platformServiceClient.isBraveSearchApiKeyConfigured()).thenReturn(true);
+        mockBraveSearchConfigured(true);
 
         List<ConnectedServiceStatusResponse> statuses = service.checkAll();
 
@@ -130,7 +140,7 @@ class ConnectedServiceStatusServiceTest {
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.isValid(3)).thenReturn(true);
         respondSuccessToAll();
-        when(platformServiceClient.isBraveSearchApiKeyConfigured()).thenReturn(true);
+        mockBraveSearchConfigured(true);
 
         List<ConnectedServiceStatusResponse> statuses = service.checkAll();
 
@@ -148,7 +158,7 @@ class ConnectedServiceStatusServiceTest {
                 .andRespond(withSuccess(new byte[]{1, 2, 3}, MediaType.IMAGE_PNG));
         wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
         penpotServer.expect(requestTo(PENPOT_URL + "/readyz")).andRespond(withSuccess());
-        when(platformServiceClient.isBraveSearchApiKeyConfigured()).thenReturn(true);
+        mockBraveSearchConfigured(true);
 
         List<ConnectedServiceStatusResponse> statuses = service.checkAll();
 
@@ -164,7 +174,7 @@ class ConnectedServiceStatusServiceTest {
                 .andRespond(withSuccess(new byte[]{1, 2, 3}, MediaType.IMAGE_PNG));
         wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
         penpotServer.expect(requestTo(PENPOT_URL + "/readyz")).andRespond(withSuccess());
-        when(platformServiceClient.isBraveSearchApiKeyConfigured()).thenReturn(true);
+        mockBraveSearchConfigured(true);
 
         List<ConnectedServiceStatusResponse> statuses = service.checkAll();
 
@@ -180,7 +190,7 @@ class ConnectedServiceStatusServiceTest {
                 .andRespond(withSuccess(new byte[]{1, 2, 3}, MediaType.IMAGE_PNG));
         wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
         penpotServer.expect(requestTo(PENPOT_URL + "/readyz")).andRespond(withSuccess());
-        when(platformServiceClient.isBraveSearchApiKeyConfigured()).thenReturn(true);
+        mockBraveSearchConfigured(true);
 
         List<ConnectedServiceStatusResponse> statuses = service.checkAll();
 
@@ -196,7 +206,7 @@ class ConnectedServiceStatusServiceTest {
                 .andRespond(withSuccess(new byte[0], MediaType.IMAGE_PNG));
         wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
         penpotServer.expect(requestTo(PENPOT_URL + "/readyz")).andRespond(withSuccess());
-        when(platformServiceClient.isBraveSearchApiKeyConfigured()).thenReturn(true);
+        mockBraveSearchConfigured(true);
 
         List<ConnectedServiceStatusResponse> statuses = service.checkAll();
 
@@ -214,7 +224,7 @@ class ConnectedServiceStatusServiceTest {
         penpotServer.expect(requestTo(PENPOT_URL + "/readyz")).andRespond(request -> {
             throw new java.io.IOException("connection refused");
         });
-        when(platformServiceClient.isBraveSearchApiKeyConfigured()).thenReturn(true);
+        mockBraveSearchConfigured(true);
 
         List<ConnectedServiceStatusResponse> statuses = service.checkAll();
 
@@ -226,7 +236,7 @@ class ConnectedServiceStatusServiceTest {
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.isValid(3)).thenReturn(true);
         respondSuccessToAll();
-        when(platformServiceClient.isBraveSearchApiKeyConfigured()).thenReturn(false);
+        mockBraveSearchConfigured(false);
 
         List<ConnectedServiceStatusResponse> statuses = service.checkAll();
 
@@ -238,7 +248,7 @@ class ConnectedServiceStatusServiceTest {
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.isValid(3)).thenReturn(true);
         respondSuccessToAll();
-        when(platformServiceClient.isBraveSearchApiKeyConfigured()).thenReturn(true);
+        mockBraveSearchConfigured(true);
 
         List<ConnectedServiceStatusDetailResponse> details = service.checkAllDetailed();
 
@@ -266,7 +276,7 @@ class ConnectedServiceStatusServiceTest {
                 .andRespond(withSuccess(new byte[]{1, 2, 3}, MediaType.IMAGE_PNG));
         wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
         penpotServer.expect(requestTo(PENPOT_URL + "/readyz")).andRespond(withSuccess());
-        when(platformServiceClient.isBraveSearchApiKeyConfigured()).thenReturn(true);
+        mockBraveSearchConfigured(true);
 
         List<ConnectedServiceStatusDetailResponse> details = service.checkAllDetailed();
 

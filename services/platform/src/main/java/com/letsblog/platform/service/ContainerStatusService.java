@@ -1,14 +1,15 @@
-package com.letsblog.api.service;
+package com.letsblog.platform.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.letsblog.api.config.LegacyJacksonRestClientConfig;
-import com.letsblog.api.dto.ConnectedServiceStatusResponse.Status;
-import com.letsblog.api.dto.ContainerStatusResponse;
+import com.letsblog.platform.dto.ConnectedServiceStatusResponse.Status;
+import com.letsblog.platform.dto.ContainerStatusResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.http.converter.AbstractJacksonHttpMessageConverter;
+import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -20,10 +21,13 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * ダッシュボードに表示する、このアプリ自体を構成するDockerコンテナ(container_name: lbs-*)の
- * 稼働状況を取得する(issue #280)。apiコンテナ自身はDockerデーモンへ直接アクセスできない
- * (docker.sockは意図的に未マウント)ため、読み取り専用のtecnativa/docker-socket-proxyを
- * 経由してDocker Engine API(GET /containers/json)を呼び出す。
+ * legacy-apiから移設(issue #695、C10-3、元は issue #280)。ダッシュボードに表示する、このアプリ自体を
+ * 構成するDockerコンテナ(container_name: lbs-*)の稼働状況を取得する。platformコンテナ自身は
+ * Dockerデーモンへ直接アクセスできない(docker.sockは意図的に未マウント)ため、読み取り専用の
+ * tecnativa/docker-socket-proxyを経由してDocker Engine API(GET /containers/json)を呼び出す。
+ *
+ * <p>docker-socket-proxyへのアクセスは本サービス(platform-service)のみに限定する(Epic #551の方針。
+ * 移設前はlegacy-apiがこの特権を保持していた)。
  */
 @Service
 public class ContainerStatusService {
@@ -41,7 +45,7 @@ public class ContainerStatusService {
 
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
     ContainerStatusService(RestClient.Builder builder) {
-        LegacyJacksonRestClientConfig.preferJackson2(builder);
+        preferJackson2(builder);
         this.dockerClient = builder.build();
     }
 
@@ -50,6 +54,18 @@ public class ContainerStatusService {
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(TIMEOUT);
         return RestClient.builder().baseUrl(baseUrl).requestFactory(requestFactory);
+    }
+
+    /**
+     * Boot 4ではRestClientの既定JSONコンバータがJackson3(tools.jackson)になったが、本クラスは
+     * com.fasterxml.jackson.databind.JsonNode(Jackson2)でレスポンスを組み立てている
+     * (KeycloakAdminClientと同じ理由)。
+     */
+    private static void preferJackson2(RestClient.Builder builder) {
+        builder.messageConverters(converters -> {
+            converters.removeIf(AbstractJacksonHttpMessageConverter.class::isInstance);
+            converters.add(0, new MappingJackson2HttpMessageConverter());
+        });
     }
 
     /**

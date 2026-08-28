@@ -1,7 +1,7 @@
-package com.letsblog.api.service;
+package com.letsblog.platform.service;
 
-import com.letsblog.api.dto.ConnectedServiceStatusResponse.Status;
-import com.letsblog.api.dto.ContainerStatusResponse;
+import com.letsblog.platform.dto.ConnectedServiceStatusResponse.Status;
+import com.letsblog.platform.dto.ContainerStatusResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -16,8 +16,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * ContainerStatusBroadcasterの回帰テスト(issue #280)。ConnectedServiceStatusBroadcasterTestと
- * 同じhubパターンを検証する。
+ * legacy-apiから移設(issue #695、C10-3)。ContainerStatusBroadcasterの回帰テスト(元は issue #280)。
+ * ConnectedServiceStatusBroadcasterTestと同じhubパターンを検証する。
  */
 @ExtendWith(MockitoExtension.class)
 class ContainerStatusBroadcasterTest {

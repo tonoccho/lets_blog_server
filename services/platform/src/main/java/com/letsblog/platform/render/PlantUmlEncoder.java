@@ -1,10 +1,11 @@
-package com.letsblog.api.render;
+package com.letsblog.platform.render;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.zip.Deflater;
 
 /**
+ * legacy-apiから移設(issue #695、C10-3)。ConnectedServiceStatusServiceのPlantUML疎通確認専用。
  * PlantUMLサーバーのURL(/png/&lt;encoded&gt;, /svg/&lt;encoded&gt;)で使われる
  * 独自エンコード(raw deflate + 64文字の専用アルファベット)を実装する。
  * PlantUML公式・各種サードパーティ実装(plantuml.com のJSエンコーダ等)と同一のアルゴリズム。

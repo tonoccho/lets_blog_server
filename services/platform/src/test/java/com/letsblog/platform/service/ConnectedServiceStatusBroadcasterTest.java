@@ -1,7 +1,7 @@
-package com.letsblog.api.service;
+package com.letsblog.platform.service;
 
-import com.letsblog.api.dto.ConnectedServiceStatusResponse;
-import com.letsblog.api.dto.ConnectedServiceStatusResponse.Status;
+import com.letsblog.platform.dto.ConnectedServiceStatusResponse;
+import com.letsblog.platform.dto.ConnectedServiceStatusResponse.Status;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -16,9 +16,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * ConnectedServiceStatusBroadcasterの回帰テスト(issue #198)。
- * subscribe時に即座に現在の状態を送ること、broadcast時に購読中の全員へ配信すること、
- * 購読者がいない場合はチェック自体をスキップすることを検証する。
+ * legacy-apiから移設(issue #695、C10-3)。ConnectedServiceStatusBroadcasterの回帰テスト
+ * (元は issue #198)。subscribe時に即座に現在の状態を送ること、broadcast時に購読中の全員へ
+ * 配信すること、購読者がいない場合はチェック自体をスキップすることを検証する。
  */
 @ExtendWith(MockitoExtension.class)
 class ConnectedServiceStatusBroadcasterTest {

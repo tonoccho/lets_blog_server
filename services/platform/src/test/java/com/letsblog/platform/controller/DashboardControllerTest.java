@@ -1,15 +1,15 @@
-package com.letsblog.api.controller;
+package com.letsblog.platform.controller;
 
-import com.letsblog.api.dto.ConnectedServiceStatusDetailResponse;
-import com.letsblog.api.dto.ConnectedServiceStatusResponse;
-import com.letsblog.api.dto.ConnectedServiceStatusResponse.Status;
-import com.letsblog.api.dto.ContainerStatusResponse;
-import com.letsblog.api.service.AdminAuthorizationService;
-import com.letsblog.api.service.ConnectedServiceStatusBroadcaster;
-import com.letsblog.api.service.ConnectedServiceStatusService;
-import com.letsblog.api.service.ContainerStatusBroadcaster;
-import com.letsblog.api.service.ContainerStatusService;
-import com.letsblog.api.service.ForbiddenException;
+import com.letsblog.platform.dto.ConnectedServiceStatusDetailResponse;
+import com.letsblog.platform.dto.ConnectedServiceStatusResponse;
+import com.letsblog.platform.dto.ConnectedServiceStatusResponse.Status;
+import com.letsblog.platform.dto.ContainerStatusResponse;
+import com.letsblog.platform.service.AdminAuthorizationService;
+import com.letsblog.platform.service.ConnectedServiceStatusBroadcaster;
+import com.letsblog.platform.service.ConnectedServiceStatusService;
+import com.letsblog.platform.service.ContainerStatusBroadcaster;
+import com.letsblog.platform.service.ContainerStatusService;
+import com.letsblog.platform.service.ForbiddenException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -25,8 +25,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * DashboardControllerの回帰テスト(issue #199, #280)。詳細診断エンドポイントがadmin限定であることと、
- * コンテナ稼働状況エンドポイントがContainerStatusServiceへ委譲することを検証する。
+ * legacy-apiから移設(issue #695、C10-3)。DashboardControllerの回帰テスト(元は issue #199, #280)。
+ * 詳細診断エンドポイントがadmin限定であることと、コンテナ稼働状況エンドポイントが
+ * ContainerStatusServiceへ委譲することを検証する。
  */
 @ExtendWith(MockitoExtension.class)
 class DashboardControllerTest {
