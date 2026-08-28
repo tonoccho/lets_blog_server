@@ -4,6 +4,8 @@ import com.letsblog.api.domain.UserSiteAuthor;
 import com.letsblog.api.dto.ArticleImageLongEdgePxBridgeResponse;
 import com.letsblog.api.dto.CacheUserSiteAuthorBridgeRequest;
 import com.letsblog.api.dto.UserSiteAuthorBridgeResponse;
+import com.letsblog.api.domain.ProjectUser;
+import com.letsblog.api.repository.ProjectUserRepository;
 import com.letsblog.api.repository.UserSiteAuthorRepository;
 import com.letsblog.api.service.ProjectService;
 import com.letsblog.api.service.ProjectUserSyncService;
@@ -21,7 +23,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** ProjectUserBridgeControllerの回帰テスト(issue #577 stage2、issue #707)。 */
+/** ProjectUserBridgeControllerの回帰テスト(issue #577 stage2、issue #707、issue #712)。 */
 @ExtendWith(MockitoExtension.class)
 class ProjectUserBridgeControllerTest {
 
@@ -34,8 +36,12 @@ class ProjectUserBridgeControllerTest {
     @Mock
     private ProjectService projectService;
 
+    @Mock
+    private ProjectUserRepository projectUserRepository;
+
     private ProjectUserBridgeController controller() {
-        return new ProjectUserBridgeController(projectUserSyncService, userSiteAuthorRepository, projectService);
+        return new ProjectUserBridgeController(
+                projectUserSyncService, userSiteAuthorRepository, projectService, projectUserRepository);
     }
 
     @Test
@@ -86,6 +92,21 @@ class ProjectUserBridgeControllerTest {
 
         assertEquals("new", existing.getCmsAuthorId());
         verify(userSiteAuthorRepository).save(existing);
+    }
+
+    @Test
+    void isProjectMember_project_userに行があればtrue() {
+        when(projectUserRepository.findByProjectIdAndUserId(1L, 10L))
+                .thenReturn(Optional.of(new ProjectUser()));
+
+        assertEquals(true, controller().isProjectMember(1L, 10L));
+    }
+
+    @Test
+    void isProjectMember_project_userに行が無ければfalse() {
+        when(projectUserRepository.findByProjectIdAndUserId(1L, 10L)).thenReturn(Optional.empty());
+
+        assertEquals(false, controller().isProjectMember(1L, 10L));
     }
 
     @Test

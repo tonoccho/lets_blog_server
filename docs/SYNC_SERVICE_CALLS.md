@@ -129,6 +129,7 @@ Phase 19の各抽出Issueが暫定策として実装していた「呼び出し�
 | content(`LegacyApiBridgeClient`) | `/api/internal/content/**`(プロジェクトメンバー判定・ロール一覧・タグデザイン・site解決等) | (未移行、既存は10秒) | - | - | (未整理、現状は明確なエラー) | 未 |
 | ai(`LegacyApiBridgeClient`) | `/api/internal/ai/**`(GitHubアクセス・プロジェクトメンバー判定・LLM設定等) | (未移行、既存は10秒) | - | - | (未整理) | 未 |
 | analytics(`LegacyApiBridgeClient`) | `/api/internal/analytics/**`(本番サイト有無・プロジェクトメンバー判定) | (未移行、既存は10秒) | - | - | (未整理) | 未 |
+| publishing(`LegacyApiBridgeClient`) | `/api/internal/project/**`(著者マッピング・画像リサイズ設定・プロジェクトメンバー判定) | (未移行、既存は10秒) | - | - | 明確なエラー(fail closed。特にプロジェクトメンバー判定は認可判定に使うため機能縮退させない) | 未(プロジェクトメンバー判定はissue #712でArticlePreviewControllerの移設に伴い追加) |
 
 ### publishing-service向け
 
@@ -159,7 +160,9 @@ Phase 19の各抽出Issueが暫定策として実装していた「呼び出し�
 
 | 呼び出し元 | エンドポイント | プロファイル | リトライ | サーキットブレーカー | フォールバック | 移行 |
 |---|---|---|---|---|---|---|
-| legacy-api(`ContentServiceClient`) | `/api/internal/content/render/**`・`/posts/**`・`/projects/{id}/content-settings` | (未移行、既存はメソッドごとに個別timeout) | - | - | (未整理) | 未 |
+| legacy-api(`ContentServiceClient`) | `/api/internal/content/posts/by-site/{siteId}`・`/projects/{id}/content-settings` | (未移行、既存はメソッドごとに個別timeout) | - | - | (未整理) | 未 |
+| publishing(`ContentServiceClient`) | `/api/internal/content/render/**`・`/posts/**` | (未移行、既存はメソッドごとに個別timeout。render系60秒/その他10秒) | - | - | (未整理、現状は明確なエラー) | 未(issue #707でlegacy-apiから移設) |
+| publishing(`ContentServiceClient`) | `/api/internal/content/preview-skeleton/fetch-and-splice`・`fetch-real-post`(Playwrightによる実ページナビゲーション) | (未移行、既存は読み取り40秒固定。`RENDER`(30秒)ではナビゲーションのタイムアウト(最大30秒)に足りないため) | - | - | 機能縮退(取得失敗時はavailable=falseを返し、拡張機能側が従来のプレーン表示へフォールバックする) | 未(issue #712でArticlePreviewServiceと共にlegacy-apiから移設) |
 
 ### 対象外(外部システム連携。C12のスコープ外)
 

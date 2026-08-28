@@ -1,10 +1,10 @@
-package com.letsblog.api.controller;
+package com.letsblog.publishing.controller;
 
-import com.letsblog.api.dto.RenderSkeletonRequest;
-import com.letsblog.api.dto.ThemeCssResponse;
-import com.letsblog.api.dto.ThemeSkeletonResponse;
-import com.letsblog.api.service.AdminAuthorizationService;
-import com.letsblog.api.service.ArticlePreviewService;
+import com.letsblog.publishing.dto.RenderSkeletonRequest;
+import com.letsblog.publishing.dto.ThemeCssResponse;
+import com.letsblog.publishing.dto.ThemeSkeletonResponse;
+import com.letsblog.publishing.service.AdminAuthorizationService;
+import com.letsblog.publishing.service.ArticlePreviewService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,10 +16,14 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * legacy-apiのArticlePreviewControllerのうち、テーマCSS取得(/theme-css)・骨格差し替え(/skeleton)・
- * プレビュー用投稿削除(/preview-post)のみを残す(issue #576)。記事本文のレンダリング(/render)は
- * content-serviceへ移設した(同じ{@code /api/projects/{projectId}/preview}配下のパスを
- * content-service側のArticlePreviewControllerが引き続き提供する)。
+ * VSCode拡張の記事プレビューのうち、CMSへの深い依存を持つテーマCSS取得(/theme-css)・
+ * 骨格差し替え(/skeleton)・プレビュー用投稿削除(/preview-post)を受け付ける。legacy-apiの
+ * {@code ArticlePreviewController}をpublishing-serviceへ移設したもの(issue #712、Epic #551 C6-6)。
+ *
+ * <p>記事本文のレンダリング(/render)はCMSへの依存を持たないため先にcontent-serviceへ移設済みで
+ * (issue #576)、同じ{@code /api/projects/{projectId}/preview}配下のパスをcontent-service側の
+ * ArticlePreviewControllerが引き続き提供する(gatewayの{@code project-preview-render}ルートが
+ * /renderのみをcontent-serviceへ、残りを本サービスへ振り分ける)。
  */
 @RestController
 @RequestMapping("/api/projects/{projectId}/preview")

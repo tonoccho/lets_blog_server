@@ -21,6 +21,10 @@ import org.springframework.web.client.RestClientResponseException;
  * {@code InternalPublishPipelineController}/{@code InternalPostBridgeController})を呼び出す
  * クライアント。legacy-apiの{@code ContentServiceClient}から、publishing-serviceへ移設した
  * PostPublishService/PostDeleteServiceが実際に使うメソッドのみを移設した(issue #707、#575設計判断1)。
+ *
+ * <p>issue #712(Epic #551 C6-6)でArticlePreviewServiceが本サービスへ移設されたのに伴い、
+ * テーマ骨格取得(Playwrightを持つのはcontent-service。{@code InternalPreviewSkeletonController})
+ * 向けの{@link #fetchAndSplice}/{@link #fetchRealPost}も同じlegacy-api版から移設した。
  */
 @Component
 public class ContentServiceClient {
@@ -31,9 +35,13 @@ public class ContentServiceClient {
     // (legacy-api版と同じ値)。
     private static final Duration RENDER_READ_TIMEOUT = Duration.ofSeconds(60);
     private static final Duration READ_TIMEOUT = Duration.ofSeconds(10);
+    // Playwrightによる実ページナビゲーション(PreviewSkeletonFetcher)は最大30秒程度かかりうる
+    // (REAL_POST_NAVIGATION_TIMEOUT_MS参照)ため、それより余裕を持たせる(legacy-api版と同じ値)。
+    private static final Duration PREVIEW_SKELETON_READ_TIMEOUT = Duration.ofSeconds(40);
 
     private final RestClient renderRestClient;
     private final RestClient restClient;
+    private final RestClient previewSkeletonRestClient;
     private final HttpServletRequest request;
 
     public ContentServiceClient(
@@ -41,6 +49,7 @@ public class ContentServiceClient {
             HttpServletRequest request) {
         this.renderRestClient = build(builder, contentServiceUri, RENDER_READ_TIMEOUT);
         this.restClient = build(builder, contentServiceUri, READ_TIMEOUT);
+        this.previewSkeletonRestClient = build(builder, contentServiceUri, PREVIEW_SKELETON_READ_TIMEOUT);
         this.request = request;
     }
 
@@ -158,6 +167,58 @@ public class ContentServiceClient {
                     .toBodilessEntity();
         } catch (RestClientException e) {
             throw new IllegalStateException("content-serviceの投稿削除反映呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    public record ThemeSkeletonBridgeResponse(String html, boolean available, String reason,
+            boolean eyecatchSpliced, String css) {
+    }
+
+    /**
+     * ArticlePreviewService#renderSkeletonが使う。Playwrightを持つのはcontent-serviceのため
+     * (issue #576の注記)、CMS/Site認証情報の解決は本サービス側で済ませた上で、navigateUrl・
+     * 差し替え内容のみを渡してPreviewSkeletonFetcher#fetchAndSpliceを実行してもらう。
+     */
+    public ThemeSkeletonBridgeResponse fetchAndSplice(
+            String url, String titleRendered, String contentRendered, String ourTitle, String ourContentHtml,
+            String featuredImageDataUri) {
+        try {
+            Map<String, Object> body = new java.util.LinkedHashMap<>();
+            body.put("url", url);
+            body.put("titleRendered", titleRendered);
+            body.put("contentRendered", contentRendered);
+            body.put("ourTitle", ourTitle);
+            body.put("ourContentHtml", ourContentHtml);
+            body.put("featuredImageDataUri", featuredImageDataUri);
+            ThemeSkeletonBridgeResponse result = authorized(previewSkeletonRestClient.post()
+                    .uri("/api/internal/content/preview-skeleton/fetch-and-splice"))
+                    .body(body)
+                    .retrieve()
+                    .body(ThemeSkeletonBridgeResponse.class);
+            if (result == null) {
+                throw new IllegalStateException("content-serviceから空の応答を受け取りました");
+            }
+            return result;
+        } catch (RestClientException e) {
+            throw new IllegalStateException("content-serviceのテーマ骨格取得呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /** ArticlePreviewService#renderRealPrivatePostが使う。 */
+    public ThemeSkeletonBridgeResponse fetchRealPost(String url, String cookieName, String cookieValue) {
+        try {
+            Map<String, Object> body = Map.of("url", url, "cookieName", cookieName, "cookieValue", cookieValue);
+            ThemeSkeletonBridgeResponse result = authorized(previewSkeletonRestClient.post()
+                    .uri("/api/internal/content/preview-skeleton/fetch-real-post"))
+                    .body(body)
+                    .retrieve()
+                    .body(ThemeSkeletonBridgeResponse.class);
+            if (result == null) {
+                throw new IllegalStateException("content-serviceから空の応答を受け取りました");
+            }
+            return result;
+        } catch (RestClientException e) {
+            throw new IllegalStateException("content-serviceのテーマ骨格取得呼び出しに失敗しました: " + e.getMessage(), e);
         }
     }
 

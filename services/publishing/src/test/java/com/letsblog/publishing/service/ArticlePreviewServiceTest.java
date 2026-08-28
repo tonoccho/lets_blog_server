@@ -1,14 +1,14 @@
-package com.letsblog.api.service;
+package com.letsblog.publishing.service;
 
-import com.letsblog.api.client.ContentServiceClient;
-import com.letsblog.api.cms.CmsType;
-import com.letsblog.api.cms.ReferencePost;
-import com.letsblog.api.cms.agent.WordPressAgentOperations;
-import com.letsblog.api.cms.ssh.WordPressSshOperations;
-import com.letsblog.api.domain.Project;
-import com.letsblog.api.domain.Site;
-import com.letsblog.api.dto.ThemeCssResponse;
-import com.letsblog.api.dto.ThemeSkeletonResponse;
+import com.letsblog.publishing.client.ContentServiceClient;
+import com.letsblog.publishing.cms.CmsType;
+import com.letsblog.publishing.cms.ReferencePost;
+import com.letsblog.publishing.cms.agent.WordPressAgentOperations;
+import com.letsblog.publishing.cms.ssh.WordPressSshOperations;
+import com.letsblog.publishing.domain.Project;
+import com.letsblog.publishing.domain.Site;
+import com.letsblog.publishing.dto.ThemeCssResponse;
+import com.letsblog.publishing.dto.ThemeSkeletonResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -32,10 +32,12 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /**
- * legacy-apiのArticlePreviewServiceのうち残っているfetchThemeCss/renderSkeleton/deletePreviewPostのみを
- * 検証する(issue #576)。記事本文レンダリング(renderHtml)はcontent-serviceへ移設したため、その振る舞いは
- * content-service側のArticlePreviewServiceTestで検証する。テーマ骨格取得(旧PreviewSkeletonFetcher)は
- * content-serviceへの内部ブリッジ(ContentServiceClient)経由になったため、モックをそちらへ差し替えている。
+ * publishing-serviceのArticlePreviewService(fetchThemeCss/renderSkeleton/renderRealPrivatePost/
+ * deletePreviewPost)を検証する。legacy-apiから移設したテストをそのまま引き継いだもの
+ * (issue #712、Epic #551 C6-6)。記事本文レンダリング(renderHtml)はcontent-serviceが持つため、
+ * その振る舞いはcontent-service側のArticlePreviewServiceTestで検証する。テーマ骨格取得
+ * (旧PreviewSkeletonFetcher)はcontent-serviceへの内部ブリッジ(ContentServiceClient)経由のため、
+ * モックをそちらへ差し替えている。
  */
 @ExtendWith(MockitoExtension.class)
 class ArticlePreviewServiceTest {
@@ -50,7 +52,7 @@ class ArticlePreviewServiceTest {
     private ContentServiceClient contentServiceClient;
 
     @Mock
-    private com.letsblog.api.cms.CmsAdapterFactory cmsAdapterFactory;
+    private com.letsblog.publishing.cms.CmsAdapterFactory cmsAdapterFactory;
 
     @Mock
     private WordPressAgentOperations wordPressAgentOperations;
@@ -421,8 +423,8 @@ class ArticlePreviewServiceTest {
         server.verify();
     }
 
-    private com.letsblog.api.cms.CmsCredentials.WordPressCredentials agentCredentials(String wpSlug) {
-        return new com.letsblog.api.cms.CmsCredentials.WordPressCredentials(
+    private com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials agentCredentials(String wpSlug) {
+        return new com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials(
                 "https://localhost/sites/" + wpSlug, "admin",
                 "AGENT", null, null, null, null, null, null, wpSlug);
     }
@@ -605,7 +607,7 @@ class ArticlePreviewServiceTest {
         Site site = managedWordPressSite(30L, "local-site", "https://localhost/sites/local-site", "local-site");
         when(siteService.getById(30L)).thenReturn(Optional.of(site));
         when(siteService.getCredentials("local-site")).thenReturn(
-                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials(
+                new com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials(
                         "https://localhost/sites/local-site", "admin", "app-pass"));
 
         server.expect(requestTo("http://wordpress/sites/local-site/wp-json/wp/v2/posts?per_page=1&orderby=date"
@@ -681,8 +683,8 @@ class ArticlePreviewServiceTest {
         assertTrue(response.css().contains(".custom-tag { color: hotpink; }"));
     }
 
-    private com.letsblog.api.cms.CmsCredentials.WordPressCredentials sshCredentials() {
-        return new com.letsblog.api.cms.CmsCredentials.WordPressCredentials(
+    private com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials sshCredentials() {
+        return new com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials(
                 "http://production.example.com", "admin",
                 "SSH", "ssh.example.com", 22, "deploy", "/var/www/html", "PRIVATE-KEY-PEM", null, null);
     }
@@ -696,14 +698,14 @@ class ArticlePreviewServiceTest {
         when(siteService.getById(40L)).thenReturn(Optional.of(site));
         when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
 
-        com.letsblog.api.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
         when(cmsAdapter.createOrUpdatePost(org.mockito.ArgumentMatchers.eq(sshCredentials()),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
-                .thenReturn(new com.letsblog.api.cms.PostResult(
+                .thenReturn(new com.letsblog.publishing.cms.PostResult(
                         "99", "http://production.example.com/?p=99", "private"));
         when(cmsAdapter.generateAuthCookie(sshCredentials()))
-                .thenReturn(new com.letsblog.api.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
+                .thenReturn(new com.letsblog.publishing.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
         when(contentServiceClient.fetchRealPost(
                 "http://production.example.com/?p=99", "wordpress_logged_in_x", "cookie-value"))
                 .thenReturn(bridged("<article>real page</article>", true, null, false, ""));
@@ -751,20 +753,20 @@ class ArticlePreviewServiceTest {
         when(siteService.getById(40L)).thenReturn(Optional.of(site));
         when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
 
-        com.letsblog.api.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
         when(cmsAdapter.resolveCategories(sshCredentials(), java.util.List.of("お知らせ")))
                 .thenReturn(java.util.List.of("5"));
         when(cmsAdapter.resolveTags(sshCredentials(), java.util.List.of("java", "spring")))
                 .thenReturn(java.util.List.of("11", "12"));
-        org.mockito.ArgumentCaptor<com.letsblog.api.cms.PostContent> contentCaptor =
-                org.mockito.ArgumentCaptor.forClass(com.letsblog.api.cms.PostContent.class);
+        org.mockito.ArgumentCaptor<com.letsblog.publishing.cms.PostContent> contentCaptor =
+                org.mockito.ArgumentCaptor.forClass(com.letsblog.publishing.cms.PostContent.class);
         when(cmsAdapter.createOrUpdatePost(org.mockito.ArgumentMatchers.eq(sshCredentials()),
                 contentCaptor.capture(), org.mockito.ArgumentMatchers.isNull()))
-                .thenReturn(new com.letsblog.api.cms.PostResult(
+                .thenReturn(new com.letsblog.publishing.cms.PostResult(
                         "99", "http://production.example.com/?p=99", "private"));
         when(cmsAdapter.generateAuthCookie(sshCredentials()))
-                .thenReturn(new com.letsblog.api.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
+                .thenReturn(new com.letsblog.publishing.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
         when(contentServiceClient.fetchRealPost(
                 "http://production.example.com/?p=99", "wordpress_logged_in_x", "cookie-value"))
                 .thenReturn(bridged("<article>real page</article>", true, null, false, ""));
@@ -787,20 +789,20 @@ class ArticlePreviewServiceTest {
         when(siteService.getById(40L)).thenReturn(Optional.of(site));
         when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
 
-        com.letsblog.api.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
         when(cmsAdapter.uploadMedia(org.mockito.ArgumentMatchers.eq(sshCredentials()),
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.any()))
                 .thenThrow(new RuntimeException("メディアのアップロードに失敗しました"));
-        org.mockito.ArgumentCaptor<com.letsblog.api.cms.PostContent> contentCaptor =
-                org.mockito.ArgumentCaptor.forClass(com.letsblog.api.cms.PostContent.class);
+        org.mockito.ArgumentCaptor<com.letsblog.publishing.cms.PostContent> contentCaptor =
+                org.mockito.ArgumentCaptor.forClass(com.letsblog.publishing.cms.PostContent.class);
         when(cmsAdapter.createOrUpdatePost(org.mockito.ArgumentMatchers.eq(sshCredentials()),
                 contentCaptor.capture(), org.mockito.ArgumentMatchers.isNull()))
-                .thenReturn(new com.letsblog.api.cms.PostResult(
+                .thenReturn(new com.letsblog.publishing.cms.PostResult(
                         "99", "http://production.example.com/?p=99", "private"));
         when(cmsAdapter.generateAuthCookie(sshCredentials()))
-                .thenReturn(new com.letsblog.api.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
+                .thenReturn(new com.letsblog.publishing.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
         when(contentServiceClient.fetchRealPost(
                 "http://production.example.com/?p=99", "wordpress_logged_in_x", "cookie-value"))
                 .thenReturn(bridged("<article>real page</article>", true, null, false, ""));
@@ -820,8 +822,8 @@ class ArticlePreviewServiceTest {
         Site site = wordPressSite(40L, "http://production.example.com");
         site.setSiteKey("production-site");
         when(siteService.getById(40L)).thenReturn(Optional.of(site));
-        com.letsblog.api.cms.CmsCredentials.WordPressCredentials credsWithoutUsername =
-                new com.letsblog.api.cms.CmsCredentials.WordPressCredentials(
+        com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials credsWithoutUsername =
+                new com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials(
                         "http://production.example.com", null,
                         "SSH", "ssh.example.com", 22, "deploy", "/var/www/html", "PRIVATE-KEY-PEM", null, null);
         when(siteService.getCredentials("production-site")).thenReturn(credsWithoutUsername);
@@ -872,11 +874,11 @@ class ArticlePreviewServiceTest {
         when(siteService.getById(40L)).thenReturn(Optional.of(site));
         when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
 
-        com.letsblog.api.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.api.cms.CmsAdapter.class);
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
         when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
         when(cmsAdapter.createOrUpdatePost(org.mockito.ArgumentMatchers.eq(sshCredentials()),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
-                .thenReturn(new com.letsblog.api.cms.PostResult(
+                .thenReturn(new com.letsblog.publishing.cms.PostResult(
                         "99", "http://production.example.com/?p=99", "private"));
         when(cmsAdapter.generateAuthCookie(sshCredentials()))
                 .thenThrow(new RuntimeException("ユーザー 'null' が見つかりません"));
@@ -888,5 +890,56 @@ class ArticlePreviewServiceTest {
         // 投稿自体は作成済みのため、拡張機能側が追跡・削除できるようpreviewPostIdを返す
         // (existingPreviewPostId(=null)のままだと投稿がAPI側では孤立し、削除できなくなる)。
         assertEquals("99", response.previewPostId());
+    }
+
+    @Test
+    void deletePreviewPost_解決したサイトの認証情報でCMSアダプタの削除を呼ぶ() {
+        Project project = projectWithMaster("test", 40L, null);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteService.getById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter =
+                org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+
+        service.deletePreviewPost(1L, 40L, "99");
+
+        verify(cmsAdapter).deletePost(sshCredentials(), "99");
+    }
+
+    @Test
+    void deletePreviewPost_サイトを解決できない場合は何もしない() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+
+        service.deletePreviewPost(1L, 999L, "99");
+
+        verifyNoInteractions(siteService, cmsAdapterFactory);
+    }
+
+    /**
+     * プレビューパネルを閉じた際のベストエフォートな後片付けであり、CMS側の削除失敗で
+     * 呼び出し元(拡張機能)へ例外を投げ返さない(ログ警告のみ)。
+     */
+    @Test
+    void deletePreviewPost_CMS側の削除が失敗しても例外を伝播させない() {
+        Project project = projectWithMaster("test", 40L, null);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteService.getById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter =
+                org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        org.mockito.Mockito.doThrow(new RuntimeException("削除に失敗しました"))
+                .when(cmsAdapter).deletePost(sshCredentials(), "99");
+
+        service.deletePreviewPost(1L, 40L, "99");
+
+        verify(cmsAdapter).deletePost(sshCredentials(), "99");
     }
 }

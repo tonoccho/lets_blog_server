@@ -1,23 +1,23 @@
-package com.letsblog.api.service;
+package com.letsblog.publishing.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.letsblog.api.client.ContentServiceClient;
-import com.letsblog.api.cms.AuthCookie;
-import com.letsblog.api.cms.CmsAdapter;
-import com.letsblog.api.cms.CmsAdapterFactory;
-import com.letsblog.api.cms.CmsCredentials;
-import com.letsblog.api.cms.CmsType;
-import com.letsblog.api.cms.MediaUploadResult;
-import com.letsblog.api.cms.PostContent;
-import com.letsblog.api.cms.PostResult;
-import com.letsblog.api.cms.ReferencePost;
-import com.letsblog.api.cms.agent.WordPressAgentOperations;
-import com.letsblog.api.cms.ssh.WordPressSshOperations;
-import com.letsblog.api.config.LegacyJacksonRestClientConfig;
-import com.letsblog.api.domain.Project;
-import com.letsblog.api.domain.Site;
-import com.letsblog.api.dto.ThemeCssResponse;
-import com.letsblog.api.dto.ThemeSkeletonResponse;
+import com.letsblog.publishing.client.ContentServiceClient;
+import com.letsblog.publishing.cms.AuthCookie;
+import com.letsblog.publishing.cms.CmsAdapter;
+import com.letsblog.publishing.cms.CmsAdapterFactory;
+import com.letsblog.publishing.cms.CmsCredentials;
+import com.letsblog.publishing.cms.CmsType;
+import com.letsblog.publishing.cms.MediaUploadResult;
+import com.letsblog.publishing.cms.PostContent;
+import com.letsblog.publishing.cms.PostResult;
+import com.letsblog.publishing.cms.ReferencePost;
+import com.letsblog.publishing.cms.agent.WordPressAgentOperations;
+import com.letsblog.publishing.cms.ssh.WordPressSshOperations;
+import com.letsblog.publishing.config.LegacyJacksonRestClientConfig;
+import com.letsblog.publishing.domain.Project;
+import com.letsblog.publishing.domain.Site;
+import com.letsblog.publishing.dto.ThemeCssResponse;
+import com.letsblog.publishing.dto.ThemeSkeletonResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -34,16 +34,18 @@ import java.util.regex.Pattern;
 
 /**
  * VSCode拡張の記事プレビュー機能向けに、プロジェクトのマスター環境サイトのテーマCSS取得・実テーマの
- * DOM構造を保った骨格差し替えを行う。legacy-apiのArticlePreviewServiceのうち、Markdown→HTML変換
- * パイプライン(renderHtml、CMSへの依存を持たない)はcontent-serviceへ移設した(issue #576、
- * {@link com.letsblog.content.service.ArticlePreviewService}参照)。
+ * DOM構造を保った骨格差し替えを行う。元はlegacy-apiのArticlePreviewServiceで、Markdown→HTML変換
+ * パイプライン(renderHtml、CMSへの依存を持たない)だけが先にcontent-serviceへ移設され
+ * (issue #576、{@code com.letsblog.content.service.ArticlePreviewService}参照)、
+ * CmsAdapter/WordPressAgentOperations/WordPressSshOperationsに依存する残りの
+ * fetchThemeCss/renderSkeleton/renderRealPrivatePost/deletePreviewPostが本サービスへ移設された
+ * (issue #712、Epic #551 C6-6)。
  *
- * <p>このクラスに残るfetchThemeCss/renderSkeleton/deletePreviewPostは、CmsAdapter/
- * WordPressAgentOperations/WordPressSshOperations/Project/Site(project-service/publishing-service
- * がまだ抽出されていないドメイン)への深い依存があり、issue #575(publishing-service)の対象になる
- * まで引き続きlegacy-apiに残る。Playwrightを持つのはcontent-serviceになった(issueの注記どおり)ため、
- * 実際のヘッドレスブラウザ操作(旧PreviewSkeletonFetcher)は{@link ContentServiceClient}経由の
- * 内部ブリッジへ委譲する(CMS認証情報自体は転送せず、解決済みのnavigateUrl・認証Cookieのみ渡す)。
+ * <p>Project/Siteの実体・CMS認証情報の所有権はproject-serviceにあるため、
+ * {@link ProjectService}/{@link SiteService}経由(内部ブリッジ)で解決する。また、Playwrightを持つのは
+ * content-serviceのため、実際のヘッドレスブラウザ操作(旧PreviewSkeletonFetcher)は
+ * {@link ContentServiceClient}経由の内部ブリッジへ委譲する(CMS認証情報自体は転送せず、
+ * 解決済みのnavigateUrl・認証Cookieのみ渡す)。
  */
 @Service
 public class ArticlePreviewService {

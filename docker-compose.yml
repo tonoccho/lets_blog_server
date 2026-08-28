@@ -494,10 +494,12 @@ services:
       # サイト本体・CMS認証情報の内部ブリッジ呼び出し先(ProjectServiceClient、#575設計判断2)。
       PROJECT_SERVICE_URI: http://project:8080
       # Markdownレンダリング・postsテーブルの読み書きの内部ブリッジ呼び出し先(ContentServiceClient、
-      # #575設計判断1)。
+      # #575設計判断1)。記事プレビューのテーマ骨格取得(Playwrightを持つのはcontent-service)も
+      # 同じクライアント経由で呼ぶ(issue #712でArticlePreviewServiceを移設したのに伴う)。
       CONTENT_SERVICE_URI: http://content:8080
-      # 著者マッピング(user_site_authors)・投稿画像リサイズのプロジェクト別デフォルトの内部ブリッジ
-      # 呼び出し先(LegacyApiBridgeClient、#575設計判断4。起動時の依存関係(depends_on)には含めない。
+      # 著者マッピング(user_site_authors)・投稿画像リサイズのプロジェクト別デフォルト・
+      # プロジェクトメンバー判定(project_user、issue #712)の内部ブリッジ呼び出し先
+      # (LegacyApiBridgeClient、#575設計判断4。起動時の依存関係(depends_on)には含めない。
       # apiがpublishingのhealthyを待つ構成にはしていないため、循環しない実行時呼び出し先として
       # のみ設定する)。あわせてlegacy-apiが著者プロビジョニング(PublishingServiceClient)を
       # このコンテナへ依頼する双方向ブリッジになる。
@@ -590,7 +592,10 @@ services:
       # ルーティング先。
       PLATFORM_SERVICE_URI: http://platform:8080
       # 投稿の公開(POST /api/posts/publish)・削除(DELETE /api/posts/*/*)のルーティング先
-      # (issue #707、posts-publish-legacy/posts-delete-legacyルート)。
+      # (issue #707、posts-publish-legacy/posts-delete-legacyルート)。一括管理・taxonomy解決
+      # (issue #708、project-bulk-management-legacy/project-asset-images-legacy/publishingルート)、
+      # 記事プレビューのテーマCSS取得/骨格差し替え/プレビュー用投稿削除(issue #712、
+      # project-preview-legacyルート。/renderのみcontent-serviceのまま)もここへ向ける。
       PUBLISHING_SERVICE_URI: http://publishing:8080
     depends_on:
       api:
