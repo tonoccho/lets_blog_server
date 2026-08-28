@@ -1,11 +1,7 @@
 package com.letsblog.api.service;
 
-import com.letsblog.api.cms.AuthorProvisioningRequest;
-import com.letsblog.api.cms.CmsAdapter;
-import com.letsblog.api.cms.CmsAdapterFactory;
-import com.letsblog.api.cms.CmsApiException;
-import com.letsblog.api.cms.CmsCredentials;
-import com.letsblog.api.cms.CmsType;
+import com.letsblog.api.client.PublishingServiceClient;
+import com.letsblog.api.client.PublishingServiceException;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.ProjectUser;
 import com.letsblog.api.domain.Site;
@@ -26,12 +22,18 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * 著者(WordPressユーザー)作成/更新の実処理がpublishing-serviceへ移管された(issue #707、#575設計
+ * 判断4の書き込み側)ため、検証はCmsAdapter/CmsAdapterFactoryではなくPublishingServiceClient
+ * (内部ブリッジ)のモックへ差し替えている。
+ */
 @ExtendWith(MockitoExtension.class)
 class ProjectUserSyncServiceTest {
 
@@ -48,10 +50,7 @@ class ProjectUserSyncServiceTest {
     private SiteService siteService;
 
     @Mock
-    private CmsAdapterFactory cmsAdapterFactory;
-
-    @Mock
-    private CmsAdapter cmsAdapter;
+    private PublishingServiceClient publishingServiceClient;
 
     @Mock
     private UserSiteAuthorRepository userSiteAuthorRepository;
@@ -59,7 +58,7 @@ class ProjectUserSyncServiceTest {
     private ProjectUserSyncService service() {
         return new ProjectUserSyncService(
                 projectService, projectUserRepository, userRepository, siteService,
-                cmsAdapterFactory, userSiteAuthorRepository);
+                publishingServiceClient, userSiteAuthorRepository);
     }
 
     private Project buildProject(Long localSiteId, Long testSiteId, Long productionSiteId) {
@@ -85,7 +84,6 @@ class ProjectUserSyncServiceTest {
         Site site = new Site();
         site.setId(id);
         site.setSiteKey(siteKey);
-        site.setCmsType(CmsType.WORDPRESS);
         return site;
     }
 
@@ -96,20 +94,17 @@ class ProjectUserSyncServiceTest {
         User user = buildUser();
         Site localSite = buildSite(10L, "local-site");
         Site testSite = buildSite(20L, "test-site");
-        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
 
         when(projectService.getProjectEntity(1L)).thenReturn(project);
         when(userRepository.findById(2L)).thenReturn(Optional.of(user));
         when(siteService.getAllById(List.of(10L, 20L))).thenReturn(List.of(localSite, testSite));
-        when(siteService.getCredentials(any())).thenReturn(credentials);
-        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
-        when(cmsAdapter.hasAuthorProvisioningCapability(any())).thenReturn(true);
-        when(cmsAdapter.provisionAuthor(eq(credentials), any(AuthorProvisioningRequest.class))).thenReturn("9");
+        when(publishingServiceClient.provisionAuthor(anyString(), any()))
+                .thenReturn(new PublishingServiceClient.AuthorProvisioningResponse("9"));
         when(userSiteAuthorRepository.findByUserIdAndSiteId(any(), any())).thenReturn(Optional.empty());
 
         service.addUserToProject(1L, 2L, "editor");
 
-        verify(cmsAdapter, times(2)).provisionAuthor(eq(credentials), any(AuthorProvisioningRequest.class));
+        verify(publishingServiceClient, times(2)).provisionAuthor(anyString(), any());
         verify(projectUserRepository).save(any(ProjectUser.class));
         verify(userSiteAuthorRepository, times(2)).save(any(com.letsblog.api.domain.UserSiteAuthor.class));
     }
@@ -125,7 +120,7 @@ class ProjectUserSyncServiceTest {
 
         service.addUserToProject(1L, 2L, "editor");
 
-        verify(cmsAdapterFactory, never()).resolve(any());
+        verify(publishingServiceClient, never()).provisionAuthor(anyString(), any());
         verify(projectUserRepository).save(any(ProjectUser.class));
     }
 
@@ -135,42 +130,38 @@ class ProjectUserSyncServiceTest {
         Project project = buildProject(10L, null, null);
         User user = buildUser();
         Site localSite = buildSite(10L, "local-site");
-        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
 
         when(projectService.getProjectEntity(1L)).thenReturn(project);
         when(userRepository.findById(2L)).thenReturn(Optional.of(user));
         when(siteService.getAllById(List.of(10L))).thenReturn(List.of(localSite));
-        when(siteService.getCredentials("local-site")).thenReturn(credentials);
-        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
-        when(cmsAdapter.hasAuthorProvisioningCapability(any())).thenReturn(true);
+        when(publishingServiceClient.provisionAuthor(eq("local-site"), any()))
+                .thenReturn(new PublishingServiceClient.AuthorProvisioningResponse("9"));
 
         service.addUserToProject(1L, 2L, "contributor");
 
-        ArgumentCaptor<AuthorProvisioningRequest> captor = ArgumentCaptor.forClass(AuthorProvisioningRequest.class);
-        verify(cmsAdapter).provisionAuthor(eq(credentials), captor.capture());
+        ArgumentCaptor<PublishingServiceClient.AuthorProvisioningRequest> captor =
+                ArgumentCaptor.forClass(PublishingServiceClient.AuthorProvisioningRequest.class);
+        verify(publishingServiceClient).provisionAuthor(eq("local-site"), captor.capture());
         assertEquals("contributor", captor.getValue().wpRole());
         assertEquals("member@example.com", captor.getValue().email());
     }
 
     @Test
-    void addUserToProject_管理者権限がないサイトは著者作成前に例外() {
+    void addUserToProject_権限がないサイトはブリッジ呼び出し失敗として例外() {
         ProjectUserSyncService service = service();
         Project project = buildProject(10L, null, null);
         User user = buildUser();
         Site localSite = buildSite(10L, "local-site");
-        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "editor", "SSH");
 
         when(projectService.getProjectEntity(1L)).thenReturn(project);
         when(userRepository.findById(2L)).thenReturn(Optional.of(user));
         when(siteService.getAllById(List.of(10L))).thenReturn(List.of(localSite));
-        when(siteService.getCredentials("local-site")).thenReturn(credentials);
-        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
-        when(cmsAdapter.hasAuthorProvisioningCapability(credentials)).thenReturn(false);
+        when(publishingServiceClient.provisionAuthor(eq("local-site"), any()))
+                .thenThrow(new PublishingServiceException("権限がありません", null));
 
-        assertThrows(CmsApiException.class, () -> service.addUserToProject(1L, 2L, "editor"));
+        assertThrows(PublishingServiceException.class, () -> service.addUserToProject(1L, 2L, "editor"));
 
-        verify(cmsAdapter, org.mockito.Mockito.never()).provisionAuthor(any(), any());
-        verify(projectUserRepository, org.mockito.Mockito.never()).save(any());
+        verify(projectUserRepository, never()).save(any());
     }
 
     @Test
@@ -180,15 +171,13 @@ class ProjectUserSyncServiceTest {
         Project project = buildProject(10L, null, null);
         User user = buildUser();
         Site localSite = buildSite(10L, "local-site");
-        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
 
         when(projectUserRepository.findByProjectIdAndUserId(1L, 2L)).thenReturn(Optional.of(projectUser));
         when(projectService.getProjectEntity(1L)).thenReturn(project);
         when(userRepository.findById(2L)).thenReturn(Optional.of(user));
         when(siteService.getAllById(List.of(10L))).thenReturn(List.of(localSite));
-        when(siteService.getCredentials("local-site")).thenReturn(credentials);
-        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
-        when(cmsAdapter.hasAuthorProvisioningCapability(any())).thenReturn(true);
+        when(publishingServiceClient.provisionAuthor(eq("local-site"), any()))
+                .thenReturn(new PublishingServiceClient.AuthorProvisioningResponse("9"));
 
         service.updateUserProjectRole(1L, 2L, "author");
 
@@ -211,7 +200,7 @@ class ProjectUserSyncServiceTest {
         service.removeUserFromProject(1L, 2L);
 
         verify(projectUserRepository).deleteByProjectIdAndUserId(1L, 2L);
-        verify(cmsAdapterFactory, never()).resolve(any());
+        verify(publishingServiceClient, never()).provisionAuthor(anyString(), any());
     }
 
     @Test
@@ -241,21 +230,20 @@ class ProjectUserSyncServiceTest {
         owner.setDisplayName("オーナー");
         ProjectUser memberLink = new ProjectUser(1L, 2L, "author");
         ProjectUser ownerLink = new ProjectUser(1L, 3L, "administrator");
-        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
 
         when(siteService.getById(10L)).thenReturn(Optional.of(site));
         when(projectUserRepository.findByProjectId(1L)).thenReturn(List.of(memberLink, ownerLink));
         when(userRepository.findById(2L)).thenReturn(Optional.of(member));
         when(userRepository.findById(3L)).thenReturn(Optional.of(owner));
-        when(siteService.getCredentials("local-site")).thenReturn(credentials);
-        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
-        when(cmsAdapter.hasAuthorProvisioningCapability(credentials)).thenReturn(true);
+        when(publishingServiceClient.provisionAuthor(eq("local-site"), any()))
+                .thenReturn(new PublishingServiceClient.AuthorProvisioningResponse("9"));
 
         service.reconcileRolesForSite(1L, 10L);
 
-        ArgumentCaptor<AuthorProvisioningRequest> captor = ArgumentCaptor.forClass(AuthorProvisioningRequest.class);
-        verify(cmsAdapter, times(2)).provisionAuthor(eq(credentials), captor.capture());
-        List<AuthorProvisioningRequest> requests = captor.getAllValues();
+        ArgumentCaptor<PublishingServiceClient.AuthorProvisioningRequest> captor =
+                ArgumentCaptor.forClass(PublishingServiceClient.AuthorProvisioningRequest.class);
+        verify(publishingServiceClient, times(2)).provisionAuthor(eq("local-site"), captor.capture());
+        List<PublishingServiceClient.AuthorProvisioningRequest> requests = captor.getAllValues();
         assertEquals("author", requests.get(0).wpRole());
         assertEquals("member@example.com", requests.get(0).email());
         assertEquals("administrator", requests.get(1).wpRole());
@@ -274,7 +262,7 @@ class ProjectUserSyncServiceTest {
 
         service.reconcileRolesForSite(1L, 10L);
 
-        verify(cmsAdapterFactory, never()).resolve(any());
+        verify(publishingServiceClient, never()).provisionAuthor(anyString(), any());
     }
 
     @Test

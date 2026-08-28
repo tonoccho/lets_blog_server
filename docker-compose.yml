@@ -113,6 +113,13 @@ services:
       # システム全体のグローバル設定(system_settings: Brave Search APIキー・実効LLM接続設定・画像生成
       # 接続設定)の所有権をplatform-serviceへ委譲する(issue #693、PlatformServiceClient参照)。
       PLATFORM_SERVICE_URI: http://platform:8080
+      # 投稿の公開・削除パイプライン(cms/*・PostPublishService・PostDeleteService)の所有権が
+      # publishing-serviceへ移った(issue #707)ことに伴う内部ブリッジ(PublishingServiceClient)。
+      # ProjectUserSyncService#provisionUserOnSiteが著者(WordPressユーザー)の作成/更新をこの
+      # コンテナへ依頼する(#575設計判断4の書き込み側。起動時の依存関係(depends_on)には含めない。
+      # publishing自身もlegacy-apiのhealthyを待つ構成にはしていないため、循環しない実行時
+      # 呼び出し先としてのみ設定する)。
+      PUBLISHING_SERVICE_URI: http://publishing:8080
       BULK_UPLOAD_STORAGE_PATH: /app/data/bulk-uploads
     volumes:
       - bulk_upload_files:/app/data/bulk-uploads
@@ -452,6 +459,54 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  # cms/*パッケージ(CmsAdapter/WordPressAdapter/エージェント・SSH操作)・PostPublishService/
+  # PostDeleteService・PostControllerの公開・削除エンドポイントをlegacy-apiから抽出(issue #707、
+  # Epic #551 C6-1)。サイト本体・CMS認証情報(project-service)・投稿(posts)テーブル(content-service)・
+  # 著者マッピング(user_site_authors、legacy-api)はいずれも自身で持たず、内部ブリッジ経由で読み書きする
+  # (#575設計判断1・2・4)。スキーマ・Flywayマイグレーションは専用のlbs_publishingスキーマ
+  # (ADR-0004)で本サービスが所有する(本Issue時点では所有ドメインテーブルは無い)。
+  publishing:
+    build:
+      context: .
+      dockerfile: services/publishing/Dockerfile
+    container_name: lbs-publishing
+    <<: [*common-service, *actuator-healthcheck]
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_publishing?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: lbs_publishing
+      SPRING_DATASOURCE_PASSWORD: ${LBS_PUBLISHING_DB_PASSWORD}
+      <<: *rabbitmq-env
+      # サイト本体・CMS認証情報の内部ブリッジ呼び出し先(ProjectServiceClient、#575設計判断2)。
+      PROJECT_SERVICE_URI: http://project:8080
+      # Markdownレンダリング・postsテーブルの読み書きの内部ブリッジ呼び出し先(ContentServiceClient、
+      # #575設計判断1)。
+      CONTENT_SERVICE_URI: http://content:8080
+      # 著者マッピング(user_site_authors)・投稿画像リサイズのプロジェクト別デフォルトの内部ブリッジ
+      # 呼び出し先(LegacyApiBridgeClient、#575設計判断4。起動時の依存関係(depends_on)には含めない。
+      # apiがpublishingのhealthyを待つ構成にはしていないため、循環しない実行時呼び出し先として
+      # のみ設定する)。あわせてlegacy-apiが著者プロビジョニング(PublishingServiceClient)を
+      # このコンテナへ依頼する双方向ブリッジになる。
+      LEGACY_API_URI: http://api:8080
+      # AdminAuthorizationService等と同じ暫定策として、CurrentActorServiceの自分自身のuserId解決を
+      # identity-serviceへの同期呼び出しに委ねる。
+      IDENTITY_SERVICE_URI: http://identity:8080
+      # [plantuml]/```plantumlの埋め込み(PlantUmlEmbedService/PlantUmlTagRenderService)の実際の
+      # レンダリング呼び出し先。
+      MEDIA_SERVICE_URI: http://media:8080
+      # 常駐wordpressコンテナ内の内部限定プロビジョニングエージェント(wordpress/provision-agent)の
+      # `/wp-cli/*`エンドポイント呼び出し先(WordPressAgentOperations)。apiと同じ値。
+      WORDPRESS_PROVISION_BASE_URL: http://wordpress:9000
+      WP_PROVISION_TOKEN: ${WP_PROVISION_TOKEN}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
   # ログの所有権をlog-writerへ完全移管(#572)。RabbitMQ経由でエラーログ/操作ログ/監査ログの
   # メッセージを受信して書き込むのに加え、読み取りAPI(監査ログ・操作ログ・フロントエンドエラー
   # ログ)もここへ移設した。スキーマ・Flywayマイグレーションは専用の lbs_log スキーマ
@@ -513,6 +568,9 @@ services:
       # /api/system/vscode-extension、下のplatformルートの/api/system/**に含まれる)の
       # ルーティング先。
       PLATFORM_SERVICE_URI: http://platform:8080
+      # 投稿の公開(POST /api/posts/publish)・削除(DELETE /api/posts/*/*)のルーティング先
+      # (issue #707、posts-publish-legacy/posts-delete-legacyルート)。
+      PUBLISHING_SERVICE_URI: http://publishing:8080
     depends_on:
       api:
         condition: service_healthy
@@ -533,6 +591,8 @@ services:
       analytics:
         condition: service_healthy
       project:
+        condition: service_healthy
+      publishing:
         condition: service_healthy
 
   # legacy-api(api)が所有するFlywayマイグレーション(lets_blogスキーマ)を、apiコンテナ自体の

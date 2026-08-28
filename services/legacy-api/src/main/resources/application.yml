@@ -154,6 +154,11 @@ app:
   # ため#577では移設せずlegacy-apiに残る)が、プロジェクト/サイトの基本情報・CMS認証情報を
   # 参照するための内部ブリッジ(issue #577 stage3、com.letsblog.api.client.ProjectServiceClient参照)。
   project-service-uri: ${PROJECT_SERVICE_URI:http://localhost:8080}
+  # 投稿の公開・削除パイプライン(cms/*・PostPublishService・PostDeleteService)の所有権がpublishing
+  # -serviceへ移った(issue #707)ことに伴う内部ブリッジ(com.letsblog.api.client.PublishingServiceClient
+  # 参照)。ProjectUserSyncService#provisionUserOnSiteが、著者(WordPressユーザー)の作成/更新を
+  # このブリッジ経由で依頼する(#575設計判断4の書き込み側)。
+  publishing-service-uri: ${PUBLISHING_SERVICE_URI:http://localhost:8080}
   wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
   wordpress-provision-token: ${WP_PROVISION_TOKEN:}
   bulk-upload-storage-path: ${BULK_UPLOAD_STORAGE_PATH:/app/data/bulk-uploads}

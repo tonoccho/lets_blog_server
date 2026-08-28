@@ -119,19 +119,18 @@ app:
         paths:
           - /api/projects/*/preview/**
       # PostController#publish/#deleteは、投稿(posts)テーブルの所有権がcontent-serviceへ移った(#576)
-      # 後もCMSアダプタ(CmsAdapter等)への深い依存のためlegacy-apiに残っている(issue #575
-      # publishing-serviceの対象。PostPublishService/PostDeleteServiceはpostsテーブルの読み書きを
+      # 後もCMSアダプタ(CmsAdapter等)への深い依存のため、publishing-serviceへ移設した
+      # (issue #707。PostPublishService/PostDeleteServiceはpostsテーブルの読み書きを
       # content-serviceへの内部ブリッジ経由で行う)。より広い/api/posts/**(下のcontentルート、
-      # content-serviceへ向く)より先に評価されるよう、ここでlegacy-apiへマッチさせる
-      # (#576移設時の発見: このルートは元々CONTENT_SERVICE_URIを指していたが、publish/deleteは
-      # 本Issueの移設対象ではないためlegacy-apiのままにする必要があった)。
+      # content-serviceへ向く)より先に評価されるよう、ここでpublishing-serviceへマッチさせる
+      # (#576移設時点ではlegacy-apiへ向けていたが、issue #707でPUBLISHING_SERVICE_URIへ切り替えた)。
       - id: posts-publish-legacy
-        uri: ${LEGACY_API_URI:http://api:8080}
+        uri: ${PUBLISHING_SERVICE_URI:http://api:8080}
         paths:
           - /api/posts/publish
         response-timeout: 1200s
       - id: posts-delete-legacy
-        uri: ${LEGACY_API_URI:http://api:8080}
+        uri: ${PUBLISHING_SERVICE_URI:http://api:8080}
         paths:
           - /api/posts/*/*
       # DashboardController(コンテナ状態SSE・接続サービス状態、/api/dashboard/**配下)は
@@ -245,10 +244,16 @@ app:
           - /api/generation-jobs/**
           - /api/article-plan/**
         response-timeout: 180s
+      # このルートのpathsは元々`/api/publish/**`・`/api/bulk-management/**`だったが、実際のコントローラの
+      # パス(PostController: /api/posts/publish・/api/posts/*/*、BulkManagementController:
+      # /api/projects/*/bulk-management/**)と一致しておらず、`/api/publish/**`宛のリクエストは
+      # どのコントローラにも到達できていなかった(issue #707調査で発見)。`/api/posts/publish`・
+      # `/api/posts/*/*`は上のposts-publish-legacy/posts-delete-legacyルートで既にPUBLISHING_SERVICE_URIへ
+      # 正しくマッチしているため、`/api/publish/**`は実体の無い誤りとして削除した(issue #707)。
+      # `/api/bulk-management/**`側の実パスへの修正は分割2(#708)で行う。
       - id: publishing
         uri: ${PUBLISHING_SERVICE_URI:http://api:8080}
         paths:
-          - /api/publish/**
           - /api/bulk-management/**
       # GA/AdSense連携の実体(ProjectDashboardController・ProjectApiKeyControllerのGA/AdSense部分)は
       # /api/projects/*/dashboard/**(上のproject-dashboard-analyticsルート)・/api/projects/*/
