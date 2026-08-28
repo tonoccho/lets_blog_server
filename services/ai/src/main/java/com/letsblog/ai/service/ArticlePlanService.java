@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.ai.ai.LlmClient;
 import com.letsblog.ai.client.LegacyApiBridgeClient;
+import com.letsblog.ai.client.PublishingServiceClient;
 import com.letsblog.ai.domain.ArticlePlanSession;
 import com.letsblog.ai.domain.GenerationJob;
 import com.letsblog.ai.dto.AcceptPlanResponse;
@@ -39,10 +40,12 @@ import java.util.Map;
  * 会話履歴はサーバー側で保持せず、呼び出しごとにフロントから全履歴を受け取る。
  *
  * <p>issue #574でai-serviceへ移設。GitHubトークン解決(プロジェクト自身のトークン優先、
- * 無ければ操作者本人のユーザー設定へフォールバック)とマスター環境サイトの既存カテゴリ/タグ取得は、
- * Project/Site/CmsAdapter/ProjectApiKeyService/UserServiceがproject-service/content-service
- * (いずれもPhase 19の他Issueで未抽出)のままlegacy-apiに残るため、{@link LegacyApiBridgeClient}
- * 経由の内部ブリッジで解決する(media-service(#573)のCmsBridgeClientと同じ暫定策)。
+ * 無ければ操作者本人のユーザー設定へフォールバック)は、Project/ProjectApiKeyService/UserServiceが
+ * project-service/content-service(いずれもPhase 19の他Issueで未抽出)のままlegacy-apiに残るため、
+ * {@link LegacyApiBridgeClient}経由の内部ブリッジで解決する(media-service(#573)のCmsBridgeClientと
+ * 同じ暫定策)。マスター環境サイトの既存カテゴリ/タグ取得は、{@code CmsAdapterFactory}/{@code cms/*}の
+ * 所有権がpublishing-serviceへ移った(issue #707)ため、{@link PublishingServiceClient}経由で
+ * publishing-serviceへ直接問い合わせる(issue #711、Epic #551 C6-5)。
  */
 @Service
 @Slf4j
@@ -84,6 +87,7 @@ public class ArticlePlanService {
     private final GithubClient githubClient;
     private final ArticlePlanSessionRepository articlePlanSessionRepository;
     private final LegacyApiBridgeClient legacyApiBridgeClient;
+    private final PublishingServiceClient publishingServiceClient;
     private final CurrentActorService currentActorService;
 
     public ArticlePlanService(
@@ -95,6 +99,7 @@ public class ArticlePlanService {
             GithubClient githubClient,
             ArticlePlanSessionRepository articlePlanSessionRepository,
             LegacyApiBridgeClient legacyApiBridgeClient,
+            PublishingServiceClient publishingServiceClient,
             CurrentActorService currentActorService) {
         this.llmClient = llmClient;
         this.llmModelService = llmModelService;
@@ -104,6 +109,7 @@ public class ArticlePlanService {
         this.githubClient = githubClient;
         this.articlePlanSessionRepository = articlePlanSessionRepository;
         this.legacyApiBridgeClient = legacyApiBridgeClient;
+        this.publishingServiceClient = publishingServiceClient;
         this.currentActorService = currentActorService;
     }
 
@@ -402,7 +408,7 @@ public class ArticlePlanService {
      * 投げず空リストへ握りつぶす。カテゴリ提示はメタデータ提案の主目的ではなく補助情報のため)。
      */
     public List<String> listExistingCategories(Long projectId) {
-        return legacyApiBridgeClient.listExistingCategories(projectId, currentActorService.getAuthorizationHeader());
+        return publishingServiceClient.listExistingCategories(projectId, currentActorService.getAuthorizationHeader());
     }
 
     /**
@@ -410,7 +416,7 @@ public class ArticlePlanService {
      * VSCode拡張の記事作成画面で、子カテゴリ選択時に親カテゴリを自動選択するために使う(issue #289)。
      */
     public List<CategoryOption> listExistingCategoriesWithParents(Long projectId) {
-        return legacyApiBridgeClient.listExistingCategoriesWithParents(
+        return publishingServiceClient.listExistingCategoriesWithParents(
                 projectId, currentActorService.getAuthorizationHeader());
     }
 
@@ -420,7 +426,7 @@ public class ArticlePlanService {
      * 優先提示するための補助情報のため)。
      */
     public List<String> listExistingTags(Long projectId) {
-        return legacyApiBridgeClient.listExistingTags(projectId, currentActorService.getAuthorizationHeader());
+        return publishingServiceClient.listExistingTags(projectId, currentActorService.getAuthorizationHeader());
     }
 
     private SuggestMetadataResponse filterToExistingCategories(

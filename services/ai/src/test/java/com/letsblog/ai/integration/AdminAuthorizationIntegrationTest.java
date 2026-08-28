@@ -32,7 +32,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>identity-serviceは外部境界のため{@link IdentityClient}を{@code @MockitoBean}で置き換える
  * (ADR-0006のモック方針)。{@link LegacyApiBridgeClient#isProjectMember}は非member/admin判定に
- * 必要なためモックするが、認可通過後に呼ばれる{@code listExistingCategories}はlegacy-apiへの
+ * 必要なためモックするが、認可通過後に呼ばれる{@code listExistingCategories}は
+ * (issue #711でpublishing-serviceへ呼び出し先を切り替えた{@code PublishingServiceClient}経由でも)
  * 接続失敗時に空リストへフォールバックする実装のため、モックせずとも200系で完了する。
  */
 @SpringBootTest

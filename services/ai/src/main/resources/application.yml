@@ -70,6 +70,10 @@ app:
   # 呼び出し元のBearerトークンをそのまま転送してlegacy-api/identity-serviceへ問い合わせる
   # 暫定策(log-writer(#572)/media-service(#573)と同じ。issue #574)。
   legacy-api-uri: ${LEGACY_API_URI:http://api:8080}
+  # マスター環境サイトの既存カテゴリ/タグ取得(PublishingServiceClient)の呼び出し先。issue #574では
+  # legacy-apiのAiBridgeControllerが所有していたが、CmsAdapterFactory/cms/*の所有権がpublishing-service
+  # へ移った(issue #707)ため、issue #711でこの3エンドポイントのみ切り替えた(Epic #551 C6-5)。
+  publishing-service-uri: ${PUBLISHING_SERVICE_URI:http://publishing:8080}
   identity-service-uri: ${IDENTITY_SERVICE_URI:http://identity:8080}
   # Brave Search APIのベースURL(APIキーとは異なりシステム設定でDB上書きされる対象ではないため、
   # legacy-apiのAppSettingService DEFINITIONSにも含まれていない固定値。env varのみで変更可能)。

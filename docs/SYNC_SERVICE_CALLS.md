@@ -127,7 +127,7 @@ Phase 19の各抽出Issueが暫定策として実装していた「呼び出し�
 |---|---|---|---|---|---|---|
 | log-writer(`GenerationJobClient`) | `GET /api/generation-jobs` | SHORT(5秒) | あり(GET) | あり(`legacy-api`) | 明確なエラー(502) | 済 |
 | content(`LegacyApiBridgeClient`) | `/api/internal/content/**`(プロジェクトメンバー判定・ロール一覧・タグデザイン・site解決等) | (未移行、既存は10秒) | - | - | (未整理、現状は明確なエラー) | 未 |
-| ai(`LegacyApiBridgeClient`) | `/api/internal/ai/**`(GitHubアクセス・既存カテゴリ/タグ・プロジェクトメンバー判定・LLM設定等) | (未移行、既存は10秒) | - | - | (未整理) | 未 |
+| ai(`LegacyApiBridgeClient`) | `/api/internal/ai/**`(GitHubアクセス・プロジェクトメンバー判定・LLM設定等) | (未移行、既存は10秒) | - | - | (未整理) | 未 |
 | analytics(`LegacyApiBridgeClient`) | `/api/internal/analytics/**`(本番サイト有無・プロジェクトメンバー判定) | (未移行、既存は10秒) | - | - | (未整理) | 未 |
 
 ### publishing-service向け
@@ -136,6 +136,7 @@ Phase 19の各抽出Issueが暫定策として実装していた「呼び出し�
 |---|---|---|---|---|---|---|
 | media(`CmsBridgeClient`) | `POST /api/internal/publishing/sites/{site}/media`(multipart)・`GET .../media-scan`・`DELETE .../media/{id}` | RENDER(30秒、大きめのメディア転送のため) | GETのみ | あり(`publishing-service`) | 明確なエラー(CMS操作の成否を呼び出し元へ確実に伝える必要があるため) | 済(issue #709でlegacy-apiからpublishing-serviceへ呼び出し先を切り替え、レビュー指摘対応でパスも/api/internal/cms/**から/api/internal/publishing/**へ変更、C12対応は維持) |
 | project(`CmsProvisioningBridgeClient`) | `POST /api/internal/project/cms/test-connection`・`install-wp-cli`・`has-author-capability`・`list-active-plugins`・`provision`・`export-database`・`export-media`・`export-themes` | (未移行、既存は固定タイムアウト。接続3秒・読み取り60秒) | - | - | (未整理、既存はconnection-check系のみ機能縮退=失敗結果を返す、それ以外は明確なエラー) | 未(issue #710でlegacy-apiからpublishing-serviceへ呼び出し先を切り替えたが、`SyncServiceClient`への移行は既定プロファイル(最長RENDER30秒)ではSSH/wp-cliのエクスポート処理に対して読み取りタイムアウトが不足する可能性があるため見送り、既存の固定タイムアウトRestClientを維持) |
+| ai(`PublishingServiceClient`) | `GET /api/internal/ai/projects/{id}/existing-categories`・`existing-categories-with-parents`・`existing-tags` | (未移行、既存は10秒) | - | - | 機能縮退(取得失敗時は空リストへフォールバック、カテゴリ/タグ提示はメタデータ提案の補助情報のため) | 未(issue #574ではlegacy-apiの`AiBridgeController`が所有していたが、`CmsAdapterFactory`/`cms/*`の所有権がpublishing-serviceへ移った(issue #707)ため、issue #711でこの3エンドポイントのみ`LegacyApiBridgeClient`から分離・切り替え) |
 
 ### media-service向け
 
