@@ -1,6 +1,6 @@
-package com.letsblog.api.dto;
+package com.letsblog.publishing.dto;
 
-import com.letsblog.api.cms.ConnectionCheckResult;
+import com.letsblog.publishing.cms.ConnectionCheckResult;
 
 /** {@code CmsProvisioningBridgeController#testConnection}のレスポンス。{@link ConnectionCheckResult}をそのまま転写する。 */
 public record CmsBridgeConnectionCheckResponse(

@@ -440,6 +440,11 @@ services:
       # (起動時の依存関係(depends_on)には含めない。apiがprojectのhealthyを待つため、循環させないよう
       # 実行時呼び出し先としてのみ設定する)。
       LEGACY_API_URI: http://api:8080
+      # CMSプロビジョニングブリッジ(CmsProvisioningBridgeClient、サイト登録・接続確認・wp-cli
+      # インストール・環境同期のSSH/wp-cli操作)の呼び出し先。issue #577 stage2ではlegacy-apiが
+      # 所有していたが、issue #710でpublishing-serviceへ移管した(Epic #551 C6-4。起動時の
+      # 依存関係(depends_on)には含めない、理由は上のLEGACY_API_URIと同じ)。
+      PUBLISHING_SERVICE_URI: http://publishing:8080
       # 組み込みタグのデザインCSS/HTMLテンプレートのAI生成(TagDesignGenerationService)の呼び出し先。
       AI_SERVICE_URI: http://ai:8080
       # AdminAuthorizationServiceのrequireAdmin/requireProjectMemberOrAdmin・自分自身のuserId解決の

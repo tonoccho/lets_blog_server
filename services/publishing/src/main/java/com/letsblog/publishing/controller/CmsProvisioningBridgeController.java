@@ -1,18 +1,18 @@
-package com.letsblog.api.controller;
+package com.letsblog.publishing.controller;
 
-import com.letsblog.api.cms.CmsAdapter;
-import com.letsblog.api.cms.CmsAdapterFactory;
-import com.letsblog.api.cms.CmsCredentials;
-import com.letsblog.api.cms.CmsType;
-import com.letsblog.api.cms.ConnectionCheckResult;
-import com.letsblog.api.cms.WpCliInstallResult;
-import com.letsblog.api.cms.ssh.WordPressSshOperations;
-import com.letsblog.api.dto.CmsBridgeConnectionCheckResponse;
-import com.letsblog.api.dto.CmsBridgeCredentialsRequest;
-import com.letsblog.api.dto.CmsBridgeExportDatabaseResponse;
-import com.letsblog.api.dto.CmsBridgeProvisionRequest;
-import com.letsblog.api.dto.CmsBridgeProvisionResponse;
-import com.letsblog.api.service.ProvisioningService;
+import com.letsblog.publishing.cms.CmsAdapter;
+import com.letsblog.publishing.cms.CmsAdapterFactory;
+import com.letsblog.publishing.cms.CmsCredentials;
+import com.letsblog.publishing.cms.CmsType;
+import com.letsblog.publishing.cms.ConnectionCheckResult;
+import com.letsblog.publishing.cms.WpCliInstallResult;
+import com.letsblog.publishing.cms.ssh.WordPressSshOperations;
+import com.letsblog.publishing.dto.CmsBridgeConnectionCheckResponse;
+import com.letsblog.publishing.dto.CmsBridgeCredentialsRequest;
+import com.letsblog.publishing.dto.CmsBridgeExportDatabaseResponse;
+import com.letsblog.publishing.dto.CmsBridgeProvisionRequest;
+import com.letsblog.publishing.dto.CmsBridgeProvisionResponse;
+import com.letsblog.publishing.service.ProvisioningService;
 import jakarta.validation.Valid;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -23,16 +23,19 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Base64;
 
 /**
- * project-service向けの内部CMSブリッジ(issue #577 stage2)。project-serviceへ移設した
- * SiteService/ProvisioningService/ProjectEnvironmentSyncServiceが、サイト登録・接続確認・
- * カテゴリ/タグ/著者プロビジョニング・環境同期のために実際のWordPress操作(SSH/wp-cliエージェント経由)を
- * 必要とするが、その実装({@link CmsAdapter}/{@link WordPressSshOperations}、SSH秘密鍵の取り扱いを含む)は
- * まだ移設せずlegacy-apiに残す(media-service(#573)のCmsMediaBridgeControllerと同じ方針: 実際の
- * CMS接続処理は集約したまま、呼び出し元サービスは「この認証情報でこの操作をしてほしい」という
- * 依頼のみを送る)。
+ * project-service向けの内部CMSブリッジ(issue #577 stage2でlegacy-apiに新設、issue #710で
+ * publishing-serviceへ移管、Epic #551 C6-4)。project-service側のSiteService/ProvisioningService/
+ * ProjectEnvironmentSyncServiceが、サイト登録・接続確認・カテゴリ/タグ/著者プロビジョニング・
+ * 環境同期のために実際のWordPress操作(SSH/wp-cliエージェント経由)を必要とするが、その実装
+ * ({@link CmsAdapter}/{@link WordPressSshOperations}、SSH秘密鍵の取り扱いを含む)は
+ * publishing-service側に集約したまま、呼び出し元サービスは「この認証情報でこの操作をしてほしい」
+ * という依頼のみを送る(media-serviceのCmsMediaBridgeController(#573→#709)と同じ方針)。
  *
- * <p>credentialsは呼び出しの間だけ受け渡すその場限りの値であり、legacy-api側では永続化しない
+ * <p>credentialsは呼び出しの間だけ受け渡すその場限りの値であり、publishing-service側では永続化しない
  * (project-serviceが暗号化して永続化する。#577の受入基準「サイトのCMS認証情報はproject-serviceが正」)。
+ *
+ * <p>認証は{@code SecurityConfig}により{@code /api/internal/**}全体に対して有効なJWTを必須とする
+ * (呼び出し元ユーザーのBearerトークンをそのまま転送する方式。移管元のlegacy-api版と同じ暫定策)。
  */
 @RestController
 public class CmsProvisioningBridgeController {
@@ -120,7 +123,7 @@ public class CmsProvisioningBridgeController {
         return wp;
     }
 
-    /** SiteService#buildCredentialsFromMapと同じマッピング(project-service側から見た生のcredentials表現)。 */
+    /** project-service側のSiteService#buildCredentialsFromMapと同じマッピング(project-service側から見た生のcredentials表現)。 */
     private CmsCredentials buildCredentials(String cmsTypeValue, java.util.Map<String, String> credentials) {
         CmsType cmsType = CmsType.valueOf(cmsTypeValue);
         return switch (cmsType) {

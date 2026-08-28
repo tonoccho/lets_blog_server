@@ -1,10 +1,10 @@
-package com.letsblog.api.service;
+package com.letsblog.publishing.service;
 
-import com.letsblog.api.cms.AuthorProvisioningRequest;
-import com.letsblog.api.cms.CmsAdapter;
-import com.letsblog.api.cms.CmsAdapterFactory;
-import com.letsblog.api.cms.CmsCredentials;
-import com.letsblog.api.cms.CmsType;
+import com.letsblog.publishing.cms.AuthorProvisioningRequest;
+import com.letsblog.publishing.cms.CmsAdapter;
+import com.letsblog.publishing.cms.CmsAdapterFactory;
+import com.letsblog.publishing.cms.CmsCredentials;
+import com.letsblog.publishing.cms.CmsType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -19,6 +19,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/** ProvisioningServiceの回帰テスト(issue #577 stage2でlegacy-api向けに作成、issue #710でpublishing-serviceへ移管)。 */
 @ExtendWith(MockitoExtension.class)
 class ProvisioningServiceTest {
 

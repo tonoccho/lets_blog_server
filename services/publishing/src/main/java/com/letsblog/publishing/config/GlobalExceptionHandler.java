@@ -10,6 +10,7 @@ import com.letsblog.publishing.service.IdentityServiceUnavailableException;
 import com.letsblog.publishing.service.InvalidPlantUmlTagException;
 import com.letsblog.publishing.service.InvalidRechartsTagException;
 import com.letsblog.publishing.service.ProjectNotFoundException;
+import com.letsblog.publishing.service.ProvisioningException;
 import com.letsblog.publishing.service.SiteNotFoundException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -84,6 +85,16 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(MediaRenderException.class)
     public ResponseEntity<ErrorResponse> handleMediaRenderException(MediaRenderException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /**
+     * CmsProvisioningBridgeControllerが委譲するサイトプロビジョニングの致命的な失敗(issue #710で
+     * legacy-apiから移設)。CMSアダプタの解決自体に失敗した場合のみ投げられる(部分的な失敗は
+     * ProvisioningResultのエラーフィールドとして200で返る)。
+     */
+    @ExceptionHandler(ProvisioningException.class)
+    public ResponseEntity<ErrorResponse> handleProvisioningException(ProvisioningException e) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 

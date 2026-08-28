@@ -1,13 +1,19 @@
-package com.letsblog.api.service;
+package com.letsblog.publishing.service;
 
-import com.letsblog.api.cms.AuthorProvisioningRequest;
-import com.letsblog.api.cms.CmsAdapter;
-import com.letsblog.api.cms.CmsAdapterFactory;
-import com.letsblog.api.cms.CmsCredentials;
-import com.letsblog.api.cms.CmsType;
+import com.letsblog.publishing.cms.AuthorProvisioningRequest;
+import com.letsblog.publishing.cms.CmsAdapter;
+import com.letsblog.publishing.cms.CmsAdapterFactory;
+import com.letsblog.publishing.cms.CmsCredentials;
+import com.letsblog.publishing.cms.CmsType;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+/**
+ * project-service向けの内部CMSブリッジ(issue #710でlegacy-apiから移設。移設元は#577 stage2の
+ * {@code com.letsblog.api.service.ProvisioningService})。project-serviceへ移設したSiteServiceが、
+ * サイト登録時のCMS側プロビジョニング(デフォルトカテゴリ・タグ・著者の作成)をこのブリッジ経由で
+ * 依頼する。
+ */
 @Service
 @Slf4j
 public class ProvisioningService {
@@ -23,7 +29,7 @@ public class ProvisioningService {
      * カテゴリ/タグ/著者は個別にtry-catchし、部分的な失敗は許容してresultにエラーを記録するのみとする
      * (例: カテゴリ作成は成功したがタグ作成が失敗、といったケースでサイト登録自体は継続させる)。
      * CMSアダプタの解決自体に失敗するなど致命的な場合のみ ProvisioningException を投げ、
-     * 呼び出し元(SiteService.register)でサイト登録全体をロールバックさせる。
+     * 呼び出し元(project-serviceのSiteService.register)でサイト登録全体をロールバックさせる。
      *
      * @param actorEmail 著者として登録するサイト登録者のメールアドレス。null の場合は著者プロビジョニングをスキップする。
      */

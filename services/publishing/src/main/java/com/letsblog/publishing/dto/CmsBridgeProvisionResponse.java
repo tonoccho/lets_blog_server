@@ -1,6 +1,6 @@
-package com.letsblog.api.dto;
+package com.letsblog.publishing.dto;
 
-import com.letsblog.api.service.ProvisioningService;
+import com.letsblog.publishing.service.ProvisioningService;
 
 /** {@code CmsProvisioningBridgeController#provision}のレスポンス。{@link ProvisioningService.ProvisioningResult}をそのまま転写する。 */
 public record CmsBridgeProvisionResponse(
