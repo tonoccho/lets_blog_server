@@ -1,7 +1,7 @@
-package com.letsblog.api.controller;
+package com.letsblog.platform.controller;
 
-import com.letsblog.api.service.BackupException;
-import com.letsblog.api.service.BackupService;
+import com.letsblog.platform.service.BackupException;
+import com.letsblog.platform.service.BackupService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -17,8 +17,11 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
 /**
- * Let's Blogアプリ自身のDBのバックアップ(ダウンロード)/リストアを提供する。
- * 権限確認・確認フラグの検証・監査ログ記録はBackupService側で行う(いずれもadmin限定の破壊的操作)。
+ * Let's Blog全体(全サービスのMySQLスキーマ + Keycloak PostgreSQL + 生成画像ファイル)のバックアップ
+ * (ダウンロード)/リストアを提供する。legacy-apiのBackupControllerと同じAPI形状のまま
+ * platform-serviceへ移設・対象拡張したもの(issue #694、C10-2)。権限確認・確認フラグの検証・
+ * 監査ログ記録はBackupService側で行う(いずれもadmin限定の破壊的操作)。gatewayの
+ * {@code /api/backup/**}ルートを経由する。
  */
 @RestController
 @RequestMapping("/api/backup")

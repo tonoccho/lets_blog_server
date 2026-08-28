@@ -5,7 +5,6 @@ import com.letsblog.api.client.AnalyticsServiceException;
 import com.letsblog.api.cms.CmsApiException;
 import com.letsblog.api.cms.agent.AgentOperationException;
 import com.letsblog.api.cms.ssh.SshOperationException;
-import com.letsblog.api.service.BackupException;
 import com.letsblog.api.service.EmailAlreadyExistsException;
 import com.letsblog.api.service.EmailSendException;
 import com.letsblog.api.service.ForbiddenException;
@@ -143,10 +142,8 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 
-    @ExceptionHandler(BackupException.class)
-    public ResponseEntity<ErrorResponse> handleBackupException(BackupException e) {
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ErrorResponse.of(e.getMessage()));
-    }
+    // BackupExceptionのハンドリングはBackupServiceと共にplatform-serviceへ移設した
+    // (issue #694、C10-2。com.letsblog.platform.config.GlobalExceptionHandler参照)。
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException e) {

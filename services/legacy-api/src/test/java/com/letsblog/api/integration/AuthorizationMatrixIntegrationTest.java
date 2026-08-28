@@ -132,9 +132,7 @@ class AuthorizationMatrixIntegrationTest {
                 // 撤去したため対象外。残るsignup/setup/setup-statusはSecurityConfigのPUBLIC_PATHS
                 // であり対象外)
 
-                // -- BackupController (2) --
-                new Endpoint("GET", "/api/backup/download"),
-                new Endpoint("POST", "/api/backup/restore"),
+                // (BackupControllerは#694でplatform-serviceへ移設したため対象外)
 
                 // -- CmsMediaBridgeController (3、#573 stage3で追加) --
                 // media-service専用の内部ブリッジ(AUTHORIZATION_MATRIX.mdの一覧表からは省略しているが、

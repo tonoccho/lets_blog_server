@@ -102,28 +102,32 @@ curl -X POST \
 
 ### Manual Database Recovery (Emergency Fallback)
 
-If automated restore fails and you have shell access:
+If automated restore fails and you have shell access (backup format extended to all service schemas +
+Keycloak PostgreSQL in issue #694/C10-2; see [BACKUP_RECOVERY_STRATEGY.md](./BACKUP_RECOVERY_STRATEGY.md#backup-package-format)):
 
 ```bash
 # 1. Extract backup archive
 unzip -d /tmp/backup-extract lets-blog-backup-20240108-145300.zip
 
-# 2. Connect to MySQL (adjust host, user, password as needed)
-mysql -h localhost -u lets_blog_user -p
+# 2. Restore each MySQL schema (one dump file per schema, e.g. mysql/lbs_identity.sql, mysql/lbs_media.sql, ...)
+for dump in /tmp/backup-extract/mysql/*.sql; do
+  schema=$(basename "$dump" .sql)
+  mysql -h $BACKUP_MYSQL_HOST -u $BACKUP_MYSQL_USER -p "$schema" < "$dump"
+done
 
-# 3. In MySQL client, drop current database
-mysql> DROP DATABASE lets_blog;
-mysql> CREATE DATABASE lets_blog;
-mysql> EXIT;
+# 3. Restore the Keycloak PostgreSQL database
+PGPASSWORD=$KEYCLOAK_DB_PASSWORD pg_restore -h keycloak-postgres -U keycloak \
+  --dbname=keycloak --clean --if-exists /tmp/backup-extract/postgres/keycloak.dump
 
-# 4. Restore database dump
-mysql -h localhost -u lets_blog_user -p lets_blog < /tmp/backup-extract/db.sql
-
-# 5. Restore generated images (if backup contains images)
+# 4. Restore generated images (if backup contains images)
 rsync -av /tmp/backup-extract/generated-images/ /var/lib/lets-blog/generated-images/
 
-# 6. Verify permissions
+# 5. Verify permissions
 sudo chown -R app:app /var/lib/lets-blog/generated-images/
+
+# 6. Restart every service so each picks up its restored schema, then verify all report healthy
+docker compose up -d identity project content media ai analytics platform gateway legacy-api keycloak
+docker compose ps
 ```
 
 ## Backup Verification

@@ -1,6 +1,7 @@
-package com.letsblog.api.service;
+package com.letsblog.platform.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.letsblog.platform.config.BackupProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -17,6 +18,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
@@ -25,21 +27,25 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.notNullValue;
-import static org.hamcrest.Matchers.notNullValue;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 
 /**
- * BackupService unit tests covering authorization, validation, and archive structure.
- * Process-level tests (mysqldump/mysql execution) are in integration tests.
+ * BackupService unit tests covering authorization, validation, and archive structure
+ * (legacy-apiのBackupServiceTestと同じ観点を、全MySQLスキーマ+Keycloak PostgreSQL対応後の
+ * アーカイブ構成に対して踏襲する。issue #694)。
+ * Process-level tests (mysqldump/mysql/pg_dump/pg_restore execution)は対象としない
+ * (実DBに接続する結合テストの領域。ADR-0006参照)。
  */
 @ExtendWith(MockitoExtension.class)
 class BackupServiceTest {
 
     private static final String ENCRYPTION_KEY = "test-encryption-key";
+    private static final List<String> MYSQL_SCHEMAS = List.of("lbs_identity", "lbs_media", "lets_blog");
+    private static final String POSTGRES_DATABASE = "keycloak";
 
     @Mock
     private AdminAuthorizationService adminAuthorizationService;
@@ -51,20 +57,38 @@ class BackupServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new BackupService("localhost", "3306", "lets_blog", "lbs_app", "secret",
-                generatedImagesDir.toString(), ENCRYPTION_KEY, adminAuthorizationService, new ObjectMapper());
+        BackupProperties properties = new BackupProperties();
+        properties.getMysql().setHost("localhost");
+        properties.getMysql().setPort("3306");
+        properties.getMysql().setUser("lbs_backup");
+        properties.getMysql().setPassword("secret");
+        properties.getMysql().setSchemas(MYSQL_SCHEMAS);
+        properties.getPostgres().setHost("localhost");
+        properties.getPostgres().setPort("5432");
+        properties.getPostgres().setUser("keycloak");
+        properties.getPostgres().setPassword("secret");
+        properties.getPostgres().setDatabase(POSTGRES_DATABASE);
+
+        service = new BackupService(properties, generatedImagesDir.toString(), ENCRYPTION_KEY,
+                adminAuthorizationService, new ObjectMapper());
     }
 
     private byte[] buildArchive(String encryptionKeyHash) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (ZipOutputStream zip = new ZipOutputStream(out)) {
-            zip.putNextEntry(new ZipEntry("db.sql"));
-            zip.write("SELECT 1;".getBytes());
+            zip.putNextEntry(new ZipEntry("metadata.json"));
+            zip.write(new ObjectMapper().writeValueAsBytes(new BackupService.BackupMetadata(
+                    encryptionKeyHash, Instant.now().toString(), MYSQL_SCHEMAS, List.of(POSTGRES_DATABASE))));
             zip.closeEntry();
 
-            zip.putNextEntry(new ZipEntry("metadata.json"));
-            zip.write(new ObjectMapper().writeValueAsBytes(
-                    new BackupService.BackupMetadata(encryptionKeyHash, Instant.now().toString())));
+            for (String schema : MYSQL_SCHEMAS) {
+                zip.putNextEntry(new ZipEntry("mysql/" + schema + ".sql"));
+                zip.write("SELECT 1;".getBytes());
+                zip.closeEntry();
+            }
+
+            zip.putNextEntry(new ZipEntry("postgres/" + POSTGRES_DATABASE + ".dump"));
+            zip.write(new byte[]{1, 2, 3});
             zip.closeEntry();
         }
         return out.toByteArray();
@@ -73,13 +97,19 @@ class BackupServiceTest {
     private byte[] buildArchiveWithImages() throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (ZipOutputStream zip = new ZipOutputStream(out)) {
-            zip.putNextEntry(new ZipEntry("db.sql"));
-            zip.write("SELECT 1;".getBytes());
+            zip.putNextEntry(new ZipEntry("metadata.json"));
+            zip.write(new ObjectMapper().writeValueAsBytes(new BackupService.BackupMetadata(
+                    sha256Hex(ENCRYPTION_KEY), Instant.now().toString(), MYSQL_SCHEMAS, List.of(POSTGRES_DATABASE))));
             zip.closeEntry();
 
-            zip.putNextEntry(new ZipEntry("metadata.json"));
-            zip.write(new ObjectMapper().writeValueAsBytes(
-                    new BackupService.BackupMetadata(sha256Hex(ENCRYPTION_KEY), Instant.now().toString())));
+            for (String schema : MYSQL_SCHEMAS) {
+                zip.putNextEntry(new ZipEntry("mysql/" + schema + ".sql"));
+                zip.write("SELECT 1;".getBytes());
+                zip.closeEntry();
+            }
+
+            zip.putNextEntry(new ZipEntry("postgres/" + POSTGRES_DATABASE + ".dump"));
+            zip.write(new byte[]{1, 2, 3});
             zip.closeEntry();
 
             zip.putNextEntry(new ZipEntry("generated-images/test-image.jpg"));
@@ -92,7 +122,6 @@ class BackupServiceTest {
         }
         return out.toByteArray();
     }
-
 
     private String sha256Hex(String value) {
         try {
@@ -111,16 +140,6 @@ class BackupServiceTest {
         @DisplayName("createBackup requires admin privileges")
         void requiresAdminPrivileges() {
             doThrow(new ForbiddenException("この操作にはadmin権限が必要です"))
-                    .when(adminAuthorizationService).requireAdmin();
-
-            assertThrows(ForbiddenException.class, () -> service.createBackup());
-            verify(adminAuthorizationService).requireAdmin();
-        }
-
-        @Test
-        @DisplayName("createBackup validates admin authorization first")
-        void validatesAuthorizationFirst() {
-            doThrow(new ForbiddenException("admin required"))
                     .when(adminAuthorizationService).requireAdmin();
 
             assertThrows(ForbiddenException.class, () -> service.createBackup());
@@ -208,80 +227,37 @@ class BackupServiceTest {
     }
 
     @Nested
-    @DisplayName("Backup Archive Validation")
-    class BackupArchiveValidationTests {
-
-        @Test
-        @DisplayName("archive should be readable as ZIP")
-        void archiveShouldBeReadableZip() throws Exception {
-            byte[] archive = buildArchive(sha256Hex(ENCRYPTION_KEY));
-
-            // Should not throw when reading as ZIP
-            try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
-                ZipEntry entry = zip.getNextEntry();
-                assertThat("Archive should contain entries", entry, notNullValue());
-            }
-        }
-
-        @Test
-        @DisplayName("archive should contain db.sql and metadata")
-        void archiveContainsRequiredEntries() throws Exception {
-            byte[] archive = buildArchive(sha256Hex(ENCRYPTION_KEY));
-
-            int dbSqlCount = 0;
-            int metadataCount = 0;
-            try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
-                ZipEntry entry;
-                while ((entry = zip.getNextEntry()) != null) {
-                    if ("db.sql".equals(entry.getName())) dbSqlCount++;
-                    if ("metadata.json".equals(entry.getName())) metadataCount++;
-                }
-            }
-
-            assertEquals(1, dbSqlCount, "Archive should contain exactly one db.sql");
-            assertEquals(1, metadataCount, "Archive should contain exactly one metadata.json");
-        }
-
-        @Test
-        @DisplayName("archive with images should preserve directory structure")
-        void archivePreservesDirectoryStructure() throws Exception {
-            byte[] archive = buildArchiveWithImages();
-
-            boolean hasImageDir = false;
-            try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
-                ZipEntry entry;
-                while ((entry = zip.getNextEntry()) != null) {
-                    if (entry.getName().startsWith("generated-images/")) {
-                        hasImageDir = true;
-                    }
-                }
-            }
-
-            assertTrue(hasImageDir, "Archive with images should preserve directory structure");
-        }
-    }
-
-    @Nested
     @DisplayName("Backup Archive Structure")
     class BackupArchiveStructureTests {
 
         @Test
-        @DisplayName("archive contains required entries")
+        @DisplayName("archive contains a metadata.json entry and one sql dump entry per configured schema")
         void archiveContainsRequiredEntries() throws Exception {
             byte[] archive = buildArchive(sha256Hex(ENCRYPTION_KEY));
 
+            java.util.Set<String> mysqlEntries = new java.util.HashSet<>();
+            boolean hasMetadata = false;
+            boolean hasPostgresDump = false;
+
             try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
                 ZipEntry entry;
-                boolean hasDbSql = false;
-                boolean hasMetadata = false;
-
                 while ((entry = zip.getNextEntry()) != null) {
-                    if ("db.sql".equals(entry.getName())) hasDbSql = true;
-                    if ("metadata.json".equals(entry.getName())) hasMetadata = true;
+                    if ("metadata.json".equals(entry.getName())) {
+                        hasMetadata = true;
+                    }
+                    if (entry.getName().startsWith("mysql/") && entry.getName().endsWith(".sql")) {
+                        mysqlEntries.add(entry.getName());
+                    }
+                    if (entry.getName().startsWith("postgres/") && entry.getName().endsWith(".dump")) {
+                        hasPostgresDump = true;
+                    }
                 }
+            }
 
-                assertTrue(hasDbSql, "db.sql entry missing");
-                assertTrue(hasMetadata, "metadata.json entry missing");
+            assertTrue(hasMetadata, "metadata.json entry missing");
+            assertTrue(hasPostgresDump, "postgres dump entry missing");
+            for (String schema : MYSQL_SCHEMAS) {
+                assertTrue(mysqlEntries.contains("mysql/" + schema + ".sql"), "mysql/" + schema + ".sql missing");
             }
         }
 
@@ -290,23 +266,23 @@ class BackupServiceTest {
         void archiveIncludesGeneratedImages() throws Exception {
             byte[] archive = buildArchiveWithImages();
 
+            boolean hasTestImage = false;
+            boolean hasSubdirImage = false;
+
             try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
                 ZipEntry entry;
-                boolean hasTestImage = false;
-                boolean hasSubdirImage = false;
-
                 while ((entry = zip.getNextEntry()) != null) {
                     if ("generated-images/test-image.jpg".equals(entry.getName())) hasTestImage = true;
                     if ("generated-images/subdir/another.png".equals(entry.getName())) hasSubdirImage = true;
                 }
-
-                assertTrue(hasTestImage, "test-image.jpg missing");
-                assertTrue(hasSubdirImage, "subdir/another.png missing");
             }
+
+            assertTrue(hasTestImage, "test-image.jpg missing");
+            assertTrue(hasSubdirImage, "subdir/another.png missing");
         }
 
         @Test
-        @DisplayName("metadata contains encryptionKeyHash and createdAt")
+        @DisplayName("metadata contains encryptionKeyHash, createdAt, mysqlSchemas and postgresDatabases")
         void metadataContainsRequiredFields() throws Exception {
             byte[] archive = buildArchive(sha256Hex(ENCRYPTION_KEY));
             ObjectMapper mapper = new ObjectMapper();
@@ -316,9 +292,12 @@ class BackupServiceTest {
                 while ((entry = zip.getNextEntry()) != null) {
                     if ("metadata.json".equals(entry.getName())) {
                         byte[] content = zip.readAllBytes();
-                        BackupService.BackupMetadata metadata = mapper.readValue(content, BackupService.BackupMetadata.class);
+                        BackupService.BackupMetadata metadata =
+                                mapper.readValue(content, BackupService.BackupMetadata.class);
                         assertThat("encryptionKeyHash", metadata.encryptionKeyHash(), notNullValue());
                         assertThat("createdAt", metadata.createdAt(), notNullValue());
+                        assertEquals(MYSQL_SCHEMAS, metadata.mysqlSchemas());
+                        assertEquals(List.of(POSTGRES_DATABASE), metadata.postgresDatabases());
                     }
                 }
             }
@@ -342,26 +321,44 @@ class BackupServiceTest {
         void archiveIsValidZipFormat() throws Exception {
             byte[] archive = buildArchive(sha256Hex(ENCRYPTION_KEY));
 
-            // Should not throw
             try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
-                zip.getNextEntry(); // Should succeed
+                assertThat("Archive should contain entries", zip.getNextEntry(), notNullValue());
             }
         }
+    }
+
+    @Nested
+    @DisplayName("Restore rejects archive entries outside the configured schema allow-list")
+    class UnknownSchemaRejectionTests {
 
         @Test
-        @DisplayName("archive contains readable entries")
-        void archiveContainsReadableEntries() throws Exception {
-            byte[] archive = buildArchive(sha256Hex(ENCRYPTION_KEY));
+        @DisplayName("restoreBackup silently skips db dump entries for schemas not in the configured list, "
+                + "so no mysql/pg_restore subprocess is ever launched for them "
+                + "(defense against a tampered archive naming e.g. the MySQL system schema)")
+        void ignoresUnknownSchemaEntriesWithoutInvokingAnyProcess() throws Exception {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            try (ZipOutputStream zip = new ZipOutputStream(out)) {
+                zip.putNextEntry(new ZipEntry("metadata.json"));
+                zip.write(new ObjectMapper().writeValueAsBytes(new BackupService.BackupMetadata(
+                        sha256Hex(ENCRYPTION_KEY), Instant.now().toString(), MYSQL_SCHEMAS,
+                        List.of(POSTGRES_DATABASE))));
+                zip.closeEntry();
 
-            try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
-                ZipEntry entry;
-                int entryCount = 0;
-                while ((entry = zip.getNextEntry()) != null) {
-                    entryCount++;
-                    zip.readAllBytes(); // Verify content is readable
-                }
-                assertThat("Should have at least 2 entries", entryCount, greaterThan(1));
+                // "mysql" is the MySQL system schema, not in MYSQL_SCHEMAS: must not be executed against.
+                zip.putNextEntry(new ZipEntry("mysql/mysql.sql"));
+                zip.write("DROP TABLE user;".getBytes());
+                zip.closeEntry();
             }
+            byte[] archive = out.toByteArray();
+
+            // Every entry present is filtered out (the only mysql/ entry is not in the allow-list, and
+            // there is no postgres/ entry), so restoreBackup completes without ever invoking the real
+            // "mysql"/"pg_restore" binaries. If it attempted to, this test would fail with a
+            // BackupException because those binaries are not necessarily on the test runner's PATH/
+            // reachable host, which would make the intent of this assertion (no invocation) clear too.
+            service.restoreBackup(new ByteArrayInputStream(archive), true, false);
+
+            verify(adminAuthorizationService).requireAdmin();
         }
     }
 }

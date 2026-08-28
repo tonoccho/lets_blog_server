@@ -83,6 +83,29 @@ app:
   # project-service(#577)と同じ暫定策。platform-serviceはusersテーブルへクロススキーマアクセス
   # できない=ADR-0004のクロススキーマ禁止のため)。
   identity-service-uri: ${IDENTITY_SERVICE_URI:http://identity:8080}
+  # BackupService(issue #694)が生成画像ファイルをバックアップ/リストアする際の保存先。
+  # legacy-apiのapiコンテナが持っていた同名プロパティと同じ(#573以降、実体はmedia-serviceが
+  # 書き込むgenerated_images volumeを共有マウントする)。
+  generated-images-storage-path: ${GENERATED_IMAGES_STORAGE_PATH:/app/data/generated-images}
+  # BackupService(issue #694、C10-2)が全サービスのMySQLスキーマ + Keycloak PostgreSQLを横断して
+  # バックアップ/リストアするための接続情報。各サービス専用のDBユーザーでは他スキーマへ
+  # アクセスできない(#570のスキーマ分離)ため、バックアップ専用のMySQLユーザー(既定値
+  # lbs_backup、mysql/init/01-create-service-schemas.shが作成・付与するスキーマ限定の権限)を使う。
+  # KeycloakのPostgreSQLは元々そのDB専用のkeycloakユーザーしか存在しないため、その認証情報を
+  # そのまま流用する(docker-compose.ymlのkeycloak-postgres定義参照)。
+  backup:
+    mysql:
+      host: ${BACKUP_MYSQL_HOST:mysql}
+      port: ${BACKUP_MYSQL_PORT:3306}
+      user: ${BACKUP_MYSQL_USER:lbs_backup}
+      password: ${BACKUP_MYSQL_PASSWORD:}
+      schemas: ${BACKUP_MYSQL_SCHEMAS:lbs_identity,lbs_project,lbs_content,lbs_media,lbs_ai,lbs_publishing,lbs_analytics,lbs_platform,lbs_log,lets_blog}
+    postgres:
+      host: ${BACKUP_POSTGRES_HOST:keycloak-postgres}
+      port: ${BACKUP_POSTGRES_PORT:5432}
+      user: ${BACKUP_POSTGRES_USER:keycloak}
+      password: ${BACKUP_POSTGRES_PASSWORD:}
+      database: ${BACKUP_POSTGRES_DATABASE:keycloak}
 
 # KeycloakのJWT検証。他サービスのSecurityConfig/JwtDecoderConfigと同じ理由により、issuer-uriによる
 # 自動設定は使わずJWKS取得先と期待issuerを個別に指定して組み立てている。
