@@ -29,7 +29,10 @@ FROM eclipse-temurin:21-jre
 # mysqldump/mysqlの基本的な読み書きには互換性がある。
 # postgresql-client: Keycloak PostgreSQL(keycloak-postgres)のバックアップ/リストア用
 # (pg_dump/pg_restoreコマンド、BackupServiceが利用。issue #694で新規追加)。
-RUN apt-get update && apt-get install -y --no-install-recommends curl default-mysql-client postgresql-client \
+# nodejs/npm: VSCode拡張機能(.vsix)のオンデマンドビルド用(システム画面からのダウンロード機能、
+# VscodeExtensionBuildServiceが利用。legacy-apiのDockerfileと同じ理由、issue #696、C10-4で
+# VscodeExtensionBuildServiceと共に移設)。
+RUN apt-get update && apt-get install -y --no-install-recommends curl default-mysql-client postgresql-client nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /workspace/services/platform/build/libs/*.jar app.jar

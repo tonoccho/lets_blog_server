@@ -68,8 +68,6 @@ app:
   wordpress-provision-token: test-token
   bulk-upload-storage-path: /tmp/bulk-uploads
   generated-images-storage-path: /tmp/generated-images
-  vscode-extension-source-path: /tmp/extension-src
-  vscode-extension-build-path: /tmp/extension-build
   backup-mysql-host: localhost
   backup-mysql-port: 3306
   backup-mysql-database: lets_blog_test

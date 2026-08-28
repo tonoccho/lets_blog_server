@@ -304,10 +304,9 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("POST", "/api/projects/1/tag-design-settings/TOC/generate"),
 
                 // -- TaxonomyController (1) --
-                new Endpoint("POST", "/api/taxonomy/resolve"),
+                new Endpoint("POST", "/api/taxonomy/resolve")
 
-                // -- VscodeExtensionController (1) --
-                new Endpoint("GET", "/api/system/vscode-extension")
+                // (VscodeExtensionControllerは#696でplatform-serviceへ移設したため対象外)
         );
     }
 

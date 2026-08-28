@@ -1,4 +1,4 @@
-package com.letsblog.api.service;
+package com.letsblog.platform.service;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,10 +19,14 @@ import java.util.stream.Stream;
  * システム画面からのVSCode拡張機能ダウンロード用に、.vsixパッケージをオンデマンドでビルドする。
  * ソースは読み取り専用でマウントされた{@code vscode-extension-source-path}配下にあり、
  * 書き込み可能な作業ディレクトリへコピーした上で npm ci → npm run compile → npx vsce package を実行する
- * (SshKeyGenerationServiceと同様、ProcessBuilderでホストコマンドに委譲するパターン)。
+ * (ホストコマンドにProcessBuilderで委譲するパターン)。
  * ダウンロードのたびに必ず再ビルドする(以前はバージョンごとにキャッシュしていたが、
  * package.jsonのversionを上げ忘れると古いビルドが配布され続けてしまう事故が起きたため、
  * キャッシュはせず常に最新ソースからビルドする)。
+ *
+ * <p>legacy-apiから移設したもの(issue #696、C10-4。#579で分割されたplatform-service抽出の
+ * 最終split。#693/#694/#695(C10-1〜C10-3)と同じくlegacy-apiの実装をそのまま踏襲しており、
+ * ビルド手順・キャッシュしない方針に変更はない)。
  */
 @Service
 @Slf4j

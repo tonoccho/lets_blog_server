@@ -1,6 +1,6 @@
-package com.letsblog.api.controller;
+package com.letsblog.platform.controller;
 
-import com.letsblog.api.service.VscodeExtensionBuildService;
+import com.letsblog.platform.service.VscodeExtensionBuildService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
@@ -17,6 +17,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
+/**
+ * legacy-apiのVscodeExtensionControllerTestと同じ観点をplatform-serviceへ移設したもの
+ * (issue #696、C10-4)。
+ */
 @ExtendWith(MockitoExtension.class)
 class VscodeExtensionControllerTest {
 

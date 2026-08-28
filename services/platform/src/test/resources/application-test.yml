@@ -54,6 +54,11 @@ app:
   web:
     base-url: http://localhost:3000
   generated-images-storage-path: /tmp/lbs-platform-test-generated-images
+  # VscodeExtensionBuildServiceのテスト用値(issue #696、C10-4)。MockitoベースのVscodeExtensionBuild
+  # ServiceTest自体はこれらを使わないが、@SpringBootTestでフルコンテキストを起動する
+  # AdminAuthorizationIntegrationTestがBean生成のために必要とする。
+  vscode-extension-source-path: /tmp/lbs-platform-test-extension-src
+  vscode-extension-build-path: /tmp/lbs-platform-test-extension-build
   backup:
     mysql:
       host: localhost
