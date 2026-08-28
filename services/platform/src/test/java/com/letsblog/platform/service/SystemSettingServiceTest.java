@@ -1,8 +1,8 @@
-package com.letsblog.api.service;
+package com.letsblog.platform.service;
 
 import com.letsblog.common.crypto.CredentialCipher;
-import com.letsblog.api.domain.SystemSetting;
-import com.letsblog.api.repository.SystemSettingRepository;
+import com.letsblog.platform.domain.SystemSetting;
+import com.letsblog.platform.repository.SystemSettingRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -20,7 +20,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * SystemSettingServiceの回帰テスト。DB設定/環境変数フォールバックの優先順位と、
- * admin権限ゲートを中心に検証する。
+ * admin権限ゲートを中心に検証する。legacy-api版から移設(issue #693)。
  */
 @ExtendWith(MockitoExtension.class)
 class SystemSettingServiceTest {

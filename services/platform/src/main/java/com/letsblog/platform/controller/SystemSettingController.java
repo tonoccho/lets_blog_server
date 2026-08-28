@@ -1,8 +1,8 @@
-package com.letsblog.api.controller;
+package com.letsblog.platform.controller;
 
-import com.letsblog.api.dto.BraveSearchApiKeyStatusResponse;
-import com.letsblog.api.dto.SetBraveSearchApiKeyRequest;
-import com.letsblog.api.service.SystemSettingService;
+import com.letsblog.platform.dto.BraveSearchApiKeyStatusResponse;
+import com.letsblog.platform.dto.SetBraveSearchApiKeyRequest;
+import com.letsblog.platform.service.SystemSettingService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 値そのものは返さず、設定済みかどうか・設定元(DB/環境変数)のみを返す
  * (site credentialsのconfiguredSecretFieldsと同じ「秘匿値は見せない」方針)。
  * 更新・削除の権限確認・監査ログ記録はSystemSettingService側で行う(admin限定の操作)。
+ * legacy-apiから移設(issue #693)。gatewayの{@code /api/system-settings/**}ルートを経由する。
  */
 @RestController
 @RequestMapping("/api/system-settings")

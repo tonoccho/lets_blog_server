@@ -1,4 +1,4 @@
-package com.letsblog.api.dto;
+package com.letsblog.platform.dto;
 
 /**
  * 秘匿情報(secret=true)は値そのものを返さず、設定済みかどうか(configured)と設定元(source)のみを返す。

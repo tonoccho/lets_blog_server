@@ -1,12 +1,11 @@
-package com.letsblog.api.service;
+package com.letsblog.platform.service;
 
-import com.letsblog.api.ai.AiProvider;
-import com.letsblog.api.ai.ImageGenerationConfigProvider;
-import com.letsblog.api.aop.AuditLog;
+import com.letsblog.platform.ai.AiProvider;
+import com.letsblog.platform.aop.AuditLog;
 import com.letsblog.common.crypto.CredentialCipher;
-import com.letsblog.api.domain.AuditLogAction;
-import com.letsblog.api.domain.SystemSetting;
-import com.letsblog.api.repository.SystemSettingRepository;
+import com.letsblog.platform.domain.AuditLogAction;
+import com.letsblog.platform.domain.SystemSetting;
+import com.letsblog.platform.repository.SystemSettingRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,16 +20,18 @@ import java.util.Map;
  * Google OAuthクライアント・Webフロントの公開URL・画像生成/アップロードのレート制限)をWeb管理画面
  * (システム設定画面、issue #403)から編集可能にする。SystemSettingService(Brave Search APIキー)と
  * 同じ仕組み(system_settingsテーブルにCredentialCipherでAES-256-GCM暗号化して保存し、未設定時は
- * 環境変数にフォールバック)を再利用するが、DB接続情報・暗号化キー自体・NEXTAUTH_SECRET・Docker内部
- * サービス間通信設定等のインフラ系設定は誤設定時にアプリが起動不能になるリスクが高いため対象外とし、
- * このサービスが扱うキーのみを編集対象とする。Brave Search APIキー・Google AdSense OAuth
- * クライアント(issue #407)はプロジェクト単位の設定のため対象外。issue #574でLlmClient自体は
- * ai-serviceへ移設したため、実効LLM接続設定(provider/apiKeyFor/defaultModelFor/baseUrlFor/
- * requestTimeoutSeconds)は{@link com.letsblog.api.controller.AiBridgeController#llmConfig}
- * 経由でai-serviceへ公開する内部ブリッジとして参照される。
+ * 環境変数にフォールバック)を再利用する。legacy-apiから移設(issue #693)。
+ *
+ * <p>legacy-api側では、実効LLM接続設定(provider/apiKeyFor/defaultModelFor/baseUrlFor/
+ * requestTimeoutSeconds)はAiBridgeController#llmConfig経由でPlatformServiceClientが本サービスの
+ * 内部エンドポイント({@link com.letsblog.platform.controller.InternalPlatformSettingsController}）
+ * を呼び出す形でai-serviceへ公開され続ける。画像生成設定(comfyUiBaseUrl/chatGptApiKey/
+ * chatGptBaseUrl)も同様に、legacy-apiに残るChatGptImageClient/ComfyUiClientがPlatformServiceClient
+ * (legacy-api側でImageGenerationConfigProviderを実装)経由で取得する。本サービス自体はlegacy-apiの
+ * ImageGenerationConfigProviderインターフェースを実装しない(モジュールを跨がないため)。
  */
 @Service
-public class AppSettingService implements ImageGenerationConfigProvider {
+public class AppSettingService {
 
     static final String LLM_API_KEY = "llm_api_key";
     static final String LLM_BASE_URL = "llm_base_url";
@@ -275,7 +276,7 @@ public class AppSettingService implements ImageGenerationConfigProvider {
         }
     }
 
-    // ---- 実際の値の解決(各クライアント/サービスから呼ばれる) ----
+    // ---- 実際の値の解決(内部ブリッジ経由で各サービスから呼ばれる) ----
 
     private String resolve(String key) {
         return repository.findById(key)
@@ -382,17 +383,14 @@ public class AppSettingService implements ImageGenerationConfigProvider {
 
     /**
      * Claude(Anthropic)はOllama/OpenAIと異なり自前ホスト型のbaseUrl差し替えに対応していないため、
-     * 固定のエンドポイントを使う(issue #530)。旧ai/LlmClient.ANTHROPIC_BASE_URLと同じ値
-     * (issue #574でLlmClient自体はai-serviceへ移設したが、AppSettingServiceはこの内部ブリッジ
-     * (AiBridgeController#llmConfig)向けに実効baseUrlを解決する責務を引き続き持つ)。
+     * 固定のエンドポイントを使う(issue #530)。旧ai/LlmClient.ANTHROPIC_BASE_URLと同じ値。
      */
     private static final String ANTHROPIC_BASE_URL = "https://api.anthropic.com";
 
     /**
-     * ai-serviceのRemoteLlmConfigProvider(内部ブリッジAiBridgeController#llmConfig経由)、および
-     * legacy-apiに残るLLM呼び出し元(AiGenerationClient経由でai-serviceへ委譲する前段)が、
-     * システム設定として決まる実効LLM接続設定を得るために呼ぶ(issue #574。以前はLlmConfigProvider
-     * インターフェース実装として、ai/パッケージのLlmClientから直接呼ばれていた)。
+     * legacy-apiのPlatformServiceClient(内部ブリッジInternalPlatformSettingsController経由)が、
+     * システム設定として決まる実効LLM接続設定を得るために呼ぶ(issue #693。移設前はai-serviceの
+     * RemoteLlmConfigProviderがAiBridgeController#llmConfig経由でこのメソッド群を参照していた)。
      */
     public AiProvider provider() {
         return getLlmProvider();
@@ -427,17 +425,19 @@ public class AppSettingService implements ImageGenerationConfigProvider {
         return getLlmRequestTimeoutSeconds();
     }
 
-    @Override
+    /**
+     * legacy-apiに残るChatGptImageClient/ComfyUiClientが、PlatformServiceClient
+     * (legacy-api側でImageGenerationConfigProviderを実装)経由で参照する画像生成AIの接続設定
+     * (issue #531、#693で解決責務ごとplatform-serviceへ移設)。
+     */
     public String comfyUiBaseUrl() {
         return getComfyUiBaseUrl();
     }
 
-    @Override
     public String chatGptApiKey() {
         return getImageLlmApiKey();
     }
 
-    @Override
     public String chatGptBaseUrl() {
         return getImageLlmBaseUrl();
     }

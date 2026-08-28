@@ -1,10 +1,10 @@
-package com.letsblog.api.service;
+package com.letsblog.platform.service;
 
-import com.letsblog.api.aop.AuditLog;
+import com.letsblog.platform.aop.AuditLog;
 import com.letsblog.common.crypto.CredentialCipher;
-import com.letsblog.api.domain.AuditLogAction;
-import com.letsblog.api.domain.SystemSetting;
-import com.letsblog.api.repository.SystemSettingRepository;
+import com.letsblog.platform.domain.AuditLogAction;
+import com.letsblog.platform.domain.SystemSetting;
+import com.letsblog.platform.repository.SystemSettingRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,6 +14,9 @@ import org.springframework.transaction.annotation.Transactional;
  * 管理する。DBに値が保存されていればそれを使い(admin向けWeb管理画面から設定可能)、
  * 未設定の場合は .env 由来の環境変数値(app.brave-search-api-key)にフォールバックする
  * (既存の環境変数のみでの運用も引き続き機能する)。値はCredentialCipherでAES-256-GCM暗号化して保存する。
+ * legacy-apiから移設(issue #693)。ai-serviceのBrave Search APIキー解決はlegacy-apiの
+ * PlatformServiceClient経由の内部ブリッジ(InternalPlatformSettingsController)を通じて
+ * 引き続き提供する。
  */
 @Service
 public class SystemSettingService {
@@ -44,8 +47,9 @@ public class SystemSettingService {
     }
 
     /**
-     * Brave Search APIキーの実際の値を返す(BraveSearchClientが呼び出す)。
-     * DB設定があればそれを優先し、なければ環境変数値(空文字列の場合もある)を返す。
+     * Brave Search APIキーの実際の値を返す(InternalPlatformSettingsController経由でlegacy-apiの
+     * AiBridgeController/ai-serviceが呼び出す)。DB設定があればそれを優先し、なければ環境変数値
+     * (空文字列の場合もある)を返す。
      */
     @Transactional(readOnly = true)
     public String getBraveSearchApiKey() {

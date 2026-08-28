@@ -142,6 +142,12 @@ app:
   # コード交換をanalytics-serviceへ委譲する(issue #578、com.letsblog.api.client.
   # AnalyticsProjectSettingsClient参照)。
   analytics-service-uri: ${ANALYTICS_SERVICE_URI:http://localhost:8080}
+  # システム全体のグローバル設定(system_settings: Brave Search APIキー・実効LLM接続設定・画像生成
+  # 接続設定)の所有権がplatform-serviceへ移った(issue #693)ことに伴う内部ブリッジ
+  # (com.letsblog.api.client.PlatformServiceClient参照)。AiBridgeController
+  # (ai-service向けブリッジ)・ChatGptImageClient/ComfyUiClient(画像生成、#574で移設されず
+  # legacy-apiに残置)がこの内部ブリッジ経由で実効値を取得する。
+  platform-service-uri: ${PLATFORM_SERVICE_URI:http://localhost:8080}
   # Project/Site本体の所有権がproject-serviceへ移った(issue #577 stage2)ことに伴い、legacy-apiに残る
   # 一括管理/環境間比較・投稿publish/delete・記事プレビュー等(いずれもCMSアダプタ・SSH実行への深い依存の
   # ため#577では移設せずlegacy-apiに残る)が、プロジェクト/サイトの基本情報・CMS認証情報を

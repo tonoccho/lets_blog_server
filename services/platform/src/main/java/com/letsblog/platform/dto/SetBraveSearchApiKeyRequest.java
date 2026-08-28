@@ -1,4 +1,4 @@
-package com.letsblog.api.dto;
+package com.letsblog.platform.dto;
 
 import jakarta.validation.constraints.NotBlank;
 

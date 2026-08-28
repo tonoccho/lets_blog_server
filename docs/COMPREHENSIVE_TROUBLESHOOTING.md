@@ -596,12 +596,16 @@ Invalid email or password
    ./scripts/reset-admin-password.sh <email> <new-password>
    ```
 
-   This runs inside the `api` container with the `admin-password-reset`
+   This runs inside the `platform` container (issue #693: `AdminPasswordResetRunner`
+   moved from legacy-api to platform-service) with the `admin-password-reset`
    Spring profile (`AdminPasswordResetRunner`), which:
-   - looks up the target user's Keycloak account (by the locally-stored
-     `keycloak_sub`, or by email if not yet linked),
-   - sets the new password on that Keycloak account via the Admin API,
-   - and only then updates the local `password_hash` column for consistency.
+   - looks up the target user's Keycloak account by email via the Keycloak
+     Admin API (platform-service does not have access to legacy-api's local
+     `users` table, per ADR-0004's schema-per-service isolation),
+   - and sets the new password on that Keycloak account via the Admin API.
+
+   The local `users.password_hash` column is not touched by this script
+   (it is unused for authentication since login moved fully to Keycloak).
 
    **The target user must already exist in Keycloak.** If it does not
    (e.g. it was never migrated to Keycloak), the command fails with a clear

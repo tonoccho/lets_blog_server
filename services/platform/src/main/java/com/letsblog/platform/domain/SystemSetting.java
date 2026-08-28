@@ -1,4 +1,4 @@
-package com.letsblog.api.domain;
+package com.letsblog.platform.domain;
 
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -10,6 +10,7 @@ import java.time.LocalDateTime;
 /**
  * アプリ全体で共有するグローバル設定値(プロジェクト/サイトに紐付かないもの)を保持する。
  * 秘匿情報はCredentialCipherでAES-256-GCM暗号化した上でsettingValueEncryptedへ格納する。
+ * legacy-apiから移設(issue #693)。lbs_platformスキーマ(ADR-0004)を所有する。
  */
 @Entity
 @Table(name = "system_settings")
