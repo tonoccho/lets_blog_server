@@ -3,6 +3,7 @@ package com.letsblog.ai.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.ai.ai.LlmClient;
 import com.letsblog.ai.client.LegacyApiBridgeClient;
+import com.letsblog.ai.client.PublishingServiceClient;
 import com.letsblog.ai.domain.ArticlePlanSession;
 import com.letsblog.ai.domain.GenerationJob;
 import com.letsblog.ai.dto.AcceptPlanResponse;
@@ -78,6 +79,9 @@ class ArticlePlanServiceTest {
     private LegacyApiBridgeClient legacyApiBridgeClient;
 
     @Mock
+    private PublishingServiceClient publishingServiceClient;
+
+    @Mock
     private CurrentActorService currentActorService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -104,7 +108,8 @@ class ArticlePlanServiceTest {
         lenient().when(currentActorService.getAuthorizationHeader()).thenReturn(null);
         return new ArticlePlanService(
                 llmClient, llmModelService, webSearchService, generationJobRepository, objectMapper,
-                githubClient, articlePlanSessionRepository, legacyApiBridgeClient, currentActorService);
+                githubClient, articlePlanSessionRepository, legacyApiBridgeClient, publishingServiceClient,
+                currentActorService);
     }
 
     private void stubGithubAccess(Long projectId, Long userId, String token, String owner, String repo) {
@@ -596,7 +601,7 @@ class ArticlePlanServiceTest {
     @Test
     void suggestMetadata_既存カテゴリが取得できる場合はAI提案を既存カテゴリのみに絞り込む() {
         ArticlePlanService service = service();
-        when(legacyApiBridgeClient.listExistingCategories(1L, null)).thenReturn(List.of("お知らせ", "技術"));
+        when(publishingServiceClient.listExistingCategories(1L, null)).thenReturn(List.of("お知らせ", "技術"));
         when(llmClient.generate(anyString(), anyString())).thenReturn(
                 "{\"titles\":[\"タイトル\"],\"slugs\":[\"slug\"],"
                 + "\"categories\":[\"お知らせ\",\"存在しないカテゴリ\"],\"tags\":[]}");
@@ -612,7 +617,7 @@ class ArticlePlanServiceTest {
     @Test
     void listExistingTags_マスターサイトのタグ名一覧を返す() {
         ArticlePlanService service = service();
-        when(legacyApiBridgeClient.listExistingTags(1L, null)).thenReturn(List.of("Java", "AWS"));
+        when(publishingServiceClient.listExistingTags(1L, null)).thenReturn(List.of("Java", "AWS"));
 
         List<String> tags = service.listExistingTags(1L);
 
@@ -622,7 +627,7 @@ class ArticlePlanServiceTest {
     @Test
     void listExistingTags_マスターサイト未紐付けなら空リストを返す() {
         ArticlePlanService service = service();
-        when(legacyApiBridgeClient.listExistingTags(1L, null)).thenReturn(List.of());
+        when(publishingServiceClient.listExistingTags(1L, null)).thenReturn(List.of());
 
         List<String> tags = service.listExistingTags(1L);
 

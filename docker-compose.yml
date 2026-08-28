@@ -211,9 +211,14 @@ services:
       # 全サービス共通の鍵(legacy-api/media-serviceと同じ値)。
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
       # 実効LLM接続設定(システム設定でDB上書き可能、AppSettingServiceが正)・GitHubトークン解決・
-      # マスター環境サイトの既存カテゴリ/タグ取得・プロジェクトメンバー判定・システム全体既定の
-      # Brave Search APIキーの呼び出し先(AiBridgeController、legacy-apiが所有。issue #574)。
+      # プロジェクトメンバー判定・システム全体既定のBrave Search APIキーの呼び出し先
+      # (AiBridgeController、legacy-apiが所有。issue #574)。
       LEGACY_API_URI: http://api:8080
+      # マスター環境サイトの既存カテゴリ/タグ取得(PublishingServiceClient)の呼び出し先。issue #574では
+      # legacy-apiのAiBridgeControllerが所有していたが、CmsAdapterFactory/cms/*の所有権がpublishing-service
+      # へ移った(issue #707)ため、issue #711でこの3エンドポイントのみ切り替えた(Epic #551 C6-5。
+      # 起動時の依存関係(depends_on)には含めない。理由は上のLEGACY_API_URIと同じ)。
+      PUBLISHING_SERVICE_URI: http://publishing:8080
       # AdminAuthorizationServiceのrequireAdmin/requireProjectMemberOrAdmin・自分自身のuserId解決の
       # ため、呼び出し元のBearerトークンをそのままidentity-serviceへ転送して問い合わせる
       # (log-writer(#572)/media-service(#573)と同じ暫定策)。

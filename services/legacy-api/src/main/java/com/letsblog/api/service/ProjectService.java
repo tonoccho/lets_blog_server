@@ -265,8 +265,10 @@ public class ProjectService {
 
     /**
      * プロジェクトのマスター環境(test/production)に紐づくサイトを解決する。未紐付けの場合はnullを返す。
-     * テーマCSS取得(ArticlePreviewService)・既存カテゴリ一覧取得(AiBridgeController)など、
-     * 「複数環境のうちどれを基準にするか」を要する機能から共通で利用する。
+     * 「複数環境のうちどれを基準にするか」を要する機能から利用する(テーマCSS取得
+     * (ArticlePreviewService)は同じロジックの独自コピーを持つ)。既存カテゴリ/タグ取得
+     * (AiBridgeController)は、issue #711でpublishing-serviceの
+     * {@code AiExistingTaxonomyBridgeController}へ移管され、本メソッドの呼び出し元ではなくなった。
      */
     public Site resolveMasterSite(Project project) {
         Long siteId = switch (project.getMasterEnvironment()) {

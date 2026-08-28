@@ -2,15 +2,10 @@ package com.letsblog.api.controller;
 
 import com.letsblog.api.ai.AiProvider;
 import com.letsblog.api.client.PlatformServiceClient;
-import com.letsblog.api.cms.CmsAdapter;
-import com.letsblog.api.cms.CmsAdapterFactory;
-import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.domain.Project;
-import com.letsblog.api.domain.Site;
 import com.letsblog.api.repository.ProjectUserRepository;
 import com.letsblog.api.service.ProjectApiKeyService;
 import com.letsblog.api.service.ProjectService;
-import com.letsblog.api.service.SiteService;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -19,12 +14,18 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * ai-service向けの内部ブリッジ(issue #574)。GithubClientの記事プラン向けissue連携で使う
- * GitHubトークン解決、マスター環境サイトの既存カテゴリ/タグ取得、プロジェクトメンバー判定は
- * Project/Site/CmsAdapter/project_user(project-service/content-serviceが未抽出のため
- * legacy-apiに残るドメイン)への依存が強いため、ai-service側で直接持たず、このブリッジ経由で
- * legacy-apiへ問い合わせる(media-service(#573)のCmsMediaBridgeControllerと同じ方針。
- * 認可は呼び出し元(ai-service)が既にrequireAdmin/requireProjectMemberOrAdmin等を済ませたリクエストの
- * Bearerトークンをそのまま転送してもらう想定で、ここでは追加の認可チェックは行わない)。
+ * GitHubトークン解決、プロジェクトメンバー判定は、Project/project_user(project-service/
+ * content-serviceが未抽出のためlegacy-apiに残るドメイン)への依存が強いため、ai-service側で
+ * 直接持たず、このブリッジ経由でlegacy-apiへ問い合わせる(media-service(#573)の
+ * CmsMediaBridgeControllerと同じ方針。認可は呼び出し元(ai-service)が既にrequireAdmin/
+ * requireProjectMemberOrAdmin等を済ませたリクエストのBearerトークンをそのまま転送してもらう想定で、
+ * ここでは追加の認可チェックは行わない)。
+ *
+ * <p>マスター環境サイトの既存カテゴリ/タグ取得の3エンドポイントは、{@code CmsAdapterFactory}/
+ * {@code cms/*}パッケージの所有権がpublishing-serviceへ移った(issue #707)のに伴い、
+ * publishing-serviceの{@code AiExistingTaxonomyBridgeController}へ移管した(issue #711、
+ * Epic #551 C6-5)。ai-serviceは新規クライアント({@code PublishingServiceClient}）経由で
+ * publishing-serviceへ直接問い合わせる。
  *
  * <p>システム全体既定のBrave Search APIキー・実効LLM接続設定は、system_settingsの所有権が
  * platform-serviceへ移った(issue #693)ため、本コントローラは{@link PlatformServiceClient}への
@@ -36,22 +37,16 @@ public class AiBridgeController {
 
     private final ProjectService projectService;
     private final ProjectApiKeyService projectApiKeyService;
-    private final SiteService siteService;
-    private final CmsAdapterFactory cmsAdapterFactory;
     private final ProjectUserRepository projectUserRepository;
     private final PlatformServiceClient platformServiceClient;
 
     public AiBridgeController(
             ProjectService projectService,
             ProjectApiKeyService projectApiKeyService,
-            SiteService siteService,
-            CmsAdapterFactory cmsAdapterFactory,
             ProjectUserRepository projectUserRepository,
             PlatformServiceClient platformServiceClient) {
         this.projectService = projectService;
         this.projectApiKeyService = projectApiKeyService;
-        this.siteService = siteService;
-        this.cmsAdapterFactory = cmsAdapterFactory;
         this.projectUserRepository = projectUserRepository;
         this.platformServiceClient = platformServiceClient;
     }
@@ -75,56 +70,6 @@ public class AiBridgeController {
         String token = projectApiKeyService.resolveGithubToken(projectId, actorUserId);
         String[] repoParts = project.getGithubRepository().split("/", 2);
         return new GithubAccessResponse(token, repoParts[0], repoParts[1]);
-    }
-
-    /**
-     * プロジェクトのマスター環境サイトに既に存在するカテゴリ名一覧。サイト未紐付け・非WordPress・
-     * 取得失敗時は空リストを返す(元のArticlePlanService#listExistingCategoriesと同じフェイルオープン方針)。
-     */
-    @GetMapping("/api/internal/ai/projects/{projectId}/existing-categories")
-    public List<String> existingCategories(@PathVariable Long projectId) {
-        try {
-            CmsAdapterAndCredentials resolved = resolveMasterSiteCmsAdapter(projectId);
-            return resolved == null ? List.of() : resolved.adapter().listCategoryNames(resolved.credentials());
-        } catch (RuntimeException e) {
-            return List.of();
-        }
-    }
-
-    /** 親カテゴリ名付きの既存カテゴリ一覧(issue #289)。取得失敗時は空リスト。 */
-    @GetMapping("/api/internal/ai/projects/{projectId}/existing-categories-with-parents")
-    public List<CmsAdapter.CategoryOption> existingCategoriesWithParents(@PathVariable Long projectId) {
-        try {
-            CmsAdapterAndCredentials resolved = resolveMasterSiteCmsAdapter(projectId);
-            return resolved == null ? List.of() : resolved.adapter().listCategoriesWithParents(resolved.credentials());
-        } catch (RuntimeException e) {
-            return List.of();
-        }
-    }
-
-    /** プロジェクトのマスター環境サイトに既に存在するタグ名一覧(issue #525)。取得失敗時は空リスト。 */
-    @GetMapping("/api/internal/ai/projects/{projectId}/existing-tags")
-    public List<String> existingTags(@PathVariable Long projectId) {
-        try {
-            CmsAdapterAndCredentials resolved = resolveMasterSiteCmsAdapter(projectId);
-            return resolved == null ? List.of() : resolved.adapter().listTagNames(resolved.credentials());
-        } catch (RuntimeException e) {
-            return List.of();
-        }
-    }
-
-    private record CmsAdapterAndCredentials(CmsAdapter adapter, CmsCredentials credentials) {
-    }
-
-    private CmsAdapterAndCredentials resolveMasterSiteCmsAdapter(Long projectId) {
-        Project project = projectService.getProjectEntity(projectId);
-        Site site = projectService.resolveMasterSite(project);
-        if (site == null) {
-            return null;
-        }
-        CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
-        CmsAdapter cmsAdapter = cmsAdapterFactory.resolve(credentials.cmsType());
-        return new CmsAdapterAndCredentials(cmsAdapter, credentials);
     }
 
     /** AdminAuthorizationService(ai-service)#requireProjectMemberOrAdminが使う、プロジェクトメンバー判定。 */

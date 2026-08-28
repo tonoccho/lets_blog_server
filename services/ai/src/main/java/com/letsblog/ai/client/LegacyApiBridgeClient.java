@@ -1,6 +1,5 @@
 package com.letsblog.ai.client;
 
-import com.letsblog.ai.dto.CategoryOption;
 import com.letsblog.ai.service.IdentityServiceUnavailableException;
 import java.net.http.HttpClient;
 import java.time.Duration;
@@ -14,18 +13,21 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
 /**
- * ArticlePlanService/WebSearchServiceがまだlegacy-apiに残るドメイン(Project/Site/CMS、
- * project_user、system_settings)へアクセスするための内部ブリッジ(issue #574)。
+ * ArticlePlanService/WebSearchServiceがまだlegacy-apiに残るドメイン(Project/Site、project_user、
+ * system_settings)へアクセスするための内部ブリッジ(issue #574)。
  *
  * <p>project-service/content-service/platform-serviceはまだ未抽出(Phase 19の他Issue)のため、
- * ArticlePlanServiceの「GitHubトークン解決」「マスター環境サイトの既存カテゴリ/タグ取得」
- * 「プロジェクトメンバー判定」、WebSearchServiceの「システム全体既定のBrave Search APIキー」は、
- * 引き続きlegacy-api側のデータ・ロジックに依存する。media-service(#573)のCmsBridgeClient/
- * GenerationJobClientと同じ暫定策(呼び出し元のBearerトークンをそのまま転送する。
- * legacy-api側の対応エンドポイント(AiBridgeController、{@code /api/internal/ai/**})は
+ * ArticlePlanServiceの「GitHubトークン解決」「プロジェクトメンバー判定」、WebSearchServiceの
+ * 「システム全体既定のBrave Search APIキー」は、引き続きlegacy-api側のデータ・ロジックに依存する。
+ * media-service(#573)のCmsBridgeClient/GenerationJobClientと同じ暫定策(呼び出し元のBearerトークンを
+ * そのまま転送する。legacy-api側の対応エンドポイント(AiBridgeController、{@code /api/internal/ai/**})は
  * CmsMediaBridgeControllerと同じ方針で追加の認可チェックを行わない
  * = 呼び出し元(ai-service)が既にrequireAdmin/requireProjectMemberOrAdmin等を済ませたリクエストの
  * トークンをそのまま転送してもらう想定)。
+ *
+ * <p>「マスター環境サイトの既存カテゴリ/タグ取得」の3メソッドは、{@code CmsAdapterFactory}/
+ * {@code cms/*}パッケージの所有権がpublishing-serviceへ移った(issue #707)のに伴い、
+ * {@link PublishingServiceClient}へ分離した(issue #711、Epic #551 C6-5)。
  */
 @Component
 public class LegacyApiBridgeClient {
@@ -68,38 +70,6 @@ public class LegacyApiBridgeClient {
         } catch (RestClientException e) {
             throw new IdentityServiceUnavailableException(
                     "legacy-apiのgithub-access呼び出しに失敗しました: " + e.getMessage(), e);
-        }
-    }
-
-    /** プロジェクトのマスター環境サイトに既に存在するカテゴリ名一覧。取得失敗時は空リスト。 */
-    public List<String> listExistingCategories(Long projectId, String bearerToken) {
-        return getListSafely("/api/internal/ai/projects/{projectId}/existing-categories", projectId, bearerToken,
-                String[].class);
-    }
-
-    /** 親カテゴリ名付きの既存カテゴリ一覧(issue #289)。取得失敗時は空リスト。 */
-    public List<CategoryOption> listExistingCategoriesWithParents(Long projectId, String bearerToken) {
-        return getListSafely(
-                "/api/internal/ai/projects/{projectId}/existing-categories-with-parents", projectId, bearerToken,
-                CategoryOption[].class);
-    }
-
-    /** プロジェクトのマスター環境サイトに既に存在するタグ名一覧(issue #525)。取得失敗時は空リスト。 */
-    public List<String> listExistingTags(Long projectId, String bearerToken) {
-        return getListSafely("/api/internal/ai/projects/{projectId}/existing-tags", projectId, bearerToken,
-                String[].class);
-    }
-
-    private <T> List<T> getListSafely(String uriTemplate, Long projectId, String bearerToken, Class<T[]> arrayType) {
-        try {
-            T[] result = restClient.get()
-                    .uri(uriTemplate, projectId)
-                    .headers(headers -> setAuthorization(headers, bearerToken))
-                    .retrieve()
-                    .body(arrayType);
-            return result == null ? List.of() : List.of(result);
-        } catch (RestClientException e) {
-            return List.of();
         }
     }
 
