@@ -32,25 +32,27 @@ app:
         paths:
           - /api/projects/*/environments/sync
         response-timeout: 300s
-      # 一括管理(bulk-management: カテゴリ/タグ/プラグイン/テーマ/投稿の環境間比較・同期)は
-      # BulkManagementService/TermComparisonService/PluginThemeComparisonService/PostComparisonServiceが
-      # project-serviceへ移設されていない(issue #577 stage2のスコープ外)ため、引き続きlegacy-apiへ
-      # ルーティングする(#577移設時の発見: 元のこのルートエントリはPROJECT_SERVICE_URIを指しており、
-      # 実際のエンドポイント(/bulk-management/apply・/apply-all・/categories/**等)をカバーしていな
-      # かった。実パスを網羅する/**へ修正した上でLEGACY_API_URIへ固定する)。
+      # 一括管理(bulk-management: カテゴリ/タグ/プラグイン/テーマ/投稿の環境間比較・同期)を担う
+      # BulkManagementService/TermComparisonService/PluginThemeComparisonService/PostComparisonServiceは
+      # publishing-serviceへ移設した(issue #708、Epic #551 C6-2。#577移設時の発見: 元のこのルート
+      # エントリはPROJECT_SERVICE_URIを指しており、実際のエンドポイント(/bulk-management/apply・
+      # /apply-all・/categories/**等)をカバーしていなかった。実パスを網羅する/**へ修正した上で
+      # まずLEGACY_API_URIへ固定し、#708でPUBLISHING_SERVICE_URIへ切り替えた)。
       - id: project-bulk-management-legacy
-        uri: ${LEGACY_API_URI:http://api:8080}
+        uri: ${PUBLISHING_SERVICE_URI:http://api:8080}
         paths:
           - /api/projects/*/bulk-management/**
         response-timeout: 300s
-      # プロジェクトユーザー管理(ProjectUserSyncService)・ComfyUI生成画像のアセットアップロード
-      # (BulkManagementService)も同じ理由でlegacy-apiに残る。
+      # プロジェクトユーザー管理(ProjectUserSyncService)は同じ理由でlegacy-apiに残る。
       - id: project-users-legacy
         uri: ${LEGACY_API_URI:http://api:8080}
         paths:
           - /api/projects/*/users/**
+      # ComfyUI生成画像のアセットアップロード(BulkManagementService#uploadImageToAllEnvironments)は、
+      # 一括管理機能一式のpublishing-serviceへの移設(issue #708)に伴い、呼び出し元の
+      # BulkManagementControllerもpublishing-serviceへ移った。
       - id: project-asset-images-legacy
-        uri: ${LEGACY_API_URI:http://api:8080}
+        uri: ${PUBLISHING_SERVICE_URI:http://api:8080}
         paths:
           - /api/projects/*/asset-images/**
       # ProjectMediaGarbageCollectionControllerはmedia-serviceへ移設した(#573 stage3)が、パス自体は
@@ -250,11 +252,15 @@ app:
       # どのコントローラにも到達できていなかった(issue #707調査で発見)。`/api/posts/publish`・
       # `/api/posts/*/*`は上のposts-publish-legacy/posts-delete-legacyルートで既にPUBLISHING_SERVICE_URIへ
       # 正しくマッチしているため、`/api/publish/**`は実体の無い誤りとして削除した(issue #707)。
-      # `/api/bulk-management/**`側の実パスへの修正は分割2(#708)で行う。
+      # `/api/bulk-management/**`の実パス(/api/projects/*/bulk-management/**)は、上の
+      # project-bulk-management-legacyルート(response-timeout: 300sのタイムアウト延長付き)で
+      # 既にPUBLISHING_SERVICE_URIへマッチしているため、ここへ重複させず削除した(issue #708)。
+      # 代わりにTaxonomyController(/api/taxonomy/resolve)向けの明示ルートをここに追加する
+      # (以前はfallback-uri経由の暗黙到達に依存していた)。
       - id: publishing
         uri: ${PUBLISHING_SERVICE_URI:http://api:8080}
         paths:
-          - /api/bulk-management/**
+          - /api/taxonomy/resolve
       # GA/AdSense連携の実体(ProjectDashboardController・ProjectApiKeyControllerのGA/AdSense部分)は
       # /api/projects/*/dashboard/**(上のproject-dashboard-analyticsルート)・/api/projects/*/
       # api-keys/**(legacy-apiに残るProjectApiKeyController経由でこのサービスへブリッジ、下の

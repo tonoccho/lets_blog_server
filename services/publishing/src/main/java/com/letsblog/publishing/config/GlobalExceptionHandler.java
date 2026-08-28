@@ -5,6 +5,7 @@ import com.letsblog.publishing.cms.CmsApiException;
 import com.letsblog.publishing.cms.agent.AgentOperationException;
 import com.letsblog.publishing.cms.ssh.SshOperationException;
 import com.letsblog.publishing.render.MediaRenderException;
+import com.letsblog.publishing.service.ForbiddenException;
 import com.letsblog.publishing.service.IdentityServiceUnavailableException;
 import com.letsblog.publishing.service.InvalidPlantUmlTagException;
 import com.letsblog.publishing.service.InvalidRechartsTagException;
@@ -48,6 +49,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ProjectNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleProjectNotFound(ProjectNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /** BulkManagementController/TaxonomyControllerが使う(issue #708)。 */
+    @ExceptionHandler(ForbiddenException.class)
+    public ResponseEntity<ErrorResponse> handleForbidden(ForbiddenException e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(InvalidPlantUmlTagException.class)

@@ -19,8 +19,11 @@ import java.util.Map;
  * 常駐wordpressコンテナ内の内部限定プロビジョニングエージェント(ポート9000)へ、
  * カテゴリ作成/編集/削除・プラグイン/テーマのインストール(SLUG指定・zipアップロード)/
  * 有効化/無効化/削除を依頼するクライアント。環境同期(WordPressSyncClient)と異なり
- * 「1環境の失敗が他環境への実行を止めない」という一括管理の方針に合わせ、
+ * 「1環境の失敗が他環境の実行を止めない」という一括管理の方針に合わせ、
  * apply系メソッドは例外を投げず常に結果(BulkApplyResult)を返す。
+ *
+ * <p>legacy-apiの{@code com.letsblog.api.provisioning.WordPressBulkManagementClient}を
+ * publishing-serviceへ移設したもの(issue #708、Epic #551 C6-2)。
  */
 @Component
 public class WordPressBulkManagementClient {

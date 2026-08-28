@@ -21,11 +21,12 @@ import org.springframework.stereotype.Component;
 
 /**
  * Project/Site本体の所有権がproject-serviceへ移った(issue #577 stage2)ことに伴う内部ブリッジ。
- * BulkManagementService/TermComparisonService/PluginThemeComparisonService/PostComparisonService/
- * ProjectUserSyncService/PostPublishService/PostDeleteService/ArticlePreviewService/
- * CmsMediaBridgeController/ContentBridgeController/TaxonomyController/AiBridgeController(いずれも
- * WordPress用CmsAdapter・SSH実行・wp-cliエージェント連携への深い依存のため#577では移設せず
- * legacy-apiに残る)は、project-serviceの{@code /api/internal/project/**}経由でプロジェクト/サイトの
+ * ProjectUserSyncService/ArticlePreviewService/CmsMediaBridgeController/ContentBridgeController/
+ * AiBridgeController(いずれもWordPress用CmsAdapter・SSH実行・wp-cliエージェント連携への深い依存
+ * のため#577では移設せずlegacy-apiに残る。BulkManagementService/TermComparisonService/
+ * PluginThemeComparisonService/PostComparisonService/TaxonomyControllerは一括管理機能一式として
+ * issue #708で、PostPublishService/PostDeleteServiceはissue #707でpublishing-serviceへ移設した)は、
+ * project-serviceの{@code /api/internal/project/**}経由でプロジェクト/サイトの
  * 基本情報・CMS認証情報を取得する({@link com.letsblog.api.service.ProjectService}/
  * {@link com.letsblog.api.service.SiteService}がこのクライアントを内部で使い、legacy-apiの
  * ローカルJPAエンティティ(旧{@code ProjectRepository}/{@code SiteRepository})を置き換える。
