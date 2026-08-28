@@ -1,0 +1,72 @@
+server:
+  port: 8080
+
+logging:
+  level:
+    root: INFO
+    com.letsblog.publishing: DEBUG
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+  # log-writer(#572)/media-service(#573)/ai-service(#574)/content-service(#576)/project-service(#577)と
+  # 同じ理由: 明示的なproducesを持たないエンドポイントがOpenAPI上`*/*`として記録されると、orvalが生成する
+  # TypeScriptクライアントの型付けが崩れる。既定の応答Content-Typeを明示することでこれを避ける。
+  default-produces-media-type: application/json
+
+spring:
+  application:
+    name: lets-blog-publishing
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lbs_publishing?useSSL=false&serverTimezone=UTC}
+    username: ${SPRING_DATASOURCE_USERNAME:lbs_publishing}
+    password: ${SPRING_DATASOURCE_PASSWORD:lbs_publishing}
+  # 現時点では自身が所有するドメインテーブルは無い(posts/sites/user_site_authors等はいずれも他
+  # サービス所有。issue #707)が、専用スキーマ(lbs_publishing、ADR-0004)・Flyway基盤自体は
+  # 他サービスと同じ構成で用意しておく(将来分割2のbulk_operation_logs移管(#572で事前決定)等が
+  # 乗る前提)。
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+
+app:
+  # サイト本体・CMS認証情報(project-serviceが所有、#575設計判断2)の内部ブリッジ呼び出し先
+  # (ProjectServiceClient)。
+  project-service-uri: ${PROJECT_SERVICE_URI:http://localhost:8080}
+  # Markdownレンダリング・postsテーブルの読み書き(content-serviceが所有、#575設計判断1)の
+  # 内部ブリッジ呼び出し先(ContentServiceClient)。
+  content-service-uri: ${CONTENT_SERVICE_URI:http://localhost:8080}
+  # 著者マッピング(user_site_authors、legacy-apiが所有、#575設計判断4)の内部ブリッジ呼び出し先
+  # (LegacyApiBridgeClient)。project_image_settings(投稿画像リサイズのプロジェクト別デフォルト、
+  # AI画像生成ドメインのためlegacy-apiに残る)の解決にも使う。
+  legacy-api-uri: ${LEGACY_API_URI:http://localhost:8080}
+  identity-service-uri: ${IDENTITY_SERVICE_URI:http://localhost:8080}
+  # [plantuml]/```plantumlの埋め込み(PlantUmlEmbedService/PlantUmlTagRenderService)が実際の
+  # レンダリングを委譲する呼び出し先(media-serviceが所有、issue #573)。
+  media-service-uri: ${MEDIA_SERVICE_URI:http://localhost:8080}
+  # 記事投稿時に画像をリサイズする長編の目標px(project_image_settings未設定時のフォールバック値)。
+  # legacy-apiのapp.default-article-image-long-edge-pxと同じ既定値(1300)。
+  default-article-image-long-edge-px: ${DEFAULT_ARTICLE_IMAGE_LONG_EDGE_PX:1300}
+
+# KeycloakのJWT検証。identity-service/log-writer/media-service/ai-service/content-service/
+# project-serviceのSecurityConfig/JwtDecoderConfigと同じ理由により、issuer-uriによる自動設定は
+# 使わずJWKS取得先と期待issuerを個別に指定して組み立てている。
+keycloak:
+  jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/certs}
+  issuer: ${KEYCLOAK_ISSUER:https://localhost/auth/realms/letsblog}

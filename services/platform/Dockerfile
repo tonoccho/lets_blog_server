@@ -18,6 +18,7 @@ COPY services/ai/build.gradle ./services/ai/build.gradle
 COPY services/content/build.gradle ./services/content/build.gradle
 COPY services/analytics/build.gradle ./services/analytics/build.gradle
 COPY services/project/build.gradle ./services/project/build.gradle
+COPY services/publishing/build.gradle ./services/publishing/build.gradle
 
 RUN ./gradlew :services:platform:bootJar --no-daemon
 

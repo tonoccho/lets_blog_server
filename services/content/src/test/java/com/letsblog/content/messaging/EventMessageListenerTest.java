@@ -6,6 +6,7 @@ import com.letsblog.common.messaging.PostPublishedEvent;
 import com.letsblog.common.messaging.ProjectDeletedEvent;
 import com.letsblog.common.messaging.SiteDeletedEvent;
 import com.letsblog.common.messaging.UserDeactivatedEvent;
+import com.letsblog.content.domain.Post;
 import com.letsblog.content.domain.ProcessedEvent;
 import com.letsblog.content.repository.PostRepository;
 import com.letsblog.content.repository.ProcessedEventRepository;
@@ -13,19 +14,24 @@ import com.letsblog.content.repository.ProjectContentSettingsRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
 import java.util.HashSet;
+import java.util.Optional;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * {@link EventMessageListener}の冪等性(issue #580)を、RabbitMQ再配送を模してリスナーメソッドを
@@ -98,6 +104,8 @@ class EventMessageListenerTest {
     void onPostPublished_重複配信でも例外にならず処理済み記録が1件だけ残る() {
         PostPublishedEvent event = new PostPublishedEvent(
                 "evt-post-published-1", Instant.now(), 1L, 10L, "99", "https://example.com/?p=99", "publish");
+        when(postRepository.findBySiteIdAndWpPostId(1L, "99")).thenReturn(Optional.empty());
+        when(postRepository.save(any(Post.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         listener.onPostPublished(event);
         listener.onPostPublished(event);
@@ -106,13 +114,76 @@ class EventMessageListenerTest {
     }
 
     @Test
+    void onPostPublished_既存投稿のstatusとlastPublishedAtを更新する() {
+        Post existing = new Post();
+        existing.setSiteId(1L);
+        existing.setWpPostId("99");
+        existing.setStatus("draft");
+        PostPublishedEvent event = new PostPublishedEvent(
+                "evt-post-published-2", Instant.now(), 1L, 10L, "99", "https://example.com/?p=99", "publish");
+        when(postRepository.findBySiteIdAndWpPostId(1L, "99")).thenReturn(Optional.of(existing));
+        when(postRepository.save(any(Post.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        listener.onPostPublished(event);
+
+        ArgumentCaptor<Post> captor = ArgumentCaptor.forClass(Post.class);
+        verify(postRepository).save(captor.capture());
+        assertEquals("publish", captor.getValue().getStatus());
+        assertNotNull(captor.getValue().getLastPublishedAt());
+    }
+
+    @Test
+    void onPostPublished_該当行が無ければ新規作成する() {
+        PostPublishedEvent event = new PostPublishedEvent(
+                "evt-post-published-3", Instant.now(), 1L, 10L, "99", "https://example.com/?p=99", "publish");
+        when(postRepository.findBySiteIdAndWpPostId(1L, "99")).thenReturn(Optional.empty());
+        when(postRepository.save(any(Post.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        listener.onPostPublished(event);
+
+        ArgumentCaptor<Post> captor = ArgumentCaptor.forClass(Post.class);
+        verify(postRepository).save(captor.capture());
+        assertEquals(1L, captor.getValue().getSiteId());
+        assertEquals("99", captor.getValue().getWpPostId());
+        assertEquals("publish", captor.getValue().getStatus());
+    }
+
+    @Test
     void onPostDeleted_重複配信でも例外にならない() {
         PostDeletedEvent event = new PostDeletedEvent("evt-post-deleted-1", Instant.now(), 1L, "99");
+        when(postRepository.findBySiteIdAndWpPostId(1L, "99")).thenReturn(Optional.empty());
 
         listener.onPostDeleted(event);
         listener.onPostDeleted(event);
 
         verify(processedEventRepository, times(1)).save(any(ProcessedEvent.class));
+    }
+
+    @Test
+    void onPostDeleted_既存投稿のstatusをtrashへ更新する() {
+        Post existing = new Post();
+        existing.setSiteId(1L);
+        existing.setWpPostId("99");
+        existing.setStatus("publish");
+        PostDeletedEvent event = new PostDeletedEvent("evt-post-deleted-2", Instant.now(), 1L, "99");
+        when(postRepository.findBySiteIdAndWpPostId(1L, "99")).thenReturn(Optional.of(existing));
+        when(postRepository.save(any(Post.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        listener.onPostDeleted(event);
+
+        ArgumentCaptor<Post> captor = ArgumentCaptor.forClass(Post.class);
+        verify(postRepository).save(captor.capture());
+        assertEquals("trash", captor.getValue().getStatus());
+    }
+
+    @Test
+    void onPostDeleted_該当行が無ければsaveしない() {
+        PostDeletedEvent event = new PostDeletedEvent("evt-post-deleted-3", Instant.now(), 1L, "99");
+        when(postRepository.findBySiteIdAndWpPostId(1L, "99")).thenReturn(Optional.empty());
+
+        listener.onPostDeleted(event);
+
+        verify(postRepository, never()).save(any(Post.class));
     }
 
     @Test

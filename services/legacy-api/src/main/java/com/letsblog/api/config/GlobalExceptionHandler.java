@@ -2,6 +2,7 @@ package com.letsblog.api.config;
 
 import com.letsblog.api.ai.AiServiceException;
 import com.letsblog.api.client.AnalyticsServiceException;
+import com.letsblog.api.client.PublishingServiceException;
 import com.letsblog.api.cms.CmsApiException;
 import com.letsblog.api.cms.agent.AgentOperationException;
 import com.letsblog.api.cms.ssh.SshOperationException;
@@ -9,7 +10,6 @@ import com.letsblog.api.service.EmailAlreadyExistsException;
 import com.letsblog.api.service.EmailSendException;
 import com.letsblog.api.service.ForbiddenException;
 import com.letsblog.api.service.InvalidPlantUmlTagException;
-import com.letsblog.api.service.InvalidRechartsTagException;
 import com.letsblog.api.service.InvalidRoleException;
 import com.letsblog.api.service.ProhibitedContentException;
 import com.letsblog.api.service.ProjectNotFoundException;
@@ -75,11 +75,6 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
     }
 
-    @ExceptionHandler(InvalidRechartsTagException.class)
-    public ResponseEntity<ErrorResponse> handleInvalidRechartsTag(InvalidRechartsTagException e) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
-    }
-
     @ExceptionHandler(InvalidPlantUmlTagException.class)
     public ResponseEntity<ErrorResponse> handleInvalidPlantUmlTag(InvalidPlantUmlTagException e) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
@@ -114,6 +109,17 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AnalyticsServiceException.class)
     public ResponseEntity<ErrorResponse> handleAnalyticsServiceException(AnalyticsServiceException e) {
         log.warn("analytics-serviceへのブリッジ呼び出しに失敗しました: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /**
+     * publishing-serviceへの内部ブリッジ呼び出しの失敗(issue #707)。ProjectUserSyncService#provisionUserOnSite
+     * が委譲する著者プロビジョニングの権限不足も、以前のCmsApiException(BAD_GATEWAY)と同じ
+     * ステータスで返す。
+     */
+    @ExceptionHandler(PublishingServiceException.class)
+    public ResponseEntity<ErrorResponse> handlePublishingServiceException(PublishingServiceException e) {
+        log.warn("publishing-serviceへのブリッジ呼び出しに失敗しました: {}", e.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 

@@ -1,0 +1,10 @@
+-- publishing-service (issue #707, Epic #551 C6-1) のスキーマ初期化。
+--
+-- 本Issue時点では、publishing-service自身が所有するドメインテーブルは無い。cms/*パッケージ
+-- (CmsAdapter/WordPressAdapter等)・PostPublishService/PostDeleteServiceはいずれもステートレスで、
+-- サイト本体・CMS認証情報はproject-service、投稿(posts)テーブルはcontent-service、著者マッピング
+-- (user_site_authors)はlegacy-apiへの内部ブリッジ経由で読み書きする(#575設計判断1・2・4)。
+--
+-- 専用スキーマ(lbs_publishing、ADR-0004)・Flyway基盤自体は他サービスと同じ構成で用意しておく
+-- (分割2でのbulk_operation_logsテーブル移管(#572で「C6完了時にpublishing-serviceへ」と事前決定)
+-- 等、将来のマイグレーションがこの上に積み重なる前提)。このマイグレーション自体は意図的に空。

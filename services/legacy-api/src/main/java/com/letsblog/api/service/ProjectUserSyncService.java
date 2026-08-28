@@ -1,11 +1,7 @@
 package com.letsblog.api.service;
 
 import com.letsblog.api.aop.AuditLog;
-import com.letsblog.api.cms.AuthorProvisioningRequest;
-import com.letsblog.api.cms.CmsAdapter;
-import com.letsblog.api.cms.CmsAdapterFactory;
-import com.letsblog.api.cms.CmsApiException;
-import com.letsblog.api.cms.CmsCredentials;
+import com.letsblog.api.client.PublishingServiceClient;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.ProjectUser;
@@ -37,7 +33,7 @@ public class ProjectUserSyncService {
     private final ProjectUserRepository projectUserRepository;
     private final UserRepository userRepository;
     private final SiteService siteService;
-    private final CmsAdapterFactory cmsAdapterFactory;
+    private final PublishingServiceClient publishingServiceClient;
     private final UserSiteAuthorRepository userSiteAuthorRepository;
 
     public ProjectUserSyncService(
@@ -45,13 +41,13 @@ public class ProjectUserSyncService {
             ProjectUserRepository projectUserRepository,
             UserRepository userRepository,
             SiteService siteService,
-            CmsAdapterFactory cmsAdapterFactory,
+            PublishingServiceClient publishingServiceClient,
             UserSiteAuthorRepository userSiteAuthorRepository) {
         this.projectService = projectService;
         this.projectUserRepository = projectUserRepository;
         this.userRepository = userRepository;
         this.siteService = siteService;
-        this.cmsAdapterFactory = cmsAdapterFactory;
+        this.publishingServiceClient = publishingServiceClient;
         this.userSiteAuthorRepository = userSiteAuthorRepository;
     }
 
@@ -130,7 +126,11 @@ public class ProjectUserSyncService {
     }
 
     private void provisionUserOnSite(Site site, User user, String wpRole) {
-        AuthorProvisioningRequest request = new AuthorProvisioningRequest(
+        // 著者(WordPressユーザー)作成/更新の実処理はpublishing-serviceへ移管した(issue #707、
+        // #575設計判断4の書き込み側)。実際のCMS側ユーザー作成/更新はpublishing-serviceの
+        // 内部ブリッジ経由で依頼する。返ってきたcmsAuthorIdのuser_site_authorsへの永続化は
+        // 引き続きこちらの責務(user_site_authors自体の所有権はlegacy-apiに残る)。
+        PublishingServiceClient.AuthorProvisioningRequest request = new PublishingServiceClient.AuthorProvisioningRequest(
                 user.getEmail(),
                 wpRole,
                 user.getFirstName(),
@@ -140,14 +140,7 @@ public class ProjectUserSyncService {
                 user.getBio(),
                 user.getLocale());
 
-        CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
-        CmsAdapter adapter = cmsAdapterFactory.resolve(site.getCmsType());
-        if (!adapter.hasAuthorProvisioningCapability(credentials)) {
-            throw new CmsApiException(
-                    "サイト '" + site.getSiteKey() + "' の登録済み認証情報に、ユーザー作成に必要な管理者権限が"
-                            + "ありません。サイト管理画面から認証情報を更新してください。");
-        }
-        String cmsAuthorId = adapter.provisionAuthor(credentials, request);
+        String cmsAuthorId = publishingServiceClient.provisionAuthor(site.getSiteKey(), request).cmsAuthorId();
         saveAuthorMapping(user.getId(), site.getId(), cmsAuthorId);
     }
 
