@@ -14,7 +14,6 @@ import com.letsblog.api.service.InvalidRoleException;
 import com.letsblog.api.service.ProhibitedContentException;
 import com.letsblog.api.service.ProjectNotFoundException;
 import com.letsblog.api.service.ProjectUserNotFoundException;
-import com.letsblog.api.service.ProvisioningException;
 import com.letsblog.api.service.SiteNotFoundException;
 import com.letsblog.api.exception.RateLimitExceededException;
 import com.letsblog.api.keycloak.KeycloakAdminException;
@@ -120,11 +119,6 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(PublishingServiceException.class)
     public ResponseEntity<ErrorResponse> handlePublishingServiceException(PublishingServiceException e) {
         log.warn("publishing-serviceへのブリッジ呼び出しに失敗しました: {}", e.getMessage());
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
-    }
-
-    @ExceptionHandler(ProvisioningException.class)
-    public ResponseEntity<ErrorResponse> handleProvisioningException(ProvisioningException e) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 

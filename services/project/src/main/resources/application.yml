@@ -53,6 +53,11 @@ app:
   # (LegacyApiBridgeClient)の呼び出し先。AdminAuthorizationService#requireProjectMemberOrAdminが使う
   # (content-service(#576)のContentBridgeController/LegacyApiBridgeClientと同じ暫定策)。
   legacy-api-uri: ${LEGACY_API_URI:http://api:8080}
+  # CMSプロビジョニングブリッジ(/api/internal/project/cms/**、CmsProvisioningBridgeClient参照)の
+  # 呼び出し先。issue #577 stage2ではlegacy-apiが所有していたためlegacy-api-uriを使っていたが、
+  # issue #710でCmsProvisioningBridgeController/ProvisioningServiceの所有権がpublishing-serviceへ
+  # 移ったため、CmsProvisioningBridgeClientの向き先をこちらへ切り替えた(Epic #551 C6-4)。
+  publishing-service-uri: ${PUBLISHING_SERVICE_URI:http://publishing:8080}
   identity-service-uri: ${IDENTITY_SERVICE_URI:http://identity:8080}
   # 組み込みタグのデザインCSS/HTMLテンプレートのAI生成(TagDesignGenerationService)の呼び出し先。
   ai-service-uri: ${AI_SERVICE_URI:http://api:8080}

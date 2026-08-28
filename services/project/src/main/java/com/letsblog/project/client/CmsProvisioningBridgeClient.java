@@ -18,14 +18,22 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 /**
- * legacy-apiの内部CMSブリッジ{@code /api/internal/project/cms/**}
- * ({@code com.letsblog.api.controller.CmsProvisioningBridgeController})を呼び出すクライアント(issue #577 stage2)。
+ * publishing-serviceの内部CMSブリッジ{@code /api/internal/project/cms/**}
+ * ({@code com.letsblog.publishing.controller.CmsProvisioningBridgeController})を呼び出すクライアント
+ * (issue #577 stage2でlegacy-api向けに新設、issue #710でpublishing-serviceへ呼び出し先を切り替え、
+ * Epic #551 C6-4)。
  *
  * <p>WordPressへの実際の接続処理(SSH/wp-cliエージェント経由、{@code CmsAdapter}/{@code WordPressSshOperations})は
- * まだ移設せずlegacy-apiに残る(media-service(#573)のCmsBridgeClientと同じ方針)。project-serviceは
- * 復号したその場限りの認証情報(SSH秘密鍵等を含む)をこの呼び出しの間だけ送り、legacy-api側では
- * 永続化しない。認証は他の内部ブリッジ(LegacyApiBridgeClient等)と同じ暫定策
+ * publishing-service側に集約されたまま(media-service(#573→#709)のCmsBridgeClientと同じ方針)。
+ * project-serviceは復号したその場限りの認証情報(SSH秘密鍵等を含む)をこの呼び出しの間だけ送り、
+ * publishing-service側では永続化しない。認証は他の内部ブリッジ(LegacyApiBridgeClient等)と同じ暫定策
  * (呼び出し元ユーザーのBearerトークンをそのまま転送する)。
+ *
+ * <p>SSH接続・wp-cli実行・DB/メディア/テーマのエクスポートは数十秒かかりうるため、
+ * {@code SyncServiceClient}のプロファイル(SHORT/STANDARD/RENDER/LLM、docs/SYNC_SERVICE_CALLS.md参照)
+ * のうち最も長いRENDER(30秒)でも足りない可能性がある。issue #710のスコープでは
+ * {@code SyncServiceClient}への移行は必須要件ではない(移行後の挙動変化のリスクを避けるため見送り)
+ * ため、移管元と同じ固定タイムアウト(接続3秒・読み取り60秒)のRestClientをそのまま維持する。
  */
 @Component
 public class CmsProvisioningBridgeClient {
@@ -39,12 +47,12 @@ public class CmsProvisioningBridgeClient {
     private final HttpServletRequest request;
 
     public CmsProvisioningBridgeClient(
-            RestClient.Builder builder, @Value("${app.legacy-api-uri}") String legacyApiUri,
+            RestClient.Builder builder, @Value("${app.publishing-service-uri}") String publishingServiceUri,
             HttpServletRequest request) {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(READ_TIMEOUT);
-        this.restClient = builder.baseUrl(legacyApiUri).requestFactory(requestFactory).build();
+        this.restClient = builder.baseUrl(publishingServiceUri).requestFactory(requestFactory).build();
         this.request = request;
     }
 
@@ -56,7 +64,7 @@ public class CmsProvisioningBridgeClient {
                     .body(credentialsBody(cmsType, credentials))
                     .retrieve()
                     .body(ConnectionCheckResult.class);
-            return result != null ? result : ConnectionCheckResult.failure("legacy-apiから空の応答を受け取りました");
+            return result != null ? result : ConnectionCheckResult.failure("publishing-serviceから空の応答を受け取りました");
         } catch (RestClientException e) {
             return ConnectionCheckResult.failure(e.getMessage());
         }
@@ -119,11 +127,11 @@ public class CmsProvisioningBridgeClient {
                     .retrieve()
                     .body(responseType);
             if (result == null) {
-                throw new CmsBridgeException("legacy-apiから空の応答を受け取りました(" + uri + ")", null);
+                throw new CmsBridgeException("publishing-serviceから空の応答を受け取りました(" + uri + ")", null);
             }
             return result;
         } catch (RestClientException e) {
-            throw new CmsBridgeException("legacy-apiの" + uri + "呼び出しに失敗しました: " + e.getMessage(), e);
+            throw new CmsBridgeException("publishing-serviceの" + uri + "呼び出しに失敗しました: " + e.getMessage(), e);
         }
     }
 
@@ -137,7 +145,7 @@ public class CmsProvisioningBridgeClient {
                     .body(byte[].class);
             return result != null ? result : new byte[0];
         } catch (RestClientException e) {
-            throw new CmsBridgeException("legacy-apiの" + uri + "呼び出しに失敗しました: " + e.getMessage(), e);
+            throw new CmsBridgeException("publishing-serviceの" + uri + "呼び出しに失敗しました: " + e.getMessage(), e);
         }
     }
 

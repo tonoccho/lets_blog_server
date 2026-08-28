@@ -1,18 +1,17 @@
-package com.letsblog.api.controller;
+package com.letsblog.publishing.controller;
 
-import com.letsblog.api.cms.CmsAdapter;
-import com.letsblog.api.cms.CmsAdapterFactory;
-import com.letsblog.api.cms.CmsCredentials;
-import com.letsblog.api.cms.CmsType;
-import com.letsblog.api.cms.ConnectionCheckResult;
-import com.letsblog.api.cms.WpCliInstallResult;
-import com.letsblog.api.cms.ssh.WordPressSshOperations;
-import com.letsblog.api.dto.CmsBridgeConnectionCheckResponse;
-import com.letsblog.api.dto.CmsBridgeCredentialsRequest;
-import com.letsblog.api.dto.CmsBridgeExportDatabaseResponse;
-import com.letsblog.api.dto.CmsBridgeProvisionRequest;
-import com.letsblog.api.dto.CmsBridgeProvisionResponse;
-import com.letsblog.api.service.ProvisioningService;
+import com.letsblog.publishing.cms.CmsAdapter;
+import com.letsblog.publishing.cms.CmsAdapterFactory;
+import com.letsblog.publishing.cms.CmsType;
+import com.letsblog.publishing.cms.ConnectionCheckResult;
+import com.letsblog.publishing.cms.WpCliInstallResult;
+import com.letsblog.publishing.cms.ssh.WordPressSshOperations;
+import com.letsblog.publishing.dto.CmsBridgeConnectionCheckResponse;
+import com.letsblog.publishing.dto.CmsBridgeCredentialsRequest;
+import com.letsblog.publishing.dto.CmsBridgeExportDatabaseResponse;
+import com.letsblog.publishing.dto.CmsBridgeProvisionRequest;
+import com.letsblog.publishing.dto.CmsBridgeProvisionResponse;
+import com.letsblog.publishing.service.ProvisioningService;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -28,10 +27,11 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 /**
- * CmsProvisioningBridgeControllerの回帰テスト(issue #577 stage2)。project-serviceへ移設した
- * SiteService/ProvisioningService/ProjectEnvironmentSyncServiceが、このブリッジ経由で
- * legacy-apiの既存CmsAdapter/ProvisioningService/WordPressSshOperations(いずれも本stageでは
- * 未変更)を正しく呼び出せることを検証する。
+ * CmsProvisioningBridgeControllerの回帰テスト(issue #577 stage2でlegacy-api向けに作成、issue #710で
+ * publishing-serviceへ移管)。project-serviceへ移設したSiteService/ProvisioningService/
+ * ProjectEnvironmentSyncServiceが、このブリッジ経由でpublishing-serviceの既存CmsAdapter/
+ * ProvisioningService/WordPressSshOperations(いずれも移管に伴うパッケージ名の変更のみで、
+ * ロジックは移管元と同一)を正しく呼び出せることを検証する。
  */
 @ExtendWith(MockitoExtension.class)
 class CmsProvisioningBridgeControllerTest {

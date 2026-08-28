@@ -135,6 +135,7 @@ Phase 19の各抽出Issueが暫定策として実装していた「呼び出し�
 | 呼び出し元 | エンドポイント | プロファイル | リトライ | サーキットブレーカー | フォールバック | 移行 |
 |---|---|---|---|---|---|---|
 | media(`CmsBridgeClient`) | `POST /api/internal/publishing/sites/{site}/media`(multipart)・`GET .../media-scan`・`DELETE .../media/{id}` | RENDER(30秒、大きめのメディア転送のため) | GETのみ | あり(`publishing-service`) | 明確なエラー(CMS操作の成否を呼び出し元へ確実に伝える必要があるため) | 済(issue #709でlegacy-apiからpublishing-serviceへ呼び出し先を切り替え、レビュー指摘対応でパスも/api/internal/cms/**から/api/internal/publishing/**へ変更、C12対応は維持) |
+| project(`CmsProvisioningBridgeClient`) | `POST /api/internal/project/cms/test-connection`・`install-wp-cli`・`has-author-capability`・`list-active-plugins`・`provision`・`export-database`・`export-media`・`export-themes` | (未移行、既存は固定タイムアウト。接続3秒・読み取り60秒) | - | - | (未整理、既存はconnection-check系のみ機能縮退=失敗結果を返す、それ以外は明確なエラー) | 未(issue #710でlegacy-apiからpublishing-serviceへ呼び出し先を切り替えたが、`SyncServiceClient`への移行は既定プロファイル(最長RENDER30秒)ではSSH/wp-cliのエクスポート処理に対して読み取りタイムアウトが不足する可能性があるため見送り、既存の固定タイムアウトRestClientを維持) |
 
 ### media-service向け
 
