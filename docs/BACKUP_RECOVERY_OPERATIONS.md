@@ -126,7 +126,7 @@ rsync -av /tmp/backup-extract/generated-images/ /var/lib/lets-blog/generated-ima
 sudo chown -R app:app /var/lib/lets-blog/generated-images/
 
 # 6. Restart every service so each picks up its restored schema, then verify all report healthy
-docker compose up -d identity project content media ai analytics platform gateway legacy-api keycloak
+docker compose up -d identity project content media ai analytics platform gateway api keycloak
 docker compose ps
 ```
 
