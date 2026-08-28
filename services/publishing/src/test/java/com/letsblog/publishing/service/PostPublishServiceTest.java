@@ -522,14 +522,14 @@ class PostPublishServiceTest {
 
     /** siteId=1 を本番サイトに持つプロジェクトを紐づける。 */
     private void bindProductionSite() {
-        ProjectServiceClient.ProjectBridge project = new ProjectServiceClient.ProjectBridge(7L, null, null, 1L);
+        ProjectServiceClient.ProjectBridge project = new ProjectServiceClient.ProjectBridge(7L, null, null, 1L, "test");
         lenient().when(projectServiceClient.findProjectIdBySiteId(1L)).thenReturn(7L);
         lenient().when(projectServiceClient.getProject(7L)).thenReturn(project);
     }
 
     /** siteId=1 をテスト環境に持つ(本番は別サイト)プロジェクトを紐づける。 */
     private void bindNonProductionSite() {
-        ProjectServiceClient.ProjectBridge project = new ProjectServiceClient.ProjectBridge(7L, null, 1L, 99L);
+        ProjectServiceClient.ProjectBridge project = new ProjectServiceClient.ProjectBridge(7L, null, 1L, 99L, "test");
         when(projectServiceClient.findProjectIdBySiteId(1L)).thenReturn(7L);
         when(projectServiceClient.getProject(7L)).thenReturn(project);
     }

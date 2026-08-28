@@ -109,6 +109,9 @@ class RouteControllerContractTest {
         SERVICE_MODULE_TO_ENV_VAR.put("analytics", "ANALYTICS_SERVICE_URI");
         SERVICE_MODULE_TO_ENV_VAR.put("project", "PROJECT_SERVICE_URI");
         SERVICE_MODULE_TO_ENV_VAR.put("log-writer", "LOG_SERVICE_URI");
+        // 公開パイプライン(PostController、issue #707)・一括管理/環境間比較・taxonomy解決
+        // (BulkManagementController/TaxonomyController、issue #708)をpublishing-serviceが持つ。
+        SERVICE_MODULE_TO_ENV_VAR.put("publishing", "PUBLISHING_SERVICE_URI");
     }
 
     /** クラス宣言行(トップレベルの public class)を検出する。 */

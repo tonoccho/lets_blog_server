@@ -161,7 +161,6 @@ app:
   publishing-service-uri: ${PUBLISHING_SERVICE_URI:http://localhost:8080}
   wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
   wordpress-provision-token: ${WP_PROVISION_TOKEN:}
-  bulk-upload-storage-path: ${BULK_UPLOAD_STORAGE_PATH:/app/data/bulk-uploads}
   # generated-images-storage-path/backup-mysql-*はBackupServiceと共にplatform-serviceへ移設した
   # (issue #694、C10-2。services/platform/.../application.ymlのapp.generated-images-storage-path/
   # app.backup.*参照)。vscode-extension-source-path/vscode-extension-build-pathは

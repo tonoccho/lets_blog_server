@@ -8,6 +8,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Optional;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -85,7 +86,8 @@ public class ProjectServiceClient {
         }
     }
 
-    public record ProjectBridge(Long id, Long localSiteId, Long testSiteId, Long productionSiteId) {
+    public record ProjectBridge(
+            Long id, Long localSiteId, Long testSiteId, Long productionSiteId, String masterEnvironment) {
     }
 
     /** PostPublishService/PostDeleteServiceが使う。未登録なら{@link SiteNotFoundException}。 */
@@ -105,6 +107,26 @@ public class ProjectServiceClient {
             }
             throw new IllegalStateException(
                     "project-serviceのサイト照会呼び出しに失敗しました: " + bodyOrMessage(e), e);
+        } catch (RestClientException e) {
+            throw new IllegalStateException("project-serviceのサイト照会呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * id指定でサイトを取得する({@code SiteService#getById}が使う、issue #708)。未登録ならempty。
+     */
+    public Optional<SiteBridge> getSite(Long siteId) {
+        try {
+            SiteBridge result = authorized(restClient.get()
+                    .uri("/api/internal/project/sites/{id}", siteId))
+                    .retrieve()
+                    .body(SiteBridge.class);
+            return Optional.ofNullable(result);
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode() == HttpStatus.NOT_FOUND) {
+                return Optional.empty();
+            }
+            throw new IllegalStateException("project-serviceのサイト照会呼び出しに失敗しました: " + bodyOrMessage(e), e);
         } catch (RestClientException e) {
             throw new IllegalStateException("project-serviceのサイト照会呼び出しに失敗しました: " + e.getMessage(), e);
         }
