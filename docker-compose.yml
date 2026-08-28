@@ -324,6 +324,12 @@ services:
       dockerfile: services/platform/Dockerfile
     container_name: lbs-platform
     <<: [*common-service, *actuator-healthcheck]
+    # 他サービスとの通信はlbs-net(x-common-serviceの既定)を維持しつつ、docker-socket-proxyへの
+    # 到達性のためだけにdocker-socket-proxy-netへも参加する(issue #701。下のdocker-socket-proxy
+    # サービス定義・networks:セクションのコメント参照)。
+    networks:
+      - lbs-net
+      - docker-socket-proxy-net
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_platform?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: lbs_platform
@@ -672,10 +678,18 @@ services:
   # apiコンテナからダッシュボードのコンテナ稼働状況(issue #280)取得のためだけにDocker Engine APIを
   # 読み取り専用で中継する。apiコンテナ自体にはdocker.sockを渡さない(コンテナ作成/実行系のPOST操作は
   # 一切許可しない=侵害時にDockerホストを乗っ取られるリスクを避ける)。
+  # issue #695(C10-3)でアプリコードの呼び出し元をplatform-serviceのみに一本化したが、lbs-net上の
+  # 全コンテナが同一フラットネットワークにいたため、環境変数を持たない他コンテナからでも
+  # http://docker-socket-proxy:2375 へ到達できてしまっていた(ネットワークレベルの制限は未達成、
+  # issue #701)。ここでは共通の lbs-net には参加させず、専用の内部ネットワーク
+  # docker-socket-proxy-net(下のplatformサービス定義・networks:セクション参照)にのみ参加させることで、
+  # Epic #551の方針どおり到達可能なコンテナをplatform-serviceだけに限定する。
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:latest
     container_name: lbs-docker-socket-proxy
-    <<: *common-service
+    restart: unless-stopped
+    networks:
+      - docker-socket-proxy-net
     environment:
       CONTAINERS: 1
       POST: 0
@@ -968,6 +982,13 @@ services:
 networks:
   lbs-net:
     driver: bridge
+  # docker-socket-proxyへの到達性をplatform-serviceのみに限定するための専用ネットワーク(issue #701、
+  # Epic #551の方針)。docker-socket-proxyはこのネットワークにのみ参加し(lbs-netには参加しない)、
+  # platformはlbs-netに加えてこちらにも参加することで両ネットワークへ到達できる。internal: trueに
+  # より、このネットワーク単体では外部(インターネット)への出口も持たない。
+  docker-socket-proxy-net:
+    driver: bridge
+    internal: true
 
 volumes:
   mysql_data:
