@@ -63,6 +63,11 @@ app:
   # 記事投稿時に画像をリサイズする長編の目標px(project_image_settings未設定時のフォールバック値)。
   # legacy-apiのapp.default-article-image-long-edge-pxと同じ既定値(1300)。
   default-article-image-long-edge-px: ${DEFAULT_ARTICLE_IMAGE_LONG_EDGE_PX:1300}
+  # 常駐wordpressコンテナ内の内部限定プロビジョニングエージェント(wordpress/provision-agent)の
+  # `/wp-cli/*`エンドポイント呼び出し先(WordPressAgentOperations)。legacy-apiのapp.wordpress-
+  # provision-base-url/app.wordpress-provision-tokenと同じ既定値。
+  wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
+  wordpress-provision-token: ${WP_PROVISION_TOKEN:}
 
 # KeycloakのJWT検証。identity-service/log-writer/media-service/ai-service/content-service/
 # project-serviceのSecurityConfig/JwtDecoderConfigと同じ理由により、issuer-uriによる自動設定は

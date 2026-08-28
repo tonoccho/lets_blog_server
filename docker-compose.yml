@@ -493,6 +493,10 @@ services:
       # [plantuml]/```plantumlの埋め込み(PlantUmlEmbedService/PlantUmlTagRenderService)の実際の
       # レンダリング呼び出し先。
       MEDIA_SERVICE_URI: http://media:8080
+      # 常駐wordpressコンテナ内の内部限定プロビジョニングエージェント(wordpress/provision-agent)の
+      # `/wp-cli/*`エンドポイント呼び出し先(WordPressAgentOperations)。apiと同じ値。
+      WORDPRESS_PROVISION_BASE_URL: http://wordpress:9000
+      WP_PROVISION_TOKEN: ${WP_PROVISION_TOKEN}
     depends_on:
       mysql:
         condition: service_healthy
