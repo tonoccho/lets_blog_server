@@ -13,9 +13,11 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 /**
- * publishing-serviceの内部CMSブリッジ(/api/internal/cms/**、issue #573 stage3でlegacy-apiに新設、
- * issue #709でpublishing-serviceへ移管、Epic #551 C6-3、
- * {@code com.letsblog.publishing.controller.CmsMediaBridgeController})を呼び出すクライアント。issue #581
+ * publishing-serviceの内部CMSブリッジ(/api/internal/publishing/**、issue #573 stage3でlegacy-apiに
+ * {@code /api/internal/cms/**}として新設、issue #709でpublishing-serviceへ移管し、レビュー指摘対応で
+ * 他の内部ブリッジと同じ{@code /api/internal/{owning-service}/**}命名規則に合わせて現行パスへ変更、
+ * Epic #551 C6-3、{@code com.letsblog.publishing.controller.CmsMediaBridgeController})を呼び出す
+ * クライアント。issue #581
  * (C12)でlbs-commonの{@link SyncServiceClient}(タイムアウト・リトライ・サーキットブレーカーの
  * 共通実装)へ移行した(接続先の切り替え後もこの共通実装は維持している)。方針の詳細は
  * docs/SYNC_SERVICE_CALLS.md参照。
@@ -62,7 +64,7 @@ public class CmsBridgeClient {
                 .header(HttpHeaders.CONTENT_TYPE, contentType != null ? contentType : "application/octet-stream");
         try {
             MediaUploadResult result = client.postMultipart(
-                    "/api/internal/cms/sites/{site}/media", new Object[] {siteKey}, body.build(),
+                    "/api/internal/publishing/sites/{site}/media", new Object[] {siteKey}, body.build(),
                     MediaUploadResult.class, ServiceAuthHeaders.forwardedBearer(bearerToken));
             if (result == null) {
                 throw new CmsBridgeException("publishing-serviceから空の応答を受け取りました", null);
@@ -76,7 +78,7 @@ public class CmsBridgeClient {
     public MediaGcScanResult scanMedia(Long projectId, String environment, String bearerToken) {
         try {
             MediaGcScanResult result = client.get(
-                    "/api/internal/cms/projects/{projectId}/media-scan?environment={environment}",
+                    "/api/internal/publishing/projects/{projectId}/media-scan?environment={environment}",
                     new Object[] {projectId, environment}, MediaGcScanResult.class,
                     ServiceAuthHeaders.forwardedBearer(bearerToken));
             if (result == null) {
@@ -91,7 +93,7 @@ public class CmsBridgeClient {
     public void deleteMedia(Long projectId, String environment, String mediaId, String bearerToken) {
         try {
             client.delete(
-                    "/api/internal/cms/projects/{projectId}/media/{mediaId}?environment={environment}",
+                    "/api/internal/publishing/projects/{projectId}/media/{mediaId}?environment={environment}",
                     new Object[] {projectId, mediaId, environment}, ServiceAuthHeaders.forwardedBearer(bearerToken));
         } catch (SyncServiceException e) {
             throw new CmsBridgeException("publishing-serviceのメディア削除呼び出しに失敗しました: " + e.getMessage(), e);

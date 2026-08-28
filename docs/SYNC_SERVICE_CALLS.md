@@ -134,7 +134,7 @@ Phase 19の各抽出Issueが暫定策として実装していた「呼び出し�
 
 | 呼び出し元 | エンドポイント | プロファイル | リトライ | サーキットブレーカー | フォールバック | 移行 |
 |---|---|---|---|---|---|---|
-| media(`CmsBridgeClient`) | `POST /api/internal/cms/sites/{site}/media`(multipart)・`GET .../media-scan`・`DELETE .../media/{id}` | RENDER(30秒、大きめのメディア転送のため) | GETのみ | あり(`publishing-service`) | 明確なエラー(CMS操作の成否を呼び出し元へ確実に伝える必要があるため) | 済(issue #709でlegacy-apiからpublishing-serviceへ呼び出し先を切り替え、C12対応は維持) |
+| media(`CmsBridgeClient`) | `POST /api/internal/publishing/sites/{site}/media`(multipart)・`GET .../media-scan`・`DELETE .../media/{id}` | RENDER(30秒、大きめのメディア転送のため) | GETのみ | あり(`publishing-service`) | 明確なエラー(CMS操作の成否を呼び出し元へ確実に伝える必要があるため) | 済(issue #709でlegacy-apiからpublishing-serviceへ呼び出し先を切り替え、レビュー指摘対応でパスも/api/internal/cms/**から/api/internal/publishing/**へ変更、C12対応は維持) |
 
 ### media-service向け
 

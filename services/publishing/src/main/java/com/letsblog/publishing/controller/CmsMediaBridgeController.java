@@ -33,8 +33,11 @@ import java.io.IOException;
  *
  * <p>認可は、media-service側で既にrequireAdmin等のチェックを済ませたリクエストのBearerトークンを
  * そのまま転送してもらう想定で、ここでは追加の認可チェックは行わない(移管元のlegacy-api版と同じ、
- * AUTHORIZATION_MATRIX.md参照)。パスは移管元と同じ{@code /api/internal/cms/**}のまま維持する
- * (media-serviceの{@code CmsBridgeClient}呼び出し契約を変更しないため)。
+ * AUTHORIZATION_MATRIX.md参照)。パスは移管元の{@code /api/internal/cms/**}から、publishing-service内の
+ * 他の内部ブリッジ({@link AuthorProvisioningInternalController}等)と同じ
+ * {@code /api/internal/{owning-service}/**}命名規則に合わせて{@code /api/internal/publishing/**}へ
+ * 変更した(issue #709のレビュー指摘対応)。media-serviceの{@code CmsBridgeClient}側の呼び出しパスも
+ * 追従済み。
  *
  * <p>{@code Project}/{@code Site}本体の所有権はproject-serviceにある(issue #577 stage2)。
  * {@link ProjectService}/{@link SiteService}がproject-serviceへの内部ブリッジ経由でプロジェクト/
@@ -56,7 +59,9 @@ public class CmsMediaBridgeController {
         this.cmsAdapterFactory = cmsAdapterFactory;
     }
 
-    @PostMapping(value = "/api/internal/cms/sites/{site}/media", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(
+            value = "/api/internal/publishing/sites/{site}/media",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public MediaUploadResult uploadMedia(@PathVariable String site, @RequestPart("file") MultipartFile file) {
         try {
             CmsCredentials credentials = siteService.getCredentials(site);
@@ -67,7 +72,7 @@ public class CmsMediaBridgeController {
         }
     }
 
-    @GetMapping("/api/internal/cms/projects/{projectId}/media-scan")
+    @GetMapping("/api/internal/publishing/projects/{projectId}/media-scan")
     public MediaGcScanBridgeResponse scanMedia(@PathVariable Long projectId, @RequestParam String environment) {
         Project project = getProject(projectId);
         Site site = resolveSite(project, environment);
@@ -76,7 +81,7 @@ public class CmsMediaBridgeController {
         return new MediaGcScanBridgeResponse(adapter.listMedia(credentials), adapter.scanMediaReferences(credentials));
     }
 
-    @DeleteMapping("/api/internal/cms/projects/{projectId}/media/{mediaId}")
+    @DeleteMapping("/api/internal/publishing/projects/{projectId}/media/{mediaId}")
     public ResponseEntity<Void> deleteMedia(
             @PathVariable Long projectId, @PathVariable String mediaId, @RequestParam String environment) {
         Project project = getProject(projectId);
