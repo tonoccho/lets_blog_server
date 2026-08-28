@@ -9,13 +9,19 @@ GeneratedImageController/RenderControllerをmedia-serviceへ移設し、当初�
 ProjectMediaGarbageCollectionControllerをmedia-serviceへ移設した一方、GenerationJobControllerに
 `POST /api/generation-jobs`を追加し、新設の内部ブリッジ`CmsMediaBridgeController`
 (`POST /api/internal/cms/sites/{site}/media`、`GET .../projects/{projectId}/media-scan`、
-`DELETE .../projects/{projectId}/media/{mediaId}`、計3エンドポイント)を追加した。
+`DELETE .../projects/{projectId}/media/{mediaId}`、計3エンドポイント)を追加した。当時の
 `CmsMediaBridgeController`はmedia-service専用の内部呼び出しであり、gatewayを経由した
-既存フロントエンドから直接到達可能な経路ではないため、下表の一覧からは省略しているが、
-`SecurityConfig`の対象からは除外していない(未認証では401になる。統合テストの
-Authorizationヘッダーなし401チェックの対象には含めている)。issue #566でAuthControllerの
-ログイン・2FA・パスワードリセット系8エンドポイントを撤去したため、現在の総数は上記174件から
-8件減った166件(公開パスの`signup`/`setup`/`setup-status`3件を含む)。
+既存フロントエンドから直接到達可能な経路ではないため、下表の一覧からは省略しつつ
+`SecurityConfig`の対象からは除外していなかった(未認証では401になる。統合テストの
+Authorizationヘッダーなし401チェックの対象にも含めていた)。issue #566でAuthControllerの
+ログイン・2FA・パスワードリセット系8エンドポイントを撤去したため、その時点の総数は上記174件から
+8件減った166件(公開パスの`signup`/`setup`/`setup-status`3件を含む)だった。
+
+その後issue #709で`CmsMediaBridgeController`はpublishing-serviceへ移設され、legacy-apiには
+存在しない(パスも`/api/internal/cms/**`から、publishing-service内の他の内部ブリッジと同じ
+`/api/internal/{owning-service}/**`命名規則に合わせて`/api/internal/publishing/**`配下へ変更
+されている)。legacy-apiの統合テスト(`AuthorizationMatrixIntegrationTest`)の401チェック対象
+からもこの3エンドポイントは除外済み。
 
 対応する統合テストは
 `services/legacy-api/src/test/java/com/letsblog/api/integration/AuthorizationMatrixIntegrationTest.java`。

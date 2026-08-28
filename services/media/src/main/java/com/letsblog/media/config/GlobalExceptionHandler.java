@@ -72,11 +72,12 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * legacy-apiのCMSブリッジ(/api/internal/cms/**、#573 stage3)呼び出しの失敗。
+     * publishing-serviceのCMSブリッジ(/api/internal/publishing/**、#573 stage3でlegacy-apiに新設、
+     * issue #709でpublishing-serviceへ移管)呼び出しの失敗。
      */
     @ExceptionHandler(CmsBridgeException.class)
     public ResponseEntity<ErrorResponse> handleCmsBridgeException(CmsBridgeException e) {
-        log.error("legacy-apiのCMSブリッジ呼び出しに失敗しました", e);
+        log.error("publishing-serviceのCMSブリッジ呼び出しに失敗しました", e);
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 

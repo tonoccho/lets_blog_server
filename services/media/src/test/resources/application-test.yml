@@ -39,7 +39,7 @@ app:
   penpot-service-email: lbs-service@letsblog.local
   penpot-service-password: test-password
   generated-images-storage-path: /tmp/generated-images
-  legacy-api-uri: http://localhost:19999
+  publishing-service-uri: http://localhost:19999
   ai-service-uri: http://localhost:19999
   identity-service-uri: http://localhost:19999
 

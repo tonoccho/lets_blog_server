@@ -1,18 +1,18 @@
-package com.letsblog.api.controller;
+package com.letsblog.publishing.controller;
 
-import com.letsblog.api.cms.CmsAdapter;
-import com.letsblog.api.cms.CmsAdapterFactory;
-import com.letsblog.api.cms.CmsCredentials;
-import com.letsblog.api.cms.CmsMediaReferenceScan;
-import com.letsblog.api.cms.CmsMediaSummary;
-import com.letsblog.api.cms.CmsType;
-import com.letsblog.api.cms.MediaUploadResult;
-import com.letsblog.api.domain.Project;
-import com.letsblog.api.domain.Site;
-import com.letsblog.api.dto.MediaGcScanBridgeResponse;
-import com.letsblog.api.service.ProjectNotFoundException;
-import com.letsblog.api.service.ProjectService;
-import com.letsblog.api.service.SiteService;
+import com.letsblog.publishing.cms.CmsAdapter;
+import com.letsblog.publishing.cms.CmsAdapterFactory;
+import com.letsblog.publishing.cms.CmsCredentials;
+import com.letsblog.publishing.cms.CmsMediaReferenceScan;
+import com.letsblog.publishing.cms.CmsMediaSummary;
+import com.letsblog.publishing.cms.CmsType;
+import com.letsblog.publishing.cms.MediaUploadResult;
+import com.letsblog.publishing.domain.Project;
+import com.letsblog.publishing.domain.Site;
+import com.letsblog.publishing.dto.MediaGcScanBridgeResponse;
+import com.letsblog.publishing.service.ProjectNotFoundException;
+import com.letsblog.publishing.service.ProjectService;
+import com.letsblog.publishing.service.SiteService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -30,9 +30,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.when;
 
 /**
- * CmsMediaBridgeControllerの回帰テスト(issue #573 stage3)。media-serviceから移設された
- * MediaController/MediaGarbageCollectionServiceのProject/Site解決ロジック(環境未設定時の
- * 例外を含む)が、このブリッジコントローラへ正しく引き継がれていることを検証する。
+ * CmsMediaBridgeControllerの回帰テスト(issue #573 stage3でlegacy-api向けに作成、issue #709で
+ * publishing-serviceへ移管、Epic #551 C6-3)。media-serviceから移設されたMediaController/
+ * MediaGarbageCollectionServiceのProject/Site解決ロジック(環境未設定時の例外を含む)が、
+ * このブリッジコントローラへ正しく引き継がれていることを検証する。
  */
 @ExtendWith(MockitoExtension.class)
 class CmsMediaBridgeControllerTest {

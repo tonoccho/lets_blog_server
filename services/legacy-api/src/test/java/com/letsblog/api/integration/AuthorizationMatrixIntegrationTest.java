@@ -134,12 +134,8 @@ class AuthorizationMatrixIntegrationTest {
 
                 // (BackupControllerは#694でplatform-serviceへ移設したため対象外)
 
-                // -- CmsMediaBridgeController (3、#573 stage3で追加) --
-                // media-service専用の内部ブリッジ(AUTHORIZATION_MATRIX.mdの一覧表からは省略しているが、
-                // SecurityConfigの対象からは除外していないため、ここでの401チェック対象には含める)。
-                new Endpoint("POST", "/api/internal/cms/sites/my-site/media"),
-                new Endpoint("GET", "/api/internal/cms/projects/1/media-scan"),
-                new Endpoint("DELETE", "/api/internal/cms/projects/1/media/1"),
+                // (CmsMediaBridgeControllerは#573 stage3でlegacy-apiに新設されたが、issue #709で
+                // publishing-serviceへ移設したため対象外)
 
                 // -- ContentCacheController (1) --
                 new Endpoint("GET", "/api/content-cache"),

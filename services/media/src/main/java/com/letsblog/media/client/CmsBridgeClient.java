@@ -13,13 +13,17 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 /**
- * legacy-apiの内部CMSブリッジ(/api/internal/cms/**、issue #573 stage3、
- * {@code com.letsblog.api.controller.CmsMediaBridgeController})を呼び出すクライアント。issue #581
+ * publishing-serviceの内部CMSブリッジ(/api/internal/publishing/**、issue #573 stage3でlegacy-apiに
+ * {@code /api/internal/cms/**}として新設、issue #709でpublishing-serviceへ移管し、レビュー指摘対応で
+ * 他の内部ブリッジと同じ{@code /api/internal/{owning-service}/**}命名規則に合わせて現行パスへ変更、
+ * Epic #551 C6-3、{@code com.letsblog.publishing.controller.CmsMediaBridgeController})を呼び出す
+ * クライアント。issue #581
  * (C12)でlbs-commonの{@link SyncServiceClient}(タイムアウト・リトライ・サーキットブレーカーの
- * 共通実装)へ移行した。方針の詳細はdocs/SYNC_SERVICE_CALLS.md参照。
+ * 共通実装)へ移行した(接続先の切り替え後もこの共通実装は維持している)。方針の詳細は
+ * docs/SYNC_SERVICE_CALLS.md参照。
  *
  * <p>CMS(WordPress)への実際の接続情報({@code CmsCredentials}、SSH鍵等の秘匿情報を含む)は
- * legacy-api側に留まり、media-serviceへは一切渡らない。media-serviceは「このsite/projectに
+ * publishing-service側に留まり、media-serviceへは一切渡らない。media-serviceは「このsite/projectに
  * 対して操作してほしい」という依頼のみを送る。
  *
  * <p>認証はstage1/stage2と同じ方式(呼び出し元ユーザーのBearerトークンをそのまま転送)だが、
@@ -40,8 +44,9 @@ public class CmsBridgeClient {
 
     private final SyncServiceClient client;
 
-    public CmsBridgeClient(RestClient.Builder builder, @Value("${app.legacy-api-uri}") String legacyApiUri) {
-        this.client = SyncServiceClient.builder(builder, "legacy-api", legacyApiUri)
+    public CmsBridgeClient(
+            RestClient.Builder builder, @Value("${app.publishing-service-uri}") String publishingServiceUri) {
+        this.client = SyncServiceClient.builder(builder, "publishing-service", publishingServiceUri)
                 .profile(SyncCallProfile.RENDER) // 大きめのメディアファイル転送を伴うため、単純なJSON APIより長めの30秒
                 .build();
     }
@@ -59,39 +64,39 @@ public class CmsBridgeClient {
                 .header(HttpHeaders.CONTENT_TYPE, contentType != null ? contentType : "application/octet-stream");
         try {
             MediaUploadResult result = client.postMultipart(
-                    "/api/internal/cms/sites/{site}/media", new Object[] {siteKey}, body.build(),
+                    "/api/internal/publishing/sites/{site}/media", new Object[] {siteKey}, body.build(),
                     MediaUploadResult.class, ServiceAuthHeaders.forwardedBearer(bearerToken));
             if (result == null) {
-                throw new CmsBridgeException("legacy-apiから空の応答を受け取りました", null);
+                throw new CmsBridgeException("publishing-serviceから空の応答を受け取りました", null);
             }
             return result;
         } catch (SyncServiceException e) {
-            throw new CmsBridgeException("legacy-apiのメディアアップロード呼び出しに失敗しました: " + e.getMessage(), e);
+            throw new CmsBridgeException("publishing-serviceのメディアアップロード呼び出しに失敗しました: " + e.getMessage(), e);
         }
     }
 
     public MediaGcScanResult scanMedia(Long projectId, String environment, String bearerToken) {
         try {
             MediaGcScanResult result = client.get(
-                    "/api/internal/cms/projects/{projectId}/media-scan?environment={environment}",
+                    "/api/internal/publishing/projects/{projectId}/media-scan?environment={environment}",
                     new Object[] {projectId, environment}, MediaGcScanResult.class,
                     ServiceAuthHeaders.forwardedBearer(bearerToken));
             if (result == null) {
-                throw new CmsBridgeException("legacy-apiから空の応答を受け取りました", null);
+                throw new CmsBridgeException("publishing-serviceから空の応答を受け取りました", null);
             }
             return result;
         } catch (SyncServiceException e) {
-            throw new CmsBridgeException("legacy-apiのメディアスキャン呼び出しに失敗しました: " + e.getMessage(), e);
+            throw new CmsBridgeException("publishing-serviceのメディアスキャン呼び出しに失敗しました: " + e.getMessage(), e);
         }
     }
 
     public void deleteMedia(Long projectId, String environment, String mediaId, String bearerToken) {
         try {
             client.delete(
-                    "/api/internal/cms/projects/{projectId}/media/{mediaId}?environment={environment}",
+                    "/api/internal/publishing/projects/{projectId}/media/{mediaId}?environment={environment}",
                     new Object[] {projectId, mediaId, environment}, ServiceAuthHeaders.forwardedBearer(bearerToken));
         } catch (SyncServiceException e) {
-            throw new CmsBridgeException("legacy-apiのメディア削除呼び出しに失敗しました: " + e.getMessage(), e);
+            throw new CmsBridgeException("publishing-serviceのメディア削除呼び出しに失敗しました: " + e.getMessage(), e);
         }
     }
 }
