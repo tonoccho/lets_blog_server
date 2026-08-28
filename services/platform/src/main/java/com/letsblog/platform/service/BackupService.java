@@ -303,15 +303,26 @@ public class BackupService {
     /**
      * バックアップに含まれる生成画像ファイルを保存先ディレクトリへ書き戻す(同名ファイルは上書き)。
      * 既存ファイルでバックアップに含まれないものは削除しない(意図しないデータ消失を避けるため)。
+     *
+     * <p>アーカイブ内のエントリ名(zipのファイル名部分)はそのままファイルシステムパスの解決に使わず、
+     * generatedImagesDir配下に正規化後も収まることを検証する(Zip Slip対策)。MySQLスキーマ名の
+     * 許可リスト検証と同様、検証に失敗したエントリはリストア対象から除外し警告ログを出す。
      */
     private void restoreGeneratedImages(Map<String, byte[]> files) {
+        Path normalizedBaseDir = generatedImagesDir.toAbsolutePath().normalize();
         for (var entry : files.entrySet()) {
+            String relativePath = entry.getKey();
+            Path target = normalizedBaseDir.resolve(relativePath).normalize();
+            if (!target.startsWith(normalizedBaseDir)) {
+                log.warn("生成画像ファイル '{}' はgeneratedImagesDirの外を指すパスに正規化されるため、"
+                        + "リストア対象から除外しました", relativePath);
+                continue;
+            }
             try {
-                Path target = generatedImagesDir.resolve(entry.getKey());
                 Files.createDirectories(target.getParent());
                 Files.write(target, entry.getValue());
             } catch (IOException e) {
-                throw new BackupException("生成画像ファイル '" + entry.getKey() + "' の書き込みに失敗しました: " + e.getMessage(), e);
+                throw new BackupException("生成画像ファイル '" + relativePath + "' の書き込みに失敗しました: " + e.getMessage(), e);
             }
         }
     }

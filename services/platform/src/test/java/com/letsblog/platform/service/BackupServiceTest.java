@@ -14,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -28,6 +29,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doThrow;
@@ -359,6 +361,86 @@ class BackupServiceTest {
             service.restoreBackup(new ByteArrayInputStream(archive), true, false);
 
             verify(adminAuthorizationService).requireAdmin();
+        }
+    }
+
+    @Nested
+    @DisplayName("Restore validates generated image paths against Zip Slip (issue #699)")
+    class GeneratedImagesRestorePathValidationTests {
+
+        /**
+         * mysqlDumps/postgresDumpのどちらかが非空でないとrestoreBackupは"ダンプが含まれていません"で
+         * 例外を投げるため(実処理には無関係)、許可リストに含まれない(=フィルタで除外され、実際の
+         * mysqlバイナリは決して起動されない)ダミーのMySQLスキーマエントリを1つ含める。
+         * UnknownSchemaRejectionTestsと同じ手法。
+         */
+        private byte[] buildImagesOnlyArchive(String... generatedImageEntryNames) throws IOException {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            try (ZipOutputStream zip = new ZipOutputStream(out)) {
+                zip.putNextEntry(new ZipEntry("metadata.json"));
+                zip.write(new ObjectMapper().writeValueAsBytes(new BackupService.BackupMetadata(
+                        sha256Hex(ENCRYPTION_KEY), Instant.now().toString(), MYSQL_SCHEMAS,
+                        List.of(POSTGRES_DATABASE))));
+                zip.closeEntry();
+
+                zip.putNextEntry(new ZipEntry("mysql/not-an-allowed-schema.sql"));
+                zip.write("SELECT 1;".getBytes());
+                zip.closeEntry();
+
+                for (String name : generatedImageEntryNames) {
+                    zip.putNextEntry(new ZipEntry(name));
+                    zip.write("content-of-".concat(name).getBytes());
+                    zip.closeEntry();
+                }
+            }
+            return out.toByteArray();
+        }
+
+        @Test
+        @DisplayName("legitimate relative generated-image paths are restored under generatedImagesDir "
+                + "(no regression)")
+        void restoresLegitimateRelativePaths() throws Exception {
+            byte[] archive = buildImagesOnlyArchive(
+                    "generated-images/test-image.jpg",
+                    "generated-images/subdir/another.png");
+
+            service.restoreBackup(new ByteArrayInputStream(archive), true, false);
+
+            Path expected1 = generatedImagesDir.resolve("test-image.jpg");
+            Path expected2 = generatedImagesDir.resolve("subdir/another.png");
+            assertTrue(Files.exists(expected1), "test-image.jpg should have been restored");
+            assertTrue(Files.exists(expected2), "subdir/another.png should have been restored");
+            assertEquals("content-of-generated-images/test-image.jpg",
+                    Files.readString(expected1));
+        }
+
+        @Test
+        @DisplayName("a crafted entry name containing path traversal (generated-images/../../evil.sh) "
+                + "is skipped and never written outside generatedImagesDir")
+        void rejectsPathTraversalEntry() throws Exception {
+            byte[] archive = buildImagesOnlyArchive(
+                    "generated-images/../../evil.sh",
+                    "generated-images/legit.txt");
+
+            service.restoreBackup(new ByteArrayInputStream(archive), true, false);
+
+            // The traversal entry must not have been written anywhere outside generatedImagesDir.
+            Path outsideTarget = generatedImagesDir.toAbsolutePath().normalize()
+                    .getParent().getParent().resolve("evil.sh");
+            assertFalse(Files.exists(outsideTarget),
+                    "evil.sh must not be written outside generatedImagesDir");
+
+            // Also verify nothing named evil.sh was written anywhere inside generatedImagesDir either
+            // (it must simply be skipped, not silently relocated).
+            try (var walk = Files.walk(generatedImagesDir)) {
+                assertFalse(walk.anyMatch(p -> p.getFileName() != null
+                                && "evil.sh".equals(p.getFileName().toString())),
+                        "evil.sh must not be written anywhere as a result of the traversal entry");
+            }
+
+            // A legitimate sibling entry in the same archive must still be restored normally.
+            assertTrue(Files.exists(generatedImagesDir.resolve("legit.txt")),
+                    "legit.txt should still have been restored despite the sibling traversal entry");
         }
     }
 }
