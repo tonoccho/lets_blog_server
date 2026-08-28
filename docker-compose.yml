@@ -90,8 +90,9 @@ services:
       COMFYUI_CHECKPOINT: ${COMFYUI_CHECKPOINT:-v1-5-pruned-emaonly.safetensors}
       COMFYUI_MODELS_PATH: /comfyui-models
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY}
-      PLANTUML_BASE_URL: http://plantuml:8080
-      PENPOT_BASE_URL: http://penpot-frontend:8080
+      # PLANTUML_BASE_URL/PENPOT_BASE_URLは、これらを使っていた唯一のクラス
+      # (ConnectedServiceStatusService)がplatform-serviceへ移設された(issue #695、C10-3)ことに伴い
+      # 撤去した(下のplatformサービス定義参照)。
       PENPOT_PUBLIC_URL: ${PENPOT_PUBLIC_URL:-http://localhost:9001}
       PENPOT_SERVICE_EMAIL: ${PENPOT_SERVICE_EMAIL:-lbs-service@letsblog.local}
       PENPOT_SERVICE_PASSWORD: ${PENPOT_SERVICE_PASSWORD}
@@ -115,7 +116,6 @@ services:
       BULK_UPLOAD_STORAGE_PATH: /app/data/bulk-uploads
       VSCODE_EXTENSION_SOURCE_PATH: /app/extension-src
       VSCODE_EXTENSION_BUILD_PATH: /app/extension-build
-      DOCKER_SOCKET_PROXY_BASE_URL: http://docker-socket-proxy:2375
     volumes:
       - bulk_upload_files:/app/data/bulk-uploads
       - comfyui_models:/comfyui-models
@@ -127,8 +127,6 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      docker-socket-proxy:
-        condition: service_started
       media:
         condition: service_healthy
       ai:
@@ -351,6 +349,15 @@ services:
       IMAGE_LLM_BASE_URL: ${IMAGE_LLM_BASE_URL:-https://api.openai.com/v1}
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY}
       UPLOAD_RATE_LIMIT_REQUESTS: ${UPLOAD_RATE_LIMIT_REQUESTS:-10}
+      # ConnectedServiceStatusService(issue #695、C10-3でlegacy-apiから移設)が疎通確認する外部連携先。
+      # legacy-apiのapiコンテナが持っていた同名の環境変数と同じ。
+      PLANTUML_BASE_URL: http://plantuml:8080
+      PENPOT_BASE_URL: http://penpot-frontend:8080
+      WORDPRESS_PROVISION_BASE_URL: http://wordpress:9000
+      # ContainerStatusService(issue #695、C10-3でlegacy-apiから移設)がDocker Engine API(コンテナ一覧)を
+      # 読み取り専用で取得するためのdocker-socket-proxyのURL。docker-socket-proxyへのアクセスは
+      # 本サービスのみに限定する(Epic #551の方針。下のdocker-socket-proxy定義・depends_on参照)。
+      DOCKER_SOCKET_PROXY_BASE_URL: http://docker-socket-proxy:2375
       # AdminAuthorizationServiceのrequireAdmin・自分自身のuserId解決のため、呼び出し元のBearer
       # トークンをそのままidentity-serviceへ転送して問い合わせる(log-writer/content-service/
       # project-serviceと同じ暫定策)。
@@ -394,6 +401,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      docker-socket-proxy:
+        condition: service_started
 
   # 名前をつけて保存・管理するSSH鍵ペア(Ed25519)、[toc]/[blogcard]/[amazon]組み込みタグの
   # デザインカスタマイズ(プロジェクト単位)をlegacy-apiから抽出した(#577 stage 1)。より大きな
@@ -493,9 +502,10 @@ services:
       # このstageではLEGACY_API_URIに明示固定してあり、この変数の影響を受けない
       # (services/gateway/src/main/resources/application.ymlのコメント参照)。
       PROJECT_SERVICE_URI: http://project:8080
-      # システム全体のグローバル設定(system-settings)のルーティング先(issue #693)。
-      # /api/system/**・/api/backup/**・/api/vscode-extension/**は#694〜#696で本サービスへ
-      # 追加移設されるまでこの変数の既定値(legacy-api)のままとなる。
+      # システム全体のグローバル設定(system-settings、issue #693)・バックアップ(issue #694)・
+      # ダッシュボードのコンテナ状態/接続サービス状態(issue #695、C10-3、dashboard-status/
+      # dashboard-status-streamルート)のルーティング先。/api/vscode-extension/**は#696で
+      # 本サービスへ追加移設されるまで、対応するコントローラー自体が存在しない(未実装)。
       PLATFORM_SERVICE_URI: http://platform:8080
     depends_on:
       api:

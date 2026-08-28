@@ -1,6 +1,6 @@
-package com.letsblog.api.service;
+package com.letsblog.platform.service;
 
-import com.letsblog.api.dto.ContainerStatusResponse;
+import com.letsblog.platform.dto.ContainerStatusResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -11,8 +11,9 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * ダッシュボードのコンテナ稼働状況をServer-Sent Eventsでリアルタイム配信する(issue #280)。
- * ConnectedServiceStatusBroadcasterと同じhubパターンを踏襲する。
+ * legacy-apiから移設(issue #695、C10-3、元は issue #280)。ダッシュボードのコンテナ稼働状況を
+ * Server-Sent Eventsでリアルタイム配信する。ConnectedServiceStatusBroadcasterと同じhubパターンを
+ * 踏襲する。
  */
 @Component
 @Slf4j

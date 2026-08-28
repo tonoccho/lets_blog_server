@@ -78,6 +78,15 @@ app:
   image-llm-api-key: ${IMAGE_LLM_API_KEY:}
   image-llm-base-url: ${IMAGE_LLM_BASE_URL:https://api.openai.com/v1}
   brave-search-api-key: ${BRAVE_SEARCH_API_KEY:}
+  # ConnectedServiceStatusService(issue #695、C10-3でlegacy-apiから移設)が疎通確認する外部連携先。
+  # legacy-apiのapiコンテナが持っていた同名プロパティと同じ。
+  plantuml-base-url: ${PLANTUML_BASE_URL:http://localhost:8085}
+  penpot-base-url: ${PENPOT_BASE_URL:http://localhost:9001}
+  wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
+  # ContainerStatusService(issue #695、C10-3でlegacy-apiから移設)がDocker Engine API(コンテナ一覧)を
+  # 読み取り専用で取得するためのdocker-socket-proxyのURL。docker-socket-proxyへのアクセスは
+  # 本サービスのみに限定する(Epic #551の方針。docker-compose.ymlのdocker-socket-proxy定義参照)。
+  docker-socket-proxy-base-url: ${DOCKER_SOCKET_PROXY_BASE_URL:http://localhost:2375}
   # CurrentActorServiceのisAdmin/自分自身のuserId解決のため、呼び出し元のBearerトークンをそのまま
   # identity-serviceの/api/identity/meへ転送して問い合わせる(log-writer(#572)/content-service(#576)/
   # project-service(#577)と同じ暫定策。platform-serviceはusersテーブルへクロススキーマアクセス

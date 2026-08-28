@@ -42,21 +42,6 @@ public class InternalPlatformSettingsController {
         return new SystemBraveSearchApiKeyResponse(apiKey == null || apiKey.isBlank() ? null : apiKey);
     }
 
-    public record BraveSearchApiKeyStatusResponse(boolean configured, String source) {
-    }
-
-    /**
-     * ConnectedServiceStatusService(legacy-api)がPlatformServiceClient#isBraveSearchApiKeyConfigured
-     * 経由で呼ぶ(issue #693のレビュー指摘)。公開エンドポイント({@code GET /api/system-settings/
-     * brave-search-api-key}、SystemSettingController参照)はログイン済みユーザーであることを要求する
-     * ようになったため、認証コンテキストを持たないこのサービス間呼び出しは代わりにこちらを使う。
-     */
-    @GetMapping("/api/internal/platform/system-settings/brave-search-api-key-status")
-    public BraveSearchApiKeyStatusResponse systemBraveSearchApiKeyStatus() {
-        SystemSettingService.BraveSearchApiKeyStatus status = systemSettingService.getBraveSearchApiKeyStatusInternal();
-        return new BraveSearchApiKeyStatusResponse(status.configured(), status.source().name());
-    }
-
     public record LlmConfigResponse(
             String provider, String baseUrl, String apiKey, String defaultModel,
             List<String> availableModels, long requestTimeoutSeconds) {

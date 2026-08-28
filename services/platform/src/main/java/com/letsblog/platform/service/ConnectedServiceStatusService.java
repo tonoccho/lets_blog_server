@@ -1,10 +1,9 @@
-package com.letsblog.api.service;
+package com.letsblog.platform.service;
 
-import com.letsblog.api.client.PlatformServiceClient;
-import com.letsblog.api.dto.ConnectedServiceStatusDetailResponse;
-import com.letsblog.api.dto.ConnectedServiceStatusResponse;
-import com.letsblog.api.dto.ConnectedServiceStatusResponse.Status;
-import com.letsblog.api.render.PlantUmlEncoder;
+import com.letsblog.platform.dto.ConnectedServiceStatusDetailResponse;
+import com.letsblog.platform.dto.ConnectedServiceStatusResponse;
+import com.letsblog.platform.dto.ConnectedServiceStatusResponse.Status;
+import com.letsblog.platform.render.PlantUmlEncoder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
@@ -25,9 +24,15 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
 /**
- * ダッシュボードに表示する接続サービス(DB・外部連携)の稼働状況をチェックする(issue #181, #197)。
- * 各サービス固有の軽量なヘルスチェック用エンドポイント(または実際の処理能力を確認できる操作)を
- * 使って疎通確認する。短いタイムアウトで行い、ダッシュボード表示への影響(応答遅延)を抑える。
+ * legacy-apiから移設(issue #695、C10-3、元は issue #181, #197)。ダッシュボードに表示する接続サービス
+ * (DB・外部連携)の稼働状況をチェックする。各サービス固有の軽量なヘルスチェック用エンドポイント
+ * (または実際の処理能力を確認できる操作)を使って疎通確認する。短いタイムアウトで行い、
+ * ダッシュボード表示への影響(応答遅延)を抑える。
+ *
+ * <p>移設前(legacy-api)はBrave Search APIキーの設定有無をPlatformServiceClient経由でplatform-service
+ * (本サービス)へ問い合わせていたが、本サービス内へ移設されたことで{@link SystemSettingService}を
+ * 直接注入する同一プロセス内呼び出しに置き換わった(C10-1、issue #693で既にSystemSettingServiceが
+ * 本サービスに存在することが前提)。
  */
 @Service
 public class ConnectedServiceStatusService {
@@ -40,7 +45,7 @@ public class ConnectedServiceStatusService {
     private final RestClient plantUmlClient;
     private final RestClient wordpressProvisioningClient;
     private final RestClient penpotClient;
-    private final PlatformServiceClient platformServiceClient;
+    private final SystemSettingService systemSettingService;
     private final String comfyUiBaseUrl;
     private final String plantUmlBaseUrl;
     private final String wordpressProvisionBaseUrl;
@@ -55,14 +60,14 @@ public class ConnectedServiceStatusService {
             @Value("${app.plantuml-base-url}") String plantUmlBaseUrl,
             @Value("${app.wordpress-provision-base-url}") String wordpressProvisionBaseUrl,
             @Value("${app.penpot-base-url}") String penpotBaseUrl,
-            PlatformServiceClient platformServiceClient) {
+            SystemSettingService systemSettingService) {
         this(dataSource,
                 llmApiKey,
                 builderWithTimeout(comfyUiBaseUrl), comfyUiBaseUrl,
                 builderWithTimeout(plantUmlBaseUrl), plantUmlBaseUrl,
                 builderWithTimeout(wordpressProvisionBaseUrl), wordpressProvisionBaseUrl,
                 builderWithTimeout(penpotBaseUrl), penpotBaseUrl,
-                platformServiceClient);
+                systemSettingService);
     }
 
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
@@ -73,14 +78,14 @@ public class ConnectedServiceStatusService {
             RestClient.Builder plantUmlBuilder, String plantUmlBaseUrl,
             RestClient.Builder wordpressBuilder, String wordpressProvisionBaseUrl,
             RestClient.Builder penpotBuilder, String penpotBaseUrl,
-            PlatformServiceClient platformServiceClient) {
+            SystemSettingService systemSettingService) {
         this.dataSource = dataSource;
         this.llmApiKey = llmApiKey;
         this.comfyUiClient = comfyUiBuilder.build();
         this.plantUmlClient = plantUmlBuilder.build();
         this.wordpressProvisioningClient = wordpressBuilder.build();
         this.penpotClient = penpotBuilder.build();
-        this.platformServiceClient = platformServiceClient;
+        this.systemSettingService = systemSettingService;
         this.comfyUiBaseUrl = comfyUiBaseUrl;
         this.plantUmlBaseUrl = plantUmlBaseUrl;
         this.wordpressProvisionBaseUrl = wordpressProvisionBaseUrl;
@@ -219,10 +224,13 @@ public class ConnectedServiceStatusService {
 
     /**
      * Brave Search APIは第三者の有料APIのため、疎通確認のために定期的に実リクエストを送ることはせず、
-     * APIキーが設定されているかどうかを稼働状況の代わりとして扱う。
+     * APIキーが設定されているかどうかを稼働状況の代わりとして扱う。SystemSettingServiceへの本呼び出しは
+     * サービス間の内部呼び出しに相当する認証コンテキストを持たない定期バッチ処理のため、認可チェック
+     * 無しの{@link SystemSettingService#getBraveSearchApiKeyStatusInternal()}を使う(同メソッドの
+     * Javadoc参照。ユーザー向けControllerからの呼び出しではないため問題ない)。
      */
     private CheckOutcome checkBraveSearch() {
-        if (platformServiceClient.isBraveSearchApiKeyConfigured()) {
+        if (systemSettingService.getBraveSearchApiKeyStatusInternal().configured()) {
             return CheckOutcome.normal(null);
         }
         return new CheckOutcome(Status.WARNING, null, "APIキーが設定されていません", null);

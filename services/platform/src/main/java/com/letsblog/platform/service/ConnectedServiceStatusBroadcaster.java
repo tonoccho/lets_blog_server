@@ -1,6 +1,6 @@
-package com.letsblog.api.service;
+package com.letsblog.platform.service;
 
-import com.letsblog.api.dto.ConnectedServiceStatusResponse;
+import com.letsblog.platform.dto.ConnectedServiceStatusResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -11,10 +11,11 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * ダッシュボードの接続サービス稼働状況をServer-Sent Eventsで配信する(issue #198)。
- * WebSocketではなくSSEを選んだのは、issue本文で両方式が許容されており、既存インフラ
- * (nginxのAPIリバースプロキシ、Route Handler経由の認証中継)を変更せずに実現できるため。
- * 接続中のクライアントを保持し、定期チェックの結果を全員へブロードキャストする単純なhub。
+ * legacy-apiから移設(issue #695、C10-3、元は issue #198)。ダッシュボードの接続サービス稼働状況を
+ * Server-Sent Eventsで配信する。WebSocketではなくSSEを選んだのは、移設元issue本文で両方式が
+ * 許容されており、既存インフラ(nginxのAPIリバースプロキシ、gatewayのストリーミング転送)を
+ * 変更せずに実現できるため。接続中のクライアントを保持し、定期チェックの結果を全員へ
+ * ブロードキャストする単純なhub。
  */
 @Component
 @Slf4j

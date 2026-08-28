@@ -164,12 +164,7 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("POST", "/api/custom-tag-templates/1/clone"),
                 new Endpoint("DELETE", "/api/custom-tag-templates/1"),
 
-                // -- DashboardController (5) --
-                new Endpoint("GET", "/api/dashboard/service-status"),
-                new Endpoint("GET", "/api/dashboard/service-status/stream"),
-                new Endpoint("GET", "/api/dashboard/service-status/detail"),
-                new Endpoint("GET", "/api/dashboard/container-status"),
-                new Endpoint("GET", "/api/dashboard/container-status/stream"),
+                // (DashboardControllerは#695でplatform-serviceへ移設したため対象外)
 
                 // (DiagramController/GeneratedImageControllerは#573でmedia-serviceへ移設したため対象外)
                 // (FrontendErrorLogControllerは#572でlog-writerサービスへ移設したため対象外)
@@ -357,7 +352,7 @@ class AuthorizationMatrixIntegrationTest {
     // =====================================================================================
 
     // GET /api/audit-logsのrequireAdmin()検証は#572でlog-writerサービスへ移設したため、
-    // このクラスの対象外(代表的なrequireAdmin()検証は下のproject-users/dashboard/service-status/detailで
+    // このクラスの対象外(代表的なrequireAdmin()検証は下のproject-users/ai-models(image/provider)で
     // 引き続きカバーする)。
 
     private User persistUser(String role) {
@@ -391,26 +386,30 @@ class AuthorizationMatrixIntegrationTest {
 
     // 元々ここはSiteStaticContentController(GET /api/sites/{siteId}/static-content)で
     // requireAdmin()を検証していたが、当該コントローラは#577でproject-serviceへ移管済みで
-    // legacy-apiにはもう存在しない(このIssue以前からの既存の陳腐化であり、本Issueで新たに
+    // legacy-apiにはもう存在しない(このIssue以前からの既存の陳腐化であり、当時新たに
     // rewriteするにあたって発覚したため、legacy-apiに残る別のrequireAdmin()採用エンドポイント
-    // であるDashboardController(/api/dashboard/service-status/detail)に差し替える)。
+    // であるDashboardController(/api/dashboard/service-status/detail)に差し替えていた)。
+    //
+    // 本Issue(#695、C10-3)でDashboardController自体もplatform-serviceへ移管されlegacy-apiには
+    // もう存在しないため、同じくrequireAdmin()を最初に呼ぶProjectAiModelController
+    // (/api/projects/{id}/ai-models/image/provider)へ再度差し替える。
 
     @Test
-    @DisplayName("GET /api/dashboard/service-status/detail: admin以外のactorは403")
-    void serviceStatusDetail_admin以外は403() throws Exception {
+    @DisplayName("GET /api/projects/1/ai-models/image/provider: admin以外のactorは403")
+    void imageProvider_admin以外は403() throws Exception {
         User editor = persistUser("editor");
 
-        mockMvc.perform(request(HttpMethod.GET, "/api/dashboard/service-status/detail")
+        mockMvc.perform(request(HttpMethod.GET, "/api/projects/1/ai-models/image/provider")
                         .with(JwtTestFixtures.jwtRequestPostProcessor(editor.getKeycloakSub())))
                 .andExpect(status().isForbidden());
     }
 
     @Test
-    @DisplayName("GET /api/dashboard/service-status/detail: adminなら403にならない")
-    void serviceStatusDetail_adminなら403にならない() throws Exception {
+    @DisplayName("GET /api/projects/1/ai-models/image/provider: adminなら403にならない")
+    void imageProvider_adminなら403にならない() throws Exception {
         User admin = persistUser("admin");
 
-        mockMvc.perform(request(HttpMethod.GET, "/api/dashboard/service-status/detail")
+        mockMvc.perform(request(HttpMethod.GET, "/api/projects/1/ai-models/image/provider")
                         .with(JwtTestFixtures.jwtRequestPostProcessor(admin.getKeycloakSub())))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(403));
     }

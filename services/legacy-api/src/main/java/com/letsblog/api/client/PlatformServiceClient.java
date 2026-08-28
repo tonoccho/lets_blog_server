@@ -24,10 +24,11 @@ import org.springframework.web.client.RestClientException;
  *       (画像生成、issue #574で移設されずlegacy-apiに残置。本クラスが
  *       {@link ImageGenerationConfigProvider}を実装することで、コンストラクタ注入先を差し替える
  *       だけで済むようにする)</li>
- *   <li>{@link com.letsblog.api.service.ConnectedServiceStatusService}(ダッシュボードの
- *       接続サービス状態チェック、issue #695のスコープでplatform-serviceへ移設される予定だが、
- *       それまではlegacy-apiに残る。Brave Search APIキーの設定有無のみを問い合わせる)</li>
  * </ul>
+ *
+ * <p>ダッシュボードの接続サービス状態チェック(旧ConnectedServiceStatusService)は、issue #695
+ * (C10-3)でplatform-serviceへ移設され、Brave Search APIキーの設定有無もSystemSettingServiceへの
+ * 同一プロセス内呼び出しに置き換わったため、本クラス経由のブリッジは不要になった。
  *
  * <p>content-service(#576)のContentServiceClientと同じブリッジパターンを踏襲するが、これらの
  * 呼び出し先はいずれも移設前のAiBridgeController#systemBraveSearchApiKey/#llmConfigと同じく
@@ -63,30 +64,6 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
             return result == null ? null : result.apiKey();
         } catch (RestClientException e) {
             throw new IllegalStateException("platform-serviceのBrave Search APIキー取得呼び出しに失敗しました: "
-                    + e.getMessage(), e);
-        }
-    }
-
-    private record BraveSearchApiKeyStatusResponse(boolean configured, String source) {
-    }
-
-    /**
-     * ConnectedServiceStatusService#checkBraveSearchが使う。platform-serviceの内部ブリッジ
-     * エンドポイント({@code GET /api/internal/platform/system-settings/brave-search-api-key-status})を
-     * 呼び出し、設定済みかどうかのみを返す(実際のキー値は取得しない)。公開エンドポイント
-     * ({@code GET /api/system-settings/brave-search-api-key}、Web管理画面向け)はログイン済み
-     * ユーザーであることを要求するようになった(issue #693のレビュー指摘)ため、認証コンテキストを
-     * 持たないこのサービス間呼び出しは代わりにこちらを使う。
-     */
-    public boolean isBraveSearchApiKeyConfigured() {
-        try {
-            BraveSearchApiKeyStatusResponse result = restClient.get()
-                    .uri("/api/internal/platform/system-settings/brave-search-api-key-status")
-                    .retrieve()
-                    .body(BraveSearchApiKeyStatusResponse.class);
-            return result != null && result.configured();
-        } catch (RestClientException e) {
-            throw new IllegalStateException("platform-serviceのBrave Search APIキー状態取得呼び出しに失敗しました: "
                     + e.getMessage(), e);
         }
     }
