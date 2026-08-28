@@ -114,14 +114,9 @@ services:
       # 接続設定)の所有権をplatform-serviceへ委譲する(issue #693、PlatformServiceClient参照)。
       PLATFORM_SERVICE_URI: http://platform:8080
       BULK_UPLOAD_STORAGE_PATH: /app/data/bulk-uploads
-      VSCODE_EXTENSION_SOURCE_PATH: /app/extension-src
-      VSCODE_EXTENSION_BUILD_PATH: /app/extension-build
     volumes:
       - bulk_upload_files:/app/data/bulk-uploads
       - comfyui_models:/comfyui-models
-      # システム画面からのVSCode拡張機能ダウンロード用。オンデマンドビルドの作業ディレクトリは
-      # コンテナ内の書き込み可能な場所(/app/extension-build)を使うため、ソースは読み取り専用でマウントする。
-      - ./extension:/app/extension-src:ro
     depends_on:
       mysql:
         condition: service_healthy
@@ -312,9 +307,10 @@ services:
   # (AdminPasswordResetRunner)もここへ移設した。スキーマ・Flywayマイグレーションは専用の
   # lbs_platformスキーマ(ADR-0004)で本サービスが所有する。全サービスMySQLスキーマ+Keycloak
   # PostgreSQLを対象としたバックアップ/リストア機能(BackupService/BackupController)をlegacy-apiから
-  # 移設・拡張した(issue #694、C10-2)。コンテナ状態/接続サービス状態のSSE中継(#695)・VSCode拡張の
-  # オンデマンドビルド配布(#696)は別issueでこのサービスへ追加される想定(gatewayのplatformルート、
-  # /api/system/**・/api/backup/**・/api/vscode-extension/**参照)。
+  # 移設・拡張した(issue #694、C10-2)。コンテナ状態/接続サービス状態のSSE中継(#695、C10-3)・
+  # VSCode拡張のオンデマンドビルド配布(VscodeExtensionBuildService/VscodeExtensionController、
+  # issue #696、C10-4)もlegacy-apiから移設した(gatewayのplatformルート、
+  # /api/system/**・/api/backup/**参照。/api/system/vscode-extensionは/api/system/**に含まれる)。
   platform:
     build:
       context: .
@@ -387,9 +383,18 @@ services:
       BACKUP_POSTGRES_USER: keycloak
       BACKUP_POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
       BACKUP_POSTGRES_DATABASE: keycloak
+      # VscodeExtensionBuildService(issue #696、C10-4でlegacy-apiから移設)がシステム画面向けに
+      # VSCode拡張機能の.vsixをオンデマンドビルドする際のソース/作業ディレクトリ。legacy-apiのapi
+      # コンテナが持っていた同名の環境変数と同じ。
+      VSCODE_EXTENSION_SOURCE_PATH: /app/extension-src
+      VSCODE_EXTENSION_BUILD_PATH: /app/extension-build
       <<: *rabbitmq-env
     volumes:
       - generated_images:/app/data/generated-images
+      # システム画面からのVSCode拡張機能ダウンロード用。オンデマンドビルドの作業ディレクトリは
+      # コンテナ内の書き込み可能な場所(/app/extension-build)を使うため、ソースは読み取り専用でマウントする
+      # (issue #696、C10-4でapiコンテナから移設)。
+      - ./extension:/app/extension-src:ro
     depends_on:
       mysql:
         condition: service_healthy
@@ -504,8 +509,9 @@ services:
       PROJECT_SERVICE_URI: http://project:8080
       # システム全体のグローバル設定(system-settings、issue #693)・バックアップ(issue #694)・
       # ダッシュボードのコンテナ状態/接続サービス状態(issue #695、C10-3、dashboard-status/
-      # dashboard-status-streamルート)のルーティング先。/api/vscode-extension/**は#696で
-      # 本サービスへ追加移設されるまで、対応するコントローラー自体が存在しない(未実装)。
+      # dashboard-status-streamルート)・VSCode拡張のオンデマンドビルド配布(issue #696、C10-4、
+      # /api/system/vscode-extension、下のplatformルートの/api/system/**に含まれる)の
+      # ルーティング先。
       PLATFORM_SERVICE_URI: http://platform:8080
     depends_on:
       api:

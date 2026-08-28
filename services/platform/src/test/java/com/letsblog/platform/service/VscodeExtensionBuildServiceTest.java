@@ -1,6 +1,6 @@
-package com.letsblog.api.service;
+package com.letsblog.platform.service;
 
-import com.letsblog.api.service.VscodeExtensionBuildService.VscodeExtensionBuildException;
+import com.letsblog.platform.service.VscodeExtensionBuildService.VscodeExtensionBuildException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -12,9 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 実際のnpm/vsce呼び出しはビルド環境依存のため単体テストでは検証しない
- * (Docker環境での実機ビルド確認をplan/todoに明記済み)。ここではソース未検出時の
- * エラーハンドリングと、キャッシュを使わず必ず再ビルドを試みることを検証する。
+ * legacy-apiのVscodeExtensionBuildServiceTestと同じ観点をplatform-serviceへ移設したもの
+ * (issue #696、C10-4)。実際のnpm/vsce呼び出しはビルド環境依存のため単体テストでは検証しない。
+ * ここではソース未検出時のエラーハンドリングと、キャッシュを使わず必ず再ビルドを試みることを検証する。
  */
 class VscodeExtensionBuildServiceTest {
 

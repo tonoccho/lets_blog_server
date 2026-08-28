@@ -96,6 +96,12 @@ app:
   # legacy-apiのapiコンテナが持っていた同名プロパティと同じ(#573以降、実体はmedia-serviceが
   # 書き込むgenerated_images volumeを共有マウントする)。
   generated-images-storage-path: ${GENERATED_IMAGES_STORAGE_PATH:/app/data/generated-images}
+  # VscodeExtensionBuildService(issue #696、C10-4でlegacy-apiから移設)がシステム画面向けに
+  # VSCode拡張機能の.vsixをオンデマンドビルドする際のソース(読み取り専用マウント)/
+  # 書き込み可能な作業ディレクトリ。legacy-apiのapiコンテナが持っていた同名プロパティと同じ
+  # (docker-compose.ymlのplatformサービス定義の./extension:/app/extension-src:ro参照)。
+  vscode-extension-source-path: ${VSCODE_EXTENSION_SOURCE_PATH:/app/extension-src}
+  vscode-extension-build-path: ${VSCODE_EXTENSION_BUILD_PATH:/app/extension-build}
   # BackupService(issue #694、C10-2)が全サービスのMySQLスキーマ + Keycloak PostgreSQLを横断して
   # バックアップ/リストアするための接続情報。各サービス専用のDBユーザーでは他スキーマへ
   # アクセスできない(#570のスキーマ分離)ため、バックアップ専用のMySQLユーザー(既定値

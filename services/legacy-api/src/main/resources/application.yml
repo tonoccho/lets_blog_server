@@ -159,9 +159,9 @@ app:
   bulk-upload-storage-path: ${BULK_UPLOAD_STORAGE_PATH:/app/data/bulk-uploads}
   # generated-images-storage-path/backup-mysql-*はBackupServiceと共にplatform-serviceへ移設した
   # (issue #694、C10-2。services/platform/.../application.ymlのapp.generated-images-storage-path/
-  # app.backup.*参照)。
-  vscode-extension-source-path: ${VSCODE_EXTENSION_SOURCE_PATH:/app/extension-src}
-  vscode-extension-build-path: ${VSCODE_EXTENSION_BUILD_PATH:/app/extension-build}
+  # app.backup.*参照)。vscode-extension-source-path/vscode-extension-build-pathは
+  # VscodeExtensionBuildServiceと共にplatform-serviceへ移設した(issue #696、C10-4。
+  # services/platform/.../application.ymlのapp.vscode-extension-*参照)。
   # docker-socket-proxy-base-urlは、これを使っていた唯一のクラス(ContainerStatusService)が
   # platform-serviceへ移設された(issue #695、C10-3)ことに伴い撤去した。docker-socket-proxyへの
   # アクセスは本サービス(legacy-api)からは行わず、platform-serviceのみに限定する(Epic #551の方針)。
