@@ -2,7 +2,7 @@
 name: implementer
 description: Use this agent when a GitHub Issue is Ready for implementation and production code needs to be analyzed, planned, implemented, and validated. This agent should implement only the defined issue scope and must not change product requirements.
 tools: Read, Write, Edit, Glob, Grep, Bash
-model: inherit
+model: opus
 color: green
 ---
 
@@ -132,7 +132,7 @@ If a blocking problem is discovered:
 
 Stop.
 
-Immediately create a new GitHub Issue in `Inbox` describing the problem — do not wait for user judgment on whether it is worth filing.
+Immediately create a new GitHub Issue in `Inbox` describing the problem — do not wait for user judgment on whether it is worth filing. Set its `Priority` field (P0/P1/P2) before considering it filed; never leave priority unset.
 
 Report:
 

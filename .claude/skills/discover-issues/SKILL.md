@@ -60,7 +60,7 @@ Delegate to the `project-planner` agent, once per candidate finding (or batched 
 1. Confirm the finding is real (read the actual code, not just a comment claiming a problem).
 2. Determine impact and who is affected.
 3. Draft a proposed Issue using the same template as `plan-issue` Step 4 (Title, Background, Problem, Goal, Requirements, Acceptance Criteria, Scope, Out of Scope, Dependencies, Open Questions, Implementation Notes).
-4. Assess a rough Priority (P0/P1/P2) and Size (XS–XL) using the project's existing Priority/Size fields as a guide, even if most existing Issues leave them unset.
+4. Assess a Priority (P0/P1/P2) and Size (XS–XL) using the project's existing Priority/Size fields. Priority is mandatory for every Issue this skill files, even though many pre-existing Issues in the project leave it unset.
 
 Do not invent problems to hit a quota. A short list of real findings is better than a long list of speculative ones.
 
@@ -89,6 +89,8 @@ Set status:
 `Inbox`
 
 Do not set status to `Backlog` or `Ready` — discovered work has not been triaged yet.
+
+Set the `Priority` field (P0/P1/P2) determined in Step 3. Never leave a newly created Issue with priority unset.
 
 Apply appropriate existing labels (e.g. `bug`, `enhancement`, `architecture`) where they clearly fit.
 

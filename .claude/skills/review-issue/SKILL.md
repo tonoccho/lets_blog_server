@@ -80,7 +80,7 @@ Did implementation exceed the Issue?
 
 ### Unrelated findings
 
-Any pre-existing problem noticed that is unrelated to this Issue. File it as a new Issue in `Inbox` immediately, without asking the user first.
+Any pre-existing problem noticed that is unrelated to this Issue. File it as a new Issue in `Inbox` immediately, without asking the user first. Set its `Priority` field (P0/P1/P2) before considering it filed; never leave priority unset.
 
 ---
 

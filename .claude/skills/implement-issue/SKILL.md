@@ -202,4 +202,4 @@ Never silently change requirements.
 
 Never fix unrelated problems discovered during implementation.
 
-If unrelated problems are discovered, immediately create a separate Issue in `Inbox` for each (using the `plan-issue` template) — do not ask the user for judgment on whether to file it. Report the new Issue number(s) in the final output.
+If unrelated problems are discovered, immediately create a separate Issue in `Inbox` for each (using the `plan-issue` template) — do not ask the user for judgment on whether to file it. Set each Issue's `Priority` field (P0/P1/P2) before considering it filed; never leave priority unset. Report the new Issue number(s) in the final output.

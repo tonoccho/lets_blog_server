@@ -120,9 +120,11 @@ The implementation workflow must:
 
 If implementation fails:
 
-Stop.
+If the failure is a blocking requirement ambiguity that only the user can resolve, stop and report it — this is a genuine blocker, not a retryable failure.
 
-Do not continue to review.
+Otherwise (a fixable problem: failing tests, an incomplete step, a bug introduced during implementation), address it and re-invoke `implement-issue` automatically. Do not stop to ask the user whether to continue — this workflow does not pause between recoverable stages (see `CLAUDE.md` → Autonomous Task Execution).
+
+Track implementation attempts for this Issue. After 3 failed attempts without reaching `Review`, stop and report the unresolved blocker instead of retrying further.
 
 ---
 
@@ -159,9 +161,9 @@ the Issue should return to:
 
 `In Progress`
 
-Then stop this workflow.
+Re-invoke `implement-issue` automatically to address the reviewer's findings, then return to Review again. Do not stop to ask the user whether to continue — this workflow is explicitly configured to retry automatically (see `CLAUDE.md` → Autonomous Task Execution).
 
-Do not automatically retry implementation unless explicitly configured to do so.
+Track review cycles for this Issue. After 3 consecutive `CHANGES REQUIRED` results without reaching `APPROVED`, stop and report the unresolved findings instead of retrying further.
 
 If the reviewer returns:
 
@@ -171,7 +173,7 @@ return the Issue to:
 
 `Backlog`
 
-and stop.
+and stop. This is a genuine blocker outside this workflow's authority — it requires the user (via `project-planner`) to resolve the ambiguity, so do not retry automatically here.
 
 ---
 
@@ -201,7 +203,9 @@ change:
 
 `QA → In Progress`
 
-Then stop.
+Re-invoke `implement-issue` automatically to fix the failing scenario, then proceed back through Review and QA again. Do not stop to ask the user whether to continue — this workflow is explicitly configured to retry automatically (see `CLAUDE.md` → Autonomous Task Execution).
+
+Track QA cycles for this Issue. After 3 consecutive `FAIL` results without reaching `PASS`, stop and report the unresolved failure instead of retrying further.
 
 If QA returns:
 
@@ -211,7 +215,7 @@ keep the Issue in:
 
 `QA`
 
-Then stop.
+Then stop. `BLOCKED` means verification itself cannot proceed (e.g. missing environment, external dependency) — this is a genuine blocker, not a retryable failure.
 
 ---
 
@@ -254,4 +258,8 @@ Never skip branch creation (`git-workflow`) before invoking the `implementer` ag
 
 Never create a Pull Request before QA has passed.
 
-If any stage stops the workflow (implementation failure, changes required, requirement clarification, QA failure, QA blocked), do not silently continue to the next stage.
+Once this workflow starts an Issue, do not pause to ask the user whether to continue after a recoverable stage outcome (implementation issues, Review `CHANGES REQUIRED`, QA `FAIL`) — retry automatically, up to that stage's retry limit (3 cycles), until the Issue either reaches an opened Pull Request or hits a genuine blocker.
+
+Only stop before a Pull Request exists for a genuine blocker: unresolved requirement ambiguity (`REQUIREMENT CLARIFICATION`, or a blocking question during implementation), QA `BLOCKED`, a retry limit exceeded, or a live-system mutation requiring explicit user confirmation. When any of these stops the workflow, report it clearly rather than silently halting.
+
+Any Issue filed to `Inbox` during this workflow (by `implement-issue`, `review-issue`, or `qa-issue`) must have its `Priority` field (P0/P1/P2) set — never leave it unset.
