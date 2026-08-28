@@ -2,7 +2,6 @@ package com.letsblog.api.service;
 
 import com.letsblog.api.aop.AuditLog;
 import com.letsblog.api.keycloak.KeycloakAdminClient;
-import com.letsblog.api.keycloak.KeycloakAdminException;
 import com.letsblog.common.crypto.CredentialCipher;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.User;
@@ -23,15 +22,21 @@ import java.util.Set;
 /**
  * セルフサインアップ、初回セットアップを扱う。ユーザーのCRUD・プロフィール管理はidentity-serviceに
  * 移設した(#561)。ログイン(パスワード照合・2FA・APIキー発行)はissue #566でKeycloakへ全面移行し
- * 撤去した。このクラスは初回セットアップ・緊急復旧のためにpassword_hash等の資格情報を引き続き扱う。
+ * 撤去した。このクラスは初回セットアップのためにpassword_hash等の資格情報を引き続き扱う。
  *
- * <p>初回セットアップ(setupInitialAdmin)・緊急復旧(resetPassword、AdminPasswordResetRunnerから
- * 呼び出される)は、ログイン経路がKeycloakへ一本化された後もローカルDBの password_hash だけを
- * 更新しても実際にはログインできないアカウントを作る/操作するだけになっていた(#564由来の
- * pre-existingなギャップ、issue #681)。そのため、この2つの操作は{@link KeycloakAdminClient}
- * (Keycloak Admin REST API)を呼び出し、Keycloak上に実際にログイン可能な状態を作る/更新する。
+ * <p>初回セットアップ(setupInitialAdmin)は、ログイン経路がKeycloakへ一本化された後もローカルDBの
+ * password_hash だけを更新しても実際にはログインできないアカウントを作るだけになっていた
+ * (#564由来のpre-existingなギャップ、issue #681)。そのため、この操作は{@link KeycloakAdminClient}
+ * (Keycloak Admin REST API)を呼び出し、Keycloak上に実際にログイン可能な状態を作る。
  * signup/create等それ以外の操作は本Issueのスコープ外であり、従来どおりローカルDBのみを操作する
  * (Keycloak連携した通常のユーザー作成導線の整備は別Issueで扱う)。
+ *
+ * <p>ロックアウト時の緊急復旧(旧resetPassword)は、issue #693でAdminPasswordResetRunnerごと
+ * platform-serviceへ移設された。platform-serviceはこのクラスが参照するusers/rolesテーブル
+ * (lets_blogスキーマ)へクロススキーマアクセスできない(ADR-0004)ため、移設後の実装はローカルDBを
+ * 一切参照せず、Keycloak Admin APIのメールアドレス検索のみでパスワードを変更する
+ * (services/platform/.../cli/AdminPasswordResetRunnerのJavadoc参照。password_hashは
+ * ログインがKeycloakへ一本化されて以降どこからも読み取られておらず、実質的な影響はない)。
  *
  * <p>identity-serviceと同一の物理スキーマ(lets_blog)上のusers/rolesテーブルを参照する
  * (ADR-0004が求めるスキーマ分離は将来のIssueで対応する)。
@@ -177,39 +182,5 @@ public class UserService {
         if (!VALID_ROLES.contains(role)) {
             throw new InvalidRoleException("role は 'admin' または 'user' である必要があります");
         }
-    }
-
-    /**
-     * ロックアウト時の運用用パスワードリセット(AdminPasswordResetRunnerから呼び出される想定)。
-     * メールでのセルフサービスリセットが使えない場合(SMTP未設定など)に、対象ユーザーを
-     * 特定して安全にパスワードだけを上書きする。他ユーザーには影響しない。
-     *
-     * <p>#681: ログインはKeycloakへ一本化されているため、ローカルのpassword_hashではなく
-     * Keycloak側のパスワードを即時変更する(temporary=false、次回ログイン時の強制変更なし)。
-     * ローカルにkeycloak_subが未設定の場合はメールアドレスでKeycloak側のユーザーを検索して
-     * 紐付ける。対象ユーザーがKeycloak上に見つからない場合はKeycloakAdminExceptionで失敗し、
-     * DBのみを操作して成功したように見せることはしない。
-     */
-    @AuditLog(action = AuditLogAction.USER_UPDATED, resourceType = "USER")
-    @Transactional
-    public UserResponse resetPassword(String email, String newPassword) {
-        if (newPassword == null || newPassword.length() < 8) {
-            throw new IllegalArgumentException("パスワードは8文字以上である必要があります");
-        }
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new UserNotFoundException("メールアドレス '" + email + "' のユーザーは登録されていません"));
-
-        String keycloakSub = user.getKeycloakSub();
-        if (keycloakSub == null || keycloakSub.isBlank()) {
-            keycloakSub = keycloakAdminClient.findUserIdByEmail(email)
-                    .orElseThrow(() -> new KeycloakAdminException(
-                            "Keycloak上に該当ユーザーが見つかりません(email=" + email + ")。"
-                                    + "Keycloak未移行のユーザーである可能性があります。"));
-            user.setKeycloakSub(keycloakSub);
-        }
-        keycloakAdminClient.setPassword(keycloakSub, newPassword);
-
-        user.setPasswordHash(passwordEncoder.encode(newPassword));
-        return UserResponse.from(userRepository.save(user));
     }
 }

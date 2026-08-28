@@ -91,6 +91,28 @@ class SystemSettingServiceTest {
     }
 
     @Test
+    void getBraveSearchApiKeyStatus_未認証ならForbidden() {
+        SystemSettingService service = buildService("env-key");
+        doThrow(new ForbiddenException("ログインが必要です"))
+                .when(adminAuthorizationService).requireAuthenticated();
+
+        assertThrows(ForbiddenException.class, service::getBraveSearchApiKeyStatus);
+        verify(repository, org.mockito.Mockito.never()).findById(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void getBraveSearchApiKeyStatusInternal_認可チェックなしで取得できる() {
+        SystemSettingService service = buildService("env-key");
+        when(repository.findById(SystemSettingService.BRAVE_SEARCH_API_KEY)).thenReturn(Optional.empty());
+
+        SystemSettingService.BraveSearchApiKeyStatus status = service.getBraveSearchApiKeyStatusInternal();
+
+        assertEquals(true, status.configured());
+        assertEquals(SystemSettingService.SettingSource.ENVIRONMENT, status.source());
+        verify(adminAuthorizationService, org.mockito.Mockito.never()).requireAuthenticated();
+    }
+
+    @Test
     void setBraveSearchApiKey_admin権限がなければForbidden() {
         SystemSettingService service = buildService("");
         doThrow(new ForbiddenException("この操作にはadmin権限が必要です"))

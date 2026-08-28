@@ -17,13 +17,16 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * platform-serviceに複製されたAdminAuthorizationService(requireAdmin)が、実際のController経由でも
- * 401/403を正しく返すことを検証する統合テスト(content-service(#644)/project-serviceの同名テストと
- * 同じ観点)。SystemSettingController#setBraveSearchApiKey(admin限定操作)で検証する。
+ * platform-serviceに複製されたAdminAuthorizationService(requireAdmin/requireAuthenticated)が、
+ * 実際のController経由でも401/403を正しく返すことを検証する統合テスト(content-service(#644)/
+ * project-serviceの同名テストと同じ観点)。SystemSettingController#setBraveSearchApiKey
+ * (admin限定操作)・#getBraveSearchApiKeyStatus(認証済みユーザーであれば可、issue #693の
+ * レビュー指摘で追加)で検証する。
  *
  * <p>identity-serviceは外部境界のため、{@link IdentityClient}を{@code @MockitoBean}で置き換える
  * (ADR-0006のモック方針)。
@@ -89,5 +92,22 @@ class AdminAuthorizationIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(REQUEST_BODY))
                 .andExpect(status().isNoContent());
+    }
+
+    @Test
+    @DisplayName("GET(状態取得)はAuthorizationヘッダーなしなら403(issue #693のレビュー指摘: "
+            + "SecurityConfigが全経路permitAllのため未ログインで到達できてしまう後退を防ぐ)")
+    void get_authorizationヘッダーなしは403() throws Exception {
+        mockMvc.perform(get(SET_KEY_PATH)).andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("GET(状態取得)は有効なJWTさえあればadminでなくても200(admin限定はPUT/DELETEのみ)")
+    void get_非adminでも認証済みなら200() throws Exception {
+        when(jwtDecoder.decode("user-jwt")).thenReturn(JwtTestFixtures.jwt("sub-3", "user"));
+        when(identityClient.fetchProfile("Bearer user-jwt")).thenReturn(new ActorProfile(11L, "user"));
+
+        mockMvc.perform(get(SET_KEY_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer user-jwt"))
+                .andExpect(status().isOk());
     }
 }

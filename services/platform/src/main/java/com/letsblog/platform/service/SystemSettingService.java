@@ -60,11 +60,41 @@ public class SystemSettingService {
     }
 
     /**
-     * Web管理画面向け: 実際のキー値は返さず、設定済みかどうかと設定元のみを返す
-     * (site credentialsのconfiguredSecretFieldsと同じ「値は見せない」方針)。
+     * Web管理画面向け({@code GET /api/system-settings/brave-search-api-key}経由): 実際のキー値は
+     * 返さず、設定済みかどうかと設定元のみを返す(site credentialsのconfiguredSecretFieldsと同じ
+     * 「値は見せない」方針)。
+     *
+     * <p>legacy-api版はSecurityConfigが{@code anyRequest().authenticated()}だったため、このメソッド
+     * 自体にadminチェックが無くても未ログインでは到達できなかった。platform-service版は他の抽出済み
+     * サービスと同じくSecurityConfigが全経路permitAllのため、ここで最低限「ログイン済みであること」を
+     * 明示的に要求する(issue #693のレビュー指摘。admin限定にはしない。設定済みか否か・設定元のみを
+     * 返す読み取り専用エンドポイントであり、legacy-api版も元々admin以外の認証済みユーザーからも
+     * 到達可能だったため)。
+     *
+     * <p>ai-service向けブリッジ({@link com.letsblog.platform.controller.InternalPlatformSettingsController})
+     * やConnectedServiceStatusService(legacy-api)からのPlatformServiceClient経由の呼び出しはサービス
+     * 間の内部呼び出しで認証コンテキストを持たないため、このメソッドではなく
+     * {@link #getBraveSearchApiKeyStatusInternal()}を使う。
      */
     @Transactional(readOnly = true)
     public BraveSearchApiKeyStatus getBraveSearchApiKeyStatus() {
+        adminAuthorizationService.requireAuthenticated();
+        return resolveBraveSearchApiKeyStatus();
+    }
+
+    /**
+     * {@link #getBraveSearchApiKeyStatus()}と同じ値を、認可チェック無しで返す。サービス間の内部呼び出し
+     * (認証コンテキストを持たない、issue #693のレビュー指摘)専用。呼び出し元が
+     * {@link com.letsblog.platform.controller.InternalPlatformSettingsController}経由(本サービスの
+     * SecurityConfigが全経路permitAllのため到達可能)であることを前提とし、ユーザー向けControllerからは
+     * 呼ばないこと。
+     */
+    @Transactional(readOnly = true)
+    public BraveSearchApiKeyStatus getBraveSearchApiKeyStatusInternal() {
+        return resolveBraveSearchApiKeyStatus();
+    }
+
+    private BraveSearchApiKeyStatus resolveBraveSearchApiKeyStatus() {
         boolean inDatabase = repository.findById(BRAVE_SEARCH_API_KEY)
                 .map(SystemSetting::getSettingValueEncrypted)
                 .map(v -> !credentialCipher.decrypt(v).isBlank())

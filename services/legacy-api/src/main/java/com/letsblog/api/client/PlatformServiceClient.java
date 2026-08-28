@@ -71,15 +71,17 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
     }
 
     /**
-     * ConnectedServiceStatusService#checkBraveSearchが使う。platform-serviceの公開エンドポイント
-     * ({@code GET /api/system-settings/brave-search-api-key}、Web管理画面向けと同じ。admin権限は
-     * 不要な読み取り専用エンドポイント)を呼び出し、設定済みかどうかのみを返す(実際のキー値は
-     * 取得しない)。
+     * ConnectedServiceStatusService#checkBraveSearchが使う。platform-serviceの内部ブリッジ
+     * エンドポイント({@code GET /api/internal/platform/system-settings/brave-search-api-key-status})を
+     * 呼び出し、設定済みかどうかのみを返す(実際のキー値は取得しない)。公開エンドポイント
+     * ({@code GET /api/system-settings/brave-search-api-key}、Web管理画面向け)はログイン済み
+     * ユーザーであることを要求するようになった(issue #693のレビュー指摘)ため、認証コンテキストを
+     * 持たないこのサービス間呼び出しは代わりにこちらを使う。
      */
     public boolean isBraveSearchApiKeyConfigured() {
         try {
             BraveSearchApiKeyStatusResponse result = restClient.get()
-                    .uri("/api/system-settings/brave-search-api-key")
+                    .uri("/api/internal/platform/system-settings/brave-search-api-key-status")
                     .retrieve()
                     .body(BraveSearchApiKeyStatusResponse.class);
             return result != null && result.configured();

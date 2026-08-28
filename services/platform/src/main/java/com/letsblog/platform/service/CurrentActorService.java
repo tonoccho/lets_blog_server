@@ -72,6 +72,17 @@ public class CurrentActorService {
         return resolveProfile().map(ActorProfile::isAdmin).orElse(false);
     }
 
+    /**
+     * 有効なJWTが提示されているか(=認証済みか)を返す。{@link #getCurrentActorKeycloakSub()}と同じ
+     * 判定(JWTの署名・有効期限自体はSpring Securityのリソースサーバーフィルタが既に検証済みの
+     * ため、identity-serviceへの問い合わせは伴わない)。SecurityConfigが全経路permitAllのサービス
+     * (本サービス含む)で、admin限定ではなく「ログインしていること」だけを要求したいエンドポイント
+     * (SystemSettingService#getBraveSearchApiKeyStatus等)が使う。
+     */
+    public boolean isAuthenticated() {
+        return getCurrentActorKeycloakSub() != null;
+    }
+
     public String getRemoteIp() {
         String forwardedFor = request.getHeader("X-Forwarded-For");
         if (forwardedFor != null && !forwardedFor.isBlank()) {
