@@ -24,11 +24,10 @@ RUN ./gradlew :services:legacy-api:bootJar --no-daemon
 FROM eclipse-temurin:21-jre
 # openssh-client: WordPress SSHトランスポート用(phase10)。nodejs/npm: VSCode拡張機能(.vsix)の
 # オンデマンドビルド用(システム画面からのダウンロード機能、VscodeExtensionBuildServiceが利用)。
-# default-mysql-client: DBバックアップ/リストア用(mysqldump/mysqlコマンド、BackupServiceが利用)。
-# Debian/Ubuntu系のdefault-mysql-clientはMariaDBクライアント実体だが、MySQL 8.0サーバーに対する
-# mysqldump/mysqlの基本的な読み書きには互換性がある。
 # curl: docker-compose healthcheckがactuatorの/actuator/healthを叩くために使用(#556)。
-RUN apt-get update && apt-get install -y --no-install-recommends openssh-client nodejs npm default-mysql-client curl \
+# (DBバックアップ/リストア用のdefault-mysql-clientは、BackupServiceと共にplatform-serviceへ
+# 移設した。issue #694、C10-2。services/platform/Dockerfile参照)。
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-client nodejs npm curl \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /workspace/services/legacy-api/build/libs/*.jar app.jar

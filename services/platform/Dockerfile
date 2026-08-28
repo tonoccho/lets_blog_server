@@ -23,7 +23,13 @@ RUN ./gradlew :services:platform:bootJar --no-daemon
 
 FROM eclipse-temurin:21-jre
 # curl: docker-compose healthcheckがactuatorの/actuator/healthを叩くために使用。
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+# default-mysql-client: 全サービスMySQLスキーマのバックアップ/リストア用(mysqldump/mysqlコマンド、
+# BackupServiceが利用。legacy-apiのDockerfileと同じ理由、issue #694でBackupServiceと共に移設)。
+# Debian/Ubuntu系のdefault-mysql-clientはMariaDBクライアント実体だが、MySQL 8.0サーバーに対する
+# mysqldump/mysqlの基本的な読み書きには互換性がある。
+# postgresql-client: Keycloak PostgreSQL(keycloak-postgres)のバックアップ/リストア用
+# (pg_dump/pg_restoreコマンド、BackupServiceが利用。issue #694で新規追加)。
+RUN apt-get update && apt-get install -y --no-install-recommends curl default-mysql-client postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /workspace/services/platform/build/libs/*.jar app.jar

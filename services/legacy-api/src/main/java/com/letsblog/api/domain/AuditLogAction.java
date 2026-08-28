@@ -28,8 +28,8 @@ public enum AuditLogAction {
     PROJECT_USER_ADDED("プロジェクトユーザー追加"),
     PROJECT_USER_ROLE_UPDATED("プロジェクトユーザーロール変更"),
     PROJECT_USER_REMOVED("プロジェクトユーザー削除"),
-    DB_BACKUP_DOWNLOADED("DBバックアップダウンロード"),
-    DB_RESTORED("DBリストア"),
+    // DB_BACKUP_DOWNLOADED/DB_RESTOREDはBackupServiceと共にplatform-serviceへ移設した
+    // (issue #694、C10-2。com.letsblog.platform.domain.AuditLogAction参照)。
     SSH_KEY_PAIR_CREATED("SSH鍵ペア作成"),
     SSH_KEY_PAIR_DELETED("SSH鍵ペア削除"),
     MEDIA_GARBAGE_COLLECTED("メディアのガベージコレクション削除");

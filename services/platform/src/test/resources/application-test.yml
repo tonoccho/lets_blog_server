@@ -46,6 +46,20 @@ app:
     from: noreply@example.com
   web:
     base-url: http://localhost:3000
+  generated-images-storage-path: /tmp/lbs-platform-test-generated-images
+  backup:
+    mysql:
+      host: localhost
+      port: 3306
+      user: test_user
+      password: test_pass
+      schemas: lbs_platform_test
+    postgres:
+      host: localhost
+      port: 5432
+      user: keycloak
+      password: test_pass
+      database: keycloak
 
 keycloak:
   jwk-set-uri: http://localhost:19999/auth/realms/letsblog/protocol/openid-connect/certs

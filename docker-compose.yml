@@ -112,19 +112,12 @@ services:
       # システム全体のグローバル設定(system_settings: Brave Search APIキー・実効LLM接続設定・画像生成
       # 接続設定)の所有権をplatform-serviceへ委譲する(issue #693、PlatformServiceClient参照)。
       PLATFORM_SERVICE_URI: http://platform:8080
-      BACKUP_MYSQL_HOST: mysql
-      BACKUP_MYSQL_PORT: "3306"
-      BACKUP_MYSQL_DATABASE: ${MYSQL_DATABASE}
-      BACKUP_MYSQL_USER: ${MYSQL_USER}
-      BACKUP_MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       BULK_UPLOAD_STORAGE_PATH: /app/data/bulk-uploads
-      GENERATED_IMAGES_STORAGE_PATH: /app/data/generated-images
       VSCODE_EXTENSION_SOURCE_PATH: /app/extension-src
       VSCODE_EXTENSION_BUILD_PATH: /app/extension-build
       DOCKER_SOCKET_PROXY_BASE_URL: http://docker-socket-proxy:2375
     volumes:
       - bulk_upload_files:/app/data/bulk-uploads
-      - generated_images:/app/data/generated-images
       - comfyui_models:/comfyui-models
       # システム画面からのVSCode拡張機能ダウンロード用。オンデマンドビルドの作業ディレクトリは
       # コンテナ内の書き込み可能な場所(/app/extension-build)を使うため、ソースは読み取り専用でマウントする。
@@ -319,10 +312,11 @@ services:
   # 実効LLM接続設定/メール送信/Google OAuthクライアント/Webフロント公開URL/アップロードレート制限)の
   # 所有権をplatform-serviceへ移管(issue #693、C10-1)。緊急パスワードリセット
   # (AdminPasswordResetRunner)もここへ移設した。スキーマ・Flywayマイグレーションは専用の
-  # lbs_platformスキーマ(ADR-0004)で本サービスが所有する。バックアップ機能拡張(#694)・
-  # コンテナ状態/接続サービス状態のSSE中継(#695)・VSCode拡張のオンデマンドビルド配布(#696)は
-  # 別issueでこのサービスへ追加される想定(gatewayのplatformルート、/api/system/**・/api/backup/**・
-  # /api/vscode-extension/**参照)。
+  # lbs_platformスキーマ(ADR-0004)で本サービスが所有する。全サービスMySQLスキーマ+Keycloak
+  # PostgreSQLを対象としたバックアップ/リストア機能(BackupService/BackupController)をlegacy-apiから
+  # 移設・拡張した(issue #694、C10-2)。コンテナ状態/接続サービス状態のSSE中継(#695)・VSCode拡張の
+  # オンデマンドビルド配布(#696)は別issueでこのサービスへ追加される想定(gatewayのplatformルート、
+  # /api/system/**・/api/backup/**・/api/vscode-extension/**参照)。
   platform:
     build:
       context: .
@@ -364,11 +358,37 @@ services:
       # AdminPasswordResetRunner(緊急パスワードリセット)がKeycloak Admin REST APIを呼び出すための
       # letsblog-servicesクライアントのシークレット(legacy-api/identity-serviceと同じ値、issue #681由来)。
       KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
+      # BackupService(issue #694)が生成画像ファイルをバックアップ/リストアする際の保存先。
+      # legacy-apiのapiコンテナが持っていた同名の環境変数と同じ(バックアップ機能の移設に伴い、
+      # 実体を書き込むmedia-serviceと共有するgenerated_images volumeをこちらへ付け替えた)。
+      GENERATED_IMAGES_STORAGE_PATH: /app/data/generated-images
+      # BackupService(issue #694、C10-2)が全サービスのMySQLスキーマ+Keycloak PostgreSQLを横断して
+      # バックアップ/リストアするための接続情報。各サービス専用のDBユーザーでは他スキーマへ
+      # アクセスできない(#570のスキーマ分離)ため、バックアップ専用のMySQLユーザー(mysql/init/
+      # 01-create-service-schemas.shが作成・スキーマ限定の権限を付与する)を使う。lets_blogは
+      # legacy-apiが解体(#583)されるまで使用するスキーマ(${MYSQL_DATABASE})。
+      BACKUP_MYSQL_HOST: mysql
+      BACKUP_MYSQL_PORT: "3306"
+      BACKUP_MYSQL_USER: lbs_backup
+      BACKUP_MYSQL_PASSWORD: ${LBS_BACKUP_DB_PASSWORD}
+      BACKUP_MYSQL_SCHEMAS: lbs_identity,lbs_project,lbs_content,lbs_media,lbs_ai,lbs_publishing,lbs_analytics,lbs_platform,lbs_log,${MYSQL_DATABASE}
+      # KeycloakのPostgreSQL(keycloak-postgres)は元々そのDB専用のkeycloakユーザーしか存在しないため、
+      # 新たな横断的な認証情報を追加せず、その既存ユーザーの認証情報をそのまま流用する
+      # (下のkeycloak-postgresサービス定義参照)。
+      BACKUP_POSTGRES_HOST: keycloak-postgres
+      BACKUP_POSTGRES_PORT: "5432"
+      BACKUP_POSTGRES_USER: keycloak
+      BACKUP_POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      BACKUP_POSTGRES_DATABASE: keycloak
       <<: *rabbitmq-env
+    volumes:
+      - generated_images:/app/data/generated-images
     depends_on:
       mysql:
         condition: service_healthy
       keycloak:
+        condition: service_healthy
+      keycloak-postgres:
         condition: service_healthy
       identity:
         condition: service_healthy
@@ -606,6 +626,10 @@ services:
       LBS_ANALYTICS_DB_PASSWORD: ${LBS_ANALYTICS_DB_PASSWORD}
       LBS_PLATFORM_DB_PASSWORD: ${LBS_PLATFORM_DB_PASSWORD}
       LBS_LOG_DB_PASSWORD: ${LBS_LOG_DB_PASSWORD}
+      # 全サービスMySQLスキーマを横断してバックアップ/リストアするための専用ユーザー(issue #694、
+      # C10-2)。01-create-service-schemas.shが作成し、上記の各スキーマ限定の権限のみを付与する
+      # (MySQL rootクレデンシャルは使わず、#570のスキーマ分離の意図を損なわない範囲に留める)。
+      LBS_BACKUP_DB_PASSWORD: ${LBS_BACKUP_DB_PASSWORD}
     volumes:
       - mysql_data:/var/lib/mysql
       - ./mysql/init:/docker-entrypoint-initdb.d:ro

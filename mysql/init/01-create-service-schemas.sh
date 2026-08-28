@@ -47,4 +47,31 @@ EOSQL
   echo "スキーマ ${schema} とユーザー ${schema}@% を作成/同期しました"
 done
 
+# platform-serviceのBackupServiceが全サービスのMySQLスキーマを横断してバックアップ/リストアする
+# ための専用ユーザー(issue #694、C10-2)。各サービス専用ユーザー(上のループ)は自分のスキーマにしか
+# アクセスできないため、バックアップ処理にはこの分離を横断できる認証情報が必要になる。MySQL
+# rootクレデンシャルではなく、このスクリプトが把握している既知のスキーマ(上のSCHEMA_PASSWORD_ENV
+# の全キー、および legacy-apiが解体(#583)されるまで使用するMYSQL_DATABASE)に限定してALL
+# PRIVILEGESを付与する(各サービス専用ユーザーと同じ権限レベルを1ユーザーに集約するだけであり、
+# mysqlシステムスキーマや想定外のデータベースへはアクセスできない。#570のスキーマ分離の意図を
+# 損なわない範囲での最小権限)。
+backup_password="${LBS_BACKUP_DB_PASSWORD:-}"
+if [ -z "$backup_password" ]; then
+  echo "警告: LBS_BACKUP_DB_PASSWORD が未設定のためlbs_backupユーザーの作成をスキップします" >&2
+else
+  mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<-EOSQL
+    CREATE USER IF NOT EXISTS 'lbs_backup'@'%' IDENTIFIED BY '${backup_password}';
+    ALTER USER IF EXISTS 'lbs_backup'@'%' IDENTIFIED BY '${backup_password}';
+EOSQL
+  for schema in "${!SCHEMA_PASSWORD_ENV[@]}"; do
+    mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e \
+      "GRANT ALL PRIVILEGES ON \`${schema}\`.* TO 'lbs_backup'@'%';"
+  done
+  if [ -n "${MYSQL_DATABASE:-}" ]; then
+    mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e \
+      "GRANT ALL PRIVILEGES ON \`${MYSQL_DATABASE}\`.* TO 'lbs_backup'@'%';"
+  fi
+  echo "ユーザー lbs_backup@% を作成/同期し、既知の全スキーマへの権限を付与しました"
+fi
+
 mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "FLUSH PRIVILEGES;"
