@@ -1,5 +1,6 @@
 package com.letsblog.api.service;
 
+import com.letsblog.api.client.PlatformServiceClient;
 import com.letsblog.api.dto.ConnectedServiceStatusDetailResponse;
 import com.letsblog.api.dto.ConnectedServiceStatusResponse;
 import com.letsblog.api.dto.ConnectedServiceStatusResponse.Status;
@@ -39,7 +40,7 @@ public class ConnectedServiceStatusService {
     private final RestClient plantUmlClient;
     private final RestClient wordpressProvisioningClient;
     private final RestClient penpotClient;
-    private final SystemSettingService systemSettingService;
+    private final PlatformServiceClient platformServiceClient;
     private final String comfyUiBaseUrl;
     private final String plantUmlBaseUrl;
     private final String wordpressProvisionBaseUrl;
@@ -54,14 +55,14 @@ public class ConnectedServiceStatusService {
             @Value("${app.plantuml-base-url}") String plantUmlBaseUrl,
             @Value("${app.wordpress-provision-base-url}") String wordpressProvisionBaseUrl,
             @Value("${app.penpot-base-url}") String penpotBaseUrl,
-            SystemSettingService systemSettingService) {
+            PlatformServiceClient platformServiceClient) {
         this(dataSource,
                 llmApiKey,
                 builderWithTimeout(comfyUiBaseUrl), comfyUiBaseUrl,
                 builderWithTimeout(plantUmlBaseUrl), plantUmlBaseUrl,
                 builderWithTimeout(wordpressProvisionBaseUrl), wordpressProvisionBaseUrl,
                 builderWithTimeout(penpotBaseUrl), penpotBaseUrl,
-                systemSettingService);
+                platformServiceClient);
     }
 
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
@@ -72,14 +73,14 @@ public class ConnectedServiceStatusService {
             RestClient.Builder plantUmlBuilder, String plantUmlBaseUrl,
             RestClient.Builder wordpressBuilder, String wordpressProvisionBaseUrl,
             RestClient.Builder penpotBuilder, String penpotBaseUrl,
-            SystemSettingService systemSettingService) {
+            PlatformServiceClient platformServiceClient) {
         this.dataSource = dataSource;
         this.llmApiKey = llmApiKey;
         this.comfyUiClient = comfyUiBuilder.build();
         this.plantUmlClient = plantUmlBuilder.build();
         this.wordpressProvisioningClient = wordpressBuilder.build();
         this.penpotClient = penpotBuilder.build();
-        this.systemSettingService = systemSettingService;
+        this.platformServiceClient = platformServiceClient;
         this.comfyUiBaseUrl = comfyUiBaseUrl;
         this.plantUmlBaseUrl = plantUmlBaseUrl;
         this.wordpressProvisionBaseUrl = wordpressProvisionBaseUrl;
@@ -221,7 +222,7 @@ public class ConnectedServiceStatusService {
      * APIキーが設定されているかどうかを稼働状況の代わりとして扱う。
      */
     private CheckOutcome checkBraveSearch() {
-        if (systemSettingService.getBraveSearchApiKeyStatus().configured()) {
+        if (platformServiceClient.isBraveSearchApiKeyConfigured()) {
             return CheckOutcome.normal(null);
         }
         return new CheckOutcome(Status.WARNING, null, "APIキーが設定されていません", null);

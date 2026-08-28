@@ -1,8 +1,8 @@
-package com.letsblog.api.service;
+package com.letsblog.platform.service;
 
 import com.letsblog.common.crypto.CredentialCipher;
-import com.letsblog.api.domain.SystemSetting;
-import com.letsblog.api.repository.SystemSettingRepository;
+import com.letsblog.platform.domain.SystemSetting;
+import com.letsblog.platform.repository.SystemSettingRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -20,7 +20,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * SystemSettingServiceの回帰テスト。DB設定/環境変数フォールバックの優先順位と、
- * admin権限ゲートを中心に検証する。
+ * admin権限ゲートを中心に検証する。legacy-api版から移設(issue #693)。
  */
 @ExtendWith(MockitoExtension.class)
 class SystemSettingServiceTest {
@@ -88,6 +88,28 @@ class SystemSettingServiceTest {
 
         assertEquals(false, status.configured());
         assertEquals(SystemSettingService.SettingSource.NONE, status.source());
+    }
+
+    @Test
+    void getBraveSearchApiKeyStatus_未認証ならForbidden() {
+        SystemSettingService service = buildService("env-key");
+        doThrow(new ForbiddenException("ログインが必要です"))
+                .when(adminAuthorizationService).requireAuthenticated();
+
+        assertThrows(ForbiddenException.class, service::getBraveSearchApiKeyStatus);
+        verify(repository, org.mockito.Mockito.never()).findById(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void getBraveSearchApiKeyStatusInternal_認可チェックなしで取得できる() {
+        SystemSettingService service = buildService("env-key");
+        when(repository.findById(SystemSettingService.BRAVE_SEARCH_API_KEY)).thenReturn(Optional.empty());
+
+        SystemSettingService.BraveSearchApiKeyStatus status = service.getBraveSearchApiKeyStatusInternal();
+
+        assertEquals(true, status.configured());
+        assertEquals(SystemSettingService.SettingSource.ENVIRONMENT, status.source());
+        verify(adminAuthorizationService, org.mockito.Mockito.never()).requireAuthenticated();
     }
 
     @Test

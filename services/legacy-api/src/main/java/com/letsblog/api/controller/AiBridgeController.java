@@ -1,18 +1,16 @@
 package com.letsblog.api.controller;
 
 import com.letsblog.api.ai.AiProvider;
+import com.letsblog.api.client.PlatformServiceClient;
 import com.letsblog.api.cms.CmsAdapter;
 import com.letsblog.api.cms.CmsAdapterFactory;
 import com.letsblog.api.cms.CmsCredentials;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
 import com.letsblog.api.repository.ProjectUserRepository;
-import com.letsblog.api.service.AppSettingService;
 import com.letsblog.api.service.ProjectApiKeyService;
 import com.letsblog.api.service.ProjectService;
 import com.letsblog.api.service.SiteService;
-import com.letsblog.api.service.SystemSettingService;
-import java.util.Arrays;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -21,13 +19,17 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * ai-service向けの内部ブリッジ(issue #574)。GithubClientの記事プラン向けissue連携で使う
- * GitHubトークン解決、マスター環境サイトの既存カテゴリ/タグ取得、プロジェクトメンバー判定、
- * システム全体既定のBrave Search APIキー、実効LLM接続設定は、いずれもProject/Site/CmsAdapter/
- * project_user/system_settings(いずれもproject-service/content-service/platform-serviceが
- * 未抽出のためlegacy-apiに残るドメイン)への依存が強いため、ai-service側で直接持たず、この
- * ブリッジ経由でlegacy-apiへ問い合わせる(media-service(#573)のCmsMediaBridgeControllerと同じ方針。
+ * GitHubトークン解決、マスター環境サイトの既存カテゴリ/タグ取得、プロジェクトメンバー判定は
+ * Project/Site/CmsAdapter/project_user(project-service/content-serviceが未抽出のため
+ * legacy-apiに残るドメイン)への依存が強いため、ai-service側で直接持たず、このブリッジ経由で
+ * legacy-apiへ問い合わせる(media-service(#573)のCmsMediaBridgeControllerと同じ方針。
  * 認可は呼び出し元(ai-service)が既にrequireAdmin/requireProjectMemberOrAdmin等を済ませたリクエストの
  * Bearerトークンをそのまま転送してもらう想定で、ここでは追加の認可チェックは行わない)。
+ *
+ * <p>システム全体既定のBrave Search APIキー・実効LLM接続設定は、system_settingsの所有権が
+ * platform-serviceへ移った(issue #693)ため、本コントローラは{@link PlatformServiceClient}への
+ * 単純委譲のみを行う(ai-serviceのLegacyApiBridgeClientが呼び出すパス自体は変えず、legacy-apiを
+ * 経由するブリッジチェーンを維持する)。
  */
 @RestController
 public class AiBridgeController {
@@ -37,8 +39,7 @@ public class AiBridgeController {
     private final SiteService siteService;
     private final CmsAdapterFactory cmsAdapterFactory;
     private final ProjectUserRepository projectUserRepository;
-    private final SystemSettingService systemSettingService;
-    private final AppSettingService appSettingService;
+    private final PlatformServiceClient platformServiceClient;
 
     public AiBridgeController(
             ProjectService projectService,
@@ -46,15 +47,13 @@ public class AiBridgeController {
             SiteService siteService,
             CmsAdapterFactory cmsAdapterFactory,
             ProjectUserRepository projectUserRepository,
-            SystemSettingService systemSettingService,
-            AppSettingService appSettingService) {
+            PlatformServiceClient platformServiceClient) {
         this.projectService = projectService;
         this.projectApiKeyService = projectApiKeyService;
         this.siteService = siteService;
         this.cmsAdapterFactory = cmsAdapterFactory;
         this.projectUserRepository = projectUserRepository;
-        this.systemSettingService = systemSettingService;
-        this.appSettingService = appSettingService;
+        this.platformServiceClient = platformServiceClient;
     }
 
     public record GithubAccessResponse(String token, String owner, String repo) {
@@ -140,7 +139,7 @@ public class AiBridgeController {
     /** WebSearchService(ai-service)のプロジェクト非依存フォールバック向け。未設定ならnull。 */
     @GetMapping("/api/internal/ai/system-settings/brave-search-api-key")
     public SystemBraveSearchApiKeyResponse systemBraveSearchApiKey() {
-        String apiKey = systemSettingService.getBraveSearchApiKey();
+        String apiKey = platformServiceClient.getBraveSearchApiKey();
         return new SystemBraveSearchApiKeyResponse(apiKey == null || apiKey.isBlank() ? null : apiKey);
     }
 
@@ -151,28 +150,14 @@ public class AiBridgeController {
 
     /**
      * RemoteLlmConfigProvider(ai-service)が呼ぶ。providerを指定しなければシステム設定の既定
-     * プロバイダーを使う(AppSettingServiceがLlmConfigProviderとして解決する値をそのまま返す)。
+     * プロバイダーを使う(platform-serviceのAppSettingServiceが解決する値をそのまま返す)。
      */
     @GetMapping("/api/internal/ai/llm-config")
     public LlmConfigResponse llmConfig(@RequestParam(required = false) String provider) {
-        AiProvider resolved = provider != null && !provider.isBlank()
-                ? AiProvider.fromString(provider) : appSettingService.provider();
+        AiProvider resolved = provider != null && !provider.isBlank() ? AiProvider.fromString(provider) : null;
+        PlatformServiceClient.LlmConfigResponse result = platformServiceClient.llmConfig(resolved);
         return new LlmConfigResponse(
-                resolved.name(),
-                appSettingService.baseUrlFor(resolved),
-                appSettingService.apiKeyFor(resolved),
-                appSettingService.defaultModelFor(resolved),
-                parseAvailableModels(appSettingService.getLlmAvailableModels()),
-                appSettingService.requestTimeoutSeconds());
-    }
-
-    private List<String> parseAvailableModels(String csv) {
-        if (csv == null || csv.isBlank()) {
-            return List.of();
-        }
-        return Arrays.stream(csv.split(","))
-                .map(String::trim)
-                .filter(s -> !s.isBlank())
-                .toList();
+                result.provider(), result.baseUrl(), result.apiKey(), result.defaultModel(),
+                result.availableModels(), result.requestTimeoutSeconds());
     }
 }

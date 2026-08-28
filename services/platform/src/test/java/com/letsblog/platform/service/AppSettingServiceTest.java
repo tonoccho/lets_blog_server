@@ -1,9 +1,9 @@
-package com.letsblog.api.service;
+package com.letsblog.platform.service;
 
-import com.letsblog.api.ai.AiProvider;
+import com.letsblog.platform.ai.AiProvider;
 import com.letsblog.common.crypto.CredentialCipher;
-import com.letsblog.api.domain.SystemSetting;
-import com.letsblog.api.repository.SystemSettingRepository;
+import com.letsblog.platform.domain.SystemSetting;
+import com.letsblog.platform.repository.SystemSettingRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -26,6 +26,7 @@ import static org.mockito.Mockito.when;
 /**
  * AppSettingServiceの回帰テスト(issue #403)。DB設定/環境変数フォールバックの優先順位、
  * バッチ更新時のバリデーションと全項目ロールバック、admin権限ゲートを中心に検証する。
+ * legacy-api版から移設(issue #693)。
  */
 @ExtendWith(MockitoExtension.class)
 class AppSettingServiceTest {
@@ -75,7 +76,7 @@ class AppSettingServiceTest {
     }
 
     @Test
-    void LlmConfigProviderとして委譲する() {
+    void 実効llm接続設定として委譲する() {
         AppSettingService service = service();
         lenient().when(repository.findById(any())).thenReturn(Optional.empty());
 
@@ -132,7 +133,7 @@ class AppSettingServiceTest {
     }
 
     @Test
-    void chatGptApiKey_ImageGenerationConfigProviderとして委譲する() {
+    void chatGptApiKey_画像生成設定として委譲する() {
         AppSettingService service = service();
         when(repository.findById("image_llm_api_key")).thenReturn(Optional.of(
                 new SystemSetting("image_llm_api_key", credentialCipher.encrypt("db-image-key"))));

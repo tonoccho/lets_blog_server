@@ -260,6 +260,9 @@ app:
           - /api/system/**
           - /api/backup/**
           - /api/vscode-extension/**
+          # プロジェクト/サイトに紐付かないアプリ全体のグローバル設定(SystemSettingController/
+          # AppSettingController)の所有権をplatform-serviceへ移管した(issue #693)。
+          - /api/system-settings/**
       # ログ読み取り・記録APIはlog-writerへ移設した(#572)。
       - id: log
         uri: ${LOG_SERVICE_URI:http://api:8080}

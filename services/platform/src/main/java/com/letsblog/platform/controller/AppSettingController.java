@@ -1,7 +1,7 @@
-package com.letsblog.api.controller;
+package com.letsblog.platform.controller;
 
-import com.letsblog.api.dto.AppSettingResponse;
-import com.letsblog.api.service.AppSettingService;
+import com.letsblog.platform.dto.AppSettingResponse;
+import com.letsblog.platform.service.AppSettingService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -16,7 +16,8 @@ import java.util.Map;
  * adminユーザー限定のシステム設定画面(issue #403)向けAPI。プロジェクトに紐付かない業務系の
  * アプリ全体設定(外部LLMサービス連携・メール送信・Google OAuthクライアント・Webフロントの公開URL)を
  * 一覧・更新する。秘匿情報は値そのものを返さない(AppSettingService/SystemSettingControllerと同じ方針)。
- * 権限確認・監査ログ記録はAppSettingService側で行う(admin限定の操作)。
+ * 権限確認・監査ログ記録はAppSettingService側で行う(admin限定の操作)。legacy-apiから移設
+ * (issue #693)。gatewayの{@code /api/system-settings/**}ルートを経由する。
  */
 @RestController
 @RequestMapping("/api/system-settings/app-settings")

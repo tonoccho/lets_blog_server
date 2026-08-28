@@ -103,10 +103,6 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("POST", "/api/ai/section"),
                 new Endpoint("POST", "/api/projects/1/ai/generate-image-prompt"),
 
-                // -- AppSettingController (2) --
-                new Endpoint("GET", "/api/system-settings/app-settings"),
-                new Endpoint("PUT", "/api/system-settings/app-settings"),
-
                 // -- ArticlePlanController (15) --
                 new Endpoint("POST", "/api/projects/1/article-plan/chat"),
                 new Endpoint("GET", "/api/projects/1/article-plan/sessions"),
@@ -308,11 +304,6 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("GET", "/api/ssh-key-pairs"),
                 new Endpoint("POST", "/api/ssh-key-pairs"),
                 new Endpoint("DELETE", "/api/ssh-key-pairs/1"),
-
-                // -- SystemSettingController (3) --
-                new Endpoint("GET", "/api/system-settings/brave-search-api-key"),
-                new Endpoint("PUT", "/api/system-settings/brave-search-api-key"),
-                new Endpoint("DELETE", "/api/system-settings/brave-search-api-key"),
 
                 // -- TagDesignSettingController (3) --
                 new Endpoint("GET", "/api/projects/1/tag-design-settings"),

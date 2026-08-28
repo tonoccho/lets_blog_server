@@ -109,6 +109,9 @@ services:
       # プロジェクト単位のGoogle Analytics/AdSense連携設定(analytics_credentials)のCRUD・AdSense
       # OAuthコード交換をanalytics-serviceへ委譲する(issue #578、AnalyticsProjectSettingsClient参照)。
       ANALYTICS_SERVICE_URI: http://analytics:8080
+      # システム全体のグローバル設定(system_settings: Brave Search APIキー・実効LLM接続設定・画像生成
+      # 接続設定)の所有権をplatform-serviceへ委譲する(issue #693、PlatformServiceClient参照)。
+      PLATFORM_SERVICE_URI: http://platform:8080
       BACKUP_MYSQL_HOST: mysql
       BACKUP_MYSQL_PORT: "3306"
       BACKUP_MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -140,6 +143,8 @@ services:
       content:
         condition: service_healthy
       analytics:
+        condition: service_healthy
+      platform:
         condition: service_healthy
       # Flyway自体の適用はlegacy-schema-migrateに委ねて先に完了させる(#668。詳細は
       # legacy-schema-migrateサービス定義のコメント参照。apiコンテナ自身も起動時に同じ
@@ -310,6 +315,66 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  # プロジェクト/サイトに紐付かないアプリ全体のグローバル設定(system_settings: Brave Search APIキー・
+  # 実効LLM接続設定/メール送信/Google OAuthクライアント/Webフロント公開URL/アップロードレート制限)の
+  # 所有権をplatform-serviceへ移管(issue #693、C10-1)。緊急パスワードリセット
+  # (AdminPasswordResetRunner)もここへ移設した。スキーマ・Flywayマイグレーションは専用の
+  # lbs_platformスキーマ(ADR-0004)で本サービスが所有する。バックアップ機能拡張(#694)・
+  # コンテナ状態/接続サービス状態のSSE中継(#695)・VSCode拡張のオンデマンドビルド配布(#696)は
+  # 別issueでこのサービスへ追加される想定(gatewayのplatformルート、/api/system/**・/api/backup/**・
+  # /api/vscode-extension/**参照)。
+  platform:
+    build:
+      context: .
+      dockerfile: services/platform/Dockerfile
+    container_name: lbs-platform
+    <<: [*common-service, *actuator-healthcheck]
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_platform?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: lbs_platform
+      SPRING_DATASOURCE_PASSWORD: ${LBS_PLATFORM_DB_PASSWORD}
+      # system_settings.setting_value_encryptedの暗号化/復号(CredentialCipher)。全サービス共通の鍵
+      # (legacy-api/ai-service/analytics-serviceと同じ値)。
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
+      # AppSettingServiceのDB未設定時フォールバック値。legacy-apiのapiコンテナが持っていた同名の
+      # 環境変数と同じ(issue #693でSystemSettingService/AppSettingServiceの所有権がここへ移った)。
+      MAIL_HOST: ${MAIL_HOST}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME}
+      MAIL_PASSWORD: ${MAIL_PASSWORD}
+      APP_MAIL_FROM: ${APP_MAIL_FROM:-noreply@letsblog.example.com}
+      APP_WEB_BASE_URL: ${APP_WEB_BASE_URL:-https://localhost}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_AVAILABLE_MODELS: ${LLM_AVAILABLE_MODELS:-gpt-4o-mini,gpt-4o,gpt-4.1-mini}
+      LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-120}
+      LLM_PROVIDER: ${LLM_PROVIDER:-OPENAI}
+      LLM_CLAUDE_API_KEY: ${LLM_CLAUDE_API_KEY}
+      LLM_CLAUDE_MODEL: ${LLM_CLAUDE_MODEL:-claude-3-5-haiku-20241022}
+      COMFYUI_BASE_URL: http://comfyui:8188
+      IMAGE_LLM_API_KEY: ${IMAGE_LLM_API_KEY}
+      IMAGE_LLM_BASE_URL: ${IMAGE_LLM_BASE_URL:-https://api.openai.com/v1}
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY}
+      UPLOAD_RATE_LIMIT_REQUESTS: ${UPLOAD_RATE_LIMIT_REQUESTS:-10}
+      # AdminAuthorizationServiceのrequireAdmin・自分自身のuserId解決のため、呼び出し元のBearer
+      # トークンをそのままidentity-serviceへ転送して問い合わせる(log-writer/content-service/
+      # project-serviceと同じ暫定策)。
+      IDENTITY_SERVICE_URI: http://identity:8080
+      # AdminPasswordResetRunner(緊急パスワードリセット)がKeycloak Admin REST APIを呼び出すための
+      # letsblog-servicesクライアントのシークレット(legacy-api/identity-serviceと同じ値、issue #681由来)。
+      KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
+      <<: *rabbitmq-env
+    depends_on:
+      mysql:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
   # 名前をつけて保存・管理するSSH鍵ペア(Ed25519)、[toc]/[blogcard]/[amazon]組み込みタグの
   # デザインカスタマイズ(プロジェクト単位)をlegacy-apiから抽出した(#577 stage 1)。より大きな
   # Project/Site(CMS/WordPress自動プロビジョニング)ドメインは後続stageの対象で、まだlegacy-apiに残る。
@@ -408,6 +473,10 @@ services:
       # このstageではLEGACY_API_URIに明示固定してあり、この変数の影響を受けない
       # (services/gateway/src/main/resources/application.ymlのコメント参照)。
       PROJECT_SERVICE_URI: http://project:8080
+      # システム全体のグローバル設定(system-settings)のルーティング先(issue #693)。
+      # /api/system/**・/api/backup/**・/api/vscode-extension/**は#694〜#696で本サービスへ
+      # 追加移設されるまでこの変数の既定値(legacy-api)のままとなる。
+      PLATFORM_SERVICE_URI: http://platform:8080
     depends_on:
       api:
         condition: service_healthy
@@ -416,6 +485,8 @@ services:
       keycloak:
         condition: service_healthy
       log-writer:
+        condition: service_healthy
+      platform:
         condition: service_healthy
       media:
         condition: service_healthy
