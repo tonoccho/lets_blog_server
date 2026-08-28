@@ -31,28 +31,28 @@ fan-outにより、同じメッセージのコピーがそれぞれのキュー�
 
 ## イベント一覧と実配線状況
 
-初版(issue #580)の6ルーティングキー。`publishing-service`/`project-service`はこのPR時点でまだ
-物理的に抽出されておらず(project-serviceはissue #577のPRがまだdevelopにマージされていない、
-publishing-serviceはissue #575未着手)、該当ドメインロジックは引き続き`legacy-api`にある。そのため
-「発行元」欄が`publishing`/`project`となっているイベントは、実際には`legacy-api`がその役を代行して
-発行する。
+初版(issue #580)の6ルーティングキー。project-service(issue #577)・publishing-service(issue #707)は
+いずれも物理的に抽出済みで、`project.deleted`/`site.deleted`はproject-serviceが、
+`post.published`/`post.deleted`はpublishing-serviceが、それぞれ自身の
+`DomainEventPublisher`から直接発行する(legacy-apiによる代行発行は解消済み)。
 
-| ルーティングキー | 発行元(代行込み) | 購読者 | 実配線状況 |
+| ルーティングキー | 発行元 | 購読者 | 実配線状況 |
 |---|---|---|---|
-| `post.published` | legacy-api(`PostPublishService#publish`、publishing-service代行) | content-service | 発行: 実装済み。購読: content-serviceが冪等な受信記録のみ(下記「実配線 vs インフラのみ」参照) |
-| `post.deleted` | legacy-api(`PostDeleteService#delete`、publishing-service代行) | content-service, media-service | 発行: 実装済み。購読: content-serviceが冪等な受信記録のみ。media-serviceは未購読(下記参照) |
+| `post.published` | publishing-service(`PostPublishService#publish`) | content-service | 発行: 実装済み。購読: content-serviceが`posts`の`status`/`wpPostId`/`lastPublishedAt`を実データ更新(下記「実配線 vs インフラのみ」参照) |
+| `post.deleted` | publishing-service(`PostDeleteService#delete`) | content-service, media-service | 発行: 実装済み。購読: content-serviceが`posts`のステータスを実データ更新。media-serviceは未購読(下記参照) |
 | `image.generated` | media-service(`GeneratedImageController#create`) | content-service | 発行・購読とも実装済み(受信記録のみ、下記参照) |
-| `project.deleted` | legacy-api(`ProjectService#deleteProject`、project-service代行) | content-service, media-service, ai-service, analytics-service | 発行: 実装済み。購読: content-service(`project_content_settings`削除)/ai-service(`project_ai_settings`削除)/analytics-service(`analytics_credentials`削除)は実データ削除。media-serviceは未購読(下記参照) |
-| `site.deleted` | legacy-api(`WordPressSiteProvisioningService#deleteSite`、project-service代行) | publishing, content-service | 発行: 実装済み。購読: content-serviceが`posts`を`site_id`で削除(既存の同期内部ブリッジ`ContentServiceClient#deletePostsBySite`と並行、どちらも`deleteBySiteId`に帰着するため冪等) |
+| `project.deleted` | project-service(`ProjectService#deleteProject`) | content-service, media-service, ai-service, analytics-service | 発行: 実装済み。購読: content-service(`project_content_settings`削除)/ai-service(`project_ai_settings`削除)/analytics-service(`analytics_credentials`削除)は実データ削除。media-serviceは未購読(下記参照) |
+| `site.deleted` | project-service(`WordPressSiteProvisioningService#deleteSite`) | publishing, content-service | 発行: 実装済み。購読: content-serviceが`posts`を`site_id`で削除(既存の同期内部ブリッジ`ContentServiceClient#deletePostsBySite`と並行、どちらも`deleteBySiteId`に帰着するため冪等) |
 | `user.deactivated` | identity-service(`UserService#deactivate`) | 全サービス | 発行: 実装済み。購読: content-serviceが冪等な受信記録のみ(下記参照) |
 
 ### 実配線 vs インフラのみ、の内訳
 
-- **実データ削除まで配線**: `project.deleted`(content/ai/analytics-serviceの3サービス)、
-  `site.deleted`(content-service)。いずれもクロススキーマFK禁止で生じた実装ギャップを埋める、
-  具体的な業務アクションがある。
-- **受信記録のみ(処理済みevent_id記録+ログ)**: `post.published`/`post.deleted`/`image.generated`/
-  `user.deactivated`のcontent-service側購読。これらはcontent-service側に具体的な業務アクションが
+- **実データ削除・更新まで配線**: `project.deleted`(content/ai/analytics-serviceの3サービス)、
+  `site.deleted`(content-service)、`post.published`/`post.deleted`(content-serviceが`posts`の
+  `status`/`wpPostId`/`lastPublishedAt`を更新、issue #707)。いずれもクロススキーマFK禁止や
+  サービス分割で生じた実装ギャップを埋める、具体的な業務アクションがある。
+- **受信記録のみ(処理済みevent_id記録+ログ)**: `image.generated`/`user.deactivated`の
+  content-service側購読。これらはcontent-service側に具体的な業務アクションが
   まだ定義されていない(例: `user.deactivated`は「権限キャッシュの破棄」が用途だが、本PR時点では
   どのサービスも権限キャッシュを持っていないため、実際に破棄する対象がない)。冪等性の仕組み
   (`ProcessedEventStore`/`IdempotentEventHandler`)自体は本物として動作するため、将来サービスが
@@ -66,10 +66,6 @@ publishing-serviceはissue #575未着手)、該当ドメインロジックは引
 
 ### 既知の関連ギャップ(本PRのスコープ外)
 
-- `services/project`(project-service、issue #577)はこのPR作成時点でdevelopにマージされていない
-  (PR #638がopenのまま)。マージ後は、`project.deleted`/`site.deleted`の発行元をlegacy-apiから
-  project-serviceへ移し、legacy-api側の`DomainEventPublisher#publishProjectDeleted`/
-  `#publishSiteDeleted`呼び出しを削除する追従が必要。
 - media-serviceの`project_image_settings`のJava側所有権移管(issue #573 stage2相当)が完了したら、
   media-serviceに`project.deleted`購読を追加する。
 - `post.deleted`のmedia-service購読(「投稿削除に伴う参照整理」)は、`generated_images`テーブルに
