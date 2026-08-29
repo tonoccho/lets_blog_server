@@ -88,7 +88,7 @@ public class ContentBridgeController {
      * content-service(LegacyApiBridgeClient#resolveTagDesign)がprojectId=nullで呼び出し、URIテンプレート
      * 展開の結果{@code ?projectId=}(空文字)として届く。required=trueのままだとSpringが空文字をLongへ
      * 変換した結果のnullを「パラメータ未指定」と判定して400になるため、明示的にrequired=falseとして
-     * nullをそのままproject-serviceへ中継し、あちら側でグローバル既定へフォールバックさせる。
+     * nullをそのままproject-serviceへ中継し、あちら側で固定のデフォルト値を返す(設定可能なグローバル既定ではない暫定対応、issue #763)。
      */
     @GetMapping("/api/internal/content/tag-design/{tagType}")
     public TagDesignResponse tagDesign(

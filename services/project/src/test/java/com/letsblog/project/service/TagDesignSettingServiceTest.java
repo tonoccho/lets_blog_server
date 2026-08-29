@@ -197,7 +197,7 @@ class TagDesignSettingServiceTest {
     }
 
     @Test
-    void resolveColors_projectIdがnullならグローバル既定の色を返す() {
+    void resolveColors_projectIdがnullなら固定のデフォルト色を返す() {
         TagDesignColors colors = service.resolveColors(null, EmbedTagType.TOC);
 
         assertEquals(DesignPreset.DEFAULT.backgroundColor(), colors.backgroundColor());
@@ -208,7 +208,7 @@ class TagDesignSettingServiceTest {
     }
 
     @Test
-    void resolveHtmlTemplate_projectIdがnullならグローバル既定としてnullを返す() {
+    void resolveHtmlTemplate_projectIdがnullなら固定のデフォルトとしてnullを返す() {
         assertEquals(null, service.resolveHtmlTemplate(null, EmbedTagType.BLOGCARD));
 
         org.mockito.Mockito.verifyNoInteractions(repository);

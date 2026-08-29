@@ -17,7 +17,7 @@ import static org.mockito.Mockito.when;
 /**
  * issue #760: プロジェクトに紐付いていないサイトへの公開では、finalize-htmlがprojectId=nullのまま
  * applyHtmlTemplateを呼ぶ。projectIdはそのままタグデザイン解決へ渡し(受け側のlegacy-api/
- * project-serviceがグローバル既定へフォールバックする)、レンダリングは成功する必要がある。
+ * project-serviceが固定のデフォルト値を返す暫定対応、issue #763)、レンダリングは成功する必要がある。
  */
 @ExtendWith(MockitoExtension.class)
 class TocStyleRenderServiceTest {
@@ -50,7 +50,7 @@ class TocStyleRenderServiceTest {
     }
 
     @Test
-    void applyHtmlTemplate_projectIdがnullでもグローバル既定のテンプレートがあれば適用する() {
+    void applyHtmlTemplate_projectIdがnullでもデフォルトのテンプレートがあれば適用する() {
         stubTagDesign("<div class=\"custom\">{{toc}}</div>");
 
         String result = service().applyHtmlTemplate(HTML_WITH_TOC, null);

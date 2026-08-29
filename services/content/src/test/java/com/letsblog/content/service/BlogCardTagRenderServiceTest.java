@@ -115,7 +115,7 @@ class BlogCardTagRenderServiceTest {
 
     /**
      * issue #760: プロジェクトに紐付いていないサイトへの公開ではprojectId=nullで呼ばれる。
-     * projectIdはそのままタグデザイン解決へ渡し(受け側がグローバル既定へフォールバックする)、
+     * projectIdはそのままタグデザイン解決へ渡し(受け側が固定のデフォルト値を返す暫定対応、issue #763)、
      * レンダリング自体は成功する。
      */
     @Test
