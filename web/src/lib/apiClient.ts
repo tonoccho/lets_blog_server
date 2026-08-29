@@ -2,6 +2,7 @@ import 'server-only';
 import { after } from 'next/server';
 import { cookies, headers } from 'next/headers';
 import { getToken } from 'next-auth/jwt';
+import { gatewayUrl } from './apiBaseUrl';
 
 export type CmsType = "WORDPRESS";
 
@@ -109,10 +110,6 @@ export interface UserCreateInput {
   role: "admin" | "user";
 }
 
-function serverUrl(): string {
-  return (process.env.LETS_BLOG_API_URL ?? 'https://localhost').replace(/\/+$/, '');
-}
-
 /**
  * next-auth/jwtのgetToken()はreq.cookies/req.headersしか参照しないため、
  * NextRequestが無いServer Component/Server Actionからでもnext/headersのcookies()/headers()を
@@ -163,13 +160,14 @@ interface OperationLogEntryInput {
 }
 
 /**
- * 操作ログをバックエンドへ記録する(issue #143)。apiFetch()自身から呼ぶため、
- * 無限再帰を避けるためにapiFetch()を経由せず直接fetchする(=この記録リクエスト自体はログされない)。
+ * 操作ログをバックエンドへ記録する(issue #143)。apiRequest()自身から呼ぶため、
+ * 無限再帰を避けるためにapiRequest()を経由せず直接fetchする(=この記録リクエスト自体はログされない)。
+ * ベースURLの組み立てだけは共通のgatewayUrl()を使う(issue #584)。
  * 記録の失敗が本来のAPI呼び出しに影響しないよう例外は握りつぶす。
  */
 async function recordOperationLog(accessToken: string, entry: OperationLogEntryInput): Promise<void> {
   try {
-    await fetch(`${serverUrl()}/api/operation-logs`, {
+    await fetch(gatewayUrl('/api/operation-logs'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -183,7 +181,7 @@ async function recordOperationLog(accessToken: string, entry: OperationLogEntryI
   }
 }
 
-interface ApiFetchInit extends RequestInit {
+interface ApiRequestInit extends RequestInit {
   /**
    * (issue #564以前の名残)呼び出し元がactorを明示できるフィールド。認可・監査ログの紐付けは
    * Authorizationヘッダーの検証済みJWTでサーバー側が判定するようになったため、この値自体は
@@ -193,10 +191,23 @@ interface ApiFetchInit extends RequestInit {
   actor?: ActorInfo;
   /** ログイン前でも呼べる公開エンドポイント(signup/setup/setup-status)向け。既定はtrue。 */
   requiresAuth?: boolean;
+  /**
+   * falseにすると、HTTPエラー応答でも例外を投げずResponseをそのまま返す。
+   * 上流のステータスをそのままブラウザへ中継したい呼び出し元(SSE中継ルート)向け。既定はtrue。
+   */
+  throwOnError?: boolean;
 }
 
-async function apiFetch<T>(path: string, init?: ApiFetchInit): Promise<T> {
-  const { requiresAuth = true, ...requestInit } = init ?? {};
+/**
+ * バックエンド(gateway)への全リクエストが通る唯一の共通経路(issue #584)。
+ * ベースURLの組み立て・Authorizationヘッダーの付与・キャッシュ無効化・操作ログの記録・
+ * エラーハンドリングをここに集約する。
+ *
+ * JSONを返さない呼び出し(バイナリのダウンロード・SSEの中継)もこの関数を直接使い、
+ * apiFetch()はこの上に乗るJSONデコード用の薄いラッパーとする。
+ */
+async function apiRequest(path: string, init?: ApiRequestInit): Promise<Response> {
+  const { requiresAuth = true, throwOnError = true, ...requestInit } = init ?? {};
   const accessToken = requiresAuth ? await currentAccessToken() : undefined;
   const method = (requestInit.method ?? 'GET').toString().toUpperCase();
   const startedAt = Date.now();
@@ -211,7 +222,7 @@ async function apiFetch<T>(path: string, init?: ApiFetchInit): Promise<T> {
 
   let res: Response;
   try {
-    res = await fetch(`${serverUrl()}${path}`, {
+    res = await fetch(gatewayUrl(path), {
       ...requestInit,
       headers: {
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
@@ -235,14 +246,23 @@ async function apiFetch<T>(path: string, init?: ApiFetchInit): Promise<T> {
   const durationMs = Date.now() - startedAt;
 
   if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    const message = `APIエラー (${res.status}): ${body || res.statusText}`;
+    // throwOnError=falseのときはボディを呼び出し元へそのまま渡すため消費しない。
+    const message = throwOnError
+      ? `APIエラー (${res.status}): ${(await res.text().catch(() => '')) || res.statusText}`
+      : `APIエラー (${res.status}): ${res.statusText}`;
     scheduleLog({ operationId: operationId ?? '', method, path, statusCode: res.status, durationMs, success: false, errorMessage: message });
-    throw new Error(message);
+    if (throwOnError) {
+      throw new Error(message);
+    }
+    return res;
   }
 
   scheduleLog({ operationId: operationId ?? '', method, path, statusCode: res.status, durationMs, success: true });
+  return res;
+}
 
+async function apiFetch<T>(path: string, init?: ApiRequestInit): Promise<T> {
+  const res = await apiRequest(path, init);
   if (res.status === 204) {
     return undefined as T;
   }
@@ -439,14 +459,7 @@ export function updateGeneratedImageTags(id: number, tags: string[]): Promise<Ge
 }
 
 export async function downloadGeneratedImageFile(id: number): Promise<{ body: ArrayBuffer; mimeType: string }> {
-  const res = await fetch(`${serverUrl()}/api/generated-images/${id}/file`, {
-    headers: { Authorization: `Bearer ${await currentAccessToken()}` },
-    cache: 'no-store',
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
-  }
+  const res = await apiRequest(`/api/generated-images/${id}/file`);
   return {
     body: await res.arrayBuffer(),
     mimeType: res.headers.get('content-type') ?? 'image/png',
@@ -838,17 +851,9 @@ export function previewProjectCustomTag(
  */
 export async function downloadProjectCustomTagCssBundle(
   projectId: number,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- 呼び出し元シグネチャ互換のために残す
   actor: ActorInfo
 ): Promise<ArrayBuffer> {
-  const res = await fetch(`${serverUrl()}/api/projects/${projectId}/custom-tags/css-bundle`, {
-    headers: { Authorization: `Bearer ${await currentAccessToken()}` },
-    cache: 'no-store',
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
-  }
+  const res = await apiRequest(`/api/projects/${projectId}/custom-tags/css-bundle`, { actor });
   return res.arrayBuffer();
 }
 
@@ -1027,14 +1032,7 @@ export function getMyCustomTagTemplates(actor: ActorInfo): Promise<CustomTagTemp
  * ダウンロードする(admin限定)。
  */
 export async function downloadBackupFile(): Promise<{ body: ArrayBuffer; filename: string }> {
-  const res = await fetch(`${serverUrl()}/api/backup/download`, {
-    headers: { Authorization: `Bearer ${await currentAccessToken()}` },
-    cache: 'no-store',
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
-  }
+  const res = await apiRequest('/api/backup/download');
   const disposition = res.headers.get('content-disposition') ?? '';
   const match = disposition.match(/filename="([^"]+)"/);
   return { body: await res.arrayBuffer(), filename: match?.[1] ?? 'lets-blog-backup.zip' };
@@ -2392,18 +2390,11 @@ export function deleteMediaGarbage(
 
 /**
  * VSCode拡張機能(.vsix)をAPIサーバーからダウンロードする。APIサーバー側で
- * オンデマンドビルド(初回は数十秒かかる場合がある)されるため、apiFetchのJSON前提の
- * エラーハンドリングは使わずバイナリを直接扱う。
+ * オンデマンドビルド(初回は数十秒かかる場合がある)されるため、JSONデコードを行うapiFetch()では
+ * なく、共通処理はそのままにResponseを返すapiRequest()を使ってバイナリを直接扱う。
  */
 export async function downloadVscodeExtension(): Promise<{ body: ArrayBuffer; filename: string }> {
-  const res = await fetch(`${serverUrl()}/api/system/vscode-extension`, {
-    headers: { Authorization: `Bearer ${await currentAccessToken()}` },
-    cache: 'no-store',
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
-  }
+  const res = await apiRequest('/api/system/vscode-extension');
   const disposition = res.headers.get('content-disposition') ?? '';
   const match = disposition.match(/filename="([^"]+)"/);
   const filename = match ? match[1] : 'letsblog-vscode.vsix';
@@ -2438,14 +2429,15 @@ export function getConnectedServiceStatusDetail(actor?: ActorInfo): Promise<Conn
 
 /**
  * 接続サービスの稼働状況をSSEで受け取るためのアップストリーム接続(issue #198)。
- * apiFetch()はJSONレスポンス前提のためストリーミングには使えず、ここだけ直接fetchする。
- * 呼び出し元(Route Handler)がbodyをそのままブラウザへ中継する。
+ * apiFetch()はJSONレスポンス前提のためストリーミングには使えないが、共通処理(gatewayのベースURL・
+ * 認証ヘッダ・操作ログ)は共有できるようapiRequest()を使う(issue #584)。
+ * 呼び出し元(Route Handler)がstatusとbodyをそのままブラウザへ中継するため、
+ * HTTPエラーでも例外は投げずResponseを返す(throwOnError: false)。
  */
 export async function streamConnectedServiceStatuses(): Promise<Response> {
-  const accessToken = await currentAccessToken();
-  return fetch(`${serverUrl()}/api/dashboard/service-status/stream`, {
-    headers: { Authorization: `Bearer ${accessToken}`, Accept: 'text/event-stream' },
-    cache: 'no-store',
+  return apiRequest('/api/dashboard/service-status/stream', {
+    headers: { Accept: 'text/event-stream' },
+    throwOnError: false,
   });
 }
 
@@ -2462,11 +2454,10 @@ export function getContainerStatuses(): Promise<ContainerStatus[]> {
   return apiFetch<ContainerStatus[]>('/api/dashboard/container-status');
 }
 
-/** コンテナ稼働状況をSSEで受け取るためのアップストリーム接続(issue #280)。 */
+/** コンテナ稼働状況をSSEで受け取るためのアップストリーム接続(issue #280)。streamConnectedServiceStatuses()と同じ扱い。 */
 export async function streamContainerStatuses(): Promise<Response> {
-  const accessToken = await currentAccessToken();
-  return fetch(`${serverUrl()}/api/dashboard/container-status/stream`, {
-    headers: { Authorization: `Bearer ${accessToken}`, Accept: 'text/event-stream' },
-    cache: 'no-store',
+  return apiRequest('/api/dashboard/container-status/stream', {
+    headers: { Accept: 'text/event-stream' },
+    throwOnError: false,
   });
 }

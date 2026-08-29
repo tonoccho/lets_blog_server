@@ -166,8 +166,7 @@ docker exec lbs-comfyui ls /root/ComfyUI/models/checkpoints/
 
 | 環境変数 | 値 | 説明 |
 |---|---|---|
-| `LETS_BLOG_API_URL` | `http://api:8080` | lbs-net内部でapiコンテナへ直接到達するため自己署名証明書を経由しない |
-| `LETS_BLOG_API_KEY` | `${SERVER_API_KEY}` | `.env` の `SERVER_API_KEY` と同じ値 |
+| `LETS_BLOG_GATEWAY_URL` | `http://gateway:8080` | サーバーサイドAPI呼び出しの唯一の宛先(issue #584)。lbs-net内部でgatewayコンテナへ直接到達するため自己署名証明書を経由しない |
 | `NEXTAUTH_SECRET` | `${NEXTAUTH_SECRET}` | `.env` の値 |
 | `NEXTAUTH_URL` | `https://localhost` | ブラウザから見える公開URL(認証コールバック等の生成に使用) |
 
@@ -185,7 +184,7 @@ Web管理画面側では自己署名証明書の信頼設定(`NODE_EXTRA_CA_CERT
 ```bash
 cd web
 cp .env.local.example .env.local
-vi .env.local   # LETS_BLOG_API_URL=https://localhost, NODE_EXTRA_CA_CERTS=../certs/localhost.crt 等
+vi .env.local   # LETS_BLOG_GATEWAY_URL=https://localhost, NODE_EXTRA_CA_CERTS=../certs/localhost.crt 等
 npm install
 npm run dev
 ```
