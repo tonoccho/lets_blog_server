@@ -29,8 +29,16 @@ public class TagDesignInternalController {
         this.tagDesignSettingService = tagDesignSettingService;
     }
 
+    /**
+     * projectIdは必須ではない(issue #760)。プロジェクトに紐付いていないサイトへの公開では
+     * 呼び出し元(content-service→legacy-api)がprojectId=nullで解決を要求し、URIテンプレート展開の
+     * 結果{@code ?projectId=}(空文字)として届く。required=trueのままだとSpringが空文字をLongへ
+     * 変換した結果のnullを「パラメータ未指定」と判定して400になるため、明示的にrequired=falseとし、
+     * {@link TagDesignSettingService}側で固定のデフォルト値を返す(設定可能なグローバル既定ではない暫定対応、issue #763)。
+     */
     @GetMapping("/api/internal/project/tag-design/{tagType}")
-    public TagDesignBridgeResponse tagDesign(@PathVariable EmbedTagType tagType, @RequestParam Long projectId) {
+    public TagDesignBridgeResponse tagDesign(
+            @PathVariable EmbedTagType tagType, @RequestParam(required = false) Long projectId) {
         TagDesignColors colors = tagDesignSettingService.resolveColors(projectId, tagType);
         String htmlTemplate = tagDesignSettingService.resolveHtmlTemplate(projectId, tagType);
         return TagDesignBridgeResponse.of(colors, htmlTemplate);

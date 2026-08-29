@@ -112,4 +112,28 @@ class BlogCardTagRenderServiceTest {
         String markdown = "普通の本文です。";
         assertEquals(markdown, service().render(markdown, 1L));
     }
+
+    /**
+     * issue #760: プロジェクトに紐付いていないサイトへの公開ではprojectId=nullで呼ばれる。
+     * projectIdはそのままタグデザイン解決へ渡し(受け側が固定のデフォルト値を返す暫定対応、issue #763)、
+     * レンダリング自体は成功する。
+     */
+    @Test
+    void render_projectIdがnullでもタグデザインを解決してカードを描画する() {
+        stubTagDesign();
+        Map<String, String> data = Map.of(
+                "title", "タイトル",
+                "url", "https://example.com/article",
+                "description", "説明文");
+        when(contentCacheService.resolve("https://example.com/article"))
+                .thenReturn(new ContentCacheResponse(
+                        "https://example.com/article", ContentType.BLOGCARD, data,
+                        LocalDateTime.now(), LocalDateTime.now()));
+
+        String result = service().render("[blogcard https://example.com/article]", null);
+
+        assertTrue(result.contains("lb-blogcard"));
+        org.mockito.Mockito.verify(legacyApiBridgeClient, org.mockito.Mockito.atLeastOnce())
+                .resolveTagDesign(org.mockito.ArgumentMatchers.isNull(), anyString(), any());
+    }
 }
