@@ -2,13 +2,22 @@
 
 ## 概要
 
-本ドキュメントは、Let's Blog Server の全コンポーネント（Penpot・MCP・Ollama・nginx等）が正しく起動・連携することを確認するための検証ガイドです。
+本ドキュメントは、Let's Blog Server の全コンポーネントが正しく起動・連携することを
+手動で確認するための検証ガイドです。自動化された E2E テスト(Playwright)の実行手順は
+`docs/e2e-testing.md` を参照してください。
 
 対象：
-- Docker Compose 構成全体
-- Ollama ↔ MCP サーバー連携
-- Penpot プラグイン動作
-- ダークモード・レスポンシブ確認
+
+- Docker Compose 構成全体(マルチサービス構成)
+- Keycloak による認証フロー
+- サービス間連携(gateway → 各ドメインサービス)
+- 複数スキーマに跨るデータ
+- サービス障害時の縮退表示
+- Penpot プラグイン / ComfyUI 等の周辺コンポーネント
+- ダークモード・レスポンシブ・アクセシビリティ
+
+> **更新(issue #588)**: サービス分割・Keycloak 移行に伴い、単一アプリケーション時代の
+> 前提(`http://localhost:8000`、`ollama` / `mcp-penpot` コンテナ等)を全面的に改めています。
 
 ---
 
@@ -17,305 +26,263 @@
 ### 1.1 システム要件
 
 ```bash
-# Docker 確認
-docker --version
-# Docker version 20.10 以上
-
-# Docker Compose 確認
-docker compose version
-# Docker Compose version 1.29 以上
-
-# ディスク容量確認（最小 20GB）
-df -h
+docker --version          # 20.10 以上
+docker compose version    # v2 以上
+df -h                     # ディスク空き容量(最小 20GB。不足すると原因不明のテスト失敗を招く)
 ```
 
-### 1.2 ポート確認
+### 1.2 公開URLとポート
+
+外部公開は reverse-proxy(nginx)経由に統一されており、アプリ利用時に個別ポートを開く必要はありません。
+
+| URL | 内容 |
+| --- | --- |
+| `https://localhost/` | Web 管理画面(Next.js) |
+| `https://localhost/auth/` | Keycloak(realm: `letsblog`) |
+| `https://localhost/api/` | gateway(各ドメインサービスへルーティング) |
+| `https://localhost/sites/{siteKey}/` | ManagedWordPress サイト |
+| `https://localhost/phpmyadmin/` | phpMyAdmin |
+| `https://localhost/comfyui/` | ComfyUI |
+| `https://localhost/penpot` | Penpot |
+| `https://localhost/plantuml/` `https://localhost/drawio/` | 図生成ツール |
 
 ```bash
-# 使用ポート
-# - 3000: MCP Server
-# - 5432: PostgreSQL (Penpot)
-# - 11434: Ollama API
-# - 443/80: nginx reverse proxy
-# - 8000: Let's Blog (アプリケーション)
-
-# ポート競合確認
-lsof -i :3000
-lsof -i :5432
-lsof -i :11434
-lsof -i :443
+# ポート競合確認(80/443 のみ外部公開)
+sudo lsof -i :80
+sudo lsof -i :443
 ```
 
 ### 1.3 環境変数確認
 
 ```bash
-# .env ファイルの存在・内容確認
-cat .env
+# .env の存在確認(未作成なら .env.example からコピーして値を埋める)
+ls -l .env
 
-# 必須変数
-# - OLLAMA_API_URL=http://ollama:11434
-# - MCP_SERVER_PORT=3000
-# - POSTGRES_PASSWORD=... (Penpot)
+# 代表的な必須変数
+# - MYSQL_ROOT_PASSWORD / MYSQL_USER / MYSQL_PASSWORD
+# - LBS_*_DB_PASSWORD(サービス別スキーマのユーザー。#570)
+# - KEYCLOAK_ADMIN_USERNAME / KEYCLOAK_ADMIN_PASSWORD / KEYCLOAK_DB_PASSWORD
+# - KEYCLOAK_WEB_CLIENT_SECRET / KEYCLOAK_SERVICES_CLIENT_SECRET
+# - NEXTAUTH_SECRET / APP_ENCRYPTION_KEY / RABBITMQ_USER / RABBITMQ_PASSWORD
+```
+
+### 1.4 証明書
+
+```bash
+./scripts/generate-certs.sh   # 初回のみ。reverse-proxy の自己署名証明書を生成する
 ```
 
 ---
 
 ## 2. Docker Compose 起動テスト
 
-### 2.1 段階的な起動
+### 2.1 全サービス起動
 
 ```bash
-# Step 1: Ollama 起動（時間がかかる）
-docker compose up -d ollama
-docker compose logs -f ollama
-
-# 期待出力:
-# ollama_1 | time=... level=INFO msg="Listening on ..."
-
-# Step 2: PostgreSQL 起動
-docker compose up -d penpot_postgres
-docker compose logs -f penpot_postgres
-
-# 期待出力:
-# PostgreSQL init process complete. Ready for start up.
-
-# Step 3: Penpot 起動
-docker compose up -d penpot
-docker compose logs -f penpot
-
-# 期待出力:
-# penpot_1 | [INFO] Application server started...
-
-# Step 4: MCP Server 起動
-docker compose up -d mcp-penpot
-docker compose logs -f mcp-penpot
-
-# 期待出力:
-# mcp-penpot_1 | [INFO] Server running on http://localhost:3000
-
-# Step 5: nginx 起動
-docker compose up -d nginx
-docker compose logs -f nginx
-
-# 期待出力:
-# nginx_1 | ... nginx ... is running
-```
-
-### 2.2 全サービス起動
-
-```bash
-# すべてのサービスを一度に起動
 docker compose up -d
 
-# 起動状態確認
+# 起動状態確認(サービス名 / 状態 / ヘルス)
 docker compose ps
-
-# 期待出力:
-# NAME                 COMMAND                  SERVICE             STATUS
-# lbs-ollama           "ollama serve"           ollama              Up 3 minutes
-# lbs-postgres         "docker-entrypoint..."   penpot_postgres     Up 2 minutes
-# lbs-penpot           "docker-entrypoint..."   penpot              Up 1 minute
-# lbs-mcp-server       "node src/server.js"     mcp-penpot          Up 30 seconds
-# lbs-nginx            "nginx -g daemon off"    nginx               Up 10 seconds
 ```
 
-### 2.3 ヘルスチェック
+主要サービス:
+
+| サービス | 役割 | ヘルスチェック |
+| --- | --- | --- |
+| `reverse-proxy` | nginx。80/443 の単一入口 | `/nginx-health` |
+| `web` | Next.js(BFF 兼 管理画面) | `/api/auth/csrf` |
+| `gateway` | `/api/**` のルーティング・JWT 検証・レート制限 | actuator |
+| `keycloak` / `keycloak-postgres` | 認証基盤 | `/auth/health/ready` / `pg_isready` |
+| `identity` | ユーザー・ロール | actuator |
+| `project` | サイト・プロジェクト・SSH 鍵 | actuator |
+| `content` | 記事本文・カスタムタグ・投稿履歴 | actuator |
+| `publishing` | 記事公開・一括管理・プレビュー | actuator |
+| `media` | 画像生成・ダイアグラム | actuator |
+| `ai` | LLM 呼び出し・記事プラン | actuator |
+| `analytics` | GA / AdSense レポート | actuator |
+| `platform` | システム設定・バックアップ・状態監視 | actuator |
+| `log-writer` | 監査・操作ログ | actuator |
+| `api`(legacy-api) | 未移行 API | actuator |
+| `legacy-schema-migrate` | 一回限りの Flyway ジョブ(正常終了で完了) | - |
+| `mysql` / `rabbitmq` | データストア / メッセージング | `mysqladmin ping` / `rabbitmq-diagnostics` |
+| `wordpress` | ManagedWordPress の実体 | - |
+
+### 2.2 全サービスが healthy になるまで待つ
 
 ```bash
-# MCP Server
-curl http://localhost:3000/health
-# 期待: {"status":"ok"}
+# E2E に必要なサービス群を対象に待機する(Playwright の globalSetup と同じ判定)
+./scripts/wait-for-stack-healthy.sh
 
-# Ollama API
-curl http://localhost:11434/api/tags
-# 期待: {"models":[{"name":"qwen2.5:7b-instruct","size":...}]}
+# compose プロジェクト内の全コンテナを対象にする場合
+./scripts/wait-for-stack-healthy.sh --all --timeout 900
+```
 
-# PostgreSQL
-docker compose exec penpot_postgres psql -U penpot -d penpot -c "SELECT 1"
-# 期待: 1
+期待結果: `OK: 対象サービスは全てhealthy(legacy-schema-migrateは正常終了)です。`
 
-# nginx (localhost/penpot)
-curl -k https://localhost/penpot
-# 期待: Penpot ページが返される
+失敗した場合は、未 healthy のサービス名が列挙されるので該当ログを見ます。
+
+```bash
+docker compose logs <service> | tail -50
+```
+
+### 2.3 個別ヘルスチェック
+
+```bash
+# gateway(および各 Spring Boot サービス)
+docker compose exec gateway curl -fs http://localhost:8080/actuator/health
+
+# Keycloak(realm の discovery document)
+curl -sk https://localhost/auth/realms/letsblog/.well-known/openid-configuration | head -c 200
+
+# Web(NextAuth の CSRF エンドポイント。認証不要で 200 が返る)
+curl -sk https://localhost/api/auth/csrf
+
+# reverse-proxy
+docker compose exec reverse-proxy wget -q -O - http://127.0.0.1/nginx-health
+
+# MySQL(全スキーマの存在確認)
+docker compose exec mysql mysql -u root -p"$MYSQL_ROOT_PASSWORD" -e "SHOW DATABASES;"
+# 期待: lets_blog, lbs_identity, lbs_project, lbs_content, lbs_media,
+#       lbs_ai, lbs_analytics, lbs_platform, lbs_publishing, lbs_log
+```
+
+### 2.4 クリーンなボリュームからの起動検証
+
+```bash
+# 注意: MySQL データを削除します
+./scripts/verify-clean-volume-boot.sh
 ```
 
 ---
 
-## 3. Ollama × MCP 連携テスト
+## 3. 認証フロー(Keycloak)の検証
 
-### 3.1 MCP Server API テスト
-
-#### Design Suggestion エンドポイント
+### 3.1 テストユーザーの用意
 
 ```bash
-curl -X POST http://localhost:3000/api/design-suggestion \
-  -H "Content-Type: application/json" \
-  -d '{
-    "design_brief": "Primary button, blue, medium size",
-    "brand_style": "modern",
-    "audience": "technical"
-  }'
-
-# 期待: JSON レスポンス
-# {
-#   "component_name": "Button",
-#   "design_suggestions": [...],
-#   "implementation_code": "..."
-# }
+E2E_TEST_PASSWORD='...' E2E_ADMIN_PASSWORD='...' \
+  ./scripts/provision-e2e-keycloak-users.sh
 ```
 
-#### Improve Component エンドポイント
+- 対象は `e2e-test@letsblog.local`(role: user)と `e2e-admin@letsblog.local`(role: admin)のみ
+- ローカル開発の Keycloak コンテナ(`lbs-keycloak`)専用。共有 / 本番環境では実行しない
+- 実ユーザーには一切触れない
 
-```bash
-curl -X POST http://localhost:3000/api/improve-component \
-  -H "Content-Type: application/json" \
-  -d '{
-    "component_info": {
-      "name": "LoginForm",
-      "description": "Login form with email and password"
-    },
-    "focus_areas": ["accessibility", "dark-mode"]
-  }'
+### 3.2 ログイン手順の確認
 
-# 期待: 改善提案の JSON
+```
+1. https://localhost/login を開く
+   期待: 即座に https://localhost/auth/realms/letsblog/... のホスト型ログイン画面へ遷移する
+2. e2e-admin@letsblog.local でサインインする
+   期待: https://localhost/ (ダッシュボード)へ戻り、ヘッダーに「ログアウト」が表示される
+3. https://localhost/users を開く
+   期待: admin なので閲覧できる(e2e-test@letsblog.local の場合は "/" へリダイレクトされる)
+4. ログアウトする
+   期待: /login へ戻り、保護ページへ再アクセスすると再度 Keycloak へリダイレクトされる
 ```
 
-#### Color Palette エンドポイント
+### 3.3 トークン検証の確認
 
 ```bash
-curl -X POST http://localhost:3000/api/generate-color-palette \
-  -H "Content-Type: application/json" \
-  -d '{
-    "brand_description": "tech startup, modern, trustworthy",
-    "accessibility_level": "AA",
-    "dark_mode": true
-  }'
-
-# 期待: カラーパレット JSON
-# {
-#   "palette": {
-#     "primary": {"light": "#...", "dark": "#..."},
-#     ...
-#   },
-#   "wcag_compliance": {...}
-# }
-```
-
-#### Typography エンドポイント
-
-```bash
-curl -X POST http://localhost:3000/api/suggest-typography \
-  -H "Content-Type: application/json" \
-  -d '{
-    "design_context": "web admin dashboard",
-    "content_type": "structured"
-  }'
-
-# 期待: フォント提案 JSON
-```
-
-### 3.2 エラーハンドリング
-
-```bash
-# Ollama が応答しない場合
-curl -X POST http://localhost:3000/api/design-suggestion \
-  -H "Content-Type: application/json" \
-  -d '{"design_brief":"test"}'
-
-# 期待エラー:
-# {"error":"Ollama service unavailable"}
-
-# MCP logs で詳細確認
-docker compose logs mcp-penpot | tail -20
+# 不正な JWT は gateway が 401 で拒否する
+curl -sk -o /dev/null -w '%{http_code}\n' \
+  -H 'Authorization: Bearer invalid.token.value' https://localhost/api/sites
+# 期待: 401
 ```
 
 ---
 
-## 4. Penpot プラグイン動作テスト
+## 4. サービス間連携の検証
 
-### 4.1 ブラウザでアクセス
+### 4.1 主要シナリオ(サイト登録 → 記事公開 → 履歴確認)
+
+自動テストは `web/e2e/main-scenario.spec.ts`。手動で確認する場合:
+
+```
+1. https://localhost/sites → 「WordPressを新規構築」で ManagedWordPress サイトを作成する
+   期待: 数分で「構築しました。」と表示され、一覧にサイトが追加される(project-service)
+2. 作成したサイトの「疎通確認」を押す
+   期待: SUCCESS / FAILED のいずれかが確定的に表示される
+3. VSCode 拡張(または API)から記事を公開する
+   期待: WordPress に記事が作成される(publishing-service)
+4. https://localhost/posts を開く
+   期待: 投稿履歴に公開した記事が表示される(content-service)
+```
+
+API で公開する場合の例(Keycloak からトークンを取得して gateway 経由で呼ぶ)。
+`admin-cli` は使わないこと — Keycloak既定で lightweight access token が有効になっており、
+発行されるトークンから `sub` と `realm_access.roles` が欠落し、identity-service の
+`/api/identity/me` が 403 になって記事公開が失敗する(issue #588)。代わりに E2E 専用の
+`letsblog-e2e` クライアント(`scripts/provision-e2e-keycloak-users.sh` で作成済み)を使う:
 
 ```bash
-# URL
-https://localhost/penpot
+TOKEN=$(curl -sk -X POST \
+  https://localhost/auth/realms/letsblog/protocol/openid-connect/token \
+  -d grant_type=password -d client_id=letsblog-e2e \
+  -d username=e2e-admin@letsblog.local -d password="$E2E_ADMIN_PASSWORD" \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
 
-# 初回アクセス
-1. ユーザー登録・ログイン
-2. 新規プロジェクト作成
-3. 新規ファイルを開く
+curl -sk -X POST https://localhost/api/posts/publish \
+  -H "Authorization: Bearer $TOKEN" \
+  -F site=<siteKey> -F title='E2E manual check' \
+  -F status=publish -F markdown='# E2E manual check'
 ```
 
-### 4.2 プラグイン インストール
+### 4.2 複数スキーマに跨るデータの確認
+
+サービス別スキーマ分離(#570 / ADR-0004)により、1つのプロジェクト / サイトは複数スキーマに
+行を持ちます。サイト・プロジェクトを1件作成したあとで、想定どおりに書き込まれているかを確認します。
 
 ```bash
-# 前提: penpot-plugin をビルド済み
-cd penpot-plugin
-npm run build
-npm run build:ui
-
-# Penpot UI から:
-1. Plugins → Add Plugin
-2. manifest.json を選択
-3. Install をクリック
+docker compose exec mysql mysql -u root -p"$MYSQL_ROOT_PASSWORD" -e "
+  SELECT COUNT(*) FROM lbs_project.sites;
+  SELECT COUNT(*) FROM lbs_project.projects;
+  SELECT COUNT(*) FROM lbs_content.posts;
+  SELECT COUNT(*) FROM lbs_media.generated_images;
+  SELECT COUNT(*) FROM lbs_ai.project_ai_settings;"
 ```
 
-### 4.3 プラグイン 機能テスト
-
-#### デザイン提案機能
-
-```
-1. Penpot でキャンバスを開く
-2. プラグインパネルを開く（右側）
-3. "Design Suggestion" タブをクリック
-4. 以下を入力:
-   - Design Brief: "Primary button, blue, medium"
-   - Brand Style: "Modern"
-   - Audience: "Technical"
-5. "Generate" ボタンをクリック
-6. 提案が表示される
-7. "Apply to Canvas" をクリック
-8. キャンバスにコンポーネントが追加される
-
-期待: MCP API が呼ばれて、Ollama が提案を生成
-```
-
-#### コンポーネント改善
-
-```
-1. キャンバス上でコンポーネントを選択
-2. プラグインの "Improve Component" タブへ
-3. Focus Areas を選択（Accessibility など）
-4. "Get Improvements" をクリック
-5. 改善提案が表示される
-
-期待: 選択したコンポーネント情報がMCP に送信される
-```
-
-#### カラーパレット生成
-
-```
-1. "Color Palette" タブをクリック
-2. Brand Description を入力
-3. "Generate Palette" をクリック
-4. パレットが生成される
-
-期待: カラーパレットが表示・使用可能になる
-```
-
-### 4.4 プラグイン デバッグ
+E2E が残したテストデータの掃除:
 
 ```bash
-# ブラウザコンソール（DevTools）で確認
-F12 → Console
-
-# 期待される操作:
-1. コンソールエラーがないか確認
-2. ネットワークリクエスト（http://localhost:3000/api/...）が表示されるか確認
-3. レスポンスが JSON か確認
-
-# MCP Server ログ確認
-docker compose logs -f mcp-penpot
+./scripts/e2e-cleanup-test-data.sh          # ドライラン(件数表示のみ)
+./scripts/e2e-cleanup-test-data.sh --yes    # 実際に削除する
 ```
+
+### 4.3 サービス障害時の縮退表示
+
+```bash
+# 下流サービスを1つ落とす
+docker compose stop content
+
+# 期待: https://localhost/posts は 500 にならず、
+#       「全0件を表示」「投稿履歴はまだありません...」の空状態で描画される。
+#       https://localhost/ のダッシュボードも投稿数 0 として表示され、他の情報は生きている。
+
+# 復旧
+docker compose start content
+./scripts/wait-for-stack-healthy.sh --services content
+```
+
+同じ検証は `web/e2e/service-degradation.spec.ts` で自動化されています
+(実際にコンテナを停止するテストは `E2E_ALLOW_SERVICE_DISRUPTION=1` のときのみ実行)。
+
+### 4.4 Penpot / ComfyUI 等の周辺コンポーネント
+
+```bash
+# Penpot(penpot-frontend / penpot-backend / penpot-exporter / penpot-postgres / penpot-valkey)
+docker compose up -d penpot-frontend
+# ブラウザ: https://localhost/penpot
+
+# ComfyUI(画像生成。media-service が利用する)
+docker compose up -d comfyui
+# ブラウザ: https://localhost/comfyui/
+
+# ダッシュボードの「接続サービス状態」パネル(platform-service)で
+# ComfyUI / PlantUML / WordPress プロビジョニング / Penpot の状態を確認できる
+```
+
+Penpot プラグインの導入・動作確認手順は `docs/penpot-setup.md` を参照してください。
 
 ---
 
@@ -324,11 +291,12 @@ docker compose logs -f mcp-penpot
 ### 5.1 Let's Blog Web UI テスト（デスクトップ）
 
 ```bash
-# アプリケーション URL
-http://localhost:8000
+# アプリケーション URL(reverse-proxy 経由。自己署名証明書のため警告を許可する)
+https://localhost
 
 # テスト項目
-1. ログインページ
+1. ログインページ(Keycloak のホスト型ログイン画面)
+   - /login にアクセスすると Keycloak へリダイレクトされること
    - 入力フィールドにフォーカス時の outline 表示
    - エラー表示の見え方
    - ボタンのホバー・active 状態
@@ -536,72 +504,44 @@ Light モード で見た後、Dark モード で以下を確認:
 
 ## 9. トラブルシューティング
 
-### 9.1 Docker Compose エラー
-
-#### エラー: "Cannot connect to PostgreSQL"
+### 9.1 起動しない / healthy にならない
 
 ```bash
-# 原因: PostgreSQL が起動していない
-# 解決:
-docker compose logs penpot_postgres
-docker compose up -d penpot_postgres
-# 数秒待機
-sleep 10
+./scripts/wait-for-stack-healthy.sh --all --timeout 900   # 未 healthy のサービスを特定する
+docker compose logs <service> | tail -50
+df -h                                                     # ディスク不足は誤解を招く失敗の原因になる
 ```
 
-#### エラー: "MCP Server connection refused"
+よくある原因:
+
+| 症状 | 原因 | 対処 |
+| --- | --- | --- |
+| `identity` / `api` がクラッシュループ | `legacy-schema-migrate` が未完了 | `docker compose logs legacy-schema-migrate` を確認(#668) |
+| `gateway` が起動しない | 依存サービス(各ドメインサービス)が未 healthy | 個別に `docker compose logs` を確認 |
+| `web` が healthy にならない | `next dev` の初回コンパイルが遅い | `start_period` 経過まで待つ。低速環境では `E2E_HEALTH_TIMEOUT` を伸ばす |
+| MySQL のスキーマが無い | 既存ボリュームでは init スクリプトが再実行されない | `docs/SERVICE_SCHEMA_MIGRATION.md` を参照 |
+
+### 9.2 認証まわり
+
+| 症状 | 原因 | 対処 |
+| --- | --- | --- |
+| ログイン後にコールバックで失敗する | redirect_uri 不一致(`https://localhost` 以外で開いている) | `https://localhost` でアクセスする |
+| `Invalid username or password` | テストユーザー未発行 / パスワード不一致 | `./scripts/provision-e2e-keycloak-users.sh` を再実行 |
+| API が 401 | トークン期限切れ・issuer 不一致 | Keycloak の `KC_HOSTNAME` 設定と再ログインを確認 |
+| admin 操作が 403 | ローカル DB に `keycloak_sub` 付きユーザーが無い | identity-service 経由(`POST /api/users`)で作成する |
+
+### 9.3 縮退表示の確認で戻せなくなった
 
 ```bash
-# 原因: MCP サーバーが起動していない or ポート被り
-# 解決:
-docker compose logs mcp-penpot
-docker compose up -d mcp-penpot
-lsof -i :3000  # ポート確認
+docker compose start content     # 停止したサービスを起動し直す
+./scripts/wait-for-stack-healthy.sh
 ```
 
-#### エラー: "Ollama model not found"
-
-```bash
-# 原因: モデルをダウンロードしていない
-# 解決:
-docker compose exec ollama ollama pull qwen2.5:7b-instruct
-# 数分待機（ダウンロード時間）
-```
-
-### 9.2 Penpot トラブル
-
-#### トラブル: "プラグインが読み込まれない"
-
-```bash
-# 原因: manifest.json パスが誤っている
-# 解決:
-1. manifest.json が penpot-plugin/ ディレクトリに存在するか確認
-2. plugin.js / ui.js がビルドされているか確認
-3. ブラウザキャッシュをクリア (Ctrl+Shift+Delete)
-4. Penpot を再読み込み
-```
-
-#### トラブル: "MCP API が応答しない"
-
-```bash
-# ブラウザコンソール確認
-F12 → Console → Network errors
-
-# MCP Server ログ確認
-docker compose logs -f mcp-penpot
-
-# CORS エラーの場合:
-# → MCP Server の CORS 設定を確認
-# → nginx の proxy_pass 設定を確認
-```
-
-### 9.3 UI テスト失敗
+### 9.4 UI テスト失敗
 
 #### テキストが小さすぎる
 
 ```bash
-# 原因: font-size が小さく設定されている
-# 確認:
 F12 → Elements → Computed styles
 # font-size が 12px 以上か確認（WCAG 要件）
 ```
@@ -609,12 +549,9 @@ F12 → Elements → Computed styles
 #### ボタンがクリックできない
 
 ```bash
-# 原因: Z-index または display: none
-# 確認:
 F12 → Elements → Computed styles
 # display: none / visibility: hidden がないか
-# z-index が正しいか
-# pointer-events が auto か
+# z-index が正しいか / pointer-events が auto か
 ```
 
 ---
@@ -623,34 +560,46 @@ F12 → Elements → Computed styles
 
 ### Docker 起動テスト
 
-- [ ] Ollama 起動・モデルロード完了
-- [ ] PostgreSQL 起動・データベース初期化完了
-- [ ] Penpot 起動・Web UI アクセス可能
-- [ ] MCP Server 起動・health endpoint 応答
-- [ ] nginx 起動・SSL 証明書有効
+- [ ] `docker compose up -d` 後、`./scripts/wait-for-stack-healthy.sh` が OK で終了する
+- [ ] `mysql` に全スキーマ(`lets_blog` / `lbs_*`)が存在する
+- [ ] `legacy-schema-migrate` が正常終了している
+- [ ] `reverse-proxy` の `/nginx-health` が 200 を返す
+- [ ] `https://localhost/` が表示される(自己署名証明書の警告は許容)
 
-### API テスト
+### 認証テスト(Keycloak)
 
-- [ ] Design Suggestion エンドポイント動作
-- [ ] Improve Component エンドポイント動作
-- [ ] Color Palette エンドポイント動作
-- [ ] Typography エンドポイント動作
-- [ ] エラーハンドリング動作
+- [ ] `/login` から Keycloak のホスト型ログイン画面へリダイレクトされる
+- [ ] 正しい資格情報でログインでき、セッションが確立する
+- [ ] 誤ったパスワードでは Keycloak 側でエラーになる
+- [ ] 非 admin は `/users` へアクセスできない / admin はアクセスできる
+- [ ] ログアウト後、保護ページで再度ログインを求められる
+- [ ] 不正な JWT を付けた API 呼び出しが 401 になる
 
-### Penpot プラグインテスト
+### サービス連携テスト
 
-- [ ] プラグインインストール成功
-- [ ] Design Suggestion 機能動作
-- [ ] Improve Component 機能動作
-- [ ] Color Palette 機能動作
-- [ ] Typography 機能動作
-- [ ] キャンバスへの反映動作
+- [ ] サイト登録(ManagedWordPress の自動構築)が完了する
+- [ ] 疎通確認が SUCCESS / FAILED を確定的に返す
+- [ ] 記事公開が成功する(publishing-service → WordPress)
+- [ ] `/posts` の投稿履歴に反映される(content-service)
+- [ ] 生成画像が `/image-gallery` に表示される(media-service)
+- [ ] 複数スキーマに想定どおり行が作成されている
+
+### 縮退表示テスト
+
+- [ ] 下流サービスを1つ停止しても画面が 500 にならない
+- [ ] 取得できないデータが空状態として表示される
+- [ ] サービス復旧後、再読み込みで正常表示に戻る
+
+### テストデータ
+
+- [ ] E2E 実行後に `./scripts/e2e-cleanup-test-data.sh` のドライランで残骸を確認した
+- [ ] 必要に応じて `--yes` で削除し、実データが消えていないことを確認した
 
 ### UI コンポーネントテスト
 
-- [ ] ログインページ表示・入力動作
+- [ ] ログインページ(Keycloak)表示・入力動作
 - [ ] ダッシュボード表示・レイアウト
-- [ ] 投稿一覧表示・pagination
+- [ ] サイト一覧 / 投稿履歴 / プロジェクト一覧の表示
 - [ ] 投稿編集フォーム動作
 - [ ] 設定ページ表示
 
@@ -683,16 +632,17 @@ F12 → Elements → Computed styles
 - [ ] LCP < 2.5s
 - [ ] バンドルサイズ < 500KB
 
+### 自動 E2E
+
+- [ ] `cd web && npm run test:e2e` が完走する(手順は `docs/e2e-testing.md`)
+
 ---
 
 ## 11. テスト完了条件
 
-✅ **すべてのチェックリスト項目が確認できた場合**
-
-→ エンドツーエンド動作検証成功！
+✅ **すべてのチェックリスト項目が確認できた場合** → エンドツーエンド動作検証成功
 
 ---
 
-**完成日:** 2024-08-07  
-**バージョン:** 1.0  
-**次ステップ:** D-2 ドキュメント作成
+**最終更新:** 2026-08-29(issue #588 マルチサービス構成対応)
+**関連ドキュメント:** `docs/e2e-testing.md` / `docs/DOCKER_COMPOSE_ARCHITECTURE.md` / `docs/TEST_DOCUMENTATION.md`

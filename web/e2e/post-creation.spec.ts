@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { loginViaKeycloak } from './helpers';
+import { E2E_ADMIN_PASSWORD, loginAsAdmin } from './helpers';
 
 /**
  * issue #645: このファイルの大半のテストは `if (要素が存在すれば) { assert }` という形で
@@ -18,11 +18,9 @@ import { loginViaKeycloak } from './helpers';
  * 作成するプロジェクト)は、afterEachで(/projects/{id}の「プロジェクトを削除」ボタン、
  * DeleteProjectButton.tsx参照)確実に削除する。実行のたびにプロジェクトが増え続けるのを防ぐため。
  */
-const ADMIN_EMAIL = 'e2e-admin@letsblog.local';
-const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? '';
 
 test.describe('Article/Post Creation Workflow', () => {
-  test.skip(!ADMIN_PASSWORD, 'E2E_ADMIN_PASSWORDが未設定のためスキップ');
+  test.skip(!E2E_ADMIN_PASSWORD, 'E2E_ADMIN_PASSWORDが未設定のためスキップ');
 
   let fixtureProjectName: string;
   // beforeEachがログイン等で失敗した場合でもafterEachが安全にno-opできるよう、
@@ -31,7 +29,7 @@ test.describe('Article/Post Creation Workflow', () => {
 
   test.beforeEach(async ({ page }) => {
     createdProjectNames = [];
-    await loginViaKeycloak(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+    await loginAsAdmin(page);
 
     // Fixture: 各テストの実行前に、プロジェクト一覧へ必ず1件のプロジェクトが存在する状態を作る。
     const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

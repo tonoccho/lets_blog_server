@@ -740,6 +740,51 @@
       ]
     },
     {
+      "id": "6b1f0b6e-6a2b-4a3c-9a7e-1f4c0b2d8e51",
+      "clientId": "letsblog-e2e",
+      "name": "Let's Blog E2E (local development only)",
+      "description": "web/e2e がブラウザを介さずAPIを直接叩くためのトークン発行専用クライアント(issue #588)。realm既定のadmin-cliはlightweight access tokenが有効でsub/realm_access.rolesが載らないため、E2E専用に用意する。ローカル開発スタック専用で、アプリケーションの認証フロー(letsblog-web / letsblog-vscode)には使わない。",
+      "surrogateAuthRequired": false,
+      "enabled": true,
+      "alwaysDisplayInConsole": false,
+      "clientAuthenticatorType": "client-secret",
+      "redirectUris": [],
+      "webOrigins": [],
+      "notBefore": 0,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "publicClient": true,
+      "frontchannelLogout": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "realm_client": "false",
+        "backchannel.logout.session.required": "true",
+        "backchannel.logout.revoke.offline.tokens": "false"
+      },
+      "authenticationFlowBindingOverrides": {},
+      "fullScopeAllowed": true,
+      "nodeReRegistrationTimeout": -1,
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "basic",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "organization",
+        "microprofile-jwt"
+      ]
+    },
+    {
       "id": "0f350279-c7b1-4959-8b97-c272d83dd64c",
       "clientId": "letsblog-services",
       "name": "Let's Blog Service-to-Service",

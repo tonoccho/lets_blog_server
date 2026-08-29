@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { injectAxe, checkA11y, getViolations } from 'axe-playwright';
-import { loginViaKeycloak } from './helpers';
+import { E2E_TEST_PASSWORD, loginAsUser } from './helpers';
 
 /**
  * issue #564でCredentialsプロバイダを廃止しKeycloakへ移行したことに伴い、以下の前提が変わった。
@@ -14,14 +14,11 @@ import { loginViaKeycloak } from './helpers';
  *   (e2e-test@letsblog.local)でログインしてから対象ページへ遷移するようにした。
  */
 
-const TEST_EMAIL = 'e2e-test@letsblog.local';
-const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD ?? '';
-
 test.describe('Accessibility (a11y) Testing', () => {
-  test.skip(!TEST_PASSWORD, 'E2E_TEST_PASSWORDが未設定のためスキップ');
+  test.skip(!E2E_TEST_PASSWORD, 'E2E_TEST_PASSWORDが未設定のためスキップ');
 
   test.beforeEach(async ({ page }) => {
-    await loginViaKeycloak(page, TEST_EMAIL, TEST_PASSWORD);
+    await loginAsUser(page);
   });
 
   test('Home page should not have accessibility violations', async ({ page }) => {

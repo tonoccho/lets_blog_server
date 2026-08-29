@@ -34,6 +34,16 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./certs:/etc/nginx/certs:ro
+    # E2E(#588)は https://localhost(=このreverse-proxy)へ直接アクセスするため、
+    # 「スタック全体がhealthy」を機械的に判定できるようヘルスチェックを持たせる。
+    # nginx:alpineにcurlは無いためbusybox wgetを使い、自己署名証明書のHTTPSではなく
+    # 80番のヘルス用location(nginx/conf.d/default.confの/nginx-health)を叩く。
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:80/nginx-health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   web:
     build:
@@ -63,6 +73,16 @@ services:
     # (gateway自身がapi/identity/各ドメインサービスのhealthyを待つ)。
     depends_on:
       - gateway
+    # E2E(#588)がテスト開始前に「全サービスhealthy」を待てるようにするためのヘルスチェック。
+    # 認証不要でNext.jsのサーバー処理まで到達する/api/auth/csrf(NextAuth)を叩く。
+    # 開発モード(next dev)は初回リクエスト時にコンパイルが走るため、start_period/retriesは
+    # 他サービス(actuator)より緩めに設定する。node:22-alpineにcurlは無いためbusybox wgetを使う。
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/auth/csrf || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 60s
 
   api:
     build:
