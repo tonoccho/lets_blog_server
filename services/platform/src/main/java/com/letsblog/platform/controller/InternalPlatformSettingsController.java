@@ -18,7 +18,10 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>いずれも移設前のAiBridgeController#systemBraveSearchApiKey/#llmConfigと同じくadmin権限チェックは
  * 行わない(システム全体で1つの値を解決するだけで、特定ユーザーのデータではないため)。
- * SecurityConfigが全経路permitAllのため、Bearerトークンの転送も不要。
+ * issue #705で本サービスのSecurityConfigは「公開パスを除きJWT必須」へ変更したが、この
+ * {@code /api/internal/platform/**}はgatewayのルート表に載っておらず外部から到達できないこと、
+ * および呼び出し元のPlatformServiceClientがBearerトークンを転送しない実装であることから、
+ * 引き続きSecurityConfigのPUBLIC_PATHSに含めている(同SecurityConfigのJavadoc参照)。
  */
 @RestController
 public class InternalPlatformSettingsController {

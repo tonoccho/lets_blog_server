@@ -47,6 +47,20 @@ legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行して�
    上記以外の全エンドポイントは、リクエストボディやパスパラメータの妥当性に関わらず、
    有効なJWTが無ければ必ず401を返す。
 
+   **platform-serviceへ移設されたエンドポイントについて(issue #705)**:
+   `AppSettingController`・`BackupController`・`DashboardController`・`SystemSettingController`・
+   `VscodeExtensionController`は#693/#694/#695/#696で`services/platform`へ移設された。移設先の
+   `com.letsblog.platform.config.SecurityConfig`は当初、他の抽出サービスのテンプレート通り
+   全経路`permitAll()`だったため、この認証ゲートが一時的に失われ、`GET /api/system/vscode-extension`等が
+   Authorizationヘッダーなしでも200を返す後退が発生していた(gateway側も`anyExchange().permitAll()`で
+   あり、どちらの層でも認証必須化が行われていなかった)。issue #705でplatform-serviceの`SecurityConfig`を
+   legacy-apiと同じ形(公開パスを除き`anyRequest().authenticated()`)へ変更し、下表の「未認証: 401」を
+   実態として復元した。platform-serviceの公開パスは Actuator (`/actuator/**`)・APIドキュメント
+   (`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html`)・サービス間内部ブリッジ
+   (`/api/internal/platform/**`、gatewayのルート表に無く外部から到達できない。同SecurityConfigの
+   Javadoc参照)のみ。対応する統合テストは
+   `services/platform/src/test/java/com/letsblog/platform/integration/AuthorizationMatrixIntegrationTest.java`。
+
 2. **ロール/所有権ゲート(→403)**: コントローラメソッド(または委譲先のサービスメソッド)の
    先頭付近で `AdminAuthorizationService` の以下いずれかを呼ぶ場合がある。
    - `requireAdmin()` — 呼び出し元のactorがadminロール(`CurrentActorService`がJWTのsub
@@ -96,6 +110,8 @@ legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行して�
 | POST /api/projects/{projectId}/ai/generate-image-prompt | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | 唯一projectIdを取り、正しくチェックしている |
 
 ## AppSettingController (2エンドポイント、ベースパス `/api/system-settings/app-settings`)
+
+platform-service所有(issue #693)。未認証401はplatform-serviceの`SecurityConfig`が担う(#705)。
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -158,6 +174,8 @@ issue #566でログイン(`POST /api/auth/login`)・2FA(`GET/POST /api/auth/totp
 
 ## BackupController (2エンドポイント、ベースパス `/api/backup`)
 
+platform-service所有(issue #694)。未認証401はplatform-serviceの`SecurityConfig`が担う(#705)。
+
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
 | GET /api/backup/download | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `BackupService.createBackup()`内でrequireAdmin() |
@@ -196,6 +214,10 @@ issue #566でログイン(`POST /api/auth/login`)・2FA(`GET/POST /api/auth/totp
 | DELETE /api/custom-tag-templates/{id} | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `CustomTagTemplateService.delete()`内 |
 
 ## DashboardController (5エンドポイント、ベースパス `/api/dashboard`)
+
+platform-service所有(issue #695)。未認証401はplatform-serviceの`SecurityConfig`が担う(#705)。
+SSE配信の2エンドポイントもブラウザから直接ではなくWeb BFF(`web/src/app/api/dashboard/*/stream/route.ts`)が
+Authorizationヘッダーを付けて中継するため、認証必須化の影響を受けない。
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -386,6 +408,8 @@ issue #566でログイン(`POST /api/auth/login`)・2FA(`GET/POST /api/auth/totp
 
 ## SystemSettingController (3エンドポイント、ベースパス `/api/system-settings`)
 
+platform-service所有(issue #693)。未認証401はplatform-serviceの`SecurityConfig`が担う(#705)。
+
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
 | GET /api/system-settings/brave-search-api-key | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | `SystemSettingService.getBraveSearchApiKeyStatus()`にrequireAdmin()が無い(設定値そのものは返さず、設定済みか否か/設定元のみ) |
@@ -407,6 +431,11 @@ issue #566でログイン(`POST /api/auth/login`)・2FA(`GET/POST /api/auth/totp
 | POST /api/taxonomy/resolve | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | site識別子を渡せば任意サイトのカテゴリ/タグ解決が可能 |
 
 ## VscodeExtensionController (1エンドポイント、ベースパス `/api/system/vscode-extension`)
+
+platform-service所有(issue #696)。未認証401はplatform-serviceの`SecurityConfig`が担う(#705)。
+移設直後は同SecurityConfigが全経路permitAllだったためAuthorizationヘッダーなしでも200で.vsixが
+取得できていた(#705の後退)。ロールチェックが無く「ログイン済みなら誰でも取得可能」である点は
+issue #705でも変更しておらず、下記「既知のギャップ」に残る。
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
