@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
+import { gatewayUrl } from "@/lib/apiBaseUrl";
 
 // /signupはissue #564でKeycloakのregistrationAllowed=false(自己登録オフ)に伴い削除した。
 const PUBLIC_PATHS = ["/login", "/setup"];
@@ -8,9 +9,9 @@ const ADMIN_ONLY_PREFIXES = ["/users", "/admin"];
 
 async function needsInitialSetup(): Promise<boolean> {
   try {
-    const apiUrl = (process.env.LETS_BLOG_API_URL ?? "https://localhost").replace(/\/+$/, "");
-    // /api/auth/setup-status はログイン前でも到達できる公開エンドポイントのためAPIキー不要。
-    const res = await fetch(`${apiUrl}/api/auth/setup-status`, {
+    // /api/auth/setup-status はログイン前でも到達できる公開エンドポイントのため認証ヘッダー不要。
+    // ベースURLの組み立てはapiClient.tsと共通のgatewayUrl()に集約している(issue #584)。
+    const res = await fetch(gatewayUrl("/api/auth/setup-status"), {
       cache: "no-store",
     });
     if (!res.ok) {

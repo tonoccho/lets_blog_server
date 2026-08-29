@@ -42,9 +42,12 @@ services:
     container_name: lbs-web
     <<: *common-service
     environment:
-      # コンテナ間通信のためlbs-net内部でapiへ直接到達させる(自己署名証明書を経由しないため
+      # Web(BFF)からバックエンドへの全リクエストはgateway経由に一本化する(issue #584)。
+      # ルーティング/JWT検証/レート制限/相関IDはgatewayが担い、未移行パスもgatewayの
+      # fallback-uriでlegacy-api(api)へ到達する(services/gateway/src/main/resources/application.yml)。
+      # コンテナ間通信のためlbs-net内部で直接到達させる(自己署名証明書を経由しないため
       # NODE_EXTRA_CA_CERTSは不要)
-      LETS_BLOG_API_URL: http://api:8080
+      LETS_BLOG_GATEWAY_URL: http://gateway:8080
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
       # ブラウザから見える公開URL(認証コールバック等の生成に使用)
       NEXTAUTH_URL: https://localhost
@@ -56,8 +59,10 @@ services:
     # 容量の大きいTurbopackキャッシュがルートディスクを圧迫していた)
     volumes:
       - ./web:/app
+    # webの呼び先はgatewayに一本化した(issue #584)ため、起動順の依存もgatewayへ付け替える
+    # (gateway自身がapi/identity/各ドメインサービスのhealthyを待つ)。
     depends_on:
-      - api
+      - gateway
 
   api:
     build:
