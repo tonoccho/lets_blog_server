@@ -68,8 +68,11 @@ test.describe('主要シナリオ: サイト登録 → 記事公開 → 履歴�
         siteCreated = true;
 
         // 登録直後に一覧へ反映されていることを確認する(サイト登録の完了条件)。
+        // ManagedWordPressのURLはサイトキーを部分文字列として含む(https://localhost/sites/<siteKey>)ため、
+        // 部分一致(td:has-text)ではサイトキー列とURL列の両方に一致してstrict mode違反になる。
+        // サイトキー列のセルはテキストがサイトキーと完全一致するので、完全一致で1件に絞る。
         await page.goto('/sites');
-        await expect(page.locator(`td:has-text("${siteKey}")`)).toBeVisible();
+        await expect(page.getByRole('cell', { name: siteKey, exact: true })).toBeVisible();
       });
 
       await test.step('3. gateway経由で記事を公開する(publishing-service)', async () => {
@@ -98,10 +101,12 @@ test.describe('主要シナリオ: サイト登録 → 記事公開 → 履歴�
 
       await test.step('4. 投稿履歴に表示されることを確認する(content-service)', async () => {
         await page.goto('/posts');
-        const historyRow = page.locator(`tbody tr:has-text("${siteName}")`);
+        // 同じサイトに複数の投稿履歴が並ぶ可能性があるため、この実行専用でユニークなスラッグで
+        // 行を1件に特定してから、サイト名とWP投稿IDが同じ行にあることを確認する。
+        const historyRow = page.locator('tbody tr').filter({ hasText: postSlug });
         await expect(historyRow).toBeVisible({ timeout: 15000 });
+        await expect(historyRow).toContainText(siteName);
         await expect(historyRow).toContainText(String(wpPostId));
-        await expect(historyRow).toContainText(postSlug);
       });
     } finally {
       // 後片付け: 投稿 → サイトの順に削除する(サイトを先に消すと投稿の削除先が失われるため)。

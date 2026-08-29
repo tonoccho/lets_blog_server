@@ -159,6 +159,8 @@ test.describe('Site Registration and Connection Flow', () => {
     // Step 3: Verify the table still renders and the fixture site is present
     const siteTable = page.locator('table');
     await expect(siteTable).toBeVisible();
-    await expect(page.locator(`td:has-text("${fixtureSiteKey}")`)).toBeVisible();
+    // ManagedWordPressのURLはサイトキーを部分文字列として含む(https://localhost/sites/<siteKey>)ため、
+    // 部分一致ではサイトキー列とURL列の両方に一致してstrict mode違反になる。完全一致で1件に絞る。
+    await expect(page.getByRole('cell', { name: fixtureSiteKey, exact: true })).toBeVisible();
   });
 });
