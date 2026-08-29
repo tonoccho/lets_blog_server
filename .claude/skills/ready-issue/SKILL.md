@@ -1,6 +1,7 @@
 ---
 name: ready-issue
-description: Validate GitHub Issue(s) in Backlog and move them to Ready when requirements, acceptance criteria, scope, and dependencies are sufficiently defined for implementation. Supports a single named Issue or a batch sweep of all Backlog Issues by priority (e.g. "実装可能なタスクをReadyに移動して"). Use when the user asks to make Issue(s) Ready for implementation.
+description: Validate GitHub Issue(s) in Backlog and move them to Ready when requirements, acceptance criteria, scope, and dependencies are sufficiently defined for implementation. Supports a single named Issue, or selecting the single highest-priority Backlog Issue (Priority → Is blocking count → oldest Issue number) and promoting it (e.g. "実装可能なタスクをReadyに移動して"). Use when the user asks to make Issue(s) Ready for implementation.
+model: haiku
 ---
 
 # Ready Issue
@@ -25,11 +26,11 @@ If the user names a specific Issue (number, URL, title, or clear natural-languag
 
 Use **Single-Issue Mode**.
 
-If the user asks broadly to move implementable work into Ready without naming one Issue (e.g. "実装可能なタスクをReadyに移動して", "promote what's ready", "sweep the backlog"):
+Otherwise — the user asks broadly to move implementable work into Ready without naming one Issue (e.g. "実装可能なタスクをReadyに移動して", "promote what's ready", "次にやるべきタスクをReadyにして"), or gives no target at all:
 
-Use **Batch Mode**.
+Use **Select-Next Mode**.
 
-If neither applies — no Issue named and no batch request implied — ask the user which Issue to evaluate, or whether to run a batch sweep. Do not silently pick an arbitrary Backlog Issue.
+Select-Next Mode promotes **one** Issue per run — the single highest-priority Backlog Issue. It is not a batch sweep. Never pick an arbitrary Backlog Issue: the selection order in Select-Next Mode is fixed and must be followed.
 
 ---
 
@@ -72,6 +73,8 @@ If it is `In Progress`, `Review`, `QA`, or `Done`, do not change its status. Rep
 ## Step 3: Invoke project-planner
 
 Ask the `project-planner` agent to independently evaluate whether the Issue is implementation-ready, per the Readiness Criteria below.
+
+Run the agent on the Sonnet model — pass `model: "sonnet"` to the Agent tool. The skill body itself runs on Haiku (selection is a property comparison), but judging an Issue's readiness means actually reading and assessing it, so the evaluation is delegated at Sonnet.
 
 The planner must not modify production code.
 
@@ -208,7 +211,9 @@ Confirm the status change and report the new state.
 
 ---
 
-# Batch Mode
+# Select-Next Mode
+
+This mode promotes exactly **one** Issue per run: the single highest-priority Backlog Issue that passes the Readiness Criteria.
 
 ## Step 1: Collect Backlog Issues
 
@@ -216,45 +221,65 @@ List every Issue currently in `Backlog`.
 
 If there are none, report that and stop.
 
-## Step 2: Order by priority
+## Step 2: Exclude blocked Issues
 
-Order the list using:
+Drop from the candidate list any Issue that is blocked — it has an open `blocked_by` dependency, or its body documents an unresolved dependency on unfinished work.
 
-1. The `Priority` field (P0/P1/P2) if set.
-2. Blocking dependencies (an Issue that unblocks others is evaluated before the Issues it blocks).
-3. Position within an in-flight Epic/tracking Issue's sequence, if applicable.
-4. Issue age (older first), as a tiebreaker.
+Read GitHub's issue dependencies with:
 
-## Step 3: Evaluate every Issue
+```bash
+gh api repos/:owner/:repo/issues/<number>/dependencies/blocked_by
+gh api repos/:owner/:repo/issues/<number>/dependencies/blocking
+```
 
-Run Steps 1–4 of **Single-Issue Mode** for each Backlog Issue in priority order, without pausing between Issues to ask whether to continue.
+A blocked Issue can never be `READY` — its `Dependencies` check fails by definition.
 
-## Step 4: Apply moves
+If every Backlog Issue is blocked, report that and stop.
 
-For every Issue evaluated `READY`, change `Backlog → Ready`.
+## Step 3: Rank the candidates
 
-For every Issue evaluated `NOT READY`, leave it in `Backlog`.
+Sort the remaining candidates by this fixed order:
+
+1. **Priority — highest first.** `P0` > `P1` > `P2` > unset. Unset always ranks last.
+2. **Is blocking count — largest first.** The number of open Issues this Issue blocks, from `dependencies/blocking`. An Issue that unblocks more work is selected first.
+3. **Issue number — oldest first.** The lowest Issue number wins.
+
+These three keys are applied strictly in order. Do not substitute your own judgment about which Issue is more interesting or easier.
+
+## Step 4: Evaluate the top candidate
+
+Run Steps 1–4 of **Single-Issue Mode** on the highest-ranked candidate.
+
+If it evaluates `READY`, move `Backlog → Ready` and stop — one Issue per run.
+
+If it evaluates `NOT READY`, leave it in `Backlog`, record the specific blocking reason, and move on to the next candidate in rank order without pausing to ask whether to continue.
+
+Stop after at most **5** candidates have been evaluated. If none of them was `READY`, report that and stop — the Backlog needs `plan-issue` work before anything can be promoted.
 
 ## Step 5: Report
 
-Return one consolidated table instead of per-Issue reports, ordered by priority:
+## Selection Result
 
-## Backlog Sweep Result
+### Selected
 
-| Issue | Title | Priority | Decision | Reason |
-|---|---|---|---|---|
+`#123 — Example title`
 
-### Moved to Ready
+| Key | Value |
+|---|---|
+| Priority | P1 |
+| Is blocking | 3 open Issues (#130, #131, #145) |
+| Issue number | 123 |
+| Decision | READY |
 
-Count and list.
+Include the Readiness Report table for the selected Issue.
 
-### Remaining in Backlog
+### Skipped
 
-Count and list, each with the specific blocking reason from its Readiness Report.
+Every candidate evaluated ahead of the selected one, each with the specific readiness criterion that failed and what must change. Leave these in `Backlog`.
 
 ### Next Step
 
-Recommend running `work-next` (or "次のタスクを実装して") to start implementing the highest-priority Ready Issue.
+Recommend running `work-next` (or "次のタスクを実装して") to start implementing the Issue just moved to Ready.
 
 ---
 
@@ -264,6 +289,10 @@ Never modify production code.
 
 Never move an Issue directly from `Inbox` to `Ready`.
 
-Never move an Issue to `Ready` when a blocking readiness criterion fails, even under batch mode time pressure.
+Never move an Issue to `Ready` when a blocking readiness criterion fails.
 
-In Batch Mode, do not stop the sweep just because one Issue is `NOT READY` — continue evaluating the rest and report all results together.
+In Select-Next Mode, promote at most one Issue per run — it is a selection gate, not a batch sweep.
+
+Do not stop the selection just because the top candidate is `NOT READY` — continue down the ranked list (up to the 5-candidate cap) and report every skipped Issue with its reason.
+
+Run this skill on the Haiku model, and delegate the readiness evaluation to `project-planner` on the Sonnet model.

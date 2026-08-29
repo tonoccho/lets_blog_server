@@ -1,6 +1,7 @@
 ---
 name: complete-issue
 description: Finalize a GitHub Issue after the user confirms its Pull Request was merged — verify the merge, move the Issue to Done, and delete the working branch locally and on the remote. Use when the user says a PR was merged (e.g. "PRをマージしました", "merged #123").
+model: haiku
 ---
 
 # Complete Issue

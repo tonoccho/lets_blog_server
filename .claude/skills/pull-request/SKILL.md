@@ -1,6 +1,7 @@
 ---
 name: pull-request
 description: Standard workflow for reviewing branch changes and creating high-quality GitHub Pull Requests linked to the originating Issue.
+model: sonnet
 ---
 
 # Pull Request Skill

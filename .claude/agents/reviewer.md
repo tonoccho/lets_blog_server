@@ -2,7 +2,7 @@
 name: reviewer
 description: Use this agent to independently review completed or proposed code changes against the GitHub Issue, acceptance criteria, project architecture, code quality standards, and regression risks. This agent should be read-only and must not modify production code.
 tools: Read, Glob, Grep, Bash
-model: inherit
+model: sonnet
 color: purple
 ---
 

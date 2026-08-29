@@ -1,6 +1,7 @@
 ---
 name: qa-issue
 description: Validate a reviewed GitHub Issue from the user's perspective. Verify acceptance criteria, user-visible behavior, edge cases, errors, and regressions. Use this skill when an Issue is in QA.
+model: sonnet
 ---
 
 # QA Issue

@@ -1,6 +1,7 @@
 ---
 name: discover-issues
 description: Proactively review the entire repository (architecture, code quality, tech debt, missing tests, TODOs, inconsistencies) and register each distinct finding as a new GitHub Issue in Inbox. Use this when the user asks Claude to look over the whole codebase/repo and file issues from what it finds, rather than converting one specific request.
+model: opus
 ---
 
 # Discover Issues

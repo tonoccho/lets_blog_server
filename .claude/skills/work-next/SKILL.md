@@ -1,6 +1,7 @@
 ---
 name: work-next
 description: Select the highest-priority Ready GitHub Issue and drive it through branch creation, implementation, review, QA, and Pull Request creation. Use this skill when the user asks Claude Code to find the next piece of work, implement the next task, or continue the development workflow (e.g. "次のタスクを実装して").
+model: sonnet
 ---
 
 # Work Next
