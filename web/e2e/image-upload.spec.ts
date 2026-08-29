@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { loginViaKeycloak } from './helpers';
+import { E2E_ADMIN_PASSWORD, loginAsAdmin } from './helpers';
 
 /**
  * issue #645: このファイルのほぼ全テストが `if (imageCount > 0) {...}` に包まれており、
@@ -26,12 +26,10 @@ import { loginViaKeycloak } from './helpers';
  * "high quality, highly detailed, sharp focus, masterpiece")が自動的に末尾へ連結されるため、
  * fixturePromptとの完全一致ではなく前方一致で照合する。
  */
-const ADMIN_EMAIL = 'e2e-admin@letsblog.local';
-const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? '';
 
 test.describe('Image Gallery Workflow', () => {
   test.describe.configure({ mode: 'serial' });
-  test.skip(!ADMIN_PASSWORD, 'E2E_ADMIN_PASSWORDが未設定のためスキップ');
+  test.skip(!E2E_ADMIN_PASSWORD, 'E2E_ADMIN_PASSWORDが未設定のためスキップ');
 
   let fixturePrompt: string;
   let fixtureReady = false;
@@ -48,7 +46,7 @@ test.describe('Image Gallery Workflow', () => {
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     try {
-      await loginViaKeycloak(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+      await loginAsAdmin(page);
 
       // Fixture: 生成画像の土台となるプロジェクトを作成する。
       const projectName = `E2E Image Fixture Project ${unique}`;
@@ -93,7 +91,7 @@ test.describe('Image Gallery Workflow', () => {
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     try {
-      await loginViaKeycloak(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+      await loginAsAdmin(page);
       await page.goto(`/projects/${fixtureProjectId}`);
 
       page.once('dialog', (dialog) => dialog.accept());
@@ -105,7 +103,7 @@ test.describe('Image Gallery Workflow', () => {
   });
 
   test.beforeEach(async ({ page }) => {
-    await loginViaKeycloak(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+    await loginAsAdmin(page);
     await page.goto('/image-gallery');
   });
 

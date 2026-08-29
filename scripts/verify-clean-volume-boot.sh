@@ -98,58 +98,12 @@ echo "--- 3/5: クリーンな状態から起動します (docker compose up -d 
 docker compose up -d "$TARGET"
 
 echo "--- 4/5: 全サービスがhealthyになるまで待機します(最大 ${TIMEOUT_SECONDS}秒) ---"
-START_TIME="$(date +%s)"
+# 待機ロジック自体はE2E(#588)と共通のscripts/wait-for-stack-healthy.shへ切り出した。
+# ここではcomposeプロジェクト内の全コンテナ(--all)を対象にする(従来と同じ判定条件)。
 ALL_OK=0
-
-while true; do
-  NOW="$(date +%s)"
-  ELAPSED=$((NOW - START_TIME))
-
-  STATUS_JSON="$(docker compose ps --all --format json)"
-  PENDING="$(echo "$STATUS_JSON" | python3 -c '
-import sys, json
-
-pending = []
-for line in sys.stdin:
-    line = line.strip()
-    if not line:
-        continue
-    c = json.loads(line)
-    service = c.get("Service", "?")
-    state = c.get("State", "")
-    health = c.get("Health", "")
-    exit_code = c.get("ExitCode", 0)
-
-    # legacy-schema-migrateは一回限りのジョブなので、正常終了(exited, code 0)がゴール
-    if service == "legacy-schema-migrate":
-        if not (state == "exited" and exit_code == 0):
-            pending.append(f"{service} (state={state}, exitCode={exit_code})")
-        continue
-
-    if health:
-        if health != "healthy":
-            pending.append(f"{service} (health={health})")
-    else:
-        if state != "running":
-            pending.append(f"{service} (state={state})")
-
-print("\n".join(pending))
-')"
-
-  if [ -z "$PENDING" ]; then
-    ALL_OK=1
-    break
-  fi
-
-  if [ "$ELAPSED" -ge "$TIMEOUT_SECONDS" ]; then
-    echo "タイムアウト(${TIMEOUT_SECONDS}秒経過)。以下のサービスがまだhealthy/正常終了していません:"
-    echo "$PENDING" | sed 's/^/  - /'
-    break
-  fi
-
-  echo "[$ELAPSED s] 待機中: $(echo "$PENDING" | tr '\n' ', ')"
-  sleep 5
-done
+if "$SCRIPT_DIR/wait-for-stack-healthy.sh" --all --timeout "$TIMEOUT_SECONDS"; then
+  ALL_OK=1
+fi
 
 echo "--- 5/5: 最終状態 ---"
 docker compose ps

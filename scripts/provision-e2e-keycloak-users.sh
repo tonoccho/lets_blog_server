@@ -1,0 +1,143 @@
+#!/bin/bash
+# E2E(web/e2e)専用の合成アカウントをローカル開発環境へプロビジョニングする(issue #588)。
+#
+#   e2e-test@letsblog.local   role=user  (非admin側の検証用)
+#   e2e-admin@letsblog.local  role=admin (admin側の検証用。realmロール admin を付与)
+#
+# 実ユーザー(s.tonouchi@gmail.com等)には一切触れない。操作対象は上記2件の
+# e2e-*@letsblog.local に限定され、それ以外のアカウントは作成・変更・削除しない。
+#
+# ■ 安全上の制約(重要)
+# このスクリプトは「ローカル開発用のdocker composeで起動しているKeycloakコンテナ
+# (コンテナ名 lbs-keycloak)」に対してのみ動作する。任意のKeycloak URLを指定する
+# オプションは意図的に用意していない(共有/本番Keycloakへ誤って実行できないようにするため)。
+# 共有環境では実行せず、docs/e2e-testing.mdの手順に従って手動で発行すること。
+#
+# ■ 何をするか
+# 1. identity-service(gateway経由 https://localhost/api/users)へユーザー作成を要求する。
+#    identity-serviceはKeycloak側のユーザー作成とローカルDB(lets_blog.users、keycloak_sub付き)
+#    への登録を1トランザクションで行う。両方揃っていないとE2Eのadmin操作は通らない
+#    (CurrentActorServiceがJWTのsubからローカルUserを引くため)。
+# 2. Keycloak Admin CLI(コンテナ内のkcadm.sh)でパスワードを設定する(temporary=false)。
+#    identity-service経由の作成ではKeycloakの資格情報までは設定されないため、この手順が必要。
+# 3. adminアカウントにrealmロール admin を付与する(JWTのrealm_access.rolesに載る)。
+#
+# 既に存在するアカウントに対しては作成をスキップし、パスワード再設定とロール付与のみを行う(冪等)。
+#
+# ■ 使い方
+#   E2E_TEST_PASSWORD='...' E2E_ADMIN_PASSWORD='...' ./scripts/provision-e2e-keycloak-users.sh
+#
+# .env の KEYCLOAK_ADMIN_USERNAME / KEYCLOAK_ADMIN_PASSWORD をKeycloak管理者資格情報として使う。
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$SCRIPT_DIR/.."
+ENV_FILE="$REPO_ROOT/.env"
+
+KEYCLOAK_CONTAINER="lbs-keycloak"
+REALM="letsblog"
+# reverse-proxy(nginx)経由の公開URL。gateway → identity-service へルーティングされる。
+API_BASE_URL="https://localhost"
+
+TEST_EMAIL="e2e-test@letsblog.local"
+ADMIN_EMAIL="e2e-admin@letsblog.local"
+
+if [ ! -f "$ENV_FILE" ]; then
+  echo "エラー: $ENV_FILE が見つかりません(cp .env.example .env で作成してください)" >&2
+  exit 1
+fi
+
+# shellcheck disable=SC1090
+KEYCLOAK_ADMIN_USERNAME="$(grep -m1 '^KEYCLOAK_ADMIN_USERNAME=' "$ENV_FILE" | cut -d= -f2-)"
+KEYCLOAK_ADMIN_PASSWORD="$(grep -m1 '^KEYCLOAK_ADMIN_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)"
+
+if [ -z "${KEYCLOAK_ADMIN_USERNAME:-}" ] || [ -z "${KEYCLOAK_ADMIN_PASSWORD:-}" ]; then
+  echo "エラー: .env の KEYCLOAK_ADMIN_USERNAME / KEYCLOAK_ADMIN_PASSWORD が未設定です" >&2
+  exit 1
+fi
+
+if [ -z "${E2E_TEST_PASSWORD:-}" ] || [ -z "${E2E_ADMIN_PASSWORD:-}" ]; then
+  echo "エラー: 環境変数 E2E_TEST_PASSWORD と E2E_ADMIN_PASSWORD を指定してください" >&2
+  echo "  例: E2E_TEST_PASSWORD='...' E2E_ADMIN_PASSWORD='...' $0" >&2
+  exit 1
+fi
+
+if ! docker inspect "$KEYCLOAK_CONTAINER" >/dev/null 2>&1; then
+  echo "エラー: コンテナ ${KEYCLOAK_CONTAINER} が見つかりません(docker compose up -d keycloak で起動してください)" >&2
+  exit 1
+fi
+
+kcadm() {
+  docker exec "$KEYCLOAK_CONTAINER" /opt/keycloak/bin/kcadm.sh "$@"
+}
+
+echo "--- Keycloak管理CLIへログインします(コンテナ内: ${KEYCLOAK_CONTAINER}) ---"
+kcadm config credentials \
+  --server http://localhost:8080/auth \
+  --realm master \
+  --user "$KEYCLOAK_ADMIN_USERNAME" \
+  --password "$KEYCLOAK_ADMIN_PASSWORD" >/dev/null
+
+# $1: email, $2: password, $3: role(user|admin)
+provision_user() {
+  local email="$1"
+  local password="$2"
+  local role="$3"
+
+  # 安全弁: このスクリプトはE2E専用の合成アカウント以外を絶対に操作しない。
+  case "$email" in
+    e2e-*@letsblog.local) ;;
+    *)
+      echo "エラー: ${email} はE2E専用アカウント(e2e-*@letsblog.local)ではありません。中止します。" >&2
+      exit 1
+      ;;
+  esac
+
+  echo "--- ${email} (role=${role}) をプロビジョニングします ---"
+
+  local status
+  status="$(curl -sk -o /dev/null -w '%{http_code}' \
+    -X POST "${API_BASE_URL}/api/users" \
+    -H 'Content-Type: application/json' \
+    -d "{\"email\":\"${email}\",\"password\":\"${password}\",\"role\":\"${role}\"}")"
+
+  case "$status" in
+    201)
+      echo "  identity-service: 新規作成しました(Keycloak + ローカルDB)"
+      ;;
+    400|409)
+      echo "  identity-service: 既に存在するためスキップします(HTTP ${status})"
+      echo "  注意: 既存アカウントのローカルDB上のroleはこのスクリプトでは変更しません。" \
+        "role=${role}になっていない場合は/usersの管理画面から変更してください。"
+      ;;
+    *)
+      echo "エラー: identity-serviceへのユーザー作成要求が失敗しました(HTTP ${status})" >&2
+      echo "  gateway/identity/keycloakが起動しているか確認してください" \
+        "(./scripts/wait-for-stack-healthy.sh)。" >&2
+      exit 1
+      ;;
+  esac
+
+  local user_id
+  user_id="$(kcadm get users -r "$REALM" -q "email=${email}" --fields id --format csv --noquotes \
+    | tr -d '\r' | head -n1)"
+  if [ -z "$user_id" ]; then
+    echo "エラー: Keycloak上に ${email} が見つかりません" >&2
+    exit 1
+  fi
+
+  kcadm set-password -r "$REALM" --userid "$user_id" --new-password "$password" --temporary=false
+  echo "  Keycloak: パスワードを設定しました(temporary=false)"
+
+  if [ "$role" = "admin" ]; then
+    kcadm add-roles -r "$REALM" --uid "$user_id" --rolename admin
+    echo "  Keycloak: realmロール admin を付与しました"
+  fi
+}
+
+provision_user "$TEST_EMAIL" "$E2E_TEST_PASSWORD" "user"
+provision_user "$ADMIN_EMAIL" "$E2E_ADMIN_PASSWORD" "admin"
+
+echo ""
+echo "完了しました。E2E実行時は同じ値を環境変数で渡してください:"
+echo "  E2E_TEST_PASSWORD / E2E_ADMIN_PASSWORD"

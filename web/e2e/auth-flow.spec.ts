@@ -1,5 +1,11 @@
 import { test, expect } from '@playwright/test';
-import { loginViaKeycloak } from './helpers';
+import {
+  E2E_ADMIN_EMAIL,
+  E2E_ADMIN_PASSWORD,
+  E2E_TEST_EMAIL,
+  E2E_TEST_PASSWORD,
+  loginViaKeycloak,
+} from './helpers';
 
 /**
  * issue #564: NextAuthのCredentialsプロバイダを廃止しKeycloak(Authorization Code + PKCE)へ
@@ -12,17 +18,14 @@ import { loginViaKeycloak } from './helpers';
  *
  * 使用するアカウントは、実ユーザー(s.tonouchi@gmail.com)ではなくこのテスト専用に
  * 発行した合成アカウント(identity-serviceのPOST /api/usersで作成し、Keycloak Admin APIで
- * パスワードを設定済み)。
- *   - e2e-test@letsblog.local  (role: user。非admin側の検証用)
- *   - e2e-admin@letsblog.local (role: admin。realmロールadminを付与済み。admin側の検証用)
- * パスワードはCI/ローンチ環境の環境変数E2E_TEST_PASSWORD/E2E_ADMIN_PASSWORDで注入する
- * (このリポジトリの.envには含めない。値はテスト account発行時のみ知りうる)。
+ * パスワードを設定する。issue #588でscripts/provision-e2e-keycloak-users.shとして
+ * 手順を自動化した)。アカウント定義とパスワードの取り込みはhelpers.tsへ集約している。
  */
 
-const TEST_EMAIL = 'e2e-test@letsblog.local';
-const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD ?? '';
-const ADMIN_EMAIL = 'e2e-admin@letsblog.local';
-const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? '';
+const TEST_EMAIL = E2E_TEST_EMAIL;
+const TEST_PASSWORD = E2E_TEST_PASSWORD;
+const ADMIN_EMAIL = E2E_ADMIN_EMAIL;
+const ADMIN_PASSWORD = E2E_ADMIN_PASSWORD;
 
 test.describe('Keycloak経由の認証フロー(issue #564)', () => {
   test.skip(!TEST_PASSWORD || !ADMIN_PASSWORD, 'E2E_TEST_PASSWORD/E2E_ADMIN_PASSWORDが未設定のためスキップ');

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { loginViaKeycloak } from './helpers';
+import { E2E_ADMIN_PASSWORD, loginAsAdmin } from './helpers';
 
 /**
  * issue #645: このファイルの大半のテストは `if (要素が存在すれば) { assert }` という形で
@@ -18,11 +18,9 @@ import { loginViaKeycloak } from './helpers';
  * Playwrightのデフォルトフックタイムアウト(30秒)を超える。test.setTimeout()で
  * 各フック自体のタイムアウトを明示的に延長している。
  */
-const ADMIN_EMAIL = 'e2e-admin@letsblog.local';
-const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? '';
 
 test.describe('Site Registration and Connection Flow', () => {
-  test.skip(!ADMIN_PASSWORD, 'E2E_ADMIN_PASSWORDが未設定のためスキップ');
+  test.skip(!E2E_ADMIN_PASSWORD, 'E2E_ADMIN_PASSWORDが未設定のためスキップ');
 
   let fixtureSiteKey: string;
   let fixtureSiteName: string;
@@ -43,7 +41,7 @@ test.describe('Site Registration and Connection Flow', () => {
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     try {
-      await loginViaKeycloak(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+      await loginAsAdmin(page);
       await page.goto('/sites');
 
       // Fixture: 常駐WordPressコンテナ上にサブディレクトリでWordPressを自動構築する
@@ -78,7 +76,7 @@ test.describe('Site Registration and Connection Flow', () => {
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     try {
-      await loginViaKeycloak(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+      await loginAsAdmin(page);
       await page.goto('/sites');
 
       const fixtureRow = page.locator(`tr:has-text("${fixtureSiteKey}")`);
@@ -95,7 +93,7 @@ test.describe('Site Registration and Connection Flow', () => {
   });
 
   test.beforeEach(async ({ page }) => {
-    await loginViaKeycloak(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+    await loginAsAdmin(page);
     await page.goto('/sites');
   });
 
