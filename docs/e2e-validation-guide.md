@@ -209,12 +209,16 @@ curl -sk -o /dev/null -w '%{http_code}\n' \
    期待: 投稿履歴に公開した記事が表示される(content-service)
 ```
 
-API で公開する場合の例(Keycloak からトークンを取得して gateway 経由で呼ぶ):
+API で公開する場合の例(Keycloak からトークンを取得して gateway 経由で呼ぶ)。
+`admin-cli` は使わないこと — Keycloak既定で lightweight access token が有効になっており、
+発行されるトークンから `sub` と `realm_access.roles` が欠落し、identity-service の
+`/api/identity/me` が 403 になって記事公開が失敗する(issue #588)。代わりに E2E 専用の
+`letsblog-e2e` クライアント(`scripts/provision-e2e-keycloak-users.sh` で作成済み)を使う:
 
 ```bash
 TOKEN=$(curl -sk -X POST \
   https://localhost/auth/realms/letsblog/protocol/openid-connect/token \
-  -d grant_type=password -d client_id=admin-cli \
+  -d grant_type=password -d client_id=letsblog-e2e \
   -d username=e2e-admin@letsblog.local -d password="$E2E_ADMIN_PASSWORD" \
   | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
 
