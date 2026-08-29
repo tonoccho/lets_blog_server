@@ -74,7 +74,7 @@ log-writer / legacy-schema-migrate)を対象に、
 ./scripts/wait-for-stack-healthy.sh --services "gateway keycloak"
 ```
 
-### 3.2 テストユーザー(Keycloak)のプロビジョニング
+### 3.2 テストユーザー / E2E 専用クライアント(Keycloak)のプロビジョニング
 
 E2E は実ユーザー(`s.tonouchi@gmail.com` 等)を **使わない**。専用の合成アカウントを使う。
 
@@ -99,12 +99,17 @@ E2E_ADMIN_PASSWORD='<任意の強いパスワード>' \
    (`CurrentActorService` が JWT の `sub` からローカル User を引くため)。
 2. Keycloak Admin CLI でパスワードを設定する(`temporary=false`)。
 3. admin アカウントに realm ロール `admin` を付与する(JWT の `realm_access.roles` に載る)。
+4. E2E 専用クライアント `letsblog-e2e` を作成する(public / direct access grant 可)。
+   `main-scenario.spec.ts` が API を直接叩くときのトークン発行に使う(§7 参照)。
+   `keycloak/realm-export.json` にも同じ定義があるが、Keycloak は realm export を
+   **初回起動時にしか読まない** ため、既に起動済みの環境ではこのスクリプトで作る必要がある。
+   既存の `admin-cli` などの実運用クライアントには一切触れない。
 
 > **共有 / 本番 Keycloak では実行しないこと。**
 > スクリプトはコンテナ名 `lbs-keycloak` 固定で、任意の URL を指定するオプションを持たない。
 > 操作対象も `e2e-*@letsblog.local` に限定されており、それ以外のメールアドレスを渡すと中止する。
 > 共有環境では同等の手順(identity-service でユーザー作成 → Admin Console でパスワード設定 →
-> realm ロール `admin` 付与)を管理者が手動で行う。
+> realm ロール `admin` 付与 → `letsblog-e2e` クライアント作成)を管理者が手動で行う。
 
 パスワードはリポジトリの `.env` には保存せず、実行時に環境変数で渡す。
 
@@ -212,9 +217,16 @@ globalTeardown がこのスクリプトを `--yes` 付きで自動実行する
 
 記事公開は **Web UI に存在しない機能**(通常は VSCode 拡張が gateway 経由で呼ぶ)なので、
 その部分だけ API を直接呼ぶ。トークンはブラウザと同じ Keycloak ユーザーで、
-realm 既定の `admin-cli` クライアント(public / direct access grant 可)から取得する
-(`helpers.ts` の `fetchAccessToken`)。ローカル開発スタック専用の手段であり、
-アプリケーションの認証フローには影響しない。
+E2E 専用クライアント `letsblog-e2e`(public / direct access grant 可)から
+Resource Owner Password Credentials グラントで取得する(`helpers.ts` の `fetchAccessToken`)。
+ローカル開発スタック専用の手段であり、アプリケーションの認証フローには影響しない。
+
+> realm 既定の `admin-cli` は使わない。Keycloak の既定で
+> `client.use.lightweight.access.token.enabled=true` が付いており、発行される
+> アクセストークンから `sub` と `realm_access.roles` が落ちる。その状態では
+> identity-service の `/api/identity/me` が 403 になり、publishing-service が 502 を返して
+> 記事公開が失敗する。`letsblog-e2e` はこの属性を持たないため、ブラウザ経由の
+> Authorization Code フローと同じ内容のトークンが得られる。
 
 WordPress の自動構築に数分かかるため、このテストのタイムアウトは 600 秒に設定している。
 

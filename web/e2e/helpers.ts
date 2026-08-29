@@ -54,14 +54,27 @@ export function loginAsUser(page: Page): Promise<void> {
 }
 
 /**
+ * E2E専用のKeycloakクライアント(issue #588)。keycloak/realm-export.json と
+ * scripts/provision-e2e-keycloak-users.sh の定義と一致させること。
+ *
+ * realm既定のadmin-cliを使わない理由: admin-cliはKeycloakの既定で
+ * client.use.lightweight.access.token.enabled=true になっており、発行される
+ * アクセストークンから sub と realm_access.roles が落ちる。その状態のトークンでは
+ * identity-serviceの /api/identity/me が403になり、下流サービスの認可が通らない。
+ */
+const E2E_CLIENT_ID = 'letsblog-e2e';
+
+/**
  * ブラウザを介さずAPIを直接叩くテスト(記事公開など、Web UIに機能が存在せずVSCode拡張が
  * gateway経由で行っている操作)のためにKeycloakからアクセストークンを取得する(issue #588)。
  *
  * letsblog-web/letsblog-vscodeクライアントはいずれもdirect access grantを許可していない
- * (Authorization Code + PKCE専用)ため、realm既定のadmin-cliクライアント
- * (public、directAccessGrantsEnabled=true)でResource Owner Password Credentialsグラントを使う。
- * gatewayはaudience/azpを検証せず、下流サービスはrealm_access.rolesを見る(KeycloakRealmRoleConverter)
- * ため、このトークンでブラウザ経由と同じ権限の呼び出しができる。
+ * (Authorization Code + PKCE専用)ため、E2E専用のletsblog-e2eクライアント
+ * (public、directAccessGrantsEnabled=true、lightweight access token無効)で
+ * Resource Owner Password Credentialsグラントを使う。
+ * gatewayはaudience/azpを検証せず、下流サービスはsubとrealm_access.rolesを見る
+ * (CurrentActorService / KeycloakRealmRoleConverter)ため、このトークンで
+ * ブラウザ経由と同じ権限の呼び出しができる。
  * ローカル開発スタック(https://localhost)専用の手段であり、本番の認証フローには影響しない。
  */
 export async function fetchAccessToken(
@@ -72,7 +85,7 @@ export async function fetchAccessToken(
   const response = await request.post('/auth/realms/letsblog/protocol/openid-connect/token', {
     form: {
       grant_type: 'password',
-      client_id: 'admin-cli',
+      client_id: E2E_CLIENT_ID,
       username: email,
       password,
     },

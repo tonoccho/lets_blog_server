@@ -21,8 +21,14 @@
 # 2. Keycloak Admin CLI(コンテナ内のkcadm.sh)でパスワードを設定する(temporary=false)。
 #    identity-service経由の作成ではKeycloakの資格情報までは設定されないため、この手順が必要。
 # 3. adminアカウントにrealmロール admin を付与する(JWTのrealm_access.rolesに載る)。
+# 4. E2E専用のKeycloakクライアント letsblog-e2e を作成する(issue #588)。
+#    web/e2eがブラウザを介さずAPIを直接叩く際のトークン発行に使う。realm既定のadmin-cliは
+#    lightweight access tokenが有効でsub/realm_access.rolesが載らず、下流サービスの認可が
+#    通らないため、E2E専用クライアントを別に用意する。keycloak/realm-export.jsonにも
+#    同じ定義があるが、Keycloakはexportを初回起動時にしか読まないため既存環境向けにここでも作る。
 #
-# 既に存在するアカウントに対しては作成をスキップし、パスワード再設定とロール付与のみを行う(冪等)。
+# 既に存在するアカウント/クライアントに対しては作成をスキップし、
+# パスワード再設定・ロール付与・設定の整合だけを行う(冪等)。
 #
 # ■ 使い方
 #   E2E_TEST_PASSWORD='...' E2E_ADMIN_PASSWORD='...' ./scripts/provision-e2e-keycloak-users.sh
@@ -41,6 +47,8 @@ API_BASE_URL="https://localhost"
 
 TEST_EMAIL="e2e-test@letsblog.local"
 ADMIN_EMAIL="e2e-admin@letsblog.local"
+# web/e2e の fetchAccessToken() が使うクライアント(helpers.ts と一致させること)。
+E2E_CLIENT_ID="letsblog-e2e"
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "エラー: $ENV_FILE が見つかりません(cp .env.example .env で作成してください)" >&2
@@ -69,6 +77,11 @@ fi
 
 kcadm() {
   docker exec "$KEYCLOAK_CONTAINER" /opt/keycloak/bin/kcadm.sh "$@"
+}
+
+# kcadm の `-f -`(標準入力からJSONを読む)を使う呼び出し用。docker exec に -i が必要。
+kcadm_stdin() {
+  docker exec -i "$KEYCLOAK_CONTAINER" /opt/keycloak/bin/kcadm.sh "$@"
 }
 
 echo "--- Keycloak管理CLIへログインします(コンテナ内: ${KEYCLOAK_CONTAINER}) ---"
@@ -135,8 +148,48 @@ provision_user() {
   fi
 }
 
+# E2E専用クライアントを作成/更新する。既存のadmin-cli等の実運用クライアントには一切触れない。
+provision_e2e_client() {
+  echo "--- Keycloakクライアント ${E2E_CLIENT_ID} をプロビジョニングします ---"
+
+  # publicClient + directAccessGrants のみ。standardFlowは無効(リダイレクト先を持たない)。
+  # lightweight access token は有効にしない(subとrealm_access.rolesを落としてしまうため)。
+  local payload
+  payload="$(cat <<JSON
+{
+  "clientId": "${E2E_CLIENT_ID}",
+  "name": "Let's Blog E2E (local development only)",
+  "enabled": true,
+  "protocol": "openid-connect",
+  "publicClient": true,
+  "standardFlowEnabled": false,
+  "implicitFlowEnabled": false,
+  "directAccessGrantsEnabled": true,
+  "serviceAccountsEnabled": false,
+  "fullScopeAllowed": true,
+  "redirectUris": [],
+  "webOrigins": [],
+  "attributes": { "realm_client": "false" }
+}
+JSON
+)"
+
+  local client_uuid
+  client_uuid="$(kcadm get clients -r "$REALM" -q "clientId=${E2E_CLIENT_ID}" \
+    --fields id --format csv --noquotes | tr -d '\r' | head -n1)"
+
+  if [ -z "$client_uuid" ]; then
+    printf '%s' "$payload" | kcadm_stdin create clients -r "$REALM" -f - >/dev/null
+    echo "  作成しました(public / direct access grant 可 / lightweight access token 無効)"
+  else
+    printf '%s' "$payload" | kcadm_stdin update "clients/${client_uuid}" -r "$REALM" -f - >/dev/null
+    echo "  既に存在するため設定を上書きしました(冪等)"
+  fi
+}
+
 provision_user "$TEST_EMAIL" "$E2E_TEST_PASSWORD" "user"
 provision_user "$ADMIN_EMAIL" "$E2E_ADMIN_PASSWORD" "admin"
+provision_e2e_client
 
 echo ""
 echo "完了しました。E2E実行時は同じ値を環境変数で渡してください:"
