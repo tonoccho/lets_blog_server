@@ -21,6 +21,11 @@ import java.util.stream.Collectors;
  * [toc]/[blogcard]/[amazon] 組み込みタグのデザイン(プリセット+背景色/テキスト色/アクセントカラー)を
  * プロジェクト単位で管理する。保存されていないプロジェクト/タグ種別はDesignPreset.DEFAULTの色を返す
  * (「デフォルト状態でも使える標準設定」の要件を、保存なしのフォールバックとして満たす)。
+ *
+ * <p>プロジェクトに紐付いていないサイトへの公開ではprojectIdがnullで解決要求が来る(issue #760)。
+ * tag_design_settings.project_idはNOT NULL + projects(id)へのFKであり「project_id IS NULLの
+ * グローバル既定行」は存在し得ないため、projectId=nullは検索せずにそのままDesignPreset.DEFAULT
+ * (=グローバル既定)へフォールバックする。
  */
 @Service
 public class TagDesignSettingService {
@@ -31,9 +36,16 @@ public class TagDesignSettingService {
         this.repository = repository;
     }
 
-    /** レンダリング時(BlogCardTagRenderService等)に使う、確定済みの3色を返す。 */
+    /**
+     * レンダリング時(BlogCardTagRenderService等)に使う、確定済みの3色を返す。
+     * projectIdがnull(プロジェクト未紐付けサイトへの公開、issue #760)の場合はグローバル既定
+     * (= プロジェクト個別の設定が無い状態)として扱い、DesignPreset.DEFAULTの色を返す。
+     */
     @Transactional(readOnly = true)
     public TagDesignColors resolveColors(Long projectId, EmbedTagType tagType) {
+        if (projectId == null) {
+            return presetColors(DesignPreset.DEFAULT);
+        }
         return repository.findByProjectIdAndTagType(projectId, tagType)
                 .map(s -> new TagDesignColors(s.getBackgroundColor(), s.getTextColor(), s.getAccentColor(), s.getCustomCss()))
                 .orElseGet(() -> presetColors(DesignPreset.DEFAULT));
@@ -42,9 +54,14 @@ public class TagDesignSettingService {
     /**
      * レンダリング時に使うHTMLテンプレートを返す。未設定(保存なし、または保存済みだが空欄)の場合はnullを返し、
      * 呼び出し側は従来どおりのハードコードされたHTML構造にフォールバックする。
+     * projectIdがnull(プロジェクト未紐付けサイト、issue #760)の場合もグローバル既定として
+     * 「カスタムテンプレート無し」= nullを返す。
      */
     @Transactional(readOnly = true)
     public String resolveHtmlTemplate(Long projectId, EmbedTagType tagType) {
+        if (projectId == null) {
+            return null;
+        }
         return repository.findByProjectIdAndTagType(projectId, tagType)
                 .map(TagDesignSetting::getHtmlTemplate)
                 .filter(template -> template != null && !template.isBlank())

@@ -83,9 +83,16 @@ public class ContentBridgeController {
      * [toc]/[blogcard]/[amazon]組み込みタグのデザイン(色+カスタムHTMLテンプレート)。
      * tag_design_settingsドメインの所有権はproject-serviceへ移設済み(issue #577 stage1)のため、
      * {@link ProjectServiceClient}経由でproject-serviceへ問い合わせる(issue #577 stage3)。
+     *
+     * <p>projectIdは必須ではない(issue #760)。プロジェクトに紐付いていないサイトへの公開では
+     * content-service(LegacyApiBridgeClient#resolveTagDesign)がprojectId=nullで呼び出し、URIテンプレート
+     * 展開の結果{@code ?projectId=}(空文字)として届く。required=trueのままだとSpringが空文字をLongへ
+     * 変換した結果のnullを「パラメータ未指定」と判定して400になるため、明示的にrequired=falseとして
+     * nullをそのままproject-serviceへ中継し、あちら側でグローバル既定へフォールバックさせる。
      */
     @GetMapping("/api/internal/content/tag-design/{tagType}")
-    public TagDesignResponse tagDesign(@PathVariable String tagType, @RequestParam Long projectId) {
+    public TagDesignResponse tagDesign(
+            @PathVariable String tagType, @RequestParam(required = false) Long projectId) {
         return TagDesignResponse.from(projectServiceClient.getTagDesign(projectId, tagType));
     }
 

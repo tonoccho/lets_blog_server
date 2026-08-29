@@ -197,6 +197,24 @@ class TagDesignSettingServiceTest {
     }
 
     @Test
+    void resolveColors_projectIdがnullならグローバル既定の色を返す() {
+        TagDesignColors colors = service.resolveColors(null, EmbedTagType.TOC);
+
+        assertEquals(DesignPreset.DEFAULT.backgroundColor(), colors.backgroundColor());
+        assertEquals(DesignPreset.DEFAULT.textColor(), colors.textColor());
+        assertEquals(DesignPreset.DEFAULT.accentColor(), colors.accentColor());
+        assertEquals(null, colors.customCss());
+        org.mockito.Mockito.verifyNoInteractions(repository);
+    }
+
+    @Test
+    void resolveHtmlTemplate_projectIdがnullならグローバル既定としてnullを返す() {
+        assertEquals(null, service.resolveHtmlTemplate(null, EmbedTagType.BLOGCARD));
+
+        org.mockito.Mockito.verifyNoInteractions(repository);
+    }
+
+    @Test
     void save_不明なプリセットIDはIllegalArgumentExceptionを投げる() {
         SaveTagDesignSettingRequest request =
                 new SaveTagDesignSettingRequest("unknown-preset", "#111111", "#eeeeee", "#60a5fa", null, null);
