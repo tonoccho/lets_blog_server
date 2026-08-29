@@ -44,7 +44,8 @@ Keycloak クライアント `letsblog-web` の redirect_uri が
 | `image-upload.spec.ts` | 画像ギャラリー(ComfyUI 生成フィクスチャ) | admin |
 | `accessibility.spec.ts` | アクセシビリティ(アプリ画面 + Keycloak ログイン画面) | user |
 | `custom-tag-generation.spec.ts` | カスタムタグ生成(プロジェクト詳細タブ) | - |
-| `performance.spec.ts` / `security.spec.ts` | 旧 `/custom-tags` 単独ページ前提の古いテスト(下記「既知の課題」参照) | - |
+| `performance.spec.ts` | カスタムタグ検証 API の応答時間とタグ画面のページロード性能 | admin |
+| `security.spec.ts` | XSS/CSS インジェクション検出、テンプレート削除の認可、CSRF・SQL インジェクション対策 | 両方 |
 
 ---
 
@@ -346,11 +347,6 @@ Keycloak にはユーザーがいるが、ローカル DB(`lets_blog.users`)に 
 
 ## 12. 既知の課題
 
-- `performance.spec.ts` / `security.spec.ts` は、独立ページとして存在しない `/custom-tags` と
-  `/api/custom-tags/validate` を前提にした古いテストで、現在の UI 構成
-  (カスタムタグ生成はプロジェクト詳細のタブ)に追随していない。
-  ログイン処理も持たないため、未ログインのまま Keycloak へリダイレクトされる。
-  マルチサービス構成への追随(issue #588)とは別に、書き直しが必要。
 - CI(GitHub Actions)は現在無効化されているため、E2E はローカル実行が前提。
 
 ---
