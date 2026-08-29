@@ -4,8 +4,6 @@ import com.letsblog.api.ai.AiServiceException;
 import com.letsblog.api.client.AnalyticsServiceException;
 import com.letsblog.api.client.PublishingServiceException;
 import com.letsblog.api.cms.CmsApiException;
-import com.letsblog.api.cms.agent.AgentOperationException;
-import com.letsblog.api.cms.ssh.SshOperationException;
 import com.letsblog.api.service.EmailAlreadyExistsException;
 import com.letsblog.api.service.EmailSendException;
 import com.letsblog.api.service.ForbiddenException;
@@ -132,15 +130,9 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 
-    @ExceptionHandler(SshOperationException.class)
-    public ResponseEntity<ErrorResponse> handleSshOperationException(SshOperationException e) {
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
-    }
-
-    @ExceptionHandler(AgentOperationException.class)
-    public ResponseEntity<ErrorResponse> handleAgentOperationException(AgentOperationException e) {
-        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
-    }
+    // SshOperationException/AgentOperationExceptionのハンドリングは、対応する例外クラス
+    // (com.letsblog.api.cms.ssh/agent)がpublishing-serviceへ完全移管された(issue #707)のに伴い
+    // 削除した(issue #715。com.letsblog.publishing.config.GlobalExceptionHandler参照)。
 
     // BackupExceptionのハンドリングはBackupServiceと共にplatform-serviceへ移設した
     // (issue #694、C10-2。com.letsblog.platform.config.GlobalExceptionHandler参照)。
