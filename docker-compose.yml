@@ -118,6 +118,11 @@ services:
       # システム全体のグローバル設定(system_settings: Brave Search APIキー・実効LLM接続設定・画像生成
       # 接続設定)の所有権をplatform-serviceへ委譲する(issue #693、PlatformServiceClient参照)。
       PLATFORM_SERVICE_URI: http://platform:8080
+      # Project/Site本体・tag_design_settingsの所有権がproject-serviceへ移った(issue #577)ことに伴う
+      # 内部ブリッジ(ProjectServiceClient参照)。未設定だとapplication.ymlの既定値
+      # (http://localhost:8080)が効いてlegacy-apiが自分自身を呼び、tag-design解決やサイト一覧など
+      # 全てのproject-service向けブリッジ呼び出しが404になる(issue #764)。
+      PROJECT_SERVICE_URI: http://project:8080
       # 投稿の公開・削除パイプライン(cms/*・PostPublishService・PostDeleteService)の所有権が
       # publishing-serviceへ移った(issue #707)ことに伴う内部ブリッジ(PublishingServiceClient)。
       # ProjectUserSyncService#provisionUserOnSiteが著者(WordPressユーザー)の作成/更新をこの
