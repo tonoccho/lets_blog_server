@@ -68,9 +68,8 @@ public class ContentServiceClient {
      */
     public String renderPreImage(String markdown, Long projectId, boolean productionSite) {
         try {
-            Map<String, Object> body = Map.of(
-                    "markdown", markdown == null ? "" : markdown, "projectId", projectId,
-                    "productionSite", productionSite);
+            PreImageRenderRequest body =
+                    new PreImageRenderRequest(markdown == null ? "" : markdown, projectId, productionSite);
             MarkdownResponse result = authorized(renderRestClient.post().uri("/api/internal/content/render/pre-image"))
                     .body(body)
                     .retrieve()
@@ -86,6 +85,14 @@ public class ContentServiceClient {
         }
     }
 
+    /**
+     * content-service側の{@code PreImageRenderRequest}に対応するリクエストボディ。
+     * プロジェクト未紐付けサイトでは{@code projectId}がnullになりうるため(issue #759)、
+     * null値を許容しない{@code Map.of}ではなくrecordで表現する。
+     */
+    public record PreImageRenderRequest(String markdown, Long projectId, boolean productionSite) {
+    }
+
     public record MarkdownResponse(String markdown) {
     }
 
@@ -95,7 +102,7 @@ public class ContentServiceClient {
      */
     public String finalizeHtml(String markdown, Long projectId) {
         try {
-            Map<String, Object> body = Map.of("markdown", markdown == null ? "" : markdown, "projectId", projectId);
+            FinalizeHtmlRequest body = new FinalizeHtmlRequest(markdown == null ? "" : markdown, projectId);
             HtmlResponse result = authorized(renderRestClient.post().uri("/api/internal/content/render/finalize-html"))
                     .body(body)
                     .retrieve()
@@ -107,6 +114,13 @@ public class ContentServiceClient {
         } catch (RestClientException e) {
             throw new IllegalStateException("content-serviceのHTML変換呼び出しに失敗しました: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * content-service側の{@code FinalizeHtmlRequest}に対応するリクエストボディ。
+     * {@link PreImageRenderRequest}と同じくnullの{@code projectId}を許容する(issue #759)。
+     */
+    public record FinalizeHtmlRequest(String markdown, Long projectId) {
     }
 
     public record HtmlResponse(String html) {
