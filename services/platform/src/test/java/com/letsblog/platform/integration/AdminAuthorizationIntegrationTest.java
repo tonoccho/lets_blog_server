@@ -50,10 +50,11 @@ class AdminAuthorizationIntegrationTest {
     private IdentityClient identityClient;
 
     @Test
-    @DisplayName("Authorizationヘッダーなしは非adminとみなされ403")
-    void authorizationヘッダーなしは403() throws Exception {
+    @DisplayName("Authorizationヘッダーなしは401(issue #705でSecurityConfigの認証ゲートを復元したため、"
+            + "コントローラ/サービス層のrequireAdmin()による403判定より前に弾かれる)")
+    void authorizationヘッダーなしは401() throws Exception {
         mockMvc.perform(put(SET_KEY_PATH).contentType(MediaType.APPLICATION_JSON).content(REQUEST_BODY))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
@@ -95,10 +96,11 @@ class AdminAuthorizationIntegrationTest {
     }
 
     @Test
-    @DisplayName("GET(状態取得)はAuthorizationヘッダーなしなら403(issue #693のレビュー指摘: "
-            + "SecurityConfigが全経路permitAllのため未ログインで到達できてしまう後退を防ぐ)")
-    void get_authorizationヘッダーなしは403() throws Exception {
-        mockMvc.perform(get(SET_KEY_PATH)).andExpect(status().isForbidden());
+    @DisplayName("GET(状態取得)はAuthorizationヘッダーなしなら401(issue #693のレビュー指摘で"
+            + "サービス層のrequireAuthenticated()による403として担保していたが、issue #705で"
+            + "SecurityConfig自体の認証ゲートを復元したためコントローラ到達前に401となる)")
+    void get_authorizationヘッダーなしは401() throws Exception {
+        mockMvc.perform(get(SET_KEY_PATH)).andExpect(status().isUnauthorized());
     }
 
     @Test
