@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as api from './apiClient';
-import { Actor, getActor, getProjectId, getServerUrl, requireAccessToken, setProjectId } from './config';
+import { Actor, getActor, getProjectId, requireAccessToken, setProjectId } from './config';
 import { buildArticleFrontMatter } from './frontMatter';
 import { createArticleScaffold, openArticle, requireWorkspaceRoot } from './articleScaffold';
 import { showSingletonPanel, WebviewPanelBase } from './webviewPanelBase';
@@ -60,7 +60,7 @@ export class ArticleCreationPanel extends WebviewPanelBase<
   private async _handleLoadProjects(): Promise<void> {
     const apiKey = await requireAccessToken(this.context);
     const actor = await getActor(this.context);
-    const projects = await api.listProjects(getServerUrl(), apiKey, actor);
+    const projects = await api.listProjects(apiKey, actor);
     this.postMessage('projectList', {
       projects,
       // 直前に選択していたプロジェクトを初期選択にする。
@@ -75,7 +75,7 @@ export class ArticleCreationPanel extends WebviewPanelBase<
   private async _handleLoadPostStatuses(): Promise<void> {
     try {
       const apiKey = await requireAccessToken(this.context);
-      const statuses = await api.getPostStatuses(getServerUrl(), apiKey);
+      const statuses = await api.getPostStatuses(apiKey);
       this.postMessage('postStatusList', { statuses });
     } catch {
       this.postMessage('postStatusList', {
@@ -101,7 +101,6 @@ export class ArticleCreationPanel extends WebviewPanelBase<
     }
     try {
       const categories = await api.listExistingCategoriesWithParents(
-        getServerUrl(),
         apiKey,
         actor,
         message.projectId
@@ -120,7 +119,6 @@ export class ArticleCreationPanel extends WebviewPanelBase<
     const actor = await this._requireActor();
     const response = await this.runCancellable((signal) =>
       api.postPlanChat(
-        getServerUrl(),
         apiKey,
         actor,
         message.projectId,
@@ -138,7 +136,7 @@ export class ArticleCreationPanel extends WebviewPanelBase<
     const apiKey = await requireAccessToken(this.context);
     const actor = await this._requireActor();
     const suggestion = await this.runCancellable((signal) =>
-      api.suggestMetadata(getServerUrl(), apiKey, actor, message.projectId, message.history, signal)
+      api.suggestMetadata(apiKey, actor, message.projectId, message.history, signal)
     );
     this.postMessage('metadataSuggestion', suggestion);
   }
@@ -150,7 +148,7 @@ export class ArticleCreationPanel extends WebviewPanelBase<
     const apiKey = await requireAccessToken(this.context);
     const actor = await this._requireActor();
     const suggestion = await this.runCancellable((signal) =>
-      api.suggestArticleStructure(getServerUrl(), apiKey, actor, message.projectId, message.history, signal)
+      api.suggestArticleStructure(apiKey, actor, message.projectId, message.history, signal)
     );
     this.postMessage('structureSuggestion', suggestion);
   }

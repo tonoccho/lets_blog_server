@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as api from './apiClient';
-import { getActor, getServerUrl, requireAccessToken } from './config';
+import { getActor, requireAccessToken } from './config';
 import { showSingletonPanel, WebviewPanelBase } from './webviewPanelBase';
 import { ImageGalleryInboundMessage, ImageGalleryOutboundCommand } from './webviewMessages';
 
@@ -77,7 +77,7 @@ export class ImageGalleryPanel extends WebviewPanelBase<
 
   private async _handleLoadImages(): Promise<void> {
     const { apiKey, actor } = await this._requireCredentials();
-    const images = await api.listGeneratedImages(getServerUrl(), apiKey, actor, this._projectId);
+    const images = await api.listGeneratedImages(apiKey, actor, this._projectId);
     this.postMessage('imageList', { images, thumbnailsPerPage: THUMBNAILS_PER_PAGE });
   }
 
@@ -95,7 +95,7 @@ export class ImageGalleryPanel extends WebviewPanelBase<
     const thumbnails = await this.runCancellable(async () => {
       const loaded: { id: number; dataUri: string }[] = [];
       for (const id of ids) {
-        const buffer = await api.downloadGeneratedImage(getServerUrl(), apiKey, actor, id);
+        const buffer = await api.downloadGeneratedImage(apiKey, actor, id);
         loaded.push({ id, dataUri: `data:image/png;base64,${buffer.toString('base64')}` });
       }
       return loaded;
@@ -155,7 +155,7 @@ export class ImageGalleryPanel extends WebviewPanelBase<
     }
 
     const { apiKey, actor } = await this._requireCredentials();
-    await api.deleteGeneratedImage(getServerUrl(), apiKey, actor, message.imageId);
+    await api.deleteGeneratedImage(apiKey, actor, message.imageId);
     // 一覧のキャッシュに削除済みの画像が残らないようにする。
     api.invalidateProjectCache(this._projectId);
 
@@ -171,7 +171,7 @@ export class ImageGalleryPanel extends WebviewPanelBase<
     message: Extract<ImageGalleryInboundMessage, { command: 'regenerateWithSettings' }>
   ): Promise<void> {
     const { apiKey, actor } = await this._requireCredentials();
-    const detail = await api.getGeneratedImageDetail(getServerUrl(), apiKey, actor, message.imageId);
+    const detail = await api.getGeneratedImageDetail(apiKey, actor, message.imageId);
 
     const { ImageGenPanel } = await import('./imageGenPanel');
     ImageGenPanel.createOrShow(this.context, this._editor, this._baseDir, this._projectId, detail);
@@ -180,7 +180,7 @@ export class ImageGalleryPanel extends WebviewPanelBase<
   /** サーバーから画像を取得し、{baseDir}/assets 配下へ保存してファイル名を返す。 */
   private async _saveToAssets(imageId: number): Promise<string> {
     const { apiKey, actor } = await this._requireCredentials();
-    const buffer = await api.downloadGeneratedImage(getServerUrl(), apiKey, actor, imageId);
+    const buffer = await api.downloadGeneratedImage(apiKey, actor, imageId);
 
     const assetsDir = path.join(this._baseDir, 'assets');
     fs.mkdirSync(assetsDir, { recursive: true });

@@ -204,7 +204,7 @@ async function warmContentCache(context: vscode.ExtensionContext, url: string): 
   try {
     const apiKey = await requireAccessToken(context);
     const actor = await getActor(context);
-    await api.resolveContentCache(getServerUrl(), apiKey, actor, url);
+    await api.resolveContentCache(apiKey, actor, url);
   } catch (err) {
     logger.debug(`貼り付け時のキャッシュ先行取得に失敗しました(プレビュー/投稿時に再取得されます): ${messageOf(err)}`);
   }
@@ -253,7 +253,7 @@ async function commandPasteAsLink(context: vscode.ExtensionContext): Promise<voi
     const actor = await getActor(context);
     const result = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'URLの情報を取得しています…' },
-      () => api.resolveContentCache(getServerUrl(), apiKey, actor, url.toString())
+      () => api.resolveContentCache(apiKey, actor, url.toString())
     );
     const title = result.type === 'AMAZON' ? result.data.productName : result.data.title;
     const siteName = result.type === 'AMAZON' ? undefined : result.data.siteName;
@@ -269,12 +269,11 @@ async function commandPasteAsLink(context: vscode.ExtensionContext): Promise<voi
  * 付加情報にすぎないため、取得に失敗してもログイン自体は失敗させず、undefinedを返す(issue #472)。
  */
 async function resolveRoleDisplayName(
-  serverUrl: string,
   accessToken: string,
   roleName: string
 ): Promise<string | undefined> {
   try {
-    const roles = await api.getRoles(serverUrl, accessToken);
+    const roles = await api.getRoles(accessToken);
     return roles.find((r) => r.roleName === roleName)?.displayName;
   } catch {
     return undefined;
@@ -335,7 +334,7 @@ async function commandLogin(context: vscode.ExtensionContext): Promise<void> {
     const roleName = extractPrimaryRoleName(claims);
     await setActor(context, { email, role: roleName ?? '' });
 
-    const roleLabel = roleName ? await resolveRoleDisplayName(serverUrl, tokens.accessToken, roleName) : undefined;
+    const roleLabel = roleName ? await resolveRoleDisplayName(tokens.accessToken, roleName) : undefined;
     vscode.window.showInformationMessage(
       `'${email}'${roleLabel ? ` (${roleLabel})` : ''} としてログインしました。`
     );
@@ -434,7 +433,7 @@ async function commandSelectSite(context: vscode.ExtensionContext): Promise<void
 
   try {
     const apiKey = await requireAccessToken(context);
-    const sites = await api.listSites(getServerUrl(), apiKey);
+    const sites = await api.listSites(apiKey);
     if (sites.length === 0) {
       vscode.window.showWarningMessage('登録済みのサイトがありません。先にWeb管理画面またはAPIでサイトを登録してください。');
       return;
@@ -466,7 +465,6 @@ async function publishToSite(
   forceStatus?: string
 ): Promise<void> {
   const apiKey = await requireAccessToken(context);
-  const serverUrl = getServerUrl();
   const article = parseArticle(editor.document.getText());
 
   if (!article.data.title) {
@@ -513,7 +511,7 @@ async function publishToSite(
   // 投稿の識別はslugを用いてサーバー側DB(postsテーブル)で管理する。
   let existingPostId: string | undefined;
   if (article.data.slug) {
-    const found = await api.lookupExistingPost(serverUrl, apiKey, siteKey, article.data.slug, actor);
+    const found = await api.lookupExistingPost(apiKey, siteKey, article.data.slug, actor);
     existingPostId = found?.wpPostId;
   }
 
@@ -528,7 +526,6 @@ async function publishToSite(
             : '本文を送信しています…',
       });
       return api.publishPost(
-        serverUrl,
         apiKey,
         {
           site: siteKey,
@@ -612,7 +609,7 @@ async function commandPublish(context: vscode.ExtensionContext): Promise<void> {
 
     const apiKey = await requireAccessToken(context);
     const actor = await getActor(context);
-    const project = await api.getProject(getServerUrl(), apiKey, actor, projectId);
+    const project = await api.getProject(apiKey, actor, projectId);
 
     const options = buildEnvironmentOptions(project);
     if (options.length === 0) {
@@ -647,10 +644,10 @@ async function commandDeletePost(context: vscode.ExtensionContext): Promise<void
 
     let candidates: { siteKey: string; wpPostId: string }[];
     if (article.data.slug) {
-      const sites = await api.listSites(getServerUrl(), apiKey, actor);
+      const sites = await api.listSites(apiKey, actor);
       const found = await Promise.all(
         sites.map(async (s) => {
-          const result = await api.lookupExistingPost(getServerUrl(), apiKey, s.siteKey, article.data.slug as string, actor);
+          const result = await api.lookupExistingPost(apiKey, s.siteKey, article.data.slug as string, actor);
           return result ? { siteKey: s.siteKey, wpPostId: result.wpPostId } : undefined;
         })
       );
@@ -685,7 +682,7 @@ async function commandDeletePost(context: vscode.ExtensionContext): Promise<void
 
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: '投稿を削除しています…' },
-      () => api.deletePost(getServerUrl(), apiKey, actor, target.siteKey, target.wpPostId)
+      () => api.deletePost(apiKey, actor, target.siteKey, target.wpPostId)
     );
 
     vscode.window.showInformationMessage(`サイト '${target.siteKey}' の投稿を削除しました。`);
@@ -755,7 +752,7 @@ async function commandAskAi(context: vscode.ExtensionContext): Promise<void> {
 
     const result = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'AIに問い合わせています…' },
-      () => api.askAi(getServerUrl(), apiKey, mode.value, text, undefined, provider)
+      () => api.askAi(apiKey, mode.value, text, undefined, provider)
     );
 
     const content = result.result + buildSourcesSection(result.sources, result.searchNote);
@@ -783,9 +780,9 @@ async function commandSuggestTags(context: vscode.ExtensionContext): Promise<voi
     const [suggestion, existingTags] = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'タグ/カテゴリを提案中…' },
       () => Promise.all([
-        api.suggestTags(getServerUrl(), apiKey, article.content, undefined, provider, projectId),
+        api.suggestTags(apiKey, article.content, undefined, provider, projectId),
         projectId
-          ? api.listExistingTags(getServerUrl(), apiKey, undefined, projectId)
+          ? api.listExistingTags(apiKey, undefined, projectId)
           : Promise.resolve<string[]>([]),
       ])
     );
@@ -847,7 +844,7 @@ async function commandFixInvalidStatus(context: vscode.ExtensionContext, uri: vs
     const document = await vscode.workspace.openTextDocument(uri);
     const editor = await vscode.window.showTextDocument(document);
     const apiKey = await requireAccessToken(context);
-    const statuses = await api.getPostStatuses(getServerUrl(), apiKey);
+    const statuses = await api.getPostStatuses(apiKey);
 
     const picked = await vscode.window.showQuickPick(
       statuses.map((s) => ({ label: s.label, description: s.value, value: s.value })),
@@ -975,7 +972,7 @@ async function commandEditDiagram(context: vscode.ExtensionContext): Promise<voi
 
     const apiKey = await requireAccessToken(context);
     const actor = await getActor(context);
-    const detail = await api.getDiagramDetail(getServerUrl(), apiKey, actor, diagramId);
+    const detail = await api.getDiagramDetail(apiKey, actor, diagramId);
 
     const baseDir = path.dirname(editor.document.uri.fsPath);
     DiagramEditorPanel.createOrShow(context, editor, baseDir, projectId, {
@@ -1118,7 +1115,7 @@ async function pickCategoriesForNewArticle(
     const actor = await getActor(context);
     if (!apiKey || !actor) return [];
 
-    const categories = await api.listExistingCategoriesWithParents(getServerUrl(), apiKey, actor, projectId);
+    const categories = await api.listExistingCategoriesWithParents(apiKey, actor, projectId);
     if (categories.length === 0) return [];
 
     const items = categories.map((category) => ({
@@ -1277,7 +1274,7 @@ async function commandSelectProject(context: vscode.ExtensionContext): Promise<v
   try {
     const apiKey = await requireAccessToken(context);
     const actor = await getActor(context);
-    const projects = await api.listProjects(getServerUrl(), apiKey, actor);
+    const projects = await api.listProjects(apiKey, actor);
 
     const validProjects = projects.filter((p) => p.githubRepository);
     if (validProjects.length === 0) {
@@ -1379,9 +1376,8 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
 
     const apiKey = await requireAccessToken(context);
     const actor = await getActor(context);
-    const serverUrl = getServerUrl();
 
-    const project = await api.getProject(serverUrl, apiKey, actor, projectId);
+    const project = await api.getProject(apiKey, actor, projectId);
     const choices = buildPreviewSiteChoices(project);
     // パネル内の環境切り替えセレクトに渡す選択肢。ローカル/テスト/本番の見た目を
     // 記事ごとに開き直さず切り替えて比較できるようにする(要件: 環境間のCSS差分確認)。
@@ -1419,7 +1415,7 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
       progress: vscode.Progress<{ message?: string }>
     ): Promise<void> => {
       progress.report({ message: 'Markdownを変換しています…' });
-      const html = await api.renderPreviewHtml(serverUrl, apiKey, actor, projectId, markdown);
+      const html = await api.renderPreviewHtml(apiKey, actor, projectId, markdown);
 
       progress.report({ message: `${targetSite.siteName} のCSSを取得しています…` });
       let css = '';
@@ -1428,7 +1424,7 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
         warning = appendWarning(warning, 'プロジェクトにサイトが紐づいていないため、CSSなしで表示しています。');
       } else {
         try {
-          const themeCss = await api.getThemeCss(serverUrl, apiKey, actor, projectId, targetSite.siteId);
+          const themeCss = await api.getThemeCss(apiKey, actor, projectId, targetSite.siteId);
           if (themeCss.available) {
             css = themeCss.css;
           } else {
@@ -1454,7 +1450,6 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
         try {
           const existingPreviewPostId = PreviewPanel.currentPanel?.getPreviewPostId(targetSite.siteId);
           const skeleton = await api.renderPreviewSkeleton(
-            serverUrl,
             apiKey,
             actor,
             projectId,
@@ -1512,7 +1507,7 @@ async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<
         onPreviewMessage,
         availableSites,
         targetSite.siteId ?? null,
-        (siteId, postId) => api.deletePreviewPost(serverUrl, apiKey, actor, projectId, siteId, postId)
+        (siteId, postId) => api.deletePreviewPost(apiKey, actor, projectId, siteId, postId)
       );
       if (previewPostId && targetSite.siteId != null) {
         PreviewPanel.currentPanel?.recordPreviewPostId(targetSite.siteId, previewPostId);

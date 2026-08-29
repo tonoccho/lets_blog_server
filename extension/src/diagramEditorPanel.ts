@@ -87,7 +87,7 @@ export class DiagramEditorPanel extends WebviewPanelBase<
     message: Extract<DiagramEditorInboundMessage, { command: 'insertNew' }>
   ): Promise<void> {
     const { apiKey, actor } = await this._requireCredentials();
-    const detail = await api.createDiagram(getServerUrl(), apiKey, actor, {
+    const detail = await api.createDiagram(apiKey, actor, {
       projectId: this._projectId,
       name: message.name,
       xml: message.xml,
@@ -111,7 +111,6 @@ export class DiagramEditorPanel extends WebviewPanelBase<
 
     const { apiKey, actor } = await this._requireCredentials();
     const detail = await api.updateDiagram(
-      getServerUrl(),
       apiKey,
       actor,
       this._mode.diagramId,
@@ -132,7 +131,7 @@ export class DiagramEditorPanel extends WebviewPanelBase<
     message: Extract<DiagramEditorInboundMessage, { command: 'saveAsNew' }>
   ): Promise<void> {
     const { apiKey, actor } = await this._requireCredentials();
-    const detail = await api.createDiagram(getServerUrl(), apiKey, actor, {
+    const detail = await api.createDiagram(apiKey, actor, {
       projectId: this._projectId,
       name: message.name,
       xml: message.xml,
