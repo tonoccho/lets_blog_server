@@ -1,6 +1,7 @@
 ---
 name: plan-issue
 description: Convert a user request, feature idea, bug report, or improvement request into a clear GitHub Issue. Use this skill as the entry point for development work.
+model: opus
 ---
 
 # Plan Issue

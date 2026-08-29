@@ -1,6 +1,7 @@
 ---
 name: review-issue
 description: Independently review an implementation against its GitHub Issue, acceptance criteria, architecture, code quality, and regression risks. Use this skill when an Issue is in Review.
+model: sonnet
 ---
 
 # Review Issue

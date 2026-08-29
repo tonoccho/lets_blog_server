@@ -1,6 +1,7 @@
 ---
 name: implement-issue
 description: Implement a GitHub Issue that has been explicitly marked Ready. Use this skill to analyze the repository, create an implementation plan, implement the change, and validate it.
+model: opus
 ---
 
 # Implement Issue

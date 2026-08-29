@@ -124,9 +124,27 @@ QA does not assume implementation is correct.
 
 # Model Selection
 
-Coding/implementation tasks (the `implementer` agent, and any direct production-code editing) must use the Opus model.
+Every skill and agent declares its model explicitly in frontmatter, chosen by what the work actually requires:
 
-Planning, review, and QA agents are not coding tasks and may continue to inherit the orchestrator's model.
+| Kind of work | Model |
+| --- | --- |
+| Running commands (git, `gh`) with no judgment | `haiku` |
+| Comparing simple properties (status, priority, dependency counts) | `haiku` |
+| Verifying tests or inspecting Issues | `sonnet` |
+| Implementing production code, or authoring Issues | `opus` |
+
+Resulting assignments:
+
+- `haiku` — `git-workflow`, `complete-issue`, `triage-backlog`, `ready-issue`
+- `sonnet` — `pull-request`, `work-next`, `review-issue`, `qa-issue`; the `reviewer` and `qa` agents
+- `opus` — `implement-issue`, `plan-issue`, `discover-issues`; the `implementer` agent
+
+Two deliberate exceptions:
+
+- `ready-issue` runs on `haiku` because its selection step is a property comparison, but it delegates the readiness evaluation to `project-planner` on `sonnet` — judging an Issue means reading and assessing it.
+- The `project-planner` agent keeps `model: inherit`. It is called both for Issue creation (opus) and Issue assessment (haiku/sonnet), so the calling skill decides.
+
+Never edit production code on anything below Opus.
 
 ---
 
@@ -182,7 +200,13 @@ Do not silently fix it.
 
 Do not wait for the user's judgment on whether it is worth filing.
 
-Immediately create a new GitHub Issue for it in `Inbox`, using the `project-planner` Issue template (Title, Background, Problem, Goal, Requirements, Acceptance Criteria, Scope, Out of Scope, Dependencies). This applies at every stage of the workflow (planning, implementation, review, QA) — whichever stage discovers the problem files it immediately.
+First, search for an existing Issue covering the same problem. Run `gh issue list --state open --search "<term>"` for the affected file path(s) and class/symbol name(s), and for the observable symptom. Search each identifier separately — a single combined query misses Issues that use different wording.
+
+- If an open Issue already covers the same problem, do **not** create a new one. Add a comment to that Issue with the new evidence (where it was re-encountered, which stage found it, any detail its body lacks) and report its number instead.
+- If a matching Issue exists but the new finding is genuinely broader or narrower in scope, say so explicitly in the comment, and only then decide whether a separate Issue is warranted.
+- Only when no existing Issue covers it, create a new one.
+
+Create the new GitHub Issue in `Inbox`, using the `project-planner` Issue template (Title, Background, Problem, Goal, Requirements, Acceptance Criteria, Scope, Out of Scope, Dependencies). This applies at every stage of the workflow (planning, implementation, review, QA) — whichever stage discovers the problem files it immediately.
 
 The Issue's `Priority` field (P0/P1/P2) must be set before the Issue is considered filed. Never leave priority unset on a newly discovered Issue, even though older Issues in the project may have it unset.
 
@@ -191,7 +215,7 @@ Then report:
 - What was discovered
 - Why it matters
 - Whether it blocks the current issue
-- The new Issue number created for it
+- The new Issue number created for it, **or** the existing Issue number the finding was added to
 
 ---
 

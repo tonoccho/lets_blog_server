@@ -1,6 +1,7 @@
 ---
 name: git-workflow
 description: Standard Git workflow for issue-based development, including repository safety checks, branch naming, commits, validation before push, and safe remote operations.
+model: haiku
 ---
 
 # Git Workflow Skill

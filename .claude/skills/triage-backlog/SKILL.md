@@ -1,6 +1,7 @@
 ---
 name: triage-backlog
-description: Review GitHub Issues sitting in Inbox and move the ones worth committing to into Backlog, ordered by priority. Use when the user asks to move tasks that should be implemented into Backlog (e.g. "実装すべきタスクをBacklogに移動して").
+description: Review GitHub Issues sitting in Inbox and move every non-blocked Issue into Backlog with a Priority set. Use when the user asks to move tasks that should be implemented into Backlog (e.g. "実装すべきタスクをBacklogに移動して").
+model: haiku
 ---
 
 # Triage Backlog
@@ -11,7 +12,7 @@ You are responsible for promoting Issues from `Inbox` to `Backlog`.
 
 `Backlog` means: the project has decided this is worth doing eventually. It does not mean the Issue is implementable yet — that gate is `ready-issue` (`Backlog → Ready`).
 
-This skill only decides *whether an Issue is worth committing to*, not whether it is fully specified.
+This skill only decides *whether an Issue is blocked*, not whether it is fully specified. Every Inbox Issue that is not blocked moves to Backlog.
 
 Do not implement production code.
 
@@ -29,11 +30,23 @@ If there are none, report that and stop.
 
 ## Step 2: Evaluate each Issue
 
-Delegate to the `project-planner` agent to independently assess each Inbox Issue for:
+Delegate to the `project-planner` agent to independently assess each Inbox Issue.
 
-### Value
+Run the agent on the Haiku model — pass `model: "haiku"` to the Agent tool. This skill and every agent it spawns run on Haiku.
 
-Does this solve a real problem? Is it duplicative of, or superseded by, another Issue?
+Assess each Issue for:
+
+### Blocked
+
+Is this Issue blocked? An Issue is blocked when it has an open `blocked_by` dependency, or its body documents a dependency on work that has not been done yet.
+
+Read GitHub's issue dependencies with:
+
+```bash
+gh api repos/:owner/:repo/issues/<number>/dependencies/blocked_by
+```
+
+This is the only gate for staying in Inbox. "Not fully specified", "needs more detail", and "unclear acceptance criteria" are **not** blockers here — those are `ready-issue`'s gate, not this one.
 
 ### Priority
 
@@ -44,11 +57,11 @@ Use the project's `Priority` field (P0/P1/P2) if set. If unset, infer priority f
 3. Whether it belongs to an in-flight Epic/tracking Issue and its position in that sequence
 4. Age (older, still-relevant requests get a slight boost over brand-new ones, all else equal)
 
-### Committability
+### Duplication
 
-Is this something the project actually intends to do, as opposed to something to leave open for future consideration or close as `wontfix`/`duplicate`?
+Is this Issue a duplicate of, or superseded by, another Issue?
 
-The planner must not modify production code and must not decide implementation-readiness here — only whether the work is worth committing to.
+The planner must not modify production code and must not decide implementation-readiness here.
 
 ---
 
@@ -58,15 +71,15 @@ For every Inbox Issue, assign exactly one outcome:
 
 ### Move to Backlog
 
-The project intends to do this. Priority is at least roughly understood.
+The default. Every Issue that is not blocked and is not a duplicate moves to Backlog, regardless of how thoroughly it is specified.
 
 ### Keep in Inbox
 
-Still undecided — needs more information or a product decision before it's worth committing to. Explain what's missing.
+Blocked — it has an open `blocked_by` dependency, or it depends on unfinished work. Name the blocker.
 
 ### Recommend Closing
 
-Duplicate, superseded, or out of scope for the project. Do not close it yourself — recommend it to the user with a reason.
+Duplicate of, or superseded by, another Issue. Do not close it yourself, and do not move it to Backlog — recommend it to the user with the Issue number it duplicates.
 
 ---
 
@@ -74,7 +87,7 @@ Duplicate, superseded, or out of scope for the project. Do not close it yourself
 
 Move every Issue classified `Move to Backlog` from `Inbox → Backlog`.
 
-Set the `Priority` field when a reasonably confident priority was determined.
+Set the `Priority` field on every moved Issue. Never leave priority unset — `ready-issue` selects by Priority first, so an unset priority sinks the Issue to the bottom of the selection order.
 
 Do not move `Keep in Inbox` or `Recommend Closing` Issues.
 
@@ -99,7 +112,7 @@ Count and list.
 
 ## Left in Inbox
 
-Count and list, with what's blocking each one — point unresolved product questions at `plan-issue` for clarification.
+Count and list, naming the specific blocker (the open `blocked_by` Issue, or the unfinished work it depends on) for each one.
 
 ## Recommended for Closing
 
@@ -107,7 +120,7 @@ Count and list, with reason. Explicitly ask the user to confirm before closing.
 
 ## Next Step
 
-Recommend running `ready-issue` (batch mode) to find which Backlog Issues are now implementable.
+Recommend running `ready-issue` to select the highest-priority Backlog Issue and promote it to Ready.
 
 ---
 
@@ -119,4 +132,6 @@ Never close an Issue without the user's explicit confirmation.
 
 Never move an Issue straight from `Inbox` to `Ready` — it must pass through `Backlog` and then the `ready-issue` gate.
 
-Do not treat "worth doing" as the same judgment as "ready to implement" — those are two separate gates in this project's pipeline.
+Do not hold a non-blocked Issue in Inbox because it looks under-specified, low-value, or hard to scope. Incomplete specification is `ready-issue`'s gate, not this one. The only reasons an Issue stays in Inbox are: it is blocked, or it is a duplicate recommended for closing.
+
+Run this skill, and every agent it spawns, on the Haiku model.

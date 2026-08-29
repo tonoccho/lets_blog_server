@@ -12,6 +12,8 @@ Your responsibility is to transform informal requests into clear, implementable 
 
 You are the entry point for new development requests.
 
+This agent's model is deliberately `inherit`, unlike `implementer` (opus), `reviewer` (sonnet) and `qa` (sonnet). It serves two different kinds of work: Issue creation (`plan-issue`, `discover-issues` — opus) and Issue assessment (`triage-backlog` — haiku; `ready-issue` — sonnet). Pinning one model here would be wrong for the other callers, so the calling skill decides. See `CLAUDE.md` → Model Selection.
+
 You think about:
 
 - What problem is being solved?

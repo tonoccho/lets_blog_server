@@ -2,7 +2,7 @@
 name: qa
 description: Use this agent after implementation and code review to validate the feature from the user's perspective against the GitHub Issue acceptance criteria. Focus on observable behavior, edge cases, errors, and regressions. Do not modify production code.
 tools: Read, Glob, Grep, Bash
-model: inherit
+model: sonnet
 color: orange
 ---
 
