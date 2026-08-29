@@ -18,7 +18,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -126,6 +129,30 @@ class AmazonTagRenderServiceTest {
 
         assertTrue(result.contains("<a href=\"https://amazon.co.jp/dp/xxx\""));
         assertFalse(result.contains("lb-amazon-card"));
+    }
+
+    /**
+     * issue #760: プロジェクトに紐付いていないサイトへの公開ではprojectId=nullで呼ばれる。
+     * projectIdはそのままタグデザイン解決へ渡し(受け側がprojectId=nullなら固定のデフォルト値を返す)、
+     * 400/502にならずレンダリング自体は成功する。
+     */
+    @Test
+    void render_projectIdがnullでもタグデザインを解決してカードを描画する() {
+        stubTagDesign();
+        Map<String, String> data = Map.of(
+                "productName", "商品名",
+                "productUrl", "https://amazon.co.jp/dp/xxx",
+                "price", "1000");
+        when(contentCacheService.resolve("https://amazon.co.jp/dp/xxx"))
+                .thenReturn(new ContentCacheResponse(
+                        "https://amazon.co.jp/dp/xxx", ContentType.AMAZON, data,
+                        LocalDateTime.now(), LocalDateTime.now()));
+
+        String result = service().render("[amazon https://amazon.co.jp/dp/xxx]", null, true);
+
+        assertTrue(result.contains("lb-amazon-card"));
+        assertTrue(result.contains("商品名"));
+        verify(legacyApiBridgeClient, atLeastOnce()).resolveTagDesign(isNull(), anyString(), any());
     }
 
     @Test
