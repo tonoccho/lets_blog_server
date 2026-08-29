@@ -63,7 +63,7 @@ class TagDesignInternalControllerTest {
      * 結果クエリは{@code ?projectId=}(空文字)になる。required=trueだと400になっていた経路。
      */
     @Test
-    void tagDesign_projectIdが空文字でも200でグローバル既定を返す() throws Exception {
+    void tagDesign_projectIdが空文字でも200で固定のデフォルト値を返す() throws Exception {
         when(tagDesignSettingService.resolveColors(null, EmbedTagType.TOC)).thenReturn(new TagDesignColors(
                 DesignPreset.DEFAULT.backgroundColor(), DesignPreset.DEFAULT.textColor(),
                 DesignPreset.DEFAULT.accentColor(), null));
