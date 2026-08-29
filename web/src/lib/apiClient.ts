@@ -189,7 +189,7 @@ interface ApiRequestInit extends RequestInit {
    * としてだけ残している(fetch()には渡らない未使用の値として無害に無視される)。
    */
   actor?: ActorInfo;
-  /** ログイン前でも呼べる公開エンドポイント(signup/setup/setup-status)向け。既定はtrue。 */
+  /** ログイン前でも呼べる公開エンドポイント(setup/setup-status)向け。既定はtrue。 */
   requiresAuth?: boolean;
   /**
    * falseにすると、HTTPエラー応答でも例外を投げずResponseをそのまま返す。

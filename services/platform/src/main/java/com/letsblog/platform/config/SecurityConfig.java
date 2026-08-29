@@ -23,7 +23,7 @@ import org.springframework.security.web.SecurityFilterChain;
  * <p>そこでlegacy-apiの{@code SecurityConfig}と同じ形(明示的な公開パスを除き
  * {@code anyRequest().authenticated()})へ戻し、移設前と同等の最低限のゲートを復元する。
  * gatewayを一律deny-by-defaultにする案も検討したが、gatewayは全サービス共通の経路であり
- * legacy-apiの公開パス({@code /api/auth/signup}等)や他サービスの現行モデルまで巻き込むため、
+ * legacy-apiの公開パス({@code /api/auth/setup}等)や他サービスの現行モデルまで巻き込むため、
  * 所有サービス自身のSecurityConfigで閉じる方式(project-service/publishing-serviceが
  * {@code /api/internal/**}に対して既に採っている方式)を選択した。
  *
