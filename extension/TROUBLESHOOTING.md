@@ -21,9 +21,26 @@
 
 | 確認 | 対処 |
 | --- | --- |
-| サーバーが起動しているか | `docker compose ps` でAPIコンテナの状態を確認 |
+| サーバーが起動しているか | `docker compose ps` でリバースプロキシ(`lbs-reverse-proxy`)とAPIゲートウェイ(`lbs-gateway`)の状態を確認 |
 | `letsBlog.serverUrl` が正しいか | 既定は `https://localhost`。ポート指定が必要な構成なら含める |
 | 証明書エラーではないか | 下の「証明書のエラー」を参照 |
+
+このメッセージは、まだどの下流サービスにも届いていない(リバースプロキシ/gatewayへの到達性の問題)
+ことを意味します。個々のサービスのログを見る前に、この2つのコンテナを確認してください。
+
+### 「担当サービス: ○○ (コンテナ: lbs-xxx)」を含むエラー(issue #585)
+
+gateway までは到達したものの、転送先の下流サービスがエラーを返した(または応答しなかった)場合に
+表示されます。サービス分割(Epic #551)により、`/api/**` のパスごとに担当するコンテナが異なります。
+
+| 対処 |
+| --- |
+| メッセージ中の `docker logs lbs-xxx` でそのサービスのログを確認する |
+| メッセージに相関ID(`X-Correlation-Id`)が含まれる場合、`docker compose logs \| grep <相関ID>` で gateway と下流サービスをまたいだ経路を追う |
+| `docker compose ps` で該当コンテナが healthy かを確認する |
+
+どのパスがどのサービスへ振り分けられるかは `services/gateway/src/main/resources/application.yml` の
+ルート表が決めます(拡張側の対応表は `src/downstreamServices.ts`)。
 
 ### 証明書のエラー(`DEPTH_ZERO_SELF_SIGNED_CERT`, `UNABLE_TO_VERIFY_LEAF_SIGNATURE`)
 

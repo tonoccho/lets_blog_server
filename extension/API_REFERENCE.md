@@ -10,6 +10,20 @@
 
 設定 `letsBlog.serverUrl`(既定: `https://localhost`)。末尾のスラッシュは除去されます。
 
+下表のエンドポイントはすべて **APIゲートウェイ(`services/gateway`)経由** で呼び出します(issue #585)。
+`letsBlog.serverUrl` はリバースプロキシ(nginx)の公開URLで、nginx の `location /api/` が
+`gateway:8080` へ中継します(`nginx/conf.d/default.conf`)。gateway はコンテナ外へポートを公開して
+いないため、拡張から見た「gatewayのベースURL」はこのリバースプロキシのURLと同一です。
+
+URL の組み立ては [`src/apiBaseUrl.ts`](src/apiBaseUrl.ts) の `gatewayUrl()` 1箇所に集約しており、
+`apiClient.ts` の各エンドポイント関数はベースURLを引数に取りません。どのパスがどのサービスへ
+振り分けられるかは `services/gateway/src/main/resources/application.yml` のルート表が決めます
+(未移行パスは同ファイルの `fallback-uri` で legacy-api へ到達します)。
+
+Keycloak(`/auth/realms/...`、`src/deviceAuth.ts`)と draw.io(`/drawio/`、
+`src/diagramEditorPanel.ts`)は gateway を経由しないため、`src/config.ts` の `getServerUrl()`
+(リバースプロキシの公開URL)を直接使います。
+
 ### 認証ヘッダ
 
 | ヘッダ | 内容 | 付与される呼び出し |
@@ -154,7 +168,29 @@ Keycloakへ直接行うようになりました(`src/deviceAuth.ts`、上記「�
 | 2xx | Zodスキーマで検証。不一致なら `ResponseValidationError` |
 | 400 / 403 / 404 / 409 / 413 | `ApiError`。リトライせず、ステータス別の対応策を添えて通知 |
 | 401 | `ApiError`。通常はアクセストークンの自動リフレッシュで防げるはずのため、リフレッシュも失敗した場合に発生する。再ログインを促す |
-| 429 / 5xx | `ApiError`。冪等な呼び出しのみリトライ |
-| 接続不可 | `NetworkError`。serverUrl・サーバー状態・証明書設定の確認を促す |
-| タイムアウト | `TimeoutError`。`letsBlog.requestTimeoutMs` の調整を促す |
+| 429 / 5xx | `ApiError`。冪等な呼び出しのみリトライ。5xxは**担当サービス名・コンテナ名・相関ID**を添えて通知 |
+| 接続不可 | `NetworkError`。下流サービスではなく到達経路(リバースプロキシ/gateway)の問題として、serverUrl・サーバー状態・証明書設定の確認を促す |
+| タイムアウト | `TimeoutError`。**担当サービス名**と `letsBlog.requestTimeoutMs` の調整を促す |
 | 利用者による中断 | `CancelledError`。失敗として扱わない |
+
+---
+
+## 下流サービスの切り分け(issue #585)
+
+サービス分割(Epic #551)後、5xx やタイムアウトは「APIサーバーが落ちている」ではなく
+「特定の下流サービスが落ちている」ことがほとんどです。gateway は応答本文に転送先サービス名を
+載せない(下流の応答をそのまま中継し、タイムアウト時は本文の無い 504 を返す)ため、拡張側で
+リクエストパスから担当サービスを逆引きして通知に含めます。
+
+対応表は [`src/downstreamServices.ts`](src/downstreamServices.ts) にあり、gateway のルート表のうち
+**拡張が実際に呼ぶパスに関係する部分だけ**を、同じ「先勝ち」順序で写したものです。
+どのルートにもマッチしないパスは gateway の `fallback-uri` と同じく legacy-api として扱います。
+
+通知には次を含めます。
+
+- 担当サービスの日本語名(例: 「AI生成サービス」)
+- コンテナ名(例: `lbs-ai`)と `docker logs lbs-ai` の案内
+- gateway が付与した相関ID(`X-Correlation-Id`、issue #582)。全サービスのログをこのIDで追えます
+
+接続そのものが確立できなかった場合(`NetworkError`)は、まだどの下流サービスにも届いていないため
+特定のサービスを名指しせず、リバースプロキシ/gateway への到達性の問題として案内します。

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { getActor, getAccessToken, getConfiguredAiProvider, getProjectId, getServerUrl } from './config';
+import { getActor, getAccessToken, getConfiguredAiProvider, getProjectId } from './config';
 import { parseArticle, validateScheduledPublication } from './frontMatter';
 import * as api from './apiClient';
 import { CancelledError, messageOf } from './errorHandler';
@@ -189,7 +189,7 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
     const apiKey = await getAccessToken(this.context);
     if (apiKey) {
       try {
-        const statuses = await api.getPostStatuses(getServerUrl(), apiKey);
+        const statuses = await api.getPostStatuses(apiKey);
         if (!isValidStatus(article.data.status, statuses.map((s) => s.value))) {
           const location = findFrontMatterFieldLine(rawText, 'status');
           if (location) {
@@ -213,7 +213,7 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
       const projectId = (article.data.project_id as number | undefined) ?? getProjectId(this.context);
       if (actor && projectId) {
         try {
-          const existingCategories = await api.listExistingCategories(getServerUrl(), apiKey, actor, projectId);
+          const existingCategories = await api.listExistingCategories(apiKey, actor, projectId);
           const invalidCategories = findInvalidCategories(article.data.categories, existingCategories);
           if (invalidCategories.length > 0) {
             const location = findFrontMatterFieldLine(rawText, 'categories');
@@ -270,7 +270,6 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
       const actor = await getActor(this.context);
       const provider = getConfiguredAiProvider();
       const result = await api.proofreadContent(
-        getServerUrl(),
         apiKey,
         actor,
         article.content,
