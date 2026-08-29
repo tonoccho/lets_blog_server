@@ -4,6 +4,7 @@ import com.letsblog.api.domain.UserSiteAuthor;
 import com.letsblog.api.dto.ArticleImageLongEdgePxBridgeResponse;
 import com.letsblog.api.dto.CacheUserSiteAuthorBridgeRequest;
 import com.letsblog.api.dto.UserSiteAuthorBridgeResponse;
+import com.letsblog.api.repository.ProjectUserRepository;
 import com.letsblog.api.repository.UserSiteAuthorRepository;
 import com.letsblog.api.service.ProjectService;
 import com.letsblog.api.service.ProjectUserSyncService;
@@ -24,6 +25,10 @@ import org.springframework.web.bind.annotation.RestController;
  * #575設計判断4)。publishing-serviceへ移設した{@code PostPublishService#resolveAuthorId}は、
  * このブリッジ経由で対応表を参照・キャッシュ書き込みする。あわせて、投稿画像の長編リサイズ目標px
  * (project_image_settings、AI画像生成ドメインのためlegacy-apiに残る)の解決もこのブリッジ経由で行う。
+ *
+ * <p>認可は、呼び出し元(project-service/publishing-service)が既にrequireAdmin/
+ * requireProjectMemberOrAdmin等を済ませたリクエストのトークンをそのまま転送してもらう想定で、
+ * ここでは追加の認可チェックは行わない(ContentBridgeController/AiBridgeControllerと同じ方針)。
  */
 @RestController
 public class ProjectUserBridgeController {
@@ -31,13 +36,25 @@ public class ProjectUserBridgeController {
     private final ProjectUserSyncService projectUserSyncService;
     private final UserSiteAuthorRepository userSiteAuthorRepository;
     private final ProjectService projectService;
+    private final ProjectUserRepository projectUserRepository;
 
     public ProjectUserBridgeController(
             ProjectUserSyncService projectUserSyncService, UserSiteAuthorRepository userSiteAuthorRepository,
-            ProjectService projectService) {
+            ProjectService projectService, ProjectUserRepository projectUserRepository) {
         this.projectUserSyncService = projectUserSyncService;
         this.userSiteAuthorRepository = userSiteAuthorRepository;
         this.projectService = projectService;
+        this.projectUserRepository = projectUserRepository;
+    }
+
+    /**
+     * AdminAuthorizationService(publishing-service)#requireProjectMemberOrAdminが使う、
+     * プロジェクトメンバー判定(issue #712。ContentBridgeController#isProjectMemberと同じ内容を、
+     * publishing-service向けの{@code /api/internal/project/**}名前空間で提供する)。
+     */
+    @GetMapping("/api/internal/project/projects/{projectId}/members/{userId}")
+    public boolean isProjectMember(@PathVariable Long projectId, @PathVariable Long userId) {
+        return projectUserRepository.findByProjectIdAndUserId(projectId, userId).isPresent();
     }
 
     /** ProjectEnvironmentSyncService(project-service)#sync がDB同期後に呼ぶ、サイト向けロール再整合。 */

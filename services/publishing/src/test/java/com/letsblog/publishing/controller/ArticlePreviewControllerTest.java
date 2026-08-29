@@ -1,11 +1,11 @@
-package com.letsblog.api.controller;
+package com.letsblog.publishing.controller;
 
-import com.letsblog.api.dto.RenderSkeletonRequest;
-import com.letsblog.api.dto.ThemeCssResponse;
-import com.letsblog.api.dto.ThemeSkeletonResponse;
-import com.letsblog.api.service.AdminAuthorizationService;
-import com.letsblog.api.service.ArticlePreviewService;
-import com.letsblog.api.service.ForbiddenException;
+import com.letsblog.publishing.dto.RenderSkeletonRequest;
+import com.letsblog.publishing.dto.ThemeCssResponse;
+import com.letsblog.publishing.dto.ThemeSkeletonResponse;
+import com.letsblog.publishing.service.AdminAuthorizationService;
+import com.letsblog.publishing.service.ArticlePreviewService;
+import com.letsblog.publishing.service.ForbiddenException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -18,9 +18,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * legacy-apiのArticlePreviewControllerのうち残っているtheme-css/skeleton/preview-postのみを検証する
- * (issue #576)。記事本文レンダリング(/render)はcontent-serviceへ移設したため、その振る舞いは
- * content-service側のArticlePreviewControllerTestで検証する。
+ * publishing-serviceのArticlePreviewController(theme-css/skeleton/preview-post)を検証する。
+ * legacy-apiから移設したテストをそのまま引き継いだもの(issue #712、Epic #551 C6-6)。
+ * 記事本文レンダリング(/render)はcontent-serviceが持つため、その振る舞いはcontent-service側の
+ * ArticlePreviewControllerTestで検証する。
  */
 @ExtendWith(MockitoExtension.class)
 class ArticlePreviewControllerTest {

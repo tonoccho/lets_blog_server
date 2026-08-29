@@ -1,5 +1,6 @@
 package com.letsblog.publishing.client;
 
+import com.letsblog.publishing.service.IdentityServiceUnavailableException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.http.HttpClient;
 import java.time.Duration;
@@ -22,7 +23,10 @@ import org.springframework.web.client.RestClientResponseException;
  *
  * <p>あわせて、投稿画像の長編リサイズ目標px(project_image_settings、AI画像生成ドメインのため
  * legacy-apiに残る)の解決もこのクライアント経由で行う({@code ProjectService#resolveArticleImageLongEdgePx}
- * と同じ値)。
+ * と同じ値)。{@code project_user}(プロジェクトメンバー)の所有権も同じ理由でlegacy-apiに残るため、
+ * issue #712で移設した{@code ArticlePreviewController}のプロジェクトメンバー判定
+ * ({@code AdminAuthorizationService#requireProjectMemberOrAdmin})もこのクライアント経由で問い合わせる
+ * (content-service/ai-service/analytics-serviceの同名メソッドと同じ方針)。
  */
 @Component
 public class LegacyApiBridgeClient {
@@ -107,6 +111,25 @@ public class LegacyApiBridgeClient {
         } catch (RestClientException e) {
             throw new IllegalStateException(
                     "legacy-apiの画像リサイズ設定照会呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * {@code AdminAuthorizationService#requireProjectMemberOrAdmin}が使う、プロジェクトメンバー判定
+     * (issue #712)。{@code project_user}の所有権がlegacy-apiに残っており、ADR-0004により
+     * lbs_publishingスキーマからは直接参照できないため、内部ブリッジ経由で問い合わせる。
+     * 呼び出し自体が失敗した場合は、認可判定を素通しさせないよう例外を伝播させる(fail closed)。
+     */
+    public boolean isProjectMember(Long projectId, Long userId) {
+        try {
+            Boolean result = authorized(restClient.get()
+                    .uri("/api/internal/project/projects/{projectId}/members/{userId}", projectId, userId))
+                    .retrieve()
+                    .body(Boolean.class);
+            return Boolean.TRUE.equals(result);
+        } catch (RestClientException e) {
+            throw new IdentityServiceUnavailableException(
+                    "legacy-apiのプロジェクトメンバー判定呼び出しに失敗しました: " + e.getMessage(), e);
         }
     }
 

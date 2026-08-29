@@ -105,19 +105,21 @@ app:
           - /api/projects/*/custom-tags/**
       # ArticlePreviewControllerのうち、記事本文のレンダリング(/render、CMSへの依存を持たない)のみ
       # content-serviceへ移設した(#576)。テーマCSS取得(/theme-css)・骨格差し替え(/skeleton)・
-      # プレビュー用投稿削除(/preview-post)はSite/CMSアダプタへの深い依存がありlegacy-apiに残した
-      # ため、/renderだけをここで先にマッチさせる。
+      # プレビュー用投稿削除(/preview-post)はSite/CMSアダプタへの深い依存があり、CmsAdapter/
+      # WordPressAgentOperations/WordPressSshOperationsと同じpublishing-serviceへ移設した
+      # (issue #712)ため、/renderだけをここで先にマッチさせる。
       - id: project-preview-render
         uri: ${CONTENT_SERVICE_URI:http://api:8080}
         paths:
           - /api/projects/*/preview/render
-      # 上記/render以外(/theme-css・/skeleton・/preview-post)はlegacy-apiに残る(#577
-      # stage3での発見: #576時点ではこの下のprojectルートがLEGACY_API_URIだったためフォール
+      # 上記/render以外(/theme-css・/skeleton・/preview-post)はpublishing-serviceが持つ
+      # (#577 stage3での発見: #576時点ではこの下のprojectルートがLEGACY_API_URIだったためフォール
       # スルーで到達できていたが、#577 stage2でprojectルートをPROJECT_SERVICE_URIへ切り替えた際に
       # 専用ルートが追加されておらず、project-serviceに存在しないパスへ転送される欠落があった。
-      # より広い/api/projects/**(下のprojectルート)より先に評価されるよう、ここで固定する)。
+      # そこでまずLEGACY_API_URIへ固定し、issue #712でPUBLISHING_SERVICE_URIへ切り替えた)。
+      # より広い/api/projects/**(下のprojectルート)より先に評価されるよう、ここで固定する。
       - id: project-preview-legacy
-        uri: ${LEGACY_API_URI:http://api:8080}
+        uri: ${PUBLISHING_SERVICE_URI:http://api:8080}
         paths:
           - /api/projects/*/preview/**
       # PostController#publish/#deleteは、投稿(posts)テーブルの所有権がcontent-serviceへ移った(#576)

@@ -1,4 +1,4 @@
-package com.letsblog.api.dto;
+package com.letsblog.publishing.dto;
 
 /**
  * @param html サイトの実テーマDOM構造(タイトル/カテゴリ/日付/アイキャッチ等)を保ったまま、

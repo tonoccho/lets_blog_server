@@ -1,5 +1,6 @@
 package com.letsblog.api.integration;
 
+import com.letsblog.api.client.ProjectServiceClient;
 import com.letsblog.api.domain.ProjectUser;
 import com.letsblog.api.domain.User;
 import com.letsblog.api.repository.ProjectUserRepository;
@@ -66,6 +67,15 @@ class AuthorizationMatrixIntegrationTest {
     @MockitoBean
     private JwtDecoder jwtDecoder;
 
+    /**
+     * requireProjectMemberOrAdmin()の検証に使うProjectApiKeyController
+     * (/api/projects/{id}/api-keys/github-token)は、認可を通過した後にproject-serviceの内部ブリッジを
+     * 呼ぶ。認可判定そのものが本テストの関心事のため、その後続呼び出しはモックへ差し替える
+     * (project-serviceのコンテナが起動していない環境でも「403にならないこと」を安定して検証するため)。
+     */
+    @MockitoBean
+    private ProjectServiceClient projectServiceClient;
+
     @Autowired
     private UserRepository userRepository;
 
@@ -120,11 +130,9 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("GET", "/api/projects/1/article-plan/tags"),
                 new Endpoint("POST", "/api/projects/1/article-plan/issues/42/assign"),
 
-                // -- ArticlePreviewController (4) --
-                new Endpoint("POST", "/api/projects/1/preview/render"),
-                new Endpoint("GET", "/api/projects/1/preview/theme-css"),
-                new Endpoint("POST", "/api/projects/1/preview/skeleton"),
-                new Endpoint("DELETE", "/api/projects/1/preview/preview-post"),
+                // (ArticlePreviewControllerは、記事本文レンダリング(/render)が#576でcontent-serviceへ、
+                // テーマCSS取得/骨格差し替え/プレビュー用投稿削除が#712でpublishing-serviceへ
+                // 移設されたため対象外)
 
                 // (AuditLogControllerは#572でlog-writerサービスへ移設したため対象外)
 
@@ -434,22 +442,27 @@ class AuthorizationMatrixIntegrationTest {
         // User1(プロジェクトAのメンバー)がプロジェクトAのエンドポイントへアクセス -> 403にならない
         // (issue #576でProjectCustomTagController(/api/projects/{id}/custom-tags)はcontent-serviceへ、
         // issue #577 stage1でTagDesignSettingController(/api/projects/{id}/tag-design-settings)は
-        // project-serviceへ移管されたため、legacy-api側に残るrequireProjectMemberOrAdmin採用エンドポイント
-        // であるArticlePreviewController(/api/projects/{id}/preview/theme-css)で検証する。認可チェックは
-        // 後続のプロジェクト参照より先に行われるため、projectId自体がproject-serviceに実在しなくても
-        // 403判定の検証には影響しない)。
-        mockMvc.perform(request(HttpMethod.GET, "/api/projects/" + projectAId + "/preview/theme-css")
+        // project-serviceへ、issue #712でArticlePreviewController(/api/projects/{id}/preview/theme-css)は
+        // publishing-serviceへ移管されたため、legacy-api側に残るrequireProjectMemberOrAdmin採用
+        // エンドポイントであるProjectApiKeyController(/api/projects/{id}/api-keys/github-token)で
+        // 検証する。認可チェックは後続のプロジェクト参照(project-serviceへの内部ブリッジ、下記で
+        // モック)より先に行われるため、projectId自体がproject-serviceに実在しなくても403判定の
+        // 検証には影響しない)。
+        when(projectServiceClient.getGithubToken(org.mockito.ArgumentMatchers.anyLong()))
+                .thenReturn(new ProjectServiceClient.GithubTokenBridge(false, null));
+
+        mockMvc.perform(request(HttpMethod.GET, "/api/projects/" + projectAId + "/api-keys/github-token")
                         .with(JwtTestFixtures.jwtRequestPostProcessor(user1.getKeycloakSub())))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(403));
 
         // User1がプロジェクトB(非所属)のエンドポイントへアクセス -> 403
-        mockMvc.perform(request(HttpMethod.GET, "/api/projects/" + projectBId + "/preview/theme-css")
+        mockMvc.perform(request(HttpMethod.GET, "/api/projects/" + projectBId + "/api-keys/github-token")
                         .with(JwtTestFixtures.jwtRequestPostProcessor(user1.getKeycloakSub())))
                 .andExpect(status().isForbidden());
 
         // adminはプロジェクトB(User1は非所属)でも403にならない(admin全プロジェクト横断バイパス)
         User admin = persistUser("admin");
-        mockMvc.perform(request(HttpMethod.GET, "/api/projects/" + projectBId + "/preview/theme-css")
+        mockMvc.perform(request(HttpMethod.GET, "/api/projects/" + projectBId + "/api-keys/github-token")
                         .with(JwtTestFixtures.jwtRequestPostProcessor(admin.getKeycloakSub())))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(403));
     }
