@@ -102,10 +102,11 @@ jobs:
       matrix:
         service: [lbs-common, legacy-api, log-writer, gateway, identity, content]
 
-    # legacy-api/contentのテストのみMySQLを使う(#570のスキーマ分離が完了するまではlegacy-apiは
-    # 共有DBのまま。contentは#576でスキーマ分離済みの専用DB lbs_content_test を使う)。
-    # lbs-common/log-writer/gateway/identityには不要だが、マトリクスジョブ単位でしか services: を
-    # 定義できないため、無害な待機コストとして許容する。
+    # legacy-api/content/identity/log-writerのテストがMySQLを使う(#570のスキーマ分離が完了する
+    # までlegacy-apiは共有DBのまま。contentは#576でスキーマ分離済みの専用DB lbs_content_test、
+    # identity/log-writerは#772で追加した lbs_identity_test / lbs_log_test を使う)。
+    # lbs-common/gatewayには不要だが、マトリクスジョブ単位でしか services: を定義できないため、
+    # 無害な待機コストとして許容する。
     services:
       mysql:
         image: mysql:8.0

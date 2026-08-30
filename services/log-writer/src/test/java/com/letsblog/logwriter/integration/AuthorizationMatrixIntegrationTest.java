@@ -111,11 +111,19 @@ class AuthorizationMatrixIntegrationTest {
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(401));
     }
 
-    /** docker-composeのhealthcheckとgatewayのDownstreamHealthConfigが無認証で叩くため、公開のまま。 */
+    /**
+     * docker-composeのhealthcheckとgatewayのDownstreamHealthConfigが無認証で叩くため、公開のまま。
+     *
+     * <p>404も除外することで「PUBLIC_PATHSに載っているがハンドラが存在しない」状態を検知する
+     * (Spring Securityは認証ゲートをハンドラ解決より前に適用するため、401でないことだけでは
+     * エンドポイントの存在を保証できない)。200そのものを期待しないのは、テスト環境にRabbitMQ等の
+     * 依存が無くヘルス集約の結果がDOWN(503)になりうるためで、ここで検証したいのは
+     * 「認証ゲートの対象外であること」だけである。
+     */
     @Test
-    @DisplayName("Actuatorヘルスチェックは認証ゲートの対象外")
+    @DisplayName("Actuatorヘルスチェックは認証ゲートの対象外(401でも404でもない)")
     void actuatorヘルスチェックは401にならない() throws Exception {
         mockMvc.perform(request(HttpMethod.GET, "/actuator/health"))
-                .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(401));
+                .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotIn(401, 404));
     }
 }

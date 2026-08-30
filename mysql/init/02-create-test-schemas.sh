@@ -12,7 +12,9 @@
 # 注意: 既存のMySQLデータボリュームが既にある環境では、コンテナを再作成しても
 # このスクリプトは実行されない(MySQL公式イメージの仕様)。適用するにはボリュームの
 # 再作成が必要(01-create-service-schemas.shと同様、docs/adr/0004-schema-per-service.md,
-# docs/MIGRATION_TESTING.md 参照)。
+# docs/MIGRATION_TESTING.md 参照)。ボリュームを作り直さずに不足スキーマだけを手で作る
+# 手順は docs/TEST_DOCUMENTATION.md の「サービス別のテスト用スキーマ」にある
+# (スキーマが増えた直後は Unknown database でテストが落ちるため)。
 set -euo pipefail
 
 TEST_DB_USER="test_user"

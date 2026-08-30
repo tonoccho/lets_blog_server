@@ -184,9 +184,47 @@ npm run test:e2e -- security.spec.ts
 ```gradle
 testImplementation 'org.springframework.boot:spring-boot-starter-test'
 testImplementation 'org.springframework.security:spring-security-test'
+// @AutoConfigureMockMvcを使う統合テスト向け
+testImplementation 'org.springframework.boot:spring-boot-webmvc-test'
 // JWTを必要とするテストのフィクスチャ(上記「JWTを必要とするテストの書き方」参照)
 testImplementation testFixtures(project(':libs:lbs-common'))
 ```
+
+#### サービス別のテスト用スキーマ
+
+ADR-0006 のとおり Testcontainers は使わず、実 MySQL の**サービス専用テストスキーマ**へ接続する
+(各サービスの `src/test/resources/application-test.yml`)。スキーマは
+`mysql/init/02-create-test-schemas.sh` が作る。
+
+| サービス | テストスキーマ | 作られ方 |
+|---|---|---|
+| legacy-api | `lets_blog_test` | `scripts/setup-test-db.sh` |
+| content / media / ai / analytics / platform | `lbs_{content,media,ai,analytics,platform}_test` | `mysql/init/02-create-test-schemas.sh` |
+| identity / project / publishing / log-writer | `lbs_{identity,project,publishing,log}_test` | 同上(#772で追加) |
+
+**注意:** `mysql/init/*.sh` は MySQL 公式イメージの仕様により**データボリュームが空のときにしか
+実行されない**。既に MySQL を動かしている環境であとからスキーマが増えると、
+`Unknown database 'lbs_project_test'` のようなエラーでテストが落ちる。ボリュームを作り直さずに
+追随するには、テストの接続先 MySQL(各 `application-test.yml` の `localhost:3306`)に対して
+不足しているスキーマを手で作る。
+
+```bash
+# <container> はテストの接続先MySQLのコンテナ名(開発スタックなら lbs-mysql)
+docker exec -i <container> sh -c 'exec mysql -u root -p"$MYSQL_ROOT_PASSWORD"' <<'SQL'
+CREATE DATABASE IF NOT EXISTS lbs_identity_test   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS lbs_project_test    CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS lbs_publishing_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS lbs_log_test        CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+GRANT ALL PRIVILEGES ON `lbs_identity_test`.*   TO 'test_user'@'%';
+GRANT ALL PRIVILEGES ON `lbs_project_test`.*    TO 'test_user'@'%';
+GRANT ALL PRIVILEGES ON `lbs_publishing_test`.* TO 'test_user'@'%';
+GRANT ALL PRIVILEGES ON `lbs_log_test`.*        TO 'test_user'@'%';
+FLUSH PRIVILEGES;
+SQL
+```
+
+テーブルは各サービスの Flyway migration が起動時に作る。identity のみ Flyway を持たない
+(移行管理は legacy-api 側)ため、テストでは `ddl-auto: create-drop` でエンティティ定義から作る。
 
 ### Web テスト環境
 
