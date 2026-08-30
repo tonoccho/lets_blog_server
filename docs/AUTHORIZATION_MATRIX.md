@@ -182,11 +182,19 @@ identity が返す 403 は、呼び出し側で `SyncServiceClientErrorException
 同じ手法の先例は `services/gateway` の `RouteControllerContractTest` と
 `DownstreamHealthConfigContractTest`(#743)。
 
-###### これは多層防御であって唯一の関門ではない(が、現状は唯一のこともある)
+###### これは多層防御である
 
-バックエンドが Bearer トークンで認可するのが本来の関門。ただし
-`GeneratedImageController` のように**バックエンド側に認可チェックが無い**エンドポイントもあり
-(#830)、その場合は Server Action の認可が現時点で唯一の関門になっている。
+バックエンドが Bearer トークンで認証・認可するのが本来の関門。
+各サービスの `SecurityConfig` は `anyRequest().authenticated()`(ADR-0008)なので、
+**未認証はバックエンドでも弾かれる**。
+
+ただし `GeneratedImageController` や `SiteController` の `register` /
+`createManagedWordPress` / `adopt` / `list` / `testConnection` のように、
+**認証は要求するがロール・所有者による絞り込みを持たない**エンドポイントがある(#830)。
+その範囲では Server Action の認可が実質的に唯一の絞り込みになっている。
+
+`SiteController` でも `getDetail` / `update` / `delete` / `installWpCli` / `reprovision` /
+`generateSshKeyPair` は `requireAdmin()` を呼んでおり、欠けているのは一部のエンドポイントに限る。
 
 ##### 注意: admin には別軸が2つある
 

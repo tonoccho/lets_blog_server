@@ -35,8 +35,11 @@ const CREDENTIAL_FIELDS: Record<CmsType, string[]> = {
  * `requireAdminSession()` を要求しており、サイトの作成だけが素通りだった。
  * サイト登録は SSH 認証情報を保存しインフラを作る操作なので、削除と同じ水準が妥当。
  *
- * **挙動の変更を伴う**: これまで非 admin でもサイトを登録できた
- * (バックエンドの `SiteController` にも認可チェックが無い。#830)。本変更以降は 403 になる。
+ * **挙動の変更を伴う**: これまで非 admin でもサイトを登録できた。
+ * バックエンドの `SiteController` は `getDetail` / `update` / `delete` / `installWpCli` /
+ * `reprovision` / `generateSshKeyPair` では `requireAdmin()` を呼ぶが、
+ * **`register` / `createManagedWordPress` / `adopt` / `list` / `testConnection` は呼ばない**
+ * (#830)。本変更以降は Server Action 側で 403 になる。
  * なお登録フォーム内の SSH 鍵生成(`generateSshKeyPairAction`)は元から admin 限定なので、
  * 非 admin はどのみち鍵を新規生成できなかった。
  */

@@ -17,8 +17,14 @@ import {
  * 画面側も `isAdmin` による出し分けをしておらず、一覧・詳細・削除・タグ編集のすべてを
  * ログイン済み利用者に開放している。認可の粒度をそこへ揃える。
  *
- * これは多層防御である。バックエンドの `GeneratedImageController` は認可チェックを
- * 一切持たない(#830)ため、現時点ではここが唯一の関門になっている。
+ * これは多層防御である。バックエンドの `GeneratedImageController` は**認可**チェックを
+ * 一切持たない(#830)。ただし media-service の `SecurityConfig` は
+ * `anyRequest().authenticated()` なので、**未認証はバックエンドでも弾かれる**。
+ * 欠けているのはロール・所有者による絞り込みであって認証ではない。
+ *
+ * 所有者による絞り込みをしていないのは、`GeneratedImage` に所有者を表す列が無く
+ * 現状のスキーマでは表現できないため。ギャラリーもプロジェクト横断で全件を表示している。
+ * `projectId` はあるので、将来プロジェクトメンバーシップによる絞り込みは可能。
  */
 export async function getGeneratedImageAction(id: number): Promise<GeneratedImageDetail> {
   await requireSession();
