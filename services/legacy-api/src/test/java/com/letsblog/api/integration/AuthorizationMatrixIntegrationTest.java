@@ -214,6 +214,44 @@ class AuthorizationMatrixIntegrationTest {
         return userRepository.save(user);
     }
 
+    // ---------------------------------------------- 無効化ユーザーの発行済みトークン(issue #816)
+
+    /**
+     * 無効化しても発行済みのアクセストークンは失効しない(Keycloakが止めるのは新規発行だけ)。
+     * #816以前は{@code CurrentActorService}が{@code enabled}を参照していなかったため、
+     * 無効化直後のユーザーは{@code accessTokenLifespan}(既定300秒)の間APIを通せた。
+     *
+     * <p>legacy-apiだけ個別の修正が必要だった理由: 他の8サービスは
+     * {@code GET /api/identity/me}経由で操作者を解決するためidentity-service側の修正で塞がるが、
+     * legacy-apiは共有スキーマの{@code users}テーブルを自前で参照している(#786参照)。
+     */
+    @Test
+    @DisplayName("無効化されたadminは操作者として解決されない(issue #816)")
+    void 無効化adminは403() throws Exception {
+        User admin = persistUser("admin");
+        admin.setEnabled(false);
+        userRepository.save(admin);
+
+        mockMvc.perform(request(HttpMethod.GET, "/api/project-users")
+                        .with(JwtTestFixtures.jwtRequestPostProcessor(admin.getKeycloakSub())))
+                .andExpect(status().isForbidden());
+    }
+
+    /** 有効なユーザーは従来どおり(無効化の判定が常時弾いていないことの確認)。 */
+    @Test
+    @DisplayName("有効なadminは従来どおり通る(issue #816)")
+    void 有効adminは403にならない() throws Exception {
+        User admin = persistUser("admin");
+
+        assertThat(admin.isEnabled())
+                .as("persistUserが作るユーザーはenabled=true(DB既定値と揃えたフィールド初期値)")
+                .isTrue();
+
+        mockMvc.perform(request(HttpMethod.GET, "/api/project-users")
+                        .with(JwtTestFixtures.jwtRequestPostProcessor(admin.getKeycloakSub())))
+                .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(403));
+    }
+
     @Test
     @DisplayName("GET /api/project-users: admin以外のactorは403")
     void projectUsers_admin以外は403() throws Exception {

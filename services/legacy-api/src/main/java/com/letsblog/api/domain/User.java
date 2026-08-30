@@ -33,6 +33,17 @@ public class User {
     @Column(name = "keycloak_sub", unique = true, length = 255)
     private String keycloakSub;
 
+    /**
+     * 無効化フラグ(V65で追加。identity-serviceの{@code deactivate}/{@code reactivate}が更新する)。
+     *
+     * <p>legacy-apiはこの値を<b>読み取り専用で使う</b>(issue #816)。無効化されたユーザーを
+     * 操作者として解決しないための判定にのみ用い、legacy-api側から更新することはない。
+     * DB既定値と揃えて{@code true}で初期化しているため、legacy-apiがユーザーを新規作成する
+     * 経路でも従来どおり有効なユーザーが作られる。
+     */
+    @Column(name = "enabled", nullable = false)
+    private boolean enabled = true;
+
     @Column(name = "password_hash", nullable = false)
     private String passwordHash;
 
