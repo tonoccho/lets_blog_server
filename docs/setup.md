@@ -124,11 +124,25 @@ docker exec lbs-api curl -sf http://localhost:8080/actuator/health
 docker exec lbs-log-writer curl -sf http://localhost:8080/actuator/health
 ```
 
-gateway は下流サービスの状態を自身の `/actuator/health` に集約するため
-(`services/gateway/.../DownstreamHealthConfig`、#560・#743)、
-`docker exec lbs-gateway curl -sf http://localhost:8080/actuator/health` を叩けば
-全サービスの疎通をまとめて確認できる。個別のサービスを見るのは、
-集約結果で DOWN になっているものを切り分けるときになる。
+gateway は下流のバックエンドサービス10個(legacy-api / identity / content / media / ai /
+analytics / log-writer / project / publishing / platform)の状態を自身の `/actuator/health` に
+集約するため(`services/gateway/.../DownstreamHealthConfig`、#560・#743)、
+次のコマンドでまとめて確認できる。
+
+```bash
+docker exec lbs-gateway curl -s http://localhost:8080/actuator/health
+```
+
+`-f` を付けないのは、いずれかが DOWN のとき gateway が 503 を返すため。
+`-f` があると curl が本文を出さずに終了してしまい、**どのサービスが DOWN なのかが分からない**。
+gateway は `show-details: always` なので、本文にサービスごとの状態が入っている。
+
+mysql / rabbitmq / keycloak / web などは集約の対象外なので、個別に確認する。
+
+なお、いずれか1つでも DOWN だと gateway 自身のヘルスも DOWN になり、
+`docker ps` で `lbs-gateway (unhealthy)` と表示される。一部のサービスだけ起動している
+開発中はこれが正常なので、gateway の unhealthy 表示だけを見て異常と判断しないこと
+(gateway の healthy を起動条件にしているコンテナは無いため、起動順序には影響しない)。
 
 ### アクセスURL一覧
 
