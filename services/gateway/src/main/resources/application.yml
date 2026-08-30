@@ -101,10 +101,17 @@ app:
       # 専用ルートが無かったため、より広い/api/projects/**(下のprojectルート)へ先勝ちでマッチし、
       # project-serviceに存在しないパスとして404になっていた(issue #771。#642/#659の
       # ArticlePlanControllerと同一パターン)。
+      #
+      # response-timeoutは下のaiルートと同じ180秒にする。このエンドポイントは同期のLLM呼び出し
+      # (AiController#generateImagePrompt → AiAssistService → AiGenerationClient)であり、
+      # AiGenerationClientのプロファイルはSyncCallProfile.LLM(読み取り180秒)、ai-service側の
+      # LLM_REQUEST_TIMEOUT_SECONDSも既定120秒。既定の60秒(default-response-timeout)のままだと
+      # 下流がまだ待っている最中にgatewayだけが504で切ってしまう。
       - id: project-ai-generate-image-prompt-legacy
         uri: ${LEGACY_API_URI:http://api:8080}
         paths:
           - /api/projects/*/ai/generate-image-prompt
+        response-timeout: 180s
       # プロジェクト単位の各種設定(ProjectController#updateCssSelectorPrefix・
       # updateImageGenerationPromptDefaults・updateImageGenerationSizeDefaults・
       # updateArticleImageResizeDefault・updateImageContentFilterSettings)も、
