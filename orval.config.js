@@ -103,13 +103,41 @@ module.exports = {
     },
   },
 
-  // 将来のサービス抽出Issueで追加する例(identity-serviceの場合):
-  // identity: {
-  //   input: { target: './openapi/identity.json' },
-  //   output: {
-  //     ...commonOutput,
-  //     target: './sdk/api-client/src/generated/identity',
-  //     baseUrl: 'http://localhost:8080/identity',
-  //   },
-  // },
+  // 公開パイプライン(PostController#publish/#delete)・一括管理/環境間比較・taxonomy解決・
+  // 記事プレビューのCMS依存部分をpublishing-serviceへ移設(#707/#708/#709/#712)。
+  publishing: {
+    input: {
+      target: './openapi/publishing.json',
+    },
+    output: {
+      ...commonOutput,
+      target: './sdk/api-client/src/generated/publishing',
+      baseUrl: 'http://localhost:8080',
+    },
+  },
+
+  // VSCode拡張の配布・バックアップ/リストア・システム設定・ダッシュボードの状態取得を
+  // platform-serviceへ移設(#693〜#696、C10)。
+  platform: {
+    input: {
+      target: './openapi/platform.json',
+    },
+    output: {
+      ...commonOutput,
+      target: './sdk/api-client/src/generated/platform',
+      baseUrl: 'http://localhost:8080',
+    },
+  },
+
+  // ユーザー・ロール・権限管理をidentity-serviceへ移設(#561)。
+  identity: {
+    input: {
+      target: './openapi/identity.json',
+    },
+    output: {
+      ...commonOutput,
+      target: './sdk/api-client/src/generated/identity',
+      baseUrl: 'http://localhost:8080',
+    },
+  },
 };

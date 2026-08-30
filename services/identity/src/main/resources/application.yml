@@ -23,6 +23,12 @@ springdoc:
     path: /swagger-ui.html
     operations-sorter: method
     tags-sorter: alpha
+  # log-writer(#572)/media-service(#573)/ai-service(#574)/content-service(#576)等と同じ理由:
+  # 明示的なproducesを持たないエンドポイントがOpenAPI上`*/*`として記録されると、orvalが生成する
+  # TypeScriptクライアントの型付けが崩れる(res.json()ではなくres.text()を生成し、宣言した
+  # レスポンス型と一致しなくなる)。既定の応答Content-Typeを明示することでこれを避ける。
+  # 本サービスだけこの設定が漏れており、生成クライアントに型エラーが出ていた(issue #739)。
+  default-produces-media-type: application/json
 
 spring:
   application:
