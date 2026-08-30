@@ -15,7 +15,7 @@ import {
   StaticContentType,
   WpCliInstallResult,
 } from "@/lib/apiClient";
-import { getSession, requireAdminSession } from "@/lib/session";
+import { requireAdminSession } from "@/lib/session";
 
 export interface RegisterSiteState {
   error?: string;
@@ -69,12 +69,9 @@ export async function registerSiteAction(
     return { error: "SSH秘密鍵を指定してください(保存済みの鍵ペアを選択するか、新しい鍵ペアを生成してください)。" };
   }
 
-  const session = await getSession();
-  const actor = session ? { id: Number(session.user.id), role: session.user.role } : undefined;
-
   let connectionCheckStatus: "SUCCESS" | "FAILED" | null;
   try {
-    const site = await registerSite({ name, siteKey, cmsType, credentials }, actor);
+    const site = await registerSite({ name, siteKey, cmsType, credentials });
     connectionCheckStatus = site.connectionCheckStatus;
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
@@ -91,11 +88,10 @@ export interface GenerateSshKeyPairResult {
 }
 
 export async function generateSshKeyPairAction(comment: string): Promise<GenerateSshKeyPairResult> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   try {
-    const keyPair = await generateSshKeyPair(comment, actor);
+    const keyPair = await generateSshKeyPair(comment);
     return { publicKeyLine: keyPair.publicKeyLine, privateKeyPem: keyPair.privateKeyPem };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
@@ -125,14 +121,9 @@ export async function createManagedWordPressSiteAction(
     return { error: "すべての項目を入力してください。" };
   }
 
-  const session = await getSession();
-  const actor = session ? { id: Number(session.user.id), role: session.user.role } : undefined;
-
   try {
     await createManagedWordPressSite(
-      { name, siteKey, title, adminUser, adminEmail, adminPassword, locale, templateSiteId },
-      actor
-    );
+      { name, siteKey, title, adminUser, adminEmail, adminPassword, locale, templateSiteId });
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -142,8 +133,8 @@ export async function createManagedWordPressSiteAction(
 }
 
 export async function deleteSiteAction(id: number) {
-  const session = await requireAdminSession();
-  await deleteSite(id, { id: Number(session.user.id), role: session.user.role });
+  await requireAdminSession();
+  await deleteSite(id);
   revalidatePath("/sites");
 }
 
@@ -152,9 +143,8 @@ export async function checkSiteConnectionAction(id: number): Promise<SiteConnect
 }
 
 export async function installWpCliAction(id: number): Promise<WpCliInstallResult> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-  return installWpCli(id, actor);
+  await requireAdminSession();
+  return installWpCli(id);
 }
 
 export interface GenerateStaticContentResult {
@@ -166,10 +156,9 @@ export async function generateStaticContentAction(
   siteId: number,
   contentType: StaticContentType
 ): Promise<GenerateStaticContentResult> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
   try {
-    const content = await generateStaticContent(siteId, contentType, actor);
+    const content = await generateStaticContent(siteId, contentType);
     return { content };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };

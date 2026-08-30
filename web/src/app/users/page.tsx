@@ -6,14 +6,13 @@ import { UserForm } from "./UserForm";
 import { DeleteUserButton } from "./DeleteUserButton";
 
 export default async function UsersPage() {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
   // viewerはログイン中ユーザー自身のローカルプロフィール(issue #784)。session.user.idは
   // Keycloakのsub(UUID)なので、自分の行かどうかの判定にはこちらの数値idを使う。
   const [users, projects, projectUsers, timezone, viewer] = await Promise.all([
     listUsers().catch(() => []),
     listProjects().catch(() => []),
-    listAllProjectUsers(actor).catch(() => []),
+    listAllProjectUsers().catch(() => []),
     getViewerTimeZone(),
     getViewerProfile(),
   ]);

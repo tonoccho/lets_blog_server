@@ -49,8 +49,7 @@ export default async function UserProfileEditPage({
     redirect("/");
   }
 
-  const actor = { id: Number(session.user.id), role: session.user.role };
-  const profile = await getUserProfile(Number(id), actor).catch(() => null);
+  const profile = await getUserProfile(Number(id)).catch(() => null);
   if (!profile) {
     redirect(isSelf ? "/" : "/users");
   }

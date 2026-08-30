@@ -14,8 +14,7 @@ export async function createProjectAction(
   _prevState: CreateProjectState,
   formData: FormData
 ): Promise<CreateProjectState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const name = String(formData.get("name") ?? "").trim();
   const slug = String(formData.get("slug") ?? "").trim();
@@ -25,7 +24,7 @@ export async function createProjectAction(
   }
 
   try {
-    await createProject({ name, slug }, actor);
+    await createProject({ name, slug });
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -35,8 +34,8 @@ export async function createProjectAction(
 }
 
 export async function deleteProjectAction(id: number) {
-  const session = await requireAdminSession();
-  await deleteProject(id, { id: Number(session.user.id), role: session.user.role });
+  await requireAdminSession();
+  await deleteProject(id);
   revalidatePath("/projects");
   redirect("/projects");
 }

@@ -6,9 +6,8 @@ import { ProjectForm } from "./ProjectForm";
 import { ProjectsTable } from "./ProjectsTable";
 
 export default async function ProjectsPage() {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-  const [projects, timezone] = await Promise.all([listProjects(actor).catch(() => []), getViewerTimeZone()]);
+  await requireAdminSession();
+  const [projects, timezone] = await Promise.all([listProjects().catch(() => []), getViewerTimeZone()]);
 
   return (
     <div className="space-y-8">

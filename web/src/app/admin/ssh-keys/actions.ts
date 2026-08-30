@@ -10,11 +10,10 @@ export interface CreateSshKeyPairResult {
 }
 
 export async function createSshKeyPairAction(name: string, comment: string): Promise<CreateSshKeyPairResult> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   try {
-    const keyPair = await createSshKeyPair({ name, comment: comment || undefined }, actor);
+    const keyPair = await createSshKeyPair({ name, comment: comment || undefined });
     revalidatePath("/admin/ssh-keys");
     return { keyPair };
   } catch (err) {
@@ -27,11 +26,10 @@ export interface DeleteSshKeyPairResult {
 }
 
 export async function deleteSshKeyPairAction(id: number): Promise<DeleteSshKeyPairResult> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   try {
-    await deleteSshKeyPair(id, actor);
+    await deleteSshKeyPair(id);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

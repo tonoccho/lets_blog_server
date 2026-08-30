@@ -11,8 +11,7 @@ const STATE_COOKIE = "adsense_oauth_state";
  * /connect/adsense/start/route.tsのコメント参照。
  */
 export async function GET(request: NextRequest) {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const code = request.nextUrl.searchParams.get("code");
   const state = request.nextUrl.searchParams.get("state");
@@ -44,7 +43,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const redirectUri = `${process.env.NEXTAUTH_URL}/connect/adsense/callback`;
-    await completeProjectAdSenseOAuth(projectId, { code, redirectUri }, actor);
+    await completeProjectAdSenseOAuth(projectId, { code, redirectUri });
   } catch (err) {
     return redirectToSettings("error", err instanceof Error ? err.message : String(err));
   }

@@ -26,12 +26,11 @@ export async function updateProjectCssSelectorPrefixAction(
   _prevState: CssSelectorPrefixFormState,
   formData: FormData
 ): Promise<CssSelectorPrefixFormState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
   const cssSelectorPrefix = String(formData.get("cssSelectorPrefix") ?? "").trim();
 
   try {
-    await updateProjectCssSelectorPrefix(projectId, cssSelectorPrefix, actor);
+    await updateProjectCssSelectorPrefix(projectId, cssSelectorPrefix);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -45,8 +44,7 @@ export async function upsertProjectCustomTagAction(
   _prevState: CustomTagFormState,
   formData: FormData
 ): Promise<CustomTagFormState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const idRaw = String(formData.get("id") ?? "").trim();
   const tagName = String(formData.get("tagName") ?? "").trim();
@@ -75,9 +73,9 @@ export async function upsertProjectCustomTagAction(
       projectId,
     };
     if (idRaw) {
-      await updateCustomTag(Number(idRaw), input, actor);
+      await updateCustomTag(Number(idRaw), input);
     } else {
-      await createCustomTag(input, actor);
+      await createCustomTag(input);
     }
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
@@ -88,7 +86,7 @@ export async function upsertProjectCustomTagAction(
 }
 
 export async function deleteProjectCustomTagAction(projectId: number, id: number) {
-  const session = await requireAdminSession();
-  await deleteCustomTag(id, { id: Number(session.user.id), role: session.user.role });
+  await requireAdminSession();
+  await deleteCustomTag(id);
   revalidatePath(`/projects/${projectId}/tags`);
 }

@@ -12,8 +12,7 @@ export default async function SitesPage() {
     getViewerTimeZone(),
   ]);
   const isAdmin = session?.user.role === "admin";
-  const actor = session ? { id: Number(session.user.id), role: session.user.role } : undefined;
-  const sshKeyPairs = isAdmin ? await listSshKeyPairs(actor).catch(() => []) : [];
+  const sshKeyPairs = isAdmin ? await listSshKeyPairs().catch(() => []) : [];
 
   return (
     <div className="space-y-8">

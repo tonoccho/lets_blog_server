@@ -13,13 +13,12 @@ export default async function ProjectAdSenseSettingsPage({
 }) {
   const { id } = await params;
   const { connected, error } = await searchParams;
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
   const projectId = Number(id);
 
   const [project, status] = await Promise.all([
-    getProject(projectId, actor).catch(() => null),
-    getProjectAdSenseStatus(projectId, actor).catch(() => ({
+    getProject(projectId).catch(() => null),
+    getProjectAdSenseStatus(projectId).catch(() => ({
       configured: false,
       accountId: null,
       clientId: null,

@@ -136,11 +136,6 @@ async function currentAccessToken(): Promise<string> {
   return token.accessToken;
 }
 
-export interface ActorInfo {
-  id: number;
-  role: "admin" | "user";
-}
-
 const OPERATION_ID_HEADER = 'x-operation-id';
 
 /** proxy.tsがリクエストごとに発番したIDを読み取り、1回の操作で発生した複数のAPI呼び出しを束ねる。 */
@@ -182,13 +177,6 @@ async function recordOperationLog(accessToken: string, entry: OperationLogEntryI
 }
 
 interface ApiRequestInit extends RequestInit {
-  /**
-   * (issue #564以前の名残)呼び出し元がactorを明示できるフィールド。認可・監査ログの紐付けは
-   * Authorizationヘッダーの検証済みJWTでサーバー側が判定するようになったため、この値自体は
-   * もう使われない。~150箇所ある個々のAPIラッパー関数のシグネチャを変更しないためにフィールド
-   * としてだけ残している(fetch()には渡らない未使用の値として無害に無視される)。
-   */
-  actor?: ActorInfo;
   /** ログイン前でも呼べる公開エンドポイント(setup/setup-status)向け。既定はtrue。 */
   requiresAuth?: boolean;
   /**
@@ -291,30 +279,28 @@ export interface SiteDetail {
   configuredSecretFields: string[];
 }
 
-export function getSiteDetail(id: number, actor?: ActorInfo): Promise<SiteDetail> {
-  return apiFetch<SiteDetail>(`/api/sites/${id}`, { actor });
+export function getSiteDetail(id: number): Promise<SiteDetail> {
+  return apiFetch<SiteDetail>(`/api/sites/${id}`);
 }
 
-export function registerSite(input: SiteRegisterInput, actor?: ActorInfo): Promise<Site> {
+export function registerSite(input: SiteRegisterInput): Promise<Site> {
   return apiFetch<Site>('/api/sites', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function createManagedWordPressSite(input: ManagedWordPressSiteInput, actor?: ActorInfo): Promise<Site> {
+export function createManagedWordPressSite(input: ManagedWordPressSiteInput): Promise<Site> {
   return apiFetch<Site>('/api/sites/managed-wordpress', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function deleteSite(id: number, actor?: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/sites/${id}`, { method: 'DELETE', actor });
+export function deleteSite(id: number): Promise<void> {
+  return apiFetch<void>(`/api/sites/${id}`, { method: 'DELETE' });
 }
 
 export interface SiteUpdateInput {
@@ -322,12 +308,11 @@ export interface SiteUpdateInput {
   credentials?: Record<string, string>;
 }
 
-export function updateSite(id: number, input: SiteUpdateInput, actor?: ActorInfo): Promise<Site> {
+export function updateSite(id: number, input: SiteUpdateInput): Promise<Site> {
   return apiFetch<Site>(`/api/sites/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
@@ -346,8 +331,8 @@ export interface WpCliInstallResult {
   message: string;
 }
 
-export function installWpCli(id: number, actor?: ActorInfo): Promise<WpCliInstallResult> {
-  return apiFetch<WpCliInstallResult>(`/api/sites/${id}/install-wp-cli`, { method: 'POST', actor });
+export function installWpCli(id: number): Promise<WpCliInstallResult> {
+  return apiFetch<WpCliInstallResult>(`/api/sites/${id}/install-wp-cli`, { method: 'POST' });
 }
 
 export type StaticContentType = "PRIVACY_POLICY" | "OPERATOR_INFO" | "TERMS_OF_SERVICE";
@@ -361,20 +346,18 @@ export interface StaticContent {
   updatedAt: string;
 }
 
-export function listStaticContent(siteId: number, actor?: ActorInfo): Promise<StaticContent[]> {
-  return apiFetch<StaticContent[]>(`/api/sites/${siteId}/static-content`, { actor });
+export function listStaticContent(siteId: number): Promise<StaticContent[]> {
+  return apiFetch<StaticContent[]>(`/api/sites/${siteId}/static-content`);
 }
 
 export function generateStaticContent(
   siteId: number,
-  contentType: StaticContentType,
-  actor?: ActorInfo
+  contentType: StaticContentType
 ): Promise<StaticContent> {
   return apiFetch<StaticContent>(`/api/sites/${siteId}/static-content/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ contentType }),
-    actor,
   });
 }
 
@@ -383,12 +366,11 @@ export interface SshKeyPair {
   privateKeyPem: string;
 }
 
-export function generateSshKeyPair(comment: string | undefined, actor?: ActorInfo): Promise<SshKeyPair> {
+export function generateSshKeyPair(comment: string | undefined): Promise<SshKeyPair> {
   return apiFetch<SshKeyPair>('/api/sites/ssh-keypair', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ comment: comment || null }),
-    actor,
   });
 }
 
@@ -408,24 +390,22 @@ export interface GeneratedSshKeyPair extends SavedSshKeyPair {
   privateKeyPem: string;
 }
 
-export function listSshKeyPairs(actor?: ActorInfo): Promise<SavedSshKeyPair[]> {
-  return apiFetch<SavedSshKeyPair[]>('/api/ssh-key-pairs', { actor });
+export function listSshKeyPairs(): Promise<SavedSshKeyPair[]> {
+  return apiFetch<SavedSshKeyPair[]>('/api/ssh-key-pairs');
 }
 
 export function createSshKeyPair(
-  input: { name: string; comment?: string },
-  actor: ActorInfo
+  input: { name: string; comment?: string }
 ): Promise<GeneratedSshKeyPair> {
   return apiFetch<GeneratedSshKeyPair>('/api/ssh-key-pairs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: input.name, comment: input.comment || null }),
-    actor,
   });
 }
 
-export function deleteSshKeyPair(id: number, actor: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/ssh-key-pairs/${id}`, { method: 'DELETE', actor });
+export function deleteSshKeyPair(id: number): Promise<void> {
+  return apiFetch<void>(`/api/ssh-key-pairs/${id}`, { method: 'DELETE' });
 }
 
 export function listPosts(): Promise<PostSummary[]> {
@@ -478,8 +458,8 @@ export interface ImageGenerationOptionsResponse {
   defaultQualityPrompt: string | null;
 }
 
-export function getImageGenerationOptions(projectId: number, actor?: ActorInfo): Promise<ImageGenerationOptionsResponse> {
-  return apiFetch<ImageGenerationOptionsResponse>(`/api/ai/image-options?projectId=${projectId}`, { actor });
+export function getImageGenerationOptions(projectId: number): Promise<ImageGenerationOptionsResponse> {
+  return apiFetch<ImageGenerationOptionsResponse>(`/api/ai/image-options?projectId=${projectId}`);
 }
 
 export interface AiImageGenerationParams {
@@ -511,14 +491,12 @@ export interface AiImageBatchResult {
 }
 
 export function generateProjectImages(
-  params: AiImageGenerationParams,
-  actor?: ActorInfo
+  params: AiImageGenerationParams
 ): Promise<AiImageBatchResult> {
   return apiFetch<AiImageBatchResult>('/api/ai/image', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
-    actor,
   });
 }
 
@@ -528,25 +506,21 @@ export interface AiImagePromptResponse {
 
 export function generateImagePromptFromChat(
   projectId: number,
-  data: { history: PlanChatMessage[]; message: string; provider?: string },
-  actor?: ActorInfo
+  data: { history: PlanChatMessage[]; message: string; provider?: string }
 ): Promise<AiImagePromptResponse> {
   return apiFetch<AiImagePromptResponse>(`/api/projects/${projectId}/ai/generate-image-prompt`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-    actor,
   });
 }
 
 export function uploadProjectAssetImage(
   projectId: number,
-  generatedImageId: number,
-  actor?: ActorInfo
+  generatedImageId: number
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/asset-images/${generatedImageId}/upload`, {
     method: 'POST',
-    actor,
   });
 }
 
@@ -567,26 +541,24 @@ export function setupInitialAdmin(email: string, password: string): Promise<Auth
   });
 }
 
-export function createUser(input: UserCreateInput, actor?: ActorInfo): Promise<AppUser> {
+export function createUser(input: UserCreateInput): Promise<AppUser> {
   return apiFetch<AppUser>('/api/users', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function updateUserRole(id: number, role: "admin" | "user", actor?: ActorInfo): Promise<AppUser> {
+export function updateUserRole(id: number, role: "admin" | "user"): Promise<AppUser> {
   return apiFetch<AppUser>(`/api/users/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ role }),
-    actor,
   });
 }
 
-export function deleteUser(id: number, actor?: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/users/${id}`, { method: 'DELETE', actor });
+export function deleteUser(id: number): Promise<void> {
+  return apiFetch<void>(`/api/users/${id}`, { method: 'DELETE' });
 }
 
 export interface SocialLinks {
@@ -649,8 +621,8 @@ export interface UserProfileInput {
   customLinks: CustomLink[] | null;
 }
 
-export function getUserProfile(id: number, actor?: ActorInfo): Promise<UserProfile> {
-  return apiFetch<UserProfile>(`/api/users/${id}`, { actor });
+export function getUserProfile(id: number): Promise<UserProfile> {
+  return apiFetch<UserProfile>(`/api/users/${id}`);
 }
 
 /**
@@ -667,12 +639,11 @@ export function getMyProfile(): Promise<UserProfile> {
   return apiFetch<UserProfile>('/api/identity/me');
 }
 
-export function updateUserProfile(id: number, input: UserProfileInput, actor?: ActorInfo): Promise<UserProfile> {
+export function updateUserProfile(id: number, input: UserProfileInput): Promise<UserProfile> {
   return apiFetch<UserProfile>(`/api/users/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
@@ -683,14 +654,12 @@ export interface UpdateUserPreferencesInput {
 
 export function updateUserPreferences(
   id: number,
-  input: UpdateUserPreferencesInput,
-  actor?: ActorInfo
+  input: UpdateUserPreferencesInput
 ): Promise<UserProfile> {
   return apiFetch<UserProfile>(`/api/users/${id}/preferences`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
@@ -708,27 +677,25 @@ export function updateMyPreferences(input: UpdateUserPreferencesInput): Promise<
 
 export function updateGithubToken(
   id: number,
-  input: { githubToken: string },
-  actor?: ActorInfo
+  input: { githubToken: string }
 ): Promise<UserProfile> {
   return apiFetch<UserProfile>(`/api/users/${id}/github-token`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function listRoles(actor: ActorInfo): Promise<RoleInfo[]> {
-  return apiFetch<RoleInfo[]>('/api/roles', { actor });
+export function listRoles(): Promise<RoleInfo[]> {
+  return apiFetch<RoleInfo[]>('/api/roles');
 }
 
-export function assignRole(userId: number, roleName: string, actor: ActorInfo): Promise<{ message: string }> {
-  return apiFetch<{ message: string }>(`/api/users/${userId}/roles/${roleName}`, { method: 'POST', actor });
+export function assignRole(userId: number, roleName: string): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>(`/api/users/${userId}/roles/${roleName}`, { method: 'POST' });
 }
 
-export function removeRole(userId: number, roleName: string, actor: ActorInfo): Promise<{ message: string }> {
-  return apiFetch<{ message: string }>(`/api/users/${userId}/roles/${roleName}`, { method: 'DELETE', actor });
+export function removeRole(userId: number, roleName: string): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>(`/api/users/${userId}/roles/${roleName}`, { method: 'DELETE' });
 }
 
 export interface PostStatusOption {
@@ -737,8 +704,8 @@ export interface PostStatusOption {
 }
 
 /** 投稿ステータスの正準リスト。VS Code拡張とサーバー側の選択肢を一致させるための共通取得元(issue #472)。 */
-export function getPostStatuses(actor?: ActorInfo): Promise<PostStatusOption[]> {
-  return apiFetch<PostStatusOption[]>('/api/metadata/post-statuses', { actor });
+export function getPostStatuses(): Promise<PostStatusOption[]> {
+  return apiFetch<PostStatusOption[]>('/api/metadata/post-statuses');
 }
 
 export type CustomTagFormat = 'INLINE' | 'BLOCK';
@@ -798,47 +765,43 @@ export interface ValidateCustomTagRequest {
 }
 
 /** プロジェクト詳細のカスタムタグ画面向け。グローバルタグを含めず、プロジェクトのタグのみを返す。 */
-export function listProjectCustomTags(projectId: number, actor?: ActorInfo): Promise<CustomTag[]> {
-  return apiFetch<CustomTag[]>(`/api/projects/${projectId}/custom-tags`, { actor });
+export function listProjectCustomTags(projectId: number): Promise<CustomTag[]> {
+  return apiFetch<CustomTag[]>(`/api/projects/${projectId}/custom-tags`);
 }
 
-export function createCustomTag(input: CustomTagInput, actor: ActorInfo): Promise<CustomTag> {
+export function createCustomTag(input: CustomTagInput): Promise<CustomTag> {
   return apiFetch<CustomTag>('/api/custom-tags', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function updateCustomTag(id: number, input: CustomTagInput, actor: ActorInfo): Promise<CustomTag> {
+export function updateCustomTag(id: number, input: CustomTagInput): Promise<CustomTag> {
   return apiFetch<CustomTag>(`/api/custom-tags/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function deleteCustomTag(id: number, actor: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/custom-tags/${id}`, { method: 'DELETE', actor });
+export function deleteCustomTag(id: number): Promise<void> {
+  return apiFetch<void>(`/api/custom-tags/${id}`, { method: 'DELETE' });
 }
 
-export function generateCustomTag(input: GenerateCustomTagInput, actor: ActorInfo): Promise<CustomTag> {
+export function generateCustomTag(input: GenerateCustomTagInput): Promise<CustomTag> {
   return apiFetch<CustomTag>('/api/custom-tags/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function validateCustomTag(input: ValidateCustomTagRequest, actor: ActorInfo): Promise<ValidationResult> {
+export function validateCustomTag(input: ValidateCustomTagRequest): Promise<ValidationResult> {
   return apiFetch<ValidationResult>('/api/custom-tags/validate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
@@ -859,27 +822,22 @@ export interface CustomTagPreviewResult {
  */
 export function previewProjectCustomTag(
   projectId: number,
-  input: CustomTagPreviewInput,
-  actor: ActorInfo
+  input: CustomTagPreviewInput
 ): Promise<CustomTagPreviewResult> {
   return apiFetch<CustomTagPreviewResult>(`/api/projects/${projectId}/custom-tags/preview`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
 /**
  * プロジェクト詳細/プロジェクト一覧向け。グローバルタグを含めず、プロジェクトのタグのCSSのみを連結する。
- * actor引数は呼び出し元シグネチャ互換のために残しているが、認可はAuthorizationヘッダーのJWTで
- * サーバー側が判定するため実際には使わない。
  */
 export async function downloadProjectCustomTagCssBundle(
-  projectId: number,
-  actor: ActorInfo
+  projectId: number
 ): Promise<ArrayBuffer> {
-  const res = await apiRequest(`/api/projects/${projectId}/custom-tags/css-bundle`, { actor });
+  const res = await apiRequest(`/api/projects/${projectId}/custom-tags/css-bundle`);
   return res.arrayBuffer();
 }
 
@@ -919,21 +877,19 @@ export interface SaveTagDesignSettingInput {
   htmlTemplate?: string;
 }
 
-export function getTagDesignSettings(projectId: number, actor?: ActorInfo): Promise<TagDesignSettingsOverview> {
-  return apiFetch<TagDesignSettingsOverview>(`/api/projects/${projectId}/tag-design-settings`, { actor });
+export function getTagDesignSettings(projectId: number): Promise<TagDesignSettingsOverview> {
+  return apiFetch<TagDesignSettingsOverview>(`/api/projects/${projectId}/tag-design-settings`);
 }
 
 export function saveTagDesignSetting(
   projectId: number,
   tagType: EmbedTagType,
-  input: SaveTagDesignSettingInput,
-  actor: ActorInfo
+  input: SaveTagDesignSettingInput
 ): Promise<TagDesignSetting> {
   return apiFetch<TagDesignSetting>(`/api/projects/${projectId}/tag-design-settings/${tagType}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
@@ -946,14 +902,12 @@ export interface GenerateTagDesignResult {
 export function generateTagDesign(
   projectId: number,
   tagType: EmbedTagType,
-  prompt: string,
-  actor: ActorInfo
+  prompt: string
 ): Promise<GenerateTagDesignResult> {
   return apiFetch<GenerateTagDesignResult>(`/api/projects/${projectId}/tag-design-settings/${tagType}/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt }),
-    actor,
   });
 }
 
@@ -990,67 +944,62 @@ export interface CloneCustomTagTemplateInput {
   projectId?: number | null;
 }
 
-export function listCustomTagTemplates(actor?: ActorInfo, projectId?: number, options?: { category?: string; search?: string; showAll?: boolean }): Promise<CustomTagTemplate[]> {
+export function listCustomTagTemplates(projectId?: number, options?: { category?: string; search?: string; showAll?: boolean }): Promise<CustomTagTemplate[]> {
   const params = new URLSearchParams();
   if (projectId != null) params.set('projectId', String(projectId));
   if (options?.category) params.set('category', options.category);
   if (options?.search) params.set('search', options.search);
   if (options?.showAll) params.set('showAll', 'true');
   const query = params.toString() ? `?${params.toString()}` : '';
-  return apiFetch<CustomTagTemplate[]>(`/api/custom-tag-templates${query}`, { actor });
+  return apiFetch<CustomTagTemplate[]>(`/api/custom-tag-templates${query}`);
 }
 
-export function getCustomTagTemplate(id: number, actor?: ActorInfo): Promise<CustomTagTemplate> {
-  return apiFetch<CustomTagTemplate>(`/api/custom-tag-templates/${id}`, { actor });
+export function getCustomTagTemplate(id: number): Promise<CustomTagTemplate> {
+  return apiFetch<CustomTagTemplate>(`/api/custom-tag-templates/${id}`);
 }
 
-export function createCustomTagTemplate(input: CustomTagTemplateInput, actor: ActorInfo): Promise<CustomTagTemplate> {
+export function createCustomTagTemplate(input: CustomTagTemplateInput): Promise<CustomTagTemplate> {
   return apiFetch<CustomTagTemplate>('/api/custom-tag-templates', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function updateCustomTagTemplate(id: number, input: CustomTagTemplateInput, actor: ActorInfo): Promise<CustomTagTemplate> {
+export function updateCustomTagTemplate(id: number, input: CustomTagTemplateInput): Promise<CustomTagTemplate> {
   return apiFetch<CustomTagTemplate>(`/api/custom-tag-templates/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function publishCustomTagTemplate(id: number, actor: ActorInfo): Promise<CustomTagTemplate> {
+export function publishCustomTagTemplate(id: number): Promise<CustomTagTemplate> {
   return apiFetch<CustomTagTemplate>(`/api/custom-tag-templates/${id}/publish`, {
     method: 'POST',
-    actor,
   });
 }
 
-export function unpublishCustomTagTemplate(id: number, actor: ActorInfo): Promise<CustomTagTemplate> {
+export function unpublishCustomTagTemplate(id: number): Promise<CustomTagTemplate> {
   return apiFetch<CustomTagTemplate>(`/api/custom-tag-templates/${id}/unpublish`, {
     method: 'POST',
-    actor,
   });
 }
 
-export function cloneCustomTagTemplate(id: number, input: CloneCustomTagTemplateInput, actor: ActorInfo): Promise<CustomTagTemplate> {
+export function cloneCustomTagTemplate(id: number, input: CloneCustomTagTemplateInput): Promise<CustomTagTemplate> {
   return apiFetch<CustomTagTemplate>(`/api/custom-tag-templates/${id}/clone`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function deleteCustomTagTemplate(id: number, actor: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/custom-tag-templates/${id}`, { method: 'DELETE', actor });
+export function deleteCustomTagTemplate(id: number): Promise<void> {
+  return apiFetch<void>(`/api/custom-tag-templates/${id}`, { method: 'DELETE' });
 }
 
-export function getMyCustomTagTemplates(actor: ActorInfo): Promise<CustomTagTemplate[]> {
-  return apiFetch<CustomTagTemplate[]>('/api/custom-tag-templates/my-templates', { actor });
+export function getMyCustomTagTemplates(): Promise<CustomTagTemplate[]> {
+  return apiFetch<CustomTagTemplate[]>('/api/custom-tag-templates/my-templates');
 }
 
 /**
@@ -1072,7 +1021,6 @@ export async function downloadBackupFile(): Promise<{ body: ArrayBuffer; filenam
  */
 export async function restoreBackup(
   file: File,
-  actor: ActorInfo,
   acknowledgeKeyMismatch: boolean
 ): Promise<void> {
   const formData = new FormData();
@@ -1082,7 +1030,6 @@ export async function restoreBackup(
   return apiFetch<void>('/api/backup/restore', {
     method: 'POST',
     body: formData,
-    actor,
   });
 }
 
@@ -1110,18 +1057,17 @@ export interface OperationLogPage {
 }
 
 export function listOperationLogs(
-  params: { page?: number; size?: number },
-  actor: ActorInfo
+  params: { page?: number; size?: number }
 ): Promise<OperationLogPage> {
   const query = new URLSearchParams();
   query.set('page', String(params.page ?? 0));
   query.set('size', String(params.size ?? 200));
   query.set('sort', 'createdAt,desc');
-  return apiFetch<OperationLogPage>(`/api/operation-logs?${query.toString()}`, { actor });
+  return apiFetch<OperationLogPage>(`/api/operation-logs?${query.toString()}`);
 }
 
-export function getOperationTrace(operationId: string, actor: ActorInfo): Promise<OperationLogEntry[]> {
-  return apiFetch<OperationLogEntry[]>(`/api/operation-logs/${encodeURIComponent(operationId)}`, { actor });
+export function getOperationTrace(operationId: string): Promise<OperationLogEntry[]> {
+  return apiFetch<OperationLogEntry[]>(`/api/operation-logs/${encodeURIComponent(operationId)}`);
 }
 
 /** 操作ログ・AIジョブ・監査ログを一元表示するための統合エントリ(issue #187)。 */
@@ -1153,15 +1099,14 @@ export interface UnifiedLogPage {
 }
 
 export function listUnifiedOperationLogs(
-  params: { type?: UnifiedLogSourceType; q?: string; page?: number; size?: number },
-  actor: ActorInfo
+  params: { type?: UnifiedLogSourceType; q?: string; page?: number; size?: number }
 ): Promise<UnifiedLogPage> {
   const query = new URLSearchParams();
   if (params.type) query.set('type', params.type);
   if (params.q) query.set('q', params.q);
   query.set('page', String(params.page ?? 0));
   query.set('size', String(params.size ?? 50));
-  return apiFetch<UnifiedLogPage>(`/api/operation-logs/unified?${query.toString()}`, { actor });
+  return apiFetch<UnifiedLogPage>(`/api/operation-logs/unified?${query.toString()}`);
 }
 
 /**
@@ -1214,59 +1159,53 @@ export interface Project {
 
 export type ProjectEnvironment = "local" | "test" | "production";
 
-export function listProjects(actor?: ActorInfo): Promise<Project[]> {
-  return apiFetch<Project[]>('/api/projects', { actor });
+export function listProjects(): Promise<Project[]> {
+  return apiFetch<Project[]>('/api/projects');
 }
 
-export function getProject(id: number, actor?: ActorInfo): Promise<Project> {
-  return apiFetch<Project>(`/api/projects/${id}`, { actor });
+export function getProject(id: number): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}`);
 }
 
-export function createProject(input: { name: string; slug: string }, actor?: ActorInfo): Promise<Project> {
+export function createProject(input: { name: string; slug: string }): Promise<Project> {
   return apiFetch<Project>('/api/projects', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function updateProject(id: number, name: string, actor?: ActorInfo): Promise<Project> {
+export function updateProject(id: number, name: string): Promise<Project> {
   return apiFetch<Project>(`/api/projects/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
-    actor,
   });
 }
 
-export function deleteProject(id: number, actor?: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/projects/${id}`, { method: 'DELETE', actor });
+export function deleteProject(id: number): Promise<void> {
+  return apiFetch<void>(`/api/projects/${id}`, { method: 'DELETE' });
 }
 
 export function updateProjectGithubRepository(
   id: number,
-  githubRepository: string,
-  actor?: ActorInfo
+  githubRepository: string
 ): Promise<Project> {
   return apiFetch<Project>(`/api/projects/${id}/github-repository`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ githubRepository }),
-    actor,
   });
 }
 
 export function updateProjectCssSelectorPrefix(
   id: number,
-  cssSelectorPrefix: string,
-  actor?: ActorInfo
+  cssSelectorPrefix: string
 ): Promise<Project> {
   return apiFetch<Project>(`/api/projects/${id}/css-selector-prefix`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cssSelectorPrefix }),
-    actor,
   });
 }
 
@@ -1274,14 +1213,12 @@ export function updateProjectCssSelectorPrefix(
 export function updateProjectImageGenerationPromptDefaults(
   id: number,
   defaultNegativePrompt: string,
-  defaultQualityPrompt: string,
-  actor?: ActorInfo
+  defaultQualityPrompt: string
 ): Promise<Project> {
   return apiFetch<Project>(`/api/projects/${id}/image-generation-prompt-defaults`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ defaultNegativePrompt, defaultQualityPrompt }),
-    actor,
   });
 }
 
@@ -1289,28 +1226,24 @@ export function updateProjectImageGenerationPromptDefaults(
 export function updateProjectImageGenerationSizeDefaults(
   id: number,
   defaultGeneratedImageWidth: number | null,
-  defaultGeneratedImageHeight: number | null,
-  actor?: ActorInfo
+  defaultGeneratedImageHeight: number | null
 ): Promise<Project> {
   return apiFetch<Project>(`/api/projects/${id}/image-generation-size-defaults`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ defaultGeneratedImageWidth, defaultGeneratedImageHeight }),
-    actor,
   });
 }
 
 /** 記事投稿時に画像をリサイズする長編の目標px(issue #291)。nullはアプリ全体のデフォルト(1300px)へ戻す。 */
 export function updateProjectArticleImageResizeDefault(
   id: number,
-  defaultArticleImageLongEdgePx: number | null,
-  actor?: ActorInfo
+  defaultArticleImageLongEdgePx: number | null
 ): Promise<Project> {
   return apiFetch<Project>(`/api/projects/${id}/article-image-resize-default`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ defaultArticleImageLongEdgePx }),
-    actor,
   });
 }
 
@@ -1319,14 +1252,12 @@ export function updateProjectImageContentFilterSettings(
   id: number,
   blockSexualContent: boolean,
   blockViolentContent: boolean,
-  blockDiscriminatoryContent: boolean,
-  actor?: ActorInfo
+  blockDiscriminatoryContent: boolean
 ): Promise<Project> {
   return apiFetch<Project>(`/api/projects/${id}/image-content-filter-settings`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ blockSexualContent, blockViolentContent, blockDiscriminatoryContent }),
-    actor,
   });
 }
 
@@ -1335,41 +1266,38 @@ export interface ProjectApiKeyStatus {
   configured: boolean;
 }
 
-export function getProjectGithubTokenStatus(projectId: number, actor?: ActorInfo): Promise<ProjectApiKeyStatus> {
-  return apiFetch<ProjectApiKeyStatus>(`/api/projects/${projectId}/api-keys/github-token`, { actor });
+export function getProjectGithubTokenStatus(projectId: number): Promise<ProjectApiKeyStatus> {
+  return apiFetch<ProjectApiKeyStatus>(`/api/projects/${projectId}/api-keys/github-token`);
 }
 
-export function setProjectGithubToken(projectId: number, githubToken: string, actor: ActorInfo): Promise<void> {
+export function setProjectGithubToken(projectId: number, githubToken: string): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}/api-keys/github-token`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ githubToken }),
-    actor,
   });
 }
 
-export function clearProjectGithubToken(projectId: number, actor: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/projects/${projectId}/api-keys/github-token`, { method: 'DELETE', actor });
+export function clearProjectGithubToken(projectId: number): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/github-token`, { method: 'DELETE' });
 }
 
 export function getProjectBraveSearchApiKeyStatus(
-  projectId: number,
-  actor?: ActorInfo
+  projectId: number
 ): Promise<ProjectApiKeyStatus> {
-  return apiFetch<ProjectApiKeyStatus>(`/api/projects/${projectId}/api-keys/brave-search-api-key`, { actor });
+  return apiFetch<ProjectApiKeyStatus>(`/api/projects/${projectId}/api-keys/brave-search-api-key`);
 }
 
-export function setProjectBraveSearchApiKey(projectId: number, apiKey: string, actor: ActorInfo): Promise<void> {
+export function setProjectBraveSearchApiKey(projectId: number, apiKey: string): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}/api-keys/brave-search-api-key`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ apiKey }),
-    actor,
   });
 }
 
-export function clearProjectBraveSearchApiKey(projectId: number, actor: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/projects/${projectId}/api-keys/brave-search-api-key`, { method: 'DELETE', actor });
+export function clearProjectBraveSearchApiKey(projectId: number): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/brave-search-api-key`, { method: 'DELETE' });
 }
 
 export interface ProjectGoogleAnalyticsStatus {
@@ -1378,27 +1306,24 @@ export interface ProjectGoogleAnalyticsStatus {
 }
 
 export function getProjectGoogleAnalyticsStatus(
-  projectId: number,
-  actor?: ActorInfo
+  projectId: number
 ): Promise<ProjectGoogleAnalyticsStatus> {
-  return apiFetch<ProjectGoogleAnalyticsStatus>(`/api/projects/${projectId}/api-keys/google-analytics`, { actor });
+  return apiFetch<ProjectGoogleAnalyticsStatus>(`/api/projects/${projectId}/api-keys/google-analytics`);
 }
 
 export function setProjectGoogleAnalyticsCredentials(
   projectId: number,
-  input: { propertyId: string; serviceAccountJson: string },
-  actor: ActorInfo
+  input: { propertyId: string; serviceAccountJson: string }
 ): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}/api-keys/google-analytics`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function clearProjectGoogleAnalyticsCredentials(projectId: number, actor: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/projects/${projectId}/api-keys/google-analytics`, { method: 'DELETE', actor });
+export function clearProjectGoogleAnalyticsCredentials(projectId: number): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/google-analytics`, { method: 'DELETE' });
 }
 
 export interface GoogleAnalyticsDailyDataPoint {
@@ -1427,10 +1352,9 @@ export interface GoogleAnalyticsReport {
 }
 
 export function getProjectGoogleAnalyticsReport(
-  projectId: number,
-  actor?: ActorInfo
+  projectId: number
 ): Promise<GoogleAnalyticsReport> {
-  return apiFetch<GoogleAnalyticsReport>(`/api/projects/${projectId}/dashboard/google-analytics`, { actor });
+  return apiFetch<GoogleAnalyticsReport>(`/api/projects/${projectId}/dashboard/google-analytics`);
 }
 
 export interface ProjectAdSenseStatus {
@@ -1440,50 +1364,44 @@ export interface ProjectAdSenseStatus {
   hasClientSecret: boolean;
 }
 
-export function getProjectAdSenseStatus(projectId: number, actor?: ActorInfo): Promise<ProjectAdSenseStatus> {
-  return apiFetch<ProjectAdSenseStatus>(`/api/projects/${projectId}/api-keys/adsense`, { actor });
+export function getProjectAdSenseStatus(projectId: number): Promise<ProjectAdSenseStatus> {
+  return apiFetch<ProjectAdSenseStatus>(`/api/projects/${projectId}/api-keys/adsense`);
 }
 
 export function setProjectAdSenseSettings(
   projectId: number,
-  input: { accountId: string; clientId: string },
-  actor: ActorInfo
+  input: { accountId: string; clientId: string }
 ): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}/api-keys/adsense`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
 export function setProjectAdSenseClientSecret(
   projectId: number,
-  clientSecret: string,
-  actor: ActorInfo
+  clientSecret: string
 ): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}/api-keys/adsense/client-secret`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ clientSecret }),
-    actor,
   });
 }
 
-export function clearProjectAdSenseCredentials(projectId: number, actor: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/projects/${projectId}/api-keys/adsense`, { method: 'DELETE', actor });
+export function clearProjectAdSenseCredentials(projectId: number): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/adsense`, { method: 'DELETE' });
 }
 
 export function completeProjectAdSenseOAuth(
   projectId: number,
-  input: { code: string; redirectUri: string },
-  actor: ActorInfo
+  input: { code: string; redirectUri: string }
 ): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}/api-keys/adsense/oauth-callback`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
@@ -1512,8 +1430,8 @@ export interface AdSenseReport {
   platformBreakdown: AdSensePlatformBreakdown[];
 }
 
-export function getProjectAdSenseReport(projectId: number, actor?: ActorInfo): Promise<AdSenseReport> {
-  return apiFetch<AdSenseReport>(`/api/projects/${projectId}/dashboard/adsense`, { actor });
+export function getProjectAdSenseReport(projectId: number): Promise<AdSenseReport> {
+  return apiFetch<AdSenseReport>(`/api/projects/${projectId}/dashboard/adsense`);
 }
 
 /**
@@ -1530,16 +1448,15 @@ export interface AppSetting {
   value: string | null;
 }
 
-export function listAppSettings(actor?: ActorInfo): Promise<AppSetting[]> {
-  return apiFetch<AppSetting[]>('/api/system-settings/app-settings', { actor });
+export function listAppSettings(): Promise<AppSetting[]> {
+  return apiFetch<AppSetting[]>('/api/system-settings/app-settings');
 }
 
-export function updateAppSettings(settings: Record<string, string>, actor: ActorInfo): Promise<void> {
+export function updateAppSettings(settings: Record<string, string>): Promise<void> {
   return apiFetch<void>('/api/system-settings/app-settings', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(settings),
-    actor,
   });
 }
 
@@ -1610,43 +1527,36 @@ export function sendArticlePlanChatMessage(
     message: string;
     sessionId?: number | null;
     githubIssueNumber?: number | null;
-  },
-  actor?: ActorInfo
+  }
 ): Promise<PlanChatResponse> {
   return apiFetch<PlanChatResponse>(`/api/projects/${projectId}/article-plan/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-    actor,
   });
 }
 
 export function listArticlePlanSessions(
-  projectId: number,
-  actor?: ActorInfo
+  projectId: number
 ): Promise<ArticlePlanSessionSummary[]> {
-  return apiFetch<ArticlePlanSessionSummary[]>(`/api/projects/${projectId}/article-plan/sessions`, { actor });
+  return apiFetch<ArticlePlanSessionSummary[]>(`/api/projects/${projectId}/article-plan/sessions`);
 }
 
 export function getArticlePlanSession(
   projectId: number,
-  sessionId: number,
-  actor?: ActorInfo
+  sessionId: number
 ): Promise<ArticlePlanSessionDetail> {
   return apiFetch<ArticlePlanSessionDetail>(
-    `/api/projects/${projectId}/article-plan/sessions/${sessionId}`,
-    { actor }
+    `/api/projects/${projectId}/article-plan/sessions/${sessionId}`
   );
 }
 
 export function getArticlePlanSessionByIssue(
   projectId: number,
-  issueNumber: number,
-  actor?: ActorInfo
+  issueNumber: number
 ): Promise<ArticlePlanSessionDetail> {
   return apiFetch<ArticlePlanSessionDetail>(
-    `/api/projects/${projectId}/article-plan/sessions/by-issue/${issueNumber}`,
-    { actor }
+    `/api/projects/${projectId}/article-plan/sessions/by-issue/${issueNumber}`
   );
 }
 
@@ -1656,70 +1566,59 @@ export interface IssueDescriptionResponse {
 
 export function getArticlePlanIssueDescription(
   projectId: number,
-  issueNumber: number,
-  actor?: ActorInfo
+  issueNumber: number
 ): Promise<IssueDescriptionResponse> {
   return apiFetch<IssueDescriptionResponse>(
-    `/api/projects/${projectId}/article-plan/issues/${issueNumber}/description`,
-    { actor }
+    `/api/projects/${projectId}/article-plan/issues/${issueNumber}/description`
   );
 }
 
 export function listArticlePlanIssues(
   projectId: number,
-  state: RepositoryIssueState,
-  actor?: ActorInfo
+  state: RepositoryIssueState
 ): Promise<RepositoryIssue[]> {
   return apiFetch<RepositoryIssue[]>(
-    `/api/projects/${projectId}/article-plan/issues?state=${state}`,
-    { actor }
+    `/api/projects/${projectId}/article-plan/issues?state=${state}`
   );
 }
 
 export function suggestArticlePlanTitles(
   projectId: number,
-  data: { history: PlanChatMessage[] },
-  actor?: ActorInfo
+  data: { history: PlanChatMessage[] }
 ): Promise<SuggestTitlesResponse> {
   return apiFetch<SuggestTitlesResponse>(`/api/projects/${projectId}/article-plan/suggest-titles`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-    actor,
   });
 }
 
 export function acceptArticlePlan(
   projectId: number,
-  data: { titles: string[] },
-  actor?: ActorInfo
+  data: { titles: string[] }
 ): Promise<AcceptPlanResponse> {
   return apiFetch<AcceptPlanResponse>(`/api/projects/${projectId}/article-plan/accept`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-    actor,
   });
 }
 
 export function suggestArticleStructure(
   projectId: number,
-  data: { history: PlanChatMessage[] },
-  actor?: ActorInfo
+  data: { history: PlanChatMessage[] }
 ): Promise<SuggestStructureResponse> {
   return apiFetch<SuggestStructureResponse>(`/api/projects/${projectId}/article-plan/suggest-structure`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-    actor,
   });
 }
 
 export function acceptArticleStructure(
   projectId: number,
   issueNumber: number,
-  data: { structure: string },
-  actor?: ActorInfo
+  data: { structure: string }
 ): Promise<AcceptStructureResponse> {
   return apiFetch<AcceptStructureResponse>(
     `/api/projects/${projectId}/article-plan/issues/${issueNumber}/accept-structure`,
@@ -1727,58 +1626,50 @@ export function acceptArticleStructure(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
-      actor,
     }
   );
 }
 
 export function updateMasterEnvironment(
   id: number,
-  masterEnvironment: "test" | "production",
-  actor?: ActorInfo
+  masterEnvironment: "test" | "production"
 ): Promise<Project> {
   return apiFetch<Project>(`/api/projects/${id}/master-environment`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ masterEnvironment }),
-    actor,
   });
 }
 
 export function bindProjectEnvironment(
   id: number,
   environment: ProjectEnvironment,
-  siteId: number,
-  actor?: ActorInfo
+  siteId: number
 ): Promise<Project> {
   return apiFetch<Project>(`/api/projects/${id}/environments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ environment, siteId }),
-    actor,
   });
 }
 
 export function unbindProjectEnvironment(
   id: number,
-  environment: ProjectEnvironment,
-  actor?: ActorInfo
+  environment: ProjectEnvironment
 ): Promise<Project> {
-  return apiFetch<Project>(`/api/projects/${id}/environments/${environment}`, { method: 'DELETE', actor });
+  return apiFetch<Project>(`/api/projects/${id}/environments/${environment}`, { method: 'DELETE' });
 }
 
 export type EnvironmentSyncTarget = "themes" | "plugins" | "media" | "db";
 
 export function syncProjectEnvironment(
   id: number,
-  input: { from: ProjectEnvironment; to: ProjectEnvironment; targets: EnvironmentSyncTarget[] },
-  actor?: ActorInfo
+  input: { from: ProjectEnvironment; to: ProjectEnvironment; targets: EnvironmentSyncTarget[] }
 ): Promise<void> {
   return apiFetch<void>(`/api/projects/${id}/environments/sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
@@ -1854,23 +1745,19 @@ export interface TermComparisonPage {
 
 export function listCategoryComparison(
   projectId: number,
-  page: number,
-  actor?: ActorInfo
+  page: number
 ): Promise<TermComparisonPage> {
   return apiFetch<TermComparisonPage>(
-    `/api/projects/${projectId}/bulk-management/categories/comparison?page=${page}`,
-    { actor }
+    `/api/projects/${projectId}/bulk-management/categories/comparison?page=${page}`
   );
 }
 
 export function listTagComparison(
   projectId: number,
-  page: number,
-  actor?: ActorInfo
+  page: number
 ): Promise<TermComparisonPage> {
   return apiFetch<TermComparisonPage>(
-    `/api/projects/${projectId}/bulk-management/tags/comparison?page=${page}`,
-    { actor }
+    `/api/projects/${projectId}/bulk-management/tags/comparison?page=${page}`
   );
 }
 
@@ -1884,14 +1771,12 @@ export function applyToEnvironment(
     categoryParentSlug?: string;
     categoryDescription?: string;
     categoryTargetSlug?: string;
-  },
-  actor?: ActorInfo
+  }
 ): Promise<BulkOperationLog> {
   return apiFetch<BulkOperationLog>(`/api/projects/${projectId}/bulk-management/apply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
@@ -1900,53 +1785,45 @@ export function applyToAllEnvironments(
   input: {
     operationType: BulkOperationType;
     value: string;
-  },
-  actor?: ActorInfo
+  }
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/apply-all`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
 export function syncCategoryToMaster(
   projectId: number,
-  slug: string,
-  actor?: ActorInfo
+  slug: string
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/categories/sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ slug }),
-    actor,
   });
 }
 
 export function deleteCategoryEverywhere(
   projectId: number,
-  slug: string,
-  actor?: ActorInfo
+  slug: string
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/categories/delete-all`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ slug }),
-    actor,
   });
 }
 
 export function syncTagToMaster(
   projectId: number,
-  slug: string,
-  actor?: ActorInfo
+  slug: string
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/tags/sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ slug }),
-    actor,
   });
 }
 
@@ -1960,60 +1837,50 @@ export interface EditTermInput {
 
 export function editCategoryAndSync(
   projectId: number,
-  input: EditTermInput,
-  actor?: ActorInfo
+  input: EditTermInput
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/categories/edit-sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
 export function editTagAndSync(
   projectId: number,
-  input: EditTermInput,
-  actor?: ActorInfo
+  input: EditTermInput
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/tags/edit-sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
 export function syncAllCategoriesToMaster(
-  projectId: number,
-  actor?: ActorInfo
+  projectId: number
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/categories/sync-all`, {
     method: 'POST',
-    actor,
   });
 }
 
 export function syncAllTagsToMaster(
-  projectId: number,
-  actor?: ActorInfo
+  projectId: number
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/tags/sync-all`, {
     method: 'POST',
-    actor,
   });
 }
 
 export function deleteTagEverywhere(
   projectId: number,
-  slug: string,
-  actor?: ActorInfo
+  slug: string
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/tags/delete-all`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ slug }),
-    actor,
   });
 }
 
@@ -2043,75 +1910,63 @@ export interface StatusComparisonPage {
 
 export function listPluginComparison(
   projectId: number,
-  page: number,
-  actor?: ActorInfo
+  page: number
 ): Promise<StatusComparisonPage> {
   return apiFetch<StatusComparisonPage>(
-    `/api/projects/${projectId}/bulk-management/plugins/comparison?page=${page}`,
-    { actor }
+    `/api/projects/${projectId}/bulk-management/plugins/comparison?page=${page}`
   );
 }
 
 export function listThemeComparison(
   projectId: number,
-  page: number,
-  actor?: ActorInfo
+  page: number
 ): Promise<StatusComparisonPage> {
   return apiFetch<StatusComparisonPage>(
-    `/api/projects/${projectId}/bulk-management/themes/comparison?page=${page}`,
-    { actor }
+    `/api/projects/${projectId}/bulk-management/themes/comparison?page=${page}`
   );
 }
 
 export function reconcilePluginState(
   projectId: number,
-  input: { slug: string; changes: { environment: ProjectEnvironment; desiredStatus: PluginThemeStatus }[] },
-  actor?: ActorInfo
+  input: { slug: string; changes: { environment: ProjectEnvironment; desiredStatus: PluginThemeStatus }[] }
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/plugins/reconcile`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
 export function reconcileThemeState(
   projectId: number,
-  input: { slug: string; changes: { environment: ProjectEnvironment; desiredStatus: PluginThemeStatus }[] },
-  actor?: ActorInfo
+  input: { slug: string; changes: { environment: ProjectEnvironment; desiredStatus: PluginThemeStatus }[] }
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/themes/reconcile`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
 export function deletePluginEverywhere(
   projectId: number,
-  slug: string,
-  actor?: ActorInfo
+  slug: string
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/plugins/delete-all`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ slug }),
-    actor,
   });
 }
 
 export function deleteThemeEverywhere(
   projectId: number,
-  slug: string,
-  actor?: ActorInfo
+  slug: string
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/themes/delete-all`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ slug }),
-    actor,
   });
 }
 
@@ -2144,20 +1999,17 @@ export interface PostComparisonPage {
 export function listPostComparison(
   projectId: number,
   postType: PostType,
-  page: number,
-  actor?: ActorInfo
+  page: number
 ): Promise<PostComparisonPage> {
   return apiFetch<PostComparisonPage>(
-    `/api/projects/${projectId}/bulk-management/posts/comparison?postType=${postType}&page=${page}`,
-    { actor }
+    `/api/projects/${projectId}/bulk-management/posts/comparison?postType=${postType}&page=${page}`
   );
 }
 
 export function deletePostEverywhere(
   projectId: number,
   postType: PostType,
-  slug: string,
-  actor?: ActorInfo
+  slug: string
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(
     `/api/projects/${projectId}/bulk-management/posts/delete-all?postType=${postType}`,
@@ -2165,7 +2017,6 @@ export function deletePostEverywhere(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ slug }),
-      actor,
     }
   );
 }
@@ -2174,8 +2025,7 @@ export function updatePostStatusEverywhere(
   projectId: number,
   postType: PostType,
   slug: string,
-  status: string,
-  actor?: ActorInfo
+  status: string
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(
     `/api/projects/${projectId}/bulk-management/posts/status-update?postType=${postType}`,
@@ -2183,15 +2033,13 @@ export function updatePostStatusEverywhere(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ slug, status }),
-      actor,
     }
   );
 }
 
 export function runBulkOperationUpload(
   projectId: number,
-  input: { operationType: ZipInstallOperationType; file: File },
-  actor?: ActorInfo
+  input: { operationType: ZipInstallOperationType; file: File }
 ): Promise<BulkOperationLog[]> {
   const formData = new FormData();
   formData.append('operationType', input.operationType);
@@ -2199,7 +2047,6 @@ export function runBulkOperationUpload(
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/upload`, {
     method: 'POST',
     body: formData,
-    actor,
   });
 }
 
@@ -2210,40 +2057,36 @@ export interface ProjectUser {
   wpRole: string;
 }
 
-export function listProjectUsers(projectId: number, actor?: ActorInfo): Promise<ProjectUser[]> {
-  return apiFetch<ProjectUser[]>(`/api/projects/${projectId}/users`, { actor });
+export function listProjectUsers(projectId: number): Promise<ProjectUser[]> {
+  return apiFetch<ProjectUser[]>(`/api/projects/${projectId}/users`);
 }
 
 export function addProjectUser(
   projectId: number,
   userId: number,
-  wpRole: string,
-  actor?: ActorInfo
+  wpRole: string
 ): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}/users`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ userId, wpRole }),
-    actor,
   });
 }
 
 export function updateProjectUserRole(
   projectId: number,
   userId: number,
-  wpRole: string,
-  actor?: ActorInfo
+  wpRole: string
 ): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}/users/${userId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ wpRole }),
-    actor,
   });
 }
 
-export function removeProjectUser(projectId: number, userId: number, actor?: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/projects/${projectId}/users/${userId}`, { method: 'DELETE', actor });
+export function removeProjectUser(projectId: number, userId: number): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/users/${userId}`, { method: 'DELETE' });
 }
 
 export interface ProjectUserSummary {
@@ -2252,8 +2095,8 @@ export interface ProjectUserSummary {
   wpRole: string;
 }
 
-export function listAllProjectUsers(actor?: ActorInfo): Promise<ProjectUserSummary[]> {
-  return apiFetch<ProjectUserSummary[]>('/api/project-users', { actor });
+export function listAllProjectUsers(): Promise<ProjectUserSummary[]> {
+  return apiFetch<ProjectUserSummary[]>('/api/project-users');
 }
 
 export interface GenerationJobDetail {
@@ -2266,8 +2109,8 @@ export interface GenerationJobDetail {
   updatedAt: string;
 }
 
-export function getGenerationJob(id: number, actor?: ActorInfo): Promise<GenerationJobDetail> {
-  return apiFetch<GenerationJobDetail>(`/api/generation-jobs/${id}`, { actor });
+export function getGenerationJob(id: number): Promise<GenerationJobDetail> {
+  return apiFetch<GenerationJobDetail>(`/api/generation-jobs/${id}`);
 }
 
 export interface LlmModelListResponse {
@@ -2275,20 +2118,18 @@ export interface LlmModelListResponse {
   selected: string;
 }
 
-export function listLlmModels(projectId: number, actor?: ActorInfo): Promise<LlmModelListResponse> {
-  return apiFetch<LlmModelListResponse>(`/api/projects/${projectId}/ai-models/llm/models`, { actor });
+export function listLlmModels(projectId: number): Promise<LlmModelListResponse> {
+  return apiFetch<LlmModelListResponse>(`/api/projects/${projectId}/ai-models/llm/models`);
 }
 
 export function selectLlmModel(
   projectId: number,
-  modelName: string,
-  actor?: ActorInfo
+  modelName: string
 ): Promise<LlmModelListResponse> {
   return apiFetch<LlmModelListResponse>(`/api/projects/${projectId}/ai-models/llm/models/selection`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ modelName }),
-    actor,
   });
 }
 
@@ -2298,21 +2139,19 @@ export interface LlmProviderListResponse {
   selected: string | null;
 }
 
-export function listLlmProvider(projectId: number, actor?: ActorInfo): Promise<LlmProviderListResponse> {
-  return apiFetch<LlmProviderListResponse>(`/api/projects/${projectId}/ai-models/llm/provider`, { actor });
+export function listLlmProvider(projectId: number): Promise<LlmProviderListResponse> {
+  return apiFetch<LlmProviderListResponse>(`/api/projects/${projectId}/ai-models/llm/provider`);
 }
 
 /** provider未指定(空文字)はプロジェクト単位の上書きを解除し、グローバル既定へ戻す。 */
 export function selectLlmProvider(
   projectId: number,
-  provider: string,
-  actor?: ActorInfo
+  provider: string
 ): Promise<LlmProviderListResponse> {
   return apiFetch<LlmProviderListResponse>(`/api/projects/${projectId}/ai-models/llm/provider/selection`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ provider: provider || null }),
-    actor,
   });
 }
 
@@ -2322,21 +2161,19 @@ export interface ImageProviderListResponse {
   selected: string | null;
 }
 
-export function listImageProvider(projectId: number, actor?: ActorInfo): Promise<ImageProviderListResponse> {
-  return apiFetch<ImageProviderListResponse>(`/api/projects/${projectId}/ai-models/image/provider`, { actor });
+export function listImageProvider(projectId: number): Promise<ImageProviderListResponse> {
+  return apiFetch<ImageProviderListResponse>(`/api/projects/${projectId}/ai-models/image/provider`);
 }
 
 /** provider未指定(空文字)はプロジェクト単位の上書きを解除し、ComfyUIへ戻す。 */
 export function selectImageProvider(
   projectId: number,
-  provider: string,
-  actor?: ActorInfo
+  provider: string
 ): Promise<ImageProviderListResponse> {
   return apiFetch<ImageProviderListResponse>(`/api/projects/${projectId}/ai-models/image/provider/selection`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ provider: provider || null }),
-    actor,
   });
 }
 
@@ -2346,18 +2183,15 @@ export interface ComfyUiCheckpointListResponse {
 }
 
 export function listComfyUiCheckpoints(
-  projectId: number,
-  actor?: ActorInfo
+  projectId: number
 ): Promise<ComfyUiCheckpointListResponse> {
   return apiFetch<ComfyUiCheckpointListResponse>(`/api/projects/${projectId}/ai-models/comfyui/checkpoints`, {
-    actor,
   });
 }
 
 export function selectComfyUiCheckpoint(
   projectId: number,
-  checkpointName: string,
-  actor?: ActorInfo
+  checkpointName: string
 ): Promise<ComfyUiCheckpointListResponse> {
   return apiFetch<ComfyUiCheckpointListResponse>(
     `/api/projects/${projectId}/ai-models/comfyui/checkpoints/selection`,
@@ -2365,7 +2199,6 @@ export function selectComfyUiCheckpoint(
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ checkpointName }),
-      actor,
     }
   );
 }
@@ -2373,25 +2206,22 @@ export function selectComfyUiCheckpoint(
 export function installComfyUiCheckpoint(
   projectId: number,
   downloadUrl: string,
-  fileName: string,
-  actor?: ActorInfo
+  fileName: string
 ): Promise<GenerationJob> {
   return apiFetch<GenerationJob>(`/api/projects/${projectId}/ai-models/comfyui/checkpoints/install`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ downloadUrl, fileName }),
-    actor,
   });
 }
 
 export function deleteComfyUiCheckpoint(
   projectId: number,
-  fileName: string,
-  actor?: ActorInfo
+  fileName: string
 ): Promise<GenerationJob> {
   return apiFetch<GenerationJob>(
     `/api/projects/${projectId}/ai-models/comfyui/checkpoints/${encodeURIComponent(fileName)}`,
-    { method: 'DELETE', actor }
+    { method: 'DELETE' }
   );
 }
 
@@ -2414,20 +2244,17 @@ export interface MediaGarbageCollectionScanResponse {
 
 export function scanMediaGarbage(
   projectId: number,
-  environment: ProjectEnvironment,
-  actor?: ActorInfo
+  environment: ProjectEnvironment
 ): Promise<MediaGarbageCollectionScanResponse> {
   return apiFetch<MediaGarbageCollectionScanResponse>(
-    `/api/projects/${projectId}/media-garbage-collection/scan?environment=${environment}`,
-    { actor }
+    `/api/projects/${projectId}/media-garbage-collection/scan?environment=${environment}`
   );
 }
 
 export function deleteMediaGarbage(
   projectId: number,
   environment: ProjectEnvironment,
-  mediaIds: string[],
-  actor?: ActorInfo
+  mediaIds: string[]
 ): Promise<GenerationJob> {
   return apiFetch<GenerationJob>(
     `/api/projects/${projectId}/media-garbage-collection/delete?environment=${environment}`,
@@ -2435,7 +2262,6 @@ export function deleteMediaGarbage(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mediaIds }),
-      actor,
     }
   );
 }
@@ -2475,8 +2301,8 @@ export interface ConnectedServiceStatusDetail {
 }
 
 /** 応答時間・エラー内容・チェック対象URLなどの詳細診断情報(issue #199)。admin限定、非adminが呼ぶと403になる。 */
-export function getConnectedServiceStatusDetail(actor?: ActorInfo): Promise<ConnectedServiceStatusDetail[]> {
-  return apiFetch<ConnectedServiceStatusDetail[]>('/api/dashboard/service-status/detail', { actor });
+export function getConnectedServiceStatusDetail(): Promise<ConnectedServiceStatusDetail[]> {
+  return apiFetch<ConnectedServiceStatusDetail[]>('/api/dashboard/service-status/detail');
 }
 
 /**
