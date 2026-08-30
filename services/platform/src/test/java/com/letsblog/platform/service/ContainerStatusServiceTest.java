@@ -4,6 +4,8 @@ import com.letsblog.platform.dto.ConnectedServiceStatusResponse.Status;
 import com.letsblog.platform.dto.ContainerStatusResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
@@ -88,6 +90,164 @@ class ContainerStatusServiceTest {
 
         assertEquals(Status.ERROR, containers.get(0).status());
         assertTrue(containers.get(0).detail().contains("Exited"));
+    }
+
+    // ------------------------------------------------------------------
+    // issue #725: 停止中コンテナの扱い。ワンショットジョブの正常完了と、
+    // 継続稼働が期待されるサービスの停止を区別する。
+    // ------------------------------------------------------------------
+
+    /** 終了コード0かつ再起動ポリシーno = 正常に完了したワンショットジョブ(legacy-schema-migrate等)。 */
+    @Test
+    void testListAll_正常終了したワンショットジョブはエラーにしない() {
+        expectList("[{\"Id\":\"abc123\",\"Names\":[\"/lbs-legacy-schema-migrate\"],"
+                + "\"State\":\"exited\",\"Status\":\"Exited (0) 2 hours ago\"}]");
+        expectInspect("abc123", 0, "no");
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(Status.NORMAL, containers.get(0).status());
+        assertEquals("exited", containers.get(0).state());
+    }
+
+    /**
+     * 終了コードが0でも、再起動ポリシーがunless-stopped(=継続稼働が期待されるサービス)なら
+     * エラーのまま。docker compose stop での正常停止をNORMALと表示すると、停止に気付けなくなる。
+     */
+    @Test
+    void testListAll_継続稼働サービスの正常停止はエラーのまま() {
+        expectList("[{\"Id\":\"def456\",\"Names\":[\"/lbs-mysql\"],"
+                + "\"State\":\"exited\",\"Status\":\"Exited (0) 5 minutes ago\"}]");
+        expectInspect("def456", 0, "unless-stopped");
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(Status.ERROR, containers.get(0).status());
+    }
+
+    /** ワンショットジョブでも異常終了(exit != 0)ならエラー。 */
+    @Test
+    void testListAll_異常終了したワンショットジョブはエラー() {
+        expectList("[{\"Id\":\"ghi789\",\"Names\":[\"/lbs-legacy-schema-migrate\"],"
+                + "\"State\":\"exited\",\"Status\":\"Exited (1) 2 hours ago\"}]");
+        expectInspect("ghi789", 1, "no");
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(Status.ERROR, containers.get(0).status());
+    }
+
+    /** 詳細が取れないときは判定できないので、異常を隠さずエラーのままにする。 */
+    @Test
+    void testListAll_詳細取得に失敗したらエラーのまま() {
+        expectList("[{\"Id\":\"jkl012\",\"Names\":[\"/lbs-legacy-schema-migrate\"],"
+                + "\"State\":\"exited\",\"Status\":\"Exited (0) 2 hours ago\"}]");
+        server.expect(requestTo(DOCKER_URL + "/containers/jkl012/json")).andRespond(withServerError());
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(Status.ERROR, containers.get(0).status());
+    }
+
+    /** 稼働中のコンテナだけなら詳細取得は行わない(往復を増やさない)。 */
+    @Test
+    void testListAll_稼働中のみなら詳細取得を行わない() {
+        expectList("[{\"Id\":\"mno345\",\"Names\":[\"/lbs-mysql\"],"
+                + "\"State\":\"running\",\"Status\":\"Up 3 hours\"}]");
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(Status.NORMAL, containers.get(0).status());
+        // 追加のリクエストを期待していないので、verify()が通れば詳細取得は行われていない。
+        server.verify();
+    }
+
+    /**
+     * 再起動ポリシーが読めなかった場合は完了扱いにしない。ExitCodeのasInt(-1)と同じく
+     * 「判定できなければ異常のまま」に倒す(レビュー指摘)。
+     */
+    @Test
+    void testListAll_再起動ポリシーが読めなければエラーのまま() {
+        expectList("[{\"Id\":\"pqr678\",\"Names\":[\"/lbs-legacy-schema-migrate\"],"
+                + "\"State\":\"exited\",\"Status\":\"Exited (0) 2 hours ago\"}]");
+        server.expect(requestTo(DOCKER_URL + "/containers/pqr678/json"))
+                .andRespond(withSuccess("{\"State\":{\"ExitCode\":0}}", MediaType.APPLICATION_JSON));
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(Status.ERROR, containers.get(0).status());
+    }
+
+    /** no以外の再起動ポリシーは継続稼働が期待されるので、exit 0でもエラーのまま。 */
+    @ParameterizedTest
+    @ValueSource(strings = {"unless-stopped", "always", "on-failure"})
+    void testListAll_no以外のポリシーの正常停止はエラーのまま(String restartPolicy) {
+        expectList("[{\"Id\":\"stu901\",\"Names\":[\"/lbs-keycloak\"],"
+                + "\"State\":\"exited\",\"Status\":\"Exited (0) 1 minute ago\"}]");
+        expectInspect("stu901", 0, restartPolicy);
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(Status.ERROR, containers.get(0).status());
+    }
+
+    /** exited以外の停止系状態(created/restarting/dead等)では詳細取得を行わずエラーにする。 */
+    @Test
+    void testListAll_exited以外の状態では詳細取得を行わない() {
+        expectList("[{\"Id\":\"vwx234\",\"Names\":[\"/lbs-ai\"],"
+                + "\"State\":\"restarting\",\"Status\":\"Restarting (1) 5 seconds ago\"}]");
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(Status.ERROR, containers.get(0).status());
+        server.verify();
+    }
+
+    /**
+     * Idが無いレスポンス(既存フィクスチャの形)でも詳細取得を行わずエラーにする。
+     * 既存テストがこの経路を暗黙に通っているので、明示的に固定しておく。
+     */
+    @Test
+    void testListAll_Idが無ければ詳細取得を行わない() {
+        expectList("[{\"Names\":[\"/lbs-wordpress\"],"
+                + "\"State\":\"exited\",\"Status\":\"Exited (0) 3 minutes ago\"}]");
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(Status.ERROR, containers.get(0).status());
+        server.verify();
+    }
+
+    /** 停止中が複数あれば、それぞれについて詳細を取得し個別に判定する。 */
+    @Test
+    void testListAll_停止中が複数あればそれぞれ判定する() {
+        expectList("[{\"Id\":\"one\",\"Names\":[\"/lbs-legacy-schema-migrate\"],"
+                + "\"State\":\"exited\",\"Status\":\"Exited (0) 2 hours ago\"},"
+                + "{\"Id\":\"two\",\"Names\":[\"/lbs-mysql\"],"
+                + "\"State\":\"exited\",\"Status\":\"Exited (0) 1 minute ago\"}]");
+        expectInspect("one", 0, "no");
+        expectInspect("two", 0, "unless-stopped");
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        // 名前順にソートされるので legacy-schema-migrate, mysql の順。
+        assertEquals("legacy-schema-migrate", containers.get(0).name());
+        assertEquals(Status.NORMAL, containers.get(0).status());
+        assertEquals("mysql", containers.get(1).name());
+        assertEquals(Status.ERROR, containers.get(1).status());
+    }
+
+    private void expectList(String json) {
+        server.expect(requestTo(DOCKER_URL + "/containers/json?all=true"))
+                .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
+    }
+
+    private void expectInspect(String id, int exitCode, String restartPolicy) {
+        server.expect(requestTo(DOCKER_URL + "/containers/" + id + "/json"))
+                .andRespond(withSuccess(
+                        "{\"State\":{\"ExitCode\":" + exitCode + "},"
+                                + "\"HostConfig\":{\"RestartPolicy\":{\"Name\":\"" + restartPolicy + "\"}}}",
+                        MediaType.APPLICATION_JSON));
     }
 
     @Test

@@ -4,6 +4,11 @@
 # ポート割当は内部8080に統一し(docs/DOCKER_COMPOSE_ARCHITECTURE.md参照)、外部公開は
 # reverse-proxy(nginx)経由のみとする。
 x-common-service: &common-service
+  # restartを個別に上書きする場合は、ダッシュボードのコンテナ状態判定
+  # (services/platform/.../ContainerStatusService、issue #725)に影響する点に注意。
+  # 判定は「終了コード0 かつ 再起動ポリシーno」を『正常に完了したワンショットジョブ』と見なす。
+  # 常駐サービスでこのアンカーを付け忘れるとポリシーがDocker既定のnoになり、正常停止が
+  # 「正常」と表示されて停止に気付けなくなる。
   restart: unless-stopped
   networks:
     - lbs-net
@@ -666,6 +671,10 @@ services:
     image: flyway/flyway:11-alpine
     container_name: lbs-legacy-schema-migrate
     <<: *common-service
+    # ワンショットジョブなので再起動させない。この値はダッシュボードのコンテナ状態判定
+    # (services/platform/.../ContainerStatusService、issue #725)が「正常に完了したジョブ」の
+    # 目印として参照している。他のサービスはx-common-serviceのrestart: unless-stoppedを使うため、
+    # ここを変えるとダッシュボードでこのコンテナがエラー表示になる。
     restart: "no"
     environment:
       FLYWAY_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
