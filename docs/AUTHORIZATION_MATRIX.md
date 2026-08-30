@@ -1,4 +1,57 @@
-# 認可マトリクス (legacy-api)
+# 認可マトリクス
+
+本ドキュメントは、どのサービスのどのエンドポイントが、誰の認証ゲートで守られるかを引くための
+一次情報である。冒頭の「認証ゲートの実施レイヤー」でランタイム横断の方針と実施状況を示し、
+以降にエンドポイント単位のマトリクスを置く。
+
+## 認証ゲートの実施レイヤー
+
+「有効なKeycloak JWTが無ければ401」という**認証ゲートは、各サービス自身の`SecurityConfig`が担う**。
+各サービスは明示的な`PUBLIC_PATHS`許可リストを持ち、それ以外は`anyRequest().authenticated()`
+(WebFluxなら`anyExchange().authenticated()`)とする。gatewayは素通しのリバースプロキシに留まり、
+Bearerトークンが提示されていれば検証するが、トークンが無いことを理由に拒否はしない。
+
+決定の根拠・検討した代替案(gatewayでの一元的なdeny-by-default)・その却下理由は
+[ADR-0008: 認証ゲートは各サービス自身の SecurityConfig で担い、gateway では実施しない](adr/0008-auth-gate-in-each-service-security-config.md)
+を参照。
+
+### ランタイム別の実施状況(2026-08-30時点)
+
+| ランタイム | 認証ゲートの担い手 | 公開パス | 対応する統合テスト |
+|---|---|---|---|
+| gateway | 担わない(方針どおり。ADR-0008)。提示されたトークンの検証のみ | 全経路(`anyExchange().permitAll()`) | 該当なし(ゲートを担わないため) |
+| legacy-api | 自サービスの`SecurityConfig`(#566) | `/api/health`、`/api/auth/setup`、`/api/auth/setup-status`、`/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html` | `services/legacy-api/src/test/java/com/letsblog/api/integration/AuthorizationMatrixIntegrationTest.java` |
+| platform | 自サービスの`SecurityConfig`(#705。**参照実装**) | `/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html`、`/api/internal/platform/**`(#742で別途判断) | `services/platform/src/test/java/com/letsblog/platform/integration/AuthorizationMatrixIntegrationTest.java`(**テストのテンプレート**) |
+| identity | 未実施(`anyRequest().permitAll()`) | 全経路 | #772で追加予定 |
+| project | 部分的(`/api/internal/**`のみ`authenticated()`) | `/api/internal/**`以外の全経路 | #772で追加予定 |
+| content | 未実施(`anyRequest().permitAll()`) | 全経路 | #772で追加予定 |
+| media | 未実施(`anyRequest().permitAll()`) | 全経路 | #772で追加予定 |
+| ai | 未実施(`anyRequest().permitAll()`) | 全経路 | #772で追加予定 |
+| analytics | 未実施(`anyRequest().permitAll()`) | 全経路 | #772で追加予定 |
+| publishing | 部分的(`/api/internal/**`のみ`authenticated()`) | `/api/internal/**`以外の全経路 | #772で追加予定 |
+| log-writer | 未実施(`anyRequest().permitAll()`) | 全経路 | #772で追加予定 |
+
+「未実施」「部分的」の8サービス(content / ai / analytics / media / identity / project /
+publishing / log-writer)を ADR-0008 の形へ揃える作業は **#772** のスコープであり、ADR-0008 を
+追加した #713 では行っていない。これら8サービスの`SecurityConfig`の Javadoc に残る
+「gatewayが実際のエンドユーザートラフィックの検証を担う想定」という ADR-0008 と矛盾する記述の
+是正も、挙動変更と同じコミットで行うため **#772** に委ねている(理由はADR-0008の
+「Notes: 本ADR(#713)時点の実施状況」を参照)。gatewayのみ、方針上そもそも挙動を変えないため
+例外として #713 で Javadoc を是正した。
+
+なお identity-service / log-writer は`SecurityConfig`としては`permitAll`だが、各コントローラーが
+`CurrentActorService`/`AdminAuthorizationService`経由でJWTのsubクレームを読む手続き的チェックを
+行っている。これは「認証済みなら誰でも到達できるエンドポイントが残る」という別の問題
+(後述の「既知のギャップ」)とは独立であり、`SecurityConfig`レベルの一律のゲートが無いことに
+変わりはない。
+
+以降のエンドポイント単位のマトリクスは、現時点では legacy-api(および legacy-api から移設された
+分の注記)のみを対象とする。上記8サービスのエンドポイント単位の行は、実際に`SecurityConfig`を
+変更する **#772** の担当とし、本節では枠と方針のみを示す。
+
+---
+
+## legacy-api のエンドポイント別マトリクス
 
 issue #568。`services/legacy-api` の全REST APIエンドポイント(`@GetMapping`/`@PostMapping`/
 `@PutMapping`/`@DeleteMapping`/`@PatchMapping` の合計174件、28コントローラファイル
