@@ -8,7 +8,7 @@
 #   - 01:27の判定: 依存が届けるはずだった実体(コード)を見た。C6の分割子#707-712と
 #     C10の分割子#693-696はいずれもその時点でCLOSED、gatewayのapplication.ymlにも
 #     publishing/platformのルートが既にあった → 着手可能
-#   - 01:32の判定: 依存Issueそのもののボード状態を見た。#583も#575もOPEN → 着手不可
+#   - 01:32の判定: 依存Issueそのものの状態を見た。#583も#575もOPEN → 着手不可
 #     (#575がCLOSEDになったのは02:12:19Z。差し戻しコメントの40分後なので、
 #      この事実主張も当時は正しかった)
 #
@@ -97,7 +97,7 @@ BLOCKED_BY_COUNT="$(echo "$BLOCKED_BY" | jq 'length')"
 if [ "$BLOCKED_BY_COUNT" -eq 0 ]; then
     echo "(なし)"
     echo "  → 正式なリンクが張られていない。この場合、本文の散文だけが依存の記録になる。"
-    echo "    散文の依存Issueのボード状態は、それ単体ではブロッカーにしない"
+    echo "    散文の依存Issueの状態は、それ単体ではブロッカーにしない"
     echo "    (.claude/CLAUDE.md の Dependency Resolution を参照)。"
 else
     for n in $(echo "$BLOCKED_BY" | jq -r '.[].number'); do
@@ -130,7 +130,18 @@ if [ -z "$(echo "$DEP_SECTION" | tr -d '[:space:]')" ]; then
     echo "(依存の節が無い、または空)"
 else
     DEP_NUMBERS="$(echo "$DEP_SECTION" | grep -oE '#[0-9]+' | tr -d '#' | sort -un || true)"
-    if [ -z "$DEP_NUMBERS" ]; then
+    # 「依存は無い」と明示している場合と、依存はあるが識別子で書かれていない場合を区別する。
+    # 前者に後者の警告を出すと、依存ゼロのIssueを「依存不明」と誤って扱わせてしまう。
+    # trはバイト単位で動くため、ここで多バイト文字を消してはいけない
+    # (`tr -d '。'` は E3/80/82 の各バイトを消すので「なし」のE3まで壊す)。
+    # 空白除去とlower化はASCIIバイトしか触らないので安全。句読点は正規表現側で吸収する。
+    DEP_COMPACT="$(echo "$DEP_SECTION" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+    if [ -z "$DEP_NUMBERS" ] && [[ "$DEP_COMPACT" =~ ^(なし|無し|特になし|none|n/a|na|-)[。.]?$ ]]; then
+        echo "(依存なしと明記されている)"
+        echo "  | $(echo "$DEP_SECTION" | tr -d '\n' | sed 's/^[[:space:]]*//')"
+        echo "  → 依存ゼロ。これは「依存が識別できない」状態とは別物であり、"
+        echo "    Dependencies の判定は PASS 側に倒してよい。"
+    elif [ -z "$DEP_NUMBERS" ]; then
         echo "(節はあるが解決可能なIssue参照が無い。本文は以下のとおり)"
         echo "$DEP_SECTION" | sed 's/^/  | /'
         echo
