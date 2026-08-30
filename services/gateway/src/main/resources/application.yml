@@ -296,10 +296,24 @@ app:
   # レート制限(現行legacy-apiのRateLimitInterceptorから移設。#560)。
   # 管理画面からのアップロード系エンドポイント制限値の動的変更(旧AppSettingService経由)は
   # gatewayがDBを持たないため未対応(静的デフォルト値のみ)。follow-up issueで再検討する。
+  #
+  # api-global / api-internal はクライアント単位に分割される(#749)。分割キーの決め方と、
+  # auth/upload/operation-logを従来どおりプロセス全体の1バケットに据え置いた理由は
+  # com.letsblog.gateway.config.RateLimitWebFilter のJavadoc、および
+  # docs/API_RATE_LIMITING.md を参照。
   rate-limit:
+    # 外部(reverse-proxy経由)クライアント1つ(=X-Forwarded-For末尾のIP)あたりの上限。
+    # #749より前は「プロセス全体で100req/分」だったが、値は据え置いたまま単位だけを
+    # クライアント単位に変更した(ブラウザ発の直接呼び出しは実測ピークでも54req/分)。
     api-global:
       limit-for-period: ${API_RATE_LIMIT_REQUESTS:100}
       limit-refresh-period: ${API_RATE_LIMIT_PERIOD:60s}
+    # lbs-net内部からgatewayを直接叩く呼び出し(WebのBFF)のログインユーザー1人あたりの上限(#749)。
+    # 管理画面の1画面あたりのBFF呼び出しは最大12本程度、実測のピーク需要は239req/分(E2E実行時)
+    # だったため、その2.5倍を既定値とする(暴走ループは引き続き頭打ちになる)。
+    api-internal:
+      limit-for-period: ${INTERNAL_API_RATE_LIMIT_REQUESTS:600}
+      limit-refresh-period: ${INTERNAL_API_RATE_LIMIT_PERIOD:60s}
     auth-endpoint:
       limit-for-period: ${AUTH_RATE_LIMIT_REQUESTS:5}
       limit-refresh-period: ${AUTH_RATE_LIMIT_PERIOD:60s}

@@ -6,23 +6,83 @@ The Let's Blog API implements rate limiting and comprehensive input validation t
 
 ## Rate Limiting
 
+Rate limiting is enforced **at the gateway** (`services/gateway`,
+`com.letsblog.gateway.config.RateLimitWebFilter`), which is the single entry point for every
+`/api/**` request since issue #560. The limits themselves come from
+`services/gateway/src/main/resources/application.yml` (`app.rate-limit.*`, bound by
+`RateLimitProperties`) and are implemented with Resilience4j `RateLimiter`s that reject
+immediately (`timeoutDuration: 0`) instead of queueing.
+
+### Partition granularity (issue #749)
+
+Since issue #584, Web's server-side (BFF) calls — Server Components, Server Actions and Route
+Handlers — also go through the gateway, so a single process-wide `api-global` bucket was shared by
+browser traffic and by every backend call made while rendering an admin screen. Measured on the
+real gateway access log (24h, 2026-08-29), `api-global` demand peaked at **239 req/min** against a
+100 req/min ceiling and produced **399 `429` responses**, i.e. the incident of issue #464 was
+recurring.
+
+`api-global` is therefore split **per client**, and internal (BFF) traffic gets its own bucket:
+
+| Request | Detected by | Bucket | Partition key |
+| --- | --- | --- | --- |
+| External (browser, VSCode extension, …) — always arrives via nginx | `X-Forwarded-For` present | `api-global` | **last** entry of `X-Forwarded-For` (`ip:<addr>`) |
+| Internal (Web BFF) with an access token | no `X-Forwarded-For`, `Authorization: Bearer` | `api-internal` | JWT `sub` (`user:<sub>`) |
+| Internal without a token (e.g. `proxy.ts` calling `/api/auth/setup-status`) | no `X-Forwarded-For`, no token | `api-internal` | peer address (`peer:<addr>`) |
+
+Rationale for these choices:
+
+- **Last** `X-Forwarded-For` entry, not the first: nginx appends the address it actually observed
+  (`$proxy_add_x_forwarded_for`), so a client-supplied `X-Forwarded-For` can only prepend values.
+  With exactly one trusted proxy in front of the gateway, the last entry cannot be spoofed.
+- **JWT `sub` only for internal requests**: the filter runs before Spring Security's chain
+  (`Ordered.HIGHEST_PRECEDENCE + 1`), so the token is parsed *without* signature verification;
+  invalid tokens are still rejected downstream with 401. Keying external traffic by `sub` would let
+  an attacker mint unlimited random `sub`s and get unlimited buckets, so external traffic is always
+  keyed by IP.
+- **`auth-endpoint` / `upload-endpoint` / `operation-log-endpoint` stay process-wide.** The first
+  two are deliberately *total* ceilings (brute-force resistance, and protection against GPU/disk
+  exhaustion by image generation and uploads — the upload limit is also the value that issue #444
+  exposes in the admin UI). `operation-log-endpoint` only ever receives internal writes and its
+  300 req/min ceiling already has ample headroom.
+- Per-client `RateLimiter` instances are kept in memory, capped at 10,000 keys; clients beyond the
+  cap share a single fallback bucket so the map cannot grow without bound.
+
+Note for the "run `npm run dev` on the host" setup (see `docs/setup.md`): Web then reaches the
+gateway through nginx, so its BFF calls carry `X-Forwarded-For` and are counted as **external**
+traffic for the host's IP. Raise `API_RATE_LIMIT_REQUESTS` if that becomes a limitation.
+
 ### Configuration
 
-Rate limiting is configured in `application.yml` using Resilience4j. Three rate limiter profiles are available:
+#### 1. External API Rate Limiter (`api-global`)
+- **Default Limit**: 100 requests per 1 minute, **per external client IP**
+- **Environment Variable**: `API_RATE_LIMIT_REQUESTS` (default: 100), `API_RATE_LIMIT_PERIOD`
+- **Applies to**: All API endpoints except auth, upload and operation logs
+- **Value rationale**: browser-originated traffic (dashboard SSE and its 30s polling fallback)
+  peaked at 54 req/min for a single source IP in the measurement above, so the pre-#749 value is
+  kept — only its unit changed from "whole process" to "per client".
 
-#### 1. Global API Rate Limiter (`api-global`)
-- **Default Limit**: 100 requests per 1 minute
-- **Environment Variable**: `API_RATE_LIMIT_REQUESTS` (default: 100)
-- **Applies to**: All API endpoints except auth and upload
+#### 1b. Internal (BFF) API Rate Limiter (`api-internal`)
+- **Default Limit**: 600 requests per 1 minute, **per logged-in user** (JWT `sub`)
+- **Environment Variable**: `INTERNAL_API_RATE_LIMIT_REQUESTS` (default: 600),
+  `INTERNAL_API_RATE_LIMIT_PERIOD`
+- **Applies to**: the same endpoints as `api-global`, when the request comes from inside `lbs-net`
+  (i.e. the `web` container's BFF calls)
+- **Value rationale**: the heaviest admin screen (project detail) issues ~12 backend calls per
+  render and a back-to-back tour of dashboard / project detail / post list / site management costs
+  ~27 calls; measured peak demand was 239 req/min. 600 gives ~2.5x headroom over the measured peak
+  while still capping a runaway client loop.
 
 #### 2. Authentication Rate Limiter (`auth-endpoint`)
-- **Default Limit**: 5 requests per 1 minute
+- **Default Limit**: 5 requests per 1 minute, **process-wide** (not partitioned)
 - **Environment Variable**: `AUTH_RATE_LIMIT_REQUESTS` (default: 5)
 - **Applies to**: `/auth/*`, `/login`, `/register` endpoints
+- **Does not apply to**: the read-only status checks `/api/auth/setup-status` and
+  `/api/auth/totp/status`, which use `api-global` / `api-internal` instead
 - **Purpose**: Prevents brute force attacks
 
 #### 3. Upload Rate Limiter (`upload-endpoint`)
-- **Default Limit**: 10 requests per 1 hour
+- **Default Limit**: 10 requests per 1 hour, **process-wide** (not partitioned)
 - **Environment Variable**: `UPLOAD_RATE_LIMIT_REQUESTS` (default: 10)
 - **Applies to**: `/upload/*`, `/image/*` endpoints (actual file uploads and AI image generation)
 - **Does not apply to**: lightweight metadata/settings endpoints under the same paths, e.g.
@@ -31,11 +91,22 @@ Rate limiting is configured in `application.yml` using Resilience4j. Three rate 
   that opening the asset-generation panel or changing defaults doesn't consume the same
   quota as the actual upload/generation calls (see issue #442)
 - **Purpose**: Prevents resource exhaustion
-- **Admin-configurable request count**: the request-count limit (but not the period) can be
-  overridden from the admin Web UI at `/admin/system-settings` (`upload_rate_limit_requests`),
-  without restarting the API server. The override is stored in the `system_settings` table and
-  falls back to `UPLOAD_RATE_LIMIT_REQUESTS` when left blank. Setting it to `-1` disables this
-  rate limiter entirely (unlimited requests). See issue #444.
+- **Partitioning**: none — process-wide, deliberately (see "Partition granularity" above)
+- **Admin-configurable request count** (*not in effect at the gateway*): while rate limiting lived
+  in legacy-api, the request-count limit (but not the period) could be overridden from the admin
+  Web UI at `/admin/system-settings` (`upload_rate_limit_requests`), stored in the
+  `system_settings` table, with `-1` disabling the limiter. The gateway has no database, so since
+  issue #560 only the static defaults above apply; re-introducing a dynamic override is issue
+  #444's scope.
+
+#### 4. Operation Log Rate Limiter (`operation-log-endpoint`)
+- **Default Limit**: 300 requests per 1 minute, **process-wide** (not partitioned)
+- **Environment Variable**: `OPERATION_LOG_RATE_LIMIT_REQUESTS` (default: 300),
+  `OPERATION_LOG_RATE_LIMIT_PERIOD`
+- **Applies to**: `/api/operation-logs*`
+- **Purpose**: the Web BFF records one operation-log entry per backend call (issue #143), so this
+  traffic is roughly 1:1 with `api-internal` traffic. It was split out of `api-global` by issue
+  #464 so that logging cannot starve the functional endpoints.
 
 ### Response Codes
 
@@ -128,44 +199,41 @@ public ResponseEntity<SiteResponse> createSite(@Valid @RequestBody CreateSiteReq
 
 ## Configuration Examples
 
-### Disable Rate Limiting for Specific Endpoints
+### Change which bucket an endpoint uses
 
-Modify `WebConfig.java`:
-
-```java
-@Override
-public void addInterceptors(InterceptorRegistry registry) {
-    registry.addInterceptor(rateLimitInterceptor)
-            .addPathPatterns("/api/**")
-            .excludePathPatterns(
-                    "/api/health",
-                    "/api/metrics",
-                    "/api/public/**"  // Add public endpoints here
-            );
-}
-```
+Bucket classification lives in one place:
+`RateLimitWebFilter#getRateLimiterName(String requestPath)`. Add the path there (and a test case in
+`RateLimitWebFilterTest`) rather than introducing per-endpoint configuration. Paths that are not
+`/api/**` (e.g. `/actuator/health`) never reach the filter's classification in a meaningful way
+because only the gateway's `/api/**` routes are exposed through nginx.
 
 ### Adjust Rate Limits for Production
 
 Environment variables:
 
 ```bash
-# Tighter limits for production
+# Tighter limits for production (set on the gateway container)
 export API_RATE_LIMIT_REQUESTS=100
-export API_RATE_LIMIT_PERIOD=1m
+export API_RATE_LIMIT_PERIOD=60s
+export INTERNAL_API_RATE_LIMIT_REQUESTS=600
+export INTERNAL_API_RATE_LIMIT_PERIOD=60s
 export AUTH_RATE_LIMIT_REQUESTS=5
-export AUTH_RATE_LIMIT_PERIOD=1m
+export AUTH_RATE_LIMIT_PERIOD=60s
+export OPERATION_LOG_RATE_LIMIT_REQUESTS=300
+export OPERATION_LOG_RATE_LIMIT_PERIOD=60s
 export UPLOAD_RATE_LIMIT_REQUESTS=10
-export UPLOAD_RATE_LIMIT_PERIOD=1h
+export UPLOAD_RATE_LIMIT_PERIOD=3600s
 ```
 
 ### Docker Compose Configuration
 
 ```yaml
-api:
+gateway:
   environment:
     API_RATE_LIMIT_REQUESTS: 100
+    INTERNAL_API_RATE_LIMIT_REQUESTS: 600
     AUTH_RATE_LIMIT_REQUESTS: 5
+    OPERATION_LOG_RATE_LIMIT_REQUESTS: 300
     UPLOAD_RATE_LIMIT_REQUESTS: 10
 ```
 
@@ -219,11 +287,14 @@ Monitor these metrics in production:
 
 ### Logging
 
-Rate limit violations are logged at WARN level:
+The gateway does not emit a dedicated WARN line for rejections; rejected requests show up in the
+gateway access log written by `CorrelationIdWebFilter` with `status=429`:
 
 ```
-WARN com.letsblog.api.config.RateLimitInterceptor - Rate limit exceeded for /api/posts (limiter: api-global)
+INFO c.l.g.config.CorrelationIdWebFilter : gateway request: method=GET path=/api/projects status=429 duration_ms=1 correlation_id=...
 ```
+
+To count them: `docker logs lbs-gateway | grep "status=429"`.
 
 ## Troubleshooting
 
@@ -250,7 +321,12 @@ WARN com.letsblog.api.config.RateLimitInterceptor - Rate limit exceeded for /api
 
 ## Related Files
 
-- `application.yml` - Rate limiter configuration
-- `api/src/main/java/com/letsblog/api/config/RateLimitInterceptor.java` - Rate limit enforcement
-- `api/src/main/java/com/letsblog/api/config/WebConfig.java` - Web configuration
-- `api/src/main/java/com/letsblog/api/config/GlobalExceptionHandler.java` - Error handling
+- `services/gateway/src/main/resources/application.yml` - Rate limiter configuration
+  (`app.rate-limit.*`)
+- `services/gateway/src/main/java/com/letsblog/gateway/config/RateLimitWebFilter.java` - Rate limit
+  enforcement, bucket classification and client partitioning
+- `services/gateway/src/main/java/com/letsblog/gateway/config/RateLimitProperties.java` - Bucket
+  defaults
+- `services/gateway/src/test/java/com/letsblog/gateway/config/RateLimitWebFilterTest.java` - Bucket
+  classification and partitioning tests
+- `nginx/conf.d/default.conf` - sets the `X-Forwarded-For` chain the partitioning relies on
