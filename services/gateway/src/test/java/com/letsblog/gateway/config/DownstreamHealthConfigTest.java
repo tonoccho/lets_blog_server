@@ -15,7 +15,7 @@ import java.time.Duration;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * {@link DownstreamHealthConfig}が定義するcontent/media/ai/analytics/log-writer向けの
+ * {@link DownstreamHealthConfig}が定義する各サービス向けの
  * {@link ReactiveHealthIndicator}が、下流サービスの応答に応じてUP/DOWN/タイムアウトを
  * 正しく反映することを検証する(issue #643)。
  *
@@ -23,6 +23,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * {@code downstreamHealthIndicator}ヘルパー(5秒タイムアウト、例外時DOWN)を共有しているため、
  * 各サービス固有のBean定義メソッドがこのヘルパーへ正しく配線されていることを、
  * サービスごとにUP/DOWN/タイムアウトの3パターンで確認する。
+ *
+ * <p>issue #743でproject/publishing/platformを追加した。網羅性そのもの
+ * (services/配下の全サービスにBeanがあること)は{@link DownstreamHealthConfigContractTest}が見る。
  */
 class DownstreamHealthConfigTest {
 
@@ -179,6 +182,84 @@ class DownstreamHealthConfigTest {
     void logWriter向けインジケータは5秒応答が無ければタイムアウトしてDOWNになる() {
         ReactiveHealthIndicator indicator = config.logWriterServiceHealthIndicator(
                 webClientWithExchange(neverRespond()), "http://log-writer:8080");
+        StepVerifier.withVirtualTime(indicator::health)
+                .thenAwait(Duration.ofSeconds(5))
+                .assertNext(health -> assertEquals(Status.DOWN, health.getStatus()))
+                .verifyComplete();
+    }
+
+    // --- project (issue #743) ---
+
+    @Test
+    void project向けインジケータは200応答でUPになる() {
+        ReactiveHealthIndicator indicator = config.projectServiceHealthIndicator(
+                webClientWithExchange(alwaysRespond(HttpStatus.OK)), "http://project:8080");
+        assertUp(indicator);
+    }
+
+    @Test
+    void project向けインジケータはエラー応答でDOWNになる() {
+        ReactiveHealthIndicator indicator = config.projectServiceHealthIndicator(
+                webClientWithExchange(alwaysRespond(HttpStatus.SERVICE_UNAVAILABLE)), "http://project:8080");
+        assertDown(indicator);
+    }
+
+    @Test
+    void project向けインジケータは5秒応答が無ければタイムアウトしてDOWNになる() {
+        ReactiveHealthIndicator indicator = config.projectServiceHealthIndicator(
+                webClientWithExchange(neverRespond()), "http://project:8080");
+        StepVerifier.withVirtualTime(indicator::health)
+                .thenAwait(Duration.ofSeconds(5))
+                .assertNext(health -> assertEquals(Status.DOWN, health.getStatus()))
+                .verifyComplete();
+    }
+
+    // --- publishing (issue #743) ---
+
+    @Test
+    void publishing向けインジケータは200応答でUPになる() {
+        ReactiveHealthIndicator indicator = config.publishingServiceHealthIndicator(
+                webClientWithExchange(alwaysRespond(HttpStatus.OK)), "http://publishing:8080");
+        assertUp(indicator);
+    }
+
+    @Test
+    void publishing向けインジケータはエラー応答でDOWNになる() {
+        ReactiveHealthIndicator indicator = config.publishingServiceHealthIndicator(
+                webClientWithExchange(alwaysRespond(HttpStatus.SERVICE_UNAVAILABLE)), "http://publishing:8080");
+        assertDown(indicator);
+    }
+
+    @Test
+    void publishing向けインジケータは5秒応答が無ければタイムアウトしてDOWNになる() {
+        ReactiveHealthIndicator indicator = config.publishingServiceHealthIndicator(
+                webClientWithExchange(neverRespond()), "http://publishing:8080");
+        StepVerifier.withVirtualTime(indicator::health)
+                .thenAwait(Duration.ofSeconds(5))
+                .assertNext(health -> assertEquals(Status.DOWN, health.getStatus()))
+                .verifyComplete();
+    }
+
+    // --- platform (issue #743) ---
+
+    @Test
+    void platform向けインジケータは200応答でUPになる() {
+        ReactiveHealthIndicator indicator = config.platformServiceHealthIndicator(
+                webClientWithExchange(alwaysRespond(HttpStatus.OK)), "http://platform:8080");
+        assertUp(indicator);
+    }
+
+    @Test
+    void platform向けインジケータはエラー応答でDOWNになる() {
+        ReactiveHealthIndicator indicator = config.platformServiceHealthIndicator(
+                webClientWithExchange(alwaysRespond(HttpStatus.SERVICE_UNAVAILABLE)), "http://platform:8080");
+        assertDown(indicator);
+    }
+
+    @Test
+    void platform向けインジケータは5秒応答が無ければタイムアウトしてDOWNになる() {
+        ReactiveHealthIndicator indicator = config.platformServiceHealthIndicator(
+                webClientWithExchange(neverRespond()), "http://platform:8080");
         StepVerifier.withVirtualTime(indicator::health)
                 .thenAwait(Duration.ofSeconds(5))
                 .assertNext(health -> assertEquals(Status.DOWN, health.getStatus()))

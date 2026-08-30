@@ -36,6 +36,17 @@ dependencies {
 tasks.named('test') {
     useJUnitPlatform()
     finalizedBy jacocoTestReport
+
+    // DownstreamHealthConfigContractTest と RouteControllerContractTest は、実行時に
+    // リポジトリのソースツリー(settings.gradle のサービス一覧、各サービスのコントローラー)を
+    // 走査する。これらを Gradle の入力として宣言しておかないと、サービスを新設しても
+    // gateway の test タスクが UP-TO-DATE で飛ばされ、契約テストが実行されない(issue #743)。
+    // CI は毎回 fresh checkout なので結局実行されるが、それではローカルで気付けず、
+    // 「次にサービスを増やしたときに落ちて気付ける」という契約テストの目的を果たさない。
+    inputs.file("$rootDir/settings.gradle").withPropertyName('settingsGradle')
+    inputs.files(fileTree("$rootDir/services") {
+        include '*/src/main/java/**/*Controller.java'
+    }).withPropertyName('downstreamControllers').withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 jacocoTestReport {
