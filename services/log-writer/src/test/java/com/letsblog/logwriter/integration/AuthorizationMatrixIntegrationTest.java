@@ -1,0 +1,121 @@
+package com.letsblog.logwriter.integration;
+
+import com.letsblog.common.client.IdentityClient;
+import com.letsblog.common.testfixtures.JwtTestFixtures;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.security.oauth2.jwt.BadJwtException;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+
+import java.util.stream.Stream;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+/**
+ * issue #772: log-writer-serviceの認証ゲート(「有効なKeycloak JWTが無ければ401」)の網羅テスト。
+ * ADR-0008が必須と定める後退検知手段であり、platform-serviceの同名クラス(#705)をテンプレートに
+ * している。{@code SecurityConfig}が{@code permitAll}へ戻れば、このクラスの401アサーションが落ちる。
+ *
+ * <p>#572でlegacy-apiから移設した時点では{@code anyRequest().permitAll()}で、「未認証なら403」の
+ * 判定は各コントローラー側({@code CurrentActorService}経由)に任されていた。legacy-api時代の
+ * {@code anyRequest().authenticated()}によるゲートからの後退であり、issue #772で復元した。
+ * 本クラスはその再発を防ぐ。
+ *
+ * <p>なおブラウザから直接叩かれる{@code POST /api/logs/errors}
+ * ({@code web/src/lib/errorLogger.ts})はAuthorizationヘッダーを付けていないため、この変更で
+ * 401になる。legacy-api時代も同じく401だったため後退ではないが、web側の是正は#791で扱う。
+ */
+@SpringBootTest
+@AutoConfigureMockMvc
+@ActiveProfiles("test")
+@DisplayName("log-writer-service: 認証ゲートの認可マトリクス統合テスト(issue #772)")
+class AuthorizationMatrixIntegrationTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockitoBean
+    private JwtDecoder jwtDecoder;
+
+    @MockitoBean
+    private IdentityClient identityClient;
+
+    record Endpoint(String method, String path) {
+        @Override
+        public String toString() {
+            return method + " " + path;
+        }
+    }
+
+    /**
+     * log-writerがgateway経由で外部へ公開している全エンドポイント(gatewayの{@code log}ルート:
+     * {@code /api/logs/**}・{@code /api/audit-logs/**}・{@code /api/operation-logs/**})。
+     * 本サービスは{@code /api/internal/**}配下の内部ブリッジを持たず、他サービスからの
+     * ログ書き込みはRabbitMQ経由({@code LogMessageListener})でHTTPを通らない。
+     *
+     * <p>Authorizationヘッダーの有無だけでSecurityConfigが401を返すため、リクエストボディ/
+     * クエリパラメータの妥当性は問わない。
+     */
+    static Stream<Endpoint> allProtectedEndpoints() {
+        return Stream.of(
+                // -- FrontendErrorLogController --
+                new Endpoint("POST", "/api/logs/errors"),
+                new Endpoint("GET", "/api/logs/errors"),
+
+                // -- AuditLogController --
+                new Endpoint("GET", "/api/audit-logs"),
+
+                // -- OperationLogController --
+                new Endpoint("POST", "/api/operation-logs"),
+                new Endpoint("GET", "/api/operation-logs"),
+                new Endpoint("GET", "/api/operation-logs/op-1"),
+                new Endpoint("GET", "/api/operation-logs/unified"));
+    }
+
+    @ParameterizedTest(name = "[{index}] {0}")
+    @MethodSource("allProtectedEndpoints")
+    @DisplayName("Authorizationヘッダーなしなら例外なく401")
+    void everyProtectedEndpoint_returns401WithoutAuthorization(Endpoint endpoint) throws Exception {
+        mockMvc.perform(request(HttpMethod.valueOf(endpoint.method()), endpoint.path()))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("GET /api/audit-logs: 不正なJWTも401")
+    void 不正なjwtは401() throws Exception {
+        when(jwtDecoder.decode("invalid-jwt")).thenThrow(new BadJwtException("invalid token"));
+
+        mockMvc.perform(request(HttpMethod.GET, "/api/audit-logs")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer invalid-jwt"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("有効なJWTがあれば認証ゲートは通過する(401にならない)")
+    void 有効なjwtなら401にならない() throws Exception {
+        mockMvc.perform(request(HttpMethod.GET, "/api/audit-logs")
+                        .with(JwtTestFixtures.jwtRequestPostProcessor("sub-772", "user")))
+                .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(401));
+    }
+
+    /** docker-composeのhealthcheckとgatewayのDownstreamHealthConfigが無認証で叩くため、公開のまま。 */
+    @Test
+    @DisplayName("Actuatorヘルスチェックは認証ゲートの対象外")
+    void actuatorヘルスチェックは401にならない() throws Exception {
+        mockMvc.perform(request(HttpMethod.GET, "/actuator/health"))
+                .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(401));
+    }
+}

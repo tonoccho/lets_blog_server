@@ -94,6 +94,10 @@ E2E_ADMIN_PASSWORD='<任意の強いパスワード>' \
 
 このスクリプトは以下を行う(冪等。既存アカウントには作成をスキップして password/role のみ整える)。
 
+0. `letsblog-services`(サービス間通信用の confidential クライアント)の Client Credentials Grant で
+   アクセストークンを取得する。issue #772 で identity-service の認証ゲート(有効な JWT が無ければ 401)を
+   復元したため、次のユーザー作成要求には Bearer トークンが必要になった。シークレットは `.env` の
+   `KEYCLOAK_SERVICES_CLIENT_SECRET` から読む(未設定ならスクリプトは中止する)。
 1. `POST https://localhost/api/users`(gateway → identity-service)でユーザーを作成する。
    identity-service が **Keycloak 側のユーザー** と **ローカル DB の `lets_blog.users`
    (`keycloak_sub` 付き)** の両方を作る。両方揃っていないと admin 操作は 403 になる
@@ -109,7 +113,8 @@ E2E_ADMIN_PASSWORD='<任意の強いパスワード>' \
 > **共有 / 本番 Keycloak では実行しないこと。**
 > スクリプトはコンテナ名 `lbs-keycloak` 固定で、任意の URL を指定するオプションを持たない。
 > 操作対象も `e2e-*@letsblog.local` に限定されており、それ以外のメールアドレスを渡すと中止する。
-> 共有環境では同等の手順(identity-service でユーザー作成 → Admin Console でパスワード設定 →
+> 共有環境では同等の手順(サービストークンを取得 → identity-service でユーザー作成 →
+> Admin Console でパスワード設定 →
 > realm ロール `admin` 付与 → `letsblog-e2e` クライアント作成)を管理者が手動で行う。
 
 パスワードはリポジトリの `.env` には保存せず、実行時に環境変数で渡す。

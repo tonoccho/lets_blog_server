@@ -8,36 +8,55 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
- * KeycloakのJWT検証設定(#563)。
+ * KeycloakのJWT検証設定。
  *
- * <p>本サービスの認可は各サービスクラスから手続き的に呼ばれる
+ * <p>本サービスの認証ゲート(「有効なKeycloak JWTが無ければ401」)は、
+ * {@code docs/adr/0008-auth-gate-in-each-service-security-config.md}(ADR-0008)のとおり
+ * このクラスが担う。{@link #PUBLIC_PATHS}に列挙したパスだけを{@code permitAll()}にし、
+ * それ以外は{@code anyRequest().authenticated()}とする(サービス単位のdeny-by-default)。
+ *
+ * <p>#563の時点では{@code anyRequest().permitAll()}とし、「Bearerトークンが送られてきた場合は
+ * 検証する」までに留めていた。認可判定自体は各コントローラから呼ばれる
  * {@code AdminAuthorizationService}/{@code PermissionAuthorizationService}
- * (CurrentActorServiceが解決するKeycloak JWTのsubクレーム起点のactorId)が担っている。
- * issue #566でCurrentActorServiceの旧ヘッダベースのフォールバックは撤去済みで、
- * JWTが無ければ「操作者なし」を返す(admin/権限系のチェックは自動的に拒否される)。
- * ただし、そもそも上記チェックを呼ばないエンドポイント全体を対象にした宣言的認可
- * (@PreAuthorize)へのフル移行・deny-by-defaultへの転換は、認可マトリクス整備(#568、B10)の
- * スコープであり本サービスでは未実施のため、この設定は引き続き「Bearerトークンが送られてきた
- * 場合は検証する」までに留める。
+ * (CurrentActorServiceが解決するJWTのsubクレーム起点のactorId)が手続き的に行っており、
+ * #566でCurrentActorServiceの旧ヘッダベースのフォールバックを撤去した後は、JWTが無ければ
+ * 「操作者なし」として権限系のチェックが自動的に拒否されるためである。
  *
- * <p>oauth2ResourceServer().jwt()を設定した時点で、Bearerトークンが実際に送られてきた場合は
- * Spring Securityの標準動作により無条件に検証される(permitAllのパスであっても、
- * Authorizationヘッダにトークンが付いていれば解決・検証を試み、不正/期限切れ/署名不正で
- * あれば401を返す)。これにより「gatewayを経由せず直接サービスを叩いた場合もJWT検証が働く」
- * という受入基準を、実際に認可をJWTへ全面移行することなく満たす。
+ * <p>しかしこれは「未認証でも到達はでき、コントローラ内のチェック有無に結果が依存する」状態であり、
+ * legacy-api時代の{@code anyRequest().authenticated()}によるゲートからの後退だった
+ * (issue #705で他サービスの同型の後退として発見、issue #772で是正)。ADR-0008のとおり
+ * SecurityConfigレベルで一律に認証を必須化する。
  *
- * <p>realm roleのSpring Security authorityへのマッピング(ROLE_&lt;大文字&gt;)はここで
- * 用意しておくが、CurrentActorServiceでの実際の権限判定は(#562時点でKeycloak側への
- * ロール同期が未実装のため)JWTのクレームではなくローカルDBのRole/Permissionを正とする。
+ * <p>{@link #PUBLIC_PATHS}はヘルスチェック(Actuator。docker-composeのhealthcheckとgatewayの
+ * {@code DownstreamHealthConfig}が無認証で叩く)とAPIドキュメントのみ。他サービスは
+ * {@code GET /api/identity/me}を共通の{@code IdentityClient}経由で呼ぶが、各サービスの
+ * {@code CurrentActorService}は呼び出し元のAuthorizationヘッダーが無い場合そもそも呼び出しを
+ * 行わない(「操作者なし」を返す)ため、authenticatedにしてもサービス間呼び出しは壊れない
+ * (docs/SYNC_SERVICE_CALLS.md参照)。
+ *
+ * <p>realm roleのSpring Security authorityへのマッピング(ROLE_&lt;大文字&gt;)はここで用意しておくが、
+ * CurrentActorServiceでの実際の権限判定は(#562時点でKeycloak側へのロール同期が未実装のため)
+ * JWTのクレームではなくローカルDBのRole/Permissionを正とする。「認証済みなら誰でも到達できる」
+ * エンドポイントが残っていること自体は{@code docs/AUTHORIZATION_MATRIX.md}の「既知のギャップ」であり、
+ * 本Issueのスコープ外。
  */
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
 
+    private static final String[] PUBLIC_PATHS = {
+            "/actuator/**",
+            "/v3/api-docs/**",
+            "/swagger-ui/**",
+            "/swagger-ui.html"
+    };
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http.csrf(csrf -> csrf.disable())
-                .authorizeHttpRequests(authorize -> authorize.anyRequest().permitAll())
+                .authorizeHttpRequests(authorize -> authorize
+                        .requestMatchers(PUBLIC_PATHS).permitAll()
+                        .anyRequest().authenticated())
                 .oauth2ResourceServer(
                         oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())))
                 .build();
