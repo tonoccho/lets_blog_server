@@ -18,6 +18,10 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -62,6 +66,8 @@ class UserWriteAuthorizationIntegrationTest {
     void setUp() {
         adminId = recreate(ADMIN_SUB, "admin");
         targetId = recreate(USER_SUB, "user");
+        // adminはユーザーを作成できる() が作る行を消しておく(email/keycloak_subがunique制約のため)。
+        userRepository.findByKeycloakSub("sub-796-created").ifPresent(userRepository::delete);
     }
 
     private Long recreate(String keycloakSub, String role) {
@@ -113,6 +119,30 @@ class UserWriteAuthorizationIntegrationTest {
     }
 
     // ---------------------------------------------------------------- adminは従来どおり通る
+
+    /**
+     * POSTはWebのユーザー管理画面とE2E準備スクリプトの両方が使う唯一の実利用経路で、
+     * 実際に本PRで {@code scripts/provision-e2e-keycloak-users.sh} の退行が見つかった箇所でもある。
+     * 「adminなら通る」ことを明示的に固定する。
+     *
+     * <p>Keycloakへのユーザー作成は外部境界のためスタブする(ADR-0006のモック方針)。
+     */
+    @Test
+    @DisplayName("adminはユーザーを作成できる")
+    void adminはユーザーを作成できる() throws Exception {
+        when(keycloakAdminClient.createUser(eq("created-by-admin@example.test"), any(), any(), anyBoolean()))
+                .thenReturn("sub-796-created");
+        long before = userRepository.count();
+
+        mockMvc.perform(request(HttpMethod.POST, "/api/users")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"created-by-admin@example.test\",\"password\":\"pw\",\"role\":\"user\"}")
+                        .with(JwtTestFixtures.jwtRequestPostProcessor(ADMIN_SUB, "admin")))
+                .andExpect(status().isCreated());
+
+        assertThat(userRepository.count()).isEqualTo(before + 1);
+        assertThat(userRepository.findByKeycloakSub("sub-796-created")).isPresent();
+    }
 
     @Test
     @DisplayName("adminは他ユーザーのroleを変更できる")

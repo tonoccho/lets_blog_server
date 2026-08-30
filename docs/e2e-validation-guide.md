@@ -160,13 +160,20 @@ docker compose exec mysql mysql -u root -p"$MYSQL_ROOT_PASSWORD" -e "SHOW DATABA
 ### 3.1 テストユーザーの用意
 
 ```bash
+E2E_PROVISION_ADMIN_EMAIL='<letsblog realm の管理者アカウント>' \
+E2E_PROVISION_ADMIN_PASSWORD='<その管理者のパスワード>' \
 E2E_TEST_PASSWORD='...' E2E_ADMIN_PASSWORD='...' \
   ./scripts/provision-e2e-keycloak-users.sh
 ```
 
 - 対象は `e2e-test@letsblog.local`(role: user)と `e2e-admin@letsblog.local`(role: admin)のみ
 - ローカル開発の Keycloak コンテナ(`lbs-keycloak`)専用。共有 / 本番環境では実行しない
-- 実ユーザーには一切触れない
+- 実ユーザーは**認証にだけ使い**、作成・変更・削除の対象にはしない
+- **前提**: letsblog realm に admin ロールのユーザーが既に存在すること。ユーザー作成
+  (`POST /api/users`)は issue #796 で admin 限定になったため、スクリプトはその管理者の
+  トークンで API を呼ぶ。まだ管理者がいない環境では、先に初回セットアップ
+  (legacy-api の `POST /api/auth/setup`)を済ませること。詳細は
+  [docs/e2e-testing.md](e2e-testing.md) を参照
 
 ### 3.2 ログイン手順の確認
 
@@ -528,7 +535,7 @@ df -h                                                     # ディスク不足�
 | ログイン後にコールバックで失敗する | redirect_uri 不一致(`https://localhost` 以外で開いている) | `https://localhost` でアクセスする |
 | `Invalid username or password` | テストユーザー未発行 / パスワード不一致 | `./scripts/provision-e2e-keycloak-users.sh` を再実行 |
 | API が 401 | トークン期限切れ・issuer 不一致 | Keycloak の `KC_HOSTNAME` 設定と再ログインを確認 |
-| admin 操作が 403 | ローカル DB に `keycloak_sub` 付きユーザーが無い | identity-service 経由(`POST /api/users`)で作成する |
+| admin 操作が 403 | ローカル DB に `keycloak_sub` 付きユーザーが無い、またはその行の `role` が admin でない | identity-service 経由(`POST /api/users`。admin のトークンが必要。issue #796)で作成する |
 
 ### 9.3 縮退表示の確認で戻せなくなった
 

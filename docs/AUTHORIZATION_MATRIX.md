@@ -54,7 +54,7 @@ identity-service / log-writer が従来から行っていた、各コントロ�
 | 呼び出し元 | エンドポイント | 扱い |
 |---|---|---|
 | `web/src/lib/errorLogger.ts`(ブラウザから直接) | `POST /api/logs/errors` | legacy-api 時代も401だったため後退ではない。web側でBearerを付ける経路へ移す是正は **#791**。log-writerの`PUBLIC_PATHS`には入れない(未認証の書き込み経路を残さないため) |
-| `scripts/provision-e2e-keycloak-users.sh` | `POST /api/users` | #772 で同スクリプトを修正し、`letsblog-services`のClient Credentialsでトークンを取得してから呼ぶようにした |
+| `scripts/provision-e2e-keycloak-users.sh` | `POST /api/users` | #772 で `letsblog-services` の Client Credentials を使うようにしたが、#796 で同エンドポイントが admin 限定になったため方式を変更した。サービスアカウントの `sub` に対応するローカル `users` 行が無く `CurrentActorService` が操作者を解決できないため、Client Credentials トークンでは `requireAdmin()` を通れない。現在は `letsblog-e2e` の password グラントで**実在する admin ユーザー**のトークンを取得する |
 
 #### identity-service の `/api/users` の認可(#796 適用後)
 
