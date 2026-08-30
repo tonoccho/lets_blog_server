@@ -90,9 +90,11 @@ class AuthorizationMatrixIntegrationTest {
     // サービス間内部ブリッジ(/api/internal/**。gatewayを経由しない)を除いた33件を列挙する。
     //
     // Phase 19のサービス抽出でコントローラがlegacy-apiから次々と移設されたため、この一覧は
-    // 大きく陳腐化していた(issue #731)。#573(media)・#574(ai)・#576(content)・#577(project)・
-    // #578(analytics)・#693〜#696(platform)・#707/#708/#712(publishing)の移設分、計107件が
-    // 実体の無いパスとして残っていた。SecurityConfigのanyRequest().authenticated()は
+    // 大きく陳腐化していた(issue #731)。実体の無いパスとして残っていたのは計107件で、
+    // 内訳は #574(ai)28件・#576(content)24件・#577(project)29件・#707/#708/#712(publishing)26件。
+    // media(#573)・analytics(#578)・platform(#693〜#696)の移設分は、当時この一覧からは
+    // 削除済みで「対象外」コメントとしてのみ残っていた(そのコメントも本Issueで整理した)。
+    // SecurityConfigのanyRequest().authenticated()は
     // コントローラの有無に関わらず全パスへ適用されるため、これらは「壊れずに通り続ける」一方で
     // 「このコントローラのこのエンドポイントは認証必須」というテストの意図を満たしていなかった。
     //
@@ -173,7 +175,10 @@ class AuthorizationMatrixIntegrationTest {
     void 有効なBearerトークンなら401にならない() throws Exception {
         when(jwtDecoder.decode("valid-jwt")).thenReturn(JwtTestFixtures.jwt("keycloak-sub-1", "user"));
 
-        mockMvc.perform(request(HttpMethod.GET, "/api/metadata/post-statuses")
+        // legacy-apiに現存するエンドポイントを使う。MetadataControllerは#576でcontent-serviceへ
+        // 移設済みで、そのパスでは未マップの404を見て「401ではない」と判定してしまい、
+        // 有効なJWTがハンドラまで届いたことの根拠にならない(issue #731)。
+        mockMvc.perform(request(HttpMethod.GET, "/api/project-users")
                         .header("Authorization", "Bearer valid-jwt"))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(401));
     }
@@ -187,7 +192,7 @@ class AuthorizationMatrixIntegrationTest {
         // 扱い)へ変換されてしまうため、実挙動に忠実になるようBadJwtExceptionでスタブする。
         when(jwtDecoder.decode("invalid-jwt")).thenThrow(new BadJwtException("invalid token"));
 
-        mockMvc.perform(request(HttpMethod.GET, "/api/metadata/post-statuses")
+        mockMvc.perform(request(HttpMethod.GET, "/api/project-users")
                         .header("Authorization", "Bearer invalid-jwt"))
                 .andExpect(status().isUnauthorized());
     }
