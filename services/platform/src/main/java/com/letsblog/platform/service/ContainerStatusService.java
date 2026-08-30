@@ -92,7 +92,8 @@ public class ContainerStatusService {
                 String state = item.path("State").asText("");
                 String detail = item.path("Status").asText("");
                 String id = item.path("Id").asText("");
-                containers.add(new ContainerStatusResponse(name, name, resolveStatus(id, state, detail), state, detail));
+                Status status = resolveStatus(id, state, detail);
+                containers.add(new ContainerStatusResponse(name, name, status, state, detail));
             }
             containers.sort(Comparator.comparing(ContainerStatusResponse::name));
             return containers;
@@ -163,7 +164,10 @@ public class ContainerStatusService {
             }
             boolean exitedSuccessfully = inspect.path("State").path("ExitCode").asInt(-1) == 0;
             String restartPolicy = inspect.path("HostConfig").path("RestartPolicy").path("Name").asText("");
-            return exitedSuccessfully && ("no".equals(restartPolicy) || restartPolicy.isEmpty());
+            // 再起動ポリシーが読めなかった場合(空文字)は完了扱いにしない。ExitCodeのasInt(-1)と
+            // 同じく「判定できなければ異常のまま」に倒す。現行のDockerは未指定でも"no"を返すため、
+            // 空文字を許容する必要は無い。
+            return exitedSuccessfully && "no".equals(restartPolicy);
         } catch (RestClientException | IllegalArgumentException e) {
             log.warn("コンテナ {} の詳細取得に失敗しました。停止中として扱います: {}", id, e.getMessage());
             return false;

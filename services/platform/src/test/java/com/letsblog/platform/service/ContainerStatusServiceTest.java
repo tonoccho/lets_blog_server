@@ -160,6 +160,80 @@ class ContainerStatusServiceTest {
         server.verify();
     }
 
+    /**
+     * 再起動ポリシーが読めなかった場合は完了扱いにしない。ExitCodeのasInt(-1)と同じく
+     * 「判定できなければ異常のまま」に倒す(レビュー指摘)。
+     */
+    @Test
+    void testListAll_再起動ポリシーが読めなければエラーのまま() {
+        expectList("[{\"Id\":\"pqr678\",\"Names\":[\"/lbs-legacy-schema-migrate\"],"
+                + "\"State\":\"exited\",\"Status\":\"Exited (0) 2 hours ago\"}]");
+        server.expect(requestTo(DOCKER_URL + "/containers/pqr678/json"))
+                .andRespond(withSuccess("{\"State\":{\"ExitCode\":0}}", MediaType.APPLICATION_JSON));
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(Status.ERROR, containers.get(0).status());
+    }
+
+    /** always/on-failureも継続稼働が期待されるポリシーなので、exit 0でもエラーのまま。 */
+    @Test
+    void testListAll_alwaysポリシーの停止はエラーのまま() {
+        expectList("[{\"Id\":\"stu901\",\"Names\":[\"/lbs-keycloak\"],"
+                + "\"State\":\"exited\",\"Status\":\"Exited (0) 1 minute ago\"}]");
+        expectInspect("stu901", 0, "always");
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(Status.ERROR, containers.get(0).status());
+    }
+
+    /** exited以外の停止系状態(created/restarting/dead等)では詳細取得を行わずエラーにする。 */
+    @Test
+    void testListAll_exited以外の状態では詳細取得を行わない() {
+        expectList("[{\"Id\":\"vwx234\",\"Names\":[\"/lbs-ai\"],"
+                + "\"State\":\"restarting\",\"Status\":\"Restarting (1) 5 seconds ago\"}]");
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(Status.ERROR, containers.get(0).status());
+        server.verify();
+    }
+
+    /**
+     * Idが無いレスポンス(既存フィクスチャの形)でも詳細取得を行わずエラーにする。
+     * 既存テストがこの経路を暗黙に通っているので、明示的に固定しておく。
+     */
+    @Test
+    void testListAll_Idが無ければ詳細取得を行わない() {
+        expectList("[{\"Names\":[\"/lbs-wordpress\"],"
+                + "\"State\":\"exited\",\"Status\":\"Exited (0) 3 minutes ago\"}]");
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(Status.ERROR, containers.get(0).status());
+        server.verify();
+    }
+
+    /** 停止中が複数あれば、それぞれについて詳細を取得し個別に判定する。 */
+    @Test
+    void testListAll_停止中が複数あればそれぞれ判定する() {
+        expectList("[{\"Id\":\"one\",\"Names\":[\"/lbs-legacy-schema-migrate\"],"
+                + "\"State\":\"exited\",\"Status\":\"Exited (0) 2 hours ago\"},"
+                + "{\"Id\":\"two\",\"Names\":[\"/lbs-mysql\"],"
+                + "\"State\":\"exited\",\"Status\":\"Exited (0) 1 minute ago\"}]");
+        expectInspect("one", 0, "no");
+        expectInspect("two", 0, "unless-stopped");
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        // 名前順にソートされるので legacy-schema-migrate, mysql の順。
+        assertEquals("legacy-schema-migrate", containers.get(0).name());
+        assertEquals(Status.NORMAL, containers.get(0).status());
+        assertEquals("mysql", containers.get(1).name());
+        assertEquals(Status.ERROR, containers.get(1).status());
+    }
+
     private void expectList(String json) {
         server.expect(requestTo(DOCKER_URL + "/containers/json?all=true"))
                 .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));

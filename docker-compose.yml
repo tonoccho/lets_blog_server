@@ -666,6 +666,10 @@ services:
     image: flyway/flyway:11-alpine
     container_name: lbs-legacy-schema-migrate
     <<: *common-service
+    # ワンショットジョブなので再起動させない。この値はダッシュボードのコンテナ状態判定
+    # (services/platform/.../ContainerStatusService、issue #725)が「正常に完了したジョブ」の
+    # 目印として参照している。他のサービスはx-common-serviceのrestart: unless-stoppedを使うため、
+    # ここを変えるとダッシュボードでこのコンテナがエラー表示になる。
     restart: "no"
     environment:
       FLYWAY_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
