@@ -6,7 +6,6 @@ import com.letsblog.api.client.ProjectServiceClient;
 import com.letsblog.api.domain.AuditLogAction;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.ProjectImageSettings;
-import com.letsblog.api.domain.Site;
 import com.letsblog.api.dto.ProjectResponse;
 import com.letsblog.api.dto.SiteResponse;
 import com.letsblog.api.dto.UpdateArticleImageResizeDefaultRequest;
@@ -261,22 +260,6 @@ public class ProjectService {
     /** {@link ProjectNotFoundException}を投げる、project-service経由のプロジェクト存在確認+取得。 */
     public Project getProjectEntity(Long projectId) {
         return toProject(projectServiceClient.getProject(projectId));
-    }
-
-    /**
-     * プロジェクトのマスター環境(test/production)に紐づくサイトを解決する。未紐付けの場合はnullを返す。
-     * 「複数環境のうちどれを基準にするか」を要する機能から利用する(テーマCSS取得
-     * (ArticlePreviewService)は同じロジックの独自コピーを持つ)。既存カテゴリ/タグ取得
-     * (AiBridgeController)は、issue #711でpublishing-serviceの
-     * {@code AiExistingTaxonomyBridgeController}へ移管され、本メソッドの呼び出し元ではなくなった。
-     */
-    public Site resolveMasterSite(Project project) {
-        Long siteId = switch (project.getMasterEnvironment()) {
-            case "test" -> project.getTestSiteId();
-            case "production" -> project.getProductionSiteId();
-            default -> null;
-        };
-        return siteId == null ? null : siteService.getById(siteId).orElse(null);
     }
 
     private ProjectResponse toResponse(Project project) {
