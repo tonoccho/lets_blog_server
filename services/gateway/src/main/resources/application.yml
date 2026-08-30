@@ -373,6 +373,13 @@ management:
         include: health
   endpoint:
     health:
-      # 下流サービスの状態を/actuator/healthに集約する(#560)。現時点では
-      # legacy-apiのみを見る(将来のサービス抽出に伴いprobesを追加していく)。
+      # 下流サービスの状態を/actuator/healthに集約する(#560)。probeの定義は
+      # DownstreamHealthConfig にあり、#743 で services/ 配下の全10サービス
+      # (gatewayを除く)が揃った。DownstreamHealthConfigContractTest が
+      # ディレクトリを列挙して網羅性を検証するので、サービス追加時の漏れは検出できる。
+      #
+      # 注意: いずれか1つでもDOWNならgateway自身の /actuator/health もDOWNになり、
+      # コンテナのhealthcheckが失敗する。一部のサービスだけ起動する開発・検証時には
+      # gatewayがunhealthy表示になるが、gatewayのhealthyを service_healthy で
+      # 待っているコンテナは無いため起動順序には影響しない。
       show-details: always
