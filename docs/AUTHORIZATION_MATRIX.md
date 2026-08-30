@@ -106,7 +106,7 @@ identity-service / log-writer が従来から行っていた、各コントロ�
 数える設計にすると「他の admin が同時に自分を消す」レースで両者とも通る検査時-使用時の穴が生まれる。
 防いでいるのは「自分で自分を締め出す」ことだけに限定している。
 
-##### 無効化されたユーザーの発行済みトークン(#816 で解消)
+##### 無効化されたユーザーの発行済みトークン(#816 で一部解消)
 
 `deactivate` は Keycloak 側とローカルの `users.enabled` を落とすが、**すでに発行済みの
 アクセストークンは失効しない**(`keycloak/realm-export.json` の `accessTokenLifespan: 300`)。
@@ -119,15 +119,38 @@ Keycloak が止めるのは新規のトークン発行だけで、既存トー�
 
 **#816 で `resolveJwtActor` が無効化ユーザーを操作者として解決しないようにした。**
 JWT の検証(署名・有効期限・issuer)自体は通っている以上 401 ではなく、
-「認証は済んでいるが操作者として扱わない」= **403** になる。
+「認証は済んでいるが操作者として扱わない」という扱いになる。
 
-修正箇所は2つだけでよい。
+| サービス | 操作者の解決経路 | 対応 | 無効化ユーザーが受け取るステータス |
+|---|---|---|---|
+| identity | 自身の `users` テーブル | `resolveJwtActor` で `enabled` を検査 | **403** |
+| legacy-api | 共有スキーマの `users` テーブルを自前参照(#786) | 同上。`User` に `enabled` の読み取り専用マッピングを追加 | **403** |
+| platform | `GET /api/identity/me`(ただし `requireAuthenticated()` は JWT の `sub` だけを見ていた) | `isAuthenticated()` を操作者の解決可否による判定へ変更 | **502**(下記) |
+| 他7サービス(ai / analytics / content / log-writer / media / project / publishing) | `GET /api/identity/me` への同期呼び出し(`IdentityClient`) | コード変更**不要** | **502**(下記) |
 
-| サービス | 操作者の解決経路 | 対応 |
-|---|---|---|
-| identity | 自身の `users` テーブル | `resolveJwtActor` で `enabled` を検査 |
-| legacy-api | 共有スキーマの `users` テーブルを自前参照(#786) | 同上。`User` エンティティに `enabled` の読み取り専用マッピングを追加 |
-| 他8サービス(ai / analytics / content / log-writer / media / platform / project / publishing) | `GET /api/identity/me` への同期呼び出し(`IdentityClient`) | **不要**。identity 側が 403 を返すため「操作者なし」として扱われる |
+###### 他サービスが 502 になる理由(意図した結果ではないが fail-closed)
+
+identity が返す 403 は、呼び出し側で `SyncServiceClientErrorException`
+(`SyncServiceException` のサブクラス)に変換され、各サービスの `CurrentActorService#lookupProfile`
+が `IdentityServiceUnavailableException` へ再変換する。`GlobalExceptionHandler` はこれを
+**502 Bad Gateway** にマップする。
+
+これは各サービスが「identity-service 障害を静かに『操作者なし』へ縮退させると、
+権限チェックが素通りする方向の不具合を生みかねない」という設計判断を明示的に置いているため
+(`lookupProfile` の Javadoc 参照)。**拒否はされる(fail-closed)** が、
+無効化ユーザー起因の 502 とサービス障害起因の 502 が区別できず、
+無効化ユーザーが画面を開くたびに各サービスが WARN/ERROR を出す。
+監視・アラートを誤爆させるため、401/403 を「操作者なし」へ分岐させる改善余地がある(**#829**)。
+
+###### この対処が効く範囲(重要)
+
+**actor を解決するエンドポイントに限る。** 本ドキュメント末尾の
+「有効な JWT さえあれば到達できるエンドポイント」の節に挙げたものは
+`CurrentActorService` を呼ばないため、**無効化ユーザーも `accessTokenLifespan` の間は
+引き続き到達できる**(`PostController` の WordPress 投稿公開・削除、`SiteController`、
+`DiagramController` の CRUD、`GenerationJobController` の作成・更新など)。
+
+これらを塞ぐには認可チェックそのものを足す必要があり、#816 のスコープ外。
 
 `reconcile-keycloak` で無効化された孤児ユーザーにも同じ判定が効く。
 

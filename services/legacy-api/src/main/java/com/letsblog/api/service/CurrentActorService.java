@@ -117,8 +117,8 @@ public class CurrentActorService {
      *
      * <p><b>legacy-apiだけ個別に必要な理由</b>: 他の8サービスは
      * {@code GET /api/identity/me}への同期呼び出しで操作者を解決するため、identity-service側の
-     * 修正だけで塞がる。legacy-apiは共有スキーマの{@code users}テーブルを自前で参照しており
-     * (#786参照)、その経路を通らない。
+     * 修正だけで塞がる(ただし見え方は403ではなく502。#829参照)。legacy-apiは共有スキーマの
+     * {@code users}テーブルを自前で参照しており(#786参照)、その経路を通らない。
      */
     private static boolean isUsable(User user) {
         return user.isEnabled();
