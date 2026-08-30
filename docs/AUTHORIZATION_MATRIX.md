@@ -92,7 +92,8 @@ identity-service / log-writer が従来から行っていた、各コントロ�
 
 **判定はロール名の文字列一致ではなく、DB から解決したロールの権限で行う**。MySQL の照合順序は
 大文字小文字を区別しない(`lets_blog` はサーバー既定の `utf8mb4_0900_ai_ci`、テスト用
-`lbs_identity_test` は `utf8mb4_unicode_ci`。どちらも `_ai_ci`)ため、
+`lbs_identity_test` は `utf8mb4_unicode_ci`。どちらもアクセントと大小の差を無視する。
+末尾空白の扱いだけは異なり、`utf8mb4_0900_ai_ci` は NO PAD なので無視しない)ため、
 `findByRoleName("role_admin")` は `ROLE_ADMIN` の行に一致する。
 `"ROLE_ADMIN".equals(roleName)` のような名前一致でガードすると、大小を変えただけの入力で
 ガードだけをすり抜け、割り当て処理では同じ行に解決される、という迂回が成立する。
@@ -114,7 +115,7 @@ identity-service の認可経路(`CurrentActorService#resolveJwtActor` → `Admi
 通常どおり API を通せる。`reconcile-keycloak` で無効化された孤児ユーザーも同様。
 
 これは `reactivate` 固有の問題ではなく無効化全般のギャップで、恒久的な対処は
-「actor 解決時に `enabled` を検査する」になる。#798 のスコープ外。
+「actor 解決時に `enabled` を検査する」になる。#798 のスコープ外で、**#816** で追跡している。
 
 ##### 注意: admin には別軸が2つある
 
