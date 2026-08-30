@@ -1164,6 +1164,32 @@ export function listUnifiedOperationLogs(
   return apiFetch<UnifiedLogPage>(`/api/operation-logs/unified?${query.toString()}`, { actor });
 }
 
+/**
+ * ブラウザで発生したエラーをlog-writerへ記録する(issue #791)。
+ *
+ * ブラウザから gateway を直叩きしていた頃の名残で認証情報が付かず、#772 で
+ * log-writer に認証ゲートが戻った際に401で無言に全滅していた。現在は
+ * web/src/app/client-errors/route.ts (BFF) だけがこの関数を呼び、Bearerが付く。
+ */
+export interface FrontendErrorLogInput {
+  message: string;
+  stack?: string;
+  componentStack?: string;
+  level: 'error' | 'warn';
+  context?: Record<string, unknown>;
+  url?: string;
+  userAgent?: string;
+  timestamp: string;
+}
+
+export function logFrontendError(input: FrontendErrorLogInput): Promise<void> {
+  return apiFetch<void>('/api/logs/errors', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
 export interface Project {
   id: number;
   name: string;
