@@ -19,6 +19,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -154,5 +155,62 @@ class UnifiedOperationLogServiceTest {
         assertEquals(3, result.getTotalElements());
         assertEquals(1, result.getContent().size());
         assertEquals(1L, result.getContent().get(0).id());
+    }
+
+    // ---------------------------------------------- AIジョブ取得失敗時の縮退(issue #825)
+
+    /**
+     * AIジョブはai-serviceへの同期HTTP呼び出しで取得する唯一の外部依存で、
+     * 操作ログ・監査ログは同じメソッド内で先にDBから取得済みである。
+     *
+     * <p>#825以前は例外がそのまま突き抜けて統合ログAPI全体が502になり、
+     * 取得済みのOPERATION/AUDITまで巻き添えで失われていた。しかも本番では
+     * GenerationJobClientが移設済みのエンドポイントを呼び続けていたため、
+     * この失敗が常時発生し /operation-logs 画面は常に空だった。
+     */
+    @Test
+    void list_AIジョブの取得に失敗しても操作ログと監査ログは返す() {
+        stubEmptySources();
+        LocalDateTime now = LocalDateTime.now();
+        when(operationLogRepository.findByUserIdOrderByCreatedAtDesc(eq(10L), any()))
+                .thenReturn(new PageImpl<>(List.of(operationLog(1L, now.minusMinutes(2)))));
+        when(auditLogRepository.findAllByOrderByCreatedAtDesc(any()))
+                .thenReturn(new PageImpl<>(List.of(auditLog(3L, now.minusMinutes(1)))));
+        when(generationJobClient.listRecent("Bearer test-token"))
+                .thenThrow(new GenerationJobUnavailableException("ai-service down", new RuntimeException()));
+
+        Page<UnifiedLogEntryResponse> result =
+                service().list(10L, true, null, null, PageRequest.of(0, 20), "Bearer test-token");
+
+        assertEquals(2, result.getTotalElements());
+        assertEquals("AUDIT", result.getContent().get(0).sourceType());
+        assertEquals("OPERATION", result.getContent().get(1).sourceType());
+    }
+
+    @Test
+    void list_AIジョブのみを要求して失敗した場合は空を返す() {
+        stubEmptySources();
+        when(generationJobClient.listRecent("Bearer test-token"))
+                .thenThrow(new GenerationJobUnavailableException("ai-service down", new RuntimeException()));
+
+        Page<UnifiedLogEntryResponse> result =
+                service().list(10L, true, "AI_JOB", null, PageRequest.of(0, 20), "Bearer test-token");
+
+        assertEquals(0, result.getTotalElements());
+    }
+
+    /**
+     * identity-serviceの障害は握り潰さない。操作者を解決できないまま統合ログを返すと
+     * 「他人のログが見えているのか自分のログなのか」が保証できなくなるため、502のままにする。
+     * 型で区別している理由は{@code GenerationJobUnavailableException}のJavadoc参照。
+     */
+    @Test
+    void list_identity障害を表す例外は握り潰さない() {
+        stubEmptySources();
+        when(generationJobClient.listRecent("Bearer test-token"))
+                .thenThrow(new IdentityServiceUnavailableException("identity down", new RuntimeException()));
+
+        assertThrows(IdentityServiceUnavailableException.class,
+                () -> service().list(10L, true, null, null, PageRequest.of(0, 20), "Bearer test-token"));
     }
 }

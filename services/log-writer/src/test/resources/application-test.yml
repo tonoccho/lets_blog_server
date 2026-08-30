@@ -31,7 +31,9 @@ spring:
 
 app:
   identity-service-uri: http://localhost:19999
-  legacy-api-uri: http://localhost:19999
+  # 到達しないポートを指す。統合テストは外部サービスへ実際には接続しない(ADR-0006)。
+  # #825でlegacy-api-uriからai-service-uriへ改名(問い合わせ先がai-serviceへ移ったため)。
+  ai-service-uri: http://localhost:19999
 
 keycloak:
   jwk-set-uri: http://localhost:19999/auth/realms/letsblog/protocol/openid-connect/certs

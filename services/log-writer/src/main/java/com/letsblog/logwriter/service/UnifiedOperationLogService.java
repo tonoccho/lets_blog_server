@@ -11,13 +11,13 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
 /**
  * 操作ログ・AIジョブ・監査ログを1画面に統合表示するための集約サービス(issue #187、
  * #572でlog-writerへ移設)。
@@ -34,6 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
  * のJavadoc参照)。
  */
 @Service
+@Slf4j
 public class UnifiedOperationLogService {
 
     private static final int SOURCE_FETCH_LIMIT = 200;
@@ -67,9 +68,24 @@ public class UnifiedOperationLogService {
                     .forEach(log -> entries.add(fromOperationLog(log)));
         }
         if (includeSource(sourceType, "AI_JOB")) {
-            generationJobClient.listRecent(bearerToken).stream()
-                    .limit(SOURCE_FETCH_LIMIT)
-                    .forEach(job -> entries.add(fromGenerationJob(job)));
+            // AIジョブはai-serviceへの同期HTTP呼び出しで取得する唯一の外部依存。ここが落ちても
+            // DBから取得済みの操作ログ・監査ログは返す(issue #825)。
+            //
+            // #825以前は例外がそのまま突き抜けて統合ログAPI全体が502になり、同じメソッド内で
+            // 先にDBから取れていたOPERATION/AUDITまで巻き添えで見えなくなっていた。実際、
+            // 本クライアントが移設済みのエンドポイントを呼び続けていたため、
+            // /operation-logs 画面は常に空だった。
+            //
+            // 握り潰さずWARNで残すのは、「AIジョブが出ない」ことに誰も気付かない状態を
+            // 作らないため。
+            try {
+                generationJobClient.listRecent(bearerToken).stream()
+                        .limit(SOURCE_FETCH_LIMIT)
+                        .forEach(job -> entries.add(fromGenerationJob(job)));
+            } catch (GenerationJobUnavailableException e) {
+                log.warn("AIジョブの取得に失敗したため、統合操作ログからAI_JOBソースを除外します: {}",
+                        e.getMessage());
+            }
         }
         if (viewerIsAdmin && includeSource(sourceType, "AUDIT")) {
             auditLogRepository.findAllByOrderByCreatedAtDesc(fetchWindow)
