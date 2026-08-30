@@ -80,7 +80,8 @@ export async function updateUserProfileAction(
         position: field("position"),
         socialLinks,
         customLinks,
-    });
+      }
+    );
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

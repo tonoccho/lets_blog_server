@@ -576,7 +576,8 @@ export async function applyToEnvironmentAction(
         categoryParentSlug: categoryParentSlug || undefined,
         categoryDescription: categoryDescription || undefined,
         categoryTargetSlug: categoryTargetSlug || undefined,
-    });
+      }
+    );
     revalidatePath(`/projects/${projectId}`);
     return { success: true, results: [result] };
   } catch (err) {
