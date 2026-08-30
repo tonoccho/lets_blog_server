@@ -223,8 +223,23 @@ public final class AuthorizationMatrixContract {
         int i = 0;
         while (i < source.length()) {
             if (source.startsWith("\"\"\"", i)) {
-                int end = source.indexOf("\"\"\"", i + 3);
-                end = end < 0 ? source.length() : end + 3;
+                // 終端探索では \""" のエスケープを飛ばす。見落とすと早期終了して
+                // 以降のクラス本体がまるごと文字列として飲まれ、そのクラスの
+                // 実エンドポイントが全部見えなくなる。
+                int end = i + 3;
+                while (end < source.length()) {
+                    int candidate = source.indexOf("\"\"\"", end);
+                    if (candidate < 0) {
+                        end = source.length();
+                        break;
+                    }
+                    if (candidate > 0 && source.charAt(candidate - 1) == '\\') {
+                        end = candidate + 1;
+                        continue;
+                    }
+                    end = candidate + 3;
+                    break;
+                }
                 out.append("\"\"\"");
                 for (int k = i + 3; k < Math.max(i + 3, end - 3); k++) {
                     out.append(source.charAt(k) == '\n' ? '\n' : ' ');
@@ -296,6 +311,7 @@ public final class AuthorizationMatrixContract {
             String annotation = methodMapping.group(1);
             int argsStart = masked.indexOf('(', methodMapping.end() - 1);
             String args = "";
+            String argsMasked = "";
             int annotationEnd = methodMapping.end();
             // 注釈名の直後が '(' のときだけ引数とみなす(次の注釈の '(' を拾わない)。
             if (argsStart >= 0 && masked.substring(methodMapping.end(), argsStart).isBlank()) {
@@ -304,6 +320,7 @@ public final class AuthorizationMatrixContract {
                     throw new AssertionError(fileName + ": 注釈の括弧が閉じていません: " + annotation);
                 }
                 args = source.substring(argsStart, argsEnd + 1);
+                argsMasked = masked.substring(argsStart, argsEnd + 1);
                 annotationEnd = argsEnd + 1;
             }
 
@@ -312,8 +329,8 @@ public final class AuthorizationMatrixContract {
                 continue;
             }
 
-            for (String verb : httpMethods(fileName, annotation, args)) {
-                for (String sub : paths(fileName, args)) {
+            for (String verb : httpMethods(fileName, annotation, argsMasked)) {
+                for (String sub : paths(fileName, args, argsMasked)) {
                     String path = join(base, sub);
                     endpoints.add(new Endpoint(verb, path.isEmpty() ? "/" : path));
                 }
@@ -329,7 +346,8 @@ public final class AuthorizationMatrixContract {
         if (open < 0 || close < 0) {
             throw new AssertionError(fileName + ": クラスレベル @RequestMapping の括弧が閉じていません");
         }
-        List<String> paths = paths(fileName, source.substring(open, close + 1));
+        List<String> paths = paths(fileName, source.substring(open, close + 1),
+                masked.substring(open, close + 1));
         if (paths.size() != 1) {
             throw new AssertionError(fileName
                     + ": クラスレベル @RequestMapping が複数パスを持ちます: " + paths
@@ -378,43 +396,55 @@ public final class AuthorizationMatrixContract {
     /**
      * 注釈が表すパス。{@code @GetMapping} のように値が無ければクラスのパスをそのまま使う。
      *
-     * <p><b>属性名で厳密に判別する</b>。#805 のQAで、位置引数を「引数中の任意の文字列リテラル」
-     * として拾っていたために {@code @GetMapping(produces = "text/plain")} が
-     * <b>幻の {@code /text/plain} を報告し、本物のパスを取りこぼす</b>ことが判明した。
-     * メッセージに従って幻のパスを一覧に足すと緑になり、実エンドポイントが検証されないまま固定される。
+     * <p><b>属性名で厳密に判別する</b>。位置引数を「引数中の任意の文字列リテラル」として拾うと、
+     * {@code @GetMapping(produces = "text/plain")} が幻の {@code /text/plain} を報告し、
+     * 本物のパスを取りこぼす。メッセージに従って幻を一覧に足すと緑になり、
+     * 実エンドポイントが検証されないまま固定される。
      *
-     * <p>また、パス式から文字列リテラルを取り出せない場合(定数参照 {@code @GetMapping(PATH_CONST)}
-     * など)は<b>落とす</b>。「値なし」と同一視するとクラスのパスに化け、
-     * base が一覧にあれば完全に無音で通ってしまう。
+     * <p><b>判定はマスク視点、値は元ソース</b>。引数の内側にもこの原則を適用しないと、
+     * 引数内の {@code //} コメントがトークンの先頭に来て属性名の判定を外し、
+     * <b>そのエンドポイントが無音で消える</b>。コメント内の文字列が幻のパスにもなる。
+     *
+     * <p>パス式から文字列リテラルを取り出せない場合(定数参照など)は<b>落とす</b>。
+     * 「値なし」と同一視するとクラスのパスに化け、base が一覧にあれば完全に無音で通ってしまう。
      */
-    private static List<String> paths(String fileName, String args) {
-        String inner = args.isEmpty() ? "" : args.substring(1, args.length() - 1).trim();
-        if (inner.isEmpty()) {
+    private static List<String> paths(String fileName, String args, String argsMasked) {
+        if (args.isEmpty()) {
+            return List.of("");
+        }
+        String inner = args.substring(1, args.length() - 1);
+        String innerMasked = argsMasked.substring(1, argsMasked.length() - 1);
+        if (innerMasked.isBlank()) {
             return List.of("");
         }
 
-        String pathExpression = null;
+        int[] pathSpan = null;
         boolean onlyNonPathAttributes = true;
-        List<String> tokens = splitTopLevel(inner);
+        List<int[]> tokens = splitTopLevel(innerMasked);
         for (int i = 0; i < tokens.size(); i++) {
-            String token = tokens.get(i).trim();
-            Matcher named = NAMED_ATTRIBUTE.matcher(token);
+            int[] span = tokens.get(i);
+            String masked = innerMasked.substring(span[0], span[1]);
+            if (masked.isBlank()) {
+                continue;
+            }
+            int lead = masked.length() - masked.stripLeading().length();
+            Matcher named = NAMED_ATTRIBUTE.matcher(masked.strip());
             if (named.find()) {
                 String attribute = named.group(1);
                 if ("value".equals(attribute) || "path".equals(attribute)) {
-                    pathExpression = token.substring(named.end()).trim();
+                    pathSpan = new int[] {span[0] + lead + named.end(), span[1]};
                     onlyNonPathAttributes = false;
                 } else if (!NON_PATH_ATTRIBUTES.contains(attribute)) {
                     onlyNonPathAttributes = false;
                 }
             } else if (i == 0) {
                 // 位置引数。属性名が無いのは先頭のパス指定のときだけ。
-                pathExpression = token;
+                pathSpan = span;
                 onlyNonPathAttributes = false;
             }
         }
 
-        if (pathExpression == null) {
+        if (pathSpan == null) {
             if (onlyNonPathAttributes) {
                 return List.of("");
             }
@@ -423,62 +453,48 @@ public final class AuthorizationMatrixContract {
                     + " AuthorizationMatrixContract の解析を拡張してください");
         }
 
+        // 値は元ソースから取るが、マスク側で二重引用符になっている位置のものだけを採る
+        // (コメントの中の文字列を幻のパスとして拾わないため)。
         List<String> paths = new ArrayList<>();
-        Matcher literal = STRING_LITERAL.matcher(pathExpression);
+        Matcher literal = STRING_LITERAL.matcher(inner);
+        literal.region(pathSpan[0], pathSpan[1]);
         while (literal.find()) {
-            paths.add(literal.group(1));
+            if (innerMasked.charAt(literal.start()) == '"') {
+                paths.add(literal.group(1));
+            }
         }
         if (paths.isEmpty()) {
             throw new AssertionError(fileName
-                    + ": マッピング注釈のパスが文字列リテラルではありません: " + pathExpression
+                    + ": マッピング注釈のパスが文字列リテラルではありません: "
+                    + inner.substring(pathSpan[0], pathSpan[1]).strip()
                     + " 定数参照は走査できません。リテラルで書くか、"
                     + "AuthorizationMatrixContract の解析を拡張してください");
         }
         return paths;
     }
 
-    /** 注釈の引数を、波括弧と文字列リテラルを尊重してトップレベルのカンマで分割する。 */
-    private static List<String> splitTopLevel(String inner) {
-        List<String> tokens = new ArrayList<>();
+    /**
+     * 注釈の引数を、波括弧を尊重してトップレベルのカンマで分割し、各トークンの範囲を返す。
+     *
+     * <p>マスク済みの視点を渡す前提。文字列の中身もコメントも空白になっているので、
+     * それらの中のカンマで誤って分割することがない。
+     */
+    private static List<int[]> splitTopLevel(String innerMasked) {
+        List<int[]> tokens = new ArrayList<>();
         int depth = 0;
-        boolean inString = false;
-        StringBuilder current = new StringBuilder();
-        for (int i = 0; i < inner.length(); i++) {
-            char c = inner.charAt(i);
-            if (inString) {
-                current.append(c);
-                if (c == '"' && (i == 0 || inner.charAt(i - 1) != '\\')) {
-                    inString = false;
-                }
-                continue;
-            }
-            switch (c) {
-                case '"' -> {
-                    inString = true;
-                    current.append(c);
-                }
-                case '{', '(' -> {
-                    depth++;
-                    current.append(c);
-                }
-                case '}', ')' -> {
-                    depth--;
-                    current.append(c);
-                }
-                case ',' -> {
-                    if (depth == 0) {
-                        tokens.add(current.toString());
-                        current.setLength(0);
-                    } else {
-                        current.append(c);
-                    }
-                }
-                default -> current.append(c);
+        int start = 0;
+        for (int i = 0; i < innerMasked.length(); i++) {
+            char c = innerMasked.charAt(i);
+            if (c == '{' || c == '(') {
+                depth++;
+            } else if (c == '}' || c == ')') {
+                depth--;
+            } else if (c == ',' && depth == 0) {
+                tokens.add(new int[] {start, i});
+                start = i + 1;
             }
         }
-        if (!current.isEmpty()) {
-            tokens.add(current.toString());
-        }
+        tokens.add(new int[] {start, innerMasked.length()});
         return tokens;
     }
 
