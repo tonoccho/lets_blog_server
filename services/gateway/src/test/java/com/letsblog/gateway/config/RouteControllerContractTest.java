@@ -58,9 +58,23 @@ import static org.junit.jupiter.api.DynamicTest.dynamicTest;
  * {@code uri}が、そのコントローラーが属するサービスの環境変数プレースホルダ
  * (例: {@code MEDIA_SERVICE_URI})を指しているかを検証する。
  *
- * <p><b>スキャン対象外</b>: legacy-api(移行期間中の暫定フォールバック先そのものであり、
- * 個別ルートを持たない大半のエンドポイントがfallback-uri経由で正しく到達するため、
- * このテストの対象に含める意味が薄い)・gateway自身、および各コントローラーの
+ * <p><b>legacy-apiも対象に含める(issue #771)</b>: 当初は「移行期間中の暫定フォールバック先
+ * そのものであり、個別ルートを持たない大半のエンドポイントがfallback-uri経由で正しく到達する」
+ * という理由でスキャン対象外にしていた。しかしこの想定は「どのルートにもマッチしない」場合にしか
+ * 成り立たない。legacy-apiに残ったまま{@code /api/projects/**}配下にあるエンドポイントは、
+ * 移設済みサービス向けの広いルート(特に{@code project}ルート)へ先勝ちでマッチしてしまい、
+ * そのサービスに存在しないパスとして404になる。実際にissue #771で
+ * {@code POST /api/projects/{projectId}/ai/generate-image-prompt}がこの状態にあることが
+ * 実機で確認され、同じ調査で ProjectController の5エンドポイント
+ * ({@code css-selector-prefix}・{@code image-generation-prompt-defaults}・
+ * {@code image-generation-size-defaults}・{@code article-image-resize-default}・
+ * {@code image-content-filter-settings})も同様に到達不能であることが判明した。
+ *
+ * <p>そこでlegacy-apiを{@code LEGACY_API_URI}を期待値としてスキャン対象へ加えた。
+ * fallback-uriも{@code ${LEGACY_API_URI:...}}であるため「専用ルートが無い」場合は従来どおり
+ * 合格し、**「他サービス向けのルートに飲み込まれている」場合だけが失敗する**。
+ *
+ * <p><b>スキャン対象外</b>: gateway自身、および各コントローラーの
  * {@code /api/internal/**}配下のエンドポイント(サービス間の内部ブリッジ専用で、
  * gatewayを経由しない。各internalXxxControllerの実装参照)。
  *
@@ -97,7 +111,7 @@ class RouteControllerContractTest {
 
     /**
      * サービスモジュール名(services/配下のディレクトリ名) -> application.ymlでそのサービスを
-     * 指す環境変数プレースホルダ名。legacy-api・gatewayは含めない(クラスJavadoc参照)。
+     * 指す環境変数プレースホルダ名。gatewayは含めない(クラスJavadoc参照)。
      */
     private static final Map<String, String> SERVICE_MODULE_TO_ENV_VAR = new LinkedHashMap<>();
 
@@ -112,6 +126,10 @@ class RouteControllerContractTest {
         // 公開パイプライン(PostController、issue #707)・一括管理/環境間比較・taxonomy解決
         // (BulkManagementController/TaxonomyController、issue #708)をpublishing-serviceが持つ。
         SERVICE_MODULE_TO_ENV_VAR.put("publishing", "PUBLISHING_SERVICE_URI");
+        // legacy-apiは「専用ルートが無ければfallback-uri(同じくLEGACY_API_URI)へ落ちる」ため、
+        // ここでの検証は実質「他サービス向けのルートに飲み込まれていないか」になる
+        // (issue #771。クラスJavadoc参照)。移設が進むにつれ対象は減っていく。
+        SERVICE_MODULE_TO_ENV_VAR.put("legacy-api", "LEGACY_API_URI");
     }
 
     /** クラス宣言行(トップレベルの public class)を検出する。 */

@@ -95,6 +95,38 @@ app:
         uri: ${LEGACY_API_URI:http://api:8080}
         paths:
           - /api/projects/*/api-keys/**
+      # 画像生成プロンプトの生成(AiController#generateImagePrompt)は、上のai-models(画像生成AI)と
+      # 同じ理由でai-serviceへ移設せずlegacy-apiに残っている(services/ai/.../AiController.javaの
+      # Javadocが「画像生成は移設しない」と明記しており、ai-service側にこのエンドポイントは無い)。
+      # 専用ルートが無かったため、より広い/api/projects/**(下のprojectルート)へ先勝ちでマッチし、
+      # project-serviceに存在しないパスとして404になっていた(issue #771。#642/#659の
+      # ArticlePlanControllerと同一パターン)。
+      #
+      # response-timeoutは下のaiルートと同じ180秒にする。このエンドポイントは同期のLLM呼び出し
+      # (AiController#generateImagePrompt → AiAssistService → AiGenerationClient)であり、
+      # AiGenerationClientのプロファイルはSyncCallProfile.LLM(読み取り180秒)、ai-service側の
+      # LLM_REQUEST_TIMEOUT_SECONDSも既定120秒。既定の60秒(default-response-timeout)のままだと
+      # 下流がまだ待っている最中にgatewayだけが504で切ってしまう。
+      - id: project-ai-generate-image-prompt-legacy
+        uri: ${LEGACY_API_URI:http://api:8080}
+        paths:
+          - /api/projects/*/ai/generate-image-prompt
+        response-timeout: 180s
+      # プロジェクト単位の各種設定(ProjectController#updateCssSelectorPrefix・
+      # updateImageGenerationPromptDefaults・updateImageGenerationSizeDefaults・
+      # updateArticleImageResizeDefault・updateImageContentFilterSettings)も、
+      # #577 stage2でproject-serviceへ移設した範囲に含まれておらずlegacy-apiに残っている
+      # (project-serviceのProjectControllerにこれらのパスは無い)。上と同じく専用ルートが無く
+      # projectルートへ先勝ちマッチして404になっていた(issue #771の調査で追加発見。
+      # web/src/lib/apiClient.tsが実際に呼んでおり、プロジェクト設定画面から到達不能だった)。
+      - id: project-settings-legacy
+        uri: ${LEGACY_API_URI:http://api:8080}
+        paths:
+          - /api/projects/*/css-selector-prefix
+          - /api/projects/*/image-generation-prompt-defaults
+          - /api/projects/*/image-generation-size-defaults
+          - /api/projects/*/article-image-resize-default
+          - /api/projects/*/image-content-filter-settings
       # ProjectCustomTagController(プロジェクト詳細のカスタムタグ画面)はcontent-serviceへ移設した
       # (#576)。パス自体は/api/projects/**配下のまま(既存フロントのURLを変えないため)。より広い
       # /api/projects/**(下のprojectルート、project-serviceが未抽出のためlegacy-apiのまま)より
