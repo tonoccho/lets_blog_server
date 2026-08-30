@@ -52,14 +52,33 @@ public final class AuthorizationMatrixContract {
         }
     }
 
-    /** クラスレベルの {@code @RequestMapping("...")}。 */
-    private static final Pattern CLASS_MAPPING =
-            Pattern.compile("@RequestMapping\\(\\s*\"([^\"]*)\"\\s*\\)");
+    /**
+     * クラスレベルの {@code @RequestMapping}。クラス宣言の直前にあるものだけを採る。
+     *
+     * <p>ファイル内で最初に現れる {@code @RequestMapping} を無条件に採ると、
+     * メソッドレベルで {@code @RequestMapping} を使っているコントローラが混ざったときに
+     * base パスが壊れる。
+     */
+    private static final Pattern CLASS_MAPPING = Pattern.compile(
+            "@RequestMapping\\(\\s*(?:(?:value|path)\\s*=\\s*)?\"([^\"]*)\"[^)]*\\)"
+                    + "(?:\\s*@\\w+(?:\\([^)]*\\))?)*\\s*(?:public\\s+)?(?:final\\s+)?class");
 
-    /** メソッドレベルの {@code @GetMapping} など。値が無い場合はクラスのパスをそのまま使う。 */
-    private static final Pattern METHOD_MAPPING = Pattern.compile(
-            "@(Get|Post|Put|Delete|Patch)Mapping"
-                    + "(?:\\(\\s*(?:value\\s*=\\s*)?\"([^\"]*)\"[^)]*\\))?");
+    /**
+     * メソッドレベルのマッピング注釈。
+     *
+     * <p>{@code @RequestMapping(method = ...)} も対象に含める。gateway の
+     * {@code RouteControllerContractTest} が既にそうしており、そちらに合わせる。
+     */
+    private static final Pattern METHOD_MAPPING =
+            Pattern.compile("@(Get|Post|Put|Delete|Patch|Request)Mapping\\b(\\([^)]*\\))?");
+
+    /** 注釈の引数から取り出すパス。{@code value =} / {@code path =} / 位置引数のいずれも許す。 */
+    private static final Pattern MAPPING_PATH =
+            Pattern.compile("(?:^|[(,\\s])(?:(?:value|path)\\s*=\\s*)?(\\{[^}]*\\}|\"[^\"]*\")");
+
+    /** {@code @RequestMapping(method = RequestMethod.GET)} の HTTP メソッド。 */
+    private static final Pattern MAPPING_METHOD =
+            Pattern.compile("method\\s*=\\s*\\{?\\s*(?:RequestMethod\\.)?(\\w+)");
 
     /** {@code SecurityConfig} の {@code PUBLIC_PATHS} 配列。 */
     private static final Pattern PUBLIC_PATHS_BLOCK =
@@ -150,14 +169,14 @@ public final class AuthorizationMatrixContract {
         List<Endpoint> endpoints = new ArrayList<>();
         try (Stream<Path> files = Files.walk(sourceRoot)) {
             files.filter(p -> p.getFileName().toString().endsWith("Controller.java"))
-                    .forEach(p -> endpoints.addAll(parseController(read(p))));
+                    .forEach(p -> endpoints.addAll(parseController(p.getFileName().toString(), read(p))));
         } catch (IOException e) {
             throw new UncheckedIOException("コントローラの走査に失敗しました: " + sourceRoot, e);
         }
         return endpoints;
     }
 
-    private static List<Endpoint> parseController(String source) {
+    private static List<Endpoint> parseController(String fileName, String source) {
         String base = "";
         Matcher classMapping = CLASS_MAPPING.matcher(source);
         if (classMapping.find()) {
@@ -167,12 +186,104 @@ public final class AuthorizationMatrixContract {
         List<Endpoint> endpoints = new ArrayList<>();
         Matcher methodMapping = METHOD_MAPPING.matcher(source);
         while (methodMapping.find()) {
-            String verb = methodMapping.group(1).toUpperCase(Locale.ROOT);
-            String sub = methodMapping.group(2) == null ? "" : methodMapping.group(2);
-            String path = base + sub;
-            endpoints.add(new Endpoint(verb, path.isEmpty() ? "/" : path));
+            String annotation = methodMapping.group(1);
+            String args = methodMapping.group(2) == null ? "" : methodMapping.group(2);
+
+            // クラスレベルの @RequestMapping はここでは扱わない(baseとして既に採っている)。
+            if ("Request".equals(annotation) && isClassLevel(source, methodMapping.end())) {
+                continue;
+            }
+
+            for (String verb : httpMethods(fileName, annotation, args)) {
+                for (String sub : paths(fileName, args)) {
+                    String path = join(base, sub);
+                    endpoints.add(new Endpoint(verb, path.isEmpty() ? "/" : path));
+                }
+            }
         }
         return endpoints;
+    }
+
+    /** 注釈の直後がクラス宣言なら、それはクラスレベルの {@code @RequestMapping}。 */
+    private static boolean isClassLevel(String source, int annotationEnd) {
+        String rest = source.substring(annotationEnd, Math.min(source.length(), annotationEnd + 400));
+        return rest.matches("(?s)(?:\\s*@\\w+(?:\\([^)]*\\))?)*\\s*(?:public\\s+)?(?:final\\s+)?class\\b.*");
+    }
+
+    /**
+     * 注釈が表す HTTP メソッド。
+     *
+     * <p>{@code @RequestMapping} に {@code method} が無い場合、Spring は全メソッドを受ける。
+     * 一覧との突き合わせでどう扱うべきか一意に決まらないので、
+     * <b>静かに縮退させず落とす</b>。この形が出てきたら走査ロジックの更新が必要という合図。
+     */
+    private static List<String> httpMethods(String fileName, String annotation, String args) {
+        if (!"Request".equals(annotation)) {
+            return List.of(annotation.toUpperCase(Locale.ROOT));
+        }
+        List<String> methods = new ArrayList<>();
+        Matcher m = MAPPING_METHOD.matcher(args);
+        while (m.find()) {
+            methods.add(m.group(1).toUpperCase(Locale.ROOT));
+        }
+        if (methods.isEmpty()) {
+            throw new AssertionError(fileName
+                    + ": メソッドレベルの @RequestMapping に method 属性がありません。"
+                    + "全HTTPメソッドを受けるため一覧との対応が一意に決まりません。"
+                    + " @GetMapping 等へ書き換えるか、AuthorizationMatrixContract を拡張してください");
+        }
+        return methods;
+    }
+
+    /**
+     * 注釈が表すパス。{@code @GetMapping} のように値が無ければクラスのパスをそのまま使う。
+     *
+     * <p>{@code {"/a","/b"}} の配列形式も展開する。
+     *
+     * <p><b>引数はあるのにパスを取り出せない場合は落とす</b>。#805 のレビューで指摘された
+     * 最大の穴がここで、{@code @GetMapping(path = "/x")} や {@code @GetMapping({"/a","/b"})} を
+     * 「値なし」と誤認するとクラスのパスに化け、既存の一覧エントリと一致して
+     * <b>陳腐化も検証漏れも出さずにテストが緑のまま通る</b>。正常系(値なし)と区別できない形で
+     * 縮退させてはいけない。
+     */
+    private static List<String> paths(String fileName, String args) {
+        if (args.isEmpty()) {
+            return List.of("");
+        }
+        Matcher m = MAPPING_PATH.matcher(args);
+        List<String> paths = new ArrayList<>();
+        if (m.find()) {
+            String token = m.group(1);
+            Matcher literal = STRING_LITERAL.matcher(token);
+            while (literal.find()) {
+                paths.add(literal.group(1));
+            }
+        }
+        if (!paths.isEmpty()) {
+            return paths;
+        }
+        // 引数はあるが文字列リテラルが1つも無い(例: @GetMapping(produces = "...") だけ)。
+        // produces/consumes だけならパス無しとして扱ってよいが、判別できない形は落とす。
+        if (!args.contains("\"")) {
+            return List.of("");
+        }
+        throw new AssertionError(fileName
+                + ": マッピング注釈の引数からパスを取り出せませんでした: " + args
+                + " AuthorizationMatrixContract の解析を拡張してください");
+    }
+
+    /** クラスのパスとメソッドのパスを、スラッシュが重複しないように連結する。 */
+    private static String join(String base, String sub) {
+        if (sub.isEmpty()) {
+            return base;
+        }
+        if (base.endsWith("/") && sub.startsWith("/")) {
+            return base + sub.substring(1);
+        }
+        if (!base.isEmpty() && !base.endsWith("/") && !sub.startsWith("/")) {
+            return base + "/" + sub;
+        }
+        return base + sub;
     }
 
     /** {@code SecurityConfig} の {@code PUBLIC_PATHS} を読む。見つからなければ空。 */

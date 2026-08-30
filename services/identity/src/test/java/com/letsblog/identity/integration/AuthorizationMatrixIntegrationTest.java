@@ -47,8 +47,6 @@ class AuthorizationMatrixIntegrationTest {
     @MockitoBean
     private JwtDecoder jwtDecoder;
 
-
-
     /**
      * identity-serviceがgateway経由で外部へ公開している全エンドポイント(gatewayの{@code identity}
      * ルート: {@code /api/identity/**}・{@code /api/users/**}・{@code /api/roles/**})。
@@ -131,13 +129,8 @@ class AuthorizationMatrixIntegrationTest {
      * 一覧とコントローラの実マッピングが一致していることを検証する(issue #805)。
      *
      * <p>「Authorizationヘッダーが無ければ401」というテストは、<b>存在しないパスに対しても通る</b>
-     * (SecurityConfigがコントローラ解決より手前で401を返すため、404にならない)。
-     * つまり一覧が陳腐化しても誰も気付かない。#731ではlegacy-apiの一覧に実体の無いパスが
-     * 107件残っていた。逆に、新しいエンドポイントを足して一覧に入れ忘れると、
-     * そのエンドポイントは認証ゲートの検証対象から外れたままになる。
-     *
-     * <p>除外は{@code SecurityConfig}の{@code PUBLIC_PATHS}をソースから読んで導出する。
-     * 検証ロジックは{@link AuthorizationMatrixContract}(lbs-commonのtest fixtures)に集約。
+     * ため、一覧が陳腐化しても気付けない。#731ではlegacy-apiの一覧に実体の無いパスが107件残っていた。
+     * 検証の詳細と限界は{@link AuthorizationMatrixContract}のJavadocを参照。
      */
     @Test
     @DisplayName("エンドポイント一覧がコントローラの実マッピングと一致する(issue #805)")
