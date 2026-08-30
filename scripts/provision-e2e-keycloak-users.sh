@@ -4,8 +4,10 @@
 #   e2e-test@letsblog.local   role=user  (非admin側の検証用)
 #   e2e-admin@letsblog.local  role=admin (admin側の検証用。realmロール admin を付与)
 #
-# 実ユーザー(s.tonouchi@gmail.com等)には一切触れない。操作対象は上記2件の
-# e2e-*@letsblog.local に限定され、それ以外のアカウントは作成・変更・削除しない。
+# 操作対象は上記2件の e2e-*@letsblog.local に限定され、それ以外のアカウントは
+# 作成・変更・削除しない。実ユーザー(s.tonouchi@gmail.com等)は、issue #796 以降
+# identity-service を admin として呼ぶための**認証にだけ**使い(手順0)、
+# 作成・変更・削除の対象にはしない。
 #
 # ■ 安全上の制約(重要)
 # このスクリプトは「ローカル開発用のdocker composeで起動しているKeycloakコンテナ
