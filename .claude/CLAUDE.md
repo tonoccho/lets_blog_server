@@ -239,7 +239,7 @@ Passing QA opens a Pull Request; it does not mark the issue Done. Done happens o
 # Dependency Resolution
 
 This is the single definition of "dependencies are resolved". `work-next`, `implement-issue`,
-`ready-issue`, `triage-backlog`, and `plan-issue` all defer to it. Do not restate it differently
+`ready-issue`, `triage-backlog`, `plan-issue`, and the `project-planner` agent all defer to it. Do not restate it differently
 anywhere else — if you find a second definition in `.claude/`, that is a bug to fix, not a
 variant to follow.
 
@@ -275,6 +275,27 @@ A verdict that asserts "prose dependencies do not block" without that evidence i
 treat it as unverified and do the inspection.
 
 The script prints the inputs. It does not inspect the codebase for you.
+
+## When the evidence itself is contested
+
+These rules make the *form* of a verdict uniform — every verdict must rest on cited code, not on
+board status. They do not mechanize how to weigh competing readings of that code. Two assessors
+can both cite real evidence and still disagree: one reads gateway's `fallback-uri` as making a
+path reachable, the other reads the un-split service as making the acceptance criteria
+unverifiable. Both are legitimate readings.
+
+That residual disagreement is not a rule failure, and it is not resolved by posting a louder
+verdict. Handle it this way:
+
+- **When inspection is inconclusive, default to `Backlog`.** Ready is an authorization to start
+  without further product-level clarification; if you cannot establish the substance is there,
+  you do not have that authorization.
+- **When your reading contradicts a recent verdict that also cited code**, do not flip the
+  status. Post a comment stating both readings and what would settle them, leave the status as
+  it is, and escalate to the user. A ping-pong of well-evidenced opposite verdicts is worse than
+  one open question (#751).
+
+Silently picking a side is the failure mode this section exists to prevent.
 
 ## Reversing a verdict
 

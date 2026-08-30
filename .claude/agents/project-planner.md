@@ -165,7 +165,11 @@ An issue is Ready only when:
 - The goal is clear.
 - Acceptance criteria are testable.
 - Blocking questions are resolved.
-- Major dependencies are identified.
+- Dependencies are resolved **per `CLAUDE.md` → Dependency Resolution**. That is the single
+  definition of "resolved"; do not apply a different one here, and do not reduce it to
+  "dependencies are identified". You render the verdict for `ready-issue` and
+  `triage-backlog`, so this criterion is the one that actually decides — read the definition
+  yourself rather than relying on the calling skill to have quoted it to you (#751).
 - Scope is reasonably bounded.
 
 If these conditions are not satisfied, do not recommend Ready.
