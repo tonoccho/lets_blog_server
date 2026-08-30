@@ -1,5 +1,7 @@
 package com.letsblog.identity.integration;
 
+import com.letsblog.common.testfixtures.AuthorizationMatrixContract;
+import com.letsblog.common.testfixtures.AuthorizationMatrixContract.Endpoint;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -46,12 +48,6 @@ class AuthorizationMatrixIntegrationTest {
     private JwtDecoder jwtDecoder;
 
 
-    record Endpoint(String method, String path) {
-        @Override
-        public String toString() {
-            return method + " " + path;
-        }
-    }
 
     /**
      * identity-serviceがgateway経由で外部へ公開している全エンドポイント(gatewayの{@code identity}
@@ -129,5 +125,24 @@ class AuthorizationMatrixIntegrationTest {
     void actuatorヘルスチェックは401にならない() throws Exception {
         mockMvc.perform(request(HttpMethod.GET, "/actuator/health"))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotIn(401, 404));
+    }
+
+    /**
+     * 一覧とコントローラの実マッピングが一致していることを検証する(issue #805)。
+     *
+     * <p>「Authorizationヘッダーが無ければ401」というテストは、<b>存在しないパスに対しても通る</b>
+     * (SecurityConfigがコントローラ解決より手前で401を返すため、404にならない)。
+     * つまり一覧が陳腐化しても誰も気付かない。#731ではlegacy-apiの一覧に実体の無いパスが
+     * 107件残っていた。逆に、新しいエンドポイントを足して一覧に入れ忘れると、
+     * そのエンドポイントは認証ゲートの検証対象から外れたままになる。
+     *
+     * <p>除外は{@code SecurityConfig}の{@code PUBLIC_PATHS}をソースから読んで導出する。
+     * 検証ロジックは{@link AuthorizationMatrixContract}(lbs-commonのtest fixtures)に集約。
+     */
+    @Test
+    @DisplayName("エンドポイント一覧がコントローラの実マッピングと一致する(issue #805)")
+    void エンドポイント一覧がコントローラと一致する() {
+        AuthorizationMatrixContract.verifyMatchesControllers(
+                "identity", allProtectedEndpoints().toList());
     }
 }

@@ -37,6 +37,17 @@ dependencies {
 tasks.named('test') {
     useJUnitPlatform()
     finalizedBy jacocoTestReport
+
+    // AuthorizationMatrixIntegrationTest は実行時に自サービスのコントローラと SecurityConfig を
+    // ソースとして走査する(issue #805。検証ロジックは lbs-common の
+    // AuthorizationMatrixContract)。これらを Gradle の入力として宣言しておかないと、
+    // コントローラを増やしても test タスクが UP-TO-DATE で飛ばされ、契約テストが実行されない。
+    // CI は毎回 fresh checkout なので結局実行されるが、それではローカルで気付けず
+    // 「エンドポイントを足したら落ちて気付ける」という目的を果たさない(#743 と同じ理由)。
+    inputs.files(fileTree("$projectDir/src/main/java") {
+        include '**/*Controller.java'
+        include '**/SecurityConfig.java'
+    }).withPropertyName('authorizationMatrixSources').withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 jacocoTestReport {
