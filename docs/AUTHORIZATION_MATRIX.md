@@ -21,7 +21,7 @@ Bearerトークンが提示されていれば検証するが、トークンが�
 |---|---|---|---|
 | gateway | 担わない(方針どおり。ADR-0008)。提示されたトークンの検証のみ | 全経路(`anyExchange().permitAll()`) | 該当なし(ゲートを担わないため) |
 | legacy-api | 自サービスの`SecurityConfig`(#566) | `/api/health`、`/api/auth/setup`、`/api/auth/setup-status`、`/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html` | `services/legacy-api/src/test/java/com/letsblog/api/integration/AuthorizationMatrixIntegrationTest.java` |
-| platform | 自サービスの`SecurityConfig`(#705。**参照実装**) | `/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html`、`/api/internal/platform/**`(#742で別途判断) | `services/platform/src/test/java/com/letsblog/platform/integration/AuthorizationMatrixIntegrationTest.java`(**テストのテンプレート**) |
+| platform | 自サービスの`SecurityConfig`(#705。**参照実装**) | `/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html`(`/api/internal/platform/**` は #742 でJWT必須へ移した) | `services/platform/src/test/java/com/letsblog/platform/integration/AuthorizationMatrixIntegrationTest.java`(**テストのテンプレート**) |
 | identity | 自サービスの`SecurityConfig`(#772) | `/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html` | `services/identity/src/test/java/com/letsblog/identity/integration/AuthorizationMatrixIntegrationTest.java` |
 | project | 自サービスの`SecurityConfig`(#772) | `/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html` | `services/project/src/test/java/com/letsblog/project/integration/AuthorizationMatrixIntegrationTest.java` |
 | content | 自サービスの`SecurityConfig`(#772) | `/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html` | `services/content/src/test/java/com/letsblog/content/integration/AuthorizationMatrixIntegrationTest.java` |
@@ -195,11 +195,41 @@ legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行して�
    Authorizationヘッダーなしでも200を返す後退が発生していた(gateway側も`anyExchange().permitAll()`で
    あり、どちらの層でも認証必須化が行われていなかった)。issue #705でplatform-serviceの`SecurityConfig`を
    legacy-apiと同じ形(公開パスを除き`anyRequest().authenticated()`)へ変更し、下表の「未認証: 401」を
-   実態として復元した。platform-serviceの公開パスは Actuator (`/actuator/**`)・APIドキュメント
-   (`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html`)・サービス間内部ブリッジ
-   (`/api/internal/platform/**`、gatewayのルート表に無く外部から到達できない。同SecurityConfigの
-   Javadoc参照)のみ。対応する統合テストは
+   実態として復元した。platform-serviceの公開パスは Actuator (`/actuator/**`)と
+   APIドキュメント (`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html`)のみ。対応する統合テストは
    `services/platform/src/test/java/com/letsblog/platform/integration/AuthorizationMatrixIntegrationTest.java`。
+
+   **サービス間内部ブリッジ `/api/internal/platform/**` について(issue #742)**:
+   #705の時点では公開パスに残していた。唯一の呼び出し元である legacy-api の
+   `PlatformServiceClient` が Authorization ヘッダーを一切付与しない実装で、
+   `authenticated()` にすると実行時に壊れたためである。
+
+   しかしこれらのエンドポイント(`InternalPlatformSettingsController`)は
+   **Brave Search APIキー・LLM APIキー・ChatGPTキーという実際のシークレットを返す**。
+   gatewayのルート表に載っておらず外部からは到達できないが、内部ネットワークからは無防備だった。
+   project-service / publishing-service の同種の内部ブリッジは既にJWT必須で、
+   platform-service だけが一貫性を欠いていた。
+
+   #742 で `PlatformServiceClient` を Client Credentials Grant
+   (`ServiceAuthHeaders.clientCredentials`、#567)でトークンを付与するよう修正し、
+   `/api/internal/platform/**` を `authenticated()` へ移した。
+   呼び出し先はシステム全体で1つの値を解決するだけで特定ユーザーのデータではないため、
+   呼び出し元ユーザーのトークンを転送する(`forwardedBearer`)必要はない。
+   下流(`InternalPlatformSettingsController`)はユーザー単位の認可を一切行わないため、
+   呼び出し元ユーザーの権限を運ぶ意味が無い。
+
+   技術的には `forwardedBearer` も選択可能で、そちらなら Keycloak への新たな実行時依存は
+   増えなかった。それでも `clientCredentials` を選んだのは、下流が必要としない権限を
+   運ばない方が筋が通るのと、ADR-0005 の案B方向と整合するため。
+   代償として **Keycloak 停止時にこれらの呼び出しが失敗するようになった**(#742 以前は
+   トークンを取得しないため Keycloak の停止に影響されなかった)。
+   `ServiceTokenUnavailableException` は `PlatformServiceClient` の各メソッドで捕捉して
+   `IllegalStateException` に包み、platform-service 停止時と同じ 409 + 説明メッセージに揃えている。
+
+   なお #796 で判明したとおり、Client Credentials のトークンは `requireAdmin()` を通れない
+   (サービスアカウントの `sub` に対応するローカル `users` 行が無く `CurrentActorService` が
+   操作者を解決できない)。`/api/internal/platform/**` は認証のみを要求し actor を解決しないため、
+   この制約には当たらない。
 
 2. **ロール/所有権ゲート(→403)**: コントローラメソッド(または委譲先のサービスメソッド)の
    先頭付近で `AdminAuthorizationService` の以下いずれかを呼ぶ場合がある。

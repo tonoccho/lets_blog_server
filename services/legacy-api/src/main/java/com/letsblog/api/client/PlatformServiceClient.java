@@ -2,10 +2,15 @@ package com.letsblog.api.client;
 
 import com.letsblog.api.ai.AiProvider;
 import com.letsblog.api.ai.ImageGenerationConfigProvider;
+import com.letsblog.common.auth.ServiceTokenClient;
+import com.letsblog.common.auth.ServiceTokenUnavailableException;
+import com.letsblog.common.client.ServiceAuthHeaders;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.List;
+import java.util.function.Consumer;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -30,10 +35,22 @@ import org.springframework.web.client.RestClientException;
  * (C10-3)でplatform-serviceへ移設され、Brave Search APIキーの設定有無もSystemSettingServiceへの
  * 同一プロセス内呼び出しに置き換わったため、本クラス経由のブリッジは不要になった。
  *
- * <p>content-service(#576)のContentServiceClientと同じブリッジパターンを踏襲するが、これらの
- * 呼び出し先はいずれも移設前のAiBridgeController#systemBraveSearchApiKey/#llmConfigと同じく
- * admin権限チェックを行わない値の解決のみのため(システム全体で1つの値を解決するだけで、
- * 特定ユーザーのデータではない)、Bearerトークンの転送は行わない。
+ * <p>content-service(#576)のContentServiceClientと同じブリッジパターンを踏襲する。
+ *
+ * <p><b>認証</b>(issue #742): 呼び出し先はいずれもシステム全体で1つの値を解決するだけで、
+ * 特定ユーザーのデータではないため、呼び出し元ユーザーのBearerトークンを転送する
+ * ({@code ServiceAuthHeaders#forwardedBearer})必要はない。代わりに
+ * {@code letsblog-services}クライアントのClient Credentials Grant
+ * ({@link ServiceTokenClient}、#567)でこのサービス自身の身元を示すトークンを付与する。
+ * 下流({@code InternalPlatformSettingsController})はユーザー単位の認可を一切行わないため、
+ * 呼び出し元ユーザーの権限を運ぶ必要が無い。
+ *
+ * <p>#742以前はAuthorizationヘッダーを一切付与しておらず、そのためplatform-service側は
+ * {@code /api/internal/platform/**}をpermitAllのまま据え置くしかなかった。しかしこれらの
+ * エンドポイントはBrave Search APIキー・LLM APIキー・ChatGPTキーという実際のシークレットを返す。
+ * gatewayのルート表に載っていないため外部からは到達できないものの、内部ネットワークからは
+ * 無防備だった。project-service/publishing-serviceの内部ブリッジは既にJWT必須なので、
+ * platform-serviceだけが一貫性を欠いていた。
  */
 @Component
 public class PlatformServiceClient implements ImageGenerationConfigProvider {
@@ -42,13 +59,34 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
     private static final Duration READ_TIMEOUT = Duration.ofSeconds(10);
 
     private final RestClient restClient;
+    private final ServiceTokenClient serviceTokenClient;
 
     public PlatformServiceClient(
-            RestClient.Builder builder, @Value("${app.platform-service-uri}") String platformServiceUri) {
+            RestClient.Builder builder,
+            @Value("${app.platform-service-uri}") String platformServiceUri,
+            ServiceTokenClient serviceTokenClient) {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(READ_TIMEOUT);
         this.restClient = builder.clone().baseUrl(platformServiceUri).requestFactory(requestFactory).build();
+        this.serviceTokenClient = serviceTokenClient;
+    }
+
+    /**
+     * このサービス自身のアクセストークンをAuthorizationヘッダーに載せる(issue #742)。
+     * {@link ServiceTokenClient}はトークンを有効期限までキャッシュするため、
+     * 呼び出しごとにKeycloakへ往復するわけではない。
+     *
+     * <p><b>この{@code Consumer}は{@code RestClient}の{@code headers(...)}呼び出し時点で
+     * 即時評価される</b>({@code retrieve()}まで遅延しない)。Keycloakが停止している等で
+     * トークンを取得できないと{@link ServiceTokenUnavailableException}が投げられるが、これは
+     * {@code RestClientException}ではないため、各メソッドのcatch節で明示的に捕まえて
+     * {@code IllegalStateException}へ包み直している。そうしないと
+     * {@code GlobalExceptionHandler}に一致するハンドラが無く、メッセージ無しの500になり
+     * 画像生成やLLM設定解決が原因不明で失敗する(#742のレビュー指摘)。
+     */
+    private Consumer<HttpHeaders> serviceAuth() {
+        return ServiceAuthHeaders.clientCredentials(serviceTokenClient);
     }
 
     private record SystemBraveSearchApiKeyResponse(String apiKey) {
@@ -59,10 +97,11 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
         try {
             SystemBraveSearchApiKeyResponse result = restClient.get()
                     .uri("/api/internal/platform/system-settings/brave-search-api-key")
+                    .headers(serviceAuth())
                     .retrieve()
                     .body(SystemBraveSearchApiKeyResponse.class);
             return result == null ? null : result.apiKey();
-        } catch (RestClientException e) {
+        } catch (RestClientException | ServiceTokenUnavailableException e) {
             throw new IllegalStateException("platform-serviceのBrave Search APIキー取得呼び出しに失敗しました: "
                     + e.getMessage(), e);
         }
@@ -84,13 +123,14 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
                         }
                         return builder.build();
                     })
+                    .headers(serviceAuth())
                     .retrieve()
                     .body(LlmConfigResponse.class);
             if (result == null) {
                 throw new IllegalStateException("platform-serviceから空の応答を受け取りました");
             }
             return result;
-        } catch (RestClientException e) {
+        } catch (RestClientException | ServiceTokenUnavailableException e) {
             throw new IllegalStateException("platform-serviceのLLM接続設定取得呼び出しに失敗しました: "
                     + e.getMessage(), e);
         }
@@ -121,6 +161,7 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
         try {
             ImageGenerationConfigResponse result = restClient.get()
                     .uri("/api/internal/platform/image-generation-config")
+                    .headers(serviceAuth())
                     .retrieve()
                     .body(ImageGenerationConfigResponse.class);
             if (result == null) {
@@ -129,7 +170,7 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
             cachedImageGenerationConfig =
                     new CachedImageGenerationConfig(result, java.time.Instant.now().plus(CONFIG_CACHE_TTL));
             return result;
-        } catch (RestClientException e) {
+        } catch (RestClientException | ServiceTokenUnavailableException e) {
             throw new IllegalStateException("platform-serviceの画像生成設定取得呼び出しに失敗しました: "
                     + e.getMessage(), e);
         }
