@@ -84,7 +84,17 @@ Before proceeding, report:
 
 # Step 4: Verify readiness
 
-Read the complete Issue.
+Read the complete Issue, **including its existing comments**. A readiness verdict already
+posted on the Issue is part of the input to this step, not noise to be re-derived around.
+
+Then run:
+
+```bash
+scripts/issue-dependency-status.sh <issue-number>
+```
+
+This prints the live state of every dependency the Issue records, and lists the readiness
+verdicts already posted on it.
 
 Confirm:
 
@@ -92,14 +102,34 @@ Confirm:
 - Requirements are clear
 - Acceptance criteria are testable
 - Scope is bounded
-- Dependencies are resolved
+- Dependencies are resolved — per **Dependency Resolution** in `CLAUDE.md`. Do not invent a
+  second definition here. In particular: a dependency Issue that is open but named only in the
+  body's prose is not by itself a blocker; what decides readiness is whether this Issue's
+  acceptance criteria can be implemented and verified against the codebase as it stands.
 - No blocking questions remain
 
 If the Issue is not actually Ready:
 
 Do not implement it.
 
-Move it back to `Backlog` if appropriate and explain why.
+Move it back to `Backlog` and explain why, citing the live evidence you checked.
+
+## Before reversing a Ready promotion
+
+If this step is about to move the Issue `Ready → Backlog` and a Ready promotion was posted on
+it recently, do not post a rollback that merely restates your own reasoning. First:
+
+1. Re-check each ground the promotion cited, live.
+2. Name in the rollback comment which specific ground no longer holds.
+
+If every ground still holds, the disagreement is about the definition of "resolved", not about
+facts. Apply `CLAUDE.md` → **Dependency Resolution** and proceed; do not post a contradicting
+verdict.
+
+This guard exists because of #751: on #584, a Ready promotion (01:27Z) and a Backlog rollback
+(01:32Z) were posted five minutes apart, and **both were factually correct**. One judged by the
+code the dependencies had delivered; the other judged by the dependency Issues' board status.
+Neither was reading the other, and this skill did not say which one governs.
 
 ---
 
