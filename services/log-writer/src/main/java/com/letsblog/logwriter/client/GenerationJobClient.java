@@ -46,7 +46,7 @@ public class GenerationJobClient {
     private final SyncServiceClient client;
 
     public GenerationJobClient(RestClient.Builder builder, @Value("${app.ai-service-uri}") String aiServiceUri) {
-        this.client = SyncServiceClient.builder(builder, "ai", aiServiceUri)
+        this.client = SyncServiceClient.builder(builder, "ai-service", aiServiceUri)
                 .profile(SyncCallProfile.SHORT)
                 .build();
     }
@@ -63,7 +63,12 @@ public class GenerationJobClient {
                     ServiceAuthHeaders.forwardedBearer(bearerToken));
             return jobs != null ? jobs : List.of();
         } catch (SyncServiceException e) {
-            throw new GenerationJobUnavailableException("ai-serviceの/api/generation-jobs呼び出しに失敗しました", e);
+            // 原因(SyncServiceExceptionのメッセージ。"[ai-service] GET /api/generation-jobs: <詳細>")を
+            // 必ず連結する。#825の縮退で失敗がHTTPレスポンスに出なくなったため、ログに原因が
+            // 残らないと404(向き先ミス)・401(realm/audience不整合)・タイムアウト・
+            // サーキットオープンのどれなのかを切り分けられない。legacy-api側の同名クラスと同じ書き方。
+            throw new GenerationJobUnavailableException(
+                    "ai-serviceの/api/generation-jobs呼び出しに失敗しました: " + e.getMessage(), e);
         }
     }
 }

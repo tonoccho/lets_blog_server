@@ -23,9 +23,10 @@ import org.springframework.transaction.annotation.Transactional;
  * #572でlog-writerへ移設)。
  *
  * <p>OPERATION/AUDITはlog-writer自身が所有するlbs_logスキーマから直接取得する。AI_JOBのみ、
- * issue #572の時点でも引き続きlegacy-apiが所有するgeneration_jobsテーブル(lets_blogスキーマ)に
- * 由来するため、{@link GenerationJobClient}経由の同期HTTP呼び出しで取得する(AIサービス抽出は
- * Phase 19の別Issueで行う。ADR-0004によりlbs_logスキーマからのクロススキーマ参照はできない)。
+ * ai-serviceが所有するgeneration_jobsテーブルに由来するため、{@link GenerationJobClient}経由の
+ * 同期HTTP呼び出しで取得する(ADR-0004によりlbs_logスキーマからのクロススキーマ参照はできない)。
+ * #572の時点ではlegacy-apiが所有していたが、AIサービス抽出でai-serviceへ移り、
+ * 本サービスの問い合わせ先は#825で追随した。
  * AIジョブは利用者に紐付く情報を持たないため全員に表示する(既存の/ai-jobs画面も同様に全件表示)。
  * 監査ログは元々admin限定のため、adminでない利用者には含めない。操作ログは元々本人限定のため、
  * 常に閲覧者本人の分のみを含める。
@@ -54,7 +55,7 @@ public class UnifiedOperationLogService {
 
     /**
      * @param bearerToken 呼び出し元の{@code Authorization}ヘッダー(AI_JOBソース取得のため
-     *                    legacy-apiへ転送する。GenerationJobClientのJavadoc参照)。
+     *                    ai-serviceへ転送する。GenerationJobClientのJavadoc参照)。
      */
     @Transactional(readOnly = true)
     public Page<UnifiedLogEntryResponse> list(
@@ -83,8 +84,10 @@ public class UnifiedOperationLogService {
                         .limit(SOURCE_FETCH_LIMIT)
                         .forEach(job -> entries.add(fromGenerationJob(job)));
             } catch (GenerationJobUnavailableException e) {
+                // 例外そのものも渡してスタックトレースを残す。縮退により失敗がHTTPレスポンスに
+                // 現れなくなったので、ここが唯一の手がかりになる。
                 log.warn("AIジョブの取得に失敗したため、統合操作ログからAI_JOBソースを除外します: {}",
-                        e.getMessage());
+                        e.getMessage(), e);
             }
         }
         if (viewerIsAdmin && includeSource(sourceType, "AUDIT")) {
