@@ -1,6 +1,7 @@
 package com.letsblog.api.client;
 
 import com.letsblog.common.auth.ServiceTokenClient;
+import com.letsblog.common.auth.ServiceTokenUnavailableException;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -9,13 +10,19 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.function.Consumer;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.web.client.RestClient;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -39,6 +46,7 @@ class PlatformServiceClientTest {
     private HttpServer server;
     private final ConcurrentMap<String, String> receivedAuthByPath = new ConcurrentHashMap<>();
     private PlatformServiceClient client;
+    private ServiceTokenClient serviceTokenClient;
 
     @BeforeEach
     void setUp() throws IOException {
@@ -46,7 +54,7 @@ class PlatformServiceClientTest {
         server.createContext("/api/internal/platform", this::respond);
         server.start();
 
-        ServiceTokenClient serviceTokenClient = mock(ServiceTokenClient.class);
+        serviceTokenClient = mock(ServiceTokenClient.class);
         when(serviceTokenClient.getAccessToken()).thenReturn(TOKEN);
 
         client = new PlatformServiceClient(
@@ -57,7 +65,9 @@ class PlatformServiceClientTest {
 
     @AfterEach
     void tearDown() {
-        server.stop(0);
+        if (server != null) {
+            server.stop(0);
+        }
     }
 
     private void respond(HttpExchange exchange) throws IOException {
@@ -85,6 +95,40 @@ class PlatformServiceClientTest {
         assertThat(receivedAuthByPath.get(path))
                 .as("%s へ Authorization ヘッダーが送られていること", path)
                 .isEqualTo("Bearer " + TOKEN);
+    }
+
+    /**
+     * Keycloak停止時などトークンを取得できない場合の壊れ方(#742のレビュー指摘)。
+     *
+     * <p>{@code ServiceAuthHeaders.clientCredentials}が返すConsumerは
+     * {@code RestClient}の{@code headers(...)}時点で即時評価されるため、
+     * {@link ServiceTokenUnavailableException}はtryの内側で投げられる。しかし
+     * {@code RestClientException}ではないので、catch節に明示的に足さないと素通りし、
+     * {@code GlobalExceptionHandler}に一致するハンドラが無いためメッセージ無しの500になる。
+     *
+     * <p>platform-serviceが停止している場合({@code IllegalStateException} → 409 + メッセージ)と
+     * 挙動を揃えるため、3メソッドすべてで包み直していることを固定する。
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("トークン取得失敗時に呼ぶ操作")
+    @DisplayName("トークンを取得できない場合はIllegalStateExceptionに包まれる")
+    void トークン取得失敗はIllegalStateExceptionになる(String name, Consumer<PlatformServiceClient> call) {
+        when(serviceTokenClient.getAccessToken())
+                .thenThrow(new ServiceTokenUnavailableException("keycloak unreachable", null));
+
+        assertThatThrownBy(() -> call.accept(client))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("keycloak unreachable");
+    }
+
+    /** {@code @MethodSource}のファクトリはstaticである必要があるため、対象をインスタンスで受け取る。 */
+    private static Stream<Arguments> トークン取得失敗時に呼ぶ操作() {
+        return Stream.of(
+                Arguments.of("getBraveSearchApiKey",
+                        (Consumer<PlatformServiceClient>) PlatformServiceClient::getBraveSearchApiKey),
+                Arguments.of("llmConfig", (Consumer<PlatformServiceClient>) c -> c.llmConfig(null)),
+                Arguments.of("comfyUiBaseUrl",
+                        (Consumer<PlatformServiceClient>) PlatformServiceClient::comfyUiBaseUrl));
     }
 
     @Test

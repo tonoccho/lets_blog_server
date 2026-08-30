@@ -18,10 +18,19 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>いずれも移設前のAiBridgeController#systemBraveSearchApiKey/#llmConfigと同じくadmin権限チェックは
  * 行わない(システム全体で1つの値を解決するだけで、特定ユーザーのデータではないため)。
- * issue #705で本サービスのSecurityConfigは「公開パスを除きJWT必須」へ変更したが、この
- * {@code /api/internal/platform/**}はgatewayのルート表に載っておらず外部から到達できないこと、
- * および呼び出し元のPlatformServiceClientがBearerトークンを転送しない実装であることから、
- * 引き続きSecurityConfigのPUBLIC_PATHSに含めている(同SecurityConfigのJavadoc参照)。
+ * <p>issue #705で本サービスのSecurityConfigは「公開パスを除きJWT必須」へ変更したが、この
+ * {@code /api/internal/platform/**}だけは当初PUBLIC_PATHSに残していた。gatewayのルート表に
+ * 載っておらず外部から到達できないことに加え、呼び出し元のPlatformServiceClientが
+ * Bearerトークンを一切付与しない実装で、authenticatedにすると実行時に壊れたためである。
+ *
+ * <p>issue #742でその呼び出し元をClient Credentials Grantでトークンを付与するよう修正し、
+ * ここもJWT必須へ移した。これでproject-service/publishing-serviceの内部ブリッジと同じ方式に揃う。
+ * 本コントローラが返すのはBrave Search APIキー・LLM APIキー・ChatGPTキーという実際の
+ * シークレットであり、外部到達性が無いとはいえ内部ネットワークから無防備なまま残す理由が無い。
+ *
+ * <p>認証は要求するが、認可(ロール判定)は行わない。認証済みであれば誰でも到達できる点は
+ * project-service/publishing-serviceの内部ブリッジと同じモデルで、
+ * サービストークン限定に絞るかどうかは別途の判断({@code docs/AUTHORIZATION_MATRIX.md}参照)。
  */
 @RestController
 public class InternalPlatformSettingsController {

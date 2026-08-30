@@ -4,6 +4,7 @@ import com.letsblog.api.keycloak.KeycloakAdminProperties;
 import com.letsblog.common.auth.ServiceTokenClient;
 import java.net.http.HttpClient;
 import java.time.Duration;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -28,8 +29,13 @@ import org.springframework.web.client.RestClient;
  *
  * <p>Keycloakが停止/無応答のときにTCP接続の確立で長時間ハングしないよう、
  * {@code KeycloakAdminClientConfig}と同じタイムアウトを設定したRestClientを渡す。
+ *
+ * <p>{@code @EnableConfigurationProperties}を本クラスにも付けているのは、
+ * {@code KeycloakAdminProperties}をBean化しているのが現状{@code KeycloakAdminClientConfig}だけで、
+ * そちらを消すと本クラスが起動に失敗するという暗黙の依存を避けるため(冪等なので二重指定でよい)。
  */
 @Configuration
+@EnableConfigurationProperties(KeycloakAdminProperties.class)
 public class ServiceTokenClientConfig {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(10);

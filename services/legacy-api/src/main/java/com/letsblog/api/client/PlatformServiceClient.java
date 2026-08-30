@@ -3,6 +3,7 @@ package com.letsblog.api.client;
 import com.letsblog.api.ai.AiProvider;
 import com.letsblog.api.ai.ImageGenerationConfigProvider;
 import com.letsblog.common.auth.ServiceTokenClient;
+import com.letsblog.common.auth.ServiceTokenUnavailableException;
 import com.letsblog.common.client.ServiceAuthHeaders;
 import java.net.http.HttpClient;
 import java.time.Duration;
@@ -41,8 +42,8 @@ import org.springframework.web.client.RestClientException;
  * ({@code ServiceAuthHeaders#forwardedBearer})必要はない。代わりに
  * {@code letsblog-services}クライアントのClient Credentials Grant
  * ({@link ServiceTokenClient}、#567)でこのサービス自身の身元を示すトークンを付与する。
- * 画像生成のようにHTTPリクエストのスコープ外(非同期処理)から呼ばれる経路もあるため、
- * 呼び出し元トークンに依存しないこの方式が適している。
+ * 下流({@code InternalPlatformSettingsController})はユーザー単位の認可を一切行わないため、
+ * 呼び出し元ユーザーの権限を運ぶ必要が無い。
  *
  * <p>#742以前はAuthorizationヘッダーを一切付与しておらず、そのためplatform-service側は
  * {@code /api/internal/platform/**}をpermitAllのまま据え置くしかなかった。しかしこれらの
@@ -75,6 +76,14 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
      * このサービス自身のアクセストークンをAuthorizationヘッダーに載せる(issue #742)。
      * {@link ServiceTokenClient}はトークンを有効期限までキャッシュするため、
      * 呼び出しごとにKeycloakへ往復するわけではない。
+     *
+     * <p><b>この{@code Consumer}は{@code RestClient}の{@code headers(...)}呼び出し時点で
+     * 即時評価される</b>({@code retrieve()}まで遅延しない)。Keycloakが停止している等で
+     * トークンを取得できないと{@link ServiceTokenUnavailableException}が投げられるが、これは
+     * {@code RestClientException}ではないため、各メソッドのcatch節で明示的に捕まえて
+     * {@code IllegalStateException}へ包み直している。そうしないと
+     * {@code GlobalExceptionHandler}に一致するハンドラが無く、メッセージ無しの500になり
+     * 画像生成やLLM設定解決が原因不明で失敗する(#742のレビュー指摘)。
      */
     private Consumer<HttpHeaders> serviceAuth() {
         return ServiceAuthHeaders.clientCredentials(serviceTokenClient);
@@ -92,7 +101,7 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
                     .retrieve()
                     .body(SystemBraveSearchApiKeyResponse.class);
             return result == null ? null : result.apiKey();
-        } catch (RestClientException e) {
+        } catch (RestClientException | ServiceTokenUnavailableException e) {
             throw new IllegalStateException("platform-serviceのBrave Search APIキー取得呼び出しに失敗しました: "
                     + e.getMessage(), e);
         }
@@ -121,7 +130,7 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
                 throw new IllegalStateException("platform-serviceから空の応答を受け取りました");
             }
             return result;
-        } catch (RestClientException e) {
+        } catch (RestClientException | ServiceTokenUnavailableException e) {
             throw new IllegalStateException("platform-serviceのLLM接続設定取得呼び出しに失敗しました: "
                     + e.getMessage(), e);
         }
@@ -161,7 +170,7 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
             cachedImageGenerationConfig =
                     new CachedImageGenerationConfig(result, java.time.Instant.now().plus(CONFIG_CACHE_TTL));
             return result;
-        } catch (RestClientException e) {
+        } catch (RestClientException | ServiceTokenUnavailableException e) {
             throw new IllegalStateException("platform-serviceの画像生成設定取得呼び出しに失敗しました: "
                     + e.getMessage(), e);
         }

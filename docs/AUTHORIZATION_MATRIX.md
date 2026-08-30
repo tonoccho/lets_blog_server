@@ -215,8 +215,16 @@ legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行して�
    `/api/internal/platform/**` を `authenticated()` へ移した。
    呼び出し先はシステム全体で1つの値を解決するだけで特定ユーザーのデータではないため、
    呼び出し元ユーザーのトークンを転送する(`forwardedBearer`)必要はない。
-   画像生成のようにHTTPリクエストのスコープ外から呼ばれる経路もあるため、
-   呼び出し元トークンに依存しない Client Credentials が適している。
+   下流(`InternalPlatformSettingsController`)はユーザー単位の認可を一切行わないため、
+   呼び出し元ユーザーの権限を運ぶ意味が無い。
+
+   技術的には `forwardedBearer` も選択可能で、そちらなら Keycloak への新たな実行時依存は
+   増えなかった。それでも `clientCredentials` を選んだのは、下流が必要としない権限を
+   運ばない方が筋が通るのと、ADR-0005 の案B方向と整合するため。
+   代償として **Keycloak 停止時にこれらの呼び出しが失敗するようになった**(#742 以前は
+   トークンを取得しないため Keycloak の停止に影響されなかった)。
+   `ServiceTokenUnavailableException` は `PlatformServiceClient` の各メソッドで捕捉して
+   `IllegalStateException` に包み、platform-service 停止時と同じ 409 + 説明メッセージに揃えている。
 
    なお #796 で判明したとおり、Client Credentials のトークンは `requireAdmin()` を通れない
    (サービスアカウントの `sub` に対応するローカル `users` 行が無く `CurrentActorService` が
