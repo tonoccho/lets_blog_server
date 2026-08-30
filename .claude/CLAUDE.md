@@ -236,6 +236,57 @@ Passing QA opens a Pull Request; it does not mark the issue Done. Done happens o
 
 ---
 
+# Dependency Resolution
+
+This is the single definition of "dependencies are resolved". `work-next`, `implement-issue`,
+`ready-issue`, and `plan-issue` all defer to it. Do not restate it differently anywhere else.
+
+Before producing any Ready/Backlog verdict, run:
+
+```bash
+scripts/issue-dependency-status.sh <issue-number>
+```
+
+It prints the live state of every dependency the Issue records, plus any readiness verdict
+already posted on the Issue. Never derive a verdict from the Issue body's prose alone, and
+never carry a dependency's status over from an earlier comment — re-read it live.
+
+## What counts as a blocker
+
+1. **An open `blocked_by` link is the only status-based blocker.** If GitHub's formal
+   dependency graph names an open Issue, the Issue is blocked. Full stop.
+2. **A dependency Issue named only in prose does not block by its board status.** What decides
+   readiness is whether *this* Issue's acceptance criteria can be implemented and verified
+   against the codebase as it stands right now.
+3. A parent or tracking Issue that is still open does **not** block when its children are done
+   and the substance is in the code. Conversely, children being closed does not make an Issue
+   ready when the substance is not actually there. Look at the code, not the board.
+4. Every verdict must state **which** of these grounds it used, and cite the live evidence
+   (the script's output, or the file paths inspected).
+
+## Reversing a verdict
+
+A Ready→Backlog rollback that contradicts a recent Ready promotion is not allowed to simply
+restate its own reasoning. Before posting it:
+
+1. Read the existing readiness comments (the script lists them).
+2. Re-check each ground the previous verdict cited, live.
+3. Say in the new comment which specific ground no longer holds, and why.
+
+If the previous verdict's grounds all still hold, the disagreement is about the *definition*
+above, not about facts — apply the definition rather than posting a contradicting verdict.
+
+## Recording dependencies
+
+Record dependencies as resolvable identifiers: a GitHub `blocked_by` link, or `#<number>` in
+the body. Epic shorthand (`A4`, `B6`, `C14`) is not resolvable — it forces every run to
+re-translate labels into Issue numbers, and that translation is where verdicts diverge.
+When an Issue records dependencies only as shorthand, resolve them to numbers and update the
+body before judging readiness. If they cannot be resolved, say the dependencies are
+*unidentifiable* — do not assert they are *unresolved*.
+
+---
+
 # Learning Loop
 
 When a failure, repeated review issue, or process problem is discovered:
