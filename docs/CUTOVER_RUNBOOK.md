@@ -57,7 +57,7 @@ Issue: [#591](https://github.com/tonoccho/lets_blog_server/issues/591) [E5] カ�
    │
 1. 事前バックアップ(フェーズA: 稼働中のリハーサル取得)
    │
-1.5 管理者トークンの事前取得(ブラウザを使うため reverse-proxy 稼働中に必須)
+1.5 管理者トークンの事前取得(カットオーバー当日・フェーズ1停止の直前。ブラウザを使うため)
    │
 2. 全サービス停止順序(フェーズ1: 外部トラフィック遮断)
    │
@@ -200,24 +200,34 @@ du -sh "$BACKUP_DIR"/*
 
 ### 1.5 管理者トークンの事前取得
 
-**このステップは [2. 全サービス停止順序](#2-全サービス停止順序) のフェーズ1
-(`docker compose stop reverse-proxy web`)より前に、必ず実施する。**
+**このステップは、カットオーバー当日、[2. 全サービス停止順序](#2-全サービス停止順序) のフェーズ1
+(`docker compose stop reverse-proxy web`)の直前に実施する。**
+[1.1](#11-実行タイミング) のフェーズA(T-24h目安のリハーサル)の時点で取得してはいけない。
+下記「トークンの持ち回りと有効期限」のとおり、取得から最初のリフレッシュまでの間隔にも
+30分の上限が効くためである。
 [3. データ移行スクリプトの実行順序と検証ポイント](#3-データ移行スクリプトの実行順序と検証ポイント)で使う
 業務API用トークン `$ADMIN_TOKEN` は、ブラウザで認可コードを取得する必要があり、
 ブラウザからKeycloakへ到達できるのは `reverse-proxy` が生きている今この瞬間だけだからである
 (`docker-compose.yml` の `keycloak` サービスはホストポートを一切公開していないため、
 reverse-proxy 停止後はブラウザから到達する手段が無い)。
 
-移行APIは `identity-service` の `AdminAuthorizationService.requireAdmin()` で保護されており、
-呼び出し元がKeycloak発行JWTの `admin` ロールを持ち、かつそのJWTの `sub` に対応する
-ローカルユーザー(`users.keycloak_sub`)が `admin` ロールであることを要求する。
-つまり **`sub` と `realm_access.roles` の両方を含むアクセストークン**が必要になる。
+移行APIは `identity-service` の `AdminAuthorizationService.requireAdmin()` で保護されている。
+その実装(`CurrentActorService#isAdmin`)は **JWT の `sub` クレームだけを使い**、
+`users.keycloak_sub` でローカルユーザーを引き当てて、そのローカルの `users.role` が
+`admin` であるかを見る。**`realm_access.roles` は参照していない**
+(`services/identity/.../config/SecurityConfig.java` の Javadoc に「実際の権限判定は
+JWTのクレームではなくローカルDBのRole/Permissionを正とする」と明記されている)。
+
+つまり必要条件は **アクセストークンに `sub` が載っていること**と、
+**その `sub` に対応するローカルユーザーの `role` が `admin` であること**の2点である。
+`admin-cli` が使えないのは、lightweight access token では前者の `sub` が落ちるためであって、
+`realm_access.roles` の有無が理由ではない。
 
 #### 使用クライアント: `letsblog-web`(と、その選定理由)
 
 | クライアント | `client.use.lightweight.access.token.enabled` | 判定 |
 |---|---|---|
-| `admin-cli` | `true` | **使えない**。lightweight access token は `sub` と `realm_access.roles` を含まず、`requireAdmin()` が403になる |
+| `admin-cli` | `true` | **使えない**。lightweight access token は `sub` を含まないため、`requireAdmin()` がローカルユーザーを引き当てられず403になる |
 | `security-admin-console` | `true` | 同上 |
 | `letsblog-e2e` | なし | E2Eテスト専用のため転用しない(#588)。そもそもstandard flowが無効 |
 | `account` | なし | 使えるが、下記の理由で第2候補 |
@@ -241,6 +251,8 @@ CODE_VERIFIER=$(openssl rand -base64 96 | tr -d '\n=+/' | cut -c1-96)
 CODE_CHALLENGE=$(printf '%s' "$CODE_VERIFIER" \
   | openssl dgst -binary -sha256 | openssl base64 | tr -d '=\n' | tr '/+' '_-')
 echo "CODE_VERIFIER=$CODE_VERIFIER"
+# 注: code_verifier も認可コードと対になる一時的な資格情報である。トークン交換が済んだら
+#     シェル履歴・作業メモに残さない(トークン実値と同じ扱いにする)。
 
 # 2. 認可URLを組み立てて表示する(このURLをブラウザで開く)
 KEYCLOAK_WEB_CLIENT_SECRET=$(grep -m1 '^KEYCLOAK_WEB_CLIENT_SECRET=' .env | cut -d= -f2-)
@@ -272,6 +284,9 @@ URL
 #    注意: accessCodeLifespan = 60秒。認可コードは取得から60秒以内に交換すること。
 #          間に合わなかった場合は手順2のURLをもう一度開くところからやり直す。
 AUTH_CODE='<URLから取り出したcodeの値>'
+# client_secret が realm 側の値とずれていると invalid_client で失敗する。その場合は
+# Keycloak管理コンソール(letsblog realm → Clients → letsblog-web → Credentials)、
+# または keycloak/realm-export.json の当該クライアントの secret を正として .env を直す。
 
 TOKEN_JSON=$(curl -sk -X POST \
   -d "grant_type=authorization_code" \
@@ -291,12 +306,28 @@ export ADMIN_REFRESH_TOKEN=$(printf '%s' "$TOKEN_JSON" | jq -r .refresh_token)
 printf '%s' "$ADMIN_TOKEN" | cut -d. -f2 | tr '_-' '/+' \
   | awk '{ while (length($0) % 4) $0 = $0 "="; print }' | base64 -d 2>/dev/null \
   | jq '{sub, realm_roles: .realm_access.roles, azp, exp}'
-# 期待: sub が非null、realm_roles に "admin" が含まれる
-#       (admin-cli の lightweight access token ではこの2つが欠落する。それが本手順の理由)
+# 必須: sub が非null(admin-cli の lightweight access token ではここが欠落する。それが本手順の理由)
+# 参考: realm_roles に "admin" があるかどうかは requireAdmin() の判定には影響しない(上記参照)
 ```
 
-`sub` が `null` だったり `realm_access.roles` が存在しない場合は、`admin-cli` など
-lightweight access token が有効なクライアントを使ってしまっている。手順2からやり直す。
+**`sub` が `null` の場合のみ**、`admin-cli` など lightweight access token が有効な
+クライアントを使ってしまっている。手順2からやり直す。
+
+`realm_access.roles` に `admin` が無くても、それだけを理由に手順2からやり直さないこと。
+Keycloak の realm ロールはコード上で自動同期されておらず(手動付与が前提)、
+`requireAdmin()` が見るのはローカル DB の `users.role` である。`sub` さえ載っていれば
+[3.3](#33-移行実行) は通り得る。逆に 403 になった場合に確認すべきは realm ロールではなく、
+**その `sub` を持つローカルユーザーの `users.role` が `admin` になっているか**である。
+
+```bash
+# 403 になった場合の切り分け: sub に対応するローカルユーザーの role を見る
+SUB=$(printf '%s' "$ADMIN_TOKEN" | cut -d. -f2 | tr '_-' '/+' \
+  | awk '{ while (length($0) % 4) $0 = $0 "="; print }' | base64 -d 2>/dev/null | jq -r .sub)
+docker exec -e MYSQL_PWD="$MYSQL_PASSWORD" lbs-mysql \
+  mysql --user="$MYSQL_USER" "$MYSQL_DATABASE" \
+  -e "SELECT id, email, role FROM users WHERE keycloak_sub = '$SUB';"
+# 期待: 1行返り、role が 'admin'
+```
 
 #### トークンの持ち回りと有効期限
 
@@ -323,11 +354,28 @@ lightweight access token が有効なクライアントを使ってしまって�
 そのため [3.1](#31-管理者トークンのリフレッシュ) のリフレッシュ手順を、
 **3.3 の直前と 3.4 の直前で毎回**実行してから使う(401/403 を踏んでから対処するのではなく先回りする)。
 
-**30分の制約**: `ssoSessionIdleTimeout` が1800秒であるため、リフレッシュの間隔が30分を超えると
-SSOセッションごと失効する。そうなるとブラウザ(= reverse-proxy)が必要な手順1〜3からやり直す
-ことになるが、その時点では reverse-proxy は停止済みでカットオーバー中には回復できない。
-**3章の作業が30分以上中断する見込みになった場合は、トークンの再取得を試みるのではなく
-[8.2 ロールバックの判断基準](#82-ロールバックの判断基準)へ移ること。**
+**30分の制約(この手順で最も詰まりやすい点)**: `ssoSessionIdleTimeout` が1800秒であるため、
+**トークンに触れない時間が30分を超えるとSSOセッションごと失効する**。失効するとブラウザ
+(= reverse-proxy)が必要な手順1〜3からやり直すことになるが、その時点では reverse-proxy は
+停止済みでカットオーバー中には回復できない。
+
+30分の上限が効くのは3章の中だけではない。**この §1.5 での取得から、最初のリフレッシュ
+([3.3](#33-移行実行) の直前に実行する [3.1](#31-管理者トークンのリフレッシュ))までの間隔にも効く。**
+その間には フェーズ1停止 → [1.フェーズB](#11-実行タイミング) の確定バックアップ
+(ボリュームの tar を含む)が挟まる。そのため:
+
+- **§1.5 はカットオーバー当日、フェーズ1停止の直前に実施する**(フェーズAのリハーサル時点で
+  取得しない)。
+- **フェーズBバックアップが長引く場合は、その最中にも10分程度の間隔で
+  [3.1](#31-管理者トークンのリフレッシュ) を実行してアイドルタイマーをリセットする。**
+  リフレッシュはブラウザ不要で `docker exec` から実行できるため、バックアップの待ち時間に
+  並行して行える。1回でも成功すれば、そこから再び30分の猶予が得られる。
+- フェーズBバックアップの所要時間は、[1.1](#11-実行タイミング) のフェーズA(リハーサル)で
+  実測しておく。本番相当のボリューム量で30分を超える見込みなら、上記のリフレッシュを
+  作業手順としてタイムライン表に組み込んでおく。
+
+**それでも失効した場合、および3章の作業が30分以上中断する見込みになった場合は、
+トークンの再取得を試みるのではなく [8.2 ロールバックの判断基準](#82-ロールバックの判断基準)へ移ること。**
 
 ---
 
@@ -345,8 +393,11 @@ SSOセッションごと失効する。そうなるとブラウザ(= reverse-pro
 > **前提: [1.5 管理者トークンの事前取得](#15-管理者トークンの事前取得)を先に完了していること。**
 > `$ADMIN_TOKEN` の取得にはブラウザからKeycloakへ到達できる必要があり、
 > このコマンドで `reverse-proxy` を止めるとその手段が失われる。取得前に停止してしまった場合は、
-> `docker compose start reverse-proxy` で一時的に再開して取得し直す(その間は外部からの
-> アクセスが再び通る点に注意する)。
+> `docker compose start reverse-proxy web` で一時的に再開して取得し直す(その間は外部からの
+> アクセスが再び通る点に注意する)。**`web` も一緒に起動すること。** `reverse-proxy` だけを
+> 起動すると、リダイレクト先 `/api/auth/callback/keycloak` は nginx から `web:3000` へ転送されて
+> 502 になり、[1.5](#15-管理者トークンの事前取得) が説明している NextAuth のエラー画面とは
+> 違う見え方になる(URLバーの `code` 自体は読めるので実害は小さいが、別の失敗と誤認しやすい)。
 
 新規リクエストを止めつつ、移行作業に必要な `mysql` / `rabbitmq` / `keycloak-postgres` /
 `keycloak` / `identity` / `gateway` は稼働させたままにする(`gateway`はreverse-proxy経由
@@ -442,7 +493,7 @@ TOKEN_JSON=$(docker exec lbs-gateway curl -s \
 export ADMIN_TOKEN=$(printf '%s' "$TOKEN_JSON" | jq -r .access_token)
 export ADMIN_REFRESH_TOKEN=$(printf '%s' "$TOKEN_JSON" | jq -r .refresh_token)
 
-# 取得できたことの確認(sub と realm_access.roles が載っていること)
+# 取得できたことの確認(requireAdmin() が使うのは sub。1.5 の手順4を参照)
 printf '%s' "$ADMIN_TOKEN" | cut -d. -f2 | tr '_-' '/+' \
   | awk '{ while (length($0) % 4) $0 = $0 "="; print }' | base64 -d 2>/dev/null \
   | jq '{sub, realm_roles: .realm_access.roles, exp}'
@@ -593,10 +644,9 @@ curl -sk https://localhost/auth/realms/letsblog/.well-known/openid-configuration
 # 可能性が高い。ここで必要なのは$KC_BOOTSTRAP_TOKEN(master realm)であり、
 # password グラントで随時取得できるため、使い回さず必ずここで新規に取得し直す。
 #
-# なお業務API用の$ADMIN_TOKENは、この時点ではreverse-proxyが再起動済み
-# ([6. 全サービスの起動順序](#6-全サービスの起動順序))であれば
-# [1.5](#15-管理者トークンの事前取得)と同じ手順で取り直せる。まだ再起動前で、かつ
-# $ADMIN_REFRESH_TOKENが生きていれば[3.1](#31-管理者トークンのリフレッシュ)でリフレッシュする。
+# なお業務API用の$ADMIN_TOKENは、この時点では[6. 全サービスの起動順序](#6-全サービスの起動順序)で
+# reverse-proxyが再起動済みのため、必要になれば[1.5](#15-管理者トークンの事前取得)と同じ手順で
+# ブラウザから取り直せる(4.2自体は$KC_BOOTSTRAP_TOKENしか使わない)。
 KC_BOOTSTRAP_TOKEN=$(curl -sk \
   -d "client_id=admin-cli" -d "grant_type=password" \
   -d "username=$KEYCLOAK_ADMIN_USERNAME" -d "password=$KEYCLOAK_ADMIN_PASSWORD" \
@@ -901,12 +951,14 @@ VSCode拡張については、配布済みの `.vsix` を旧バージョンへ�
   - **[1.5 管理者トークンの事前取得](#15-管理者トークンの事前取得)の新手順そのもの(issue #766)。**
     以前ここに記載していた `admin-cli` の Resource Owner Password Credentials Grant は、
     同クライアントに `client.use.lightweight.access.token.enabled: "true"` が設定されており
-    発行されるトークンに `sub` と `realm_access.roles` が載らないため、
+    発行されるトークンに `sub` が載らないため、`sub` からローカルユーザーを引き当てる
     `requireAdmin()` を通過できないことが判明した(issue #766)。そこで
     `letsblog-web` クライアントの Authorization Code + PKCE フローへ差し替えたが、
     **以下は机上の設計であり実機未検証**である。
     - 取得したトークンで `POST /api/users/migrate-to-keycloak` が403にならないこと
       (letsblog realm の人間管理者のパスワードが必要なため、ユーザー立ち会いのもとで実施する)。
+      403になった場合に確認すべきは、そのJWTの `sub` に対応する `users.role` が `admin` か
+      どうかである(Keycloak側の realm ロールではない。[1.5](#15-管理者トークンの事前取得)参照)。
     - NextAuth のコールバック(`/api/auth/callback/keycloak`)が `state` 検証で失敗した際に、
       認可コードを消費せずに残すこと(消費されていると手順3のトークン交換が
       `invalid_grant` で失敗する。その場合は手順2からやり直せばよいが、
