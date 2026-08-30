@@ -52,7 +52,6 @@ export async function updateUserProfileAction(
     return value === "" ? null : value;
   };
 
-
   const customLinksJson = String(formData.get("customLinks") ?? "[]");
   let customLinks: CustomLink[];
   try {
@@ -81,7 +80,7 @@ export async function updateUserProfileAction(
         position: field("position"),
         socialLinks,
         customLinks,
-      });
+    });
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

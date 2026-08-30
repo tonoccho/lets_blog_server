@@ -15,7 +15,7 @@ import {
   StaticContentType,
   WpCliInstallResult,
 } from "@/lib/apiClient";
-import { getSession, requireAdminSession } from "@/lib/session";
+import { requireAdminSession } from "@/lib/session";
 
 export interface RegisterSiteState {
   error?: string;
@@ -69,8 +69,6 @@ export async function registerSiteAction(
     return { error: "SSH秘密鍵を指定してください(保存済みの鍵ペアを選択するか、新しい鍵ペアを生成してください)。" };
   }
 
-  await getSession();
-
   let connectionCheckStatus: "SUCCESS" | "FAILED" | null;
   try {
     const site = await registerSite({ name, siteKey, cmsType, credentials });
@@ -122,8 +120,6 @@ export async function createManagedWordPressSiteAction(
   if (!name || !siteKey || !title || !adminUser || !adminEmail || !adminPassword) {
     return { error: "すべての項目を入力してください。" };
   }
-
-  await getSession();
 
   try {
     await createManagedWordPressSite(

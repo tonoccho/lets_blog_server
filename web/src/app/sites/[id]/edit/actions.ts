@@ -51,7 +51,7 @@ export async function updateSiteAction(
       {
         name: name || undefined,
         credentials: Object.keys(credentials).length > 0 ? credentials : undefined,
-      });
+    });
     revalidatePath("/sites");
     revalidatePath(`/sites/${siteId}/edit`);
     return { success: true, connectionCheckStatus: site.connectionCheckStatus };
