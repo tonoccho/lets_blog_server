@@ -15,7 +15,19 @@ SERVICES=(
   "content|${CONTENT_SERVICE_URL:-http://localhost:8080}"
   "analytics|${ANALYTICS_SERVICE_URL:-http://localhost:8080}"
   "project|${PROJECT_SERVICE_URL:-http://localhost:8080}"
+  # 公開パイプライン・一括管理・記事プレビューのCMS依存部分をpublishing-serviceへ移設
+  # (#707/#708/#709/#712)。
+  "publishing|${PUBLISHING_SERVICE_URL:-http://localhost:8080}"
+  # VSCode拡張配布・バックアップ・システム設定・ダッシュボード状態をplatform-serviceへ移設
+  # (#693〜#696、C10)。
+  "platform|${PLATFORM_SERVICE_URL:-http://localhost:8080}"
+  # ユーザー・ロール・権限管理をidentity-serviceへ移設(#561)。
+  "identity|${IDENTITY_SERVICE_URL:-http://localhost:8080}"
 )
+
+# gatewayは対象外。自身のコントローラを持たず、springdocも導入していない
+# (services/gateway/build.gradle にspringdoc依存が無い)。ルーティング先の各サービスの
+# specを個別に取得すれば足りる。
 
 OPENAPI_DIR="openapi"
 MAX_RETRIES=30

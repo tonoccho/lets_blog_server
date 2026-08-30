@@ -4,12 +4,21 @@
 // 再エクスポートすることで、@api-client を利用する側(web/extension)の import文は
 // 変更不要にする)
 
-// legacy-api
+// legacy-api。Phase 19のサービス抽出でposts/sites/usersはcontent/project/identityへ移り、
+// AuthControllerのログインも#566で撤去された。openapi/legacy-api.jsonが当時のまま古く、
+// 実在しないエンドポイント(/api/auth/login等)のクライアントが生成・コミットされていたため、
+// specを再生成して現行のコントローラ構成に合わせた(issue #739)。
+// AiBridgeController/AnalyticsBridgeController/ContentBridgeController/ProjectUserBridgeControllerは
+// サービス間の内部ブリッジ専用(/api/internal/**)で、gatewayからは到達不能かつweb/extensionが
+// 呼ぶ想定もないため、他サービスの内部ブリッジと同様にここでは再エクスポートしない。
 export * from './generated/legacy-api/letSBlogAPI.schemas';
-export * from './generated/legacy-api/auth/auth';
-export * from './generated/legacy-api/posts/posts';
-export * from './generated/legacy-api/sites/sites';
-export * from './generated/legacy-api/users/users';
+export * from './generated/legacy-api/authentication/authentication';
+export * from './generated/legacy-api/health-controller/health-controller';
+export * from './generated/legacy-api/ai-controller/ai-controller';
+export * from './generated/legacy-api/project-controller/project-controller';
+export * from './generated/legacy-api/project-ai-model-controller/project-ai-model-controller';
+export * from './generated/legacy-api/project-api-key-controller/project-api-key-controller';
+export * from './generated/legacy-api/project-user-controller/project-user-controller';
 
 // log-writer(ログの所有権を完全移管、#572)
 export * from './generated/log-writer/openAPIDefinition.schemas';
@@ -179,4 +188,20 @@ export type {
   delete1Response as deleteCustomTagTemplateResponse,
 } from './generated/content/custom-tag-template-controller/custom-tag-template-controller';
 
+// legacy-api の内部ブリッジコントローラ(AiBridgeController/ContentBridgeController)は
+// ai-service/content-service と同じDTOを参照するため、legacy-apiのschemasにも同名の型が
+// 生成される。#739でlegacy-apiのspecを再生成した結果この重複が顕在化した。
+// legacy-apiは解体予定(#583)であり、これらの型を所有するのは移設先のサービスなので、
+// ai/content側を正として明示的に再エクスポートし曖昧性を解消する
+// (上のlist/create/delete系の衝突解消と同じパターン)。
+export type { GenerationJobResponse, PlanChatMessage } from './generated/ai/openAPIDefinition.schemas';
+export type { RoleOptionResponse } from './generated/content/openAPIDefinition.schemas';
+
+// analytics(#578)・project(#577)・publishing(#707/#708/#712)・platform(#693〜#696)・
+// identity(#561)の生成物は openapi/*.json と sdk/api-client/src/generated/ に揃っているが、
+// ここからの再エクスポートはまだ行っていない(issue #739のスコープは生成パイプラインの追随まで)。
+// 再エクスポートには、上のlist/create/delete系で繰り返し起きているサービス跨ぎの名前衝突を
+// 5サービス分まとめて解消する必要があり、独立した作業になるため別Issueで扱う。
+// 現時点でこれらを`@api-client`から利用している呼び出し元は無い。
+//
 // 将来のサービス抽出Issueで追加するターゲットも、ここに re-export を追加していく。
