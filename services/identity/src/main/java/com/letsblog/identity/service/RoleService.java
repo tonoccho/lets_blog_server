@@ -38,12 +38,26 @@ public class RoleService {
      * 既定シード({@code V8__add_rbac_tables.sql})で該当するのは{@code ROLE_ADMIN}のみ。
      *
      * <p><b>ロール名の文字列比較ではなく、DBから解決した実体で判定している理由</b>:
-     * MySQLのスキーマは{@code utf8mb4_unicode_ci}(大文字小文字を区別せず、末尾空白も無視する)
-     * のため、{@code findByRoleName("role_admin")}や{@code "ROLE_ADMIN "}が
-     * {@code ROLE_ADMIN}の行に一致する。コントローラ側で
-     * {@code "ROLE_ADMIN".equals(roleName)}のような名前一致でガードすると、
+     * MySQLの照合順序は大文字小文字を区別しない({@code lets_blog}はサーバー既定の
+     * {@code utf8mb4_0900_ai_ci}、テスト用{@code lbs_identity_test}は
+     * {@code mysql/init/02-create-test-schemas.sh}が指定する{@code utf8mb4_unicode_ci}。
+     * どちらも{@code _ai_ci}でアクセントと大小の差を無視する)。そのため
+     * {@code findByRoleName("role_admin")}は{@code ROLE_ADMIN}の行に一致する。
+     * コントローラ側で{@code "ROLE_ADMIN".equals(roleName)}のような名前一致でガードすると、
      * 大小を変えただけの入力でガードだけをすり抜け、{@link #assignRoleToUser}側では
-     * 同じ行に解決される、という迂回が成立する。解決結果の権限で判定すれば照合規則に依存しない。
+     * 同じ行に解決される、という迂回が成立する。
+     *
+     * <p>ここでの安全性は「正規化を網羅したから」ではなく<b>構造から</b>来ている。
+     * 判定と割り当てが同じ{@code findByRoleName(roleName)}を同じ入力文字列で呼ぶため、
+     * どんな入力に対しても両者の解決結果は必ず一致する。ある入力が{@code ROLE_ADMIN}の行に
+     * 解決するなら判定も必ずtrueになり、解決しないなら割り当ても{@code RoleNotFoundException}に
+     * なる。全角・Unicode正規化・末尾空白といった照合順序の差異は、この構造の下では
+     * 分岐点になりえない。したがって照合順序が将来変わっても、この判定は追随不要である。
+     *
+     * <p><b>特権の定義を変える場合の注意</b>: 新たに{@code requirePermission(X)}を追加するときは、
+     * Xを特権の定義に含めるべきか判断すること。現状{@code requirePermission}が実際に
+     * 要求しているのは{@code ROLE_MANAGE}だけなので、それ以外のPermissionを持つロールを
+     * 特権とみなさなくても実害が無いが、enforceされるPermissionが増えると前提が変わる。
      *
      * <p>ロールが存在しない場合はfalseを返す。その場合は後続の
      * {@link #assignRoleToUser}/{@link #removeRoleFromUser}が

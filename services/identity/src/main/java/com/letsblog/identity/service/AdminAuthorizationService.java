@@ -10,6 +10,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class AdminAuthorizationService {
 
+    /** {@code users.role}カラムのadmin区分({@code UserService.VALID_ROLES}と同じ値)。 */
+    private static final String ADMIN_ROLE = "admin";
+
     private final CurrentActorService currentActorService;
 
     public AdminAuthorizationService(CurrentActorService currentActorService) {
@@ -42,6 +45,31 @@ public class AdminAuthorizationService {
         Long actorId = currentActorService.getCurrentActorId();
         if (actorId != null && actorId.equals(userId)) {
             throw new ForbiddenException(message);
+        }
+    }
+
+    /**
+     * 自分自身のadmin権限を手放す変更を禁止する(issue #798)。
+     *
+     * <p>{@code PATCH /api/users/{id}}は{@code users.role}を書き換えるため、adminが自分自身を
+     * {@code role="user"}へ降格させられた。降格後は{@code requireAdmin()}を要求する
+     * {@code PATCH}・{@code deactivate}・{@code reactivate}・{@code DELETE}がすべて閉じるため、
+     * 他にadminがいなければDBを直接操作する以外に復旧手段が無い。自己削除・自己無効化を
+     * 禁止しておきながら自己降格を残すのは、#798が#796について指摘したのと同じ非対称になる。
+     *
+     * <p>{@code PATCH}はパスワード変更にも使われるため、{@link #requireAdminAndNotSelf}のように
+     * 操作そのものを禁止するのではなく、<b>自分自身に対するadmin以外へのrole変更</b>だけを拒否する。
+     * {@code role}を指定しない更新(パスワードのみ)と、admin→adminの無変更は通す。
+     *
+     * @param newRole リクエストが指定したrole。{@code null}(role未指定)なら何もしない
+     */
+    public void requireNotSelfDemotion(Long userId, String newRole) {
+        if (newRole == null || ADMIN_ROLE.equals(newRole)) {
+            return;
+        }
+        Long actorId = currentActorService.getCurrentActorId();
+        if (actorId != null && actorId.equals(userId)) {
+            throw new ForbiddenException("自分自身のadmin権限は外せません");
         }
     }
 

@@ -85,17 +85,23 @@ public class UserController {
      * 本人が変更してよいプロフィール項目は{@code PUT /api/users/{id}}
      * ({@link #updateProfile}、{@code requireSelfOrAdmin})、個人設定は
      * {@code PATCH /api/identity/me/preferences}が担当する。
+     *
+     * <p>あわせて自分自身の降格も禁止する(issue #798)。adminが自分を{@code role="user"}に
+     * 書き換えると、admin限定のエンドポイントがすべて閉じて復旧できなくなる。自己削除・自己無効化と
+     * 同じロックアウト経路なので同様に塞ぐ。詳細は
+     * {@link AdminAuthorizationService#requireNotSelfDemotion}を参照。
      */
-    @Operation(summary = "ユーザー情報を更新", description = "指定されたユーザーのrole/passwordを更新します(admin限定)")
+    @Operation(summary = "ユーザー情報を更新", description = "指定されたユーザーのrole/passwordを更新します(admin限定。自分自身をadmin以外へ降格することは不可)")
     @ApiResponse(responseCode = "200", description = "ユーザーが更新されました")
     @ApiResponse(responseCode = "401", description = "認証ヘッダが無効")
-    @ApiResponse(responseCode = "403", description = "admin権限がありません")
+    @ApiResponse(responseCode = "403", description = "admin権限が無い、または自分自身をadmin以外へ降格しようとした")
     @ApiResponse(responseCode = "404", description = "ユーザーが見つかりません")
     @PatchMapping("/{id}")
     public UserResponse update(
             @Parameter(description = "ユーザーID") @PathVariable Long id,
             @RequestBody UserUpdateRequest request) {
         adminAuthorizationService.requireAdmin();
+        adminAuthorizationService.requireNotSelfDemotion(id, request.role());
         return userService.update(id, request);
     }
 

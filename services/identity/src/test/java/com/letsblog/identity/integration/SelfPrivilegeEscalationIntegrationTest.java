@@ -18,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -150,21 +151,40 @@ class SelfPrivilegeEscalationIntegrationTest {
     }
 
     /**
-     * MySQLのスキーマは{@code utf8mb4_unicode_ci}(大文字小文字を区別せず、末尾空白も無視)のため、
-     * {@code findByRoleName("role_admin")}は{@code ROLE_ADMIN}の行に一致する。
-     * 認可をロール名の文字列一致({@code "ROLE_ADMIN".equals(roleName)})で書くと、
-     * 大小を変えただけの入力でガードだけをすり抜け、割り当て処理では同じ行に解決される、
-     * という迂回が成立する。実装はDBから解決した実体の権限で判定しているため塞がっている。
+     * MySQLの照合順序は大文字小文字を区別しないため、{@code findByRoleName("role_admin")}は
+     * {@code ROLE_ADMIN}の行に一致する。認可をロール名の文字列一致
+     * ({@code "ROLE_ADMIN".equals(roleName)})で書くと、大小を変えただけの入力でガードだけを
+     * すり抜け、割り当て処理では同じ行に解決される、という迂回が成立する。
+     * 実装はDBから解決した実体の権限で判定しているため塞がっている。
+     *
+     * <p>403が返ること自体が「DBが実際に大文字小文字を区別せず{@code ROLE_ADMIN}へ解決した」
+     * ことの証拠になる。解決しなければ{@code RoleNotFoundException}で404になるため。
      */
     @ParameterizedTest(name = "ロール名 \"{0}\" でも迂回できない")
-    @ValueSource(strings = {"role_admin", "Role_Admin", "ROLE_ADMIN "})
-    @DisplayName("照合規則の揺れ(大文字小文字・末尾空白)でガードを迂回できない")
-    void 照合規則の揺れで迂回できない(String roleName) throws Exception {
-        mockMvc.perform(request(HttpMethod.POST, "/api/users/" + operatorId + "/roles/" + roleName.strip())
+    @ValueSource(strings = {"role_admin", "Role_Admin", "rOlE_aDmIn"})
+    @DisplayName("大文字小文字の揺れでガードを迂回できない")
+    void 大文字小文字の揺れで迂回できない(String roleName) throws Exception {
+        mockMvc.perform(request(HttpMethod.POST, "/api/users/" + operatorId + "/roles/" + roleName)
                         .with(JwtTestFixtures.jwtRequestPostProcessor(OPERATOR_SUB, "user")))
                 .andExpect(status().isForbidden());
 
         assertThat(hasRbacRole(operatorId, PRIVILEGED_ROLE)).isFalse();
+    }
+
+    /**
+     * 存在しないロール名では、認可より先に何かが起きたりせず404になる。
+     * {@code isPrivilegedRole}は存在しないロールに対してfalseを返すため
+     * {@code requirePermission(ROLE_MANAGE)}を通り、そのあと{@code RoleService}が
+     * {@code RoleNotFoundException}を投げる。この順序で副作用が発生しないことを固定する。
+     */
+    @Test
+    @DisplayName("存在しないロール名は404で、user_rolesに副作用が無い")
+    void 存在しないロールは404() throws Exception {
+        mockMvc.perform(request(HttpMethod.POST, "/api/users/" + plainId + "/roles/ROLE_DOES_NOT_EXIST")
+                        .with(JwtTestFixtures.jwtRequestPostProcessor(OPERATOR_SUB, "user")))
+                .andExpect(status().isNotFound());
+
+        assertThat(userRepository.findById(plainId).orElseThrow().getRoles()).isEmpty();
     }
 
     @Test
@@ -246,6 +266,65 @@ class SelfPrivilegeEscalationIntegrationTest {
                 .andExpect(status().isForbidden());
 
         assertThat(userRepository.findById(plainId).orElseThrow().isEnabled()).isTrue();
+    }
+
+    // ------------------------------------------------- 3. 自己降格によるロックアウト
+
+    @Test
+    @DisplayName("adminは自分自身をuserへ降格できない")
+    void adminは自己降格できない() throws Exception {
+        mockMvc.perform(request(HttpMethod.PATCH, "/api/users/" + adminId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"role\":\"user\"}")
+                        .with(JwtTestFixtures.jwtRequestPostProcessor(ADMIN_SUB, "admin")))
+                .andExpect(status().isForbidden());
+
+        assertThat(userRepository.findById(adminId).orElseThrow().getRole()).isEqualTo("admin");
+    }
+
+    /**
+     * {@code PATCH}はパスワード変更にも使われるため、操作そのものを禁止すると回帰する。
+     * 禁止しているのは「自分自身をadmin以外へ変更すること」だけ。
+     */
+    @Test
+    @DisplayName("adminは自分自身のパスワードだけなら更新できる(role未指定)")
+    void adminは自分のパスワードを更新できる() throws Exception {
+        mockMvc.perform(request(HttpMethod.PATCH, "/api/users/" + adminId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"new-password\"}")
+                        .with(JwtTestFixtures.jwtRequestPostProcessor(ADMIN_SUB, "admin")))
+                .andExpect(status().isOk());
+
+        assertThat(userRepository.findById(adminId).orElseThrow().getRole()).isEqualTo("admin");
+    }
+
+    @Test
+    @DisplayName("adminは自分自身にrole=adminを指定する無変更の更新は通せる")
+    void adminはadminのまま更新できる() throws Exception {
+        mockMvc.perform(request(HttpMethod.PATCH, "/api/users/" + adminId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"role\":\"admin\"}")
+                        .with(JwtTestFixtures.jwtRequestPostProcessor(ADMIN_SUB, "admin")))
+                .andExpect(status().isOk());
+
+        assertThat(userRepository.findById(adminId).orElseThrow().getRole()).isEqualTo("admin");
+    }
+
+    @Test
+    @DisplayName("adminは他ユーザーを降格できる")
+    void adminは他ユーザーを降格できる() throws Exception {
+        userRepository.findById(plainId).ifPresent(u -> {
+            u.setRole("admin");
+            userRepository.save(u);
+        });
+
+        mockMvc.perform(request(HttpMethod.PATCH, "/api/users/" + plainId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"role\":\"user\"}")
+                        .with(JwtTestFixtures.jwtRequestPostProcessor(ADMIN_SUB, "admin")))
+                .andExpect(status().isOk());
+
+        assertThat(userRepository.findById(plainId).orElseThrow().getRole()).isEqualTo("user");
     }
 
     // ------------------------------------------------- 認証ゲート(#772)

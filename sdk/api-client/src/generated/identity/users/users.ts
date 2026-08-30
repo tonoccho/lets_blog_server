@@ -8,12 +8,14 @@ import type {
   AssignRole200,
   AssignRole401,
   AssignRole403,
+  AssignRole404,
   MigrateToKeycloakRequest,
   MigrationSummaryResponse,
   ReconciliationSummaryResponse,
   RemoveRole200,
   RemoveRole401,
   RemoveRole403,
+  RemoveRole404,
   UpdateGithubTokenRequest,
   UpdateUserPreferencesRequest,
   UserCreateRequest,
@@ -239,7 +241,7 @@ export const getUpdateUrl = (id: number,) => {
 }
 
 /**
- * 指定されたユーザーのrole/passwordを更新します(admin限定)
+ * 指定されたユーザーのrole/passwordを更新します(admin限定。自分自身をadmin以外へ降格することは不可)
  * @summary ユーザー情報を更新
  */
 export const update = async (id: number,
@@ -466,10 +468,15 @@ export type assignRoleResponse403 = {
   status: 403
 }
 
+export type assignRoleResponse404 = {
+  data: AssignRole404
+  status: 404
+}
+
 export type assignRoleResponseSuccess = (assignRoleResponse200) & {
   headers: Headers;
 };
-export type assignRoleResponseError = (assignRoleResponse401 | assignRoleResponse403) & {
+export type assignRoleResponseError = (assignRoleResponse401 | assignRoleResponse403 | assignRoleResponse404) & {
   headers: Headers;
 };
 
@@ -485,7 +492,7 @@ export const getAssignRoleUrl = (userId: number,
 }
 
 /**
- * 指定されたユーザーにロールを割り当てます
+ * 指定されたユーザーにロールを割り当てます(特権ロールはadmin限定)
  * @summary ロールを割り当て
  */
 export const assignRole = async (userId: number,
@@ -523,10 +530,15 @@ export type removeRoleResponse403 = {
   status: 403
 }
 
+export type removeRoleResponse404 = {
+  data: RemoveRole404
+  status: 404
+}
+
 export type removeRoleResponseSuccess = (removeRoleResponse200) & {
   headers: Headers;
 };
-export type removeRoleResponseError = (removeRoleResponse401 | removeRoleResponse403) & {
+export type removeRoleResponseError = (removeRoleResponse401 | removeRoleResponse403 | removeRoleResponse404) & {
   headers: Headers;
 };
 
@@ -542,7 +554,7 @@ export const getRemoveRoleUrl = (userId: number,
 }
 
 /**
- * 指定されたユーザーからロールを削除します
+ * 指定されたユーザーからロールを削除します(特権ロールはadmin限定)
  * @summary ロールを削除
  */
 export const removeRole = async (userId: number,
@@ -673,7 +685,7 @@ export const getDeactivateUrl = (id: number,) => {
 }
 
 /**
- * 指定されたユーザーを無効化します(Keycloak登録済みの場合はKeycloak側も無効化)
+ * 指定されたユーザーを無効化します(admin限定。自分自身は無効化不可。Keycloak登録済みの場合はKeycloak側も無効化)
  * @summary ユーザーを無効化
  */
 export const deactivate = async (id: number, options?: RequestInit): Promise<deactivateResponse> => {
