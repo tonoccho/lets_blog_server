@@ -6,6 +6,7 @@ import {
   updateMyPreferences,
   type CustomLink,
   type SocialLinks,
+  type UserProfile,
 } from "@/lib/apiClient";
 import { getViewerProfile, requireSession } from "@/lib/session";
 
@@ -113,7 +114,7 @@ export async function updatePreferencesAction(
 
   // 自ユーザーの解決はidentity-service側が検証済みJWTのsubから行う(issue #784)。
   // 以前はNumber(session.user.id)=NaNをパスへ埋め込んでおり、保存が常に失敗していた。
-  let updated;
+  let updated: UserProfile;
   try {
     updated = await updateMyPreferences({ locale, timezone });
   } catch (err) {

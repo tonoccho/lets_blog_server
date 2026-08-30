@@ -76,7 +76,7 @@ export default async function UsersPage() {
                       <Link href={`/users/${user.id}/edit`} className="text-sm text-neutral-600 dark:text-neutral-400 hover:underline">
                         編集
                       </Link>
-                      {viewer?.id !== user.id && <DeleteUserButton id={user.id} />}
+                      {viewer != null && viewer.id !== user.id && <DeleteUserButton id={user.id} />}
                     </div>
                   </td>
                 </tr>

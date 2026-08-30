@@ -112,6 +112,29 @@ class SelfPreferencesIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
+    /**
+     * 読み取り側({@code GET /api/identity/me})は既存エンドポイントの再利用だが、issue #784で
+     * タイムゾーン表示と「自分自身か」の判定4箇所の土台になり、露出度が上がった。
+     * PATCHと同じ3経路をここで固定する。
+     */
+    @Test
+    @DisplayName("GET /api/identity/me: 有効なJWTのsubから自ユーザーのプロフィールを返す")
+    void 自ユーザーのプロフィールを取得できる() throws Exception {
+        mockMvc.perform(request(HttpMethod.GET, "/api/identity/me")
+                        .with(JwtTestFixtures.jwtRequestPostProcessor(KEYCLOAK_SUB, "user")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(userId))
+                .andExpect(jsonPath("$.timezone").value("Asia/Tokyo"));
+    }
+
+    @Test
+    @DisplayName("GET /api/identity/me: keycloak_subが未同期なら403")
+    void 未同期のsubではプロフィールを取得できない() throws Exception {
+        mockMvc.perform(request(HttpMethod.GET, "/api/identity/me")
+                        .with(JwtTestFixtures.jwtRequestPostProcessor("sub-784-unknown", "user")))
+                .andExpect(status().isForbidden());
+    }
+
     /** 不正なタイムゾーンは既存のバリデーション(UserService)どおり400。 */
     @Test
     @DisplayName("不正なタイムゾーンは400")
