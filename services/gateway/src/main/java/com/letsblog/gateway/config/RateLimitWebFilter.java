@@ -1,10 +1,12 @@
 package com.letsblog.gateway.config;
 
+import com.nimbusds.jwt.JWTParser;
 import io.github.resilience4j.ratelimiter.RateLimiter;
 import io.github.resilience4j.ratelimiter.RateLimiterConfig;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.server.reactive.ServerHttpRequest;
@@ -15,8 +17,10 @@ import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
 
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -25,6 +29,49 @@ import java.util.concurrent.ConcurrentHashMap;
  * 移設元と同一だが、アップロード系エンドポイントを管理画面から動的に変更する機能
  * (旧AppSettingService経由のDB設定)は、gatewayがDBを持たない設計のため対応していない
  * (静的なデフォルト値のみ。follow-up issueで再検討する)。
+ *
+ * <h2>api-globalバケットの分割粒度(#749)</h2>
+ *
+ * <p>issue #584でWeb(BFF: Server Component/Server Action/Route Handler)の呼び先が
+ * legacy-api直叩きからgateway経由へ統一された結果、従来はブラウザ発のポーリングだけが通っていた
+ * このフィルタを、管理画面の全データ取得が通るようになった。api-globalが
+ * 「プロセス全体で100req/分」の単一バケットのままだと、画面遷移のたびに数本〜十数本の
+ * BFF呼び出しが同じ枠を食い合い、#464(バケット枯渇でサーバーが応答しなくなる)の再発に至る。
+ * 実測(2026-08-29のgatewayアクセスログ24時間分)でもapi-global相当のリクエストはピーク239req/分に達し、
+ * 24時間で399件の429が発生していた。
+ *
+ * <p>そこで api-global だけを<b>クライアント単位</b>へ分割し、さらに<b>内部(BFF)トラフィックを
+ * 別バケット(api-internal)へ分離</b>する。分割キーは次の順で決まる:
+ *
+ * <ol>
+ *   <li>{@code X-Forwarded-For} がある = reverse-proxy(nginx)を経由した<b>外部</b>リクエスト。
+ *       キーは同ヘッダの<b>末尾</b>の値({@code ip:<addr>})。nginxは
+ *       {@code $proxy_add_x_forwarded_for} で自身が観測したpeerアドレスを末尾に<b>追記</b>するため、
+ *       クライアントが偽装ヘッダを送っても末尾の値は詐称できない(先頭の値は詐称できるので使わない)。
+ *       バケットは api-global。</li>
+ *   <li>{@code X-Forwarded-For} が無い = lbs-net内部からgatewayを直接叩いた<b>内部</b>リクエスト
+ *       (webコンテナのBFF等)。Bearerトークンが載っていればそのJWTの {@code sub} をキーにし
+ *       ({@code user:<sub>})、ログイン中ユーザーごとに枠を分ける。バケットは api-internal。</li>
+ *   <li>内部かつトークン無し(proxy.tsの {@code /api/auth/setup-status} 等)は、
+ *       接続元アドレスをキーにする({@code peer:<addr>})。バケットは api-internal。</li>
+ * </ol>
+ *
+ * <p>JWTはここでは<b>検証せずに</b>パースする(このフィルタはSpring Securityのフィルタチェーンより
+ * 前段の{@code Ordered.HIGHEST_PRECEDENCE + 1}で動くため、検証済みJwtはまだ利用できない)。
+ * 署名が不正なトークンは後段のresource server設定(SecurityConfig)が401で弾くため、
+ * 偽造subで得られるのは「自分専用の枠」だけで制限の回避にはならない。ただし外部リクエストに対して
+ * subを使うと、乱数subの偽造トークンを撒くことで枠を無限に増やせてしまうため、
+ * <b>外部は常にIP</b>で分割し、subは内部リクエストにのみ使う。
+ *
+ * <p>auth-endpoint / upload-endpoint / operation-log-endpoint は従来どおり<b>プロセス全体で
+ * 1バケット</b>のままとする。前者2つは「総量に対する上限」(ブルートフォース耐性・
+ * 画像生成やアップロードによる資源枯渇の防止)であり、クライアント単位に割ると総量が青天井になるため
+ * (upload-endpointの上限値は#444で管理画面から変更可能にする対象でもある)。
+ * operation-log-endpointはBFFからの書き込み専用で、そもそも300req/分の枠に余裕がある。
+ *
+ * <p>クライアントキーごとにRateLimiterインスタンスを保持するため、キー数の上限
+ * ({@value #MAX_TRACKED_CLIENT_KEYS})を超えた分は共有のフォールバックキーへ寄せ、
+ * マップの無制限な増殖を防ぐ。
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 1)
@@ -34,8 +81,17 @@ public class RateLimitWebFilter implements WebFilter {
     private static final String OPERATION_LOG_ENDPOINT = "operation-log-endpoint";
     private static final String AUTH_ENDPOINT = "auth-endpoint";
     private static final String API_GLOBAL = "api-global";
+    private static final String API_INTERNAL = "api-internal";
 
     private static final String OPERATION_LOG_PATH = "/api/operation-logs";
+
+    private static final String FORWARDED_FOR_HEADER = "X-Forwarded-For";
+    private static final String BEARER_PREFIX = "Bearer ";
+    private static final String KEY_SEPARATOR = "|";
+    /** キー数が上限に達した後の新規クライアントがまとめて使う共有キー。 */
+    private static final String OVERFLOW_CLIENT_KEY = "overflow";
+    /** 保持するクライアント別RateLimiterの上限数。 */
+    private static final int MAX_TRACKED_CLIENT_KEYS = 10_000;
 
     private static final Set<String> AUTH_STATUS_CHECK_PATHS =
             Set.of("/api/auth/setup-status", "/api/auth/totp/status");
@@ -50,12 +106,22 @@ public class RateLimitWebFilter implements WebFilter {
         this.properties = properties;
     }
 
+    /** レート制限の適用単位。{@code internal}はlbs-net内部から直接gatewayを叩いた呼び出し。 */
+    private record ClientIdentity(boolean internal, String key) {
+    }
+
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         ServerHttpRequest request = exchange.getRequest();
         String path = request.getPath().value();
-        String rateLimiterName = getRateLimiterName(path);
-        RateLimiter rateLimiter = rateLimiters.computeIfAbsent(rateLimiterName, this::createRateLimiter);
+        String bucketName = getRateLimiterName(path);
+        String limiterKey = bucketName;
+        if (API_GLOBAL.equals(bucketName)) {
+            ClientIdentity client = resolveClient(request);
+            bucketName = client.internal() ? API_INTERNAL : API_GLOBAL;
+            limiterKey = bucketName + KEY_SEPARATOR + client.key();
+        }
+        RateLimiter rateLimiter = resolveRateLimiter(bucketName, limiterKey);
 
         if (!rateLimiter.acquirePermission()) {
             ServerHttpResponse response = exchange.getResponse();
@@ -70,11 +136,28 @@ public class RateLimitWebFilter implements WebFilter {
         return chain.filter(exchange);
     }
 
-    private RateLimiter createRateLimiter(String name) {
-        RateLimitProperties.Bucket bucket = switch (name) {
+    /**
+     * バケットとクライアントキーの組に対応するRateLimiterを返す。
+     * 追跡中のキー数が上限に達している場合は、新規クライアントを共有のフォールバックキーへ寄せる。
+     */
+    private RateLimiter resolveRateLimiter(String bucketName, String limiterKey) {
+        RateLimiter existing = rateLimiters.get(limiterKey);
+        if (existing != null) {
+            return existing;
+        }
+        String effectiveKey = limiterKey;
+        if (rateLimiters.size() >= MAX_TRACKED_CLIENT_KEYS) {
+            effectiveKey = bucketName + KEY_SEPARATOR + OVERFLOW_CLIENT_KEY;
+        }
+        return rateLimiters.computeIfAbsent(effectiveKey, key -> createRateLimiter(key, bucketName));
+    }
+
+    private RateLimiter createRateLimiter(String limiterKey, String bucketName) {
+        RateLimitProperties.Bucket bucket = switch (bucketName) {
             case UPLOAD_ENDPOINT -> properties.getUploadEndpoint();
             case OPERATION_LOG_ENDPOINT -> properties.getOperationLogEndpoint();
             case AUTH_ENDPOINT -> properties.getAuthEndpoint();
+            case API_INTERNAL -> properties.getApiInternal();
             default -> properties.getApiGlobal();
         };
         RateLimiterConfig config = RateLimiterConfig.custom()
@@ -82,7 +165,72 @@ public class RateLimitWebFilter implements WebFilter {
                 .limitRefreshPeriod(bucket.getLimitRefreshPeriod())
                 .timeoutDuration(Duration.ZERO)
                 .build();
-        return RateLimiter.of(name, config);
+        return RateLimiter.of(limiterKey, config);
+    }
+
+    /** api-globalの分割キー(クラスJavadocの表を参照)。 */
+    private ClientIdentity resolveClient(ServerHttpRequest request) {
+        String externalIp = externalClientIp(request);
+        if (externalIp != null) {
+            return new ClientIdentity(false, "ip:" + externalIp);
+        }
+        String subject = unverifiedJwtSubject(request);
+        if (subject != null) {
+            return new ClientIdentity(true, "user:" + subject);
+        }
+        return new ClientIdentity(true, "peer:" + peerAddress(request));
+    }
+
+    /**
+     * reverse-proxy(nginx)が付与した X-Forwarded-For の末尾の値を返す(無ければnull=内部リクエスト)。
+     * nginxの{@code $proxy_add_x_forwarded_for}はクライアント申告値の後ろに自身が観測したpeerアドレスを
+     * 追記するため、末尾の値だけが信頼できる。
+     */
+    private String externalClientIp(ServerHttpRequest request) {
+        List<String> headerValues = request.getHeaders().get(FORWARDED_FOR_HEADER);
+        if (headerValues == null) {
+            return null;
+        }
+        String lastValue = null;
+        for (String headerValue : headerValues) {
+            for (String candidate : headerValue.split(",")) {
+                String trimmed = candidate.trim();
+                if (!trimmed.isEmpty()) {
+                    lastValue = trimmed;
+                }
+            }
+        }
+        return lastValue;
+    }
+
+    /**
+     * Authorizationヘッダのトークンから{@code sub}クレームを取り出す(署名検証はしない。
+     * 検証は後段のresource server設定が行う。クラスJavadoc参照)。
+     */
+    private String unverifiedJwtSubject(ServerHttpRequest request) {
+        String authorization = request.getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
+        if (authorization == null || !authorization.startsWith(BEARER_PREFIX)) {
+            return null;
+        }
+        String token = authorization.substring(BEARER_PREFIX.length()).trim();
+        try {
+            String subject = JWTParser.parse(token).getJWTClaimsSet().getSubject();
+            if (subject == null || subject.isBlank()) {
+                return null;
+            }
+            return subject;
+        } catch (Exception e) {
+            // パースできないトークンはクライアント識別に使えないだけで、拒否は後段(401)に委ねる。
+            return null;
+        }
+    }
+
+    private String peerAddress(ServerHttpRequest request) {
+        InetSocketAddress remoteAddress = request.getRemoteAddress();
+        if (remoteAddress == null || remoteAddress.getAddress() == null) {
+            return "unknown";
+        }
+        return remoteAddress.getAddress().getHostAddress();
     }
 
     private String getRateLimiterName(String requestPath) {

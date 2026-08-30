@@ -19,6 +19,11 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'io.github.resilience4j:resilience4j-ratelimiter:2.4.0'
+    // RateLimitWebFilterが、Spring Securityのフィルタチェーンより前段でJWTのsubを
+    // 取り出す(署名検証はしない)ために使う(#749)。oauth2-resource-serverの推移的依存でも
+    // クラスパスには載るが、直接importするため明示的に宣言する(バージョンはSpring Bootの
+    // 依存管理に任せる)。
+    implementation 'com.nimbusds:nimbus-jose-jwt'
 
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
