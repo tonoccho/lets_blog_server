@@ -85,11 +85,11 @@ describe('downstreamServiceFor', () => {
   });
 
   /**
-   * issue #771: 実装はlegacy-apiにしか無いが、gatewayに専用ルートが無いため
-   * project-serviceへ先勝ちマッチしている(=実際に転送される先はproject-service)。
-   * ここでも「実際の転送先」を返すことで、エラーメッセージが実態とずれないようにする。
+   * issue #771: 実装はlegacy-apiにしか無い。gatewayに専用ルート
+   * (project-ai-generate-image-prompt-legacy)を追加したため、legacy-apiへ向くようになった。
+   * より広い /api/projects/** より前で判定される必要がある。
    */
-  it('generate-image-promptはgatewayの実際の挙動どおりproject-serviceへ向く(issue #771)', () => {
-    expect(downstreamServiceFor('/api/projects/3/ai/generate-image-prompt').id).toBe('project');
+  it('generate-image-promptはlegacy-apiへ向く(issue #771)', () => {
+    expect(downstreamServiceFor('/api/projects/3/ai/generate-image-prompt').id).toBe('api');
   });
 });

@@ -55,11 +55,10 @@ const ROUTES: Route[] = [
   { pattern: '/api/posts/*/*', service: PUBLISHING },
   // 記事プラン(壁打ちチャット・構成提案・Issue操作)は ai-service(issue #574/#659)。
   { pattern: '/api/projects/*/article-plan/**', service: AI },
+  // 画像生成プロンプト生成は実装が legacy-api にしか無く、gateway にも専用ルートを追加した
+  // (issue #771。それ以前は下の project ルートへ先勝ちマッチして404になっていた)。
+  { pattern: '/api/projects/*/ai/generate-image-prompt', service: LEGACY },
   // 上記以外の /api/projects/** ・ /api/sites/** は project-service(issue #577 stage2)。
-  //
-  // 注: /api/projects/*/ai/generate-image-prompt は実装が legacy-api にしか無いにも関わらず、
-  // gateway に専用ルートが無いためこの project ルートへ先勝ちマッチして404になる
-  // (issue #771 で報告済み)。ここでも「実際に転送される先」である project-service を返す。
   { pattern: '/api/projects/**', service: PROJECT },
   { pattern: '/api/sites/**', service: PROJECT },
   // 記事本文の照会・カスタムタグ・メタデータ・コンテンツキャッシュは content-service(issue #576)。
