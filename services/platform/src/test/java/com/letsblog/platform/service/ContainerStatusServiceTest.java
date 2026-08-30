@@ -90,6 +90,89 @@ class ContainerStatusServiceTest {
         assertTrue(containers.get(0).detail().contains("Exited"));
     }
 
+    // ------------------------------------------------------------------
+    // issue #725: 停止中コンテナの扱い。ワンショットジョブの正常完了と、
+    // 継続稼働が期待されるサービスの停止を区別する。
+    // ------------------------------------------------------------------
+
+    /** 終了コード0かつ再起動ポリシーno = 正常に完了したワンショットジョブ(legacy-schema-migrate等)。 */
+    @Test
+    void testListAll_正常終了したワンショットジョブはエラーにしない() {
+        expectList("[{\"Id\":\"abc123\",\"Names\":[\"/lbs-legacy-schema-migrate\"],"
+                + "\"State\":\"exited\",\"Status\":\"Exited (0) 2 hours ago\"}]");
+        expectInspect("abc123", 0, "no");
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(Status.NORMAL, containers.get(0).status());
+        assertEquals("exited", containers.get(0).state());
+    }
+
+    /**
+     * 終了コードが0でも、再起動ポリシーがunless-stopped(=継続稼働が期待されるサービス)なら
+     * エラーのまま。docker compose stop での正常停止をNORMALと表示すると、停止に気付けなくなる。
+     */
+    @Test
+    void testListAll_継続稼働サービスの正常停止はエラーのまま() {
+        expectList("[{\"Id\":\"def456\",\"Names\":[\"/lbs-mysql\"],"
+                + "\"State\":\"exited\",\"Status\":\"Exited (0) 5 minutes ago\"}]");
+        expectInspect("def456", 0, "unless-stopped");
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(Status.ERROR, containers.get(0).status());
+    }
+
+    /** ワンショットジョブでも異常終了(exit != 0)ならエラー。 */
+    @Test
+    void testListAll_異常終了したワンショットジョブはエラー() {
+        expectList("[{\"Id\":\"ghi789\",\"Names\":[\"/lbs-legacy-schema-migrate\"],"
+                + "\"State\":\"exited\",\"Status\":\"Exited (1) 2 hours ago\"}]");
+        expectInspect("ghi789", 1, "no");
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(Status.ERROR, containers.get(0).status());
+    }
+
+    /** 詳細が取れないときは判定できないので、異常を隠さずエラーのままにする。 */
+    @Test
+    void testListAll_詳細取得に失敗したらエラーのまま() {
+        expectList("[{\"Id\":\"jkl012\",\"Names\":[\"/lbs-legacy-schema-migrate\"],"
+                + "\"State\":\"exited\",\"Status\":\"Exited (0) 2 hours ago\"}]");
+        server.expect(requestTo(DOCKER_URL + "/containers/jkl012/json")).andRespond(withServerError());
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(Status.ERROR, containers.get(0).status());
+    }
+
+    /** 稼働中のコンテナだけなら詳細取得は行わない(往復を増やさない)。 */
+    @Test
+    void testListAll_稼働中のみなら詳細取得を行わない() {
+        expectList("[{\"Id\":\"mno345\",\"Names\":[\"/lbs-mysql\"],"
+                + "\"State\":\"running\",\"Status\":\"Up 3 hours\"}]");
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(Status.NORMAL, containers.get(0).status());
+        // 追加のリクエストを期待していないので、verify()が通れば詳細取得は行われていない。
+        server.verify();
+    }
+
+    private void expectList(String json) {
+        server.expect(requestTo(DOCKER_URL + "/containers/json?all=true"))
+                .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
+    }
+
+    private void expectInspect(String id, int exitCode, String restartPolicy) {
+        server.expect(requestTo(DOCKER_URL + "/containers/" + id + "/json"))
+                .andRespond(withSuccess(
+                        "{\"State\":{\"ExitCode\":" + exitCode + "},"
+                                + "\"HostConfig\":{\"RestartPolicy\":{\"Name\":\"" + restartPolicy + "\"}}}",
+                        MediaType.APPLICATION_JSON));
+    }
+
     @Test
     void testListAll_docker_socket_proxy未到達時は空リストを返す() {
         server.expect(requestTo(DOCKER_URL + "/containers/json?all=true"))

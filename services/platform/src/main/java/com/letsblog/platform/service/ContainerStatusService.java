@@ -91,7 +91,8 @@ public class ContainerStatusService {
                 String name = rawName.substring(CONTAINER_NAME_PREFIX.length());
                 String state = item.path("State").asText("");
                 String detail = item.path("Status").asText("");
-                containers.add(new ContainerStatusResponse(name, name, resolveStatus(state, detail), state, detail));
+                String id = item.path("Id").asText("");
+                containers.add(new ContainerStatusResponse(name, name, resolveStatus(id, state, detail), state, detail));
             }
             containers.sort(Comparator.comparing(ContainerStatusResponse::name));
             return containers;
@@ -110,16 +111,62 @@ public class ContainerStatusService {
     }
 
     /**
-     * running以外は全てエラー扱いにする(停止・再起動中・作成直後など、いずれも「使えない状態」のため)。
      * runningでもヘルスチェック異常(Docker HEALTHCHECK設定時にStatus文字列へ付与される)は警告にする。
+     *
+     * <p>running以外は原則エラー扱いだが、{@code exited}だけは例外を設ける(issue #725)。
+     * {@code legacy-schema-migrate}のようなワンショットジョブは正常に完了しても{@code exited}に
+     * なるため、一律エラーにするとダッシュボードが常時赤くなり、本当の異常が埋もれる。
+     * 判定は{@link #isCompletedOneShotJob}に委ねる。
      */
-    private Status resolveStatus(String state, String detail) {
-        if (!"running".equals(state)) {
-            return Status.ERROR;
+    private Status resolveStatus(String id, String state, String detail) {
+        if ("running".equals(state)) {
+            if (detail.contains("(unhealthy)") || detail.contains("(health: starting)")) {
+                return Status.WARNING;
+            }
+            return Status.NORMAL;
         }
-        if (detail.contains("(unhealthy)") || detail.contains("(health: starting)")) {
-            return Status.WARNING;
+        if ("exited".equals(state) && isCompletedOneShotJob(id)) {
+            return Status.NORMAL;
         }
-        return Status.NORMAL;
+        return Status.ERROR;
+    }
+
+    /**
+     * 停止中のコンテナが「正常に完了したワンショットジョブ」かどうかを判定する(issue #725)。
+     *
+     * <p>終了コード0だけでは足りない。継続稼働が期待されるサービスを{@code docker compose stop}で
+     * 正常停止した場合も終了コードは0になり、それをNORMALと表示すると停止に気付けなくなるためである。
+     * 再起動ポリシーを併せて見て、<b>終了コードが0であり、かつ再起動ポリシーが{@code no}</b>の場合だけ
+     * 「完了した」と扱う。docker-compose.ymlでは共通アンカー{@code x-common-service}が
+     * {@code restart: unless-stopped}を与えており、ワンショットジョブだけが{@code restart: "no"}で
+     * 上書きしている(legacy-schema-migrate)。この違いがそのまま判定材料になる。
+     *
+     * <p>一覧APIの{@code GET /containers/json}は{@code HostConfig}として{@code NetworkMode}しか
+     * 返さず、終了コードもStatus文字列("Exited (0) 2 hours ago")に埋まっているだけなので、
+     * 停止中のコンテナに限って{@code GET /containers/{id}/json}を追加で呼ぶ。通常このAPIを叩く
+     * 時点で停止中のコンテナは多くても数個なので、往復の増加は限定的である。
+     *
+     * <p>取得に失敗した場合はfalseを返す(=エラー表示のまま)。判定できないことを理由に
+     * 異常を隠さない方が安全なため。
+     */
+    private boolean isCompletedOneShotJob(String id) {
+        if (id.isEmpty()) {
+            return false;
+        }
+        try {
+            JsonNode inspect = dockerClient.get()
+                    .uri("/containers/{id}/json", id)
+                    .retrieve()
+                    .body(JsonNode.class);
+            if (inspect == null) {
+                return false;
+            }
+            boolean exitedSuccessfully = inspect.path("State").path("ExitCode").asInt(-1) == 0;
+            String restartPolicy = inspect.path("HostConfig").path("RestartPolicy").path("Name").asText("");
+            return exitedSuccessfully && ("no".equals(restartPolicy) || restartPolicy.isEmpty());
+        } catch (RestClientException | IllegalArgumentException e) {
+            log.warn("コンテナ {} の詳細取得に失敗しました。停止中として扱います: {}", id, e.getMessage());
+            return false;
+        }
     }
 }
