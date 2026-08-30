@@ -3,9 +3,8 @@ import { listAppSettings } from "@/lib/apiClient";
 import { AppSettingsPanel } from "./AppSettingsPanel";
 
 export default async function AdminSystemSettingsPage() {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-  const settings = await listAppSettings(actor).catch(() => []);
+  await requireAdminSession();
+  const settings = await listAppSettings().catch(() => []);
 
   return (
     <div className="space-y-8">

@@ -10,13 +10,12 @@ export default async function ProjectGoogleAnalyticsSettingsPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
   const projectId = Number(id);
 
   const [project, status] = await Promise.all([
-    getProject(projectId, actor).catch(() => null),
-    getProjectGoogleAnalyticsStatus(projectId, actor).catch(() => ({ configured: false, propertyId: null })),
+    getProject(projectId).catch(() => null),
+    getProjectGoogleAnalyticsStatus(projectId).catch(() => ({ configured: false, propertyId: null })),
   ]);
   if (!project) {
     notFound();

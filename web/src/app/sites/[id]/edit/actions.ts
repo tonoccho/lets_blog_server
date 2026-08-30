@@ -34,8 +34,7 @@ export async function updateSiteAction(
   _prevState: UpdateSiteState,
   formData: FormData
 ): Promise<UpdateSiteState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const name = String(formData.get("name") ?? "").trim();
   const credentials: Record<string, string> = {};
@@ -52,9 +51,7 @@ export async function updateSiteAction(
       {
         name: name || undefined,
         credentials: Object.keys(credentials).length > 0 ? credentials : undefined,
-      },
-      actor
-    );
+      });
     revalidatePath("/sites");
     revalidatePath(`/sites/${siteId}/edit`);
     return { success: true, connectionCheckStatus: site.connectionCheckStatus };

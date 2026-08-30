@@ -101,8 +101,7 @@ export async function bindEnvironmentAction(
   _prevState: EnvironmentActionState,
   formData: FormData
 ): Promise<EnvironmentActionState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const siteId = Number(formData.get("siteId"));
   if (!siteId) {
@@ -110,7 +109,7 @@ export async function bindEnvironmentAction(
   }
 
   try {
-    await bindProjectEnvironment(projectId, environment, siteId, actor);
+    await bindProjectEnvironment(projectId, environment, siteId);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -120,11 +119,8 @@ export async function bindEnvironmentAction(
 }
 
 export async function unbindEnvironmentAction(projectId: number, environment: ProjectEnvironment) {
-  const session = await requireAdminSession();
-  await unbindProjectEnvironment(projectId, environment, {
-    id: Number(session.user.id),
-    role: session.user.role,
-  });
+  await requireAdminSession();
+  await unbindProjectEnvironment(projectId, environment);
   revalidatePath(`/projects/${projectId}`);
 }
 
@@ -138,8 +134,7 @@ export async function updateProjectNameAction(
   _prevState: UpdateProjectNameState,
   formData: FormData
 ): Promise<UpdateProjectNameState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const name = String(formData.get("name") ?? "").trim();
   if (!name) {
@@ -147,7 +142,7 @@ export async function updateProjectNameAction(
   }
 
   try {
-    await updateProject(projectId, name, actor);
+    await updateProject(projectId, name);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -167,8 +162,7 @@ export async function updateMasterEnvironmentAction(
   _prevState: UpdateMasterEnvironmentState,
   formData: FormData
 ): Promise<UpdateMasterEnvironmentState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const masterEnvironment = String(formData.get("masterEnvironment") ?? "");
   if (masterEnvironment !== "test" && masterEnvironment !== "production") {
@@ -176,7 +170,7 @@ export async function updateMasterEnvironmentAction(
   }
 
   try {
-    await updateMasterEnvironment(projectId, masterEnvironment, actor);
+    await updateMasterEnvironment(projectId, masterEnvironment);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -195,13 +189,12 @@ export async function updateProjectGithubRepositoryAction(
   _prevState: UpdateProjectGithubRepositoryState,
   formData: FormData
 ): Promise<UpdateProjectGithubRepositoryState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const githubRepository = String(formData.get("githubRepository") ?? "").trim();
 
   try {
-    await updateProjectGithubRepository(projectId, githubRepository, actor);
+    await updateProjectGithubRepository(projectId, githubRepository);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -220,14 +213,13 @@ export async function updateImageGenerationPromptDefaultsAction(
   _prevState: UpdateImageGenerationPromptDefaultsState,
   formData: FormData
 ): Promise<UpdateImageGenerationPromptDefaultsState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const defaultNegativePrompt = String(formData.get("defaultNegativePrompt") ?? "").trim();
   const defaultQualityPrompt = String(formData.get("defaultQualityPrompt") ?? "").trim();
 
   try {
-    await updateProjectImageGenerationPromptDefaults(projectId, defaultNegativePrompt, defaultQualityPrompt, actor);
+    await updateProjectImageGenerationPromptDefaults(projectId, defaultNegativePrompt, defaultQualityPrompt);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -246,8 +238,7 @@ export async function updateImageGenerationSizeDefaultsAction(
   _prevState: UpdateImageGenerationSizeDefaultsState,
   formData: FormData
 ): Promise<UpdateImageGenerationSizeDefaultsState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const widthRaw = String(formData.get("defaultGeneratedImageWidth") ?? "").trim();
   const heightRaw = String(formData.get("defaultGeneratedImageHeight") ?? "").trim();
@@ -256,7 +247,7 @@ export async function updateImageGenerationSizeDefaultsAction(
 
   try {
     await updateProjectImageGenerationSizeDefaults(
-      projectId, defaultGeneratedImageWidth, defaultGeneratedImageHeight, actor);
+      projectId, defaultGeneratedImageWidth, defaultGeneratedImageHeight);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -276,8 +267,7 @@ export async function updateImageContentFilterSettingsAction(
   _prevState: UpdateImageContentFilterSettingsState,
   formData: FormData
 ): Promise<UpdateImageContentFilterSettingsState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const blockSexualContent = formData.get("blockSexualContent") === "on";
   const blockViolentContent = formData.get("blockViolentContent") === "on";
@@ -285,7 +275,7 @@ export async function updateImageContentFilterSettingsAction(
 
   try {
     await updateProjectImageContentFilterSettings(
-      projectId, blockSexualContent, blockViolentContent, blockDiscriminatoryContent, actor);
+      projectId, blockSexualContent, blockViolentContent, blockDiscriminatoryContent);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -304,14 +294,13 @@ export async function updateArticleImageResizeDefaultAction(
   _prevState: UpdateArticleImageResizeDefaultState,
   formData: FormData
 ): Promise<UpdateArticleImageResizeDefaultState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const raw = String(formData.get("defaultArticleImageLongEdgePx") ?? "").trim();
   const defaultArticleImageLongEdgePx = raw ? Number(raw) : null;
 
   try {
-    await updateProjectArticleImageResizeDefault(projectId, defaultArticleImageLongEdgePx, actor);
+    await updateProjectArticleImageResizeDefault(projectId, defaultArticleImageLongEdgePx);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -330,8 +319,7 @@ export async function setProjectGithubTokenAction(
   _prevState: ProjectApiKeyFormState,
   formData: FormData
 ): Promise<ProjectApiKeyFormState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const githubToken = String(formData.get("githubToken") ?? "").trim();
   if (!githubToken) {
@@ -339,7 +327,7 @@ export async function setProjectGithubTokenAction(
   }
 
   try {
-    await setProjectGithubToken(projectId, githubToken, actor);
+    await setProjectGithubToken(projectId, githubToken);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -349,9 +337,8 @@ export async function setProjectGithubTokenAction(
 }
 
 export async function clearProjectGithubTokenAction(projectId: number): Promise<void> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-  await clearProjectGithubToken(projectId, actor);
+  await requireAdminSession();
+  await clearProjectGithubToken(projectId);
   revalidatePath(`/projects/${projectId}`);
 }
 
@@ -360,8 +347,7 @@ export async function setProjectBraveSearchApiKeyAction(
   _prevState: ProjectApiKeyFormState,
   formData: FormData
 ): Promise<ProjectApiKeyFormState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const apiKey = String(formData.get("apiKey") ?? "").trim();
   if (!apiKey) {
@@ -369,7 +355,7 @@ export async function setProjectBraveSearchApiKeyAction(
   }
 
   try {
-    await setProjectBraveSearchApiKey(projectId, apiKey, actor);
+    await setProjectBraveSearchApiKey(projectId, apiKey);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -379,9 +365,8 @@ export async function setProjectBraveSearchApiKeyAction(
 }
 
 export async function clearProjectBraveSearchApiKeyAction(projectId: number): Promise<void> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-  await clearProjectBraveSearchApiKey(projectId, actor);
+  await requireAdminSession();
+  await clearProjectBraveSearchApiKey(projectId);
   revalidatePath(`/projects/${projectId}`);
 }
 
@@ -390,8 +375,7 @@ export async function setProjectGoogleAnalyticsCredentialsAction(
   _prevState: ProjectApiKeyFormState,
   formData: FormData
 ): Promise<ProjectApiKeyFormState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const propertyId = String(formData.get("propertyId") ?? "").trim();
   const serviceAccountJson = String(formData.get("serviceAccountJson") ?? "").trim();
@@ -403,7 +387,7 @@ export async function setProjectGoogleAnalyticsCredentialsAction(
   }
 
   try {
-    await setProjectGoogleAnalyticsCredentials(projectId, { propertyId, serviceAccountJson }, actor);
+    await setProjectGoogleAnalyticsCredentials(projectId, { propertyId, serviceAccountJson });
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -414,9 +398,8 @@ export async function setProjectGoogleAnalyticsCredentialsAction(
 }
 
 export async function clearProjectGoogleAnalyticsCredentialsAction(projectId: number): Promise<void> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-  await clearProjectGoogleAnalyticsCredentials(projectId, actor);
+  await requireAdminSession();
+  await clearProjectGoogleAnalyticsCredentials(projectId);
   revalidatePath(`/projects/${projectId}/settings/google-analytics`);
   revalidatePath(`/projects/${projectId}/dashboard`);
 }
@@ -426,8 +409,7 @@ export async function setProjectAdSenseSettingsAction(
   _prevState: ProjectApiKeyFormState,
   formData: FormData
 ): Promise<ProjectApiKeyFormState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const accountId = String(formData.get("accountId") ?? "").trim();
   const clientId = String(formData.get("clientId") ?? "").trim();
@@ -440,9 +422,9 @@ export async function setProjectAdSenseSettingsAction(
   }
 
   try {
-    await setProjectAdSenseSettings(projectId, { accountId, clientId }, actor);
+    await setProjectAdSenseSettings(projectId, { accountId, clientId });
     if (clientSecret) {
-      await setProjectAdSenseClientSecret(projectId, clientSecret, actor);
+      await setProjectAdSenseClientSecret(projectId, clientSecret);
     }
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
@@ -454,9 +436,8 @@ export async function setProjectAdSenseSettingsAction(
 }
 
 export async function clearProjectAdSenseCredentialsAction(projectId: number): Promise<void> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-  await clearProjectAdSenseCredentials(projectId, actor);
+  await requireAdminSession();
+  await clearProjectAdSenseCredentials(projectId);
   revalidatePath(`/projects/${projectId}/settings/adsense`);
   revalidatePath(`/projects/${projectId}/dashboard`);
 }
@@ -471,8 +452,7 @@ export async function addProjectUserAction(
   _prevState: AddProjectUserState,
   formData: FormData
 ): Promise<AddProjectUserState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const userId = Number(formData.get("userId"));
   const wpRole = String(formData.get("wpRole") ?? "").trim();
@@ -481,7 +461,7 @@ export async function addProjectUserAction(
   }
 
   try {
-    await addProjectUser(projectId, userId, wpRole, actor);
+    await addProjectUser(projectId, userId, wpRole);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -491,20 +471,14 @@ export async function addProjectUserAction(
 }
 
 export async function updateProjectUserRoleAction(projectId: number, userId: number, wpRole: string) {
-  const session = await requireAdminSession();
-  await updateProjectUserRole(projectId, userId, wpRole, {
-    id: Number(session.user.id),
-    role: session.user.role,
-  });
+  await requireAdminSession();
+  await updateProjectUserRole(projectId, userId, wpRole);
   revalidatePath(`/projects/${projectId}`);
 }
 
 export async function removeProjectUserAction(projectId: number, userId: number) {
-  const session = await requireAdminSession();
-  await removeProjectUser(projectId, userId, {
-    id: Number(session.user.id),
-    role: session.user.role,
-  });
+  await requireAdminSession();
+  await removeProjectUser(projectId, userId);
   revalidatePath(`/projects/${projectId}`);
 }
 
@@ -518,8 +492,7 @@ export async function syncEnvironmentAction(
   _prevState: SyncEnvironmentState,
   formData: FormData
 ): Promise<SyncEnvironmentState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const from = String(formData.get("from") ?? "") as ProjectEnvironment;
   const to = String(formData.get("to") ?? "") as ProjectEnvironment;
@@ -536,7 +509,7 @@ export async function syncEnvironmentAction(
   }
 
   try {
-    await syncProjectEnvironment(projectId, { from, to, targets }, actor);
+    await syncProjectEnvironment(projectId, { from, to, targets });
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -556,8 +529,7 @@ export async function applyToEnvironmentAction(
   _prevState: BulkOperationState,
   formData: FormData
 ): Promise<BulkOperationState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const environment = String(formData.get("environment") ?? "") as ProjectEnvironment;
   const operationType = String(formData.get("operationType") ?? "") as BulkOperationType;
@@ -604,9 +576,7 @@ export async function applyToEnvironmentAction(
         categoryParentSlug: categoryParentSlug || undefined,
         categoryDescription: categoryDescription || undefined,
         categoryTargetSlug: categoryTargetSlug || undefined,
-      },
-      actor
-    );
+      });
     revalidatePath(`/projects/${projectId}`);
     return { success: true, results: [result] };
   } catch (err) {
@@ -619,8 +589,7 @@ export async function applyToAllEnvironmentsAction(
   _prevState: BulkOperationState,
   formData: FormData
 ): Promise<BulkOperationState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const operationType = String(formData.get("operationType") ?? "") as BulkOperationType;
   const value = String(formData.get("value") ?? "").trim();
@@ -633,7 +602,7 @@ export async function applyToAllEnvironmentsAction(
   }
 
   try {
-    const results = await applyToAllEnvironments(projectId, { operationType, value }, actor);
+    const results = await applyToAllEnvironments(projectId, { operationType, value });
     revalidatePath(`/projects/${projectId}`);
     return { success: true, results };
   } catch (err) {
@@ -646,13 +615,12 @@ export async function syncTermToMasterAction(
   kind: "category" | "tag",
   slug: string
 ): Promise<BulkOperationState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   try {
     const results = await (kind === "category"
-      ? syncCategoryToMaster(projectId, slug, actor)
-      : syncTagToMaster(projectId, slug, actor));
+      ? syncCategoryToMaster(projectId, slug)
+      : syncTagToMaster(projectId, slug));
     revalidatePath(`/projects/${projectId}`);
     return { success: true, results };
   } catch (err) {
@@ -665,13 +633,12 @@ export async function editTermAndSyncAction(
   kind: "category" | "tag",
   input: EditTermInput
 ): Promise<BulkOperationState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   try {
     const results = await (kind === "category"
-      ? editCategoryAndSync(projectId, input, actor)
-      : editTagAndSync(projectId, input, actor));
+      ? editCategoryAndSync(projectId, input)
+      : editTagAndSync(projectId, input));
     revalidatePath(`/projects/${projectId}`);
     return { success: true, results };
   } catch (err) {
@@ -683,13 +650,12 @@ export async function syncAllTermsToMasterAction(
   projectId: number,
   kind: "category" | "tag"
 ): Promise<BulkOperationState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   try {
     const results = await (kind === "category"
-      ? syncAllCategoriesToMaster(projectId, actor)
-      : syncAllTagsToMaster(projectId, actor));
+      ? syncAllCategoriesToMaster(projectId)
+      : syncAllTagsToMaster(projectId));
     revalidatePath(`/projects/${projectId}`);
     return { success: true, results };
   } catch (err) {
@@ -702,13 +668,12 @@ export async function deleteTermEverywhereAction(
   kind: "category" | "tag",
   slug: string
 ): Promise<BulkOperationState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   try {
     const results = await (kind === "category"
-      ? deleteCategoryEverywhere(projectId, slug, actor)
-      : deleteTagEverywhere(projectId, slug, actor));
+      ? deleteCategoryEverywhere(projectId, slug)
+      : deleteTagEverywhere(projectId, slug));
     revalidatePath(`/projects/${projectId}`);
     return { success: true, results };
   } catch (err) {
@@ -721,8 +686,7 @@ export async function runBulkOperationUploadAction(
   _prevState: BulkOperationState,
   formData: FormData
 ): Promise<BulkOperationState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const operationType = String(formData.get("operationType") ?? "") as BulkOperationType;
   const file = formData.get("file");
@@ -735,7 +699,7 @@ export async function runBulkOperationUploadAction(
   }
 
   try {
-    const results = await runBulkOperationUpload(projectId, { operationType, file }, actor);
+    const results = await runBulkOperationUpload(projectId, { operationType, file });
     revalidatePath(`/projects/${projectId}`);
     return { success: true, results };
   } catch (err) {
@@ -748,12 +712,11 @@ export async function fetchTermComparisonAction(
   kind: "category" | "tag",
   page: number
 ): Promise<TermComparisonPage> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   return kind === "category"
-    ? listCategoryComparison(projectId, page, actor)
-    : listTagComparison(projectId, page, actor);
+    ? listCategoryComparison(projectId, page)
+    : listTagComparison(projectId, page);
 }
 
 export async function fetchStatusComparisonAction(
@@ -761,12 +724,11 @@ export async function fetchStatusComparisonAction(
   kind: "plugin" | "theme",
   page: number
 ): Promise<StatusComparisonPage> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   return kind === "plugin"
-    ? listPluginComparison(projectId, page, actor)
-    : listThemeComparison(projectId, page, actor);
+    ? listPluginComparison(projectId, page)
+    : listThemeComparison(projectId, page);
 }
 
 export async function reconcileStateAction(
@@ -775,13 +737,12 @@ export async function reconcileStateAction(
   slug: string,
   changes: { environment: ProjectEnvironment; desiredStatus: PluginThemeStatus }[]
 ): Promise<BulkOperationState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   try {
     const results = await (kind === "plugin"
-      ? reconcilePluginState(projectId, { slug, changes }, actor)
-      : reconcileThemeState(projectId, { slug, changes }, actor));
+      ? reconcilePluginState(projectId, { slug, changes })
+      : reconcileThemeState(projectId, { slug, changes }));
     revalidatePath(`/projects/${projectId}`);
     return { success: true, results };
   } catch (err) {
@@ -794,13 +755,12 @@ export async function deleteSlugEverywhereAction(
   kind: "plugin" | "theme",
   slug: string
 ): Promise<BulkOperationState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   try {
     const results = await (kind === "plugin"
-      ? deletePluginEverywhere(projectId, slug, actor)
-      : deleteThemeEverywhere(projectId, slug, actor));
+      ? deletePluginEverywhere(projectId, slug)
+      : deleteThemeEverywhere(projectId, slug));
     revalidatePath(`/projects/${projectId}`);
     return { success: true, results };
   } catch (err) {
@@ -814,20 +774,18 @@ export interface AiModelActionState {
 }
 
 export async function fetchLlmModelsAction(projectId: number): Promise<LlmModelListResponse> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-  return listLlmModels(projectId, actor);
+  await requireAdminSession();
+  return listLlmModels(projectId);
 }
 
 export async function selectLlmModelAction(
   projectId: number,
   modelName: string
 ): Promise<{ error?: string }> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   try {
-    await selectLlmModel(projectId, modelName, actor);
+    await selectLlmModel(projectId, modelName);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -836,20 +794,18 @@ export async function selectLlmModelAction(
 }
 
 export async function fetchLlmProviderAction(projectId: number): Promise<LlmProviderListResponse> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-  return listLlmProvider(projectId, actor);
+  await requireAdminSession();
+  return listLlmProvider(projectId);
 }
 
 export async function selectLlmProviderAction(
   projectId: number,
   provider: string
 ): Promise<{ error?: string }> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   try {
-    await selectLlmProvider(projectId, provider, actor);
+    await selectLlmProvider(projectId, provider);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -858,20 +814,18 @@ export async function selectLlmProviderAction(
 }
 
 export async function fetchImageProviderAction(projectId: number): Promise<ImageProviderListResponse> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-  return listImageProvider(projectId, actor);
+  await requireAdminSession();
+  return listImageProvider(projectId);
 }
 
 export async function selectImageProviderAction(
   projectId: number,
   provider: string
 ): Promise<{ error?: string }> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   try {
-    await selectImageProvider(projectId, provider, actor);
+    await selectImageProvider(projectId, provider);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -880,20 +834,18 @@ export async function selectImageProviderAction(
 }
 
 export async function fetchComfyUiCheckpointsAction(projectId: number): Promise<ComfyUiCheckpointListResponse> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-  return listComfyUiCheckpoints(projectId, actor);
+  await requireAdminSession();
+  return listComfyUiCheckpoints(projectId);
 }
 
 export async function selectComfyUiCheckpointAction(
   projectId: number,
   checkpointName: string
 ): Promise<{ error?: string }> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   try {
-    await selectComfyUiCheckpoint(projectId, checkpointName, actor);
+    await selectComfyUiCheckpoint(projectId, checkpointName);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -906,11 +858,10 @@ export async function installComfyUiCheckpointAction(
   downloadUrl: string,
   fileName: string
 ): Promise<AiModelActionState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   try {
-    const job = await installComfyUiCheckpoint(projectId, downloadUrl, fileName, actor);
+    const job = await installComfyUiCheckpoint(projectId, downloadUrl, fileName);
     return { jobId: job.id };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
@@ -921,11 +872,10 @@ export async function deleteComfyUiCheckpointAction(
   projectId: number,
   fileName: string
 ): Promise<AiModelActionState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   try {
-    const job = await deleteComfyUiCheckpoint(projectId, fileName, actor);
+    const job = await deleteComfyUiCheckpoint(projectId, fileName);
     return { jobId: job.id };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
@@ -933,20 +883,18 @@ export async function deleteComfyUiCheckpointAction(
 }
 
 export async function fetchGenerationJobAction(jobId: number): Promise<GenerationJobDetail> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-  return getGenerationJob(jobId, actor);
+  await requireAdminSession();
+  return getGenerationJob(jobId);
 }
 
 export async function fetchMediaGarbageScanAction(
   projectId: number,
   environment: ProjectEnvironment
 ): Promise<{ data?: MediaGarbageCollectionScanResponse; error?: string }> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   try {
-    const data = await scanMediaGarbage(projectId, environment, actor);
+    const data = await scanMediaGarbage(projectId, environment);
     return { data };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
@@ -958,11 +906,10 @@ export async function deleteMediaGarbageAction(
   environment: ProjectEnvironment,
   mediaIds: string[]
 ): Promise<AiModelActionState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   try {
-    const job = await deleteMediaGarbage(projectId, environment, mediaIds, actor);
+    const job = await deleteMediaGarbage(projectId, environment, mediaIds);
     return { jobId: job.id };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
@@ -970,20 +917,18 @@ export async function deleteMediaGarbageAction(
 }
 
 export async function fetchImageGenerationOptionsAction(projectId: number): Promise<ImageGenerationOptionsResponse> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-  return getImageGenerationOptions(projectId, actor);
+  await requireAdminSession();
+  return getImageGenerationOptions(projectId);
 }
 
 export async function generateProjectImagesAction(
   projectId: number,
   params: Omit<AiImageGenerationParams, "projectId">
 ): Promise<{ images?: AiImageResult[]; error?: string }> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   try {
-    const result = await generateProjectImages({ ...params, projectId }, actor);
+    const result = await generateProjectImages({ ...params, projectId });
     return { images: result.images };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
@@ -994,11 +939,10 @@ export async function generateImagePromptAction(
   projectId: number,
   data: { history: PlanChatMessage[]; message: string; provider?: string }
 ): Promise<{ prompt?: string; error?: string }> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   try {
-    const result = await generateImagePromptFromChat(projectId, data, actor);
+    const result = await generateImagePromptFromChat(projectId, data);
     return { prompt: result.prompt };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
@@ -1010,15 +954,13 @@ export async function fetchPostComparisonAction(
   postType: PostType,
   page: number
 ): Promise<PostComparisonPage> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-  return listPostComparison(projectId, postType, page, actor);
+  await requireAdminSession();
+  return listPostComparison(projectId, postType, page);
 }
 
 export async function fetchPostStatusesAction(): Promise<PostStatusOption[]> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-  return getPostStatuses(actor);
+  await requireAdminSession();
+  return getPostStatuses();
 }
 
 export async function deletePostEverywhereAction(
@@ -1026,11 +968,10 @@ export async function deletePostEverywhereAction(
   postType: PostType,
   slug: string
 ): Promise<BulkOperationState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   try {
-    await deletePostEverywhere(projectId, postType, slug, actor);
+    await deletePostEverywhere(projectId, postType, slug);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -1044,11 +985,10 @@ export async function updatePostStatusEverywhereAction(
   slug: string,
   status: string
 ): Promise<BulkOperationState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   try {
-    await updatePostStatusEverywhere(projectId, postType, slug, status, actor);
+    await updatePostStatusEverywhere(projectId, postType, slug, status);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -1066,11 +1006,10 @@ export async function uploadProjectAssetImageAction(
   projectId: number,
   generatedImageId: number
 ): Promise<{ logs?: BulkOperationLog[]; error?: string }> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   try {
-    const logs = await uploadProjectAssetImage(projectId, generatedImageId, actor);
+    const logs = await uploadProjectAssetImage(projectId, generatedImageId);
     revalidatePath(`/projects/${projectId}`);
     return { logs };
   } catch (err) {

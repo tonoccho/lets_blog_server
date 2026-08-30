@@ -37,14 +37,13 @@ const NOT_ELIGIBLE_ADSENSE_REPORT: AdSenseReport = {
 
 export default async function ProjectDashboardPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
   const projectId = Number(id);
 
   const [project, gaReport, adsenseReport] = await Promise.all([
-    getProject(projectId, actor).catch(() => null),
-    getProjectGoogleAnalyticsReport(projectId, actor).catch(() => NOT_ELIGIBLE_GA_REPORT),
-    getProjectAdSenseReport(projectId, actor).catch(() => NOT_ELIGIBLE_ADSENSE_REPORT),
+    getProject(projectId).catch(() => null),
+    getProjectGoogleAnalyticsReport(projectId).catch(() => NOT_ELIGIBLE_GA_REPORT),
+    getProjectAdSenseReport(projectId).catch(() => NOT_ELIGIBLE_ADSENSE_REPORT),
   ]);
   if (!project) {
     notFound();

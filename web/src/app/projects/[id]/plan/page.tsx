@@ -22,29 +22,28 @@ export default async function ArticlePlanPage({
 }) {
   const { id } = await params;
   const { issue: issueRaw } = await searchParams;
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
   const projectId = Number(id);
   const issueNumber = issueRaw ? Number(issueRaw) : null;
 
-  const project = await getProject(projectId, actor).catch(() => null);
+  const project = await getProject(projectId).catch(() => null);
   if (!project) {
     notFound();
   }
 
   const [sessions, issues, issueSession, allIssues, issueDescription] = await Promise.all([
-    listArticlePlanSessions(projectId, actor).catch(() => []),
+    listArticlePlanSessions(projectId).catch(() => []),
     project.githubRepository
-      ? listArticlePlanIssues(projectId, "open", actor).catch(() => [])
+      ? listArticlePlanIssues(projectId, "open").catch(() => [])
       : Promise.resolve([]),
     issueNumber
-      ? getArticlePlanSessionByIssue(projectId, issueNumber, actor).catch(() => null)
+      ? getArticlePlanSessionByIssue(projectId, issueNumber).catch(() => null)
       : Promise.resolve(null),
     issueNumber && project.githubRepository
-      ? listArticlePlanIssues(projectId, "all", actor).catch(() => [])
+      ? listArticlePlanIssues(projectId, "all").catch(() => [])
       : Promise.resolve([]),
     issueNumber && project.githubRepository
-      ? getArticlePlanIssueDescription(projectId, issueNumber, actor).catch(() => null)
+      ? getArticlePlanIssueDescription(projectId, issueNumber).catch(() => null)
       : Promise.resolve(null),
   ]);
   const issueTitle = issueNumber ? allIssues.find((i) => i.number === issueNumber)?.title ?? null : null;

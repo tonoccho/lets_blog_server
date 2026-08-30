@@ -23,8 +23,7 @@ export async function updateAppSettingsAction(
   _prevState: UpdateAppSettingsFormState,
   formData: FormData
 ): Promise<UpdateAppSettingsFormState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const settings: Record<string, string> = {};
   for (const [key, value] of formData.entries()) {
@@ -35,7 +34,7 @@ export async function updateAppSettingsAction(
   }
 
   try {
-    await updateAppSettings(settings, actor);
+    await updateAppSettings(settings);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
