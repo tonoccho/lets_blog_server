@@ -124,8 +124,11 @@ docker exec lbs-api curl -sf http://localhost:8080/actuator/health
 docker exec lbs-log-writer curl -sf http://localhost:8080/actuator/health
 ```
 
-将来のapi-gateway導入後は、gateway経由の疎通確認に置き換わる予定
-([spec/phase17/00-overview.md](../spec/phase17/00-overview.md) 参照)。
+gateway は下流サービスの状態を自身の `/actuator/health` に集約するため
+(`services/gateway/.../DownstreamHealthConfig`、#560・#743)、
+`docker exec lbs-gateway curl -sf http://localhost:8080/actuator/health` を叩けば
+全サービスの疎通をまとめて確認できる。個別のサービスを見るのは、
+集約結果で DOWN になっているものを切り分けるときになる。
 
 ### アクセスURL一覧
 
@@ -294,6 +297,7 @@ Phase 6以降は意図した仕様(すべて `https://localhost/...` 経由に�
 
 ## 関連ドキュメント
 
-- [spec/phase6/00-overview.md](../spec/phase6/00-overview.md) — リバースプロキシ導入の全体設計
-- [spec/phase6/01-reverse-proxy.md](../spec/phase6/01-reverse-proxy.md) — nginx設定の詳細
+- [nginx/conf.d/default.conf](../nginx/conf.d/default.conf) — リバースプロキシのルーティング設定
+  (どのパスをどのサービスへ振り分けるか、その判断理由がコメントに書かれている)
+- [docs/DOCKER_COMPOSE_ARCHITECTURE.md](DOCKER_COMPOSE_ARCHITECTURE.md) — コンテナ構成・ポート割当・起動順序
 - [.env.example](../.env.example) — 環境変数の全項目
