@@ -126,6 +126,10 @@ class RouteControllerContractTest {
         // 公開パイプライン(PostController、issue #707)・一括管理/環境間比較・taxonomy解決
         // (BulkManagementController/TaxonomyController、issue #708)をpublishing-serviceが持つ。
         SERVICE_MODULE_TO_ENV_VAR.put("publishing", "PUBLISHING_SERVICE_URI");
+        // VscodeExtensionController/SystemSettingController/AppSettingController/DashboardController/
+        // BackupController(issue #693/#695/#696、C10)をplatform-serviceが持つ。
+        // 新設時(#698)にこのマップへ追加し漏れていた(issue #716)。
+        SERVICE_MODULE_TO_ENV_VAR.put("platform", "PLATFORM_SERVICE_URI");
         // legacy-apiは「専用ルートが無ければfallback-uri(同じくLEGACY_API_URI)へ落ちる」ため、
         // ここでの検証は実質「他サービス向けのルートに飲み込まれていないか」になる
         // (issue #771。クラスJavadoc参照)。移設が進むにつれ対象は減っていく。
