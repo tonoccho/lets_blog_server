@@ -87,24 +87,33 @@ E2E は実ユーザー(`s.tonouchi@gmail.com` 等)を **使わない**。専用�
 ローカル開発の Keycloak コンテナ(`lbs-keycloak`)へは、スクリプトで発行できる。
 
 ```bash
+E2E_PROVISION_ADMIN_EMAIL='<letsblog realm の管理者アカウント>' \
+E2E_PROVISION_ADMIN_PASSWORD='<その管理者のパスワード>' \
 E2E_TEST_PASSWORD='<任意の強いパスワード>' \
 E2E_ADMIN_PASSWORD='<任意の強いパスワード>' \
 ./scripts/provision-e2e-keycloak-users.sh
 ```
 
+> **前提**: letsblog realm に admin ロールのユーザーが既に存在すること。
+> ユーザー作成 (`POST /api/users`) は issue #796 で admin 限定になったため、
+> スクリプトは実在する管理者のトークンで API を呼ぶ。ローカル開発環境では初回セットアップ
+> (legacy-api の `/api/auth/setup`)で作られた管理者アカウントが該当する。
+> パスワードは `.env` には保存せず、実行時に環境変数で渡す。
+
 このスクリプトは以下を行う(冪等。既存アカウントには作成をスキップして password/role のみ整える)。
 
-0. `letsblog-services`(サービス間通信用の confidential クライアント)の Client Credentials Grant で
-   アクセストークンを取得する。issue #772 で identity-service の認証ゲート(有効な JWT が無ければ 401)を
-   復元したため、次のユーザー作成要求には Bearer トークンが必要になった。シークレットは `.env` の
-   `KEYCLOAK_SERVICES_CLIENT_SECRET` から読む(未設定ならスクリプトは中止する)。
+0. E2E 専用クライアント `letsblog-e2e` を用意し、その password グラントで **実在する admin
+   ユーザー** のアクセストークンを取得する。issue #772 で認証ゲート(有効な JWT が無ければ 401)が、
+   issue #796 で `POST /api/users` の admin 必須が入ったため、ユーザー作成には管理者のトークンが要る。
+   取得後、`GET /api/users`(admin 限定)で実際に管理者操作ができることを先に確認し、
+   できなければその場で中止する(後続が 403 で落ちた理由を追いにくくしないため)。
 1. `POST https://localhost/api/users`(gateway → identity-service)でユーザーを作成する。
    identity-service が **Keycloak 側のユーザー** と **ローカル DB の `lets_blog.users`
    (`keycloak_sub` 付き)** の両方を作る。両方揃っていないと admin 操作は 403 になる
    (`CurrentActorService` が JWT の `sub` からローカル User を引くため)。
 2. Keycloak Admin CLI でパスワードを設定する(`temporary=false`)。
 3. admin アカウントに realm ロール `admin` を付与する(JWT の `realm_access.roles` に載る)。
-4. E2E 専用クライアント `letsblog-e2e` を作成する(public / direct access grant 可)。
+4. (手順 0 で作成済み)E2E 専用クライアント `letsblog-e2e`(public / direct access grant 可)。
    `main-scenario.spec.ts` が API を直接叩くときのトークン発行に使う(§7 参照)。
    `keycloak/realm-export.json` にも同じ定義があるが、Keycloak は realm export を
    **初回起動時にしか読まない** ため、既に起動済みの環境ではこのスクリプトで作る必要がある。
