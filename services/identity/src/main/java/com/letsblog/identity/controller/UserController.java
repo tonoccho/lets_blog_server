@@ -61,32 +61,57 @@ public class UserController {
         return userService.list();
     }
 
+    /**
+     * {@code UserCreateRequest}が{@code role}を受け取るため、認可が無いと任意のクライアントが
+     * {@code role=admin}のアカウントを作れてしまう(権限昇格)。#653で{@code list()}に
+     * 認可を入れた際に書き込み系が取り残されていた(issue #796)。
+     */
     @Operation(summary = "ユーザーを新規作成", description = "新しいユーザーアカウントを作成します")
     @ApiResponse(responseCode = "201", description = "ユーザーが作成されました")
     @ApiResponse(responseCode = "400", description = "リクエストボディが不正")
     @ApiResponse(responseCode = "401", description = "認証ヘッダが無効")
+    @ApiResponse(responseCode = "403", description = "admin権限がありません")
     @PostMapping
     public ResponseEntity<UserResponse> create(@Valid @RequestBody UserCreateRequest request) {
+        adminAuthorizationService.requireAdmin();
         return ResponseEntity.status(HttpStatus.CREATED).body(userService.create(request));
     }
 
-    @Operation(summary = "ユーザー情報を更新", description = "指定されたユーザーの情報を部分更新します")
+    /**
+     * {@code requireSelfOrAdmin}ではなく{@code requireAdmin}である理由(issue #796):
+     * {@code UserUpdateRequest}が扱うのは{@code role}と{@code password}、すなわち
+     * <b>管理者が管理する項目</b>であって本人が自由に変えてよい項目ではない。本人に許すと
+     * 自分の{@code role}をadminへ書き換えられ、権限昇格そのものになる。
+     * 本人が変更してよいプロフィール項目は{@code PUT /api/users/{id}}
+     * ({@link #updateProfile}、{@code requireSelfOrAdmin})、個人設定は
+     * {@code PATCH /api/identity/me/preferences}が担当する。
+     */
+    @Operation(summary = "ユーザー情報を更新", description = "指定されたユーザーのrole/passwordを更新します(admin限定)")
     @ApiResponse(responseCode = "200", description = "ユーザーが更新されました")
     @ApiResponse(responseCode = "401", description = "認証ヘッダが無効")
+    @ApiResponse(responseCode = "403", description = "admin権限がありません")
     @ApiResponse(responseCode = "404", description = "ユーザーが見つかりません")
     @PatchMapping("/{id}")
     public UserResponse update(
             @Parameter(description = "ユーザーID") @PathVariable Long id,
             @RequestBody UserUpdateRequest request) {
+        adminAuthorizationService.requireAdmin();
         return userService.update(id, request);
     }
 
-    @Operation(summary = "ユーザーを削除", description = "指定されたユーザーを削除します")
+    /**
+     * 無効化({@link #deactivate})がadmin限定なのに、より破壊的な削除に認可が無い非対称を解消する
+     * (issue #796)。あわせて自己削除も禁止する。Web側の{@code deleteUserAction}にも同じガードが
+     * あるが、gatewayは認可判定を行わない(ADR-0008)ためクライアント側の防御だけでは不十分。
+     */
+    @Operation(summary = "ユーザーを削除", description = "指定されたユーザーを削除します(admin限定。自分自身は削除不可)")
     @ApiResponse(responseCode = "204", description = "ユーザーが削除されました")
     @ApiResponse(responseCode = "401", description = "認証ヘッダが無効")
+    @ApiResponse(responseCode = "403", description = "admin権限が無い、または自分自身を削除しようとした")
     @ApiResponse(responseCode = "404", description = "ユーザーが見つかりません")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@Parameter(description = "ユーザーID") @PathVariable Long id) {
+        adminAuthorizationService.requireAdminAndNotSelf(id);
         userService.delete(id);
         return ResponseEntity.noContent().build();
     }

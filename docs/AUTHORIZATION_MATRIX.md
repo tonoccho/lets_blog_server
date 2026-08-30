@@ -56,6 +56,26 @@ identity-service / log-writer が従来から行っていた、各コントロ�
 | `web/src/lib/errorLogger.ts`(ブラウザから直接) | `POST /api/logs/errors` | legacy-api 時代も401だったため後退ではない。web側でBearerを付ける経路へ移す是正は **#791**。log-writerの`PUBLIC_PATHS`には入れない(未認証の書き込み経路を残さないため) |
 | `scripts/provision-e2e-keycloak-users.sh` | `POST /api/users` | #772 で同スクリプトを修正し、`letsblog-services`のClient Credentialsでトークンを取得してから呼ぶようにした |
 
+#### identity-service の `/api/users` の認可(#796 適用後)
+
+認証ゲート(#772)は「有効なJWTが無ければ401」までしか担わない。その先の**認可**は
+`AdminAuthorizationService` によるコントローラ層の手続き的チェックが担う。
+
+| エンドポイント | 認可 | 備考 |
+|---|---|---|
+| `GET /api/users` | `requireAdmin()` | #653 で追加 |
+| `POST /api/users` | `requireAdmin()` | **#796 で追加**。`UserCreateRequest` が `role` を受け取るため、認可が無いと `role=admin` のアカウントを誰でも作れた(権限昇格) |
+| `PATCH /api/users/{id}` | `requireAdmin()` | **#796 で追加**。扱うのは `role` / `password` で管理者が管理する項目。本人に許すと自分の `role` を admin へ書き換えられる |
+| `DELETE /api/users/{id}` | `requireAdminAndNotSelf(id)` | **#796 で追加**。無効化が admin 限定なのに削除に認可が無い非対称を解消。あわせて自己削除も禁止(最後の admin が自分を消して誰も管理できなくなるのを防ぐ) |
+| `POST /api/users/{id}/deactivate`・`/reactivate` | `requireAdmin()` | 従来どおり |
+| `POST /api/users/migrate-to-keycloak`・`/reconcile-keycloak` | `requireAdmin()` | 従来どおり |
+| `GET /api/users/{id}`・`PUT /api/users/{id}`・`PATCH /{id}/preferences`・`PUT /{id}/github-token` | `requireSelfOrAdmin(id)` | 本人が変更してよいプロフィール項目。個人設定は `PATCH /api/identity/me/preferences`(#784)も使える |
+| `GET /api/identity/me`・`/me/permissions`・`PATCH /me/preferences` | 自ユーザー限定(JWTの `sub` から解決) | クライアントから識別子を受け取らないため、ID の取り違えが構造的に起きない(#784) |
+
+Web 管理画面は `requireAdminSession()` で守られているが、gateway は認可判定を行わない
+(ADR-0008)ため、アクセストークンを持つクライアントは API を直接叩ける。**クライアント側の
+防御だけでは不十分**であり、サーバー側の認可が一次的な防御である。
+
 ---
 
 ## legacy-api のエンドポイント別マトリクス
