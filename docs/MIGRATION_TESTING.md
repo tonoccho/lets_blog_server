@@ -1,5 +1,16 @@
 # Database Migration Testing Guide
 
+## サービス別スキーマ分離への移行(#570)について
+
+[ADR-0004](adr/0004-schema-per-service.md) により、`api`(現 `services/legacy-api`)が
+単独で持っていたスキーマは、サービスごとに分離される方針になった。新しいサービス
+(project-service, content-service 等)のFlyway設定・スキーマ命名規約・既存データの
+移行手順・移行検証手順は [docs/SERVICE_SCHEMA_MIGRATION.md](SERVICE_SCHEMA_MIGRATION.md)
+を参照。
+
+以下、このドキュメントの本体は `services/legacy-api` が現在も所有する既存のV1〜V63
+マイグレーション(移行方針により再配置しない)に関する説明であり、引き続き有効。
+
 ## Overview
 
 This document describes the database migration testing strategy for Let's Blog. All Flyway database migrations are automatically tested to ensure:
@@ -14,7 +25,7 @@ This document describes the database migration testing strategy for Let's Blog. 
 
 All Flyway migrations are located in:
 ```
-api/src/main/resources/db/migration/
+services/legacy-api/src/main/resources/db/migration/
 ```
 
 Migrations follow the Flyway naming convention:
@@ -25,7 +36,7 @@ Migrations follow the Flyway naming convention:
 
 ### Test Classes
 
-The following test classes are provided in `api/src/test/java/com/letsblog/api/migration/`:
+The following test classes are provided in `services/legacy-api/src/test/java/com/letsblog/api/migration/`:
 
 1. **MigrationIdempotencyTest**
    - Tests that migrations can be applied successfully
@@ -57,14 +68,14 @@ mysql -u root -p -e "FLUSH PRIVILEGES;"
 #### Run Tests
 
 ```bash
-cd api
+cd services/legacy-api
 ./gradlew test --tests "com.letsblog.api.migration.*"
 ```
 
 Or run specific test class:
 
 ```bash
-cd api
+cd services/legacy-api
 ./gradlew test --tests "com.letsblog.api.migration.MigrationIdempotencyTest"
 ```
 
@@ -109,7 +120,7 @@ The `MigrationIdempotencyTest` class verifies:
 
 ## Flyway Configuration
 
-Flyway is configured in `api/src/main/resources/application.yml`:
+Flyway is configured in `services/legacy-api/src/main/resources/application.yml`:
 
 ```yaml
 spring:
@@ -148,7 +159,7 @@ spring:
 
 ### Process
 
-1. Create a new SQL file in `api/src/main/resources/db/migration/`
+1. Create a new SQL file in `services/legacy-api/src/main/resources/db/migration/`
 2. Follow naming: `V{NextNumber}__{Description}.sql`
 3. Write idempotent SQL
 4. Run tests locally: `./gradlew test --tests "com.letsblog.api.migration.*"`
@@ -209,9 +220,9 @@ UPDATE affected_table SET column = corrected_value WHERE condition;
 ## Related Files
 
 - `.github/workflows/migration-test.yml` - CI/CD workflow
-- `api/src/main/resources/application.yml` - Flyway configuration
-- `api/src/test/resources/application-test.yml` - Test configuration
-- `api/src/main/resources/db/migration/` - Migration files
+- `services/legacy-api/src/main/resources/application.yml` - Flyway configuration
+- `services/legacy-api/src/test/resources/application-test.yml` - Test configuration
+- `services/legacy-api/src/main/resources/db/migration/` - Migration files
 
 ## Questions or Issues?
 

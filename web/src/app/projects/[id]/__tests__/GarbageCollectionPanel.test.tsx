@@ -55,6 +55,18 @@ function getSelect(labelText: string) {
   return within(label).getByRole('combobox') as HTMLSelectElement
 }
 
+// テキストが複数のDOMノードに分割される要素をマッチさせるヘルパー。
+// https://testing-library.com/docs/guide-disappearance/#tips
+function getByTextAcrossNodes(text: string) {
+  return screen.getByText((_, element) => {
+    if (!element) return false
+    const hasText = (node: Element) => node.textContent === text
+    const nodeHasText = hasText(element)
+    const childrenDontHaveText = Array.from(element.children).every((child) => !hasText(child))
+    return nodeHasText && childrenDontHaveText
+  })
+}
+
 const SCAN_RESPONSE = {
   environment: 'local' as const,
   items: [
@@ -107,7 +119,7 @@ describe('GarbageCollectionPanel スキャン', () => {
 
     expect(actions.fetchMediaGarbageScanAction).toHaveBeenCalledWith(1, 'local')
     expect(screen.getByText('b')).toBeInTheDocument()
-    expect(screen.getByText(/全5件中、参照あり3件・未参照2件/)).toBeInTheDocument()
+    expect(getByTextAcrossNodes('全5件中、参照あり3件・ 未参照2件')).toBeInTheDocument()
   })
 
   it('スキャン失敗時はエラーメッセージを表示する', async () => {

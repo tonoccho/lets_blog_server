@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as api from './apiClient';
-import { getActor, getConfiguredAiProvider, getServerUrl, requireApiKey } from './config';
+import { getActor, getConfiguredAiProvider, requireAccessToken } from './config';
 import { SectionContext } from './headingContext';
 import { showSingletonPanel, WebviewPanelBase } from './webviewPanelBase';
 import {
@@ -70,10 +70,10 @@ export class SectionGenPanel extends WebviewPanelBase<SectionGenInboundMessage, 
   private async _handleGenerate(
     message: Extract<SectionGenInboundMessage, { command: 'generate' }>
   ): Promise<void> {
-    const apiKey = await requireApiKey(this.context);
+    const apiKey = await requireAccessToken(this.context);
     const actor = await getActor(this.context);
     const result = await this.runCancellable((signal) =>
-      api.generateSection(getServerUrl(), apiKey, actor, message.params, signal)
+      api.generateSection(apiKey, actor, message.params, signal)
     );
     this.postMessage('generated', result);
   }

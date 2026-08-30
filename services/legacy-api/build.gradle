@@ -1,0 +1,100 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.1.0'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'org.owasp.dependencycheck' version '13.0.0'
+    id 'me.champeau.jmh' version '0.7.3'
+    id 'jacoco'
+    id 'checkstyle'
+}
+
+dependencies {
+    implementation project(':libs:lbs-common')
+
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-restclient'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-amqp'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-mail'
+    implementation 'org.springframework.boot:spring-boot-starter-aspectj'
+    implementation 'org.thymeleaf:thymeleaf'
+
+    implementation 'com.mysql:mysql-connector-j'
+    implementation 'org.springframework.boot:spring-boot-starter-flyway'
+    implementation 'org.flywaydb:flyway-mysql'
+
+    implementation 'org.springframework.security:spring-security-crypto'
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0'
+
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-micrometer-metrics'
+    implementation 'org.springframework.boot:spring-boot-jackson2'
+    implementation 'net.logstash.logback:logstash-logback-encoder:7.4'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-webmvc-test'
+    testImplementation 'org.springframework.boot:spring-boot-jdbc-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+    // JWTを必要とするテストの共通フィクスチャ(#587)。実DBはTestcontainersではなく
+    // application-test.yml経由の実MySQLを使う(docs/adr/0006-per-service-test-strategy.md参照)。
+    testImplementation testFixtures(project(':libs:lbs-common'))
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    // JMH for benchmarking
+    testImplementation 'org.openjdk.jmh:jmh-core:1.37'
+    testAnnotationProcessor 'org.openjdk.jmh:jmh-generator-annprocess:1.37'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    finalizedBy jacocoTestReport
+}
+
+jacocoTestReport {
+    dependsOn test
+    afterEvaluate {
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: [
+                '**/config/**',
+                '**/entity/**',
+                '**/dto/**',
+                '**/exception/**',
+                '**/*$*',
+            ])
+        }))
+    }
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+    }
+}
+
+task coverageCheck {
+    dependsOn jacocoTestReport
+    doLast {
+        def xmlFile = file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
+        if (xmlFile.exists()) {
+            println "✓ JaCoCo coverage report generated at: ${xmlFile}"
+        }
+    }
+}
+
+jmh {
+    jmhVersion = '1.37'
+    warmupIterations = 3
+    iterations = 5
+    timeOnIteration = '1s'
+    timeUnit = 'ms'
+    benchmarkMode = ['avgt']
+    fork = 1
+    threads = 1
+    verbosity = 'EXTRA'
+    resultFormat = 'JSON'
+}

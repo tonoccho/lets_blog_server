@@ -118,7 +118,7 @@ describe('SiteListTable', () => {
         timezone="Asia/Tokyo"
       />
     )
-    expect(screen.getByText(/2件中2件を表示/)).toBeInTheDocument()
+    expect(screen.getByText(/2件を表示.*全2件中/)).toBeInTheDocument()
   })
 
   it('renders admin columns when isAdmin is true', () => {

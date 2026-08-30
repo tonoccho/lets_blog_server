@@ -21,11 +21,10 @@ export default async function OperationLogsPage({
   const page = Number(params.page ?? "0") || 0;
   const type = (params.type || undefined) as UnifiedLogSourceType | undefined;
   const q = params.q || undefined;
-  const actor = { id: Number(session.user.id), role: session.user.role };
   const timezone = await getViewerTimeZone();
   const isAdmin = session.user.role === "admin";
 
-  const result = await listUnifiedOperationLogs({ type, q, page, size: PAGE_SIZE }, actor).catch(() => ({
+  const result = await listUnifiedOperationLogs({ type, q, page, size: PAGE_SIZE }).catch(() => ({
     content: [],
     totalElements: 0,
     totalPages: 0,

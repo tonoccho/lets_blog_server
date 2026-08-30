@@ -10,16 +10,33 @@
 
 設定 `letsBlog.serverUrl`(既定: `https://localhost`)。末尾のスラッシュは除去されます。
 
+下表のエンドポイントはすべて **APIゲートウェイ(`services/gateway`)経由** で呼び出します(issue #585)。
+`letsBlog.serverUrl` はリバースプロキシ(nginx)の公開URLで、nginx の `location /api/` が
+`gateway:8080` へ中継します(`nginx/conf.d/default.conf`)。gateway はコンテナ外へポートを公開して
+いないため、拡張から見た「gatewayのベースURL」はこのリバースプロキシのURLと同一です。
+
+URL の組み立ては [`src/apiBaseUrl.ts`](src/apiBaseUrl.ts) の `gatewayUrl()` 1箇所に集約しており、
+`apiClient.ts` の各エンドポイント関数はベースURLを引数に取りません。どのパスがどのサービスへ
+振り分けられるかは `services/gateway/src/main/resources/application.yml` のルート表が決めます
+(未移行パスは同ファイルの `fallback-uri` で legacy-api へ到達します)。
+
+Keycloak(`/auth/realms/...`、`src/deviceAuth.ts`)と draw.io(`/drawio/`、
+`src/diagramEditorPanel.ts`)は gateway を経由しないため、`src/config.ts` の `getServerUrl()`
+(リバースプロキシの公開URL)を直接使います。
+
 ### 認証ヘッダ
 
 | ヘッダ | 内容 | 付与される呼び出し |
 | --- | --- | --- |
-| `X-API-Key` | SecretStorageに保管されたAPIキー | ログイン系以外のすべて |
-| `X-Actor-Id` | 操作の実行者のユーザーID | actorを渡した呼び出し |
-| `X-Actor-Role` | 実行者のロール | actorを渡した呼び出し |
+| `Authorization` | `Bearer <アクセストークン>`。SecretStorageに保管されたKeycloak発行のJWT | Keycloakのトークン/デバイス認可エンドポイント以外のすべて |
 
-`/api/auth/login` と `/api/auth/totp/verify` は、APIキーを取得する前に呼ぶため
-`X-API-Key` なしでの呼び出しがサーバー側で許可されています。
+issue #565(Device Authorization Grantへの移行)により、「誰であるか」の判定はサーバー側が
+アクセストークン(JWT)を検証して行うようになったため、従来の個別ヘッダによる自己申告
+(APIキー/実行者ID/実行者ロール)は廃止しました(サーバー側の対応する実装もissue #566で
+完全撤去済み)。アクセストークンの取得・自動更新は`src/config.ts`の`requireAccessToken`が担い、
+Device Authorization Grantそのもの(デバイス認可リクエスト・ポーリング・リフレッシュ)の実装は
+`src/deviceAuth.ts`にあります(Keycloakの`/protocol/openid-connect/auth/device` /
+`/protocol/openid-connect/token`を直接呼び出すため、上記のエンドポイント一覧には含まれません)。
 
 ### リトライ
 
@@ -31,16 +48,23 @@
 
 「キャッシュ」列に記載のあるものは5分間キャッシュされます。
 `assignIssue` / `acceptArticleStructure` / `deleteGeneratedImage` の直後は該当プロジェクトのキャッシュを、
-ログイン・APIキー変更時は全キャッシュを破棄します。
+ログイン時は全キャッシュを破棄します。
 
 ---
 
 ## 認証
 
+Device Authorization Grantへの移行(issue #565)により、ログインは仲介APIサーバーではなく
+Keycloakへ直接行うようになりました(`src/deviceAuth.ts`、上記「認証ヘッダ」参照)。
+
+以前使っていたメールアドレス/パスワードログイン用のエンドポイントは、`src/apiClient.ts`に
+関数(`login` / `verifyTotpLogin`)としては残していますが、**拡張からは呼び出していません**
+(未使用のエクスポート。撤去はissue #566のスコープ)。
+
 | メソッド | パス | 関数 | リトライ | 説明 |
 | --- | --- | --- | --- | --- |
-| POST | `/api/auth/login` | `login` | - | メールアドレス/パスワードでログイン。2FA未設定ならこの時点でAPIキーが発行される。 |
-| POST | `/api/auth/totp/verify` | `verifyTotpLogin` | - | `login` が `twoFactorRequired=true` を返した場合にTOTPコードを検証し、APIキーを取得する。 |
+| POST | `/api/auth/login` | `login`(未使用) | - | メールアドレス/パスワードでログイン。2FA未設定ならこの時点でAPIキーが発行される。 |
+| POST | `/api/auth/totp/verify` | `verifyTotpLogin`(未使用) | - | `login` が `twoFactorRequired=true` を返した場合にTOTPコードを検証し、APIキーを取得する。 |
 
 **レスポンス** (`LoginResult`): `user` / `twoFactorRequired` / `apiKey`
 
@@ -143,8 +167,30 @@
 | --- | --- |
 | 2xx | Zodスキーマで検証。不一致なら `ResponseValidationError` |
 | 400 / 403 / 404 / 409 / 413 | `ApiError`。リトライせず、ステータス別の対応策を添えて通知 |
-| 401 | `ApiError`。再ログイン/APIキー再設定を促す |
-| 429 / 5xx | `ApiError`。冪等な呼び出しのみリトライ |
-| 接続不可 | `NetworkError`。serverUrl・サーバー状態・証明書設定の確認を促す |
-| タイムアウト | `TimeoutError`。`letsBlog.requestTimeoutMs` の調整を促す |
+| 401 | `ApiError`。通常はアクセストークンの自動リフレッシュで防げるはずのため、リフレッシュも失敗した場合に発生する。再ログインを促す |
+| 429 / 5xx | `ApiError`。冪等な呼び出しのみリトライ。5xxは**担当サービス名・コンテナ名・相関ID**を添えて通知 |
+| 接続不可 | `NetworkError`。下流サービスではなく到達経路(リバースプロキシ/gateway)の問題として、serverUrl・サーバー状態・証明書設定の確認を促す |
+| タイムアウト | `TimeoutError`。**担当サービス名**と `letsBlog.requestTimeoutMs` の調整を促す |
 | 利用者による中断 | `CancelledError`。失敗として扱わない |
+
+---
+
+## 下流サービスの切り分け(issue #585)
+
+サービス分割(Epic #551)後、5xx やタイムアウトは「APIサーバーが落ちている」ではなく
+「特定の下流サービスが落ちている」ことがほとんどです。gateway は応答本文に転送先サービス名を
+載せない(下流の応答をそのまま中継し、タイムアウト時は本文の無い 504 を返す)ため、拡張側で
+リクエストパスから担当サービスを逆引きして通知に含めます。
+
+対応表は [`src/downstreamServices.ts`](src/downstreamServices.ts) にあり、gateway のルート表のうち
+**拡張が実際に呼ぶパスに関係する部分だけ**を、同じ「先勝ち」順序で写したものです。
+どのルートにもマッチしないパスは gateway の `fallback-uri` と同じく legacy-api として扱います。
+
+通知には次を含めます。
+
+- 担当サービスの日本語名(例: 「AI生成サービス」)
+- コンテナ名(例: `lbs-ai`)と `docker logs lbs-ai` の案内
+- gateway が付与した相関ID(`X-Correlation-Id`、issue #582)。全サービスのログをこのIDで追えます
+
+接続そのものが確立できなかった場合(`NetworkError`)は、まだどの下流サービスにも届いていないため
+特定のサービスを名指しせず、リバースプロキシ/gateway への到達性の問題として案内します。

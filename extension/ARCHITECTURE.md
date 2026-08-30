@@ -44,12 +44,20 @@ articles/
                 │                 └────────────────────────────┘
       ┌─────────▼───────────────────────────────────────────┐
       │ apiClient.ts   全API呼び出しの単一窓口                 │
+      │   apiBaseUrl.ts (gateway宛URLの組み立て)              │
       │   schemas.ts (Zod検証) / cache.ts (TTL付きLRU)        │
       └─────────┬───────────────────────────────────────────┘
       ┌─────────▼───────────────────────────────────────────┐
       │ httpClient.ts  ネイティブfetch / node:https           │
       │ errorHandler.ts (例外型・リトライ) / logger.ts        │
+      │   downstreamServices.ts (パス→担当サービスの逆引き)    │
       └──────────────────────────────────────────────────────┘
+
+config.ts(資格情報・設定値)は deviceAuth.ts 経由でKeycloakのデバイス認可/トークン
+エンドポイントを呼び、httpClient.ts を共有する(apiClient.ts とは独立した経路)。
+
+apiClient.ts が呼ぶ `/api/**` は例外なく APIゲートウェイ(services/gateway)経由で、
+宛先URLの組み立ては apiBaseUrl.ts の1箇所に集約している(issue #585)。
 ```
 
 **依存の向きは上から下の一方向**です。下位モジュール(`httpClient` / `logger` / `frontMatter` など)は
@@ -70,7 +78,8 @@ articles/
 | ファイル | 責任 |
 | --- | --- |
 | `apiClient.ts` | **全API呼び出しの単一窓口**。エンドポイントごとの関数を公開する。タイムアウト・リトライ・ログ・レスポンス検証・キャッシュをここで一元化する。 |
-| `httpClient.ts` | HTTPトランスポート。既定はNode 18以降のネイティブ`fetch`。自己署名証明書を許容する設定が有効なHTTPS接続に限り`node:https`へ切り替える(ネイティブfetchはリクエスト単位でTLS検証を緩められないため)。 |
+| `apiBaseUrl.ts` | `/api/**` を呼ぶ際のベースURLを組み立てる**唯一の場所**(issue #585)。呼び先は常にAPIゲートウェイ(実体はリバースプロキシの`location /api/`経由)。Keycloak・draw.ioは対象外で`config.ts`の`getServerUrl()`を使う。 |
+| `httpClient.ts` | HTTPトランスポート。既定はNode 18以降のネイティブ`fetch`。自己署名証明書を許容する設定が有効なHTTPS接続に限り`node:https`へ切り替える(ネイティブfetchはリクエスト単位でTLS検証を緩められないため)。応答ヘッダの読み取り(`header()`)はgatewayの相関ID取得に使う。 |
 | `multipart.ts` | `multipart/form-data`ボディの組み立て。ストリームではなく`Buffer`を返すため、両トランスポートで同じボディを使える。 |
 | `schemas.ts` | APIレスポンスのZod検証スキーマ。**レスポンス型はここから`z.infer`で導出**され、スキーマと型定義が乖離しない。 |
 | `cache.ts` | TTL付きLRUキャッシュ。参照系レスポンスの再取得を抑える。同一キーへの並行取得は先行のPromiseを共有する。 |
@@ -79,9 +88,12 @@ articles/
 
 | ファイル | 責任 |
 | --- | --- |
-| `errorHandler.ts` | 例外型(`ApiError` / `NetworkError` / `TimeoutError` / `ResponseValidationError` / `CancelledError`)の定義、原因と対応策を含むメッセージへの整形、指数バックオフによるリトライ。 |
+| `errorHandler.ts` | 例外型(`ApiError` / `NetworkError` / `TimeoutError` / `ResponseValidationError` / `CancelledError`)の定義、原因と対応策を含むメッセージへの整形、指数バックオフによるリトライ。5xx・タイムアウトでは`downstreamServices.ts`で担当サービスを逆引きして通知に含める(issue #585)。 |
+| `downstreamServices.ts` | リクエストパスから、gatewayが転送する下流サービス(コンテナ名・日本語表示名)を逆引きする純粋関数(issue #585)。gatewayのルート表のうち拡張が呼ぶ部分だけを同じ「先勝ち」順序で写している。他の拡張内モジュールへ依存しない。 |
 | `logger.ts` | 構造化ログ。出力パネル「Let's Blog」へ書き出す。認証情報らしいキーの値はマスクする。 |
-| `config.ts` | 設定値と資格情報の読み書き。**SecretStorageに触れるのはこのファイルだけ**。 |
+| `config.ts` | 設定値と資格情報の読み書き。**SecretStorageに触れるのはこのファイルだけ**。アクセストークンの期限管理・自動リフレッシュ(`requireAccessToken`)もここに置く。 |
+| `deviceAuth.ts` | Device Authorization Grant(issue #565)のプロトコル部分。デバイス認可/トークンエンドポイントへのリクエストと、応答の解釈(成功/pending/slow_down/denied/expired)。`config.ts`から呼ばれる。 |
+| `jwtClaims.ts` | アクセストークン(JWT)のペイロードを署名検証なしでデコードし、表示用のemail/roleを取り出す純粋関数(issue #565)。 |
 
 ### 3.4 ドメインロジック(vscode APIに依存しない純粋関数)
 
@@ -193,17 +205,25 @@ front matterの`wp_post_ids`は**サイトキーごとに投稿IDを持ちます
 
 新しいエンドポイントを呼ぶときの型です。
 
+> **issue #565での変更**: `buildHeaders`は`Authorization: Bearer <apiKey引数>`を送るようになり、
+> `actor`引数はヘッダ組み立てには使いません(サーバーがJWTから実行者を判定するため)。
+> 以下のコード例にある`apiKey`という変数名/引数名は歴史的な名残で、実体はKeycloak発行の
+> アクセストークンです(全呼び出し箇所の一括リネームは#566のスコープとして見送っています)。
+> `actor`引数自体は既存の呼び出し元シグネチャを変えない目的で残していますが、値としては未使用です。
+
 ### 参照系(キャッシュあり・リトライあり)
+
+> **issue #585での変更**: ベースURLは `apiBaseUrl.ts` の `gatewayUrl()` が組み立てる gateway 宛の
+> URLに固定したため、各エンドポイント関数は `serverUrl` 引数を取りません(呼び出し元が別のベースURLを
+> 渡す余地自体を無くしています)。
 
 ```ts
 export async function listSites(
-  serverUrl: string,
   apiKey: string,
   actor?: Actor
 ): Promise<SiteSummary[]> {
   return cachedRequestJson(
     'sites',                                  // キャッシュキー(パラメータを含めて一意にする)
-    serverUrl,
     '/api/sites',
     { label: 'listSites', headers: buildHeaders(apiKey, actor) },
     schemas.SiteSummaryListSchema             // レスポンス検証スキーマ(必須)
@@ -216,7 +236,6 @@ export async function listSites(
 ```ts
 export async function assignIssue(/* ... */): Promise<AssignIssueResult> {
   const result = await requestJson(
-    serverUrl,
     `/api/projects/${projectId}/article-plan/issues/${issueNumber}/assign`,
     {
       label: 'assignIssue',
@@ -240,7 +259,7 @@ export async function generateSection(
   /* ... */,
   signal?: AbortSignal
 ): Promise<AiSectionResult> {
-  return requestJson(serverUrl, '/api/ai/section', {
+  return requestJson('/api/ai/section', {
     label: 'generateSection',
     signal,
     method: 'POST',
@@ -252,7 +271,7 @@ export async function generateSection(
 
 // パネル側
 const result = await this.runCancellable((signal) =>
-  api.generateSection(getServerUrl(), apiKey, actor, message.params, signal)
+  api.generateSection(apiKey, actor, message.params, signal)
 );
 ```
 
@@ -260,7 +279,7 @@ const result = await this.runCancellable((signal) =>
 
 ```ts
 try {
-  const apiKey = await requireApiKey(context);   // 未設定なら対応方法付きの例外
+  const apiKey = await requireAccessToken(context); // 未ログイン/リフレッシュ失敗なら対応方法付きの例外
   const actor = await getActor(context);
   const sites = await api.listSites(getServerUrl(), apiKey, actor);
   // ...
@@ -289,7 +308,7 @@ npm run compile       # 型チェック + ビルド
 
 | 設定 | 既定値 | 用途 |
 | --- | --- | --- |
-| `letsBlog.serverUrl` | `https://localhost` | 仲介APIサーバーのベースURL |
+| `letsBlog.serverUrl` | `https://localhost` | リバースプロキシ(nginx)の公開URL。`/api/**` はここからAPIゲートウェイへ中継される(issue #585) |
 | `letsBlog.allowInsecureTls` | `false` | 自己署名証明書を許容する(有効時は中間者攻撃を検出できません) |
 | `letsBlog.debugMode` | `false` | デバッグログを出力パネルへ出す |
 | `letsBlog.requestTimeoutMs` | `120000` | APIリクエストのタイムアウト |

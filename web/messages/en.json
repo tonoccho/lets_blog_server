@@ -21,6 +21,7 @@
     "admin": "Admin"
   },
   "header": {
+    "admin": "Admin",
     "openAdminMenu": "Open admin menu",
     "openMenu": "Open menu",
     "closeMenu": "Close menu",

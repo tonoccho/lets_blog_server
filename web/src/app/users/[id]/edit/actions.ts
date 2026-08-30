@@ -3,14 +3,12 @@
 import { revalidatePath } from "next/cache";
 import {
   updateUserProfile,
-  updateUserPreferences,
-  disableTwoFactor,
-  setupTwoFactor,
-  verifyTwoFactorSetup,
+  updateMyPreferences,
   type CustomLink,
   type SocialLinks,
+  type UserProfile,
 } from "@/lib/apiClient";
-import { requireSession } from "@/lib/session";
+import { getViewerProfile, requireSession } from "@/lib/session";
 
 export interface UpdateProfileState {
   error?: string;
@@ -41,7 +39,10 @@ export async function updateUserProfileAction(
 ): Promise<UpdateProfileState> {
   const session = await requireSession();
 
-  const isSelf = session.user.id === String(userId);
+  // session.user.idはKeycloakのsub(UUID)であり、ローカルの数値ユーザーIDではない(issue #784)。
+  // 自分自身かの判定には、identity-serviceが自ユーザーとして返すローカルidを使う。
+  const viewer = await getViewerProfile();
+  const isSelf = viewer?.id === userId;
   if (!isSelf && session.user.role !== "admin") {
     return { error: "この操作を行う権限がありません。" };
   }
@@ -50,8 +51,6 @@ export async function updateUserProfileAction(
     const value = String(formData.get(name) ?? "").trim();
     return value === "" ? null : value;
   };
-
-  const actor = { id: Number(session.user.id), role: session.user.role };
 
   const customLinksJson = String(formData.get("customLinks") ?? "[]");
   let customLinks: CustomLink[];
@@ -81,8 +80,7 @@ export async function updateUserProfileAction(
         position: field("position"),
         socialLinks,
         customLinks,
-      },
-      actor
+      }
     );
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
@@ -102,9 +100,7 @@ export async function updatePreferencesAction(
   _prevState: UpdatePreferencesState,
   formData: FormData
 ): Promise<UpdatePreferencesState> {
-  const session = await requireSession();
-  const userId = Number(session.user.id);
-  const actor = { id: userId, role: session.user.role };
+  await requireSession();
 
   const locale = String(formData.get("locale") ?? "").trim();
   const timezone = String(formData.get("timezone") ?? "").trim();
@@ -113,68 +109,15 @@ export async function updatePreferencesAction(
     return { error: "言語とタイムゾーンを選択してください。" };
   }
 
+  // 自ユーザーの解決はidentity-service側が検証済みJWTのsubから行う(issue #784)。
+  // 以前はNumber(session.user.id)=NaNをパスへ埋め込んでおり、保存が常に失敗していた。
+  let updated: UserProfile;
   try {
-    await updateUserPreferences(userId, { locale, timezone }, actor);
+    updated = await updateMyPreferences({ locale, timezone });
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
 
-  revalidatePath(`/users/${userId}/edit`);
+  revalidatePath(`/users/${updated.id}/edit`);
   return { success: true };
-}
-
-export interface TwoFactorSetupState {
-  error?: string;
-  qrCodeDataUrl?: string;
-  backupCodes?: string[];
-}
-
-/** 2FA(TOTP)設定。/settings/security から移動(issue #189)。本人のみが対象。 */
-export async function startTwoFactorSetupAction(
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- useActionStateのシグネチャ上prevStateを受け取る必要がある
-  _prevState: TwoFactorSetupState
-): Promise<TwoFactorSetupState> {
-  const session = await requireSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-
-  try {
-    const result = await setupTwoFactor(actor);
-    return { qrCodeDataUrl: result.qrCodeDataUrl, backupCodes: result.backupCodes };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-export interface VerifyTwoFactorState {
-  error?: string;
-  success?: boolean;
-}
-
-export async function verifyTwoFactorSetupAction(
-  _prevState: VerifyTwoFactorState,
-  formData: FormData
-): Promise<VerifyTwoFactorState> {
-  const session = await requireSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-
-  const code = String(formData.get("code") ?? "").trim();
-  if (!code) {
-    return { error: "認証コードを入力してください。" };
-  }
-
-  try {
-    await verifyTwoFactorSetup(code, actor);
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
-  }
-
-  revalidatePath(`/users/${session.user.id}/edit`);
-  return { success: true };
-}
-
-export async function disableTwoFactorAction() {
-  const session = await requireSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-  await disableTwoFactor(actor);
-  revalidatePath(`/users/${session.user.id}/edit`);
 }

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { getApiKey, getActor, getProjectId, getServerUrl } from './config';
+import { getAccessToken, getActor, getProjectId } from './config';
 import * as api from './apiClient';
 import { detectFrontMatterCompletionContext, FrontMatterCompletionField } from './frontMatterCompletionLogic';
 import { logger } from './logger';
@@ -29,7 +29,7 @@ export class FrontMatterCompletionProvider implements vscode.CompletionItemProvi
       return undefined;
     }
 
-    const apiKey = await getApiKey(this.context);
+    const apiKey = await getAccessToken(this.context);
     if (!apiKey) {
       return undefined;
     }
@@ -60,10 +60,8 @@ export class FrontMatterCompletionProvider implements vscode.CompletionItemProvi
     field: FrontMatterCompletionField,
     apiKey: string
   ): Promise<{ value: string; detail?: string }[]> {
-    const serverUrl = getServerUrl();
-
     if (field === 'status') {
-      const statuses = await api.getPostStatuses(serverUrl, apiKey);
+      const statuses = await api.getPostStatuses(apiKey);
       return statuses.map((status) => ({ value: status.value, detail: status.label }));
     }
 
@@ -75,8 +73,8 @@ export class FrontMatterCompletionProvider implements vscode.CompletionItemProvi
 
     const values =
       field === 'categories'
-        ? await api.listExistingCategories(serverUrl, apiKey, actor, projectId)
-        : await api.listExistingTags(serverUrl, apiKey, actor, projectId);
+        ? await api.listExistingCategories(apiKey, actor, projectId)
+        : await api.listExistingTags(apiKey, actor, projectId);
     return values.map((value) => ({ value }));
   }
 }

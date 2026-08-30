@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as api from './apiClient';
-import { Actor, getActor, getProjectId, getServerUrl, requireApiKey } from './config';
+import { Actor, getActor, getProjectId, requireAccessToken } from './config';
 import { buildArticleFrontMatter } from './frontMatter';
 import { createArticleScaffold, openArticle, requireWorkspaceRoot } from './articleScaffold';
 import { messageOf } from './errorHandler';
@@ -61,13 +61,13 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
         'ユーザーまたはプロジェクトが未選択です。「Let\'s Blog: Login」「Let\'s Blog: Select Project」を先に実行してください。'
       );
     }
-    const apiKey = await requireApiKey(this.context);
+    const apiKey = await requireAccessToken(this.context);
     return { apiKey, actor, projectId };
   }
 
   private async _handleLoadIssues(): Promise<void> {
     const { apiKey, actor, projectId } = await this._requireContext();
-    const issues = await api.listUnassignedIssues(getServerUrl(), apiKey, actor, projectId);
+    const issues = await api.listUnassignedIssues(apiKey, actor, projectId);
     this.postMessage('issueList', { issues });
   }
 
@@ -80,7 +80,6 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
   ): Promise<void> {
     const { apiKey, actor, projectId } = await this._requireContext();
     const description = await api.getIssueDescription(
-      getServerUrl(),
       apiKey,
       actor,
       projectId,
@@ -98,7 +97,6 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
     const { apiKey, actor, projectId } = await this._requireContext();
     const response = await this.runCancellable((signal) =>
       api.postPlanChat(
-        getServerUrl(),
         apiKey,
         actor,
         projectId,
@@ -119,7 +117,7 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
   ): Promise<void> {
     const { apiKey, actor, projectId } = await this._requireContext();
     const suggestion = await this.runCancellable((signal) =>
-      api.suggestArticleStructure(getServerUrl(), apiKey, actor, projectId, message.history, signal)
+      api.suggestArticleStructure(apiKey, actor, projectId, message.history, signal)
     );
     this.postMessage('structureSuggestion', suggestion);
   }
@@ -129,7 +127,6 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
   ): Promise<void> {
     const { apiKey, actor, projectId } = await this._requireContext();
     const result = await api.acceptArticleStructure(
-      getServerUrl(),
       apiKey,
       actor,
       projectId,
@@ -141,7 +138,7 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
 
   private async _handleLoadCategories(): Promise<void> {
     const { apiKey, actor, projectId } = await this._requireContext();
-    const categories = await api.listExistingCategoriesWithParents(getServerUrl(), apiKey, actor, projectId);
+    const categories = await api.listExistingCategoriesWithParents(apiKey, actor, projectId);
     this.postMessage('categoryList', { categories });
   }
 
@@ -150,7 +147,7 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
   ): Promise<void> {
     const { apiKey, actor, projectId } = await this._requireContext();
     const suggestion = await this.runCancellable((signal) =>
-      api.suggestMetadata(getServerUrl(), apiKey, actor, projectId, message.history, signal)
+      api.suggestMetadata(apiKey, actor, projectId, message.history, signal)
     );
     this.postMessage('metadataSuggestion', suggestion);
   }
@@ -161,7 +158,7 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
     const { apiKey, actor, projectId } = await this._requireContext();
     const { issue, metadata } = message;
 
-    const description = await api.getIssueDescription(getServerUrl(), apiKey, actor, projectId, issue.number);
+    const description = await api.getIssueDescription(apiKey, actor, projectId, issue.number);
 
     const scaffold = await createArticleScaffold({
       workspaceRoot: requireWorkspaceRoot(),
@@ -181,7 +178,7 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
     this._lastArticlePath = scaffold.articlePath;
 
     try {
-      await api.assignIssue(getServerUrl(), apiKey, actor, projectId, issue.number);
+      await api.assignIssue(apiKey, actor, projectId, issue.number);
     } catch (error) {
       this.postMessage('error', {
         error: `記事ファイルは生成されましたが、issueの割り当てに失敗しました: ${messageOf(error)}`,

@@ -1,0 +1,68 @@
+// analytics-service (#578): Google Analytics/AdSense連携(OAuth資格情報の保管、GA4 Data API/AdSense
+// Management APIレポート取得)をlegacy-apiから抽出した。OAuthの資格情報を扱うため、他ドメインから
+// 分離して保管する。GA/AdSense連携は外部API依存で他ドメインとの結合が最も薄いドメインでもある。
+// スキーマ分離(lbs_analytics)により他サービスから独立する。
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.1.0'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'jacoco'
+    id 'checkstyle'
+}
+
+dependencies {
+    implementation project(':libs:lbs-common')
+
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-restclient'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    // project.deletedドメインイベント購読(letsblog.events、issue #580)。analytics_credentialsの
+    // クリーンアップに使う。
+    implementation 'org.springframework.boot:spring-boot-starter-amqp'
+    // リトライ→DLQ(spring.rabbitmq.listener.simple.retry)。Spring BootのBOMがバージョンを
+    // 管理しないため明示指定する(content-serviceと同じ)。
+    implementation 'org.springframework.retry:spring-retry:2.0.11'
+    // GoogleAnalyticsClient/AdSenseClient/IdentityClient/LegacyApiBridgeClient等がcom.fasterxml.
+    // jackson.databind.ObjectMapper/JsonNodeを直接使うため明示的に追加する(Boot 4の既定JSON
+    // コンバータ・既定ObjectMapperはJackson3系(tools.jackson)に変わったため、com.fasterxml.jackson.
+    // databind.ObjectMapperのBean定義には明示的にこのモジュールが必要。legacy-api/ai-serviceの
+    // build.gradleと同じ構成)。
+    implementation 'org.springframework.boot:spring-boot-jackson2'
+
+    // analytics_credentialsのスキーマ所有権(#578)。
+    implementation 'org.springframework.boot:spring-boot-starter-flyway'
+    implementation 'org.flywaydb:flyway-mysql'
+
+    // analytics_credentials.ga_service_account_json_encrypted/adsense_refresh_token_encrypted/
+    // adsense_oauth_client_secret_encryptedの暗号化(CredentialCipher、lbs-common)。
+    implementation 'org.springframework.security:spring-security-crypto'
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+
+    implementation 'com.mysql:mysql-connector-j'
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-webmvc-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+    testImplementation testFixtures(project(':libs:lbs-common'))
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    finalizedBy jacocoTestReport
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+    }
+}

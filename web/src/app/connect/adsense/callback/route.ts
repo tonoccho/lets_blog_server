@@ -6,12 +6,12 @@ const STATE_COOKIE = "adsense_oauth_state";
 
 /**
  * Google AdSense連携(issue #387)のOAuthコールバック着地点。stateがstart側で発行したcookieの値と
- * 一致することを確認してからSpring Boot APIへ認可コードを渡す(サーバー間通信、X-API-Key認証)。
- * 詳細は/connect/adsense/start/route.tsのコメント参照。
+ * 一致することを確認してからSpring Boot APIへ認可コードを渡す(サーバー間通信、Authorization: Bearer
+ * トークン認証。issue #566で旧ヘッダベースのAPIキー認証から移行済み)。詳細は
+ * /connect/adsense/start/route.tsのコメント参照。
  */
 export async function GET(request: NextRequest) {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const code = request.nextUrl.searchParams.get("code");
   const state = request.nextUrl.searchParams.get("state");
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const redirectUri = `${process.env.NEXTAUTH_URL}/connect/adsense/callback`;
-    await completeProjectAdSenseOAuth(projectId, { code, redirectUri }, actor);
+    await completeProjectAdSenseOAuth(projectId, { code, redirectUri });
   } catch (err) {
     return redirectToSettings("error", err instanceof Error ? err.message : String(err));
   }

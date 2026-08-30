@@ -1,18 +1,20 @@
 import Link from "next/link";
 import { listUsers, listProjects, listAllProjectUsers } from "@/lib/apiClient";
-import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
+import { requireAdminSession, getViewerTimeZone, getViewerProfile } from "@/lib/session";
 import { formatDateTime } from "@/lib/formatDate";
 import { UserForm } from "./UserForm";
 import { DeleteUserButton } from "./DeleteUserButton";
 
 export default async function UsersPage() {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
-  const [users, projects, projectUsers, timezone] = await Promise.all([
+  await requireAdminSession();
+  // viewerはログイン中ユーザー自身のローカルプロフィール(issue #784)。session.user.idは
+  // Keycloakのsub(UUID)なので、自分の行かどうかの判定にはこちらの数値idを使う。
+  const [users, projects, projectUsers, timezone, viewer] = await Promise.all([
     listUsers().catch(() => []),
     listProjects().catch(() => []),
-    listAllProjectUsers(actor).catch(() => []),
+    listAllProjectUsers().catch(() => []),
     getViewerTimeZone(),
+    getViewerProfile(),
   ]);
 
   const userToProjects = new Map<number, string[]>();
@@ -73,7 +75,7 @@ export default async function UsersPage() {
                       <Link href={`/users/${user.id}/edit`} className="text-sm text-neutral-600 dark:text-neutral-400 hover:underline">
                         編集
                       </Link>
-                      {String(user.id) !== session.user.id && <DeleteUserButton id={user.id} />}
+                      {viewer != null && viewer.id !== user.id && <DeleteUserButton id={user.id} />}
                     </div>
                   </td>
                 </tr>

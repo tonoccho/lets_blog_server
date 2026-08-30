@@ -1,0 +1,72 @@
+// media-service (#573): ComfyUI画像生成・draw.ioダイアグラム・PlantUML/Recharts/Penpotレンダリング。
+// GPU/外部プロセス依存でレスポンスタイムが他のAPIと桁違いに長いため、最も独立性が高い領域として
+// legacy-apiから抽出した。スキーマ分離(lbs_media)により他サービスから独立する。
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.1.0'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'jacoco'
+    id 'checkstyle'
+}
+
+dependencies {
+    implementation project(':libs:lbs-common')
+
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-restclient'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    // メディアガベージコレクションの監査ログ発行(#573 stage3、AuditLogService参照)。
+    implementation 'org.springframework.boot:spring-boot-starter-amqp'
+    // GeneratedImageController/PenpotClient等がcom.fasterxml.jackson.databind.ObjectMapper/JsonNodeを
+    // 直接使うため明示的に追加する(Boot 4の既定JSONコンバータ・既定ObjectMapperはJackson3系
+    // (tools.jackson)に変わったため、com.fasterxml.jackson.databind.ObjectMapperのBean定義には
+    // 明示的にこのモジュールが必要。legacy-apiのbuild.gradleと同じ構成)。
+    implementation 'org.springframework.boot:spring-boot-jackson2'
+
+    // generated_images/generated_image_sequences/diagrams/project_image_settingsのスキーマ所有権(#573)。
+    implementation 'org.springframework.boot:spring-boot-starter-flyway'
+    implementation 'org.flywaydb:flyway-mysql'
+
+    implementation 'org.springframework.security:spring-security-crypto'
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+
+    // [recharts]組み込みタグのサーバーサイドレンダリング(RechartsRenderer)に使うヘッドレスChromium。
+    // legacy-apiのPlaywrightConfig/RechartsRendererと同一の実装・同一バージョン。
+    implementation 'com.microsoft.playwright:playwright:1.62.0'
+
+    implementation 'com.mysql:mysql-connector-j'
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-webmvc-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+    testImplementation testFixtures(project(':libs:lbs-common'))
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    finalizedBy jacocoTestReport
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+    }
+}
+
+// Dockerイメージのビルド時、実行時クラスパスのjarを一時的に取り出してPlaywrightのブラウザ
+// インストールCLI(com.microsoft.playwright.CLI)を`java -cp`で実行するために使う
+// (legacy-apiのbuild.gradleにあるcopyRuntimeLibsタスクと同じ理由)。
+tasks.register('copyRuntimeLibs', Copy) {
+    from configurations.runtimeClasspath
+    into "$buildDir/runtime-libs"
+}

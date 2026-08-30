@@ -2,6 +2,7 @@ import 'server-only';
 import { after } from 'next/server';
 import { cookies, headers } from 'next/headers';
 import { getToken } from 'next-auth/jwt';
+import { gatewayUrl } from './apiBaseUrl';
 
 export type CmsType = "WORDPRESS";
 
@@ -62,19 +63,6 @@ export interface GeneratedImageDetail extends GeneratedImageSummary {
   loraWeight: number | null;
 }
 
-export interface DiagramSummary {
-  id: number;
-  projectId: number | null;
-  name: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface DiagramDetail extends DiagramSummary {
-  xml: string;
-  svg: string;
-}
-
 export interface SiteRegisterInput {
   name: string;
   siteKey: string;
@@ -97,17 +85,6 @@ export interface AuthenticatedUser {
   id: number;
   email: string;
   role: "admin" | "user";
-}
-
-export interface LoginResult {
-  user: AuthenticatedUser;
-  twoFactorRequired: boolean;
-  apiKey: string | null;
-}
-
-export interface TwoFactorSetup {
-  qrCodeDataUrl: string;
-  backupCodes: string[];
 }
 
 export interface AppUser {
@@ -133,14 +110,15 @@ export interface UserCreateInput {
   role: "admin" | "user";
 }
 
-function serverUrl(): string {
-  return (process.env.LETS_BLOG_API_URL ?? 'https://localhost').replace(/\/+$/, '');
-}
-
 /**
  * next-auth/jwtのgetToken()はreq.cookies/req.headersしか参照しないため、
  * NextRequestが無いServer Component/Server Actionからでもnext/headersのcookies()/headers()を
  * そのまま渡せる(型定義上はNextRequest等を期待しているため as any で吸収する)。
+ *
+ * 注意: ここで読むCookieは、SessionProvider(web/src/app/SessionProvider.tsx)のrefetchIntervalに
+ * よってブラウザが定期的に/api/auth/sessionを叩くことでjwtコールバックのリフレッシュが走り、
+ * 更新され続けている前提。getToken()自体はjwtコールバックを再実行しない生のCookieデコードのため、
+ * ここで読むaccessTokenが失効間際でないかはSessionProvider側の更新頻度に依存する。
  */
 async function currentToken() {
   return getToken({
@@ -149,27 +127,13 @@ async function currentToken() {
   });
 }
 
-/** ログイン中ユーザーのAPIキーをNextAuthのJWT(HttpOnly cookie)から取得する。 */
-async function currentApiKey(): Promise<string> {
+/** ログイン中ユーザーのKeycloakアクセストークンをNextAuthのJWT(HttpOnly cookie)から取得する。 */
+async function currentAccessToken(): Promise<string> {
   const token = await currentToken();
-  if (!token?.apiKey) {
-    throw new Error('ログインしていないか、APIキーが未取得です。再度ログインしてください。');
+  if (!token?.accessToken) {
+    throw new Error('ログインしていないか、アクセストークンが未取得です。再度ログインしてください。');
   }
-  return token.apiKey;
-}
-
-export interface ActorInfo {
-  id: number;
-  role: "admin" | "user";
-}
-
-/** actorが明示指定されなかった呼び出しでも操作ログにユーザーを紐付けられるよう、JWTから補完する。 */
-async function currentTokenActor(): Promise<ActorInfo | undefined> {
-  const token = await currentToken();
-  if (!token?.id || !token?.role) {
-    return undefined;
-  }
-  return { id: Number(token.id), role: token.role };
+  return token.accessToken;
 }
 
 const OPERATION_ID_HEADER = 'x-operation-id';
@@ -191,18 +155,18 @@ interface OperationLogEntryInput {
 }
 
 /**
- * 操作ログをバックエンドへ記録する(issue #143)。apiFetch()自身から呼ぶため、
- * 無限再帰を避けるためにapiFetch()を経由せず直接fetchする(=この記録リクエスト自体はログされない)。
+ * 操作ログをバックエンドへ記録する(issue #143)。apiRequest()自身から呼ぶため、
+ * 無限再帰を避けるためにapiRequest()を経由せず直接fetchする(=この記録リクエスト自体はログされない)。
+ * ベースURLの組み立てだけは共通のgatewayUrl()を使う(issue #584)。
  * 記録の失敗が本来のAPI呼び出しに影響しないよう例外は握りつぶす。
  */
-async function recordOperationLog(apiKey: string, actor: ActorInfo | undefined, entry: OperationLogEntryInput): Promise<void> {
+async function recordOperationLog(accessToken: string, entry: OperationLogEntryInput): Promise<void> {
   try {
-    await fetch(`${serverUrl()}/api/operation-logs`, {
+    await fetch(gatewayUrl('/api/operation-logs'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-API-Key': apiKey,
-        ...(actor ? { 'X-Actor-Id': String(actor.id), 'X-Actor-Role': actor.role } : {}),
+        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify(entry),
       cache: 'no-store',
@@ -212,34 +176,44 @@ async function recordOperationLog(apiKey: string, actor: ActorInfo | undefined, 
   }
 }
 
-interface ApiFetchInit extends RequestInit {
-  actor?: ActorInfo;
-  /** ログイン前でも呼べる公開エンドポイント(signup/setup/setup-status)向け。既定はtrue。 */
+interface ApiRequestInit extends RequestInit {
+  /** ログイン前でも呼べる公開エンドポイント(setup/setup-status)向け。既定はtrue。 */
   requiresAuth?: boolean;
+  /**
+   * falseにすると、HTTPエラー応答でも例外を投げずResponseをそのまま返す。
+   * 上流のステータスをそのままブラウザへ中継したい呼び出し元(SSE中継ルート)向け。既定はtrue。
+   */
+  throwOnError?: boolean;
 }
 
-async function apiFetch<T>(path: string, init?: ApiFetchInit): Promise<T> {
-  const { actor, requiresAuth = true, ...requestInit } = init ?? {};
-  const apiKey = requiresAuth ? await currentApiKey() : undefined;
+/**
+ * バックエンド(gateway)への全リクエストが通る唯一の共通経路(issue #584)。
+ * ベースURLの組み立て・Authorizationヘッダーの付与・キャッシュ無効化・操作ログの記録・
+ * エラーハンドリングをここに集約する。
+ *
+ * JSONを返さない呼び出し(バイナリのダウンロード・SSEの中継)もこの関数を直接使い、
+ * apiFetch()はこの上に乗るJSONデコード用の薄いラッパーとする。
+ */
+async function apiRequest(path: string, init?: ApiRequestInit): Promise<Response> {
+  const { requiresAuth = true, throwOnError = true, ...requestInit } = init ?? {};
+  const accessToken = requiresAuth ? await currentAccessToken() : undefined;
   const method = (requestInit.method ?? 'GET').toString().toUpperCase();
   const startedAt = Date.now();
   // after()内ではRequest-time API(headers/cookies)を呼べないため、レンダリング中に読んでおく。
-  const operationId = apiKey ? await currentOperationId() : null;
-  const logActor = actor ?? (apiKey ? await currentTokenActor() : undefined);
+  const operationId = accessToken ? await currentOperationId() : null;
 
   const scheduleLog = (entry: OperationLogEntryInput) => {
-    if (apiKey && operationId) {
-      after(() => recordOperationLog(apiKey, logActor, entry));
+    if (accessToken && operationId) {
+      after(() => recordOperationLog(accessToken, entry));
     }
   };
 
   let res: Response;
   try {
-    res = await fetch(`${serverUrl()}${path}`, {
+    res = await fetch(gatewayUrl(path), {
       ...requestInit,
       headers: {
-        ...(apiKey ? { 'X-API-Key': apiKey } : {}),
-        ...(actor ? { 'X-Actor-Id': String(actor.id), 'X-Actor-Role': actor.role } : {}),
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...(requestInit.headers ?? {}),
       },
       cache: 'no-store',
@@ -260,14 +234,23 @@ async function apiFetch<T>(path: string, init?: ApiFetchInit): Promise<T> {
   const durationMs = Date.now() - startedAt;
 
   if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    const message = `APIエラー (${res.status}): ${body || res.statusText}`;
+    // throwOnError=falseのときはボディを呼び出し元へそのまま渡すため消費しない。
+    const message = throwOnError
+      ? `APIエラー (${res.status}): ${(await res.text().catch(() => '')) || res.statusText}`
+      : `APIエラー (${res.status}): ${res.statusText}`;
     scheduleLog({ operationId: operationId ?? '', method, path, statusCode: res.status, durationMs, success: false, errorMessage: message });
-    throw new Error(message);
+    if (throwOnError) {
+      throw new Error(message);
+    }
+    return res;
   }
 
   scheduleLog({ operationId: operationId ?? '', method, path, statusCode: res.status, durationMs, success: true });
+  return res;
+}
 
+async function apiFetch<T>(path: string, init?: ApiRequestInit): Promise<T> {
+  const res = await apiRequest(path, init);
   if (res.status === 204) {
     return undefined as T;
   }
@@ -296,30 +279,28 @@ export interface SiteDetail {
   configuredSecretFields: string[];
 }
 
-export function getSiteDetail(id: number, actor?: ActorInfo): Promise<SiteDetail> {
-  return apiFetch<SiteDetail>(`/api/sites/${id}`, { actor });
+export function getSiteDetail(id: number): Promise<SiteDetail> {
+  return apiFetch<SiteDetail>(`/api/sites/${id}`);
 }
 
-export function registerSite(input: SiteRegisterInput, actor?: ActorInfo): Promise<Site> {
+export function registerSite(input: SiteRegisterInput): Promise<Site> {
   return apiFetch<Site>('/api/sites', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function createManagedWordPressSite(input: ManagedWordPressSiteInput, actor?: ActorInfo): Promise<Site> {
+export function createManagedWordPressSite(input: ManagedWordPressSiteInput): Promise<Site> {
   return apiFetch<Site>('/api/sites/managed-wordpress', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function deleteSite(id: number, actor?: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/sites/${id}`, { method: 'DELETE', actor });
+export function deleteSite(id: number): Promise<void> {
+  return apiFetch<void>(`/api/sites/${id}`, { method: 'DELETE' });
 }
 
 export interface SiteUpdateInput {
@@ -327,12 +308,11 @@ export interface SiteUpdateInput {
   credentials?: Record<string, string>;
 }
 
-export function updateSite(id: number, input: SiteUpdateInput, actor?: ActorInfo): Promise<Site> {
+export function updateSite(id: number, input: SiteUpdateInput): Promise<Site> {
   return apiFetch<Site>(`/api/sites/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
@@ -351,8 +331,8 @@ export interface WpCliInstallResult {
   message: string;
 }
 
-export function installWpCli(id: number, actor?: ActorInfo): Promise<WpCliInstallResult> {
-  return apiFetch<WpCliInstallResult>(`/api/sites/${id}/install-wp-cli`, { method: 'POST', actor });
+export function installWpCli(id: number): Promise<WpCliInstallResult> {
+  return apiFetch<WpCliInstallResult>(`/api/sites/${id}/install-wp-cli`, { method: 'POST' });
 }
 
 export type StaticContentType = "PRIVACY_POLICY" | "OPERATOR_INFO" | "TERMS_OF_SERVICE";
@@ -366,20 +346,18 @@ export interface StaticContent {
   updatedAt: string;
 }
 
-export function listStaticContent(siteId: number, actor?: ActorInfo): Promise<StaticContent[]> {
-  return apiFetch<StaticContent[]>(`/api/sites/${siteId}/static-content`, { actor });
+export function listStaticContent(siteId: number): Promise<StaticContent[]> {
+  return apiFetch<StaticContent[]>(`/api/sites/${siteId}/static-content`);
 }
 
 export function generateStaticContent(
   siteId: number,
-  contentType: StaticContentType,
-  actor?: ActorInfo
+  contentType: StaticContentType
 ): Promise<StaticContent> {
   return apiFetch<StaticContent>(`/api/sites/${siteId}/static-content/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ contentType }),
-    actor,
   });
 }
 
@@ -388,12 +366,11 @@ export interface SshKeyPair {
   privateKeyPem: string;
 }
 
-export function generateSshKeyPair(comment: string | undefined, actor?: ActorInfo): Promise<SshKeyPair> {
+export function generateSshKeyPair(comment: string | undefined): Promise<SshKeyPair> {
   return apiFetch<SshKeyPair>('/api/sites/ssh-keypair', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ comment: comment || null }),
-    actor,
   });
 }
 
@@ -413,24 +390,22 @@ export interface GeneratedSshKeyPair extends SavedSshKeyPair {
   privateKeyPem: string;
 }
 
-export function listSshKeyPairs(actor?: ActorInfo): Promise<SavedSshKeyPair[]> {
-  return apiFetch<SavedSshKeyPair[]>('/api/ssh-key-pairs', { actor });
+export function listSshKeyPairs(): Promise<SavedSshKeyPair[]> {
+  return apiFetch<SavedSshKeyPair[]>('/api/ssh-key-pairs');
 }
 
 export function createSshKeyPair(
-  input: { name: string; comment?: string },
-  actor: ActorInfo
+  input: { name: string; comment?: string }
 ): Promise<GeneratedSshKeyPair> {
   return apiFetch<GeneratedSshKeyPair>('/api/ssh-key-pairs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: input.name, comment: input.comment || null }),
-    actor,
   });
 }
 
-export function deleteSshKeyPair(id: number, actor: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/ssh-key-pairs/${id}`, { method: 'DELETE', actor });
+export function deleteSshKeyPair(id: number): Promise<void> {
+  return apiFetch<void>(`/api/ssh-key-pairs/${id}`, { method: 'DELETE' });
 }
 
 export function listPosts(): Promise<PostSummary[]> {
@@ -464,45 +439,10 @@ export function updateGeneratedImageTags(id: number, tags: string[]): Promise<Ge
 }
 
 export async function downloadGeneratedImageFile(id: number): Promise<{ body: ArrayBuffer; mimeType: string }> {
-  const res = await fetch(`${serverUrl()}/api/generated-images/${id}/file`, {
-    headers: { 'X-API-Key': await currentApiKey() },
-    cache: 'no-store',
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
-  }
+  const res = await apiRequest(`/api/generated-images/${id}/file`);
   return {
     body: await res.arrayBuffer(),
     mimeType: res.headers.get('content-type') ?? 'image/png',
-  };
-}
-
-export function listDiagrams(projectId?: number): Promise<DiagramSummary[]> {
-  const query = projectId ? `?projectId=${projectId}` : '';
-  return apiFetch<DiagramSummary[]>(`/api/diagrams${query}`);
-}
-
-export function getDiagram(id: number): Promise<DiagramDetail> {
-  return apiFetch<DiagramDetail>(`/api/diagrams/${id}`);
-}
-
-export function deleteDiagram(id: number): Promise<void> {
-  return apiFetch<void>(`/api/diagrams/${id}`, { method: 'DELETE' });
-}
-
-export async function downloadDiagramSvg(id: number): Promise<{ body: ArrayBuffer; mimeType: string }> {
-  const res = await fetch(`${serverUrl()}/api/diagrams/${id}/svg`, {
-    headers: { 'X-API-Key': await currentApiKey() },
-    cache: 'no-store',
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
-  }
-  return {
-    body: await res.arrayBuffer(),
-    mimeType: res.headers.get('content-type') ?? 'image/svg+xml',
   };
 }
 
@@ -518,8 +458,8 @@ export interface ImageGenerationOptionsResponse {
   defaultQualityPrompt: string | null;
 }
 
-export function getImageGenerationOptions(projectId: number, actor?: ActorInfo): Promise<ImageGenerationOptionsResponse> {
-  return apiFetch<ImageGenerationOptionsResponse>(`/api/ai/image-options?projectId=${projectId}`, { actor });
+export function getImageGenerationOptions(projectId: number): Promise<ImageGenerationOptionsResponse> {
+  return apiFetch<ImageGenerationOptionsResponse>(`/api/ai/image-options?projectId=${projectId}`);
 }
 
 export interface AiImageGenerationParams {
@@ -551,14 +491,12 @@ export interface AiImageBatchResult {
 }
 
 export function generateProjectImages(
-  params: AiImageGenerationParams,
-  actor?: ActorInfo
+  params: AiImageGenerationParams
 ): Promise<AiImageBatchResult> {
   return apiFetch<AiImageBatchResult>('/api/ai/image', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
-    actor,
   });
 }
 
@@ -568,105 +506,26 @@ export interface AiImagePromptResponse {
 
 export function generateImagePromptFromChat(
   projectId: number,
-  data: { history: PlanChatMessage[]; message: string; provider?: string },
-  actor?: ActorInfo
+  data: { history: PlanChatMessage[]; message: string; provider?: string }
 ): Promise<AiImagePromptResponse> {
   return apiFetch<AiImagePromptResponse>(`/api/projects/${projectId}/ai/generate-image-prompt`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-    actor,
   });
 }
 
 export function uploadProjectAssetImage(
   projectId: number,
-  generatedImageId: number,
-  actor?: ActorInfo
+  generatedImageId: number
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/asset-images/${generatedImageId}/upload`, {
     method: 'POST',
-    actor,
   });
-}
-
-export async function login(email: string, password: string): Promise<LoginResult | null> {
-  const res = await fetch(`${serverUrl()}/api/auth/login`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ email, password, label: 'web' }),
-    cache: 'no-store',
-  });
-
-  if (res.status === 401) {
-    return null;
-  }
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
-  }
-  return (await res.json()) as LoginResult;
-}
-
-/**
- * ログイン2段階目。login()でtwoFactorRequired=trueだった場合に、
- * TOTPコード(またはバックアップコード)を検証してログインを完了する。
- * 401の場合はコードが無効なのでnullを返す。
- */
-export async function verifyTotpLogin(userId: number, code: string): Promise<LoginResult | null> {
-  const res = await fetch(`${serverUrl()}/api/auth/totp/verify`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ userId, code, label: 'web' }),
-    cache: 'no-store',
-  });
-
-  if (res.status === 401) {
-    return null;
-  }
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
-  }
-  return (await res.json()) as LoginResult;
-}
-
-export function getTwoFactorStatus(actor: ActorInfo): Promise<{ enabled: boolean }> {
-  return apiFetch<{ enabled: boolean }>('/api/auth/totp/status', { actor });
-}
-
-export function setupTwoFactor(actor: ActorInfo): Promise<TwoFactorSetup> {
-  return apiFetch<TwoFactorSetup>('/api/auth/totp/setup', { method: 'POST', actor });
-}
-
-export function verifyTwoFactorSetup(code: string, actor: ActorInfo): Promise<{ message: string }> {
-  return apiFetch<{ message: string }>('/api/auth/totp/verify-setup', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code }),
-    actor,
-  });
-}
-
-export function disableTwoFactor(actor: ActorInfo): Promise<{ message: string }> {
-  return apiFetch<{ message: string }>('/api/auth/totp/disable', { method: 'POST', actor });
 }
 
 export function listUsers(): Promise<AppUser[]> {
   return apiFetch<AppUser[]>('/api/users');
-}
-
-export function signup(email: string, password: string): Promise<AuthenticatedUser> {
-  return apiFetch<AuthenticatedUser>('/api/auth/signup', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-    requiresAuth: false,
-  });
 }
 
 export function getSetupStatus(): Promise<{ needsSetup: boolean }> {
@@ -682,26 +541,24 @@ export function setupInitialAdmin(email: string, password: string): Promise<Auth
   });
 }
 
-export function createUser(input: UserCreateInput, actor?: ActorInfo): Promise<AppUser> {
+export function createUser(input: UserCreateInput): Promise<AppUser> {
   return apiFetch<AppUser>('/api/users', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function updateUserRole(id: number, role: "admin" | "user", actor?: ActorInfo): Promise<AppUser> {
+export function updateUserRole(id: number, role: "admin" | "user"): Promise<AppUser> {
   return apiFetch<AppUser>(`/api/users/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ role }),
-    actor,
   });
 }
 
-export function deleteUser(id: number, actor?: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/users/${id}`, { method: 'DELETE', actor });
+export function deleteUser(id: number): Promise<void> {
+  return apiFetch<void>(`/api/users/${id}`, { method: 'DELETE' });
 }
 
 export interface SocialLinks {
@@ -764,16 +621,29 @@ export interface UserProfileInput {
   customLinks: CustomLink[] | null;
 }
 
-export function getUserProfile(id: number, actor?: ActorInfo): Promise<UserProfile> {
-  return apiFetch<UserProfile>(`/api/users/${id}`, { actor });
+export function getUserProfile(id: number): Promise<UserProfile> {
+  return apiFetch<UserProfile>(`/api/users/${id}`);
 }
 
-export function updateUserProfile(id: number, input: UserProfileInput, actor?: ActorInfo): Promise<UserProfile> {
+/**
+ * ログイン中ユーザー自身のプロフィール(issue #784)。
+ *
+ * identity-serviceが検証済みJWTの`sub`から自ユーザーを解決するため、**呼び出し側は
+ * ユーザーIDを渡さない**。Keycloak移行(#564)以降`session.user.id`はKeycloakの`sub`(UUID)で
+ * あり、これを`Number()`に通すと必ず`NaN`になる。`/api/users/${Number(session.user.id)}`という
+ * 組み立て方は`/api/users/NaN`という壊れたリクエストを生み、24時間で203件観測されていた。
+ *
+ * ID指定版の{@link getUserProfile}はadminが他ユーザーを操作する経路のため残す。
+ */
+export function getMyProfile(): Promise<UserProfile> {
+  return apiFetch<UserProfile>('/api/identity/me');
+}
+
+export function updateUserProfile(id: number, input: UserProfileInput): Promise<UserProfile> {
   return apiFetch<UserProfile>(`/api/users/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
@@ -784,40 +654,48 @@ export interface UpdateUserPreferencesInput {
 
 export function updateUserPreferences(
   id: number,
-  input: UpdateUserPreferencesInput,
-  actor?: ActorInfo
+  input: UpdateUserPreferencesInput
 ): Promise<UserProfile> {
   return apiFetch<UserProfile>(`/api/users/${id}/preferences`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
+  });
+}
+
+/**
+ * ログイン中ユーザー自身の個人設定(言語・タイムゾーン)を更新する(issue #784)。
+ * {@link getMyProfile}と同じ理由でユーザーIDを渡さない。
+ */
+export function updateMyPreferences(input: UpdateUserPreferencesInput): Promise<UserProfile> {
+  return apiFetch<UserProfile>('/api/identity/me/preferences', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
   });
 }
 
 export function updateGithubToken(
   id: number,
-  input: { githubToken: string },
-  actor?: ActorInfo
+  input: { githubToken: string }
 ): Promise<UserProfile> {
   return apiFetch<UserProfile>(`/api/users/${id}/github-token`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function listRoles(actor: ActorInfo): Promise<RoleInfo[]> {
-  return apiFetch<RoleInfo[]>('/api/roles', { actor });
+export function listRoles(): Promise<RoleInfo[]> {
+  return apiFetch<RoleInfo[]>('/api/roles');
 }
 
-export function assignRole(userId: number, roleName: string, actor: ActorInfo): Promise<{ message: string }> {
-  return apiFetch<{ message: string }>(`/api/users/${userId}/roles/${roleName}`, { method: 'POST', actor });
+export function assignRole(userId: number, roleName: string): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>(`/api/users/${userId}/roles/${roleName}`, { method: 'POST' });
 }
 
-export function removeRole(userId: number, roleName: string, actor: ActorInfo): Promise<{ message: string }> {
-  return apiFetch<{ message: string }>(`/api/users/${userId}/roles/${roleName}`, { method: 'DELETE', actor });
+export function removeRole(userId: number, roleName: string): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>(`/api/users/${userId}/roles/${roleName}`, { method: 'DELETE' });
 }
 
 export interface PostStatusOption {
@@ -826,24 +704,8 @@ export interface PostStatusOption {
 }
 
 /** 投稿ステータスの正準リスト。VS Code拡張とサーバー側の選択肢を一致させるための共通取得元(issue #472)。 */
-export function getPostStatuses(actor?: ActorInfo): Promise<PostStatusOption[]> {
-  return apiFetch<PostStatusOption[]>('/api/metadata/post-statuses', { actor });
-}
-
-export function requestPasswordReset(email: string): Promise<{ message: string }> {
-  return apiFetch<{ message: string }>('/api/auth/password-reset/request', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email }),
-  });
-}
-
-export function confirmPasswordReset(token: string, newPassword: string): Promise<{ message: string }> {
-  return apiFetch<{ message: string }>('/api/auth/password-reset/confirm', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token, newPassword }),
-  });
+export function getPostStatuses(): Promise<PostStatusOption[]> {
+  return apiFetch<PostStatusOption[]>('/api/metadata/post-statuses');
 }
 
 export type CustomTagFormat = 'INLINE' | 'BLOCK';
@@ -903,47 +765,43 @@ export interface ValidateCustomTagRequest {
 }
 
 /** プロジェクト詳細のカスタムタグ画面向け。グローバルタグを含めず、プロジェクトのタグのみを返す。 */
-export function listProjectCustomTags(projectId: number, actor?: ActorInfo): Promise<CustomTag[]> {
-  return apiFetch<CustomTag[]>(`/api/projects/${projectId}/custom-tags`, { actor });
+export function listProjectCustomTags(projectId: number): Promise<CustomTag[]> {
+  return apiFetch<CustomTag[]>(`/api/projects/${projectId}/custom-tags`);
 }
 
-export function createCustomTag(input: CustomTagInput, actor: ActorInfo): Promise<CustomTag> {
+export function createCustomTag(input: CustomTagInput): Promise<CustomTag> {
   return apiFetch<CustomTag>('/api/custom-tags', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function updateCustomTag(id: number, input: CustomTagInput, actor: ActorInfo): Promise<CustomTag> {
+export function updateCustomTag(id: number, input: CustomTagInput): Promise<CustomTag> {
   return apiFetch<CustomTag>(`/api/custom-tags/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function deleteCustomTag(id: number, actor: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/custom-tags/${id}`, { method: 'DELETE', actor });
+export function deleteCustomTag(id: number): Promise<void> {
+  return apiFetch<void>(`/api/custom-tags/${id}`, { method: 'DELETE' });
 }
 
-export function generateCustomTag(input: GenerateCustomTagInput, actor: ActorInfo): Promise<CustomTag> {
+export function generateCustomTag(input: GenerateCustomTagInput): Promise<CustomTag> {
   return apiFetch<CustomTag>('/api/custom-tags/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function validateCustomTag(input: ValidateCustomTagRequest, actor: ActorInfo): Promise<ValidationResult> {
+export function validateCustomTag(input: ValidateCustomTagRequest): Promise<ValidationResult> {
   return apiFetch<ValidationResult>('/api/custom-tags/validate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
@@ -964,31 +822,22 @@ export interface CustomTagPreviewResult {
  */
 export function previewProjectCustomTag(
   projectId: number,
-  input: CustomTagPreviewInput,
-  actor: ActorInfo
+  input: CustomTagPreviewInput
 ): Promise<CustomTagPreviewResult> {
   return apiFetch<CustomTagPreviewResult>(`/api/projects/${projectId}/custom-tags/preview`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-/** プロジェクト詳細/プロジェクト一覧向け。グローバルタグを含めず、プロジェクトのタグのCSSのみを連結する。 */
-export async function downloadProjectCustomTagCssBundle(projectId: number, actor: ActorInfo): Promise<ArrayBuffer> {
-  const res = await fetch(`${serverUrl()}/api/projects/${projectId}/custom-tags/css-bundle`, {
-    headers: {
-      'X-API-Key': await currentApiKey(),
-      'X-Actor-Id': String(actor.id),
-      'X-Actor-Role': actor.role,
-    },
-    cache: 'no-store',
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
-  }
+/**
+ * プロジェクト詳細/プロジェクト一覧向け。グローバルタグを含めず、プロジェクトのタグのCSSのみを連結する。
+ */
+export async function downloadProjectCustomTagCssBundle(
+  projectId: number
+): Promise<ArrayBuffer> {
+  const res = await apiRequest(`/api/projects/${projectId}/custom-tags/css-bundle`);
   return res.arrayBuffer();
 }
 
@@ -1028,21 +877,19 @@ export interface SaveTagDesignSettingInput {
   htmlTemplate?: string;
 }
 
-export function getTagDesignSettings(projectId: number, actor?: ActorInfo): Promise<TagDesignSettingsOverview> {
-  return apiFetch<TagDesignSettingsOverview>(`/api/projects/${projectId}/tag-design-settings`, { actor });
+export function getTagDesignSettings(projectId: number): Promise<TagDesignSettingsOverview> {
+  return apiFetch<TagDesignSettingsOverview>(`/api/projects/${projectId}/tag-design-settings`);
 }
 
 export function saveTagDesignSetting(
   projectId: number,
   tagType: EmbedTagType,
-  input: SaveTagDesignSettingInput,
-  actor: ActorInfo
+  input: SaveTagDesignSettingInput
 ): Promise<TagDesignSetting> {
   return apiFetch<TagDesignSetting>(`/api/projects/${projectId}/tag-design-settings/${tagType}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
@@ -1055,14 +902,12 @@ export interface GenerateTagDesignResult {
 export function generateTagDesign(
   projectId: number,
   tagType: EmbedTagType,
-  prompt: string,
-  actor: ActorInfo
+  prompt: string
 ): Promise<GenerateTagDesignResult> {
   return apiFetch<GenerateTagDesignResult>(`/api/projects/${projectId}/tag-design-settings/${tagType}/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt }),
-    actor,
   });
 }
 
@@ -1099,67 +944,62 @@ export interface CloneCustomTagTemplateInput {
   projectId?: number | null;
 }
 
-export function listCustomTagTemplates(actor?: ActorInfo, projectId?: number, options?: { category?: string; search?: string; showAll?: boolean }): Promise<CustomTagTemplate[]> {
+export function listCustomTagTemplates(projectId?: number, options?: { category?: string; search?: string; showAll?: boolean }): Promise<CustomTagTemplate[]> {
   const params = new URLSearchParams();
   if (projectId != null) params.set('projectId', String(projectId));
   if (options?.category) params.set('category', options.category);
   if (options?.search) params.set('search', options.search);
   if (options?.showAll) params.set('showAll', 'true');
   const query = params.toString() ? `?${params.toString()}` : '';
-  return apiFetch<CustomTagTemplate[]>(`/api/custom-tag-templates${query}`, { actor });
+  return apiFetch<CustomTagTemplate[]>(`/api/custom-tag-templates${query}`);
 }
 
-export function getCustomTagTemplate(id: number, actor?: ActorInfo): Promise<CustomTagTemplate> {
-  return apiFetch<CustomTagTemplate>(`/api/custom-tag-templates/${id}`, { actor });
+export function getCustomTagTemplate(id: number): Promise<CustomTagTemplate> {
+  return apiFetch<CustomTagTemplate>(`/api/custom-tag-templates/${id}`);
 }
 
-export function createCustomTagTemplate(input: CustomTagTemplateInput, actor: ActorInfo): Promise<CustomTagTemplate> {
+export function createCustomTagTemplate(input: CustomTagTemplateInput): Promise<CustomTagTemplate> {
   return apiFetch<CustomTagTemplate>('/api/custom-tag-templates', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function updateCustomTagTemplate(id: number, input: CustomTagTemplateInput, actor: ActorInfo): Promise<CustomTagTemplate> {
+export function updateCustomTagTemplate(id: number, input: CustomTagTemplateInput): Promise<CustomTagTemplate> {
   return apiFetch<CustomTagTemplate>(`/api/custom-tag-templates/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function publishCustomTagTemplate(id: number, actor: ActorInfo): Promise<CustomTagTemplate> {
+export function publishCustomTagTemplate(id: number): Promise<CustomTagTemplate> {
   return apiFetch<CustomTagTemplate>(`/api/custom-tag-templates/${id}/publish`, {
     method: 'POST',
-    actor,
   });
 }
 
-export function unpublishCustomTagTemplate(id: number, actor: ActorInfo): Promise<CustomTagTemplate> {
+export function unpublishCustomTagTemplate(id: number): Promise<CustomTagTemplate> {
   return apiFetch<CustomTagTemplate>(`/api/custom-tag-templates/${id}/unpublish`, {
     method: 'POST',
-    actor,
   });
 }
 
-export function cloneCustomTagTemplate(id: number, input: CloneCustomTagTemplateInput, actor: ActorInfo): Promise<CustomTagTemplate> {
+export function cloneCustomTagTemplate(id: number, input: CloneCustomTagTemplateInput): Promise<CustomTagTemplate> {
   return apiFetch<CustomTagTemplate>(`/api/custom-tag-templates/${id}/clone`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function deleteCustomTagTemplate(id: number, actor: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/custom-tag-templates/${id}`, { method: 'DELETE', actor });
+export function deleteCustomTagTemplate(id: number): Promise<void> {
+  return apiFetch<void>(`/api/custom-tag-templates/${id}`, { method: 'DELETE' });
 }
 
-export function getMyCustomTagTemplates(actor: ActorInfo): Promise<CustomTagTemplate[]> {
-  return apiFetch<CustomTagTemplate[]>('/api/custom-tag-templates/my-templates', { actor });
+export function getMyCustomTagTemplates(): Promise<CustomTagTemplate[]> {
+  return apiFetch<CustomTagTemplate[]>('/api/custom-tag-templates/my-templates');
 }
 
 /**
@@ -1167,14 +1007,7 @@ export function getMyCustomTagTemplates(actor: ActorInfo): Promise<CustomTagTemp
  * ダウンロードする(admin限定)。
  */
 export async function downloadBackupFile(): Promise<{ body: ArrayBuffer; filename: string }> {
-  const res = await fetch(`${serverUrl()}/api/backup/download`, {
-    headers: { 'X-API-Key': await currentApiKey() },
-    cache: 'no-store',
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
-  }
+  const res = await apiRequest('/api/backup/download');
   const disposition = res.headers.get('content-disposition') ?? '';
   const match = disposition.match(/filename="([^"]+)"/);
   return { body: await res.arrayBuffer(), filename: match?.[1] ?? 'lets-blog-backup.zip' };
@@ -1188,7 +1021,6 @@ export async function downloadBackupFile(): Promise<{ body: ArrayBuffer; filenam
  */
 export async function restoreBackup(
   file: File,
-  actor: ActorInfo,
   acknowledgeKeyMismatch: boolean
 ): Promise<void> {
   const formData = new FormData();
@@ -1198,7 +1030,6 @@ export async function restoreBackup(
   return apiFetch<void>('/api/backup/restore', {
     method: 'POST',
     body: formData,
-    actor,
   });
 }
 
@@ -1206,6 +1037,8 @@ export interface OperationLogEntry {
   id: number;
   operationId: string;
   userId: number | null;
+  /** JWTのsubクレーム(issue #569)。旧ヘッダーベース(廃止済み)の操作や未認証の場合はnull。 */
+  actorKeycloakSub: string | null;
   method: string;
   path: string;
   statusCode: number | null;
@@ -1224,18 +1057,17 @@ export interface OperationLogPage {
 }
 
 export function listOperationLogs(
-  params: { page?: number; size?: number },
-  actor: ActorInfo
+  params: { page?: number; size?: number }
 ): Promise<OperationLogPage> {
   const query = new URLSearchParams();
   query.set('page', String(params.page ?? 0));
   query.set('size', String(params.size ?? 200));
   query.set('sort', 'createdAt,desc');
-  return apiFetch<OperationLogPage>(`/api/operation-logs?${query.toString()}`, { actor });
+  return apiFetch<OperationLogPage>(`/api/operation-logs?${query.toString()}`);
 }
 
-export function getOperationTrace(operationId: string, actor: ActorInfo): Promise<OperationLogEntry[]> {
-  return apiFetch<OperationLogEntry[]>(`/api/operation-logs/${encodeURIComponent(operationId)}`, { actor });
+export function getOperationTrace(operationId: string): Promise<OperationLogEntry[]> {
+  return apiFetch<OperationLogEntry[]>(`/api/operation-logs/${encodeURIComponent(operationId)}`);
 }
 
 /** 操作ログ・AIジョブ・監査ログを一元表示するための統合エントリ(issue #187)。 */
@@ -1249,6 +1081,13 @@ export interface UnifiedLogEntry {
   detail: string | null;
   status: string | null;
   operationId: string | null;
+  /**
+   * JWTのsubクレーム(issue #569)。OPERATION/AUDITでJWT認証時のみ値を持つ。
+   * 旧ヘッダーベース(廃止済み)の操作、AI_JOB、未認証の場合はnull
+   * (issue #564でWebはKeycloakのアクセストークンを送るようになったため、Web発の操作は
+   * 基本的に値を持つ。VSCode拡張は#565が未着手のため、そちらの操作は引き続きnullになる)。
+   */
+  actorKeycloakSub: string | null;
 }
 
 export interface UnifiedLogPage {
@@ -1260,15 +1099,40 @@ export interface UnifiedLogPage {
 }
 
 export function listUnifiedOperationLogs(
-  params: { type?: UnifiedLogSourceType; q?: string; page?: number; size?: number },
-  actor: ActorInfo
+  params: { type?: UnifiedLogSourceType; q?: string; page?: number; size?: number }
 ): Promise<UnifiedLogPage> {
   const query = new URLSearchParams();
   if (params.type) query.set('type', params.type);
   if (params.q) query.set('q', params.q);
   query.set('page', String(params.page ?? 0));
   query.set('size', String(params.size ?? 50));
-  return apiFetch<UnifiedLogPage>(`/api/operation-logs/unified?${query.toString()}`, { actor });
+  return apiFetch<UnifiedLogPage>(`/api/operation-logs/unified?${query.toString()}`);
+}
+
+/**
+ * ブラウザで発生したエラーをlog-writerへ記録する(issue #791)。
+ *
+ * ブラウザから gateway を直叩きしていた頃の名残で認証情報が付かず、#772 で
+ * log-writer に認証ゲートが戻った際に401で無言に全滅していた。現在は
+ * web/src/app/client-errors/route.ts (BFF) だけがこの関数を呼び、Bearerが付く。
+ */
+export interface FrontendErrorLogInput {
+  message: string;
+  stack?: string;
+  componentStack?: string;
+  level: 'error' | 'warn';
+  context?: Record<string, unknown>;
+  url?: string;
+  userAgent?: string;
+  timestamp: string;
+}
+
+export function logFrontendError(input: FrontendErrorLogInput): Promise<void> {
+  return apiFetch<void>('/api/logs/errors', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
 }
 
 export interface Project {
@@ -1295,59 +1159,53 @@ export interface Project {
 
 export type ProjectEnvironment = "local" | "test" | "production";
 
-export function listProjects(actor?: ActorInfo): Promise<Project[]> {
-  return apiFetch<Project[]>('/api/projects', { actor });
+export function listProjects(): Promise<Project[]> {
+  return apiFetch<Project[]>('/api/projects');
 }
 
-export function getProject(id: number, actor?: ActorInfo): Promise<Project> {
-  return apiFetch<Project>(`/api/projects/${id}`, { actor });
+export function getProject(id: number): Promise<Project> {
+  return apiFetch<Project>(`/api/projects/${id}`);
 }
 
-export function createProject(input: { name: string; slug: string }, actor?: ActorInfo): Promise<Project> {
+export function createProject(input: { name: string; slug: string }): Promise<Project> {
   return apiFetch<Project>('/api/projects', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function updateProject(id: number, name: string, actor?: ActorInfo): Promise<Project> {
+export function updateProject(id: number, name: string): Promise<Project> {
   return apiFetch<Project>(`/api/projects/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
-    actor,
   });
 }
 
-export function deleteProject(id: number, actor?: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/projects/${id}`, { method: 'DELETE', actor });
+export function deleteProject(id: number): Promise<void> {
+  return apiFetch<void>(`/api/projects/${id}`, { method: 'DELETE' });
 }
 
 export function updateProjectGithubRepository(
   id: number,
-  githubRepository: string,
-  actor?: ActorInfo
+  githubRepository: string
 ): Promise<Project> {
   return apiFetch<Project>(`/api/projects/${id}/github-repository`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ githubRepository }),
-    actor,
   });
 }
 
 export function updateProjectCssSelectorPrefix(
   id: number,
-  cssSelectorPrefix: string,
-  actor?: ActorInfo
+  cssSelectorPrefix: string
 ): Promise<Project> {
   return apiFetch<Project>(`/api/projects/${id}/css-selector-prefix`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cssSelectorPrefix }),
-    actor,
   });
 }
 
@@ -1355,14 +1213,12 @@ export function updateProjectCssSelectorPrefix(
 export function updateProjectImageGenerationPromptDefaults(
   id: number,
   defaultNegativePrompt: string,
-  defaultQualityPrompt: string,
-  actor?: ActorInfo
+  defaultQualityPrompt: string
 ): Promise<Project> {
   return apiFetch<Project>(`/api/projects/${id}/image-generation-prompt-defaults`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ defaultNegativePrompt, defaultQualityPrompt }),
-    actor,
   });
 }
 
@@ -1370,28 +1226,24 @@ export function updateProjectImageGenerationPromptDefaults(
 export function updateProjectImageGenerationSizeDefaults(
   id: number,
   defaultGeneratedImageWidth: number | null,
-  defaultGeneratedImageHeight: number | null,
-  actor?: ActorInfo
+  defaultGeneratedImageHeight: number | null
 ): Promise<Project> {
   return apiFetch<Project>(`/api/projects/${id}/image-generation-size-defaults`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ defaultGeneratedImageWidth, defaultGeneratedImageHeight }),
-    actor,
   });
 }
 
 /** 記事投稿時に画像をリサイズする長編の目標px(issue #291)。nullはアプリ全体のデフォルト(1300px)へ戻す。 */
 export function updateProjectArticleImageResizeDefault(
   id: number,
-  defaultArticleImageLongEdgePx: number | null,
-  actor?: ActorInfo
+  defaultArticleImageLongEdgePx: number | null
 ): Promise<Project> {
   return apiFetch<Project>(`/api/projects/${id}/article-image-resize-default`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ defaultArticleImageLongEdgePx }),
-    actor,
   });
 }
 
@@ -1400,14 +1252,12 @@ export function updateProjectImageContentFilterSettings(
   id: number,
   blockSexualContent: boolean,
   blockViolentContent: boolean,
-  blockDiscriminatoryContent: boolean,
-  actor?: ActorInfo
+  blockDiscriminatoryContent: boolean
 ): Promise<Project> {
   return apiFetch<Project>(`/api/projects/${id}/image-content-filter-settings`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ blockSexualContent, blockViolentContent, blockDiscriminatoryContent }),
-    actor,
   });
 }
 
@@ -1416,41 +1266,38 @@ export interface ProjectApiKeyStatus {
   configured: boolean;
 }
 
-export function getProjectGithubTokenStatus(projectId: number, actor?: ActorInfo): Promise<ProjectApiKeyStatus> {
-  return apiFetch<ProjectApiKeyStatus>(`/api/projects/${projectId}/api-keys/github-token`, { actor });
+export function getProjectGithubTokenStatus(projectId: number): Promise<ProjectApiKeyStatus> {
+  return apiFetch<ProjectApiKeyStatus>(`/api/projects/${projectId}/api-keys/github-token`);
 }
 
-export function setProjectGithubToken(projectId: number, githubToken: string, actor: ActorInfo): Promise<void> {
+export function setProjectGithubToken(projectId: number, githubToken: string): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}/api-keys/github-token`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ githubToken }),
-    actor,
   });
 }
 
-export function clearProjectGithubToken(projectId: number, actor: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/projects/${projectId}/api-keys/github-token`, { method: 'DELETE', actor });
+export function clearProjectGithubToken(projectId: number): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/github-token`, { method: 'DELETE' });
 }
 
 export function getProjectBraveSearchApiKeyStatus(
-  projectId: number,
-  actor?: ActorInfo
+  projectId: number
 ): Promise<ProjectApiKeyStatus> {
-  return apiFetch<ProjectApiKeyStatus>(`/api/projects/${projectId}/api-keys/brave-search-api-key`, { actor });
+  return apiFetch<ProjectApiKeyStatus>(`/api/projects/${projectId}/api-keys/brave-search-api-key`);
 }
 
-export function setProjectBraveSearchApiKey(projectId: number, apiKey: string, actor: ActorInfo): Promise<void> {
+export function setProjectBraveSearchApiKey(projectId: number, apiKey: string): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}/api-keys/brave-search-api-key`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ apiKey }),
-    actor,
   });
 }
 
-export function clearProjectBraveSearchApiKey(projectId: number, actor: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/projects/${projectId}/api-keys/brave-search-api-key`, { method: 'DELETE', actor });
+export function clearProjectBraveSearchApiKey(projectId: number): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/brave-search-api-key`, { method: 'DELETE' });
 }
 
 export interface ProjectGoogleAnalyticsStatus {
@@ -1459,27 +1306,24 @@ export interface ProjectGoogleAnalyticsStatus {
 }
 
 export function getProjectGoogleAnalyticsStatus(
-  projectId: number,
-  actor?: ActorInfo
+  projectId: number
 ): Promise<ProjectGoogleAnalyticsStatus> {
-  return apiFetch<ProjectGoogleAnalyticsStatus>(`/api/projects/${projectId}/api-keys/google-analytics`, { actor });
+  return apiFetch<ProjectGoogleAnalyticsStatus>(`/api/projects/${projectId}/api-keys/google-analytics`);
 }
 
 export function setProjectGoogleAnalyticsCredentials(
   projectId: number,
-  input: { propertyId: string; serviceAccountJson: string },
-  actor: ActorInfo
+  input: { propertyId: string; serviceAccountJson: string }
 ): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}/api-keys/google-analytics`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
-export function clearProjectGoogleAnalyticsCredentials(projectId: number, actor: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/projects/${projectId}/api-keys/google-analytics`, { method: 'DELETE', actor });
+export function clearProjectGoogleAnalyticsCredentials(projectId: number): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/google-analytics`, { method: 'DELETE' });
 }
 
 export interface GoogleAnalyticsDailyDataPoint {
@@ -1508,10 +1352,9 @@ export interface GoogleAnalyticsReport {
 }
 
 export function getProjectGoogleAnalyticsReport(
-  projectId: number,
-  actor?: ActorInfo
+  projectId: number
 ): Promise<GoogleAnalyticsReport> {
-  return apiFetch<GoogleAnalyticsReport>(`/api/projects/${projectId}/dashboard/google-analytics`, { actor });
+  return apiFetch<GoogleAnalyticsReport>(`/api/projects/${projectId}/dashboard/google-analytics`);
 }
 
 export interface ProjectAdSenseStatus {
@@ -1521,50 +1364,44 @@ export interface ProjectAdSenseStatus {
   hasClientSecret: boolean;
 }
 
-export function getProjectAdSenseStatus(projectId: number, actor?: ActorInfo): Promise<ProjectAdSenseStatus> {
-  return apiFetch<ProjectAdSenseStatus>(`/api/projects/${projectId}/api-keys/adsense`, { actor });
+export function getProjectAdSenseStatus(projectId: number): Promise<ProjectAdSenseStatus> {
+  return apiFetch<ProjectAdSenseStatus>(`/api/projects/${projectId}/api-keys/adsense`);
 }
 
 export function setProjectAdSenseSettings(
   projectId: number,
-  input: { accountId: string; clientId: string },
-  actor: ActorInfo
+  input: { accountId: string; clientId: string }
 ): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}/api-keys/adsense`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
 export function setProjectAdSenseClientSecret(
   projectId: number,
-  clientSecret: string,
-  actor: ActorInfo
+  clientSecret: string
 ): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}/api-keys/adsense/client-secret`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ clientSecret }),
-    actor,
   });
 }
 
-export function clearProjectAdSenseCredentials(projectId: number, actor: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/projects/${projectId}/api-keys/adsense`, { method: 'DELETE', actor });
+export function clearProjectAdSenseCredentials(projectId: number): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/adsense`, { method: 'DELETE' });
 }
 
 export function completeProjectAdSenseOAuth(
   projectId: number,
-  input: { code: string; redirectUri: string },
-  actor: ActorInfo
+  input: { code: string; redirectUri: string }
 ): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}/api-keys/adsense/oauth-callback`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
@@ -1593,8 +1430,8 @@ export interface AdSenseReport {
   platformBreakdown: AdSensePlatformBreakdown[];
 }
 
-export function getProjectAdSenseReport(projectId: number, actor?: ActorInfo): Promise<AdSenseReport> {
-  return apiFetch<AdSenseReport>(`/api/projects/${projectId}/dashboard/adsense`, { actor });
+export function getProjectAdSenseReport(projectId: number): Promise<AdSenseReport> {
+  return apiFetch<AdSenseReport>(`/api/projects/${projectId}/dashboard/adsense`);
 }
 
 /**
@@ -1611,16 +1448,15 @@ export interface AppSetting {
   value: string | null;
 }
 
-export function listAppSettings(actor?: ActorInfo): Promise<AppSetting[]> {
-  return apiFetch<AppSetting[]>('/api/system-settings/app-settings', { actor });
+export function listAppSettings(): Promise<AppSetting[]> {
+  return apiFetch<AppSetting[]>('/api/system-settings/app-settings');
 }
 
-export function updateAppSettings(settings: Record<string, string>, actor: ActorInfo): Promise<void> {
+export function updateAppSettings(settings: Record<string, string>): Promise<void> {
   return apiFetch<void>('/api/system-settings/app-settings', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(settings),
-    actor,
   });
 }
 
@@ -1691,43 +1527,36 @@ export function sendArticlePlanChatMessage(
     message: string;
     sessionId?: number | null;
     githubIssueNumber?: number | null;
-  },
-  actor?: ActorInfo
+  }
 ): Promise<PlanChatResponse> {
   return apiFetch<PlanChatResponse>(`/api/projects/${projectId}/article-plan/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-    actor,
   });
 }
 
 export function listArticlePlanSessions(
-  projectId: number,
-  actor?: ActorInfo
+  projectId: number
 ): Promise<ArticlePlanSessionSummary[]> {
-  return apiFetch<ArticlePlanSessionSummary[]>(`/api/projects/${projectId}/article-plan/sessions`, { actor });
+  return apiFetch<ArticlePlanSessionSummary[]>(`/api/projects/${projectId}/article-plan/sessions`);
 }
 
 export function getArticlePlanSession(
   projectId: number,
-  sessionId: number,
-  actor?: ActorInfo
+  sessionId: number
 ): Promise<ArticlePlanSessionDetail> {
   return apiFetch<ArticlePlanSessionDetail>(
-    `/api/projects/${projectId}/article-plan/sessions/${sessionId}`,
-    { actor }
+    `/api/projects/${projectId}/article-plan/sessions/${sessionId}`
   );
 }
 
 export function getArticlePlanSessionByIssue(
   projectId: number,
-  issueNumber: number,
-  actor?: ActorInfo
+  issueNumber: number
 ): Promise<ArticlePlanSessionDetail> {
   return apiFetch<ArticlePlanSessionDetail>(
-    `/api/projects/${projectId}/article-plan/sessions/by-issue/${issueNumber}`,
-    { actor }
+    `/api/projects/${projectId}/article-plan/sessions/by-issue/${issueNumber}`
   );
 }
 
@@ -1737,70 +1566,59 @@ export interface IssueDescriptionResponse {
 
 export function getArticlePlanIssueDescription(
   projectId: number,
-  issueNumber: number,
-  actor?: ActorInfo
+  issueNumber: number
 ): Promise<IssueDescriptionResponse> {
   return apiFetch<IssueDescriptionResponse>(
-    `/api/projects/${projectId}/article-plan/issues/${issueNumber}/description`,
-    { actor }
+    `/api/projects/${projectId}/article-plan/issues/${issueNumber}/description`
   );
 }
 
 export function listArticlePlanIssues(
   projectId: number,
-  state: RepositoryIssueState,
-  actor?: ActorInfo
+  state: RepositoryIssueState
 ): Promise<RepositoryIssue[]> {
   return apiFetch<RepositoryIssue[]>(
-    `/api/projects/${projectId}/article-plan/issues?state=${state}`,
-    { actor }
+    `/api/projects/${projectId}/article-plan/issues?state=${state}`
   );
 }
 
 export function suggestArticlePlanTitles(
   projectId: number,
-  data: { history: PlanChatMessage[] },
-  actor?: ActorInfo
+  data: { history: PlanChatMessage[] }
 ): Promise<SuggestTitlesResponse> {
   return apiFetch<SuggestTitlesResponse>(`/api/projects/${projectId}/article-plan/suggest-titles`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-    actor,
   });
 }
 
 export function acceptArticlePlan(
   projectId: number,
-  data: { titles: string[] },
-  actor?: ActorInfo
+  data: { titles: string[] }
 ): Promise<AcceptPlanResponse> {
   return apiFetch<AcceptPlanResponse>(`/api/projects/${projectId}/article-plan/accept`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-    actor,
   });
 }
 
 export function suggestArticleStructure(
   projectId: number,
-  data: { history: PlanChatMessage[] },
-  actor?: ActorInfo
+  data: { history: PlanChatMessage[] }
 ): Promise<SuggestStructureResponse> {
   return apiFetch<SuggestStructureResponse>(`/api/projects/${projectId}/article-plan/suggest-structure`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-    actor,
   });
 }
 
 export function acceptArticleStructure(
   projectId: number,
   issueNumber: number,
-  data: { structure: string },
-  actor?: ActorInfo
+  data: { structure: string }
 ): Promise<AcceptStructureResponse> {
   return apiFetch<AcceptStructureResponse>(
     `/api/projects/${projectId}/article-plan/issues/${issueNumber}/accept-structure`,
@@ -1808,58 +1626,50 @@ export function acceptArticleStructure(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
-      actor,
     }
   );
 }
 
 export function updateMasterEnvironment(
   id: number,
-  masterEnvironment: "test" | "production",
-  actor?: ActorInfo
+  masterEnvironment: "test" | "production"
 ): Promise<Project> {
   return apiFetch<Project>(`/api/projects/${id}/master-environment`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ masterEnvironment }),
-    actor,
   });
 }
 
 export function bindProjectEnvironment(
   id: number,
   environment: ProjectEnvironment,
-  siteId: number,
-  actor?: ActorInfo
+  siteId: number
 ): Promise<Project> {
   return apiFetch<Project>(`/api/projects/${id}/environments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ environment, siteId }),
-    actor,
   });
 }
 
 export function unbindProjectEnvironment(
   id: number,
-  environment: ProjectEnvironment,
-  actor?: ActorInfo
+  environment: ProjectEnvironment
 ): Promise<Project> {
-  return apiFetch<Project>(`/api/projects/${id}/environments/${environment}`, { method: 'DELETE', actor });
+  return apiFetch<Project>(`/api/projects/${id}/environments/${environment}`, { method: 'DELETE' });
 }
 
 export type EnvironmentSyncTarget = "themes" | "plugins" | "media" | "db";
 
 export function syncProjectEnvironment(
   id: number,
-  input: { from: ProjectEnvironment; to: ProjectEnvironment; targets: EnvironmentSyncTarget[] },
-  actor?: ActorInfo
+  input: { from: ProjectEnvironment; to: ProjectEnvironment; targets: EnvironmentSyncTarget[] }
 ): Promise<void> {
   return apiFetch<void>(`/api/projects/${id}/environments/sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
@@ -1935,23 +1745,19 @@ export interface TermComparisonPage {
 
 export function listCategoryComparison(
   projectId: number,
-  page: number,
-  actor?: ActorInfo
+  page: number
 ): Promise<TermComparisonPage> {
   return apiFetch<TermComparisonPage>(
-    `/api/projects/${projectId}/bulk-management/categories/comparison?page=${page}`,
-    { actor }
+    `/api/projects/${projectId}/bulk-management/categories/comparison?page=${page}`
   );
 }
 
 export function listTagComparison(
   projectId: number,
-  page: number,
-  actor?: ActorInfo
+  page: number
 ): Promise<TermComparisonPage> {
   return apiFetch<TermComparisonPage>(
-    `/api/projects/${projectId}/bulk-management/tags/comparison?page=${page}`,
-    { actor }
+    `/api/projects/${projectId}/bulk-management/tags/comparison?page=${page}`
   );
 }
 
@@ -1965,14 +1771,12 @@ export function applyToEnvironment(
     categoryParentSlug?: string;
     categoryDescription?: string;
     categoryTargetSlug?: string;
-  },
-  actor?: ActorInfo
+  }
 ): Promise<BulkOperationLog> {
   return apiFetch<BulkOperationLog>(`/api/projects/${projectId}/bulk-management/apply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
@@ -1981,53 +1785,45 @@ export function applyToAllEnvironments(
   input: {
     operationType: BulkOperationType;
     value: string;
-  },
-  actor?: ActorInfo
+  }
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/apply-all`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
 export function syncCategoryToMaster(
   projectId: number,
-  slug: string,
-  actor?: ActorInfo
+  slug: string
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/categories/sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ slug }),
-    actor,
   });
 }
 
 export function deleteCategoryEverywhere(
   projectId: number,
-  slug: string,
-  actor?: ActorInfo
+  slug: string
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/categories/delete-all`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ slug }),
-    actor,
   });
 }
 
 export function syncTagToMaster(
   projectId: number,
-  slug: string,
-  actor?: ActorInfo
+  slug: string
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/tags/sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ slug }),
-    actor,
   });
 }
 
@@ -2041,60 +1837,50 @@ export interface EditTermInput {
 
 export function editCategoryAndSync(
   projectId: number,
-  input: EditTermInput,
-  actor?: ActorInfo
+  input: EditTermInput
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/categories/edit-sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
 export function editTagAndSync(
   projectId: number,
-  input: EditTermInput,
-  actor?: ActorInfo
+  input: EditTermInput
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/tags/edit-sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
 export function syncAllCategoriesToMaster(
-  projectId: number,
-  actor?: ActorInfo
+  projectId: number
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/categories/sync-all`, {
     method: 'POST',
-    actor,
   });
 }
 
 export function syncAllTagsToMaster(
-  projectId: number,
-  actor?: ActorInfo
+  projectId: number
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/tags/sync-all`, {
     method: 'POST',
-    actor,
   });
 }
 
 export function deleteTagEverywhere(
   projectId: number,
-  slug: string,
-  actor?: ActorInfo
+  slug: string
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/tags/delete-all`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ slug }),
-    actor,
   });
 }
 
@@ -2124,75 +1910,63 @@ export interface StatusComparisonPage {
 
 export function listPluginComparison(
   projectId: number,
-  page: number,
-  actor?: ActorInfo
+  page: number
 ): Promise<StatusComparisonPage> {
   return apiFetch<StatusComparisonPage>(
-    `/api/projects/${projectId}/bulk-management/plugins/comparison?page=${page}`,
-    { actor }
+    `/api/projects/${projectId}/bulk-management/plugins/comparison?page=${page}`
   );
 }
 
 export function listThemeComparison(
   projectId: number,
-  page: number,
-  actor?: ActorInfo
+  page: number
 ): Promise<StatusComparisonPage> {
   return apiFetch<StatusComparisonPage>(
-    `/api/projects/${projectId}/bulk-management/themes/comparison?page=${page}`,
-    { actor }
+    `/api/projects/${projectId}/bulk-management/themes/comparison?page=${page}`
   );
 }
 
 export function reconcilePluginState(
   projectId: number,
-  input: { slug: string; changes: { environment: ProjectEnvironment; desiredStatus: PluginThemeStatus }[] },
-  actor?: ActorInfo
+  input: { slug: string; changes: { environment: ProjectEnvironment; desiredStatus: PluginThemeStatus }[] }
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/plugins/reconcile`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
 export function reconcileThemeState(
   projectId: number,
-  input: { slug: string; changes: { environment: ProjectEnvironment; desiredStatus: PluginThemeStatus }[] },
-  actor?: ActorInfo
+  input: { slug: string; changes: { environment: ProjectEnvironment; desiredStatus: PluginThemeStatus }[] }
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/themes/reconcile`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
-    actor,
   });
 }
 
 export function deletePluginEverywhere(
   projectId: number,
-  slug: string,
-  actor?: ActorInfo
+  slug: string
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/plugins/delete-all`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ slug }),
-    actor,
   });
 }
 
 export function deleteThemeEverywhere(
   projectId: number,
-  slug: string,
-  actor?: ActorInfo
+  slug: string
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/themes/delete-all`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ slug }),
-    actor,
   });
 }
 
@@ -2225,20 +1999,17 @@ export interface PostComparisonPage {
 export function listPostComparison(
   projectId: number,
   postType: PostType,
-  page: number,
-  actor?: ActorInfo
+  page: number
 ): Promise<PostComparisonPage> {
   return apiFetch<PostComparisonPage>(
-    `/api/projects/${projectId}/bulk-management/posts/comparison?postType=${postType}&page=${page}`,
-    { actor }
+    `/api/projects/${projectId}/bulk-management/posts/comparison?postType=${postType}&page=${page}`
   );
 }
 
 export function deletePostEverywhere(
   projectId: number,
   postType: PostType,
-  slug: string,
-  actor?: ActorInfo
+  slug: string
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(
     `/api/projects/${projectId}/bulk-management/posts/delete-all?postType=${postType}`,
@@ -2246,7 +2017,6 @@ export function deletePostEverywhere(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ slug }),
-      actor,
     }
   );
 }
@@ -2255,8 +2025,7 @@ export function updatePostStatusEverywhere(
   projectId: number,
   postType: PostType,
   slug: string,
-  status: string,
-  actor?: ActorInfo
+  status: string
 ): Promise<BulkOperationLog[]> {
   return apiFetch<BulkOperationLog[]>(
     `/api/projects/${projectId}/bulk-management/posts/status-update?postType=${postType}`,
@@ -2264,15 +2033,13 @@ export function updatePostStatusEverywhere(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ slug, status }),
-      actor,
     }
   );
 }
 
 export function runBulkOperationUpload(
   projectId: number,
-  input: { operationType: ZipInstallOperationType; file: File },
-  actor?: ActorInfo
+  input: { operationType: ZipInstallOperationType; file: File }
 ): Promise<BulkOperationLog[]> {
   const formData = new FormData();
   formData.append('operationType', input.operationType);
@@ -2280,7 +2047,6 @@ export function runBulkOperationUpload(
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/upload`, {
     method: 'POST',
     body: formData,
-    actor,
   });
 }
 
@@ -2291,40 +2057,36 @@ export interface ProjectUser {
   wpRole: string;
 }
 
-export function listProjectUsers(projectId: number, actor?: ActorInfo): Promise<ProjectUser[]> {
-  return apiFetch<ProjectUser[]>(`/api/projects/${projectId}/users`, { actor });
+export function listProjectUsers(projectId: number): Promise<ProjectUser[]> {
+  return apiFetch<ProjectUser[]>(`/api/projects/${projectId}/users`);
 }
 
 export function addProjectUser(
   projectId: number,
   userId: number,
-  wpRole: string,
-  actor?: ActorInfo
+  wpRole: string
 ): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}/users`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ userId, wpRole }),
-    actor,
   });
 }
 
 export function updateProjectUserRole(
   projectId: number,
   userId: number,
-  wpRole: string,
-  actor?: ActorInfo
+  wpRole: string
 ): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}/users/${userId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ wpRole }),
-    actor,
   });
 }
 
-export function removeProjectUser(projectId: number, userId: number, actor?: ActorInfo): Promise<void> {
-  return apiFetch<void>(`/api/projects/${projectId}/users/${userId}`, { method: 'DELETE', actor });
+export function removeProjectUser(projectId: number, userId: number): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/users/${userId}`, { method: 'DELETE' });
 }
 
 export interface ProjectUserSummary {
@@ -2333,8 +2095,8 @@ export interface ProjectUserSummary {
   wpRole: string;
 }
 
-export function listAllProjectUsers(actor?: ActorInfo): Promise<ProjectUserSummary[]> {
-  return apiFetch<ProjectUserSummary[]>('/api/project-users', { actor });
+export function listAllProjectUsers(): Promise<ProjectUserSummary[]> {
+  return apiFetch<ProjectUserSummary[]>('/api/project-users');
 }
 
 export interface GenerationJobDetail {
@@ -2347,8 +2109,8 @@ export interface GenerationJobDetail {
   updatedAt: string;
 }
 
-export function getGenerationJob(id: number, actor?: ActorInfo): Promise<GenerationJobDetail> {
-  return apiFetch<GenerationJobDetail>(`/api/generation-jobs/${id}`, { actor });
+export function getGenerationJob(id: number): Promise<GenerationJobDetail> {
+  return apiFetch<GenerationJobDetail>(`/api/generation-jobs/${id}`);
 }
 
 export interface LlmModelListResponse {
@@ -2356,20 +2118,18 @@ export interface LlmModelListResponse {
   selected: string;
 }
 
-export function listLlmModels(projectId: number, actor?: ActorInfo): Promise<LlmModelListResponse> {
-  return apiFetch<LlmModelListResponse>(`/api/projects/${projectId}/ai-models/llm/models`, { actor });
+export function listLlmModels(projectId: number): Promise<LlmModelListResponse> {
+  return apiFetch<LlmModelListResponse>(`/api/projects/${projectId}/ai-models/llm/models`);
 }
 
 export function selectLlmModel(
   projectId: number,
-  modelName: string,
-  actor?: ActorInfo
+  modelName: string
 ): Promise<LlmModelListResponse> {
   return apiFetch<LlmModelListResponse>(`/api/projects/${projectId}/ai-models/llm/models/selection`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ modelName }),
-    actor,
   });
 }
 
@@ -2379,21 +2139,19 @@ export interface LlmProviderListResponse {
   selected: string | null;
 }
 
-export function listLlmProvider(projectId: number, actor?: ActorInfo): Promise<LlmProviderListResponse> {
-  return apiFetch<LlmProviderListResponse>(`/api/projects/${projectId}/ai-models/llm/provider`, { actor });
+export function listLlmProvider(projectId: number): Promise<LlmProviderListResponse> {
+  return apiFetch<LlmProviderListResponse>(`/api/projects/${projectId}/ai-models/llm/provider`);
 }
 
 /** provider未指定(空文字)はプロジェクト単位の上書きを解除し、グローバル既定へ戻す。 */
 export function selectLlmProvider(
   projectId: number,
-  provider: string,
-  actor?: ActorInfo
+  provider: string
 ): Promise<LlmProviderListResponse> {
   return apiFetch<LlmProviderListResponse>(`/api/projects/${projectId}/ai-models/llm/provider/selection`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ provider: provider || null }),
-    actor,
   });
 }
 
@@ -2403,21 +2161,19 @@ export interface ImageProviderListResponse {
   selected: string | null;
 }
 
-export function listImageProvider(projectId: number, actor?: ActorInfo): Promise<ImageProviderListResponse> {
-  return apiFetch<ImageProviderListResponse>(`/api/projects/${projectId}/ai-models/image/provider`, { actor });
+export function listImageProvider(projectId: number): Promise<ImageProviderListResponse> {
+  return apiFetch<ImageProviderListResponse>(`/api/projects/${projectId}/ai-models/image/provider`);
 }
 
 /** provider未指定(空文字)はプロジェクト単位の上書きを解除し、ComfyUIへ戻す。 */
 export function selectImageProvider(
   projectId: number,
-  provider: string,
-  actor?: ActorInfo
+  provider: string
 ): Promise<ImageProviderListResponse> {
   return apiFetch<ImageProviderListResponse>(`/api/projects/${projectId}/ai-models/image/provider/selection`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ provider: provider || null }),
-    actor,
   });
 }
 
@@ -2427,18 +2183,15 @@ export interface ComfyUiCheckpointListResponse {
 }
 
 export function listComfyUiCheckpoints(
-  projectId: number,
-  actor?: ActorInfo
+  projectId: number
 ): Promise<ComfyUiCheckpointListResponse> {
   return apiFetch<ComfyUiCheckpointListResponse>(`/api/projects/${projectId}/ai-models/comfyui/checkpoints`, {
-    actor,
   });
 }
 
 export function selectComfyUiCheckpoint(
   projectId: number,
-  checkpointName: string,
-  actor?: ActorInfo
+  checkpointName: string
 ): Promise<ComfyUiCheckpointListResponse> {
   return apiFetch<ComfyUiCheckpointListResponse>(
     `/api/projects/${projectId}/ai-models/comfyui/checkpoints/selection`,
@@ -2446,7 +2199,6 @@ export function selectComfyUiCheckpoint(
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ checkpointName }),
-      actor,
     }
   );
 }
@@ -2454,25 +2206,22 @@ export function selectComfyUiCheckpoint(
 export function installComfyUiCheckpoint(
   projectId: number,
   downloadUrl: string,
-  fileName: string,
-  actor?: ActorInfo
+  fileName: string
 ): Promise<GenerationJob> {
   return apiFetch<GenerationJob>(`/api/projects/${projectId}/ai-models/comfyui/checkpoints/install`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ downloadUrl, fileName }),
-    actor,
   });
 }
 
 export function deleteComfyUiCheckpoint(
   projectId: number,
-  fileName: string,
-  actor?: ActorInfo
+  fileName: string
 ): Promise<GenerationJob> {
   return apiFetch<GenerationJob>(
     `/api/projects/${projectId}/ai-models/comfyui/checkpoints/${encodeURIComponent(fileName)}`,
-    { method: 'DELETE', actor }
+    { method: 'DELETE' }
   );
 }
 
@@ -2495,20 +2244,17 @@ export interface MediaGarbageCollectionScanResponse {
 
 export function scanMediaGarbage(
   projectId: number,
-  environment: ProjectEnvironment,
-  actor?: ActorInfo
+  environment: ProjectEnvironment
 ): Promise<MediaGarbageCollectionScanResponse> {
   return apiFetch<MediaGarbageCollectionScanResponse>(
-    `/api/projects/${projectId}/media-garbage-collection/scan?environment=${environment}`,
-    { actor }
+    `/api/projects/${projectId}/media-garbage-collection/scan?environment=${environment}`
   );
 }
 
 export function deleteMediaGarbage(
   projectId: number,
   environment: ProjectEnvironment,
-  mediaIds: string[],
-  actor?: ActorInfo
+  mediaIds: string[]
 ): Promise<GenerationJob> {
   return apiFetch<GenerationJob>(
     `/api/projects/${projectId}/media-garbage-collection/delete?environment=${environment}`,
@@ -2516,25 +2262,17 @@ export function deleteMediaGarbage(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mediaIds }),
-      actor,
     }
   );
 }
 
 /**
  * VSCode拡張機能(.vsix)をAPIサーバーからダウンロードする。APIサーバー側で
- * オンデマンドビルド(初回は数十秒かかる場合がある)されるため、apiFetchのJSON前提の
- * エラーハンドリングは使わずバイナリを直接扱う。
+ * オンデマンドビルド(初回は数十秒かかる場合がある)されるため、JSONデコードを行うapiFetch()では
+ * なく、共通処理はそのままにResponseを返すapiRequest()を使ってバイナリを直接扱う。
  */
 export async function downloadVscodeExtension(): Promise<{ body: ArrayBuffer; filename: string }> {
-  const res = await fetch(`${serverUrl()}/api/system/vscode-extension`, {
-    headers: { 'X-API-Key': await currentApiKey() },
-    cache: 'no-store',
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`APIエラー (${res.status}): ${body || res.statusText}`);
-  }
+  const res = await apiRequest('/api/system/vscode-extension');
   const disposition = res.headers.get('content-disposition') ?? '';
   const match = disposition.match(/filename="([^"]+)"/);
   const filename = match ? match[1] : 'letsblog-vscode.vsix';
@@ -2563,20 +2301,21 @@ export interface ConnectedServiceStatusDetail {
 }
 
 /** 応答時間・エラー内容・チェック対象URLなどの詳細診断情報(issue #199)。admin限定、非adminが呼ぶと403になる。 */
-export function getConnectedServiceStatusDetail(actor?: ActorInfo): Promise<ConnectedServiceStatusDetail[]> {
-  return apiFetch<ConnectedServiceStatusDetail[]>('/api/dashboard/service-status/detail', { actor });
+export function getConnectedServiceStatusDetail(): Promise<ConnectedServiceStatusDetail[]> {
+  return apiFetch<ConnectedServiceStatusDetail[]>('/api/dashboard/service-status/detail');
 }
 
 /**
  * 接続サービスの稼働状況をSSEで受け取るためのアップストリーム接続(issue #198)。
- * apiFetch()はJSONレスポンス前提のためストリーミングには使えず、ここだけ直接fetchする。
- * 呼び出し元(Route Handler)がbodyをそのままブラウザへ中継する。
+ * apiFetch()はJSONレスポンス前提のためストリーミングには使えないが、共通処理(gatewayのベースURL・
+ * 認証ヘッダ・操作ログ)は共有できるようapiRequest()を使う(issue #584)。
+ * 呼び出し元(Route Handler)がstatusとbodyをそのままブラウザへ中継するため、
+ * HTTPエラーでも例外は投げずResponseを返す(throwOnError: false)。
  */
 export async function streamConnectedServiceStatuses(): Promise<Response> {
-  const apiKey = await currentApiKey();
-  return fetch(`${serverUrl()}/api/dashboard/service-status/stream`, {
-    headers: { 'X-API-Key': apiKey, Accept: 'text/event-stream' },
-    cache: 'no-store',
+  return apiRequest('/api/dashboard/service-status/stream', {
+    headers: { Accept: 'text/event-stream' },
+    throwOnError: false,
   });
 }
 
@@ -2593,11 +2332,10 @@ export function getContainerStatuses(): Promise<ContainerStatus[]> {
   return apiFetch<ContainerStatus[]>('/api/dashboard/container-status');
 }
 
-/** コンテナ稼働状況をSSEで受け取るためのアップストリーム接続(issue #280)。 */
+/** コンテナ稼働状況をSSEで受け取るためのアップストリーム接続(issue #280)。streamConnectedServiceStatuses()と同じ扱い。 */
 export async function streamContainerStatuses(): Promise<Response> {
-  const apiKey = await currentApiKey();
-  return fetch(`${serverUrl()}/api/dashboard/container-status/stream`, {
-    headers: { 'X-API-Key': apiKey, Accept: 'text/event-stream' },
-    cache: 'no-store',
+  return apiRequest('/api/dashboard/container-status/stream', {
+    headers: { Accept: 'text/event-stream' },
+    throwOnError: false,
   });
 }

@@ -1,0 +1,87 @@
+// content-service (#576): 記事本文(posts)・カスタムタグ・Markdownレンダリング・記事プレビュー・
+// ブログカード/Amazonタグのコンテンツキャッシュをlegacy-apiから抽出した。公開パイプラインと
+// プレビューの両方から使われる中核ドメイン。スキーマ分離(lbs_content)により他サービスから独立する。
+// [blogcard]/[amazon]タグのスクレイピング(ContentCacheService)、記事プレビューのテーマ骨格取得
+// (PreviewSkeletonFetcher)にヘッドレスChromium(Playwright)を使うため、legacy-apiと同じ
+// Playwright依存を持つ(Playwrightを持つのはcontent-serviceになった。issueの注記参照)。
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.1.0'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'jacoco'
+    id 'checkstyle'
+}
+
+dependencies {
+    implementation project(':libs:lbs-common')
+
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-restclient'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-amqp'
+    // letsblog.eventsコンシューマーのリトライ→DLQ(spring.rabbitmq.listener.simple.retry、issue #580)。
+    // Spring BootのBOM(dependency-management)がバージョンを管理しないため明示指定する。
+    implementation 'org.springframework.retry:spring-retry:2.0.11'
+    // MediaRenderClient/LegacyApiBridgeClient/IdentityClient/OgpMetadataParser等がcom.fasterxml.jackson.
+    // databind.ObjectMapper/JsonNodeを直接使うため明示的に追加する(Boot 4の既定JSONコンバータ・既定
+    // ObjectMapperはJackson3系(tools.jackson)に変わったため。legacy-api/media-service/ai-serviceと同じ構成)。
+    implementation 'org.springframework.boot:spring-boot-jackson2'
+
+    // posts/custom_tags/custom_tag_templates/content_cache/project_content_settingsのスキーマ所有権(#576)。
+    implementation 'org.springframework.boot:spring-boot-starter-flyway'
+    implementation 'org.flywaydb:flyway-mysql'
+
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    // @AuditLog(CustomTagService/CustomTagTemplateService)のAOP実装(AuditLogAspect)に使う。
+    // legacy-apiと同じ構成。
+    implementation 'org.springframework.boot:spring-boot-starter-aspectj'
+
+    implementation 'com.mysql:mysql-connector-j'
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0'
+
+    // Markdown->HTML変換(MarkdownRenderer)。legacy-apiと同一バージョン。
+    implementation 'com.vladsch.flexmark:flexmark-all:0.64.8'
+
+    // [blogcard]/[amazon]組み込みタグのスクレイピング(PlaywrightPageFetcher)、記事プレビューの
+    // テーマ骨格取得(PreviewSkeletonFetcher)に使うヘッドレスChromium。legacy-apiと同一バージョン。
+    implementation 'com.microsoft.playwright:playwright:1.62.0'
+
+    // OGPメタデータ/Amazon商品ページのHTML解析(OgpMetadataParser/AmazonProductParser)。legacy-apiと
+    // 同じくflexmark-all経由の推移的依存(org.jsoup:jsoup)をそのまま使う(明示宣言しない)。
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-webmvc-test'
+    // InternalPostBridgeControllerDeleteBySiteIntegrationTest(issue #641)が使う@AutoConfigureTestDatabase。
+    // legacy-api/build.gradleと同じ依存(ADR-0006: 実MySQLに接続する方式、Testcontainersは使わない)。
+    testImplementation 'org.springframework.boot:spring-boot-jdbc-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+    testImplementation testFixtures(project(':libs:lbs-common'))
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    finalizedBy jacocoTestReport
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+    }
+}
+
+// Dockerイメージのビルド時、実行時クラスパスのjarを一時的に取り出してPlaywrightのブラウザ
+// インストールCLI(com.microsoft.playwright.CLI)を`java -cp`で実行するために使う
+// (legacy-api/media-serviceのbuild.gradleにあるcopyRuntimeLibsタスクと同じ理由)。
+tasks.register('copyRuntimeLibs', Copy) {
+    from configurations.runtimeClasspath
+    into "$buildDir/runtime-libs"
+}

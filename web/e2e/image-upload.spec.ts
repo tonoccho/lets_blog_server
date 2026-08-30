@@ -1,9 +1,109 @@
 import { test, expect } from '@playwright/test';
-import path from 'path';
+import { E2E_ADMIN_PASSWORD, loginAsAdmin } from './helpers';
 
-test.describe('Image Upload and Generation Workflow', () => {
+/**
+ * issue #645: このファイルのほぼ全テストが `if (imageCount > 0) {...}` に包まれており、
+ * 生成画像が1件も無い環境では常に無検証のままpassしていた。加えて、
+ * `imageContainer.isClickable()`(Playwright Locatorに存在しないメソッド)や
+ * `input[type="file"]`によるローカルファイルアップロードなど、/image-galleryの実際の実装
+ * (src/app/image-gallery/page.tsx, ImageGalleryGrid.tsx)には存在しない機能を前提にしていた。
+ * /image-galleryはAI生成画像(ComfyUI/ChatGPT)の一覧・詳細・タグ編集・削除のみを提供し、
+ * ローカルファイルのアップロードや検索・ページネーションは実装されていない。
+ *
+ * beforeAllで実際にプロジェクトを作成し、アセット画像生成パネル(ProjectAssetGenerationPanel.tsx、
+ * ComfyUI経由)で1枚だけ画像を生成する。生成に成功した画像はlegacy-apiの
+ * AiAssistService#generateImageがMediaGeneratedImageClient経由でmedia-serviceへ保存するため、
+ * /image-galleryへ確実に1件表示される状態になる。ComfyUIが利用できない実行環境では、
+ * custom-tag-generation.spec.tsと同じ方針でtest.skipにより明示的にスキップする
+ * (暗黙のvacuous passにはしない)。
+ *
+ * 削除テストがこのフィクスチャ画像自体を削除するため、フルパラレル実行時に他のテストと
+ * 競合しないようこのdescribe全体をserialモードで実行する。
+ *
+ * ComfyUI生成は数分かかりうるため、beforeAll自体のタイムアウトをPlaywrightのデフォルト30秒から
+ * 延長している(test.setTimeout())。また、画像のalt属性(prompt文字列)はlegacy-apiの
+ * AiAssistService.resolveParams()でapp.default-quality-prompt(既定で
+ * "high quality, highly detailed, sharp focus, masterpiece")が自動的に末尾へ連結されるため、
+ * fixturePromptとの完全一致ではなく前方一致で照合する。
+ */
+
+test.describe('Image Gallery Workflow', () => {
+  test.describe.configure({ mode: 'serial' });
+  test.skip(!E2E_ADMIN_PASSWORD, 'E2E_ADMIN_PASSWORDが未設定のためスキップ');
+
+  let fixturePrompt: string;
+  let fixtureReady = false;
+  let fixtureProjectId: string | null = null;
+
+  test.beforeAll(async ({ browser }) => {
+    // プロジェクト作成+ComfyUI生成(最大120秒待つ)を合わせて数分かかりうるため、
+    // このフック自体のタイムアウトをデフォルトの30秒から延長する。
+    test.setTimeout(200_000);
+
+    const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    fixturePrompt = `E2E fixture image ${unique}`;
+
+    const context = await browser.newContext({ ignoreHTTPSErrors: true });
+    const page = await context.newPage();
+    try {
+      await loginAsAdmin(page);
+
+      // Fixture: 生成画像の土台となるプロジェクトを作成する。
+      const projectName = `E2E Image Fixture Project ${unique}`;
+      await page.goto('/projects');
+      await page.locator('#project-form input[name="name"]').fill(projectName);
+      await page.locator('#project-form input[name="slug"]').fill(`e2e-image-fixture-${unique}`);
+      await page.locator('#project-form button:has-text("作成")').click();
+      await expect(page.getByText('作成しました。')).toBeVisible({ timeout: 10000 });
+      await page.reload();
+      await page.locator(`tbody tr:has-text("${projectName}") a:has-text("詳細")`).click();
+      await expect(page).toHaveURL(/\/projects\/\d+$/, { timeout: 10000 });
+      fixtureProjectId = page.url().match(/\/projects\/(\d+)$/)?.[1] ?? null;
+
+      // アセット画像生成パネルを開き、低steps・小サイズ・1枚のみの最小構成で生成する。
+      await page.locator('button:has-text("アセット画像生成")').click();
+      await page.locator('textarea[placeholder="生成したい画像の説明"]').fill(fixturePrompt);
+      await page.locator('label:has-text("steps") + input').fill('5');
+      await page.locator('label:has-text("width") + input').fill('512');
+      await page.locator('label:has-text("height") + input').fill('512');
+      await page.locator('label:has-text("batch size") + input').fill('1');
+
+      const generateButton = page.getByRole('button', { name: '生成', exact: true });
+      await generateButton.click();
+
+      const successMessage = page.getByText('生成しました。アセットとして追加する画像を選択してください。');
+      const errorMessage = page.locator('p.text-red-600');
+      await expect(successMessage.or(errorMessage)).toBeVisible({ timeout: 120000 });
+      fixtureReady = await successMessage.isVisible();
+    } finally {
+      await context.close();
+    }
+  });
+
+  test.afterAll(async ({ browser }) => {
+    test.setTimeout(60_000);
+
+    if (!fixtureProjectId) {
+      // beforeAllがプロジェクト作成の完了前に失敗した場合は、削除対象が存在しないため何もしない。
+      return;
+    }
+
+    const context = await browser.newContext({ ignoreHTTPSErrors: true });
+    const page = await context.newPage();
+    try {
+      await loginAsAdmin(page);
+      await page.goto(`/projects/${fixtureProjectId}`);
+
+      page.once('dialog', (dialog) => dialog.accept());
+      await page.locator('button:has-text("プロジェクトを削除")').click();
+      await expect(page).toHaveURL(/\/projects$/, { timeout: 15000 });
+    } finally {
+      await context.close();
+    }
+  });
+
   test.beforeEach(async ({ page }) => {
-    // Navigate to image gallery page
+    await loginAsAdmin(page);
     await page.goto('/image-gallery');
   });
 
@@ -17,143 +117,57 @@ test.describe('Image Upload and Generation Workflow', () => {
     expect(title.toLowerCase()).toMatch(/画像|image|gallery/i);
   });
 
-  test('Image gallery displays uploaded images (if any)', async ({ page }) => {
-    // Step 1: Check if there are any images displayed
-    const imageElements = page.locator('img[alt], [role="img"]');
-    const imageCount = await imageElements.count();
+  test('Image gallery displays the fixture generated image', async ({ page }) => {
+    test.skip(!fixtureReady, 'ComfyUIでの画像生成に失敗したため実行をスキップ');
 
-    // Step 2: If images exist, verify they're visible
-    if (imageCount > 0) {
-      const firstImage = imageElements.first();
-      await expect(firstImage).toBeVisible();
-    }
+    const fixtureImage = page.locator(`img[alt^="${fixturePrompt}"]`);
+    await expect(fixtureImage).toBeVisible();
   });
 
-  test('Image upload interface is accessible', async ({ page }) => {
-    // Step 1: Look for file input
-    const fileInput = page.locator('input[type="file"]').first();
+  test('Image detail modal opens and shows generation parameters', async ({ page }) => {
+    test.skip(!fixtureReady, 'ComfyUIでの画像生成に失敗したため実行をスキップ');
 
-    if (await fileInput.isVisible()) {
-      // Step 2: Verify upload button is visible
-      const uploadButton = page.locator('button:has-text("アップロード"), button:has-text("Upload")').first();
-      await expect(uploadButton).toBeVisible().catch(() => {
-        // Upload button might appear after selecting file
-        console.log('Upload button may appear after file selection');
-      });
-    }
+    const fixtureImage = page.locator(`img[alt^="${fixturePrompt}"]`);
+    await fixtureImage.click();
+
+    await expect(page.getByText('生成画像の詳細')).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText('steps')).toBeVisible();
   });
 
-  test('Search or filter images (if feature exists)', async ({ page }) => {
-    // Step 1: Look for search input
-    const searchInput = page.locator('input[placeholder*="検索"], input[placeholder*="Search"], input[placeholder*="filter"]');
-
-    if (await searchInput.isVisible()) {
-      // Step 2: Perform a search
-      await searchInput.fill('test');
-
-      // Step 3: Wait for results to update
-      await page.waitForTimeout(500);
-
-      // Step 4: Verify page is still loaded
-      await expect(page).toHaveURL(/image-gallery/);
-    }
+  test('Local file upload input is not implemented on the image gallery page', async ({ page }) => {
+    // /image-galleryにファイルアップロード用のinput[type="file"]は実装されていない
+    // (issue #645で確認。画像はComfyUI/ChatGPT生成、またはVSCode拡張経由でのみ登録される)。
+    const fileInput = page.locator('input[type="file"]');
+    await expect(fileInput).toHaveCount(0);
   });
 
-  test('Image deletion (if delete functionality exists)', async ({ page }) => {
-    // Step 1: Check if there are any images in the gallery
-    const imageElements = page.locator('img[alt], [role="img"]');
-    const imageCount = await imageElements.count();
-
-    if (imageCount > 0) {
-      // Step 2: Look for delete button
-      const deleteButtons = page.locator('button:has-text("削除"), button[aria-label*="delete"]');
-      const deleteCount = await deleteButtons.count();
-
-      if (deleteCount > 0) {
-        // Step 3: Click first delete button
-        await deleteButtons.first().click();
-
-        // Step 4: Confirm deletion if dialog appears
-        const confirmButton = page.locator('button:has-text("確認"), button:has-text("削除"), button:has-text("OK")').first();
-        if (await confirmButton.isVisible()) {
-          await confirmButton.click();
-
-          // Step 5: Verify deletion (success message or image removed)
-          await expect(page).toHaveURL(/image-gallery/, { timeout: 10000 });
-        }
-      }
-    }
+  test('Search/filter input is not implemented on the image gallery page', async ({ page }) => {
+    // 検索・フィルタ入力欄も実装されていない(issue #645で確認)。
+    const searchInput = page.locator(
+      'input[placeholder*="検索"], input[placeholder*="Search"], input[placeholder*="filter"]'
+    );
+    await expect(searchInput).toHaveCount(0);
   });
 
-  test('Image detail/preview (if feature exists)', async ({ page }) => {
-    // Step 1: Check if there are any images
-    const imageElements = page.locator('img[alt], [role="img"]');
-    const imageCount = await imageElements.count();
-
-    if (imageCount > 0) {
-      // Step 2: Click on first image to view details
-      const firstImage = imageElements.first();
-      const imageContainer = firstImage.locator('..').first(); // Get parent element
-
-      if (await imageContainer.isClickable()) {
-        await imageContainer.click();
-
-        // Step 3: Verify modal or detail page opens
-        const modal = page.locator('[role="dialog"], [class*="modal"]').first();
-        await expect(modal).toBeVisible({ timeout: 5000 }).catch(() => {
-          // If no modal, verify we're on a detail page
-          console.log('Image detail might open in separate page');
-        });
-      }
-    }
-  });
-
-  test('Image metadata display (if available)', async ({ page }) => {
-    // Step 1: Check if there are any images
-    const imageElements = page.locator('img[alt], [role="img"]');
-    const imageCount = await imageElements.count();
-
-    if (imageCount > 0) {
-      // Step 2: Look for metadata elements (date, size, etc.)
-      const metadataElements = page.locator('[class*="meta"], [class*="info"], [class*="detail"]');
-      const metadataCount = await metadataElements.count();
-
-      if (metadataCount > 0) {
-        await expect(metadataElements.first()).toBeVisible();
-      }
-    }
-  });
-
-  test('Image pagination/infinite scroll (if feature exists)', async ({ page }) => {
-    // Step 1: Get initial image count
-    const initialImages = page.locator('img[alt], [role="img"]');
-    const initialCount = await initialImages.count();
-
-    if (initialCount > 0) {
-      // Step 2: Scroll to bottom of page
-      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-
-      // Step 3: Wait for potential new images to load
-      await page.waitForTimeout(1000);
-
-      // Step 4: Verify page is still loaded
-      await expect(page).toHaveURL(/image-gallery/);
-    }
-  });
-
-  test('Responsive layout on mobile (if applicable)', async ({ page }) => {
+  test('Responsive layout on mobile', async ({ page }) => {
     // Step 1: Set mobile viewport
     await page.setViewportSize({ width: 375, height: 667 });
 
     // Step 2: Verify page is still accessible on mobile
     const heading = page.locator('h1');
     await expect(heading).toBeVisible();
+  });
 
-    // Step 3: Verify images are still displayed
-    const imageElements = page.locator('img[alt], [role="img"]');
-    if (await imageElements.count() > 0) {
-      const firstImage = imageElements.first();
-      await expect(firstImage).toBeVisible();
-    }
+  test('Image deletion removes the fixture image from the gallery', async ({ page }) => {
+    test.skip(!fixtureReady, 'ComfyUIでの画像生成に失敗したため実行をスキップ');
+
+    const fixtureImage = page.locator(`img[alt^="${fixturePrompt}"]`);
+    await fixtureImage.click();
+    await expect(page.getByText('生成画像の詳細')).toBeVisible();
+
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.locator('button:has-text("削除")').click();
+
+    await expect(fixtureImage).toHaveCount(0, { timeout: 10000 });
   });
 });

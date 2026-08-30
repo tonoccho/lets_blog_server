@@ -43,10 +43,6 @@
         "title": "Let's Blog: Select Site"
       },
       {
-        "command": "letsBlog.setApiKey",
-        "title": "Let's Blog: Set API Key"
-      },
-      {
         "command": "letsBlog.askAi",
         "title": "Let's Blog: Ask AI (Draft/Proofread/Summarize)"
       },
@@ -193,7 +189,7 @@
         "letsBlog.serverUrl": {
           "type": "string",
           "default": "https://localhost",
-          "description": "仲介APIサーバーのベースURL(リバースプロキシ経由の自己署名証明書を既定で使用)"
+          "description": "Let's Blogサーバーのリバースプロキシ(nginx)の公開URL(自己署名証明書を既定で使用)。API呼び出し(/api/**)はすべてこのURL経由でAPIゲートウェイへ中継され、ゲートウェイが各サービスへ振り分けます。ログイン(Keycloak)とダイアグラム編集(draw.io)も同じURLを使います。"
         },
         "letsBlog.allowInsecureTls": {
           "type": "boolean",

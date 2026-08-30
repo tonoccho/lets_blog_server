@@ -10,14 +10,13 @@ export default async function SiteEditPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
   const { id } = await params;
 
   const [site, sshKeyPairs, staticContents] = await Promise.all([
-    getSiteDetail(Number(id), actor).catch(() => null),
-    listSshKeyPairs(actor).catch(() => []),
-    listStaticContent(Number(id), actor).catch(() => []),
+    getSiteDetail(Number(id)).catch(() => null),
+    listSshKeyPairs().catch(() => []),
+    listStaticContent(Number(id)).catch(() => []),
   ]);
   if (!site) {
     notFound();

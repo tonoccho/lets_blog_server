@@ -1,0 +1,164 @@
+server:
+  port: 8080
+
+logging:
+  level:
+    root: INFO
+    com.letsblog.platform: DEBUG
+  # 相関ID(issue #582、com.letsblog.common.web.CorrelationIdFilter)をログ行に含める。
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%X{correlationId}] - %msg%n"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+  # 他サービスと同じ理由: 明示的なproducesを持たないエンドポイントがOpenAPI上`*/*`として記録されると、
+  # orvalが生成するTypeScriptクライアントの型付けが崩れる。既定の応答Content-Typeを明示することで
+  # これを避ける。
+  default-produces-media-type: application/json
+
+spring:
+  application:
+    name: lets-blog-platform
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lbs_platform?useSSL=false&serverTimezone=UTC}
+    username: ${SPRING_DATASOURCE_USERNAME:lbs_platform}
+    password: ${SPRING_DATASOURCE_PASSWORD:lbs_platform}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  # system_settingsのスキーマ所有権をplatform-serviceへ移管した(issue #693)。専用スキーマ
+  # (lbs_platform、ADR-0004)なので、legacy-api側のV1〜とは無関係の独立したマイグレーション履歴として
+  # V1から開始する。既存データの移行はscripts/migrate-system-settings-to-lbs-platform.sqlを参照
+  # (V1適用後に実行する運用)。
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+  # AppSettingServiceのメール送信設定項目(mail_host/mail_port/mail_username/mail_password)の
+  # 環境変数フォールバック値。legacy-api版と同じくSMTP送信自体は行わない(唯一の利用者だった
+  # MailSenderServiceはissue #566で撤去済み。Web管理画面からの表示・編集項目としてのみ残る)。
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+
+app:
+  encryption-key: ${APP_ENCRYPTION_KEY:}
+  mail:
+    from: ${APP_MAIL_FROM:noreply@letsblog.example.com}
+  web:
+    base-url: ${APP_WEB_BASE_URL:http://localhost:3000}
+  llm-base-url: ${LLM_BASE_URL:https://api.openai.com/v1}
+  llm-api-key: ${LLM_API_KEY:}
+  llm-model: ${LLM_MODEL:gpt-4o-mini}
+  llm-available-models: ${LLM_AVAILABLE_MODELS:gpt-4o-mini,gpt-4o,gpt-4.1-mini}
+  llm-request-timeout-seconds: ${LLM_REQUEST_TIMEOUT_SECONDS:120}
+  llm-provider: ${LLM_PROVIDER:OPENAI}
+  llm-claude-api-key: ${LLM_CLAUDE_API_KEY:}
+  llm-claude-model: ${LLM_CLAUDE_MODEL:claude-3-5-haiku-20241022}
+  comfyui-base-url: ${COMFYUI_BASE_URL:http://localhost:8188}
+  image-llm-api-key: ${IMAGE_LLM_API_KEY:}
+  image-llm-base-url: ${IMAGE_LLM_BASE_URL:https://api.openai.com/v1}
+  brave-search-api-key: ${BRAVE_SEARCH_API_KEY:}
+  # ConnectedServiceStatusService(issue #695、C10-3でlegacy-apiから移設)が疎通確認する外部連携先。
+  # legacy-apiのapiコンテナが持っていた同名プロパティと同じ。
+  plantuml-base-url: ${PLANTUML_BASE_URL:http://localhost:8085}
+  penpot-base-url: ${PENPOT_BASE_URL:http://localhost:9001}
+  wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
+  # ContainerStatusService(issue #695、C10-3でlegacy-apiから移設)がDocker Engine API(コンテナ一覧)を
+  # 読み取り専用で取得するためのdocker-socket-proxyのURL。docker-socket-proxyへのアクセスは
+  # 本サービスのみに限定する(Epic #551の方針。docker-compose.ymlのdocker-socket-proxy定義参照)。
+  docker-socket-proxy-base-url: ${DOCKER_SOCKET_PROXY_BASE_URL:http://localhost:2375}
+  # CurrentActorServiceのisAdmin/自分自身のuserId解決のため、呼び出し元のBearerトークンをそのまま
+  # identity-serviceの/api/identity/meへ転送して問い合わせる(log-writer(#572)/content-service(#576)/
+  # project-service(#577)と同じ暫定策。platform-serviceはusersテーブルへクロススキーマアクセス
+  # できない=ADR-0004のクロススキーマ禁止のため)。
+  identity-service-uri: ${IDENTITY_SERVICE_URI:http://identity:8080}
+  # BackupService(issue #694)が生成画像ファイルをバックアップ/リストアする際の保存先。
+  # legacy-apiのapiコンテナが持っていた同名プロパティと同じ(#573以降、実体はmedia-serviceが
+  # 書き込むgenerated_images volumeを共有マウントする)。
+  generated-images-storage-path: ${GENERATED_IMAGES_STORAGE_PATH:/app/data/generated-images}
+  # VscodeExtensionBuildService(issue #696、C10-4でlegacy-apiから移設)がシステム画面向けに
+  # VSCode拡張機能の.vsixをオンデマンドビルドする際のソース(読み取り専用マウント)/
+  # 書き込み可能な作業ディレクトリ。legacy-apiのapiコンテナが持っていた同名プロパティと同じ
+  # (docker-compose.ymlのplatformサービス定義の./extension:/app/extension-src:ro参照)。
+  vscode-extension-source-path: ${VSCODE_EXTENSION_SOURCE_PATH:/app/extension-src}
+  vscode-extension-build-path: ${VSCODE_EXTENSION_BUILD_PATH:/app/extension-build}
+  # BackupService(issue #694、C10-2)が全サービスのMySQLスキーマ + Keycloak PostgreSQLを横断して
+  # バックアップ/リストアするための接続情報。各サービス専用のDBユーザーでは他スキーマへ
+  # アクセスできない(#570のスキーマ分離)ため、バックアップ専用のMySQLユーザー(既定値
+  # lbs_backup、mysql/init/01-create-service-schemas.shが作成・付与するスキーマ限定の権限)を使う。
+  # KeycloakのPostgreSQLは元々そのDB専用のkeycloakユーザーしか存在しないため、その認証情報を
+  # そのまま流用する(docker-compose.ymlのkeycloak-postgres定義参照)。
+  backup:
+    mysql:
+      host: ${BACKUP_MYSQL_HOST:mysql}
+      port: ${BACKUP_MYSQL_PORT:3306}
+      user: ${BACKUP_MYSQL_USER:lbs_backup}
+      password: ${BACKUP_MYSQL_PASSWORD:}
+      schemas: ${BACKUP_MYSQL_SCHEMAS:lbs_identity,lbs_project,lbs_content,lbs_media,lbs_ai,lbs_publishing,lbs_analytics,lbs_platform,lbs_log,lets_blog}
+    postgres:
+      host: ${BACKUP_POSTGRES_HOST:keycloak-postgres}
+      port: ${BACKUP_POSTGRES_PORT:5432}
+      user: ${BACKUP_POSTGRES_USER:keycloak}
+      password: ${BACKUP_POSTGRES_PASSWORD:}
+      database: ${BACKUP_POSTGRES_DATABASE:keycloak}
+
+# KeycloakのJWT検証。他サービスのSecurityConfig/JwtDecoderConfigと同じ理由により、issuer-uriによる
+# 自動設定は使わずJWKS取得先と期待issuerを個別に指定して組み立てている。
+keycloak:
+  jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/certs}
+  issuer: ${KEYCLOAK_ISSUER:https://localhost/auth/realms/letsblog}
+  # AdminPasswordResetRunner(緊急パスワードリセット、issue #693)がKeycloak Admin REST APIを
+  # 呼び出すための設定。legacy-api/identity-serviceと同じletsblog-servicesクライアントの
+  # サービスアカウント(realm-management#manage-usersロール)を使う。
+  admin:
+    token-uri: ${KEYCLOAK_TOKEN_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/token}
+    admin-base-uri: ${KEYCLOAK_ADMIN_BASE_URI:http://keycloak:8080/auth/admin/realms/letsblog}
+    client-id: ${KEYCLOAK_SERVICES_CLIENT_ID:letsblog-services}
+    client-secret: ${KEYCLOAK_SERVICES_CLIENT_SECRET:}
+
+---
+# admin-password-resetプロファイル専用設定(issue #697)。AdminPasswordResetRunnerは
+# @Profile("admin-password-reset")によりコンポーネント自体は有効化されるが、それだけでは
+# Webサーバーの起動有無は制御されない(server.port: 8080は上のデフォルト設定のまま固定される)。
+# 稼働中のplatformコンテナ(既に8080を使用中)に対してこのプロファイルで追加起動すると、
+# ポート競合(Web server failed to start. Port 8080 was already in use.)で失敗する
+# (#693で新規に混入したものではなく、legacy-api版から同一構造で存在していたバグ)。
+#
+# spring.main.web-application-type: none(Webサーバー自体を起動しない)は、当初この用途に最小の
+# 変更として検討したが、AuditLogAspect(@Aspect @Component、issue #693で移設した@AuditLog
+# ADVICEの実装)がリクエストスコープのCurrentActorService(HttpServletRequestに依存)を
+# コンストラクタ注入しており、web application context自体が無いとこの依存を解決できずアプリ
+# 起動そのものが失敗する(#697のQAで確認)。AdminPasswordResetRunnerは@AuditLogを使わないが、
+# AuditLogAspectはコンポーネントスキャンで無条件にBean化されるため、web-application-typeでは
+# 対応できない。
+#
+# 代わりにserver.port: 0(OSに空いているポートを動的に割り当てる)を使う。Webサーバー自体は
+# 引き続き起動する(HttpServletRequestのBeanスコープは維持される)が、稼働中コンテナのポート8080とは
+# 衝突しない。QAで動作確認済み(issue #697のコメント参照)。
+spring:
+  config:
+    activate:
+      on-profile: admin-password-reset
+
+server:
+  port: 0

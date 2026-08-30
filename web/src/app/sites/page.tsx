@@ -12,8 +12,7 @@ export default async function SitesPage() {
     getViewerTimeZone(),
   ]);
   const isAdmin = session?.user.role === "admin";
-  const actor = session ? { id: Number(session.user.id), role: session.user.role } : undefined;
-  const sshKeyPairs = isAdmin ? await listSshKeyPairs(actor).catch(() => []) : [];
+  const sshKeyPairs = isAdmin ? await listSshKeyPairs().catch(() => []) : [];
 
   return (
     <div className="space-y-8">
@@ -21,9 +20,18 @@ export default async function SitesPage() {
 
       <SiteListTable sites={sites} projects={projects} isAdmin={isAdmin} timezone={timezone} />
 
-      <div id="site-creation">
-        <SiteCreationPanel users={users} sites={sites} sshKeyPairs={sshKeyPairs} />
-      </div>
+      {/*
+        サイト登録は admin 限定(issue #824 で registerSiteAction /
+        createManagedWordPressSiteAction に requireAdminSession() を追加した)。
+        ガードを付けないと、非 admin にはフォームが見えるのに送信すると
+        黙ってトップページへリダイレクトされる行き止まりになる
+        (useActionState 経由なのでエラー表示も出ない)。
+      */}
+      {isAdmin && (
+        <div id="site-creation">
+          <SiteCreationPanel users={users} sites={sites} sshKeyPairs={sshKeyPairs} />
+        </div>
+      )}
     </div>
   );
 }

@@ -1,9 +1,63 @@
 import { test, expect } from '@playwright/test';
+import { E2E_ADMIN_PASSWORD, loginAsAdmin } from './helpers';
+
+/**
+ * issue #645: このファイルの大半のテストは `if (要素が存在すれば) { assert }` という形で
+ * 書かれており、プロジェクトが1件も登録されていない環境では常に無検証のままpassしていた
+ * (加えてタイトル入力欄のセレクタが実際のDOM(input[name="name"]/input[name="slug"])と
+ * 一致しておらず、`if (await titleInput.isVisible())`の分岐に一度も入っていなかった)。
+ * beforeEachで確実に1件プロジェクトを作成するfixtureデータ投入を行い、条件分岐に依存しない
+ * 確定的な検証に置き換える。/projectsはrequireAdminSession()で保護されているため、
+ * ログインにはadmin権限を持つe2e-admin@letsblog.local(helpers.ts/auth-flow.spec.ts参照)を使う。
+ *
+ * なお、検索・フィルタ機能や一覧上の削除ボタンは/projectsの現在の実装には存在しない
+ * (issue #645の調査で確認、ProjectsTable.tsxは定義されているがpage.tsxからは未使用のdead code)。
+ * これらは「未実装であること」自体を確定的に固定するテストに置き換えている。
+ *
+ * 各テストで作成したfixtureプロジェクト(および「Create a new project...」テストが追加で
+ * 作成するプロジェクト)は、afterEachで(/projects/{id}の「プロジェクトを削除」ボタン、
+ * DeleteProjectButton.tsx参照)確実に削除する。実行のたびにプロジェクトが増え続けるのを防ぐため。
+ */
 
 test.describe('Article/Post Creation Workflow', () => {
+  test.skip(!E2E_ADMIN_PASSWORD, 'E2E_ADMIN_PASSWORDが未設定のためスキップ');
+
+  let fixtureProjectName: string;
+  // beforeEachがログイン等で失敗した場合でもafterEachが安全にno-opできるよう、
+  // 空配列で初期化しておく(ログイン成功後にfixture作成分を追加する)。
+  let createdProjectNames: string[] = [];
+
   test.beforeEach(async ({ page }) => {
-    // Navigate to projects page
+    createdProjectNames = [];
+    await loginAsAdmin(page);
+
+    // Fixture: 各テストの実行前に、プロジェクト一覧へ必ず1件のプロジェクトが存在する状態を作る。
+    const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    fixtureProjectName = `E2E Fixture Project ${unique}`;
+    createdProjectNames.push(fixtureProjectName);
     await page.goto('/projects');
+    await page.locator('#project-form input[name="name"]').fill(fixtureProjectName);
+    await page.locator('#project-form input[name="slug"]').fill(`e2e-fixture-${unique}`);
+    await page.locator('#project-form button:has-text("作成")').click();
+    await expect(page.getByText('作成しました。')).toBeVisible({ timeout: 10000 });
+    await page.reload();
+  });
+
+  test.afterEach(async ({ page }) => {
+    // このテストが作成した全プロジェクト(fixture + テスト自身が追加作成したもの)を後始末する。
+    for (const name of createdProjectNames) {
+      await page.goto('/projects');
+      const row = page.locator(`tbody tr:has-text("${name}")`);
+      if ((await row.count()) === 0) {
+        continue;
+      }
+      await row.locator('a:has-text("詳細")').click();
+      await expect(page).toHaveURL(/\/projects\/\d+$/, { timeout: 10000 });
+
+      page.once('dialog', (dialog) => dialog.accept());
+      await page.locator('button:has-text("プロジェクトを削除")').click();
+      await expect(page).toHaveURL(/\/projects$/, { timeout: 10000 });
+    }
   });
 
   test('Navigate to projects page and view project list', async ({ page }) => {
@@ -24,69 +78,52 @@ test.describe('Article/Post Creation Workflow', () => {
     const projectForm = page.locator('id=project-form');
     await expect(projectForm).toBeVisible();
 
-    // Step 3: Look for form inputs
-    const titleInput = page.locator('input[name*="title"], input[placeholder*="タイトル"]').first();
-    if (await titleInput.isVisible()) {
-      await expect(titleInput).toBeVisible();
-    }
+    // Step 3: Verify the actual form inputs are present (name/slug, see ProjectForm.tsx)
+    const nameInput = page.locator('#project-form input[name="name"]');
+    const slugInput = page.locator('#project-form input[name="slug"]');
+    await expect(nameInput).toBeVisible();
+    await expect(slugInput).toBeVisible();
   });
 
   test('Create a new project with basic information', async ({ page }) => {
     // Step 1: Scroll to project form
     await page.locator('id=project-form').scrollIntoViewIfNeeded();
 
-    // Step 2: Find and fill project form fields
-    const titleInput = page.locator('input[name*="title"], input[placeholder*="タイトル"], input[placeholder*="Project"]').first();
+    // Step 2: Fill project form fields
+    const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const projectTitle = `Test Project ${unique}`;
+    createdProjectNames.push(projectTitle); // afterEachで後始末する対象に追加する
+    await page.locator('#project-form input[name="name"]').fill(projectTitle);
+    await page.locator('#project-form input[name="slug"]').fill(`test-project-${unique}`);
 
-    if (await titleInput.isVisible()) {
-      // Step 3: Fill project title
-      const projectTitle = `Test Project ${Date.now()}`;
-      await titleInput.fill(projectTitle);
+    // Step 3: Submit
+    await page.locator('#project-form button:has-text("作成")').click();
 
-      // Step 4: Look for description field
-      const descriptionInput = page.locator('textarea[name*="description"], textarea[placeholder*="説明"]').first();
-      if (await descriptionInput.isVisible()) {
-        await descriptionInput.fill('This is a test project for E2E testing');
-      }
+    // Step 4: Verify project was created (success message rendered by ProjectForm.tsx)
+    await expect(page.getByText('作成しました。')).toBeVisible({ timeout: 10000 });
 
-      // Step 5: Look for and click submit button
-      const submitButton = page.locator('button:has-text("作成"), button:has-text("保存"), button:has-text("追加")').first();
-      if (await submitButton.isVisible()) {
-        await submitButton.click();
-
-        // Step 6: Verify project was created (either success message or redirect)
-        await expect(page).toHaveURL(/projects/, { timeout: 10000 });
-
-        // Step 7: Verify new project appears in list
-        const projectName = page.locator(`text="${projectTitle}"`);
-        await expect(projectName).toBeVisible({ timeout: 5000 }).catch(() => {
-          // If project name not immediately visible, it might be on next page or requires refresh
-          console.log('Project created but not immediately visible in list');
-        });
-      }
-    }
+    // Step 5: Verify the new project appears in the list after reload
+    await page.reload();
+    const projectName = page.locator(`text="${projectTitle}"`);
+    await expect(projectName).toBeVisible({ timeout: 5000 });
   });
 
   test('View project details', async ({ page }) => {
-    // Step 1: Check if there are any projects in the table
+    // Step 1: The fixture project guarantees at least one row exists
     const projectRows = page.locator('tbody tr');
-    const rowCount = await projectRows.count();
+    await expect(projectRows.first()).toBeVisible();
 
-    if (rowCount > 0) {
-      // Step 2: Click on the first project to view details
-      const firstProjectLink = projectRows.first().locator('a, button').first();
+    // Step 2: Click the "詳細" link of the first project to view details
+    const detailLink = projectRows.first().locator('a:has-text("詳細")');
+    await expect(detailLink).toBeVisible();
+    await detailLink.click();
 
-      if (await firstProjectLink.isVisible()) {
-        await firstProjectLink.click();
+    // Step 3: Verify project details page is loaded
+    await expect(page).toHaveURL(/\/projects\/\d+$/, { timeout: 10000 });
 
-        // Step 3: Verify project details page is loaded
-        await expect(page).toHaveURL(/projects\/\d+/, { timeout: 10000 });
-
-        // Step 4: Verify project information is displayed
-        const projectContent = page.locator('main, [role="main"], body');
-        await expect(projectContent).toBeDefined();
-      }
-    }
+    // Step 4: Verify project information is displayed
+    const projectContent = page.locator('main, [role="main"], body');
+    await expect(projectContent.first()).toBeVisible();
   });
 
   test('Project list displays project information', async ({ page }) => {
@@ -94,65 +131,28 @@ test.describe('Article/Post Creation Workflow', () => {
     const tableHeaders = page.locator('thead');
     await expect(tableHeaders).toBeVisible();
 
-    // Step 2: Check if there are any project rows
-    const projectRows = page.locator('tbody tr');
-    const rowCount = await projectRows.count();
+    // Step 2: The fixture project guarantees at least one row exists
+    const firstRow = page.locator('tbody tr').first();
+    await expect(firstRow).toBeVisible();
 
-    if (rowCount > 0) {
-      // Step 3: Verify first row has expected content
-      const firstRow = projectRows.first();
-      await expect(firstRow).toBeVisible();
-
-      // Step 4: Verify columns are present (title, date, status, etc.)
-      const cells = firstRow.locator('td, th');
-      const cellCount = await cells.count();
-      expect(cellCount).toBeGreaterThan(0);
-    }
+    // Step 3: Verify columns are present (name, slug, environment badges, created date)
+    const cells = firstRow.locator('td, th');
+    expect(await cells.count()).toBeGreaterThan(0);
   });
 
-  test('Search or filter projects (if feature exists)', async ({ page }) => {
-    // Step 1: Look for search input
-    const searchInput = page.locator('input[placeholder*="検索"], input[placeholder*="Search"], input[placeholder*="filter"]');
-
-    if (await searchInput.isVisible()) {
-      // Step 2: Perform a search
-      await searchInput.fill('test');
-
-      // Step 3: Verify results are updated
-      const projectTable = page.locator('table');
-      await expect(projectTable).toBeVisible();
-
-      // Optional: Wait a bit for filter to apply
-      await page.waitForTimeout(500);
-
-      // Step 4: Verify table is still visible (results updated)
-      await expect(projectTable).toBeVisible();
-    }
+  test('Project search/filter input is not implemented yet', async ({ page }) => {
+    // /projectsには検索・フィルタ入力欄が実装されていない(issue #645で確認)。
+    // 将来実装された場合はこのテストが失敗して気づけるよう、不在を確定的に固定する。
+    const searchInput = page.locator(
+      'input[placeholder*="検索"], input[placeholder*="Search"], input[placeholder*="filter"]'
+    );
+    await expect(searchInput).toHaveCount(0);
   });
 
-  test('Delete project (if delete functionality exists)', async ({ page }) => {
-    // Step 1: Check if there are any projects
-    const projectRows = page.locator('tbody tr');
-    const rowCount = await projectRows.count();
-
-    if (rowCount > 0) {
-      // Step 2: Look for delete button in first row
-      const firstRow = projectRows.first();
-      const deleteButton = firstRow.locator('button:has-text("削除"), button[aria-label*="delete"]').first();
-
-      if (await deleteButton.isVisible()) {
-        // Step 3: Click delete button
-        await deleteButton.click();
-
-        // Step 4: Confirm deletion if there's a dialog
-        const confirmButton = page.locator('button:has-text("確認"), button:has-text("削除"), button:has-text("OK")').first();
-        if (await confirmButton.isVisible()) {
-          await confirmButton.click();
-        }
-
-        // Step 5: Verify deletion (success message or row removed)
-        await expect(page).toHaveURL(/projects/, { timeout: 10000 });
-      }
-    }
+  test('Project row delete button is not implemented yet', async ({ page }) => {
+    // /projectsの一覧行には削除ボタンが実装されていない(issue #645で確認、ProjectsTable.tsxは
+    // 定義されているがpage.tsxからは未使用)。
+    const deleteButtons = page.locator('tbody tr button:has-text("削除"), tbody tr button[aria-label*="delete"]');
+    await expect(deleteButtons).toHaveCount(0);
   });
 });

@@ -127,7 +127,14 @@ This creates:
 docker compose up -d
 ```
 
-Wait for all services to start (~30 seconds to 2 minutes depending on hardware):
+This starts all ~19 containers (reverse proxy, web, API, log-writer, MySQL, RabbitMQ,
+ComfyUI, PlantUML, drawio, WordPress, phpMyAdmin, and the Penpot design-tooling suite).
+Wait for all services to start — first-time startup (pulling/building images) can take
+several minutes, and subsequent restarts typically take 30 seconds to 2 minutes depending
+on hardware, since services that declare a healthcheck (`api`, `log-writer`, `mysql`,
+`rabbitmq`, `penpot-postgres`, `penpot-valkey`) wait for their dependencies to report
+healthy before starting (see [docs/DOCKER_COMPOSE_ARCHITECTURE.md](DOCKER_COMPOSE_ARCHITECTURE.md)
+for the full port/healthcheck layout):
 
 ```bash
 docker compose ps
@@ -135,14 +142,47 @@ docker compose ps
 
 **Screenshot placeholder: Docker services running status**
 
-Expected output should show these services as "Up":
+Expected output should show these containers as "Up" (the ones with a healthcheck should
+say "healthy", not just "Up"):
 - `lbs-reverse-proxy` (nginx)
 - `lbs-web` (Next.js admin panel)
 - `lbs-api` (REST API server)
+- `lbs-log-writer` (async error/operation/audit log writer)
 - `lbs-mysql` (Database)
-- `lbs-ollama` (LLM service)
+- `lbs-rabbitmq` (log message queue)
 - `lbs-comfyui` (Image generation)
 - `lbs-plantuml` (Diagram rendering)
+- `lbs-drawio`, `lbs-wordpress`, `lbs-phpmyadmin`, and the `lbs-penpot-*` containers
+
+If a container never reaches "healthy", see
+[Multi-service startup failures](COMPREHENSIVE_TROUBLESHOOTING.md#multi-service-startup-failures)
+in the troubleshooting guide.
+
+#### Restarting or rebuilding a single service
+
+You don't need to restart the whole stack after changing one service:
+
+```bash
+# Restart a running container (e.g. after an env var change)
+docker compose restart api
+
+# Rebuild the image and recreate the container (e.g. after a code change)
+docker compose build api
+docker compose up -d api
+```
+
+#### Reading logs
+
+```bash
+# Follow one service's logs
+docker compose logs -f api
+
+# Follow several at once
+docker compose logs -f api log-writer
+
+# Last 100 lines, no follow
+docker compose logs --tail 100 api
+```
 
 ### Step 5: Access the Web Admin Panel
 
@@ -231,16 +271,19 @@ code --install-extension letsblog-vscode-1.0.0.vsix
 
 ### Configure the Extension
 
-1. Open VSCode command palette: `Ctrl+Shift+P`
-2. Search for: `Let's Blog: Login`
-3. When prompted, enter:
-   - **Server URL**: `https://localhost` (or your server's URL)
-   - **Email**: Your admin account email
-   - **Password**: Your admin account password
+1. Set `letsBlog.serverUrl` in your VSCode settings if it differs from the default
+   (`https://localhost`).
+2. Open VSCode command palette: `Ctrl+Shift+P`
+3. Search for: `Let's Blog: Login`
+4. Your default browser opens automatically to Keycloak's device verification page, and a
+   progress notification shows a short code (e.g. `ABCD-1234`). Enter that code (it's usually
+   pre-filled from the URL) and approve the login with your account.
 
-**Screenshot placeholder: VSCode extension login dialog**
+**Screenshot placeholder: VSCode extension login progress notification**
 
-The extension will automatically save your API key for future sessions.
+The extension stores the access/refresh tokens it receives in VSCode's Secret Storage and
+refreshes them automatically for future sessions — you won't be prompted for a password. This
+is a Device Authorization Grant flow (RFC 8628): the extension never sees your password.
 
 ### Handling SSL Certificate Warning
 

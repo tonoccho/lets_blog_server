@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as api from './apiClient';
-import { getActor, getServerUrl, requireApiKey } from './config';
+import { getActor, requireAccessToken } from './config';
 import { showSingletonPanel, WebviewPanelBase } from './webviewPanelBase';
 import { DiagramGalleryInboundMessage, DiagramGalleryOutboundCommand } from './webviewMessages';
 
@@ -62,14 +62,14 @@ export class DiagramGalleryPanel extends WebviewPanelBase<
   }
 
   private async _requireCredentials(): Promise<{ apiKey: string; actor: api.Actor | undefined }> {
-    const apiKey = await requireApiKey(this.context);
+    const apiKey = await requireAccessToken(this.context);
     const actor = await getActor(this.context);
     return { apiKey, actor };
   }
 
   private async _handleLoadDiagrams(): Promise<void> {
     const { apiKey, actor } = await this._requireCredentials();
-    const diagrams = await api.listDiagrams(getServerUrl(), apiKey, actor, this._projectId);
+    const diagrams = await api.listDiagrams(apiKey, actor, this._projectId);
     this.postMessage('diagramList', { diagrams });
   }
 
@@ -81,7 +81,7 @@ export class DiagramGalleryPanel extends WebviewPanelBase<
     const thumbnails = await this.runCancellable(async () => {
       const loaded: { id: number; dataUri: string }[] = [];
       for (const id of message.diagramIds) {
-        const svg = await api.getDiagramSvg(getServerUrl(), apiKey, actor, id);
+        const svg = await api.getDiagramSvg(apiKey, actor, id);
         loaded.push({ id, dataUri: `data:image/svg+xml;base64,${Buffer.from(svg, 'utf-8').toString('base64')}` });
       }
       return loaded;
@@ -120,7 +120,7 @@ export class DiagramGalleryPanel extends WebviewPanelBase<
     }
 
     const { apiKey, actor } = await this._requireCredentials();
-    await api.deleteDiagram(getServerUrl(), apiKey, actor, message.diagramId, this._projectId);
+    await api.deleteDiagram(apiKey, actor, message.diagramId, this._projectId);
 
     this.postMessage('diagramDeleted', { diagramId: message.diagramId });
     vscode.window.showInformationMessage(`ダイアグラム(ID: ${message.diagramId})を削除しました。`);
@@ -129,7 +129,7 @@ export class DiagramGalleryPanel extends WebviewPanelBase<
   /** サーバーからSVGを取得し、{baseDir}/assets 配下へ保存してファイル名を返す。 */
   private async _saveToAssets(diagramId: number): Promise<string> {
     const { apiKey, actor } = await this._requireCredentials();
-    const svg = await api.getDiagramSvg(getServerUrl(), apiKey, actor, diagramId);
+    const svg = await api.getDiagramSvg(apiKey, actor, diagramId);
 
     const assetsDir = path.join(this._baseDir, 'assets');
     fs.mkdirSync(assetsDir, { recursive: true });

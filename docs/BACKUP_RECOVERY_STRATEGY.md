@@ -6,23 +6,42 @@ This document outlines the Let's Blog application's backup and recovery strategy
 
 ## Backup Scope
 
-The backup system protects two critical components:
+The backup system (owned by `platform-service`, issue #694 / C10-2) protects three critical components:
 
-1. **MySQL Database**: All application data including sites, articles, user credentials, audit logs, and configuration
-2. **Generated Images**: All AI-generated images stored in the `generated-images` volume
+1. **All service MySQL schemas**: `lbs_identity`, `lbs_project`, `lbs_content`, `lbs_media`, `lbs_ai`,
+   `lbs_publishing`, `lbs_analytics`, `lbs_platform`, `lbs_log`, plus the legacy schema still used by
+   `legacy-api` until it is fully decomposed (#583). This covers sites, articles, user data, audit logs,
+   and configuration across every domain service (#570 schema-per-service split).
+2. **Keycloak PostgreSQL database** (`keycloak`, in the separate `keycloak-postgres` instance): all
+   authentication data (users, credentials, roles, sessions).
+3. **Generated Images**: All AI-generated images stored in the `generated-images` volume.
 
 **Note**: Individual managed WordPress sites' databases and files are excluded. Each WordPress site is responsible for its own backup/recovery procedures.
 
 ## Backup Architecture
 
+### Cross-Schema Credentials
+
+Each service owns a dedicated MySQL user scoped to its own schema (#570), so no single service
+credential can dump/restore every schema. `BackupService` instead uses a dedicated `lbs_backup` MySQL
+user (created by `mysql/init/01-create-service-schemas.sh`) that is granted the same per-schema
+privileges as each service's own user, but on every known schema at once — it has no access to the
+MySQL system schemas or any database outside the application's own set, preserving the intent of the
+schema-per-service separation (#570). For Keycloak's PostgreSQL database, the existing `keycloak` user (already
+scoped to only the `keycloak` database) is reused; no new PostgreSQL credential is introduced.
+
 ### Backup Package Format
 
 Backups are created as ZIP archives containing:
 
-- `db.sql` - Complete MySQL database dump (single-transaction, includes routines and triggers)
 - `metadata.json` - Backup metadata including:
   - `encryptionKeyHash` - SHA256 hash of the current APP_ENCRYPTION_KEY for validation during restore
   - `createdAt` - ISO 8601 timestamp of backup creation
+  - `mysqlSchemas` - list of MySQL schema names included in this backup
+  - `postgresDatabases` - list of PostgreSQL database names included in this backup (currently just `keycloak`)
+- `mysql/<schema>.sql` - One `mysqldump` (single-transaction, includes routines and triggers) per MySQL
+  schema listed in `mysqlSchemas`, e.g. `mysql/lbs_identity.sql`, `mysql/lbs_media.sql`, ...
+- `postgres/keycloak.dump` - `pg_dump --format=custom` output of the Keycloak PostgreSQL database
 - `generated-images/` - Directory containing all AI-generated images (if any exist)
 
 ### Encryption Key Validation
@@ -93,27 +112,41 @@ If automated recovery fails, manual recovery is possible:
 
 ```bash
 # Extract backup archive
-unzip lets-blog-backup-20240108-145300.zip
+unzip -d /tmp/backup-extract lets-blog-backup-20240108-145300.zip
 
-# Extract and restore database
-mysql -h <mysql-host> -u <mysql-user> -p<mysql-password> <database-name> < db.sql
+# Restore each MySQL schema (one dump file per schema under mysql/)
+for dump in /tmp/backup-extract/mysql/*.sql; do
+  schema=$(basename "$dump" .sql)
+  mysql -h <mysql-host> -u <mysql-user> -p<mysql-password> "$schema" < "$dump"
+done
+
+# Restore the Keycloak PostgreSQL database (custom-format pg_dump output)
+PGPASSWORD=<keycloak-db-password> pg_restore -h <keycloak-postgres-host> -U keycloak \
+  --dbname=keycloak --clean --if-exists /tmp/backup-extract/postgres/keycloak.dump
 
 # Restore generated images
 # Copy generated-images/* to /path/to/generated-images-storage/
-rsync -av generated-images/ /path/to/generated-images-storage/
+rsync -av /tmp/backup-extract/generated-images/ /path/to/generated-images-storage/
 ```
 
 ### Recovery Verification Checklist
 
-After restore completion:
+After restore completion, every service and Keycloak must come back up healthy (all consume the
+schemas/database restored above):
 
-- [ ] Application starts without errors
-- [ ] Admin dashboard loads
+- [ ] `identity`, `project`, `content`, `media`, `ai`, `publishing` (once split out), `analytics`,
+      `platform`, `gateway`, and `legacy-api` (while it still owns a schema, pre-#583) all report
+      healthy on their `/actuator/health` endpoint (`docker compose ps` shows `healthy`, matching the
+      existing `x-actuator-healthcheck` healthcheck used by every service in `docker-compose.yml`)
+- [ ] Keycloak itself starts and its realm/users are reachable (`/auth/realms/letsblog`), confirming the
+      restored `keycloak` PostgreSQL database is intact
+- [ ] Admin dashboard loads and admin login succeeds (validates both the identity/Keycloak restore and
+      the `lbs_platform`/legacy schema restore)
 - [ ] All sites are accessible
 - [ ] Articles display correctly
 - [ ] Generated images load in articles
-- [ ] Audit logs show recovery action
-- [ ] Database integrity check passes (check for errors in MySQL error log)
+- [ ] Audit logs show the recovery action (`DB_RESTORED`, recorded by platform-service)
+- [ ] Database integrity check passes for each restored MySQL schema (check for errors in MySQL error log)
 - [ ] Performance is normal (no slow queries)
 
 ## Monitoring and Alerting
@@ -257,6 +290,6 @@ Backup retention policies should comply with:
 
 ## References
 
-- [BackupService.java](../api/src/main/java/com/letsblog/api/service/BackupService.java) - Implementation details
-- [BackupController.java](../api/src/main/java/com/letsblog/api/controller/BackupController.java) - API endpoints
-- [BackupServiceTest.java](../api/src/test/java/com/letsblog/api/service/BackupServiceTest.java) - Test coverage
+- [BackupService.java](../services/platform/src/main/java/com/letsblog/platform/service/BackupService.java) - Implementation details
+- [BackupController.java](../services/platform/src/main/java/com/letsblog/platform/controller/BackupController.java) - API endpoints
+- [BackupServiceTest.java](../services/platform/src/test/java/com/letsblog/platform/service/BackupServiceTest.java) - Test coverage

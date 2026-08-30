@@ -36,8 +36,7 @@ export default async function ProjectDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
   const projectId = Number(id);
 
   const emptyComparisonPage = { items: [], page: 0, size: 20, totalCount: 0, masterEnvironment: "test" as const };
@@ -61,14 +60,14 @@ export default async function ProjectDetailPage({
     githubTokenStatus,
     braveSearchApiKeyStatus,
   ] = await Promise.all([
-    getProject(projectId, actor).catch(logAndFallback("プロジェクト情報", null)),
+    getProject(projectId).catch(logAndFallback("プロジェクト情報", null)),
     listSites().catch(logAndFallback("サイト一覧", [])),
-    listProjectUsers(projectId, actor).catch(logAndFallback("プロジェクトメンバー", [])),
+    listProjectUsers(projectId).catch(logAndFallback("プロジェクトメンバー", [])),
     listUsers().catch(logAndFallback("ユーザー一覧", [])),
-    listCategoryComparison(projectId, 0, actor).catch(logAndFallback("カテゴリ比較", emptyComparisonPage)),
+    listCategoryComparison(projectId, 0).catch(logAndFallback("カテゴリ比較", emptyComparisonPage)),
     getViewerTimeZone(),
-    getProjectGithubTokenStatus(projectId, actor).catch(logAndFallback("GitHubトークン設定状況", { configured: false })),
-    getProjectBraveSearchApiKeyStatus(projectId, actor)
+    getProjectGithubTokenStatus(projectId).catch(logAndFallback("GitHubトークン設定状況", { configured: false })),
+    getProjectBraveSearchApiKeyStatus(projectId)
       .catch(logAndFallback("Brave APIキー設定状況", { configured: false })),
   ]);
 

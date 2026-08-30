@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as api from './apiClient';
-import { getActor, getConfiguredAiProvider, getServerUrl, requireApiKey } from './config';
+import { getActor, getConfiguredAiProvider, requireAccessToken } from './config';
 import { buildSourcesSection } from './markdownSources';
 import { showSingletonPanel, WebviewPanelBase } from './webviewPanelBase';
 import { AskAiInboundMessage, AskAiInitPayload, AskAiOutboundCommand } from './webviewMessages';
@@ -55,10 +55,10 @@ export class AskAiPanel extends WebviewPanelBase<AskAiInboundMessage, AskAiOutbo
   private async _handleAsk(
     message: Extract<AskAiInboundMessage, { command: 'ask' }>
   ): Promise<void> {
-    const apiKey = await requireApiKey(this.context);
+    const apiKey = await requireAccessToken(this.context);
     const actor = await getActor(this.context);
     const result = await this.runCancellable((signal) =>
-      api.askAiSearch(getServerUrl(), apiKey, actor, message.question, message.provider, signal)
+      api.askAiSearch(apiKey, actor, message.question, message.provider, signal)
     );
     this._lastResult = result;
     this.postMessage('answered', result);

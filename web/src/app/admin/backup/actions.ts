@@ -12,8 +12,7 @@ export async function restoreBackupAction(
   _prevState: RestoreBackupFormState,
   formData: FormData
 ): Promise<RestoreBackupFormState> {
-  const session = await requireAdminSession();
-  const actor = { id: Number(session.user.id), role: session.user.role };
+  await requireAdminSession();
 
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) {
@@ -22,7 +21,7 @@ export async function restoreBackupAction(
   const acknowledgeKeyMismatch = formData.get("acknowledgeKeyMismatch") === "on";
 
   try {
-    await restoreBackup(file, actor, acknowledgeKeyMismatch);
+    await restoreBackup(file, acknowledgeKeyMismatch);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

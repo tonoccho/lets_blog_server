@@ -1,0 +1,385 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: gateway
+
+# ルーティング(#560)。Spring Cloud Gatewayはこの環境のSpring Boot 4.1系と非互換のため
+# (services/gateway/build.gradleのコメント参照)、独自のプロパティ構造(RouteProperties)
+# として定義し、com.letsblog.gateway.config.ProxyHandler がWebClientで転送する。
+#
+# 実サービスはまだlegacy-apiのみのため、全ルートが暫定的にlegacy-apiを指す。
+# 各サービス抽出Issue(Phase 19)で、対応する環境変数のURIを新サービスへ向け直すだけで
+# 移行できる。リストは先頭から順に評価され、最初にマッチしたルートが使われる
+# (先勝ち。特定度の高いパスを先に置くこと)。
+app:
+  gateway:
+    # 既定は60秒(旧nginxの暗黙のproxy_read_timeoutと同等)。個別に長い処理が
+    # 必要なルートはresponse-timeoutで上書きする(下記)。
+    default-response-timeout: 60s
+    # 移行期間中、どのルートにもマッチしなかったパスのフォールバック先。
+    fallback-uri: ${LEGACY_API_URI:http://api:8080}
+    routes:
+      # 以下は、旧nginx設定で個別にタイムアウト延長していたエンドポイントの移設(#560)。
+      # より広いプレフィックスにマッチする下のルートより先に評価されるよう、
+      # 特定度の高いものを先に置く。
+      #
+      # プロジェクトのCRUD・環境紐付け・環境同期はproject-serviceへ移設した(issue #577 stage2)。
+      # environments/syncはenvironmentsSyncのタイムアウト延長対象のためproject-serviceへの専用ルートを残す。
+      - id: project-environment-sync
+        uri: ${PROJECT_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/projects/*/environments/sync
+        response-timeout: 300s
+      # 一括管理(bulk-management: カテゴリ/タグ/プラグイン/テーマ/投稿の環境間比較・同期)を担う
+      # BulkManagementService/TermComparisonService/PluginThemeComparisonService/PostComparisonServiceは
+      # publishing-serviceへ移設した(issue #708、Epic #551 C6-2。#577移設時の発見: 元のこのルート
+      # エントリはPROJECT_SERVICE_URIを指しており、実際のエンドポイント(/bulk-management/apply・
+      # /apply-all・/categories/**等)をカバーしていなかった。実パスを網羅する/**へ修正した上で
+      # まずLEGACY_API_URIへ固定し、#708でPUBLISHING_SERVICE_URIへ切り替えた)。
+      - id: project-bulk-management-legacy
+        uri: ${PUBLISHING_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/projects/*/bulk-management/**
+        response-timeout: 300s
+      # プロジェクトユーザー管理(ProjectUserSyncService)は同じ理由でlegacy-apiに残る。
+      - id: project-users-legacy
+        uri: ${LEGACY_API_URI:http://api:8080}
+        paths:
+          - /api/projects/*/users/**
+      # ComfyUI生成画像のアセットアップロード(BulkManagementService#uploadImageToAllEnvironments)は、
+      # 一括管理機能一式のpublishing-serviceへの移設(issue #708)に伴い、呼び出し元の
+      # BulkManagementControllerもpublishing-serviceへ移った。
+      - id: project-asset-images-legacy
+        uri: ${PUBLISHING_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/projects/*/asset-images/**
+      # ProjectMediaGarbageCollectionControllerはmedia-serviceへ移設した(#573 stage3)が、パス自体は
+      # /api/projects/**配下のまま(既存フロントのURLを変えないため)。より広い/api/projects/**
+      # (下のprojectルート、legacy-apiへ向く)より先に評価されるよう、ここに置く。
+      - id: project-media-garbage-collection
+        uri: ${MEDIA_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/projects/*/media-garbage-collection/scan
+          - /api/projects/*/media-garbage-collection/delete
+      # ProjectAiModelControllerを分割し、LLMモデル/プロバイダー選択(ProjectLlmModelController)を
+      # ai-serviceへ移設した(issue #574)。パス自体は/api/projects/**配下のまま(既存フロントのURLを
+      # 変えないため)。同じ/api/projects/{id}/ai-models/**配下でも、画像生成AI/ComfyUI部分
+      # (ImageModelService/ComfyUiModelService)はlegacy-apiに残るため、より広い/api/projects/**
+      # (下のprojectルート)より先にここでLLM部分だけをai-serviceへマッチさせる。
+      - id: project-ai-models-llm
+        uri: ${AI_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/projects/*/ai-models/llm/**
+      # ProjectDashboardController(プロジェクトダッシュボードのGA/AdSenseレポート取得)は
+      # analytics-serviceへ移設した(#578)。パス自体は/api/projects/**配下のまま(既存フロントのURLを
+      # 変えないため)。より広い/api/projects/**(下のprojectルート)より先にここでマッチさせる
+      # (project-ai-models-llmと同じパターン)。DashboardController(コンテナ状態SSE・接続サービス状態、
+      # /api/dashboard/**配下でこれとはパスが異なる)は分析ではなくplatform-serviceへ移設された
+      # (下のdashboard-statusルートのコメント参照、issue #695、C10-3)。
+      - id: project-dashboard-analytics
+        uri: ${ANALYTICS_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/projects/*/dashboard/**
+      # 画像生成AI/ComfyUI部分(ImageModelService/ComfyUiModelService、上のLLM部分を除く
+      # /api/projects/*/ai-models/**の残り)・プロジェクト単位のGitHubトークン/Brave Search APIキー/
+      # GA/AdSense連携(ProjectApiKeyController、issue #577の「B8と重複しないか要確認」の検討の結果、
+      # ProjectApiKeyServiceは分析/AI資格情報のドメインに深く依存しており本stageでは移設しない判断
+      # とした。PR説明参照)は、いずれもproject-serviceへ移設していないためlegacy-apiに残る。
+      - id: project-ai-models-legacy
+        uri: ${LEGACY_API_URI:http://api:8080}
+        paths:
+          - /api/projects/*/ai-models/**
+      - id: project-api-keys-legacy
+        uri: ${LEGACY_API_URI:http://api:8080}
+        paths:
+          - /api/projects/*/api-keys/**
+      # 画像生成プロンプトの生成(AiController#generateImagePrompt)は、上のai-models(画像生成AI)と
+      # 同じ理由でai-serviceへ移設せずlegacy-apiに残っている(services/ai/.../AiController.javaの
+      # Javadocが「画像生成は移設しない」と明記しており、ai-service側にこのエンドポイントは無い)。
+      # 専用ルートが無かったため、より広い/api/projects/**(下のprojectルート)へ先勝ちでマッチし、
+      # project-serviceに存在しないパスとして404になっていた(issue #771。#642/#659の
+      # ArticlePlanControllerと同一パターン)。
+      #
+      # response-timeoutは下のaiルートと同じ180秒にする。このエンドポイントは同期のLLM呼び出し
+      # (AiController#generateImagePrompt → AiAssistService → AiGenerationClient)であり、
+      # AiGenerationClientのプロファイルはSyncCallProfile.LLM(読み取り180秒)、ai-service側の
+      # LLM_REQUEST_TIMEOUT_SECONDSも既定120秒。既定の60秒(default-response-timeout)のままだと
+      # 下流がまだ待っている最中にgatewayだけが504で切ってしまう。
+      - id: project-ai-generate-image-prompt-legacy
+        uri: ${LEGACY_API_URI:http://api:8080}
+        paths:
+          - /api/projects/*/ai/generate-image-prompt
+        response-timeout: 180s
+      # プロジェクト単位の各種設定(ProjectController#updateCssSelectorPrefix・
+      # updateImageGenerationPromptDefaults・updateImageGenerationSizeDefaults・
+      # updateArticleImageResizeDefault・updateImageContentFilterSettings)も、
+      # #577 stage2でproject-serviceへ移設した範囲に含まれておらずlegacy-apiに残っている
+      # (project-serviceのProjectControllerにこれらのパスは無い)。上と同じく専用ルートが無く
+      # projectルートへ先勝ちマッチして404になっていた(issue #771の調査で追加発見。
+      # web/src/lib/apiClient.tsが実際に呼んでおり、プロジェクト設定画面から到達不能だった)。
+      - id: project-settings-legacy
+        uri: ${LEGACY_API_URI:http://api:8080}
+        paths:
+          - /api/projects/*/css-selector-prefix
+          - /api/projects/*/image-generation-prompt-defaults
+          - /api/projects/*/image-generation-size-defaults
+          - /api/projects/*/article-image-resize-default
+          - /api/projects/*/image-content-filter-settings
+      # ProjectCustomTagController(プロジェクト詳細のカスタムタグ画面)はcontent-serviceへ移設した
+      # (#576)。パス自体は/api/projects/**配下のまま(既存フロントのURLを変えないため)。より広い
+      # /api/projects/**(下のprojectルート、project-serviceが未抽出のためlegacy-apiのまま)より
+      # 先にここでマッチさせる。
+      - id: project-custom-tags
+        uri: ${CONTENT_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/projects/*/custom-tags/**
+      # ArticlePreviewControllerのうち、記事本文のレンダリング(/render、CMSへの依存を持たない)のみ
+      # content-serviceへ移設した(#576)。テーマCSS取得(/theme-css)・骨格差し替え(/skeleton)・
+      # プレビュー用投稿削除(/preview-post)はSite/CMSアダプタへの深い依存があり、CmsAdapter/
+      # WordPressAgentOperations/WordPressSshOperationsと同じpublishing-serviceへ移設した
+      # (issue #712)ため、/renderだけをここで先にマッチさせる。
+      - id: project-preview-render
+        uri: ${CONTENT_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/projects/*/preview/render
+      # 上記/render以外(/theme-css・/skeleton・/preview-post)はpublishing-serviceが持つ
+      # (#577 stage3での発見: #576時点ではこの下のprojectルートがLEGACY_API_URIだったためフォール
+      # スルーで到達できていたが、#577 stage2でprojectルートをPROJECT_SERVICE_URIへ切り替えた際に
+      # 専用ルートが追加されておらず、project-serviceに存在しないパスへ転送される欠落があった。
+      # そこでまずLEGACY_API_URIへ固定し、issue #712でPUBLISHING_SERVICE_URIへ切り替えた)。
+      # より広い/api/projects/**(下のprojectルート)より先に評価されるよう、ここで固定する。
+      - id: project-preview-legacy
+        uri: ${PUBLISHING_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/projects/*/preview/**
+      # PostController#publish/#deleteは、投稿(posts)テーブルの所有権がcontent-serviceへ移った(#576)
+      # 後もCMSアダプタ(CmsAdapter等)への深い依存のため、publishing-serviceへ移設した
+      # (issue #707。PostPublishService/PostDeleteServiceはpostsテーブルの読み書きを
+      # content-serviceへの内部ブリッジ経由で行う)。より広い/api/posts/**(下のcontentルート、
+      # content-serviceへ向く)より先に評価されるよう、ここでpublishing-serviceへマッチさせる
+      # (#576移設時点ではlegacy-apiへ向けていたが、issue #707でPUBLISHING_SERVICE_URIへ切り替えた)。
+      - id: posts-publish-legacy
+        uri: ${PUBLISHING_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/posts/publish
+        response-timeout: 1200s
+      - id: posts-delete-legacy
+        uri: ${PUBLISHING_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/posts/*/*
+      # DashboardController(コンテナ状態SSE・接続サービス状態、/api/dashboard/**配下)は
+      # GA/AdSenseレポート(ProjectDashboardController、/api/projects/*/dashboard/**配下、
+      # 上のanalyticsルート参照)とは別物で分析ドメインではない。C10(platform-service)へ移設された
+      # (issue #695、C10-3)ため、非ストリーム系(service-status/service-status/detail/
+      # container-status)・ストリーム系の両方をPLATFORM_SERVICE_URIへ向ける。下の広い
+      # /api/dashboard/**(analyticsルート)より先にここでマッチさせる。
+      #
+      # ストリーム系エンドポイント(#560)は、ダッシュボードの常時接続ストリームのため応答自体は
+      # すぐ返る(ボディはFlux<DataBuffer>として遅延ストリーミングされ、この
+      # response-timeoutには縛られない。ProxyHandlerのJavadoc参照)。非ストリーム系はissue #695より前は
+      # このルート表に専用エントリが無く、fallback-uri(legacy-api)経由の暗黙到達に依存していた
+      # (#695で明示ルートを追加した)。
+      - id: dashboard-status
+        uri: ${PLATFORM_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/dashboard/service-status
+          - /api/dashboard/service-status/detail
+          - /api/dashboard/service-status/stream
+          - /api/dashboard/container-status
+          - /api/dashboard/container-status/stream
+
+      # ログイン・サインアップ・2FA・APIキー発行は現行の認証機構のまま legacy-api に残る
+      # (カットオーバー計画(#591)を経てから撤去する方針。ADR-0003参照)。
+      - id: auth
+        uri: ${LEGACY_API_URI:http://api:8080}
+        paths:
+          - /api/auth/**
+      # ユーザー/ロール管理は identity-service に移設した(#561)。
+      - id: identity
+        uri: ${IDENTITY_SERVICE_URI:http://identity:8080}
+        paths:
+          - /api/identity/**
+          - /api/users/**
+          - /api/roles/**
+      # SSH鍵ペア管理・組み込みタグのデザインカスタマイズをproject-serviceへ移設した(#577 stage 1)。
+      # Project/Site本体(下のprojectルート)はまだlegacy-apiに残っているため、この2つだけを
+      # 先にproject-serviceへマッチさせる(より広い/api/projects/**より先に評価される必要がある)。
+      # 元のこのルートエントリのpaths(/api/ssh-keys/**)は実際のSshKeyPairControllerの
+      # @RequestMapping(/api/ssh-key-pairs)と一致していなかった(#577移設時の発見)ため、
+      # 実パスに修正した上でこちらへ分離した。
+      - id: project-ssh-key-pairs
+        uri: ${PROJECT_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/ssh-key-pairs/**
+      - id: project-tag-design-settings
+        uri: ${PROJECT_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/projects/*/tag-design-settings/**
+      # ArticlePlanController(記事プラン壁打ちチャット・セッション管理)はai-serviceへ移設済み
+      # (issue #574)。パス自体は/api/projects/**配下のまま(既存フロントのURLを変えないため)。
+      # より広い/api/projects/**(下のprojectルート)より先にここでマッチさせる
+      # (project-ai-models-llmと同じパターン)。このルートが欠けていたため、記事プラン関連の
+      # 全リクエストがprojectルートへ誤って先勝ちマッチし、project-serviceに存在しない
+      # エンドポイントとして到達不能になっていた(issue #642のcontract testで検出)。
+      - id: project-article-plan
+        uri: ${AI_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/projects/*/article-plan/**
+      # Project/Site本体(CRUD・環境紐付け・CMS/WordPress自動プロビジョニング・サイト管理)を
+      # project-serviceへ移設した(issue #577 stage2)。上記の、project-serviceへ移設していない
+      # サブパス(bulk-management/users/asset-images/ai-models(LLM以外)/dashboard/api-keys/
+      # article-plan)はより先に評価されるため、ここへは落ちてこない。
+      - id: project
+        uri: ${PROJECT_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/projects/**
+          - /api/sites/**
+      - id: content
+        uri: ${CONTENT_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/posts/**
+          - /api/custom-tags/**
+          # CustomTagTemplateController/ContentCacheController/MetadataControllerもcontent-serviceへ
+          # 移設した(#576)。実際のマッピングは/api/custom-tag-templates/**・/api/content-cache/**・
+          # /api/metadata/**であり、既存のこのルートエントリ(/api/posts/**・/api/custom-tags/**のみ)は
+          # これらの実パスをカバーしていなかったため追加した(#573のGeneratedImageController発見と
+          # 同じパターン)。
+          - /api/custom-tag-templates/**
+          - /api/content-cache/**
+          - /api/metadata/**
+      - id: media
+        uri: ${MEDIA_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/images/**
+          # GeneratedImageControllerの実際のマッピングは/api/generated-images/**(/api/images/**
+          # ではない)。#573で移設した際、既存のこのルートエントリが実パスをカバーしていなかったため
+          # 追加した(このコメント自体も#573移設時の発見の記録)。
+          - /api/generated-images/**
+          - /api/diagrams/**
+          - /api/render/**
+          # MediaControllerの実際のマッピングは/api/media/**(#573 stage3でmedia-serviceへ移設)。
+          - /api/media/**
+      # 画像生成(AiController#image/#imageOptions)はissue #574でもai-serviceへ移設せずlegacy-apiに
+      # 残した(PR説明参照)。/api/ai/**の大半(テキスト生成)はai-serviceへ移ったため、この2エンドポイント
+      # だけを下の広い/api/ai/**ルートより先にlegacy-apiへマッチさせる。
+      - id: ai-image-legacy
+        uri: ${LEGACY_API_URI:http://api:8080}
+        paths:
+          - /api/ai/image
+          - /api/ai/image-options
+      # LLM呼び出しはLLM_REQUEST_TIMEOUT_SECONDS(既定120秒)まで掛かりうり、記事プランの壁打ちは
+      # Web検索+LLM呼び出しでさらに長くなりうるため、既定の60秒(default-response-timeout)より
+      # 長いタイムアウトを設定する(issue #574の受入基準)。AiGenerationClient/GenerationJobClientの
+      # READ_TIMEOUT(180秒)と揃えている。
+      - id: ai
+        uri: ${AI_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/ai/**
+          - /api/generation-jobs/**
+          - /api/article-plan/**
+        response-timeout: 180s
+      # このルートのpathsは元々`/api/publish/**`・`/api/bulk-management/**`だったが、実際のコントローラの
+      # パス(PostController: /api/posts/publish・/api/posts/*/*、BulkManagementController:
+      # /api/projects/*/bulk-management/**)と一致しておらず、`/api/publish/**`宛のリクエストは
+      # どのコントローラにも到達できていなかった(issue #707調査で発見)。`/api/posts/publish`・
+      # `/api/posts/*/*`は上のposts-publish-legacy/posts-delete-legacyルートで既にPUBLISHING_SERVICE_URIへ
+      # 正しくマッチしているため、`/api/publish/**`は実体の無い誤りとして削除した(issue #707)。
+      # `/api/bulk-management/**`の実パス(/api/projects/*/bulk-management/**)は、上の
+      # project-bulk-management-legacyルート(response-timeout: 300sのタイムアウト延長付き)で
+      # 既にPUBLISHING_SERVICE_URIへマッチしているため、ここへ重複させず削除した(issue #708)。
+      # 代わりにTaxonomyController(/api/taxonomy/resolve)向けの明示ルートをここに追加する
+      # (以前はfallback-uri経由の暗黙到達に依存していた)。
+      - id: publishing
+        uri: ${PUBLISHING_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/taxonomy/resolve
+      # GA/AdSense連携の実体(ProjectDashboardController・ProjectApiKeyControllerのGA/AdSense部分)は
+      # /api/projects/*/dashboard/**(上のproject-dashboard-analyticsルート)・/api/projects/*/
+      # api-keys/**(legacy-apiに残るProjectApiKeyController経由でこのサービスへブリッジ、下の
+      # projectルート)配下にあり、/api/analytics/**を直接叩くコントローラーはまだ無い
+      # (将来直接公開する場合に備えたルート)。/api/dashboard/**(DashboardController、コンテナ状態
+      # SSE・接続サービス状態)は分析ドメインではないため、ここに含めない(上のdashboard-statusルートの
+      # コメント参照。platform-serviceへ明示ルーティングされる、issue #695)。
+      - id: analytics
+        uri: ${ANALYTICS_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/analytics/**
+      - id: platform
+        uri: ${PLATFORM_SERVICE_URI:http://api:8080}
+        paths:
+          # VscodeExtensionController(VSCode拡張の.vsixオンデマンドビルド配布、issue #696、C10-4)は
+          # /api/system/vscode-extension配下にあり、この/api/system/**に含まれる。以前ここにあった
+          # /api/vscode-extension/**という別パターンは実際のコントローラーパス(/api/system/
+          # vscode-extension)と一致せず一度もマッチしないルールだったため、#696で撤去した。
+          - /api/system/**
+          - /api/backup/**
+          # プロジェクト/サイトに紐付かないアプリ全体のグローバル設定(SystemSettingController/
+          # AppSettingController)の所有権をplatform-serviceへ移管した(issue #693)。
+          - /api/system-settings/**
+      # ログ読み取り・記録APIはlog-writerへ移設した(#572)。
+      - id: log
+        uri: ${LOG_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/logs/**
+          - /api/audit-logs/**
+          - /api/operation-logs/**
+  # レート制限(現行legacy-apiのRateLimitInterceptorから移設。#560)。
+  # 管理画面からのアップロード系エンドポイント制限値の動的変更(旧AppSettingService経由)は
+  # gatewayがDBを持たないため未対応(静的デフォルト値のみ)。follow-up issueで再検討する。
+  #
+  # api-global / api-internal はクライアント単位に分割される(#749)。分割キーの決め方と、
+  # auth/upload/operation-logを従来どおりプロセス全体の1バケットに据え置いた理由は
+  # com.letsblog.gateway.config.RateLimitWebFilter のJavadoc、および
+  # docs/API_RATE_LIMITING.md を参照。
+  rate-limit:
+    # 外部(reverse-proxy経由)クライアント1つ(=X-Forwarded-For末尾のIP)あたりの上限。
+    # #749より前は「プロセス全体で100req/分」だったが、値は据え置いたまま単位だけを
+    # クライアント単位に変更した(ブラウザ発の直接呼び出しは実測ピークでも54req/分)。
+    api-global:
+      limit-for-period: ${API_RATE_LIMIT_REQUESTS:100}
+      limit-refresh-period: ${API_RATE_LIMIT_PERIOD:60s}
+    # lbs-net内部からgatewayを直接叩く呼び出し(WebのBFF)のログインユーザー1人あたりの上限(#749)。
+    # 管理画面の1画面あたりのBFF呼び出しは最大12本程度、実測のピーク需要は239req/分(E2E実行時)
+    # だったため、その2.5倍を既定値とする(暴走ループは引き続き頭打ちになる)。
+    api-internal:
+      limit-for-period: ${INTERNAL_API_RATE_LIMIT_REQUESTS:600}
+      limit-refresh-period: ${INTERNAL_API_RATE_LIMIT_PERIOD:60s}
+    auth-endpoint:
+      limit-for-period: ${AUTH_RATE_LIMIT_REQUESTS:5}
+      limit-refresh-period: ${AUTH_RATE_LIMIT_PERIOD:60s}
+    operation-log-endpoint:
+      limit-for-period: ${OPERATION_LOG_RATE_LIMIT_REQUESTS:300}
+      limit-refresh-period: ${OPERATION_LOG_RATE_LIMIT_PERIOD:60s}
+    upload-endpoint:
+      limit-for-period: ${UPLOAD_RATE_LIMIT_REQUESTS:10}
+      limit-refresh-period: ${UPLOAD_RATE_LIMIT_PERIOD:3600s}
+
+# JWT検証(#560)。jwk-set-uriはコンテナ間通信で実際に到達可能な内部アドレス、
+# issuerはブラウザ経由で発行されるトークンのiss claim(#559でKC_HOSTNAME固定済みの
+# 公開URL)。この2つが異なる(内部アドレス経由でもissは常に公開URL値になる)ため、
+# Spring Bootの spring.security.oauth2.resourceserver.jwt.issuer-uri
+# (フェッチ先とissuerの一致を前提とする自動設定)は使えず、
+# com.letsblog.gateway.config.JwtDecoderConfig で個別にJwtDecoderを組み立てている。
+keycloak:
+  jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/certs}
+  issuer: ${KEYCLOAK_ISSUER:https://localhost/auth/realms/letsblog}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      # 下流サービスの状態を/actuator/healthに集約する(#560)。probeの定義は
+      # DownstreamHealthConfig にあり、#743 で services/ 配下の全10サービス
+      # (gatewayを除く)が揃った。DownstreamHealthConfigContractTest が
+      # ディレクトリを列挙して網羅性を検証するので、サービス追加時の漏れは検出できる。
+      #
+      # 注意: いずれか1つでもDOWNならgateway自身の /actuator/health もDOWNになり、
+      # コンテナのhealthcheckが失敗する。一部のサービスだけ起動する開発・検証時には
+      # gatewayがunhealthy表示になるが、gatewayのhealthyを service_healthy で
+      # 待っているコンテナは無いため起動順序には影響しない。
+      show-details: always

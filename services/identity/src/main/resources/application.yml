@@ -1,0 +1,78 @@
+server:
+  port: 8080
+
+logging:
+  level:
+    root: INFO
+    com.letsblog.identity: DEBUG
+  # 相関ID(issue #582、com.letsblog.common.web.CorrelationIdFilter)をログ行に含める。
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%X{correlationId}] - %msg%n"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+  # log-writer(#572)/media-service(#573)/ai-service(#574)/content-service(#576)等と同じ理由:
+  # 明示的なproducesを持たないエンドポイントがOpenAPI上`*/*`として記録されると、orvalが生成する
+  # TypeScriptクライアントの型付けが崩れる(res.json()ではなくres.text()を生成し、宣言した
+  # レスポンス型と一致しなくなる)。既定の応答Content-Typeを明示することでこれを避ける。
+  # 本サービスだけこの設定が漏れており、生成クライアントに型エラーが出ていた(issue #739)。
+  default-produces-media-type: application/json
+
+spring:
+  application:
+    name: identity
+  # ユーザー/ロール管理を扱う(#561)。現時点ではlegacy-apiと同一の物理スキーマ(lets_blog)上の
+  # users/roles/role_permissions/user_rolesテーブルを直接参照する(ADR-0004が求める
+  # スキーマ分離自体は本Issueのスコープ外。両サービスが同一テーブルを直接参照する状態は
+  # 移行期間中の暫定措置であり、将来のスキーマ分離Issueで解消する)。
+  # そのためFlywayは持たず(移行管理は引き続きlegacy-api側が担う)、ddl-auto: validateで
+  # 既存スキーマとの整合のみ確認する。
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lets_blog?useSSL=false&serverTimezone=UTC}
+    username: ${SPRING_DATASOURCE_USERNAME:lbs_app}
+    password: ${SPRING_DATASOURCE_PASSWORD:lbs_app}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  # user.deactivatedドメインイベント発行(letsblog.events、issue #580)。プロデューサー側のみを
+  # 担うため、リトライ/DLQ設定は不要(コンシューマー側の設定はcontent-service等を参照)。
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+
+# GitHubトークンの暗号化(user.githubTokenEncrypted)に使う。legacy-apiと同じ物理カラムを
+# 参照するため、legacy-apiと同一のAPP_ENCRYPTION_KEYを共有する必要がある。
+app:
+  encryption-key: ${APP_ENCRYPTION_KEY:}
+
+# Keycloakユーザー同期(#562)。letsblog-services(#560で定義済みのサービス間通信用confidentialクライアント)
+# のクライアントクレデンシャルズグラントでKeycloak Admin REST APIを呼び出す。事前にrealm側で
+# このクライアントのサービスアカウントにrealm-management#manage-usersロールを付与しておく必要がある
+# (keycloak/realm-export.json参照)。token-uri/admin-base-uriはコンテナ間通信で到達可能な内部アドレス
+# (gatewayのkeycloak.jwk-set-uriと同様の考え方。services/gateway/src/main/resources/application.yml参照)。
+keycloak:
+  admin:
+    token-uri: ${KEYCLOAK_TOKEN_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/token}
+    admin-base-uri: ${KEYCLOAK_ADMIN_BASE_URI:http://keycloak:8080/auth/admin/realms/letsblog}
+    client-id: ${KEYCLOAK_SERVICES_CLIENT_ID:letsblog-services}
+    client-secret: ${KEYCLOAK_SERVICES_CLIENT_SECRET:}
+  # KeycloakのJWT検証(#563)。gatewayを経由しない直接アクセスに対しても、Bearerトークンが
+  # 付与されていれば独立して検証する(gatewayのbypassを許さない)。jwk-set-uri/issuerの
+  # 意味はservices/gateway/src/main/resources/application.ymlのコメント参照。
+  jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/certs}
+  issuer: ${KEYCLOAK_ISSUER:https://localhost/auth/realms/letsblog}

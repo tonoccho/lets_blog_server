@@ -9,7 +9,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   const { id } = await params;
   const projectId = Number(id);
-  const actor = { id: Number(session.user.id), role: session.user.role };
   const body = await request.json().catch(() => null);
   if (!body || typeof body.htmlTemplate !== "string" || typeof body.testContent !== "string") {
     return Response.json({ error: "リクエストの形式が不正です。" }, { status: 400 });
@@ -18,9 +17,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   try {
     const result = await previewProjectCustomTag(
       projectId,
-      { htmlTemplate: body.htmlTemplate, cssContent: body.cssContent, testContent: body.testContent },
-      actor
-    );
+      { htmlTemplate: body.htmlTemplate, cssContent: body.cssContent, testContent: body.testContent });
     return Response.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

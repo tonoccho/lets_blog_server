@@ -12,28 +12,68 @@ Code coverage is measured across multiple dimensions:
 
 ## Coverage Targets by Module
 
-### API (Java/Spring Boot)
+Since #557/#587, the backend is a Gradle multi-project build. Each module is tested and
+covered independently in CI (`.github/workflows/api-services-test.yml`), which uploads
+JaCoCo reports to Codecov under a per-module `flags:` tag matching the module name below.
+None of these modules currently define a `jacocoTestCoverageVerification` threshold in their
+`build.gradle` (verified 2026-08) — the numbers below are targets tracked via Codecov/PR
+review, not a build-breaking gate. The same threshold values that applied to the old single
+`api/` project are kept here, applied uniformly to every backend module, since no
+module-specific evidence for different numbers exists yet.
 
-**Location**: `api/build/reports/jacoco/test/jacocoTestReport.xml`
+### `libs:lbs-common`
 
-**Target Thresholds**:
-- Statements: 60%
-- Branches: 50%
-- Functions: 60%
-- Lines: 60%
+**Location**: `libs/lbs-common/build/reports/jacoco/test/jacocoTestReport.xml`
 
-**Excluded from Coverage**:
+**Target Thresholds**: Statements 60% / Branches 50% / Functions 60% / Lines 60%
+
+No `**/config/**`-style exclusions are configured for this module's `jacocoTestReport` (see
+`libs/lbs-common/build.gradle`); it holds only cross-cutting utilities, not domain logic
+(#554), so the general thresholds apply as-is. Test fixtures (`src/testFixtures/`, e.g.
+`com.letsblog.common.testfixtures.JwtTestFixtures`, see
+[ADR-0006](adr/0006-per-service-test-strategy.md)) are not part of `src/main` and are not
+subject to these coverage targets.
+
+### `services:legacy-api`
+
+**Location**: `services/legacy-api/build/reports/jacoco/test/jacocoTestReport.xml`
+
+**Target Thresholds**: Statements 60% / Branches 50% / Functions 60% / Lines 60%
+
+**Excluded from Coverage** (configured in `services/legacy-api/build.gradle`):
 - Configuration classes (`**/config/**`)
 - Entity classes (`**/entity/**`)
 - DTOs (`**/dto/**`)
 - Exception classes (`**/exception/**`)
 - Auto-generated classes (`**/*$*`)
 
-**Core Modules to Prioritize**:
+**Core Packages to Prioritize**:
 - `com.letsblog.api.service.*` - Business logic (target: 80%+)
 - `com.letsblog.api.controller.*` - REST endpoints (target: 75%+)
 - `com.letsblog.api.repository.*` - Data access (target: 70%+)
 - `com.letsblog.api.util.*` - Utility functions (target: 85%+)
+
+### `services:identity`
+
+**Location**: `services/identity/build/reports/jacoco/test/jacocoTestReport.xml`
+
+**Target Thresholds**: Statements 60% / Branches 50% / Functions 60% / Lines 60%
+
+No JaCoCo exclusions are currently configured in `services/identity/build.gradle` (unlike
+`legacy-api`); the general thresholds apply to the whole module until package-specific
+guidance is established.
+
+### `services:log-writer`
+
+**Location**: `services/log-writer/build/reports/jacoco/test/jacocoTestReport.xml`
+
+**Target Thresholds**: Statements 60% / Branches 50% / Functions 60% / Lines 60%
+
+### `services:gateway`
+
+**Location**: `services/gateway/build/reports/jacoco/test/jacocoTestReport.xml`
+
+**Target Thresholds**: Statements 60% / Branches 50% / Functions 60% / Lines 60%
 
 ### Frontend (TypeScript/React)
 
@@ -56,23 +96,28 @@ Code coverage is measured across multiple dimensions:
 
 **Priority Areas**:
 - `src/components/` - React components (target: 60%+)
-- `src/hooks/` - Custom hooks (target: 70%+)
 - `src/lib/` - Utility functions (target: 75%+)
-- `src/app/` - Page components (target: 50%+)
+- `src/app/` - Page components/routes (target: 50%+)
+
+(Verified against `web/src/` 2026-08: no dedicated `src/hooks/` directory currently exists;
+removed from this list. Reintroduce it here if one is added.)
 
 ## Continuous Integration Coverage Check
 
 ### API Coverage
 
-Coverage reports are generated and uploaded to Codecov during CI/CD:
+Coverage reports are generated per backend module and uploaded to Codecov during CI/CD
+(`.github/workflows/api-services-test.yml`, per-module `flags:` — see "Coverage Targets by
+Module" above):
 
 ```bash
-cd api
-./gradlew test jacocoTestReport
+# From the project root, e.g. legacy-api
+./gradlew :services:legacy-api:test :services:legacy-api:jacocoTestReport
 ```
 
 Results are available at:
-- Local: `api/build/reports/jacoco/test/index.html`
+- Local: `services/<service>/build/reports/jacoco/test/index.html` (or
+  `libs/lbs-common/build/reports/jacoco/test/index.html`)
 - Codecov: https://codecov.io/gh/tonoccho/lets_blog_server
 
 ### Frontend Coverage
@@ -144,5 +189,9 @@ describe('MyComponent', () => {
 ## Related Documentation
 
 - [Frontend Tests](../web/jest.config.ts) - Jest configuration
-- [API Tests](../api/build.gradle) - JaCoCo configuration
+- [legacy-api JaCoCo configuration](../services/legacy-api/build.gradle)
+- [identity JaCoCo configuration](../services/identity/build.gradle)
+- [lbs-common JaCoCo configuration](../libs/lbs-common/build.gradle)
 - [CI/CD Workflows](../.github/workflows/) - Automated testing and coverage
+- [Test Documentation](./TEST_DOCUMENTATION.md) - How to run tests per service, JWT test fixture
+- [ADR-0006: サービス別のテスト戦略](./adr/0006-per-service-test-strategy.md)

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { getApiKey, getActor, getProjectId, getServerUrl } from './config';
+import { getAccessToken, getActor, getProjectId } from './config';
 import * as api from './apiClient';
 import { detectBodyCustomTagCompletionContext } from './bodyCustomTagCompletionLogic';
 import { logger } from './logger';
@@ -28,7 +28,7 @@ export class BodyCustomTagCompletionProvider implements vscode.CompletionItemPro
       return undefined;
     }
 
-    const apiKey = await getApiKey(this.context);
+    const apiKey = await getAccessToken(this.context);
     const actor = await getActor(this.context);
     const projectId = getProjectId(this.context);
     if (!apiKey || !actor || !projectId) {
@@ -41,7 +41,7 @@ export class BodyCustomTagCompletionProvider implements vscode.CompletionItemPro
     );
 
     try {
-      const tags = await api.listCustomTags(getServerUrl(), apiKey, actor, projectId);
+      const tags = await api.listCustomTags(apiKey, actor, projectId);
       return tags.map((tag) => {
         const item = new vscode.CompletionItem(tag.tagName, vscode.CompletionItemKind.Snippet);
         item.detail = tag.description ?? undefined;

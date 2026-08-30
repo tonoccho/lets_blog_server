@@ -6,20 +6,127 @@ AI執筆支援(外部LLMサービス)・チャットでの壁打ちからのプ�
 Docker Composeでまとめて起動する。クライアントはVSCode拡張機能(執筆・投稿)とWeb管理画面
 (サイト管理・投稿履歴・ユーザー管理等)の2つ。
 
-詳細なアーキテクチャは [spec/phase1/00-overview.md](spec/phase1/00-overview.md) を参照。
+現在はマイクロサービス化 + Keycloak認証基盤への移行(Epic #551)を進行中で、以下はその現状と目標。
+設計上の意思決定は [docs/adr/](docs/adr/README.md) に、コンテナ構成の詳細は
+[docs/DOCKER_COMPOSE_ARCHITECTURE.md](docs/DOCKER_COMPOSE_ARCHITECTURE.md) にある。
+
+## アーキテクチャ
+
+### 現状(2026年8月時点)
+
+`api`(`services/legacy-api`)がドメインロジックの大半を担う単一サービスに、認証以外の周辺コンポーネント
+(RabbitMQ経由の非同期ログ書き込み・Penpotによるデザイン生成・PlantUML/drawioレンダリング・WordPress
+プロビジョニング)が接続する構成。
+
+```mermaid
+flowchart LR
+    subgraph Client
+        VSCode["VSCode拡張"]
+        Web["Web管理画面<br/>(Next.js)"]
+    end
+
+    RP["reverse-proxy<br/>(nginx)"]
+
+    subgraph Server["Docker Compose"]
+        API["api<br/>(legacy-api, Spring Boot)"]
+        LW["log-writer"]
+        MySQL[(MySQL<br/>単一スキーマ)]
+        RMQ[["RabbitMQ<br/>letsblog.logs"]]
+        Penpot["Penpotスイート<br/>(デザイン生成)"]
+        ComfyUI["ComfyUI<br/>(画像生成, GPU)"]
+        PlantUML["PlantUML"]
+        Drawio["drawio"]
+    end
+
+    WP[("WordPress サイト群")]
+
+    VSCode -- "Bearer JWT (Keycloak)" --> RP
+    Web -- "Bearer JWT (Keycloak)" --> RP
+    RP --> API
+    RP --> Web
+    API --> MySQL
+    API -- "ログ発行" --> RMQ
+    RMQ -- "非同期コンシューム" --> LW
+    LW --> MySQL
+    API --> Penpot
+    API --> ComfyUI
+    API --> PlantUML
+    API --> Drawio
+    API -- "REST API + アプリケーションパスワード" --> WP
+```
+
+認証はKeycloak(OIDC)発行のJWTへ一括切り替え済み(issue #566)で、旧来のヘッダベースの
+自己申告方式([ADR-0002](docs/adr/0002-keycloak-oidc.md) の Context 参照)は撤去した。
+このアーキテクチャ図自体は、ドメイン単位のマイクロサービス分割(Phase 19)がまだ進行中の
+時点のものであり、api-gateway/identity-service/Keycloakは実際には既に導入済み
+(下記「目標構成」の一部を先取りして稼働している)。
+
+### 目標構成(マイグレーション後)
+
+[ADR-0001](docs/adr/0001-domain-based-microservices.md)〜[ADR-0004](docs/adr/0004-schema-per-service.md) の
+決定に基づき、ドメイン単位の完全なマイクロサービス化と Keycloak (OIDC) 認証基盤への一括切り替えを行う。
+
+```mermaid
+flowchart LR
+    subgraph Client
+        VSCode["VSCode拡張<br/>(Device Code)"]
+        Web["Web管理画面<br/>(Auth Code + PKCE)"]
+    end
+
+    RP["reverse-proxy<br/>(nginx)"]
+    GW["api-gateway<br/>(JWT検証/ルーティング/レート制限/相関ID)"]
+    KC["Keycloak<br/>(OIDC IdP) + PostgreSQL"]
+
+    subgraph Services["ドメインサービス群(各サービス専用MySQLスキーマ)"]
+        Identity["identity-service"]
+        Project["project-service"]
+        Content["content-service"]
+        Media["media-service"]
+        AI["ai-service"]
+        Publishing["publishing-service"]
+        Analytics["analytics-service"]
+        Platform["platform-service"]
+        LogW["log-writer"]
+    end
+
+    Events[["RabbitMQ<br/>letsblog.events / letsblog.logs"]]
+
+    VSCode -- OIDCトークン --> RP
+    Web -- OIDCトークン --> RP
+    RP --> GW
+    GW -- JWT検証 --> KC
+    GW --> Identity
+    GW --> Project
+    GW --> Content
+    GW --> Media
+    GW --> AI
+    GW --> Publishing
+    GW --> Analytics
+    GW --> Platform
+    Services -- 発行/購読 --> Events
+    Events --> LogW
+```
+
+サービス間の同期呼び出しは Client Credentials Grant で相互認証する(図では省略。
+サービス数が多く全組み合わせを描くと見づらいため)。
+
+移行の詳細な意思決定は [docs/adr/](docs/adr/README.md) を参照。実行計画は
+GitHub の Epic #551 とその子Issueが一次情報。
 
 ## CI/CD & Quality
 
-[![API Tests and Coverage](https://github.com/tonoccho/lets_blog_server/actions/workflows/api-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/api-test.yml)
-[![Log Writer Tests](https://github.com/tonoccho/lets_blog_server/actions/workflows/log-writer-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/log-writer-test.yml)
+[![API Services Tests](https://github.com/tonoccho/lets_blog_server/actions/workflows/api-services-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/api-services-test.yml)
 [![Frontend Tests](https://github.com/tonoccho/lets_blog_server/actions/workflows/frontend-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/frontend-test.yml)
 [![Extension Build](https://github.com/tonoccho/lets_blog_server/actions/workflows/extension-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/extension-test.yml)
 
-[![codecov](https://codecov.io/gh/tonoccho/lets_blog_server/graph/badge.svg?flag=api)](https://codecov.io/gh/tonoccho/lets_blog_server)
+[![codecov](https://codecov.io/gh/tonoccho/lets_blog_server/graph/badge.svg?flag=legacy-api)](https://codecov.io/gh/tonoccho/lets_blog_server)
+[![codecov](https://codecov.io/gh/tonoccho/lets_blog_server/graph/badge.svg?flag=log-writer)](https://codecov.io/gh/tonoccho/lets_blog_server)
+[![codecov](https://codecov.io/gh/tonoccho/lets_blog_server/graph/badge.svg?flag=lbs-common)](https://codecov.io/gh/tonoccho/lets_blog_server)
 [![codecov](https://codecov.io/gh/tonoccho/lets_blog_server/graph/badge.svg?flag=frontend)](https://codecov.io/gh/tonoccho/lets_blog_server)
 
 ## 目次
 
+- [アーキテクチャ](#アーキテクチャ)
 - [ハードウェア要件](#ハードウェア要件)
 - [前提ソフトウェア要件](#前提ソフトウェア要件)
 - [前提ソフトウェアのインストール](#前提ソフトウェアのインストール)
@@ -33,7 +140,7 @@ Docker Composeでまとめて起動する。クライアントはVSCode拡張機
 |---|---|
 | GPU | **NVIDIA GPU(VRAM 16GB以上)必須**。ComfyUI(画像生成)がGPUを使用するため |
 | GPUドライバ | NVIDIA GPUドライバ + NVIDIA Container Toolkit(Dockerコンテナへのパススルー用) |
-| メモリ | 8GB以上を推奨(MySQL・Spring Boot API・Next.js・ComfyUI等の複数コンテナを同時起動するため) |
+| メモリ | **16GB以上を推奨**(全19コンテナをアイドル状態で起動した実測値で約10.3GiB。ホストOS分の余裕や、ComfyUIでの画像生成時のスパイクを考慮すると16GB以上が安全。詳細は[docs/DOCKER_COMPOSE_ARCHITECTURE.md](docs/DOCKER_COMPOSE_ARCHITECTURE.md#リソース実測)参照) |
 | ディスク | Dockerイメージに加え、ComfyUIのモデルファイルで数GB〜十数GB程度の空き容量が必要 |
 | ネットワーク | ホストの80番・443番ポートが空いていること(リバースプロキシが使用) |
 
@@ -177,9 +284,9 @@ code --install-extension letsblog-vscode-<バージョン>.vsix
 REST APIは以下のエンドポイントで公開しています:
 
 - **Swagger UI (対話的ドキュメント)**: `https://localhost/api/swagger-ui.html`
-- **OpenAPI JSON スペック**: `https://localhost/api-docs`
+- **OpenAPI JSON スペック**: `https://localhost/v3/api-docs`
 
-APIの認証にはX-API-Keyヘッダを使用します。APIキーはログイン(`/api/auth/login`)またはTOTP認証(`/api/auth/totp/verify`)成功時にレスポンスのheadersに含まれます。
+APIの認証にはKeycloakが発行するアクセストークンを`Authorization: Bearer`ヘッダーで使用します(issue #566で旧ヘッダベースのAPIキー認証から移行済み)。
 
 ## Code Quality & Coverage Details
 
@@ -203,7 +310,9 @@ APIの認証にはX-API-Keyヘッダを使用します。APIキーはログイ�
 ### 技術ドキュメント
 
 - [docs/setup.md](docs/setup.md) — 環境変数・起動手順・トラブルシューティングの詳細
-- [spec/phase1/00-overview.md](spec/phase1/00-overview.md) — 全体アーキテクチャ
+- [docs/DOCKER_COMPOSE_ARCHITECTURE.md](docs/DOCKER_COMPOSE_ARCHITECTURE.md) — コンテナ構成・ポート割当・起動順序
+- [docs/adr/](docs/adr/README.md) — アーキテクチャ意思決定記録 (ADR)
+- [docs/SERVICE_SCHEMA_MIGRATION.md](docs/SERVICE_SCHEMA_MIGRATION.md) — サービス別MySQLスキーマ分離とデータ移行ガイド
 - [docs/AI_SERVICE_PROVIDER_RESEARCH.md](docs/AI_SERVICE_PROVIDER_RESEARCH.md) — 外部AIサービス移行の調査・比較
 - [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) — リリースノート
 

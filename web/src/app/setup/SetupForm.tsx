@@ -1,13 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { signIn } from "next-auth/react";
 import { setupAction } from "./actions";
 
+/**
+ * issue #564でCredentialsプロバイダを廃止したため、このフォームは自動ログイン(signIn("keycloak")の
+ * 即時呼び出し)を行わず、「作成後はログイン画面へ」の案内にとどめる。issue #681でlegacy-apiの
+ * /api/auth/setupをKeycloak Admin REST API経由の実装に置き換えたため、ここで作成される管理者
+ * アカウントは実際にKeycloak側にも作成され、指定したメールアドレス・パスワードでログイン画面から
+ * すぐにログイン可能になる。
+ */
 export function SetupForm() {
-  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
   const [pending, setPending] = useState(false);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -16,26 +21,26 @@ export function SetupForm() {
     setError(null);
 
     const formData = new FormData(event.currentTarget);
-    const email = String(formData.get("email") ?? "");
-    const password = String(formData.get("password") ?? "");
-
     const setupResult = await setupAction({}, formData);
-    if (setupResult.error) {
-      setError(setupResult.error);
-      setPending(false);
-      return;
-    }
-
-    const signInResult = await signIn("credentials", { email, password, redirect: false });
     setPending(false);
 
-    if (!signInResult || signInResult.error) {
-      setError("管理者アカウントは作成されましたが、自動ログインに失敗しました。ログイン画面からお試しください。");
+    if (setupResult.error) {
+      setError(setupResult.error);
       return;
     }
 
-    router.push("/");
-    router.refresh();
+    setSuccess(true);
+  }
+
+  if (success) {
+    return (
+      <div className="space-y-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 text-sm">
+        <p className="text-green-600">管理者アカウントを作成しました。</p>
+        <p className="text-neutral-600 dark:text-neutral-400">
+          入力したメールアドレスとパスワードでログイン画面からログインできます。
+        </p>
+      </div>
+    );
   }
 
   return (
