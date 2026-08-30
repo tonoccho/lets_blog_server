@@ -6,8 +6,9 @@ AI執筆支援(外部LLMサービス)・チャットでの壁打ちからのプ�
 Docker Composeでまとめて起動する。クライアントはVSCode拡張機能(執筆・投稿)とWeb管理画面
 (サイト管理・投稿履歴・ユーザー管理等)の2つ。
 
-詳細なアーキテクチャは [spec/phase1/00-overview.md](spec/phase1/00-overview.md)(初期構築時点)を参照。
 現在はマイクロサービス化 + Keycloak認証基盤への移行(Epic #551)を進行中で、以下はその現状と目標。
+設計上の意思決定は [docs/adr/](docs/adr/README.md) に、コンテナ構成の詳細は
+[docs/DOCKER_COMPOSE_ARCHITECTURE.md](docs/DOCKER_COMPOSE_ARCHITECTURE.md) にある。
 
 ## アーキテクチャ
 
@@ -109,8 +110,8 @@ flowchart LR
 サービス間の同期呼び出しは Client Credentials Grant で相互認証する(図では省略。
 サービス数が多く全組み合わせを描くと見づらいため)。
 
-移行の詳細な意思決定は [docs/adr/](docs/adr/README.md)、実行計画は
-[spec/phase17/00-overview.md](spec/phase17/00-overview.md) 以降の各phaseを参照。
+移行の詳細な意思決定は [docs/adr/](docs/adr/README.md) を参照。実行計画は
+GitHub の Epic #551 とその子Issueが一次情報。
 
 ## CI/CD & Quality
 
@@ -309,7 +310,7 @@ APIの認証にはKeycloakが発行するアクセストークンを`Authorizati
 ### 技術ドキュメント
 
 - [docs/setup.md](docs/setup.md) — 環境変数・起動手順・トラブルシューティングの詳細
-- [spec/phase1/00-overview.md](spec/phase1/00-overview.md) — 全体アーキテクチャ
+- [docs/DOCKER_COMPOSE_ARCHITECTURE.md](docs/DOCKER_COMPOSE_ARCHITECTURE.md) — コンテナ構成・ポート割当・起動順序
 - [docs/adr/](docs/adr/README.md) — アーキテクチャ意思決定記録 (ADR)
 - [docs/SERVICE_SCHEMA_MIGRATION.md](docs/SERVICE_SCHEMA_MIGRATION.md) — サービス別MySQLスキーマ分離とデータ移行ガイド
 - [docs/AI_SERVICE_PROVIDER_RESEARCH.md](docs/AI_SERVICE_PROVIDER_RESEARCH.md) — 外部AIサービス移行の調査・比較

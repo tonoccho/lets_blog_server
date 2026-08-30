@@ -124,8 +124,25 @@ docker exec lbs-api curl -sf http://localhost:8080/actuator/health
 docker exec lbs-log-writer curl -sf http://localhost:8080/actuator/health
 ```
 
-将来のapi-gateway導入後は、gateway経由の疎通確認に置き換わる予定
-([spec/phase17/00-overview.md](../spec/phase17/00-overview.md) 参照)。
+gateway は下流のバックエンドサービス10個(legacy-api / identity / content / media / ai /
+analytics / log-writer / project / publishing / platform)の状態を自身の `/actuator/health` に
+集約するため(`services/gateway/.../DownstreamHealthConfig`、#560・#743)、
+次のコマンドでまとめて確認できる。
+
+```bash
+docker exec lbs-gateway curl -s http://localhost:8080/actuator/health
+```
+
+`-f` を付けないのは、いずれかが DOWN のとき gateway が 503 を返すため。
+`-f` があると curl が本文を出さずに終了してしまい、**どのサービスが DOWN なのかが分からない**。
+gateway は `show-details: always` なので、本文にサービスごとの状態が入っている。
+
+mysql / rabbitmq / keycloak / web などは集約の対象外なので、個別に確認する。
+
+なお、いずれか1つでも DOWN だと gateway 自身のヘルスも DOWN になり、
+`docker ps` で `lbs-gateway (unhealthy)` と表示される。一部のサービスだけ起動している
+開発中はこれが正常なので、gateway の unhealthy 表示だけを見て異常と判断しないこと
+(gateway の healthy を起動条件にしているコンテナは無いため、起動順序には影響しない)。
 
 ### アクセスURL一覧
 
@@ -294,6 +311,7 @@ Phase 6以降は意図した仕様(すべて `https://localhost/...` 経由に�
 
 ## 関連ドキュメント
 
-- [spec/phase6/00-overview.md](../spec/phase6/00-overview.md) — リバースプロキシ導入の全体設計
-- [spec/phase6/01-reverse-proxy.md](../spec/phase6/01-reverse-proxy.md) — nginx設定の詳細
+- [nginx/conf.d/default.conf](../nginx/conf.d/default.conf) — リバースプロキシのルーティング設定
+  (どのパスをどのサービスへ振り分けるか、その判断理由がコメントに書かれている)
+- [docs/DOCKER_COMPOSE_ARCHITECTURE.md](DOCKER_COMPOSE_ARCHITECTURE.md) — コンテナ構成・ポート割当・起動順序
 - [.env.example](../.env.example) — 環境変数の全項目
