@@ -66,6 +66,7 @@ class AuthorizationMatrixIntegrationTest {
                 // -- IdentityController --
                 new Endpoint("GET", "/api/identity/me"),
                 new Endpoint("GET", "/api/identity/me/permissions"),
+                new Endpoint("PATCH", "/api/identity/me/preferences"),
                 new Endpoint("GET", "/api/identity/users/1/permissions"),
 
                 // -- UserController --

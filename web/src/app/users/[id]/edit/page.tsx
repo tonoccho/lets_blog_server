@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getUserProfile } from "@/lib/apiClient";
-import { requireSession } from "@/lib/session";
+import { requireSession, getViewerProfile } from "@/lib/session";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { Tabs, type TabItem } from "@/components/Tabs";
 import { UserProfileForm } from "./UserProfileForm";
@@ -41,7 +41,10 @@ export default async function UserProfileEditPage({
   const { id } = await params;
   const session = await requireSession();
 
-  const isSelf = session.user.id === id;
+  // session.user.idはKeycloakのsub(UUID)であり、ローカルの数値ユーザーIDではない(issue #784)。
+  // 以前は `session.user.id === id` が常にfalseになり、非adminが自分の編集画面を開けなかった。
+  const viewer = await getViewerProfile();
+  const isSelf = viewer != null && String(viewer.id) === id;
   if (!isSelf && session.user.role !== "admin") {
     redirect("/");
   }

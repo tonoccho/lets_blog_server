@@ -653,6 +653,20 @@ export function getUserProfile(id: number, actor?: ActorInfo): Promise<UserProfi
   return apiFetch<UserProfile>(`/api/users/${id}`, { actor });
 }
 
+/**
+ * ログイン中ユーザー自身のプロフィール(issue #784)。
+ *
+ * identity-serviceが検証済みJWTの`sub`から自ユーザーを解決するため、**呼び出し側は
+ * ユーザーIDを渡さない**。Keycloak移行(#564)以降`session.user.id`はKeycloakの`sub`(UUID)で
+ * あり、これを`Number()`に通すと必ず`NaN`になる。`/api/users/${Number(session.user.id)}`という
+ * 組み立て方は`/api/users/NaN`という壊れたリクエストを生み、24時間で203件観測されていた。
+ *
+ * ID指定版の{@link getUserProfile}はadminが他ユーザーを操作する経路のため残す。
+ */
+export function getMyProfile(): Promise<UserProfile> {
+  return apiFetch<UserProfile>('/api/identity/me');
+}
+
 export function updateUserProfile(id: number, input: UserProfileInput, actor?: ActorInfo): Promise<UserProfile> {
   return apiFetch<UserProfile>(`/api/users/${id}`, {
     method: 'PUT',
@@ -677,6 +691,18 @@ export function updateUserPreferences(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
     actor,
+  });
+}
+
+/**
+ * ログイン中ユーザー自身の個人設定(言語・タイムゾーン)を更新する(issue #784)。
+ * {@link getMyProfile}と同じ理由でユーザーIDを渡さない。
+ */
+export function updateMyPreferences(input: UpdateUserPreferencesInput): Promise<UserProfile> {
+  return apiFetch<UserProfile>('/api/identity/me/preferences', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
   });
 }
 
