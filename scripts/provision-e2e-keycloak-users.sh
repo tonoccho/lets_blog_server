@@ -14,6 +14,9 @@
 # 共有環境では実行せず、docs/e2e-testing.mdの手順に従って手動で発行すること。
 #
 # ■ 何をするか
+# 0. letsblog-services(サービス間通信用のconfidentialクライアント)のClient Credentials Grantで
+#    アクセストークンを取得する。issue #772でidentity-serviceの認証ゲート(有効なJWTが無ければ401)を
+#    復元したため、次のユーザー作成要求にもBearerトークンが必要になった。
 # 1. identity-service(gateway経由 https://localhost/api/users)へユーザー作成を要求する。
 #    identity-serviceはKeycloak側のユーザー作成とローカルDB(lets_blog.users、keycloak_sub付き)
 #    への登録を1トランザクションで行う。両方揃っていないとE2Eのadmin操作は通らない
@@ -58,9 +61,19 @@ fi
 # shellcheck disable=SC1090
 KEYCLOAK_ADMIN_USERNAME="$(grep -m1 '^KEYCLOAK_ADMIN_USERNAME=' "$ENV_FILE" | cut -d= -f2-)"
 KEYCLOAK_ADMIN_PASSWORD="$(grep -m1 '^KEYCLOAK_ADMIN_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)"
+# issue #772でidentity-serviceの認証ゲートを復元したため、POST /api/users も有効なJWTが要る。
+# letsblog-services(サービス間通信用のconfidentialクライアント)のClient Credentialsで取得する。
+KEYCLOAK_SERVICES_CLIENT_SECRET="$(grep -m1 '^KEYCLOAK_SERVICES_CLIENT_SECRET=' "$ENV_FILE" | cut -d= -f2-)"
 
 if [ -z "${KEYCLOAK_ADMIN_USERNAME:-}" ] || [ -z "${KEYCLOAK_ADMIN_PASSWORD:-}" ]; then
   echo "エラー: .env の KEYCLOAK_ADMIN_USERNAME / KEYCLOAK_ADMIN_PASSWORD が未設定です" >&2
+  exit 1
+fi
+
+if [ -z "${KEYCLOAK_SERVICES_CLIENT_SECRET:-}" ]; then
+  echo "エラー: .env の KEYCLOAK_SERVICES_CLIENT_SECRET が未設定です" >&2
+  echo "  identity-serviceの POST /api/users は認証必須(issue #772)のため、" >&2
+  echo "  letsblog-servicesクライアントのシークレットが必要です。" >&2
   exit 1
 fi
 
@@ -91,6 +104,31 @@ kcadm config credentials \
   --user "$KEYCLOAK_ADMIN_USERNAME" \
   --password "$KEYCLOAK_ADMIN_PASSWORD" >/dev/null
 
+# identity-serviceの POST /api/users を呼ぶためのアクセストークンを取得する(issue #772)。
+# letsblog-services のClient Credentials Grantを使う。POST /api/users は
+# UserController#create のとおりadmin判定を行わない(認証ゲートのみ)ため、
+# エンドユーザーのsubを持たないサービストークンでも作成できる。
+SERVICE_ACCESS_TOKEN=""
+fetch_service_access_token() {
+  local response
+  response="$(curl -sk -X POST \
+    "${API_BASE_URL}/auth/realms/${REALM}/protocol/openid-connect/token" \
+    -H 'Content-Type: application/x-www-form-urlencoded' \
+    -d 'grant_type=client_credentials' \
+    -d 'client_id=letsblog-services' \
+    --data-urlencode "client_secret=${KEYCLOAK_SERVICES_CLIENT_SECRET}")"
+
+  SERVICE_ACCESS_TOKEN="$(printf '%s' "$response" \
+    | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
+
+  if [ -z "$SERVICE_ACCESS_TOKEN" ]; then
+    echo "エラー: letsblog-servicesのアクセストークン取得に失敗しました" >&2
+    echo "  Keycloakとreverse-proxyが起動しているか、.env の" >&2
+    echo "  KEYCLOAK_SERVICES_CLIENT_SECRET がrealmの設定と一致しているか確認してください。" >&2
+    exit 1
+  fi
+}
+
 # $1: email, $2: password, $3: role(user|admin)
 provision_user() {
   local email="$1"
@@ -111,12 +149,19 @@ provision_user() {
   local status
   status="$(curl -sk -o /dev/null -w '%{http_code}' \
     -X POST "${API_BASE_URL}/api/users" \
+    -H "Authorization: Bearer ${SERVICE_ACCESS_TOKEN}" \
     -H 'Content-Type: application/json' \
     -d "{\"email\":\"${email}\",\"password\":\"${password}\",\"role\":\"${role}\"}")"
 
   case "$status" in
     201)
       echo "  identity-service: 新規作成しました(Keycloak + ローカルDB)"
+      ;;
+    401)
+      echo "エラー: identity-serviceが401を返しました(issue #772で認証ゲートを復元済み)" >&2
+      echo "  letsblog-servicesのアクセストークンがidentity-serviceで検証できていません。" >&2
+      echo "  .env の KEYCLOAK_SERVICES_CLIENT_SECRET と realm の設定を確認してください。" >&2
+      exit 1
       ;;
     400|409)
       echo "  identity-service: 既に存在するためスキップします(HTTP ${status})"
@@ -186,6 +231,9 @@ JSON
     echo "  既に存在するため設定を上書きしました(冪等)"
   fi
 }
+
+echo "--- identity-service呼び出し用のサービストークンを取得します ---"
+fetch_service_access_token
 
 provision_user "$TEST_EMAIL" "$E2E_TEST_PASSWORD" "user"
 provision_user "$ADMIN_EMAIL" "$E2E_ADMIN_PASSWORD" "admin"

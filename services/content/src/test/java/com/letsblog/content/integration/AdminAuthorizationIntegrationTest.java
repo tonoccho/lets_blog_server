@@ -59,10 +59,11 @@ class AdminAuthorizationIntegrationTest {
     private LegacyApiBridgeClient legacyApiBridgeClient;
 
     @Test
-    @DisplayName("Authorizationヘッダーなしは非adminとみなされ403(プロジェクトメンバーでも管理者でもない)")
-    void authorizationヘッダーなしは403() throws Exception {
+    @DisplayName("Authorizationヘッダーなしは401(issue #772でSecurityConfigの認証ゲートを復元したため、"
+            + "コントローラの認可チェック(403)へ到達する前にSpring Securityが弾く)")
+    void authorizationヘッダーなしは401() throws Exception {
         mockMvc.perform(post(RENDER_PATH).contentType(MediaType.APPLICATION_JSON).content(RENDER_BODY))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

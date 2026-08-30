@@ -102,10 +102,11 @@ jobs:
       matrix:
         service: [lbs-common, legacy-api, log-writer, gateway, identity, content]
 
-    # legacy-api/contentのテストのみMySQLを使う(#570のスキーマ分離が完了するまではlegacy-apiは
-    # 共有DBのまま。contentは#576でスキーマ分離済みの専用DB lbs_content_test を使う)。
-    # lbs-common/log-writer/gateway/identityには不要だが、マトリクスジョブ単位でしか services: を
-    # 定義できないため、無害な待機コストとして許容する。
+    # legacy-api/content/identity/log-writerのテストがMySQLを使う(#570のスキーマ分離が完了する
+    # までlegacy-apiは共有DBのまま。contentは#576でスキーマ分離済みの専用DB lbs_content_test、
+    # identity/log-writerは#772で追加した lbs_identity_test / lbs_log_test を使う)。
+    # lbs-common/gatewayには不要だが、マトリクスジョブ単位でしか services: を定義できないため、
+    # 無害な待機コストとして許容する。
     services:
       mysql:
         image: mysql:8.0
@@ -149,12 +150,21 @@ jobs:
       - name: Run linter
         run: ./gradlew ${{ steps.project.outputs.path }}:lint
 
-      - name: Create content test schema
-        if: matrix.service == 'content'
+      # サービス専用のテストスキーマを作る(mysql/init/02-create-test-schemas.sh のCI版)。
+      # 各サービスの src/test/resources/application-test.yml が参照する
+      # (ADR-0006: Testcontainersは使わず実MySQLに接続する)。identity / log-writer 分は
+      # issue #772 で AuthorizationMatrixIntegrationTest を追加したときに足した。
+      - name: Create service test schema
+        if: matrix.service == 'content' || matrix.service == 'identity' || matrix.service == 'log-writer'
         run: |
+          case "${{ matrix.service }}" in
+            content)    schema=lbs_content_test ;;
+            identity)   schema=lbs_identity_test ;;
+            log-writer) schema=lbs_log_test ;;
+          esac
           mysql -h 127.0.0.1 -P 3306 -u root -ptestpass -e "
-            CREATE DATABASE IF NOT EXISTS lbs_content_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-            GRANT ALL PRIVILEGES ON lbs_content_test.* TO 'test_user'@'%';
+            CREATE DATABASE IF NOT EXISTS ${schema} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+            GRANT ALL PRIVILEGES ON ${schema}.* TO 'test_user'@'%';
             FLUSH PRIVILEGES;"
 
       - name: Run unit tests with coverage

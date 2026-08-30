@@ -15,39 +15,46 @@ Bearerトークンが提示されていれば検証するが、トークンが�
 [ADR-0008: 認証ゲートは各サービス自身の SecurityConfig で担い、gateway では実施しない](adr/0008-auth-gate-in-each-service-security-config.md)
 を参照。
 
-### ランタイム別の実施状況(2026-08-30時点)
+### ランタイム別の実施状況(2026-08-30時点、#772適用後)
 
 | ランタイム | 認証ゲートの担い手 | 公開パス | 対応する統合テスト |
 |---|---|---|---|
 | gateway | 担わない(方針どおり。ADR-0008)。提示されたトークンの検証のみ | 全経路(`anyExchange().permitAll()`) | 該当なし(ゲートを担わないため) |
 | legacy-api | 自サービスの`SecurityConfig`(#566) | `/api/health`、`/api/auth/setup`、`/api/auth/setup-status`、`/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html` | `services/legacy-api/src/test/java/com/letsblog/api/integration/AuthorizationMatrixIntegrationTest.java` |
 | platform | 自サービスの`SecurityConfig`(#705。**参照実装**) | `/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html`、`/api/internal/platform/**`(#742で別途判断) | `services/platform/src/test/java/com/letsblog/platform/integration/AuthorizationMatrixIntegrationTest.java`(**テストのテンプレート**) |
-| identity | 未実施(`anyRequest().permitAll()`) | 全経路 | #772で追加予定 |
-| project | 部分的(`/api/internal/**`のみ`authenticated()`) | `/api/internal/**`以外の全経路 | #772で追加予定 |
-| content | 未実施(`anyRequest().permitAll()`) | 全経路 | #772で追加予定 |
-| media | 未実施(`anyRequest().permitAll()`) | 全経路 | #772で追加予定 |
-| ai | 未実施(`anyRequest().permitAll()`) | 全経路 | #772で追加予定 |
-| analytics | 未実施(`anyRequest().permitAll()`) | 全経路 | #772で追加予定 |
-| publishing | 部分的(`/api/internal/**`のみ`authenticated()`) | `/api/internal/**`以外の全経路 | #772で追加予定 |
-| log-writer | 未実施(`anyRequest().permitAll()`) | 全経路 | #772で追加予定 |
+| identity | 自サービスの`SecurityConfig`(#772) | `/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html` | `services/identity/src/test/java/com/letsblog/identity/integration/AuthorizationMatrixIntegrationTest.java` |
+| project | 自サービスの`SecurityConfig`(#772) | `/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html` | `services/project/src/test/java/com/letsblog/project/integration/AuthorizationMatrixIntegrationTest.java` |
+| content | 自サービスの`SecurityConfig`(#772) | `/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html` | `services/content/src/test/java/com/letsblog/content/integration/AuthorizationMatrixIntegrationTest.java` |
+| media | 自サービスの`SecurityConfig`(#772) | `/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html` | `services/media/src/test/java/com/letsblog/media/integration/AuthorizationMatrixIntegrationTest.java` |
+| ai | 自サービスの`SecurityConfig`(#772) | `/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html` | `services/ai/src/test/java/com/letsblog/ai/integration/AuthorizationMatrixIntegrationTest.java` |
+| analytics | 自サービスの`SecurityConfig`(#772) | `/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html` | `services/analytics/src/test/java/com/letsblog/analytics/integration/AuthorizationMatrixIntegrationTest.java` |
+| publishing | 自サービスの`SecurityConfig`(#772) | `/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html` | `services/publishing/src/test/java/com/letsblog/publishing/integration/AuthorizationMatrixIntegrationTest.java` |
+| log-writer | 自サービスの`SecurityConfig`(#772) | `/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html` | `services/log-writer/src/test/java/com/letsblog/logwriter/integration/AuthorizationMatrixIntegrationTest.java` |
 
-「未実施」「部分的」の8サービス(content / ai / analytics / media / identity / project /
-publishing / log-writer)を ADR-0008 の形へ揃える作業は **#772** のスコープであり、ADR-0008 を
-追加した #713 では行っていない。これら8サービスの`SecurityConfig`の Javadoc に残る
-「gatewayが実際のエンドユーザートラフィックの検証を担う想定」という ADR-0008 と矛盾する記述の
-是正も、挙動変更と同じコミットで行うため **#772** に委ねている(理由はADR-0008の
-「Notes: 本ADR(#713)時点の実施状況」を参照)。gatewayのみ、方針上そもそも挙動を変えないため
-例外として #713 で Javadoc を是正した。
+**#772** で、残っていた8サービス(content / ai / analytics / media / identity / project /
+publishing / log-writer)を ADR-0008 の形へ揃えた。同時に、これら8サービスの`SecurityConfig`の
+Javadoc に残っていた「gatewayが実際のエンドユーザートラフィックの検証を担う想定」という
+ADR-0008 と矛盾する記述も、挙動の変更と同じコミットで是正した。gatewayのみ、方針上そもそも
+挙動を変えないため例外として #713 で Javadoc を是正済み。
 
-なお identity-service / log-writer は`SecurityConfig`としては`permitAll`だが、各コントローラーが
-`CurrentActorService`/`AdminAuthorizationService`経由でJWTのsubクレームを読む手続き的チェックを
-行っている。これは「認証済みなら誰でも到達できるエンドポイントが残る」という別の問題
-(後述の「既知のギャップ」)とは独立であり、`SecurityConfig`レベルの一律のゲートが無いことに
-変わりはない。
+identity-service / log-writer が従来から行っていた、各コントローラーによる
+`CurrentActorService`/`AdminAuthorizationService`経由の手続き的チェック(JWTのsubクレームを読む)は
+そのまま残る。これは「認証済みなら誰でも到達できるエンドポイントが残る」という別の問題
+(後述の「既知のギャップ」)であり、#772 が復元したのはその手前にある一律の認証ゲートである。
 
-以降のエンドポイント単位のマトリクスは、現時点では legacy-api(および legacy-api から移設された
-分の注記)のみを対象とする。上記8サービスのエンドポイント単位の行は、実際に`SecurityConfig`を
-変更する **#772** の担当とし、本節では枠と方針のみを示す。
+各サービスのエンドポイント単位の一覧は、上表の「対応する統合テスト」列が指す
+`AuthorizationMatrixIntegrationTest` の `allProtectedEndpoints()` が一次情報である
+(gateway経由で公開している全エンドポイントと内部ブリッジを列挙し、「Authorizationヘッダーが
+無ければ401」をパラメータ化テストで網羅する)。以降のエンドポイント単位のマトリクス(2層目の
+認可チェックの有無)は、現時点では legacy-api(および legacy-api から移設された分の注記)のみを
+対象とする。
+
+#### #772 で認証必須化した結果、未認証では到達しなくなった既知の呼び出し
+
+| 呼び出し元 | エンドポイント | 扱い |
+|---|---|---|
+| `web/src/lib/errorLogger.ts`(ブラウザから直接) | `POST /api/logs/errors` | legacy-api 時代も401だったため後退ではない。web側でBearerを付ける経路へ移す是正は **#791**。log-writerの`PUBLIC_PATHS`には入れない(未認証の書き込み経路を残さないため) |
+| `scripts/provision-e2e-keycloak-users.sh` | `POST /api/users` | #772 で同スクリプトを修正し、`letsblog-services`のClient Credentialsでトークンを取得してから呼ぶようにした |
 
 ---
 

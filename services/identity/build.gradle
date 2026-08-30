@@ -26,6 +26,8 @@ dependencies {
     annotationProcessor 'org.projectlombok:lombok'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    // @AutoConfigureMockMvc(AuthorizationMatrixIntegrationTest、issue #772)。他サービスと同じ依存。
+    testImplementation 'org.springframework.boot:spring-boot-webmvc-test'
     testImplementation 'org.springframework.security:spring-security-test'
     // JWTを必要とするテストの共通フィクスチャ(#587)。
     testImplementation testFixtures(project(':libs:lbs-common'))
