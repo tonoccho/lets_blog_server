@@ -72,13 +72,25 @@ public final class AuthorizationMatrixContract {
     private static final Pattern METHOD_MAPPING =
             Pattern.compile("@(Get|Post|Put|Delete|Patch|Request)Mapping\\b(\\([^)]*\\))?");
 
-    /** 注釈の引数から取り出すパス。{@code value =} / {@code path =} / 位置引数のいずれも許す。 */
-    private static final Pattern MAPPING_PATH =
-            Pattern.compile("(?:^|[(,\\s])(?:(?:value|path)\\s*=\\s*)?(\\{[^}]*\\}|\"[^\"]*\")");
+    /** {@code value = } のような名前付き属性の先頭。 */
+    private static final Pattern NAMED_ATTRIBUTE = Pattern.compile("^(\\w+)\\s*=\\s*");
 
-    /** {@code @RequestMapping(method = RequestMethod.GET)} の HTTP メソッド。 */
-    private static final Pattern MAPPING_METHOD =
-            Pattern.compile("method\\s*=\\s*\\{?\\s*(?:RequestMethod\\.)?(\\w+)");
+    /** 走査対象のクラスを判定する注釈。 */
+    private static final Pattern CONTROLLER_ANNOTATION =
+            Pattern.compile("@(?:Rest)?Controller\\b");
+
+    /** パスを表さない注釈属性。これらだけならパス無し(クラスのパスをそのまま使う)。 */
+    private static final Set<String> NON_PATH_ATTRIBUTES =
+            Set.of("method", "produces", "consumes", "headers", "params", "name");
+
+
+    /** {@code @RequestMapping(method = ...)} の属性値。{@code {GET, POST}} の配列も含む。 */
+    private static final Pattern MAPPING_METHOD_ATTR =
+            Pattern.compile("method\\s*=\\s*(\\{[^}]*\\}|[\\w.]+)");
+
+    /** 上の属性値から個々のHTTPメソッド名を取り出す。 */
+    private static final Pattern REQUEST_METHOD_NAME =
+            Pattern.compile("(?:RequestMethod\\.)?([A-Z]+)");
 
     /** {@code SecurityConfig} の {@code PUBLIC_PATHS} 配列。 */
     private static final Pattern PUBLIC_PATHS_BLOCK =
@@ -165,15 +177,72 @@ public final class AuthorizationMatrixContract {
         return concrete.matches(regex.toString());
     }
 
+    /**
+     * 走査対象は「{@code @RestController} または {@code @Controller} を持つ .java」。
+     *
+     * <p>ファイル名({@code *Controller.java})で絞ると、命名から外れたコントローラが
+     * <b>丸ごと不可視</b>になる。命名を強制する仕組みはリポジトリに無いので、注釈で判定する。
+     */
     private static List<Endpoint> scanControllerEndpoints(Path sourceRoot) {
         List<Endpoint> endpoints = new ArrayList<>();
         try (Stream<Path> files = Files.walk(sourceRoot)) {
-            files.filter(p -> p.getFileName().toString().endsWith("Controller.java"))
-                    .forEach(p -> endpoints.addAll(parseController(p.getFileName().toString(), read(p))));
+            files.filter(p -> p.getFileName().toString().endsWith(".java")).forEach(p -> {
+                String source = stripComments(read(p));
+                if (CONTROLLER_ANNOTATION.matcher(source).find()) {
+                    endpoints.addAll(parseController(p.getFileName().toString(), source));
+                }
+            });
         } catch (IOException e) {
             throw new UncheckedIOException("コントローラの走査に失敗しました: " + sourceRoot, e);
         }
         return endpoints;
+    }
+
+    /**
+     * コメントとJavadocを空白へ置き換える(位置をずらさないため長さは保つ)。
+     *
+     * <p>本リポジトリはJavadocが厚く、説明のために{@code {@code @GetMapping("/x")}}のような
+     * コード例を書く動機が現実にある。除去しないと、それが実在のエンドポイントとして
+     * <b>幻の「検証漏れ」</b>に化ける。コメントアウトされた古い注釈も同様。
+     */
+    private static String stripComments(String source) {
+        StringBuilder out = new StringBuilder(source.length());
+        int i = 0;
+        while (i < source.length()) {
+            char c = source.charAt(i);
+            if (c == '"' || c == '\'') {
+                int end = i + 1;
+                while (end < source.length()) {
+                    if (source.charAt(end) == '\\') {
+                        end += 2;
+                        continue;
+                    }
+                    if (source.charAt(end) == c) {
+                        break;
+                    }
+                    end++;
+                }
+                end = Math.min(end + 1, source.length());
+                out.append(source, i, end);
+                i = end;
+            } else if (source.startsWith("//", i)) {
+                int end = source.indexOf('\n', i);
+                end = end < 0 ? source.length() : end;
+                out.append(" ".repeat(end - i));
+                i = end;
+            } else if (source.startsWith("/*", i)) {
+                int end = source.indexOf("*/", i + 2);
+                end = end < 0 ? source.length() : end + 2;
+                for (int k = i; k < end; k++) {
+                    out.append(source.charAt(k) == '\n' ? '\n' : ' ');
+                }
+                i = end;
+            } else {
+                out.append(c);
+                i++;
+            }
+        }
+        return out.toString();
     }
 
     private static List<Endpoint> parseController(String fileName, String source) {
@@ -214,17 +283,22 @@ public final class AuthorizationMatrixContract {
      * 注釈が表す HTTP メソッド。
      *
      * <p>{@code @RequestMapping} に {@code method} が無い場合、Spring は全メソッドを受ける。
-     * 一覧との突き合わせでどう扱うべきか一意に決まらないので、
-     * <b>静かに縮退させず落とす</b>。この形が出てきたら走査ロジックの更新が必要という合図。
+     * 一覧との突き合わせでどう扱うべきか一意に決まらないので、<b>静かに縮退させず落とす</b>。
+     * この形が出てきたら走査ロジックの更新が必要という合図。
+     *
+     * <p>{@code method = {GET, POST}} の配列も展開する。1つしか拾わないと残りが無音で消える。
      */
     private static List<String> httpMethods(String fileName, String annotation, String args) {
         if (!"Request".equals(annotation)) {
             return List.of(annotation.toUpperCase(Locale.ROOT));
         }
         List<String> methods = new ArrayList<>();
-        Matcher m = MAPPING_METHOD.matcher(args);
-        while (m.find()) {
-            methods.add(m.group(1).toUpperCase(Locale.ROOT));
+        Matcher attr = MAPPING_METHOD_ATTR.matcher(args);
+        if (attr.find()) {
+            Matcher name = REQUEST_METHOD_NAME.matcher(attr.group(1));
+            while (name.find()) {
+                methods.add(name.group(1));
+            }
         }
         if (methods.isEmpty()) {
             throw new AssertionError(fileName
@@ -238,38 +312,108 @@ public final class AuthorizationMatrixContract {
     /**
      * 注釈が表すパス。{@code @GetMapping} のように値が無ければクラスのパスをそのまま使う。
      *
-     * <p>{@code {"/a","/b"}} の配列形式も展開する。
+     * <p><b>属性名で厳密に判別する</b>。#805 のQAで、位置引数を「引数中の任意の文字列リテラル」
+     * として拾っていたために {@code @GetMapping(produces = "text/plain")} が
+     * <b>幻の {@code /text/plain} を報告し、本物のパスを取りこぼす</b>ことが判明した。
+     * メッセージに従って幻のパスを一覧に足すと緑になり、実エンドポイントが検証されないまま固定される。
      *
-     * <p><b>引数はあるのにパスを取り出せない場合は落とす</b>。#805 のレビューで指摘された
-     * 最大の穴がここで、{@code @GetMapping(path = "/x")} や {@code @GetMapping({"/a","/b"})} を
-     * 「値なし」と誤認するとクラスのパスに化け、既存の一覧エントリと一致して
-     * <b>陳腐化も検証漏れも出さずにテストが緑のまま通る</b>。正常系(値なし)と区別できない形で
-     * 縮退させてはいけない。
+     * <p>また、パス式から文字列リテラルを取り出せない場合(定数参照 {@code @GetMapping(PATH_CONST)}
+     * など)は<b>落とす</b>。「値なし」と同一視するとクラスのパスに化け、
+     * base が一覧にあれば完全に無音で通ってしまう。
      */
     private static List<String> paths(String fileName, String args) {
-        if (args.isEmpty()) {
+        String inner = args.isEmpty() ? "" : args.substring(1, args.length() - 1).trim();
+        if (inner.isEmpty()) {
             return List.of("");
         }
-        Matcher m = MAPPING_PATH.matcher(args);
-        List<String> paths = new ArrayList<>();
-        if (m.find()) {
-            String token = m.group(1);
-            Matcher literal = STRING_LITERAL.matcher(token);
-            while (literal.find()) {
-                paths.add(literal.group(1));
+
+        String pathExpression = null;
+        boolean onlyNonPathAttributes = true;
+        List<String> tokens = splitTopLevel(inner);
+        for (int i = 0; i < tokens.size(); i++) {
+            String token = tokens.get(i).trim();
+            Matcher named = NAMED_ATTRIBUTE.matcher(token);
+            if (named.find()) {
+                String attribute = named.group(1);
+                if ("value".equals(attribute) || "path".equals(attribute)) {
+                    pathExpression = token.substring(named.end()).trim();
+                    onlyNonPathAttributes = false;
+                } else if (!NON_PATH_ATTRIBUTES.contains(attribute)) {
+                    onlyNonPathAttributes = false;
+                }
+            } else if (i == 0) {
+                // 位置引数。属性名が無いのは先頭のパス指定のときだけ。
+                pathExpression = token;
+                onlyNonPathAttributes = false;
             }
         }
-        if (!paths.isEmpty()) {
-            return paths;
+
+        if (pathExpression == null) {
+            if (onlyNonPathAttributes) {
+                return List.of("");
+            }
+            throw new AssertionError(fileName
+                    + ": マッピング注釈の引数を解釈できませんでした: " + args
+                    + " AuthorizationMatrixContract の解析を拡張してください");
         }
-        // 引数はあるが文字列リテラルが1つも無い(例: @GetMapping(produces = "...") だけ)。
-        // produces/consumes だけならパス無しとして扱ってよいが、判別できない形は落とす。
-        if (!args.contains("\"")) {
-            return List.of("");
+
+        List<String> paths = new ArrayList<>();
+        Matcher literal = STRING_LITERAL.matcher(pathExpression);
+        while (literal.find()) {
+            paths.add(literal.group(1));
         }
-        throw new AssertionError(fileName
-                + ": マッピング注釈の引数からパスを取り出せませんでした: " + args
-                + " AuthorizationMatrixContract の解析を拡張してください");
+        if (paths.isEmpty()) {
+            throw new AssertionError(fileName
+                    + ": マッピング注釈のパスが文字列リテラルではありません: " + pathExpression
+                    + " 定数参照は走査できません。リテラルで書くか、"
+                    + "AuthorizationMatrixContract の解析を拡張してください");
+        }
+        return paths;
+    }
+
+    /** 注釈の引数を、波括弧と文字列リテラルを尊重してトップレベルのカンマで分割する。 */
+    private static List<String> splitTopLevel(String inner) {
+        List<String> tokens = new ArrayList<>();
+        int depth = 0;
+        boolean inString = false;
+        StringBuilder current = new StringBuilder();
+        for (int i = 0; i < inner.length(); i++) {
+            char c = inner.charAt(i);
+            if (inString) {
+                current.append(c);
+                if (c == '"' && (i == 0 || inner.charAt(i - 1) != '\\')) {
+                    inString = false;
+                }
+                continue;
+            }
+            switch (c) {
+                case '"' -> {
+                    inString = true;
+                    current.append(c);
+                }
+                case '{', '(' -> {
+                    depth++;
+                    current.append(c);
+                }
+                case '}', ')' -> {
+                    depth--;
+                    current.append(c);
+                }
+                case ',' -> {
+                    if (depth == 0) {
+                        tokens.add(current.toString());
+                        current.setLength(0);
+                    } else {
+                        current.append(c);
+                    }
+                }
+                default -> current.append(c);
+            }
+        }
+        if (!current.isEmpty()) {
+            tokens.add(current.toString());
+        }
+        return tokens;
     }
 
     /** クラスのパスとメソッドのパスを、スラッシュが重複しないように連結する。 */
