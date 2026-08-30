@@ -46,7 +46,24 @@ if ! command -v gh >/dev/null 2>&1; then
     exit 2
 fi
 
-REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
+if ! REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)" || [ -z "$REPO" ]; then
+    echo "エラー: リポジトリを特定できませんでした(ghの認証切れ、またはリポジトリ外での実行)" >&2
+    exit 1
+fi
+
+# gh api を叩いて配列を返す。失敗を黙って空配列にすると「依存なし」と区別できず、
+# 一時的なネットワーク/レート制限エラーが「ブロッカー無し」に化けるので、明示的に落とす。
+# (set -euo pipefail の下では代入の失敗が無言終了になるため、ここで握って理由を出す)
+fetch_array() {
+    local path="$1"
+    local out
+    if ! out="$(gh api "$path" --paginate 2>&1)"; then
+        echo "エラー: $path の取得に失敗しました。判定を出さずに中断します。" >&2
+        echo "$out" | head -3 >&2
+        exit 1
+    fi
+    echo "$out" | jq -s 'add // []'
+}
 
 # Issue本体。存在しなければここで落ちる。
 if ! SELF="$(gh issue view "$ISSUE" --repo "$REPO" --json number,title,state,body 2>/dev/null)"; then
@@ -92,7 +109,7 @@ print_issue_line "$ISSUE" ""
 echo
 echo "=== 正式な依存リンク (GitHub issue dependencies) ==="
 echo "-- blocked_by (OPENならこれが唯一の状態ベースのブロッカー) --"
-BLOCKED_BY="$(gh api "repos/$REPO/issues/$ISSUE/dependencies/blocked_by" --paginate 2>/dev/null | jq -s 'add // []')"
+BLOCKED_BY="$(fetch_array "repos/$REPO/issues/$ISSUE/dependencies/blocked_by")"
 BLOCKED_BY_COUNT="$(echo "$BLOCKED_BY" | jq 'length')"
 if [ "$BLOCKED_BY_COUNT" -eq 0 ]; then
     echo "(なし)"
@@ -106,7 +123,7 @@ else
 fi
 
 echo "-- blocking (このIssueが塞いでいる先) --"
-BLOCKING="$(gh api "repos/$REPO/issues/$ISSUE/dependencies/blocking" --paginate 2>/dev/null | jq -s 'add // []')"
+BLOCKING="$(fetch_array "repos/$REPO/issues/$ISSUE/dependencies/blocking")"
 if [ "$(echo "$BLOCKING" | jq 'length')" -eq 0 ]; then
     echo "(なし)"
 else
@@ -169,7 +186,12 @@ echo
 echo "=== 既存の Readiness 判定コメント ==="
 # 逆向きの判定を無自覚に投稿しないための材料。判定を覆すときは、
 # ここに出たコメントが挙げた根拠を1つずつライブで再確認すること(#751)。
-COMMENTS="$(gh issue view "$ISSUE" --repo "$REPO" --json comments \
+if ! COMMENTS_JSON="$(gh issue view "$ISSUE" --repo "$REPO" --json comments 2>&1)"; then
+    echo "エラー: コメントの取得に失敗しました。判定を出さずに中断します。" >&2
+    echo "$COMMENTS_JSON" | head -3 >&2
+    exit 1
+fi
+COMMENTS="$(echo "$COMMENTS_JSON" \
     | jq -r '[.comments[]
         | select(.body | test("READY|Ready|Backlog|readiness|Readiness"))
         | "\(.createdAt)\t\(.body | split("\n")[0:2] | join(" / ") | .[0:160])"] | .[]')"
