@@ -4,6 +4,8 @@ import com.letsblog.platform.dto.ConnectedServiceStatusResponse.Status;
 import com.letsblog.platform.dto.ContainerStatusResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
@@ -176,12 +178,13 @@ class ContainerStatusServiceTest {
         assertEquals(Status.ERROR, containers.get(0).status());
     }
 
-    /** always/on-failureも継続稼働が期待されるポリシーなので、exit 0でもエラーのまま。 */
-    @Test
-    void testListAll_alwaysポリシーの停止はエラーのまま() {
+    /** no以外の再起動ポリシーは継続稼働が期待されるので、exit 0でもエラーのまま。 */
+    @ParameterizedTest
+    @ValueSource(strings = {"unless-stopped", "always", "on-failure"})
+    void testListAll_no以外のポリシーの正常停止はエラーのまま(String restartPolicy) {
         expectList("[{\"Id\":\"stu901\",\"Names\":[\"/lbs-keycloak\"],"
                 + "\"State\":\"exited\",\"Status\":\"Exited (0) 1 minute ago\"}]");
-        expectInspect("stu901", 0, "always");
+        expectInspect("stu901", 0, restartPolicy);
 
         List<ContainerStatusResponse> containers = service.listAll();
 
