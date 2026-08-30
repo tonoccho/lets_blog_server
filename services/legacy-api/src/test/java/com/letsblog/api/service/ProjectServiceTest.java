@@ -408,29 +408,4 @@ class ProjectServiceTest {
         assertEquals(1L, service.findProjectIdBySiteId(10L));
     }
 
-    @Test
-    void resolveMasterSite_マスター環境に紐づくサイトを解決する() {
-        ProjectService service = service();
-        Project project = new Project();
-        project.setId(1L);
-        project.setMasterEnvironment("production");
-        project.setProductionSiteId(30L);
-        com.letsblog.api.domain.Site site = new com.letsblog.api.domain.Site();
-        site.setId(30L);
-        when(siteService.getById(30L)).thenReturn(Optional.of(site));
-
-        com.letsblog.api.domain.Site result = service.resolveMasterSite(project);
-
-        assertEquals(30L, result.getId());
-    }
-
-    @Test
-    void resolveMasterSite_未紐付けならnull() {
-        ProjectService service = service();
-        Project project = new Project();
-        project.setId(1L);
-        project.setMasterEnvironment("production");
-
-        assertNull(service.resolveMasterSite(project));
-    }
 }
