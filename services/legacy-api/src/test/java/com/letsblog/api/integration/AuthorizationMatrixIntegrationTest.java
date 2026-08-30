@@ -85,13 +85,23 @@ class AuthorizationMatrixIntegrationTest {
     // =====================================================================================
     // (a) 全エンドポイント(health・公開パスを除く)の401網羅
     //
-    // services/legacy-api/src/main/java/com/letsblog/api/controller/ の30ファイル・179エンドポイント
-    // (#572でAuditLogController/OperationLogController/FrontendErrorLogControllerの3ファイル・
-    // 7エンドポイントをlog-writerサービスへ移設した後、#566でAuthControllerのログイン・2FA・
-    // パスワードリセット系8エンドポイントを撤去し、#688でAuthControllerのセルフサインアップ
-    // 1エンドポイントを撤去した後の数)から、SecurityConfigのPUBLIC_PATHS
-    // (health・auth/setup・auth/setup-status)を除いた176件を列挙する。
-    // パスパラメータには存在確認不要な適当な値(1、"slug"等)を埋める。Authorizationヘッダーの
+    // services/legacy-api/src/main/java/com/letsblog/api/controller/ に**現在残っている**
+    // エンドポイントから、SecurityConfigのPUBLIC_PATHS(health・auth/setup・auth/setup-status)と
+    // サービス間内部ブリッジ(/api/internal/**。gatewayを経由しない)を除いた33件を列挙する。
+    //
+    // Phase 19のサービス抽出でコントローラがlegacy-apiから次々と移設されたため、この一覧は
+    // 大きく陳腐化していた(issue #731)。実体の無いパスとして残っていたのは計107件で、
+    // 内訳は #574(ai)28件・#576(content)24件・#577(project)29件・#707/#708/#712(publishing)26件。
+    // media(#573)・analytics(#578)・platform(#693〜#696)の移設分は、当時この一覧からは
+    // 削除済みで「対象外」コメントとしてのみ残っていた(そのコメントも本Issueで整理した)。
+    // SecurityConfigのanyRequest().authenticated()は
+    // コントローラの有無に関わらず全パスへ適用されるため、これらは「壊れずに通り続ける」一方で
+    // 「このコントローラのこのエンドポイントは認証必須」というテストの意図を満たしていなかった。
+    //
+    // 削除した107件は、移設先サービスの同名テスト(#772で8サービスすべてに追加)がすべて
+    // 担当している。担保が失われていないことは移設先の一覧と突き合わせて確認済み。
+    //
+    // パスパラメータには存在確認不要な適当な値(1等)を埋める。Authorizationヘッダーの
     // 有無だけでSecurityConfigが401を返すため、リクエストボディ/クエリパラメータの妥当性は問わない。
     // =====================================================================================
 
@@ -104,108 +114,18 @@ class AuthorizationMatrixIntegrationTest {
 
     static Stream<Endpoint> allProtectedEndpoints() {
         return Stream.of(
-                // -- AiController (8) --
-                new Endpoint("POST", "/api/ai/draft"),
-                new Endpoint("POST", "/api/ai/ask"),
-                new Endpoint("POST", "/api/ai/tags"),
-                new Endpoint("POST", "/api/ai/proofread"),
+                // -- AiController (3) --
                 new Endpoint("POST", "/api/ai/image"),
                 new Endpoint("GET", "/api/ai/image-options"),
-                new Endpoint("POST", "/api/ai/section"),
                 new Endpoint("POST", "/api/projects/1/ai/generate-image-prompt"),
 
-                // -- ArticlePlanController (15) --
-                new Endpoint("POST", "/api/projects/1/article-plan/chat"),
-                new Endpoint("GET", "/api/projects/1/article-plan/sessions"),
-                new Endpoint("GET", "/api/projects/1/article-plan/sessions/5"),
-                new Endpoint("GET", "/api/projects/1/article-plan/sessions/by-issue/42"),
-                new Endpoint("GET", "/api/projects/1/article-plan/issues/42/description"),
-                new Endpoint("GET", "/api/projects/1/article-plan/issues"),
-                new Endpoint("POST", "/api/projects/1/article-plan/suggest-titles"),
-                new Endpoint("POST", "/api/projects/1/article-plan/accept"),
-                new Endpoint("POST", "/api/projects/1/article-plan/suggest-structure"),
-                new Endpoint("POST", "/api/projects/1/article-plan/issues/42/accept-structure"),
-                new Endpoint("POST", "/api/projects/1/article-plan/suggest-metadata"),
-                new Endpoint("GET", "/api/projects/1/article-plan/categories"),
-                new Endpoint("GET", "/api/projects/1/article-plan/categories/hierarchy"),
-                new Endpoint("GET", "/api/projects/1/article-plan/tags"),
-                new Endpoint("POST", "/api/projects/1/article-plan/issues/42/assign"),
-
-                // (ArticlePreviewControllerは、記事本文レンダリング(/render)が#576でcontent-serviceへ、
-                // テーマCSS取得/骨格差し替え/プレビュー用投稿削除が#712でpublishing-serviceへ
-                // 移設されたため対象外)
-
-                // (AuditLogControllerは#572でlog-writerサービスへ移設したため対象外)
-
-                // (AuthControllerのログイン・2FA・パスワードリセット系エンドポイントはissue #566で、
-                // セルフサインアップ(signup)はissue #688で撤去したため対象外。
-                // 残るsetup/setup-statusはSecurityConfigのPUBLIC_PATHSであり対象外)
-
-                // (BackupControllerは#694でplatform-serviceへ移設したため対象外)
-
-                // (CmsMediaBridgeControllerは#573 stage3でlegacy-apiに新設されたが、issue #709で
-                // publishing-serviceへ移設したため対象外)
-
-                // -- ContentCacheController (1) --
-                new Endpoint("GET", "/api/content-cache"),
-
-                // -- CustomTagController (7) --
-                new Endpoint("POST", "/api/custom-tags/generate"),
-                new Endpoint("POST", "/api/custom-tags/validate"),
-                new Endpoint("POST", "/api/custom-tags"),
-                new Endpoint("GET", "/api/custom-tags"),
-                new Endpoint("GET", "/api/custom-tags/css-bundle"),
-                new Endpoint("PUT", "/api/custom-tags/1"),
-                new Endpoint("DELETE", "/api/custom-tags/1"),
-
-                // -- CustomTagTemplateController (9) --
-                new Endpoint("POST", "/api/custom-tag-templates"),
-                new Endpoint("GET", "/api/custom-tag-templates/1"),
-                new Endpoint("GET", "/api/custom-tag-templates"),
-                new Endpoint("GET", "/api/custom-tag-templates/my-templates"),
-                new Endpoint("PUT", "/api/custom-tag-templates/1"),
-                new Endpoint("POST", "/api/custom-tag-templates/1/publish"),
-                new Endpoint("POST", "/api/custom-tag-templates/1/unpublish"),
-                new Endpoint("POST", "/api/custom-tag-templates/1/clone"),
-                new Endpoint("DELETE", "/api/custom-tag-templates/1"),
-
-                // (DashboardControllerは#695でplatform-serviceへ移設したため対象外)
-
-                // (DiagramController/GeneratedImageControllerは#573でmedia-serviceへ移設したため対象外)
-                // (FrontendErrorLogControllerは#572でlog-writerサービスへ移設したため対象外)
-
-                // -- GenerationJobController (3) --
-                new Endpoint("GET", "/api/generation-jobs"),
-                new Endpoint("POST", "/api/generation-jobs"),
-                new Endpoint("GET", "/api/generation-jobs/1"),
-                new Endpoint("PATCH", "/api/generation-jobs/1"),
-
-                // (HealthController /api/health は公開パスのため対象外)
-                // (MediaControllerは#573 stage3でmedia-serviceへ移設したため対象外)
-
-                // -- MetadataController (2) --
-                new Endpoint("GET", "/api/metadata/post-statuses"),
-                new Endpoint("GET", "/api/metadata/roles"),
-
-                // (OperationLogControllerは#572でlog-writerサービスへ移設したため対象外)
-
-                // -- PostController (4) --
-                new Endpoint("GET", "/api/posts"),
-                new Endpoint("POST", "/api/posts/publish"),
-                new Endpoint("GET", "/api/posts/mysite/by-slug/my-slug"),
-                new Endpoint("DELETE", "/api/posts/mysite/123"),
-
-                // -- ProjectAiModelController (10) --
-                new Endpoint("GET", "/api/projects/1/ai-models/llm/models"),
-                new Endpoint("PUT", "/api/projects/1/ai-models/llm/models/selection"),
-                new Endpoint("GET", "/api/projects/1/ai-models/llm/provider"),
-                new Endpoint("PUT", "/api/projects/1/ai-models/llm/provider/selection"),
+                // -- ProjectAiModelController (6) --
                 new Endpoint("GET", "/api/projects/1/ai-models/image/provider"),
                 new Endpoint("PUT", "/api/projects/1/ai-models/image/provider/selection"),
                 new Endpoint("GET", "/api/projects/1/ai-models/comfyui/checkpoints"),
                 new Endpoint("PUT", "/api/projects/1/ai-models/comfyui/checkpoints/selection"),
                 new Endpoint("POST", "/api/projects/1/ai-models/comfyui/checkpoints/install"),
-                new Endpoint("DELETE", "/api/projects/1/ai-models/comfyui/checkpoints/ckpt.safetensors"),
+                new Endpoint("DELETE", "/api/projects/1/ai-models/comfyui/checkpoints/1"),
 
                 // -- ProjectApiKeyController (14) --
                 new Endpoint("GET", "/api/projects/1/api-keys/github-token"),
@@ -223,96 +143,19 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("DELETE", "/api/projects/1/api-keys/adsense"),
                 new Endpoint("POST", "/api/projects/1/api-keys/adsense/oauth-callback"),
 
-                // -- ProjectController (42) --
-                new Endpoint("POST", "/api/projects"),
-                new Endpoint("GET", "/api/projects"),
-                new Endpoint("GET", "/api/projects/1"),
-                new Endpoint("PUT", "/api/projects/1"),
-                new Endpoint("DELETE", "/api/projects/1"),
-                new Endpoint("POST", "/api/projects/1/environments"),
-                new Endpoint("DELETE", "/api/projects/1/environments/local"),
-                new Endpoint("PUT", "/api/projects/1/master-environment"),
-                new Endpoint("PUT", "/api/projects/1/github-repository"),
+                // -- ProjectController (9) --
                 new Endpoint("PUT", "/api/projects/1/css-selector-prefix"),
                 new Endpoint("PUT", "/api/projects/1/image-generation-prompt-defaults"),
                 new Endpoint("PUT", "/api/projects/1/image-generation-size-defaults"),
                 new Endpoint("PUT", "/api/projects/1/article-image-resize-default"),
                 new Endpoint("PUT", "/api/projects/1/image-content-filter-settings"),
-                new Endpoint("POST", "/api/projects/1/environments/sync"),
-                new Endpoint("POST", "/api/projects/1/bulk-management/apply"),
-                new Endpoint("POST", "/api/projects/1/bulk-management/apply-all"),
-                new Endpoint("POST", "/api/projects/1/bulk-management/upload"),
-                new Endpoint("POST", "/api/projects/1/asset-images/1/upload"),
-                new Endpoint("GET", "/api/projects/1/bulk-management/categories/comparison"),
-                new Endpoint("GET", "/api/projects/1/bulk-management/tags/comparison"),
-                new Endpoint("POST", "/api/projects/1/bulk-management/categories/sync"),
-                new Endpoint("POST", "/api/projects/1/bulk-management/categories/delete-all"),
-                new Endpoint("POST", "/api/projects/1/bulk-management/categories/edit-sync"),
-                new Endpoint("POST", "/api/projects/1/bulk-management/categories/sync-all"),
-                new Endpoint("POST", "/api/projects/1/bulk-management/tags/sync"),
-                new Endpoint("POST", "/api/projects/1/bulk-management/tags/delete-all"),
-                new Endpoint("POST", "/api/projects/1/bulk-management/tags/edit-sync"),
-                new Endpoint("POST", "/api/projects/1/bulk-management/tags/sync-all"),
-                new Endpoint("GET", "/api/projects/1/bulk-management/plugins/comparison"),
-                new Endpoint("GET", "/api/projects/1/bulk-management/themes/comparison"),
-                new Endpoint("POST", "/api/projects/1/bulk-management/plugins/reconcile"),
-                new Endpoint("POST", "/api/projects/1/bulk-management/themes/reconcile"),
-                new Endpoint("POST", "/api/projects/1/bulk-management/plugins/delete-all"),
-                new Endpoint("POST", "/api/projects/1/bulk-management/themes/delete-all"),
-                new Endpoint("GET", "/api/projects/1/bulk-management/posts/comparison"),
-                new Endpoint("POST", "/api/projects/1/bulk-management/posts/delete-all"),
-                new Endpoint("POST", "/api/projects/1/bulk-management/posts/status-update"),
                 new Endpoint("GET", "/api/projects/1/users"),
                 new Endpoint("POST", "/api/projects/1/users"),
-                new Endpoint("PUT", "/api/projects/1/users/2"),
-                new Endpoint("DELETE", "/api/projects/1/users/2"),
-
-                // -- ProjectCustomTagController (3) --
-                new Endpoint("GET", "/api/projects/1/custom-tags"),
-                new Endpoint("GET", "/api/projects/1/custom-tags/css-bundle"),
-                new Endpoint("POST", "/api/projects/1/custom-tags/preview"),
-
-                // (ProjectDashboardControllerは#578でanalytics-serviceへ移設したため対象外)
-
-                // (ProjectMediaGarbageCollectionControllerは#573 stage3でmedia-serviceへ移設したため対象外)
+                new Endpoint("PUT", "/api/projects/1/users/1"),
+                new Endpoint("DELETE", "/api/projects/1/users/1"),
 
                 // -- ProjectUserController (1) --
-                new Endpoint("GET", "/api/project-users"),
-
-                // (RenderControllerは#573でmedia-serviceへ移設したため対象外)
-
-                // -- SiteController (11) --
-                new Endpoint("POST", "/api/sites"),
-                new Endpoint("POST", "/api/sites/managed-wordpress"),
-                new Endpoint("POST", "/api/sites/managed-wordpress/adopt"),
-                new Endpoint("GET", "/api/sites"),
-                new Endpoint("GET", "/api/sites/1"),
-                new Endpoint("POST", "/api/sites/ssh-keypair"),
-                new Endpoint("PUT", "/api/sites/1"),
-                new Endpoint("POST", "/api/sites/1/test-connection"),
-                new Endpoint("DELETE", "/api/sites/1"),
-                new Endpoint("POST", "/api/sites/1/install-wp-cli"),
-                new Endpoint("POST", "/api/sites/1/reprovision"),
-
-                // -- SiteStaticContentController (2) --
-                new Endpoint("GET", "/api/sites/1/static-content"),
-                new Endpoint("POST", "/api/sites/1/static-content/generate"),
-
-                // -- SshKeyPairController (3) --
-                new Endpoint("GET", "/api/ssh-key-pairs"),
-                new Endpoint("POST", "/api/ssh-key-pairs"),
-                new Endpoint("DELETE", "/api/ssh-key-pairs/1"),
-
-                // -- TagDesignSettingController (3) --
-                new Endpoint("GET", "/api/projects/1/tag-design-settings"),
-                new Endpoint("PUT", "/api/projects/1/tag-design-settings/TOC"),
-                new Endpoint("POST", "/api/projects/1/tag-design-settings/TOC/generate"),
-
-                // -- TaxonomyController (1) --
-                new Endpoint("POST", "/api/taxonomy/resolve")
-
-                // (VscodeExtensionControllerは#696でplatform-serviceへ移設したため対象外)
-        );
+                new Endpoint("GET", "/api/project-users"));
     }
 
     @ParameterizedTest(name = "[{index}] {0}")
@@ -332,7 +175,10 @@ class AuthorizationMatrixIntegrationTest {
     void 有効なBearerトークンなら401にならない() throws Exception {
         when(jwtDecoder.decode("valid-jwt")).thenReturn(JwtTestFixtures.jwt("keycloak-sub-1", "user"));
 
-        mockMvc.perform(request(HttpMethod.GET, "/api/metadata/post-statuses")
+        // legacy-apiに現存するエンドポイントを使う。MetadataControllerは#576でcontent-serviceへ
+        // 移設済みで、そのパスでは未マップの404を見て「401ではない」と判定してしまい、
+        // 有効なJWTがハンドラまで届いたことの根拠にならない(issue #731)。
+        mockMvc.perform(request(HttpMethod.GET, "/api/project-users")
                         .header("Authorization", "Bearer valid-jwt"))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(401));
     }
@@ -346,7 +192,7 @@ class AuthorizationMatrixIntegrationTest {
         // 扱い)へ変換されてしまうため、実挙動に忠実になるようBadJwtExceptionでスタブする。
         when(jwtDecoder.decode("invalid-jwt")).thenThrow(new BadJwtException("invalid token"));
 
-        mockMvc.perform(request(HttpMethod.GET, "/api/metadata/post-statuses")
+        mockMvc.perform(request(HttpMethod.GET, "/api/project-users")
                         .header("Authorization", "Bearer invalid-jwt"))
                 .andExpect(status().isUnauthorized());
     }
