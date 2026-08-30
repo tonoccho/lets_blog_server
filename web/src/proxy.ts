@@ -64,6 +64,15 @@ export async function proxy(request: NextRequest) {
   return NextResponse.next({ request: { headers: requestHeaders } });
 }
 
+/**
+ * client-errorsを除外している理由(issue #791):
+ *   /client-errors はブラウザのerror boundaryが投げる fire-and-forget のビーコンを受ける
+ *   Route Handler。ここをmatcherに含めると、未認証時にこのproxyが/loginへ307リダイレクトを
+ *   返してしまい、レスポンスを見ないビーコンに対して無意味なリダイレクトと
+ *   needsInitialSetup()のgateway呼び出しが1件ずつ発生する。認証の判定はハンドラ自身が
+ *   getSession()で行い、未認証なら記録せず204を返す(docs/AUTHORIZATION_MATRIX.md参照)。
+ *   api/authを除外しているのと同じ理由(Route Handlerをリダイレクトしても意味がない)。
+ */
 export const config = {
-  matcher: ["/((?!api/auth|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!api/auth|client-errors|_next/static|_next/image|favicon.ico).*)"],
 };

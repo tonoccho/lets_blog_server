@@ -26,7 +26,13 @@ export async function POST(request: Request) {
     return Response.json({ error: "リクエストボディがJSONではありません" }, { status: 400 });
   }
 
-  if (payload?.level !== "error" && payload?.level !== "warn") {
+  if (typeof payload?.message !== "string" || payload.message.length === 0) {
+    // log-writer側の FrontendErrorLog.message は NOT NULL だが、コントローラは検証せず
+    // RabbitMQへpublishして即201を返すため、ここで弾かないとコンシューマ側で無言に失敗する。
+    return Response.json({ error: "messageは必須です" }, { status: 400 });
+  }
+
+  if (payload.level !== "error" && payload.level !== "warn") {
     return Response.json({ error: "levelはerrorまたはwarnである必要があります" }, { status: 400 });
   }
 
@@ -34,8 +40,13 @@ export async function POST(request: Request) {
   // POST /api/logs/errors を未認証で通すと、認証不要で無制限に書き込める経路が
   // できてスパム・容量枯渇の的になるため(ADR-0008)。ブラウザ側は
   // errorLogger.logErrorToConsole() が常に走るのでコンソールには残る。
+  //
+  // このパスは proxy.ts の matcher から除外してあるため、ここが実際の認証判定点になる
+  // (除外していないと proxy.ts が先に /login へリダイレクトしてこの分岐に到達しない)。
+  // session.error は "RefreshAccessTokenError"(アクセストークンのリフレッシュ失敗)。
+  // 生きたアクセストークンが無く log-writer で401になるだけなので、未認証と同じ扱いにする。
   const session = await getSession();
-  if (!session) {
+  if (!session || session.error) {
     return new Response(null, { status: 204 });
   }
 

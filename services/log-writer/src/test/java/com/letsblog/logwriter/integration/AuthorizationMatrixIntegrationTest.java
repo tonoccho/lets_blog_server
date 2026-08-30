@@ -34,9 +34,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * {@code anyRequest().authenticated()}によるゲートからの後退であり、issue #772で復元した。
  * 本クラスはその再発を防ぐ。
  *
- * <p>なおブラウザから直接叩かれる{@code POST /api/logs/errors}
- * ({@code web/src/lib/errorLogger.ts})はAuthorizationヘッダーを付けていないため、この変更で
- * 401になる。legacy-api時代も同じく401だったため後退ではないが、web側の是正は#791で扱う。
+ * <p>{@code POST /api/logs/errors}は、#772の時点ではブラウザが
+ * {@code web/src/lib/errorLogger.ts}から直接叩いておりAuthorizationヘッダーが無いため401になり、
+ * フロントエンドのエラーログが無言で全滅していた(legacy-api時代も同じく401だったため
+ * ゲートとしては後退ではない)。#791でweb側を是正し、現在はブラウザが同一オリジンのBFF
+ * {@code POST /client-errors}を呼び、そこからBearer付きで中継している。
+ * 本クラスの401アサーションは、その前提({@code PUBLIC_PATHS}に入れない)を守るためのもの。
  */
 @SpringBootTest
 @AutoConfigureMockMvc

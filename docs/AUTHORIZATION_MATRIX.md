@@ -53,7 +53,7 @@ identity-service / log-writer が従来から行っていた、各コントロ�
 
 | 呼び出し元 | エンドポイント | 扱い |
 |---|---|---|
-| `web/src/lib/errorLogger.ts`(ブラウザから直接) | `POST /api/logs/errors` | legacy-api 時代も401だったため後退ではない。**#791 で是正済み**: ブラウザは同一オリジンのBFF `POST /client-errors`(`web/src/app/client-errors/route.ts`)を呼び、そこから server-only の `apiClient` 経由でBearer付きで log-writer へ中継する。log-writerの`PUBLIC_PATHS`は増やしていない(未認証の書き込み経路を残さないため) |
+| `web/src/lib/errorLogger.ts`(#791 以前はブラウザから直接) | `POST /api/logs/errors` | legacy-api 時代も401だったため後退ではない。**#791 で是正済み**: ブラウザは同一オリジンのBFF `POST /client-errors`(`web/src/app/client-errors/route.ts`)を呼び、そこから server-only の `apiClient` 経由でBearer付きで log-writer へ中継する。log-writerの`PUBLIC_PATHS`は増やしていない(未認証の書き込み経路を残さないため) |
 | `scripts/provision-e2e-keycloak-users.sh` | `POST /api/users` | #772 で `letsblog-services` の Client Credentials を使うようにしたが、#796 で同エンドポイントが admin 限定になったため方式を変更した。サービスアカウントの `sub` に対応するローカル `users` 行が無く `CurrentActorService` が操作者を解決できないため、Client Credentials トークンでは `requireAdmin()` を通れない。現在は `letsblog-e2e` の password グラントで**実在する admin ユーザー**のトークンを取得する |
 
 #### identity-service の `/api/users` の認可(#796 適用後)
@@ -324,11 +324,17 @@ BFF を `/api/` の下に置いていないのは、nginx の `location /api/`
 (`nginx/conf.d/default.conf:68`)が NextAuth 用の正規表現 location を除き `/api/**` を
 無条件に gateway へ転送するためで、`/api/**` に置いた Route Handler は到達しない。
 
-**未認証時の挙動**: セッションが無い状態(ログイン画面など)で発生したエラーは
-**記録せずに破棄する**(BFF は 204 を返し、log-writer へ中継しない)。
+**未認証時の挙動**: セッションが無い(または `session.error` が立っている)状態で発生した
+エラーは**記録せずに破棄する**(BFF は 204 を返し、log-writer へ中継しない)。
 `POST /api/logs/errors` を未認証で通すと、認証不要で無制限に書き込める経路ができて
 スパム・容量枯渇の的になるため(ADR-0008)。ブラウザ側では error boundary が
 `logErrorToConsole()` も呼ぶため、コンソールには常に残る。
+
+この判定を BFF 自身が行えるよう、`/client-errors` は `web/src/proxy.ts` の matcher から
+除外している。除外しないと proxy が先に `/login` へ307リダイレクトを返してしまい、
+レスポンスを見ない fire-and-forget のビーコンに対して無意味なリダイレクトと
+`needsInitialSetup()` の gateway 呼び出しが1件ずつ発生する。NextAuth の Route Handler
+(`api/auth`)を同じ理由で除外しているのと同じ扱い。
 
 ## GenerationJobController (3エンドポイント、ベースパス `/api/generation-jobs`)
 

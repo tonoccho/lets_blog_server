@@ -70,11 +70,45 @@ describe('POST /client-errors', () => {
     expect(mockLogFrontendError).not.toHaveBeenCalled();
   });
 
+  it('session.errorが立っていれば中継せずに204を返す', async () => {
+    mockGetSession.mockResolvedValue({ user: {}, error: 'RefreshAccessTokenError' } as never);
+
+    const res = await POST(postRequest(validPayload));
+
+    expect(res.status).toBe(204);
+    expect(mockLogFrontendError).not.toHaveBeenCalled();
+  });
+
   it.each([['info'], [undefined], ['ERROR']])('levelが%sなら400を返す', async (level) => {
     const res = await POST(postRequest({ ...validPayload, level }));
 
     expect(res.status).toBe(400);
     expect(mockLogFrontendError).not.toHaveBeenCalled();
+  });
+
+  it.each([[''], [undefined], [123]])('messageが%sなら400を返す', async (message) => {
+    const res = await POST(postRequest({ ...validPayload, message }));
+
+    expect(res.status).toBe(400);
+    expect(mockGetSession).not.toHaveBeenCalled();
+    expect(mockLogFrontendError).not.toHaveBeenCalled();
+  });
+
+  it('ペイロードの全フィールドをそのまま中継する', async () => {
+    mockGetSession.mockResolvedValue({ user: {} } as never);
+    mockLogFrontendError.mockResolvedValue(undefined);
+
+    const full = {
+      ...validPayload,
+      stack: 'at foo (bar.ts:1:1)',
+      componentStack: 'at Component',
+      context: { projectId: 3 },
+      url: 'https://localhost/projects/3',
+      userAgent: 'jest',
+    };
+    await POST(postRequest(full));
+
+    expect(mockLogFrontendError).toHaveBeenCalledWith(full);
   });
 
   it('log-writerへの中継が失敗しても502を返すだけでthrowしない', async () => {
