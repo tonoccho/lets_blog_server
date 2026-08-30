@@ -88,6 +88,8 @@ print_issue_line() {
 
     # 親トラッキングIssueの見落としを防ぐため、sub-issueの内訳も併せて出す。
     # 分割子が全てCLOSEDなのに親がOPEN、という#575のケースがここで可視化される。
+    # 取得に失敗したときは「分割子なし」と区別できるよう明示する。黙って空扱いにすると、
+    # 親トラッキングIssueの分割子が全てCLOSEDという事実を見落としたまま判定が進む。
     local subs sub_total sub_open sub_note=""
     if subs="$(gh api "repos/$REPO/issues/$n/sub_issues" --paginate 2>/dev/null)"; then
         sub_total="$(echo "$subs" | jq -s 'add // [] | length')"
@@ -98,6 +100,8 @@ print_issue_line() {
                 sub_note="${sub_note} ※親はOPENだが分割子は全てCLOSED"
             fi
         fi
+    else
+        sub_note=" ※sub-issuesの取得に失敗(分割子の有無は未確認)"
     fi
 
     echo "${prefix}#${n} ${state} closed=${closed}${sub_note} ${title}"
