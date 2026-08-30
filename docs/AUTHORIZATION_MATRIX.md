@@ -123,8 +123,14 @@ identity-service の認可経路(`CurrentActorService#resolveJwtActor` → `Admi
 (`CurrentActorService#isAdmin`)。RBAC の `ROLE_ADMIN`(`user_roles` / `roles` テーブル)とは
 **別軸**で、`ROLE_ADMIN` を自分に付けても `requireAdmin()` のエンドポイントは開かない。
 逆に、`ROLE_ADMIN` を持たない `users.role = "admin"` のユーザーは `requirePermission(...)` を
-通れない。既定シードは admin ユーザーに `ROLE_ADMIN` も割り当てるため通常この差は表面化しないが、
-2つの認可軸が並存していること自体は整理の余地がある(#798 のスコープ外)。
+通れない。既定シードは admin ユーザーに `ROLE_ADMIN` も割り当てるため通常この差は表面化しない。
+
+この2軸が並存していること自体は整理の余地があり、**#815** で追跡している。
+#798 は次の非対称を1つ増やしている: `users.role = "admin"` だが `ROLE_ADMIN` を持たないユーザーは、
+**特権ロールは付与できる**(`requireAdmin()` を通るため)のに、
+**特権でないロールは付与できない**(`requirePermission(ROLE_MANAGE)` を通れないため)。
+`users.role = "admin"` はこのコードベースの最上位権限なので昇格には当たらず、
+自分に `ROLE_ADMIN` を付ければ自力で解消できるが、直感には反する。#815 で扱う。
 
 
 Web 管理画面は `requireAdminSession()` で守られているが、gateway は認可判定を行わない

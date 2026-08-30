@@ -61,6 +61,12 @@ public class AdminAuthorizationService {
      * 操作そのものを禁止するのではなく、<b>自分自身に対するadmin以外へのrole変更</b>だけを拒否する。
      * {@code role}を指定しない更新(パスワードのみ)と、admin→adminの無変更は通す。
      *
+     * <p>不正なrole文字列({@code "ADMIN"}のような大小違いや{@code "editor"}など)を自分自身に
+     * 指定した場合、{@code UserService#validateRole}の400ではなく先にこのガードの403が返る。
+     * {@code VALID_ROLES}が完全一致({@code Set.contains})なので、ここを通す値を増やすと
+     * 「ガードは抜けたが role は書き換わらない」入力が生まれるため、大小を区別したまま
+     * fail-closed 側に倒している。
+     *
      * @param newRole リクエストが指定したrole。{@code null}(role未指定)なら何もしない
      */
     public void requireNotSelfDemotion(Long userId, String newRole) {
