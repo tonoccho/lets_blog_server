@@ -1,5 +1,6 @@
 package com.letsblog.common.auth;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 
@@ -17,6 +18,10 @@ import java.time.Instant;
  *
  * <p>スレッドセーフではない。{@link ServiceTokenClient#getAccessToken()}が
  * {@code synchronized}で呼び出し全体を保護する前提で使う。
+ *
+ * <p>時刻の取得は{@link Clock}経由で行う。クールダウンの経過判定はこのクラスの主要な振る舞いそのもので
+ * あり、時刻源を直接呼ぶとテストが実時間の経過に依存してしまう(検証に使う待ち時間と、テストコード自体の
+ * 実行にかかる時間が同じオーダーになり、結果が実行環境の速度で変わる)ため、差し替え可能にしている。
  */
 final class CircuitBreaker {
 
@@ -25,6 +30,7 @@ final class CircuitBreaker {
 
     private final int failureThreshold;
     private final Duration openDuration;
+    private final Clock clock;
 
     private int consecutiveFailures;
     private Instant openedAt;
@@ -34,8 +40,14 @@ final class CircuitBreaker {
     }
 
     CircuitBreaker(int failureThreshold, Duration openDuration) {
+        this(failureThreshold, openDuration, Clock.systemUTC());
+    }
+
+    /** 時刻源を差し替えるコンストラクタ。テストが実時間に依存しないようにするために使う。 */
+    CircuitBreaker(int failureThreshold, Duration openDuration, Clock clock) {
         this.failureThreshold = failureThreshold;
         this.openDuration = openDuration;
+        this.clock = clock;
     }
 
     /** OPEN状態でクールダウン未経過なら例外を送出する。呼び出し可能ならそのまま戻る。 */
@@ -43,7 +55,7 @@ final class CircuitBreaker {
         if (openedAt == null) {
             return;
         }
-        if (Instant.now().isBefore(openedAt.plus(openDuration))) {
+        if (Instant.now(clock).isBefore(openedAt.plus(openDuration))) {
             throw new ServiceTokenUnavailableException(
                     "サービストークンエンドポイントへの接続が連続して失敗したため、サーキットブレーカーが"
                             + "作動中です。しばらく待ってから再試行してください。");
@@ -60,7 +72,7 @@ final class CircuitBreaker {
     void recordFailure() {
         consecutiveFailures++;
         if (consecutiveFailures >= failureThreshold) {
-            openedAt = Instant.now();
+            openedAt = Instant.now(clock);
         }
     }
 }
