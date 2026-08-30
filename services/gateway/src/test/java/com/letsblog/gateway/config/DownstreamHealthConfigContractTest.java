@@ -2,16 +2,22 @@ package com.letsblog.gateway.config;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
+import java.lang.reflect.Parameter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.health.contributor.ReactiveHealthIndicator;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -36,6 +42,20 @@ class DownstreamHealthConfigContractTest {
     /** 自分自身なので集約対象にしない。 */
     private static final Set<String> EXCLUDED_MODULES = Set.of("gateway");
 
+    /** {@code settings.gradle}の {@code include 'services:xxx'} 行。 */
+    private static final Pattern SERVICE_INCLUDE =
+            Pattern.compile("^\\s*include\\s+'services:([a-z0-9-]+)'", Pattern.MULTILINE);
+
+    /**
+     * Bean名から導いたサービス名 → 期待する環境変数名 の既定規則からの例外。
+     * legacy-apiだけは歴史的経緯で{@code LEGACY_API_URI}(SERVICEが入らない)。
+     */
+    private static final Map<String, String> ENV_VAR_EXCEPTIONS =
+            Map.of("legacy-api", "LEGACY_API_URI", "log-writer", "LOG_SERVICE_URI");
+
+    /** 既定URIのホスト名がモジュール名と異なるもの。 */
+    private static final Map<String, String> HOST_EXCEPTIONS = Map.of("legacy-api", "api");
+
     private static Path findRepoRoot() {
         Path dir = Paths.get("").toAbsolutePath();
         while (dir != null) {
@@ -49,17 +69,25 @@ class DownstreamHealthConfigContractTest {
                         + Paths.get("").toAbsolutePath() + ")");
     }
 
-    /** {@code services/}配下の、Gradleサブプロジェクトになっているディレクトリ名。 */
+    /**
+     * {@code settings.gradle}の{@code include 'services:xxx'}行からサービス名を取る。
+     *
+     * <p>ディレクトリの存在({@code build.gradle}があるか)ではなく{@code settings.gradle}を
+     * 一次情報にしているのは、そちらが「このリポジトリが公式に持つサービス」の定義だから。
+     * ディレクトリ走査だと、将来{@code build.gradle.kts}を採用したサービスが無言で対象外になり、
+     * 逆に未登録のディレクトリを拾ってしまう。
+     */
     private static Set<String> serviceModules() throws IOException {
-        Path servicesDir = findRepoRoot().resolve("services");
-        try (Stream<Path> children = Files.list(servicesDir)) {
-            return children
-                    .filter(Files::isDirectory)
-                    .filter(p -> Files.exists(p.resolve("build.gradle")))
-                    .map(p -> p.getFileName().toString())
-                    .filter(name -> !EXCLUDED_MODULES.contains(name))
-                    .collect(TreeSet::new, Set::add, Set::addAll);
+        String settings = Files.readString(findRepoRoot().resolve("settings.gradle"));
+        Set<String> modules = new TreeSet<>();
+        Matcher matcher = SERVICE_INCLUDE.matcher(settings);
+        while (matcher.find()) {
+            String name = matcher.group(1);
+            if (!EXCLUDED_MODULES.contains(name)) {
+                modules.add(name);
+            }
         }
+        return modules;
     }
 
     /**
@@ -69,16 +97,9 @@ class DownstreamHealthConfigContractTest {
      */
     private static Set<String> coveredModules() {
         Set<String> covered = new TreeSet<>();
-        for (Method method : DownstreamHealthConfig.class.getDeclaredMethods()) {
-            if (!method.isAnnotationPresent(Bean.class)
-                    || !ReactiveHealthIndicator.class.isAssignableFrom(method.getReturnType())) {
-                continue;
-            }
-            String name = method.getName()
-                    .replaceFirst("HealthIndicator$", "")
-                    .replaceFirst("Service$", "");
+        for (Method method : healthIndicatorBeans()) {
             // camelCase を kebab-case へ(logWriter -> log-writer、legacyApi -> legacy-api)
-            covered.add(name.replaceAll("([a-z0-9])([A-Z])", "$1-$2").toLowerCase(java.util.Locale.ROOT));
+            covered.add(moduleNameOf(method));
         }
         return covered;
     }
@@ -111,6 +132,68 @@ class DownstreamHealthConfigContractTest {
                 .as("services/配下に無いサービスのヘルスインジケータが残っています。"
                         + "サービスを廃止した際の削除漏れの可能性があります")
                 .containsAll(coveredModules());
+    }
+
+    /**
+     * Bean名だけを見ていると、コピペで別サービスのURIを指してしまう配線ミスを検出できない
+     * (issue #743のレビュー指摘)。たとえば
+     * {@code platformServiceHealthIndicator} の引数が
+     * {@code @Value("${PROJECT_SERVICE_URI:http://project:8080}")} になっていても、
+     * 網羅性のテストも{@link DownstreamHealthConfigTest}(URIを引数で直接渡すため
+     * {@code @Value}を評価しない)も通ってしまう。
+     *
+     * <p>その状態では集約ヘルスが他サービスの状態を別名で報告し続け、
+     * #743が問題視した誤報とまったく同じことが起きる。Bean名から期待される
+     * 環境変数名と既定ホストを導いて突き合わせる。
+     */
+    @Test
+    @DisplayName("各インジケータの@Valueが自分のサービスのURIを指している")
+    void 各インジケータが自分のサービスを見ている() {
+        for (Method method : healthIndicatorBeans()) {
+            String module = moduleNameOf(method);
+
+            // legacy-apiだけは既定値の無い app.gateway.fallback-uri を使う(ルート表と共有するため)。
+            if ("legacy-api".equals(module)) {
+                assertThat(valueExpressionOf(method))
+                        .as("legacyApiのインジケータはルート表と同じfallback-uriを見るべき")
+                        .isEqualTo("${app.gateway.fallback-uri}");
+                continue;
+            }
+
+            String expectedEnvVar = ENV_VAR_EXCEPTIONS.getOrDefault(
+                    module, module.toUpperCase(Locale.ROOT).replace('-', '_') + "_SERVICE_URI");
+            String expectedHost = HOST_EXCEPTIONS.getOrDefault(module, module);
+
+            assertThat(valueExpressionOf(method))
+                    .as("%s のインジケータが別サービスのURIを指しています(コピペミスの疑い)", module)
+                    .isEqualTo("${" + expectedEnvVar + ":http://" + expectedHost + ":8080}");
+        }
+    }
+
+    private static List<Method> healthIndicatorBeans() {
+        return Stream.of(DownstreamHealthConfig.class.getDeclaredMethods())
+                .filter(m -> m.isAnnotationPresent(Bean.class))
+                .filter(m -> ReactiveHealthIndicator.class.isAssignableFrom(m.getReturnType()))
+                .sorted(java.util.Comparator.comparing(Method::getName))
+                .toList();
+    }
+
+    private static String moduleNameOf(Method method) {
+        String name = method.getName()
+                .replaceFirst("HealthIndicator$", "")
+                .replaceFirst("Service$", "");
+        return name.replaceAll("([a-z0-9])([A-Z])", "$1-$2").toLowerCase(Locale.ROOT);
+    }
+
+    private static String valueExpressionOf(Method method) {
+        for (Parameter parameter : method.getParameters()) {
+            Value value = parameter.getAnnotation(Value.class);
+            if (value != null) {
+                return value.value();
+            }
+        }
+        throw new AssertionError(
+                method.getName() + " に @Value を持つ引数がありません。URIの配線を検証できません");
     }
 
     /** 網羅の確認だけでなく、検出できた一覧を失敗時に読めるようにしておく。 */
