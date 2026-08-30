@@ -154,6 +154,40 @@ identity が返す 403 は、呼び出し側で `SyncServiceClientErrorException
 
 `reconcile-keycloak` で無効化された孤児ユーザーにも同じ判定が効く。
 
+##### web の Server Action の認可(#824)
+
+`"use server"` を付けた関数はブラウザから直接 POST できるエンドポイントになる。
+**認可を書き忘れても動いてしまい、型検査もリントも警告しない。**
+
+#824 の時点で認可呼び出しを持たない Server Action が7個あり、
+「意図的に未認証であるべきもの」と「付け忘れ」が混在していた。
+
+| Server Action | 判断 | 理由 |
+|---|---|---|
+| `setup/actions.ts: setupAction` | **意図的に未認証** | 初期セットアップはまだ誰もアカウントを持たない状態で実行する。保護はサーバー側(`UserService#setupInitialAdmin` が既存ユーザーがいれば拒否) |
+| `sites/actions.ts: registerSiteAction` | `requireAdminSession()` | SSH 認証情報を保存しインフラを作る操作。同ファイルの削除・WP-CLI導入・静的コンテンツ生成・SSH鍵生成はすべて admin 限定 |
+| `sites/actions.ts: createManagedWordPressSiteAction` | `requireAdminSession()` | 同上 |
+| `sites/actions.ts: checkSiteConnectionAction` | `requireSession()` | `CheckConnectionButton` は `isAdmin` ガードの**外**で描画され、ログイン済みなら誰でも押せる想定。ただし外部サイトへ接続を試みるため未認証で通してはいけない |
+| `image-gallery/actions.ts` の3つ | `requireSession()` | `/image-gallery` は `ADMIN_ONLY_PREFIXES` に含まれず、画面も `isAdmin` の出し分けをしていない。認可の粒度を画面に揃える |
+
+**挙動の変更**: これまで非 admin でもサイトを登録できた。#824 以降は 403 になる。
+
+###### 再発防止
+
+`web/src/__tests__/serverActionAuthorization.test.ts` が `src/app` 配下の
+`actions.ts` を走査し、各 Server Action が
+**認可呼び出しを持つか、JSDoc に「意図的に未認証」と理由を書いているか**のどちらかであることを
+検証する。次に Server Action を足したとき、どちらも無ければ落ちる。
+
+同じ手法の先例は `services/gateway` の `RouteControllerContractTest` と
+`DownstreamHealthConfigContractTest`(#743)。
+
+###### これは多層防御であって唯一の関門ではない(が、現状は唯一のこともある)
+
+バックエンドが Bearer トークンで認可するのが本来の関門。ただし
+`GeneratedImageController` のように**バックエンド側に認可チェックが無い**エンドポイントもあり
+(#830)、その場合は Server Action の認可が現時点で唯一の関門になっている。
+
 ##### 注意: admin には別軸が2つある
 
 ここでの `requireAdmin()` は `users.role` カラムが `"admin"` であることを指す
