@@ -34,6 +34,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 削除・改変と、{@code role=admin}のアカウント作成(権限昇格)ができる状態だった。
  * {@code UserUpdateRequest}が{@code role}を受け取るため、自分自身をadminへ昇格させることも可能だった。
  *
+ * <p>本クラスと隣接する残存経路(ロール割り当てによる自己昇格、自己無効化によるロックアウト)は
+ * #798で塞いだ。{@code SelfPrivilegeEscalationIntegrationTest}を参照。
+ *
  * <p>Keycloak Admin APIは外部境界のため{@link KeycloakAdminClient}を{@code @MockitoBean}で
  * 置き換える(ADR-0006のモック方針)。認可で弾かれる経路では、そもそもここへ到達しないことも
  * 併せて検証する(下流に副作用が及んでいないこと)。

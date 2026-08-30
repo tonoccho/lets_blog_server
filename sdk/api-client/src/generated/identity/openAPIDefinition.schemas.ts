@@ -183,9 +183,13 @@ export type AssignRole401 = {[key: string]: string};
 
 export type AssignRole403 = {[key: string]: string};
 
+export type AssignRole404 = {[key: string]: string};
+
 export type RemoveRole200 = {[key: string]: string};
 
 export type RemoveRole401 = {[key: string]: string};
 
 export type RemoveRole403 = {[key: string]: string};
+
+export type RemoveRole404 = {[key: string]: string};
 
