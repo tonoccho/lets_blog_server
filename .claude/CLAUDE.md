@@ -239,7 +239,9 @@ Passing QA opens a Pull Request; it does not mark the issue Done. Done happens o
 # Dependency Resolution
 
 This is the single definition of "dependencies are resolved". `work-next`, `implement-issue`,
-`ready-issue`, and `plan-issue` all defer to it. Do not restate it differently anywhere else.
+`ready-issue`, `triage-backlog`, and `plan-issue` all defer to it. Do not restate it differently
+anywhere else — if you find a second definition in `.claude/`, that is a bug to fix, not a
+variant to follow.
 
 Before producing any Ready/Backlog verdict, run:
 
@@ -263,6 +265,16 @@ never carry a dependency's status over from an earlier comment — re-read it li
    ready when the substance is not actually there. Look at the code, not the board.
 4. Every verdict must state **which** of these grounds it used, and cite the live evidence
    (the script's output, or the file paths inspected).
+
+Rule 2 is not a licence to skip the check. It moves the check from the board to the code — it
+does not remove it. This repository barely uses `blocked_by` links, so in practice almost every
+dependency arrives as prose, and rule 2 is the path most verdicts take. Whenever an Issue names
+a dependency whose work may not exist yet, the verdict is only valid if it **names the concrete
+files, endpoints, or config it inspected** to establish that the substance is (or is not) there.
+A verdict that asserts "prose dependencies do not block" without that evidence is not a verdict;
+treat it as unverified and do the inspection.
+
+The script prints the inputs. It does not inspect the codebase for you.
 
 ## Reversing a verdict
 

@@ -235,16 +235,27 @@ If there are none, report that and stop.
 
 ## Step 2: Exclude blocked Issues
 
-Drop from the candidate list any Issue that is blocked — it has an open `blocked_by` dependency, or its body documents an unresolved dependency on unfinished work.
+Drop from the candidate list any Issue that is blocked **per `CLAUDE.md` → Dependency
+Resolution**. That is the single definition; do not apply a different one here.
 
-Read GitHub's issue dependencies with:
+Read the live dependency state with:
 
 ```bash
-gh api repos/:owner/:repo/issues/<number>/dependencies/blocked_by
-gh api repos/:owner/:repo/issues/<number>/dependencies/blocking
+scripts/issue-dependency-status.sh <number>
 ```
 
-A blocked Issue can never be `READY` — its `Dependencies` check fails by definition.
+Concretely, at this step:
+
+- An **open `blocked_by` link** excludes the candidate outright.
+- A dependency named **only in the body's prose** does **not** exclude the candidate on its
+  board status alone. It is not enough that the dependency Issue is open, or that the body
+  says the work is not done yet. Carry the candidate forward to Step 4, where the readiness
+  evaluation decides on the substance in the codebase.
+- Never exclude a candidate on prose alone without saying so — if you drop one here, name the
+  open `blocked_by` link you saw.
+
+A blocked Issue can never be `READY` — its `Dependencies` check fails by definition. But
+"the body mentions an unfinished dependency" is not the same thing as blocked (#751).
 
 If every Backlog Issue is blocked, report that and stop.
 
