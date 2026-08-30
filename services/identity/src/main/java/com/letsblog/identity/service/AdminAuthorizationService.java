@@ -23,18 +23,25 @@ public class AdminAuthorizationService {
     }
 
     /**
-     * admin権限を要求したうえで、対象が操作者自身でないことも要求する(issue #796)。
+     * admin権限を要求したうえで、対象が操作者自身でないことも要求する(issue #796、#798)。
      *
-     * <p>アカウント削除のように取り消せない操作で、最後のadminが自分自身を消して
-     * 誰も管理できない状態になるのを防ぐ。Web側にも同じガードがあるが
+     * <p>自分自身を締め出す操作を防ぐ。最後のadminが自分のアカウントを消したり無効化したりすると
+     * 誰も管理できない状態になる。Web側にも同じガードがあるが
      * ({@code web/src/app/users/actions.ts})、gatewayは認可判定を行わず(ADR-0008)、
      * アクセストークンを持つクライアントはAPIを直接叩けるため、サーバー側にも置く。
+     *
+     * <p><b>「最後のadminか」は数えない</b>(#798で改めて判断した)。adminが2人いれば
+     * 互いに削除・無効化でき、それは正当な運用である。数える設計にすると、
+     * 「他のadminが同時に自分を消す」レースで両者とも通ってしまう検査時-使用時の穴が生まれ、
+     * 検査の意味が薄い。ここで防ぐのは「自分で自分を締め出す」ことだけに限定する。
+     *
+     * @param message 拒否時のメッセージ。操作(削除/無効化など)ごとに呼び出し元が指定する
      */
-    public void requireAdminAndNotSelf(Long userId) {
+    public void requireAdminAndNotSelf(Long userId, String message) {
         requireAdmin();
         Long actorId = currentActorService.getCurrentActorId();
         if (actorId != null && actorId.equals(userId)) {
-            throw new ForbiddenException("自分自身のアカウントは削除できません");
+            throw new ForbiddenException(message);
         }
     }
 

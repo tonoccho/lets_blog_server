@@ -111,20 +111,28 @@ public class UserController {
     @ApiResponse(responseCode = "404", description = "ユーザーが見つかりません")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@Parameter(description = "ユーザーID") @PathVariable Long id) {
-        adminAuthorizationService.requireAdminAndNotSelf(id);
+        adminAuthorizationService.requireAdminAndNotSelf(id, "自分自身のアカウントは削除できません");
         userService.delete(id);
         return ResponseEntity.noContent().build();
     }
 
-    @Operation(summary = "ユーザーを無効化", description = "指定されたユーザーを無効化します(Keycloak登録済みの場合はKeycloak側も無効化)")
+    /**
+     * 自己無効化を禁止する理由(issue #798)。
+     *
+     * <p>#796は自己「削除」を禁止したが「無効化」は放置していた。adminが自分自身を無効化すると
+     * ログインできなくなり、他にadminがいなければ誰も復旧できない
+     * ({@link #reactivate}も{@code requireAdmin()}を要求するため)。取り消せない度合いは
+     * 削除より低いものの、締め出しという結果は同じなので、削除と同じガードを掛ける。
+     */
+    @Operation(summary = "ユーザーを無効化", description = "指定されたユーザーを無効化します(admin限定。自分自身は無効化不可。Keycloak登録済みの場合はKeycloak側も無効化)")
     @ApiResponse(responseCode = "200", description = "ユーザーが無効化されました")
     @ApiResponse(responseCode = "401", description = "認証ヘッダが無効")
-    @ApiResponse(responseCode = "403", description = "admin権限がありません")
+    @ApiResponse(responseCode = "403", description = "admin権限が無い、または自分自身を無効化しようとした")
     @ApiResponse(responseCode = "404", description = "ユーザーが見つかりません")
     @ApiResponse(responseCode = "502", description = "Keycloak Admin APIの呼び出しに失敗しました")
     @PostMapping("/{id}/deactivate")
     public UserResponse deactivate(@Parameter(description = "ユーザーID") @PathVariable Long id) {
-        adminAuthorizationService.requireAdmin();
+        adminAuthorizationService.requireAdminAndNotSelf(id, "自分自身のアカウントは無効化できません");
         return userService.deactivate(id);
     }
 
@@ -215,29 +223,63 @@ public class UserController {
         return userService.updateGithubToken(id, request);
     }
 
-    @Operation(summary = "ロールを割り当て", description = "指定されたユーザーにロールを割り当てます")
+    @Operation(summary = "ロールを割り当て", description = "指定されたユーザーにロールを割り当てます(特権ロールはadmin限定)")
     @ApiResponse(responseCode = "200", description = "ロールが割り当てられました")
     @ApiResponse(responseCode = "401", description = "認証ヘッダが無効")
-    @ApiResponse(responseCode = "403", description = "ロール管理権限がありません")
+    @ApiResponse(responseCode = "403", description = "ロール管理権限が無い、または特権ロールをadmin以外が操作しようとした")
+    @ApiResponse(responseCode = "404", description = "ユーザーまたはロールが見つかりません")
     @PostMapping("/{userId}/roles/{roleName}")
     public ResponseEntity<Map<String, String>> assignRole(
             @Parameter(description = "ユーザーID") @PathVariable Long userId,
             @Parameter(description = "ロール名") @PathVariable String roleName) {
-        permissionAuthorizationService.requirePermission(Permission.ROLE_MANAGE);
+        authorizeRoleChange(roleName);
         roleService.assignRoleToUser(userId, roleName);
         return ResponseEntity.ok(Map.of("message", "ロールを割り当てました。"));
     }
 
-    @Operation(summary = "ロールを削除", description = "指定されたユーザーからロールを削除します")
+    @Operation(summary = "ロールを削除", description = "指定されたユーザーからロールを削除します(特権ロールはadmin限定)")
     @ApiResponse(responseCode = "200", description = "ロールが削除されました")
     @ApiResponse(responseCode = "401", description = "認証ヘッダが無効")
-    @ApiResponse(responseCode = "403", description = "ロール管理権限がありません")
+    @ApiResponse(responseCode = "403", description = "ロール管理権限が無い、または特権ロールをadmin以外が操作しようとした")
+    @ApiResponse(responseCode = "404", description = "ユーザーまたはロールが見つかりません")
     @DeleteMapping("/{userId}/roles/{roleName}")
     public ResponseEntity<Map<String, String>> removeRole(
             @Parameter(description = "ユーザーID") @PathVariable Long userId,
             @Parameter(description = "ロール名") @PathVariable String roleName) {
-        permissionAuthorizationService.requirePermission(Permission.ROLE_MANAGE);
+        authorizeRoleChange(roleName);
         roleService.removeRoleFromUser(userId, roleName);
         return ResponseEntity.ok(Map.of("message", "ロールを解除しました。"));
+    }
+
+    /**
+     * ロールの付与・剥奪の認可(issue #798)。
+     *
+     * <p>従来は付与・剥奪ともに{@code requirePermission(ROLE_MANAGE)}だけだった。
+     * {@code ROLE_MANAGE}は既定シードでは{@code ROLE_ADMIN}しか持たないため既定データでは
+     * 実害が無かったが、運用で非adminロールに{@code ROLE_MANAGE}を付与すると、そのユーザーは
+     * {@code POST /api/users/{自分のid}/roles/ROLE_ADMIN}で自分に特権ロールを付けられた。
+     * #796が{@code PATCH /api/users/{id}}について塞いだのと同型の経路が、権限設定次第で復活する。
+     *
+     * <p>そこで「ロールを配れる権限を与えるロール」(特権ロール。
+     * {@link RoleService#isPrivilegedRole}参照)の付与・剥奪だけをadmin限定にする。
+     * 選択肢として「自分自身へのロール割り当てだけを禁止する」案もあったが、それでは
+     * {@code ROLE_MANAGE}保有者どうしが互いに特権ロールを付け合ったり、自分が管理する別アカウントに
+     * 付けたりする経路が残るため採らなかった。
+     *
+     * <p>剥奪も同じ扱いにしているのは対称性のため。付与がadmin限定なのに剥奪が
+     * {@code ROLE_MANAGE}のままだと、{@code ROLE_MANAGE}保有者がadminたちから特権ロールを
+     * 剥がして回れてしまう(RBAC軸での妨害)。
+     *
+     * <p><b>注意</b>: ここでの「admin」は{@code users.role}カラムが{@code "admin"}であることを指し
+     * ({@code CurrentActorService#isAdmin})、RBACの{@code ROLE_ADMIN}とは別軸である。
+     * したがって{@code ROLE_ADMIN}を自分に付けても{@code requireAdmin()}のエンドポイントは
+     * 開かない。この二重構造そのものの整理は本Issueのスコープ外。
+     */
+    private void authorizeRoleChange(String roleName) {
+        if (roleService.isPrivilegedRole(roleName)) {
+            adminAuthorizationService.requireAdmin();
+            return;
+        }
+        permissionAuthorizationService.requirePermission(Permission.ROLE_MANAGE);
     }
 }

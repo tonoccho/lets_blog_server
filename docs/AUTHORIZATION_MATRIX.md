@@ -56,7 +56,7 @@ identity-service / log-writer が従来から行っていた、各コントロ�
 | `web/src/lib/errorLogger.ts`(#791 以前はブラウザから直接) | `POST /api/logs/errors` | legacy-api 時代も401だったため後退ではない。**#791 で是正済み**: ブラウザは同一オリジンのBFF `POST /client-errors`(`web/src/app/client-errors/route.ts`)を呼び、そこから server-only の `apiClient` 経由でBearer付きで log-writer へ中継する。log-writerの`PUBLIC_PATHS`は増やしていない(未認証の書き込み経路を残さないため) |
 | `scripts/provision-e2e-keycloak-users.sh` | `POST /api/users` | #772 で `letsblog-services` の Client Credentials を使うようにしたが、#796 で同エンドポイントが admin 限定になったため方式を変更した。サービスアカウントの `sub` に対応するローカル `users` 行が無く `CurrentActorService` が操作者を解決できないため、Client Credentials トークンでは `requireAdmin()` を通れない。現在は `letsblog-e2e` の password グラントで**実在する admin ユーザー**のトークンを取得する |
 
-#### identity-service の `/api/users` の認可(#796 適用後)
+#### identity-service の `/api/users` の認可(#796・#798 適用後)
 
 認証ゲート(#772)は「有効なJWTが無ければ401」までしか担わない。その先の**認可**は
 `AdminAuthorizationService` によるコントローラ層の手続き的チェックが担う。
@@ -66,11 +66,48 @@ identity-service / log-writer が従来から行っていた、各コントロ�
 | `GET /api/users` | `requireAdmin()` | #653 で追加 |
 | `POST /api/users` | `requireAdmin()` | **#796 で追加**。`UserCreateRequest` が `role` を受け取るため、認可が無いと `role=admin` のアカウントを誰でも作れた(権限昇格) |
 | `PATCH /api/users/{id}` | `requireAdmin()` | **#796 で追加**。扱うのは `role` / `password` で管理者が管理する項目。本人に許すと自分の `role` を admin へ書き換えられる |
-| `DELETE /api/users/{id}` | `requireAdminAndNotSelf(id)` | **#796 で追加**。無効化が admin 限定なのに削除に認可が無い非対称を解消。あわせて自己削除も禁止(最後の admin が自分を消して誰も管理できなくなるのを防ぐ) |
-| `POST /api/users/{id}/deactivate`・`/reactivate` | `requireAdmin()` | 従来どおり |
+| `DELETE /api/users/{id}` | `requireAdminAndNotSelf(id, ...)` | **#796 で追加**。無効化が admin 限定なのに削除に認可が無い非対称を解消。あわせて自己削除も禁止(最後の admin が自分を消して誰も管理できなくなるのを防ぐ) |
+| `POST /api/users/{id}/deactivate` | `requireAdminAndNotSelf(id, ...)` | **#798 で自己ガードを追加**。#796 は自己「削除」だけを禁止し「無効化」を放置していた。admin が自分を無効化するとログインできなくなり、他に admin がいなければ `reactivate` も `requireAdmin()` を要求するため誰も復旧できない |
+| `POST /api/users/{id}/reactivate` | `requireAdmin()` | 従来どおり。無効化されている本人はそもそもログインできないので、自己ガードは不要 |
+| `POST・DELETE /api/users/{userId}/roles/{roleName}` | 特権ロールは `requireAdmin()`、それ以外は `requirePermission(ROLE_MANAGE)` | **#798 で変更**。下記参照 |
 | `POST /api/users/migrate-to-keycloak`・`/reconcile-keycloak` | `requireAdmin()` | 従来どおり |
 | `GET /api/users/{id}`・`PUT /api/users/{id}`・`PATCH /{id}/preferences`・`PUT /{id}/github-token` | `requireSelfOrAdmin(id)` | 本人が変更してよいプロフィール項目。個人設定は `PATCH /api/identity/me/preferences`(#784)も使える |
 | `GET /api/identity/me`・`/me/permissions`・`PATCH /me/preferences` | 自ユーザー限定(JWTの `sub` から解決) | クライアントから識別子を受け取らないため、ID の取り違えが構造的に起きない(#784) |
+
+##### ロール付与・剥奪の認可(#798)
+
+`POST・DELETE /api/users/{userId}/roles/{roleName}` は従来 `requirePermission(ROLE_MANAGE)` だけで
+守られており、admin 判定ではなかった。既定シード(`V8__add_rbac_tables.sql`)で `ROLE_MANAGE` を
+持つのは `ROLE_ADMIN` のみなので既定データでは実害が無いが、運用で非 admin ロールに
+`ROLE_MANAGE` を付与すると、そのユーザーは `POST /api/users/{自分のid}/roles/ROLE_ADMIN` で
+自分に特権ロールを付けられた。#796 が `PATCH /api/users/{id}` について塞いだのと同型の経路である。
+
+**特権ロール**を「ロールを配れる権限(`ROLE_MANAGE` または `USER_ROLE_MANAGE`)を与えるロール」と
+定義し、その付与・剥奪だけを `requireAdmin()` にした(`RoleService#isPrivilegedRole`)。
+それ以外のロールは従来どおり `requirePermission(ROLE_MANAGE)` で、`ROLE_MANAGE` という権限が
+無意味にならないようにしている。
+
+剥奪も同じ扱いにしているのは対称性のため。付与が admin 限定なのに剥奪が `ROLE_MANAGE` のままだと、
+`ROLE_MANAGE` 保有者が admin たちから特権ロールを剥がして回れてしまう。
+
+**判定はロール名の文字列一致ではなく、DB から解決したロールの権限で行う**。MySQL のスキーマは
+`utf8mb4_unicode_ci`(大文字小文字を区別せず、末尾空白も無視)のため、`findByRoleName("role_admin")`
+は `ROLE_ADMIN` の行に一致する。`"ROLE_ADMIN".equals(roleName)` のような名前一致でガードすると、
+大小を変えただけの入力でガードだけをすり抜け、割り当て処理では同じ行に解決される、という迂回が成立する。
+
+**「最後の admin か」は数えない**。admin が2人いれば互いに削除・無効化でき、それは正当な運用である。
+数える設計にすると「他の admin が同時に自分を消す」レースで両者とも通る検査時-使用時の穴が生まれる。
+防いでいるのは「自分で自分を締め出す」ことだけに限定している。
+
+##### 注意: admin には別軸が2つある
+
+ここでの `requireAdmin()` は `users.role` カラムが `"admin"` であることを指す
+(`CurrentActorService#isAdmin`)。RBAC の `ROLE_ADMIN`(`user_roles` / `roles` テーブル)とは
+**別軸**で、`ROLE_ADMIN` を自分に付けても `requireAdmin()` のエンドポイントは開かない。
+逆に、`ROLE_ADMIN` を持たない `users.role = "admin"` のユーザーは `requirePermission(...)` を
+通れない。既定シードは admin ユーザーに `ROLE_ADMIN` も割り当てるため通常この差は表面化しないが、
+2つの認可軸が並存していること自体は整理の余地がある(#798 のスコープ外)。
+
 
 Web 管理画面は `requireAdminSession()` で守られているが、gateway は認可判定を行わない
 (ADR-0008)ため、アクセストークンを持つクライアントは API を直接叩ける。**クライアント側の
