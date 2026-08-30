@@ -141,6 +141,11 @@ What this issue intentionally does not include.
 
 Related issues, systems, or prerequisites.
 
+Name every dependency Issue as `#<number>`. Epic shorthand alone (`A4`, `B6`, `C14`) is not a
+resolvable identifier — it forces every later readiness check to re-translate labels into Issue
+numbers, and that translation is where verdicts diverge (#751). Write `C14 (#583)`, not `C14`.
+Where GitHub's formal `blocked_by` link applies, add it as well.
+
 # Open Questions
 
 Only questions that remain unresolved.

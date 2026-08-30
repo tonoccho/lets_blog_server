@@ -127,9 +127,21 @@ Important exclusions should be documented if reasonable interpretations could ot
 
 ### Dependencies
 
-PASS if dependencies are resolved, explicitly accepted, or not applicable.
+Judge this per **Dependency Resolution** in `CLAUDE.md` — that is the single definition, shared
+with `work-next` and `implement-issue`. Run `scripts/issue-dependency-status.sh <issue-number>`
+and judge from its live output.
+
+PASS if dependencies are resolved, explicitly accepted, or not applicable. An open `blocked_by`
+link is the only status-based blocker; a dependency named only in the body's prose is judged by
+whether this Issue's acceptance criteria can be implemented and verified against the codebase
+as it stands.
 
 FAIL if implementation depends on unfinished work that has not been identified.
+
+State which ground the verdict used, and cite the live evidence. If the Issue records its
+dependencies only as Epic shorthand (`A4`, `C14`), resolve them to `#<number>` and update the
+body first; if they cannot be resolved, report them as *unidentifiable* rather than asserting
+they are *unresolved* (#751).
 
 ### Blocking Questions
 
