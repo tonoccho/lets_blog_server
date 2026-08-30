@@ -60,8 +60,9 @@ public final class AuthorizationMatrixContract {
      * base パスが壊れる。
      */
     private static final Pattern CLASS_MAPPING = Pattern.compile(
-            "@RequestMapping\\(\\s*(?:(?:value|path)\\s*=\\s*)?\"([^\"]*)\"[^)]*\\)"
-                    + "(?:\\s*@\\w+(?:\\([^)]*\\))?)*\\s*(?:public\\s+)?(?:final\\s+)?class");
+            "@RequestMapping\\s*\\([^)]*\\)"
+                    + "(?:\\s*@\\w+(?:\\([^)]*\\))?)*\\s*(?:public\\s+)?(?:abstract\\s+)?"
+                    + "(?:final\\s+)?class");
 
     /**
      * メソッドレベルのマッピング注釈。
@@ -70,7 +71,7 @@ public final class AuthorizationMatrixContract {
      * {@code RouteControllerContractTest} が既にそうしており、そちらに合わせる。
      */
     private static final Pattern METHOD_MAPPING =
-            Pattern.compile("@(Get|Post|Put|Delete|Patch|Request)Mapping\\b(\\([^)]*\\))?");
+            Pattern.compile("@(Get|Post|Put|Delete|Patch|Request)Mapping\\b");
 
     /** {@code value = } のような名前付き属性の先頭。 */
     private static final Pattern NAMED_ATTRIBUTE = Pattern.compile("^(\\w+)\\s*=\\s*");
@@ -187,9 +188,10 @@ public final class AuthorizationMatrixContract {
         List<Endpoint> endpoints = new ArrayList<>();
         try (Stream<Path> files = Files.walk(sourceRoot)) {
             files.filter(p -> p.getFileName().toString().endsWith(".java")).forEach(p -> {
-                String source = stripComments(read(p));
-                if (CONTROLLER_ANNOTATION.matcher(source).find()) {
-                    endpoints.addAll(parseController(p.getFileName().toString(), source));
+                String source = read(p);
+                String masked = maskLiterals(source);
+                if (CONTROLLER_ANNOTATION.matcher(masked).find()) {
+                    endpoints.addAll(parseController(p.getFileName().toString(), source, masked));
                 }
             });
         } catch (IOException e) {
@@ -199,32 +201,51 @@ public final class AuthorizationMatrixContract {
     }
 
     /**
-     * コメントとJavadocを空白へ置き換える(位置をずらさないため長さは保つ)。
+     * ソースから「コード視点」を作る。コメント・Javadoc・文字列リテラルの中身を空白へ置き換え、
+     * <b>長さは保つ</b>ので元ソースとオフセットが一致する。
      *
-     * <p>本リポジトリはJavadocが厚く、説明のために{@code {@code @GetMapping("/x")}}のような
-     * コード例を書く動機が現実にある。除去しないと、それが実在のエンドポイントとして
-     * <b>幻の「検証漏れ」</b>に化ける。コメントアウトされた古い注釈も同様。
+     * <p>注釈の位置と引数の範囲はこの視点で探し、<b>引数の中身は元ソースから取り出す</b>。
+     * こうすると次の3つが同時に塞がる。
+     *
+     * <ul>
+     *   <li>Javadocのコード例({@code {@code @GetMapping("/x")}})やコメントアウトされた注釈が
+     *       実在のエンドポイントとして<b>幻の「検証漏れ」</b>に化ける</li>
+     *   <li>テキストブロック({@code """..."""})に書いたコード例が同様に化ける。
+     *       本リポジトリはLLMプロンプトにテキストブロックを7ファイルで使っており、
+     *       そこにSpringのコード例が入る動機は現実にある</li>
+     *   <li>文字列の中の{@code )}が注釈の引数を途中で切る。
+     *       {@code @GetMapping(params = "a=(b)", value = "/x")}のような形で
+     *       「paramsだけ」に見えてクラスのパスへ<b>無音で縮退</b>していた</li>
+     * </ul>
      */
-    private static String stripComments(String source) {
+    private static String maskLiterals(String source) {
         StringBuilder out = new StringBuilder(source.length());
         int i = 0;
         while (i < source.length()) {
+            if (source.startsWith("\"\"\"", i)) {
+                int end = source.indexOf("\"\"\"", i + 3);
+                end = end < 0 ? source.length() : end + 3;
+                out.append("\"\"\"");
+                for (int k = i + 3; k < Math.max(i + 3, end - 3); k++) {
+                    out.append(source.charAt(k) == '\n' ? '\n' : ' ');
+                }
+                if (end - 3 >= i + 3) {
+                    out.append("\"\"\"");
+                }
+                i = end;
+                continue;
+            }
             char c = source.charAt(i);
             if (c == '"' || c == '\'') {
                 int end = i + 1;
-                while (end < source.length()) {
-                    if (source.charAt(end) == '\\') {
-                        end += 2;
-                        continue;
-                    }
-                    if (source.charAt(end) == c) {
-                        break;
-                    }
-                    end++;
+                while (end < source.length() && source.charAt(end) != c) {
+                    end += source.charAt(end) == '\\' ? 2 : 1;
                 }
-                end = Math.min(end + 1, source.length());
-                out.append(source, i, end);
-                i = end;
+                out.append(c).append(" ".repeat(Math.max(0, Math.min(end, source.length()) - i - 1)));
+                if (end < source.length()) {
+                    out.append(c);
+                }
+                i = Math.min(end + 1, source.length());
             } else if (source.startsWith("//", i)) {
                 int end = source.indexOf('\n', i);
                 end = end < 0 ? source.length() : end;
@@ -245,21 +266,49 @@ public final class AuthorizationMatrixContract {
         return out.toString();
     }
 
-    private static List<Endpoint> parseController(String fileName, String source) {
+    /** {@code (} から対応する {@code )} までの範囲。マスク済みの視点で数えるので文字列は邪魔しない。 */
+    private static int matchingParen(String masked, int open) {
+        int depth = 0;
+        for (int i = open; i < masked.length(); i++) {
+            if (masked.charAt(i) == '(') {
+                depth++;
+            } else if (masked.charAt(i) == ')') {
+                depth--;
+                if (depth == 0) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    private static List<Endpoint> parseController(String fileName, String source, String masked) {
         String base = "";
-        Matcher classMapping = CLASS_MAPPING.matcher(source);
+        Matcher classMapping = CLASS_MAPPING.matcher(masked);
         if (classMapping.find()) {
-            base = classMapping.group(1);
+            // パスは元ソースから取る(マスク視点では中身が空白になっている)。
+            base = pathOfClassMapping(fileName, source, masked, classMapping.start());
         }
 
         List<Endpoint> endpoints = new ArrayList<>();
-        Matcher methodMapping = METHOD_MAPPING.matcher(source);
+        Matcher methodMapping = METHOD_MAPPING.matcher(masked);
         while (methodMapping.find()) {
             String annotation = methodMapping.group(1);
-            String args = methodMapping.group(2) == null ? "" : methodMapping.group(2);
+            int argsStart = masked.indexOf('(', methodMapping.end() - 1);
+            String args = "";
+            int annotationEnd = methodMapping.end();
+            // 注釈名の直後が '(' のときだけ引数とみなす(次の注釈の '(' を拾わない)。
+            if (argsStart >= 0 && masked.substring(methodMapping.end(), argsStart).isBlank()) {
+                int argsEnd = matchingParen(masked, argsStart);
+                if (argsEnd < 0) {
+                    throw new AssertionError(fileName + ": 注釈の括弧が閉じていません: " + annotation);
+                }
+                args = source.substring(argsStart, argsEnd + 1);
+                annotationEnd = argsEnd + 1;
+            }
 
             // クラスレベルの @RequestMapping はここでは扱わない(baseとして既に採っている)。
-            if ("Request".equals(annotation) && isClassLevel(source, methodMapping.end())) {
+            if ("Request".equals(annotation) && isClassLevel(masked, annotationEnd)) {
                 continue;
             }
 
@@ -273,10 +322,27 @@ public final class AuthorizationMatrixContract {
         return endpoints;
     }
 
+    /** クラスレベル {@code @RequestMapping} のパス。配列や定数参照はここでも落とす。 */
+    private static String pathOfClassMapping(String fileName, String source, String masked, int start) {
+        int open = masked.indexOf('(', start);
+        int close = matchingParen(masked, open);
+        if (open < 0 || close < 0) {
+            throw new AssertionError(fileName + ": クラスレベル @RequestMapping の括弧が閉じていません");
+        }
+        List<String> paths = paths(fileName, source.substring(open, close + 1));
+        if (paths.size() != 1) {
+            throw new AssertionError(fileName
+                    + ": クラスレベル @RequestMapping が複数パスを持ちます: " + paths
+                    + " AuthorizationMatrixContract の解析を拡張してください");
+        }
+        return paths.get(0);
+    }
+
     /** 注釈の直後がクラス宣言なら、それはクラスレベルの {@code @RequestMapping}。 */
     private static boolean isClassLevel(String source, int annotationEnd) {
         String rest = source.substring(annotationEnd, Math.min(source.length(), annotationEnd + 400));
-        return rest.matches("(?s)(?:\\s*@\\w+(?:\\([^)]*\\))?)*\\s*(?:public\\s+)?(?:final\\s+)?class\\b.*");
+        return rest.matches("(?s)(?:\\s*@\\w+(?:\\([^)]*\\))?)*\\s*(?:public\\s+)?(?:abstract\\s+)?"
+                + "(?:final\\s+)?class\\b.*");
     }
 
     /**
@@ -430,16 +496,33 @@ public final class AuthorizationMatrixContract {
         return base + sub;
     }
 
-    /** {@code SecurityConfig} の {@code PUBLIC_PATHS} を読む。見つからなければ空。 */
+    /**
+     * {@code SecurityConfig} の {@code PUBLIC_PATHS} を読む。見つからなければ空。
+     *
+     * <p>ブロックの範囲は<b>マスク視点</b>で探し、値は<b>元ソース</b>から取る。
+     * マスクを通さないとコメントアウトされた行が有効な公開パスとして読まれ、
+     * 実在する認証必須エンドポイントが必須リストから黙って除外される。
+     * 「{@code PUBLIC_PATHS} の行をコメントアウトして認証必須にする」は、
+     * まさにこのテストが守るべき変更なので、素通しすると無音の穴になる。
+     */
     private static Set<String> readPublicPaths(Path sourceRoot) {
         Set<String> paths = new LinkedHashSet<>();
         try (Stream<Path> files = Files.walk(sourceRoot)) {
             files.filter(p -> p.getFileName().toString().equals("SecurityConfig.java"))
                     .forEach(p -> {
-                        Matcher block = PUBLIC_PATHS_BLOCK.matcher(read(p));
-                        if (block.find()) {
-                            Matcher literal = STRING_LITERAL.matcher(block.group(1));
-                            while (literal.find()) {
+                        String source = read(p);
+                        Matcher block = PUBLIC_PATHS_BLOCK.matcher(maskLiterals(source));
+                        if (!block.find()) {
+                            return;
+                        }
+                        // 元ソースから読むが、コメント内の文字列は採らない。
+                        // maskLiterals は長さを保つので、同じ位置がマスク側でも二重引用符なら
+                        // 「コードとして生きている文字列」、空白なら「コメントの中」と判別できる。
+                        String masked = maskLiterals(source);
+                        Matcher literal = STRING_LITERAL.matcher(source);
+                        literal.region(block.start(1), block.end(1));
+                        while (literal.find()) {
+                            if (masked.charAt(literal.start()) == '"') {
                                 paths.add(literal.group(1));
                             }
                         }
