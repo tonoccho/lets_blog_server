@@ -141,18 +141,17 @@ class ServiceTokenClientTest {
         // 2回分(失敗→回復)の期待値を先に積んでおく。
         server.expect(requestTo(TOKEN_URI)).andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
         expectTokenRequest("token-recovered", 60);
+        MutableClock clock = MutableClock.atEpoch();
+        Duration cooldown = Duration.ofSeconds(30);
         ServiceTokenClient client = new ServiceTokenClient(
                 builder, TOKEN_URI, "letsblog-services", "test-secret",
-                new CircuitBreaker(1, Duration.ofMillis(1)));
+                new CircuitBreaker(1, cooldown, clock));
 
         assertThrows(ServiceTokenUnavailableException.class, client::getAccessToken);
 
-        // クールダウン(1ms)経過を待ってから、半開状態としての再試行が実際にHTTPを呼ぶことを確認する。
-        try {
-            Thread.sleep(10);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+        // クールダウン経過後、半開状態としての再試行が実際にHTTPを呼ぶことを確認する。
+        // 実時間を待たず時刻源を進める(CircuitBreakerTestと同じ理由)。
+        clock.advance(cooldown);
         String recovered = client.getAccessToken();
 
         assertEquals("token-recovered", recovered);

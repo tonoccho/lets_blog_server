@@ -45,13 +45,22 @@ class CircuitBreakerTest {
     }
 
     @Test
-    void クールダウン経過後は半開状態としてcheckAllowedが通る() throws InterruptedException {
-        CircuitBreaker breaker = new CircuitBreaker(1, Duration.ofMillis(1));
+    void クールダウン経過後は半開状態としてcheckAllowedが通る() {
+        // 実時間ではなく時刻源を進めて検証する。以前はクールダウンを1msに縮めてThread.sleep()で
+        // 待っていたが、assertThrows()に渡すメソッド参照の初回生成だけで約1msかかるため、
+        // 「まだクールダウン中」を確かめる最初のassertThrowsが実行環境によっては通り抜けていた。
+        MutableClock clock = MutableClock.atEpoch();
+        Duration cooldown = Duration.ofSeconds(30);
+        CircuitBreaker breaker = new CircuitBreaker(1, cooldown, clock);
         breaker.recordFailure();
         assertThrows(ServiceTokenUnavailableException.class, breaker::checkAllowed);
 
-        Thread.sleep(10);
+        // 満了直前はまだOPENのまま
+        clock.advance(cooldown.minusMillis(1));
+        assertThrows(ServiceTokenUnavailableException.class, breaker::checkAllowed);
 
+        // 満了時点で半開状態として1回だけ通す
+        clock.advance(Duration.ofMillis(1));
         assertDoesNotThrow(breaker::checkAllowed);
     }
 }
