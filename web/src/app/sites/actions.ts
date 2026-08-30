@@ -15,7 +15,7 @@ import {
   StaticContentType,
   WpCliInstallResult,
 } from "@/lib/apiClient";
-import { requireAdminSession } from "@/lib/session";
+import { requireAdminSession, requireSession } from "@/lib/session";
 
 export interface RegisterSiteState {
   error?: string;
@@ -27,10 +27,25 @@ const CREDENTIAL_FIELDS: Record<CmsType, string[]> = {
   WORDPRESS: ["baseUrl", "sshHost", "sshUser", "wpPath"],
 };
 
+/**
+ * サイトを登録する(issue #824 で認可を追加)。
+ *
+ * **admin 限定**。同じファイルの `deleteSiteAction` / `installWpCliAction` /
+ * `generateStaticContentAction` / `generateSshKeyPairAction` はいずれも
+ * `requireAdminSession()` を要求しており、サイトの作成だけが素通りだった。
+ * サイト登録は SSH 認証情報を保存しインフラを作る操作なので、削除と同じ水準が妥当。
+ *
+ * **挙動の変更を伴う**: これまで非 admin でもサイトを登録できた
+ * (バックエンドの `SiteController` にも認可チェックが無い。#830)。本変更以降は 403 になる。
+ * なお登録フォーム内の SSH 鍵生成(`generateSshKeyPairAction`)は元から admin 限定なので、
+ * 非 admin はどのみち鍵を新規生成できなかった。
+ */
 export async function registerSiteAction(
   _prevState: RegisterSiteState,
   formData: FormData
 ): Promise<RegisterSiteState> {
+  await requireAdminSession();
+
   const name = String(formData.get("name") ?? "").trim();
   const siteKey = String(formData.get("siteKey") ?? "").trim();
   const cmsType = String(formData.get("cmsType") ?? "") as CmsType;
@@ -103,10 +118,13 @@ export interface CreateManagedWordPressSiteState {
   success?: boolean;
 }
 
+/** マネージドWordPressサイトを作成する。認可の判断は {@link registerSiteAction} と同じ(#824)。 */
 export async function createManagedWordPressSiteAction(
   _prevState: CreateManagedWordPressSiteState,
   formData: FormData
 ): Promise<CreateManagedWordPressSiteState> {
+  await requireAdminSession();
+
   const name = String(formData.get("managedName") ?? "").trim();
   const siteKey = String(formData.get("managedSiteKey") ?? "").trim();
   const title = String(formData.get("managedTitle") ?? "").trim();
@@ -138,7 +156,18 @@ export async function deleteSiteAction(id: number) {
   revalidatePath("/sites");
 }
 
+/**
+ * サイトへの疎通を確認する(issue #824 で認可を追加)。
+ *
+ * **ログイン必須だが admin 限定にはしない**。呼び出し元の `CheckConnectionButton` は
+ * `SiteListTable` の `isAdmin &&` ガードの**外**で描画されており、ログイン済みなら誰でも
+ * 押せる想定になっている(削除ボタンはガードの内側)。UI の意図に認可の粒度を揃える。
+ *
+ * 未認証で通してはいけないのは、この操作が**外部サイトへの接続を試みる**ため。
+ * 認証していない相手に外部への疎通確認を代行させる形になる。
+ */
 export async function checkSiteConnectionAction(id: number): Promise<SiteConnectionCheckResult> {
+  await requireSession();
   return checkSiteConnection(id);
 }
 
