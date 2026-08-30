@@ -1,4 +1,6 @@
 import { render, screen, act } from '@testing-library/react'
+import { renderToString } from 'react-dom/server'
+import { hydrateRoot } from 'react-dom/client'
 import { I18nProvider, useI18n } from '../I18nProvider'
 
 /**
@@ -73,11 +75,13 @@ describe('I18nProvider (issue #721)', () => {
     )
   })
 
-  /**
-   * 他タブで言語が切り替わったときに storage イベントで追随する。
-   * 同一タブ内の切り替えは LanguageSwitcher が `window.location.reload()` するため対象外。
-   */
-  it('他タブでの変更(storageイベント)に追随する', () => {
+  it('localStorageが読めない環境でもinitialLocaleへ倒す', () => {
+    const spy = jest
+      .spyOn(Storage.prototype, 'getItem')
+      .mockImplementation(() => {
+        throw new Error('SecurityError')
+      })
+
     render(
       <I18nProvider initialLocale="ja">
         <Probe />
@@ -85,11 +89,47 @@ describe('I18nProvider (issue #721)', () => {
     )
     expect(screen.getByTestId('locale')).toHaveTextContent('ja')
 
+    spy.mockRestore()
+  })
+
+  /**
+   * この変更で唯一リグレッションが起きうるのがハイドレーション経路なので、SSR された HTML へ
+   * 実際に hydrate して確認する。`useSyncExternalStore` の `getServerSnapshot` はハイドレーション時
+   * にも使われるため、保存値があっても**初回は initialLocale で描画され**、直後に保存値へ
+   * 切り替わる。変更前(`useEffect` で切り替える実装)と同じ順序であり、ハイドレーション不一致の
+   * 警告も出ない。`useState` の遅延初期化にするとここが初回から `en` になり不一致になる。
+   */
+  it('SSR済みHTMLへのハイドレーションで不一致を起こさず、直後に保存値へ切り替わる', () => {
+    const html = renderToString(
+      <I18nProvider initialLocale="ja">
+        <Probe />
+      </I18nProvider>
+    )
+    expect(html).toContain('>ja<')
+
+    window.localStorage.setItem('locale', 'en')
+
+    const container = document.createElement('div')
+    container.innerHTML = html
+    document.body.appendChild(container)
+
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+
     act(() => {
-      window.localStorage.setItem('locale', 'en')
-      window.dispatchEvent(new StorageEvent('storage', { key: 'locale', newValue: 'en' }))
+      hydrateRoot(
+        container,
+        <I18nProvider initialLocale="ja">
+          <Probe />
+        </I18nProvider>
+      )
     })
 
-    expect(screen.getByTestId('locale')).toHaveTextContent('en')
+    // ハイドレーション不一致の警告が出ていないこと。
+    expect(errorSpy).not.toHaveBeenCalled()
+    // passive effect でクライアントのスナップショットへ切り替わっていること。
+    expect(container.querySelector('[data-testid="locale"]')?.textContent).toBe('en')
+
+    errorSpy.mockRestore()
+    document.body.removeChild(container)
   })
 })

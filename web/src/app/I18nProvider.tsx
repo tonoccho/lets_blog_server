@@ -23,12 +23,19 @@ const messagesByLocale: Record<Locale, Messages> = {
 const LOCALE_STORAGE_KEY = "locale";
 
 /**
- * localStorageの変更を購読する。同じタブ内での変更は{@link LanguageSwitcher}が
- * `window.location.reload()` するため、ここで拾うのは他タブでの変更(storageイベント)。
+ * 購読は行わない(no-op)。localStorageの言語設定が変わるのは{@link LanguageSwitcher}経由だけで、
+ * そこでは`window.location.reload()`によりページごと作り直されるため、購読しても拾う変更が無い。
+ *
+ * <p>`storage`イベントを購読して他タブの変更に追随させることもできるが、
+ * {@link LanguageSwitcher}のセレクトボックスは自身の`useState`で値を持っており追随しないため、
+ * 「本文だけ英語、セレクトは日本語」という不整合が生まれる。issue #721はlintエラーの解消が
+ * スコープなので、挙動を変えないno-opにしておく。
+ *
+ * <p>購読が無くてもハイドレーション後の切り替えは働く。Reactは`useSyncExternalStore`のマウント時に
+ * passive effectでスナップショットを取り直し、サーバー用の値と異なれば再レンダーするため。
  */
-function subscribeToStoredLocale(onStoreChange: () => void): () => void {
-  window.addEventListener("storage", onStoreChange);
-  return () => window.removeEventListener("storage", onStoreChange);
+function subscribeToStoredLocale(): () => void {
+  return () => {};
 }
 
 /**
@@ -39,7 +46,7 @@ function subscribeToStoredLocale(onStoreChange: () => void): () => void {
 function getStoredLocale(): Locale | null {
   try {
     const stored = window.localStorage.getItem(LOCALE_STORAGE_KEY);
-    return stored !== null && stored in messagesByLocale ? (stored as Locale) : null;
+    return stored !== null && Object.hasOwn(messagesByLocale, stored) ? (stored as Locale) : null;
   } catch {
     return null;
   }
