@@ -20,7 +20,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * セルフサインアップ、初回セットアップを扱う。ユーザーのCRUD・プロフィール管理はidentity-serviceに
+ * 初回セットアップを扱う。ユーザーのCRUD・プロフィール管理はidentity-serviceに
  * 移設した(#561)。ログイン(パスワード照合・2FA・APIキー発行)はissue #566でKeycloakへ全面移行し
  * 撤去した。このクラスは初回セットアップのためにpassword_hash等の資格情報を引き続き扱う。
  *
@@ -28,8 +28,13 @@ import java.util.Set;
  * password_hash だけを更新しても実際にはログインできないアカウントを作るだけになっていた
  * (#564由来のpre-existingなギャップ、issue #681)。そのため、この操作は{@link KeycloakAdminClient}
  * (Keycloak Admin REST API)を呼び出し、Keycloak上に実際にログイン可能な状態を作る。
- * signup/create等それ以外の操作は本Issueのスコープ外であり、従来どおりローカルDBのみを操作する
+ * create等それ以外の操作は本Issueのスコープ外であり、従来どおりローカルDBのみを操作する
  * (Keycloak連携した通常のユーザー作成導線の整備は別Issueで扱う)。
+ *
+ * <p>誰でも呼び出せたセルフサインアップ(signup)は、
+ * ログインがKeycloakへ一本化された後もローカルDBにしかアカウントを作らず、ログインできない
+ * ユーザーを生むだけになっていた。Web/拡張/SDK/OpenAPIのいずれからも呼び出されていない
+ * 到達不能なコードであったため、issue #688でエンドポイントごと削除した。
  *
  * <p>ロックアウト時の緊急復旧(旧resetPassword)は、issue #693でAdminPasswordResetRunnerごと
  * platform-serviceへ移設された。platform-serviceはこのクラスが参照するusers/rolesテーブル
@@ -105,15 +110,6 @@ public class UserService {
             throw new IllegalStateException("ユーザーの GitHub トークンが設定されていません");
         }
         return credentialCipher.decrypt(user.getGithubTokenEncrypted());
-    }
-
-    /**
-     * 誰でも呼び出せるセルフサインアップ。roleは常に"user"固定。
-     */
-    @AuditLog(action = AuditLogAction.USER_CREATED, resourceType = "USER")
-    @Transactional
-    public UserResponse signup(String email, String password) {
-        return create(new UserCreateRequest(email, password, "user"));
     }
 
     @Transactional(readOnly = true)

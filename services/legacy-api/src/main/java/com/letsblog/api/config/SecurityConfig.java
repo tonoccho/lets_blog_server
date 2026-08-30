@@ -16,7 +16,7 @@ import org.springframework.security.web.SecurityFilterChain;
  * {@code anyRequest().authenticated()}(有効なKeycloak JWTを要求)で置き換える。
  *
  * <p>permitAllとして残すのは、(1) まだ資格情報を持ちようがない初回セットアップ導線
- * ({@code /api/auth/signup} / {@code /api/auth/setup} / {@code /api/auth/setup-status}。
+ * ({@code /api/auth/setup} / {@code /api/auth/setup-status}。
  * AuthControllerのJavadoc参照)、(2) ヘルスチェック({@code /api/health}、Actuator)、
  * (3) 元々ApiKeyAuthFilterの対象外だったAPIドキュメント({@code /v3/api-docs/**}、
  * {@code /swagger-ui/**}、{@code /swagger-ui.html})のみ。認可判定自体(admin/プロジェクト
@@ -34,7 +34,6 @@ public class SecurityConfig {
 
     private static final String[] PUBLIC_PATHS = {
             "/api/health",
-            "/api/auth/signup",
             "/api/auth/setup",
             "/api/auth/setup-status",
             "/actuator/**",

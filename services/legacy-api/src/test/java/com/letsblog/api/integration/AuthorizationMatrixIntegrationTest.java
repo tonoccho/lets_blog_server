@@ -85,11 +85,12 @@ class AuthorizationMatrixIntegrationTest {
     // =====================================================================================
     // (a) 全エンドポイント(health・公開パスを除く)の401網羅
     //
-    // services/legacy-api/src/main/java/com/letsblog/api/controller/ の30ファイル・180エンドポイント
+    // services/legacy-api/src/main/java/com/letsblog/api/controller/ の30ファイル・179エンドポイント
     // (#572でAuditLogController/OperationLogController/FrontendErrorLogControllerの3ファイル・
     // 7エンドポイントをlog-writerサービスへ移設した後、#566でAuthControllerのログイン・2FA・
-    // パスワードリセット系8エンドポイントを撤去した後の数)から、SecurityConfigのPUBLIC_PATHS
-    // (health・auth/signup・auth/setup・auth/setup-status)を除いた176件を列挙する。
+    // パスワードリセット系8エンドポイントを撤去し、#688でAuthControllerのセルフサインアップ
+    // 1エンドポイントを撤去した後の数)から、SecurityConfigのPUBLIC_PATHS
+    // (health・auth/setup・auth/setup-status)を除いた176件を列挙する。
     // パスパラメータには存在確認不要な適当な値(1、"slug"等)を埋める。Authorizationヘッダーの
     // 有無だけでSecurityConfigが401を返すため、リクエストボディ/クエリパラメータの妥当性は問わない。
     // =====================================================================================
@@ -136,9 +137,9 @@ class AuthorizationMatrixIntegrationTest {
 
                 // (AuditLogControllerは#572でlog-writerサービスへ移設したため対象外)
 
-                // (AuthControllerのログイン・2FA・パスワードリセット系エンドポイントはissue #566で
-                // 撤去したため対象外。残るsignup/setup/setup-statusはSecurityConfigのPUBLIC_PATHS
-                // であり対象外)
+                // (AuthControllerのログイン・2FA・パスワードリセット系エンドポイントはissue #566で、
+                // セルフサインアップ(signup)はissue #688で撤去したため対象外。
+                // 残るsetup/setup-statusはSecurityConfigのPUBLIC_PATHSであり対象外)
 
                 // (BackupControllerは#694でplatform-serviceへ移設したため対象外)
 

@@ -39,7 +39,6 @@ legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行して�
    メソッドや `@Valid` によるボディ検証に到達する前に即座に401を返す。
    例外として以下はJWTなしでも到達できる(`SecurityConfig.PUBLIC_PATHS`):
    - `GET /api/health`
-   - `POST /api/auth/signup`
    - `POST /api/auth/setup`
    - `GET /api/auth/setup-status`
    - Actuator (`/actuator/**`)・APIドキュメント (`/v3/api-docs/**`、`/swagger-ui/**`)
@@ -158,17 +157,18 @@ requireProjectMemberOrAdmin をコントローラ側で呼ぶ点は同じ(プロ
 | --- | --- | --- | --- | --- | --- | --- |
 | GET /api/audit-logs | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 統合テストで代表検証済み(b) |
 
-## AuthController (3エンドポイント、ベースパス `/api/auth`)
+## AuthController (2エンドポイント、ベースパス `/api/auth`)
 
 issue #566でログイン(`POST /api/auth/login`)・2FA(`GET/POST /api/auth/totp/*`)・
 パスワードリセット(`POST /api/auth/password-reset/*`)の計8エンドポイントはKeycloakへ
-全面移行し撤去した。残る3エンドポイントは、Keycloak上にまだアカウントが1つも存在しない
-状態からのWeb管理画面初回セットアップ専用で、いずれも`SecurityConfig.PUBLIC_PATHS`により
-公開されている。
+全面移行し撤去した。さらにissue #688で、ログインのKeycloak一本化(#564)以降ローカルDBにしか
+アカウントを作らずログイン不能なユーザーを生むだけになっていたセルフサインアップ
+(`AuthController.signup`。Web/拡張/SDK/OpenAPIのいずれからも呼び出し元は無かった)も撤去した。
+残る2エンドポイントは、Keycloak上にまだアカウントが1つも存在しない状態からのWeb管理画面
+初回セットアップ専用で、いずれも`SecurityConfig.PUBLIC_PATHS`により公開されている。
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
-| POST /api/auth/signup | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | PUBLIC_PATHS。Web側の自己登録UIは既にKeycloakのregistrationAllowed=falseで撤去済みのため、2026-08時点で呼び出し元は無い |
 | GET /api/auth/setup-status | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | PUBLIC_PATHS |
 | POST /api/auth/setup | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | PUBLIC_PATHS。初期管理者セットアップ用(ローカルDB直書きのみでKeycloak側にはアカウントを作らない) |
 

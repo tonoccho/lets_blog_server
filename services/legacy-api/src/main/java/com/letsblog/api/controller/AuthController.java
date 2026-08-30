@@ -34,14 +34,6 @@ public class AuthController {
         this.userService = userService;
     }
 
-    @Operation(summary = "ユーザー登録", description = "新しいユーザーアカウントを作成します")
-    @ApiResponse(responseCode = "200", description = "ユーザーが登録されました")
-    @ApiResponse(responseCode = "400", description = "リクエストボディが不正")
-    @PostMapping("/signup")
-    public UserResponse signup(@Valid @RequestBody SignupRequest request) {
-        return userService.signup(request.email(), request.password());
-    }
-
     @Operation(summary = "セットアップ状態を確認", description = "システムのセットアップが必要かどうかを確認します")
     @ApiResponse(responseCode = "200", description = "セットアップ状態を返す")
     @GetMapping("/setup-status")

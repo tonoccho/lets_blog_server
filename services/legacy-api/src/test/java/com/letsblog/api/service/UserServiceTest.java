@@ -46,48 +46,6 @@ class UserServiceTest {
     }
 
     @Test
-    void signup_roleはuser固定で作成される() {
-        service = service();
-        when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
-        when(userRepository.save(any(User.class))).thenAnswer(invocation -> {
-            User u = invocation.getArgument(0);
-            u.setId(1L);
-            return u;
-        });
-
-        UserResponse response = service.signup("new@example.com", "password123");
-
-        assertEquals("user", response.role());
-        assertEquals("new@example.com", response.email());
-    }
-
-    @Test
-    void signup_ROLE_VIEWERが自動付与される() {
-        service = service();
-        com.letsblog.api.domain.Role viewerRole = new com.letsblog.api.domain.Role("ROLE_VIEWER", "閲覧者");
-        when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
-        when(roleRepository.findByRoleName("ROLE_VIEWER")).thenReturn(Optional.of(viewerRole));
-        when(userRepository.save(any(User.class))).thenAnswer(invocation -> {
-            User u = invocation.getArgument(0);
-            u.setId(1L);
-            return u;
-        });
-
-        UserResponse response = service.signup("new@example.com", "password123");
-
-        assertTrue(response.roleNames().contains("ROLE_VIEWER"));
-    }
-
-    @Test
-    void signup_既存メールは例外() {
-        service = service();
-        when(userRepository.existsByEmail("dup@example.com")).thenReturn(true);
-
-        assertThrows(EmailAlreadyExistsException.class,
-                () -> service.signup("dup@example.com", "password123"));
-    }
-
-    @Test
     void hasAnyUser_ユーザーが存在すればtrue() {
         service = service();
         when(userRepository.count()).thenReturn(1L);
