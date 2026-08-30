@@ -67,9 +67,14 @@ spring:
 # そちらへ寄せる想定(現時点は短いタイムアウトのみの素朴な同期呼び出し)。
 app:
   identity-service-uri: ${IDENTITY_SERVICE_URI:http://identity:8080}
-  # 統合操作ログ(/api/operation-logs/unified)のAIジョブソースを、引き続きlegacy-apiが
-  # 所有するgeneration_jobsテーブルから同期HTTP呼び出しで取得する(同上の暫定策)。
-  legacy-api-uri: ${LEGACY_API_URI:http://api:8080}
+  # 統合操作ログ(/api/operation-logs/unified)のAIジョブソースをai-serviceから
+  # 同期HTTP呼び出しで取得する(lbs_logスキーマからgeneration_jobsは直接参照できないため)。
+  #
+  # 既定値を http://ai:8080 にしている理由(issue #825): 他サービスのapp.ai-service-uriは
+  # ${AI_SERVICE_URI:http://api:8080} と書かれているが、これはGenerationJobControllerが
+  # legacy-apiにあった頃の名残で、現在のlegacy-apiに当該エンドポイントは存在しない。
+  # その既定値を踏襲すると、環境変数未設定時に404を受け続ける(#825で実際に起きた事象)。
+  ai-service-uri: ${AI_SERVICE_URI:http://ai:8080}
 
 # KeycloakのJWT検証(#572)。identity-serviceのSecurityConfig/JwtDecoderConfigと同じ理由により、
 # issuer-uriによる自動設定は使わずJWKS取得先と期待issuerを個別に指定して組み立てている。

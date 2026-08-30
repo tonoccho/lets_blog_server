@@ -585,9 +585,9 @@ services:
       # lbs_logスキーマはusersテーブルへアクセスできない=ADR-0004のクロススキーマ禁止のため。
       # C12(#581)でサービス間同期呼び出しの標準クライアントが定まったらそちらへ寄せる)。
       IDENTITY_SERVICE_URI: http://identity:8080
-      # 統合操作ログ(/api/operation-logs/unified)のAIジョブソースを、引き続きlegacy-apiが
-      # 所有するgeneration_jobsから同期HTTP呼び出しで取得するため(同上、C12までの暫定策)。
-      LEGACY_API_URI: http://api:8080
+      # 統合操作ログ(/api/operation-logs/unified)のAIジョブソース。#825でlegacy-apiから
+      # ai-serviceへ向け直した(GenerationJobControllerがai-serviceへ移設済みのため)。
+      AI_SERVICE_URI: http://ai:8080
     depends_on:
       mysql:
         condition: service_healthy

@@ -120,12 +120,28 @@ Phase 19の各抽出Issueが暫定策として実装していた「呼び出し�
 | content(`AiGenerationClient`) | `POST /api/ai/internal/generate` | LLM(180秒) | なし(POST) | あり(`ai-service`) | 明確なエラー(LLM生成結果はプレースホルダで代替できる性質のものではない) | 済 |
 | legacy-api(`AiGenerationClient`) | `POST /api/ai/internal/generate` | LLM(180秒) | なし | あり(`ai-service`) | content-service版と同じ | 済 |
 | legacy-api(`AiProjectSettingsClient`) | `GET/PUT/DELETE /api/internal/ai/projects/{id}/brave-search-api-key` | (未移行、既存はSTANDARD相当の10秒) | - | - | (未整理) | 未 |
+| log-writer(`GenerationJobClient`) | `GET /api/generation-jobs` | SHORT(5秒) | あり(GET) | あり(`ai-service`) | **機能縮退**(WARNを残しAI_JOBソースのみ除外。操作ログ・監査ログは返す。#825) | 済 |
+
+
+#### log-writer の AIジョブ取得を機能縮退にしている理由(#825)
+
+統合操作ログ(`GET /api/operation-logs/unified`)は OPERATION / AUDIT / AI_JOB の3ソースを
+マージする。前2つは log-writer 自身の `lbs_log` スキーマから取得済みで、AI_JOB だけが
+外部への同期呼び出しに依存する。
+
+#825 以前はここを「明確なエラー(502)」にしていたため、**AIジョブ取得の失敗だけで
+取得済みの操作ログ・監査ログまで巻き添えで失われていた**。実際、本クライアントが
+ai-service へ移設済みのエンドポイントを legacy-api に問い合わせ続けていたため
+この失敗が常時発生し、`/operation-logs` 画面は常に空だった。
+
+そのため機能縮退へ変更した。ただし縮退により**失敗が HTTP レスポンスに現れなくなる**ので、
+握り潰さず WARN に原因(`SyncServiceException` のメッセージ)とスタックトレースを残す。
+向き先・レスポンス形状・認証転送は `GenerationJobClientTest` が固定している。
 
 ### legacy-api向け
 
 | 呼び出し元 | エンドポイント | プロファイル | リトライ | サーキットブレーカー | フォールバック | 移行 |
 |---|---|---|---|---|---|---|
-| log-writer(`GenerationJobClient`) | `GET /api/generation-jobs` | SHORT(5秒) | あり(GET) | あり(`legacy-api`) | 明確なエラー(502) | 済 |
 | content(`LegacyApiBridgeClient`) | `/api/internal/content/**`(プロジェクトメンバー判定・ロール一覧・タグデザイン・site解決等) | (未移行、既存は10秒) | - | - | (未整理、現状は明確なエラー) | 未 |
 | ai(`LegacyApiBridgeClient`) | `/api/internal/ai/**`(GitHubアクセス・プロジェクトメンバー判定・LLM設定等) | (未移行、既存は10秒) | - | - | (未整理) | 未 |
 | analytics(`LegacyApiBridgeClient`) | `/api/internal/analytics/**`(本番サイト有無・プロジェクトメンバー判定) | (未移行、既存は10秒) | - | - | (未整理) | 未 |
