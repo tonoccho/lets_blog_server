@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createUser, deleteUser } from "@/lib/apiClient";
-import { requireAdminSession } from "@/lib/session";
+import { requireAdminSession, getViewerProfile } from "@/lib/session";
 
 export interface CreateUserState {
   error?: string;
@@ -40,7 +40,10 @@ export async function createUserAction(
 export async function deleteUserAction(id: number) {
   const session = await requireAdminSession();
 
-  if (String(id) === session.user.id) {
+  // session.user.idはKeycloakのsub(UUID)であり、ローカルの数値ユーザーIDではない(issue #784)。
+  // 以前はこの比較が常にfalseで、自己削除のガードが機能していなかった。
+  const viewer = await getViewerProfile();
+  if (viewer?.id === id) {
     throw new Error("自分自身のアカウントは削除できません。");
   }
 

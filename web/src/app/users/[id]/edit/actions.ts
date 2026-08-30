@@ -3,11 +3,11 @@
 import { revalidatePath } from "next/cache";
 import {
   updateUserProfile,
-  updateUserPreferences,
+  updateMyPreferences,
   type CustomLink,
   type SocialLinks,
 } from "@/lib/apiClient";
-import { requireSession } from "@/lib/session";
+import { getViewerProfile, requireSession } from "@/lib/session";
 
 export interface UpdateProfileState {
   error?: string;
@@ -38,7 +38,10 @@ export async function updateUserProfileAction(
 ): Promise<UpdateProfileState> {
   const session = await requireSession();
 
-  const isSelf = session.user.id === String(userId);
+  // session.user.idはKeycloakのsub(UUID)であり、ローカルの数値ユーザーIDではない(issue #784)。
+  // 自分自身かの判定には、identity-serviceが自ユーザーとして返すローカルidを使う。
+  const viewer = await getViewerProfile();
+  const isSelf = viewer?.id === userId;
   if (!isSelf && session.user.role !== "admin") {
     return { error: "この操作を行う権限がありません。" };
   }
@@ -99,9 +102,7 @@ export async function updatePreferencesAction(
   _prevState: UpdatePreferencesState,
   formData: FormData
 ): Promise<UpdatePreferencesState> {
-  const session = await requireSession();
-  const userId = Number(session.user.id);
-  const actor = { id: userId, role: session.user.role };
+  await requireSession();
 
   const locale = String(formData.get("locale") ?? "").trim();
   const timezone = String(formData.get("timezone") ?? "").trim();
@@ -110,12 +111,15 @@ export async function updatePreferencesAction(
     return { error: "言語とタイムゾーンを選択してください。" };
   }
 
+  // 自ユーザーの解決はidentity-service側が検証済みJWTのsubから行う(issue #784)。
+  // 以前はNumber(session.user.id)=NaNをパスへ埋め込んでおり、保存が常に失敗していた。
+  let updated;
   try {
-    await updateUserPreferences(userId, { locale, timezone }, actor);
+    updated = await updateMyPreferences({ locale, timezone });
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
 
-  revalidatePath(`/users/${userId}/edit`);
+  revalidatePath(`/users/${updated.id}/edit`);
   return { success: true };
 }
