@@ -73,14 +73,21 @@ public class CurrentActorService {
     }
 
     /**
-     * 有効なJWTが提示されているか(=認証済みか)を返す。{@link #getCurrentActorKeycloakSub()}と同じ
-     * 判定(JWTの署名・有効期限自体はSpring Securityのリソースサーバーフィルタが既に検証済みの
-     * ため、identity-serviceへの問い合わせは伴わない)。SecurityConfigが全経路permitAllのサービス
-     * (本サービス含む)で、admin限定ではなく「ログインしていること」だけを要求したいエンドポイント
-     * (SystemSettingService#getBraveSearchApiKeyStatus等)が使う。
+     * 操作者として扱える利用者からのリクエストかを返す。admin限定ではなく「ログインしていること」
+     * だけを要求したいエンドポイント(SystemSettingService#getBraveSearchApiKeyStatus等)が使う。
+     *
+     * <p><b>JWTのsubの有無ではなく操作者の解決可否で判定する(issue #816)</b>:
+     * #816以前は{@link #getCurrentActorKeycloakSub()}と同じくJWTのsubクレームだけを見ており、
+     * identity-serviceへの問い合わせを伴わなかった。そのため<b>無効化されたユーザーでも
+     * 素通りしていた</b>。無効化しても発行済みトークンは失効しない(Keycloakが止めるのは
+     * 新規発行だけ)ので、JWTを見るだけでは無効化を検知できない。
+     *
+     * <p>{@link #getCurrentActorId()}はidentity-serviceの{@code GET /api/identity/me}で解決する。
+     * #816でidentity側が無効化ユーザーを操作者として解決しなくなったため、
+     * こちらを使えば無効化も反映される。
      */
     public boolean isAuthenticated() {
-        return getCurrentActorKeycloakSub() != null;
+        return getCurrentActorId() != null;
     }
 
     public String getRemoteIp() {

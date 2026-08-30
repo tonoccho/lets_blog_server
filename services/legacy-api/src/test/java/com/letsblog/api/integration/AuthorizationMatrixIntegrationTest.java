@@ -10,7 +10,10 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpMethod;
@@ -81,6 +84,13 @@ class AuthorizationMatrixIntegrationTest {
 
     @Autowired
     private ProjectUserRepository projectUserRepository;
+
+    /** {@code users.enabled}はidentity-serviceが書き手のため、テストからはJDBCで直接更新する(#816)。 */
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     // =====================================================================================
     // (a) 全エンドポイント(health・公開パスを除く)の401網羅
@@ -212,6 +222,53 @@ class AuthorizationMatrixIntegrationTest {
         user.setRole(role);
         user.setKeycloakSub("keycloak-sub-" + System.nanoTime());
         return userRepository.save(user);
+    }
+
+    // ---------------------------------------------- 無効化ユーザーの発行済みトークン(issue #816)
+
+    /**
+     * 無効化しても発行済みのアクセストークンは失効しない(Keycloakが止めるのは新規発行だけ)。
+     * #816以前は{@code CurrentActorService}が{@code enabled}を参照していなかったため、
+     * 無効化直後のユーザーは{@code accessTokenLifespan}(既定300秒)の間APIを通せた。
+     *
+     * <p>legacy-apiだけ個別の修正が必要だった理由: 他の8サービスは
+     * {@code GET /api/identity/me}経由で操作者を解決するためidentity-service側の修正で塞がるが、
+     * legacy-apiは共有スキーマの{@code users}テーブルを自前で参照している(#786参照)。
+     */
+    @Test
+    @DisplayName("無効化されたadminは操作者として解決されない(issue #816)")
+    void 無効化adminは403() throws Exception {
+        User admin = persistUser("admin");
+
+        // enabledはidentity-serviceが書き手の列で、legacy-api側のマッピングは
+        // insertable=false, updatable=false で不変にしてある(User.enabledのJavadoc参照)。
+        // そのためエンティティ経由では無効化できない。identity-serviceがUPDATEした状態を
+        // 再現するためJDBCで直接落とす。この書き方自体が「legacy-apiは読むだけ」という
+        // 契約の実証になっている。
+        jdbcTemplate.update("UPDATE users SET enabled = FALSE WHERE id = ?", admin.getId());
+        // 本クラスは@Transactionalなので、JDBCの更新はJPAの永続化コンテキストに反映されない。
+        // クリアしないと後続のfindByKeycloakSubがキャッシュ済みのenabled=trueを返す。
+        entityManager.flush();
+        entityManager.clear();
+
+        mockMvc.perform(request(HttpMethod.GET, "/api/project-users")
+                        .with(JwtTestFixtures.jwtRequestPostProcessor(admin.getKeycloakSub())))
+                .andExpect(status().isForbidden());
+    }
+
+    /** 有効なユーザーは従来どおり(無効化の判定が常時弾いていないことの確認)。 */
+    @Test
+    @DisplayName("有効なadminは従来どおり通る(issue #816)")
+    void 有効adminは403にならない() throws Exception {
+        User admin = persistUser("admin");
+
+        assertThat(admin.isEnabled())
+                .as("persistUserが作るユーザーはenabled=true(DB既定値と揃えたフィールド初期値)")
+                .isTrue();
+
+        mockMvc.perform(request(HttpMethod.GET, "/api/project-users")
+                        .with(JwtTestFixtures.jwtRequestPostProcessor(admin.getKeycloakSub())))
+                .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(403));
     }
 
     @Test

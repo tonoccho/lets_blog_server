@@ -86,6 +86,43 @@ public class CurrentActorService {
             // 明示的に空扱いにする。
             return Optional.empty();
         }
-        return userRepository.findByKeycloakSub(subject);
+        return userRepository.findByKeycloakSub(subject).filter(CurrentActorService::isUsable);
+    }
+
+    /**
+     * 無効化されたユーザーを操作者として解決しない(issue #816)。
+     *
+     * <p>{@code deactivate}はKeycloak側とローカルの{@code users.enabled}を落とすが、
+     * <b>すでに発行済みのアクセストークンは失効しない</b>。Keycloakが止めるのは新規のトークン発行
+     * だけで、既存トークンの署名も有効期限も変わらないためである。#816以前はこの解決処理が
+     * {@code enabled}を参照していなかったので、無効化直後のユーザーは
+     * {@code accessTokenLifespan}(既定300秒)の間、admin操作を含めて通常どおりAPIを通せた。
+     *
+     * <p>結果として、無効化されたadminが自分自身を{@code reactivate}して復帰でき、
+     * 退職者や侵害されたアカウントを即時に締め出せなかった。
+     *
+     * <p><b>ここを直せば他サービスにも効く</b>: legacy-apiを除く8サービスの
+     * {@code CurrentActorService}は、いずれも{@code GET /api/identity/me}への同期呼び出し
+     * ({@code IdentityClient})で操作者を解決する。そのエンドポイントは
+     * {@code requireActorId()}を通るため、無効化ユーザーでは403になる。
+     * legacy-apiだけは共有スキーマの{@code users}を自前参照するため個別に修正した(#786参照)。
+     *
+     * <p><b>ただし他サービスでの見え方は403ではなく502になる</b>。403は呼び出し側で
+     * {@code SyncServiceClientErrorException}に変換され、各サービスの{@code lookupProfile}が
+     * {@code IdentityServiceUnavailableException}へ再変換し、{@code GlobalExceptionHandler}が
+     * 502にマップするため。拒否はされる(fail-closed)が、無効化ユーザー起因の502と
+     * サービス障害起因の502が区別できない。改善は#829で追跡している。
+     *
+     * <p>無効化を「解決しない」で表現しているのは、JWTの検証(署名・有効期限・issuer)自体は
+     * 通っている以上401ではなく、「認証は済んでいるが操作者として扱わない」が実態に合うため。
+     * {@code AdminAuthorizationService}や{@code PermissionAuthorizationService}は
+     * 操作者を解決できないと既にForbiddenを投げる設計なので、そこに合流する。
+     *
+     * <p><b>効く範囲は actor を解決するエンドポイントに限る。</b>認可チェックを持たない
+     * エンドポイント({@code docs/AUTHORIZATION_MATRIX.md}の「有効なJWTさえあれば到達できる
+     * エンドポイント」の節)には効かない。
+     */
+    private static boolean isUsable(User user) {
+        return user.isEnabled();
     }
 }

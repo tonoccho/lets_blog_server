@@ -33,6 +33,26 @@ public class User {
     @Column(name = "keycloak_sub", unique = true, length = 255)
     private String keycloakSub;
 
+    /**
+     * 無効化フラグ(V65で追加。identity-serviceの{@code deactivate}/{@code reactivate}が更新する)。
+     *
+     * <p>legacy-apiはこの値を<b>読み取り専用で使う</b>(issue #816)。無効化されたユーザーを
+     * 操作者として解決しないための判定にのみ用いる。
+     *
+     * <p>{@code insertable = false, updatable = false}でマッピング側から強制している。
+     * {@code users}はidentity-serviceが書き手、legacy-apiが読み手の共有テーブルであり、
+     * 本エンティティには{@code @DynamicUpdate}が無いためUPDATE時に全列を書き戻す。
+     * 将来legacy-apiにUserの更新経路が増えると、読み込み時点の古い{@code enabled=true}を
+     * 書き戻してidentity-serviceの{@code deactivate}を静かに取り消す lost update が起こりうる。
+     * セキュリティに関わる列なので、コメントではなくマッピングで不変にしておく。
+     *
+     * <p>INSERT対象からも外しているが、DDL側が{@code NOT NULL DEFAULT TRUE}
+     * ({@code V65__add_user_enabled.sql})なので、legacy-apiがユーザーを新規作成する経路でも
+     * 従来どおり有効なユーザーが作られる。
+     */
+    @Column(name = "enabled", nullable = false, insertable = false, updatable = false)
+    private boolean enabled = true;
+
     @Column(name = "password_hash", nullable = false)
     private String passwordHash;
 

@@ -68,7 +68,7 @@ identity-service / log-writer が従来から行っていた、各コントロ�
 | `PATCH /api/users/{id}` | `requireAdmin()` + `requireNotSelfDemotion(id, role)` | **#796 で追加、#798 で自己降格ガードを追加**。扱うのは `role` / `password` で管理者が管理する項目。本人に許すと自分の `role` を admin へ書き換えられる。逆に admin が自分を `role="user"` へ降格すると admin 限定エンドポイントが全て閉じて復旧できなくなるため、**自分自身を admin 以外へ変更すること**も禁止した(パスワードのみの更新と admin→admin は通る) |
 | `DELETE /api/users/{id}` | `requireAdminAndNotSelf(id, ...)` | **#796 で追加**。無効化が admin 限定なのに削除に認可が無い非対称を解消。あわせて自己削除も禁止(最後の admin が自分を消して誰も管理できなくなるのを防ぐ) |
 | `POST /api/users/{id}/deactivate` | `requireAdminAndNotSelf(id, ...)` | **#798 で自己ガードを追加**。#796 は自己「削除」だけを禁止し「無効化」を放置していた。admin が自分を無効化するとログインできなくなり、他に admin がいなければ `reactivate` も `requireAdmin()` を要求するため誰も復旧できない |
-| `POST /api/users/{id}/reactivate` | `requireAdmin()` | 従来どおり。自己ガードは付けていない。無効化しても**発行済みアクセストークンは失効しない**ため厳密には自己 reactivate は可能だが、それは無効化全般の既知ギャップ(下記)であって `reactivate` 固有の問題ではなく、自己ガードを足しても解決しない |
+| `POST /api/users/{id}/reactivate` | `requireAdmin()` | 自己ガードは付けていない。#798 の時点では「無効化しても発行済みトークンが失効しないため厳密には自己 reactivate が可能」だったが、それは無効化全般のギャップ(下記)であり `reactivate` 固有ではないとして #816 に委ねた。**#816 で無効化ユーザーが操作者として解決されなくなったため、自己 reactivate は実際に不可能になった**(`requireAdmin()` の手前で 403)|
 | `POST・DELETE /api/users/{userId}/roles/{roleName}` | 特権ロールは `requireAdmin()`、それ以外は `requirePermission(ROLE_MANAGE)` | **#798 で変更**。下記参照 |
 | `POST /api/users/migrate-to-keycloak`・`/reconcile-keycloak` | `requireAdmin()` | 従来どおり |
 | `GET /api/users/{id}`・`PUT /api/users/{id}`・`PATCH /{id}/preferences`・`PUT /{id}/github-token` | `requireSelfOrAdmin(id)` | 本人が変更してよいプロフィール項目。個人設定は `PATCH /api/identity/me/preferences`(#784)も使える |
@@ -106,16 +106,53 @@ identity-service / log-writer が従来から行っていた、各コントロ�
 数える設計にすると「他の admin が同時に自分を消す」レースで両者とも通る検査時-使用時の穴が生まれる。
 防いでいるのは「自分で自分を締め出す」ことだけに限定している。
 
-##### 既知のギャップ: 無効化されたユーザーの発行済みトークン
+##### 無効化されたユーザーの発行済みトークン(#816 で一部解消)
 
 `deactivate` は Keycloak 側とローカルの `users.enabled` を落とすが、**すでに発行済みの
 アクセストークンは失効しない**(`keycloak/realm-export.json` の `accessTokenLifespan: 300`)。
-identity-service の認可経路(`CurrentActorService#resolveJwtActor` → `AdminAuthorizationService`)は
-`User.enabled` を参照しないため、無効化直後のユーザーは最大5分間、admin 操作を含めて
-通常どおり API を通せる。`reconcile-keycloak` で無効化された孤児ユーザーも同様。
+Keycloak が止めるのは新規のトークン発行だけで、既存トークンの署名も有効期限も変わらない。
 
-これは `reactivate` 固有の問題ではなく無効化全般のギャップで、恒久的な対処は
-「actor 解決時に `enabled` を検査する」になる。#798 のスコープ外で、**#816** で追跡している。
+#816 以前は identity-service の `CurrentActorService#resolveJwtActor` が `User.enabled` を
+参照しなかったため、無効化直後のユーザーは最大5分間、admin 操作を含めて通常どおり API を
+通せた。無効化された admin が自分自身を `reactivate` して復帰することもでき、
+退職者や侵害されたアカウントを即時に締め出せなかった。
+
+**#816 で `resolveJwtActor` が無効化ユーザーを操作者として解決しないようにした。**
+JWT の検証(署名・有効期限・issuer)自体は通っている以上 401 ではなく、
+「認証は済んでいるが操作者として扱わない」という扱いになる。
+
+| サービス | 操作者の解決経路 | 対応 | 無効化ユーザーが受け取るステータス |
+|---|---|---|---|
+| identity | 自身の `users` テーブル | `resolveJwtActor` で `enabled` を検査 | **403** |
+| legacy-api | 共有スキーマの `users` テーブルを自前参照(#786) | 同上。`User` に `enabled` の読み取り専用マッピングを追加 | **403** |
+| platform | `GET /api/identity/me`(ただし `requireAuthenticated()` は JWT の `sub` だけを見ていた) | `isAuthenticated()` を操作者の解決可否による判定へ変更 | **502**(下記) |
+| 他7サービス(ai / analytics / content / log-writer / media / project / publishing) | `GET /api/identity/me` への同期呼び出し(`IdentityClient`) | コード変更**不要** | **502**(下記) |
+
+###### 他サービスが 502 になる理由(意図した結果ではないが fail-closed)
+
+identity が返す 403 は、呼び出し側で `SyncServiceClientErrorException`
+(`SyncServiceException` のサブクラス)に変換され、各サービスの `CurrentActorService#lookupProfile`
+が `IdentityServiceUnavailableException` へ再変換する。`GlobalExceptionHandler` はこれを
+**502 Bad Gateway** にマップする。
+
+これは各サービスが「identity-service 障害を静かに『操作者なし』へ縮退させると、
+権限チェックが素通りする方向の不具合を生みかねない」という設計判断を明示的に置いているため
+(`lookupProfile` の Javadoc 参照)。**拒否はされる(fail-closed)** が、
+無効化ユーザー起因の 502 とサービス障害起因の 502 が区別できず、
+無効化ユーザーが画面を開くたびに各サービスが WARN/ERROR を出す。
+監視・アラートを誤爆させるため、401/403 を「操作者なし」へ分岐させる改善余地がある(**#829**)。
+
+###### この対処が効く範囲(重要)
+
+**actor を解決するエンドポイントに限る。** 本ドキュメント末尾の
+「有効な JWT さえあれば到達できるエンドポイント」の節に挙げたものは
+`CurrentActorService` を呼ばないため、**無効化ユーザーも `accessTokenLifespan` の間は
+引き続き到達できる**(`PostController` の WordPress 投稿公開・削除、`SiteController`、
+`DiagramController` の CRUD、`GenerationJobController` の作成・更新など)。
+
+これらを塞ぐには認可チェックそのものを足す必要があり、#816 のスコープ外。
+
+`reconcile-keycloak` で無効化された孤児ユーザーにも同じ判定が効く。
 
 ##### 注意: admin には別軸が2つある
 
