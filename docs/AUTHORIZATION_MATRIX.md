@@ -330,11 +330,15 @@ BFF を `/api/` の下に置いていないのは、nginx の `location /api/`
 スパム・容量枯渇の的になるため(ADR-0008)。ブラウザ側では error boundary が
 `logErrorToConsole()` も呼ぶため、コンソールには常に残る。
 
-この判定を BFF 自身が行えるよう、`/client-errors` は `web/src/proxy.ts` の matcher から
-除外している。除外しないと proxy が先に `/login` へ307リダイレクトを返してしまい、
+この判定を BFF 自身が行えるよう、`web/src/proxy.ts` は `/client-errors` を
+**完全一致**で素通しする。素通ししないと proxy が先に `/login` へ307リダイレクトを返してしまい、
 レスポンスを見ない fire-and-forget のビーコンに対して無意味なリダイレクトと
-`needsInitialSetup()` の gateway 呼び出しが1件ずつ発生する。NextAuth の Route Handler
-(`api/auth`)を同じ理由で除外しているのと同じ扱い。
+`needsInitialSetup()` の gateway 呼び出しが1件ずつ発生する。
+
+matcher の否定先読み(`(?!api/auth|...)`)ではなく `proxy()` 内で弾いているのは、
+先読みが前方一致になるため。`client-errors` を先読みに加えると
+`/client-errors-foo` や `/client-errors/nested` のような「`client-errors` で始まる別のルート」
+まで認証ゲートを外れてしまい、そこにページを足した時点で無言でゲートが消える。
 
 ## GenerationJobController (3エンドポイント、ベースパス `/api/generation-jobs`)
 

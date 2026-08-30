@@ -45,6 +45,22 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
+  // /client-errors はブラウザのerror boundaryが投げる fire-and-forget のビーコンを受ける
+  // Route Handler(issue #791)。ここでリダイレクトを返しても、送信側はレスポンスを見ないので
+  // 意味が無いばかりか、未認証エラー1件ごとに needsInitialSetup() のgateway呼び出しが1件増える。
+  // 認証の判定はハンドラ自身がgetSession()で行い、未認証なら記録せず204を返す
+  // (web/src/app/client-errors/route.ts、docs/AUTHORIZATION_MATRIX.md参照)。
+  //
+  // matcherの否定先読みではなくここで弾いているのは、先読みが前方一致になるため。
+  // `(?!...|client-errors|...)` と書くと /client-errors-foo や /client-errors/nested のような
+  // 「client-errorsで始まる別のルート」まで除外され、そこにページを足した時点で
+  // 認証ゲートが無言で外れる(ADR-0008が本方式の最大のリスクとして挙げている型の事故)。
+  // 完全一致で判定すればその穴は構造的に生じない。PUBLIC_PATHSがstartsWithなので、
+  // そちらに足すのではなく専用の早期returnにしている。
+  if (pathname === "/client-errors") {
+    return NextResponse.next({ request: { headers: requestHeaders } });
+  }
+
   const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET });
 
   // token.errorは"RefreshAccessTokenError"(アクセストークンのリフレッシュ失敗。auth.tsのjwt
@@ -64,15 +80,6 @@ export async function proxy(request: NextRequest) {
   return NextResponse.next({ request: { headers: requestHeaders } });
 }
 
-/**
- * client-errorsを除外している理由(issue #791):
- *   /client-errors はブラウザのerror boundaryが投げる fire-and-forget のビーコンを受ける
- *   Route Handler。ここをmatcherに含めると、未認証時にこのproxyが/loginへ307リダイレクトを
- *   返してしまい、レスポンスを見ないビーコンに対して無意味なリダイレクトと
- *   needsInitialSetup()のgateway呼び出しが1件ずつ発生する。認証の判定はハンドラ自身が
- *   getSession()で行い、未認証なら記録せず204を返す(docs/AUTHORIZATION_MATRIX.md参照)。
- *   api/authを除外しているのと同じ理由(Route Handlerをリダイレクトしても意味がない)。
- */
 export const config = {
-  matcher: ["/((?!api/auth|client-errors|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!api/auth|_next/static|_next/image|favicon.ico).*)"],
 };

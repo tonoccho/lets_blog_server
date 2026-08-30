@@ -83,6 +83,7 @@ describe('POST /client-errors', () => {
     const res = await POST(postRequest({ ...validPayload, level }));
 
     expect(res.status).toBe(400);
+    expect(mockGetSession).not.toHaveBeenCalled();
     expect(mockLogFrontendError).not.toHaveBeenCalled();
   });
 

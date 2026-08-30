@@ -41,8 +41,8 @@ export async function POST(request: Request) {
   // できてスパム・容量枯渇の的になるため(ADR-0008)。ブラウザ側は
   // errorLogger.logErrorToConsole() が常に走るのでコンソールには残る。
   //
-  // このパスは proxy.ts の matcher から除外してあるため、ここが実際の認証判定点になる
-  // (除外していないと proxy.ts が先に /login へリダイレクトしてこの分岐に到達しない)。
+  // proxy.ts はこのパスを完全一致で素通しするため、ここが実際の認証判定点になる
+  // (素通ししないと proxy.ts が先に /login へリダイレクトしてこの分岐に到達しない)。
   // session.error は "RefreshAccessTokenError"(アクセストークンのリフレッシュ失敗)。
   // 生きたアクセストークンが無く log-writer で401になるだけなので、未認証と同じ扱いにする。
   const session = await getSession();
