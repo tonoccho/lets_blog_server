@@ -6,6 +6,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -124,15 +125,35 @@ class AuthorizationMatrixIntegrationTest {
     }
 
     /**
-     * サービス間内部ブリッジ({@code /api/internal/platform/**})は、gatewayのルート表に載っておらず
-     * 外部から到達できない一方、唯一の呼び出し元であるlegacy-apiの{@code PlatformServiceClient}が
-     * Bearerトークンを転送しないため、SecurityConfigのPUBLIC_PATHSに残している。認証必須化に巻き込んで
-     * サービス間呼び出しを壊していないことを確認する(SecurityConfigのJavadoc参照)。
+     * サービス間内部ブリッジ({@code /api/internal/platform/**})の認証(issue #742)。
+     *
+     * <p>#705の時点ではPUBLIC_PATHSに残していた。唯一の呼び出し元であるlegacy-apiの
+     * {@code PlatformServiceClient}がAuthorizationヘッダーを付与しない実装で、authenticatedに
+     * すると実行時に壊れたためである。#742でその呼び出し元をClient Credentials Grantで
+     * トークンを付与するよう修正したので、ここもproject-service/publishing-serviceの内部ブリッジと
+     * 同じJWT必須へ揃えた。
+     *
+     * <p>これらのエンドポイントはBrave Search APIキー・LLM APIキー・ChatGPTキーという
+     * 実際のシークレットを返す。gatewayのルート表に載っておらず外部からは到達できないが、
+     * 内部ネットワークからは無防備だった。
      */
+    @ParameterizedTest(name = "{0} は未認証で401")
+    @ValueSource(strings = {
+            "/api/internal/platform/system-settings/brave-search-api-key",
+            "/api/internal/platform/llm-config",
+            "/api/internal/platform/image-generation-config"
+    })
+    @DisplayName("内部ブリッジ /api/internal/platform/** は未認証なら401(issue #742)")
+    void 内部ブリッジは未認証で401(String path) throws Exception {
+        mockMvc.perform(request(HttpMethod.GET, path))
+                .andExpect(status().isUnauthorized());
+    }
+
     @Test
-    @DisplayName("内部ブリッジ /api/internal/platform/** は認証ゲートの対象外(401にならない)")
-    void 内部ブリッジは401にならない() throws Exception {
-        mockMvc.perform(request(HttpMethod.GET, "/api/internal/platform/system-settings/brave-search-api-key"))
+    @DisplayName("内部ブリッジは有効なJWTがあれば認証ゲートを通過する")
+    void 内部ブリッジは有効なjwtなら通過する() throws Exception {
+        mockMvc.perform(request(HttpMethod.GET, "/api/internal/platform/system-settings/brave-search-api-key")
+                        .with(JwtTestFixtures.jwtRequestPostProcessor("sub-742", "user")))
                 .andExpect(status().isOk());
     }
 

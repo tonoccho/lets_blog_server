@@ -28,14 +28,20 @@ import org.springframework.security.web.SecurityFilterChain;
  * {@code /api/internal/**}に対して既に採っている方式)を選択した。
  *
  * <p>{@link #PUBLIC_PATHS}として残すのは、(1) ヘルスチェック(Actuator。docker-composeの
- * healthcheckとgatewayの{@code DownstreamHealthConfig}が無認証で叩く)、(2) APIドキュメント、
- * (3) サービス間内部ブリッジ{@code /api/internal/platform/**}
- * ({@link com.letsblog.platform.controller.InternalPlatformSettingsController})のみ。
- * 内部ブリッジはgatewayのルート表に載っておらず外部から到達できない一方、唯一の呼び出し元である
- * legacy-apiの{@code PlatformServiceClient}がBearerトークンを転送しない実装のため、ここを
- * authenticatedにすると実行時に壊れる。移設前も同じ値はlegacy-apiのプロセス内で解決されており
- * 外部到達性は無かったため、本Issue(未認証で外部から到達できてしまう後退の解消)の範囲では
- * permitAllのまま据え置く。
+ * healthcheckとgatewayの{@code DownstreamHealthConfig}が無認証で叩く)、(2) APIドキュメントのみ。
+ *
+ * <p>サービス間内部ブリッジ{@code /api/internal/platform/**}
+ * ({@link com.letsblog.platform.controller.InternalPlatformSettingsController})は
+ * #705の時点ではpermitAllのまま据え置いていた。唯一の呼び出し元であるlegacy-apiの
+ * {@code PlatformServiceClient}がAuthorizationヘッダーを一切付与しない実装で、
+ * authenticatedにすると実行時に壊れたためである。
+ *
+ * <p>issue #742でその呼び出し元をClient Credentials Grant
+ * ({@code ServiceAuthHeaders#clientCredentials})でトークンを付与するよう修正したので、
+ * ここもauthenticatedへ移した。これでproject-service/publishing-serviceの内部ブリッジと
+ * 同じ「JWT必須」方式に揃う。これらのエンドポイントはBrave Search APIキー・LLM APIキー・
+ * ChatGPTキーという実際のシークレットを返すため、gatewayのルート表に載っておらず外部から
+ * 到達できないとはいえ、内部ネットワークから無防備なまま残す理由が無い。
  *
  * <p>ロールベースの認可(admin限定操作など)は引き続きコントローラ/サービス層から呼ばれる
  * AdminAuthorizationService/CurrentActorService(identity-service経由)が担う。「認証済みなら
@@ -50,8 +56,7 @@ public class SecurityConfig {
             "/actuator/**",
             "/v3/api-docs/**",
             "/swagger-ui/**",
-            "/swagger-ui.html",
-            "/api/internal/platform/**"
+            "/swagger-ui.html"
     };
 
     @Bean
