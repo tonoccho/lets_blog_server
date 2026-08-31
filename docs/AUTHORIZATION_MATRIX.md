@@ -294,6 +294,58 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 対応する統合テストは
 `services/legacy-api/src/test/java/com/letsblog/api/integration/AuthorizationMatrixIntegrationTest.java`。
 
+## admin判定の2つの軸(identity-service、issue #815)
+
+identity-service には admin かどうかを決める仕組みが**2つ**ある。名前がどちらも「admin」なので
+同一のものと誤解されやすいが、**別軸**である。
+
+| 軸 | 実体 | 判定に使うもの | 主な利用 |
+|---|---|---|---|
+| **粗い軸** | `users.role` カラムが `"admin"` | `CurrentActorService#isAdmin()` | `AdminAuthorizationService#requireAdmin()` / `requireSelfOrAdmin()` / `requireAdminAndNotSelf()`。`/api/users` の大半、`/api/audit-logs`、`GET /api/logs/errors` など |
+| **細かい軸** | RBAC(`roles` / `role_permissions` / `user_roles`) | `User#hasPermission(Permission)` | `PermissionAuthorizationService#requirePermission()` |
+
+### 決定: `users.role = "admin"` は全 Permission を含意する
+
+**#815 以前は両軸が完全に独立**しており、`users.role = "admin"` でも RBAC の `ROLE_ADMIN` を
+持たなければ `requirePermission(...)` を通れなかった。
+
+その状態で #798 が「ロールを配れる権限を与えるロール(特権ロール)」の付与・剥奪だけを
+`requireAdmin()` に変更した結果、**直感に反する非対称**が生まれた。
+
+> `users.role = "admin"` だが `ROLE_ADMIN` を持たないユーザーは、
+> **特権ロールは付与できるのに、特権でないロールは付与できない**
+
+#815 で `PermissionAuthorizationService#requirePermission()` の先頭に
+「操作者が `users.role = "admin"` なら通す」を入れ、次のとおり関係を一意にした。
+
+- **admin は全部できる**(RBACロールの保有状況を問わない)
+- **RBAC は admin 以外へ個別に権限を配るための仕組み**
+
+これにより上記の非対称は解消する。
+
+### 2軸を維持した理由(採用しなかった案)
+
+- **RBAC に寄せる**(`users.role` を廃止): 既存の `role='admin'` ユーザーへ `ROLE_ADMIN` を
+  割り当てる移行と、`requireAdmin()` を使う多数のエンドポイントの書き換えが必要になる。
+  `UserCreateRequest.role` / `UserUpdateRequest.role` の API 互換にも影響する
+- **`users.role` に寄せる**(RBAC を撤去): `Permission` は19種あるが、実際に
+  `requirePermission` で強制されているのは **`ROLE_MANAGE` の1種類のみ**
+  (`USER_ROLE_MANAGE` は `RoleService#isPrivilegedRole` の特権判定に現れるだけ)。
+  撤去は筋が通るが、`GET /api/roles` の廃止とテーブル削除を伴い影響が大きい。
+  #786 で `lbs_identity` にこれらのテーブルを作ったばかりでもある
+
+いずれも本Issueより広い変更になるため、**2軸を維持したうえで関係を定める**方針を採った。
+
+### 未使用の Permission の扱い
+
+19種のうち実際に強制されているのは `ROLE_MANAGE` のみで、残り
+(`USER_CREATE` / `POST_PUBLISH` / `SITE_DELETE` / `AUDIT_LOG_VIEW` / `SYSTEM_CONFIG` 等)は
+**どこからも参照されていない**。
+
+`Permission` enum とシードは**残す**。細粒度認可を広げる際の受け皿として意図された設計であり、
+消すと再導入時にマイグレーションが要る。ただし**現時点で強制されていない**ことを
+ここに明記しておく。「`SITE_DELETE` を持たないロール」を作ってもサイト削除は防げない。
+
 ## 現行の認可モデル(2層構造)
 
 legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行していない
