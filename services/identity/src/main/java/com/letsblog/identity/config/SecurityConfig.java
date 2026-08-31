@@ -36,9 +36,8 @@ import org.springframework.security.web.SecurityFilterChain;
  *
  * <p>realm roleのSpring Security authorityへのマッピング(ROLE_&lt;大文字&gt;)はここで用意しておくが、
  * CurrentActorServiceでの実際の権限判定は(#562時点でKeycloak側へのロール同期が未実装のため)
- * JWTのクレームではなくローカルDBのRole/Permissionを正とする。「認証済みなら誰でも到達できる」
- * エンドポイントが残っていること自体は{@code docs/AUTHORIZATION_MATRIX.md}の「既知のギャップ」であり、
- * 本Issueのスコープ外。
+ * JWTのクレームではなくローカルDBのRole/Permissionを正とする。エンドポイント単位の認可の
+ * 網羅状況は{@code docs/AUTHORIZATION_MATRIX.md}を参照(#830で全件の要否を決定済み)。
  */
 @Configuration
 @EnableWebSecurity
@@ -48,7 +47,12 @@ public class SecurityConfig {
             "/actuator/**",
             "/v3/api-docs/**",
             "/swagger-ui/**",
-            "/swagger-ui.html"
+            "/swagger-ui.html",
+            // 初回セットアップ導線(issue #583でlegacy-apiから移設)。まだ誰もログインできない
+            // 状態で叩くため、認証を必須にするとセットアップ自体が不可能になる。
+            // legacy-api側でも同じ2本だけがPUBLIC_PATHSに含まれていた(ADR-0008 / issue #713)。
+            "/api/auth/setup-status",
+            "/api/auth/setup"
     };
 
     @Bean

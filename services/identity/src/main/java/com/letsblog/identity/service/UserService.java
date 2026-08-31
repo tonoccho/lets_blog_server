@@ -121,6 +121,63 @@ public class UserService {
         }
     }
 
+    /**
+     * 利用者が1人でも登録されているか。初回セットアップ導線({@code GET /api/auth/setup-status})が使う。
+     * issue #583でlegacy-apiから移設した。
+     */
+    @Transactional(readOnly = true)
+    public boolean hasAnyUser() {
+        return userRepository.count() > 0;
+    }
+
+    /**
+     * {@code users}が空の場合のみ許可される初回セットアップ。roleは常に"admin"固定。
+     * issue #583でlegacy-apiから移設した。
+     *
+     * <p>#681: Keycloak上に実際にログイン可能な管理者アカウントを作成する。Keycloak側の
+     * ユーザー作成・パスワード即時設定({@code temporary=false})を先に行い、成功した場合のみ
+     * ローカルにも作成する(Keycloak側の作成に失敗した場合はローカルには一切作成しない
+     * = 暗黙に成功しない)。Keycloak側に既に同一email/usernameのユーザーが存在する場合は
+     * {@code createUser}が409で失敗し、このメソッドも例外で失敗する(= 拒否)。
+     * ローカル保存に失敗した場合は、孤児となったKeycloakユーザーをベストエフォートで削除する。
+     */
+    @Transactional
+    public UserResponse setupInitialAdmin(String email, String password) {
+        if (hasAnyUser()) {
+            throw new IllegalArgumentException("初回セットアップは既に完了しています");
+        }
+        if (userRepository.existsByEmail(email)) {
+            throw new EmailAlreadyExistsException("メールアドレス '" + email + "' は既に登録されています");
+        }
+
+        String keycloakSub = keycloakAdminClient.createUser(email, null, null, false);
+        try {
+            keycloakAdminClient.setPassword(keycloakSub, password);
+        } catch (RuntimeException e) {
+            compensateKeycloakUser(keycloakSub);
+            throw e;
+        }
+
+        try {
+            User user = new User();
+            user.setEmail(email);
+            user.setPasswordHash(passwordEncoder.encode(password));
+            user.setRole("admin");
+            user.setKeycloakSub(keycloakSub);
+            user.setEnabled(true);
+
+            String defaultRoleName = LEGACY_ROLE_TO_ROLE_NAME.get("admin");
+            if (defaultRoleName != null) {
+                roleRepository.findByRoleName(defaultRoleName).ifPresent(role -> user.getRoles().add(role));
+            }
+
+            return UserResponse.from(userRepository.save(user));
+        } catch (RuntimeException e) {
+            compensateKeycloakUser(keycloakSub);
+            throw e;
+        }
+    }
+
     @Transactional
     public UserResponse update(Long id, UserUpdateRequest request) {
         User user = userRepository.findById(id)

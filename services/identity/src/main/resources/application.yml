@@ -33,12 +33,10 @@ springdoc:
 spring:
   application:
     name: identity
-  # ユーザー/ロール管理を扱う(#561)。現時点ではlegacy-apiと同一の物理スキーマ(lets_blog)上の
-  # users/roles/role_permissions/user_rolesテーブルを直接参照する(ADR-0004が求める
-  # スキーマ分離自体は本Issueのスコープ外。両サービスが同一テーブルを直接参照する状態は
-  # 移行期間中の暫定措置であり、将来のスキーマ分離Issueで解消する)。
-  # そのためFlywayは持たず(移行管理は引き続きlegacy-api側が担う)、ddl-auto: validateで
-  # 既存スキーマとの整合のみ確認する。
+  # ユーザー/ロール管理を扱う(#561)。#786で専用スキーマlbs_identityへ分離済み(ADR-0004)。
+  # #583でproject_users/user_site_authorsの所有権も移ってきたため、lbs_identityが持つのは
+  # users / roles / role_permissions / user_roles / project_users / user_site_authors の6テーブル。
+  # スキーマの管理は下のFlyway(db/migration/V1__create_identity_tables.sql)が行う。
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lbs_identity?useSSL=false&serverTimezone=UTC}
     username: ${SPRING_DATASOURCE_USERNAME:lbs_identity}
@@ -63,6 +61,11 @@ spring:
 # 参照するため、legacy-apiと同一のAPP_ENCRYPTION_KEYを共有する必要がある。
 app:
   encryption-key: ${APP_ENCRYPTION_KEY:}
+  # issue #583: project_users/user_site_authors の所有権がidentity-serviceへ移ったのに伴い、
+  # ProjectUserSyncService がプロジェクト/サイトの照会(project-service)と、
+  # WordPress側ユーザーの作成・更新(publishing-service)を内部ブリッジ経由で行う。
+  project-service-uri: ${PROJECT_SERVICE_URI:http://project:8080}
+  publishing-service-uri: ${PUBLISHING_SERVICE_URI:http://publishing:8080}
 
 # Keycloakユーザー同期(#562)。letsblog-services(#560で定義済みのサービス間通信用confidentialクライアント)
 # のクライアントクレデンシャルズグラントでKeycloak Admin REST APIを呼び出す。事前にrealm側で
