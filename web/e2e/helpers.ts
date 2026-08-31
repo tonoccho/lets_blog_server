@@ -141,6 +141,14 @@ export function waitForServicesHealthy(services?: string[], timeoutSeconds = 600
  * (services/gateway の RateLimitProperties)であり、ワーカー数を増やすと簡単に上限へ達する。
  * APIを直接呼べばフィクスチャ1件あたり1往復に抑えられる。
  *
+ * <p><b>accessToken は管理者のものであること(issue #949)。</b>
+ * {@code POST /api/projects} は #830 の認可強化で {@code requireAdmin()} を通るようになった。
+ * 非管理者のトークンを渡すと403で落ちる。{@code beforeAll} から呼ぶと、その describe の
+ * テストが**全て実行されない**ため、原因の分かりにくい形で検証が丸ごと消える
+ * (custom-tag-generation.spec.ts で実際にそうなっていた)。
+ * {@link deleteFixtureProject} も同様に管理者を要する。
+ *
+ * @param accessToken **管理者**のアクセストークン({@link E2E_ADMIN_EMAIL} で取得したもの)
  * @param prefix プロジェクト名/slug の接頭辞(spec ごとに変えて衝突と識別性を確保する)
  */
 export async function createFixtureProject(
@@ -162,7 +170,12 @@ export async function createFixtureProject(
   return { id: ((await response.json()) as { id: number }).id, name };
 }
 
-/** {@link createFixtureProject} で作ったプロジェクトを削除する(issue #844)。 */
+/**
+ * {@link createFixtureProject} で作ったプロジェクトを削除する(issue #844)。
+ *
+ * <p>{@code DELETE /api/projects/{id}} も {@code requireAdmin()} を通るため、
+ * accessToken は**管理者**のものであること(issue #949)。
+ */
 export async function deleteFixtureProject(
   request: APIRequestContext,
   accessToken: string,
