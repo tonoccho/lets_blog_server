@@ -49,6 +49,10 @@ dependencies {
     // 利用側(testFixtures(project(...)))へ推移的に公開するためtestFixturesApiとして宣言する。
     testFixturesApi 'org.springframework.security:spring-security-oauth2-jose'
     testFixturesApi 'org.springframework.security:spring-security-test'
+
+    // MigrationContract(#914)が Flyway の MigrateResult / MigrationInfo を扱う。
+    // 利用側(各サービスの MigrationContractTest)も Flyway Bean を注入するため api で公開する。
+    testFixturesApi 'org.flywaydb:flyway-core'
 }
 
 tasks.named('test') {
