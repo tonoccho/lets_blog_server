@@ -38,12 +38,20 @@ Assess each Issue for:
 
 ### Blocked
 
-Is this Issue blocked? An Issue is blocked when it has an open `blocked_by` dependency, or its body documents a dependency on work that has not been done yet.
+Is this Issue blocked? Judge this **per `CLAUDE.md` → Dependency Resolution** — that is the
+single definition, shared with `ready-issue`, `work-next`, and `implement-issue`. Do not apply a
+different one here.
+
+At this gate that means: an **open `blocked_by` link** blocks. A dependency named only in the
+body's prose does **not** block on its board status alone — Backlog does not assert the work is
+startable, only that it is worth doing, so a prose dependency that is still open is not a reason
+to hold an Issue in Inbox. Whether the substance actually exists is `ready-issue`'s gate, not
+this one (#751).
 
 Read GitHub's issue dependencies with:
 
 ```bash
-gh api repos/:owner/:repo/issues/<number>/dependencies/blocked_by
+scripts/issue-dependency-status.sh <number>
 ```
 
 This is the only gate for staying in Inbox. "Not fully specified", "needs more detail", and "unclear acceptance criteria" are **not** blockers here — those are `ready-issue`'s gate, not this one.
@@ -75,7 +83,7 @@ The default. Every Issue that is not blocked and is not a duplicate moves to Bac
 
 ### Keep in Inbox
 
-Blocked — it has an open `blocked_by` dependency, or it depends on unfinished work. Name the blocker.
+Blocked — it has an open `blocked_by` link. Name it. A prose-only dependency is not a blocker here (see above).
 
 ### Recommend Closing
 
@@ -112,7 +120,7 @@ Count and list.
 
 ## Left in Inbox
 
-Count and list, naming the specific blocker (the open `blocked_by` Issue, or the unfinished work it depends on) for each one.
+Count and list, naming the open `blocked_by` Issue for each one.
 
 ## Recommended for Closing
 
