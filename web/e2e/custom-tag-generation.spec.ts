@@ -150,7 +150,7 @@ test.describe('カスタムタグ生成フロー', () => {
       description: 'カスタムボタンコンポーネント',
     });
 
-    // issue #843: E2E用のLLMスタブ(docker-compose.e2e-llm-stub.yml)を重ねて起動していれば、
+    // issue #843: E2E用のLLMスタブ(docker-compose.e2e-stubs.yml)を重ねて起動していれば、
     // 生成は実キー不要で決定的に成功する。その場合ここはスキップに落ちず、
     // 以降のプレビュー表示・編集モード・再読み込み後の一覧表示まで実際に検証される。
     //
@@ -161,7 +161,7 @@ test.describe('カスタムタグ生成フロー', () => {
     if (!success && requireLlm) {
       throw new Error(
         'LLMでの生成に失敗しました。E2E_REQUIRE_LLM=1 が指定されているためスキップせず失敗させます。'
-          + ' docker-compose.e2e-llm-stub.yml を重ねて起動しているか確認してください(issue #843)。'
+          + ' docker-compose.e2e-stubs.yml を重ねて起動しているか確認してください(issue #843)。'
       );
     }
     test.skip(!success, 'LLMバックエンドでの生成に失敗したため以降の検証をスキップ');

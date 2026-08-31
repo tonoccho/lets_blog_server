@@ -33,7 +33,7 @@ class GithubClientTest {
     void setUp() {
         RestClient.Builder builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
-        client = new GithubClient(builder);
+        client = new GithubClient(builder, "https://api.github.com");
     }
 
     @Test

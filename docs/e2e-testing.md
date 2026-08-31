@@ -188,30 +188,27 @@ npx playwright test -g "サイトを登録して記事を公開"     # テスト
 | `COMPOSE_PROJECT_NAME` | リポジトリのディレクトリ名 | healthy 待ちが対象とする compose プロジェクト(issue #842) |
 | `E2E_REQUIRE_LLM` | (なし) | `1` でLLM生成の失敗をスキップせず失敗させる(issue #843) |
 
-### LLMスタブ(issue #843)
+### 外部依存スタブ(issue #843 → #928 で集約)
 
-カスタムタグ生成の「正常系: 生成から自動保存までの完全フロー」は、`.env` の `LLM_API_KEY` が
-プレースホルダのままだと生成が必ず失敗し、`test.skip` に落ちて**恒常的に未検証**だった。
-この spec が検証したいのは「生成結果がUIとDBにどう反映されるか」であってLLMの生成品質ではないため、
-**実キー不要で決定的なスタブ**を用意した。
+受け入れテストは外部SaaSに依存しない。LLM / Google Analytics / AdSense / Brave Search /
+OpenAI画像生成 / GitHub は、決定的に応答するスタブへ置き換える。
 
 ```bash
-# E2E実行時だけスタブを重ねて起動する
-docker compose -f docker-compose.yml -f docker-compose.e2e-llm-stub.yml up -d
+# スタブを重ねて起動する
+docker compose -f docker-compose.yml -f docker-compose.e2e-stubs.yml up -d
+
+# LLM の接続設定がDBに残っていると環境変数より優先されるため、先に空にする
+./scripts/e2e-clear-llm-db-overrides.sh
 
 # 生成が失敗したらスキップせず落とす(未検証へ戻ったことに気づけるようにする)
 E2E_REQUIRE_LLM=1 npx playwright test e2e/custom-tag-generation.spec.ts
 ```
 
-スタブ(`e2e-llm-stub/server.js`)は OpenAI互換の `POST /chat/completions` だけを実装し、
-`CustomTagGenerationService` の抽出パターンに合う ```` ```html ```` / ```` ```css ```` の
-フェンス付きで固定の応答を返す。プロンプトに `FORCE_LLM_ERROR` を含めると 500 を返すため、
-**失敗系の分岐も引き続き検証できる**。
+スタブの一覧・応答内容・エラー注入の方法は
+**[ACCEPTANCE_TESTING.md の「外部依存スタブ」節](ACCEPTANCE_TESTING.md)** にある。
 
-実効のLLM接続設定は legacy-api の `/api/internal/ai/llm-config` 経由で ai-service へ渡るため、
-オーバーライドが変えるのは `api` コンテナの `LLM_BASE_URL` だけでよい。
-**システム設定(DB)で baseUrl を上書きしている環境では DB 側が優先される**(`AppSettingService` が正)。
-その場合はシステム設定画面の値を空にしてから使うこと。
+`docker-compose.e2e-llm-stub.yml`(#843)は `docker-compose.e2e-stubs.yml` へ統合し削除した。
+依存ごとにオーバーライドを増やすと起動手順が破綻するため、1本にまとめている。
 
 > **`E2E_SKIP_HEALTH_WAIT` は常用しないこと。** これは docker CLI が無い環境向けの逃げ道であり、
 > 常用すると本来この待ち合わせが防いでいる「まだ起動しきっていないスタックに対してテストを流す」

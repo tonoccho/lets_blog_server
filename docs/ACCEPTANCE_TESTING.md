@@ -82,11 +82,16 @@
 | --- | --- | --- |
 | `@slow` | 分単位で時間がかかる | ComfyUI の実生成、WordPress への実公開、サイトのプロビジョニング |
 | `@destructive` | 環境の状態を壊す | 一括削除、バックアップ/リストア、ユーザー0人状態の再現。**前後で復旧すること** |
-| `@stub` | 外部依存スタブの起動が前提 | LLM / GA / AdSense / Brave Search / ChatGPT画像(AT-2 / #928) |
+| `@stub` | 外部依存スタブの起動が前提 | LLM / GA / AdSense / Brave Search / OpenAI画像生成 / GitHub(§9) |
 | `@api` | UI を経由せず HTTP で検証する | 認証ゲート、拡張のAPI、非同期経路 |
 
 ドメインタグ(`@auth`, `@media` など)は自由に付けてよい。上記4つは**意味が固定**なので、
 別の意味で使わないこと。
+
+`@stub` が付いたシナリオは、スタブが起動していなければ**スキップではなく失敗**する(§9)。
+
+このほか playwright-bdd の特殊タグ **`@mode:serial`** が使える。同じスタブへ制御エンドポイント
+経由でエラーを注入するシナリオは、これを付けて直列化すること(§9)。
 
 `@slow` と `@destructive` は `npm run test:at:fast` から除外される。日常の回帰確認は fast、
 リリース前や AT-19(#945)のクリーンスレート実行では `npm run test:at` を使う。
@@ -220,7 +225,138 @@ Then('Keycloakのホスト型ログイン画面が表示される', async ({ pag
 
 ---
 
-## 9. 実行順序とクリーンスレート
+## 9. 外部依存スタブ
+
+受け入れテストは**外部SaaSに依存しない**(issue #928 / AT-2)。実キーが要る依存は
+`docker-compose.e2e-stubs.yml` でまとめてスタブへ置き換える。
+
+```bash
+# スタブを起動する(開発スタックへ重ねる)
+docker compose -f docker-compose.yml -f docker-compose.e2e-stubs.yml up -d
+
+# システム設定(DB)に残っているLLM/画像生成の上書きを消す(下の「落とし穴」参照)
+./scripts/e2e-clear-llm-db-overrides.sh --yes
+
+cd web && npm run test:at
+```
+
+### 何をスタブ化しているか
+
+| スタブ | 置き換える依存 | 向き先を決める環境変数 | ホスト公開 |
+| --- | --- | --- | --- |
+| `llm-stub` | 外部LLM(OpenAI互換 Chat Completions) | `LLM_BASE_URL`(ai / platform) | 18081 |
+| `ga-stub` | Google Analytics Data API + OAuth | `GOOGLE_ANALYTICS_DATA_API_BASE_URL`, `GOOGLE_ANALYTICS_OAUTH_TOKEN_URI` | 18082 |
+| `adsense-stub` | AdSense Management API + Google OAuth | `ADSENSE_DATA_API_BASE_URL`, `GOOGLE_OAUTH_TOKEN_URI` | 18083 |
+| `brave-stub` | Brave Search API | `BRAVE_SEARCH_BASE_URL` | 18084 |
+| `image-stub` | OpenAI 画像生成(gpt-image-1) | `IMAGE_LLM_BASE_URL`(platform) | 18085 |
+| `github-stub` | GitHub REST API(issues) | `GITHUB_API_BASE_URL`(ai) | 18086 |
+
+実装は `e2e-stubs/<name>/server.js`、共通土台は `e2e-stubs/lib/stub.js`。
+`node:22-alpine` にソースをマウントするだけなので、イメージのビルドは要らない。
+
+**スタブ化しないもの**: ComfyUI / PlantUML / draw.io / Penpot / WordPress。
+いずれもローカルコンテナとして実物が動くため、実物に対して検証する。
+
+### 決定性
+
+同じ入力には常に同じ応答を返す。タイムスタンプも乱数も含めない
+(LLMスタブの `created` は固定値)。だからシナリオは応答の中身をそのままアサートできる。
+
+この約束自体を `features/stubs/external-stubs.feature` が検証している。
+スタブを直したら、まずこれを通すこと。
+
+### エラー注入
+
+異常系(401 / 429 / 500 / タイムアウト)は実サービスでは再現できないので、スタブから起こす。
+経路は2つあり、**どちらを使うかで並列実行の可否が変わる**。
+
+#### 1. リクエストヘッダ — スタブを直接叩くとき
+
+```
+X-E2E-Stub-Force-Status: 429     そのリクエストだけを429にする
+X-E2E-Stub-Force-Delay: 30000    そのリクエストだけを遅延させる
+```
+
+スタブの状態を変えないので、**並列に走る他のシナリオへ影響しない**。
+ヘルパーは `support/stubs.ts` の `forceStatusHeader()` / `forceDelayHeader()`。
+
+#### 2. 制御エンドポイント — サービス越しに呼ばせるとき
+
+実際の異常系シナリオでスタブを呼ぶのはサービスであってテストではないため、
+テストはヘッダを差し込めない。事前にスタブへ仕込む。
+
+```bash
+curl -XPOST http://127.0.0.1:18081/__control/force -d '{"status":429,"count":1}'
+curl -XPOST http://127.0.0.1:18081/__control/reset
+curl      http://127.0.0.1:18081/__control/state    # 仕込みと受信件数
+```
+
+ヘルパーは `forceStubStatus()` / `forceStubDelay()` / `resetStub()` / `stubRequestCount()`。
+
+> **この経路はスタブ全体の状態を変える。** 同じスタブへ注入するシナリオを並列に走らせると
+> 互いの仕込みを奪い合う。使うシナリオには **`@mode:serial`** を付け、同じスタブを触る
+> シナリオを複数の `.feature` に散らさないこと。
+
+`stubRequestCount()` は「サービスが実際に外部を呼んだか」の確認に使える。
+キャッシュが効いて外部を呼ばなかったのか、呼んで失敗したのかを区別できる。
+
+### 資格情報の不正を再現する
+
+制御エンドポイントを使わず、**特定の値を登録するだけ**で認証失敗を起こせる。
+「不正なキーを登録した利用者に何が見えるか」を検証するときはこちらを使う。
+
+| スタブ | 値 | 結果 |
+| --- | --- | --- |
+| `ga-stub` | サービスアカウントJSONの `client_email` が `invalid@` で始まる | トークン交換が401 |
+| `adsense-stub` | 認可コード `e2e-stub-invalid-code` | トークン交換が401 |
+| `adsense-stub` | リフレッシュトークン `e2e-stub-invalid-refresh` | トークン交換が401 |
+| `brave-stub` | APIキー `e2e-stub-invalid-key` | 401 |
+| `github-stub` | トークン `e2e-stub-invalid-token` | 401 |
+| `github-stub` | トークン `e2e-stub-readonly-token` | 書き込みが403 |
+| `github-stub` | トークン `e2e-stub-ratelimited-token` | 403 + `X-RateLimit-Remaining: 0` |
+
+### 落とし穴: システム設定(DB)が環境変数より優先される
+
+LLM と画像生成の接続設定は「DB(`lbs_platform.system_settings`)に値があればDB、
+無ければ環境変数の既定値」という順で解決される(platform-service の `AppSettingService` が正)。
+
+つまり **compose で `LLM_BASE_URL` を差し替えても、システム設定画面で一度でも保存していれば
+実サービスへ出ていく**。実キーが入っていれば課金が発生し、入っていなければテストが不可解に落ちる。
+
+```bash
+./scripts/e2e-clear-llm-db-overrides.sh          # 消す行を表示するだけ
+./scripts/e2e-clear-llm-db-overrides.sh --yes    # 削除して platform を再起動
+```
+
+GA / AdSense / Brave / GitHub の資格情報は**プロジェクト単位のDB設定**であって
+システム設定ではないため、この問題は起きない。向き先(baseUrl)だけが環境変数で決まる。
+
+> **GAのトークン交換先はサービスアカウントJSONが優先する。** `token_uri` がJSONに書いてあると
+> `GOOGLE_ANALYTICS_OAUTH_TOKEN_URI` は無視される。スタブ用のサービスアカウントJSONには
+> `token_uri` を**書かないこと**。
+
+### スタブ未起動は「スキップ」ではなく「失敗」
+
+`@stub` が付いたシナリオは、スタブが起動していなければ**明示的なエラーで落ちる**
+(`support/stubs.ts` の `requireStubs()`、`steps/stubs.steps.ts` の `Before({ tags: '@stub' })`)。
+
+#843 では LLM が使えない環境で `test.skip` に落とし、その分岐が恒常的に未検証のまま
+気づかれずに残った。スタブを起動していないことは環境の不備であって、
+検証しなくてよい理由ではない。
+
+### スタブを直したら再起動する
+
+ソースはコンテナへ**マウント**されているが、Node はプロセス起動時に読み込む。
+`e2e-stubs/` を編集したら反映のために再起動すること。
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.e2e-stubs.yml restart \
+  llm-stub ga-stub adsense-stub brave-stub image-stub github-stub
+```
+
+---
+
+## 10. 実行順序とクリーンスレート
 
 受け入れテストは**毎回まっさらな状態から**実行する。DBの初期化・シード・段階実行
 (WordPress のプロビジョニングを先行させる等)は **AT-19(#945)** が整備する。
@@ -228,9 +364,10 @@ Then('Keycloakのホスト型ログイン画面が表示される', async ({ pag
 
 ---
 
-## 10. 参考
+## 11. 参考
 
 - [ACCEPTANCE_CRITERIA.md](ACCEPTANCE_CRITERIA.md) — 受け入れ基準カタログ(機能IDと検証状況)
+- `docker-compose.e2e-stubs.yml` / `e2e-stubs/` — 外部依存スタブ(§9)
 - [e2e-testing.md](e2e-testing.md) — スタック起動、Keycloak プロビジョニング、テストデータ、トラブルシューティング
 - [TEST_DOCUMENTATION.md](TEST_DOCUMENTATION.md) — テスト全体の階層
 - [playwright-bdd](https://vitalets.github.io/playwright-bdd/)
