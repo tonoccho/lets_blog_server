@@ -500,7 +500,9 @@ content-service / media-service のコンテナ間呼び出しだけだった。
 
 > **`ContentCacheController#resolve` について:** 認可の問題ではないが、**宛先アドレスの検証が無く
 > 内部アドレスへの SSRF になる**ことがこの棚卸しで判明した。入力検証で対処すべき別種の問題なので
-> **#902** として分けて起票した。
+> **#902** として分けて起票し、`OutboundUrlGuard` で対処済み。ループバック・プライベート帯・
+> リンクローカル(`169.254.169.254`)・IPv6 ユニークローカル・CGNAT 等へ**名前解決される**宛先を拒否し、
+> Playwright の `page.route` で**リダイレクトを含む各リクエストの直前**にも同じ検査を通す。
 
 **`media` の12件(#830)** — `DiagramController`(6) と `GeneratedImageController`(6)。
 

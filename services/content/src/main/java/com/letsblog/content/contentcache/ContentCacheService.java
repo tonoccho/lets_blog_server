@@ -40,6 +40,7 @@ public class ContentCacheService {
     private final OgpMetadataParser ogpMetadataParser;
     private final AmazonProductParser amazonProductParser;
     private final ObjectMapper objectMapper;
+    private final OutboundUrlGuard outboundUrlGuard;
     private final long ttlHours;
 
     public ContentCacheService(
@@ -48,12 +49,14 @@ public class ContentCacheService {
             OgpMetadataParser ogpMetadataParser,
             AmazonProductParser amazonProductParser,
             ObjectMapper objectMapper,
+            OutboundUrlGuard outboundUrlGuard,
             @Value("${app.content-cache-ttl-hours}") long ttlHours) {
         this.contentCacheRepository = contentCacheRepository;
         this.pageFetcher = pageFetcher;
         this.ogpMetadataParser = ogpMetadataParser;
         this.amazonProductParser = amazonProductParser;
         this.objectMapper = objectMapper;
+        this.outboundUrlGuard = outboundUrlGuard;
         this.ttlHours = ttlHours;
     }
 
@@ -61,6 +64,10 @@ public class ContentCacheService {
     public ContentCacheResponse resolve(String rawUrl) {
         URI uri = parseUrl(rawUrl);
         String normalizedUrl = uri.toString();
+        // 宛先が外部の公開ページであることを、キャッシュ照会より前に確かめる(issue #902)。
+        // キャッシュヒット時でも通すのは、過去に許可されていた宛先が内部アドレスへ
+        // 向け直された場合に、古い結果を返し続けないため。
+        outboundUrlGuard.requireAllowed(normalizedUrl);
         ContentType type = resolveType(uri);
         String urlHash = sha256Hex(normalizedUrl);
 
