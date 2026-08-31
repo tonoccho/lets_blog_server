@@ -220,28 +220,76 @@ Web 管理画面は `requireAdminSession()` で守られているが、gateway �
 
 ## legacy-api のエンドポイント別マトリクス
 
-issue #568。`services/legacy-api` の全REST APIエンドポイント(`@GetMapping`/`@PostMapping`/
-`@PutMapping`/`@DeleteMapping`/`@PatchMapping` の合計174件、28コントローラファイル
-[`HealthController`を含む]。`grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' controller/*.java | wc -l`
-で確認)について、現行の認可チェックと実際に返るステータスを一覧化する。#573でDiagramController/
-GeneratedImageController/RenderControllerをmedia-serviceへ移設し、当初の191件・33ファイルから
-減少している(このマトリクス自体は各stageの移設時に更新した)。stage3でMediaController/
-ProjectMediaGarbageCollectionControllerをmedia-serviceへ移設した一方、GenerationJobControllerに
-`POST /api/generation-jobs`を追加し、新設の内部ブリッジ`CmsMediaBridgeController`
-(`POST /api/internal/cms/sites/{site}/media`、`GET .../projects/{projectId}/media-scan`、
-`DELETE .../projects/{projectId}/media/{mediaId}`、計3エンドポイント)を追加した。当時の
-`CmsMediaBridgeController`はmedia-service専用の内部呼び出しであり、gatewayを経由した
-既存フロントエンドから直接到達可能な経路ではないため、下表の一覧からは省略しつつ
-`SecurityConfig`の対象からは除外していなかった(未認証では401になる。統合テストの
-Authorizationヘッダーなし401チェックの対象にも含めていた)。issue #566でAuthControllerの
-ログイン・2FA・パスワードリセット系8エンドポイントを撤去したため、その時点の総数は上記174件から
-8件減った166件(公開パスの`signup`/`setup`/`setup-status`3件を含む)だった。
+issue #568。`services/legacy-api` に残っている REST API エンドポイントについて、現行の認可チェックと
+実際に返るステータスを一覧化する。
 
-その後issue #709で`CmsMediaBridgeController`はpublishing-serviceへ移設され、legacy-apiには
-存在しない(パスも`/api/internal/cms/**`から、publishing-service内の他の内部ブリッジと同じ
-`/api/internal/{owning-service}/**`命名規則に合わせて`/api/internal/publishing/**`配下へ変更
-されている)。legacy-apiの統合テスト(`AuthorizationMatrixIntegrationTest`)の401チェック対象
-からもこの3エンドポイントは除外済み。
+**実測値(2026-08-31 時点、develop): 53エンドポイント / 11コントローラファイル**(`HealthController` を含む)。
+
+```bash
+ls services/legacy-api/src/main/java/com/letsblog/api/controller/*.java | wc -l
+grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
+  services/legacy-api/src/main/java/com/letsblog/api/controller/*.java | wc -l
+```
+
+| コントローラ | エンドポイント数 |
+|---|---|
+| `ProjectApiKeyController` | 14 |
+| `ProjectController` | 9 |
+| `ProjectAiModelController` | 6 |
+| `ContentBridgeController` | 6 |
+| `ProjectUserBridgeController` | 5 |
+| `AiBridgeController` | 4 |
+| `AiController` | 3 |
+| `AuthController` | 2 |
+| `AnalyticsBridgeController` | 2 |
+| `ProjectUserController` | 1 |
+| `HealthController` | 1 |
+
+### この数値の扱いについて(issue #733)
+
+**この文書の数値は、Epic #551 のドメイン分割による移設に自動追随しない。** 以前この節は
+「191件・33ファイル」→「174件・28ファイル」→「166件」と記述し、あわせて「このマトリクス自体は
+各stageの移設時に更新した」と書いていたが、実際には #573 以降の多数の移設Issue
+(#574 ai / #576 content / #577 project / #578 analytics / #693-#696 platform /
+#707・#708・#709 publishing 等)に追随できておらず、実態と大きく乖離していた
+(#733 起票時点の実測は67件で、その後さらに移設が進み現在は53件)。
+
+エンドポイントを移設・追加する際は、上記コマンドで再計測してこの節を更新すること。
+
+### 以降の表に出てくる移設済みコントローラの現在の所有サービス
+
+以降のエンドポイント別マトリクスには、**legacy-api から既に他サービスへ移設されたコントローラの行が
+多数含まれている**(認可の内容自体は移設後も同じため、記録として残している)。
+行の「備考」欄に所有サービスを注記しているものもあるが、注記の無いものを含め、
+2026-08-31 時点の実際の所有サービスは次のとおり。**いずれも legacy-api には存在しない。**
+
+| コントローラ | 現在の所有サービス |
+|---|---|
+| `MetadataController` / `CustomTagController` / `CustomTagTemplateController` / `ProjectCustomTagController` / `ContentCacheController` | content |
+| `PostController` | content と publishing の両方に同名クラスがある(記事本文の管理が content、公開処理が publishing) |
+| `SiteController` / `SiteStaticContentController` / `SshKeyPairController` / `TagDesignSettingController` | project |
+| `ArticlePlanController` | ai |
+| `ProjectDashboardController` | analytics |
+| `OperationLogController` / `FrontendErrorLogController` | log-writer |
+| `InternalPlatformSettingsController` | platform |
+| `DiagramController` / `GeneratedImageController` / `RenderController` / `MediaController` | media |
+| `CmsMediaBridgeController` / `TaxonomyController` | publishing |
+| `ArticlePreviewController` | content と publishing の両方に同名クラスがある |
+| `GenerationJobController` | ai |
+| `AppSettingController` / `SystemSettingController` / `DashboardController` / `BackupController` / `VscodeExtensionController` | platform |
+| `AuditLogController` | log-writer |
+
+各行の「未認証で401になるか」は、移設先サービスの `SecurityConfig` が担う。
+現時点で `SecurityConfig` が認証ゲートを持つのは legacy-api と platform のみで、
+残りのサービスは #772 で対応する(冒頭の「認証ゲートの実施レイヤー」節を参照)。
+
+`CmsMediaBridgeController` は #573 で legacy-api に追加されたのち #709 で publishing-service へ
+移設され、パスも `/api/internal/cms/**` から、他の内部ブリッジと同じ
+`/api/internal/{owning-service}/**` の命名規則に合わせて `/api/internal/publishing/**` 配下へ
+変更されている。legacy-api の統合テストの401チェック対象からも除外済み。
+
+なお #566 で `AuthController` のログイン・2FA・パスワードリセット系8エンドポイントが撤去され、
+現在 `AuthController` に残るのは公開パスの `setup` / `setup-status` の2件のみである。
 
 対応する統合テストは
 `services/legacy-api/src/test/java/com/letsblog/api/integration/AuthorizationMatrixIntegrationTest.java`。
