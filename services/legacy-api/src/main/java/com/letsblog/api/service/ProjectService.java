@@ -253,6 +253,24 @@ public class ProjectService {
      * 指定サイトが所属するプロジェクトのIDを返す(いずれの環境にも紐付いていなければnull)。
      * カスタムタグのプロジェクトスコープ判定(投稿レンダリング時)に使う。
      */
+    /**
+     * 指定プロジェクトに紐付いているサイトのID一覧(issue #830)。
+     * ContentBridgeController#accessibleSiteIds が使う。
+     */
+    public java.util.List<Long> siteIdsOfProject(Long projectId) {
+        try {
+            Project project = getProjectEntity(projectId);
+            return java.util.stream.Stream
+                    .of(project.getLocalSiteId(), project.getTestSiteId(), project.getProductionSiteId())
+                    .filter(java.util.Objects::nonNull)
+                    .distinct()
+                    .toList();
+        } catch (ProjectNotFoundException e) {
+            // 所属レコードだけ残ってプロジェクトが消えている場合。絞り込みの材料としては空でよい。
+            return java.util.List.of();
+        }
+    }
+
     public Long findProjectIdBySiteId(Long siteId) {
         return projectServiceClient.findProjectIdBySiteId(siteId);
     }

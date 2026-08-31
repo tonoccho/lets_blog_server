@@ -327,7 +327,7 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 | | 件数 |
 |---|---|
 | 総エンドポイント | 278 |
-| **認可なし(内部ブリッジを除く)** | **4**(#830 の初回計測時は 56) |
+| **認可なし(内部ブリッジを除く)** | **0**(#830 の初回計測時は 56) |
 
 サービス別の内訳:
 
@@ -335,8 +335,8 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 |---|---|---|
 | **media** | **0** | #830 で解消 |
 | **ai** | **0** | #830 で解消。下記「解消済み」参照 |
-| project | 2 | `ProjectController#list`、`SiteController#list`(いずれも一覧。下記参照) |
-| content | 2 | `PostController#list` / `#lookupBySlug`(いずれも一覧・参照。下記参照) |
+| **project** | **0** | #830 で解消 |
+| **content** | **0** | #830 で解消 |
 | **legacy-api** | **0** | #830 で解消 |
 | **platform** | **0** | #830 で解消 |
 | **publishing** | **0** | #830 で解消。下記「解消済み」参照 |
@@ -375,9 +375,10 @@ DBもコンテナも要らないため、MySQL が未公開の環境でも実行
 
 ### 既知の要対応(優先度順)
 
-1. **一覧系 4件** — `project/ProjectController#list`、`project/SiteController#list`、
-   `content/PostController#list` / `#lookupBySlug`。いずれも「自分がアクセスできる分だけ返す」
-   絞り込みが要り、判定材料の `project_users` が legacy-api に残っている(下記「一覧系を残している理由」)
+**無し。** #830 で全エンドポイントの認可要否を決定し、実装へ反映した。
+
+ラチェット(`AuthorizationCoverageTest`)の許可リストは**10サービスすべて空**で、
+新たに認可チェックの無いエンドポイントが増えると即座に失敗する。
 
 ### 解消済み
 
@@ -402,17 +403,26 @@ DBもコンテナも要らないため、MySQL が未公開の環境でも実行
 `ProjectController#get` は `requireProjectMemberOrAdmin(id)`。更新系が全て admin 限定である一方、
 参照が「認証済みなら誰でも」では他人のプロジェクトの構成(GitHub リポジトリ・環境の紐付け)が読めた。
 
-### 一覧系を残している理由
+### 一覧系の絞り込み(#830)
 
-`ProjectController#list` と `SiteController#list` は認可を付けずに残している。
-「自分がアクセスできる分だけ返す」絞り込みが必要で、単純に admin 限定にはできない。
+`ProjectController#list` / `SiteController#list` / `content/PostController#list` / `#lookupBySlug` は
+「認証済みなら誰でも全件を列挙できる」状態だった。admin 限定にすると VSCode 拡張のサイト選択や
+Web の一覧画面が壊れるため、**操作者が見てよい範囲だけを返す絞り込み**を入れた。
 
-- 判定材料の `project_users` は legacy-api に残っており(ADR-0004 によりクロススキーマ参照不可)、
-  内部ブリッジ越しの N+1 になる
-- VSCode 拡張が `SiteController#list` をサイト選択に使っている
-  (`extension/src/apiClient.ts`)ため、admin 限定にすると非 admin の拡張利用が壊れる
+判定材料の `project_users` は legacy-api に残っている(ADR-0004 によりクロススキーマ参照不可)。
+行ごとに `isProjectMember` を呼ぶと N+1 になるので、**まとめて引く内部ブリッジを2本足した**。
 
-#583 で `project_users` が project-service へ移った後に、リポジトリ側の絞り込みとして実装する。
+| ブリッジ | 用途 |
+|---|---|
+| `GET /api/internal/project/users/{userId}/project-ids` | project-service が所属プロジェクトIDを引く |
+| `GET /api/internal/content/users/{userId}/site-ids` | content-service がアクセス可能サイトIDを引く |
+
+content-service は `project_users`(legacy-api)も `projects`(project-service)も持たないため、
+両方を引ける legacy-api 側で解決して返している。
+
+いずれも admin は絞り込まない(`Optional.empty()` を「制限なし」として扱う)。
+#583 で `project_users` が project-service へ移った時点で、呼び出し側のクライアントとともに
+向き先を変えることになる。
 
 **`media` の5件(#830)** — `ComfyUiCheckpointController#install` / `#delete` と
 `RenderController` の3件。いずれも**認可を足すのではなく、外部から到達できないことを確定させた**。

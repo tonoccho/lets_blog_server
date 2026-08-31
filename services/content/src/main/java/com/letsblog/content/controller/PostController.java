@@ -9,6 +9,8 @@ import com.letsblog.content.dto.PostLookupResponse;
 import com.letsblog.content.dto.PostSummaryResponse;
 import com.letsblog.content.repository.PostRepository;
 import com.letsblog.content.service.CurrentActorService;
+import com.letsblog.content.service.ForbiddenException;
+import com.letsblog.content.service.AdminAuthorizationService;
 import com.letsblog.content.service.PostNotFoundException;
 import com.letsblog.content.service.SiteNotFoundException;
 import lombok.extern.slf4j.Slf4j;
@@ -18,6 +20,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
+import java.util.Set;
+import java.util.Optional;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -42,18 +47,24 @@ public class PostController {
     private final LegacyApiBridgeClient legacyApiBridgeClient;
     private final CurrentActorService currentActorService;
     private final ObjectMapper objectMapper;
+    private final AdminAuthorizationService adminAuthorizationService;
 
     public PostController(
             PostRepository postRepository, LegacyApiBridgeClient legacyApiBridgeClient,
-            CurrentActorService currentActorService, ObjectMapper objectMapper) {
+            CurrentActorService currentActorService, ObjectMapper objectMapper,
+            AdminAuthorizationService adminAuthorizationService) {
         this.postRepository = postRepository;
         this.legacyApiBridgeClient = legacyApiBridgeClient;
         this.currentActorService = currentActorService;
         this.objectMapper = objectMapper;
+        this.adminAuthorizationService = adminAuthorizationService;
     }
 
     /**
      * 投稿履歴一覧(Web管理フロントエンドの表示用)。
+     *
+     * <p><b>操作者が所属するプロジェクトのサイトの投稿だけ</b>を返す(issue #830)。admin は全件。
+     * 以前は認可チェックが無く、認証済みなら誰でも全サイトの投稿履歴を列挙できた。
      */
     @GetMapping
     public List<PostSummaryResponse> list(
@@ -65,6 +76,12 @@ public class PostController {
                         LegacyApiBridgeClient.SiteSummary::id, LegacyApiBridgeClient.SiteSummary::name));
 
         List<Post> posts = postRepository.findAll();
+        Optional<Set<Long>> accessible = adminAuthorizationService.accessibleSiteIds();
+        if (accessible.isPresent()) {
+            Set<Long> siteIds = accessible.get();
+            // sortPosts が list.sort() で並べ替えるため、可変リストを渡す必要がある。
+            posts = new ArrayList<>(posts.stream().filter(post -> siteIds.contains(post.getSiteId())).toList());
+        }
         posts = sortPosts(posts, sortBy, sortOrder, siteNamesById);
 
         return posts.stream()
@@ -125,6 +142,11 @@ public class PostController {
         Long siteId = legacyApiBridgeClient.resolveSiteIdByKey(site, currentActorService.getAuthorizationHeader());
         if (siteId == null) {
             throw new SiteNotFoundException("siteKey '" + site + "' は登録されていません");
+        }
+        // 自分が所属するプロジェクトのサイトでなければ、投稿の有無すら返さない(issue #830)。
+        Optional<Set<Long>> accessible = adminAuthorizationService.accessibleSiteIds();
+        if (accessible.isPresent() && !accessible.get().contains(siteId)) {
+            throw new ForbiddenException("この操作にはプロジェクトメンバーまたはadmin権限が必要です");
         }
         Post post = postRepository.findFirstBySiteIdAndSlugOrderByUpdatedAtDesc(siteId, slug)
                 .orElseThrow(() -> new PostNotFoundException(

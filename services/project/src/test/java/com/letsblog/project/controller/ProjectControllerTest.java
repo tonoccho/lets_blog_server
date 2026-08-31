@@ -10,6 +10,8 @@ import com.letsblog.project.service.ForbiddenException;
 import com.letsblog.project.service.ProjectEnvironmentSyncService;
 import com.letsblog.project.service.ProjectService;
 import java.time.LocalDateTime;
+import java.util.Set;
+import java.util.Optional;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -139,5 +141,32 @@ class ProjectControllerTest {
 
         verify(adminAuthorizationService).requireAdmin();
         verify(projectService).updateProject(1L, "新しい名前");
+    }
+
+    // ---- issue #830: 一覧は操作者が所属するプロジェクトだけ ----
+
+    @Test
+    void list_adminは全件を返す() {
+        when(adminAuthorizationService.accessibleProjectIds()).thenReturn(Optional.empty());
+        when(projectService.listProjects(null, null)).thenReturn(List.of(buildResponse()));
+
+        assertEquals(1, controller().list(null, null).size());
+    }
+
+    @Test
+    void list_非adminは所属プロジェクトだけに絞られる() {
+        // buildResponse() の id は 1。所属が {2} なら 1 は落ちる。
+        when(adminAuthorizationService.accessibleProjectIds()).thenReturn(Optional.of(Set.of(2L)));
+        when(projectService.listProjects(null, null)).thenReturn(List.of(buildResponse()));
+
+        assertEquals(List.of(), controller().list(null, null));
+    }
+
+    @Test
+    void list_所属していれば残る() {
+        when(adminAuthorizationService.accessibleProjectIds()).thenReturn(Optional.of(Set.of(1L)));
+        when(projectService.listProjects(null, null)).thenReturn(List.of(buildResponse()));
+
+        assertEquals(1, controller().list(null, null).size());
     }
 }

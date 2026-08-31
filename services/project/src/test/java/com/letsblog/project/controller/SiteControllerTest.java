@@ -8,8 +8,12 @@ import com.letsblog.project.dto.SiteResponse;
 import com.letsblog.project.service.AdminAuthorizationService;
 import com.letsblog.project.service.ForbiddenException;
 import com.letsblog.project.service.ProvisioningService;
+import com.letsblog.project.service.ProjectService;
 import com.letsblog.project.service.SiteService;
 import com.letsblog.project.service.WordPressSiteProvisioningService;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 import java.time.LocalDateTime;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -38,10 +42,13 @@ class SiteControllerTest {
     private WordPressSiteProvisioningService wordPressSiteProvisioningService;
     @Mock
     private SshKeyGenerationService sshKeyGenerationService;
+    @Mock
+    private ProjectService projectService;
 
     private SiteController controller() {
         return new SiteController(
-                siteService, adminAuthorizationService, wordPressSiteProvisioningService, sshKeyGenerationService);
+                siteService, adminAuthorizationService, wordPressSiteProvisioningService, sshKeyGenerationService,
+                projectService);
     }
 
     private SiteResponse buildResponse() {
@@ -140,5 +147,34 @@ class SiteControllerTest {
         assertThrows(ForbiddenException.class, () -> controller().testConnection(1L));
 
         verify(siteService, never()).checkConnection(1L);
+    }
+
+    // ---- issue #830: 一覧は所属プロジェクトに紐付くサイトだけ ----
+
+    @Test
+    void list_adminは全件を返す() {
+        when(adminAuthorizationService.accessibleProjectIds()).thenReturn(Optional.empty());
+        when(siteService.list(null, null)).thenReturn(List.of(buildResponse()));
+
+        assertEquals(1, controller().list(null, null).size());
+    }
+
+    @Test
+    void list_非adminは所属プロジェクトのサイトだけに絞られる() {
+        // buildResponse() の id は 1。所属プロジェクトのサイトが {9} なら 1 は落ちる。
+        when(adminAuthorizationService.accessibleProjectIds()).thenReturn(Optional.of(Set.of(3L)));
+        when(projectService.siteIdsOfProjects(Set.of(3L))).thenReturn(Set.of(9L));
+        when(siteService.list(null, null)).thenReturn(List.of(buildResponse()));
+
+        assertEquals(List.of(), controller().list(null, null));
+    }
+
+    @Test
+    void list_所属プロジェクトのサイトなら残る() {
+        when(adminAuthorizationService.accessibleProjectIds()).thenReturn(Optional.of(Set.of(3L)));
+        when(projectService.siteIdsOfProjects(Set.of(3L))).thenReturn(Set.of(1L));
+        when(siteService.list(null, null)).thenReturn(List.of(buildResponse()));
+
+        assertEquals(1, controller().list(null, null).size());
     }
 }

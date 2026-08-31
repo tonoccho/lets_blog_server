@@ -13,6 +13,7 @@ import com.letsblog.project.dto.SshKeyPairRequest;
 import com.letsblog.project.dto.SshKeyPairResponse;
 import com.letsblog.project.service.AdminAuthorizationService;
 import com.letsblog.project.service.ProvisioningService;
+import com.letsblog.project.service.ProjectService;
 import com.letsblog.project.service.SiteService;
 import com.letsblog.project.service.WordPressSiteProvisioningService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -22,6 +23,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -45,16 +47,19 @@ public class SiteController {
     private final AdminAuthorizationService adminAuthorizationService;
     private final WordPressSiteProvisioningService wordPressSiteProvisioningService;
     private final SshKeyGenerationService sshKeyGenerationService;
+    private final ProjectService projectService;
 
     public SiteController(
             SiteService siteService,
             AdminAuthorizationService adminAuthorizationService,
             WordPressSiteProvisioningService wordPressSiteProvisioningService,
-            SshKeyGenerationService sshKeyGenerationService) {
+            SshKeyGenerationService sshKeyGenerationService,
+            ProjectService projectService) {
         this.siteService = siteService;
         this.adminAuthorizationService = adminAuthorizationService;
         this.wordPressSiteProvisioningService = wordPressSiteProvisioningService;
         this.sshKeyGenerationService = sshKeyGenerationService;
+        this.projectService = projectService;
     }
 
     @Operation(summary = "WordPress サイトを登録", description = "既存のWordPressサイトを登録します")
@@ -91,11 +96,25 @@ public class SiteController {
     }
 
     @Operation(summary = "登録済みのサイト一覧を取得", description = "登録済みのすべてのWordPressサイトを取得します")
+    /**
+     * サイト一覧。<b>操作者が所属するプロジェクトに紐付くサイトだけ</b>を返す(issue #830)。
+     * admin は全件。以前は認可チェックが無く、認証済みなら誰でも全サイトを列挙できた。
+     *
+     * <p>VSCode拡張がサイト選択に使うため admin 限定にはできない(#830 の初回対応時の判断)。
+     * 所属プロジェクトのID一覧を legacy-api の内部ブリッジからまとめて引き、
+     * そこに紐付くサイトIDへ絞る(サイトごとの逆引きは N+1 になるため)。
+     */
     @GetMapping
     public List<SiteResponse> list(
             @RequestParam(required = false) String sortBy,
             @RequestParam(required = false) String sortOrder) {
-        return siteService.list(sortBy, sortOrder);
+        List<SiteResponse> all = siteService.list(sortBy, sortOrder);
+        return adminAuthorizationService.accessibleProjectIds()
+                .map(projectIds -> {
+                    Set<Long> siteIds = projectService.siteIdsOfProjects(projectIds);
+                    return all.stream().filter(site -> siteIds.contains(site.id())).toList();
+                })
+                .orElse(all);
     }
 
     @Operation(summary = "サイトの詳細情報を取得", description = "指定されたサイトの詳細情報を取得します")

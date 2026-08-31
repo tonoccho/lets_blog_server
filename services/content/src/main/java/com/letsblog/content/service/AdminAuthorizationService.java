@@ -1,5 +1,7 @@
 package com.letsblog.content.service;
 
+import java.util.Set;
+import java.util.Optional;
 import com.letsblog.content.client.LegacyApiBridgeClient;
 import org.springframework.stereotype.Service;
 
@@ -46,5 +48,23 @@ public class AdminAuthorizationService {
         if (!legacyApiBridgeClient.isProjectMember(projectId, actorId, currentActorService.getAuthorizationHeader())) {
             throw new ForbiddenException("この操作にはプロジェクトメンバーまたはadmin権限が必要です");
         }
+    }
+
+    /**
+     * 一覧系エンドポイントが「操作者が見てよい範囲」を絞るための判定材料(issue #830)。
+     *
+     * <p>admin は全件を見られるので {@link Optional#empty()} を返す。それ以外は
+     * <b>アクセスできるサイトのID集合</b>を返す(空集合なら一覧は空になる)。
+     */
+    public Optional<Set<Long>> accessibleSiteIds() {
+        if (currentActorService.isAdmin()) {
+            return Optional.empty();
+        }
+        Long actorId = currentActorService.getCurrentActorId();
+        if (actorId == null) {
+            throw new ForbiddenException("この操作にはログインが必要です");
+        }
+        return Optional.of(Set.copyOf(legacyApiBridgeClient.accessibleSiteIds(
+                actorId, currentActorService.getAuthorizationHeader())));
     }
 }

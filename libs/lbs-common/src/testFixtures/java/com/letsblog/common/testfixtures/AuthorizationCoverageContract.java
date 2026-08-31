@@ -73,12 +73,17 @@ public final class AuthorizationCoverageContract {
      *                      {@code "PostController#publish"} の形式で列挙する
      */
     public static void verifyNoNewUnauthorizedEndpoints(String serviceModule, Set<String> allowed) {
-        Path serviceRoot = findRepoRoot().resolve("services").resolve(serviceModule);
-        List<Unauthorized> found = scanUnauthorized(serviceRoot.resolve("src/main/java"));
+        compare(serviceModule, currentUnauthorized(serviceModule), allowed);
+    }
 
-        Set<String> actual = new TreeSet<>();
-        found.forEach(u -> actual.add(u.toString()));
-
+    /**
+     * 実際の走査結果と許可リストを突き合わせる本体。
+     *
+     * <p>走査から切り離してあるのは、<b>ラチェット自身の挙動を実サービスの状態に依存せず</b>
+     * 検証できるようにするため(issue #830)。すべてのサービスで無認可がゼロになると、
+     * 「現状から1件取り除いて失敗を確かめる」形のテストは材料が無くなって成立しない。
+     */
+    static void compare(String serviceModule, Set<String> actual, Set<String> allowed) {
         Set<String> added = new TreeSet<>(actual);
         added.removeAll(allowed);
 
