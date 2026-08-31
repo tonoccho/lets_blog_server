@@ -1,6 +1,8 @@
 package com.letsblog.platform.integration;
 
 import com.letsblog.common.client.IdentityClient;
+import com.letsblog.common.testfixtures.AuthorizationMatrixContract;
+import com.letsblog.common.testfixtures.AuthorizationMatrixContract.Endpoint;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -56,13 +58,6 @@ class AuthorizationMatrixIntegrationTest {
     @MockitoBean
     private IdentityClient identityClient;
 
-    record Endpoint(String method, String path) {
-        @Override
-        public String toString() {
-            return method + " " + path;
-        }
-    }
-
     /**
      * platform-serviceがgateway経由で外部へ公開している全エンドポイント
      * (gatewayの{@code platform}ルート: {@code /api/system/**}・{@code /api/backup/**}・
@@ -74,6 +69,14 @@ class AuthorizationMatrixIntegrationTest {
      */
     static Stream<Endpoint> allProtectedEndpoints() {
         return Stream.of(
+                // -- InternalPlatformSettingsController (3、issue #742) --
+                // #705の時点ではPUBLIC_PATHSに残していたが、#742で呼び出し元(legacy-apiの
+                // PlatformServiceClient)がClient Credentialsでトークンを付けるようになったため
+                // JWT必須へ移した。#805の契約テストがこの追加漏れを検出した。
+                new Endpoint("GET", "/api/internal/platform/system-settings/brave-search-api-key"),
+                new Endpoint("GET", "/api/internal/platform/llm-config"),
+                new Endpoint("GET", "/api/internal/platform/image-generation-config"),
+
                 // -- VscodeExtensionController (1、issue #696) --
                 new Endpoint("GET", "/api/system/vscode-extension"),
 
@@ -163,5 +166,19 @@ class AuthorizationMatrixIntegrationTest {
     void actuatorヘルスチェックは401にならない() throws Exception {
         mockMvc.perform(request(HttpMethod.GET, "/actuator/health"))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(401));
+    }
+
+    /**
+     * 一覧とコントローラの実マッピングが一致していることを検証する(issue #805)。
+     *
+     * <p>「Authorizationヘッダーが無ければ401」というテストは、<b>存在しないパスに対しても通る</b>
+     * ため、一覧が陳腐化しても気付けない。#731ではlegacy-apiの一覧に実体の無いパスが107件残っていた。
+     * 検証の詳細と限界は{@link AuthorizationMatrixContract}のJavadocを参照。
+     */
+    @Test
+    @DisplayName("エンドポイント一覧がコントローラの実マッピングと一致する(issue #805)")
+    void エンドポイント一覧がコントローラと一致する() {
+        AuthorizationMatrixContract.verifyMatchesControllers(
+                "platform", allProtectedEndpoints().toList());
     }
 }

@@ -5,6 +5,8 @@ import com.letsblog.api.domain.ProjectUser;
 import com.letsblog.api.domain.User;
 import com.letsblog.api.repository.ProjectUserRepository;
 import com.letsblog.api.repository.UserRepository;
+import com.letsblog.common.testfixtures.AuthorizationMatrixContract;
+import com.letsblog.common.testfixtures.AuthorizationMatrixContract.Endpoint;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -97,7 +99,9 @@ class AuthorizationMatrixIntegrationTest {
     //
     // services/legacy-api/src/main/java/com/letsblog/api/controller/ に**現在残っている**
     // エンドポイントから、SecurityConfigのPUBLIC_PATHS(health・auth/setup・auth/setup-status)と
-    // サービス間内部ブリッジ(/api/internal/**。gatewayを経由しない)を除いた33件を列挙する。
+    // #805でサービス間内部ブリッジ(/api/internal/**)17件も一覧に加えた。gatewayのルート表には
+    // 無いが、PUBLIC_PATHSにも入っていないため認証は必須で、実際401を返す。除外していたのは
+    // legacy-apiだけで、他サービスは元から含めていた。
     //
     // Phase 19のサービス抽出でコントローラがlegacy-apiから次々と移設されたため、この一覧は
     // 大きく陳腐化していた(issue #731)。実体の無いパスとして残っていたのは計107件で、
@@ -114,13 +118,6 @@ class AuthorizationMatrixIntegrationTest {
     // パスパラメータには存在確認不要な適当な値(1等)を埋める。Authorizationヘッダーの
     // 有無だけでSecurityConfigが401を返すため、リクエストボディ/クエリパラメータの妥当性は問わない。
     // =====================================================================================
-
-    record Endpoint(String method, String path) {
-        @Override
-        public String toString() {
-            return method + " " + path;
-        }
-    }
 
     static Stream<Endpoint> allProtectedEndpoints() {
         return Stream.of(
@@ -165,7 +162,31 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("DELETE", "/api/projects/1/users/1"),
 
                 // -- ProjectUserController (1) --
-                new Endpoint("GET", "/api/project-users"));
+                new Endpoint("GET", "/api/project-users"),
+
+                // -- サービス間内部ブリッジ (17、issue #805で追加) --
+                // gatewayのルート表に無く外部からは到達できないが、SecurityConfigの
+                // PUBLIC_PATHSにも入っていないため**認証は必須**で、実際401を返す。
+                // 他サービス(ai/content/project/publishing/media)は元から一覧に含めており、
+                // legacy-apiだけが除外していた。#805の契約テストがこの不一致を検出した。
+                // 呼び出し元はいずれもBearerトークンを転送する(docs/SYNC_SERVICE_CALLS.md参照)。
+                new Endpoint("GET", "/api/internal/analytics/projects/1"),
+                new Endpoint("GET", "/api/internal/analytics/projects/1/members/1"),
+                new Endpoint("GET", "/api/internal/project/projects/1/members/1"),
+                new Endpoint("POST", "/api/internal/project/project-users/1/sites/1/reconcile-roles"),
+                new Endpoint("GET", "/api/internal/project/user-site-authors/1/1"),
+                new Endpoint("POST", "/api/internal/project/user-site-authors"),
+                new Endpoint("GET", "/api/internal/project/projects/1/article-image-long-edge-px"),
+                new Endpoint("GET", "/api/internal/content/projects/1/members/1"),
+                new Endpoint("GET", "/api/internal/content/roles"),
+                new Endpoint("GET", "/api/internal/content/tag-design/PLANTUML"),
+                new Endpoint("GET", "/api/internal/content/projects/1/slug"),
+                new Endpoint("GET", "/api/internal/content/sites/by-key/site-key"),
+                new Endpoint("GET", "/api/internal/content/sites"),
+                new Endpoint("GET", "/api/internal/ai/projects/1/github-access"),
+                new Endpoint("GET", "/api/internal/ai/projects/1/members/1"),
+                new Endpoint("GET", "/api/internal/ai/system-settings/brave-search-api-key"),
+                new Endpoint("GET", "/api/internal/ai/llm-config"));
     }
 
     @ParameterizedTest(name = "[{index}] {0}")
@@ -369,5 +390,19 @@ class AuthorizationMatrixIntegrationTest {
         mockMvc.perform(request(HttpMethod.GET, "/api/projects/" + projectBId + "/api-keys/github-token")
                         .with(JwtTestFixtures.jwtRequestPostProcessor(admin.getKeycloakSub())))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(403));
+    }
+
+    /**
+     * 一覧とコントローラの実マッピングが一致していることを検証する(issue #805)。
+     *
+     * <p>「Authorizationヘッダーが無ければ401」というテストは、<b>存在しないパスに対しても通る</b>
+     * ため、一覧が陳腐化しても気付けない。#731ではlegacy-apiの一覧に実体の無いパスが107件残っていた。
+     * 検証の詳細と限界は{@link AuthorizationMatrixContract}のJavadocを参照。
+     */
+    @Test
+    @DisplayName("エンドポイント一覧がコントローラの実マッピングと一致する(issue #805)")
+    void エンドポイント一覧がコントローラと一致する() {
+        AuthorizationMatrixContract.verifyMatchesControllers(
+                "legacy-api", allProtectedEndpoints().toList());
     }
 }

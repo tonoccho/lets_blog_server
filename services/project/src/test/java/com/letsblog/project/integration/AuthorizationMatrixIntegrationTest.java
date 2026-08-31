@@ -1,5 +1,7 @@
 package com.letsblog.project.integration;
 
+import com.letsblog.common.testfixtures.AuthorizationMatrixContract;
+import com.letsblog.common.testfixtures.AuthorizationMatrixContract.Endpoint;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
 import com.letsblog.project.client.IdentityClient;
 import org.junit.jupiter.api.DisplayName;
@@ -47,13 +49,6 @@ class AuthorizationMatrixIntegrationTest {
 
     @MockitoBean
     private IdentityClient identityClient;
-
-    record Endpoint(String method, String path) {
-        @Override
-        public String toString() {
-            return method + " " + path;
-        }
-    }
 
     /**
      * project-serviceがgateway経由で外部へ公開している全エンドポイント(gatewayの{@code project}
@@ -163,5 +158,19 @@ class AuthorizationMatrixIntegrationTest {
     void actuatorヘルスチェックは401にならない() throws Exception {
         mockMvc.perform(request(HttpMethod.GET, "/actuator/health"))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotIn(401, 404));
+    }
+
+    /**
+     * 一覧とコントローラの実マッピングが一致していることを検証する(issue #805)。
+     *
+     * <p>「Authorizationヘッダーが無ければ401」というテストは、<b>存在しないパスに対しても通る</b>
+     * ため、一覧が陳腐化しても気付けない。#731ではlegacy-apiの一覧に実体の無いパスが107件残っていた。
+     * 検証の詳細と限界は{@link AuthorizationMatrixContract}のJavadocを参照。
+     */
+    @Test
+    @DisplayName("エンドポイント一覧がコントローラの実マッピングと一致する(issue #805)")
+    void エンドポイント一覧がコントローラと一致する() {
+        AuthorizationMatrixContract.verifyMatchesControllers(
+                "project", allProtectedEndpoints().toList());
     }
 }
