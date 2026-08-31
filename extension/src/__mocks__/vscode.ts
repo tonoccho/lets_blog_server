@@ -15,6 +15,7 @@ export function setConfiguration(key: string, value: unknown): void {
 /** テスト間で状態が漏れないよう、差し込んだ設定と記録した呼び出しを消す。 */
 export function resetMocks(): void {
   configurationValues.clear();
+  configurationUpdates.length = 0;
   shownWarnings.length = 0;
   shownErrors.length = 0;
   lastCreatedWebviewPanel = undefined;
@@ -23,12 +24,31 @@ export function resetMocks(): void {
 export const shownWarnings: string[] = [];
 export const shownErrors: string[] = [];
 
+/**
+ * `update()` の呼び出し記録(issue #775)。書き込み先(ConfigurationTarget)まで検証できるように、
+ * 値だけでなくtargetも保持する。
+ */
+export const configurationUpdates: { key: string; value: unknown; target: number | undefined }[] = [];
+
+/** vscode.ConfigurationTarget の数値はVS Code APIの定義に合わせる。 */
+export const ConfigurationTarget = {
+  Global: 1,
+  Workspace: 2,
+  WorkspaceFolder: 3,
+} as const;
+
 export const workspace = {
   getConfiguration(section: string) {
     return {
       get<T>(key: string, defaultValue?: T): T | undefined {
         const full = `${section}.${key}`;
         return configurationValues.has(full) ? (configurationValues.get(full) as T) : defaultValue;
+      },
+      update(key: string, value: unknown, target?: number): Promise<void> {
+        const full = `${section}.${key}`;
+        configurationValues.set(full, value);
+        configurationUpdates.push({ key: full, value, target });
+        return Promise.resolve();
       },
     };
   },

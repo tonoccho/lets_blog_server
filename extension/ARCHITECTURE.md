@@ -294,13 +294,15 @@ try {
 
 ```bash
 npm test              # ユニットテスト
-npm run test:coverage # カバレッジ付き(CIと同じ)
+npm run test:coverage # カバレッジ付き(閾値チェックあり)
 npm run compile       # 型チェック + ビルド
 ```
 
 - テストは`src/__tests__/`に置きます。
 - `vscode`モジュールは拡張ホスト外で解決できないため、`src/__mocks__/vscode.ts`のスタブへ差し替えています(`jest.config.js`の`moduleNameMapper`)。
-- `frontMatter.ts` / `headingContext.ts` / `config.ts` は**カバレッジ100%を閾値として設定**しており、下回るとCIが失敗します。
+- `frontMatter.ts` / `headingContext.ts` / `config.ts` は**カバレッジ100%を閾値として設定**しており(`jest.config.js` の `coverageThreshold`)、下回ると `npm run test:coverage` が失敗します。
+  - `npm test` は閾値を検証しません。閾値まで含めて確認するときは `npm run test:coverage` を使ってください。
+  - GitHub Actions は現状リポジトリ全体で意図的に無効化されている(README/CLAUDE.md参照)ため、この閾値が自動で強制されることはありません。ローカルで `npm run test:coverage` を実行して確認してください。
 
 ---
 

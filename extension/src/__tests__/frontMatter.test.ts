@@ -328,3 +328,27 @@ describe('validateScheduledPublication', () => {
     expect(result.error).toContain('ISO 8601');
   });
 });
+
+describe('カバレッジ補完(issue #775)', () => {
+  // normalizeCategoryKeyのcategoryが配列だった場合の分岐(frontMatter.ts:69)。
+  // 単数形のcategoryキーへYAMLの配列が書かれている記事が実在しうるため、
+  // その場合はString()で1要素へ潰さずそのまま配列として引き継ぐ必要がある。
+  it('単数形のcategoryキーが配列の場合はそのままcategoriesへ引き継ぐ', () => {
+    const article = parseArticle('---\ntitle: サンプル\ncategory:\n  - 技術\n  - 設計\n---\n\n本文です。\n');
+    expect(article.data.categories).toEqual(['技術', '設計']);
+    expect(article.data.category).toBeUndefined();
+  });
+
+  // buildArticleFrontMatterのnow既定引数(frontMatter.ts:185)。実運用では第2引数を
+  // 渡さずに呼ぶため、既定値(new Date())が使われる経路も検証しておく。
+  it('nowを省略すると現在時刻を基準に7日後をpublish_scheduled_atの既定値にする', () => {
+    const before = Date.now();
+    const frontMatter = buildArticleFrontMatter({ title: 'T', slug: 's' });
+    const after = Date.now();
+
+    const scheduled = new Date(frontMatter.publish_scheduled_at as string).getTime();
+    const sevenDays = 7 * 24 * 60 * 60 * 1000;
+    expect(scheduled).toBeGreaterThanOrEqual(before + sevenDays - 1000);
+    expect(scheduled).toBeLessThanOrEqual(after + sevenDays + 1000);
+  });
+});
