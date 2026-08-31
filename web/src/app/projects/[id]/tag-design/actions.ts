@@ -19,7 +19,8 @@ export async function saveTagDesignSettingAction(
   _prevState: TagDesignFormState,
   formData: FormData
 ): Promise<TagDesignFormState> {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   const projectIdRaw = String(formData.get("projectId") ?? "").trim();
   const tagType = String(formData.get("tagType") ?? "").trim() as EmbedTagType;
@@ -41,7 +42,7 @@ export async function saveTagDesignSettingAction(
   };
 
   try {
-    await saveTagDesignSetting(projectId, tagType, input);
+    await saveTagDesignSetting(projectId, tagType, input, actor);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -55,10 +56,11 @@ export async function generateTagDesignAction(
   tagType: EmbedTagType,
   prompt: string
 ): Promise<{ data?: GenerateTagDesignResult; error?: string }> {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
-    const result = await generateTagDesign(projectId, tagType, prompt);
+    const result = await generateTagDesign(projectId, tagType, prompt, actor);
     return { data: result };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };

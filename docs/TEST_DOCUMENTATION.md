@@ -1,69 +1,3 @@
-# テストドキュメント
-
-## サービス構成とテストの実行方法
-
-本プロジェクトのバックエンドはGradleマルチプロジェクト構成で、以下のモジュールに
-分かれている(#587。旧単一`api/`プロジェクトからの移行は#557以降で完了済み)。
-
-| モジュール | パス | 役割 |
-|---|---|---|
-| `libs:lbs-common` | `libs/lbs-common` | サービス間で共有する横断的な部品(ドメインロジックは持たない) |
-| `services:legacy-api` | `services/legacy-api` | カットオーバー前の中心的なAPIサービス(Phase 19で段階的に分割予定) |
-| `services:identity` | `services/identity` | ユーザー・ロール・権限管理 |
-| `services:log-writer` | `services/log-writer` | ログ書き込み |
-| `services:gateway` | `services/gateway` | APIゲートウェイ |
-
-各サービスのテストは、プロジェクトルートから`./gradlew`でサービスごとに独立して実行できる
-(`.claude/CLAUDE.md`セクション19「Running Locally」と同じコマンド)。
-
-```bash
-# 全サービス
-./gradlew lint test
-
-# 1サービスだけ(例: legacy-api)
-./gradlew :services:legacy-api:lint :services:legacy-api:test
-
-# 1サービスの特定テストクラスだけ
-./gradlew :services:legacy-api:test --tests "CustomTagGenerationIntegrationTest"
-
-# lbs-common(共有ライブラリ)
-./gradlew :libs:lbs-common:lint :libs:lbs-common:test
-```
-
-CIでは`.github/workflows/api-services-test.yml`が、変更のあったサービスだけをマトリクスで
-`lint`+`test`+`jacocoTestReport`し、Codecovへサービス別`flags:`でカバレッジをアップロードする
-(GitHub Actions自体は本リポジトリで意図的に無効化されているため、CI上では実行されない。
-`README.md`/`.claude/CLAUDE.md`参照)。
-
-## JWTを必要とするテストの書き方
-
-JWT認証を伴うエンドポイント・ロジックのテストは、`libs/lbs-common`が
-`java-test-fixtures`として提供する`com.letsblog.common.testfixtures.JwtTestFixtures`を使う
-(#587)。利用側のサービスは`build.gradle`に以下を追加する(`services/legacy-api`・
-`services/identity`は追加済み)。
-
-```gradle
-testImplementation testFixtures(project(':libs:lbs-common'))
-```
-
-使用例:
-
-```java
-// SecurityContextHolderへ手動でJwtAuthenticationTokenを設定する単体テスト
-SecurityContextHolder.getContext().setAuthentication(
-        new JwtAuthenticationToken(JwtTestFixtures.jwt("keycloak-sub-1", "admin")));
-
-// @SpringBootTest + MockMvcの統合テスト
-mockMvc.perform(get("/api/projects")
-        .with(JwtTestFixtures.jwtRequestPostProcessor("keycloak-sub-1", "admin")))
-    .andExpect(status().isOk());
-```
-
-DBへ接続するテスト・サービス間契約テスト・他サービス呼び出しのモック方針については、
-[ADR-0006: サービス別のテスト戦略](adr/0006-per-service-test-strategy.md)を参照。
-
----
-
 # カスタムタグ生成機能テストドキュメント
 
 ## 概要
@@ -74,7 +8,7 @@ DBへ接続するテスト・サービス間契約テスト・他サービス呼
 
 ### 1. 統合テスト（Integration Tests）
 
-**場所**: `services/legacy-api/src/test/java/com/letsblog/api/integration/CustomTagGenerationIntegrationTest.java`
+**場所**: `api/src/test/java/com/letsblog/api/integration/CustomTagGenerationIntegrationTest.java`
 
 **説明**: Spring Boot の実際のアプリケーションコンテキストを使用して、複数のコンポーネント（Controller、Service、Repository）が正しく連携することを検証します。
 
@@ -94,8 +28,8 @@ DBへ接続するテスト・サービス間契約テスト・他サービス呼
 **実行方法**:
 
 ```bash
-# プロジェクトルートから
-./gradlew :services:legacy-api:test --tests "CustomTagGenerationIntegrationTest"
+cd api
+./gradlew test --tests "CustomTagGenerationIntegrationTest"
 ```
 
 ### 2. E2E テスト（Playwright）
@@ -175,56 +109,16 @@ npm run test:e2e -- security.spec.ts
 
 **必要な設定**:
 - Java 21
-- Gradle(ルートのマルチプロジェクトビルド。`libs/lbs-common` + `services/*`)
-- Spring Boot 4.1.0
+- Gradle
+- Spring Boot 3.3.4
 - Spring Security Test
 
-**依存関係追加**（各サービスの`build.gradle`）:
+**依存関係追加**（build.gradle）:
 
 ```gradle
 testImplementation 'org.springframework.boot:spring-boot-starter-test'
 testImplementation 'org.springframework.security:spring-security-test'
-// @AutoConfigureMockMvcを使う統合テスト向け
-testImplementation 'org.springframework.boot:spring-boot-webmvc-test'
-// JWTを必要とするテストのフィクスチャ(上記「JWTを必要とするテストの書き方」参照)
-testImplementation testFixtures(project(':libs:lbs-common'))
 ```
-
-#### サービス別のテスト用スキーマ
-
-ADR-0006 のとおり Testcontainers は使わず、実 MySQL の**サービス専用テストスキーマ**へ接続する
-(各サービスの `src/test/resources/application-test.yml`)。スキーマは
-`mysql/init/02-create-test-schemas.sh` が作る。
-
-| サービス | テストスキーマ | 作られ方 |
-|---|---|---|
-| legacy-api | `lets_blog_test` | `scripts/setup-test-db.sh` |
-| content / media / ai / analytics / platform | `lbs_{content,media,ai,analytics,platform}_test` | `mysql/init/02-create-test-schemas.sh` |
-| identity / project / publishing / log-writer | `lbs_{identity,project,publishing,log}_test` | 同上(#772で追加) |
-
-**注意:** `mysql/init/*.sh` は MySQL 公式イメージの仕様により**データボリュームが空のときにしか
-実行されない**。既に MySQL を動かしている環境であとからスキーマが増えると、
-`Unknown database 'lbs_project_test'` のようなエラーでテストが落ちる。ボリュームを作り直さずに
-追随するには、テストの接続先 MySQL(各 `application-test.yml` の `localhost:3306`)に対して
-不足しているスキーマを手で作る。
-
-```bash
-# <container> はテストの接続先MySQLのコンテナ名(開発スタックなら lbs-mysql)
-docker exec -i <container> sh -c 'exec mysql -u root -p"$MYSQL_ROOT_PASSWORD"' <<'SQL'
-CREATE DATABASE IF NOT EXISTS lbs_identity_test   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE DATABASE IF NOT EXISTS lbs_project_test    CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE DATABASE IF NOT EXISTS lbs_publishing_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE DATABASE IF NOT EXISTS lbs_log_test        CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-GRANT ALL PRIVILEGES ON `lbs_identity_test`.*   TO 'test_user'@'%';
-GRANT ALL PRIVILEGES ON `lbs_project_test`.*    TO 'test_user'@'%';
-GRANT ALL PRIVILEGES ON `lbs_publishing_test`.* TO 'test_user'@'%';
-GRANT ALL PRIVILEGES ON `lbs_log_test`.*        TO 'test_user'@'%';
-FLUSH PRIVILEGES;
-SQL
-```
-
-テーブルは各サービスの Flyway migration が起動時に作る。identity のみ Flyway を持たない
-(移行管理は legacy-api 側)ため、テストでは `ddl-auto: create-drop` でエンティティ定義から作る。
 
 ### Web テスト環境
 
@@ -245,17 +139,36 @@ npx playwright install
 
 ## テスト実行パイプライン（CI/CD）
 
-### GitHub Actions
+### GitHub Actions 設定例
 
-バックエンドのCI定義は`.github/workflows/api-services-test.yml`(#557、#587で更新)。
-変更のあったサービスだけを`lbs-common`/`legacy-api`/`log-writer`/`gateway`/`identity`の
-マトリクスで検出し、それぞれ独立して`lint`+`test`+`jacocoTestReport`を実行、Codecovへ
-サービス別`flags:`でカバレッジをアップロードする。フロントエンド(`web`)のCI定義は
-`.github/workflows/frontend-test.yml`を参照。
+```yaml
+name: Test Suite
 
-GitHub Actions自体は本リポジトリ全体で意図的に無効化されている(`README.md`参照)ため、
-これらのワークフローファイルはPR上では実行されない。プッシュ前に、上記「サービス構成と
-テストの実行方法」に記載のコマンドをローカルで実行して検証すること。
+on: [push, pull_request]
+
+jobs:
+  api-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-java@v3
+        with:
+          java-version: '21'
+      - name: Run API Tests
+        run: cd api && ./gradlew test
+
+  e2e-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      - name: Install dependencies
+        run: cd web && npm install
+      - name: Run E2E Tests
+        run: cd web && npm run test:e2e
+```
 
 ## テスト結果レポート
 
@@ -264,8 +177,8 @@ GitHub Actions自体は本リポジトリ全体で意図的に無効化されて
 テスト結果は自動的に生成されます：
 
 ```bash
-# テスト結果レポート(例: legacy-api)
-cat services/legacy-api/build/reports/tests/test/index.html
+# テスト結果レポート
+cat api/build/reports/tests/test/index.html
 ```
 
 ### E2E テスト
@@ -339,5 +252,3 @@ kill -9 <PID>
 - [カスタムタグ生成機能仕様書](./CUSTOM_TAGS_SPECIFICATION.md)
 - [開発者ガイド](./DEVELOPER_GUIDE.md)
 - [E2E テスト実行ガイド](./E2E_TEST_GUIDE.md)
-- [カバレッジ目標](./COVERAGE_TARGETS.md)
-- [ADR-0006: サービス別のテスト戦略](./adr/0006-per-service-test-strategy.md)

@@ -15,7 +15,7 @@ import {
   StaticContentType,
   WpCliInstallResult,
 } from "@/lib/apiClient";
-import { requireAdminSession, requireSession } from "@/lib/session";
+import { getSession, requireAdminSession } from "@/lib/session";
 
 export interface RegisterSiteState {
   error?: string;
@@ -27,28 +27,10 @@ const CREDENTIAL_FIELDS: Record<CmsType, string[]> = {
   WORDPRESS: ["baseUrl", "sshHost", "sshUser", "wpPath"],
 };
 
-/**
- * サイトを登録する(issue #824 で認可を追加)。
- *
- * **admin 限定**。同じファイルの `deleteSiteAction` / `installWpCliAction` /
- * `generateStaticContentAction` / `generateSshKeyPairAction` はいずれも
- * `requireAdminSession()` を要求しており、サイトの作成だけが素通りだった。
- * サイト登録は SSH 認証情報を保存しインフラを作る操作なので、削除と同じ水準が妥当。
- *
- * **挙動の変更を伴う**: これまで非 admin でもサイトを登録できた。
- * バックエンドの `SiteController` は `getDetail` / `update` / `delete` / `installWpCli` /
- * `reprovision` / `generateSshKeyPair` では `requireAdmin()` を呼ぶが、
- * **`register` / `createManagedWordPress` / `adopt` / `list` / `testConnection` は呼ばない**
- * (#830)。本変更以降は Server Action 側で 403 になる。
- * なお登録フォーム内の SSH 鍵生成(`generateSshKeyPairAction`)は元から admin 限定なので、
- * 非 admin はどのみち鍵を新規生成できなかった。
- */
 export async function registerSiteAction(
   _prevState: RegisterSiteState,
   formData: FormData
 ): Promise<RegisterSiteState> {
-  await requireAdminSession();
-
   const name = String(formData.get("name") ?? "").trim();
   const siteKey = String(formData.get("siteKey") ?? "").trim();
   const cmsType = String(formData.get("cmsType") ?? "") as CmsType;
@@ -87,9 +69,12 @@ export async function registerSiteAction(
     return { error: "SSH秘密鍵を指定してください(保存済みの鍵ペアを選択するか、新しい鍵ペアを生成してください)。" };
   }
 
+  const session = await getSession();
+  const actor = session ? { id: Number(session.user.id), role: session.user.role } : undefined;
+
   let connectionCheckStatus: "SUCCESS" | "FAILED" | null;
   try {
-    const site = await registerSite({ name, siteKey, cmsType, credentials });
+    const site = await registerSite({ name, siteKey, cmsType, credentials }, actor);
     connectionCheckStatus = site.connectionCheckStatus;
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
@@ -106,10 +91,11 @@ export interface GenerateSshKeyPairResult {
 }
 
 export async function generateSshKeyPairAction(comment: string): Promise<GenerateSshKeyPairResult> {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
-    const keyPair = await generateSshKeyPair(comment);
+    const keyPair = await generateSshKeyPair(comment, actor);
     return { publicKeyLine: keyPair.publicKeyLine, privateKeyPem: keyPair.privateKeyPem };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
@@ -121,13 +107,10 @@ export interface CreateManagedWordPressSiteState {
   success?: boolean;
 }
 
-/** マネージドWordPressサイトを作成する。認可の判断は {@link registerSiteAction} と同じ(#824)。 */
 export async function createManagedWordPressSiteAction(
   _prevState: CreateManagedWordPressSiteState,
   formData: FormData
 ): Promise<CreateManagedWordPressSiteState> {
-  await requireAdminSession();
-
   const name = String(formData.get("managedName") ?? "").trim();
   const siteKey = String(formData.get("managedSiteKey") ?? "").trim();
   const title = String(formData.get("managedTitle") ?? "").trim();
@@ -142,9 +125,14 @@ export async function createManagedWordPressSiteAction(
     return { error: "すべての項目を入力してください。" };
   }
 
+  const session = await getSession();
+  const actor = session ? { id: Number(session.user.id), role: session.user.role } : undefined;
+
   try {
     await createManagedWordPressSite(
-      { name, siteKey, title, adminUser, adminEmail, adminPassword, locale, templateSiteId });
+      { name, siteKey, title, adminUser, adminEmail, adminPassword, locale, templateSiteId },
+      actor
+    );
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -154,29 +142,19 @@ export async function createManagedWordPressSiteAction(
 }
 
 export async function deleteSiteAction(id: number) {
-  await requireAdminSession();
-  await deleteSite(id);
+  const session = await requireAdminSession();
+  await deleteSite(id, { id: Number(session.user.id), role: session.user.role });
   revalidatePath("/sites");
 }
 
-/**
- * サイトへの疎通を確認する(issue #824 で認可を追加)。
- *
- * **ログイン必須だが admin 限定にはしない**。呼び出し元の `CheckConnectionButton` は
- * `SiteListTable` の `isAdmin &&` ガードの**外**で描画されており、ログイン済みなら誰でも
- * 押せる想定になっている(削除ボタンはガードの内側)。UI の意図に認可の粒度を揃える。
- *
- * 未認証で通してはいけないのは、この操作が**外部サイトへの接続を試みる**ため。
- * 認証していない相手に外部への疎通確認を代行させる形になる。
- */
 export async function checkSiteConnectionAction(id: number): Promise<SiteConnectionCheckResult> {
-  await requireSession();
   return checkSiteConnection(id);
 }
 
 export async function installWpCliAction(id: number): Promise<WpCliInstallResult> {
-  await requireAdminSession();
-  return installWpCli(id);
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  return installWpCli(id, actor);
 }
 
 export interface GenerateStaticContentResult {
@@ -188,9 +166,10 @@ export async function generateStaticContentAction(
   siteId: number,
   contentType: StaticContentType
 ): Promise<GenerateStaticContentResult> {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
   try {
-    const content = await generateStaticContent(siteId, contentType);
+    const content = await generateStaticContent(siteId, contentType, actor);
     return { content };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };

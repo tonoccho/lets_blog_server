@@ -1,0 +1,165 @@
+server:
+  port: 8080
+
+logging:
+  level:
+    root: INFO
+    com.letsblog.api: DEBUG
+    org.springframework.web: DEBUG
+  path: ./logs
+  json:
+    enabled: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    enable:
+      jvm: true
+      process: true
+      system: true
+      logback: true
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+
+spring:
+  application:
+    name: lets-blog-api
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lets_blog?useSSL=false&serverTimezone=UTC}
+    username: ${SPRING_DATASOURCE_USERNAME:lbs_app}
+    password: ${SPRING_DATASOURCE_PASSWORD:lbs_app}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # マイグレーションSQL内でメールテンプレートのThymeleaf構文 [[${var}]] を使うため、
+    # Flyway自身の ${...} プレースホルダー置換とぶつからないよう無効化する
+    placeholder-replacement: false
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: ${MAIL_SMTP_AUTH:true}
+          starttls:
+            enable: ${MAIL_SMTP_STARTTLS_ENABLE:true}
+            required: ${MAIL_SMTP_STARTTLS_REQUIRED:true}
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    # ログ発行(issue #466)はキュー障害時に同期DB書き込みへフォールバックする方針のため、
+    # 接続不可時にリクエストスレッドを長く塞がないよう短めのタイムアウトにする。
+    connection-timeout: 3000ms
+    template:
+      reply-timeout: 3000
+
+app:
+  encryption-key: ${APP_ENCRYPTION_KEY:}
+  mail:
+    from: ${APP_MAIL_FROM:noreply@letsblog.example.com}
+  web:
+    base-url: ${APP_WEB_BASE_URL:http://localhost:3000}
+  llm-base-url: ${LLM_BASE_URL:https://api.openai.com/v1}
+  llm-api-key: ${LLM_API_KEY:}
+  llm-model: ${LLM_MODEL:gpt-4o-mini}
+  llm-available-models: ${LLM_AVAILABLE_MODELS:gpt-4o-mini,gpt-4o,gpt-4.1-mini}
+  llm-request-timeout-seconds: ${LLM_REQUEST_TIMEOUT_SECONDS:120}
+  llm-provider: ${LLM_PROVIDER:OPENAI}
+  llm-claude-api-key: ${LLM_CLAUDE_API_KEY:}
+  llm-claude-model: ${LLM_CLAUDE_MODEL:claude-3-5-haiku-20241022}
+  comfyui-base-url: ${COMFYUI_BASE_URL:http://localhost:8188}
+  comfyui-checkpoint: ${COMFYUI_CHECKPOINT:v1-5-pruned-emaonly.safetensors}
+  comfyui-models-path: ${COMFYUI_MODELS_PATH:/app/data/comfyui-models}
+  image-llm-api-key: ${IMAGE_LLM_API_KEY:}
+  image-llm-base-url: ${IMAGE_LLM_BASE_URL:https://api.openai.com/v1}
+  brave-search-base-url: ${BRAVE_SEARCH_BASE_URL:https://api.search.brave.com}
+  brave-search-api-key: ${BRAVE_SEARCH_API_KEY:}
+  google-analytics-data-api-base-url: ${GOOGLE_ANALYTICS_DATA_API_BASE_URL:https://analyticsdata.googleapis.com}
+  google-analytics-oauth-token-uri: ${GOOGLE_ANALYTICS_OAUTH_TOKEN_URI:https://oauth2.googleapis.com/token}
+  # AdSense連携(issue #387)。OAuthクライアントID/シークレットはプロジェクトごとに異なるため
+  # プロジェクト単位のDB設定(issue #407)で保持し、環境変数では扱わない。
+  google-oauth-token-uri: ${GOOGLE_OAUTH_TOKEN_URI:https://oauth2.googleapis.com/token}
+  adsense-data-api-base-url: ${ADSENSE_DATA_API_BASE_URL:https://adsense.googleapis.com}
+  plantuml-base-url: ${PLANTUML_BASE_URL:http://localhost:8085}
+  penpot-base-url: ${PENPOT_BASE_URL:http://localhost:9001}
+  penpot-public-url: ${PENPOT_PUBLIC_URL:http://localhost:9001}
+  penpot-service-email: ${PENPOT_SERVICE_EMAIL:lbs-service@letsblog.local}
+  penpot-service-password: ${PENPOT_SERVICE_PASSWORD:}
+  content-cache-ttl-hours: ${CONTENT_CACHE_TTL_HOURS:24}
+  wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
+  wordpress-provision-token: ${WP_PROVISION_TOKEN:}
+  bulk-upload-storage-path: ${BULK_UPLOAD_STORAGE_PATH:/app/data/bulk-uploads}
+  generated-images-storage-path: ${GENERATED_IMAGES_STORAGE_PATH:/app/data/generated-images}
+  vscode-extension-source-path: ${VSCODE_EXTENSION_SOURCE_PATH:/app/extension-src}
+  vscode-extension-build-path: ${VSCODE_EXTENSION_BUILD_PATH:/app/extension-build}
+  backup-mysql-host: ${BACKUP_MYSQL_HOST:localhost}
+  backup-mysql-port: ${BACKUP_MYSQL_PORT:3306}
+  backup-mysql-database: ${BACKUP_MYSQL_DATABASE:lets_blog}
+  backup-mysql-user: ${BACKUP_MYSQL_USER:lbs_app}
+  backup-mysql-password: ${BACKUP_MYSQL_PASSWORD:lbs_app}
+  docker-socket-proxy-base-url: ${DOCKER_SOCKET_PROXY_BASE_URL:http://localhost:2375}
+  default-negative-prompt: ${DEFAULT_NEGATIVE_PROMPT:low quality, blurry, watermark, text}
+  default-quality-prompt: ${DEFAULT_QUALITY_PROMPT:high quality, highly detailed, sharp focus, masterpiece}
+  default-generated-image-width: ${DEFAULT_GENERATED_IMAGE_WIDTH:1920}
+  default-generated-image-height: ${DEFAULT_GENERATED_IMAGE_HEIGHT:1080}
+  default-article-image-long-edge-px: ${DEFAULT_ARTICLE_IMAGE_LONG_EDGE_PX:1300}
+  default-block-sexual-content: ${DEFAULT_BLOCK_SEXUAL_CONTENT:true}
+  default-block-violent-content: ${DEFAULT_BLOCK_VIOLENT_CONTENT:true}
+  default-block-discriminatory-content: ${DEFAULT_BLOCK_DISCRIMINATORY_CONTENT:true}
+
+resilience4j:
+  ratelimiter:
+    configs:
+      default:
+        registerHealthIndicator: false
+        limitRefreshPeriod: 1m
+        limitForPeriod: 100
+        # 枠が枯渇している間、acquirePermission()が許可待ちでリクエストスレッドを
+        # ブロックしないよう即時拒否にする(issue #464。以前は1sブロックしており、
+        # バースト時に複数リクエストが同時に足止めされ、サーバー全体が無応答に見えた)。
+        timeoutDuration: 0s
+        allowHealthIndicatorToFail: true
+    instances:
+      api-global:
+        baseConfig: default
+        limitForPeriod: ${API_RATE_LIMIT_REQUESTS:100}
+        limitRefreshPeriod: ${API_RATE_LIMIT_PERIOD:1m}
+      auth-endpoint:
+        baseConfig: default
+        limitForPeriod: ${AUTH_RATE_LIMIT_REQUESTS:5}
+        limitRefreshPeriod: ${AUTH_RATE_LIMIT_PERIOD:1m}
+      # フロントエンドはapiFetch()のたびに監査ログを自動送信するため(web/src/lib/apiClient.ts)、
+      # api-globalと同じバケットを共有するとダッシュボード等の通常操作の枠まで消費してしまい、
+      # 無関係なAPI呼び出しが軒並み429になる(issue #464)。専用バケットに分離する。
+      operation-log-endpoint:
+        baseConfig: default
+        limitForPeriod: ${OPERATION_LOG_RATE_LIMIT_REQUESTS:300}
+        limitRefreshPeriod: ${OPERATION_LOG_RATE_LIMIT_PERIOD:1m}
+      upload-endpoint:
+        baseConfig: default
+        limitForPeriod: ${UPLOAD_RATE_LIMIT_REQUESTS:10}
+        limitRefreshPeriod: ${UPLOAD_RATE_LIMIT_PERIOD:1h}

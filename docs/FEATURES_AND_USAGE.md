@@ -365,6 +365,15 @@ Manage user accounts in **Settings** → **Users**:
 - **Set permissions** - Admin/Editor/Viewer roles
 - **Manage access** - Enable/disable accounts
 
+### API Configuration
+
+For advanced users integrating with external tools:
+
+1. Navigate to **Settings** → **API**
+2. View your API key
+3. Click **Generate New Key** to rotate key
+4. Use key in header: `X-API-Key: your_key_here`
+
 ### System Maintenance
 
 Monitor and maintain system health:

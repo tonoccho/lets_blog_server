@@ -3,10 +3,11 @@ import { requireAdminSession } from "@/lib/session";
 import { RoleAssignmentPanel } from "./RoleAssignmentPanel";
 
 export default async function AdminRolesPage() {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   const [roles, users] = await Promise.all([
-    listRoles().catch(() => []),
+    listRoles(actor).catch(() => []),
     listUsers().catch(() => []),
   ]);
 

@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as api from './apiClient';
-import { getActor, getServerUrl, requireAccessToken } from './config';
+import { getActor, getServerUrl, requireApiKey } from './config';
 import { showSingletonPanel, WebviewPanelBase } from './webviewPanelBase';
 import { DiagramEditorInboundMessage, DiagramEditorOutboundCommand } from './webviewMessages';
 
@@ -69,7 +69,7 @@ export class DiagramEditorPanel extends WebviewPanelBase<
   }
 
   private async _requireCredentials(): Promise<{ apiKey: string; actor: api.Actor | undefined }> {
-    const apiKey = await requireAccessToken(this.context);
+    const apiKey = await requireApiKey(this.context);
     const actor = await getActor(this.context);
     return { apiKey, actor };
   }
@@ -87,7 +87,7 @@ export class DiagramEditorPanel extends WebviewPanelBase<
     message: Extract<DiagramEditorInboundMessage, { command: 'insertNew' }>
   ): Promise<void> {
     const { apiKey, actor } = await this._requireCredentials();
-    const detail = await api.createDiagram(apiKey, actor, {
+    const detail = await api.createDiagram(getServerUrl(), apiKey, actor, {
       projectId: this._projectId,
       name: message.name,
       xml: message.xml,
@@ -111,6 +111,7 @@ export class DiagramEditorPanel extends WebviewPanelBase<
 
     const { apiKey, actor } = await this._requireCredentials();
     const detail = await api.updateDiagram(
+      getServerUrl(),
       apiKey,
       actor,
       this._mode.diagramId,
@@ -131,7 +132,7 @@ export class DiagramEditorPanel extends WebviewPanelBase<
     message: Extract<DiagramEditorInboundMessage, { command: 'saveAsNew' }>
   ): Promise<void> {
     const { apiKey, actor } = await this._requireCredentials();
-    const detail = await api.createDiagram(apiKey, actor, {
+    const detail = await api.createDiagram(getServerUrl(), apiKey, actor, {
       projectId: this._projectId,
       name: message.name,
       xml: message.xml,

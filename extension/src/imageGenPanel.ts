@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as api from './apiClient';
-import { getActor, getConfiguredAiProvider, requireAccessToken } from './config';
+import { getActor, getConfiguredAiProvider, getServerUrl, requireApiKey } from './config';
 import { parseArticle, stringifyArticle } from './frontMatter';
 import { showSingletonPanel, WebviewPanelBase } from './webviewPanelBase';
 import { ImageGenInboundMessage, ImageGenOutboundCommand } from './webviewMessages';
@@ -90,8 +90,8 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
   }
 
   private async _handleLoadOptions(): Promise<void> {
-    const apiKey = await requireAccessToken(this.context);
-    const options = await api.getImageGenerationOptions(apiKey, this._projectId);
+    const apiKey = await requireApiKey(this.context);
+    const options = await api.getImageGenerationOptions(getServerUrl(), apiKey, this._projectId);
     // letsBlog.aiProviderの現在値をWebview初期表示へ反映する(issue #530)。サーバー側の
     // ImageGenerationOptionsResponseには含まれない値のため、ここで拡張機能側の設定を合成して渡す。
     this.postMessage('options', { ...options, defaultAiProvider: getConfiguredAiProvider() });
@@ -104,10 +104,10 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
   private async _handleGenerate(
     message: Extract<ImageGenInboundMessage, { command: 'generate' }>
   ): Promise<void> {
-    const apiKey = await requireAccessToken(this.context);
+    const apiKey = await requireApiKey(this.context);
     const actor = await getActor(this.context);
     const result = await this.runCancellable((signal) =>
-      api.generateImage(apiKey, actor, this._projectId, message.params, signal)
+      api.generateImage(getServerUrl(), apiKey, actor, this._projectId, message.params, signal)
     );
     this._lastGenerated = result;
     this._lastPrompt = message.params.prompt;
@@ -118,10 +118,11 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
   private async _handleSendChat(
     message: Extract<ImageGenInboundMessage, { command: 'sendChat' }>
   ): Promise<void> {
-    const apiKey = await requireAccessToken(this.context);
+    const apiKey = await requireApiKey(this.context);
     const actor = await getActor(this.context);
     const result = await this.runCancellable((signal) =>
       api.generateImagePrompt(
+        getServerUrl(),
         apiKey,
         actor,
         this._projectId,

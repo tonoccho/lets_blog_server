@@ -7,12 +7,6 @@ export interface HttpResponse {
   status: number;
   ok: boolean;
   statusText: string;
-  /**
-   * 応答ヘッダを1件読む(ヘッダ名の大文字小文字は問わない)。gatewayが全応答へ付与する
-   * `X-Correlation-Id`(services/gateway CorrelationIdWebFilter、issue #582)を
-   * エラーメッセージへ載せるために使う(issue #585)。存在しない場合はundefined。
-   */
-  header(name: string): string | undefined;
   /** 応答本文を文字列として読む。 */
   text(): Promise<string>;
   /** 応答本文をJSONとして読む(検証はrequestJson側で行う)。 */
@@ -58,7 +52,6 @@ async function requestViaFetch(url: string, options: HttpRequestOptions): Promis
     status: res.status,
     ok: res.ok,
     statusText: res.statusText,
-    header: (name: string) => res.headers.get(name) ?? undefined,
     text: () => res.text(),
     json: () => res.json(),
     arrayBuffer: () => res.arrayBuffer(),
@@ -91,11 +84,6 @@ function requestViaNodeHttps(url: string, options: HttpRequestOptions): Promise<
             status,
             ok: status >= 200 && status < 300,
             statusText: res.statusMessage ?? '',
-            // node:httpのヘッダ名は既に小文字へ正規化されている。
-            header: (name: string) => {
-              const value = res.headers[name.toLowerCase()];
-              return Array.isArray(value) ? value.join(', ') : value;
-            },
             text: async () => buffer.toString('utf-8'),
             json: async () => JSON.parse(buffer.toString('utf-8')),
             arrayBuffer: async () =>

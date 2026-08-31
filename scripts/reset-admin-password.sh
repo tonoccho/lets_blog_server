@@ -1,23 +1,15 @@
 #!/bin/bash
 # ログインできなくなった場合(SMTP未設定でメールによるパスワードリセットが使えない等)に、
 # 対象ユーザーのパスワードだけを安全にリセットする運用スクリプト。
-# 実行中のplatformコンテナ内で一時的な別プロセスとしてSpring Bootアプリを起動し
-# (admin-password-resetプロファイル専用のapplication.yml設定でserver.port: 0となり、OSが
-# 空いているポートを動的に割り当てる。稼働中コンテナが既にポート8080を使用中のため、これが
-# 無ければポート競合で起動に失敗する。issue #697)、
-# AdminPasswordResetRunner経由でKeycloak Admin REST APIを呼び出し、対象ユーザーのKeycloak側
-# パスワードを即時変更する(temporary=false、次回ログイン時の強制変更なし。issue #681。
-# AdminPasswordResetRunnerはissue #693でlegacy-api(apiコンテナ)からplatform-service
-# (platformコンテナ)へ移設された)。
-# ログインはKeycloakへ一本化されているため、ローカルDBのpassword_hashのみを更新しても
-# 実際にはログインできない(#564由来のギャップ)。対象ユーザーがKeycloak上に存在しない場合は
-# エラーで終了し、DBのみを操作して成功したように見せることはない。
+# 実行中のapiコンテナ内で一時的な別プロセスとしてSpring Bootアプリを起動し
+# (admin-password-resetプロファイルによりWebサーバーは起動しない)、
+# 既存のUserService/BCryptPasswordEncoderを使ってパスワードハッシュを更新するため、
 # 手動でのSQL操作や全ユーザー削除(TRUNCATE)は不要。
 #
 # 使い方: ./scripts/reset-admin-password.sh <email> <new-password>
 set -euo pipefail
 
-CONTAINER="lbs-platform"
+CONTAINER="lbs-api"
 
 if [ "$#" -ne 2 ]; then
   echo "使い方: $0 <email> <new-password>" >&2

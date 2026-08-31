@@ -24,7 +24,7 @@ describe('errorLogger', () => {
       await logErrorToBackend(error, { level: 'error' });
 
       expect(mockFetch).toHaveBeenCalledWith(
-        '/client-errors',
+        '/api/logs/errors',
         expect.objectContaining({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

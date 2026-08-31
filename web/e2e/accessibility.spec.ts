@@ -1,28 +1,31 @@
 import { test, expect } from '@playwright/test';
 import { injectAxe, checkA11y, getViolations } from 'axe-playwright';
-import { E2E_TEST_PASSWORD, loginAsUser } from './helpers';
-
-/**
- * issue #564でCredentialsプロバイダを廃止しKeycloakへ移行したことに伴い、以下の前提が変わった。
- * - /signupは削除済み(該当テストも削除)。
- * - /loginは自前のフォームを持たず、即座にKeycloakのホスト型ログイン画面へリダイレクトする。
- *   フォーム(email/passwordのinput)を検証するテストは、Keycloak側のフォーム
- *   (#username/#password/#kc-login)を対象にするよう書き換えた。
- * - 未ログイン状態で保護ページ(/等)へ行くとproxy.tsがログインへ誘導し、結果的にKeycloakの
- *   ホスト型ページへ到達してしまう(以前は自前の/loginページが表示されていた)。アプリ自身の
- *   ホーム画面のアクセシビリティを検証したいテストは、E2E専用の合成アカウント
- *   (e2e-test@letsblog.local)でログインしてから対象ページへ遷移するようにした。
- */
 
 test.describe('Accessibility (a11y) Testing', () => {
-  test.skip(!E2E_TEST_PASSWORD, 'E2E_TEST_PASSWORDが未設定のためスキップ');
-
-  test.beforeEach(async ({ page }) => {
-    await loginAsUser(page);
-  });
-
   test('Home page should not have accessibility violations', async ({ page }) => {
     await page.goto('/');
+    await injectAxe(page);
+    await checkA11y(page, null, {
+      detailedReport: true,
+      detailedReportOptions: {
+        html: true,
+      },
+    });
+  });
+
+  test('Signup page should not have accessibility violations', async ({ page }) => {
+    await page.goto('/signup');
+    await injectAxe(page);
+    await checkA11y(page, null, {
+      detailedReport: true,
+      detailedReportOptions: {
+        html: true,
+      },
+    });
+  });
+
+  test('Login page should not have accessibility violations', async ({ page }) => {
+    await page.goto('/login');
     await injectAxe(page);
     await checkA11y(page, null, {
       detailedReport: true,
@@ -50,6 +53,24 @@ test.describe('Accessibility (a11y) Testing', () => {
 
     // Document violations but don't fail tests yet
     // This allows for incremental fixes while tracking what needs to be addressed
+  });
+
+  test('Forms should have proper labels and ARIA attributes', async ({ page }) => {
+    await page.goto('/login');
+
+    // Check email input has associated label
+    const emailInput = page.locator('input[name="email"]');
+    await expect(emailInput).toBeTruthy();
+
+    // Check password input has associated label
+    const passwordInput = page.locator('input[name="password"]');
+    await expect(passwordInput).toBeTruthy();
+
+    // Check submit button has accessible name
+    const submitButton = page.locator('button[type="submit"]');
+    const accessibleName = await submitButton.getAttribute('aria-label') ||
+                          await submitButton.textContent();
+    await expect(accessibleName).toBeTruthy();
   });
 
   test('Navigation should be keyboard accessible', async ({ page }) => {
@@ -124,47 +145,13 @@ test.describe('Accessibility (a11y) Testing', () => {
     // Use tools like WebAIM Contrast Checker for verification
     console.log('Manual check needed: Verify color contrast meets WCAG AA standards');
   });
-});
-
-test.describe('Accessibility (a11y) Testing - Keycloakホスト型ログイン画面', () => {
-  test('Login page should not have accessibility violations', async ({ page }) => {
-    await page.goto('/login');
-    await page.waitForURL(/\/auth\/realms\/letsblog\//, { timeout: 15000 });
-    await injectAxe(page);
-    await checkA11y(page, null, {
-      detailedReport: true,
-      detailedReportOptions: {
-        html: true,
-      },
-    });
-  });
-
-  test('Forms should have proper labels and ARIA attributes', async ({ page }) => {
-    await page.goto('/login');
-    await page.waitForURL(/\/auth\/realms\/letsblog\//, { timeout: 15000 });
-
-    // Check username input has associated label
-    const usernameInput = page.locator('#username');
-    await expect(usernameInput).toBeTruthy();
-
-    // Check password input has associated label
-    const passwordInput = page.locator('#password');
-    await expect(passwordInput).toBeTruthy();
-
-    // Check submit button has accessible name
-    const submitButton = page.locator('#kc-login');
-    const accessibleName = await submitButton.getAttribute('aria-label') ||
-                          await submitButton.textContent();
-    await expect(accessibleName).toBeTruthy();
-  });
 
   test('Focus indicators should be visible', async ({ page }) => {
     await page.goto('/login');
-    await page.waitForURL(/\/auth\/realms\/letsblog\//, { timeout: 15000 });
 
-    // Click on username input to show focus
-    const usernameInput = page.locator('#username');
-    await usernameInput.focus();
+    // Click on email input to show focus
+    const emailInput = page.locator('input[name="email"]');
+    await emailInput.focus();
 
     // Verify element is focused
     const focusedElement = page.locator(':focus');

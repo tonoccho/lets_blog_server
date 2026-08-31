@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { z, ZodType } from 'zod';
 import { LocalImageReference, guessImageMimeType } from './frontMatter';
-import { Actor, allowsInsecureTls } from './config';
+import { Actor } from './config';
 import {
   ApiError,
   CancelledError,
@@ -13,7 +13,6 @@ import {
 } from './errorHandler';
 import { logger } from './logger';
 import { httpRequest, HttpResponse } from './httpClient';
-import { gatewayBaseUrl, gatewayUrl } from './apiBaseUrl';
 import { buildMultipartBody, MultipartPart } from './multipart';
 import { LruCache } from './cache';
 import * as schemas from './schemas';
@@ -33,23 +32,28 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 const PUBLISH_MIN_TIMEOUT_MS = 1_200_000;
 
 /**
- * gatewayが全応答へ付与する相関IDのヘッダ名
- * (services/gateway CorrelationIdWebFilter.CORRELATION_ID_HEADER、issue #582)。
+ * TLS証明書の検証は既定で有効(allowInsecureTls=false)。
+ * 検証を無効化すると中間者攻撃でAPIキーや記事内容を傍受・改竄されうるため、
+ * 自己署名証明書のローカル環境へ接続する場合に限り、利用者が明示的に有効化する。
+ * 危険な設定であることに気付けるよう、有効な間は警告としてログに残す。
  */
-const CORRELATION_ID_HEADER = 'X-Correlation-Id';
+function allowsInsecureTls(): boolean {
+  const allowed = vscode.workspace.getConfiguration('letsBlog').get<boolean>('allowInsecureTls', false);
+  if (allowed) {
+    logger.warn(
+      'letsBlog.allowInsecureTlsが有効なため、TLS証明書の検証をスキップします。' +
+        '信頼できるネットワーク上のローカル環境でのみ使用してください。'
+    );
+  }
+  return allowed;
+}
 
-/**
- * リクエストヘッダを組み立てる。issue #565(Device Authorization Grantへの移行)により、
- * 「誰であるか」の判定はサーバー側がAuthorization: Bearerで送られたアクセストークン(JWT)を
- * 検証して行うため、従来の個別ヘッダによる自己申告(APIキー/実行者ID/実行者ロール)は廃止した。
- * actor引数は、この関数を呼ぶ~30個のエンドポイント関数(とその呼び出し元)のシグネチャを
- * 一括で変更する大きな機械的差分を避けるため#565時点では残しており、ヘッダ組み立てには
- * 使わない。issue #566(旧認証機構の撤去)でも、この引数自体は明示的なスコープに含まれて
- * いなかったため意図的に手を付けていない(呼び出し元シグネチャの整理は別途Issueを起票して
- * 対応する想定)。
- */
-function buildHeaders(accessToken: string, actor?: Actor, contentType?: string): Record<string, string> {
-  const headers: Record<string, string> = { Authorization: `Bearer ${accessToken}` };
+function buildHeaders(apiKey: string, actor?: Actor, contentType?: string): Record<string, string> {
+  const headers: Record<string, string> = { 'X-API-Key': apiKey };
+  if (actor) {
+    headers['X-Actor-Id'] = String(actor.id);
+    headers['X-Actor-Role'] = actor.role;
+  }
   if (contentType) {
     headers['Content-Type'] = contentType;
   }
@@ -94,13 +98,9 @@ interface RequestSpec {
 /**
  * 全API呼び出しの共通経路。タイムアウト・リトライ・ログ・エラー整形をここへ集約し、
  * 個々のエンドポイント関数がエラーハンドリングを取りこぼさないようにする。
- *
- * 宛先は gatewayUrl()(apiBaseUrl.ts)が組み立てる gateway 宛のURLで固定する(issue #585)。
- * 以前は呼び出し元がベースURLを引数で引き回していたが、拡張が呼ぶ`/api/**`は例外なく
- * gateway経由になったため、呼び出し元が別のベースURLを渡す余地自体を無くしている。
  */
-async function request(path: string, spec: RequestSpec): Promise<HttpResponse> {
-  const url = gatewayUrl(path);
+async function request(serverUrl: string, path: string, spec: RequestSpec): Promise<HttpResponse> {
+  const url = `${serverUrl}${path}`;
   const method = spec.method ?? 'GET';
   const timeoutMs = Math.max(getTimeoutMs(), spec.minTimeoutMs ?? 0);
 
@@ -143,17 +143,8 @@ async function request(path: string, spec: RequestSpec): Promise<HttpResponse> {
 
       if (!res.ok) {
         const body = await res.text().catch(() => '');
-        // gatewayが全応答へ付与する相関ID(issue #582)。下流サービス障害時に、
-        // 利用者へ提示するメッセージとログの両方から同じIDで経路を追えるようにする(issue #585)。
-        const correlationId = res.header(CORRELATION_ID_HEADER);
-        logger.warn(`${spec.label}: ${method} ${url} -> ${res.status}`, { body, correlationId });
-        throw new ApiError(
-          `APIエラー (${res.status})`,
-          res.status,
-          body || res.statusText,
-          url,
-          correlationId
-        );
+        logger.warn(`${spec.label}: ${method} ${url} -> ${res.status}`, { body });
+        throw new ApiError(`APIエラー (${res.status})`, res.status, body || res.statusText, url);
       }
       logger.debug(`${spec.label}: ${method} ${url} -> ${res.status}`);
       return res;
@@ -168,12 +159,13 @@ async function request(path: string, spec: RequestSpec): Promise<HttpResponse> {
  * 戻り値の型はスキーマから推論されるため、スキーマと型定義が乖離しない。
  */
 async function requestJson<S extends ZodType>(
+  serverUrl: string,
   path: string,
   spec: RequestSpec,
   schema: S
 ): Promise<z.infer<S>> {
-  const res = await request(path, spec);
-  const url = gatewayUrl(path);
+  const res = await request(serverUrl, path, spec);
+  const url = `${serverUrl}${path}`;
 
   let payload: unknown;
   try {
@@ -196,8 +188,8 @@ async function requestJson<S extends ZodType>(
 }
 
 /** 画像などのバイナリを返すエンドポイント用のヘルパー。 */
-async function requestBinary(path: string, spec: RequestSpec): Promise<Buffer> {
-  const res = await request(path, spec);
+async function requestBinary(serverUrl: string, path: string, spec: RequestSpec): Promise<Buffer> {
+  const res = await request(serverUrl, path, spec);
   return Buffer.from(await res.arrayBuffer());
 }
 
@@ -223,15 +215,16 @@ export function invalidateProjectCache(projectId: number): void {
   responseCache.invalidate(`project:${projectId}`);
 }
 
-/** キャッシュを経由してJSONを取得する。キーが衝突しないようgatewayのベースURLとパラメータを含める。 */
+/** キャッシュを経由してJSONを取得する。キーが衝突しないようserverUrlとパラメータを含める。 */
 async function cachedRequestJson<S extends ZodType>(
   cacheKey: string,
+  serverUrl: string,
   path: string,
   spec: RequestSpec,
   schema: S
 ): Promise<z.infer<S>> {
-  return responseCache.getOrLoad(`${cacheKey}@${gatewayBaseUrl()}`, () =>
-    requestJson(path, spec, schema)
+  return responseCache.getOrLoad(`${cacheKey}@${serverUrl}`, () =>
+    requestJson(serverUrl, path, spec, schema)
   ) as Promise<z.infer<S>>;
 }
 
@@ -250,6 +243,7 @@ import type {
   AssignIssueResult,
   ContentCacheResult,
   ImageGenerationOptions,
+  LoginResult,
   PlanChatResult,
   ProjectDetail,
   ProjectSite,
@@ -276,6 +270,7 @@ export type {
   AssignIssueResult,
   ContentCacheResult,
   ImageGenerationOptions,
+  LoginResult,
   PlanChatResult,
   ProjectDetail,
   ProjectSite,
@@ -339,10 +334,27 @@ export interface ImageGenerationParams {
   loraWeight?: number;
 }
 
-// メールアドレス/パスワードでのログイン(login()/verifyTotpLogin())は、issue #565で
-// Device Authorization Grantへ移行した時点で拡張からは呼び出さなくなり、issue #566で
-// サーバー側の対応エンドポイント(/api/auth/login、/api/auth/totp/verify)自体も撤去された
-// ため、ここから削除した(詳細はgit history参照)。
+/**
+ * メールアドレス/パスワードでログインする。ログイン前はAPIキーを持たないため、
+ * このエンドポイントはサーバー側でX-API-Keyヘッダなしでの呼び出しが許可されている。
+ * 2FA未設定ユーザーはこの時点でapiKeyが発行される。
+ */
+export async function login(serverUrl: string, email: string, password: string): Promise<LoginResult> {
+  return requestJson(serverUrl, '/api/auth/login', {
+    label: 'login',
+    method: 'POST',
+    createBody: jsonBody({ email, password, label: 'vscode' }),
+  }, schemas.LoginResultSchema);
+}
+
+/** ログイン2段階目。login()でtwoFactorRequired=trueだった場合にTOTPコードを検証し、apiKeyを取得する。 */
+export async function verifyTotpLogin(serverUrl: string, userId: number, code: string): Promise<LoginResult> {
+  return requestJson(serverUrl, '/api/auth/totp/verify', {
+    label: 'verifyTotpLogin',
+    method: 'POST',
+    createBody: jsonBody({ userId, code, label: 'vscode' }),
+  }, schemas.LoginResultSchema);
+}
 
 /**
  * Markdown記事をCMSへ投稿する(既存投稿がある場合は更新)。
@@ -351,11 +363,12 @@ export interface ImageGenerationParams {
  * @param params 投稿内容。imagesは実ファイルが存在するものだけを渡すこと。
  */
 export async function publishPost(
+  serverUrl: string,
   apiKey: string,
   params: PublishParams,
   actor?: Actor
 ): Promise<PublishResult> {
-  return requestJson('/api/posts/publish', {
+  return requestJson(serverUrl, '/api/posts/publish', {
     label: 'publishPost',
     method: 'POST',
     minTimeoutMs: PUBLISH_MIN_TIMEOUT_MS,
@@ -403,12 +416,13 @@ export async function publishPost(
 
 /** 投稿を削除する(WordPressの場合、既定でゴミ箱へ移動する。完全削除は行わない)。 */
 export async function deletePost(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   site: string,
   wpPostId: string
 ): Promise<void> {
-  await request(`/api/posts/${encodeURIComponent(site)}/${encodeURIComponent(wpPostId)}`, {
+  await request(serverUrl, `/api/posts/${encodeURIComponent(site)}/${encodeURIComponent(wpPostId)}`, {
     label: 'deletePost',
     method: 'DELETE',
     headers: buildHeaders(apiKey, actor),
@@ -421,6 +435,7 @@ export async function deletePost(
  * 取得するために使う。該当する投稿が無い場合(まだそのサイトへ投稿されていない)はundefinedを返す。
  */
 export async function lookupExistingPost(
+  serverUrl: string,
   apiKey: string,
   siteKey: string,
   slug: string,
@@ -428,6 +443,7 @@ export async function lookupExistingPost(
 ): Promise<schemas.PostLookupResult | undefined> {
   try {
     return await requestJson(
+      serverUrl,
       `/api/posts/${encodeURIComponent(siteKey)}/by-slug/${encodeURIComponent(slug)}`,
       {
         label: 'lookupExistingPost',
@@ -446,10 +462,11 @@ export async function lookupExistingPost(
 
 /** 登録済みサイトの一覧を取得する。 */
 export async function listSites(
+  serverUrl: string,
   apiKey: string,
   actor?: Actor
 ): Promise<{ id: number; name: string; siteKey: string }[]> {
-  return cachedRequestJson('sites', '/api/sites', {
+  return cachedRequestJson('sites', serverUrl, '/api/sites', {
     label: 'listSites',
     headers: buildHeaders(apiKey, actor),
   }, schemas.SiteSummaryListSchema);
@@ -457,9 +474,10 @@ export async function listSites(
 
 /** 投稿ステータスの選択肢を取得する。UIのハードコードをサーバー側の正準リストへ統一する(issue #472)。 */
 export async function getPostStatuses(
+  serverUrl: string,
   apiKey: string
 ): Promise<schemas.PostStatusOption[]> {
-  return cachedRequestJson('post-statuses', '/api/metadata/post-statuses', {
+  return cachedRequestJson('post-statuses', serverUrl, '/api/metadata/post-statuses', {
     label: 'getPostStatuses',
     headers: buildHeaders(apiKey),
   }, schemas.PostStatusOptionListSchema);
@@ -467,9 +485,10 @@ export async function getPostStatuses(
 
 /** ロールの表示名一覧を取得する(issue #472)。 */
 export async function getRoles(
+  serverUrl: string,
   apiKey: string
 ): Promise<schemas.RoleOption[]> {
-  return cachedRequestJson('roles', '/api/metadata/roles', {
+  return cachedRequestJson('roles', serverUrl, '/api/metadata/roles', {
     label: 'getRoles',
     headers: buildHeaders(apiKey),
   }, schemas.RoleOptionListSchema);
@@ -480,13 +499,14 @@ export async function getRoles(
  * @param mode draft(下書き) / proofread(校正) / summarize(要約)
  */
 export async function askAi(
+  serverUrl: string,
   apiKey: string,
   mode: 'draft' | 'proofread' | 'summarize',
   text: string,
   actor?: Actor,
   provider?: string
 ): Promise<AiDraftResult> {
-  return requestJson('/api/ai/draft', {
+  return requestJson(serverUrl, '/api/ai/draft', {
     label: 'askAi',
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
@@ -501,13 +521,14 @@ export async function askAi(
  * @param signal 利用者によるキャンセル用。中断時はCancelledErrorが投げられる。
  */
 export async function askAiSearch(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   question: string,
   provider?: string,
   signal?: AbortSignal
 ): Promise<AiAskResult> {
-  return requestJson('/api/ai/ask', {
+  return requestJson(serverUrl, '/api/ai/ask', {
     label: 'askAiSearch',
     signal,
     method: 'POST',
@@ -522,12 +543,13 @@ export async function askAiSearch(
  * @param signal 利用者によるキャンセル用。中断時はCancelledErrorが投げられる。
  */
 export async function generateSection(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   params: AiSectionParams,
   signal?: AbortSignal
 ): Promise<AiSectionResult> {
-  return requestJson('/api/ai/section', {
+  return requestJson(serverUrl, '/api/ai/section', {
     label: 'generateSection',
     signal,
     method: 'POST',
@@ -542,13 +564,14 @@ export async function generateSection(
  * 既存のタグを優先して提案する(issue #525)。
  */
 export async function suggestTags(
+  serverUrl: string,
   apiKey: string,
   text: string,
   actor?: Actor,
   provider?: string,
   projectId?: number
 ): Promise<AiTagsResult> {
-  return requestJson('/api/ai/tags', {
+  return requestJson(serverUrl, '/api/ai/tags', {
     label: 'suggestTags',
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
@@ -563,13 +586,14 @@ export async function suggestTags(
  * @param signal 再入力等で古いリクエストを打ち切るためのキャンセル用(issue #523)。
  */
 export async function proofreadContent(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   text: string,
   provider?: string,
   signal?: AbortSignal
 ): Promise<ProofreadResult> {
-  return requestJson('/api/ai/proofread', {
+  return requestJson(serverUrl, '/api/ai/proofread', {
     label: 'proofreadContent',
     signal,
     method: 'POST',
@@ -581,12 +605,14 @@ export async function proofreadContent(
 
 /** プロジェクトのマスター環境サイトに既に存在するタグ名一覧。サイト未紐付け等の場合は空配列(issue #525)。 */
 export async function listExistingTags(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   projectId: number
 ): Promise<string[]> {
   return cachedRequestJson(
     `project:${projectId}:tags`,
+    serverUrl,
     `/api/projects/${projectId}/article-plan/tags`,
     { label: 'listExistingTags', headers: buildHeaders(apiKey, actor) },
     schemas.TagNameListSchema
@@ -597,12 +623,14 @@ export async function listExistingTags(
  * 本文中に埋め込めるカスタムタグ一覧(プロジェクト固有 + グローバル)。本文でのコード補完に使う(issue #522)。
  */
 export async function listCustomTags(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   projectId: number
 ): Promise<schemas.CustomTagSummary[]> {
   return cachedRequestJson(
     `project:${projectId}:custom-tags`,
+    serverUrl,
     `/api/custom-tags?projectId=${projectId}`,
     { label: 'listCustomTags', headers: buildHeaders(apiKey, actor) },
     schemas.CustomTagSummaryListSchema
@@ -614,6 +642,7 @@ export async function listCustomTags(
  * @param signal 利用者によるキャンセル用。
  */
 export async function generateImage(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   projectId: number | undefined,
@@ -621,7 +650,7 @@ export async function generateImage(
   signal?: AbortSignal
 ): Promise<AiImageResult> {
   // 生成画像はサーバー側に保存されるため、再試行すると重複した生成結果が残る。
-  const batch = await requestJson('/api/ai/image', {
+  const batch = await requestJson(serverUrl, '/api/ai/image', {
     label: 'generateImage',
     signal,
     method: 'POST',
@@ -633,12 +662,14 @@ export async function generateImage(
 
 /** 画像生成で選択できるモデル/サンプラー/スケジューラ/LoRAの一覧を取得する。 */
 export async function getImageGenerationOptions(
+  serverUrl: string,
   apiKey: string,
   projectId?: number
 ): Promise<ImageGenerationOptions> {
   const query = projectId ? `?projectId=${projectId}` : '';
   return cachedRequestJson(
     `project:${projectId ?? 'none'}:image-options`,
+    serverUrl,
     `/api/ai/image-options${query}`,
     { label: 'getImageGenerationOptions', headers: buildHeaders(apiKey) },
     schemas.ImageGenerationOptionsSchema
@@ -646,16 +677,16 @@ export async function getImageGenerationOptions(
 }
 
 /** ユーザー一覧を取得する。 */
-export async function listUsers(apiKey: string): Promise<Actor[]> {
-  return requestJson('/api/users', {
+export async function listUsers(serverUrl: string, apiKey: string): Promise<Actor[]> {
+  return requestJson(serverUrl, '/api/users', {
     label: 'listUsers',
     headers: buildHeaders(apiKey),
   }, schemas.ActorListSchema);
 }
 
 /** プロジェクト一覧を取得する。 */
-export async function listProjects(apiKey: string, actor?: Actor): Promise<ProjectSummary[]> {
-  return cachedRequestJson('projects', '/api/projects', {
+export async function listProjects(serverUrl: string, apiKey: string, actor?: Actor): Promise<ProjectSummary[]> {
+  return cachedRequestJson('projects', serverUrl, '/api/projects', {
     label: 'listProjects',
     headers: buildHeaders(apiKey, actor),
   }, schemas.ProjectSummaryListSchema);
@@ -663,12 +694,14 @@ export async function listProjects(apiKey: string, actor?: Actor): Promise<Proje
 
 /** プロジェクト詳細を取得する。ローカル/テスト/本番のサイト紐付けを含む。 */
 export async function getProject(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   projectId: number
 ): Promise<ProjectDetail> {
   return cachedRequestJson(
     `project:${projectId}:detail`,
+    serverUrl,
     `/api/projects/${projectId}`,
     { label: 'getProject', headers: buildHeaders(apiKey, actor) },
     schemas.ProjectDetailSchema
@@ -677,6 +710,7 @@ export async function getProject(
 
 /** リポジトリのissue一覧のうち、未割り当て(assigneesが空)のものだけを返す。 */
 export async function listUnassignedIssues(
+  serverUrl: string,
   apiKey: string,
   actor: Actor,
   projectId: number,
@@ -684,6 +718,7 @@ export async function listUnassignedIssues(
 ): Promise<RepositoryIssue[]> {
   const issues = await cachedRequestJson(
     `project:${projectId}:issues:${state}`,
+    serverUrl,
     `/api/projects/${projectId}/article-plan/issues?state=${state}`,
     { label: 'listUnassignedIssues', headers: buildHeaders(apiKey, actor) },
     schemas.RepositoryIssueListSchema
@@ -711,6 +746,7 @@ export interface PlanChatRequestParams {
  * @param signal 利用者によるキャンセル用。
  */
 export async function postPlanChat(
+  serverUrl: string,
   apiKey: string,
   actor: Actor,
   projectId: number,
@@ -718,7 +754,7 @@ export async function postPlanChat(
   signal?: AbortSignal
 ): Promise<PlanChatResult> {
   // チャットセッションがサーバー側に記録されるため、再試行すると履歴が重複する。
-  return requestJson(`/api/projects/${projectId}/article-plan/chat`, {
+  return requestJson(serverUrl, `/api/projects/${projectId}/article-plan/chat`, {
     label: 'postPlanChat',
     signal,
     method: 'POST',
@@ -733,6 +769,7 @@ export async function postPlanChat(
  * @param signal 利用者によるキャンセル用。
  */
 export async function generateImagePrompt(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   projectId: number,
@@ -741,7 +778,7 @@ export async function generateImagePrompt(
   signal?: AbortSignal,
   provider?: string
 ): Promise<AiImagePromptResult> {
-  return requestJson(`/api/projects/${projectId}/ai/generate-image-prompt`, {
+  return requestJson(serverUrl, `/api/projects/${projectId}/ai/generate-image-prompt`, {
     label: 'generateImagePrompt',
     signal,
     method: 'POST',
@@ -753,12 +790,14 @@ export async function generateImagePrompt(
 
 /** GitHub Issueの本文を取得する。未記入のIssueでは空文字を返す。 */
 export async function getIssueDescription(
+  serverUrl: string,
   apiKey: string,
   actor: Actor,
   projectId: number,
   issueNumber: number
 ): Promise<string> {
   const data = await requestJson(
+    serverUrl,
     `/api/projects/${projectId}/article-plan/issues/${issueNumber}/description`,
     { label: 'getIssueDescription', headers: buildHeaders(apiKey, actor) }, schemas.IssueDescriptionSchema);
   return data.body ?? '';
@@ -766,12 +805,14 @@ export async function getIssueDescription(
 
 /** プロジェクトのマスター環境サイトに既に存在するカテゴリ名一覧。サイト未紐付け等の場合は空配列。 */
 export async function listExistingCategories(
+  serverUrl: string,
   apiKey: string,
   actor: Actor,
   projectId: number
 ): Promise<string[]> {
   return cachedRequestJson(
     `project:${projectId}:categories`,
+    serverUrl,
     `/api/projects/${projectId}/article-plan/categories`,
     { label: 'listExistingCategories', headers: buildHeaders(apiKey, actor) },
     schemas.CategoryNameListSchema
@@ -783,12 +824,14 @@ export async function listExistingCategories(
  * 子カテゴリ選択時に親カテゴリを自動選択するUIのために使う(issue #289)。
  */
 export async function listExistingCategoriesWithParents(
+  serverUrl: string,
   apiKey: string,
   actor: Actor,
   projectId: number
 ): Promise<schemas.CategoryOption[]> {
   return cachedRequestJson(
     `project:${projectId}:categories:hierarchy`,
+    serverUrl,
     `/api/projects/${projectId}/article-plan/categories/hierarchy`,
     { label: 'listExistingCategoriesWithParents', headers: buildHeaders(apiKey, actor) },
     schemas.CategoryOptionListSchema
@@ -800,6 +843,7 @@ export async function listExistingCategoriesWithParents(
  * @param signal 利用者によるキャンセル用。
  */
 export async function suggestMetadata(
+  serverUrl: string,
   apiKey: string,
   actor: Actor,
   projectId: number,
@@ -807,6 +851,7 @@ export async function suggestMetadata(
   signal?: AbortSignal
 ): Promise<SuggestMetadataResult> {
   return requestJson(
+    serverUrl,
     `/api/projects/${projectId}/article-plan/suggest-metadata`,
     {
       label: 'suggestMetadata',
@@ -823,6 +868,7 @@ export async function suggestMetadata(
  * @param signal 利用者によるキャンセル用。
  */
 export async function suggestArticleStructure(
+  serverUrl: string,
   apiKey: string,
   actor: Actor,
   projectId: number,
@@ -830,6 +876,7 @@ export async function suggestArticleStructure(
   signal?: AbortSignal
 ): Promise<SuggestStructureResult> {
   return requestJson(
+    serverUrl,
     `/api/projects/${projectId}/article-plan/suggest-structure`,
     {
       label: 'suggestArticleStructure',
@@ -843,6 +890,7 @@ export async function suggestArticleStructure(
 
 /** 提案された構成案でGitHub Issueの本文を更新する。スキャフォールド時にこの内容がarticle.mdへ反映される。 */
 export async function acceptArticleStructure(
+  serverUrl: string,
   apiKey: string,
   actor: Actor,
   projectId: number,
@@ -850,6 +898,7 @@ export async function acceptArticleStructure(
   structure: string
 ): Promise<AcceptStructureResult> {
   const result = await requestJson(
+    serverUrl,
     `/api/projects/${projectId}/article-plan/issues/${issueNumber}/accept-structure`,
     {
       label: 'acceptArticleStructure',
@@ -869,12 +918,14 @@ export async function acceptArticleStructure(
  * 該当プロジェクトのキャッシュを破棄する。副作用があるため再試行しない。
  */
 export async function assignIssue(
+  serverUrl: string,
   apiKey: string,
   actor: Actor,
   projectId: number,
   issueNumber: number
 ): Promise<AssignIssueResult> {
   const result = await requestJson(
+    serverUrl,
     `/api/projects/${projectId}/article-plan/issues/${issueNumber}/assign`,
     {
       label: 'assignIssue',
@@ -893,12 +944,13 @@ export async function assignIssue(
  * ローカル画像はサーバー側で解決できないため、呼び出し前にdata URIへ置換しておくこと。
  */
 export async function renderPreviewHtml(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   projectId: number,
   markdown: string
 ): Promise<string> {
-  const data = await requestJson(`/api/projects/${projectId}/preview/render`, {
+  const data = await requestJson(serverUrl, `/api/projects/${projectId}/preview/render`, {
     label: 'renderPreviewHtml',
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
@@ -922,6 +974,7 @@ export async function renderPreviewHtml(
  * (投稿の作成/更新という副作用を伴うため再試行はしない)。
  */
 export async function renderPreviewSkeleton(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   projectId: number,
@@ -935,6 +988,7 @@ export async function renderPreviewSkeleton(
   tags?: string[]
 ): Promise<schemas.ThemeSkeletonResult> {
   return requestJson(
+    serverUrl,
     `/api/projects/${projectId}/preview/skeleton`,
     {
       label: 'renderPreviewSkeleton',
@@ -953,6 +1007,7 @@ export async function renderPreviewSkeleton(
  * (WordPressの既定挙動でゴミ箱へ移動する)。プレビューパネルを閉じた際に呼ばれる想定。
  */
 export async function deletePreviewPost(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   projectId: number,
@@ -960,6 +1015,7 @@ export async function deletePreviewPost(
   postId: string
 ): Promise<void> {
   await request(
+    serverUrl,
     `/api/projects/${projectId}/preview/preview-post?siteId=${siteId}&postId=${encodeURIComponent(postId)}`,
     {
       label: 'deletePreviewPost',
@@ -975,6 +1031,7 @@ export async function deletePreviewPost(
  * サイトのCSSは短時間で変わるものではないため、サイトごとにキャッシュする。
  */
 export async function getThemeCss(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   projectId: number,
@@ -983,6 +1040,7 @@ export async function getThemeCss(
   const query = siteId != null ? `?siteId=${siteId}` : '';
   return cachedRequestJson(
     `project:${projectId}:theme-css:${siteId ?? 'master'}`,
+    serverUrl,
     `/api/projects/${projectId}/preview/theme-css${query}`,
     { label: 'getThemeCss', headers: buildHeaders(apiKey, actor) },
     schemas.ThemeCssResultSchema
@@ -996,11 +1054,13 @@ export async function getThemeCss(
  * 変換結果を返すだけでサーバー状態を変えないため、再試行して差し支えない。
  */
 export async function resolveContentCache(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   url: string
 ): Promise<schemas.ContentCacheResult> {
   return requestJson(
+    serverUrl,
     `/api/content-cache?url=${encodeURIComponent(url)}`,
     { label: 'resolveContentCache', headers: buildHeaders(apiKey, actor), retryable: true },
     schemas.ContentCacheResultSchema
@@ -1012,12 +1072,14 @@ export async function resolveContentCache(
  * projectId未指定時は全プロジェクトが対象になるため、通常はプロジェクトを指定して呼ぶ。
  */
 export async function listGeneratedImages(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   projectId: number
 ): Promise<schemas.GeneratedImageSummary[]> {
   return cachedRequestJson(
     `project:${projectId}:generated-images`,
+    serverUrl,
     `/api/generated-images?projectId=${projectId}`,
     { label: 'listGeneratedImages', headers: buildHeaders(apiKey, actor) },
     schemas.GeneratedImageSummaryListSchema
@@ -1026,11 +1088,13 @@ export async function listGeneratedImages(
 
 /** 生成画像の詳細(生成に使ったパラメータ一式)を取得する(issue #294)。 */
 export async function getGeneratedImageDetail(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   imageId: number
 ): Promise<schemas.GeneratedImageDetail> {
   return requestJson(
+    serverUrl,
     `/api/generated-images/${imageId}`,
     { label: 'getGeneratedImageDetail', headers: buildHeaders(apiKey, actor) },
     schemas.GeneratedImageDetailSchema
@@ -1039,11 +1103,12 @@ export async function getGeneratedImageDetail(
 
 /** 生成画像のバイナリを取得する。 */
 export async function downloadGeneratedImage(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   imageId: number
 ): Promise<Buffer> {
-  return requestBinary(`/api/generated-images/${imageId}/file`, {
+  return requestBinary(serverUrl, `/api/generated-images/${imageId}/file`, {
     label: 'downloadGeneratedImage',
     headers: buildHeaders(apiKey, actor),
   });
@@ -1051,11 +1116,12 @@ export async function downloadGeneratedImage(
 
 /** 生成画像をサーバーから削除する。 */
 export async function deleteGeneratedImage(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   imageId: number
 ): Promise<void> {
-  await request(`/api/generated-images/${imageId}`, {
+  await request(serverUrl, `/api/generated-images/${imageId}`, {
     label: 'deleteGeneratedImage',
     method: 'DELETE',
     headers: buildHeaders(apiKey, actor),
@@ -1066,11 +1132,13 @@ export type { GeneratedImageSummary, GeneratedImageDetail } from './schemas';
 
 /** ダイアグラムの新規作成。 */
 export async function createDiagram(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   params: { projectId: number; name: string; xml: string; svg: string }
 ): Promise<schemas.DiagramDetail> {
   const result = await requestJson(
+    serverUrl,
     '/api/diagrams',
     {
       label: 'createDiagram',
@@ -1086,12 +1154,14 @@ export async function createDiagram(
 
 /** ダイアグラムの一覧。projectId未指定時は全件を返す。 */
 export async function listDiagrams(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   projectId: number
 ): Promise<schemas.DiagramSummary[]> {
   return cachedRequestJson(
     `project:${projectId}:diagrams`,
+    serverUrl,
     `/api/diagrams?projectId=${projectId}`,
     { label: 'listDiagrams', headers: buildHeaders(apiKey, actor) },
     schemas.DiagramSummaryListSchema
@@ -1100,11 +1170,13 @@ export async function listDiagrams(
 
 /** ダイアグラムの詳細(xml含む、再編集用)を取得する。 */
 export async function getDiagramDetail(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   diagramId: number
 ): Promise<schemas.DiagramDetail> {
   return requestJson(
+    serverUrl,
     `/api/diagrams/${diagramId}`,
     { label: 'getDiagramDetail', headers: buildHeaders(apiKey, actor) },
     schemas.DiagramDetailSchema
@@ -1113,11 +1185,12 @@ export async function getDiagramDetail(
 
 /** ダイアグラムのSVG本体を取得する。 */
 export async function getDiagramSvg(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   diagramId: number
 ): Promise<string> {
-  const buffer = await requestBinary(`/api/diagrams/${diagramId}/svg`, {
+  const buffer = await requestBinary(serverUrl, `/api/diagrams/${diagramId}/svg`, {
     label: 'getDiagramSvg',
     headers: buildHeaders(apiKey, actor),
   });
@@ -1126,6 +1199,7 @@ export async function getDiagramSvg(
 
 /** ダイアグラムの上書き保存。 */
 export async function updateDiagram(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   diagramId: number,
@@ -1133,6 +1207,7 @@ export async function updateDiagram(
   projectId: number
 ): Promise<schemas.DiagramDetail> {
   const result = await requestJson(
+    serverUrl,
     `/api/diagrams/${diagramId}`,
     {
       label: 'updateDiagram',
@@ -1148,12 +1223,13 @@ export async function updateDiagram(
 
 /** ダイアグラムをサーバーから削除する。 */
 export async function deleteDiagram(
+  serverUrl: string,
   apiKey: string,
   actor: Actor | undefined,
   diagramId: number,
   projectId: number
 ): Promise<void> {
-  await request(`/api/diagrams/${diagramId}`, {
+  await request(serverUrl, `/api/diagrams/${diagramId}`, {
     label: 'deleteDiagram',
     method: 'DELETE',
     headers: buildHeaders(apiKey, actor),

@@ -10,19 +10,20 @@ import { z } from 'zod';
  * 各レスポンス型はこのスキーマから `z.infer` で導出するため、スキーマと型定義が乖離しない。
  */
 
-/**
- * 操作の実行者(ログインユーザー)。
- * `/api/users` 等サーバーのレスポンスではローカルDBの数値idを含むが、issue #565以降
- * `letsBlog.login` (Device Authorization Grant)で復元するActorはKeycloakのJWTクレーム
- * (`sub`はローカルDBの数値idではなくKeycloakのUUID)から作るため、idは持たない。
- * どちらの由来でも検証できるようoptionalにしている。
- */
+/** 操作の実行者(ログインユーザー)。X-Actor-*ヘッダの送出元でもある。 */
 export const ActorSchema = z.object({
-  id: z.number().optional(),
+  id: z.number(),
   email: z.string(),
   role: z.string(),
 });
 export type Actor = z.infer<typeof ActorSchema>;
+
+export const LoginResultSchema = z.object({
+  user: ActorSchema,
+  twoFactorRequired: z.boolean(),
+  apiKey: z.string().nullable(),
+});
+export type LoginResult = z.infer<typeof LoginResultSchema>;
 
 export const PublishResultSchema = z.object({
   wpPostId: z.string(),

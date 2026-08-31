@@ -3,7 +3,7 @@ import { streamConnectedServiceStatuses } from "@/lib/apiClient";
 /**
  * バックエンドのSSE配信(/api/dashboard/service-status/stream)を、認証ヘッダを付けたうえで
  * ブラウザへそのまま中継するルート(issue #198)。ブラウザはセッションCookie(HttpOnly)しか
- * 持たずAuthorizationヘッダーを付与できないため、他のAPI呼び出しと同様にサーバー側で仲介する。
+ * 持たずX-API-Keyを付与できないため、他のAPI呼び出しと同様にサーバー側で仲介する。
  */
 export async function GET() {
   const upstream = await streamConnectedServiceStatuses();
