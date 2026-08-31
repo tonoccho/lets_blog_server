@@ -217,6 +217,14 @@ app:
         uri: ${PROJECT_SERVICE_URI:http://api:8080}
         paths:
           - /api/projects/*/tag-design-settings/**
+      # GlobalTagDesignSettingController(どのプロジェクトにも属さないグローバル既定、issue #763)。
+      # projectIdがLongで束縛されているため/api/projects/global/...のようにプロジェクト配下へ
+      # 寄せられず、独立したパスになっている。このルートが欠けていたため、#763のマージ時点から
+      # 全リクエストがfallback-uri(legacy-api)へ誤ルーティングされ404になっていた(issue #861)。
+      - id: project-global-tag-design-settings
+        uri: ${PROJECT_SERVICE_URI:http://api:8080}
+        paths:
+          - /api/tag-design-settings/**
       # ArticlePlanController(記事プラン壁打ちチャット・セッション管理)はai-serviceへ移設済み
       # (issue #574)。パス自体は/api/projects/**配下のまま(既存フロントのURLを変えないため)。
       # より広い/api/projects/**(下のprojectルート)より先にここでマッチさせる
