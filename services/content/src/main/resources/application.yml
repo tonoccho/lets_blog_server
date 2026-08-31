@@ -70,12 +70,13 @@ spring:
         default-requeue-rejected: false
 
 app:
-  # まだlegacy-apiに残るドメイン(Project/Site/CMS、project_user、roles)への内部ブリッジ
-  # (LegacyApiBridgeClient)の呼び出し先。また、legacy-api側のPostPublishService/PostDeleteService/
-  # ArticlePreviewService(公開・削除・テーマ骨格取得。#575で切り出されるまでlegacy-apiに残る)が
-  # posts/レンダリングパイプライン/PreviewSkeletonFetcherへアクセスするための内部ブリッジ
-  # (ContentBridgeController)も、認証はここへの同一の呼び出し元Bearerトークン転送方式に揃える。
-  legacy-api-uri: ${LEGACY_API_URI:http://api:8080}
+  # issue #583でlegacy-apiを解体し、それまで legacy-api の ContentBridgeController を素通しして
+  # いた経路を所有サービスへ直接向けた(素通しだったのは、所有権が #577 stage1/stage2 で既に
+  # project-service へ移っていたため)。
+  #   - projects / sites / tag_design_settings、アクセス可能サイトID(ProjectBridgeClient)
+  #     → project-service
+  #   - project_users のメンバー判定、roles(IdentityBridgeClient)→ identity-service
+  project-service-uri: ${PROJECT_SERVICE_URI:http://project:8080}
   identity-service-uri: ${IDENTITY_SERVICE_URI:http://identity:8080}
   # 組み込みタグ展開時のPlantUML/Rechartsダイアグラム描画はmedia-serviceへ同期呼び出しする
   # (issueの注記。Playwrightを持つのはcontent-serviceになったが、実際のレンダリング処理自体は

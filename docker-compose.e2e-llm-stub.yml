@@ -9,9 +9,10 @@
 # 使い方(E2E実行時のみ、このオーバーライドを重ねる):
 #   docker compose -f docker-compose.yml -f docker-compose.e2e-llm-stub.yml up -d
 #
-# 実効のLLM接続設定は legacy-api の /api/internal/ai/llm-config 経由で
-# ai-service へ渡る(RemoteLlmConfigProvider)。したがって向き先を変えるのは
-# api コンテナの LLM_BASE_URL でよい。
+# 実効のLLM接続設定は platform-service の /api/internal/platform/llm-config 経由で
+# ai-service へ渡る(RemoteLlmConfigProvider)。issue #583 で legacy-api を削除する前は
+# legacy-api の /api/internal/ai/llm-config が中継していた。
+# したがって向き先を変えるのは ai コンテナの LLM_BASE_URL でよい。
 #
 # 注意: システム設定(DB)で baseUrl を上書きしている環境では、DB側が優先される
 # (AppSettingService が正)。その場合はシステム設定画面の値を空にしてから使うこと。
@@ -35,12 +36,24 @@ services:
       timeout: 3s
       retries: 10
 
-  api:
+  # issue #583 で legacy-api(api コンテナ)を削除したため、上書き先を ai / platform へ移した。
+  # LLM を実際に呼ぶのは ai-service、その接続設定の既定値を持つのは platform-service
+  # (system_settings の所有者、issue #693)。両方を同じスタブへ向けないと、
+  # DB に設定が無い環境で platform 側の既定値(本物のエンドポイント)が使われてしまう。
+  ai:
     environment:
       # OpenAI互換の Chat Completions を返すスタブへ向ける。
       # LlmClient は {baseUrl}/chat/completions を叩く(パスはクライアント側が付ける)。
       LLM_BASE_URL: http://llm-stub:8080
       # スタブは Authorization を検証しないが、未設定だと呼び出し前に弾かれる経路があるため値を入れる。
+      LLM_API_KEY: e2e-stub-key
+    depends_on:
+      llm-stub:
+        condition: service_healthy
+
+  platform:
+    environment:
+      LLM_BASE_URL: http://llm-stub:8080
       LLM_API_KEY: e2e-stub-key
     depends_on:
       llm-stub:

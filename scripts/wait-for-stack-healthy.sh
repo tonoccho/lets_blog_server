@@ -42,8 +42,7 @@ COMPOSE_ARGS=(-p "$COMPOSE_PROJECT" -f "$REPO_ROOT/docker-compose.yml")
 # E2E実行に必要なサービス(docker-compose.yml)。gatewayは各ドメインサービスのhealthyを
 # depends_onで待つが、待機対象として明示しておくことで「どれが遅れているか」を可視化する。
 REQUIRED_SERVICES="reverse-proxy web gateway keycloak keycloak-postgres mysql rabbitmq \
-api identity media ai content analytics project publishing platform log-writer \
-legacy-schema-migrate"
+identity media ai content analytics project publishing platform log-writer"
 
 TIMEOUT_SECONDS=600
 TARGET_SERVICES="$REQUIRED_SERVICES"
@@ -126,6 +125,7 @@ if raw:
                 containers.append(json.loads(line))
 
 wait_all = os.environ.get("WAIT_ALL") == "1"
+ONE_SHOT_JOBS = set()
 targets = os.environ.get("TARGET_SERVICES", "").split()
 
 by_service = {c.get("Service", "?"): c for c in containers}
@@ -144,8 +144,10 @@ for service in targets:
     health = c.get("Health", "")
     exit_code = c.get("ExitCode", 0)
 
-    # legacy-schema-migrateは一回限りのFlywayジョブなので、正常終了(exited, code 0)がゴール。
-    if service == "legacy-schema-migrate":
+    # 一回限りのジョブ(ワンショットコンテナ)は正常終了(exited, code 0)がゴール。
+    # issue #583で legacy-schema-migrate を削除したため現在は該当が無いが、
+    # 同種のジョブを足したときのためにこの分岐は残す。
+    if service in ONE_SHOT_JOBS:
         if not (state == "exited" and exit_code == 0):
             pending.append(f"{service} (state={state}, exitCode={exit_code})")
         continue
@@ -196,7 +198,7 @@ print("\n".join(pending))
 done
 
 if [ "$ALL_OK" -eq 1 ]; then
-  log "OK: 対象サービスは全てhealthy(legacy-schema-migrateは正常終了)です。"
+  log "OK: 対象サービスは全てhealthyです。"
   exit 0
 fi
 

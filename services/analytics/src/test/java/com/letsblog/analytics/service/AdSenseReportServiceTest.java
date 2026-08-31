@@ -5,7 +5,7 @@ import com.letsblog.analytics.adsense.AdSenseDailyDataPoint;
 import com.letsblog.analytics.adsense.AdSenseException;
 import com.letsblog.analytics.adsense.AdSensePlatformBreakdown;
 import com.letsblog.analytics.adsense.AdSenseReport;
-import com.letsblog.analytics.client.LegacyApiBridgeClient;
+import com.letsblog.analytics.client.ProjectBridgeClient;
 import com.letsblog.analytics.dto.AdSenseReportResponse;
 import com.letsblog.common.crypto.CredentialCipher;
 import org.junit.jupiter.api.Test;
@@ -32,7 +32,7 @@ import static org.mockito.Mockito.when;
  * AdSenseReportServiceの回帰テスト(issue #387、issue #578でanalytics-serviceへ移設)。AdSense未設定/
  * 本番サイト未紐付けの場合にeligible=falseを返しAPIへ問い合わせないこと、取得失敗時にeligible=trueの
  * ままerrorMessageを設定する(例外を投げない)ことを検証する。legacy-api版と異なり、本番サイトの
- * 有無はProjectRepositoryではなくLegacyApiBridgeClient経由のブリッジ呼び出しで判定し、リフレッシュ
+ * 有無はProjectRepositoryではなくProjectBridgeClient経由のブリッジ呼び出しで判定し、リフレッシュ
  * トークン/クライアントシークレットの復号はProjectApiKeyServiceへの委譲ではなくこのサービス自身が
  * CredentialCipherで行う。
  */
@@ -40,7 +40,7 @@ import static org.mockito.Mockito.when;
 class AdSenseReportServiceTest {
 
     @Mock
-    private LegacyApiBridgeClient legacyApiBridgeClient;
+    private ProjectBridgeClient projectBridgeClient;
     @Mock
     private AnalyticsCredentialsService analyticsCredentialsService;
     @Mock
@@ -55,7 +55,7 @@ class AdSenseReportServiceTest {
 
     private AdSenseReportService service() {
         return new AdSenseReportService(
-                legacyApiBridgeClient, analyticsCredentialsService, adSenseClient, adminAuthorizationService,
+                projectBridgeClient, analyticsCredentialsService, adSenseClient, adminAuthorizationService,
                 currentActorService, credentialCipher);
     }
 
@@ -72,8 +72,8 @@ class AdSenseReportServiceTest {
 
     @Test
     void getReport_AdSense未設定なら未対象でAPIを呼ばない() {
-        lenient().when(legacyApiBridgeClient.getProjectEligibility(eq(1L), any()))
-                .thenReturn(new LegacyApiBridgeClient.ProjectEligibility(true));
+        lenient().when(projectBridgeClient.getProjectEligibility(eq(1L), any()))
+                .thenReturn(new ProjectBridgeClient.ProjectEligibility(true));
         when(analyticsCredentialsService.hasAdsenseCredentials(1L)).thenReturn(false);
 
         AdSenseReportResponse response = service().getReport(1L);
@@ -83,8 +83,8 @@ class AdSenseReportServiceTest {
 
     @Test
     void getReport_本番サイト未紐付けなら未対象でAPIを呼ばない() {
-        lenient().when(legacyApiBridgeClient.getProjectEligibility(eq(1L), any()))
-                .thenReturn(new LegacyApiBridgeClient.ProjectEligibility(false));
+        lenient().when(projectBridgeClient.getProjectEligibility(eq(1L), any()))
+                .thenReturn(new ProjectBridgeClient.ProjectEligibility(false));
         when(analyticsCredentialsService.hasAdsenseCredentials(1L)).thenReturn(true);
 
         AdSenseReportResponse response = service().getReport(1L);
@@ -94,8 +94,8 @@ class AdSenseReportServiceTest {
 
     @Test
     void getReport_設定済みかつ本番サイトありならレポートを取得する() {
-        lenient().when(legacyApiBridgeClient.getProjectEligibility(eq(1L), any()))
-                .thenReturn(new LegacyApiBridgeClient.ProjectEligibility(true));
+        lenient().when(projectBridgeClient.getProjectEligibility(eq(1L), any()))
+                .thenReturn(new ProjectBridgeClient.ProjectEligibility(true));
         stubConfiguredCredentials();
         when(adSenseClient.refreshAccessToken("client-id", "client-secret", "refresh-token")).thenReturn("access-token");
         when(adSenseClient.fetchReport("access-token", "pub-1234567890123456", "LAST_30_DAYS"))
@@ -118,8 +118,8 @@ class AdSenseReportServiceTest {
 
     @Test
     void getReport_取得に失敗したら対象のままerrorMessageを設定する() {
-        lenient().when(legacyApiBridgeClient.getProjectEligibility(eq(1L), any()))
-                .thenReturn(new LegacyApiBridgeClient.ProjectEligibility(true));
+        lenient().when(projectBridgeClient.getProjectEligibility(eq(1L), any()))
+                .thenReturn(new ProjectBridgeClient.ProjectEligibility(true));
         stubConfiguredCredentials();
         when(adSenseClient.refreshAccessToken(anyString(), anyString(), anyString()))
                 .thenThrow(new AdSenseException("APIエラー", null));

@@ -1,7 +1,7 @@
 package com.letsblog.ai.integration;
 
 import com.letsblog.common.client.IdentityClient;
-import com.letsblog.ai.client.LegacyApiBridgeClient;
+import com.letsblog.ai.client.IdentityBridgeClient;
 import com.letsblog.common.testfixtures.AuthorizationMatrixContract;
 import com.letsblog.common.testfixtures.AuthorizationMatrixContract.Endpoint;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
@@ -58,7 +58,7 @@ class AuthorizationMatrixIntegrationTest {
     private IdentityClient identityClient;
 
     @MockitoBean
-    private LegacyApiBridgeClient legacyApiBridgeClient;
+    private IdentityBridgeClient identityBridgeClient;
 
     /**
      * ai-serviceがgateway経由で外部へ公開している全エンドポイント(gatewayの{@code ai}ルート:
@@ -88,8 +88,20 @@ class AuthorizationMatrixIntegrationTest {
                 // -- GenerationJobController --
                 new Endpoint("GET", "/api/generation-jobs"),
                 new Endpoint("GET", "/api/generation-jobs/1"),
-                new Endpoint("POST", "/api/generation-jobs"),
-                new Endpoint("PATCH", "/api/generation-jobs/1"),
+
+                // -- InternalGenerationJobController --
+                // 作成・進捗更新は #905 で /api/internal/ai/generation-jobs へ移った。
+                // 一覧がその移動に追随しておらず、旧パスを載せたままになっていた(#583の検証で発覚)。
+                new Endpoint("POST", "/api/internal/ai/generation-jobs"),
+                new Endpoint("PATCH", "/api/internal/ai/generation-jobs/1"),
+
+                // -- AiController(画像生成プロンプト。issue #583でlegacy-apiから移設) --
+                new Endpoint("POST", "/api/projects/1/ai/generate-image-prompt"),
+
+                // -- ProjectBraveSearchApiKeyController(issue #583でlegacy-apiから移設) --
+                new Endpoint("GET", "/api/projects/1/api-keys/brave-search-api-key"),
+                new Endpoint("PUT", "/api/projects/1/api-keys/brave-search-api-key"),
+                new Endpoint("DELETE", "/api/projects/1/api-keys/brave-search-api-key"),
 
                 // -- ArticlePlanController --
                 new Endpoint("POST", "/api/projects/1/article-plan/chat"),

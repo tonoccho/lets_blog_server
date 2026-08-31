@@ -25,7 +25,7 @@ import java.util.List;
  * Project/Site(CMS)ドメインはこのstageではまだlegacy-apiに残っており、project-serviceの
  * lbs_projectスキーマ上のsitesテーブルは空のスキーマ先行状態(V1マイグレーションのコメント参照)のため、
  * 実データを持つlegacy-api側のSiteを本サービスから直接クロススキーマ参照することはADR-0004により
- * できない。TODO(#577 stage 3): legacy-apiへの内部ブリッジ(LegacyApiBridgeClientと同種)経由で
+ * できない。TODO(#577 stage 3): legacy-apiへの内部ブリッジ(IdentityBridgeClientと同種)経由で
  * サイト参照チェックを復元する。それまでの間、削除時にサイトから参照中かどうかの検証は行われない
  * (既知の暫定的な退行。実装時の判断はPRの説明を参照)。
  */

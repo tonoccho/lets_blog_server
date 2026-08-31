@@ -15,7 +15,9 @@ import java.time.Duration;
  *
  * <p>サービス抽出に伴い対応するprobeを追加していく。#561でidentity-serviceを、
  * #643でcontent/media/ai/analytics/log-writerを追加した。#743でplatform/project/publishingを
- * 追加し、{@code services/}配下の全サービス(gatewayを除く10個)が揃った。
+ * 追加し、{@code services/}配下の全サービスが揃った。#583でlegacy-apiを削除したのに伴い、
+ * そのprobe({@code legacyApiHealthIndicator}、廃止した{@code app.gateway.fallback-uri}を
+ * 参照していた)も外し、現在はgatewayを除く9サービスを対象とする。
  *
  * <p>この3つが漏れていたのは、サービス新設時にルート定義({@code application.yml})は
  * 追加されるのに、集約ヘルスチェックへの追加が別の場所にあって忘れられるため。同型の漏れは
@@ -26,13 +28,6 @@ import java.time.Duration;
  */
 @Configuration
 public class DownstreamHealthConfig {
-
-    @Bean
-    public ReactiveHealthIndicator legacyApiHealthIndicator(
-            WebClient gatewayWebClient,
-            @Value("${app.gateway.fallback-uri}") String legacyApiUri) {
-        return downstreamHealthIndicator(gatewayWebClient, legacyApiUri);
-    }
 
     @Bean
     public ReactiveHealthIndicator identityServiceHealthIndicator(
@@ -76,11 +71,12 @@ public class DownstreamHealthConfig {
         return downstreamHealthIndicator(gatewayWebClient, logServiceUri);
     }
 
-    // 以下3つの既定URIは、ルート定義(application.yml)が使う ${PROJECT_SERVICE_URI:http://api:8080}
-    // のような「未設定ならlegacy-apiへフォールバック」とは意図的に変えてある(issue #743)。
-    // ルーティングでは移設途中のサービスをlegacy-apiへ落とすのが正しいが、ヘルスチェックで同じことを
-    // すると legacy-api の状態を project/publishing/platform の名前で報告してしまい、
-    // 「3サービスが落ちているのに集約ヘルスがUP」という誤報になる。未設定ならDOWNになる方が正しい。
+    // 以下3つの既定URIが実サービスのホストを指しているのは #743 の対応。当時のルート定義は
+    // ${PROJECT_SERVICE_URI:http://api:8080} のように「未設定ならlegacy-apiへフォールバック」
+    // していたが、ヘルスチェックで同じことをすると legacy-api の状態を project/publishing/platform
+    // の名前で報告してしまい、「3サービスが落ちているのに集約ヘルスがUP」という誤報になる。
+    // issue #583 で legacy-api を削除し、ルート定義側の既定値も実サービスのホストへ揃えたため、
+    // 現在は両者の方針が一致している。
     @Bean
     public ReactiveHealthIndicator projectServiceHealthIndicator(
             WebClient gatewayWebClient,

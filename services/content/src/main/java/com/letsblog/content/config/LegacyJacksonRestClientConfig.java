@@ -6,7 +6,7 @@ import org.springframework.web.client.RestClient;
 
 /**
  * Boot 4ではRestClientの既定JSONコンバータがJackson3(tools.jackson)になったが、本サービスの
- * 内部ブリッジクライアント群(LegacyApiBridgeClient/IdentityClient/MediaRenderClient等)は
+ * 内部ブリッジクライアント群(ProjectBridgeClient/IdentityClient/MediaRenderClient等)は
  * com.fasterxml.jackson.databind.JsonNode/ObjectMapperでレスポンスを組み立てる箇所がある。
  * Jackson3のコンバータはJsonNode.class(Jackson2)を誤って受理した上でデシリアライズに失敗するため、
  * 各クライアントの構築時にJackson3コンバータを外し、Jackson2コンバータへ差し替える

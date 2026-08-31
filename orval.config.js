@@ -3,8 +3,8 @@
 // openapi/<サービス名>.json として取得したうえで、このファイル1回の実行(`npx orval`)で
 // 全ターゲットをまとめて生成する。
 //
-// この Issue (#555) の時点ではサービスは legacy-api のみ。将来のサービス抽出Issue
-// (Phase 19)で、下のコメント例のようにターゲットを追加していく
+// #555 の時点ではサービスは legacy-api のみだったが、Phase 19 のサービス抽出で分割され、
+// issue #583 で legacy-api 自体が削除された。現在は9サービスがターゲット
 // (docs/API_CLIENT_GENERATION.md 参照)。
 const commonOutput = {
   client: 'fetch',
@@ -14,17 +14,6 @@ const commonOutput = {
 };
 
 module.exports = {
-  legacyApi: {
-    input: {
-      target: './openapi/legacy-api.json',
-    },
-    output: {
-      ...commonOutput,
-      target: './sdk/api-client/src/generated/legacy-api',
-      baseUrl: 'http://localhost:8080',
-    },
-  },
-
   // ログの所有権をlog-writerへ完全移管(#572)。読み取りAPI(監査ログ・操作ログ・
   // フロントエンドエラーログ)をlog-writerへ移設したことに伴うターゲット追加。
   logWriter: {

@@ -1,6 +1,6 @@
 package com.letsblog.content.service;
 
-import com.letsblog.content.client.LegacyApiBridgeClient;
+import com.letsblog.content.client.ProjectBridgeClient;
 import com.letsblog.content.dto.TagDesignColors;
 import com.letsblog.content.markdown.MarkdownRenderer;
 import org.springframework.stereotype.Service;
@@ -11,7 +11,7 @@ import org.springframework.stereotype.Service;
  * flexmarkが行う(MarkdownRenderer)。CSSは統合CSSバンドル経由でのみ提供し、記事本文へは注入しない
  * (CustomTagRenderServiceと同じ方針)。legacy-apiのTocStyleRenderServiceと同じ実装(issue #576で
  * content-serviceへ移管)。tag_design_settingsテーブル自体はlegacy-apiに残るドメインのため、
- * カスタムHTMLテンプレートの解決は{@link LegacyApiBridgeClient}経由の内部ブリッジで行う。
+ * カスタムHTMLテンプレートの解決は{@link ProjectBridgeClient}経由の内部ブリッジで行う。
  *
  * カスタムHTMLテンプレート(issue #165)は、flexmarkが目次を展開した後のHTML全体に対して
  * 後処理で適用する(applyHtmlTemplate)。目次はH2〜H4の見出し構造から動的に生成される
@@ -23,11 +23,11 @@ public class TocStyleRenderService {
 
     private static final String TOC_LIST_OPEN_TAG = "<ul class=\"" + MarkdownRenderer.TOC_LIST_CLASS + "\">";
 
-    private final LegacyApiBridgeClient legacyApiBridgeClient;
+    private final ProjectBridgeClient projectBridgeClient;
     private final CurrentActorService currentActorService;
 
-    public TocStyleRenderService(LegacyApiBridgeClient legacyApiBridgeClient, CurrentActorService currentActorService) {
-        this.legacyApiBridgeClient = legacyApiBridgeClient;
+    public TocStyleRenderService(ProjectBridgeClient projectBridgeClient, CurrentActorService currentActorService) {
+        this.projectBridgeClient = projectBridgeClient;
         this.currentActorService = currentActorService;
     }
 
@@ -41,7 +41,7 @@ public class TocStyleRenderService {
         if (html == null || html.isEmpty()) {
             return html;
         }
-        String template = legacyApiBridgeClient
+        String template = projectBridgeClient
                 .resolveTagDesign(projectId, "TOC", currentActorService.getAuthorizationHeader())
                 .htmlTemplate();
         if (template == null) {

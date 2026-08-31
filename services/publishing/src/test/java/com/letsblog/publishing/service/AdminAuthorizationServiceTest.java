@@ -1,6 +1,6 @@
 package com.letsblog.publishing.service;
 
-import com.letsblog.publishing.client.LegacyApiBridgeClient;
+import com.letsblog.publishing.client.IdentityBridgeClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -18,7 +18,7 @@ import static org.mockito.Mockito.when;
  * {@code requireProjectMemberOrAdmin}はArticlePreviewControllerの移設に伴い追加した(issue #712)。
  * content-service/ai-service側の同名テストと同じ観点(admin許可/非admin拒否/プロジェクトメンバー
  * 許可/非メンバー拒否/操作者未解決)を、本サービスの依存関係(CurrentActorService経由の
- * identity-service委譲、LegacyApiBridgeClient経由のプロジェクトメンバー判定)に合わせて検証する。
+ * identity-service委譲、IdentityBridgeClient経由のプロジェクトメンバー判定)に合わせて検証する。
  */
 @ExtendWith(MockitoExtension.class)
 class AdminAuthorizationServiceTest {
@@ -27,13 +27,13 @@ class AdminAuthorizationServiceTest {
     private CurrentActorService currentActorService;
 
     @Mock
-    private LegacyApiBridgeClient legacyApiBridgeClient;
+    private IdentityBridgeClient identityBridgeClient;
 
     private AdminAuthorizationService service;
 
     @BeforeEach
     void setUp() {
-        service = new AdminAuthorizationService(currentActorService, legacyApiBridgeClient);
+        service = new AdminAuthorizationService(currentActorService, identityBridgeClient);
     }
 
     @Test
@@ -56,14 +56,14 @@ class AdminAuthorizationServiceTest {
 
         assertDoesNotThrow(() -> service.requireProjectMemberOrAdmin(1L));
         // adminは所属を問わずバイパスするため、legacy-apiへの問い合わせ自体を行わない。
-        verifyNoInteractions(legacyApiBridgeClient);
+        verifyNoInteractions(identityBridgeClient);
     }
 
     @Test
     void requireProjectMemberOrAdmin_プロジェクトメンバーなら許可() {
         when(currentActorService.isAdmin()).thenReturn(false);
         when(currentActorService.getCurrentActorId()).thenReturn(10L);
-        when(legacyApiBridgeClient.isProjectMember(1L, 10L)).thenReturn(true);
+        when(identityBridgeClient.isProjectMember(1L, 10L)).thenReturn(true);
 
         assertDoesNotThrow(() -> service.requireProjectMemberOrAdmin(1L));
     }
@@ -72,7 +72,7 @@ class AdminAuthorizationServiceTest {
     void requireProjectMemberOrAdmin_メンバーでなければ例外() {
         when(currentActorService.isAdmin()).thenReturn(false);
         when(currentActorService.getCurrentActorId()).thenReturn(10L);
-        when(legacyApiBridgeClient.isProjectMember(1L, 10L)).thenReturn(false);
+        when(identityBridgeClient.isProjectMember(1L, 10L)).thenReturn(false);
 
         assertThrows(ForbiddenException.class, () -> service.requireProjectMemberOrAdmin(1L));
     }
@@ -83,14 +83,14 @@ class AdminAuthorizationServiceTest {
         when(currentActorService.getCurrentActorId()).thenReturn(null);
 
         assertThrows(ForbiddenException.class, () -> service.requireProjectMemberOrAdmin(1L));
-        verifyNoInteractions(legacyApiBridgeClient);
+        verifyNoInteractions(identityBridgeClient);
     }
 
     @Test
     void requireProjectMemberOrAdminForSite_プロジェクトに紐付くサイトは通常のメンバー判定に委ねる() {
         when(currentActorService.isAdmin()).thenReturn(false);
         when(currentActorService.getCurrentActorId()).thenReturn(10L);
-        when(legacyApiBridgeClient.isProjectMember(1L, 10L)).thenReturn(true);
+        when(identityBridgeClient.isProjectMember(1L, 10L)).thenReturn(true);
 
         assertDoesNotThrow(() -> service.requireProjectMemberOrAdminForSite(1L));
     }
@@ -103,7 +103,7 @@ class AdminAuthorizationServiceTest {
 
         assertDoesNotThrow(() -> service.requireProjectMemberOrAdminForSite(null));
         // projectIdがnullの状態でメンバー判定へ進むと、legacy-apiへnullのprojectIdを送ってしまう。
-        verifyNoInteractions(legacyApiBridgeClient);
+        verifyNoInteractions(identityBridgeClient);
     }
 
     @Test
@@ -111,6 +111,6 @@ class AdminAuthorizationServiceTest {
         when(currentActorService.isAdmin()).thenReturn(false);
 
         assertThrows(ForbiddenException.class, () -> service.requireProjectMemberOrAdminForSite(null));
-        verifyNoInteractions(legacyApiBridgeClient);
+        verifyNoInteractions(identityBridgeClient);
     }
 }

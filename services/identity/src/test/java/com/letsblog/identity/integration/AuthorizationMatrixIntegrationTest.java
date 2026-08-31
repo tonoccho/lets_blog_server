@@ -80,7 +80,23 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("DELETE", "/api/users/1/roles/admin"),
 
                 // -- RoleController --
-                new Endpoint("GET", "/api/roles"));
+                new Endpoint("GET", "/api/roles"),
+
+                // -- ProjectUserController(issue #583でlegacy-apiから移設) --
+                new Endpoint("GET", "/api/projects/1/users"),
+                new Endpoint("POST", "/api/projects/1/users"),
+                new Endpoint("PUT", "/api/projects/1/users/1"),
+                new Endpoint("DELETE", "/api/projects/1/users/1"),
+                new Endpoint("GET", "/api/project-users"),
+
+                // -- 内部ブリッジ(InternalProjectUserController、issue #583) --
+                new Endpoint("GET", "/api/internal/identity/projects/1/members/1"),
+                new Endpoint("GET", "/api/internal/identity/users/1/project-ids"),
+                new Endpoint("GET", "/api/internal/identity/roles"),
+                new Endpoint("GET", "/api/internal/identity/user-site-authors/1/1"),
+                new Endpoint("POST", "/api/internal/identity/user-site-authors"),
+                new Endpoint("POST", "/api/internal/identity/project-users/1/sites/1/reconcile-roles"),
+                new Endpoint("GET", "/api/internal/identity/users/1/github-token"));
     }
 
     @ParameterizedTest(name = "[{index}] {0}")

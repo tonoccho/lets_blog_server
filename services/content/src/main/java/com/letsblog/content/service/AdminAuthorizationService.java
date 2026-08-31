@@ -2,7 +2,8 @@ package com.letsblog.content.service;
 
 import java.util.Set;
 import java.util.Optional;
-import com.letsblog.content.client.LegacyApiBridgeClient;
+import com.letsblog.content.client.IdentityBridgeClient;
+import com.letsblog.content.client.ProjectBridgeClient;
 import org.springframework.stereotype.Service;
 
 /**
@@ -12,19 +13,23 @@ import org.springframework.stereotype.Service;
  * <p>admin判定はCurrentActorService経由でidentity-serviceへ委ねる(log-writer/media-service/
  * ai-serviceと同じ暫定策)。プロジェクトメンバー判定は、project_userテーブルがproject-serviceが
  * 未抽出のままlegacy-apiに残っている(ADR-0004によりクロススキーマアクセス不可)ため、legacy-apiの
- * 内部ブリッジ({@link LegacyApiBridgeClient#isProjectMember})経由で呼び出し元のBearerトークンを
+ * 内部ブリッジ({@link IdentityBridgeClient#isProjectMember})経由で呼び出し元のBearerトークンを
  * 転送して問い合わせる。
  */
 @Service
 public class AdminAuthorizationService {
 
     private final CurrentActorService currentActorService;
-    private final LegacyApiBridgeClient legacyApiBridgeClient;
+    private final IdentityBridgeClient identityBridgeClient;
+    private final ProjectBridgeClient projectBridgeClient;
 
     public AdminAuthorizationService(
-            CurrentActorService currentActorService, LegacyApiBridgeClient legacyApiBridgeClient) {
+            CurrentActorService currentActorService,
+            IdentityBridgeClient identityBridgeClient,
+            ProjectBridgeClient projectBridgeClient) {
         this.currentActorService = currentActorService;
-        this.legacyApiBridgeClient = legacyApiBridgeClient;
+        this.identityBridgeClient = identityBridgeClient;
+        this.projectBridgeClient = projectBridgeClient;
     }
 
     public void requireAdmin() {
@@ -45,7 +50,7 @@ public class AdminAuthorizationService {
         if (actorId == null) {
             throw new ForbiddenException("この操作にはログインが必要です");
         }
-        if (!legacyApiBridgeClient.isProjectMember(projectId, actorId, currentActorService.getAuthorizationHeader())) {
+        if (!identityBridgeClient.isProjectMember(projectId, actorId, currentActorService.getAuthorizationHeader())) {
             throw new ForbiddenException("この操作にはプロジェクトメンバーまたはadmin権限が必要です");
         }
     }
@@ -64,7 +69,7 @@ public class AdminAuthorizationService {
         if (actorId == null) {
             throw new ForbiddenException("この操作にはログインが必要です");
         }
-        return Optional.of(Set.copyOf(legacyApiBridgeClient.accessibleSiteIds(
+        return Optional.of(Set.copyOf(projectBridgeClient.accessibleSiteIds(
                 actorId, currentActorService.getAuthorizationHeader())));
     }
 }

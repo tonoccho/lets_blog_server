@@ -1,7 +1,7 @@
 package com.letsblog.content.service;
 
 import com.letsblog.content.aop.AuditLog;
-import com.letsblog.content.client.LegacyApiBridgeClient;
+import com.letsblog.content.client.ProjectBridgeClient;
 import com.letsblog.content.domain.AuditLogAction;
 import com.letsblog.content.domain.CustomTag;
 import com.letsblog.content.domain.CustomTagFormat;
@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
  * legacy-apiのCustomTagServiceと同じ実装(issue #576でcontent-serviceへ移管)。
  * cssSelectorPrefixの解決先はProjectService(legacy-api)から本サービス自身が所有する
  * ProjectContentSettingsServiceへ、組み込みタグのデザイン色解決はTagDesignSettingService
- * (legacy-apiに残るドメイン、tag_design_settings)から{@link LegacyApiBridgeClient}経由の
+ * (legacy-apiに残るドメイン、tag_design_settings)から{@link ProjectBridgeClient}経由の
  * 内部ブリッジへ切り替えた。
  */
 @Service
@@ -36,7 +36,7 @@ public class CustomTagService {
 
     private final CustomTagRepository customTagRepository;
     private final AdminAuthorizationService adminAuthorizationService;
-    private final LegacyApiBridgeClient legacyApiBridgeClient;
+    private final ProjectBridgeClient projectBridgeClient;
     private final CurrentActorService currentActorService;
     private final TocStyleRenderService tocStyleRenderService;
     private final BlogCardTagRenderService blogCardTagRenderService;
@@ -45,7 +45,7 @@ public class CustomTagService {
 
     public CustomTagService(CustomTagRepository customTagRepository,
                              AdminAuthorizationService adminAuthorizationService,
-                             LegacyApiBridgeClient legacyApiBridgeClient,
+                             ProjectBridgeClient projectBridgeClient,
                              CurrentActorService currentActorService,
                              TocStyleRenderService tocStyleRenderService,
                              BlogCardTagRenderService blogCardTagRenderService,
@@ -53,7 +53,7 @@ public class CustomTagService {
                              ProjectContentSettingsService projectContentSettingsService) {
         this.customTagRepository = customTagRepository;
         this.adminAuthorizationService = adminAuthorizationService;
-        this.legacyApiBridgeClient = legacyApiBridgeClient;
+        this.projectBridgeClient = projectBridgeClient;
         this.currentActorService = currentActorService;
         this.tocStyleRenderService = tocStyleRenderService;
         this.blogCardTagRenderService = blogCardTagRenderService;
@@ -174,7 +174,7 @@ public class CustomTagService {
     private String buildEmbedTagCss(Long projectId) {
         StringBuilder sb = new StringBuilder();
         for (EmbedTagType tagType : EmbedTagType.values()) {
-            TagDesignColors colors = legacyApiBridgeClient.toColors(legacyApiBridgeClient.resolveTagDesign(
+            TagDesignColors colors = projectBridgeClient.toColors(projectBridgeClient.resolveTagDesign(
                     projectId, tagType.name(), currentActorService.getAuthorizationHeader()));
             String style = switch (tagType) {
                 case TOC -> tocStyleRenderService.buildStyle(colors);

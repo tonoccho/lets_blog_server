@@ -1,6 +1,6 @@
 package com.letsblog.publishing.service;
 
-import com.letsblog.publishing.client.LegacyApiBridgeClient;
+import com.letsblog.publishing.client.MediaSettingsBridgeClient;
 import com.letsblog.publishing.cms.CmsType;
 import com.letsblog.publishing.domain.BulkOperationLog;
 import com.letsblog.publishing.domain.BulkOperationSourceType;
@@ -55,13 +55,13 @@ class BulkManagementServiceTest {
     private ImageResizeService imageResizeService;
 
     @Mock
-    private LegacyApiBridgeClient legacyApiBridgeClient;
+    private MediaSettingsBridgeClient mediaSettingsBridgeClient;
 
     private BulkManagementService service() {
         return new BulkManagementService(
                 bulkManagementClient,
                 bulkUploadStorageService, siteService, sshOperations, cmsAdapterFactory,
-                projectService, imageResizeService, legacyApiBridgeClient);
+                projectService, imageResizeService, mediaSettingsBridgeClient);
     }
 
     private Project buildProject(Long localSiteId, Long testSiteId, Long productionSiteId) {
@@ -545,7 +545,7 @@ class BulkManagementServiceTest {
 
         byte[] originalData = new byte[]{1, 2, 3};
         byte[] resizedData = new byte[]{9, 9, 9};
-        when(legacyApiBridgeClient.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
+        when(mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
         when(imageResizeService.resizeToLongEdge(originalData, "image/png", 1300, true))
                 .thenReturn(new ImageResizeService.ResizeResult(resizedData, "image/png"));
 
@@ -583,7 +583,7 @@ class BulkManagementServiceTest {
 
         byte[] originalData = new byte[]{1, 2, 3};
         byte[] resizedData = new byte[]{9, 9, 9};
-        when(legacyApiBridgeClient.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
+        when(mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
         when(imageResizeService.resizeToLongEdge(originalData, "image/png", 1300, true))
                 .thenReturn(new ImageResizeService.ResizeResult(resizedData, "image/jpeg"));
 
@@ -610,7 +610,7 @@ class BulkManagementServiceTest {
         when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
         when(siteService.getCredentials("local-site")).thenReturn(
                 new com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "SSH"));
-        when(legacyApiBridgeClient.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
+        when(mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
         when(imageResizeService.resizeToLongEdge(any(), any(), eq(1300), eq(true)))
                 .thenReturn(new ImageResizeService.ResizeResult(new byte[]{1}, "image/png"));
         com.letsblog.publishing.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);

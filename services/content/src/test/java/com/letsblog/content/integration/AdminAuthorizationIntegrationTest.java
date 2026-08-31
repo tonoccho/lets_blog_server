@@ -1,9 +1,11 @@
 package com.letsblog.content.integration;
 
 import com.letsblog.common.client.ActorProfile;
+import java.util.Optional;
 import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
-import com.letsblog.content.client.LegacyApiBridgeClient;
+import com.letsblog.content.client.IdentityBridgeClient;
+import com.letsblog.content.client.ProjectBridgeClient;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,11 +32,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * legacy-apiの{@code AuthorizationMatrixIntegrationTest}と同じ観点((a)JWTが無効なら401、
  * (b)/(c)admin/プロジェクトメンバーの認可判定は403で表現される)を、content-serviceの認可経路
  * (JWTのsubからではなく、CurrentActorServiceがAuthorizationヘッダーをidentity-serviceへ転送して
- * 解決する。LegacyApiBridgeClient経由のプロジェクトメンバー判定)に合わせて{@link
+ * 解決する。IdentityBridgeClient経由のプロジェクトメンバー判定)に合わせて{@link
  * com.letsblog.content.controller.ArticlePreviewController#render}で検証する。
  *
- * <p>identity-service/legacy-apiは外部境界のため、legacy-apiのテストと同様に{@link IdentityClient}/
- * {@link LegacyApiBridgeClient}を{@code @MockitoBean}で置き換える(ADR-0006のモック方針、
+ * <p>identity-service/identity-service/project-serviceは外部境界のため、legacy-apiのテストと同様に{@link IdentityClient}/
+ * {@link IdentityBridgeClient}/{@link ProjectBridgeClient}を{@code @MockitoBean}で置き換える(ADR-0006のモック方針、
  * 実際のサービス間HTTP呼び出しはまだWireMock導入前のため)。
  */
 @SpringBootTest
@@ -56,7 +58,10 @@ class AdminAuthorizationIntegrationTest {
     private IdentityClient identityClient;
 
     @MockitoBean
-    private LegacyApiBridgeClient legacyApiBridgeClient;
+    private IdentityBridgeClient identityBridgeClient;
+
+    @MockitoBean
+    private ProjectBridgeClient projectBridgeClient;
 
     @Test
     @DisplayName("Authorizationヘッダーなしは401(issue #772でSecurityConfigの認証ゲートを復元したため、"
@@ -82,8 +87,9 @@ class AdminAuthorizationIntegrationTest {
     @DisplayName("有効なJWTでも非member・非adminなら403")
     void 非メンバー非adminは403() throws Exception {
         when(jwtDecoder.decode("member-check-jwt")).thenReturn(JwtTestFixtures.jwt("sub-1", "user"));
-        when(identityClient.fetchProfile("Bearer member-check-jwt")).thenReturn(new ActorProfile(10L, "user"));
-        when(legacyApiBridgeClient.isProjectMember(42L, 10L, "Bearer member-check-jwt")).thenReturn(false);
+        when(identityClient.lookupProfile("Bearer member-check-jwt"))
+                .thenReturn(Optional.of(new ActorProfile(10L, "user")));
+        when(identityBridgeClient.isProjectMember(42L, 10L, "Bearer member-check-jwt")).thenReturn(false);
 
         mockMvc.perform(post(RENDER_PATH)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer member-check-jwt")
@@ -96,14 +102,15 @@ class AdminAuthorizationIntegrationTest {
     @DisplayName("プロジェクトメンバーなら403にならない")
     void プロジェクトメンバーは403にならない() throws Exception {
         when(jwtDecoder.decode("member-jwt")).thenReturn(JwtTestFixtures.jwt("sub-2", "user"));
-        when(identityClient.fetchProfile("Bearer member-jwt")).thenReturn(new ActorProfile(11L, "user"));
-        when(legacyApiBridgeClient.isProjectMember(42L, 11L, "Bearer member-jwt")).thenReturn(true);
+        when(identityClient.lookupProfile("Bearer member-jwt"))
+                .thenReturn(Optional.of(new ActorProfile(11L, "user")));
+        when(identityBridgeClient.isProjectMember(42L, 11L, "Bearer member-jwt")).thenReturn(true);
         // 認可通過後、目次(TOC)のカスタムHTMLテンプレート取得(TocStyleRenderService)もlegacy-apiへの
         // 内部ブリッジを経由するため、認可の検証対象ではないがnullを返さないようスタブしておく
         // (htmlTemplate()がnullなら未カスタマイズとしてそのまま返す実装だが、レスポンス自体はnullを
         // 許容しないため)。
-        when(legacyApiBridgeClient.resolveTagDesign(anyLong(), anyString(), anyString()))
-                .thenReturn(new LegacyApiBridgeClient.TagDesignResponse(null, null, null, null, null));
+        when(projectBridgeClient.resolveTagDesign(anyLong(), anyString(), anyString()))
+                .thenReturn(new ProjectBridgeClient.TagDesignResponse(null, null, null, null, null));
 
         mockMvc.perform(post(RENDER_PATH)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer member-jwt")
@@ -116,9 +123,10 @@ class AdminAuthorizationIntegrationTest {
     @DisplayName("adminなら所属に関わらず403にならない(プロジェクトメンバー判定はバイパスされる)")
     void adminは403にならない() throws Exception {
         when(jwtDecoder.decode("admin-jwt")).thenReturn(JwtTestFixtures.jwt("sub-3", "admin"));
-        when(identityClient.fetchProfile("Bearer admin-jwt")).thenReturn(new ActorProfile(1L, "admin"));
-        when(legacyApiBridgeClient.resolveTagDesign(anyLong(), anyString(), anyString()))
-                .thenReturn(new LegacyApiBridgeClient.TagDesignResponse(null, null, null, null, null));
+        when(identityClient.lookupProfile("Bearer admin-jwt"))
+                .thenReturn(Optional.of(new ActorProfile(1L, "admin")));
+        when(projectBridgeClient.resolveTagDesign(anyLong(), anyString(), anyString()))
+                .thenReturn(new ProjectBridgeClient.TagDesignResponse(null, null, null, null, null));
 
         mockMvc.perform(post(RENDER_PATH)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer admin-jwt")

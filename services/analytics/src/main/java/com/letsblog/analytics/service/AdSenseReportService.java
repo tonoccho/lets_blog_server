@@ -2,7 +2,7 @@ package com.letsblog.analytics.service;
 
 import com.letsblog.analytics.adsense.AdSenseClient;
 import com.letsblog.analytics.adsense.AdSenseReport;
-import com.letsblog.analytics.client.LegacyApiBridgeClient;
+import com.letsblog.analytics.client.ProjectBridgeClient;
 import com.letsblog.analytics.dto.AdSenseReportResponse;
 import com.letsblog.common.crypto.CredentialCipher;
 import lombok.extern.slf4j.Slf4j;
@@ -22,7 +22,7 @@ public class AdSenseReportService {
     private static final String DATE_RANGE = "LAST_30_DAYS";
     private static final String PERIOD_LABEL = "過去30日間";
 
-    private final LegacyApiBridgeClient legacyApiBridgeClient;
+    private final ProjectBridgeClient projectBridgeClient;
     private final AnalyticsCredentialsService analyticsCredentialsService;
     private final AdSenseClient adSenseClient;
     private final AdminAuthorizationService adminAuthorizationService;
@@ -30,13 +30,13 @@ public class AdSenseReportService {
     private final CredentialCipher credentialCipher;
 
     public AdSenseReportService(
-            LegacyApiBridgeClient legacyApiBridgeClient,
+            ProjectBridgeClient projectBridgeClient,
             AnalyticsCredentialsService analyticsCredentialsService,
             AdSenseClient adSenseClient,
             AdminAuthorizationService adminAuthorizationService,
             CurrentActorService currentActorService,
             CredentialCipher credentialCipher) {
-        this.legacyApiBridgeClient = legacyApiBridgeClient;
+        this.projectBridgeClient = projectBridgeClient;
         this.analyticsCredentialsService = analyticsCredentialsService;
         this.adSenseClient = adSenseClient;
         this.adminAuthorizationService = adminAuthorizationService;
@@ -47,8 +47,8 @@ public class AdSenseReportService {
     @Transactional(readOnly = true)
     public AdSenseReportResponse getReport(Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        LegacyApiBridgeClient.ProjectEligibility eligibility =
-                legacyApiBridgeClient.getProjectEligibility(projectId, currentActorService.getAuthorizationHeader());
+        ProjectBridgeClient.ProjectEligibility eligibility =
+                projectBridgeClient.getProjectEligibility(projectId, currentActorService.getAuthorizationHeader());
         if (!analyticsCredentialsService.hasAdsenseCredentials(projectId) || !eligibility.hasProductionSite()) {
             return AdSenseReportResponse.notEligible();
         }

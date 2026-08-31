@@ -1,6 +1,6 @@
 package com.letsblog.content.service;
 
-import com.letsblog.content.client.LegacyApiBridgeClient;
+import com.letsblog.content.client.ProjectBridgeClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -26,18 +26,18 @@ class TocStyleRenderServiceTest {
             "<ul class=\"lb-toc-list\"><li><a href=\"#a\">A</a></li></ul>\n<h2 id=\"a\">A</h2>";
 
     @Mock
-    private LegacyApiBridgeClient legacyApiBridgeClient;
+    private ProjectBridgeClient projectBridgeClient;
 
     @Mock
     private CurrentActorService currentActorService;
 
     private TocStyleRenderService service() {
-        return new TocStyleRenderService(legacyApiBridgeClient, currentActorService);
+        return new TocStyleRenderService(projectBridgeClient, currentActorService);
     }
 
     private void stubTagDesign(String htmlTemplate) {
-        when(legacyApiBridgeClient.resolveTagDesign(any(), anyString(), any())).thenReturn(
-                new LegacyApiBridgeClient.TagDesignResponse("#fff", "#000", "#f00", null, htmlTemplate));
+        when(projectBridgeClient.resolveTagDesign(any(), anyString(), any())).thenReturn(
+                new ProjectBridgeClient.TagDesignResponse("#fff", "#000", "#f00", null, htmlTemplate));
     }
 
     @Test
@@ -46,7 +46,7 @@ class TocStyleRenderServiceTest {
 
         assertEquals(HTML_WITH_TOC, service().applyHtmlTemplate(HTML_WITH_TOC, null));
 
-        verify(legacyApiBridgeClient).resolveTagDesign(isNull(), anyString(), any());
+        verify(projectBridgeClient).resolveTagDesign(isNull(), anyString(), any());
     }
 
     @Test
@@ -66,6 +66,6 @@ class TocStyleRenderServiceTest {
         String result = service().applyHtmlTemplate(HTML_WITH_TOC, 1L);
 
         assertTrue(result.startsWith("<div class=\"custom\">"));
-        verify(legacyApiBridgeClient).resolveTagDesign(org.mockito.ArgumentMatchers.eq(1L), anyString(), any());
+        verify(projectBridgeClient).resolveTagDesign(org.mockito.ArgumentMatchers.eq(1L), anyString(), any());
     }
 }

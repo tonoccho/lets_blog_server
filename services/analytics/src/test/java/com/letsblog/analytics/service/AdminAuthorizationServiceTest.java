@@ -1,6 +1,6 @@
 package com.letsblog.analytics.service;
 
-import com.letsblog.analytics.client.LegacyApiBridgeClient;
+import com.letsblog.analytics.client.IdentityBridgeClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -17,7 +17,7 @@ import static org.mockito.Mockito.when;
  * requireProjectMemberOrAdmin、issue #578)の単体テスト(issue #644)。legacy-apiの
  * {@code com.letsblog.api.service.AdminAuthorizationServiceTest}と同じ観点(admin許可/非admin拒否/
  * プロジェクトメンバー許可/非メンバー拒否)を、本サービスの依存関係(CurrentActorService経由の
- * identity-service委譲、LegacyApiBridgeClient経由のプロジェクトメンバー判定)に合わせて検証する。
+ * identity-service委譲、IdentityBridgeClient経由のプロジェクトメンバー判定)に合わせて検証する。
  */
 @ExtendWith(MockitoExtension.class)
 class AdminAuthorizationServiceTest {
@@ -26,13 +26,13 @@ class AdminAuthorizationServiceTest {
     private CurrentActorService currentActorService;
 
     @Mock
-    private LegacyApiBridgeClient legacyApiBridgeClient;
+    private IdentityBridgeClient identityBridgeClient;
 
     private AdminAuthorizationService service;
 
     @BeforeEach
     void setUp() {
-        service = new AdminAuthorizationService(currentActorService, legacyApiBridgeClient);
+        service = new AdminAuthorizationService(currentActorService, identityBridgeClient);
     }
 
     @Test
@@ -61,7 +61,7 @@ class AdminAuthorizationServiceTest {
         when(currentActorService.isAdmin()).thenReturn(false);
         when(currentActorService.getCurrentActorId()).thenReturn(10L);
         when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer xxx");
-        when(legacyApiBridgeClient.isProjectMember(1L, 10L, "Bearer xxx")).thenReturn(true);
+        when(identityBridgeClient.isProjectMember(1L, 10L, "Bearer xxx")).thenReturn(true);
 
         assertDoesNotThrow(() -> service.requireProjectMemberOrAdmin(1L));
     }
@@ -71,7 +71,7 @@ class AdminAuthorizationServiceTest {
         when(currentActorService.isAdmin()).thenReturn(false);
         when(currentActorService.getCurrentActorId()).thenReturn(10L);
         when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer xxx");
-        when(legacyApiBridgeClient.isProjectMember(1L, 10L, "Bearer xxx")).thenReturn(false);
+        when(identityBridgeClient.isProjectMember(1L, 10L, "Bearer xxx")).thenReturn(false);
 
         assertThrows(ForbiddenException.class, () -> service.requireProjectMemberOrAdmin(1L));
     }

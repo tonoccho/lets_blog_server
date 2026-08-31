@@ -59,7 +59,7 @@ class AuthorizationCoverageContractTest {
     void 全サービスで無認可はゼロ() {
         // #830 で全エンドポイントの認可要否を決定し実装へ反映した。以降どのサービスでも
         // 無認可エンドポイントは1件も無いのが正しい状態なので、そこを固定する。
-        for (String service : List.of("ai", "analytics", "content", "identity", "legacy-api",
+        for (String service : List.of("ai", "analytics", "content", "identity",
                 "log-writer", "media", "platform", "project", "publishing")) {
             assertTrue(AuthorizationCoverageContract.currentUnauthorized(service).isEmpty(),
                     service + " に認可チェックの無いエンドポイントが残っている: "

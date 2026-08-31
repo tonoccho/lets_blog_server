@@ -54,16 +54,19 @@ app:
   # Markdownレンダリング・postsテーブルの読み書き(content-serviceが所有、#575設計判断1)の
   # 内部ブリッジ呼び出し先(ContentServiceClient)。
   content-service-uri: ${CONTENT_SERVICE_URI:http://localhost:8080}
-  # 著者マッピング(user_site_authors、legacy-apiが所有、#575設計判断4)の内部ブリッジ呼び出し先
-  # (LegacyApiBridgeClient)。project_image_settings(投稿画像リサイズのプロジェクト別デフォルト、
-  # AI画像生成ドメインのためlegacy-apiに残る)の解決にも使う。
-  legacy-api-uri: ${LEGACY_API_URI:http://localhost:8080}
+  # 著者マッピング(user_site_authors、#575設計判断4)とプロジェクトメンバー判定(project_users)の
+  # 内部ブリッジ呼び出し先(IdentityBridgeClient)。issue #583でこれらの所有権がlegacy-apiから
+  # identity-serviceへ移ったため、legacy-api-uri は不要になった。
+  # project_image_settings(投稿画像リサイズのプロジェクト別デフォルト)は #583 で
+  # media-service が所有するようになったため、下の media-service-uri 経由で解決する
+  # (MediaSettingsBridgeClient)。
   identity-service-uri: ${IDENTITY_SERVICE_URI:http://localhost:8080}
   # [plantuml]/```plantumlの埋め込み(PlantUmlEmbedService/PlantUmlTagRenderService)が実際の
   # レンダリングを委譲する呼び出し先(media-serviceが所有、issue #573)。
   media-service-uri: ${MEDIA_SERVICE_URI:http://localhost:8080}
-  # 記事投稿時に画像をリサイズする長編の目標px(project_image_settings未設定時のフォールバック値)。
-  # legacy-apiのapp.default-article-image-long-edge-pxと同じ既定値(1300)。
+  # 記事投稿時に画像をリサイズする長編の目標px(media-serviceへ問い合わせられない
+  # projectId=null のときのフォールバック値)。media-serviceのapp.default-article-image-long-edge-px
+  # と同じ既定値(1300)。
   default-article-image-long-edge-px: ${DEFAULT_ARTICLE_IMAGE_LONG_EDGE_PX:1300}
   # 常駐wordpressコンテナ内の内部限定プロビジョニングエージェント(wordpress/provision-agent)の
   # `/wp-cli/*`エンドポイント呼び出し先(WordPressAgentOperations)。legacy-apiのapp.wordpress-

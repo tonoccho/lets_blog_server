@@ -10,7 +10,7 @@
 # ループバックに限定しているのは、外部へ DB を晒さないため。
 #
 #   docker compose -f docker-compose.yml -f docker-compose.host-tests.yml up -d mysql
-#   ./gradlew :services:legacy-api:test
+#   ./gradlew :services:content:test   # 等、DBを使うサービスのテスト
 #
 # 注意: 127.0.0.1:3306 を使うコンテナ(loop-engineering の lbs-test-db など)が
 # 既に起動していると衝突する。どちらか一方だけを起動すること。

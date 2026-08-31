@@ -1,7 +1,7 @@
 package com.letsblog.project.service;
 
 import com.letsblog.project.client.CmsProvisioningBridgeClient;
-import com.letsblog.project.client.LegacyApiBridgeClient;
+import com.letsblog.project.client.IdentityBridgeClient;
 import com.letsblog.project.domain.Project;
 import com.letsblog.project.domain.Site;
 import com.letsblog.project.provisioning.WordPressSyncClient;
@@ -21,7 +21,7 @@ import static org.mockito.Mockito.when;
 /**
  * ProjectEnvironmentSyncServiceの回帰テスト(issue #577 stage2、legacy-apiから移設)。
  * project_userテーブルはまだlegacy-apiに残るため、DB同期後のロール再整合が
- * LegacyApiBridgeClient経由でlegacy-apiへ依頼されることを検証する。
+ * IdentityBridgeClient経由でidentity-serviceへ依頼されることを検証する。
  */
 @ExtendWith(MockitoExtension.class)
 class ProjectEnvironmentSyncServiceTest {
@@ -37,13 +37,13 @@ class ProjectEnvironmentSyncServiceTest {
     @Mock
     private CmsProvisioningBridgeClient bridgeClient;
     @Mock
-    private LegacyApiBridgeClient legacyApiBridgeClient;
+    private IdentityBridgeClient identityBridgeClient;
     @Mock
     private CurrentActorService currentActorService;
 
     private ProjectEnvironmentSyncService service() {
         return new ProjectEnvironmentSyncService(projectRepository, siteRepository, siteService, syncClient,
-                bridgeClient, legacyApiBridgeClient, currentActorService);
+                bridgeClient, identityBridgeClient, currentActorService);
     }
 
     @Test
@@ -89,7 +89,7 @@ class ProjectEnvironmentSyncServiceTest {
 
         verify(syncClient).sync(new WordPressSyncClient.SyncCommand(
                 "from-slug", "wp_from", "to-slug", "wp_to", List.of("db", "themes")));
-        verify(legacyApiBridgeClient).reconcileRolesForSite(1L, 20L, "Bearer token");
+        verify(identityBridgeClient).reconcileRolesForSite(1L, 20L, "Bearer token");
     }
 
     @Test

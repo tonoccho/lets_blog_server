@@ -1,6 +1,6 @@
 package com.letsblog.content.controller;
 
-import com.letsblog.content.client.LegacyApiBridgeClient;
+import com.letsblog.content.client.IdentityBridgeClient;
 import com.letsblog.content.domain.PostStatus;
 import com.letsblog.content.dto.PostStatusOptionResponse;
 import com.letsblog.content.dto.RoleOptionResponse;
@@ -19,18 +19,18 @@ import java.util.List;
  * クライアント(Web/VS Code拡張)がUIの選択肢・表示名をサーバー側の正準値と一致させるための
  * メタデータAPI(issue #472)。特定の{@code Permission}は要求せず、認証済みactorであれば参照できる。
  * legacy-apiのMetadataControllerと同じ実装(issue #576でcontent-serviceへ移管)。rolesテーブルは
- * legacy-apiに残るドメインのため、{@link LegacyApiBridgeClient}経由の内部ブリッジで取得する。
+ * legacy-apiに残るドメインのため、{@link IdentityBridgeClient}経由の内部ブリッジで取得する。
  */
 @Tag(name = "Metadata", description = "クライアントUI統一のためのメタデータAPI")
 @RestController
 @RequestMapping("/api/metadata")
 public class MetadataController {
 
-    private final LegacyApiBridgeClient legacyApiBridgeClient;
+    private final IdentityBridgeClient identityBridgeClient;
     private final CurrentActorService currentActorService;
 
-    public MetadataController(LegacyApiBridgeClient legacyApiBridgeClient, CurrentActorService currentActorService) {
-        this.legacyApiBridgeClient = legacyApiBridgeClient;
+    public MetadataController(IdentityBridgeClient identityBridgeClient, CurrentActorService currentActorService) {
+        this.identityBridgeClient = identityBridgeClient;
         this.currentActorService = currentActorService;
     }
 
@@ -53,6 +53,6 @@ public class MetadataController {
      */
     @GetMapping("/roles")
     public List<RoleOptionResponse> roles() {
-        return legacyApiBridgeClient.listRoles(currentActorService.getAuthorizationHeader());
+        return identityBridgeClient.listRoles(currentActorService.getAuthorizationHeader());
     }
 }

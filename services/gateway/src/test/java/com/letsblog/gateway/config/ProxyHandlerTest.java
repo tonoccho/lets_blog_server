@@ -53,8 +53,14 @@ class ProxyHandlerTest {
         };
         WebClient webClient = WebClient.builder().exchangeFunction(capturing).build();
 
+        // issue #583でフォールバックを廃止したため、テスト対象のパスを拾う包括ルートを1本置く。
+        RouteProperties.Route catchAll = new RouteProperties.Route();
+        catchAll.setId("test-catch-all");
+        catchAll.setUri("http://downstream:8080");
+        catchAll.setPaths(List.of("/**"));
+
         RouteProperties routeProperties = new RouteProperties();
-        routeProperties.setFallbackUri("http://downstream:8080");
+        routeProperties.setRoutes(List.of(catchAll));
         routeProperties.setDefaultResponseTimeout(Duration.ofSeconds(5));
 
         return new ProxyHandler(webClient, routeProperties);

@@ -1,6 +1,6 @@
 package com.letsblog.content.service;
 
-import com.letsblog.content.client.LegacyApiBridgeClient;
+import com.letsblog.content.client.ProjectBridgeClient;
 import com.letsblog.content.domain.ProjectContentSettings;
 import com.letsblog.content.repository.ProjectContentSettingsRepository;
 import org.springframework.stereotype.Service;
@@ -16,15 +16,15 @@ import java.util.Optional;
 public class ProjectContentSettingsService {
 
     private final ProjectContentSettingsRepository repository;
-    private final LegacyApiBridgeClient legacyApiBridgeClient;
+    private final ProjectBridgeClient projectBridgeClient;
     private final CurrentActorService currentActorService;
 
     public ProjectContentSettingsService(
             ProjectContentSettingsRepository repository,
-            LegacyApiBridgeClient legacyApiBridgeClient,
+            ProjectBridgeClient projectBridgeClient,
             CurrentActorService currentActorService) {
         this.repository = repository;
-        this.legacyApiBridgeClient = legacyApiBridgeClient;
+        this.projectBridgeClient = projectBridgeClient;
         this.currentActorService = currentActorService;
     }
 
@@ -56,7 +56,7 @@ public class ProjectContentSettingsService {
      * (issue #298、legacy-apiのProjectService#resolveCssSelectorPrefixと同じ方針)。
      * project_content_settingsは本サービスが所有するため自身のリポジトリで解決するが、フォールバック先の
      * プロジェクトslugはproject-serviceが未抽出のままlegacy-apiに残っている(ADR-0004)ため、
-     * 未設定の場合のみ内部ブリッジ({@link LegacyApiBridgeClient#resolveProjectSlug}）で問い合わせる。
+     * 未設定の場合のみ内部ブリッジ({@link ProjectBridgeClient#resolveProjectSlug}）で問い合わせる。
      */
     @Transactional(readOnly = true)
     public String resolveCssSelectorPrefix(Long projectId) {
@@ -64,6 +64,6 @@ public class ProjectContentSettingsService {
         if (prefix != null && !prefix.isBlank()) {
             return prefix;
         }
-        return legacyApiBridgeClient.resolveProjectSlug(projectId, currentActorService.getAuthorizationHeader());
+        return projectBridgeClient.resolveProjectSlug(projectId, currentActorService.getAuthorizationHeader());
     }
 }

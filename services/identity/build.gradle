@@ -12,6 +12,10 @@ dependencies {
     implementation project(':libs:lbs-common')
 
     implementation 'org.springframework.boot:spring-boot-starter-web'
+    // issue #583: ProjectUserSyncService が project-service / publishing-service の内部ブリッジを
+    // RestClient で呼ぶ。RestClient.Builder の自動設定はこのスターターが提供する
+    // (media/project 等の他サービスと同じ依存)。
+    implementation 'org.springframework.boot:spring-boot-starter-restclient'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     // user.deactivatedドメインイベント発行(letsblog.events、issue #580)。プロデューサー側のみを

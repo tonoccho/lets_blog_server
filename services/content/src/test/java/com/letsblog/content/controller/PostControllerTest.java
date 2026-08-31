@@ -1,7 +1,7 @@
 package com.letsblog.content.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.content.client.LegacyApiBridgeClient;
+import com.letsblog.content.client.ProjectBridgeClient;
 import com.letsblog.content.domain.Post;
 import com.letsblog.content.dto.PostLookupResponse;
 import com.letsblog.content.dto.PostSummaryResponse;
@@ -31,7 +31,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * legacy-apiのPostControllerTestのうち、content-serviceへ移設した参照系(list/lookupBySlug)の
- * 振る舞いを引き継いだテスト(issue #576)。SiteRepositoryの代わりにLegacyApiBridgeClient経由の
+ * 振る舞いを引き継いだテスト(issue #576)。SiteRepositoryの代わりにProjectBridgeClient経由の
  * サイト解決をモックする。
  */
 @ExtendWith(MockitoExtension.class)
@@ -41,7 +41,7 @@ class PostControllerTest {
     private PostRepository postRepository;
 
     @Mock
-    private LegacyApiBridgeClient legacyApiBridgeClient;
+    private ProjectBridgeClient projectBridgeClient;
 
     @Mock
     private CurrentActorService currentActorService;
@@ -50,7 +50,7 @@ class PostControllerTest {
     private AdminAuthorizationService adminAuthorizationService;
 
     private PostController controller() {
-        return new PostController(postRepository, legacyApiBridgeClient, currentActorService, new ObjectMapper(),
+        return new PostController(postRepository, projectBridgeClient, currentActorService, new ObjectMapper(),
                 adminAuthorizationService);
     }
 
@@ -69,7 +69,7 @@ class PostControllerTest {
         LocalDateTime older = LocalDateTime.of(2026, 1, 1, 0, 0);
         LocalDateTime newer = LocalDateTime.of(2026, 2, 1, 0, 0);
         when(postRepository.findAll()).thenReturn(new ArrayList<>(List.of(buildPost(1L, older), buildPost(2L, newer))));
-        when(legacyApiBridgeClient.listSites(null)).thenReturn(List.of());
+        when(projectBridgeClient.listSites(null)).thenReturn(List.of());
 
         List<PostSummaryResponse> result = assertDoesNotThrow(() -> controller.list(null, null));
 
@@ -81,7 +81,7 @@ class PostControllerTest {
     @Test
     void lookupBySlug_該当する投稿があればwpPostIdとstatusを返す() {
         PostController controller = controller();
-        when(legacyApiBridgeClient.resolveSiteIdByKey("main", null)).thenReturn(1L);
+        when(projectBridgeClient.resolveSiteIdByKey("main", null)).thenReturn(1L);
         Post post = buildPost(1L, LocalDateTime.now());
         post.setWpPostId("42");
         post.setSlug("my-article");
@@ -98,7 +98,7 @@ class PostControllerTest {
     @Test
     void lookupBySlug_該当する投稿が無ければPostNotFoundExceptionを投げる() {
         PostController controller = controller();
-        when(legacyApiBridgeClient.resolveSiteIdByKey("main", null)).thenReturn(1L);
+        when(projectBridgeClient.resolveSiteIdByKey("main", null)).thenReturn(1L);
         when(postRepository.findFirstBySiteIdAndSlugOrderByUpdatedAtDesc(1L, "unknown-slug"))
                 .thenReturn(Optional.empty());
 
@@ -108,7 +108,7 @@ class PostControllerTest {
     @Test
     void lookupBySlug_サイトが存在しなければSiteNotFoundExceptionを投げる() {
         PostController controller = controller();
-        when(legacyApiBridgeClient.resolveSiteIdByKey("unknown-site", null)).thenReturn(null);
+        when(projectBridgeClient.resolveSiteIdByKey("unknown-site", null)).thenReturn(null);
 
         assertThrows(SiteNotFoundException.class, () -> controller.lookupBySlug("unknown-site", "my-article"));
     }
@@ -119,7 +119,7 @@ class PostControllerTest {
     void list_非adminはアクセスできないサイトの投稿を返さない() {
         // buildPost の siteId は 1。アクセス可能が {9} なら落ちる。
         when(postRepository.findAll()).thenReturn(new ArrayList<>(List.of(buildPost(1L, LocalDateTime.now()))));
-        when(legacyApiBridgeClient.listSites(any())).thenReturn(List.of());
+        when(projectBridgeClient.listSites(any())).thenReturn(List.of());
         when(adminAuthorizationService.accessibleSiteIds()).thenReturn(Optional.of(Set.of(9L)));
 
         assertEquals(List.of(), controller().list(null, null));
@@ -128,7 +128,7 @@ class PostControllerTest {
     @Test
     void list_adminは全件を返す() {
         when(postRepository.findAll()).thenReturn(new ArrayList<>(List.of(buildPost(1L, LocalDateTime.now()))));
-        when(legacyApiBridgeClient.listSites(any())).thenReturn(List.of());
+        when(projectBridgeClient.listSites(any())).thenReturn(List.of());
         when(adminAuthorizationService.accessibleSiteIds()).thenReturn(Optional.empty());
 
         assertEquals(1, controller().list(null, null).size());
@@ -136,7 +136,7 @@ class PostControllerTest {
 
     @Test
     void lookupBySlug_アクセスできないサイトは投稿の有無すら返さない() {
-        when(legacyApiBridgeClient.resolveSiteIdByKey(eq("main"), any())).thenReturn(1L);
+        when(projectBridgeClient.resolveSiteIdByKey(eq("main"), any())).thenReturn(1L);
         when(adminAuthorizationService.accessibleSiteIds()).thenReturn(Optional.of(Set.of(9L)));
 
         assertThrows(ForbiddenException.class, () -> controller().lookupBySlug("main", "slug"));

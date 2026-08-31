@@ -104,7 +104,29 @@ class AuthorizationMatrixIntegrationTest {
 
                 // -- ProjectMediaGarbageCollectionController --
                 new Endpoint("GET", "/api/projects/1/media-garbage-collection/scan"),
-                new Endpoint("POST", "/api/projects/1/media-garbage-collection/delete"));
+                new Endpoint("POST", "/api/projects/1/media-garbage-collection/delete"),
+
+                // -- ImageGenerationController(issue #583でlegacy-apiから移設) --
+                new Endpoint("POST", "/api/ai/image"),
+                new Endpoint("GET", "/api/ai/image-options"),
+
+                // -- ProjectImageModelController(issue #583でlegacy-apiから移設) --
+                new Endpoint("GET", "/api/projects/1/ai-models/image/provider"),
+                new Endpoint("PUT", "/api/projects/1/ai-models/image/provider/selection"),
+                new Endpoint("GET", "/api/projects/1/ai-models/comfyui/checkpoints"),
+                new Endpoint("PUT", "/api/projects/1/ai-models/comfyui/checkpoints/selection"),
+                new Endpoint("POST", "/api/projects/1/ai-models/comfyui/checkpoints/install"),
+                new Endpoint("DELETE", "/api/projects/1/ai-models/comfyui/checkpoints/model.safetensors"),
+
+                // -- ProjectImageSettingsController(issue #583でlegacy-apiから移設) --
+                new Endpoint("GET", "/api/projects/1/image-settings"),
+                new Endpoint("PUT", "/api/projects/1/image-generation-prompt-defaults"),
+                new Endpoint("PUT", "/api/projects/1/image-generation-size-defaults"),
+                new Endpoint("PUT", "/api/projects/1/article-image-resize-default"),
+                new Endpoint("PUT", "/api/projects/1/image-content-filter-settings"),
+
+                // -- 内部ブリッジ(InternalProjectImageSettingsController、issue #583) --
+                new Endpoint("GET", "/api/internal/media/projects/1/article-image-long-edge-px"));
     }
 
     @ParameterizedTest(name = "[{index}] {0}")

@@ -1,6 +1,6 @@
 package com.letsblog.media.service;
 
-import com.letsblog.media.client.LegacyApiBridgeClient;
+import com.letsblog.media.client.IdentityBridgeClient;
 import org.springframework.stereotype.Service;
 
 /**
@@ -10,19 +10,19 @@ import org.springframework.stereotype.Service;
  * <p>issue #830 で、ダイアグラム・生成画像をプロジェクト単位で絞るために
  * {@code requireProjectMemberOrAdmin}を追加した。プロジェクトメンバー判定は、
  * {@code project_users}がlegacy-apiに残っている(ADR-0004によりクロススキーマアクセス不可)ため
- * {@link LegacyApiBridgeClient#isProjectMember}経由で問い合わせる
+ * {@link IdentityBridgeClient#isProjectMember}経由で問い合わせる
  * (ai/content/analytics/publishingと同じ方針)。
  */
 @Service
 public class AdminAuthorizationService {
 
     private final CurrentActorService currentActorService;
-    private final LegacyApiBridgeClient legacyApiBridgeClient;
+    private final IdentityBridgeClient identityBridgeClient;
 
     public AdminAuthorizationService(
-            CurrentActorService currentActorService, LegacyApiBridgeClient legacyApiBridgeClient) {
+            CurrentActorService currentActorService, IdentityBridgeClient identityBridgeClient) {
         this.currentActorService = currentActorService;
-        this.legacyApiBridgeClient = legacyApiBridgeClient;
+        this.identityBridgeClient = identityBridgeClient;
     }
 
     public void requireAdmin() {
@@ -40,7 +40,7 @@ public class AdminAuthorizationService {
         if (actorId == null) {
             throw new ForbiddenException("この操作にはログインが必要です");
         }
-        if (!legacyApiBridgeClient.isProjectMember(
+        if (!identityBridgeClient.isProjectMember(
                 projectId, actorId, currentActorService.getAuthorizationHeader())) {
             throw new ForbiddenException("この操作にはプロジェクトメンバーまたはadmin権限が必要です");
         }

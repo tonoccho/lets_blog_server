@@ -3,6 +3,8 @@ package com.letsblog.ai.controller;
 import com.letsblog.ai.dto.AiAskRequest;
 import com.letsblog.ai.dto.AiAskResponse;
 import com.letsblog.ai.dto.AiDraftRequest;
+import com.letsblog.ai.dto.AiImagePromptRequest;
+import com.letsblog.ai.dto.AiImagePromptResponse;
 import com.letsblog.ai.dto.AiDraftResponse;
 import com.letsblog.ai.dto.AiProofreadRequest;
 import com.letsblog.ai.dto.AiProofreadResponse;
@@ -13,6 +15,7 @@ import com.letsblog.ai.dto.AiTagsResponse;
 import com.letsblog.ai.service.AdminAuthorizationService;
 import com.letsblog.ai.service.AiAssistService;
 import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
@@ -83,5 +86,21 @@ public class AiController {
     @PostMapping("/api/ai/section")
     public AiSectionResponse section(@Valid @RequestBody AiSectionRequest request) {
         return aiAssistService.generateSection(request);
+    }
+
+    /**
+     * チャットから画像生成プロンプト(英語)を作る。issue #583でlegacy-apiの{@code AiController}から
+     * 移設した。#583で画像生成本体はmedia-serviceへ移したが、これはプロンプト文字列を作るだけの
+     * 純粋なLLM機能なのでai-serviceが持つ。
+     *
+     * <p>projectId のプロジェクト設定(選択中モデル/プロバイダー)を読むため、
+     * メンバー(またはadmin)に限定する(issue #830。移設前と同じ判定)。
+     */
+    @PostMapping("/api/projects/{projectId}/ai/generate-image-prompt")
+    public AiImagePromptResponse generateImagePrompt(
+            @PathVariable Long projectId, @Valid @RequestBody AiImagePromptRequest request) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        return aiAssistService.generateImagePrompt(
+                projectId, request.history(), request.message(), request.provider());
     }
 }

@@ -67,9 +67,12 @@ app:
   # project_ai_settings.brave_search_api_key_encryptedの暗号化/復号(CredentialCipher、lbs-common)。
   # 全サービス共通のAES-256-GCM鍵(legacy-api/media-serviceと同じ値を使う)。
   encryption-key: ${APP_ENCRYPTION_KEY:}
-  # 呼び出し元のBearerトークンをそのまま転送してlegacy-api/identity-serviceへ問い合わせる
-  # 暫定策(log-writer(#572)/media-service(#573)と同じ。issue #574)。
-  legacy-api-uri: ${LEGACY_API_URI:http://api:8080}
+  # 呼び出し元のBearerトークンをそのまま転送して他サービスの内部ブリッジへ問い合わせる
+  # (log-writer(#572)/media-service(#573)と同じ方針。issue #574)。
+  # issue #583でlegacy-apiを解体したため、向き先は以下の2つに分かれた。
+  #   - プロジェクトメンバー判定(IdentityBridgeClient) → identity-service(project_users の所有者)
+  #   - GitHubアクセス解決(ProjectBridgeClient) → project-service(GitHubトークンの所有者)
+  project-service-uri: ${PROJECT_SERVICE_URI:http://project:8080}
   # マスター環境サイトの既存カテゴリ/タグ取得(PublishingServiceClient)の呼び出し先。issue #574では
   # legacy-apiのAiBridgeControllerが所有していたが、CmsAdapterFactory/cms/*の所有権がpublishing-service
   # へ移った(issue #707)ため、issue #711でこの3エンドポイントのみ切り替えた(Epic #551 C6-5)。

@@ -1,6 +1,6 @@
 package com.letsblog.analytics.service;
 
-import com.letsblog.analytics.client.LegacyApiBridgeClient;
+import com.letsblog.analytics.client.IdentityBridgeClient;
 import org.springframework.stereotype.Service;
 
 /**
@@ -11,19 +11,19 @@ import org.springframework.stereotype.Service;
  * <p>admin判定はCurrentActorService経由でidentity-serviceへ委ねる(log-writer(#572)/
  * media-service(#573)/ai-service(#574)と同じ暫定策)。プロジェクトメンバー判定は、project_user
  * テーブルがproject-serviceが未抽出のままlegacy-apiに残っている(ADR-0004によりクロススキーマ
- * アクセス不可)ため、legacy-apiの内部ブリッジ({@link LegacyApiBridgeClient#isProjectMember})経由で
+ * アクセス不可)ため、legacy-apiの内部ブリッジ({@link IdentityBridgeClient#isProjectMember})経由で
  * 呼び出し元のBearerトークンを転送して問い合わせる。
  */
 @Service
 public class AdminAuthorizationService {
 
     private final CurrentActorService currentActorService;
-    private final LegacyApiBridgeClient legacyApiBridgeClient;
+    private final IdentityBridgeClient identityBridgeClient;
 
     public AdminAuthorizationService(
-            CurrentActorService currentActorService, LegacyApiBridgeClient legacyApiBridgeClient) {
+            CurrentActorService currentActorService, IdentityBridgeClient identityBridgeClient) {
         this.currentActorService = currentActorService;
-        this.legacyApiBridgeClient = legacyApiBridgeClient;
+        this.identityBridgeClient = identityBridgeClient;
     }
 
     public void requireAdmin() {
@@ -44,7 +44,7 @@ public class AdminAuthorizationService {
         if (actorId == null) {
             throw new ForbiddenException("この操作にはログインが必要です");
         }
-        if (!legacyApiBridgeClient.isProjectMember(projectId, actorId, currentActorService.getAuthorizationHeader())) {
+        if (!identityBridgeClient.isProjectMember(projectId, actorId, currentActorService.getAuthorizationHeader())) {
             throw new ForbiddenException("この操作にはプロジェクトメンバーまたはadmin権限が必要です");
         }
     }

@@ -1,6 +1,6 @@
 package com.letsblog.content.service;
 
-import com.letsblog.content.client.LegacyApiBridgeClient;
+import com.letsblog.content.client.ProjectBridgeClient;
 import com.letsblog.content.contentcache.ContentCacheService;
 import com.letsblog.content.contentcache.ContentScrapingException;
 import com.letsblog.content.dto.ContentCacheResponse;
@@ -23,7 +23,7 @@ import java.util.regex.Pattern;
  * スクレイピング結果(タイトル・説明・URL等)は対象サイトが自由に設定できる非信頼な文字列のため、
  * HTML出力に含める際は必ずエスケープし、URLはhttp/https以外を許可しない(XSS対策)。
  * カードの配色はプロジェクトごとのデザイン設定(#150、tag_design_settings)に従う。
- * 同テーブルはlegacy-apiに残るドメインのため、{@link LegacyApiBridgeClient}経由の内部ブリッジで解決する。
+ * 同テーブルはlegacy-apiに残るドメインのため、{@link ProjectBridgeClient}経由の内部ブリッジで解決する。
  */
 @Service
 @Slf4j
@@ -35,14 +35,14 @@ public class BlogCardTagRenderService {
     private static final String CARD_CLASS_ATTR = "class=\"lb-blogcard\"";
 
     private final ContentCacheService contentCacheService;
-    private final LegacyApiBridgeClient legacyApiBridgeClient;
+    private final ProjectBridgeClient projectBridgeClient;
     private final CurrentActorService currentActorService;
 
     public BlogCardTagRenderService(
-            ContentCacheService contentCacheService, LegacyApiBridgeClient legacyApiBridgeClient,
+            ContentCacheService contentCacheService, ProjectBridgeClient projectBridgeClient,
             CurrentActorService currentActorService) {
         this.contentCacheService = contentCacheService;
-        this.legacyApiBridgeClient = legacyApiBridgeClient;
+        this.projectBridgeClient = projectBridgeClient;
         this.currentActorService = currentActorService;
     }
 
@@ -63,7 +63,7 @@ public class BlogCardTagRenderService {
         if (result.indexOf(CARD_CLASS_ATTR) < 0) {
             return result.toString();
         }
-        TagDesignColors colors = legacyApiBridgeClient.toColors(legacyApiBridgeClient.resolveTagDesign(
+        TagDesignColors colors = projectBridgeClient.toColors(projectBridgeClient.resolveTagDesign(
                 projectId, "BLOGCARD", currentActorService.getAuthorizationHeader()));
         return "<style>\n" + buildStyle(colors) + "\n</style>\n\n" + result;
     }
@@ -107,7 +107,7 @@ public class BlogCardTagRenderService {
             String escapedHref = HtmlUtils.htmlEscape(href);
             String escapedImageUrl = imageUrl == null ? "" : HtmlUtils.htmlEscape(imageUrl);
 
-            String customTemplate = legacyApiBridgeClient.resolveTagDesign(
+            String customTemplate = projectBridgeClient.resolveTagDesign(
                     projectId, "BLOGCARD", currentActorService.getAuthorizationHeader()).htmlTemplate();
             if (customTemplate != null) {
                 return EmbedTagTemplateRenderer.render(customTemplate, Map.of(

@@ -1,11 +1,14 @@
 package com.letsblog.project.controller;
 
+import com.letsblog.common.crypto.CredentialCipher;
+import com.letsblog.project.client.IdentityBridgeClient;
 import com.letsblog.project.cms.CmsType;
 import com.letsblog.project.domain.Project;
 import com.letsblog.project.domain.Site;
 import com.letsblog.project.dto.ProjectBridgeResponse;
 import com.letsblog.project.dto.SiteBridgeResponse;
 import com.letsblog.project.repository.SiteRepository;
+import com.letsblog.project.service.CurrentActorService;
 import com.letsblog.project.service.ProjectService;
 import java.util.List;
 import java.util.Optional;
@@ -21,8 +24,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.when;
 
 /**
- * ProjectInternalControllerの回帰テスト(issue #577 stage3)。legacy-apiに残るBulkManagementService等が
- * このエンドポイント経由でプロジェクト/サイトの基本情報を取得できることを検証する。
+ * ProjectInternalControllerの回帰テスト(issue #577 stage3)。他サービスがこのエンドポイント経由で
+ * プロジェクト/サイトの基本情報を取得できることを検証する。
  */
 @ExtendWith(MockitoExtension.class)
 class ProjectInternalControllerTest {
@@ -33,8 +36,18 @@ class ProjectInternalControllerTest {
     @Mock
     private SiteRepository siteRepository;
 
+    @Mock
+    private IdentityBridgeClient identityBridgeClient;
+
+    @Mock
+    private CurrentActorService currentActorService;
+
+    @Mock
+    private CredentialCipher credentialCipher;
+
     private ProjectInternalController controller() {
-        return new ProjectInternalController(projectService, siteRepository);
+        return new ProjectInternalController(
+                projectService, siteRepository, identityBridgeClient, currentActorService, credentialCipher);
     }
 
     private Project buildProject(Long id) {

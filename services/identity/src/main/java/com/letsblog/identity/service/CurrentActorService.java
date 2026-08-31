@@ -50,6 +50,18 @@ public class CurrentActorService {
         return "admin".equals(getCurrentActorRole());
     }
 
+    /**
+     * JWTの{@code sub}クレーム(Keycloakのユーザー識別子)。監査ログの{@code actorKeycloakSub}に使う
+     * (issue #583)。{@link #getCurrentActorId()}と違いローカルの{@code users}行を必要としないので、
+     * まだ同期されていない利用者の操作でも記録が残る。
+     */
+    public String getCurrentActorKeycloakSub() {
+        if (!(SecurityContextHolder.getContext().getAuthentication() instanceof JwtAuthenticationToken token)) {
+            return null;
+        }
+        return token.getToken().getSubject();
+    }
+
     public String getRemoteIp() {
         String forwardedFor = request.getHeader("X-Forwarded-For");
         if (forwardedFor != null && !forwardedFor.isBlank()) {

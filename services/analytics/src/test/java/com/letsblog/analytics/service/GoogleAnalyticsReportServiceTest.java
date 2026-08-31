@@ -6,7 +6,7 @@ import com.letsblog.analytics.analytics.GoogleAnalyticsClient;
 import com.letsblog.analytics.analytics.GoogleAnalyticsDailyDataPoint;
 import com.letsblog.analytics.analytics.GoogleAnalyticsException;
 import com.letsblog.analytics.analytics.GoogleAnalyticsReport;
-import com.letsblog.analytics.client.LegacyApiBridgeClient;
+import com.letsblog.analytics.client.ProjectBridgeClient;
 import com.letsblog.analytics.dto.GoogleAnalyticsReportResponse;
 import com.letsblog.common.crypto.CredentialCipher;
 import org.junit.jupiter.api.Test;
@@ -35,14 +35,14 @@ import static org.mockito.Mockito.when;
  * GoogleAnalyticsReportServiceの回帰テスト(issue #386、issue #578でanalytics-serviceへ移設)。
  * GA未設定/本番サイト未紐付けの場合にeligible=falseを返しGA4 Data APIへ問い合わせないこと、
  * レポート取得失敗時にeligible=trueのままerrorMessageを設定する(例外を投げない)ことを検証する。
- * legacy-api版と異なり、本番サイトの有無はProjectRepositoryではなくLegacyApiBridgeClient経由の
+ * legacy-api版と異なり、本番サイトの有無はProjectRepositoryではなくProjectBridgeClient経由の
  * ブリッジ呼び出しで判定する(project-service未抽出のためprojectsテーブルはlegacy-apiに残るため)。
  */
 @ExtendWith(MockitoExtension.class)
 class GoogleAnalyticsReportServiceTest {
 
     @Mock
-    private LegacyApiBridgeClient legacyApiBridgeClient;
+    private ProjectBridgeClient projectBridgeClient;
     @Mock
     private AnalyticsCredentialsService analyticsCredentialsService;
     @Mock
@@ -58,7 +58,7 @@ class GoogleAnalyticsReportServiceTest {
 
     private GoogleAnalyticsReportService service() {
         return new GoogleAnalyticsReportService(
-                legacyApiBridgeClient, analyticsCredentialsService, googleAnalyticsClient,
+                projectBridgeClient, analyticsCredentialsService, googleAnalyticsClient,
                 adminAuthorizationService, currentActorService, credentialCipher, objectMapper);
     }
 
@@ -67,8 +67,8 @@ class GoogleAnalyticsReportServiceTest {
 
     @Test
     void getReport_GA未設定なら未対象でAPIを呼ばない() {
-        lenient().when(legacyApiBridgeClient.getProjectEligibility(eq(1L), any()))
-                .thenReturn(new LegacyApiBridgeClient.ProjectEligibility(true));
+        lenient().when(projectBridgeClient.getProjectEligibility(eq(1L), any()))
+                .thenReturn(new ProjectBridgeClient.ProjectEligibility(true));
         when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(false);
 
         GoogleAnalyticsReportResponse response = service().getReport(1L);
@@ -79,8 +79,8 @@ class GoogleAnalyticsReportServiceTest {
 
     @Test
     void getReport_本番サイト未紐付けなら未対象でAPIを呼ばない() {
-        lenient().when(legacyApiBridgeClient.getProjectEligibility(eq(1L), any()))
-                .thenReturn(new LegacyApiBridgeClient.ProjectEligibility(false));
+        lenient().when(projectBridgeClient.getProjectEligibility(eq(1L), any()))
+                .thenReturn(new ProjectBridgeClient.ProjectEligibility(false));
         when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
 
         GoogleAnalyticsReportResponse response = service().getReport(1L);
@@ -91,8 +91,8 @@ class GoogleAnalyticsReportServiceTest {
 
     @Test
     void getReport_設定済みかつ本番サイトありならレポートを取得する() {
-        lenient().when(legacyApiBridgeClient.getProjectEligibility(eq(1L), any()))
-                .thenReturn(new LegacyApiBridgeClient.ProjectEligibility(true));
+        lenient().when(projectBridgeClient.getProjectEligibility(eq(1L), any()))
+                .thenReturn(new ProjectBridgeClient.ProjectEligibility(true));
         when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
         when(analyticsCredentialsService.getGaPropertyId(1L)).thenReturn("123456789");
         when(analyticsCredentialsService.getGaServiceAccountJsonEncrypted(1L))
@@ -117,8 +117,8 @@ class GoogleAnalyticsReportServiceTest {
 
     @Test
     void getReport_取得に失敗したら対象のままerrorMessageを設定する() {
-        lenient().when(legacyApiBridgeClient.getProjectEligibility(eq(1L), any()))
-                .thenReturn(new LegacyApiBridgeClient.ProjectEligibility(true));
+        lenient().when(projectBridgeClient.getProjectEligibility(eq(1L), any()))
+                .thenReturn(new ProjectBridgeClient.ProjectEligibility(true));
         when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
         when(analyticsCredentialsService.getGaPropertyId(1L)).thenReturn("123456789");
         when(analyticsCredentialsService.getGaServiceAccountJsonEncrypted(1L))

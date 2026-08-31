@@ -3,7 +3,7 @@ package com.letsblog.content.controller;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.content.client.LegacyApiBridgeClient;
+import com.letsblog.content.client.ProjectBridgeClient;
 import com.letsblog.content.domain.Post;
 import com.letsblog.content.dto.PostLookupResponse;
 import com.letsblog.content.dto.PostSummaryResponse;
@@ -36,7 +36,7 @@ import java.util.stream.Collectors;
  * legacy-api側の新しい内部ブリッジ(ContentBridgeClient)経由で行うよう書き換えている)。
  *
  * <p>サイトの名前/キーはSite domain(project-service未抽出、legacy-apiに残る)にあるため、
- * {@link LegacyApiBridgeClient}経由の内部ブリッジで解決する。
+ * {@link ProjectBridgeClient}経由の内部ブリッジで解決する。
  */
 @Slf4j
 @RestController
@@ -44,17 +44,17 @@ import java.util.stream.Collectors;
 public class PostController {
 
     private final PostRepository postRepository;
-    private final LegacyApiBridgeClient legacyApiBridgeClient;
+    private final ProjectBridgeClient projectBridgeClient;
     private final CurrentActorService currentActorService;
     private final ObjectMapper objectMapper;
     private final AdminAuthorizationService adminAuthorizationService;
 
     public PostController(
-            PostRepository postRepository, LegacyApiBridgeClient legacyApiBridgeClient,
+            PostRepository postRepository, ProjectBridgeClient projectBridgeClient,
             CurrentActorService currentActorService, ObjectMapper objectMapper,
             AdminAuthorizationService adminAuthorizationService) {
         this.postRepository = postRepository;
-        this.legacyApiBridgeClient = legacyApiBridgeClient;
+        this.projectBridgeClient = projectBridgeClient;
         this.currentActorService = currentActorService;
         this.objectMapper = objectMapper;
         this.adminAuthorizationService = adminAuthorizationService;
@@ -71,9 +71,9 @@ public class PostController {
             @RequestParam(required = false) String sortBy,
             @RequestParam(required = false) String sortOrder) {
         String bearerToken = currentActorService.getAuthorizationHeader();
-        Map<Long, String> siteNamesById = legacyApiBridgeClient.listSites(bearerToken).stream()
+        Map<Long, String> siteNamesById = projectBridgeClient.listSites(bearerToken).stream()
                 .collect(Collectors.toMap(
-                        LegacyApiBridgeClient.SiteSummary::id, LegacyApiBridgeClient.SiteSummary::name));
+                        ProjectBridgeClient.SiteSummary::id, ProjectBridgeClient.SiteSummary::name));
 
         List<Post> posts = postRepository.findAll();
         Optional<Set<Long>> accessible = adminAuthorizationService.accessibleSiteIds();
@@ -139,7 +139,7 @@ public class PostController {
      */
     @GetMapping("/{site}/by-slug/{slug}")
     public PostLookupResponse lookupBySlug(@PathVariable String site, @PathVariable String slug) {
-        Long siteId = legacyApiBridgeClient.resolveSiteIdByKey(site, currentActorService.getAuthorizationHeader());
+        Long siteId = projectBridgeClient.resolveSiteIdByKey(site, currentActorService.getAuthorizationHeader());
         if (siteId == null) {
             throw new SiteNotFoundException("siteKey '" + site + "' は登録されていません");
         }

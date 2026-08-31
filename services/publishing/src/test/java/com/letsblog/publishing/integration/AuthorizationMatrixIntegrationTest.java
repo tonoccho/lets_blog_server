@@ -123,7 +123,11 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("POST", "/api/internal/project/cms/provision"),
                 new Endpoint("POST", "/api/internal/project/cms/export-database"),
                 new Endpoint("POST", "/api/internal/project/cms/export-media"),
-                new Endpoint("POST", "/api/internal/project/cms/export-themes"));
+                new Endpoint("POST", "/api/internal/project/cms/export-themes"),
+
+                // 一覧に載っていなかった内部ブリッジ(#583の検証で発覚。追加時に載せ忘れていたもので、
+                // #583の変更とは無関係)。
+                new Endpoint("GET", "/api/internal/publishing/sites/site-key/project-id"));
     }
 
     @ParameterizedTest(name = "[{index}] {0}")

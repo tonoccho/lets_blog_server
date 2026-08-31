@@ -70,6 +70,16 @@ app:
   penpot-service-email: ${PENPOT_SERVICE_EMAIL:lbs-service@letsblog.local}
   penpot-service-password: ${PENPOT_SERVICE_PASSWORD:}
   generated-images-storage-path: ${GENERATED_IMAGES_STORAGE_PATH:/app/data/generated-images}
+  # 画像生成のアプリ全体の既定値(issue #583でlegacy-apiから移設)。プロジェクト単位の上書きが
+  # 無い場合にProjectImageDefaultsResolverが使う。環境変数名は移設前と同じものを引き継いでいる。
+  default-negative-prompt: ${DEFAULT_NEGATIVE_PROMPT:low quality, blurry, watermark, text}
+  default-quality-prompt: ${DEFAULT_QUALITY_PROMPT:high quality, highly detailed, sharp focus, masterpiece}
+  default-generated-image-width: ${DEFAULT_GENERATED_IMAGE_WIDTH:1920}
+  default-generated-image-height: ${DEFAULT_GENERATED_IMAGE_HEIGHT:1080}
+  default-article-image-long-edge-px: ${DEFAULT_ARTICLE_IMAGE_LONG_EDGE_PX:1300}
+  default-block-sexual-content: ${DEFAULT_BLOCK_SEXUAL_CONTENT:true}
+  default-block-violent-content: ${DEFAULT_BLOCK_VIOLENT_CONTENT:true}
+  default-block-discriminatory-content: ${DEFAULT_BLOCK_DISCRIMINATORY_CONTENT:true}
   # メディアガベージコレクションのCMSブリッジ(/api/internal/publishing/**、CmsBridgeClient参照)の
   # 呼び出し先。#573 stage3ではlegacy-apiが所有していたためlegacy-api-uriを使っていたが、
   # issue #709でCmsMediaBridgeControllerの所有権がpublishing-serviceへ移ったため、
@@ -84,15 +94,26 @@ app:
   # 自分自身のuserId解決のため、呼び出し元のBearerトークンをそのままidentity-serviceの
   # /api/identity/meへ転送して問い合わせる(#573 stage3、log-writer(#572)と同じ暫定策。
   # media-serviceはusersテーブルへクロススキーマアクセスできない=ADR-0004のクロススキーマ禁止のため)。
+  # issue #583でproject_usersの所有権がidentity-serviceへ移ったため、
+  # プロジェクトメンバー判定(IdentityBridgeClient)の向き先もこちらになった。
   identity-service-uri: ${IDENTITY_SERVICE_URI:http://identity:8080}
-  # ダイアグラム・生成画像のプロジェクトメンバー判定(AdminAuthorizationService、issue #830)。
-  # project_usersはまだlegacy-apiが所有しているため(ADR-0004によりクロススキーマアクセス不可)、
-  # ProjectUserBridgeControllerが既に公開している内部ブリッジを再利用する。
-  # #583でproject_usersがproject-serviceへ移った時点で向き先を変える。
-  legacy-api-uri: ${LEGACY_API_URI:http://api:8080}
+  # issue #583: project_image_settings と画像生成の所有権がmedia-serviceへ移ったのに伴い、
+  # プロジェクトの存在確認(ProjectImageDefaultsResolver / ImageModelService /
+  # ComfyUiModelService)を project-service の内部ブリッジ経由で行う。
+  project-service-uri: ${PROJECT_SERVICE_URI:http://project:8080}
+  # 画像生成の接続設定(ComfyUIのbaseUrl・ChatGPTのAPIキー/baseUrl)の取得先。system_settingsの
+  # 所有権はplatform-service(issue #693)。issue #583で画像生成がこちらへ移ったため追加した。
+  platform-service-uri: ${PLATFORM_SERVICE_URI:http://platform:8080}
 
 # KeycloakのJWT検証(#573)。identity-service/log-writerのSecurityConfig/JwtDecoderConfigと同じ理由
 # により、issuer-uriによる自動設定は使わずJWKS取得先と期待issuerを個別に指定して組み立てている。
 keycloak:
   jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/certs}
   issuer: ${KEYCLOAK_ISSUER:https://localhost/auth/realms/letsblog}
+  # サービス間のClient Credentials認証(#567)。issue #583で画像生成がmedia-serviceへ移り、
+  # platform-serviceの/api/internal/platform/image-generation-config(#742でJWT必須)を
+  # このサービス自身のトークンで呼ぶ必要が生じたため追加した(ServiceTokenClientConfig参照)。
+  admin:
+    token-uri: ${KEYCLOAK_TOKEN_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/token}
+    client-id: ${KEYCLOAK_SERVICES_CLIENT_ID:letsblog-services}
+    client-secret: ${KEYCLOAK_SERVICES_CLIENT_SECRET:}
