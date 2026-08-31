@@ -160,6 +160,8 @@ The workflow may still stop before a Pull Request exists, but only for a genuine
 - QA `BLOCKED` (verification itself cannot proceed).
 - A per-stage retry limit is exceeded without resolving the problem (see `work-next`).
 - A live-system mutation would require explicit confirmation (see existing Keycloak / production DB rules).
+- Two well-evidenced verdicts on the same Issue disagree and only the user can settle it
+  (see **Dependency Resolution** → When a verdict contradicts a recent one).
 
 Otherwise, do not halt the workflow short of an opened Pull Request.
 
@@ -239,7 +241,8 @@ Passing QA opens a Pull Request; it does not mark the issue Done. Done happens o
 # Dependency Resolution
 
 This is the single definition of "dependencies are resolved". `work-next`, `implement-issue`,
-`ready-issue`, `triage-backlog`, `plan-issue`, and the `project-planner` agent all defer to it. Do not restate it differently
+`ready-issue`, `triage-backlog`, `plan-issue`, and the `project-planner` agent all defer to it.
+Do not restate it differently
 anywhere else — if you find a second definition in `.claude/`, that is a bug to fix, not a
 variant to follow.
 
@@ -266,48 +269,45 @@ never carry a dependency's status over from an earlier comment — re-read it li
 4. Every verdict must state **which** of these grounds it used, and cite the live evidence
    (the script's output, or the file paths inspected).
 
-Rule 2 is not a licence to skip the check. It moves the check from the board to the code — it
-does not remove it. This repository barely uses `blocked_by` links, so in practice almost every
-dependency arrives as prose, and rule 2 is the path most verdicts take. Whenever an Issue names
-a dependency whose work may not exist yet, the verdict is only valid if it **names the concrete
-files, endpoints, or config it inspected** to establish that the substance is (or is not) there.
-A verdict that asserts "prose dependencies do not block" without that evidence is not a verdict;
-treat it as unverified and do the inspection.
+Rule 2 moves the check from the board to the code; it does not remove it. This repository barely
+uses `blocked_by` links, so rule 2 is the path most verdicts take. A verdict that asserts "prose
+dependencies do not block" without **naming the concrete files, endpoints, or config it
+inspected** is not a verdict; treat it as unverified and do the inspection. The script prints the
+inputs — it does not inspect the codebase for you.
 
-The script prints the inputs. It does not inspect the codebase for you.
+## When a verdict contradicts a recent one
 
-## When the evidence itself is contested
+Governs whenever you are about to post a verdict opposite to a recent one, and decides *whether*
+you may flip the status. **Reversing a verdict** below is the procedure you run first — only ever
+a step inside this decision. The rules above make a verdict's *form* uniform (cited code, not
+board status) but do not mechanize how to weigh competing readings of that code: two assessors
+can cite real evidence and both be legitimate. After running it, apply exactly one of:
 
-These rules make the *form* of a verdict uniform — every verdict must rest on cited code, not on
-board status. They do not mechanize how to weigh competing readings of that code. Two assessors
-can both cite real evidence and still disagree: one reads gateway's `fallback-uri` as making a
-path reachable, the other reads the un-split service as making the acceptance criteria
-unverifiable. Both are legitimate readings.
+- **The earlier ground is factually falsified** — the code it cited does not say what it was
+  claimed to say (e.g. a `fallback-uri` cited as covering a path that it demonstrably does not
+  match). A correction, not a disagreement: flip the status and name the falsified ground.
+- **Both readings are tenable on the same facts** — you weigh the same code differently rather
+  than showing the earlier reading false. Do **not** flip the status. Post both readings and what
+  would settle them, leave the status, and escalate to the user (a genuine blocker — see
+  **Autonomous Task Execution**). Ping-ponging well-evidenced opposite verdicts is worse than one
+  open question (#751).
+- **Inspection is inconclusive** — default to `Backlog`. Ready authorizes starting without
+  further clarification; without establishing the substance, you lack that authorization.
 
-That residual disagreement is not a rule failure, and it is not resolved by posting a louder
-verdict. Handle it this way:
-
-- **When inspection is inconclusive, default to `Backlog`.** Ready is an authorization to start
-  without further product-level clarification; if you cannot establish the substance is there,
-  you do not have that authorization.
-- **When your reading contradicts a recent verdict that also cited code**, do not flip the
-  status. Post a comment stating both readings and what would settle them, leave the status as
-  it is, and escalate to the user. A ping-pong of well-evidenced opposite verdicts is worse than
-  one open question (#751).
-
-Silently picking a side is the failure mode this section exists to prevent.
+If you cannot tell which of the first two you are in, you are in the second. Silently picking a
+side is what this prevents.
 
 ## Reversing a verdict
 
-A Ready→Backlog rollback that contradicts a recent Ready promotion is not allowed to simply
-restate its own reasoning. Before posting it:
+Required by the section above; its outcome feeds that choice. Never post a contradicting
+verdict without running it.
 
 1. Read the existing readiness comments (the script lists them).
 2. Re-check each ground the previous verdict cited, live.
 3. Say in the new comment which specific ground no longer holds, and why.
 
-If the previous verdict's grounds all still hold, the disagreement is about the *definition*
-above, not about facts — apply the definition rather than posting a contradicting verdict.
+If every ground still holds, the disagreement is about the *definition* above, not the facts —
+apply the definition rather than posting a contradicting verdict.
 
 ## Recording dependencies
 
