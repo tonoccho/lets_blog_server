@@ -1,10 +1,36 @@
 import type { AxiosRequestConfig } from 'axios';
 
+/**
+ * orval の custom mutator として使うことを想定した最小のフェッチ実装。
+ *
+ * <p><b>現在このファイルはどこからも参照されていない</b>(ADR-0009)。
+ * `orval.config.js` は mutator を指定しておらず、生成コードは自前で `fetch` を呼ぶ。
+ * web は `web/src/lib/apiClient.ts`(server-only、Bearerトークン付与あり)を使う。
+ *
+ * <p>以前はここで
+ * `process.env.REACT_APP_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'`
+ * とベースURLを組み立てていたが、
+ *
+ * <ul>
+ *   <li>`REACT_APP_API_URL` は Create React App の規約で、このリポジトリに定義が無い</li>
+ *   <li>`NEXT_PUBLIC_API_URL` も docker-compose.yml・web/.env.local.example のいずれにも無い</li>
+ *   <li>結果として常に `http://localhost:8080` になるが、このポートは外部公開されておらず、
+ *       コンテナ内から見た `localhost` は呼び出し元コンテナ自身を指すため到達しない</li>
+ * </ul>
+ *
+ * という「もっともらしいが必ず失敗する」既定値だった(issue #750)。
+ * web 側のベースURL組み立ては `web/src/lib/apiBaseUrl.ts` の `gatewayUrl()` に集約済みで、
+ * ここに独自の解決を残すと二重管理になる。そのため**呼び出し元が明示的に渡す**形にした。
+ *
+ * @param baseUrl 呼び出し先のベースURL。web から使う場合は `gatewayUrl('')` 相当を渡すこと。
+ *   認証が必要なエンドポイントでは、併せて `config.headers` に `Authorization` を載せること
+ *   (この関数自体はトークンを解決しない)。
+ */
 export const apiClient = async <T>(
   config: AxiosRequestConfig,
+  baseUrl: string,
   options?: any
 ): Promise<T> => {
-  const baseUrl = process.env.REACT_APP_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
   const url = `${baseUrl}${config.url || ''}`;
 
   const response = await fetch(url, {
