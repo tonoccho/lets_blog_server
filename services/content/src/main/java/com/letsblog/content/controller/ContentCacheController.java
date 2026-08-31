@@ -21,6 +21,14 @@ public class ContentCacheController {
         this.contentCacheService = contentCacheService;
     }
 
+    /**
+     * 認可不要: blogcard/amazon組み込みタグ(#147・#148・#149)のためのURLメタデータ取得で、
+     * 記事を書く利用者が普通に使う(issue #830)。admin限定にすると機能が壊れ、
+     * プロジェクトメンバー限定にしてもメンバーなら同じことができるので緩和にならない。
+     *
+     * <p><b>ただし宛先アドレスの検証が無く、内部アドレスへのSSRFになる。</b>これは認可ではなく
+     * 入力検証で対処すべき別種の問題なので、#902 として分けて起票した。
+     */
     @GetMapping
     public ContentCacheResponse resolve(@RequestParam String url) {
         return contentCacheService.resolve(url);

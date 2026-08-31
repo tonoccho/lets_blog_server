@@ -43,6 +43,10 @@ public class CustomTagController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
+    /**
+     * 認可不要: 渡されたHTML/CSSの記法を検査して結果を返すだけの純粋な関数で、
+     * 保存済みリソースを読み書きしない(issue #830)。エディタの入力補助として使われる。
+     */
     @PostMapping("/validate")
     public ResponseEntity<ValidationResult> validate(@Valid @RequestBody ValidateCustomTagRequest request) {
         ValidationResult result = customTagValidationService.validate(request.htmlTemplate(), request.cssContent());

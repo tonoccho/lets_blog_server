@@ -18,9 +18,14 @@ class AuthorizationCoverageTest {
 
     /** 現時点で認可チェックを持たないエンドポイント(issue #830 時点)。
      * 減らせたらこのリストからも消すこと(残したままだとテストが教えてくれる)。 */
-    private static final Set<String> KNOWN_UNAUTHORIZED = Set.of(
-            "FrontendErrorLogController#logError",
-            "OperationLogController#record");
+    /**
+     * log-writer に認可チェックの無いエンドポイントは残っていない(issue #830)。
+     *
+     * <p>2件ともクライアントが自分のエラー・操作を送ってくる<b>書き込み専用の窓口</b>で、
+     * 他人のデータを読み書きしない。読み取り側には別途認可が掛かっている。
+     * 「認可不要」と判断し、理由を各メソッドの Javadoc へ記録した。
+     */
+    private static final Set<String> KNOWN_UNAUTHORIZED = Set.of();
 
     @Test
     @DisplayName("認可チェックの無いエンドポイントが増えていない(issue #830)")

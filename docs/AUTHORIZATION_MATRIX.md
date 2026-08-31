@@ -327,7 +327,7 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 | | 件数 |
 |---|---|
 | 総エンドポイント | 278 |
-| **認可なし(内部ブリッジを除く)** | **33**(#830 の初回計測時は 56) |
+| **認可なし(内部ブリッジを除く)** | **17**(#830 の初回計測時は 56) |
 
 サービス別の内訳:
 
@@ -336,12 +336,12 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 | media | 13 | `DiagramController`(6)、`GeneratedImageController`(6)、`MediaController#upload`(1) |
 | **ai** | **0** | #830 で解消。下記「解消済み」参照 |
 | project | 2 | `ProjectController#list`、`SiteController#list`(いずれも一覧。下記参照) |
-| content | 6 | `MetadataController`(2)、`PostController`(2)、`ContentCacheController`(1)、`CustomTagController#validate`(1) |
-| legacy-api | 5 | `AiController`(2)、`AuthController`(2、公開パス)、`HealthController`(1) |
-| platform | 5 | `DashboardController`(4)、`VscodeExtensionController`(1) |
+| content | 2 | `PostController#list` / `#lookupBySlug`(いずれも一覧・参照。下記参照) |
+| **legacy-api** | **0** | #830 で解消 |
+| **platform** | **0** | #830 で解消 |
 | **publishing** | **0** | #830 で解消。下記「解消済み」参照 |
-| log-writer | 2 | `FrontendErrorLogController`、`OperationLogController` |
-| **analytics / identity / publishing / ai** | **0** | 全エンドポイントが認可済み |
+| **log-writer** | **0** | #830 で解消 |
+| **analytics / identity / publishing / ai / platform / log-writer / legacy-api** | **0** | 全エンドポイントが認可済み、または理由付きで「認可不要」 |
 
 内部ブリッジ(`/api/internal/**`)は対象外とした。サービス間呼び出し専用で gateway からは
 到達せず、認可はトークンを転送する呼び出し元が担うため。
@@ -379,7 +379,9 @@ DBもコンテナも要らないため、MySQL が未公開の環境でも実行
    `Diagram` / `GeneratedImage` は `projectId` を持つのでプロジェクト単位で絞れるはずだが、
    media-service にはプロジェクトメンバー判定のブリッジがまだ無い(ai / content / analytics /
    publishing は持っている)。`MediaController#upload` も同様に site キーからの解決が要る
-2. **`content` の6件 / `platform` の5件 / `log-writer` の2件 / `legacy-api` の5件**
+2. **一覧系 4件** — `project/ProjectController#list`、`project/SiteController#list`、
+   `content/PostController#list` / `#lookupBySlug`。いずれも「自分がアクセスできる分だけ返す」
+   絞り込みが要り、判定材料の `project_users` が legacy-api に残っている(下記「一覧系を残している理由」)
 
 ### 解消済み
 
@@ -467,6 +469,37 @@ content-service / media-service のコンテナ間呼び出しだけだった。
 (`web/src/app/page.tsx`)が表示するジョブ履歴。**ただし `generation_jobs` に所有者を表す列が無く、
 「自分のジョブだけ」に絞ることが今のスキーマではできない。** 利用者ごとに絞るなら列の追加を伴うため、
 ギャップとして記録するに留めた。
+
+**`content` の4件 / `platform` の5件 / `log-writer` の2件 / `legacy-api` の5件(#830)**
+
+*認可を足したもの(4件)*
+
+- `platform/DashboardController#getContainerStatus` と `#streamContainerStatus` →
+  `requireAdmin()`。**コンテナ名と稼働状況はインフラの構成情報**で、#816 のQAで
+  「無効化された利用者に全コンテナ名と稼働状況が見え続ける」ことが確認されている。
+  同じコントローラの `getServiceStatusDetail` が既に admin 限定なのとも揃う
+- `legacy-api/AiController#image` と `#imageOptions` → `projectId` 指定時に
+  `requireProjectMemberOrAdmin`。プロジェクト設定(既定サイズ・ネガティブプロンプト等)を
+  読むため。同じクラスの `generateImagePrompt` が既にそうしていたのに揃えた
+
+*「認可不要」と判断したもの(12件)*
+
+| エンドポイント | 理由 |
+|---|---|
+| `content/MetadataController#postStatuses` | enum を列挙するだけ。保存済みデータに触れない |
+| `content/MetadataController#roles` | ロール名と表示名のみ。権限一覧は含まない |
+| `content/CustomTagController#validate` | HTML/CSS の記法検査。純粋な関数 |
+| `content/ContentCacheController#resolve` | blogcard/amazon 用。記事を書く利用者が普通に使うので admin 限定にできず、メンバー限定にしても緩和にならない |
+| `platform/DashboardController#getServiceStatus` / `#streamServiceStatus` | 共通ダッシュボードの「アプリが動いているか」の要約。詳細版は admin 限定 |
+| `platform/VscodeExtensionController#download` | 拡張(.vsix)の配布。利用者固有のデータを含まない |
+| `log-writer/FrontendErrorLogController#logError` | クライアントが自分のエラーを送る書き込み専用の窓口。読み取り側には認可あり |
+| `log-writer/OperationLogController#record` | 同上 |
+| `legacy-api/AuthController#setupStatus` / `#setup` | `PUBLIC_PATHS` の**認証前に叩かれる公開パス**。認可を掛けると初回セットアップが不可能になる |
+| `legacy-api/HealthController#health` | 同上。監視・コンテナのヘルスチェック用 |
+
+> **`ContentCacheController#resolve` について:** 認可の問題ではないが、**宛先アドレスの検証が無く
+> 内部アドレスへの SSRF になる**ことがこの棚卸しで判明した。入力検証で対処すべき別種の問題なので
+> **#902** として分けて起票した。
 
 `legacy-api/AuthController` の2件は初回セットアップ導線で **`PUBLIC_PATHS` に含まれる公開パス**、
 `HealthController#health` も同様。これらは「認可不要」が正しく、

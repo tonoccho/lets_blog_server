@@ -18,12 +18,15 @@ class AuthorizationCoverageTest {
 
     /** 現時点で認可チェックを持たないエンドポイント(issue #830 時点)。
      * 減らせたらこのリストからも消すこと(残したままだとテストが教えてくれる)。 */
-    private static final Set<String> KNOWN_UNAUTHORIZED = Set.of(
-            "DashboardController#getServiceStatus",
-            "DashboardController#streamServiceStatus",
-            "DashboardController#getContainerStatus",
-            "DashboardController#streamContainerStatus",
-            "VscodeExtensionController#download");
+    /**
+     * platform-service に認可チェックの無いエンドポイントは残っていない(issue #830)。
+     *
+     * <p>container-status とそのSSE版は<b>インフラの構成情報</b>なので requireAdmin を掛けた
+     * (#816 のQAで、無効化された利用者に全コンテナ名と稼働状況が見え続けることが確認されている)。
+     * service-status とそのSSE版、および VscodeExtensionController#download は
+     * 「認可不要」と判断し、理由を各メソッドの Javadoc へ記録した。
+     */
+    private static final Set<String> KNOWN_UNAUTHORIZED = Set.of();
 
     @Test
     @DisplayName("認可チェックの無いエンドポイントが増えていない(issue #830)")
