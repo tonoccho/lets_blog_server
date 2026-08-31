@@ -2339,6 +2339,11 @@ export interface ConnectedServiceStatusDetail {
   errorMessage: string | null;
   targetUrl: string | null;
   checkedAt: string;
+  /**
+   * この依存/サービスが落ちたときに使えなくなる機能(issue #589)。
+   * 外部依存など、影響を定義していないものは null。
+   */
+  impact: string | null;
 }
 
 /** 応答時間・エラー内容・チェック対象URLなどの詳細診断情報(issue #199)。admin限定、非adminが呼ぶと403になる。 */

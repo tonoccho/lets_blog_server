@@ -26,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
@@ -59,6 +60,14 @@ class ConnectedServiceStatusServiceTest {
     @Mock
     private Connection connection;
 
+    // issue #589 で追加した2つのチェックは、このテストの関心(外部依存の疎通判定)の外なので
+    // モックで固定する。それぞれの判定ロジックは専用のテストで検証する。
+    @Mock
+    private LetsBlogServiceStatusService letsBlogServiceStatusService;
+
+    @Mock
+    private RabbitMqQueueStatusService rabbitMqQueueStatusService;
+
     private MockRestServiceServer comfyUiServer;
     private MockRestServiceServer plantUmlServer;
     private MockRestServiceServer wordpressServer;
@@ -83,11 +92,18 @@ class ConnectedServiceStatusServiceTest {
                 plantUmlBuilder, PLANTUML_URL,
                 wordpressBuilder, WORDPRESS_URL,
                 penpotBuilder, PENPOT_URL,
-                systemSettingService);
+                systemSettingService,
+                letsBlogServiceStatusService,
+                rabbitMqQueueStatusService);
     }
 
     @BeforeEach
     void setUp() {
+        // #589 の2チェックは既定で「正常」に固定し、既存の検証(外部依存の疎通判定)へ影響させない。
+        lenient().when(letsBlogServiceStatusService.checkAll()).thenReturn(List.of());
+        lenient().when(letsBlogServiceStatusService.targetUrl()).thenReturn("http://gateway:8080/actuator/health");
+        lenient().when(rabbitMqQueueStatusService.check())
+                .thenReturn(new RabbitMqQueueStatusService.QueueStatus(true, false, null, "http://rabbitmq:15672/api/queues"));
         service = buildService("test-llm-api-key");
     }
 

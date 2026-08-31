@@ -19,6 +19,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
@@ -46,6 +47,8 @@ public class ConnectedServiceStatusService {
     private final RestClient wordpressProvisioningClient;
     private final RestClient penpotClient;
     private final SystemSettingService systemSettingService;
+    private final LetsBlogServiceStatusService letsBlogServiceStatusService;
+    private final RabbitMqQueueStatusService rabbitMqQueueStatusService;
     private final String comfyUiBaseUrl;
     private final String plantUmlBaseUrl;
     private final String wordpressProvisionBaseUrl;
@@ -60,14 +63,16 @@ public class ConnectedServiceStatusService {
             @Value("${app.plantuml-base-url}") String plantUmlBaseUrl,
             @Value("${app.wordpress-provision-base-url}") String wordpressProvisionBaseUrl,
             @Value("${app.penpot-base-url}") String penpotBaseUrl,
-            SystemSettingService systemSettingService) {
+            SystemSettingService systemSettingService,
+            LetsBlogServiceStatusService letsBlogServiceStatusService,
+            RabbitMqQueueStatusService rabbitMqQueueStatusService) {
         this(dataSource,
                 llmApiKey,
                 builderWithTimeout(comfyUiBaseUrl), comfyUiBaseUrl,
                 builderWithTimeout(plantUmlBaseUrl), plantUmlBaseUrl,
                 builderWithTimeout(wordpressProvisionBaseUrl), wordpressProvisionBaseUrl,
                 builderWithTimeout(penpotBaseUrl), penpotBaseUrl,
-                systemSettingService);
+                systemSettingService, letsBlogServiceStatusService, rabbitMqQueueStatusService);
     }
 
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
@@ -78,7 +83,9 @@ public class ConnectedServiceStatusService {
             RestClient.Builder plantUmlBuilder, String plantUmlBaseUrl,
             RestClient.Builder wordpressBuilder, String wordpressProvisionBaseUrl,
             RestClient.Builder penpotBuilder, String penpotBaseUrl,
-            SystemSettingService systemSettingService) {
+            SystemSettingService systemSettingService,
+            LetsBlogServiceStatusService letsBlogServiceStatusService,
+            RabbitMqQueueStatusService rabbitMqQueueStatusService) {
         this.dataSource = dataSource;
         this.llmApiKey = llmApiKey;
         this.comfyUiClient = comfyUiBuilder.build();
@@ -86,6 +93,8 @@ public class ConnectedServiceStatusService {
         this.wordpressProvisioningClient = wordpressBuilder.build();
         this.penpotClient = penpotBuilder.build();
         this.systemSettingService = systemSettingService;
+        this.letsBlogServiceStatusService = letsBlogServiceStatusService;
+        this.rabbitMqQueueStatusService = rabbitMqQueueStatusService;
         this.comfyUiBaseUrl = comfyUiBaseUrl;
         this.plantUmlBaseUrl = plantUmlBaseUrl;
         this.wordpressProvisionBaseUrl = wordpressProvisionBaseUrl;
@@ -121,14 +130,41 @@ public class ConnectedServiceStatusService {
         CompletableFuture<ConnectedServiceStatusDetailResponse> penpot =
                 checkAsync("penpot", "Penpot", this::checkPenpot);
 
-        return List.of(
+        List<ConnectedServiceStatusDetailResponse> result = new ArrayList<>(List.of(
                 runTimed("database", "データベース", this::checkDatabase),
                 runTimed("llm", "LLM", this::checkLlm),
                 comfyUi.join(),
                 plantUml.join(),
                 wordpressProvisioning.join(),
                 penpot.join(),
-                runTimed("brave-search", "Brave Search API", this::checkBraveSearch));
+                runTimed("brave-search", "Brave Search API", this::checkBraveSearch),
+                // RabbitMQのキュー滞留・DLQ滞留(issue #589)。DLQに残っていれば、
+                // 処理されなかったイベントが確実に存在するのでERRORにする。
+                runTimed("rabbitmq-queues", "RabbitMQ キュー滞留", this::checkRabbitMqQueues)));
+
+        // Let's Blog自身の9サービス(issue #589)。外部依存だけでなく、どのサービスが
+        // 落ちているかがダッシュボードで分かるようにする。
+        result.addAll(letsBlogServiceStatusService.checkAll().stream()
+                .map(this::toDetail)
+                .toList());
+        return result;
+    }
+
+    private ConnectedServiceStatusDetailResponse toDetail(LetsBlogServiceStatusService.ServiceHealth health) {
+        return new ConnectedServiceStatusDetailResponse(
+                health.id(), health.name(),
+                health.up() ? Status.NORMAL : Status.ERROR,
+                0, null, health.detail(),
+                letsBlogServiceStatusService.targetUrl(), Instant.now(), health.impact());
+    }
+
+    private CheckOutcome checkRabbitMqQueues() {
+        RabbitMqQueueStatusService.QueueStatus status = rabbitMqQueueStatusService.check();
+        if (status.ok()) {
+            return CheckOutcome.normal(status.targetUrl());
+        }
+        return new CheckOutcome(
+                status.warning() ? Status.WARNING : Status.ERROR, null, status.message(), status.targetUrl());
     }
 
     private CompletableFuture<ConnectedServiceStatusDetailResponse> checkAsync(
@@ -142,7 +178,7 @@ public class ConnectedServiceStatusService {
         long responseTimeMs = System.currentTimeMillis() - startedAt;
         return new ConnectedServiceStatusDetailResponse(
                 id, name, outcome.status(), responseTimeMs,
-                outcome.httpStatus(), outcome.errorMessage(), outcome.targetUrl(), Instant.now());
+                outcome.httpStatus(), outcome.errorMessage(), outcome.targetUrl(), Instant.now(), null);
     }
 
     private CheckOutcome checkDatabase() {

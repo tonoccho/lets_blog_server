@@ -13,7 +13,10 @@ management:
   endpoints:
     web:
       exposure:
-        include: health
+        # issue #589: health に加えて info / metrics も公開する。
+        # 認証ゲート(ADR-0008)の PUBLIC_PATHS に /actuator/** が入っているため、
+        # 秘匿情報を含みうるエンドポイント(env / configprops / heapdump 等)は公開しない。
+        include: health,info,metrics
   endpoint:
     health:
       show-details: when-authorized
