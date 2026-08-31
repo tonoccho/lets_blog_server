@@ -16,8 +16,9 @@
 - 受け入れ基準は `.feature` に日本語の Gherkin で書く。仕様書とテストを二重に持たない。
 - 実装の内部構造(クラス名・テーブル名・内部APIの形)はシナリオに書かない。
   それらは単体テスト・契約テストの担当。
-- 1シナリオ = 1つの受け入れ基準。`docs/ACCEPTANCE_CRITERIA.md`(AT-1 / #927 が作成)の
-  トレーサビリティ表から、対応するシナリオを引けるようにする。
+- 1シナリオ = 1つの受け入れ基準。[ACCEPTANCE_CRITERIA.md](ACCEPTANCE_CRITERIA.md) の
+  トレーサビリティ表から、対応するシナリオを引けるようにする。`.feature` を実装したら、
+  同じPRでカタログの「対応シナリオ」列と「状態」を更新する。
 
 ---
 
@@ -229,6 +230,7 @@ Then('Keycloakのホスト型ログイン画面が表示される', async ({ pag
 
 ## 10. 参考
 
+- [ACCEPTANCE_CRITERIA.md](ACCEPTANCE_CRITERIA.md) — 受け入れ基準カタログ(機能IDと検証状況)
 - [e2e-testing.md](e2e-testing.md) — スタック起動、Keycloak プロビジョニング、テストデータ、トラブルシューティング
 - [TEST_DOCUMENTATION.md](TEST_DOCUMENTATION.md) — テスト全体の階層
 - [playwright-bdd](https://vitalets.github.io/playwright-bdd/)

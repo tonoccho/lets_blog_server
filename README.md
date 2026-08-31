@@ -297,6 +297,9 @@ APIの認証にはKeycloakが発行するアクセストークンを`Authorizati
 ### 技術ドキュメント
 
 - [docs/setup.md](docs/setup.md) — 環境変数・起動手順・トラブルシューティングの詳細
+- [docs/ACCEPTANCE_CRITERIA.md](docs/ACCEPTANCE_CRITERIA.md) — 受け入れ基準カタログ(全機能の一覧と検証状況)
+- [docs/ACCEPTANCE_TESTING.md](docs/ACCEPTANCE_TESTING.md) — 受け入れテスト(Gherkin)の書き方・タグ規約・実行方法
+- [docs/e2e-testing.md](docs/e2e-testing.md) — E2E/受け入れテストの実行環境と前提
 - [docs/DOCKER_COMPOSE_ARCHITECTURE.md](docs/DOCKER_COMPOSE_ARCHITECTURE.md) — コンテナ構成・ポート割当・起動順序
 - [docs/adr/](docs/adr/README.md) — アーキテクチャ意思決定記録 (ADR)
 - [docs/SERVICE_SCHEMA_MIGRATION.md](docs/SERVICE_SCHEMA_MIGRATION.md) — サービス別MySQLスキーマ分離とデータ移行ガイド
