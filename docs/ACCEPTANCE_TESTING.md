@@ -81,7 +81,7 @@
 | タグ | 意味 | 付ける基準 |
 | --- | --- | --- |
 | `@slow` | 分単位で時間がかかる | ComfyUI の実生成、WordPress への実公開、サイトのプロビジョニング |
-| `@destructive` | 環境の状態を壊す | 一括削除、バックアップ/リストア、ユーザー0人状態の再現。**前後で復旧すること** |
+| `@destructive` | 環境の共有状態を壊す | 一括削除、バックアップ/リストア、ユーザーの無効化、ログアウト。**前後で復旧すること**。§10 の `at-destructive` 段階で最後にまとめて実行される |
 | `@stub` | 外部依存スタブの起動が前提 | LLM / GA / AdSense / Brave Search / OpenAI画像生成 / GitHub(§9) |
 | `@api` | UI を経由せず HTTP で検証する | 認証ゲート、拡張のAPI、非同期経路 |
 
@@ -202,7 +202,7 @@ Then('Keycloakのホスト型ログイン画面が表示される', async ({ pag
 
 | spec | 移行先 Issue | 状態 |
 | --- | --- | --- |
-| `auth-flow.spec.ts` | AT-3 (#929) | 1シナリオのみ移行済み(#926 のサンプル) |
+| `auth-flow.spec.ts` | AT-3 (#929) | **移行完了。spec は削除済み**(`features/auth/` の6ファイル) |
 | `accessibility.spec.ts` | AT-18 (#944) | 未 |
 | `main-scenario.spec.ts` | AT-6 (#932) | 未 |
 | `site-registration.spec.ts` | AT-5 (#931) | 未 |
@@ -374,7 +374,7 @@ npm run test:at:clean                 # リセット → 段階順に全実行
 ### 段階
 
 ```
-reset ─→ at-setup ─→ at-seed ─→ at-provision ─→ at-main
+reset ─→ at-setup ─→ at-seed ─→ at-provision ─→ at-main ─→ at-destructive
 ```
 
 | 段階 | 中身 | 担当 |
@@ -383,12 +383,29 @@ reset ─→ at-setup ─→ at-seed ─→ at-provision ─→ at-main
 | `at-setup` | `@stage:setup` のシナリオ。初回セットアップ(ユーザー0人 → 最初の管理者) | AT-3 (#929) |
 | `at-seed` | `scripts/seed-acceptance-env.sh`。E2E専用の合成アカウントを発行 | AT-19 |
 | `at-provision` | `@stage:provision` のシナリオ。**WordPress のプロビジョニング** | AT-5 (#931) |
-| `at-main` | 上記以外すべて | 各ドメインIssue |
+| `at-main` | 上記以外すべて(`@destructive` を除く) | 各ドメインIssue |
+| `at-destructive` | `@destructive` のシナリオ。**最後に、それだけで**実行する | 各ドメインIssue |
+
+### なぜ `@destructive` を別段階にするか(#929)
+
+`@destructive` は「環境の状態を壊す」シナリオである。壊す対象は**共有されている**。
+例えば「無効化したユーザーの発行済みトークンが拒否される」は、共通の合成アカウントを
+一時的に無効化する。これを他のシナリオと並列に走らせると、同じアカウントでログインしている
+無関係なシナリオが巻き添えで落ちる(実測で3件が落ちた)。
+
+Playwright はファイルをまたぐ直列化の手段を持たない(`@mode:serial` は同一ファイル内だけ)。
+段階を1つ足して「この段階が走るときは他に誰も走っていない」状態を作るのが、
+この構成で表現できる唯一の確実な隔離である。
+
+データを消さなくても、**共有された状態を一時的に壊すなら `@destructive` を付ける**。
+ログアウト(Keycloak のSSOセッションを終了させる)のように、消すのはデータではないが
+並列実行を壊すものも含む。
 
 段階は Playwright のプロジェクト間 `dependencies` で表現している
 ([web/playwright.config.ts](../web/playwright.config.ts))。したがって:
 
-- **`--project=at-main` を指定するだけでよい。** 依存する前段は Playwright が自動で先に走る。
+- **`--project=at-destructive` を指定するだけでよい。** 依存する前段は Playwright が自動で先に走る。
+  `npm run test:at` / `test:at:clean` はこれを指定している。
 - **前段が失敗したら後続は実行されない。** Playwright は依存プロジェクトが落ちた場合、
   依存元を「失敗」ではなく**スキップ**として報告する。プロビジョニングが失敗したときに
   大量の失敗が並んで原因が埋もれる、という事態を避けるための設計である。
@@ -396,7 +413,8 @@ reset ─→ at-setup ─→ at-seed ─→ at-provision ─→ at-main
 ### 段階タグ
 
 `@stage:setup` / `@stage:provision` は**段階の割り当てにしか使わない**。
-付けなければ `at-main` に入る。§4 のタグ規約(`@slow` 等)とは目的が違うので混ぜないこと。
+付けなければ `at-main` に入る(`@destructive` が付いていれば `at-destructive`)。
+§4 のタグ規約(`@slow` 等)とは目的が違うので混ぜないこと。
 
 新しいシナリオを書くとき、これらを付ける必要はほぼ無い。付けるのは
 「他の全シナリオより先に成立していなければならない前提」だけである。

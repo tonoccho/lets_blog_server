@@ -13,7 +13,8 @@ import { defineBddProject } from 'playwright-bdd';
  *   - その他のブラウザ : ブラウザ差が意味を持つspecのみに絞る
  * とし、実行時間を抑えつつクロスブラウザ検証の意図は維持する。
  */
-const CROSS_BROWSER_SPECS = [/auth-flow\.spec\.ts/, /accessibility\.spec\.ts/];
+// auth-flow.spec.ts は AT-3(#929)で features/auth/ へ全移行し削除した。
+const CROSS_BROWSER_SPECS = [/accessibility\.spec\.ts/];
 
 /**
  * issue #926 (AT-0): 受け入れテストは Gherkin(`.feature`)で記述し、playwright-bdd で
@@ -61,12 +62,31 @@ const atProvision = defineBddProject({
   tags: '@stage:provision',
 });
 
-/** 段階4: それ以外すべて。 */
+/** 段階4: それ以外すべて。@destructive は含めない(下の at-destructive が最後にまとめて実行する)。 */
 const atMain = defineBddProject({
   ...BDD_COMMON,
   name: 'at-main',
   outputDir: '.features-gen/at-main',
-  tags: 'not @stage:setup and not @stage:provision',
+  tags: 'not @stage:setup and not @stage:provision and not @destructive',
+});
+
+/**
+ * 段階5: `@destructive` のシナリオ(issue #929)。
+ *
+ * 環境の状態を壊すシナリオを**最後に、それだけで**実行する。
+ * 例えば「無効化したユーザーの発行済みトークンが拒否される」は共有の合成アカウントを
+ * 一時的に無効化する。これを他のシナリオと並列に走らせると、同じアカウントで
+ * ログインしている無関係なシナリオが巻き添えで落ちる(実測で3件が落ちた)。
+ *
+ * Playwright はファイルをまたぐ直列化の手段を持たない(`@mode:serial` は同一ファイル内だけ)。
+ * 段階を1つ足して「この段階が走るときは他に誰も走っていない」状態を作るのが、
+ * この構成で表現できる唯一の確実な隔離である。
+ */
+const atDestructive = defineBddProject({
+  ...BDD_COMMON,
+  name: 'at-destructive',
+  outputDir: '.features-gen/at-destructive',
+  tags: '@destructive and not @stage:setup and not @stage:provision',
 });
 
 export default defineConfig({
@@ -108,8 +128,9 @@ export default defineConfig({
     // chromium のみで回す。上の CROSS_BROWSER_SPECS と同じ考え方で、ブラウザ別の
     // 受け入れテストが必要になった時点で AT-18 がプロジェクトを追加する。
     //
-    // `--project=at-main` を指定すれば、依存する at-setup → at-seed → at-provision も
-    // Playwright が自動で先に実行する。段階を個別に指定する必要はない。
+    // `--project=at-destructive` を指定すれば、依存する at-setup → at-seed →
+    // at-provision → at-main も Playwright が自動で先に実行する。
+    // 段階を個別に指定する必要はない。
     {
       ...atSetup,
       use: { ...devices['Desktop Chrome'] },
@@ -133,6 +154,11 @@ export default defineConfig({
       ...atMain,
       use: { ...devices['Desktop Chrome'] },
       dependencies: ['at-provision'],
+    },
+    {
+      ...atDestructive,
+      use: { ...devices['Desktop Chrome'] },
+      dependencies: ['at-main'],
     },
     {
       name: 'chromium',

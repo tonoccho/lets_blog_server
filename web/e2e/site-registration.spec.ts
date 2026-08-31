@@ -10,7 +10,7 @@ import { E2E_ADMIN_PASSWORD, loginAsAdmin } from './helpers';
  * このフィクスチャサイトを前提とした確定的な検証を行うようにする(afterAllで削除する)。
  * /sitesページ自体はproxy.tsによりログイン必須(未ログインは/loginへリダイレクト)であり、
  * サイト削除(deleteSiteAction)はrequireAdminSession()で保護されているため、
- * ログインにはadmin権限を持つe2e-admin@letsblog.local(helpers.ts/auth-flow.spec.ts参照)を使う。
+ * ログインにはadmin権限を持つe2e-admin@letsblog.local(helpers.ts参照)を使う。
  * (registerSiteAction/createManagedWordPressSiteAction自体はgetSession()のみでrequireAdminSession()
  * までは要求しないが、admin権限はその上位互換なのでここでの選択に影響しない。actions.ts参照)。
  *
