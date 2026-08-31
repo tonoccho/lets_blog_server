@@ -65,9 +65,8 @@ docker compose up -d
 
 `wait-for-stack-healthy.sh` は E2E に必要なサービス
 (reverse-proxy / web / gateway / keycloak / keycloak-postgres / mysql / rabbitmq /
-api / identity / media / ai / content / analytics / project / publishing / platform /
-log-writer / legacy-schema-migrate)を対象に、
-`healthy`(ヘルスチェックを持たないものは `running`、`legacy-schema-migrate` は正常終了)
+identity / media / ai / content / analytics / project / publishing / platform /
+log-writer)を対象に、`healthy`(ヘルスチェックを持たないものは `running`)
 になるまで待つ。penpot / comfyui / drawio 等の任意サービスは待機対象に含めない。
 
 ```bash
@@ -110,7 +109,7 @@ E2E_ADMIN_PASSWORD='<任意の強いパスワード>' \
    取得後、`GET /api/users`(admin 限定)で実際に管理者操作ができることを先に確認し、
    できなければその場で中止する(後続が 403 で落ちた理由を追いにくくしないため)。
 1. `POST https://localhost/api/users`(gateway → identity-service)でユーザーを作成する。
-   identity-service が **Keycloak 側のユーザー** と **ローカル DB の `lets_blog.users`
+   identity-service が **Keycloak 側のユーザー** と **ローカル DB の `lbs_identity.users`
    (`keycloak_sub` 付き)** の両方を作る。両方揃っていないと admin 操作は 403 になる
    (`CurrentActorService` が JWT の `sub` からローカル User を引くため)。
 2. Keycloak Admin CLI でパスワードを設定する(`temporary=false`)。
@@ -232,7 +231,7 @@ E2E_REQUIRE_LLM=1 npx playwright test e2e/custom-tag-generation.spec.ts
 | `lbs_media` | `generated_images` / `diagrams` / `project_image_settings` / `generated_image_sequences` |
 | `lbs_ai` | `article_plan_sessions` / `project_ai_settings` |
 | `lbs_analytics` | `analytics_credentials` |
-| `lets_blog` | `project_users` / `project_image_settings` / `user_site_authors` |
+| `lbs_identity` | `users` / `roles` / `role_permissions` / `user_roles` / `project_users` / `user_site_authors` |
 
 投入は各 spec の `beforeAll` / `beforeEach` が **UI 経由**(=本番と同じ経路)で行い、
 削除も `afterEach` / `afterAll` が UI 経由で行う。ただしフィクスチャ構築の途中で
@@ -426,7 +425,7 @@ docker compose logs <service> | tail -50
 
 ### admin 操作が 403 になる
 
-Keycloak にはユーザーがいるが、ローカル DB(`lets_blog.users`)に `keycloak_sub` 付きの
+Keycloak にはユーザーがいるが、ローカル DB(`lbs_identity.users`)に `keycloak_sub` 付きの
 行が無い可能性がある。identity-service 経由(`POST /api/users`)で作成し直す。
 
 ### 証明書エラー

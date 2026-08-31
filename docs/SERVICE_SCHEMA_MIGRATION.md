@@ -106,9 +106,9 @@ spring:
     locations: classpath:db/migration
 ```
 
-既存のV1〜V63マイグレーション(`services/legacy-api/src/main/resources/db/migration/`)は
-再配置しない。各サービスは自スキーマ用の新規の初期マイグレーション(`V1__init_schema.sql`)から
-始める。
+分割前の単一サービスが持っていたV1〜V81のマイグレーションは再配置せず、各サービスは自スキーマ用の
+新規の初期マイグレーション(`V1__init_schema.sql` 等)から始めた。旧マイグレーションは
+legacy-api ごと #583 で削除済み(内容は git history を参照)。
 
 ## 既存データの移行
 
@@ -186,15 +186,15 @@ docker exec -i lbs-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" \
 
 1. **件数突合**: 移行元テーブルの行数と、移行先テーブルの行数が一致すること。
    ```sql
-   -- 移行元
-   SELECT COUNT(*) FROM lets_blog.sites;
+   -- 移行元(分割前のスキーマ。#785で廃止したため、現在は新規の移行では発生しない)
+   SELECT COUNT(*) FROM <移行元スキーマ>.sites;
    -- 移行先
    SELECT COUNT(*) FROM lbs_project.sites;
    ```
 2. **サンプル値突合**: 主キーの一部(先頭・末尾・ランダムに数件)を移行元・移行先の両方で
    取得し、主要カラムの値が一致することを確認する。
    ```sql
-   SELECT * FROM lets_blog.sites WHERE id IN (1, 2, 999) ORDER BY id;
+   SELECT * FROM <移行元スキーマ>.sites WHERE id IN (1, 2, 999) ORDER BY id;
    SELECT * FROM lbs_project.sites WHERE id IN (1, 2, 999) ORDER BY id;
    ```
 

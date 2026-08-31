@@ -12,59 +12,10 @@ Docker Composeでまとめて起動する。クライアントはVSCode拡張機
 
 ## アーキテクチャ
 
-### 現状(2026年8月時点)
-
-`api`(`services/legacy-api`)がドメインロジックの大半を担う単一サービスに、認証以外の周辺コンポーネント
-(RabbitMQ経由の非同期ログ書き込み・Penpotによるデザイン生成・PlantUML/drawioレンダリング・WordPress
-プロビジョニング)が接続する構成。
-
-```mermaid
-flowchart LR
-    subgraph Client
-        VSCode["VSCode拡張"]
-        Web["Web管理画面<br/>(Next.js)"]
-    end
-
-    RP["reverse-proxy<br/>(nginx)"]
-
-    subgraph Server["Docker Compose"]
-        API["api<br/>(legacy-api, Spring Boot)"]
-        LW["log-writer"]
-        MySQL[(MySQL<br/>単一スキーマ)]
-        RMQ[["RabbitMQ<br/>letsblog.logs"]]
-        Penpot["Penpotスイート<br/>(デザイン生成)"]
-        ComfyUI["ComfyUI<br/>(画像生成, GPU)"]
-        PlantUML["PlantUML"]
-        Drawio["drawio"]
-    end
-
-    WP[("WordPress サイト群")]
-
-    VSCode -- "Bearer JWT (Keycloak)" --> RP
-    Web -- "Bearer JWT (Keycloak)" --> RP
-    RP --> API
-    RP --> Web
-    API --> MySQL
-    API -- "ログ発行" --> RMQ
-    RMQ -- "非同期コンシューム" --> LW
-    LW --> MySQL
-    API --> Penpot
-    API --> ComfyUI
-    API --> PlantUML
-    API --> Drawio
-    API -- "REST API + アプリケーションパスワード" --> WP
-```
-
-認証はKeycloak(OIDC)発行のJWTへ一括切り替え済み(issue #566)で、旧来のヘッダベースの
-自己申告方式([ADR-0002](docs/adr/0002-keycloak-oidc.md) の Context 参照)は撤去した。
-このアーキテクチャ図自体は、ドメイン単位のマイクロサービス分割(Phase 19)がまだ進行中の
-時点のものであり、api-gateway/identity-service/Keycloakは実際には既に導入済み
-(下記「目標構成」の一部を先取りして稼働している)。
-
-### 目標構成(マイグレーション後)
-
-[ADR-0001](docs/adr/0001-domain-based-microservices.md)〜[ADR-0004](docs/adr/0004-schema-per-service.md) の
-決定に基づき、ドメイン単位の完全なマイクロサービス化と Keycloak (OIDC) 認証基盤への一括切り替えを行う。
+ドメイン単位のマイクロサービス構成。認証は Keycloak(OIDC)発行の JWT へ一括切り替え済み
+(#566)で、旧来のヘッダベースの自己申告方式([ADR-0002](docs/adr/0002-keycloak-oidc.md) の
+Context 参照)は撤去した。分割前の単一サービス `legacy-api` は #583 で解体・削除し、
+その旧 MySQL スキーマも #785 で廃止した(Epic #551 完了)。
 
 ```mermaid
 flowchart LR
@@ -74,26 +25,34 @@ flowchart LR
     end
 
     RP["reverse-proxy<br/>(nginx)"]
-    GW["api-gateway<br/>(JWT検証/ルーティング/レート制限/相関ID)"]
+    GW["gateway<br/>(JWT検証/ルーティング/レート制限/相関ID)"]
     KC["Keycloak<br/>(OIDC IdP) + PostgreSQL"]
 
     subgraph Services["ドメインサービス群(各サービス専用MySQLスキーマ)"]
-        Identity["identity-service"]
-        Project["project-service"]
-        Content["content-service"]
-        Media["media-service"]
-        AI["ai-service"]
-        Publishing["publishing-service"]
-        Analytics["analytics-service"]
-        Platform["platform-service"]
-        LogW["log-writer"]
+        Identity["identity-service<br/>ユーザー・ロール・メンバー"]
+        Project["project-service<br/>プロジェクト・サイト・SSH鍵"]
+        Content["content-service<br/>投稿・カスタムタグ・描画"]
+        Media["media-service<br/>画像生成・ダイアグラム"]
+        AI["ai-service<br/>LLM生成・記事プラン"]
+        Publishing["publishing-service<br/>公開・一括管理・プレビュー"]
+        Analytics["analytics-service<br/>GA/AdSense"]
+        Platform["platform-service<br/>システム設定・バックアップ"]
+        LogW["log-writer<br/>監査/操作/エラーログ"]
     end
 
     Events[["RabbitMQ<br/>letsblog.events / letsblog.logs"]]
 
+    subgraph External["外部連携"]
+        WP[("WordPress サイト群")]
+        ComfyUI["ComfyUI (GPU)"]
+        PlantUML["PlantUML / drawio"]
+        Penpot["Penpot"]
+    end
+
     VSCode -- OIDCトークン --> RP
     Web -- OIDCトークン --> RP
     RP --> GW
+    RP --> Web
     GW -- JWT検証 --> KC
     GW --> Identity
     GW --> Project
@@ -103,15 +62,43 @@ flowchart LR
     GW --> Publishing
     GW --> Analytics
     GW --> Platform
+    GW --> LogW
     Services -- 発行/購読 --> Events
     Events --> LogW
+    Publishing -- "SSH + wp-cli" --> WP
+    Media --> ComfyUI
+    Media --> Penpot
+    Content --> PlantUML
 ```
 
 サービス間の同期呼び出しは Client Credentials Grant で相互認証する(図では省略。
-サービス数が多く全組み合わせを描くと見づらいため)。
+サービス数が多く全組み合わせを描くと見づらいため)。詳細は
+[docs/SYNC_SERVICE_CALLS.md](docs/SYNC_SERVICE_CALLS.md) を参照。
 
-移行の詳細な意思決定は [docs/adr/](docs/adr/README.md) を参照。実行計画は
-GitHub の Epic #551 とその子Issueが一次情報。
+### サービス一覧
+
+| サービス | 責務 | スキーマ |
+|---|---|---|
+| `gateway` | 単一入口。ルーティング・JWT検証・レート制限・相関ID付与・下流ヘルスの集約 | なし |
+| `identity` | ユーザー・ロール・権限・プロジェクトメンバー・著者マッピング・初回セットアップ | `lbs_identity` |
+| `project` | プロジェクト・サイト・SSH鍵ペア・組み込みタグのデザイン設定・GitHubトークン | `lbs_project` |
+| `content` | 投稿本文・カスタムタグ・組み込みタグ展開・コンテンツキャッシュ・CSSセレクタ接頭辞 | `lbs_content` |
+| `media` | 画像生成(ComfyUI/ChatGPT)・生成画像・ダイアグラム・画像設定 | `lbs_media` |
+| `ai` | LLM生成(下書き/校正/タグ/セクション)・記事プラン・生成ジョブ・Brave Searchキー | `lbs_ai` |
+| `publishing` | WordPressへの公開・削除・一括管理・環境間比較・記事プレビュー | `lbs_publishing` |
+| `analytics` | Google Analytics / AdSense のレポートと資格情報 | `lbs_analytics` |
+| `platform` | システム設定・バックアップ・ダッシュボード状態・VSCode拡張の配布 | `lbs_platform` |
+| `log-writer` | 監査ログ・操作ログ・フロントエンドエラーログ(RabbitMQ経由で非同期に書き込む) | `lbs_log` |
+
+各サービスは**自分のスキーマにしかアクセスしない**([ADR-0004](docs/adr/0004-schema-per-service.md))。
+他サービスのデータが要る場合は `/api/internal/**` の内部ブリッジ経由で問い合わせる。
+
+認証ゲート(有効な JWT が無ければ401)は gateway ではなく**各サービスの `SecurityConfig`** が担う
+([ADR-0008](docs/adr/0008-auth-gate-in-each-service-security-config.md))。gateway を迂回した
+直接アクセスでも守られる。エンドポイント単位の認可の網羅状況は
+[docs/AUTHORIZATION_MATRIX.md](docs/AUTHORIZATION_MATRIX.md) にある。
+
+移行の意思決定は [docs/adr/](docs/adr/README.md)、実行の記録は Epic #551 とその子Issueが一次情報。
 
 ## CI/CD & Quality
 
@@ -119,7 +106,6 @@ GitHub の Epic #551 とその子Issueが一次情報。
 [![Frontend Tests](https://github.com/tonoccho/lets_blog_server/actions/workflows/frontend-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/frontend-test.yml)
 [![Extension Build](https://github.com/tonoccho/lets_blog_server/actions/workflows/extension-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/extension-test.yml)
 
-[![codecov](https://codecov.io/gh/tonoccho/lets_blog_server/graph/badge.svg?flag=legacy-api)](https://codecov.io/gh/tonoccho/lets_blog_server)
 [![codecov](https://codecov.io/gh/tonoccho/lets_blog_server/graph/badge.svg?flag=log-writer)](https://codecov.io/gh/tonoccho/lets_blog_server)
 [![codecov](https://codecov.io/gh/tonoccho/lets_blog_server/graph/badge.svg?flag=lbs-common)](https://codecov.io/gh/tonoccho/lets_blog_server)
 [![codecov](https://codecov.io/gh/tonoccho/lets_blog_server/graph/badge.svg?flag=frontend)](https://codecov.io/gh/tonoccho/lets_blog_server)
@@ -140,7 +126,7 @@ GitHub の Epic #551 とその子Issueが一次情報。
 |---|---|
 | GPU | **NVIDIA GPU(VRAM 16GB以上)必須**。ComfyUI(画像生成)がGPUを使用するため |
 | GPUドライバ | NVIDIA GPUドライバ + NVIDIA Container Toolkit(Dockerコンテナへのパススルー用) |
-| メモリ | **16GB以上を推奨**(全19コンテナをアイドル状態で起動した実測値で約10.3GiB。ホストOS分の余裕や、ComfyUIでの画像生成時のスパイクを考慮すると16GB以上が安全。詳細は[docs/DOCKER_COMPOSE_ARCHITECTURE.md](docs/DOCKER_COMPOSE_ARCHITECTURE.md#リソース実測)参照) |
+| メモリ | **24GB以上を推奨**(全29コンテナ起動時の実測で約15GiB。ホストOS分の余裕や、ComfyUIでの画像生成時のスパイクを考慮するとこの程度が安全。以前は19コンテナ/約10.3GiBだったが、Epic #551 のマイクロサービス分割でサービス数が増えた。詳細は[docs/DOCKER_COMPOSE_ARCHITECTURE.md](docs/DOCKER_COMPOSE_ARCHITECTURE.md#リソース実測)参照) |
 | ディスク | Dockerイメージに加え、ComfyUIのモデルファイルで数GB〜十数GB程度の空き容量が必要 |
 | ネットワーク | ホストの80番・443番ポートが空いていること(リバースプロキシが使用) |
 

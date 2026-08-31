@@ -126,12 +126,12 @@ docker compose logs -f web  # Web管理画面のログ確認
 # 環境変数変更など、再ビルド不要な場合
 docker compose restart api
 
-# コード変更を反映する場合(イメージの再ビルドが必要)
-docker compose build api
-docker compose up -d api
+# コード変更を反映する場合(イメージの再ビルドが必要。例: content-service)
+docker compose build content
+docker compose up -d content
 ```
 
-`api` / `log-writer` は `services/legacy-api` / `services/log-writer` のGradleビルド成果物を
+バックエンドの各サービスは `services/<サービス名>` のGradleビルド成果物を
 イメージに焼き込む構成のため、ソース変更後は必ず `docker compose build` からやり直す
 (コンテナ再起動だけでは反映されない)。
 
@@ -141,18 +141,16 @@ docker compose up -d api
 直接アクセスする。
 
 ```bash
-# reverse-proxy経由(通常のアクセス経路)
-curl -k https://localhost/api/health
+# reverse-proxy経由(通常のアクセス経路。初回セットアップ導線は未認証で叩ける)
+curl -k https://localhost/api/auth/setup-status
 
-# api単体の疎通確認(コンテナ内から直接。curlは#556で追加済み)
-docker exec lbs-api curl -sf http://localhost:8080/actuator/health
-
-# log-writerも同様
+# 個別サービスの疎通確認(コンテナ内から直接。curlは#556で追加済み)
+docker exec lbs-content curl -sf http://localhost:8080/actuator/health
 docker exec lbs-log-writer curl -sf http://localhost:8080/actuator/health
 ```
 
-gateway は下流のバックエンドサービス10個(legacy-api / identity / content / media / ai /
-analytics / log-writer / project / publishing / platform)の状態を自身の `/actuator/health` に
+gateway は下流のバックエンドサービス9個(identity / project / content / media / ai /
+analytics / publishing / platform / log-writer)の状態を自身の `/actuator/health` に
 集約するため(`services/gateway/.../DownstreamHealthConfig`、#560・#743)、
 次のコマンドでまとめて確認できる。
 

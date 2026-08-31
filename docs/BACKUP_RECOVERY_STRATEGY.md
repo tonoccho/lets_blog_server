@@ -9,9 +9,10 @@ This document outlines the Let's Blog application's backup and recovery strategy
 The backup system (owned by `platform-service`, issue #694 / C10-2) protects three critical components:
 
 1. **All service MySQL schemas**: `lbs_identity`, `lbs_project`, `lbs_content`, `lbs_media`, `lbs_ai`,
-   `lbs_publishing`, `lbs_analytics`, `lbs_platform`, `lbs_log`, plus the legacy schema still used by
-   `legacy-api` until it is fully decomposed (#583). This covers sites, articles, user data, audit logs,
-   and configuration across every domain service (#570 schema-per-service split).
+   `lbs_publishing`, `lbs_analytics`, `lbs_platform`, `lbs_log`. This covers sites, articles, user data,
+   audit logs, and configuration across every domain service (#570 schema-per-service split).
+   The pre-split single schema (`lets_blog`) was dropped in #785 after `legacy-api` was removed in
+   #583, so it is no longer in `BACKUP_MYSQL_SCHEMAS`.
 2. **Keycloak PostgreSQL database** (`keycloak`, in the separate `keycloak-postgres` instance): all
    authentication data (users, credentials, roles, sessions).
 3. **Generated Images**: All AI-generated images stored in the `generated-images` volume.
@@ -134,10 +135,11 @@ rsync -av /tmp/backup-extract/generated-images/ /path/to/generated-images-storag
 After restore completion, every service and Keycloak must come back up healthy (all consume the
 schemas/database restored above):
 
-- [ ] `identity`, `project`, `content`, `media`, `ai`, `publishing` (once split out), `analytics`,
-      `platform`, `gateway`, and `legacy-api` (while it still owns a schema, pre-#583) all report
-      healthy on their `/actuator/health` endpoint (`docker compose ps` shows `healthy`, matching the
-      existing `x-actuator-healthcheck` healthcheck used by every service in `docker-compose.yml`)
+- [ ] `identity`, `project`, `content`, `media`, `ai`, `publishing`, `analytics`, `platform`,
+      `log-writer`, and `gateway` all report healthy on their `/actuator/health` endpoint
+      (`docker compose ps` shows `healthy`, matching the existing `x-actuator-healthcheck` healthcheck
+      used by every service in `docker-compose.yml`). `bash scripts/wait-for-stack-healthy.sh`
+      checks all of them at once.
 - [ ] Keycloak itself starts and its realm/users are reachable (`/auth/realms/letsblog`), confirming the
       restored `keycloak` PostgreSQL database is intact
 - [ ] Admin dashboard loads and admin login succeeds (validates both the identity/Keycloak restore and
@@ -162,7 +164,7 @@ The system logs all backup operations:
 Monitoring should check:
 
 ```
-[INFO] Backup archive created (database=lets_blog, size=... bytes)
+[INFO] Backup archive created (schemas=lbs_identity,lbs_project,..., size=... bytes)
 ```
 
 ### Backup Failure Alerting

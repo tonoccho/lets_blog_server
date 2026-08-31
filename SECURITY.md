@@ -43,6 +43,51 @@ This project uses automated security scanning to detect vulnerabilities early:
 
 See [Security Scanning Documentation](docs/SECURITY_SCANNING.md) for more details.
 
+## Authentication and Authorization Model
+
+Authentication is handled entirely by **Keycloak (OIDC)**. There is no application-managed login
+path: the header-based self-declared identity used before issue #566 has been removed
+(see [ADR-0002](docs/adr/0002-keycloak-oidc.md)).
+
+| Client | Flow |
+|---|---|
+| Web admin UI (Next.js) | Authorization Code + PKCE, via NextAuth's Keycloak provider (#564) |
+| VSCode extension | Device Authorization Grant (#565) |
+| Service-to-service | Client Credentials Grant, `letsblog-services` client (#567, [ADR-0005](docs/adr/0005-service-to-service-client-credentials.md)) |
+
+### Where the auth gate lives
+
+**Each service enforces its own authentication gate** in its `SecurityConfig`
+(`anyRequest().authenticated()`, with a short explicit `PUBLIC_PATHS` list), *not* the gateway
+([ADR-0008](docs/adr/0008-auth-gate-in-each-service-security-config.md)). A request that bypasses the
+gateway and reaches a service container directly is still rejected without a valid JWT.
+
+The only endpoints reachable without a token are:
+
+- `/actuator/**` (health/info/metrics; used by docker healthchecks and the gateway's aggregate health)
+- API docs (`/v3/api-docs/**`, `/swagger-ui/**`)
+- `/api/auth/setup-status` and `/api/auth/setup` — first-run admin creation, which by definition has
+  to work before anyone can log in (identity-service, moved there in #583)
+
+### Authorization
+
+Authorization (who may do what) is procedural, per endpoint: `requireAdmin()`,
+`requireProjectMemberOrAdmin()`, and their variants. Issue #830 went through every endpoint and
+decided whether it needs authorization; endpoints deliberately left at "any authenticated user" carry
+a `認可不要: <reason>` comment on the handler.
+
+This is enforced mechanically: `AuthorizationCoverageContract` (in `libs/lbs-common` test fixtures)
+fails the build if an endpoint without an authorization call — and without that comment — appears in
+any service. The allow-list is empty for all nine services. The current state is documented in
+[docs/AUTHORIZATION_MATRIX.md](docs/AUTHORIZATION_MATRIX.md).
+
+### Deactivated users
+
+Deactivating a user does **not** revoke already-issued access tokens (Keycloak only stops issuing new
+ones). Each service therefore re-resolves the actor through identity-service on every request and
+treats a disabled user as "no actor", so authorization fails closed (#816). identity-service returning
+401/403 is treated as an authorization result, not as an outage (#829).
+
 ## Best Practices
 
 When contributing to this project, please follow these security best practices:

@@ -92,8 +92,9 @@ traffic for the host's IP. Raise `API_RATE_LIMIT_REQUESTS` if that becomes a lim
   quota as the actual upload/generation calls (see issue #442)
 - **Purpose**: Prevents resource exhaustion
 - **Partitioning**: none — process-wide, deliberately (see "Partition granularity" above)
-- **Admin-configurable request count** (*not in effect at the gateway*): while rate limiting lived
-  in legacy-api, the request-count limit (but not the period) could be overridden from the admin
+- **Admin-configurable request count** (*not in effect at the gateway*): before #560, while rate
+  limiting lived in the pre-split service, the request-count limit (but not the period) could be
+  overridden from the admin
   Web UI at `/admin/system-settings` (`upload_rate_limit_requests`), stored in the
   `system_settings` table, with `-1` disabling the limiter. The gateway has no database, so since
   issue #560 only the static defaults above apply; re-introducing a dynamic override is issue

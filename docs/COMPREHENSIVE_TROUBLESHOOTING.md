@@ -349,14 +349,15 @@ ERROR: error running exit hooks: error removing container: <container_id>
 **Symptoms:**
 ```bash
 $ docker compose ps
-NAME          STATUS
-lbs-api       Created            # never transitions to "Up"/"Starting"
-lbs-mysql     Up (unhealthy)
+NAME            STATUS
+lbs-content     Created            # never transitions to "Up"/"Starting"
+lbs-mysql       Up (unhealthy)
 ```
 
-**Cause:** Since #556, `api` / `log-writer` `depends_on` `mysql` and `rabbitmq` with
+**Cause:** Since #556, the backend services `depends_on` `mysql` and `rabbitmq` with
 `condition: service_healthy` — they won't even start until both report healthy. If `mysql`
-or `rabbitmq` never becomes healthy, everything that depends on them stays stuck too.
+or `rabbitmq` never becomes healthy, everything that depends on them stays stuck too
+(and `gateway`, which waits on all nine services, stays stuck after that).
 
 **Solution:**
 
@@ -445,11 +446,11 @@ Service unavailable
 
 4. **Try accessing directly (for debugging)**
    ```bash
-   # Get container IP
-   docker inspect lbs-api | grep '"IPAddress"'
-   
-   # Test connection to that IP
-   curl http://<container-ip>:8080/api/health
+   # Get container IP (example: gateway)
+   docker inspect lbs-gateway | grep '"IPAddress"'
+
+   # Test connection to that IP (actuator is reachable without a token)
+   curl http://<container-ip>:8080/actuator/health
    ```
 
 ---
@@ -576,8 +577,9 @@ Invalid email or password
 
 1. **Verify user account exists**
    ```bash
+   # users は identity-service が lbs_identity で所有する(#786)
    docker compose exec mysql mysql -uroot -p$MYSQL_ROOT_PASSWORD \
-     -D lets_blog -e "SELECT * FROM users;" 2>/dev/null
+     -D lbs_identity -e "SELECT id, email, role, enabled FROM users;" 2>/dev/null
    ```
 
 2. **Check if setup was completed**
@@ -596,12 +598,12 @@ Invalid email or password
    ./scripts/reset-admin-password.sh <email> <new-password>
    ```
 
-   This runs inside the `platform` container (issue #693: `AdminPasswordResetRunner`
-   moved from legacy-api to platform-service) with the `admin-password-reset`
+   This runs inside the `platform` container (issue #693 moved `AdminPasswordResetRunner`
+   into platform-service) with the `admin-password-reset`
    Spring profile (`AdminPasswordResetRunner`), which:
    - looks up the target user's Keycloak account by email via the Keycloak
-     Admin API (platform-service does not have access to legacy-api's local
-     `users` table, per ADR-0004's schema-per-service isolation),
+     Admin API (platform-service has no access to the `users` table, which
+     identity-service owns in `lbs_identity`, per ADR-0004's schema-per-service isolation),
    - and sets the new password on that Keycloak account via the Admin API.
 
    The local `users.password_hash` column is not touched by this script
