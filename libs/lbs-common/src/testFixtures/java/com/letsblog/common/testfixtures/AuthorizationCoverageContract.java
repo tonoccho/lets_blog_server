@@ -141,6 +141,12 @@ public final class AuthorizationCoverageContract {
         // コントローラだけを見ると偽陽性になる。
         Set<String> authorizingDelegates = authorizingServicesIn(file);
 
+        // 同じコントローラ内の private ヘルパが認可している場合も「認可あり」とみなす(issue #830)。
+        // 「IDで引いて、その所属プロジェクトのメンバーか確かめる」処理はハンドラ間で共通化するのが
+        // 自然で(media の DiagramController#findAuthorized 等)、ヘルパを見ないと
+        // 実際には守られているエンドポイントを未認可と誤判定する。
+        Set<String> authorizingHelpers = authorizingHelpersIn(source);
+
         Matcher mapping = MAPPING.matcher(source);
         List<Integer> starts = new ArrayList<>();
         while (mapping.find()) {
@@ -163,6 +169,9 @@ public final class AuthorizationCoverageContract {
                 continue;
             }
             if (delegatesToAuthorizingService(block, authorizingDelegates)) {
+                continue;
+            }
+            if (callsAuthorizingHelper(block, authorizingHelpers)) {
                 continue;
             }
             String method = methodNameOf(block);
@@ -267,6 +276,58 @@ public final class AuthorizationCoverageContract {
     private static boolean delegatesToAuthorizingService(String block, Set<String> authorizingDelegates) {
         for (String field : authorizingDelegates) {
             if (block.contains(field + ".")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+
+    /**
+     * 同じファイル内で定義されている private メソッドのうち、本体に認可呼び出しを含むものの名前を返す。
+     *
+     * <p>{@link #authorizingServicesIn} のコントローラ内版。ハンドラが直接 {@code requireXxx} を
+     * 呼ばず、共通ヘルパへ切り出しているケースを拾う(issue #830)。
+     */
+    private static Set<String> authorizingHelpersIn(String source) {
+        Set<String> names = new LinkedHashSet<>();
+        Matcher declaration = Pattern.compile(
+                "\\bprivate\\s+(?:static\\s+)?[\\w<>\\[\\],.?\\s]+?\\b(\\w+)\\s*\\([^)]*\\)\\s*\\{").matcher(source);
+        while (declaration.find()) {
+            int bodyStart = source.indexOf('{', declaration.end() - 1);
+            int end = matchingBrace(source, bodyStart);
+            if (end < 0) {
+                continue;
+            }
+            String body = source.substring(bodyStart, end);
+            if (AUTHORIZATION_CALL.matcher(body).find()) {
+                names.add(declaration.group(1));
+            }
+        }
+        return names;
+    }
+
+    /** {@code open} 位置の {@code &#123;} に対応する閉じ括弧の位置を返す(見つからなければ -1)。 */
+    private static int matchingBrace(String source, int open) {
+        int depth = 0;
+        for (int i = open; i < source.length(); i++) {
+            char c = source.charAt(i);
+            if (c == '{') {
+                depth++;
+            } else if (c == '}') {
+                depth--;
+                if (depth == 0) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    /** ブロックが、認可を行う同一クラス内のヘルパを呼んでいるか。 */
+    private static boolean callsAuthorizingHelper(String block, Set<String> authorizingHelpers) {
+        for (String name : authorizingHelpers) {
+            if (Pattern.compile("\\b" + Pattern.quote(name) + "\\s*\\(").matcher(block).find()) {
                 return true;
             }
         }

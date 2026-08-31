@@ -207,6 +207,9 @@ services:
       # (Epic #551 C6-3)。起動時の依存関係(depends_on)には含めない(publishingがmediaのhealthyを
       # 待つ構成にはしていないため、循環させないよう実行時呼び出し先としてのみ設定する)。
       PUBLISHING_SERVICE_URI: http://publishing:8080
+      # ダイアグラム・生成画像のプロジェクトメンバー判定(issue #830)。project_usersがまだ
+      # legacy-apiにあるため、ProjectUserBridgeControllerの内部ブリッジへ問い合わせる。
+      LEGACY_API_URI: http://api:8080
       # ComfyUIチェックポイントのダウンロード/削除ジョブ(GenerationJob、ai-serviceが所有)の
       # 進捗反映先。#573 stage2ではlegacy-apiが所有していたため上のLEGACY_API_URIを共用していたが、
       # issue #574でgeneration_jobsの所有権がai-serviceへ移ったため、GenerationJobClientの向き先を

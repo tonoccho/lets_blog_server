@@ -85,6 +85,11 @@ app:
   # /api/identity/meへ転送して問い合わせる(#573 stage3、log-writer(#572)と同じ暫定策。
   # media-serviceはusersテーブルへクロススキーマアクセスできない=ADR-0004のクロススキーマ禁止のため)。
   identity-service-uri: ${IDENTITY_SERVICE_URI:http://identity:8080}
+  # ダイアグラム・生成画像のプロジェクトメンバー判定(AdminAuthorizationService、issue #830)。
+  # project_usersはまだlegacy-apiが所有しているため(ADR-0004によりクロススキーマアクセス不可)、
+  # ProjectUserBridgeControllerが既に公開している内部ブリッジを再利用する。
+  # #583でproject_usersがproject-serviceへ移った時点で向き先を変える。
+  legacy-api-uri: ${LEGACY_API_URI:http://api:8080}
 
 # KeycloakのJWT検証(#573)。identity-service/log-writerのSecurityConfig/JwtDecoderConfigと同じ理由
 # により、issuer-uriによる自動設定は使わずJWKS取得先と期待issuerを個別に指定して組み立てている。
