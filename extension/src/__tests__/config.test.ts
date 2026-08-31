@@ -1,5 +1,7 @@
 import type * as vscode from 'vscode';
 import {
+  getConfiguredAiProvider,
+  setConfiguredAiProvider,
   getServerUrl,
   allowsInsecureTls,
   requireAccessToken,
@@ -14,7 +16,13 @@ import {
   requireProjectId,
 } from '../config';
 import * as deviceAuth from '../deviceAuth';
-import { resetMocks, setConfiguration, shownWarnings } from '../__mocks__/vscode';
+import {
+  ConfigurationTarget,
+  configurationUpdates,
+  resetMocks,
+  setConfiguration,
+  shownWarnings,
+} from '../__mocks__/vscode';
 
 /** SecretStorage と workspaceState を持つ最小のExtensionContextスタブ。 */
 function createContext(): vscode.ExtensionContext & { secretValues: Map<string, string> } {
@@ -224,5 +232,78 @@ describe('プロジェクトID', () => {
 
   it('requireProjectIdは未選択なら対応方法を含む例外を投げる', () => {
     expect(() => requireProjectId(createContext())).toThrow('Select Project');
+  });
+});
+
+describe('AIプロバイダー設定(issue #530 / カバレッジ補完 issue #775)', () => {
+  it('未設定なら空文字を返す(サーバー側の既定値に委ねることを意味する)', () => {
+    expect(getConfiguredAiProvider()).toBe('');
+  });
+
+  it('設定済みならその値を返す', () => {
+    setConfiguration('letsBlog.aiProvider', 'OPENAI');
+    expect(getConfiguredAiProvider()).toBe('OPENAI');
+  });
+
+  it('setConfiguredAiProviderはuser設定(Global)へ書き込む', async () => {
+    await setConfiguredAiProvider('CLAUDE');
+    expect(configurationUpdates).toEqual([
+      { key: 'letsBlog.aiProvider', value: 'CLAUDE', target: ConfigurationTarget.Global },
+    ]);
+  });
+
+  it('書き込んだ値はgetConfiguredAiProviderから読み出せる', async () => {
+    await setConfiguredAiProvider('OLLAMA');
+    expect(getConfiguredAiProvider()).toBe('OLLAMA');
+  });
+
+  it('空文字を書き込むと「サーバーの既定値を使う」状態へ戻せる', async () => {
+    await setConfiguredAiProvider('OPENAI');
+    await setConfiguredAiProvider('');
+    expect(getConfiguredAiProvider()).toBe('');
+  });
+});
+
+describe('アクセストークン更新のタイムアウト(カバレッジ補完 issue #775)', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  // requireAccessTokenはリフレッシュ要求に30秒のタイムアウトを設けており、
+  // 期限を過ぎるとAbortControllerで中断する(config.ts:133)。応答が返らないKeycloakを
+  // 相手に拡張が無期限に固まらないための経路なので、実際に発火させて検証する。
+  it('リフレッシュが応答しない場合は中断し、再ログインを促す例外を投げる', async () => {
+    jest.useFakeTimers();
+    try {
+      const context = createContext();
+      const expiredTokens = {
+        accessToken: 'access-old',
+        refreshToken: 'refresh-old',
+        expiresAt: Date.now() - 1_000,
+      };
+      context.secretValues.set('letsBlog.tokens', JSON.stringify(expiredTokens));
+
+      let observedSignal: AbortSignal | undefined;
+      jest
+        .spyOn(deviceAuth, 'refreshAccessToken')
+        .mockImplementation((_serverUrl, _refreshToken, _allowInsecureTls, signal) => {
+          observedSignal = signal;
+          return new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () => reject(new Error('aborted')));
+          });
+        });
+
+      const pending = requireAccessToken(context);
+      const rejection = expect(pending).rejects.toThrow('Login');
+
+      await jest.advanceTimersByTimeAsync(30_000);
+      await rejection;
+
+      expect(observedSignal?.aborted).toBe(true);
+      // 中断後は保存済みトークンを破棄して再ログインへ誘導する。
+      expect(context.secretValues.has('letsBlog.tokens')).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
