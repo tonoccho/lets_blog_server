@@ -88,6 +88,9 @@ app:
   # Brave Search APIのベースURL(APIキーとは異なりシステム設定でDB上書きされる対象ではないため、
   # legacy-apiのAppSettingService DEFINITIONSにも含まれていない固定値。env varのみで変更可能)。
   brave-search-base-url: ${BRAVE_SEARCH_BASE_URL:https://api.search.brave.com}
+  # GitHub REST APIのベースURL。受け入れテストではスタブへ向ける(issue #928)。
+  # 実GitHubのままだと、記事プランの検証(#935)がテストのたびに本物のIssueを作ってしまう。
+  github-api-base-url: ${GITHUB_API_BASE_URL:https://api.github.com}
 
 # KeycloakのJWT検証。identity-service/log-writer/media-serviceのSecurityConfig/JwtDecoderConfigと
 # 同じ理由により、issuer-uriによる自動設定は使わずJWKS取得先と期待issuerを個別に指定して組み立てている。

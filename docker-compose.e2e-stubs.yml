@@ -1,0 +1,133 @@
+# 受け入れテスト用の外部依存スタブ一式(issue #928 / AT-2)。
+#
+#   docker compose -f docker-compose.yml -f docker-compose.e2e-stubs.yml up -d
+#
+# 受け入れテストは外部SaaSに依存しない。実キーが要る依存(LLM / Google Analytics /
+# AdSense / Brave Search / OpenAI画像生成 / GitHub)を、決定的に応答するスタブへ置き換える。
+# 詳細と使い方は docs/ACCEPTANCE_TESTING.md の「外部依存スタブ」節を参照。
+#
+# #843 で導入した docker-compose.e2e-llm-stub.yml は本ファイルへ統合し、削除した。
+# オーバーライドを依存ごとに増やすと起動手順が破綻するため、1本にまとめる方針。
+#
+# ## 落とし穴: システム設定(DB)が環境変数より優先される
+#
+# LLM の baseUrl / APIキーは platform-service の system_settings(DB)に値があると
+# そちらが優先される(AppSettingService が正)。環境変数だけ差し替えても実サービスへ
+# 出ていく。受け入れテストの前に scripts/e2e-clear-llm-db-overrides.sh で DB 側を空にすること。
+#
+# ## ホスト公開ポート
+#
+# 各スタブは 127.0.0.1 のみに公開する。受け入れテストが制御エンドポイント
+# (POST /__control/force など)でエラーを注入し、/__control/state で呼ばれた回数を
+# 確認するために必要。外部へは開けない。
+
+x-stub-base: &stub-base
+  image: node:22-alpine
+  restart: unless-stopped
+  working_dir: /app
+  volumes:
+    - ./e2e-stubs:/app:ro
+  environment:
+    PORT: "8080"
+  networks:
+    - lbs-net
+  healthcheck:
+    # localhost ではなく 127.0.0.1 を使う。node:22-alpine の busybox wget は localhost を
+    # ::1 へ先に解決し、サーバーが IPv4 の 0.0.0.0 にしか bind していないため接続拒否になる。
+    test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+
+services:
+  llm-stub:
+    <<: *stub-base
+    container_name: lbs-e2e-llm-stub
+    command: ["node", "llm/server.js"]
+    ports:
+      - "127.0.0.1:18081:8080"
+
+  ga-stub:
+    <<: *stub-base
+    container_name: lbs-e2e-ga-stub
+    command: ["node", "google-analytics/server.js"]
+    ports:
+      - "127.0.0.1:18082:8080"
+
+  adsense-stub:
+    <<: *stub-base
+    container_name: lbs-e2e-adsense-stub
+    command: ["node", "adsense/server.js"]
+    ports:
+      - "127.0.0.1:18083:8080"
+
+  brave-stub:
+    <<: *stub-base
+    container_name: lbs-e2e-brave-stub
+    command: ["node", "brave-search/server.js"]
+    ports:
+      - "127.0.0.1:18084:8080"
+
+  image-stub:
+    <<: *stub-base
+    container_name: lbs-e2e-image-stub
+    command: ["node", "openai-image/server.js"]
+    ports:
+      - "127.0.0.1:18085:8080"
+
+  github-stub:
+    <<: *stub-base
+    container_name: lbs-e2e-github-stub
+    command: ["node", "github/server.js"]
+    ports:
+      - "127.0.0.1:18086:8080"
+
+  # ---- 各サービスの向き先をスタブへ ----
+
+  # LLM を実際に呼ぶのは ai-service、その接続設定の既定値を持つのは platform-service
+  # (system_settings の所有者、issue #693)。両方を向けないと、DBに設定が無い環境で
+  # platform 側の既定値(本物のエンドポイント)が使われてしまう(#843)。
+  ai:
+    environment:
+      # LlmClient は {baseUrl}/chat/completions を叩く(パスはクライアント側が付ける)。
+      LLM_BASE_URL: http://llm-stub:8080
+      # スタブは Authorization を検証しないが、未設定だと呼び出し前に弾かれる経路があるため値を入れる。
+      LLM_API_KEY: e2e-stub-key
+      BRAVE_SEARCH_BASE_URL: http://brave-stub:8080
+      GITHUB_API_BASE_URL: http://github-stub:8080
+    depends_on:
+      llm-stub:
+        condition: service_healthy
+      brave-stub:
+        condition: service_healthy
+      github-stub:
+        condition: service_healthy
+
+  platform:
+    environment:
+      LLM_BASE_URL: http://llm-stub:8080
+      LLM_API_KEY: e2e-stub-key
+      # media-service は画像生成の接続設定を platform の
+      # /api/internal/platform/image-generation-config から取る(PlatformServiceClient)。
+      # したがって ChatGPT 画像生成の向き先はここで決まる。
+      IMAGE_LLM_BASE_URL: http://image-stub:8080
+      IMAGE_LLM_API_KEY: e2e-stub-image-key
+    depends_on:
+      llm-stub:
+        condition: service_healthy
+      image-stub:
+        condition: service_healthy
+
+  analytics:
+    environment:
+      GOOGLE_ANALYTICS_DATA_API_BASE_URL: http://ga-stub:8080
+      # サービスアカウントJSONに token_uri が書かれているとそちらが優先される。
+      # スタブ用のJSONには token_uri を入れないこと(docs/ACCEPTANCE_TESTING.md)。
+      GOOGLE_ANALYTICS_OAUTH_TOKEN_URI: http://ga-stub:8080/token
+      ADSENSE_DATA_API_BASE_URL: http://adsense-stub:8080
+      GOOGLE_OAUTH_TOKEN_URI: http://adsense-stub:8080/token
+    depends_on:
+      ga-stub:
+        condition: service_healthy
+      adsense-stub:
+        condition: service_healthy

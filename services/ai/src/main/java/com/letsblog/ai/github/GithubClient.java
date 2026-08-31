@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.letsblog.ai.config.LegacyJacksonRestClientConfig;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -16,14 +17,20 @@ import java.util.List;
 /**
  * GitHub REST API(issues)を利用したissue作成クライアント。
  * Octokit等のライブラリは導入せず、LlmClient/WordPressAdapterと同様にRestClientの薄いラッパーとして実装する。
+ *
+ * ベースURLは{@code app.github-api-base-url}(既定 https://api.github.com)。BraveSearchClientと
+ * 同じく設定値にしてあるのは、受け入れテストがスタブへ向けられるようにするため(issue #928)。
+ * 実GitHubへ向けたままだとテストのたびに本物のIssueが作られ、担当者が書き換わる。
  */
 @Component
 public class GithubClient {
 
     private final RestClient client;
 
-    public GithubClient(@Qualifier("githubRestClientBuilder") RestClient.Builder restClientBuilder) {
-        RestClient.Builder clonedBuilder = restClientBuilder.clone().baseUrl("https://api.github.com");
+    public GithubClient(
+            @Qualifier("githubRestClientBuilder") RestClient.Builder restClientBuilder,
+            @Value("${app.github-api-base-url}") String baseUrl) {
+        RestClient.Builder clonedBuilder = restClientBuilder.clone().baseUrl(baseUrl);
         LegacyJacksonRestClientConfig.preferJackson2(clonedBuilder);
         this.client = clonedBuilder.build();
     }
