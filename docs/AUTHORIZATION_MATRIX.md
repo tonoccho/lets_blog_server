@@ -467,8 +467,8 @@ issue #566でログイン(`POST /api/auth/login`)・2FA(`GET/POST /api/auth/totp
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
-| GET /api/auth/setup-status | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | PUBLIC_PATHS |
-| POST /api/auth/setup | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | PUBLIC_PATHS。初期管理者セットアップ用(ローカルDB直書きのみでKeycloak側にはアカウントを作らない) |
+| GET /api/auth/setup-status | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | PUBLIC_PATHS。`needsSetup` は**ローカル`users`テーブルの件数のみ**で判定する(`UserService#hasAnyUser`: `services/legacy-api/src/main/java/com/letsblog/api/service/UserService.java:116`)。Keycloak側は見ないため、ローカル`users`が空でKeycloakに同一メールのアカウントが残っている場合、`needsSetup=true` を返した直後の `POST /api/auth/setup` が Keycloak の409により502で失敗しうる |
+| POST /api/auth/setup | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | PUBLIC_PATHS。初期管理者セットアップ用。**Keycloak Admin REST API経由でKeycloak側にもアカウントを作る**ため、作成した資格情報でそのままKeycloakログインが可能(`UserService#setupInitialAdmin`: `services/legacy-api/src/main/java/com/letsblog/api/service/UserService.java:132`。140行目で`keycloakAdminClient.createUser`、142行目で`setPassword`を呼び、その後ローカル`users`行を`role=admin`+`ROLE_ADMIN`で作成する。issue #681で変更。#564時点の「ローカルDB直書きのみ」の記述はそれ以前の実装)。ユーザーが1人でも存在する場合は400で拒否される |
 
 ## BackupController (2エンドポイント、ベースパス `/api/backup`)
 
