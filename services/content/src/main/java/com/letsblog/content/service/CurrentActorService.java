@@ -105,7 +105,8 @@ public class CurrentActorService {
             return Optional.empty();
         }
         try {
-            return Optional.of(identityClient.fetchProfile(bearerToken));
+            // 401/403(無効化ユーザー等)は「操作者なし」。障害と区別する(issue #829)。
+            return identityClient.lookupProfile(bearerToken);
         } catch (SyncServiceException e) {
             throw new IdentityServiceUnavailableException(
                     "identity-serviceの/api/identity/me呼び出しに失敗しました: " + e.getMessage(), e);

@@ -2,6 +2,7 @@ package com.letsblog.project.client;
 
 import com.letsblog.project.service.IdentityServiceUnavailableException;
 import java.net.http.HttpClient;
+import java.util.Optional;
 import java.time.Duration;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -9,6 +10,7 @@ import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 
 /**
  * identity-serviceの{@code GET /api/identity/me}を、呼び出し元のBearerトークンをそのまま
@@ -53,5 +55,36 @@ public class IdentityClient {
         } catch (RestClientException e) {
             throw new IdentityServiceUnavailableException("identity-serviceの/api/identity/me呼び出しに失敗しました", e);
         }
+    }
+
+    /**
+     * 操作者を解決する。<b>認証・認可の結果</b>と<b>サービス障害</b>を区別する(issue #829)。
+     *
+     * <p>identity-serviceが401/403を返すのは「このトークンでは操作者を解決できない」という
+     * 正常な判定結果であって障害ではない(#816以降、無効化されたユーザーがこれに当たる)。
+     * {@link #fetchProfile}は{@code RestClientException}を一律に
+     * {@code IdentityServiceUnavailableException}へ翻訳するため、そのままでは502になり、
+     * 無効化ユーザー起因の502と本当のidentity-service障害の502が区別できない。
+     *
+     * <p>401/403は{@link Optional#empty()}(操作者なし)として返す。呼び出し元の
+     * {@code requireAdmin()}等がその先で403を返すため、拒否されること自体は変わらない。
+     * <b>5xx・タイムアウト・通信断は従来どおり例外のまま</b>伝播させる
+     * (identity-service障害時に「操作者なし」へ縮退すると権限チェックが素通りしうるため)。
+     */
+    public Optional<ActorProfile> lookupProfile(String bearerToken) {
+        try {
+            return Optional.of(fetchProfile(bearerToken));
+        } catch (IdentityServiceUnavailableException e) {
+            if (e.getCause() instanceof RestClientResponseException response
+                    && isAuthRejection(response.getStatusCode().value())) {
+                return Optional.empty();
+            }
+            throw e;
+        }
+    }
+
+    /** identity-serviceからの401/403は「操作者を解決できない」という判定結果で、障害ではない。 */
+    private static boolean isAuthRejection(int statusCode) {
+        return statusCode == 401 || statusCode == 403;
     }
 }

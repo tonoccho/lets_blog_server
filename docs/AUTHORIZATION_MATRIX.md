@@ -125,22 +125,37 @@ JWT の検証(署名・有効期限・issuer)自体は通っている以上 401 
 |---|---|---|---|
 | identity | 自身の `users` テーブル | `resolveJwtActor` で `enabled` を検査 | **403** |
 | legacy-api | 共有スキーマの `users` テーブルを自前参照(#786) | 同上。`User` に `enabled` の読み取り専用マッピングを追加 | **403** |
-| platform | `GET /api/identity/me`(ただし `requireAuthenticated()` は JWT の `sub` だけを見ていた) | `isAuthenticated()` を操作者の解決可否による判定へ変更 | **502**(下記) |
-| 他7サービス(ai / analytics / content / log-writer / media / project / publishing) | `GET /api/identity/me` への同期呼び出し(`IdentityClient`) | コード変更**不要** | **502**(下記) |
+| platform | `GET /api/identity/me`(ただし `requireAuthenticated()` は JWT の `sub` だけを見ていた) | `isAuthenticated()` を操作者の解決可否による判定へ変更 | **403**(#829で502から是正) |
+| 他7サービス(ai / analytics / content / log-writer / media / project / publishing) | `GET /api/identity/me` への同期呼び出し(`IdentityClient`) | `lookupProfile` が401/403を「操作者なし」へ分岐(#829) | **403**(#829で502から是正) |
 
-###### 他サービスが 502 になる理由(意図した結果ではないが fail-closed)
+###### 401/403(認証・認可の結果)とサービス障害(502)の区別
 
 identity が返す 403 は、呼び出し側で `SyncServiceClientErrorException`
-(`SyncServiceException` のサブクラス)に変換され、各サービスの `CurrentActorService#lookupProfile`
-が `IdentityServiceUnavailableException` へ再変換する。`GlobalExceptionHandler` はこれを
-**502 Bad Gateway** にマップする。
+(`SyncServiceException` のサブクラス)に変換される。
 
-これは各サービスが「identity-service 障害を静かに『操作者なし』へ縮退させると、
-権限チェックが素通りする方向の不具合を生みかねない」という設計判断を明示的に置いているため
-(`lookupProfile` の Javadoc 参照)。**拒否はされる(fail-closed)** が、
-無効化ユーザー起因の 502 とサービス障害起因の 502 が区別できず、
-無効化ユーザーが画面を開くたびに各サービスが WARN/ERROR を出す。
-監視・アラートを誤爆させるため、401/403 を「操作者なし」へ分岐させる改善余地がある(**#829**)。
+**#829 以前**は、各サービスの `CurrentActorService#lookupProfile` がこれを一律に
+`IdentityServiceUnavailableException` へ再変換し、`GlobalExceptionHandler` が
+**502 Bad Gateway** にマップしていた。拒否はされる(fail-closed)ものの、
+無効化ユーザー起因の 502 とサービス障害起因の 502 が区別できず、無効化ユーザーが
+画面を開いたままにしているだけで `accessTokenLifespan`(既定300秒)の間、
+各サービスが 502 と ERROR ログを出し続けて監視を誤爆させていた。
+
+**#829 で、認証・認可の結果とサービス障害を分けた。**
+
+| identity からの応答 | 扱い | 最終的なステータス |
+|---|---|---|
+| 401 / 403 | 「操作者なし」(`Optional.empty()`) | 呼び出し先の `requireAdmin()` 等が拒否し **403** |
+| 上記以外の 4xx(404 等) | 例外のまま伝播 | **502** |
+| 5xx・タイムアウト・通信断・サーキットオープン | 例外のまま伝播 | **502** |
+
+5xx 以下を一緒に「操作者なし」へ縮退させていない点が重要である。そうすると
+identity-service 障害時に権限チェックが素通りする方向の不具合になりうるため
+(各サービスの `lookupProfile` の Javadoc に置かれた設計判断)。
+`IdentityServiceUnavailableException` の ERROR ログは、これにより
+**本当にサービスが応答しない場合にだけ**出るようになった。
+
+判定は共通化してある。lbs-common の `IdentityClient#lookupProfile`(6サービスが利用)と、
+独自クライアントを持つ project / publishing の `IdentityClient#lookupProfile`。
 
 ###### この対処が効く範囲(重要)
 
