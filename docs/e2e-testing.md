@@ -254,10 +254,18 @@ E2E_REQUIRE_LLM=1 npx playwright test e2e/custom-tag-generation.spec.ts
 globalTeardown がこのスクリプトを `--yes` 付きで自動実行する
 (**共有環境では指定しないこと**)。
 
-> このスクリプトが消すのは DB の行だけ。ManagedWordPress サイトの実体
-> (wordpress コンテナ内のファイルと専用 DB)は UI / API からのサイト削除でしか解放されない。
-> 各 spec の後片付け(UI 経由の削除)が正常に完了することが前提で、
-> このスクリプトは「テストが途中で落ちて残った行」の最後の手段として使う。
+ManagedWordPress サイト(`sites.managed_wordpress = 1`)については、DB 行を消す前に
+wordpress コンテナ内のプロビジョニングエージェント(`POST /deprovision`、
+`wordpress/provision-agent/index.php`)を呼んで **実体(サイトディレクトリと専用 DB)も解放する**
+(issue #765)。project-service のサイト削除が呼ぶものと同じエンドポイントで、
+`rm -rf` と `DROP DATABASE IF EXISTS` はどちらも冪等なため、UI 経由で既に削除済みのサイトに
+対して再実行しても問題ない。
+
+> **前提**: `lbs-wordpress` コンテナが起動していて、`.env` に `WP_PROVISION_TOKEN` が
+> 設定されていること。どちらか欠けている場合、実体の解放だけを警告付きでスキップし、
+> DB 行の削除は続行する(実体は残るため、後から手動で `/deprovision` を叩く必要がある)。
+> 解放に失敗したサイトについては、DB 行の削除で `wp_slug` / `wp_db_name` が失われる前に、
+> 手動で解放するためのコマンドをログへ出力する。
 
 ---
 
@@ -311,7 +319,8 @@ WordPress の自動構築に数分かかるため、このテストのタイム�
 - `chromium`: 全 spec を実行する(網羅ブラウザ)
 - `firefox` / `webkit` / `Mobile Chrome` / `Mobile Safari`:
   ブラウザ差が意味を持つ `auth-flow.spec.ts` / `accessibility.spec.ts` のみ
-- `fullyParallel: true`。フィクスチャ名はタイムスタンプ+乱数で一意なので並列でも衝突しない
+- `fullyParallel: true`。フィクスチャ名はタイムスタンプ+乱数で一意なので、**名前は**並列でも衝突しない
+  (ただし後述の通り、名前が衝突しないことと並列実行して安全なことは別問題)
 - ワーカー数は `E2E_WORKERS` で上書き可能(既定は CI で1、ローカルは Playwright の自動判定)
 
 さらに絞りたい場合:
@@ -319,6 +328,35 @@ WordPress の自動構築に数分かかるため、このテストのタイム�
 ```bash
 npx playwright test --project=chromium e2e/main-scenario.spec.ts e2e/auth-flow.spec.ts
 ```
+
+### 9.1 フィクスチャの並列実行に関する制約(issue #765)
+
+`fullyParallel: true` では、1つの spec ファイル内のテストが複数ワーカーへ分配される。
+このとき **`beforeAll` は「ファイルにつき1回」ではなく「ワーカーにつき1回」実行される**。
+ManagedWordPress を `beforeAll` で構築する spec をそのまま並列実行すると、ワーカー数だけ
+同時に自動構築が走り、構築が競合してタイムアウトし、削除されない孤児サイト
+(`lbs_project.sites` の `e2efix-*`)が溜まる。
+
+そのため、**ManagedWordPress を構築する describe は `test.describe.configure({ mode: 'serial' })`
+を宣言する**。describe 内の全テストが1ワーカーで順に実行され、フィクスチャの構築・削除は1回だけになる。
+他の spec ファイルとの並列実行は従来どおり行われるため、全体の実行時間への影響は小さい。
+
+| spec | フィクスチャ | 実行モード |
+| --- | --- | --- |
+| `main-scenario.spec.ts` | ManagedWordPress サイト1件(テスト内で構築・削除) | serial |
+| `site-registration.spec.ts` | ManagedWordPress サイト1件(`beforeAll` / `afterAll`) | serial |
+| `post-creation.spec.ts` | プロジェクト1件(`beforeEach` / `afterEach`) | 既定(並列可) |
+
+`post-creation.spec.ts` は ManagedWordPress を構築しないため直列化していない。ただし
+`/projects` の一覧は全ワーカー・全 spec で共有されるため、**一覧の「先頭行」を対象にする
+アサーションを書かないこと**(他のテストが並列に作成・削除している行を掴み、クリック直前に
+行が消えて不安定になる)。必ず自分のフィクスチャを名前で特定する。
+
+ManagedWordPress の削除は「コンテナ内のファイル削除 + 専用 DB の `DROP DATABASE`」を伴い、
+30 秒では終わらないことがある。後片付けの待ちは 60 秒を目安にする
+(`main-scenario.spec.ts` / `site-registration.spec.ts` はいずれも 60 秒)。
+削除しきれなかった場合は `[E2E ORPHAN] site_key=...` をログへ出力するので、
+実行後に孤児が残ったかどうかはレポートの標準出力から判別できる。
 
 ---
 
@@ -355,6 +393,11 @@ test.describe('機能名', () => {
    `expect(...).toBeVisible()` などの条件待ちを使う。
 5. **長時間フィクスチャには `test.setTimeout()`** を明示する
    (フックの既定タイムアウトは 30 秒)。
+6. **`beforeAll` でフィクスチャを構築する describe は `test.describe.configure({ mode: 'serial' })`
+   を宣言する**。`beforeAll` はワーカーごとに実行されるため、宣言しないと同じフィクスチャが
+   ワーカー数だけ重複構築される(§9.1、issue #765)。
+7. **共有一覧の「先頭行」に依存しない**。他のワーカー・他の spec が同じ一覧へ行を作り消しているため、
+   `tbody tr` の `.first()` は不安定。自分のフィクスチャを名前・キーで特定する。
 
 ---
 
@@ -396,6 +439,17 @@ Keycloak にはユーザーがいるが、ローカル DB(`lets_blog.users`)に 
 ```bash
 ./scripts/e2e-cleanup-test-data.sh          # まずドライランで確認
 ./scripts/e2e-cleanup-test-data.sh --yes
+```
+
+### 孤児の ManagedWordPress サイト(`e2efix-*` / `e2emain-*`)が残る
+
+後片付けが完走しなかった実行では、ログに `[E2E ORPHAN] site_key=...` が出力される。
+残っているかどうかは次で確認でき、上記のクリーンアップスクリプト(`--yes`)が
+DB 行と実体の両方を解放する(§6)。
+
+```bash
+docker exec -i -e MYSQL_PWD="$(grep '^MYSQL_ROOT_PASSWORD=' .env | cut -d= -f2-)" lbs-mysql \
+  mysql -u root -e "SELECT site_key FROM lbs_project.sites WHERE site_key LIKE 'e2e%';"
 ```
 
 ---

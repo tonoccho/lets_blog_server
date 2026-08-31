@@ -17,16 +17,26 @@ import { E2E_ADMIN_PASSWORD, loginAsAdmin } from './helpers';
  * beforeAll/afterAllの内部waitはWordPressの自動構築・削除で数分かかりうるため、
  * Playwrightのデフォルトフックタイムアウト(30秒)を超える。test.setTimeout()で
  * 各フック自体のタイムアウトを明示的に延長している。
+ *
+ * issue #765: `beforeAll`は「ファイルにつき1回」ではなく「ワーカーにつき1回」実行される。
+ * playwright.config.tsは`fullyParallel: true`かつローカルではワーカー数がPlaywrightの自動判定
+ * (CPU数の半分)のため、既定設定ではこのdescribeのテストが複数ワーカーへ分配され、
+ * その数だけManagedWordPressの自動構築が同時に走っていた(構築が競合してタイムアウトし、
+ * 削除されない孤児サイトがlbs_project.sitesに溜まる)。serialモードにすると
+ * describe内の全テストが1ワーカーで順に実行されるため、フィクスチャの構築・削除は1回だけになる。
  */
 
 test.describe('Site Registration and Connection Flow', () => {
   test.skip(!E2E_ADMIN_PASSWORD, 'E2E_ADMIN_PASSWORDが未設定のためスキップ');
+  // ManagedWordPressフィクスチャをワーカーごとに重複構築しないための直列化(issue #765)。
+  // main-scenario.spec.tsと同じ方針。他のspecファイルとの並列実行は従来どおり行われる。
+  test.describe.configure({ mode: 'serial' });
 
   let fixtureSiteKey: string;
   let fixtureSiteName: string;
-  // 「構築しました。」を確認できた場合のみtrueにする(単に変数へ値を代入しただけでは、
-  // beforeAllがログイン等で失敗した場合に実際には存在しないサイトをafterAllが削除しようと
-  // してしまうため)。
+  // 「構築しました。」を確認できた場合のみtrueにする。afterAllは(構築の途中でbeforeAllが
+  // 失敗しても実体が残りうるため)このフラグに関わらず削除を試みるが、削除に失敗したときに
+  // それをテスト失敗として報告するかどうかの判断にこのフラグを使う(issue #765)。
   let fixtureSiteCreated = false;
 
   test.beforeAll(async ({ browser }) => {
@@ -68,8 +78,8 @@ test.describe('Site Registration and Connection Flow', () => {
     // サイト削除(WordPressコンテナ・専用DBの削除を伴いうる)にも時間がかかりうるため延長する。
     test.setTimeout(180_000);
 
-    if (!fixtureSiteCreated) {
-      // beforeAllがサイト構築の完了前に失敗した場合は、削除対象が存在しないため何もしない。
+    if (!fixtureSiteKey) {
+      // beforeAll自体が実行されていない(describeごとskip等)。後始末の対象が無い。
       return;
     }
 
@@ -81,12 +91,29 @@ test.describe('Site Registration and Connection Flow', () => {
 
       const fixtureRow = page.locator(`tr:has-text("${fixtureSiteKey}")`);
       if ((await fixtureRow.count()) === 0) {
+        // 行が無い = サイトが作られていない(beforeAllが構築前に失敗した)。解放対象も無い。
         return;
       }
 
       page.once('dialog', (dialog) => dialog.accept());
       await fixtureRow.locator('button:has-text("削除")').click();
-      await expect(fixtureRow).toHaveCount(0, { timeout: 30000 });
+      // ManagedWordPressの削除はコンテナ内のファイル削除+専用DBのDROPを伴い、30秒では
+      // 終わらないことがある(issue #765)。main-scenario.spec.tsと同じ60秒を与える。
+      await expect(fixtureRow).toHaveCount(0, { timeout: 60000 });
+    } catch (error) {
+      // 削除しきれなかった場合、DB行に加えてManagedWordPressの実体(wordpressコンテナ内の
+      // ファイルと専用DB)が残る。どのサイトが孤児になったかをログから特定できるようにする
+      // (握りつぶすとe2efix-*が溜まり続け、後から原因を追えなくなる。issue #765)。
+      console.error(
+        `[E2E ORPHAN] site_key=${fixtureSiteKey} のフィクスチャサイトを削除できませんでした。` +
+          'ManagedWordPressの実体(wordpressコンテナ内のファイル・専用DB)が残っている可能性があります。' +
+          '`./scripts/e2e-cleanup-test-data.sh --yes` で解放してください。'
+      );
+      // 構築に成功していた場合のみ失敗として扱う(beforeAllが構築前に失敗したケースは、
+      // そちらのエラーが既に報告されているため、後始末の失敗を二重に報告しない)。
+      if (fixtureSiteCreated) {
+        throw error;
+      }
     } finally {
       await context.close();
     }

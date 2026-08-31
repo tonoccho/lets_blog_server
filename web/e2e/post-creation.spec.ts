@@ -17,6 +17,12 @@ import { E2E_ADMIN_PASSWORD, loginAsAdmin } from './helpers';
  * 各テストで作成したfixtureプロジェクト(および「Create a new project...」テストが追加で
  * 作成するプロジェクト)は、afterEachで(/projects/{id}の「プロジェクトを削除」ボタン、
  * DeleteProjectButton.tsx参照)確実に削除する。実行のたびにプロジェクトが増え続けるのを防ぐため。
+ *
+ * issue #765: このspecはbeforeEachごとにプロジェクトを1件作るだけで、ManagedWordPressの
+ * 自動構築は行わない(それはsite-registration.spec.ts / main-scenario.spec.tsの担当)。
+ * そのためワーカー間で構築が競合することはないが、/projectsの一覧は全ワーカー・全specで
+ * 共有されるため、「一覧の先頭行」を対象にするアサーションは他のテストが並列に作成・削除している
+ * プロジェクトを掴んでしまう。一覧を見るテストは必ず自分のフィクスチャ行を名前で特定する。
  */
 
 test.describe('Article/Post Creation Workflow', () => {
@@ -109,12 +115,15 @@ test.describe('Article/Post Creation Workflow', () => {
   });
 
   test('View project details', async ({ page }) => {
-    // Step 1: The fixture project guarantees at least one row exists
-    const projectRows = page.locator('tbody tr');
-    await expect(projectRows.first()).toBeVisible();
+    // Step 1: The fixture project guarantees a matching row exists
+    // (一覧の先頭行ではなく、このテストが作ったフィクスチャ行を対象にする。先頭行は
+    //  他のspec/ワーカーが並列に作成・削除しているプロジェクトになりうるため、
+    //  クリック直前に行が消えて不安定になる。issue #765)
+    const fixtureRow = page.locator(`tbody tr:has-text("${fixtureProjectName}")`);
+    await expect(fixtureRow).toBeVisible();
 
-    // Step 2: Click the "詳細" link of the first project to view details
-    const detailLink = projectRows.first().locator('a:has-text("詳細")');
+    // Step 2: Click its "詳細" link to view details
+    const detailLink = fixtureRow.locator('a:has-text("詳細")');
     await expect(detailLink).toBeVisible();
     await detailLink.click();
 
@@ -131,12 +140,13 @@ test.describe('Article/Post Creation Workflow', () => {
     const tableHeaders = page.locator('thead');
     await expect(tableHeaders).toBeVisible();
 
-    // Step 2: The fixture project guarantees at least one row exists
-    const firstRow = page.locator('tbody tr').first();
-    await expect(firstRow).toBeVisible();
+    // Step 2: The fixture project guarantees a matching row exists
+    // (先頭行は他のspec/ワーカーのプロジェクトになりうるため、フィクスチャ行を対象にする。issue #765)
+    const fixtureRow = page.locator(`tbody tr:has-text("${fixtureProjectName}")`);
+    await expect(fixtureRow).toBeVisible();
 
     // Step 3: Verify columns are present (name, slug, environment badges, created date)
-    const cells = firstRow.locator('td, th');
+    const cells = fixtureRow.locator('td, th');
     expect(await cells.count()).toBeGreaterThan(0);
   });
 

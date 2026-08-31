@@ -21,10 +21,14 @@
 #   その他   : 上記projects/sitesのidに紐づく行、またはE2E固有のプレフィックスを持つ行
 # 実データ(手動で作成したプロジェクト・サイト)には一致しない。
 #
-# 注意: このスクリプトはDBの行のみを削除する。ManagedWordPressサイトの実体
-# (wordpressコンテナ内のファイル・専用DB)はUI/APIからのサイト削除でしか解放されないため、
-# まずは各specの後片付け(UI経由の削除)が正常に完了することを前提にすること。
-# ここでの削除は「テストが途中で落ちて残った行」を掃除するための最後の手段。
+# ManagedWordPressサイト(sites.managed_wordpress = 1)については、DB行を消す前に
+# wordpressコンテナ内のプロビジョニングエージェント(POST /deprovision、ポート9000、
+# wordpress/provision-agent/index.php)を呼び出して実体(サイトディレクトリと専用DB)も解放する
+# (issue #765。従来はDB行しか消せず、e2eの孤児サイトの実体が残り続けていた)。
+# エージェントはproject-serviceのサイト削除が呼ぶものと同一で、rm -rf と DROP DATABASE IF EXISTS の
+# どちらも冪等なため、UI経由の削除で既に解放済みのサイトに対して再実行しても問題ない。
+# wordpressコンテナが起動していない、または .env の WP_PROVISION_TOKEN が未設定の場合は、
+# 実体の解放だけを警告付きでスキップし、DB行の削除は続行する。
 #
 # 既定はドライラン(削除件数を表示するだけ)。実際に削除するには --yes を付ける。
 #
@@ -40,6 +44,9 @@ REPO_ROOT="$SCRIPT_DIR/.."
 ENV_FILE="$REPO_ROOT/.env"
 
 MYSQL_CONTAINER="lbs-mysql"
+WORDPRESS_CONTAINER="lbs-wordpress"
+# プロビジョニングエージェントの待ち受け先(wordpress/start.sh。コンテナ内からのみ叩く)。
+PROVISION_AGENT_URL="http://127.0.0.1:9000"
 APPLY=0
 
 while [ $# -gt 0 ]; do
@@ -65,6 +72,9 @@ if [ -z "${MYSQL_ROOT_PASSWORD:-}" ]; then
   echo "エラー: .env の MYSQL_ROOT_PASSWORD が未設定です" >&2
   exit 1
 fi
+
+# 実体の解放(/deprovision)にのみ使う。未設定でもDB行の削除は行えるため、ここでは中断しない。
+WP_PROVISION_TOKEN="$(grep -m1 '^WP_PROVISION_TOKEN=' "$ENV_FILE" | cut -d= -f2- || true)"
 
 if ! docker inspect "$MYSQL_CONTAINER" >/dev/null 2>&1; then
   echo "エラー: コンテナ ${MYSQL_CONTAINER} が見つかりません" >&2
@@ -130,11 +140,83 @@ run_sql() {
     mysql -u root --table
 }
 
+# 対象E2Eサイトのうち、実体(wordpressコンテナ内のディレクトリと専用DB)を持つものを
+# "wp_slug<TAB>wp_db_name" の形式で列挙する。
+list_managed_sites() {
+  echo "SELECT wp_slug, wp_db_name FROM lbs_project.sites
+        WHERE (${SITE_FILTER}) AND managed_wordpress = 1
+          AND wp_slug IS NOT NULL AND wp_slug <> ''
+          AND wp_db_name IS NOT NULL AND wp_db_name <> '';" \
+    | docker exec -i -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" "$MYSQL_CONTAINER" \
+        mysql -u root --batch --skip-column-names
+}
+
+# ManagedWordPressの実体を解放する(issue #765)。DB行を消す前に呼ぶこと
+# (消した後ではwp_slug/wp_db_nameが分からなくなる)。
+deprovision_managed_sites() {
+  local mode="$1" # count | delete
+  local slug db_name matched=0 failed=0
+
+  if ! docker inspect "$WORDPRESS_CONTAINER" >/dev/null 2>&1; then
+    echo "警告: コンテナ ${WORDPRESS_CONTAINER} が見つからないため、ManagedWordPressの実体は解放しません" >&2
+    return 0
+  fi
+  if [ -z "${WP_PROVISION_TOKEN:-}" ]; then
+    echo "警告: .env の WP_PROVISION_TOKEN が未設定のため、ManagedWordPressの実体は解放しません" >&2
+    return 0
+  fi
+
+  while IFS=$'\t' read -r slug db_name; do
+    [ -z "$slug" ] && continue
+    # プロビジョニングエージェント側のバリデーションと同じ文字種に限定する
+    # (JSONへ素で埋め込むため、想定外の値はここで弾く)。
+    if ! [[ "$slug" =~ ^[a-z0-9-]+$ ]] || ! [[ "$db_name" =~ ^[a-z0-9_-]+$ ]]; then
+      echo "警告: 不正な値のためスキップします (slug='${slug}', dbName='${db_name}')" >&2
+      continue
+    fi
+    matched=$((matched + 1))
+
+    if [ "$mode" = "count" ]; then
+      echo "  - ${slug} (DB: ${db_name})"
+      continue
+    fi
+
+    # --max-time: 1件でハングしてもglobal-teardown.ts側の実行時間上限(300秒)を
+    # 使い切らないように上限を設ける(UI経由の削除でも60秒で完了する処理のため十分)。
+    if docker exec "$WORDPRESS_CONTAINER" curl -fsS --max-time 120 \
+        -X POST "${PROVISION_AGENT_URL}/deprovision" \
+        -H "X-Provision-Token: ${WP_PROVISION_TOKEN}" \
+        -H 'Content-Type: application/json' \
+        -d "{\"slug\":\"${slug}\",\"dbName\":\"${db_name}\"}" >/dev/null; then
+      echo "  - ${slug} の実体を解放しました (DB: ${db_name})"
+    else
+      failed=$((failed + 1))
+      # 直後のDB行削除でwp_slug/wp_db_nameは失われるため、手動で解放し直せるだけの情報を
+      # ここでログに残す(issue #765)。
+      echo "  ! ${slug} の実体の解放に失敗しました (DB: ${db_name})。手動で解放するには:" >&2
+      echo "      docker exec ${WORDPRESS_CONTAINER} curl -fsS -X POST ${PROVISION_AGENT_URL}/deprovision \\" >&2
+      echo "        -H \"X-Provision-Token: \$(grep '^WP_PROVISION_TOKEN=' .env | cut -d= -f2-)\" \\" >&2
+      echo "        -d '{\"slug\":\"${slug}\",\"dbName\":\"${db_name}\"}'" >&2
+    fi
+  done < <(list_managed_sites)
+
+  if [ "$matched" -eq 0 ]; then
+    echo "  (対象なし)"
+  fi
+  if [ "$failed" -gt 0 ]; then
+    echo "警告: ${failed}件のManagedWordPress実体を解放できませんでした(DB行の削除は続行します)" >&2
+  fi
+}
+
 if [ "$APPLY" -eq 1 ]; then
+  echo "ManagedWordPressの実体を解放します"
+  deprovision_managed_sites delete
   echo "E2Eテストデータを全スキーマから削除します"
   build_sql delete | run_sql
   echo "削除が完了しました。"
 else
   echo "ドライラン(何も削除しません)。実行するには --yes を付けてください。"
+  echo "解放対象のManagedWordPress実体:"
+  deprovision_managed_sites count
   build_sql count | run_sql
 fi
