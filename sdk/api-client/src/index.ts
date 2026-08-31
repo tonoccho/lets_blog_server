@@ -205,3 +205,178 @@ export type { RoleOptionResponse } from './generated/content/openAPIDefinition.s
 // 現時点でこれらを`@api-client`から利用している呼び出し元は無い。
 //
 // 将来のサービス抽出Issueで追加するターゲットも、ここに re-export を追加していく。
+
+// ---- 以下 issue #809 で追加(analytics/project/publishing/platform/identity) ----
+// 内部ブリッジ(/api/internal/**)のコントローラは、既存方針どおり再エクスポートしない。
+
+// analytics(アクセス解析・AdSense、#578)
+export * from './generated/analytics/openAPIDefinition.schemas';
+export * from './generated/analytics/project-dashboard-controller/project-dashboard-controller';
+
+// identity(ユーザー・ロール・自ユーザー情報、#561)
+export * from './generated/identity/openAPIDefinition.schemas';
+export * from './generated/identity/identity-controller/identity-controller';
+export * from './generated/identity/role-controller/role-controller';
+export * from './generated/identity/users/users';
+
+// project(プロジェクト・サイト・SSH鍵・静的コンテンツ・タグデザイン設定、#577)
+export * from './generated/project/openAPIDefinition.schemas';
+export * from './generated/project/project-controller/project-controller';
+export * from './generated/project/sites/sites';
+export * from './generated/project/ssh-key-pair-controller/ssh-key-pair-controller';
+export * from './generated/project/static-content/static-content';
+export * from './generated/project/tag-design-setting-controller/tag-design-setting-controller';
+
+// publishing(記事公開・プレビュー・タクソノミ・一括管理、#707/#708/#712)
+export * from './generated/publishing/openAPIDefinition.schemas';
+export * from './generated/publishing/article-preview-controller/article-preview-controller';
+export * from './generated/publishing/bulk-management-controller/bulk-management-controller';
+export * from './generated/publishing/post-controller/post-controller';
+export * from './generated/publishing/taxonomy-controller/taxonomy-controller';
+
+// platform(システム設定・バックアップ・ダッシュボード・VSCode拡張配布、#693〜#696)
+export * from './generated/platform/openAPIDefinition.schemas';
+export * from './generated/platform/app-setting-controller/app-setting-controller';
+export * from './generated/platform/backup-controller/backup-controller';
+export * from './generated/platform/dashboard-controller/dashboard-controller';
+export * from './generated/platform/system-setting-controller/system-setting-controller';
+export * from './generated/platform/vscode-extension-controller/vscode-extension-controller';
+
+// ---- issue #809: 5サービス追加に伴う名前衝突の解消 ----
+//
+// orvalのマルチターゲット生成はサービスを跨いだ名前空間を持たないため、Javaのメソッド名が
+// list/create/update/delete/get/resolve のように汎用的だと、複数サービスで同一のシンボル名
+// (関数名・URL組み立て関数・レスポンス型)が生成される(#573で最初に顕在化、#574/#576でも再発)。
+//
+// **どちらを正とするか**: いずれも「既にエクスポートされていた側(先に追加されたサービス)」を正とする。
+// 新規追加の5サービスを優先すると、`@lets-blog/api-client` の既存の公開シンボルが指す先が
+// 黙って別サービスのクライアントへ入れ替わる。呼び出し元は型エラーにならないまま
+// 別サービスを叩くことになり、最も気付きにくい壊れ方をする。既存側を正としておけば、
+// 公開APIの意味は変わらず、新サービス側のシンボルが名前で引けないだけに留まる。
+//
+// 新サービス側のクライアントが必要になったら、そのときに使う側の事情に合わせて
+// `export { x as yFromProject }` の形で別名エクスポートを足すこと
+// (既存のcontent側 deleteCustomTag と同じパターン)。
+export type {
+  BraveSearchApiKeyStatusResponse,
+  CategoryOption,
+  SetBraveSearchApiKeyRequest,
+} from './generated/ai/openAPIDefinition.schemas';
+export {
+  getResolveUrl,
+  resolve,
+} from './generated/content/content-cache-controller/content-cache-controller';
+export type {
+  resolveResponse,
+  resolveResponse200,
+  resolveResponseSuccess,
+} from './generated/content/content-cache-controller/content-cache-controller';
+export {
+  generate,
+  getGenerateUrl,
+  getUpdate1Url,
+  update1,
+} from './generated/content/custom-tag-controller/custom-tag-controller';
+export type {
+  createResponse200,
+  generateResponse,
+  generateResponse200,
+  generateResponseSuccess,
+  update1Response,
+  update1Response200,
+  update1ResponseSuccess,
+} from './generated/content/custom-tag-controller/custom-tag-controller';
+export {
+  getPublishUrl,
+  publish,
+} from './generated/content/custom-tag-template-controller/custom-tag-template-controller';
+export type {
+  publishResponse,
+  publishResponse200,
+  publishResponseSuccess,
+} from './generated/content/custom-tag-template-controller/custom-tag-template-controller';
+export type {
+  ThemeSkeletonResponse,
+} from './generated/content/openAPIDefinition.schemas';
+export {
+  getList3Url,
+  list3,
+} from './generated/content/post-controller/post-controller';
+export type {
+  list3Response,
+  list3Response200,
+  list3ResponseSuccess,
+} from './generated/content/post-controller/post-controller';
+export {
+  getList2Url,
+  list2,
+} from './generated/content/project-custom-tag-controller/project-custom-tag-controller';
+export type {
+  list2Response,
+  list2Response200,
+  list2ResponseSuccess,
+} from './generated/content/project-custom-tag-controller/project-custom-tag-controller';
+export type {
+  _deleteResponse204,
+} from './generated/identity/users/users';
+export {
+  SiteResponseCmsType,
+} from './generated/legacy-api/letSBlogAPI.schemas';
+export type {
+  CompleteAdSenseOAuthRequest,
+  LlmConfigParams,
+  LlmConfigResponse,
+  ProjectResponse,
+  SiteResponse,
+  SystemBraveSearchApiKeyResponse,
+  TagDesignParams,
+  UserResponse,
+} from './generated/legacy-api/letSBlogAPI.schemas';
+export {
+  clearBraveSearchApiKey,
+  getBraveSearchApiKeyStatus,
+  getClearBraveSearchApiKeyUrl,
+  getGetBraveSearchApiKeyStatusUrl,
+  getSetBraveSearchApiKeyUrl,
+  setBraveSearchApiKey,
+} from './generated/legacy-api/project-api-key-controller/project-api-key-controller';
+export type {
+  clearBraveSearchApiKeyResponse,
+  clearBraveSearchApiKeyResponse200,
+  clearBraveSearchApiKeyResponseSuccess,
+  getBraveSearchApiKeyStatusResponse,
+  getBraveSearchApiKeyStatusResponse200,
+  getBraveSearchApiKeyStatusResponseSuccess,
+  setBraveSearchApiKeyResponse,
+  setBraveSearchApiKeyResponse200,
+  setBraveSearchApiKeyResponseSuccess,
+} from './generated/legacy-api/project-api-key-controller/project-api-key-controller';
+export {
+  delete2,
+  getDelete2Url,
+} from './generated/media/comfy-ui-checkpoint-controller/comfy-ui-checkpoint-controller';
+export type {
+  delete2Response,
+  delete2Response200,
+  delete2ResponseSuccess,
+} from './generated/media/comfy-ui-checkpoint-controller/comfy-ui-checkpoint-controller';
+export {
+  get,
+  getGetUrl,
+  getUpdateUrl,
+  update,
+} from './generated/media/diagram-controller/diagram-controller';
+export type {
+  getResponse,
+  getResponse200,
+  getResponseSuccess,
+  updateResponse,
+  updateResponse200,
+  updateResponseSuccess,
+} from './generated/media/diagram-controller/diagram-controller';
+export type {
+  MediaUploadResult,
+} from './generated/media/openAPIDefinition.schemas';
+export type {
+  WpCliInstallResult,
+} from './generated/project/openAPIDefinition.schemas';
