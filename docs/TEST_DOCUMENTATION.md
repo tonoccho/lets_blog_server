@@ -8,10 +8,18 @@
 | モジュール | パス | 役割 |
 |---|---|---|
 | `libs:lbs-common` | `libs/lbs-common` | サービス間で共有する横断的な部品(ドメインロジックは持たない) |
-| `services:legacy-api` | `services/legacy-api` | カットオーバー前の中心的なAPIサービス(Phase 19で段階的に分割予定) |
-| `services:identity` | `services/identity` | ユーザー・ロール・権限管理 |
+| `services:gateway` | `services/gateway` | APIゲートウェイ(ルーティング・JWT検証・レート制限・相関ID) |
+| `services:identity` | `services/identity` | ユーザー・ロール・権限・プロジェクトメンバー |
+| `services:project` | `services/project` | プロジェクト・サイト・SSH鍵・タグデザイン |
+| `services:content` | `services/content` | 投稿・カスタムタグ・レンダリング・コンテンツキャッシュ |
+| `services:media` | `services/media` | 画像生成・生成画像・ダイアグラム・ComfyUI |
+| `services:ai` | `services/ai` | LLM生成・記事プラン・生成ジョブ |
+| `services:analytics` | `services/analytics` | GA/AdSense レポートと資格情報 |
+| `services:publishing` | `services/publishing` | 公開パイプライン・一括管理・記事プレビュー |
+| `services:platform` | `services/platform` | システム設定・バックアップ・ダッシュボード状態・VSCode拡張配布 |
 | `services:log-writer` | `services/log-writer` | ログ書き込み |
-| `services:gateway` | `services/gateway` | APIゲートウェイ |
+
+> `services:legacy-api` は issue #583 で解体・削除した。全エンドポイントは上のいずれかへ移設済み。
 
 ### テスト用MySQLの前提
 
@@ -44,6 +52,9 @@ bin/loop test api
 
 接続先の MySQL(`lbs-test-db`)がテストスキーマ込みで自動的に用意される。何も準備しなくてよい。
 
+> `bin/loop` は本リポジトリ外のツール(loop-engineering)で、その `api` ターゲットは
+> issue #583 で削除した legacy-api を指していた可能性がある。動かない場合は下の B) を使うこと。
+
 **B) ホストから `./gradlew` で回す**
 
 開発スタックの MySQL を `127.0.0.1:3306` へ公開するオーバーライドを重ねる。
@@ -52,7 +63,7 @@ bin/loop test api
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.host-tests.yml up -d mysql
 bash scripts/check-test-db.sh
-./gradlew :services:legacy-api:test
+./gradlew :services:content:test
 ```
 
 > **注意:** `127.0.0.1:3306` を使うコンテナが複数あると衝突する
@@ -75,11 +86,11 @@ docker compose exec mysql bash /docker-entrypoint-initdb.d/02-create-test-schema
 # 全サービス
 ./gradlew lint test
 
-# 1サービスだけ(例: legacy-api)
-./gradlew :services:legacy-api:lint :services:legacy-api:test
+# 1サービスだけ(例: content)
+./gradlew :services:content:lint :services:content:test
 
 # 1サービスの特定テストクラスだけ
-./gradlew :services:legacy-api:test --tests "CustomTagGenerationIntegrationTest"
+./gradlew :services:content:test --tests "CustomTagGenerationIntegrationTest"
 
 # lbs-common(共有ライブラリ)
 ./gradlew :libs:lbs-common:lint :libs:lbs-common:test
@@ -90,12 +101,51 @@ CIでは`.github/workflows/api-services-test.yml`が、変更のあったサー�
 (GitHub Actions自体は本リポジトリで意図的に無効化されているため、CI上では実行されない。
 `README.md`/`.claude/CLAUDE.md`参照)。
 
+## 性能テストの現状(issue #915)
+
+**負荷試験のツール(JMH / k6)は持たない。** 性能に関する自動検証は
+`web/e2e/performance.spec.ts`(Playwright)だけである。
+
+| 対象 | 目標値 |
+|---|---|
+| API レスポンス(`/api/custom-tags/validate`) | < 2秒 |
+| 複数リクエストの並列処理 | < 3秒 |
+| LLM 応答 | < 10秒 |
+| タグ画面のページロード | < 3秒 |
+
+### JMH / k6 をやめた理由
+
+#24 で JMH ベンチマークと k6 負荷試験、専用のGitHub Actionsワークフローが入ったが、
+**一度も実態へ追随されないまま #583(legacy-api の解体)で削除された**。
+削除時点で既に動作していなかったことが判明している。
+
+- **JMH は実行するベンチマークが0件だった。** `me.champeau.jmh` プラグインと依存だけがあり、
+  `find services/legacy-api/src -path '*jmh*' -o -name '*Benchmark*'` は0件。
+  ワークフローは毎回「No benchmark results found」を出していた
+- **k6 は存在しないエンドポイントを叩いていた。** `/api/articles`・`/api/articles/preview` は
+  現在どのサービスにも無い(投稿は `/api/posts`、プレビューは `/api/projects/{id}/preview/**`)
+- **認証が考慮されていない。** #772 以降 `/api/**` は全サービスで Keycloak JWT 必須だが、
+  スクリプトはトークンを付けないため、パスが正しくても401になる
+- **実行環境の前提が古い。** 単一 jar 起動を想定しており、現在の11コンテナ構成では成立しない
+
+「あるのに動かない CI」は無いより悪い(緑だから大丈夫という誤解を生む)ため、
+**復活させずに廃止する**と判断した(#915)。
+
+### 再び必要になったら
+
+負荷試験を入れ直す場合は、以下を満たす形で新規に作ること。旧スクリプトは流用しない。
+
+- `docker compose up -d` 済みのスタックに対し、**gateway 経由**で叩く
+  (`scripts/wait-for-stack-healthy.sh` が使える)
+- Keycloak からトークンを取得する(`scripts/provision-e2e-keycloak-users.sh` と
+  `docs/e2e-testing.md` に先例がある)
+- 閾値は現構成で**実測してから**設定する。旧スクリプトの p95/p99 は単一 jar 時代の値で根拠が無い
+
 ## JWTを必要とするテストの書き方
 
 JWT認証を伴うエンドポイント・ロジックのテストは、`libs/lbs-common`が
 `java-test-fixtures`として提供する`com.letsblog.common.testfixtures.JwtTestFixtures`を使う
-(#587)。利用側のサービスは`build.gradle`に以下を追加する(`services/legacy-api`・
-`services/identity`は追加済み)。
+(#587)。利用側のサービスは`build.gradle`に以下を追加する(全サービス追加済み)。
 
 ```gradle
 testImplementation testFixtures(project(':libs:lbs-common'))
@@ -129,7 +179,12 @@ DBへ接続するテスト・サービス間契約テスト・他サービス呼
 
 ### 1. 統合テスト（Integration Tests）
 
-**場所**: `services/legacy-api/src/test/java/com/letsblog/api/integration/CustomTagGenerationIntegrationTest.java`
+**場所**: `services/content/src/test/java/com/letsblog/content/service/CustomTagGenerationServiceTest.java`
+
+> issue #576 でカスタムタグの所有権が content-service へ移り、#583 の legacy-api 削除時に
+> Spring Boot コンテキストを起動する統合テストから、サービス層の単体テストへ整理された。
+> 下表のうち「DB保存」を伴うシナリオは、現在は `CustomTagServiceTest` と
+> content-service の `AuthorizationCoverageTest` が分担している。
 
 **説明**: Spring Boot の実際のアプリケーションコンテキストを使用して、複数のコンポーネント（Controller、Service、Repository）が正しく連携することを検証します。
 
@@ -150,7 +205,7 @@ DBへ接続するテスト・サービス間契約テスト・他サービス呼
 
 ```bash
 # プロジェクトルートから
-./gradlew :services:legacy-api:test --tests "CustomTagGenerationIntegrationTest"
+./gradlew :services:content:test --tests "CustomTagGeneration*"
 ```
 
 ### 2. E2E テスト（Playwright）
@@ -253,9 +308,10 @@ ADR-0006 のとおり Testcontainers は使わず、実 MySQL の**サービス�
 
 | サービス | テストスキーマ | 作られ方 |
 |---|---|---|
-| legacy-api | `lets_blog_test` | `mysql/init/02-create-test-schemas.sh`(#762で追加。以前は `scripts/setup-test-db.sh` だけが作っており、開発スタックのMySQLには作られていなかった。同スクリプトは参照されなくなったため #846 で削除済み) |
-| content / media / ai / analytics / platform | `lbs_{content,media,ai,analytics,platform}_test` | `mysql/init/02-create-test-schemas.sh` |
+| content / media / ai / analytics / platform | `lbs_{content,media,ai,analytics,platform}_test` | `mysql/init/02-create-test-schemas.sh`(#762で追加。以前は `scripts/setup-test-db.sh` だけが作っており、開発スタックのMySQLには作られていなかった。同スクリプトは参照されなくなったため #846 で削除済み) |
 | identity / project / publishing / log-writer | `lbs_{identity,project,publishing,log}_test` | 同上(#772で追加) |
+
+> `lets_blog_test`(legacy-api 用)は #583 のサービス削除と #785 の旧スキーマ廃止に伴い不要になった。
 
 **注意:** `mysql/init/*.sh` は MySQL 公式イメージの仕様により**データボリュームが空のときにしか
 実行されない**。既に MySQL を動かしている環境であとからスキーマが増えると、
@@ -288,8 +344,14 @@ FLUSH PRIVILEGES;
 SQL
 ```
 
-テーブルは各サービスの Flyway migration が起動時に作る。identity のみ Flyway を持たない
-(移行管理は legacy-api 側)ため、テストでは `ddl-auto: create-drop` でエンティティ定義から作る。
+テーブルは各サービスの Flyway migration が起動時に作る。**9サービスすべてが
+`spring.flyway.enabled: true` + `spring.jpa.hibernate.ddl-auto: validate`** で、
+マイグレーションとエンティティ定義の食い違いは context load の失敗として現れる。
+identity だけ `flyway.enabled: false` + `ddl-auto: create-drop` になっており V1 が
+テストで一度も実行されていなかったが、issue #914 で他8サービスへ揃えた。
+
+冪等性・履歴・チェックサムの検証は各サービスの `MigrationContractTest`
+(共通実装は `libs/lbs-common` の `MigrationContract`、issue #914)が行う。
 
 ### Web テスト環境
 
@@ -337,8 +399,8 @@ npx jest            # ユニットテスト
 ### GitHub Actions
 
 バックエンドのCI定義は`.github/workflows/api-services-test.yml`(#557、#587で更新)。
-変更のあったサービスだけを`lbs-common`/`legacy-api`/`log-writer`/`gateway`/`identity`の
-マトリクスで検出し、それぞれ独立して`lint`+`test`+`jacocoTestReport`を実行、Codecovへ
+変更のあったサービスだけを`lbs-common`と全9サービス+`gateway`のマトリクスで検出し、
+それぞれ独立して`lint`+`test`+`jacocoTestReport`を実行、Codecovへ
 サービス別`flags:`でカバレッジをアップロードする。フロントエンド(`web`)のCI定義は
 `.github/workflows/frontend-test.yml`を参照。
 
@@ -353,8 +415,8 @@ GitHub Actions自体は本リポジトリ全体で意図的に無効化されて
 テスト結果は自動的に生成されます：
 
 ```bash
-# テスト結果レポート(例: legacy-api)
-cat services/legacy-api/build/reports/tests/test/index.html
+# テスト結果レポート(例: content)
+cat services/content/build/reports/tests/test/index.html
 ```
 
 ### E2E テスト
