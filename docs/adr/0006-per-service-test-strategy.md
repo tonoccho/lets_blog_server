@@ -32,7 +32,7 @@ GitHub Actions自体は本リポジトリ全体で意図的に無効化されて
 (`org.testcontainers:*`のGradle依存も同様)。実際にDBへ接続するテストは、
 `services/legacy-api/src/test/resources/application-test.yml`が指す`localhost:3306`の
 実MySQLに対して行われており、これはローカルではリポジトリのdocker-compose MySQL
-コンテナ(`scripts/setup-test-db.sh`)、CIでは`.github/workflows/api-services-test.yml`の
+コンテナ、CIでは`.github/workflows/api-services-test.yml`の
 素の`services: mysql: image: mysql:8.0`ブロックが提供する。つまりTestcontainersは
 「今後採用される可能性のある方式」ではなく、単に使われないまま残った実装で、放置すると
 将来の実装者が誤ってTestcontainersを本来の方針と誤認しかねない状態だった。
@@ -44,7 +44,9 @@ GitHub Actions自体は本リポジトリ全体で意図的に無効化されて
 各サービスでDBに接続するテストが必要な場合、per-test Testcontainersではなく、実際に
 稼働している共有MySQLに接続する方式を正式なテンプレートとする。
 
-- ローカル: リポジトリのdocker-compose MySQLコンテナ(`scripts/setup-test-db.sh`参照)
+- ローカル: リポジトリのdocker-compose MySQLコンテナ。テスト用スキーマとユーザーは
+  `mysql/init/02-create-test-schemas.sh`が作る(このADR記載時は`scripts/setup-test-db.sh`だったが、
+  #762で全10スキーマが前者に集約され、後者は参照されなくなったため#846で削除した)
 - CI: `.github/workflows/api-services-test.yml`の`services: mysql:`ブロック
 - 接続設定: サービスごとの`src/test/resources/application-test.yml`(`legacy-api`に既存例あり)
 

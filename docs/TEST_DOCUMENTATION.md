@@ -253,7 +253,7 @@ ADR-0006 のとおり Testcontainers は使わず、実 MySQL の**サービス�
 
 | サービス | テストスキーマ | 作られ方 |
 |---|---|---|
-| legacy-api | `lets_blog_test` | `mysql/init/02-create-test-schemas.sh`(#762で追加。以前は `scripts/setup-test-db.sh` だけが作っており、開発スタックのMySQLには作られていなかった) |
+| legacy-api | `lets_blog_test` | `mysql/init/02-create-test-schemas.sh`(#762で追加。以前は `scripts/setup-test-db.sh` だけが作っており、開発スタックのMySQLには作られていなかった。同スクリプトは参照されなくなったため #846 で削除済み) |
 | content / media / ai / analytics / platform | `lbs_{content,media,ai,analytics,platform}_test` | `mysql/init/02-create-test-schemas.sh` |
 | identity / project / publishing / log-writer | `lbs_{identity,project,publishing,log}_test` | 同上(#772で追加) |
 
