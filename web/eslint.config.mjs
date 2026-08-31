@@ -13,6 +13,18 @@ const eslintConfig = defineConfig([
   // lint が壊れる(例: Playwright を一度でも実行すると playwright-report/trace/ の
   // ミニファイ済みバンドルが react-hooks/rules-of-hooks で 257 件のエラーになった)。
   // 生成物はコミットされないため、この不整合は .gitignore 側からは気付けない。
+  // E2E / 受け入れテストは React ではない(issue #929)。
+  // Playwright のフィクスチャは `async ({}, use) => { await use(value); }` という形をとるが、
+  // react-hooks/rules-of-hooks は識別子 `use` を React の use フックだと誤認して
+  // 「コンポーネントでもカスタムフックでもない関数からフックを呼んでいる」と報告する。
+  // 誤検知なので e2e/ 配下だけルールを外す。ここを広げる(src/ を含める等)と、
+  // 本物のフック違反まで見逃すことになるので範囲は e2e/ に限ること。
+  {
+    files: ["e2e/**/*.ts"],
+    rules: {
+      "react-hooks/rules-of-hooks": "off",
+    },
+  },
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",

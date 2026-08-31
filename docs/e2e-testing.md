@@ -46,7 +46,6 @@ Keycloak クライアント `letsblog-web` の redirect_uri が
 | `global-setup.ts` | 全サービスの healthy 待ち + 公開URL/Keycloak への疎通確認 | - |
 | `global-teardown.ts` | 全スキーマ横断のテストデータ削除(`E2E_DB_CLEANUP=1` のときのみ) | - |
 | `main-scenario.spec.ts` | **主要シナリオ**: サイト登録 → 記事公開 → 履歴確認 | admin |
-| `auth-flow.spec.ts` | Keycloak 経由のログイン/ログアウト/権限による出し分け(リダイレクト1件は `features/auth/login.feature` へ移行済み) | 両方 |
 | `service-degradation.spec.ts` | 下流サービス障害時の縮退表示 | admin |
 | `site-registration.spec.ts` | サイト管理・疎通確認(ManagedWordPress フィクスチャ) | admin |
 | `post-creation.spec.ts` | プロジェクト作成ワークフロー | admin |
@@ -328,7 +327,7 @@ WordPress の自動構築に数分かかるため、このテストのタイム�
 
 - `chromium`: 全 spec を実行する(網羅ブラウザ)
 - `firefox` / `webkit` / `Mobile Chrome` / `Mobile Safari`:
-  ブラウザ差が意味を持つ `auth-flow.spec.ts` / `accessibility.spec.ts` のみ
+  ブラウザ差が意味を持つ `accessibility.spec.ts` のみ
 - `fullyParallel: true`。フィクスチャ名はタイムスタンプ+乱数で一意なので、**名前は**並列でも衝突しない
   (ただし後述の通り、名前が衝突しないことと並列実行して安全なことは別問題)
 - ワーカー数は `E2E_WORKERS` で上書き可能(既定は CI で1、ローカルは Playwright の自動判定)
@@ -336,7 +335,7 @@ WordPress の自動構築に数分かかるため、このテストのタイム�
 さらに絞りたい場合:
 
 ```bash
-npx playwright test --project=chromium e2e/main-scenario.spec.ts e2e/auth-flow.spec.ts
+npx playwright test --project=chromium e2e/main-scenario.spec.ts e2e/security.spec.ts
 ```
 
 ### 9.1 フィクスチャの並列実行に関する制約(issue #765)

@@ -8,7 +8,7 @@ import { E2E_ADMIN_PASSWORD, loginAsAdmin } from './helpers';
  * 一致しておらず、`if (await titleInput.isVisible())`の分岐に一度も入っていなかった)。
  * beforeEachで確実に1件プロジェクトを作成するfixtureデータ投入を行い、条件分岐に依存しない
  * 確定的な検証に置き換える。/projectsはrequireAdminSession()で保護されているため、
- * ログインにはadmin権限を持つe2e-admin@letsblog.local(helpers.ts/auth-flow.spec.ts参照)を使う。
+ * ログインにはadmin権限を持つe2e-admin@letsblog.local(helpers.ts参照)を使う。
  *
  * なお、検索・フィルタ機能や一覧上の削除ボタンは/projectsの現在の実装には存在しない
  * (issue #645の調査で確認、ProjectsTable.tsxは定義されているがpage.tsxからは未使用のdead code)。
