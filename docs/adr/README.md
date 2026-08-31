@@ -39,3 +39,4 @@ ADR には以下のセクションを含める。
 | [ADR-0006](0006-per-service-test-strategy.md) | サービス別のテスト戦略(DB・JWTフィクスチャ・契約テスト・モック方針)を確立する |
 | [ADR-0007](0007-web-vscode-duplicate-feature-triage.md) | Web管理画面とVSCode拡張の重複候補機能は機能ごとに判断し、一律の統合はしない |
 | [ADR-0008](0008-auth-gate-in-each-service-security-config.md) | 認証ゲートは各サービス自身の SecurityConfig で担い、gateway では実施しない |
+| [ADR-0009](0009-sdk-api-client-not-consumed-by-web.md) | sdk/api-client は web から利用せず、生成物の維持のみを行う |
