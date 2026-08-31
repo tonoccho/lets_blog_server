@@ -21,19 +21,26 @@ public class PostDeleteService {
     private final CmsAdapterFactory cmsAdapterFactory;
     private final ContentServiceClient contentServiceClient;
     private final DomainEventPublisher domainEventPublisher;
+    private final AdminAuthorizationService adminAuthorizationService;
 
     public PostDeleteService(ProjectServiceClient projectServiceClient, CmsAdapterFactory cmsAdapterFactory,
                               ContentServiceClient contentServiceClient,
-                              DomainEventPublisher domainEventPublisher) {
+                              DomainEventPublisher domainEventPublisher,
+                              AdminAuthorizationService adminAuthorizationService) {
         this.projectServiceClient = projectServiceClient;
         this.cmsAdapterFactory = cmsAdapterFactory;
         this.contentServiceClient = contentServiceClient;
         this.domainEventPublisher = domainEventPublisher;
+        this.adminAuthorizationService = adminAuthorizationService;
     }
 
     @AuditLog(action = AuditLogAction.POST_DELETED, resourceType = "POST")
     public void delete(String siteKey, String wpPostId) {
         ProjectServiceClient.SiteBridge site = projectServiceClient.getSiteByKey(siteKey);
+        // 投稿削除は「認証済みなら誰でも」ではなく、そのサイトが属するプロジェクトのメンバー
+        // (またはadmin)に限定する(issue #830)。CMSへの副作用が始まる前に判定する。
+        adminAuthorizationService.requireProjectMemberOrAdminForSite(
+                projectServiceClient.findProjectIdBySiteId(site.id()));
         CmsCredentials credentials = projectServiceClient.getCredentials(siteKey).toCmsCredentials();
         CmsAdapter cmsAdapter = cmsAdapterFactory.resolve(credentials.cmsType());
 

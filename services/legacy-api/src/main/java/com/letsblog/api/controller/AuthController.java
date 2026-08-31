@@ -36,6 +36,11 @@ public class AuthController {
 
     @Operation(summary = "セットアップ状態を確認", description = "システムのセットアップが必要かどうかを確認します")
     @ApiResponse(responseCode = "200", description = "セットアップ状態を返す")
+    /**
+     * 認可不要: 初回セットアップが必要かどうかを返す導線で、SecurityConfig の PUBLIC_PATHS に含まれる
+     * <b>認証前に叩かれる公開パス</b>(issue #830)。まだ誰もログインできない状態で使うため、
+     * 認可を掛けると初回セットアップ自体が不可能になる。
+     */
     @GetMapping("/setup-status")
     public Map<String, Boolean> setupStatus() {
         return Map.of("needsSetup", !userService.hasAnyUser());
@@ -44,6 +49,11 @@ public class AuthController {
     @Operation(summary = "初期管理者をセットアップ", description = "最初の管理者ユーザーをセットアップします")
     @ApiResponse(responseCode = "200", description = "管理者がセットアップされました")
     @ApiResponse(responseCode = "400", description = "リクエストボディが不正")
+    /**
+     * 認可不要: 初回セットアップで最初のadminを作る導線で、SecurityConfig の PUBLIC_PATHS に含まれる
+     * <b>認証前に叩かれる公開パス</b>(issue #830)。まだ誰もログインできない状態で使うため、
+     * 認可を掛けると初回セットアップ自体が不可能になる。
+     */
     @PostMapping("/setup")
     public UserResponse setup(@Valid @RequestBody SignupRequest request) {
         return userService.setupInitialAdmin(request.email(), request.password());

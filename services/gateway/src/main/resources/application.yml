@@ -266,7 +266,12 @@ app:
           # 追加した(このコメント自体も#573移設時の発見の記録)。
           - /api/generated-images/**
           - /api/diagrams/**
-          - /api/render/**
+          # /api/render/** は載せない(issue #830)。PlantUML/Recharts/Penpotのレンダリングは
+          # content-service・publishing-serviceのMediaRenderClientがapp.media-service-uriへ
+          # コンテナ間で直接呼ぶ経路しか無く、web/extensionからの利用は無い。gatewayに載せると
+          # 「有効なJWTさえあれば誰でも」外部から叩ける状態になり、特に
+          # /api/render/penpot/design-file はサービスアカウントで共有Penpotにファイルを作れてしまう。
+          # 認可はレンダリングを依頼する側(content-serviceのCustomTagController等)が担う。
           # MediaControllerの実際のマッピングは/api/media/**(#573 stage3でmedia-serviceへ移設)。
           - /api/media/**
       # 画像生成(AiController#image/#imageOptions)はissue #574でもai-serviceへ移設せずlegacy-apiに

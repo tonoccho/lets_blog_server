@@ -13,7 +13,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 /**
- * ai-serviceの内部ブリッジ{@code POST /api/ai/internal/generate}を呼び出すクライアント(issue #577)。
+ * ai-serviceの内部ブリッジ{@code POST /api/internal/ai/generate}を呼び出すクライアント(issue #577)。
  * legacy-api/content-serviceのAiGenerationClientと同じ実装(TagDesignGenerationServiceが使う)。
  *
  * <p>projectIdを渡すとai-service側でそのプロジェクトの選択中モデル/プロバイダーを解決して使う
@@ -48,7 +48,7 @@ public class AiGenerationClient {
             body.put("prompt", prompt);
             body.put("providerOverride", providerOverride);
             GenerateResponse response = restClient.post()
-                    .uri("/api/ai/internal/generate")
+                    .uri("/api/internal/ai/generate")
                     .headers(this::setAuthorization)
                     .body(body)
                     .retrieve()
@@ -58,7 +58,7 @@ public class AiGenerationClient {
             }
             return response.result();
         } catch (RestClientException e) {
-            throw new AiServiceException("ai-serviceの/api/ai/internal/generate呼び出しに失敗しました: " + e.getMessage(), e);
+            throw new AiServiceException("ai-serviceの/api/internal/ai/generate呼び出しに失敗しました: " + e.getMessage(), e);
         }
     }
 

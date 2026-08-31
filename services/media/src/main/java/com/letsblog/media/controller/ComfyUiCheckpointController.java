@@ -34,6 +34,12 @@ public class ComfyUiCheckpointController {
         this.request = request;
     }
 
+    /**
+     * 認可不要: gatewayのルート表に載っておらず外部から到達できない(issue #830 で
+     * RouteControllerContractTest の NON_GATEWAY_ROUTED_PATHS として明示済み)。
+     * legacy-apiのMediaComfyUiClientがdocker network越しに直接呼ぶ経路しか無く、
+     * admin判定は呼び出し元(legacy-apiのComfyUiModelService)が済ませている。
+     */
     @PostMapping("/api/comfyui/checkpoints/install")
     public ResponseEntity<Void> install(@Valid @RequestBody InstallComfyUiCheckpointCommand command) {
         modelInstallJobRunner.runComfyUiDownload(
@@ -41,6 +47,7 @@ public class ComfyUiCheckpointController {
         return ResponseEntity.accepted().build();
     }
 
+    /** 認可不要: {@link #install}と同じ理由(gateway非経由・呼び出し元が認可済み、issue #830)。 */
     @PostMapping("/api/comfyui/checkpoints/delete")
     public ResponseEntity<Void> delete(@Valid @RequestBody DeleteComfyUiCheckpointCommand command) {
         modelInstallJobRunner.runComfyUiDelete(command.jobId(), command.fileName(), bearerToken());

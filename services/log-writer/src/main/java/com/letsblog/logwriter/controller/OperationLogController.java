@@ -42,6 +42,11 @@ public class OperationLogController {
         this.currentActorService = currentActorService;
     }
 
+    /**
+     * 認可不要: クライアントが自分の操作を記録するための書き込み専用の窓口(issue #830)。
+     * {@link FrontendErrorLogController#logError}と同じ扱いで、操作者はトークンから解決する。
+     * 読み取り側({@code GET}/{@code /unified})には別途認可が掛かっている。
+     */
     @PostMapping
     public ResponseEntity<Void> record(@RequestBody OperationLogRequest request) {
         Long userId = currentActorService.tryGetCurrentActorId();

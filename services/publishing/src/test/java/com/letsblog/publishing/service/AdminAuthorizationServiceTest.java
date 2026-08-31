@@ -85,4 +85,32 @@ class AdminAuthorizationServiceTest {
         assertThrows(ForbiddenException.class, () -> service.requireProjectMemberOrAdmin(1L));
         verifyNoInteractions(legacyApiBridgeClient);
     }
+
+    @Test
+    void requireProjectMemberOrAdminForSite_プロジェクトに紐付くサイトは通常のメンバー判定に委ねる() {
+        when(currentActorService.isAdmin()).thenReturn(false);
+        when(currentActorService.getCurrentActorId()).thenReturn(10L);
+        when(legacyApiBridgeClient.isProjectMember(1L, 10L)).thenReturn(true);
+
+        assertDoesNotThrow(() -> service.requireProjectMemberOrAdminForSite(1L));
+    }
+
+    @Test
+    void requireProjectMemberOrAdminForSite_未紐付けサイトはadminのみ許可() {
+        // issue #759: どの環境にも紐付いていないサイトはprojectIdがnullになりうる。
+        // 判定に使えるメンバーシップが無いので、adminだけを通す(issue #830)。
+        when(currentActorService.isAdmin()).thenReturn(true);
+
+        assertDoesNotThrow(() -> service.requireProjectMemberOrAdminForSite(null));
+        // projectIdがnullの状態でメンバー判定へ進むと、legacy-apiへnullのprojectIdを送ってしまう。
+        verifyNoInteractions(legacyApiBridgeClient);
+    }
+
+    @Test
+    void requireProjectMemberOrAdminForSite_未紐付けサイトへの非adminはForbidden() {
+        when(currentActorService.isAdmin()).thenReturn(false);
+
+        assertThrows(ForbiddenException.class, () -> service.requireProjectMemberOrAdminForSite(null));
+        verifyNoInteractions(legacyApiBridgeClient);
+    }
 }

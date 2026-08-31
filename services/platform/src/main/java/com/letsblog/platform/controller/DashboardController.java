@@ -44,12 +44,17 @@ public class DashboardController {
         this.adminAuthorizationService = adminAuthorizationService;
     }
 
+    /**
+     * 認可不要: ログイン後の共通ダッシュボードが出す「アプリが健全に動いているか」の要約
+     * (issue #830)。より詳しい{@link #getServiceStatusDetail}のほうはadmin限定にしてある。
+     */
     @GetMapping("/service-status")
     public List<ConnectedServiceStatusResponse> getServiceStatus() {
         return connectedServiceStatusService.checkAll();
     }
 
     /** issue #198: 稼働状況の変化をポーリングなしで受け取るためのSSE配信。 */
+    /** 認可不要: {@link #getServiceStatus}のSSE版で、同じ要約を流すだけ(issue #830)。 */
     @GetMapping("/service-status/stream")
     public SseEmitter streamServiceStatus() {
         return connectedServiceStatusBroadcaster.subscribe();
@@ -63,14 +68,24 @@ public class DashboardController {
     }
 
     /** issue #280: このアプリを構成するDockerコンテナ(lbs-*)の稼働状況。 */
+    /**
+     * コンテナ名と稼働状況の一覧。**インフラの構成情報**なので admin 限定にする(issue #830)。
+     *
+     * <p>#816 のQAで、無効化された利用者のブラウザセッションが全コンテナ名と稼働状況を
+     * 表示し続けることが確認されており、#830 はそれを塞ぐべき対象として名指ししている。
+     * 同じコントローラの{@link #getServiceStatusDetail}が既に admin 限定である点とも揃う。
+     */
     @GetMapping("/container-status")
     public List<ContainerStatusResponse> getContainerStatus() {
+        adminAuthorizationService.requireAdmin();
         return containerStatusService.listAll();
     }
 
     /** issue #280: コンテナ稼働状況の変化をポーリングなしで受け取るためのSSE配信。 */
+    /** {@link #getContainerStatus}のSSE版。同じ情報を流すので同じく admin 限定(issue #830)。 */
     @GetMapping("/container-status/stream")
     public SseEmitter streamContainerStatus() {
+        adminAuthorizationService.requireAdmin();
         return containerStatusBroadcaster.subscribe();
     }
 }

@@ -61,6 +61,7 @@ public class PostPublishService {
     private final ObjectMapper objectMapper;
     private final ImageResizeService imageResizeService;
     private final DomainEventPublisher domainEventPublisher;
+    private final AdminAuthorizationService adminAuthorizationService;
 
     public PostPublishService(ProjectServiceClient projectServiceClient, CmsAdapterFactory cmsAdapterFactory,
                                ContentServiceClient contentServiceClient,
@@ -70,7 +71,8 @@ public class PostPublishService {
                                LegacyApiBridgeClient legacyApiBridgeClient,
                                ObjectMapper objectMapper,
                                ImageResizeService imageResizeService,
-                               DomainEventPublisher domainEventPublisher) {
+                               DomainEventPublisher domainEventPublisher,
+                               AdminAuthorizationService adminAuthorizationService) {
         this.projectServiceClient = projectServiceClient;
         this.cmsAdapterFactory = cmsAdapterFactory;
         this.contentServiceClient = contentServiceClient;
@@ -81,6 +83,7 @@ public class PostPublishService {
         this.objectMapper = objectMapper;
         this.imageResizeService = imageResizeService;
         this.domainEventPublisher = domainEventPublisher;
+        this.adminAuthorizationService = adminAuthorizationService;
     }
 
     @AuditLog(action = AuditLogAction.POST_PUBLISHED, resourceType = "POST")
@@ -90,6 +93,9 @@ public class PostPublishService {
         CmsAdapter cmsAdapter = cmsAdapterFactory.resolve(credentials.cmsType());
 
         Long projectId = projectServiceClient.findProjectIdBySiteId(site.id());
+        // WordPressへの公開は「認証済みなら誰でも」ではなく、そのサイトが属するプロジェクトの
+        // メンバー(またはadmin)に限定する(issue #830)。CMSへの副作用が始まる前に判定する。
+        adminAuthorizationService.requireProjectMemberOrAdminForSite(projectId);
         // カスタムタグ→[blogcard]→[amazon]→[recharts]の展開はcontent-serviceへ委譲する(issue #576)。
         // [recharts]タグの記法・データが不正な場合はInvalidRechartsTagExceptionが未捕捉のまま伝播し、
         // GlobalExceptionHandlerが400として返すことで投稿自体を拒否する(Issue #340、ContentServiceClient

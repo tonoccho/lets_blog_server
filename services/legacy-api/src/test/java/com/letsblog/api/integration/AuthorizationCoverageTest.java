@@ -18,12 +18,17 @@ class AuthorizationCoverageTest {
 
     /** 現時点で認可チェックを持たないエンドポイント(issue #830 時点)。
      * 減らせたらこのリストからも消すこと(残したままだとテストが教えてくれる)。 */
-    private static final Set<String> KNOWN_UNAUTHORIZED = Set.of(
-            "AiController#image",
-            "AiController#imageOptions",
-            "AuthController#setupStatus",
-            "AuthController#setup",
-            "HealthController#health");
+    /**
+     * legacy-api に認可チェックの無いエンドポイントは残っていない(issue #830)。
+     *
+     * <p>{@code AiController#image} / {@code #imageOptions} は projectId 指定時に
+     * プロジェクト設定を読むため {@code requireProjectMemberOrAdmin} を掛けた
+     * (同じクラスの {@code generateImagePrompt} が既にそうしていたのに揃えた)。
+     * {@code AuthController} の2件と {@code HealthController#health} は
+     * SecurityConfig の PUBLIC_PATHS に含まれる<b>認証前に叩かれる公開パス</b>で、
+     * 認可を掛けると初回セットアップ自体が不可能になる。理由は Javadoc へ記録した。
+     */
+    private static final Set<String> KNOWN_UNAUTHORIZED = Set.of();
 
     @Test
     @DisplayName("認可チェックの無いエンドポイントが増えていない(issue #830)")

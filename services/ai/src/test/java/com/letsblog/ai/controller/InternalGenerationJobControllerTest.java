@@ -24,22 +24,26 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * GenerationJobControllerの回帰テスト。#573 stage2で追加したPATCH /{id}
+ * InternalGenerationJobControllerの回帰テスト。#573 stage2で追加したPATCH /{id}
  * (media-serviceの非同期ジョブランナーがジョブの進捗・完了・失敗を反映するために呼ぶ)、
  * および#573 stage3で追加したPOST(legacy-apiに残らなくなったコントローラからのジョブ起動用)を
  * 検証する。
+ *
+ * <p>issue #830 で、この2つはコンテナ間専用でありながらgatewayのルート表に載る
+ * {@code /api/generation-jobs/**} に同居していたため、{@code /api/internal/ai/generation-jobs} へ
+ * 分離した。テストクラスもそれに合わせて移した(元は GenerationJobControllerTest)。
  */
 @ExtendWith(MockitoExtension.class)
-class GenerationJobControllerTest {
+class InternalGenerationJobControllerTest {
 
     @Mock
     private GenerationJobRepository generationJobRepository;
 
-    private GenerationJobController controller;
+    private InternalGenerationJobController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new GenerationJobController(generationJobRepository);
+        controller = new InternalGenerationJobController(generationJobRepository);
     }
 
     @Test

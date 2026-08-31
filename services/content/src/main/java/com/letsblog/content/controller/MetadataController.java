@@ -36,6 +36,10 @@ public class MetadataController {
 
     @Operation(summary = "投稿ステータスの選択肢を取得", description = "WordPress投稿ステータスの正準リストを返します")
     @ApiResponse(responseCode = "200", description = "投稿ステータス一覧を返す")
+    /**
+     * 認可不要: WordPress投稿ステータスのenumを列挙して返すだけで、保存済みデータには一切触れない
+     * (issue #830)。クライアントUIの選択肢をサーバー側の正準値と揃えるためのもの。
+     */
     @GetMapping("/post-statuses")
     public List<PostStatusOptionResponse> postStatuses() {
         return Arrays.stream(PostStatus.values()).map(PostStatusOptionResponse::from).toList();
@@ -43,6 +47,10 @@ public class MetadataController {
 
     @Operation(summary = "ロールの表示名一覧を取得", description = "権限一覧を含まない、ロール名と表示名のみの一覧を返します")
     @ApiResponse(responseCode = "200", description = "ロール一覧を返す")
+    /**
+     * 認可不要: ロール名と表示名だけを返し、各ロールが持つ権限一覧は含まない(issue #830)。
+     * クライアントUIの表示名を揃えるためのもので、権限構成が漏れるわけではない。
+     */
     @GetMapping("/roles")
     public List<RoleOptionResponse> roles() {
         return legacyApiBridgeClient.listRoles(currentActorService.getAuthorizationHeader());

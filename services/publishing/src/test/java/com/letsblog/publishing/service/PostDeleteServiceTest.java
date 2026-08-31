@@ -21,6 +21,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @ExtendWith(MockitoExtension.class)
 class PostDeleteServiceTest {
@@ -35,6 +36,8 @@ class PostDeleteServiceTest {
     private CmsAdapter cmsAdapter;
     @Mock
     private DomainEventPublisher domainEventPublisher;
+    @Mock
+    private AdminAuthorizationService adminAuthorizationService;
 
     private PostDeleteService service;
 
@@ -43,7 +46,8 @@ class PostDeleteServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new PostDeleteService(projectServiceClient, cmsAdapterFactory, contentServiceClient, domainEventPublisher);
+        service = new PostDeleteService(projectServiceClient, cmsAdapterFactory, contentServiceClient, domainEventPublisher,
+                adminAuthorizationService);
 
         ProjectServiceClient.SiteBridge site =
                 new ProjectServiceClient.SiteBridge(1L, "main", "Main", "https://example.com", CmsType.WORDPRESS, false, null);
@@ -78,5 +82,29 @@ class PostDeleteServiceTest {
 
         verify(contentServiceClient, never()).markTrashed(ArgumentMatchers.anyLong(), ArgumentMatchers.anyString());
         verify(domainEventPublisher, never()).publishPostDeleted(ArgumentMatchers.anyLong(), ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void delete_プロジェクトメンバーでもadminでもなければCMSへ触れずに拒否する() {
+        // issue #830: 投稿削除は「認証済みなら誰でも」ではなく、サイトが属するプロジェクトの
+        // メンバー(またはadmin)に限定する。CMSへの副作用が始まる前に弾まれることを確かめる。
+        Mockito.when(projectServiceClient.findProjectIdBySiteId(1L)).thenReturn(7L);
+        Mockito.doThrow(new ForbiddenException("この操作にはプロジェクトメンバーまたはadmin権限が必要です"))
+                .when(adminAuthorizationService).requireProjectMemberOrAdminForSite(7L);
+
+        assertThrows(ForbiddenException.class, () -> service.delete("main", "99"));
+
+        verify(cmsAdapter, never()).deletePost(any(), any());
+        verify(contentServiceClient, never()).markTrashed(ArgumentMatchers.anyLong(), ArgumentMatchers.anyString());
+        verify(domainEventPublisher, never()).publishPostDeleted(ArgumentMatchers.anyLong(), ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void delete_サイトが属するプロジェクトのIDで認可判定を行う() {
+        Mockito.when(projectServiceClient.findProjectIdBySiteId(1L)).thenReturn(7L);
+
+        service.delete("main", "99");
+
+        verify(adminAuthorizationService).requireProjectMemberOrAdminForSite(7L);
     }
 }

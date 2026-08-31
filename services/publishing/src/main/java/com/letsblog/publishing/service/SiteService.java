@@ -29,6 +29,14 @@ public class SiteService {
         return projectServiceClient.getSite(siteId).map(this::toSite);
     }
 
+    /**
+     * サイトキーから、そのサイトが属するプロジェクトのIDを解決する(どの環境にも紐付いていなければnull)。
+     * {@code AdminAuthorizationService#requireProjectMemberOrAdminForSite}へ渡す認可判定用(issue #830)。
+     */
+    public Long resolveProjectId(String siteKey) {
+        return projectServiceClient.findProjectIdBySiteId(projectServiceClient.getSiteByKey(siteKey).id());
+    }
+
     public CmsCredentials getCredentials(String siteKey) {
         ProjectServiceClient.SiteCredentialsBridge bridge = projectServiceClient.getCredentials(siteKey);
         return buildCredentialsFromMap(bridge.cmsType(), bridge.credentials());

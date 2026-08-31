@@ -327,21 +327,21 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 | | 件数 |
 |---|---|
 | 総エンドポイント | 278 |
-| **認可なし(内部ブリッジを除く)** | **56** |
+| **認可なし(内部ブリッジを除く)** | **5**(#830 の初回計測時は 56) |
 
 サービス別の内訳:
 
 | サービス | 認可なし | 内容 |
 |---|---|---|
-| media | 18 | `DiagramController`(6)、`GeneratedImageController`(6)、`RenderController`(3)、`ComfyUiCheckpointController`(2)、`MediaController`(1) |
-| ai | 10 | `AiController`(5)、`GenerationJobController`(4)、`InternalAiGenerationController`(1) |
-| project | 7 | `SiteController`(5)、`ProjectController`(2) |
-| content | 6 | `MetadataController`(2)、`PostController`(2)、`ContentCacheController`(1)、`CustomTagController#validate`(1) |
-| legacy-api | 5 | `AiController`(2)、`AuthController`(2、公開パス)、`HealthController`(1) |
-| platform | 5 | `DashboardController`(4)、`VscodeExtensionController`(1) |
-| publishing | 3 | **`PostController#publish` / `#delete`**、`TaxonomyController#resolve` |
-| log-writer | 2 | `FrontendErrorLogController`、`OperationLogController` |
-| **analytics / identity** | **0** | 全エンドポイントが認可済み |
+| media | 1 | `MediaController#upload`(下記参照) |
+| **ai** | **0** | #830 で解消。下記「解消済み」参照 |
+| project | 2 | `ProjectController#list`、`SiteController#list`(いずれも一覧。下記参照) |
+| content | 2 | `PostController#list` / `#lookupBySlug`(いずれも一覧・参照。下記参照) |
+| **legacy-api** | **0** | #830 で解消 |
+| **platform** | **0** | #830 で解消 |
+| **publishing** | **0** | #830 で解消。下記「解消済み」参照 |
+| **log-writer** | **0** | #830 で解消 |
+| **analytics / identity / publishing / ai / platform / log-writer / legacy-api** | **0** | 全エンドポイントが認可済み、または理由付きで「認可不要」 |
 
 内部ブリッジ(`/api/internal/**`)は対象外とした。サービス間呼び出し専用で gateway からは
 到達せず、認可はトークンを転送する呼び出し元が担うため。
@@ -375,13 +375,153 @@ DBもコンテナも要らないため、MySQL が未公開の環境でも実行
 
 ### 既知の要対応(優先度順)
 
-1. **`publishing/PostController#publish` / `#delete`** — WordPress への投稿公開・削除。
-   本来は `requireProjectMemberOrAdmin` 相当が必要だが、
-   `ProjectServiceClient.SiteBridge` が `projectId` を持たないため、
-   project-service の内部ブリッジに projectId を載せる変更が前提になる
-2. **`project/SiteController#register` / `#createManagedWordPress` / `#adoptManagedWordPress`** — サイト作成
-3. **`media` の18件** — 画像・ダイアグラムの作成/更新/削除を含む
-4. **`ai` の10件** — 生成系。コスト面の影響もある
+1. **`media/MediaController#upload`** — `site` キーで指定した CMS のメディアライブラリへ
+   直接ファイルをアップロードする。サイトが属するプロジェクトのメンバーに限定すべきだが、
+   media-service には site キーからプロジェクトを引く手段が無い(publishing-service の
+   `/api/internal/publishing/**` に site→project の逆引きが無い)。publishing 側へ
+   ブリッジを足す変更が要る
+2. **一覧系 4件** — `project/ProjectController#list`、`project/SiteController#list`、
+   `content/PostController#list` / `#lookupBySlug`。いずれも「自分がアクセスできる分だけ返す」
+   絞り込みが要り、判定材料の `project_users` が legacy-api に残っている(下記「一覧系を残している理由」)
+
+### 解消済み
+
+**`publishing` の3件(#830)** — `PostController#publish` / `#delete`、`TaxonomyController#resolve`。
+
+当初は「`ProjectServiceClient.SiteBridge` が `projectId` を持たないため掛けられない」と記録して
+いたが、`ProjectServiceClient#findProjectIdBySiteId` でサイトIDから逆引きできるため前提が誤りだった。
+3件とも `AdminAuthorizationService#requireProjectMemberOrAdminForSite` で、
+サイトが属するプロジェクトのメンバー(または admin)に限定した。
+
+どの環境にも紐付いていないサイトは `projectId` が null になりうる(#759)。判定に使える
+メンバーシップが存在しないため、**その場合は admin のみを許可**する。未紐付けサイトを
+投稿公開・削除の抜け道として残さないための判断。
+
+**`project` の5件(#830)** — `SiteController#register` / `#createManagedWordPress` /
+`#adoptManagedWordPress` / `#testConnection` と `ProjectController#get`。
+
+前者4件は `requireAdmin()`。同じコントローラの `update` / `delete` / `getDetail` が既に admin 限定で、
+サイト登録は CMS 認証情報の登録を、マネージド WordPress の作成・取り込みはコンテナの払い出しを伴う。
+`testConnection` は保存済み認証情報で外部へ接続し admin 権限の有無まで返すため、`getDetail` と揃えた。
+
+`ProjectController#get` は `requireProjectMemberOrAdmin(id)`。更新系が全て admin 限定である一方、
+参照が「認証済みなら誰でも」では他人のプロジェクトの構成(GitHub リポジトリ・環境の紐付け)が読めた。
+
+### 一覧系を残している理由
+
+`ProjectController#list` と `SiteController#list` は認可を付けずに残している。
+「自分がアクセスできる分だけ返す」絞り込みが必要で、単純に admin 限定にはできない。
+
+- 判定材料の `project_users` は legacy-api に残っており(ADR-0004 によりクロススキーマ参照不可)、
+  内部ブリッジ越しの N+1 になる
+- VSCode 拡張が `SiteController#list` をサイト選択に使っている
+  (`extension/src/apiClient.ts`)ため、admin 限定にすると非 admin の拡張利用が壊れる
+
+#583 で `project_users` が project-service へ移った後に、リポジトリ側の絞り込みとして実装する。
+
+**`media` の5件(#830)** — `ComfyUiCheckpointController#install` / `#delete` と
+`RenderController` の3件。いずれも**認可を足すのではなく、外部から到達できないことを確定させた**。
+
+`ComfyUiCheckpointController` は元から gateway のルート表に無く、legacy-api の
+`MediaComfyUiClient` が docker network 越しに直接呼ぶだけだった(クラスの Javadoc にもそう書かれており、
+`RouteControllerContractTest` の `NON_GATEWAY_ROUTED_PATHS` にも載っている)。
+
+`RenderController` の3件は **gateway の media ルートに `/api/render/**` が載っていた**ため、
+有効な JWT があれば外部から直接叩けた。呼び出し元はいずれも content-service /
+publishing-service の `MediaRenderClient` で、`app.media-service-uri` へコンテナ間で直接呼ぶ経路しか
+持たない(web / extension からの利用は無いことをリポジトリ全体の検索で確認した)。
+そこで **gateway のルート表から `/api/render/**` を外した**。
+
+とくに `POST /api/render/penpot/design-file` は、サービスアカウント
+(`PENPOT_SERVICE_EMAIL`)で共有 Penpot ワークスペースにファイルを作る。ルートに載っていた間は
+認証済みユーザーなら誰でも無制限に作成できた。
+
+5件とも各メソッドの Javadoc に `認可不要:` マーカーで理由を記録した。
+
+**`ai` の10件(#830)** — 内訳は3種類。
+
+*パスを内部側へ移して外部到達を断ったもの(3件)*
+
+`GenerationJobController` の `create` / `update` と `InternalAiGenerationController#generate`。
+いずれも Javadoc に「内部ブリッジ」と書かれ、実際の呼び出し元も legacy-api / project-service /
+content-service / media-service のコンテナ間呼び出しだけだった。
+
+にもかかわらず前者は `/api/generation-jobs/**`(一覧・詳細を Web が使うため gateway に載っている)に
+同居し、後者は `/api/ai/internal/generate` という **`/api/internal/**` 規則から外れた命名**だった
+(`/api/ai/**` は gateway に載っている)。結果として **有効な JWT さえあれば外部から任意のジョブを
+作成・改変でき、内部生成ブリッジも直接叩けた**。
+
+`/api/internal/ai/generation-jobs` と `/api/internal/ai/generate` へ移した。gateway は
+`/api/internal/**` をルーティングしないため、外部からの到達経路が無くなる。
+`create`/`update` は新設の `InternalGenerationJobController` へ分離した。
+
+*認可を足したもの(1件)*
+
+`AiController#tags` — `projectId` 指定時はそのプロジェクトの既存タグ(保存済みリソース)を読むため、
+`requireProjectMemberOrAdmin` を掛けた。未指定時は読むものが無いので判定しない。
+
+*「認可不要」と判断したもの(6件)*
+
+`AiController` の `draft` / `ask` / `proofread` / `section` は、利用者自身の入力からの生成で
+保存済みリソースに触れない。LLM のコストは利用量に比例するが、それは認可ではなく
+レート制限 / クォータで扱う問題として本Issueのスコープ外とした。
+
+`GenerationJobController` の `list` / `get` は、ログイン後の共通ダッシュボード
+(`web/src/app/page.tsx`)が表示するジョブ履歴。**ただし `generation_jobs` に所有者を表す列が無く、
+「自分のジョブだけ」に絞ることが今のスキーマではできない。** 利用者ごとに絞るなら列の追加を伴うため、
+ギャップとして記録するに留めた。
+
+**`content` の4件 / `platform` の5件 / `log-writer` の2件 / `legacy-api` の5件(#830)**
+
+*認可を足したもの(4件)*
+
+- `platform/DashboardController#getContainerStatus` と `#streamContainerStatus` →
+  `requireAdmin()`。**コンテナ名と稼働状況はインフラの構成情報**で、#816 のQAで
+  「無効化された利用者に全コンテナ名と稼働状況が見え続ける」ことが確認されている。
+  同じコントローラの `getServiceStatusDetail` が既に admin 限定なのとも揃う
+- `legacy-api/AiController#image` と `#imageOptions` → `projectId` 指定時に
+  `requireProjectMemberOrAdmin`。プロジェクト設定(既定サイズ・ネガティブプロンプト等)を
+  読むため。同じクラスの `generateImagePrompt` が既にそうしていたのに揃えた
+
+*「認可不要」と判断したもの(12件)*
+
+| エンドポイント | 理由 |
+|---|---|
+| `content/MetadataController#postStatuses` | enum を列挙するだけ。保存済みデータに触れない |
+| `content/MetadataController#roles` | ロール名と表示名のみ。権限一覧は含まない |
+| `content/CustomTagController#validate` | HTML/CSS の記法検査。純粋な関数 |
+| `content/ContentCacheController#resolve` | blogcard/amazon 用。記事を書く利用者が普通に使うので admin 限定にできず、メンバー限定にしても緩和にならない |
+| `platform/DashboardController#getServiceStatus` / `#streamServiceStatus` | 共通ダッシュボードの「アプリが動いているか」の要約。詳細版は admin 限定 |
+| `platform/VscodeExtensionController#download` | 拡張(.vsix)の配布。利用者固有のデータを含まない |
+| `log-writer/FrontendErrorLogController#logError` | クライアントが自分のエラーを送る書き込み専用の窓口。読み取り側には認可あり |
+| `log-writer/OperationLogController#record` | 同上 |
+| `legacy-api/AuthController#setupStatus` / `#setup` | `PUBLIC_PATHS` の**認証前に叩かれる公開パス**。認可を掛けると初回セットアップが不可能になる |
+| `legacy-api/HealthController#health` | 同上。監視・コンテナのヘルスチェック用 |
+
+> **`ContentCacheController#resolve` について:** 認可の問題ではないが、**宛先アドレスの検証が無く
+> 内部アドレスへの SSRF になる**ことがこの棚卸しで判明した。入力検証で対処すべき別種の問題なので
+> **#902** として分けて起票した。
+
+**`media` の12件(#830)** — `DiagramController`(6) と `GeneratedImageController`(6)。
+
+media-service に**プロジェクトメンバー判定の手段が無かった**ため、`Diagram` / `GeneratedImage` が
+`projectId` を持っているにもかかわらず「有効な JWT さえあれば誰でも他人のダイアグラム・生成画像を
+読み書き・削除できる」状態だった。
+
+`LegacyApiBridgeClient`(ai / content / analytics / publishing が既に持っているものと同じ形)を
+media にも追加し、`AdminAuthorizationService#requireProjectMemberOrAdmin` を実装した。
+**legacy-api 側には新しいエンドポイントを足していない** — `ProjectUserBridgeController` が既に
+公開している `/api/internal/project/projects/{projectId}/members/{userId}` を再利用している
+(#583 が legacy-api を縮小しようとしているところへ、同一実装のメンバー判定を5本目として
+増やしたくないため)。
+
+- 個別リソース操作(`get` / `getSvg` / `update` / `delete` / `create` / `updateTags` /
+  `getImageFile`)は、リソースの `projectId` でメンバー判定する
+- どのプロジェクトにも紐付いていないリソース(`projectId` が null)は admin のみ。
+  `projectId` を空で作ったリソースが抜け道にならないようにするため
+- 一覧(`list`)は `projectId` 指定時はメンバー判定、**未指定時は admin 限定**。
+  本来は「操作者が所属するプロジェクトの分だけ」返すべきだが、所属プロジェクトの一覧を引く手段が
+  media-service に無い(内部ブリッジは `isProjectMember` だけ)。#583 の後に絞り込みへ置き換える
 
 `legacy-api/AuthController` の2件は初回セットアップ導線で **`PUBLIC_PATHS` に含まれる公開パス**、
 `HealthController#health` も同様。これらは「認可不要」が正しく、
