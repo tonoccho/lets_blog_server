@@ -17,7 +17,6 @@ set -euo pipefail
 # いる等)は、以下の環境変数にベースURLを設定するとそちらから取得する。
 # 設定しなければ上記の docker exec 経由になる。
 #
-#   LETS_BLOG_API_URL      legacy-api
 #   LOG_WRITER_URL         log-writer
 #   MEDIA_SERVICE_URL      media
 #   AI_SERVICE_URL         ai
@@ -33,10 +32,11 @@ set -euo pipefail
 # 内容の重複を検査して落とす(#811。以前は全サービスの既定値が
 # http://localhost:8080 で、まさにこの状態になりえた)。
 #
+# issue #583 で legacy-api を削除したため、対象は9サービスになった。
+#
 # "サービス名|コンテナ名|URL上書き環境変数の値" の形式で列挙する。
 # サービスを増やすときはここに1行足す(orval.config.js 側にもターゲット定義が必要)。
 SERVICES=(
-  "legacy-api|lbs-api|${LETS_BLOG_API_URL:-}"
   "log-writer|lbs-log-writer|${LOG_WRITER_URL:-}"
   "media|lbs-media|${MEDIA_SERVICE_URL:-}"
   "ai|lbs-ai|${AI_SERVICE_URL:-}"

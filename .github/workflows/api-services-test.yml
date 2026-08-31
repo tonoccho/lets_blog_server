@@ -32,7 +32,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       lbs-common: ${{ steps.filter.outputs.lbs-common }}
-      legacy-api: ${{ steps.filter.outputs.legacy-api }}
       log-writer: ${{ steps.filter.outputs.log-writer }}
       gateway: ${{ steps.filter.outputs.gateway }}
       identity: ${{ steps.filter.outputs.identity }}
@@ -56,13 +55,6 @@ jobs:
               - 'settings.gradle'
               - 'gradle/**'
               - 'gradlew'
-            legacy-api:
-              - 'libs/**'
-              - 'build.gradle'
-              - 'settings.gradle'
-              - 'gradle/**'
-              - 'gradlew'
-              - 'services/legacy-api/**'
             log-writer:
               - 'libs/**'
               - 'build.gradle'
@@ -138,7 +130,6 @@ jobs:
     needs: detect-changes
     if: |
       (matrix.service == 'lbs-common' && needs.detect-changes.outputs.lbs-common == 'true') ||
-      (matrix.service == 'legacy-api' && needs.detect-changes.outputs.legacy-api == 'true') ||
       (matrix.service == 'log-writer' && needs.detect-changes.outputs.log-writer == 'true') ||
       (matrix.service == 'gateway' && needs.detect-changes.outputs.gateway == 'true') ||
       (matrix.service == 'identity' && needs.detect-changes.outputs.identity == 'true') ||
@@ -154,12 +145,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [lbs-common, legacy-api, log-writer, gateway, identity, content,
+        service: [lbs-common, log-writer, gateway, identity, content,
                   ai, analytics, media, platform, project, publishing]
 
-    # legacy-api/content/identity/log-writerのテストがMySQLを使う(#570のスキーマ分離が完了する
-    # までlegacy-apiは共有DBのまま。contentは#576でスキーマ分離済みの専用DB lbs_content_test、
-    # identity/log-writerは#772で追加した lbs_identity_test / lbs_log_test を使う)。
+    # content/identity/log-writer 等のテストがMySQLを使う(#570のスキーマ分離により、
+    # いずれも lbs_<service>_test という専用スキーマ。contentは#576、
+    # identity/log-writerは#772で追加した)。
     # lbs-common/gatewayには不要だが、マトリクスジョブ単位でしか services: を定義できないため、
     # 無害な待機コストとして許容する。
     services:
@@ -210,13 +201,13 @@ jobs:
       # (ADR-0006: Testcontainersは使わず実MySQLに接続する)。identity / log-writer 分は
       # issue #772 で AuthorizationMatrixIntegrationTest を追加したときに足した。
       #
-      # issue #790: DBを使わない lbs-common / gateway と、共有DB(lets_blog_test)を使う
-      # legacy-api 以外はすべて専用スキーマを持つ。列挙漏れを黙って通さないよう、
-      # case に該当しないサービスは明示的に失敗させる(マトリクスへ追加したのに
-      # スキーマを足し忘れると、DB接続エラーという分かりにくい形で落ちるため)。
+      # issue #790: DBを使わない lbs-common / gateway 以外はすべて専用スキーマを持つ。
+      # 列挙漏れを黙って通さないよう、case に該当しないサービスは明示的に失敗させる
+      # (マトリクスへ追加したのにスキーマを足し忘れると、DB接続エラーという分かりにくい形で
+      # 落ちるため)。issue #583 で legacy-api(唯一の共有DB利用者)を削除した。
       - name: Create service test schema
         if: >-
-          matrix.service != 'lbs-common' && matrix.service != 'gateway' && matrix.service != 'legacy-api'
+          matrix.service != 'lbs-common' && matrix.service != 'gateway'
         run: |
           case "${{ matrix.service }}" in
             content)    schema=lbs_content_test ;;
@@ -240,16 +231,7 @@ jobs:
             FLUSH PRIVILEGES;"
 
       - name: Run unit tests with coverage
-        run: |
-          if [ "${{ matrix.service }}" = "legacy-api" ]; then
-            ./gradlew ${{ steps.project.outputs.path }}:test ${{ steps.project.outputs.path }}:jacocoTestReport \
-              -Dspring.datasource.url=jdbc:mysql://localhost:3306/lets_blog_test?useSSL=false&serverTimezone=UTC \
-              -Dspring.datasource.username=test_user \
-              -Dspring.datasource.password=test_pass \
-              -Dspring.test.database.replace=any
-          else
-            ./gradlew ${{ steps.project.outputs.path }}:test ${{ steps.project.outputs.path }}:jacocoTestReport
-          fi
+        run: ./gradlew ${{ steps.project.outputs.path }}:test ${{ steps.project.outputs.path }}:jacocoTestReport
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3

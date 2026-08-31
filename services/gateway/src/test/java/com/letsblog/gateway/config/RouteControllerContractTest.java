@@ -58,21 +58,16 @@ import static org.junit.jupiter.api.DynamicTest.dynamicTest;
  * {@code uri}が、そのコントローラーが属するサービスの環境変数プレースホルダ
  * (例: {@code MEDIA_SERVICE_URI})を指しているかを検証する。
  *
- * <p><b>legacy-apiも対象に含める(issue #771)</b>: 当初は「移行期間中の暫定フォールバック先
- * そのものであり、個別ルートを持たない大半のエンドポイントがfallback-uri経由で正しく到達する」
- * という理由でスキャン対象外にしていた。しかしこの想定は「どのルートにもマッチしない」場合にしか
- * 成り立たない。legacy-apiに残ったまま{@code /api/projects/**}配下にあるエンドポイントは、
- * 移設済みサービス向けの広いルート(特に{@code project}ルート)へ先勝ちでマッチしてしまい、
- * そのサービスに存在しないパスとして404になる。実際にissue #771で
- * {@code POST /api/projects/{projectId}/ai/generate-image-prompt}がこの状態にあることが
- * 実機で確認され、同じ調査で ProjectController の5エンドポイント
- * ({@code css-selector-prefix}・{@code image-generation-prompt-defaults}・
- * {@code image-generation-size-defaults}・{@code article-image-resize-default}・
- * {@code image-content-filter-settings})も同様に到達不能であることが判明した。
+ * <p><b>issue #583でフォールバックを廃止した</b>。以前はどのルートにもマッチしないパスを
+ * 暗黙にlegacy-apiへ流していたため、「ルート表に載っていない」ことが表面化しなかった。
+ * 現在はマッチしなければgatewayが404を返すので、このテストでも「どのルートにもマッチしない」を
+ * 契約違反として扱う。
  *
- * <p>そこでlegacy-apiを{@code LEGACY_API_URI}を期待値としてスキャン対象へ加えた。
- * fallback-uriも{@code ${LEGACY_API_URI:...}}であるため「専用ルートが無い」場合は従来どおり
- * 合格し、**「他サービス向けのルートに飲み込まれている」場合だけが失敗する**。
+ * <p>#771では、legacy-apiに残ったまま{@code /api/projects/**}配下にあったエンドポイントが
+ * 移設済みサービス向けの広いルート(特に{@code project}ルート)へ先勝ちでマッチし、
+ * そのサービスに存在しないパスとして404になっていた
+ * ({@code POST /api/projects/{projectId}/ai/generate-image-prompt}と ProjectController の
+ * 5エンドポイント)。#583でこれらは所有サービスへ移設し、専用ルートを持つようになっている。
  *
  * <p><b>スキャン対象外</b>: gateway自身、および各コントローラーの
  * {@code /api/internal/**}配下のエンドポイント(サービス間の内部ブリッジ専用で、
@@ -99,11 +94,11 @@ class RouteControllerContractTest {
      * {@code /api/internal/**}の命名規則には従わないが、実際にはgatewayを経由しない
      * (コンテナ間で直接呼び出される)ことがJavadocで明示されているエンドポイント。
      *
-     * <p>ComfyUiCheckpointController(media-service)は、legacy-apiのComfyUiModelServiceから
-     * docker network越しに直接呼ばれる設計であり(同クラスのJavadoc「gatewayは経由しない」
-     * 参照)、gatewayのルート表に載っていないのは意図通り(バグではない)。命名が
-     * {@code /api/internal/**}規則から外れている点は本Issue(#642、テストのみ)のスコープ外の
-     * 発見のため、ここでは除外リストとして扱うにとどめ、コード側は変更しない。
+     * <p>ComfyUiCheckpointController(media-service)は、#583以前はlegacy-apiの
+     * ComfyUiModelServiceからdocker network越しに直接呼ばれる設計だった(同クラスのJavadoc
+     * 「gatewayは経由しない」参照)。#583でComfyUiModelServiceがmedia-service自身へ移り、
+     * 同一サービス内の直接呼び出しになったため、この2本は外部から到達する必要がそもそも無い。
+     * gatewayのルート表に載っていないのは引き続き意図通り(バグではない)。
      */
     private static final List<String> NON_GATEWAY_ROUTED_PATHS = List.of(
             "/api/comfyui/checkpoints/install",
@@ -136,10 +131,6 @@ class RouteControllerContractTest {
         // BackupController(issue #693/#695/#696、C10)をplatform-serviceが持つ。
         // 新設時(#698)にこのマップへ追加し漏れていた(issue #716)。
         SERVICE_MODULE_TO_ENV_VAR.put("platform", "PLATFORM_SERVICE_URI");
-        // legacy-apiは「専用ルートが無ければfallback-uri(同じくLEGACY_API_URI)へ落ちる」ため、
-        // ここでの検証は実質「他サービス向けのルートに飲み込まれていないか」になる
-        // (issue #771。クラスJavadoc参照)。移設が進むにつれ対象は減っていく。
-        SERVICE_MODULE_TO_ENV_VAR.put("legacy-api", "LEGACY_API_URI");
     }
 
     /** クラス宣言行(トップレベルの public class)を検出する。 */
@@ -187,10 +178,12 @@ class RouteControllerContractTest {
         String samplePath = endpoint.path().replaceAll("\\{[^/}]+}", "sample-value");
 
         RouteProperties.Route matched = proxyHandler.resolveRoute(samplePath);
-        String matchedUri = matched != null ? matched.getUri() : routeProperties.getFallbackUri();
+        // issue #583でフォールバックを廃止した。マッチしなければgatewayが404を返すので、
+        // 「どのルートにもマッチしない」は転送先が無い=契約違反として扱う。
+        String matchedUri = matched != null ? matched.getUri() : null;
         String matchedDescription = matched != null
                 ? "route '" + matched.getId() + "' (uri=" + matchedUri + ")"
-                : "どのルートにもマッチせずfallback-uri (" + matchedUri + ") へ";
+                : "どのルートにもマッチせず404";
 
         boolean ok = matchedUri != null && matchedUri.contains(endpoint.expectedEnvVar());
         assertTrue(ok, () -> String.format(

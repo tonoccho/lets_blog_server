@@ -65,6 +65,13 @@ public class ProxyHandler {
     public Mono<ServerResponse> handle(ServerRequest request) {
         String path = request.path();
         RouteProperties.Route route = resolveRoute(path);
+        if (route == null) {
+            // issue #583: legacy-apiの削除に伴い、未割り当てパスのフォールバック転送先を廃止した。
+            // 以前はどのルートにもマッチしないパスを暗黙にlegacy-apiへ流しており、ルート表に
+            // 載せ忘れたエンドポイントがたまたま動いてしまう(逆に、legacy-apiに無ければ
+            // legacy-apiの404として返る)状態だった。gateway自身が404を返すようにする。
+            return ServerResponse.notFound().build();
+        }
         String targetUri = buildTargetUri(route, request);
         Duration timeout = route != null && route.getResponseTimeout() != null
                 ? route.getResponseTimeout()
@@ -109,9 +116,14 @@ public class ProxyHandler {
         return null;
     }
 
-    /** package-privateな理由はresolveRoute(String)のJavadoc参照(issue #642)。 */
+    /**
+     * package-privateな理由はresolveRoute(String)のJavadoc参照(issue #642)。
+     *
+     * <p>{@code route}は非nullであることを前提とする。マッチしなかった場合は
+     * {@link #handle(ServerRequest)}が404を返して呼ばない(issue #583でフォールバックを廃止)。
+     */
     String buildTargetUri(RouteProperties.Route route, ServerRequest request) {
-        String baseUri = route != null ? route.getUri() : routeProperties.getFallbackUri();
+        String baseUri = route.getUri();
         String query = request.uri().getRawQuery();
         String path = request.path();
         return query == null || query.isBlank()

@@ -122,7 +122,8 @@ kcadm config credentials \
 # password グラントで取得する。lightweight でないため sub が載り、requireAdmin() が通る。
 #
 # 前提: letsblog realm に admin ロールのユーザーが既に存在すること。ローカル開発環境では
-# 初回セットアップ(legacy-api の /api/auth/setup)で作られた管理者アカウントが該当する。
+# 初回セットアップ(/api/auth/setup。issue #583 で identity-service へ移設)で作られた
+# 管理者アカウントが該当する。
 ADMIN_ACCESS_TOKEN=""
 fetch_admin_access_token() {
   local response

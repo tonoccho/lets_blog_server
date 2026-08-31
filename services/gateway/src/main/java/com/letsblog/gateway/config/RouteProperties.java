@@ -16,19 +16,12 @@ import java.util.List;
 public class RouteProperties {
 
     /** どのルートにもマッチしなかった場合のフォールバック先(#560。移行期間中はlegacy-api)。 */
-    private String fallbackUri;
 
     private Duration defaultResponseTimeout = Duration.ofSeconds(60);
 
     private List<Route> routes = new ArrayList<>();
 
-    public String getFallbackUri() {
-        return fallbackUri;
-    }
 
-    public void setFallbackUri(String fallbackUri) {
-        this.fallbackUri = fallbackUri;
-    }
 
     public Duration getDefaultResponseTimeout() {
         return defaultResponseTimeout;

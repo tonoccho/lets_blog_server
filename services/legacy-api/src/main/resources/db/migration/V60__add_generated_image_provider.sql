@@ -1,1 +1,0 @@
-ALTER TABLE generated_images ADD COLUMN provider VARCHAR(20) NOT NULL DEFAULT 'COMFYUI';

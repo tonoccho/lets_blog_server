@@ -58,8 +58,9 @@ services:
     <<: *common-service
     environment:
       # Web(BFF)からバックエンドへの全リクエストはgateway経由に一本化する(issue #584)。
-      # ルーティング/JWT検証/レート制限/相関IDはgatewayが担い、未移行パスもgatewayの
-      # fallback-uriでlegacy-api(api)へ到達する(services/gateway/src/main/resources/application.yml)。
+      # ルーティング/JWT検証/レート制限/相関IDはgatewayが担う。issue #583でlegacy-apiを削除し、
+      # gatewayのフォールバック(未割り当てパスの暗黙転送)も廃止したため、ルート表に無いパスは
+      # gatewayが404を返す(services/gateway/src/main/resources/application.yml)。
       # コンテナ間通信のためlbs-net内部で直接到達させる(自己署名証明書を経由しないため
       # NODE_EXTRA_CA_CERTSは不要)
       LETS_BLOG_GATEWAY_URL: http://gateway:8080
@@ -89,100 +90,6 @@ services:
       retries: 12
       start_period: 60s
 
-  api:
-    build:
-      context: .
-      dockerfile: services/legacy-api/Dockerfile
-    container_name: lbs-api
-    <<: [*common-service, *actuator-healthcheck]
-    environment:
-      <<: *rabbitmq-env
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
-      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER}
-      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
-      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
-      # 初回セットアップ(/api/auth/setup)・緊急復旧(AdminPasswordResetRunner)がKeycloak Admin REST
-      # API経由の実装になった(#681)ため、identity-serviceと同じletsblog-servicesクライアントの
-      # シークレットが必要(他の値は既定値で足りるためservices/legacy-api/.../application.ymlに委ねる)。
-      KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
-      MAIL_HOST: ${MAIL_HOST}
-      MAIL_PORT: ${MAIL_PORT:-587}
-      MAIL_USERNAME: ${MAIL_USERNAME}
-      MAIL_PASSWORD: ${MAIL_PASSWORD}
-      APP_MAIL_FROM: ${APP_MAIL_FROM:-noreply@letsblog.example.com}
-      APP_WEB_BASE_URL: ${APP_WEB_BASE_URL:-https://localhost}
-      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
-      LLM_API_KEY: ${LLM_API_KEY}
-      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
-      LLM_AVAILABLE_MODELS: ${LLM_AVAILABLE_MODELS:-gpt-4o-mini,gpt-4o,gpt-4.1-mini}
-      LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-120}
-      COMFYUI_BASE_URL: http://comfyui:8188
-      COMFYUI_CHECKPOINT: ${COMFYUI_CHECKPOINT:-v1-5-pruned-emaonly.safetensors}
-      COMFYUI_MODELS_PATH: /comfyui-models
-      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY}
-      # PLANTUML_BASE_URL/PENPOT_BASE_URLは、これらを使っていた唯一のクラス
-      # (ConnectedServiceStatusService)がplatform-serviceへ移設された(issue #695、C10-3)ことに伴い
-      # 撤去した(下のplatformサービス定義参照)。
-      PENPOT_PUBLIC_URL: ${PENPOT_PUBLIC_URL:-http://localhost:9001}
-      PENPOT_SERVICE_EMAIL: ${PENPOT_SERVICE_EMAIL:-lbs-service@letsblog.local}
-      PENPOT_SERVICE_PASSWORD: ${PENPOT_SERVICE_PASSWORD}
-      WORDPRESS_PROVISION_BASE_URL: http://wordpress:9000
-      WP_PROVISION_TOKEN: ${WP_PROVISION_TOKEN}
-      # PlantUML/Recharts/Penpotの実際のレンダリング呼び出しをmedia-serviceへ委譲する(#573)。
-      MEDIA_SERVICE_URI: http://media:8080
-      # LLMテキスト生成(AiGenerationClient)・generation_jobsのジョブ作成/進捗更新
-      # (GenerationJobClient)をai-serviceへ委譲する(issue #574)。
-      AI_SERVICE_URI: http://ai:8080
-      # 公開パイプライン中のカスタムタグ/組み込みタグ展開・Markdown→HTML変換(ContentServiceClient)、
-      # posts/project_content_settingsの読み書き、記事プレビューのテーマ骨格取得(Playwright)を
-      # content-serviceへ委譲する(issue #576)。
-      CONTENT_SERVICE_URI: http://content:8080
-      # プロジェクト単位のGoogle Analytics/AdSense連携設定(analytics_credentials)のCRUD・AdSense
-      # OAuthコード交換をanalytics-serviceへ委譲する(issue #578、AnalyticsProjectSettingsClient参照)。
-      ANALYTICS_SERVICE_URI: http://analytics:8080
-      # システム全体のグローバル設定(system_settings: Brave Search APIキー・実効LLM接続設定・画像生成
-      # 接続設定)の所有権をplatform-serviceへ委譲する(issue #693、PlatformServiceClient参照)。
-      PLATFORM_SERVICE_URI: http://platform:8080
-      # Project/Site本体・tag_design_settingsの所有権がproject-serviceへ移った(issue #577)ことに伴う
-      # 内部ブリッジ(ProjectServiceClient参照)。未設定だとapplication.ymlの既定値
-      # (http://localhost:8080)が効いてlegacy-apiが自分自身を呼び、tag-design解決やサイト一覧など
-      # 全てのproject-service向けブリッジ呼び出しが404になる(issue #764)。
-      PROJECT_SERVICE_URI: http://project:8080
-      # 投稿の公開・削除パイプライン(cms/*・PostPublishService・PostDeleteService)の所有権が
-      # publishing-serviceへ移った(issue #707)ことに伴う内部ブリッジ(PublishingServiceClient)。
-      # ProjectUserSyncService#provisionUserOnSiteが著者(WordPressユーザー)の作成/更新をこの
-      # コンテナへ依頼する(#575設計判断4の書き込み側。起動時の依存関係(depends_on)には含めない。
-      # publishing自身もlegacy-apiのhealthyを待つ構成にはしていないため、循環しない実行時
-      # 呼び出し先としてのみ設定する)。
-      PUBLISHING_SERVICE_URI: http://publishing:8080
-    volumes:
-      - comfyui_models:/comfyui-models
-    depends_on:
-      mysql:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      media:
-        condition: service_healthy
-      ai:
-        condition: service_healthy
-      content:
-        condition: service_healthy
-      analytics:
-        condition: service_healthy
-      platform:
-        condition: service_healthy
-      # Flyway自体の適用はlegacy-schema-migrateに委ねて先に完了させる(#668。詳細は
-      # legacy-schema-migrateサービス定義のコメント参照。apiコンテナ自身も起動時に同じ
-      # マイグレーションをSpring Boot Flywayで実行するが、既に適用済みのためno-opになる)。
-      legacy-schema-migrate:
-        condition: service_completed_successfully
-
-  # ComfyUI画像生成・draw.ioダイアグラム・PlantUML/Recharts/Penpotレンダリングの所有権をmedia-serviceへ
-  # 移管(#573)。スキーマ・Flywayマイグレーションは専用のlbs_mediaスキーマ(ADR-0004)で本サービスが
-  # 所有する。generated_images/comfyui_models volumeはapiと共有マウントする(#573 stage1時点では
-  # comfyui_modelsはまだ未使用だが、stage2でComfyUiModelService/ModelInstallJobRunnerを移設した際に
-  # そのまま使えるよう先にマウントしておく)。
   media:
     build:
       context: .
@@ -207,9 +114,9 @@ services:
       # (Epic #551 C6-3)。起動時の依存関係(depends_on)には含めない(publishingがmediaのhealthyを
       # 待つ構成にはしていないため、循環させないよう実行時呼び出し先としてのみ設定する)。
       PUBLISHING_SERVICE_URI: http://publishing:8080
-      # ダイアグラム・生成画像のプロジェクトメンバー判定(issue #830)。project_usersがまだ
-      # legacy-apiにあるため、ProjectUserBridgeControllerの内部ブリッジへ問い合わせる。
-      LEGACY_API_URI: http://api:8080
+      # プロジェクトの存在確認(画像設定の読み書き・解決、issue #583)。project_image_settings と
+      # 画像生成一式が media-service へ移ったのに伴い、projects の所有者へ問い合わせる。
+      PROJECT_SERVICE_URI: http://project:8080
       # ComfyUIチェックポイントのダウンロード/削除ジョブ(GenerationJob、ai-serviceが所有)の
       # 進捗反映先。#573 stage2ではlegacy-apiが所有していたため上のLEGACY_API_URIを共用していたが、
       # issue #574でgeneration_jobsの所有権がai-serviceへ移ったため、GenerationJobClientの向き先を
@@ -248,10 +155,10 @@ services:
       # project_ai_settings.brave_search_api_key_encryptedの暗号化/復号(CredentialCipher)。
       # 全サービス共通の鍵(legacy-api/media-serviceと同じ値)。
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
-      # 実効LLM接続設定(システム設定でDB上書き可能、AppSettingServiceが正)・GitHubトークン解決・
-      # プロジェクトメンバー判定・システム全体既定のBrave Search APIキーの呼び出し先
-      # (AiBridgeController、legacy-apiが所有。issue #574)。
-      LEGACY_API_URI: http://api:8080
+      # GitHubアクセス解決(ProjectBridgeClient)の呼び出し先。issue #583 で legacy-api の
+      # AiBridgeController から、GitHubトークンの所有者である project-service へ移した。
+      # プロジェクトメンバー判定は下の IDENTITY_SERVICE_URI(project_users の所有者)へ向く。
+      PROJECT_SERVICE_URI: http://project:8080
       # マスター環境サイトの既存カテゴリ/タグ取得(PublishingServiceClient)の呼び出し先。issue #574では
       # legacy-apiのAiBridgeControllerが所有していたが、CmsAdapterFactory/cms/*の所有権がpublishing-service
       # へ移った(issue #707)ため、issue #711でこの3エンドポイントのみ切り替えた(Epic #551 C6-5。
@@ -291,14 +198,11 @@ services:
       SPRING_DATASOURCE_USERNAME: lbs_content
       SPRING_DATASOURCE_PASSWORD: ${LBS_CONTENT_DB_PASSWORD}
       <<: *rabbitmq-env
-      # まだlegacy-apiに残るドメイン(Project/Site、project_user、roles、tag_design_settings)への
-      # 内部ブリッジ(ContentBridgeController、legacy-apiが所有)の呼び出し先。また、legacy-api側の
-      # PostPublishService/PostDeleteService/ArticlePreviewService(公開・削除・テーマ骨格取得。
-      # #575で切り出されるまでlegacy-apiに残る)がposts/レンダリングパイプライン/
-      # PreviewSkeletonFetcherへアクセスするための内部ブリッジの認証にも同じ呼び出し元Bearer
-      # トークン転送方式を使う(起動時の依存関係(depends_on)には含めない。apiがcontentのhealthyを
-      # 待つため、循環させないよう実行時呼び出し先としてのみ設定する)。
-      LEGACY_API_URI: http://api:8080
+      # projects/sites/tag_design_settings への内部ブリッジ(ProjectBridgeClient)の呼び出し先。
+      # issue #583 まではこれらを legacy-api の ContentBridgeController 経由で取得していたが、
+      # その実装は project-service への素通しだったため、中継を外して直接向けた。
+      # project_users のメンバー判定と roles は下の IDENTITY_SERVICE_URI へ向く。
+      PROJECT_SERVICE_URI: http://project:8080
       # 埋め込みタグ(PlantUML/Recharts)展開・カスタムタグAI生成のPenpotデザインファイル作成の
       # 呼び出し先(issueの注記どおり、実際のダイアグラム描画はmedia-serviceへ委譲する)。
       MEDIA_SERVICE_URI: http://media:8080
@@ -336,9 +240,10 @@ services:
       # AdSense OAuthクライアントシークレット)の暗号化/復号(CredentialCipher)。全サービス共通の鍵
       # (legacy-api/ai-serviceと同じ値)。
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
-      # レポート取得可否判定(本番サイトが紐付いているか)・プロジェクトメンバー判定の呼び出し先
-      # (AnalyticsBridgeController、legacy-apiが所有。issue #578)。
-      LEGACY_API_URI: http://api:8080
+      # レポート取得可否判定(本番サイトが紐付いているか、ProjectBridgeClient)の呼び出し先。
+      # issue #583 で legacy-api の AnalyticsBridgeController から projects/sites の所有者である
+      # project-service へ移した。プロジェクトメンバー判定は下の IDENTITY_SERVICE_URI へ向く。
+      PROJECT_SERVICE_URI: http://project:8080
       # AdminAuthorizationServiceのrequireProjectMemberOrAdmin・自分自身のuserId解決のため、
       # 呼び出し元のBearerトークンをそのままidentity-serviceへ転送して問い合わせる
       # (log-writer(#572)/media-service(#573)/ai-service(#574)と同じ暫定策)。
@@ -430,8 +335,10 @@ services:
       # BackupService(issue #694、C10-2)が全サービスのMySQLスキーマ+Keycloak PostgreSQLを横断して
       # バックアップ/リストアするための接続情報。各サービス専用のDBユーザーでは他スキーマへ
       # アクセスできない(#570のスキーマ分離)ため、バックアップ専用のMySQLユーザー(mysql/init/
-      # 01-create-service-schemas.shが作成・スキーマ限定の権限を付与する)を使う。lets_blogは
-      # legacy-apiが解体(#583)されるまで使用するスキーマ(${MYSQL_DATABASE})。
+      # 01-create-service-schemas.shが作成・スキーマ限定の権限を付与する)を使う。
+      # 旧スキーマ(${MYSQL_DATABASE}、既定 lets_blog)は #583 で legacy-api を削除した後も
+      # まだ物理的に存在するため、退避対象として残してある。最終的な扱い(バックアップ後にDROP)は
+      # #785 で実行し、その時点でこの一覧からも外す。
       BACKUP_MYSQL_HOST: mysql
       BACKUP_MYSQL_PORT: "3306"
       BACKUP_MYSQL_USER: lbs_backup
@@ -473,7 +380,7 @@ services:
 
   # 名前をつけて保存・管理するSSH鍵ペア(Ed25519)、[toc]/[blogcard]/[amazon]組み込みタグの
   # デザインカスタマイズ(プロジェクト単位)をlegacy-apiから抽出した(#577 stage 1)。より大きな
-  # Project/Site(CMS/WordPress自動プロビジョニング)ドメインは後続stageの対象で、まだlegacy-apiに残る。
+  # Project/Site(CMS/WordPress自動プロビジョニング)ドメインは #577 stage2 で移設済み。
   project:
     build:
       context: .
@@ -485,11 +392,10 @@ services:
       SPRING_DATASOURCE_USERNAME: lbs_project
       SPRING_DATASOURCE_PASSWORD: ${LBS_PROJECT_DB_PASSWORD}
       <<: *rabbitmq-env
-      # まだlegacy-apiに残るドメイン(project_user、プロジェクトメンバー判定)への内部ブリッジ
-      # (LegacyApiBridgeClient、legacy-api側のContentBridgeControllerを再利用)の呼び出し先
-      # (起動時の依存関係(depends_on)には含めない。apiがprojectのhealthyを待つため、循環させないよう
-      # 実行時呼び出し先としてのみ設定する)。
-      LEGACY_API_URI: http://api:8080
+      # project_users(メンバー判定・所属プロジェクトID)と利用者個人のGitHubトークンへの
+      # 内部ブリッジ(IdentityBridgeClient)の呼び出し先は、下の IDENTITY_SERVICE_URI。
+      # issue #583 で project_users の所有権が legacy-api から identity-service へ移ったため、
+      # LEGACY_API_URI は不要になった。
       # CMSプロビジョニングブリッジ(CmsProvisioningBridgeClient、サイト登録・接続確認・wp-cli
       # インストール・環境同期のSSH/wp-cli操作)の呼び出し先。issue #577 stage2ではlegacy-apiが
       # 所有していたが、issue #710でpublishing-serviceへ移管した(Epic #551 C6-4。起動時の
@@ -522,7 +428,8 @@ services:
   # cms/*パッケージ(CmsAdapter/WordPressAdapter/エージェント・SSH操作)・PostPublishService/
   # PostDeleteService・PostControllerの公開・削除エンドポイントをlegacy-apiから抽出(issue #707、
   # Epic #551 C6-1)。サイト本体・CMS認証情報(project-service)・投稿(posts)テーブル(content-service)・
-  # 著者マッピング(user_site_authors、legacy-api)はいずれも自身で持たず、内部ブリッジ経由で読み書きする
+  # 著者マッピング(user_site_authors、issue #583でidentity-service)はいずれも自身で持たず、
+  # 内部ブリッジ経由で読み書きする
   # (#575設計判断1・2・4)。スキーマ・Flywayマイグレーションは専用のlbs_publishingスキーマ
   # (ADR-0004)で本サービスが所有する(本Issue時点では所有ドメインテーブルは無い)。
   publishing:
@@ -542,16 +449,15 @@ services:
       # #575設計判断1)。記事プレビューのテーマ骨格取得(Playwrightを持つのはcontent-service)も
       # 同じクライアント経由で呼ぶ(issue #712でArticlePreviewServiceを移設したのに伴う)。
       CONTENT_SERVICE_URI: http://content:8080
-      # 著者マッピング(user_site_authors)・投稿画像リサイズのプロジェクト別デフォルト・
-      # プロジェクトメンバー判定(project_user、issue #712)の内部ブリッジ呼び出し先
-      # (LegacyApiBridgeClient、#575設計判断4。起動時の依存関係(depends_on)には含めない。
-      # apiがpublishingのhealthyを待つ構成にはしていないため、循環しない実行時呼び出し先として
-      # のみ設定する)。あわせてlegacy-apiが著者プロビジョニング(PublishingServiceClient)を
-      # このコンテナへ依頼する双方向ブリッジになる。
-      LEGACY_API_URI: http://api:8080
-      # AdminAuthorizationService等と同じ暫定策として、CurrentActorServiceの自分自身のuserId解決を
-      # identity-serviceへの同期呼び出しに委ねる。
+      # 著者マッピング(user_site_authors、#575設計判断4)とプロジェクトメンバー判定
+      # (project_users、issue #712)の内部ブリッジ呼び出し先(IdentityBridgeClient)。
+      # issue #583 でこれらの所有権が identity-service へ移った。あわせて identity-service が
+      # 著者プロビジョニング(PublishingServiceClient)をこのコンテナへ依頼する双方向ブリッジになる
+      # (起動時の依存関係(depends_on)には含めない。循環しない実行時呼び出し先としてのみ設定する)。
+      # CurrentActorService の自分自身の userId 解決も同じ宛先。
       IDENTITY_SERVICE_URI: http://identity:8080
+      # 投稿画像リサイズのプロジェクト別デフォルト(project_image_settings、MediaSettingsBridgeClient)は
+      # issue #583 で media-service が所有するようになったため、下の MEDIA_SERVICE_URI 経由で解決する。
       # [plantuml]/```plantumlの埋め込み(PlantUmlEmbedService/PlantUmlTagRenderService)の実際の
       # レンダリング呼び出し先。
       MEDIA_SERVICE_URI: http://media:8080
@@ -605,9 +511,10 @@ services:
         condition: service_healthy
 
   # 単一入口(#560)。/api/**のルーティング・JWT検証・レート制限・相関ID付与を担う。
-  # ルーティング先の実サービスはまだlegacy-apiのみのため、全ルートが暫定的にapiを指す
-  # (services/gateway/src/main/resources/application.yml参照)。ログ関連ルートのみ#572で
-  # log-writerへ向けている。
+  # issue #583 で legacy-api を削除し、全ルートが実サービスを指すようになった。
+  # 未割り当てパスのフォールバック(以前は legacy-api へ暗黙転送していた)も廃止し、
+  # マッチしないパスは gateway 自身が404を返す
+  # (services/gateway/src/main/resources/application.yml参照)。
   gateway:
     build:
       context: .
@@ -624,11 +531,9 @@ services:
       CONTENT_SERVICE_URI: http://content:8080
       # プロジェクトダッシュボードのGA/AdSenseレポート取得のルーティング先(#578)。
       ANALYTICS_SERVICE_URI: http://analytics:8080
-      # SSH鍵ペア管理・組み込みタグのデザインカスタマイズのルーティング先(#577 stage 1、
-      # project-ssh-key-pairs/project-tag-design-settingsルート)。Project/Site本体
-      # (/api/projects/**・/api/sites/**、下のprojectルート)はまだlegacy-apiに残るため、
-      # このstageではLEGACY_API_URIに明示固定してあり、この変数の影響を受けない
-      # (services/gateway/src/main/resources/application.ymlのコメント参照)。
+      # Project/Site本体、SSH鍵ペア管理、組み込みタグのデザインカスタマイズ、
+      # プロジェクト単位のGitHubトークン(issue #583で分割した api-keys のうち1本)の
+      # ルーティング先(services/gateway/src/main/resources/application.yml参照)。
       PROJECT_SERVICE_URI: http://project:8080
       # システム全体のグローバル設定(system-settings、issue #693)・バックアップ(issue #694)・
       # ダッシュボードのコンテナ状態/接続サービス状態(issue #695、C10-3、dashboard-status/
@@ -643,8 +548,6 @@ services:
       # project-preview-legacyルート。/renderのみcontent-serviceのまま)もここへ向ける。
       PUBLISHING_SERVICE_URI: http://publishing:8080
     depends_on:
-      api:
-        condition: service_healthy
       identity:
         condition: service_healthy
       keycloak:
@@ -664,41 +567,6 @@ services:
       project:
         condition: service_healthy
       publishing:
-        condition: service_healthy
-
-  # legacy-api(api)が所有するFlywayマイグレーション(lets_blogスキーマ)を、apiコンテナ自体の
-  # 起動より前に一回限り適用するための専用ジョブ(#668)。identityはこのスキーマのrole_permissions
-  # 等のテーブルをddl-auto: validateで前提にしているが、以前はapiの起動(=Flyway適用)を経由
-  # せずidentityが先に起動できてしまい、かつapiはmedia/ai/content/analytics(いずれもidentityの
-  # healthyを待つ)の起動待ちで、identityはapiの移行を待たずクラッシュループする循環デッドロックが
-  # 空のMySQLボリュームから発生していた。identity/apiの双方がこのジョブの完了(exit 0)を
-  # 待ってから起動するようにし、apiコンテナ自体への依存に置き換えることで循環を断つ
-  # (apiは起動時に自身のSpring Boot Flywayでも同じマイグレーションを実行するが、既に適用済みの
-  # ため実質no-opになる。Flyway自体は同時実行に対して安全だが、決定的な順序にするためここで
-  # 明示的に先に完了させる)。マイグレーションSQL本体はapi(legacy-api)が引き続き所有し
-  # (services/legacy-api/src/main/resources/db/migration)、ここでは読み取り専用でマウントするのみ。
-  legacy-schema-migrate:
-    image: flyway/flyway:11-alpine
-    container_name: lbs-legacy-schema-migrate
-    <<: *common-service
-    # ワンショットジョブなので再起動させない。この値はダッシュボードのコンテナ状態判定
-    # (services/platform/.../ContainerStatusService、issue #725)が「正常に完了したジョブ」の
-    # 目印として参照している。他のサービスはx-common-serviceのrestart: unless-stoppedを使うため、
-    # ここを変えるとダッシュボードでこのコンテナがエラー表示になる。
-    restart: "no"
-    environment:
-      FLYWAY_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
-      FLYWAY_USER: ${MYSQL_USER}
-      FLYWAY_PASSWORD: ${MYSQL_PASSWORD}
-      # V6__add_mail_templates.sqlがメールテンプレート内でThymeleaf構文 [[${var}]] を使うため、
-      # Flyway自身の ${...} プレースホルダー置換とぶつからないよう無効化する
-      # (services/legacy-api/src/main/resources/application.ymlのplaceholder-replacement: falseと同じ)。
-      FLYWAY_PLACEHOLDER_REPLACEMENT: "false"
-    volumes:
-      - ./services/legacy-api/src/main/resources/db/migration:/flyway/sql:ro
-    command: ["migrate"]
-    depends_on:
-      mysql:
         condition: service_healthy
 
   identity:
@@ -728,10 +596,6 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      # legacy-api所有のFlywayマイグレーション(role_permissions等)が適用済みであることを保証する
-      # (#668。上のlegacy-schema-migrateサービスのコメント参照)。
-      legacy-schema-migrate:
-        condition: service_completed_successfully
 
   rabbitmq:
     image: rabbitmq:3-management-alpine

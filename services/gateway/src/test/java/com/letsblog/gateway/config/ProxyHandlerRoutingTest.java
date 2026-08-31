@@ -45,9 +45,8 @@ class ProxyHandlerRoutingTest {
         return route;
     }
 
-    private static RouteProperties routeProperties(String fallbackUri, RouteProperties.Route... routes) {
+    private static RouteProperties routeProperties(RouteProperties.Route... routes) {
         RouteProperties properties = new RouteProperties();
-        properties.setFallbackUri(fallbackUri);
         properties.setDefaultResponseTimeout(Duration.ofSeconds(60));
         properties.setRoutes(List.of(routes));
         return properties;
@@ -71,7 +70,7 @@ class ProxyHandlerRoutingTest {
     @DisplayName("単一セグメントワイルドカード(*)は1階層だけにマッチし、それ以上深いパスにはマッチしない")
     void singleSegmentWildcardMatchesOnlyOneLevelDeep() {
         RouteProperties.Route oneSegment = route("one-segment", "http://one-segment-svc:8080", null, "/api/foo/*");
-        RouteProperties properties = routeProperties("http://fallback:8080", oneSegment);
+        RouteProperties properties = routeProperties(oneSegment);
         ProxyHandler handler = handler(properties);
 
         assertEquals(oneSegment, handler.resolveRoute("/api/foo/bar"));
@@ -83,7 +82,7 @@ class ProxyHandlerRoutingTest {
     @DisplayName("複数セグメントワイルドカード(**)は0階層以上の深さにマッチする")
     void doubleWildcardMatchesAnyDepthIncludingZero() {
         RouteProperties.Route multi = route("multi", "http://multi-svc:8080", null, "/api/foo/**");
-        RouteProperties properties = routeProperties("http://fallback:8080", multi);
+        RouteProperties properties = routeProperties(multi);
         ProxyHandler handler = handler(properties);
 
         assertEquals(multi, handler.resolveRoute("/api/foo/bar"));
@@ -108,7 +107,7 @@ class ProxyHandlerRoutingTest {
         RouteProperties.Route broad = route("broad", "http://broad-svc:8080", null, "/api/projects/**");
 
         // 特定度の高いルートを先に置いた場合: 意図通りspecificが勝つ。
-        ProxyHandler specificFirst = handler(routeProperties("http://fallback:8080", specific, broad));
+        ProxyHandler specificFirst = handler(routeProperties(specific, broad));
         assertEquals(specific, specificFirst.resolveRoute("/api/projects/123/special/thing"));
 
         // 順序を入れ替えて広いルートを先に置くと、パターンとしてはより特定度の高い
@@ -116,19 +115,19 @@ class ProxyHandlerRoutingTest {
         // (これがまさにissue #642が問題にしている「順序ミスによるサイレントな誤ルーティング」
         // のクラス。ルート表の並び順は開発者の責任であり、ProxyHandler側は特定度を
         // 自動判定しないことをここで固定化する。)
-        ProxyHandler broadFirst = handler(routeProperties("http://fallback:8080", broad, specific));
+        ProxyHandler broadFirst = handler(routeProperties(broad, specific));
         assertEquals(broad, broadFirst.resolveRoute("/api/projects/123/special/thing"));
     }
 
     // ------------------------------------------------------------------
-    // resolveRoute: フォールバック
+    // resolveRoute: マッチしない場合
     // ------------------------------------------------------------------
 
     @Test
-    @DisplayName("どのルートにもマッチしない場合はnullを返す(呼び出し側でfallback-uriを使う)")
+    @DisplayName("どのルートにもマッチしない場合はnullを返す(呼び出し側が404を返す。issue #583)")
     void returnsNullWhenNoRouteMatches() {
         RouteProperties.Route unrelated = route("unrelated", "http://unrelated-svc:8080", null, "/api/other/**");
-        ProxyHandler handler = handler(routeProperties("http://fallback:8080", unrelated));
+        ProxyHandler handler = handler(routeProperties(unrelated));
 
         assertNull(handler.resolveRoute("/api/unmatched/thing"));
     }
@@ -141,7 +140,7 @@ class ProxyHandlerRoutingTest {
     @DisplayName("マッチしたルートのuriを使い、クエリ文字列があれば?付きで連結する")
     void buildTargetUriUsesMatchedRouteAndAppendsQueryString() {
         RouteProperties.Route route = route("foo", "http://foo-svc:8080", null, "/api/foo/**");
-        ProxyHandler handler = handler(routeProperties("http://fallback:8080", route));
+        ProxyHandler handler = handler(routeProperties(route));
 
         ServerRequest request = requestFor("/api/foo/bar?x=1&y=2");
         String target = handler.buildTargetUri(route, request);
@@ -153,23 +152,12 @@ class ProxyHandlerRoutingTest {
     @DisplayName("クエリ文字列が無い場合は?を付与しない")
     void buildTargetUriOmitsQuestionMarkWhenNoQuery() {
         RouteProperties.Route route = route("foo", "http://foo-svc:8080", null, "/api/foo/**");
-        ProxyHandler handler = handler(routeProperties("http://fallback:8080", route));
+        ProxyHandler handler = handler(routeProperties(route));
 
         ServerRequest request = requestFor("/api/foo/bar");
         String target = handler.buildTargetUri(route, request);
 
         assertEquals("http://foo-svc:8080/api/foo/bar", target);
-    }
-
-    @Test
-    @DisplayName("マッチしたルートが無い(null)場合はfallback-uriを使う")
-    void buildTargetUriUsesFallbackUriWhenRouteIsNull() {
-        ProxyHandler handler = handler(routeProperties("http://fallback:8080"));
-
-        ServerRequest request = requestFor("/api/unmatched/thing?z=9");
-        String target = handler.buildTargetUri(null, request);
-
-        assertEquals("http://fallback:8080/api/unmatched/thing?z=9", target);
     }
 
     // ------------------------------------------------------------------
@@ -186,7 +174,7 @@ class ProxyHandlerRoutingTest {
     void perRouteResponseTimeoutOverridesDefaultAndTriggersGatewayTimeout() {
         RouteProperties.Route slowRoute =
                 route("slow", "http://slow-svc:8080", Duration.ofSeconds(2), "/api/slow/**");
-        RouteProperties properties = routeProperties("http://fallback:8080", slowRoute);
+        RouteProperties properties = routeProperties(slowRoute);
         properties.setDefaultResponseTimeout(Duration.ofSeconds(60));
 
         ExchangeFunction delayedOk = request ->
@@ -207,7 +195,7 @@ class ProxyHandlerRoutingTest {
     void routeWithoutOverrideUsesDefaultResponseTimeout() {
         RouteProperties.Route routeWithoutOverride =
                 route("no-override", "http://svc:8080", null, "/api/plain/**");
-        RouteProperties properties = routeProperties("http://fallback:8080", routeWithoutOverride);
+        RouteProperties properties = routeProperties(routeWithoutOverride);
         properties.setDefaultResponseTimeout(Duration.ofSeconds(2));
 
         ExchangeFunction delayedOk = request ->
@@ -227,7 +215,7 @@ class ProxyHandlerRoutingTest {
     void respondsNormallyWhenDownstreamRespondsWithinTimeout() {
         RouteProperties.Route fastRoute =
                 route("fast", "http://fast-svc:8080", Duration.ofSeconds(2), "/api/fast/**");
-        RouteProperties properties = routeProperties("http://fallback:8080", fastRoute);
+        RouteProperties properties = routeProperties(fastRoute);
 
         ExchangeFunction immediateOk = request -> Mono.just(ClientResponse.create(HttpStatus.OK).build());
         ProxyHandler handler = handlerWithDownstream(properties, immediateOk);

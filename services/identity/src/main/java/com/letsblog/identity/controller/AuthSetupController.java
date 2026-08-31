@@ -40,26 +40,30 @@ public class AuthSetupController {
         this.userService = userService;
     }
 
+    @Operation(summary = "セットアップ状態を確認", description = "システムのセットアップが必要かどうかを確認します")
+    @ApiResponse(responseCode = "200", description = "セットアップ状態を返す")
     /**
      * 認可不要: 初回セットアップが必要かどうかを返す導線で、SecurityConfig の PUBLIC_PATHS に含まれる
      * <b>認証前に叩かれる公開パス</b>(issue #830)。まだ誰もログインできない状態で使うため、
      * 認可を掛けると初回セットアップ自体が不可能になる。
      */
-    @Operation(summary = "セットアップ状態を確認", description = "システムのセットアップが必要かどうかを確認します")
-    @ApiResponse(responseCode = "200", description = "セットアップ状態を返す")
     @GetMapping("/setup-status")
     public Map<String, Boolean> setupStatus() {
         return Map.of("needsSetup", !userService.hasAnyUser());
     }
 
+    @Operation(summary = "初期管理者をセットアップ", description = "最初の管理者ユーザーをセットアップします")
+    @ApiResponse(responseCode = "200", description = "管理者がセットアップされました")
+    @ApiResponse(responseCode = "400", description = "リクエストボディが不正")
     /**
      * 認可不要: 初回セットアップで最初のadminを作る導線で、SecurityConfig の PUBLIC_PATHS に含まれる
      * <b>認証前に叩かれる公開パス</b>(issue #830)。まだ誰もログインできない状態で使うため、
      * 認可を掛けると初回セットアップ自体が不可能になる。
+     *
+     * <p>マーカーは OpenAPI 注釈の<b>下</b>(マッピング注釈の直前)へ置くこと。
+     * {@code AuthorizationCoverageContract} は @XxxMapping から直前のコメントまでしか
+     * 遡らないため、注釈の上に書くと1つ手前のメソッドへ帰属してしまう。
      */
-    @Operation(summary = "初期管理者をセットアップ", description = "最初の管理者ユーザーをセットアップします")
-    @ApiResponse(responseCode = "200", description = "管理者がセットアップされました")
-    @ApiResponse(responseCode = "400", description = "リクエストボディが不正")
     @PostMapping("/setup")
     public UserResponse setup(@Valid @RequestBody SignupRequest request) {
         return userService.setupInitialAdmin(request.email(), request.password());

@@ -4,21 +4,16 @@
 // 再エクスポートすることで、@api-client を利用する側(web/extension)の import文は
 // 変更不要にする)
 
-// legacy-api。Phase 19のサービス抽出でposts/sites/usersはcontent/project/identityへ移り、
-// AuthControllerのログインも#566で撤去された。openapi/legacy-api.jsonが当時のまま古く、
-// 実在しないエンドポイント(/api/auth/login等)のクライアントが生成・コミットされていたため、
-// specを再生成して現行のコントローラ構成に合わせた(issue #739)。
-// AiBridgeController/AnalyticsBridgeController/ContentBridgeController/ProjectUserBridgeControllerは
-// サービス間の内部ブリッジ専用(/api/internal/**)で、gatewayからは到達不能かつweb/extensionが
-// 呼ぶ想定もないため、他サービスの内部ブリッジと同様にここでは再エクスポートしない。
-export * from './generated/legacy-api/letSBlogAPI.schemas';
-export * from './generated/legacy-api/authentication/authentication';
-export * from './generated/legacy-api/health-controller/health-controller';
-export * from './generated/legacy-api/ai-controller/ai-controller';
-export * from './generated/legacy-api/project-controller/project-controller';
-export * from './generated/legacy-api/project-ai-model-controller/project-ai-model-controller';
-export * from './generated/legacy-api/project-api-key-controller/project-api-key-controller';
-export * from './generated/legacy-api/project-user-controller/project-user-controller';
+// issue #583 で legacy-api を削除した。ここにあった再エクスポート
+// (authentication / health / ai / project / project-ai-model / project-api-key /
+// project-user)は、それぞれの所有サービスの spec から生成されるものへ置き換わる。
+//   - 初回セットアップ(/api/auth/setup・setup-status)・プロジェクトメンバー → identity
+//   - 画像生成(/api/ai/image・image-options)・ai-models の画像/ComfyUI・画像設定 → media
+//   - 画像生成プロンプト・api-keys/brave-search-api-key → ai
+//   - api-keys/github-token → project
+//   - api-keys/google-analytics・adsense → analytics
+// 各サービスの spec は開発スタックを新コードで起動したうえで
+// scripts/generate-api-client.sh を回すと更新される(docs/API_CLIENT_GENERATION.md)。
 
 // log-writer(ログの所有権を完全移管、#572)
 export * from './generated/log-writer/openAPIDefinition.schemas';
@@ -188,12 +183,10 @@ export type {
   delete1Response as deleteCustomTagTemplateResponse,
 } from './generated/content/custom-tag-template-controller/custom-tag-template-controller';
 
-// legacy-api の内部ブリッジコントローラ(AiBridgeController/ContentBridgeController)は
-// ai-service/content-service と同じDTOを参照するため、legacy-apiのschemasにも同名の型が
-// 生成される。#739でlegacy-apiのspecを再生成した結果この重複が顕在化した。
-// legacy-apiは解体予定(#583)であり、これらの型を所有するのは移設先のサービスなので、
-// ai/content側を正として明示的に再エクスポートし曖昧性を解消する
-// (上のlist/create/delete系の衝突解消と同じパターン)。
+// #739 の時点では legacy-api の内部ブリッジコントローラが ai/content と同じDTOを参照しており、
+// legacy-api の schemas にも同名の型が生成されて衝突していた。issue #583 で legacy-api を
+// 削除したので衝突源は無くなったが、これらの型を所有するのは ai/content 側であることを
+// 明示するため、再エクスポート自体は残す。
 export type { GenerationJobResponse, PlanChatMessage } from './generated/ai/openAPIDefinition.schemas';
 export type { RoleOptionResponse } from './generated/content/openAPIDefinition.schemas';
 
@@ -319,38 +312,6 @@ export type {
 export type {
   _deleteResponse204,
 } from './generated/identity/users/users';
-export {
-  SiteResponseCmsType,
-} from './generated/legacy-api/letSBlogAPI.schemas';
-export type {
-  CompleteAdSenseOAuthRequest,
-  LlmConfigParams,
-  LlmConfigResponse,
-  ProjectResponse,
-  SiteResponse,
-  SystemBraveSearchApiKeyResponse,
-  TagDesignParams,
-  UserResponse,
-} from './generated/legacy-api/letSBlogAPI.schemas';
-export {
-  clearBraveSearchApiKey,
-  getBraveSearchApiKeyStatus,
-  getClearBraveSearchApiKeyUrl,
-  getGetBraveSearchApiKeyStatusUrl,
-  getSetBraveSearchApiKeyUrl,
-  setBraveSearchApiKey,
-} from './generated/legacy-api/project-api-key-controller/project-api-key-controller';
-export type {
-  clearBraveSearchApiKeyResponse,
-  clearBraveSearchApiKeyResponse200,
-  clearBraveSearchApiKeyResponseSuccess,
-  getBraveSearchApiKeyStatusResponse,
-  getBraveSearchApiKeyStatusResponse200,
-  getBraveSearchApiKeyStatusResponseSuccess,
-  setBraveSearchApiKeyResponse,
-  setBraveSearchApiKeyResponse200,
-  setBraveSearchApiKeyResponseSuccess,
-} from './generated/legacy-api/project-api-key-controller/project-api-key-controller';
 export {
   delete2,
   getDelete2Url,
