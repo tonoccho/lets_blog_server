@@ -131,6 +131,12 @@ public final class AuthorizationCoverageContract {
             return result;
         }
 
+        // 委譲先のサービスが認可している場合も「認可あり」とみなす(issue #830)。
+        // 例: legacy-api の ProjectApiKeyController は素通しに見えるが、
+        // ProjectApiKeyService が全 public メソッドで requireProjectMemberOrAdmin を呼んでいる。
+        // コントローラだけを見ると偽陽性になる。
+        Set<String> authorizingDelegates = authorizingServicesIn(file);
+
         Matcher mapping = MAPPING.matcher(source);
         List<Integer> starts = new ArrayList<>();
         while (mapping.find()) {
@@ -143,12 +149,58 @@ public final class AuthorizationCoverageContract {
             if (AUTHORIZATION_CALL.matcher(block).find() || INTENTIONAL_MARKER.matcher(block).find()) {
                 continue;
             }
+            if (delegatesToAuthorizingService(block, authorizingDelegates)) {
+                continue;
+            }
             String method = methodNameOf(block);
             if (method != null) {
                 result.add(new Unauthorized(controller, method));
             }
         }
         return result;
+    }
+
+    /**
+     * 同じサービスモジュールの {@code service/} 配下で、認可呼び出しを含むクラスの
+     * フィールド名候補(先頭小文字のクラス名)を集める。
+     *
+     * <p>認可をサービス層に置く実装は珍しくない(legacy-api の {@code ProjectApiKeyService} は
+     * 全 public メソッドで {@code requireProjectMemberOrAdmin} を呼ぶ)。コントローラの
+     * メソッド本体だけを見ると、そうしたエンドポイントを「認可なし」と誤判定する。
+     *
+     * <p>これは呼び出しグラフを追う代わりの近似である。「認可を呼ぶサービスへ委譲していれば
+     * 認可済みとみなす」ため、そのサービスの<b>一部の</b>メソッドだけが認可している場合は
+     * 見逃しうる。ラチェット(増やさないこと)の用途にはこの精度で足りると判断した。
+     */
+    private static Set<String> authorizingServicesIn(Path controllerFile) {
+        Path serviceDir = controllerFile.getParent().getParent().resolve("service");
+        Set<String> names = new LinkedHashSet<>();
+        if (!Files.isDirectory(serviceDir)) {
+            return names;
+        }
+        try (Stream<Path> files = Files.list(serviceDir)) {
+            for (Path p : (Iterable<Path>) files.filter(f -> f.toString().endsWith(".java"))::iterator) {
+                String body = Files.readString(p, StandardCharsets.UTF_8);
+                if (!AUTHORIZATION_CALL.matcher(body).find()) {
+                    continue;
+                }
+                String cls = p.getFileName().toString().replace(".java", "");
+                names.add(Character.toLowerCase(cls.charAt(0)) + cls.substring(1));
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return names;
+    }
+
+    /** ハンドラ本体が、認可を行うサービスのメソッドを呼んでいるか。 */
+    private static boolean delegatesToAuthorizingService(String block, Set<String> authorizingDelegates) {
+        for (String field : authorizingDelegates) {
+            if (block.contains(field + ".")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** マッピング注釈の直後にあるハンドラメソッド名を取り出す。 */

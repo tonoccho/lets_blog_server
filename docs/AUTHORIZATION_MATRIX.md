@@ -317,26 +317,31 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 ### 実測(2026-08-31、develop)
 
 全コントローラを走査し、認可呼び出し(`requireAdmin` / `requireSelfOrAdmin` /
-`requireProjectMemberOrAdmin` / `requirePermission` 等)の有無を数えた結果:
+`requireProjectMemberOrAdmin` / `requirePermission` 等)の有無を数えた。
+
+**コントローラのメソッド本体だけでなく、委譲先のサービスが認可している場合も「認可あり」と数える。**
+認可をサービス層に置く実装があるため(legacy-api の `ProjectApiKeyService` は全 public メソッドで
+`requireProjectMemberOrAdmin` を呼ぶ)、コントローラだけを見ると**偽陽性**になる。
+実際、この補正で **98件 → 56件**へ下がった(42件はサービス層で認可済みだった)。
 
 | | 件数 |
 |---|---|
 | 総エンドポイント | 278 |
-| 認可呼び出しあり | 113 |
-| **認可呼び出しなし(内部ブリッジを除く)** | **98** |
+| **認可なし(内部ブリッジを除く)** | **56** |
 
 サービス別の内訳:
 
-| サービス | 認可なし | 主なもの |
+| サービス | 認可なし | 内容 |
 |---|---|---|
-| content | 21 | `CustomTagTemplateController`(9)、`CustomTagController`(7) |
-| legacy-api | 19 | `ProjectApiKeyController`(14。GitHub/Brave/GA/AdSense の資格情報) |
-| media | 18 | `DiagramController`(6)、`GeneratedImageController`(6) |
-| platform | 12 | `DashboardController`(4)、`SystemSettingController`(3)、`BackupController`(2) |
-| ai | 10 | `AiController`(5)、`GenerationJobController`(4) |
-| project | 10 | `SiteController`(5)、`SshKeyPairController`(3) |
-| publishing | 3 | **`PostController#publish` / `#delete`**(WordPress への投稿公開・削除) |
-| analytics / log-writer / identity | 各1〜2 | |
+| media | 18 | `DiagramController`(6)、`GeneratedImageController`(6)、`RenderController`(3)、`ComfyUiCheckpointController`(2)、`MediaController`(1) |
+| ai | 10 | `AiController`(5)、`GenerationJobController`(4)、`InternalAiGenerationController`(1) |
+| project | 7 | `SiteController`(5)、`ProjectController`(2) |
+| content | 6 | `MetadataController`(2)、`PostController`(2)、`ContentCacheController`(1)、`CustomTagController#validate`(1) |
+| legacy-api | 5 | `AiController`(2)、`AuthController`(2、公開パス)、`HealthController`(1) |
+| platform | 5 | `DashboardController`(4)、`VscodeExtensionController`(1) |
+| publishing | 3 | **`PostController#publish` / `#delete`**、`TaxonomyController#resolve` |
+| log-writer | 2 | `FrontendErrorLogController`、`OperationLogController` |
+| **analytics / identity** | **0** | 全エンドポイントが認可済み |
 
 内部ブリッジ(`/api/internal/**`)は対象外とした。サービス間呼び出し専用で gateway からは
 到達せず、認可はトークンを転送する呼び出し元が担うため。
@@ -370,9 +375,13 @@ Spring コンテキストを起動しない静的解析なので、DBもコン�
    本来は `requireProjectMemberOrAdmin` 相当が必要だが、
    `ProjectServiceClient.SiteBridge` が `projectId` を持たないため、
    project-service の内部ブリッジに projectId を載せる変更が前提になる
-2. **`project/SiteController#register` / `#createManagedWordPress`** — サイト作成
-3. **`legacy-api/ProjectApiKeyController`(14件)** — GitHub トークン・Brave Search APIキー・
-   GA/AdSense 資格情報の読み書き
+2. **`project/SiteController#register` / `#createManagedWordPress` / `#adoptManagedWordPress`** — サイト作成
+3. **`media` の18件** — 画像・ダイアグラムの作成/更新/削除を含む
+4. **`ai` の10件** — 生成系。コスト面の影響もある
+
+`legacy-api/AuthController` の2件は初回セットアップ導線で **`PUBLIC_PATHS` に含まれる公開パス**、
+`HealthController#health` も同様。これらは「認可不要」が正しく、
+#583 で legacy-api を解体する際に移設先で同じ扱いにする。
 
 ## admin判定の2つの軸(identity-service、issue #815)
 
