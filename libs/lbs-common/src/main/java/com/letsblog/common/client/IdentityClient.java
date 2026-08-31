@@ -1,5 +1,6 @@
 package com.letsblog.common.client;
 
+import java.util.Optional;
 import org.springframework.web.client.RestClient;
 
 /**
@@ -36,5 +37,45 @@ public final class IdentityClient {
     public ActorProfile fetchProfile(String bearerToken) {
         return client.get(
                 "/api/identity/me", new Object[0], ActorProfile.class, ServiceAuthHeaders.forwardedBearer(bearerToken));
+    }
+
+    /**
+     * 操作者を解決する。<b>認証・認可の結果</b>と<b>サービス障害</b>を区別する(issue #829)。
+     *
+     * <p>identity-serviceが401/403を返すのは「このトークンでは操作者を解決できない」という
+     * <b>正常な判定結果</b>であって障害ではない(#816以降、無効化されたユーザーがこれに当たる)。
+     * これを{@link SyncServiceException}のまま伝播させると呼び出し元が
+     * {@code IdentityServiceUnavailableException}へ翻訳し、最終的に502になる。すると
+     *
+     * <ul>
+     *   <li>無効化ユーザーがブラウザを開いたままにしているだけで、アクセストークンの寿命の間
+     *       各サービスが502を返し続け、監視が誤爆する</li>
+     *   <li>その502と、本当にidentity-serviceが落ちている502をログから区別できない</li>
+     * </ul>
+     *
+     * <p>そこで401/403は{@link Optional#empty()}(操作者なし)として返す。呼び出し元の
+     * {@code requireAdmin()}等がその先で403を返すため、拒否されること自体は変わらない
+     * (fail-closedのまま)。
+     *
+     * <p><b>5xx・タイムアウト・通信断・サーキットブレーカー作動は従来どおり例外のまま</b>伝播させる。
+     * ここを一緒に握り潰すと、identity-service障害時に「操作者なし」へ静かに縮退し、
+     * 権限チェックが素通りする方向の不具合になりうる(このクラスのJavadoc冒頭の方針)。
+     *
+     * @throws SyncServiceException identity-serviceへの呼び出しが<b>障害として</b>失敗した場合
+     */
+    public Optional<ActorProfile> lookupProfile(String bearerToken) {
+        try {
+            return Optional.of(fetchProfile(bearerToken));
+        } catch (SyncServiceClientErrorException e) {
+            if (isAuthRejection(e.statusCode())) {
+                return Optional.empty();
+            }
+            throw e;
+        }
+    }
+
+    /** identity-serviceからの401/403は「操作者を解決できない」という判定結果で、障害ではない。 */
+    private static boolean isAuthRejection(int statusCode) {
+        return statusCode == 401 || statusCode == 403;
     }
 }

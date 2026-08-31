@@ -105,6 +105,7 @@ public class CurrentActorService {
         if (bearerToken == null || bearerToken.isBlank()) {
             return Optional.empty();
         }
-        return Optional.of(identityClient.fetchProfile(bearerToken));
+        // 401/403(無効化ユーザー等)は「操作者なし」。障害と区別する(issue #829)。
+        return identityClient.lookupProfile(bearerToken);
     }
 }
