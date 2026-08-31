@@ -174,6 +174,45 @@ npx playwright test -g "サイトを登録して記事を公開"     # テスト
 | `E2E_TEST_PASSWORD` | (なし) | `e2e-test@letsblog.local` のパスワード。未設定なら該当 spec をスキップ |
 | `E2E_ADMIN_PASSWORD` | (なし) | `e2e-admin@letsblog.local` のパスワード。未設定なら該当 spec をスキップ |
 | `E2E_SKIP_HEALTH_WAIT` | (なし) | `1` で globalSetup の healthy 待ちをスキップ(docker CLI が無い環境等) |
+| `COMPOSE_PROJECT_NAME` | リポジトリのディレクトリ名 | healthy 待ちが対象とする compose プロジェクト(issue #842) |
+| `E2E_REQUIRE_LLM` | (なし) | `1` でLLM生成の失敗をスキップせず失敗させる(issue #843) |
+
+### LLMスタブ(issue #843)
+
+カスタムタグ生成の「正常系: 生成から自動保存までの完全フロー」は、`.env` の `LLM_API_KEY` が
+プレースホルダのままだと生成が必ず失敗し、`test.skip` に落ちて**恒常的に未検証**だった。
+この spec が検証したいのは「生成結果がUIとDBにどう反映されるか」であってLLMの生成品質ではないため、
+**実キー不要で決定的なスタブ**を用意した。
+
+```bash
+# E2E実行時だけスタブを重ねて起動する
+docker compose -f docker-compose.yml -f docker-compose.e2e-llm-stub.yml up -d
+
+# 生成が失敗したらスキップせず落とす(未検証へ戻ったことに気づけるようにする)
+E2E_REQUIRE_LLM=1 npx playwright test e2e/custom-tag-generation.spec.ts
+```
+
+スタブ(`e2e-llm-stub/server.js`)は OpenAI互換の `POST /chat/completions` だけを実装し、
+`CustomTagGenerationService` の抽出パターンに合う ```` ```html ```` / ```` ```css ```` の
+フェンス付きで固定の応答を返す。プロンプトに `FORCE_LLM_ERROR` を含めると 500 を返すため、
+**失敗系の分岐も引き続き検証できる**。
+
+実効のLLM接続設定は legacy-api の `/api/internal/ai/llm-config` 経由で ai-service へ渡るため、
+オーバーライドが変えるのは `api` コンテナの `LLM_BASE_URL` だけでよい。
+**システム設定(DB)で baseUrl を上書きしている環境では DB 側が優先される**(`AppSettingService` が正)。
+その場合はシステム設定画面の値を空にしてから使うこと。
+
+> **`E2E_SKIP_HEALTH_WAIT` は常用しないこと。** これは docker CLI が無い環境向けの逃げ道であり、
+> 常用すると本来この待ち合わせが防いでいる「まだ起動しきっていないスタックに対してテストを流す」
+> 事故を検出できなくなる。
+>
+> issue #842 以前は `bin/loop test e2e` がこの変数なしでは必ずタイムアウトしていた。
+> `scripts/wait-for-stack-healthy.sh` が `docker compose ps` を `-f` / `-p` なしで実行しており、
+> カレントディレクトリに compose ファイルが無い環境(`test-e2e` コンテナの中など)では
+> プロジェクトを解決できず、全サービスを「存在しない」と報告して600秒待っていた。
+> 現在はリポジトリ基準の絶対パスとプロジェクト名を明示して解決するため、
+> **カレントディレクトリに依存しない**。プロジェクト名がずれている場合は
+> 600秒待たずに即座に、実在するプロジェクト名を添えて失敗する。
 | `E2E_HEALTH_TIMEOUT` | `600` | healthy 待ちのタイムアウト秒数 |
 | `E2E_DB_CLEANUP` | (なし) | `1` で globalTeardown が全スキーマのテストデータを削除する |
 | `E2E_ALLOW_SERVICE_DISRUPTION` | (なし) | `1` で「下流サービスを実際に停止する」縮退表示テストを有効化 |

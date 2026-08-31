@@ -33,6 +33,9 @@ export function ContainerStatusPanel({ initialStatuses }: { initialStatuses: Con
   const [statuses, setStatuses] = useState(initialStatuses);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [live, setLive] = useState(false);
+  // 取得失敗を握り潰さず画面に出す(issue #876)。以前は `if (!res.ok) return;` で
+  // 捨てていたため、認証エラー(401)でも「データが無い」ようにしか見えなかった。
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -47,10 +50,20 @@ export function ContainerStatusPanel({ initialStatuses }: { initialStatuses: Con
     const refresh = async () => {
       try {
         const res = await fetch("/api/dashboard/container-status", { cache: "no-store" });
-        if (!res.ok) return;
+        if (!res.ok) {
+          if (cancelled) return;
+          setFetchError(
+            res.status === 401 || res.status === 403
+              ? "認証されていないためコンテナの状態を取得できません。再ログインしてください。"
+              : `コンテナの状態の取得に失敗しました(HTTP ${res.status})。`
+          );
+          return;
+        }
+        if (!cancelled) setFetchError(null);
         applyStatuses((await res.json()) as ContainerStatus[]);
       } catch {
-        // ポーリングの失敗は無視し、次回の更新を待つ(直近の表示を維持する)
+        // ネットワーク到達不能。次回の更新を待つ(直近の表示は維持する)。
+        if (!cancelled) setFetchError("コンテナの状態を取得できませんでした(通信エラー)。");
       }
     };
 
@@ -110,6 +123,11 @@ export function ContainerStatusPanel({ initialStatuses }: { initialStatuses: Con
           )}
         </div>
       </div>
+      {fetchError && (
+        <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+          {fetchError}
+        </p>
+      )}
       {statuses.length === 0 ? (
         <p className="mt-4 text-sm text-neutral-500 dark:text-neutral-400">
           コンテナの状態を取得できませんでした(docker-socket-proxyが未設定/未起動の可能性があります)。

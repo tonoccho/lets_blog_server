@@ -125,22 +125,37 @@ JWT の検証(署名・有効期限・issuer)自体は通っている以上 401 
 |---|---|---|---|
 | identity | 自身の `users` テーブル | `resolveJwtActor` で `enabled` を検査 | **403** |
 | legacy-api | 共有スキーマの `users` テーブルを自前参照(#786) | 同上。`User` に `enabled` の読み取り専用マッピングを追加 | **403** |
-| platform | `GET /api/identity/me`(ただし `requireAuthenticated()` は JWT の `sub` だけを見ていた) | `isAuthenticated()` を操作者の解決可否による判定へ変更 | **502**(下記) |
-| 他7サービス(ai / analytics / content / log-writer / media / project / publishing) | `GET /api/identity/me` への同期呼び出し(`IdentityClient`) | コード変更**不要** | **502**(下記) |
+| platform | `GET /api/identity/me`(ただし `requireAuthenticated()` は JWT の `sub` だけを見ていた) | `isAuthenticated()` を操作者の解決可否による判定へ変更 | **403**(#829で502から是正) |
+| 他7サービス(ai / analytics / content / log-writer / media / project / publishing) | `GET /api/identity/me` への同期呼び出し(`IdentityClient`) | `lookupProfile` が401/403を「操作者なし」へ分岐(#829) | **403**(#829で502から是正) |
 
-###### 他サービスが 502 になる理由(意図した結果ではないが fail-closed)
+###### 401/403(認証・認可の結果)とサービス障害(502)の区別
 
 identity が返す 403 は、呼び出し側で `SyncServiceClientErrorException`
-(`SyncServiceException` のサブクラス)に変換され、各サービスの `CurrentActorService#lookupProfile`
-が `IdentityServiceUnavailableException` へ再変換する。`GlobalExceptionHandler` はこれを
-**502 Bad Gateway** にマップする。
+(`SyncServiceException` のサブクラス)に変換される。
 
-これは各サービスが「identity-service 障害を静かに『操作者なし』へ縮退させると、
-権限チェックが素通りする方向の不具合を生みかねない」という設計判断を明示的に置いているため
-(`lookupProfile` の Javadoc 参照)。**拒否はされる(fail-closed)** が、
-無効化ユーザー起因の 502 とサービス障害起因の 502 が区別できず、
-無効化ユーザーが画面を開くたびに各サービスが WARN/ERROR を出す。
-監視・アラートを誤爆させるため、401/403 を「操作者なし」へ分岐させる改善余地がある(**#829**)。
+**#829 以前**は、各サービスの `CurrentActorService#lookupProfile` がこれを一律に
+`IdentityServiceUnavailableException` へ再変換し、`GlobalExceptionHandler` が
+**502 Bad Gateway** にマップしていた。拒否はされる(fail-closed)ものの、
+無効化ユーザー起因の 502 とサービス障害起因の 502 が区別できず、無効化ユーザーが
+画面を開いたままにしているだけで `accessTokenLifespan`(既定300秒)の間、
+各サービスが 502 と ERROR ログを出し続けて監視を誤爆させていた。
+
+**#829 で、認証・認可の結果とサービス障害を分けた。**
+
+| identity からの応答 | 扱い | 最終的なステータス |
+|---|---|---|
+| 401 / 403 | 「操作者なし」(`Optional.empty()`) | 呼び出し先の `requireAdmin()` 等が拒否し **403** |
+| 上記以外の 4xx(404 等) | 例外のまま伝播 | **502** |
+| 5xx・タイムアウト・通信断・サーキットオープン | 例外のまま伝播 | **502** |
+
+5xx 以下を一緒に「操作者なし」へ縮退させていない点が重要である。そうすると
+identity-service 障害時に権限チェックが素通りする方向の不具合になりうるため
+(各サービスの `lookupProfile` の Javadoc に置かれた設計判断)。
+`IdentityServiceUnavailableException` の ERROR ログは、これにより
+**本当にサービスが応答しない場合にだけ**出るようになった。
+
+判定は共通化してある。lbs-common の `IdentityClient#lookupProfile`(6サービスが利用)と、
+独自クライアントを持つ project / publishing の `IdentityClient#lookupProfile`。
 
 ###### この対処が効く範囲(重要)
 
@@ -293,6 +308,123 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 
 対応する統合テストは
 `services/legacy-api/src/test/java/com/letsblog/api/integration/AuthorizationMatrixIntegrationTest.java`。
+
+## 認可チェックの網羅状況(issue #830)
+
+認証ゲート(#772、ADR-0008)は全サービスに入ったが、**その先の認可**(誰が何をしてよいか)は
+まだ全エンドポイントに行き渡っていない。有効なJWTさえあれば到達できるエンドポイントが残っている。
+
+### 実測(2026-08-31、develop)
+
+全コントローラを走査し、認可呼び出し(`requireAdmin` / `requireSelfOrAdmin` /
+`requireProjectMemberOrAdmin` / `requirePermission` 等)の有無を数えた結果:
+
+| | 件数 |
+|---|---|
+| 総エンドポイント | 278 |
+| 認可呼び出しあり | 113 |
+| **認可呼び出しなし(内部ブリッジを除く)** | **98** |
+
+サービス別の内訳:
+
+| サービス | 認可なし | 主なもの |
+|---|---|---|
+| content | 21 | `CustomTagTemplateController`(9)、`CustomTagController`(7) |
+| legacy-api | 19 | `ProjectApiKeyController`(14。GitHub/Brave/GA/AdSense の資格情報) |
+| media | 18 | `DiagramController`(6)、`GeneratedImageController`(6) |
+| platform | 12 | `DashboardController`(4)、`SystemSettingController`(3)、`BackupController`(2) |
+| ai | 10 | `AiController`(5)、`GenerationJobController`(4) |
+| project | 10 | `SiteController`(5)、`SshKeyPairController`(3) |
+| publishing | 3 | **`PostController#publish` / `#delete`**(WordPress への投稿公開・削除) |
+| analytics / log-writer / identity | 各1〜2 | |
+
+内部ブリッジ(`/api/internal/**`)は対象外とした。サービス間呼び出し専用で gateway からは
+到達せず、認可はトークンを転送する呼び出し元が担うため。
+
+### 再発防止: ラチェット
+
+個々について「認証のみでよいか、認可が必要か」を決めるのは**製品判断**を伴い、一度には片付かない。
+一方でその間に新しい無認可エンドポイントが増え続けると差は開く一方になる。
+
+そこで **`AuthorizationCoverageContract`**(`libs/lbs-common` の testFixtures)で
+現状を許可リストとして固定し、**増えることだけを止める**。
+
+- 許可リストに**無い**無認可エンドポイントが現れたら失敗する(新規の付け忘れを検知)
+- 許可リストにあるのに**もう無認可でない**ものがあれば失敗する(解消したらリストから消させ、
+  リストが実態から乖離しないようにする)
+- 意図的に認証のみでよい場合は、そのメソッドのコメントに **`認可不要: <理由>`** と書けば
+  許可リストに載せなくてよい
+
+Spring コンテキストを起動しない静的解析なので、DBもコンテナも不要である。
+先例は同パッケージの `AuthorizationMatrixContract`(認証ゲートの後退検知、#805)。
+
+**この契約テストは「認可が正しいか」を判定しない。** 認可呼び出しが*書かれているか*だけを見る。
+呼んでいる認可が適切かどうかはレビューの仕事である。
+
+現在 publishing-service に導入済み(`AuthorizationCoverageTest`)。他サービスへは
+同じ形のテストを追加すれば横展開できる。
+
+### 既知の要対応(優先度順)
+
+1. **`publishing/PostController#publish` / `#delete`** — WordPress への投稿公開・削除。
+   本来は `requireProjectMemberOrAdmin` 相当が必要だが、
+   `ProjectServiceClient.SiteBridge` が `projectId` を持たないため、
+   project-service の内部ブリッジに projectId を載せる変更が前提になる
+2. **`project/SiteController#register` / `#createManagedWordPress`** — サイト作成
+3. **`legacy-api/ProjectApiKeyController`(14件)** — GitHub トークン・Brave Search APIキー・
+   GA/AdSense 資格情報の読み書き
+
+## admin判定の2つの軸(identity-service、issue #815)
+
+identity-service には admin かどうかを決める仕組みが**2つ**ある。名前がどちらも「admin」なので
+同一のものと誤解されやすいが、**別軸**である。
+
+| 軸 | 実体 | 判定に使うもの | 主な利用 |
+|---|---|---|---|
+| **粗い軸** | `users.role` カラムが `"admin"` | `CurrentActorService#isAdmin()` | `AdminAuthorizationService#requireAdmin()` / `requireSelfOrAdmin()` / `requireAdminAndNotSelf()`。`/api/users` の大半、`/api/audit-logs`、`GET /api/logs/errors` など |
+| **細かい軸** | RBAC(`roles` / `role_permissions` / `user_roles`) | `User#hasPermission(Permission)` | `PermissionAuthorizationService#requirePermission()` |
+
+### 決定: `users.role = "admin"` は全 Permission を含意する
+
+**#815 以前は両軸が完全に独立**しており、`users.role = "admin"` でも RBAC の `ROLE_ADMIN` を
+持たなければ `requirePermission(...)` を通れなかった。
+
+その状態で #798 が「ロールを配れる権限を与えるロール(特権ロール)」の付与・剥奪だけを
+`requireAdmin()` に変更した結果、**直感に反する非対称**が生まれた。
+
+> `users.role = "admin"` だが `ROLE_ADMIN` を持たないユーザーは、
+> **特権ロールは付与できるのに、特権でないロールは付与できない**
+
+#815 で `PermissionAuthorizationService#requirePermission()` の先頭に
+「操作者が `users.role = "admin"` なら通す」を入れ、次のとおり関係を一意にした。
+
+- **admin は全部できる**(RBACロールの保有状況を問わない)
+- **RBAC は admin 以外へ個別に権限を配るための仕組み**
+
+これにより上記の非対称は解消する。
+
+### 2軸を維持した理由(採用しなかった案)
+
+- **RBAC に寄せる**(`users.role` を廃止): 既存の `role='admin'` ユーザーへ `ROLE_ADMIN` を
+  割り当てる移行と、`requireAdmin()` を使う多数のエンドポイントの書き換えが必要になる。
+  `UserCreateRequest.role` / `UserUpdateRequest.role` の API 互換にも影響する
+- **`users.role` に寄せる**(RBAC を撤去): `Permission` は19種あるが、実際に
+  `requirePermission` で強制されているのは **`ROLE_MANAGE` の1種類のみ**
+  (`USER_ROLE_MANAGE` は `RoleService#isPrivilegedRole` の特権判定に現れるだけ)。
+  撤去は筋が通るが、`GET /api/roles` の廃止とテーブル削除を伴い影響が大きい。
+  #786 で `lbs_identity` にこれらのテーブルを作ったばかりでもある
+
+いずれも本Issueより広い変更になるため、**2軸を維持したうえで関係を定める**方針を採った。
+
+### 未使用の Permission の扱い
+
+19種のうち実際に強制されているのは `ROLE_MANAGE` のみで、残り
+(`USER_CREATE` / `POST_PUBLISH` / `SITE_DELETE` / `AUDIT_LOG_VIEW` / `SYSTEM_CONFIG` 等)は
+**どこからも参照されていない**。
+
+`Permission` enum とシードは**残す**。細粒度認可を広げる際の受け皿として意図された設計であり、
+消すと再導入時にマイグレーションが要る。ただし**現時点で強制されていない**ことを
+ここに明記しておく。「`SITE_DELETE` を持たないロール」を作ってもサイト削除は防げない。
 
 ## 現行の認可モデル(2層構造)
 

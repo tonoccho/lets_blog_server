@@ -406,6 +406,9 @@ services:
       # 読み取り専用で取得するためのdocker-socket-proxyのURL。docker-socket-proxyへのアクセスは
       # 本サービスのみに限定する(Epic #551の方針。下のdocker-socket-proxy定義・depends_on参照)。
       DOCKER_SOCKET_PROXY_BASE_URL: http://docker-socket-proxy:2375
+      # ダッシュボードに他プロジェクトのコンテナを載せないための絞り込みに使う(issue #803)。
+      # composeが既定で使うプロジェクト名(ディレクトリ名)と一致させること。
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-lets_blog_server}
       # AdminAuthorizationServiceのrequireAdmin・自分自身のuserId解決のため、呼び出し元のBearer
       # トークンをそのままidentity-serviceへ転送して問い合わせる(log-writer/content-service/
       # project-serviceと同じ暫定策)。
@@ -698,9 +701,13 @@ services:
     container_name: lbs-identity
     <<: [*common-service, *actuator-healthcheck]
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
-      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER}
-      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
+      # issue #786: 専用スキーマlbs_identityへ切り替えた(ADR-0004)。#561の受入基準にあった
+      # 「lbs_identityをFlywayで管理する」が未達のまま、分割前のlets_blogを参照し続けていた。
+      # 切り替え前にscripts/migrate-identity-tables-to-lbs-identity.sqlでデータを移すこと
+      # (手順はdocs/SERVICE_SCHEMA_MIGRATION.md)。
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_identity?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: lbs_identity
+      SPRING_DATASOURCE_PASSWORD: ${LBS_IDENTITY_DB_PASSWORD}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
       # Keycloakユーザー同期(#562)。letsblog-servicesクライアントのシークレット
       # (keycloak/realm-export.jsonで定義済み)。他の値(token-uri等)はコンテナ間の既定URLで

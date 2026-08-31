@@ -1,5 +1,13 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { E2E_ADMIN_PASSWORD, loginAsAdmin } from './helpers';
+import {
+  E2E_ADMIN_PASSWORD,
+  E2E_TEST_EMAIL,
+  E2E_TEST_PASSWORD,
+  createFixtureProject,
+  deleteFixtureProject,
+  fetchAccessToken,
+  loginAsAdmin,
+} from './helpers';
 
 /**
  * issue #758: このファイルは #564(Credentialsプロバイダ廃止・Keycloak移行)以降、
@@ -22,11 +30,35 @@ import { E2E_ADMIN_PASSWORD, loginAsAdmin } from './helpers';
  * afterAll で削除する。これにより「たまたま既存プロジェクトがあれば動く」依存も消える。
  */
 
+/**
+ * フィクスチャ作成方式の統一状況(issue #844)
+ *
+ * <p>gateway の api-global バケットは**クライアント単位ではなくグローバルに 100req/分**
+ * (services/gateway の RateLimitProperties)。UI経由でフィクスチャを作ると1テストあたり
+ * 25回前後 gateway を呼ぶため、ワーカー数を増やすと上限に達する。#753 が
+ * security.spec.ts / performance.spec.ts をAPI直叩きへ切り替えたのはこのため。
+ *
+ * <p>本ファイルも #844 で API 直叩きへ揃えた。共通ヘルパーは helpers.ts の
+ * createFixtureProject / deleteFixtureProject(security.spec.ts のローカル定義もそちらへ寄せた)。
+ *
+ * <p><b>揃えていない spec と、その理由:</b>
+ *
+ * <ul>
+ *   <li><b>image-upload.spec.ts</b> — beforeAll が作るのはプロジェクトだけでなく
+ *       「アセット画像生成パネルでComfyUI経由の画像を1枚生成した状態」である。
+ *       生成そのものがUI操作を通す前提のフィクスチャで、プロジェクト作成だけをAPIへ寄せても
+ *       呼び出し回数の主因(画像生成の待ち合わせ)は減らない。describe全体が serial モードで
+ *       並列実行されないため、レート制限のリスクも生じない</li>
+ *   <li><b>post-creation.spec.ts</b> — /projects の作成フォーム自体が検証対象を含むため、
+ *       beforeEach をAPIへ寄せると「UIで作れること」の確認が薄くなる。
+ *       並列実行時の不安定さは #765 で別途扱う(そちらでフィクスチャの直列化を行う)</li>
+ *   <li><b>accessibility.spec.ts / site-registration.spec.ts</b> — プロジェクトのフィクスチャを
+ *       作らないため対象外(前者はページを開くだけ、後者は ManagedWordPress サイトを作る)</li>
+ * </ul>
+ */
 /** beforeAll で作成するフィクスチャプロジェクト。afterAll で削除する。 */
-let fixtureProjectId: string;
-let fixtureProjectName: string;
-/** 実際に作成できた場合のみ true。afterAll が存在しないプロジェクトを消しにいかないようにする。 */
-let fixtureProjectCreated = false;
+let fixtureProjectId: number | null = null;
+let fixtureAccessToken: string;
 
 /**
  * カスタムタグ生成UIは独立した /custom-tags ページではなく、プロジェクト詳細のタブ
@@ -90,58 +122,22 @@ test.describe('カスタムタグ生成フロー', () => {
   // (LLMバックエンドは往復に時間がかかり、疎通できない場合はエラー表示までさらに待つ)
   test.describe.configure({ timeout: 120_000 });
 
-  test.beforeAll(async ({ browser }) => {
-    const page = await browser.newPage();
-    try {
-      await loginAsAdmin(page);
-      await page.goto('/projects');
-
-      const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      fixtureProjectName = `E2E CustomTag ${unique}`;
-      const slug = `e2e-customtag-${unique}`.toLowerCase();
-
-      const createForm = page.locator('form').filter({ has: page.locator('input[name="slug"]') });
-      await createForm.locator('input[name="name"]').fill(fixtureProjectName);
-      // name の onChange が slug を自動生成するため、明示的に上書きしてから送信する。
-      await createForm.locator('input[name="slug"]').fill(slug);
-      await createForm.locator('button[type="submit"]').click();
-
-      // 作成された行の「タグ」リンクから id を取り出す。
-      const row = page.locator('tr').filter({ hasText: fixtureProjectName });
-      await expect(row).toBeVisible({ timeout: 15000 });
-      const tagsHref = await row.locator('a[href$="/tags"]').getAttribute('href');
-      const matched = tagsHref?.match(/\/projects\/(\d+)\/tags$/);
-      expect(matched, `プロジェクトidを href から取得できませんでした: ${tagsHref}`).not.toBeNull();
-      fixtureProjectId = matched![1];
-      fixtureProjectCreated = true;
-    } finally {
-      await page.close();
-    }
+  // issue #844: フィクスチャの作成・削除は gateway のAPIを直接叩く。
+  // UI経由(/projects のフォーム → 一覧 → 詳細)だと1テストあたり25回前後 gateway を呼び、
+  // api-global バケット(クライアント単位ではなくグローバルに100req/分)へワーカー数に比例して
+  // 近づく。#753 が security.spec.ts / performance.spec.ts で是正したのと同じ理由で、
+  // ここも API 直叩きへ揃える(共通ヘルパーは helpers.ts)。
+  test.beforeAll(async ({ request }) => {
+    fixtureAccessToken = await fetchAccessToken(request, E2E_TEST_EMAIL, E2E_TEST_PASSWORD);
+    const project = await createFixtureProject(request, fixtureAccessToken, 'CustomTag');
+    fixtureProjectId = project.id;
   });
 
-  test.afterAll(async ({ browser }) => {
-    if (!fixtureProjectCreated) {
+  test.afterAll(async ({ request }) => {
+    if (fixtureProjectId === null) {
       return;
     }
-    const page = await browser.newPage();
-    try {
-      await loginAsAdmin(page);
-      await page.goto(`/projects/${fixtureProjectId}`);
-      // 削除確認は window.confirm(DeleteProjectButton.tsx)。ネイティブダイアログなので自動承諾する。
-      page.on('dialog', (dialog) => dialog.accept());
-      await page.locator('button:has-text("プロジェクトを削除")').click();
-
-      // deleteProjectAction は完了後に /projects へ redirect する(actions.ts)。
-      // これを待たずに page.goto('/projects') すると、まだ削除前のRSCペイロードを
-      // クライアントルーターがキャッシュしてしまい、以降いくら待っても行が消えない。
-      await page.waitForURL('**/projects', { timeout: 30000 });
-      await page.reload();
-      await expect(page.locator('tr').filter({ hasText: fixtureProjectName })).toHaveCount(0, {
-        timeout: 15000,
-      });
-    } finally {
-      await page.close();
-    }
+    await deleteFixtureProject(request, fixtureAccessToken, fixtureProjectId);
   });
 
   test('正常系: プロンプト入力からタグ生成・自動保存までの完全フロー', async ({ page }) => {
@@ -154,9 +150,20 @@ test.describe('カスタムタグ生成フロー', () => {
       description: 'カスタムボタンコンポーネント',
     });
 
-    // 生成そのものは外部のLLMバックエンドに依存する。バックエンドが不在の環境では
-    // 生成が失敗しうるため、ここから先の検証は成功時に限る。ナビゲーション起因の
-    // スキップ(#758で解消したもの)とは別軸であり、こちらは環境要因のゲート。
+    // issue #843: E2E用のLLMスタブ(docker-compose.e2e-llm-stub.yml)を重ねて起動していれば、
+    // 生成は実キー不要で決定的に成功する。その場合ここはスキップに落ちず、
+    // 以降のプレビュー表示・編集モード・再読み込み後の一覧表示まで実際に検証される。
+    //
+    // スタブを使わない実行(実LLMバックエンドが不在、または資格情報が未設定)では
+    // 従来どおりスキップする。E2E_REQUIRE_LLM=1 を渡すと、その場合でも
+    // スキップせず失敗させられる(CIで「気づかないうちに未検証へ戻る」ことを防ぐため)。
+    const requireLlm = process.env.E2E_REQUIRE_LLM === '1';
+    if (!success && requireLlm) {
+      throw new Error(
+        'LLMでの生成に失敗しました。E2E_REQUIRE_LLM=1 が指定されているためスキップせず失敗させます。'
+          + ' docker-compose.e2e-llm-stub.yml を重ねて起動しているか確認してください(issue #843)。'
+      );
+    }
     test.skip(!success, 'LLMバックエンドでの生成に失敗したため以降の検証をスキップ');
 
     // HTML/CSSプレビュー(data-testidは存在しないため<pre>要素で判定)が表示される
