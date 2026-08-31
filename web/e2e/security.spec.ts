@@ -11,6 +11,8 @@ import {
   E2E_ADMIN_PASSWORD,
   E2E_TEST_EMAIL,
   E2E_TEST_PASSWORD,
+  createFixtureProject,
+  deleteFixtureProject,
   fetchAccessToken,
   loginAsAdmin,
 } from './helpers';
@@ -35,56 +37,6 @@ import {
  *   - サニタイズテスト用のフィクスチャ(プロジェクト1件)は gateway のAPIを直接呼んで
  *     作成・削除する(理由は createFixtureProject() のコメント参照)。
  */
-
-/**
- * フィクスチャのプロジェクトを gateway 経由のAPIで直接作成する(issue #753)。
- *
- * post-creation.spec.ts と同じくWeb UI(/projects の作成フォーム → 一覧 → /projects/{id})で
- * 用意することもできるが、その導線は 1テストあたり ダッシュボード+一覧+詳細 の
- * サーバーレンダリングで25回前後 gateway を呼ぶ。gateway の api-global バケットは
- * クライアント単位ではなく**グローバル**に 100リクエスト/分
- * (services/gateway の RateLimitProperties)であり、playwright.config.ts の既定設定
- * (fullyParallel: true + ワーカー数はCPUコア数の半分)で本ファイルと performance.spec.ts を
- * 同時に流すとこの上限を超える。超えた分は 429 になるが、Next.js 側は
- * listProjects()/getProject() の失敗を握りつぶして「全0件」や404を描画するため、
- * 「フィクスチャのプロジェクトが消えた」ように見える別のテストの失敗として表面化する
- * (実測: 既定設定では1分間に96リクエストに達し /api/projects が429になった)。
- *
- * プロジェクトのCRUD自体はこのファイルの検証対象ではない(UIからの作成・削除は
- * post-creation.spec.ts が担保している)ため、main-scenario.spec.ts と同じ方針で
- * APIを直接呼び、フィクスチャ1件あたりのリクエストを1往復に抑える。
- */
-async function createFixtureProject(
-  request: APIRequestContext,
-  accessToken: string
-): Promise<number> {
-  const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const response = await request.post('/api/projects', {
-    headers: { Authorization: `Bearer ${accessToken}` },
-    data: { name: `E2E Security Project ${unique}`, slug: `e2e-sec-${unique}` },
-  });
-  expect(
-    response.ok(),
-    `フィクスチャのプロジェクト作成に失敗しました (status=${response.status()}): ${await response.text()}`
-  ).toBe(true);
-
-  return ((await response.json()) as { id: number }).id;
-}
-
-/** createFixtureProject() で作ったプロジェクトを削除する。後片付けもAPIで行う。 */
-async function deleteFixtureProject(
-  request: APIRequestContext,
-  accessToken: string,
-  projectId: number
-): Promise<void> {
-  const response = await request.delete(`/api/projects/${projectId}`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  expect(
-    response.ok(),
-    `フィクスチャのプロジェクト削除に失敗しました (status=${response.status()}): ${await response.text()}`
-  ).toBe(true);
-}
 
 /** 「カスタムタグ管理」タブ内のAI生成フォーム。同じ画面の手動追加フォームと区別する。 */
 function generationFormOf(page: Page): Locator {
@@ -325,7 +277,7 @@ test.describe('カスタムタグ生成の入力サニタイズ', () => {
     // Fixture: 「カスタムタグ管理」タブを確実に開けるよう、専用のプロジェクトを1件作る
     // (プロジェクトが無い環境で無検証のままpassしないようにする。issue #645)。
     fixtureAccessToken = await fetchAccessToken(request, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);
-    fixtureProjectId = await createFixtureProject(request, fixtureAccessToken);
+    fixtureProjectId = (await createFixtureProject(request, fixtureAccessToken, 'Security')).id;
   });
 
   test.afterEach(async ({ request }) => {

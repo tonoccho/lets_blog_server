@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
+import { expect } from '@playwright/test';
 import type { APIRequestContext, Page } from '@playwright/test';
 
 /**
@@ -129,4 +130,49 @@ export function waitForServicesHealthy(services?: string[], timeoutSeconds = 600
     stdio: 'inherit',
     timeout: (timeoutSeconds + 30) * 1000,
   });
+}
+
+/**
+ * フィクスチャのプロジェクトを gateway 経由のAPIで直接作成する(issue #753、共通化は #844)。
+ *
+ * <p>Web UI(/projects の作成フォーム → 一覧 → /projects/{id})でも用意できるが、その導線は
+ * 1テストあたり ダッシュボード+一覧+詳細 のサーバーレンダリングで25回前後 gateway を呼ぶ。
+ * gateway の api-global バケットはクライアント単位ではなく**グローバル**に 100リクエスト/分
+ * (services/gateway の RateLimitProperties)であり、ワーカー数を増やすと簡単に上限へ達する。
+ * APIを直接呼べばフィクスチャ1件あたり1往復に抑えられる。
+ *
+ * @param prefix プロジェクト名/slug の接頭辞(spec ごとに変えて衝突と識別性を確保する)
+ */
+export async function createFixtureProject(
+  request: APIRequestContext,
+  accessToken: string,
+  prefix: string
+): Promise<{ id: number; name: string }> {
+  const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const name = `E2E ${prefix} ${unique}`;
+  const response = await request.post('/api/projects', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    data: { name, slug: `e2e-${prefix.toLowerCase()}-${unique}` },
+  });
+  expect(
+    response.ok(),
+    `フィクスチャのプロジェクト作成に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+
+  return { id: ((await response.json()) as { id: number }).id, name };
+}
+
+/** {@link createFixtureProject} で作ったプロジェクトを削除する(issue #844)。 */
+export async function deleteFixtureProject(
+  request: APIRequestContext,
+  accessToken: string,
+  projectId: number
+): Promise<void> {
+  const response = await request.delete(`/api/projects/${projectId}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  expect(
+    response.ok(),
+    `フィクスチャのプロジェクト削除に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
 }
