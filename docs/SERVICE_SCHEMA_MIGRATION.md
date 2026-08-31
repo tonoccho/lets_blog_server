@@ -198,5 +198,66 @@ docker exec -i lbs-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" \
    SELECT * FROM lbs_project.sites WHERE id IN (1, 2, 999) ORDER BY id;
    ```
 
-両方の突合が一致した後にのみ、移行元テーブルの参照をアプリケーションコードから外す
-(削除は #583 legacy-api解体まで行わない)。
+両方の突合が一致した後にのみ、移行元テーブルの参照をアプリケーションコードから外す。
+
+---
+
+## 旧スキーマ `lets_blog` の廃止(issue #785、2026-09-01 実行済み)
+
+分割前の単一スキーマ `lets_blog`(`.env` の `MYSQL_DATABASE`)は**削除した**。
+以下は実行時点の記録である。
+
+### 判断の根拠(実測)
+
+1. **参照ゼロ**。#583 で legacy-api を削除した後、`lets_blog` に接続するサービスは無い。
+   `docker-compose.yml` の全 `SPRING_DATASOURCE_URL` は `lbs_*` を指しており、
+   `information_schema.processlist` の実接続も9サービスすべて `lbs_*` だった。
+2. **identity 系6テーブルは移行済みで内容一致**。件数だけでなく、
+   `users` は `id / email / keycloak_sub / role / enabled` の全行が `lbs_identity` と一致した
+   (UNION ALL + GROUP BY HAVING COUNT(*) <> 2 が0行)。
+
+   | テーブル | `lets_blog` | `lbs_identity` |
+   |---|---:|---:|
+   | `users` | 2 | 2 |
+   | `roles` | 3 | 3 |
+   | `role_permissions` | 30 | 30 |
+   | `user_roles` | 2 | 2 |
+   | `project_users` | 0 | 0 |
+   | `user_site_authors` | 2 | 2 |
+
+3. **`project_image_settings` は0行**。所有権は #583 で media-service(`lbs_media`)へ移った。
+4. 残る `flyway_schema_history` は legacy-api のマイグレーション履歴で、
+   legacy-api 自体が無くなったため意味を持たない。
+
+### 実行手順(再現する場合)
+
+```bash
+# 1. 退避(root で。スキーマ専用ユーザーでは他スキーマへ触れない)
+mkdir -p backups
+docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" lbs-mysql \
+  mysqldump --user=root --single-transaction --routines --triggers --databases lets_blog \
+  > backups/lets_blog-final-before-drop-$(date +%Y%m%d-%H%M%S).sql
+
+# 2. 削除
+docker exec lbs-mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "DROP DATABASE lets_blog"'
+
+# 3. 使われなくなった grant を落とす
+docker exec lbs-mysql sh -c \
+  'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "REVOKE ALL PRIVILEGES ON \`lets\\_blog\`.* FROM '"'"'lbs_app'"'"'@'"'"'%'"'"'; FLUSH PRIVILEGES;"'
+```
+
+### あわせて変更した設定
+
+- `docker-compose.yml`: mysql コンテナの `MYSQL_DATABASE` を削除。残すと**空ボリュームからの
+  初回起動時に使われないスキーマが再作成される**。`MYSQL_USER` / `MYSQL_PASSWORD`(`lbs_app`)は
+  **残した**。wordpress(`WORDPRESS_DB_USER`)と phpmyadmin(`PMA_USER`)がこのユーザーで接続し、
+  マネージドWordPressのサイト別DBはプロビジョニングエージェントが root で都度作成して
+  このユーザーへ個別に権限を付与するため、`MYSQL_DATABASE` が無くても機能する
+- `docker-compose.yml`: `BACKUP_MYSQL_SCHEMAS` から `${MYSQL_DATABASE}` を削除(対象は `lbs_*` 9つ)
+- `mysql/init/01-create-service-schemas.sh`: `lbs_backup` への `MYSQL_DATABASE` 権限付与を削除
+- `scripts/db-backup.sh` / `scripts/db-restore.sh`: 単一スキーマ前提だったものを、
+  `--databases` でサービス別スキーマ9つを対象にする形へ変更
+- `.env.example`: `MYSQL_DATABASE` を削除
+
+> **既存の `.env` に `MYSQL_DATABASE` が残っていても害はない**(参照元が無い)。
+> `scripts/check-env.sh` が「.env にあって .env.example に無いキー」として情報表示するだけである。

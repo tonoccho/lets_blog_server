@@ -336,14 +336,13 @@ services:
       # バックアップ/リストアするための接続情報。各サービス専用のDBユーザーでは他スキーマへ
       # アクセスできない(#570のスキーマ分離)ため、バックアップ専用のMySQLユーザー(mysql/init/
       # 01-create-service-schemas.shが作成・スキーマ限定の権限を付与する)を使う。
-      # 旧スキーマ(${MYSQL_DATABASE}、既定 lets_blog)は #583 で legacy-api を削除した後も
-      # まだ物理的に存在するため、退避対象として残してある。最終的な扱い(バックアップ後にDROP)は
-      # #785 で実行し、その時点でこの一覧からも外す。
+      # 旧スキーマ(分割前の lets_blog)は #785 でバックアップのうえ DROP したため、
+      # この一覧から外した。対象はサービス別スキーマ9つ(ADR-0004)のみ。
       BACKUP_MYSQL_HOST: mysql
       BACKUP_MYSQL_PORT: "3306"
       BACKUP_MYSQL_USER: lbs_backup
       BACKUP_MYSQL_PASSWORD: ${LBS_BACKUP_DB_PASSWORD}
-      BACKUP_MYSQL_SCHEMAS: lbs_identity,lbs_project,lbs_content,lbs_media,lbs_ai,lbs_publishing,lbs_analytics,lbs_platform,lbs_log,${MYSQL_DATABASE}
+      BACKUP_MYSQL_SCHEMAS: lbs_identity,lbs_project,lbs_content,lbs_media,lbs_ai,lbs_publishing,lbs_analytics,lbs_platform,lbs_log
       # KeycloakのPostgreSQL(keycloak-postgres)は元々そのDB専用のkeycloakユーザーしか存在しないため、
       # 新たな横断的な認証情報を追加せず、その既存ユーザーの認証情報をそのまま流用する
       # (下のkeycloak-postgresサービス定義参照)。
@@ -639,7 +638,14 @@ services:
     <<: *common-service
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      # MYSQL_DATABASE(分割前の lets_blog スキーマ)は #785 で撤去した。#583 で legacy-api を
+      # 削除して参照元が無くなり、スキーマ自体も DROP 済み。残すと空ボリュームからの初回起動時に
+      # 使われないスキーマが再作成されてしまう。
+      #
+      # MYSQL_USER / MYSQL_PASSWORD(lbs_app)は残す。下の wordpress(WORDPRESS_DB_USER)と
+      # phpmyadmin(PMA_USER)がこのユーザーで接続する。マネージドWordPressのサイト別DBは
+      # プロビジョニングエージェントが root で都度作成し、このユーザーへ個別に権限を付与するため、
+      # MYSQL_DATABASE が無くても機能する。
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       # サービス別スキーマ分離(#570)。mysql/init/01-create-service-schemas.sh が
