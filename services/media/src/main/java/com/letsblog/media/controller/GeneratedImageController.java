@@ -11,6 +11,7 @@ import com.letsblog.media.dto.UpdateGeneratedImageTagsRequest;
 import com.letsblog.media.messaging.DomainEventPublisher;
 import com.letsblog.media.repository.GeneratedImageRepository;
 import com.letsblog.media.service.AdminAuthorizationService;
+import com.letsblog.media.service.GeneratedImageCreationService;
 import com.letsblog.media.service.GeneratedImageNotFoundException;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -29,7 +30,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.math.BigDecimal;
 import java.util.List;
 
 /**
@@ -45,17 +45,20 @@ public class GeneratedImageController {
     private final ObjectMapper objectMapper;
     private final DomainEventPublisher domainEventPublisher;
     private final AdminAuthorizationService adminAuthorizationService;
+    private final GeneratedImageCreationService generatedImageCreationService;
 
     public GeneratedImageController(GeneratedImageRepository generatedImageRepository,
                                      GeneratedImageStorageService generatedImageStorageService,
                                      ObjectMapper objectMapper,
                                      DomainEventPublisher domainEventPublisher,
-                                     AdminAuthorizationService adminAuthorizationService) {
+                                     AdminAuthorizationService adminAuthorizationService,
+                                     GeneratedImageCreationService generatedImageCreationService) {
         this.generatedImageRepository = generatedImageRepository;
         this.generatedImageStorageService = generatedImageStorageService;
         this.objectMapper = objectMapper;
         this.domainEventPublisher = domainEventPublisher;
         this.adminAuthorizationService = adminAuthorizationService;
+        this.generatedImageCreationService = generatedImageCreationService;
     }
 
     /**
@@ -103,29 +106,10 @@ public class GeneratedImageController {
         // 指定されたプロジェクトに画像を登録できるのはそのメンバー(またはadmin)だけ(issue #830)。
         // ファイル保存が始まる前に判定する。
         adminAuthorizationService.requireProjectMemberOrAdminForResource(request.projectId());
-        String filePath = generatedImageStorageService.store(request.projectId(), request.imageData());
-        GeneratedImage image = new GeneratedImage();
-        image.setProjectId(request.projectId());
-        image.setPrompt(request.prompt());
-        image.setNegativePrompt(request.negativePrompt());
-        image.setSteps(request.steps());
-        image.setCfgScale(request.cfgScale() != null ? BigDecimal.valueOf(request.cfgScale()) : null);
-        image.setSamplerName(request.samplerName());
-        image.setScheduler(request.scheduler());
-        image.setSeed(request.seed());
-        image.setWidth(request.width());
-        image.setHeight(request.height());
-        image.setBatchSize(request.batchSize());
-        image.setCheckpoint(request.checkpoint());
-        image.setLoraName(request.loraName());
-        image.setLoraWeight(request.loraWeight() != null ? BigDecimal.valueOf(request.loraWeight()) : null);
-        image.setFilePath(filePath);
-        image.setMimeType(request.mimeType());
-        image.setProvider(request.provider());
-        image.setTagsJson(request.tagsJson());
-        GeneratedImage saved = generatedImageRepository.save(image);
-        domainEventPublisher.publishImageGenerated(saved.getId(), saved.getProjectId());
-        return toDetailResponse(saved);
+        // 保存処理そのものは GeneratedImageCreationService へ切り出した(issue #583)。
+        // #583で画像生成本体がmedia-serviceへ移り、ImageGenerationService からも
+        // 同じ処理を直接呼ぶ必要が生じたため。
+        return toDetailResponse(generatedImageCreationService.create(request));
     }
 
     /** 自動生成されたタグを手動で編集・追加する(issue #281)。 */

@@ -1,6 +1,6 @@
 package com.letsblog.media.service;
 
-import com.letsblog.media.client.LegacyApiBridgeClient;
+import com.letsblog.media.client.IdentityBridgeClient;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,10 +29,10 @@ class AdminAuthorizationServiceTest {
     private CurrentActorService currentActorService;
 
     @Mock
-    private LegacyApiBridgeClient legacyApiBridgeClient;
+    private IdentityBridgeClient identityBridgeClient;
 
     private AdminAuthorizationService service() {
-        return new AdminAuthorizationService(currentActorService, legacyApiBridgeClient);
+        return new AdminAuthorizationService(currentActorService, identityBridgeClient);
     }
 
     @Test
@@ -57,7 +57,7 @@ class AdminAuthorizationServiceTest {
 
         assertDoesNotThrow(() -> service().requireProjectMemberOrAdmin(1L));
         // adminは所属を問わずバイパスするため、legacy-apiへの問い合わせ自体を行わない。
-        verifyNoInteractions(legacyApiBridgeClient);
+        verifyNoInteractions(identityBridgeClient);
     }
 
     @Test
@@ -65,7 +65,7 @@ class AdminAuthorizationServiceTest {
         when(currentActorService.isAdmin()).thenReturn(false);
         when(currentActorService.getCurrentActorId()).thenReturn(10L);
         when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer t");
-        when(legacyApiBridgeClient.isProjectMember(1L, 10L, "Bearer t")).thenReturn(true);
+        when(identityBridgeClient.isProjectMember(1L, 10L, "Bearer t")).thenReturn(true);
 
         assertDoesNotThrow(() -> service().requireProjectMemberOrAdmin(1L));
     }
@@ -75,7 +75,7 @@ class AdminAuthorizationServiceTest {
         when(currentActorService.isAdmin()).thenReturn(false);
         when(currentActorService.getCurrentActorId()).thenReturn(10L);
         when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer t");
-        when(legacyApiBridgeClient.isProjectMember(1L, 10L, "Bearer t")).thenReturn(false);
+        when(identityBridgeClient.isProjectMember(1L, 10L, "Bearer t")).thenReturn(false);
 
         assertThrows(ForbiddenException.class, () -> service().requireProjectMemberOrAdmin(1L));
     }
@@ -86,7 +86,7 @@ class AdminAuthorizationServiceTest {
         when(currentActorService.getCurrentActorId()).thenReturn(null);
 
         assertThrows(ForbiddenException.class, () -> service().requireProjectMemberOrAdmin(1L));
-        verifyNoInteractions(legacyApiBridgeClient);
+        verifyNoInteractions(identityBridgeClient);
     }
 
     @Test
@@ -96,7 +96,7 @@ class AdminAuthorizationServiceTest {
         when(currentActorService.isAdmin()).thenReturn(true);
 
         assertDoesNotThrow(() -> service().requireProjectMemberOrAdminForResource(null));
-        verifyNoInteractions(legacyApiBridgeClient);
+        verifyNoInteractions(identityBridgeClient);
     }
 
     @Test
@@ -104,6 +104,6 @@ class AdminAuthorizationServiceTest {
         when(currentActorService.isAdmin()).thenReturn(false);
 
         assertThrows(ForbiddenException.class, () -> service().requireProjectMemberOrAdminForResource(null));
-        verifyNoInteractions(legacyApiBridgeClient);
+        verifyNoInteractions(identityBridgeClient);
     }
 }
