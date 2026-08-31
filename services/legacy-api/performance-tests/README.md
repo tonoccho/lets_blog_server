@@ -272,5 +272,5 @@ See `docs/PERFORMANCE_TESTING.md` for detailed baseline expectations and analysi
 ## Related Documentation
 
 - [k6 Documentation](https://k6.io/docs/)
-- [Performance Testing Guide](../docs/PERFORMANCE_TESTING.md)
-- [API Documentation](../openapi.json)
+- [Performance Testing Guide](../../../docs/PERFORMANCE_TESTING.md)
+- [API Documentation](../../../openapi/legacy-api.json)
