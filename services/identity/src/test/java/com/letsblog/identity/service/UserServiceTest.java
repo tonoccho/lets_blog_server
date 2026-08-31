@@ -28,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -102,6 +103,9 @@ class UserServiceTest {
     void create_Keycloak作成に失敗したらローカルにも作成しない() {
         UserService service = service();
         when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
+        // issue #956: RBACのロールは Keycloak を呼ぶ前に解決するため、ここのスタブが要る。
+        when(roleRepository.findByRoleName("ROLE_VIEWER"))
+                .thenReturn(Optional.of(new Role("ROLE_VIEWER", "閲覧者")));
         when(keycloakAdminClient.createUser("new@example.com", null, null, false))
                 .thenThrow(new KeycloakUserSyncException("Keycloakが停止しています"));
 
@@ -115,6 +119,8 @@ class UserServiceTest {
     void create_ローカル保存に失敗したらKeycloakユーザーを削除する() {
         UserService service = service();
         when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
+        when(roleRepository.findByRoleName("ROLE_VIEWER"))
+                .thenReturn(Optional.of(new Role("ROLE_VIEWER", "閲覧者")));
         when(keycloakAdminClient.createUser("new@example.com", null, null, false)).thenReturn("kc-sub-2");
         when(userRepository.save(any(User.class))).thenThrow(new RuntimeException("DB書き込み失敗"));
 
@@ -122,6 +128,23 @@ class UserServiceTest {
                 () -> service.create(new UserCreateRequest("new@example.com", "password123", "user")));
 
         verify(keycloakAdminClient).deleteUser("kc-sub-2");
+    }
+
+    @Test
+    void create_RBACのロールが未投入なら作成せずに落ちる_issue956() {
+        UserService service = service();
+        when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
+        // roles テーブルが空の状態。以前は ifPresent で黙って握りつぶし、
+        // ロールの付かないユーザーが作られていた(#956)。
+        when(roleRepository.findByRoleName("ROLE_VIEWER")).thenReturn(Optional.empty());
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> service.create(new UserCreateRequest("new@example.com", "password123", "user")));
+        assertTrue(thrown.getMessage().contains("ROLE_VIEWER"));
+
+        // Keycloakを呼ぶ前に落ちるので、孤児アカウントの補償も要らない。
+        verify(keycloakAdminClient, never()).createUser(any(), any(), any(), anyBoolean());
+        verify(userRepository, never()).save(any(User.class));
     }
 
     @Test

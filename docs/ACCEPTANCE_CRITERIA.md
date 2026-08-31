@@ -84,7 +84,7 @@ API: identity `AuthSetupController`, `IdentityController` / Keycloak Device Code
 | AC-AUTH-006 | 無効化ユーザーのトークン失効 | 退職者の発行済みトークンが使えなくなる | `POST /api/users/{id}/deactivate` 後、既発行アクセストークンでの要求が拒否され、新規トークンも取得できない(#816) | `features/auth/token-lifecycle.feature` › 無効化したユーザーの発行済みアクセストークンは拒否される | 検証済(`@destructive`) |
 | AC-AUTH-007 | 認証ゲート(ADR-0008) | gateway を迂回しても保護が効く | 全9サービスへ直接アクセスすると、JWT無し・他レルム・改竄署名のいずれも401。有効なJWTなら401にならない | `features/auth/auth-gate.feature` › 全4シナリオ | 検証済(`@api`) |
 | AC-AUTH-008 | セッション期限切れ | 期限切れで自動的に締め出される | 復号できないセッションでは保護ページに入れず、ログイン画面へ戻される | `features/auth/token-lifecycle.feature` › 不正なトークンではWebの保護ページに入れずログイン画面へ戻される | 検証済(§4.1 参照) |
-| AC-AUTH-009 | 自分のプロフィール・権限の取得 | 画面が自分の権限に応じた出し分けをできる | `GET /api/identity/me` と `/me/permissions` が本人の情報と権限集合を返す | `features/auth/permissions.feature` › 権限APIの内容と画面の出し分けが一致する | 実装中(`@fail`。**#956**) |
+| AC-AUTH-009 | 自分のプロフィール・権限の取得 | 画面が自分の権限に応じた出し分けをできる | `GET /api/identity/me` と `/me/permissions` が本人の情報と権限集合を返す | `features/auth/permissions.feature` › 権限APIの内容と画面の出し分けが一致する | 検証済 |
 | AC-AUTH-010 | 表示設定(preferences)の保存 | 言語・表示設定が次回も維持される | `PATCH /api/identity/me/preferences` の内容が再ログイン後も反映される | — | 未着手 |
 
 ### 2.2 ユーザー・ロール・権限 — `USR`
@@ -492,15 +492,14 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 
 | 状態 | 件数 |
 | --- | --- |
-| `検証済` | 14 |
-| `実装中` | 1 |
+| `検証済` | 15 |
 | `既存spec` / `既存spec(部分)` | 31 |
 | `未着手` | 147 |
 | `対象外`(§2 に行を持つもの) | 1 |
 | **§2 合計** | **194** |
 
 `検証済` のうち2件は §4.1 のとおり受け入れ基準を狭めてある。
-2件は `@fail`(不具合が直るまで失敗が期待値)で、対応する Issue は **#955** と **#956**。
+1件は `@fail`(不具合が直るまで失敗が期待値)で、対応する Issue は **#955**。
 
 | 区分 | 件数 |
 | --- | --- |
