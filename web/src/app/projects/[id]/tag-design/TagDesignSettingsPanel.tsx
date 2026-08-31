@@ -199,7 +199,7 @@ function TagDesignGenerationForm({
   tagType,
   onApply,
 }: {
-  projectId: number;
+  projectId: number | null;
   tagType: EmbedTagType;
   onApply: (result: GeneratedTagDesign) => void;
 }) {
@@ -282,7 +282,7 @@ function TagDesignEditor({
   presets,
   initialSetting,
 }: {
-  projectId: number;
+  projectId: number | null;
   tagType: EmbedTagType;
   presets: TagDesignPreset[];
   initialSetting: TagDesignSetting;
@@ -350,7 +350,9 @@ function TagDesignEditor({
         <h2 className="font-medium">
           {TAG_LABELS[tagType]}のデザインを編集: <code className="font-mono text-sm">{TAG_SYNTAX[tagType]}</code>
         </h2>
-        <input type="hidden" name="projectId" value={projectId} />
+        {/* projectIdがnull(グローバル既定、#763)のときは空文字を送り、サーバー側で
+            グローバル扱いに倒す。value={null} だとReactが属性自体を落としてしまう。 */}
+        <input type="hidden" name="projectId" value={projectId ?? ""} />
         <input type="hidden" name="tagType" value={tagType} />
       <input type="hidden" name="presetId" value={presetId} />
 
@@ -478,7 +480,7 @@ export function TagDesignSettingsPanel({
   presets,
   settings,
 }: {
-  projectId: number;
+  projectId: number | null;
   presets: TagDesignPreset[];
   settings: TagDesignSetting[];
 }) {

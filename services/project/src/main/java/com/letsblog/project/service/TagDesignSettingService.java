@@ -23,11 +23,17 @@ import java.util.stream.Collectors;
  * (「デフォルト状態でも使える標準設定」の要件を、保存なしのフォールバックとして満たす)。
  *
  * <p>プロジェクトに紐付いていないサイトへの公開ではprojectIdがnullで解決要求が来る(issue #760)。
- * この場合はDBを検索せず、常に固定のデフォルト値(DesignPreset.DEFAULTの色 / カスタムHTMLテンプレート無し)
- * を返す暫定対応とする。tag_design_settings.project_idはNOT NULL + projects(id)へのFKであり、
- * CustomTagRenderServiceのような「project_id IS NULLの行を運用者が保存できる設定可能なグローバル既定」は
- * 現状のスキーマでは持てない。したがってここで返る値は運用者が変更できないハードコード既定であり、
- * 設定可能なグローバル既定が必要になった場合はissue #763で対応する。
+ * #763で{@code tag_design_settings.project_id}をnullable化したため、この場合は
+ * {@code project_id IS NULL}の<b>グローバル既定行</b>を引く。content-serviceの
+ * {@code custom_tags}が{@code findByProjectIdIsNull()}で行っているのと同じ方式で、
+ * 運用者が管理画面から設定できる。グローバル行も保存されていなければ、従来どおり
+ * DesignPreset.DEFAULTの色 / カスタムHTMLテンプレート無しへフォールバックする。
+ *
+ * <p><b>プロジェクト行からグローバル行へのフォールバックは行わない。</b>
+ * プロジェクトに紐付いた解決で未設定だった場合は、グローバル行ではなくDesignPreset.DEFAULTを返す
+ * (#763以前と同じ)。グローバル行を挟むと既存プロジェクトの見た目が
+ * グローバル設定の変更で勝手に変わってしまい、回帰になるため。
+ * グローバル行はあくまで「projectIdがnullのとき」だけの解決先である。
  */
 @Service
 public class TagDesignSettingService {
@@ -40,16 +46,12 @@ public class TagDesignSettingService {
 
     /**
      * レンダリング時(BlogCardTagRenderService等)に使う、確定済みの3色を返す。
-     * projectIdがnull(プロジェクト未紐付けサイトへの公開、issue #760)の場合はDBを検索せず、
-     * 常にDesignPreset.DEFAULTの色を返す。設定可能なグローバル既定行を引いているわけではなく、
-     * 変更できないハードコード既定を返す暫定対応である(理由と将来対応はクラスJavadoc / issue #763参照)。
+     * projectIdがnull(プロジェクト未紐付けサイトへの公開、issue #760)の場合はグローバル既定行を引く(#763)。
+     * 該当行が無ければDesignPreset.DEFAULTの色を返す。
      */
     @Transactional(readOnly = true)
     public TagDesignColors resolveColors(Long projectId, EmbedTagType tagType) {
-        if (projectId == null) {
-            return presetColors(DesignPreset.DEFAULT);
-        }
-        return repository.findByProjectIdAndTagType(projectId, tagType)
+        return findSetting(projectId, tagType)
                 .map(s -> new TagDesignColors(s.getBackgroundColor(), s.getTextColor(), s.getAccentColor(), s.getCustomCss()))
                 .orElseGet(() -> presetColors(DesignPreset.DEFAULT));
     }
@@ -57,16 +59,12 @@ public class TagDesignSettingService {
     /**
      * レンダリング時に使うHTMLテンプレートを返す。未設定(保存なし、または保存済みだが空欄)の場合はnullを返し、
      * 呼び出し側は従来どおりのハードコードされたHTML構造にフォールバックする。
-     * projectIdがnull(プロジェクト未紐付けサイト、issue #760)の場合はDBを検索せず、常に
-     * 「カスタムテンプレート無し」= nullを返す。設定可能なグローバル既定行を引いているわけではなく、
-     * 変更できないハードコード既定を返す暫定対応である(理由と将来対応はクラスJavadoc / issue #763参照)。
+     * projectIdがnull(プロジェクト未紐付けサイト、issue #760)の場合はグローバル既定行を引く(#763)。
+     * 該当行が無い、または保存済みだがテンプレートが空欄なら、従来どおりnullを返す。
      */
     @Transactional(readOnly = true)
     public String resolveHtmlTemplate(Long projectId, EmbedTagType tagType) {
-        if (projectId == null) {
-            return null;
-        }
-        return repository.findByProjectIdAndTagType(projectId, tagType)
+        return findSetting(projectId, tagType)
                 .map(TagDesignSetting::getHtmlTemplate)
                 .filter(template -> template != null && !template.isBlank())
                 .orElse(null);
@@ -78,7 +76,7 @@ public class TagDesignSettingService {
                 .map(p -> new TagDesignPresetResponse(p.id(), p.label(), p.backgroundColor(), p.textColor(), p.accentColor()))
                 .toList();
 
-        Map<EmbedTagType, TagDesignSetting> saved = repository.findByProjectId(projectId).stream()
+        Map<EmbedTagType, TagDesignSetting> saved = findAllSettings(projectId).stream()
                 .collect(Collectors.toMap(TagDesignSetting::getTagType, s -> s));
 
         List<TagDesignSettingResponse> settings = Arrays.stream(EmbedTagType.values())
@@ -92,7 +90,7 @@ public class TagDesignSettingService {
     public TagDesignSettingResponse save(Long projectId, EmbedTagType tagType, SaveTagDesignSettingRequest request) {
         DesignPreset preset = DesignPreset.fromId(request.presetId());
 
-        TagDesignSetting entity = repository.findByProjectIdAndTagType(projectId, tagType)
+        TagDesignSetting entity = findSetting(projectId, tagType)
                 .orElseGet(TagDesignSetting::new);
         entity.setProjectId(projectId);
         entity.setTagType(tagType);
@@ -105,6 +103,26 @@ public class TagDesignSettingService {
 
         TagDesignSetting saved = repository.save(entity);
         return toResponse(tagType, saved);
+    }
+
+    /**
+     * projectIdのスコープで1件引く。
+     *
+     * <p>Spring Data JPAの{@code findByProjectIdAndTagType(null, ...)}は
+     * {@code project_id = NULL}というSQLになり、NULL同士の比較は常にUNKNOWNなので何にも一致しない。
+     * グローバル行を引くには{@code IS NULL}を使う専用のメソッドが要る(#763)。
+     */
+    private java.util.Optional<TagDesignSetting> findSetting(Long projectId, EmbedTagType tagType) {
+        return projectId == null
+                ? repository.findByProjectIdIsNullAndTagType(tagType)
+                : repository.findByProjectIdAndTagType(projectId, tagType);
+    }
+
+    /** projectIdのスコープの全件。null なら グローバル行(project_id IS NULL)を返す(#763)。 */
+    private List<TagDesignSetting> findAllSettings(Long projectId) {
+        return projectId == null
+                ? repository.findByProjectIdIsNull()
+                : repository.findByProjectId(projectId);
     }
 
     private TagDesignColors presetColors(DesignPreset preset) {

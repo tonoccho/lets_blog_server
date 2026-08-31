@@ -877,16 +877,29 @@ export interface SaveTagDesignSettingInput {
   htmlTemplate?: string;
 }
 
-export function getTagDesignSettings(projectId: number): Promise<TagDesignSettingsOverview> {
-  return apiFetch<TagDesignSettingsOverview>(`/api/projects/${projectId}/tag-design-settings`);
+/**
+ * タグデザイン設定のベースパス。
+ *
+ * projectIdがnullならプロジェクトに紐付いていないサイト向けの「グローバル既定」を指す(issue #763)。
+ * サーバー側は同じtag_design_settingsテーブルのproject_id IS NULLの行を読み書きする。
+ * グローバル側はadmin限定(GlobalTagDesignSettingController)。
+ */
+function tagDesignBasePath(projectId: number | null): string {
+  return projectId === null
+    ? '/api/tag-design-settings'
+    : `/api/projects/${projectId}/tag-design-settings`;
+}
+
+export function getTagDesignSettings(projectId: number | null): Promise<TagDesignSettingsOverview> {
+  return apiFetch<TagDesignSettingsOverview>(tagDesignBasePath(projectId));
 }
 
 export function saveTagDesignSetting(
-  projectId: number,
+  projectId: number | null,
   tagType: EmbedTagType,
   input: SaveTagDesignSettingInput
 ): Promise<TagDesignSetting> {
-  return apiFetch<TagDesignSetting>(`/api/projects/${projectId}/tag-design-settings/${tagType}`, {
+  return apiFetch<TagDesignSetting>(`${tagDesignBasePath(projectId)}/${tagType}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
@@ -900,11 +913,11 @@ export interface GenerateTagDesignResult {
 }
 
 export function generateTagDesign(
-  projectId: number,
+  projectId: number | null,
   tagType: EmbedTagType,
   prompt: string
 ): Promise<GenerateTagDesignResult> {
-  return apiFetch<GenerateTagDesignResult>(`/api/projects/${projectId}/tag-design-settings/${tagType}/generate`, {
+  return apiFetch<GenerateTagDesignResult>(`${tagDesignBasePath(projectId)}/${tagType}/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt }),

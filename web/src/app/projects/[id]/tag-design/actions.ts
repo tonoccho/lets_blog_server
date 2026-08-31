@@ -23,9 +23,16 @@ export async function saveTagDesignSettingAction(
 
   const projectIdRaw = String(formData.get("projectId") ?? "").trim();
   const tagType = String(formData.get("tagType") ?? "").trim() as EmbedTagType;
-  const projectId = Number(projectIdRaw);
 
-  if (!projectIdRaw || !tagType) {
+  if (!tagType) {
+    return { error: "不正なリクエストです。" };
+  }
+
+  // projectIdが空ならプロジェクト未紐付けサイト向けのグローバル既定(issue #763)。
+  // 空文字をNumber()すると0になり、存在しないプロジェクトIDとして送ってしまうため、
+  // 明示的にnullへ倒す。
+  const projectId = projectIdRaw === "" ? null : Number(projectIdRaw);
+  if (projectId !== null && !Number.isInteger(projectId)) {
     return { error: "不正なリクエストです。" };
   }
 
@@ -46,12 +53,12 @@ export async function saveTagDesignSettingAction(
     return { error: err instanceof Error ? err.message : String(err) };
   }
 
-  revalidatePath(`/projects/${projectId}/tags`);
+  revalidatePath(projectId === null ? "/admin/tag-design" : `/projects/${projectId}/tags`);
   return { success: true };
 }
 
 export async function generateTagDesignAction(
-  projectId: number,
+  projectId: number | null,
   tagType: EmbedTagType,
   prompt: string
 ): Promise<{ data?: GenerateTagDesignResult; error?: string }> {

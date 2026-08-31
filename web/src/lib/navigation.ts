@@ -10,6 +10,7 @@ import {
   History,
   Settings,
   KeyRound,
+  Palette,
   type LucideIcon,
 } from "lucide-react";
 
@@ -33,6 +34,7 @@ export const ICON_MAP: Record<string, LucideIcon> = {
   History,
   Settings,
   KeyRound,
+  Palette,
 };
 
 export const NAV_ITEMS: NavItem[] = [
@@ -49,4 +51,6 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
   { href: "/admin/backup", label: "データバックアップ", icon: "DatabaseBackup", adminOnly: true, group: "admin" },
   { href: "/admin/system-settings", label: "システム設定", icon: "Settings", adminOnly: true, group: "admin" },
   { href: "/admin/ssh-keys", label: "SSH鍵管理", icon: "KeyRound", adminOnly: true, group: "admin" },
+  // プロジェクト未紐付けサイト向けのグローバル既定タグデザイン(issue #763)。
+  { href: "/admin/tag-design", label: "グローバルタグデザイン", icon: "Palette", adminOnly: true, group: "admin" },
 ];
