@@ -314,6 +314,12 @@ services:
       PLANTUML_BASE_URL: http://plantuml:8080
       PENPOT_BASE_URL: http://penpot-frontend:8080
       WORDPRESS_PROVISION_BASE_URL: http://wordpress:9000
+      # issue #589: ダッシュボードに Let's Blog 自身の9サービスの状態を出すため、gateway の
+      # 集約ヘルスを読む。各サービスを個別に叩かず1箇所(gateway)の判定を展開する。
+      GATEWAY_URI: http://gateway:8080
+      # issue #589: RabbitMQ のキュー滞留・DLQ 滞留の判定に Management HTTP API を使う。
+      # AMQP の接続だけでは各キューの滞留数を取れない。
+      RABBITMQ_MANAGEMENT_URI: http://rabbitmq:15672
       # ContainerStatusService(issue #695、C10-3でlegacy-apiから移設)がDocker Engine API(コンテナ一覧)を
       # 読み取り専用で取得するためのdocker-socket-proxyのURL。docker-socket-proxyへのアクセスは
       # 本サービスのみに限定する(Epic #551の方針。下のdocker-socket-proxy定義・depends_on参照)。

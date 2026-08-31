@@ -17,5 +17,10 @@ public record ConnectedServiceStatusDetailResponse(
         Integer httpStatus,
         String errorMessage,
         String targetUrl,
-        Instant checkedAt) {
+        Instant checkedAt,
+        /**
+         * この依存/サービスが落ちたときに使えなくなる機能の説明(issue #589)。
+         * 対象外(外部依存など、影響を定義していないもの)は {@code null}。
+         */
+        String impact) {
 }

@@ -154,7 +154,7 @@ export function ConnectedServiceStatusPanel({
             管理者向け詳細診断
           </summary>
           <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[720px] text-left text-xs">
+            <table className="w-full min-w-[900px] text-left text-xs">
               <thead>
                 <tr className="text-neutral-500 dark:text-neutral-400">
                   <th className="pb-2 pr-4 font-medium">サービス</th>
@@ -162,6 +162,7 @@ export function ConnectedServiceStatusPanel({
                   <th className="pb-2 pr-4 font-medium">応答時間</th>
                   <th className="pb-2 pr-4 font-medium">HTTPステータス</th>
                   <th className="pb-2 pr-4 font-medium">エラー内容</th>
+                  <th className="pb-2 pr-4 font-medium">停止時の影響</th>
                   <th className="pb-2 pr-4 font-medium">チェック対象URL</th>
                   <th className="pb-2 font-medium">最終チェック時刻</th>
                 </tr>
@@ -176,6 +177,8 @@ export function ConnectedServiceStatusPanel({
                     <td className="py-2 pr-4 text-neutral-700 dark:text-neutral-300">{detail.responseTimeMs}ms</td>
                     <td className="py-2 pr-4 text-neutral-700 dark:text-neutral-300">{detail.httpStatus ?? "-"}</td>
                     <td className="py-2 pr-4 text-neutral-700 dark:text-neutral-300">{detail.errorMessage ?? "-"}</td>
+                    {/* issue #589: サービス名だけでは、落ちたときに何が使えなくなるか判断できない。 */}
+                    <td className="py-2 pr-4 text-neutral-700 dark:text-neutral-300">{detail.impact ?? "-"}</td>
                     <td className="py-2 pr-4 break-all text-neutral-700 dark:text-neutral-300">
                       {detail.targetUrl ?? "-"}
                     </td>

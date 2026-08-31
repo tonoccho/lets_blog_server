@@ -49,6 +49,11 @@ app:
   penpot-base-url: http://localhost:9001
   wordpress-provision-base-url: http://localhost:9000
   docker-socket-proxy-base-url: http://localhost:2375
+  # LetsBlogServiceStatusService / RabbitMqQueueStatusService のテスト用値(issue #589)。
+  # 上と同じ理由(@SpringBootTestのBean生成に必要)。判定ロジックはそれぞれの
+  # ユニットテストが MockRestServiceServer / 継ぎ目の差し替えで検証する。
+  gateway-uri: http://localhost:19999
+  rabbitmq-management-uri: http://localhost:19999
   mail:
     from: noreply@example.com
   web:

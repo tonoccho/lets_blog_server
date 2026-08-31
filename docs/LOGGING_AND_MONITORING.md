@@ -426,6 +426,80 @@ output.elasticsearch:
   index: "lets-blog-api-%{+yyyy.MM.dd}"
 ```
 
+## サービスの死活監視(issue #589)
+
+サービスが11個(gateway + 9ドメイン + Keycloak)になった構成では、「どれが落ちているか」が
+一目で分からないと運用できない。判定は次の3層に分かれている。
+
+### 1. 各サービスの `/actuator/health`
+
+全サービスが `health` / `info` / `metrics` を公開する。認証ゲート(ADR-0008)の
+`PUBLIC_PATHS` に `/actuator/**` が入っているため<b>未認証で到達できる</b>。
+`env` / `configprops` / `heapdump` のような秘匿情報を含みうるものは公開していない。
+
+```bash
+docker exec lbs-content curl -s http://localhost:8080/actuator/health
+```
+
+docker compose の healthcheck もこのエンドポイントを使う(`x-actuator-healthcheck`)。
+
+### 2. gateway の集約ヘルス
+
+gateway は下流9サービスの `/actuator/health` を集約する
+(`services/gateway/.../DownstreamHealthConfig`、#560 / #643 / #743)。
+どのサービスが不健全かはコンポーネント名で分かる。
+
+```bash
+docker exec lbs-gateway curl -s http://localhost:8080/actuator/health | jq '.components | with_entries(select(.key | endswith("Service")))'
+```
+
+```json
+{
+  "identityService": { "status": "UP" },
+  "contentService":  { "status": "DOWN" }
+}
+```
+
+サービスを増やしたときは `DownstreamHealthConfig` に Bean を足す。
+`DownstreamHealthConfigContractTest` が `services/` 配下のディレクトリを列挙して
+突き合わせるので、足し忘れるとテストが落ちる。
+
+### 3. ダッシュボード(Web)
+
+`/`(ログイン後のトップ)の「接続サービスの状態」に次を表示する。実装は
+platform-service の `ConnectedServiceStatusService`。
+
+| 区分 | 対象 |
+|---|---|
+| 外部依存 | データベース、LLM、ComfyUI、PlantUML、WordPress プロビジョニングエージェント、Penpot、Brave Search |
+| **Let's Blog 自身の9サービス** | identity / project / content / media / ai / analytics / publishing / platform / log-writer(#589で追加) |
+| **RabbitMQ のキュー滞留・DLQ 滞留** | 全キュー(#589で追加) |
+
+自サービスの状態は **gateway の集約ヘルスを展開**して得る(各サービスを個別に叩かない)。
+同じ判定が2箇所に分かれて食い違うのを避けるため。gateway へ到達できない場合は9件すべてを
+「判定不能(ERROR)」として返す。判定できないものを「正常」に見せないため。
+
+管理者向けの詳細診断(`GET /api/dashboard/service-status/detail`)には
+**「停止時の影響」**の列がある。サービス名だけでは、落ちたときに何が使えなくなるか
+運用する人が判断できないため(`LetsBlogServiceStatusService.IMPACT`)。
+
+### RabbitMQ の滞留判定
+
+判定には Management HTTP API(`/api/queues`)を使う。AMQP の接続だけでは各キューの
+滞留数を取れない。
+
+| 条件 | 判定 | 理由 |
+|---|---|---|
+| `*.dlq` に1件でもある | **ERROR** | リトライ上限を超えて処理できなかったイベントが確実に存在する。投稿公開後のキャッシュ無効化やプロジェクト削除の後始末が実行されていない |
+| 通常キューが100件以上 | WARNING | コンシューマーが追いつけていない。本システムのイベントは人の操作に紐づくもので、定常的に積み上がる性質ではない |
+| Management API へ到達できない | WARNING | 滞留の有無が判定できないだけで、ブローカーの死活は他の経路でも分かる |
+
+DLQ の中身を見るには:
+
+```bash
+docker exec lbs-rabbitmq rabbitmqctl list_queues name messages | grep '\.dlq'
+```
+
 ## Monitoring and Alerting
 
 ### Key Metrics to Monitor

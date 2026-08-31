@@ -13,7 +13,10 @@ management:
   endpoints:
     web:
       exposure:
-        include: health
+        # issue #589: health に加えて info / metrics も公開する。
+        # 認証ゲート(ADR-0008)の PUBLIC_PATHS に /actuator/** が入っているため、
+        # 秘匿情報を含みうるエンドポイント(env / configprops / heapdump 等)は公開しない。
+        include: health,info,metrics
   endpoint:
     health:
       show-details: when-authorized
@@ -61,6 +64,13 @@ spring:
     password: ${MAIL_PASSWORD:}
 
 app:
+  # issue #589: ダッシュボードに Let's Blog 自身の9サービスの状態を出すため、gateway の
+  # 集約ヘルス(/actuator/health)を読む。各サービスを個別に叩かないのは、同じ判定が
+  # 2箇所に分かれて食い違うのを避けるため(LetsBlogServiceStatusService のJavadoc参照)。
+  gateway-uri: ${GATEWAY_URI:http://gateway:8080}
+  # issue #589: RabbitMQ のキュー滞留・DLQ 滞留の判定に Management HTTP API を使う。
+  # AMQP の接続だけでは各キューの滞留数を取れない。
+  rabbitmq-management-uri: ${RABBITMQ_MANAGEMENT_URI:http://rabbitmq:15672}
   encryption-key: ${APP_ENCRYPTION_KEY:}
   mail:
     from: ${APP_MAIL_FROM:noreply@letsblog.example.com}
