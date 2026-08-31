@@ -13,6 +13,12 @@
 #
 # どちらも「環境要因の失敗」であり、本物の失敗を埋もれさせる。先に切り分ける。
 #
+# 注意: docker-compose.host-tests.yml が公開するのは 127.0.0.1(IPv4)だけ。
+# localhost が ::1 にも解決され、JVMがIPv6を優先する環境では、ポートを公開していても
+# jdbc:mysql://localhost:3306 が繋がらないことがある。その場合は接続先を
+# 127.0.0.1 に固定するか、オーバーライド側で ::1 も公開する。
+# 既定では TEST_DB_HOST=127.0.0.1 を見るので、このスクリプト自身はIPv6の影響を受けない。
+#
 # 使い方:
 #   bash scripts/check-test-db.sh
 #
@@ -45,8 +51,12 @@ remedy() {
     echo "    A) コンテナの中でテストを回す(接続先が自動で用意される。最も簡単)"
     echo "         bin/loop test api"
     echo
-    echo "    B) ホストから ./gradlew で回す場合は、先にMySQLを 127.0.0.1:${PORT} へ公開する"
+    echo "    B) ホストから ./gradlew で回す場合は、先にMySQLを 127.0.0.1:3306 へ公開する"
     echo "         docker compose -f docker-compose.yml -f docker-compose.host-tests.yml up -d mysql"
+    if [ "$PORT" != "3306" ]; then
+        echo "       ※ TEST_DB_PORT=${PORT} を指定しているが、上のオーバーライドが公開するのは 3306。"
+        echo "         別ポートを使うなら docker-compose.host-tests.yml も合わせて直すこと。"
+    fi
     echo
     echo "    スキーマだけが足りない場合は、初期化スクリプトを手動で再実行する(冪等):"
     echo "         docker compose exec mysql bash /docker-entrypoint-initdb.d/02-create-test-schemas.sh"
