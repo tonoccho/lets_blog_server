@@ -7,6 +7,7 @@ import {
   listCategoryComparison,
   getProjectGithubTokenStatus,
   getProjectBraveSearchApiKeyStatus,
+  getProjectImageSettings,
 } from "@/lib/apiClient";
 import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -41,6 +42,22 @@ export default async function ProjectDetailPage({
 
   const emptyComparisonPage = { items: [], page: 0, size: 20, totalCount: 0, masterEnvironment: "test" as const };
 
+  // 画像生成設定の取得に失敗したときのフォールバック。全項目 null = 「プロジェクト単位の上書き
+  // なし」で、フォームはアプリ全体の既定値のプレースホルダを出す(issue #913)。
+  const EMPTY_IMAGE_SETTINGS = {
+    projectId,
+    imageProvider: null,
+    comfyuiCheckpoint: null,
+    defaultNegativePrompt: null,
+    defaultQualityPrompt: null,
+    defaultGeneratedImageWidth: null,
+    defaultGeneratedImageHeight: null,
+    defaultArticleImageLongEdgePx: null,
+    blockSexualContent: null,
+    blockViolentContent: null,
+    blockDiscriminatoryContent: null,
+  };
+
   function logAndFallback<T>(label: string, fallback: T) {
     return (err: unknown) => {
       console.error(`[projects/${projectId}] ${label}の取得に失敗しました:`, err);
@@ -59,6 +76,7 @@ export default async function ProjectDetailPage({
     timezone,
     githubTokenStatus,
     braveSearchApiKeyStatus,
+    imageSettings,
   ] = await Promise.all([
     getProject(projectId).catch(logAndFallback("プロジェクト情報", null)),
     listSites().catch(logAndFallback("サイト一覧", [])),
@@ -69,6 +87,10 @@ export default async function ProjectDetailPage({
     getProjectGithubTokenStatus(projectId).catch(logAndFallback("GitHubトークン設定状況", { configured: false })),
     getProjectBraveSearchApiKeyStatus(projectId)
       .catch(logAndFallback("Brave APIキー設定状況", { configured: false })),
+    // 画像生成設定は media-service が所有する(issue #583)。GET /api/projects/{id} には含まれない
+    // ため個別に取得する。以前はここを取得しておらず、保存できるのに画面には常に空が
+    // 表示されていた(issue #913)。取得に失敗しても画面全体は落とさない。
+    getProjectImageSettings(projectId).catch(logAndFallback("画像生成設定", EMPTY_IMAGE_SETTINGS)),
   ]);
 
   if (!project) {
@@ -151,23 +173,23 @@ export default async function ProjectDetailPage({
           <ProjectAssetGenerationPanel projectId={project.id} />
           <ProjectImageGenerationPromptDefaultsForm
             projectId={project.id}
-            defaultNegativePrompt={project.defaultNegativePrompt}
-            defaultQualityPrompt={project.defaultQualityPrompt}
+            defaultNegativePrompt={imageSettings.defaultNegativePrompt}
+            defaultQualityPrompt={imageSettings.defaultQualityPrompt}
           />
           <ProjectImageGenerationSizeDefaultsForm
             projectId={project.id}
-            defaultGeneratedImageWidth={project.defaultGeneratedImageWidth}
-            defaultGeneratedImageHeight={project.defaultGeneratedImageHeight}
+            defaultGeneratedImageWidth={imageSettings.defaultGeneratedImageWidth}
+            defaultGeneratedImageHeight={imageSettings.defaultGeneratedImageHeight}
           />
           <ProjectArticleImageResizeDefaultForm
             projectId={project.id}
-            defaultArticleImageLongEdgePx={project.defaultArticleImageLongEdgePx}
+            defaultArticleImageLongEdgePx={imageSettings.defaultArticleImageLongEdgePx}
           />
           <ProjectImageContentFilterSettingsForm
             projectId={project.id}
-            blockSexualContent={project.blockSexualContent}
-            blockViolentContent={project.blockViolentContent}
-            blockDiscriminatoryContent={project.blockDiscriminatoryContent}
+            blockSexualContent={imageSettings.blockSexualContent}
+            blockViolentContent={imageSettings.blockViolentContent}
+            blockDiscriminatoryContent={imageSettings.blockDiscriminatoryContent}
           />
         </div>
       ),

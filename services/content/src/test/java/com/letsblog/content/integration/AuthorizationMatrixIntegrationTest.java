@@ -133,7 +133,13 @@ class AuthorizationMatrixIntegrationTest {
 
                 // -- 内部ブリッジ(InternalProjectContentSettingsController) --
                 new Endpoint("GET", "/api/internal/content/projects/1/content-settings"),
-                new Endpoint("PUT", "/api/internal/content/projects/1/content-settings"));
+                new Endpoint("PUT", "/api/internal/content/projects/1/content-settings"),
+
+                // -- ProjectContentSettingsController(issue #913) --
+                // css-selector-prefix は #583 で gateway のルートを content へ向けたが、
+                // 受け口のコントローラを作り忘れて404になっていた。GET は #913 で新設。
+                new Endpoint("GET", "/api/projects/1/content-settings"),
+                new Endpoint("PUT", "/api/projects/1/css-selector-prefix"));
     }
 
     @ParameterizedTest(name = "[{index}] {0}")

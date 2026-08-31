@@ -24,6 +24,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.DynamicTest.dynamicTest;
 
@@ -170,6 +171,79 @@ class RouteControllerContractTest {
                 .map(endpoint -> dynamicTest(
                         endpoint.serviceModule() + ": " + endpoint.controllerClass() + " " + endpoint.path(),
                         () -> assertRoutesToExpectedService(proxyHandler, routeProperties, endpoint)));
+    }
+
+    /**
+     * 逆方向の検証: <b>ルート表の各パスが、転送先サービスの実コントローラで実際に処理される</b>こと
+     * (issue #913)。
+     *
+     * <p>{@link #everyDownstreamControllerEndpointRoutesToItsOwnService()} は
+     * 「コントローラ → ルート」しか見ておらず、<b>行き先にハンドラが無いルート</b>を検出できなかった。
+     * 実際 #583 で {@code /api/projects/*&#47;css-selector-prefix} を content-service へ向けたのに
+     * 受け口のコントローラを作り忘れ、**gateway は正しく転送するが content が404を返す**状態を
+     * 作ってしまった(#913 で発見)。#583 でフォールバックを廃止して「ルートが無ければ404」に
+     * したのと同じ理由で、「ルートはあるがハンドラが無い」も黙って通してはいけない。
+     *
+     * <p>パスパターン({@code /api/projects/*&#47;users/**} 等)とコントローラの
+     * {@code @RequestMapping}(パス変数を含む)を直接比較できないため、
+     * 双方を「セグメント数とワイルドカード位置を無視した比較可能な形」へ正規化して突き合わせる。
+     */
+    @TestFactory
+    Stream<DynamicTest> everyRoutePathIsServedByAControllerInItsTargetService() throws IOException {
+        Path repoRoot = findRepoRoot();
+        RouteProperties routeProperties = loadRouteProperties(repoRoot);
+
+        Map<String, List<ControllerEndpoint>> byEnvVar = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : SERVICE_MODULE_TO_ENV_VAR.entrySet()) {
+            byEnvVar.computeIfAbsent(entry.getValue(), k -> new ArrayList<>())
+                    .addAll(scanControllerEndpoints(repoRoot, entry.getKey(), entry.getValue()));
+        }
+
+        List<DynamicTest> tests = new ArrayList<>();
+        for (RouteProperties.Route route : routeProperties.getRoutes()) {
+            String envVar = envVarOf(route.getUri());
+            for (String pattern : route.getPaths()) {
+                tests.add(dynamicTest(
+                        "route '" + route.getId() + "' " + pattern,
+                        () -> assertPatternIsServed(route, pattern, envVar, byEnvVar.get(envVar))));
+            }
+        }
+        return tests.stream();
+    }
+
+    /** {@code ${MEDIA_SERVICE_URI:http://media:8080}} から {@code MEDIA_SERVICE_URI} を取り出す。 */
+    private static String envVarOf(String uri) {
+        Matcher m = Pattern.compile("\\$\\{([A-Z_]+)").matcher(uri == null ? "" : uri);
+        return m.find() ? m.group(1) : null;
+    }
+
+    private void assertPatternIsServed(
+            RouteProperties.Route route, String pattern, String envVar, List<ControllerEndpoint> candidates) {
+        assertNotNull(envVar, () -> "route '" + route.getId() + "' のuriが環境変数プレースホルダの形式ではありません: "
+                + route.getUri());
+        assertNotNull(candidates, () -> "route '" + route.getId() + "' の転送先 " + envVar
+                + " に対応するサービスがSERVICE_MODULE_TO_ENV_VARにありません。");
+
+        String normalizedPattern = normalize(pattern);
+        boolean served = candidates.stream().anyMatch(e -> normalize(e.path()).equals(normalizedPattern)
+                || normalizedPattern.endsWith("/**") && normalize(e.path()).startsWith(
+                        normalizedPattern.substring(0, normalizedPattern.length() - 3)));
+
+        assertTrue(served, () -> String.format(
+                "route '%s' のパス %s は %s へ転送されますが、そのサービスに対応するコントローラが"
+                        + "ありません。gatewayは正しく転送しますが、転送先が404を返します"
+                        + "(issue #913 で /api/projects/*/css-selector-prefix がこの状態でした)。%n"
+                        + "ルート表(services/gateway/src/main/resources/application.yml)から%n"
+                        + "このパスを削除するか、転送先サービスにコントローラを追加してください。",
+                route.getId(), pattern, envVar));
+    }
+
+    /**
+     * パスパターンとコントローラの実パスを比較可能な形へ正規化する。
+     * パス変数({@code {id}})もワイルドカード1セグメント({@code *})も、同じ {@code *} に潰す。
+     */
+    private static String normalize(String path) {
+        return path.replaceAll("\\{[^/}]+}", "*");
     }
 
     private void assertRoutesToExpectedService(
