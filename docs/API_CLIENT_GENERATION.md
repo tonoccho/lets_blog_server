@@ -56,7 +56,6 @@ spec は**実行中のサービスから取得する**。静的なファイル�
 
 | サービス | コンテナ名 | URL 上書き用の環境変数 |
 |---|---|---|
-| legacy-api | `lbs-api` | `LETS_BLOG_API_URL` |
 | log-writer | `lbs-log-writer` | `LOG_WRITER_URL` |
 | media | `lbs-media` | `MEDIA_SERVICE_URL` |
 | ai | `lbs-ai` | `AI_SERVICE_URL` |

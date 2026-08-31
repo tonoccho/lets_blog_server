@@ -158,7 +158,7 @@ Expected output should show these containers as "Up" (the ones with a healthchec
 say "healthy", not just "Up"):
 - `lbs-reverse-proxy` (nginx)
 - `lbs-web` (Next.js admin panel)
-- `lbs-api` (REST API server)
+- `lbs-gateway` (API gateway) and the nine backend services (`lbs-identity`, `lbs-project`, `lbs-content`, `lbs-media`, `lbs-ai`, `lbs-analytics`, `lbs-publishing`, `lbs-platform`, `lbs-log-writer`)
 - `lbs-log-writer` (async error/operation/audit log writer)
 - `lbs-mysql` (Database)
 - `lbs-rabbitmq` (log message queue)

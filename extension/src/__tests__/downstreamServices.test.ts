@@ -52,9 +52,14 @@ describe('downstreamServiceFor', () => {
     ['/api/projects/3/article-plan/chat', 'ai'],
     ['/api/projects/3/article-plan/categories/hierarchy', 'ai'],
     ['/api/projects/3/article-plan/issues/12/assign', 'ai'],
-    // legacy-api(画像生成だけはai-serviceへ移設されていない、issue #574)
-    ['/api/ai/image', 'api'],
-    ['/api/ai/image-options?projectId=3', 'api'],
+    // media-service(画像生成は issue #583 で legacy-api から media へ移設)
+    ['/api/ai/image', 'media'],
+    ['/api/ai/image-options?projectId=3', 'media'],
+    ['/api/projects/3/ai-models/image/provider', 'media'],
+    ['/api/projects/3/ai-models/comfyui/checkpoints', 'media'],
+    ['/api/projects/3/image-settings', 'media'],
+    // LLMモデル選択だけは ai-service(issue #574)
+    ['/api/projects/3/ai-models/llm/models', 'ai'],
     // media-service(issue #573)
     ['/api/generated-images?projectId=3', 'media'],
     ['/api/generated-images/7/file', 'media'],
@@ -64,8 +69,19 @@ describe('downstreamServiceFor', () => {
     ['/api/projects', 'project'],
     ['/api/projects/3', 'project'],
     ['/api/sites', 'project'],
-    // identity-service(issue #561)
+    // identity-service(issue #561、#583でメンバー管理と初回セットアップも移設)
     ['/api/users', 'identity'],
+    ['/api/projects/3/users', 'identity'],
+    ['/api/project-users', 'identity'],
+    ['/api/auth/setup-status', 'identity'],
+    // content-service(cssSelectorPrefix は #576 で content 所有、#583 でルートも content へ)
+    ['/api/projects/3/css-selector-prefix', 'content'],
+    ['/api/projects/3/content-settings', 'content'],
+    // プロジェクト単位のAPIキーは #583 で所有サービスへ分割した
+    ['/api/projects/3/api-keys/github-token', 'project'],
+    ['/api/projects/3/api-keys/brave-search-api-key', 'ai'],
+    ['/api/projects/3/api-keys/google-analytics', 'analytics'],
+    ['/api/projects/3/api-keys/adsense', 'analytics'],
   ];
 
   it.each(cases)('%s -> %s', (path, expectedId) => {
@@ -76,8 +92,13 @@ describe('downstreamServiceFor', () => {
     expect(downstreamServiceFor('https://localhost/api/ai/draft').id).toBe('ai');
   });
 
-  it('ルート表のどれにもマッチしないパスはfallback-uriと同じlegacy-apiとして扱う', () => {
-    expect(downstreamServiceFor('/api/unknown-endpoint').id).toBe('api');
+  /**
+   * issue #583: legacy-api を削除し、gateway のフォールバック(未割り当てパスの暗黙転送)も
+   * 廃止した。マッチしないパスは gateway 自身が404を返すので、存在しないコンテナ
+   * (`lbs-api`)のログを見るよう案内してはいけない。
+   */
+  it('ルート表のどれにもマッチしないパスはgateway自身として扱う(issue #583)', () => {
+    expect(downstreamServiceFor('/api/unknown-endpoint').id).toBe('gateway');
   });
 
   it('サービス名は利用者向けの日本語ラベルを持つ', () => {
@@ -85,11 +106,11 @@ describe('downstreamServiceFor', () => {
   });
 
   /**
-   * issue #771: 実装はlegacy-apiにしか無い。gatewayに専用ルート
-   * (project-ai-generate-image-prompt-legacy)を追加したため、legacy-apiへ向くようになった。
+   * issue #771 で gateway に専用ルートを追加した(それ以前は広い /api/projects/** へ
+   * 先勝ちマッチして404だった)。issue #583 で ai-service へ移設。
    * より広い /api/projects/** より前で判定される必要がある。
    */
-  it('generate-image-promptはlegacy-apiへ向く(issue #771)', () => {
-    expect(downstreamServiceFor('/api/projects/3/ai/generate-image-prompt').id).toBe('api');
+  it('generate-image-promptはai-serviceへ向く(issue #771 / #583)', () => {
+    expect(downstreamServiceFor('/api/projects/3/ai/generate-image-prompt').id).toBe('ai');
   });
 });

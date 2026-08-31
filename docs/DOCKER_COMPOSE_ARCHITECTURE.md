@@ -27,60 +27,65 @@ Keycloak / 各ドメインサービス)を見据えた構成に整えた(#556)�
 |---|---|---|---|
 | `reverse-proxy` (nginx) | 80, 443 | ○ (80, 443) | 唯一の外部窓口 |
 | `web` | 3000 | reverse-proxy経由のみ | |
-| `gateway` | 8080 | reverse-proxy経由のみ(`/api/`) | #560。JWT検証・レート制限・相関ID・下流ルーティングを一手に引き受けるAPIゲートウェイ。`/actuator/health`で下流(legacy-api・identity)の状態を集約 |
-| `identity` | 8080 | gateway経由のみ(`/api/identity/`, `/api/users/`, `/api/roles/`) | #561。ユーザー・ロール管理。現時点ではlegacy-apiと同一の物理スキーマ(lets_blogのusers/roles/role_permissions/user_rolesテーブル)を参照する暫定構成(スキーマ分離自体は#570で対応) |
-| `api` | 8080 | gateway経由のみ | `/actuator/health`をヘルスチェックに使用。#560でreverse-proxyからの直接ルーティングをgatewayに置き換えた。ログイン・2FA・APIキー発行は引き続きここが担う(#561でユーザーCRUD/ロール管理のみidentityへ移設) |
-| `log-writer` | 8080 | 非公開(RabbitMQコンシューマー) | 旧8081から統一 |
+| `gateway` | 8080 | reverse-proxy経由のみ(`/api/`) | #560。JWT検証・レート制限・相関ID・下流ルーティングを一手に引き受けるAPIゲートウェイ。`/actuator/health`で下流9サービスの状態を集約(#743) |
+| `identity` | 8080 | gateway経由のみ(`/api/identity/`, `/api/users/`, `/api/roles/`, `/api/auth/`, `/api/project-users`) | #561。ユーザー・ロール・権限・プロジェクトメンバー・著者マッピング・初回セットアップ。専用スキーマ `lbs_identity`(#786) |
+| `project` | 8080 | gateway経由のみ(`/api/projects/`, `/api/sites/`, `/api/ssh-key-pairs/`) | #577。プロジェクト・サイト・SSH鍵・タグデザイン・GitHubトークン。`lbs_project` |
+| `content` | 8080 | gateway経由のみ(`/api/posts/`, `/api/custom-tags/`, `/api/content-cache/`) | #576。投稿・カスタムタグ・組み込みタグ展開・CSSセレクタ接頭辞。`lbs_content` |
+| `media` | 8080 | gateway経由のみ(`/api/generated-images/`, `/api/diagrams/`, `/api/ai/image`) | #573、#583。画像生成・生成画像・ダイアグラム・画像設定。`lbs_media` |
+| `ai` | 8080 | gateway経由のみ(`/api/ai/`, `/api/generation-jobs/`) | #574。LLM生成・記事プラン・生成ジョブ。`lbs_ai` |
+| `analytics` | 8080 | gateway経由のみ(`/api/projects/*/dashboard/`) | #578。GA/AdSense のレポートと資格情報。`lbs_analytics` |
+| `publishing` | 8080 | gateway経由のみ(`/api/posts/publish`, `/api/taxonomy/resolve`) | #707〜#712。公開・削除・一括管理・記事プレビュー。`lbs_publishing` |
+| `platform` | 8080 | gateway経由のみ(`/api/system/`, `/api/backup/`, `/api/dashboard/`) | #693〜#696。システム設定・バックアップ・ダッシュボード状態・VSCode拡張配布。`lbs_platform` |
+| `log-writer` | 8080 | gateway経由のみ(`/api/logs/`)+ RabbitMQコンシューマー | 旧8081から統一。監査/操作/エラーログ。`lbs_log` |
 | `mysql` | 3306 | 非公開 | |
-| `rabbitmq` | 5672 (+管理UI 15672) | 非公開 | |
+| `rabbitmq` | 5672 (+管理UI 15672) | 非公開 | 管理UIは platform-service のキュー滞留・DLQ監視も使う(#589) |
 | `phpmyadmin` | 80 | reverse-proxy経由のみ(`/phpmyadmin/`) | |
 | `keycloak` | 8080(管理/ヘルスチェックは9000) | reverse-proxy経由のみ(`/auth/`) | `KC_HTTP_RELATIVE_PATH=/auth`。#559 |
 | `keycloak-postgres` | 5432 | 非公開 | Keycloak専用PostgreSQL。#559 |
 | `penpot-frontend` | 8080 | `9001:8080`(直接公開。ハンドオフURL生成のため) | |
-| `comfyui` | 8188 | 非公開(api経由) | GPU必須 |
-| `plantuml` | 8080 | 非公開(api経由) | |
+| `comfyui` | 8188 | 非公開(media経由) | GPU必須 |
+| `plantuml` | 8080 | 非公開(content/media経由) | |
 | `drawio` | 8080 | 非公開(web経由) | |
-| `wordpress` | 9000 | 非公開(api経由でプロビジョニング) | |
+| `wordpress` | 9000 | 非公開(publishing経由でプロビジョニング) | |
 
-将来の各ドメインサービス追加時も、内部ポート8080・外部公開はgateway/reverse-proxy経由のみ、
-という原則を踏襲する(#560でgatewayを新設済み。各サービス抽出Issueでは
-`services/gateway/src/main/resources/application.yml` のルートURIを新サービスへ
-向け直すだけで移行できる)。
+サービスを追加するときも、内部ポート8080・外部公開はgateway/reverse-proxy経由のみ、
+という原則を踏襲する。gateway のルート表
+(`services/gateway/src/main/resources/application.yml`)へエントリを足すこと。
+**フォールバックは無い**(#583で廃止)ので、載せ忘れたパスは gateway が404を返す。
+`RouteControllerContractTest` が「コントローラ→ルート」と「ルート→コントローラ」の
+両方向を突き合わせるので、片方だけ足しても落ちる(#642 / #913)。
 
 ## サービス起動順序(`depends_on` + healthcheck)
 
-`api` / `log-writer` は `mysql` と `rabbitmq` の `service_healthy` を待ってから起動する
-(既存)。今回、`api` / `log-writer` 自身にも `x-actuator-healthcheck` を追加したため、
-将来これらに依存する新サービス(gateway等)も `condition: service_healthy` で
-正しく待ち合わせできるようになった。
+各サービスは `mysql` と `rabbitmq` の `service_healthy` を待ってから起動する。
+全サービスに `x-actuator-healthcheck`(`/actuator/health`)が付いているため、
+依存する側は `condition: service_healthy` で正しく待ち合わせできる。
 
-### `legacy-schema-migrate`(#668。空のMySQLボリュームからの起動デッドロック解消)
+`gateway` は下流9サービスと `keycloak` の healthy を待ってから起動する。
+`web` は `gateway` の healthy を待つ。
 
-`identity` は独自のFlywayを持たず、`api`(legacy-api)がFlywayで管理する `lets_blog`
-スキーマ(`role_permissions` 等)の存在を `ddl-auto: validate` で前提にしている
-(services/identity/src/main/resources/application.yml参照。ADR-0004のスキーマ分離が
-`identity` にはまだ適用されていない暫定状態)。一方 `api` は `media`/`ai`/`content`/
-`analytics` の healthy を待ち、それら4サービスは全て `identity` の healthy を待つ。
+### 起動デッドロックの解消(#668 → #583 / #786 で解消済み)
 
-そのため、以前は `identity` の `depends_on` に `api` を含めることができなかった
-(`identity` → `api` → `media`/`ai`/`content`/`analytics` → `identity` という循環になる)。
-結果として空のMySQLボリュームからの起動では、`api` のFlyway移行が実行される機会がないまま
-`identity` がスキーマ検証に失敗してクラッシュループし、スタック全体が起動不能になっていた。
+以前は `identity` が独自の Flyway を持たず、`api`(legacy-api)が管理する `lets_blog`
+スキーマの存在を `ddl-auto: validate` で前提にしていた。一方 `api` は
+`media`/`ai`/`content`/`analytics` の healthy を待ち、それら4サービスは `identity` の
+healthy を待つ。この循環のため、空の MySQL ボリュームからの起動では `api` の Flyway 移行が
+実行される機会がないまま `identity` がスキーマ検証に失敗してクラッシュループしていた。
 
-この循環を断つため、`api` 本体のFlyway移行とは別に、`flyway/flyway` 公式イメージで
-`lets_blog` スキーマへのマイグレーションだけを一回限り実行する `legacy-schema-migrate`
-サービスを追加した(マイグレーションSQL自体は引き続き `api` が所有し、
-`services/legacy-api/src/main/resources/db/migration` を読み取り専用でマウントするのみ)。
-`identity` と `api` はいずれも `api` コンテナ自体ではなく、この
-`legacy-schema-migrate` の完了(`condition: service_completed_successfully`)を
-待ってから起動する。`api` コンテナ自身も起動時に組み込みのSpring Boot Flywayで
-同じマイグレーションを実行するが、`legacy-schema-migrate` で既に適用済みのため
-no-opになる(Flywayは同時実行に対しても安全だが、起動順序を決定的にするため
-明示的に先に完了させている)。
+**この循環は既に無い。**
+
+- #786 で `identity` が専用スキーマ `lbs_identity` と自前の Flyway を持つようになり、
+  他サービスのマイグレーションに依存しなくなった
+- #583 で `api`(legacy-api)そのものを削除し、それ専用の一回限りジョブ
+  `legacy-schema-migrate` も不要になった
+- #785 で旧スキーマ `lets_blog` 自体を廃止した
+
+現在は**全9サービスが自分のスキーマだけを Flyway で管理する**(ADR-0004)ため、
+サービス間にマイグレーションの依存関係が無い。
 
 再現手順は `scripts/verify-clean-volume-boot.sh` としてスクリプト化してある
 (`lets_blog_server_mysql_data` ボリュームを削除し、クリーンな状態から
-`docker compose up -d gateway` して全サービスがhealthyになることを確認する)。
+`docker compose up -d` して全サービスがhealthyになることを確認する)。
 
 ## GPU/メモリを満たさない環境向けの縮退起動(検討結果)
 
@@ -101,41 +106,63 @@ no-opになる(Flywayは同時実行に対しても安全だが、起動順序�
 
 ## リソース実測
 
-全19コンテナを `docker compose up -d` で起動し、アイドル状態(リクエストなし、
-画像生成等の負荷なし)で `docker stats --no-stream` を実測した値。
+全29コンテナを `docker compose up -d` で起動した状態で `docker stats --no-stream` を実測した値
+(2026-09-01、issue #590 で再実測)。
 
 | コンテナ | メモリ使用量 |
 |---|---|
-| `lbs-web` | 3002.4 MiB |
-| `lbs-penpot-backend` | 1986.6 MiB |
-| `lbs-comfyui` | 1371.1 MiB |
-| `lbs-api` | 1187.8 MiB |
-| `lbs-plantuml` | 568.0 MiB |
-| `lbs-penpot-frontend` | 567.3 MiB |
-| `lbs-log-writer` | 419.8 MiB |
-| `lbs-mysql` | 393.0 MiB |
-| `lbs-drawio` | 277.0 MiB |
-| `lbs-penpot-exporter` | 177.6 MiB |
-| `lbs-rabbitmq` | 141.6 MiB |
-| `lbs-penpot-postgres` | 138.8 MiB |
-| `lbs-penpot-mcp` | 122.3 MiB |
-| `lbs-wordpress` | 65.1 MiB |
-| `lbs-penpot-mailcatch` | 43.6 MiB |
-| `lbs-phpmyadmin` | 42.6 MiB |
-| `lbs-docker-socket-proxy` | 32.5 MiB |
-| `lbs-penpot-valkey` | 18.8 MiB |
-| `lbs-reverse-proxy` | 17.5 MiB |
-| **合計** | **約10.3 GiB** |
+| `lbs-penpot-backend` | 3224.6 MiB |
+| `lbs-web` | 1766.4 MiB |
+| `lbs-comfyui` | 1422.3 MiB |
+| `lbs-keycloak` | 828.7 MiB |
+| `lbs-content` | 788.9 MiB |
+| `lbs-media` | 759.2 MiB |
+| `lbs-platform` | 576.9 MiB |
+| `lbs-identity` | 572.7 MiB |
+| `lbs-penpot-frontend` | 567.7 MiB |
+| `lbs-log-writer` | 558.1 MiB |
+| `lbs-project` | 547.6 MiB |
+| `lbs-ai` | 518.5 MiB |
+| `lbs-analytics` | 508.2 MiB |
+| `lbs-publishing` | 464.3 MiB |
+| `lbs-plantuml` | 414.6 MiB |
+| `lbs-gateway` | 404.2 MiB |
+| `lbs-mysql` | 396.1 MiB |
+| `lbs-drawio` | 295.3 MiB |
+| `lbs-penpot-exporter` | 176.9 MiB |
+| `lbs-rabbitmq` | 148.6 MiB |
+| `lbs-penpot-mcp` | 125.8 MiB |
+| `lbs-penpot-postgres` | 108.2 MiB |
+| `lbs-penpot-mailcatch` | 43.3 MiB |
+| `lbs-phpmyadmin` | 42.8 MiB |
+| `lbs-keycloak-postgres` | 31.3 MiB |
+| `lbs-wordpress` | 27.6 MiB |
+| `lbs-reverse-proxy` | 23.2 MiB |
+| `lbs-docker-socket-proxy` | 20.7 MiB |
+| `lbs-penpot-valkey` | 18.0 MiB |
+| **合計** | **約15.0 GiB** |
 
 **注意点**
 
 - `web` はNext.jsの開発モード(Turbopack, ホットリロード用のbind mount)で実行しているため、
   本番ビルドより大幅にメモリを消費している。本番相当の構成にすればもっと小さくなる見込み。
-- `comfyui` はアイドル値。実際に画像生成を行うとGPU VRAM側の使用量が主に増加する
+- `comfyui` は画像生成をしていない状態の値。実際に生成するとGPU VRAM側の使用量が主に増加する
   (ホストメモリへの影響は本測定の範囲外)。
-- 上記はアイドル時の実測値であり、ビルド時(`docker compose build`実行中)やAI機能利用時は
-  瞬間的にこれを上回る。ホストOS自体の消費分も含め、実測値(約10.3GiB)に対して
-  余裕を見て16GB以上を推奨する(README参照)。
-- この表は#556時点(19コンテナ)の実測。#559でKeycloak(`keycloak` 約1.4GiB /
-  `keycloak-postgres` 約43MiB)が追加され、現在は21コンテナ構成。表全体の再実測は
-  今後のリソース監査でまとめて行う。
+- ビルド時(`docker compose build` 実行中)やAI機能利用時は瞬間的にこれを上回る。
+  ホストOS自体の消費分も含め、実測値(約15GiB)に対して余裕を見て**24GB以上を推奨**する(README参照)。
+
+### 前回(#556時点)からの変化
+
+| | コンテナ数 | 合計メモリ |
+|---|---:|---:|
+| #556 時点 | 19 | 約10.3 GiB |
+| **現在** | **29** | **約15.0 GiB** |
+
+増分の内訳は、Epic #551 のマイクロサービス分割で追加された9サービス
+(gateway / identity / project / content / media / ai / analytics / publishing / platform、
+合計約5.1 GiB)と Keycloak 一式(#559、約0.9 GiB)。
+分割前の単一サービス `lbs-api`(約1.2 GiB)は #583 で削除された。
+
+JVM が9個に増えたぶん、1サービスあたりの実処理量に比べてベースラインの消費が大きい。
+メモリ制約環境では Penpot 7サービス(合計約4.3 GiB)を落とす縮退起動が最も効く
+(上記「Penpotスイート」の節を参照)。

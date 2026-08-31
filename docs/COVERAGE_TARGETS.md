@@ -17,8 +17,8 @@ covered independently in CI (`.github/workflows/api-services-test.yml`), which u
 JaCoCo reports to Codecov under a per-module `flags:` tag matching the module name below.
 None of these modules currently define a `jacocoTestCoverageVerification` threshold in their
 `build.gradle` (verified 2026-08) — the numbers below are targets tracked via Codecov/PR
-review, not a build-breaking gate. The same threshold values that applied to the old single
-`api/` project are kept here, applied uniformly to every backend module, since no
+review, not a build-breaking gate. The same threshold values that applied to the pre-split
+single project are kept here, applied uniformly to every backend module, since no
 module-specific evidence for different numbers exists yet.
 
 ### `libs:lbs-common`
@@ -34,24 +34,24 @@ No `**/config/**`-style exclusions are configured for this module's `jacocoTestR
 [ADR-0006](adr/0006-per-service-test-strategy.md)) are not part of `src/main` and are not
 subject to these coverage targets.
 
-### `services:legacy-api`
+### ドメインサービス9つ
 
-**Location**: `services/legacy-api/build/reports/jacoco/test/jacocoTestReport.xml`
+`services:identity` / `project` / `content` / `media` / `ai` / `analytics` / `publishing` /
+`platform` / `log-writer`。
+
+**Location**: `services/<name>/build/reports/jacoco/test/jacocoTestReport.xml`
 
 **Target Thresholds**: Statements 60% / Branches 50% / Functions 60% / Lines 60%
 
-**Excluded from Coverage** (configured in `services/legacy-api/build.gradle`):
-- Configuration classes (`**/config/**`)
-- Entity classes (`**/entity/**`)
-- DTOs (`**/dto/**`)
-- Exception classes (`**/exception/**`)
-- Auto-generated classes (`**/*$*`)
+JaCoCo の除外設定は現時点でどのサービスにも入れていない。分割前の `legacy-api` は
+`**/config/**` / `**/entity/**` / `**/dto/**` / `**/exception/**` / `**/*$*` を除外していたが、
+そのサービスは #583 で削除された。除外を入れるかどうかは、モジュールごとに実測してから決める。
 
-**Core Packages to Prioritize**:
-- `com.letsblog.api.service.*` - Business logic (target: 80%+)
-- `com.letsblog.api.controller.*` - REST endpoints (target: 75%+)
-- `com.letsblog.api.repository.*` - Data access (target: 70%+)
-- `com.letsblog.api.util.*` - Utility functions (target: 85%+)
+**優先して上げたいパッケージ**(モジュール名は `com.letsblog.<service>`):
+
+- `service.*` — ビジネスロジック(目標 80%+)
+- `controller.*` — RESTエンドポイント(目標 75%+)
+- `repository.*` — データアクセス(目標 70%+)
 
 ### `services:identity`
 
@@ -59,9 +59,8 @@ subject to these coverage targets.
 
 **Target Thresholds**: Statements 60% / Branches 50% / Functions 60% / Lines 60%
 
-No JaCoCo exclusions are currently configured in `services/identity/build.gradle` (unlike
-`legacy-api`); the general thresholds apply to the whole module until package-specific
-guidance is established.
+No JaCoCo exclusions are currently configured in `services/identity/build.gradle`; the general
+thresholds apply to the whole module until package-specific guidance is established.
 
 ### `services:log-writer`
 
@@ -111,8 +110,8 @@ Coverage reports are generated per backend module and uploaded to Codecov during
 Module" above):
 
 ```bash
-# From the project root, e.g. legacy-api
-./gradlew :services:legacy-api:test :services:legacy-api:jacocoTestReport
+# From the project root, e.g. content
+./gradlew :services:content:test :services:content:jacocoTestReport
 ```
 
 Results are available at:
@@ -189,7 +188,6 @@ describe('MyComponent', () => {
 ## Related Documentation
 
 - [Frontend Tests](../web/jest.config.ts) - Jest configuration
-- [legacy-api JaCoCo configuration](../services/legacy-api/build.gradle)
 - [identity JaCoCo configuration](../services/identity/build.gradle)
 - [lbs-common JaCoCo configuration](../libs/lbs-common/build.gradle)
 - [CI/CD Workflows](../.github/workflows/) - Automated testing and coverage

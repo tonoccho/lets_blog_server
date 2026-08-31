@@ -102,8 +102,6 @@ docker compose ps
 | `analytics` | GA / AdSense レポート | actuator |
 | `platform` | システム設定・バックアップ・状態監視 | actuator |
 | `log-writer` | 監査・操作ログ | actuator |
-| `api`(legacy-api) | 未移行 API | actuator |
-| `legacy-schema-migrate` | 一回限りの Flyway ジョブ(正常終了で完了) | - |
 | `mysql` / `rabbitmq` | データストア / メッセージング | `mysqladmin ping` / `rabbitmq-diagnostics` |
 | `wordpress` | ManagedWordPress の実体 | - |
 
@@ -117,7 +115,7 @@ docker compose ps
 ./scripts/wait-for-stack-healthy.sh --all --timeout 900
 ```
 
-期待結果: `OK: 対象サービスは全てhealthy(legacy-schema-migrateは正常終了)です。`
+期待結果: `OK: 対象サービスは全てhealthyです。`
 
 失敗した場合は、未 healthy のサービス名が列挙されるので該当ログを見ます。
 
@@ -142,8 +140,9 @@ docker compose exec reverse-proxy wget -q -O - http://127.0.0.1/nginx-health
 
 # MySQL(全スキーマの存在確認)
 docker compose exec mysql mysql -u root -p"$MYSQL_ROOT_PASSWORD" -e "SHOW DATABASES;"
-# 期待: lets_blog, lbs_identity, lbs_project, lbs_content, lbs_media,
+# 期待: lbs_identity, lbs_project, lbs_content, lbs_media,
 #       lbs_ai, lbs_analytics, lbs_platform, lbs_publishing, lbs_log
+#       (分割前の lets_blog は #785 で廃止済み)
 ```
 
 ### 2.4 クリーンなボリュームからの起動検証
@@ -523,7 +522,7 @@ df -h                                                     # ディスク不足�
 
 | 症状 | 原因 | 対処 |
 | --- | --- | --- |
-| `identity` / `api` がクラッシュループ | `legacy-schema-migrate` が未完了 | `docker compose logs legacy-schema-migrate` を確認(#668) |
+| いずれかのサービスがクラッシュループ | 自スキーマの Flyway 移行に失敗 | `docker compose logs <service>` を確認。#668 の起動デッドロックは #583/#786 で解消済み |
 | `gateway` が起動しない | 依存サービス(各ドメインサービス)が未 healthy | 個別に `docker compose logs` を確認 |
 | `web` が healthy にならない | `next dev` の初回コンパイルが遅い | `start_period` 経過まで待つ。低速環境では `E2E_HEALTH_TIMEOUT` を伸ばす |
 | MySQL のスキーマが無い | 既存ボリュームでは init スクリプトが再実行されない | `docs/SERVICE_SCHEMA_MIGRATION.md` を参照 |
@@ -568,8 +567,7 @@ F12 → Elements → Computed styles
 ### Docker 起動テスト
 
 - [ ] `docker compose up -d` 後、`./scripts/wait-for-stack-healthy.sh` が OK で終了する
-- [ ] `mysql` に全スキーマ(`lets_blog` / `lbs_*`)が存在する
-- [ ] `legacy-schema-migrate` が正常終了している
+- [ ] `mysql` に全スキーマ(`lbs_*` の9個)が存在する
 - [ ] `reverse-proxy` の `/nginx-health` が 200 を返す
 - [ ] `https://localhost/` が表示される(自己署名証明書の警告は許容)
 

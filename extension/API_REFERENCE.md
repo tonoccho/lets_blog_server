@@ -17,8 +17,9 @@
 
 URL の組み立ては [`src/apiBaseUrl.ts`](src/apiBaseUrl.ts) の `gatewayUrl()` 1箇所に集約しており、
 `apiClient.ts` の各エンドポイント関数はベースURLを引数に取りません。どのパスがどのサービスへ
-振り分けられるかは `services/gateway/src/main/resources/application.yml` のルート表が決めます
-(未移行パスは同ファイルの `fallback-uri` で legacy-api へ到達します)。
+振り分けられるかは `services/gateway/src/main/resources/application.yml` のルート表が決めます。
+issue #583 でフォールバック(未割り当てパスの暗黙転送)は廃止したため、ルート表に無いパスは
+gateway が404を返します。
 
 Keycloak(`/auth/realms/...`、`src/deviceAuth.ts`)と draw.io(`/drawio/`、
 `src/diagramEditorPanel.ts`)は gateway を経由しないため、`src/config.ts` の `getServerUrl()`
@@ -184,7 +185,9 @@ Keycloakへ直接行うようになりました(`src/deviceAuth.ts`、上記「�
 
 対応表は [`src/downstreamServices.ts`](src/downstreamServices.ts) にあり、gateway のルート表のうち
 **拡張が実際に呼ぶパスに関係する部分だけ**を、同じ「先勝ち」順序で写したものです。
-どのルートにもマッチしないパスは gateway の `fallback-uri` と同じく legacy-api として扱います。
+どのルートにもマッチしないパスは gateway 自身として扱います(issue #583 でフォールバックを
+廃止したため、そうしたパスは gateway が404を返す。存在しないコンテナのログを見るよう
+案内してしまわないため)。
 
 通知には次を含めます。
 
