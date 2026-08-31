@@ -18,6 +18,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -83,6 +84,11 @@ class AdminAuthorizationIntegrationTest {
 
         mockMvc.perform(get(GA_REPORT_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer member-check-jwt"))
                 .andExpect(status().isForbidden());
+
+        // 操作者解決が実際に lookupProfile を通っていることを確かめる(issue #916)。
+        // @MockitoBean は未使用スタブを報告しないため、呼び出し先が変わっても
+        // when(...) が黙って空振りする。#906 / #583 で実際に起きた。
+        verify(identityClient).lookupProfile("Bearer member-check-jwt");
     }
 
     @Test
@@ -95,6 +101,11 @@ class AdminAuthorizationIntegrationTest {
 
         mockMvc.perform(get(GA_REPORT_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer member-jwt"))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(403));
+
+        // 操作者解決が実際に lookupProfile を通っていることを確かめる(issue #916)。
+        // @MockitoBean は未使用スタブを報告しないため、呼び出し先が変わっても
+        // when(...) が黙って空振りする。#906 / #583 で実際に起きた。
+        verify(identityClient).lookupProfile("Bearer member-jwt");
     }
 
     @Test
@@ -106,5 +117,31 @@ class AdminAuthorizationIntegrationTest {
 
         mockMvc.perform(get(GA_REPORT_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer admin-jwt"))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(403));
+
+        // 操作者解決が実際に lookupProfile を通っていることを確かめる(issue #916)。
+        // @MockitoBean は未使用スタブを報告しないため、呼び出し先が変わっても
+        // when(...) が黙って空振りする。#906 / #583 で実際に起きた。
+        verify(identityClient).lookupProfile("Bearer admin-jwt");
+    }
+
+    /**
+     * 無効化されたユーザー(issue #816)は、identity-service が 401/403 を返すため
+     * {@code IdentityClient#lookupProfile} が {@link Optional#empty()} を返す。
+     * これは<b>認証・認可の結果</b>であって障害ではないので(issue #829)、502 ではなく
+     * 「操作者なし」として認可で拒否されること(403)を確かめる。
+     *
+     * <p>この経路は #906 / #583 で「テストが旧メソッドをスタブしたままだったため
+     * 検証できていなかった」箇所そのものなので、明示的に足した(issue #916)。
+     */
+    @Test
+    @DisplayName("無効化ユーザー(identityが401/403 → 操作者なし)は403。502にはしない")
+    void 操作者を解決できない場合は403() throws Exception {
+        when(jwtDecoder.decode("disabled-jwt")).thenReturn(JwtTestFixtures.jwt("sub-disabled", "user"));
+        when(identityClient.lookupProfile("Bearer disabled-jwt")).thenReturn(Optional.empty());
+
+        mockMvc.perform(get(GA_REPORT_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer disabled-jwt"))
+                .andExpect(status().isForbidden());
+
+        verify(identityClient).lookupProfile("Bearer disabled-jwt");
     }
 }
