@@ -84,6 +84,12 @@ async function submitGeneration(
 test.describe('カスタムタグ生成フロー', () => {
   test.skip(!E2E_ADMIN_PASSWORD, 'E2E_ADMIN_PASSWORDが未設定のためスキップ');
 
+  // submitGeneration は成功/失敗いずれかの表示を最大30秒待つが、Playwrightの既定の
+  // テストタイムアウトも30秒なので、待ち切る前にテスト自体が落ちる。ログイン+遷移の
+  // 時間も含めると確実に超えるため、このdescribe全体のタイムアウトを引き上げる。
+  // (LLMバックエンドは往復に時間がかかり、疎通できない場合はエラー表示までさらに待つ)
+  test.describe.configure({ timeout: 120_000 });
+
   test.beforeAll(async ({ browser }) => {
     const page = await browser.newPage();
     try {
@@ -124,7 +130,12 @@ test.describe('カスタムタグ生成フロー', () => {
       // 削除確認は window.confirm(DeleteProjectButton.tsx)。ネイティブダイアログなので自動承諾する。
       page.on('dialog', (dialog) => dialog.accept());
       await page.locator('button:has-text("プロジェクトを削除")').click();
-      await page.goto('/projects');
+
+      // deleteProjectAction は完了後に /projects へ redirect する(actions.ts)。
+      // これを待たずに page.goto('/projects') すると、まだ削除前のRSCペイロードを
+      // クライアントルーターがキャッシュしてしまい、以降いくら待っても行が消えない。
+      await page.waitForURL('**/projects', { timeout: 30000 });
+      await page.reload();
       await expect(page.locator('tr').filter({ hasText: fixtureProjectName })).toHaveCount(0, {
         timeout: 15000,
       });
