@@ -78,31 +78,4 @@ public class AiBridgeController {
         return projectUserRepository.findByProjectIdAndUserId(projectId, userId).isPresent();
     }
 
-    public record SystemBraveSearchApiKeyResponse(String apiKey) {
-    }
-
-    /** WebSearchService(ai-service)のプロジェクト非依存フォールバック向け。未設定ならnull。 */
-    @GetMapping("/api/internal/ai/system-settings/brave-search-api-key")
-    public SystemBraveSearchApiKeyResponse systemBraveSearchApiKey() {
-        String apiKey = platformServiceClient.getBraveSearchApiKey();
-        return new SystemBraveSearchApiKeyResponse(apiKey == null || apiKey.isBlank() ? null : apiKey);
-    }
-
-    public record LlmConfigResponse(
-            String provider, String baseUrl, String apiKey, String defaultModel,
-            List<String> availableModels, long requestTimeoutSeconds) {
-    }
-
-    /**
-     * RemoteLlmConfigProvider(ai-service)が呼ぶ。providerを指定しなければシステム設定の既定
-     * プロバイダーを使う(platform-serviceのAppSettingServiceが解決する値をそのまま返す)。
-     */
-    @GetMapping("/api/internal/ai/llm-config")
-    public LlmConfigResponse llmConfig(@RequestParam(required = false) String provider) {
-        AiProvider resolved = provider != null && !provider.isBlank() ? AiProvider.fromString(provider) : null;
-        PlatformServiceClient.LlmConfigResponse result = platformServiceClient.llmConfig(resolved);
-        return new LlmConfigResponse(
-                result.provider(), result.baseUrl(), result.apiKey(), result.defaultModel(),
-                result.availableModels(), result.requestTimeoutSeconds());
-    }
 }

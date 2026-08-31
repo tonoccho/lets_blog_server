@@ -1,6 +1,6 @@
 package com.letsblog.ai.ai;
 
-import com.letsblog.ai.client.LegacyApiBridgeClient;
+import com.letsblog.ai.client.PlatformServiceClient;
 import com.letsblog.ai.service.CurrentActorService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.HashMap;
@@ -12,10 +12,10 @@ import org.springframework.stereotype.Component;
  * {@link LlmConfigProvider}のai-service向け実装。実際の値(LLM APIキー・ベースURL・モデル名等)は
  * Web管理画面のシステム設定(issue #403)で決まり、legacy-apiのAppSettingServiceがsystem_settings
  * (platform-serviceがまだ未抽出のためlegacy-apiに残る、ADR-0004)を正として保持し続けるため、
- * ai-serviceは{@link LegacyApiBridgeClient#resolveLlmConfig}経由で都度解決する(issue #574)。
+ * ai-serviceは{@link PlatformServiceClient#resolveLlmConfig}経由で都度解決する(issue #574。#583でlegacy-apiの中継を外し、システム設定を所有するplatform-serviceを直接呼ぶよう切り替えた)。
  *
  * <p>1リクエスト内でLlmClientが複数回設定値を参照しても(provider()→apiKeyFor(provider)のように)
- * legacy-apiへの往復が増えないよう、解決済みの{@link LegacyApiBridgeClient.LlmConfig}を
+ * legacy-apiへの往復が増えないよう、解決済みの{@link PlatformServiceClient.LlmConfig}を
  * プロバイダー名(未指定時は"__default__")ごとにリクエストスコープでキャッシュする。
  */
 @Component
@@ -24,13 +24,14 @@ public class RemoteLlmConfigProvider implements LlmConfigProvider {
     private static final String CACHE_ATTR = RemoteLlmConfigProvider.class.getName() + ".cache";
     private static final String DEFAULT_KEY = "__default__";
 
-    private final LegacyApiBridgeClient bridgeClient;
+    private final PlatformServiceClient platformServiceClient;
     private final CurrentActorService currentActorService;
     private final HttpServletRequest request;
 
     public RemoteLlmConfigProvider(
-            LegacyApiBridgeClient bridgeClient, CurrentActorService currentActorService, HttpServletRequest request) {
-        this.bridgeClient = bridgeClient;
+            PlatformServiceClient platformServiceClient, CurrentActorService currentActorService,
+            HttpServletRequest request) {
+        this.platformServiceClient = platformServiceClient;
         this.currentActorService = currentActorService;
         this.request = request;
     }
@@ -80,29 +81,29 @@ public class RemoteLlmConfigProvider implements LlmConfigProvider {
         return resolveDefault().availableModels();
     }
 
-    private LegacyApiBridgeClient.LlmConfig resolveFor(AiProvider provider) {
+    private PlatformServiceClient.LlmConfig resolveFor(AiProvider provider) {
         return resolve(provider == null ? null : provider.name());
     }
 
-    private LegacyApiBridgeClient.LlmConfig resolveDefault() {
+    private PlatformServiceClient.LlmConfig resolveDefault() {
         return resolve(null);
     }
 
     @SuppressWarnings("unchecked")
-    private LegacyApiBridgeClient.LlmConfig resolve(String providerName) {
-        Map<String, LegacyApiBridgeClient.LlmConfig> cache =
-                (Map<String, LegacyApiBridgeClient.LlmConfig>) request.getAttribute(CACHE_ATTR);
+    private PlatformServiceClient.LlmConfig resolve(String providerName) {
+        Map<String, PlatformServiceClient.LlmConfig> cache =
+                (Map<String, PlatformServiceClient.LlmConfig>) request.getAttribute(CACHE_ATTR);
         if (cache == null) {
             cache = new HashMap<>();
             request.setAttribute(CACHE_ATTR, cache);
         }
         String cacheKey = providerName == null ? DEFAULT_KEY : providerName;
-        LegacyApiBridgeClient.LlmConfig cached = cache.get(cacheKey);
+        PlatformServiceClient.LlmConfig cached = cache.get(cacheKey);
         if (cached != null) {
             return cached;
         }
-        LegacyApiBridgeClient.LlmConfig resolved =
-                bridgeClient.resolveLlmConfig(providerName, currentActorService.getAuthorizationHeader());
+        PlatformServiceClient.LlmConfig resolved =
+                platformServiceClient.resolveLlmConfig(providerName, currentActorService.getAuthorizationHeader());
         cache.put(cacheKey, resolved);
         // 解決結果自体が名乗るプロバイダー名でもキャッシュしておく(未指定呼び出し→provider()解決後、
         // 同じリクエスト内でapiKeyFor(解決済みprovider)を呼んでも往復が増えないようにするため)。

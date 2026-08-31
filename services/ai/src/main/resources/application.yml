@@ -75,6 +75,10 @@ app:
   # へ移った(issue #707)ため、issue #711でこの3エンドポイントのみ切り替えた(Epic #551 C6-5)。
   publishing-service-uri: ${PUBLISHING_SERVICE_URI:http://publishing:8080}
   identity-service-uri: ${IDENTITY_SERVICE_URI:http://identity:8080}
+  # システム設定由来の実効LLM接続設定とBrave Search APIキーの取得先(issue #583)。
+  # 以前はlegacy-apiのAiBridgeController経由だったが、その実装はplatform-serviceへの
+  # 単純な中継だったため直接呼ぶよう切り替えた。
+  platform-service-uri: ${PLATFORM_SERVICE_URI:http://platform:8080}
   # Brave Search APIのベースURL(APIキーとは異なりシステム設定でDB上書きされる対象ではないため、
   # legacy-apiのAppSettingService DEFINITIONSにも含まれていない固定値。env varのみで変更可能)。
   brave-search-base-url: ${BRAVE_SEARCH_BASE_URL:https://api.search.brave.com}
