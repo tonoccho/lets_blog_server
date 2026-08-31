@@ -32,7 +32,8 @@ public class TagDesignSetting {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "project_id", nullable = false)
+    /** nullならグローバル既定行(プロジェクト未紐付けサイト向け)。#763でnullable化した。 */
+    @Column(name = "project_id")
     private Long projectId;
 
     @Enumerated(EnumType.STRING)

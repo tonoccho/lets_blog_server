@@ -196,22 +196,77 @@ class TagDesignSettingServiceTest {
         assertEquals(null, colors.customCss());
     }
 
+    /**
+     * #763以前は、projectIdがnullのときDBを引かずハードコード既定を返していた
+     * (project_idがNOT NULLでグローバル行を持てなかったため)。
+     * V2でnullable化したので、いまはグローバル既定行を引く。
+     */
     @Test
-    void resolveColors_projectIdがnullなら固定のデフォルト色を返す() {
+    void resolveColors_projectIdがnullならグローバル既定行を引く() {
+        TagDesignSetting global = new TagDesignSetting();
+        global.setProjectId(null);
+        global.setTagType(EmbedTagType.TOC);
+        global.setPresetId("ocean");
+        global.setBackgroundColor("#001122");
+        global.setTextColor("#ffffff");
+        global.setAccentColor("#3399ff");
+        global.setCustomCss(".toc{}");
+        when(repository.findByProjectIdIsNullAndTagType(EmbedTagType.TOC)).thenReturn(Optional.of(global));
+
+        TagDesignColors colors = service.resolveColors(null, EmbedTagType.TOC);
+
+        assertEquals("#001122", colors.backgroundColor());
+        assertEquals("#ffffff", colors.textColor());
+        assertEquals("#3399ff", colors.accentColor());
+        assertEquals(".toc{}", colors.customCss());
+    }
+
+    @Test
+    void resolveColors_projectIdがnullでグローバル行も無ければデフォルト色を返す() {
+        when(repository.findByProjectIdIsNullAndTagType(EmbedTagType.TOC)).thenReturn(Optional.empty());
+
         TagDesignColors colors = service.resolveColors(null, EmbedTagType.TOC);
 
         assertEquals(DesignPreset.DEFAULT.backgroundColor(), colors.backgroundColor());
         assertEquals(DesignPreset.DEFAULT.textColor(), colors.textColor());
         assertEquals(DesignPreset.DEFAULT.accentColor(), colors.accentColor());
         assertEquals(null, colors.customCss());
-        org.mockito.Mockito.verifyNoInteractions(repository);
+    }
+
+    /**
+     * projectIdがnullの解決だけがグローバル行を見る。プロジェクトに紐付いた解決が
+     * 未設定だった場合はグローバル行へフォールバックせず、従来どおりDEFAULTを返す
+     * (グローバル設定の変更で既存プロジェクトの見た目が変わるのを避けるため。#763)。
+     */
+    @Test
+    void resolveColors_プロジェクト未設定時はグローバル行へフォールバックしない() {
+        when(repository.findByProjectIdAndTagType(7L, EmbedTagType.TOC)).thenReturn(Optional.empty());
+
+        TagDesignColors colors = service.resolveColors(7L, EmbedTagType.TOC);
+
+        assertEquals(DesignPreset.DEFAULT.backgroundColor(), colors.backgroundColor());
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never())
+                .findByProjectIdIsNullAndTagType(org.mockito.ArgumentMatchers.any());
     }
 
     @Test
-    void resolveHtmlTemplate_projectIdがnullなら固定のデフォルトとしてnullを返す() {
-        assertEquals(null, service.resolveHtmlTemplate(null, EmbedTagType.BLOGCARD));
+    void resolveHtmlTemplate_projectIdがnullならグローバル既定行のテンプレートを返す() {
+        TagDesignSetting global = new TagDesignSetting();
+        global.setProjectId(null);
+        global.setTagType(EmbedTagType.BLOGCARD);
+        global.setHtmlTemplate("<div>global</div>");
+        when(repository.findByProjectIdIsNullAndTagType(EmbedTagType.BLOGCARD))
+                .thenReturn(Optional.of(global));
 
-        org.mockito.Mockito.verifyNoInteractions(repository);
+        assertEquals("<div>global</div>", service.resolveHtmlTemplate(null, EmbedTagType.BLOGCARD));
+    }
+
+    @Test
+    void resolveHtmlTemplate_projectIdがnullでグローバル行が無ければnullを返す() {
+        when(repository.findByProjectIdIsNullAndTagType(EmbedTagType.BLOGCARD))
+                .thenReturn(Optional.empty());
+
+        assertEquals(null, service.resolveHtmlTemplate(null, EmbedTagType.BLOGCARD));
     }
 
     @Test

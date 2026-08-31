@@ -100,6 +100,12 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("GET", "/api/projects/1/tag-design-settings"),
                 new Endpoint("PUT", "/api/projects/1/tag-design-settings/plantuml"),
                 new Endpoint("POST", "/api/projects/1/tag-design-settings/plantuml/generate"),
+                // プロジェクト未紐付けサイト向けのグローバル既定タグデザイン(issue #763)。
+                // GlobalTagDesignSettingController。認可はadmin限定(グローバル既定には
+                // 判定に使えるプロジェクトメンバーシップが無いため)。
+                new Endpoint("GET", "/api/tag-design-settings"),
+                new Endpoint("PUT", "/api/tag-design-settings/plantuml"),
+                new Endpoint("POST", "/api/tag-design-settings/plantuml/generate"),
 
                 // -- 内部ブリッジ(TagDesignInternalController) --
                 new Endpoint("GET", "/api/internal/project/tag-design/plantuml"),
