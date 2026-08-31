@@ -78,17 +78,29 @@ if [ "$status" -ne 0 ]; then
     echo "       詳細は docs/SERVICE_SCHEMA_MIGRATION.md を参照。"
 fi
 
-# docker-compose.yml が `${VAR}` を既定値なしで参照しているのに `.env.example` に無いと、
+# docker-compose.yml が既定値なしで変数を参照しているのに `.env.example` に無いと、
 # `.env` を正しく作っても compose の警告が出続ける。`.env.example` を契約とみなす以上、
 # 契約そのものの抜けもここで見る(#756 では LLM_CLAUDE_API_KEY / IMAGE_LLM_API_KEY が該当した)。
-# `${VAR:-default}` は既定値があるので警告にならず、この正規表現にも合致しない。
+#
+# 既定値ありの `${VAR:-default}` / `${VAR:+alt}` / `${VAR-default}` は警告にならないので対象外。
+# 拾うのは `${VAR}`、必須指定の `${VAR:?msg}` / `${VAR?msg}`、波括弧なしの `$VAR`。
+compose_required_vars() {
+    # 行頭コメントと行末コメントを落とす(`[[${var}]]` のような説明文を拾わないため)。
+    grep -v '^[[:space:]]*#' "$1" \
+        | sed 's/[[:space:]]#.*$//' \
+        | grep -ohE '\$\{[A-Za-z_][A-Za-z0-9_]*(:?[-+?][^}]*)?\}|\$[A-Za-z_][A-Za-z0-9_]*' \
+        | sed -E 's/^\$\{//; s/\}$//; s/^\$//' \
+        | grep -vE '^[A-Za-z_][A-Za-z0-9_]*:?[-+]' \
+        | sed -E 's/:?\?.*$//' \
+        | sort -u
+}
+
 COMPOSE="$REPO_ROOT/docker-compose.yml"
 if [ -f "$COMPOSE" ]; then
-    # 行頭コメントは除く(コメント内の `[[${var}]]` のような記述を拾わないため)。
-    uncontracted="$(grep -v '^[[:space:]]*#' "$COMPOSE" \
-        | grep -ohE '\$\{[A-Za-z_][A-Za-z0-9_]*\}' \
-        | tr -d '${}' | sort -u \
-        | comm -23 - <(keys_of "$EXAMPLE"))"
+    # `|| true` が要る。参照が1件も無いと途中の grep が exit 1 を返し、pipefail によって
+    # パイプライン全体が失敗扱いになり、set -e でこの行が無言終了してしまう。
+    # 検査スクリプトが理由も出さずに落ちるのは、#756 が問題にしている「静かに壊れる」そのもの。
+    uncontracted="$(comm -23 <(compose_required_vars "$COMPOSE" || true) <(keys_of "$EXAMPLE"))"
     if [ -n "$uncontracted" ]; then
         status=1
         echo "✗ docker-compose.yml が既定値なしで参照しているのに .env.example に無いキー:"

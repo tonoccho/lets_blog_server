@@ -63,7 +63,6 @@ Copy the example configuration and edit it:
 
 ```bash
 cp .env.example .env
-bash scripts/check-env.sh   # .env が .env.example の全項目を満たしているか確認
 ```
 
 Edit `.env` with your favorite text editor and change these critical values:
@@ -97,6 +96,18 @@ COMFYUI_IMAGE=nvidia/cuda:12.1.0-runtime-ubuntu22.04
 OLLAMA_MODEL=qwen2.5:7b-instruct
 COMFYUI_CHECKPOINT=sd-v1-5-fp16.safetensors
 ```
+
+After editing, verify that `.env` covers everything `.env.example` declares:
+
+```bash
+bash scripts/check-env.sh
+```
+
+`.env` is created once by `cp` and does not follow later additions to `.env.example`.
+A missed key fails quietly — `docker compose` warns but still starts, and
+`mysql/init/01-create-service-schemas.sh` **skips** creating a database user whose
+`LBS_*_DB_PASSWORD` is empty. Re-run this check after every `git pull` that touches
+`.env.example`.
 
 #### Generating Secure Keys
 
