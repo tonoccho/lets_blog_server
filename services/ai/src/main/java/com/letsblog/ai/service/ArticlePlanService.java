@@ -4,7 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.ai.ai.LlmClient;
-import com.letsblog.ai.client.LegacyApiBridgeClient;
+import com.letsblog.ai.client.ProjectBridgeClient;
 import com.letsblog.ai.client.PublishingServiceClient;
 import com.letsblog.ai.domain.ArticlePlanSession;
 import com.letsblog.ai.domain.GenerationJob;
@@ -42,7 +42,7 @@ import java.util.Map;
  * <p>issue #574でai-serviceへ移設。GitHubトークン解決(プロジェクト自身のトークン優先、
  * 無ければ操作者本人のユーザー設定へフォールバック)は、Project/ProjectApiKeyService/UserServiceが
  * project-service/content-service(いずれもPhase 19の他Issueで未抽出)のままlegacy-apiに残るため、
- * {@link LegacyApiBridgeClient}経由の内部ブリッジで解決する(media-service(#573)のCmsBridgeClientと
+ * {@link ProjectBridgeClient}経由の内部ブリッジで解決する(media-service(#573)のCmsBridgeClientと
  * 同じ暫定策)。マスター環境サイトの既存カテゴリ/タグ取得は、{@code CmsAdapterFactory}/{@code cms/*}の
  * 所有権がpublishing-serviceへ移った(issue #707)ため、{@link PublishingServiceClient}経由で
  * publishing-serviceへ直接問い合わせる(issue #711、Epic #551 C6-5)。
@@ -86,7 +86,7 @@ public class ArticlePlanService {
     private final ObjectMapper objectMapper;
     private final GithubClient githubClient;
     private final ArticlePlanSessionRepository articlePlanSessionRepository;
-    private final LegacyApiBridgeClient legacyApiBridgeClient;
+    private final ProjectBridgeClient projectBridgeClient;
     private final PublishingServiceClient publishingServiceClient;
     private final CurrentActorService currentActorService;
 
@@ -98,7 +98,7 @@ public class ArticlePlanService {
             ObjectMapper objectMapper,
             GithubClient githubClient,
             ArticlePlanSessionRepository articlePlanSessionRepository,
-            LegacyApiBridgeClient legacyApiBridgeClient,
+            ProjectBridgeClient projectBridgeClient,
             PublishingServiceClient publishingServiceClient,
             CurrentActorService currentActorService) {
         this.llmClient = llmClient;
@@ -108,7 +108,7 @@ public class ArticlePlanService {
         this.objectMapper = objectMapper;
         this.githubClient = githubClient;
         this.articlePlanSessionRepository = articlePlanSessionRepository;
-        this.legacyApiBridgeClient = legacyApiBridgeClient;
+        this.projectBridgeClient = projectBridgeClient;
         this.publishingServiceClient = publishingServiceClient;
         this.currentActorService = currentActorService;
     }
@@ -245,15 +245,15 @@ public class ArticlePlanService {
      * リポジトリに登録済みのissue一覧を取得する。
      */
     public List<RepositoryIssueResponse> listRepositoryIssues(Long projectId, Long userId, String state) {
-        LegacyApiBridgeClient.GithubAccess access = resolveGithubAccess(projectId, userId);
+        ProjectBridgeClient.GithubAccess access = resolveGithubAccess(projectId, userId);
         List<GithubIssueSummary> issues = githubClient.listIssues(access.token(), access.owner(), access.repo(), state);
         return issues.stream()
                 .map(i -> new RepositoryIssueResponse(i.number(), i.title(), i.htmlUrl(), i.state(), i.assignees()))
                 .toList();
     }
 
-    private LegacyApiBridgeClient.GithubAccess resolveGithubAccess(Long projectId, Long userId) {
-        return legacyApiBridgeClient.resolveGithubAccess(projectId, userId, currentActorService.getAuthorizationHeader());
+    private ProjectBridgeClient.GithubAccess resolveGithubAccess(Long projectId, Long userId) {
+        return projectBridgeClient.resolveGithubAccess(projectId, userId, currentActorService.getAuthorizationHeader());
     }
 
     /**
@@ -261,7 +261,7 @@ public class ArticlePlanService {
      * 1件の作成に失敗しても他のタイトルの登録は続け、結果を個別に集約して返す。
      */
     public AcceptPlanResponse acceptPlan(Long projectId, Long userId, List<String> titles) {
-        LegacyApiBridgeClient.GithubAccess access = resolveGithubAccess(projectId, userId);
+        ProjectBridgeClient.GithubAccess access = resolveGithubAccess(projectId, userId);
 
         List<AcceptPlanResultItem> results = new ArrayList<>();
         for (String title : titles) {
@@ -280,7 +280,7 @@ public class ArticlePlanService {
      * 既に構成案で更新済みのissueであれば現状の内容をそのまま表示できるようにする。
      */
     public IssueDescriptionResponse getIssueDescription(Long projectId, Long userId, Integer issueNumber) {
-        LegacyApiBridgeClient.GithubAccess access = resolveGithubAccess(projectId, userId);
+        ProjectBridgeClient.GithubAccess access = resolveGithubAccess(projectId, userId);
         String body = githubClient.getIssueBody(access.token(), access.owner(), access.repo(), issueNumber);
         return new IssueDescriptionResponse(body);
     }
@@ -289,7 +289,7 @@ public class ArticlePlanService {
      * 提案された記事構成で、指定issueのdescription(body)を上書きする。
      */
     public AcceptStructureResponse acceptStructure(Long projectId, Long userId, Integer issueNumber, String structure) {
-        LegacyApiBridgeClient.GithubAccess access = resolveGithubAccess(projectId, userId);
+        ProjectBridgeClient.GithubAccess access = resolveGithubAccess(projectId, userId);
         GithubIssue issue = githubClient.updateIssueBody(
                 access.token(), access.owner(), access.repo(), issueNumber, structure);
         return new AcceptStructureResponse(issue.number(), issue.htmlUrl());
@@ -299,7 +299,7 @@ public class ArticlePlanService {
      * 指定issueをログイン中のユーザーに割り当て、in-progressラベルを付与する。
      */
     public AssignIssueResponse assignIssueToActor(Long projectId, Long userId, Integer issueNumber) {
-        LegacyApiBridgeClient.GithubAccess access = resolveGithubAccess(projectId, userId);
+        ProjectBridgeClient.GithubAccess access = resolveGithubAccess(projectId, userId);
 
         GithubUser authUser = githubClient.getAuthenticatedUser(access.token());
 

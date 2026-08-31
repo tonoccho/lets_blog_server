@@ -4,7 +4,8 @@ import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.AuthorizationMatrixContract;
 import com.letsblog.common.testfixtures.AuthorizationMatrixContract.Endpoint;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
-import com.letsblog.content.client.LegacyApiBridgeClient;
+import com.letsblog.content.client.IdentityBridgeClient;
+import com.letsblog.content.client.ProjectBridgeClient;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -40,7 +41,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>ロール単位の認可(プロジェクトメンバー/adminの403)は{@link AdminAuthorizationIntegrationTest}が
  * 担当し、ここでは重複させない。
  *
- * <p>identity-service/legacy-apiは外部境界のため{@link IdentityClient}/{@link LegacyApiBridgeClient}を
+ * <p>identity-service/identity-service/project-serviceは外部境界のため{@link IdentityClient}/{@link IdentityBridgeClient}/{@link ProjectBridgeClient}を
  * {@code @MockitoBean}で置き換える(ADR-0006のモック方針)。
  */
 @SpringBootTest
@@ -59,7 +60,10 @@ class AuthorizationMatrixIntegrationTest {
     private IdentityClient identityClient;
 
     @MockitoBean
-    private LegacyApiBridgeClient legacyApiBridgeClient;
+    private IdentityBridgeClient identityBridgeClient;
+
+    @MockitoBean
+    private ProjectBridgeClient projectBridgeClient;
 
     /**
      * content-serviceがgateway経由で外部へ公開している全エンドポイント(gatewayの{@code content}ルート:

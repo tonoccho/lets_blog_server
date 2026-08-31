@@ -68,9 +68,12 @@ app:
   # adsense_refresh_token_encrypted/adsense_oauth_client_secret_encrypted)の暗号化/復号
   # (CredentialCipher、lbs-common)。全サービス共通のAES-256-GCM鍵(legacy-api/ai-serviceと同じ値)。
   encryption-key: ${APP_ENCRYPTION_KEY:}
-  # 呼び出し元のBearerトークンをそのまま転送してlegacy-api/identity-serviceへ問い合わせる
-  # 暫定策(log-writer(#572)/media-service(#573)/ai-service(#574)と同じ。issue #578)。
-  legacy-api-uri: ${LEGACY_API_URI:http://api:8080}
+  # 呼び出し元のBearerトークンをそのまま転送して他サービスの内部ブリッジへ問い合わせる
+  # (log-writer(#572)/media-service(#573)/ai-service(#574)と同じ方針。issue #578)。
+  # issue #583でlegacy-apiを解体したため、向き先は以下の2つに分かれた。
+  #   - プロジェクトメンバー判定(IdentityBridgeClient) → identity-service(project_users の所有者)
+  #   - レポート取得可否判定(ProjectBridgeClient) → project-service(projects/sites の所有者)
+  project-service-uri: ${PROJECT_SERVICE_URI:http://project:8080}
   identity-service-uri: ${IDENTITY_SERVICE_URI:http://identity:8080}
   # Google Analytics連携(issue #386、legacy-apiから移設)。
   google-analytics-data-api-base-url: ${GOOGLE_ANALYTICS_DATA_API_BASE_URL:https://analyticsdata.googleapis.com}

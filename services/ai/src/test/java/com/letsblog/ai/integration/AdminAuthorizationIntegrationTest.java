@@ -1,6 +1,6 @@
 package com.letsblog.ai.integration;
 
-import com.letsblog.ai.client.LegacyApiBridgeClient;
+import com.letsblog.ai.client.IdentityBridgeClient;
 import com.letsblog.common.client.ActorProfile;
 import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
@@ -26,12 +26,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * issue #574)が、実際のController経由でも401/403を正しく返すことを検証する統合テスト。legacy-apiの
  * {@code AuthorizationMatrixIntegrationTest}と同じ観点((a)JWTが無効なら401、(b)/(c)admin/
  * プロジェクトメンバーの認可判定は403で表現される)を、ai-serviceの認可経路(CurrentActorServiceが
- * Authorizationヘッダーをidentity-serviceへ転送して解決する。LegacyApiBridgeClient経由の
+ * Authorizationヘッダーをidentity-serviceへ転送して解決する。IdentityBridgeClient経由の
  * プロジェクトメンバー判定)に合わせて{@link
  * com.letsblog.ai.controller.ArticlePlanController#listCategories}で検証する。
  *
  * <p>identity-serviceは外部境界のため{@link IdentityClient}を{@code @MockitoBean}で置き換える
- * (ADR-0006のモック方針)。{@link LegacyApiBridgeClient#isProjectMember}は非member/admin判定に
+ * (ADR-0006のモック方針)。{@link IdentityBridgeClient#isProjectMember}は非member/admin判定に
  * 必要なためモックするが、認可通過後に呼ばれる{@code listExistingCategories}は
  * (issue #711でpublishing-serviceへ呼び出し先を切り替えた{@code PublishingServiceClient}経由でも)
  * 接続失敗時に空リストへフォールバックする実装のため、モックせずとも200系で完了する。
@@ -54,7 +54,7 @@ class AdminAuthorizationIntegrationTest {
     private IdentityClient identityClient;
 
     @MockitoBean
-    private LegacyApiBridgeClient legacyApiBridgeClient;
+    private IdentityBridgeClient identityBridgeClient;
 
     @Test
     @DisplayName("Authorizationヘッダーなしは401(issue #772でSecurityConfigの認証ゲートを復元したため、"
@@ -77,7 +77,7 @@ class AdminAuthorizationIntegrationTest {
     void 非メンバー非adminは403() throws Exception {
         when(jwtDecoder.decode("member-check-jwt")).thenReturn(JwtTestFixtures.jwt("sub-1", "user"));
         when(identityClient.fetchProfile("Bearer member-check-jwt")).thenReturn(new ActorProfile(10L, "user"));
-        when(legacyApiBridgeClient.isProjectMember(42L, 10L, "Bearer member-check-jwt")).thenReturn(false);
+        when(identityBridgeClient.isProjectMember(42L, 10L, "Bearer member-check-jwt")).thenReturn(false);
 
         mockMvc.perform(get(CATEGORIES_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer member-check-jwt"))
                 .andExpect(status().isForbidden());
@@ -88,7 +88,7 @@ class AdminAuthorizationIntegrationTest {
     void プロジェクトメンバーは403にならない() throws Exception {
         when(jwtDecoder.decode("member-jwt")).thenReturn(JwtTestFixtures.jwt("sub-2", "user"));
         when(identityClient.fetchProfile("Bearer member-jwt")).thenReturn(new ActorProfile(11L, "user"));
-        when(legacyApiBridgeClient.isProjectMember(42L, 11L, "Bearer member-jwt")).thenReturn(true);
+        when(identityBridgeClient.isProjectMember(42L, 11L, "Bearer member-jwt")).thenReturn(true);
 
         mockMvc.perform(get(CATEGORIES_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer member-jwt"))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(403));

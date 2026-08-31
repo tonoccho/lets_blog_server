@@ -25,7 +25,7 @@ import org.springframework.stereotype.Component;
  * issue #577(project-service抽出)で既に実装済みのものをそのまま利用する
  * (SiteCredentialsInternalController等)。
  *
- * <p>認証は、他サービスの同種ブリッジ(project-serviceのLegacyApiBridgeClient等)と同じ暫定策として、
+ * <p>認証は、他サービスの同種ブリッジ(project-serviceのIdentityBridgeClient等)と同じ暫定策として、
  * 呼び出し元のBearerトークンをそのまま転送する。
  */
 @Component

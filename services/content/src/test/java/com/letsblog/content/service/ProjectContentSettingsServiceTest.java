@@ -1,6 +1,6 @@
 package com.letsblog.content.service;
 
-import com.letsblog.content.client.LegacyApiBridgeClient;
+import com.letsblog.content.client.ProjectBridgeClient;
 import com.letsblog.content.domain.ProjectContentSettings;
 import com.letsblog.content.repository.ProjectContentSettingsRepository;
 import org.junit.jupiter.api.Test;
@@ -30,13 +30,13 @@ class ProjectContentSettingsServiceTest {
     private ProjectContentSettingsRepository repository;
 
     @Mock
-    private LegacyApiBridgeClient legacyApiBridgeClient;
+    private ProjectBridgeClient projectBridgeClient;
 
     @Mock
     private CurrentActorService currentActorService;
 
     private ProjectContentSettingsService service() {
-        return new ProjectContentSettingsService(repository, legacyApiBridgeClient, currentActorService);
+        return new ProjectContentSettingsService(repository, projectBridgeClient, currentActorService);
     }
 
     @Test
@@ -76,14 +76,14 @@ class ProjectContentSettingsServiceTest {
         when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
 
         assertEquals("custom-prefix", service().resolveCssSelectorPrefix(1L));
-        verifyNoInteractions(legacyApiBridgeClient);
+        verifyNoInteractions(projectBridgeClient);
     }
 
     @Test
     void resolveCssSelectorPrefix_未設定時はlegacy_api経由でプロジェクトslugへフォールバックする() {
         when(repository.findByProjectId(1L)).thenReturn(Optional.empty());
         lenient().when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer token");
-        when(legacyApiBridgeClient.resolveProjectSlug(1L, "Bearer token")).thenReturn("proj-a");
+        when(projectBridgeClient.resolveProjectSlug(1L, "Bearer token")).thenReturn("proj-a");
 
         assertEquals("proj-a", service().resolveCssSelectorPrefix(1L));
     }

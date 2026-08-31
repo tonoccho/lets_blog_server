@@ -5,7 +5,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.publishing.aop.AuditLog;
 import com.letsblog.publishing.client.ContentServiceClient;
-import com.letsblog.publishing.client.LegacyApiBridgeClient;
+import com.letsblog.publishing.client.IdentityBridgeClient;
+import com.letsblog.publishing.client.MediaSettingsBridgeClient;
 import com.letsblog.publishing.client.ProjectServiceClient;
 import com.letsblog.publishing.cms.CmsAdapter;
 import com.letsblog.publishing.cms.CmsAdapterFactory;
@@ -43,7 +44,7 @@ import java.util.Optional;
  * <p>legacy-apiの{@code PostPublishService}をpublishing-serviceへ移設したもの(issue #707、Epic #551
  * C6-1)。サイト本体・CMS認証情報はproject-service({@link ProjectServiceClient})、Markdown
  * レンダリング・postsテーブルの読み書きはcontent-service({@link ContentServiceClient})、著者マッピング
- * ({@code user_site_authors})はlegacy-api({@link LegacyApiBridgeClient})への内部ブリッジ経由で行う
+ * ({@code user_site_authors})はidentity-service({@link IdentityBridgeClient})への内部ブリッジ経由で行う
  * (#575設計判断1・2・4)。[plantuml]/```plantumlの埋め込み(CMSメディアライブラリへのアップロードを
  * 伴う)は、CmsAdapter/CmsCredentialsへの依存が強いため引き続きこのクラス自身が行う。
  */
@@ -57,7 +58,8 @@ public class PostPublishService {
     private final PlantUmlEmbedService plantUmlEmbedService;
     private final PlantUmlTagRenderService plantUmlTagRenderService;
     private final CurrentActorService currentActorService;
-    private final LegacyApiBridgeClient legacyApiBridgeClient;
+    private final IdentityBridgeClient identityBridgeClient;
+    private final MediaSettingsBridgeClient mediaSettingsBridgeClient;
     private final ObjectMapper objectMapper;
     private final ImageResizeService imageResizeService;
     private final DomainEventPublisher domainEventPublisher;
@@ -68,7 +70,8 @@ public class PostPublishService {
                                PlantUmlEmbedService plantUmlEmbedService,
                                PlantUmlTagRenderService plantUmlTagRenderService,
                                CurrentActorService currentActorService,
-                               LegacyApiBridgeClient legacyApiBridgeClient,
+                               IdentityBridgeClient identityBridgeClient,
+                               MediaSettingsBridgeClient mediaSettingsBridgeClient,
                                ObjectMapper objectMapper,
                                ImageResizeService imageResizeService,
                                DomainEventPublisher domainEventPublisher,
@@ -79,7 +82,8 @@ public class PostPublishService {
         this.plantUmlEmbedService = plantUmlEmbedService;
         this.plantUmlTagRenderService = plantUmlTagRenderService;
         this.currentActorService = currentActorService;
-        this.legacyApiBridgeClient = legacyApiBridgeClient;
+        this.identityBridgeClient = identityBridgeClient;
+        this.mediaSettingsBridgeClient = mediaSettingsBridgeClient;
         this.objectMapper = objectMapper;
         this.imageResizeService = imageResizeService;
         this.domainEventPublisher = domainEventPublisher;
@@ -210,7 +214,7 @@ public class PostPublishService {
      * 投稿者(CurrentActorServiceが解決するLet's Blogユーザー)に対応する、投稿先サイト上の
      * 既存WordPressユーザーIDを解決する。まずuser_site_authors(legacy-apiが所有し、
      * ProjectUserSyncServiceがプロジェクトメンバー追加/ロール変更のたびに書き込む対応表)を
-     * {@link LegacyApiBridgeClient}経由で参照し、無ければ従来通りメールアドレスでの動的検索に
+     * {@link IdentityBridgeClient}経由で参照し、無ければ従来通りメールアドレスでの動的検索に
      * フォールバックする(見つかればlegacy-apiへその場でキャッシュ書き込みを依頼する。#575設計判断4)。
      * 見つからない・解決に失敗した場合はnullを返し、投稿自体は従来通り(authorId未指定)続行する
      * (著者解決の失敗で投稿全体を失敗させない)。
@@ -221,7 +225,7 @@ public class PostPublishService {
             return null;
         }
         try {
-            Optional<String> cached = legacyApiBridgeClient.findUserSiteAuthor(actorId, siteId);
+            Optional<String> cached = identityBridgeClient.findUserSiteAuthor(actorId, siteId);
             if (cached.isPresent()) {
                 return cached.get();
             }
@@ -231,7 +235,7 @@ public class PostPublishService {
                 return null;
             }
             Optional<String> resolved = cmsAdapter.findAuthorIdByEmail(credentials, email);
-            resolved.ifPresent(cmsAuthorId -> legacyApiBridgeClient.cacheUserSiteAuthor(actorId, siteId, cmsAuthorId));
+            resolved.ifPresent(cmsAuthorId -> identityBridgeClient.cacheUserSiteAuthor(actorId, siteId, cmsAuthorId));
             return resolved.orElse(null);
         } catch (RuntimeException e) {
             log.warn("投稿者のWordPressユーザーID解決に失敗しました(著者未設定のまま投稿を続行します): {}", e.getMessage());
@@ -258,7 +262,7 @@ public class PostPublishService {
         String rewritten = markdown;
         Map<String, String> referenceToUrl = new LinkedHashMap<>();
         String featuredMediaId = null;
-        int articleImageLongEdgePx = legacyApiBridgeClient.resolveArticleImageLongEdgePx(projectId);
+        int articleImageLongEdgePx = mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(projectId);
 
         for (int i = 0; i < images.size(); i++) {
             MultipartFile image = images.get(i);

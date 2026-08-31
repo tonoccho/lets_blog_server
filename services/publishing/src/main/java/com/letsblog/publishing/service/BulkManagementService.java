@@ -1,6 +1,6 @@
 package com.letsblog.publishing.service;
 
-import com.letsblog.publishing.client.LegacyApiBridgeClient;
+import com.letsblog.publishing.client.MediaSettingsBridgeClient;
 import com.letsblog.publishing.cms.CmsAdapter;
 import com.letsblog.publishing.cms.CmsAdapterFactory;
 import com.letsblog.publishing.cms.CmsCredentials;
@@ -39,7 +39,7 @@ import java.util.Set;
  *
  * <p>legacy-apiの{@code com.letsblog.api.service.BulkManagementService}をpublishing-serviceへ
  * 移設したもの(issue #708、Epic #551 C6-2)。プロジェクト単位の投稿画像リサイズ設定
- * (project_image_settings、legacy-api所有)の解決は{@link LegacyApiBridgeClient}経由の内部ブリッジに
+ * (project_image_settings、legacy-api所有)の解決は{@link MediaSettingsBridgeClient}経由の内部ブリッジに
  * 置き換えた({@code ProjectService#resolveArticleImageLongEdgePx}を直接呼んでいた旧実装から変更)。
  */
 @Service
@@ -56,7 +56,7 @@ public class BulkManagementService {
     private final CmsAdapterFactory cmsAdapterFactory;
     private final ProjectService projectService;
     private final ImageResizeService imageResizeService;
-    private final LegacyApiBridgeClient legacyApiBridgeClient;
+    private final MediaSettingsBridgeClient mediaSettingsBridgeClient;
 
     public BulkManagementService(
             WordPressBulkManagementClient bulkManagementClient,
@@ -66,7 +66,7 @@ public class BulkManagementService {
             CmsAdapterFactory cmsAdapterFactory,
             ProjectService projectService,
             ImageResizeService imageResizeService,
-            LegacyApiBridgeClient legacyApiBridgeClient) {
+            MediaSettingsBridgeClient mediaSettingsBridgeClient) {
         this.bulkManagementClient = bulkManagementClient;
         this.bulkUploadStorageService = bulkUploadStorageService;
         this.siteService = siteService;
@@ -74,7 +74,7 @@ public class BulkManagementService {
         this.cmsAdapterFactory = cmsAdapterFactory;
         this.projectService = projectService;
         this.imageResizeService = imageResizeService;
-        this.legacyApiBridgeClient = legacyApiBridgeClient;
+        this.mediaSettingsBridgeClient = mediaSettingsBridgeClient;
     }
 
     /**
@@ -192,7 +192,7 @@ public class BulkManagementService {
      * アセットとしてアップロードする。CmsAdapter.uploadMediaは認証情報(managed/SSH)に応じた
      * トランスポート選択を内部で行うため、applyToSite()のような分岐は不要でサイトごとに委譲するだけでよい。
      * 環境単位で成否をBulkOperationLogへ記録する(1環境の失敗が他環境の実行を止めない)。
-     * アップロード前に、記事本文画像と同じ長編px基準(LegacyApiBridgeClient#resolveArticleImageLongEdgePx)で
+     * アップロード前に、記事本文画像と同じ長編px基準(MediaSettingsBridgeClient#resolveArticleImageLongEdgePx)で
      * リサイズする(issue #440。生成画像はデフォルト1920x1080等でリサイズされずにそのままアップロード
      * されていた)。あわせて、透過を持たないPNGはJPEGへ変換してファイルサイズを削減する
      * (issue #468。ComfyUI生成画像はPNGのため容量が大きい)。全環境で同じ結果を使い回すため、
@@ -202,7 +202,7 @@ public class BulkManagementService {
     public List<BulkOperationLog> uploadImageToAllEnvironments(
             Long projectId, byte[] data, String filename, String contentType, Long actorId) {
         Project project = getProject(projectId);
-        int longEdgePx = legacyApiBridgeClient.resolveArticleImageLongEdgePx(projectId);
+        int longEdgePx = mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(projectId);
         ImageResizeService.ResizeResult resized =
                 imageResizeService.resizeToLongEdge(data, contentType, longEdgePx, true);
         byte[] resizedData = resized.data();

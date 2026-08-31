@@ -2,7 +2,7 @@ package com.letsblog.project.service;
 
 import com.letsblog.project.cms.DatabaseExport;
 import com.letsblog.project.client.CmsProvisioningBridgeClient;
-import com.letsblog.project.client.LegacyApiBridgeClient;
+import com.letsblog.project.client.IdentityBridgeClient;
 import com.letsblog.project.domain.Project;
 import com.letsblog.project.domain.Site;
 import com.letsblog.project.provisioning.WordPressSyncClient;
@@ -20,9 +20,9 @@ import org.springframework.transaction.annotation.Transactional;
  * 限る。同期元は、managedWordpress環境に加え、SSH/wp-cli管理の外部サイトもDB・メディア・テーマのみ
  * 対応する(issue #511)。
  *
- * <p>project_userテーブルはまだlegacy-apiに残る(issue #577 stage2のスコープ外)ため、DB同期完了後の
- * WordPressユーザーロール再整合(issue #514)は{@link LegacyApiBridgeClient#reconcileRolesForSite}
- * 経由でlegacy-apiへ依頼する。
+ * <p>{@code project_users}テーブルはidentity-serviceが所有する(issue #583)ため、DB同期完了後の
+ * WordPressユーザーロール再整合(issue #514)は{@link IdentityBridgeClient#reconcileRolesForSite}
+ * 経由でidentity-serviceへ依頼する。
  */
 @Service
 public class ProjectEnvironmentSyncService {
@@ -35,19 +35,19 @@ public class ProjectEnvironmentSyncService {
     private final SiteService siteService;
     private final WordPressSyncClient syncClient;
     private final CmsProvisioningBridgeClient bridgeClient;
-    private final LegacyApiBridgeClient legacyApiBridgeClient;
+    private final IdentityBridgeClient identityBridgeClient;
     private final CurrentActorService currentActorService;
 
     public ProjectEnvironmentSyncService(
             ProjectRepository projectRepository, SiteRepository siteRepository, SiteService siteService,
             WordPressSyncClient syncClient, CmsProvisioningBridgeClient bridgeClient,
-            LegacyApiBridgeClient legacyApiBridgeClient, CurrentActorService currentActorService) {
+            IdentityBridgeClient identityBridgeClient, CurrentActorService currentActorService) {
         this.projectRepository = projectRepository;
         this.siteRepository = siteRepository;
         this.siteService = siteService;
         this.syncClient = syncClient;
         this.bridgeClient = bridgeClient;
-        this.legacyApiBridgeClient = legacyApiBridgeClient;
+        this.identityBridgeClient = identityBridgeClient;
         this.currentActorService = currentActorService;
     }
 
@@ -80,7 +80,7 @@ public class ProjectEnvironmentSyncService {
         }
 
         if (targets.contains("db")) {
-            legacyApiBridgeClient.reconcileRolesForSite(
+            identityBridgeClient.reconcileRolesForSite(
                     project.getId(), toSite.getId(), currentActorService.getAuthorizationHeader());
         }
     }

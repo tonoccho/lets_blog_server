@@ -1,6 +1,6 @@
 package com.letsblog.content.service;
 
-import com.letsblog.content.client.LegacyApiBridgeClient;
+import com.letsblog.content.client.ProjectBridgeClient;
 import com.letsblog.content.contentcache.ContentCacheService;
 import com.letsblog.content.contentcache.ContentScrapingException;
 import com.letsblog.content.domain.ContentType;
@@ -33,20 +33,20 @@ class BlogCardTagRenderServiceTest {
     private ContentCacheService contentCacheService;
 
     @Mock
-    private LegacyApiBridgeClient legacyApiBridgeClient;
+    private ProjectBridgeClient projectBridgeClient;
 
     @Mock
     private CurrentActorService currentActorService;
 
     private BlogCardTagRenderService service() {
-        return new BlogCardTagRenderService(contentCacheService, legacyApiBridgeClient, currentActorService);
+        return new BlogCardTagRenderService(contentCacheService, projectBridgeClient, currentActorService);
     }
 
     private void stubTagDesign() {
-        LegacyApiBridgeClient.TagDesignResponse response =
-                new LegacyApiBridgeClient.TagDesignResponse("#fff", "#000", "#f00", null, null);
-        lenient().when(legacyApiBridgeClient.resolveTagDesign(any(), anyString(), any())).thenReturn(response);
-        lenient().when(legacyApiBridgeClient.toColors(any()))
+        ProjectBridgeClient.TagDesignResponse response =
+                new ProjectBridgeClient.TagDesignResponse("#fff", "#000", "#f00", null, null);
+        lenient().when(projectBridgeClient.resolveTagDesign(any(), anyString(), any())).thenReturn(response);
+        lenient().when(projectBridgeClient.toColors(any()))
                 .thenReturn(new TagDesignColors("#fff", "#000", "#f00", null));
     }
 
@@ -133,7 +133,7 @@ class BlogCardTagRenderServiceTest {
         String result = service().render("[blogcard https://example.com/article]", null);
 
         assertTrue(result.contains("lb-blogcard"));
-        org.mockito.Mockito.verify(legacyApiBridgeClient, org.mockito.Mockito.atLeastOnce())
+        org.mockito.Mockito.verify(projectBridgeClient, org.mockito.Mockito.atLeastOnce())
                 .resolveTagDesign(org.mockito.ArgumentMatchers.isNull(), anyString(), any());
     }
 }

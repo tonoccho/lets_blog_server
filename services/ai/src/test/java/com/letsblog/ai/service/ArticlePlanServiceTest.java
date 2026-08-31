@@ -2,7 +2,7 @@ package com.letsblog.ai.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.ai.ai.LlmClient;
-import com.letsblog.ai.client.LegacyApiBridgeClient;
+import com.letsblog.ai.client.ProjectBridgeClient;
 import com.letsblog.ai.client.PublishingServiceClient;
 import com.letsblog.ai.domain.ArticlePlanSession;
 import com.letsblog.ai.domain.GenerationJob;
@@ -50,9 +50,9 @@ import static org.mockito.Mockito.when;
  * ArticlePlanServiceの回帰テスト(issue #574でai-serviceへ移設)。
  *
  * <p>GitHubトークン解決とマスター環境サイトの既存カテゴリ/タグ取得はlegacy-apiに残る
- * Project/Site/CmsAdapter/ProjectApiKeyServiceへの直接依存から、{@link LegacyApiBridgeClient}経由の
+ * Project/Site/CmsAdapter/ProjectApiKeyServiceへの直接依存から、{@link ProjectBridgeClient}経由の
  * 内部ブリッジ呼び出しへ置き換わった(ArticlePlanServiceのJavadoc参照)。そのため、これらに関する
- * テストはProject/Site/CmsAdapterのモックではなくLegacyApiBridgeClientのモックで表現している。
+ * テストはProject/Site/CmsAdapterのモックではなくProjectBridgeClientのモックで表現している。
  */
 @ExtendWith(MockitoExtension.class)
 class ArticlePlanServiceTest {
@@ -76,7 +76,7 @@ class ArticlePlanServiceTest {
     private ArticlePlanSessionRepository articlePlanSessionRepository;
 
     @Mock
-    private LegacyApiBridgeClient legacyApiBridgeClient;
+    private ProjectBridgeClient projectBridgeClient;
 
     @Mock
     private PublishingServiceClient publishingServiceClient;
@@ -108,17 +108,17 @@ class ArticlePlanServiceTest {
         lenient().when(currentActorService.getAuthorizationHeader()).thenReturn(null);
         return new ArticlePlanService(
                 llmClient, llmModelService, webSearchService, generationJobRepository, objectMapper,
-                githubClient, articlePlanSessionRepository, legacyApiBridgeClient, publishingServiceClient,
+                githubClient, articlePlanSessionRepository, projectBridgeClient, publishingServiceClient,
                 currentActorService);
     }
 
     private void stubGithubAccess(Long projectId, Long userId, String token, String owner, String repo) {
-        when(legacyApiBridgeClient.resolveGithubAccess(projectId, userId, null))
-                .thenReturn(new LegacyApiBridgeClient.GithubAccess(token, owner, repo));
+        when(projectBridgeClient.resolveGithubAccess(projectId, userId, null))
+                .thenReturn(new ProjectBridgeClient.GithubAccess(token, owner, repo));
     }
 
     private void stubGithubAccessNotConfigured(Long projectId, Long userId) {
-        when(legacyApiBridgeClient.resolveGithubAccess(projectId, userId, null))
+        when(projectBridgeClient.resolveGithubAccess(projectId, userId, null))
                 .thenThrow(new IllegalStateException(
                         "このプロジェクトにGitHubリポジトリが紐付けられていません。プロジェクト詳細ページから設定してください。"));
     }

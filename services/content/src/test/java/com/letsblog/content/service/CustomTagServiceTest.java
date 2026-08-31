@@ -1,6 +1,6 @@
 package com.letsblog.content.service;
 
-import com.letsblog.content.client.LegacyApiBridgeClient;
+import com.letsblog.content.client.ProjectBridgeClient;
 import com.letsblog.content.domain.CustomTag;
 import com.letsblog.content.dto.CustomTagRequest;
 import com.letsblog.content.dto.CustomTagResponse;
@@ -46,7 +46,7 @@ class CustomTagServiceTest {
     @Mock
     private AdminAuthorizationService adminAuthorizationService;
     @Mock
-    private LegacyApiBridgeClient legacyApiBridgeClient;
+    private ProjectBridgeClient projectBridgeClient;
     @Mock
     private CurrentActorService currentActorService;
     @Mock
@@ -65,7 +65,7 @@ class CustomTagServiceTest {
         service = new CustomTagService(
                 customTagRepository,
                 adminAuthorizationService,
-                legacyApiBridgeClient,
+                projectBridgeClient,
                 currentActorService,
                 tocStyleRenderService,
                 blogCardTagRenderService,
@@ -415,9 +415,9 @@ class CustomTagServiceTest {
     // ------------------------------------------------------------------
 
     private void stubEmbedTagCss() {
-        when(legacyApiBridgeClient.resolveTagDesign(eq(PROJECT_ID), any(), any()))
-                .thenReturn(new LegacyApiBridgeClient.TagDesignResponse("#fff", "#000", "#00f", null, null));
-        when(legacyApiBridgeClient.toColors(any())).thenReturn(new TagDesignColors("#fff", "#000", "#00f", null));
+        when(projectBridgeClient.resolveTagDesign(eq(PROJECT_ID), any(), any()))
+                .thenReturn(new ProjectBridgeClient.TagDesignResponse("#fff", "#000", "#00f", null, null));
+        when(projectBridgeClient.toColors(any())).thenReturn(new TagDesignColors("#fff", "#000", "#00f", null));
         when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer token");
         when(tocStyleRenderService.buildStyle(any())).thenReturn(".lb-toc{color:red;}");
         when(blogCardTagRenderService.buildStyle(any())).thenReturn(".lb-blogcard{color:blue;}");

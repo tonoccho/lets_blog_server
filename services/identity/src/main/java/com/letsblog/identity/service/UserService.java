@@ -178,6 +178,18 @@ public class UserService {
         }
     }
 
+    /**
+     * 利用者個人のGitHubトークン(暗号化済み)。未設定なら{@code null}。
+     * project-service の GitHub アクセス解決が内部ブリッジ経由で使う(issue #583)。
+     * 復号は呼び出し元が全サービス共通の{@code APP_ENCRYPTION_KEY}で行う。
+     */
+    @Transactional(readOnly = true)
+    public byte[] getGithubTokenEncrypted(Long id) {
+        return userRepository.findById(id)
+                .orElseThrow(() -> new UserNotFoundException("id " + id + " のユーザーは登録されていません"))
+                .getGithubTokenEncrypted();
+    }
+
     @Transactional
     public UserResponse update(Long id, UserUpdateRequest request) {
         User user = userRepository.findById(id)

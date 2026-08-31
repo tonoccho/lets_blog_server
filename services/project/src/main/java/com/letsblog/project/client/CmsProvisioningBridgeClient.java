@@ -26,7 +26,7 @@ import org.springframework.web.client.RestClientException;
  * <p>WordPressへの実際の接続処理(SSH/wp-cliエージェント経由、{@code CmsAdapter}/{@code WordPressSshOperations})は
  * publishing-service側に集約されたまま(media-service(#573→#709)のCmsBridgeClientと同じ方針)。
  * project-serviceは復号したその場限りの認証情報(SSH秘密鍵等を含む)をこの呼び出しの間だけ送り、
- * publishing-service側では永続化しない。認証は他の内部ブリッジ(LegacyApiBridgeClient等)と同じ暫定策
+ * publishing-service側では永続化しない。認証は他の内部ブリッジ(IdentityBridgeClient等)と同じ暫定策
  * (呼び出し元ユーザーのBearerトークンをそのまま転送する)。
  *
  * <p>SSH接続・wp-cli実行・DB/メディア/テーマのエクスポートは数十秒かかりうるため、

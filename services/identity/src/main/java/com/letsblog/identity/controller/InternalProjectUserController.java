@@ -5,6 +5,7 @@ import com.letsblog.identity.dto.RoleOptionResponse;
 import com.letsblog.identity.dto.UserSiteAuthorBridgeResponse;
 import com.letsblog.identity.service.ProjectUserSyncService;
 import com.letsblog.identity.service.RoleService;
+import com.letsblog.identity.service.UserService;
 import java.util.List;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -36,11 +37,13 @@ public class InternalProjectUserController {
 
     private final ProjectUserSyncService projectUserSyncService;
     private final RoleService roleService;
+    private final UserService userService;
 
     public InternalProjectUserController(
-            ProjectUserSyncService projectUserSyncService, RoleService roleService) {
+            ProjectUserSyncService projectUserSyncService, RoleService roleService, UserService userService) {
         this.projectUserSyncService = projectUserSyncService;
         this.roleService = roleService;
+        this.userService = userService;
     }
 
     /**
@@ -109,5 +112,26 @@ public class InternalProjectUserController {
     public ResponseEntity<Void> reconcileRolesForSite(@PathVariable Long projectId, @PathVariable Long siteId) {
         projectUserSyncService.reconcileRolesForSite(projectId, siteId);
         return ResponseEntity.noContent().build();
+    }
+
+    /** 利用者個人のGitHubトークン(暗号化済みバイト列)。未設定なら{@code configured=false}。 */
+    public record UserGithubTokenBridgeResponse(boolean configured, byte[] encryptedToken) {
+    }
+
+    /**
+     * 認可不要: {@link #isProjectMember}と同じ理由(gateway非経由・呼び出し元が認可済み、issue #583)。
+     *
+     * <p>project-service の GitHub アクセス解決が使う。プロジェクト自身のトークンが未設定のとき、
+     * 操作者本人のユーザー設定へフォールバックするため({@code ArticlePlanService#resolveGithubAccess}
+     * と同じ優先順)。
+     *
+     * <p><b>復号はしない。</b>暗号化済みバイト列のまま返し、呼び出し元が全サービス共通の
+     * {@code APP_ENCRYPTION_KEY}で復号する。#583以前は legacy-api が同一プロセス内で復号し
+     * <b>平文のトークンをHTTPで</b>返していたので、この経路のほうが安全側である。
+     */
+    @GetMapping("/users/{userId}/github-token")
+    public UserGithubTokenBridgeResponse userGithubToken(@PathVariable Long userId) {
+        byte[] encrypted = userService.getGithubTokenEncrypted(userId);
+        return new UserGithubTokenBridgeResponse(encrypted != null && encrypted.length > 0, encrypted);
     }
 }

@@ -1,7 +1,7 @@
 package com.letsblog.ai.integration;
 
 import com.letsblog.common.client.IdentityClient;
-import com.letsblog.ai.client.LegacyApiBridgeClient;
+import com.letsblog.ai.client.IdentityBridgeClient;
 import com.letsblog.common.testfixtures.AuthorizationMatrixContract;
 import com.letsblog.common.testfixtures.AuthorizationMatrixContract.Endpoint;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
@@ -58,7 +58,7 @@ class AuthorizationMatrixIntegrationTest {
     private IdentityClient identityClient;
 
     @MockitoBean
-    private LegacyApiBridgeClient legacyApiBridgeClient;
+    private IdentityBridgeClient identityBridgeClient;
 
     /**
      * ai-serviceがgateway経由で外部へ公開している全エンドポイント(gatewayの{@code ai}ルート:

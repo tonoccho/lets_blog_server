@@ -1,7 +1,8 @@
 package com.letsblog.publishing.service;
 
 import com.letsblog.publishing.client.ContentServiceClient;
-import com.letsblog.publishing.client.LegacyApiBridgeClient;
+import com.letsblog.publishing.client.IdentityBridgeClient;
+import com.letsblog.publishing.client.MediaSettingsBridgeClient;
 import com.letsblog.publishing.client.ProjectServiceClient;
 import com.letsblog.publishing.cms.CmsAdapter;
 import com.letsblog.publishing.cms.CmsAdapterFactory;
@@ -49,7 +50,7 @@ import static org.mockito.Mockito.when;
  * PostPublishServiceの回帰テスト(legacy-apiから移設。issue #707)。画像ファイル名リネーム
  * ({slug}-{4桁連番}.{拡張子})とfeatured_image指定時のfeatured_media解決を中心に検証する。サイト本体・
  * CMS認証情報はProjectServiceClient、カスタムタグ/組み込みタグの展開・HTML変換・postsテーブルの
- * 読み書きはContentServiceClient、著者マッピング(user_site_authors)はLegacyApiBridgeClient経由に
+ * 読み書きはContentServiceClient、著者マッピング(user_site_authors)はIdentityBridgeClient経由に
  * なったため(#575設計判断1・2・4)、それらのモックへ差し替えている。
  */
 @ExtendWith(MockitoExtension.class)
@@ -68,7 +69,10 @@ class PostPublishServiceTest {
     @Mock
     private CurrentActorService currentActorService;
     @Mock
-    private LegacyApiBridgeClient legacyApiBridgeClient;
+    private IdentityBridgeClient identityBridgeClient;
+
+    @Mock
+    private MediaSettingsBridgeClient mediaSettingsBridgeClient;
     @Mock
     private CmsAdapter cmsAdapter;
     @Mock
@@ -85,7 +89,7 @@ class PostPublishServiceTest {
     void setUp() {
         service = new PostPublishService(projectServiceClient, cmsAdapterFactory, contentServiceClient,
                 plantUmlEmbedService, plantUmlTagRenderService,
-                currentActorService, legacyApiBridgeClient,
+                currentActorService, identityBridgeClient, mediaSettingsBridgeClient,
                 new com.fasterxml.jackson.databind.ObjectMapper(), new ImageResizeService(), domainEventPublisher,
                 adminAuthorizationService);
 
@@ -113,8 +117,8 @@ class PostPublishServiceTest {
         lenient().when(cmsAdapter.postExists(any(), any())).thenReturn(true);
         lenient().when(cmsAdapter.mediaExists(any(), any())).thenReturn(true);
         lenient().when(currentActorService.getCurrentActorId()).thenReturn(null);
-        lenient().when(legacyApiBridgeClient.findUserSiteAuthor(any(), any())).thenReturn(Optional.empty());
-        lenient().when(legacyApiBridgeClient.resolveArticleImageLongEdgePx(any())).thenReturn(1300);
+        lenient().when(identityBridgeClient.findUserSiteAuthor(any(), any())).thenReturn(Optional.empty());
+        lenient().when(mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(any())).thenReturn(1300);
     }
 
     private PostPublishCommand command(String slug, String title, List<MultipartFile> images, String featuredImageFilename) {
@@ -320,7 +324,7 @@ class PostPublishServiceTest {
         when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
                 .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
         when(currentActorService.getCurrentActorId()).thenReturn(10L);
-        when(legacyApiBridgeClient.findUserSiteAuthor(10L, 1L)).thenReturn(Optional.of("7"));
+        when(identityBridgeClient.findUserSiteAuthor(10L, 1L)).thenReturn(Optional.of("7"));
 
         service.publish(command("my-article", "My Article", List.of(), null));
 
@@ -340,7 +344,7 @@ class PostPublishServiceTest {
 
         service.publish(command("my-article", "My Article", List.of(), null));
 
-        verify(legacyApiBridgeClient).cacheUserSiteAuthor(10L, 1L, "7");
+        verify(identityBridgeClient).cacheUserSiteAuthor(10L, 1L, "7");
     }
 
     @Test
@@ -360,7 +364,7 @@ class PostPublishServiceTest {
         when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
                 .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
         when(currentActorService.getCurrentActorId()).thenReturn(10L);
-        when(legacyApiBridgeClient.findUserSiteAuthor(10L, 1L)).thenThrow(new RuntimeException("接続エラー"));
+        when(identityBridgeClient.findUserSiteAuthor(10L, 1L)).thenThrow(new RuntimeException("接続エラー"));
 
         PostPublishResponse response = service.publish(command("my-article", "My Article", List.of(), null));
 
@@ -377,7 +381,7 @@ class PostPublishServiceTest {
         ArgumentCaptor<byte[]> bytesCaptor = ArgumentCaptor.forClass(byte[].class);
         when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.jpg"), any(), bytesCaptor.capture()))
                 .thenReturn(new MediaUploadResult("1", "https://example.com/wp-content/uploads/1.jpg"));
-        when(legacyApiBridgeClient.resolveArticleImageLongEdgePx(any())).thenReturn(100);
+        when(mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(any())).thenReturn(100);
 
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "eyecatch.png", "image/png", renderPng(400, 200)));
@@ -399,7 +403,7 @@ class PostPublishServiceTest {
         ArgumentCaptor<byte[]> bytesCaptor = ArgumentCaptor.forClass(byte[].class);
         when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.jpg"), any(), bytesCaptor.capture()))
                 .thenReturn(new MediaUploadResult("1", "https://example.com/wp-content/uploads/1.jpg"));
-        when(legacyApiBridgeClient.resolveArticleImageLongEdgePx(any())).thenReturn(1300);
+        when(mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(any())).thenReturn(1300);
 
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "eyecatch.png", "image/png", renderPng(400, 200)));

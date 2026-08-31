@@ -30,7 +30,7 @@ spring:
       reply-timeout: 1000
 
 app:
-  legacy-api-uri: http://localhost:19999
+  project-service-uri: http://localhost:19999
   identity-service-uri: http://localhost:19999
   media-service-uri: http://localhost:19999
   ai-service-uri: http://localhost:19999

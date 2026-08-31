@@ -1,6 +1,6 @@
 package com.letsblog.analytics.integration;
 
-import com.letsblog.analytics.client.LegacyApiBridgeClient;
+import com.letsblog.analytics.client.IdentityBridgeClient;
 import com.letsblog.common.client.ActorProfile;
 import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
@@ -31,7 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 検証する。
  *
  * <p>identity-serviceは外部境界のため{@link IdentityClient}を{@code @MockitoBean}で置き換える
- * (ADR-0006のモック方針)。{@link LegacyApiBridgeClient#isProjectMember}は非member/admin判定に
+ * (ADR-0006のモック方針)。{@link IdentityBridgeClient#isProjectMember}は非member/admin判定に
  * 必要なためモックする。認可通過後に呼ばれる{@code getProjectEligibility}は、legacy-apiが
  * テスト環境で稼働していないため接続失敗(502)にはなるが、403にはならないため「403にならない」
  * ケースの検証には影響しない。
@@ -54,7 +54,7 @@ class AdminAuthorizationIntegrationTest {
     private IdentityClient identityClient;
 
     @MockitoBean
-    private LegacyApiBridgeClient legacyApiBridgeClient;
+    private IdentityBridgeClient identityBridgeClient;
 
     @Test
     @DisplayName("Authorizationヘッダーなしは401(issue #772でSecurityConfigの認証ゲートを復元したため、"
@@ -77,7 +77,7 @@ class AdminAuthorizationIntegrationTest {
     void 非メンバー非adminは403() throws Exception {
         when(jwtDecoder.decode("member-check-jwt")).thenReturn(JwtTestFixtures.jwt("sub-1", "user"));
         when(identityClient.fetchProfile("Bearer member-check-jwt")).thenReturn(new ActorProfile(10L, "user"));
-        when(legacyApiBridgeClient.isProjectMember(42L, 10L, "Bearer member-check-jwt")).thenReturn(false);
+        when(identityBridgeClient.isProjectMember(42L, 10L, "Bearer member-check-jwt")).thenReturn(false);
 
         mockMvc.perform(get(GA_REPORT_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer member-check-jwt"))
                 .andExpect(status().isForbidden());
@@ -88,7 +88,7 @@ class AdminAuthorizationIntegrationTest {
     void プロジェクトメンバーは403にならない() throws Exception {
         when(jwtDecoder.decode("member-jwt")).thenReturn(JwtTestFixtures.jwt("sub-2", "user"));
         when(identityClient.fetchProfile("Bearer member-jwt")).thenReturn(new ActorProfile(11L, "user"));
-        when(legacyApiBridgeClient.isProjectMember(42L, 11L, "Bearer member-jwt")).thenReturn(true);
+        when(identityBridgeClient.isProjectMember(42L, 11L, "Bearer member-jwt")).thenReturn(true);
 
         mockMvc.perform(get(GA_REPORT_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer member-jwt"))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(403));
