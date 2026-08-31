@@ -162,6 +162,7 @@ npm run test:a11y                      # アクセシビリティのみ
 
 npm run test:at                        # 受け入れテスト(.feature)を全件
 npm run test:at:fast                   # 受け入れテストから @slow / @destructive を除く
+npm run test:at:clean                  # 環境をリセットしてから段階順に全実行(破壊的)
 
 npx playwright test --project=chromium              # ブラウザを絞る
 npx playwright test e2e/main-scenario.spec.ts       # ファイルを絞る
@@ -185,6 +186,7 @@ npx playwright test -g "サイトを登録して記事を公開"     # テスト
 | `E2E_TEST_PASSWORD` | (なし) | `e2e-test@letsblog.local` のパスワード。未設定なら該当 spec をスキップ |
 | `E2E_ADMIN_PASSWORD` | (なし) | `e2e-admin@letsblog.local` のパスワード。未設定なら該当 spec をスキップ |
 | `E2E_SKIP_HEALTH_WAIT` | (なし) | `1` で globalSetup の healthy 待ちをスキップ(docker CLI が無い環境等) |
+| `ACCEPTANCE_RESET` | (なし) | `1` で受け入れテスト環境をリセットしてから開始(破壊的。issue #945。[ACCEPTANCE_TESTING.md](ACCEPTANCE_TESTING.md) §10) |
 | `COMPOSE_PROJECT_NAME` | リポジトリのディレクトリ名 | healthy 待ちが対象とする compose プロジェクト(issue #842) |
 | `E2E_REQUIRE_LLM` | (なし) | `1` でLLM生成の失敗をスキップせず失敗させる(issue #843) |
 
