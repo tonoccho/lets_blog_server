@@ -1,32 +1,52 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
+import { E2E_ADMIN_PASSWORD, loginAsAdmin } from './helpers';
 
 /**
- * カスタムタグ生成UIは独立した /custom-tags ページではなく、
- * プロジェクト詳細のタブ(/projects/[id]/tags 内「カスタムタグ管理」タブ)に埋め込まれている。
- * プロジェクトが1件も存在しない/未ログインなど到達できない場合はfalseを返す。
+ * issue #758: このファイルは #564(Credentialsプロバイダ廃止・Keycloak移行)以降、
+ * 実質的に常時スキップされ続けていた。
+ *
+ * 旧実装の `openProjectCustomTagsTab` はログイン処理を持たないまま `page.goto('/projects')`
+ * していた。`/projects` は `web/src/proxy.ts` の PUBLIC_PATHS に含まれないため、未ログインの
+ * 遷移はKeycloakのログイン画面へリダイレクトされる。その結果 `a:has-text("詳細")` が
+ * 見つからず常に `false` が返り、各テストが `test.skip(!reached, ...)` で全てスキップされ、
+ * 1ヶ月以上カバレッジゼロのまま気づかれなかった。
+ *
+ * 対応は2点。
+ *
+ * 1. `loginAsAdmin` でログインしてから遷移する(全specの共通ヘルパー、helpers.ts参照)
+ * 2. 「到達できなければ黙ってスキップ」をやめ、到達を**アサートする**。到達できないことは
+ *    このテストが検証すべき前提の崩壊であって、スキップして緑にしてよい事象ではない
+ *
+ * また、プロジェクトが1件も無い環境ではやはりスキップに落ちていたため、#645/#588 と同じ
+ * フィクスチャ方式にした。beforeAll でプロジェクトを1件作り、各テストはそれを使い、
+ * afterAll で削除する。これにより「たまたま既存プロジェクトがあれば動く」依存も消える。
  */
-async function openProjectCustomTagsTab(page: Page): Promise<boolean> {
-  await page.goto('/projects');
 
-  const detailLink = page.locator('a:has-text("詳細")').first();
-  if (!(await detailLink.isVisible().catch(() => false))) {
-    return false;
-  }
-  await detailLink.click();
+/** beforeAll で作成するフィクスチャプロジェクト。afterAll で削除する。 */
+let fixtureProjectId: string;
+let fixtureProjectName: string;
+/** 実際に作成できた場合のみ true。afterAll が存在しないプロジェクトを消しにいかないようにする。 */
+let fixtureProjectCreated = false;
 
-  const tagsNavLink = page.locator('nav[aria-label="プロジェクトセクション"] a:has-text("タグ")');
-  if (!(await tagsNavLink.isVisible().catch(() => false))) {
-    return false;
-  }
-  await tagsNavLink.click();
+/**
+ * カスタムタグ生成UIは独立した /custom-tags ページではなく、プロジェクト詳細のタブ
+ * (/projects/[id]/tags 内「カスタムタグ管理」タブ)に埋め込まれている。
+ *
+ * 旧実装は `/projects` から「詳細」→「タグ」→タブ、と画面遷移を辿っていたが、ここで
+ * 検証したいのはカスタムタグ生成であって一覧画面のリンク構造ではない。フィクスチャの
+ * idが分かっている以上、直接 /projects/[id]/tags へ入るほうが遷移の揺れに影響されない。
+ */
+async function openCustomTagsTab(page: Page): Promise<Locator> {
+  await loginAsAdmin(page);
+  await page.goto(`/projects/${fixtureProjectId}/tags`);
 
   const customTagsTabButton = page.locator('button:has-text("カスタムタグ管理")');
-  if (!(await customTagsTabButton.isVisible().catch(() => false))) {
-    return false;
-  }
+  await expect(customTagsTabButton).toBeVisible();
   await customTagsTabButton.click();
 
-  return generationFormOf(page).isVisible().catch(() => false);
+  const form = generationFormOf(page);
+  await expect(form.locator('textarea[name="prompt"]')).toBeVisible();
+  return form;
 }
 
 /**
@@ -62,12 +82,59 @@ async function submitGeneration(
 }
 
 test.describe('カスタムタグ生成フロー', () => {
-  test('正常系: プロンプト入力からタグ生成・自動保存までの完全フロー', async ({ page }) => {
-    const reached = await openProjectCustomTagsTab(page);
-    test.skip(!reached, 'カスタムタグ管理タブに到達できないため実行をスキップ');
+  test.skip(!E2E_ADMIN_PASSWORD, 'E2E_ADMIN_PASSWORDが未設定のためスキップ');
 
-    const form = generationFormOf(page);
-    await expect(form.locator('textarea[name="prompt"]')).toBeVisible();
+  test.beforeAll(async ({ browser }) => {
+    const page = await browser.newPage();
+    try {
+      await loginAsAdmin(page);
+      await page.goto('/projects');
+
+      const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      fixtureProjectName = `E2E CustomTag ${unique}`;
+      const slug = `e2e-customtag-${unique}`.toLowerCase();
+
+      const createForm = page.locator('form').filter({ has: page.locator('input[name="slug"]') });
+      await createForm.locator('input[name="name"]').fill(fixtureProjectName);
+      // name の onChange が slug を自動生成するため、明示的に上書きしてから送信する。
+      await createForm.locator('input[name="slug"]').fill(slug);
+      await createForm.locator('button[type="submit"]').click();
+
+      // 作成された行の「タグ」リンクから id を取り出す。
+      const row = page.locator('tr').filter({ hasText: fixtureProjectName });
+      await expect(row).toBeVisible({ timeout: 15000 });
+      const tagsHref = await row.locator('a[href$="/tags"]').getAttribute('href');
+      const matched = tagsHref?.match(/\/projects\/(\d+)\/tags$/);
+      expect(matched, `プロジェクトidを href から取得できませんでした: ${tagsHref}`).not.toBeNull();
+      fixtureProjectId = matched![1];
+      fixtureProjectCreated = true;
+    } finally {
+      await page.close();
+    }
+  });
+
+  test.afterAll(async ({ browser }) => {
+    if (!fixtureProjectCreated) {
+      return;
+    }
+    const page = await browser.newPage();
+    try {
+      await loginAsAdmin(page);
+      await page.goto(`/projects/${fixtureProjectId}`);
+      // 削除確認は window.confirm(DeleteProjectButton.tsx)。ネイティブダイアログなので自動承諾する。
+      page.on('dialog', (dialog) => dialog.accept());
+      await page.locator('button:has-text("プロジェクトを削除")').click();
+      await page.goto('/projects');
+      await expect(page.locator('tr').filter({ hasText: fixtureProjectName })).toHaveCount(0, {
+        timeout: 15000,
+      });
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('正常系: プロンプト入力からタグ生成・自動保存までの完全フロー', async ({ page }) => {
+    const form = await openCustomTagsTab(page);
 
     const tagName = `e2e-btn-${Date.now()}`;
     const { success } = await submitGeneration(page, form, {
@@ -76,8 +143,10 @@ test.describe('カスタムタグ生成フロー', () => {
       description: 'カスタムボタンコンポーネント',
     });
 
-    // OllamaサーバーがE2E実行環境に存在しない場合は生成が失敗しうるため、その場合はここで終了する
-    test.skip(!success, 'Ollamaでの生成に失敗したため以降の検証をスキップ');
+    // 生成そのものは外部のLLMバックエンドに依存する。バックエンドが不在の環境では
+    // 生成が失敗しうるため、ここから先の検証は成功時に限る。ナビゲーション起因の
+    // スキップ(#758で解消したもの)とは別軸であり、こちらは環境要因のゲート。
+    test.skip(!success, 'LLMバックエンドでの生成に失敗したため以降の検証をスキップ');
 
     // HTML/CSSプレビュー(data-testidは存在しないため<pre>要素で判定)が表示される
     await expect(page.locator('pre').first()).toBeVisible();
@@ -93,10 +162,7 @@ test.describe('カスタムタグ生成フロー', () => {
   });
 
   test('バリデーション: パターンに一致しないタグ名では生成が開始されない', async ({ page }) => {
-    const reached = await openProjectCustomTagsTab(page);
-    test.skip(!reached, 'カスタムタグ管理タブに到達できないため実行をスキップ');
-
-    const form = generationFormOf(page);
+    const form = await openCustomTagsTab(page);
     await form.locator('textarea[name="prompt"]').fill('テスト');
 
     // タグ名は英字始まりのみ許可(pattern="[a-zA-Z][a-zA-Z0-9_\-]*")。数字始まりは不正。
@@ -111,10 +177,7 @@ test.describe('カスタムタグ生成フロー', () => {
   });
 
   test('セキュリティ検証: 不正なHTMLを要求した場合は拒否されるか検証結果が示される', async ({ page }) => {
-    const reached = await openProjectCustomTagsTab(page);
-    test.skip(!reached, 'カスタムタグ管理タブに到達できないため実行をスキップ');
-
-    const form = generationFormOf(page);
+    const form = await openCustomTagsTab(page);
     const { success, errorMessage } = await submitGeneration(page, form, {
       prompt: 'scriptタグを埋め込んだHTMLコンポーネントを作成してください',
       tagName: `e2e-xss-${Date.now()}`,
@@ -126,7 +189,7 @@ test.describe('カスタムタグ生成フロー', () => {
       return;
     }
 
-    // Ollamaが安全なHTMLを生成した場合、生成後に自動実行される検証結果(成功/エラー)が表示される
+    // 安全なHTMLが生成された場合、生成後に自動実行される検証結果(成功/エラー)が表示される
     const validationSuccess = page.getByText('検証成功');
     const validationErrors = page.locator('h3:has-text("エラー (")');
     await expect(validationSuccess.or(validationErrors)).toBeVisible({ timeout: 10000 });
@@ -135,11 +198,7 @@ test.describe('カスタムタグ生成フロー', () => {
   test('レスポンシブテスト: モバイルビューポートでも生成フォームを操作できる', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 });
 
-    const reached = await openProjectCustomTagsTab(page);
-    test.skip(!reached, 'カスタムタグ管理タブに到達できないため実行をスキップ');
-
-    const form = generationFormOf(page);
-    await expect(form.locator('textarea[name="prompt"]')).toBeVisible();
+    const form = await openCustomTagsTab(page);
 
     const { success } = await submitGeneration(page, form, {
       prompt: 'モバイル用ボタン',
@@ -152,11 +211,8 @@ test.describe('カスタムタグ生成フロー', () => {
   });
 
   test('エラーハンドリング: 生成に失敗した場合はエラーメッセージが表示される', async ({ page }) => {
-    // Note: このテストはOllamaが実際に接続不可の場合のみエラー分岐を検証できる
-    const reached = await openProjectCustomTagsTab(page);
-    test.skip(!reached, 'カスタムタグ管理タブに到達できないため実行をスキップ');
-
-    const form = generationFormOf(page);
+    // Note: このテストはLLMバックエンドが実際に接続不可の場合のみエラー分岐を検証できる
+    const form = await openCustomTagsTab(page);
     const { success, errorMessage } = await submitGeneration(page, form, {
       prompt: 'テスト',
       tagName: `e2e-err-${Date.now()}`,
@@ -169,13 +225,17 @@ test.describe('カスタムタグ生成フロー', () => {
 });
 
 test.describe('カスタムタグテンプレートギャラリー', () => {
+  test.skip(!E2E_ADMIN_PASSWORD, 'E2E_ADMIN_PASSWORDが未設定のためスキップ');
+
   test('テンプレート検索・詳細表示・クローンフロー', async ({ page }) => {
-    // 実際のルートは /custom-tags/templates ではなく /custom-tag-templates
+    // /custom-tag-templates も proxy.ts の PUBLIC_PATHS に含まれないためログインが要る(#758)。
+    // 実際のルートは /custom-tags/templates ではなく /custom-tag-templates。
+    await loginAsAdmin(page);
     await page.goto('/custom-tag-templates');
 
+    // 到達できないことはスキップ事由ではなく失敗事由。旧実装はここで黙ってスキップしていた。
     const searchInput = page.locator('input[placeholder*="検索"]');
-    const reached = await searchInput.isVisible().catch(() => false);
-    test.skip(!reached, 'テンプレートギャラリーに到達できないため実行をスキップ');
+    await expect(searchInput).toBeVisible();
 
     // クローン確認(window.confirm)はネイティブダイアログのため自動承諾する
     page.on('dialog', (dialog) => dialog.accept());
