@@ -83,7 +83,9 @@ released version, and the mistake was invisible in the PR itself: the diff looke
 the PR page gave no warning.
 
 An unexpectedly huge diff on what should be a small change is the symptom. If you see it,
-**check the base before merging.**
+**check the base before merging.** This matters more now that `complete-issue` merges
+automatically: the base check here is the last human-legible chance to catch a wrong base
+before the squash lands.
 
 ---
 
@@ -138,6 +140,9 @@ Examples:
 - `docs: update local development guide`
 
 The title should describe the user-visible or architectural purpose of the change.
+
+Because merges are squashed, this title becomes the commit subject on `develop`. Write it as
+the commit message you want in the history.
 
 Avoid vague titles such as:
 
@@ -250,7 +255,7 @@ Do not claim the Pull Request was created unless the creation was confirmed.
 
 This skill is normally invoked from `qa-issue` Step 5a, after the Issue has already passed internal Review and QA. In that case:
 
-Do not change the Issue's GitHub status. It should already be `QA`, and stays `QA` — a human still needs to merge the Pull Request.
+Do not change the Issue's GitHub status. It should already be `QA`, and stays `QA` — the merge and the move to `Done` belong to `complete-issue`, which runs after this skill.
 
 If this skill is ever invoked standalone, before internal Review/QA have run, do not move the Issue to:
 
@@ -266,7 +271,9 @@ not:
 
 `Finished and merged`
 
-Moving the Issue to `Done` happens only via the `complete-issue` skill, after the user confirms the Pull Request was merged.
+Moving the Issue to `Done` happens only via the `complete-issue` skill, which merges the Pull Request and then finalizes the Issue.
+
+Never merge the Pull Request from this skill. Creating it and merging it are deliberately separate steps.
 
 ---
 
@@ -297,7 +304,7 @@ Validation:
 - integration tests: PASS / NOT APPLICABLE
 
 Issue Status:
-QA (awaiting merge)
+QA (awaiting `complete-issue`)
 
 ---
 
@@ -336,4 +343,4 @@ The Pull Request workflow is complete only when:
 - The Issue relationship is documented.
 - The PR description accurately describes the work.
 - Validation results are accurately reported.
-- The Issue's status is left at `QA`, awaiting the user's merge confirmation (`complete-issue` handles the move to `Done`).
+- The Issue's status is left at `QA`, awaiting `complete-issue` (which merges the PR and moves it to `Done`).

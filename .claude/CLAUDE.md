@@ -131,12 +131,13 @@ Every skill and agent declares its model explicitly in frontmatter, chosen by wh
 | Running commands (git, `gh`) with no judgment | `haiku` |
 | Comparing simple properties (status, priority, dependency counts) | `haiku` |
 | Verifying tests or inspecting Issues | `sonnet` |
+| Merging a Pull Request (irreversible; gated on preconditions) | `sonnet` |
 | Implementing production code, or authoring Issues | `opus` |
 
 Resulting assignments:
 
-- `haiku` — `git-workflow`, `complete-issue`, `triage-backlog`, `ready-issue`
-- `sonnet` — `pull-request`, `work-next`, `review-issue`, `qa-issue`; the `reviewer` and `qa` agents
+- `haiku` — `git-workflow`, `triage-backlog`, `ready-issue`
+- `sonnet` — `pull-request`, `work-next`, `review-issue`, `qa-issue`, `complete-issue`; the `reviewer` and `qa` agents
 - `opus` — `implement-issue`, `plan-issue`, `discover-issues`; the `implementer` agent
 
 Two deliberate exceptions:
@@ -150,20 +151,21 @@ Never edit production code on anything below Opus.
 
 # Autonomous Task Execution
 
-Once a task is started via `work-next` (or an equivalent "implement the next task" request), it must proceed through Implementation → Review → QA → Pull Request without stopping to ask the user whether to continue at each stage.
+Once a task is started via `work-next` (or an equivalent "implement the next task" request), it must proceed through Implementation → Review → QA → Pull Request → Merge without stopping to ask the user whether to continue at each stage. The merge is a squash merge performed by `complete-issue`; once QA has passed and the Pull Request is open, it does not need a separate confirmation.
 
 A recoverable stage outcome — implementation issues, Review `CHANGES REQUIRED`, QA `FAIL` — must loop back into implementation automatically and retry. Do not pause for user confirmation before retrying.
 
-The workflow may still stop before a Pull Request exists, but only for a genuine blocker:
+The workflow may still stop before the Pull Request is merged, but only for a genuine blocker:
 
 - A requirement ambiguity only the user can resolve (Review `REQUIREMENT CLARIFICATION`, or a blocking question raised during implementation).
 - QA `BLOCKED` (verification itself cannot proceed).
 - A per-stage retry limit is exceeded without resolving the problem (see `work-next`).
+- The Pull Request cannot be merged as-is: a merge conflict, a draft, or a blocked merge state. Never resolve this by forcing the merge.
 - A live-system mutation would require explicit confirmation (see existing Keycloak / production DB rules).
 - Two well-evidenced verdicts on the same Issue disagree and only the user can settle it
   (see **Dependency Resolution** → When a verdict contradicts a recent one).
 
-Otherwise, do not halt the workflow short of an opened Pull Request.
+Otherwise, do not halt the workflow short of a merged Pull Request and a `Done` Issue.
 
 ---
 
@@ -232,9 +234,11 @@ An issue may be considered complete only when:
 - Required validation has completed
 - Review has no blocking issues
 - QA confirms the expected behavior
-- A Pull Request was opened and the user has confirmed it was merged
+- A Pull Request was opened and squash-merged into `develop`
 
-Passing QA opens a Pull Request; it does not mark the issue Done. Done happens only after the user confirms the merge, at which point the working branch is deleted locally and remotely.
+Passing QA opens a Pull Request; it does not mark the issue Done. `complete-issue` then merges it with `gh pr merge --squash --delete-branch`, moves the Issue to `Done`, and deletes the working branch locally and remotely.
+
+Squash is this repository's merge method for Issue Pull Requests. A Pull Request that cannot be merged cleanly is a blocker to report — never something to force through with `--admin`, a manual conflict fix during the merge step, or a different merge method.
 
 ---
 

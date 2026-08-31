@@ -1,16 +1,16 @@
 ---
 name: complete-issue
-description: Finalize a GitHub Issue after the user confirms its Pull Request was merged — verify the merge, move the Issue to Done, and delete the working branch locally and on the remote. Use when the user says a PR was merged (e.g. "PRをマージしました", "merged #123").
-model: haiku
+description: Merge a Pull Request that has passed QA (squash merge, head branch deleted), then move its Issue to Done and clean up the local branch. Use when the user asks to merge or finish an Issue/PR (e.g. "#123をマージして", "PRをマージしました"), and as the final stage of `work-next` after `pull-request`.
+model: sonnet
 ---
 
 # Complete Issue
 
-You are finishing an Issue after a human has merged its Pull Request.
+You are finishing an Issue: merging its Pull Request, then moving the Issue to `Done` and cleaning up the working branch.
 
-This skill never merges anything itself. Merging is exclusively the user's action, performed on GitHub. This skill only verifies that it happened and then cleans up.
+This skill performs the merge itself, with `gh pr merge --squash --delete-branch`. If a human already merged the Pull Request, skip the merge and carry on with the finalization.
 
-Do not implement production code. Do not run `gh pr merge` under any circumstances, even if asked to "just merge it too" — redirect that request back to the user.
+Do not implement production code. Never merge a Pull Request that has not passed internal Review and QA, and never force a merge past a conflicted, draft, or blocked state — stop and report instead.
 
 ---
 
@@ -27,31 +27,45 @@ If neither is identifiable, ask the user which Issue/PR they mean. Do not guess 
 
 ---
 
-## Step 2: Verify the merge
+## Step 2: Confirm the Issue is cleared to merge
 
-Check the actual state — do not trust the claim alone:
+Read the Issue's GitHub Project status. It gates the merge, so read it *before* merging anything.
 
-`gh pr view <pr-number> --json state,mergedAt,baseRefName,headRefName`
+Expected: `QA` — that status is what proves internal Review and QA both passed.
 
-If `state` is not `MERGED`:
-
-Stop. Report the actual state (e.g. still `OPEN`, or `CLOSED` without merging). Do not change the Issue status and do not delete anything.
-
-If `state` is `MERGED`:
-
-Continue. Record `baseRefName` (base branch) and `headRefName` (working branch).
+- `QA` → proceed to Step 3.
+- Already `Done` → the Issue was finalized before. Do not merge anything. Check the PR state in Step 3 and, if a stale branch is still around, perform only the cleanup in Step 5.
+- Anything else (`In Progress`, `Review`, `Backlog`, …) → stop and report the discrepancy. Do not merge — something in the pipeline was skipped.
 
 ---
 
-## Step 3: Confirm the Issue's current status
+## Step 3: Merge the Pull Request
 
-Read the Issue's GitHub Project status.
+Read the actual state — never act on the user's claim alone:
 
-Expected: `QA`.
+`gh pr view <pr-number> --json state,isDraft,mergeable,mergeStateStatus,mergedAt,baseRefName,headRefName`
 
-If it is already `Done`, report that no change is needed, but still perform the branch cleanup in Step 5 if the branch still exists.
+Record `baseRefName` (base branch) and `headRefName` (working branch), then branch on `state`:
 
-If it is in an unexpected state (e.g. still `In Progress`, or `Backlog`), report the discrepancy and ask before proceeding — something in the pipeline may have been skipped.
+`MERGED` — already merged by a human. Skip the merge and continue at Step 4.
+
+`CLOSED` — closed without merging. Stop. Do not reopen it, do not merge, do not delete anything. Report the state.
+
+`OPEN` — merge it, but only if all of the following hold:
+
+- Step 2 found the Issue in `QA`.
+- `isDraft` is `false`.
+- `mergeable` is `MERGEABLE`, and `mergeStateStatus` is neither `DIRTY` nor `BLOCKED`.
+
+If any of them fails, stop and report which one. Do not resolve conflicts, mark a draft ready for review, or bypass a branch protection rule to get the merge through.
+
+Otherwise merge:
+
+`gh pr merge <pr-number> --squash --delete-branch`
+
+Squash is this repository's required merge method, and the head branch is always deleted on merge. Do not substitute `--merge` or `--rebase`, and never add `--admin`.
+
+Then re-read `gh pr view <pr-number> --json state,mergedAt` and confirm `state` is `MERGED`. If the merge command fails, or the state is anything else, stop and report the failure — do not retry with different flags.
 
 ---
 
@@ -61,18 +75,21 @@ Change:
 
 `QA → Done`
 
+Only after Step 3 has confirmed `state` is `MERGED`.
+
 ---
 
 ## Step 5: Clean up the branch
 
-1. Switch to the base branch recorded in Step 2 (normally `develop`).
+`--delete-branch` already removed the remote head branch. The local branch remains.
+
+1. Switch to the base branch recorded in Step 3 (normally `develop`).
 2. Pull the latest state: `git pull --ff-only origin <base-branch>`.
 3. Delete the local working branch: `git branch -d <head-branch>`.
-   - If `-d` refuses because the branch isn't detected as fully merged locally (stale local history), fetch first (`git fetch origin`) and retry. Do not use `-D` to force-delete without understanding why `-d` refused.
-4. Delete the remote working branch, if it still exists: `git push origin --delete <head-branch>`.
-   - GitHub often auto-deletes the head branch on merge; if the remote branch is already gone, skip this without error.
+   - A squash merge rewrites the commits, so `-d` will normally refuse with "not fully merged" even though the work is in the base branch. That refusal is expected here, not a warning sign: once Step 3 confirmed `MERGED` and the squash commit is present on the base branch, use `git branch -D <head-branch>`.
+4. Delete the remote working branch only if it somehow still exists: `git push origin --delete <head-branch>`. `--delete-branch` normally handled it already — skip without error.
 
-Never delete a branch before Step 2 has confirmed the PR is actually merged.
+Never delete a branch before Step 3 has confirmed the PR is actually merged.
 
 ---
 
@@ -86,7 +103,7 @@ Issue number and title.
 
 ## Pull Request
 
-Number, URL, merge confirmation (`mergedAt`).
+Number, URL, merge confirmation (`mergedAt`), and whether this skill merged it (squash) or it was already merged by a human.
 
 ## Status Change
 
@@ -95,7 +112,7 @@ Number, URL, merge confirmation (`mergedAt`).
 ## Branch Cleanup
 
 - Local branch: deleted / already gone
-- Remote branch: deleted / already gone (auto-deleted on merge)
+- Remote branch: deleted / already gone (deleted by `--delete-branch`)
 
 ## Working Directory
 
@@ -105,7 +122,9 @@ Current branch after cleanup (should be the base branch, up to date).
 
 ## Rules
 
-Never run `gh pr merge` or any command that merges a Pull Request.
+Only ever merge with `gh pr merge --squash --delete-branch`. Never `--merge`, `--rebase`, or `--admin`.
+
+Never merge a Pull Request whose Issue is not in `QA` — that status is the proof that Review and QA both passed.
 
 Never delete a branch without first confirming via `gh pr view` that its PR is actually merged.
 

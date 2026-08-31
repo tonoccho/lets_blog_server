@@ -1,6 +1,6 @@
 ---
 name: work-next
-description: Select the highest-priority Ready GitHub Issue and drive it through branch creation, implementation, review, QA, and Pull Request creation. Use this skill when the user asks Claude Code to find the next piece of work, implement the next task, or continue the development workflow (e.g. "次のタスクを実装して").
+description: Select the highest-priority Ready GitHub Issue and drive it through branch creation, implementation, review, QA, Pull Request creation, and merge. Use this skill when the user asks Claude Code to find the next piece of work, implement the next task, or continue the development workflow (e.g. "次のタスクを実装して").
 model: sonnet
 ---
 
@@ -8,7 +8,7 @@ model: sonnet
 
 You are the orchestrator of the project's AI development workflow.
 
-Your responsibility is to select the next Ready GitHub Issue and drive it all the way to an open Pull Request awaiting the user's merge.
+Your responsibility is to select the next Ready GitHub Issue and drive it all the way to a merged Pull Request and a `Done` Issue.
 
 You do not directly implement application code.
 
@@ -19,8 +19,9 @@ You coordinate:
 - review-issue
 - qa-issue
 - pull-request
+- complete-issue (squash merge, `Done`, branch cleanup)
 
-Finishing the Issue (`Done` + branch cleanup) happens separately, via `complete-issue`, once the user confirms the Pull Request was merged. This skill's run ends when the Pull Request is opened — it does not wait for the merge.
+This skill's run ends when the Pull Request has been merged and the Issue is `Done`, not when the Pull Request is opened.
 
 The GitHub Issue status is the source of truth.
 
@@ -224,7 +225,11 @@ If QA returns:
 
 `PASS`
 
-The `qa-issue` skill itself invokes `pull-request` to open the Pull Request. The Issue status remains `QA` — do not move it to `Done` here. Report the Pull Request URL and ask the user to review and merge it. Then stop; this workflow's job is done once the PR is open.
+The `qa-issue` skill itself invokes `pull-request` to open the Pull Request. The Issue status is still `QA` at that point.
+
+Then invoke `complete-issue` for this Issue. It merges the Pull Request (`gh pr merge --squash --delete-branch`), moves the Issue `QA → Done`, and cleans up the branch. Do not stop to ask the user whether to merge — reaching `PASS` with an open Pull Request is what authorizes it (see `CLAUDE.md` → Autonomous Task Execution).
+
+If `complete-issue` stops without merging (merge conflict, draft, blocked merge state, or the Issue is not in `QA`), do not work around it. Report exactly which precondition failed, leave the Pull Request open, and stop.
 
 If QA returns:
 
@@ -266,7 +271,9 @@ Ready
 → In Progress
 → Review
 → QA
-→ Pull Request opened (awaiting merge)
+→ Pull Request opened
+→ Squash-merged
+→ Done
 ```
 
 ## Unrelated Issues Filed
@@ -275,22 +282,24 @@ Aggregate any new Issue numbers reported by `implement-issue`, `review-issue`, o
 
 `None`
 
-## Next Step
+## Merge
 
-Tell the user: once the Pull Request is merged, say so (e.g. "PRをマージしました") to trigger `complete-issue`, which moves the Issue to `Done` and deletes the working branch locally and remotely.
+Pull Request number and URL, the squash-merge confirmation, and the branch cleanup result.
 
 ---
 
 # Rules
 
-Never mark an Issue `Done` from this skill — that requires a confirmed merge via `complete-issue`.
+Never mark an Issue `Done` from this skill directly — `Done` is set by `complete-issue`, and only after it has confirmed the Pull Request is actually merged.
 
 Never skip branch creation (`git-workflow`) before invoking the `implementer` agent.
 
 Never create a Pull Request before QA has passed.
 
-Once this workflow starts an Issue, do not pause to ask the user whether to continue after a recoverable stage outcome (implementation issues, Review `CHANGES REQUIRED`, QA `FAIL`) — retry automatically, up to that stage's retry limit (3 cycles), until the Issue either reaches an opened Pull Request or hits a genuine blocker.
+Never merge a Pull Request from this skill directly — always delegate to `complete-issue`, which enforces the squash method and the merge preconditions.
 
-Only stop before a Pull Request exists for a genuine blocker: unresolved requirement ambiguity (`REQUIREMENT CLARIFICATION`, or a blocking question during implementation), QA `BLOCKED`, a retry limit exceeded, or a live-system mutation requiring explicit user confirmation. When any of these stops the workflow, report it clearly rather than silently halting.
+Once this workflow starts an Issue, do not pause to ask the user whether to continue after a recoverable stage outcome (implementation issues, Review `CHANGES REQUIRED`, QA `FAIL`) — retry automatically, up to that stage's retry limit (3 cycles), until the Issue either reaches a merged Pull Request or hits a genuine blocker.
+
+Only stop short of a merged Pull Request for a genuine blocker: unresolved requirement ambiguity (`REQUIREMENT CLARIFICATION`, or a blocking question during implementation), QA `BLOCKED`, a retry limit exceeded, a Pull Request that cannot be merged as-is, or a live-system mutation requiring explicit user confirmation. When any of these stops the workflow, report it clearly rather than silently halting.
 
 Any Issue filed to `Inbox` during this workflow (by `implement-issue`, `review-issue`, or `qa-issue`) must have its `Priority` field (P0/P1/P2) set — never leave it unset.

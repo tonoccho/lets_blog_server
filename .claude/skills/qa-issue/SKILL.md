@@ -78,7 +78,7 @@ All required acceptance criteria are verified.
 
 No significant regression is found.
 
-Proceed to Pull Request creation (Step 5a) — do not move straight to Done. A human still has to merge the branch.
+Proceed to Pull Request creation (Step 5a) — do not move straight to Done. The merge is `complete-issue`'s job, not this skill's.
 
 ### FAIL
 
@@ -120,9 +120,9 @@ The Issue's GitHub status remains:
 
 `QA`
 
-Do not move it to `Done` here. `Done` is reserved for after the user confirms the Pull Request was actually merged — see the `complete-issue` skill.
+Do not move it to `Done` here. `Done` is reserved for after the Pull Request is actually merged — see the `complete-issue` skill.
 
-Report the Pull Request URL to the user and explicitly ask them to review and merge it. Then stop this workflow; do not poll for the merge.
+Report the Pull Request URL to the user. Then stop this workflow and return to the caller — `work-next` invokes `complete-issue`, which merges the Pull Request and finalizes the Issue. Never merge from this skill.
 
 ---
 
@@ -170,9 +170,9 @@ Current GitHub status.
 
 ### Next Step
 
-`Awaiting PR merge` (PASS) / `Implementation` (FAIL) / `Blocked`
+`Awaiting complete-issue (merge)` (PASS) / `Implementation` (FAIL) / `Blocked`
 
-If PASS, include the Pull Request URL from Step 5a and state that the Issue moves to `Done` only after the user confirms the merge (see `complete-issue`).
+If PASS, include the Pull Request URL from Step 5a and state that the Issue moves to `Done` via `complete-issue`, which performs the squash merge.
 
 ---
 
@@ -185,6 +185,8 @@ Never ignore failed acceptance criteria.
 Never modify production code.
 
 Do not mark Done merely because automated tests pass.
+
+Never merge a Pull Request from this skill — merging belongs to `complete-issue`.
 
 Never move an Issue to `Done` from this skill — `Done` requires a confirmed merge, handled by `complete-issue`.
 
