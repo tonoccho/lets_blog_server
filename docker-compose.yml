@@ -406,6 +406,9 @@ services:
       # 読み取り専用で取得するためのdocker-socket-proxyのURL。docker-socket-proxyへのアクセスは
       # 本サービスのみに限定する(Epic #551の方針。下のdocker-socket-proxy定義・depends_on参照)。
       DOCKER_SOCKET_PROXY_BASE_URL: http://docker-socket-proxy:2375
+      # ダッシュボードに他プロジェクトのコンテナを載せないための絞り込みに使う(issue #803)。
+      # composeが既定で使うプロジェクト名(ディレクトリ名)と一致させること。
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-lets_blog_server}
       # AdminAuthorizationServiceのrequireAdmin・自分自身のuserId解決のため、呼び出し元のBearer
       # トークンをそのままidentity-serviceへ転送して問い合わせる(log-writer/content-service/
       # project-serviceと同じ暫定策)。
