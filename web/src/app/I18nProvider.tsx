@@ -26,10 +26,12 @@ const LOCALE_STORAGE_KEY = "locale";
  * 購読は行わない(no-op)。localStorageの言語設定が変わるのは{@link LanguageSwitcher}経由だけで、
  * そこでは`window.location.reload()`によりページごと作り直されるため、購読しても拾う変更が無い。
  *
- * <p>`storage`イベントを購読して他タブの変更に追随させることもできるが、
- * {@link LanguageSwitcher}のセレクトボックスは自身の`useState`で値を持っており追随しないため、
- * 「本文だけ英語、セレクトは日本語」という不整合が生まれる。issue #721はlintエラーの解消が
- * スコープなので、挙動を変えないno-opにしておく。
+ * <p>`storage`イベントを購読して他タブの変更に追随させることもできる。issue #721の時点では
+ * {@link LanguageSwitcher}が自身の`useState`でlocaleを持っており追随しないため、購読すると
+ * 「本文だけ英語、セレクトは日本語」という不整合が生まれるという理由で見送った。
+ * issue #800で{@link LanguageSwitcher}がこのProviderの`locale`を参照するようになり、
+ * その前提は解消している(両者は常に一致する)。ただし他タブ追随を入れるかどうかは
+ * 挙動の変更であり#800のスコープ外のため、購読は引き続きno-opのままにしている。
  *
  * <p>購読が無くてもハイドレーション後の切り替えは働く。Reactは`useSyncExternalStore`のマウント時に
  * passive effectでスナップショットを取り直し、サーバー用の値と異なれば再レンダーするため。
