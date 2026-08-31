@@ -40,9 +40,13 @@ spring:
   # そのためFlywayは持たず(移行管理は引き続きlegacy-api側が担う)、ddl-auto: validateで
   # 既存スキーマとの整合のみ確認する。
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lets_blog?useSSL=false&serverTimezone=UTC}
-    username: ${SPRING_DATASOURCE_USERNAME:lbs_app}
-    password: ${SPRING_DATASOURCE_PASSWORD:lbs_app}
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lbs_identity?useSSL=false&serverTimezone=UTC}
+    username: ${SPRING_DATASOURCE_USERNAME:lbs_identity}
+    password: ${SPRING_DATASOURCE_PASSWORD:lbs_identity}
+  # issue #786: 専用スキーマlbs_identityを自身のFlywayで管理する(ADR-0004)。
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
   jpa:
     hibernate:
       ddl-auto: validate
