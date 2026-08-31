@@ -1,5 +1,7 @@
 package com.letsblog.logwriter.service;
 
+import com.letsblog.common.client.SyncServiceTimeoutException;
+import java.util.Optional;
 import com.letsblog.common.client.ActorProfile;
 import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
@@ -85,12 +87,13 @@ class CurrentActorServiceTest {
         service = new CurrentActorService(request, identityClient);
         stubRequestAttributeCache();
         when(request.getHeader("Authorization")).thenReturn("Bearer valid-jwt");
-        when(identityClient.fetchProfile("Bearer valid-jwt")).thenReturn(new ActorProfile(42L, "editor"));
+        when(identityClient.lookupProfile("Bearer valid-jwt"))
+                .thenReturn(Optional.of(new ActorProfile(42L, "editor")));
 
         assertEquals(42L, service.getCurrentActorId());
         // リクエストスコープでキャッシュされ、2回目の呼び出しではidentityClientを再度呼ばない
         service.isAdmin();
-        verify(identityClient, times(1)).fetchProfile(eq("Bearer valid-jwt"));
+        verify(identityClient, times(1)).lookupProfile(eq("Bearer valid-jwt"));
     }
 
     @Test
@@ -98,8 +101,8 @@ class CurrentActorServiceTest {
         service = new CurrentActorService(request, identityClient);
         stubRequestAttributeCache();
         when(request.getHeader("Authorization")).thenReturn("Bearer valid-jwt");
-        when(identityClient.fetchProfile("Bearer valid-jwt"))
-                .thenThrow(new IdentityServiceUnavailableException("timeout", null));
+        when(identityClient.lookupProfile("Bearer valid-jwt"))
+                .thenThrow(new SyncServiceTimeoutException("identity-service", "http://identity:8080", "GET /api/identity/me", null));
 
         assertThrows(IdentityServiceUnavailableException.class, () -> service.getCurrentActorId());
     }
@@ -109,8 +112,8 @@ class CurrentActorServiceTest {
         service = new CurrentActorService(request, identityClient);
         stubRequestAttributeCache();
         when(request.getHeader("Authorization")).thenReturn("Bearer valid-jwt");
-        when(identityClient.fetchProfile("Bearer valid-jwt"))
-                .thenThrow(new IdentityServiceUnavailableException("timeout", null));
+        when(identityClient.lookupProfile("Bearer valid-jwt"))
+                .thenThrow(new SyncServiceTimeoutException("identity-service", "http://identity:8080", "GET /api/identity/me", null));
 
         assertNull(service.tryGetCurrentActorId());
     }
@@ -120,7 +123,8 @@ class CurrentActorServiceTest {
         service = new CurrentActorService(request, identityClient);
         stubRequestAttributeCache();
         when(request.getHeader("Authorization")).thenReturn("Bearer valid-jwt");
-        when(identityClient.fetchProfile("Bearer valid-jwt")).thenReturn(new ActorProfile(1L, "admin"));
+        when(identityClient.lookupProfile("Bearer valid-jwt"))
+                .thenReturn(Optional.of(new ActorProfile(1L, "admin")));
 
         assertEquals(true, service.isAdmin());
     }
@@ -132,5 +136,42 @@ class CurrentActorServiceTest {
         when(request.getHeader("Authorization")).thenReturn(null);
 
         assertFalse(service.isAdmin());
+    }
+
+    // ---- issue #906 / #829: 401/403 は「操作者なし」で、障害と区別する ----
+
+    @Test
+    void getCurrentActorId_無効化ユーザー等でidentityが401_403ならnull() {
+        // IdentityClient#lookupProfile が 401/403 を Optional.empty() へ畳む(issue #829)。
+        // 障害(例外)と違い、ここは「操作者を解決できなかった」として静かにnullを返す。
+        service = new CurrentActorService(request, identityClient);
+        stubRequestAttributeCache();
+        when(request.getHeader("Authorization")).thenReturn("Bearer revoked-jwt");
+        when(identityClient.lookupProfile("Bearer revoked-jwt")).thenReturn(Optional.empty());
+
+        assertNull(service.getCurrentActorId());
+    }
+
+    @Test
+    void isAdmin_identityが401_403ならfalse() {
+        service = new CurrentActorService(request, identityClient);
+        stubRequestAttributeCache();
+        when(request.getHeader("Authorization")).thenReturn("Bearer revoked-jwt");
+        when(identityClient.lookupProfile("Bearer revoked-jwt")).thenReturn(Optional.empty());
+
+        assertFalse(service.isAdmin());
+    }
+
+    @Test
+    void isAdmin_identityService障害はfalseへ縮退させず例外を伝播させる() {
+        // 障害を静かにadmin権限無しへ縮退させると、権限チェックが素通りする方向の不具合を生みうる。
+        service = new CurrentActorService(request, identityClient);
+        stubRequestAttributeCache();
+        when(request.getHeader("Authorization")).thenReturn("Bearer valid-jwt");
+        when(identityClient.lookupProfile("Bearer valid-jwt")).thenThrow(
+                new SyncServiceTimeoutException("identity-service", "http://identity:8080",
+                        "GET /api/identity/me", null));
+
+        assertThrows(IdentityServiceUnavailableException.class, () -> service.isAdmin());
     }
 }
