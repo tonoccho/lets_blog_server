@@ -103,13 +103,17 @@ Issue: [#591](https://github.com/tonoccho/lets_blog_server/issues/591) [E5] カ�
 
 ### 1.2 バックアップ対象一覧
 
-既存の `docs/BACKUP_RECOVERY_STRATEGY.md` / `docs/BACKUP_RECOVERY_OPERATIONS.md` および
-`/admin/backup` (Web管理画面) ・ `scripts/db-backup.sh` は、いずれも単一スキーマ
-(`${MYSQL_DATABASE}` = `lets_blog`)と `generated_images` ボリュームのみを対象にした
-マイクロサービス分割(#570 ADR-0004)以前の設計であり、**サービス別スキーマ(`lbs_*`)・
-Keycloak用PostgreSQL・その他の名前付きボリュームをカバーしていない**。カットオーバーは
-不可逆な操作であるため、この手順書では既存ツールに頼らず、以下を漏れなく個別に
-バックアップする。
+既存の `docs/BACKUP_RECOVERY_STRATEGY.md` / `docs/BACKUP_RECOVERY_OPERATIONS.md` は、
+単一スキーマ(分割前の `lets_blog`)と `generated_images` ボリュームのみを対象にした
+マイクロサービス分割(#570 ADR-0004)以前の設計であり、**Keycloak用PostgreSQL・
+その他の名前付きボリュームをカバーしていない**。カットオーバーは不可逆な操作であるため、
+この手順書では既存ツールに頼らず、以下を漏れなく個別にバックアップする。
+
+> **更新(issue #785)**: 分割前の `lets_blog` スキーマは #583 の legacy-api 削除に伴い
+> バックアップのうえ DROP した。`scripts/db-backup.sh` と `/admin/backup`
+> (`BACKUP_MYSQL_SCHEMAS`)はいずれもサービス別スキーマ9つを対象にするよう更新済みなので、
+> MySQL 部分についてはこれらを使ってよい。Keycloak PostgreSQL とボリュームは
+> 引き続き下記の個別手順が必要である。
 
 | 種別 | 対象 | 優先度 | 備考 |
 |---|---|---|---|
@@ -323,8 +327,9 @@ Keycloak の realm ロールはコード上で自動同期されておらず(手
 # 403 になった場合の切り分け: sub に対応するローカルユーザーの role を見る
 SUB=$(printf '%s' "$ADMIN_TOKEN" | cut -d. -f2 | tr '_-' '/+' \
   | awk '{ while (length($0) % 4) $0 = $0 "="; print }' | base64 -d 2>/dev/null | jq -r .sub)
-docker exec -e MYSQL_PWD="$MYSQL_PASSWORD" lbs-mysql \
-  mysql --user="$MYSQL_USER" "$MYSQL_DATABASE" \
+# users は issue #786 で lbs_identity スキーマへ移った(分割前の lets_blog は #785 で削除済み)。
+docker exec -e MYSQL_PWD="$LBS_IDENTITY_DB_PASSWORD" lbs-mysql \
+  mysql --user=lbs_identity lbs_identity \
   -e "SELECT id, email, role FROM users WHERE keycloak_sub = '$SUB';"
 # 期待: 1行返り、role が 'admin'
 ```
@@ -515,8 +520,9 @@ reverse-proxy 停止中でも `docker exec` から取得できる。
 ### 3.2 移行前の状態確認
 
 ```bash
-docker exec -e MYSQL_PWD="$MYSQL_PASSWORD" lbs-mysql \
-  mysql --user="$MYSQL_USER" "$MYSQL_DATABASE" \
+# users は issue #786 で lbs_identity スキーマへ移った(分割前の lets_blog は #785 で削除済み)。
+docker exec -e MYSQL_PWD="$LBS_IDENTITY_DB_PASSWORD" lbs-mysql \
+  mysql --user=lbs_identity lbs_identity \
   -e "SELECT COUNT(*) AS total, SUM(keycloak_sub IS NULL) AS unmigrated FROM users;"
 ```
 

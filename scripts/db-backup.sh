@@ -1,5 +1,10 @@
 #!/bin/bash
 # Let's Blogアプリ自身のMySQLデータベースをmysqldumpでバックアップする(開発者向け簡易手段)。
+#
+# issue #785: 分割前の単一スキーマ(lets_blog)は削除したため、サービス別スキーマ9つ(ADR-0004)を
+# まとめて1ファイルへダンプする。root で実行するのは、各サービス専用ユーザーが自分のスキーマ
+# にしかアクセスできないため(スキーマ横断のバックアップ用に lbs_backup ユーザーもあるが、
+# こちらは .env に root しか無い場合でも動く開発者向けの簡易手段として root を使う)。
 # mysqlコンテナはportsを公開していないため、ホストから直接接続できず、
 # connect-internet-egress.shと同様にコンテナ名を直接指定してdocker exec経由で操作する。
 #
@@ -32,8 +37,14 @@ fi
 OUTPUT_PATH="${1:-$REPO_ROOT/backups/lets-blog-backup-$(date +%Y%m%d-%H%M%S).sql}"
 mkdir -p "$(dirname "$OUTPUT_PATH")"
 
-docker exec -e MYSQL_PWD="$MYSQL_PASSWORD" "$CONTAINER" \
-  mysqldump --user="$MYSQL_USER" --single-transaction --routines --triggers "$MYSQL_DATABASE" \
+# サービス別スキーマ(ADR-0004)。増減したらここも更新すること
+# (docker-compose.yml の BACKUP_MYSQL_SCHEMAS と揃える)。
+SCHEMAS="lbs_identity lbs_project lbs_content lbs_media lbs_ai lbs_publishing lbs_analytics lbs_platform lbs_log"
+
+# shellcheck disable=SC2086
+docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" "$CONTAINER" \
+  mysqldump --user=root --single-transaction --routines --triggers --databases $SCHEMAS \
   > "$OUTPUT_PATH"
 
 echo "バックアップを作成しました: $OUTPUT_PATH"
+echo "対象スキーマ: $SCHEMAS"

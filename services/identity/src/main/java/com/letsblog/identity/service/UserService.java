@@ -37,10 +37,8 @@ import java.util.UUID;
  * legacy-apiのUserServiceに残したまま(現行の認証機構はカットオーバー計画(#591)を経てから
  * 撤去する方針。ADR-0003参照)であり、このクラスでは扱わない。
  *
- * <p>現時点ではlegacy-apiと同一の物理スキーマ(lets_blog)上のusers/rolesテーブルを
- * 参照する(ADR-0004が求めるスキーマ分離自体は本Issueのスコープ外。両サービスが
- * 同一テーブルを直接参照する状態は移行期間中の暫定措置であり、将来のスキーマ分離
- * Issueで解消する)。
+ * <p>専用スキーマ lbs_identity(ADR-0004、issue #786)上のusers/rolesテーブルを参照する。
+ * 分割前の共有スキーマは issue #785 で削除済み。
  *
  * <p>Keycloakユーザー同期(#562)。ユーザーの作成・削除・無効化/有効化はこのサービスを入口とし、
  * 内部でKeycloak Admin API({@link KeycloakAdminClient})を呼ぶ。ただしkeycloak_subが
