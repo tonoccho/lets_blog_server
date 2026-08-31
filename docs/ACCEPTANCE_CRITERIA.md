@@ -29,7 +29,11 @@ AT-3〜AT-19(#929〜#945)の各Issueが、自分の担当領域の行を `検証
 - `実装中` — `.feature` を書いたが通っていない(`test.skip` で止まっている場合を含む)
 - `既存spec` — 移行前の Playwright spec が担保している。`.feature` への移行待ち。
   `既存spec(部分)` は、その行の受け入れ基準の一部しか見ていないことを示す
-  (例: フォームに到達するだけで送信結果を見ていない)
+  (例: フォームに到達するだけで送信結果を見ていない)。
+  **spec が存在することと、通っていることは別である。** #949 では
+  `custom-tag-generation.spec.ts` の6テストが `beforeAll` の403で1件も実行されておらず、
+  この表で `既存spec` としていた6行が実際には未検証だった。状態を書くときは
+  「その spec が今この環境で通ること」を確かめること
 - `検証済` — そのシナリオが `npm run test:at` で実際に通っている
 - `対象外(理由)` — 受け入れテストを書かないと決めた。**理由を必ず書く**
 
@@ -254,7 +258,7 @@ API: content `CustomTagController`, `CustomTagTemplateController`, `ProjectCusto
 | --- | --- | --- | --- | --- | --- |
 | AC-TAG-001 | カスタムタグ生成 | 記事に使う装飾を自分で作れる | プロンプトからタグが生成され自動保存される | `e2e/custom-tag-generation.spec.ts` › 正常系: プロンプト入力からタグ生成・自動保存までの完全フロー | 既存spec(`@stub`) |
 | AC-TAG-002 | タグ名のバリデーション | 使えない名前で作らずに済む | パターンに一致しないタグ名では生成が開始されない | `e2e/custom-tag-generation.spec.ts` › バリデーション: パターンに一致しないタグ名では生成が開始されない | 既存spec |
-| AC-TAG-003 | 生成物のセキュリティ検証 | 危険なHTMLが公開先へ入らない | script タグ・イベントハンドラ・`javascript:`・CSS `behavior` を含む生成は拒否される | `e2e/security.spec.ts` › XSS脆弱性チェック: scriptタグの検出 / XSS脆弱性チェック: イベントハンドラの検出 / XSS脆弱性チェック: JavaScriptプロトコルの検出 / CSS インジェクション検出: behavior プロパティ、`e2e/custom-tag-generation.spec.ts` › セキュリティ検証: 不正なHTMLを要求した場合は拒否されるか検証結果が示される | 既存spec |
+| AC-TAG-003 | 生成物のセキュリティ検証 | 危険なHTMLが公開先へ入らない | script タグ・イベントハンドラ・`javascript:`・CSS `behavior` を含む生成は拒否され、生成後の検証結果(成功/警告/エラー)が画面に示される | `e2e/security.spec.ts` › XSS脆弱性チェック: scriptタグの検出 / XSS脆弱性チェック: イベントハンドラの検出 / XSS脆弱性チェック: JavaScriptプロトコルの検出 / CSS インジェクション検出: behavior プロパティ、`e2e/custom-tag-generation.spec.ts` › セキュリティ検証: 不正なHTMLを要求した場合は拒否されるか検証結果が示される | 既存spec |
 | AC-TAG-004 | 生成失敗時のエラー表示 | 失敗に気付ける | 生成に失敗するとエラーメッセージが表示される | `e2e/custom-tag-generation.spec.ts` › エラーハンドリング: 生成に失敗した場合はエラーメッセージが表示される | 既存spec |
 | AC-TAG-005 | タグの一覧・編集・削除 | 作ったタグを保守できる | `GET/PUT/DELETE /api/custom-tags` の結果が一覧に反映される | — | 未着手 |
 | AC-TAG-006 | タグ検証API | 貼る前に安全か確かめられる | `POST /api/custom-tags/validate` が `isValid` と理由を返す | (検証は AC-TAG-003 の spec 群が担保。応答時間は AC-PERF-001) | 既存spec(部分) |

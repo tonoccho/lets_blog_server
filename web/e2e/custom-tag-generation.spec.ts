@@ -1,8 +1,7 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import {
+  E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
-  E2E_TEST_EMAIL,
-  E2E_TEST_PASSWORD,
   createFixtureProject,
   deleteFixtureProject,
   fetchAccessToken,
@@ -120,15 +119,32 @@ test.describe('カスタムタグ生成フロー', () => {
   // テストタイムアウトも30秒なので、待ち切る前にテスト自体が落ちる。ログイン+遷移の
   // 時間も含めると確実に超えるため、このdescribe全体のタイムアウトを引き上げる。
   // (LLMバックエンドは往復に時間がかかり、疎通できない場合はエラー表示までさらに待つ)
-  test.describe.configure({ timeout: 120_000 });
+  //
+  // issue #949: mode: 'serial' も宣言する。docs/e2e-testing.md §9.1 の原則
+  // (beforeAll でフィクスチャを構築する describe は serial にする、#765)に反していた。
+  // 宣言が無いと beforeAll がワーカーごとに走り、同じフィクスチャが重複構築される。
+  // 加えて、この5テストは全て同じプロジェクト詳細画面でログイン→遷移→生成を行うため、
+  // 並列に走らせるとログインと生成が集中し、正常系が不安定に落ちる(実測)。
+  // #830 で beforeAll が403になって以降このdescribeは1件も実行されておらず、
+  // 実際に並列で走らせて初めて表面化した。
+  test.describe.configure({ mode: 'serial', timeout: 120_000 });
 
   // issue #844: フィクスチャの作成・削除は gateway のAPIを直接叩く。
   // UI経由(/projects のフォーム → 一覧 → 詳細)だと1テストあたり25回前後 gateway を呼び、
   // api-global バケット(クライアント単位ではなくグローバルに100req/分)へワーカー数に比例して
   // 近づく。#753 が security.spec.ts / performance.spec.ts で是正したのと同じ理由で、
   // ここも API 直叩きへ揃える(共通ヘルパーは helpers.ts)。
+  // issue #949: フィクスチャ用のトークンは**管理者**で取る。POST /api/projects は
+  // #830 の認可強化で requireAdmin() を通るようになったため、非管理者では403になり
+  // beforeAll ごと落ちて6テスト全部が実行されなかった。
+  // performance.spec.ts / security.spec.ts は元から管理者で取っており、ここだけずれていた。
+  //
+  // 画面操作は下の loginAsAdmin で管理者として行う(このspecは元からそうだった)。
+  // カスタムタグの生成・保存自体は管理者を要さない(CustomTagController に認可チェックは無い)が、
+  // 「非管理者でも生成できる」ことの検証はこのspecの目的ではない。必要なら AT-12(#938)が
+  // 受け入れ基準として別に定義する。
   test.beforeAll(async ({ request }) => {
-    fixtureAccessToken = await fetchAccessToken(request, E2E_TEST_EMAIL, E2E_TEST_PASSWORD);
+    fixtureAccessToken = await fetchAccessToken(request, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);
     const project = await createFixtureProject(request, fixtureAccessToken, 'CustomTag');
     fixtureProjectId = project.id;
   });
@@ -207,10 +223,19 @@ test.describe('カスタムタグ生成フロー', () => {
       return;
     }
 
-    // 安全なHTMLが生成された場合、生成後に自動実行される検証結果(成功/エラー)が表示される
+    // 安全なHTMLが生成された場合、生成後に自動実行される検証結果が表示される。
+    //
+    // issue #949: ValidationPanel の表示は3通りある(エラーあり / 警告あり / どちらも無い)。
+    // 「警告のみ」を数えていなかったため、検証結果が出ているのに落ちていた。
+    // 実際、スタブが返すHTMLには {{content}} プレースホルダーが無く、
+    // missing-content-placeholder の**警告だけ**が付く。
+    // ここで確かめたいのは「検証が走って結果が示されること」なので、3通りすべてを受ける。
     const validationSuccess = page.getByText('検証成功');
     const validationErrors = page.locator('h3:has-text("エラー (")');
-    await expect(validationSuccess.or(validationErrors)).toBeVisible({ timeout: 10000 });
+    const validationWarnings = page.locator('h3:has-text("警告 (")');
+    await expect(
+      validationSuccess.or(validationErrors).or(validationWarnings)
+    ).toBeVisible({ timeout: 10000 });
   });
 
   test('レスポンシブテスト: モバイルビューポートでも生成フォームを操作できる', async ({ page }) => {
