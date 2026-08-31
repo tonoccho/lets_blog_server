@@ -24,7 +24,9 @@ test.describe('Accessibility (a11y) Testing', () => {
   test('Home page should not have accessibility violations', async ({ page }) => {
     await page.goto('/');
     await injectAxe(page);
-    await checkA11y(page, null, {
+    // contextを省略するとページ全体が対象になる。axe-playwrightの型は
+    // ContextSpec | undefined なので、nullではなくundefinedを渡す。
+    await checkA11y(page, undefined, {
       detailedReport: true,
       detailedReportOptions: {
         html: true,
@@ -41,9 +43,11 @@ test.describe('Accessibility (a11y) Testing', () => {
     // Log violations for manual review
     if (violations.length > 0) {
       console.log(`Found ${violations.length} accessibility violation(s):`);
-      violations.forEach((violation: { id: string; description: string; impact: string; nodes: unknown[] }) => {
+      // 引数の型は getViolations() が返す axe-core の Result に合わせる(自前で構造を
+      // 書き下すと、impact が string | null | undefined であることとずれる)。
+      violations.forEach((violation) => {
         console.log(`- ${violation.id}: ${violation.description}`);
-        console.log(`  Impact: ${violation.impact}`);
+        console.log(`  Impact: ${violation.impact ?? 'unknown'}`);
         console.log(`  Elements affected: ${violation.nodes.length}`);
       });
     }
@@ -131,7 +135,9 @@ test.describe('Accessibility (a11y) Testing - Keycloakホスト型ログイン�
     await page.goto('/login');
     await page.waitForURL(/\/auth\/realms\/letsblog\//, { timeout: 15000 });
     await injectAxe(page);
-    await checkA11y(page, null, {
+    // contextを省略するとページ全体が対象になる。axe-playwrightの型は
+    // ContextSpec | undefined なので、nullではなくundefinedを渡す。
+    await checkA11y(page, undefined, {
       detailedReport: true,
       detailedReportOptions: {
         html: true,

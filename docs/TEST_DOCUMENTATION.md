@@ -308,6 +308,30 @@ npm install
 npx playwright install
 ```
 
+#### web の必須検証コマンド
+
+`web` を変更したら、以下の3つを**すべて**実行すること(issue #720)。
+
+```bash
+cd web
+npm run lint        # ESLint
+npx tsc --noEmit    # 型チェック
+npx jest            # ユニットテスト
+```
+
+**`npx tsc --noEmit` を省略しないこと。** Jest は ts-jest / babel でトランスパイルするだけで
+型検査をしないため、**Jest が全件成功していても型エラーは残りうる**。実際 #720 では
+`npx jest` が183件すべて成功する一方で `npx tsc --noEmit` が6件のエラーを報告していた
+(e2e スペックの型不一致3件と、`SiteListTable.test.tsx` のモックが `Site` / `Project` の
+フィールド追加に追随していないもの3件)。
+
+`web/tsconfig.json` の `include` は `**/*.ts` / `**/*.tsx` なので、`e2e/` と
+`__tests__/` も型チェックの対象である。`npm run build`(= `next build`)も型チェックを
+行うため、ビルドを通す前にここで検出できる。
+
+なお GitHub Actions はリポジトリ全体で意図的に無効化されているため、これらは
+**自動では強制されない**。ローカルで実行して確認すること。
+
 ## テスト実行パイプライン（CI/CD）
 
 ### GitHub Actions
