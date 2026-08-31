@@ -21,6 +21,11 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0'
     implementation 'com.mysql:mysql-connector-j'
+    // issue #786で専用スキーマlbs_identityをFlywayで管理するようにしたが、依存の追加が漏れていた。
+    // application.ymlにflyway.enabled: trueとdb/migration/V1があってもライブラリが無ければ何も起きず、
+    // ddl-auto: validateが「missing table [role_permissions]」で起動失敗する(issue #886で修正)。
+    implementation 'org.springframework.boot:spring-boot-starter-flyway'
+    implementation 'org.flywaydb:flyway-mysql'
 
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
