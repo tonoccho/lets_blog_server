@@ -127,21 +127,9 @@ Important exclusions should be documented if reasonable interpretations could ot
 
 ### Dependencies
 
-Judge this per **Dependency Resolution** in `CLAUDE.md` — that is the single definition, shared
-with `work-next` and `implement-issue`. Run `scripts/issue-dependency-status.sh <issue-number>`
-and judge from its live output.
-
-PASS if dependencies are resolved, explicitly accepted, or not applicable. An open `blocked_by`
-link is the only status-based blocker; a dependency named only in the body's prose is judged by
-whether this Issue's acceptance criteria can be implemented and verified against the codebase
-as it stands.
+PASS if dependencies are resolved, explicitly accepted, or not applicable.
 
 FAIL if implementation depends on unfinished work that has not been identified.
-
-State which ground the verdict used, and cite the live evidence. If the Issue records its
-dependencies only as Epic shorthand (`A4`, `C14`), resolve them to `#<number>` and update the
-body first; if they cannot be resolved, report them as *unidentifiable* rather than asserting
-they are *unresolved* (#751).
 
 ### Blocking Questions
 
@@ -235,27 +223,16 @@ If there are none, report that and stop.
 
 ## Step 2: Exclude blocked Issues
 
-Drop from the candidate list any Issue that is blocked **per `CLAUDE.md` → Dependency
-Resolution**. That is the single definition; do not apply a different one here.
+Drop from the candidate list any Issue that is blocked — it has an open `blocked_by` dependency, or its body documents an unresolved dependency on unfinished work.
 
-Read the live dependency state with:
+Read GitHub's issue dependencies with:
 
 ```bash
-scripts/issue-dependency-status.sh <number>
+gh api repos/:owner/:repo/issues/<number>/dependencies/blocked_by
+gh api repos/:owner/:repo/issues/<number>/dependencies/blocking
 ```
 
-Concretely, at this step:
-
-- An **open `blocked_by` link** excludes the candidate outright.
-- A dependency named **only in the body's prose** does **not** exclude the candidate on its
-  board status alone. It is not enough that the dependency Issue is open, or that the body
-  says the work is not done yet. Carry the candidate forward to Step 4, where the readiness
-  evaluation decides on the substance in the codebase.
-- Never exclude a candidate on prose alone without saying so — if you drop one here, name the
-  open `blocked_by` link you saw.
-
-A blocked Issue can never be `READY` — its `Dependencies` check fails by definition. But
-"the body mentions an unfinished dependency" is not the same thing as blocked (#751).
+A blocked Issue can never be `READY` — its `Dependencies` check fails by definition.
 
 If every Backlog Issue is blocked, report that and stop.
 

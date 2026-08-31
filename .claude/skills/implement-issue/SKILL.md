@@ -48,7 +48,7 @@ Before implementing, report which Issue was selected.
 
 ## Step 2: Verify readiness
 
-Read the complete Issue, **including its existing comments**.
+Read the complete Issue.
 
 Verify:
 
@@ -57,20 +57,13 @@ Verify:
 - Acceptance Criteria
 - Scope
 - Out of Scope
-- Dependencies — per **Dependency Resolution** in `CLAUDE.md`. Run
-  `scripts/issue-dependency-status.sh <issue-number>` and judge from its live output, not from
-  the Issue body's prose or from what an earlier comment said a dependency's status was.
+- Dependencies
 
 If the Issue is no longer implementation-ready:
 
 Stop.
 
-Return the Issue to Backlog and explain why, citing the live evidence you checked.
-
-Before posting a rollback that contradicts a recent Ready promotion, apply the same guard as
-`work-next` Step 4: re-check each ground the promotion cited and name the one that no longer
-holds. If they all still hold, apply the `CLAUDE.md` definition instead of posting a
-contradicting verdict (#751).
+Return the Issue to Backlog and explain why.
 
 Do not guess missing requirements.
 

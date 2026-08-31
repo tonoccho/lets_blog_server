@@ -141,11 +141,6 @@ What this issue intentionally does not include.
 
 Related issues, systems, or prerequisites.
 
-Name every dependency Issue as `#<number>`. Epic shorthand alone (`A4`, `B6`, `C14`) is not a
-resolvable identifier — it forces every later readiness check to re-translate labels into Issue
-numbers, and that translation is where verdicts diverge (#751). Write `C14 (#583)`, not `C14`.
-Where GitHub's formal `blocked_by` link applies, add it as well.
-
 # Open Questions
 
 Only questions that remain unresolved.
@@ -165,11 +160,7 @@ An issue is Ready only when:
 - The goal is clear.
 - Acceptance criteria are testable.
 - Blocking questions are resolved.
-- Dependencies are resolved **per `CLAUDE.md` → Dependency Resolution**. That is the single
-  definition of "resolved"; do not apply a different one here, and do not reduce it to
-  "dependencies are identified". You render the verdict for `ready-issue` and
-  `triage-backlog`, so this criterion is the one that actually decides — read the definition
-  yourself rather than relying on the calling skill to have quoted it to you (#751).
+- Major dependencies are identified.
 - Scope is reasonably bounded.
 
 If these conditions are not satisfied, do not recommend Ready.

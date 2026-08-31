@@ -117,7 +117,7 @@ Even though the Issue stays in `Inbox`, record a readiness signal to help the la
 - [ ] Acceptance criteria are testable
 - [ ] Scope is bounded
 - [ ] Out-of-scope behavior is clear
-- [ ] Blocking dependencies are resolved (per `CLAUDE.md` → Dependency Resolution)
+- [ ] Blocking dependencies are resolved
 - [ ] No blocking questions remain
 
 If all conditions are satisfied, report:
