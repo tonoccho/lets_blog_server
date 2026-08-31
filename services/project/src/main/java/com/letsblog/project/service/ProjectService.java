@@ -3,7 +3,6 @@ package com.letsblog.project.service;
 import com.letsblog.project.aop.AuditLog;
 import com.letsblog.project.domain.AuditLogAction;
 import com.letsblog.project.domain.Project;
-import com.letsblog.project.domain.Site;
 import com.letsblog.project.dto.ProjectResponse;
 import com.letsblog.project.dto.SiteResponse;
 import com.letsblog.project.dto.UpdateProjectGithubRepositoryRequest;
@@ -208,18 +207,6 @@ public class ProjectService {
         Project project = getProjectEntity(projectId);
         project.setGithubTokenEncrypted(encryptedToken);
         projectRepository.save(project);
-    }
-
-    /**
-     * プロジェクトのマスター環境(test/production)に紐づくサイトを解決する。未紐付けの場合はnullを返す。
-     */
-    public Site resolveMasterSite(Project project) {
-        Long siteId = switch (project.getMasterEnvironment()) {
-            case "test" -> project.getTestSiteId();
-            case "production" -> project.getProductionSiteId();
-            default -> null;
-        };
-        return siteId == null ? null : siteRepository.findById(siteId).orElse(null);
     }
 
     private ProjectResponse toResponse(Project project) {
