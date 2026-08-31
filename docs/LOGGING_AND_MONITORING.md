@@ -2,7 +2,8 @@
 
 This document describes the logging and metrics collection framework across the Let's Blog
 multi-service architecture (gateway + domain services, see
-[ARCHITECTURE.md](./ARCHITECTURE.md) if present, or the tracking issue #551).
+[DOCKER_COMPOSE_ARCHITECTURE.md](./DOCKER_COMPOSE_ARCHITECTURE.md) and the
+[architecture decision records](./adr/), or the tracking issue #551).
 
 ## Overview
 

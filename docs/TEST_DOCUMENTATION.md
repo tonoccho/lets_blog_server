@@ -401,8 +401,7 @@ kill -9 <PID>
 
 ## 関連ドキュメント
 
-- [カスタムタグ生成機能仕様書](./CUSTOM_TAGS_SPECIFICATION.md)
-- [開発者ガイド](./DEVELOPER_GUIDE.md)
-- [E2E テスト実行ガイド](./E2E_TEST_GUIDE.md)
+- [E2E テストの実行と設計方針](./e2e-testing.md)
+- [E2E 検証ガイド](./e2e-validation-guide.md)
 - [カバレッジ目標](./COVERAGE_TARGETS.md)
 - [ADR-0006: サービス別のテスト戦略](./adr/0006-per-service-test-strategy.md)
