@@ -22,7 +22,9 @@ export function CustomTagGenerationForm({
   effectivePrefix,
   onGenerationSuccess,
 }: CustomTagGenerationFormProps) {
-  const { data: session } = useSession();
+  const { data: session, status: sessionStatus } = useSession();
+  // セッション未解決のまま送信された場合に、利用者へ理由を見せるためのメッセージ(issue #778)。
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const { isLoading, error, result, generate, reset } = useCustomTagGeneration();
   const { isLoading: isValidating, error: validationError, result: validationResult, validate: validateContent, reset: resetValidation } = useCustomTagValidation();
   const formRef = useRef<HTMLFormElement>(null);
@@ -33,7 +35,20 @@ export function CustomTagGenerationForm({
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!session?.user) return;
+    // issue #778: 以前はここで黙ってreturnしていた。isLoadingが立たずerrorも出ないため、
+    // 「ボタンを押しても何も起きない」という手がかりの無い無反応状態になっていた。
+    // 根本的にはSessionProviderへサーバー解決済みのセッションを渡して未解決期間を
+    // 無くしたが(layout.tsx)、セッション切れや取得失敗では依然ここに到達しうるため、
+    // 捨てずに理由を表示する。
+    if (!session?.user) {
+      setSessionError(
+        sessionStatus === "loading"
+          ? "セッションを確認しています。少し待ってからもう一度お試しください。"
+          : "セッションが確認できませんでした。ページを再読み込みするか、再ログインしてください。"
+      );
+      return;
+    }
+    setSessionError(null);
 
     const formData = new FormData(e.currentTarget);
     const prompt = formData.get("prompt") as string;
@@ -130,12 +145,15 @@ export function CustomTagGenerationForm({
               </span>
             </div>
             {error && <p className="text-sm text-red-600">{error}</p>}
+            {sessionError && <p className="text-sm text-red-600">{sessionError}</p>}
+            {/* セッション未解決の間は押せないようにし、ラベルでも状態を示す(issue #778)。
+                押せてしまうと、送信が捨てられたのか処理中なのかを利用者が区別できない。 */}
             <button
               type="submit"
-              disabled={isLoading}
+              disabled={isLoading || sessionStatus === "loading"}
               className="rounded bg-blue-600 px-4 py-2 text-sm text-white disabled:bg-neutral-200 disabled:text-neutral-600"
             >
-              {isLoading ? "生成中..." : "生成"}
+              {isLoading ? "生成中..." : sessionStatus === "loading" ? "セッション確認中..." : "生成"}
             </button>
           </form>
         </>
