@@ -1,6 +1,7 @@
 #!/bin/bash
 # content/media/ai/analytics/platform/identity/project/publishing/log-writerサービスの
-# 結合テスト用スキーマ作成(#664、platform分は#693、identity/project/publishing/log-writer分は#772)。
+# 結合テスト用スキーマ作成(#664、platform分は#693、identity/project/publishing/log-writer分は#772、
+# legacy-apiのlets_blog_test分は#762)。
 # 各サービスのapplication-test.yml(ADR-0006: Testcontainersは使わず実MySQLに接続する方式)が
 # 参照するlbs_{content,media,ai,analytics,platform,identity,project,publishing,log}_testスキーマを、
 # 01-create-service-schemas.shと
@@ -34,6 +35,11 @@ TEST_SCHEMAS=(
   lbs_project_test
   lbs_publishing_test
   lbs_log_test
+  # legacy-apiのテストスキーマ(#762)。以前はscripts/setup-test-db.shだけが作っており、
+  # そちらはホスト側にmysqlクライアントとroot接続を要求する。開発スタックのMySQLには
+  # lets_blog_testだけが作られず、legacy-apiのDB依存テストがUnknown databaseで落ちていた。
+  # 他のスキーマと同じくここで作れば、このスクリプトの手動再実行だけで揃う。
+  lets_blog_test
 )
 
 mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e \
