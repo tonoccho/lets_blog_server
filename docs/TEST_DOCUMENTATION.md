@@ -13,6 +13,61 @@
 | `services:log-writer` | `services/log-writer` | ログ書き込み |
 | `services:gateway` | `services/gateway` | APIゲートウェイ |
 
+### テスト用MySQLの前提
+
+**先に読むこと。** 各サービスの `src/test/resources/application-test.yml` は接続先を
+`jdbc:mysql://localhost:3306/...` に固定している(ADR-0006: Testcontainers は使わず実 MySQL を使う)。
+この前提が崩れていると、テストは中身と無関係な理由で大量に落ち、本物の失敗が埋もれる(#762)。
+
+崩れ方は2通りある。
+
+| 症状 | 例外 | 原因 |
+|---|---|---|
+| ポートに何もいない | `FlywaySqlUnableToConnectToDbException` / `ConnectException` | `docker-compose.yml` の `mysql` はホストにポートを**公開していない** |
+| スキーマが無い | `Unknown database 'lbs_project_test'` | `mysql/init/*.sh` はデータボリュームが**空のときにしか**実行されない |
+
+実行前に前提を確認する。
+
+```bash
+bash scripts/check-test-db.sh
+```
+
+到達性・資格情報・必要なスキーマ10件の有無を見て、足りないものと対処を出す。
+
+#### 実行方法は2つ
+
+**A) コンテナの中で回す(推奨)**
+
+```bash
+bin/loop test api
+```
+
+接続先の MySQL(`lbs-test-db`)がテストスキーマ込みで自動的に用意される。何も準備しなくてよい。
+
+**B) ホストから `./gradlew` で回す**
+
+開発スタックの MySQL を `127.0.0.1:3306` へ公開するオーバーライドを重ねる。
+ループバックに限定しているのは、外部へ DB を晒さないため。
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.host-tests.yml up -d mysql
+bash scripts/check-test-db.sh
+./gradlew :services:legacy-api:test
+```
+
+> **注意:** `127.0.0.1:3306` を使うコンテナが複数あると衝突する
+> (開発スタックの `mysql` と、コンテナ実行用の `lbs-test-db`)。どちらか一方だけを起動すること。
+> 両方起動していると、テストが「起動しているつもりでない方」の MySQL に当たり、
+> スキーマやデータが噛み合わずに落ちる。
+
+スキーマだけが足りない場合は、初期化スクリプトを手動で再実行する(冪等)。
+
+```bash
+docker compose exec mysql bash /docker-entrypoint-initdb.d/02-create-test-schemas.sh
+```
+
+---
+
 各サービスのテストは、プロジェクトルートから`./gradlew`でサービスごとに独立して実行できる
 (`.claude/CLAUDE.md`セクション19「Running Locally」と同じコマンド)。
 
@@ -198,7 +253,7 @@ ADR-0006 のとおり Testcontainers は使わず、実 MySQL の**サービス�
 
 | サービス | テストスキーマ | 作られ方 |
 |---|---|---|
-| legacy-api | `lets_blog_test` | `scripts/setup-test-db.sh` |
+| legacy-api | `lets_blog_test` | `mysql/init/02-create-test-schemas.sh`(#762で追加。以前は `scripts/setup-test-db.sh` だけが作っており、開発スタックのMySQLには作られていなかった) |
 | content / media / ai / analytics / platform | `lbs_{content,media,ai,analytics,platform}_test` | `mysql/init/02-create-test-schemas.sh` |
 | identity / project / publishing / log-writer | `lbs_{identity,project,publishing,log}_test` | 同上(#772で追加) |
 
@@ -208,8 +263,18 @@ ADR-0006 のとおり Testcontainers は使わず、実 MySQL の**サービス�
 追随するには、テストの接続先 MySQL(各 `application-test.yml` の `localhost:3306`)に対して
 不足しているスキーマを手で作る。
 
+スキーマを足すだけなら、初期化スクリプトの手動再実行で足りる(冪等。上の「テスト用MySQLの前提」参照)。
+
 ```bash
-# <container> はテストの接続先MySQLのコンテナ名(開発スタックなら lbs-mysql)
+docker compose exec mysql bash /docker-entrypoint-initdb.d/02-create-test-schemas.sh
+```
+
+個別に作る場合は以下。`<container>` はテストの**接続先**MySQLのコンテナ名で、
+コンテナ実行(`bin/loop test api`)なら `lbs-test-db`、ホスト実行なら開発スタックの `lbs-mysql`。
+`lbs-mysql` はホストにポートを公開していないため、ホストから直接は繋がらない
+(`docker-compose.host-tests.yml` を重ねる必要がある)。
+
+```bash
 docker exec -i <container> sh -c 'exec mysql -u root -p"$MYSQL_ROOT_PASSWORD"' <<'SQL'
 CREATE DATABASE IF NOT EXISTS lbs_identity_test   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE DATABASE IF NOT EXISTS lbs_project_test    CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
