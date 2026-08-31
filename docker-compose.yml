@@ -258,6 +258,10 @@ services:
       # ため、呼び出し元のBearerトークンをそのままidentity-serviceへ転送して問い合わせる
       # (log-writer(#572)/media-service(#573)と同じ暫定策)。
       IDENTITY_SERVICE_URI: http://identity:8080
+      # システム設定由来の実効LLM接続設定とBrave Search APIキーの取得先(issue #583)。
+      # 以前はlegacy-apiのAiBridgeController経由だったが、その実装はplatform-serviceへの
+      # 単純な中継だったため直接呼ぶよう切り替えた。
+      PLATFORM_SERVICE_URI: http://platform:8080
       <<: *rabbitmq-env
     depends_on:
       mysql:

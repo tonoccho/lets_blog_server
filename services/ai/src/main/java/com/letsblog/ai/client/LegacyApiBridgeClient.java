@@ -88,61 +88,6 @@ public class LegacyApiBridgeClient {
         }
     }
 
-    /**
-     * システム全体既定のBrave Search APIキー(Web管理画面のシステム設定、無ければ環境変数)。
-     * WebSearchServiceのプロジェクト非依存呼び出し(AiAssistService由来)向けのフォールバック。
-     * 未設定ならnull。
-     */
-    public String resolveSystemBraveSearchApiKey(String bearerToken) {
-        try {
-            SystemBraveSearchApiKey result = restClient.get()
-                    .uri("/api/internal/ai/system-settings/brave-search-api-key")
-                    .headers(headers -> setAuthorization(headers, bearerToken))
-                    .retrieve()
-                    .body(SystemBraveSearchApiKey.class);
-            return result == null ? null : result.apiKey();
-        } catch (RestClientException e) {
-            return null;
-        }
-    }
-
-    public record SystemBraveSearchApiKey(String apiKey) {
-    }
-
-    /**
-     * システム設定(Web管理画面、issue #403)で決まる実効LLM接続設定を解決する。providerがnullの
-     * 場合、legacy-api側でシステム設定の既定プロバイダーを解決して使う。
-     */
-    public LlmConfig resolveLlmConfig(String provider, String bearerToken) {
-        try {
-            LlmConfig config = restClient.get()
-                    .uri(uriBuilder -> {
-                        var builder = uriBuilder.path("/api/internal/ai/llm-config");
-                        if (provider != null && !provider.isBlank()) {
-                            builder.queryParam("provider", provider);
-                        }
-                        return builder.build();
-                    })
-                    .headers(headers -> setAuthorization(headers, bearerToken))
-                    .retrieve()
-                    .body(LlmConfig.class);
-            if (config == null) {
-                throw new IllegalStateException("legacy-apiから空の応答を受け取りました");
-            }
-            return config;
-        } catch (RestClientResponseException e) {
-            throw new IllegalStateException(bodyOrMessage(e), e);
-        } catch (RestClientException e) {
-            throw new IdentityServiceUnavailableException(
-                    "legacy-apiのllm-config呼び出しに失敗しました: " + e.getMessage(), e);
-        }
-    }
-
-    public record LlmConfig(
-            String provider, String baseUrl, String apiKey, String defaultModel,
-            List<String> availableModels, long requestTimeoutSeconds) {
-    }
-
     private void setAuthorization(HttpHeaders headers, String bearerToken) {
         if (bearerToken != null && !bearerToken.isBlank()) {
             headers.set(HttpHeaders.AUTHORIZATION, bearerToken);

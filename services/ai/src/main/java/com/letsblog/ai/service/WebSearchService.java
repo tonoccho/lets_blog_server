@@ -1,7 +1,7 @@
 package com.letsblog.ai.service;
 
 import com.letsblog.ai.ai.BraveSearchClient;
-import com.letsblog.ai.client.LegacyApiBridgeClient;
+import com.letsblog.ai.client.PlatformServiceClient;
 import com.letsblog.ai.dto.SourceReference;
 import org.springframework.stereotype.Service;
 
@@ -16,7 +16,7 @@ import java.util.List;
  * <p>issue #574でai-serviceへ移設。プロジェクトスコープのAPIキー(project_ai_settings、ai-service
  * 自身が所有)は自前のリポジトリから直接解決できるが、プロジェクトに紐付かない呼び出し向けの
  * システム全体既定キー(system_settings、platform-serviceがまだ未抽出のためlegacy-apiに残る)は
- * {@link LegacyApiBridgeClient}経由で解決する。
+ * {@link PlatformServiceClient}経由で解決する(issue #583でlegacy-apiの中継を外し、システム設定を所有するplatform-serviceを直接呼ぶよう切り替えた)。
  */
 @Service
 public class WebSearchService {
@@ -24,19 +24,19 @@ public class WebSearchService {
     private static final int SEARCH_RESULT_COUNT = 5;
 
     private final BraveSearchClient braveSearchClient;
-    private final LegacyApiBridgeClient legacyApiBridgeClient;
+    private final PlatformServiceClient platformServiceClient;
     private final ProjectAiSettingsService projectAiSettingsService;
     private final CurrentActorService currentActorService;
     private final com.letsblog.common.crypto.CredentialCipher credentialCipher;
 
     public WebSearchService(
             BraveSearchClient braveSearchClient,
-            LegacyApiBridgeClient legacyApiBridgeClient,
+            PlatformServiceClient platformServiceClient,
             ProjectAiSettingsService projectAiSettingsService,
             CurrentActorService currentActorService,
             com.letsblog.common.crypto.CredentialCipher credentialCipher) {
         this.braveSearchClient = braveSearchClient;
-        this.legacyApiBridgeClient = legacyApiBridgeClient;
+        this.platformServiceClient = platformServiceClient;
         this.projectAiSettingsService = projectAiSettingsService;
         this.currentActorService = currentActorService;
         this.credentialCipher = credentialCipher;
@@ -55,7 +55,7 @@ public class WebSearchService {
         try {
             String apiKey = projectId != null ? resolveProjectBraveSearchApiKey(projectId) : null;
             if (apiKey == null) {
-                apiKey = legacyApiBridgeClient.resolveSystemBraveSearchApiKey(currentActorService.getAuthorizationHeader());
+                apiKey = platformServiceClient.resolveSystemBraveSearchApiKey(currentActorService.getAuthorizationHeader());
             }
             return WebSearchOutcome.success(braveSearchClient.search(query, SEARCH_RESULT_COUNT, apiKey));
         } catch (RuntimeException e) {
