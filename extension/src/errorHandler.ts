@@ -80,7 +80,7 @@ export class TimeoutError extends Error {
  */
 const STATUS_GUIDANCE: Record<number, { cause: string; remedy: string }> = {
   400: { cause: 'リクエスト内容がサーバーに受け付けられませんでした。', remedy: 'front matterの項目(title/slug/categories等)に不正な値がないか確認してください。' },
-  401: { cause: 'APIキーが無効か期限切れです。', remedy: '「Let\'s Blog: Login」で再ログインするか、「Let\'s Blog: Set API Key」でAPIキーを再設定してください。' },
+  401: { cause: 'アクセストークンが無効か期限切れです。', remedy: '「Let\'s Blog: Login」で再ログインしてください。' },
   403: { cause: 'この操作を行う権限がありません。', remedy: '対象プロジェクトのメンバーに追加されているか、管理者に確認してください。' },
   404: { cause: '対象のリソースが見つかりませんでした。', remedy: 'プロジェクト/サイト/Issueが削除されていないか、選択中のプロジェクトが正しいか確認してください。' },
   408: { cause: 'サーバーがリクエストをタイムアウトしました。', remedy: '時間をおいて再実行してください。' },

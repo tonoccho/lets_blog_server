@@ -263,7 +263,7 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
       const apiKey = await getAccessToken(this.context);
       if (!apiKey) {
         if (options.manual) {
-          throw new Error("APIキーが未設定です。「Let's Blog: Set API Key」を先に実行してください。");
+          throw new Error("ログインしていません。「Let's Blog: Login」を先に実行してください。");
         }
         return;
       }

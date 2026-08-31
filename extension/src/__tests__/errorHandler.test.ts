@@ -98,3 +98,24 @@ describe('describeError: 既存の分岐', () => {
     expect(describeError(new Error('なにか失敗'))).toBe('なにか失敗');
   });
 });
+
+describe('describeError: 401の案内が現行の認証方式に沿っていること(issue #774)', () => {
+  // #565でDevice Authorization Grantへ移行し、#566で旧認証機構(APIキー)と
+  // 「Let's Blog: Set API Key」コマンドが撤去された。401は利用者が最も遭遇しやすい
+  // エラーの1つであり、ここで存在しない操作を案内すると確実に行き止まりへ誘導する。
+  const message = () =>
+    describeError(new ApiError('APIエラー (401)', 401, '', 'https://localhost/api/projects'));
+
+  it('撤去済みの「Set API Key」コマンドに言及しない', () => {
+    expect(message()).not.toContain('Set API Key');
+  });
+
+  it('現在存在しない「APIキー」ではなく現行の用語を使う', () => {
+    expect(message()).not.toContain('APIキー');
+    expect(message()).toContain('アクセストークン');
+  });
+
+  it('実行可能な対処として「Let\'s Blog: Login」での再ログインを案内する', () => {
+    expect(message()).toContain("Let's Blog: Login");
+  });
+});
