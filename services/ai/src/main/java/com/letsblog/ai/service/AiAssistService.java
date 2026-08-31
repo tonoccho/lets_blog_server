@@ -8,6 +8,7 @@ import com.letsblog.ai.domain.GenerationJob;
 import com.letsblog.ai.dto.AiAskRequest;
 import com.letsblog.ai.dto.AiAskResponse;
 import com.letsblog.ai.dto.AiDraftRequest;
+import com.letsblog.ai.dto.AiImagePromptResponse;
 import com.letsblog.ai.dto.AiDraftResponse;
 import com.letsblog.ai.dto.AiProofreadRequest;
 import com.letsblog.ai.dto.AiProofreadResponse;
@@ -41,6 +42,13 @@ import java.util.Map;
  */
 @Service
 public class AiAssistService {
+
+    /** issue #583でlegacy-apiから移設。画像生成プロンプト作成のシステムプロンプト。 */
+    private static final String IMAGE_PROMPT_SYSTEM_PROMPT =
+            "あなたは画像生成AI(Stable Diffusion)向けのプロンプトエンジニアです。"
+            + "ユーザーとの会話から生成したい画像の内容を理解し、Stable Diffusion用の英語のプロンプトを作成してください。"
+            + "被写体、構図、スタイル、雰囲気、画質に関する具体的なキーワードをカンマ区切りで含めてください。"
+            + "出力はプロンプト文字列のみとし、説明文や前置き、日本語は含めないでください。";
 
     private static final Logger log = LoggerFactory.getLogger(AiAssistService.class);
 
@@ -181,6 +189,47 @@ public class AiAssistService {
             provider = llmModelService.getSelectedProvider(projectId);
         }
         return llmClient.generate(prompt, model, provider);
+    }
+
+    /**
+     * チャットメッセージ(と任意の履歴)から、画像生成AI(Stable Diffusion)向けの英語プロンプトを
+     * LLMで生成する。issue #583でlegacy-apiの{@code AiAssistService#generateImagePrompt}から移設した。
+     *
+     * <p>#583で画像生成そのものはmedia-serviceへ移したが、<b>これは純粋なLLM機能</b>
+     * (プロンプト文字列を作るだけで画像は生成しない)なので、LLMの所有者であるai-serviceが持つ。
+     *
+     * <p>「System+履歴+User」形式のプロンプト組み立ては{@code ArticlePlanService#buildChatPrompt}と同じ。
+     */
+    public AiImagePromptResponse generateImagePrompt(
+            Long projectId, List<PlanChatMessage> history, String message, String providerOverride) {
+        GenerationJob job = startJob("llm_image_prompt", Map.of(
+                "projectId", String.valueOf(projectId),
+                "message", message));
+        try {
+            String prompt = buildImagePromptChat(history, message);
+            String result = generateForBridge(projectId, prompt, providerOverride);
+            completeJob(job, Map.of("result", result));
+            return new AiImagePromptResponse(result);
+        } catch (RuntimeException e) {
+            failJob(job, e);
+            throw e;
+        }
+    }
+
+    private String buildImagePromptChat(List<PlanChatMessage> history, String message) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("System: ").append(IMAGE_PROMPT_SYSTEM_PROMPT).append("\n\n");
+        if (history != null) {
+            for (PlanChatMessage msg : history) {
+                sb.append("user".equals(msg.role()) ? "User" : "Assistant")
+                        .append(": ")
+                        .append(msg.content())
+                        .append("\n");
+            }
+        }
+        sb.append("User: ").append(message).append("\n");
+        sb.append("Assistant: ");
+        return sb.toString();
     }
 
     /**
