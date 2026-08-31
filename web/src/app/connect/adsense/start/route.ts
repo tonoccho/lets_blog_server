@@ -17,14 +17,15 @@ const SCOPE = "https://www.googleapis.com/auth/adsense.readonly";
  * (issue #407でアプリ全体のシステム設定からプロジェクト単位に変更。APIコンテナ側のAdSenseClientと同じ設定元)。
  */
 export async function GET(request: NextRequest) {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   const projectId = request.nextUrl.searchParams.get("projectId");
   if (!projectId || Number.isNaN(Number(projectId))) {
     return Response.json({ error: "projectIdが指定されていません。" }, { status: 400 });
   }
 
-  const status = await getProjectAdSenseStatus(Number(projectId));
+  const status = await getProjectAdSenseStatus(Number(projectId), actor);
   const clientId = status.clientId;
   if (!clientId || !status.hasClientSecret) {
     return Response.json(

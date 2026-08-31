@@ -7,11 +7,12 @@ import { PostsTable } from "../../../posts/PostsTable";
 
 export default async function ProjectPostsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
   const projectId = Number(id);
 
   const [project, allPosts, timezone] = await Promise.all([
-    getProject(projectId).catch(() => null),
+    getProject(projectId, actor).catch(() => null),
     listPosts().catch(() => []),
     getViewerTimeZone(),
   ]);

@@ -14,13 +14,14 @@ import { ContainerStatusPanel } from "./ContainerStatusPanel";
 export default async function DashboardPage() {
   const session = await getSession();
   const isAdmin = session?.user.role === "admin";
+  const actor = session ? { id: Number(session.user.id), role: session.user.role } : undefined;
 
   const [sites, posts, jobs, serviceStatuses, serviceStatusDetail, containerStatuses] = await Promise.all([
     listSites().catch(() => []),
     listPosts().catch(() => []),
     listGenerationJobs().catch(() => []),
     getConnectedServiceStatuses().catch(() => []),
-    isAdmin ? getConnectedServiceStatusDetail().catch(() => null) : Promise.resolve(null),
+    isAdmin ? getConnectedServiceStatusDetail(actor).catch(() => null) : Promise.resolve(null),
     getContainerStatuses().catch(() => []),
   ]);
 

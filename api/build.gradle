@@ -1,0 +1,161 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.1.0'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'org.owasp.dependencycheck' version '13.0.0'
+    id 'me.champeau.jmh' version '0.7.3'
+    id 'jacoco'
+    id 'checkstyle'
+}
+
+group = 'com.letsblog'
+version = '0.1.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-restclient'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-amqp'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-mail'
+    implementation 'org.springframework.boot:spring-boot-starter-aspectj'
+    implementation 'org.thymeleaf:thymeleaf'
+    implementation 'dev.samstevens.totp:totp:1.7.1'
+
+    implementation 'com.mysql:mysql-connector-j'
+    implementation 'org.springframework.boot:spring-boot-starter-flyway'
+    implementation 'org.flywaydb:flyway-mysql'
+
+    implementation 'org.springframework.security:spring-security-crypto'
+
+    implementation 'com.vladsch.flexmark:flexmark-all:0.64.8'
+
+    // [blogcard]/[amazon] 組み込みタグ向けのヘッドレスブラウザスクレイピングに使用
+    implementation 'com.microsoft.playwright:playwright:1.62.0'
+
+    implementation 'com.hierynomus:sshj:0.38.0'
+
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0'
+
+    implementation 'io.github.resilience4j:resilience4j-ratelimiter:2.4.0'
+    implementation 'io.github.resilience4j:resilience4j-spring-boot4:2.4.0'
+    implementation 'io.github.resilience4j:resilience4j-circuitbreaker:2.4.0'
+
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-micrometer-metrics'
+    implementation 'org.springframework.boot:spring-boot-jackson2'
+    implementation 'net.logstash.logback:logstash-logback-encoder:7.4'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-webmvc-test'
+    testImplementation 'org.springframework.boot:spring-boot-jdbc-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+    testImplementation 'org.testcontainers:testcontainers:1.19.3'
+    testImplementation 'org.testcontainers:mysql:1.19.3'
+    testImplementation 'org.testcontainers:junit-jupiter:1.19.3'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    // JMH for benchmarking
+    testImplementation 'org.openjdk.jmh:jmh-core:1.37'
+    testAnnotationProcessor 'org.openjdk.jmh:jmh-generator-annprocess:1.37'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    finalizedBy jacocoTestReport
+}
+
+jacoco {
+    toolVersion = '0.8.11'
+}
+
+jacocoTestReport {
+    dependsOn test
+    afterEvaluate {
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: [
+                '**/config/**',
+                '**/entity/**',
+                '**/dto/**',
+                '**/exception/**',
+                '**/*$*',
+            ])
+        }))
+    }
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+    }
+}
+
+checkstyle {
+    configFile = file('checkstyle.xml')
+    ignoreFailures = false
+    showViolations = true
+}
+
+tasks.named('checkstyleMain') {
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}
+
+task lint {
+    dependsOn checkstyleMain
+    doLast {
+        println "✓ Lint check passed"
+    }
+}
+
+task coverageCheck {
+    dependsOn jacocoTestReport
+    doLast {
+        def xmlFile = file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
+        if (xmlFile.exists()) {
+            println "✓ JaCoCo coverage report generated at: ${xmlFile}"
+        }
+    }
+}
+
+dependencyCheck {
+    format = 'HTML'
+    suppressionFile = 'dependency-check-suppression.xml'
+    failBuildOnCVSS = 7.0
+}
+
+// Dockerイメージのビルド時、実行時クラスパスのjarを一時的に取り出してPlaywrightのブラウザ
+// インストールCLI(com.microsoft.playwright.CLI)を`java -cp`で実行するために使う。
+// app.jar自体はSpring Bootのfat jar(BOOT-INF/lib配下にネストされる)のため、
+// 単純に `java -cp app.jar ...` ではCLIの依存クラスを解決できない。
+tasks.register('copyRuntimeLibs', Copy) {
+    from configurations.runtimeClasspath
+    into "$buildDir/runtime-libs"
+}
+
+jmh {
+    jmhVersion = '1.37'
+    warmupIterations = 3
+    iterations = 5
+    timeOnIteration = '1s'
+    timeUnit = 'ms'
+    benchmarkMode = ['avgt']
+    fork = 1
+    threads = 1
+    verbosity = 'EXTRA'
+    resultFormat = 'JSON'
+}

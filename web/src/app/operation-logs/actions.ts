@@ -9,10 +9,11 @@ import { groupOperationLogEntries, describeOperationTraceText } from "./operatio
  * 取り直してからテキスト化する(1つの操作がページ境界をまたいでも欠落しないようにするため)。
  */
 export async function copyOperationTraceAction(operationId: string): Promise<string> {
-  await requireSession();
+  const session = await requireSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
   const timezone = await getViewerTimeZone();
 
-  const entries = await getOperationTrace(operationId);
+  const entries = await getOperationTrace(operationId, actor);
   const [group] = groupOperationLogEntries(entries);
   if (!group) {
     return `操作ID: ${operationId}\n(記録が見つかりませんでした)`;

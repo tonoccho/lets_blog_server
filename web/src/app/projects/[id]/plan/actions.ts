@@ -29,12 +29,15 @@ export async function sendPlanChatMessage(
   sessionId: number | null,
   githubIssueNumber: number | null
 ): Promise<ActionResult<{ reply: string; sessionId: number }>> {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
     const response = await sendArticlePlanChatMessage(
       projectId,
-      { history, message, sessionId, githubIssueNumber });
+      { history, message, sessionId, githubIssueNumber },
+      actor
+    );
     return { ok: true, data: { reply: response.reply, sessionId: response.sessionId } };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -44,10 +47,11 @@ export async function sendPlanChatMessage(
 export async function loadPlanSessions(
   projectId: number
 ): Promise<ActionResult<{ sessions: ArticlePlanSessionSummary[] }>> {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
-    const sessions = await listArticlePlanSessions(projectId);
+    const sessions = await listArticlePlanSessions(projectId, actor);
     return { ok: true, data: { sessions } };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -58,10 +62,11 @@ export async function loadPlanSession(
   projectId: number,
   sessionId: number
 ): Promise<ActionResult<{ session: ArticlePlanSessionDetail }>> {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
-    const detail = await getArticlePlanSession(projectId, sessionId);
+    const detail = await getArticlePlanSession(projectId, sessionId, actor);
     return { ok: true, data: { session: detail } };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -72,10 +77,11 @@ export async function loadPlanSessionByIssue(
   projectId: number,
   issueNumber: number
 ): Promise<ActionResult<{ session: ArticlePlanSessionDetail | null }>> {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
-    const detail = await getArticlePlanSessionByIssue(projectId, issueNumber);
+    const detail = await getArticlePlanSessionByIssue(projectId, issueNumber, actor);
     return { ok: true, data: { session: detail } };
   } catch {
     return { ok: true, data: { session: null } };
@@ -86,10 +92,11 @@ export async function loadIssueDescription(
   projectId: number,
   issueNumber: number
 ): Promise<ActionResult<{ body: string }>> {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
-    const response = await getArticlePlanIssueDescription(projectId, issueNumber);
+    const response = await getArticlePlanIssueDescription(projectId, issueNumber, actor);
     return { ok: true, data: { body: response.body } };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -100,10 +107,11 @@ export async function loadRepositoryIssues(
   projectId: number,
   state: RepositoryIssueState
 ): Promise<ActionResult<{ issues: RepositoryIssue[] }>> {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
-    const issues = await listArticlePlanIssues(projectId, state);
+    const issues = await listArticlePlanIssues(projectId, state, actor);
     return { ok: true, data: { issues } };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -114,10 +122,11 @@ export async function suggestPlanTitles(
   projectId: number,
   history: PlanChatMessage[]
 ): Promise<ActionResult<{ titles: string[] }>> {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
-    const response = await suggestArticlePlanTitles(projectId, { history });
+    const response = await suggestArticlePlanTitles(projectId, { history }, actor);
     return { ok: true, data: { titles: response.titles } };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -128,10 +137,11 @@ export async function acceptPlan(
   projectId: number,
   titles: string[]
 ): Promise<ActionResult<{ results: AcceptPlanResultItem[] }>> {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
-    const response = await acceptArticlePlan(projectId, { titles });
+    const response = await acceptArticlePlan(projectId, { titles }, actor);
     return { ok: true, data: { results: response.results } };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -142,10 +152,11 @@ export async function suggestPlanStructure(
   projectId: number,
   history: PlanChatMessage[]
 ): Promise<ActionResult<{ structure: string }>> {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
-    const response = await suggestArticleStructure(projectId, { history });
+    const response = await suggestArticleStructure(projectId, { history }, actor);
     return { ok: true, data: { structure: response.structure } };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -157,10 +168,11 @@ export async function acceptPlanStructure(
   issueNumber: number,
   structure: string
 ): Promise<ActionResult<{ issueNumber: number; issueUrl: string }>> {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
-    const response = await acceptArticleStructure(projectId, issueNumber, { structure });
+    const response = await acceptArticleStructure(projectId, issueNumber, { structure }, actor);
     return { ok: true, data: { issueNumber: response.issueNumber, issueUrl: response.issueUrl } };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };

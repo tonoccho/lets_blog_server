@@ -9,9 +9,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
   const { id } = await params;
   const projectId = Number(id);
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
-    const body = await downloadProjectCustomTagCssBundle(projectId);
+    const body = await downloadProjectCustomTagCssBundle(projectId, actor);
     return new Response(body, {
       status: 200,
       headers: {

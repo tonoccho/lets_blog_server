@@ -10,17 +10,18 @@ import { CssBundleViewer } from "../custom-tags/CssBundleViewer";
 
 export default async function ProjectTagsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
   const projectId = Number(id);
 
-  const project = await getProject(projectId).catch(() => null);
+  const project = await getProject(projectId, actor).catch(() => null);
   if (!project) {
     notFound();
   }
 
   const [overview, tags] = await Promise.all([
-    getTagDesignSettings(projectId),
-    listProjectCustomTags(projectId).catch(() => []),
+    getTagDesignSettings(projectId, actor),
+    listProjectCustomTags(projectId, actor).catch(() => []),
   ]);
 
   const tabs: TabItem[] = [

@@ -1,17 +1,15 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
-import { gatewayUrl } from "@/lib/apiBaseUrl";
 
-// /signupはissue #564でKeycloakのregistrationAllowed=false(自己登録オフ)に伴い削除した。
-const PUBLIC_PATHS = ["/login", "/setup"];
+const PUBLIC_PATHS = ["/login", "/signup", "/setup"];
 const ADMIN_ONLY_PREFIXES = ["/users", "/admin"];
 
 async function needsInitialSetup(): Promise<boolean> {
   try {
-    // /api/auth/setup-status はログイン前でも到達できる公開エンドポイントのため認証ヘッダー不要。
-    // ベースURLの組み立てはapiClient.tsと共通のgatewayUrl()に集約している(issue #584)。
-    const res = await fetch(gatewayUrl("/api/auth/setup-status"), {
+    const apiUrl = (process.env.LETS_BLOG_API_URL ?? "https://localhost").replace(/\/+$/, "");
+    // /api/auth/setup-status はログイン前でも到達できる公開エンドポイントのためAPIキー不要。
+    const res = await fetch(`${apiUrl}/api/auth/setup-status`, {
       cache: "no-store",
     });
     if (!res.ok) {
@@ -45,28 +43,9 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
-  // /client-errors はブラウザのerror boundaryが投げる fire-and-forget のビーコンを受ける
-  // Route Handler(issue #791)。ここでリダイレクトを返しても、送信側はレスポンスを見ないので
-  // 意味が無いばかりか、未認証エラー1件ごとに needsInitialSetup() のgateway呼び出しが1件増える。
-  // 認証の判定はハンドラ自身がgetSession()で行い、未認証なら記録せず204を返す
-  // (web/src/app/client-errors/route.ts、docs/AUTHORIZATION_MATRIX.md参照)。
-  //
-  // matcherの否定先読みではなくここで弾いているのは、先読みが前方一致になるため。
-  // `(?!...|client-errors|...)` と書くと /client-errors-foo や /client-errors/nested のような
-  // 「client-errorsで始まる別のルート」まで除外され、そこにページを足した時点で
-  // 認証ゲートが無言で外れる(ADR-0008が本方式の最大のリスクとして挙げている型の事故)。
-  // 完全一致で判定すればその穴は構造的に生じない。PUBLIC_PATHSがstartsWithなので、
-  // そちらに足すのではなく専用の早期returnにしている。
-  if (pathname === "/client-errors") {
-    return NextResponse.next({ request: { headers: requestHeaders } });
-  }
-
   const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET });
 
-  // token.errorは"RefreshAccessTokenError"(アクセストークンのリフレッシュ失敗。auth.tsのjwt
-  // コールバック参照)。リフレッシュ済みの生きたアクセストークンが無い状態なので、未ログインと
-  // 同様に扱いKeycloakへの再ログインを促す。
-  if (!token || token.error) {
+  if (!token) {
     if (await needsInitialSetup()) {
       return NextResponse.redirect(new URL("/setup", request.url));
     }

@@ -3,8 +3,9 @@ import { listSshKeyPairs } from "@/lib/apiClient";
 import { SshKeyPairsPanel } from "./SshKeyPairsPanel";
 
 export default async function AdminSshKeysPage() {
-  await requireAdminSession();
-  const keyPairs = await listSshKeyPairs().catch(() => []);
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
+  const keyPairs = await listSshKeyPairs(actor).catch(() => []);
 
   return (
     <div className="space-y-8">

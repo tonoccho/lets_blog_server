@@ -13,11 +13,11 @@ OWASP Top 10 (2021) に対する現状の対応をまとめたものです。
 
 | 情報 | 保管先 | キー | 生存期間 |
 | --- | --- | --- | --- |
-| アクセストークン/リフレッシュトークン | `context.secrets`(VSCode Secret Storage) | `letsBlog.tokens` | ログアウト相当(リフレッシュ失敗による破棄)/再ログインまで |
-| ログインユーザー(Actor、表示用) | `context.secrets` | `letsBlog.actor` | ログアウト/再ログインまで |
+| APIキー | `context.secrets`(VSCode Secret Storage) | `letsBlog.apiKey` | 明示的な再設定まで |
+| ログインユーザー(Actor) | `context.secrets` | `letsBlog.actor` | ログアウト/再ログインまで |
 | 選択中のプロジェクトID | `context.workspaceState` | `letsBlog.projectId` | ワークスペース単位で永続 |
 
-トークンとActorは **VSCode の Secret Storage API** に保管します。Secret Storage は
+APIキーとActorは **VSCode の Secret Storage API** に保管します。Secret Storage は
 OSの資格情報ストア(macOS: Keychain、Windows: 資格情報マネージャー、Linux: libsecret/gnome-keyring)へ
 委譲されるため、平文ファイルとしてディスクへ書き出されません。
 
@@ -27,15 +27,12 @@ OSの資格情報ストア(macOS: Keychain、Windows: 資格情報マネージ�
 ### 1.2 実装上の取り決め
 
 - 資格情報の読み書きは `src/config.ts` に集約します。他のモジュールが `context.secrets` を直接触ることはしません。
-- issue #565(Device Authorization Grantへの移行)以降、拡張はメールアドレス/パスワードを一切扱いません。
-  ログイン(`src/extension.ts` の `commandLogin`)はKeycloakへのデバイス認可リクエスト・ユーザーによる
-  ブラウザ上での承認・トークンエンドポイントのポーリングのみで完結し、資格情報は拡張を経由しません。
-- アクセストークンは有効期限が近い/切れている場合、`config.ts` の `requireAccessToken` が
-  リフレッシュトークンを使って自動的に更新します。リフレッシュにも失敗した場合(リフレッシュトークン自体の
-  失効・取り消し等)は保存済みトークンを破棄し、再ログインを促します。
+- パスワードと2段階認証コードは、送信後に変数の参照を切ります(`src/extension.ts` の `commandLogin`)。
+  - JavaScriptの文字列は不変でメモリ上をゼロ埋めできないため、これは「保持し続けない」ための措置であり、
+    メモリダンプに対する完全な防御ではありません。この制約は仕様として受け入れています。
+- APIキーの入力(`commandSetApiKey`)およびパスワード入力には `showInputBox({ password: true })` を使い、
+  画面上で伏字にします。
 - Actorの保存値は読み出し時に `ActorSchema`(Zod)で検証し、壊れていた場合は破棄して再ログインを促します。
-  Device Authorization Grant移行後のActorはKeycloakのJWTクレーム(email/realm_access.roles)から
-  復元した表示専用の値で、ローカルDBの数値ユーザーIDは持ちません。
 
 ### 1.3 ログへの出力
 
@@ -63,17 +60,18 @@ TLS証明書の検証は **既定で有効**です(`letsBlog.allowInsecureTls` �
 指定できる `node:https` トランスポートへ切り替えます(ネイティブ `fetch` はリクエスト単位で
 証明書検証を緩める手段を持たないため)。
 
-### 2.2 平文HTTPへのトークン送信
+### 2.2 平文HTTPへの資格情報送信
 
-issue #565(Device Authorization Grantへの移行)以降、拡張はパスワードを一切扱わないため
-専用の同意ダイアログは廃止しました。デバイス認可・トークンエンドポイントへの通信は
-`letsBlog.serverUrl`(既定 `https://`)を経由し、TLS証明書検証(2.1節)の対象になります。
+`letsBlog.serverUrl` が `https://` で始まらない場合、ログイン時に
+モーダルの警告を表示し、利用者の明示的な同意なしにパスワードを送信しません
+(`confirmCredentialTransport`)。
 
 ### 2.3 送信するヘッダ
 
 | ヘッダ | 内容 |
 | --- | --- |
-| `Authorization` | `Bearer <アクセストークン>`。Secret Storage に保管されたKeycloak発行のJWT。サーバー側(各サービスのoauth2 resource server)がJWTを検証して実行者を判定する |
+| `X-API-Key` | Secret Storage に保管されたAPIキー |
+| `X-Actor-Id` / `X-Actor-Role` | 操作の実行者(サーバー側の権限判定に使用) |
 
 ---
 
@@ -101,22 +99,21 @@ issue #565(Device Authorization Grantへの移行)以降、拡張はパスワー
 
 | # | カテゴリ | 対応状況 |
 | --- | --- | --- |
-| A01 | アクセス制御の不備 | 認可判定はAPIサーバー側が `Authorization: Bearer` で送られたアクセストークン(JWT、Keycloak発行)の検証結果に基づき実施。拡張側は権限判定を行わず、サーバーの判定結果(403等)に従う。 |
-| A02 | 暗号化の失敗 | TLS検証を既定で有効化。トークンはSecret Storage(OSの資格情報ストア)へ委譲。拡張はパスワードを扱わず、独自の暗号処理も実装しない。 |
+| A01 | アクセス制御の不備 | 認可判定はAPIサーバー側が `X-API-Key` と `X-Actor-*` に基づき実施。拡張側は権限判定を行わず、サーバーの判定結果(403等)に従う。 |
+| A02 | 暗号化の失敗 | TLS検証を既定で有効化。資格情報はSecret Storage(OSの資格情報ストア)へ委譲。平文HTTP時は明示的な同意を要求。拡張は独自の暗号処理を実装しない。 |
 | A03 | インジェクション | Webviewへの動的値は `textContent`/DOM APIで描画。CSPでnonce付きスクリプトのみ許可。multipartのヘッダ値は改行・引用符を除去(`src/multipart.ts`)。ファイル名は接頭辞とタイムスタンプから生成し、サーバー応答由来のパス要素を混入させない。 |
 | A04 | 安全でない設計 | 資格情報の取り扱いを `config.ts` に、通信を `apiClient.ts`/`httpClient.ts` に集約し、経路を限定。再試行は冪等な操作のみに限定し、重複投稿を設計上防止。 |
 | A05 | セキュリティ設定ミス | 危険側(TLS検証無効)を既定にしない。有効時は警告ログを出力。Webviewは `default-src 'none'` を起点に必要最小限のみ許可。 |
 | A06 | 脆弱で古いコンポーネント | 実行時依存は `gray-matter` と `zod` のみ(`node-fetch`/`form-data` を廃止)。Dependabot が `/extension` を週次で監視。 |
-| A07 | 識別と認証の失敗 | 認証はKeycloak(Device Authorization Grant)に委譲し、拡張はパスワードを扱わない。2段階認証等の認証強度はKeycloak側の設定に従う。トークンはSecret Storageに保管し設定ファイルへ書かない。 |
+| A07 | 識別と認証の失敗 | 認証はAPIサーバーに委譲。2段階認証(TOTP)に対応。APIキーはSecret Storageに保管し設定ファイルへ書かない。 |
 | A08 | ソフトウェアとデータの整合性の不備 | APIレスポンスをZodスキーマで検証し(`src/schemas.ts`)、想定外の形式を拡張内部へ持ち込まない。 |
 | A09 | ログとモニタリングの失敗 | 構造化ログ(`src/logger.ts`)で失敗を記録。資格情報らしいキーの値はマスク。`letsBlog.debugMode` で詳細ログを取得可能。 |
 | A10 | SSRF | 接続先は利用者が設定した `letsBlog.serverUrl` のみ。サーバー応答に含まれるURLを拡張が自動で取得することはしない(記事プレビューのCSS取得はサーバー側の処理)。 |
 
 ### 既知の制約
 
-- **メモリ上のトークンを消去できない**: JavaScriptの文字列は不変のため、アクセストークン/
-  リフレッシュトークンをメモリからゼロ埋めで消すことはできません(issue #565以降、拡張はパスワードを
-  一切扱わないため、この制約の影響範囲はトークンに限定されます)。
+- **メモリ上の資格情報を消去できない**: JavaScriptの文字列は不変のため、パスワードを
+  メモリからゼロ埋めで消すことはできません。参照を早期に切ることで生存期間を短縮しています。
 - **`allowInsecureTls: true` 時の中間者攻撃**: 利用者が明示的に有効化した場合、
   証明書検証を行わないため中間者攻撃を検出できません。ローカル環境専用の設定です。
 - **Webviewの `style-src 'unsafe-inline'`**: 3章に記載の理由により許容しています。

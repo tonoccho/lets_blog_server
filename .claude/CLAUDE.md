@@ -1,247 +1,538 @@
-# Project Development Rules
+# CLAUDE.md
 
-## Core Principle
+## Role
 
-This project uses a structured AI-assisted development workflow.
+You are an AI coding agent working on this repository.
 
-Do not jump directly from an informal user request to code implementation.
+Your primary task is to implement GitHub Issues accurately and safely.
 
-All feature development should follow:
+GitHub Issues are the primary source of task requirements.
 
-1. Requirement clarification
-2. Issue definition
-3. Ready
-4. Analysis
-5. Implementation planning
-6. Implementation
-7. Review
-8. QA
-9. Done
-10. Retrospective and rule improvement
+Do not treat assumptions, guesses, or inferred requirements as confirmed requirements.
 
 ---
 
-# Source of Truth
+# 1. General Workflow
 
-GitHub Issues are the source of truth for development work.
+When asked to work on a GitHub Issue, follow this workflow:
 
-Do not create independent TODO files for issue status management.
+1. Read and understand the Issue.
+2. Inspect the current repository state.
+3. Inspect relevant existing code before making changes.
+4. Identify the smallest reasonable set of changes required.
+5. Create or switch to an appropriate working branch.
+6. Implement the changes.
+7. Run relevant tests, linters, formatters, and type checks.
+8. Review the resulting diff.
+9. Fix any problems found during verification.
+10. Commit the changes.
+11. Push the working branch to GitHub.
+12. Create or update a Pull Request.
+13. Clearly report what was changed and what verification was performed.
 
-Do not begin implementation unless the task is sufficiently defined.
-
-The expected workflow is:
-
-Inbox
-→ Backlog
-→ Ready
-→ In Progress
-→ Review
-→ QA
-→ Done
-
----
-
-# Agent Responsibilities
-
-## project-planner
-
-Responsible for:
-
-- Understanding user requests
-- Clarifying requirements
-- Identifying missing requirements
-- Investigating the existing project when necessary
-- Defining scope
-- Defining acceptance criteria
-- Identifying dependencies
-- Creating or updating implementation-ready issues
-
-Must NOT:
-
-- Implement production code
-- Make architectural changes without documenting them
-- Mark an issue Ready when important requirements are unknown
+Do not skip verification merely because the change appears simple.
 
 ---
 
-## implementer
+# 2. GitHub Issue Rules
 
-Responsible for:
+Before modifying code, read the relevant GitHub Issue using GitHub CLI when necessary.
 
-- Reading the issue
-- Investigating the existing codebase
-- Identifying affected areas
-- Creating an implementation plan
-- Implementing the approved scope
-- Adding or updating tests
-- Running relevant validation
+For example:
 
-Must NOT:
+```bash
+gh issue view <issue-number>
+```
 
-- Expand scope without justification
-- Implement unrelated refactoring
-- Change product requirements
-- Mark work Done
+Treat the Issue as the specification for the task.
 
----
+Pay attention to:
 
-## reviewer
+* Problem description
+* Expected behavior
+* Acceptance criteria
+* Constraints
+* Related Issues
+* Existing discussion and comments
 
-Responsible for independently reviewing implementation.
+If the Issue contains explicit acceptance criteria, all of them must be addressed.
 
-Review:
+## Do not silently expand the scope
 
-- Requirement compliance
-- Architecture consistency
-- Code quality
-- Security concerns
-- Regression risk
-- Unnecessary complexity
-- Scope creep
-- Missing tests
+Do not implement additional features simply because they seem useful.
 
-Reviewer should not approve implementation merely because tests pass.
+If you discover a potentially useful improvement that is outside the Issue's scope:
 
----
+1. Do not implement it automatically.
+2. Mention it in the final report.
+3. Suggest creating a separate Issue if appropriate.
 
-## qa
+## Ambiguous requirements
 
-Responsible for validating the completed behavior from the user's perspective.
+If the Issue is ambiguous but a reasonable interpretation can be made without changing the intended behavior, choose the least invasive interpretation.
 
-QA must verify acceptance criteria.
-
-QA should focus on:
-
-- Expected user behavior
-- Edge cases
-- Regression behavior
-- Error handling
-- End-to-end flows where appropriate
-
-QA does not assume implementation is correct.
+If ambiguity could materially change the behavior, stop and ask for clarification rather than inventing requirements.
 
 ---
 
-# Model Selection
+# 3. Repository Inspection
 
-Every skill and agent declares its model explicitly in frontmatter, chosen by what the work actually requires:
+Before editing files:
 
-| Kind of work | Model |
-| --- | --- |
-| Running commands (git, `gh`) with no judgment | `haiku` |
-| Comparing simple properties (status, priority, dependency counts) | `haiku` |
-| Verifying tests or inspecting Issues | `sonnet` |
-| Implementing production code, or authoring Issues | `opus` |
+* Check the current Git status.
+* Inspect the repository structure.
+* Identify the relevant application/module.
+* Read existing implementations before creating new ones.
+* Look for existing tests.
+* Look for project-specific documentation.
+* Check package/build configuration when relevant.
 
-Resulting assignments:
+Start with commands such as:
 
-- `haiku` — `git-workflow`, `complete-issue`, `triage-backlog`, `ready-issue`
-- `sonnet` — `pull-request`, `work-next`, `review-issue`, `qa-issue`; the `reviewer` and `qa` agents
-- `opus` — `implement-issue`, `plan-issue`, `discover-issues`; the `implementer` agent
+```bash
+git status
+git branch --show-current
+git log -5 --oneline
+```
 
-Two deliberate exceptions:
+Do not assume the repository is clean.
 
-- `ready-issue` runs on `haiku` because its selection step is a property comparison, but it delegates the readiness evaluation to `project-planner` on `sonnet` — judging an Issue means reading and assessing it.
-- The `project-planner` agent keeps `model: inherit`. It is called both for Issue creation (opus) and Issue assessment (haiku/sonnet), so the calling skill decides.
+If there are pre-existing uncommitted changes:
 
-Never edit production code on anything below Opus.
-
----
-
-# Autonomous Task Execution
-
-Once a task is started via `work-next` (or an equivalent "implement the next task" request), it must proceed through Implementation → Review → QA → Pull Request without stopping to ask the user whether to continue at each stage.
-
-A recoverable stage outcome — implementation issues, Review `CHANGES REQUIRED`, QA `FAIL` — must loop back into implementation automatically and retry. Do not pause for user confirmation before retrying.
-
-The workflow may still stop before a Pull Request exists, but only for a genuine blocker:
-
-- A requirement ambiguity only the user can resolve (Review `REQUIREMENT CLARIFICATION`, or a blocking question raised during implementation).
-- QA `BLOCKED` (verification itself cannot proceed).
-- A per-stage retry limit is exceeded without resolving the problem (see `work-next`).
-- A live-system mutation would require explicit confirmation (see existing Keycloak / production DB rules).
-
-Otherwise, do not halt the workflow short of an opened Pull Request.
+* Do not overwrite them.
+* Do not reset them.
+* Do not discard them.
+* Determine whether they are related to the current task.
+* Preserve unrelated user changes.
 
 ---
 
-# Implementation Rules
+# 4. Branching Strategy
 
-Before editing code:
+- Never work directly on `main` unless explicitly instructed.
+- Never create branches from `main` unless explicitly instructed.
+- Always create branches from `develop` unless explicitly instructed.
+- Never merge working branches to `develop` without PR.
+- Never merge working branches to `main` without PRNever merge working branches to `main` without PR..
 
-1. Read the relevant GitHub Issue.
-2. Read relevant architecture and development documentation.
-3. Inspect existing implementations.
-4. Prefer existing patterns over inventing new ones.
-5. Identify the smallest change that satisfies the requirements.
+For an Issue, prefer:
 
-After editing code:
+```text
+fix/issue-<number>
+```
 
-1. Run relevant tests.
-2. Run linting where available.
-3. Run type checks where available.
-4. Check for unintended changes.
-5. Compare the implementation against acceptance criteria.
+for bug fixes, and:
 
----
+```text
+feature/issue-<number>
+```
 
-# Scope Control
+for new functionality.
 
-Do not change unrelated files.
+Examples:
 
-Do not perform opportunistic refactoring unless:
+```text
+fix/issue-42
+feature/issue-57
+```
 
-- It is required to complete the issue, or
-- The user explicitly requests it.
+Before creating a branch, verify the current Git state.
 
-If a problem outside the issue is discovered:
-
-Do not silently fix it.
-
-Do not wait for the user's judgment on whether it is worth filing.
-
-First, search for an existing Issue covering the same problem. Run `gh issue list --state open --search "<term>"` for the affected file path(s) and class/symbol name(s), and for the observable symptom. Search each identifier separately — a single combined query misses Issues that use different wording.
-
-- If an open Issue already covers the same problem, do **not** create a new one. Add a comment to that Issue with the new evidence (where it was re-encountered, which stage found it, any detail its body lacks) and report its number instead.
-- If a matching Issue exists but the new finding is genuinely broader or narrower in scope, say so explicitly in the comment, and only then decide whether a separate Issue is warranted.
-- Only when no existing Issue covers it, create a new one.
-
-Create the new GitHub Issue in `Inbox`, using the `project-planner` Issue template (Title, Background, Problem, Goal, Requirements, Acceptance Criteria, Scope, Out of Scope, Dependencies). This applies at every stage of the workflow (planning, implementation, review, QA) — whichever stage discovers the problem files it immediately.
-
-The Issue's `Priority` field (P0/P1/P2) must be set before the Issue is considered filed. Never leave priority unset on a newly discovered Issue, even though older Issues in the project may have it unset.
-
-Then report:
-
-- What was discovered
-- Why it matters
-- Whether it blocks the current issue
-- The new Issue number created for it, **or** the existing Issue number the finding was added to
+Do not delete existing branches unless explicitly instructed.
 
 ---
 
-# Completion Definition
+# 5. Coding Principles
 
-Work is not Done merely because code has been written.
+Prefer:
 
-An issue may be considered complete only when:
+* Small, focused changes
+* Existing project conventions
+* Existing abstractions
+* Simple implementations
+* Readable code
+* Minimal dependencies
+* Backward compatibility
 
-- Acceptance criteria are satisfied
-- Relevant tests pass
-- Required validation has completed
-- Review has no blocking issues
-- QA confirms the expected behavior
-- A Pull Request was opened and the user has confirmed it was merged
+Avoid:
 
-Passing QA opens a Pull Request; it does not mark the issue Done. Done happens only after the user confirms the merge, at which point the working branch is deleted locally and remotely.
+* Unnecessary refactoring
+* Large unrelated changes
+* Introducing new dependencies without a clear reason
+* Rewriting working code unnecessarily
+* Changing public APIs without justification
+* "Cleaning up" unrelated code
+
+The goal is to solve the Issue, not to redesign the entire project.
 
 ---
 
-# Learning Loop
+# 6. Existing Code Has Priority
 
-When a failure, repeated review issue, or process problem is discovered:
+Before creating a new implementation, search the repository for existing functionality that may already solve part of the problem.
 
-1. Determine whether it is a one-time mistake or a recurring pattern.
-2. If recurring, propose a rule or documentation improvement.
-3. Do not silently modify project rules without explaining the reason.
+Prefer modifying or reusing existing code over creating duplicate functionality.
 
-The goal is to improve the system so the same category of mistake becomes less likely.
+Follow the project's existing:
+
+* Naming conventions
+* Directory structure
+* Error handling
+* Logging
+* Testing patterns
+* Formatting
+* Architectural patterns
+
+Do not introduce a new architectural pattern merely because you personally prefer it.
+
+---
+
+# 7. Tests and Verification
+
+After making changes, run the tests relevant to the modified code.
+
+Also run the project's standard verification commands when available.
+
+Typical examples include:
+
+```bash
+npm test
+npm run lint
+npm run typecheck
+```
+
+or the equivalent commands for the project's language/framework.
+
+Do not claim that tests passed unless you actually ran them.
+
+If tests fail:
+
+1. Determine whether the failure is caused by your changes.
+2. Fix the issue if it is within the current task.
+3. Re-run the relevant tests.
+
+If a test cannot be run because of an environmental problem, clearly report that fact.
+
+Never hide a failed test.
+
+---
+
+# 8. Diff Review
+
+Before committing, inspect:
+
+```bash
+git status
+git diff
+```
+
+Verify that:
+
+* Only intended files were modified.
+* No debugging code remains.
+* No secrets or credentials were added.
+* No unrelated changes were accidentally included.
+* The implementation matches the Issue.
+
+If unexpected changes appear, investigate them before committing.
+
+---
+
+# 9. Security
+
+Never commit:
+
+* Passwords
+* API keys
+* Access tokens
+* Private keys
+* Credentials
+* `.env` files containing secrets
+* Personal sensitive data
+
+If credentials are encountered during the task, do not expose them in commits, comments, or Pull Requests.
+
+Do not weaken authentication, authorization, validation, or security controls merely to make tests pass.
+
+---
+
+# 10. Destructive Operations
+
+Do not perform destructive operations without explicit confirmation.
+
+Examples include:
+
+```bash
+git reset --hard
+git clean -fd
+git push --force
+git branch -D
+```
+
+Also avoid deleting files or database data unless the Issue explicitly requires it and the consequences are understood.
+
+Never use force-push on shared branches unless explicitly instructed.
+
+---
+
+# 11. Commit Rules
+
+Create commits that clearly describe the change.
+
+Prefer:
+
+```text
+Fix login timeout handling
+Add password reset link
+Handle missing configuration file
+```
+
+Avoid vague messages such as:
+
+```text
+update
+fix
+changes
+work
+```
+
+When appropriate, reference the Issue number.
+
+For example:
+
+```text
+Fix password reset link (#42)
+```
+
+Do not create meaningless intermediate commits merely to save progress unless necessary.
+
+---
+
+# 12. Pull Request Rules
+
+When the task is complete, create a Pull Request unless explicitly instructed otherwise.
+
+The Pull Request should contain:
+
+* A concise summary
+* What was changed
+* How it was tested
+* Any limitations or unresolved issues
+
+When appropriate, link the Pull Request to the Issue using:
+
+```text
+Closes #<issue-number>
+```
+
+or another appropriate GitHub closing keyword.
+
+Example:
+
+```text
+Closes #42
+```
+
+Do not claim that the Issue is resolved if the implementation is incomplete.
+
+---
+
+# 13. GitHub CLI
+
+Use GitHub CLI when GitHub interaction is required.
+
+Useful commands include:
+
+```bash
+gh issue view <number>
+gh issue comment <number> --body "..."
+gh pr create
+gh pr view
+gh pr comment
+```
+
+Before performing GitHub operations, verify that the correct repository and account are being used.
+
+Do not modify or close unrelated Issues or Pull Requests.
+
+---
+
+# 14. Issue Comments
+
+When appropriate, update the Issue or Pull Request with useful information.
+
+Comments should be concise and factual.
+
+For example:
+
+```text
+Implemented the requested change and opened PR #57.
+
+Verification:
+- Unit tests: passed
+- Lint: passed
+- Type check: passed
+```
+
+Do not post speculative information as fact.
+
+Do not spam the Issue with progress updates unless requested.
+
+---
+
+# 15. Handling Failures
+
+If the task cannot be completed:
+
+Do not pretend it is complete.
+
+Instead, report:
+
+1. What was attempted.
+2. What was successfully changed.
+3. What failed.
+4. The exact error or relevant failure.
+5. What remains to be done.
+
+If the failure is caused by the environment rather than the code, explicitly distinguish the two.
+
+---
+
+# 16. Final Response
+
+After completing the task, provide a concise summary containing:
+
+## Changes
+
+What was implemented.
+
+## Verification
+
+Which tests/checks were run and their results.
+
+## Git
+
+The commit hash and branch name when available.
+
+## Pull Request
+
+The Pull Request number or URL when available.
+
+## Notes
+
+Any limitations, warnings, or follow-up work.
+
+Do not claim success unless the implementation has actually been verified.
+
+---
+
+# 17. Important Behavioral Rules
+
+The following rules have priority over convenience:
+
+1. Do not modify unrelated code.
+2. Do not invent requirements.
+3. Do not silently ignore acceptance criteria.
+4. Do not overwrite the user's existing uncommitted work.
+5. Do not commit secrets.
+6. Do not bypass failing tests without explanation.
+7. Do not push directly to `main`.
+8. Do not use destructive Git commands without explicit confirmation.
+9. Do not claim that something works without verification.
+10. When uncertain about a requirement that materially affects implementation, ask before proceeding.
+
+The objective is not to make the largest possible change.
+
+The objective is to make the **smallest correct, tested, reviewable change that completely satisfies the GitHub Issue**.
+
+---
+
+# 18. API Client Code Generation
+
+The API client for TypeScript/JavaScript projects is auto-generated from the OpenAPI specification.
+
+## Workflow
+
+1. **OpenAPI Spec**: The Spring Boot API server generates an OpenAPI 3.0 spec at `/v3/api-docs` using `springdoc-openapi`.
+
+2. **Client Generation**: Use `orval` to generate a type-safe TypeScript client:
+
+   ```bash
+   # From project root:
+   npx orval --config orval.config.js
+   ```
+
+3. **Output**: Generated client code is placed in `sdk/api-client/src/generated/`.
+
+4. **Usage**: Import and use from `@api-client` path alias:
+
+   ```typescript
+   import { listSites, type Site } from '@api-client';
+   ```
+
+## Setup
+
+* **orval.config.js**: Main configuration file (root directory)
+* **openapi.json**: Downloaded OpenAPI spec (regenerated before running orval)
+* **sdk/api-client/**: Generated client library package
+* **web/tsconfig.json**: Includes path alias `@api-client` → `../sdk/api-client/src`
+* **extension/tsconfig.json**: Includes path alias `@api-client` → `../sdk/api-client/src`
+
+## Regenerating the Client
+
+After API changes, regenerate the client:
+
+```bash
+# In web or extension directory:
+npm run generate:api-client
+```
+
+This script fetches the latest OpenAPI spec and regenerates client code.
+
+---
+
+## 19. GitHub Actions CI/CD Workflows
+
+This repository uses GitHub Actions to automate testing, linting, and validation on every push and pull request.
+
+### Workflow Overview
+
+| Workflow | Trigger | Purpose |
+| --- | --- | --- |
+| **API Tests and Coverage** | Push to main/develop; API path changes | Run unit tests with JaCoCo coverage, lint checks, and upload coverage to Codecov |
+| **Frontend Tests** | Push to main/develop; web path changes | TypeScript type checking, Next.js build, linting, unit tests, and E2E tests |
+| **Extension Build** | Push to main/develop; extension path changes | TypeScript compilation and extension manifest validation |
+
+#### Running Locally
+
+Before pushing, run the same checks locally to catch issues early:
+
+```bash
+# API
+cd api
+./gradlew lint test
+
+# Frontend
+cd web
+npm run lint
+npm run build  # Includes TypeScript type checking
+
+# Extension
+cd extension
+npm run compile
+```
+
+### Workflow Status
+
+Workflow status badges are displayed in the README.md. You can also view detailed reports on the [Actions page](https://github.com/tonoccho/lets_blog_server/actions).
+
+### Understanding Failures
+
+If a workflow fails:
+
+1. **Check the workflow log** on the Actions page
+2. **Identify which step failed** (lint, test, build, etc.)
+3. **Run that step locally** to reproduce the error
+4. **Fix the issue** and commit/push again
+
+The workflow will automatically re-run on your next push.

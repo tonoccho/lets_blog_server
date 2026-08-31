@@ -18,8 +18,7 @@ vi .env   # パスワード・APIキー・暗号化キー・NEXTAUTH_SECRET等�
 # 2. リバースプロキシ用の自己署名証明書を生成
 bash scripts/generate-certs.sh
 
-# 3. Docker Compose で全サービスを起動(reverse-proxy/web/api/log-writer/mysql/rabbitmq/
-#    phpmyadmin/comfyui/plantuml/drawio/wordpress/Penpotスイート。計19コンテナ)
+# 3. Docker Compose で全サービスを起動(reverse-proxy/web/api/mysql/phpmyadmin/comfyui/plantuml)
 docker compose up -d
 
 # 4. ブラウザで https://localhost にアクセス(自己署名証明書の警告は例外承認する)
@@ -40,6 +39,7 @@ docker compose up -d
 | 項目 | 説明 | 変更要否 |
 |---|---|---|
 | `MYSQL_ROOT_PASSWORD` / `MYSQL_PASSWORD` | MySQLのパスワード | 必須変更 |
+| `SERVER_API_KEY` | Web管理画面・VSCode拡張が使う固定APIキー(`X-API-Key`ヘッダ) | 必須変更 |
 | `APP_ENCRYPTION_KEY` | CMS認証情報暗号化キー(Base64, 32バイト)。生成例: `openssl rand -base64 32` | 必須変更 |
 | `COMFYUI_IMAGE` | ComfyUIイメージ(GPU種別に応じて変更。既定はNVIDIA CUDA13系) | 環境に応じて変更 |
 | `LLM_API_KEY` | 下書き/校正/要約・タグ提案・記事プランニングで使う外部LLMサービス(既定: OpenAI)のAPIキー | 必須変更 |
@@ -67,82 +67,20 @@ bash scripts/generate-certs.sh
 docker compose up -d
 ```
 
-起動するサービス: `reverse-proxy`(nginx) / `web`(Next.js) / `api` / `log-writer` / `mysql` /
-`rabbitmq` / `phpmyadmin` / `comfyui` / `plantuml` / `drawio` / `wordpress` /
-`penpot-*`(デザイン生成スイート、6コンテナ)/ `docker-socket-proxy`。
-アーキテクチャ・ポート割当・全サービスの起動時メモリ実測値は
-[docs/DOCKER_COMPOSE_ARCHITECTURE.md](DOCKER_COMPOSE_ARCHITECTURE.md) を参照。
+起動するサービス: `reverse-proxy`(nginx) / `web`(Next.js) / `api` / `mysql` / `phpmyadmin` / `comfyui` / `plantuml`。
 
 Phase 6 以降、`reverse-proxy` の `80`(HTTP→HTTPSリダイレクト)・`443`(HTTPS)以外はホストにポート公開していない。
 各サービスへは直接ポートではなく、必ず `https://localhost/...` 経由でアクセスする。
-
-サービスによってはヘルスチェックが設定されており(`api` / `log-writer` / `mysql` / `rabbitmq` /
-`penpot-postgres` / `penpot-valkey`)、依存先が healthy になるまで起動を待つため、初回起動や
-複数コンテナの一括再作成時は数十秒〜数分かかることがある。`docker compose ps` の `STATUS`
-列が `Up` ではなく `Up (healthy)` になっているかを確認する。
 
 `web` サービスはソースディレクトリ(`./web`)をコンテナにバインドマウントしているため、
 コード変更は再ビルドなしでホットリロードされる。`package.json` の依存関係を変更した場合は
 `docker compose up -d --build web` でイメージを再ビルドする。
 
 ```bash
-docker compose ps           # 起動状況確認(healthyかどうかも表示される)
+docker compose ps           # 起動状況確認
 docker compose logs -f api  # 個別サービスのログ確認
 docker compose logs -f web  # Web管理画面のログ確認
 ```
-
-### 個別サービスの再起動・再ビルド
-
-コード変更後、全サービスを再作成する必要はない。変更したサービスだけを対象にする。
-
-```bash
-# 環境変数変更など、再ビルド不要な場合
-docker compose restart api
-
-# コード変更を反映する場合(イメージの再ビルドが必要)
-docker compose build api
-docker compose up -d api
-```
-
-`api` / `log-writer` は `services/legacy-api` / `services/log-writer` のGradleビルド成果物を
-イメージに焼き込む構成のため、ソース変更後は必ず `docker compose build` からやり直す
-(コンテナ再起動だけでは反映されない)。
-
-### サービス間の疎通確認
-
-現状は `reverse-proxy`(nginx)が唯一の外部窓口。個別サービスの単体疎通確認にはコンテナ内から
-直接アクセスする。
-
-```bash
-# reverse-proxy経由(通常のアクセス経路)
-curl -k https://localhost/api/health
-
-# api単体の疎通確認(コンテナ内から直接。curlは#556で追加済み)
-docker exec lbs-api curl -sf http://localhost:8080/actuator/health
-
-# log-writerも同様
-docker exec lbs-log-writer curl -sf http://localhost:8080/actuator/health
-```
-
-gateway は下流のバックエンドサービス10個(legacy-api / identity / content / media / ai /
-analytics / log-writer / project / publishing / platform)の状態を自身の `/actuator/health` に
-集約するため(`services/gateway/.../DownstreamHealthConfig`、#560・#743)、
-次のコマンドでまとめて確認できる。
-
-```bash
-docker exec lbs-gateway curl -s http://localhost:8080/actuator/health
-```
-
-`-f` を付けないのは、いずれかが DOWN のとき gateway が 503 を返すため。
-`-f` があると curl が本文を出さずに終了してしまい、**どのサービスが DOWN なのかが分からない**。
-gateway は `show-details: always` なので、本文にサービスごとの状態が入っている。
-
-mysql / rabbitmq / keycloak / web などは集約の対象外なので、個別に確認する。
-
-なお、いずれか1つでも DOWN だと gateway 自身のヘルスも DOWN になり、
-`docker ps` で `lbs-gateway (unhealthy)` と表示される。一部のサービスだけ起動している
-開発中はこれが正常なので、gateway の unhealthy 表示だけを見て異常と判断しないこと
-(gateway の healthy を起動条件にしているコンテナは無いため、起動順序には影響しない)。
 
 ### アクセスURL一覧
 
@@ -183,7 +121,8 @@ docker exec lbs-comfyui ls /root/ComfyUI/models/checkpoints/
 
 | 環境変数 | 値 | 説明 |
 |---|---|---|
-| `LETS_BLOG_GATEWAY_URL` | `http://gateway:8080` | サーバーサイドAPI呼び出しの唯一の宛先(issue #584)。lbs-net内部でgatewayコンテナへ直接到達するため自己署名証明書を経由しない |
+| `LETS_BLOG_API_URL` | `http://api:8080` | lbs-net内部でapiコンテナへ直接到達するため自己署名証明書を経由しない |
+| `LETS_BLOG_API_KEY` | `${SERVER_API_KEY}` | `.env` の `SERVER_API_KEY` と同じ値 |
 | `NEXTAUTH_SECRET` | `${NEXTAUTH_SECRET}` | `.env` の値 |
 | `NEXTAUTH_URL` | `https://localhost` | ブラウザから見える公開URL(認証コールバック等の生成に使用) |
 
@@ -201,7 +140,7 @@ Web管理画面側では自己署名証明書の信頼設定(`NODE_EXTRA_CA_CERT
 ```bash
 cd web
 cp .env.local.example .env.local
-vi .env.local   # LETS_BLOG_GATEWAY_URL=https://localhost, NODE_EXTRA_CA_CERTS=../certs/localhost.crt 等
+vi .env.local   # LETS_BLOG_API_URL=https://localhost, NODE_EXTRA_CA_CERTS=../certs/localhost.crt 等
 npm install
 npm run dev
 ```
@@ -303,15 +242,13 @@ LISTENしているかを確認する(環境変数変更後はプロセス再起�
 (admin限定)で `LLM` がWARNINGの場合はAPIキー未設定、ERRORの場合は`docker compose logs api`で
 詳細なエラー内容(レート制限・認証エラー等)を確認する。
 
-**各サービスの個別ポート(内部8080等)に直接アクセスできない**
-Phase 6以降は意図した仕様(すべて `https://localhost/...` 経由に一本化。内部ポートは#556で
-全サービス8080に統一済み)。デバッグ目的で一時的に直接アクセスしたい場合は、
-`docker exec <コンテナ名> curl ...` でコンテナ内から確認するか、該当サービスの
-`docker-compose.yml` に一時的に `ports:` を追加する(恒久的な変更はしないこと)。
+**個別ポート(8080/8081/8188/8085等)に直接アクセスできない**
+Phase 6以降は意図した仕様(すべて `https://localhost/...` 経由に一本化)。
+デバッグ目的で一時的に直接アクセスしたい場合は、該当サービスの `docker-compose.yml` に
+一時的に `ports:` を追加する(恒久的な変更はしないこと)。
 
 ## 関連ドキュメント
 
-- [nginx/conf.d/default.conf](../nginx/conf.d/default.conf) — リバースプロキシのルーティング設定
-  (どのパスをどのサービスへ振り分けるか、その判断理由がコメントに書かれている)
-- [docs/DOCKER_COMPOSE_ARCHITECTURE.md](DOCKER_COMPOSE_ARCHITECTURE.md) — コンテナ構成・ポート割当・起動順序
+- [spec/phase6/00-overview.md](../spec/phase6/00-overview.md) — リバースプロキシ導入の全体設計
+- [spec/phase6/01-reverse-proxy.md](../spec/phase6/01-reverse-proxy.md) — nginx設定の詳細
 - [.env.example](../.env.example) — 環境変数の全項目

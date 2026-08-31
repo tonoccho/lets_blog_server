@@ -120,18 +120,15 @@ export function GarbageCollectionPanel({ projectId, project }: { projectId: numb
   function handleJobSettled(job: GenerationJobDetail) {
     setDeleting(false);
     setProgress(null);
-    // 先に再スキャンを走らせておく(runScan は内部で setMessage(null) を呼ぶため、
-    // 結果メッセージの設定より後に呼ぶと React 18 のバッチ処理でメッセージが
-    // 直後に消されてしまう)。
-    if (environment) {
-      runScan(environment);
-    }
     const parsed = parseDeleteResult(job.resultPayload);
     if (job.status === "done" && parsed) {
       setResultSummary(parsed);
       setMessage({ type: "success", text: `${parsed.deletedCount}件削除しました${parsed.failedCount > 0 ? `(${parsed.failedCount}件失敗)` : ""}。` });
     } else {
       setMessage({ type: "error", text: "削除処理に失敗しました。" });
+    }
+    if (environment) {
+      runScan(environment);
     }
   }
 

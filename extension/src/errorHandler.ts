@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import { logger } from './logger';
-import { downstreamServiceFor, GATEWAY, pathOf } from './downstreamServices';
 
 /**
  * APIサーバーがエラーステータスを返した場合の例外。
@@ -11,13 +10,7 @@ export class ApiError extends Error {
     message: string,
     public readonly status: number,
     public readonly responseBody: string,
-    public readonly url: string,
-    /**
-     * gatewayが応答へ付与した相関ID(X-Correlation-Id、issue #582)。
-     * 各サービスのログをこのIDで横断的に追えるため、下流サービス障害時の調査手掛かりとして
-     * 利用者へ提示する(issue #585)。取得できなかった場合はundefined。
-     */
-    public readonly correlationId?: string
+    public readonly url: string
   ) {
     super(message);
     this.name = 'ApiError';
@@ -88,30 +81,10 @@ const STATUS_GUIDANCE: Record<number, { cause: string; remedy: string }> = {
   413: { cause: '送信データがサーバーの上限を超えています。', remedy: '同梱する画像の枚数やサイズを減らしてください。' },
   429: { cause: 'リクエストが多すぎるため、サーバーに一時的に拒否されました。', remedy: 'しばらく待ってから再実行してください。' },
   500: { cause: 'サーバー内部でエラーが発生しました。', remedy: 'しばらく待ってから再実行し、解消しない場合はサーバーのログを確認してください。' },
-  502: { cause: 'gatewayが担当サービスへ到達できませんでした。', remedy: '担当サービスのコンテナが起動しているか確認してください。' },
-  503: { cause: '担当サービスが一時的に利用できません。', remedy: '担当サービスの起動完了を待ってから再実行してください。' },
-  504: { cause: 'gatewayから見て担当サービスの応答がタイムアウトしました。', remedy: 'AI生成など時間のかかる処理の場合は、条件を軽くして再実行してください。' },
+  502: { cause: 'リバースプロキシがAPIサーバーへ到達できませんでした。', remedy: 'APIサーバーのコンテナが起動しているか確認してください。' },
+  503: { cause: 'サーバーが一時的に利用できません。', remedy: 'サーバーの起動完了を待ってから再実行してください。' },
+  504: { cause: '上流サーバーの応答がタイムアウトしました。', remedy: 'AI生成など時間のかかる処理の場合は、条件を軽くして再実行してください。' },
 };
-
-/**
- * 「どのサービスが失敗したか」を伝える一文を組み立てる(issue #585)。
- *
- * サービス分割(Epic #551)後、拡張が受け取る5xxや接続失敗は個々の下流サービスの障害であることが
- * ほとんどだが、gatewayは応答にサービス名を載せない。そこでリクエストパスからgatewayの
- * ルート表を逆引きし、コンテナ名(`docker logs lbs-<id>`で辿れる)を添えて提示する。
- */
-function describeResponsibleService(url: string): string {
-  const service = downstreamServiceFor(url);
-  return (
-    `担当サービス: ${service.label} (コンテナ: lbs-${service.id}、パス: ${pathOf(url)})。` +
-    ` 対応: 「docker logs lbs-${service.id}」でそのサービスのログを確認してください。`
-  );
-}
-
-/** 相関IDが取れている場合に、ログ横断検索の手掛かりとして添える一文。 */
-function describeCorrelationId(correlationId: string | undefined): string | undefined {
-  return correlationId ? `相関ID: ${correlationId}(全サービスのログをこのIDで追えます)。` : undefined;
-}
 
 /**
  * 例外を、原因と対応策を含む利用者向けメッセージへ変換する。
@@ -128,16 +101,6 @@ export function describeError(error: unknown): string {
     if (guidance) {
       parts.push(guidance.cause, `対応: ${guidance.remedy}`);
     }
-    // 5xxは下流サービス側の障害(gatewayは応答をそのまま中継する)。どのサービスを見ればよいかを
-    // 示さないと利用者はサービス分割後の構成から当たりを付けられないため、ここで明示する。
-    // 4xxは利用者の操作・入力に起因することが大半で、サービス名を出すとむしろ誤誘導になるため付けない。
-    if (error.status >= 500) {
-      parts.push(describeResponsibleService(error.url));
-      const correlation = describeCorrelationId(error.correlationId);
-      if (correlation) {
-        parts.push(correlation);
-      }
-    }
     if (detail) {
       parts.push(`サーバーからの応答: ${truncate(detail, 500)}`);
     }
@@ -152,22 +115,15 @@ export function describeError(error: unknown): string {
     );
   }
   if (error instanceof TimeoutError) {
-    // 応答自体が返っていないため、gatewayが遅いのか担当サービスが遅いのかは拡張からは区別できない。
-    // ただし「この処理を担当するのはどのサービスか」は分かるため、調査の起点として示す。
     return (
       `サーバーからの応答が ${Math.round(error.timeoutMs / 1000)} 秒以内に返りませんでした。` +
-      ` ${describeResponsibleService(error.url)}` +
       ' 対応: サーバーが起動しているか、letsBlog.serverUrlの設定が正しいか確認してください。' +
       ' AI生成など時間のかかる処理はletsBlog.requestTimeoutMsを延ばしてください。'
     );
   }
   if (error instanceof NetworkError) {
-    // 接続そのものが確立できていないため、失敗しているのは個々の下流サービスではなく
-    // リバースプロキシ/gatewayへの到達性。担当サービス名を出すと誤誘導になるので出さない。
     return (
       `サーバー(${error.url})へ接続できませんでした: ${messageOf(error.cause)}` +
-      ` この段階では ${GATEWAY.label}(コンテナ: lbs-${GATEWAY.id})やリバースプロキシへ届いていないため、` +
-      '個々の下流サービスではなく到達経路の問題です。' +
       ' 対応: letsBlog.serverUrlの設定値、サーバーの起動状態、証明書の設定(letsBlog.allowInsecureTls)を確認してください。'
     );
   }

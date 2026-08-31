@@ -22,10 +22,11 @@ export interface CustomTagTemplateActionState {
 export async function createCustomTagTemplateAction(
   input: CustomTagTemplateInput
 ): Promise<{ data?: CustomTagTemplate; error?: string }> {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
-    const result = await createCustomTagTemplate(input);
+    const result = await createCustomTagTemplate(input, actor);
     revalidatePath("/custom-tag-templates");
     return { data: result };
   } catch (err) {
@@ -37,10 +38,11 @@ export async function updateCustomTagTemplateAction(
   id: number,
   input: CustomTagTemplateInput
 ): Promise<{ data?: CustomTagTemplate; error?: string }> {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
-    const result = await updateCustomTagTemplate(id, input);
+    const result = await updateCustomTagTemplate(id, input, actor);
     revalidatePath("/custom-tag-templates");
     return { data: result };
   } catch (err) {
@@ -51,10 +53,11 @@ export async function updateCustomTagTemplateAction(
 export async function publishCustomTagTemplateAction(
   id: number
 ): Promise<{ data?: CustomTagTemplate; error?: string }> {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
-    const result = await publishCustomTagTemplate(id);
+    const result = await publishCustomTagTemplate(id, actor);
     revalidatePath("/custom-tag-templates");
     return { data: result };
   } catch (err) {
@@ -65,10 +68,11 @@ export async function publishCustomTagTemplateAction(
 export async function unpublishCustomTagTemplateAction(
   id: number
 ): Promise<{ data?: CustomTagTemplate; error?: string }> {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
-    const result = await unpublishCustomTagTemplate(id);
+    const result = await unpublishCustomTagTemplate(id, actor);
     revalidatePath("/custom-tag-templates");
     return { data: result };
   } catch (err) {
@@ -80,10 +84,11 @@ export async function cloneCustomTagTemplateAction(
   id: number,
   input: CloneCustomTagTemplateInput
 ): Promise<{ data?: CustomTagTemplate; error?: string }> {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
-    const result = await cloneCustomTagTemplate(id, input);
+    const result = await cloneCustomTagTemplate(id, input, actor);
     revalidatePath("/custom-tag-templates");
     return { data: result };
   } catch (err) {
@@ -94,10 +99,11 @@ export async function cloneCustomTagTemplateAction(
 export async function deleteCustomTagTemplateAction(
   id: number
 ): Promise<CustomTagTemplateActionState> {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const actor = { id: Number(session.user.id), role: session.user.role };
 
   try {
-    await deleteCustomTagTemplate(id);
+    await deleteCustomTagTemplate(id, actor);
     revalidatePath("/custom-tag-templates");
     return { success: true };
   } catch (err) {

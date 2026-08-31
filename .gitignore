@@ -1,19 +1,18 @@
 # Env / secrets
 .env
 
-# DB/Keycloakバックアップダンプ(実データを含むためコミット対象外)
-backups/
-
 # Claude Code セッション固有のランタイム状態(CLAUDE.md 等の規約ファイルはコミット対象)
 .claude/scheduled_tasks.lock
 
 # Java / Gradle
-.gradle/
-build/
-bin/
+api/.gradle/
+api/build/
+log-writer/.gradle/
+log-writer/build/
 *.class
 *.jar
-!gradle/wrapper/gradle-wrapper.jar
+!api/gradle/wrapper/gradle-wrapper.jar
+!log-writer/gradle/wrapper/gradle-wrapper.jar
 
 # Node
 node_modules/
@@ -40,5 +39,4 @@ docker-data/
 
 # リバースプロキシ用TLS証明書(scripts/generate-certs.sh で生成、秘密鍵のためコミットしない)
 certs/
-# アプリケーション実行/テスト時に生成されるログ出力(logback-spring.xml の LOG_PATH=./logs)
-services/legacy-api/logs/*.log
+api/logs/application.log

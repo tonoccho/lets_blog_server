@@ -6,7 +6,6 @@ function entry(overrides: Partial<OperationLogEntry>): OperationLogEntry {
     id: 1,
     operationId: 'op-1',
     userId: 1,
-    actorKeycloakSub: null,
     method: 'GET',
     path: '/api/sites',
     statusCode: 200,
