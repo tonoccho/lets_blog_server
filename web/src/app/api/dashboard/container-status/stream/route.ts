@@ -1,26 +1,23 @@
 import { streamContainerStatuses } from "@/lib/apiClient";
 
 /**
- * 到達性についての判定(issue #782)
+ * 到達性についての判定(issue #782 → #876 で変更)
  *
- * <p>このRoute Handlerは、**コンテナ構成(nginx経由)では到達しない**。
- * `nginx/conf.d/default.conf` の `location /api/` が、NextAuth用の正規表現location
- * (`/api/auth/(session|csrf|...)`)を除く `/api/**` をすべて gateway へ転送するため、
- * ブラウザの `fetch("/api/dashboard/...")` は Next.js サーバーに届かず
- * gateway → platform-service(#695でDashboardControllerを移設)へ到達する。
+ * <p>**#876 以降、このRoute Handlerはコンテナ構成でも到達する。**
+ * `nginx/conf.d/default.conf` に `location /api/dashboard/` を追加し、web へ振り分けている
+ * (prefix location は最長一致が優先されるため、`location /api/` より先に効く)。
  *
- * <p>実測(2026-08-31): `curl -sk https://localhost/api/dashboard/service-status` は
- * **ボディ無しの401**を返す。このハンドラは成功時200・失敗時 `{"error":...}` の500しか
- * 返さないため、応答の形からも platform-service 由来と判別できる。
+ * <p>#782 の調査時点では `location /api/` が `/api/**` を一律 gateway へ送っていたため、
+ * ここには到達せず、ブラウザは認証なしで platform-service(#695 で DashboardController を移設、
+ * #705 以降は認証必須)を叩いて401になっていた。しかもパネル側が `if (!res.ok) return;` で
+ * 握り潰すため、画面上は「データが無い」ようにしか見えなかった。
  *
- * <p>ただし**削除はしない**。`npm run dev` でホスト上のNext.jsへ直接アクセスする開発形態では
- * nginxを経由しないため、このハンドラが到達し、意図どおり機能する。
- * `apiClient.ts` は `server-only` でセッションCookieからトークンを取得するため、
- * ブラウザから直接 gateway を叩く経路には認証を付けられない。つまりこのハンドラは
- * ホスト開発時における唯一の認証付与手段である。
+ * <p>このハンドラが必要な理由は変わらない。`web/src/lib/apiClient.ts` は `server-only` で、
+ * next-auth の `getToken()` がセッションCookie(HttpOnly)から取り出したアクセストークンを
+ * `Authorization` ヘッダーに載せる。ブラウザ側にはこの手段が無く(`fetch` は素で呼んでおり、
+ * `EventSource` は仕様上ヘッダーを付けられない)、**ここがブラウザ経路に認証を付ける唯一の手段**である。
  *
- * <p>コンテナ構成でダッシュボードのパネルが実際に動くかどうかは**別の問題**で、
- * issue #876 で扱う(ブラウザは Authorization ヘッダー無しで gateway を叩くため401になる)。
+ * <p>`npm run dev` でホストのNext.jsへ直接アクセスする開発形態では従来どおり nginx を経由せずに到達する。
  */
 
 /**
