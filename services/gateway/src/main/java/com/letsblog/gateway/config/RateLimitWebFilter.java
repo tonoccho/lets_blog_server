@@ -96,6 +96,17 @@ public class RateLimitWebFilter implements WebFilter {
     private static final Set<String> AUTH_STATUS_CHECK_PATHS =
             Set.of("/api/auth/setup-status", "/api/auth/totp/status");
 
+    /**
+     * NextAuthのクライアントサイド診断ロガーの送信先(issue #781)。ログイン試行ではないため
+     * {@link #AUTH_ENDPOINT}(5 req/60s、プロセス全体で1バケット)を消費させない。
+     *
+     * <p>本来これはnginxのNextAuth用locationでwebへ振り分けられ、gatewayには到達しない
+     * (#781でそちらも修正した)。ただしnginxを経由しない経路や設定の取りこぼしで到達した場合に、
+     * ブラウザのログノイズだけで<b>全ユーザーの</b>ログイン試行が429で弾かれる自己DoSになるため、
+     * gateway側でも保険をかける。24時間の実測では77件が到達し、うち10件が429だった。
+     */
+    private static final String NEXTAUTH_CLIENT_LOG_PATH = "/api/auth/_log";
+
     private static final Set<String> LIGHTWEIGHT_IMAGE_METADATA_PATH_SUFFIXES = Set.of(
             "/image-options", "/image-generation-prompt-defaults", "/image-generation-size-defaults");
 
@@ -236,7 +247,8 @@ public class RateLimitWebFilter implements WebFilter {
     private String getRateLimiterName(String requestPath) {
         if (requestPath.startsWith(OPERATION_LOG_PATH)) {
             return OPERATION_LOG_ENDPOINT;
-        } else if (AUTH_STATUS_CHECK_PATHS.contains(requestPath)) {
+        } else if (AUTH_STATUS_CHECK_PATHS.contains(requestPath)
+                || NEXTAUTH_CLIENT_LOG_PATH.equals(requestPath)) {
             return API_GLOBAL;
         } else if (requestPath.contains("/auth/")
                 || requestPath.contains("/login")

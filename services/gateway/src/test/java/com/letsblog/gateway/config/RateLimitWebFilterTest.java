@@ -112,6 +112,36 @@ class RateLimitWebFilterTest {
     }
 
     @Test
+    @DisplayName("NextAuthの診断ログ(_log)はauth-endpointバケットを消費しない(issue #781)")
+    void nextAuthClientLogDoesNotConsumeAuthBucket() {
+        // ブラウザのログノイズを大量に送っても、ログイン試行の枠を食わないこと。
+        // auth-endpointはプロセス全体で1バケット(上限2)なので、共有していると
+        // _logを2回投げただけで全ユーザーのログインが429になる。
+        for (int i = 0; i < 5; i++) {
+            consume(exchangeFor("/api/auth/_log"));
+        }
+
+        // 実際のログイン試行は枠が残っていること
+        ServerWebExchange login = exchangeFor("/api/auth/callback/keycloak");
+        StepVerifier.create(filter.filter(login, chain)).verifyComplete();
+
+        assertNotEquals(HttpStatus.TOO_MANY_REQUESTS, login.getResponse().getStatusCode());
+    }
+
+    @Test
+    @DisplayName("_log以外の/api/auth/*は従来どおりauth-endpointバケットを使う(issue #781)")
+    void otherAuthPathsStillUseAuthBucket() {
+        // 保険の分類が広すぎないことの確認。callbackは従来どおりauth-endpoint(上限2)。
+        StepVerifier.create(filter.filter(exchangeFor("/api/auth/callback/keycloak"), chain)).verifyComplete();
+        StepVerifier.create(filter.filter(exchangeFor("/api/auth/signin"), chain)).verifyComplete();
+
+        ServerWebExchange third = exchangeFor("/api/auth/callback/keycloak");
+        StepVerifier.create(filter.filter(third, chain)).verifyComplete();
+
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, third.getResponse().getStatusCode());
+    }
+
+    @Test
     @DisplayName("画像アップロードはupload-endpointバケットを使う")
     void uploadEndpointUsesDedicatedBucket() {
         // api-globalバケットを枯渇させても、upload系には影響しない
