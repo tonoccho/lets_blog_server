@@ -33,7 +33,6 @@ PASSWORD="${TEST_DB_PASSWORD:-test_pass}"
 
 # application-test.yml が参照するスキーマの一覧。増減したらここも直すこと。
 REQUIRED_SCHEMAS=(
-    lets_blog_test
     lbs_identity_test
     lbs_project_test
     lbs_content_test
