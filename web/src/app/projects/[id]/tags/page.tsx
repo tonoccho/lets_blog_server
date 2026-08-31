@@ -1,5 +1,10 @@
 import { notFound } from "next/navigation";
-import { getProject, getTagDesignSettings, listProjectCustomTags } from "@/lib/apiClient";
+import {
+  getProject,
+  getProjectContentSettings,
+  getTagDesignSettings,
+  listProjectCustomTags,
+} from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { Tabs, type TabItem } from "@/components/Tabs";
@@ -18,9 +23,13 @@ export default async function ProjectTagsPage({ params }: { params: Promise<{ id
     notFound();
   }
 
-  const [overview, tags] = await Promise.all([
+  const [overview, tags, contentSettings] = await Promise.all([
     getTagDesignSettings(projectId),
     listProjectCustomTags(projectId).catch(() => []),
+    // cssSelectorPrefix は content-service が所有する(issue #576)。GET /api/projects/{id} には
+    // 含まれないため個別に取得する。以前は project.cssSelectorPrefix を渡しており、
+    // 常に undefined だった(issue #913)。
+    getProjectContentSettings(projectId).catch(() => ({ cssSelectorPrefix: null })),
   ]);
 
   const tabs: TabItem[] = [
@@ -46,7 +55,7 @@ export default async function ProjectTagsPage({ params }: { params: Promise<{ id
           projectId={projectId}
           projectName={project.name}
           projectSlug={project.slug}
-          cssSelectorPrefix={project.cssSelectorPrefix}
+          cssSelectorPrefix={contentSettings.cssSelectorPrefix}
           tags={tags}
         />
       ),

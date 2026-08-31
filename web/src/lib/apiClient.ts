@@ -1148,6 +1148,15 @@ export function logFrontendError(input: FrontendErrorLogInput): Promise<void> {
   });
 }
 
+/**
+ * `GET /api/projects/{id}` が実際に返すフィールド(project-service の ProjectResponse)。
+ *
+ * issue #913: 以前はここに cssSelectorPrefix と画像生成設定8件も宣言していたが、
+ * project-service はそれらを返さない(所有者が content-service / media-service のため)。
+ * 型だけが「返る」と言っていたので、保存はできるのに画面には常に空が表示されていた。
+ * 実態に合わせて外し、各設定は所有サービスから個別に取得する
+ * (getProjectContentSettings / getProjectImageSettings)。
+ */
 export interface Project {
   id: number;
   name: string;
@@ -1157,7 +1166,20 @@ export interface Project {
   productionSite: Site | null;
   masterEnvironment: "test" | "production";
   githubRepository: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** プロジェクト単位のコンテンツ設定(content-service が所有、issue #576)。 */
+export interface ProjectContentSettings {
   cssSelectorPrefix: string | null;
+}
+
+/** プロジェクト単位の画像生成設定(media-service が所有、issue #583)。null は「未設定」。 */
+export interface ProjectImageSettings {
+  projectId: number;
+  imageProvider: string | null;
+  comfyuiCheckpoint: string | null;
   defaultNegativePrompt: string | null;
   defaultQualityPrompt: string | null;
   defaultGeneratedImageWidth: number | null;
@@ -1166,8 +1188,14 @@ export interface Project {
   blockSexualContent: boolean | null;
   blockViolentContent: boolean | null;
   blockDiscriminatoryContent: boolean | null;
-  createdAt: string;
-  updatedAt: string;
+}
+
+export function getProjectContentSettings(projectId: number): Promise<ProjectContentSettings> {
+  return apiFetch<ProjectContentSettings>(`/api/projects/${projectId}/content-settings`);
+}
+
+export function getProjectImageSettings(projectId: number): Promise<ProjectImageSettings> {
+  return apiFetch<ProjectImageSettings>(`/api/projects/${projectId}/image-settings`);
 }
 
 export type ProjectEnvironment = "local" | "test" | "production";
@@ -1214,8 +1242,8 @@ export function updateProjectGithubRepository(
 export function updateProjectCssSelectorPrefix(
   id: number,
   cssSelectorPrefix: string
-): Promise<Project> {
-  return apiFetch<Project>(`/api/projects/${id}/css-selector-prefix`, {
+): Promise<ProjectContentSettings> {
+  return apiFetch<ProjectContentSettings>(`/api/projects/${id}/css-selector-prefix`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cssSelectorPrefix }),
@@ -1227,8 +1255,8 @@ export function updateProjectImageGenerationPromptDefaults(
   id: number,
   defaultNegativePrompt: string,
   defaultQualityPrompt: string
-): Promise<Project> {
-  return apiFetch<Project>(`/api/projects/${id}/image-generation-prompt-defaults`, {
+): Promise<ProjectImageSettings> {
+  return apiFetch<ProjectImageSettings>(`/api/projects/${id}/image-generation-prompt-defaults`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ defaultNegativePrompt, defaultQualityPrompt }),
@@ -1240,8 +1268,8 @@ export function updateProjectImageGenerationSizeDefaults(
   id: number,
   defaultGeneratedImageWidth: number | null,
   defaultGeneratedImageHeight: number | null
-): Promise<Project> {
-  return apiFetch<Project>(`/api/projects/${id}/image-generation-size-defaults`, {
+): Promise<ProjectImageSettings> {
+  return apiFetch<ProjectImageSettings>(`/api/projects/${id}/image-generation-size-defaults`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ defaultGeneratedImageWidth, defaultGeneratedImageHeight }),
@@ -1252,8 +1280,8 @@ export function updateProjectImageGenerationSizeDefaults(
 export function updateProjectArticleImageResizeDefault(
   id: number,
   defaultArticleImageLongEdgePx: number | null
-): Promise<Project> {
-  return apiFetch<Project>(`/api/projects/${id}/article-image-resize-default`, {
+): Promise<ProjectImageSettings> {
+  return apiFetch<ProjectImageSettings>(`/api/projects/${id}/article-image-resize-default`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ defaultArticleImageLongEdgePx }),
@@ -1266,8 +1294,8 @@ export function updateProjectImageContentFilterSettings(
   blockSexualContent: boolean,
   blockViolentContent: boolean,
   blockDiscriminatoryContent: boolean
-): Promise<Project> {
-  return apiFetch<Project>(`/api/projects/${id}/image-content-filter-settings`, {
+): Promise<ProjectImageSettings> {
+  return apiFetch<ProjectImageSettings>(`/api/projects/${id}/image-content-filter-settings`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ blockSexualContent, blockViolentContent, blockDiscriminatoryContent }),
