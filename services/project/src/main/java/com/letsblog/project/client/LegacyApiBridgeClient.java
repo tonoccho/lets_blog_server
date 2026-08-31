@@ -4,11 +4,14 @@ import com.letsblog.project.service.IdentityServiceUnavailableException;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+
+import java.util.List;
 
 /**
  * まだlegacy-apiに残るドメイン(project_user、プロジェクトメンバー判定)へアクセスするための
@@ -49,6 +52,26 @@ public class LegacyApiBridgeClient {
         } catch (RestClientException e) {
             throw new IdentityServiceUnavailableException(
                     "legacy-apiのプロジェクトメンバー判定呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 操作者が所属するプロジェクトのID一覧(issue #830)。
+     *
+     * <p>一覧系エンドポイントの「自分がアクセスできる分だけ返す」絞り込みに使う。
+     * {@link #isProjectMember}を行ごとに呼ぶとN+1になるためまとめて引く。
+     */
+    public List<Long> projectIdsForUser(Long userId, String bearerToken) {
+        try {
+            List<Long> result = restClient.get()
+                    .uri("/api/internal/project/users/{userId}/project-ids", userId)
+                    .headers(headers -> setAuthorization(headers, bearerToken))
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<List<Long>>() { });
+            return result != null ? result : List.of();
+        } catch (RestClientException e) {
+            throw new IdentityServiceUnavailableException(
+                    "legacy-apiの所属プロジェクト一覧呼び出しに失敗しました: " + e.getMessage(), e);
         }
     }
 

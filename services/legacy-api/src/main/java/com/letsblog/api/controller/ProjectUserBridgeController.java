@@ -1,5 +1,6 @@
 package com.letsblog.api.controller;
 
+import com.letsblog.api.domain.ProjectUser;
 import com.letsblog.api.domain.UserSiteAuthor;
 import com.letsblog.api.dto.ArticleImageLongEdgePxBridgeResponse;
 import com.letsblog.api.dto.CacheUserSiteAuthorBridgeRequest;
@@ -14,6 +15,8 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * project-service/publishing-service向けの内部ブリッジ(issue #577 stage2、issue #707)。
@@ -55,6 +58,25 @@ public class ProjectUserBridgeController {
     @GetMapping("/api/internal/project/projects/{projectId}/members/{userId}")
     public boolean isProjectMember(@PathVariable Long projectId, @PathVariable Long userId) {
         return projectUserRepository.findByProjectIdAndUserId(projectId, userId).isPresent();
+    }
+
+    /**
+     * 操作者が所属するプロジェクトのID一覧(issue #830)。
+     *
+     * <p>一覧系エンドポイント({@code ProjectController#list} / {@code SiteController#list} /
+     * content-serviceの{@code PostController#list})が「自分がアクセスできる分だけ返す」絞り込みに使う。
+     * {@link #isProjectMember}を行ごとに呼ぶとN+1になるため、まとめて引けるようにした。
+     *
+     * <p>{@code project_users}はまだlegacy-apiが所有しているので(ADR-0004によりクロススキーマ
+     * アクセス不可)ここで提供する。#583でproject-serviceへ移った時点で、呼び出し側の
+     * クライアントとともに向き先を変える。
+     */
+    @GetMapping("/api/internal/project/users/{userId}/project-ids")
+    public List<Long> projectIdsForUser(@PathVariable Long userId) {
+        return projectUserRepository.findByUserId(userId).stream()
+                .map(ProjectUser::getProjectId)
+                .distinct()
+                .toList();
     }
 
     /** ProjectEnvironmentSyncService(project-service)#sync がDB同期後に呼ぶ、サイト向けロール再整合。 */

@@ -16,18 +16,14 @@ import org.junit.jupiter.api.Test;
  */
 class AuthorizationCoverageTest {
 
-    /** 現時点で認可チェックを持たないエンドポイント(issue #830 時点)。
-     * 減らせたらこのリストからも消すこと(残したままだとテストが教えてくれる)。 */
-    private static final Set<String> KNOWN_UNAUTHORIZED = Set.of(
-            // 残る2件はいずれも「一覧」。単一リソースの参照(ProjectController#get /
-            // SiteController#getDetail)は #830 で閉じたが、一覧は「自分がアクセスできる分だけ返す」
-            // 絞り込みが要る。その判定材料である project_users は legacy-api に残っており
-            // (ADR-0004 によりクロススキーマ参照不可)、内部ブリッジ越しの N+1 になる。
-            // VSCode 拡張が SiteController#list をサイト選択に使っている(extension/src/apiClient.ts)ため、
-            // admin 限定にすると非 admin の拡張利用が壊れる。#583 で project_users が
-            // project-service へ移った後に、リポジトリ側の絞り込みとして実装する。
-            "ProjectController#list",
-            "SiteController#list");
+    /**
+     * project-service に認可チェックの無いエンドポイントは残っていない(issue #830)。
+     *
+     * <p>最後まで残っていた {@code ProjectController#list} / {@code SiteController#list} は、
+     * legacy-api の内部ブリッジへ {@code users/{userId}/project-ids} を足して
+     * <b>操作者が所属するプロジェクトの分だけ</b>返すよう絞り込んだ。admin は全件。
+     */
+    private static final Set<String> KNOWN_UNAUTHORIZED = Set.of();
 
     @Test
     @DisplayName("認可チェックの無いエンドポイントが増えていない(issue #830)")

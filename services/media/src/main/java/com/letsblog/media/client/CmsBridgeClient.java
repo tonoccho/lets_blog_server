@@ -75,6 +75,32 @@ public class CmsBridgeClient {
         }
     }
 
+    /** サイトが属するプロジェクトのID(いずれの環境にも紐付いていなければnull)。 */
+    public record SiteProjectId(Long projectId) {
+    }
+
+    /**
+     * サイトキーからプロジェクトIDを逆引きする(issue #830)。
+     *
+     * <p>{@code MediaController#upload}が、アップロード先サイトの属するプロジェクトのメンバーか
+     * どうかを判定するために使う。media-serviceはサイトを所有していないので自前で引けない。
+     */
+    public Long resolveProjectIdBySiteKey(String siteKey, String bearerToken) {
+        try {
+            SiteProjectId result = client.get(
+                    "/api/internal/publishing/sites/{site}/project-id",
+                    new Object[] {siteKey}, SiteProjectId.class,
+                    ServiceAuthHeaders.forwardedBearer(bearerToken));
+            if (result == null) {
+                throw new CmsBridgeException("publishing-serviceから空の応答を受け取りました", null);
+            }
+            return result.projectId();
+        } catch (SyncServiceException e) {
+            throw new CmsBridgeException(
+                    "publishing-serviceのプロジェクトID逆引き呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+    }
+
     public MediaGcScanResult scanMedia(Long projectId, String environment, String bearerToken) {
         try {
             MediaGcScanResult result = client.get(

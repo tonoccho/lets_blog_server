@@ -9,6 +9,7 @@ import com.letsblog.project.dto.UpdateProjectGithubRepositoryRequest;
 import com.letsblog.project.messaging.DomainEventPublisher;
 import com.letsblog.project.repository.ProjectRepository;
 import com.letsblog.project.repository.SiteRepository;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import org.springframework.stereotype.Service;
@@ -169,6 +170,29 @@ public class ProjectService {
         return projectRepository.findByLocalSiteIdOrTestSiteIdOrProductionSiteId(siteId, siteId, siteId)
                 .map(Project::getId)
                 .orElse(null);
+    }
+
+    /**
+     * 指定したプロジェクト群に紐付いているサイトのID集合を返す(issue #830)。
+     *
+     * <p>{@code SiteController#list}が「操作者が所属するプロジェクトのサイトだけ」に絞るために使う。
+     * サイトごとに{@link #findProjectIdBySiteId}を呼ぶとN+1になるため、逆向きにまとめて集める。
+     */
+    @Transactional(readOnly = true)
+    public Set<Long> siteIdsOfProjects(Set<Long> projectIds) {
+        Set<Long> siteIds = new HashSet<>();
+        for (Project project : projectRepository.findAllById(projectIds)) {
+            addIfPresent(siteIds, project.getLocalSiteId());
+            addIfPresent(siteIds, project.getTestSiteId());
+            addIfPresent(siteIds, project.getProductionSiteId());
+        }
+        return siteIds;
+    }
+
+    private static void addIfPresent(Set<Long> target, Long value) {
+        if (value != null) {
+            target.add(value);
+        }
     }
 
     @AuditLog(action = AuditLogAction.PROJECT_UPDATED, resourceType = "PROJECT")

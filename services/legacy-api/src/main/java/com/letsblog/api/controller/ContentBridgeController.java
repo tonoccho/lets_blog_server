@@ -1,5 +1,6 @@
 package com.letsblog.api.controller;
 
+import com.letsblog.api.domain.ProjectUser;
 import com.letsblog.api.client.ProjectServiceClient;
 import com.letsblog.api.domain.Project;
 import com.letsblog.api.domain.Site;
@@ -124,6 +125,26 @@ public class ContentBridgeController {
     }
 
     /** PostController(content-service)#listが使う、全サイトのid/siteKey/nameの一覧(サイト名表示用)。 */
+    /**
+     * 操作者がアクセスできるサイトのID一覧(issue #830)。
+     *
+     * <p>content-serviceの{@code PostController#list} / {@code #lookupBySlug}が
+     * 「自分が所属するプロジェクトのサイトの投稿だけ」に絞るために使う。
+     *
+     * <p>content-serviceは{@code project_users}(legacy-api)も{@code projects}
+     * (project-service)も持たないため、両方を引ける当サービスで解決して返す。
+     * #583でこれらの所有権が移った時点で、呼び出し側とともに向き先を変える。
+     */
+    @GetMapping("/api/internal/content/users/{userId}/site-ids")
+    public List<Long> accessibleSiteIds(@PathVariable Long userId) {
+        return projectUserRepository.findByUserId(userId).stream()
+                .map(ProjectUser::getProjectId)
+                .distinct()
+                .flatMap(projectId -> projectService.siteIdsOfProject(projectId).stream())
+                .distinct()
+                .toList();
+    }
+
     @GetMapping("/api/internal/content/sites")
     public List<SiteSummary> sites() {
         return siteService.listAll().stream()

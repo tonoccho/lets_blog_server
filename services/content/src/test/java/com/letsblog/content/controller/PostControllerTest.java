@@ -6,7 +6,9 @@ import com.letsblog.content.domain.Post;
 import com.letsblog.content.dto.PostLookupResponse;
 import com.letsblog.content.dto.PostSummaryResponse;
 import com.letsblog.content.repository.PostRepository;
+import com.letsblog.content.service.AdminAuthorizationService;
 import com.letsblog.content.service.CurrentActorService;
+import com.letsblog.content.service.ForbiddenException;
 import com.letsblog.content.service.PostNotFoundException;
 import com.letsblog.content.service.SiteNotFoundException;
 import org.junit.jupiter.api.Test;
@@ -15,6 +17,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
+import java.util.Set;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -22,6 +25,8 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 /**
@@ -41,8 +46,12 @@ class PostControllerTest {
     @Mock
     private CurrentActorService currentActorService;
 
+    @Mock
+    private AdminAuthorizationService adminAuthorizationService;
+
     private PostController controller() {
-        return new PostController(postRepository, legacyApiBridgeClient, currentActorService, new ObjectMapper());
+        return new PostController(postRepository, legacyApiBridgeClient, currentActorService, new ObjectMapper(),
+                adminAuthorizationService);
     }
 
     private Post buildPost(long id, LocalDateTime updatedAt) {
@@ -102,5 +111,34 @@ class PostControllerTest {
         when(legacyApiBridgeClient.resolveSiteIdByKey("unknown-site", null)).thenReturn(null);
 
         assertThrows(SiteNotFoundException.class, () -> controller.lookupBySlug("unknown-site", "my-article"));
+    }
+
+    // ---- issue #830: 自分が所属するプロジェクトのサイトの投稿だけ ----
+
+    @Test
+    void list_非adminはアクセスできないサイトの投稿を返さない() {
+        // buildPost の siteId は 1。アクセス可能が {9} なら落ちる。
+        when(postRepository.findAll()).thenReturn(new ArrayList<>(List.of(buildPost(1L, LocalDateTime.now()))));
+        when(legacyApiBridgeClient.listSites(any())).thenReturn(List.of());
+        when(adminAuthorizationService.accessibleSiteIds()).thenReturn(Optional.of(Set.of(9L)));
+
+        assertEquals(List.of(), controller().list(null, null));
+    }
+
+    @Test
+    void list_adminは全件を返す() {
+        when(postRepository.findAll()).thenReturn(new ArrayList<>(List.of(buildPost(1L, LocalDateTime.now()))));
+        when(legacyApiBridgeClient.listSites(any())).thenReturn(List.of());
+        when(adminAuthorizationService.accessibleSiteIds()).thenReturn(Optional.empty());
+
+        assertEquals(1, controller().list(null, null).size());
+    }
+
+    @Test
+    void lookupBySlug_アクセスできないサイトは投稿の有無すら返さない() {
+        when(legacyApiBridgeClient.resolveSiteIdByKey(eq("main"), any())).thenReturn(1L);
+        when(adminAuthorizationService.accessibleSiteIds()).thenReturn(Optional.of(Set.of(9L)));
+
+        assertThrows(ForbiddenException.class, () -> controller().lookupBySlug("main", "slug"));
     }
 }
