@@ -23,13 +23,16 @@ COPY services/publishing/build.gradle ./services/publishing/build.gradle
 RUN ./gradlew :services:legacy-api:bootJar --no-daemon
 
 FROM eclipse-temurin:21-jre
-# openssh-client: WordPress SSHトランスポート用(phase10)。
 # curl: docker-compose healthcheckがactuatorの/actuator/healthを叩くために使用(#556)。
+# (openssh-clientは、それを使う唯一のクラスSshKeyGenerationServiceの削除に伴い外した。
+# issue #822。実装は#577でproject-serviceへ移設済みで、legacy-api側は呼び出し元ゼロのまま
+# 残っていた。WordPressのSSHトランスポート自体もproject-serviceのSiteServiceが担う。
+# services/project/Dockerfile参照)。
 # (DBバックアップ/リストア用のdefault-mysql-clientは、BackupServiceと共にplatform-serviceへ
 # 移設した。issue #694、C10-2。services/platform/Dockerfile参照。nodejs/npmは、VSCode拡張機能
 # (.vsix)のオンデマンドビルド用に使っていた唯一のクラスVscodeExtensionBuildServiceと共に
 # platform-serviceへ移設した。issue #696、C10-4。services/platform/Dockerfile参照)。
-RUN apt-get update && apt-get install -y --no-install-recommends openssh-client curl \
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /workspace/services/legacy-api/build/libs/*.jar app.jar
