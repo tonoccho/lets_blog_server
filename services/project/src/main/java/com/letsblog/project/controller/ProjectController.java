@@ -66,6 +66,10 @@ public class ProjectController {
 
     @GetMapping("/{id}")
     public ProjectResponse get(@PathVariable Long id) {
+        // 単一プロジェクトの参照は、そのプロジェクトのメンバー(またはadmin)に限定する(issue #830)。
+        // 更新系が全てadmin限定である一方、参照が「認証済みなら誰でも」では、他人のプロジェクトの
+        // 構成(GitHubリポジトリ・環境の紐付け等)が読めてしまう。
+        adminAuthorizationService.requireProjectMemberOrAdmin(id);
         return projectService.getProject(id);
     }
 

@@ -327,7 +327,7 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 | | 件数 |
 |---|---|
 | 総エンドポイント | 278 |
-| **認可なし(内部ブリッジを除く)** | **53**(#830 の初回計測時は 56) |
+| **認可なし(内部ブリッジを除く)** | **48**(#830 の初回計測時は 56) |
 
 サービス別の内訳:
 
@@ -335,7 +335,7 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 |---|---|---|
 | media | 18 | `DiagramController`(6)、`GeneratedImageController`(6)、`RenderController`(3)、`ComfyUiCheckpointController`(2)、`MediaController`(1) |
 | ai | 10 | `AiController`(5)、`GenerationJobController`(4)、`InternalAiGenerationController`(1) |
-| project | 7 | `SiteController`(5)、`ProjectController`(2) |
+| project | 2 | `ProjectController#list`、`SiteController#list`(いずれも一覧。下記参照) |
 | content | 6 | `MetadataController`(2)、`PostController`(2)、`ContentCacheController`(1)、`CustomTagController#validate`(1) |
 | legacy-api | 5 | `AiController`(2)、`AuthController`(2、公開パス)、`HealthController`(1) |
 | platform | 5 | `DashboardController`(4)、`VscodeExtensionController`(1) |
@@ -375,9 +375,9 @@ DBもコンテナも要らないため、MySQL が未公開の環境でも実行
 
 ### 既知の要対応(優先度順)
 
-1. **`project/SiteController#register` / `#createManagedWordPress` / `#adoptManagedWordPress`** — サイト作成
-2. **`media` の18件** — 画像・ダイアグラムの作成/更新/削除を含む
-3. **`ai` の10件** — 生成系。コスト面の影響もある
+1. **`media` の18件** — 画像・ダイアグラムの作成/更新/削除を含む
+2. **`ai` の10件** — 生成系。コスト面の影響もある
+3. **`content` の6件 / `platform` の5件 / `log-writer` の2件**
 
 ### 解消済み
 
@@ -391,6 +391,28 @@ DBもコンテナも要らないため、MySQL が未公開の環境でも実行
 どの環境にも紐付いていないサイトは `projectId` が null になりうる(#759)。判定に使える
 メンバーシップが存在しないため、**その場合は admin のみを許可**する。未紐付けサイトを
 投稿公開・削除の抜け道として残さないための判断。
+
+**`project` の5件(#830)** — `SiteController#register` / `#createManagedWordPress` /
+`#adoptManagedWordPress` / `#testConnection` と `ProjectController#get`。
+
+前者4件は `requireAdmin()`。同じコントローラの `update` / `delete` / `getDetail` が既に admin 限定で、
+サイト登録は CMS 認証情報の登録を、マネージド WordPress の作成・取り込みはコンテナの払い出しを伴う。
+`testConnection` は保存済み認証情報で外部へ接続し admin 権限の有無まで返すため、`getDetail` と揃えた。
+
+`ProjectController#get` は `requireProjectMemberOrAdmin(id)`。更新系が全て admin 限定である一方、
+参照が「認証済みなら誰でも」では他人のプロジェクトの構成(GitHub リポジトリ・環境の紐付け)が読めた。
+
+### 一覧系を残している理由
+
+`ProjectController#list` と `SiteController#list` は認可を付けずに残している。
+「自分がアクセスできる分だけ返す」絞り込みが必要で、単純に admin 限定にはできない。
+
+- 判定材料の `project_users` は legacy-api に残っており(ADR-0004 によりクロススキーマ参照不可)、
+  内部ブリッジ越しの N+1 になる
+- VSCode 拡張が `SiteController#list` をサイト選択に使っている
+  (`extension/src/apiClient.ts`)ため、admin 限定にすると非 admin の拡張利用が壊れる
+
+#583 で `project_users` が project-service へ移った後に、リポジトリ側の絞り込みとして実装する。
 
 `legacy-api/AuthController` の2件は初回セットアップ導線で **`PUBLIC_PATHS` に含まれる公開パス**、
 `HealthController#health` も同様。これらは「認可不要」が正しく、

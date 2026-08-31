@@ -20,6 +20,7 @@ import org.springframework.http.ResponseEntity;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -63,12 +64,24 @@ class ProjectControllerTest {
     }
 
     @Test
-    void get_権限チェックなしで取得できる() {
+    void get_プロジェクトメンバーなら取得できる() {
+        // issue #830 以前は認可チェックが無く、認証済みなら誰でも他人のプロジェクト構成を読めた。
         when(projectService.getProject(1L)).thenReturn(buildResponse());
 
         ProjectResponse response = controller().get(1L);
 
         assertEquals("test", response.slug());
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+    }
+
+    @Test
+    void get_メンバーでもadminでもなければ拒否しプロジェクトを読まない() {
+        doThrow(new ForbiddenException("この操作にはプロジェクトメンバーまたはadmin権限が必要です"))
+                .when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+
+        assertThrows(ForbiddenException.class, () -> controller().get(1L));
+
+        verify(projectService, never()).getProject(1L);
     }
 
     @Test
