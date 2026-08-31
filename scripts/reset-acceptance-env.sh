@@ -313,9 +313,15 @@ step "リセットが成立したことを検証します"
 verify_failed=0
 
 # 7-1. 9スキーマに Flyway 管理テーブル以外のデータが残っていないこと。
+#
+# ただし**マイグレーションが投入するマスタデータは残っていて当然**なので数えない。
+# lbs_identity の roles / role_permissions は V2__seed_roles_and_permissions.sql が入れる
+# RBACの定義であり(issue #956)、これが空のほうが異常である。
+# マスタデータを投入するマイグレーションを足したら、ここにも足すこと。
 for s in "${SERVICE_SCHEMAS[@]}"; do
   tables="$(mysql_q "SELECT table_name FROM information_schema.tables
-                     WHERE table_schema='$s' AND table_name<>'flyway_schema_history';" || true)"
+                     WHERE table_schema='$s'
+                       AND table_name NOT IN ('flyway_schema_history', 'roles', 'role_permissions');" || true)"
   total=0
   for t in $tables; do
     c="$(mysql_q "SELECT COUNT(*) FROM \`$s\`.\`$t\`;" || echo 0)"

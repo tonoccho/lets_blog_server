@@ -1,6 +1,7 @@
 package com.letsblog.identity.service;
 
 import com.letsblog.common.crypto.CredentialCipher;
+import com.letsblog.identity.domain.Role;
 import com.letsblog.identity.domain.User;
 import com.letsblog.identity.dto.MigrationSummaryResponse;
 import com.letsblog.identity.dto.ReconciliationSummaryResponse;
@@ -94,6 +95,10 @@ public class UserService {
         }
         validateRole(request.role());
 
+        // RBACのロールは Keycloak へ作りに行く**前**に解決する(issue #956)。
+        // マスタデータの欠落は補償のしようがない失敗なので、外部に副作用を出す前に落とす。
+        Role defaultRole = resolveDefaultRole(request.role());
+
         // #562: ユーザー作成はidentity-serviceを入口とし、内部でKeycloakにも登録する。
         // Keycloak側の作成に失敗した場合はローカルにも一切作成しない(暗黙の成功をしない)。
         String keycloakSub = keycloakAdminClient.createUser(request.email(), null, null, false);
@@ -105,9 +110,8 @@ public class UserService {
         user.setKeycloakSub(keycloakSub);
         user.setEnabled(true);
 
-        String defaultRoleName = LEGACY_ROLE_TO_ROLE_NAME.get(request.role());
-        if (defaultRoleName != null) {
-            roleRepository.findByRoleName(defaultRoleName).ifPresent(role -> user.getRoles().add(role));
+        if (defaultRole != null) {
+            user.getRoles().add(defaultRole);
         }
 
         try {
@@ -164,9 +168,9 @@ public class UserService {
             user.setKeycloakSub(keycloakSub);
             user.setEnabled(true);
 
-            String defaultRoleName = LEGACY_ROLE_TO_ROLE_NAME.get("admin");
-            if (defaultRoleName != null) {
-                roleRepository.findByRoleName(defaultRoleName).ifPresent(role -> user.getRoles().add(role));
+            Role adminRole = resolveDefaultRole("admin");
+            if (adminRole != null) {
+                user.getRoles().add(adminRole);
             }
 
             return UserResponse.from(userRepository.save(user));
@@ -174,6 +178,41 @@ public class UserService {
             compensateKeycloakUser(keycloakSub);
             throw e;
         }
+    }
+
+    /**
+     * {@code users.role}(admin/user)に対応するRBACのロールを解決する(issue #956)。
+     *
+     * <p><b>ロールが見つからないことを正常系として扱わない。</b>
+     * 以前は {@code findByRoleName(...).ifPresent(...)} と書いており、
+     * {@code roles} テーブルが空でも例外にならず、ユーザー作成だけが成功して
+     * ロールが付かない状態が黙って生まれていた。issue #583 で identity-service を
+     * 切り出した際にマスタデータの投入が失われ、クリーンな環境では全ユーザーの権限が
+     * 空になっていたが、この書き方のせいで誰も気づけなかった。
+     *
+     * <p>マスタデータは {@code V2__seed_roles_and_permissions.sql} が投入する。
+     * ここで見つからないのは設定の欠落であり、作成を続けてよい状況ではない。
+     *
+     * <p>呼び出し側は Keycloak へユーザーを作る<b>前</b>にこれを呼ぶこと。
+     * 外部に副作用を出したあとで落ちると、補償(孤児アカウントの削除)が要る。
+     * マスタデータの欠落は補償のしようがない種類の失敗なので、先に落とすほうが素直である。
+     *
+     * @return 対応するロール。{@code legacyRole} が未知の場合は {@code null}
+     * @throws IllegalStateException 対応するロールが {@code roles} に存在しない場合
+     */
+    private Role resolveDefaultRole(String legacyRole) {
+        String defaultRoleName = LEGACY_ROLE_TO_ROLE_NAME.get(legacyRole);
+        if (defaultRoleName == null) {
+            // 未知のrole文字列。RBACのロールは付けないが、それ自体は呼び出し側の
+            // バリデーションの領分なのでここでは何もしない(従来の挙動を保つ)。
+            return null;
+        }
+        return roleRepository.findByRoleName(defaultRoleName)
+                .orElseThrow(() -> new IllegalStateException(
+                        "RBACのロール '" + defaultRoleName + "' が存在しません。"
+                                + "identity-serviceのマイグレーション"
+                                + "(V2__seed_roles_and_permissions.sql)が適用されているか確認してください"
+                                + "(issue #956)。"));
     }
 
     /**

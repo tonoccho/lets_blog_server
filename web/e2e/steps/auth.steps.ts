@@ -110,14 +110,33 @@ Then('管理者専用ページが表示される', async ({ page }) => {
   await expect(page).toHaveURL(/\/users$/, { timeout: 5000 });
 });
 
+/**
+ * 管理系の権限。Web の ADMIN_ONLY_PREFIXES(`/users` / `/admin`)が要求する操作の裏にある。
+ * 一般ユーザー(ROLE_VIEWER)がこれを持っていたら、画面の出し分けとサーバーの権限が
+ * 食い違っていることになる。
+ *
+ * `USER_READ` は含めない。ROLE_VIEWER も持つ設計だからである
+ * (V2__seed_roles_and_permissions.sql。閲覧者はユーザー一覧を見られる)。
+ * 「管理者専用ページに入れるか」と「ユーザーを閲覧できるか」は別の話である。
+ */
+const ADMIN_ONLY_PERMISSIONS = ['USER_CREATE', 'USER_DELETE', 'ROLE_MANAGE', 'SYSTEM_CONFIG'];
+
+/** 誰でも持つ閲覧権限。これが欠けていたらロールの割り当て自体が壊れている。 */
+const VIEWER_PERMISSIONS = ['POST_READ', 'SITE_READ'];
+
 Then(
-  '管理者の権限には USER_READ が含まれ、一般ユーザーの権限には含まれない',
+  '管理者だけが管理系の権限を持ち、一般ユーザーは閲覧権限だけを持つ',
   async ({ request }) => {
     const adminPermissions = await fetchPermissions(request, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);
     const userPermissions = await fetchPermissions(request, E2E_TEST_EMAIL, E2E_TEST_PASSWORD);
 
-    expect(adminPermissions, '管理者に USER_READ が無い').toContain('USER_READ');
-    expect(userPermissions, '一般ユーザーに USER_READ が付いている').not.toContain('USER_READ');
+    for (const permission of ADMIN_ONLY_PERMISSIONS) {
+      expect(adminPermissions, `管理者に ${permission} が無い`).toContain(permission);
+      expect(userPermissions, `一般ユーザーに ${permission} が付いている`).not.toContain(permission);
+    }
+    for (const permission of VIEWER_PERMISSIONS) {
+      expect(userPermissions, `一般ユーザーに ${permission} が無い`).toContain(permission);
+    }
   }
 );
 
