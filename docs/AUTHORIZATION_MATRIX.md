@@ -327,21 +327,21 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 | | 件数 |
 |---|---|
 | 総エンドポイント | 278 |
-| **認可なし(内部ブリッジを除く)** | **43**(#830 の初回計測時は 56) |
+| **認可なし(内部ブリッジを除く)** | **33**(#830 の初回計測時は 56) |
 
 サービス別の内訳:
 
 | サービス | 認可なし | 内容 |
 |---|---|---|
 | media | 13 | `DiagramController`(6)、`GeneratedImageController`(6)、`MediaController#upload`(1) |
-| ai | 10 | `AiController`(5)、`GenerationJobController`(4)、`InternalAiGenerationController`(1) |
+| **ai** | **0** | #830 で解消。下記「解消済み」参照 |
 | project | 2 | `ProjectController#list`、`SiteController#list`(いずれも一覧。下記参照) |
 | content | 6 | `MetadataController`(2)、`PostController`(2)、`ContentCacheController`(1)、`CustomTagController#validate`(1) |
 | legacy-api | 5 | `AiController`(2)、`AuthController`(2、公開パス)、`HealthController`(1) |
 | platform | 5 | `DashboardController`(4)、`VscodeExtensionController`(1) |
 | **publishing** | **0** | #830 で解消。下記「解消済み」参照 |
 | log-writer | 2 | `FrontendErrorLogController`、`OperationLogController` |
-| **analytics / identity / publishing** | **0** | 全エンドポイントが認可済み |
+| **analytics / identity / publishing / ai** | **0** | 全エンドポイントが認可済み |
 
 内部ブリッジ(`/api/internal/**`)は対象外とした。サービス間呼び出し専用で gateway からは
 到達せず、認可はトークンを転送する呼び出し元が担うため。
@@ -379,8 +379,7 @@ DBもコンテナも要らないため、MySQL が未公開の環境でも実行
    `Diagram` / `GeneratedImage` は `projectId` を持つのでプロジェクト単位で絞れるはずだが、
    media-service にはプロジェクトメンバー判定のブリッジがまだ無い(ai / content / analytics /
    publishing は持っている)。`MediaController#upload` も同様に site キーからの解決が要る
-2. **`ai` の10件** — 生成系。コスト面の影響もある
-3. **`content` の6件 / `platform` の5件 / `log-writer` の2件**
+2. **`content` の6件 / `platform` の5件 / `log-writer` の2件 / `legacy-api` の5件**
 
 ### 解消済み
 
@@ -435,6 +434,39 @@ publishing-service の `MediaRenderClient` で、`app.media-service-uri` へコ�
 認証済みユーザーなら誰でも無制限に作成できた。
 
 5件とも各メソッドの Javadoc に `認可不要:` マーカーで理由を記録した。
+
+**`ai` の10件(#830)** — 内訳は3種類。
+
+*パスを内部側へ移して外部到達を断ったもの(3件)*
+
+`GenerationJobController` の `create` / `update` と `InternalAiGenerationController#generate`。
+いずれも Javadoc に「内部ブリッジ」と書かれ、実際の呼び出し元も legacy-api / project-service /
+content-service / media-service のコンテナ間呼び出しだけだった。
+
+にもかかわらず前者は `/api/generation-jobs/**`(一覧・詳細を Web が使うため gateway に載っている)に
+同居し、後者は `/api/ai/internal/generate` という **`/api/internal/**` 規則から外れた命名**だった
+(`/api/ai/**` は gateway に載っている)。結果として **有効な JWT さえあれば外部から任意のジョブを
+作成・改変でき、内部生成ブリッジも直接叩けた**。
+
+`/api/internal/ai/generation-jobs` と `/api/internal/ai/generate` へ移した。gateway は
+`/api/internal/**` をルーティングしないため、外部からの到達経路が無くなる。
+`create`/`update` は新設の `InternalGenerationJobController` へ分離した。
+
+*認可を足したもの(1件)*
+
+`AiController#tags` — `projectId` 指定時はそのプロジェクトの既存タグ(保存済みリソース)を読むため、
+`requireProjectMemberOrAdmin` を掛けた。未指定時は読むものが無いので判定しない。
+
+*「認可不要」と判断したもの(6件)*
+
+`AiController` の `draft` / `ask` / `proofread` / `section` は、利用者自身の入力からの生成で
+保存済みリソースに触れない。LLM のコストは利用量に比例するが、それは認可ではなく
+レート制限 / クォータで扱う問題として本Issueのスコープ外とした。
+
+`GenerationJobController` の `list` / `get` は、ログイン後の共通ダッシュボード
+(`web/src/app/page.tsx`)が表示するジョブ履歴。**ただし `generation_jobs` に所有者を表す列が無く、
+「自分のジョブだけ」に絞ることが今のスキーマではできない。** 利用者ごとに絞るなら列の追加を伴うため、
+ギャップとして記録するに留めた。
 
 `legacy-api/AuthController` の2件は初回セットアップ導線で **`PUBLIC_PATHS` に含まれる公開パス**、
 `HealthController#health` も同様。これらは「認可不要」が正しく、

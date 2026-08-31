@@ -29,7 +29,7 @@ public class InternalAiGenerationController {
     public record GenerateResponse(String result) {
     }
 
-    @PostMapping("/api/ai/internal/generate")
+    @PostMapping("/api/internal/ai/generate")
     public GenerateResponse generate(@RequestBody GenerateRequest request) {
         String result = aiAssistService.generateForBridge(
                 request.projectId(), request.prompt(), request.providerOverride());
