@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -65,5 +66,48 @@ class AiControllerTest {
         verify(aiAssistService, never()).generateImagePrompt(
                 org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
+    }
+
+    // ---- issue #830: 画像生成もprojectId指定時はプロジェクト設定を読むためメンバー判定する ----
+
+    private static com.letsblog.api.dto.AiImageRequest imageRequest(Long projectId) {
+        return new com.letsblog.api.dto.AiImageRequest(
+                "prompt", null, null, null, null, null, null, null, null, null, null, null, null, projectId);
+    }
+
+    @Test
+    void image_projectId指定時はプロジェクトメンバー判定を通す() {
+        controller().image(imageRequest(7L));
+
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(7L);
+    }
+
+    @Test
+    void image_プロジェクトメンバーでなければ生成せずに拒否する() {
+        doThrow(new com.letsblog.api.service.ForbiddenException("メンバーではありません"))
+                .when(adminAuthorizationService).requireProjectMemberOrAdmin(7L);
+
+        assertThrows(com.letsblog.api.service.ForbiddenException.class,
+                () -> controller().image(imageRequest(7L)));
+
+        verifyNoInteractions(aiAssistService);
+    }
+
+    @Test
+    void image_projectId未指定なら読むプロジェクト設定が無いので判定しない() {
+        controller().image(imageRequest(null));
+
+        verify(adminAuthorizationService, never()).requireProjectMemberOrAdmin(org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
+    void imageOptions_プロジェクトメンバーでなければ選択肢を読まずに拒否する() {
+        doThrow(new com.letsblog.api.service.ForbiddenException("メンバーではありません"))
+                .when(adminAuthorizationService).requireProjectMemberOrAdmin(7L);
+
+        assertThrows(com.letsblog.api.service.ForbiddenException.class,
+                () -> controller().imageOptions(7L));
+
+        verifyNoInteractions(aiAssistService);
     }
 }

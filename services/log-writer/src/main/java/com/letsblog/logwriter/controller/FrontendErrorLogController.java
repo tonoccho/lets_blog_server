@@ -34,6 +34,11 @@ public class FrontendErrorLogController {
         this.adminAuthorizationService = adminAuthorizationService;
     }
 
+    /**
+     * 認可不要: クライアント(Web/VSCode拡張)が自分で遭遇したエラーを送ってくる書き込み専用の窓口
+     * (issue #830)。他人のデータを読み書きするものではなく、操作者は記録側でトークンから解決する。
+     * 読み取り側({@code GET /errors})には別途認可が掛かっている。
+     */
     @PostMapping("/errors")
     public ResponseEntity<Void> logError(@RequestBody FrontendErrorLogRequest request) {
         FrontendErrorLog errorLog = request.toDomain();

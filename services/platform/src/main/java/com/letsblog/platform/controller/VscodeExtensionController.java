@@ -25,6 +25,10 @@ public class VscodeExtensionController {
         this.vscodeExtensionBuildService = vscodeExtensionBuildService;
     }
 
+    /**
+     * 認可不要: 本システム用のVSCode拡張(.vsix)を配布する(issue #830)。
+     * 拡張を入れられること自体が全利用者に必要で、配布物に利用者固有のデータは含まれない。
+     */
     @GetMapping
     public ResponseEntity<Resource> download() {
         VscodeExtensionBuildService.BuiltExtension built = vscodeExtensionBuildService.buildAndGetVsix();

@@ -10,6 +10,7 @@ import com.letsblog.media.dto.GeneratedImageSummaryResponse;
 import com.letsblog.media.dto.UpdateGeneratedImageTagsRequest;
 import com.letsblog.media.messaging.DomainEventPublisher;
 import com.letsblog.media.repository.GeneratedImageRepository;
+import com.letsblog.media.service.AdminAuthorizationService;
 import com.letsblog.media.service.GeneratedImageNotFoundException;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -43,15 +44,18 @@ public class GeneratedImageController {
     private final GeneratedImageStorageService generatedImageStorageService;
     private final ObjectMapper objectMapper;
     private final DomainEventPublisher domainEventPublisher;
+    private final AdminAuthorizationService adminAuthorizationService;
 
     public GeneratedImageController(GeneratedImageRepository generatedImageRepository,
                                      GeneratedImageStorageService generatedImageStorageService,
                                      ObjectMapper objectMapper,
-                                     DomainEventPublisher domainEventPublisher) {
+                                     DomainEventPublisher domainEventPublisher,
+                                     AdminAuthorizationService adminAuthorizationService) {
         this.generatedImageRepository = generatedImageRepository;
         this.generatedImageStorageService = generatedImageStorageService;
         this.objectMapper = objectMapper;
         this.domainEventPublisher = domainEventPublisher;
+        this.adminAuthorizationService = adminAuthorizationService;
     }
 
     /**
@@ -61,6 +65,16 @@ public class GeneratedImageController {
     public List<GeneratedImageSummaryResponse> list(
             @RequestParam(required = false) Long projectId,
             @RequestParam(required = false) String tag) {
+        // projectId 指定時はそのプロジェクトのメンバーに限定する(issue #830)。
+        // 未指定は「全プロジェクトの生成画像を返す」なので admin に限定する。本来は
+        // 「操作者が所属するプロジェクトの分だけ」返すべきだが、所属プロジェクトの一覧を
+        // 引く手段が media-service に無い(内部ブリッジは isProjectMember だけ)。
+        // #583 で project_users が project-service へ移った後に絞り込みへ置き換える。
+        if (projectId != null) {
+            adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        } else {
+            adminAuthorizationService.requireAdmin();
+        }
         List<GeneratedImage> images = projectId != null
                 ? generatedImageRepository.findAllByProjectIdOrderByCreatedAtDesc(projectId)
                 : generatedImageRepository.findAllByOrderByCreatedAtDesc();
@@ -75,7 +89,7 @@ public class GeneratedImageController {
 
     @GetMapping("/api/generated-images/{id}")
     public GeneratedImageDetailResponse get(@PathVariable Long id) {
-        return toDetailResponse(findOrThrow(id));
+        return toDetailResponse(findAuthorized(id));
     }
 
     /**
@@ -86,6 +100,9 @@ public class GeneratedImageController {
     @PostMapping("/api/generated-images")
     @ResponseStatus(HttpStatus.CREATED)
     public GeneratedImageDetailResponse create(@Valid @RequestBody CreateGeneratedImageRequest request) {
+        // 指定されたプロジェクトに画像を登録できるのはそのメンバー(またはadmin)だけ(issue #830)。
+        // ファイル保存が始まる前に判定する。
+        adminAuthorizationService.requireProjectMemberOrAdminForResource(request.projectId());
         String filePath = generatedImageStorageService.store(request.projectId(), request.imageData());
         GeneratedImage image = new GeneratedImage();
         image.setProjectId(request.projectId());
@@ -115,14 +132,14 @@ public class GeneratedImageController {
     @PutMapping("/api/generated-images/{id}/tags")
     public GeneratedImageDetailResponse updateTags(
             @PathVariable Long id, @RequestBody UpdateGeneratedImageTagsRequest request) {
-        GeneratedImage image = findOrThrow(id);
+        GeneratedImage image = findAuthorized(id);
         image.setTagsJson(serializeTags(request.tags()));
         return toDetailResponse(generatedImageRepository.save(image));
     }
 
     @GetMapping("/api/generated-images/{id}/file")
     public ResponseEntity<byte[]> getImageFile(@PathVariable Long id) {
-        GeneratedImage image = findOrThrow(id);
+        GeneratedImage image = findAuthorized(id);
         byte[] data = generatedImageStorageService.load(image.getFilePath());
         return ResponseEntity.ok()
                 .contentType(MediaType.IMAGE_PNG)
@@ -132,7 +149,7 @@ public class GeneratedImageController {
 
     @DeleteMapping("/api/generated-images/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
-        GeneratedImage image = findOrThrow(id);
+        GeneratedImage image = findAuthorized(id);
         generatedImageStorageService.delete(image.getFilePath());
         generatedImageRepository.delete(image);
         return ResponseEntity.noContent().build();
@@ -146,6 +163,16 @@ public class GeneratedImageController {
                 image.getWidth(), image.getHeight(), image.getBatchSize(), image.getCheckpoint(),
                 image.getLoraName(), image.getLoraWeight() != null ? image.getLoraWeight().doubleValue() : null,
                 image.getCreatedAt(), parseTags(image.getTagsJson()), image.getProvider());
+    }
+
+    /**
+     * IDで生成画像を引き、その所属プロジェクトのメンバー(またはadmin)であることを確かめる
+     * (issue #830)。所属を調べるには一度読む必要があるため、存在確認と認可をここでまとめる。
+     */
+    private GeneratedImage findAuthorized(Long id) {
+        GeneratedImage image = findOrThrow(id);
+        adminAuthorizationService.requireProjectMemberOrAdminForResource(image.getProjectId());
+        return image;
     }
 
     private GeneratedImage findOrThrow(Long id) {

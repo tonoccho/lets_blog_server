@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 /**
- * ai-serviceの内部ブリッジ{@code POST /api/ai/internal/generate}を呼び出すクライアント(issue #574)。
+ * ai-serviceの内部ブリッジ{@code POST /api/internal/ai/generate}を呼び出すクライアント(issue #574)。
  * issue #581(C12)でlbs-commonの{@link SyncServiceClient}(タイムアウト・リトライ・サーキットブレーカー
  * の共通実装)へ移行した。方針の詳細はdocs/SYNC_SERVICE_CALLS.md参照。
  *
@@ -54,14 +54,14 @@ public class AiGenerationClient {
             body.put("prompt", prompt);
             body.put("providerOverride", providerOverride);
             GenerateResponse response = client.post(
-                    "/api/ai/internal/generate", new Object[0], body, GenerateResponse.class,
+                    "/api/internal/ai/generate", new Object[0], body, GenerateResponse.class,
                     ServiceAuthHeaders.forwardedBearer(request));
             if (response == null) {
                 throw new AiServiceException("ai-serviceから空の応答を受け取りました", null);
             }
             return response.result();
         } catch (SyncServiceException e) {
-            throw new AiServiceException("ai-serviceの/api/ai/internal/generate呼び出しに失敗しました: " + e.getMessage(), e);
+            throw new AiServiceException("ai-serviceの/api/internal/ai/generate呼び出しに失敗しました: " + e.getMessage(), e);
         }
     }
 

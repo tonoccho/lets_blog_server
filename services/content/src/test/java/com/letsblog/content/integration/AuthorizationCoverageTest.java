@@ -19,10 +19,10 @@ class AuthorizationCoverageTest {
     /** 現時点で認可チェックを持たないエンドポイント(issue #830 時点)。
      * 減らせたらこのリストからも消すこと(残したままだとテストが教えてくれる)。 */
     private static final Set<String> KNOWN_UNAUTHORIZED = Set.of(
-            "ContentCacheController#resolve",
-            "CustomTagController#validate",
-            "MetadataController#postStatuses",
-            "MetadataController#roles",
+            // 残る2件は投稿の一覧・参照。「自分がアクセスできるサイトの投稿だけ」に絞る必要があり、
+            // その判定材料である project_users は legacy-api に残っている(ADR-0004によりクロス
+            // スキーマ参照不可)。project/site の一覧系(#830)と同じ理由で、#583 で project_users が
+            // project-service へ移った後にリポジトリ側の絞り込みとして実装する。
             "PostController#list",
             "PostController#lookupBySlug");
 

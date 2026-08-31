@@ -61,6 +61,9 @@ public class SiteController {
     @ApiResponse(responseCode = "201", description = "サイトが登録されました")
     @PostMapping
     public ResponseEntity<SiteResponse> register(@Valid @RequestBody SiteRegisterRequest request) {
+        // 同じコントローラのupdate/delete/getDetailと揃えてadmin限定にする(issue #830)。
+        // サイト登録はCMS認証情報の登録を伴うため、認証済みなら誰でも、では通せない。
+        adminAuthorizationService.requireAdmin();
         return ResponseEntity.status(HttpStatus.CREATED).body(siteService.register(request));
     }
 
@@ -69,6 +72,8 @@ public class SiteController {
     @PostMapping("/managed-wordpress")
     public ResponseEntity<SiteResponse> createManagedWordPress(
             @Valid @RequestBody CreateManagedWordPressSiteRequest request) {
+        // WordPressコンテナの新規構築(インフラの払い出し)を伴うためadmin限定(issue #830)。
+        adminAuthorizationService.requireAdmin();
         SiteResponse response = wordPressSiteProvisioningService.createManagedSite(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
@@ -79,6 +84,8 @@ public class SiteController {
     @PostMapping("/managed-wordpress/adopt")
     public ResponseEntity<SiteResponse> adoptManagedWordPress(
             @Valid @RequestBody AdoptWordPressSiteRequest request) {
+        // 既存WordPress環境の取り込み。createManagedWordPressと同じ影響範囲なのでadmin限定(issue #830)。
+        adminAuthorizationService.requireAdmin();
         SiteResponse response = wordPressSiteProvisioningService.adoptManagedSite(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
@@ -118,6 +125,9 @@ public class SiteController {
     @Operation(summary = "サイト接続をテスト", description = "WordPressサイトへの接続をテストします")
     @PostMapping("/{id}/test-connection")
     public Map<String, Object> testConnection(@Parameter(description = "サイトID") @PathVariable Long id) {
+        // 保存済みのCMS認証情報を使って外部へ接続し、admin権限の有無まで返す。
+        // getDetailがadmin限定である以上、その材料になる本エンドポイントも揃える(issue #830)。
+        adminAuthorizationService.requireAdmin();
         SiteConnectionCheckResult result = siteService.checkConnection(id);
         Map<String, Object> response = new HashMap<>();
         response.put("connectionCheckStatus", result.connectionOk() ? "SUCCESS" : "FAILED");

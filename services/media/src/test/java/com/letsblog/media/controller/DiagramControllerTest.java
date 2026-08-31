@@ -6,7 +6,9 @@ import com.letsblog.media.dto.DiagramDetailResponse;
 import com.letsblog.media.dto.DiagramSummaryResponse;
 import com.letsblog.media.dto.UpdateDiagramRequest;
 import com.letsblog.media.repository.DiagramRepository;
+import com.letsblog.media.service.AdminAuthorizationService;
 import com.letsblog.media.service.DiagramNotFoundException;
+import com.letsblog.media.service.ForbiddenException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -20,6 +22,8 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -33,11 +37,14 @@ class DiagramControllerTest {
     @Mock
     private DiagramRepository diagramRepository;
 
+    @Mock
+    private AdminAuthorizationService adminAuthorizationService;
+
     private DiagramController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new DiagramController(diagramRepository);
+        controller = new DiagramController(diagramRepository, adminAuthorizationService);
     }
 
     private Diagram buildDiagram(Long id, Long projectId, String name) {
@@ -169,5 +176,59 @@ class DiagramControllerTest {
 
         assertThrows(DiagramNotFoundException.class, () -> controller.delete(99L));
         verify(diagramRepository, never()).delete(any(Diagram.class));
+    }
+
+    // ---- issue #830: プロジェクト単位の認可 ----
+
+    @Test
+    void list_projectId未指定は全プロジェクト分を返すのでadmin限定() {
+        controller.list(null);
+
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void list_projectId指定時はそのプロジェクトのメンバー判定を通す() {
+        controller.list(7L);
+
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(7L);
+        verify(adminAuthorizationService, never()).requireAdmin();
+    }
+
+    @Test
+    void get_所属プロジェクトのメンバーでなければ拒否する() {
+        Diagram diagram = new Diagram();
+        diagram.setId(1L);
+        diagram.setProjectId(7L);
+        when(diagramRepository.findById(1L)).thenReturn(Optional.of(diagram));
+        doThrow(new ForbiddenException("メンバーではありません"))
+                .when(adminAuthorizationService).requireProjectMemberOrAdminForResource(7L);
+
+        assertThrows(ForbiddenException.class, () -> controller.get(1L));
+    }
+
+    @Test
+    void delete_所属プロジェクトのメンバーでなければ削除しない() {
+        Diagram diagram = new Diagram();
+        diagram.setId(1L);
+        diagram.setProjectId(7L);
+        when(diagramRepository.findById(1L)).thenReturn(Optional.of(diagram));
+        doThrow(new ForbiddenException("メンバーではありません"))
+                .when(adminAuthorizationService).requireProjectMemberOrAdminForResource(7L);
+
+        assertThrows(ForbiddenException.class, () -> controller.delete(1L));
+
+        verify(diagramRepository, never()).delete(any());
+    }
+
+    @Test
+    void create_指定プロジェクトのメンバーでなければ保存しない() {
+        doThrow(new ForbiddenException("メンバーではありません"))
+                .when(adminAuthorizationService).requireProjectMemberOrAdminForResource(7L);
+
+        assertThrows(ForbiddenException.class,
+                () -> controller.create(new CreateDiagramRequest(7L, "名前", "<xml/>", "<svg/>")));
+
+        verify(diagramRepository, never()).save(any());
     }
 }

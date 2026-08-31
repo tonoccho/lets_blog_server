@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -86,7 +87,7 @@ class DashboardControllerTest {
     }
 
     @Test
-    void getContainerStatus_ContainerStatusServiceの結果をそのまま返す() {
+    void getContainerStatus_admin権限があればContainerStatusServiceの結果をそのまま返す() {
         List<ContainerStatusResponse> containers =
                 List.of(new ContainerStatusResponse("api", "api", Status.NORMAL, "running", "Up 2 hours"));
         when(containerStatusService.listAll()).thenReturn(containers);
@@ -94,5 +95,40 @@ class DashboardControllerTest {
         List<ContainerStatusResponse> result = controller().getContainerStatus();
 
         assertEquals(containers, result);
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    // ---- issue #830: コンテナ名と稼働状況はインフラの構成情報なのでadmin限定にした ----
+
+    @Test
+    void getContainerStatus_admin権限がなければコンテナ一覧を読まずに拒否する() {
+        // #816 のQAで、無効化された利用者に全コンテナ名と稼働状況が見え続けることが確認されている。
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です"))
+                .when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller().getContainerStatus());
+
+        verifyNoInteractions(containerStatusService);
+    }
+
+    @Test
+    void streamContainerStatus_admin権限がなければ購読させない() {
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です"))
+                .when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller().streamContainerStatus());
+
+        verifyNoInteractions(containerStatusBroadcaster);
+    }
+
+    @Test
+    void getServiceStatus_admin以外でも要約は返す() {
+        // 詳細(getServiceStatusDetail)はadmin限定だが、要約は共通ダッシュボード向けなので開けておく。
+        List<ConnectedServiceStatusResponse> statuses =
+                List.of(new ConnectedServiceStatusResponse("database", "データベース", Status.NORMAL));
+        when(connectedServiceStatusService.checkAll()).thenReturn(statuses);
+
+        assertEquals(statuses, controller().getServiceStatus());
+        verifyNoInteractions(adminAuthorizationService);
     }
 }

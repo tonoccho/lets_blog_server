@@ -107,7 +107,13 @@ class RouteControllerContractTest {
      */
     private static final List<String> NON_GATEWAY_ROUTED_PATHS = List.of(
             "/api/comfyui/checkpoints/install",
-            "/api/comfyui/checkpoints/delete");
+            "/api/comfyui/checkpoints/delete",
+            // RenderController(media-service)。content-service/publishing-serviceの
+            // MediaRenderClientがapp.media-service-uriへコンテナ間で直接呼ぶ経路しか無く、
+            // web/extensionからの利用は無い。issue #830でgatewayのルート表から外した。
+            "/api/render/plantuml",
+            "/api/render/recharts",
+            "/api/render/penpot/design-file");
 
     /**
      * サービスモジュール名(services/配下のディレクトリ名) -> application.ymlでそのサービスを

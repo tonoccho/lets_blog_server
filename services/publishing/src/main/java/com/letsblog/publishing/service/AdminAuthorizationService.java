@@ -49,4 +49,19 @@ public class AdminAuthorizationService {
             throw new ForbiddenException("この操作にはプロジェクトメンバーまたはadmin権限が必要です");
         }
     }
+
+    /**
+     * サイト単位の操作を、そのサイトが属するプロジェクトのメンバーまたはadminに限定する(issue #830)。
+     *
+     * <p>どの環境にも紐付いていないサイトは{@code projectId}がnullになりうる(issue #759)。その場合は
+     * 判定に使えるプロジェクトメンバーシップが存在しないため、adminのみを許可する。「認証済みなら誰でも」
+     * のまま残すと、未紐付けサイトがWordPress投稿の公開・削除の抜け道になるため。
+     */
+    public void requireProjectMemberOrAdminForSite(Long projectId) {
+        if (projectId == null) {
+            requireAdmin();
+            return;
+        }
+        requireProjectMemberOrAdmin(projectId);
+    }
 }

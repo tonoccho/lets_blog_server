@@ -1,9 +1,13 @@
 package com.letsblog.ai.controller;
 
 import com.letsblog.ai.dto.AiProofreadRequest;
+import com.letsblog.ai.dto.AiTagsRequest;
+import com.letsblog.ai.dto.AiTagsResponse;
 import com.letsblog.ai.dto.AiProofreadResponse;
 import com.letsblog.ai.dto.ProofreadIssue;
+import com.letsblog.ai.service.AdminAuthorizationService;
 import com.letsblog.ai.service.AiAssistService;
+import com.letsblog.ai.service.ForbiddenException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -12,6 +16,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -24,9 +33,11 @@ class AiControllerTest {
 
     @Mock
     private AiAssistService aiAssistService;
+    @Mock
+    private AdminAuthorizationService adminAuthorizationService;
 
     private AiController controller() {
-        return new AiController(aiAssistService);
+        return new AiController(aiAssistService, adminAuthorizationService);
     }
 
     @Test
@@ -40,5 +51,39 @@ class AiControllerTest {
         AiProofreadResponse response = controller.proofread(request);
 
         assertEquals(expected, response);
+    }
+
+    // ---- issue #830 ----
+
+    @Test
+    void tags_projectId指定時はプロジェクトメンバー判定を通す() {
+        // projectIdが指定されると既存タグ(保存済みリソース)を読むため、他の生成系と違い認可が要る。
+        AiTagsRequest request = new AiTagsRequest("本文", null, 7L);
+        when(aiAssistService.suggestTags(request)).thenReturn(new AiTagsResponse(List.of("カテゴリ"), List.of("タグ")));
+
+        controller().tags(request);
+
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(7L);
+    }
+
+    @Test
+    void tags_プロジェクトメンバーでなければ生成せずに拒否する() {
+        AiTagsRequest request = new AiTagsRequest("本文", null, 7L);
+        doThrow(new ForbiddenException("この操作にはプロジェクトメンバーまたはadmin権限が必要です"))
+                .when(adminAuthorizationService).requireProjectMemberOrAdmin(7L);
+
+        assertThrows(ForbiddenException.class, () -> controller().tags(request));
+
+        verifyNoInteractions(aiAssistService);
+    }
+
+    @Test
+    void tags_projectId未指定なら読むものが無いので認可判定しない() {
+        AiTagsRequest request = new AiTagsRequest("本文", null, null);
+        when(aiAssistService.suggestTags(request)).thenReturn(new AiTagsResponse(List.of("カテゴリ"), List.of("タグ")));
+
+        controller().tags(request);
+
+        verify(adminAuthorizationService, never()).requireProjectMemberOrAdmin(org.mockito.ArgumentMatchers.anyLong());
     }
 }

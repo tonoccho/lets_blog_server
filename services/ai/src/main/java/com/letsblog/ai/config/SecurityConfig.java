@@ -25,7 +25,7 @@ import org.springframework.security.web.SecurityFilterChain;
  *
  * <p>{@link #PUBLIC_PATHS}はヘルスチェック(Actuator。docker-composeのhealthcheckとgatewayの
  * {@code DownstreamHealthConfig}が無認証で叩く)とAPIドキュメントのみ。サービス間内部ブリッジ
- * ({@code /api/ai/internal/generate}、{@code /api/internal/ai/projects/{projectId}/brave-search-api-key})は
+ * ({@code /api/internal/ai/generate}、{@code /api/internal/ai/projects/{projectId}/brave-search-api-key})は
  * 公開しない。呼び出し元(content-service/legacy-apiの{@code AiGenerationClient}、legacy-apiの
  * {@code AiProjectSettingsClient})、および{@code /api/generation-jobs}を叩くmedia-service/
  * legacy-apiの{@code GenerationJobClient}は、いずれも{@code ServiceAuthHeaders.forwardedBearer}で

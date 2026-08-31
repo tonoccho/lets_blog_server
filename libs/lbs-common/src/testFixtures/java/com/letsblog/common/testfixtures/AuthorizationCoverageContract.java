@@ -42,7 +42,11 @@ public final class AuthorizationCoverageContract {
     private static final Pattern AUTHORIZATION_CALL = Pattern.compile(
             "\\b(requireAdmin|requireSelfOrAdmin|requireAdminAndNotSelf|requirePermission"
                     + "|requireProjectMemberOrAdmin|requireNotSelfDemotion|requireAuthenticated"
-                    + "|requireActorId|requireCurrentActorId)\\s*\\(");
+                    + "|requireActorId|requireCurrentActorId)"
+                    // 対象を絞った派生(例: requireProjectMemberOrAdminForSite)も認可呼び出しとして数える。
+                    // 接尾辞を許さないと、派生名を作った瞬間に「認可が無い」と誤判定される(issue #830)。
+                    // ここに列挙した名前で始まるものだけが対象なので、Objects.requireNonNull は拾わない。
+                    + "[A-Za-z]*\\s*\\(");
 
     /**
      * 認可を意図的に付けない場合に、その理由とともに置くマーカー。
@@ -137,19 +141,37 @@ public final class AuthorizationCoverageContract {
         // コントローラだけを見ると偽陽性になる。
         Set<String> authorizingDelegates = authorizingServicesIn(file);
 
+        // 同じコントローラ内の private ヘルパが認可している場合も「認可あり」とみなす(issue #830)。
+        // 「IDで引いて、その所属プロジェクトのメンバーか確かめる」処理はハンドラ間で共通化するのが
+        // 自然で(media の DiagramController#findAuthorized 等)、ヘルパを見ないと
+        // 実際には守られているエンドポイントを未認可と誤判定する。
+        Set<String> authorizingHelpers = authorizingHelpersIn(source);
+
         Matcher mapping = MAPPING.matcher(source);
         List<Integer> starts = new ArrayList<>();
         while (mapping.find()) {
             starts.add(mapping.start());
         }
+        // ブロックの先頭は @XxxMapping そのものではなく、その直前に置かれた Javadoc/コメントまで
+        // 遡る(issue #830)。マーカーは注釈の上に書くのが自然だが、単純に @Mapping 区切りで
+        // 分割すると、そのコメントが「直前のエンドポイントのブロック末尾」に入ってしまい、
+        // 除外理由が1つ手前のメソッドに帰属する。認可の除外が別のメソッドへずれて効くのは
+        // セキュリティ上そのままにできない誤りなので、境界のほうを直す。
+        List<Integer> blockStarts = new ArrayList<>();
+        for (int start : starts) {
+            blockStarts.add(docCommentStart(source, start));
+        }
         for (int i = 0; i < starts.size(); i++) {
-            int from = starts.get(i);
-            int to = i + 1 < starts.size() ? starts.get(i + 1) : source.length();
+            int from = blockStarts.get(i);
+            int to = i + 1 < starts.size() ? blockStarts.get(i + 1) : source.length();
             String block = source.substring(from, to);
             if (AUTHORIZATION_CALL.matcher(block).find() || INTENTIONAL_MARKER.matcher(block).find()) {
                 continue;
             }
             if (delegatesToAuthorizingService(block, authorizingDelegates)) {
+                continue;
+            }
+            if (callsAuthorizingHelper(block, authorizingHelpers)) {
                 continue;
             }
             String method = methodNameOf(block);
@@ -172,6 +194,63 @@ public final class AuthorizationCoverageContract {
      * 認可済みとみなす」ため、そのサービスの<b>一部の</b>メソッドだけが認可している場合は
      * 見逃しうる。ラチェット(増やさないこと)の用途にはこの精度で足りると判断した。
      */
+
+    /**
+     * {@code index} の直前にある Javadoc / 行コメントの開始位置を返す(無ければ {@code index} のまま)。
+     * 空白・改行だけを挟んで連続するコメント行はすべて取り込む。
+     */
+    private static int docCommentStart(String source, int index) {
+        int cursor = index;
+        while (true) {
+            int scan = cursor - 1;
+            while (scan >= 0 && Character.isWhitespace(source.charAt(scan))) {
+                scan--;
+            }
+            if (scan < 1) {
+                return cursor;
+            }
+            if (source.charAt(scan) == '/' && source.charAt(scan - 1) == '*') {
+                int open = blockCommentOpen(source, scan - 1);
+                if (open < 0) {
+                    return cursor;
+                }
+                cursor = open;
+                continue;
+            }
+            int lineStart = source.lastIndexOf('\n', scan) + 1;
+            String line = source.substring(lineStart, scan + 1).trim();
+            if (line.startsWith("//")) {
+                cursor = lineStart;
+                continue;
+            }
+            return cursor;
+        }
+    }
+
+
+    /**
+     * {@code from} 以前にある「行頭の」ブロックコメント開始 {@code /*} を返す(無ければ -1)。
+     *
+     * <p>単純な {@code lastIndexOf("/*")} では、コメント本文に含まれるパス(例: {@code /api/render/**})
+     * の中の {@code /*} を拾ってしまい、コメントの途中を開始位置と誤認する。そうなると
+     * 「認可不要:」マーカーがブロックの外へ落ち、除外が効かない(issue #830)。
+     */
+    private static int blockCommentOpen(String source, int from) {
+        int search = from;
+        while (search >= 0) {
+            int open = source.lastIndexOf("/*", search);
+            if (open < 0) {
+                return -1;
+            }
+            int lineStart = source.lastIndexOf('\n', open) + 1;
+            if (source.substring(lineStart, open).isBlank()) {
+                return open;
+            }
+            search = open - 1;
+        }
+        return -1;
+    }
+
     private static Set<String> authorizingServicesIn(Path controllerFile) {
         Path serviceDir = controllerFile.getParent().getParent().resolve("service");
         Set<String> names = new LinkedHashSet<>();
@@ -197,6 +276,58 @@ public final class AuthorizationCoverageContract {
     private static boolean delegatesToAuthorizingService(String block, Set<String> authorizingDelegates) {
         for (String field : authorizingDelegates) {
             if (block.contains(field + ".")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+
+    /**
+     * 同じファイル内で定義されている private メソッドのうち、本体に認可呼び出しを含むものの名前を返す。
+     *
+     * <p>{@link #authorizingServicesIn} のコントローラ内版。ハンドラが直接 {@code requireXxx} を
+     * 呼ばず、共通ヘルパへ切り出しているケースを拾う(issue #830)。
+     */
+    private static Set<String> authorizingHelpersIn(String source) {
+        Set<String> names = new LinkedHashSet<>();
+        Matcher declaration = Pattern.compile(
+                "\\bprivate\\s+(?:static\\s+)?[\\w<>\\[\\],.?\\s]+?\\b(\\w+)\\s*\\([^)]*\\)\\s*\\{").matcher(source);
+        while (declaration.find()) {
+            int bodyStart = source.indexOf('{', declaration.end() - 1);
+            int end = matchingBrace(source, bodyStart);
+            if (end < 0) {
+                continue;
+            }
+            String body = source.substring(bodyStart, end);
+            if (AUTHORIZATION_CALL.matcher(body).find()) {
+                names.add(declaration.group(1));
+            }
+        }
+        return names;
+    }
+
+    /** {@code open} 位置の {@code &#123;} に対応する閉じ括弧の位置を返す(見つからなければ -1)。 */
+    private static int matchingBrace(String source, int open) {
+        int depth = 0;
+        for (int i = open; i < source.length(); i++) {
+            char c = source.charAt(i);
+            if (c == '{') {
+                depth++;
+            } else if (c == '}') {
+                depth--;
+                if (depth == 0) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    /** ブロックが、認可を行う同一クラス内のヘルパを呼んでいるか。 */
+    private static boolean callsAuthorizingHelper(String block, Set<String> authorizingHelpers) {
+        for (String name : authorizingHelpers) {
+            if (Pattern.compile("\\b" + Pattern.quote(name) + "\\s*\\(").matcher(block).find()) {
                 return true;
             }
         }

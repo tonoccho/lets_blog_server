@@ -18,17 +18,22 @@ class AuthorizationCoverageTest {
 
     /** 現時点で認可チェックを持たないエンドポイント(issue #830 時点)。
      * 減らせたらこのリストからも消すこと(残したままだとテストが教えてくれる)。 */
-    private static final Set<String> KNOWN_UNAUTHORIZED = Set.of(
-            "AiController#draft",
-            "AiController#ask",
-            "AiController#tags",
-            "AiController#proofread",
-            "AiController#section",
-            "GenerationJobController#list",
-            "GenerationJobController#get",
-            "GenerationJobController#create",
-            "GenerationJobController#update",
-            "InternalAiGenerationController#generate");
+    /**
+     * ai-service に認可チェックの無いエンドポイントは残っていない(issue #830)。
+     *
+     * <ul>
+     *   <li>{@code AiController} の draft / ask / proofread / section — 利用者自身の入力からの
+     *       生成で保存済みリソースに触れないため「認可不要」と判断し、理由をJavadocへ記録した</li>
+     *   <li>{@code AiController#tags} — projectId 指定時は既存タグを読むので
+     *       {@code requireProjectMemberOrAdmin} を掛けた</li>
+     *   <li>{@code GenerationJobController} の list / get — 共通ダッシュボードの表示用。
+     *       generation_jobs に所有者列が無く利用者ごとに絞れないことをギャップとして記録した</li>
+     *   <li>{@code GenerationJobController} の create / update と
+     *       {@code InternalAiGenerationController#generate} — いずれもコンテナ間専用なので
+     *       {@code /api/internal/ai/**} へ移し、外部からの到達経路を無くした</li>
+     * </ul>
+     */
+    private static final Set<String> KNOWN_UNAUTHORIZED = Set.of();
 
     @Test
     @DisplayName("認可チェックの無いエンドポイントが増えていない(issue #830)")

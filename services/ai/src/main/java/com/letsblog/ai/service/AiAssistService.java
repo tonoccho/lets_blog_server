@@ -37,7 +37,7 @@ import java.util.Map;
  * 残す(PR説明参照。#573が生成画像の保存責務のみをmedia-serviceへ委譲し、生成AI呼び出し自体は
  * legacy-apiに残した判断を踏襲する)。legacy-api側に残った画像生成コードがテキスト生成を必要とする
  * 箇所(画像プロンプト生成・生成画像のタグ提案)は、ai-serviceが公開する内部ブリッジ
- * ({@code POST /api/ai/internal/generate})経由でLLM呼び出しを行う。
+ * ({@code POST /api/internal/ai/generate})経由でLLM呼び出しを行う。
  */
 @Service
 public class AiAssistService {
@@ -166,7 +166,7 @@ public class AiAssistService {
      * issue #574: legacy-apiに残った画像生成・タグ/静的コンテンツ生成(AiAssistService#generateImage/
      * #generateImagePrompt/#suggestImageTagsJson、CustomTagGenerationService、
      * TagDesignGenerationService、StaticContentGenerationService)からのテキスト生成呼び出しを受ける
-     * 内部ブリッジ({@code POST /api/ai/internal/generate}が呼ぶ)。
+     * 内部ブリッジ({@code POST /api/internal/ai/generate}が呼ぶ)。
      *
      * <p>projectIdが指定されればそのプロジェクトの選択中モデルを使い、未指定ならシステム既定モデルを使う。
      * プロバイダーはproviderOverride(指定時は最優先) → projectIdが指定されていればそのプロジェクトの

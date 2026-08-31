@@ -54,7 +54,7 @@ public class GenerationJobClient {
     public GenerationJobSummary create(String type, String requestPayload) {
         try {
             GenerationJobSummary created = client.post(
-                    "/api/generation-jobs", new Object[0],
+                    "/api/internal/ai/generation-jobs", new Object[0],
                     Map.of("type", type, "requestPayload", requestPayload == null ? "" : requestPayload),
                     GenerationJobSummary.class, ServiceAuthHeaders.forwardedBearer(request));
             if (created == null) {
@@ -69,7 +69,7 @@ public class GenerationJobClient {
     public void updateStatus(Long jobId, String status, String resultPayload) {
         try {
             client.patch(
-                    "/api/generation-jobs/{id}", new Object[] {jobId},
+                    "/api/internal/ai/generation-jobs/{id}", new Object[] {jobId},
                     Map.of("status", status, "resultPayload", resultPayload == null ? "" : resultPayload),
                     ServiceAuthHeaders.forwardedBearer(request));
         } catch (SyncServiceException e) {

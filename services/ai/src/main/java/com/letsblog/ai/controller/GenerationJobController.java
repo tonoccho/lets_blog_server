@@ -1,20 +1,13 @@
 package com.letsblog.ai.controller;
 
 import com.letsblog.ai.domain.GenerationJob;
-import com.letsblog.ai.dto.CreateGenerationJobRequest;
 import com.letsblog.ai.dto.GenerationJobDetailResponse;
 import com.letsblog.ai.dto.GenerationJobResponse;
-import com.letsblog.ai.dto.UpdateGenerationJobRequest;
 import com.letsblog.ai.repository.GenerationJobRepository;
 import com.letsblog.ai.service.GenerationJobNotFoundException;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Comparator;
@@ -42,6 +35,14 @@ public class GenerationJobController {
         this.generationJobRepository = generationJobRepository;
     }
 
+    /**
+     * 認可不要: ログイン後の共通ダッシュボード(web/src/app/page.tsx)が表示するジョブ履歴で、
+     * 認証済みユーザー全員に見せる前提の画面(issue #830)。
+     *
+     * <p>ただし generation_jobs には所有者を表す列(userId/projectId)が無く、
+     * 「自分のジョブだけ」に絞ることが今のスキーマではできない。利用者ごとに絞るなら
+     * 列の追加を伴うため、本Issueのスコープでは現状維持とし、ギャップとして記録するに留める。
+     */
     @GetMapping
     public List<GenerationJobResponse> list() {
         return generationJobRepository.findAll().stream()
@@ -54,6 +55,7 @@ public class GenerationJobController {
     /**
      * モデルインストール等の非同期ジョブの完了をフロントがポーリングするためのエンドポイント。
      */
+    /** 認可不要: {@link #list}と同じ理由(共通ダッシュボード、所有者列が無い、issue #830)。 */
     @GetMapping("/{id}")
     public GenerationJobDetailResponse get(@PathVariable Long id) {
         GenerationJob job = generationJobRepository.findById(id)
@@ -62,38 +64,5 @@ public class GenerationJobController {
                 job.getId(), job.getType(), job.getStatus(),
                 job.getRequestPayload(), job.getResultPayload(),
                 job.getCreatedAt(), job.getUpdatedAt());
-    }
-
-    /**
-     * media-service側で、legacy-apiに残らなくなったコントローラ(ProjectMediaGarbageCollectionController
-     * 等)からジョブを起動するために呼ぶ(#573 stage3)。作成直後のstatusは常に"running"
-     * (既存のComfyUiModelService/MediaGarbageCollectionServiceの挙動を踏襲)。
-     */
-    @PostMapping
-    @ResponseStatus(HttpStatus.CREATED)
-    public GenerationJobResponse create(@RequestBody CreateGenerationJobRequest request) {
-        GenerationJob job = new GenerationJob();
-        job.setType(request.type());
-        job.setStatus("running");
-        job.setRequestPayload(request.requestPayload());
-        GenerationJob saved = generationJobRepository.save(job);
-        return new GenerationJobResponse(
-                saved.getId(), saved.getType(), saved.getStatus(), saved.getCreatedAt(), saved.getUpdatedAt());
-    }
-
-    /**
-     * media-service側の非同期ジョブランナーが、自身が実行しているジョブの進捗・完了・失敗を
-     * 反映するために呼ぶ(#573 stage2)。statusはこのAPI自体では値の妥当性を検証しない
-     * (呼び出し元が"running"/"done"/"failed"等、既存の慣例に従う責務を負う)。
-     */
-    @PatchMapping("/{id}")
-    public GenerationJobResponse update(@PathVariable Long id, @RequestBody UpdateGenerationJobRequest request) {
-        GenerationJob job = generationJobRepository.findById(id)
-                .orElseThrow(() -> new GenerationJobNotFoundException("id " + id + " のジョブは見つかりません"));
-        job.setStatus(request.status());
-        job.setResultPayload(request.resultPayload());
-        GenerationJob saved = generationJobRepository.save(job);
-        return new GenerationJobResponse(
-                saved.getId(), saved.getType(), saved.getStatus(), saved.getCreatedAt(), saved.getUpdatedAt());
     }
 }

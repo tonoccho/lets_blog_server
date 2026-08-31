@@ -32,13 +32,25 @@ public class AiController {
         this.adminAuthorizationService = adminAuthorizationService;
     }
 
+    /**
+     * 画像生成。projectId が指定されるとそのプロジェクトの設定(既定サイズ・ネガティブプロンプト等)を
+     * 読むため、指定時はメンバー(またはadmin)に限定する(issue #830)。
+     * すぐ下の {@link #generateImagePrompt} が既に同じ判定をしているのに揃えた。
+     */
     @PostMapping("/api/ai/image")
     public AiImageBatchResponse image(@Valid @RequestBody AiImageRequest request) {
+        if (request.projectId() != null) {
+            adminAuthorizationService.requireProjectMemberOrAdmin(request.projectId());
+        }
         return aiAssistService.generateImage(request);
     }
 
+    /** {@link #image}と同じ理由で、projectId 指定時はメンバー判定を行う(issue #830)。 */
     @GetMapping("/api/ai/image-options")
     public ImageGenerationOptionsResponse imageOptions(@RequestParam(required = false) Long projectId) {
+        if (projectId != null) {
+            adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        }
         return aiAssistService.getImageOptions(projectId);
     }
 

@@ -21,7 +21,9 @@ import org.springframework.http.ResponseEntity;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /** SiteControllerの回帰テスト(issue #577 stage2、legacy-apiから移設)。 */
@@ -92,5 +94,51 @@ class SiteControllerTest {
 
         assertEquals(200, response.getStatusCode().value());
         verify(adminAuthorizationService).requireAdmin();
+    }
+
+    // ---- issue #830: 「認証済みなら誰でも」だった4件をadmin限定にした回帰テスト ----
+
+    @Test
+    void register_admin以外は拒否しサイトを登録しない() {
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です"))
+                .when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class,
+                () -> controller().register(new SiteRegisterRequest(
+                        "Name", "my-site", CmsType.WORDPRESS, Map.of("baseUrl", "https://example.com"))));
+
+        verifyNoInteractions(siteService);
+    }
+
+    @Test
+    void createManagedWordPress_admin以外は拒否しプロビジョニングしない() {
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です"))
+                .when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class,
+                () -> controller().createManagedWordPress(null));
+
+        verifyNoInteractions(wordPressSiteProvisioningService);
+    }
+
+    @Test
+    void adoptManagedWordPress_admin以外は拒否し取り込まない() {
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です"))
+                .when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class,
+                () -> controller().adoptManagedWordPress(null));
+
+        verifyNoInteractions(wordPressSiteProvisioningService);
+    }
+
+    @Test
+    void testConnection_admin以外は拒否し接続確認を行わない() {
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です"))
+                .when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller().testConnection(1L));
+
+        verify(siteService, never()).checkConnection(1L);
     }
 }
