@@ -103,4 +103,17 @@ class AuthorizationCoverageContractTest {
         assertTrue(media.stream().noneMatch(e -> e.startsWith("RenderController#")),
                 "RenderController のマーカーが効いていない: " + media);
     }
+
+    @Test
+    @DisplayName("同じコントローラ内のprivateヘルパが認可していれば「認可あり」と数える")
+    void コントローラ内のヘルパ経由の認可も数える() {
+        // issue #830: 「IDで引いて所属プロジェクトのメンバーか確かめる」処理は
+        // ハンドラ間で共通化するのが自然(media の DiagramController#findAuthorized 等)。
+        // ヘルパを見ないと、実際には守られているエンドポイントを未認可と誤判定する。
+        Set<String> media = AuthorizationCoverageContract.currentUnauthorized("media");
+        assertTrue(media.stream().noneMatch(e -> e.startsWith("DiagramController#")),
+                "DiagramController のヘルパ経由の認可が効いていない: " + media);
+        assertTrue(media.stream().noneMatch(e -> e.startsWith("GeneratedImageController#")),
+                "GeneratedImageController のヘルパ経由の認可が効いていない: " + media);
+    }
 }

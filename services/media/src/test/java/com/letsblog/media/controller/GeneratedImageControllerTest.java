@@ -9,6 +9,7 @@ import com.letsblog.media.dto.GeneratedImageSummaryResponse;
 import com.letsblog.media.dto.UpdateGeneratedImageTagsRequest;
 import com.letsblog.media.messaging.DomainEventPublisher;
 import com.letsblog.media.repository.GeneratedImageRepository;
+import com.letsblog.media.service.AdminAuthorizationService;
 import com.letsblog.media.service.GeneratedImageNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -41,13 +42,16 @@ class GeneratedImageControllerTest {
     private GeneratedImageStorageService generatedImageStorageService;
     @Mock
     private DomainEventPublisher domainEventPublisher;
+    @Mock
+    private AdminAuthorizationService adminAuthorizationService;
 
     private GeneratedImageController controller;
 
     @BeforeEach
     void setUp() {
         controller = new GeneratedImageController(
-                generatedImageRepository, generatedImageStorageService, new ObjectMapper(), domainEventPublisher);
+                generatedImageRepository, generatedImageStorageService, new ObjectMapper(), domainEventPublisher,
+                adminAuthorizationService);
     }
 
     private GeneratedImage buildImage(Long id, String prompt, String tagsJson) {
