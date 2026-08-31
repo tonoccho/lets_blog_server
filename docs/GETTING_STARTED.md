@@ -63,6 +63,7 @@ Copy the example configuration and edit it:
 
 ```bash
 cp .env.example .env
+bash scripts/check-env.sh   # .env が .env.example の全項目を満たしているか確認
 ```
 
 Edit `.env` with your favorite text editor and change these critical values:

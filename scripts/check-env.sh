@@ -1,0 +1,113 @@
+#!/bin/bash
+# issue #756: `.env` が `.env.example` に追随できているかを確認する。
+#
+# 背景: `.env` はセットアップ時に `cp .env.example .env` で作るきりで、その後
+# `.env.example` に項目が増えても既存の `.env` は追随しない。追随漏れは静かに壊れる。
+#
+#   - `docker compose` が「The "X" variable is not set. Defaulting to a blank string.」と
+#     警告するが、起動自体は成功するので見落とされる
+#   - `mysql/init/01-create-service-schemas.sh` は LBS_*_DB_PASSWORD が空だと
+#     該当ユーザーの作成をスキップする。#756 では LBS_BACKUP_DB_PASSWORD がこれに当たり、
+#     lbs_backup ユーザーが作られず platform-service のバックアップ機能が動かなかった
+#
+# `.env.example` を契約とみなし、そこにあるキーが `.env` に揃っているかを見る。
+#
+# 使い方:
+#   bash scripts/check-env.sh            # リポジトリ直下の .env を見る
+#   bash scripts/check-env.sh path/to/.env
+#
+# 終了コード: 0 = 問題なし / 1 = 不足あり / 2 = 使い方の誤り
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+EXAMPLE="$REPO_ROOT/.env.example"
+TARGET="${1:-$REPO_ROOT/.env}"
+
+if [ ! -f "$EXAMPLE" ]; then
+    echo "エラー: $EXAMPLE が見つかりません" >&2
+    exit 2
+fi
+
+if [ ! -f "$TARGET" ]; then
+    echo "エラー: $TARGET が見つかりません。" >&2
+    echo "  cp .env.example .env  を実行してから設定してください(docs/setup.md)。" >&2
+    exit 1
+fi
+
+# `KEY=` 形式の行からキー名だけを取り出す。コメント行と空行は自然に外れる。
+keys_of() {
+    grep -oE '^[A-Za-z_][A-Za-z0-9_]*=' "$1" | tr -d '=' | sort -u
+}
+
+# 値が空のキー(`KEY=` だけ、または空白のみ)。compose の警告と同じものを拾う。
+empty_keys_of() {
+    grep -oE '^[A-Za-z_][A-Za-z0-9_]*=[[:space:]]*$' "$1" | grep -oE '^[A-Za-z_][A-Za-z0-9_]*' | sort -u
+}
+
+missing="$(comm -23 <(keys_of "$EXAMPLE") <(keys_of "$TARGET"))"
+extra="$(comm -13 <(keys_of "$EXAMPLE") <(keys_of "$TARGET"))"
+
+# `.env.example` では値が入っているのに `.env` で空になっているキー。
+# 単なる未設定と違い「消してしまった」ケースなので、不足と同じ扱いにする。
+blanked="$(comm -12 <(empty_keys_of "$TARGET") <(comm -23 <(keys_of "$EXAMPLE") <(empty_keys_of "$EXAMPLE")))"
+
+status=0
+
+if [ -n "$missing" ]; then
+    status=1
+    echo "✗ .env.example にあって .env に無いキー:"
+    echo "$missing" | sed 's/^/    /'
+fi
+
+if [ -n "$blanked" ]; then
+    status=1
+    echo "✗ .env.example では値が入っているのに .env で空のキー:"
+    echo "$blanked" | sed 's/^/    /'
+fi
+
+if [ "$status" -ne 0 ]; then
+    echo
+    echo "  対処:"
+    echo "    1. .env.example の該当行を .env にコピーし、環境に合わせた値を設定する"
+    echo "    2. LBS_*_DB_PASSWORD を足した場合は、MySQLのユーザー作成をやり直す。"
+    echo "       docker-entrypoint-initdb.d はデータボリュームが空のときしか走らないため、"
+    echo "       既存ボリュームでは手動で再実行する(冪等):"
+    echo "         docker compose up -d mysql"
+    echo "         docker compose exec mysql bash /docker-entrypoint-initdb.d/01-create-service-schemas.sh"
+    echo "       詳細は docs/SERVICE_SCHEMA_MIGRATION.md を参照。"
+fi
+
+# docker-compose.yml が `${VAR}` を既定値なしで参照しているのに `.env.example` に無いと、
+# `.env` を正しく作っても compose の警告が出続ける。`.env.example` を契約とみなす以上、
+# 契約そのものの抜けもここで見る(#756 では LLM_CLAUDE_API_KEY / IMAGE_LLM_API_KEY が該当した)。
+# `${VAR:-default}` は既定値があるので警告にならず、この正規表現にも合致しない。
+COMPOSE="$REPO_ROOT/docker-compose.yml"
+if [ -f "$COMPOSE" ]; then
+    # 行頭コメントは除く(コメント内の `[[${var}]]` のような記述を拾わないため)。
+    uncontracted="$(grep -v '^[[:space:]]*#' "$COMPOSE" \
+        | grep -ohE '\$\{[A-Za-z_][A-Za-z0-9_]*\}' \
+        | tr -d '${}' | sort -u \
+        | comm -23 - <(keys_of "$EXAMPLE"))"
+    if [ -n "$uncontracted" ]; then
+        status=1
+        echo "✗ docker-compose.yml が既定値なしで参照しているのに .env.example に無いキー:"
+        echo "$uncontracted" | sed 's/^/    /'
+        echo "    → .env を正しく作っても compose の警告が消えない。.env.example に行を足すこと"
+        echo "      (使わないキーなら値は空でよい。行が無いことが警告の原因)。"
+    fi
+fi
+
+if [ -n "$extra" ]; then
+    # 手元だけの上書きは正当な使い方なので、警告に留めて終了コードは変えない。
+    echo "△ .env にあって .env.example に無いキー(独自設定なら問題なし):"
+    echo "$extra" | sed 's/^/    /'
+fi
+
+if [ "$status" -eq 0 ] && [ -z "$extra" ]; then
+    echo "✓ .env は .env.example の全項目を満たしています"
+elif [ "$status" -eq 0 ]; then
+    echo "✓ 不足なし(.env.example の全項目が .env に存在します)"
+fi
+
+exit "$status"

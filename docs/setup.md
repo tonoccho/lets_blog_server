@@ -14,6 +14,7 @@ cd lets_blog_server
 # 1. 環境変数を設定
 cp .env.example .env
 vi .env   # パスワード・APIキー・暗号化キー・NEXTAUTH_SECRET等を変更
+bash scripts/check-env.sh   # .env が .env.example の全項目を満たしているか確認
 
 # 2. リバースプロキシ用の自己署名証明書を生成
 bash scripts/generate-certs.sh
@@ -48,6 +49,32 @@ docker compose up -d
 | `APP_MAIL_FROM` / `APP_WEB_BASE_URL` | メール送信元・Web公開URL(メール内リンク生成に使用) | `APP_WEB_BASE_URL` は `https://localhost` を指定 |
 | `MAIL_HOST` / `MAIL_PORT` / `MAIL_USERNAME` / `MAIL_PASSWORD` | 外部メールサービス(SendGrid/Resend/AWS SES等)のSMTP接続情報 | 必須変更 |
 | `NEXTAUTH_SECRET` | Web管理画面(Auth.js)のセッション署名鍵。生成例: `openssl rand -hex 32` | 必須変更 |
+| `LBS_*_DB_PASSWORD` | サービス別スキーマ用のMySQLユーザーのパスワード(ADR-0004)。`LBS_BACKUP_DB_PASSWORD` はplatform-serviceのバックアップ機能が使う `lbs_backup` ユーザー用 | 必須変更 |
+
+### `.env` が `.env.example` に追随しているか確認する
+
+`.env` は初回に `cp` で作るきりなので、その後 `.env.example` に項目が増えても追随しない。
+追随漏れは静かに壊れる — `docker compose` は警告を出すが起動自体は成功し、
+`mysql/init/01-create-service-schemas.sh` は `LBS_*_DB_PASSWORD` が空だと該当ユーザーの
+作成を**スキップする**(#756 ではこれで `lbs_backup` が作られず、バックアップ機能が動かなかった)。
+
+```bash
+bash scripts/check-env.sh
+```
+
+`.env.example` にあって `.env` に無いキー、および `.env` で空になっているキーを報告する。
+不足があれば終了コード1で落ちる。`git pull` で `.env.example` が更新されたら実行すること。
+
+`LBS_*_DB_PASSWORD` を後から足した場合は、MySQLのユーザー作成をやり直す必要がある。
+`docker-entrypoint-initdb.d` はデータボリュームが空のときしか走らないため、
+既存ボリュームでは手動で再実行する(このスクリプトは冪等)。
+
+```bash
+docker compose up -d mysql
+docker compose exec mysql bash /docker-entrypoint-initdb.d/01-create-service-schemas.sh
+```
+
+詳細は [SERVICE_SCHEMA_MIGRATION.md](SERVICE_SCHEMA_MIGRATION.md) を参照。
 
 ## 2. TLS証明書の生成
 
