@@ -7,8 +7,9 @@ package com.letsblog.common.client;
  */
 public class SyncServiceUnavailableException extends SyncServiceException {
 
-    public SyncServiceUnavailableException(String serviceName, String operation, Throwable cause) {
-        super(serviceName, operation, "呼び出し先へ到達できませんでした: " + rootMessage(cause), cause);
+    public SyncServiceUnavailableException(
+            String serviceName, String baseUrl, String operation, Throwable cause) {
+        super(serviceName, baseUrl, operation, "呼び出し先へ到達できませんでした: " + rootMessage(cause), cause);
     }
 
     private static String rootMessage(Throwable cause) {

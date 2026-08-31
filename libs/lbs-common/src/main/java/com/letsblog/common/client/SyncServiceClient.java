@@ -49,12 +49,16 @@ import org.springframework.web.client.RestClientResponseException;
 public final class SyncServiceClient {
 
     private final String serviceName;
+    /** 実際の宛先。例外メッセージへ含め、設定ミスによる向き先違いを切り分けられるようにする(issue #827)。 */
+    private final String baseUrl;
     private final RestClient restClient;
     private final CircuitBreaker circuitBreaker;
     private final Retry retry;
 
-    private SyncServiceClient(String serviceName, RestClient restClient, CircuitBreaker circuitBreaker, Retry retry) {
+    private SyncServiceClient(
+            String serviceName, String baseUrl, RestClient restClient, CircuitBreaker circuitBreaker, Retry retry) {
         this.serviceName = serviceName;
+        this.baseUrl = baseUrl;
         this.restClient = restClient;
         this.circuitBreaker = circuitBreaker;
         this.retry = retry;
@@ -178,6 +182,11 @@ public final class SyncServiceClient {
         return serviceName;
     }
 
+    /** 実際に呼び出すベースURL(診断用。例外メッセージにも含まれる。issue #827)。 */
+    public String baseUrl() {
+        return baseUrl;
+    }
+
     /** 現在のサーキットブレーカー状態(監視・診断用)。 */
     public CircuitBreaker.State circuitBreakerState() {
         return circuitBreaker.getState();
@@ -201,7 +210,7 @@ public final class SyncServiceClient {
         try {
             return decorated.get();
         } catch (CallNotPermittedException e) {
-            throw new SyncServiceCircuitOpenException(serviceName, operation);
+            throw new SyncServiceCircuitOpenException(serviceName, baseUrl, operation);
         }
     }
 
@@ -212,19 +221,19 @@ public final class SyncServiceClient {
             } catch (RestClientResponseException e) {
                 if (e.getStatusCode().is4xxClientError()) {
                     throw new SyncServiceClientErrorException(
-                            serviceName, operation, e.getStatusCode().value(), bodyOrMessage(e), e);
+                            serviceName, baseUrl, operation, e.getStatusCode().value(), bodyOrMessage(e), e);
                 }
                 throw new SyncServiceServerErrorException(
-                        serviceName, operation, e.getStatusCode().value(), bodyOrMessage(e), e);
+                        serviceName, baseUrl, operation, e.getStatusCode().value(), bodyOrMessage(e), e);
             } catch (ResourceAccessException e) {
                 if (isTimeout(e)) {
-                    throw new SyncServiceTimeoutException(serviceName, operation, e);
+                    throw new SyncServiceTimeoutException(serviceName, baseUrl, operation, e);
                 }
-                throw new SyncServiceUnavailableException(serviceName, operation, e);
+                throw new SyncServiceUnavailableException(serviceName, baseUrl, operation, e);
             } catch (SyncServiceException e) {
                 throw e;
             } catch (RuntimeException e) {
-                throw new SyncServiceUnavailableException(serviceName, operation, e);
+                throw new SyncServiceUnavailableException(serviceName, baseUrl, operation, e);
             }
         };
     }
@@ -296,7 +305,7 @@ public final class SyncServiceClient {
                     restClientBuilder.clone().baseUrl(baseUrl).requestFactory(requestFactory).build();
             CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker(serviceName, circuitBreakerConfig);
             Retry retry = retryRegistry.retry(serviceName + "-retry", retryConfig);
-            return new SyncServiceClient(serviceName, restClient, circuitBreaker, retry);
+            return new SyncServiceClient(serviceName, baseUrl, restClient, circuitBreaker, retry);
         }
     }
 

@@ -62,7 +62,8 @@ class CurrentActorServiceTest {
         when(request.getHeader(HttpHeaders.AUTHORIZATION)).thenReturn("Bearer token");
         when(identityClient.fetchProfile("Bearer token")).thenThrow(
                 new SyncServiceClientErrorException(
-                        "identity-service", "GET /api/identity/me", 403, "Forbidden", null));
+                        "identity-service", "http://identity:8080", "GET /api/identity/me", 403, "Forbidden",
+                        null));
 
         // identity-serviceへの問い合わせ失敗は「未認証」へ握り潰さず伝播させる設計
         // (lookupProfileのJavadoc参照)。素通りしないことがここでの要点。

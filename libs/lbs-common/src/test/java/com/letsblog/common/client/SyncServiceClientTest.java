@@ -347,6 +347,122 @@ class SyncServiceClientTest {
         }
     }
 
+    // ---- issue #827: 例外メッセージに実際の宛先URLを含める ----
+
+    /**
+     * 論理サービス名({@code serviceName})は呼び出し元が付ける名前にすぎず、設定した宛先が
+     * 別サービスを指していても食い違いに気付けない(#825で実際に起きた)。4xx/5xxのように
+     * 「応答は返ってきている」ケースでは cause にもURLが載らないため、ここで欠けると
+     * 向き先ミスをログから切り分けられなくなる。
+     */
+    @Test
+    void クライアントエラーの例外メッセージに宛先URLと論理サービス名の両方が含まれる() throws IOException {
+        httpServer = startHttpServer(exchange -> respond(exchange, 404, "{\"error\":\"Not Found\"}"));
+        String url = baseUrl(httpServer);
+        SyncServiceClient client = freshBuilder(url).profile(SyncCallProfile.SHORT).build();
+
+        SyncServiceClientErrorException e = assertThrows(
+                SyncServiceClientErrorException.class,
+                () -> client.get("/api/value", new Object[0], Value.class, h -> { }));
+
+        assertEquals(url, e.baseUrl());
+        assertTrue(e.getMessage().contains(url), "宛先URLを含むこと: " + e.getMessage());
+        assertTrue(e.getMessage().contains("test-service"), "論理サービス名も残ること: " + e.getMessage());
+    }
+
+    @Test
+    void サーバーエラーの例外メッセージに宛先URLが含まれる() throws IOException {
+        httpServer = startHttpServer(exchange -> respond(exchange, 500, "{\"error\":\"boom\"}"));
+        String url = baseUrl(httpServer);
+        SyncServiceClient client = freshBuilder(url)
+                .profile(SyncCallProfile.SHORT)
+                .retryConfig(RetryConfig.custom().maxAttempts(1).build())
+                .build();
+
+        SyncServiceServerErrorException e = assertThrows(
+                SyncServiceServerErrorException.class,
+                () -> client.get("/api/value", new Object[0], Value.class, h -> { }));
+
+        assertEquals(url, e.baseUrl());
+        assertTrue(e.getMessage().contains(url), "宛先URLを含むこと: " + e.getMessage());
+        assertTrue(e.getMessage().contains("test-service"), "論理サービス名も残ること: " + e.getMessage());
+    }
+
+    @Test
+    void 通信断の例外メッセージに宛先URLが含まれる() throws IOException {
+        rawServerSocket = new ServerSocket(0);
+        int port = rawServerSocket.getLocalPort();
+        rawServerSocket.close();
+        String url = "http://localhost:" + port;
+        SyncServiceClient client = freshBuilder(url)
+                .profile(SyncCallProfile.SHORT)
+                .retryConfig(RetryConfig.custom().maxAttempts(1).build())
+                .build();
+
+        SyncServiceUnavailableException e = assertThrows(
+                SyncServiceUnavailableException.class,
+                () -> client.get("/api/value", new Object[0], Value.class, h -> { }));
+
+        assertEquals(url, e.baseUrl());
+        assertTrue(e.getMessage().contains(url), "宛先URLを含むこと: " + e.getMessage());
+        assertTrue(e.getMessage().contains("test-service"), "論理サービス名も残ること: " + e.getMessage());
+    }
+
+    @Test
+    void タイムアウトの例外メッセージに宛先URLが含まれる() throws IOException {
+        httpServer = startHttpServer(exchange -> {
+            try {
+                Thread.sleep(Duration.ofSeconds(5).toMillis());
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+            respond(exchange, 200, "{\"value\":\"late\"}");
+        });
+        String url = baseUrl(httpServer);
+        SyncServiceClient client = freshBuilder(url)
+                .profile(SyncCallProfile.SHORT)
+                .retryConfig(RetryConfig.custom().maxAttempts(1).build())
+                .build();
+
+        SyncServiceTimeoutException e = assertThrows(
+                SyncServiceTimeoutException.class,
+                () -> client.get("/api/value", new Object[0], Value.class, h -> { }));
+
+        assertEquals(url, e.baseUrl());
+        assertTrue(e.getMessage().contains(url), "宛先URLを含むこと: " + e.getMessage());
+    }
+
+    @Test
+    void サーキットオープンの例外メッセージに宛先URLが含まれる() throws IOException {
+        httpServer = startHttpServer(exchange -> respond(exchange, 500, "{\"error\":\"boom\"}"));
+        String url = baseUrl(httpServer);
+        SyncServiceClient client = freshBuilder(url)
+                .profile(SyncCallProfile.SHORT)
+                .retryConfig(RetryConfig.custom().maxAttempts(1).build())
+                .circuitBreakerConfig(CircuitBreakerConfig.custom()
+                        .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
+                        .slidingWindowSize(2)
+                        .minimumNumberOfCalls(2)
+                        .failureRateThreshold(50.0f)
+                        .recordExceptions(SyncServiceServerErrorException.class)
+                        .build())
+                .build();
+
+        for (int i = 0; i < 2; i++) {
+            assertThrows(
+                    SyncServiceServerErrorException.class,
+                    () -> client.get("/api/value", new Object[0], Value.class, h -> { }));
+        }
+
+        SyncServiceCircuitOpenException e = assertThrows(
+                SyncServiceCircuitOpenException.class,
+                () -> client.get("/api/value", new Object[0], Value.class, h -> { }));
+
+        assertEquals(url, e.baseUrl());
+        assertTrue(e.getMessage().contains(url), "宛先URLを含むこと: " + e.getMessage());
+        assertTrue(e.getMessage().contains("test-service"), "論理サービス名も残ること: " + e.getMessage());
+    }
+
     private record Value(String value) {
     }
 }
