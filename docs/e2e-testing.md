@@ -174,6 +174,19 @@ npx playwright test -g "サイトを登録して記事を公開"     # テスト
 | `E2E_TEST_PASSWORD` | (なし) | `e2e-test@letsblog.local` のパスワード。未設定なら該当 spec をスキップ |
 | `E2E_ADMIN_PASSWORD` | (なし) | `e2e-admin@letsblog.local` のパスワード。未設定なら該当 spec をスキップ |
 | `E2E_SKIP_HEALTH_WAIT` | (なし) | `1` で globalSetup の healthy 待ちをスキップ(docker CLI が無い環境等) |
+| `COMPOSE_PROJECT_NAME` | リポジトリのディレクトリ名 | healthy 待ちが対象とする compose プロジェクト(issue #842) |
+
+> **`E2E_SKIP_HEALTH_WAIT` は常用しないこと。** これは docker CLI が無い環境向けの逃げ道であり、
+> 常用すると本来この待ち合わせが防いでいる「まだ起動しきっていないスタックに対してテストを流す」
+> 事故を検出できなくなる。
+>
+> issue #842 以前は `bin/loop test e2e` がこの変数なしでは必ずタイムアウトしていた。
+> `scripts/wait-for-stack-healthy.sh` が `docker compose ps` を `-f` / `-p` なしで実行しており、
+> カレントディレクトリに compose ファイルが無い環境(`test-e2e` コンテナの中など)では
+> プロジェクトを解決できず、全サービスを「存在しない」と報告して600秒待っていた。
+> 現在はリポジトリ基準の絶対パスとプロジェクト名を明示して解決するため、
+> **カレントディレクトリに依存しない**。プロジェクト名がずれている場合は
+> 600秒待たずに即座に、実在するプロジェクト名を添えて失敗する。
 | `E2E_HEALTH_TIMEOUT` | `600` | healthy 待ちのタイムアウト秒数 |
 | `E2E_DB_CLEANUP` | (なし) | `1` で globalTeardown が全スキーマのテストデータを削除する |
 | `E2E_ALLOW_SERVICE_DISRUPTION` | (なし) | `1` で「下流サービスを実際に停止する」縮退表示テストを有効化 |
