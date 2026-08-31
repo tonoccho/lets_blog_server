@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
  * 認可チェックを持たないエンドポイントが増えていないことを保証する(issue #830)。
  *
  * <p>#830 の調査で、認可チェックを一切持たないエンドポイントが内部ブリッジを除いて
- * 全サービス合計98件あることが分かった。個々について「認証のみでよいか、認可が必要か」を
+ * 全サービス合計56件あることが分かった。個々について「認証のみでよいか、認可が必要か」を
  * 決めるのは製品判断を伴い一度には片付かないため、現状を許可リストで固定し、
  * <b>新しく増えることだけを止める</b>。
  *
@@ -21,20 +21,15 @@ import org.junit.jupiter.api.Test;
 class AuthorizationCoverageTest {
 
     /**
-     * 現時点で認可チェックを持たないエンドポイント(issue #830 時点)。
+     * publishing-service に認可チェックの無いエンドポイントは残っていない。
      *
-     * <ul>
-     *   <li>{@code PostController#publish} / {@code #delete} — WordPress への投稿公開・削除。
-     *       **本来は認可が必要**。ただし {@code ProjectServiceClient.SiteBridge} が
-     *       {@code projectId} を持たないため、{@code requireProjectMemberOrAdmin} を掛けるには
-     *       project-service の内部ブリッジに projectId を載せる変更が要る(#830 で対応)</li>
-     *   <li>{@code TaxonomyController#resolve} — CMS のカテゴリ/タグ解決。要否は #830 で判断する</li>
-     * </ul>
+     * <p>#830 時点では {@code PostController#publish} / {@code #delete} /
+     * {@code TaxonomyController#resolve} の3件が該当していた。当時は
+     * 「{@code SiteBridge} が {@code projectId} を持たないため掛けられない」と記録していたが、
+     * {@code ProjectServiceClient#findProjectIdBySiteId} で逆引きできるため、
+     * いずれも {@code requireProjectMemberOrAdminForSite} で塞いだ。
      */
-    private static final Set<String> KNOWN_UNAUTHORIZED = Set.of(
-            "PostController#publish",
-            "PostController#delete",
-            "TaxonomyController#resolve");
+    private static final Set<String> KNOWN_UNAUTHORIZED = Set.of();
 
     @Test
     @DisplayName("認可チェックの無いエンドポイントが増えていない(issue #830)")

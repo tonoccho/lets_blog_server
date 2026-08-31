@@ -15,8 +15,11 @@ import org.junit.jupiter.api.Test;
  */
 class AuthorizationCoverageContractTest {
 
-    /** publishing は件数が少なく、変化を追いやすいので検証台にする。 */
-    private static final String SERVICE = "publishing";
+    /**
+     * 件数が少なく変化を追いやすいので検証台にする。publishing は #830 で無認可がゼロになり、
+     * 「1件取り除いて失敗を確かめる」検証が成り立たなくなったため content に移した。
+     */
+    private static final String SERVICE = "content";
 
     @Test
     @DisplayName("現状の一覧をそのまま許可リストにすれば通る")
@@ -66,5 +69,15 @@ class AuthorizationCoverageContractTest {
         // サービス間呼び出し専用でgatewayからは到達しないため一覧に載らない。
         Set<String> current = AuthorizationCoverageContract.currentUnauthorized(SERVICE);
         assertTrue(current.stream().noneMatch(s -> s.contains("BridgeController")), current.toString());
+    }
+
+    @Test
+    @DisplayName("認可メソッドの派生名(requireProjectMemberOrAdminForSite等)も認可として数える")
+    void 派生名も認可として数える() {
+        // publishing の PostController#publish/#delete は、PostPublishService/PostDeleteService が
+        // 呼ぶ requireProjectMemberOrAdminForSite にのみ守られている(issue #830)。接尾辞付きの
+        // 名前を認可呼び出しと認識できないと、この2件が「認可なし」として現れてしまう。
+        Set<String> publishing = AuthorizationCoverageContract.currentUnauthorized("publishing");
+        assertTrue(publishing.isEmpty(), "publishing に無認可エンドポイントが残っている: " + publishing);
     }
 }

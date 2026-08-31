@@ -32,6 +32,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -39,6 +40,8 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -70,6 +73,8 @@ class PostPublishServiceTest {
     private CmsAdapter cmsAdapter;
     @Mock
     private DomainEventPublisher domainEventPublisher;
+    @Mock
+    private AdminAuthorizationService adminAuthorizationService;
 
     private PostPublishService service;
 
@@ -81,7 +86,8 @@ class PostPublishServiceTest {
         service = new PostPublishService(projectServiceClient, cmsAdapterFactory, contentServiceClient,
                 plantUmlEmbedService, plantUmlTagRenderService,
                 currentActorService, legacyApiBridgeClient,
-                new com.fasterxml.jackson.databind.ObjectMapper(), new ImageResizeService(), domainEventPublisher);
+                new com.fasterxml.jackson.databind.ObjectMapper(), new ImageResizeService(), domainEventPublisher,
+                adminAuthorizationService);
 
         ProjectServiceClient.SiteBridge site =
                 new ProjectServiceClient.SiteBridge(1L, "main", "Main", "https://example.com", CmsType.WORDPRESS, false, null);
@@ -769,5 +775,22 @@ class PostPublishServiceTest {
         verify(contentServiceClient).upsertPost(
                 any(), eq("202"), any(), any(), any(), any(), scheduledAtCaptor.capture());
         assertEquals(scheduledAt.toInstant(), scheduledAtCaptor.getValue().toInstant(java.time.ZoneOffset.UTC));
+    }
+
+    @Test
+    void publish_プロジェクトメンバーでもadminでもなければCMSへ触れずに拒否する() {
+        // issue #830: WordPressへの公開が「認証済みなら誰でも」通っていた。CMSへの副作用
+        // (画像アップロード・投稿作成)が始まる前に弾まれることを確かめる。
+        lenient().when(projectServiceClient.findProjectIdBySiteId(1L)).thenReturn(7L);
+        doThrow(new ForbiddenException("この操作にはプロジェクトメンバーまたはadmin権限が必要です"))
+                .when(adminAuthorizationService).requireProjectMemberOrAdminForSite(7L);
+
+        assertThrows(ForbiddenException.class,
+                () -> service.publish(command("my-article", "My Article", List.of(), null)));
+
+        verify(cmsAdapter, never()).createOrUpdatePost(any(), any(), any());
+        verify(contentServiceClient, never()).renderPreImage(anyString(), any(), anyBoolean());
+        verify(domainEventPublisher, never())
+                .publishPostPublished(any(), any(), anyString(), anyString(), anyString());
     }
 }

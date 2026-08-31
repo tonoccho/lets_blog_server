@@ -42,7 +42,11 @@ public final class AuthorizationCoverageContract {
     private static final Pattern AUTHORIZATION_CALL = Pattern.compile(
             "\\b(requireAdmin|requireSelfOrAdmin|requireAdminAndNotSelf|requirePermission"
                     + "|requireProjectMemberOrAdmin|requireNotSelfDemotion|requireAuthenticated"
-                    + "|requireActorId|requireCurrentActorId)\\s*\\(");
+                    + "|requireActorId|requireCurrentActorId)"
+                    // 対象を絞った派生(例: requireProjectMemberOrAdminForSite)も認可呼び出しとして数える。
+                    // 接尾辞を許さないと、派生名を作った瞬間に「認可が無い」と誤判定される(issue #830)。
+                    // ここに列挙した名前で始まるものだけが対象なので、Objects.requireNonNull は拾わない。
+                    + "[A-Za-z]*\\s*\\(");
 
     /**
      * 認可を意図的に付けない場合に、その理由とともに置くマーカー。

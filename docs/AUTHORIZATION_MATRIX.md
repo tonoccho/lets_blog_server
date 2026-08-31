@@ -327,7 +327,7 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 | | 件数 |
 |---|---|
 | 総エンドポイント | 278 |
-| **認可なし(内部ブリッジを除く)** | **56** |
+| **認可なし(内部ブリッジを除く)** | **53**(#830 の初回計測時は 56) |
 
 サービス別の内訳:
 
@@ -339,9 +339,9 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 | content | 6 | `MetadataController`(2)、`PostController`(2)、`ContentCacheController`(1)、`CustomTagController#validate`(1) |
 | legacy-api | 5 | `AiController`(2)、`AuthController`(2、公開パス)、`HealthController`(1) |
 | platform | 5 | `DashboardController`(4)、`VscodeExtensionController`(1) |
-| publishing | 3 | **`PostController#publish` / `#delete`**、`TaxonomyController#resolve` |
+| **publishing** | **0** | #830 で解消。下記「解消済み」参照 |
 | log-writer | 2 | `FrontendErrorLogController`、`OperationLogController` |
-| **analytics / identity** | **0** | 全エンドポイントが認可済み |
+| **analytics / identity / publishing** | **0** | 全エンドポイントが認可済み |
 
 内部ブリッジ(`/api/internal/**`)は対象外とした。サービス間呼び出し専用で gateway からは
 到達せず、認可はトークンを転送する呼び出し元が担うため。
@@ -375,13 +375,22 @@ DBもコンテナも要らないため、MySQL が未公開の環境でも実行
 
 ### 既知の要対応(優先度順)
 
-1. **`publishing/PostController#publish` / `#delete`** — WordPress への投稿公開・削除。
-   本来は `requireProjectMemberOrAdmin` 相当が必要だが、
-   `ProjectServiceClient.SiteBridge` が `projectId` を持たないため、
-   project-service の内部ブリッジに projectId を載せる変更が前提になる
-2. **`project/SiteController#register` / `#createManagedWordPress` / `#adoptManagedWordPress`** — サイト作成
-3. **`media` の18件** — 画像・ダイアグラムの作成/更新/削除を含む
-4. **`ai` の10件** — 生成系。コスト面の影響もある
+1. **`project/SiteController#register` / `#createManagedWordPress` / `#adoptManagedWordPress`** — サイト作成
+2. **`media` の18件** — 画像・ダイアグラムの作成/更新/削除を含む
+3. **`ai` の10件** — 生成系。コスト面の影響もある
+
+### 解消済み
+
+**`publishing` の3件(#830)** — `PostController#publish` / `#delete`、`TaxonomyController#resolve`。
+
+当初は「`ProjectServiceClient.SiteBridge` が `projectId` を持たないため掛けられない」と記録して
+いたが、`ProjectServiceClient#findProjectIdBySiteId` でサイトIDから逆引きできるため前提が誤りだった。
+3件とも `AdminAuthorizationService#requireProjectMemberOrAdminForSite` で、
+サイトが属するプロジェクトのメンバー(または admin)に限定した。
+
+どの環境にも紐付いていないサイトは `projectId` が null になりうる(#759)。判定に使える
+メンバーシップが存在しないため、**その場合は admin のみを許可**する。未紐付けサイトを
+投稿公開・削除の抜け道として残さないための判断。
 
 `legacy-api/AuthController` の2件は初回セットアップ導線で **`PUBLIC_PATHS` に含まれる公開パス**、
 `HealthController#health` も同様。これらは「認可不要」が正しく、
