@@ -327,16 +327,16 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 | | 件数 |
 |---|---|
 | 総エンドポイント | 278 |
-| **認可なし(内部ブリッジを除く)** | **5**(#830 の初回計測時は 56) |
+| **認可なし(内部ブリッジを除く)** | **0**(#830 の初回計測時は 56) |
 
 サービス別の内訳:
 
 | サービス | 認可なし | 内容 |
 |---|---|---|
-| media | 1 | `MediaController#upload`(下記参照) |
+| **media** | **0** | #830 で解消 |
 | **ai** | **0** | #830 で解消。下記「解消済み」参照 |
-| project | 2 | `ProjectController#list`、`SiteController#list`(いずれも一覧。下記参照) |
-| content | 2 | `PostController#list` / `#lookupBySlug`(いずれも一覧・参照。下記参照) |
+| **project** | **0** | #830 で解消 |
+| **content** | **0** | #830 で解消 |
 | **legacy-api** | **0** | #830 で解消 |
 | **platform** | **0** | #830 で解消 |
 | **publishing** | **0** | #830 で解消。下記「解消済み」参照 |
@@ -375,14 +375,10 @@ DBもコンテナも要らないため、MySQL が未公開の環境でも実行
 
 ### 既知の要対応(優先度順)
 
-1. **`media/MediaController#upload`** — `site` キーで指定した CMS のメディアライブラリへ
-   直接ファイルをアップロードする。サイトが属するプロジェクトのメンバーに限定すべきだが、
-   media-service には site キーからプロジェクトを引く手段が無い(publishing-service の
-   `/api/internal/publishing/**` に site→project の逆引きが無い)。publishing 側へ
-   ブリッジを足す変更が要る
-2. **一覧系 4件** — `project/ProjectController#list`、`project/SiteController#list`、
-   `content/PostController#list` / `#lookupBySlug`。いずれも「自分がアクセスできる分だけ返す」
-   絞り込みが要り、判定材料の `project_users` が legacy-api に残っている(下記「一覧系を残している理由」)
+**無し。** #830 で全エンドポイントの認可要否を決定し、実装へ反映した。
+
+ラチェット(`AuthorizationCoverageTest`)の許可リストは**10サービスすべて空**で、
+新たに認可チェックの無いエンドポイントが増えると即座に失敗する。
 
 ### 解消済み
 
@@ -407,17 +403,26 @@ DBもコンテナも要らないため、MySQL が未公開の環境でも実行
 `ProjectController#get` は `requireProjectMemberOrAdmin(id)`。更新系が全て admin 限定である一方、
 参照が「認証済みなら誰でも」では他人のプロジェクトの構成(GitHub リポジトリ・環境の紐付け)が読めた。
 
-### 一覧系を残している理由
+### 一覧系の絞り込み(#830)
 
-`ProjectController#list` と `SiteController#list` は認可を付けずに残している。
-「自分がアクセスできる分だけ返す」絞り込みが必要で、単純に admin 限定にはできない。
+`ProjectController#list` / `SiteController#list` / `content/PostController#list` / `#lookupBySlug` は
+「認証済みなら誰でも全件を列挙できる」状態だった。admin 限定にすると VSCode 拡張のサイト選択や
+Web の一覧画面が壊れるため、**操作者が見てよい範囲だけを返す絞り込み**を入れた。
 
-- 判定材料の `project_users` は legacy-api に残っており(ADR-0004 によりクロススキーマ参照不可)、
-  内部ブリッジ越しの N+1 になる
-- VSCode 拡張が `SiteController#list` をサイト選択に使っている
-  (`extension/src/apiClient.ts`)ため、admin 限定にすると非 admin の拡張利用が壊れる
+判定材料の `project_users` は legacy-api に残っている(ADR-0004 によりクロススキーマ参照不可)。
+行ごとに `isProjectMember` を呼ぶと N+1 になるので、**まとめて引く内部ブリッジを2本足した**。
 
-#583 で `project_users` が project-service へ移った後に、リポジトリ側の絞り込みとして実装する。
+| ブリッジ | 用途 |
+|---|---|
+| `GET /api/internal/project/users/{userId}/project-ids` | project-service が所属プロジェクトIDを引く |
+| `GET /api/internal/content/users/{userId}/site-ids` | content-service がアクセス可能サイトIDを引く |
+
+content-service は `project_users`(legacy-api)も `projects`(project-service)も持たないため、
+両方を引ける legacy-api 側で解決して返している。
+
+いずれも admin は絞り込まない(`Optional.empty()` を「制限なし」として扱う)。
+#583 で `project_users` が project-service へ移った時点で、呼び出し側のクライアントとともに
+向き先を変えることになる。
 
 **`media` の5件(#830)** — `ComfyUiCheckpointController#install` / `#delete` と
 `RenderController` の3件。いずれも**認可を足すのではなく、外部から到達できないことを確定させた**。
@@ -500,7 +505,9 @@ content-service / media-service のコンテナ間呼び出しだけだった。
 
 > **`ContentCacheController#resolve` について:** 認可の問題ではないが、**宛先アドレスの検証が無く
 > 内部アドレスへの SSRF になる**ことがこの棚卸しで判明した。入力検証で対処すべき別種の問題なので
-> **#902** として分けて起票した。
+> **#902** として分けて起票し、`OutboundUrlGuard` で対処済み。ループバック・プライベート帯・
+> リンクローカル(`169.254.169.254`)・IPv6 ユニークローカル・CGNAT 等へ**名前解決される**宛先を拒否し、
+> Playwright の `page.route` で**リダイレクトを含む各リクエストの直前**にも同じ検査を通す。
 
 **`media` の12件(#830)** — `DiagramController`(6) と `GeneratedImageController`(6)。
 
@@ -523,6 +530,14 @@ media にも追加し、`AdminAuthorizationService#requireProjectMemberOrAdmin` 
   本来は「操作者が所属するプロジェクトの分だけ」返すべきだが、所属プロジェクトの一覧を引く手段が
   media-service に無い(内部ブリッジは `isProjectMember` だけ)。#583 の後に絞り込みへ置き換える
 
+**`media/MediaController#upload`(#830)** — `site` キーで指定した CMS のメディアライブラリへ
+直接ファイルをアップロードするため、**認証済みなら誰でも任意サイトへ書き込めた**。
+
+media-service はサイトを所有していない(所有権は project-service、#577 stage2)ので
+site→project の逆引きを自前でできなかった。publishing-service は `SiteService#resolveProjectId`
+で既に解決できるため、同じ内部ブリッジ上に
+`GET /api/internal/publishing/sites/{site}/project-id` を1本足し、
+`requireProjectMemberOrAdminForResource` で塞いだ。
 `legacy-api/AuthController` の2件は初回セットアップ導線で **`PUBLIC_PATHS` に含まれる公開パス**、
 `HealthController#health` も同様。これらは「認可不要」が正しく、
 #583 で legacy-api を解体する際に移設先で同じ扱いにする。

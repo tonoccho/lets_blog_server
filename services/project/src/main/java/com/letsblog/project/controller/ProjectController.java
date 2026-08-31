@@ -57,11 +57,18 @@ public class ProjectController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
+    /**
+     * プロジェクト一覧。<b>操作者が所属するプロジェクトだけ</b>を返す(issue #830)。
+     * admin は全件。以前は認可チェックが無く、認証済みなら誰でも全プロジェクトを列挙できた。
+     */
     @GetMapping
     public List<ProjectResponse> list(
             @RequestParam(required = false) String sortBy,
             @RequestParam(required = false) String sortOrder) {
-        return projectService.listProjects(sortBy, sortOrder);
+        List<ProjectResponse> all = projectService.listProjects(sortBy, sortOrder);
+        return adminAuthorizationService.accessibleProjectIds()
+                .map(ids -> all.stream().filter(p -> ids.contains(p.id())).toList())
+                .orElse(all);
     }
 
     @GetMapping("/{id}")

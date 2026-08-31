@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import org.junit.jupiter.api.DisplayName;
@@ -15,43 +16,55 @@ import org.junit.jupiter.api.Test;
  */
 class AuthorizationCoverageContractTest {
 
-    /**
-     * 件数が少なく変化を追いやすいので検証台にする。publishing は #830 で無認可がゼロになり、
-     * 「1件取り除いて失敗を確かめる」検証が成り立たなくなったため content に移した。
-     */
-    private static final String SERVICE = "content";
+    /** 突き合わせの検証に使う合成データ。実サービスの状態に依存させない(issue #830)。 */
+    private static final String SERVICE = "publishing";
+
+
+
 
     @Test
-    @DisplayName("現状の一覧をそのまま許可リストにすれば通る")
+    @DisplayName("走査結果と許可リストが一致すれば通る")
     void 現状と一致すれば通る() {
-        Set<String> current = AuthorizationCoverageContract.currentUnauthorized(SERVICE);
-        assertDoesNotThrow(
-                () -> AuthorizationCoverageContract.verifyNoNewUnauthorizedEndpoints(SERVICE, current));
+        Set<String> current = Set.of("FooController#bar", "FooController#baz");
+
+        assertDoesNotThrow(() -> AuthorizationCoverageContract.compare(SERVICE, current, current));
     }
 
     @Test
     @DisplayName("許可リストに無い無認可エンドポイントがあれば失敗する(新規の付け忘れ検知)")
     void 新規の無認可は失敗する() {
-        Set<String> current = new TreeSet<>(AuthorizationCoverageContract.currentUnauthorized(SERVICE));
-        String removed = current.iterator().next();
-        current.remove(removed);
+        Set<String> current = Set.of("FooController#bar", "FooController#baz");
+        Set<String> allowed = Set.of("FooController#bar");
 
         AssertionError e = assertThrows(AssertionError.class,
-                () -> AuthorizationCoverageContract.verifyNoNewUnauthorizedEndpoints(SERVICE, current));
+                () -> AuthorizationCoverageContract.compare(SERVICE, current, allowed));
         assertTrue(e.getMessage().contains("新たに認可チェックの無いエンドポイントが増えました"), e.getMessage());
-        assertTrue(e.getMessage().contains(removed), e.getMessage());
+        assertTrue(e.getMessage().contains("FooController#baz"), e.getMessage());
     }
 
     @Test
     @DisplayName("解消済みなのに許可リストに残っていれば失敗する(リストの陳腐化防止)")
     void 解消済みが残っていれば失敗する() {
-        Set<String> current = new TreeSet<>(AuthorizationCoverageContract.currentUnauthorized(SERVICE));
-        current.add("GhostController#alreadyFixed");
+        Set<String> current = Set.of("FooController#bar");
+        Set<String> allowed = Set.of("FooController#bar", "FooController#gone");
 
         AssertionError e = assertThrows(AssertionError.class,
-                () -> AuthorizationCoverageContract.verifyNoNewUnauthorizedEndpoints(SERVICE, current));
+                () -> AuthorizationCoverageContract.compare(SERVICE, current, allowed));
         assertTrue(e.getMessage().contains("もう認可チェックが無い状態ではありません"), e.getMessage());
-        assertTrue(e.getMessage().contains("GhostController#alreadyFixed"), e.getMessage());
+        assertTrue(e.getMessage().contains("FooController#gone"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("全サービスの許可リストが空である(#830 完了状態の固定)")
+    void 全サービスで無認可はゼロ() {
+        // #830 で全エンドポイントの認可要否を決定し実装へ反映した。以降どのサービスでも
+        // 無認可エンドポイントは1件も無いのが正しい状態なので、そこを固定する。
+        for (String service : List.of("ai", "analytics", "content", "identity", "legacy-api",
+                "log-writer", "media", "platform", "project", "publishing")) {
+            assertTrue(AuthorizationCoverageContract.currentUnauthorized(service).isEmpty(),
+                    service + " に認可チェックの無いエンドポイントが残っている: "
+                            + AuthorizationCoverageContract.currentUnauthorized(service));
+        }
     }
 
     @Test

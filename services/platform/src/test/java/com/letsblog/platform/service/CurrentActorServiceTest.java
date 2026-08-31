@@ -1,5 +1,6 @@
 package com.letsblog.platform.service;
 
+import java.util.Optional;
 import com.letsblog.common.client.ActorProfile;
 import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.client.SyncServiceClientErrorException;
@@ -47,7 +48,8 @@ class CurrentActorServiceTest {
     @DisplayName("有効なユーザーは認証済みと判定する")
     void 有効なユーザー() {
         when(request.getHeader(HttpHeaders.AUTHORIZATION)).thenReturn("Bearer token");
-        when(identityClient.fetchProfile("Bearer token")).thenReturn(new ActorProfile(1L, "user"));
+        when(identityClient.lookupProfile("Bearer token"))
+                .thenReturn(Optional.of(new ActorProfile(1L, "user")));
 
         assertThat(service().isAuthenticated()).isTrue();
     }
@@ -55,18 +57,34 @@ class CurrentActorServiceTest {
     /**
      * identity-serviceが無効化ユーザーに対して403を返す状態を再現する。
      * #816以前はJWTのsubしか見ていなかったため、この状況でもtrueを返していた。
+     *
+     * <p>#829 で {@code IdentityClient#lookupProfile} が 401/403 を
+     * {@link Optional#empty()} へ畳むようになったため、<b>例外ではなく false</b> が正解
+     * (無効化ユーザーは「操作者なし」であって、identity-serviceの障害ではない)。
+     * このテストは #829 以前の期待値のまま残っており、develop で失敗していた(issue #906)。
      */
     @Test
-    @DisplayName("無効化ユーザー(identityが403)は認証済みと判定しない")
+    @DisplayName("無効化ユーザー(identityが401/403)は認証済みと判定しない")
     void 無効化ユーザー() {
         when(request.getHeader(HttpHeaders.AUTHORIZATION)).thenReturn("Bearer token");
-        when(identityClient.fetchProfile("Bearer token")).thenThrow(
-                new SyncServiceClientErrorException(
-                        "identity-service", "http://identity:8080", "GET /api/identity/me", 403, "Forbidden",
-                        null));
+        when(identityClient.lookupProfile("Bearer token")).thenReturn(Optional.empty());
 
-        // identity-serviceへの問い合わせ失敗は「未認証」へ握り潰さず伝播させる設計
-        // (lookupProfileのJavadoc参照)。素通りしないことがここでの要点。
+        assertThat(service().isAuthenticated()).isFalse();
+    }
+
+    /**
+     * 無効化(401/403)と違い、<b>identity-serviceの障害</b>は「未認証」へ握り潰さず伝播させる。
+     * 静かに false へ縮退させると、認証チェックが素通りする方向の不具合を生みかねないため。
+     */
+    @Test
+    @DisplayName("identity-serviceの障害は未認証へ縮退させず伝播させる")
+    void identity障害() {
+        when(request.getHeader(HttpHeaders.AUTHORIZATION)).thenReturn("Bearer token");
+        when(identityClient.lookupProfile("Bearer token")).thenThrow(
+                new SyncServiceClientErrorException(
+                        "identity-service", "http://identity:8080", "GET /api/identity/me", 500,
+                        "Internal Server Error", null));
+
         assertThatThrownBy(() -> service().isAuthenticated())
                 .isInstanceOf(IdentityServiceUnavailableException.class);
     }

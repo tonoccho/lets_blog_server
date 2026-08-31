@@ -16,15 +16,14 @@ import org.junit.jupiter.api.Test;
  */
 class AuthorizationCoverageTest {
 
-    /** 現時点で認可チェックを持たないエンドポイント(issue #830 時点)。
-     * 減らせたらこのリストからも消すこと(残したままだとテストが教えてくれる)。 */
-    private static final Set<String> KNOWN_UNAUTHORIZED = Set.of(
-            // 残る2件は投稿の一覧・参照。「自分がアクセスできるサイトの投稿だけ」に絞る必要があり、
-            // その判定材料である project_users は legacy-api に残っている(ADR-0004によりクロス
-            // スキーマ参照不可)。project/site の一覧系(#830)と同じ理由で、#583 で project_users が
-            // project-service へ移った後にリポジトリ側の絞り込みとして実装する。
-            "PostController#list",
-            "PostController#lookupBySlug");
+    /**
+     * content-service に認可チェックの無いエンドポイントは残っていない(issue #830)。
+     *
+     * <p>最後まで残っていた {@code PostController#list} / {@code #lookupBySlug} は、
+     * legacy-api の内部ブリッジへ {@code users/{userId}/site-ids} を足して
+     * <b>操作者が所属するプロジェクトのサイトの投稿だけ</b>に絞り込んだ。admin は全件。
+     */
+    private static final Set<String> KNOWN_UNAUTHORIZED = Set.of();
 
     @Test
     @DisplayName("認可チェックの無いエンドポイントが増えていない(issue #830)")

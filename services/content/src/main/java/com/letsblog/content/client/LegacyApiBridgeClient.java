@@ -158,6 +158,27 @@ public class LegacyApiBridgeClient {
         }
     }
 
+    /**
+     * 操作者がアクセスできるサイトのID一覧(issue #830)。
+     *
+     * <p>{@code PostController#list} / {@code #lookupBySlug}が「自分が所属するプロジェクトの
+     * サイトの投稿だけ」に絞るために使う。content-serviceは{@code project_users}も
+     * {@code projects}も持たないため、両方を引けるlegacy-apiで解決してもらう。
+     */
+    public List<Long> accessibleSiteIds(Long userId, String bearerToken) {
+        try {
+            Long[] result = restClient.get()
+                    .uri("/api/internal/content/users/{userId}/site-ids", userId)
+                    .headers(headers -> setAuthorization(headers, bearerToken))
+                    .retrieve()
+                    .body(Long[].class);
+            return result == null ? List.of() : List.of(result);
+        } catch (RestClientException e) {
+            throw new IdentityServiceUnavailableException(
+                    "legacy-apiのアクセス可能サイト一覧呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+    }
+
     public record SiteSummary(Long id, String siteKey, String name) {
     }
 
