@@ -2,6 +2,8 @@ package com.letsblog.media.controller;
 
 import com.letsblog.media.client.CmsBridgeClient;
 import com.letsblog.media.client.MediaUploadResult;
+import com.letsblog.media.service.AdminAuthorizationService;
+import com.letsblog.media.service.ForbiddenException;
 import com.letsblog.media.service.ImageResizeService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
@@ -19,6 +21,9 @@ import java.io.ByteArrayOutputStream;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -34,11 +39,13 @@ class MediaControllerTest {
     private CmsBridgeClient cmsBridgeClient;
     @Mock
     private HttpServletRequest request;
+    @Mock
+    private AdminAuthorizationService adminAuthorizationService;
 
     private final ImageResizeService imageResizeService = new ImageResizeService();
 
     private MediaController controller() {
-        return new MediaController(cmsBridgeClient, imageResizeService, request);
+        return new MediaController(cmsBridgeClient, imageResizeService, request, adminAuthorizationService);
     }
 
     @Test
@@ -124,5 +131,34 @@ class MediaControllerTest {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         ImageIO.write(image, "jpg", out);
         return out.toByteArray();
+    }
+
+    // ---- issue #830 ----
+
+    @Test
+    void upload_サイトが属するプロジェクトのIDで認可判定を行う() throws Exception {
+        when(request.getHeader(HttpHeaders.AUTHORIZATION)).thenReturn("Bearer token-abc");
+        when(cmsBridgeClient.resolveProjectIdBySiteKey("main", "Bearer token-abc")).thenReturn(7L);
+        when(cmsBridgeClient.uploadMedia(any(), anyString(), anyString(), any(), any()))
+                .thenReturn(new MediaUploadResult("1", "https://example.com/media/1.jpg"));
+
+        controller().upload("main", new MockMultipartFile(
+                "file", "a.jpg", "image/jpeg", renderJpeg(10, 10)));
+
+        verify(adminAuthorizationService).requireProjectMemberOrAdminForResource(7L);
+    }
+
+    @Test
+    void upload_プロジェクトメンバーでなければCMSへ書き込まない() {
+        // CMSのメディアライブラリへ直接書き込むので、誰でも通してはいけない(issue #830)。
+        when(request.getHeader(HttpHeaders.AUTHORIZATION)).thenReturn("Bearer token-abc");
+        when(cmsBridgeClient.resolveProjectIdBySiteKey("main", "Bearer token-abc")).thenReturn(7L);
+        doThrow(new ForbiddenException("メンバーではありません"))
+                .when(adminAuthorizationService).requireProjectMemberOrAdminForResource(7L);
+
+        assertThrows(ForbiddenException.class, () -> controller().upload("main", new MockMultipartFile(
+                "file", "a.jpg", "image/jpeg", new byte[] {1, 2, 3})));
+
+        verify(cmsBridgeClient, never()).uploadMedia(any(), anyString(), anyString(), any(), any());
     }
 }

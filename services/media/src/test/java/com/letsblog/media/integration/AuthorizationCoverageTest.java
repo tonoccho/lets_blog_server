@@ -13,20 +13,13 @@ import org.junit.jupiter.api.Test;
 class AuthorizationCoverageTest {
 
     /**
-     * media-service に残る唯一の無認可エンドポイント(issue #830)。
+     * media-service に認可チェックの無いエンドポイントは残っていない(issue #830)。
      *
-     * <p>{@code MediaController#upload} は {@code site} キーで指定した CMS のメディアライブラリへ
-     * 直接ファイルをアップロードする。<b>サイトが属するプロジェクトのメンバーに限定すべきだが、
-     * media-service には site キーからプロジェクトを引く手段が無い</b>
-     * (publishing-service の {@code /api/internal/publishing/**} は {@code sites/{site}/media} と
-     * {@code projects/{projectId}/media-scan}・{@code media/{mediaId}} しか公開しておらず、
-     * site→project の逆引きが無い)。publishing 側にブリッジを足す変更を伴うため、
-     * このスライスのスコープからは外した。
-     *
-     * <p>ダイアグラム・生成画像の12件は {@code AdminAuthorizationService} に
-     * {@code requireProjectMemberOrAdmin} を追加して塞いだ。
+     * <p>最後まで残っていた {@code MediaController#upload} は、publishing-service の内部ブリッジへ
+     * {@code sites/{site}/project-id} を足してサイトキーからプロジェクトを逆引きできるようにし、
+     * {@code requireProjectMemberOrAdminForResource} で塞いだ。
      */
-    private static final Set<String> KNOWN_UNAUTHORIZED = Set.of("MediaController#upload");
+    private static final Set<String> KNOWN_UNAUTHORIZED = Set.of();
 
     @Test
     @DisplayName("認可チェックの無いエンドポイントが増えていない(issue #830)")

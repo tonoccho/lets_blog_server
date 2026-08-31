@@ -72,6 +72,24 @@ public class CmsMediaBridgeController {
         }
     }
 
+    /** サイトが属するプロジェクトのID(いずれの環境にも紐付いていなければnull)。 */
+    public record SiteProjectIdBridgeResponse(Long projectId) {
+    }
+
+    /**
+     * サイトキーからプロジェクトIDを逆引きする(issue #830)。
+     *
+     * <p>media-serviceの{@code MediaController#upload}が、アップロード先サイトの属する
+     * プロジェクトのメンバーかどうかを判定するために呼ぶ。media-serviceはサイトを所有しておらず
+     * (所有権はproject-service、#577 stage2)、この逆引きを自前でできない。
+     * publishing-serviceは{@code SiteService#resolveProjectId}で既に解決できるため、
+     * 同じ内部ブリッジ上で提供する。
+     */
+    @GetMapping("/api/internal/publishing/sites/{site}/project-id")
+    public SiteProjectIdBridgeResponse siteProjectId(@PathVariable String site) {
+        return new SiteProjectIdBridgeResponse(siteService.resolveProjectId(site));
+    }
+
     @GetMapping("/api/internal/publishing/projects/{projectId}/media-scan")
     public MediaGcScanBridgeResponse scanMedia(@PathVariable Long projectId, @RequestParam String environment) {
         Project project = getProject(projectId);

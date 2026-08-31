@@ -3,6 +3,7 @@ package com.letsblog.media.controller;
 import com.letsblog.media.ai.AiServiceException;
 import com.letsblog.media.client.CmsBridgeClient;
 import com.letsblog.media.client.MediaUploadResult;
+import com.letsblog.media.service.AdminAuthorizationService;
 import com.letsblog.media.service.ImageResizeService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpHeaders;
@@ -27,16 +28,22 @@ public class MediaController {
     private final CmsBridgeClient cmsBridgeClient;
     private final ImageResizeService imageResizeService;
     private final HttpServletRequest request;
+    private final AdminAuthorizationService adminAuthorizationService;
 
     public MediaController(CmsBridgeClient cmsBridgeClient, ImageResizeService imageResizeService,
-            HttpServletRequest request) {
+            HttpServletRequest request, AdminAuthorizationService adminAuthorizationService) {
         this.cmsBridgeClient = cmsBridgeClient;
         this.imageResizeService = imageResizeService;
         this.request = request;
+        this.adminAuthorizationService = adminAuthorizationService;
     }
 
     @PostMapping(value = "/api/media/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public MediaUploadResult upload(@RequestParam("site") String site, @RequestPart("file") MultipartFile file) {
+        // CMSのメディアライブラリへ直接書き込むので、サイトが属するプロジェクトのメンバー
+        // (またはadmin)に限定する(issue #830)。ファイルを読む前に判定する。
+        adminAuthorizationService.requireProjectMemberOrAdminForResource(
+                cmsBridgeClient.resolveProjectIdBySiteKey(site, bearerToken()));
         try {
             byte[] bytes = imageResizeService.stripMetadata(file.getBytes(), file.getContentType());
             return cmsBridgeClient.uploadMedia(

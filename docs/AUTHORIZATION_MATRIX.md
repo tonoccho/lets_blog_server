@@ -327,13 +327,13 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 | | 件数 |
 |---|---|
 | 総エンドポイント | 278 |
-| **認可なし(内部ブリッジを除く)** | **5**(#830 の初回計測時は 56) |
+| **認可なし(内部ブリッジを除く)** | **4**(#830 の初回計測時は 56) |
 
 サービス別の内訳:
 
 | サービス | 認可なし | 内容 |
 |---|---|---|
-| media | 1 | `MediaController#upload`(下記参照) |
+| **media** | **0** | #830 で解消 |
 | **ai** | **0** | #830 で解消。下記「解消済み」参照 |
 | project | 2 | `ProjectController#list`、`SiteController#list`(いずれも一覧。下記参照) |
 | content | 2 | `PostController#list` / `#lookupBySlug`(いずれも一覧・参照。下記参照) |
@@ -375,12 +375,7 @@ DBもコンテナも要らないため、MySQL が未公開の環境でも実行
 
 ### 既知の要対応(優先度順)
 
-1. **`media/MediaController#upload`** — `site` キーで指定した CMS のメディアライブラリへ
-   直接ファイルをアップロードする。サイトが属するプロジェクトのメンバーに限定すべきだが、
-   media-service には site キーからプロジェクトを引く手段が無い(publishing-service の
-   `/api/internal/publishing/**` に site→project の逆引きが無い)。publishing 側へ
-   ブリッジを足す変更が要る
-2. **一覧系 4件** — `project/ProjectController#list`、`project/SiteController#list`、
+1. **一覧系 4件** — `project/ProjectController#list`、`project/SiteController#list`、
    `content/PostController#list` / `#lookupBySlug`。いずれも「自分がアクセスできる分だけ返す」
    絞り込みが要り、判定材料の `project_users` が legacy-api に残っている(下記「一覧系を残している理由」)
 
@@ -525,6 +520,14 @@ media にも追加し、`AdminAuthorizationService#requireProjectMemberOrAdmin` 
   本来は「操作者が所属するプロジェクトの分だけ」返すべきだが、所属プロジェクトの一覧を引く手段が
   media-service に無い(内部ブリッジは `isProjectMember` だけ)。#583 の後に絞り込みへ置き換える
 
+**`media/MediaController#upload`(#830)** — `site` キーで指定した CMS のメディアライブラリへ
+直接ファイルをアップロードするため、**認証済みなら誰でも任意サイトへ書き込めた**。
+
+media-service はサイトを所有していない(所有権は project-service、#577 stage2)ので
+site→project の逆引きを自前でできなかった。publishing-service は `SiteService#resolveProjectId`
+で既に解決できるため、同じ内部ブリッジ上に
+`GET /api/internal/publishing/sites/{site}/project-id` を1本足し、
+`requireProjectMemberOrAdminForResource` で塞いだ。
 `legacy-api/AuthController` の2件は初回セットアップ導線で **`PUBLIC_PATHS` に含まれる公開パス**、
 `HealthController#health` も同様。これらは「認可不要」が正しく、
 #583 で legacy-api を解体する際に移設先で同じ扱いにする。
