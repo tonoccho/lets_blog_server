@@ -39,20 +39,51 @@ If any precondition is not met, do not create the Pull Request.
 
 # 1. Determine the Pull Request Range
 
-Determine:
+**The base branch is `develop`. Never `main`.**
 
-- Base branch
-- Current working branch
+`develop` is this repository's integration branch and GitHub's default branch.
+`main` is the **release branch** — it is updated only by a deliberate release
+(`develop` → `main`), never by an Issue's Pull Request.
 
-The Pull Request should normally be:
+Pass it explicitly:
 
-`<working-branch>` → `<base-branch>`
+```bash
+gh pr create --base develop --head <working-branch> ...
+```
+
+`--base develop` is required even though `develop` is the default. Omitting it works until
+someone's local `gh` is configured differently, or a branch was cut from `main` — and the
+failure is silent: the PR is created against `main` and looks normal.
+
+The Pull Request should be:
+
+`<working-branch>` → `develop`
 
 For example:
 
-`feature/123-add-tag-search` → `main`
+`feature/123-add-tag-search` → `develop`
 
 Confirm that the current branch is not the base branch.
+
+## Before creating the PR, verify the base (issue #839)
+
+```bash
+# 1. The working branch must be based on develop
+git merge-base --is-ancestor origin/develop HEAD && echo "OK: developから派生している"
+
+# 2. After creating it, confirm the PR's base really is develop
+gh pr view <number> --json baseRefName -q .baseRefName   # => develop
+```
+
+**Why this check exists.** In #839, two Issue PRs were created with `base=main` by mistake.
+Because their branches were cut from `develop`, squash-merging them into `main` pulled in
+**the entire 159-commit difference** — one squash showed
+`1744 files changed, 85710 insertions(+), 102813 deletions(-)`. `main` stopped pointing at the
+released version, and the mistake was invisible in the PR itself: the diff looked enormous but
+the PR page gave no warning.
+
+An unexpectedly huge diff on what should be a small change is the symptom. If you see it,
+**check the base before merging.**
 
 ---
 
