@@ -5,11 +5,20 @@ on:
     branches: [main, develop]
     paths:
       - 'web/**'
+      # issue #810: web は tsconfig の paths で "@api-client": ["../sdk/api-client/src"] を
+      # 参照しており、sdk/api-client に型レベルで依存している。sdk 側の変更でこのワークフローが
+      # 起動しないと、web の型エラーを CI で検知できない(#739 で実際に踏み、17件の型エラーが
+      # CI をすり抜けた)。
+      - 'sdk/**'
+      - 'orval.config.js'
       - '.github/workflows/frontend-test.yml'
   pull_request:
     branches: [main, develop]
     paths:
       - 'web/**'
+      - 'sdk/**'
+      - 'orval.config.js'
+      - '.github/workflows/frontend-test.yml'
 
 jobs:
   test:
@@ -28,6 +37,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
         working-directory: web
+
+      # issue #810: sdk/api-client 自体の型チェック。web の型チェックは path mapping 経由で
+      # index.ts から到達できるファイルしか見ないため、再エクスポートされていない生成物は
+      # どのビルドでも型検査されない。ここで include 指定の tsconfig を使って src 配下を全て見る。
+      - name: Install sdk/api-client dependencies
+        run: npm ci
+        working-directory: sdk/api-client
+
+      - name: Type check sdk/api-client
+        run: npm run typecheck
+        working-directory: sdk/api-client
 
       - name: Run linter
         run: npm run lint
