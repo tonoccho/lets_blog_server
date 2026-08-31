@@ -1,0 +1,47 @@
+# E2E用のLLMスタブ(issue #843)。
+#
+# custom-tag-generation.spec.ts の「正常系: 生成から自動保存までの完全フロー」は、
+# .env の LLM_API_KEY がプレースホルダ(changeme_llm_api_key)のままだと生成が必ず失敗し、
+# test.skip に落ちて恒常的に未検証だった。この spec が検証したいのは
+# 「生成結果がUIとDBにどう反映されるか」であってLLMの生成品質ではないため、
+# 実キー不要で決定的なスタブへ向ける。
+#
+# 使い方(E2E実行時のみ、このオーバーライドを重ねる):
+#   docker compose -f docker-compose.yml -f docker-compose.e2e-llm-stub.yml up -d
+#
+# 実効のLLM接続設定は legacy-api の /api/internal/ai/llm-config 経由で
+# ai-service へ渡る(RemoteLlmConfigProvider)。したがって向き先を変えるのは
+# api コンテナの LLM_BASE_URL でよい。
+#
+# 注意: システム設定(DB)で baseUrl を上書きしている環境では、DB側が優先される
+# (AppSettingService が正)。その場合はシステム設定画面の値を空にしてから使うこと。
+
+services:
+  llm-stub:
+    image: node:22-alpine
+    container_name: lbs-e2e-llm-stub
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./e2e-llm-stub:/app:ro
+    command: ["node", "server.js"]
+    environment:
+      PORT: "8080"
+    networks:
+      - lbs-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    environment:
+      # OpenAI互換の Chat Completions を返すスタブへ向ける。
+      # LlmClient は {baseUrl}/chat/completions を叩く(パスはクライアント側が付ける)。
+      LLM_BASE_URL: http://llm-stub:8080
+      # スタブは Authorization を検証しないが、未設定だと呼び出し前に弾かれる経路があるため値を入れる。
+      LLM_API_KEY: e2e-stub-key
+    depends_on:
+      llm-stub:
+        condition: service_healthy
