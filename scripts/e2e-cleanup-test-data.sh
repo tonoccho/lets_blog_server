@@ -141,7 +141,8 @@ run_sql() {
 }
 
 # 対象E2Eサイトのうち、実体(wordpressコンテナ内のディレクトリと専用DB)を持つものを
-# "wp_slug<TAB>wp_db_name" の形式で列挙する。
+# "wp_slug<TAB>wp_db_name" の形式で列挙する。失敗時は非0で返る(pipefailによりdocker execの
+# 失敗がそのままこの関数の終了ステータスになる)。呼び出し側は必ず終了ステータスを見ること。
 list_managed_sites() {
   echo "SELECT wp_slug, wp_db_name FROM lbs_project.sites
         WHERE (${SITE_FILTER}) AND managed_wordpress = 1
@@ -155,7 +156,7 @@ list_managed_sites() {
 # (消した後ではwp_slug/wp_db_nameが分からなくなる)。
 deprovision_managed_sites() {
   local mode="$1" # count | delete
-  local slug db_name matched=0 failed=0
+  local slug db_name rows matched=0 failed=0
 
   if ! docker inspect "$WORDPRESS_CONTAINER" >/dev/null 2>&1; then
     echo "警告: コンテナ ${WORDPRESS_CONTAINER} が見つからないため、ManagedWordPressの実体は解放しません" >&2
@@ -164,6 +165,14 @@ deprovision_managed_sites() {
   if [ -z "${WP_PROVISION_TOKEN:-}" ]; then
     echo "警告: .env の WP_PROVISION_TOKEN が未設定のため、ManagedWordPressの実体は解放しません" >&2
     return 0
+  fi
+
+  # プロセス置換(done < <(...))は供給側コマンドの終了ステータスをシェルが一切見ない
+  # (set -euo pipefailの対象外)。一覧取得が失敗しても0件と区別できず、警告も出ないまま
+  # DB行の削除へ進んでしまうため、コマンド置換で受けて終了ステータスを必ず確認する。
+  if ! rows="$(list_managed_sites)"; then
+    echo "エラー: ManagedWordPressサイトの一覧取得に失敗しました" >&2
+    return 1
   fi
 
   while IFS=$'\t' read -r slug db_name; do
@@ -198,7 +207,7 @@ deprovision_managed_sites() {
       echo "        -H \"X-Provision-Token: \$(grep '^WP_PROVISION_TOKEN=' .env | cut -d= -f2-)\" \\" >&2
       echo "        -d '{\"slug\":\"${slug}\",\"dbName\":\"${db_name}\"}'" >&2
     fi
-  done < <(list_managed_sites)
+  done <<< "$rows"
 
   if [ "$matched" -eq 0 ]; then
     echo "  (対象なし)"
@@ -210,13 +219,21 @@ deprovision_managed_sites() {
 
 if [ "$APPLY" -eq 1 ]; then
   echo "ManagedWordPressの実体を解放します"
-  deprovision_managed_sites delete
+  # 解放対象を確定できなかった場合はDB行を消さずに中断する。行を消すとwp_slug/wp_db_nameが
+  # 失われ、実体を手動で解放する手段も無くなるため(issue #765)。
+  if ! deprovision_managed_sites delete; then
+    echo "エラー: 解放対象を確定できなかったため、DB行の削除は行いません。" >&2
+    echo "       原因(mysqlへの接続等)を解消してから再実行してください。" >&2
+    exit 1
+  fi
   echo "E2Eテストデータを全スキーマから削除します"
   build_sql delete | run_sql
   echo "削除が完了しました。"
 else
   echo "ドライラン(何も削除しません)。実行するには --yes を付けてください。"
   echo "解放対象のManagedWordPress実体:"
-  deprovision_managed_sites count
+  # ドライランでは何も削除しないため、一覧取得に失敗しても(関数が警告を出した上で)
+  # DB行の件数表示までは続ける。
+  deprovision_managed_sites count || true
   build_sql count | run_sql
 fi

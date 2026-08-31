@@ -34,10 +34,6 @@ test.describe('Site Registration and Connection Flow', () => {
 
   let fixtureSiteKey: string;
   let fixtureSiteName: string;
-  // 「構築しました。」を確認できた場合のみtrueにする。afterAllは(構築の途中でbeforeAllが
-  // 失敗しても実体が残りうるため)このフラグに関わらず削除を試みるが、削除に失敗したときに
-  // それをテスト失敗として報告するかどうかの判断にこのフラグを使う(issue #765)。
-  let fixtureSiteCreated = false;
 
   test.beforeAll(async ({ browser }) => {
     // WordPressの自動構築は数分かかりうるため、このフック自体のタイムアウトを
@@ -68,7 +64,6 @@ test.describe('Site Registration and Connection Flow', () => {
       // WordPressの自動構築は完了まで数分かかる場合がある(ManagedWordPressForm.tsx参照)。
       await page.locator('button:has-text("構築する")').click();
       await expect(page.getByText('構築しました。')).toBeVisible({ timeout: 240000 });
-      fixtureSiteCreated = true;
     } finally {
       await context.close();
     }
@@ -85,6 +80,12 @@ test.describe('Site Registration and Connection Flow', () => {
 
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
+    // 一覧にフィクスチャ行が実在し、実際に削除を試みたかどうか。
+    // 「解放対象が無い(=何もしなくてよい)」と「削除を試みて失敗した(=孤児が残る)」を
+    // 区別するために使う。beforeAllが『構築しました。』を確認できたかどうかでは判断しない
+    // ——構築自体は成功していて確認待ちだけがタイムアウトした場合(issue #765のProblem 1)、
+    // 孤児が最も残りやすいのに失敗として報告されなくなるため。
+    let deletionAttempted = false;
     try {
       await loginAsAdmin(page);
       await page.goto('/sites');
@@ -95,6 +96,7 @@ test.describe('Site Registration and Connection Flow', () => {
         return;
       }
 
+      deletionAttempted = true;
       page.once('dialog', (dialog) => dialog.accept());
       await fixtureRow.locator('button:has-text("削除")').click();
       // ManagedWordPressの削除はコンテナ内のファイル削除+専用DBのDROPを伴い、30秒では
@@ -109,9 +111,10 @@ test.describe('Site Registration and Connection Flow', () => {
           'ManagedWordPressの実体(wordpressコンテナ内のファイル・専用DB)が残っている可能性があります。' +
           '`./scripts/e2e-cleanup-test-data.sh --yes` で解放してください。'
       );
-      // 構築に成功していた場合のみ失敗として扱う(beforeAllが構築前に失敗したケースは、
-      // そちらのエラーが既に報告されているため、後始末の失敗を二重に報告しない)。
-      if (fixtureSiteCreated) {
+      // 実在する行に対して削除を試みて失敗した = 孤児が残ったということなので、失敗として報告する。
+      // 行に到達する前(ログイン・遷移)で落ちた場合は、その原因は各テスト側で既に失敗として
+      // 報告されているため、ログのみに留めて二重に報告しない。
+      if (deletionAttempted) {
         throw error;
       }
     } finally {
