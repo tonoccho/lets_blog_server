@@ -135,6 +135,51 @@ MigrationResult result = job.run("legacy-sites-to-project-service", (targetConne
 
 具体的などのテーブルをどう移すかは、各サービス抽出Issue側でこの基盤を使って実装する。
 
+### identity-service の移行手順(issue #786)
+
+identity-service は #561 の受入基準「`lbs_identity` を Flyway で管理する」が**未達のままクローズ**
+されており、分割前の `lets_blog` スキーマを参照し続けていた。そのため旧スキーマの
+`users` / `roles` / `role_permissions` / `user_roles` / `project_users` / `user_site_authors` は
+「移行漏れの残骸」ではなく**現に参照されている生きたテーブル**である。
+旧スキーマを削除・アーカイブする(#785 / #583)前に、必ず本移行を済ませること。
+
+**この移行はサービス停止中、またはアクセスの無い時間帯に行うこと。**
+移行後も legacy-api が同じ `users` を参照するため両スキーマにデータが並存する。
+その間にどちらかへ書き込みが入ると乖離する(legacy-api 側の参照を断つのは #583 のスコープ)。
+
+```bash
+# 1. lbs_identity に空の6テーブルを作る(identity-service を起動すると Flyway V1 が適用される)
+docker compose up -d identity
+docker logs lbs-identity | grep -i flyway     # "Successfully applied 1 migration" を確認
+
+# 2. データを移す(root 権限が必要。クロススキーマINSERTのためアプリのFlywayでは実行できない)
+docker exec -i lbs-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" \
+  < scripts/migrate-identity-tables-to-lbs-identity.sql
+
+# 3. スクリプト末尾の件数突合で、6テーブルすべて source_count = target_count を確認する
+```
+
+件数突合の出力例:
+
+```
++-------------------+--------------+--------------+
+| table_name        | source_count | target_count |
++-------------------+--------------+--------------+
+| roles             |            3 |            3 |
+| users             |            2 |            2 |
+| role_permissions  |           30 |           30 |
+| user_roles        |            2 |            2 |
+| project_users     |            0 |            0 |
+| user_site_authors |            2 |            2 |
++-------------------+--------------+--------------+
+```
+
+4. `docker-compose.yml` の identity-service は既に `lbs_identity` を指しているので、
+   移行後に `docker compose up -d identity` で再作成する。
+5. ログイン・ユーザー管理・プロジェクトメンバー管理が動作することを確認する。
+6. 旧スキーマ側の6テーブルの削除は **#583(legacy-api 解体)のスコープ**。legacy-api が
+   まだ `users` を参照しているため、本Issueの時点では削除しない。
+
 ## 移行の検証手順
 
 各サービス抽出Issueでデータ移行を行った際は、次の2点を確認する。
