@@ -327,13 +327,13 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 | | 件数 |
 |---|---|
 | 総エンドポイント | 278 |
-| **認可なし(内部ブリッジを除く)** | **48**(#830 の初回計測時は 56) |
+| **認可なし(内部ブリッジを除く)** | **43**(#830 の初回計測時は 56) |
 
 サービス別の内訳:
 
 | サービス | 認可なし | 内容 |
 |---|---|---|
-| media | 18 | `DiagramController`(6)、`GeneratedImageController`(6)、`RenderController`(3)、`ComfyUiCheckpointController`(2)、`MediaController`(1) |
+| media | 13 | `DiagramController`(6)、`GeneratedImageController`(6)、`MediaController#upload`(1) |
 | ai | 10 | `AiController`(5)、`GenerationJobController`(4)、`InternalAiGenerationController`(1) |
 | project | 2 | `ProjectController#list`、`SiteController#list`(いずれも一覧。下記参照) |
 | content | 6 | `MetadataController`(2)、`PostController`(2)、`ContentCacheController`(1)、`CustomTagController#validate`(1) |
@@ -375,7 +375,10 @@ DBもコンテナも要らないため、MySQL が未公開の環境でも実行
 
 ### 既知の要対応(優先度順)
 
-1. **`media` の18件** — 画像・ダイアグラムの作成/更新/削除を含む
+1. **`media` の13件** — 画像・ダイアグラムの作成/更新/削除を含む。
+   `Diagram` / `GeneratedImage` は `projectId` を持つのでプロジェクト単位で絞れるはずだが、
+   media-service にはプロジェクトメンバー判定のブリッジがまだ無い(ai / content / analytics /
+   publishing は持っている)。`MediaController#upload` も同様に site キーからの解決が要る
 2. **`ai` の10件** — 生成系。コスト面の影響もある
 3. **`content` の6件 / `platform` の5件 / `log-writer` の2件**
 
@@ -413,6 +416,25 @@ DBもコンテナも要らないため、MySQL が未公開の環境でも実行
   (`extension/src/apiClient.ts`)ため、admin 限定にすると非 admin の拡張利用が壊れる
 
 #583 で `project_users` が project-service へ移った後に、リポジトリ側の絞り込みとして実装する。
+
+**`media` の5件(#830)** — `ComfyUiCheckpointController#install` / `#delete` と
+`RenderController` の3件。いずれも**認可を足すのではなく、外部から到達できないことを確定させた**。
+
+`ComfyUiCheckpointController` は元から gateway のルート表に無く、legacy-api の
+`MediaComfyUiClient` が docker network 越しに直接呼ぶだけだった(クラスの Javadoc にもそう書かれており、
+`RouteControllerContractTest` の `NON_GATEWAY_ROUTED_PATHS` にも載っている)。
+
+`RenderController` の3件は **gateway の media ルートに `/api/render/**` が載っていた**ため、
+有効な JWT があれば外部から直接叩けた。呼び出し元はいずれも content-service /
+publishing-service の `MediaRenderClient` で、`app.media-service-uri` へコンテナ間で直接呼ぶ経路しか
+持たない(web / extension からの利用は無いことをリポジトリ全体の検索で確認した)。
+そこで **gateway のルート表から `/api/render/**` を外した**。
+
+とくに `POST /api/render/penpot/design-file` は、サービスアカウント
+(`PENPOT_SERVICE_EMAIL`)で共有 Penpot ワークスペースにファイルを作る。ルートに載っていた間は
+認証済みユーザーなら誰でも無制限に作成できた。
+
+5件とも各メソッドの Javadoc に `認可不要:` マーカーで理由を記録した。
 
 `legacy-api/AuthController` の2件は初回セットアップ導線で **`PUBLIC_PATHS` に含まれる公開パス**、
 `HealthController#health` も同様。これらは「認可不要」が正しく、

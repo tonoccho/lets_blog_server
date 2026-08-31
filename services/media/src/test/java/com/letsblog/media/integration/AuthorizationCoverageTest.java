@@ -19,8 +19,9 @@ class AuthorizationCoverageTest {
     /** 現時点で認可チェックを持たないエンドポイント(issue #830 時点)。
      * 減らせたらこのリストからも消すこと(残したままだとテストが教えてくれる)。 */
     private static final Set<String> KNOWN_UNAUTHORIZED = Set.of(
-            "ComfyUiCheckpointController#install",
-            "ComfyUiCheckpointController#delete",
+            // ComfyUiCheckpointController(2)とRenderController(3)は #830 で「認可不要」と判断し、
+            // 各メソッドのJavadocへ理由を記録した(gatewayのルート表に載っておらず外部から到達
+            // できない/呼び出し元のサービスが認可済み)。マーカーが効くのでこのリストからは外れる。
             "DiagramController#create",
             "DiagramController#list",
             "DiagramController#get",
@@ -33,10 +34,10 @@ class AuthorizationCoverageTest {
             "GeneratedImageController#updateTags",
             "GeneratedImageController#getImageFile",
             "GeneratedImageController#delete",
-            "MediaController#upload",
-            "RenderController#renderPlantUml",
-            "RenderController#renderRecharts",
-            "RenderController#createPenpotDesignFile");
+            // MediaController#upload は site キーからプロジェクトを解決してメンバー判定する必要が
+            // あるが、media-service にはプロジェクトメンバー判定のブリッジがまだ無い。
+            // Diagram/GeneratedImage の13件も同じ理由(entity は projectId を持っているが判定手段が無い)。
+            "MediaController#upload");
 
     @Test
     @DisplayName("認可チェックの無いエンドポイントが増えていない(issue #830)")

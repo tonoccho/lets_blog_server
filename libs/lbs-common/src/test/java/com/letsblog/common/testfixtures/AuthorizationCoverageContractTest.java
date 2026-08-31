@@ -80,4 +80,27 @@ class AuthorizationCoverageContractTest {
         Set<String> publishing = AuthorizationCoverageContract.currentUnauthorized("publishing");
         assertTrue(publishing.isEmpty(), "publishing に無認可エンドポイントが残っている: " + publishing);
     }
+
+    @Test
+    @DisplayName("注釈の上に置いた「認可不要:」マーカーが、そのメソッド自身の除外として効く")
+    void マーカーは直前のメソッドへずれない() {
+        // issue #830: @XxxMapping 区切りで分割していたため、注釈の上に書いた Javadoc が
+        // 「1つ手前のエンドポイントのブロック末尾」に入り、除外理由が別のメソッドに帰属していた。
+        // media の ComfyUiCheckpointController#install / #delete は2件とも Javadoc に
+        // マーカーを持つ。ずれが起きると後ろの1件だけが無認可として残る。
+        Set<String> media = AuthorizationCoverageContract.currentUnauthorized("media");
+        assertTrue(media.stream().noneMatch(e -> e.startsWith("ComfyUiCheckpointController#")),
+                "ComfyUiCheckpointController のマーカーが効いていない: " + media);
+    }
+
+    @Test
+    @DisplayName("コメント本文にパス(/api/render/**)を含んでもマーカーが効く")
+    void コメント内のスラッシュアスタリスクで開始位置を誤らない() {
+        // issue #830: lastIndexOf("/*") が本文中の "/api/render/**" の "/*" を拾い、
+        // コメントの途中をブロック開始と誤認していた。その結果、先頭行に書いた
+        // 「認可不要:」がブロックの外へ落ちて除外が効かなかった。
+        Set<String> media = AuthorizationCoverageContract.currentUnauthorized("media");
+        assertTrue(media.stream().noneMatch(e -> e.startsWith("RenderController#")),
+                "RenderController のマーカーが効いていない: " + media);
+    }
 }

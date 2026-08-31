@@ -146,9 +146,18 @@ public final class AuthorizationCoverageContract {
         while (mapping.find()) {
             starts.add(mapping.start());
         }
+        // ブロックの先頭は @XxxMapping そのものではなく、その直前に置かれた Javadoc/コメントまで
+        // 遡る(issue #830)。マーカーは注釈の上に書くのが自然だが、単純に @Mapping 区切りで
+        // 分割すると、そのコメントが「直前のエンドポイントのブロック末尾」に入ってしまい、
+        // 除外理由が1つ手前のメソッドに帰属する。認可の除外が別のメソッドへずれて効くのは
+        // セキュリティ上そのままにできない誤りなので、境界のほうを直す。
+        List<Integer> blockStarts = new ArrayList<>();
+        for (int start : starts) {
+            blockStarts.add(docCommentStart(source, start));
+        }
         for (int i = 0; i < starts.size(); i++) {
-            int from = starts.get(i);
-            int to = i + 1 < starts.size() ? starts.get(i + 1) : source.length();
+            int from = blockStarts.get(i);
+            int to = i + 1 < starts.size() ? blockStarts.get(i + 1) : source.length();
             String block = source.substring(from, to);
             if (AUTHORIZATION_CALL.matcher(block).find() || INTENTIONAL_MARKER.matcher(block).find()) {
                 continue;
@@ -176,6 +185,63 @@ public final class AuthorizationCoverageContract {
      * 認可済みとみなす」ため、そのサービスの<b>一部の</b>メソッドだけが認可している場合は
      * 見逃しうる。ラチェット(増やさないこと)の用途にはこの精度で足りると判断した。
      */
+
+    /**
+     * {@code index} の直前にある Javadoc / 行コメントの開始位置を返す(無ければ {@code index} のまま)。
+     * 空白・改行だけを挟んで連続するコメント行はすべて取り込む。
+     */
+    private static int docCommentStart(String source, int index) {
+        int cursor = index;
+        while (true) {
+            int scan = cursor - 1;
+            while (scan >= 0 && Character.isWhitespace(source.charAt(scan))) {
+                scan--;
+            }
+            if (scan < 1) {
+                return cursor;
+            }
+            if (source.charAt(scan) == '/' && source.charAt(scan - 1) == '*') {
+                int open = blockCommentOpen(source, scan - 1);
+                if (open < 0) {
+                    return cursor;
+                }
+                cursor = open;
+                continue;
+            }
+            int lineStart = source.lastIndexOf('\n', scan) + 1;
+            String line = source.substring(lineStart, scan + 1).trim();
+            if (line.startsWith("//")) {
+                cursor = lineStart;
+                continue;
+            }
+            return cursor;
+        }
+    }
+
+
+    /**
+     * {@code from} 以前にある「行頭の」ブロックコメント開始 {@code /*} を返す(無ければ -1)。
+     *
+     * <p>単純な {@code lastIndexOf("/*")} では、コメント本文に含まれるパス(例: {@code /api/render/**})
+     * の中の {@code /*} を拾ってしまい、コメントの途中を開始位置と誤認する。そうなると
+     * 「認可不要:」マーカーがブロックの外へ落ち、除外が効かない(issue #830)。
+     */
+    private static int blockCommentOpen(String source, int from) {
+        int search = from;
+        while (search >= 0) {
+            int open = source.lastIndexOf("/*", search);
+            if (open < 0) {
+                return -1;
+            }
+            int lineStart = source.lastIndexOf('\n', open) + 1;
+            if (source.substring(lineStart, open).isBlank()) {
+                return open;
+            }
+            search = open - 1;
+        }
+        return -1;
+    }
+
     private static Set<String> authorizingServicesIn(Path controllerFile) {
         Path serviceDir = controllerFile.getParent().getParent().resolve("service");
         Set<String> names = new LinkedHashSet<>();
