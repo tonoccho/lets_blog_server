@@ -16,7 +16,9 @@
 -- IncorrectResultSizeDataAccessException で落ちる。アプリ側の upsert は
 -- 「引いて無ければ作る」なので、同時実行で二重作成されうる。
 -- そこで NULL を実在しない ID (-1) へ畳んだ生成カラムを一意性の担保に使う。
--- projects.id は AUTO_INCREMENT で負値を取らないため -1 が実在の ID と衝突することはない。
+-- projects.id は AUTO_INCREMENT で採番されるため実運用で -1 になることはない。
+-- (AUTO_INCREMENT は明示的な負値の INSERT を禁止しないので DB 制約としての保証ではないが、
+--  Project エンティティは GenerationType.IDENTITY で、アプリからIDを明示指定する経路が無い)
 -- (custom_tags は素の UNIQUE のままで同じ穴を持つが、そちらの是正はこの Issue のスコープ外)
 
 -- FK を張ったまま MODIFY COLUMN すると InnoDB が制約を作り直そうとして
