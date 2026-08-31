@@ -37,6 +37,12 @@ jobs:
       gateway: ${{ steps.filter.outputs.gateway }}
       identity: ${{ steps.filter.outputs.identity }}
       content: ${{ steps.filter.outputs.content }}
+      ai: ${{ steps.filter.outputs.ai }}
+      analytics: ${{ steps.filter.outputs.analytics }}
+      media: ${{ steps.filter.outputs.media }}
+      platform: ${{ steps.filter.outputs.platform }}
+      project: ${{ steps.filter.outputs.project }}
+      publishing: ${{ steps.filter.outputs.publishing }}
     steps:
       - uses: actions/checkout@v7
 
@@ -85,6 +91,48 @@ jobs:
               - 'gradle/**'
               - 'gradlew'
               - 'services/content/**'
+            ai:
+              - 'libs/**'
+              - 'build.gradle'
+              - 'settings.gradle'
+              - 'gradle/**'
+              - 'gradlew'
+              - 'services/ai/**'
+            analytics:
+              - 'libs/**'
+              - 'build.gradle'
+              - 'settings.gradle'
+              - 'gradle/**'
+              - 'gradlew'
+              - 'services/analytics/**'
+            media:
+              - 'libs/**'
+              - 'build.gradle'
+              - 'settings.gradle'
+              - 'gradle/**'
+              - 'gradlew'
+              - 'services/media/**'
+            platform:
+              - 'libs/**'
+              - 'build.gradle'
+              - 'settings.gradle'
+              - 'gradle/**'
+              - 'gradlew'
+              - 'services/platform/**'
+            project:
+              - 'libs/**'
+              - 'build.gradle'
+              - 'settings.gradle'
+              - 'gradle/**'
+              - 'gradlew'
+              - 'services/project/**'
+            publishing:
+              - 'libs/**'
+              - 'build.gradle'
+              - 'settings.gradle'
+              - 'gradle/**'
+              - 'gradlew'
+              - 'services/publishing/**'
 
   test:
     needs: detect-changes
@@ -94,13 +142,20 @@ jobs:
       (matrix.service == 'log-writer' && needs.detect-changes.outputs.log-writer == 'true') ||
       (matrix.service == 'gateway' && needs.detect-changes.outputs.gateway == 'true') ||
       (matrix.service == 'identity' && needs.detect-changes.outputs.identity == 'true') ||
-      (matrix.service == 'content' && needs.detect-changes.outputs.content == 'true')
+      (matrix.service == 'content' && needs.detect-changes.outputs.content == 'true') ||
+      (matrix.service == 'ai' && needs.detect-changes.outputs.ai == 'true') ||
+      (matrix.service == 'analytics' && needs.detect-changes.outputs.analytics == 'true') ||
+      (matrix.service == 'media' && needs.detect-changes.outputs.media == 'true') ||
+      (matrix.service == 'platform' && needs.detect-changes.outputs.platform == 'true') ||
+      (matrix.service == 'project' && needs.detect-changes.outputs.project == 'true') ||
+      (matrix.service == 'publishing' && needs.detect-changes.outputs.publishing == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        service: [lbs-common, legacy-api, log-writer, gateway, identity, content]
+        service: [lbs-common, legacy-api, log-writer, gateway, identity, content,
+                  ai, analytics, media, platform, project, publishing]
 
     # legacy-api/content/identity/log-writerのテストがMySQLを使う(#570のスキーマ分離が完了する
     # までlegacy-apiは共有DBのまま。contentは#576でスキーマ分離済みの専用DB lbs_content_test、
@@ -154,13 +209,30 @@ jobs:
       # 各サービスの src/test/resources/application-test.yml が参照する
       # (ADR-0006: Testcontainersは使わず実MySQLに接続する)。identity / log-writer 分は
       # issue #772 で AuthorizationMatrixIntegrationTest を追加したときに足した。
+      #
+      # issue #790: DBを使わない lbs-common / gateway と、共有DB(lets_blog_test)を使う
+      # legacy-api 以外はすべて専用スキーマを持つ。列挙漏れを黙って通さないよう、
+      # case に該当しないサービスは明示的に失敗させる(マトリクスへ追加したのに
+      # スキーマを足し忘れると、DB接続エラーという分かりにくい形で落ちるため)。
       - name: Create service test schema
-        if: matrix.service == 'content' || matrix.service == 'identity' || matrix.service == 'log-writer'
+        if: >-
+          matrix.service != 'lbs-common' && matrix.service != 'gateway' && matrix.service != 'legacy-api'
         run: |
           case "${{ matrix.service }}" in
             content)    schema=lbs_content_test ;;
             identity)   schema=lbs_identity_test ;;
             log-writer) schema=lbs_log_test ;;
+            ai)         schema=lbs_ai_test ;;
+            analytics)  schema=lbs_analytics_test ;;
+            media)      schema=lbs_media_test ;;
+            platform)   schema=lbs_platform_test ;;
+            project)    schema=lbs_project_test ;;
+            publishing) schema=lbs_publishing_test ;;
+            *)
+              echo "テストスキーマの割り当てが未定義です: ${{ matrix.service }}" >&2
+              echo "マトリクスへサービスを追加したら、ここにも lbs_<service>_test を足すこと(issue #790)。" >&2
+              exit 1
+              ;;
           esac
           mysql -h 127.0.0.1 -P 3306 -u root -ptestpass -e "
             CREATE DATABASE IF NOT EXISTS ${schema} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
