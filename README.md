@@ -225,6 +225,7 @@ cd lets_blog_server
 # 1. 環境変数を設定
 cp .env.example .env
 vi .env   # パスワード・APIキー・暗号化キー・NEXTAUTH_SECRET等を変更
+bash scripts/check-env.sh   # .env が .env.example の全項目を満たしているか確認
 
 # 2. リバースプロキシ用の自己署名証明書を生成
 bash scripts/generate-certs.sh
