@@ -39,8 +39,9 @@ ADR-0008 と矛盾する記述も、挙動の変更と同じコミットで是�
 
 identity-service / log-writer が従来から行っていた、各コントローラーによる
 `CurrentActorService`/`AdminAuthorizationService`経由の手続き的チェック(JWTのsubクレームを読む)は
-そのまま残る。これは「認証済みなら誰でも到達できるエンドポイントが残る」という別の問題
-(後述の「既知のギャップ」)であり、#772 が復元したのはその手前にある一律の認証ゲートである。
+そのまま残る。これは「認証済みなら誰でも到達できるエンドポイントが残る」という別の問題で、
+#772 が復元したのはその手前にある一律の認証ゲートである。
+(その別の問題は #830 で解消した。後述の「認可チェックの網羅状況(issue #830)」を参照。)
 
 各サービスのエンドポイント単位の一覧は、上表の「対応する統合テスト」列が指す
 `AuthorizationMatrixIntegrationTest` の `allProtectedEndpoints()` が一次情報である
@@ -676,8 +677,10 @@ legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行して�
    処理が実行される前に例外が投げられる。
 
    **いずれのチェックも呼ばないエンドポイント**は、有効なJWTさえ持っていればロール・
-   プロジェクト所属に関わらず到達できる。これは既知のギャップであり、本Issueでは
-   修正せず、末尾の「既知のギャップ」節に事実として列挙するに留める。
+   プロジェクト所属に関わらず到達できる。#733 の時点ではこれを既知のギャップとして
+   末尾に列挙するに留めていたが、**#830 で全件の要否を決定し実装へ反映した**。
+   現在は「認可チェックの網羅状況(issue #830)」節と
+   `AuthorizationCoverageContract` の許可リスト(全10サービスで空)が一次情報である。
 
 ## 表の見方
 
@@ -1059,19 +1062,67 @@ platform-service所有(issue #693)。未認証401はplatform-serviceの`Security
 platform-service所有(issue #696)。未認証401はplatform-serviceの`SecurityConfig`が担う(#705)。
 移設直後は同SecurityConfigが全経路permitAllだったためAuthorizationヘッダーなしでも200で.vsixが
 取得できていた(#705の後退)。ロールチェックが無く「ログイン済みなら誰でも取得可能」である点は
-issue #705でも変更しておらず、下記「既知のギャップ」に残る。
+issue #705でも変更しておらず、下記「既知のギャップ」に残っていた。
+#830 で `VscodeExtensionController` に `認可不要: <理由>` を明記し、
+「ログイン済みなら誰でも取得可能」が意図的な判断であることを記録した。
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
-| GET /api/system/vscode-extension | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | VSCode拡張機能(.vsix)のビルド・ダウンロード。認証済みなら誰でも取得可能 |
+| GET /api/system/vscode-extension | なし(#830 で「認可不要」と決定) | 401 | 該当なし | 認可OK | 現状維持 | VSCode拡張機能(.vsix)のビルド・ダウンロード。認証済みなら誰でも取得可能。#830 で意図的な判断として `認可不要:` コメントに記録済み |
 
 ---
 
-## 既知のギャップ(認可チェックが無いエンドポイント、本Issueでは修正せず事実列挙のみ)
+## 既知のギャップ(#830 で解消済み。履歴として残す)
 
-以下は有効なJWTさえあれば、ロール・プロジェクト所属に関わらず到達できる
-(`requireAdmin`/`requireProjectMemberOrAdmin`のいずれも呼ばれない)エンドポイント。
-修正は本Issueのスコープ外であり、別Issueでの対応を推奨する。
+> **2026-08-31 更新(#830)。** かつてこの節は「認可チェックが無いエンドポイント」を
+> 列挙していた(下記「解消前の一覧」)。#830 で**その全件について認可の要否を決定し実装へ
+> 反映した**ため、列挙は現在の実態を表していない。
+>
+> **現在の一次情報はこの節ではない。** 上の「[認可チェックの網羅状況(issue #830)]
+> (#認可チェックの網羅状況issue-830)」節と、そこで説明している
+> `AuthorizationCoverageContract`(`libs/lbs-common` の testFixtures)の許可リストが
+> 一次情報である。許可リストは**全10サービスで空**であり、認可チェックを持たない
+> エンドポイントが新たに増えると各サービスの `AuthorizationCoverageTest` が失敗する。
+>
+> ここに手で書いた一覧を再び置かないこと。**この一覧が腐ったことが、機械検査へ
+> 移した理由そのもの**である。
+
+### 認可を付けなかったエンドポイントの調べ方
+
+「認証済みなら誰でもよい」と判断したものは、許可リストではなく**そのハンドラの Javadoc に
+`認可不要: <理由>` と書く**規約になっている。現在の全件はリポジトリから直接引ける:
+
+```bash
+grep -rn "認可不要:" services/*/src/main/java --include=*.java
+```
+
+理由は概ね次のいずれかに分類される。
+
+| 分類 | 例 |
+| --- | --- |
+| 利用者自身の入力からの生成で、保存済みリソースに触れない | `AiController#draft` / `#ask` / `#tags` / `#proofread` |
+| 渡された値を検査・変換して返すだけの純粋な関数 | `CustomTagController#validate`、`MetadataController` |
+| ログイン後の共通ダッシュボードが出す要約(所有者軸が無い) | `DashboardController#getServiceStatus`、`GenerationJobController#list` |
+| クライアントが自分の記録を送る書き込み専用の窓口 | `OperationLogController`、`FrontendErrorLogController` |
+| `SecurityConfig` の `PUBLIC_PATHS`(未認証で到達する公開パス) | `HealthController`、`AuthController#setup` / `#setupStatus` |
+| gateway のルート表に無く外部から到達できない(呼び出し元が認可済み) | `RenderController`、`ComfyUiCheckpointController` |
+
+### 注記: `requireAuthenticated()` は認可ではない
+
+`AuthorizationCoverageContract` は `requireAuthenticated` も認可呼び出しとして数える。
+厳密には認証の再確認であって認可ではないため、**これだけを持つエンドポイントは
+「認証済みなら誰でも」と同義**である。現在の該当は1件だけで、いずれも意図的:
+
+- `SystemSettingService#getBraveSearchApiKeyStatus`(`GET /api/system-settings/brave-search-api-key`)
+  — 設定済みか否かと設定元だけを返す読み取り専用で、値は返さない。admin 限定にしない判断は
+  #693 のレビューで決めたもの(legacy-api 版も admin 以外の認証済み利用者から到達できた)。
+
+新たに `requireAuthenticated` だけのエンドポイントを足す場合は、ここに理由を追記すること。
+
+### 解消前の一覧(2026-08-31 以前。**現状ではない**)
+
+<details>
+<summary>#830 着手前に「有効なJWTさえあれば到達できる」と記録されていたエンドポイント</summary>
 
 - `AiController`: `POST /api/ai/draft`, `POST /api/ai/ask`, `POST /api/ai/tags`,
   `POST /api/ai/proofread`, `POST /api/ai/image`, `GET /api/ai/image-options`,
@@ -1087,7 +1138,7 @@ issue #705でも変更しておらず、下記「既知のギャップ」に残�
 - `FrontendErrorLogController`: `POST /api/logs/errors`
 - `GenerationJobController`: `GET /api/generation-jobs`, `GET /api/generation-jobs/{id}`,
   `PATCH /api/generation-jobs/{id}`(#573 stage2で追加), `POST /api/generation-jobs`(#573 stage3で追加)
-- `OperationLogController`: 全4エンドポイント(ただし自己スコープ設計。備考参照)
+- `OperationLogController`: 全4エンドポイント(ただし自己スコープ設計)
 - `PostController`: 全4エンドポイント。WordPressへの投稿公開・削除を含む、影響の大きい操作
 - `ProjectController`: `GET /api/projects`(一覧), `GET /api/projects/{id}`(詳細)
 - `SiteController`: `POST /api/sites`, `POST /api/sites/managed-wordpress`,
@@ -1096,6 +1147,8 @@ issue #705でも変更しておらず、下記「既知のギャップ」に残�
 - `SystemSettingController`: `GET /api/system-settings/brave-search-api-key`
 - `TaxonomyController`: `POST /api/taxonomy/resolve`
 - `VscodeExtensionController`: `GET /api/system/vscode-extension`
+
+</details>
 
 ### 未使用の認可プリミティブ
 
