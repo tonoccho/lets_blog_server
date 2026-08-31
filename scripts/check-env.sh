@@ -96,6 +96,12 @@ compose_required_vars() {
 }
 
 COMPOSE="$REPO_ROOT/docker-compose.yml"
+if [ -f "$COMPOSE" ] && [ ! -r "$COMPOSE" ]; then
+    # 読めないまま `|| true` に飲み込ませると「参照0件」と区別が付かず、
+    # 契約の抜けを見落としたまま ✓ を出してしまう。ここで落として区別する。
+    echo "エラー: $COMPOSE を読み取れません。契約の抜けを検査できないため中断します。" >&2
+    exit 1
+fi
 if [ -f "$COMPOSE" ]; then
     # `|| true` が要る。参照が1件も無いと途中の grep が exit 1 を返し、pipefail によって
     # パイプライン全体が失敗扱いになり、set -e でこの行が無言終了してしまう。
