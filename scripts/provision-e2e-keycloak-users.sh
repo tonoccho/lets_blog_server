@@ -222,6 +222,23 @@ provision_user() {
   kcadm set-password -r "$REALM" --userid "$user_id" --new-password "$password" --temporary=false
   echo "  Keycloak: パスワードを設定しました(temporary=false)"
 
+  # プロフィール(firstName/lastName)を必ず埋める(issue #945)。
+  #
+  # このレルムでは required action の VERIFY_PROFILE が有効になっている。プロフィールが
+  # 不完全なユーザーは、ブラウザのログインでは補完画面が出るだけだが、
+  # **パスワードグラント(直接付与)では "Account is not fully set up" で失敗する**。
+  # web/e2e の fetchAccessToken() はパスワードグラントを使うため、ここが埋まっていないと
+  # API直叩きのテストが1件も動かない。
+  #
+  # identity-service の KeycloakAdminClient#createUser は firstName/lastName を送らないので、
+  # このスクリプトが新規作成したアカウントは必ずこの状態になる。従来これが表面化しなかったのは、
+  # 既存の合成アカウントが以前の経緯でプロフィールを持っていたためで、
+  # #945 で環境をまっさらにして作り直したときに初めて露見した。
+  kcadm update "users/$user_id" -r "$REALM" \
+    -s 'emailVerified=true' -s 'enabled=true' -s 'requiredActions=[]' \
+    -s "firstName=E2E" -s "lastName=${role}" >/dev/null
+  echo "  Keycloak: プロフィールを補完しました(VERIFY_PROFILE 対策)"
+
   if [ "$role" = "admin" ]; then
     kcadm add-roles -r "$REALM" --uid "$user_id" --rolename admin
     echo "  Keycloak: realmロール admin を付与しました"

@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
 import { request, type FullConfig } from '@playwright/test';
 import { waitForServicesHealthy } from './helpers';
 
@@ -14,13 +16,31 @@ import { waitForServicesHealthy } from './helpers';
  * 実際にHTTPリクエストを1回ずつ投げて疎通を確認する。ここで失敗した場合はテストを開始しない
  * (原因不明の大量失敗ではなく、明確な前提エラーとして落とす)。
  *
+ * issue #945 (AT-19): 受け入れテストは毎回まっさらな状態から始める。
+ * ACCEPTANCE_RESET=1 が指定された場合、healthy待ちの**前に**環境をリセットする
+ * (リセット自体がサービスを再起動するため、待つのはその後でよい)。
+ * リセットは破壊的なので、既定では実行しない。
+ *
  * 環境変数:
+ *   ACCEPTANCE_RESET=1     : scripts/reset-acceptance-env.sh --yes を実行してから始める
+ *                            (MySQL 9スキーマ・Keycloakの合成アカウント・WordPressの実体・
+ *                             生成画像・キューを初期化する。破壊的)
  *   E2E_SKIP_HEALTH_WAIT=1 : docker composeのhealthy待ちをスキップする
  *                            (スタック外でPlaywrightだけ動かす場合や、docker CLIが無い環境向け)
  *   E2E_HEALTH_TIMEOUT     : healthy待ちのタイムアウト秒数(既定600)
  */
 export default async function globalSetup(config: FullConfig): Promise<void> {
   const baseURL = config.projects[0]?.use?.baseURL ?? 'https://localhost';
+  const repoRoot = path.resolve(__dirname, '..', '..');
+
+  if (process.env.ACCEPTANCE_RESET === '1') {
+    console.log('[e2e] ACCEPTANCE_RESET=1: 受け入れテスト環境をリセットします(破壊的)');
+    execFileSync(path.join(repoRoot, 'scripts', 'reset-acceptance-env.sh'), ['--yes'], {
+      cwd: repoRoot,
+      stdio: 'inherit',
+      timeout: 1_800_000,
+    });
+  }
 
   if (process.env.E2E_SKIP_HEALTH_WAIT === '1') {
     console.log('[e2e] E2E_SKIP_HEALTH_WAIT=1 のため docker compose のhealthy待ちをスキップします');

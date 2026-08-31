@@ -109,6 +109,7 @@ cd web
 npm run test:at            # 全件(@slow / @destructive を含む)
 npm run test:at:fast       # @slow と @destructive を除く
 npm run test:at:ui         # Playwright Test UI
+npm run test:at:clean      # 環境をリセットしてから段階順に全実行(§10)
 
 # タグで絞る(引数はそのまま playwright test へ渡る)
 npm run test:at -- --grep @api
@@ -127,7 +128,7 @@ npm run test:at -- --grep "ログイン画面"
 ### シナリオ名はそのままレポートに出る
 
 ```
-[bdd-chromium] › .features-gen/auth/login.feature.spec.js:6:7 ›
+[at-main] › .features-gen/at-main/auth/login.feature.spec.js:6:7 ›
   ログイン › ログイン画面にアクセスするとKeycloakのホスト型ログイン画面へリダイレクトされる @auth
 ```
 
@@ -216,7 +217,8 @@ Then('Keycloakのホスト型ログイン画面が表示される', async ({ pag
 
 ## 8. ブラウザ
 
-受け入れテストは `bdd-chromium` プロジェクト(chromium)のみで実行する。
+受け入れテストは chromium のみで実行する(段階ごとのプロジェクト `at-setup` /
+`at-seed` / `at-provision` / `at-main` はいずれも `Desktop Chrome`。§10)。
 
 サイト登録・記事公開・画像生成のようなバックエンド横断のシナリオは、ブラウザを変えても
 同じ経路を通る。ブラウザ差が意味を持つのはレンダリング・アクセシビリティ・レスポンシブ、
@@ -356,11 +358,156 @@ docker compose -f docker-compose.yml -f docker-compose.e2e-stubs.yml restart \
 
 ---
 
-## 10. 実行順序とクリーンスレート
+## 10. クリーンスレート実行と段階順序
 
-受け入れテストは**毎回まっさらな状態から**実行する。DBの初期化・シード・段階実行
-(WordPress のプロビジョニングを先行させる等)は **AT-19(#945)** が整備する。
-本ドキュメントのタグ規約はその段階定義と整合させること。
+受け入れテストは**毎回まっさらな状態から**実行する(issue #945 / AT-19)。
+前のテストが残したデータに依存して通る/落ちるテストを作らないため、また初回セットアップ
+(ユーザー0人)やバックアップ/リストアのようにクリーンな状態を要するシナリオを
+書けるようにするため。
+
+```bash
+source ~/.config/lets-blog-e2e.env    # 合成アカウントの資格情報(リポジトリ外・モード600)
+cd web
+npm run test:at:clean                 # リセット → 段階順に全実行
+```
+
+### 段階
+
+```
+reset ─→ at-setup ─→ at-seed ─→ at-provision ─→ at-main
+```
+
+| 段階 | 中身 | 担当 |
+| --- | --- | --- |
+| `reset` | `scripts/reset-acceptance-env.sh --yes`。`globalSetup` が `ACCEPTANCE_RESET=1` のときだけ実行 | AT-19 |
+| `at-setup` | `@stage:setup` のシナリオ。初回セットアップ(ユーザー0人 → 最初の管理者) | AT-3 (#929) |
+| `at-seed` | `scripts/seed-acceptance-env.sh`。E2E専用の合成アカウントを発行 | AT-19 |
+| `at-provision` | `@stage:provision` のシナリオ。**WordPress のプロビジョニング** | AT-5 (#931) |
+| `at-main` | 上記以外すべて | 各ドメインIssue |
+
+段階は Playwright のプロジェクト間 `dependencies` で表現している
+([web/playwright.config.ts](../web/playwright.config.ts))。したがって:
+
+- **`--project=at-main` を指定するだけでよい。** 依存する前段は Playwright が自動で先に走る。
+- **前段が失敗したら後続は実行されない。** Playwright は依存プロジェクトが落ちた場合、
+  依存元を「失敗」ではなく**スキップ**として報告する。プロビジョニングが失敗したときに
+  大量の失敗が並んで原因が埋もれる、という事態を避けるための設計である。
+
+### 段階タグ
+
+`@stage:setup` / `@stage:provision` は**段階の割り当てにしか使わない**。
+付けなければ `at-main` に入る。§4 のタグ規約(`@slow` 等)とは目的が違うので混ぜないこと。
+
+新しいシナリオを書くとき、これらを付ける必要はほぼ無い。付けるのは
+「他の全シナリオより先に成立していなければならない前提」だけである。
+
+### 初回セットアップを二重に定義しない
+
+最初の管理者を作るのは `at-setup` 段階の**シナリオそのもの**(AT-3)である。
+シードスクリプトは「ユーザーが0人のまま来た場合」だけ補完として作る。
+単一ドメインのテストを回すために `at-setup` を通さず実行したときのための逃げ道であり、
+通常の全実行では `setup-status` が `needsSetup: false` を返してスキップされる。
+
+### リセットが消すもの
+
+| 対象 | 内容 |
+| --- | --- |
+| MySQL | 9スキーマ(`lbs_identity` 他)を drop → create し、サービス再起動で Flyway に再作成させる |
+| MySQL(WP) | ManagedWordPress のサイト別DB(`wp_*`) |
+| Keycloak | `letsblog` レルムの **`@letsblog.local` ドメインのアカウントだけ** |
+| WordPress | `/var/www/html/sites/*` の実体 |
+| メディア | 生成画像の保存領域、ComfyUI の output |
+| RabbitMQ | 全キューの purge |
+
+`*_test` スキーマ(ホストからの `./gradlew test` 用)には触れない。
+
+スキーマを作り直すと `GRANT` が失われるため、`mysql/init/01-create-service-schemas.sh` を
+再実行して権限を張り直す。ここが失敗すると各サービスの Flyway が起動時に落ちるので、
+スクリプトはこの失敗で中断する。
+
+> **副次的な効果**: 毎回 drop してから Flyway に再作成させるので、
+> 「マイグレーションが空スキーマから通るか」も同時に検証される(#914 の契約テストと同じ性質)。
+
+### 安全装置
+
+`reset-acceptance-env.sh` は**接続先を指定するオプションを持たない**。
+コンテナ名(`lbs-mysql` / `lbs-keycloak` / `lbs-wordpress` / `lbs-rabbitmq` / `lbs-media` /
+`lbs-comfyui`)とレルム名(`letsblog`)はスクリプト内で `readonly` に固定してある。
+`scripts/provision-e2e-keycloak-users.sh` と同じ設計で、共有/本番環境では実行できない。
+
+Keycloak のユーザー削除は **`@letsblog.local` ドメインに限定**する。
+このレルムには利用者の実アカウント(`s.tonouchi@gmail.com`)が居るため、
+ドメインで区切ることが実装上の保証になっている。ドライラン(`--yes` なし)は
+削除対象と**保護対象**の両方を表示するので、実行前に必ず確認すること。
+
+```bash
+./scripts/reset-acceptance-env.sh          # ドライラン。何も消さない
+./scripts/reset-acceptance-env.sh --yes    # 実行
+```
+
+### リセットは自分で検証する
+
+リセットスクリプトは、最後に**成立したことを確かめてから**終わる。
+「消したつもり」で終わらせない — リセットが不完全なまま受け入れテストを始めると、
+前のデータに依存した結果が出て、しかもそれが分からない。
+
+1. 9スキーマに Flyway 管理テーブル以外のデータが残っていないこと
+2. Keycloak に `@letsblog.local` のアカウントが残っていないこと
+3. WordPress にサイト実体が残っていないこと
+4. `GET /api/auth/setup-status` が gateway 経由で 200 を返すこと(#951 の踏み抜き防止)
+
+いずれかが崩れていればスクリプトは非0で終了する。
+
+### 所要時間(2026-09-01 実測)
+
+| 段階 | 実測 |
+| --- | --- |
+| `reset` | 約 30 秒(うち大半はサービス11本の再起動と healthy 待ち) |
+| `at-seed` | 約 8 秒 |
+| `npm run test:at:clean` 全体(シナリオ7件) | 約 46 秒 |
+
+毎回フルリセットしても、実行時間の支配項はシナリオ本体であって初期化ではない。
+
+**リセットを省略する選択肢は取らない**
+(それをやると「前のテストの残骸に依存して通るテスト」が戻ってくる)。
+時間が問題になったら、段階の並列化や不要なコンテナの停止で対処すること。
+
+### 前段が失敗したときの見え方
+
+```
+$ npm run test:at         # 資格情報を渡さずに実行した場合
+  1 failed
+    [at-seed] › e2e/stages/seed.setup.ts:20:5 › 受け入れテスト環境にシードを投入する
+  6 did not run
+```
+
+後続は「6 failed」ではなく **`6 did not run`** になる。原因が1行で読める。
+
+### Keycloak の合成アカウントは profile を埋めないと認証できない
+
+このレルムでは required action の `VERIFY_PROFILE` が有効になっている。
+`firstName` / `lastName` が空のユーザーは、ブラウザのログインでは補完画面が出るだけだが、
+**パスワードグラント(直接付与)では `Account is not fully set up` で失敗する**。
+`web/e2e` の `fetchAccessToken()` はパスワードグラントを使うため、ここが埋まっていないと
+API直叩きのテストが1件も動かない。
+
+identity-service の `KeycloakAdminClient#createUser` は `firstName`/`lastName` を送らないので、
+`POST /api/auth/setup` や `POST /api/users` で作られたアカウントは必ずこの状態になる。
+`scripts/provision-e2e-keycloak-users.sh` と `scripts/seed-acceptance-env.sh` は、
+パスワード設定に続けてプロフィールを補完する(#945)。
+
+従来これが表面化しなかったのは、既存の合成アカウントが以前の経緯でプロフィールを
+持っていたためで、環境をまっさらにして作り直したときに初めて露見した。
+
+### `E2E_DB_CLEANUP` はもう受け入れテストには要らない
+
+受け入れテストは実行の**前**に全部消してから始めるので、終了時の後片付けは不要である。
+むしろ残しておいたほうが失敗の調査ができる。
+
+`global-teardown.ts` と `E2E_DB_CLEANUP` を残しているのは、`.feature` へ未移行の
+Playwright spec(`web/e2e/*.spec.ts`)が「既存データを壊さない一意なフィクスチャ」という
+**逆の前提**で書かれており、その孤児行の掃除には依然として必要だから(#765)。
+全 spec の移行が終わった時点で teardown ごと削除する(§7)。
 
 ---
 
