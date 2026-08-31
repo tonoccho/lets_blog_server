@@ -7,7 +7,7 @@ package com.letsblog.common.client;
  */
 public class SyncServiceTimeoutException extends SyncServiceException {
 
-    public SyncServiceTimeoutException(String serviceName, String operation, Throwable cause) {
-        super(serviceName, operation, "呼び出しがタイムアウトしました", cause);
+    public SyncServiceTimeoutException(String serviceName, String baseUrl, String operation, Throwable cause) {
+        super(serviceName, baseUrl, operation, "呼び出しがタイムアウトしました", cause);
     }
 }

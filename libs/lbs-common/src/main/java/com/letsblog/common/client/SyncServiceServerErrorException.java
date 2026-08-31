@@ -12,8 +12,9 @@ public class SyncServiceServerErrorException extends SyncServiceException {
     private final String responseBody;
 
     public SyncServiceServerErrorException(
-            String serviceName, String operation, int statusCode, String responseBody, Throwable cause) {
-        super(serviceName, operation, statusCode + "を返しました: " + responseBody, cause);
+            String serviceName, String baseUrl, String operation, int statusCode, String responseBody,
+            Throwable cause) {
+        super(serviceName, baseUrl, operation, statusCode + "を返しました: " + responseBody, cause);
         this.statusCode = statusCode;
         this.responseBody = responseBody;
     }

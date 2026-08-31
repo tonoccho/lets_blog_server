@@ -7,7 +7,7 @@ package com.letsblog.common.client;
  */
 public class SyncServiceCircuitOpenException extends SyncServiceException {
 
-    public SyncServiceCircuitOpenException(String serviceName, String operation) {
-        super(serviceName, operation, "サーキットブレーカーが作動中のため呼び出しを行いませんでした");
+    public SyncServiceCircuitOpenException(String serviceName, String baseUrl, String operation) {
+        super(serviceName, baseUrl, operation, "サーキットブレーカーが作動中のため呼び出しを行いませんでした");
     }
 }
