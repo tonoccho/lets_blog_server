@@ -99,6 +99,33 @@ JWTを必要とするエンドポイント・認証ロジックのテストは�
 時点でWireMockを使うことを推奨する。契約テストと同じ理由により、現時点でWireMockの依存や
 スタブコードは追加しない。
 
+### `@MockitoBean` のスタブには `verify` を添える(issue #916)
+
+`@SpringBootTest` + `@MockitoBean` で他サービスのクライアントを差し替える場合、
+**そのスタブが実際に呼ばれたことを `verify(...)` で確かめる**。
+
+`@ExtendWith(MockitoExtension.class)` の単体テストは既定が `STRICT_STUBS` なので、使われない
+`when(...)` は `UnnecessaryStubbingException` になる。**`@MockitoBean` にはこの保護が無い。**
+呼び出し先が変わってスタブが空振りしても、テストは何も言わずに通る。
+
+実際に2度起きている。`IdentityClient#fetchProfile` から `#lookupProfile`(401/403 を
+`Optional.empty()` として扱う、issue #829)へ移った際、テスト側が旧メソッドをスタブしたまま
+残った。
+
+- **#906**: platform / log-writer で顕在化。単体テストだったため
+  `UnnecessaryStubbingException` で気付けた
+- **#916**: ai / analytics / content / media / platform の5サービスに同じ食い違いが残っていた。
+  こちらは `@MockitoBean` なので<b>4サービスは通ったまま</b>で、
+  「adminなら403にならない」等の肯定パスを実質検証できていなかった。
+  #583 の検証で実MySQLに接続できるようにするまで、この空振りは #762 の
+  context load 失敗に埋もれて見えなかった
+
+`verify` を足したうえで、production 側をわざと `fetchProfile` へ戻して**テストが落ちること**を
+確認済み(#916)。
+
+WireMock を導入すればスタブの空振りは「未設定のパスを叩いた」という形で表面化するが、
+それまでの間の最小の保険としてこの規約を置く。
+
 ### カバレッジ目標: サービス別に`docs/COVERAGE_TARGETS.md`で管理
 
 各サービスのカバレッジ目標値は本ADRでは重複させず、`docs/COVERAGE_TARGETS.md`を正とする。
