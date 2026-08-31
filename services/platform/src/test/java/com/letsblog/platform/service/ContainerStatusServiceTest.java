@@ -35,7 +35,10 @@ class ContainerStatusServiceTest {
     void setUp() {
         RestClient.Builder builder = RestClient.builder().baseUrl(DOCKER_URL);
         server = MockRestServiceServer.bindTo(builder).build();
-        service = new ContainerStatusService(builder);
+        // 既定のインスタンスはプロジェクト名を持たない = 従来どおり名前の前方一致のみで絞る
+        // (issue #803のフォールバック挙動)。プロジェクトラベルでの絞り込みは
+        // projectScopedService()を使う専用のテストで検証する。
+        service = new ContainerStatusService(builder, "");
     }
 
     @Test
@@ -258,5 +261,88 @@ class ContainerStatusServiceTest {
         List<ContainerStatusResponse> containers = service.listAll();
 
         assertEquals(List.of(), containers);
+    }
+
+    // ---- issue #803: composeプロジェクトラベルによる絞り込み ----
+
+    private ContainerStatusService projectScopedService(String project) {
+        RestClient.Builder builder = RestClient.builder().baseUrl(DOCKER_URL);
+        server = MockRestServiceServer.bindTo(builder).build();
+        return new ContainerStatusService(builder, project);
+    }
+
+    /** 名前が lbs- で始まり、指定プロジェクトのラベルを持つコンテナのJSON。 */
+    private String container(String name, String project) {
+        String labels = project == null
+                ? "{}"
+                : "{\"com.docker.compose.project\":\"" + project + "\"}";
+        return "{\"Names\":[\"/" + name + "\"],\"State\":\"running\",\"Status\":\"Up 2 hours\","
+                + "\"Labels\":" + labels + "}";
+    }
+
+    @Test
+    void testListAll_別プロジェクトのlbsコンテナは除外する() {
+        // docker-socket-proxyはホストのDockerデーモン全体を見るため、他プロジェクトの
+        // lbs-*コンテナも一覧に含まれる。実際に開発環境のテストハーネスが起動する
+        // lbs-test-db(project=loop-engineering-test)が載ることが確認されている。
+        ContainerStatusService scoped = projectScopedService("lets_blog_server");
+        server.expect(requestTo(DOCKER_URL + "/containers/json?all=true"))
+                .andRespond(withSuccess(
+                        "[" + container("lbs-api", "lets_blog_server")
+                                + "," + container("lbs-test-db", "loop-engineering-test")
+                                + "," + container("lbs-mysql", "lets_blog_server") + "]",
+                        MediaType.APPLICATION_JSON));
+
+        List<ContainerStatusResponse> containers = scoped.listAll();
+
+        assertEquals(2, containers.size());
+        assertEquals("api", containers.get(0).name());
+        assertEquals("mysql", containers.get(1).name());
+    }
+
+    @Test
+    void testListAll_自プロジェクトのコンテナは従来どおり全て表示する() {
+        ContainerStatusService scoped = projectScopedService("lets_blog_server");
+        server.expect(requestTo(DOCKER_URL + "/containers/json?all=true"))
+                .andRespond(withSuccess(
+                        "[" + container("lbs-gateway", "lets_blog_server")
+                                + "," + container("lbs-web", "lets_blog_server")
+                                + "," + container("lbs-identity", "lets_blog_server") + "]",
+                        MediaType.APPLICATION_JSON));
+
+        List<ContainerStatusResponse> containers = scoped.listAll();
+
+        assertEquals(3, containers.size());
+    }
+
+    @Test
+    void testListAll_ラベルが無いコンテナはプロジェクト指定時に除外する() {
+        // composeで起動していないlbs-*(docker runで手動起動した等)は所属が判定できないため、
+        // プロジェクトを指定している場合は含めない。
+        ContainerStatusService scoped = projectScopedService("lets_blog_server");
+        server.expect(requestTo(DOCKER_URL + "/containers/json?all=true"))
+                .andRespond(withSuccess(
+                        "[" + container("lbs-api", "lets_blog_server")
+                                + "," + container("lbs-manual", null) + "]",
+                        MediaType.APPLICATION_JSON));
+
+        List<ContainerStatusResponse> containers = scoped.listAll();
+
+        assertEquals(1, containers.size());
+        assertEquals("api", containers.get(0).name());
+    }
+
+    @Test
+    void testListAll_プロジェクト名未設定なら従来どおり前方一致だけで判定する() {
+        // 設定漏れの環境で一覧が空になると、本物の障害と区別が付かなくなるためのフォールバック。
+        server.expect(requestTo(DOCKER_URL + "/containers/json?all=true"))
+                .andRespond(withSuccess(
+                        "[" + container("lbs-api", "lets_blog_server")
+                                + "," + container("lbs-test-db", "loop-engineering-test") + "]",
+                        MediaType.APPLICATION_JSON));
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(2, containers.size(), "プロジェクト名が無ければ絞り込まない");
     }
 }

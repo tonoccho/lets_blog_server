@@ -35,18 +35,36 @@ public class ContainerStatusService {
     private static final Logger log = LoggerFactory.getLogger(ContainerStatusService.class);
     private static final Duration TIMEOUT = Duration.ofSeconds(3);
     private static final String CONTAINER_NAME_PREFIX = "lbs-";
+    /** docker composeが全コンテナへ付けるプロジェクト名ラベル。一覧APIのLabelsに含まれる。 */
+    private static final String COMPOSE_PROJECT_LABEL = "com.docker.compose.project";
 
     private final RestClient dockerClient;
+    /**
+     * 自分が属するcomposeプロジェクト名(issue #803)。空文字なら判定に使わない。
+     *
+     * <p>docker-socket-proxyはホストのDockerデーモン全体を見ているため、
+     * {@code GET /containers/json} には他プロジェクトのコンテナも含まれる。名前が{@code lbs-}で
+     * 始まるかだけで絞ると、同一ホスト上の無関係なコンテナが紛れ込む。実際に開発環境の
+     * テストハーネスが起動する{@code lbs-test-db}(別プロジェクト)が載ることが確認されている。
+     *
+     * <p>しかもそれは{@code restart: no}で常駐するMySQLのため、#725で入れた
+     * 「終了コード0かつ再起動ポリシーnoならワンショットジョブの正常完了」の判定に合致し、
+     * 停止すると「正常」と表示されてしまう(誤りだと気付く手がかりが無い)。
+     */
+    private final String composeProject;
 
     @Autowired
-    public ContainerStatusService(@Value("${app.docker-socket-proxy-base-url}") String dockerSocketProxyBaseUrl) {
-        this(builderWithTimeout(dockerSocketProxyBaseUrl));
+    public ContainerStatusService(
+            @Value("${app.docker-socket-proxy-base-url}") String dockerSocketProxyBaseUrl,
+            @Value("${app.compose-project-name:}") String composeProject) {
+        this(builderWithTimeout(dockerSocketProxyBaseUrl), composeProject);
     }
 
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
-    ContainerStatusService(RestClient.Builder builder) {
+    ContainerStatusService(RestClient.Builder builder, String composeProject) {
         preferJackson2(builder);
         this.dockerClient = builder.build();
+        this.composeProject = composeProject == null ? "" : composeProject.trim();
     }
 
     private static RestClient.Builder builderWithTimeout(String baseUrl) {
@@ -88,6 +106,9 @@ public class ContainerStatusService {
                 if (rawName == null || !rawName.startsWith(CONTAINER_NAME_PREFIX)) {
                     continue;
                 }
+                if (!belongsToThisProject(item)) {
+                    continue;
+                }
                 String name = rawName.substring(CONTAINER_NAME_PREFIX.length());
                 String state = item.path("State").asText("");
                 String detail = item.path("Status").asText("");
@@ -101,6 +122,21 @@ public class ContainerStatusService {
             log.warn("コンテナ状態の取得に失敗しました(docker-socket-proxy未設定/未到達の可能性があります): {}", e.getMessage());
             return List.of();
         }
+    }
+
+    /**
+     * このアプリを構成するコンテナかを、composeのプロジェクトラベルで判定する(issue #803)。
+     *
+     * <p>プロジェクト名が解決できない場合({@code app.compose-project-name}が未設定)は、
+     * 従来どおり名前の前方一致だけで通す。ラベルで絞れないことを理由に一覧を空にすると、
+     * 設定漏れのある環境でダッシュボードが「コンテナが1つも無い」という誤った表示になり、
+     * 本物の障害と区別が付かなくなるため。
+     */
+    private boolean belongsToThisProject(JsonNode item) {
+        if (composeProject.isEmpty()) {
+            return true;
+        }
+        return composeProject.equals(item.path("Labels").path(COMPOSE_PROJECT_LABEL).asText(""));
     }
 
     private String firstName(JsonNode namesNode) {
