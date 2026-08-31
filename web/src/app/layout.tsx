@@ -51,7 +51,7 @@ export default async function RootLayout({
         />
       </head>
       <body className="min-h-full flex flex-col bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-50">
-        <SessionProvider>
+        <SessionProvider session={session}>
           <I18nProvider>
             <header className="sticky top-0 z-40 border-b border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
               <div className="mx-auto max-w-7xl px-4">

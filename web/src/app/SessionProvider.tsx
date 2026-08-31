@@ -1,6 +1,7 @@
 "use client";
 
 import { SessionProvider as NextAuthSessionProvider } from "next-auth/react";
+import type { Session } from "next-auth";
 import type { ReactNode } from "react";
 
 // KeycloakのアクセストークンはHttpOnly cookie(NextAuthのJWT)の中にのみ保持されており、
@@ -12,9 +13,23 @@ import type { ReactNode } from "react";
 // 持って次の更新が走るため、失効間際の生アクセストークンをapiFetch()が読んでしまう窓を狭められる。
 const ACCESS_TOKEN_REFETCH_INTERVAL_SECONDS = 240;
 
-export function SessionProvider({ children }: { children: ReactNode }) {
+/**
+ * @param session サーバー側で解決済みのセッション(issue #778)。これを渡さないと
+ *   `useSession()` はマウント後に `/api/auth/session` を取得し終えるまで
+ *   `status === "loading"` / `data === undefined` を返す。その未解決期間に
+ *   クライアントコンポーネントが `if (!session?.user) return;` のような分岐を持つと、
+ *   利用者の操作が無反応のまま捨てられる(#778 で実際に起きた)。
+ *   初期値を渡せば、通常のページ遷移ではこの窓自体が無くなる。
+ */
+export function SessionProvider({
+  children,
+  session,
+}: {
+  children: ReactNode;
+  session: Session | null;
+}) {
   return (
-    <NextAuthSessionProvider refetchInterval={ACCESS_TOKEN_REFETCH_INTERVAL_SECONDS}>
+    <NextAuthSessionProvider session={session} refetchInterval={ACCESS_TOKEN_REFETCH_INTERVAL_SECONDS}>
       {children}
     </NextAuthSessionProvider>
   );
