@@ -1,0 +1,39 @@
+# .vsix に同梱しないもの(issue #773)。
+#
+# 拡張の実行時に必要なのは out/ の JavaScript・webviews/・package.json だけで、
+# それ以外は配布物に入っていても使われない。特に coverage/ は `npm run test:coverage`
+# を実行したかどうかでローカルに存在したりしなかったりするため、除外しないと
+# 「ビルドした環境の状態によって .vsix の中身が変わる」という再現性の問題になる。
+#
+# platform-service のオンデマンドビルド(VscodeExtensionBuildService、issue #696)は
+# node_modules/ と out/ を除くソースを作業ディレクトリへコピーしてから
+# npm run compile → npx vsce package を実行する。このファイルもコピーされるため、
+# ローカルの `npx vsce package` と同じ除外がそちらでも効く。
+
+# テストカバレッジレポート(jest --coverage の生成物)
+coverage/**
+
+# TypeScript の原本。実行されるのは out/ にコンパイル済みの .js
+src/**
+
+# ソースマップ。参照先の src/ を同梱しない以上、あっても行番号を解決できないため入れない
+# (拡張のデバッグはこのリポジトリを直接開いて F5 で行う)
+out/**/*.js.map
+
+# テストコードとモック(src/ 配下だが、将来 out/ 側へ出力された場合にも効くよう明示する)
+**/__tests__/**
+**/__mocks__/**
+**/*.test.js
+**/*.test.ts
+
+# ビルド・テスト・エディタの設定。いずれも実行時には参照されない
+jest.config.js
+tsconfig.json
+.vscode/**
+.vscode-test/**
+
+# 生成物そのもの(リポジトリに .vsix がコミットされている場合に入れ子で同梱されるのを防ぐ)
+*.vsix
+
+# npm のロックファイル。vsce は同梱された node_modules を使うため配布物には不要
+package-lock.json
