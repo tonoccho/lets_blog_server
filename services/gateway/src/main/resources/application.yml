@@ -16,6 +16,11 @@ spring:
 # どのルートにもマッチしないパスはgateway自身が404を返す(ProxyHandler#handle)。
 # ルート表への載せ忘れが「たまたま動く / 別サービスの404として返る」形で隠れなくなる。
 app:
+  # 下流サービス名のDNS解決をキャッシュする上限秒数(issue #951)。
+  # Reactor Netty の既定は DNS レコードの TTL(Docker の組み込みDNSは600秒)に従うため、
+  # 複数サービスを同時再起動して IP が入れ替わると、gateway が古いIPを掴んだまま
+  # **別のサービスへ転送し続ける**。GatewayRoutingConfig のコメント参照。
+  dns-cache-ttl-seconds: ${GATEWAY_DNS_CACHE_TTL_SECONDS:10}
   gateway:
     # 既定は60秒(旧nginxの暗黙のproxy_read_timeoutと同等)。個別に長い処理が
     # 必要なルートはresponse-timeoutで上書きする(下記)。
