@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { defineBddConfig } from 'playwright-bdd';
 
 /**
  * issue #588: 実行時間対策。バックエンドがマルチサービス化し、フィクスチャ構築
@@ -13,6 +14,26 @@ import { defineConfig, devices } from '@playwright/test';
  * とし、実行時間を抑えつつクロスブラウザ検証の意図は維持する。
  */
 const CROSS_BROWSER_SPECS = [/auth-flow\.spec\.ts/, /accessibility\.spec\.ts/];
+
+/**
+ * issue #926 (AT-0): 受け入れテストは Gherkin(`.feature`)で記述し、playwright-bdd で
+ * Playwright のテストへ変換して実行する。ランナーを Playwright のままにすることで、
+ * 下の globalSetup(スタックのhealthy待ち)・ignoreHTTPSErrors・trace/video・retries・
+ * ワーカー制御を、受け入れテストでもそのまま使える。
+ *
+ * 生成物は web/.features-gen/ に出る。testDir('./e2e')の外へ置くことで、chromium 等の
+ * 既存 spec 用プロジェクトが生成物を拾わないようにしている(生成物の二重実行を防ぐ)。
+ * .gitignore / eslint.config.mjs / tsconfig.json の除外も併せて更新すること(#848 と同型)。
+ */
+const bddTestDir = defineBddConfig({
+  features: 'e2e/features/**/*.feature',
+  // ステップ定義とその依存(support/)を読み込む。support/ は既存 helpers.ts の再エクスポート。
+  steps: ['e2e/steps/**/*.ts', 'e2e/support/**/*.ts'],
+  featuresRoot: 'e2e/features',
+  outputDir: '.features-gen',
+  // `.feature` は日本語キーワード(機能:/シナリオ:/前提/もし/ならば)で書く。
+  language: 'ja',
+});
 
 export default defineConfig({
   testDir: './e2e',
@@ -46,6 +67,17 @@ export default defineConfig({
   },
 
   projects: [
+    // 受け入れテスト(.feature)。既存 spec 用のプロジェクトとは testDir が別なので、
+    // 双方が互いのテストを拾うことはない。
+    //
+    // ブラウザ差が結果に影響するのは AT-18(#944)の範囲だけなので、受け入れテストは
+    // chromium のみで回す。上の CROSS_BROWSER_SPECS と同じ考え方で、ブラウザ別の
+    // 受け入れテストが必要になった時点で AT-18 がプロジェクトを追加する。
+    {
+      name: 'bdd-chromium',
+      testDir: bddTestDir,
+      use: { ...devices['Desktop Chrome'] },
+    },
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },

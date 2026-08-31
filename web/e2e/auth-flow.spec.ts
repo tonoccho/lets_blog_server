@@ -30,12 +30,10 @@ const ADMIN_PASSWORD = E2E_ADMIN_PASSWORD;
 test.describe('Keycloak経由の認証フロー(issue #564)', () => {
   test.skip(!TEST_PASSWORD || !ADMIN_PASSWORD, 'E2E_TEST_PASSWORD/E2E_ADMIN_PASSWORDが未設定のためスキップ');
 
-  test('ログイン画面にアクセスするとKeycloakのホスト型ログイン画面へリダイレクトされる', async ({ page }) => {
-    await page.goto('/login');
-    await page.waitForURL(/\/auth\/realms\/letsblog\//, { timeout: 15000 });
-    await expect(page.locator('#username')).toBeVisible();
-    await expect(page.locator('#password')).toBeVisible();
-  });
+  // 「ログイン画面にアクセスするとKeycloakのホスト型ログイン画面へリダイレクトされる」は
+  // issue #926(AT-0)で受け入れテスト基盤のサンプルとして
+  // e2e/features/auth/login.feature へ移行済み。二重管理しないためここからは削除した。
+  // 残りのシナリオは AT-3(#929)が同様に .feature へ移行し、この spec を削除する。
 
   test('Keycloakで正しい資格情報を入力するとログインでき、セッションが確立する', async ({ page }) => {
     await loginViaKeycloak(page, TEST_EMAIL, TEST_PASSWORD);

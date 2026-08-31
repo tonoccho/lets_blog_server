@@ -14,6 +14,9 @@
 /coverage
 /test-results
 /playwright-report
+# playwright-bdd が .feature から生成する Playwright テスト(issue #926)。
+# eslint.config.mjs / tsconfig.json の除外も併せて更新すること。
+/.features-gen
 
 # next.js
 /.next/
