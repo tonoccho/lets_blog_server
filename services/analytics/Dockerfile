@@ -9,7 +9,6 @@ RUN chmod +x gradlew && ./gradlew --version
 
 COPY libs ./libs
 COPY services/analytics ./services/analytics
-COPY services/legacy-api/build.gradle ./services/legacy-api/build.gradle
 COPY services/log-writer/build.gradle ./services/log-writer/build.gradle
 COPY services/gateway/build.gradle ./services/gateway/build.gradle
 COPY services/identity/build.gradle ./services/identity/build.gradle

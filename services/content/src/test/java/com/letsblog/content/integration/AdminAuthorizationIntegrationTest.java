@@ -1,6 +1,7 @@
 package com.letsblog.content.integration;
 
 import com.letsblog.common.client.ActorProfile;
+import java.util.Optional;
 import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
 import com.letsblog.content.client.IdentityBridgeClient;
@@ -86,7 +87,8 @@ class AdminAuthorizationIntegrationTest {
     @DisplayName("有効なJWTでも非member・非adminなら403")
     void 非メンバー非adminは403() throws Exception {
         when(jwtDecoder.decode("member-check-jwt")).thenReturn(JwtTestFixtures.jwt("sub-1", "user"));
-        when(identityClient.fetchProfile("Bearer member-check-jwt")).thenReturn(new ActorProfile(10L, "user"));
+        when(identityClient.lookupProfile("Bearer member-check-jwt"))
+                .thenReturn(Optional.of(new ActorProfile(10L, "user")));
         when(identityBridgeClient.isProjectMember(42L, 10L, "Bearer member-check-jwt")).thenReturn(false);
 
         mockMvc.perform(post(RENDER_PATH)
@@ -100,7 +102,8 @@ class AdminAuthorizationIntegrationTest {
     @DisplayName("プロジェクトメンバーなら403にならない")
     void プロジェクトメンバーは403にならない() throws Exception {
         when(jwtDecoder.decode("member-jwt")).thenReturn(JwtTestFixtures.jwt("sub-2", "user"));
-        when(identityClient.fetchProfile("Bearer member-jwt")).thenReturn(new ActorProfile(11L, "user"));
+        when(identityClient.lookupProfile("Bearer member-jwt"))
+                .thenReturn(Optional.of(new ActorProfile(11L, "user")));
         when(identityBridgeClient.isProjectMember(42L, 11L, "Bearer member-jwt")).thenReturn(true);
         // 認可通過後、目次(TOC)のカスタムHTMLテンプレート取得(TocStyleRenderService)もlegacy-apiへの
         // 内部ブリッジを経由するため、認可の検証対象ではないがnullを返さないようスタブしておく
@@ -120,7 +123,8 @@ class AdminAuthorizationIntegrationTest {
     @DisplayName("adminなら所属に関わらず403にならない(プロジェクトメンバー判定はバイパスされる)")
     void adminは403にならない() throws Exception {
         when(jwtDecoder.decode("admin-jwt")).thenReturn(JwtTestFixtures.jwt("sub-3", "admin"));
-        when(identityClient.fetchProfile("Bearer admin-jwt")).thenReturn(new ActorProfile(1L, "admin"));
+        when(identityClient.lookupProfile("Bearer admin-jwt"))
+                .thenReturn(Optional.of(new ActorProfile(1L, "admin")));
         when(projectBridgeClient.resolveTagDesign(anyLong(), anyString(), anyString()))
                 .thenReturn(new ProjectBridgeClient.TagDesignResponse(null, null, null, null, null));
 

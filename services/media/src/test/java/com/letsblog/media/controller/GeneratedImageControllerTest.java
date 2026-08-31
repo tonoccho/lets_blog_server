@@ -155,24 +155,20 @@ class GeneratedImageControllerTest {
     }
 
     /**
-     * legacy-apiのAiAssistService#generateImageが、実際の画像生成(引き続きlegacy-api側で行う)の
-     * 後に呼ぶ新設エンドポイント(issue #573 stage4)。ファイル保存とDB行作成が両方行われることを
-     * 検証する。
+     * {@code POST /api/generated-images} は、認可を確認したうえで保存処理を
+     * {@link GeneratedImageCreationService} へ委譲する(issue #583で切り出した)。
+     * 保存処理そのものの検証は {@code GeneratedImageCreationServiceTest} が行う。
      */
     @Test
-    void create_ファイルを保存しパラメータ込みで画像行を作成する() {
+    void create_認可を確認してから保存サービスへ委譲する() {
         byte[] imageData = new byte[]{1, 2, 3};
-        when(generatedImageStorageService.store(1L, imageData)).thenReturn("1/0001.png");
-        when(generatedImageRepository.save(any(GeneratedImage.class))).thenAnswer(inv -> {
-            GeneratedImage image = inv.getArgument(0);
-            image.setId(42L);
-            image.setCreatedAt(LocalDateTime.now());
-            return image;
-        });
-
         CreateGeneratedImageRequest request = new CreateGeneratedImageRequest(
                 1L, "a cat", "blurry", 20, 7.0, "euler", "normal", 123L, 512, 512, 1,
                 "checkpoint.safetensors", null, null, "image/png", "COMFYUI", "[\"猫\"]", imageData);
+
+        GeneratedImage saved = buildImage(42L, "a cat", "[\"猫\"]");
+        saved.setProvider("COMFYUI");
+        when(generatedImageCreationService.create(request)).thenReturn(saved);
 
         GeneratedImageDetailResponse response = controller.create(request);
 
@@ -181,10 +177,8 @@ class GeneratedImageControllerTest {
         assertEquals("COMFYUI", response.provider());
         assertEquals(List.of("猫"), response.tags());
 
-        ArgumentCaptor<GeneratedImage> savedCaptor = ArgumentCaptor.forClass(GeneratedImage.class);
-        verify(generatedImageRepository).save(savedCaptor.capture());
-        assertEquals("1/0001.png", savedCaptor.getValue().getFilePath());
-        assertEquals(1L, savedCaptor.getValue().getProjectId());
-        verify(domainEventPublisher).publishImageGenerated(42L, 1L);
+        // ファイル保存が始まる前にプロジェクトメンバー判定を通していること(issue #830)。
+        verify(adminAuthorizationService).requireProjectMemberOrAdminForResource(1L);
+        verify(generatedImageCreationService).create(request);
     }
 }

@@ -4,6 +4,7 @@ import com.letsblog.ai.client.IdentityBridgeClient;
 import com.letsblog.common.client.ActorProfile;
 import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
+import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -76,7 +77,8 @@ class AdminAuthorizationIntegrationTest {
     @DisplayName("有効なJWTでも非member・非adminなら403")
     void 非メンバー非adminは403() throws Exception {
         when(jwtDecoder.decode("member-check-jwt")).thenReturn(JwtTestFixtures.jwt("sub-1", "user"));
-        when(identityClient.fetchProfile("Bearer member-check-jwt")).thenReturn(new ActorProfile(10L, "user"));
+        when(identityClient.lookupProfile("Bearer member-check-jwt"))
+                .thenReturn(Optional.of(new ActorProfile(10L, "user")));
         when(identityBridgeClient.isProjectMember(42L, 10L, "Bearer member-check-jwt")).thenReturn(false);
 
         mockMvc.perform(get(CATEGORIES_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer member-check-jwt"))
@@ -87,7 +89,8 @@ class AdminAuthorizationIntegrationTest {
     @DisplayName("プロジェクトメンバーなら403にならない")
     void プロジェクトメンバーは403にならない() throws Exception {
         when(jwtDecoder.decode("member-jwt")).thenReturn(JwtTestFixtures.jwt("sub-2", "user"));
-        when(identityClient.fetchProfile("Bearer member-jwt")).thenReturn(new ActorProfile(11L, "user"));
+        when(identityClient.lookupProfile("Bearer member-jwt"))
+                .thenReturn(Optional.of(new ActorProfile(11L, "user")));
         when(identityBridgeClient.isProjectMember(42L, 11L, "Bearer member-jwt")).thenReturn(true);
 
         mockMvc.perform(get(CATEGORIES_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer member-jwt"))
@@ -98,7 +101,8 @@ class AdminAuthorizationIntegrationTest {
     @DisplayName("adminなら所属に関わらず403にならない(プロジェクトメンバー判定はバイパスされる)")
     void adminは403にならない() throws Exception {
         when(jwtDecoder.decode("admin-jwt")).thenReturn(JwtTestFixtures.jwt("sub-3", "admin"));
-        when(identityClient.fetchProfile("Bearer admin-jwt")).thenReturn(new ActorProfile(1L, "admin"));
+        when(identityClient.lookupProfile("Bearer admin-jwt"))
+                .thenReturn(Optional.of(new ActorProfile(1L, "admin")));
 
         mockMvc.perform(get(CATEGORIES_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer admin-jwt"))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(403));

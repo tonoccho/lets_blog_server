@@ -121,7 +121,17 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("GET", "/api/internal/project/sites"),
 
                 // -- 内部ブリッジ(SiteCredentialsInternalController) --
-                new Endpoint("GET", "/api/internal/project/sites/site-key/credentials"));
+                new Endpoint("GET", "/api/internal/project/sites/site-key/credentials"),
+
+                // -- ProjectGithubTokenController(issue #583でlegacy-apiから移設) --
+                new Endpoint("GET", "/api/projects/1/api-keys/github-token"),
+                new Endpoint("PUT", "/api/projects/1/api-keys/github-token"),
+                new Endpoint("DELETE", "/api/projects/1/api-keys/github-token"),
+
+                // -- 内部ブリッジ(ProjectInternalController、issue #583で legacy-api から引き取った分) --
+                new Endpoint("GET", "/api/internal/project/projects/1/eligibility"),
+                new Endpoint("GET", "/api/internal/project/users/1/site-ids"),
+                new Endpoint("GET", "/api/internal/project/projects/1/github-access"));
     }
 
     @ParameterizedTest(name = "[{index}] {0}")
