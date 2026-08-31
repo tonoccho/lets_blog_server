@@ -11,10 +11,13 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui",
-    "test:e2e:debug": "playwright test --debug",
-    "test:a11y": "playwright test --grep Accessibility",
+    "test:e2e": "bddgen && playwright test",
+    "test:e2e:ui": "bddgen && playwright test --ui",
+    "test:e2e:debug": "bddgen && playwright test --debug",
+    "test:at": "bddgen && playwright test --project=bdd-chromium",
+    "test:at:fast": "bddgen && playwright test --project=bdd-chromium --grep-invert \"@slow|@destructive\"",
+    "test:at:ui": "bddgen && playwright test --project=bdd-chromium --ui",
+    "test:a11y": "bddgen && playwright test --grep Accessibility",
     "generate:api-client": "cd .. && ./scripts/generate-api-client.sh"
   },
   "dependencies": {
@@ -45,6 +48,7 @@
     "eslint-config-next": "16.2.12",
     "jest": "^30.4.2",
     "jest-environment-jsdom": "^30.4.1",
+    "playwright-bdd": "^9.2.0",
     "tailwindcss": "^4",
     "ts-jest": "^29.4.12",
     "typescript": "^5"

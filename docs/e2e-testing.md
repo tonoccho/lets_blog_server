@@ -6,6 +6,12 @@ Playwright による Let's Blog Server の E2E テストの実行方法・前提
 > gateway + 複数のドメインサービスへ移行済み。E2E は `npm run dev`(`http://localhost:3000`)
 > ではなく、**docker compose で起動したスタック全体(`https://localhost`)** に対して実行する。
 
+> **受け入れテスト(issue #926 / AT-0)**: 受け入れ基準は Gherkin(`.feature`)で書き、
+> playwright-bdd で同じ Playwright スタック上で実行する。記述形式・配置規約・タグ規約・
+> 実行方法、および本ドキュメントが扱う spec からの移行方針は
+> **[ACCEPTANCE_TESTING.md](ACCEPTANCE_TESTING.md)** を参照。
+> 本ドキュメントは前提環境(スタック起動・プロビジョニング・テストデータ)を扱う。
+
 ---
 
 ## 1. 全体像
@@ -33,11 +39,14 @@ Keycloak クライアント `letsblog-web` の redirect_uri が
 
 | ファイル | 内容 | ログイン |
 | --- | --- | --- |
+| `features/**/*.feature` | **受け入れテスト**(Gherkin)。[ACCEPTANCE_TESTING.md](ACCEPTANCE_TESTING.md) | シナリオによる |
+| `steps/*.ts` | 受け入れテストのステップ定義 | - |
+| `support/index.ts` | ステップ定義から `helpers.ts` を参照するための再エクスポート | - |
 | `helpers.ts` | 共通ヘルパー(Keycloak ログイン、トークン取得、compose 操作、healthy 待ち) | - |
 | `global-setup.ts` | 全サービスの healthy 待ち + 公開URL/Keycloak への疎通確認 | - |
 | `global-teardown.ts` | 全スキーマ横断のテストデータ削除(`E2E_DB_CLEANUP=1` のときのみ) | - |
 | `main-scenario.spec.ts` | **主要シナリオ**: サイト登録 → 記事公開 → 履歴確認 | admin |
-| `auth-flow.spec.ts` | Keycloak 経由のログイン/ログアウト/権限による出し分け | 両方 |
+| `auth-flow.spec.ts` | Keycloak 経由のログイン/ログアウト/権限による出し分け(リダイレクト1件は `features/auth/login.feature` へ移行済み) | 両方 |
 | `service-degradation.spec.ts` | 下流サービス障害時の縮退表示 | admin |
 | `site-registration.spec.ts` | サイト管理・疎通確認(ManagedWordPress フィクスチャ) | admin |
 | `post-creation.spec.ts` | プロジェクト作成ワークフロー | admin |
@@ -150,6 +159,9 @@ npm run test:e2e                       # 全spec(chromium は全件、他ブラ�
 npm run test:e2e:ui                    # Playwright Test UI
 npm run test:e2e:debug                 # Inspector
 npm run test:a11y                      # アクセシビリティのみ
+
+npm run test:at                        # 受け入れテスト(.feature)を全件
+npm run test:at:fast                   # 受け入れテストから @slow / @destructive を除く
 
 npx playwright test --project=chromium              # ブラウザを絞る
 npx playwright test e2e/main-scenario.spec.ts       # ファイルを絞る

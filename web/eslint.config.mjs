@@ -28,6 +28,8 @@ const eslintConfig = defineConfig([
     "blob-report/**",
     // Playwright のブラウザ/キャッシュ類。
     ".playwright/**",
+    // playwright-bdd が .feature から生成する Playwright テスト(issue #926)。
+    ".features-gen/**",
   ]),
 ]);
 
