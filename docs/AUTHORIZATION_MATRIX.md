@@ -366,8 +366,12 @@ Spring コンテキストを起動しない静的解析なので、DBもコン�
 **この契約テストは「認可が正しいか」を判定しない。** 認可呼び出しが*書かれているか*だけを見る。
 呼んでいる認可が適切かどうかはレビューの仕事である。
 
-現在 publishing-service に導入済み(`AuthorizationCoverageTest`)。他サービスへは
-同じ形のテストを追加すれば横展開できる。
+**全10サービスに導入済み**(各サービスの `AuthorizationCoverageTest`)。
+DBもコンテナも要らないため、MySQL が未公開の環境でも実行できる(実測で確認済み)。
+
+許可リストは `AuthorizationCoverageContract.currentUnauthorized("<service>")` で生成できる。
+`analytics` と `identity` は許可リストが空(=全エンドポイントが認可済み)なので、
+新たに無認可のエンドポイントを足すと**即座に失敗する**。
 
 ### 既知の要対応(優先度順)
 
