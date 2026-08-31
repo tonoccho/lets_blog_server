@@ -309,6 +309,71 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 対応する統合テストは
 `services/legacy-api/src/test/java/com/letsblog/api/integration/AuthorizationMatrixIntegrationTest.java`。
 
+## 認可チェックの網羅状況(issue #830)
+
+認証ゲート(#772、ADR-0008)は全サービスに入ったが、**その先の認可**(誰が何をしてよいか)は
+まだ全エンドポイントに行き渡っていない。有効なJWTさえあれば到達できるエンドポイントが残っている。
+
+### 実測(2026-08-31、develop)
+
+全コントローラを走査し、認可呼び出し(`requireAdmin` / `requireSelfOrAdmin` /
+`requireProjectMemberOrAdmin` / `requirePermission` 等)の有無を数えた結果:
+
+| | 件数 |
+|---|---|
+| 総エンドポイント | 278 |
+| 認可呼び出しあり | 113 |
+| **認可呼び出しなし(内部ブリッジを除く)** | **98** |
+
+サービス別の内訳:
+
+| サービス | 認可なし | 主なもの |
+|---|---|---|
+| content | 21 | `CustomTagTemplateController`(9)、`CustomTagController`(7) |
+| legacy-api | 19 | `ProjectApiKeyController`(14。GitHub/Brave/GA/AdSense の資格情報) |
+| media | 18 | `DiagramController`(6)、`GeneratedImageController`(6) |
+| platform | 12 | `DashboardController`(4)、`SystemSettingController`(3)、`BackupController`(2) |
+| ai | 10 | `AiController`(5)、`GenerationJobController`(4) |
+| project | 10 | `SiteController`(5)、`SshKeyPairController`(3) |
+| publishing | 3 | **`PostController#publish` / `#delete`**(WordPress への投稿公開・削除) |
+| analytics / log-writer / identity | 各1〜2 | |
+
+内部ブリッジ(`/api/internal/**`)は対象外とした。サービス間呼び出し専用で gateway からは
+到達せず、認可はトークンを転送する呼び出し元が担うため。
+
+### 再発防止: ラチェット
+
+個々について「認証のみでよいか、認可が必要か」を決めるのは**製品判断**を伴い、一度には片付かない。
+一方でその間に新しい無認可エンドポイントが増え続けると差は開く一方になる。
+
+そこで **`AuthorizationCoverageContract`**(`libs/lbs-common` の testFixtures)で
+現状を許可リストとして固定し、**増えることだけを止める**。
+
+- 許可リストに**無い**無認可エンドポイントが現れたら失敗する(新規の付け忘れを検知)
+- 許可リストにあるのに**もう無認可でない**ものがあれば失敗する(解消したらリストから消させ、
+  リストが実態から乖離しないようにする)
+- 意図的に認証のみでよい場合は、そのメソッドのコメントに **`認可不要: <理由>`** と書けば
+  許可リストに載せなくてよい
+
+Spring コンテキストを起動しない静的解析なので、DBもコンテナも不要である。
+先例は同パッケージの `AuthorizationMatrixContract`(認証ゲートの後退検知、#805)。
+
+**この契約テストは「認可が正しいか」を判定しない。** 認可呼び出しが*書かれているか*だけを見る。
+呼んでいる認可が適切かどうかはレビューの仕事である。
+
+現在 publishing-service に導入済み(`AuthorizationCoverageTest`)。他サービスへは
+同じ形のテストを追加すれば横展開できる。
+
+### 既知の要対応(優先度順)
+
+1. **`publishing/PostController#publish` / `#delete`** — WordPress への投稿公開・削除。
+   本来は `requireProjectMemberOrAdmin` 相当が必要だが、
+   `ProjectServiceClient.SiteBridge` が `projectId` を持たないため、
+   project-service の内部ブリッジに projectId を載せる変更が前提になる
+2. **`project/SiteController#register` / `#createManagedWordPress`** — サイト作成
+3. **`legacy-api/ProjectApiKeyController`(14件)** — GitHub トークン・Brave Search APIキー・
+   GA/AdSense 資格情報の読み書き
+
 ## admin判定の2つの軸(identity-service、issue #815)
 
 identity-service には admin かどうかを決める仕組みが**2つ**ある。名前がどちらも「admin」なので
