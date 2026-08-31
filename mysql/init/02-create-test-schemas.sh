@@ -6,9 +6,9 @@
 # 参照するlbs_{content,media,ai,analytics,platform,identity,project,publishing,log}_testスキーマを、
 # 01-create-service-schemas.shと
 # 同じくMySQLコンテナの初回起動時(docker-entrypoint-initdb.d、データボリュームが空の場合のみ
-# 実行される)に作成する。既存のtest_user(scripts/setup-test-db.shがlets_blog_testに対して作成する
-# ユーザーと同じ資格情報)に、このスクリプトが作成する各スキーマへの同レベルの権限
-# (ALL PRIVILEGES)を付与する。
+# 実行される)に作成する。test_user(かつてscripts/setup-test-db.shがlets_blog_testに対して
+# 作成していたユーザーと同じ資格情報。同スクリプトは参照されなくなったため#846で削除済み)に、
+# このスクリプトが作成する各スキーマへの同レベルの権限(ALL PRIVILEGES)を付与する。
 #
 # 注意: 既存のMySQLデータボリュームが既にある環境では、コンテナを再作成しても
 # このスクリプトは実行されない(MySQL公式イメージの仕様)。適用するにはボリュームの
@@ -35,8 +35,8 @@ TEST_SCHEMAS=(
   lbs_project_test
   lbs_publishing_test
   lbs_log_test
-  # legacy-apiのテストスキーマ(#762)。以前はscripts/setup-test-db.shだけが作っており、
-  # そちらはホスト側にmysqlクライアントとroot接続を要求する。開発スタックのMySQLには
+  # legacy-apiのテストスキーマ(#762)。以前はscripts/setup-test-db.sh(#846で削除)だけが作っており、
+  # そちらはホスト側にmysqlクライアントとroot接続を要求していた。開発スタックのMySQLには
   # lets_blog_testだけが作られず、legacy-apiのDB依存テストがUnknown databaseで落ちていた。
   # 他のスキーマと同じくここで作れば、このスクリプトの手動再実行だけで揃う。
   lets_blog_test
