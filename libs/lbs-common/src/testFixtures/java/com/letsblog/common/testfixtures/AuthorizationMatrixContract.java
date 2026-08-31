@@ -184,7 +184,9 @@ public final class AuthorizationMatrixContract {
      * <p>ファイル名({@code *Controller.java})で絞ると、命名から外れたコントローラが
      * <b>丸ごと不可視</b>になる。命名を強制する仕組みはリポジトリに無いので、注釈で判定する。
      */
-    private static List<Endpoint> scanControllerEndpoints(Path sourceRoot) {
+    // package-private: 同パッケージのテスト(AuthorizationMatrixContractTest)が、
+    // 合成したソースツリーに対して走査ロジックだけを検証するために呼ぶ(issue #833)。
+    static List<Endpoint> scanControllerEndpoints(Path sourceRoot) {
         List<Endpoint> endpoints = new ArrayList<>();
         try (Stream<Path> files = Files.walk(sourceRoot)) {
             files.filter(p -> p.getFileName().toString().endsWith(".java")).forEach(p -> {
@@ -453,15 +455,39 @@ public final class AuthorizationMatrixContract {
                     + " AuthorizationMatrixContract の解析を拡張してください");
         }
 
-        // 値は元ソースから取るが、マスク側で二重引用符になっている位置のものだけを採る
-        // (コメントの中の文字列を幻のパスとして拾わないため)。
+        return pathElements(fileName, inner, innerMasked, pathSpan);
+    }
+
+    /**
+     * パス式を<b>トップレベル要素ごと</b>に検査して値を取り出す(issue #833)。
+     *
+     * <p>リスト全体が空のときだけ落とす作りだと、{@code @GetMapping({"/a", CONST})} は
+     * リテラルが1つ取れるので非空になり、<b>定数要素が無音で捨てられる</b>。
+     * 第1要素が既に一覧にある場合は警告すら出ずに緑になる。
+     * #805 の方針「解釈できない書き方は静かに縮退させず落とす」を要素レベルまで降ろす。
+     */
+    private static List<String> pathElements(String fileName, String inner, String innerMasked, int[] pathSpan) {
+        int start = pathSpan[0];
+        int end = pathSpan[1];
+        // 前後の空白を除いた実体の範囲を求める(マスク視点。長さは元ソースと一致する)。
+        String maskedExpr = innerMasked.substring(start, end);
+        start += maskedExpr.length() - maskedExpr.stripLeading().length();
+        end -= maskedExpr.length() - maskedExpr.stripTrailing().length();
+        // 配列形式なら波括弧の内側を要素分割の対象にする。
+        if (end - start >= 2 && innerMasked.charAt(start) == '{' && innerMasked.charAt(end - 1) == '}') {
+            start++;
+            end--;
+        }
+
         List<String> paths = new ArrayList<>();
-        Matcher literal = STRING_LITERAL.matcher(inner);
-        literal.region(pathSpan[0], pathSpan[1]);
-        while (literal.find()) {
-            if (innerMasked.charAt(literal.start()) == '"') {
-                paths.add(literal.group(1));
+        for (int[] span : splitTopLevel(innerMasked.substring(start, end))) {
+            int from = start + span[0];
+            int to = start + span[1];
+            if (innerMasked.substring(from, to).isBlank()) {
+                // 末尾カンマなどの空要素。値を持たないので検査対象にしない。
+                continue;
             }
+            paths.add(literalOf(fileName, inner, innerMasked, from, to));
         }
         if (paths.isEmpty()) {
             throw new AssertionError(fileName
@@ -471,6 +497,44 @@ public final class AuthorizationMatrixContract {
                     + "AuthorizationMatrixContract の解析を拡張してください");
         }
         return paths;
+    }
+
+    /**
+     * 1要素がちょうど1つの文字列リテラルだけで構成されていることを要求し、その値を返す。
+     *
+     * <p>値は元ソースから取るが、マスク側で二重引用符になっている位置のものだけを採る
+     * (コメントの中の文字列を幻のパスとして拾わないため)。リテラルを取り除いた残りが
+     * 空白でなければ、定数参照や連結が混ざっているので落とす。
+     */
+    private static String literalOf(String fileName, String inner, String innerMasked, int from, int to) {
+        String value = null;
+        StringBuilder remainder = new StringBuilder(innerMasked.substring(from, to));
+        Matcher literal = STRING_LITERAL.matcher(inner);
+        literal.region(from, to);
+        while (literal.find()) {
+            if (innerMasked.charAt(literal.start()) != '"') {
+                // マスク側が引用符でない = コメントの中。パスとして採らない。
+                continue;
+            }
+            if (value != null) {
+                throw new AssertionError(fileName
+                        + ": マッピング注釈のパス要素に文字列リテラルが複数あります: "
+                        + inner.substring(from, to).strip()
+                        + " AuthorizationMatrixContract の解析を拡張してください");
+            }
+            value = literal.group(1);
+            for (int i = literal.start(); i < literal.end(); i++) {
+                remainder.setCharAt(i - from, ' ');
+            }
+        }
+        if (value == null || !remainder.toString().isBlank()) {
+            throw new AssertionError(fileName
+                    + ": マッピング注釈のパス要素が文字列リテラルではありません: "
+                    + inner.substring(from, to).strip()
+                    + " 定数参照は走査できません。リテラルで書くか、"
+                    + "AuthorizationMatrixContract の解析を拡張してください");
+        }
+        return value;
     }
 
     /**
