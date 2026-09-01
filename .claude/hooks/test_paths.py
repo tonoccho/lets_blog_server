@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+"""`.claude/hooks/paths.py` の分類器の単体テスト(#983)。
+
+`.claude/` は既存のどのテストランナー(jest / playwright-bdd / Gradle)の対象にも
+なっていないため、Python 標準の unittest で回す。
+
+    python3 -m unittest discover -s .claude/hooks -t .claude/hooks -p 'test_*.py'
+
+分類規則そのものは `paths.py` が唯一の定義である。ここには規則を書き写さず、
+代表的なパスに対する期待値だけを固定する。
+"""
+
+import os
+import subprocess
+import sys
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
+sys.path.insert(0, HERE)
+
+import paths  # noqa: E402
+
+
+class TestCodeClassification(unittest.TestCase):
+    """テストコードとして扱うパス。"""
+
+    TEST_PATHS = [
+        "services/identity/src/test/java/com/example/identity/UserServiceTest.java",
+        "packages/lbs-common/src/testFixtures/java/com/example/common/Fixtures.java",
+        "apps/web/e2e/features/article/publish.feature",
+        "apps/web/e2e/steps/article.steps.ts",
+        "apps/web/src/components/ArticleCard.test.tsx",
+        "apps/mcp-server/src/tools/designSuggestion.test.js",
+        "apps/web/src/lib/api.spec.ts",
+        "apps/web/src/lib/__tests__/format.ts",
+        "apps/web/src/lib/__mocks__/fetch.ts",
+        # テストランナーの設定・セットアップはテストコード側。
+        "apps/web/jest.config.ts",
+        "apps/web/jest.setup.ts",
+        "apps/extension/jest.config.js",
+        "apps/web/playwright.config.ts",
+        # フック自身の Python 単体テスト。
+        ".claude/hooks/test_paths.py",
+    ]
+
+    def test_is_test_true(self):
+        for path in self.TEST_PATHS:
+            with self.subTest(path=path):
+                self.assertTrue(paths.is_test(path))
+
+    def test_test_code_is_never_production(self):
+        for path in self.TEST_PATHS:
+            with self.subTest(path=path):
+                self.assertFalse(paths.is_production(path))
+
+
+class ProductionCodeClassification(unittest.TestCase):
+    """プロダクションコードとして扱うパス。"""
+
+    PRODUCTION_PATHS = [
+        # 既存の実装ソースツリー(回帰確認)。
+        "apps/web/src/app/[locale]/page.tsx",
+        "apps/extension/src/config.ts",
+        "services/identity/src/main/java/com/example/identity/UserService.java",
+        "packages/lbs-common/src/main/java/com/example/common/Json.java",
+        # #983 の決定: 拡張の Webview 実装。
+        "apps/extension/webviews/diagramGallery.js",
+        "apps/extension/webviews/plan.html",
+        "apps/extension/webviews/sectionGen.css",
+        "apps/extension/webviews/vendor/prism/prism-bundle.min.js",
+        # #983 の決定: infra 一式。
+        "infra/nginx/conf.d/default.conf",
+        "infra/nginx/nginx.conf",
+        "infra/keycloak/realm-export.json",
+        "infra/mysql/init/01-create-service-schemas.sh",
+        "infra/wordpress/provision-agent/index.php",
+        "infra/e2e-stubs/llm/server.js",
+        # #983 の決定: compose ファイル一式。
+        "docker-compose.yml",
+        "docker-compose.override.yml",
+        "docker-compose.e2e-stubs.yml",
+        "docker-compose.host-tests.yml",
+        # 実装判断: 実行時イメージ定義。
+        "apps/web/Dockerfile",
+        "services/identity/Dockerfile",
+        "infra/wordpress/Dockerfile",
+        # 実装判断: 実行時・ビルド出力を決める設定。
+        "apps/web/next.config.ts",
+        "apps/web/postcss.config.mjs",
+        # 実装判断: 利用者に見える UI 文言とプラグインの出荷 UI。
+        "apps/web/messages/ja.json",
+        "apps/penpot-plugin/ui.html",
+        "apps/penpot-plugin/styles.css",
+        "apps/penpot-plugin/manifest.json",
+    ]
+
+    def test_is_production_true(self):
+        for path in self.PRODUCTION_PATHS:
+            with self.subTest(path=path):
+                self.assertTrue(paths.is_production(path))
+
+    def test_production_code_is_never_test(self):
+        for path in self.PRODUCTION_PATHS:
+            with self.subTest(path=path):
+                self.assertFalse(paths.is_test(path))
+
+
+class NeutralClassification(unittest.TestCase):
+    """テストでもプロダクションでもない「中立」パス。"""
+
+    NEUTRAL_PATHS = [
+        # ルール自身(意図的に据え置き。ルールを書き換えるコミットをブロックしない)。
+        ".claude/CLAUDE.md",
+        ".claude/hooks/guard.py",
+        ".claude/hooks/paths.py",
+        ".claude/skills/work-next/SKILL.md",
+        # ドキュメント・スクリプト・CI 定義・開発ツール設定。
+        "docs/adr/0009-sdk-api-client-not-consumed-by-web.md",
+        "README.md",
+        "LICENSE",
+        "scripts/git-hooks/pre-commit",
+        "scripts/check-changed-coverage.py",
+        ".github/workflows/frontend-test.yml",
+        ".github/dependabot.yml",
+        "config/checkstyle.xml",
+        "config/orval.config.js",
+        # 依存マニフェストとビルド定義。
+        "apps/web/package.json",
+        "apps/web/package-lock.json",
+        "apps/extension/package.json",
+        "build.gradle",
+        "services/identity/build.gradle",
+        "settings.gradle",
+        "gradle/wrapper/gradle-wrapper.properties",
+        "gradlew",
+        # 型・lint 設定。
+        "apps/web/tsconfig.json",
+        "apps/web/eslint.config.mjs",
+        "apps/web/next-env.d.ts",
+        # 生成物・静的アセット・リポジトリメタ。
+        "openapi/content.json",
+        "apps/web/public/next.svg",
+        ".env.example",
+        ".node-version",
+        ".gitignore",
+        "apps/extension/.vscodeignore",
+        "apps/extension/.vscode/extensions.json",
+        # プロダクション扱いのディレクトリ配下でも、ドキュメントは中立。
+        "infra/keycloak/README.md",
+        "apps/extension/webviews/vendor/prism/LICENSE",
+    ]
+
+    def test_neutral_is_neither(self):
+        for path in self.NEUTRAL_PATHS:
+            with self.subTest(path=path):
+                self.assertFalse(paths.is_test(path))
+                self.assertFalse(paths.is_production(path))
+
+    def test_neutral_paths_are_declared(self):
+        """中立は「取りこぼし」ではなく、列挙された意図の結果であること。"""
+        for path in self.NEUTRAL_PATHS:
+            with self.subTest(path=path):
+                self.assertTrue(paths.is_declared_neutral(path))
+
+    def test_declared_neutral_is_false_for_classified_paths(self):
+        self.assertFalse(paths.is_declared_neutral("infra/nginx/nginx.conf"))
+        self.assertFalse(paths.is_declared_neutral("apps/web/src/app/page.tsx"))
+        self.assertFalse(paths.is_declared_neutral("apps/web/e2e/steps/article.steps.ts"))
+
+
+class ClassifySplit(unittest.TestCase):
+    def test_classify_splits_and_drops_neutral(self):
+        tests, prod = paths.classify(
+            [
+                "apps/web/e2e/features/article/publish.feature",
+                "infra/nginx/conf.d/default.conf",
+                "docs/architecture.md",
+                "apps/web/src/app/page.tsx",
+                "services/identity/src/test/java/UserServiceTest.java",
+                ".claude/hooks/guard.py",
+            ]
+        )
+        self.assertEqual(
+            tests,
+            [
+                "apps/web/e2e/features/article/publish.feature",
+                "services/identity/src/test/java/UserServiceTest.java",
+            ],
+        )
+        self.assertEqual(
+            prod,
+            ["infra/nginx/conf.d/default.conf", "apps/web/src/app/page.tsx"],
+        )
+
+    def test_classify_empty(self):
+        self.assertEqual(paths.classify([]), ([], []))
+
+    def test_classify_neutral_only(self):
+        self.assertEqual(paths.classify(["docs/a.md", ".claude/x.py"]), ([], []))
+
+
+class RepositoryExhaustiveness(unittest.TestCase):
+    """追跡中の全ファイルが、テスト / プロダクション / 列挙済みの中立 のいずれかであること。
+
+    どれにも当たらないファイルがあるということは、分類が「意図して中立」ではなく
+    「黙って中立」に落ちているということ(#983 の問題そのもの)。
+    """
+
+    def test_every_tracked_file_is_classified(self):
+        out = subprocess.run(
+            ["git", "ls-files"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        tracked = [p for p in out.splitlines() if p.strip()]
+        self.assertTrue(tracked)
+        unclassified = [
+            p
+            for p in tracked
+            if not (paths.is_test(p) or paths.is_production(p) or paths.is_declared_neutral(p))
+        ]
+        self.assertEqual(unclassified, [])
+
+
+if __name__ == "__main__":
+    unittest.main()
