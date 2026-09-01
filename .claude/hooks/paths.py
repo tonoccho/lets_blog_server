@@ -119,8 +119,11 @@ PRODUCTION_PATTERNS = [
 #       元になる振る舞いは services/*/src/ 側で検証される。
 #   apps/*/public/
 #       静的アセット(svg など)。振る舞いを持たない。
-#   dotfile 各種(.gitignore / .env.example / .node-version / .vscode* など)
-#       リポジトリと開発環境のメタデータ。
+#   .gitignore / .dockerignore / .vscodeignore / .env*.example / .node-version / .vscode/
+#       リポジトリと開発環境のメタデータ。名前を一つずつ挙げる。
+#       「名前が . で始まる」は中立の根拠にならない。dotfile が増えたときに
+#       黙って中立へ落ちるのを防ぐため、ワイルドカード(\.[^/]+$)は置かない。
+#       新しい dotfile はここに足す=そのとき分類を決める、という運用にする。
 NEUTRAL_PATTERNS = [
     r"^\.claude/",
     r"^docs/",
@@ -140,7 +143,12 @@ NEUTRAL_PATTERNS = [
     r"^openapi/[^/]+\.json$",
     r"^apps/[^/]+/public/",
     r"(^|/)\.vscode/",
-    r"(^|/)\.[^/]+$",
+    r"(^|/)\.gitignore$",
+    r"(^|/)\.dockerignore$",
+    r"(^|/)\.vscodeignore$",
+    r"(^|/)\.env\.example$",
+    r"(^|/)\.env\.local\.example$",
+    r"(^|/)\.node-version$",
 ]
 
 TEST_RE = [re.compile(p) for p in TEST_PATTERNS]
