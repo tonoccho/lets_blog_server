@@ -43,9 +43,9 @@ Keycloak / 各ドメインサービス)を見据えた構成に整えた(#556)�
 | `keycloak` | 8080(管理/ヘルスチェックは9000) | reverse-proxy経由のみ(`/auth/`) | `KC_HTTP_RELATIVE_PATH=/auth`。#559 |
 | `keycloak-postgres` | 5432 | 非公開 | Keycloak専用PostgreSQL。#559 |
 | `penpot-frontend` | 8080 | `9001:8080`(直接公開。ハンドオフURL生成のため) | |
-| `comfyui` | 8188 | 非公開(media経由) | GPU必須 |
-| `plantuml` | 8080 | 非公開(content/media経由) | |
-| `drawio` | 8080 | 非公開(web経由) | |
+| `comfyui` | 8188 | 非公開(media経由) | GPU必須。#979でreverse-proxyの`/comfyui/`中継を削除した(ブラウザから開く導線が無く、無認証で任意のワークフローを実行できてしまうため)。media-serviceが`COMFYUI_BASE_URL=http://comfyui:8188`でlbs-net経由に呼ぶ |
+| `plantuml` | 8080 | 非公開(content/media経由) | #979でreverse-proxyの`/plantuml/`中継を削除した(ブラウザからの参照が無く、無認証で任意のソースをサーバー側で描画させられるため)。media-serviceが`PLANTUML_BASE_URL=http://plantuml:8080`でlbs-net経由に呼ぶ |
+| `drawio` | 8080 | reverse-proxy経由(`/drawio/`) | **無認証で公開する意図的な判断(#979)**。VSCode拡張の`diagramEditorPanel.ts`がwebviewのiframeへ`/drawio/?embed=1&...`を読み込む。webviewはlbs-netの外のブラウザ文脈のためコンテナ間通信に寄せられない。webからは参照しない |
 | `wordpress` | 9000 | 非公開(publishing経由でプロビジョニング) | |
 
 サービスを追加するときも、内部ポート8080・外部公開はgateway/reverse-proxy経由のみ、
