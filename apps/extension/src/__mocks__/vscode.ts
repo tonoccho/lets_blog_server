@@ -19,6 +19,24 @@ export function resetMocks(): void {
   shownWarnings.length = 0;
   shownErrors.length = 0;
   lastCreatedWebviewPanel = undefined;
+  warningResponse = undefined;
+  openedDocuments.length = 0;
+  workspaceFolders = undefined;
+}
+
+/** showWarningMessage が返す選択肢(未設定なら「閉じた」= undefined)。 */
+let warningResponse: string | undefined;
+export function setWarningResponse(value: string | undefined): void {
+  warningResponse = value;
+}
+
+/** openTextDocument / showTextDocument に渡されたパス。 */
+export const openedDocuments: string[] = [];
+
+/** workspace.workspaceFolders の差し替え口。 */
+let workspaceFolders: { uri: { fsPath: string } }[] | undefined;
+export function setWorkspaceFolders(folders: { uri: { fsPath: string } }[] | undefined): void {
+  workspaceFolders = folders;
 }
 
 export const shownWarnings: string[] = [];
@@ -38,6 +56,13 @@ export const ConfigurationTarget = {
 } as const;
 
 export const workspace = {
+  get workspaceFolders() {
+    return workspaceFolders;
+  },
+  openTextDocument(fileName: string) {
+    openedDocuments.push(fileName);
+    return Promise.resolve({ fileName });
+  },
   getConfiguration(section: string) {
     return {
       get<T>(key: string, defaultValue?: T): T | undefined {
@@ -62,13 +87,21 @@ interface MockWebviewPanel {
   title: string;
   webview: {
     html: string;
+    /** CSPで使う配信元。実物と同じく webview 固有のスキームを模す。 */
+    cspSource: string;
     asWebviewUri: (uri: unknown) => { toString: () => string };
     onDidReceiveMessage: (listener: (message: unknown) => void) => { dispose: () => void };
     postMessageToExtension: (message: unknown) => void;
+    /** 拡張側から Webview へ送られたメッセージの記録。 */
+    postMessage: (message: unknown) => Promise<boolean>;
+    readonly posted: unknown[];
   };
   reveal: () => void;
   onDidDispose: (listener: () => void) => { dispose: () => void };
+  /** onDidDispose に登録されたリスナー(VSCodeがパネルを閉じた状況の再現に使う)。 */
+  fireDispose: () => void;
   dispose: () => void;
+  disposed: boolean;
 }
 
 export const window = {
@@ -77,8 +110,12 @@ export const window = {
     show: () => undefined,
     dispose: () => undefined,
   }),
-  showWarningMessage: (message: string) => {
+  showWarningMessage: (message: string, ..._items: string[]) => {
     shownWarnings.push(message);
+    return Promise.resolve(warningResponse);
+  },
+  showTextDocument: (document: { fileName: string }) => {
+    openedDocuments.push(document.fileName);
     return Promise.resolve(undefined);
   },
   showErrorMessage: (message: string) => {
@@ -87,10 +124,13 @@ export const window = {
   },
   createWebviewPanel: (): MockWebviewPanel => {
     let receiveListener: ((message: unknown) => void) | undefined;
+    let disposeListener: (() => void) | undefined;
+    const posted: unknown[] = [];
     const panel: MockWebviewPanel = {
       title: '',
       webview: {
         html: '',
+        cspSource: 'vscode-webview://mock',
         asWebviewUri: (uri: unknown) => ({ toString: () => String(uri) }),
         onDidReceiveMessage: (listener) => {
           receiveListener = listener;
@@ -98,18 +138,37 @@ export const window = {
         },
         // テストが「Webview内のスクリプトがvscode.postMessageを呼んだ」状況を再現するためのヘルパー。
         postMessageToExtension: (message: unknown) => receiveListener?.(message),
+        postMessage: (message: unknown) => {
+          posted.push(message);
+          return Promise.resolve(true);
+        },
+        posted,
       },
       reveal: () => undefined,
-      onDidDispose: () => ({ dispose: () => undefined }),
-      dispose: () => undefined,
+      onDidDispose: (listener: () => void) => {
+        disposeListener = listener;
+        return { dispose: () => undefined };
+      },
+      fireDispose: () => disposeListener?.(),
+      dispose: () => {
+        panel.disposed = true;
+      },
+      disposed: false,
     };
     lastCreatedWebviewPanel = panel;
     return panel;
   },
 };
 
+/**
+ * vscode.Uri の最小再現。webviewPanelBase は joinPath(...).fsPath でHTML資材を読むため、
+ * 文字列ではなく fsPath / toString を持つオブジェクトを返す。
+ */
 export const Uri = {
-  joinPath: (...segments: unknown[]) => segments.join('/'),
+  joinPath: (...segments: unknown[]) => {
+    const joined = segments.join('/');
+    return { fsPath: joined.replace(/^file:\/\//, ''), toString: () => joined };
+  },
 };
 
 export const ViewColumn = { Beside: 2, One: 1 };
