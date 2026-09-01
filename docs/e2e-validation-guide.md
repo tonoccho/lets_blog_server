@@ -639,7 +639,7 @@ F12 → Elements → Computed styles
 
 ### 自動 E2E
 
-- [ ] `cd web && npm run test:e2e` が完走する(手順は `docs/e2e-testing.md`)
+- [ ] `cd apps/web && npm run test:e2e` が完走する(手順は `docs/e2e-testing.md`)
 
 ---
 
