@@ -168,6 +168,10 @@ class NeutralClassification(unittest.TestCase):
         self.assertFalse(paths.is_declared_neutral("apps/web/src/app/page.tsx"))
         self.assertFalse(paths.is_declared_neutral("apps/web/e2e/steps/article.steps.ts"))
 
+    def test_declared_neutral_is_false_for_unknown_path(self):
+        """列挙のどれにも当たらないパスは「宣言された中立」ではない。"""
+        self.assertFalse(paths.is_declared_neutral("some/unknown/place/thing.txt"))
+
 
 class ClassifySplit(unittest.TestCase):
     def test_classify_splits_and_drops_neutral(self):
