@@ -47,11 +47,18 @@ export interface DirectResponse {
  * @param path    `/api/...` 形式のパス
  * @param options `token` を渡すと `Authorization: Bearer` を付ける。
  *                `rawAuthorization` は Bearer を含む生のヘッダ値(改竄トークンの検証用)。
+ *                `headers` は任意の追加ヘッダ。
  */
 export function requestServiceDirectly(
   service: DomainService,
   path: string,
-  options: { token?: string; rawAuthorization?: string; method?: string } = {}
+  options: {
+    token?: string;
+    rawAuthorization?: string;
+    method?: string;
+    /** 追加のリクエストヘッダー。gateway が付けるヘッダーの偽装(#943 / AT-17)に使う。 */
+    headers?: Record<string, string>;
+  } = {}
 ): DirectResponse {
   const url = `http://${service}:8080${path}`;
   const args = [
@@ -65,6 +72,9 @@ export function requestServiceDirectly(
     ?? (options.token ? `Bearer ${options.token}` : undefined);
   if (authorization) {
     args.push('--header', `Authorization: ${authorization}`);
+  }
+  for (const [name, value] of Object.entries(options.headers ?? {})) {
+    args.push('--header', `${name}: ${value}`);
   }
   args.push(url);
 
