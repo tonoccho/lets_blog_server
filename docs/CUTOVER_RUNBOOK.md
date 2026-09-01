@@ -20,7 +20,7 @@ Issue: [#591](https://github.com/tonoccho/lets_blog_server/issues/591) [E5] カ�
   Keycloakユーザー同期(#562)・全サービスのOAuth2 Resource Server化(#563)・
   WebのKeycloakプロバイダ移行(#564)・VSCode拡張のDevice Authorization Grant移行(#565)は
   **すべて完了(CLOSED)済み**。つまり `web`(NextAuth)と`extension`(VSCode拡張)は
-  現在すでにKeycloak経由のログインのみを実装しており、`web/src/lib/auth.ts` の
+  現在すでにKeycloak経由のログインのみを実装しており、`apps/web/src/lib/auth.ts` の
   `providers` 配列には Keycloak プロバイダ以外(旧来の Credentials プロバイダ)は存在しない。
 - 一方で、旧認証機構のバックエンドコード(`ApiKeyAuthFilter` / `AuthController` の
   ログイン・2FA・パスワードリセット系エンドポイント / `TwoFactorService` /
@@ -119,7 +119,7 @@ Issue: [#591](https://github.com/tonoccho/lets_blog_server/issues/591) [E5] カ�
 |---|---|---|---|
 | MySQL | `lets_blog`(レガシー/未分割スキーマ。`users`テーブルを含む) | 必須 | `identity`/`api`が接続する共有スキーマ |
 | MySQL | `lbs_identity` / `lbs_project` / `lbs_content` / `lbs_media` / `lbs_ai` / `lbs_publishing` / `lbs_analytics` / `lbs_platform` / `lbs_log` | 必須 | ADR-0004。`lbs_publishing`/`lbs_platform`は対応サービス未抽出のため空の想定だが、将来の取りこぼし防止のため対象に含める |
-| MySQL | WordPressサイトごとの動的DB(`wp_*`等。`wordpress/provision-agent/index.php`がサイト作成時に`CREATE DATABASE`する) | 必須 | **固定スキーマ名の列挙だけでは漏れる**。`mysqldump --all-databases`で一括取得することで担保する(下記1.3参照) |
+| MySQL | WordPressサイトごとの動的DB(`wp_*`等。`infra/wordpress/provision-agent/index.php`がサイト作成時に`CREATE DATABASE`する) | 必須 | **固定スキーマ名の列挙だけでは漏れる**。`mysqldump --all-databases`で一括取得することで担保する(下記1.3参照) |
 | PostgreSQL | `keycloak`(Keycloakのrealm/ユーザー/クレデンシャル情報) | 必須 | `lbs-keycloak-postgres`コンテナ |
 | Docker Volume | `generated_images` | 必須 | AI生成画像(issue本文で名指し) |
 | Docker Volume | `comfyui_models` | 必須 | issue本文で名指し。チェックポイント等 |
@@ -245,7 +245,7 @@ JWTのクレームではなくローカルDBのRole/Permissionを正とする」
 
 `letsblog-web` は confidential クライアントで PKCE(`S256`)必須、
 redirect_uri は `https://localhost/api/auth/callback/keycloak` の1件のみ
-(`keycloak/realm-export.json` で確認できる)。**Keycloakのクライアント設定は一切変更しない。**
+(`infra/keycloak/realm-export.json` で確認できる)。**Keycloakのクライアント設定は一切変更しない。**
 
 #### 手順
 
@@ -290,7 +290,7 @@ URL
 AUTH_CODE='<URLから取り出したcodeの値>'
 # client_secret が realm 側の値とずれていると invalid_client で失敗する。その場合は
 # Keycloak管理コンソール(letsblog realm → Clients → letsblog-web → Credentials)、
-# または keycloak/realm-export.json の当該クライアントの secret を正として .env を直す。
+# または infra/keycloak/realm-export.json の当該クライアントの secret を正として .env を直す。
 
 TOKEN_JSON=$(curl -sk -X POST \
   -d "grant_type=authorization_code" \
@@ -343,7 +343,7 @@ docker exec -e MYSQL_PWD="$LBS_IDENTITY_DB_PASSWORD" lbs-mysql \
 > **トークンの実値を [9. 実行記録](#9-実行記録) やGitへ残さないこと。**
 > 実行記録に書くのは「取得した/リフレッシュした」という事実と時刻だけにする。
 
-`keycloak/realm-export.json` の実値は次のとおり。
+`infra/keycloak/realm-export.json` の実値は次のとおり。
 
 | 設定 | 値 | 意味 |
 |---|---|---|
@@ -575,7 +575,7 @@ docker exec lbs-gateway curl -s -X POST \
 
   **注意: `/auth/admin/realms/letsblog/users` はKeycloak自身のAdmin REST APIであり、
   letsblog realmの業務用ロール(`admin`。`identity-service`の`requireAdmin()`が見るロール)
-  とは別物である。letsblog realmの`admin`ロール(`keycloak/realm-export.json`参照。
+  とは別物である。letsblog realmの`admin`ロール(`infra/keycloak/realm-export.json`参照。
   `composite: false`で`realm-management`クライアントロールを持たない)から発行された
   [1.5](#15-管理者トークンの事前取得)で取得した `$ADMIN_TOKEN` では権限不足(403)になる。
   このAPIを呼ぶには、`docker-compose.yml` の `keycloak` サービスに設定されている
@@ -608,7 +608,7 @@ docker exec lbs-gateway curl -s -X POST -H "Authorization: Bearer $ADMIN_TOKEN" 
 
 - 移行された各ユーザー宛にパスワード再設定メールが実際に届いていること
   (開発環境ではMailCatcher `http://localhost:1080` で確認できる。
-  [keycloak/README.md](../keycloak/README.md)参照)。
+  [infra/keycloak/README.md](../infra/keycloak/README.md)参照)。
 
 ---
 
@@ -616,8 +616,8 @@ docker exec lbs-gateway curl -s -X POST -H "Authorization: Bearer $ADMIN_TOKEN" 
 
 ### 4.1 realm定義の反映方法(重要な既知の制約)
 
-realm定義は `keycloak/realm-export.json` をGit管理し、`keycloak` コンテナが
-`start --import-realm` で起動時に自動importする(`keycloak/README.md`参照)。
+realm定義は `infra/keycloak/realm-export.json` をGit管理し、`keycloak` コンテナが
+`start --import-realm` で起動時に自動importする(`infra/keycloak/README.md`参照)。
 
 **Keycloakの `--import-realm` は「realmが存在しない場合のみ新規importする」動作であり、
 既にrealmが存在する状態(=Keycloakのデータボリュームが既に初期化済みの状態)で
@@ -626,7 +626,7 @@ realm定義は `keycloak/realm-export.json` をGit管理し、`keycloak` コン�
 realmの設定(クライアント追加、ロール変更等)を今回のカットオーバーに合わせて更新した
 場合は、以下のいずれかが必要になる。
 
-- 変更内容をKeycloak管理コンソールで手動反映し、`keycloak/README.md` の
+- 変更内容をKeycloak管理コンソールで手動反映し、`infra/keycloak/README.md` の
   「`realm-export.json` の再生成手順」に従ってエクスポートし直し、Gitへコミットする
   (通常の運用時の変更手順。データを失わない)。
 - 検証環境等でrealmを完全にリセットしたい場合のみ、`keycloak_postgres` ボリュームを
@@ -830,7 +830,7 @@ Keycloakから取り消す、等)は推奨しない。**
 - [3.4](#34-検証ポイント)のユーザー移行検証で `failed` が発生し、対象が全ユーザーの
   相当割合(目安: 過半数、または唯一の管理者アカウントを含む)に及ぶ
 - [4.2](#42-検証手順)のrealm検証(`.well-known`、クライアント一覧、ロール一覧)のいずれかが
-  失敗し、[keycloak/README.md](../keycloak/README.md)の手順で30分以内に復旧できない
+  失敗し、[infra/keycloak/README.md](../infra/keycloak/README.md)の手順で30分以内に復旧できない
 - [7. 疎通確認チェックリスト](#7-疎通確認チェックリスト)のうち「Webログイン」または
   「VSCodeログイン」が失敗し、原因調査が30分以内に完了しない
   (唯一のログイン経路が機能しない = サービス全体が使用不能と同義のため)
@@ -989,7 +989,7 @@ VSCode拡張については、配布済みの `.vsix` を旧バージョンへ�
   対象範囲の食い違いがある(1.2節参照)。両ドキュメントを現行アーキテクチャに合わせて
   更新することは本Issueのスコープ外のため、別Issueとして起票することを推奨する。
 - WordPressサイトの動的DBは、命名規則の一覧をコード上で確認できなかった
-  (`wordpress/provision-agent/index.php`が`CREATE DATABASE`する際の`dbName`は
+  (`infra/wordpress/provision-agent/index.php`が`CREATE DATABASE`する際の`dbName`は
   Web/API側から渡されるパラメータであり、固定の命名規則の定義箇所を本調査では特定していない)。
   `mysqldump --all-databases`を使うことで名前に依存せず取りこぼしを防いでいるが、
   復元時の突合(1.4節)は件数ベースの簡易チェックにとどまる。

@@ -25,7 +25,7 @@
 ## 2. なぜ playwright-bdd か
 
 `@cucumber/cucumber` 単体は独自のランナーを持ち込む。その場合、既存の
-[web/playwright.config.ts](../web/playwright.config.ts) が持つ次の資産をすべて再実装することになる。
+[apps/web/playwright.config.ts](../apps/web/playwright.config.ts) が持つ次の資産をすべて再実装することになる。
 
 - `globalSetup` — 全サービスの healthy 待ちと公開URL/Keycloak への疎通確認
 - `use.ignoreHTTPSErrors` — reverse-proxy の自己署名証明書
@@ -36,10 +36,10 @@
 ランナーは Playwright のまま。上記をそのまま使える。
 
 ```
-.feature ──(bddgen)──> web/.features-gen/**/*.spec.js ──(playwright test)──> 実行
+.feature ──(bddgen)──> apps/web/.features-gen/**/*.spec.js ──(playwright test)──> 実行
 ```
 
-生成物 `web/.features-gen/` はコミットしない。`.gitignore` / `eslint.config.mjs` /
+生成物 `apps/web/.features-gen/` はコミットしない。`.gitignore` / `eslint.config.mjs` /
 `tsconfig.json` の3か所で除外している(#848 と同型の再発防止。**除外を足すときは3か所とも**)。
 
 ---
@@ -48,12 +48,12 @@
 
 | パス | 内容 |
 | --- | --- |
-| `web/e2e/features/<domain>/*.feature` | 受け入れ基準。日本語の Gherkin で書く |
-| `web/e2e/steps/fixtures.ts` | 全ステップ定義が共有する `test` インスタンスと `Given/When/Then` |
-| `web/e2e/steps/<domain>.steps.ts` | ドメイン固有のステップ定義 |
-| `web/e2e/steps/common.steps.ts` | ドメイン横断の共通ステップ(ログイン済み状態など) |
-| `web/e2e/support/index.ts` | 既存 `web/e2e/helpers.ts` の再エクスポート |
-| `web/e2e/*.spec.ts` | 移行前の既存 Playwright spec(§7) |
+| `apps/web/e2e/features/<domain>/*.feature` | 受け入れ基準。日本語の Gherkin で書く |
+| `apps/web/e2e/steps/fixtures.ts` | 全ステップ定義が共有する `test` インスタンスと `Given/When/Then` |
+| `apps/web/e2e/steps/<domain>.steps.ts` | ドメイン固有のステップ定義 |
+| `apps/web/e2e/steps/common.steps.ts` | ドメイン横断の共通ステップ(ログイン済み状態など) |
+| `apps/web/e2e/support/index.ts` | 既存 `apps/web/e2e/helpers.ts` の再エクスポート |
+| `apps/web/e2e/*.spec.ts` | 移行前の既存 Playwright spec(§7) |
 
 `<domain>` は AT Issue の区切りに合わせる:
 `auth` / `users` / `projects` / `posts` / `bulk` / `ai` / `plans` / `media` / `diagrams` /
@@ -68,7 +68,7 @@
 
 ### フィクスチャを足すとき
 
-`web/e2e/steps/fixtures.ts` の `test` を拡張する。ステップ定義ファイルごとに
+`apps/web/e2e/steps/fixtures.ts` の `test` を拡張する。ステップ定義ファイルごとに
 `createBdd()` を呼び直すと、フィクスチャの型が食い違って生成時に落ちる。
 
 ---
@@ -104,7 +104,7 @@
 [e2e-testing.md §3](e2e-testing.md) を参照。受け入れテストも同じスタックに対して実行する。
 
 ```bash
-cd web
+cd apps/web
 
 npm run test:at            # 全件(@slow / @destructive を含む)
 npm run test:at:fast       # @slow と @destructive を除く
@@ -122,7 +122,7 @@ npm run test:at -- --grep "ログイン画面"
 
 `npm run test:e2e` は `.feature` と既存 spec の**両方**を実行する。
 
-`bddgen`(`.feature` → `web/.features-gen/`)は Playwright を起動する全 npm script の
+`bddgen`(`.feature` → `apps/web/.features-gen/`)は Playwright を起動する全 npm script の
 先頭で走るため、生成を手動で意識する必要はない。
 
 ### シナリオ名はそのままレポートに出る
@@ -138,7 +138,7 @@ npm run test:at -- --grep "ログイン画面"
 
 ## 6. 書き方
 
-`web/e2e/features/auth/login.feature`(#926 のサンプル):
+`apps/web/e2e/features/auth/login.feature`(#926 のサンプル):
 
 ```gherkin
 # language: ja
@@ -150,7 +150,7 @@ npm run test:at -- --grep "ログイン画面"
     ならば Keycloakのホスト型ログイン画面が表示される
 ```
 
-ステップ定義 `web/e2e/steps/auth.steps.ts`:
+ステップ定義 `apps/web/e2e/steps/auth.steps.ts`:
 
 ```typescript
 import { Then, When } from './fixtures';
@@ -239,7 +239,7 @@ docker compose -f docker-compose.yml -f docker-compose.e2e-stubs.yml up -d
 # システム設定(DB)に残っているLLM/画像生成の上書きを消す(下の「落とし穴」参照)
 ./scripts/e2e-clear-llm-db-overrides.sh --yes
 
-cd web && npm run test:at
+cd apps/web && npm run test:at
 ```
 
 ### 何をスタブ化しているか
@@ -253,7 +253,7 @@ cd web && npm run test:at
 | `image-stub` | OpenAI 画像生成(gpt-image-1) | `IMAGE_LLM_BASE_URL`(platform) | 18085 |
 | `github-stub` | GitHub REST API(issues) | `GITHUB_API_BASE_URL`(ai) | 18086 |
 
-実装は `e2e-stubs/<name>/server.js`、共通土台は `e2e-stubs/lib/stub.js`。
+実装は `infra/e2e-stubs/<name>/server.js`、共通土台は `infra/e2e-stubs/lib/stub.js`。
 `node:22-alpine` にソースをマウントするだけなので、イメージのビルドは要らない。
 
 **スタブ化しないもの**: ComfyUI / PlantUML / draw.io / Penpot / WordPress。
@@ -349,7 +349,7 @@ GA / AdSense / Brave / GitHub の資格情報は**プロジェクト単位のDB�
 ### スタブを直したら再起動する
 
 ソースはコンテナへ**マウント**されているが、Node はプロセス起動時に読み込む。
-`e2e-stubs/` を編集したら反映のために再起動すること。
+`infra/e2e-stubs/` を編集したら反映のために再起動すること。
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.e2e-stubs.yml restart \
@@ -367,7 +367,7 @@ docker compose -f docker-compose.yml -f docker-compose.e2e-stubs.yml restart \
 
 ```bash
 source ~/.config/lets-blog-e2e.env    # 合成アカウントの資格情報(リポジトリ外・モード600)
-cd web
+cd apps/web
 npm run test:at:clean                 # リセット → 段階順に全実行
 ```
 
@@ -402,7 +402,7 @@ Playwright はファイルをまたぐ直列化の手段を持たない(`@mode:s
 並列実行を壊すものも含む。
 
 段階は Playwright のプロジェクト間 `dependencies` で表現している
-([web/playwright.config.ts](../web/playwright.config.ts))。したがって:
+([apps/web/playwright.config.ts](../apps/web/playwright.config.ts))。したがって:
 
 - **`--project=at-destructive` を指定するだけでよい。** 依存する前段は Playwright が自動で先に走る。
   `npm run test:at` / `test:at:clean` はこれを指定している。
@@ -439,7 +439,7 @@ Playwright はファイルをまたぐ直列化の手段を持たない(`@mode:s
 
 `*_test` スキーマ(ホストからの `./gradlew test` 用)には触れない。
 
-スキーマを作り直すと `GRANT` が失われるため、`mysql/init/01-create-service-schemas.sh` を
+スキーマを作り直すと `GRANT` が失われるため、`infra/mysql/init/01-create-service-schemas.sh` を
 再実行して権限を張り直す。ここが失敗すると各サービスの Flyway が起動時に落ちるので、
 スクリプトはこの失敗で中断する。
 
@@ -511,7 +511,7 @@ $ npm run test:at         # 資格情報を渡さずに実行した場合
 このレルムでは required action の `VERIFY_PROFILE` が有効になっている。
 `firstName` / `lastName` が空のユーザーは、ブラウザのログインでは補完画面が出るだけだが、
 **パスワードグラント(直接付与)では `Account is not fully set up` で失敗する**。
-`web/e2e` の `fetchAccessToken()` はパスワードグラントを使うため、ここが埋まっていないと
+`apps/web/e2e` の `fetchAccessToken()` はパスワードグラントを使うため、ここが埋まっていないと
 API直叩きのテストが1件も動かない。
 
 identity-service の `KeycloakAdminClient#createUser` は `firstName`/`lastName` を送らないので、
@@ -528,7 +528,7 @@ identity-service の `KeycloakAdminClient#createUser` は `firstName`/`lastName`
 むしろ残しておいたほうが失敗の調査ができる。
 
 `global-teardown.ts` と `E2E_DB_CLEANUP` を残しているのは、`.feature` へ未移行の
-Playwright spec(`web/e2e/*.spec.ts`)が「既存データを壊さない一意なフィクスチャ」という
+Playwright spec(`apps/web/e2e/*.spec.ts`)が「既存データを壊さない一意なフィクスチャ」という
 **逆の前提**で書かれており、その孤児行の掃除には依然として必要だから(#765)。
 全 spec の移行が終わった時点で teardown ごと削除する(§7)。
 
@@ -537,7 +537,7 @@ Playwright spec(`web/e2e/*.spec.ts`)が「既存データを壊さない一意�
 ## 11. 参考
 
 - [ACCEPTANCE_CRITERIA.md](ACCEPTANCE_CRITERIA.md) — 受け入れ基準カタログ(機能IDと検証状況)
-- `docker-compose.e2e-stubs.yml` / `e2e-stubs/` — 外部依存スタブ(§9)
+- `docker-compose.e2e-stubs.yml` / `infra/e2e-stubs/` — 外部依存スタブ(§9)
 - [e2e-testing.md](e2e-testing.md) — スタック起動、Keycloak プロビジョニング、テストデータ、トラブルシューティング
 - [TEST_DOCUMENTATION.md](TEST_DOCUMENTATION.md) — テスト全体の階層
 - [playwright-bdd](https://vitalets.github.io/playwright-bdd/)

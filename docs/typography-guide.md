@@ -274,7 +274,7 @@ Line Height（px） = Font Size（px） × Line Height（倍数）
 
 ### 4.1 Tailwind Config 拡張
 
-**ファイル:** `web/tailwind.config.ts`
+**ファイル:** `apps/web/tailwind.config.ts`
 
 ```typescript
 export default {

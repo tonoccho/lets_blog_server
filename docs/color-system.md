@@ -176,7 +176,7 @@
 
 ### 4.1 CSS カスタムプロパティ
 
-**ファイル:** `web/src/styles/colors.css`
+**ファイル:** `apps/web/src/styles/colors.css`
 
 ```css
 /* Light mode (default) */
@@ -258,7 +258,7 @@
 
 ### 4.2 Tailwind Config 拡張
 
-**ファイル:** `web/tailwind.config.ts`
+**ファイル:** `apps/web/tailwind.config.ts`
 
 ```typescript
 export default {

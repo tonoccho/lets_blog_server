@@ -277,40 +277,42 @@ lets-blog-server/
 │   ├── e2e-validation-guide.md
 │   └── DOCUMENTATION.md (本ファイル)
 │
-├── mcp-server/                    # MCP サーバー（Ollama 連携）
-│   ├── src/
-│   │   ├── server.js
-│   │   ├── clients/
-│   │   ├── tools/
-│   │   └── utils/
-│   ├── package.json
-│   ├── Dockerfile
-│   └── README.md
+├── apps/                          # 利用者が直接触るアプリケーション(#963)
+│   ├── mcp-server/                # MCP サーバー（Ollama 連携）
+│   │   ├── src/
+│   │   │   ├── server.js
+│   │   │   ├── clients/
+│   │   │   ├── tools/
+│   │   │   └── utils/
+│   │   ├── package.json
+│   │   ├── Dockerfile
+│   │   └── README.md
+│   │
+│   ├── penpot-plugin/             # Penpot AI プラグイン
+│   │   ├── src/
+│   │   │   ├── plugin.ts
+│   │   │   ├── ui.ts
+│   │   ├── manifest.json
+│   │   ├── ui.html
+│   │   ├── styles.css
+│   │   └── package.json
+│   │
+│   └── web/                       # Next.js Web App
+│       ├── src/
+│       │   ├── app/
+│       │   ├── components/
+│       │   ├── constants/
+│       │   ├── hooks/
+│       │   └── styles/
+│       ├── tailwind.config.ts
+│       ├── package.json
+│       └── ...
 │
-├── penpot-plugin/                 # Penpot AI プラグイン
-│   ├── src/
-│   │   ├── plugin.ts
-│   │   ├── ui.ts
-│   ├── manifest.json
-│   ├── ui.html
-│   ├── styles.css
-│   └── package.json
-│
-├── web/                           # Next.js Web App
-│   ├── src/
-│   │   ├── app/
-│   │   ├── components/
-│   │   ├── constants/
-│   │   ├── hooks/
-│   │   └── styles/
-│   ├── tailwind.config.ts
-│   ├── package.json
-│   └── ...
-│
-└── nginx/                         # Reverse Proxy
-    └── conf.d/
-        ├── penpot.conf
-        └── mcp.conf
+└── infra/                         # ミドルウェアの設定(#963)
+    └── nginx/                     # Reverse Proxy
+        └── conf.d/
+            ├── penpot.conf
+            └── mcp.conf
 ```
 
 ### コンポーネント開発
@@ -318,7 +320,7 @@ lets-blog-server/
 #### Button コンポーネント例
 
 ```typescript
-// web/src/components/ui/Button.tsx
+// apps/web/src/components/ui/Button.tsx
 
 import { ReactNode } from 'react';
 import { cn } from '@/utils/cn';
@@ -377,7 +379,7 @@ export function Button({
 #### ダッシュボードページ例
 
 ```typescript
-// web/src/app/(dashboard)/page.tsx
+// apps/web/src/app/(dashboard)/page.tsx
 
 import { Header } from '@/components/layout/Header';
 import { Sidebar } from '@/components/layout/Sidebar';
@@ -432,7 +434,7 @@ export default function DashboardPage() {
 #### エンドポイント例（Express）
 
 ```typescript
-// mcp-server/src/server.js
+// apps/mcp-server/src/server.js
 
 app.post('/api/design-suggestion', async (req, res) => {
   try {
@@ -456,7 +458,7 @@ app.post('/api/design-suggestion', async (req, res) => {
 #### Jest テスト例
 
 ```typescript
-// web/src/components/ui/__tests__/Button.test.tsx
+// apps/web/src/components/ui/__tests__/Button.test.tsx
 
 import { render, screen } from '@testing-library/react';
 import { Button } from '../Button';
@@ -553,7 +555,7 @@ Penpot Plugin
 #### 1. ツール関数を作成
 
 ```typescript
-// mcp-server/src/tools/generateLayoutSuggestions.ts
+// apps/mcp-server/src/tools/generateLayoutSuggestions.ts
 
 export async function generateLayoutSuggestions(brief: string) {
   const prompt = `
@@ -580,7 +582,7 @@ export async function generateLayoutSuggestions(brief: string) {
 #### 2. API エンドポイント を作成
 
 ```typescript
-// mcp-server/src/server.js
+// apps/mcp-server/src/server.js
 
 app.post('/api/generate-layout', async (req, res) => {
   try {
@@ -596,7 +598,7 @@ app.post('/api/generate-layout', async (req, res) => {
 #### 3. Penpot プラグイン に追加
 
 ```typescript
-// penpot-plugin/src/ui.ts
+// apps/penpot-plugin/src/ui.ts
 
 async function getLayoutSuggestion() {
   const brief = document.getElementById('brief').value;
@@ -686,7 +688,7 @@ A: 初回ダウンロード時に 5GB 以上必要です。
 **Q: プラグインがPenpotで読み込まれません**
 
 A: 以下を確認してください：
-1. `penpot-plugin/manifest.json` が存在するか
+1. `apps/penpot-plugin/manifest.json` が存在するか
 2. `npm run build` でビルド済みか
 3. `plugin.js` が dist/ に存在するか
 4. ブラウザキャッシュをクリア（Ctrl+Shift+Delete）
@@ -741,7 +743,7 @@ window.matchMedia('(prefers-color-scheme: dark)').matches
 A: 以下の手順で作成してください：
 
 1. `docs/design-tokens.json` で色・タイポを確認
-2. `web/src/components/ui/YourComponent.tsx` を作成
+2. `apps/web/src/components/ui/YourComponent.tsx` を作成
 3. Tailwind CSS クラスを使用（CSS-in-JS 不推奨）
 4. Storybook に追加（オプション）
 5. PR でレビュー依頼

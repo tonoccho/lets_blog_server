@@ -53,7 +53,7 @@ The project uses multiple layers of automated security scanning to detect vulner
 
 **Local Usage**:
 ```bash
-cd web
+cd apps/web
 npm audit              # Show vulnerabilities
 npm audit fix         # Attempt automatic fixes
 npm audit fix --force # Force fixes (may introduce breaking changes)
@@ -231,8 +231,8 @@ Regular security reviews recommended:
 
 ```bash
 # Local dependency audits
-cd web && npm audit
-cd extension && npm audit
+cd apps/web && npm audit
+cd apps/extension && npm audit
 cd api && ./gradlew dependencyCheck
 
 # Check for outdated dependencies

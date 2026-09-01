@@ -54,7 +54,7 @@ identity-service / log-writer が従来から行っていた、各コントロ�
 
 | 呼び出し元 | エンドポイント | 扱い |
 |---|---|---|
-| `web/src/lib/errorLogger.ts`(#791 以前はブラウザから直接) | `POST /api/logs/errors` | legacy-api 時代も401だったため後退ではない。**#791 で是正済み**: ブラウザは同一オリジンのBFF `POST /client-errors`(`web/src/app/client-errors/route.ts`)を呼び、そこから server-only の `apiClient` 経由でBearer付きで log-writer へ中継する。log-writerの`PUBLIC_PATHS`は増やしていない(未認証の書き込み経路を残さないため) |
+| `apps/web/src/lib/errorLogger.ts`(#791 以前はブラウザから直接) | `POST /api/logs/errors` | legacy-api 時代も401だったため後退ではない。**#791 で是正済み**: ブラウザは同一オリジンのBFF `POST /client-errors`(`apps/web/src/app/client-errors/route.ts`)を呼び、そこから server-only の `apiClient` 経由でBearer付きで log-writer へ中継する。log-writerの`PUBLIC_PATHS`は増やしていない(未認証の書き込み経路を残さないため) |
 | `scripts/provision-e2e-keycloak-users.sh` | `POST /api/users` | #772 で `letsblog-services` の Client Credentials を使うようにしたが、#796 で同エンドポイントが admin 限定になったため方式を変更した。サービスアカウントの `sub` に対応するローカル `users` 行が無く `CurrentActorService` が操作者を解決できないため、Client Credentials トークンでは `requireAdmin()` を通れない。現在は `letsblog-e2e` の password グラントで**実在する admin ユーザー**のトークンを取得する |
 
 #### identity-service の `/api/users` の認可(#796・#798 適用後)
@@ -110,7 +110,7 @@ identity-service / log-writer が従来から行っていた、各コントロ�
 ##### 無効化されたユーザーの発行済みトークン(#816 で一部解消)
 
 `deactivate` は Keycloak 側とローカルの `users.enabled` を落とすが、**すでに発行済みの
-アクセストークンは失効しない**(`keycloak/realm-export.json` の `accessTokenLifespan: 300`)。
+アクセストークンは失効しない**(`infra/keycloak/realm-export.json` の `accessTokenLifespan: 300`)。
 Keycloak が止めるのは新規のトークン発行だけで、既存トークンの署名も有効期限も変わらない。
 
 #816 以前は identity-service の `CurrentActorService#resolveJwtActor` が `User.enabled` を
@@ -190,7 +190,7 @@ identity-service 障害時に権限チェックが素通りする方向の不具
 
 ###### 再発防止
 
-`web/src/__tests__/serverActionAuthorization.test.ts` が `src/app` 配下の
+`apps/web/src/__tests__/serverActionAuthorization.test.ts` が `src/app` 配下の
 `actions.ts` を走査し、各 Server Action が
 **認可呼び出しを持つか、JSDoc に「意図的に未認証」と理由を書いているか**のどちらかであることを
 検証する。次に Server Action を足したとき、どちらも無ければ落ちる。
@@ -352,7 +352,7 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 個々について「認証のみでよいか、認可が必要か」を決めるのは**製品判断**を伴い、一度には片付かない。
 一方でその間に新しい無認可エンドポイントが増え続けると差は開く一方になる。
 
-そこで **`AuthorizationCoverageContract`**(`libs/lbs-common` の testFixtures)で
+そこで **`AuthorizationCoverageContract`**(`packages/lbs-common` の testFixtures)で
 現状を許可リストとして固定し、**増えることだけを止める**。
 
 - 許可リストに**無い**無認可エンドポイントが現れたら失敗する(新規の付け忘れを検知)
@@ -473,7 +473,7 @@ content-service / media-service のコンテナ間呼び出しだけだった。
 レート制限 / クォータで扱う問題として本Issueのスコープ外とした。
 
 `GenerationJobController` の `list` / `get` は、ログイン後の共通ダッシュボード
-(`web/src/app/page.tsx`)が表示するジョブ履歴。**ただし `generation_jobs` に所有者を表す列が無く、
+(`apps/web/src/app/page.tsx`)が表示するジョブ履歴。**ただし `generation_jobs` に所有者を表す列が無く、
 「自分のジョブだけ」に絞ることが今のスキーマではできない。** 利用者ごとに絞るなら列の追加を伴うため、
 ギャップとして記録するに留めた。
 
@@ -606,7 +606,7 @@ identity-service には admin かどうかを決める仕組みが**2つ**ある
 | **従** | Keycloak realm ロール `admin` → JWT の `realm_access.roles` | identity-service が `users.role` に追随させる | **Web(Next.js)のセッションロール判定** |
 
 Web はサーバー側で JWT の `realm_access.roles` からセッションのロールを決め
-(`web/src/lib/auth.ts`)、管理者専用パスをそれで塞ぐ(`web/src/proxy.ts` の
+(`apps/web/src/lib/auth.ts`)、管理者専用パスをそれで塞ぐ(`apps/web/src/proxy.ts` の
 `ADMIN_ONLY_PREFIXES`)。ローカルDBを引かないため、**identity-service が realm ロールを
 同期しないと画面だけが非管理者として振る舞う**。#955 はまさにこれで、
 初回セットアップで作った最初の管理者が `/users` にも `/admin/*` にも入れなかった
@@ -658,7 +658,7 @@ admin 性と無関係な RBAC ロールの付け外しまで Keycloak の一時�
 #### 必要な Keycloak の権限
 
 `letsblog-services` のサービスアカウントが持つ `realm-management` のロールは
-`manage-users` と `view-users` だけである(`keycloak/realm-export.json`)。
+`manage-users` と `view-users` だけである(`infra/keycloak/realm-export.json`)。
 ロールマッピングは「ロールの表現(`id` + `name`)の配列」を要求するため id の解決が要るが、
 素直な `GET /admin/realms/{realm}/roles/{name}` は **`view-realm` を要求し、実機で 403 になる**。
 
@@ -888,7 +888,7 @@ platform-service所有(issue #694)。未認証401はplatform-serviceの`Security
 ## DashboardController (5エンドポイント、ベースパス `/api/dashboard`)
 
 platform-service所有(issue #695)。未認証401はplatform-serviceの`SecurityConfig`が担う(#705)。
-SSE配信の2エンドポイントもブラウザから直接ではなくWeb BFF(`web/src/app/api/dashboard/*/stream/route.ts`)が
+SSE配信の2エンドポイントもブラウザから直接ではなくWeb BFF(`apps/web/src/app/api/dashboard/*/stream/route.ts`)が
 Authorizationヘッダーを付けて中継するため、認証必須化の影響を受けない。
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
@@ -908,12 +908,12 @@ Authorizationヘッダーを付けて中継するため、認証必須化の影�
 
 ### フロントエンドエラーログの経路(#791)
 
-ブラウザは `POST /api/logs/errors` を直接叩かない。`web/src/lib/errorLogger.ts` は同一オリジンの
+ブラウザは `POST /api/logs/errors` を直接叩かない。`apps/web/src/lib/errorLogger.ts` は同一オリジンの
 `POST /client-errors` を呼び、Next.js の Route Handler が server-only の `apiClient` 経由で
 Bearer を付けて log-writer へ中継する。
 
 BFF を `/api/` の下に置いていないのは、nginx の `location /api/`
-(`nginx/conf.d/default.conf:68`)が NextAuth 用の正規表現 location を除き `/api/**` を
+(`infra/nginx/conf.d/default.conf:68`)が NextAuth 用の正規表現 location を除き `/api/**` を
 無条件に gateway へ転送するためで、`/api/**` に置いた Route Handler は到達しない。
 
 **未認証時の挙動**: セッションが無い(または `session.error` が立っている)状態で発生した
@@ -922,7 +922,7 @@ BFF を `/api/` の下に置いていないのは、nginx の `location /api/`
 スパム・容量枯渇の的になるため(ADR-0008)。ブラウザ側では error boundary が
 `logErrorToConsole()` も呼ぶため、コンソールには常に残る。
 
-この判定を BFF 自身が行えるよう、`web/src/proxy.ts` は `/client-errors` を
+この判定を BFF 自身が行えるよう、`apps/web/src/proxy.ts` は `/client-errors` を
 **完全一致**で素通しする。素通ししないと proxy が先に `/login` へ307リダイレクトを返してしまい、
 レスポンスを見ない fire-and-forget のビーコンに対して無意味なリダイレクトと
 `needsInitialSetup()` の gateway 呼び出しが1件ずつ発生する。
@@ -1151,7 +1151,7 @@ issue #705でも変更しておらず、下記「既知のギャップ」に残�
 >
 > **現在の一次情報はこの節ではない。** 上の「[認可チェックの網羅状況(issue #830)]
 > (#認可チェックの網羅状況issue-830)」節と、そこで説明している
-> `AuthorizationCoverageContract`(`libs/lbs-common` の testFixtures)の許可リストが
+> `AuthorizationCoverageContract`(`packages/lbs-common` の testFixtures)の許可リストが
 > 一次情報である。許可リストは**全10サービスで空**であり、認可チェックを持たない
 > エンドポイントが新たに増えると各サービスの `AuthorizationCoverageTest` が失敗する。
 >

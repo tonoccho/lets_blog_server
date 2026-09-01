@@ -55,7 +55,7 @@ docker compose up -d
 
 `.env` は初回に `cp` で作るきりなので、その後 `.env.example` に項目が増えても追随しない。
 追随漏れは静かに壊れる — `docker compose` は警告を出すが起動自体は成功し、
-`mysql/init/01-create-service-schemas.sh` は `LBS_*_DB_PASSWORD` が空だと該当ユーザーの
+`infra/mysql/init/01-create-service-schemas.sh` は `LBS_*_DB_PASSWORD` が空だと該当ユーザーの
 作成を**スキップする**(#756 ではこれで `lbs_backup` が作られず、バックアップ機能が動かなかった)。
 
 ```bash
@@ -219,12 +219,12 @@ Web管理画面側では自己署名証明書の信頼設定(`NODE_EXTRA_CA_CERT
 
 より高速なホットリロードを求める場合など、コンテナを使わずホスト上で直接起動することもできる。
 この場合は `docker-compose.yml` の `web` サービスを停止し(`docker compose stop web`)、
-リバースプロキシがホスト側の3000番へ到達できるよう `nginx/conf.d/default.conf` の
+リバースプロキシがホスト側の3000番へ到達できるよう `infra/nginx/conf.d/default.conf` の
 `location /` の `proxy_pass` 先を `host.docker.internal:3000` に戻す必要がある(Linuxでは
 `reverse-proxy` サービスに `extra_hosts: ["host.docker.internal:host-gateway"]` の追加が必要)。
 
 ```bash
-cd web
+cd apps/web
 cp .env.local.example .env.local
 vi .env.local   # LETS_BLOG_GATEWAY_URL=https://localhost, NODE_EXTRA_CA_CERTS=../certs/localhost.crt 等
 npm install
@@ -315,7 +315,7 @@ LISTENしているかを確認する(環境変数変更後はプロセス再起�
 
 **Web管理画面からのAPI呼び出しが `DEPTH_ZERO_SELF_SIGNED_CERT` で失敗する**
 コンテナ化された `web` サービスでは内部通信が平文HTTP(`http://api:8080`)のため通常発生しない。
-ホスト上で `npm run dev` を直接起動する代替方式を使っている場合のみ、`web/.env.local` の
+ホスト上で `npm run dev` を直接起動する代替方式を使っている場合のみ、`apps/web/.env.local` の
 `NODE_EXTRA_CA_CERTS` が正しいパス(`../certs/localhost.crt`)を指しているか確認し、
 `npm run dev` を再起動する(環境変数の変更はプロセス再起動が必要)。
 
@@ -336,7 +336,7 @@ Phase 6以降は意図した仕様(すべて `https://localhost/...` 経由に�
 
 ## 関連ドキュメント
 
-- [nginx/conf.d/default.conf](../nginx/conf.d/default.conf) — リバースプロキシのルーティング設定
+- [infra/nginx/conf.d/default.conf](../infra/nginx/conf.d/default.conf) — リバースプロキシのルーティング設定
   (どのパスをどのサービスへ振り分けるか、その判断理由がコメントに書かれている)
 - [docs/DOCKER_COMPOSE_ARCHITECTURE.md](DOCKER_COMPOSE_ARCHITECTURE.md) — コンテナ構成・ポート割当・起動順序
 - [.env.example](../.env.example) — 環境変数の全項目

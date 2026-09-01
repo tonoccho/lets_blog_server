@@ -387,7 +387,7 @@ or `rabbitmq` never becomes healthy, everything that depends on them stays stuck
      failing component (mail, datasource, etc.) rather than assuming the whole app is down.
 
 4. **A dependency's schema/user init script didn't run**
-   The per-service MySQL schemas/users (#570, `mysql/init/`) only get created on a *fresh*
+   The per-service MySQL schemas/users (#570, `infra/mysql/init/`) only get created on a *fresh*
    MySQL data volume — recreating the `mysql` container alone does not re-run them. If a
    service errors with "Access denied" for its own schema user, you likely need
    `docker compose down -v` (destroys the MySQL volume — only do this in a disposable dev
