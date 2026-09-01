@@ -19,7 +19,7 @@
     "test:at:ui": "rm -rf .features-gen && bddgen && playwright test --project=at-destructive --ui",
     "test:at:clean": "rm -rf .features-gen && bddgen && ACCEPTANCE_RESET=1 playwright test --project=at-destructive",
     "test:a11y": "rm -rf .features-gen && bddgen && playwright test --grep Accessibility",
-    "generate:api-client": "cd .. && ./scripts/generate-api-client.sh"
+    "generate:api-client": "cd ../.. && ./scripts/generate-api-client.sh"
   },
   "dependencies": {
     "jose": "^6.2.10",

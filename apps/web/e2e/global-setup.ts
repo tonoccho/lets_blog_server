@@ -31,7 +31,7 @@ import { waitForServicesHealthy } from './helpers';
  */
 export default async function globalSetup(config: FullConfig): Promise<void> {
   const baseURL = config.projects[0]?.use?.baseURL ?? 'https://localhost';
-  const repoRoot = path.resolve(__dirname, '..', '..');
+  const repoRoot = path.resolve(__dirname, '..', '..', '..');
 
   if (process.env.ACCEPTANCE_RESET === '1') {
     console.log('[e2e] ACCEPTANCE_RESET=1: 受け入れテスト環境をリセットします(破壊的)');

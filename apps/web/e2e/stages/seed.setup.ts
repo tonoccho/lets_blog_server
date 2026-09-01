@@ -15,7 +15,7 @@ import { expect, test } from '@playwright/test';
  *
  * 段階順: reset(スクリプト) → at-setup → **at-seed** → at-provision → at-main
  */
-const REPO_ROOT = path.resolve(__dirname, '../../..');
+const REPO_ROOT = path.resolve(__dirname, '../../../..');
 
 test('受け入れテスト環境にシードを投入する', () => {
   // provision-e2e-keycloak-users.sh は Keycloak Admin CLI とユーザー作成APIを叩くため、

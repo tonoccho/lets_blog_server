@@ -21,7 +21,7 @@ import path from 'node:path';
  * 掃除には依然として必要だから。全 spec の移行が終わった時点で、この teardown ごと削除する。
  */
 export default async function globalTeardown(): Promise<void> {
-  const repoRoot = path.resolve(__dirname, '..', '..');
+  const repoRoot = path.resolve(__dirname, '..', '..', '..');
   const script = path.join(repoRoot, 'scripts', 'e2e-cleanup-test-data.sh');
 
   if (process.env.E2E_DB_CLEANUP !== '1') {

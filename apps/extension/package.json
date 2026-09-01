@@ -236,7 +236,7 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -w -p ./",
-    "generate:api-client": "cd .. && ./scripts/generate-api-client.sh",
+    "generate:api-client": "cd ../.. && ./scripts/generate-api-client.sh",
     "test": "jest",
     "test:coverage": "jest --coverage"
   },

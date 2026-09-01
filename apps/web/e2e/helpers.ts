@@ -17,8 +17,8 @@ export const E2E_ADMIN_EMAIL = 'e2e-admin@letsblog.local';
 export const E2E_TEST_PASSWORD = process.env.E2E_TEST_PASSWORD ?? '';
 export const E2E_ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? '';
 
-/** リポジトリルート(apps/web/e2e から2階層上)。スクリプト実行のたびに解決する。 */
-const REPO_ROOT = path.resolve(__dirname, '..', '..');
+/** リポジトリルート(apps/web/e2e から3階層上)。スクリプト実行のたびに解決する。 */
+const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 
 /**
  * issue #564: Keycloakへの移行に伴い、/loginは自前フォームを持たずKeycloakのホスト型
