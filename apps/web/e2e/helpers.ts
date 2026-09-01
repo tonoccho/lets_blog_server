@@ -105,8 +105,9 @@ export async function fetchAccessToken(
 
 /**
  * docker composeのサービスを停止/起動する(issue #588、サービス障害時の縮退表示の検証用)。
- * スタック全体を壊しうる操作のため、呼び出し側はE2E_ALLOW_SERVICE_DISRUPTIONが
- * 設定されている場合のみ使うこと(service-degradation.spec.ts参照)。
+ * スタック全体を壊しうる操作のため、呼び出すシナリオには必ず `@destructive` を付け、
+ * 停止したサービスを後始末で起動し直すこと
+ * (`e2e/features/cross-cutting/service-degradation.feature` と `e2e/steps/degradation.steps.ts`)。
  */
 export function composeServiceControl(action: 'stop' | 'start', service: string): void {
   execFileSync('docker', ['compose', action, service], {

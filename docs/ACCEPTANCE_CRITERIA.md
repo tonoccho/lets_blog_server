@@ -350,20 +350,21 @@ API: log-writer `AuditLogController`, `OperationLogController`, `FrontendErrorLo
 | AC-EXT-023 | `letsBlog.pasteSmartCard` | リンクを見栄えよく貼れる | URLがブログカード/Amazonカードとして挿入される | — | 未着手 |
 | AC-EXT-024 | `letsBlog.pasteAsLink` | リンクを簡潔に貼れる | URLがタイトル付きリンクとして挿入される | — | 未着手 |
 
-### 2.15 横断的品質(認可・ルーティング・縮退) — `XC`
+### 2.15 横断的品質(認可・ルーティング・レート制限・相関ID・縮退) — `XC`
 
 | 機能ID | 機能 | 利用者から見た価値 | 受け入れ基準(要約) | 対応シナリオ | 状態 |
 | --- | --- | --- | --- | --- | --- |
-| AC-XC-001 | エンドポイント認可 | 権限の無い操作ができない | [AUTHORIZATION_MATRIX.md](AUTHORIZATION_MATRIX.md) の全行が、想定ロールでのみ成功し他は403(#830 の再発検知) | — | 未着手(`@api`) |
+| AC-XC-001 | エンドポイント認可 | 権限の無い操作ができない | [AUTHORIZATION_MATRIX.md](AUTHORIZATION_MATRIX.md) の全行が、想定ロールでのみ成功し他は403(#830 の再発検知) | `features/cross-cutting/authorization-matrix.feature` › 認可マトリクスが未認証401としている全エンドポイントは、認証なしでは拒否される / 認可マトリクスが権限不足403としている全エンドポイントは、権限の無い利用者を拒否する / 権限の無い利用者は投稿の公開も削除もできない | 検証済(`@api`) |
 | AC-XC-002 | Server Action の認可 | 画面経由でも権限が効く | 認可を要する Server Action が未認可では拒否される(#824 の再発検知) | — | 未着手 |
-| AC-XC-003 | gateway ルーティング | 追加したAPIが正しいサービスへ届く | 全公開ルートが意図したサービスへ到達する(#861 の再発検知) | — | 未着手(`@api`) |
-| AC-XC-004 | レート制限 | 過剰な要求でシステムが倒れない | 制限超過時に429が返り、通常利用は影響を受けない | — | 未着手(`@api`) |
-| AC-XC-005 | 相関IDの伝播 | 障害を横断的に追跡できる | 1リクエストの相関IDが全サービスのログで一致する | — | 未着手(`@api`) |
-| AC-XC-006 | 下流障害時の縮退 | 一部が落ちても画面が壊れない | ダッシュボード状態APIが落ちても直近表示を維持し、content 停止時も投稿履歴は空状態で表示される | `e2e/service-degradation.spec.ts` › ダッシュボードの状態APIが落ちてもページは壊れず、直近の表示を維持する / content-serviceが停止していても投稿履歴ページは空状態で表示される | 既存spec(`@destructive`) |
+| AC-XC-003 | gateway ルーティング | 追加したAPIが正しいサービスへ届く | 全公開ルートが意図したサービスへ到達する(#861 の再発検知) | `features/cross-cutting/gateway-routing.feature` › 全公開エンドポイントがgateway経由で担当サービスまで到達する / gatewayを迂回した直接アクセスは、gatewayが付けるヘッダを偽装しても拒否される | 検証済(`@api`。到達先が**どのサービスか**は `RouteControllerContractTest` が正。[ACCEPTANCE_TESTING.md §11](ACCEPTANCE_TESTING.md)) |
+| AC-XC-004 | レート制限 | 過剰な要求でシステムが倒れない | 制限超過時に429が返り、通常利用は影響を受けない | `features/cross-cutting/rate-limit.feature` › 短時間に上限を超えて要求すると429と再試行までの時間が返る / あるクライアントが上限に達しても、別のクライアントの要求は通る / 制限の時間枠が明けると再び受理される | 検証済(`@api`。時間枠の回復は `@slow`) |
+| AC-XC-005 | 相関IDの伝播 | 障害を横断的に追跡できる | 1リクエストの相関IDが全サービスのログで一致する | `features/cross-cutting/correlation-id.feature` › クライアントが送った相関IDが下流サービスのログに現れる / クライアントが相関IDを送らないとgatewayが採番して応答ヘッダで返す / 1つの操作のログをgatewayと下流サービスで同じ相関IDから追える | 検証済(`@api`。ただし project / publishing はログにIDを出しておらず対象にできない。#992) |
+| AC-XC-006 | 下流障害時の縮退 | 一部が落ちても画面が壊れない | 下流サービス(content / ai / media / log-writer)が停止していても、画面は壊れず業務操作は続けられ、復旧後は追加の操作なしに元へ戻る | `features/cross-cutting/service-degradation.feature` › ダッシュボードの状態APIが落ちてもページは壊れず、直近の表示を維持する / content-serviceが停止していても投稿履歴ページは空状態で表示される / ai-serviceが停止していてもAI以外の機能は使える / media-serviceが停止していても記事の公開はできる / log-writerが停止していても業務操作は成功する / 停止したサービスが復旧すると追加の操作なしに機能が戻る | 検証済(`@destructive`) |
 | AC-XC-007 | 障害の種別判別 | 認可拒否と本当の障害を区別できる | identity の401/403がサービス障害(502)として扱われない(#829 の再発検知) | — | 未着手(`@api`) |
 | AC-XC-008 | CSRF保護 | 外部サイトから操作されない | 保護対象フォームにCSRFトークンが含まれる | `e2e/security.spec.ts` › CSRF保護確認: トークンが含まれていることを確認 | 既存spec |
 | AC-XC-009 | SQLインジェクション対策 | 不正な入力でデータが壊れない | 特殊文字を含むクエリが安全に処理される | `e2e/security.spec.ts` › SQLインジェクション対策: 特殊文字を含むクエリが安全に処理されること | 既存spec |
 | AC-XC-010 | 入力サニタイズ | 危険な入力が保存されない | ユーザー入力がサニタイズされて保存・表示される | `e2e/security.spec.ts` › 入力サニタイズ: ユーザー入力が正しくサニタイズされること | 既存spec |
+| AC-XC-011 | 認可表の網羅性 | 認可の一次情報が実態とずれない | 実装から抽出した公開エンドポイント集合と [AUTHORIZATION_MATRIX.md](AUTHORIZATION_MATRIX.md) の差分が空である(#731 の陳腐化の再発防止) | `features/cross-cutting/authorization-matrix.feature` › 公開エンドポイントはすべて認可マトリクスに載っている | 実装中(`@api`。シナリオは通っていない。認可表に無い公開エンドポイントが22件あるため。#991) |
 
 ### 2.16 横断的品質(i18n・a11y・レスポンシブ) — `UX`
 
