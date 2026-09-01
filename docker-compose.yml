@@ -648,8 +648,9 @@ services:
       # 削除して参照元が無くなり、スキーマ自体も DROP 済み。残すと空ボリュームからの初回起動時に
       # 使われないスキーマが再作成されてしまう。
       #
-      # MYSQL_USER / MYSQL_PASSWORD(lbs_app)は残す。下の wordpress(WORDPRESS_DB_USER)と
-      # phpmyadmin(PMA_USER)がこのユーザーで接続する。マネージドWordPressのサイト別DBは
+      # MYSQL_USER / MYSQL_PASSWORD(lbs_app)は残す。下の wordpress(WORDPRESS_DB_USER)が
+      # このユーザーで接続する(phpmyadmin は #978 以降このユーザーを渡されず、運用者が
+      # ログイン画面で入力する)。マネージドWordPressのサイト別DBは
       # プロビジョニングエージェントが root で都度作成し、このユーザーへ個別に権限を付与するため、
       # MYSQL_DATABASE が無くても機能する。
       MYSQL_USER: ${MYSQL_USER}
@@ -684,8 +685,13 @@ services:
     <<: *common-service
     environment:
       PMA_HOST: mysql
-      PMA_USER: ${MYSQL_USER}
-      PMA_PASSWORD: ${MYSQL_PASSWORD}
+      # PMA_USER / PMA_PASSWORD は**渡さない**(#978)。公式イメージは PMA_USER が
+      # 設定されていると auth_type を config に切り替え、ログイン画面を出さずに
+      # MySQL へ接続済みのセッションを与える(/etc/phpmyadmin/config.inc.php)。
+      # reverse-proxy は /phpmyadmin/ を無認証で中継するため、この組み合わせでは
+      # URL に到達できる者が誰でも全DBを読み書きできてしまう。
+      # 渡さなければ既定の auth_type: cookie に戻り、phpMyAdmin 自身のログインを経由する。
+      # 運用者は .env の MYSQL_USER / MYSQL_PASSWORD を入力してログインする。
       # サブパス(/phpmyadmin/)配下でのリンク生成・リダイレクトを正しく行うために必須
       PMA_ABSOLUTE_URI: https://localhost/phpmyadmin/
     depends_on:

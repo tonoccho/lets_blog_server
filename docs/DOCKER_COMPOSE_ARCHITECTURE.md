@@ -39,7 +39,7 @@ Keycloak / 各ドメインサービス)を見据えた構成に整えた(#556)�
 | `log-writer` | 8080 | gateway経由のみ(`/api/logs/`)+ RabbitMQコンシューマー | 旧8081から統一。監査/操作/エラーログ。`lbs_log` |
 | `mysql` | 3306 | 非公開 | |
 | `rabbitmq` | 5672 (+管理UI 15672) | 非公開 | 管理UIは platform-service のキュー滞留・DLQ監視も使う(#589) |
-| `phpmyadmin` | 80 | reverse-proxy経由のみ(`/phpmyadmin/`) | |
+| `phpmyadmin` | 80 | reverse-proxy経由のみ(`/phpmyadmin/`) | **認証あり(phpMyAdmin自身のログイン画面)**。`.env` の `MYSQL_USER` / `MYSQL_PASSWORD` を入力してログインする。コンテナへ `PMA_USER` / `PMA_PASSWORD` は渡さない(#978。渡すと `auth_type` が `config` になり無認証で全DBを操作できる) |
 | `keycloak` | 8080(管理/ヘルスチェックは9000) | reverse-proxy経由のみ(`/auth/`) | `KC_HTTP_RELATIVE_PATH=/auth`。#559 |
 | `keycloak-postgres` | 5432 | 非公開 | Keycloak専用PostgreSQL。#559 |
 | `penpot-frontend` | 8080 | `9001:8080`(直接公開。ハンドオフURL生成のため) | |
@@ -54,6 +54,22 @@ Keycloak / 各ドメインサービス)を見据えた構成に整えた(#556)�
 **フォールバックは無い**(#583で廃止)ので、載せ忘れたパスは gateway が404を返す。
 `RouteControllerContractTest` が「コントローラ→ルート」と「ルート→コントローラ」の
 両方向を突き合わせるので、片方だけ足しても落ちる(#642 / #913)。
+
+### phpMyAdmin の利用手順(#978)
+
+`https://localhost/phpmyadmin/` は reverse-proxy が中継するが、アプリの認証ゲート
+(ADR-0008)を通らない。そのため phpMyAdmin 自身のログインで守る。
+
+1. `https://localhost/phpmyadmin/` を開く(ログイン画面が出る)
+2. `.env` の `MYSQL_USER` / `MYSQL_PASSWORD` を入力してログインする
+
+サービス専用スキーマ(`lbs_identity` 等)を直接見たい場合は、スキーマと同名の
+サービスユーザー(`lbs_identity` など)と、`.env` の対応する `LBS_*_DB_PASSWORD` で
+ログインする(`infra/mysql/init/01-create-service-schemas.sh` が作るユーザー。
+詳細は [SERVICE_SCHEMA_MIGRATION.md](SERVICE_SCHEMA_MIGRATION.md))。
+
+セッションの署名鍵(`blowfish_secret`)はコンテナ起動時に自動生成されるため、
+`phpmyadmin` コンテナを再起動するとログインし直しになる。
 
 ## サービス起動順序(`depends_on` + healthcheck)
 
