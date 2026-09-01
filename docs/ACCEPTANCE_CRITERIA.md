@@ -323,32 +323,44 @@ API: log-writer `AuditLogController`, `OperationLogController`, `FrontendErrorLo
 `apps/extension/package.json` の `contributes.commands` 全24コマンド。
 検証方針は AT-16(#942)に従い、**APIレベル + 単体テストの二層**とする(UI操作は対象外)。
 
+- Layer 1(APIレベル): `apps/extension/e2e/features/**`。拡張自身の `apiClient` / `httpClient` を
+  通して実スタックへ接続する。実行方法は [apps/extension/e2e/README.md](../apps/extension/e2e/README.md)。
+- Layer 2(単体): `apps/extension/src/__tests__/**`。サーバー越しに観測できない部分
+  (リクエストの中身、ローカルのファイル生成、パネルの状態遷移)を担当する。
+- UI操作(コマンドパレット・エディタへの挿入・Webview・キーバインド)は自動化せず、
+  [apps/extension/MANUAL_ACCEPTANCE_CHECKLIST.md](../apps/extension/MANUAL_ACCEPTANCE_CHECKLIST.md)
+  に列挙して人が確認する。**どのコマンドも、この3つのいずれかに必ず対応付ける**。
+
+下表の「対応シナリオ」は `apps/extension/e2e/features/` 配下を `ext:` を頭に付けて示す
+(`apps/web/e2e/features/` を指す他節と混ざらないようにするため)。単体テストは
+`apps/extension/src/__tests__/` 配下のファイル名で示す。
+
 | 機能ID | コマンド | 利用者から見た価値 | 受け入れ基準(要約) | 対応シナリオ | 状態 |
 | --- | --- | --- | --- | --- | --- |
-| AC-EXT-001 | `letsBlog.login` | エディタから離れずに認証できる | Device Code フローが完了しトークンが保存される | — | 未着手 |
-| AC-EXT-002 | `letsBlog.selectProject` | 作業対象を切り替えられる | プロジェクト一覧から選択でき、以後の操作が対象に向く | — | 未着手 |
-| AC-EXT-003 | `letsBlog.selectSite` | 公開先を切り替えられる | サイト一覧から選択でき、以後の公開が対象に向く | — | 未着手 |
-| AC-EXT-004 | `letsBlog.createArticle` | AI支援付きで記事を起こせる | 新規記事ファイルが生成され、AIの下書きが入る | — | 未着手(`@stub`) |
-| AC-EXT-005 | `letsBlog.createArticleWithoutAi` | AIを使わず記事を起こせる | テンプレートだけの記事ファイルが生成される | — | 未着手 |
-| AC-EXT-006 | `letsBlog.publish` | エディタから公開できる | 編集中の記事が公開され、公開先URLで読める | — | 未着手(`@slow`) |
-| AC-EXT-007 | `letsBlog.schedulePublication` | 予約公開できる | 指定時刻が設定され、時刻まで公開されない | — | 未着手 |
-| AC-EXT-008 | `letsBlog.deletePost` | 公開済み記事を取り下げられる | 公開先から記事が消える | — | 未着手(`@destructive`) |
-| AC-EXT-009 | `letsBlog.askAi` | 執筆中に下書き/校正/要約を頼める | 選択範囲に対する応答がエディタへ挿入される | — | 未着手(`@stub`) |
-| AC-EXT-010 | `letsBlog.askAiSearch` | Web検索を踏まえた回答を得られる | 検索結果を根拠にした応答が返る | — | 未着手(`@stub`) |
-| AC-EXT-011 | `letsBlog.suggestTags` | タグを考えなくてよい | 本文からタグ候補が提示される | — | 未着手(`@stub`) |
-| AC-EXT-012 | `letsBlog.proofreadNow` | その場で校正できる | 校正指摘が提示される | — | 未着手(`@stub`) |
-| AC-EXT-013 | `letsBlog.generateSection` | 節単位で書き足せる | 見出しに対応する本文が挿入される | — | 未着手(`@stub`) |
-| AC-EXT-014 | `letsBlog.switchAiProvider` | 用途に応じてAIを変えられる | 切り替えたプロバイダが以後の生成に使われる | — | 未着手 |
-| AC-EXT-015 | `letsBlog.planArticle` | 何を書くか詰められる | プラン対話が開始し、結果を記事へ引き継げる | — | 未着手(`@stub`) |
-| AC-EXT-016 | `letsBlog.generateImage` | 挿絵を作れる | 生成画像が記事へ挿入され、ギャラリーにも現れる | — | 未着手(`@slow` `@stub`) |
-| AC-EXT-017 | `letsBlog.imageGallery` | 既存の画像を再利用できる | ギャラリーが開き、選んだ画像が記事へ挿入される | — | 未着手 |
-| AC-EXT-018 | `letsBlog.previewArticle` | 公開前の見た目を確認できる | 公開先テーマ相当のプレビューが開く | — | 未着手 |
-| AC-EXT-019 | `letsBlog.previewDevTools` | プレビューの不具合を調べられる | DevTools が開く | — | 対象外(開発者向けデバッグ機能で、利用者から見た受け入れ基準を持たない) |
-| AC-EXT-020 | `letsBlog.addNewDiagram` | 図を新規作成できる | draw.io が開き、保存すると図が登録される | — | 未着手 |
-| AC-EXT-021 | `letsBlog.editDiagram` | 図を修正できる | 既存の図が draw.io で開き、保存内容が反映される | — | 未着手 |
-| AC-EXT-022 | `letsBlog.diagramGallery` | 作った図を再利用できる | 図の一覧から選択して記事へ挿入できる | — | 未着手 |
-| AC-EXT-023 | `letsBlog.pasteSmartCard` | リンクを見栄えよく貼れる | URLがブログカード/Amazonカードとして挿入される | — | 未着手 |
-| AC-EXT-024 | `letsBlog.pasteAsLink` | リンクを簡潔に貼れる | URLがタイトル付きリンクとして挿入される | — | 未着手 |
+| AC-EXT-001 | `letsBlog.login` | エディタから離れずに認証できる | Device Code フローが完了しトークンが保存される | `ext:auth/login.feature` › デバイスコードで承認するとアクセストークンが保存され再ログインなしでAPIを呼べる / 期限切れのアクセストークンはリフレッシュトークンで自動的に更新される、`ext:auth/connection.feature` の2シナリオ(TLS検証・誤ったURL)、手動: チェックリスト §2 | 検証済(UI表示は手動) |
+| AC-EXT-002 | `letsBlog.selectProject` | 作業対象を切り替えられる | プロジェクト一覧から選択でき、以後の操作が対象に向く | `ext:projects/selection.feature` › プロジェクト一覧から選んだプロジェクトはワークスペースに記憶される、手動: チェックリスト §3 | 検証済(クイックピックは手動) |
+| AC-EXT-003 | `letsBlog.selectSite` | 公開先を切り替えられる | サイト一覧から選択でき、以後の公開が対象に向く | `ext:projects/selection.feature` › 選択したプロジェクトに紐付くサイトを一覧できる、手動: チェックリスト §3 | 検証済(クイックピックは手動) |
+| AC-EXT-004 | `letsBlog.createArticle` | AI支援付きで記事を起こせる | 新規記事ファイルが生成され、AIの下書きが入る | `ext:articles/authoring.feature` › AIありの記事作成では見出しを含む構成案が提案される、単体 `articleScaffold.test.ts`、手動: チェックリスト §4 | 検証済(パネル操作は手動) |
+| AC-EXT-005 | `letsBlog.createArticleWithoutAi` | AIを使わず記事を起こせる | テンプレートだけの記事ファイルが生成される | 単体 `articleScaffold.test.ts`(生成物・上書き確認の3分岐・日本語front matter)、手動: チェックリスト §4 | 検証済(単体。サーバーを介さずLayer 1の対象外) |
+| AC-EXT-006 | `letsBlog.publish` | エディタから公開できる | 編集中の記事が公開され、公開先URLで読める | `ext:articles/publish.feature` › front matter付きのMarkdownを公開するとWordPress投稿が作成される / 公開済みの記事を再度公開すると同じWordPress投稿が更新される、単体 `apiClientRequests.test.ts`(multipartの組み立て) | 検証済(`@slow`) |
+| AC-EXT-007 | `letsBlog.schedulePublication` | 予約公開できる | 指定時刻が設定され、時刻まで公開されない | —(#1003 でブロック。エージェント経路が `publishScheduledAt` を無視して即時公開するため、シナリオを置くとバグを期待値に固定してしまう) | 未着手(#1003) |
+| AC-EXT-008 | `letsBlog.deletePost` | 公開済み記事を取り下げられる | 公開先から記事が消える | —(#1001 でブロック。`wp post delete` へ存在しない `--yes` を渡しており削除が常に502) | 未着手(#1001) |
+| AC-EXT-009 | `letsBlog.askAi` | 執筆中に下書き/校正/要約を頼める | 選択範囲に対する応答がエディタへ挿入される | `ext:ai/assist.feature` › askAiは選んだモードでAIへ依頼する(draft / proofread / summarize の3例) | 検証済(`@stub`) |
+| AC-EXT-010 | `letsBlog.askAiSearch` | Web検索を踏まえた回答を得られる | 検索結果を根拠にした応答が返る | `ext:ai/assist.feature` › askAiSearchはWeb検索の結果を根拠として返す | 検証済(`@stub`) |
+| AC-EXT-011 | `letsBlog.suggestTags` | タグを考えなくてよい | 本文からタグ候補が提示される | `ext:ai/assist.feature` › suggestTagsはカテゴリとタグの候補を返す | 検証済(`@stub`) |
+| AC-EXT-012 | `letsBlog.proofreadNow` | その場で校正できる | 校正指摘が提示される | `ext:ai/assist.feature` › 校正チェックは指定した本文の指摘だけを返す、単体 `apiClientRequests.test.ts` › 校正チェックは本文とプロバイダーだけを送る | 検証済(`@stub`。波線表示は手動) |
+| AC-EXT-013 | `letsBlog.generateSection` | 節単位で書き足せる | 見出しに対応する本文が挿入される | `ext:ai/assist.feature` › generateSectionは見出しのコンテキストを含めて依頼する、単体 `apiClientRequests.test.ts` › セクション生成は見出しと直前の文脈・記事タイトルを含めて送る | 検証済(`@stub`) |
+| AC-EXT-014 | `letsBlog.switchAiProvider` | 用途に応じてAIを変えられる | 切り替えたプロバイダが以後の生成に使われる | `ext:ai/assist.feature` › AIプロバイダーを切り替えると以降のリクエストへ反映される、単体 `apiClientRequests.test.ts` | 検証済(`@stub`) |
+| AC-EXT-015 | `letsBlog.planArticle` | 何を書くか詰められる | プラン対話が開始し、結果を記事へ引き継げる | `ext:articles/authoring.feature` › AIありの記事作成では見出しを含む構成案が提案される(`/article-plan/suggest-structure`)、手動: チェックリスト §4 | 検証済(部分。壁打ちパネルの対話は手動) |
+| AC-EXT-016 | `letsBlog.generateImage` | 挿絵を作れる | 生成画像が記事へ挿入され、ギャラリーにも現れる | —(#998 でブロック。media-service に `KEYCLOAK_SERVICES_CLIENT_SECRET` が渡っておらず画像生成APIが失敗する) | 未着手(#998) |
+| AC-EXT-017 | `letsBlog.imageGallery` | 既存の画像を再利用できる | ギャラリーが開き、選んだ画像が記事へ挿入される | `ext:media/gallery.feature` › プロジェクトの生成画像を一覧できる、手動: チェックリスト §7 | 検証済(挿入操作は手動) |
+| AC-EXT-018 | `letsBlog.previewArticle` | 公開前の見た目を確認できる | 公開先テーマ相当のプレビューが開く | `ext:articles/authoring.feature` › 記事のプレビューHTMLを取得できる、単体 `previewPanel.test.ts`、手動: チェックリスト §8 | 検証済(見た目は手動) |
+| AC-EXT-019 | `letsBlog.previewDevTools` | プレビューの不具合を調べられる | DevTools が開く | 手動: チェックリスト §8 | 対象外(開発者向けデバッグ機能で、利用者から見た受け入れ基準を持たない) |
+| AC-EXT-020 | `letsBlog.addNewDiagram` | 図を新規作成できる | draw.io が開き、保存すると図が登録される | `ext:diagrams/diagrams.feature` › ダイアグラムを作成し編集して一覧から参照できる(作成とSVG取得)、単体 `diagramEditorPanel.test.ts`、手動: チェックリスト §7 | 検証済(draw.io操作は手動) |
+| AC-EXT-021 | `letsBlog.editDiagram` | 図を修正できる | 既存の図が draw.io で開き、保存内容が反映される | `ext:diagrams/diagrams.feature`(更新して一覧へ反映)、手動: チェックリスト §7 | 検証済(draw.io操作は手動) |
+| AC-EXT-022 | `letsBlog.diagramGallery` | 作った図を再利用できる | 図の一覧から選択して記事へ挿入できる | `ext:diagrams/diagrams.feature`(一覧・削除)、手動: チェックリスト §7 | 検証済(挿入操作は手動) |
+| AC-EXT-023 | `letsBlog.pasteSmartCard` | リンクを見栄えよく貼れる | URLがブログカード/Amazonカードとして挿入される | 単体 `urlPaste.test.ts`(カード記法の生成)、手動: チェックリスト §9。カード情報の先読み(`/api/content-cache`)は #1002 でブロック | 検証済(部分。先読みは #1002) |
+| AC-EXT-024 | `letsBlog.pasteAsLink` | リンクを簡潔に貼れる | URLがタイトル付きリンクとして挿入される | 単体 `urlPaste.test.ts`(リンク記法の生成)、手動: チェックリスト §9。タイトル解決(`/api/content-cache`)は #1002 でブロックのため、現状はURLのみの貼り付けへフォールバックする | 検証済(部分。先読みは #1002) |
 
 ### 2.15 横断的品質(認可・ルーティング・レート制限・相関ID・縮退) — `XC`
 
@@ -493,11 +505,16 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 
 | 状態 | 件数 |
 | --- | --- |
-| `検証済` | 15 |
+| `検証済` | 35 |
 | `既存spec` / `既存spec(部分)` | 31 |
-| `未着手` | 147 |
+| `未着手` | 127 |
 | `対象外`(§2 に行を持つもの) | 1 |
 | **§2 合計** | **194** |
+
+`検証済` のうち 20 件は VSCode拡張(`AC-EXT-*`)で、#942(AT-16)により
+APIレベルの受け入れテスト・単体テスト・手動チェックリストのいずれかへ対応付けた。
+`AC-EXT-007` / `008` / `016` は実装側の不具合(#1003 / #1001 / #998)のため自動化できず
+`未着手` のままにしてある——バグを期待値として固定しないため。
 
 `検証済` のうち2件は §4.1 のとおり受け入れ基準を狭めてある。
 `@fail`(不具合が直るまで失敗が期待値)のシナリオは無い(#955 の修正で最後の1件が外れた)。
@@ -519,16 +536,18 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 | `POST` | 13 | | `ANA` | 6 | | `STUB` | 2 |
 | `BULK` | 13 | | | | | | |
 
-**受け入れテストが1件も無い領域**: `BULK` `AI` `PLAN` `DIAG` `ANA` `SYS` `LOG` `EXT`
-(8領域 / 95 機能ID)。これが issue #927 が可視化しようとした穴である。
-`SET`(初回セットアップ)は #929(AT-3)で埋めた。
+**受け入れテストが1件も無い領域**: `BULK` `AI` `PLAN` `DIAG` `ANA` `SYS` `LOG`
+(7領域 / 71 機能ID)。これが issue #927 が可視化しようとした穴である。
+`SET`(初回セットアップ)は #929(AT-3)で、`EXT`(VSCode拡張)は #942(AT-16)で埋めた。
+なお `AI` / `DIAG` の一部は拡張側(`AC-EXT-*`)から同じサーバー契約を検証しているが、
+Web管理画面としての受け入れ基準は AT-8 / AT-11 の担当のままである。
 
 入力ソースの網羅状況:
 
 | ソース | 件数 | カバー状況 |
 | --- | --- | --- |
 | Web管理画面 (`apps/web/src/app/**/page.tsx`) | 24 ページ | 全ページが1つ以上の機能IDに対応(§7) |
-| VSCode拡張 (`apps/extension/package.json`) | 24 コマンド | AC-EXT-001〜024 で1対1 |
+| VSCode拡張 (`apps/extension/package.json`) | 24 コマンド | AC-EXT-001〜024 で1対1。全24コマンドが Layer 1 シナリオ / 単体テスト / 手動チェックリストのいずれかへ対応付け済み(§2.14) |
 | 公開APIコントローラ | 48 クラス | 全クラスが1つ以上の機能IDに対応 |
 | 内部ブリッジコントローラ | 18 クラス | AC-INT-001〜018(受け入れテスト対象外) |
 
