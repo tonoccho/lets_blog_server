@@ -240,8 +240,17 @@ provision_user() {
   echo "  Keycloak: プロフィールを補完しました(VERIFY_PROFILE 対策)"
 
   if [ "$role" = "admin" ]; then
+    # issue #955 以降、identity-service が role=admin のユーザー作成時に自分で realm ロール
+    # admin を付与する(users.role が正、realm ロールが従。docs/AUTHORIZATION_MATRIX.md の
+    # 「Keycloak の realm ロール admin は users.role の従」節)。
+    # つまり上で 201 が返った新規作成の場合、この呼び出しはもう要らない。
+    #
+    # それでも残しているのは、上の 400|409 で「既に存在するためスキップ」した場合のためである。
+    # そのアカウントは #955 より前に作られている可能性があり、その頃の identity-service は
+    # realm ロールを付けなかったので、E2E環境を作り直さない限り admin が欠けたままになる。
+    # add-roles は冪等なので、新規作成の場合に実行しても無害。
     kcadm add-roles -r "$REALM" --uid "$user_id" --rolename admin
-    echo "  Keycloak: realmロール admin を付与しました"
+    echo "  Keycloak: realmロール admin を確認しました(#955以降は identity-service が付与済み)"
   fi
 }
 

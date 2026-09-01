@@ -595,6 +595,77 @@ identity-service には admin かどうかを決める仕組みが**2つ**ある
 消すと再導入時にマイグレーションが要る。ただし**現時点で強制されていない**ことを
 ここに明記しておく。「`SITE_DELETE` を持たないロール」を作ってもサイト削除は防げない。
 
+### Keycloak の realm ロール `admin` は `users.role` の**従**(issue #955)
+
+軸をもう1つ増やしたわけではない。Keycloak の realm ロール `admin` は
+**`users.role` から導出される値**であり、判定の根拠にはならない。
+
+| | 実体 | 誰が書くか | 何に使われるか |
+|---|---|---|---|
+| **正** | `users.role`(`admin` / `user`) | identity-service | バックエンドAPIの認可(上表の粗い軸) |
+| **従** | Keycloak realm ロール `admin` → JWT の `realm_access.roles` | identity-service が `users.role` に追随させる | **Web(Next.js)のセッションロール判定** |
+
+Web はサーバー側で JWT の `realm_access.roles` からセッションのロールを決め
+(`web/src/lib/auth.ts`)、管理者専用パスをそれで塞ぐ(`web/src/proxy.ts` の
+`ADMIN_ONLY_PREFIXES`)。ローカルDBを引かないため、**identity-service が realm ロールを
+同期しないと画面だけが非管理者として振る舞う**。#955 はまさにこれで、
+初回セットアップで作った最初の管理者が `/users` にも `/admin/*` にも入れなかった
+(APIは通るのに画面に入れない、という切り分けの難しい食い違いになる)。
+
+#### 同期する経路
+
+`users.role` が決まる/変わる経路すべてで `KeycloakAdminClient#grantRealmRole` /
+`revokeRealmRole` を呼ぶ(`UserService`)。
+
+| 経路 | 挙動 |
+|---|---|
+| `POST /api/auth/setup` | admin 作成時に付与。失敗したら Keycloak ユーザーごと削除して例外(ローカルには何も残らない) |
+| `POST /api/users`(`role=admin`) | 同上 |
+| `PATCH /api/users/{id}`(`role` 指定) | Keycloak を**先に**更新してからローカル保存。保存が失敗したら realm ロールを元へ戻す |
+| `POST /api/users/migrate-to-keycloak` | 移行時に admin なら付与。失敗したら作った Keycloak ユーザーを消し、そのユーザーだけ移行失敗として集計する |
+| `POST`/`DELETE /api/users/{userId}/roles/{roleName}` | `reconcileKeycloakAdminRole` で `users.role` へ冪等に整合させる(ベストエフォート) |
+
+RBAC の `ROLE_ADMIN` は realm ロールを**駆動しない**。3つ目の軸を作らないための線引きであり、
+`ROLE_ADMIN` を付けても剥がしても realm ロールは変わらない(`users.role` に対する整合だけを行う)。
+
+#### ずれてしまった環境の回復
+
+`PATCH /api/users/{id}` は **admin 性が変わらなくても**、`role` が指定されていれば realm ロールを
+同期する。#955 の修正より前に作られた管理者は realm ロールを持たないので、「変わったときだけ
+同期する」設計にすると画面から直す手段が無くなる(まさに #955 の背景。他に管理者が居なければ
+`kcadm` でしか回復できない)。付与も剥奪も冪等なので、ずれていなければ確認で終わる。
+
+**回復手順**: 別の管理者(または `kcadm`)から、対象ユーザーへ `PATCH /api/users/{id}` で
+`role` を今と同じ値のまま送る。管理者が1人も画面へ入れない場合だけ、
+`kcadm add-roles -r letsblog --uid <id> --rolename admin` で1人目を復旧させる。
+
+#### 失敗を握りつぶさない
+
+「ローカルDBだけが admin で Keycloak が追随しない」状態が #955 の不具合そのものなので、
+`users.role` を**変える**経路では同期の失敗を必ず例外にする。作成系は Keycloak ユーザーを削除して
+補償し(`compensateKeycloakUser` の先例に従う)、更新系は Keycloak → ローカルの順にして
+`@Transactional` のロールバックに任せる。
+
+唯一の例外が RBAC の `POST`/`DELETE /api/users/{userId}/roles/{roleName}` で、ここでの整合失敗は
+警告ログに留めて成功を返す。この経路は `users.role` を**変えない**ので、失敗しても新たなずれは
+生まれない(禁じているのはずれを作って黙ることであり、ここには作りようがない)。例外にすると、
+admin 性と無関係な RBAC ロールの付け外しまで Keycloak の一時的な不調で 502 になり、
+元々動いていた RBAC 管理を壊してしまう。
+
+`keycloakSub` を持たない未移行ユーザーは Keycloak 側に対応するアカウントが無いためスキップする
+(`updateUserProfile` / `delete` / `deactivate` と同じ扱い)。
+
+#### 必要な Keycloak の権限
+
+`letsblog-services` のサービスアカウントが持つ `realm-management` のロールは
+`manage-users` と `view-users` だけである(`keycloak/realm-export.json`)。
+ロールマッピングは「ロールの表現(`id` + `name`)の配列」を要求するため id の解決が要るが、
+素直な `GET /admin/realms/{realm}/roles/{name}` は **`view-realm` を要求し、実機で 403 になる**。
+
+そこでユーザースコープの `GET .../users/{id}/role-mappings/realm`(割当済み)と
+`.../role-mappings/realm/available`(割当可能)から id を引く。こちらは `view-users` で読めるため、
+**realm の権限設定を変えずに済む** — 既に構築済みの環境が realm の再インポートを迫られない。
+
 ## 現行の認可モデル(2層構造)
 
 legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行していない

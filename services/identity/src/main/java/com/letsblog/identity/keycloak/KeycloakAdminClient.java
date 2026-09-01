@@ -1,10 +1,12 @@
 package com.letsblog.identity.keycloak;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.letsblog.common.auth.ServiceTokenClient;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.AbstractJacksonHttpMessageConverter;
@@ -25,6 +27,12 @@ import org.springframework.web.client.RestClientResponseException;
  * に変換して送出する(#562の受入基準: Keycloak停止時に明確なエラーを返し、暗黙に成功しない)。
  */
 public class KeycloakAdminClient {
+
+    /** 割当済みのrealmロール一覧(直接付与されているものだけ。composite展開はしない)。 */
+    private static final String ASSIGNED_REALM_ROLES = "/users/{id}/role-mappings/realm";
+
+    /** まだ割り当てられていない、割り当て可能なrealmロール一覧。 */
+    private static final String AVAILABLE_REALM_ROLES = "/users/{id}/role-mappings/realm/available";
 
     private final ServiceTokenClient serviceTokenClient;
     private final RestClient adminClient;
@@ -213,6 +221,115 @@ public class KeycloakAdminClient {
             throw new KeycloakUserSyncException(errorMessage("ユーザー存在確認(sub=" + keycloakSub + ")", e), e);
         } catch (Exception e) {
             throw connectionFailure("ユーザー存在確認(sub=" + keycloakSub + ")", e);
+        }
+    }
+
+    /**
+     * realmロールを付与する(issue #955)。既に付与済みなら何もしないため冪等。
+     *
+     * <p>Keycloakのロールマッピングは「ロールの表現({@code id}+{@code name})の配列」を要求するので、
+     * 先にロールの{@code id}を引く必要がある。ここで{@code GET /roles/&#123;roleName&#125;}を
+     * <b>使わない</b>のは、そのエンドポイントが{@code realm-management}の{@code view-realm}権限を
+     * 要求するためである。{@code letsblog-services}のサービスアカウントに付いているのは
+     * {@code manage-users}と{@code view-users}だけで(keycloak/realm-export.json)、
+     * 実機で確認すると{@code GET /roles/admin}は403 Forbiddenになる。
+     * 代わりにユーザースコープの{@code role-mappings/realm}と{@code role-mappings/realm/available}を
+     * 使う。こちらは{@code view-users}で読めるため、realmの権限設定を変えずに済む
+     * (= 既に構築済みの環境がrealmの再インポートを迫られない)。
+     *
+     * <p>{@code available}は「まだ割り当てられていない、割り当て可能なロール」しか返さない。
+     * そのため先に割当済み一覧を見て、既に付いていればそこで終える。
+     *
+     * <p>どちらの一覧にも無い場合は例外にする。付与できていないのに成功として返すと、
+     * ローカルDBだけがadminでKeycloakが追随しない状態(issue #955そのもの)が再発するため。
+     */
+    public void grantRealmRole(String keycloakSub, String roleName) {
+        if (findRoleMapping(keycloakSub, roleName, ASSIGNED_REALM_ROLES) != null) {
+            return;
+        }
+        ObjectNode role = findRoleMapping(keycloakSub, roleName, AVAILABLE_REALM_ROLES);
+        if (role == null) {
+            throw new KeycloakUserSyncException(
+                    "Keycloakのrealmロール '" + roleName + "' をユーザー(sub=" + keycloakSub + ")へ"
+                            + "割り当てられません。realmにそのロールが定義されているか"
+                            + "(keycloak/realm-export.json)確認してください(issue #955)。");
+        }
+        ArrayNode body = JsonNodeFactory.instance.arrayNode();
+        body.add(role);
+        modifyRealmRoleMappings(
+                HttpMethod.POST, keycloakSub, body, "realmロール付与(role=" + roleName + ")");
+    }
+
+    /**
+     * realmロールを剥奪する(issue #955)。割当済み一覧に無ければ何もしないため冪等。
+     *
+     * <p>剥奪したい状態が既に満たされている場合(ロールが付いていない、realmにロールが無い)は
+     * 正常扱いにする。付与と違い、「消えていること」が目的なので、消す対象が無いのは成功である。
+     */
+    public void revokeRealmRole(String keycloakSub, String roleName) {
+        ObjectNode role = findRoleMapping(keycloakSub, roleName, ASSIGNED_REALM_ROLES);
+        if (role == null) {
+            return;
+        }
+        ArrayNode body = JsonNodeFactory.instance.arrayNode();
+        body.add(role);
+        modifyRealmRoleMappings(
+                HttpMethod.DELETE, keycloakSub, body, "realmロール剥奪(role=" + roleName + ")");
+    }
+
+    /**
+     * 指定した一覧({@code uri})から{@code roleName}を探し、ロールマッピングに渡せる表現
+     * ({@code id}/{@code name})を返す。見つからなければ{@code null}を返し、
+     * 「無いこと」をどう扱うかは呼び出し側(付与=例外、剥奪=正常)に委ねる。
+     *
+     * <p>ユーザー自体が存在しない場合(404)も{@code null}を返す。剥奪は目的が達成済みなので正常、
+     * 付与は上の呼び出し側が「割り当てられない」として例外にするため、いずれも安全側に倒れる。
+     */
+    private ObjectNode findRoleMapping(String keycloakSub, String roleName, String uri) {
+        String action = "realmロール一覧取得(role=" + roleName + ", sub=" + keycloakSub + ")";
+        JsonNode roles;
+        try {
+            roles = adminClient.get()
+                    .uri(uri, keycloakSub)
+                    .header("Authorization", "Bearer " + serviceTokenClient.getAccessToken())
+                    .retrieve()
+                    .body(JsonNode.class);
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                return null;
+            }
+            throw new KeycloakUserSyncException(errorMessage(action, e), e);
+        } catch (Exception e) {
+            throw connectionFailure(action, e);
+        }
+        if (roles == null || !roles.isArray()) {
+            return null;
+        }
+        for (JsonNode role : roles) {
+            if (roleName.equals(role.path("name").asText(null)) && role.hasNonNull("id")) {
+                ObjectNode mapping = JsonNodeFactory.instance.objectNode();
+                mapping.put("id", role.get("id").asText());
+                mapping.put("name", roleName);
+                return mapping;
+            }
+        }
+        return null;
+    }
+
+    private void modifyRealmRoleMappings(
+            HttpMethod httpMethod, String keycloakSub, ArrayNode body, String action) {
+        try {
+            adminClient.method(httpMethod)
+                    .uri("/users/{id}/role-mappings/realm", keycloakSub)
+                    .header("Authorization", "Bearer " + serviceTokenClient.getAccessToken())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientResponseException e) {
+            throw new KeycloakUserSyncException(errorMessage(action + "(sub=" + keycloakSub + ")", e), e);
+        } catch (Exception e) {
+            throw connectionFailure(action + "(sub=" + keycloakSub + ")", e);
         }
     }
 
