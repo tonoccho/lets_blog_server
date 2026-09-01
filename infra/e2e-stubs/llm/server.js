@@ -52,39 +52,6 @@ const DRAFT_COMPLETION = [
 
 const TAGS_COMPLETION = 'e2e-stub-tag-a, e2e-stub-tag-b, e2e-stub-tag-c';
 
-/**
- * タグ提案(AiAssistService#suggestTags)はプロンプトでJSONオブジェクトを要求し、
- * 応答をJSONとして解釈する。解釈できないと候補が空になり、呼び元は「候補が返らない」ことしか
- * 観測できない。そのためJSONを要求されたときはJSONで返す(issue #942)。
- */
-const TAGS_JSON_COMPLETION = JSON.stringify({
-  categories: ['E2Eスタブ分類'],
-  tags: ['e2e-stub-tag-a', 'e2e-stub-tag-b', 'e2e-stub-tag-c'],
-});
-
-/**
- * 校正チェック(AiAssistService#proofread)はJSON配列の指摘一覧を要求する。
- * originalText は「本文中の該当箇所をそのまま引用したもの」でなければ、呼び元(拡張の
- * 波線表示)が位置を特定できない。プロンプト末尾の本文から先頭行を取り出して使うことで、
- * 任意の入力に対して決定的かつ本文に実在する指摘を返す(issue #942)。
- */
-function proofreadIssuesJson(prompt) {
-  const bodyIndex = prompt.lastIndexOf('本文:');
-  const body = bodyIndex >= 0 ? prompt.slice(bodyIndex + '本文:'.length) : prompt;
-  const firstLine = body.split('\n').map((line) => line.trim()).find((line) => line !== '') ?? '';
-  if (firstLine === '') {
-    return '[]';
-  }
-  return JSON.stringify([
-    {
-      type: 'typo',
-      originalText: firstLine,
-      message: '[E2Eスタブ] 誤字脱字の可能性があります。',
-      suggestion: null,
-    },
-  ]);
-}
-
 const PROOFREAD_COMPLETION = [
   '校正結果(E2Eスタブ):',
   '',
@@ -103,14 +70,6 @@ const GENERIC_COMPLETION = 'E2Eスタブの応答です。';
  */
 function completionFor(prompt) {
   const p = prompt.toLowerCase();
-  // JSONを要求するプロンプト(タグ提案・校正チェック)は、要求された形式で返す。
-  // 判定にはプロンプトが提示する出力例そのものを使い、文言の言い回しに依存させない。
-  if (prompt.includes('{"categories":')) {
-    return TAGS_JSON_COMPLETION;
-  }
-  if (prompt.includes('{"type": "typo"')) {
-    return proofreadIssuesJson(prompt);
-  }
   if (prompt.includes('カスタムタグ') || p.includes('custom tag') || p.includes('```css')) {
     return CUSTOM_TAG_COMPLETION;
   }
