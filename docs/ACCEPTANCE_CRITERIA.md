@@ -347,8 +347,8 @@ API: log-writer `AuditLogController`, `OperationLogController`, `FrontendErrorLo
 | AC-EXT-008 | `letsBlog.deletePost` | 公開済み記事を取り下げられる | 公開先から記事が消える | —(#1001 でブロック。`wp post delete` へ存在しない `--yes` を渡しており削除が常に502) | 未着手(#1001) |
 | AC-EXT-009 | `letsBlog.askAi` | 執筆中に下書き/校正/要約を頼める | 選択範囲に対する応答がエディタへ挿入される | `ext:ai/assist.feature` › askAiは選んだモードでAIへ依頼する(draft / proofread / summarize の3例) | 検証済(`@stub`) |
 | AC-EXT-010 | `letsBlog.askAiSearch` | Web検索を踏まえた回答を得られる | 検索結果を根拠にした応答が返る | `ext:ai/assist.feature` › askAiSearchはWeb検索の結果を根拠として返す | 検証済(`@stub`) |
-| AC-EXT-011 | `letsBlog.suggestTags` | タグを考えなくてよい | 本文からタグ候補が提示される | `ext:ai/assist.feature` › suggestTagsはカテゴリとタグの候補を返す | 検証済(`@stub`) |
-| AC-EXT-012 | `letsBlog.proofreadNow` | その場で校正できる | 校正指摘が提示される | `ext:ai/assist.feature` › 校正チェックは指定した本文の指摘だけを返す、単体 `apiClientRequests.test.ts` › 校正チェックは本文とプロバイダーだけを送る | 検証済(`@stub`。波線表示は手動) |
+| AC-EXT-011 | `letsBlog.suggestTags` | タグを考えなくてよい | 本文からタグ候補が提示される | —(#1004 でブロック。LLMスタブがJSONを要求するプロンプトへ散文で応答するため候補が常に空。単体 `apiClientRequests.test.ts` がリクエスト形式のみ担保) | 未着手(#1004) |
+| AC-EXT-012 | `letsBlog.proofreadNow` | その場で校正できる | 校正指摘が提示される | —(#1004 でブロック。LLMスタブが校正指摘のJSONを返さないため指摘が常に空)。単体 `apiClientRequests.test.ts` › 校正チェックは本文とプロバイダーだけを送る(送信内容のみ担保)、手動: チェックリスト §5 | 未着手(#1004。送信内容は単体で検証済) |
 | AC-EXT-013 | `letsBlog.generateSection` | 節単位で書き足せる | 見出しに対応する本文が挿入される | `ext:ai/assist.feature` › generateSectionは見出しのコンテキストを含めて依頼する、単体 `apiClientRequests.test.ts` › セクション生成は見出しと直前の文脈・記事タイトルを含めて送る | 検証済(`@stub`) |
 | AC-EXT-014 | `letsBlog.switchAiProvider` | 用途に応じてAIを変えられる | 切り替えたプロバイダが以後の生成に使われる | `ext:ai/assist.feature` › AIプロバイダーを切り替えると以降のリクエストへ反映される、単体 `apiClientRequests.test.ts` | 検証済(`@stub`) |
 | AC-EXT-015 | `letsBlog.planArticle` | 何を書くか詰められる | プラン対話が開始し、結果を記事へ引き継げる | `ext:articles/authoring.feature` › AIありの記事作成では見出しを含む構成案が提案される(`/article-plan/suggest-structure`)、手動: チェックリスト §4 | 検証済(部分。壁打ちパネルの対話は手動) |
@@ -505,15 +505,15 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 
 | 状態 | 件数 |
 | --- | --- |
-| `検証済` | 35 |
+| `検証済` | 33 |
 | `既存spec` / `既存spec(部分)` | 31 |
-| `未着手` | 127 |
+| `未着手` | 129 |
 | `対象外`(§2 に行を持つもの) | 1 |
 | **§2 合計** | **194** |
 
-`検証済` のうち 20 件は VSCode拡張(`AC-EXT-*`)で、#942(AT-16)により
+`検証済` のうち 18 件は VSCode拡張(`AC-EXT-*`)で、#942(AT-16)により
 APIレベルの受け入れテスト・単体テスト・手動チェックリストのいずれかへ対応付けた。
-`AC-EXT-007` / `008` / `016` は実装側の不具合(#1003 / #1001 / #998)のため自動化できず
+`AC-EXT-007` / `008` / `011` / `012` / `016` は実装側・スタブ側の不具合(#1003 / #1001 / #1004 / #998)のため自動化できず
 `未着手` のままにしてある——バグを期待値として固定しないため。
 
 `検証済` のうち2件は §4.1 のとおり受け入れ基準を狭めてある。

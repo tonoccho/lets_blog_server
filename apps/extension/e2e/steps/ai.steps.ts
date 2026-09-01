@@ -16,24 +16,6 @@ When('モード {string} でAIに {string} を依頼する', async (world, mode,
   );
 });
 
-When('本文 {string} からタグ候補を提案させる', async (world, text) => {
-  const scope = w(world);
-  (scope as { tags?: unknown }).tags = await apiClient.suggestTags(
-    scope.token,
-    text,
-    scope.actor,
-    undefined,
-    scope.project.id
-  );
-});
-
-Then('タグ候補が1件以上返る', (world) => {
-  const tags = (world as { tags?: { categories: string[]; tags: string[] } }).tags;
-  if (!tags || tags.tags.length === 0) {
-    throw new Error(`タグ候補が返りませんでした: ${JSON.stringify(tags)}`);
-  }
-});
-
 When('見出し {string} と直前の文脈を指定してセクション本文を生成する', async (world, heading) => {
   const scope = w(world);
   (scope as { result?: unknown }).result = await apiClient.generateSection(scope.token, scope.actor, {
@@ -62,29 +44,6 @@ Then('回答と出典URLの一覧が返る', (world) => {
   }
   for (const source of result.sources) {
     if (!/^https?:\/\//.test(source.url)) throw new Error(`出典URLが不正です: ${source.url}`);
-  }
-});
-
-When('本文 {string} の校正チェックを実行する', async (world, text) => {
-  const scope = w(world);
-  (scope as { proofreadText?: string }).proofreadText = text;
-  (scope as { proofread?: unknown }).proofread = await apiClient.proofreadContent(
-    scope.token,
-    scope.actor,
-    text
-  );
-});
-
-Then('指摘の該当箇所がすべて本文中の文字列である', (world) => {
-  const scope = world as { proofreadText?: string; proofread?: { issues: { originalText: string }[] } };
-  const issues = scope.proofread?.issues ?? [];
-  if (issues.length === 0) {
-    throw new Error(`校正の指摘が返りませんでした: ${JSON.stringify(scope.proofread)}`);
-  }
-  for (const issue of issues) {
-    if (!scope.proofreadText?.includes(issue.originalText)) {
-      throw new Error(`指摘の該当箇所が本文にありません: ${issue.originalText}`);
-    }
   }
 });
 
