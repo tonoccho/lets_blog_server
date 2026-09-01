@@ -209,7 +209,7 @@ Then('Keycloakのホスト型ログイン画面が表示される', async ({ pag
 | `post-creation.spec.ts` | AT-6 (#932) | 未 |
 | `image-upload.spec.ts` | AT-10 (#936) | 未 |
 | `custom-tag-generation.spec.ts` | AT-12 (#938) | 未 |
-| `service-degradation.spec.ts` | AT-17 (#943) | 未 |
+| `service-degradation.spec.ts` | AT-17 (#943) | **移行完了。spec は削除済み**(`features/cross-cutting/service-degradation.feature`) |
 | `security.spec.ts` | AT-17 (#943) | 未 |
 | `performance.spec.ts` | — | 移行対象外。受け入れ基準ではなく応答時間の閾値検証であり、#915 の判断で「唯一の性能テスト」として Playwright spec のまま維持する |
 
@@ -398,6 +398,7 @@ Playwright はファイルをまたぐ直列化の手段を持たない(`@mode:s
 この構成で表現できる唯一の確実な隔離である。
 
 データを消さなくても、**共有された状態を一時的に壊すなら `@destructive` を付ける**。
+
 ログアウト(Keycloak のSSOセッションを終了させる)のように、消すのはデータではないが
 並列実行を壊すものも含む。
 
@@ -534,7 +535,35 @@ Playwright spec(`apps/web/e2e/*.spec.ts`)が「既存データを壊さない一
 
 ---
 
-## 11. 参考
+## 11. JUnit のテストと重複したら、どちらを正とするか
+
+横断的な性質(認可・ルーティング)は、JUnit のコントラクトテストでも守られている。
+同じことを2か所で検証すると、片方だけが直された状態に必ずなる。そこで**役割を分ける**
+(issue #943 / AT-17 の Implementation Notes)。
+
+| 検証したいこと | 正とする場所 | 理由 |
+| --- | --- | --- |
+| ルート表の転送先が**正しいサービス**か / 転送先にハンドラがあるか | `services/gateway/src/test/java/com/letsblog/gateway/config/RouteControllerContractTest.java` | 静的に全ルートを網羅でき、スタックの起動も要らない。実行時に「どのサービスが応答したか」を外から見分ける手段は無い |
+| 公開エンドポイントが**利用者から到達できる**か(経路なし404にならないか) | `apps/web/e2e/features/cross-cutting/gateway-routing.feature` | 利用者から見たふるまい。ルート表が正しくてもサービスが落ちていれば到達しない |
+| 「Authorizationヘッダーが無ければ401」 | 各サービスの `AuthorizationMatrixIntegrationTest` | サービス単体の契約。gateway もスタックも介さず速い |
+| 認可表の全行が**利用者から見て**拒否されるか / 表に載っていない公開エンドポイントが無いか | `apps/web/e2e/features/cross-cutting/authorization-matrix.feature` | 表と実装の乖離は、サービス単体のテストからは見えない(#731) |
+
+### 一斉走査が触らないもの
+
+`gateway-routing.feature` と `authorization-matrix.feature` は全エンドポイントを1回ずつ叩く。
+次の2種類だけは対象から外している(`apps/web/e2e/support/endpoints.ts`)。
+
+- **gateway に経路が無いもの**(`/api/render/**`、`/api/comfyui/checkpoints/*`)。
+  コンテナ間で直接呼ばれる経路しか無く、公開エンドポイントではない。
+  `RouteControllerContractTest` の `NON_GATEWAY_ROUTED_PATHS` と同じ集合
+- **gateway の `upload-endpoint` バケットに入るもの**(パスに `/upload` か `/image` を含む8本)。
+  このバケットは**プロセス全体で1時間に10回**しかない。8本のために枠を使い切ると、
+  同じ1時間に走る画像アップロード系のシナリオが巻き添えで429になる。
+  この8本の経路は `RouteControllerContractTest` が静的に担保する
+
+---
+
+## 12. 参考
 
 - [ACCEPTANCE_CRITERIA.md](ACCEPTANCE_CRITERIA.md) — 受け入れ基準カタログ(機能IDと検証状況)
 - `docker-compose.e2e-stubs.yml` / `infra/e2e-stubs/` — 外部依存スタブ(§9)

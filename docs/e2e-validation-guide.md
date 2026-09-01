@@ -270,8 +270,8 @@ docker compose start content
 ./scripts/wait-for-stack-healthy.sh --services content
 ```
 
-同じ検証は `apps/web/e2e/service-degradation.spec.ts` で自動化されています
-(実際にコンテナを停止するテストは `E2E_ALLOW_SERVICE_DISRUPTION=1` のときのみ実行)。
+同じ検証は `apps/web/e2e/features/cross-cutting/service-degradation.feature` で自動化されています
+(`@destructive` なので `npm run test:at` の最終段階で実行されます。issue #943 / AT-17)。
 
 ### 4.4 Penpot / ComfyUI 等の周辺コンポーネント
 

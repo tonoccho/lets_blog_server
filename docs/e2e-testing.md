@@ -46,7 +46,6 @@ Keycloak クライアント `letsblog-web` の redirect_uri が
 | `global-setup.ts` | 全サービスの healthy 待ち + 公開URL/Keycloak への疎通確認 | - |
 | `global-teardown.ts` | 全スキーマ横断のテストデータ削除(`E2E_DB_CLEANUP=1` のときのみ) | - |
 | `main-scenario.spec.ts` | **主要シナリオ**: サイト登録 → 記事公開 → 履歴確認 | admin |
-| `service-degradation.spec.ts` | 下流サービス障害時の縮退表示 | admin |
 | `site-registration.spec.ts` | サイト管理・疎通確認(ManagedWordPress フィクスチャ) | admin |
 | `post-creation.spec.ts` | プロジェクト作成ワークフロー | admin |
 | `image-upload.spec.ts` | 画像ギャラリー(ComfyUI 生成フィクスチャ) | admin |
@@ -224,7 +223,6 @@ E2E_REQUIRE_LLM=1 npx playwright test e2e/custom-tag-generation.spec.ts
 > 600秒待たずに即座に、実在するプロジェクト名を添えて失敗する。
 | `E2E_HEALTH_TIMEOUT` | `600` | healthy 待ちのタイムアウト秒数 |
 | `E2E_DB_CLEANUP` | (なし) | `1` で globalTeardown が全スキーマのテストデータを削除する |
-| `E2E_ALLOW_SERVICE_DISRUPTION` | (なし) | `1` で「下流サービスを実際に停止する」縮退表示テストを有効化 |
 | `E2E_WORKERS` | (なし) | Playwright のワーカー数を明示指定する |
 | `CI` | (なし) | リトライ2回・`test.only` 禁止 |
 
@@ -307,16 +305,17 @@ WordPress の自動構築に数分かかるため、このテストのタイム�
 
 ## 8. サービス障害時の縮退表示
 
-`service-degradation.spec.ts`。Web の各ページはサーバーコンポーネントで
+`apps/web/e2e/features/cross-cutting/service-degradation.feature`(issue #943 / AT-17 で
+`service-degradation.spec.ts` から移行、spec は削除済み)。Web の各ページはサーバーコンポーネントで
 `listPosts().catch(() => [])` のように下流エラーを吸収し、空状態へ縮退する実装になっている。
 
-1. **常時実行**: ダッシュボードの状態更新 API(ポーリング / SSE)を 503 に差し替えても、
-   ページが壊れず直近の表示を維持することを検証する(ブラウザ側のみを落とすため安全)。
-2. **オプトイン**: `E2E_ALLOW_SERVICE_DISRUPTION=1` のときのみ、実際に
-   `docker compose stop content` して `/posts` が空状態で描画される(500 にならない)ことを
-   検証し、終了時に `docker compose start content` + healthy 待ちで復旧する。
+6シナリオがある。ダッシュボードの状態更新 API(ポーリング / SSE)を 503 に差し替える1件と、
+実際に `docker compose stop` する5件(content / ai / media / log-writer の停止と、content の復旧)。
 
-スタックを一時的に壊す操作を伴うため、2 は既定で無効。CI や使い捨て環境でのみ有効化する。
+いずれも `@destructive` なので、`at-destructive` 段階で**最後にそれだけで**実行される
+(docs/ACCEPTANCE_TESTING.md §10)。停止したサービスはシナリオの後始末で必ず起動し直し、
+healthy になるまで待つ。`E2E_ALLOW_SERVICE_DISRUPTION` によるオプトインは廃止した
+(段階分離が同じ役割を果たし、環境変数が無いと黙ってスキップされる方が危険なため)。
 
 ---
 
