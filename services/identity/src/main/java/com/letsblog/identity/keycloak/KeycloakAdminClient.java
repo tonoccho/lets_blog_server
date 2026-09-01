@@ -28,6 +28,12 @@ import org.springframework.web.client.RestClientResponseException;
  */
 public class KeycloakAdminClient {
 
+    /** 割当済みのrealmロール一覧(直接付与されているものだけ。composite展開はしない)。 */
+    private static final String ASSIGNED_REALM_ROLES = "/users/{id}/role-mappings/realm";
+
+    /** まだ割り当てられていない、割り当て可能なrealmロール一覧。 */
+    private static final String AVAILABLE_REALM_ROLES = "/users/{id}/role-mappings/realm/available";
+
     private final ServiceTokenClient serviceTokenClient;
     private final RestClient adminClient;
 
@@ -219,22 +225,34 @@ public class KeycloakAdminClient {
     }
 
     /**
-     * realmロールを付与する(issue #955)。既に付与済みの場合もKeycloakは成功を返すため冪等。
+     * realmロールを付与する(issue #955)。既に付与済みなら何もしないため冪等。
      *
-     * <p>Keycloak Admin REST APIのロールマッピングは「ロールの表現(id+name)の配列」を要求するため、
-     * 先に{@code GET /roles/&#123;roleName&#125;}でidを引いてから
-     * {@code POST /users/&#123;id&#125;/role-mappings/realm}を呼ぶ2段構えになる。
+     * <p>Keycloakのロールマッピングは「ロールの表現({@code id}+{@code name})の配列」を要求するので、
+     * 先にロールの{@code id}を引く必要がある。ここで{@code GET /roles/&#123;roleName&#125;}を
+     * <b>使わない</b>のは、そのエンドポイントが{@code realm-management}の{@code view-realm}権限を
+     * 要求するためである。{@code letsblog-services}のサービスアカウントに付いているのは
+     * {@code manage-users}と{@code view-users}だけで(keycloak/realm-export.json)、
+     * 実機で確認すると{@code GET /roles/admin}は403 Forbiddenになる。
+     * 代わりにユーザースコープの{@code role-mappings/realm}と{@code role-mappings/realm/available}を
+     * 使う。こちらは{@code view-users}で読めるため、realmの権限設定を変えずに済む
+     * (= 既に構築済みの環境がrealmの再インポートを迫られない)。
      *
-     * <p>realmにそのロールが存在しない場合は例外にする。付与できていないのに成功として返すと、
+     * <p>{@code available}は「まだ割り当てられていない、割り当て可能なロール」しか返さない。
+     * そのため先に割当済み一覧を見て、既に付いていればそこで終える。
+     *
+     * <p>どちらの一覧にも無い場合は例外にする。付与できていないのに成功として返すと、
      * ローカルDBだけがadminでKeycloakが追随しない状態(issue #955そのもの)が再発するため。
      */
     public void grantRealmRole(String keycloakSub, String roleName) {
-        ObjectNode role = findRealmRole(roleName);
+        if (findRoleMapping(keycloakSub, roleName, ASSIGNED_REALM_ROLES) != null) {
+            return;
+        }
+        ObjectNode role = findRoleMapping(keycloakSub, roleName, AVAILABLE_REALM_ROLES);
         if (role == null) {
             throw new KeycloakUserSyncException(
-                    "Keycloakのrealmロール '" + roleName + "' が存在しません。"
-                            + "keycloak/realm-export.jsonのrealmロール定義が適用されているか確認してください"
-                            + "(issue #955)。");
+                    "Keycloakのrealmロール '" + roleName + "' をユーザー(sub=" + keycloakSub + ")へ"
+                            + "割り当てられません。realmにそのロールが定義されているか"
+                            + "(keycloak/realm-export.json)確認してください(issue #955)。");
         }
         ArrayNode body = JsonNodeFactory.instance.arrayNode();
         body.add(role);
@@ -243,55 +261,59 @@ public class KeycloakAdminClient {
     }
 
     /**
-     * realmロールを剥奪する(issue #955)。DELETEの冪等性を保つため、
-     * 「realmにロールが無い」「対象ユーザーにマッピングが無い/ユーザーが居ない」(404)は
-     * いずれも正常扱いにする。剥奪したい状態は既に満たされているため。
+     * realmロールを剥奪する(issue #955)。割当済み一覧に無ければ何もしないため冪等。
+     *
+     * <p>剥奪したい状態が既に満たされている場合(ロールが付いていない、realmにロールが無い)は
+     * 正常扱いにする。付与と違い、「消えていること」が目的なので、消す対象が無いのは成功である。
      */
     public void revokeRealmRole(String keycloakSub, String roleName) {
-        ObjectNode role = findRealmRole(roleName);
+        ObjectNode role = findRoleMapping(keycloakSub, roleName, ASSIGNED_REALM_ROLES);
         if (role == null) {
             return;
         }
         ArrayNode body = JsonNodeFactory.instance.arrayNode();
         body.add(role);
-        try {
-            modifyRealmRoleMappings(
-                    HttpMethod.DELETE, keycloakSub, body, "realmロール剥奪(role=" + roleName + ")");
-        } catch (KeycloakUserSyncException e) {
-            if (e.getCause() instanceof RestClientResponseException cause
-                    && cause.getStatusCode().value() == 404) {
-                return;
-            }
-            throw e;
-        }
+        modifyRealmRoleMappings(
+                HttpMethod.DELETE, keycloakSub, body, "realmロール剥奪(role=" + roleName + ")");
     }
 
     /**
-     * realmロールの表現({@code id}/{@code name})を引く。存在しない場合(404)は{@code null}を返し、
-     * 「存在しないこと」をどう扱うかは呼び出し側(付与=例外、剥奪=正常)に委ねる。
+     * 指定した一覧({@code uri})から{@code roleName}を探し、ロールマッピングに渡せる表現
+     * ({@code id}/{@code name})を返す。見つからなければ{@code null}を返し、
+     * 「無いこと」をどう扱うかは呼び出し側(付与=例外、剥奪=正常)に委ねる。
+     *
+     * <p>ユーザー自体が存在しない場合(404)も{@code null}を返す。剥奪は目的が達成済みなので正常、
+     * 付与は上の呼び出し側が「割り当てられない」として例外にするため、いずれも安全側に倒れる。
      */
-    private ObjectNode findRealmRole(String roleName) {
+    private ObjectNode findRoleMapping(String keycloakSub, String roleName, String uri) {
+        String action = "realmロール一覧取得(role=" + roleName + ", sub=" + keycloakSub + ")";
+        JsonNode roles;
         try {
-            JsonNode role = adminClient.get()
-                    .uri("/roles/{roleName}", roleName)
+            roles = adminClient.get()
+                    .uri(uri, keycloakSub)
                     .header("Authorization", "Bearer " + serviceTokenClient.getAccessToken())
                     .retrieve()
                     .body(JsonNode.class);
-            if (role == null || !role.hasNonNull("id")) {
-                return null;
-            }
-            ObjectNode mapping = JsonNodeFactory.instance.objectNode();
-            mapping.put("id", role.get("id").asText());
-            mapping.put("name", role.path("name").asText(roleName));
-            return mapping;
         } catch (RestClientResponseException e) {
             if (e.getStatusCode().value() == 404) {
                 return null;
             }
-            throw new KeycloakUserSyncException(errorMessage("realmロール取得(role=" + roleName + ")", e), e);
+            throw new KeycloakUserSyncException(errorMessage(action, e), e);
         } catch (Exception e) {
-            throw connectionFailure("realmロール取得(role=" + roleName + ")", e);
+            throw connectionFailure(action, e);
         }
+        if (roles == null || !roles.isArray()) {
+            return null;
+        }
+        for (JsonNode role : roles) {
+            if (roleName.equals(role.path("name").asText(null)) && role.hasNonNull("id")) {
+                ObjectNode mapping = JsonNodeFactory.instance.objectNode();
+                mapping.put("id", role.get("id").asText());
+                mapping.put("name", roleName);
+                return mapping;
+            }
+        }
+        return null;
     }
 
     private void modifyRealmRoleMappings(

@@ -26,6 +26,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -261,17 +262,36 @@ class UserServiceTest {
     }
 
     @Test
-    void update_admin性が変わらなければKeycloakを呼ばない_issue955() {
+    void update_roleを指定しなければKeycloakを呼ばない_issue955() {
         UserService service = service();
         User user = buildUser();
         user.setKeycloakSub("kc-sub-955-8");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        service.update(1L, new UserUpdateRequest("user", "newpassword123"));
+        service.update(1L, new UserUpdateRequest(null, "newpassword123"));
 
         verify(keycloakAdminClient, never()).grantRealmRole(any(), any());
         verify(keycloakAdminClient, never()).revokeRealmRole(any(), any());
+    }
+
+    /**
+     * #955の修正より前に作られた管理者は、ローカルがadminのままrealmロールを持たない。
+     * 「admin性が変わったときだけ同期する」設計だとこれを画面から直せないので、
+     * roleが指定されていれば変化の有無を問わず同期する(冪等なので再付与は無害)。
+     */
+    @Test
+    void update_同じroleを指定し直すとrealmロールを付け直す_ずれの回復手段_issue955() {
+        UserService service = service();
+        User user = buildUser();
+        user.setRole("admin");
+        user.setKeycloakSub("kc-sub-955-8b");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.update(1L, new UserUpdateRequest("admin", null));
+
+        verify(keycloakAdminClient).grantRealmRole("kc-sub-955-8b", "admin");
     }
 
     @Test
@@ -499,6 +519,74 @@ class UserServiceTest {
 
         assertTrue(summary.migratedUserIds().isEmpty());
         assertTrue(summary.failedUserIds().containsKey(1L));
+    }
+
+    @Test
+    void migrateToKeycloak_adminならrealmロールも付与する_issue955() {
+        UserService service = service();
+        User user = buildUser();
+        user.setRole("admin");
+        when(userRepository.findByKeycloakSubIsNull()).thenReturn(List.of(user));
+        when(keycloakAdminClient.createUser("user@example.com", null, null, true)).thenReturn("kc-sub-955-11");
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        MigrationSummaryResponse summary = service.migrateToKeycloak(null);
+
+        assertEquals(List.of(1L), summary.migratedUserIds());
+        verify(keycloakAdminClient).grantRealmRole("kc-sub-955-11", "admin");
+    }
+
+    @Test
+    void migrateToKeycloak_一般ユーザーにはrealmロールを付与しない_issue955() {
+        UserService service = service();
+        User user = buildUser();
+        when(userRepository.findByKeycloakSubIsNull()).thenReturn(List.of(user));
+        when(keycloakAdminClient.createUser("user@example.com", null, null, true)).thenReturn("kc-sub-955-12");
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.migrateToKeycloak(null);
+
+        verify(keycloakAdminClient, never()).grantRealmRole(any(), any());
+    }
+
+    @Test
+    void migrateToKeycloak_realmロール付与に失敗したら孤児を消して移行失敗にする_issue955() {
+        UserService service = service();
+        User user = buildUser();
+        user.setRole("admin");
+        when(userRepository.findByKeycloakSubIsNull()).thenReturn(List.of(user));
+        when(keycloakAdminClient.createUser("user@example.com", null, null, true)).thenReturn("kc-sub-955-13");
+        org.mockito.Mockito.doThrow(new KeycloakUserSyncException("Keycloakが停止しています"))
+                .when(keycloakAdminClient).grantRealmRole("kc-sub-955-13", "admin");
+
+        MigrationSummaryResponse summary = service.migrateToKeycloak(null);
+
+        assertTrue(summary.migratedUserIds().isEmpty());
+        assertTrue(summary.failedUserIds().containsKey(1L));
+        // subを書き戻さないまま残るとKeycloak側が孤児になり、再実行が409で詰まる。
+        assertNull(user.getKeycloakSub());
+        verify(keycloakAdminClient).deleteUser("kc-sub-955-13");
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    /**
+     * この経路はusers.roleを変えないため、失敗しても「ローカルだけがadmin」という
+     * #955のずれは生まれない。例外にするとadmin性と無関係なRBACロールの付け外しまで
+     * 502になるので、警告ログに留めて成功を返す。
+     */
+    @Test
+    void reconcileKeycloakAdminRole_同期に失敗しても例外にしない_issue955() {
+        UserService service = service();
+        User user = buildUser();
+        user.setRole("admin");
+        user.setKeycloakSub("kc-sub-955-14");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        org.mockito.Mockito.doThrow(new KeycloakUserSyncException("Keycloakが停止しています"))
+                .when(keycloakAdminClient).grantRealmRole("kc-sub-955-14", "admin");
+
+        service.reconcileKeycloakAdminRole(1L);
+
+        verify(keycloakAdminClient).grantRealmRole("kc-sub-955-14", "admin");
     }
 
     @Test

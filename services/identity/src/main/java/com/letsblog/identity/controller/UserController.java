@@ -237,6 +237,10 @@ public class UserController {
      * 「{@code ROLE_ADMIN}が付いたからrealmロール{@code admin}を付ける」という導出はしない。
      * realmロールが従うのはあくまで{@code users.role}である
      * (正/従の決定はdocs/AUTHORIZATION_MATRIX.mdを参照)。
+     *
+     * <p>整合はベストエフォートであり、失敗してもこのエンドポイントは成功を返す。
+     * ロール割り当て自体は既に成功しており、この経路は{@code users.role}を変えないため、
+     * 失敗しても新たなずれは生まれない(理由は{@code reconcileKeycloakAdminRole}のjavadoc)。
      */
     @Operation(summary = "ロールを割り当て", description = "指定されたユーザーにロールを割り当てます(特権ロールはadmin限定)")
     @ApiResponse(responseCode = "200", description = "ロールが割り当てられました")

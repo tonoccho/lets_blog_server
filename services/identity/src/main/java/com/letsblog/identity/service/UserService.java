@@ -259,7 +259,13 @@ public class UserService {
     }
 
     /**
-     * ユーザーを更新する。roleの変更でadmin性が変わる場合、Keycloakのrealmロールを追随させる(#955)。
+     * ユーザーを更新する。{@code role}が指定されたら、Keycloakのrealmロールをその値へ追随させる(#955)。
+     *
+     * <p><b>変化の有無を問わず同期する</b>のは、これが既にずれてしまった環境の<b>回復手段</b>を
+     * 兼ねるからである。#955の修正より前に作られた管理者はrealmロールを持たないが、
+     * 「変わったときだけ同期する」設計だと、role=adminのユーザーにrole=adminをPATCHしても
+     * 何も起こらず、画面からは直せないままになる(このIssueの背景そのもの)。
+     * 付与/剥奪はどちらも冪等なので、ずれていなければ実質的に無害な確認で終わる。
      *
      * <p><b>トランザクション境界</b>: Keycloakへの付与/剥奪を<b>ローカル保存より先に</b>行い、
      * 失敗時は{@link KeycloakUserSyncException}をこの{@code @Transactional}メソッドの外へ
@@ -284,13 +290,9 @@ public class UserService {
         }
 
         boolean wasAdmin = isAdminRole(user.getRole());
-        boolean willBeAdmin = wasAdmin;
-        if (request.role() != null) {
-            willBeAdmin = isAdminRole(request.role());
-        }
-        boolean adminChanged = willBeAdmin != wasAdmin && user.getKeycloakSub() != null;
-        if (adminChanged) {
-            syncKeycloakAdminRole(user.getKeycloakSub(), willBeAdmin);
+        boolean syncedKeycloak = request.role() != null && user.getKeycloakSub() != null;
+        if (syncedKeycloak) {
+            syncKeycloakAdminRole(user.getKeycloakSub(), isAdminRole(request.role()));
         }
 
         if (request.role() != null) {
@@ -303,7 +305,7 @@ public class UserService {
         try {
             return UserResponse.from(userRepository.save(user));
         } catch (RuntimeException e) {
-            if (adminChanged) {
+            if (syncedKeycloak) {
                 compensateKeycloakAdminRole(user.getKeycloakSub(), wasAdmin);
             }
             throw e;
@@ -319,6 +321,16 @@ public class UserService {
      * ここで行うのはあくまで{@code users.role}に対する整合であり、何らかの理由で
      * ずれていた場合にそれを直す。ずれていなければKeycloakへの再付与/再剥奪は無害である
      * (どちらも冪等)。
+     *
+     * <p><b>失敗しても例外にせず、警告ログに留める</b>。他の経路と扱いが違うのは、
+     * この経路が{@code users.role}を<b>変えない</b>からである。RBACのロール割り当ては
+     * 別トランザクションで既にコミットされており、ここで失敗しても
+     * 「ローカルだけがadminでKeycloakが追随しない」新たなずれは生まれない
+     * (要件3が禁じているのはそのずれを作って黙ることであり、ここには作りようがない)。
+     * 逆に例外にすると、admin性と無関係なRBACロールの付け外しまで、成功しているのに
+     * Keycloakの一時的な不調で502を返すことになる。これは修理の機会を1回逃すのと引き換えに、
+     * 元々動いていたRBAC管理を壊す取引で、割に合わない。
+     * ずれの本格的な修復は{@code PATCH /api/users/&#123;id&#125;}(role指定)が担う。
      */
     @Transactional(readOnly = true)
     public void reconcileKeycloakAdminRole(Long userId) {
@@ -327,7 +339,14 @@ public class UserService {
         if (user.getKeycloakSub() == null) {
             return;
         }
-        syncKeycloakAdminRole(user.getKeycloakSub(), isAdminRole(user.getRole()));
+        try {
+            syncKeycloakAdminRole(user.getKeycloakSub(), isAdminRole(user.getRole()));
+        } catch (RuntimeException e) {
+            log.warn("ユーザー(id={}, keycloakSub={})のKeycloak realmロール整合に失敗しました。"
+                            + "RBACのロール変更自体は成功しています。realmロールのずれが残る場合は"
+                            + "PATCH /api/users/{} でroleを指定し直してください(issue #955)。",
+                    user.getId(), user.getKeycloakSub(), user.getId(), e);
+        }
     }
 
     @Transactional(readOnly = true)
@@ -466,6 +485,18 @@ public class UserService {
             try {
                 String keycloakSub = keycloakAdminClient.createUser(
                         user.getEmail(), user.getFirstName(), user.getLastName(), true);
+                // issue #955: ここも「Keycloakアカウントが生まれる経路」なので、admin なら
+                // realmロールも併せて付与する。付与しないと、移行された管理者が
+                // 「ログインはできるが管理画面に入れない」= #955そのものの状態になる。
+                // 失敗したら作ったばかりのKeycloakユーザーを消す(createと同じ補償)。消さないと
+                // keycloakSubがローカルへ保存されないまま孤児として残り、再実行が409で詰まる。
+                // その上でこのユーザーだけを移行失敗として集計する(下のcatch)。他ユーザーは続行する。
+                try {
+                    syncKeycloakAdminRole(keycloakSub, isAdminRole(user.getRole()));
+                } catch (RuntimeException syncFailure) {
+                    compensateKeycloakUser(keycloakSub);
+                    throw syncFailure;
+                }
                 user.setKeycloakSub(keycloakSub);
                 userRepository.save(user);
                 keycloakAdminClient.sendPasswordResetEmail(keycloakSub);

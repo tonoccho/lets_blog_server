@@ -16,6 +16,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -73,5 +74,45 @@ class UserControllerTest {
 
         assertEquals(users, result);
         verify(adminAuthorizationService).requireAdmin();
+    }
+
+    /**
+     * issue #955: RBACのロール割り当て後にKeycloakのrealmロールを{@code users.role}へ
+     * 整合させる配線の回帰テスト。整合そのものの挙動はUserServiceTestが検証しているので、
+     * ここではコントローラが呼び出すこと・整合の失敗がエンドポイントを壊さないことだけを見る。
+     */
+    @Test
+    void assignRole_割り当て後にKeycloakのrealmロールを整合させる_issue955() {
+        UserController controller = controller();
+        when(roleService.isPrivilegedRole("ROLE_VIEWER")).thenReturn(false);
+
+        controller.assignRole(1L, "ROLE_VIEWER");
+
+        verify(roleService).assignRoleToUser(1L, "ROLE_VIEWER");
+        verify(userService).reconcileKeycloakAdminRole(1L);
+    }
+
+    @Test
+    void removeRole_解除後にKeycloakのrealmロールを整合させる_issue955() {
+        UserController controller = controller();
+        when(roleService.isPrivilegedRole("ROLE_VIEWER")).thenReturn(false);
+
+        controller.removeRole(1L, "ROLE_VIEWER");
+
+        verify(roleService).removeRoleFromUser(1L, "ROLE_VIEWER");
+        verify(userService).reconcileKeycloakAdminRole(1L);
+    }
+
+    @Test
+    void assignRole_認可に失敗したらロール割り当ても整合も行わない_issue955() {
+        UserController controller = controller();
+        when(roleService.isPrivilegedRole("ROLE_ADMIN")).thenReturn(true);
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です"))
+                .when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.assignRole(1L, "ROLE_ADMIN"));
+
+        verify(roleService, never()).assignRoleToUser(any(), any());
+        verify(userService, never()).reconcileKeycloakAdminRole(any());
     }
 }
