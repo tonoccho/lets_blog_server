@@ -62,12 +62,31 @@ path: the header-based self-declared identity used before issue #566 has been re
 ([ADR-0008](docs/adr/0008-auth-gate-in-each-service-security-config.md)). A request that bypasses the
 gateway and reaches a service container directly is still rejected without a valid JWT.
 
-The only endpoints reachable without a token are:
+The only **application** endpoints reachable without a token are:
 
 - `/actuator/**` (health/info/metrics; used by docker healthchecks and the gateway's aggregate health)
 - API docs (`/v3/api-docs/**`, `/swagger-ui/**`)
 - `/api/auth/setup-status` and `/api/auth/setup` — first-run admin creation, which by definition has
   to work before anyone can log in (identity-service, moved there in #583)
+
+### Paths the reverse proxy forwards outside that gate
+
+The gate above only covers what reaches `web` or `gateway`. `infra/nginx/conf.d/default.conf`
+also forwards a number of paths straight to bundled third-party containers. Those requests never
+reach a Spring `SecurityConfig`, so each one is only as protected as the tool behind it. This is
+the full list — everything else under `/` and `/api/` goes through the gate above.
+
+| Path | Forwarded to | What guards it |
+|---|---|---|
+| `/nginx-health` | nginx itself | Nothing. Returns a static `200`; carries no data |
+| `/auth/` | Keycloak | Keycloak's own login. Public by design — it *is* the login endpoint (#559) |
+| `/phpmyadmin/` | phpMyAdmin | phpMyAdmin's own login screen (`auth_type: cookie`), using MySQL credentials. The container is deliberately given **no** `PMA_USER` / `PMA_PASSWORD`: those switch it to `auth_type: config`, which hands every visitor an already-connected MySQL session (#978) |
+| `/penpot` | Penpot | Penpot's own login |
+| `/sites/<slug>/**` | WordPress | Nothing for published pages — they are public blog content by design. `wp-admin` behind them is guarded by WordPress's own login |
+| `/comfyui/`, `/plantuml/`, `/drawio/` | ComfyUI / PlantUML / drawio | **Nothing.** Documented as internal-only but in fact forwarded unauthenticated; tracked in #979 |
+
+A path added to the reverse proxy that does not terminate in `web` or `gateway` belongs in this
+table. If it has no authentication of its own, it does not belong on the reverse proxy at all.
 
 ### Authorization
 
