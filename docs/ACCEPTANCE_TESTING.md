@@ -55,6 +55,29 @@
 | `apps/web/e2e/support/index.ts` | 既存 `apps/web/e2e/helpers.ts` の再エクスポート |
 | `apps/web/e2e/*.spec.ts` | 移行前の既存 Playwright spec(§7) |
 
+### VSCode拡張だけは別のランナーを使う(#942 / AT-16)
+
+拡張の受け入れテストはブラウザを一切使わず、拡張自身の `apiClient` / `httpClient` を
+Node から直接呼ぶ。Playwright を持ち込む理由が無いため、拡張が既に使っている jest の上で
+`.feature` を実行する最小のランナーを置いてある。**記法・タグの意味・原則はこの文書と同じ**。
+
+| パス | 内容 |
+| --- | --- |
+| `apps/extension/e2e/features/<domain>/*.feature` | 拡張の受け入れ基準(日本語 Gherkin) |
+| `apps/extension/e2e/steps/<domain>.steps.ts` | ステップ定義 |
+| `apps/extension/e2e/support/gherkin.ts` | `.feature` → jest への変換とタグ絞り込み |
+
+```bash
+cd apps/extension
+npm run test:at          # 全件
+npm run test:at:fast     # @slow / @destructive を除く
+```
+
+詳細は [apps/extension/e2e/README.md](../apps/extension/e2e/README.md)。
+UI操作(コマンドパレット・Webview・キーバインド)は自動化せず、
+[apps/extension/MANUAL_ACCEPTANCE_CHECKLIST.md](../apps/extension/MANUAL_ACCEPTANCE_CHECKLIST.md)
+で人が確認する。
+
 `<domain>` は AT Issue の区切りに合わせる:
 `auth` / `users` / `projects` / `posts` / `bulk` / `ai` / `plans` / `media` / `diagrams` /
 `content` / `analytics` / `system` / `logs` / `extension` / `cross-cutting`。

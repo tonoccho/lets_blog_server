@@ -30,6 +30,12 @@ class TestCodeClassification(unittest.TestCase):
         "packages/lbs-common/src/testFixtures/java/com/example/common/Fixtures.java",
         "apps/web/e2e/features/article/publish.feature",
         "apps/web/e2e/steps/article.steps.ts",
+        # #942: 拡張の受け入れテスト(jest 上の Gherkin ランナー)。
+        "apps/extension/e2e/features/auth/login.feature",
+        "apps/extension/e2e/steps/auth.steps.ts",
+        "apps/extension/e2e/support/gherkin.ts",
+        "apps/extension/e2e/acceptance.test.ts",
+        "apps/extension/e2e/jest.config.js",
         "apps/web/src/components/ArticleCard.test.tsx",
         "apps/mcp-server/src/tools/designSuggestion.test.js",
         "apps/web/src/lib/api.spec.ts",

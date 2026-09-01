@@ -101,6 +101,30 @@ thresholds apply to the whole module until package-specific guidance is establis
 (Verified against `apps/web/src/` 2026-08: no dedicated `src/hooks/` directory currently exists;
 removed from this list. Reintroduce it here if one is added.)
 
+### VSCode拡張 (`apps/extension`)
+
+**Location**: `apps/extension/coverage/` (`npm --prefix apps/extension run test:coverage`)
+
+**Target Thresholds**(純ロジックのモジュール): Statements 90% / Branches 90% / Functions 90% / Lines 90%
+
+拡張は `apps/web` とは別の jest プロジェクトで、閾値は
+[apps/extension/jest.config.js](../apps/extension/jest.config.js) の `coverageThreshold` に
+**ファイル単位**で設定する(リポジトリ全体の一律の下限は置かない)。理由は、拡張のソースが
+性質の異なる2種類に分かれるためである。
+
+| 区分 | 例 | 目標 | 検証手段 |
+| --- | --- | --- | --- |
+| 純ロジック(サーバーもVSCode APIも介さない) | `frontMatter` `headingContext` `config` `issueParser` `markdownSources` `cache` `urlPaste` `multipart` `articleScaffold` `webviewPanelBase` `proofreadLogic` `webviewSecurity` `schemas` `jwtClaims` `apiBaseUrl` | **Branches 90%+**(既に100%のものは100%を維持) | 単体テスト `src/__tests__/**` |
+| VSCode拡張ホストに依存する層 | `extension.ts`(コマンド登録)、各 `*Panel.ts` の生成部、`*CompletionProvider.ts` | 数値目標を置かない | UI操作は [apps/extension/MANUAL_ACCEPTANCE_CHECKLIST.md](../apps/extension/MANUAL_ACCEPTANCE_CHECKLIST.md)、サーバー契約は Layer 1 受け入れテスト(`apps/extension/e2e/`) |
+
+`apiClient.ts` は「どのURLへ何を送るか」を決める層であり、送信内容そのものは
+サーバー越しに観測できない。`src/__tests__/apiClientRequests.test.ts` が
+`httpClient` をモックして担保する(issue #942)。
+
+```bash
+npm --prefix apps/extension run test:coverage
+```
+
 ## Continuous Integration Coverage Check
 
 ### API Coverage

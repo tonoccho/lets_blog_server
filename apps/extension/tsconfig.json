@@ -16,5 +16,5 @@
       "@api-client": ["../../packages/api-client/src"]
     }
   },
-  "exclude": ["node_modules", ".vscode-test", "src/__tests__", "src/__mocks__"]
+  "exclude": ["node_modules", ".vscode-test", "src/__tests__", "src/__mocks__", "e2e"]
 }

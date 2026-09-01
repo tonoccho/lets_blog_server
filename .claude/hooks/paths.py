@@ -21,7 +21,8 @@ nginx の設定も、Keycloak のレルム定義も、compose のポート公開
 import re
 
 # テストコード。JVM の src/test・src/testFixtures、Gherkin の .feature、
-# playwright-bdd の e2e 一式、jest の *.test.* / *.spec.* を含む。
+# 各アプリの e2e 一式(apps/web は playwright-bdd、apps/extension は jest 上の
+# Gherkin ランナー。#942)、jest の *.test.* / *.spec.* を含む。
 #
 # テストランナーの設定・セットアップ(jest.config / jest.setup / playwright.config)も
 # テストコード側に置く。これらはテストの回り方だけを決め、出荷物の振る舞いには影響しない。
@@ -30,7 +31,7 @@ TEST_PATTERNS = [
     r"(^|/)src/test/",
     r"(^|/)src/testFixtures/",
     r"\.feature$",
-    r"^apps/web/e2e/",
+    r"^apps/[^/]+/e2e/",
     r"\.test\.[jt]sx?$",
     r"\.spec\.[jt]sx?$",
     r"(^|/)__tests__/",
