@@ -73,7 +73,7 @@ app:
 # Keycloakユーザー同期(#562)。letsblog-services(#560で定義済みのサービス間通信用confidentialクライアント)
 # のクライアントクレデンシャルズグラントでKeycloak Admin REST APIを呼び出す。事前にrealm側で
 # このクライアントのサービスアカウントにrealm-management#manage-usersロールを付与しておく必要がある
-# (keycloak/realm-export.json参照)。token-uri/admin-base-uriはコンテナ間通信で到達可能な内部アドレス
+# (infra/keycloak/realm-export.json参照)。token-uri/admin-base-uriはコンテナ間通信で到達可能な内部アドレス
 # (gatewayのkeycloak.jwk-set-uriと同様の考え方。services/gateway/src/main/resources/application.yml参照)。
 keycloak:
   admin:

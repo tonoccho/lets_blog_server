@@ -39,7 +39,7 @@ import java.util.zip.ZipOutputStream;
  * 対象を全サービスのMySQLスキーマ(#570のスキーマ分離により分かれている)とKeycloak PostgreSQL
  * (認証基盤、ADR-0002)へ拡張したもの。各サービス専用のDBユーザーでは他スキーマにアクセスできない
  * ため、{@link BackupProperties}が保持するバックアップ専用の横断的なMySQL認証情報
- * ({@code lbs_backup}、mysql/init/01-create-service-schemas.sh参照)を使う。KeycloakのPostgreSQLは
+ * ({@code lbs_backup}、infra/mysql/init/01-create-service-schemas.sh参照)を使う。KeycloakのPostgreSQLは
  * 元々そのDB専用の{@code keycloak}ユーザーしか存在しないため、その認証情報をそのまま流用する。
  *
  * <p>バックアップはZIPアーカイブとして、metadata.json・スキーマ/DBごとのSQLダンプ

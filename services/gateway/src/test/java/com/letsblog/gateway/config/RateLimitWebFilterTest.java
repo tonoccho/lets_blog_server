@@ -294,7 +294,7 @@ class RateLimitWebFilterTest {
      * 本番既定値(api-internal 600req/分・api-global 100req/分・operation-log 300req/分)のまま検証する。
      *
      * <p>各画面のリクエスト本数は、Server Component/Server Actionのデータ取得呼び出しを実コードから数えた値
-     * (web/src/app配下)。BFFはapiClient.tsのapiRequest()経由で1リクエストにつきPOST /api/operation-logsも
+     * (apps/web/src/app配下)。BFFはapiClient.tsのapiRequest()経由で1リクエストにつきPOST /api/operation-logsも
      * 1本送るため、それも合わせて再現する。ブラウザ直発はダッシュボードのSSE 2本のみ。
      *
      * <p>4画面1周でBFF 23本。5周=115本は、#749より前の「プロセス全体で100req/分」の上限を超えるため、

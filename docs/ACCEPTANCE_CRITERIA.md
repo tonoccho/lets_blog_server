@@ -20,7 +20,7 @@ AT-3〜AT-19(#929〜#945)の各Issueが、自分の担当領域の行を `検証
 | 機能 | 利用者が認識する単位。画面名・コマンド名・APIの束 |
 | 利用者から見た価値 | なぜこの機能があるのか。ここが書けない行は機能の切り方が間違っている |
 | 受け入れ基準(要約) | 利用者から観測できるふるまい。`.feature` のシナリオの元になる |
-| 対応シナリオ | `web/e2e/features/...` のファイルパスとシナリオ名。未実装なら `—` |
+| 対応シナリオ | `apps/web/e2e/features/...` のファイルパスとシナリオ名。未実装なら `—` |
 | 状態 | `未着手` / `実装中` / `既存spec` / `検証済` / `対象外(理由)` |
 
 状態の意味:
@@ -320,7 +320,7 @@ API: log-writer `AuditLogController`, `OperationLogController`, `FrontendErrorLo
 
 ### 2.14 VSCode拡張 — `EXT`
 
-`extension/package.json` の `contributes.commands` 全24コマンド。
+`apps/extension/package.json` の `contributes.commands` 全24コマンド。
 検証方針は AT-16(#942)に従い、**APIレベル + 単体テストの二層**とする(UI操作は対象外)。
 
 | 機能ID | コマンド | 利用者から見た価値 | 受け入れ基準(要約) | 対応シナリオ | 状態 |
@@ -432,7 +432,7 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 
 | 機能ID | 機能 | 対象外の理由 |
 | --- | --- | --- |
-| AC-PERF-001 | カスタムタグ検証APIの応答時間 | 受け入れ基準ではなく性能の閾値検証。#915 の判断で `web/e2e/performance.spec.ts` に残す。対応: `APIレスポンス時間が2秒以内であること` / `複数リクエストの並列処理パフォーマンス` |
+| AC-PERF-001 | カスタムタグ検証APIの応答時間 | 受け入れ基準ではなく性能の閾値検証。#915 の判断で `apps/web/e2e/performance.spec.ts` に残す。対応: `APIレスポンス時間が2秒以内であること` / `複数リクエストの並列処理パフォーマンス` |
 | AC-PERF-002 | AI生成の応答時間 | 同上。外部LLMの応答時間に依存し、受け入れ可否の判定に使えない。対応: `performance.spec.ts` › `Ollamaレスポンス時間が10秒以内であること` |
 | AC-PERF-003 | タグ画面のページロード時間 | 同上。対応: `performance.spec.ts` › `UIレンダリング性能: タグ画面のページロード時間` |
 | AC-EXT-019 | `letsBlog.previewDevTools` | 開発者向けのデバッグ機能。利用者から見た受け入れ基準を持たない |
@@ -526,12 +526,12 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 
 | ソース | 件数 | カバー状況 |
 | --- | --- | --- |
-| Web管理画面 (`web/src/app/**/page.tsx`) | 24 ページ | 全ページが1つ以上の機能IDに対応(§7) |
-| VSCode拡張 (`extension/package.json`) | 24 コマンド | AC-EXT-001〜024 で1対1 |
+| Web管理画面 (`apps/web/src/app/**/page.tsx`) | 24 ページ | 全ページが1つ以上の機能IDに対応(§7) |
+| VSCode拡張 (`apps/extension/package.json`) | 24 コマンド | AC-EXT-001〜024 で1対1 |
 | 公開APIコントローラ | 48 クラス | 全クラスが1つ以上の機能IDに対応 |
 | 内部ブリッジコントローラ | 18 クラス | AC-INT-001〜018(受け入れテスト対象外) |
 
-> #927 の Background は Web を「23 ページ」としていたが、`find web/src/app -name page.tsx`
+> #927 の Background は Web を「23 ページ」としていたが、`find apps/web/src/app -name page.tsx`
 > の実測は 24 ページ(2026-09-01)。本カタログは実測に合わせた。
 
 ---

@@ -21,10 +21,10 @@ Playwright による Let's Blog Server の E2E テストの実行方法・前提
 | ベースURL | `https://localhost`(reverse-proxy の自己署名証明書。`ignoreHTTPSErrors: true`) |
 | 認証 | Keycloak のホスト型ログイン画面(NextAuth の Authorization Code + PKCE) |
 | テスト対象 | web(Next.js) / gateway / identity / project / content / media / ai / analytics / platform / publishing / legacy-api / Keycloak / MySQL / RabbitMQ / WordPress |
-| テスト配置 | `web/e2e/` |
-| 設定 | `web/playwright.config.ts` |
-| 起動待ち | `web/e2e/global-setup.ts` → `scripts/wait-for-stack-healthy.sh` |
-| 後片付け | `web/e2e/global-teardown.ts` → `scripts/e2e-cleanup-test-data.sh`(任意) |
+| テスト配置 | `apps/web/e2e/` |
+| 設定 | `apps/web/playwright.config.ts` |
+| 起動待ち | `apps/web/e2e/global-setup.ts` → `scripts/wait-for-stack-healthy.sh` |
+| 後片付け | `apps/web/e2e/global-teardown.ts` → `scripts/e2e-cleanup-test-data.sh`(任意) |
 
 E2E は Playwright に Web サーバーを起動させない(`webServer` を設定していない)。
 Keycloak クライアント `letsblog-web` の redirect_uri が
@@ -35,7 +35,7 @@ Keycloak クライアント `letsblog-web` の redirect_uri が
 
 ## 2. テストファイル
 
-`web/e2e/`:
+`apps/web/e2e/`:
 
 | ファイル | 内容 | ログイン |
 | --- | --- | --- |
@@ -124,7 +124,7 @@ E2E_ADMIN_PASSWORD='<任意の強いパスワード>' \
 3. admin アカウントに realm ロール `admin` を付与する(JWT の `realm_access.roles` に載る)。
 4. (手順 0 で作成済み)E2E 専用クライアント `letsblog-e2e`(public / direct access grant 可)。
    `main-scenario.spec.ts` が API を直接叩くときのトークン発行に使う(§7 参照)。
-   `keycloak/realm-export.json` にも同じ定義があるが、Keycloak は realm export を
+   `infra/keycloak/realm-export.json` にも同じ定義があるが、Keycloak は realm export を
    **初回起動時にしか読まない** ため、既に起動済みの環境ではこのスクリプトで作る必要がある。
    既存の `admin-cli` などの実運用クライアントには一切触れない。
 
@@ -150,7 +150,7 @@ export E2E_ADMIN_PASSWORD='...'
 ## 4. 実行
 
 ```bash
-cd web
+cd apps/web
 npm install
 npx playwright install    # 初回のみ
 
@@ -265,7 +265,7 @@ globalTeardown がこのスクリプトを `--yes` 付きで自動実行する
 
 ManagedWordPress サイト(`sites.managed_wordpress = 1`)については、DB 行を消す前に
 wordpress コンテナ内のプロビジョニングエージェント(`POST /deprovision`、
-`wordpress/provision-agent/index.php`)を呼んで **実体(サイトディレクトリと専用 DB)も解放する**
+`infra/wordpress/provision-agent/index.php`)を呼んで **実体(サイトディレクトリと専用 DB)も解放する**
 (issue #765)。project-service のサイト削除が呼ぶものと同じエンドポイントで、
 `rm -rf` と `DROP DATABASE IF EXISTS` はどちらも冪等なため、UI 経由で既に削除済みのサイトに
 対して再実行しても問題ない。
@@ -474,5 +474,5 @@ docker exec -i -e MYSQL_PWD="$(grep '^MYSQL_ROOT_PASSWORD=' .env | cut -d= -f2-)
 - `docs/e2e-validation-guide.md` — 手動でのエンドツーエンド動作検証手順
 - `docs/DOCKER_COMPOSE_ARCHITECTURE.md` — サービス構成
 - `docs/TEST_DOCUMENTATION.md` — サービス別のテスト戦略
-- `keycloak/README.md` — realm 定義と運用
+- `infra/keycloak/README.md` — realm 定義と運用
 - [Playwright Documentation](https://playwright.dev/)

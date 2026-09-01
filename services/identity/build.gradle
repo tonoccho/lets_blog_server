@@ -9,7 +9,7 @@ plugins {
 }
 
 dependencies {
-    implementation project(':libs:lbs-common')
+    implementation project(':packages:lbs-common')
 
     implementation 'org.springframework.boot:spring-boot-starter-web'
     // issue #583: ProjectUserSyncService が project-service / publishing-service の内部ブリッジを
@@ -39,7 +39,7 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-webmvc-test'
     testImplementation 'org.springframework.security:spring-security-test'
     // JWTを必要とするテストの共通フィクスチャ(#587)。
-    testImplementation testFixtures(project(':libs:lbs-common'))
+    testImplementation testFixtures(project(':packages:lbs-common'))
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 

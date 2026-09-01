@@ -30,7 +30,7 @@ public class AdminAuthorizationService {
      *
      * <p>自分自身を締め出す操作を防ぐ。最後のadminが自分のアカウントを消したり無効化したりすると
      * 誰も管理できない状態になる。Web側にも同じガードがあるが
-     * ({@code web/src/app/users/actions.ts})、gatewayは認可判定を行わず(ADR-0008)、
+     * ({@code apps/web/src/app/users/actions.ts})、gatewayは認可判定を行わず(ADR-0008)、
      * アクセストークンを持つクライアントはAPIを直接叩けるため、サーバー側にも置く。
      *
      * <p><b>「最後のadminか」は数えない</b>(#798で改めて判断した)。adminが2人いれば

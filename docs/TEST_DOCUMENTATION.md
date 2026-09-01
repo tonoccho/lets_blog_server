@@ -7,7 +7,7 @@
 
 | モジュール | パス | 役割 |
 |---|---|---|
-| `libs:lbs-common` | `libs/lbs-common` | サービス間で共有する横断的な部品(ドメインロジックは持たない) |
+| `libs:lbs-common` | `packages/lbs-common` | サービス間で共有する横断的な部品(ドメインロジックは持たない) |
 | `services:gateway` | `services/gateway` | APIゲートウェイ(ルーティング・JWT検証・レート制限・相関ID) |
 | `services:identity` | `services/identity` | ユーザー・ロール・権限・プロジェクトメンバー |
 | `services:project` | `services/project` | プロジェクト・サイト・SSH鍵・タグデザイン |
@@ -32,7 +32,7 @@
 | 症状 | 例外 | 原因 |
 |---|---|---|
 | ポートに何もいない | `FlywaySqlUnableToConnectToDbException` / `ConnectException` | `docker-compose.yml` の `mysql` はホストにポートを**公開していない** |
-| スキーマが無い | `Unknown database 'lbs_project_test'` | `mysql/init/*.sh` はデータボリュームが**空のときにしか**実行されない |
+| スキーマが無い | `Unknown database 'lbs_project_test'` | `infra/mysql/init/*.sh` はデータボリュームが**空のときにしか**実行されない |
 
 実行前に前提を確認する。
 
@@ -104,7 +104,7 @@ CIでは`.github/workflows/api-services-test.yml`が、変更のあったサー�
 ## 性能テストの現状(issue #915)
 
 **負荷試験のツール(JMH / k6)は持たない。** 性能に関する自動検証は
-`web/e2e/performance.spec.ts`(Playwright)だけである。
+`apps/web/e2e/performance.spec.ts`(Playwright)だけである。
 
 | 対象 | 目標値 |
 |---|---|
@@ -143,7 +143,7 @@ CIでは`.github/workflows/api-services-test.yml`が、変更のあったサー�
 
 ## JWTを必要とするテストの書き方
 
-JWT認証を伴うエンドポイント・ロジックのテストは、`libs/lbs-common`が
+JWT認証を伴うエンドポイント・ロジックのテストは、`packages/lbs-common`が
 `java-test-fixtures`として提供する`com.letsblog.common.testfixtures.JwtTestFixtures`を使う
 (#587)。利用側のサービスは`build.gradle`に以下を追加する(全サービス追加済み)。
 
@@ -210,7 +210,7 @@ DBへ接続するテスト・サービス間契約テスト・他サービス呼
 
 ### 2. E2E テスト（Playwright）
 
-**場所**: `web/e2e/`
+**場所**: `apps/web/e2e/`
 
 **説明**: ユーザーが実際にUIを操作する場合の動作を検証します。ブラウザ上での実際の操作フローを自動テストします。
 
@@ -228,7 +228,7 @@ DBへ接続するテスト・サービス間契約テスト・他サービス呼
 **実行方法**:
 
 ```bash
-cd web
+cd apps/web
 
 # 依存関係インストール
 npm install
@@ -255,7 +255,7 @@ npm run test:e2e:debug
 **実行方法**:
 
 ```bash
-cd web
+cd apps/web
 npm run test:e2e -- performance.spec.ts
 ```
 
@@ -275,7 +275,7 @@ npm run test:e2e -- performance.spec.ts
 **実行方法**:
 
 ```bash
-cd web
+cd apps/web
 npm run test:e2e -- security.spec.ts
 ```
 
@@ -285,7 +285,7 @@ npm run test:e2e -- security.spec.ts
 
 **必要な設定**:
 - Java 21
-- Gradle(ルートのマルチプロジェクトビルド。`libs/lbs-common` + `services/*`)
+- Gradle(ルートのマルチプロジェクトビルド。`packages/lbs-common` + `services/*`)
 - Spring Boot 4.1.0
 - Spring Security Test
 
@@ -304,16 +304,16 @@ testImplementation testFixtures(project(':libs:lbs-common'))
 
 ADR-0006 のとおり Testcontainers は使わず、実 MySQL の**サービス専用テストスキーマ**へ接続する
 (各サービスの `src/test/resources/application-test.yml`)。スキーマは
-`mysql/init/02-create-test-schemas.sh` が作る。
+`infra/mysql/init/02-create-test-schemas.sh` が作る。
 
 | サービス | テストスキーマ | 作られ方 |
 |---|---|---|
-| content / media / ai / analytics / platform | `lbs_{content,media,ai,analytics,platform}_test` | `mysql/init/02-create-test-schemas.sh`(#762で追加。以前は `scripts/setup-test-db.sh` だけが作っており、開発スタックのMySQLには作られていなかった。同スクリプトは参照されなくなったため #846 で削除済み) |
+| content / media / ai / analytics / platform | `lbs_{content,media,ai,analytics,platform}_test` | `infra/mysql/init/02-create-test-schemas.sh`(#762で追加。以前は `scripts/setup-test-db.sh` だけが作っており、開発スタックのMySQLには作られていなかった。同スクリプトは参照されなくなったため #846 で削除済み) |
 | identity / project / publishing / log-writer | `lbs_{identity,project,publishing,log}_test` | 同上(#772で追加) |
 
 > `lets_blog_test`(legacy-api 用)は #583 のサービス削除と #785 の旧スキーマ廃止に伴い不要になった。
 
-**注意:** `mysql/init/*.sh` は MySQL 公式イメージの仕様により**データボリュームが空のときにしか
+**注意:** `infra/mysql/init/*.sh` は MySQL 公式イメージの仕様により**データボリュームが空のときにしか
 実行されない**。既に MySQL を動かしている環境であとからスキーマが増えると、
 `Unknown database 'lbs_project_test'` のようなエラーでテストが落ちる。ボリュームを作り直さずに
 追随するには、テストの接続先 MySQL(各 `application-test.yml` の `localhost:3306`)に対して
@@ -351,7 +351,7 @@ identity だけ `flyway.enabled: false` + `ddl-auto: create-drop` になって�
 テストで一度も実行されていなかったが、issue #914 で他8サービスへ揃えた。
 
 冪等性・履歴・チェックサムの検証は各サービスの `MigrationContractTest`
-(共通実装は `libs/lbs-common` の `MigrationContract`、issue #914)が行う。
+(共通実装は `packages/lbs-common` の `MigrationContract`、issue #914)が行う。
 
 ### Web テスト環境
 
@@ -363,7 +363,7 @@ identity だけ `flyway.enabled: false` + `ddl-auto: create-drop` になって�
 **インストール**:
 
 ```bash
-cd web
+cd apps/web
 npm install
 
 # Playwrightブラウザのインストール
@@ -375,7 +375,7 @@ npx playwright install
 `web` を変更したら、以下の3つを**すべて**実行すること(issue #720)。
 
 ```bash
-cd web
+cd apps/web
 npm run lint        # ESLint
 npx tsc --noEmit    # 型チェック
 npx jest            # ユニットテスト
@@ -387,7 +387,7 @@ npx jest            # ユニットテスト
 (e2e スペックの型不一致3件と、`SiteListTable.test.tsx` のモックが `Site` / `Project` の
 フィールド追加に追随していないもの3件)。
 
-`web/tsconfig.json` の `include` は `**/*.ts` / `**/*.tsx` なので、`e2e/` と
+`apps/web/tsconfig.json` の `include` は `**/*.ts` / `**/*.tsx` なので、`e2e/` と
 `__tests__/` も型チェックの対象である。`npm run build`(= `next build`)も型チェックを
 行うため、ビルドを通す前にここで検出できる。
 

@@ -25,7 +25,7 @@ The backup system (owned by `platform-service`, issue #694 / C10-2) protects thr
 
 Each service owns a dedicated MySQL user scoped to its own schema (#570), so no single service
 credential can dump/restore every schema. `BackupService` instead uses a dedicated `lbs_backup` MySQL
-user (created by `mysql/init/01-create-service-schemas.sh`) that is granted the same per-schema
+user (created by `infra/mysql/init/01-create-service-schemas.sh`) that is granted the same per-schema
 privileges as each service's own user, but on every known schema at once — it has no access to the
 MySQL system schemas or any database outside the application's own set, preserving the intent of the
 schema-per-service separation (#570). For Keycloak's PostgreSQL database, the existing `keycloak` user (already

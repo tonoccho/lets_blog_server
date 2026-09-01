@@ -39,7 +39,7 @@ import static org.junit.jupiter.api.DynamicTest.dynamicTest;
  * {@code /api/ssh-key-pairs}等。application.ymlの各所のコメント参照)。レビューでの
  * 手動発見に頼らず、テストとして自動的に検知できるようにする。
  *
- * <p><b>アプローチ</b>: gatewayモジュールは{@code libs:lbs-common}以外の他サービスモジュールへの
+ * <p><b>アプローチ</b>: gatewayモジュールは{@code packages:lbs-common}以外の他サービスモジュールへの
  * コンパイル時依存を持たない(services/gateway/build.gradle参照)。7つの抽出済みサービス
  * すべてへ{@code testImplementation project(':services:xxx')}を追加してリフレクションで
  * 検証する方法も検討したが、(1)gatewayが本来担うべきでない大量のコンパイル時結合を
@@ -81,7 +81,7 @@ import static org.junit.jupiter.api.DynamicTest.dynamicTest;
  * ArticlePlanController(ai-service、実パスは{@code /api/projects/{projectId}/article-plan/**})
  * は、application.ymlのルート表に対応するエントリが無く、より先に評価される{@code project}ルート
  * ({@code /api/projects/**}、PROJECT_SERVICE_URI宛)に先勝ちでマッチし、ai-serviceではなく
- * project-serviceへ誤ってルーティングされていた(web/src/lib/apiClient.tsが実際に
+ * project-serviceへ誤ってルーティングされていた(apps/web/src/lib/apiClient.tsが実際に
  * {@code /api/projects/{projectId}/article-plan/...}を呼ぶため、記事プラン機能がgateway経由で
  * 到達不能になっていた)。{@code project-ai-models-llm}と同じパターンで
  * {@code project-article-plan}ルート({@code /api/projects/*&#47;article-plan/**} →

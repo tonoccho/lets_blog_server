@@ -330,4 +330,4 @@ To count them: `docker logs lbs-gateway | grep "status=429"`.
   defaults
 - `services/gateway/src/test/java/com/letsblog/gateway/config/RateLimitWebFilterTest.java` - Bucket
   classification and partitioning tests
-- `nginx/conf.d/default.conf` - sets the `X-Forwarded-For` chain the partitioning relies on
+- `infra/nginx/conf.d/default.conf` - sets the `X-Forwarded-For` chain the partitioning relies on

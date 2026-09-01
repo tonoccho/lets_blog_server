@@ -22,7 +22,7 @@
 | `lbs_platform` | バックアップ等の運用系 | platform-service (#579) |
 | `lbs_log` | ログ | log-writer(既存。移行対象は#572で決定) |
 
-`mysql/init/01-create-service-schemas.sh` が、MySQLコンテナの初回起動時
+`infra/mysql/init/01-create-service-schemas.sh` が、MySQLコンテナの初回起動時
 (データボリュームが空の場合のみ)にこれらのスキーマと、スキーマ名と同名のユーザー
 (例: `lbs_identity`@`%`)を作成する。各ユーザーは自分のスキーマにしかアクセスできない
 (`GRANT ALL PRIVILEGES ON <schema>.* TO '<schema>'@'%'`)。
@@ -112,7 +112,7 @@ legacy-api ごと #583 で削除済み(内容は git history を参照)。
 
 ## 既存データの移行
 
-`libs/lbs-common` の `com.letsblog.common.migration` パッケージに、既存スキーマから
+`packages/lbs-common` の `com.letsblog.common.migration` パッケージに、既存スキーマから
 サービス別スキーマへデータを移すワンショット移行ジョブの基盤(`SchemaMigrationJob`)がある。
 
 - 冪等性: 同じジョブ名は、移行先スキーマの管理テーブル(`_migration_state`)にCOMPLETEDと
@@ -254,7 +254,7 @@ docker exec lbs-mysql sh -c \
   マネージドWordPressのサイト別DBはプロビジョニングエージェントが root で都度作成して
   このユーザーへ個別に権限を付与するため、`MYSQL_DATABASE` が無くても機能する
 - `docker-compose.yml`: `BACKUP_MYSQL_SCHEMAS` から `${MYSQL_DATABASE}` を削除(対象は `lbs_*` 9つ)
-- `mysql/init/01-create-service-schemas.sh`: `lbs_backup` への `MYSQL_DATABASE` 権限付与を削除
+- `infra/mysql/init/01-create-service-schemas.sh`: `lbs_backup` への `MYSQL_DATABASE` 権限付与を削除
 - `scripts/db-backup.sh` / `scripts/db-restore.sh`: 単一スキーマ前提だったものを、
   `--databases` でサービス別スキーマ9つを対象にする形へ変更
 - `.env.example`: `MYSQL_DATABASE` を削除

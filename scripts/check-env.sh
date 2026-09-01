@@ -6,7 +6,7 @@
 #
 #   - `docker compose` が「The "X" variable is not set. Defaulting to a blank string.」と
 #     警告するが、起動自体は成功するので見落とされる
-#   - `mysql/init/01-create-service-schemas.sh` は LBS_*_DB_PASSWORD が空だと
+#   - `infra/mysql/init/01-create-service-schemas.sh` は LBS_*_DB_PASSWORD が空だと
 #     該当ユーザーの作成をスキップする。#756 では LBS_BACKUP_DB_PASSWORD がこれに当たり、
 #     lbs_backup ユーザーが作られず platform-service のバックアップ機能が動かなかった
 #

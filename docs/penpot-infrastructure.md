@@ -116,7 +116,7 @@ https://localhost/
 
 ### 3.2 nginx ルーティング設定
 
-ファイル: `nginx/conf.d/penpot.conf` (新規作成)
+ファイル: `infra/nginx/conf.d/penpot.conf` (新規作成)
 
 ```nginx
 location /penpot {

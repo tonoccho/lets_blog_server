@@ -14,7 +14,7 @@ import java.util.List;
  * (#570、ADR-0004)ため、バックアップ処理が全スキーマを横断してダンプ/リストアするには、この分離を
  * 横断できる専用の認証情報が必要になる。ここでは全スキーマへ{@code root}相当の権限を持つMySQL
  * rootクレデンシャルではなく、バックアップ専用のMySQLユーザー(既定値{@code lbs_backup}、
- * mysql/init/01-create-service-schemas.shが作成する)を使う。このユーザーは{@link #mysql}の
+ * infra/mysql/init/01-create-service-schemas.shが作成する)を使う。このユーザーは{@link #mysql}の
  * {@code schemas}で列挙されたスキーマ(=アプリ自身が所有する既知のスキーマ)にのみ権限を持ち、
  * mysqlシステムスキーマや他の想定外のデータベースへはアクセスできない(#570のスキーマ分離の
  * 意図を損なわない範囲での最小権限)。

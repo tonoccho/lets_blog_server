@@ -9,7 +9,7 @@ import com.letsblog.media.domain.ProjectImageSettings;
  * <b>プロジェクト全体</b>({@code ProjectResponse})を返していた。所有権がmedia-serviceへ
  * 移ったことでプロジェクト全体は組み立てられなくなるため、<b>更新した設定そのもの</b>を返す。
  *
- * <p>Web側は戻り値を使わず({@code web/src/app/projects/[id]/actions.ts}は{@code await}して
+ * <p>Web側は戻り値を使わず({@code apps/web/src/app/projects/[id]/actions.ts}は{@code await}して
  * 破棄し{@code revalidatePath}する)、保存後は再取得しているため、この変更で壊れる画面は無い。
  * ただしその再取得側が値を表示できていない既存の不具合があり、そちらは #913 で扱う。
  *

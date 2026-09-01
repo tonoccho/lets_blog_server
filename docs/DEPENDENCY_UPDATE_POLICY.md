@@ -30,7 +30,7 @@ Weekly updates strike a balance between:
 
 ### 1. npm (web, extension, SDK)
 
-- **Directories**: `/web`, `/extension`, `/sdk/api-client`
+- **Directories**: `/web`, `/extension`, `/packages/api-client`
 - **Dependencies**: All (production and development)
 - **Commit prefix**: `chore`
 - **Open PR limit**: 10 (maximum concurrent Dependabot PRs)

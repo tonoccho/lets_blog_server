@@ -1,7 +1,7 @@
 package com.letsblog.publishing.cms.agent;
 
 /**
- * WordPress自動プロビジョニング用エージェント(wordpress/provision-agent)経由のwp-cli操作が
+ * WordPress自動プロビジョニング用エージェント(infra/wordpress/provision-agent)経由のwp-cli操作が
  * 失敗したことを表す例外。
  */
 public class AgentOperationException extends RuntimeException {

@@ -172,7 +172,7 @@ class UserWriteAuthorizationIntegrationTest {
     // ---------------------------------------------------------------- 自己削除の禁止
 
     /**
-     * Web側({@code web/src/app/users/actions.ts})にも同じガードがあるが、gatewayは認可判定を
+     * Web側({@code apps/web/src/app/users/actions.ts})にも同じガードがあるが、gatewayは認可判定を
      * 行わない(ADR-0008)ため、アクセストークンを持つクライアントはAPIを直接叩ける。
      * サーバー側の backstop が無いと、最後のadminが自分を消して誰も管理できない状態になりうる。
      */

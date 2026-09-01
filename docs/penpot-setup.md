@@ -245,7 +245,7 @@ WebSocket is closed before the connection is established
 **対応:**
 ```bash
 # penpot.conf に以下が含まれているか確認
-cat nginx/conf.d/penpot.conf | grep -A2 "Upgrade"
+cat infra/nginx/conf.d/penpot.conf | grep -A2 "Upgrade"
 ```
 
 出力に以下が含まれていることを確認：

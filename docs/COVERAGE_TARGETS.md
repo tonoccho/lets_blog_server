@@ -23,12 +23,12 @@ module-specific evidence for different numbers exists yet.
 
 ### `libs:lbs-common`
 
-**Location**: `libs/lbs-common/build/reports/jacoco/test/jacocoTestReport.xml`
+**Location**: `packages/lbs-common/build/reports/jacoco/test/jacocoTestReport.xml`
 
 **Target Thresholds**: Statements 60% / Branches 50% / Functions 60% / Lines 60%
 
 No `**/config/**`-style exclusions are configured for this module's `jacocoTestReport` (see
-`libs/lbs-common/build.gradle`); it holds only cross-cutting utilities, not domain logic
+`packages/lbs-common/build.gradle`); it holds only cross-cutting utilities, not domain logic
 (#554), so the general thresholds apply as-is. Test fixtures (`src/testFixtures/`, e.g.
 `com.letsblog.common.testfixtures.JwtTestFixtures`, see
 [ADR-0006](adr/0006-per-service-test-strategy.md)) are not part of `src/main` and are not
@@ -76,7 +76,7 @@ thresholds apply to the whole module until package-specific guidance is establis
 
 ### Frontend (TypeScript/React)
 
-**Location**: `web/coverage/coverage-final.json`
+**Location**: `apps/web/coverage/coverage-final.json`
 
 **Target Thresholds**:
 - Statements: 40%
@@ -98,7 +98,7 @@ thresholds apply to the whole module until package-specific guidance is establis
 - `src/lib/` - Utility functions (target: 75%+)
 - `src/app/` - Page components/routes (target: 50%+)
 
-(Verified against `web/src/` 2026-08: no dedicated `src/hooks/` directory currently exists;
+(Verified against `apps/web/src/` 2026-08: no dedicated `src/hooks/` directory currently exists;
 removed from this list. Reintroduce it here if one is added.)
 
 ## Continuous Integration Coverage Check
@@ -116,7 +116,7 @@ Module" above):
 
 Results are available at:
 - Local: `services/<service>/build/reports/jacoco/test/index.html` (or
-  `libs/lbs-common/build/reports/jacoco/test/index.html`)
+  `packages/lbs-common/build/reports/jacoco/test/index.html`)
 - Codecov: https://codecov.io/gh/tonoccho/lets_blog_server
 
 ### Frontend Coverage
@@ -124,12 +124,12 @@ Results are available at:
 Coverage reports are generated and uploaded to Codecov during CI/CD:
 
 ```bash
-cd web
+cd apps/web
 npm run test:coverage
 ```
 
 Results are available at:
-- Local: `web/coverage/lcov-report/index.html`
+- Local: `apps/web/coverage/lcov-report/index.html`
 - Codecov: https://codecov.io/gh/tonoccho/lets_blog_server
 
 ## Improving Coverage
@@ -187,9 +187,9 @@ describe('MyComponent', () => {
 
 ## Related Documentation
 
-- [Frontend Tests](../web/jest.config.ts) - Jest configuration
+- [Frontend Tests](../apps/web/jest.config.ts) - Jest configuration
 - [identity JaCoCo configuration](../services/identity/build.gradle)
-- [lbs-common JaCoCo configuration](../libs/lbs-common/build.gradle)
+- [lbs-common JaCoCo configuration](../packages/lbs-common/build.gradle)
 - [CI/CD Workflows](../.github/workflows/) - Automated testing and coverage
 - [Test Documentation](./TEST_DOCUMENTATION.md) - How to run tests per service, JWT test fixture
 - [ADR-0006: サービス別のテスト戦略](./adr/0006-per-service-test-strategy.md)

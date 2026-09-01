@@ -105,7 +105,7 @@ bash scripts/check-env.sh
 
 `.env` is created once by `cp` and does not follow later additions to `.env.example`.
 A missed key fails quietly — `docker compose` warns but still starts, and
-`mysql/init/01-create-service-schemas.sh` **skips** creating a database user whose
+`infra/mysql/init/01-create-service-schemas.sh` **skips** creating a database user whose
 `LBS_*_DB_PASSWORD` is empty. Re-run this check after every `git pull` that touches
 `.env.example`.
 

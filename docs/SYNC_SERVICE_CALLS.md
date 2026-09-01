@@ -8,7 +8,7 @@ issue #581([C12] サービス間同期呼び出しの規約を定める)。イ�
 
 ## 共通クライアント: `SyncServiceClient`
 
-`libs/lbs-common/src/main/java/com/letsblog/common/client/`に実装。既存の依存
+`packages/lbs-common/src/main/java/com/letsblog/common/client/`に実装。既存の依存
 (`spring-boot-starter-restclient`、`resilience4j-circuitbreaker`/`resilience4j-retry`)のみを使い、
 新規のHTTPクライアントライブラリは追加していない。
 
@@ -217,7 +217,7 @@ gatewayのルーティングトポロジー自体は変更しない(上記「認
 
 ## テスト
 
-`libs/lbs-common/src/test/java/com/letsblog/common/client/SyncServiceClientTest.java`が、実際の
+`packages/lbs-common/src/test/java/com/letsblog/common/client/SyncServiceClientTest.java`が、実際の
 HTTPサーバー(JDK標準の`HttpServer`/`ServerSocket`、追加ライブラリ無し)を使って以下を検証する。
 
 - 正常応答がそのまま返る

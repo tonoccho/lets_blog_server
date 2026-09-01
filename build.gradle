@@ -1,4 +1,4 @@
-// ルートビルド。各サブプロジェクト(libs/*, services/*)はこのビルドの一部として扱われる。
+// ルートビルド。各サブプロジェクト(packages/*, services/*)はこのビルドの一部として扱われる。
 // checkstyle / jacoco / dependencyCheck は、各サブプロジェクトが該当プラグインを
 // 適用している場合にのみ、ここで定義した共通設定を適用する(プラグインの適用有無自体は
 // 各サブプロジェクトの build.gradle が決める)。
@@ -21,7 +21,7 @@ subprojects {
 
     plugins.withId('checkstyle') {
         checkstyle {
-            configFile = rootProject.file('checkstyle.xml')
+            configFile = rootProject.file('config/checkstyle.xml')
             ignoreFailures = false
             showViolations = true
         }
@@ -50,7 +50,7 @@ subprojects {
     plugins.withId('org.owasp.dependencycheck') {
         dependencyCheck {
             format = 'HTML'
-            suppressionFile = rootProject.file('dependency-check-suppression.xml').path
+            suppressionFile = rootProject.file('config/dependency-check-suppression.xml').path
             failBuildOnCVSS = 7.0
         }
     }

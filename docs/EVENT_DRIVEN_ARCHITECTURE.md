@@ -124,7 +124,7 @@ public void onProjectDeleted(ProjectDeletedEvent event) {
 トランザクション全体がロールバックされ、再配信時に正しくやり直せる設計。詳細は
 `ProcessedEventStore`/`ProcessedEventStoreImpl`のJavadoc参照)。
 
-**検証**: `libs/lbs-common`の`IdempotentEventHandlerTest`(フェイクストアでの単体検証)に加え、
+**検証**: `packages/lbs-common`の`IdempotentEventHandlerTest`(フェイクストアでの単体検証)に加え、
 content-service/ai-service/analytics-serviceそれぞれの`EventMessageListenerTest`で、
 同一イベントをリスナーメソッドへ複数回直接投入し(RabbitMQの再配送を模す)、業務リポジトリの
 呼び出しが1回に収束することをMockitoで確認している。
@@ -222,6 +222,6 @@ DLQの`messages`件数とあわせて監視する対象。Prometheus等への継
 - [サービス別スキーマ分離とデータ移行ガイド](SERVICE_SCHEMA_MIGRATION.md)
   (「サービス跨ぎのJOIN/FKの禁止」節でこのイベント基盤への言及あり)
 - `letsblog.logs`(ログ専用exchange、issue #466)の実装は
-  `libs/lbs-common/src/main/java/com/letsblog/common/messaging/LogExchanges.java`と
+  `packages/lbs-common/src/main/java/com/letsblog/common/messaging/LogExchanges.java`と
   `services/log-writer/src/main/java/com/letsblog/logwriter/config/RabbitMqConfig.java`を参照
   (本ドキュメントが踏襲した設計の元)

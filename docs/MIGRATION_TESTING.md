@@ -37,7 +37,7 @@
 ### 2. 冪等性・履歴・チェックサム(`MigrationContractTest`)
 
 各サービスに `MigrationContractTest` があり、共通実装
-`libs/lbs-common/src/testFixtures/java/com/letsblog/common/testfixtures/MigrationContract.java`
+`packages/lbs-common/src/testFixtures/java/com/letsblog/common/testfixtures/MigrationContract.java`
 (#914)を呼ぶ。
 
 | 検証 | 内容 |

@@ -202,7 +202,7 @@ curl -sk -o /dev/null -w '%{http_code}\n' \
 
 ### 4.1 主要シナリオ(サイト登録 → 記事公開 → 履歴確認)
 
-自動テストは `web/e2e/main-scenario.spec.ts`。手動で確認する場合:
+自動テストは `apps/web/e2e/main-scenario.spec.ts`。手動で確認する場合:
 
 ```
 1. https://localhost/sites → 「WordPressを新規構築」で ManagedWordPress サイトを作成する
@@ -270,7 +270,7 @@ docker compose start content
 ./scripts/wait-for-stack-healthy.sh --services content
 ```
 
-同じ検証は `web/e2e/service-degradation.spec.ts` で自動化されています
+同じ検証は `apps/web/e2e/service-degradation.spec.ts` で自動化されています
 (実際にコンテナを停止するテストは `E2E_ALLOW_SERVICE_DISRUPTION=1` のときのみ実行)。
 
 ### 4.4 Penpot / ComfyUI 等の周辺コンポーネント
@@ -639,7 +639,7 @@ F12 → Elements → Computed styles
 
 ### 自動 E2E
 
-- [ ] `cd web && npm run test:e2e` が完走する(手順は `docs/e2e-testing.md`)
+- [ ] `cd apps/web && npm run test:e2e` が完走する(手順は `docs/e2e-testing.md`)
 
 ---
 

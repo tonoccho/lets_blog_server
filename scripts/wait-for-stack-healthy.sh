@@ -2,11 +2,11 @@
 # docker composeスタックの各サービスがhealthy(ヘルスチェック未定義のものはrunning)になるまで
 # 待機する非破壊スクリプト(issue #588)。
 #
-# E2E(web/e2e)はKeycloak・gateway・各ドメインサービス・reverse-proxyが全て起動している
-# 前提で実行される(web/playwright.config.tsのbaseURLはhttps://localhost)。サービス数が
+# E2E(apps/web/e2e)はKeycloak・gateway・各ドメインサービス・reverse-proxyが全て起動している
+# 前提で実行される(apps/web/playwright.config.tsのbaseURLはhttps://localhost)。サービス数が
 # 増えた結果、`docker compose up -d`の直後は一部サービスがまだ起動途中であることが常態化し、
 # テスト開始時刻によって結果が変わる状態になっていた。テスト実行前にこのスクリプトで
-# 全サービスのhealthyを待ってから開始する(web/e2e/global-setup.tsから呼ばれる)。
+# 全サービスのhealthyを待ってから開始する(apps/web/e2e/global-setup.tsから呼ばれる)。
 #
 # 既定の待機対象はE2Eに必要なサービス群(REQUIRED_SERVICES)のみ。penpot/comfyui/drawio等の
 # 起動していない可能性があるオプションサービスは待たない(起動していれば無視される)。

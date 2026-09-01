@@ -1,5 +1,5 @@
 #!/bin/bash
-# E2E(web/e2e)が投入したテストデータを、サービス別に分割された全MySQLスキーマから
+# E2E(apps/web/e2e)が投入したテストデータを、サービス別に分割された全MySQLスキーマから
 # 横断的に削除する(issue #588)。
 #
 # サービス分割(#570 / ADR-0004)以降、1つのE2Eフィクスチャ(プロジェクト1件・サイト1件)は
@@ -23,7 +23,7 @@
 #
 # ManagedWordPressサイト(sites.managed_wordpress = 1)については、DB行を消す前に
 # wordpressコンテナ内のプロビジョニングエージェント(POST /deprovision、ポート9000、
-# wordpress/provision-agent/index.php)を呼び出して実体(サイトディレクトリと専用DB)も解放する
+# infra/wordpress/provision-agent/index.php)を呼び出して実体(サイトディレクトリと専用DB)も解放する
 # (issue #765。従来はDB行しか消せず、e2eの孤児サイトの実体が残り続けていた)。
 # エージェントはproject-serviceのサイト削除が呼ぶものと同一で、rm -rf と DROP DATABASE IF EXISTS の
 # どちらも冪等なため、UI経由の削除で既に解放済みのサイトに対して再実行しても問題ない。
@@ -36,7 +36,7 @@
 #   ./scripts/e2e-cleanup-test-data.sh          # ドライラン(何も削除しない)
 #   ./scripts/e2e-cleanup-test-data.sh --yes    # 実際に削除する
 #
-# web/e2e/global-teardown.ts からは E2E_DB_CLEANUP=1 が指定されたときのみ --yes 付きで呼ばれる。
+# apps/web/e2e/global-teardown.ts からは E2E_DB_CLEANUP=1 が指定されたときのみ --yes 付きで呼ばれる。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,7 +45,7 @@ ENV_FILE="$REPO_ROOT/.env"
 
 MYSQL_CONTAINER="lbs-mysql"
 WORDPRESS_CONTAINER="lbs-wordpress"
-# プロビジョニングエージェントの待ち受け先(wordpress/start.sh。コンテナ内からのみ叩く)。
+# プロビジョニングエージェントの待ち受け先(infra/wordpress/start.sh。コンテナ内からのみ叩く)。
 PROVISION_AGENT_URL="http://127.0.0.1:9000"
 APPLY=0
 

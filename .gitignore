@@ -17,16 +17,16 @@ bin/
 
 # Node
 node_modules/
-web/.next/
-web/dist/
-web/.env.local
+apps/web/.next/
+apps/web/dist/
+apps/web/.env.local
 npm-debug.log*
 
 # VSCode extension
-extension/out/
-extension/coverage/
-extension/dist/
-extension/*.vsix
+apps/extension/out/
+apps/extension/coverage/
+apps/extension/dist/
+apps/extension/*.vsix
 
 # IDE
 .idea/

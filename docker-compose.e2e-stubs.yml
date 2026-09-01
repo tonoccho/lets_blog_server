@@ -26,7 +26,7 @@ x-stub-base: &stub-base
   restart: unless-stopped
   working_dir: /app
   volumes:
-    - ./e2e-stubs:/app:ro
+    - ./infra/e2e-stubs:/app:ro
   environment:
     PORT: "8080"
   networks:

@@ -40,7 +40,7 @@ public class RoleService {
      * <p><b>ロール名の文字列比較ではなく、DBから解決した実体で判定している理由</b>:
      * MySQLの照合順序は大文字小文字を区別しない({@code lets_blog}はサーバー既定の
      * {@code utf8mb4_0900_ai_ci}、テスト用{@code lbs_identity_test}は
-     * {@code mysql/init/02-create-test-schemas.sh}が指定する{@code utf8mb4_unicode_ci}。
+     * {@code infra/mysql/init/02-create-test-schemas.sh}が指定する{@code utf8mb4_unicode_ci}。
      * どちらもアクセントと大小の差を無視する。{@code utf8mb4_unicode_ci}は名前に{@code _ai}を
      * 含まないが、{@code _ci}があり{@code _as}が無いためアクセント非依存になる)。そのため
      * {@code findByRoleName("role_admin")}は{@code ROLE_ADMIN}の行に一致する。

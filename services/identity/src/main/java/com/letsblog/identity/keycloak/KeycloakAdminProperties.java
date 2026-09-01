@@ -9,7 +9,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *
  * <p>client-idは"letsblog-services"(#560で定義済みのサービス間通信用confidentialクライアント)を
  * 既定値として再利用する。realm側でこのクライアントのサービスアカウントに
- * realm-management#manage-usersロールを付与しておく必要がある(keycloak/realm-export.json参照)。
+ * realm-management#manage-usersロールを付与しておく必要がある(infra/keycloak/realm-export.json参照)。
  */
 @ConfigurationProperties(prefix = "keycloak.admin")
 @Getter

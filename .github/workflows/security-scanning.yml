@@ -20,9 +20,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - directory: "web"
+          - directory: "apps/web"
             name: "Frontend"
-          - directory: "extension"
+          - directory: "apps/extension"
             name: "Extension"
 
     steps:
@@ -86,9 +86,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - directory: "web"
+          - directory: "apps/web"
             name: "Frontend"
-          - directory: "extension"
+          - directory: "apps/extension"
             name: "Extension"
 
     steps:
@@ -149,7 +149,7 @@ jobs:
         with:
           node-version: '18'
           cache: 'npm'
-          cache-dependency-path: 'web/package-lock.json'
+          cache-dependency-path: '${{ matrix.directory }}/package-lock.json'
 
       - name: Install cyclonedx-npm
         run: npm install -g @cyclonedx/npm
@@ -157,7 +157,7 @@ jobs:
 
       - name: Generate SBOM for Frontend
         run: |
-          cd web
+          cd apps/web
           cyclonedx-npm --output-file ../sbom-frontend.json
         continue-on-error: true
 
