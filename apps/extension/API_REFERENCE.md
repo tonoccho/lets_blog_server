@@ -12,7 +12,7 @@
 
 下表のエンドポイントはすべて **APIゲートウェイ(`services/gateway`)経由** で呼び出します(issue #585)。
 `letsBlog.serverUrl` はリバースプロキシ(nginx)の公開URLで、nginx の `location /api/` が
-`gateway:8080` へ中継します(`nginx/conf.d/default.conf`)。gateway はコンテナ外へポートを公開して
+`gateway:8080` へ中継します(`infra/nginx/conf.d/default.conf`)。gateway はコンテナ外へポートを公開して
 いないため、拡張から見た「gatewayのベースURL」はこのリバースプロキシのURLと同一です。
 
 URL の組み立ては [`src/apiBaseUrl.ts`](src/apiBaseUrl.ts) の `gatewayUrl()` 1箇所に集約しており、

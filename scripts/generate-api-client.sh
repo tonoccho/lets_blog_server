@@ -35,7 +35,7 @@ set -euo pipefail
 # issue #583 で legacy-api を削除したため、対象は9サービスになった。
 #
 # "サービス名|コンテナ名|URL上書き環境変数の値" の形式で列挙する。
-# サービスを増やすときはここに1行足す(orval.config.js 側にもターゲット定義が必要)。
+# サービスを増やすときはここに1行足す(config/orval.config.js 側にもターゲット定義が必要)。
 SERVICES=(
   "log-writer|lbs-log-writer|${LOG_WRITER_URL:-}"
   "media|lbs-media|${MEDIA_SERVICE_URL:-}"
@@ -164,9 +164,9 @@ echo "🔨 Generating TypeScript client with orval (all targets)..."
 
 # 出力先ディレクトリはorval.config.js側の各ターゲットが作成するため、ここでは
 # ルートの出力先だけ用意しておく。
-mkdir -p "sdk/api-client/src/generated"
+mkdir -p "packages/api-client/src/generated"
 
-npx orval
+npx orval --config config/orval.config.js
 
 echo "✅ API client generation complete"
-echo "📁 Generated client: sdk/api-client/src/generated/"
+echo "📁 Generated client: packages/api-client/src/generated/"

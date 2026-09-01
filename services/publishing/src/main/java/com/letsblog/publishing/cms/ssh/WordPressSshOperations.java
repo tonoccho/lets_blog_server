@@ -272,7 +272,7 @@ public class WordPressSshOperations {
 
     /**
      * プラグイン/テーマのインストール・有効化・無効化・削除をwp-cli経由で行う。
-     * provision-agent(wordpress/provision-agent/index.php)の/bulk-managementハンドラと同じ挙動
+     * provision-agent(infra/wordpress/provision-agent/index.php)の/bulk-managementハンドラと同じ挙動
      * (インストール済みならskipped、失敗時は例外を投げずfailed()を返す)に揃える。
      */
     public SshApplyResult applyPluginTheme(WordPressCredentials creds, BulkOperationType type, String slug) {

@@ -231,7 +231,7 @@ public class KeycloakAdminClient {
      * 先にロールの{@code id}を引く必要がある。ここで{@code GET /roles/&#123;roleName&#125;}を
      * <b>使わない</b>のは、そのエンドポイントが{@code realm-management}の{@code view-realm}権限を
      * 要求するためである。{@code letsblog-services}のサービスアカウントに付いているのは
-     * {@code manage-users}と{@code view-users}だけで(keycloak/realm-export.json)、
+     * {@code manage-users}と{@code view-users}だけで(infra/keycloak/realm-export.json)、
      * 実機で確認すると{@code GET /roles/admin}は403 Forbiddenになる。
      * 代わりにユーザースコープの{@code role-mappings/realm}と{@code role-mappings/realm/available}を
      * 使う。こちらは{@code view-users}で読めるため、realmの権限設定を変えずに済む
@@ -252,7 +252,7 @@ public class KeycloakAdminClient {
             throw new KeycloakUserSyncException(
                     "Keycloakのrealmロール '" + roleName + "' をユーザー(sub=" + keycloakSub + ")へ"
                             + "割り当てられません。realmにそのロールが定義されているか"
-                            + "(keycloak/realm-export.json)確認してください(issue #955)。");
+                            + "(infra/keycloak/realm-export.json)確認してください(issue #955)。");
         }
         ArrayNode body = JsonNodeFactory.instance.arrayNode();
         body.add(role);

@@ -21,7 +21,7 @@ subprojects {
 
     plugins.withId('checkstyle') {
         checkstyle {
-            configFile = rootProject.file('checkstyle.xml')
+            configFile = rootProject.file('config/checkstyle.xml')
             ignoreFailures = false
             showViolations = true
         }
@@ -50,7 +50,7 @@ subprojects {
     plugins.withId('org.owasp.dependencycheck') {
         dependencyCheck {
             format = 'HTML'
-            suppressionFile = rootProject.file('dependency-check-suppression.xml').path
+            suppressionFile = rootProject.file('config/dependency-check-suppression.xml').path
             failBuildOnCVSS = 7.0
         }
     }

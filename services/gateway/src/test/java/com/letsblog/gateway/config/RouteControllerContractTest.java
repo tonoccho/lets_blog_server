@@ -81,7 +81,7 @@ import static org.junit.jupiter.api.DynamicTest.dynamicTest;
  * ArticlePlanController(ai-service、実パスは{@code /api/projects/{projectId}/article-plan/**})
  * は、application.ymlのルート表に対応するエントリが無く、より先に評価される{@code project}ルート
  * ({@code /api/projects/**}、PROJECT_SERVICE_URI宛)に先勝ちでマッチし、ai-serviceではなく
- * project-serviceへ誤ってルーティングされていた(web/src/lib/apiClient.tsが実際に
+ * project-serviceへ誤ってルーティングされていた(apps/web/src/lib/apiClient.tsが実際に
  * {@code /api/projects/{projectId}/article-plan/...}を呼ぶため、記事プラン機能がgateway経由で
  * 到達不能になっていた)。{@code project-ai-models-llm}と同じパターンで
  * {@code project-article-plan}ルート({@code /api/projects/*&#47;article-plan/**} →

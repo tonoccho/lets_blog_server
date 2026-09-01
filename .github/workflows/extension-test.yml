@@ -4,12 +4,12 @@ on:
   push:
     branches: [main, develop]
     paths:
-      - 'extension/**'
+      - 'apps/extension/**'
       - '.github/workflows/extension-test.yml'
   pull_request:
     branches: [main, develop]
     paths:
-      - 'extension/**'
+      - 'apps/extension/**'
 
 jobs:
   build:
@@ -24,19 +24,19 @@ jobs:
         with:
           node-version: '18'
           cache: 'npm'
-          cache-dependency-path: 'extension/package-lock.json'
+          cache-dependency-path: 'apps/extension/package-lock.json'
 
       - name: Install dependencies
         run: npm ci
-        working-directory: extension
+        working-directory: apps/extension
 
       - name: Compile TypeScript
         run: npm run compile
-        working-directory: extension
+        working-directory: apps/extension
 
       - name: Run unit tests
         run: npm run test:coverage
-        working-directory: extension
+        working-directory: apps/extension
 
       - name: Validate extension manifest
         run: |
@@ -57,12 +57,12 @@ jobs:
             exit 1
           fi
           echo "✓ Extension manifest validation passed"
-        working-directory: extension
+        working-directory: apps/extension
 
       - name: Upload build artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: extension-build
-          path: extension/out/
+          path: apps/extension/out/
           retention-days: 30

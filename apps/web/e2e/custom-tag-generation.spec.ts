@@ -13,7 +13,7 @@ import {
  * 実質的に常時スキップされ続けていた。
  *
  * 旧実装の `openProjectCustomTagsTab` はログイン処理を持たないまま `page.goto('/projects')`
- * していた。`/projects` は `web/src/proxy.ts` の PUBLIC_PATHS に含まれないため、未ログインの
+ * していた。`/projects` は `apps/web/src/proxy.ts` の PUBLIC_PATHS に含まれないため、未ログインの
  * 遷移はKeycloakのログイン画面へリダイレクトされる。その結果 `a:has-text("詳細")` が
  * 見つからず常に `false` が返り、各テストが `test.skip(!reached, ...)` で全てスキップされ、
  * 1ヶ月以上カバレッジゼロのまま気づかれなかった。

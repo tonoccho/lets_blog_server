@@ -19,7 +19,7 @@ import {
 /**
  * 認証・セッション・初回セットアップのステップ定義(issue #929 / AT-3)。
  *
- * 移行元は `web/e2e/auth-flow.spec.ts`(削除済み)。
+ * 移行元は `apps/web/e2e/auth-flow.spec.ts`(削除済み)。
  */
 
 const REALM_BASE = '/auth/realms/letsblog';
@@ -102,7 +102,7 @@ When('管理者専用ページを開く', async ({ page }) => {
 });
 
 Then('トップページへ戻される', async ({ page }) => {
-  // web/src/proxy.ts の ADMIN_ONLY_PREFIXES が "/" へ戻す。
+  // apps/web/src/proxy.ts の ADMIN_ONLY_PREFIXES が "/" へ戻す。
   await expect(page).toHaveURL('/', { timeout: 5000 });
 });
 
@@ -413,7 +413,7 @@ When('承認しないままトークンを要求する', async ({ request, ctx }
 
 Then('authorization_pending が返る', async ({ ctx }) => {
   const result = ctx.deviceTokenResult as { status: number; body: Record<string, unknown> };
-  // 拡張(extension/src/deviceAuth.ts)はこの値を見てポーリングを続ける。
+  // 拡張(apps/extension/src/deviceAuth.ts)はこの値を見てポーリングを続ける。
   // 別のエラーに変わると、拡張は待たずに失敗として扱う。
   expect(result.body.error, `期待と違うエラー: ${JSON.stringify(result.body)}`)
     .toBe('authorization_pending');

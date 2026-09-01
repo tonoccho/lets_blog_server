@@ -12,7 +12,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * "letsblog-services"クライアントのクライアントクレデンシャルズグラントで認証する)。
  * サービス間はGradleモジュールではなくHTTPのみで連携する方針(settings.gradle参照)のため、
  * 同じ設定・実装をこのモジュール内に個別に持つ。realm側でこのクライアントのサービスアカウントに
- * realm-management#manage-usersロールが付与されている前提(keycloak/realm-export.json参照)。
+ * realm-management#manage-usersロールが付与されている前提(infra/keycloak/realm-export.json参照)。
  */
 @ConfigurationProperties(prefix = "keycloak.admin")
 @Getter

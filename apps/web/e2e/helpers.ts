@@ -17,7 +17,7 @@ export const E2E_ADMIN_EMAIL = 'e2e-admin@letsblog.local';
 export const E2E_TEST_PASSWORD = process.env.E2E_TEST_PASSWORD ?? '';
 export const E2E_ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? '';
 
-/** リポジトリルート(web/e2e から2階層上)。スクリプト実行のたびに解決する。 */
+/** リポジトリルート(apps/web/e2e から2階層上)。スクリプト実行のたびに解決する。 */
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 
 /**
@@ -55,7 +55,7 @@ export function loginAsUser(page: Page): Promise<void> {
 }
 
 /**
- * E2E専用のKeycloakクライアント(issue #588)。keycloak/realm-export.json と
+ * E2E専用のKeycloakクライアント(issue #588)。infra/keycloak/realm-export.json と
  * scripts/provision-e2e-keycloak-users.sh の定義と一致させること。
  *
  * realm既定のadmin-cliを使わない理由: admin-cliはKeycloakの既定で

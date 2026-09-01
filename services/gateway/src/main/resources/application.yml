@@ -133,7 +133,7 @@ app:
       #     legacy-api側は素通しだった)
       #   - 画像生成系4本(project_image_settings)→ media-service
       # 専用ルートが無かった頃はprojectルートへ先勝ちマッチして404になっていた
-      # (issue #771の調査で発見。web/src/lib/apiClient.tsが実際に呼んでいる)。
+      # (issue #771の調査で発見。apps/web/src/lib/apiClient.tsが実際に呼んでいる)。
       - id: project-content-settings
         uri: ${CONTENT_SERVICE_URI:http://content:8080}
         paths:

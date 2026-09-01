@@ -68,7 +68,7 @@ public class UserService {
 
     private static final Set<String> VALID_ROLES = Set.of("admin", "user");
 
-    /** {@code users.role = "admin"} に対応するKeycloakのrealmロール名(keycloak/realm-export.json)。 */
+    /** {@code users.role = "admin"} に対応するKeycloakのrealmロール名(infra/keycloak/realm-export.json)。 */
     private static final String KEYCLOAK_ADMIN_REALM_ROLE = "admin";
 
     private static final Map<String, String> LEGACY_ROLE_TO_ROLE_NAME = Map.of(

@@ -32,7 +32,7 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
 
-    // 生成物(web/.gitignore の "# testing" 節に対応。追加時は両方を更新する):
+    // 生成物(apps/web/.gitignore の "# testing" 節に対応。追加時は両方を更新する):
     "coverage/**",
     "test-results/**",
     "playwright-report/**",

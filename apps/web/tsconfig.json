@@ -20,7 +20,7 @@
     ],
     "paths": {
       "@/*": ["./src/*"],
-      "@api-client": ["../sdk/api-client/src"]
+      "@api-client": ["../../packages/api-client/src"]
     }
   },
   "include": [

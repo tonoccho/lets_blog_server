@@ -49,7 +49,7 @@ export async function proxy(request: NextRequest) {
   // Route Handler(issue #791)。ここでリダイレクトを返しても、送信側はレスポンスを見ないので
   // 意味が無いばかりか、未認証エラー1件ごとに needsInitialSetup() のgateway呼び出しが1件増える。
   // 認証の判定はハンドラ自身がgetSession()で行い、未認証なら記録せず204を返す
-  // (web/src/app/client-errors/route.ts、docs/AUTHORIZATION_MATRIX.md参照)。
+  // (apps/web/src/app/client-errors/route.ts、docs/AUTHORIZATION_MATRIX.md参照)。
   //
   // matcherの否定先読みではなくここで弾いているのは、先読みが前方一致になるため。
   // `(?!...|client-errors|...)` と書くと /client-errors-foo や /client-errors/nested のような

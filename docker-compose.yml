@@ -36,8 +36,8 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/conf.d:/etc/nginx/conf.d:ro
       - ./certs:/etc/nginx/certs:ro
     # E2E(#588)は https://localhost(=このreverse-proxy)へ直接アクセスするため、
     # 「スタック全体がhealthy」を機械的に判定できるようヘルスチェックを持たせる。
@@ -52,7 +52,7 @@ services:
 
   web:
     build:
-      context: ./web
+      context: ./apps/web
       dockerfile: Dockerfile
     container_name: lbs-web
     <<: *common-service
@@ -74,7 +74,7 @@ services:
     # (匿名ボリュームは/var/lib/docker配下、すなわちルートディスクに置かれるため、
     # 容量の大きいTurbopackキャッシュがルートディスクを圧迫していた)
     volumes:
-      - ./web:/app
+      - ./apps/web:/app
     # webの呼び先はgatewayに一本化した(issue #584)ため、起動順の依存もgatewayへ付け替える
     # (gateway自身がapi/identity/各ドメインサービスのhealthyを待つ)。
     depends_on:
@@ -368,7 +368,7 @@ services:
       # システム画面からのVSCode拡張機能ダウンロード用。オンデマンドビルドの作業ディレクトリは
       # コンテナ内の書き込み可能な場所(/app/extension-build)を使うため、ソースは読み取り専用でマウントする
       # (issue #696、C10-4でapiコンテナから移設)。
-      - ./extension:/app/extension-src:ro
+      - ./apps/extension:/app/extension-src:ro
     depends_on:
       mysql:
         condition: service_healthy
@@ -671,7 +671,7 @@ services:
       LBS_BACKUP_DB_PASSWORD: ${LBS_BACKUP_DB_PASSWORD}
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./mysql/init:/docker-entrypoint-initdb.d:ro
+      - ./infra/mysql/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
@@ -736,7 +736,7 @@ services:
       KC_HTTP_ENABLED: "true"
       KC_HEALTH_ENABLED: "true"
     volumes:
-      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+      - ./infra/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
     depends_on:
       keycloak-postgres:
         condition: service_healthy
@@ -892,7 +892,7 @@ services:
 
   # mcp-penpot:
   #   build:
-  #     context: ./mcp-server
+  #     context: ./apps/mcp-server
   #     dockerfile: Dockerfile
   #   container_name: lbs-mcp-penpot
   #   restart: unless-stopped
@@ -912,7 +912,7 @@ services:
 
   wordpress:
     build:
-      context: ./wordpress
+      context: ./infra/wordpress
       dockerfile: Dockerfile
     container_name: lbs-wordpress
     <<: *common-service

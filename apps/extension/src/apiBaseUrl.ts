@@ -7,12 +7,12 @@ import { getServerUrl } from './config';
  * gateway がルーティング・JWT検証・レート制限・相関ID付与を一手に引き受けるため、拡張側は
  * サービス分割の進行(Epic #551)に関わらず gateway だけを見ていればよい。ルーティング表は
  * services/gateway/src/main/resources/application.yml を参照(未移行パスは同ファイルの
- * fallback-uri で legacy-api へ到達する)。Web(BFF)側の対応する実装は web/src/lib/apiBaseUrl.ts。
+ * fallback-uri で legacy-api へ到達する)。Web(BFF)側の対応する実装は apps/web/src/lib/apiBaseUrl.ts。
  *
  * <b>なぜ `letsBlog.serverUrl` をそのまま使うのか</b>: gateway コンテナはホストへポートを公開して
  * おらず(docker-compose.yml の gateway サービスに ports 指定は無い)、拡張が動くVSCodeは
  * lbs-net の外にいる。到達経路は常にリバースプロキシ(nginx)であり、
- * nginx/conf.d/default.conf の `location /api/` が `gateway:8080` へ中継する。つまり
+ * infra/nginx/conf.d/default.conf の `location /api/` が `gateway:8080` へ中継する。つまり
  * 「gatewayのベースURL」は拡張から見ればリバースプロキシの公開URLそのものになる。
  * gateway用に別設定を増やしても標準構成では指す先が存在しないため、設定は増やさず
  * 「`/api/**` の組み立てはこの関数だけを通る」という一点に集約する。

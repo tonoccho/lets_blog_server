@@ -8,7 +8,7 @@
 #   - ポートに何もいない → FlywaySqlUnableToConnectToDbException / ConnectException
 #     (docker-compose.yml の mysql はホストにポートを公開していない)
 #   - スキーマが無い → Unknown database 'lbs_project_test'
-#     (mysql/init/*.sh はデータボリュームが空のときしか走らないため、
+#     (infra/mysql/init/*.sh はデータボリュームが空のときしか走らないため、
 #      スキーマが増えた既存環境では作られない)
 #
 # どちらも「環境要因の失敗」であり、本物の失敗を埋もれさせる。先に切り分ける。

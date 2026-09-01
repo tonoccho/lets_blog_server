@@ -76,7 +76,7 @@ Authorization (who may do what) is procedural, per endpoint: `requireAdmin()`,
 decided whether it needs authorization; endpoints deliberately left at "any authenticated user" carry
 a `認可不要: <reason>` comment on the handler.
 
-This is enforced mechanically: `AuthorizationCoverageContract` (in `libs/lbs-common` test fixtures)
+This is enforced mechanically: `AuthorizationCoverageContract` (in `packages/lbs-common` test fixtures)
 fails the build if an endpoint without an authorization call — and without that comment — appears in
 any service. The allow-list is empty for all nine services. The current state is documented in
 [docs/AUTHORIZATION_MATRIX.md](docs/AUTHORIZATION_MATRIX.md).

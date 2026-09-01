@@ -3,11 +3,12 @@ WORKDIR /workspace
 
 # ルートのマルチプロジェクトGradleビルドの一部としてビルドするため、
 # ビルドコンテキストはリポジトリルート。
-COPY gradlew settings.gradle build.gradle checkstyle.xml dependency-check-suppression.xml ./
+COPY gradlew settings.gradle build.gradle ./
+COPY config ./config
 COPY gradle ./gradle
 RUN chmod +x gradlew && ./gradlew --version
 
-COPY libs ./libs
+COPY packages ./packages
 COPY services/gateway ./services/gateway
 COPY services/log-writer/build.gradle ./services/log-writer/build.gradle
 COPY services/identity/build.gradle ./services/identity/build.gradle

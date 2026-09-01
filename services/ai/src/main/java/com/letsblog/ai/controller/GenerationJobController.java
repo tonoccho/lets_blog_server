@@ -36,7 +36,7 @@ public class GenerationJobController {
     }
 
     /**
-     * 認可不要: ログイン後の共通ダッシュボード(web/src/app/page.tsx)が表示するジョブ履歴で、
+     * 認可不要: ログイン後の共通ダッシュボード(apps/web/src/app/page.tsx)が表示するジョブ履歴で、
      * 認証済みユーザー全員に見せる前提の画面(issue #830)。
      *
      * <p>ただし generation_jobs には所有者を表す列(userId/projectId)が無く、

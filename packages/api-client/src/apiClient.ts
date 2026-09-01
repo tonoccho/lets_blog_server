@@ -30,7 +30,7 @@ function toFetchHeaders(headers: AxiosRequestConfig['headers']): Record<string, 
  *
  * <p><b>現在このファイルはどこからも参照されていない</b>(ADR-0009)。
  * `orval.config.js` は mutator を指定しておらず、生成コードは自前で `fetch` を呼ぶ。
- * web は `web/src/lib/apiClient.ts`(server-only、Bearerトークン付与あり)を使う。
+ * web は `apps/web/src/lib/apiClient.ts`(server-only、Bearerトークン付与あり)を使う。
  *
  * <p>以前はここで
  * `process.env.REACT_APP_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'`
@@ -44,7 +44,7 @@ function toFetchHeaders(headers: AxiosRequestConfig['headers']): Record<string, 
  * </ul>
  *
  * という「もっともらしいが必ず失敗する」既定値だった(issue #750)。
- * web 側のベースURL組み立ては `web/src/lib/apiBaseUrl.ts` の `gatewayUrl()` に集約済みで、
+ * web 側のベースURL組み立ては `apps/web/src/lib/apiBaseUrl.ts` の `gatewayUrl()` に集約済みで、
  * ここに独自の解決を残すと二重管理になる。そのため**呼び出し元が明示的に渡す**形にした。
  *
  * @param baseUrl 呼び出し先のベースURL。web から使う場合は `gatewayUrl('')` 相当を渡すこと。

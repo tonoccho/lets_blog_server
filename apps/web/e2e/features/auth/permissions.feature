@@ -3,7 +3,7 @@
 機能: 権限による出し分け
 
   管理者だけが触れる画面と、誰でも触れる画面を分ける。
-  画面側の出し分け(`web/src/proxy.ts` の ADMIN_ONLY_PREFIXES)と、
+  画面側の出し分け(`apps/web/src/proxy.ts` の ADMIN_ONLY_PREFIXES)と、
   サーバーが返す権限(`GET /api/identity/me/permissions`)が食い違わないことを確かめる。
 
   シナリオ: 非管理者は管理者専用ページへアクセスすると拒否される

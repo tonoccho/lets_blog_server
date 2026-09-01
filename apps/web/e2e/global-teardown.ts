@@ -16,7 +16,7 @@ import path from 'node:path';
  * 受け入れテストは実行の「前」に scripts/reset-acceptance-env.sh で全部消してから始めるため、
  * 終了時に残っていても次回の実行には影響しない。むしろ残しておいたほうが失敗の調査ができる。
  *
- * この変数を残しているのは、`.feature` へ未移行の Playwright spec(web/e2e/*.spec.ts)が
+ * この変数を残しているのは、`.feature` へ未移行の Playwright spec(apps/web/e2e/*.spec.ts)が
  * 「既存データを壊さない一意なフィクスチャ」という逆の前提で書かれており、その孤児行の
  * 掃除には依然として必要だから。全 spec の移行が終わった時点で、この teardown ごと削除する。
  */

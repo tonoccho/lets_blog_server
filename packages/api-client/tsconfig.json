@@ -1,5 +1,5 @@
 {
-  // issue #810: sdk/api-client 自体の型チェック用。
+  // issue #810: packages/api-client 自体の型チェック用。
   //
   // これが無いと、web の型チェック(path mapping 経由)が index.ts から到達できるファイルしか
   // 見ないため、index.ts から再エクスポートされていない生成物はどのビルドでも型検査されない。

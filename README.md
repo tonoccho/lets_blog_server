@@ -100,6 +100,32 @@ flowchart LR
 
 移行の意思決定は [docs/adr/](docs/adr/README.md)、実行の記録は Epic #551 とその子Issueが一次情報。
 
+### ディレクトリ構成
+
+直下は「何であるか」で分けてある(#963)。
+
+```
+apps/        利用者が直接触るアプリケーション
+  web/            Next.js のフロントエンド(BFF を兼ねる)
+  extension/      VSCode 拡張
+  mcp-server/     MCP サーバー
+  penpot-plugin/  Penpot プラグイン
+services/    バックエンドの9サービス(Spring Boot)
+packages/    サービス・アプリ間で共有するライブラリ
+  lbs-common/     Java 共通ライブラリ(Gradle プロジェクト :packages:lbs-common)
+  api-client/     OpenAPI から生成する TypeScript クライアント
+infra/       ミドルウェアの設定。それ自体はビルド対象ではない
+  nginx/ mysql/ keycloak/ wordpress/ e2e-stubs/
+config/      ビルド・生成ツールの設定(checkstyle / dependency-check / orval)
+scripts/     運用・開発用スクリプト
+openapi/     各サービスから取得した OpenAPI spec(生成の中間物)
+docs/        設計・運用ドキュメントと ADR
+```
+
+`docker-compose*.yml` は直下に残している。移動すると `build.context` やボリュームバインドの
+相対パスが全て変わるうえ、`-f` か `COMPOSE_FILE` を渡さないと `docker compose` を素で
+叩けなくなるため。`gradlew` / `gradle/` / `settings.gradle` / `build.gradle` は Gradle の規約により直下。
+
 ## CI/CD & Quality
 
 [![API Services Tests](https://github.com/tonoccho/lets_blog_server/actions/workflows/api-services-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/api-services-test.yml)
@@ -113,6 +139,7 @@ flowchart LR
 ## 目次
 
 - [アーキテクチャ](#アーキテクチャ)
+- [ディレクトリ構成](#ディレクトリ構成)
 - [ハードウェア要件](#ハードウェア要件)
 - [前提ソフトウェア要件](#前提ソフトウェア要件)
 - [前提ソフトウェアのインストール](#前提ソフトウェアのインストール)
@@ -261,10 +288,10 @@ code --install-extension letsblog-vscode-<バージョン>.vsix
 拡張のTLS証明書検証は既定で有効(`letsBlog.allowInsecureTls: false`)。上記の証明書登録が
 行えない場合に限り、`letsBlog.allowInsecureTls: true` で検証をスキップできるが、
 中間者攻撃を検出できなくなるため信頼できるネットワーク上のローカル環境でのみ使用すること。
-拡張の設計は [extension/ARCHITECTURE.md](extension/ARCHITECTURE.md)、API仕様は
-[extension/API_REFERENCE.md](extension/API_REFERENCE.md)、セキュリティ仕様は
-[extension/SECURITY.md](extension/SECURITY.md)、不具合調査は
-[extension/TROUBLESHOOTING.md](extension/TROUBLESHOOTING.md) を参照。
+拡張の設計は [apps/extension/ARCHITECTURE.md](apps/extension/ARCHITECTURE.md)、API仕様は
+[apps/extension/API_REFERENCE.md](apps/extension/API_REFERENCE.md)、セキュリティ仕様は
+[apps/extension/SECURITY.md](apps/extension/SECURITY.md)、不具合調査は
+[apps/extension/TROUBLESHOOTING.md](apps/extension/TROUBLESHOOTING.md) を参照。
 
 ## API ドキュメント
 

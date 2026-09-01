@@ -122,7 +122,7 @@ app:
   # BackupService(issue #694、C10-2)が全サービスのMySQLスキーマ + Keycloak PostgreSQLを横断して
   # バックアップ/リストアするための接続情報。各サービス専用のDBユーザーでは他スキーマへ
   # アクセスできない(#570のスキーマ分離)ため、バックアップ専用のMySQLユーザー(既定値
-  # lbs_backup、mysql/init/01-create-service-schemas.shが作成・付与するスキーマ限定の権限)を使う。
+  # lbs_backup、infra/mysql/init/01-create-service-schemas.shが作成・付与するスキーマ限定の権限)を使う。
   # KeycloakのPostgreSQLは元々そのDB専用のkeycloakユーザーしか存在しないため、その認証情報を
   # そのまま流用する(docker-compose.ymlのkeycloak-postgres定義参照)。
   backup:

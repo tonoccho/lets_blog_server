@@ -57,7 +57,7 @@ docker run -d --name kc-temp --network kc-temp-net \
 docker exec kc-temp /opt/keycloak/bin/kc.sh export --dir /tmp/kc-export --realm letsblog \
   --db postgres --db-url jdbc:postgresql://kc-temp-postgres:5432/keycloak \
   --db-username keycloak --db-password keycloak
-docker cp kc-temp:/tmp/kc-export/letsblog-realm.json ./keycloak/realm-export.json
+docker cp kc-temp:/tmp/kc-export/letsblog-realm.json ./infra/keycloak/realm-export.json
 
 # 4. 後片付け
 docker rm -f kc-temp kc-temp-postgres

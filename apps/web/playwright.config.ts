@@ -22,7 +22,7 @@ const CROSS_BROWSER_SPECS = [/accessibility\.spec\.ts/];
  * 下の globalSetup(スタックのhealthy待ち)・ignoreHTTPSErrors・trace/video・retries・
  * ワーカー制御を、受け入れテストでもそのまま使える。
  *
- * 生成物は web/.features-gen/ に出る。testDir('./e2e')の外へ置くことで、chromium 等の
+ * 生成物は apps/web/.features-gen/ に出る。testDir('./e2e')の外へ置くことで、chromium 等の
  * 既存 spec 用プロジェクトが生成物を拾わないようにしている(生成物の二重実行を防ぐ)。
  * .gitignore / eslint.config.mjs / tsconfig.json の除外も併せて更新すること(#848 と同型)。
  *
@@ -107,7 +107,7 @@ export default defineConfig({
 
   use: {
     // issue #564でKeycloak(Authorization Code + PKCE)へ移行して以降、コールバックURLは
-    // Keycloakクライアント(keycloak/realm-export.jsonのletsblog-web)に
+    // Keycloakクライアント(infra/keycloak/realm-export.jsonのletsblog-web)に
     // https://localhost/api/auth/callback/keycloak として固定登録されている。
     // このURLは実行時に差し替えられないため、E2Eも`npm run dev`(http://localhost:3000)を
     // 別途起動するのではなく、docker composeのweb+reverse-proxy+keycloakスタック

@@ -37,7 +37,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 本クラスはその再発を防ぐ。
  *
  * <p>{@code POST /api/logs/errors}は、#772の時点ではブラウザが
- * {@code web/src/lib/errorLogger.ts}から直接叩いておりAuthorizationヘッダーが無いため401になり、
+ * {@code apps/web/src/lib/errorLogger.ts}から直接叩いておりAuthorizationヘッダーが無いため401になり、
  * フロントエンドのエラーログが無言で全滅していた(legacy-api時代も同じく401だったため
  * ゲートとしては後退ではない)。#791でweb側を是正し、現在はブラウザが同一オリジンのBFF
  * {@code POST /client-errors}を呼び、そこからBearer付きで中継している。

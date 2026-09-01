@@ -14,7 +14,7 @@ import org.flywaydb.core.api.output.MigrateResult;
  * それ専用の GitHub Actions ワークフローだけが担っていた。legacy-api ごと消えた結果、
  * <b>Flyway を持つ9サービスに同等の検証が1つも無くなった</b>のを埋める。
  *
- * <p>9サービスへ同じクラスを複製せず、{@code libs/lbs-common} の testFixtures へ置く
+ * <p>9サービスへ同じクラスを複製せず、{@code packages/lbs-common} の testFixtures へ置く
  * ({@link AuthorizationCoverageContract}(#830)・{@link AuthorizationMatrixContract}(#805)と同じ方針)。
  *
  * <h2>スキーマとエンティティの整合について</h2>

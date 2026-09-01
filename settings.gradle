@@ -1,6 +1,6 @@
 rootProject.name = 'lets-blog-server'
 
-include 'libs:lbs-common'
+include 'packages:lbs-common'
 include 'services:log-writer'
 include 'services:gateway'
 include 'services:identity'

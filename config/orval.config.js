@@ -18,11 +18,11 @@ module.exports = {
   // フロントエンドエラーログ)をlog-writerへ移設したことに伴うターゲット追加。
   logWriter: {
     input: {
-      target: './openapi/log-writer.json',
+      target: '../openapi/log-writer.json',
     },
     output: {
       ...commonOutput,
-      target: './sdk/api-client/src/generated/log-writer',
+      target: '../packages/api-client/src/generated/log-writer',
       baseUrl: 'http://localhost:8080',
     },
   },
@@ -31,11 +31,11 @@ module.exports = {
   // 移設(#573)。
   media: {
     input: {
-      target: './openapi/media.json',
+      target: '../openapi/media.json',
     },
     output: {
       ...commonOutput,
-      target: './sdk/api-client/src/generated/media',
+      target: '../packages/api-client/src/generated/media',
       baseUrl: 'http://localhost:8080',
     },
   },
@@ -44,11 +44,11 @@ module.exports = {
   // generation_jobsをai-serviceへ移設(#574)。
   ai: {
     input: {
-      target: './openapi/ai.json',
+      target: '../openapi/ai.json',
     },
     output: {
       ...commonOutput,
-      target: './sdk/api-client/src/generated/ai',
+      target: '../packages/api-client/src/generated/ai',
       baseUrl: 'http://localhost:8080',
     },
   },
@@ -57,11 +57,11 @@ module.exports = {
   // content-serviceへ移設(#576)。
   content: {
     input: {
-      target: './openapi/content.json',
+      target: '../openapi/content.json',
     },
     output: {
       ...commonOutput,
-      target: './sdk/api-client/src/generated/content',
+      target: '../packages/api-client/src/generated/content',
       baseUrl: 'http://localhost:8080',
     },
   },
@@ -70,11 +70,11 @@ module.exports = {
   // レポート取得)をanalytics-serviceへ移設(#578)。
   analytics: {
     input: {
-      target: './openapi/analytics.json',
+      target: '../openapi/analytics.json',
     },
     output: {
       ...commonOutput,
-      target: './sdk/api-client/src/generated/analytics',
+      target: '../packages/api-client/src/generated/analytics',
       baseUrl: 'http://localhost:8080',
     },
   },
@@ -83,11 +83,11 @@ module.exports = {
   // デザインカスタマイズ(プロジェクト単位)をproject-serviceへ移設(#577 stage 1)。
   project: {
     input: {
-      target: './openapi/project.json',
+      target: '../openapi/project.json',
     },
     output: {
       ...commonOutput,
-      target: './sdk/api-client/src/generated/project',
+      target: '../packages/api-client/src/generated/project',
       baseUrl: 'http://localhost:8080',
     },
   },
@@ -96,11 +96,11 @@ module.exports = {
   // 記事プレビューのCMS依存部分をpublishing-serviceへ移設(#707/#708/#709/#712)。
   publishing: {
     input: {
-      target: './openapi/publishing.json',
+      target: '../openapi/publishing.json',
     },
     output: {
       ...commonOutput,
-      target: './sdk/api-client/src/generated/publishing',
+      target: '../packages/api-client/src/generated/publishing',
       baseUrl: 'http://localhost:8080',
     },
   },
@@ -109,11 +109,11 @@ module.exports = {
   // platform-serviceへ移設(#693〜#696、C10)。
   platform: {
     input: {
-      target: './openapi/platform.json',
+      target: '../openapi/platform.json',
     },
     output: {
       ...commonOutput,
-      target: './sdk/api-client/src/generated/platform',
+      target: '../packages/api-client/src/generated/platform',
       baseUrl: 'http://localhost:8080',
     },
   },
@@ -121,11 +121,11 @@ module.exports = {
   // ユーザー・ロール・権限管理をidentity-serviceへ移設(#561)。
   identity: {
     input: {
-      target: './openapi/identity.json',
+      target: '../openapi/identity.json',
     },
     output: {
       ...commonOutput,
-      target: './sdk/api-client/src/generated/identity',
+      target: '../packages/api-client/src/generated/identity',
       baseUrl: 'http://localhost:8080',
     },
   },

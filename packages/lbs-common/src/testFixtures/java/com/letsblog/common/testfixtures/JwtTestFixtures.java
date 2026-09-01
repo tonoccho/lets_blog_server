@@ -16,7 +16,7 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
  *
  * <p>各サービスのテストが、KeycloakのJWT形状(realmロールは{@code realm_access.roles}
  * クレーム、サービス間通信のトークンは{@code azp}クレームのみでend-userのsub無し)を
- * 個別に手組みしていた重複を解消するために{@code libs/lbs-common}のテストフィクスチャ
+ * 個別に手組みしていた重複を解消するために{@code packages/lbs-common}のテストフィクスチャ
  * ({@code java-test-fixtures}プラグイン)として提供する。利用側は
  * {@code testImplementation testFixtures(project(':libs:lbs-common'))}を追加すればよい。
  *

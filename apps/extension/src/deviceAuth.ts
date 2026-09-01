@@ -5,7 +5,7 @@ import { httpRequest } from './httpClient';
  *
  * VSCode拡張はOAuthのリダイレクト先を持てないため、Authorization Codeではなく
  * Device Codeフローを使う。Keycloak側にはredirect不要・client_secret不要のpublicクライアント
- * `letsblog-vscode` を用意済み(keycloak/realm-export.json、
+ * `letsblog-vscode` を用意済み(infra/keycloak/realm-export.json、
  * `oauth2.device.authorization.grant.enabled: true`)。
  *
  * このファイルは「サーバーの応答をどう解釈するか」「エラーコードから次に何をすべきか」という
@@ -14,13 +14,13 @@ import { httpRequest } from './httpClient';
  * ここでは1回分のリクエスト/判定だけを提供する)。
  */
 
-/** Keycloak側に登録済みのpublicクライアントID(client_secret不要、keycloak/realm-export.json参照)。 */
+/** Keycloak側に登録済みのpublicクライアントID(client_secret不要、infra/keycloak/realm-export.json参照)。 */
 export const DEVICE_CLIENT_ID = 'letsblog-vscode';
 
 /**
  * letsBlog.serverUrl(仲介APIサーバーの外部ベースURL)から、Keycloakのrealmエンドポイントの
  * ベースURLを組み立てる。nginxが `/auth/` をKeycloakへフォワードする構成
- * (web側の `keycloakExternalBase` と同じパターン、`web/src/lib/auth.ts` 参照)。
+ * (web側の `keycloakExternalBase` と同じパターン、`apps/web/src/lib/auth.ts` 参照)。
  */
 export function realmBaseUrl(serverUrl: string): string {
   return `${serverUrl}/auth/realms/letsblog`;

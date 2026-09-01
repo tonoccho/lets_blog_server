@@ -5,7 +5,7 @@ import { getContainerStatuses } from "@/lib/apiClient";
  * 到達性についての判定(issue #782 → #876 で変更)
  *
  * <p>**#876 以降、このRoute Handlerはコンテナ構成でも到達する。**
- * `nginx/conf.d/default.conf` に `location /api/dashboard/` を追加し、web へ振り分けている
+ * `infra/nginx/conf.d/default.conf` に `location /api/dashboard/` を追加し、web へ振り分けている
  * (prefix location は最長一致が優先されるため、`location /api/` より先に効く)。
  *
  * <p>#782 の調査時点では `location /api/` が `/api/**` を一律 gateway へ送っていたため、
@@ -13,7 +13,7 @@ import { getContainerStatuses } from "@/lib/apiClient";
  * #705 以降は認証必須)を叩いて401になっていた。しかもパネル側が `if (!res.ok) return;` で
  * 握り潰すため、画面上は「データが無い」ようにしか見えなかった。
  *
- * <p>このハンドラが必要な理由は変わらない。`web/src/lib/apiClient.ts` は `server-only` で、
+ * <p>このハンドラが必要な理由は変わらない。`apps/web/src/lib/apiClient.ts` は `server-only` で、
  * next-auth の `getToken()` がセッションCookie(HttpOnly)から取り出したアクセストークンを
  * `Authorization` ヘッダーに載せる。ブラウザ側にはこの手段が無く(`fetch` は素で呼んでおり、
  * `EventSource` は仕様上ヘッダーを付けられない)、**ここがブラウザ経路に認証を付ける唯一の手段**である。

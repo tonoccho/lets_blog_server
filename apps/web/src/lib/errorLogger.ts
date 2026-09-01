@@ -29,7 +29,7 @@ export async function logErrorToBackend(error: Error | string, options?: {
   };
 
   try {
-    // 送信先は同一オリジンのBFF(web/src/app/client-errors/route.ts)。
+    // 送信先は同一オリジンのBFF(apps/web/src/app/client-errors/route.ts)。
     // 以前はブラウザから /api/logs/errors を直叩きしていたが、Authorizationヘッダーが
     // 無いため #772 の認証ゲート復元で401になり、エラーログが無言で全滅していた(issue #791)。
     // nginx の location /api/ が /api/** を gateway へ転送するため、この中継先は

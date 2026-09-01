@@ -13,7 +13,7 @@
     "skipLibCheck": true,
     "baseUrl": ".",
     "paths": {
-      "@api-client": ["../sdk/api-client/src"]
+      "@api-client": ["../../packages/api-client/src"]
     }
   },
   "exclude": ["node_modules", ".vscode-test", "src/__tests__", "src/__mocks__"]

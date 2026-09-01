@@ -2,7 +2,7 @@
 @auth @api
 機能: Device Code フロー
 
-  VSCode拡張のログイン経路(`extension/src/deviceAuth.ts`)。ブラウザを持たない
+  VSCode拡張のログイン経路(`apps/extension/src/deviceAuth.ts`)。ブラウザを持たない
   エディタから、ユーザーにブラウザで承認してもらってトークンを得る。
 
   シナリオ: デバイス認可を要求すると、ユーザーコードと確認URLが返る

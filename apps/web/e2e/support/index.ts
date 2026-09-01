@@ -1,7 +1,7 @@
 /**
  * 受け入れテスト(BDD)からの既存 E2E 資産への入口(issue #926 / AT-0)。
  *
- * `web/e2e/helpers.ts` は Playwright 直書きの13 specが依存している。AT-3〜AT-18 で
+ * `apps/web/e2e/helpers.ts` は Playwright 直書きの13 specが依存している。AT-3〜AT-18 で
  * spec を `.feature` へ段階移行していく間、helpers は両方から使われる。そこで helpers を
  * `support/` へ「移設」せず、ここから再エクスポートするだけに留める。
  *

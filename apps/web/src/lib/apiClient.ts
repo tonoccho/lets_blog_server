@@ -115,7 +115,7 @@ export interface UserCreateInput {
  * NextRequestが無いServer Component/Server Actionからでもnext/headersのcookies()/headers()を
  * そのまま渡せる(型定義上はNextRequest等を期待しているため as any で吸収する)。
  *
- * 注意: ここで読むCookieは、SessionProvider(web/src/app/SessionProvider.tsx)のrefetchIntervalに
+ * 注意: ここで読むCookieは、SessionProvider(apps/web/src/app/SessionProvider.tsx)のrefetchIntervalに
  * よってブラウザが定期的に/api/auth/sessionを叩くことでjwtコールバックのリフレッシュが走り、
  * 更新され続けている前提。getToken()自体はjwtコールバックを再実行しない生のCookieデコードのため、
  * ここで読むaccessTokenが失効間際でないかはSessionProvider側の更新頻度に依存する。
@@ -1127,7 +1127,7 @@ export function listUnifiedOperationLogs(
  *
  * ブラウザから gateway を直叩きしていた頃の名残で認証情報が付かず、#772 で
  * log-writer に認証ゲートが戻った際に401で無言に全滅していた。現在は
- * web/src/app/client-errors/route.ts (BFF) だけがこの関数を呼び、Bearerが付く。
+ * apps/web/src/app/client-errors/route.ts (BFF) だけがこの関数を呼び、Bearerが付く。
  */
 export interface FrontendErrorLogInput {
   message: string;

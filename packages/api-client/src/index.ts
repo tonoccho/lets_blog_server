@@ -191,7 +191,7 @@ export type { GenerationJobResponse, PlanChatMessage } from './generated/ai/open
 export type { RoleOptionResponse } from './generated/content/openAPIDefinition.schemas';
 
 // analytics(#578)・project(#577)・publishing(#707/#708/#712)・platform(#693〜#696)・
-// identity(#561)の生成物は openapi/*.json と sdk/api-client/src/generated/ に揃っているが、
+// identity(#561)の生成物は openapi/*.json と packages/api-client/src/generated/ に揃っているが、
 // ここからの再エクスポートはまだ行っていない(issue #739のスコープは生成パイプラインの追随まで)。
 // 再エクスポートには、上のlist/create/delete系で繰り返し起きているサービス跨ぎの名前衝突を
 // 5サービス分まとめて解消する必要があり、独立した作業になるため別Issueで扱う。

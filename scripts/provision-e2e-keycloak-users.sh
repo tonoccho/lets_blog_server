@@ -1,5 +1,5 @@
 #!/bin/bash
-# E2E(web/e2e)専用の合成アカウントをローカル開発環境へプロビジョニングする(issue #588)。
+# E2E(apps/web/e2e)専用の合成アカウントをローカル開発環境へプロビジョニングする(issue #588)。
 #
 #   e2e-test@letsblog.local   role=user  (非admin側の検証用)
 #   e2e-admin@letsblog.local  role=admin (admin側の検証用。realmロール admin を付与)
@@ -29,9 +29,9 @@
 #    identity-service経由の作成ではKeycloakの資格情報までは設定されないため、この手順が必要。
 # 3. adminアカウントにrealmロール admin を付与する(JWTのrealm_access.rolesに載る)。
 # 4. (手順0で作成済み)E2E専用のKeycloakクライアント letsblog-e2e(issue #588)。
-#    web/e2eがブラウザを介さずAPIを直接叩く際のトークン発行に使う。realm既定のadmin-cliは
+#    apps/web/e2eがブラウザを介さずAPIを直接叩く際のトークン発行に使う。realm既定のadmin-cliは
 #    lightweight access tokenが有効でsub/realm_access.rolesが載らず、下流サービスの認可が
-#    通らないため、E2E専用クライアントを別に用意する。keycloak/realm-export.jsonにも
+#    通らないため、E2E専用クライアントを別に用意する。infra/keycloak/realm-export.jsonにも
 #    同じ定義があるが、Keycloakはexportを初回起動時にしか読まないため既存環境向けにここでも作る。
 #
 # 既に存在するアカウント/クライアントに対しては作成をスキップし、
@@ -56,7 +56,7 @@ API_BASE_URL="https://localhost"
 
 TEST_EMAIL="e2e-test@letsblog.local"
 ADMIN_EMAIL="e2e-admin@letsblog.local"
-# web/e2e の fetchAccessToken() が使うクライアント(helpers.ts と一致させること)。
+# apps/web/e2e の fetchAccessToken() が使うクライアント(helpers.ts と一致させること)。
 E2E_CLIENT_ID="letsblog-e2e"
 
 if [ ! -f "$ENV_FILE" ]; then
@@ -227,7 +227,7 @@ provision_user() {
   # このレルムでは required action の VERIFY_PROFILE が有効になっている。プロフィールが
   # 不完全なユーザーは、ブラウザのログインでは補完画面が出るだけだが、
   # **パスワードグラント(直接付与)では "Account is not fully set up" で失敗する**。
-  # web/e2e の fetchAccessToken() はパスワードグラントを使うため、ここが埋まっていないと
+  # apps/web/e2e の fetchAccessToken() はパスワードグラントを使うため、ここが埋まっていないと
   # API直叩きのテストが1件も動かない。
   #
   # identity-service の KeycloakAdminClient#createUser は firstName/lastName を送らないので、

@@ -6,7 +6,7 @@ import { getSession } from "@/lib/session";
  *
  * なぜ /api/ の下に置かないか:
  *   nginx の `location /api/` は NextAuth 用の正規表現locationを除き `/api/**` を
- *   無条件に gateway へ転送する(nginx/conf.d/default.conf:68)。したがって
+ *   無条件に gateway へ転送する(infra/nginx/conf.d/default.conf:68)。したがって
  *   `/api/**` に置いた Route Handler はコンテナ構成では到達しない。到達可能な
  *   既存の Route Handler(admin/backup/download、connect/adsense/*、
  *   projects/[id]/custom-tags/* など)がいずれも `/api` の外にあるのはこのため。
