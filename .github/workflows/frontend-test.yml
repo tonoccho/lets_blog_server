@@ -10,14 +10,14 @@ on:
       # 起動しないと、web の型エラーを CI で検知できない(#739 で実際に踏み、17件の型エラーが
       # CI をすり抜けた)。
       - 'packages/api-client/**'
-      - 'orval.config.js'
+      - 'config/orval.config.js'
       - '.github/workflows/frontend-test.yml'
   pull_request:
     branches: [main, develop]
     paths:
       - 'apps/web/**'
       - 'packages/api-client/**'
-      - 'orval.config.js'
+      - 'config/orval.config.js'
       - '.github/workflows/frontend-test.yml'
 
 jobs:

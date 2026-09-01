@@ -186,7 +186,7 @@ jobs:
         id: project
         run: |
           if [ "${{ matrix.service }}" = "lbs-common" ]; then
-            echo "path=:libs:lbs-common" >> "$GITHUB_OUTPUT"
+            echo "path=:packages:lbs-common" >> "$GITHUB_OUTPUT"
             echo "dir=packages/lbs-common" >> "$GITHUB_OUTPUT"
           else
             echo "path=:services:${{ matrix.service }}" >> "$GITHUB_OUTPUT"

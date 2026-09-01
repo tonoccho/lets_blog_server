@@ -8,7 +8,7 @@ spring:
     # content-service(services/content/src/test/resources/application-test.yml)と同じ方式
     # (ADR-0006: Testcontainersは使わず実MySQLに接続する)。専用のlbs_project_testスキーマ
     # (lets_blog_testと同じtest_user/test_pass)を使い、lbs_projectスキーマ(実データ)には接続しない。
-    # スキーマはmysql/init/02-create-test-schemas.shが作成する(issue #772)。
+    # スキーマはinfra/mysql/init/02-create-test-schemas.shが作成する(issue #772)。
     url: jdbc:mysql://localhost:3306/lbs_project_test?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
     username: test_user
     password: test_pass

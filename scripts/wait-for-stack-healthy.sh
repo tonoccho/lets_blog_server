@@ -3,7 +3,7 @@
 # 待機する非破壊スクリプト(issue #588)。
 #
 # E2E(apps/web/e2e)はKeycloak・gateway・各ドメインサービス・reverse-proxyが全て起動している
-# 前提で実行される(web/playwright.config.tsのbaseURLはhttps://localhost)。サービス数が
+# 前提で実行される(apps/web/playwright.config.tsのbaseURLはhttps://localhost)。サービス数が
 # 増えた結果、`docker compose up -d`の直後は一部サービスがまだ起動途中であることが常態化し、
 # テスト開始時刻によって結果が変わる状態になっていた。テスト実行前にこのスクリプトで
 # 全サービスのhealthyを待ってから開始する(apps/web/e2e/global-setup.tsから呼ばれる)。

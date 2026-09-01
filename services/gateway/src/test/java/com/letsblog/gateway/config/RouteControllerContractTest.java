@@ -39,7 +39,7 @@ import static org.junit.jupiter.api.DynamicTest.dynamicTest;
  * {@code /api/ssh-key-pairs}等。application.ymlの各所のコメント参照)。レビューでの
  * 手動発見に頼らず、テストとして自動的に検知できるようにする。
  *
- * <p><b>アプローチ</b>: gatewayモジュールは{@code libs:lbs-common}以外の他サービスモジュールへの
+ * <p><b>アプローチ</b>: gatewayモジュールは{@code packages:lbs-common}以外の他サービスモジュールへの
  * コンパイル時依存を持たない(services/gateway/build.gradle参照)。7つの抽出済みサービス
  * すべてへ{@code testImplementation project(':services:xxx')}を追加してリフレクションで
  * 検証する方法も検討したが、(1)gatewayが本来担うべきでない大量のコンパイル時結合を

@@ -14,7 +14,7 @@
  * 値の例:
  * - コンテナ実行時(docker-compose.yml の web サービス): `http://gateway:8080`
  *   (lbs-net 内部の平文HTTP。自己署名証明書を経由しないため NODE_EXTRA_CA_CERTS 不要)
- * - ホスト上で `npm run dev` する場合(web/.env.local): `https://localhost`
+ * - ホスト上で `npm run dev` する場合(apps/web/.env.local): `https://localhost`
  *   (nginx 経由。NODE_EXTRA_CA_CERTS が必要。docs/setup.md 参照)
  */
 const DEFAULT_GATEWAY_URL = 'https://localhost';

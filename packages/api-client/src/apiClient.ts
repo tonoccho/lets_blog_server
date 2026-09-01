@@ -6,7 +6,7 @@ import type { AxiosRequestConfig } from 'axios';
  * <p>`AxiosRequestConfig['headers']`の値は`string | number | boolean | null | undefined`を
  * 取りうるが、`fetch`のヘッダーは文字列しか受け付けない。そのまま展開すると
  * `Type 'null' is not assignable to type 'string'` になる。
- * この型エラーは、#810でsdk/api-client自体の型チェックを入れて初めて検出された
+ * この型エラーは、#810でpackages/api-client自体の型チェックを入れて初めて検出された
  * (index.tsから再エクスポートされていないため、webの型チェックからは到達しなかった)。
  *
  * <p>null/undefinedのヘッダーは「指定なし」として落とす(空文字を送ると、
@@ -38,7 +38,7 @@ function toFetchHeaders(headers: AxiosRequestConfig['headers']): Record<string, 
  *
  * <ul>
  *   <li>`REACT_APP_API_URL` は Create React App の規約で、このリポジトリに定義が無い</li>
- *   <li>`NEXT_PUBLIC_API_URL` も docker-compose.yml・web/.env.local.example のいずれにも無い</li>
+ *   <li>`NEXT_PUBLIC_API_URL` も docker-compose.yml・apps/web/.env.local.example のいずれにも無い</li>
  *   <li>結果として常に `http://localhost:8080` になるが、このポートは外部公開されておらず、
  *       コンテナ内から見た `localhost` は呼び出し元コンテナ自身を指すため到達しない</li>
  * </ul>

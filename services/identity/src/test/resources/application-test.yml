@@ -9,7 +9,7 @@ spring:
     # (ADR-0006: Testcontainersは使わず実MySQLに接続する)。専用のlbs_identity_testスキーマを使い、
     # 本番相当のlbs_identityスキーマ(実データ。issue #786で専用スキーマへ分離済み)には
     # 接続しない。
-    # スキーマはmysql/init/02-create-test-schemas.shが作成する(issue #772)。
+    # スキーマはinfra/mysql/init/02-create-test-schemas.shが作成する(issue #772)。
     url: jdbc:mysql://localhost:3306/lbs_identity_test?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
     username: test_user
     password: test_pass

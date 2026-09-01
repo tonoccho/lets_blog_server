@@ -34,7 +34,7 @@ public sealed interface CmsCredentials {
 
         /**
          * 自動構築(managed)WordPressサイト向け。常駐wordpressコンテナ内の内部限定
-         * プロビジョニングエージェント(wordpress/provision-agent)経由でwp-cliを実行する。
+         * プロビジョニングエージェント(infra/wordpress/provision-agent)経由でwp-cliを実行する。
          * wpSlugはそのサイトディレクトリ({@code /var/www/html/sites/{wpSlug}})の識別子。
          */
         public boolean isAgent() {

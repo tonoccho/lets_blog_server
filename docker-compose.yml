@@ -42,7 +42,7 @@ services:
     # E2E(#588)は https://localhost(=このreverse-proxy)へ直接アクセスするため、
     # 「スタック全体がhealthy」を機械的に判定できるようヘルスチェックを持たせる。
     # nginx:alpineにcurlは無いためbusybox wgetを使い、自己署名証明書のHTTPSではなく
-    # 80番のヘルス用location(nginx/conf.d/default.confの/nginx-health)を叩く。
+    # 80番のヘルス用location(infra/nginx/conf.d/default.confの/nginx-health)を叩く。
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:80/nginx-health || exit 1"]
       interval: 10s
@@ -68,7 +68,7 @@ services:
       # ブラウザから見える公開URL(認証コールバック等の生成に使用)
       NEXTAUTH_URL: https://localhost
       # Keycloakのletsblog-webクライアント(confidential client)のシークレット(#564)。
-      # web/src/lib/auth.tsがトークン交換・リフレッシュ・ログアウトのサーバー間通信で使う。
+      # apps/web/src/lib/auth.tsがトークン交換・リフレッシュ・ログアウトのサーバー間通信で使う。
       KEYCLOAK_WEB_CLIENT_SECRET: ${KEYCLOAK_WEB_CLIENT_SECRET}
     # node_modules/.nextは匿名ボリュームにせず./web配下のbind mountに含める
     # (匿名ボリュームは/var/lib/docker配下、すなわちルートディスクに置かれるため、
@@ -340,7 +340,7 @@ services:
       GENERATED_IMAGES_STORAGE_PATH: /app/data/generated-images
       # BackupService(issue #694、C10-2)が全サービスのMySQLスキーマ+Keycloak PostgreSQLを横断して
       # バックアップ/リストアするための接続情報。各サービス専用のDBユーザーでは他スキーマへ
-      # アクセスできない(#570のスキーマ分離)ため、バックアップ専用のMySQLユーザー(mysql/init/
+      # アクセスできない(#570のスキーマ分離)ため、バックアップ専用のMySQLユーザー(infra/mysql/init/
       # 01-create-service-schemas.shが作成・スキーマ限定の権限を付与する)を使う。
       # 旧スキーマ(分割前の lets_blog)は #785 でバックアップのうえ DROP したため、
       # この一覧から外した。対象はサービス別スキーマ9つ(ADR-0004)のみ。
@@ -466,7 +466,7 @@ services:
       # [plantuml]/```plantumlの埋め込み(PlantUmlEmbedService/PlantUmlTagRenderService)の実際の
       # レンダリング呼び出し先。
       MEDIA_SERVICE_URI: http://media:8080
-      # 常駐wordpressコンテナ内の内部限定プロビジョニングエージェント(wordpress/provision-agent)の
+      # 常駐wordpressコンテナ内の内部限定プロビジョニングエージェント(infra/wordpress/provision-agent)の
       # `/wp-cli/*`エンドポイント呼び出し先(WordPressAgentOperations)。apiと同じ値。
       WORDPRESS_PROVISION_BASE_URL: http://wordpress:9000
       WP_PROVISION_TOKEN: ${WP_PROVISION_TOKEN}
@@ -590,7 +590,7 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${LBS_IDENTITY_DB_PASSWORD}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
       # Keycloakユーザー同期(#562)。letsblog-servicesクライアントのシークレット
-      # (keycloak/realm-export.jsonで定義済み)。他の値(token-uri等)はコンテナ間の既定URLで
+      # (infra/keycloak/realm-export.jsonで定義済み)。他の値(token-uri等)はコンテナ間の既定URLで
       # 足りるためservices/identity/src/main/resources/application.ymlの既定値に委ねる。
       KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
       <<: *rabbitmq-env
@@ -654,7 +654,7 @@ services:
       # MYSQL_DATABASE が無くても機能する。
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-      # サービス別スキーマ分離(#570)。mysql/init/01-create-service-schemas.sh が
+      # サービス別スキーマ分離(#570)。infra/mysql/init/01-create-service-schemas.sh が
       # 初回起動時にこれらの値でスキーマ/ユーザーを作成する。
       LBS_IDENTITY_DB_PASSWORD: ${LBS_IDENTITY_DB_PASSWORD}
       LBS_PROJECT_DB_PASSWORD: ${LBS_PROJECT_DB_PASSWORD}
@@ -691,7 +691,7 @@ services:
     depends_on:
       - mysql
 
-  # 認証基盤(ADR-0002, #559)。realm定義はGit管理された ./keycloak/realm-export.json から
+  # 認証基盤(ADR-0002, #559)。realm定義はGit管理された ./infra/keycloak/realm-export.json から
   # 起動時にimportする(--import-realm)。GUIでの手作業設定はしない。
   keycloak-postgres:
     image: postgres:15

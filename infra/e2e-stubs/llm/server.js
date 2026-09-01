@@ -1,6 +1,6 @@
 'use strict';
 /**
- * 外部LLM(OpenAI互換 Chat Completions)のスタブ(issue #843 で新設、#928 で e2e-stubs/ へ移設)。
+ * 外部LLM(OpenAI互換 Chat Completions)のスタブ(issue #843 で新設、#928 で infra/e2e-stubs/ へ移設)。
  *
  * ai-service の LlmClient は {baseUrl}/chat/completions を叩く。生成品質ではなく
  * 「生成結果がUI・DB・公開先へどう反映されるか」を検証するので、決定的な応答で足りる。

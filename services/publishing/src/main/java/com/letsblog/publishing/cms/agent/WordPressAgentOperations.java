@@ -33,7 +33,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 常駐wordpressコンテナ内の内部限定プロビジョニングエージェント(wordpress/provision-agent)
+ * 常駐wordpressコンテナ内の内部限定プロビジョニングエージェント(infra/wordpress/provision-agent)
  * の`/wp-cli/*`エンドポイント経由で、自動構築(managed)WordPressサイトをwp-cliで操作する。
  * 外部SSHサイト向けのWordPressSshOperationsと同じ役割を、SSHの代わりにエージェントへのHTTP呼び出しで担う。
  */

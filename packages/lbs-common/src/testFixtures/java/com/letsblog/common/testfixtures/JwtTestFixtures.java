@@ -18,7 +18,7 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
  * クレーム、サービス間通信のトークンは{@code azp}クレームのみでend-userのsub無し)を
  * 個別に手組みしていた重複を解消するために{@code packages/lbs-common}のテストフィクスチャ
  * ({@code java-test-fixtures}プラグイン)として提供する。利用側は
- * {@code testImplementation testFixtures(project(':libs:lbs-common'))}を追加すればよい。
+ * {@code testImplementation testFixtures(project(':packages:lbs-common'))}を追加すればよい。
  *
  * <p>ロール→authority変換規則(大文字化+{@code ROLE_}プレフィックス)は、
  * legacy-api/identity-serviceの{@code KeycloakRealmRoleConverter}と同じ規則を
