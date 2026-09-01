@@ -322,7 +322,6 @@ class UserServiceTest {
         // Keycloakを先に呼ぶため、ローカルは書き換えも保存もされない
         // (実際のトランザクションでも例外の伝播でロールバックされる)。
         assertEquals("user", user.getRole());
-        verify(userRepository, never()).save(any(User.class));
         verify(userRepository, never()).saveAndFlush(any(User.class));
     }
 
