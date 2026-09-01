@@ -138,13 +138,22 @@ class NeutralClassification(unittest.TestCase):
         "apps/web/tsconfig.json",
         "apps/web/eslint.config.mjs",
         "apps/web/next-env.d.ts",
-        # 生成物・静的アセット・リポジトリメタ。
+        # 生成物・静的アセット。
         "openapi/content.json",
         "apps/web/public/next.svg",
-        ".env.example",
-        ".node-version",
+        # リポジトリメタとしての dotfile。列挙(paths.py の NEUTRAL_PATTERNS)に
+        # 実在するものを一つずつ対応させる。ワイルドカードで一括に中立化しない。
         ".gitignore",
+        "apps/mcp-server/.gitignore",
+        "apps/penpot-plugin/.gitignore",
+        "apps/web/.gitignore",
+        ".dockerignore",
+        "apps/web/.dockerignore",
         "apps/extension/.vscodeignore",
+        ".env.example",
+        "apps/mcp-server/.env.example",
+        "apps/web/.env.local.example",
+        ".node-version",
         "apps/extension/.vscode/extensions.json",
         # プロダクション扱いのディレクトリ配下でも、ドキュメントは中立。
         "infra/keycloak/README.md",
@@ -171,6 +180,43 @@ class NeutralClassification(unittest.TestCase):
     def test_declared_neutral_is_false_for_unknown_path(self):
         """列挙のどれにも当たらないパスは「宣言された中立」ではない。"""
         self.assertFalse(paths.is_declared_neutral("some/unknown/place/thing.txt"))
+
+    def test_declared_neutral_is_false_for_unknown_dotfile(self):
+        """dotfile であることは中立の根拠にならない。
+
+        中立は「意図して分類の外に置いたもの」の列挙であって、名前が `.` で始まる
+        という構文上の性質ではない。将来 dotfile が増えたら、その都度
+        `NEUTRAL_PATTERNS` に足す(=分類を決める)ことを強制する。
+        """
+        for path in [
+            ".htpasswd",
+            ".some-new-tool.json",
+            "apps/web/.env.production",
+            ".editorconfig",
+        ]:
+            with self.subTest(path=path):
+                self.assertFalse(paths.is_declared_neutral(path))
+
+
+class TrackedDotfileEnumeration(unittest.TestCase):
+    """追跡中の dotfile が、名前ごとに列挙されて中立になっていること。"""
+
+    def test_tracked_dotfiles_are_declared_neutral(self):
+        out = subprocess.run(
+            ["git", "ls-files"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        dotfiles = [
+            p
+            for p in out.splitlines()
+            if p.strip() and os.path.basename(p).startswith(".")
+        ]
+        self.assertTrue(dotfiles)
+        not_declared = [p for p in dotfiles if not paths.is_declared_neutral(p)]
+        self.assertEqual(not_declared, [])
 
 
 class ClassifySplit(unittest.TestCase):
