@@ -2,7 +2,7 @@
 
 `packages/api-client`(`@lets-blog/api-client`)の TypeScript クライアントは、各サービスが公開する
 OpenAPI spec から orval で生成する。この手順は `scripts/generate-api-client.sh` と
-`orval.config.js` が参照する一次資料である(issue #555 / #739 / #811)。
+`config/orval.config.js` が参照する一次資料である(issue #555 / #739 / #811)。
 
 ## 全体の流れ
 
@@ -98,7 +98,7 @@ springdoc が返す `servers[0].url` は**リクエストのホストから生�
 | `packages/api-client/src/generated/**` | **する** | 生成物だが、利用側がビルドなしで使えるようコミットしている |
 | `packages/api-client/src/index.ts` | **する**(手書き) | 生成物を再エクスポートする。**orval は上書きしない**ので、手当ては保たれる(#809) |
 
-`packages/api-client/src/index.ts` は生成対象外である(`orval.config.js` の全ターゲットの
+`packages/api-client/src/index.ts` は生成対象外である(`config/orval.config.js` の全ターゲットの
 `output.target` は `packages/api-client/src/generated/<service>` 配下)。サービスを追加したら
 このファイルへ再エクスポートを手で足す必要がある。名前衝突の解消方針は同ファイルの
 コメントを参照。
@@ -107,7 +107,7 @@ springdoc が返す `servers[0].url` は**リクエストのホストから生�
 
 1. `scripts/generate-api-client.sh` の `SERVICES` に
    `"<service>|<container>|${<SERVICE>_URL:-}"` を1行足す
-2. `orval.config.js` に対応するターゲット定義を足す
+2. `config/orval.config.js` に対応するターゲット定義を足す
 3. `packages/api-client/src/index.ts` に再エクスポートを足す(内部ブリッジ `/api/internal/**` は除く)
 4. 本ドキュメントの表を更新する
 

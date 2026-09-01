@@ -162,7 +162,7 @@ echo "✅ All specs are distinct"
 
 echo "🔨 Generating TypeScript client with orval (all targets)..."
 
-# 出力先ディレクトリはorval.config.js側の各ターゲットが作成するため、ここでは
+# 出力先ディレクトリはconfig/orval.config.js側の各ターゲットが作成するため、ここでは
 # ルートの出力先だけ用意しておく。
 mkdir -p "packages/api-client/src/generated"
 

@@ -29,7 +29,7 @@ function toFetchHeaders(headers: AxiosRequestConfig['headers']): Record<string, 
  * orval の custom mutator として使うことを想定した最小のフェッチ実装。
  *
  * <p><b>現在このファイルはどこからも参照されていない</b>(ADR-0009)。
- * `orval.config.js` は mutator を指定しておらず、生成コードは自前で `fetch` を呼ぶ。
+ * `config/orval.config.js` は mutator を指定しておらず、生成コードは自前で `fetch` を呼ぶ。
  * web は `apps/web/src/lib/apiClient.ts`(server-only、Bearerトークン付与あり)を使う。
  *
  * <p>以前はここで
