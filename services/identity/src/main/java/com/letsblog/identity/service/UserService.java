@@ -276,6 +276,14 @@ public class UserService {
      *
      * <p>逆向き(Keycloakは成功したがローカル保存が失敗)の場合は、realmロールを元の状態へ
      * ベストエフォートで戻す({@code create}の{@code compensateKeycloakUser}と同じ補償の考え方)。
+     * ここで{@code save}ではなく{@code saveAndFlush}を使うのは、この補償を実際に働かせるためである。
+     * {@code user}は同一トランザクションで{@code findById}した管理下のエンティティなので、
+     * {@code save}(= {@code merge})はUPDATE文の発行をフラッシュまで遅延させる。既定の
+     * {@code FlushMode.AUTO}では、後続のクエリが無い以上それはコミット時 — つまり
+     * このメソッドのcatchを抜けた後 — になり、DB障害を捕まえられない。
+     * {@code create}/{@code setupInitialAdmin}の同じ形のtry/catchが機能するのは、
+     * そちらが新規エンティティで、{@code GenerationType.IDENTITY}のid採番のために
+     * Hibernateが即座にINSERTを発行するからである。
      *
      * <p>{@code keycloakSub}が未設定のユーザー(未移行)はKeycloak側に対応するアカウントが
      * 無いためスキップする(updateUserProfile/delete/deactivateと同じ扱い)。
@@ -303,7 +311,7 @@ public class UserService {
         }
 
         try {
-            return UserResponse.from(userRepository.save(user));
+            return UserResponse.from(userRepository.saveAndFlush(user));
         } catch (RuntimeException e) {
             if (syncedKeycloak) {
                 compensateKeycloakAdminRole(user.getKeycloakSub(), wasAdmin);

@@ -236,7 +236,7 @@ class UserServiceTest {
         User user = buildUser();
         user.setKeycloakSub("kc-sub-955-6");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         UserResponse response = service.update(1L, new UserUpdateRequest("admin", null));
 
@@ -252,7 +252,7 @@ class UserServiceTest {
         user.setRole("admin");
         user.setKeycloakSub("kc-sub-955-7");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         UserResponse response = service.update(1L, new UserUpdateRequest("user", null));
 
@@ -267,7 +267,7 @@ class UserServiceTest {
         User user = buildUser();
         user.setKeycloakSub("kc-sub-955-8");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.update(1L, new UserUpdateRequest(null, "newpassword123"));
 
@@ -287,7 +287,7 @@ class UserServiceTest {
         user.setRole("admin");
         user.setKeycloakSub("kc-sub-955-8b");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.update(1L, new UserUpdateRequest("admin", null));
 
@@ -299,7 +299,7 @@ class UserServiceTest {
         UserService service = service();
         User user = buildUser();
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         UserResponse response = service.update(1L, new UserUpdateRequest("admin", null));
 
@@ -323,6 +323,27 @@ class UserServiceTest {
         // (実際のトランザクションでも例外の伝播でロールバックされる)。
         assertEquals("user", user.getRole());
         verify(userRepository, never()).save(any(User.class));
+        verify(userRepository, never()).saveAndFlush(any(User.class));
+    }
+
+    /**
+     * 保存は{@code save}ではなく{@code saveAndFlush}でなければならない。{@code user}は同一
+     * トランザクションで読んだ管理下のエンティティなので、{@code save}(= merge)はUPDATEの発行を
+     * コミット時まで遅らせる。その場合DB障害はこのメソッドのcatchを抜けた後に起きるため、
+     * 下の「ローカル保存に失敗したらrealmロールを元に戻す」補償が働かない(#955のレビュー指摘)。
+     */
+    @Test
+    void update_保存はフラッシュを伴う_補償が働く前提_issue955() {
+        UserService service = service();
+        User user = buildUser();
+        user.setKeycloakSub("kc-sub-955-15");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.update(1L, new UserUpdateRequest("admin", null));
+
+        verify(userRepository).saveAndFlush(user);
+        verify(userRepository, never()).save(any(User.class));
     }
 
     @Test
@@ -331,7 +352,7 @@ class UserServiceTest {
         User user = buildUser();
         user.setKeycloakSub("kc-sub-955-10");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(userRepository.save(any(User.class))).thenThrow(new RuntimeException("DB書き込み失敗"));
+        when(userRepository.saveAndFlush(any(User.class))).thenThrow(new RuntimeException("DB書き込み失敗"));
 
         assertThrows(RuntimeException.class, () -> service.update(1L, new UserUpdateRequest("admin", null)));
 
