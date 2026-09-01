@@ -50,6 +50,11 @@ npx jest -c e2e/jest.config.js -t "ログイン"   # シナリオ名で絞る
 - `@stub` のシナリオはスタブへ到達できなければ失敗する(docs/ACCEPTANCE_TESTING.md §9 と同じ方針)。
 - `@slow` はマネージドWordPressの構築と実公開を伴う。サイト `at16probe` とプロジェクト
   `at16-extension` が無ければ作り、あれば再利用する(冪等)。
+- gateway のレート制限は**クライアントIPあたり 100 req/分**
+  (`services/gateway/src/main/resources/application.yml` の `rate-limit.api-global`)。
+  全件実行1回で数十リクエストを使うため、**続けて何度も回すと 429 になる**。
+  背景ステップが解決するログインユーザー・プロジェクト・サイトは実行内で使い回しているが、
+  それでも連続実行するときは1分空けること(429 は環境の状態であってシナリオの失敗ではない)。
 
 ## 単体テスト(Layer 2)との使い分け
 

@@ -56,25 +56,42 @@ Given('拡張の設定が既定値である', (world) => {
   w(world).context = createContext();
 });
 
+/**
+ * 実行ごとに1回だけ解決すればよい前提(ログインユーザー・プロジェクト・サイト)。
+ *
+ * gateway のレート制限はクライアントIPあたり 100req/分
+ * (services/gateway/src/main/resources/application.yml の api-global)。背景ステップが
+ * シナリオごとに一覧APIを叩くと、それだけで上限へ届いて 429 になる。
+ */
+let cachedActor: Actor | undefined;
+let cachedProject: ProjectFixture | undefined;
+let cachedSite: SiteFixture | undefined;
+
 Given('管理者としてログイン済みである', async (world) => {
   const scope = w(world);
   scope.context = await loggedInAdminContext();
   scope.token = await adminAccessToken(scope.context);
-  const users = await apiClient.listUsers(scope.token);
-  const admin = users.find((u) => u.email === ADMIN_EMAIL);
-  if (!admin) throw new Error(`${ADMIN_EMAIL} が見つかりません。シードを実行してください。`);
-  scope.actor = admin;
+  if (!cachedActor) {
+    const users = await apiClient.listUsers(scope.token);
+    cachedActor = users.find((u) => u.email === ADMIN_EMAIL);
+    if (!cachedActor) throw new Error(`${ADMIN_EMAIL} が見つかりません。シードを実行してください。`);
+  }
+  scope.actor = cachedActor;
 });
 
 Given('受け入れテスト用のプロジェクトが存在する', async (world) => {
   const scope = w(world);
-  scope.project = await ensureProject(scope.token);
+  cachedProject = cachedProject ?? (await ensureProject(scope.token));
+  scope.project = cachedProject;
 });
 
 Given('公開先のマネージドWordPressサイトが用意されている', async (world) => {
   const scope = w(world);
-  scope.site = await ensureManagedSite(scope.token);
-  await bindEnvironment(scope.token, scope.project.id, 'test', scope.site.id);
+  if (!cachedSite) {
+    cachedSite = await ensureManagedSite(scope.token);
+    await bindEnvironment(scope.token, cachedProject!.id, 'test', cachedSite.id);
+  }
+  scope.site = cachedSite;
 });
 
 Then('エラーメッセージに接続先のURLが含まれる', (world) => {
