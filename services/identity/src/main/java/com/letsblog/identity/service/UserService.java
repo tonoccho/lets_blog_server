@@ -48,9 +48,18 @@ import java.util.UUID;
  * スキップし、ローカルのみを更新する(#561までの既存挙動を変えない)。createは常にKeycloak側の
  * ユーザー作成を伴う(新規ユーザーである以上、Keycloak側に何も無い状態は無い)。
  *
- * <p>ロール(role/roles)とパスワード(passwordHash)はこの同期の対象外。ロールはアプリ側プロファイルの
- * 一部として引き続きidentity-serviceのみが正であり、passwordHashは現行ログイン(legacy-api)専用の
- * 値でKeycloakの資格情報とは無関係(ADR-0003のカットオーバー完了までは実ログインで使われ続けるため)。
+ * <p>パスワード(passwordHash)はこの同期の対象外。現行ログイン(legacy-api)専用の値であり、
+ * Keycloakの資格情報とは無関係(ADR-0003のカットオーバー完了までは実ログインで使われ続けるため)。
+ *
+ * <p><b>admin判定の軸(issue #955、#815の続き)</b>。
+ * {@code users.role}(admin/user)が<b>正</b>であり、Keycloakのrealmロール{@code admin}は
+ * そこから導出される<b>従</b>である。Web側がセッションのロールをJWTの{@code realm_access.roles}から
+ * 導出する(#566)ため、両者が食い違うと「APIは通るのに管理画面へ入れない」状態になる(#955)。
+ * そこで{@code users.role}が変わる経路すべてでrealmロールを追随させる。
+ * RBAC({@code roles}/{@code user_roles})は3つ目の軸ではなく、admin以外へ個別に権限を配る仕組みで
+ * あり、realmロールを駆動しない({@code ROLE_ADMIN}の付与・剥奪はrealmロールを変えず、
+ * {@link #reconcileKeycloakAdminRole(Long)}が{@code users.role}に対する冪等な整合だけを行う)。
+ * 詳細はdocs/AUTHORIZATION_MATRIX.mdの「admin判定の2つの軸」を参照。
  */
 @Service
 public class UserService {
@@ -58,6 +67,9 @@ public class UserService {
     private static final Logger log = LoggerFactory.getLogger(UserService.class);
 
     private static final Set<String> VALID_ROLES = Set.of("admin", "user");
+
+    /** {@code users.role = "admin"} に対応するKeycloakのrealmロール名(keycloak/realm-export.json)。 */
+    private static final String KEYCLOAK_ADMIN_REALM_ROLE = "admin";
 
     private static final Map<String, String> LEGACY_ROLE_TO_ROLE_NAME = Map.of(
             "admin", "ROLE_ADMIN",
@@ -103,6 +115,18 @@ public class UserService {
         // Keycloak側の作成に失敗した場合はローカルにも一切作成しない(暗黙の成功をしない)。
         String keycloakSub = keycloakAdminClient.createUser(request.email(), null, null, false);
 
+        // issue #955: role=adminならKeycloakのrealmロールも付与する(users.roleが正、realmロールが従)。
+        // ここで失敗したら孤児となるKeycloakユーザーを消して失敗させる。ローカルだけがadminで
+        // Keycloakが追随しない状態(=#955の不具合そのもの)を作らないため、握りつぶさない。
+        if (isAdminRole(request.role())) {
+            try {
+                keycloakAdminClient.grantRealmRole(keycloakSub, KEYCLOAK_ADMIN_REALM_ROLE);
+            } catch (RuntimeException e) {
+                compensateKeycloakUser(keycloakSub);
+                throw e;
+            }
+        }
+
         User user = new User();
         user.setEmail(request.email());
         user.setPasswordHash(passwordEncoder.encode(request.password()));
@@ -142,6 +166,10 @@ public class UserService {
      * = 暗黙に成功しない)。Keycloak側に既に同一email/usernameのユーザーが存在する場合は
      * {@code createUser}が409で失敗し、このメソッドも例外で失敗する(= 拒否)。
      * ローカル保存に失敗した場合は、孤児となったKeycloakユーザーをベストエフォートで削除する。
+     *
+     * <p>#955: Keycloakのrealmロール{@code admin}も併せて付与する。付与に失敗した場合は
+     * パスワード設定失敗と同様にKeycloakユーザーを削除して例外にする(ローカルには何も残らない)。
+     * 「ログインはできるが管理画面には入れない管理者」を作らないための境界である。
      */
     @Transactional
     public UserResponse setupInitialAdmin(String email, String password) {
@@ -155,6 +183,9 @@ public class UserService {
         String keycloakSub = keycloakAdminClient.createUser(email, null, null, false);
         try {
             keycloakAdminClient.setPassword(keycloakSub, password);
+            // issue #955: 最初の管理者にKeycloakのrealmロールadminを付与する。これが無いと
+            // JWTのrealm_access.rolesにadminが載らず、ログインはできるのに管理画面へ入れない。
+            keycloakAdminClient.grantRealmRole(keycloakSub, KEYCLOAK_ADMIN_REALM_ROLE);
         } catch (RuntimeException e) {
             compensateKeycloakUser(keycloakSub);
             throw e;
@@ -227,6 +258,22 @@ public class UserService {
                 .getGithubTokenEncrypted();
     }
 
+    /**
+     * ユーザーを更新する。roleの変更でadmin性が変わる場合、Keycloakのrealmロールを追随させる(#955)。
+     *
+     * <p><b>トランザクション境界</b>: Keycloakへの付与/剥奪を<b>ローカル保存より先に</b>行い、
+     * 失敗時は{@link KeycloakUserSyncException}をこの{@code @Transactional}メソッドの外へ
+     * 伝播させる。ローカルの{@code users.role}はまだ書き換えておらず、保存も呼ばれないうえ、
+     * 実行時例外による自動ロールバックで管理下のエンティティへの変更も破棄される。
+     * つまり「ローカルだけがadminでKeycloakが追随しない」状態には決してならない
+     * (#955の不具合そのものであり、握りつぶしてはならない)。
+     *
+     * <p>逆向き(Keycloakは成功したがローカル保存が失敗)の場合は、realmロールを元の状態へ
+     * ベストエフォートで戻す({@code create}の{@code compensateKeycloakUser}と同じ補償の考え方)。
+     *
+     * <p>{@code keycloakSub}が未設定のユーザー(未移行)はKeycloak側に対応するアカウントが
+     * 無いためスキップする(updateUserProfile/delete/deactivateと同じ扱い)。
+     */
     @Transactional
     public UserResponse update(Long id, UserUpdateRequest request) {
         User user = userRepository.findById(id)
@@ -234,13 +281,53 @@ public class UserService {
 
         if (request.role() != null) {
             validateRole(request.role());
+        }
+
+        boolean wasAdmin = isAdminRole(user.getRole());
+        boolean willBeAdmin = wasAdmin;
+        if (request.role() != null) {
+            willBeAdmin = isAdminRole(request.role());
+        }
+        boolean adminChanged = willBeAdmin != wasAdmin && user.getKeycloakSub() != null;
+        if (adminChanged) {
+            syncKeycloakAdminRole(user.getKeycloakSub(), willBeAdmin);
+        }
+
+        if (request.role() != null) {
             user.setRole(request.role());
         }
         if (request.password() != null && !request.password().isBlank()) {
             user.setPasswordHash(passwordEncoder.encode(request.password()));
         }
 
-        return UserResponse.from(userRepository.save(user));
+        try {
+            return UserResponse.from(userRepository.save(user));
+        } catch (RuntimeException e) {
+            if (adminChanged) {
+                compensateKeycloakAdminRole(user.getKeycloakSub(), wasAdmin);
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * {@code users.role}を正として、Keycloakのrealmロール{@code admin}を冪等に一致させる(#955)。
+     *
+     * <p>{@code POST/DELETE /api/users/&#123;userId&#125;/roles/&#123;roleName&#125;}
+     * (RBACのロール割り当て)の後始末として呼ぶ。RBACは3つ目のadmin判定軸ではないので、
+     * {@code ROLE_ADMIN}が付いたからrealmロールを付ける、という導出はしない。
+     * ここで行うのはあくまで{@code users.role}に対する整合であり、何らかの理由で
+     * ずれていた場合にそれを直す。ずれていなければKeycloakへの再付与/再剥奪は無害である
+     * (どちらも冪等)。
+     */
+    @Transactional(readOnly = true)
+    public void reconcileKeycloakAdminRole(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new UserNotFoundException("id " + userId + " のユーザーは登録されていません"));
+        if (user.getKeycloakSub() == null) {
+            return;
+        }
+        syncKeycloakAdminRole(user.getKeycloakSub(), isAdminRole(user.getRole()));
     }
 
     @Transactional(readOnly = true)
@@ -453,6 +540,35 @@ public class UserService {
         roleRepository.findByRoleName("ROLE_VIEWER").ifPresent(role -> user.getRoles().add(role));
 
         return UserResponse.from(userRepository.save(user));
+    }
+
+    private boolean isAdminRole(String role) {
+        return "admin".equals(role);
+    }
+
+    /** Keycloakのrealmロール{@code admin}を、あるべき状態({@code users.role})へ合わせる(#955)。 */
+    private void syncKeycloakAdminRole(String keycloakSub, boolean shouldBeAdmin) {
+        if (shouldBeAdmin) {
+            keycloakAdminClient.grantRealmRole(keycloakSub, KEYCLOAK_ADMIN_REALM_ROLE);
+        } else {
+            keycloakAdminClient.revokeRealmRole(keycloakSub, KEYCLOAK_ADMIN_REALM_ROLE);
+        }
+    }
+
+    /**
+     * Keycloak側のrealmロール変更に成功した後でローカル保存が失敗した場合の補償(#955)。
+     * ローカルはロールバックされるため、Keycloakを元の状態へ戻す。戻せなかった場合は
+     * ログに残す(Keycloakだけがadminという状態は、バックエンドの認可がローカルの
+     * {@code users.role}を見るため権限昇格にはならないが、放置はしない)。
+     */
+    private void compensateKeycloakAdminRole(String keycloakSub, boolean previousAdmin) {
+        try {
+            syncKeycloakAdminRole(keycloakSub, previousAdmin);
+        } catch (RuntimeException cleanupFailure) {
+            log.error(
+                    "ローカル保存失敗後のKeycloak realmロール(sub={})の巻き戻しに失敗しました。手動での確認が必要です。",
+                    keycloakSub, cleanupFailure);
+        }
     }
 
     private void compensateKeycloakUser(String keycloakSub) {

@@ -229,6 +229,15 @@ public class UserController {
         return userService.updateGithubToken(id, request);
     }
 
+    /**
+     * RBACのロールを割り当てる。割り当て後に{@link UserService#reconcileKeycloakAdminRole(Long)}で
+     * Keycloakのrealmロールを{@code users.role}へ冪等に整合させる(issue #955)。
+     *
+     * <p>RBACの{@code ROLE_ADMIN}はadmin判定の3つ目の軸ではないため、
+     * 「{@code ROLE_ADMIN}が付いたからrealmロール{@code admin}を付ける」という導出はしない。
+     * realmロールが従うのはあくまで{@code users.role}である
+     * (正/従の決定はdocs/AUTHORIZATION_MATRIX.mdを参照)。
+     */
     @Operation(summary = "ロールを割り当て", description = "指定されたユーザーにロールを割り当てます(特権ロールはadmin限定)")
     @ApiResponse(responseCode = "200", description = "ロールが割り当てられました")
     @ApiResponse(responseCode = "401", description = "認証ヘッダが無効")
@@ -240,6 +249,7 @@ public class UserController {
             @Parameter(description = "ロール名") @PathVariable String roleName) {
         authorizeRoleChange(roleName);
         roleService.assignRoleToUser(userId, roleName);
+        userService.reconcileKeycloakAdminRole(userId);
         return ResponseEntity.ok(Map.of("message", "ロールを割り当てました。"));
     }
 
@@ -254,6 +264,7 @@ public class UserController {
             @Parameter(description = "ロール名") @PathVariable String roleName) {
         authorizeRoleChange(roleName);
         roleService.removeRoleFromUser(userId, roleName);
+        userService.reconcileKeycloakAdminRole(userId);
         return ResponseEntity.ok(Map.of("message", "ロールを解除しました。"));
     }
 

@@ -1,10 +1,12 @@
 package com.letsblog.identity.keycloak;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.letsblog.common.auth.ServiceTokenClient;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.AbstractJacksonHttpMessageConverter;
@@ -213,6 +215,99 @@ public class KeycloakAdminClient {
             throw new KeycloakUserSyncException(errorMessage("ユーザー存在確認(sub=" + keycloakSub + ")", e), e);
         } catch (Exception e) {
             throw connectionFailure("ユーザー存在確認(sub=" + keycloakSub + ")", e);
+        }
+    }
+
+    /**
+     * realmロールを付与する(issue #955)。既に付与済みの場合もKeycloakは成功を返すため冪等。
+     *
+     * <p>Keycloak Admin REST APIのロールマッピングは「ロールの表現(id+name)の配列」を要求するため、
+     * 先に{@code GET /roles/&#123;roleName&#125;}でidを引いてから
+     * {@code POST /users/&#123;id&#125;/role-mappings/realm}を呼ぶ2段構えになる。
+     *
+     * <p>realmにそのロールが存在しない場合は例外にする。付与できていないのに成功として返すと、
+     * ローカルDBだけがadminでKeycloakが追随しない状態(issue #955そのもの)が再発するため。
+     */
+    public void grantRealmRole(String keycloakSub, String roleName) {
+        ObjectNode role = findRealmRole(roleName);
+        if (role == null) {
+            throw new KeycloakUserSyncException(
+                    "Keycloakのrealmロール '" + roleName + "' が存在しません。"
+                            + "keycloak/realm-export.jsonのrealmロール定義が適用されているか確認してください"
+                            + "(issue #955)。");
+        }
+        ArrayNode body = JsonNodeFactory.instance.arrayNode();
+        body.add(role);
+        modifyRealmRoleMappings(
+                HttpMethod.POST, keycloakSub, body, "realmロール付与(role=" + roleName + ")");
+    }
+
+    /**
+     * realmロールを剥奪する(issue #955)。DELETEの冪等性を保つため、
+     * 「realmにロールが無い」「対象ユーザーにマッピングが無い/ユーザーが居ない」(404)は
+     * いずれも正常扱いにする。剥奪したい状態は既に満たされているため。
+     */
+    public void revokeRealmRole(String keycloakSub, String roleName) {
+        ObjectNode role = findRealmRole(roleName);
+        if (role == null) {
+            return;
+        }
+        ArrayNode body = JsonNodeFactory.instance.arrayNode();
+        body.add(role);
+        try {
+            modifyRealmRoleMappings(
+                    HttpMethod.DELETE, keycloakSub, body, "realmロール剥奪(role=" + roleName + ")");
+        } catch (KeycloakUserSyncException e) {
+            if (e.getCause() instanceof RestClientResponseException cause
+                    && cause.getStatusCode().value() == 404) {
+                return;
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * realmロールの表現({@code id}/{@code name})を引く。存在しない場合(404)は{@code null}を返し、
+     * 「存在しないこと」をどう扱うかは呼び出し側(付与=例外、剥奪=正常)に委ねる。
+     */
+    private ObjectNode findRealmRole(String roleName) {
+        try {
+            JsonNode role = adminClient.get()
+                    .uri("/roles/{roleName}", roleName)
+                    .header("Authorization", "Bearer " + serviceTokenClient.getAccessToken())
+                    .retrieve()
+                    .body(JsonNode.class);
+            if (role == null || !role.hasNonNull("id")) {
+                return null;
+            }
+            ObjectNode mapping = JsonNodeFactory.instance.objectNode();
+            mapping.put("id", role.get("id").asText());
+            mapping.put("name", role.path("name").asText(roleName));
+            return mapping;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                return null;
+            }
+            throw new KeycloakUserSyncException(errorMessage("realmロール取得(role=" + roleName + ")", e), e);
+        } catch (Exception e) {
+            throw connectionFailure("realmロール取得(role=" + roleName + ")", e);
+        }
+    }
+
+    private void modifyRealmRoleMappings(
+            HttpMethod httpMethod, String keycloakSub, ArrayNode body, String action) {
+        try {
+            adminClient.method(httpMethod)
+                    .uri("/users/{id}/role-mappings/realm", keycloakSub)
+                    .header("Authorization", "Bearer " + serviceTokenClient.getAccessToken())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientResponseException e) {
+            throw new KeycloakUserSyncException(errorMessage(action + "(sub=" + keycloakSub + ")", e), e);
+        } catch (Exception e) {
+            throw connectionFailure(action + "(sub=" + keycloakSub + ")", e);
         }
     }
 

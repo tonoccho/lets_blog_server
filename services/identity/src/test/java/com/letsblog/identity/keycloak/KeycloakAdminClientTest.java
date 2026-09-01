@@ -197,6 +197,108 @@ class KeycloakAdminClientTest {
     }
 
     @Test
+    void grantRealmRole_ロールを引いてrole_mappingsへPOSTする() {
+        expectTokenRequest();
+        server.expect(requestTo(ADMIN_BASE_URI + "/roles/admin"))
+                .andExpect(method(GET))
+                .andExpect(header("Authorization", "Bearer test-access-token"))
+                .andRespond(withSuccess(
+                        "{\"id\":\"role-uuid-1\",\"name\":\"admin\",\"composite\":false}",
+                        MediaType.APPLICATION_JSON));
+        server.expect(requestTo(ADMIN_BASE_URI + "/users/sub-role-1/role-mappings/realm"))
+                .andExpect(method(POST))
+                .andExpect(header("Authorization", "Bearer test-access-token"))
+                .andExpect(content().string("[{\"id\":\"role-uuid-1\",\"name\":\"admin\"}]"))
+                .andRespond(withStatus(HttpStatus.NO_CONTENT));
+
+        client.grantRealmRole("sub-role-1", "admin");
+
+        server.verify();
+    }
+
+    @Test
+    void grantRealmRole_realmにロールが無ければ例外になる() {
+        expectTokenRequest();
+        server.expect(requestTo(ADMIN_BASE_URI + "/roles/missing-role"))
+                .andExpect(method(GET))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        KeycloakUserSyncException exception = assertThrows(KeycloakUserSyncException.class,
+                () -> client.grantRealmRole("sub-role-2", "missing-role"));
+
+        org.hamcrest.MatcherAssert.assertThat(exception.getMessage(), containsString("missing-role"));
+        server.verify();
+    }
+
+    @Test
+    void grantRealmRole_付与に失敗すれば例外になる() {
+        expectTokenRequest();
+        server.expect(requestTo(ADMIN_BASE_URI + "/roles/admin"))
+                .andRespond(withSuccess(
+                        "{\"id\":\"role-uuid-1\",\"name\":\"admin\"}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(ADMIN_BASE_URI + "/users/sub-role-3/role-mappings/realm"))
+                .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
+
+        assertThrows(KeycloakUserSyncException.class, () -> client.grantRealmRole("sub-role-3", "admin"));
+    }
+
+    @Test
+    void revokeRealmRole_role_mappingsへDELETEする() {
+        expectTokenRequest();
+        server.expect(requestTo(ADMIN_BASE_URI + "/roles/admin"))
+                .andExpect(method(GET))
+                .andRespond(withSuccess(
+                        "{\"id\":\"role-uuid-1\",\"name\":\"admin\"}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(ADMIN_BASE_URI + "/users/sub-role-4/role-mappings/realm"))
+                .andExpect(method(DELETE))
+                .andExpect(content().string("[{\"id\":\"role-uuid-1\",\"name\":\"admin\"}]"))
+                .andRespond(withStatus(HttpStatus.NO_CONTENT));
+
+        client.revokeRealmRole("sub-role-4", "admin");
+
+        server.verify();
+    }
+
+    @Test
+    void revokeRealmRole_realmにロールが無ければ何もせず成功扱い() {
+        expectTokenRequest();
+        server.expect(requestTo(ADMIN_BASE_URI + "/roles/admin"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        client.revokeRealmRole("sub-role-5", "admin");
+
+        // マッピング削除は呼ばれない(expectを積んでいないため、呼ばれていれば失敗する)。
+        server.verify();
+    }
+
+    @Test
+    void revokeRealmRole_マッピングが無い404は冪等に成功扱いにする() {
+        expectTokenRequest();
+        server.expect(requestTo(ADMIN_BASE_URI + "/roles/admin"))
+                .andRespond(withSuccess(
+                        "{\"id\":\"role-uuid-1\",\"name\":\"admin\"}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(ADMIN_BASE_URI + "/users/sub-role-6/role-mappings/realm"))
+                .andExpect(method(DELETE))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        client.revokeRealmRole("sub-role-6", "admin");
+
+        server.verify();
+    }
+
+    @Test
+    void revokeRealmRole_404以外の失敗は例外になる() {
+        expectTokenRequest();
+        server.expect(requestTo(ADMIN_BASE_URI + "/roles/admin"))
+                .andRespond(withSuccess(
+                        "{\"id\":\"role-uuid-1\",\"name\":\"admin\"}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(ADMIN_BASE_URI + "/users/sub-role-7/role-mappings/realm"))
+                .andRespond(withStatus(HttpStatus.FORBIDDEN));
+
+        assertThrows(KeycloakUserSyncException.class, () -> client.revokeRealmRole("sub-role-7", "admin"));
+    }
+
+    @Test
     void exists_404なら存在しないとみなしfalse() {
         expectTokenRequest();
         server.expect(requestTo(ADMIN_BASE_URI + "/users/missing-sub"))
