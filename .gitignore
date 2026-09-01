@@ -6,6 +6,11 @@ backups/
 
 # Claude Code セッション固有のランタイム状態(CLAUDE.md 等の規約ファイルはコミット対象)
 .claude/scheduled_tasks.lock
+.claude/.state/
+
+# Python (フック / 検査スクリプト)
+__pycache__/
+*.pyc
 
 # Java / Gradle
 .gradle/

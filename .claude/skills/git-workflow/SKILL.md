@@ -125,7 +125,12 @@ Prefer fast-forward-only updates when possible.
 
 If the update cannot be completed safely, stop and report the reason.
 
-Do not resolve unrelated merge conflicts automatically.
+Do not resolve unrelated merge conflicts automatically — this step only updates the base
+branch, and a conflict here means the local base branch diverged, which is not this Issue's
+work.
+
+A conflict between the **working branch and `develop`** is a different thing, and it *is*
+resolved here rather than reported: see `CLAUDE.md` → **Merge Conflicts**.
 
 ---
 

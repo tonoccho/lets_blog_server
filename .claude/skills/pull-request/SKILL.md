@@ -32,6 +32,8 @@ Do not create a Pull Request until all of the following are true:
 - The working branch has been pushed.
 - No known critical or high-severity problem remains.
 - The branch contains no unrelated changes.
+- The branch merges cleanly into `develop` — resolve any conflict first (see below), do not
+  report it as a blocker.
 
 If any precondition is not met, do not create the Pull Request.
 
@@ -86,6 +88,30 @@ An unexpectedly huge diff on what should be a small change is the symptom. If yo
 **check the base before merging.** This matters more now that `complete-issue` merges
 automatically: the base check here is the last human-legible chance to catch a wrong base
 before the squash lands.
+
+## Sync with `develop` and resolve conflicts
+
+Before creating the Pull Request, bring the branch up to date with `develop`:
+
+```bash
+git fetch origin
+git merge origin/develop
+```
+
+If it conflicts, **resolve it** — a conflict with `develop` is not a blocker here. Follow
+`CLAUDE.md` → **Merge Conflicts**: resolve the conflicted files, commit the resolution, re-run
+the full relevant validation (tests, lint, type check), and push.
+
+If validation fails after the resolution:
+
+1. Fix the production code first — a resolution most often drops or duplicates a change.
+2. Change a test only when the test case itself is demonstrably inappropriate, and say which
+   and why in the Pull Request body.
+3. Never make it green by skipping, ignoring, or deleting a test.
+
+The conflict-resolution commit itself may touch test and production files together; it
+reconciles two existing histories rather than authoring new behavior. Anything written
+**after** it returns to alternating test and production phases in separate commits.
 
 ---
 

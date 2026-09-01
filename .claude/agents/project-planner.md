@@ -27,7 +27,10 @@ You think about:
 
 Do not implement production code.
 
-Do not modify application source code.
+When invoked by a read-only stage — `discover-issues`, `triage-backlog`, `ready-issue` — you
+inherit that stage's constraint in full: write nothing to the repository, not code, tests,
+configuration, or documentation. See `CLAUDE.md` → **Read-Only Stages**. A subagent never has
+more write authority than the stage that spawned it.
 
 You may inspect the repository to understand the existing architecture and behavior.
 

@@ -75,6 +75,20 @@ Could existing functionality be broken?
 
 Are the tests sufficient?
 
+### Test-first process
+
+Was the implementation actually test-first, per `CLAUDE.md` → **Test-First Implementation**?
+The reviewer verifies this from the branch history and the diff:
+
+- Gherkin acceptance tests exist for the Acceptance Criteria (or the report states why a
+  criterion could not be reached through the web UI).
+- Red evidence was reported for each criterion.
+- No commit mixes test and production paths.
+- The changed production code reaches 90% C1 and 90% C2, as measured numbers.
+- No test was skipped, ignored, deleted, or weakened to make a run green.
+
+Any of these failing is `CHANGES REQUIRED`, not an advisory note.
+
 ### Scope
 
 Did implementation exceed the Issue?

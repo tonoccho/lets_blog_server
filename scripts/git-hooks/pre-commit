@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""コミット時に `CLAUDE.md` → **Test-First Implementation** を強制する git フック。
+
+Claude Code のフック(.claude/hooks/guard.py)はエージェントの操作しか見られないため、
+コミットという不変条件はここでも検査する。人手のコミットにも等しく効く。
+
+検査するもの:
+  1. フェーズ分離 — テストコードとプロダクションコードを同じコミットに入れない
+  2. テストの黙殺 — @Disabled / test.skip などを追加しない
+  3. テストファースト — プロダクションコードのコミットより前に、
+     このブランチにテストコードの変更が存在すること
+
+有効化:
+    git config core.hooksPath scripts/git-hooks
+"""
+
+import os
+import re
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "..", ".claude", "hooks"))
+from paths import classify, is_production, is_test  # noqa: E402
+
+SILENCERS = [
+    (r"@Disabled\b", "@Disabled"),
+    (r"@Ignore\b", "@Ignore"),
+    (r"\b(test|it|describe|context)\.skip\s*\(", "test.skip()"),
+    (r"\b(test|it|describe)\.fixme\s*\(", "test.fixme()"),
+    (r"\bxit\s*\(", "xit()"),
+    (r"\bxdescribe\s*\(", "xdescribe()"),
+    (r"testPathIgnorePatterns", "testPathIgnorePatterns"),
+]
+
+RED = "\033[31m"
+OFF = "\033[0m"
+
+
+def run(args):
+    out = subprocess.run(args, capture_output=True, text=True)
+    return out.stdout if out.returncode == 0 else None
+
+
+def fail(title, body):
+    print("%s✗ %s%s\n" % (RED, title, OFF))
+    print(body)
+    print("\n(この検査は CLAUDE.md の規約を強制するものです。--no-verify で回避しないこと。)")
+    sys.exit(1)
+
+
+def staged_files():
+    out = run(["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"]) or ""
+    return [p for p in out.splitlines() if p.strip()]
+
+
+def check_phase_separation(files):
+    tests, prod = classify(files)
+    if tests and prod:
+        fail(
+            "テストコードとプロダクションコードが同じコミットに混在しています",
+            "テスト:\n  %s\n\nプロダクション:\n  %s\n\n"
+            "フェーズは交互に、別々のコミットにしてください:\n"
+            "  git restore --staged <片側のパス>\n"
+            "  git commit -m 'test: ...'   # テストフェーズ\n"
+            "  git commit -m 'feat: ...'   # プロダクションフェーズ"
+            % ("\n  ".join(tests), "\n  ".join(prod)),
+        )
+
+
+def check_silencers(files):
+    for path in files:
+        if not (is_test(path) or is_production(path)):
+            continue
+        diff = run(["git", "diff", "--cached", "-U0", "--", path]) or ""
+        added = "\n".join(l[1:] for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++"))
+        for pattern, label in SILENCERS:
+            if re.search(pattern, added):
+                fail(
+                    "テストを黙らせる変更が含まれています: %s (%s)" % (label, path),
+                    "失敗しているテストは直すものであって、skip / ignore / 削除するものではありません。\n"
+                    "まずプロダクションコードを修正してください。テストケース自体が不適切だと\n"
+                    "示せる場合に限りテストを修正し、その理由を報告すること。",
+                )
+
+
+def base_ref():
+    for ref in ("origin/develop", "develop"):
+        if run(["git", "rev-parse", "--verify", "--quiet", ref]):
+            return ref
+    return None
+
+
+def check_test_first(files):
+    _, prod = classify(files)
+    if not prod:
+        return
+    base = base_ref()
+    if base is None:
+        return
+    merge_base = (run(["git", "merge-base", base, "HEAD"]) or "").strip()
+    if not merge_base:
+        return
+    branch_files = run(["git", "diff", "--name-only", merge_base, "HEAD"]) or ""
+    if any(is_test(p) for p in branch_files.splitlines() if p.strip()):
+        return
+    fail(
+        "テストより先にプロダクションコードをコミットしようとしています",
+        "このブランチにはまだテストコードの変更が1つもありません。\n\n"
+        "プロダクション:\n  %s\n\n"
+        "受け入れ基準を Gherkin シナリオ(apps/web/e2e/features/**/*.feature)に翻訳し、\n"
+        "失敗することを確認してから実装してください(CLAUDE.md → Test-First Implementation)。\n"
+        "  cd apps/web && npm run test:at:fast" % "\n  ".join(prod),
+    )
+
+
+def main():
+    files = staged_files()
+    if not files:
+        return 0
+    check_phase_separation(files)
+    check_silencers(files)
+    check_test_first(files)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
