@@ -77,11 +77,6 @@ Given('公開先のマネージドWordPressサイトが用意されている', a
   await bindEnvironment(scope.token, scope.project.id, 'test', scope.site.id);
 });
 
-Given('受け入れテスト用サイトをプロジェクトの本番環境に紐付ける', async (world) => {
-  const scope = w(world);
-  await bindEnvironment(scope.token, scope.project.id, 'production', scope.site.id);
-});
-
 Then('エラーメッセージに接続先のURLが含まれる', (world) => {
   const error = capturedError(world);
   const url = (error as { url?: string }).url ?? '';

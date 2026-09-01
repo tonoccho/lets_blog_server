@@ -107,18 +107,3 @@ Then('同じWordPress投稿IDが返る', (world) => {
     );
   }
 });
-
-When('スラッグ {string} の記事を公開予定日時付きで公開する', async (world, slug) => {
-  const scheduledAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().replace(/\.\d+Z$/, 'Z');
-  const scope = w(world);
-  const lookup = await apiClient.lookupExistingPost(scope.token, scope.site.siteKey, slug, scope.actor);
-  (scope as { wpPostId?: string }).wpPostId = lookup?.wpPostId;
-  await publish(world, slug, '受け入れテストの予約投稿です。', scheduledAt);
-});
-
-Then('投稿ステータスが {string} になる', (world, expected) => {
-  const published = (world as { published?: { status?: string } }).published;
-  if (published?.status !== expected) {
-    throw new Error(`ステータスが ${String(published?.status)} でした(期待: ${expected})`);
-  }
-});
