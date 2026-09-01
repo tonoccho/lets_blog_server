@@ -18,6 +18,11 @@ Do not move an Issue to Ready merely because the user requested it.
 
 The Issue must pass the readiness checks below.
 
+This is a **read-only stage**. It never writes to the repository — no production code, no
+tests, no configuration, no documentation. It verifies readiness and records the verdict on
+the Issue. See `CLAUDE.md` → **Read-Only Stages** for the single definition of what that
+forbids and which GitHub mutations it permits; do not apply a different one here.
+
 ---
 
 # Choose a mode
@@ -76,7 +81,8 @@ Ask the `project-planner` agent to independently evaluate whether the Issue is i
 
 Run the agent on the Sonnet model — pass `model: "sonnet"` to the Agent tool. The skill body itself runs on Haiku (selection is a property comparison), but judging an Issue's readiness means actually reading and assessing it, so the evaluation is delegated at Sonnet.
 
-The planner must not modify production code.
+The planner inherits this stage's read-only constraint (`CLAUDE.md` → **Read-Only Stages**):
+it reads the Issue and the codebase to judge readiness, and writes nothing to the repository.
 
 ---
 
@@ -308,7 +314,11 @@ Recommend running `work-next` (or "次のタスクを実装して") to start imp
 
 # Rules
 
-Never modify production code.
+Never write to the repository. This is a **read-only stage** (`CLAUDE.md` →
+**Read-Only Stages**): verifying readiness is the whole job. The only permitted mutations are
+the `Backlog → Ready` move, the Readiness Report comment, and rewriting Epic shorthand in the
+Issue body to `#<number>`. If readiness cannot be judged without changing a file, that is a
+blocker to report, not a change to make.
 
 Never move an Issue directly from `Inbox` to `Ready`.
 

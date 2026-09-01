@@ -160,12 +160,69 @@ The workflow may still stop before the Pull Request is merged, but only for a ge
 - A requirement ambiguity only the user can resolve (Review `REQUIREMENT CLARIFICATION`, or a blocking question raised during implementation).
 - QA `BLOCKED` (verification itself cannot proceed).
 - A per-stage retry limit is exceeded without resolving the problem (see `work-next`).
-- The Pull Request cannot be merged as-is: a merge conflict, a draft, or a blocked merge state. Never resolve this by forcing the merge.
+- The Pull Request cannot be merged as-is for a reason this workflow may not fix on its own:
+  a draft, or a blocked merge state (branch protection, a required check that cannot pass).
+  A **merge conflict is not one of these** — resolve it on the working branch per
+  **Merge Conflicts**. Never force a merge past any of them.
 - A live-system mutation would require explicit confirmation (see existing Keycloak / production DB rules).
 - Two well-evidenced verdicts on the same Issue disagree and only the user can settle it
   (see **Dependency Resolution** → When a verdict contradicts a recent one).
 
 Otherwise, do not halt the workflow short of a merged Pull Request and a `Done` Issue.
+
+---
+
+# Read-Only Stages
+
+This is the single definition of "read-only". `discover-issues`, `triage-backlog`, and
+`ready-issue` defer to it, as does every agent they spawn. Do not restate it differently
+anywhere else — if you find a second definition in `.claude/`, that is a bug to fix, not a
+variant to follow.
+
+These three stages never change the repository. They read the codebase and the Issue tracker,
+form a judgment, and record that judgment in GitHub. That is their entire output.
+
+## What must not change
+
+While one of these stages is running, nothing in the working tree may be written — not
+production code, not tests, not configuration, not migrations, not documentation, not
+`.claude/` itself. "Production code" is not the boundary; the boundary is **any file in the
+repository**.
+
+Not permitted:
+
+- `Edit`, `Write`, `NotebookEdit`
+- Shell writes into a repository path: `>`, `>>`, `sed -i`, `patch`, `tee`, `mv`, `rm`, `cp`
+- Commands that write as a side effect: formatters, `--fix` linters, code generators,
+  dependency installs that touch a lockfile, database migrations, builds that commit artifacts
+- Any `git` command that changes state: `add`, `commit`, `checkout`, `switch`, `branch`,
+  `merge`, `rebase`, `stash`, `restore`, `reset`, `push`
+
+Read-only inspection is expected and encouraged: `cat`, `sed -n`, `grep`, `find`, `git log`,
+`git diff`, `git show`, `gh issue view`, `scripts/issue-dependency-status.sh`.
+
+Scratch notes go to the session scratchpad directory, never into the repository.
+
+## What may change
+
+Only GitHub Issue state, and only the mutations listed for that stage:
+
+| Stage | Permitted GitHub mutations |
+| --- | --- |
+| `discover-issues` | Create new Issues in `Inbox` with `Priority` set; comment on an existing Issue when the finding is already covered by it |
+| `triage-backlog` | Move `Inbox → Backlog`; set `Priority` on each Issue it moves |
+| `ready-issue` | Move `Backlog → Ready`; post the Readiness Report as a comment; rewrite Epic shorthand in the Issue body to `#<number>` (required by **Dependency Resolution** → Recording dependencies) |
+
+Anything not listed is out of bounds — including closing an Issue, which stays the user's call.
+
+## When a read-only stage finds something it wants to fix
+
+Do not fix it. That is the point of the stage. File it — or comment on the Issue that already
+covers it — per **Scope Control**, and report it. A one-line "obvious" fix is still a code
+change, and a stage that is trusted to only read must actually only read.
+
+If a stage cannot complete its judgment without changing a file, that is a blocker to report,
+not a reason to make the change.
 
 ---
 
@@ -186,6 +243,103 @@ After editing code:
 3. Run type checks where available.
 4. Check for unintended changes.
 5. Compare the implementation against acceptance criteria.
+
+---
+
+# Test-First Implementation
+
+This is the single definition of how implementation proceeds. `work-next`, `implement-issue`,
+the `implementer` agent, and `review-issue` all defer to it. Do not restate it differently
+anywhere else — if you find a second definition in `.claude/`, that is a bug to fix, not a
+variant to follow.
+
+Every Issue is implemented test-first:
+
+1. **RED — write the acceptance tests.** Translate the Issue's Acceptance Criteria into Gherkin
+   scenarios, run them, and confirm every new scenario **fails**. Record the failure output.
+2. **GREEN — change the production code.** Only after red has been recorded for the criterion
+   being implemented.
+3. **Repeat** in small cycles, one criterion (or one unit of behavior) at a time.
+
+A new acceptance test that passes before any production code changed is not evidence of correct
+behavior — it means the scenario does not actually exercise the criterion. Fix the scenario
+until it fails, and fails for the right reason (the behavior is missing, not a typo in a
+selector or a step definition). Never skip the red step, and never write it up as done without
+the failure output to show for it.
+
+## Where the tests live
+
+| Kind | Location | Runner |
+| --- | --- | --- |
+| Acceptance (Gherkin) | `apps/web/e2e/features/**/*.feature` — Japanese keywords (`機能:` / `シナリオ:` / `前提` / `もし` / `ならば`); step definitions in `apps/web/e2e/steps/` | `npm run test:at` (`playwright-bdd`; stage projects `at-setup` → `at-seed` → `at-provision` → `at-main` → `at-destructive`, selected by `@stage:` tags) |
+| Frontend unit | `apps/web/src/**/*.test.ts(x)` | `npm run test`, `npm run test:coverage` (jest) |
+| Backend unit / integration | `services/<svc>/src/test/**` | `./gradlew :services:<svc>:test` (JUnit + JaCoCo) |
+
+Write the Gherkin scenario wherever the criterion is reachable through the product — that is
+the whole point of an acceptance test. When a criterion genuinely cannot be reached from the
+web UI (an internal service contract, a migration, an operational behavior), say so explicitly
+in the implementation report, name why, and express the criterion as a service-level test
+instead. That is a documented exception, not a silent one.
+
+## Never edit tests and production code in the same phase
+
+An edit phase is either a **test phase** or a **production phase**. Never both.
+
+- **Test phase**: only test code changes — `**/*.feature`, `apps/web/e2e/**`,
+  `**/*.test.ts(x)`, `**/*.spec.ts`, `**/src/test/**`, `**/src/testFixtures/**`, and
+  test-only fixtures and helpers. Production code is not touched, not even a one-character fix.
+- **Production phase**: only production code changes. No test file is touched — not to adjust
+  an assertion, not to fix an import, not to make something compile.
+
+Commit each phase separately (`test: …` for a test phase; `feat:` / `fix:` / `refactor:` for a
+production phase) so the alternation is visible in history. Verify it before every commit:
+
+```bash
+git diff --cached --name-only
+```
+
+Every path in that list must be on the same side of the line. If it is not, unstage and split.
+
+When a production change makes existing tests stop compiling (a renamed method, a changed
+signature), finish and commit the production phase, then do the mechanical test adaptation as
+the next test phase. The phases alternate; they never merge into one edit. The branch must be
+green before it is pushed.
+
+## Coverage
+
+Tests must cover the production code this Issue adds or changes to at least **90% C1
+(branch/decision) and 90% C2 (condition)**.
+
+- **Scope: the code this Issue changed**, not the repository as a whole. Pre-existing coverage
+  debt in files you did not touch is not this Issue's problem — and is never an excuse for
+  leaving new code uncovered.
+- **JVM**: JaCoCo's `BRANCH` counter — `./gradlew :services:<svc>:test jacocoTestReport`,
+  report at `services/<svc>/build/reports/jacoco/test/html/index.html`. The compiler
+  short-circuits `&&` / `||` into separate bytecode branches, so this counter reflects
+  condition coverage, not merely decision coverage.
+- **Frontend**: jest's `branches` metric — `npm run test:coverage` (v8 provider), read per
+  changed file, not from the global summary.
+- Report the measured numbers **for the changed files**, together with the command that
+  produced them. "Tests pass" is not a coverage report.
+- The repository-wide thresholds (`apps/web/jest.config.ts` → `coverageThreshold`, currently
+  40) are a floor for legacy code and a separate concern. Do not lower them, and do not raise
+  them as a side effect of an Issue.
+
+If a branch genuinely cannot be reached from a test, name it and say why in the implementation
+report. Do not pad the number with tests that assert nothing.
+
+## Never skip a test
+
+A failing test is fixed, never silenced. Do not add `@Disabled`, `@Ignore`, `test.skip`,
+`it.skip`, `xit`, `describe.skip`, `test.fixme`, a `@skip` / `@fixme` tag, a `--grep-invert`
+exclusion, or a `testPathIgnorePatterns` entry to make a run green. Do not delete a failing
+test, and do not weaken an assertion until it stops failing.
+
+When a test fails, **fix the production code first** — a failing test is evidence about the
+code until proven otherwise. Change the test only when the test case itself is demonstrably
+inappropriate: it asserts behavior the Issue's Acceptance Criteria do not require, or it
+encodes an assumption this Issue deliberately changed. When you do change one, report which
+test, and why the old assertion was wrong.
 
 ---
 
@@ -238,7 +392,54 @@ An issue may be considered complete only when:
 
 Passing QA opens a Pull Request; it does not mark the issue Done. `complete-issue` then merges it with `gh pr merge --squash --delete-branch`, moves the Issue to `Done`, and deletes the working branch locally and remotely.
 
-Squash is this repository's merge method for Issue Pull Requests. A Pull Request that cannot be merged cleanly is a blocker to report — never something to force through with `--admin`, a manual conflict fix during the merge step, or a different merge method.
+Squash is this repository's merge method for Issue Pull Requests. A Pull Request that cannot be
+merged cleanly is never forced through — not with `--admin`, not with a different merge method,
+not by bypassing a branch protection rule. A **merge conflict** is resolved on the working
+branch and re-verified (see **Merge Conflicts**); a draft or blocked merge state that survives
+that is a blocker to report.
+
+---
+
+# Merge Conflicts
+
+This is the single definition of how a conflict with `develop` is handled. `pull-request`,
+`complete-issue`, `git-workflow`, and `work-next` defer to it.
+
+A conflict between the working branch and `develop` **is resolved, not reported as a blocker.**
+
+Resolve it on the working branch:
+
+```bash
+git fetch origin
+git merge origin/develop     # resolve the conflicted files, then commit
+```
+
+then re-validate and push. This applies whenever the conflict shows up — while `pull-request`
+is preparing the Pull Request, or after it is open and GitHub reports
+`mergeable: CONFLICTING` / `mergeStateStatus: DIRTY`.
+
+What remains forbidden is getting the merge through *without* resolving it:
+
+- `gh pr merge --admin`
+- Any merge method other than `--squash`
+- Marking a draft ready for review to unblock a merge
+- Bypassing a branch protection rule
+
+`complete-issue` still merges only a clean, mergeable Pull Request. When it finds a conflict,
+the fix is to resolve it on the working branch, push, re-verify, and merge — never to force it.
+
+## After resolving a conflict
+
+Re-run the full relevant validation (tests, lint, type check). If anything fails:
+
+1. **Fix the production code first.** A conflict resolution most often drops or duplicates a
+   change — that is a production defect, not a test defect.
+2. Change a test only when the test case itself is demonstrably inappropriate, per
+   **Test-First Implementation** → Never skip a test. `@Disabled`, `test.skip`, and deleting
+   the test are never the resolution.
+3. The conflict-resolution commit itself may touch test and production files together — it is
+   the mechanical reconciliation of two existing histories, not new authoring. Everything you
+   write **after** it goes back to alternating test and production phases in separate commits.
 
 ---
 
@@ -321,6 +522,62 @@ re-translate labels into Issue numbers, and that translation is where verdicts d
 When an Issue records dependencies only as shorthand, resolve them to numbers and update the
 body before judging readiness. If they cannot be resolved, say the dependencies are
 *unidentifiable* — do not assert they are *unresolved*.
+
+---
+
+# Enforcement
+
+The rules above are not only written down; the ones that can be checked mechanically are
+**enforced**. A violation is refused, not reported.
+
+## Claude Code hooks — `.claude/settings.json`
+
+`.claude/hooks/guard.py` runs as a `PreToolUse` hook and denies the tool call outright.
+
+| Guard | Fires on | Blocks |
+| --- | --- | --- |
+| Read-only stage tracking | `Skill` | Records that `discover-issues` / `triage-backlog` / `ready-issue` started; cleared by any other skill or by the user's next prompt |
+| Repository writes | `Write` / `Edit` / `NotebookEdit` | Any write inside the repository while a read-only stage is active |
+| Mutating shell | `Bash` | `sed -i`, `rm` / `mv` / `cp` / `tee` / `patch`, state-changing `git`, dependency installs, and output redirection — while a read-only stage is active |
+| Test silencing | `Write` / `Edit` | Adding `@Disabled`, `@Ignore`, `test.skip`, `it.skip`, `xit`, `test.fixme`, or `testPathIgnorePatterns` to a test or production file (`.claude/`, `docs/`, `scripts/`, `.github/` and `*.md` are exempt, so the rules themselves can be written down) |
+| Phase separation | `Bash` (`git commit`) | A commit whose staged paths mix test code and production code |
+| Hook bypass | `Bash` | `git commit` / `git push` with `--no-verify` — the git hook is not optional |
+| Merge method | `Bash` (`gh pr merge`) | `--admin`, `--merge`, `--rebase` |
+| Coverage | `Bash` (`gh pr create`) | Opening a Pull Request while changed-code C1/C2 coverage is under 90% |
+
+`.claude/hooks/paths.py` is the single classifier for test / production / neutral paths. Both
+the Claude Code hook and the git hook import it; do not restate the patterns anywhere else.
+
+## Git hook — `scripts/git-hooks/pre-commit`
+
+Bound with `git config core.hooksPath scripts/git-hooks` (already set in this checkout; a fresh
+clone runs it once). It enforces the same invariants for **any** committer, agent or human:
+
+1. **Phase separation** — no commit mixes test and production paths.
+2. **No test silencing** — nothing that disables a test is added to a test or production file.
+3. **Test-first** — a commit containing production code is refused while the branch has no test
+   change at all. Write the failing Gherkin scenario first.
+
+## Coverage check — `scripts/check-changed-coverage.py`
+
+Computes branch coverage (C1/C2) of the production files this branch changed, from JaCoCo's
+`BRANCH` counter and jest's branch map, and exits non-zero below 90%. Run it directly, or let
+the Pull Request guard run it:
+
+```bash
+./gradlew :services:<svc>:test jacocoTestReport
+cd apps/web && npm run test:coverage
+python3 scripts/check-changed-coverage.py
+```
+
+A missing coverage report for a changed file fails the check — it never passes silently.
+
+## When a guard blocks something
+
+The guard is the rule speaking, not an obstacle to route around. Do not disable a hook, do not
+reach for `--no-verify`, and do not move a file to dodge a path pattern. If a guard is
+genuinely wrong, say so and file an Issue against it — the fix belongs in the guard, as its own
+change.
 
 ---
 

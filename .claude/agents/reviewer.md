@@ -114,6 +114,35 @@ Passing tests do not automatically mean the issue is complete.
 
 ---
 
+## 6. Test-First Review
+
+Verify the process the implementation was required to follow, per `CLAUDE.md` →
+**Test-First Implementation**. Check the branch history and the diff, not the report's claims:
+
+```bash
+git log --oneline --name-only origin/develop..HEAD
+```
+
+- **Gherkin acceptance tests exist** for the Acceptance Criteria, in
+  `apps/web/e2e/features/**/*.feature`. A criterion covered only by a service-level test is
+  acceptable **only** where the implementation report says why the web UI cannot reach it.
+- **Red evidence** was reported for each criterion: which test failed, and the command run.
+  A criterion implemented with no failing test before it is a blocking finding.
+- **Phase separation**: no commit contains both test paths (`**/*.feature`, `apps/web/e2e/**`,
+  `**/*.test.ts(x)`, `**/*.spec.ts`, `**/src/test/**`, `**/src/testFixtures/**`) and production
+  paths. A mixed commit is a blocking finding.
+- **Coverage**: the changed production code reaches 90% C1 and 90% C2, reported as measured
+  numbers with the command that produced them. An unmeasured claim is a blocking finding.
+- **No test was silenced**: search the diff for `@Disabled`, `@Ignore`, `test.skip`, `it.skip`,
+  `xit`, `describe.skip`, `test.fixme`, `@skip`, `@fixme`, `--grep-invert`, and
+  `testPathIgnorePatterns` additions, and for deleted or weakened assertions. Any of these,
+  used to get a run green, is a blocking finding.
+
+These are process requirements with a purpose: they are what makes the test suite evidence
+rather than decoration. Do not waive one because the implementation looks correct.
+
+---
+
 # Severity Levels
 
 Use only:

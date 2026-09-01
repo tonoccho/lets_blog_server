@@ -100,16 +100,30 @@ Do not invoke the `implementer` agent until the correct branch is checked out an
 
 ## Step 5: Invoke implementer
 
-Ask the `implementer` agent to:
+Ask the `implementer` agent to work **test-first**, per `CLAUDE.md` →
+**Test-First Implementation**. That is the single definition of the order; do not restate a
+different one here.
 
 1. Read the Issue.
 2. Inspect the codebase.
 3. Analyze impact.
-4. Create an implementation plan.
-5. Implement the plan.
-6. Add or update tests.
-7. Run validation.
-8. Report the final result.
+4. Create an implementation plan, including which Acceptance Criterion becomes which Gherkin
+   scenario.
+5. **RED** — write the acceptance tests: Gherkin scenarios in
+   `apps/web/e2e/features/**/*.feature` (Japanese keywords) with step definitions in
+   `apps/web/e2e/steps/`, plus the unit tests for the behavior being added. Run them
+   (`cd apps/web && npm run test:at:fast`, `npm run test`, `./gradlew :services:<svc>:test`)
+   and **capture the failure output**. A new scenario that passes here does not exercise its
+   criterion — fix the scenario before continuing.
+6. Commit the test phase alone (`test: …`).
+7. **GREEN** — implement the plan, touching no test file in that phase.
+8. Commit the production phase alone (`feat:` / `fix:` / `refactor:`).
+9. Repeat 5–8 in small cycles until every criterion is covered.
+10. Run full validation and measure C1/C2 coverage of the changed production code.
+11. Report the final result, including the red evidence and the coverage numbers.
+
+A test phase and a production phase never merge into one edit. When a production change breaks
+test compilation, finish the production phase, then adapt the tests as the next test phase.
 
 ---
 
@@ -125,6 +139,26 @@ Verify that:
 - No unrelated scope expansion occurred.
 - The working tree is understood.
 
+Also verify the test-first evidence — this is a gate, not a formality:
+
+- **Red evidence exists** for every Acceptance Criterion implemented: the failing scenario
+  names and the command that produced the failure. A criterion implemented without a prior
+  failing test is a failed stage; send it back.
+- **Phase separation holds.** Check it against the history, not the report:
+
+  ```bash
+  git log --oneline --name-only origin/develop..HEAD
+  ```
+
+  No commit may contain both test paths (`**/*.feature`, `apps/web/e2e/**`, `**/*.test.ts(x)`,
+  `**/*.spec.ts`, `**/src/test/**`, `**/src/testFixtures/**`) and production paths.
+- **Coverage** of the production code this Issue changed is at least 90% C1 and 90% C2, with
+  the measured numbers and the command that produced them (JaCoCo `BRANCH` for JVM, jest
+  `branches` for the frontend). A report without numbers is not verified.
+- **No test was skipped, ignored, deleted, or weakened** to make a run green
+  (`@Disabled`, `@Ignore`, `test.skip`, `it.skip`, `xit`, `test.fixme`, `--grep-invert`,
+  `testPathIgnorePatterns`). Check the diff for these directly.
+
 Do not trust a statement such as "all tests pass" without evidence from the tool output.
 
 ---
@@ -135,7 +169,9 @@ Invoke the `git-workflow` skill to:
 
 1. Inspect the diff and confirm every change belongs to this Issue.
 2. Run project validation (formatter, lint, typecheck, tests) if not already confirmed in Step 6.
-3. Commit with a message following the repository's convention.
+3. Commit each phase separately, with a message following the repository's convention. Before
+   each commit, confirm `git diff --cached --name-only` lists only test paths or only
+   production paths — never both.
 4. Push the branch (`git push -u origin <branch-name>`).
 
 Do not skip this step — implementation is not usable by later stages (Review, QA, Pull Request) until it is committed and pushed.
@@ -180,7 +216,12 @@ Short summary.
 
 ### Tests
 
-Commands executed and results.
+Commands executed and results, including:
+
+- The **red evidence**: which scenarios failed before implementation, and the command run.
+- The **C1/C2 coverage** of the production code this Issue changed, with the command run.
+- Any criterion covered by a service-level test instead of Gherkin, and why the web UI could
+  not reach it.
 
 ### Acceptance Criteria
 
@@ -207,6 +248,14 @@ Never implement an Issue that is not Ready.
 Never mark an Issue Done.
 
 Never silently change requirements.
+
+Never change production code before a failing test exists for the behavior it implements.
+
+Never edit test code and production code in the same phase or the same commit.
+
+Never make a run green by skipping, ignoring, deleting, or weakening a test. When a test fails,
+fix the production code first; change the test only when the test case itself is demonstrably
+wrong, and say so in the report.
 
 Never fix unrelated problems discovered during implementation.
 

@@ -10,7 +10,12 @@ You are finishing an Issue: merging its Pull Request, then moving the Issue to `
 
 This skill performs the merge itself, with `gh pr merge --squash --delete-branch`. If a human already merged the Pull Request, skip the merge and carry on with the finalization.
 
-Do not implement production code. Never merge a Pull Request that has not passed internal Review and QA, and never force a merge past a conflicted, draft, or blocked state — stop and report instead.
+Do not implement production code. Never merge a Pull Request that has not passed internal
+Review and QA, and never *force* a merge past a conflicted, draft, or blocked state.
+
+A **merge conflict** is resolved rather than reported: bring `develop` into the working branch,
+fix the conflict, re-validate, push, then merge cleanly (see `CLAUDE.md` → **Merge Conflicts**).
+A draft or a blocked merge state that survives that is a blocker — stop and report it.
 
 ---
 
@@ -57,7 +62,22 @@ Record `baseRefName` (base branch) and `headRefName` (working branch), then bran
 - `isDraft` is `false`.
 - `mergeable` is `MERGEABLE`, and `mergeStateStatus` is neither `DIRTY` nor `BLOCKED`.
 
-If any of them fails, stop and report which one. Do not resolve conflicts, mark a draft ready for review, or bypass a branch protection rule to get the merge through.
+If `mergeable` is `CONFLICTING` or `mergeStateStatus` is `DIRTY`, **resolve the conflict** —
+this one is not a stop. Per `CLAUDE.md` → **Merge Conflicts**:
+
+```bash
+git switch <headRefName>
+git fetch origin
+git merge origin/develop     # resolve, then commit
+```
+
+Re-run the full relevant validation, push, and re-read `gh pr view` before merging. If
+validation fails after the resolution, fix the production code first; change a test only when
+the test case itself is demonstrably inappropriate, and never by skipping or deleting it.
+
+If any **other** precondition fails (the Issue is not in `QA`, the PR is a draft,
+`mergeStateStatus` is `BLOCKED`), stop and report which one. Do not mark a draft ready for
+review, and do not bypass a branch protection rule to get the merge through.
 
 Otherwise merge:
 

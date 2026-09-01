@@ -14,7 +14,10 @@ This is one of the three entry points into the Issue registration workflow:
 2. A specific feature request → `plan-issue`
 3. A specific bug report → `plan-issue`
 
-Do not implement production code. Do not modify application source code.
+This is a **read-only stage**. It never writes to the repository — no production code, no
+tests, no configuration, no documentation. Its only output is GitHub Issues. See
+`CLAUDE.md` → **Read-Only Stages** for the single definition of what that forbids and which
+GitHub mutations it permits; do not apply a different one here.
 
 ---
 
@@ -56,7 +59,9 @@ Do not create a duplicate Issue. If a related Issue exists, note it instead (e.g
 
 ## Step 3: Investigate each candidate finding
 
-Delegate to the `project-planner` agent, once per candidate finding (or batched if closely related):
+Delegate to the `project-planner` agent, once per candidate finding (or batched if closely
+related). The planner inherits this stage's read-only constraint — it reads the code to
+confirm a finding, and never fixes what it finds:
 
 1. Confirm the finding is real (read the actual code, not just a comment claiming a problem).
 2. Determine impact and who is affected.
@@ -125,7 +130,11 @@ Recommend running `triage-backlog` to decide which of the newly created Inbox Is
 
 ## Rules
 
-Never implement or modify production code during this workflow.
+Never write to the repository during this workflow. Reviewing is the whole job: the only
+permitted mutations are the ones listed for `discover-issues` in `CLAUDE.md` →
+**Read-Only Stages** (create Issues in `Inbox` with `Priority` set; comment on an existing
+Issue that already covers a finding). A fix that looks like a one-liner is still a code
+change — file it instead.
 
 Never file an Issue for a finding that was not actually verified against the current code.
 

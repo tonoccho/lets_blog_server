@@ -14,7 +14,10 @@ You are responsible for promoting Issues from `Inbox` to `Backlog`.
 
 This skill only decides *whether an Issue is blocked*, not whether it is fully specified. Every Inbox Issue that is not blocked moves to Backlog.
 
-Do not implement production code.
+This is a **read-only stage**. It never writes to the repository — no production code, no
+tests, no configuration, no documentation. Its only output is the `Inbox → Backlog` move
+(with `Priority` set on each Issue it moves). See `CLAUDE.md` → **Read-Only Stages** for the
+single definition; do not apply a different one here.
 
 ---
 
@@ -69,7 +72,9 @@ Use the project's `Priority` field (P0/P1/P2) if set. If unset, infer priority f
 
 Is this Issue a duplicate of, or superseded by, another Issue?
 
-The planner must not modify production code and must not decide implementation-readiness here.
+The planner inherits this stage's read-only constraint (`CLAUDE.md` → **Read-Only Stages**):
+it reads the Issue and the codebase, writes nothing, and must not decide
+implementation-readiness here.
 
 ---
 
@@ -134,7 +139,10 @@ Recommend running `ready-issue` to select the highest-priority Backlog Issue and
 
 ## Rules
 
-Never implement or modify production code.
+Never write to the repository. Reviewing is the whole job: the only permitted mutations are
+the ones listed for `triage-backlog` in `CLAUDE.md` → **Read-Only Stages** — move
+`Inbox → Backlog` and set `Priority` on the Issues moved. Nothing else, in the repository or
+on the board.
 
 Never close an Issue without the user's explicit confirmation.
 
