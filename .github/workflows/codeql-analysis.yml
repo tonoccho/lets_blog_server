@@ -32,10 +32,14 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      # Gradleのマルチプロジェクトルートはリポジトリ直下(settings.gradle/build.gradle/gradlew)で、
+      # サブプロジェクトは services/* と packages/lbs-common にある(#980)。
+      # api/ ディレクトリは存在しないため、ルートからそのままビルドする。
       - name: Build Java
-        run: |
-          cd api
-          ./gradlew build -x test
+        run: ./gradlew build -x test
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
