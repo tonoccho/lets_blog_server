@@ -18,10 +18,16 @@ const PHPMYADMIN_DATABASE_LIST = '/phpmyadmin/index.php?route=/server/databases'
 
 /**
  * 「MySQL に接続済みのセッションが与えられている」ときにだけ応答へ現れる印。
- * どちらも実際に MySQL へ問い合わせた結果を描画しないと出てこないため、
- * 1つでも含まれていれば無認証でデータベースを覗けたことになる。
+ * どちらも実際に MySQL へ接続した結果を描画しないと出てこないため、1つでも
+ * 含まれていれば無認証でデータベースを覗けたことになる。
+ *   - `db=information_schema` : サーバー上に実在するデータベースへのリンク
+ *   - `id="pma_navigation"`   : データベースを操作する管理画面の枠
+ *
+ * `route=/database/structure` は印にできない。ログイン画面でも JS の
+ * `CommonParams.setAll({... opendb_url:"index.php?route=/database/structure" ...})`
+ * として出力されるため、未認証でも必ず含まれてしまう。
  */
-const DATABASE_LISTING_MARKERS = ['route=/database/structure', 'db=information_schema'];
+const DATABASE_LISTING_MARKERS = ['db=information_schema', 'id="pma_navigation"'];
 
 /** ログインフォーム(templates/login/form.twig)のユーザー名入力。 */
 const LOGIN_FORM_MARKER = 'name="pma_username"';
