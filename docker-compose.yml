@@ -648,8 +648,9 @@ services:
       # 削除して参照元が無くなり、スキーマ自体も DROP 済み。残すと空ボリュームからの初回起動時に
       # 使われないスキーマが再作成されてしまう。
       #
-      # MYSQL_USER / MYSQL_PASSWORD(lbs_app)は残す。下の wordpress(WORDPRESS_DB_USER)と
-      # phpmyadmin(PMA_USER)がこのユーザーで接続する。マネージドWordPressのサイト別DBは
+      # MYSQL_USER / MYSQL_PASSWORD(lbs_app)は残す。下の wordpress(WORDPRESS_DB_USER)が
+      # このユーザーで接続する(phpmyadmin は #978 以降このユーザーを渡されず、運用者が
+      # ログイン画面で入力する)。マネージドWordPressのサイト別DBは
       # プロビジョニングエージェントが root で都度作成し、このユーザーへ個別に権限を付与するため、
       # MYSQL_DATABASE が無くても機能する。
       MYSQL_USER: ${MYSQL_USER}

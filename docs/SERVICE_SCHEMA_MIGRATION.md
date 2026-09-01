@@ -250,9 +250,11 @@ docker exec lbs-mysql sh -c \
 
 - `docker-compose.yml`: mysql コンテナの `MYSQL_DATABASE` を削除。残すと**空ボリュームからの
   初回起動時に使われないスキーマが再作成される**。`MYSQL_USER` / `MYSQL_PASSWORD`(`lbs_app`)は
-  **残した**。wordpress(`WORDPRESS_DB_USER`)と phpmyadmin(`PMA_USER`)がこのユーザーで接続し、
+  **残した**。wordpress(`WORDPRESS_DB_USER`)と phpmyadmin がこのユーザーで接続し、
   マネージドWordPressのサイト別DBはプロビジョニングエージェントが root で都度作成して
   このユーザーへ個別に権限を付与するため、`MYSQL_DATABASE` が無くても機能する
+  (phpmyadmin へ `PMA_USER` / `PMA_PASSWORD` を渡すのは #978 でやめた。無認証で全DBを
+  操作できてしまうため、現在は運用者がログイン画面でこのユーザーを入力する)
 - `docker-compose.yml`: `BACKUP_MYSQL_SCHEMAS` から `${MYSQL_DATABASE}` を削除(対象は `lbs_*` 9つ)
 - `infra/mysql/init/01-create-service-schemas.sh`: `lbs_backup` への `MYSQL_DATABASE` 権限付与を削除
 - `scripts/db-backup.sh` / `scripts/db-restore.sh`: 単一スキーマ前提だったものを、
