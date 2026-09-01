@@ -238,7 +238,9 @@
     "watch": "tsc -w -p ./",
     "generate:api-client": "cd ../.. && ./scripts/generate-api-client.sh",
     "test": "jest",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "test:at": "jest -c e2e/jest.config.js",
+    "test:at:fast": "AT_EXCLUDE_TAGS=@slow,@destructive jest -c e2e/jest.config.js"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
