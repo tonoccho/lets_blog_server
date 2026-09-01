@@ -42,9 +42,13 @@ df -h                     # ディスク空き容量(最小 20GB。不足する�
 | `https://localhost/api/` | gateway(各ドメインサービスへルーティング) |
 | `https://localhost/sites/{siteKey}/` | ManagedWordPress サイト |
 | `https://localhost/phpmyadmin/` | phpMyAdmin |
-| `https://localhost/comfyui/` | ComfyUI |
 | `https://localhost/penpot` | Penpot |
-| `https://localhost/plantuml/` `https://localhost/drawio/` | 図生成ツール |
+| `https://localhost/drawio/` | draw.io(VSCode拡張のダイアグラム編集が読み込む) |
+
+ComfyUI(`/comfyui/`)と PlantUML(`/plantuml/`)は #979 で reverse-proxy の中継を
+削除したため、ブラウザからは到達しない。状態確認はダッシュボードの
+「接続サービス状態」パネル、直接の疎通確認は `lbs-net` の中から行う
+(例: `docker exec lbs-media curl -s -o /dev/null -w '%{http_code}' http://plantuml:8080/`)。
 
 ```bash
 # ポート競合確認(80/443 のみ外部公開)
@@ -282,7 +286,8 @@ docker compose up -d penpot-frontend
 
 # ComfyUI(画像生成。media-service が利用する)
 docker compose up -d comfyui
-# ブラウザ: https://localhost/comfyui/
+# ブラウザからは開けない(#979 で /comfyui/ の中継を削除)。疎通確認は lbs-net の中から:
+#   docker exec lbs-media curl -s -o /dev/null -w '%{http_code}' http://comfyui:8188/
 
 # ダッシュボードの「接続サービス状態」パネル(platform-service)で
 # ComfyUI / PlantUML / WordPress プロビジョニング / Penpot の状態を確認できる

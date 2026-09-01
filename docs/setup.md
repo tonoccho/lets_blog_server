@@ -176,8 +176,11 @@ mysql / rabbitmq / keycloak / web などは集約の対象外なので、個別�
 | Web管理画面 | https://localhost/ | サイト管理・投稿履歴・AIジョブ・ユーザー管理等(Next.js) |
 | 仲介APIサーバー | https://localhost/api/ | REST API(VSCode拡張・Web管理画面が使用) |
 | phpMyAdmin | https://localhost/phpmyadmin/ | MySQLデータベース管理 |
-| ComfyUI | https://localhost/comfyui/ | 画像生成ワークフローUI |
-| PlantUML | https://localhost/plantuml/ | 図のプレビュー・検証用 |
+| draw.io | https://localhost/drawio/ | ダイアグラム編集UI(VSCode拡張のwebviewが読み込む。#979) |
+
+ComfyUI と PlantUML はブラウザからは開けない(#979 で reverse-proxy の `/comfyui/` /
+`/plantuml/` 中継を削除した)。いずれも media-service が `lbs-net` 経由で呼ぶ内部専用サービスで、
+稼働状況はダッシュボードの「接続サービス状態」パネルで確認する。
 
 ### ブラウザの自己署名証明書警告について
 
