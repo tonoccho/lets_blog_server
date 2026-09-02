@@ -83,7 +83,7 @@ the full list — everything else under `/` and `/api/` goes through the gate ab
 | `/phpmyadmin/` | phpMyAdmin | phpMyAdmin's own login screen (`auth_type: cookie`), using MySQL credentials. The container is deliberately given **no** `PMA_USER` / `PMA_PASSWORD`: those switch it to `auth_type: config`, which hands every visitor an already-connected MySQL session (#978) |
 | `/penpot` | Penpot | Penpot's own login |
 | `/sites/<slug>/**` | WordPress | Nothing for published pages — they are public blog content by design. `wp-admin` behind them is guarded by WordPress's own login |
-| `/comfyui/`, `/plantuml/`, `/drawio/` | ComfyUI / PlantUML / drawio | **Nothing.** Documented as internal-only but in fact forwarded unauthenticated; tracked in #979 |
+| `/drawio/` | drawio | **Nothing — deliberately (#979).** The VSCode extension loads `/drawio/?embed=1&…` into a webview iframe (`apps/extension/src/diagramEditorPanel.ts`), which runs outside `lbs-net`, so it cannot use container-to-container calls like the other bundled tools. draw.io is a self-contained static editor that touches none of this repository's data; diagrams are saved by the extension through the authenticated `/api/**`. `/comfyui/` and `/plantuml/` used to sit on this row and were **removed** from the reverse proxy in #979: nothing in `web` or the extension opened them, and unauthenticated they allowed arbitrary GPU workflows and arbitrary server-side rendering |
 
 A path added to the reverse proxy that does not terminate in `web` or `gateway` belongs in this
 table. If it has no authentication of its own, it does not belong on the reverse proxy at all.
