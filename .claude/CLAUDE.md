@@ -394,6 +394,11 @@ Tests must cover the production code this Issue adds or changes to at least **90
   40) are a floor for legacy code and a separate concern. Do not lower them, and do not raise
   them as a side effect of an Issue.
 
+- **Production code no coverage runner reaches** carries no numeric target — `apps/*/webviews/`,
+  `infra/e2e-stubs/**`, `next.config.ts`. It is verified by acceptance tests instead. See
+  **Enforcement** → Coverage check for the exact rule; the exemption is the coverage gate's
+  alone and does not relax phase separation or test-first for those files.
+
 If a branch genuinely cannot be reached from a test, name it and say why in the implementation
 report. Do not pad the number with tests that assert nothing.
 
@@ -639,7 +644,20 @@ cd apps/web && npm run test:coverage
 python3 scripts/check-changed-coverage.py
 ```
 
-A missing coverage report for a changed file fails the check — it never passes silently.
+It gates only the trees a coverage runner actually walks — `services/**/src`,
+`packages/**/src`, `apps/*/src` (`MEASURABLE_PATTERNS` in the script). Within those, a missing
+coverage report for a changed file fails the check; it never passes silently.
+
+Production code outside those trees is **reported as unmeasurable and skipped**, not failed:
+`apps/*/webviews/` plain `.js`, `infra/e2e-stubs/**` (Node processes that only ever run under
+docker-compose), `next.config.ts`. No jest or JaCoCo run reaches them, so no report can exist,
+and demanding one made `gh pr create` impossible for Issues that legitimately touched only
+those files (#942, #935). They are verified by the acceptance-test layer instead — the same
+convention `docs/COVERAGE_TARGETS.md` already applies to `extension.ts` and the Panel
+constructors. This is a **coverage** exemption only: `paths.py` still classifies these files as
+production, so phase separation and test-first still apply to them in full.
+
+Its own unit tests: `python3 -m unittest discover -s scripts -t scripts -p 'test_*.py'`.
 
 ## When a guard blocks something
 
