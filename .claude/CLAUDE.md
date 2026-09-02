@@ -124,7 +124,12 @@ QA does not assume implementation is correct.
 
 # Model Selection
 
-Every skill and agent declares its model explicitly in frontmatter, chosen by what the work actually requires:
+Every skill and agent declares a model in its frontmatter. **A frontmatter declaration is a
+request, not a guarantee.** The session's model is set by the CLI (`--model`), and a skill's
+declaration may or may not override it. Never assume a stage ran on the model it declares —
+measure it (see **How to check what actually ran**) before relying on it.
+
+## What each stage declares
 
 | Kind of work | Model |
 | --- | --- |
@@ -132,7 +137,8 @@ Every skill and agent declares its model explicitly in frontmatter, chosen by wh
 | Comparing simple properties (status, priority, dependency counts) | `haiku` |
 | Verifying tests or inspecting Issues | `sonnet` |
 | Merging a Pull Request (irreversible; gated on preconditions) | `sonnet` |
-| Implementing production code, or authoring Issues | `opus` |
+| Implementing production code | `sonnet` — see **Implementation runs on Sonnet** |
+| Authoring Issues | `opus` |
 
 Resulting assignments:
 
@@ -145,7 +151,70 @@ Two deliberate exceptions:
 - `ready-issue` runs on `haiku` because its selection step is a property comparison, but it delegates the readiness evaluation to `project-planner` on `sonnet` — judging an Issue means reading and assessing it.
 - The `project-planner` agent keeps `model: inherit`. It is called both for Issue creation (opus) and Issue assessment (haiku/sonnet), so the calling skill decides.
 
-Never edit production code on anything below Opus.
+## What actually ran
+
+Measured 2026-09-02 across the three unattended `work-next` cycles whose session IDs appear in
+`~/.local/state/claude-auto/*.log` (411 assistant responses). The loop was invoking
+`claude -p "/work-next" --model opus` at the time.
+
+| Stage | Declares | Observed | Match |
+| --- | --- | --- | --- |
+| (no skill attributed — top-level turns) | — | `opus` ×125, 90K output tok | — |
+| `work-next` | `sonnet` | `sonnet` ×92 | yes |
+| `git-workflow` | `haiku` | `sonnet` ×57 | no |
+| `implement-issue` | `opus` | `sonnet` ×56, `opus` ×0 | no |
+| `qa-issue` | `sonnet` | `opus` ×24, `sonnet` ×7 | no |
+| `review-issue` | `sonnet` | `opus` ×17, `sonnet` ×11 | no |
+| `pull-request` | `sonnet` | `sonnet` ×18, `opus` ×4 | partial |
+| `complete-issue` | `sonnet` | `sonnet` ×14, `opus` ×12 | partial |
+
+Three findings, and they are why this section no longer states the assignment as fact:
+
+1. **The CLI `--model` governed the largest block** — the top-level turns attributed to no
+   skill: 125 responses and 90K output tokens, the single biggest consumer.
+2. **`implement-issue` never reached `opus`** in any measured cycle, despite declaring it.
+3. **`review-issue` / `qa-issue` ran mostly on `opus`**, despite declaring `sonnet` — the
+   inverse of the intent.
+
+In these cycles every response ran at `effort=medium`. Interactive sessions in the same
+transcript directory show `effort=high`, so this is a property of how the loop invokes
+`claude`, not a repository-wide setting.
+
+The sample is small: session IDs have only been logged since 2026-09-02, so 3 of 24 cycles
+could be attributed. Closing the gap between declaration and behaviour is #1011.
+
+## Implementation runs on Sonnet
+
+This section previously ended with "Never edit production code on anything below Opus." **That
+rule is withdrawn.** No hook ever enforced it, and the measurement above shows it never held —
+every implementation response ran on Sonnet.
+
+By the user's decision (2026-09-02), implementation runs on **Sonnet by default**, and Opus is
+reserved for escalation rather than spent up front:
+
+- The unattended loop (`~/.local/bin/claude-work-next.sh`) invokes `--model sonnet`.
+- When an Issue is rolled back from `Review` or `QA` to `In progress` **twice within one
+  cycle**, the loop stops implementing, returns the Issue to `Ready`, and re-assesses its
+  readiness on **Opus** in a fresh context. Repeated rollbacks are treated as evidence of a
+  defective Issue definition, not of an under-powered implementation model.
+
+Do not reinstate an "Opus only" rule for production code without also making it enforceable.
+An unenforced model rule is exactly what produced the three-way mismatch above.
+
+## How to check what actually ran
+
+```bash
+cd ~/.claude/projects/-home-seiji-src-lets-blog-server
+cat *.jsonl | jq -R 'fromjson? // empty' \
+  | jq -sr '[.[] | select(.type=="assistant")]
+      | group_by((.attributionSkill // "(none)") + "|" + .message.model)
+      | map({k: .[0], n: length}) | sort_by(-.n) | .[]
+      | "\(.n)  \(.k.attributionSkill // "(none)")  \(.k.message.model)  effort=\(.k.effort)"'
+```
+
+`attributionSkill`, `message.model` and `effort` are recorded per response. A subagent's own
+responses are **not** in these transcripts, so the model behind an `Agent` call cannot be
+confirmed this way — that blind spot is part of #1011.
 
 ---
 
