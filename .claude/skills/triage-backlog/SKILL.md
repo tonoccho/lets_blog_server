@@ -27,7 +27,28 @@ List every Issue currently in:
 
 `Inbox`
 
-If there are none, report that and stop.
+Then **exclude every Issue carrying the `epic` label**. An Epic is a tracking container for the
+Issues underneath it, not a unit of work: it has no acceptance criteria that could be
+implemented, so promoting it only consumes a `ready-issue` slot to produce `NOT READY`
+(#925 got exactly that verdict on 2026-09-01). Epics stay in `Inbox` permanently, by the
+user's decision (#1008).
+
+Check the label on each Issue collected above:
+
+```bash
+gh issue view <number> --json labels --jq '[.labels[].name] | index("epic") != null'
+```
+
+`true` means skip it.
+
+Excluded Epics are not assessed, not moved, and not classified. They are still **reported** in
+Step 5 — silently dropping them would read as "Inbox is empty" when it is not.
+
+Epics do not shield the Issues beneath them. A child of an Epic is an ordinary Inbox Issue and
+is triaged normally.
+
+If no Issues remain after the exclusion, report that — naming the Epics that were skipped — and
+stop.
 
 ---
 
@@ -90,6 +111,8 @@ The default. Every Issue that is not blocked and is not a duplicate moves to Bac
 
 Blocked — it has an open `blocked_by` link. Name it. A prose-only dependency is not a blocker here (see above).
 
+Epics never reach this step: they are excluded in Step 1, before any classification.
+
 ### Recommend Closing
 
 Duplicate of, or superseded by, another Issue. Do not close it yourself, and do not move it to Backlog — recommend it to the user with the Issue number it duplicates.
@@ -131,6 +154,11 @@ Count and list, naming the open `blocked_by` Issue for each one.
 
 Count and list, with reason. Explicitly ask the user to confirm before closing.
 
+## Skipped (Epic)
+
+Count and list the `epic`-labelled Issues excluded in Step 1. These were not assessed and
+remain in `Inbox` by design — say so, so the count is not read as an oversight.
+
 ## Next Step
 
 Recommend running `ready-issue` to select the highest-priority Backlog Issue and promote it to Ready.
@@ -148,6 +176,8 @@ Never close an Issue without the user's explicit confirmation.
 
 Never move an Issue straight from `Inbox` to `Ready` — it must pass through `Backlog` and then the `ready-issue` gate.
 
-Do not hold a non-blocked Issue in Inbox because it looks under-specified, low-value, or hard to scope. Incomplete specification is `ready-issue`'s gate, not this one. The only reasons an Issue stays in Inbox are: it is blocked, or it is a duplicate recommended for closing.
+Do not hold a non-blocked Issue in Inbox because it looks under-specified, low-value, or hard to scope. Incomplete specification is `ready-issue`'s gate, not this one. The only reasons an Issue stays in Inbox are: it carries the `epic` label, it is blocked, or it is a duplicate recommended for closing.
+
+Never move an `epic`-labelled Issue out of `Inbox` — not to `Backlog`, and not on the grounds that its children are done. Its board position is not a progress signal.
 
 Run this skill, and every agent it spawns, on the Haiku model.
