@@ -15,6 +15,11 @@ const config: Config = {
   testPathIgnorePatterns: ['/node_modules/', '/.next/', '/e2e/'],
   collectCoverageFrom: [
     'src/**/*.{js,jsx,ts,tsx}',
+    // next.config.ts は src/ の外にあるがプロダクションコードである(セキュリティヘッダの
+    // 設定を持つ。issue #984)。scripts/check-changed-coverage.py は「変更した
+    // プロダクションコード」にカバレッジレポートが存在することを要求するため、
+    // 収集対象に含める。
+    'next.config.ts',
     '!src/**/*.d.ts',
     '!src/**/*.stories.{js,jsx,ts,tsx}',
     '!src/**/index.{js,jsx,ts,tsx}',
