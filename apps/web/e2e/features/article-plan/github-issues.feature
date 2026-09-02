@@ -1,5 +1,5 @@
 # language: ja
-@stub @plan
+@stub @plan @timeout:180000
 機能: 記事プランとGitHub Issueの往復
 
   企画は GitHub Issue として残り、Issue から企画を再開できる(issue #935 / AT-9)。

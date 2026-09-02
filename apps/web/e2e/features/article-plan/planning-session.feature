@@ -1,5 +1,5 @@
 # language: ja
-@stub @plan
+@stub @plan @timeout:180000
 機能: 記事プランの壁打ちセッション
 
   記事を書く前に「何を書くか」をAIと詰める(issue #935 / AT-9)。

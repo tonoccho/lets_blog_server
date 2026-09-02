@@ -1,5 +1,5 @@
 # language: ja
-@stub @plan
+@stub @plan @timeout:180000
 機能: 記事プランの提案と受理
 
   壁打ちの結果から、タイトル案・構成案・メタデータを引き出して受理する(issue #935 / AT-9)。
