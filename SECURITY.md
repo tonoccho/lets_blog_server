@@ -120,11 +120,38 @@ When contributing to this project, please follow these security best practices:
 
 ## Security Headers
 
-The project includes security configurations:
-- Secure HTTP headers in web responses (via backend and frontend middleware)
-- HTTPS enforcement for API communication
-- CORS policies to restrict API access
-- Secure session handling with NextAuth.js
+The admin web application (`apps/web`) sends the following headers on every response it
+serves. They are declared in `apps/web/next.config.ts` (`headers()`), which Next.js applies
+before `proxy.ts` runs, so the authentication gate's redirect responses carry them too:
+
+- `X-Content-Type-Options: nosniff` — no MIME sniffing
+- `X-Frame-Options: SAMEORIGIN` — the admin screens cannot be framed by another site
+- `Referrer-Policy: strict-origin-when-cross-origin` — no path/query leak across origins
+- `Strict-Transport-Security: max-age=300` — deliberately short. This environment uses a
+  self-signed certificate (`scripts/generate-certs.sh`), and a long `max-age` would make the
+  certificate warning unbypassable after the certificate is regenerated.
+
+The headers are set in the application rather than in the reverse proxy. nginx's `add_header`
+appends unconditionally, so applying them to the whole 443 server block would duplicate or
+contradict the headers that Keycloak, WordPress, phpMyAdmin and draw.io emit themselves, and
+`X-Frame-Options` on `/drawio/` would break the draw.io editor that the VSCode extension loads
+in a webview iframe. Those upstreams keep their own header policy.
+
+Not implemented, and why:
+
+- **Content-Security-Policy** — not sent. The admin screens embed draw.io, Penpot and PlantUML
+  through iframes and images, and the development server needs `eval` and inline scripts, so a
+  policy that is both correct and useful cannot be written without a dedicated effort. (The
+  article preview has its own CSP, applied to the previewed HTML only.)
+- **CORS** — there is no explicit CORS configuration anywhere in this repository (no
+  `CorsConfiguration`, `addCorsMappings`, `CorsWebFilter`, `@CrossOrigin`, nor a hand-written
+  `Access-Control-Allow-Origin`). The browser reaches the web app and the API through the same
+  origin (the reverse proxy publishes both under one host), so cross-origin requests are
+  rejected by the browser's same-origin policy by default and no allow-list is granted.
+
+HTTPS enforcement and session handling are unchanged: the reverse proxy redirects port 80 to
+443 (`infra/nginx/conf.d/default.conf`), and sessions are handled by NextAuth.js with
+Keycloak-issued tokens held in an encrypted, HttpOnly session cookie.
 
 ## Dependency Management
 
