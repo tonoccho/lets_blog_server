@@ -198,21 +198,31 @@ API: ai `AiController`, `ProjectLlmModelController`, `ProjectBraveSearchApiKeyCo
 
 画面: `/projects/[id]/plan`
 API: ai `ArticlePlanController`(15エンドポイント)
+シナリオ: `apps/web/e2e/features/article-plan/`(#935 / AT-9。全15シナリオ、`@stub` `@plan`)
+
+**GitHub は実サービスを叩かない。** `infra/e2e-stubs/github` のスタブへ向ける
+(#928 / AT-2。`docker-compose.e2e-stubs.yml` が ai-service の `GITHUB_API_BASE_URL` を
+差し替える)。検証専用リポジトリを用意しない判断は 2026-09-01 に #935 で確定した。
+実 GitHub へ向けると、テストのたびに本リポジトリの Issue が作られ担当者が書き換わるためである。
+
+**3行は `@api` で検証する。** AC-PLAN-005 / 012 と AC-PLAN-011 の導線は Web 管理画面に無く、
+VSCode拡張(`AC-EXT-*`)と拡張向けAPIが使う。UI から到達できない基準を UI シナリオに
+仕立てても、確かめているのはテスト側の作り物になる。
 
 | 機能ID | 機能 | 利用者から見た価値 | 受け入れ基準(要約) | 対応シナリオ | 状態 |
 | --- | --- | --- | --- | --- | --- |
-| AC-PLAN-001 | プラン対話 (`/article-plan/chat`) | 何を書くかをAIと詰められる | 対話が継続し、セッションとして保存される | — | 未着手(`@stub`) |
-| AC-PLAN-002 | セッション一覧・復元 | 中断した検討を再開できる | `GET /sessions` と `/sessions/{id}` で過去の対話を復元できる | — | 未着手 |
-| AC-PLAN-003 | タイトル提案 | 見出しを考える手間が減る | `POST /suggest-titles` が複数の候補を返す | — | 未着手(`@stub`) |
-| AC-PLAN-004 | 構成提案 | 記事の骨組みを得られる | `POST /suggest-structure` が見出し構成を返す | — | 未着手(`@stub`) |
-| AC-PLAN-005 | メタデータ提案 | 分類とdescriptionを埋められる | `POST /suggest-metadata` がカテゴリ・タグ・説明文を返す | — | 未着手(`@stub`) |
-| AC-PLAN-006 | プランの確定 | 決めた内容を記事へ引き継げる | `POST /accept` 後、その内容で執筆を開始できる | — | 未着手 |
-| AC-PLAN-007 | GitHub Issue一覧の取得 | 書くネタをIssueで管理できる | `GET /issues` が紐付けたリポジトリのIssueを返す | — | 未着手(`@stub`) |
-| AC-PLAN-008 | Issue本文の取得 | Issueの内容からプランを起こせる | `GET /issues/{issueNumber}/description` が本文を返す | — | 未着手(`@stub`) |
-| AC-PLAN-009 | Issueに紐づくセッション | Issueと検討履歴が対応する | `GET /sessions/by-issue/{issueNumber}` が該当セッションを返す | — | 未着手 |
-| AC-PLAN-010 | Issueへの構成反映 | 決めた構成をIssueに残せる | `POST /issues/{issueNumber}/accept-structure` 後、Issueに構成が書かれる | — | 未着手(`@stub`) |
-| AC-PLAN-011 | Issueの担当割当 | 誰が書くか決められる | `POST /issues/{issueNumber}/assign` 後、Issueの担当者が変わる | — | 未着手(`@stub`) |
-| AC-PLAN-012 | 既存カテゴリ・タグの参照 | 公開先にある分類を再利用できる | `GET /categories` `/categories/hierarchy` `/tags` が公開先の既存分類を返す | — | 未着手 |
+| AC-PLAN-001 | プラン対話 (`/article-plan/chat`) | 何を書くかをAIと詰められる | 対話が継続し、セッションとして保存される | `article-plan/planning-session.feature` › 企画チャットを開始すると新規セッションが作られ壁打ち一覧に現れる / 同じセッションで発言を続けると直前までの文脈が保持される / LLMが失敗してもセッションは壊れず再試行できる | 検証済(`@stub`) |
+| AC-PLAN-002 | セッション一覧・復元 | 中断した検討を再開できる | `GET /sessions` と `/sessions/{id}` で過去の対話を復元できる | `article-plan/planning-session.feature` › 保存済みセッションを開き直すと過去のやり取りが復元される | 検証済 |
+| AC-PLAN-003 | タイトル提案 | 見出しを考える手間が減る | `POST /suggest-titles` が複数の候補を返す | `article-plan/suggestions.feature` › タイトル案が複数返り、選んだものをIssueとして受理できる | 検証済(`@stub`) |
+| AC-PLAN-004 | 構成提案 | 記事の骨組みを得られる | `POST /suggest-structure` が見出し構成を返す | `article-plan/suggestions.feature` › 構成案が見出し階層として返る | 検証済(`@stub`) |
+| AC-PLAN-005 | メタデータ提案 | 分類とdescriptionを埋められる | `POST /suggest-metadata` がカテゴリ・タグ・説明文を返す | `article-plan/suggestions.feature` › メタデータ提案のカテゴリは公開先の既存カテゴリだけになる(`@api`) | 検証済(`@stub` `@api`。Web に導線が無い) |
+| AC-PLAN-006 | プランの確定 | 決めた内容を記事へ引き継げる | `POST /accept` 後、その内容で執筆を開始できる | `article-plan/suggestions.feature` › タイトル案が複数返り、選んだものをIssueとして受理できる | 検証済(部分。Issue化までを見る。執筆への引き継ぎは AT-6 / #932) |
+| AC-PLAN-007 | GitHub Issue一覧の取得 | 書くネタをIssueで管理できる | `GET /issues` が紐付けたリポジトリのIssueを返す | `article-plan/github-issues.feature` › GitHubトークンが設定されたプロジェクトでIssue一覧を取得できる / GitHubトークン未設定のプロジェクトでは設定不備と分かるエラーになる / 無効なGitHubトークンでは認証に失敗したと分かるエラーになる | 検証済(`@stub`) |
+| AC-PLAN-008 | Issue本文の取得 | Issueの内容からプランを起こせる | `GET /issues/{issueNumber}/description` が本文を返す | `article-plan/github-issues.feature` › Issue本文を企画セッションの入力にできる | 検証済(`@stub`) |
+| AC-PLAN-009 | Issueに紐づくセッション | Issueと検討履歴が対応する | `GET /sessions/by-issue/{issueNumber}` が該当セッションを返す | `article-plan/github-issues.feature` › Issue番号から壁打ちセッションを引き当てられる | 検証済(`@stub`) |
+| AC-PLAN-010 | Issueへの構成反映 | 決めた構成をIssueに残せる | `POST /issues/{issueNumber}/accept-structure` 後、Issueに構成が書かれる | `article-plan/github-issues.feature` › 構成案をIssueへ反映するとGitHub側のIssueが更新される | 検証済(`@stub`) |
+| AC-PLAN-011 | Issueの担当割当 | 誰が書くか決められる | `POST /issues/{issueNumber}/assign` 後、Issueの担当者が変わる | `article-plan/github-issues.feature` › Issueを担当者へ割り当てられる(`@api`) | 検証済(`@stub` `@api`。Web に導線が無い) |
+| AC-PLAN-012 | 既存カテゴリ・タグの参照 | 公開先にある分類を再利用できる | `GET /categories` `/categories/hierarchy` `/tags` が公開先の既存分類を返す | `article-plan/suggestions.feature` › 既存カテゴリを親子構造として、既存タグを一覧として取得できる(`@api`) | 検証済(`@api`。Web に導線が無い) |
 
 ### 2.8 画像生成・ギャラリー・メディア — `IMG`
 
@@ -536,9 +546,10 @@ APIレベルの受け入れテスト・単体テスト・手動チェックリ�
 | `POST` | 13 | | `ANA` | 6 | | `STUB` | 2 |
 | `BULK` | 13 | | | | | | |
 
-**受け入れテストが1件も無い領域**: `BULK` `AI` `PLAN` `DIAG` `ANA` `SYS` `LOG`
-(7領域 / 71 機能ID)。これが issue #927 が可視化しようとした穴である。
-`SET`(初回セットアップ)は #929(AT-3)で、`EXT`(VSCode拡張)は #942(AT-16)で埋めた。
+**受け入れテストが1件も無い領域**: `BULK` `AI` `DIAG` `ANA` `SYS` `LOG`
+(6領域 / 59 機能ID)。これが issue #927 が可視化しようとした穴である。
+`SET`(初回セットアップ)は #929(AT-3)で、`EXT`(VSCode拡張)は #942(AT-16)で、
+`PLAN`(記事プランとGitHub Issue連携)は #935(AT-9)で埋めた。
 なお `AI` / `DIAG` の一部は拡張側(`AC-EXT-*`)から同じサーバー契約を検証しているが、
 Web管理画面としての受け入れ基準は AT-8 / AT-11 の担当のままである。
 
