@@ -686,18 +686,36 @@ The rules above are not only written down; the ones that can be checked mechanic
 
 ### Where squash is enforced
 
-Squash-only is enforced **in the hook**, by requiring `--squash` on every `glab mr merge`. It is
-deliberately *not* delegated to GitLab's project setting alone:
+In two places, deliberately. Neither alone is enough.
 
-- The project is currently `squash_option: default_off` / `merge_method: merge`, so GitLab
-  would happily produce a merge commit. The hook is what actually holds the line today.
-- A hook check fails loudly at the moment of the mistake and names the rule; a silent project
-  setting does not teach the caller anything.
+| Layer | Setting | Covers | Misses |
+| --- | --- | --- | --- |
+| GitLab project | `squash_option: always`, `merge_method: ff` | every merge, including the web UI | says nothing about *why*; a project admin can change it |
+| `guard.py` hook | `--squash` required on `glab mr merge` | agent and CLI merges | web UI merges, and any shell indirection |
 
-Setting GitLab's own "require squash" (`squash_option: always`) in addition would also cover
-merges performed from the web UI, which no hook can see. That change was **not** made as part
-of #1022 — it alters project-wide merge behaviour and history shape, and belongs to a decision
-the user makes explicitly rather than a side effect of a hook fix.
+The hook is not made redundant by the project setting. It fails loudly at the moment of the
+mistake and names the rule; a silent server-side rewrite teaches the caller nothing, and the
+setting is one API call away from being changed back.
+
+**`merge_method: ff` is what makes the history linear**, and it is the half that is easy to
+miss. Squash alone is not enough: with `merge_method: merge`, GitLab creates the squashed
+commit *and then a merge commit on top of it*. That is what happened to !1020 (#1030) —
+
+```
+*   8cdb16dd Merge branch 'fix/1022-glab-guards' into 'develop'
+|\
+| * b40b02c1 fix: guard.py の空振りしていた… (!1020)
+|/
+* 1c054624 test: 記事プランと… (#1019)
+```
+
+— which is not what GitHub's squash merge did, and not what the rest of this history looks
+like. With `ff`, the squashed commit is created on top of the target and fast-forwarded in:
+one Issue, one commit, no merge bubble.
+
+`ff` requires the source branch to be mergeable without a merge commit. Squash satisfies that
+by construction (the squashed commit is built on the current target), so the ordinary flow is
+unaffected. A conflict is still resolved on the working branch per **Merge Conflicts**.
 
 `.claude/hooks/paths.py` is the single classifier for test / production / neutral paths. Both
 the Claude Code hook and the git hook import it; do not restate the patterns anywhere else.
