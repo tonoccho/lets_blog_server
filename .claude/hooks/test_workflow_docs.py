@@ -1,4 +1,4 @@
-"""`.claude/` のルールと手順書が GitLab を指していることを検証する(#1025)。
+"""リポジトリの規約・手順書・設定が GitLab の実態を指していることを検証する(#1025, #1027)。
 
 ## なぜ機械的に検査するのか
 
@@ -18,6 +18,7 @@ GitLab 側は何も変わらないので、気づくのも遅れる。
 import os
 import re
 import subprocess
+import sys
 import unittest
 
 HOOKS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -142,3 +143,56 @@ class StatusLabels(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NoDeadCiConfiguration(unittest.TestCase):
+    """動かない見込みの CI 設定を残さないこと(#1027)。
+
+    GitHub Actions は移行前から意図的に無効化されていたため、`.github/workflows/` は
+    「有効化すれば動く定義」だった。移行後は**動かないプラットフォーム向けの定義**に
+    変わっており、意味が違う。README のバッジに至っては、存在しないリポジトリの
+    存在しないワークフローの状態を指している。
+
+    GitLab CI は稼働させない(2026-09-03、利用者決定。Runner 0台)。したがって
+    ここで固定するのは「GitLab CI に移した」ことではなく、
+    **死んだ設定が残っていない**ことである。
+    """
+
+    def test_no_github_actions_workflows(self):
+        self.assertFalse(
+            os.path.exists(os.path.join(REPO_ROOT, ".github")),
+            ".github/ が残っている。GitHub Actions は動かない",
+        )
+
+    def test_readme_has_no_dead_badges(self):
+        """バッジは、存在しないワークフローと止まった収集の状態を指している。"""
+        with open(os.path.join(REPO_ROOT, "README.md"), encoding="utf-8") as f:
+            readme = f.read()
+        for dead in (
+            "github.com/tonoccho/lets_blog_server/actions",
+            "codecov.io/gh/tonoccho",
+        ):
+            with self.subTest(badge=dead):
+                self.assertNotIn(dead, readme, "死んだバッジが残っている: %s" % dead)
+
+    def test_paths_no_longer_declares_github_neutral(self):
+        """`.github/` を消したら、その分類宣言も消す。
+
+        残しておくと、`.github/` を再び置いたときに「意図して中立にした」ものとして
+        黙って通ってしまう。分類は都度決める、というのが paths.py の設計方針である。
+        """
+        sys.path.insert(0, HOOKS_DIR)
+        import paths
+
+        self.assertFalse(paths.is_declared_neutral(".github/workflows/x.yml"))
+
+    def test_quality_gates_are_documented_somewhere(self):
+        """CI が無いなら、代わりに何が品質を担保しているかが書かれていること。
+
+        「CI が無い」はリポジトリを見た人が推測すべきことではない。
+        """
+        with open(os.path.join(REPO_ROOT, "README.md"), encoding="utf-8") as f:
+            readme = f.read()
+        self.assertIn("scripts/git-hooks/pre-commit", readme)
+        self.assertIn("check-changed-coverage.py", readme)
+

@@ -127,8 +127,6 @@ class NeutralClassification(unittest.TestCase):
         "LICENSE",
         "scripts/git-hooks/pre-commit",
         "scripts/check-changed-coverage.py",
-        ".github/workflows/frontend-test.yml",
-        ".github/dependabot.yml",
         "config/checkstyle.xml",
         "config/orval.config.js",
         # 依存マニフェストとビルド定義。
@@ -164,7 +162,7 @@ class NeutralClassification(unittest.TestCase):
         # プロダクション扱いのディレクトリ配下でも、ドキュメントは中立。
         "infra/keycloak/README.md",
         "apps/extension/webviews/vendor/prism/LICENSE",
-        # GitLab のリポジトリ設定(#1022)。`.github/` と同じく開発のための道具立てで、
+        # GitLab のリポジトリ設定(#1022)。開発のための道具立てで、
         # 出荷物には入らない。`.gitlab/` は Issue / MR のテンプレート置き場。
         ".gitlab-ci.yml",
         ".gitlab/issue_templates/default.md",

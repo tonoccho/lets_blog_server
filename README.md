@@ -126,15 +126,44 @@ docs/        設計・運用ドキュメントと ADR
 相対パスが全て変わるうえ、`-f` か `COMPOSE_FILE` を渡さないと `docker compose` を素で
 叩けなくなるため。`gradlew` / `gradle/` / `settings.gradle` / `build.gradle` は Gradle の規約により直下。
 
-## CI/CD & Quality
+## 品質の担保
 
-[![API Services Tests](https://github.com/tonoccho/lets_blog_server/actions/workflows/api-services-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/api-services-test.yml)
-[![Frontend Tests](https://github.com/tonoccho/lets_blog_server/actions/workflows/frontend-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/frontend-test.yml)
-[![Extension Build](https://github.com/tonoccho/lets_blog_server/actions/workflows/extension-test.yml/badge.svg?branch=develop)](https://github.com/tonoccho/lets_blog_server/actions/workflows/extension-test.yml)
+**このリポジトリは CI を持たない。** GitHub Actions は移行前から意図的に無効化されており、
+GitLab へ移行した 2026-09-03 に「稼働させない」と決定した（Runner を運用しないため）。
+`.github/` は同時に削除した。動く見込みの無い定義とバッジを残さないためである（#1027）。
 
-[![codecov](https://codecov.io/gh/tonoccho/lets_blog_server/graph/badge.svg?flag=log-writer)](https://codecov.io/gh/tonoccho/lets_blog_server)
-[![codecov](https://codecov.io/gh/tonoccho/lets_blog_server/graph/badge.svg?flag=lbs-common)](https://codecov.io/gh/tonoccho/lets_blog_server)
-[![codecov](https://codecov.io/gh/tonoccho/lets_blog_server/graph/badge.svg?flag=frontend)](https://codecov.io/gh/tonoccho/lets_blog_server)
+推測させないために書いておくと、代わりに品質を担保しているのは次の3つで、いずれも
+**コミットとマージの経路上で機械的に強制される**。
+
+| 仕組み | 実体 | 強制するもの |
+| --- | --- | --- |
+| git フック | `scripts/git-hooks/pre-commit` | テストとプロダクションの混在コミット禁止、テスト無効化の禁止、テストファースト |
+| Claude Code フック | `.claude/hooks/guard.py` | 上記に加え、読み取り専用ステージ、マージ方式、ラベル整合性 |
+| カバレッジゲート | `scripts/check-changed-coverage.py` | 変更コードの C1/C2 が 90% 未満なら Merge Request を作れない |
+
+git フックは `git config core.hooksPath scripts/git-hooks` で有効になる（このチェックアウトでは
+設定済み）。**エージェントか人間かを問わず、あらゆるコミッタに適用される。**
+
+テストは手元で回す。
+
+```bash
+./gradlew test                                                    # バックエンド
+cd apps/web && npm run test:coverage && npm run lint              # フロントエンド
+npm run test:at                                                   # 受け入れテスト
+python3 -m unittest discover -s .claude/hooks -t .claude/hooks -p 'test_*.py'
+python3 -m unittest discover -s scripts -t scripts -p 'test_*.py'
+```
+
+依存の更新は自動化していない（Dependabot は GitLab では動かない）。定期的に手元で確認する。
+
+```bash
+cd apps/web && npm audit --audit-level=moderate
+cd apps/extension && npm audit --audit-level=moderate
+./gradlew dependencyCheckAnalyze
+```
+
+規約そのものは [`.claude/CLAUDE.md`](.claude/CLAUDE.md)、ワークフロー環境の構築は
+[`docs/GITLAB_WORKFLOW_SETUP.md`](docs/GITLAB_WORKFLOW_SETUP.md) を参照。
 
 ## 目次
 

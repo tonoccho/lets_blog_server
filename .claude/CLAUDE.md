@@ -705,7 +705,7 @@ The rules above are not only written down; the ones that can be checked mechanic
 | Read-only stage tracking | `Skill` | Records that `discover-issues` / `triage-backlog` / `ready-issue` started; cleared by any other skill or by the user's next prompt |
 | Repository writes | `Write` / `Edit` / `NotebookEdit` | Any write inside the repository while a read-only stage is active |
 | Mutating shell | `Bash` | `sed -i`, `rm` / `mv` / `cp` / `tee` / `patch`, state-changing `git`, dependency installs, and output redirection — while a read-only stage is active |
-| Test silencing | `Write` / `Edit` | Adding `@Disabled`, `@Ignore`, `test.skip`, `it.skip`, `xit`, `test.fixme`, or `testPathIgnorePatterns` to a test or production file (`.claude/`, `docs/`, `scripts/`, `.github/` and `*.md` are exempt, so the rules themselves can be written down) |
+| Test silencing | `Write` / `Edit` | Adding `@Disabled`, `@Ignore`, `test.skip`, `it.skip`, `xit`, `test.fixme`, or `testPathIgnorePatterns` to a test or production file (`.claude/`, `docs/`, `scripts/` and `*.md` are exempt, so the rules themselves can be written down) |
 | Phase separation | `Bash` (`git commit`) | A commit whose staged paths mix test code and production code |
 | Hook bypass | `Bash` | `git commit` / `git push` with `--no-verify` — the git hook is not optional |
 | Merge method | `Bash` (`glab mr merge`) | `--rebase`, and **any invocation without `--squash`** |

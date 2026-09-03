@@ -218,7 +218,7 @@ def cmd_write(payload):
             "一時メモはスクラッチパッドディレクトリへ。" % (stage, rel)
         )
 
-    if inside and not re.match(r"^(\.claude|docs|\.github|scripts)/", rel) and not rel.endswith(".md"):
+    if inside and not re.match(r"^(\.claude|docs|scripts)/", rel) and not rel.endswith(".md"):
         added = tool_input.get("new_string") or tool_input.get("content") or ""
         for pattern, label in SILENCERS:
             if re.search(pattern, added):

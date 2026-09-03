@@ -105,10 +105,11 @@ PRODUCTION_PATTERNS = [
 #       意図的な据え置き(#983 利用者決定)。
 #   docs/・*.md・LICENSE・README
 #       文書。製品の振る舞いを決めない。
-#   scripts/・.github/・.gitlab/・.gitlab-ci.yml・config/
+#   scripts/・.gitlab/・.gitlab-ci.yml・config/
 #       開発とCIのための道具立て。出荷物には入らない。
 #       `.gitlab/` は Issue / MR テンプレートの置き場、`.gitlab-ci.yml` はパイプライン定義
-#       (#1022)。`.github/` は GitLab 移行で不要になるが、削除は #1027 の範囲。
+#       (#1022)。`.github/` は #1027 で削除した。宣言も併せて外してある —
+#       残しておくと、再び置かれたときに「意図して中立にした」ものとして黙って通る。
 #   package.json / package-lock.json / build.gradle / settings.gradle / gradle*
 #       依存マニフェストとビルド定義。テストとプロダクションの両方が同じファイルを共有するため、
 #       プロダクション扱いにすると「テスト専用の依存を足すテストフェーズのコミット」が
@@ -131,7 +132,6 @@ NEUTRAL_PATTERNS = [
     r"^\.claude/",
     r"^docs/",
     r"^scripts/",
-    r"^\.github/",
     r"^\.gitlab/",
     r"^\.gitlab-ci\.yml$",
     r"^config/",
