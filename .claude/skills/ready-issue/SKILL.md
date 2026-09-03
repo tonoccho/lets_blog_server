@@ -137,10 +137,9 @@ Judge this per **Dependency Resolution** in `CLAUDE.md` — that is the single d
 with `work-next` and `implement-issue`. Run `scripts/issue-dependency-status.sh <issue-number>`
 and judge from its live output.
 
-PASS if dependencies are resolved, explicitly accepted, or not applicable. An open `blocked_by`
-link is the only status-based blocker; a dependency named only in the body's prose is judged by
-whether this Issue's acceptance criteria can be implemented and verified against the codebase
-as it stands.
+PASS if dependencies are resolved, explicitly accepted, or not applicable. **No link and no
+board status blocks by itself** — every dependency is judged by whether this Issue's acceptance
+criteria can be implemented and verified against the codebase as it stands.
 
 FAIL if implementation depends on unfinished work that has not been identified.
 
@@ -252,13 +251,11 @@ scripts/issue-dependency-status.sh <number>
 
 Concretely, at this step:
 
-- An **open `blocked_by` link** excludes the candidate outright.
-- A dependency named **only in the body's prose** does **not** exclude the candidate on its
-  board status alone. It is not enough that the dependency Issue is open, or that the body
-  says the work is not done yet. Carry the candidate forward to Step 4, where the readiness
-  evaluation decides on the substance in the codebase.
-- Never exclude a candidate on prose alone without saying so — if you drop one here, name the
-  open `blocked_by` link you saw.
+- **No dependency excludes a candidate on its status alone.** It is not enough that the
+  dependency Issue is open, or that the body says the work is not done yet. Carry the candidate
+  forward to Step 4, where the readiness evaluation decides on the substance in the codebase.
+- Never exclude a candidate at this step without saying so — if you drop one here, name the
+  concrete reason, and it must be a reason from the codebase, not from the board.
 
 A blocked Issue can never be `READY` — its `Dependencies` check fails by definition. But
 "the body mentions an unfinished dependency" is not the same thing as blocked (#751).

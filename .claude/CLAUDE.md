@@ -586,20 +586,35 @@ never carry a dependency's status over from an earlier comment — re-read it li
 
 ## What counts as a blocker
 
-1. **An open `blocked_by` link is the only status-based blocker.** If the formal
-   dependency graph names an open Issue, the Issue is blocked. Full stop.
-2. **A dependency Issue named only in prose does not block by its board status.** What decides
-   readiness is whether *this* Issue's acceptance criteria can be implemented and verified
-   against the codebase as it stands right now.
-3. A parent or tracking Issue that is still open does **not** block when its children are done
+1. **No link and no board status blocks, by itself.** What decides readiness is whether *this*
+   Issue's acceptance criteria can be implemented and verified against the codebase as it
+   stands right now.
+2. A parent or tracking Issue that is still open does **not** block when its children are done
    and the substance is in the code. Conversely, children being closed does not make an Issue
    ready when the substance is not actually there. Look at the code, not the board.
-4. Every verdict must state **which** of these grounds it used, and cite the live evidence
-   (the script's output, or the file paths inspected).
+3. Every verdict must state which of these grounds it used, and cite the live evidence
+   (the script's output, and the file paths inspected).
 
-Rule 2 moves the check from the board to the code; it does not remove it. This repository barely
-uses `blocked_by` links, so rule 2 is the path most verdicts take. A verdict that asserts "prose
-dependencies do not block" without **naming the concrete files, endpoints, or config it
+### Why there is no status-based blocker (changed 2026-09-03, #1024)
+
+This section used to open with a different rule:
+
+> **An open `blocked_by` link is the only status-based blocker.** If the formal dependency
+> graph names an open Issue, the Issue is blocked. Full stop.
+
+**That rule is withdrawn, because the mechanism it named does not exist here.** GitHub's issue
+dependency graph is directional: `blocked_by` says which Issue blocks which. GitLab Community
+Edition has no equivalent — `blocks` / `is_blocked_by` are Premium, and the only link type
+available is `relates_to`, which carries no direction. A `relates_to` link cannot express "A
+blocks B", so it cannot be a blocker.
+
+The rule was already close to dead: this repository barely used `blocked_by` links, and the old
+rule 2 was the path nearly every verdict took. Keeping a rule that points at a missing mechanism
+is worse than deleting it — it invites a verdict to claim a formal ground it never checked.
+
+What replaces it is not "nothing". It is the same inspection the old rule 2 demanded, now
+applying to every dependency without exception: **look at the code.** A verdict that asserts
+"dependencies do not block" without **naming the concrete files, endpoints, or config it
 inspected** is not a verdict; treat it as unverified and do the inspection. The script prints the
 inputs — it does not inspect the codebase for you.
 
@@ -639,8 +654,9 @@ apply the definition rather than posting a contradicting verdict.
 
 ## Recording dependencies
 
-Record dependencies as resolvable identifiers: a formal `blocked_by` link, or `#<number>` in
-the body. Epic shorthand (`A4`, `B6`, `C14`) is not resolvable — it forces every run to
+Record dependencies as resolvable identifiers: `#<number>` in the body, optionally with a
+`relates_to` link for navigation. (A `relates_to` link is navigation only — it states no
+direction, so it is never itself a blocker; see **What counts as a blocker**.) Epic shorthand (`A4`, `B6`, `C14`) is not resolvable — it forces every run to
 re-translate labels into Issue numbers, and that translation is where verdicts diverge.
 When an Issue records dependencies only as shorthand, resolve them to numbers and update the
 body before judging readiness. If they cannot be resolved, say the dependencies are
