@@ -196,3 +196,104 @@ class NoDeadCiConfiguration(unittest.TestCase):
         self.assertIn("scripts/git-hooks/pre-commit", readme)
         self.assertIn("check-changed-coverage.py", readme)
 
+
+# ADR は過去の意思決定の記録である。当時 GitHub を使っていた事実は事実として正しく、
+# 遡って書き換えてはならない(#1028 Requirement 5)。移行という新しい決定は、
+# 既存 ADR の改竄ではなく新しい ADR で述べる。
+ADR_DIR = "docs/adr/"
+
+
+def repo_docs():
+    out = subprocess.run(
+        ["git", "ls-files", "docs", "*.md"],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+    ).stdout.split()
+    return [p for p in out if p.endswith(".md")]
+
+
+class NoReferencesToDeletedPaths(unittest.TestCase):
+    """削除した `.github/` を指す記述が残っていないこと(#1028)。
+
+    #1027 で `.github/` を消したため、これらは**存在しないパスへの案内**になった。
+    `docs/COVERAGE_TARGETS.md` には相対リンクもあり、リンク切れになっている。
+    """
+
+    def test_docs_do_not_point_at_dot_github(self):
+        offenders = []
+        for path in repo_docs():
+            if path.startswith(ADR_DIR):
+                continue  # 過去の記録。書き換えない
+            for i, line in enumerate(read(path).splitlines(), 1):
+                if ".github/" in line:
+                    offenders.append("%s:%d  %s" % (path, i, line.strip()[:80]))
+        self.assertEqual(
+            [], offenders, "削除済みの .github/ を指す記述が残っている:\n" + "\n".join(offenders)
+        )
+
+    def test_docs_do_not_describe_github_only_mechanisms_as_current(self):
+        """GitLab に存在しない仕組みを、現に動いているものとして案内しないこと。"""
+        stale = ("Dependabot", "CodeQL", "GitHub Actions", "GitHub Security")
+        offenders = []
+        for path in repo_docs():
+            if path.startswith(ADR_DIR):
+                continue
+            text = read(path)
+            for i, line in enumerate(text.splitlines(), 1):
+                for term in stale:
+                    # 「もう使っていない」と述べる文脈は許す。判別は素朴だが、
+                    # 移行の記述であることを明示的に書かせるための線引きである。
+                    # 否定の文脈かどうかを素朴なキーワードで見る。当初は日本語の
+                    # 表現しか並べておらず、英語で「もう動かない」と書いた行まで
+                    # 拾ってしまった(SECURITY.md)。主張は変えず、実際に使う否定表現を
+                    # 並べ直す。「Dependabot creates pull requests」のような、
+                    # 現行として案内する行は依然として失敗する。
+                    if term in line and not any(
+                        w in line for w in (
+                            "使わない", "動かない", "廃止", "削除", "かつて", "移行前",
+                            "使っていない", "無効化", "代替", "得られない", "しか無い",
+                            "no longer", "does not run", "There is no", "not automated",
+                            "was removed", "removed", "no CI",
+                        )
+                    ):
+                        offenders.append("%s:%d  %s" % (path, i, line.strip()[:80]))
+        self.assertEqual(
+            [], offenders,
+            "GitHub 専用の仕組みが現行として案内されている:\n" + "\n".join(offenders[:20])
+        )
+
+
+class MigrationAdr(unittest.TestCase):
+    """移行の判断を ADR に残すこと(#1028 Requirement 6)。"""
+
+    def _adr_files(self):
+        return [p for p in repo_docs() if p.startswith(ADR_DIR) and "README" not in p]
+
+    def test_a_migration_adr_exists(self):
+        texts = {p: read(p) for p in self._adr_files()}
+        matched = [p for p, t in texts.items() if "GitLab" in t and "移行" in t]
+        self.assertTrue(matched, "GitLab 移行の ADR が無い")
+        self.adr = texts[matched[0]]
+
+    def test_the_adr_records_the_ce_consequences(self):
+        """CE で使えないものと、その代替を書くこと。"""
+        text = "\n".join(read(p) for p in self._adr_files())
+        for topic in ("スコープ付きラベル", "blocked_by", "CI"):
+            with self.subTest(topic=topic):
+                self.assertIn(topic, text, "%s についての記述が ADR に無い" % topic)
+
+    def test_existing_adrs_are_untouched(self):
+        """既存 ADR を書き換えていないこと。
+
+        当時 GitHub を使っていた事実は事実として正しい。
+        """
+        untouched = subprocess.run(
+            ["git", "diff", "--name-only", "origin/develop...HEAD", "--", ADR_DIR],
+            cwd=REPO_ROOT, capture_output=True, text=True,
+        ).stdout.split()
+        modified = [
+            p for p in untouched
+            if subprocess.run(["git", "cat-file", "-e", "origin/develop:" + p],
+                              cwd=REPO_ROOT, capture_output=True).returncode == 0
+        ]
+        self.assertEqual([], modified, "既存の ADR が変更されている: %s" % modified)
+

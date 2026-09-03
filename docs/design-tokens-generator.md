@@ -807,10 +807,13 @@ export function ThemeToggle() {
 
 ## 8. CI/CD 統合
 
-### GitHub Actions 例
+### CI パイプライン例
+
+> このリポジトリに CI は無い(#1027)。以下は、将来 CI を持つ判断に変わった
+> ときのための構成例である。実際に置かれている定義ではない。
 
 ```yaml
-# .github/workflows/design-tokens.yml
+# CI 定義の例
 
 name: Update Design Tokens
 

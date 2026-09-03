@@ -66,8 +66,8 @@ bash scripts/check-test-db.sh
 ./gradlew test
 ```
 
-CI では `.github/workflows/api-services-test.yml` のサービス別マトリクスが各サービスの
-`test` を実行するため、これらも一緒に走る(専用のワークフローは持たない)。
+CI は無いため、`./gradlew test` をローカルで実行したときに一緒に走る
+(専用の実行経路は持たない)。
 
 ## 新しいマイグレーションを追加する
 

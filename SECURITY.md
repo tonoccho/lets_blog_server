@@ -2,7 +2,7 @@
 
 ## Reporting Security Vulnerabilities
 
-If you discover a security vulnerability in this project, please **do not open a public GitHub issue**. Instead, please report it responsibly by sending an email to **s.tonouchi@gmail.com** with:
+If you discover a security vulnerability in this project, please **do not open a public issue on the tracker**. Instead, please report it responsibly by sending an email to **s.tonouchi@gmail.com** with:
 
 1. Description of the vulnerability
 2. Steps to reproduce the issue
@@ -27,21 +27,23 @@ Security updates will be released as soon as possible after a vulnerability is c
 
 ## Security Scanning
 
-This project uses automated security scanning to detect vulnerabilities early:
+**There is no automated security scanning.** This repository has no CI (see
+[README → 品質の担保](README.md#品質の担保)), so nothing scans on a schedule or on push.
 
-### Dependency Scanning
-- **Dependabot**: Automatically scans for vulnerable dependencies
-- **npm audit**: Weekly scans for JavaScript dependencies
-- **Gradle dependencyCheck**: Weekly scans for Java dependencies
+Scanning is run by hand instead, when dependencies change and roughly monthly:
 
-### Code Analysis
-- **CodeQL**: Continuous static analysis for Java and JavaScript/TypeScript code
-- **GitHub Security Alerts**: Automated vulnerability detection for dependencies
+```bash
+cd apps/web       && npm audit --audit-level=moderate
+cd apps/extension && npm audit --audit-level=moderate
+./gradlew dependencyCheckAnalyze
+```
 
-### License Compliance
-- Automated license scanning to ensure compliance with open source license requirements
+Static analysis is limited to what the ordinary build gives — ESLint on the frontend, the
+JVM build's own checks. There is no CodeQL equivalent; that gap is a known consequence of
+not running CI, not an oversight.
 
-See [Security Scanning Documentation](docs/SECURITY_SCANNING.md) for more details.
+See [Security Scanning Documentation](docs/SECURITY_SCANNING.md) for the full picture,
+including what was removed and why.
 
 ## Authentication and Authorization Model
 
@@ -155,21 +157,26 @@ Keycloak-issued tokens held in an encrypted, HttpOnly session cookie.
 
 ## Dependency Management
 
-This project uses Dependabot to automatically monitor and manage dependency updates:
+Dependency updates are **not automated**. Dependabot does not run here (it is a GitHub
+service, and this repository moved to a self-hosted GitLab CE in 2026-09), and no
+replacement has been put in its place.
 
-- **npm**: Frontend, Extension, and SDK dependencies
-- **Gradle**: Backend Java dependencies
-- **GitHub Actions**: CI/CD action versions
+Updates are raised as Issues and applied by hand. Vulnerability fixes are treated as
+`priority::P0`. The procedure, including which update sizes may be batched, is in
+[docs/DEPENDENCY_UPDATE_POLICY.md](docs/DEPENDENCY_UPDATE_POLICY.md).
 
-Dependabot creates pull requests for updates, allowing for review before merging.
+## What enforces security practices
 
-## Third-Party Security Tools
+There is no third-party security service wired in. What the repository does enforce, it
+enforces on the commit and merge path:
 
-The project integrates with GitHub's built-in security features:
+| Mechanism | Where |
+| --- | --- |
+| Phase separation, test-first, no silenced tests | `scripts/git-hooks/pre-commit` |
+| The above plus read-only stages, merge method, label integrity | `.claude/hooks/guard.py` |
+| Changed-code branch coverage at 90% before a Merge Request opens | `scripts/check-changed-coverage.py` |
 
-1. **Dependabot**: Automatic dependency vulnerability detection
-2. **CodeQL**: Static code analysis
-3. **GitHub Security Alerts**: Vulnerability notifications
+The git hook applies to every committer, agent or human.
 
 ## Questions?
 

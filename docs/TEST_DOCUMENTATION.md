@@ -96,10 +96,10 @@ docker compose exec mysql bash /docker-entrypoint-initdb.d/02-create-test-schema
 ./gradlew :libs:lbs-common:lint :libs:lbs-common:test
 ```
 
-CIでは`.github/workflows/api-services-test.yml`が、変更のあったサービスだけをマトリクスで
-`lint`+`test`+`jacocoTestReport`し、Codecovへサービス別`flags:`でカバレッジをアップロードする
-(GitHub Actions自体は本リポジトリで意図的に無効化されているため、CI上では実行されない。
-`README.md`/`.claude/CLAUDE.md`参照)。
+**CI は無い。** 上記のコマンドをローカルで実行して検証すること
+(`README.md` の「品質の担保」参照)。かつては変更のあったサービスだけをマトリクスで
+`lint`+`test`+`jacocoTestReport`し Codecov へアップロードする定義があったが、
+GitHub Actions は元から無効化されており、GitLab 移行時に定義ごと削除した(#1027)。
 
 ## 性能テストの現状(issue #915)
 
@@ -115,7 +115,7 @@ CIでは`.github/workflows/api-services-test.yml`が、変更のあったサー�
 
 ### JMH / k6 をやめた理由
 
-#24 で JMH ベンチマークと k6 負荷試験、専用のGitHub Actionsワークフローが入ったが、
+#24 で JMH ベンチマークと k6 負荷試験、専用の CI ワークフローが入ったが、
 **一度も実態へ追随されないまま #583(legacy-api の解体)で削除された**。
 削除時点で既に動作していなかったことが判明している。
 
@@ -391,22 +391,27 @@ npx jest            # ユニットテスト
 `__tests__/` も型チェックの対象である。`npm run build`(= `next build`)も型チェックを
 行うため、ビルドを通す前にここで検出できる。
 
-なお GitHub Actions はリポジトリ全体で意図的に無効化されているため、これらは
-**自動では強制されない**。ローカルで実行して確認すること。
+なお **CI は無い**ため、これらは**自動では強制されない**。ローカルで実行して確認すること。
 
-## テスト実行パイプライン（CI/CD）
+## テスト実行パイプライン
 
-### GitHub Actions
+**このリポジトリに CI は無い**(2026-09-03 の GitLab CE 移行時に決定。#1027)。
+テストは手元で実行する。プッシュ前に、上記「サービス構成とテストの実行方法」に
+記載のコマンドを回して検証すること。
 
-バックエンドのCI定義は`.github/workflows/api-services-test.yml`(#557、#587で更新)。
-変更のあったサービスだけを`lbs-common`と全9サービス+`gateway`のマトリクスで検出し、
-それぞれ独立して`lint`+`test`+`jacocoTestReport`を実行、Codecovへ
-サービス別`flags:`でカバレッジをアップロードする。フロントエンド(`web`)のCI定義は
-`.github/workflows/frontend-test.yml`を参照。
+代わりに品質を担保している仕組み(git フック、Claude Code フック、カバレッジゲート)は
+`README.md` の「品質の担保」を参照。
 
-GitHub Actions自体は本リポジトリ全体で意図的に無効化されている(`README.md`参照)ため、
-これらのワークフローファイルはPR上では実行されない。プッシュ前に、上記「サービス構成と
-テストの実行方法」に記載のコマンドをローカルで実行して検証すること。
+### 移行前にあったもの
+
+バックエンドの CI 定義は、変更のあったサービスだけを `lbs-common` と全9サービス+`gateway`
+のマトリクスで検出し、それぞれ独立して `lint`+`test`+`jacocoTestReport` を実行、Codecov へ
+サービス別 `flags:` でカバレッジをアップロードするものだった(#557、#587)。フロントエンドにも
+同様の定義があった。
+
+GitHub Actions は元から意図的に無効化されており、実際には一度も動いていない。定義は
+移行時に削除した。将来 CI を持つ判断に変わったときのために、その設計に埋まっていた教訓は
+ADR([0010](adr/0010-github-to-gitlab-migration.md))に残してある。
 
 ## テスト結果レポート
 

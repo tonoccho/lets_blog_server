@@ -1,144 +1,89 @@
-# Dependency Update Policy
+# 依存更新の運用
 
-This document outlines the automated dependency update strategy for the Let's Blog Server project.
+## 現状: 自動更新は動いていない
 
-## Overview
+**Dependabot は GitLab では動かない。** 2026-09-03 の GitLab CE 移行に伴い、その設定は
+削除した（#1027）。後継は置いていない。
 
-We use **Dependabot** to automatically check for dependency updates and create pull requests. This helps us stay current with security patches, bug fixes, and new features while maintaining code quality and stability.
+Renovate をセルフホストすれば同等のことはできるが、それには CI かスケジュール実行の
+基盤が要る。CI を稼働させない判断（#1027）と整合しないため、**当面は手動運用**とする。
 
-## Automated Update Schedule
-
-### Update Frequency
-
-- **Interval**: Weekly (every Monday)
-- **Time**: Varies by ecosystem to stagger updates:
-  - npm (web): 03:00 UTC
-  - npm (extension): 03:00 UTC
-  - npm (SDK): 03:00 UTC
-  - gradle (API): 03:30 UTC
-  - GitHub Actions: 04:00 UTC
-  - Docker: 04:30 UTC
-
-### Rationale
-
-Weekly updates strike a balance between:
-- Staying current with security patches and features
-- Reducing the frequency of dependency updates
-- Allowing time for testing and review
-
-## Configured Ecosystems
-
-### 1. npm (web, extension, SDK)
-
-- **Directories**: `/web`, `/extension`, `/packages/api-client`
-- **Dependencies**: All (production and development)
-- **Commit prefix**: `chore`
-- **Open PR limit**: 10 (maximum concurrent Dependabot PRs)
-
-### 2. Gradle (API)
-
-- **Directory**: `/api`
-- **Dependencies**: All (production and development)
-- **Commit prefix**: `chore`
-- **Open PR limit**: 10
-
-### 3. GitHub Actions
-
-- **Directory**: Repository root
-- **Dependencies**: Workflow dependencies
-- **Commit prefix**: `ci`
-- **Open PR limit**: 10
-
-### 4. Docker
-
-- **Directory**: Repository root
-- **Dependencies**: Base images in Dockerfile
-- **Commit prefix**: `ci`
-- **Open PR limit**: 10
-
-## Auto-Merge Policy
-
-### Enabled for
-
-- **Patch updates** (e.g., 1.2.3 → 1.2.4)
-- **Minor updates** (e.g., 1.2.3 → 1.3.0) for stable versions
-- **Production dependencies** primarily
-
-### Conditions
-
-- Automated merge is triggered via GitHub Actions workflow (`.github/workflows/dependabot-auto-merge.yml`)
-- Pull request must pass all status checks before merging
-- Using **squash merge** strategy for cleaner commit history
-
-### Manual Review Required
-
-- Major version updates (e.g., 1.x.x → 2.0.0)
-- Development dependencies with breaking changes
-- Dependencies affecting core functionality
-- Any update with potential security or stability concerns
-
-## Best Practices
-
-### For Developers
-
-1. **Respond promptly** to Dependabot PRs that require manual review
-2. **Review changelog** for major version updates before merging
-3. **Test locally** if a dependency update affects your work
-4. **Monitor CI/CD** results to catch any regressions
-
-### For Teams
-
-1. **Use the weekly schedule** as a predictable update window
-2. **Batch-review** Dependabot PRs during backlog refinement
-3. **Document breaking changes** from major updates in PR comments
-4. **Tag teammates** if an update requires domain expertise
-
-## Monitoring and Maintenance
-
-### GitHub Dashboard
-
-- Visit the repository's Dependabot tab to see update history
-- Check "Security alerts" for critical vulnerability announcements
-
-### PR Review
-
-- Dependabot PRs are marked with the `dependencies` label
-- Reviewer: `tonoccho` (default)
-- Filter PRs by `author:dependabot[bot]` to focus on dependency updates
-
-### Troubleshooting
-
-**Dependabot PRs failing CI**: Check the GitHub Actions logs to understand the failure:
-- Test failures may indicate breaking changes
-- Lock file conflicts may require resolution
-- Security policy violations may require human review
-
-**Auto-merge not triggering**: Verify that:
-- Status checks are passing
-- The PR author is `dependabot[bot]`
-- GitHub Actions workflow has permission to merge
-
-## Security Considerations
-
-### Version Pinning
-
-- We allow all dependency types and don't pin versions strictly
-- This ensures timely security patches
-- Regular updates are performed to manage risk
-
-### Vulnerability Response
-
-- Critical/high severity vulnerabilities trigger immediate PRs
-- GitHub Security Advisories are monitored via the dependabot workflow
-- Manual review and merging are done for high-severity updates
-
-## Future Improvements
-
-- Consider **automated testing** enhancements (e.g., integration tests for dependencies)
-- Evaluate **grouping strategies** for related dependency updates
-- Monitor **update failure rates** to identify problematic dependencies
+なお移行前の Dependabot 設定は `updates: []` で、実質すでに何も更新していなかった。
+自動更新が止まったのは移行が原因ではなく、それ以前からである。
 
 ---
 
-**Last updated**: August 2026  
-**Policy maintainer**: DevOps Team
+## 手動での更新手順
+
+### 実行頻度
+
+- **依存を追加・変更したとき**（必須）
+- **月1回程度**（脆弱性の確認）
+
+### 1. 脆弱性の確認
+
+```bash
+cd apps/web       && npm audit --audit-level=moderate
+cd apps/extension && npm audit --audit-level=moderate
+./gradlew dependencyCheckAnalyze
+```
+
+### 2. 更新可能なものの確認
+
+```bash
+cd apps/web       && npm outdated
+cd apps/extension && npm outdated
+./gradlew dependencyUpdates   # プラグインが入っている場合
+```
+
+### 3. 更新の適用
+
+**更新は Issue にする。** このリポジトリでは全ての変更が Issue から始まる
+（`.claude/CLAUDE.md` → Source of Truth）。依存更新も例外ではない。
+
+| 更新の種類 | 扱い |
+| --- | --- |
+| パッチ（`1.2.3` → `1.2.4`） | まとめて1つの Issue でよい |
+| マイナー（`1.2.x` → `1.3.0`） | まとめてよいが、変更点を確認する |
+| メジャー（`1.x` → `2.0`） | **1つずつ別の Issue**。破壊的変更の追随が要る |
+| 脆弱性の修正 | 優先度 `priority::P0`。他を止めてでも入れる |
+
+更新後は、影響範囲のテストを手元で回す。CI が受け止めてくれないため、**ここを飛ばすと
+壊れたまま入る**。
+
+```bash
+./gradlew test
+cd apps/web && npm run test:coverage && npm run lint && npm run build
+npm run test:at            # 受け入れテスト
+```
+
+---
+
+## `package.json` / `build.gradle` の扱い
+
+これらは `.claude/hooks/paths.py` の分類上**中立**である。テストとプロダクションの両方が
+同じファイルを共有するため、プロダクション扱いにすると「テスト専用の依存を足すテスト
+フェーズのコミット」がフェーズ分離違反になり、通常の作業が成立しなくなるためである。
+
+したがって依存更新のコミットは、テストファーストの要求を受けない。**依存の妥当性は
+レビューと、上記の手動スキャンで担保する。**
+
+---
+
+## 将来 Renovate を入れるなら
+
+CI を持つ判断に変わった場合、Renovate のセルフホストが現実的な選択肢になる。GitLab に
+対応しており、MR を自動で作れる。その際は次を決める必要がある。
+
+- 実行基盤（GitLab Runner のスケジュールジョブか、外部の cron か）
+- 自動マージの可否。**このリポジトリのマージ規約は squash のみで、`glab mr merge` に
+  `--squash` を要求するフックがある**（`.claude/CLAUDE.md` → Enforcement）。Renovate の
+  自動マージがこれと整合するかの確認が要る
+- カバレッジゲート（`scripts/check-changed-coverage.py`）との関係
+
+---
+
+## 関連
+
+- [SECURITY_SCANNING.md](SECURITY_SCANNING.md) — セキュリティスキャンの現状
+- [README の「品質の担保」](../README.md#品質の担保) — CI が無い代わりに何が守っているか

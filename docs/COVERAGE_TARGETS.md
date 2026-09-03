@@ -13,8 +13,8 @@ Code coverage is measured across multiple dimensions:
 ## Coverage Targets by Module
 
 Since #557/#587, the backend is a Gradle multi-project build. Each module is tested and
-covered independently in CI (`.github/workflows/api-services-test.yml`), which uploads
-JaCoCo reports to Codecov under a per-module `flags:` tag matching the module name below.
+covered independently. Coverage is measured locally — there is no CI (#1027), and the
+Codecov upload that used to carry a per-module `flags:` tag no longer runs.
 None of these modules currently define a `jacocoTestCoverageVerification` threshold in their
 `build.gradle` (verified 2026-08) — the numbers below are targets tracked via Codecov/PR
 review, not a build-breaking gate. The same threshold values that applied to the pre-split
@@ -129,9 +129,8 @@ npm --prefix apps/extension run test:coverage
 
 ### API Coverage
 
-Coverage reports are generated per backend module and uploaded to Codecov during CI/CD
-(`.github/workflows/api-services-test.yml`, per-module `flags:` — see "Coverage Targets by
-Module" above):
+Coverage reports are generated per backend module by running the tasks below. There is no
+CI and no Codecov upload (#1027); read the reports from the local `build/reports/` paths:
 
 ```bash
 # From the project root, e.g. content
@@ -214,6 +213,6 @@ describe('MyComponent', () => {
 - [Frontend Tests](../apps/web/jest.config.ts) - Jest configuration
 - [identity JaCoCo configuration](../services/identity/build.gradle)
 - [lbs-common JaCoCo configuration](../packages/lbs-common/build.gradle)
-- [CI/CD Workflows](../.github/workflows/) - Automated testing and coverage
+- [README → 品質の担保](../README.md#品質の担保) - What enforces quality without CI
 - [Test Documentation](./TEST_DOCUMENTATION.md) - How to run tests per service, JWT test fixture
 - [ADR-0006: サービス別のテスト戦略](./adr/0006-per-service-test-strategy.md)
