@@ -40,7 +40,31 @@
 ```
 
 生成物 `apps/web/.features-gen/` はコミットしない。`.gitignore` / `eslint.config.mjs` /
-`tsconfig.json` の3か所で除外している(#848 と同型の再発防止。**除外を足すときは3か所とも**)。
+`tsconfig.json` / `jest.config.ts` の4か所で除外している(#848 と同型の再発防止。
+**除外を足すときは4か所とも**)。
+
+前3者は `.features-gen` を名指しで除外する。`jest.config.ts` だけは形が違い、
+`testMatch` で**拾う対象を列挙する**ことで除外する(既定の `testMatch` は rootDir 全体に
+及び、生成物 `*.feature.spec.js` を拾ってしまう)。
+
+`testPathIgnorePatterns` に足さないのは、その追加を `.claude/hooks/guard.py` が
+「テストの握りつぶし」としてブロックするためで、ガードはこのケース(テストではなく
+別ランナーの生成物の除外)を区別しないからである(#994)。
+
+**`roots: ['<rootDir>/src']` で範囲を狭める案は採らない。** next.config.ts は `src/` の外に
+あるプロダクションコードで(#984)、その単体テスト `next.config.test.ts` も
+`apps/web/` 直下にあるため、`src/` に閉じるとこの1スイートが黙って実行されなくなる
+(実測でスイート数 32 → 31、テスト数 191 → 189。しかも出力は緑のまま)。
+
+この4か所が揃っていることは `scripts/test_bddgen_output_is_excluded.py` が検査する。
+漏れは**生成物が存在するときにしか現れない**ため、`bddgen` を走らせていない作業ツリーや
+クリーンな CI では緑になり、レビューでも気づけない。実際 #994 は `jest.config.ts` の
+漏れで、`bddgen` の後の `npm run test` が「15 suites failed」になっていた(単体テストは
+189件すべて通っているのに、である)。
+
+```bash
+python3 -m unittest discover -s scripts -t scripts -p 'test_*.py'
+```
 
 ---
 

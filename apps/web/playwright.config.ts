@@ -24,7 +24,11 @@ const CROSS_BROWSER_SPECS = [/accessibility\.spec\.ts/];
  *
  * 生成物は apps/web/.features-gen/ に出る。testDir('./e2e')の外へ置くことで、chromium 等の
  * 既存 spec 用プロジェクトが生成物を拾わないようにしている(生成物の二重実行を防ぐ)。
- * .gitignore / eslint.config.mjs / tsconfig.json の除外も併せて更新すること(#848 と同型)。
+ * .gitignore / eslint.config.mjs / tsconfig.json / jest.config.ts の4か所の除外も併せて
+ * 更新すること(#848 と同型)。jest.config.ts だけは名指しではなく testMatch で拾う対象を
+ * 列挙する形で除外している(理由と、roots で src/ に閉じる案を採らなかった理由は
+ * 当該コメントと #994 を参照)。
+ * 4か所が揃っていることは scripts/test_bddgen_output_is_excluded.py が検査する。
  *
  * issue #945 (AT-19): 受け入れテストは「まっさらな状態」から**段階順に**実行する。
  *
