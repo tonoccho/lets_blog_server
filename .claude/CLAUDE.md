@@ -79,8 +79,35 @@ To read the current status:
 glab issue view <iid> -F json --jq '[.labels[] | select(startswith("status::"))]'
 ```
 
-Mechanical enforcement of the "exactly one" rule is #1023. Until it lands, the rule holds by
-convention only — so read the status back after changing it.
+### How "exactly one" is enforced
+
+In two layers, for the same reason squash is (see **Enforcement** → Where squash is enforced):
+neither layer sees what the other sees.
+
+| Layer | Catches | Blind to |
+| --- | --- | --- |
+| `guard.py` → `check_status_label_integrity` | agent and CLI label changes, at the moment of the mistake | the GitLab web UI, and shell indirection |
+| `scripts/check-issue-labels.sh` | anything, including web-UI edits | only after the fact |
+
+The hook refuses exactly two things, both decidable from the command text alone — it never
+queries the Issue's current labels, so it stays fast and needs no network:
+
+- `labels=` — a wholesale overwrite. It silently drops `epic`, `bug` and everything else.
+- adding a `status::` without removing one in the same call, or removing without adding.
+
+Creating an Issue (`glab issue create --label status::Inbox,...`) is not a transition and is
+not refused; that is where the first status comes from.
+
+Run the script when you suspect drift, and after any manual editing in the web UI:
+
+```bash
+scripts/check-issue-labels.sh
+```
+
+It reports `0` and `2+` separately, because they are different failures. **Zero is the dangerous
+one**: an Issue with no `status::` label appears in no board column and is invisible to
+`work-next` and to triage, so nothing ever complains about it. Two means the Issue is in no
+defined stage at all.
 
 ---
 

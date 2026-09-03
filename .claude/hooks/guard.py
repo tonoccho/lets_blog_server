@@ -472,6 +472,88 @@ def check_merge_flags(command):
             )
 
 
+# Issue のラベルを変える呼び出しから、`-f key=value` / `--field key=value` を拾う。
+LABEL_FIELD = re.compile(r"^(labels|add_labels|remove_labels)=(.*)$", re.S)
+
+
+def _label_fields(args):
+    """`-f`/`--field` で渡されたラベル関連の値を {key: value} で返す。"""
+    fields = {}
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        value = None
+        if arg in ("-f", "--field", "-F", "--raw-field"):
+            if i + 1 < len(args):
+                value = args[i + 1]
+                i += 1
+        elif arg.startswith("--field="):
+            value = arg[len("--field="):]
+        i += 1
+        if value is None:
+            continue
+        match = LABEL_FIELD.match(value)
+        if match:
+            fields[match.group(1)] = match.group(2)
+    return fields
+
+
+def _has_status(value):
+    return any(part.strip().startswith("status::") for part in value.split(","))
+
+
+def check_status_label_integrity(command):
+    """CLAUDE.md → How to change status: ステータスは常にちょうど1つ(#1023)。
+
+    GitHub Projects の Status は単一選択フィールドで、2つ持つことは構造的に不可能
+    だった。GitLab CE のラベルにその保証は無い(スコープ付きラベルは Premium)。
+    ワークフローの選択ロジックはこの一意性に依拠している。
+
+    ここで止めるのは、実際に起きる2つの壊し方だけである。両方とも**構文だけで**
+    判定できる — Issue の現在のラベルを問い合わせないので、フックは速いままで、
+    ネットワークにも認証にも依存しない。
+    """
+    for args in invokes(command, "glab", ()):
+        # Issue への PUT だけが対象。作成(`glab issue create --label`)は遷移ではなく、
+        # 最初のステータスはそこで付く。読み取りも対象外。
+        if "--method" not in args and "-X" not in args:
+            continue
+        if not any(re.search(r"issues/\d+", a) for a in args):
+            continue
+        method = ""
+        for i, a in enumerate(args):
+            if a in ("--method", "-X") and i + 1 < len(args):
+                method = args[i + 1].upper()
+        if method != "PUT":
+            continue
+
+        fields = _label_fields(args)
+
+        if "labels" in fields:
+            emit_deny(
+                "`labels=` はラベル集合の**上書き**です。Issue が持っている `epic` や "
+                "`bug` などのラベルが黙って消えます(CLAUDE.md → How to change status)。"
+                "`add_labels=` と `remove_labels=` を使ってください。"
+            )
+
+        added = fields.get("add_labels", "")
+        removed = fields.get("remove_labels", "")
+        if _has_status(added) and not _has_status(removed):
+            emit_deny(
+                "ステータスを足すだけの呼び出しです。GitLab CE のラベルに排他性は無いので"
+                "(スコープ付きラベルは Premium)、これでは `status::` が2つになります"
+                "(CLAUDE.md → How to change status)。"
+                "同じ呼び出しに `remove_labels=status::<現在の値>` を含めてください。"
+            )
+        if _has_status(removed) and not _has_status(added):
+            emit_deny(
+                "ステータスを外すだけの呼び出しです。`status::` が0個の Issue は"
+                "ボードのどの列にも現れず、`work-next` からも triage からも見えなくなります"
+                "(CLAUDE.md → How to change status)。"
+                "同じ呼び出しに `add_labels=status::<次の値>` を含めてください。"
+            )
+
+
 def check_no_verify(command):
     for sub in ("commit", "push"):
         for args in invokes(command, "git", (sub,)):
@@ -527,6 +609,7 @@ def cmd_bash(payload):
     command = cmd_of(payload)
     check_read_only(payload, command)
     check_merge_flags(command)
+    check_status_label_integrity(command)
     check_no_verify(command)
     check_commit_phase(payload, command)
     check_pr_coverage(payload, command)

@@ -405,3 +405,81 @@ class ExplainSubcommand(unittest.TestCase):
         self.assertIn("git", out, "解析結果に実体コマンドが出ていない")
         self.assertIn("timeout", out, "剥がしたラッパーが示されていない")
         self.assertIn("deny", out.lower(), "判定結果が示されていない")
+
+
+class StatusLabelIntegrity(unittest.TestCase):
+    """CLAUDE.md → How to change status: ステータスは常にちょうど1つ(#1023)。
+
+    GitHub Projects の Status は単一選択フィールドで、2つ持つことは構造的に不可能だった。
+    GitLab CE のラベルにその保証は無い(スコープ付きラベルは Premium)。
+    ワークフローの選択ロジックはこの一意性に依拠しているので、規約で守るだけでは足りない。
+
+    ここで防ぐのは、実際に起きる2つの壊し方である。
+
+      1. `labels=` によるラベル集合の上書き。epic や bug が黙って消える。
+         #1025 で実証済み: ["epic","priority::P0","status::Inbox"] → ["status::Inbox"]
+      2. add_labels と remove_labels を別々の呼び出しに分けること。その間、
+         ステータスが 0 個または 2 個になる。0 個の Issue はボードのどの列にも現れず、
+         work-next からも triage からも見えなくなる。
+    """
+
+    PUT = "glab api projects/:id/issues/42 --method PUT "
+
+    def test_paired_transition_is_allowed(self):
+        self.assertIsNone(
+            run_hook(
+                "bash",
+                bash_payload(
+                    self.PUT + "-f remove_labels=status::Ready -f add_labels=status::In Progress"
+                ),
+            )
+        )
+
+    def test_adding_a_status_without_removing_one_is_denied(self):
+        reason = run_hook("bash", bash_payload(self.PUT + "-f add_labels=status::Review"))
+        self.assertIsNotNone(reason, "ステータスの片側追加が拒否されていない")
+        self.assertIn("remove_labels", reason)
+
+    def test_removing_a_status_without_adding_one_is_denied(self):
+        reason = run_hook("bash", bash_payload(self.PUT + "-f remove_labels=status::Review"))
+        self.assertIsNotNone(reason, "ステータスの片側削除が拒否されていない")
+
+    def test_wholesale_label_overwrite_is_denied(self):
+        reason = run_hook("bash", bash_payload(self.PUT + "-f labels=status::Done"))
+        self.assertIsNotNone(reason, "labels= による上書きが拒否されていない")
+        self.assertIn("add_labels", reason)
+
+    def test_wholesale_overwrite_is_denied_with_long_flag(self):
+        self.assertIsNotNone(
+            run_hook("bash", bash_payload(self.PUT + "--field labels=status::Done"))
+        )
+
+    def test_priority_only_change_is_allowed(self):
+        """優先度だけを足すのは、ステータスの一意性とは無関係。"""
+        self.assertIsNone(
+            run_hook("bash", bash_payload(self.PUT + "-f add_labels=priority::P0"))
+        )
+
+    def test_unrelated_label_change_is_allowed(self):
+        self.assertIsNone(run_hook("bash", bash_payload(self.PUT + "-f add_labels=bug")))
+
+    def test_issue_creation_with_a_status_label_is_allowed(self):
+        """新規作成は遷移ではない。最初のステータスはここで付く。"""
+        self.assertIsNone(
+            run_hook(
+                "bash",
+                bash_payload("glab issue create --title x --label status::Inbox,priority::P1 --yes"),
+            )
+        )
+
+    def test_wrapped_violation_is_still_denied(self):
+        """#1029 の教訓。前置詞で外れないこと。"""
+        self.assertIsNotNone(
+            run_hook("bash", bash_payload("timeout 60 " + self.PUT + "-f labels=status::Done"))
+        )
+
+    def test_reading_an_issue_is_allowed(self):
+        self.assertIsNone(
+            run_hook("bash", bash_payload("glab api projects/:id/issues/42"))
+        )
+
