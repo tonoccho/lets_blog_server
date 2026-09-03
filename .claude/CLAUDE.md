@@ -749,13 +749,28 @@ the Claude Code hook and the git hook import it; do not restate the patterns any
 
 ## Git hook — `scripts/git-hooks/pre-commit`
 
-Bound with `git config core.hooksPath scripts/git-hooks` (already set in this checkout; a fresh
-clone runs it once). It enforces the same invariants for **any** committer, agent or human:
+Bound by `bash scripts/setup-git-hooks.sh`, which sets `core.hooksPath` to
+`scripts/git-hooks`. It is idempotent, and it is step 1 of the clone procedure in `README.md`.
+Once bound, it enforces the same invariants for **any** committer, agent or human:
 
 1. **Phase separation** — no commit mixes test and production paths.
 2. **No test silencing** — nothing that disables a test is added to a test or production file.
 3. **Test-first** — a commit containing production code is refused while the branch has no test
    change at all. Write the failing Gherkin scenario first.
+
+**Never assert that the binding is in place — check it.** `core.hooksPath` is git
+configuration, not repository content: it is in no clone, no checkout and no diff. This
+section used to say "already set in this checkout", and that claim was false for every commit
+from #976 until #1039 — the hook had never run once. The only symptom of an unbound hook is
+that **nothing happens**, and `guard.py` still firing on agent commits supplies a false
+confidence that the enforcement is working.
+
+```bash
+bash scripts/setup-git-hooks.sh --check   # non-zero when unbound
+```
+
+`scripts/test_git_hooks_binding.py` makes the same check in the Python unit test suite, so
+drift fails a run that is already part of the routine.
 
 ## Coverage check — `scripts/check-changed-coverage.py`
 

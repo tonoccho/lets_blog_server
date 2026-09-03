@@ -141,8 +141,21 @@ GitHub Actions のワークフロー定義も同時に削除した。動く見�
 | Claude Code フック | `.claude/hooks/guard.py` | 上記に加え、読み取り専用ステージ、マージ方式、ラベル整合性 |
 | カバレッジゲート | `scripts/check-changed-coverage.py` | 変更コードの C1/C2 が 90% 未満なら Merge Request を作れない |
 
-git フックは `git config core.hooksPath scripts/git-hooks` で有効になる（このチェックアウトでは
-設定済み）。**エージェントか人間かを問わず、あらゆるコミッタに適用される。**
+git フックは `bash scripts/setup-git-hooks.sh` で有効になる（`core.hooksPath` を
+`scripts/git-hooks` に束縛する。冪等なので何度実行してもよい）。有効になれば
+**エージェントか人間かを問わず、あらゆるコミッタに適用される。**
+
+`core.hooksPath` は git の設定であってリポジトリの内容ではないため、クローンにも
+チェックアウトにも含まれない。束縛が外れていても症状は「何も起きない」ことだけで、
+現に #976 で追加されて以降 #1039 まで一度も動いていなかった。だから状態を断言せず、
+点検できるようにしてある。
+
+```bash
+bash scripts/setup-git-hooks.sh --check   # 束縛されているか（外れていれば非0で終了）
+```
+
+`scripts/test_git_hooks_binding.py` が下記の単体テストの中で同じことを検査するので、
+外れたまま気づかないことは無い。
 
 テストは手元で回す。
 
@@ -264,18 +277,21 @@ sudo snap install code --classic
 git clone <このリポジトリのURL>
 cd lets_blog_server
 
-# 1. 環境変数を設定
+# 1. git フックを有効にする（コミット時の規約検査。このリポジトリにコミットするなら必須）
+bash scripts/setup-git-hooks.sh
+
+# 2. 環境変数を設定
 cp .env.example .env
 vi .env   # パスワード・APIキー・暗号化キー・NEXTAUTH_SECRET等を変更
 bash scripts/check-env.sh   # .env が .env.example の全項目を満たしているか確認
 
-# 2. リバースプロキシ用の自己署名証明書を生成
+# 3. リバースプロキシ用の自己署名証明書を生成
 bash scripts/generate-certs.sh
 
-# 3. Docker Composeで全サービスを起動
+# 4. Docker Composeで全サービスを起動
 docker compose up -d
 
-# 4. ブラウザで https://localhost にアクセス(自己署名証明書の警告は例外承認する)
+# 5. ブラウザで https://localhost にアクセス(自己署名証明書の警告は例外承認する)
 ```
 
 初回アクセス時、まだユーザーが1人も存在しない場合は `/setup` にリダイレクトされ、
