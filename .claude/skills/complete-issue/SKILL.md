@@ -1,6 +1,6 @@
 ---
 name: complete-issue
-description: Merge a Merge Request that has passed QA (squash merge, head branch deleted), then move its Issue to Done and clean up the local branch. Use when the user asks to merge or finish an Issue/PR (e.g. "#123をマージして", "PRをマージしました"), and as the final stage of `work-next` after `pull-request`.
+description: Merge a Merge Request that has passed QA (squash merge, head branch deleted), then move its Issue to Done and clean up the local branch. Use when the user asks to merge or finish an Issue/PR (e.g. "#123をマージして", "PRをマージしました"), and as the final stage of `work-next` after `merge-request`.
 model: sonnet
 ---
 

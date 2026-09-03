@@ -114,7 +114,7 @@ If PASS: do not change status yet — continue to Step 5a first.
 
 QA passing means the work is behaviorally correct, not that it is done — nothing has been merged yet.
 
-Invoke the `pull-request` skill to open (or confirm an existing) Merge Request for the Issue's branch.
+Invoke the `merge-request` skill to open (or confirm an existing) Merge Request for the Issue's branch.
 
 The Issue's `status::` label remains:
 

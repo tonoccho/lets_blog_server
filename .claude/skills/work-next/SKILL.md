@@ -18,7 +18,7 @@ You coordinate:
 - implement-issue
 - review-issue
 - qa-issue
-- pull-request
+- merge-request
 - complete-issue (squash merge, `Done`, branch cleanup)
 
 This skill's run ends when the Merge Request has been merged and the Issue is `Done`, not when the Merge Request is opened.
@@ -258,7 +258,7 @@ If QA returns:
 
 `PASS`
 
-The `qa-issue` skill itself invokes `pull-request` to open the Merge Request. The Issue status is still `QA` at that point.
+The `qa-issue` skill itself invokes `merge-request` to open the Merge Request. The Issue status is still `QA` at that point.
 
 Then invoke `complete-issue` for this Issue. It merges the Merge Request (`glab mr merge --squash --remove-source-branch`), moves the Issue `status::QA → status::Done`, and cleans up the branch. Do not stop to ask the user whether to merge — reaching `PASS` with an open Merge Request is what authorizes it (see `CLAUDE.md` → Autonomous Task Execution).
 

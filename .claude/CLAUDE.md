@@ -213,7 +213,7 @@ measure it (see **How to check what actually ran**) before relying on it.
 Resulting assignments:
 
 - `haiku` — `git-workflow`, `triage-backlog`, `ready-issue`
-- `sonnet` — `pull-request`, `work-next`, `review-issue`, `qa-issue`, `complete-issue`; the `reviewer` and `qa` agents
+- `sonnet` — `merge-request`, `work-next`, `review-issue`, `qa-issue`, `complete-issue`; the `reviewer` and `qa` agents
 - `opus` — `implement-issue`, `plan-issue`, `discover-issues`; the `implementer` agent
 
 Two deliberate exceptions:
@@ -235,7 +235,7 @@ Measured 2026-09-02 across the three unattended `work-next` cycles whose session
 | `implement-issue` | `opus` | `sonnet` ×56, `opus` ×0 | no |
 | `qa-issue` | `sonnet` | `opus` ×24, `sonnet` ×7 | no |
 | `review-issue` | `sonnet` | `opus` ×17, `sonnet` ×11 | no |
-| `pull-request` | `sonnet` | `sonnet` ×18, `opus` ×4 | partial |
+| `merge-request`（改名前に計測。#1033） | `sonnet` | `sonnet` ×18, `opus` ×4 | partial |
 | `complete-issue` | `sonnet` | `sonnet` ×14, `opus` ×12 | partial |
 
 Three findings, and they are why this section no longer states the assignment as fact:
@@ -546,7 +546,7 @@ that is a blocker to report.
 
 # Merge Conflicts
 
-This is the single definition of how a conflict with `develop` is handled. `pull-request`,
+This is the single definition of how a conflict with `develop` is handled. `merge-request`,
 `complete-issue`, `git-workflow`, and `work-next` defer to it.
 
 A conflict between the working branch and `develop` **is resolved, not reported as a blocker.**
@@ -558,7 +558,7 @@ git fetch origin
 git merge origin/develop     # resolve the conflicted files, then commit
 ```
 
-then re-validate and push. This applies whenever the conflict shows up — while `pull-request`
+then re-validate and push. This applies whenever the conflict shows up — while `merge-request`
 is preparing the Merge Request, or after it is open and GitLab reports the branch as
 having conflicts (`has_conflicts: true`).
 

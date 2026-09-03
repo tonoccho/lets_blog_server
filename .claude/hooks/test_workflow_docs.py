@@ -297,3 +297,53 @@ class MigrationAdr(unittest.TestCase):
         ]
         self.assertEqual([], modified, "既存の ADR が変更されている: %s" % modified)
 
+
+class SkillNames(unittest.TestCase):
+    """スキル名も GitLab の用語であること(#1033)。
+
+    #1025 で本文の用語は移行したが、**ディレクトリ名と frontmatter の `name:` は
+    検査の対象外だった**。`GitLabTerminology` は Markdown の本文しか見ていない。
+    そのため `skills/pull-request/` だけが GitHub の用語で残り、その `description` は
+    「GitLab Merge Requests を作る」と書いてある、という食い違いが放置されていた。
+
+    スキル名は利用者が打つ呼び出し名であり、grep でも補完でも目に入る。
+    ここを検査に入れないと、同じ種類の取りこぼしが次も起きる。
+    """
+
+    def skill_dirs(self):
+        out = subprocess.run(
+            ["git", "ls-files", ".claude/skills"],
+            cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+        ).stdout.split()
+        return sorted({p.split("/")[2] for p in out if p.count("/") >= 3})
+
+    def test_no_skill_is_named_after_a_github_concept(self):
+        stale = ("pull-request", "pull_request", "pr")
+        offenders = [d for d in self.skill_dirs() if d in stale]
+        self.assertEqual(
+            [], offenders, "GitHub の用語を名前に持つスキルがある: %s" % offenders
+        )
+
+    def test_frontmatter_name_matches_the_directory(self):
+        """`name:` とディレクトリ名がずれていると、どちらで呼ばれるか分からない。"""
+        mismatched = []
+        for d in self.skill_dirs():
+            path = ".claude/skills/%s/SKILL.md" % d
+            for line in read(path).splitlines():
+                if line.startswith("name:"):
+                    declared = line.split(":", 1)[1].strip()
+                    if declared != d:
+                        mismatched.append("%s (name: %s)" % (d, declared))
+                    break
+        self.assertEqual([], mismatched, "ディレクトリ名と name: が一致しない: %s" % mismatched)
+
+    def test_no_document_references_the_old_skill_name(self):
+        offenders = []
+        for path in claude_docs():
+            for i, line in enumerate(read(path).splitlines(), 1):
+                if "pull-request" in line:
+                    offenders.append("%s:%d  %s" % (path, i, line.strip()[:80]))
+        self.assertEqual(
+            [], offenders, "旧スキル名への参照が残っている:\n" + "\n".join(offenders)
+        )
+

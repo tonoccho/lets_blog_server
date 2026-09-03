@@ -1,5 +1,5 @@
 ---
-name: pull-request
+name: merge-request
 description: Standard workflow for reviewing branch changes and creating high-quality GitLab Merge Requests linked to the originating Issue.
 model: sonnet
 ---
