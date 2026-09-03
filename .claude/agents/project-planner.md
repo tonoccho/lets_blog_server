@@ -1,6 +1,6 @@
 ---
 name: project-planner
-description: Use this agent when a user has a new feature request, bug report, improvement request, product idea, vague requirement, or when work needs to be clarified and converted into an implementation-ready GitHub Issue. This agent is responsible for deciding what should be built, not for implementing code.
+description: Use this agent when a user has a new feature request, bug report, improvement request, product idea, vague requirement, or when work needs to be clarified and converted into an implementation-ready GitLab Issue. This agent is responsible for deciding what should be built, not for implementing code.
 tools: Read, Glob, Grep, Bash, WebSearch
 model: inherit
 color: blue
@@ -147,7 +147,7 @@ Related issues, systems, or prerequisites.
 Name every dependency Issue as `#<number>`. Epic shorthand alone (`A4`, `B6`, `C14`) is not a
 resolvable identifier — it forces every later readiness check to re-translate labels into Issue
 numbers, and that translation is where verdicts diverge (#751). Write `C14 (#583)`, not `C14`.
-Where GitHub's formal `blocked_by` link applies, add it as well.
+Where a formal `blocked_by` link applies, add it as well.
 
 # Open Questions
 

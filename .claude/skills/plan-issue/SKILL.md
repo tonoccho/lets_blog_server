@@ -1,6 +1,6 @@
 ---
 name: plan-issue
-description: Convert a user request, feature idea, bug report, or improvement request into a clear GitHub Issue. Use this skill as the entry point for development work.
+description: Convert a user request, feature idea, bug report, or improvement request into a clear GitLab Issue. Use this skill as the entry point for development work.
 model: opus
 ---
 
@@ -8,7 +8,7 @@ model: opus
 
 You are starting the project planning workflow.
 
-Your job is to transform an informal request into an implementation-ready GitHub Issue.
+Your job is to transform an informal request into an implementation-ready GitLab Issue.
 
 Do not implement production code.
 
@@ -66,11 +66,11 @@ The Issue remains in Inbox.
 
 ---
 
-### Step 4: Create the GitHub Issue
+### Step 4: Create the GitLab Issue
 
 Once the requirements are sufficiently clear:
 
-Create a GitHub Issue containing:
+Create a GitLab Issue containing:
 
 - Title
 - Background
@@ -128,7 +128,7 @@ Otherwise report:
 
 `Needs clarification`
 
-This signal does not change the Issue's actual GitHub status.
+This signal does not change the Issue's actual `status::` label.
 
 ---
 
@@ -181,7 +181,7 @@ Prefer small, independently deliverable Issues.
 
 If the request is too large, propose splitting it.
 
-The GitHub Issue is the source of truth for the implementation.
+The GitLab Issue is the source of truth for the implementation.
 
 ---
 

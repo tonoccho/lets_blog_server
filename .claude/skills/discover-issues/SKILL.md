@@ -1,6 +1,6 @@
 ---
 name: discover-issues
-description: Proactively review the entire repository (architecture, code quality, tech debt, missing tests, TODOs, inconsistencies) and register each distinct finding as a new GitHub Issue in Inbox. Use this when the user asks Claude to look over the whole codebase/repo and file issues from what it finds, rather than converting one specific request.
+description: Proactively review the entire repository (architecture, code quality, tech debt, missing tests, TODOs, inconsistencies) and register each distinct finding as a new GitLab Issue in Inbox. Use this when the user asks Claude to look over the whole codebase/repo and file issues from what it finds, rather than converting one specific request.
 model: opus
 ---
 
@@ -15,9 +15,9 @@ This is one of the three entry points into the Issue registration workflow:
 3. A specific bug report → `plan-issue`
 
 This is a **read-only stage**. It never writes to the repository — no production code, no
-tests, no configuration, no documentation. Its only output is GitHub Issues. See
+tests, no configuration, no documentation. Its only output is GitLab Issues. See
 `CLAUDE.md` → **Read-Only Stages** for the single definition of what that forbids and which
-GitHub mutations it permits; do not apply a different one here.
+GitLab mutations it permits; do not apply a different one here.
 
 ---
 
@@ -49,7 +49,7 @@ Report which areas were actually covered versus skipped due to scope, so the use
 
 Before treating anything as a new finding:
 
-1. Search open Issues (`gh issue list`, all statuses) for related titles/keywords.
+1. Search open Issues (`glab issue list --search "<term>"`, all statuses) for related titles/keywords.
 2. Search closed Issues for prior decisions (e.g. `wontfix`) that would make re-filing pointless.
 3. Check whether the finding is already tracked inside an existing Epic/tracking Issue.
 
@@ -88,7 +88,7 @@ Cap the batch at a reasonable number for one run (roughly 10 or fewer). If more 
 
 For each surviving finding:
 
-Create a GitHub Issue using the `plan-issue` template and conventions.
+Create a GitLab Issue using the `plan-issue` template and conventions.
 
 Set status:
 

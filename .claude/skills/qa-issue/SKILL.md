@@ -1,6 +1,6 @@
 ---
 name: qa-issue
-description: Validate a reviewed GitHub Issue from the user's perspective. Verify acceptance criteria, user-visible behavior, edge cases, errors, and regressions. Use this skill when an Issue is in QA.
+description: Validate a reviewed GitLab Issue from the user's perspective. Verify acceptance criteria, user-visible behavior, edge cases, errors, and regressions. Use this skill when an Issue is in QA.
 model: sonnet
 ---
 
@@ -35,7 +35,7 @@ Prefer:
 
 ## Step 2: Read the requirements
 
-Read the complete GitHub Issue.
+Read the complete GitLab Issue.
 
 Extract every acceptance criterion.
 
@@ -78,7 +78,7 @@ All required acceptance criteria are verified.
 
 No significant regression is found.
 
-Proceed to Pull Request creation (Step 5a) — do not move straight to Done. The merge is `complete-issue`'s job, not this skill's.
+Proceed to Merge Request creation (Step 5a) — do not move straight to Done. The merge is `complete-issue`'s job, not this skill's.
 
 ### FAIL
 
@@ -110,19 +110,19 @@ If PASS: do not change status yet — continue to Step 5a first.
 
 ---
 
-## Step 5a: Create the Pull Request (PASS only)
+## Step 5a: Create the Merge Request (PASS only)
 
 QA passing means the work is behaviorally correct, not that it is done — nothing has been merged yet.
 
-Invoke the `pull-request` skill to open (or confirm an existing) Pull Request for the Issue's branch.
+Invoke the `pull-request` skill to open (or confirm an existing) Merge Request for the Issue's branch.
 
-The Issue's GitHub status remains:
+The Issue's `status::` label remains:
 
 `QA`
 
-Do not move it to `Done` here. `Done` is reserved for after the Pull Request is actually merged — see the `complete-issue` skill.
+Do not move it to `Done` here. `Done` is reserved for after the Merge Request is actually merged — see the `complete-issue` skill.
 
-Report the Pull Request URL to the user. Then stop this workflow and return to the caller — `work-next` invokes `complete-issue`, which merges the Pull Request and finalizes the Issue. Never merge from this skill.
+Report the Merge Request URL to the user. Then stop this workflow and return to the caller — `work-next` invokes `complete-issue`, which merges the Merge Request and finalizes the Issue. Never merge from this skill.
 
 ---
 
@@ -166,13 +166,13 @@ Explain how the result was established.
 
 ### Status
 
-Current GitHub status.
+Current `status::` label.
 
 ### Next Step
 
 `Awaiting complete-issue (merge)` (PASS) / `Implementation` (FAIL) / `Blocked`
 
-If PASS, include the Pull Request URL from Step 5a and state that the Issue moves to `Done` via `complete-issue`, which performs the squash merge.
+If PASS, include the Merge Request URL from Step 5a and state that the Issue moves to `Done` via `complete-issue`, which performs the squash merge.
 
 ---
 
@@ -186,7 +186,7 @@ Never modify production code.
 
 Do not mark Done merely because automated tests pass.
 
-Never merge a Pull Request from this skill — merging belongs to `complete-issue`.
+Never merge a Merge Request from this skill — merging belongs to `complete-issue`.
 
 Never move an Issue to `Done` from this skill — `Done` requires a confirmed merge, handled by `complete-issue`.
 

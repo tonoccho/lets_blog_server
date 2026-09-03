@@ -1,6 +1,6 @@
 ---
 name: work-next
-description: Select the highest-priority Ready GitHub Issue and drive it through branch creation, implementation, review, QA, Pull Request creation, and merge. Use this skill when the user asks Claude Code to find the next piece of work, implement the next task, or continue the development workflow (e.g. "次のタスクを実装して").
+description: Select the highest-priority Ready GitLab Issue and drive it through branch creation, implementation, review, QA, Merge Request creation, and merge. Use this skill when the user asks Claude Code to find the next piece of work, implement the next task, or continue the development workflow (e.g. "次のタスクを実装して").
 model: sonnet
 ---
 
@@ -8,7 +8,7 @@ model: sonnet
 
 You are the orchestrator of the project's AI development workflow.
 
-Your responsibility is to select the next Ready GitHub Issue and drive it all the way to a merged Pull Request and a `Done` Issue.
+Your responsibility is to select the next Ready GitLab Issue and drive it all the way to a merged Merge Request and a `Done` Issue.
 
 You do not directly implement application code.
 
@@ -21,9 +21,9 @@ You coordinate:
 - pull-request
 - complete-issue (squash merge, `Done`, branch cleanup)
 
-This skill's run ends when the Pull Request has been merged and the Issue is `Done`, not when the Pull Request is opened.
+This skill's run ends when the Merge Request has been merged and the Issue is `Done`, not when the Merge Request is opened.
 
-The GitHub Issue status is the source of truth.
+The GitLab Issue status is the source of truth.
 
 ---
 
@@ -35,7 +35,7 @@ Before selecting work:
 
 1. Read `CLAUDE.md`.
 2. Inspect the Git repository status.
-3. Inspect the GitHub Project / Issues.
+3. Inspect the GitLab Issue board (`status::` labels).
 4. Identify Issues currently in `Ready`.
 
 Do not start implementation if the working tree contains unexpected changes that could interfere with the selected Issue.
@@ -48,7 +48,7 @@ Stop and report them.
 
 # Step 2: Find Ready Issues
 
-Search GitHub for Issues with:
+Search GitLab for Issues with (`glab issue list --label 'status::Ready'`):
 
 `Status = Ready`
 
@@ -258,9 +258,9 @@ If QA returns:
 
 `PASS`
 
-The `qa-issue` skill itself invokes `pull-request` to open the Pull Request. The Issue status is still `QA` at that point.
+The `qa-issue` skill itself invokes `pull-request` to open the Merge Request. The Issue status is still `QA` at that point.
 
-Then invoke `complete-issue` for this Issue. It merges the Pull Request (`gh pr merge --squash --delete-branch`), moves the Issue `QA → Done`, and cleans up the branch. Do not stop to ask the user whether to merge — reaching `PASS` with an open Pull Request is what authorizes it (see `CLAUDE.md` → Autonomous Task Execution).
+Then invoke `complete-issue` for this Issue. It merges the Merge Request (`glab mr merge --squash --remove-source-branch`), moves the Issue `status::QA → status::Done`, and cleans up the branch. Do not stop to ask the user whether to merge — reaching `PASS` with an open Merge Request is what authorizes it (see `CLAUDE.md` → Autonomous Task Execution).
 
 If `complete-issue` stops on a **merge conflict**, that is not a stop: resolve it on the
 working branch per `CLAUDE.md` → **Merge Conflicts**, re-run validation, push, and re-invoke
@@ -314,7 +314,7 @@ Ready
 → Implemented (GREEN)
 → Review
 → QA
-→ Pull Request opened
+→ Merge Request opened
 → Squash-merged
 → Done
 ```
@@ -332,13 +332,13 @@ Aggregate any new Issue numbers reported by `implement-issue`, `review-issue`, o
 
 ## Merge
 
-Pull Request number and URL, the squash-merge confirmation, and the branch cleanup result.
+Merge Request number and URL, the squash-merge confirmation, and the branch cleanup result.
 
 ---
 
 # Rules
 
-Never mark an Issue `Done` from this skill directly — `Done` is set by `complete-issue`, and only after it has confirmed the Pull Request is actually merged.
+Never mark an Issue `Done` from this skill directly — `Done` is set by `complete-issue`, and only after it has confirmed the Merge Request is actually merged.
 
 Never skip branch creation (`git-workflow`) before invoking the `implementer` agent.
 
@@ -351,13 +351,13 @@ production code, or that reports it below 90%.
 
 Never accept a run made green by skipping, ignoring, or deleting a test.
 
-Never create a Pull Request before QA has passed.
+Never create a Merge Request before QA has passed.
 
-Never merge a Pull Request from this skill directly — always delegate to `complete-issue`, which enforces the squash method and the merge preconditions.
+Never merge a Merge Request from this skill directly — always delegate to `complete-issue`, which enforces the squash method and the merge preconditions.
 
-Once this workflow starts an Issue, do not pause to ask the user whether to continue after a recoverable stage outcome (implementation issues, Review `CHANGES REQUIRED`, QA `FAIL`) — retry automatically, up to that stage's retry limit (3 cycles), until the Issue either reaches a merged Pull Request or hits a genuine blocker.
+Once this workflow starts an Issue, do not pause to ask the user whether to continue after a recoverable stage outcome (implementation issues, Review `CHANGES REQUIRED`, QA `FAIL`) — retry automatically, up to that stage's retry limit (3 cycles), until the Issue either reaches a merged Merge Request or hits a genuine blocker.
 
-Only stop short of a merged Pull Request for a genuine blocker: unresolved requirement ambiguity (`REQUIREMENT CLARIFICATION`, or a blocking question during implementation), QA `BLOCKED`, a retry limit exceeded, a Pull Request that cannot be merged as-is **for a reason other than a conflict** (a draft, a blocked merge state), or a live-system mutation requiring explicit user confirmation. When any of these stops the workflow, report it clearly rather than silently halting.
+Only stop short of a merged Merge Request for a genuine blocker: unresolved requirement ambiguity (`REQUIREMENT CLARIFICATION`, or a blocking question during implementation), QA `BLOCKED`, a retry limit exceeded, a Merge Request that cannot be merged as-is **for a reason other than a conflict** (a draft, a blocked merge state), or a live-system mutation requiring explicit user confirmation. When any of these stops the workflow, report it clearly rather than silently halting.
 
 A merge conflict is not on that list. Resolve it on the working branch, re-validate, push, and continue (`CLAUDE.md` → **Merge Conflicts**).
 

@@ -1,6 +1,6 @@
 ---
 name: review-issue
-description: Independently review an implementation against its GitHub Issue, acceptance criteria, architecture, code quality, and regression risks. Use this skill when an Issue is in Review.
+description: Independently review an implementation against its GitLab Issue, acceptance criteria, architecture, code quality, and regression risks. Use this skill when an Issue is in Review.
 model: sonnet
 ---
 
@@ -39,7 +39,7 @@ Prefer:
 
 Read:
 
-- GitHub Issue
+- GitLab Issue
 - Acceptance Criteria
 - Implementation Plan
 - Git diff
@@ -123,7 +123,7 @@ Return the Issue to Backlog.
 
 ---
 
-## Step 5: Update GitHub status
+## Step 5: Update the `status::` label
 
 If:
 
@@ -181,7 +181,7 @@ New Issue numbers created in `Inbox` for unrelated problems noticed during revie
 
 ### Status Change
 
-Explain the GitHub status transition.
+Explain the `status::` label transition.
 
 ### Next Step
 
