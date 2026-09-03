@@ -164,6 +164,11 @@ class NeutralClassification(unittest.TestCase):
         # プロダクション扱いのディレクトリ配下でも、ドキュメントは中立。
         "infra/keycloak/README.md",
         "apps/extension/webviews/vendor/prism/LICENSE",
+        # GitLab のリポジトリ設定(#1022)。`.github/` と同じく開発のための道具立てで、
+        # 出荷物には入らない。`.gitlab/` は Issue / MR のテンプレート置き場。
+        ".gitlab-ci.yml",
+        ".gitlab/issue_templates/default.md",
+        ".gitlab/merge_request_templates/default.md",
     ]
 
     def test_neutral_is_neither(self):

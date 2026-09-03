@@ -7,7 +7,7 @@
    リポジトリ内のいかなるファイルも書き換えさせない。
 2. **Test-First Implementation** — テストコードとプロダクションコードを同一コミットに
    混在させない。テストを skip/ignore/削除して緑にすることを許さない。
-3. **Merge Conflicts** — `--admin` や squash 以外のマージ方式による強制マージを許さない。
+3. **Completion Definition** — squash 以外のマージ方式を許さない。
 
 使い方(settings.json から):
     guard.py stage   # PreToolUse: Skill        読み取り専用ステージの開始/終了を記録
@@ -154,7 +154,7 @@ def cmd_write(payload):
         emit_deny(
             "`%s` は読み取り専用ステージです(CLAUDE.md → Read-Only Stages)。"
             "リポジトリ内のファイル(%s)は変更できません。"
-            "見つけた問題は直さずに GitHub Issue として登録し、報告してください。"
+            "見つけた問題は直さずに GitLab Issue として登録し、報告してください。"
             "一時メモはスクラッチパッドディレクトリへ。" % (stage, rel)
         )
 
@@ -184,8 +184,8 @@ def check_read_only(payload, command):
         if re.search(pattern, cleaned):
             emit_deny(
                 "`%s` は読み取り専用ステージです(CLAUDE.md → Read-Only Stages)。"
-                "%s は実行できません。許可されているのは GitHub Issue の操作(`gh issue` / "
-                "プロジェクト状態の更新)と読み取り専用の調査だけです。" % (stage, label)
+                "%s は実行できません。許可されているのは GitLab Issue の操作(`glab issue` / "
+                "`status::` ラベルによるステータス更新)と読み取り専用の調査だけです。" % (stage, label)
             )
     if re.search(r"(^|[^0-9&])>>?[^&]", cleaned):
         emit_deny(
@@ -200,18 +200,50 @@ def check_read_only(payload, command):
 BOUNDARY = r"(?:^|[;&|]\s*)"
 
 
+# `glab mr merge` の引数部分。次のコマンド区切りまでを切り出す。コマンド全体を対象にすると、
+# `;` の後ろの無関係なコマンドのフラグをマージ方式と取り違える。
+GLAB_MERGE = re.compile(BOUNDARY + r"glab\s+mr\s+merge\b([^;&|]*)")
+
+# 長いフラグと、cobra が受け付ける短縮フラグの結合(`-sd` など)の両方を拾う。
+#
+#   - `(?![-\w])` … `--squash` が `--squash-message` に前方一致するのを防ぐ。
+#     `--squash-message` はコミットメッセージの指定であって、マージ方式の指定ではない。
+#   - `(?<![-\w])-` … 2つ目以降のハイフンから始まる誤検出を防ぐ。これにより
+#     `--remove-source-branch` の中の `r` を `-r`(--rebase)と読むことがなくなる。
+#   - 短縮フラグは小文字のみを見る。`-R`(--repo)は `-r`(--rebase)ではない。
+SQUASH_FLAG = re.compile(r"--squash(?![-\w])|(?<![-\w])-[a-z]*s[a-z]*(?![-\w])")
+REBASE_FLAG = re.compile(r"--rebase(?![-\w])|(?<![-\w])-[a-z]*r[a-z]*(?![-\w])")
+
+
 def check_merge_flags(command):
-    if not re.search(BOUNDARY + r"gh\s+pr\s+merge\b", command):
+    """CLAUDE.md → Completion Definition: Issue の MR は squash のみ。
+
+    `gh pr merge` は方式を指定しないと対話的に尋ねる仕様だったため、旧実装は
+    `--merge` / `--rebase` を明示したときだけ拒否すれば足りていた。GitLab は違う。
+    `glab mr merge` に方式のフラグを付けないと**黙ってマージコミットを作る**
+    (プロジェクト設定 `squash_option` が `default_off` のため)。したがって判定は
+    「禁止フラグの検出」ではなく「squash 指定の要求」でなければならない。
+
+    `--admin` に相当する管理者バイパスは GitLab には無い。保護ブランチの回避は
+    フックではなく GitLab 側の権限設定で防ぐ(CLAUDE.md → Merge Conflicts)。
+    """
+    match = GLAB_MERGE.search(command)
+    if not match:
         return
-    if "--admin" in command:
+    args = match.group(1)
+    if REBASE_FLAG.search(args):
         emit_deny(
-            "`gh pr merge --admin` は禁止です(CLAUDE.md → Merge Conflicts)。"
-            "コンフリクトは作業ブランチ側で解決し、クリーンな状態で squash マージしてください。"
+            "このリポジトリの Issue MR のマージ方式は squash のみです"
+            "(CLAUDE.md → Completion Definition)。`--rebase` は使えません。"
+            "`glab mr merge --squash --remove-source-branch` を使ってください。"
         )
-    if re.search(r"--(merge|rebase)\b", command):
+    if not SQUASH_FLAG.search(args):
         emit_deny(
-            "このリポジトリの Issue PR のマージ方式は squash のみです"
-            "(CLAUDE.md → Completion Definition)。`--squash` を使ってください。"
+            "`glab mr merge` にマージ方式が指定されていません。GitLab は方式未指定だと"
+            "マージコミットを作ります(このプロジェクトの squash_option は default_off)。"
+            "このリポジトリの Issue MR は squash のみです"
+            "(CLAUDE.md → Completion Definition)。"
+            "`glab mr merge --squash --remove-source-branch` を使ってください。"
         )
 
 
@@ -247,8 +279,14 @@ def check_commit_phase(payload, command):
         )
 
 
+# MR 作成の検出。`check_merge_flags` の GLAB_MERGE と同じく、判定に使う正規表現は
+# モジュール定数として置く。フックが「どのコマンドを見ているか」をテストから直接
+# 確認できるようにするため(#1022)。ここが古いままだとガードは無言で空振りする。
+GLAB_MR_CREATE = re.compile(BOUNDARY + r"glab\s+mr\s+create\b")
+
+
 def check_pr_coverage(payload, command):
-    if not re.search(BOUNDARY + r"gh\s+pr\s+create\b", command):
+    if not GLAB_MR_CREATE.search(command):
         return
     root = project_dir(payload)
     script = os.path.join(root, "scripts", "check-changed-coverage.py")
@@ -260,7 +298,7 @@ def check_pr_coverage(payload, command):
     if result.returncode != 0:
         emit_deny(
             "変更したプロダクションコードの C1/C2 カバレッジが基準(90%%)を満たしていないため、"
-            "Pull Request を作成できません(CLAUDE.md → Test-First Implementation → Coverage)。\n\n%s"
+            "Merge Request を作成できません(CLAUDE.md → Test-First Implementation → Coverage)。\n\n%s"
             % (result.stdout + result.stderr).strip()[:2000]
         )
 

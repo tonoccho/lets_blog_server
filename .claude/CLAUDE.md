@@ -464,7 +464,7 @@ An issue may be considered complete only when:
 - QA confirms the expected behavior
 - A Pull Request was opened and squash-merged into `develop`
 
-Passing QA opens a Pull Request; it does not mark the issue Done. `complete-issue` then merges it with `gh pr merge --squash --delete-branch`, moves the Issue to `Done`, and deletes the working branch locally and remotely.
+Passing QA opens a Merge Request; it does not mark the issue Done. `complete-issue` then merges it with `glab mr merge --squash --remove-source-branch`, moves the Issue to `Done`, and deletes the working branch locally and remotely.
 
 Squash is this repository's merge method for Issue Pull Requests. A Pull Request that cannot be
 merged cleanly is never forced through — not with `--admin`, not with a different merge method,
@@ -489,15 +489,21 @@ git merge origin/develop     # resolve the conflicted files, then commit
 ```
 
 then re-validate and push. This applies whenever the conflict shows up — while `pull-request`
-is preparing the Pull Request, or after it is open and GitHub reports
-`mergeable: CONFLICTING` / `mergeStateStatus: DIRTY`.
+is preparing the Merge Request, or after it is open and GitLab reports the branch as
+having conflicts (`has_conflicts: true`).
 
 What remains forbidden is getting the merge through *without* resolving it:
 
-- `gh pr merge --admin`
-- Any merge method other than `--squash`
+- Any merge method other than `--squash` — including **omitting the flag**. GitLab merges with a
+  merge commit when no method is given, so `glab mr merge` without `--squash` is itself a
+  violation, not a neutral default. (GitHub's `gh pr merge` asked interactively; GitLab does
+  not. The guard requires `--squash` rather than merely rejecting `--rebase`.)
 - Marking a draft ready for review to unblock a merge
-- Bypassing a branch protection rule
+- Bypassing a protected-branch rule
+
+GitLab has **no `--admin` equivalent** — there is no per-merge administrator override. The
+protection that `gh pr merge --admin` used to defeat lives in GitLab's protected-branch
+settings, and is enforced there rather than by this hook.
 
 `complete-issue` still merges only a clean, mergeable Pull Request. When it finds a conflict,
 the fix is to resolve it on the working branch, push, re-verify, and merge — never to force it.
@@ -616,8 +622,23 @@ The rules above are not only written down; the ones that can be checked mechanic
 | Test silencing | `Write` / `Edit` | Adding `@Disabled`, `@Ignore`, `test.skip`, `it.skip`, `xit`, `test.fixme`, or `testPathIgnorePatterns` to a test or production file (`.claude/`, `docs/`, `scripts/`, `.github/` and `*.md` are exempt, so the rules themselves can be written down) |
 | Phase separation | `Bash` (`git commit`) | A commit whose staged paths mix test code and production code |
 | Hook bypass | `Bash` | `git commit` / `git push` with `--no-verify` — the git hook is not optional |
-| Merge method | `Bash` (`gh pr merge`) | `--admin`, `--merge`, `--rebase` |
-| Coverage | `Bash` (`gh pr create`) | Opening a Pull Request while changed-code C1/C2 coverage is under 90% |
+| Merge method | `Bash` (`glab mr merge`) | `--rebase`, and **any invocation without `--squash`** |
+| Coverage | `Bash` (`glab mr create`) | Opening a Merge Request while changed-code C1/C2 coverage is under 90% |
+
+### Where squash is enforced
+
+Squash-only is enforced **in the hook**, by requiring `--squash` on every `glab mr merge`. It is
+deliberately *not* delegated to GitLab's project setting alone:
+
+- The project is currently `squash_option: default_off` / `merge_method: merge`, so GitLab
+  would happily produce a merge commit. The hook is what actually holds the line today.
+- A hook check fails loudly at the moment of the mistake and names the rule; a silent project
+  setting does not teach the caller anything.
+
+Setting GitLab's own "require squash" (`squash_option: always`) in addition would also cover
+merges performed from the web UI, which no hook can see. That change was **not** made as part
+of #1022 — it alters project-wide merge behaviour and history shape, and belongs to a decision
+the user makes explicitly rather than a side effect of a hook fix.
 
 `.claude/hooks/paths.py` is the single classifier for test / production / neutral paths. Both
 the Claude Code hook and the git hook import it; do not restate the patterns anywhere else.
