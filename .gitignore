@@ -1,6 +1,10 @@
 # Env / secrets
 .env
 
+# Claude Code のサブエージェントが作る git worktree(#1036)。
+# リポジトリ全体のコピーが置かれるため、git add -A で丸ごと混入しうる。
+.claude/worktrees/
+
 # DB/Keycloakバックアップダンプ(実データを含むためコミット対象外)
 backups/
 

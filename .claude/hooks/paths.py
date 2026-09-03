@@ -156,6 +156,24 @@ NEUTRAL_PATTERNS = [
     r"(^|/)\.node-version$",
 ]
 
+# Claude Code のサブエージェントが作る git worktree(#1036)。
+# `.claude/worktrees/agent-<id>/` の下にリポジトリ全体のコピーが置かれる。
+#
+# 接頭辞を**剥がして**中身のパスとして分類する。除外(どの分類にも入れない)ではなく
+# こちらを選ぶのは、万一 worktree 内のファイルがステージされたときに、本来のガード
+# (フェーズ分離・テストファースト・テスト無効化の検査)が正しく働くようにするため。
+#
+# 剥がさないと `NEUTRAL_PATTERNS` の `^\.claude/` が先にマッチし、worktree 内の
+# **あらゆるファイルが中立**になる。`.claude/` を中立にしているのはルールと執行機構
+# そのものを守るためであって(#983)、worktree はその意図の対象外である。
+WORKTREE_PREFIX = re.compile(r"^\.claude/worktrees/[^/]+/")
+
+
+def strip_worktree(path: str) -> str:
+    """エージェント worktree の接頭辞を剥がす。worktree でなければそのまま返す。"""
+    return WORKTREE_PREFIX.sub("", path)
+
+
 TEST_RE = [re.compile(p) for p in TEST_PATTERNS]
 DOC_RE = [re.compile(p) for p in DOC_PATTERNS]
 PRODUCTION_RE = [re.compile(p) for p in PRODUCTION_PATTERNS]
@@ -163,10 +181,12 @@ NEUTRAL_RE = [re.compile(p) for p in NEUTRAL_PATTERNS]
 
 
 def is_test(path: str) -> bool:
+    path = strip_worktree(path)
     return any(r.search(path) for r in TEST_RE)
 
 
 def is_production(path: str) -> bool:
+    path = strip_worktree(path)
     if is_test(path):
         return False
     if any(r.search(path) for r in DOC_RE):
@@ -180,6 +200,7 @@ def is_declared_neutral(path: str) -> bool:
     分類には使わない。「中立に落ちたファイルが、列挙された意図の結果か、
     それとも規則の取りこぼしか」を単体テストが区別するためにある。
     """
+    path = strip_worktree(path)
     if is_test(path) or is_production(path):
         return False
     return any(r.search(path) for r in NEUTRAL_RE)

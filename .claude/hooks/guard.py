@@ -24,7 +24,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import classify, is_production, is_test  # noqa: E402
+from paths import classify, is_production, is_test, strip_worktree  # noqa: E402
 
 READ_ONLY_SKILLS = {"discover-issues", "triage-backlog", "ready-issue"}
 
@@ -218,7 +218,11 @@ def cmd_write(payload):
             "一時メモはスクラッチパッドディレクトリへ。" % (stage, rel)
         )
 
-    if inside and not re.match(r"^(\.claude|docs|scripts)/", rel) and not rel.endswith(".md"):
+    # 免除の判定も worktree の接頭辞を剥がしてから行う(#1036)。剥がさないと、
+    # worktree 内のプロダクションコードへの `test.skip` 追加が `.claude/` の免除で
+    # 素通りする。
+    rel_real = strip_worktree(rel)
+    if inside and not re.match(r"^(\.claude|docs|scripts)/", rel_real) and not rel_real.endswith(".md"):
         added = tool_input.get("new_string") or tool_input.get("content") or ""
         for pattern, label in SILENCERS:
             if re.search(pattern, added):

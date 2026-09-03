@@ -286,3 +286,73 @@ class RepositoryExhaustiveness(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AgentWorktree(unittest.TestCase):
+    """エージェントの git worktree 配下を、実体のパスとして分類すること(#1036)。
+
+    Claude Code のサブエージェントは `.claude/worktrees/agent-<id>/` に
+    **リポジトリ全体のコピー**を作る。パスの前方一致だけで判定すると、
+    `NEUTRAL_PATTERNS` の `^\.claude/` が先にマッチし、**worktree 内の
+    あらゆるファイルが中立**になる。
+
+    `.claude/` を中立にしているのは「ルールと執行機構そのものを書き換える
+    コミットをブロックしないため」(#983 の利用者決定)であって、worktree は
+    その意図の対象外である。巻き込まれるとフェーズ分離もテストファーストも
+    テスト無効化の検査も、worktree 内では一切効かなくなる。
+
+    正しい扱いは「worktree の接頭辞を剥がして、中身のパスとして分類する」こと。
+    除外(どの分類にも入れない)ではなくこちらを選ぶ理由は、万一 worktree 内の
+    ファイルがステージされたときに**本来のガードが働く**ようにするため。
+    """
+
+    WORKTREE = ".claude/worktrees/agent-a1b2c3/"
+
+    def test_production_code_in_a_worktree_is_production(self):
+        path = self.WORKTREE + "apps/web/src/app/page.tsx"
+        self.assertTrue(paths.is_production(path), "worktree 内のプロダクションコードが中立扱い")
+        self.assertFalse(paths.is_declared_neutral(path))
+
+    def test_test_code_in_a_worktree_is_test(self):
+        path = self.WORKTREE + "services/media/src/test/java/X.java"
+        self.assertTrue(paths.is_test(path))
+        self.assertFalse(paths.is_production(path))
+
+    def test_infra_in_a_worktree_is_production(self):
+        self.assertTrue(paths.is_production(self.WORKTREE + "infra/nginx/nginx.conf"))
+
+    def test_neutral_in_a_worktree_stays_neutral(self):
+        """worktree 内の `.claude/` は、実体としても中立である。"""
+        self.assertTrue(paths.is_declared_neutral(self.WORKTREE + ".claude/CLAUDE.md"))
+        self.assertTrue(paths.is_declared_neutral(self.WORKTREE + "docs/setup.md"))
+
+    def test_the_worktree_directory_itself_is_not_production(self):
+        """接頭辞だけのパスは、剥がすと空になる。プロダクションではない。"""
+        self.assertFalse(paths.is_production(".claude/worktrees/"))
+        self.assertFalse(paths.is_production(".claude/worktrees/agent-a1b2c3"))
+
+    def test_a_real_claude_path_is_unaffected(self):
+        """本物の `.claude/` は従来どおり中立のままであること(退行の防止)。"""
+        for path in (".claude/CLAUDE.md", ".claude/hooks/guard.py", ".claude/skills/work-next/SKILL.md"):
+            with self.subTest(path=path):
+                self.assertTrue(paths.is_declared_neutral(path))
+                self.assertFalse(paths.is_production(path))
+
+
+class WorktreeIsIgnored(unittest.TestCase):
+    """`.claude/worktrees/` が git に追跡されないこと(#1036)。
+
+    追跡対象外(untracked)なだけでは足りない。`git add -A` で1710ファイルが
+    ステージされうる。無視されていることを確かめる。
+    """
+
+    def test_git_ignores_the_worktree_directory(self):
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", ".claude/worktrees/agent-x/apps/web/src/app/page.tsx"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+        )
+        self.assertEqual(
+            0, result.returncode, ".claude/worktrees/ が .gitignore で無視されていない"
+        )
+
