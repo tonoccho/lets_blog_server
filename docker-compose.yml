@@ -100,6 +100,11 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_media?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: lbs_media
       SPRING_DATASOURCE_PASSWORD: ${LBS_MEDIA_DB_PASSWORD}
+      # media は platform-service の /api/internal/platform/image-generation-config を
+      # 自分自身のサービストークンで呼ぶ(#583 で画像生成一式が移り、#742 で JWT 必須になった)。
+      # この宣言が無いと application.yml の既定値(空文字)が使われ、Keycloak が
+      # unauthorized_client で拒否し、画像生成に関わる公開APIが全滅する(#998)。
+      KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
       COMFYUI_BASE_URL: http://comfyui:8188
       COMFYUI_CHECKPOINT: ${COMFYUI_CHECKPOINT:-v1-5-pruned-emaonly.safetensors}
       COMFYUI_MODELS_PATH: /comfyui-models
