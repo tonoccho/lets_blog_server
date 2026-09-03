@@ -16,7 +16,7 @@
 #   bash scripts/check-env.sh            # リポジトリ直下の .env を見る
 #   bash scripts/check-env.sh path/to/.env
 #
-# 終了コード: 0 = 問題なし / 1 = 不足あり / 2 = 使い方の誤り
+# 終了コード: 0 = 問題なし / 1 = 不足または重複あり / 2 = 使い方の誤り
 
 set -euo pipefail
 
@@ -40,6 +40,18 @@ keys_of() {
     grep -oE '^[A-Za-z_][A-Za-z0-9_]*=' "$1" | tr -d '=' | sort -u
 }
 
+# 同じキーが2回以上定義されている行。`sort -u` を通す keys_of とは別に、
+# **重複を潰さずに**数える必要があるのでここだけ -u を付けない(#959)。
+#
+# なぜ重複が問題か: `docker compose` の env_file も shell の `source` も**後の定義が勝つ**。
+# したがってキーが2箇所にあると、コメント付きの正しい定義を利用者が書き換えても、
+# コメントの無い後の行に上書きされて無視される。しかも警告は一切出ない。
+# #959 では `.env.example` の PENPOT_SECRET_KEY がまさにこれで、
+# 「512-bit base64 で生成せよ」という指示を持たないほうが有効になっていた。
+duplicate_keys_of() {
+    grep -oE '^[A-Za-z_][A-Za-z0-9_]*=' "$1" | tr -d '=' | sort | uniq -d
+}
+
 # 値が空のキー(`KEY=` だけ、または空白のみ)。compose の警告と同じものを拾う。
 empty_keys_of() {
     grep -oE '^[A-Za-z_][A-Za-z0-9_]*=[[:space:]]*$' "$1" | grep -oE '^[A-Za-z_][A-Za-z0-9_]*' | sort -u
@@ -53,6 +65,24 @@ extra="$(comm -13 <(keys_of "$EXAMPLE") <(keys_of "$TARGET"))"
 blanked="$(comm -12 <(empty_keys_of "$TARGET") <(comm -23 <(keys_of "$EXAMPLE") <(empty_keys_of "$EXAMPLE")))"
 
 status=0
+
+# 契約そのもの(.env.example)の重複を先に見る。ここが壊れていると、`.env` を
+# どれだけ正しく作っても後勝ちで弱い値が有効になるため、不足の議論より前に置く。
+example_dups="$(duplicate_keys_of "$EXAMPLE")"
+if [ -n "$example_dups" ]; then
+    status=1
+    echo "✗ .env.example で重複定義されているキー:"
+    echo "$example_dups" | sed 's/^/    /'
+    echo "    → 後の定義が勝つため、前の行のコメントや値が無視される。1箇所にまとめること。"
+fi
+
+target_dups="$(duplicate_keys_of "$TARGET")"
+if [ -n "$target_dups" ]; then
+    status=1
+    echo "✗ $(basename "$TARGET") で重複定義されているキー:"
+    echo "$target_dups" | sed 's/^/    /'
+    echo "    → 後の定義が勝つ。意図しない値が有効になっていないか確認し、1箇所にまとめること。"
+fi
 
 if [ -n "$missing" ]; then
     status=1
