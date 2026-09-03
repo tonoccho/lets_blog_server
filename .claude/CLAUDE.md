@@ -680,6 +680,33 @@ production, so phase separation and test-first still apply to them in full.
 
 Its own unit tests: `python3 -m unittest discover -s scripts -t scripts -p 'test_*.py'`.
 
+## What the guards are, and are not
+
+The guards stop **mistakes**, not **circumvention**. They inspect the command a tool is about
+to run, and a shell can always defeat inspection — `bash -c '...'`, `eval`, a variable that
+expands to the forbidden word. Making them airtight is not achievable and is not the goal.
+
+This distinction is load-bearing, because the guards were once assumed to be stronger than they
+are. Until #1029 they matched a regex anchored to the start of the command, so **`timeout 60
+git push --no-verify` passed** — no circumvention, just an ordinary way to write a command.
+They now parse the command (splitting on separators, stripping env assignments and wrappers
+like `timeout` / `env` / `nice` / `sudo`, respecting quotes), which closes that class of hole
+without pretending to close all of them.
+
+Defence against deliberate circumvention lives elsewhere and must stay there:
+
+- **GitLab protected-branch settings** — who may merge and push, enforced server-side
+- **`scripts/git-hooks/pre-commit`** — runs for any committer, agent or human
+
+To see how a guard reads a command:
+
+```bash
+python3 .claude/hooks/guard.py explain 'timeout 60 git push --no-verify'
+```
+
+Use it before concluding that a hook "is not running". That conclusion was drawn once and was
+wrong: the hook was running, and the judgement was missing the command (#1029).
+
 ## When a guard blocks something
 
 The guard is the rule speaking, not an obstacle to route around. Do not disable a hook, do not

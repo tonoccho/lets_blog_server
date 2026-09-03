@@ -166,28 +166,33 @@ class CoverageGate(unittest.TestCase):
 class NoStaleGitHubReferences(unittest.TestCase):
     """移行後に `gh` 前提の判定・文言が残っていないこと(#1022 の受入基準)。"""
 
-    def test_guarded_commands_are_glab_not_gh(self):
-        """判定に使う正規表現が `glab` を見ていること。
+    def test_the_guarded_program_is_glab(self):
+        """ガードが見ているのが glab であること。
 
-        当初このテストは guard.py の**ソース全体**に `gh pr merge` が現れないことを
-        主張していたが、それは行き過ぎだった。受入基準が求めているのは「`gh` を含む
-        **旧判定**が残っていないこと」であって、判定を反転させた理由を述べた説明文まで
-        消すことではない。このリポジトリは判断の経緯をコメントとして残す方針であり
-        (CLAUDE.md → Learning Loop)、説明の削除はその方針に反する。
+        このテストは当初 guard.py のソース全体に `gh pr merge` が現れないことを
+        主張し、次に GLAB_MERGE / GLAB_MR_CREATE という正規表現定数の pattern を
+        検査していた。#1029 でその定数自体が無くなった — 判定は正規表現ではなく
+        `invokes(command, "glab", ("mr", "merge"))` というコマンド解析になったため。
 
-        そこで主張の対象を、実際に照合に使われる正規表現そのものに変えた。
-        ソースの文字列ではなく judgement を見るので、説明文の有無に左右されない。
+        実装の形に依存しない形へ移した。主張する内容は変わっていない:
+        **ガードは glab の操作を見ており、gh のそれではない。**
         """
-        sys.path.insert(0, os.path.dirname(HOOK))
-        import guard
+        self.assertIsNotNone(
+            run_hook("bash", bash_payload("glab mr merge 9 --rebase")),
+            "glab mr merge --rebase が拒否されていない",
+        )
+        self.assertIsNotNone(
+            run_hook("bash", bash_payload("glab mr merge 9")),
+            "方式未指定の glab mr merge が拒否されていない",
+        )
 
-        for name, pattern in (
-            ("GLAB_MERGE", guard.GLAB_MERGE.pattern),
-            ("GLAB_MR_CREATE", guard.GLAB_MR_CREATE.pattern),
-        ):
-            with self.subTest(constant=name):
-                self.assertIn("glab", pattern, "%s が glab を見ていない" % name)
-                self.assertNotIn("gh", pattern, "%s に gh の判定が残っている" % name)
+    def test_gh_commands_are_no_longer_guarded(self):
+        """`gh` はこのリポジトリの操作対象ではなくなった。
+
+        移行後 `gh` は GitHub 側(移行元)にしか届かない。ここで拒否しても
+        このリポジトリを守ることにはならないので、判定の対象から外れている。
+        """
+        self.assertIsNone(run_hook("bash", bash_payload("gh pr merge 9 --rebase")))
 
     def test_read_only_denial_message_mentions_glab(self):
         """読み取り専用ステージの拒否文言が GitLab の操作を案内すること。"""
@@ -230,3 +235,173 @@ class UnchangedGuards(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WrapperPrefixBypass(unittest.TestCase):
+    """#1029: 前置詞でガードが外れないこと。
+
+    旧実装は `BOUNDARY = (?:^|[;&|]\\s*)` でコマンド先頭に固定して照合していた。
+    そのため `timeout 60 git push --no-verify` のように**普通の書き方**をしただけで
+    全てのガードが黙って外れた。故意の迂回ではなく、実際に #1022 の QA 中に
+    `timeout` を付けたことで偶然踏んでいる。
+    """
+
+    WRAPPED_VIOLATIONS = [
+        "timeout 60 git push --no-verify",
+        "timeout 60 git push --no-verify 2>&1 | head -3",
+        "env FOO=1 git push --no-verify",
+        "FOO=1 git push --no-verify",
+        "sudo -n git push --no-verify",
+        "nice git push --no-verify",
+        "nice -n 5 git push --no-verify",
+        "time git commit --no-verify -m x",
+        "command git push --no-verify",
+        "nohup git push --no-verify",
+        "xargs git push --no-verify",
+        "timeout 60 glab mr merge 9 --rebase --yes",
+        "nice glab mr merge 9 --rebase",
+        "env GLAB_X=1 glab mr merge 9",
+        "sudo -n glab mr merge 9 --squash-message x",
+    ]
+
+    def test_wrapped_violations_are_still_denied(self):
+        for command in self.WRAPPED_VIOLATIONS:
+            with self.subTest(command=command):
+                self.assertIsNotNone(
+                    run_hook("bash", bash_payload(command)),
+                    "前置詞でガードが外れた: %s" % command,
+                )
+
+    WRAPPED_LEGITIMATE = [
+        "timeout 60 glab mr merge 9 --squash --remove-source-branch",
+        "env FOO=1 glab mr merge 9 -sd",
+        "timeout 60 git push",
+        "timeout 60 git push origin develop",
+    ]
+
+    def test_wrapped_legitimate_commands_are_allowed(self):
+        for command in self.WRAPPED_LEGITIMATE:
+            with self.subTest(command=command):
+                self.assertIsNone(
+                    run_hook("bash", bash_payload(command)),
+                    "正当なコマンドが拒否された: %s" % command,
+                )
+
+    QUOTED = [
+        "echo 'timeout 60 git push --no-verify'",
+        'echo "glab mr merge 9 --rebase"',
+        "grep -n 'git push --no-verify' docs/x.md",
+    ]
+
+    def test_quoted_occurrences_are_not_executions(self):
+        """引用符の中に現れた違反コマンドは実行ではない。"""
+        for command in self.QUOTED:
+            with self.subTest(command=command):
+                self.assertIsNone(
+                    run_hook("bash", bash_payload(command)),
+                    "引用符内の文字列を実行と誤認した: %s" % command,
+                )
+
+    def test_violation_after_a_separator_is_denied(self):
+        """区切りの後ろに前置詞付きで置かれた場合も見逃さない。"""
+        self.assertIsNotNone(
+            run_hook("bash", bash_payload("echo hi && timeout 60 git push --no-verify"))
+        )
+
+
+class ReadOnlyStageFalsePositives(unittest.TestCase):
+    """#986: 読み取り専用ステージが正当な調査コマンドを誤って拒否しないこと。
+
+    旧実装は引用を解釈せず生の文字列に正規表現をかけていたため、引用符の内側の
+    `>` や `rm` / `patch` をシェルのリダイレクト・破壊的コマンドと誤認していた。
+    読み取り専用ステージの目的はリポジトリを変更させないことであって、調査を
+    妨げることではない。
+    """
+
+    def _in_stage(self, command):
+        root = tempfile.mkdtemp()
+        state = os.path.join(root, ".claude", ".state")
+        os.makedirs(state)
+        with open(os.path.join(state, "readonly-test-session"), "w") as f:
+            f.write("ready-issue")
+        env_backup = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        try:
+            return run_hook("bash", bash_payload(command, cwd=root))
+        finally:
+            if env_backup is not None:
+                os.environ["CLAUDE_PROJECT_DIR"] = env_backup
+
+    LEGITIMATE = [
+        """python3 -c 'b = open("x").read()
+if len(b)>3000: print("big")'""",
+        """python3 -c 'print("#%d -> Ready" % 5)'""",
+        "grep -n 'patch' CHANGELOG.md",
+        "cat docs/patch-notes.md",
+        "awk '$1 > 5' file.txt",
+        "jq '.x > 3' data.json",
+        "grep -r 'rm -rf' docs/",
+        "echo 'cp'",
+        "git log --oneline -5",
+        "git diff develop..HEAD",
+        "cat scripts/issue-dependency-status.sh",
+        "glab issue view 986",
+    ]
+
+    def test_investigation_commands_are_allowed(self):
+        for command in self.LEGITIMATE:
+            with self.subTest(command=command):
+                self.assertIsNone(
+                    self._in_stage(command),
+                    "正当な調査コマンドが拒否された: %s" % command,
+                )
+
+    ACTUAL_MUTATIONS = [
+        "rm -rf build",
+        "mv a b",
+        "cp a b",
+        "sed -i 's/a/b/' file",
+        "sed -i.bak 's/a/b/' file",
+        "git commit -m x",
+        "git checkout develop",
+        "git push origin develop",
+        "npm install",
+        "npm ci",
+        "echo x > file.txt",
+        "echo x >> file.txt",
+        "tee file.txt",
+        "timeout 60 rm -rf build",
+        "env FOO=1 git commit -m x",
+    ]
+
+    def test_actual_mutations_are_still_denied(self):
+        for command in self.ACTUAL_MUTATIONS:
+            with self.subTest(command=command):
+                self.assertIsNotNone(
+                    self._in_stage(command),
+                    "リポジトリを変更するコマンドが許可された: %s" % command,
+                )
+
+    def test_devnull_redirect_is_allowed(self):
+        """`2>/dev/null` はファイル書き込みではない。"""
+        self.assertIsNone(self._in_stage("glab issue view 986 2>/dev/null"))
+
+
+class ExplainSubcommand(unittest.TestCase):
+    """#1029 Requirement 3: ガードの解釈を確認できること。
+
+    このバグが温存されたのは、ガードが対象コマンドをどう読んだかを
+    確認する手段が無かったためである。
+    """
+
+    def test_explain_reports_the_parsed_commands(self):
+        proc = subprocess.run(
+            [sys.executable, HOOK, "explain", "timeout 60 git push --no-verify"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        out = proc.stdout
+        self.assertIn("git", out, "解析結果に実体コマンドが出ていない")
+        self.assertIn("timeout", out, "剥がしたラッパーが示されていない")
+        self.assertIn("deny", out.lower(), "判定結果が示されていない")

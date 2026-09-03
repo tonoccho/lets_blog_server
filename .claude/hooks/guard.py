@@ -19,6 +19,7 @@
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 
@@ -39,19 +40,85 @@ SILENCERS = [
     (r"@(skip|fixme)\b", "@skip / @fixme タグ"),
 ]
 
-# 読み取り専用ステージ中に禁止するシェル操作。
-MUTATING_SHELL = [
-    (r"\bsed\b[^|;&]*\s-i\b", "sed -i"),
-    (r"\b(rm|mv|cp|tee|patch|truncate)\b", "ファイルを書き換えるコマンド"),
-    (
-        r"\bgit\s+(add|commit|checkout|switch|branch|merge|rebase|stash|restore|reset|push|apply|cherry-pick|tag|rm|mv)\b",
-        "リポジトリ状態を変える git コマンド",
-    ),
-    (r"\b(npm|pnpm|yarn)\s+(i|install|ci|add|update)\b", "ロックファイルを書き換える依存インストール"),
-]
+# 読み取り専用ステージ中に禁止するコマンド。**コマンド名で判定する**(#986)。
+# 旧実装は生の文字列に `\b(rm|mv|cp|tee|patch|truncate)\b` をかけていたため、
+# `grep -n 'patch' CHANGELOG.md` や `cat docs/patch-notes.md` のように、検索語や
+# ファイル名にこれらの語が含まれるだけの調査コマンドまで拒否していた。
+# 読み取り専用ステージの目的はリポジトリを変更させないことであって、調査を
+# 妨げることではない。
+DESTRUCTIVE_COMMANDS = {
+    "rm": "ファイルを削除するコマンド",
+    "mv": "ファイルを移動するコマンド",
+    "cp": "ファイルを複製するコマンド",
+    "tee": "ファイルへ書き出すコマンド",
+    "patch": "ファイルへパッチを当てるコマンド",
+    "truncate": "ファイルを切り詰めるコマンド",
+    "install": "ファイルを配置するコマンド",
+}
+
+# 状態を変える git のサブコマンド。`git log` / `git diff` / `git show` は読み取りなので通す。
+MUTATING_GIT = {
+    "add", "commit", "checkout", "switch", "branch", "merge", "rebase", "stash",
+    "restore", "reset", "push", "apply", "cherry-pick", "tag", "rm", "mv",
+}
+
+# ロックファイルを書き換える依存インストール。
+PACKAGE_MANAGERS = {"npm", "pnpm", "yarn", "bun"}
+INSTALL_SUBCOMMANDS = {"i", "install", "ci", "add", "update", "upgrade", "remove", "uninstall"}
+
+
+def destructive_reason(argv):
+    """読み取り専用ステージで禁止すべきコマンドなら、その説明を返す。"""
+    if not argv:
+        return None
+    name = os.path.basename(argv[0])
+    args = argv[1:]
+
+    if name in DESTRUCTIVE_COMMANDS:
+        return DESTRUCTIVE_COMMANDS[name]
+
+    # `sed -i` だけが書き込む。`sed -n '1,5p' file` は読み取り。
+    if name == "sed":
+        for arg in args:
+            if arg == "--in-place" or arg.startswith("--in-place="):
+                return "sed --in-place"
+            if arg.startswith("-") and not arg.startswith("--") and "i" in arg[1:]:
+                return "sed -i"
+        return None
+
+    if name == "git":
+        for arg in args:
+            if arg.startswith("-"):
+                continue
+            return "リポジトリ状態を変える git コマンド" if arg in MUTATING_GIT else None
+        return None
+
+    if name in PACKAGE_MANAGERS:
+        for arg in args:
+            if arg.startswith("-"):
+                continue
+            return "ロックファイルを書き換える依存インストール" if arg in INSTALL_SUBCOMMANDS else None
+        return None
+
+    return None
+
+
+class Denied(Exception):
+    """explain モードで、拒否理由を出力せずに受け取るための例外。"""
+
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
+# explain モードでは emit_deny が標準出力に書かず Denied を送出する。
+# フック本来の経路(stdout に JSON、exit 0)を explain のために変えたくないため。
+EXPLAIN_MODE = False
 
 
 def emit_deny(reason):
+    if EXPLAIN_MODE:
+        raise Denied(reason)
     json.dump(
         {
             "hookSpecificOutput": {
@@ -87,13 +154,6 @@ def read_stage(payload):
             return f.read().strip()
     except OSError:
         return None
-
-
-def strip_redirect_noise(command):
-    """`2>/dev/null` のような無害なリダイレクトを除いた文字列を返す。"""
-    for noise in (r"2>&1", r"&>\s*/dev/null", r"\d?>\s*/dev/null"):
-        command = re.sub(noise, " ", command)
-    return command
 
 
 def cmd_of(payload):
@@ -179,40 +239,208 @@ def check_read_only(payload, command):
     stage = read_stage(payload)
     if not stage:
         return
-    cleaned = strip_redirect_noise(command)
-    for pattern, label in MUTATING_SHELL:
-        if re.search(pattern, cleaned):
+
+    parsed = simple_commands(command)
+    if parsed is None:
+        # 解析できないコマンドは、読み取り専用ステージでは通さない。ここだけは
+        # 過検知に倒す(調査は解析できる書き方でやり直せるが、見逃しは戻せない)。
+        emit_deny(
+            "`%s` は読み取り専用ステージです(CLAUDE.md → Read-Only Stages)。"
+            "コマンドを解析できなかったため実行を許可できません"
+            "(引用符が閉じていない可能性があります)。" % stage
+        )
+
+    for argv, redirects in parsed:
+        reason = destructive_reason(argv)
+        if reason:
             emit_deny(
                 "`%s` は読み取り専用ステージです(CLAUDE.md → Read-Only Stages)。"
                 "%s は実行できません。許可されているのは GitLab Issue の操作(`glab issue` / "
-                "`status::` ラベルによるステータス更新)と読み取り専用の調査だけです。" % (stage, label)
+                "`status::` ラベルによるステータス更新)と読み取り専用の調査だけです。"
+                % (stage, reason)
             )
-    if re.search(r"(^|[^0-9&])>>?[^&]", cleaned):
-        emit_deny(
-            "`%s` は読み取り専用ステージです(CLAUDE.md → Read-Only Stages)。"
-            "リダイレクトによるファイル書き込みは実行できません。"
-            "一時ファイルが要る場合はスクラッチパッドディレクトリを使ってください。" % stage
-        )
+        # リダイレクトはトークンとして現れたものだけを見る。引用符の内側の `>` は
+        # トークンに埋もれるので、`awk '$1 > 5'` や `python3 -c '... if x>3 ...'` は
+        # ここに来ない(#986)。
+        for target in redirects:
+            if target in ("/dev/null", "/dev/stderr", "/dev/stdout"):
+                continue
+            emit_deny(
+                "`%s` は読み取り専用ステージです(CLAUDE.md → Read-Only Stages)。"
+                "リダイレクトによるファイル書き込み(%s)は実行できません。"
+                "一時ファイルが要る場合はスクラッチパッドディレクトリを使ってください。"
+                % (stage, target)
+            )
 
 
-# コマンド境界(文頭 / ; / && / | の直後)。ヒアドキュメントや引用符の中に現れた
-# 同じ文字列を「実行しようとしている」と誤検知しないための前置き。
-BOUNDARY = r"(?:^|[;&|]\s*)"
-
-
-# `glab mr merge` の引数部分。次のコマンド区切りまでを切り出す。コマンド全体を対象にすると、
-# `;` の後ろの無関係なコマンドのフラグをマージ方式と取り違える。
-GLAB_MERGE = re.compile(BOUNDARY + r"glab\s+mr\s+merge\b([^;&|]*)")
-
-# 長いフラグと、cobra が受け付ける短縮フラグの結合(`-sd` など)の両方を拾う。
+# --------------------------------------------------------------- コマンドの解析
 #
-#   - `(?![-\w])` … `--squash` が `--squash-message` に前方一致するのを防ぐ。
-#     `--squash-message` はコミットメッセージの指定であって、マージ方式の指定ではない。
-#   - `(?<![-\w])-` … 2つ目以降のハイフンから始まる誤検出を防ぐ。これにより
-#     `--remove-source-branch` の中の `r` を `-r`(--rebase)と読むことがなくなる。
-#   - 短縮フラグは小文字のみを見る。`-R`(--repo)は `-r`(--rebase)ではない。
-SQUASH_FLAG = re.compile(r"--squash(?![-\w])|(?<![-\w])-[a-z]*s[a-z]*(?![-\w])")
-REBASE_FLAG = re.compile(r"--rebase(?![-\w])|(?<![-\w])-[a-z]*r[a-z]*(?![-\w])")
+# ここが #1029 と #986 の共通の修正点である。
+#
+# 旧実装は、コマンド文字列を**構文解析せずに**正規表現へかけていた。その結果、
+# 逆向きの2つの欠陥が同時に存在していた。
+#
+#   #1029(偽陰性): 判定を `BOUNDARY = (?:^|[;&|]\s*)` でコマンド先頭に固定していた
+#     ため、`timeout 60 git push --no-verify` のように前置詞を伴うだけでガードが
+#     黙って外れた。故意の迂回ではなく、普通の書き方で踏む。
+#   #986(偽陽性): 引用を解釈しないため、`grep -n 'patch' file` や
+#     `python3 -c '... if len(b)>3000 ...'` の引用符の内側を、破壊的コマンドや
+#     シェルのリダイレクトと誤認して正当な調査を拒否した。
+#
+# どちらも「そのコマンドが実際に何を実行するか」を見ていないことから来ている。
+# 以下は、コマンド文字列を「実行される個々のコマンド」へ分解する。
+#
+# **完全性は主張しない。** シェルは `bash -c '...'`、`eval`、変数展開といった
+# 任意の間接実行を許すので、この方式でガードを完全にすることはできない。
+# 目的は「うっかりを止めること」であって「悪意ある迂回を防ぐこと」ではない
+# (CLAUDE.md → Enforcement)。悪意ある迂回に対する防御は、GitLab の保護ブランチ
+# 設定と git フック側にある。
+
+# コマンドの区切り。shlex に punctuation_chars を与えると、これらは
+# 独立したトークンとして出てくる(引用符の内側にあるものは分割されない)。
+SEPARATORS = {";", "&", "&&", "|", "||", "\n"}
+
+# 出力のリダイレクト。トークンとして現れたものだけがシェルの演算子であり、
+# 引用符の内側の `>` は文字列の一部としてトークンに埋もれる。
+REDIRECTS = {">", ">>", ">|", ">&"}
+
+# 先頭から剥がすラッパー。値を取る引数を持つものは、その分も読み飛ばす。
+# 網羅は不可能なので、これは「既知の穴を塞ぐ」列挙である。
+#   name: (値を取るフラグの集合, フラグ以外の引数をいくつ読み飛ばすか)
+WRAPPERS = {
+    "timeout": ({"-s", "--signal", "-k", "--kill-after"}, 1),  # 継続時間を1つ取る
+    "env": (set(), 0),
+    "nice": ({"-n", "--adjustment"}, 0),
+    "ionice": ({"-c", "-n", "-p"}, 0),
+    "sudo": ({"-u", "--user", "-g", "--group", "-p", "--prompt"}, 0),
+    "time": (set(), 0),
+    "command": (set(), 0),
+    "nohup": (set(), 0),
+    "stdbuf": ({"-i", "-o", "-e"}, 0),
+    "xargs": ({"-I", "-n", "-P", "-d", "-a", "-E", "-s"}, 0),
+    "setsid": (set(), 0),
+}
+
+ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def split_commands(command):
+    """コマンド文字列を「実行される個々のコマンド」のトークン列へ分解する。
+
+    戻り値は `(argv, redirect_targets)` の並び。解析できない場合は None を返す
+    (呼び出し側が保守的なフォールバックへ倒すため。空リストと区別する)。
+    """
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        # 引用符が閉じていない等。解析できないものを「該当なし」と扱うと
+        # #1029 と同じ見逃しになるので、呼び出し側で生文字列へフォールバックする。
+        return None
+
+    commands = []
+    argv = []
+    redirects = []
+    expect_redirect_target = False
+    for token in tokens:
+        if expect_redirect_target:
+            redirects.append(token)
+            expect_redirect_target = False
+            continue
+        if token in SEPARATORS:
+            if argv or redirects:
+                commands.append((argv, redirects))
+            argv, redirects = [], []
+            continue
+        if token in REDIRECTS:
+            expect_redirect_target = True
+            continue
+        argv.append(token)
+    if argv or redirects:
+        commands.append((argv, redirects))
+    return commands
+
+
+def strip_wrappers(argv):
+    """環境変数代入と既知のラッパーを剥がし、(実体のargv, 剥がしたもの) を返す。"""
+    stripped = []
+    argv = list(argv)
+    while argv:
+        head = argv[0]
+        if ASSIGNMENT.match(head):
+            stripped.append(argv.pop(0))
+            continue
+        name = os.path.basename(head)
+        if name not in WRAPPERS:
+            break
+        value_flags, positionals = WRAPPERS[name]
+        stripped.append(argv.pop(0))
+        # ラッパー自身のフラグを読み飛ばす。値を取るフラグは次のトークンも。
+        while argv and argv[0].startswith("-") and argv[0] != "--":
+            flag = argv.pop(0)
+            base = flag.split("=", 1)[0]
+            if base in value_flags and "=" not in flag and len(base) == len(flag):
+                if argv:
+                    argv.pop(0)
+        if argv and argv[0] == "--":
+            argv.pop(0)
+        for _ in range(positionals):
+            if argv:
+                stripped.append(argv.pop(0))
+    return argv, stripped
+
+
+def simple_commands(command):
+    """ラッパーを剥がした後の argv の並びを返す。解析不能なら None。"""
+    parsed = split_commands(command)
+    if parsed is None:
+        return None
+    out = []
+    for argv, redirects in parsed:
+        real, _ = strip_wrappers(argv)
+        out.append((real, redirects))
+    return out
+
+
+def invokes(command, program, subcommands=()):
+    """`program`(必要なら続く部分コマンド)を実行する箇所の残り引数を列挙する。
+
+    解析できない場合は、生の文字列に対する緩い照合へフォールバックする。
+    見逃す(#1029)よりは過検知に倒す。
+    """
+    parsed = simple_commands(command)
+    if parsed is None:
+        pattern = r"\b" + re.escape(program) + r"\b"
+        if subcommands:
+            pattern += r"\s+" + r"\s+".join(re.escape(s) for s in subcommands) + r"\b"
+        return [command.split()] if re.search(pattern, command) else []
+
+    found = []
+    for argv, _ in parsed:
+        if not argv or os.path.basename(argv[0]) != program:
+            continue
+        rest = argv[1:]
+        if subcommands:
+            positional = [a for a in rest if not a.startswith("-")]
+            if positional[: len(subcommands)] != list(subcommands):
+                continue
+        found.append(rest)
+    return found
+
+
+# マージ方式のフラグ。長いフラグと、cobra が受け付ける短縮フラグの結合(`-sd`)の両方。
+# `--squash-message` はコミットメッセージの指定であって方式の指定ではないので、
+# `--squash` の前方一致で拾ってはいけない。`-R`(--repo)は `-r`(--rebase)ではない。
+def _has_flag(args, long_name, short):
+    for arg in args:
+        if arg == long_name or arg.startswith(long_name + "="):
+            return True
+        if arg.startswith("--"):
+            continue
+        if arg.startswith("-") and len(arg) > 1 and short in arg[1:]:
+            return True
+    return False
 
 
 def check_merge_flags(command):
@@ -227,45 +455,43 @@ def check_merge_flags(command):
     `--admin` に相当する管理者バイパスは GitLab には無い。保護ブランチの回避は
     フックではなく GitLab 側の権限設定で防ぐ(CLAUDE.md → Merge Conflicts)。
     """
-    match = GLAB_MERGE.search(command)
-    if not match:
-        return
-    args = match.group(1)
-    if REBASE_FLAG.search(args):
-        emit_deny(
-            "このリポジトリの Issue MR のマージ方式は squash のみです"
-            "(CLAUDE.md → Completion Definition)。`--rebase` は使えません。"
-            "`glab mr merge --squash --remove-source-branch` を使ってください。"
-        )
-    if not SQUASH_FLAG.search(args):
-        emit_deny(
-            "`glab mr merge` にマージ方式が指定されていません。GitLab は方式未指定だと"
-            "マージコミットを作ります(このプロジェクトの squash_option は default_off)。"
-            "このリポジトリの Issue MR は squash のみです"
-            "(CLAUDE.md → Completion Definition)。"
-            "`glab mr merge --squash --remove-source-branch` を使ってください。"
-        )
+    for args in invokes(command, "glab", ("mr", "merge")):
+        if _has_flag(args, "--rebase", "r"):
+            emit_deny(
+                "このリポジトリの Issue MR のマージ方式は squash のみです"
+                "(CLAUDE.md → Completion Definition)。`--rebase` は使えません。"
+                "`glab mr merge --squash --remove-source-branch` を使ってください。"
+            )
+        if not _has_flag(args, "--squash", "s"):
+            emit_deny(
+                "`glab mr merge` にマージ方式が指定されていません。GitLab は方式未指定だと"
+                "マージコミットを作ります(このプロジェクトの squash_option は default_off)。"
+                "このリポジトリの Issue MR は squash のみです"
+                "(CLAUDE.md → Completion Definition)。"
+                "`glab mr merge --squash --remove-source-branch` を使ってください。"
+            )
 
 
 def check_no_verify(command):
-    if re.search(BOUNDARY + r"git\s+(commit|push)\b", command) and re.search(
-        r"--no-verify\b|\-n\b(?=.*\bcommit\b)", command
-    ):
-        emit_deny(
-            "`--no-verify` は禁止です。git フックはこのリポジトリのフェーズ分離"
-            "(CLAUDE.md → Test-First Implementation)を強制するためのものです。"
-        )
+    for sub in ("commit", "push"):
+        for args in invokes(command, "git", (sub,)):
+            if "--no-verify" in args or (sub == "commit" and "-n" in args):
+                emit_deny(
+                    "`--no-verify` は禁止です。git フックはこのリポジトリのフェーズ分離"
+                    "(CLAUDE.md → Test-First Implementation)を強制するためのものです。"
+                )
 
 
 def check_commit_phase(payload, command):
-    if not re.search(BOUNDARY + r"git\s+commit\b", command):
+    commits = invokes(command, "git", ("commit",))
+    if not commits:
         return
     root = project_dir(payload)
     staged = git(["diff", "--cached", "--name-only"], root)
     if staged is None:
         return
     files = [p for p in staged.splitlines() if p.strip()]
-    if re.search(r"\bgit\s+commit\b[^|;&]*\s-(a|am|ma)\b", command):
+    if any(_has_flag(args, "--all", "a") for args in commits):
         tracked = git(["diff", "--name-only"], root) or ""
         files += [p for p in tracked.splitlines() if p.strip()]
     tests, prod = classify(files)
@@ -279,14 +505,8 @@ def check_commit_phase(payload, command):
         )
 
 
-# MR 作成の検出。`check_merge_flags` の GLAB_MERGE と同じく、判定に使う正規表現は
-# モジュール定数として置く。フックが「どのコマンドを見ているか」をテストから直接
-# 確認できるようにするため(#1022)。ここが古いままだとガードは無言で空振りする。
-GLAB_MR_CREATE = re.compile(BOUNDARY + r"glab\s+mr\s+create\b")
-
-
 def check_pr_coverage(payload, command):
-    if not GLAB_MR_CREATE.search(command):
+    if not invokes(command, "glab", ("mr", "create")):
         return
     root = project_dir(payload)
     script = os.path.join(root, "scripts", "check-changed-coverage.py")
@@ -313,9 +533,64 @@ def cmd_bash(payload):
     allow()
 
 
+# --------------------------------------------------------------------- explain
+
+
+def cmd_explain(command):
+    """コマンドをどう解析し、どう判定したかを表示する。
+
+    #1029 が長く気づかれなかったのは、ガードが対象コマンドを**どう読んだか**を
+    確認する手段が無かったためである。`timeout 60 git push --no-verify` が通るのを見て
+    「フックが動いていない」と誤診断した(#1029 のコメント参照)。実際にはフックは
+    動いており、判定が前置詞で外れていた。この2つを区別できるようにする。
+
+        python3 .claude/hooks/guard.py explain '<コマンド>'
+    """
+    global EXPLAIN_MODE
+    EXPLAIN_MODE = True
+
+    print("入力: %s" % command)
+    parsed = split_commands(command)
+    if parsed is None:
+        print("解析: 失敗(引用符が閉じていない可能性)")
+        print("      通常のガードは生文字列への緩い照合へフォールバックする")
+        print("      読み取り専用ステージでは解析不能そのものを拒否する")
+    else:
+        print("解析: %d 個のコマンド" % len(parsed))
+        for i, (argv, redirects) in enumerate(parsed, 1):
+            real, stripped = strip_wrappers(argv)
+            print("  [%d] 実体      : %s" % (i, real))
+            if stripped:
+                print("      剥がした前置: %s" % stripped)
+            if redirects:
+                print("      書き込み先  : %s" % redirects)
+            reason = destructive_reason(real)
+            if reason:
+                print("      読み取り専用ステージ: 拒否(%s)" % reason)
+
+    for label, check in (
+        ("マージ方式", check_merge_flags),
+        ("--no-verify 禁止", check_no_verify),
+    ):
+        try:
+            check(command)
+        except Denied as denied:
+            print("判定: DENY [%s] %s" % (label, denied.reason))
+            return 0
+
+    if invokes(command, "glab", ("mr", "create")):
+        print("判定: glab mr create を検出。カバレッジ検査が走る(結果は計測次第)")
+        return 0
+
+    print("判定: allow(このコマンドを止めるガードは無い)")
+    return 0
+
+
 def main():
     if len(sys.argv) < 2:
         sys.exit(0)
+    if sys.argv[1] == "explain":
+        sys.exit(cmd_explain(" ".join(sys.argv[2:])))
     try:
         payload = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
