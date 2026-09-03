@@ -1,6 +1,6 @@
 ---
 name: implement-issue
-description: Implement a GitHub Issue that has been explicitly marked Ready. Use this skill to analyze the repository, create an implementation plan, implement the change, and validate it.
+description: Implement a GitLab Issue that has been explicitly marked Ready. Use this skill to analyze the repository, create an implementation plan, implement the change, and validate it.
 model: opus
 ---
 
@@ -22,7 +22,7 @@ Use that Issue.
 
 If no Issue number was specified:
 
-Search GitHub for Issues with:
+Search GitLab for Issues with:
 
 `Status = Ready`
 
@@ -174,7 +174,7 @@ Invoke the `git-workflow` skill to:
    production paths — never both.
 4. Push the branch (`git push -u origin <branch-name>`).
 
-Do not skip this step — implementation is not usable by later stages (Review, QA, Pull Request) until it is committed and pushed.
+Do not skip this step — implementation is not usable by later stages (Review, QA, Merge Request) until it is committed and pushed.
 
 ---
 
@@ -208,7 +208,7 @@ Issue number and title.
 
 ### Status
 
-Current GitHub status.
+Current `status::` label.
 
 ### Implementation Summary
 

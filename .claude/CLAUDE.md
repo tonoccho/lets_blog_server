@@ -23,7 +23,7 @@ All feature development should follow:
 
 # Source of Truth
 
-GitHub Issues are the source of truth for development work.
+GitLab Issues are the source of truth for development work.
 
 Do not create independent TODO files for issue status management.
 
@@ -38,6 +38,49 @@ Inbox
 → Review
 → QA
 → Done
+
+## How status is represented
+
+This is the single definition of how an Issue's status is stored and changed. Every skill and
+agent defers to it. Do not restate it differently anywhere else — if you find a second
+definition in `.claude/`, that is a bug to fix, not a variant to follow.
+
+Status is a **label**, named `status::<Stage>`:
+
+`status::Inbox` `status::Backlog` `status::Ready` `status::In Progress` `status::Review`
+`status::QA` `status::Done`
+
+Priority is a label too: `priority::P0` / `priority::P1` / `priority::P2`.
+
+GitLab CE has no single-select field and no scoped labels (those are Premium), so **nothing
+stops an Issue from carrying two status labels at once, or none.** GitHub Projects made that
+impossible; here it is only a convention, and the workflow depends on it. Exactly one
+`status::` label, always.
+
+## How to change status
+
+Remove the old label and add the new one **in the same call**. Never as two calls:
+
+```bash
+glab api "projects/:id/issues/<iid>" --method PUT \
+  -f "remove_labels=status::Ready" -f "add_labels=status::In Progress"
+```
+
+Two separate calls leave the Issue with zero or two status labels in between. An Issue with no
+status label appears in no board column and is invisible to `work-next` and to triage; an Issue
+with two is in no defined stage at all.
+
+Never write the whole label set with `labels=` — that silently drops `epic`, `bug` and every
+other label the Issue carries. Only `add_labels` / `remove_labels`.
+
+To read the current status:
+
+```bash
+glab issue view <iid> -F json --jq '[.labels[] | select(startswith("status::"))]'
+```
+
+Mechanical enforcement of the "exactly one" rule is #1023. Until it lands, the rule holds by
+convention only — so read the status back after changing it.
 
 ---
 
@@ -136,7 +179,7 @@ measure it (see **How to check what actually ran**) before relying on it.
 | Running commands (git, `gh`) with no judgment | `haiku` |
 | Comparing simple properties (status, priority, dependency counts) | `haiku` |
 | Verifying tests or inspecting Issues | `sonnet` |
-| Merging a Pull Request (irreversible; gated on preconditions) | `sonnet` |
+| Merging a Merge Request (irreversible; gated on preconditions) | `sonnet` |
 | Implementing production code | `sonnet` — see **Implementation runs on Sonnet** |
 | Authoring Issues | `opus` |
 
@@ -220,16 +263,16 @@ confirmed this way — that blind spot is part of #1011.
 
 # Autonomous Task Execution
 
-Once a task is started via `work-next` (or an equivalent "implement the next task" request), it must proceed through Implementation → Review → QA → Pull Request → Merge without stopping to ask the user whether to continue at each stage. The merge is a squash merge performed by `complete-issue`; once QA has passed and the Pull Request is open, it does not need a separate confirmation.
+Once a task is started via `work-next` (or an equivalent "implement the next task" request), it must proceed through Implementation → Review → QA → Merge Request → Merge without stopping to ask the user whether to continue at each stage. The merge is a squash merge performed by `complete-issue`; once QA has passed and the Merge Request is open, it does not need a separate confirmation.
 
 A recoverable stage outcome — implementation issues, Review `CHANGES REQUIRED`, QA `FAIL` — must loop back into implementation automatically and retry. Do not pause for user confirmation before retrying.
 
-The workflow may still stop before the Pull Request is merged, but only for a genuine blocker:
+The workflow may still stop before the Merge Request is merged, but only for a genuine blocker:
 
 - A requirement ambiguity only the user can resolve (Review `REQUIREMENT CLARIFICATION`, or a blocking question raised during implementation).
 - QA `BLOCKED` (verification itself cannot proceed).
 - A per-stage retry limit is exceeded without resolving the problem (see `work-next`).
-- The Pull Request cannot be merged as-is for a reason this workflow may not fix on its own:
+- The Merge Request cannot be merged as-is for a reason this workflow may not fix on its own:
   a draft, or a blocked merge state (branch protection, a required check that cannot pass).
   A **merge conflict is not one of these** — resolve it on the working branch per
   **Merge Conflicts**. Never force a merge past any of them.
@@ -237,7 +280,7 @@ The workflow may still stop before the Pull Request is merged, but only for a ge
 - Two well-evidenced verdicts on the same Issue disagree and only the user can settle it
   (see **Dependency Resolution** → When a verdict contradicts a recent one).
 
-Otherwise, do not halt the workflow short of a merged Pull Request and a `Done` Issue.
+Otherwise, do not halt the workflow short of a merged Merge Request and a `Done` Issue.
 
 ---
 
@@ -249,7 +292,7 @@ anywhere else — if you find a second definition in `.claude/`, that is a bug t
 variant to follow.
 
 These three stages never change the repository. They read the codebase and the Issue tracker,
-form a judgment, and record that judgment in GitHub. That is their entire output.
+form a judgment, and record that judgment in GitLab. That is their entire output.
 
 ## What must not change
 
@@ -268,15 +311,15 @@ Not permitted:
   `merge`, `rebase`, `stash`, `restore`, `reset`, `push`
 
 Read-only inspection is expected and encouraged: `cat`, `sed -n`, `grep`, `find`, `git log`,
-`git diff`, `git show`, `gh issue view`, `scripts/issue-dependency-status.sh`.
+`git diff`, `git show`, `glab issue view`, `scripts/issue-dependency-status.sh`.
 
 Scratch notes go to the session scratchpad directory, never into the repository.
 
 ## What may change
 
-Only GitHub Issue state, and only the mutations listed for that stage:
+Only GitLab Issue state, and only the mutations listed for that stage:
 
-| Stage | Permitted GitHub mutations |
+| Stage | Permitted GitLab mutations |
 | --- | --- |
 | `discover-issues` | Create new Issues in `Inbox` with `Priority` set; comment on an existing Issue when the finding is already covered by it |
 | `triage-backlog` | Move `Inbox → Backlog`; set `Priority` on each Issue it moves |
@@ -299,7 +342,7 @@ not a reason to make the change.
 
 Before editing code:
 
-1. Read the relevant GitHub Issue.
+1. Read the relevant GitLab Issue.
 2. Read relevant architecture and development documentation.
 3. Inspect existing implementations.
 4. Prefer existing patterns over inventing new ones.
@@ -432,13 +475,13 @@ Do not silently fix it.
 
 Do not wait for the user's judgment on whether it is worth filing.
 
-First, search for an existing Issue covering the same problem. Run `gh issue list --state open --search "<term>"` for the affected file path(s) and class/symbol name(s), and for the observable symptom. Search each identifier separately — a single combined query misses Issues that use different wording.
+First, search for an existing Issue covering the same problem. Run `glab issue list --search "<term>"` (add `--all` to include closed ones) for the affected file path(s) and class/symbol name(s), and for the observable symptom. Search each identifier separately — a single combined query misses Issues that use different wording.
 
 - If an open Issue already covers the same problem, do **not** create a new one. Add a comment to that Issue with the new evidence (where it was re-encountered, which stage found it, any detail its body lacks) and report its number instead.
 - If a matching Issue exists but the new finding is genuinely broader or narrower in scope, say so explicitly in the comment, and only then decide whether a separate Issue is warranted.
 - Only when no existing Issue covers it, create a new one.
 
-Create the new GitHub Issue in `Inbox`, using the `project-planner` Issue template (Title, Background, Problem, Goal, Requirements, Acceptance Criteria, Scope, Out of Scope, Dependencies). This applies at every stage of the workflow (planning, implementation, review, QA) — whichever stage discovers the problem files it immediately.
+Create the new GitLab Issue in `Inbox`, using the `project-planner` Issue template (Title, Background, Problem, Goal, Requirements, Acceptance Criteria, Scope, Out of Scope, Dependencies). This applies at every stage of the workflow (planning, implementation, review, QA) — whichever stage discovers the problem files it immediately.
 
 The Issue's `Priority` field (P0/P1/P2) must be set before the Issue is considered filed. Never leave priority unset on a newly discovered Issue, even though older Issues in the project may have it unset.
 
@@ -462,11 +505,11 @@ An issue may be considered complete only when:
 - Required validation has completed
 - Review has no blocking issues
 - QA confirms the expected behavior
-- A Pull Request was opened and squash-merged into `develop`
+- A Merge Request was opened and squash-merged into `develop`
 
 Passing QA opens a Merge Request; it does not mark the issue Done. `complete-issue` then merges it with `glab mr merge --squash --remove-source-branch`, moves the Issue to `Done`, and deletes the working branch locally and remotely.
 
-Squash is this repository's merge method for Issue Pull Requests. A Pull Request that cannot be
+Squash is this repository's merge method for Issue Merge Requests. A Merge Request that cannot be
 merged cleanly is never forced through — not with `--admin`, not with a different merge method,
 not by bypassing a branch protection rule. A **merge conflict** is resolved on the working
 branch and re-verified (see **Merge Conflicts**); a draft or blocked merge state that survives
@@ -496,16 +539,16 @@ What remains forbidden is getting the merge through *without* resolving it:
 
 - Any merge method other than `--squash` — including **omitting the flag**. GitLab merges with a
   merge commit when no method is given, so `glab mr merge` without `--squash` is itself a
-  violation, not a neutral default. (GitHub's `gh pr merge` asked interactively; GitLab does
+  violation, not a neutral default. (GitHub's PR merge command asked interactively; GitLab does
   not. The guard requires `--squash` rather than merely rejecting `--rebase`.)
 - Marking a draft ready for review to unblock a merge
 - Bypassing a protected-branch rule
 
 GitLab has **no `--admin` equivalent** — there is no per-merge administrator override. The
-protection that `gh pr merge --admin` used to defeat lives in GitLab's protected-branch
+protection that GitHub's administrator-override merge used to defeat lives in GitLab's protected-branch
 settings, and is enforced there rather than by this hook.
 
-`complete-issue` still merges only a clean, mergeable Pull Request. When it finds a conflict,
+`complete-issue` still merges only a clean, mergeable Merge Request. When it finds a conflict,
 the fix is to resolve it on the working branch, push, re-verify, and merge — never to force it.
 
 ## After resolving a conflict
@@ -543,7 +586,7 @@ never carry a dependency's status over from an earlier comment — re-read it li
 
 ## What counts as a blocker
 
-1. **An open `blocked_by` link is the only status-based blocker.** If GitHub's formal
+1. **An open `blocked_by` link is the only status-based blocker.** If the formal
    dependency graph names an open Issue, the Issue is blocked. Full stop.
 2. **A dependency Issue named only in prose does not block by its board status.** What decides
    readiness is whether *this* Issue's acceptance criteria can be implemented and verified
@@ -596,7 +639,7 @@ apply the definition rather than posting a contradicting verdict.
 
 ## Recording dependencies
 
-Record dependencies as resolvable identifiers: a GitHub `blocked_by` link, or `#<number>` in
+Record dependencies as resolvable identifiers: a formal `blocked_by` link, or `#<number>` in
 the body. Epic shorthand (`A4`, `B6`, `C14`) is not resolvable — it forces every run to
 re-translate labels into Issue numbers, and that translation is where verdicts diverge.
 When an Issue records dependencies only as shorthand, resolve them to numbers and update the
@@ -657,7 +700,7 @@ clone runs it once). It enforces the same invariants for **any** committer, agen
 
 Computes branch coverage (C1/C2) of the production files this branch changed, from JaCoCo's
 `BRANCH` counter and jest's branch map, and exits non-zero below 90%. Run it directly, or let
-the Pull Request guard run it:
+the Merge Request guard run it:
 
 ```bash
 ./gradlew :services:<svc>:test jacocoTestReport
@@ -672,7 +715,7 @@ coverage report for a changed file fails the check; it never passes silently.
 Production code outside those trees is **reported as unmeasurable and skipped**, not failed:
 `apps/*/webviews/` plain `.js`, `infra/e2e-stubs/**` (Node processes that only ever run under
 docker-compose), `next.config.ts`. No jest or JaCoCo run reaches them, so no report can exist,
-and demanding one made `gh pr create` impossible for Issues that legitimately touched only
+and demanding one made opening a Merge Request impossible for Issues that legitimately touched only
 those files (#942, #935). They are verified by the acceptance-test layer instead — the same
 convention `docs/COVERAGE_TARGETS.md` already applies to `extension.ts` and the Panel
 constructors. This is a **coverage** exemption only: `paths.py` still classifies these files as

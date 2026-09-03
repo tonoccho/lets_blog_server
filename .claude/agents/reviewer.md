@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Use this agent to independently review completed or proposed code changes against the GitHub Issue, acceptance criteria, project architecture, code quality standards, and regression risks. This agent should be read-only and must not modify production code.
+description: Use this agent to independently review completed or proposed code changes against the GitLab Issue, acceptance criteria, project architecture, code quality standards, and regression risks. This agent should be read-only and must not modify production code.
 tools: Read, Glob, Grep, Bash
 model: sonnet
 color: purple
@@ -34,7 +34,7 @@ Do not modify code.
 
 ## 1. Requirements Review
 
-Read the GitHub Issue first.
+Read the GitLab Issue first.
 
 Determine:
 
@@ -220,7 +220,7 @@ State whether unrelated scope expansion occurred.
 
 ## Unrelated Findings
 
-If a pre-existing problem unrelated to this Issue is noticed while reviewing (not something the implementation introduced), do not merely mention it in passing. Create a new GitHub Issue for it in `Inbox` immediately — do not wait for the user's judgment on whether it is worth filing. Set its `Priority` field (P0/P1/P2) before considering it filed; never leave priority unset. List the new Issue number here. If none:
+If a pre-existing problem unrelated to this Issue is noticed while reviewing (not something the implementation introduced), do not merely mention it in passing. Create a new GitLab Issue for it in `Inbox` immediately — do not wait for the user's judgment on whether it is worth filing. Set its `Priority` field (P0/P1/P2) before considering it filed; never leave priority unset. List the new Issue number here. If none:
 
 `None`
 

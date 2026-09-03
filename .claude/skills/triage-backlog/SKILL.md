@@ -1,6 +1,6 @@
 ---
 name: triage-backlog
-description: Review GitHub Issues sitting in Inbox and move every non-blocked Issue into Backlog with a Priority set. Use when the user asks to move tasks that should be implemented into Backlog (e.g. "実装すべきタスクをBacklogに移動して").
+description: Review GitLab Issues sitting in Inbox and move every non-blocked Issue into Backlog with a Priority set. Use when the user asks to move tasks that should be implemented into Backlog (e.g. "実装すべきタスクをBacklogに移動して").
 model: haiku
 ---
 
@@ -36,7 +36,7 @@ user's decision (#1008).
 Check the label on each Issue collected above:
 
 ```bash
-gh issue view <number> --json labels --jq '[.labels[].name] | index("epic") != null'
+glab issue view <number> -F json --jq '[.labels[]] | index("epic") != null'
 ```
 
 `true` means skip it.
@@ -72,7 +72,7 @@ startable, only that it is worth doing, so a prose dependency that is still open
 to hold an Issue in Inbox. Whether the substance actually exists is `ready-issue`'s gate, not
 this one (#751).
 
-Read GitHub's issue dependencies with:
+Read the Issue's recorded dependencies with:
 
 ```bash
 scripts/issue-dependency-status.sh <number>
@@ -121,7 +121,13 @@ Duplicate of, or superseded by, another Issue. Do not close it yourself, and do 
 
 ## Step 4: Apply the moves
 
-Move every Issue classified `Move to Backlog` from `Inbox → Backlog`.
+Move every Issue classified `Move to Backlog` from `status::Inbox → status::Backlog`, and set
+its priority label in the same call (see `CLAUDE.md` → **How to change status**):
+
+```bash
+glab api "projects/:id/issues/<iid>" --method PUT \
+  -f "remove_labels=status::Inbox" -f "add_labels=status::Backlog,priority::P1"
+```
 
 Set the `Priority` field on every moved Issue. Never leave priority unset — `ready-issue` selects by Priority first, so an unset priority sinks the Issue to the bottom of the selection order.
 

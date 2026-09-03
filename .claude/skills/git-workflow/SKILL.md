@@ -10,7 +10,7 @@ model: haiku
 
 Use this skill whenever work involves:
 
-- Starting implementation for a GitHub Issue
+- Starting implementation for a GitLab Issue
 - Creating a branch
 - Checking repository state
 - Committing changes
@@ -93,7 +93,7 @@ For this repository, working branches are created from:
 
 `develop`
 
-not `main`. All changes to `main` go through a Pull Request from `develop` (or a branch merged into `develop`) — never branch directly from `main` and never push directly to `main`.
+not `main`. All changes to `main` go through a Merge Request from `develop` (or a branch merged into `develop`) — never branch directly from `main` and never push directly to `main`.
 
 If working in a different repository without this convention, determine the base branch from:
 
@@ -327,4 +327,4 @@ The Git portion of an Issue workflow is complete when:
 - Required validation passed.
 - Meaningful commits were created.
 - The branch was pushed successfully.
-- The remote branch is available for Pull Request creation.
+- The remote branch is available for Merge Request creation.

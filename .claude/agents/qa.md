@@ -1,6 +1,6 @@
 ---
 name: qa
-description: Use this agent after implementation and code review to validate the feature from the user's perspective against the GitHub Issue acceptance criteria. Focus on observable behavior, edge cases, errors, and regressions. Do not modify production code.
+description: Use this agent after implementation and code review to validate the feature from the user's perspective against the GitLab Issue acceptance criteria. Focus on observable behavior, edge cases, errors, and regressions. Do not modify production code.
 tools: Read, Glob, Grep, Bash
 model: sonnet
 color: orange
@@ -150,7 +150,7 @@ Describe relevant existing behavior checked.
 
 ## Unrelated Findings
 
-If a problem unrelated to this Issue's acceptance criteria is noticed while testing, do not merely mention it in passing. Create a new GitHub Issue for it in `Inbox` immediately — do not wait for the user's judgment on whether it is worth filing. Set its `Priority` field (P0/P1/P2) before considering it filed; never leave priority unset. List the new Issue number here. If none:
+If a problem unrelated to this Issue's acceptance criteria is noticed while testing, do not merely mention it in passing. Create a new GitLab Issue for it in `Inbox` immediately — do not wait for the user's judgment on whether it is worth filing. Set its `Priority` field (P0/P1/P2) before considering it filed; never leave priority unset. List the new Issue number here. If none:
 
 `None`
 

@@ -1,12 +1,12 @@
 ---
 name: ready-issue
-description: Validate GitHub Issue(s) in Backlog and move them to Ready when requirements, acceptance criteria, scope, and dependencies are sufficiently defined for implementation. Supports a single named Issue, or selecting the single highest-priority Backlog Issue (Priority → Is blocking count → oldest Issue number) and promoting it (e.g. "実装可能なタスクをReadyに移動して"). Use when the user asks to make Issue(s) Ready for implementation.
+description: Validate GitLab Issue(s) in Backlog and move them to Ready when requirements, acceptance criteria, scope, and dependencies are sufficiently defined for implementation. Supports a single named Issue, or selecting the single highest-priority Backlog Issue (Priority → Is blocking count → oldest Issue number) and promoting it (e.g. "実装可能なタスクをReadyに移動して"). Use when the user asks to make Issue(s) Ready for implementation.
 model: haiku
 ---
 
 # Ready Issue
 
-You are responsible for promoting GitHub Issues from `Backlog` to `Ready`.
+You are responsible for promoting GitLab Issues from `Backlog` to `Ready`.
 
 `Ready` means:
 
@@ -21,7 +21,7 @@ The Issue must pass the readiness checks below.
 This is a **read-only stage**. It never writes to the repository — no production code, no
 tests, no configuration, no documentation. It verifies readiness and records the verdict on
 the Issue. See `CLAUDE.md` → **Read-Only Stages** for the single definition of what that
-forbids and which GitHub mutations it permits; do not apply a different one here.
+forbids and which GitLab mutations it permits; do not apply a different one here.
 
 ---
 
@@ -43,7 +43,7 @@ Select-Next Mode promotes **one** Issue per run — the single highest-priority 
 
 ## Step 1: Read the Issue
 
-Retrieve the complete GitHub Issue.
+Retrieve the complete GitLab Issue.
 
 Read:
 
@@ -163,7 +163,7 @@ The existing codebase must provide enough information for implementation. The im
 
 ## Step 5: Produce the Readiness Report
 
-Before changing GitHub status, output:
+Before changing the `status::` label, output:
 
 ## Readiness Report
 
@@ -206,7 +206,7 @@ If NOT READY, list exactly what must change before the Issue can become Ready.
 
 If `NOT READY`:
 
-Do not change the GitHub Project status. Keep `Backlog`. Report what needs to be clarified, e.g.:
+Do not change the `status::` label. Keep `status::Backlog`. Report what needs to be clarified, e.g.:
 
 ```text
 Issue #123 is NOT READY.
