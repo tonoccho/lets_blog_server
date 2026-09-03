@@ -385,6 +385,49 @@ if len(b)>3000: print("big")'""",
         """`2>/dev/null` はファイル書き込みではない。"""
         self.assertIsNone(self._in_stage("glab issue view 986 2>/dev/null"))
 
+    # ---------------------------------------------------------------- #1034
+    #
+    # リダイレクト演算子は2種類あり、扱いが逆になる。
+    #
+    #   `>&` … ファイルディスクリプタの**複製**。ターゲットは fd 番号か `-`(クローズ)で、
+    #          ファイルではない。`2>&1` はファイルを1バイトも作らない
+    #   `&>` … stdout と stderr を**まとめてファイルへ**書く。ターゲットはファイル名
+    #
+    # 当初はどちらも扱えていなかった。`>&` はターゲットをファイル名として許可リストに
+    # かけていたため偽陽性(`2>&1` の拒否)、`&>` は REDIRECTS に無く演算子として
+    # 認識されなかったため偽陰性(実ファイルへの書き込みが素通り)になっていた。
+
+    FD_DUPLICATIONS = [
+        "bash scripts/x.sh 2>&1 | head",
+        "glab issue view 1 2>&1",
+        "cmd 1>&2",
+        "cmd 2>&-",
+    ]
+
+    def test_fd_duplication_is_not_a_file_write(self):
+        """fd 複製はファイルを作らない。拒否してはいけない(#1034)。"""
+        for command in self.FD_DUPLICATIONS:
+            with self.subTest(command=command):
+                self.assertIsNone(
+                    self._in_stage(command),
+                    "fd 複製がファイル書き込みと誤判定された: %s" % command,
+                )
+
+    def test_ampersand_redirect_to_devnull_is_allowed(self):
+        """`&>/dev/null` は許可リストのターゲットなので通る。"""
+        self.assertIsNone(self._in_stage("glab issue view 1 &>/dev/null"))
+
+    def test_ampersand_redirect_to_a_real_file_is_denied(self):
+        """`&> 実ファイル` は本物のファイル書き込みである(#1034 の偽陰性)。
+
+        当初 `&>` は REDIRECTS に無く、演算子として認識されていなかった。
+        `&>/dev/null` が通っていたのは「fd 複製として正しく除外されていた」からでは
+        なく、**オペレータ自体が見えていなかった偶然**である。
+        """
+        reason = self._in_stage("echo x &> real.txt")
+        self.assertIsNotNone(reason, "&> による実ファイルへの書き込みが素通りした")
+        self.assertIn("real.txt", reason)
+
 
 class ExplainSubcommand(unittest.TestCase):
     """#1029 Requirement 3: ガードの解釈を確認できること。
@@ -392,6 +435,34 @@ class ExplainSubcommand(unittest.TestCase):
     このバグが温存されたのは、ガードが対象コマンドをどう読んだかを
     確認する手段が無かったためである。
     """
+
+    def test_explain_does_not_call_an_fd_a_write_target(self):
+        """`2>&1` の `1` を書き込み先として表示しないこと(#1034)。
+
+        当初の拒否メッセージは `(1)` をファイル名として報告しており、
+        そこにこの欠陥が出ていた。
+        """
+        proc = subprocess.run(
+            [sys.executable, HOOK, "explain", "cmd 2>&1"],
+            capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(0, proc.returncode, proc.stderr)
+        for line in proc.stdout.splitlines():
+            if "書き込み" in line:
+                self.fail("fd 複製が書き込み先として表示された: %s" % line.strip())
+
+    def test_explain_reports_an_ampersand_redirect_target(self):
+        """`&>real.txt` の `real.txt` は書き込み先として表示されること(#1034)。"""
+        proc = subprocess.run(
+            [sys.executable, HOOK, "explain", "cmd &>real.txt"],
+            capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(0, proc.returncode, proc.stderr)
+        self.assertIn("real.txt", proc.stdout)
+        self.assertTrue(
+            any("書き込み" in l and "real.txt" in l for l in proc.stdout.splitlines()),
+            "real.txt が書き込み先として表示されていない:\n%s" % proc.stdout,
+        )
 
     def test_explain_reports_the_parsed_commands(self):
         proc = subprocess.run(

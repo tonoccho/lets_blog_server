@@ -802,6 +802,22 @@ Defence against deliberate circumvention lives elsewhere and must stay there:
 - **GitLab protected-branch settings** — who may merge and push, enforced server-side
 - **`scripts/git-hooks/pre-commit`** — runs for any committer, agent or human
 
+### Redirections, and what a read-only stage refuses
+
+A read-only stage refuses **every** output redirection whose target is not `/dev/null` (or
+`/dev/stderr` / `/dev/stdout`) — **including a write into the scratchpad**. The check looks at
+the redirection, not at where it points. Compose what you need from pipes and stdout instead.
+
+Two operators look alike and are treated oppositely, because they mean opposite things:
+
+| Operator | Target is | In a read-only stage |
+| --- | --- | --- |
+| `>` `>>` `>\|` `&>` | a file name | refused unless `/dev/null` |
+| `>&` | a file descriptor (`2>&1`, `1>&2`, `2>&-`) | allowed — it writes no file |
+
+Getting this wrong cost twice (#1034): `2>&1` was refused as a write to a file named `1`, while
+`&>` was not recognised as an operator at all, so `echo x &> real.txt` passed straight through.
+
 To see how a guard reads a command:
 
 ```bash

@@ -261,14 +261,24 @@ def check_read_only(payload, command):
             )
         # リダイレクトはトークンとして現れたものだけを見る。引用符の内側の `>` は
         # トークンに埋もれるので、`awk '$1 > 5'` や `python3 -c '... if x>3 ...'` は
-        # ここに来ない(#986)。
+        # ここに来ない(#986)。fd 複製(`2>&1`)は split_commands が既に落としている(#1034)。
         for target in redirects:
             if target in ("/dev/null", "/dev/stderr", "/dev/stdout"):
                 continue
+            # 文言は実装に合わせる(#1034 Requirement 4、方針A)。以前は
+            # 「一時ファイルが要る場合はスクラッチパッドディレクトリを使ってください」と
+            # 案内していたが、**この検査はリダイレクト先を問わないため、スクラッチパッドへ
+            # 書こうとしても同じく拒否される**。実行できない手段を案内していた。
+            #
+            # 実装をメッセージに寄せる(スクラッチパッド配下だけ許可する)道もあるが、
+            # それは Read-Only Stages の境界を「リポジトリ内を書き換えない」から
+            # 「特定ディレクトリ以外を書き換えない」へ広げる変更であり、影響が大きい。
+            # ここでは案内のほうを事実に合わせる。
             emit_deny(
                 "`%s` は読み取り専用ステージです(CLAUDE.md → Read-Only Stages)。"
                 "リダイレクトによるファイル書き込み(%s)は実行できません。"
-                "一時ファイルが要る場合はスクラッチパッドディレクトリを使ってください。"
+                "**書き込み先を問わず**拒否されます(スクラッチパッドも含む)。"
+                "この段階で必要な情報は、パイプと標準出力だけで組み立ててください。"
                 % (stage, target)
             )
 
@@ -302,7 +312,20 @@ SEPARATORS = {";", "&", "&&", "|", "||", "\n"}
 
 # 出力のリダイレクト。トークンとして現れたものだけがシェルの演算子であり、
 # 引用符の内側の `>` は文字列の一部としてトークンに埋もれる。
-REDIRECTS = {">", ">>", ">|", ">&"}
+#
+# 演算子は2種類あり、**ターゲットの意味が逆になる**(#1034)。
+#
+#   ファイルへ書く   `>` `>>` `>|` `&>`  … 直後のトークンはファイル名
+#   fd を複製する    `>&`               … 直後のトークンは fd 番号か `-`(クローズ)
+#
+# `2>&1` はファイルを1バイトも作らない。これをファイル名として許可リストに
+# かけていたため、読み取り専用ステージで正当な調査が拒否されていた。
+# 逆に `&>` は列挙から漏れており、`echo x &> real.txt` が素通りしていた。
+# `&>/dev/null` が通っていたのは正しく除外されていたからではなく、
+# **オペレータ自体が見えていなかった偶然**である。
+FILE_REDIRECTS = {">", ">>", ">|", "&>"}
+FD_DUPLICATIONS = {">&"}
+REDIRECTS = FILE_REDIRECTS | FD_DUPLICATIONS
 
 # 先頭から剥がすラッパー。値を取る引数を持つものは、その分も読み飛ばす。
 # 網羅は不可能なので、これは「既知の穴を塞ぐ」列挙である。
@@ -342,19 +365,25 @@ def split_commands(command):
     commands = []
     argv = []
     redirects = []
-    expect_redirect_target = False
+    # None = ターゲットを待っていない / True = ファイル名を待つ / False = fd を待つ
+    expect_target = None
     for token in tokens:
-        if expect_redirect_target:
-            redirects.append(token)
-            expect_redirect_target = False
+        if expect_target is not None:
+            # fd 複製のターゲット(`1` / `2` / `-`)はファイルではないので捨てる。
+            if expect_target:
+                redirects.append(token)
+            expect_target = None
             continue
         if token in SEPARATORS:
             if argv or redirects:
                 commands.append((argv, redirects))
             argv, redirects = [], []
             continue
-        if token in REDIRECTS:
-            expect_redirect_target = True
+        if token in FD_DUPLICATIONS:
+            expect_target = False
+            continue
+        if token in FILE_REDIRECTS:
+            expect_target = True
             continue
         argv.append(token)
     if argv or redirects:
