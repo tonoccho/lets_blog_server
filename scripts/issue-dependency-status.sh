@@ -13,13 +13,24 @@
 #      この事実主張も当時は正しかった)
 #
 # 親トラッキングIssue(#575)は分割子が全てDoneでも自身はOPENのまま残るため、
-# 2つの判定が同時に成立してしまう。加えて#584には正式なblocked_byリンクが1本も無く
-# (`dependencies/blocked_by`は空配列を返す)、依存関係は本文の散文としてしか存在しない。
-# 散文は実行のたびに解釈し直されるので、解釈が揺れる。
+# 2つの判定が同時に成立してしまう。
 #
 # このスクリプトは判定そのものは行わない。判定の「入力」を、誰がいつ実行しても
 # 同じ形で得られるように固定する。判定基準は .claude/CLAUDE.md の
 # 「Dependency Resolution」節を参照すること。
+#
+# GitLab移行について(#1024):
+#
+# GitHubの `dependencies/blocked_by` は方向を持つ正式な依存リンクで、旧版の
+# CLAUDE.md ルール1はこれを「唯一の状態ベースのブロッカー」と定めていた。
+# **GitLab Community Edition にこれは無い。** `blocks` / `is_blocked_by` の
+# リンク種別は Premium 以上で、CEで使えるのは方向を持たない `relates_to` だけである。
+# したがって本スクリプトは「正式な依存リンク」ではなく「関連リンク」を出力し、
+# それが状態ベースのブロッカーではないことを出力自身に明記する。
+# ルール1の改訂については CLAUDE.md → Dependency Resolution を参照。
+#
+# 親子関係(旧 sub_issues)は REST には無い(404)。GraphQL の work item 階層なら
+# CEでも取得できるので、そちらを使う。
 #
 # 使い方:
 #   scripts/issue-dependency-status.sh <issue-number>
@@ -41,106 +52,107 @@ if ! [[ "$ISSUE" =~ ^[0-9]+$ ]]; then
     exit 2
 fi
 
-if ! command -v gh >/dev/null 2>&1; then
-    echo "エラー: ghコマンドが見つかりません。bin/loop exec 経由で実行してください。" >&2
+if ! command -v glab >/dev/null 2>&1; then
+    echo "エラー: glabコマンドが見つかりません。" >&2
     exit 2
 fi
 
-if ! REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)" || [ -z "$REPO" ]; then
-    echo "エラー: リポジトリを特定できませんでした(ghの認証切れ、またはリポジトリ外での実行)" >&2
-    exit 1
-fi
-
-# gh api を叩いて配列を返す。失敗を黙って空配列にすると「依存なし」と区別できず、
-# 一時的なネットワーク/レート制限エラーが「ブロッカー無し」に化けるので、明示的に落とす。
-# (set -euo pipefail の下では代入の失敗が無言終了になるため、ここで握って理由を出す)
-fetch_array() {
+# 取得に失敗したら必ず落とす。失敗を黙って空配列にすると「依存なし」と区別できず、
+# 一時的なネットワーク/レート制限エラーが「ブロッカー無し」に化ける。それは #751 と
+# 同じ種類の事故である。(set -euo pipefail の下では代入の失敗が無言終了になるため、
+# ここで握って理由を出す)
+fetch() {
     local path="$1"
+    local label="$2"
     local out
-    if ! out="$(gh api "$path" --paginate 2>&1)"; then
-        echo "エラー: $path の取得に失敗しました。判定を出さずに中断します。" >&2
+    if ! out="$(glab api "$path" 2>&1)"; then
+        echo "エラー: ${label} の取得に失敗しました。判定を出さずに中断します。" >&2
         echo "$out" | head -3 >&2
         exit 1
     fi
-    echo "$out" | jq -s 'add // []'
+    echo "$out"
 }
 
 # Issue本体。存在しなければここで落ちる。
-if ! SELF="$(gh issue view "$ISSUE" --repo "$REPO" --json number,title,state,body 2>/dev/null)"; then
-    echo "エラー: Issue #$ISSUE を取得できませんでした($REPO)" >&2
-    exit 1
-fi
+SELF="$(fetch "projects/:id/issues/${ISSUE}" "Issue #${ISSUE}")"
 
-# 1行サマリを出す。状態はライブ取得した値のみを使う。
+# 1行サマリ。状態はライブ取得した値のみを使う。
 print_issue_line() {
     local n="$1"
     local prefix="$2"
     local json state title closed
 
-    if ! json="$(gh issue view "$n" --repo "$REPO" --json number,title,state,closedAt 2>/dev/null)"; then
-        echo "${prefix}#${n} <取得失敗: このリポジトリに存在しない可能性>"
+    if ! json="$(glab api "projects/:id/issues/${n}" 2>/dev/null)"; then
+        echo "${prefix}#${n} <取得失敗: このプロジェクトに存在しない可能性>"
         return
     fi
 
     state="$(echo "$json" | jq -r .state)"
     title="$(echo "$json" | jq -r .title)"
-    closed="$(echo "$json" | jq -r '.closedAt // "-"')"
-
-    # 親トラッキングIssueの見落としを防ぐため、sub-issueの内訳も併せて出す。
-    # 分割子が全てCLOSEDなのに親がOPEN、という#575のケースがここで可視化される。
-    # 取得に失敗したときは「分割子なし」と区別できるよう明示する。黙って空扱いにすると、
-    # 親トラッキングIssueの分割子が全てCLOSEDという事実を見落としたまま判定が進む。
-    local subs sub_total sub_open sub_note=""
-    if subs="$(gh api "repos/$REPO/issues/$n/sub_issues" --paginate 2>/dev/null)"; then
-        sub_total="$(echo "$subs" | jq -s 'add // [] | length')"
-        if [ "$sub_total" -gt 0 ]; then
-            sub_open="$(echo "$subs" | jq -s '[add[] | select(.state == "open")] | length')"
-            sub_note=" sub-issues=${sub_total}(open ${sub_open})"
-            if [ "$state" = "OPEN" ] && [ "$sub_open" -eq 0 ]; then
-                sub_note="${sub_note} ※親はOPENだが分割子は全てCLOSED"
-            fi
-        fi
-    else
-        sub_note=" ※sub-issuesの取得に失敗(分割子の有無は未確認)"
-    fi
-
-    echo "${prefix}#${n} ${state} closed=${closed}${sub_note} ${title}"
+    # closed_at は GitHub から移行した Issue では null になっている(移行時に
+    # 引き継がれなかった)。GitLab 上で閉じた Issue には入る。`-` は「閉じていない」
+    # ではなく「不明」であり、state と混同しないこと。
+    closed="$(echo "$json" | jq -r '.closed_at // "不明(移行前に閉じた可能性)"')"
+    if [ "$state" = "opened" ]; then closed="-"; fi
+    echo "${prefix}#${n} ${state} closed=${closed} ${title}"
 }
 
 echo "=== 対象 Issue ==="
 print_issue_line "$ISSUE" ""
 
+# 親トラッキングIssueの見落としを防ぐため、子アイテムの内訳を出す。
+# 分割子が全てCLOSEDなのに親がOPEN、という#575のケースがここで可視化される。
+#
+# REST の sub_issues / children は GitLab CE には無い(404)。GraphQL の
+# work item 階層ウィジェットならCEでも取れる。取得に失敗したときは「子は無い」と
+# 区別できるよう明示する。黙って空扱いにすると、分割子が全てCLOSEDという事実を
+# 見落としたまま判定が進む。
 echo
-echo "=== 正式な依存リンク (GitHub issue dependencies) ==="
-echo "-- blocked_by (OPENならこれが唯一の状態ベースのブロッカー) --"
-BLOCKED_BY="$(fetch_array "repos/$REPO/issues/$ISSUE/dependencies/blocked_by")"
-BLOCKED_BY_COUNT="$(echo "$BLOCKED_BY" | jq 'length')"
-if [ "$BLOCKED_BY_COUNT" -eq 0 ]; then
-    echo "(なし)"
-    echo "  → 正式なリンクが張られていない。この場合、本文の散文だけが依存の記録になる。"
-    echo "    散文の依存Issueの状態は、それ単体ではブロッカーにしない"
-    echo "    (.claude/CLAUDE.md の Dependency Resolution を参照)。"
+echo "=== 子アイテム(親トラッキングIssueの見落とし防止) ==="
+GQL='{ project(fullPath: "'"${GITLAB_PROJECT_PATH:-seiji/lets_blog_server}"'") { workItems(iid: "'"$ISSUE"'") { nodes { widgets { ... on WorkItemWidgetHierarchy { hasChildren children { nodes { iid state } } } } } } } }'
+if CHILDREN_RAW="$(glab api graphql -f query="$GQL" 2>/dev/null)"; then
+    CHILDREN="$(echo "$CHILDREN_RAW" \
+        | jq -c '[.data.project.workItems.nodes[]?.widgets[]? | select(.children != null) | .children.nodes[]?]' 2>/dev/null || echo '[]')"
+    CHILD_TOTAL="$(echo "$CHILDREN" | jq 'length')"
+    if [ "$CHILD_TOTAL" -eq 0 ]; then
+        echo "(子アイテムなし)"
+    else
+        CHILD_OPEN="$(echo "$CHILDREN" | jq '[.[] | select(.state == "OPEN")] | length')"
+        echo "子アイテム ${CHILD_TOTAL}件(open ${CHILD_OPEN}件)"
+        for n in $(echo "$CHILDREN" | jq -r '.[].iid'); do
+            print_issue_line "$n" "  "
+        done
+        SELF_STATE="$(echo "$SELF" | jq -r .state)"
+        if [ "$SELF_STATE" = "opened" ] && [ "$CHILD_OPEN" -eq 0 ]; then
+            echo "  ※親はOPENだが子アイテムは全てCLOSED。#575 と同じ形である。"
+            echo "    親がOPENであること自体をブロッカーにしてはいけない。"
+        fi
+    fi
 else
-    for n in $(echo "$BLOCKED_BY" | jq -r '.[].number'); do
-        print_issue_line "$n" "  "
-    done
+    echo "※子アイテムの取得に失敗(有無は未確認)。GraphQLが使えない可能性がある。"
 fi
 
-echo "-- blocking (このIssueが塞いでいる先) --"
-BLOCKING="$(fetch_array "repos/$REPO/issues/$ISSUE/dependencies/blocking")"
-if [ "$(echo "$BLOCKING" | jq 'length')" -eq 0 ]; then
+echo
+echo "=== 関連リンク (GitLab issue links) ==="
+# GitLab CE のリンクは relates_to のみで、方向を持たない。GitHub の blocked_by と
+# 同じものだと誤解されないよう、ここで明示する。
+LINKS="$(fetch "projects/:id/issues/${ISSUE}/links" "関連リンク")"
+if [ "$(echo "$LINKS" | jq 'length')" -eq 0 ]; then
     echo "(なし)"
 else
-    for n in $(echo "$BLOCKING" | jq -r '.[].number'); do
-        print_issue_line "$n" "  "
-    done
+    echo "$LINKS" | jq -r '.[] | "  #\(.iid) \(.state) link_type=\(.link_type // "relates_to") \(.title)"'
 fi
+echo
+echo "  注意: GitLab CE のリンク種別は relates_to のみで、方向を持たない。"
+echo "  これは GitHub の blocked_by とは違い、それ自体は状態ベースのブロッカーではない。"
+echo "  判断すべきは「このIssueの受入基準を現在のコードベースに対して実装し検証できるか」。"
+echo "  (.claude/CLAUDE.md の Dependency Resolution を参照)"
 
 echo
 echo "=== 本文の依存節が挙げる Issue ==="
 # 依存の見出しから次の見出しまでを切り出し、#<数字>を拾う。
 # 見出しの表記は揺れる(「## 依存」「## 依存関係」「## Dependencies」)ので前方一致で拾う。
-DEP_SECTION="$(echo "$SELF" | jq -r .body \
+DEP_SECTION="$(echo "$SELF" | jq -r '.description // ""' \
     | awk '
         /^#+[[:space:]]*(依存|Dependencies|Depends)/ { inside = 1; next }
         inside && /^#+[[:space:]]/ { inside = 0 }
@@ -170,10 +182,9 @@ else
         echo "  「A4, B6, C14」というEpicコードの略記)で、実行のたびに"
         echo "  「ラベル→Issue番号」の翻訳が必要になる。この翻訳が実行ごとにぶれるため、"
         echo "  判定も揺れる(#751)。"
-        echo "  対処: 判定を出す前に、Epicコードが指すIssue番号を特定して本文を更新するか、"
-        echo "  GitHubの正式なblocked_byリンクを張ること。特定できないなら、"
-        echo "  その旨を判定コメントに書く(「依存不明のため差し戻し」は許容されるが、"
-        echo "  「依存が未解決のため差し戻し」と断定してはいけない)。"
+        echo "  対処: 判定を出す前に、Epicコードが指すIssue番号を特定して本文を更新すること。"
+        echo "  特定できないなら、その旨を判定コメントに書く(「依存不明のため差し戻し」は"
+        echo "  許容されるが、「依存が未解決のため差し戻し」と断定してはいけない)。"
     else
         for n in $DEP_NUMBERS; do
             print_issue_line "$n" "  "
@@ -181,7 +192,7 @@ else
         echo
         echo "  注意: ここに挙がったIssueがOPENであること自体はブロッカーではない。"
         echo "  判断すべきは「このIssueの受入基準を現在のコードベースに対して実装し検証できるか」。"
-        echo "  親がOPENでも分割子が全てCLOSEDで実体がコードにあるなら着手可能と判定してよい。"
+        echo "  親がOPENでも子アイテムが全てCLOSEDで実体がコードにあるなら着手可能と判定してよい。"
         echo "  どちらの根拠で判定したかは、判定コメントに必ず明記すること。"
     fi
 fi
@@ -190,15 +201,11 @@ echo
 echo "=== 既存の Readiness 判定コメント ==="
 # 逆向きの判定を無自覚に投稿しないための材料。判定を覆すときは、
 # ここに出たコメントが挙げた根拠を1つずつライブで再確認すること(#751)。
-if ! COMMENTS_JSON="$(gh issue view "$ISSUE" --repo "$REPO" --json comments 2>&1)"; then
-    echo "エラー: コメントの取得に失敗しました。判定を出さずに中断します。" >&2
-    echo "$COMMENTS_JSON" | head -3 >&2
-    exit 1
-fi
-COMMENTS="$(echo "$COMMENTS_JSON" \
-    | jq -r '[.comments[]
+NOTES="$(fetch "projects/:id/issues/${ISSUE}/notes" "コメント")"
+COMMENTS="$(echo "$NOTES" \
+    | jq -r '[.[]
         | select(.body | test("READY|Ready|Backlog|readiness|Readiness"))
-        | "\(.createdAt)\t\(.body | split("\n")[0:2] | join(" / ") | .[0:160])"] | .[]')"
+        | "\(.created_at)\t\(.body | split("\n")[0:2] | join(" / ") | .[0:160])"] | .[]')"
 
 if [ -z "$COMMENTS" ]; then
     echo "(なし)"

@@ -66,10 +66,11 @@ Is this Issue blocked? Judge this **per `CLAUDE.md` → Dependency Resolution** 
 single definition, shared with `ready-issue`, `work-next`, and `implement-issue`. Do not apply a
 different one here.
 
-At this gate that means: an **open `blocked_by` link** blocks. A dependency named only in the
-body's prose does **not** block on its board status alone — Backlog does not assert the work is
-startable, only that it is worth doing, so a prose dependency that is still open is not a reason
-to hold an Issue in Inbox. Whether the substance actually exists is `ready-issue`'s gate, not
+At this gate that means: **no link and no board status blocks by itself** — GitLab CE has no
+directional dependency link, so there is nothing here that can declare an Issue blocked. Backlog
+does not assert the work is startable, only that it is worth doing, so a dependency that is
+still open is not a reason to hold an Issue in Inbox. Whether the substance actually exists is
+`ready-issue`'s gate, not
 this one (#751).
 
 Read the Issue's recorded dependencies with:
@@ -109,7 +110,9 @@ The default. Every Issue that is not blocked and is not a duplicate moves to Bac
 
 ### Keep in Inbox
 
-Blocked — it has an open `blocked_by` link. Name it. A prose-only dependency is not a blocker here (see above).
+Blocked — reaching this classification requires a concrete, named reason why the work cannot be
+started at all (not merely that a dependency Issue is open). Name it. An open dependency Issue is
+not by itself a blocker here (see above).
 
 Epics never reach this step: they are excluded in Step 1, before any classification.
 
@@ -154,7 +157,7 @@ Count and list.
 
 ## Left in Inbox
 
-Count and list, naming the open `blocked_by` Issue for each one.
+Count and list, naming the concrete reason each one is held.
 
 ## Recommended for Closing
 
