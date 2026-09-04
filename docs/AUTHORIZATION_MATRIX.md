@@ -20,7 +20,7 @@ Bearerトークンが提示されていれば検証するが、トークンが�
 | ランタイム | 認証ゲートの担い手 | 公開パス | 対応する統合テスト |
 |---|---|---|---|
 | gateway | 担わない(方針どおり。ADR-0008)。提示されたトークンの検証のみ | 全経路(`anyExchange().permitAll()`) | 該当なし(ゲートを担わないため) |
-| legacy-api | 自サービスの`SecurityConfig`(#566) | `/api/health`、`/api/auth/setup`、`/api/auth/setup-status`、`/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html` | `services/legacy-api/src/test/java/com/letsblog/api/integration/AuthorizationMatrixIntegrationTest.java` |
+| legacy-api(**issue #583/#917で削除済み。`services/legacy-api`はリポジトリに存在しない**) | 自サービスの`SecurityConfig`(#566) | `/api/health`、`/api/auth/setup`、`/api/auth/setup-status`、`/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html` | 該当なし(サービス自体が削除済み。移設先の各行を参照) |
 | platform | 自サービスの`SecurityConfig`(#705。**参照実装**) | `/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html`(`/api/internal/platform/**` は #742 でJWT必須へ移した) | `services/platform/src/test/java/com/letsblog/platform/integration/AuthorizationMatrixIntegrationTest.java`(**テストのテンプレート**) |
 | identity | 自サービスの`SecurityConfig`(#772) | `/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html` | `services/identity/src/test/java/com/letsblog/identity/integration/AuthorizationMatrixIntegrationTest.java` |
 | project | 自サービスの`SecurityConfig`(#772) | `/actuator/**`、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html` | `services/project/src/test/java/com/letsblog/project/integration/AuthorizationMatrixIntegrationTest.java` |
@@ -234,14 +234,20 @@ Web 管理画面は `requireAdminSession()` で守られているが、gateway �
 
 ---
 
-## legacy-api のエンドポイント別マトリクス
+## legacy-api のエンドポイント別マトリクス(#583/#917で削除済み。以下は解体完了直前の記録)
 
-issue #568。`services/legacy-api` に残っている REST API エンドポイントについて、現行の認可チェックと
-実際に返るステータスを一覧化する。
+issue #568。**`services/legacy-api` はissue #583で解体され、#917でリポジトリから完全に削除された
+(2026-08-31。以下のディレクトリ・コマンドはもう存在せず再実行できない)。**
+本節は削除される直前に `services/legacy-api` に残っていた REST API エンドポイントの記録であり、
+下記「以降の表に出てくる移設済みコントローラの現在の所有サービス」がその後の移設先の一覧として
+今も有効である。個々のエンドポイントの現行の認可チェックは、移設先サービスの
+`## XxxController` 節(本ファイル後半)を参照すること。
 
-**実測値(2026-08-31 時点、develop): 53エンドポイント / 11コントローラファイル**(`HealthController` を含む)。
+**実測値(2026-08-31 時点、develop、削除直前): 53エンドポイント / 11コントローラファイル**
+(`HealthController` を含む)。
 
 ```bash
+# 実行不能(services/legacy-api は削除済み)。削除前の実測手順として記録のみ残す。
 ls services/legacy-api/src/main/java/com/letsblog/api/controller/*.java | wc -l
 grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
   services/legacy-api/src/main/java/com/letsblog/api/controller/*.java | wc -l
@@ -296,8 +302,8 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 | `AuditLogController` | log-writer |
 
 各行の「未認証で401になるか」は、移設先サービスの `SecurityConfig` が担う。
-現時点で `SecurityConfig` が認証ゲートを持つのは legacy-api と platform のみで、
-残りのサービスは #772 で対応する(冒頭の「認証ゲートの実施レイヤー」節を参照)。
+**#772 で全サービスに認証ゲートが揃った**(冒頭の「認証ゲートの実施レイヤー」節を参照)。
+本節が記録している2026-08-31時点(legacy-api削除直前)には既に#772が適用済みだった。
 
 `CmsMediaBridgeController` は #573 で legacy-api に追加されたのち #709 で publishing-service へ
 移設され、パスも `/api/internal/cms/**` から、他の内部ブリッジと同じ
@@ -307,8 +313,9 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 なお #566 で `AuthController` のログイン・2FA・パスワードリセット系8エンドポイントが撤去され、
 現在 `AuthController` に残るのは公開パスの `setup` / `setup-status` の2件のみである。
 
-対応する統合テストは
-`services/legacy-api/src/test/java/com/letsblog/api/integration/AuthorizationMatrixIntegrationTest.java`。
+当時対応していた統合テスト`services/legacy-api/src/test/java/com/letsblog/api/integration/AuthorizationMatrixIntegrationTest.java`は、
+`services/legacy-api`自体の削除(#583/#917)に伴い存在しない。現行の対応する統合テストは、
+移設先の各サービスの`AuthorizationMatrixIntegrationTest`(冒頭の「認証ゲートの実施レイヤー」節の表を参照)。
 
 ## 認可チェックの網羅状況(issue #830)
 
@@ -839,10 +846,14 @@ issue #566でログイン(`POST /api/auth/login`)・2FA(`GET/POST /api/auth/totp
 残る2エンドポイントは、Keycloak上にまだアカウントが1つも存在しない状態からのWeb管理画面
 初回セットアップ専用で、いずれも`SecurityConfig.PUBLIC_PATHS`により公開されている。
 
+**issue #583でlegacy-apiが解体された際、この2エンドポイントは identity-service の
+`AuthSetupController`(クラス名が変わった)へ移設された(`services/legacy-api`自体は
+issue #583/#917で削除済み。issue #991で本節の`services/legacy-api/...`参照を現状のパスへ修正)。**
+
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
-| GET /api/auth/setup-status | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | PUBLIC_PATHS。`needsSetup` は**ローカル`users`テーブルの件数のみ**で判定する(`UserService#hasAnyUser`: `services/legacy-api/src/main/java/com/letsblog/api/service/UserService.java:116`)。Keycloak側は見ないため、ローカル`users`が空でKeycloakに同一メールのアカウントが残っている場合、`needsSetup=true` を返した直後の `POST /api/auth/setup` が Keycloak の409により502で失敗しうる |
-| POST /api/auth/setup | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | PUBLIC_PATHS。初期管理者セットアップ用。**Keycloak Admin REST API経由でKeycloak側にもアカウントを作る**ため、作成した資格情報でそのままKeycloakログインが可能(`UserService#setupInitialAdmin`: `services/legacy-api/src/main/java/com/letsblog/api/service/UserService.java:132`。140行目で`keycloakAdminClient.createUser`、142行目で`setPassword`を呼び、その後ローカル`users`行を`role=admin`+`ROLE_ADMIN`で作成する。issue #681で変更。#564時点の「ローカルDB直書きのみ」の記述はそれ以前の実装)。ユーザーが1人でも存在する場合は400で拒否される |
+| GET /api/auth/setup-status | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | PUBLIC_PATHS。`needsSetup` は**ローカル`users`テーブルの件数のみ**で判定する(`UserService#hasAnyUser`: `services/identity/src/main/java/com/letsblog/identity/service/UserService.java:155`)。Keycloak側は見ないため、ローカル`users`が空でKeycloakに同一メールのアカウントが残っている場合、`needsSetup=true` を返した直後の `POST /api/auth/setup` が Keycloak の409により502で失敗しうる |
+| POST /api/auth/setup | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | PUBLIC_PATHS。初期管理者セットアップ用。**Keycloak Admin REST API経由でKeycloak側にもアカウントを作る**ため、作成した資格情報でそのままKeycloakログインが可能(`UserService#setupInitialAdmin`: `services/identity/src/main/java/com/letsblog/identity/service/UserService.java:175`。183行目で`keycloakAdminClient.createUser`、185行目で`setPassword`を呼び、その後ローカル`users`行を`role=admin`+`ROLE_ADMIN`で作成する。issue #681で変更、issue #955でKeycloakのrealmロール`admin`付与も追加。#564時点の「ローカルDB直書きのみ」の記述はそれ以前の実装)。ユーザーが1人でも存在する場合は400で拒否される |
 
 ## BackupController (2エンドポイント、ベースパス `/api/backup`)
 
@@ -899,6 +910,20 @@ Authorizationヘッダーを付けて中継するため、認証必須化の影�
 | GET /api/dashboard/container-status | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | Dockerコンテナ稼働状況 |
 | GET /api/dashboard/container-status/stream | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | 上記のSSE配信版 |
 
+## DiagramController (6エンドポイント、ベースパスなし)
+
+media-service所有。draw.ioで作成したダイアグラムの一覧・詳細・バイナリ取得・作成・更新・削除
+(issue #830で`requireProjectMemberOrAdmin`系を追加)。`projectId`を持たないリソースはadmin限定。
+
+| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
+| --- | --- | --- | --- | --- | --- | --- |
+| POST /api/diagrams | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `DiagramController.java:33-43`。リクエストの`projectId`で判定 |
+| GET /api/diagrams | requireProjectMemberOrAdmin(projectId指定時)/requireAdmin(未指定時) | 401 | 403 | 認可OK | 現状維持 | `DiagramController.java:45-61`。`projectId`未指定は全プロジェクト横断一覧になるためadmin限定 |
+| GET /api/diagrams/{id} | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `DiagramController.java:63-66,118-122`。`findAuthorized`が対象を読んでから`projectId`で判定するため、id=1のダイアグラムが存在しない場合は404が先に返る |
+| GET /api/diagrams/{id}/svg | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `DiagramController.java:68-75,118-122`。同上(存在しない場合は404が先) |
+| PUT /api/diagrams/{id} | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `DiagramController.java:77-84,118-122`。同上 |
+| DELETE /api/diagrams/{id} | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `DiagramController.java:86-90,118-122`。同上(存在しない場合は404が先) |
+
 ## FrontendErrorLogController (2エンドポイント、ベースパス `/api/logs`)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
@@ -932,6 +957,20 @@ matcher の否定先読み(`(?!api/auth|...)`)ではなく `proxy()` 内で弾�
 `/client-errors-foo` や `/client-errors/nested` のような「`client-errors` で始まる別のルート」
 まで認証ゲートを外れてしまい、そこにページを足した時点で無言でゲートが消える。
 
+## GeneratedImageController (6エンドポイント、ベースパスなし)
+
+media-service所有。ComfyUIで生成した画像とパラメータの一覧・詳細・バイナリ取得
+(issue #830で`requireProjectMemberOrAdmin`系を追加)。`projectId`を持たないリソースはadmin限定。
+
+| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET /api/generated-images | requireProjectMemberOrAdmin(projectId指定時)/requireAdmin(未指定時) | 401 | 403 | 認可OK | 現状維持 | `GeneratedImageController.java:67-91`。`projectId`未指定は全プロジェクト横断一覧になるためadmin限定 |
+| GET /api/generated-images/{id} | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `GeneratedImageController.java:93-96,156-160`。`findAuthorized`が対象を読んでから`projectId`で判定するため、id=1の生成画像が存在しない場合は404が先に返る |
+| POST /api/generated-images | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `GeneratedImageController.java:103-113`。リクエストの`projectId`で判定 |
+| PUT /api/generated-images/{id}/tags | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `GeneratedImageController.java:116-122,156-160`。同上(存在しない場合は404が先) |
+| GET /api/generated-images/{id}/file | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `GeneratedImageController.java:124-132,156-160`。同上(存在しない場合は404が先) |
+| DELETE /api/generated-images/{id} | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `GeneratedImageController.java:134-140,156-160`。同上(存在しない場合は404が先) |
+
 ## GenerationJobController (3エンドポイント、ベースパス `/api/generation-jobs`)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
@@ -940,11 +979,42 @@ matcher の否定先読み(`(?!api/auth|...)`)ではなく `proxy()` 内で弾�
 | GET /api/generation-jobs/{id} | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | |
 | PATCH /api/generation-jobs/{id} | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | #573 stage2で追加。media-service側の非同期ジョブランナーがBearerトークンを転送して呼ぶ内部向け更新API |
 
+## GlobalTagDesignSettingController (3エンドポイント、ベースパス `/api/tag-design-settings`)
+
+project-service所有(issue #763)。プロジェクトに紐付いていないサイト向けのグローバル既定タグ
+デザイン。`TagDesignSettingController`(プロジェクト単位、`project_id`あり)とは別クラスで、
+こちらは`project_id IS NULL`の1組を扱うため判定に使えるメンバーシップが無く、admin限定にしている。
+
+| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET /api/tag-design-settings | requireAdmin | 401 | 403 | 認可OK | 現状維持 | `GlobalTagDesignSettingController.java:54-58` |
+| PUT /api/tag-design-settings/{tagType} | requireAdmin | 401 | 403 | 認可OK | 現状維持 | `GlobalTagDesignSettingController.java:60-66` |
+| POST /api/tag-design-settings/{tagType}/generate | requireAdmin | 401 | 403 | 認可OK | 現状維持 | `GlobalTagDesignSettingController.java:68-75` |
+
 ## HealthController (1エンドポイント、ベースパスなし)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
 | GET /api/health | なし(公開) | 該当なし(公開エンドポイント) | 該当なし | 認可OK | 現状維持(公開エンドポイントとして必要) | `SecurityConfig.PUBLIC_PATHS`で明示的に除外 |
+
+## IdentityController (1エンドポイント、ベースパス `/api/identity`)
+
+identity-service所有(issue #561)。`GET /api/identity/me`・`/me/permissions`・`PATCH /me/preferences`は
+本節ではなく「identity-service の `/api/users` の認可」節の表(#784)に既に記載済みのため、
+ここには含めない。issue #991時点でその節に無かった1エンドポイントのみを追加する。
+
+| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET /api/identity/users/{id}/permissions | requireSelfOrAdmin | 401 | 403 | 認可OK | 現状維持 | `IdentityController.java:76-80` |
+
+## MediaController (1エンドポイント、ベースパスなし)
+
+media-service所有(issue #573 stage3)。CMSのメディアライブラリへ直接アップロードするため、
+サイトが属するプロジェクトのメンバー(またはadmin)に限定する(issue #830)。
+
+| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
+| --- | --- | --- | --- | --- | --- | --- |
+| POST /api/media/upload | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `MediaController.java:41-46`。siteキーから`CmsBridgeClient.resolveProjectIdBySiteKey`でprojectIdを逆引きして判定 |
 
 ## MetadataController (2エンドポイント、ベースパス `/api/metadata`)
 
@@ -1004,6 +1074,17 @@ matcher の否定先読み(`(?!api/auth|...)`)ではなく `proxy()` 内で弾�
 | PUT .../adsense/client-secret | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | |
 | DELETE .../adsense | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | |
 | POST .../adsense/oauth-callback | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | Next.js側OAuthコールバックからのサーバー間呼び出し。ブラウザ直叩き想定ではないが、チェック自体はある |
+
+## ProjectContentSettingsController (1エンドポイント、ベースパス `/api/projects/{projectId}`)
+
+content-service所有(issue #576、#913)。実装は`GET /content-settings`と`PUT /css-selector-prefix`の
+計2エンドポイントを持つが、`PUT`は移設前の記載のまま「## ProjectController」節の
+`PUT /api/projects/{id}/css-selector-prefix`行に残っている(#991のスコープ外。節の再編は行わない)。
+ここには issue #991時点で未記載だった`GET`のみを追加する。
+
+| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET /api/projects/{projectId}/content-settings | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | `ProjectContentSettingsController.java:43-47` |
 
 ## ProjectController (42エンドポイント、ベースパス `/api/projects`)
 
@@ -1067,11 +1148,39 @@ matcher の否定先読み(`(?!api/auth|...)`)ではなく `proxy()` 内で弾�
 | GET .../google-analytics | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `GoogleAnalyticsReportService.getReport()`内 |
 | GET .../adsense | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `AdSenseReportService.getReport()`内 |
 
+## ProjectImageSettingsController (1エンドポイント、ベースパス `/api/projects/{id}`)
+
+media-service所有(issue #583)。実装は`GET /image-settings`と4件の`PUT`(画像生成プロンプト/サイズ
+既定値・記事画像リサイズ既定値・コンテンツフィルタ設定)の計5エンドポイントを持つが、`PUT`4件は
+legacy-apiからの移設前の記載のまま「## ProjectController」節に残っている(#991のスコープ外。
+節の再編は行わない)。ここには issue #991時点で未記載だった`GET`のみを追加する。
+
+| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET /api/projects/{id}/image-settings | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | `ProjectImageSettingsController.java:50-58` |
+
+## ProjectMediaGarbageCollectionController (2エンドポイント、ベースパス `/api/projects/{id}/media-garbage-collection`)
+
+media-service所有(issue #573 stage3)。プロジェクト画面の「ガベージコレクション」タブ向けAPI(issue #500)。
+
+| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET /api/projects/{id}/media-garbage-collection/scan | requireAdmin | 401 | 403 | 認可OK | 現状維持 | `ProjectMediaGarbageCollectionController.java:41-45` |
+| POST /api/projects/{id}/media-garbage-collection/delete | requireAdmin | 401 | 403 | 認可OK | 現状維持 | `ProjectMediaGarbageCollectionController.java:47-56` |
+
 ## ProjectUserController (1エンドポイント、ベースパス `/api/project-users`)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
 | GET /api/project-users | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 全プロジェクト横断のproject-userペア一覧。統合テストで代表検証済み(b) |
+
+## RoleController (1エンドポイント、ベースパス `/api/roles`)
+
+identity-service所有(RBAC、issue #653系)。
+
+| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET /api/roles | requirePermission(ROLE_MANAGE) | 401 | 403 | 認可OK | 現状維持 | `RoleController.java:25-29` |
 
 ## SiteController (11エンドポイント、ベースパス `/api/sites`)
 
