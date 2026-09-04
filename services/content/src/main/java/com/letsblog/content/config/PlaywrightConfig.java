@@ -18,6 +18,16 @@ import java.util.List;
  * @Lazyにしているのは、Chromiumの実行バイナリが存在しない環境(ブラウザインストールをまだ
  * 行っていないローカル開発機やCI等)でもアプリ自体は起動・他機能のテストができるようにするため。
  * PlaywrightもBrowserもプロセス/ネイティブリソースを保持するため、アプリ終了時にcloseする。
+ *
+ * <p><b>ここの{@code @Lazy}だけでは足りない(issue #1046)。</b>Bean定義側の{@code @Lazy}は、
+ * eagerな消費者が{@link Browser}を直接注入した時点で効かなくなる。実際、
+ * {@link com.letsblog.content.contentcache.PlaywrightPageFetcher}と
+ * {@link com.letsblog.content.service.PreviewSkeletonFetcher}(どちらもeager singleton)が
+ * コンストラクタで素の{@code Browser}を受け取っていたため、Chromiumの無いホストでは
+ * {@code @SpringBootTest}が248件中53件全滅していた。<b>新たに{@code Browser}/{@code Playwright}を
+ * 使うBeanを足すときは、その注入点にも{@code @Lazy}を付けること。</b>
+ * media-serviceで先に同じ欠陥を直している(#1020)。付け忘れは
+ * {@code PlaywrightLazyBrowserTest}のラチェットが検知する。
  */
 @Configuration
 public class PlaywrightConfig {

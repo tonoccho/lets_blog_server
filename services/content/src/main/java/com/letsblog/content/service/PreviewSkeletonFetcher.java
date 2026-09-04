@@ -11,6 +11,7 @@ import com.microsoft.playwright.options.Cookie;
 import com.microsoft.playwright.options.WaitUntilState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
@@ -263,7 +264,30 @@ public class PreviewSkeletonFetcher {
 
     private final Browser browser;
 
-    public PreviewSkeletonFetcher(Browser browser) {
+    /**
+     * {@code @Lazy}は<b>注入点に必要</b>である(issue #1046。media-serviceの
+     * {@code RechartsRenderer}で先に判明した同型の欠陥 #1020)。
+     *
+     * <p>{@link com.letsblog.content.config.PlaywrightConfig}の{@code browser}Bean定義には
+     * 元から{@code @Lazy}が付いていたが、それだけでは効かない。{@code @Component}である本クラスは
+     * eager singletonであり、さらに
+     * {@link com.letsblog.content.controller.InternalPreviewSkeletonController}が本クラスを
+     * eagerに注入するため、コンテキスト起動時に{@code browser}が実体化され、Chromiumの実行
+     * バイナリが無いホストではApplicationContextごと落ちていた(実測:
+     * {@code chrome-headless-shell: libatk-1.0.so.0 が無い} → {@code TargetClosedError})。
+     *
+     * <p>ここに{@code @Lazy}を置くとSpringは{@link Browser}のプロキシを注入し、実体は
+     * {@code browser.newPage()}/{@code newContext()}が最初に呼ばれるまで作られない。
+     * <b>実行時経路は変わらない</b>ため、Chromiumを持つコンテナでの記事プレビューの
+     * スケルトン取得({@link #fetchAndSplice} / {@link #fetchRealPost})は従来どおり動く。
+     *
+     * <p><b>content-serviceにはeagerな消費者が2つある。</b>もう一方は
+     * {@link com.letsblog.content.contentcache.PlaywrightPageFetcher}で、片方だけ遅延にしても
+     * 症状は残る。採らなかった案は{@code docs/TEST_DOCUMENTATION.md}に記録がある。
+     *
+     * <p>この不変条件は{@code PlaywrightLazyBrowserTest}のラチェットが検査する。
+     */
+    public PreviewSkeletonFetcher(@Lazy Browser browser) {
         this.browser = browser;
     }
 

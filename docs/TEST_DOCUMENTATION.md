@@ -77,7 +77,7 @@ bash scripts/check-test-db.sh
 docker compose exec mysql bash /docker-entrypoint-initdb.d/02-create-test-schemas.sh
 ```
 
-### media-service に Chromium は要らない(#1020)
+### media / content サービスに Chromium は要らない(#1020 / #1046)
 
 media-service は `[recharts]` 組み込みタグのサーバーサイドレンダリングにヘッドレス Chromium を
 使う(`PlaywrightConfig` → `RechartsRenderer`)。**しかしテストを回すのにブラウザは要らない。**
@@ -121,6 +121,27 @@ Chromium の実行バイナリが無いホストでは ApplicationContext の生
 > **Node 側(受け入れテスト)の Playwright は別問題。** `npm run test:at` はホストの
 > `~/.cache/ms-playwright` にブラウザを要求する。こちらは実行環境を用意する話であり、
 > **#1045** で扱う。#1020 の対処はこれを解決しない。
+
+#### content-service にも同じ欠陥があった(#1046)
+
+`com.microsoft.playwright` を使うサービスは media だけではない。content-service は
+`[blogcard]`/`[amazon]` 組み込みタグのスクレイピング(`PlaywrightPageFetcher`)と、記事
+プレビューのテーマ骨格取得(`PreviewSkeletonFetcher`)で同じ `PlaywrightConfig` を使っており、
+**同じ形で `./gradlew :services:content:test` が 248件中53件失敗していた**(内訳は media と
+同じ顔ぶれ — 認可マトリクス #772 が41件、AdminAuthorization #644 が6件、Flyway 契約 #914 が
+3件、内部ブリッジが3件)。対処も同じで、**両方の注入点に `@Lazy` を付けた**。
+
+> **media と違い、eager な消費者が2つある。**片方だけ直しても、もう片方が `browser` を
+> eager に実体化するので症状はそのまま残る。「1つ直したから終わり」と読めてしまうのが
+> この欠陥の質の悪いところで、下のラチェットはそのために**パッケージ全体を走査する**。
+
+`services/content/src/test/java/com/letsblog/content/config/PlaywrightLazyBrowserTest.java` が
+media 版と同じ2つの角度で見張る。走査対象は **`com.letsblog.content`**。
+
+> **移植時の罠。** 走査対象のパッケージ名を移植元(`com.letsblog.media`)のまま残すと、候補が
+> 0件になってラチェットは**永遠に緑のまま何も検知しない**(#994 と同型)。content 版には
+> 「既知の消費者2つが走査候補に入っていること」を確かめる3本目のテストを足してあり、
+> 向け先を取り違えたらそれが落ちる。
 
 ---
 

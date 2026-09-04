@@ -4,6 +4,7 @@ import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.PlaywrightException;
 import com.microsoft.playwright.options.WaitUntilState;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 /**
@@ -23,7 +24,32 @@ public class PlaywrightPageFetcher {
     private final Browser browser;
     private final OutboundUrlGuard outboundUrlGuard;
 
-    public PlaywrightPageFetcher(Browser browser, OutboundUrlGuard outboundUrlGuard) {
+    /**
+     * {@code @Lazy}は<b>注入点に必要</b>である(issue #1046。media-serviceの
+     * {@code RechartsRenderer}で先に判明した同型の欠陥 #1020)。
+     *
+     * <p>{@link com.letsblog.content.config.PlaywrightConfig}の{@code browser}Bean定義には
+     * 元から{@code @Lazy}が付いていたが、それだけでは効かない。{@code @Component}である本クラスは
+     * eager singletonであり、さらに{@code ContentCacheService}が本クラスをeagerに注入するため、
+     * コンテキスト起動時に{@code browser}が実体化され、Chromiumの実行バイナリが無いホストでは
+     * ApplicationContextごと落ちていた(実測: {@code chrome-headless-shell:
+     * libatk-1.0.so.0 が無い} → {@code TargetClosedError})。巻き添えで認可マトリクス(#772)・
+     * AdminAuthorization(#644)・Flyway契約(#914)・内部ブリッジの計53件が常に赤になり、
+     * 本物の退行が紛れても気づけない状態だった。
+     *
+     * <p>ここに{@code @Lazy}を置くとSpringは{@link Browser}のプロキシを注入し、実体は
+     * {@code browser.newPage()}が最初に呼ばれるまで作られない。<b>実行時経路は変わらない</b>
+     * ため、Chromiumを持つコンテナでの{@code [blogcard]}/{@code [amazon]}のスクレイピングは
+     * 従来どおり動く。
+     *
+     * <p><b>content-serviceにはeagerな消費者が2つある。</b>もう一方は
+     * {@link com.letsblog.content.service.PreviewSkeletonFetcher}で、片方だけ遅延にしても
+     * 症状は残る。採らなかった案(クラス自体を{@code @Lazy}にする / プロファイル分離 /
+     * ホストへ依存パッケージを導入する)は{@code docs/TEST_DOCUMENTATION.md}に記録がある。
+     *
+     * <p>この不変条件は{@code PlaywrightLazyBrowserTest}のラチェットが検査する。
+     */
+    public PlaywrightPageFetcher(@Lazy Browser browser, OutboundUrlGuard outboundUrlGuard) {
         this.browser = browser;
         this.outboundUrlGuard = outboundUrlGuard;
     }
