@@ -19,6 +19,37 @@ import java.util.Map;
  * 変換する。React/Recharts自体は公開記事にもプレビューのWebviewにも一切配信されず、
  * サーバー内部のレンダリングにのみ使い捨てのページとして使う。
  * [recharts]組み込みタグ({@link com.letsblog.media.service.RechartsTagRenderService}参照)から呼ばれる。
+ *
+ * <h2>{@code render()}を丸ごとsynchronized(this)にしている理由(issue #1047)</h2>
+ *
+ * <p>{@code render()}は{@link #browser}(全リクエスト共有のシングルトン)から{@code newPage()}する。
+ * 複数スレッドから排他なく{@code newPage()}以降のPlaywright呼び出しを行うと、
+ * {@code PlaywrightException: Cannot find object to call pausedStateChanged}でHTTP 502になる
+ * (実運用で4並行時に概ね半数が失敗することを確認済み)。
+ *
+ * <p><b>{@code BrowserContext}を分けても直らない。</b>Playwright Javaバインディングの
+ * {@code Connection}(playwright-1.62.0の{@code com.microsoft.playwright.impl.Connection})は
+ * <b>Browser1個につき1本のメッセージパイプ</b>であり、逆アセンブルして確認した限り内部に
+ * {@code synchronized}は無い。{@code BrowserContext}/{@code Page}を分けても、それらが発行する
+ * RPCは結局同じ{@code Connection}を経由するため、複数スレッドが同時にRPCの送受信
+ * (送信→応答ポーリング→ディスパッチ)を行えば競合したままである。Playwright Javaの
+ * 公式スレッドモデルも「Playwrightインスタンスは作成したスレッドに束縛される」という前提であり、
+ * 複数スレッドからの同時アクセスはそもそも想定されていない。
+ *
+ * <p>そのため対処は<b>{@code newPage()}からpage使用後の{@code close()}までを丸ごと直列化する</b>
+ * (=1度に1リクエストしか{@link #browser}に触らせない)。既存の{@link #loadBundleJs()}の
+ * 二重チェックロックも同じ{@code this}をモニタにしているため、ロックの取得順序は
+ * 常に「{@code render()}の外側ロック→{@code loadBundleJs()}の内側ロック」の一方向のみで、
+ * デッドロックの余地は無い(Javaのモニタは再入可能)。
+ *
+ * <p><b>スループットへの影響。</b>1回のレンダリングは概ね1秒未満だが、直列化により
+ * 並行リクエストは待ち行列に積まれる。並行数が増えるほどテール待ち時間は線形に伸びるが、
+ * [recharts]組み込みタグの利用頻度・記事あたりの図表数を踏まえると許容範囲と判断した
+ * (常時大量の同時レンダリングが発生する経路ではない)。将来スループットが問題になった場合は、
+ * {@code Browser}/{@code BrowserContext}を複数プールする設計への変更を検討すること
+ * (issue #1047のGoal参照。プーリング自体は本Issueのスコープ外)。
+ *
+ * <p>回帰テスト: {@code RechartsRendererConcurrentAccessTest}。
  */
 @Component
 public class RechartsRenderer {
@@ -85,26 +116,30 @@ public class RechartsRenderer {
         args.put("gridColor", config.gridColor());
         args.put("yAxisLabel", config.yAxisLabel());
 
-        try (Page page = browser.newPage()) {
-            page.setContent("<!DOCTYPE html><html><head></head><body><div id=\"root\"></div></body></html>");
-            page.addScriptTag(new Page.AddScriptTagOptions().setContent(loadBundleJs()));
-            page.evaluate("(config) => window.renderChart(config)", args);
-            page.waitForFunction("() => window.__chartResult || window.__chartError",
-                    null, new Page.WaitForFunctionOptions().setTimeout(RENDER_TIMEOUT_MS));
+        // issue #1047: browser.newPage()からpage.close()までを丸ごとsynchronized(this)で直列化する。
+        // 理由・採らなかった案はクラスJavadoc(直列化のスコープに関する節)を参照。
+        synchronized (this) {
+            try (Page page = browser.newPage()) {
+                page.setContent("<!DOCTYPE html><html><head></head><body><div id=\"root\"></div></body></html>");
+                page.addScriptTag(new Page.AddScriptTagOptions().setContent(loadBundleJs()));
+                page.evaluate("(config) => window.renderChart(config)", args);
+                page.waitForFunction("() => window.__chartResult || window.__chartError",
+                        null, new Page.WaitForFunctionOptions().setTimeout(RENDER_TIMEOUT_MS));
 
-            Object raw = page.evaluate("() => ({ result: window.__chartResult, error: window.__chartError })");
-            Map<String, Object> result = (Map<String, Object>) raw;
-            Object error = result.get("error");
-            if (error != null) {
-                throw new RechartsRenderException("チャートの生成に失敗しました: " + error);
+                Object raw = page.evaluate("() => ({ result: window.__chartResult, error: window.__chartError })");
+                Map<String, Object> result = (Map<String, Object>) raw;
+                Object error = result.get("error");
+                if (error != null) {
+                    throw new RechartsRenderException("チャートの生成に失敗しました: " + error);
+                }
+                Object html = result.get("result");
+                if (!(html instanceof String svg) || svg.isBlank()) {
+                    throw new RechartsRenderException("チャートの生成結果を取得できませんでした");
+                }
+                return svg;
+            } catch (PlaywrightException e) {
+                throw new RechartsRenderException("チャートのレンダリングに失敗しました: " + e.getMessage(), e);
             }
-            Object html = result.get("result");
-            if (!(html instanceof String svg) || svg.isBlank()) {
-                throw new RechartsRenderException("チャートの生成結果を取得できませんでした");
-            }
-            return svg;
-        } catch (PlaywrightException e) {
-            throw new RechartsRenderException("チャートのレンダリングに失敗しました: " + e.getMessage(), e);
         }
     }
 

@@ -13,6 +13,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.locks.ReentrantLock;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -42,7 +43,7 @@ class PreviewSkeletonFetcherResponseTest {
     private ThemeSkeletonResponse fetchWith(Object evaluated) {
         when(browser.newPage()).thenReturn(page);
         when(page.evaluate(anyString(), any())).thenReturn(evaluated);
-        return new PreviewSkeletonFetcher(browser)
+        return new PreviewSkeletonFetcher(browser, new ReentrantLock())
                 .fetchAndSplice("https://example.com/post/1", "題", "<p>本文</p>",
                         "新しい題", "<p>新しい本文</p>", null);
     }
@@ -98,7 +99,7 @@ class PreviewSkeletonFetcherResponseTest {
         when(page.navigate(anyString(), any(Page.NavigateOptions.class)))
                 .thenThrow(new PlaywrightException("Timeout 15000ms exceeded"));
 
-        PreviewSkeletonFetcher fetcher = new PreviewSkeletonFetcher(browser);
+        PreviewSkeletonFetcher fetcher = new PreviewSkeletonFetcher(browser, new ReentrantLock());
 
         assertThat(assertThrows(ContentScrapingException.class,
                 () -> fetcher.fetchAndSplice("https://example.com/post/1", "題", "<p>本文</p>",

@@ -9,6 +9,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.concurrent.locks.ReentrantLock;
+
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
@@ -61,7 +63,7 @@ class ContentCacheSsrfGuardTest {
     @Test
     @DisplayName("PageFetcher はブラウザを起こす前に宛先を検査する")
     void 取得前に宛先を検査する() {
-        PlaywrightPageFetcher fetcher = new PlaywrightPageFetcher(browser, outboundUrlGuard);
+        PlaywrightPageFetcher fetcher = new PlaywrightPageFetcher(browser, outboundUrlGuard, new ReentrantLock());
         doThrow(new ContentScrapingException("このURLは取得できません", null))
                 .when(outboundUrlGuard).requireAllowed("http://mysql:3306/");
 

@@ -7,6 +7,8 @@ import com.microsoft.playwright.options.WaitUntilState;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
+import java.util.concurrent.locks.ReentrantLock;
+
 /**
  * ヘッドレスブラウザ(Playwright)でURLを開き、JS実行後のレンダリング済みHTMLを取得する。
  * OGPメタタグはJS実行なしの生HTMLに含まれることが多いが、Amazon商品ページ等は
@@ -23,6 +25,14 @@ public class PlaywrightPageFetcher {
 
     private final Browser browser;
     private final OutboundUrlGuard outboundUrlGuard;
+    /**
+     * {@link Browser}(= 共有Connection)への排他アクセス用ロック(issue #1047)。
+     * {@link com.letsblog.content.config.PlaywrightConfig#browserAccessLock()}のJavadoc参照
+     * (なぜ{@code synchronized(this)}ではなく共有Beanなのか、なぜ{@code synchronized(browser)}
+     * を採らないのか)。{@link com.letsblog.content.service.PreviewSkeletonFetcher}と<b>同じ
+     * インスタンス</b>が注入される。
+     */
+    private final ReentrantLock browserAccessLock;
 
     /**
      * {@code @Lazy}は<b>注入点に必要</b>である(issue #1046。media-serviceの
@@ -49,14 +59,20 @@ public class PlaywrightPageFetcher {
      *
      * <p>この不変条件は{@code PlaywrightLazyBrowserTest}のラチェットが検査する。
      */
-    public PlaywrightPageFetcher(@Lazy Browser browser, OutboundUrlGuard outboundUrlGuard) {
+    public PlaywrightPageFetcher(@Lazy Browser browser, OutboundUrlGuard outboundUrlGuard,
+                                  ReentrantLock browserAccessLock) {
         this.browser = browser;
         this.outboundUrlGuard = outboundUrlGuard;
+        this.browserAccessLock = browserAccessLock;
     }
 
     public String fetchHtml(String url) {
         // 最初のURLはブラウザを起こす前に弾く(明確なエラーを返すため)。
         outboundUrlGuard.requireAllowed(url);
+        // issue #1047: newPage()からclose()までを丸ごとロックで直列化する(理由は
+        // PlaywrightConfig#browserAccessLock()のJavadoc参照。PreviewSkeletonFetcherと
+        // 同じロックを共有し、クラスをまたいだ排他にする)。
+        browserAccessLock.lock();
         try (Page page = browser.newPage()) {
             // リダイレクト・サブリソースも含め、ブラウザが実際に接続する直前に毎回検査する。
             page.route("**/*", route -> {
@@ -72,6 +88,8 @@ public class PlaywrightPageFetcher {
             return page.content();
         } catch (PlaywrightException e) {
             throw new ContentScrapingException("URLの取得に失敗しました: " + url, e);
+        } finally {
+            browserAccessLock.unlock();
         }
     }
 }

@@ -17,6 +17,7 @@ import org.springframework.stereotype.Component;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * ヘッドレスブラウザ(Playwright)でサイトの記事ページを開き、実テーマが描画したHTML/CSSを取得する。
@@ -263,6 +264,14 @@ public class PreviewSkeletonFetcher {
             """;
 
     private final Browser browser;
+    /**
+     * {@link Browser}(= 共有Connection)への排他アクセス用ロック(issue #1047)。
+     * {@link com.letsblog.content.config.PlaywrightConfig#browserAccessLock()}のJavadoc参照
+     * (なぜ{@code synchronized(this)}ではなく共有Beanなのか、なぜ{@code synchronized(browser)}
+     * を採らないのか)。{@link com.letsblog.content.contentcache.PlaywrightPageFetcher}と
+     * <b>同じインスタンス</b>が注入される。
+     */
+    private final ReentrantLock browserAccessLock;
 
     /**
      * {@code @Lazy}は<b>注入点に必要</b>である(issue #1046。media-serviceの
@@ -287,8 +296,9 @@ public class PreviewSkeletonFetcher {
      *
      * <p>この不変条件は{@code PlaywrightLazyBrowserTest}のラチェットが検査する。
      */
-    public PreviewSkeletonFetcher(@Lazy Browser browser) {
+    public PreviewSkeletonFetcher(@Lazy Browser browser, ReentrantLock browserAccessLock) {
         this.browser = browser;
+        this.browserAccessLock = browserAccessLock;
     }
 
     /**
@@ -313,6 +323,10 @@ public class PreviewSkeletonFetcher {
         args.put("ourContentHtml", ourContentHtml);
         args.put("featuredImageDataUri", featuredImageDataUri);
 
+        // issue #1047: newPage()からclose()までを丸ごとロックで直列化する(理由は
+        // PlaywrightConfig#browserAccessLock()のJavadoc参照。PlaywrightPageFetcher・
+        // fetchRealPostと同じロックを共有し、クラス/メソッドをまたいだ排他にする)。
+        browserAccessLock.lock();
         try (Page page = browser.newPage()) {
             page.navigate(url, new Page.NavigateOptions()
                     .setTimeout(NAVIGATION_TIMEOUT_MS)
@@ -321,6 +335,8 @@ public class PreviewSkeletonFetcher {
             return toResponse(result);
         } catch (PlaywrightException e) {
             throw new ContentScrapingException("記事ページの取得に失敗しました: " + url, e);
+        } finally {
+            browserAccessLock.unlock();
         }
     }
 
@@ -337,6 +353,9 @@ public class PreviewSkeletonFetcher {
         cookie.url = url;
         cookie.httpOnly = true;
 
+        // issue #1047: newContext()からclose()までを丸ごとロックで直列化する(fetchAndSpliceと
+        // 同じロック。理由はPlaywrightConfig#browserAccessLock()のJavadoc参照)。
+        browserAccessLock.lock();
         try (BrowserContext context = browser.newContext()) {
             context.addCookies(List.of(cookie));
             try (Page page = context.newPage()) {
@@ -349,6 +368,8 @@ public class PreviewSkeletonFetcher {
             }
         } catch (PlaywrightException e) {
             throw new ContentScrapingException("記事ページの取得に失敗しました: " + url, e);
+        } finally {
+            browserAccessLock.unlock();
         }
     }
 

@@ -11,6 +11,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -52,7 +53,7 @@ class PlaywrightPageFetcherRouteTest {
         when(browser.newPage()).thenReturn(page);
         when(page.content()).thenReturn("<html><head></head><body>ok</body></html>");
 
-        String html = new PlaywrightPageFetcher(browser, outboundUrlGuard)
+        String html = new PlaywrightPageFetcher(browser, outboundUrlGuard, new ReentrantLock())
                 .fetchHtml("https://example.com/article");
 
         assertThat(html)
@@ -100,7 +101,7 @@ class PlaywrightPageFetcherRouteTest {
         when(page.navigate(any(String.class), any(Page.NavigateOptions.class)))
                 .thenThrow(new com.microsoft.playwright.PlaywrightException("net::ERR_ABORTED"));
 
-        PlaywrightPageFetcher fetcher = new PlaywrightPageFetcher(browser, outboundUrlGuard);
+        PlaywrightPageFetcher fetcher = new PlaywrightPageFetcher(browser, outboundUrlGuard, new ReentrantLock());
 
         assertThat(org.junit.jupiter.api.Assertions.assertThrows(
                 ContentScrapingException.class,
