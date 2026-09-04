@@ -31,7 +31,9 @@ const config: Config = {
   // あるため、src/ に閉じるとこの1スイートが黙って実行されなくなる。
   testMatch: [
     '<rootDir>/src/**/*.{test,spec}.{js,jsx,ts,tsx}',
-    // src/ の外にあるプロダクションコード(next.config.ts)の単体テスト。
+    // src/ の外にあるものの単体テスト。next.config.ts のようにプロダクションコードが
+    // src/ の外に置かれている場合(#984)と、package-lock.json のように apps/web 直下の
+    // ファイル自体を検査するもの(dependency-advisories.test.ts、#1006)が該当する。
     '<rootDir>/*.{test,spec}.{js,jsx,ts,tsx}',
   ],
   testPathIgnorePatterns: ['/node_modules/', '/.next/', '/e2e/'],

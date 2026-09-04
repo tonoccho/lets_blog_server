@@ -162,11 +162,33 @@ echo "✅ All specs are distinct"
 
 echo "🔨 Generating TypeScript client with orval (all targets)..."
 
+# orval CLI のバージョンを固定する(#1006)。
+#
+# このスクリプトはリポジトリルートで `npx orval` を呼ぶが、ルートには package.json も
+# node_modules も無い。そのため npx は**毎回レジストリの latest を取りに行く**。
+# 生成物をコミットしている(docs/API_CLIENT_GENERATION.md「コミットするもの」)以上、
+# これは「実行した日によって差分が出る」ということであり、再現性が無い。
+#
+# 実際に壊れた: 2026-09-03 時点の latest である orval@8.28.0 は、依存する
+# @orval/angular@8.28.0 が未公開のまま公開されており、`npx orval` は ETARGET で失敗した
+# (数時間後に 8.28.1 が出て解消したが、それも latest 追従では防げない)。
+#
+# 8.27.0 を選ぶ理由:
+#   - GHSA-h526-wf6g-67jv(@orval/core の code injection)の修正版であること
+#   - コミット済みの packages/api-client/src/generated/** を1バイトも変えずに再生成できる
+#     こと(8.28.x は multipart の Blob を Blob | File へ広げ、サービスごとに index.ts を
+#     新規生成するため、生成物に差分が出る。それはそれで別途レビューすべき変更である)
+#   - apps/web が devDependencies に宣言する @orval/core / @orval/fetch と同一であること
+#     (apps/web/dependency-advisories.test.ts がこの一致を固定している)
+#
+# 上げるときは apps/web/package.json の @orval/* と一緒に上げ、生成物の差分をレビューする。
+ORVAL_VERSION="8.27.0"
+
 # 出力先ディレクトリはconfig/orval.config.js側の各ターゲットが作成するため、ここでは
 # ルートの出力先だけ用意しておく。
 mkdir -p "packages/api-client/src/generated"
 
-npx orval --config config/orval.config.js
+npx --yes "orval@${ORVAL_VERSION}" --config config/orval.config.js
 
 echo "✅ API client generation complete"
 echo "📁 Generated client: packages/api-client/src/generated/"

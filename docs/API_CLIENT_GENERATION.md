@@ -52,6 +52,19 @@ spec は**実行中のサービスから取得する**。静的なファイル�
 
 `curl` / `jq` / `docker` / `npx`(Node.js)。
 
+### 5. orval のバージョンは固定されている
+
+スクリプトはリポジトリルートで `npx` を呼ぶが、ルートには `package.json` も `node_modules` も
+無い。素の `npx orval` は**毎回レジストリの latest を取りに行く**ため、生成物をコミットしている
+以上「実行した日によって差分が出る」ことになる。
+
+そこでスクリプトは `ORVAL_VERSION`(現在 **8.27.0**)で CLI を固定し、
+`npx --yes "orval@${ORVAL_VERSION}"` として呼ぶ(#1006)。
+
+- `apps/web/package.json` の `@orval/core` / `@orval/fetch` も同じ 8.27.0 を**厳密指定**する。
+  この一致は `apps/web/dependency-advisories.test.ts` が検査している
+- 上げるときはスクリプトと `apps/web/package.json` を**同時に**上げ、生成物の差分をレビューする
+
 ## 取得先の指定
 
 | サービス | コンテナ名 | URL 上書き用の環境変数 |
@@ -120,6 +133,12 @@ springdoc が返す `servers[0].url` は**リクエストのホストから生�
 **`複数のサービスが同一の spec を返しました`**
 環境変数の設定ミスで、複数サービスの取得先が同じサービスを指している。
 上の表と実際に設定した環境変数を突き合わせる。
+
+**`npx orval` が `ETARGET  No matching version found for @orval/...` で失敗する**
+orval は多数の `@orval/*` サブパッケージへ**厳密なバージョン指定**で依存しており、その一部が
+未公開のまま新バージョンが公開されることがある(2026-09-03 の 8.28.0 が実例)。
+スクリプトはバージョンを固定しているのでこの経路では起きないが、`ORVAL_VERSION` を
+上げるときは `npm view orval@<version> dependencies` の各サブパッケージが公開済みか確かめる。
 
 **`openapi/*.json` に大きな差分が出る**
 実装の変更が反映された正しい差分か、取得経路の違いによるノイズかを確認する。

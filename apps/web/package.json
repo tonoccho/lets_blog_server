@@ -32,8 +32,8 @@
     "server-only": "^0.0.1"
   },
   "devDependencies": {
-    "@orval/core": "^6.23.0",
-    "@orval/fetch": "^6.23.0",
+    "@orval/core": "8.27.0",
+    "@orval/fetch": "8.27.0",
     "@playwright/test": "^1.40.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/dom": "^10.4.1",
