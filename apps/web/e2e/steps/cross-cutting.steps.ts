@@ -413,6 +413,72 @@ Then('同じクライアントの要求が再び受理される', async ({ ctx }
   expect(response.status, '時間枠が明けても制限が解除されない').toBe(200);
 });
 
+// ------------------------------------------ 画像生成設定のレート制限(issue #999)
+
+/**
+ * `GET /api/projects/{id}/image-settings` が upload-endpoint バケット
+ * (プロセス全体で10req/時)を消費しないことの検証用フィクスチャ(issue #999)。
+ *
+ * ProjectController 側のフィクスチャ({@link registerSiteFixture}相当)はサイトを作るが、
+ * ここではプロジェクトそのものが要る(image-settings はプロジェクト単位のAPIのため)。
+ */
+interface ImageSettingsRateLimitProjectFixture {
+  id: number;
+}
+
+async function registerImageSettingsRateLimitProjectFixture(
+  request: APIRequestContext
+): Promise<ImageSettingsRateLimitProjectFixture> {
+  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const response = await request.post('/api/projects', {
+    headers: { Authorization: `Bearer ${await adminToken(request)}` },
+    data: { name: `AT-17 image-settings rate-limit fixture ${suffix}`, slug: `at17-imgset-${suffix}` },
+  });
+  expect(
+    response.ok(),
+    `画像生成設定レート制限検証用プロジェクトの作成に失敗しました `
+      + `(status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+  return { id: ((await response.json()) as { id: number }).id };
+}
+
+Given('管理者がプロジェクトを1件登録している', async ({ ctx, request }) => {
+  ctx.imageSettingsRateLimitProject = await registerImageSettingsRateLimitProjectFixture(request);
+});
+
+/** upload-endpoint の既定上限(10req/時)を確実に上回る回数。 */
+const IMAGE_SETTINGS_REQUEST_COUNT = 11;
+
+When('管理者としてそのプロジェクトの画像生成設定を11回連続で取得する', async ({ ctx, request }) => {
+  const project = ctx.imageSettingsRateLimitProject as ImageSettingsRateLimitProjectFixture;
+  const token = await adminToken(request);
+  const statuses: number[] = [];
+  for (let i = 0; i < IMAGE_SETTINGS_REQUEST_COUNT; i += 1) {
+    const response = sendThroughGateway({ path: `/api/projects/${project.id}/image-settings`, token });
+    statuses.push(response.status);
+  }
+  ctx.imageSettingsStatuses = statuses;
+});
+
+Then('全て200で返り、429は一度も返らない', async ({ ctx }) => {
+  const statuses = ctx.imageSettingsStatuses as number[];
+  expect(
+    statuses,
+    '画像生成設定の取得がupload-endpointの枠(プロセス全体で10req/時)を消費し、'
+      + '11回連続で呼べていない(#999)'
+  ).toEqual(Array(IMAGE_SETTINGS_REQUEST_COUNT).fill(200));
+});
+
+After({ tags: '@cross-cutting' }, async ({ ctx, request }) => {
+  const project = ctx.imageSettingsRateLimitProject as ImageSettingsRateLimitProjectFixture | undefined;
+  if (!project) {
+    return;
+  }
+  await request.delete(`/api/projects/${project.id}`, {
+    headers: { Authorization: `Bearer ${await adminToken(request)}` },
+  });
+});
+
 // --------------------------------------------------------------- 相関ID
 
 /**

@@ -84,12 +84,23 @@ traffic for the host's IP. Raise `API_RATE_LIMIT_REQUESTS` if that becomes a lim
 #### 3. Upload Rate Limiter (`upload-endpoint`)
 - **Default Limit**: 10 requests per 1 hour, **process-wide** (not partitioned)
 - **Environment Variable**: `UPLOAD_RATE_LIMIT_REQUESTS` (default: 10)
-- **Applies to**: `/upload/*`, `/image/*` endpoints (actual file uploads and AI image generation)
-- **Does not apply to**: lightweight metadata/settings endpoints under the same paths, e.g.
-  `/api/ai/image-options`, `/api/projects/{id}/image-generation-prompt-defaults`,
-  `/api/projects/{id}/image-generation-size-defaults` — these use `api-global` instead so
-  that opening the asset-generation panel or changing defaults doesn't consume the same
-  quota as the actual upload/generation calls (see issue #442)
+- **Applies to** (allowlist, issue #999): only the actual heavy upload/generation calls —
+  `POST /api/media/upload`, `POST /api/ai/image` (exact match, so it doesn't catch
+  `/api/ai/image-options`), `POST /api/projects/{id}/asset-images/{generatedImageId}/upload`,
+  and `POST /api/projects/{id}/bulk-management/upload` (a real multipart file upload, not an
+  image, but resource-intensive in the same way)
+- **Does not apply to**: any other endpoint, including every image-related metadata/settings
+  endpoint under `/api/projects/{id}/**` (e.g. `image-settings`,
+  `image-content-filter-settings`, `article-image-resize-default`,
+  `ai-models/image/provider[/selection]`) and `/api/generated-images/**` — these use
+  `api-global` instead
+- **Why an allowlist and not a blocklist**: before #999, this was a blocklist (`/upload` or
+  `/image` substring match, with a short exception list for known-lightweight paths). Every new
+  lightweight image-related endpoint had to be remembered and added to the exception list, and
+  when it wasn't (e.g. `GET /api/projects/{id}/image-settings`, added in #913), it silently
+  shared the 10-req/hour quota with real uploads — opening the project detail page alone could
+  exhaust it. The allowlist inverts this: a new lightweight endpoint is safe by default, and
+  only genuinely heavy operations need to be added here
 - **Purpose**: Prevents resource exhaustion
 - **Partitioning**: none — process-wide, deliberately (see "Partition granularity" above)
 - **Admin-configurable request count** (*not in effect at the gateway*): before #560, while rate

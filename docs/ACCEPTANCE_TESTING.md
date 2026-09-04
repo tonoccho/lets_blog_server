@@ -606,10 +606,20 @@ Playwright spec(`apps/web/e2e/*.spec.ts`)が「既存データを壊さない一
 - **gateway に経路が無いもの**(`/api/render/**`、`/api/comfyui/checkpoints/*`)。
   コンテナ間で直接呼ばれる経路しか無く、公開エンドポイントではない。
   `RouteControllerContractTest` の `NON_GATEWAY_ROUTED_PATHS` と同じ集合
-- **gateway の `upload-endpoint` バケットに入るもの**(パスに `/upload` か `/image` を含む8本)。
-  このバケットは**プロセス全体で1時間に10回**しかない。8本のために枠を使い切ると、
+- **gateway の `upload-endpoint` バケットに入るもの**(実アップロード・実生成の4本)。
+  `POST /api/media/upload`、`POST /api/ai/image`、
+  `POST /api/projects/{id}/asset-images/{generatedImageId}/upload`、
+  `POST /api/projects/{id}/bulk-management/upload` の4本。
+  このバケットは**プロセス全体で1時間に10回**しかない。この4本のために枠を使い切ると、
   同じ1時間に走る画像アップロード系のシナリオが巻き添えで429になる。
-  この8本の経路は `RouteControllerContractTest` が静的に担保する
+  この4本の経路は `RouteControllerContractTest` が静的に担保する
+
+  issue #999 より前は「パスに `/upload` か `/image` を**含む**」という部分一致で判定して
+  いたため、`GET /api/projects/{id}/image-settings` のような軽量な設定APIまで巻き込み、
+  除外対象が8本あった。今は実アップロード・実生成だけを列挙する**許可リスト**方式で、
+  gateway 側(`RateLimitWebFilter`)と同じ定義を `isUploadBucketPath` が持つ。
+  両者の一致は `RateLimitUploadBucketSyncTest` が検証する
+  (`docs/API_RATE_LIMITING.md`)
 
 ---
 

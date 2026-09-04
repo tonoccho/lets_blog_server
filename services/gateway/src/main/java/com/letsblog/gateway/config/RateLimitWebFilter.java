@@ -23,6 +23,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 /**
  * レート制限(#560。旧legacy-apiのRateLimitInterceptorから移設)。バケット分類ロジックは
@@ -107,8 +108,49 @@ public class RateLimitWebFilter implements WebFilter {
      */
     private static final String NEXTAUTH_CLIENT_LOG_PATH = "/api/auth/_log";
 
-    private static final Set<String> LIGHTWEIGHT_IMAGE_METADATA_PATH_SUFFIXES = Set.of(
-            "/image-options", "/image-generation-prompt-defaults", "/image-generation-size-defaults");
+    /**
+     * upload-endpointバケットに入れる、実アップロード・実生成のパス(issue #999)。
+     *
+     * <p>#999より前は「{@code /upload}または{@code /image}を含むパスはupload-endpoint、
+     * ただし{@code LIGHTWEIGHT_IMAGE_METADATA_PATH_SUFFIXES}に載っている3件は除く」という
+     * <b>ブロックリスト</b>方式だった。{@code /image}を含む新しい軽量な画像関連メタデータAPI
+     * ({@code GET /api/projects/{id}/image-settings}等)が増えるたびに、例外リストへ
+     * 追加し忘れて誤ってupload-endpoint(プロセス全体で10req/時)を消費する事故を
+     * 繰り返した(#999)。
+     *
+     * <p>今は逆に、資源枯渇の防止という本来の目的(クラスJavadoc参照)に直接該当する
+     * 「実際に重い操作」だけを明示的に列挙する<b>許可リスト</b>方式にしている。新しい
+     * 軽量な画像関連メタデータAPIが増えても、ここに追加しない限り自動的にapi-globalへ
+     * 入るため、同種の事故が原理的に起きない。
+     *
+     * <ul>
+     *   <li>{@code POST /api/media/upload} — 実際の画像/メディアバイナリのアップロード</li>
+     *   <li>{@code POST /api/ai/image} — 実際の画像生成(ComfyUI/ChatGPT呼び出し)。
+     *       {@code /api/ai/image-options}(設定の参照)を巻き込まないよう、部分一致ではなく
+     *       完全一致で扱う</li>
+     *   <li>{@code POST /api/projects/{id}/asset-images/{generatedImageId}/upload} —
+     *       生成済み画像を各環境へ実際にアップロードする
+     *       ({@code BulkManagementController#uploadAssetImage}参照)</li>
+     *   <li>{@code POST /api/projects/{id}/bulk-management/upload} — プラグイン/テーマ/CSV等の
+     *       ファイルを各環境へ実際にmultipartアップロードし一括適用する
+     *       ({@code BulkManagementController#runBulkOperationUpload}参照)。画像アップロード
+     *       ではないが実際の重いファイルアップロードであるため、#999でも
+     *       upload-endpointに残す判断をした</li>
+     * </ul>
+     *
+     * <p>{@code apps/web/e2e/support/endpoints.ts#isUploadBucketPath}に全く同じ定義を
+     * 持つ(二重管理)。両者が食い違っていないことは
+     * {@code RateLimitUploadBucketSyncTest}が検証している(#999 受入基準4)。
+     */
+    private static final Set<String> UPLOAD_BUCKET_EXACT_PATHS = Set.of(
+            "/api/media/upload",
+            "/api/ai/image");
+
+    private static final Pattern ASSET_IMAGE_UPLOAD_PATH_PATTERN =
+            Pattern.compile("^/api/projects/[^/]+/asset-images/[^/]+/upload$");
+
+    private static final Pattern BULK_MANAGEMENT_UPLOAD_PATH_PATTERN =
+            Pattern.compile("^/api/projects/[^/]+/bulk-management/upload$");
 
     private final ConcurrentHashMap<String, RateLimiter> rateLimiters = new ConcurrentHashMap<>();
     private final RateLimitProperties properties;
@@ -254,15 +296,16 @@ public class RateLimitWebFilter implements WebFilter {
                 || requestPath.contains("/login")
                 || requestPath.contains("/register")) {
             return AUTH_ENDPOINT;
-        } else if (isLightweightImageMetadataPath(requestPath)) {
-            return API_GLOBAL;
-        } else if (requestPath.contains("/upload") || requestPath.contains("/image")) {
+        } else if (isUploadBucketPath(requestPath)) {
             return UPLOAD_ENDPOINT;
         }
         return API_GLOBAL;
     }
 
-    private boolean isLightweightImageMetadataPath(String requestPath) {
-        return LIGHTWEIGHT_IMAGE_METADATA_PATH_SUFFIXES.stream().anyMatch(requestPath::endsWith);
+    /** {@link #UPLOAD_BUCKET_EXACT_PATHS}のJavadoc参照。 */
+    private boolean isUploadBucketPath(String requestPath) {
+        return UPLOAD_BUCKET_EXACT_PATHS.contains(requestPath)
+                || ASSET_IMAGE_UPLOAD_PATH_PATTERN.matcher(requestPath).matches()
+                || BULK_MANAGEMENT_UPLOAD_PATH_PATTERN.matcher(requestPath).matches();
     }
 }

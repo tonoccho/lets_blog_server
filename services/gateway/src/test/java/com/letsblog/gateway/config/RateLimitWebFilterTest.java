@@ -4,7 +4,9 @@ import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.PlainJWT;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestFactory;
 import org.springframework.web.server.WebFilterChain;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
@@ -13,10 +15,14 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
+import java.net.InetSocketAddress;
 import java.time.Duration;
+import java.util.List;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.DynamicTest.dynamicTest;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -162,6 +168,129 @@ class RateLimitWebFilterTest {
         StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
 
         verify(chain, times(1)).filter(exchange);
+    }
+
+    /**
+     * issue #999 受入基準2の直接的な再現。修正前は{@code /image-settings}が
+     * upload-endpoint(既定10req/3600s)を消費しており、プロジェクト詳細ページを開くだけで
+     * 11回目以降が429になっていた。
+     */
+    @Test
+    @DisplayName("画像生成設定の取得(#999)は本番既定値のまま11回連続で呼んでも429にならない")
+    void imageSettingsCanBeCalledElevenTimesWithoutRateLimit() {
+        RateLimitWebFilter defaultsFilter = new RateLimitWebFilter(new RateLimitProperties());
+        for (int i = 1; i <= 11; i++) {
+            ServerWebExchange exchange = exchangeFor("/api/projects/5/image-settings");
+            StepVerifier.create(defaultsFilter.filter(exchange, chain)).verifyComplete();
+            assertNotEquals(
+                    HttpStatus.TOO_MANY_REQUESTS,
+                    exchange.getResponse().getStatusCode(),
+                    i + "回目の呼び出しで429になった(#999)");
+        }
+    }
+
+    @Test
+    @DisplayName("画像生成設定の取得(#999)はupload-endpointを共有しない: 実アップロードで上限に達しても影響を受けない")
+    void imageSettingsDoesNotShareUploadBucketWithRealUploads() {
+        // upload-endpointの上限(2)を実アップロード経路で使い切る
+        consume(exchangeFor("/api/ai/image"));
+        consume(exchangeFor("/api/ai/image"));
+
+        ServerWebExchange exchange = exchangeFor("/api/projects/5/image-settings");
+        StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
+
+        assertNotEquals(HttpStatus.TOO_MANY_REQUESTS, exchange.getResponse().getStatusCode());
+    }
+
+    /**
+     * issue #999で新たにupload-endpointから外した画像関連の設定・メタデータ系エンドポイント
+     * (旧ブロックリスト方式では{@code /image}を含むため誤って巻き込まれていた)。
+     */
+    private static final List<String> FREED_IMAGE_METADATA_PATHS = List.of(
+            "/api/projects/5/image-settings",
+            "/api/projects/5/image-content-filter-settings",
+            "/api/projects/5/article-image-resize-default",
+            "/api/projects/5/ai-models/image/provider",
+            "/api/projects/5/ai-models/image/provider/selection",
+            "/api/generated-images",
+            "/api/generated-images/9",
+            "/api/generated-images/9/tags",
+            "/api/generated-images/9/file",
+            "/api/projects/5/ai/generate-image-prompt");
+
+    /**
+     * issue #999で新たにupload-endpointから外した画像関連の設定・メタデータ系エンドポイント
+     * (旧ブロックリスト方式では{@code /image}を含むため誤って巻き込まれていた)。
+     * パスごとに独立したDynamicTestにしているのは、1本の失敗で残りの検証が
+     * (JUnitのAssertionによる早期終了で)埋もれないようにするため。
+     */
+    @TestFactory
+    @DisplayName("画像に関する設定・メタデータの読み書き(#999)はapi-globalバケットを使う")
+    Stream<DynamicTest> freedImageMetadataEndpointsUseGlobalBucket() {
+        return FREED_IMAGE_METADATA_PATHS.stream().map(path -> dynamicTest(path, () -> {
+            RateLimitProperties properties = new RateLimitProperties();
+            properties.setUploadEndpoint(new RateLimitProperties.Bucket(2, Duration.ofMinutes(1)));
+            RateLimitWebFilter isolatedFilter = new RateLimitWebFilter(properties);
+            WebFilterChain isolatedChain = mock(WebFilterChain.class);
+            when(isolatedChain.filter(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.empty());
+
+            // upload-endpointの上限(2)を使い切っても、対象パスは影響を受けないこと
+            StepVerifier.create(isolatedFilter.filter(exchangeFor("/api/ai/image"), isolatedChain)).verifyComplete();
+            StepVerifier.create(isolatedFilter.filter(exchangeFor("/api/ai/image"), isolatedChain)).verifyComplete();
+
+            ServerWebExchange exchange = exchangeFor(path);
+            StepVerifier.create(isolatedFilter.filter(exchange, isolatedChain)).verifyComplete();
+            assertNotEquals(
+                    HttpStatus.TOO_MANY_REQUESTS,
+                    exchange.getResponse().getStatusCode(),
+                    path + " がupload-endpointを共有している(#999)");
+        }));
+    }
+
+    /**
+     * issue #999 受入基準3: 実アップロード・実生成は引き続きupload-endpoint(10req/時)で
+     * 制限され、しかも同じプロセス全体の1バケットを共有すること(#999で判定方式を変えても
+     * この3エンドポイント+一括管理アップロードは動かさない)。
+     */
+    @Test
+    @DisplayName("POST /api/media/upload と POST /api/ai/image は同じupload-endpointバケットを共有する(#999)")
+    void mediaUploadAndAiImageShareUploadBucket() {
+        consume(exchangeFor("/api/media/upload"));
+        consume(exchangeFor("/api/ai/image"));
+
+        ServerWebExchange exchange = exchangeFor("/api/media/upload");
+        StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
+
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, exchange.getResponse().getStatusCode());
+    }
+
+    @Test
+    @DisplayName("プロジェクトへの生成画像アセットアップロードはupload-endpointバケットを使う(#999)")
+    void assetImageUploadUsesUploadBucket() {
+        consume(exchangeFor("/api/projects/5/asset-images/9/upload"));
+        consume(exchangeFor("/api/projects/5/asset-images/9/upload"));
+
+        ServerWebExchange exchange = exchangeFor("/api/projects/5/asset-images/9/upload");
+        StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
+
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, exchange.getResponse().getStatusCode());
+    }
+
+    /**
+     * 一括管理アップロード({@code BulkManagementController#runBulkOperationUpload})は
+     * 画像ではないが実際のmultipartファイルアップロードであるため、#999でも
+     * upload-endpointに残す判断をした(理由は endpoints.ts の同定義のコメント参照)。
+     */
+    @Test
+    @DisplayName("一括管理アップロードはupload-endpointバケットに残す(#999の実装判断)")
+    void bulkManagementUploadUsesUploadBucket() {
+        consume(exchangeFor("/api/projects/5/bulk-management/upload"));
+        consume(exchangeFor("/api/projects/5/bulk-management/upload"));
+
+        ServerWebExchange exchange = exchangeFor("/api/projects/5/bulk-management/upload");
+        StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
+
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, exchange.getResponse().getStatusCode());
     }
 
     @Test
@@ -343,5 +472,108 @@ class RateLimitWebFilterTest {
                 HttpStatus.TOO_MANY_REQUESTS,
                 exchange.getResponse().getStatusCode(),
                 "429 になった: " + exchange.getRequest().getPath().value());
+    }
+
+    // ------------------------------------------------------------------
+    // 分岐網羅の補完。#999でこのファイル(RateLimitWebFilter)へ手を入れたため、
+    // 変更したコードのC1/C2 90%基準(CLAUDE.md)を、ファイル単位で計測する
+    // scripts/check-changed-coverage.pyが素通りできるよう、同じファイル内の
+    // 未網羅分岐(externalClientIp/unverifiedJwtSubject/peerAddress/auth判定の一部)も
+    // 併せて埋める。いずれも#999以前から存在する挙動で、今回の変更はしていない。
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("X-Forwarded-Forに空要素が混ざっていても、末尾の値でクライアントを識別する")
+    void externalClientKeyIgnoresEmptySegments() {
+        // "203.0.113.10,,203.0.113.11" の空要素を無視し、末尾の203.0.113.11をキーにする
+        consume(externalExchangeFor("/api/projects", "203.0.113.10,,203.0.113.11"));
+        consume(externalExchangeFor("/api/projects", "203.0.113.11"));
+
+        ServerWebExchange exhausted = externalExchangeFor("/api/projects", "203.0.113.11");
+        consume(exhausted);
+
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, exhausted.getResponse().getStatusCode());
+    }
+
+    @Test
+    @DisplayName("Bearer以外のAuthorizationヘッダはトークン無しとして扱い、接続元単位の枠を共有する")
+    void nonBearerAuthorizationHeaderSharesPeerBucketWithNoTokenRequests() {
+        consume(exchangeFor("/api/auth/setup-status"));
+        ServerWebExchange nonBearer = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/auth/setup-status")
+                        .header("Authorization", "Basic dXNlcjpwYXNz").build());
+        consume(nonBearer);
+
+        ServerWebExchange third = exchangeFor("/api/auth/setup-status");
+        StepVerifier.create(filter.filter(third, chain)).verifyComplete();
+
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, third.getResponse().getStatusCode());
+    }
+
+    @Test
+    @DisplayName("subクレームの無いトークンはトークン無しとして扱う")
+    void tokenWithoutSubjectClaimIsTreatedAsNoToken() {
+        String token = new PlainJWT(new JWTClaimsSet.Builder().build()).serialize();
+        consume(exchangeFor("/api/auth/setup-status"));
+        ServerWebExchange withoutSubject = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/auth/setup-status")
+                        .header("Authorization", "Bearer " + token).build());
+        consume(withoutSubject);
+
+        ServerWebExchange third = exchangeFor("/api/auth/setup-status");
+        StepVerifier.create(filter.filter(third, chain)).verifyComplete();
+
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, third.getResponse().getStatusCode());
+    }
+
+    @Test
+    @DisplayName("空文字のsubクレームはトークン無しとして扱う")
+    void tokenWithBlankSubjectClaimIsTreatedAsNoToken() {
+        String token = new PlainJWT(new JWTClaimsSet.Builder().subject("").build()).serialize();
+        consume(exchangeFor("/api/auth/setup-status"));
+        ServerWebExchange blankSubject = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/auth/setup-status")
+                        .header("Authorization", "Bearer " + token).build());
+        consume(blankSubject);
+
+        ServerWebExchange third = exchangeFor("/api/auth/setup-status");
+        StepVerifier.create(filter.filter(third, chain)).verifyComplete();
+
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, third.getResponse().getStatusCode());
+    }
+
+    @Test
+    @DisplayName("接続元アドレスが解決できる場合はそのアドレスで枠を分ける")
+    void peerAddressUsesResolvedRemoteAddress() {
+        ServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/auth/setup-status")
+                        .remoteAddress(new InetSocketAddress("127.0.0.1", 12345)).build());
+        StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
+
+        assertNotEquals(HttpStatus.TOO_MANY_REQUESTS, exchange.getResponse().getStatusCode());
+    }
+
+    @Test
+    @DisplayName("接続元アドレスが未解決の場合はunknown扱いになる")
+    void peerAddressFallsBackToUnknownForUnresolvedRemoteAddress() {
+        ServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/auth/setup-status")
+                        .remoteAddress(InetSocketAddress.createUnresolved("unresolved.invalid", 12345))
+                        .build());
+        StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
+
+        assertNotEquals(HttpStatus.TOO_MANY_REQUESTS, exchange.getResponse().getStatusCode());
+    }
+
+    @Test
+    @DisplayName("/authを含まなくても/loginや/registerを含むパスはauth-endpointバケットを使う")
+    void loginAndRegisterPathsWithoutAuthSegmentUseAuthBucket() {
+        consume(exchangeFor("/api/some/login"));
+        consume(exchangeFor("/api/some/register"));
+
+        ServerWebExchange exchange = exchangeFor("/api/other/login");
+        StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
+
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, exchange.getResponse().getStatusCode());
     }
 }

@@ -75,19 +75,47 @@ export const NON_GATEWAY_ROUTED_PATHS = [
  * (`services/gateway/src/main/java/com/letsblog/gateway/config/RateLimitWebFilter.java`)。
  *
  * このバケットは**プロセス全体で1時間に10回**しかない。全エンドポイントを1回ずつ叩く
- * シナリオがここを踏むと、たった8本のために枠を使い切り、同じ1時間に走る画像アップロード系の
+ * シナリオがここを踏むと、わずかな本数のために枠を使い切り、同じ1時間に走る画像アップロード系の
  * シナリオを巻き添えで429にする。したがって一斉走査の対象からは外す
  * (routing の担保は RouteControllerContractTest 側にある。docs/ACCEPTANCE_TESTING.md §11)。
+ *
+ * issue #999より前は「`/upload`か`/image`を含むパスはupload-endpoint、ただし例外リストに
+ * 載っている3件は除く」という**ブロックリスト**方式だった。`/image`を含む新しいパス
+ * (`GET /api/projects/{id}/image-settings`等)が増えるたびに、例外リストへ追加し忘れて
+ * 巻き込まれる事故を繰り返した(issue #999)。
+ *
+ * 今は逆に、実アップロード・実生成という「重い操作」だけを明示的に列挙する**許可リスト**
+ * 方式にしている。新しい軽量な画像関連メタデータAPIが増えても、ここに追加しない限りは
+ * 自動的にapi-global(通常の枠)に入るため、同種の事故が起きない。
+ *
+ * gateway側(`RateLimitWebFilter`)と全く同じ定義をこちらにも持つ(二重管理)。
+ * 両者が食い違っていないことは
+ * `services/gateway/src/test/java/com/letsblog/gateway/config/RateLimitUploadBucketSyncTest.java`
+ * が検証している(issue #999 受入基準4)。
  */
-const LIGHTWEIGHT_IMAGE_METADATA_SUFFIXES = [
-  '/image-options', '/image-generation-prompt-defaults', '/image-generation-size-defaults',
+const UPLOAD_BUCKET_EXACT_PATHS = [
+  // 実際の画像/メディアバイナリのアップロード。
+  '/api/media/upload',
+  // 実際の画像生成(ComfyUI/ChatGPT呼び出し)。`/api/ai/image-options`(設定の参照)を
+  // 巻き込まないよう、部分一致ではなく完全一致で扱う。
+  '/api/ai/image',
 ];
 
+/** `POST /api/projects/{id}/asset-images/{generatedImageId}/upload`: 生成済み画像を各環境へ実アップロードする。 */
+const ASSET_IMAGE_UPLOAD_PATTERN = new RegExp('^/api/projects/[^/]+/asset-images/[^/]+/upload$');
+
+/**
+ * `POST /api/projects/{id}/bulk-management/upload`: プラグイン/テーマ/CSV等のファイルを
+ * 各環境へ実際にmultipartアップロードし、一括適用する(`BulkManagementController`)。
+ * 画像アップロードではないが実際の重いファイルアップロードであるため、upload-endpointに残す
+ * (issue #999の実装判断)。
+ */
+const BULK_MANAGEMENT_UPLOAD_PATTERN = new RegExp('^/api/projects/[^/]+/bulk-management/upload$');
+
 export function isUploadBucketPath(requestPath: string): boolean {
-  if (LIGHTWEIGHT_IMAGE_METADATA_SUFFIXES.some((suffix) => requestPath.endsWith(suffix))) {
-    return false;
-  }
-  return requestPath.includes('/upload') || requestPath.includes('/image');
+  return UPLOAD_BUCKET_EXACT_PATHS.includes(requestPath)
+    || ASSET_IMAGE_UPLOAD_PATTERN.test(requestPath)
+    || BULK_MANAGEMENT_UPLOAD_PATTERN.test(requestPath);
 }
 
 /** `{id}` のようなパス変数を具体値へ置き換える(存在しないIDを狙う)。 */
