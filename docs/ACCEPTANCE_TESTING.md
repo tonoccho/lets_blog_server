@@ -150,6 +150,9 @@ UI操作(コマンドパレット・Webview・キーバインド)は自動化せ
 前提(スタックの起動、Keycloak のテストユーザー発行、証明書)は
 [e2e-testing.md §3](e2e-testing.md) を参照。受け入れテストも同じスタックに対して実行する。
 
+ホストの 80/443 を他のプロセスが占有している場合は、先に §12 を読むこと。
+その状態では global-setup の疎通確認で全シナリオが始まらない。
+
 ```bash
 cd apps/web
 
@@ -610,7 +613,143 @@ Playwright spec(`apps/web/e2e/*.spec.ts`)が「既存データを壊さない一
 
 ---
 
-## 12. 参考
+## 12. ホストの80/443を他プロセスが占有している場合(#1038)
+
+受け入れテストの baseURL は `apps/web/playwright.config.ts` で **`https://localhost` に
+ハードコード**されている。Keycloak の `redirect_uri` が
+`https://localhost/api/auth/callback/keycloak` として固定登録されており、実行時に
+差し替えられないためである。この URL を受けるのは `docker-compose.yml` の
+`reverse-proxy` で、**ホストの 80/443 を占有できること**を前提にしている。
+
+その前提が成り立たないホスト(この開発機では GitLab を提供する `infra-proxy` が
+先に `0.0.0.0:80` / `0.0.0.0:443` を握っている)では、受け入れテストが**1本も実行できない**。
+
+### 症状
+
+```bash
+# 到達できない。2xx か 3xx が返らなければ、この節が該当する
+curl -sk -o /dev/null -w '%{http_code}' https://localhost/
+```
+
+`000`(接続断)や `502` が返る。`npm run test:at:fast` は
+`apps/web/e2e/global-setup.ts` の疎通確認で落ち、`@stage:` の全プロジェクト
+(`at-setup` / `at-seed` / `at-provision` / `at-main` / `at-destructive`)が始まらない。
+
+### 症状の見えにくさ — コンテナは healthy を返し続ける
+
+ポート競合の帰結は「ポートが公開されないこと」だけでは済まない。**Docker はネットワーク
+接続時にポート公開を行うため、公開に失敗したコンテナはどのネットワークにも所属しないまま
+running になる。**
+
+```bash
+docker inspect lbs-reverse-proxy --format '{{json .NetworkSettings.Networks}}'   # {}
+docker exec lbs-reverse-proxy wget -q -O /dev/null -T 3 http://web:3000/         # bad address
+```
+
+`web` にも `gateway` にも到達できないので、仮にポートが公開されていても何も中継できない。
+それでも旧来のヘルスチェックは自分の netns 内の `127.0.0.1:80/nginx-health` を叩くだけ
+だったので `healthy` を返し、`scripts/wait-for-stack-healthy.sh` は
+`OK: 対象サービスは全てhealthyです` を返していた。**壊れていることがスタックの健全性
+チェックから見えない**のが、この問題の最も厄介なところだった。
+
+現在はどちらも是正してある。
+
+- `docker-compose.yml` の `reverse-proxy` ヘルスチェックは上流到達性
+  (`nc -z web 3000 || nc -z gateway 8080`)を含む。孤立時は名前解決に失敗して unhealthy になる
+- `scripts/wait-for-stack-healthy.sh` は、コンテナが全て healthy になったあとに
+  **ホストから baseURL へ届くこと**も確認する。切り分けだけしたいときは
+  `--http-only`、意図して省くときは `--skip-http-check`(または `E2E_SKIP_HTTP_CHECK=1`)
+
+### 対処 — 共有プロキシに vhost を足して共存させる
+
+`localhost` も `server.tonoccho.local` も `/etc/hosts` でどちらも `127.0.0.1` に解決される。
+したがって **IP で分離することはできない**。分離できる軸は Host ヘッダ / SNI だけであり、
+それはまさに nginx の vhost が担う役割である。そこで、占有している側のプロキシへ
+`server_name localhost;` の vhost を足し、`lbs-reverse-proxy` へ中継させる。
+
+配置する設定は本リポジトリで管理している([infra/shared-host/20-localhost.conf](../infra/shared-host/20-localhost.conf))。
+適用・点検は次のスクリプトが行う。
+
+```bash
+# 適用済みかを点検する(何も書き換えない)
+bash scripts/setup-shared-host-proxy.sh --check
+
+# 適用する(冪等。何度実行してもよい)
+bash scripts/setup-shared-host-proxy.sh
+
+# 以後、スタックはポート公開なしで起動する(80/443 は占有側のもの)
+docker compose -f docker-compose.yml -f docker-compose.shared-host.yml up -d
+
+# 確認
+curl -sk -o /dev/null -w '%{http_code}' https://localhost/   # 2xx か 3xx
+cd apps/web && npm run test:at:fast
+```
+
+`docker-compose.shared-host.yml` は `reverse-proxy` の `ports` を `!override []` で
+打ち消すだけのオーバーライドである(`ports: []` では compose がリストをマージするため
+公開が残る)。**コミット済みの `docker-compose.yml` の既定は変えていない** —
+ホストを単独で占有できる環境ではこれまでどおり何も足さずに起動できる。
+
+配置先(既定 `/home/seiji/src/infra`)は `INFRA_DIR` で、コンテナ名は `PROXY_CONTAINER` で
+上書きできる。
+
+### 触るときの注意
+
+**書き込み先は GitLab を提供している nginx の設定ディレクトリである。**壊すと GitLab が
+止まり、`glab` に依存する開発ワークフローごと進行不能になる。スクリプトは
+
+1. 適用前後で GitLab の生存を確認し、
+2. `docker exec infra-proxy nginx -t` を通してからでなければ reload せず、
+3. `nginx -t` が落ちたら **reload せずに配置したファイルを撤去して**異常終了する
+
+ようにしてある。手で置き換えないこと。
+
+**infra 側スタックを作り直したら、もう一度適用すること。**`docker network connect` は
+コンテナに対する操作であって compose の定義ではないため、`docker compose up -d` などで
+`infra-proxy` が作り直されると接続が失われる(設定ファイル自体は残る)。
+`--check` が「接続されていません」と報告したらこれである。再実行すれば直る(冪等)。
+
+適用しても安全であることは、infra の実設定(`00-common.conf` /
+`10-server.tonoccho.local.conf`)と実際の証明書を並べた状態で `nginx -t` を通して確認できる。
+上流を変数経由にしてあるため、**`lbs-reverse-proxy` を名前解決できないネットワーク上でも
+検証は成功する** — これが「lbs スタックを止めていても GitLab が落ちない」ことの実証である。
+直書きに戻すと同じ条件で `host not found in upstream "lbs-reverse-proxy"` になり、nginx は
+起動できない。
+
+vhost の中で最も重要なのは、上流名を**変数経由で遅延解決している**ことである。
+
+```nginx
+resolver 127.0.0.11 valid=10s ipv6=off;
+set $lbs_upstream https://lbs-reverse-proxy:443;
+proxy_pass $lbs_upstream;
+```
+
+`proxy_pass https://lbs-reverse-proxy:443;` と直接書くと nginx は**起動時**に名前解決する。
+lets_blog_server スタックを停止している間に `infra-proxy` を再起動・reload すると
+`host not found in upstream` で nginx 自体が起動できず、**GitLab ごと落ちる**。しかも
+lbs スタックが動いている間は何の症状も出ないため、レビューでは気づけない。
+`scripts/test_shared_host_proxy.py` がこの回帰を検査している。
+
+### 採らなかった案
+
+**案B: baseURL を環境変数化し、Keycloak に別の redirect_uri を登録する。**
+ハードコードの理由そのものを解消できるが、影響範囲が広すぎる。公開 URL を変えるには
+`docker-compose.yml` の `NEXTAUTH_URL` / `APP_WEB_BASE_URL` / `PMA_ABSOLUTE_URI` /
+`KC_HOSTNAME`、`infra/keycloak/realm-export.json` の `redirect_uri`、
+`apps/web/playwright.config.ts` の baseURL を全て揃える必要がある。とりわけ `KC_HOSTNAME`
+は **Keycloak が発行するトークンの `iss` を変える**。つまりテスト環境の都合で、開発スタックが
+名乗る公開 URL と発行済みトークンの意味そのものを変えることになる。テストのために製品側の
+同一性を動かすのは筋が悪い。
+
+**案C: 受け入れテストの実行中だけ infra-proxy を停止する。**
+最も単純だが、実行中は GitLab が止まるため `glab` が使えなくなる。このプロジェクトの
+開発ワークフロー自体が Issue の記録と Merge Request の操作に `glab` を使っているので、
+受け入れテストを回している間はワークフローが一切進行できない。受け入れテストは
+数十分単位で走るものであり、その間ワークフローを止める運用は現実的でない。
+
+---
+
+## 13. 参考
 
 - [ACCEPTANCE_CRITERIA.md](ACCEPTANCE_CRITERIA.md) — 受け入れ基準カタログ(機能IDと検証状況)
 - `docker-compose.e2e-stubs.yml` / `infra/e2e-stubs/` — 外部依存スタブ(§9)

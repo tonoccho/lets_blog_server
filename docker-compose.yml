@@ -43,12 +43,32 @@ services:
     # 「スタック全体がhealthy」を機械的に判定できるようヘルスチェックを持たせる。
     # nginx:alpineにcurlは無いためbusybox wgetを使い、自己署名証明書のHTTPSではなく
     # 80番のヘルス用location(infra/nginx/conf.d/default.confの/nginx-health)を叩く。
+    #
+    # issue #1038: /nginx-health だけでは足りない。ホストの80/443を他プロセスが占有していると
+    # Dockerはネットワーク接続時のポート公開に失敗し、コンテナは**どのネットワークにも
+    # 所属しないまま running になる**(実測: NetworkSettings.Networks が {}、コンテナ内は
+    # loopback のみ、web:3000 も gateway:8080 も `bad address`)。ところが /nginx-health は
+    # 自分のnetns内の127.0.0.1を叩くだけなので、この状態でも 200 を返し healthy と
+    # 報告され続ける。何も中継できないのに「正常」と見える、最も質の悪い壊れ方だった。
+    #
+    # そこで上流への到達性を条件に加える。busybox nc の -z はTCP接続だけを見るため、
+    # web(Next.js)のコンパイル中でも、gatewayが5xxを返していても落ちない。孤立時のみ
+    # 名前解決に失敗して落ちる。web と gateway の**どちらか**が届けばよいことにして、
+    # 片方の再起動でreverse-proxyがunhealthyへ倒れる無用な連鎖を避ける。
+    #
+    # start_period は上流のTCP待ち受け開始を待てる長さにする(webの`next dev`は
+    # 初回コンパイル前に3000番をlistenするので、ここで待つのはコンパイルではなく起動)。
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:80/nginx-health || exit 1"]
+      test:
+        - CMD-SHELL
+        - >-
+          wget -q -O /dev/null http://127.0.0.1:80/nginx-health
+          && { nc -z -w 3 web 3000 || nc -z -w 3 gateway 8080; }
+          || exit 1
       interval: 10s
-      timeout: 5s
+      timeout: 10s
       retries: 5
-      start_period: 10s
+      start_period: 60s
 
   web:
     build:
