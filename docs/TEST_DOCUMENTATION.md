@@ -77,6 +77,51 @@ bash scripts/check-test-db.sh
 docker compose exec mysql bash /docker-entrypoint-initdb.d/02-create-test-schemas.sh
 ```
 
+### media-service に Chromium は要らない(#1020)
+
+media-service は `[recharts]` 組み込みタグのサーバーサイドレンダリングにヘッドレス Chromium を
+使う(`PlaywrightConfig` → `RechartsRenderer`)。**しかしテストを回すのにブラウザは要らない。**
+
+かつては要った。`RechartsRenderer` が eager singleton のまま素の `Browser` を注入していたため、
+Chromium の実行バイナリが無いホストでは ApplicationContext の生成そのものが落ち、
+`./gradlew :services:media:test` が **118件中46件**失敗していた(#1020)。落ちるのは
+認可マトリクス(#772)・AdminAuthorization(#644)・Flyway 契約(#914)という、レンダリングとは
+無関係なテストばかりで、認可と DB マイグレーションの回帰検知が常に赤のまま誰も読まない状態に
+なっていた。上の「テスト用MySQLの前提」と同じ、**環境要因が本物の失敗を埋もれさせる**形である。
+
+| 症状 | 例外 | 原因 |
+|---|---|---|
+| ブラウザが無い | `TargetClosedError` / `chrome-headless-shell: libatk-1.0.so.0` | eager な消費者が `Browser` を直接注入し、Bean 定義側の `@Lazy` を無効化していた |
+
+#### 採った対処と、採らなかった案
+
+**注入点に `@Lazy` を付けた**(`RechartsRenderer` のコンストラクタ引数)。Spring は `Browser` の
+プロキシを注入し、実体は `browser.newPage()` が最初に呼ばれるまで作られない。実行時経路は
+変わらないので、Chromium を持つコンテナでの `POST /api/render/recharts` は従来どおり動く。
+
+- **`RechartsRenderer` 自体を `@Lazy` にする** — 採らない。`RenderController` が eager に
+  注入するので実体化は結局起動時に起きる。消費者が増えるたびに全員へ付けて回ることになり、
+  付け忘れがそのまま再発の形になる。
+- **プロファイル分離**(テストだけ `browser` を差し替える) — 採らない。テストは通るが、
+  Chromium の無いホストで**アプリを起動する**ことは相変わらずできない。`PlaywrightConfig` の
+  コメントが元から述べていた意図を、テスト専用の迂回で置き換えることになる。
+- **ホストへ依存パッケージ(libatk 等)を導入する** — 採らない。環境側の対処であり、
+  「ブラウザの有無に関係なく実行できる」という #1020 の Goal と方向が逆。
+
+#### 再発の検知
+
+`services/media/src/test/java/com/letsblog/media/config/PlaywrightLazyBrowserTest.java` が
+2つの角度から見張る。どちらも Chromium も DB も要らない。
+
+1. コンテキストを起動しても `browser`/`playwright` シングルトンが**作られない**こと
+   (Chromium 入りのコンテナでも意味を持つよう、例外の有無ではなく実体化の有無を見る)
+2. `com.letsblog.media` の Spring 管理コンポーネントに `@Lazy` の無い `Browser`/`Playwright`
+   注入点が現れたら失敗するラチェット(将来 eager な消費者が増えたときに気づくため)
+
+> **Node 側(受け入れテスト)の Playwright は別問題。** `npm run test:at` はホストの
+> `~/.cache/ms-playwright` にブラウザを要求する。こちらは実行環境を用意する話であり、
+> **#1045** で扱う。#1020 の対処はこれを解決しない。
+
 ---
 
 各サービスのテストは、プロジェクトルートから`./gradlew`でサービスごとに独立して実行できる

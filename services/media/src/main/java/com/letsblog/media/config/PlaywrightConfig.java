@@ -15,6 +15,14 @@ import java.util.List;
  * legacy-apiのPlaywrightConfig(#573でRechartsRendererと共にmedia-serviceへ移設)と同一の実装。
  * @Lazyにしているのは、Chromiumの実行バイナリが存在しない環境でもアプリ自体は起動・他機能の
  * テストができるようにするため。
+ *
+ * <p><b>ここの{@code @Lazy}だけでは足りない(issue #1020)。</b>Bean定義側の{@code @Lazy}は、
+ * eagerな消費者が{@link Browser}を直接注入した時点で効かなくなる。実際、
+ * {@link com.letsblog.media.render.RechartsRenderer}(eager singleton)がコンストラクタで
+ * 素の{@code Browser}を受け取っていたため、Chromiumの無いホストでは
+ * {@code @SpringBootTest}が118件中46件全滅していた。<b>新たに{@code Browser}/{@code Playwright}を
+ * 使うBeanを足すときは、その注入点にも{@code @Lazy}を付けること。</b>
+ * 付け忘れは{@code PlaywrightLazyBrowserTest}のラチェットが検知する。
  */
 @Configuration
 public class PlaywrightConfig {
