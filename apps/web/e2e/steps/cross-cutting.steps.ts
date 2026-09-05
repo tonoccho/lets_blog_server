@@ -22,10 +22,12 @@ import {
   type ControllerEndpoint,
 } from '../support/endpoints';
 import {
+  fetchThroughGateway,
   floodGateway,
   probeThroughGateway,
   sendThroughGateway,
   waitForContainerLog,
+  type GatewayBodyResponse,
   type GatewayProbeResult,
   type GatewayResponse,
 } from '../support/gateway';
@@ -293,6 +295,51 @@ Then('どれもgatewayの経路なし404にはならず、担当サービスの�
     gateNotAnswering.map(describe),
     'gateway 経由の要求に対して、担当サービスの認証ゲートが応答していない'
   ).toEqual([]);
+});
+
+/**
+ * クエリ中継の検証で使うクライアントIP(issue #1002)。一斉走査(`probeThroughGateway`)や
+ * レート制限のシナリオと枠を分けるため、`support/gateway.ts` が使う TEST-NET-3 の
+ * 連番(198.51.100.1〜250)とは重ならない値を固定で使う。
+ */
+const CONTENT_CACHE_PROBE_CLIENT_IP = '198.51.100.251';
+
+/** `/api/content-cache` の応答(必要な項目だけ)。 */
+interface ContentCardResponse {
+  url: string;
+  data?: Record<string, string>;
+}
+
+When('gateway経由で {string} のカード情報を要求する', async ({ ctx, request }, url: string) => {
+  const token = await fetchAccessToken(request, E2E_TEST_EMAIL, E2E_TEST_PASSWORD);
+  ctx.contentCacheRequestedUrl = url;
+  // 拡張(apps/extension/src/apiClient.ts の resolveContentCache)と同じく、
+  // encodeURIComponent で**1回だけ**エンコードして送る。
+  ctx.contentCacheResponse = fetchThroughGateway({
+    path: `/api/content-cache?url=${encodeURIComponent(url)}`,
+    token,
+    clientIp: CONTENT_CACHE_PROBE_CLIENT_IP,
+  });
+});
+
+Then('カード情報が取得でき、要求したURLがそのまま返る', async ({ ctx }) => {
+  const requestedUrl = ctx.contentCacheRequestedUrl as string;
+  const response = ctx.contentCacheResponse as GatewayBodyResponse;
+
+  expect(
+    response.status,
+    `gateway経由の GET /api/content-cache が失敗した(#1002): ${response.body}`
+  ).toBe(200);
+
+  const card = JSON.parse(response.body) as ContentCardResponse;
+  expect(
+    card.url,
+    'content-service が受け取ったURLが、要求したURLと一致しない(gatewayが値を再エンコードしている。#1002)'
+  ).toBe(requestedUrl);
+  expect(
+    card.data?.title ?? '',
+    'カード情報(OGPのタイトル)が取得できていない'
+  ).not.toBe('');
 });
 
 /**

@@ -2,6 +2,7 @@ package com.letsblog.gateway.config;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
@@ -13,10 +14,13 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
+import java.net.URI;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
@@ -158,6 +162,42 @@ class ProxyHandlerRoutingTest {
         String target = handler.buildTargetUri(route, request);
 
         assertEquals("http://foo-svc:8080/api/foo/bar", target);
+    }
+
+    @Test
+    @DisplayName("?だけ付いた空のクエリ文字列でも?を付与しない(空文字のクエリを下流へ渡さない)")
+    void buildTargetUriOmitsQuestionMarkWhenQueryIsBlank() {
+        RouteProperties.Route route = route("foo", "http://foo-svc:8080", null, "/api/foo/**");
+        ProxyHandler handler = handler(routeProperties(route));
+
+        // requestFor(String)はURIテンプレートとして解釈されて空クエリが落ちるため、URIを直接渡す。
+        ServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.method(HttpMethod.GET, URI.create("/api/foo/bar?")).build());
+        ServerRequest request = ServerRequest.create(exchange, List.of());
+
+        assertEquals("http://foo-svc:8080/api/foo/bar", handler.buildTargetUri(route, request));
+    }
+
+    // ------------------------------------------------------------------
+    // handle: ルートが無い場合(issue #583でフォールバックを廃止)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("どのルートにもマッチしない要求は、下流へ転送せずgateway自身が本文の無い404を返す")
+    void respondsWithEmptyNotFoundWhenNoRouteMatches() {
+        RouteProperties.Route unrelated = route("unrelated", "http://unrelated-svc:8080", null, "/api/other/**");
+        AtomicBoolean forwarded = new AtomicBoolean(false);
+        ExchangeFunction recordingOk = request -> {
+            forwarded.set(true);
+            return Mono.just(ClientResponse.create(HttpStatus.OK).build());
+        };
+        ProxyHandler handler = handlerWithDownstream(routeProperties(unrelated), recordingOk);
+
+        StepVerifier.create(handler.handle(requestFor("/api/unmatched/thing")))
+                .assertNext(response -> assertEquals(HttpStatus.NOT_FOUND, response.statusCode()))
+                .verifyComplete();
+
+        assertFalse(forwarded.get(), "経路が無い要求を下流へ転送してはいけない");
     }
 
     // ------------------------------------------------------------------

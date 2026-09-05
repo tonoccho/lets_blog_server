@@ -142,6 +142,48 @@ export function sendThroughGateway(options: {
   return { status: Number(statusLine.split(/\s+/)[1]), headers };
 }
 
+export interface GatewayBodyResponse {
+  status: number;
+  /** 応答本文(そのままの文字列)。 */
+  body: string;
+}
+
+/**
+ * 1リクエストだけ送り、ステータスと**応答本文**を返す(issue #1002)。
+ *
+ * `sendThroughGateway` はヘッダーしか返さないため、下流サービスが何を受け取ったかを
+ * 本文から確かめる検証には使えない。クエリ文字列の中継(二重エンコードしていないこと)は
+ * 応答本文に現れるので、本文まで読める入口をここに足す。
+ *
+ * `path` は**エンコード済みの**パス+クエリをそのまま渡すこと。`execFileSync` はシェルを
+ * 介さないので、`%` や `&` を含んでいても書き換えられない。
+ */
+export function fetchThroughGateway(options: {
+  method?: string;
+  path: string;
+  token?: string;
+  clientIp?: string;
+}): GatewayBodyResponse {
+  const args = [
+    'exec', GATEWAY_CONTAINER, 'curl', '-s', '-w', '\n%{http_code}',
+    '--max-time', '90', '-X', options.method ?? 'GET',
+  ];
+  if (options.clientIp) {
+    args.push('-H', `X-Forwarded-For: ${options.clientIp}`);
+  }
+  if (options.token) {
+    args.push('-H', `Authorization: Bearer ${options.token}`);
+  }
+  args.push(`${GATEWAY_ORIGIN}${options.path}`);
+
+  const output = execFileSync('docker', args, { encoding: 'utf8', timeout: 120_000 });
+  const separator = output.lastIndexOf('\n');
+  if (separator < 0) {
+    throw new Error(`gatewayからの応答を解釈できませんでした: ${output}`);
+  }
+  return { status: Number(output.slice(separator + 1).trim()), body: output.slice(0, separator) };
+}
+
 /**
  * 同じクライアント(= 同じ `X-Forwarded-For` 末尾)から連続して送り、ステータスの列を返す。
  * レート制限の検証に使う。

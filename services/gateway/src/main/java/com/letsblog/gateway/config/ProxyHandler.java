@@ -11,6 +11,7 @@ import org.springframework.web.reactive.function.server.ServerResponse;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
@@ -77,8 +78,11 @@ public class ProxyHandler {
                 ? route.getResponseTimeout()
                 : routeProperties.getDefaultResponseTimeout();
 
+        // URIとして渡す。String版のuri(...)は渡された文字列をURIテンプレートとして
+        // 解釈し直すため、既にエンコード済みの値を二重エンコードしてしまう
+        // (buildTargetUriのJavadoc参照。issue #1002)。
         WebClient.RequestBodySpec requestSpec = webClient.method(request.method())
-                .uri(targetUri)
+                .uri(URI.create(targetUri))
                 .headers(headers -> copyRequestHeaders(request.headers().asHttpHeaders(), headers));
 
         Mono<ServerResponse> response = requestSpec
@@ -121,6 +125,23 @@ public class ProxyHandler {
      *
      * <p>{@code route}は非nullであることを前提とする。マッチしなかった場合は
      * {@link #handle(ServerRequest)}が404を返して呼ばない(issue #583でフォールバックを廃止)。
+     *
+     * <p><b>戻り値は「既にパーセントエンコードされたURI文字列」であり、再度エンコードしては
+     * ならない(issue #1002)。</b>クライアントから届いた生のパス({@code ServerRequest#path()}は
+     * {@code RequestPath}の生の値)と生のクエリ({@code getRawQuery()})をそのまま連結している。
+     * これを{@code WebClient.uri(String)}へ渡すと、WebClient既定の
+     * {@code DefaultUriBuilderFactory}がURIテンプレートとして符号化し直し、値の中の
+     * {@code %}が{@code %25}へ置き換わる。すなわち
+     * {@code ?url=https%3A%2F%2Fexample.com%2F} が
+     * {@code ?url=https%253A%252F%252Fexample.com%252F} になり、下流が
+     * {@code @RequestParam}で1回復号しても絶対URLへ戻らない。gatewayは「受け取った
+     * リクエストラインをそのまま渡す」のが仕事なので、{@link #handle(ServerRequest)}では
+     * {@code URI}へ変換してから渡す({@code URI}版の{@code uri(...)}は
+     * {@code UriBuilderFactory}を通さない)。
+     *
+     * <p>ここで{@code URI.create}が失敗する組み合わせは実運用では起きない。リクエストラインが
+     * URIとして解釈できない場合、Reactor Nettyのアダプタがこのハンドラに到達する前に400を
+     * 返しているためで、残るのはルート表の{@code uri}(設定値。絶対URI)との連結だけである。
      */
     String buildTargetUri(RouteProperties.Route route, ServerRequest request) {
         String baseUri = route.getUri();

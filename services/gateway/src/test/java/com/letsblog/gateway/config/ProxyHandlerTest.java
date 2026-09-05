@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * gatewayのリバースプロキシとしての基本的なヘッダー転送を検証する。
@@ -107,5 +108,45 @@ class ProxyHandlerTest {
 
         ClientRequest forwarded = capturedRequest.get();
         assertNotNull(forwarded.headers().getFirst("X-Custom-Client-Header"));
+    }
+
+    @Test
+    @DisplayName("接続用ヘッダー(host/content-length)は下流へ転送しない。接続に応じてWebClientが張り直す")
+    void dropsConnectionScopedRequestHeaders() {
+        ExchangeFunction alwaysOk = request -> Mono.just(ClientResponse.create(HttpStatus.OK).build());
+        ProxyHandler handler = handlerWithDownstream(alwaysOk);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.add(HttpHeaders.HOST, "forged-host.example");
+        headers.add(HttpHeaders.CONTENT_LENGTH, "999");
+        headers.add("X-Kept-Header", "kept");
+
+        StepVerifier.create(handler.handle(requestWithHeaders(headers)))
+                .assertNext(response -> assertEquals(HttpStatus.OK, response.statusCode()))
+                .verifyComplete();
+
+        ClientRequest forwarded = capturedRequest.get();
+        assertNull(forwarded.headers().getFirst(HttpHeaders.HOST),
+                "クライアントが申告したHostをそのまま下流へ渡してはいけない");
+        assertNull(forwarded.headers().getFirst(HttpHeaders.CONTENT_LENGTH));
+        assertEquals("kept", forwarded.headers().getFirst("X-Kept-Header"));
+    }
+
+    @Test
+    @DisplayName("下流の応答ヘッダーは、接続用ヘッダー(transfer-encoding等)を除いてクライアントへ引き継がれる")
+    void copiesResponseHeadersExceptConnectionScopedOnes() {
+        ExchangeFunction respondsWithHeaders = request -> Mono.just(ClientResponse.create(HttpStatus.OK)
+                .header("X-Downstream-Header", "kept")
+                .header(HttpHeaders.TRANSFER_ENCODING, "chunked")
+                .build());
+        ProxyHandler handler = handlerWithDownstream(respondsWithHeaders);
+
+        StepVerifier.create(handler.handle(requestWithHeaders(new HttpHeaders())))
+                .assertNext(response -> {
+                    assertEquals("kept", response.headers().getFirst("X-Downstream-Header"));
+                    assertNull(response.headers().getFirst(HttpHeaders.TRANSFER_ENCODING),
+                            "接続用ヘッダーは下流の応答からそのまま返してはいけない");
+                })
+                .verifyComplete();
     }
 }
