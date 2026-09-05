@@ -306,6 +306,41 @@ cd apps/web && npm run test:at
 実装は `infra/e2e-stubs/<name>/server.js`、共通土台は `infra/e2e-stubs/lib/stub.js`。
 `node:22-alpine` にソースをマウントするだけなので、イメージのビルドは要らない。
 
+### `working_dir` はマウント先(`/app`)にしない
+
+スタブは `./infra/e2e-stubs` を `/app` へ読み取り専用でマウントするが、`working_dir` は
+**`/`** であり、起動は `node /app/<name>/server.js` と絶対パスで書く(#1000)。
+
+ヘルスチェックは `docker exec` と同じ経路で走り、その cwd はコンテナの `WorkingDir` に
+なる。`healthcheck:` には `docker exec -w` に当たる指定が無いので、cwd を選べるのは
+`working_dir` だけである。**runc 1.4.0**(Ubuntu 26.04 / Docker 29.1.3)は exec の cwd が
+バインドマウント経由でマウント名前空間のルート外を指す場合、プロセスの起動そのものを拒否する。
+
+```
+OCI runtime exec failed: exec failed: unable to start container process:
+current working directory is outside of container mount namespace root
+-- possible container breakout detected
+```
+
+拒否されるのは**プロセスが動き出す前**なので、`test:` の中に `cd /` を書いても効かない。
+`working_dir: /app` のままだとスタブ6本が起動直後から恒常的に `unhealthy` になり、
+`depends_on: condition: service_healthy` で待つ `ai` / `platform` / `analytics` が起動を
+完了できず、上の `docker compose ... up -d` がそこで止まる。
+`scripts/verify-clean-volume-boot.sh`(`wait-for-stack-healthy.sh --all`)も必ずタイムアウトする。
+
+この拒否は runc のバージョンに依存する(1.4.3 では起きない)。**動く環境があることは
+この組み合わせが安全である根拠にならない**ため、compose の宣言そのものを
+`scripts/test_compose_healthcheck_cwd.py` が検査する。同じ理由で `web`
+(イメージの `WORKDIR` が `/app`、そこへ `./apps/web` をマウント)も `working_dir: /` にしてある。
+
+その帰結として、**`docker compose exec` は `/` で始まる**。コンテナの中で
+`package.json` のあるディレクトリを前提にするコマンドを流すときは cwd を明示すること。
+
+```bash
+docker compose exec -w /app web sh      # web は npm を /app で動かす
+docker exec -w /app lbs-e2e-llm-stub sh # スタブのソースは /app:ro
+```
+
 **スタブ化しないもの**: ComfyUI / PlantUML / draw.io / Penpot / WordPress。
 いずれもローカルコンテナとして実物が動くため、実物に対して検証する。
 

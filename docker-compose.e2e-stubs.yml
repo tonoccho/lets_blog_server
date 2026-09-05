@@ -24,7 +24,22 @@
 x-stub-base: &stub-base
   image: node:22-alpine
   restart: unless-stopped
-  working_dir: /app
+  # マウント先(/app)を working_dir にしない(#1000)。
+  #
+  # ヘルスチェックは docker exec と同じ経路で走り、その cwd はコンテナの WorkingDir に
+  # なる。healthcheck: には -w に当たる指定が無いので、cwd を選べるのはここだけである。
+  # runc 1.4.0 は exec の cwd がバインドマウント経由でマウント名前空間のルート外を指す場合、
+  # プロセスの起動そのものを拒否する:
+  #
+  #   OCI runtime exec failed: exec failed: unable to start container process:
+  #   current working directory is outside of container mount namespace root
+  #
+  # 拒否されるのはプロセスが動き出す前なので、test: の中に cd を書いても回避できない。
+  # working_dir=/app のままだとスタブ6本が起動直後から恒常的に unhealthy になり、
+  # condition: service_healthy で待つ ai / platform / analytics が起動を完了できない。
+  # ソースの持ち込み方(読み取り専用の /app マウント)とスタブの機能は変えていない。
+  # 起動は下の command が絶対パス(/app/<name>/server.js)で指す。
+  working_dir: /
   volumes:
     - ./infra/e2e-stubs:/app:ro
   environment:
@@ -43,42 +58,42 @@ services:
   llm-stub:
     <<: *stub-base
     container_name: lbs-e2e-llm-stub
-    command: ["node", "llm/server.js"]
+    command: ["node", "/app/llm/server.js"]
     ports:
       - "127.0.0.1:18081:8080"
 
   ga-stub:
     <<: *stub-base
     container_name: lbs-e2e-ga-stub
-    command: ["node", "google-analytics/server.js"]
+    command: ["node", "/app/google-analytics/server.js"]
     ports:
       - "127.0.0.1:18082:8080"
 
   adsense-stub:
     <<: *stub-base
     container_name: lbs-e2e-adsense-stub
-    command: ["node", "adsense/server.js"]
+    command: ["node", "/app/adsense/server.js"]
     ports:
       - "127.0.0.1:18083:8080"
 
   brave-stub:
     <<: *stub-base
     container_name: lbs-e2e-brave-stub
-    command: ["node", "brave-search/server.js"]
+    command: ["node", "/app/brave-search/server.js"]
     ports:
       - "127.0.0.1:18084:8080"
 
   image-stub:
     <<: *stub-base
     container_name: lbs-e2e-image-stub
-    command: ["node", "openai-image/server.js"]
+    command: ["node", "/app/openai-image/server.js"]
     ports:
       - "127.0.0.1:18085:8080"
 
   github-stub:
     <<: *stub-base
     container_name: lbs-e2e-github-stub
-    command: ["node", "github/server.js"]
+    command: ["node", "/app/github/server.js"]
     ports:
       - "127.0.0.1:18086:8080"
 

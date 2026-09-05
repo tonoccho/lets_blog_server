@@ -95,6 +95,19 @@ services:
     # 容量の大きいTurbopackキャッシュがルートディスクを圧迫していた)
     volumes:
       - ./apps/web:/app
+    # マウント先(/app)を working_dir にしない(#1000)。
+    #
+    # イメージのWORKDIRは/appだが、そこは上のバインドマウントの中である。ヘルスチェックは
+    # docker execと同じ経路で走り、cwdはコンテナのWorkingDirになる。runc 1.4.0はexecのcwdが
+    # バインドマウント経由でマウント名前空間のルート外を指す場合、プロセスの起動そのものを
+    # 拒否する(current working directory is outside of container mount namespace root)。
+    # 拒否されるのはプロセスが動き出す前なので、test:の中にcdを書いても回避できない。
+    # e2eスタブ6本が恒常的にunhealthyになったのと同じ構図で、webも同じ組み合わせを持つ。
+    #
+    # next devはプロジェクトディレクトリをcwdから決めるため、起動時にだけ/appへ入る。
+    # commandはDockerfileのCMD(npm run dev)と同じものを、cd経由で起動する。
+    working_dir: /
+    command: ["sh", "-c", "cd /app && exec npm run dev"]
     # webの呼び先はgatewayに一本化した(issue #584)ため、起動順の依存もgatewayへ付け替える
     # (gateway自身がapi/identity/各ドメインサービスのhealthyを待つ)。
     depends_on:
