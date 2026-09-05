@@ -353,7 +353,7 @@ API: log-writer `AuditLogController`, `OperationLogController`, `FrontendErrorLo
 | AC-EXT-004 | `letsBlog.createArticle` | AI支援付きで記事を起こせる | 新規記事ファイルが生成され、AIの下書きが入る | `ext:articles/authoring.feature` › AIありの記事作成では見出しを含む構成案が提案される、単体 `articleScaffold.test.ts`、手動: チェックリスト §4 | 検証済(パネル操作は手動) |
 | AC-EXT-005 | `letsBlog.createArticleWithoutAi` | AIを使わず記事を起こせる | テンプレートだけの記事ファイルが生成される | 単体 `articleScaffold.test.ts`(生成物・上書き確認の3分岐・日本語front matter)、手動: チェックリスト §4 | 検証済(単体。サーバーを介さずLayer 1の対象外) |
 | AC-EXT-006 | `letsBlog.publish` | エディタから公開できる | 編集中の記事が公開され、公開先URLで読める | `ext:articles/publish.feature` › front matter付きのMarkdownを公開するとWordPress投稿が作成される / 公開済みの記事を再度公開すると同じWordPress投稿が更新される、単体 `apiClientRequests.test.ts`(multipartの組み立て) | 検証済(`@slow`) |
-| AC-EXT-007 | `letsBlog.schedulePublication` | 予約公開できる | 指定時刻が設定され、時刻まで公開されない | —(#1003 でブロック。エージェント経路が `publishScheduledAt` を無視して即時公開するため、シナリオを置くとバグを期待値に固定してしまう) | 未着手(#1003) |
+| AC-EXT-007 | `letsBlog.schedulePublication` | 予約公開できる | 指定時刻が設定され、時刻まで公開されない | `ext:articles/publish.feature` › 本番サイトへは公開予定日時を指定して予約投稿できる / 予約日時を変更して再公開しても予約状態が維持される(#1003 で解消。provision-agentの`/wp-cli/post`が`publishScheduledAt`を読んでおらず、日時なしで即時公開されていた) | 検証済(`@slow`) |
 | AC-EXT-008 | `letsBlog.deletePost` | 公開済み記事を取り下げられる | 公開先から記事が消える | `ext:articles/deletion.feature` › 公開した記事を削除すると公開先から読めなくなる / アイキャッチ画像付きの記事を削除すると、未参照になったメディアも削除できる(#1001 で解消。`wp post delete` へ渡していた存在しない `--yes` が原因で常に502だった) | 検証済(`@slow`) |
 | AC-EXT-009 | `letsBlog.askAi` | 執筆中に下書き/校正/要約を頼める | 選択範囲に対する応答がエディタへ挿入される | `ext:ai/assist.feature` › askAiは選んだモードでAIへ依頼する(draft / proofread / summarize の3例) | 検証済(`@stub`) |
 | AC-EXT-010 | `letsBlog.askAiSearch` | Web検索を踏まえた回答を得られる | 検索結果を根拠にした応答が返る | `ext:ai/assist.feature` › askAiSearchはWeb検索の結果を根拠として返す | 検証済(`@stub`) |
@@ -523,8 +523,8 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 
 `検証済` のうち 18 件は VSCode拡張(`AC-EXT-*`)で、#942(AT-16)により
 APIレベルの受け入れテスト・単体テスト・手動チェックリストのいずれかへ対応付けた。
-`AC-EXT-007` / `008` / `011` / `012` / `016` は実装側・スタブ側の不具合(#1003 / #1001 / #1004 / #998)のため自動化できず
-`未着手` のままにしてある——バグを期待値として固定しないため。
+`AC-EXT-011` / `012` / `016` は実装側・スタブ側の不具合(#1004 / #998)のため自動化できず
+`未着手` のままにしてある——バグを期待値として固定しないため(`007` は#1003で、`008` は#1001で解消済み)。
 
 `検証済` のうち2件は §4.1 のとおり受け入れ基準を狭めてある。
 `@fail`(不具合が直るまで失敗が期待値)のシナリオは無い(#955 の修正で最後の1件が外れた)。

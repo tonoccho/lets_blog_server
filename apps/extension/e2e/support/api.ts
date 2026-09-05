@@ -52,6 +52,7 @@ export interface ProjectFixture {
 export const FIXTURE_PROJECT_SLUG = 'at16-extension';
 export const FIXTURE_PROJECT_NAME = 'AT16 拡張受け入れテスト';
 export const FIXTURE_SITE_KEY = 'at16probe';
+export const FIXTURE_PROD_SITE_KEY = 'at16probeprod';
 
 /** 受け入れテスト用プロジェクトを用意する(冪等)。 */
 export async function ensureProject(token: string): Promise<ProjectFixture> {
@@ -77,6 +78,28 @@ export interface SiteFixture {
   siteKey: string;
 }
 
+async function createManagedSite(
+  token: string,
+  siteKey: string,
+  siteName: string,
+  siteTitle: string,
+  adminUser: string,
+  adminEmail: string
+): Promise<SiteFixture> {
+  const created = await call('POST', '/api/sites/managed-wordpress', token, {
+    name: siteName,
+    siteKey,
+    title: siteTitle,
+    adminUser,
+    adminEmail,
+    adminPassword: 'At16Probe#Passw0rd1',
+  });
+  if (created.status >= 300) {
+    throw new Error(`マネージドWordPressを構築できませんでした (HTTP ${created.status}): ${created.text}`);
+  }
+  return created.json as SiteFixture;
+}
+
 /**
  * 公開シナリオ用のマネージドWordPressサイトを用意する(冪等)。
  * 構築には数十秒〜数分かかるため、これを使うシナリオには `@slow` を付ける。
@@ -85,19 +108,31 @@ export async function ensureManagedSite(token: string): Promise<SiteFixture> {
   const list = await call('GET', '/api/sites', token);
   const existing = (list.json as SiteFixture[] | undefined)?.find((s) => s.siteKey === FIXTURE_SITE_KEY);
   if (existing) return existing;
+  return createManagedSite(
+    token, FIXTURE_SITE_KEY, 'AT16 probe site', 'AT16 Probe', 'at16probeadmin', 'at16-probe@letsblog.local'
+  );
+}
 
-  const created = await call('POST', '/api/sites/managed-wordpress', token, {
-    name: 'AT16 probe site',
-    siteKey: FIXTURE_SITE_KEY,
-    title: 'AT16 Probe',
-    adminUser: 'at16probeadmin',
-    adminEmail: 'at16-probe@letsblog.local',
-    adminPassword: 'At16Probe#Passw0rd1',
-  });
-  if (created.status >= 300) {
-    throw new Error(`マネージドWordPressを構築できませんでした (HTTP ${created.status}): ${created.text}`);
+/**
+ * 予約投稿(publishScheduledAt)はプロジェクトの本番(production)環境サイトでのみ有効になる
+ * (issue #520)。`ensureManagedSite`が用意する`test`環境サイトとは別サイトを本番として
+ * 用意し、既存シナリオの前提(そのサイトは本番ではない)を壊さない(issue #1003)。
+ */
+export async function ensureProductionManagedSite(token: string, projectId: number): Promise<SiteFixture> {
+  const list = await call('GET', '/api/sites', token);
+  let site = (list.json as SiteFixture[] | undefined)?.find((s) => s.siteKey === FIXTURE_PROD_SITE_KEY);
+  if (!site) {
+    site = await createManagedSite(
+      token,
+      FIXTURE_PROD_SITE_KEY,
+      'AT16 probe site (production)',
+      'AT16 Probe Prod',
+      'at16probeprodadmin',
+      'at16-probe-prod@letsblog.local'
+    );
   }
-  return created.json as SiteFixture;
+  await bindEnvironment(token, projectId, 'production', site.id);
+  return site;
 }
 
 export interface UnreferencedMedia {

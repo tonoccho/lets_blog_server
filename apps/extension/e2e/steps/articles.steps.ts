@@ -133,6 +133,27 @@ When('同じスラッグの記事を本文を変えて再度公開する', async
   await publish(world, slug, '受け入れテストで更新した記事本文です。');
 });
 
+// ------------------------------------------------------------------ 予約投稿(issue #1003)
+
+Given('スラッグ {string} の記事を公開予定日時 {string} で公開する', async (world, slug, scheduledAt) => {
+  await publish(world, slug, '受け入れテストで作成した記事本文です。', { scheduledAt });
+});
+
+When('同じスラッグの記事の公開予定日時を {string} に変更して再公開する', async (world, scheduledAt) => {
+  const scope = w(world);
+  const slug = (scope as unknown as { slug: string }).slug;
+  const lookup = await apiClient.lookupExistingPost(scope.token, scope.site.siteKey, slug, scope.actor);
+  (scope as { wpPostId?: string }).wpPostId = lookup?.wpPostId;
+  await publish(world, slug, '受け入れテストで更新した記事本文です。', { scheduledAt });
+});
+
+Then('応答のstatusが {string} になる', (world, expectedStatus) => {
+  const published = (world as { published?: { status?: string } }).published;
+  if (published?.status !== expectedStatus) {
+    throw new Error(`ステータスが一致しません: ${JSON.stringify(published)} (期待値: ${expectedStatus})`);
+  }
+});
+
 // ------------------------------------------------------------------ 記事の削除(issue #1001)
 
 Given('スラッグ {string} の記事を公開状態で投稿する', async (world, slug) => {

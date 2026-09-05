@@ -13,7 +13,14 @@ import {
   loggedInAdminContext,
   adminAccessToken,
 } from '../support/env';
-import { ensureManagedSite, ensureProject, bindEnvironment, ProjectFixture, SiteFixture } from '../support/api';
+import {
+  ensureManagedSite,
+  ensureProductionManagedSite,
+  ensureProject,
+  bindEnvironment,
+  ProjectFixture,
+  SiteFixture,
+} from '../support/api';
 import * as apiClient from '../../src/apiClient';
 import type { Actor } from '../../src/schemas';
 
@@ -66,6 +73,7 @@ Given('拡張の設定が既定値である', (world) => {
 let cachedActor: Actor | undefined;
 let cachedProject: ProjectFixture | undefined;
 let cachedSite: SiteFixture | undefined;
+let cachedProdSite: SiteFixture | undefined;
 
 Given('管理者としてログイン済みである', async (world) => {
   const scope = w(world);
@@ -92,6 +100,13 @@ Given('公開先のマネージドWordPressサイトが用意されている', a
     await bindEnvironment(scope.token, cachedProject!.id, 'test', cachedSite.id);
   }
   scope.site = cachedSite;
+});
+
+/** issue #1003: 予約投稿(publishScheduledAt)は本番(production)環境サイトでのみ有効になる。 */
+Given('予約投稿の検証に使う本番マネージドWordPressサイトが用意されている', async (world) => {
+  const scope = w(world);
+  cachedProdSite = cachedProdSite ?? (await ensureProductionManagedSite(scope.token, cachedProject!.id));
+  scope.site = cachedProdSite;
 });
 
 Then('エラーメッセージに接続先のURLが含まれる', (world) => {

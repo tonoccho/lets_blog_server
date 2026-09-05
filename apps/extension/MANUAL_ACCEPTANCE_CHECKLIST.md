@@ -71,7 +71,7 @@ Layer 1 / Layer 2 のどちらからも観測できない。
 
 - [ ] `Let's Blog: Publish` の進捗通知が出て、完了後に公開URLを開けるアクションが提示される
 - [ ] `Let's Blog: Schedule Publication` で日時を入力すると front matter の `publish_scheduled_at` が書き換わる
-      (**サーバー側の予約公開はエージェント経路で未実装。#1003**)
+      (サーバー側の予約公開は`ext:articles/publish.feature`で自動検証済み。#1003で解消)
 - [ ] `Let's Blog: Delete Post` の確認ダイアログが出る(**削除自体は #1001 で失敗する**)
 
 ## 7. 画像・図(AC-EXT-016 / 017 / 020 / 021 / 022)

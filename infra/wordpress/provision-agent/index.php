@@ -1161,9 +1161,25 @@ if ($path === '/wp-cli/post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $featuredMediaId = $input['featuredMediaId'] ?? null;
     $authorId = $input['authorId'] ?? null;
     $htmlContent = (string) ($input['htmlContent'] ?? '');
+    $publishScheduledAt = (string) ($input['publishScheduledAt'] ?? '');
 
     if (!isValidSlug($slug) || $title === '' || $status === '') {
         respond(400, ['error' => 'パラメータが不正です']);
+    }
+
+    // publishScheduledAtが未指定ならnullのまま(予約投稿ではない通常の作成/更新)。
+    // SSH経路(WordPressSshOperations)と同じくpost_date/post_date_gmtの両方にUTC値を送る
+    // (post updateは未指定フィールドを既存値のまま引き継ぐため、post_date_gmtだけでは
+    // サイトのローカル時刻を表示するpost_dateが更新前の値に取り残される。issue #1003)。
+    $scheduledDateArg = null;
+    if ($publishScheduledAt !== '') {
+        try {
+            $scheduledDate = new DateTime($publishScheduledAt);
+        } catch (Exception $e) {
+            respond(400, ['error' => "publishScheduledAtの形式が不正です: $publishScheduledAt"]);
+        }
+        $scheduledDate->setTimezone(new DateTimeZone('UTC'));
+        $scheduledDateArg = $scheduledDate->format('Y-m-d H:i:s');
     }
     $sitePath = resolveExistingSitePath($slug);
     if ($sitePath === null) {
@@ -1186,6 +1202,10 @@ if ($path === '/wp-cli/post' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $subArgs = $existingPostId !== null ? ['post', 'update', (string) $existingPostId, '-'] : ['post', 'create', '-'];
     $subArgs[] = "--post_title=$title";
     $subArgs[] = "--post_status=$status";
+    if ($scheduledDateArg !== null) {
+        $subArgs[] = "--post_date=$scheduledDateArg";
+        $subArgs[] = "--post_date_gmt=$scheduledDateArg";
+    }
     if ($postSlug !== '') {
         $subArgs[] = "--post_name=$postSlug";
     }
