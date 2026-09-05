@@ -1245,8 +1245,10 @@ if ($path === '/wp-cli/post-delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         respond(404, ['error' => "サイト '$slug' が見つかりません"]);
     }
 
-    // --forceを付けない = WordPressコアのwp_delete_post()既定挙動(ゴミ箱対応の投稿タイプはゴミ箱へ移動)に委ねる
-    [$code, $out, $err] = runWp(['post', 'delete', $postId, '--yes', "--path=$sitePath", '--allow-root']);
+    // --forceを付けない = WordPressコアのwp_delete_post()既定挙動(ゴミ箱対応の投稿タイプはゴミ箱へ移動)に委ねる。
+    // --yesは付けない。`wp post delete`は確認プロンプトを出さず、このフラグを受け付けない
+    // (`wp db reset`等のコマンド専用)。渡すと"unknown --yes parameter"で必ず失敗する(issue #1001)。
+    [$code, $out, $err] = runWp(['post', 'delete', $postId, "--path=$sitePath", '--allow-root']);
     if ($code !== 0) {
         respond(500, ['error' => '投稿の削除に失敗しました', 'detail' => combinedOutput($out, $err)]);
     }
@@ -1476,6 +1478,7 @@ if ($path === '/wp-cli/media-reference-scan' && $_SERVER['REQUEST_METHOD'] === '
 
 // メディア(添付ファイル)を完全に削除する(issue #500)。post-deleteと異なり`--force`を付けて
 // ゴミ箱を経由せず物理削除する(アップロード済みファイルも合わせて削除される)。
+// post-deleteと同じ理由で`--yes`は付けない(issue #1001)。
 if ($path === '/wp-cli/media-delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = (string) ($input['slug'] ?? '');
     $mediaId = (string) ($input['mediaId'] ?? '');
@@ -1488,7 +1491,7 @@ if ($path === '/wp-cli/media-delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         respond(404, ['error' => "サイト '$slug' が見つかりません"]);
     }
 
-    [$code, $out, $err] = runWp(['post', 'delete', $mediaId, '--force', '--yes', "--path=$sitePath", '--allow-root']);
+    [$code, $out, $err] = runWp(['post', 'delete', $mediaId, '--force', "--path=$sitePath", '--allow-root']);
     if ($code !== 0) {
         respond(500, ['error' => 'メディアの削除に失敗しました', 'detail' => combinedOutput($out, $err)]);
     }

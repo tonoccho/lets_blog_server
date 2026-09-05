@@ -243,7 +243,7 @@ API: media `ImageGenerationController`, `GeneratedImageController`, `MediaContro
 | AC-IMG-010 | ComfyUI チェックポイント管理 | 使うモデルを選べる | チェックポイントの一覧・選択・導入・削除の結果が生成に反映される | — | 未着手(`@slow`) |
 | AC-IMG-011 | 画像生成の既定設定 | 毎回同じ設定を入れ直さなくてよい | プロンプト既定値・サイズ既定値・リサイズ既定値の保存内容が生成フォームに反映される(#913 の再発検知) | — | 未着手 |
 | AC-IMG-012 | 画像コンテンツフィルタ設定 | 不適切な生成を抑止できる | `PUT /image-content-filter-settings` の設定が生成結果に反映される | — | 未着手 |
-| AC-IMG-013 | メディアのガベージコレクション | 使われていない画像で容量を食わない | `GET /media-garbage-collection/scan` が未使用を列挙し、`POST /delete` で削除される | — | 未着手(`@destructive`) |
+| AC-IMG-013 | メディアのガベージコレクション | 使われていない画像で容量を食わない | `GET /media-garbage-collection/scan` が未使用を列挙し、`POST /delete` で削除される | —(削除経路そのものは `ext:articles/deletion.feature` › アイキャッチ画像付きの記事を削除すると、未参照になったメディアも削除できる が #1001 の再発検知として通る。画面としての受け入れは AT-10 で別途) | 未着手(`@destructive`) |
 
 ### 2.9 ダイアグラムとレンダリング — `DIAG`
 
@@ -354,7 +354,7 @@ API: log-writer `AuditLogController`, `OperationLogController`, `FrontendErrorLo
 | AC-EXT-005 | `letsBlog.createArticleWithoutAi` | AIを使わず記事を起こせる | テンプレートだけの記事ファイルが生成される | 単体 `articleScaffold.test.ts`(生成物・上書き確認の3分岐・日本語front matter)、手動: チェックリスト §4 | 検証済(単体。サーバーを介さずLayer 1の対象外) |
 | AC-EXT-006 | `letsBlog.publish` | エディタから公開できる | 編集中の記事が公開され、公開先URLで読める | `ext:articles/publish.feature` › front matter付きのMarkdownを公開するとWordPress投稿が作成される / 公開済みの記事を再度公開すると同じWordPress投稿が更新される、単体 `apiClientRequests.test.ts`(multipartの組み立て) | 検証済(`@slow`) |
 | AC-EXT-007 | `letsBlog.schedulePublication` | 予約公開できる | 指定時刻が設定され、時刻まで公開されない | —(#1003 でブロック。エージェント経路が `publishScheduledAt` を無視して即時公開するため、シナリオを置くとバグを期待値に固定してしまう) | 未着手(#1003) |
-| AC-EXT-008 | `letsBlog.deletePost` | 公開済み記事を取り下げられる | 公開先から記事が消える | —(#1001 でブロック。`wp post delete` へ存在しない `--yes` を渡しており削除が常に502) | 未着手(#1001) |
+| AC-EXT-008 | `letsBlog.deletePost` | 公開済み記事を取り下げられる | 公開先から記事が消える | `ext:articles/deletion.feature` › 公開した記事を削除すると公開先から読めなくなる / アイキャッチ画像付きの記事を削除すると、未参照になったメディアも削除できる(#1001 で解消。`wp post delete` へ渡していた存在しない `--yes` が原因で常に502だった) | 検証済(`@slow`) |
 | AC-EXT-009 | `letsBlog.askAi` | 執筆中に下書き/校正/要約を頼める | 選択範囲に対する応答がエディタへ挿入される | `ext:ai/assist.feature` › askAiは選んだモードでAIへ依頼する(draft / proofread / summarize の3例) | 検証済(`@stub`) |
 | AC-EXT-010 | `letsBlog.askAiSearch` | Web検索を踏まえた回答を得られる | 検索結果を根拠にした応答が返る | `ext:ai/assist.feature` › askAiSearchはWeb検索の結果を根拠として返す | 検証済(`@stub`) |
 | AC-EXT-011 | `letsBlog.suggestTags` | タグを考えなくてよい | 本文からタグ候補が提示される | —(#1004 でブロック。LLMスタブがJSONを要求するプロンプトへ散文で応答するため候補が常に空。単体 `apiClientRequests.test.ts` がリクエスト形式のみ担保) | 未着手(#1004) |

@@ -100,6 +100,96 @@ export async function ensureManagedSite(token: string): Promise<SiteFixture> {
   return created.json as SiteFixture;
 }
 
+export interface UnreferencedMedia {
+  mediaId: string;
+  guid: string;
+  title: string;
+  mimeType: string;
+}
+
+/**
+ * どの投稿からも参照されていないメディアを列挙する(issue #500 のガベージコレクション)。
+ *
+ * 拡張にはメディアのガベージコレクションを呼ぶコマンドが無い(Web管理画面の機能)ため、
+ * ここだけは拡張の apiClient を通せない。それでもトランスポートは拡張自身の httpClient に
+ * 揃える(このファイルの方針)。issue #1001 の受け入れ基準「アイキャッチ付き記事の
+ * メディア削除経路も同じエラーにならない」を確かめるために使う。
+ */
+export async function scanUnreferencedMedia(
+  token: string,
+  projectId: number,
+  environment: string
+): Promise<UnreferencedMedia[]> {
+  const result = await call(
+    'GET',
+    `/api/projects/${projectId}/media-garbage-collection/scan?environment=${environment}`,
+    token
+  );
+  if (result.status >= 300) {
+    throw new Error(`未参照メディアの走査に失敗しました (HTTP ${result.status}): ${result.text}`);
+  }
+  return ((result.json as { items?: UnreferencedMedia[] } | undefined)?.items ?? []);
+}
+
+export interface MediaDeletionOutcome {
+  status: string;
+  deletedCount: number;
+  failedCount: number;
+  failures: Record<string, string>;
+}
+
+/**
+ * 未参照メディアの削除を要求し、非同期ジョブの完了まで待つ。
+ * 削除は generation_jobs のジョブとして走るため、完了は GET /api/generation-jobs/{id} で見る。
+ */
+export async function deleteUnreferencedMedia(
+  token: string,
+  projectId: number,
+  environment: string,
+  mediaIds: string[]
+): Promise<MediaDeletionOutcome> {
+  const started = await call(
+    'POST',
+    `/api/projects/${projectId}/media-garbage-collection/delete?environment=${environment}`,
+    token,
+    { mediaIds }
+  );
+  if (started.status >= 300) {
+    throw new Error(`メディア削除の開始に失敗しました (HTTP ${started.status}): ${started.text}`);
+  }
+  const jobId = (started.json as { id?: number } | undefined)?.id;
+  if (jobId === undefined) {
+    throw new Error(`メディア削除ジョブのIDが返りませんでした: ${started.text}`);
+  }
+
+  const deadline = Date.now() + 120_000;
+  for (;;) {
+    const job = await call('GET', `/api/generation-jobs/${jobId}`, token);
+    if (job.status >= 300) {
+      throw new Error(`メディア削除ジョブの照会に失敗しました (HTTP ${job.status}): ${job.text}`);
+    }
+    const detail = job.json as { status?: string; resultPayload?: string | null } | undefined;
+    const jobStatus = detail?.status ?? '';
+    if (jobStatus === 'done' || jobStatus === 'failed') {
+      const payload = JSON.parse(detail?.resultPayload || '{}') as {
+        deletedCount?: number;
+        failedCount?: number;
+        failures?: Record<string, string>;
+      };
+      return {
+        status: jobStatus,
+        deletedCount: payload.deletedCount ?? 0,
+        failedCount: payload.failedCount ?? 0,
+        failures: payload.failures ?? {},
+      };
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`メディア削除ジョブが終わりませんでした (jobId=${jobId}, status=${jobStatus})`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+}
+
 /** プロジェクトの環境(local/test/production)へサイトを紐付ける(冪等)。 */
 export async function bindEnvironment(
   token: string,
