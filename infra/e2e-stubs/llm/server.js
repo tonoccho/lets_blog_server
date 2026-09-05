@@ -64,6 +64,116 @@ const IMAGE_PROMPT_COMPLETION =
 
 const GENERIC_COMPLETION = 'E2Eスタブの応答です。';
 
+// ------------------------------------ タグ提案・校正チェック(issue #1004 / AT-8・AT-16)
+
+/**
+ * JSON出力を要求するプロンプトの判定に使う、**プロンプトが載せている出力例そのもの**。
+ *
+ * 「タグ」「校正」のような言い回しで判定すると、同じ語を含む別用途
+ * (`/api/ai/draft` の mode=proofread は散文の全文校正を求める)まで巻き込む。
+ * 出力例は「JSONで返せ」という要求そのものなので、取り違えようがない。
+ *
+ * 出典は ai-service の AiAssistService:
+ *   TAGS_PROMPT_TEMPLATE            → {"categories": ["カテゴリ1", ...], "tags": [...]}
+ *   PROOFREAD_CHECK_PROMPT_TEMPLATE → [{"type": "typo", "originalText": ..., ...}]
+ */
+const TAGS_JSON_MARKER = '{"categories":';
+const PROOFREAD_JSON_MARKER = '{"type": "typo"';
+
+/** タグ提案の候補。タグ名は散文版({@link TAGS_COMPLETION})と同じにしてある。 */
+const TAGS_JSON_CATEGORIES = ['E2Eスタブのカテゴリ'];
+const TAGS_JSON_TAGS = ['e2e-stub-tag-a', 'e2e-stub-tag-b', 'e2e-stub-tag-c'];
+
+const TAGS_JSON_COMPLETION = JSON.stringify({
+  categories: TAGS_JSON_CATEGORIES,
+  tags: TAGS_JSON_TAGS,
+});
+
+/**
+ * 校正の指摘。引用({@code originalText})だけは本文から作るので、ここには持たない。
+ * 種別は AiAssistService が挙げる typo / readability / unnecessary から2つを使う。
+ * suggestion が null になる指摘(readability)を必ず1件含め、
+ * 「置き換え案の無い指摘」の経路も呼び元が観測できるようにする。
+ */
+const PROOFREAD_ISSUE_KINDS = [
+  {
+    type: 'typo',
+    message: 'E2Eスタブが検出した誤字脱字の指摘です。',
+    suggestion: (quote) => `${quote}(E2Eスタブの置き換え案)`,
+  },
+  {
+    type: 'readability',
+    message: 'E2Eスタブが検出した読みにくい表現の指摘です。',
+    suggestion: () => null,
+  },
+];
+
+/** 引用の長さ(コードポイント数)。本文が短くても収まるよう控えめにする。 */
+const PROOFREAD_QUOTE_LENGTH = 8;
+
+/**
+ * プロンプト末尾に積まれた本文を取り出す。ai-service のテンプレートは
+ * どちらも「(空行)本文:(改行)」に続けて本文を差し込む。
+ */
+function promptBodyText(prompt) {
+  const marker = '\n本文:\n';
+  const at = prompt.indexOf(marker);
+  return at < 0 ? '' : prompt.slice(at + marker.length);
+}
+
+/**
+ * 本文から引用を決定的に切り出す。
+ *
+ * AiAssistService#parseProofreadResponse は originalText が本文中に**実在しない**指摘を
+ * 捨てる(エディタが波線を引く位置を特定できないため)。したがって引用は本文の
+ * 部分文字列でなければならない。文の区切りで割った断片の先頭を使い、
+ * サロゲートペアを割らないようコードポイント単位で切る。
+ */
+function proofreadQuotes(body) {
+  const segments = body
+    .split(/[\n。、!?!?]/)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment !== '');
+  const quotes = [];
+  for (const segment of segments) {
+    const quote = Array.from(segment).slice(0, PROOFREAD_QUOTE_LENGTH).join('');
+    if (!quotes.includes(quote)) {
+      quotes.push(quote);
+    }
+    if (quotes.length === PROOFREAD_ISSUE_KINDS.length) {
+      break;
+    }
+  }
+  return quotes;
+}
+
+function proofreadJsonCompletion(prompt) {
+  const issues = proofreadQuotes(promptBodyText(prompt)).map((quote, index) => {
+    const kind = PROOFREAD_ISSUE_KINDS[index];
+    return {
+      type: kind.type,
+      originalText: quote,
+      message: kind.message,
+      suggestion: kind.suggestion(quote),
+    };
+  });
+  return JSON.stringify(issues);
+}
+
+/**
+ * JSON形式を要求するプロンプトへの応答。判別できなければ null を返し、呼び元へ委ねる。
+ *
+ * 記事プラン({@link articlePlanCompletionFor})と同じく、**一般判定より先に**通す必要がある。
+ * タグ提案のプロンプトは「タグ」を、校正チェックのプロンプトは「校正」を含むため、
+ * 後ろに置くと必ず散文({@link TAGS_COMPLETION} / {@link PROOFREAD_COMPLETION})へ吸われ、
+ * 呼び元のJSON解釈が失敗して候補も指摘も空になる(#1004 の症状そのもの)。
+ */
+function jsonFormatCompletionFor(prompt) {
+  if (prompt.includes(TAGS_JSON_MARKER)) return TAGS_JSON_COMPLETION;
+  if (prompt.includes(PROOFREAD_JSON_MARKER)) return proofreadJsonCompletion(prompt);
+  return null;
+}
+
 // ------------------------------------------------------- 記事プラン(issue #935 / AT-9)
 
 /**
@@ -176,6 +286,10 @@ function completionFor(prompt) {
   const planCompletion = articlePlanCompletionFor(prompt);
   if (planCompletion !== null) {
     return planCompletion;
+  }
+  const jsonCompletion = jsonFormatCompletionFor(prompt);
+  if (jsonCompletion !== null) {
+    return jsonCompletion;
   }
   if (prompt.includes('カスタムタグ') || p.includes('custom tag') || p.includes('```css')) {
     return CUSTOM_TAG_COMPLETION;
