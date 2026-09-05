@@ -25,10 +25,85 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
  * ログイン画面へ即座にリダイレクトするようになった。E2Eからログイン状態を作るには、
  * このホスト型フォームへ実際に値を入力してサインインを完了させる必要がある。
  * 全specがこの共通ヘルパー経由でログインする。
+ *
+ * <p><b>`goto` に load を待たせない。中断されうる進行中のナビゲーションを作らない(issue #1017)。</b>
+ *
+ * <p>以前はこう書いていた:
+ *
+ * <pre>
+ *   await page.goto('/login');                                  // 既定は load 完了まで待つ
+ *   await page.waitForURL(/\/auth\/realms\/letsblog\//, ...);   // ナビゲーションイベントを待つ
+ * </pre>
+ *
+ * <p>この2行はどちらも**進行中のナビゲーションに紐づいて待つ**。`/login` は
+ * マウント時に `signIn("keycloak")` を呼ぶだけの画面で、そこから Keycloak への遷移は
+ * クライアント側で起きる。この遷移が、先行するナビゲーション(`goto` の load 待ち)を
+ * **中断**すると、待っていた側は `net::ERR_ABORTED; maybe frame was detached?` で
+ * **即座に**失敗する。タイムアウトではないので、待ち時間を伸ばしても直らない。
+ * `/login` の読み込みが遅いほど中断は起きやすく、ワーカー数を増やすと確率的に踏む。
+ * 全 UI シナリオがこのヘルパーを通るため、製品の不具合と見分けの付かない失敗になる。
+ *
+ * <p>実測は issue #1017 の本文に記録がある(2026-09-02、AT-9(#935)の15シナリオ)。
+ * ワーカー数1では2回の実行でログイン失敗0件、ワーカー数2では5回の実行で2件が落ちた。
+ * 落ちるシナリオは毎回違う。なおこの開発ホストは Playwright のブラウザが OS 共有
+ * ライブラリ(`libatk-1.0.so.0` ほか)を欠いていて起動できないため、ブラウザを使う
+ * シナリオをこの場で再実行して追試することは現状できない(#1045。本件とは別問題)。
+ *
+ * <p>そこで:
+ * <ul>
+ *   <li>`goto` は `waitUntil: 'commit'`(応答が返った時点で戻る)にする。**これが修正の本体**。
+ *       load を待たずに戻るので、クライアント側リダイレクトが始まる時点で `goto` の
+ *       ナビゲーションは既に解決しており、中断されうる進行中のナビゲーションがそもそも無い。</li>
+ *   <li>URL の到達は {@code expect(page).toHaveURL()} で待つ。Playwright 1.62.1 の
+ *       {@code toHaveURL}(`playwright/lib/matchers/expect.js`)は**引数の型で経路が分かれる**。
+ *       ネイティブ {@code URLPattern} インスタンスか関数のときだけ
+ *       {@code toHaveURLWithPredicate} → {@code Frame.waitForURL()} を通る。分岐の条件は
+ *       {@code isURLPattern = (v) => v instanceof globalThis.URLPattern}
+ *       (`playwright-core/lib/coreBundle.js`)で、**正規表現も文字列もこれには一致しない**。
+ *       ここで渡しているのは正規表現と文字列なので、実際に通るのはもう一方——
+ *       {@code toMatchText} → {@code mainFrame()._expect("to.have.url")} →
+ *       サーバ側 {@code Frame.expect()} の**ポーリング**である。1度照合したあと
+ *       {@code retryWithProgressAndBackoff} が即時 → 20 → 50 → 100 → 100 → 500ms
+ *       (以降 500ms 据え置き)で再試行し、毎回インジェクトスクリプトを走らせて
+ *       {@code document.location.href} を読み直す。ナビゲーションイベントの購読で
+ *       一致を検出しているのではない。</li>
+ *   <li>この経路には、旧 {@code page.waitForURL()} が持っていた**中断の再送出**が無い。
+ *       旧経路は {@code waitForNavigation()} で "navigated" を購読し、イベントが error を
+ *       運んでいればそれをそのまま throw していた——`net::ERR_ABORTED; maybe frame was
+ *       detached?` が表に出てくるのはそこである。ポーリング経路が各試行の前に呼ぶ
+ *       {@code performActionPreChecks} も未コミットのナビゲーションを待ちはするが、
+ *       それがエラーで終わっても待ちを解いて次の試行へ進むだけで throw しない。
+ *       とはいえ**修正の本体はあくまで上の `commit` 化**である。中断されうる進行中の
+ *       ナビゲーションをそもそも作らないことが原因の除去で、こちらはその上での備えに
+ *       すぎない。どちらか一方だけで足りるかは実測で切り分けていない(#1045 により
+ *       この開発ホストではブラウザが起動できない)。</li>
+ *   <li>URL が一致したあとの {@code waitForLoadState('load')} は**必要**である。
+ *       上のポーリング経路は `load` の発火を待たない。{@code performActionPreChecks} が
+ *       待つのは未コミットのナビゲーションまでで、照合そのものは `:root` を解決できる
+ *       実行コンテキストさえあれば走る——どちらもドキュメントのコミット時点で満たされる。
+ *       一方、以前使っていた {@code page.waitForURL()} は `waitUntil` 未指定なら `load`
+ *       を既定とし、到達先の load 完了まで待っていた。つまりこの1行は、待ち方を
+ *       {@code toHaveURL()} に変えたことで失われた待機を明示的に埋め直すものであって、
+ *       冗長な念押しではない。呼び出し側は直後にフォーム入力やクリックを行うため、
+ *       「load 完了後に操作する」というこのヘルパーの約束はこの行が担っている。</li>
+ * </ul>
+ *
+ * <p>待ち時間を伸ばして誤魔化しているのではない(#843 の轍を踏まない)。上で見たとおり
+ * 修正前の失敗はタイムアウトではなく即時の ERR_ABORTED であり、待ち時間では直らない。
+ * 直しているのは `goto` が進行中のナビゲーションを抱えたまま待つ、という構図の方である。
+ *
+ * <p>timeout はそれとは別の理由で、**2つの待機とも** 15 秒から 30 秒へ揃えた。
+ * 1つ目は、`goto` が load を待たなくなった結果、これまで `goto` 側が負担していた
+ * `/login` の読み込み時間がこの待機に含まれるようになったためである。
+ * 2つ目(ログイン後のコールバック待ち)にそうした機械的な必要は無いが、
+ * どちらも「URL 到達をアサートし、続けて load を待つ」という同じ2行の形で書いてある以上、
+ * 値を非対称にしておく理由も無いので合わせた(この timeout が掛かるのは URL 到達までで、
+ * 続く {@code waitForLoadState('load')} は既定の timeout を使う)。
  */
 export async function loginViaKeycloak(page: Page, email: string, password: string): Promise<void> {
-  await page.goto('/login');
-  await page.waitForURL(/\/auth\/realms\/letsblog\//, { timeout: 15000 });
+  await page.goto('/login', { waitUntil: 'commit' });
+  await expect(page).toHaveURL(/\/auth\/realms\/letsblog\//, { timeout: 30000 });
+  await page.waitForLoadState('load');
 
   await page.locator('#username').fill(email);
   await page.locator('#password').fill(password);
@@ -41,7 +116,10 @@ export async function loginViaKeycloak(page: Page, email: string, password: stri
     await page.locator('input[type="submit"]').first().click();
   }
 
-  await page.waitForURL('/', { timeout: 15000 });
+  // ログイン後のコールバック(Keycloak → /api/auth/callback/keycloak → /)の待機。
+  // 上の待機と書き方・timeout を揃えてある(#1017 でこの形にした)。
+  await expect(page).toHaveURL('/', { timeout: 30000 });
+  await page.waitForLoadState('load');
 }
 
 /** admin権限の合成アカウントでログインする(呼び出し側の重複を減らすための薄いラッパー)。 */
