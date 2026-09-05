@@ -16,15 +16,16 @@ import { waitForServicesHealthy } from './helpers';
  * 実際にHTTPリクエストを1回ずつ投げて疎通を確認する。ここで失敗した場合はテストを開始しない
  * (原因不明の大量失敗ではなく、明確な前提エラーとして落とす)。
  *
- * issue #945 (AT-19): 受け入れテストは毎回まっさらな状態から始める。
- * ACCEPTANCE_RESET=1 が指定された場合、healthy待ちの**前に**環境をリセットする
- * (リセット自体がサービスを再起動するため、待つのはその後でよい)。
- * リセットは破壊的なので、既定では実行しない。
+ * issue #945 (AT-19) / #965: 受け入れテストは毎回まっさらな状態から始める。
+ * ACCEPTANCE_RESET=1 が指定された場合、healthy待ちの**前に**スタックをゼロから構築し直す。
+ * これは全プロジェクト(at-setup 以降)より前に走るので、撤去の直前に置いたウォッシュアウト・
+ * プローブが「撤去で消えた」ことの証拠になりうる唯一の場所である(#965 §7-A)。
+ * 破壊的なので、既定では実行しない。
  *
  * 環境変数:
- *   ACCEPTANCE_RESET=1     : scripts/reset-acceptance-env.sh --yes を実行してから始める
- *                            (MySQL 9スキーマ・Keycloakの合成アカウント・WordPressの実体・
- *                             生成画像・キューを初期化する。破壊的)
+ *   ACCEPTANCE_RESET=1     : scripts/rebuild-acceptance-env.sh --yes を実行してから始める
+ *                            (compose プロジェクトを撤去し、Docker ボリュームを破棄し、
+ *                             ソースからビルドして起動し直す。破壊的)
  *   E2E_SKIP_HEALTH_WAIT=1 : docker composeのhealthy待ちをスキップする
  *                            (スタック外でPlaywrightだけ動かす場合や、docker CLIが無い環境向け)
  *   E2E_HEALTH_TIMEOUT     : healthy待ちのタイムアウト秒数(既定600)
@@ -34,11 +35,13 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
   const repoRoot = path.resolve(__dirname, '..', '..', '..');
 
   if (process.env.ACCEPTANCE_RESET === '1') {
-    console.log('[e2e] ACCEPTANCE_RESET=1: 受け入れテスト環境をリセットします(破壊的)');
-    execFileSync(path.join(repoRoot, 'scripts', 'reset-acceptance-env.sh'), ['--yes'], {
+    console.log('[e2e] ACCEPTANCE_RESET=1: 受け入れテスト環境をゼロから構築し直します(破壊的)');
+    // ビルドキャッシュが効かない場合のイメージ再ビルドを含むため、上限は大きく取る。
+    // 30分ではキャッシュ無しのゼロ構築に足りない(#965 の実測)。
+    execFileSync(path.join(repoRoot, 'scripts', 'rebuild-acceptance-env.sh'), ['--yes'], {
       cwd: repoRoot,
       stdio: 'inherit',
-      timeout: 1_800_000,
+      timeout: 5_400_000,
     });
   }
 

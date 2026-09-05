@@ -1,0 +1,1280 @@
+#!/usr/bin/env python3
+"""受け入れテストを「全撤去 → ゼロから構築 → テスト」の順で回すことの検証(#965)。
+
+    python3 -m unittest discover -s scripts -t scripts -p 'test_*.py'
+
+## なぜ Gherkin ではないのか
+
+`CLAUDE.md` → **Test-First Implementation** は、受入基準を原則として
+`apps/web/e2e/features/**` の受け入れシナリオで表現することを求め、
+「Web UI から到達できない基準は、その旨を明示してサービス/スクリプトレベルのテストで
+表現する」ことを明示的な例外として認めている。
+
+本Issueの受入基準は、**受け入れテストを走らせる土台そのもの**を対象にしている。
+
+  - `docker compose down -v` が Docker ボリュームを破棄したか
+  - `docker volume inspect --format '{{.CreatedAt}}'` が更新されたか
+  - `--yes` なしのドライランが何も変更しないか
+  - 撤去の直前に置いたプローブが構築後に消えているか
+
+いずれも、判定した瞬間にはスタックが存在しない(あるいは存在してはいけない)。
+Playwright はスタックが上がっていることを前提に起動するため、これらを Gherkin で
+書いても**走らせる手段が無い**。書かなかったのではなく、構造的に書けない。
+
+唯一 Web UI から到達できる基準 —「ゼロ構築直後に `needsSetup: true`」— は、
+既存の `apps/web/e2e/features/auth/setup.feature`(`@stage:setup`、`前提 システムに
+ユーザーが1人も居ない`)が `reset` 段の直後に実行されることで既に表現されている。
+本ファイルではスクリプト側の自己検証(§4-6)としてのみ扱う。
+
+したがって `scripts/test_shared_host_proxy.py`(#1038)・
+`scripts/test_git_hooks_binding.py`(#1039)と同じ**文書化された例外**として、ここで表現する。
+
+## どう検証するか
+
+本物の docker を叩くわけにはいかない(このテストは開発機の実スタックを壊しうる)。
+そこで `docker` と `curl` を **PATH で差し替えた偽物**に向け、状態をディレクトリで模す。
+偽 docker はボリューム・Keycloak ユーザー・MySQL データベース・WordPress サイトを
+ファイルで持ち、`volume rm` でそのボリュームに乗っているデータを消す。
+「keycloak_postgres だけ消えなかった」のような**人為的な残存**もこれで作れる。
+
+環境変数(偽 docker 向け):
+
+    FAKE_STATE            状態ディレクトリ
+    FAKE_DOCKER_LOG       呼ばれた引数の記録先
+    FAKE_STACK_UP         1 なら直前のスタックが起動している
+    FAKE_UNDELETABLE      volume rm を失敗させるボリューム名(空白区切り)。
+                          手順1で落ちるので、手順4の検証には**到達しない**
+    FAKE_NOT_RECREATED    破棄はできるが、構築が作り直さないボリューム名(空白区切り)。
+                          手順4-1 が捕まえるべき壊れ方
+    FAKE_STICKY_PROBE     破棄をまたいで生き残らせるプローブの種類
+                          (keycloak / mysql / wordpress。空白区切り)。
+                          ボリュームは破棄され作り直されるが、そのプローブの実体だけが
+                          構築後の存在確認に現れる = 手順4-7 が捕まえるべき壊れ方
+    FAKE_UNHEALTHY        1 なら compose ps が unhealthy を返す
+    FAKE_EXTRA_KC_USER    構築後の letsblog レルムに居座る余計なユーザー名
+    FAKE_DIRTY_SCHEMA     行が残っているスキーマ名
+    FAKE_SETUP_STATUS     setup-status の応答ボディ
+    FAKE_SETUP_CODE       setup-status の HTTP ステータス
+    FAKE_SHARED_HOST      1 なら reverse-proxy がポートを公開していない(#1038 の構成)
+"""
+
+import json
+import os
+import re
+import shutil
+import stat
+import subprocess
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))
+
+SCRIPT = "scripts/rebuild-acceptance-env.sh"
+LEGACY_SCRIPT = "scripts/reset-acceptance-env.sh"
+WAIT_SCRIPT = "scripts/wait-for-stack-healthy.sh"
+GLOBAL_SETUP = "apps/web/e2e/global-setup.ts"
+PACKAGE_JSON = "apps/web/package.json"
+DOC = "docs/ACCEPTANCE_TESTING.md"
+
+# docker-compose.yml が宣言するボリューム(接頭辞なしの短い名前)。
+DESTROYED_VOLUMES = [
+    "mysql_data",
+    "rabbitmq_data",
+    "keycloak_postgres",
+    "penpot_postgres",
+    "penpot_assets",
+    "comfyui_output",
+    "wordpress_sites",
+    "bulk_upload_files",
+    "generated_images",
+]
+PRESERVED_VOLUMES = ["comfyui_models"]
+VOLUME_PREFIX = "lets_blog_server_"
+
+SERVICE_SCHEMAS = [
+    "lbs_identity",
+    "lbs_project",
+    "lbs_content",
+    "lbs_media",
+    "lbs_ai",
+    "lbs_publishing",
+    "lbs_analytics",
+    "lbs_platform",
+    "lbs_log",
+]
+
+
+def read(rel_path):
+    with open(os.path.join(REPO_ROOT, rel_path), encoding="utf-8") as f:
+        return f.read()
+
+
+def exists(rel_path):
+    return os.path.exists(os.path.join(REPO_ROOT, rel_path))
+
+
+FAKE_DOCKER = r'''#!/usr/bin/env python3
+"""テスト用の docker スタブ。状態を FAKE_STATE 配下のファイルで持つ。"""
+import json
+import os
+import sys
+import time
+
+STATE = os.environ["FAKE_STATE"]
+LOG = os.environ["FAKE_DOCKER_LOG"]
+args = sys.argv[1:]
+
+VOLUME_PREFIX = "lets_blog_server_"
+SCHEMAS = """lbs_identity lbs_project lbs_content lbs_media lbs_ai
+lbs_publishing lbs_analytics lbs_platform lbs_log""".split()
+# __VOLUME_LISTS__
+
+with open(LOG, "a", encoding="utf-8") as f:
+    f.write("\t".join(args) + "\n")
+
+
+def path(*p):
+    return os.path.join(STATE, *p)
+
+
+def read_lines(name):
+    p = path(name)
+    if not os.path.exists(p):
+        return []
+    with open(p, encoding="utf-8") as f:
+        return [l.strip() for l in f if l.strip()]
+
+
+def write_lines(name, lines):
+    with open(path(name), "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + ("\n" if lines else ""))
+
+
+def volume_exists(name):
+    return os.path.exists(path("volumes", name))
+
+
+def volume_created_at(name):
+    with open(path("volumes", name), encoding="utf-8") as f:
+        return f.read().strip()
+
+
+def create_volume(name, when=None):
+    os.makedirs(path("volumes"), exist_ok=True)
+    when = when or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    with open(path("volumes", name), "w", encoding="utf-8") as f:
+        f.write(when)
+
+
+# ボリュームに乗っているデータ。volume rm でまとめて消える。
+VOLUME_DATA = {
+    VOLUME_PREFIX + "keycloak_postgres": "kcusers",
+    VOLUME_PREFIX + "mysql_data": "mysqldbs",
+    VOLUME_PREFIX + "wordpress_sites": "wpsites",
+}
+
+# FAKE_STICKY_PROBE が指すプローブの種類 → それが乗っているデータ。
+# ボリューム破棄は成功するのに、この実体だけが残る(古いレプリカ・キャッシュ・
+# 削除経路のバグ)状況を作るための仕掛け。
+STICKY_DATA = {"keycloak": "kcusers", "mysql": "mysqldbs", "wordpress": "wpsites"}
+
+
+def sticky_data_files():
+    kinds = os.environ.get("FAKE_STICKY_PROBE", "").split()
+    return {STICKY_DATA[k] for k in kinds if k in STICKY_DATA}
+
+
+def is_probe_entry(line):
+    return line.startswith("at-wipe-probe-") or line.startswith("at_wipe_probe_")
+
+REQUIRED_SERVICES = """reverse-proxy web gateway keycloak keycloak-postgres mysql rabbitmq
+identity media ai content analytics project publishing platform log-writer""".split()
+
+PROBE_CONTAINERS = ["lbs-mysql", "lbs-keycloak", "lbs-wordpress", "lbs-reverse-proxy"]
+
+
+def fail(msg, code=1):
+    sys.stderr.write(msg + "\n")
+    sys.exit(code)
+
+
+def sql_of(argv):
+    if "-e" in argv:
+        return argv[argv.index("-e") + 1]
+    return ""
+
+
+def fresh_boot():
+    """空ボリュームから起動したときの初期状態を作る。
+
+    init スクリプトが作るスキーマは**足りない分を足す**。まるごと空のときだけ書くと、
+    生き残ったプローブ DB が1つあるだけでスキーマの再作成が起きなくなり、
+    手順4-3b の別の失敗にすり替わってしまう。
+    """
+    dbs = read_lines("mysqldbs")
+    want = list(SCHEMAS) + [s + "_test" for s in SCHEMAS]
+    missing = [d for d in want if d not in dbs]
+    if missing or not os.path.exists(path("mysqldbs")):
+        write_lines("mysqldbs", dbs + missing)
+    if not os.path.exists(path("kcusers")):
+        write_lines("kcusers", [])
+    if not os.path.exists(path("wpsites")):
+        write_lines("wpsites", [])
+
+
+# ---------------------------------------------------------------- volume
+if args[:1] == ["volume"]:
+    sub = args[1]
+    if sub == "inspect":
+        names = [a for a in args[2:] if not a.startswith("--") and "{{" not in a]
+        out = []
+        for n in names:
+            if not volume_exists(n):
+                fail("Error: No such volume: %s" % n)
+            out.append(volume_created_at(n))
+        print("\n".join(out))
+        sys.exit(0)
+    if sub == "rm":
+        undeletable = os.environ.get("FAKE_UNDELETABLE", "").split()
+        sticky = sticky_data_files()
+        for n in args[2:]:
+            if any(n.endswith(u) for u in undeletable if u):
+                fail("Error: volume is in use: %s" % n)
+            if volume_exists(n):
+                os.remove(path("volumes", n))
+                data = VOLUME_DATA.get(n)
+                if data and os.path.exists(path(data)):
+                    if data in sticky:
+                        # 破棄は成功したのに、このプローブの実体だけが残る。
+                        write_lines(data, [l for l in read_lines(data) if is_probe_entry(l)])
+                    else:
+                        os.remove(path(data))
+        sys.exit(0)
+    if sub == "ls":
+        names = sorted(os.listdir(path("volumes"))) if os.path.isdir(path("volumes")) else []
+        print("\n".join(names))
+        sys.exit(0)
+    fail("fake docker: unsupported volume subcommand %s" % sub)
+
+# ---------------------------------------------------------------- inspect
+if args[:1] == ["inspect"]:
+    positional = []
+    fmt = ""
+    i = 1
+    while i < len(args):
+        if args[i] in ("-f", "--format"):
+            fmt = args[i + 1]
+            i += 2
+            continue
+        positional.append(args[i])
+        i += 1
+    name = positional[0]
+    if not name.startswith("lbs-"):
+        # このスタック以外のコンテナ(共有プロキシの infra-proxy 等)は常に在るものとして扱う。
+        print("[]")
+        sys.exit(0)
+    running = name in read_lines("containers")
+    if name == "lbs-reverse-proxy" and "PortBindings" in fmt:
+        if not running:
+            fail("Error: No such object: %s" % name)
+        print("0" if os.environ.get("FAKE_SHARED_HOST") == "1" else "2")
+        sys.exit(0)
+    if not running:
+        fail("Error: No such object: %s" % name)
+    if "State.Running" in fmt:
+        print("true")
+    else:
+        print("[]")
+    sys.exit(0)
+
+# ---------------------------------------------------------------- exec
+if args[:1] == ["exec"]:
+    rest = [a for a in args[1:] if a != "-i"]
+    while rest and rest[0].startswith("-"):
+        rest = rest[2:] if rest[0] == "-e" else rest[1:]
+    container = rest[0]
+    argv = rest[1:]
+    if not container.startswith("lbs-"):
+        sys.exit(0)
+    if container not in read_lines("containers"):
+        fail("Error: No such container: %s" % container)
+
+    if container == "lbs-keycloak":
+        joined = " ".join(argv)
+        if "config credentials" in joined:
+            sys.exit(0)
+        if "get realms/letsblog" in joined:
+            if not volume_exists(VOLUME_PREFIX + "keycloak_postgres"):
+                fail("realm not found")
+            print(json.dumps({"realm": "letsblog"}))
+            sys.exit(0)
+        if joined.startswith("/opt/keycloak/bin/kcadm.sh create users") or " create users" in joined:
+            username = ""
+            for i, a in enumerate(argv):
+                if a == "-s" and argv[i + 1].startswith("username="):
+                    username = argv[i + 1].split("=", 1)[1]
+            users = read_lines("kcusers")
+            users.append(username)
+            write_lines("kcusers", users)
+            sys.stderr.write("Created new user with id 'fake-id'\n")
+            sys.exit(0)
+        if " get users" in joined:
+            users = read_lines("kcusers")
+            extra = os.environ.get("FAKE_EXTRA_KC_USER", "")
+            if extra and extra not in users:
+                users = users + [extra]
+            print(
+                json.dumps(
+                    [{"id": "id-%d" % i, "username": u, "email": u} for i, u in enumerate(users)]
+                )
+            )
+            sys.exit(0)
+        fail("fake docker: unsupported kcadm call: %s" % joined)
+
+    if container == "lbs-mysql":
+        sql = sql_of(argv)
+        if not volume_exists(VOLUME_PREFIX + "mysql_data"):
+            fail("Can't connect to MySQL server")
+        if sql.upper().startswith("CREATE DATABASE"):
+            name = sql.split("`")[1]
+            dbs = read_lines("mysqldbs")
+            if name not in dbs:
+                dbs.append(name)
+            write_lines("mysqldbs", dbs)
+            sys.exit(0)
+        if "SHOW DATABASES LIKE" in sql:
+            prefix = "at_wipe_probe_"
+            print("\n".join(d for d in read_lines("mysqldbs") if d.startswith(prefix)))
+            sys.exit(0)
+        if sql.upper().startswith("SHOW DATABASES"):
+            print("\n".join(read_lines("mysqldbs")))
+            sys.exit(0)
+        if "information_schema.tables" in sql:
+            dirty = os.environ.get("FAKE_DIRTY_SCHEMA", "")
+            if dirty and ("'%s'" % dirty) in sql:
+                print("some_table")
+            sys.exit(0)
+        if "SELECT COUNT(*)" in sql.upper():
+            print("3")
+            sys.exit(0)
+        sys.exit(0)
+
+    if container == "lbs-wordpress":
+        joined = " ".join(argv)
+        if "mkdir" in joined:
+            slug = joined.rstrip("'\"").split("/var/www/html/sites/")[1].split()[0].strip("'\"")
+            sites = read_lines("wpsites")
+            if slug not in sites:
+                sites.append(slug)
+            write_lines("wpsites", sites)
+            sys.exit(0)
+        if "ls " in joined:
+            sites = read_lines("wpsites")
+            if "wc -l" in joined:
+                print(len(sites))
+            else:
+                print("\n".join(sites))
+            sys.exit(0)
+        if "test -d" in joined:
+            slug = joined.split("/var/www/html/sites/")[1].split()[0].strip("'\"")
+            sys.exit(0 if slug in read_lines("wpsites") else 1)
+        sys.exit(0)
+
+    sys.exit(0)
+
+# ---------------------------------------------------------------- compose
+if args[:1] == ["compose"]:
+    rest = args[1:]
+    verb = None
+    for a in rest:
+        if a in ("down", "up", "build", "ps"):
+            verb = a
+            break
+    if verb == "down":
+        write_lines("containers", [])
+        sys.exit(0)
+    if verb in ("up", "build"):
+        if verb == "up":
+            # up のあとに並ぶ位置引数がサービス指定。無ければ全サービスが対象。
+            i = rest.index("up")
+            targets = [a for a in rest[i + 1 :] if not a.startswith("-")]
+            not_recreated = os.environ.get("FAKE_NOT_RECREATED", "").split()
+            for v in DESTROYED + PRESERVED:
+                if v in not_recreated:
+                    continue
+                if not volume_exists(VOLUME_PREFIX + v):
+                    create_volume(VOLUME_PREFIX + v)
+            fresh_boot()
+            # GPU が無いホストでは comfyui の起動に失敗する。compose はそこで中断するため、
+            # 依存関係の下流(web / gateway / keycloak ほか)は created のまま残る。
+            if not targets or "comfyui" in targets:
+                sys.stderr.write(
+                    'Error response from daemon: could not select device driver "nvidia" '
+                    "with capabilities: [[gpu]]\n"
+                )
+                started = read_lines("containers")
+                for s in ("mysql", "rabbitmq", "keycloak-postgres", "reverse-proxy"):
+                    started.append("lbs-%s" % s)
+                write_lines("containers", sorted(set(started)))
+                sys.exit(1)
+            containers = ["lbs-%s" % s for s in REQUIRED_SERVICES] + PROBE_CONTAINERS
+            write_lines("containers", sorted(set(containers)))
+        sys.exit(0)
+    if "config" in rest and "--services" in rest:
+        print("\n".join(sorted(set(REQUIRED_SERVICES + ["comfyui", "wordpress", "phpmyadmin"]))))
+        sys.exit(0)
+    if verb == "ps":
+        running = read_lines("containers")
+        out = []
+        for s in REQUIRED_SERVICES:
+            if "lbs-%s" % s not in running:
+                continue
+            health = "healthy"
+            if os.environ.get("FAKE_UNHEALTHY") == "1" and s == "gateway":
+                health = "starting"
+            out.append({"Service": s, "State": "running", "Health": health, "ExitCode": 0})
+        print(json.dumps(out))
+        sys.exit(0)
+    sys.exit(0)
+
+# ---------------------------------------------------------------- ps / network / その他
+if args[:1] == ["ps"]:
+    print("")
+    sys.exit(0)
+
+sys.exit(0)
+'''
+
+# 偽 docker のソースへ、ボリューム一覧を埋め込む(テスト側の定義を唯一の出所にする)。
+FAKE_DOCKER = FAKE_DOCKER.replace(
+    "# __VOLUME_LISTS__",
+    "DESTROYED = %r\nPRESERVED = %r" % (DESTROYED_VOLUMES, PRESERVED_VOLUMES),
+)
+assert "DESTROYED = [" in FAKE_DOCKER, "偽 docker へボリューム一覧を埋め込めていない"
+
+FAKE_CURL = r'''#!/usr/bin/env python3
+"""テスト用の curl スタブ。setup-status とベースURLだけを返す。"""
+import os
+import sys
+
+argv = sys.argv[1:]
+url = [a for a in argv if a.startswith("http")]
+url = url[0] if url else ""
+
+with open(os.environ["FAKE_DOCKER_LOG"], "a", encoding="utf-8") as f:
+    f.write("curl\t" + " ".join(argv) + "\n")
+
+if "setup-status" in url:
+    body = os.environ.get("FAKE_SETUP_STATUS", '{"needsSetup":true}')
+    code = os.environ.get("FAKE_SETUP_CODE", "200")
+else:
+    body = ""
+    code = "200"
+    # ベースURLは、構築直後しばらく 502 を返す(下流の web / gateway がまだ起動途中)。
+    # FAKE_LOCALHOST_WARMUP 回だけ 502 を返し、以降 200 にする。
+    warmup = int(os.environ.get("FAKE_LOCALHOST_WARMUP", "0"))
+    if warmup:
+        counter = os.path.join(os.environ["FAKE_STATE"], "localhost-probes")
+        seen = 0
+        if os.path.exists(counter):
+            with open(counter, encoding="utf-8") as f:
+                seen = int(f.read() or 0)
+        seen += 1
+        with open(counter, "w", encoding="utf-8") as f:
+            f.write(str(seen))
+        if seen <= warmup:
+            code = "502"
+
+write_format = ""
+if "-w" in argv:
+    write_format = argv[argv.index("-w") + 1]
+
+silent_body = "-o" in argv
+if not silent_body:
+    sys.stdout.write(body)
+sys.stdout.write(write_format.replace("%{http_code}", code).replace("\\n", "\n"))
+sys.exit(0)
+'''
+
+
+class RebuildScriptHarness(unittest.TestCase):
+    """偽 docker / 偽 curl の上でゼロ構築スクリプトを走らせるための土台。"""
+
+    maxDiff = None
+
+    def setUp(self):
+        self.assertTrue(exists(SCRIPT), "%s が無い" % SCRIPT)
+        self.tmp = tempfile.mkdtemp(prefix="at-rebuild-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.state = os.path.join(self.tmp, "state")
+        self.bin = os.path.join(self.tmp, "bin")
+        os.makedirs(os.path.join(self.state, "volumes"))
+        os.makedirs(self.bin)
+        self.infra = os.path.join(self.tmp, "infra")
+        os.makedirs(os.path.join(self.infra, "proxy", "conf.d"))
+        os.makedirs(os.path.join(self.infra, "proxy", "certs"))
+        self.log = os.path.join(self.tmp, "docker.log")
+
+        for name, source in (("docker", FAKE_DOCKER), ("curl", FAKE_CURL)):
+            p = os.path.join(self.bin, name)
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(source)
+            os.chmod(p, 0o755)
+
+        # 直前のスタックが起動している状態を既定にする。
+        self.set_containers(
+            ["lbs-mysql", "lbs-keycloak", "lbs-wordpress", "lbs-reverse-proxy"]
+            + ["lbs-%s" % s for s in ("gateway", "web", "identity")]
+        )
+        for v in DESTROYED_VOLUMES + PRESERVED_VOLUMES:
+            self.create_volume(v, "2020-01-01T00:00:00Z")
+        self.write_state("mysqldbs", SERVICE_SCHEMAS + [s + "_test" for s in SERVICE_SCHEMAS])
+        self.write_state("kcusers", [])
+        self.write_state("wpsites", [])
+
+    # -- 状態の読み書き -------------------------------------------------
+    def write_state(self, name, lines):
+        with open(os.path.join(self.state, name), "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + ("\n" if lines else ""))
+
+    def read_state(self, name):
+        p = os.path.join(self.state, name)
+        if not os.path.exists(p):
+            return []
+        with open(p, encoding="utf-8") as f:
+            return [l.strip() for l in f if l.strip()]
+
+    def set_containers(self, names):
+        self.write_state("containers", sorted(set(names)))
+
+    def create_volume(self, short_name, when):
+        with open(
+            os.path.join(self.state, "volumes", VOLUME_PREFIX + short_name), "w", encoding="utf-8"
+        ) as f:
+            f.write(when)
+
+    def volume_created_at(self, short_name):
+        p = os.path.join(self.state, "volumes", VOLUME_PREFIX + short_name)
+        if not os.path.exists(p):
+            return None
+        with open(p, encoding="utf-8") as f:
+            return f.read().strip()
+
+    def docker_calls(self):
+        if not os.path.exists(self.log):
+            return []
+        with open(self.log, encoding="utf-8") as f:
+            return [l.rstrip("\n") for l in f if l.strip()]
+
+    # -- 実行 -----------------------------------------------------------
+    def run_script(self, *args, **env_overrides):
+        env = dict(os.environ)
+        env["PATH"] = self.bin + os.pathsep + env["PATH"]
+        env["FAKE_STATE"] = self.state
+        env["FAKE_DOCKER_LOG"] = self.log
+        # healthy 待ちの既定は 900 秒。単体テストでその上限を待つわけにはいかないので短くする。
+        # 縮められるのは**待つ時間**だけで、接続先・プロジェクト・ボリュームは差し替えられない。
+        env["ACCEPTANCE_HEALTH_TIMEOUT"] = "10"
+        # 共有プロキシの再適用は実物の scripts/setup-shared-host-proxy.sh を呼ぶ。
+        # 書き込み先を一時ディレクトリへ逃がし、GitLab の生存確認は省く。
+        env["INFRA_DIR"] = self.infra
+        env["GITLAB_HEALTH_URL"] = ""
+        env.update({k: str(v) for k, v in env_overrides.items()})
+        return subprocess.run(
+            ["bash", os.path.join(REPO_ROOT, SCRIPT)] + list(args),
+            capture_output=True,
+            text=True,
+            timeout=300,
+            env=env,
+            cwd=REPO_ROOT,
+        )
+
+    def out(self, r):
+        return r.stdout + r.stderr
+
+
+class Usage(RebuildScriptHarness):
+    def test_is_executable(self):
+        st = os.stat(os.path.join(REPO_ROOT, SCRIPT))
+        self.assertTrue(st.st_mode & stat.S_IXUSR, "%s に実行ビットが無い" % SCRIPT)
+
+    def test_syntax_is_valid(self):
+        r = subprocess.run(
+            ["bash", "-n", os.path.join(REPO_ROOT, SCRIPT)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(0, r.returncode, r.stderr)
+
+    def test_help_exits_zero(self):
+        r = self.run_script("--help")
+        self.assertEqual(0, r.returncode, self.out(r))
+        self.assertIn("--yes", r.stdout)
+
+    def test_unknown_option_is_refused(self):
+        r = self.run_script("--project", "something-else")
+        self.assertNotEqual(0, r.returncode, "接続先を差し替える引数が通ってしまった")
+        self.assertIn("不明な引数", self.out(r))
+
+
+class SafetyDeviceIsHardcodedTargets(unittest.TestCase):
+    """安全装置(1)は維持する: 接続先・compose プロジェクト・ボリューム名を引数で差し替えられない。
+
+    #965 §2 は「1 は維持し、ゼロ構築スクリプトへそのまま引き継ぐ」と決めている。
+    """
+
+    def setUp(self):
+        self.assertTrue(exists(SCRIPT), "%s が無い" % SCRIPT)
+        self.text = read(SCRIPT)
+
+    def test_compose_project_is_readonly(self):
+        self.assertRegex(
+            self.text,
+            r"readonly\s+COMPOSE_PROJECT=[\"']?lets_blog_server",
+            "compose プロジェクト名が readonly で固定されていない",
+        )
+
+    def test_volume_lists_are_readonly(self):
+        self.assertRegex(self.text, r"readonly\s+DESTROY_VOLUMES=\(", "破棄対象が固定されていない")
+        self.assertRegex(self.text, r"readonly\s+PRESERVE_VOLUMES=\(", "保全対象が固定されていない")
+
+    def test_declares_every_compose_volume(self):
+        """docker-compose.yml が宣言するボリュームを、破棄か保全のどちらかに必ず割り当てる。
+
+        取りこぼしたボリュームは「黙って残る」。列挙漏れに気づく手段が無いのが
+        現行リセットの問題(#965 Problem)なので、ここで固定する。
+        """
+        compose = read("docker-compose.yml")
+        declared = []
+        in_volumes = False
+        for line in compose.splitlines():
+            if line.startswith("volumes:"):
+                in_volumes = True
+                continue
+            if in_volumes:
+                if line and not line.startswith(" "):
+                    break
+                name = line.strip().rstrip(":")
+                if name and not name.startswith("#"):
+                    declared.append(name)
+        self.assertTrue(declared, "docker-compose.yml の volumes: を読み取れなかった")
+        for name in declared:
+            with self.subTest(volume=name):
+                self.assertIn(
+                    name,
+                    self.text,
+                    "ボリューム %s が破棄・保全のどちらにも現れない" % name,
+                )
+
+    def test_probe_names_are_confined_to_the_wipe_probe_prefix(self):
+        """スクリプトが作るアカウントは at-wipe-probe- 接頭辞に限る(#965 §2)。"""
+        self.assertIn("at-wipe-probe-", self.text)
+        self.assertIn("@letsblog.local", self.text)
+
+    def test_does_not_delete_accounts_by_name(self):
+        """ゼロ構築経路は、名指しでアカウントを削除する処理を持たない(#965 §2)。"""
+        self.assertNotIn("kcadm delete", self.text)
+        self.assertNotIn("delete users/", self.text)
+
+    def test_preserves_comfyui_models_and_says_why(self):
+        self.assertRegex(self.text, r"readonly\s+PRESERVE_VOLUMES=\(\s*comfyui_models")
+        self.assertIn("モデル", self.text, "comfyui_models を保全する理由がコメントに無い")
+
+    def test_reuses_the_existing_health_wait(self):
+        """#965 §1-3: `wait-for-stack-healthy.sh` を再利用する(重複実装しない)。"""
+        self.assertIn("wait-for-stack-healthy.sh", self.text)
+
+    def test_legacy_data_layer_reset_keeps_its_domain_restriction(self):
+        """#965 §2: データ層リセット経路のドメイン限定は撤廃しない。"""
+        legacy = read(LEGACY_SCRIPT)
+        self.assertIn("SYNTHETIC_EMAIL_DOMAIN", legacy)
+        self.assertIn("@letsblog.local", legacy)
+
+
+class DryRunChangesNothing(RebuildScriptHarness):
+    """受入基準: `--yes` なしは3つを表示して、何も削除せず、ダミーも作らない。"""
+
+    def setUp(self):
+        super().setUp()
+        self.before = {v: self.volume_created_at(v) for v in DESTROYED_VOLUMES + PRESERVED_VOLUMES}
+        self.r = self.run_script()
+
+    def test_exits_zero(self):
+        self.assertEqual(0, self.r.returncode, self.out(self.r))
+
+    def test_lists_the_volumes_it_would_destroy(self):
+        out = self.out(self.r)
+        self.assertIn("破棄するボリューム", out)
+        for v in DESTROYED_VOLUMES:
+            with self.subTest(volume=v):
+                self.assertIn(VOLUME_PREFIX + v, out)
+
+    def test_lists_the_volumes_it_would_preserve(self):
+        out = self.out(self.r)
+        self.assertIn("保全するボリューム", out)
+        self.assertIn(VOLUME_PREFIX + "comfyui_models", out)
+
+    def test_lists_the_probes_it_would_create(self):
+        out = self.out(self.r)
+        self.assertIn("作成するプローブ", out)
+        self.assertRegex(out, r"at-wipe-probe-\d+@letsblog\.local")
+        self.assertRegex(out, r"at_wipe_probe_\d+")
+        self.assertRegex(out, r"/var/www/html/sites/at-wipe-probe-\d+")
+
+    def test_says_it_changed_nothing(self):
+        self.assertIn("何も変更していません", self.out(self.r))
+
+    def test_created_no_probes(self):
+        self.assertEqual([], self.read_state("kcusers"), "ドライランが Keycloak ユーザーを作った")
+        self.assertEqual(
+            [], [d for d in self.read_state("mysqldbs") if d.startswith("at_wipe_probe_")]
+        )
+        self.assertEqual([], self.read_state("wpsites"), "ドライランが WordPress サイトを作った")
+
+    def test_destroyed_nothing(self):
+        after = {v: self.volume_created_at(v) for v in DESTROYED_VOLUMES + PRESERVED_VOLUMES}
+        self.assertEqual(self.before, after, "ドライランでボリュームの CreatedAt が変わった")
+
+    def test_ran_no_destructive_docker_command(self):
+        for call in self.docker_calls():
+            with self.subTest(call=call):
+                self.assertNotIn("volume\trm", call)
+                self.assertNotIn("down", call.split("\t"))
+                self.assertNotIn("up", call.split("\t"))
+
+
+class ProbesAreCreatedBeforeTheTeardown(RebuildScriptHarness):
+    """受入基準: `--yes` 実行時、3つのダミーが作られ、作られたことがログに出る。"""
+
+    def setUp(self):
+        super().setUp()
+        self.r = self.run_script("--yes")
+        self.out_text = self.out(self.r)
+
+    def test_succeeds(self):
+        self.assertEqual(0, self.r.returncode, self.out_text)
+
+    def test_logs_all_three_probes_with_the_same_identifier(self):
+        import re
+
+        ids = set(re.findall(r"at[-_]wipe[-_]probe[-_](\d+)", self.out_text))
+        self.assertEqual(1, len(ids), "プローブ識別子が一意でない: %s\n%s" % (ids, self.out_text))
+        probe_id = ids.pop()
+        self.assertIn("at-wipe-probe-%s@letsblog.local" % probe_id, self.out_text)
+        self.assertIn("at_wipe_probe_%s" % probe_id, self.out_text)
+        self.assertIn("/var/www/html/sites/at-wipe-probe-%s" % probe_id, self.out_text)
+
+    def test_creates_the_keycloak_user_with_kcadm_not_the_identity_api(self):
+        calls = "\n".join(self.docker_calls())
+        self.assertIn("kcadm.sh", calls)
+        self.assertIn("create", calls)
+        self.assertNotIn("/api/users", calls, "identity-service の API でユーザーを作っている")
+
+    def test_creates_a_standalone_mysql_database(self):
+        calls = [c for c in self.docker_calls() if "CREATE DATABASE" in c]
+        self.assertTrue(calls, "MySQL のプローブ DB を作っていない")
+        for c in calls:
+            with self.subTest(call=c):
+                self.assertIn("at_wipe_probe_", c)
+                for schema in SERVICE_SCHEMAS:
+                    self.assertNotIn(
+                        "`%s`" % schema, c, "サービススキーマの中にプローブを作っている"
+                    )
+
+    def test_confirms_the_probes_exist_right_after_creating_them(self):
+        """作成直後の存在確認が無いと、後の「消えている」が「作れていなかった」と区別できない。"""
+        self.assertRegex(self.out_text, r"確認:.*プローブ.*存在")
+        import re
+
+        confirm = re.search(r"確認:.*プローブ.*存在.*", self.out_text)
+        teardown = re.search(r"^--- 1/5 .*$", self.out_text, re.M)
+        self.assertIsNotNone(teardown, "撤去の段が見つからない:\n" + self.out_text)
+        self.assertLess(
+            confirm.start(), teardown.start(), "プローブの存在確認が撤去より後に来ている"
+        )
+
+    def test_does_not_delete_the_probes_itself(self):
+        """消すのは `down -v`(ボリューム破棄)である。個別削除は書かない(#965 §7-A-3)。"""
+        for call in self.docker_calls():
+            with self.subTest(call=call):
+                self.assertNotIn("DROP DATABASE", call)
+                self.assertNotIn("rm -rf /var/www/html/sites/at-wipe-probe", call)
+
+
+class ProbesAreGoneAfterTheRebuild(RebuildScriptHarness):
+    def test_reports_all_three_probes_gone(self):
+        r = self.run_script("--yes")
+        self.assertEqual(0, r.returncode, self.out(r))
+        self.assertIn("プローブ", self.out(r))
+        self.assertRegex(self.out(r), r"OK:.*プローブ")
+
+    def test_probe_state_is_actually_empty(self):
+        self.run_script("--yes")
+        self.assertEqual([], self.read_state("kcusers"))
+        self.assertEqual(
+            [], [d for d in self.read_state("mysqldbs") if d.startswith("at_wipe_probe_")]
+        )
+        self.assertEqual([], self.read_state("wpsites"))
+
+
+class RemainingProbeIsNamedAndFatal(RebuildScriptHarness):
+    """受入基準: どれか1つでも残ったら、どれが残ったかを名指しして非0で終了する。
+
+    ここで再現するのは「**ボリュームは破棄され、構築で作り直されたのに、そのプローブの
+    実体だけが構築後の存在確認に現れる**」状態である(古いレプリカ、キャッシュ、
+    削除経路のバグ)。手順4-7 の存在確認は、まさにこれを捕まえるために置かれている。
+
+    `FAKE_UNDELETABLE`(`docker volume rm` 自体を失敗させる)ではこの経路へ**入れない**。
+    スクリプトは手順1で「ボリューム ... を破棄できませんでした」と落ち、手順4へ到達しない。
+    それでも旧テストが green だったのは、手順0の計画表示と作成ログに
+    プローブ名がそのまま出ているためで、手順4-7 は一度も走っていなかった(QA 1、2026-09-05)。
+
+    そこで `FAKE_STICKY_PROBE` を使う。`volume rm` は成功させ、ボリュームは作り直したうえで、
+    **指定した1種類のプローブの実体だけ**を破棄をまたいで残す。
+    """
+
+    #: 手順4-7 だけが出す見出し。手順0の計画表示にも 4-4 / 4-5 にも現れない。
+    STEP_47_HEADING = "NG: 撤去したはずのプローブが残っています"
+
+    #: 手順4-7 が各プローブに付ける括弧書き。名指しの根拠がここにある。
+    STEP_47_REASON = {
+        "keycloak": "(keycloak_postgres が破棄されていない)",
+        "mysql": "(mysql_data が破棄されていない)",
+        "wordpress": "(wordpress_sites が破棄されていない)",
+    }
+
+    def run_with_sticky_probe(self, kind):
+        """1種類だけプローブが生き残った状態で走らせ、手順4-7 を通ったことまで確かめる。"""
+        r = self.run_script("--yes", FAKE_STICKY_PROBE=kind)
+        out = self.out(r)
+        self.assertNotEqual(0, r.returncode, "プローブが残ったのに成功した:\n" + out)
+        self.assertNotIn(
+            "を破棄できませんでした",
+            out,
+            "手順1のボリューム破棄失敗で落ちている(手順4-7 を検証できていない):\n" + out,
+        )
+        self.assertIn("--- 4/5", out, "手順4(検証)へ到達していない:\n" + out)
+        self.assertIn(
+            self.STEP_47_HEADING,
+            out,
+            "手順4-7(構築後のプローブ存在確認)が失敗を検出していない:\n" + out,
+        )
+        # 破棄と再作成そのものは成立している。捕まえたのは「作り直したのに残っている」である。
+        for v in DESTROYED_VOLUMES:
+            self.assertNotEqual(
+                "2020-01-01T00:00:00Z",
+                self.volume_created_at(v),
+                "%s が作り直されていない(別の失敗を見ている)" % v,
+            )
+        # 名指しは残った1種類だけに限る。
+        for other, reason in self.STEP_47_REASON.items():
+            if other != kind:
+                self.assertNotIn(reason, out, "残っていない %s まで名指ししている" % other)
+        return out
+
+    def test_names_the_keycloak_probe_when_the_user_survives_the_wipe(self):
+        out = self.run_with_sticky_probe("keycloak")
+        self.assertRegex(
+            out,
+            r"- Keycloak ユーザー at-wipe-probe-\d+@letsblog\.local"
+            + re.escape(self.STEP_47_REASON["keycloak"]),
+            "残った Keycloak プローブを名指ししていない:\n" + out,
+        )
+
+    def test_names_the_mysql_probe_when_the_database_survives_the_wipe(self):
+        out = self.run_with_sticky_probe("mysql")
+        self.assertRegex(
+            out,
+            r"- MySQL データベース at_wipe_probe_\d+" + re.escape(self.STEP_47_REASON["mysql"]),
+            "残った MySQL プローブを名指ししていない:\n" + out,
+        )
+
+    def test_names_the_wordpress_probe_when_the_directory_survives_the_wipe(self):
+        out = self.run_with_sticky_probe("wordpress")
+        self.assertRegex(
+            out,
+            r"- WordPress ディレクトリ /var/www/html/sites/at-wipe-probe-\d+"
+            + re.escape(self.STEP_47_REASON["wordpress"]),
+            "残った WordPress プローブを名指ししていない:\n" + out,
+        )
+
+
+class ProbesAreSkippedWhenThePreviousStackIsDown(RebuildScriptHarness):
+    """受入基準: 直前のスタックが停止していても実行でき、省略したことを出力に残す。"""
+
+    def setUp(self):
+        super().setUp()
+        self.set_containers([])
+        self.r = self.run_script("--yes")
+
+    def test_succeeds(self):
+        self.assertEqual(0, self.r.returncode, self.out(self.r))
+
+    def test_says_the_probes_were_skipped_and_why(self):
+        self.assertIn("プローブ省略", self.out(self.r))
+        self.assertIn("直前のスタックが起動していない", self.out(self.r))
+
+    def test_still_verifies_volume_recreation(self):
+        self.assertIn("CreatedAt", self.out(self.r))
+        for v in DESTROYED_VOLUMES:
+            with self.subTest(volume=v):
+                self.assertNotEqual(
+                    "2020-01-01T00:00:00Z",
+                    self.volume_created_at(v),
+                    "%s が作り直されていない" % v,
+                )
+
+
+class VolumesAreDestroyedAndRecreated(RebuildScriptHarness):
+    def test_destroy_targets_get_a_newer_created_at(self):
+        r = self.run_script("--yes")
+        self.assertEqual(0, r.returncode, self.out(r))
+        for v in DESTROYED_VOLUMES:
+            with self.subTest(volume=v):
+                self.assertNotEqual("2020-01-01T00:00:00Z", self.volume_created_at(v))
+
+    def test_comfyui_models_is_never_removed(self):
+        self.run_script("--yes")
+        for call in self.docker_calls():
+            if call.startswith("volume\trm"):
+                with self.subTest(call=call):
+                    self.assertNotIn("comfyui_models", call)
+
+    def test_comfyui_models_created_at_is_unchanged(self):
+        self.run_script("--yes")
+        self.assertEqual(
+            "2020-01-01T00:00:00Z",
+            self.volume_created_at("comfyui_models"),
+            "保全対象の comfyui_models が作り直されている",
+        )
+
+    def test_a_volume_that_cannot_be_destroyed_is_fatal_at_the_teardown(self):
+        """手順1: `docker volume rm` が失敗したら、そこで名指しして止まる。
+
+        ここで止まるので、**手順4の検証には到達しない**。手順4-1(構築後に CreatedAt が
+        更新されているか)を検査したいなら別の壊し方が要る —
+        `test_reports_a_destroy_target_that_the_build_did_not_recreate` がそれである。
+        """
+        r = self.run_script("--yes", FAKE_UNDELETABLE="rabbitmq_data")
+        out = self.out(r)
+        self.assertNotEqual(0, r.returncode, "破棄できていないのに成功した:\n" + out)
+        self.assertIn("rabbitmq_data", out)
+        self.assertIn("を破棄できませんでした", out)
+
+    def test_reports_a_destroy_target_that_the_build_did_not_recreate(self):
+        """手順4-1: 破棄はできたのに構築が作り直さなかったボリュームを名指しして非0終了する。
+
+        破棄そのものは成功させ(`volume rm` は通る)、構築だけがそのボリュームを
+        作らない状態を作る。手順1では落ちないので、判定は手順4-1 が下すしかない。
+        """
+        r = self.run_script("--yes", FAKE_NOT_RECREATED="rabbitmq_data")
+        out = self.out(r)
+        self.assertNotEqual(0, r.returncode, "作り直されていないのに成功した:\n" + out)
+        self.assertNotIn(
+            "を破棄できませんでした", out, "手順1で落ちている(手順4-1 を検証できていない):\n" + out
+        )
+        self.assertIn("--- 4/5", out, "手順4(検証)へ到達していない:\n" + out)
+        self.assertIn(
+            VOLUME_PREFIX + "rabbitmq_data が存在しません(構築で作り直されていない)",
+            out,
+            "作り直されなかったボリュームを名指ししていない:\n" + out,
+        )
+
+    def test_builds_from_source(self):
+        self.run_script("--yes")
+        calls = "\n".join(self.docker_calls())
+        self.assertIn("--build", calls, "ソースからの再ビルドを行っていない")
+
+    def test_no_cache_is_available_as_a_flag(self):
+        self.run_script("--yes", "--no-cache")
+        calls = "\n".join(self.docker_calls())
+        self.assertIn("--no-cache", calls)
+
+    def test_starts_the_required_services_even_though_comfyui_cannot_start(self):
+        """**回帰させてはいけない検査(2026-09-04 の実測で踏んだ)。**
+
+        この開発機には NVIDIA ランタイムが無く、`comfyui` は起動できない
+        (`could not select device driver "nvidia"`)。`docker compose up -d` を
+        サービス無指定で呼ぶと、compose はそこで**中断**し、依存関係の下流
+        (web / gateway / keycloak / 各ドメインサービス)を `created` のまま残す。
+        健全性待ちはそれを 900 秒待ってからタイムアウトする — 実測で踏んだ壊れ方である。
+
+        必須サービスと任意サービスを分けて起動し、任意サービスの起動失敗は警告に留めること。
+        """
+        r = self.run_script("--yes")
+        out = self.out(r)
+        self.assertEqual(0, r.returncode, "comfyui の起動失敗でゼロ構築ごと落ちている:\n" + out)
+        for service in ("web", "gateway", "keycloak", "identity"):
+            with self.subTest(service=service):
+                self.assertIn(
+                    "lbs-%s" % service,
+                    self.read_state("containers"),
+                    "%s が起動していない(compose が comfyui で中断している)" % service,
+                )
+
+    def test_says_which_optional_service_failed_to_start(self):
+        r = self.run_script("--yes")
+        self.assertIn("comfyui", self.out(r), "起動しなかった任意サービスの名前が出ていない")
+
+    def test_still_creates_the_volume_of_the_optional_service(self):
+        """comfyui_output は comfyui だけが使う。作られないと破棄検証が通らない。"""
+        self.run_script("--yes")
+        self.assertIsNotNone(self.volume_created_at("comfyui_output"))
+
+    def test_includes_the_e2e_stub_compose_file(self):
+        self.run_script("--yes")
+        calls = "\n".join(self.docker_calls())
+        self.assertIn("docker-compose.e2e-stubs.yml", calls)
+
+
+class PostBuildVerification(RebuildScriptHarness):
+    """#965 §4: ゼロ構築が成立したことをスクリプト自身が確かめる。"""
+
+    def test_fails_when_the_stack_never_becomes_healthy(self):
+        """受入基準: どのサービスが healthy になっていないかが分かる形で非0終了する。
+
+        `ACCEPTANCE_HEALTH_TIMEOUT` が効いていないと、ここは既定の 900 秒を待って
+        subprocess のタイムアウトで落ちる(= スクリプトが上限を渡していない)。
+        """
+        r = self.run_script("--yes", FAKE_UNHEALTHY="1")
+        out = self.out(r)
+        self.assertNotEqual(0, r.returncode, "healthy でないのに成功した:\n" + out)
+        self.assertIn("gateway", out, "どのサービスが healthy でないかが分からない")
+        self.assertIn("後続の段階は実行されません", out)
+
+    def test_fails_when_setup_status_is_not_200(self):
+        r = self.run_script("--yes", FAKE_SETUP_CODE="502")
+        out = self.out(r)
+        self.assertNotEqual(0, r.returncode, "setup-status が 502 なのに成功した:\n" + out)
+        self.assertIn("setup-status", out)
+
+    def test_fails_when_setup_is_not_needed(self):
+        r = self.run_script("--yes", FAKE_SETUP_STATUS='{"needsSetup":false}')
+        out = self.out(r)
+        self.assertNotEqual(0, r.returncode, "needsSetup が false なのに成功した:\n" + out)
+        self.assertIn("needsSetup", out)
+
+    def test_fails_when_an_unexpected_keycloak_user_survives(self):
+        r = self.run_script("--yes", FAKE_EXTRA_KC_USER="leftover@example.com")
+        out = self.out(r)
+        self.assertNotEqual(0, r.returncode, "余計なユーザーが居るのに成功した:\n" + out)
+        self.assertIn("leftover@example.com", out)
+
+    def test_accepts_only_the_service_account(self):
+        """`service-account-letsblog-services` だけは残っていてよい(#965 §4-4)。"""
+        r = self.run_script("--yes", FAKE_EXTRA_KC_USER="service-account-letsblog-services")
+        self.assertEqual(0, r.returncode, self.out(r))
+
+    def test_fails_when_a_schema_still_has_rows(self):
+        r = self.run_script("--yes", FAKE_DIRTY_SCHEMA="lbs_content")
+        out = self.out(r)
+        self.assertNotEqual(0, r.returncode, "スキーマにデータが残っているのに成功した:\n" + out)
+        self.assertIn("lbs_content", out)
+
+    def test_checks_the_test_schemas_were_recreated(self):
+        """`*_test` は mysql_data ごと消えるので、02-create-test-schemas.sh による再作成を確認する。"""
+        r = self.run_script("--yes")
+        self.assertEqual(0, r.returncode, self.out(r))
+        self.assertIn("_test", self.out(r))
+
+    def test_removes_host_side_artifacts_of_the_previous_run(self):
+        for rel in ("apps/web/test-results", "apps/web/playwright-report"):
+            d = os.path.join(REPO_ROOT, rel)
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, ".at-probe"), "w", encoding="utf-8") as f:
+                f.write("x")
+        self.run_script("--yes")
+        for rel in ("apps/web/test-results", "apps/web/playwright-report"):
+            with self.subTest(path=rel):
+                self.assertFalse(
+                    os.path.exists(os.path.join(REPO_ROOT, rel, ".at-probe")),
+                    "%s が消えていない" % rel,
+                )
+
+
+class RunningItTwiceGivesTheSameResult(RebuildScriptHarness):
+    """受入基準: 2回連続で実行して、2回目も1回目と同じ結果になる。"""
+
+    def test_second_run_succeeds_too(self):
+        first = self.run_script("--yes")
+        self.assertEqual(0, first.returncode, self.out(first))
+        second = self.run_script("--yes")
+        self.assertEqual(0, second.returncode, self.out(second))
+
+    def test_second_run_leaves_no_probe_behind(self):
+        self.run_script("--yes")
+        self.run_script("--yes")
+        self.assertEqual([], self.read_state("kcusers"))
+        self.assertEqual(
+            [], [d for d in self.read_state("mysqldbs") if d.startswith("at_wipe_probe_")]
+        )
+        self.assertEqual([], self.read_state("wpsites"))
+
+
+class SharedHostProxyIsReapplied(RebuildScriptHarness):
+    """#1038 の共有ホスト構成では、ネットワークを作り直すと infra-proxy の接続が切れる。
+
+    `lbs-reverse-proxy` が 80/443 を公開していない = 共有ホスト構成である。
+    この構成で `down` → `up` すると `https://localhost` が到達不能になるため、
+    構築後に `scripts/setup-shared-host-proxy.sh` を再適用しなければならない
+    (同スクリプトの「infra 側スタックを作り直したら、もう一度適用すること」と同じ事情)。
+    """
+
+    def test_uses_the_shared_host_override_when_ports_are_not_published(self):
+        self.run_script("--yes", FAKE_SHARED_HOST="1")
+        calls = "\n".join(self.docker_calls())
+        self.assertIn("docker-compose.shared-host.yml", calls)
+
+    def test_does_not_use_the_override_when_ports_are_published(self):
+        self.run_script("--yes")
+        calls = "\n".join(self.docker_calls())
+        self.assertNotIn("docker-compose.shared-host.yml", calls)
+
+    def test_mentions_reapplying_the_shared_host_setup(self):
+        self.assertIn("setup-shared-host-proxy.sh", read(SCRIPT))
+
+    def test_reapplication_does_not_gate_on_a_stack_that_is_still_starting(self):
+        """**回帰させてはいけない検査(2026-09-04 の実測で踏んだ)。**
+
+        `up -d --build` が返った直後、web / gateway はまだ起動途中で
+        `https://localhost/` は 502 を返す。`setup-shared-host-proxy.sh` は
+        既定で「適用後にベースURLへ届くこと」まで確認するので、そこで落ちる。
+        しかしこれは共有プロキシの失敗ではなく、単に**まだ早い**だけである。
+
+        到達性の判定はリトライを持つ `wait-for-stack-healthy.sh` に委ね、
+        再適用そのものは接続の復旧だけを行うこと(`LBS_BASE_URL=` で確認を省く)。
+        """
+        r = self.run_script("--yes", FAKE_SHARED_HOST="1", FAKE_LOCALHOST_WARMUP="2")
+        out = self.out(r)
+        self.assertEqual(
+            0,
+            r.returncode,
+            "構築直後の 502 で落ちている(健全性待ちのリトライへ委ねていない):\n" + out,
+        )
+        self.assertNotIn("共有プロキシの再適用に失敗", out)
+
+
+class WiredIntoTheCleanRun(unittest.TestCase):
+    """受入基準: `test:at:clean` がゼロ構築を通る / `test:at` と `test:at:fast` は変わらない。"""
+
+    def setUp(self):
+        self.pkg = json.loads(read(PACKAGE_JSON))["scripts"]
+
+    def test_global_setup_runs_the_zero_build_script(self):
+        text = read(GLOBAL_SETUP)
+        self.assertIn("rebuild-acceptance-env.sh", text)
+
+    def test_clean_run_enables_the_reset(self):
+        self.assertIn("ACCEPTANCE_RESET=1", self.pkg["test:at:clean"])
+
+    def test_fast_paths_do_not_reset(self):
+        self.assertNotIn("ACCEPTANCE_RESET", self.pkg["test:at"])
+        self.assertNotIn("ACCEPTANCE_RESET", self.pkg["test:at:fast"])
+
+    def test_fast_paths_still_target_the_same_projects(self):
+        self.assertIn("--project=at-destructive", self.pkg["test:at"])
+        self.assertIn("--project=at-main", self.pkg["test:at:fast"])
+        self.assertIn('--grep-invert "@slow"', self.pkg["test:at:fast"])
+
+    def test_global_setup_allows_enough_time_for_a_cold_build(self):
+        """ゼロ構築はイメージのビルドを含む。従来の 30 分では足りない。"""
+        text = read(GLOBAL_SETUP)
+        import re
+
+        m = re.search(r"timeout:\s*([\d_]+)", text)
+        self.assertIsNotNone(m, "globalSetup にタイムアウト指定が無い")
+        self.assertGreaterEqual(
+            int(m.group(1).replace("_", "")),
+            3_600_000,
+            "ゼロ構築(キャッシュ無しビルドを含む)に足りるタイムアウトになっていない",
+        )
+
+
+class Documentation(unittest.TestCase):
+    """#965 §6: `docs/ACCEPTANCE_TESTING.md` §10 を改訂する。"""
+
+    def setUp(self):
+        self.doc = read(DOC)
+
+    def section10(self):
+        lines = self.doc.splitlines()
+        start = next(i for i, l in enumerate(lines) if l.startswith("## 10."))
+        end = next(
+            (i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines)
+        )
+        return "\n".join(lines[start:end])
+
+    def test_no_real_account_is_named_anywhere(self):
+        """#965 §2/§6: 実アカウントを守るという理由づけは成り立たない。記述ごと消す。"""
+        self.assertNotIn("s.tonouchi@gmail.com", self.doc)
+
+    def test_stage_diagram_starts_with_the_teardown_and_rebuild(self):
+        s = self.section10()
+        self.assertIn("全撤去", s)
+        self.assertRegex(s, r"全撤去.*ゼロ構築.*\n?.*at-setup")
+
+    def test_has_a_destroyed_versus_preserved_volume_table(self):
+        s = self.section10()
+        self.assertIn("破棄するボリューム", s)
+        self.assertIn("保全するボリューム", s)
+        for v in DESTROYED_VOLUMES + PRESERVED_VOLUMES:
+            with self.subTest(volume=v):
+                self.assertIn(v, s, "ボリューム %s が §10 の表に無い" % v)
+
+    def test_explains_why_comfyui_models_is_preserved(self):
+        self.assertIn("モデル", self.section10())
+
+    def test_documents_the_probe_mechanism(self):
+        s = self.section10()
+        self.assertIn("at-wipe-probe-", s)
+        for keyword in ("kcadm", "mysql_data", "keycloak_postgres", "wordpress_sites"):
+            with self.subTest(keyword=keyword):
+                self.assertIn(keyword, s)
+
+    def test_safety_section_states_the_no_valuable_account_premise(self):
+        s = self.section10()
+        self.assertIn("失って困るアカウントを置かない", s)
+        self.assertIn("readonly", s, "引数で差し替えられないという安全装置(1)の記述が消えている")
+
+    def test_requires_a_synthetic_provision_admin_email(self):
+        s = self.section10()
+        self.assertIn("E2E_PROVISION_ADMIN_EMAIL", s)
+        self.assertIn("@letsblog.local", s)
+
+    def test_records_measured_durations_with_and_without_build_cache(self):
+        s = self.section10()
+        self.assertIn("キャッシュ", s)
+        import re
+
+        self.assertRegex(
+            s,
+            r"ビルドキャッシュ(あり|なし)",
+            "ビルドキャッシュあり/なしの実測が書かれていない",
+        )
+        self.assertTrue(
+            re.search(r"\d+\s*分|\d+\s*秒", s), "実測所要時間の数値が書かれていない"
+        )
+        # 「あり」「なし」それぞれの行に実測値が入っていること。
+        # 表の枠だけ作って埋め忘れる(あるいは仮の値を残す)のを防ぐ。
+        for kind in ("ビルドキャッシュあり", "ビルドキャッシュなし"):
+            row = next((l for l in s.splitlines() if kind in l), None)
+            with self.subTest(kind=kind):
+                self.assertIsNotNone(row, "%s の行が無い" % kind)
+                self.assertRegex(
+                    row, r"\d+\s*(分|秒)", "%s の行に実測値が入っていない: %s" % (kind, row)
+                )
+                self.assertNotIn("__", row, "仮の値が残っている: %s" % row)
+
+    def test_explains_why_there_is_no_teardown_after_the_run(self):
+        s = self.section10()
+        self.assertIn("E2E_DB_CLEANUP", s)
+        self.assertIn("次回実行の先頭", s)
+
+    def test_names_the_new_script(self):
+        self.assertIn("rebuild-acceptance-env.sh", self.section10())
+
+
+if __name__ == "__main__":
+    unittest.main()

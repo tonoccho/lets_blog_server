@@ -410,26 +410,38 @@ docker compose -f docker-compose.yml -f docker-compose.e2e-stubs.yml restart \
 
 ## 10. クリーンスレート実行と段階順序
 
-受け入れテストは**毎回まっさらな状態から**実行する(issue #945 / AT-19)。
+受け入れテストは**毎回まっさらな状態から**実行する(issue #945 / AT-19、#965)。
 前のテストが残したデータに依存して通る/落ちるテストを作らないため、また初回セットアップ
 (ユーザー0人)やバックアップ/リストアのようにクリーンな状態を要するシナリオを
 書けるようにするため。
 
+実行順序は **「全撤去 → ゼロから構築 → テスト」** である。利用者の方針(2026-09-01)は
+
+> 1. システムを0から構築してスタートする
+> 2. テストを行う
+> 3. テストのために作成した一切のものを削除する
+
+の3つで、**3 はテスト終了後の後片付けではなく、次回実行の最初のステップ**として行う。
+終了時に何も消さないので、失敗の調査は実行後のスタックに対してそのまま行える(#945 の判断)。
+
 ```bash
 source ~/.config/lets-blog-e2e.env    # 合成アカウントの資格情報(リポジトリ外・モード600)
 cd apps/web
-npm run test:at:clean                 # リセット → 段階順に全実行
+npm run test:at:clean                 # 全撤去+ゼロ構築 → 段階順に全実行
 ```
+
+`npm run test:at` / `npm run test:at:fast` は**既存スタックに対して回す高速経路**であり、
+撤去も構築も行わない。ゼロ構築を通るのは `test:at:clean` だけである。
 
 ### 段階
 
 ```
-reset ─→ at-setup ─→ at-seed ─→ at-provision ─→ at-main ─→ at-destructive
+全撤去+ゼロ構築 ─→ at-setup ─→ at-seed ─→ at-provision ─→ at-main ─→ at-destructive
 ```
 
 | 段階 | 中身 | 担当 |
 | --- | --- | --- |
-| `reset` | `scripts/reset-acceptance-env.sh --yes`。`globalSetup` が `ACCEPTANCE_RESET=1` のときだけ実行 | AT-19 |
+| 全撤去+ゼロ構築 | `scripts/rebuild-acceptance-env.sh --yes`。`globalSetup` が `ACCEPTANCE_RESET=1` のときだけ実行 | AT-19 / #965 |
 | `at-setup` | `@stage:setup` のシナリオ。初回セットアップ(ユーザー0人 → 最初の管理者) | AT-3 (#929) |
 | `at-seed` | `scripts/seed-acceptance-env.sh`。E2E専用の合成アカウントを発行 | AT-19 |
 | `at-provision` | `@stage:provision` のシナリオ。**WordPress のプロビジョニング** | AT-5 (#931) |
@@ -477,74 +489,232 @@ Playwright はファイルをまたぐ直列化の手段を持たない(`@mode:s
 単一ドメインのテストを回すために `at-setup` を通さず実行したときのための逃げ道であり、
 通常の全実行では `setup-status` が `needsSetup: false` を返してスキップされる。
 
-### リセットが消すもの
+### 破棄するボリューム / 保全するボリューム
 
-| 対象 | 内容 |
+ゼロ構築(`scripts/rebuild-acceptance-env.sh`)は、**消す対象を列挙して個別に消す**のではなく
+**ボリュームごと破棄する**。列挙方式には「列挙漏れが起きたときに気づく手段が無い」という
+弱点があり(#965 Problem)、ボリューム破棄はその弱点を構造的に消す。
+
+| 破棄するボリューム | 中身 | 破棄する理由 |
+| --- | --- | --- |
+| `lets_blog_server_mysql_data` | 9スキーマ・`wp_*`・`*_test`・MySQL ユーザーと `GRANT` | 初期化スクリプトが本来の経路で走り、`GRANT` を手で張り直す回避が要らなくなる |
+| `lets_blog_server_keycloak_postgres` | `letsblog` レルム定義・クライアント・required action・アカウント | `--import-realm` は既存レルムがあると再インポートしないため、残すと `infra/keycloak/realm-export.json` と実環境の一致を誰も検証していない状態になる |
+| `lets_blog_server_wordpress_sites` | `/var/www/html/sites/*` のサイト実体 | プロビジョニングのシナリオが「既にあるものを確認するだけ」に退化しないため |
+| `lets_blog_server_rabbitmq_data` | キューとメッセージ | 前回実行のメッセージが残ると非同期シナリオの結果が変わる |
+| `lets_blog_server_generated_images` | 生成画像の保存領域 | テストが作った成果物 |
+| `lets_blog_server_bulk_upload_files` | 一括アップロードの一時ファイル | テストが作った成果物 |
+| `lets_blog_server_comfyui_output` | ComfyUI の output | テストが作った成果物 |
+| `lets_blog_server_penpot_postgres` | Penpot の DB | 既定は破棄。再構築コストが問題になれば保全へ移す(#965 Open Questions) |
+| `lets_blog_server_penpot_assets` | Penpot のアセット | 同上 |
+
+| 保全するボリューム | 保全する理由 |
 | --- | --- |
-| MySQL | 9スキーマ(`lbs_identity` 他)を drop → create し、サービス再起動で Flyway に再作成させる |
-| MySQL(WP) | ManagedWordPress のサイト別DB(`wp_*`) |
-| Keycloak | `letsblog` レルムの **`@letsblog.local` ドメインのアカウントだけ** |
-| WordPress | `/var/www/html/sites/*` の実体 |
-| メディア | 生成画像の保存領域、ComfyUI の output |
-| RabbitMQ | 全キューの purge |
+| `lets_blog_server_comfyui_models` | 画像生成の**モデル重み**。再取得に長時間かかり、そもそもテスト対象の状態ではない。`CreatedAt` が実行をまたいで変わらないことをスクリプトが検証する |
 
-`*_test` スキーマ(ホストからの `./gradlew test` 用)には触れない。
+`*_test` スキーマ(ホストからの `./gradlew test` 用)は `mysql_data` ごと巻き添えで消えるが、
+構築時に `infra/mysql/init/02-create-test-schemas.sh` が本来の経路で作り直す。
+作り直されたことはスクリプトが確認する(確認できなければ非0で終了する)。
 
-スキーマを作り直すと `GRANT` が失われるため、`infra/mysql/init/01-create-service-schemas.sh` を
-再実行して権限を張り直す。ここが失敗すると各サービスの Flyway が起動時に落ちるので、
-スクリプトはこの失敗で中断する。
+ホスト側に残る前回実行の生成物も撤去と同時に消す。
 
-> **副次的な効果**: 毎回 drop してから Flyway に再作成させるので、
-> 「マイグレーションが空スキーマから通るか」も同時に検証される(#914 の契約テストと同じ性質)。
+| 対象 | 誰が消すか |
+| --- | --- |
+| `apps/web/test-results/` / `apps/web/playwright-report/` | `rebuild-acceptance-env.sh`(撤去の直前) |
+| `apps/web/.features-gen/` | `npm run test:at:clean` が `bddgen` の直前に消す。**globalSetup から消してはいけない** — Playwright は globalSetup の**あとに**テストファイルを読み込むため、実行中のテストが消える |
+
+> **副次的な効果**: 空のボリュームから Flyway に再作成させるので、
+> 「マイグレーションが空スキーマから通るか」も毎回検証される(#914 の契約テストと同じ性質)。
+
+### 撤去の粒度が違う3本を残してある(統合しない)
+
+| スクリプト | 何をするか | いつ使うか |
+| --- | --- | --- |
+| `scripts/rebuild-acceptance-env.sh` | 撤去 → ボリューム破棄(9本)→ ソースからビルドして起動 → 検証 | `test:at:clean`。ゼロ構築を検証したいとき |
+| `scripts/reset-acceptance-env.sh` | 既存コンテナへの `docker exec` でデータ層だけを初期化 | 速く戻したいとき。コンテナ・イメージ・ボリュームは残る |
+| `scripts/verify-clean-volume-boot.sh` | `docker compose down` → **`mysql_data` だけ**を `docker volume rm` → ビルドせずに起動 → healthy 待ち | 空の MySQL ボリュームから起動できるかだけを狭く問いたいとき(#668) |
+
+#### `verify-clean-volume-boot.sh`(#668)と統合しない理由
+
+`verify-clean-volume-boot.sh` は `docker compose down`(`-v` は付けない)のあと
+`com.docker.compose.volume=mysql_data` ラベルの付いたボリューム**1本だけ**を消し、
+`docker compose up -d gateway` で(**イメージをビルドせずに**)起動して、
+`scripts/wait-for-stack-healthy.sh` で全コンテナが healthy になるのを待つ。
+検証はそこまでで、レルムやスキーマやプローブは見ない。
+
+破棄する範囲だけを見れば `rebuild-acceptance-env.sh` はこの上位互換である
+(`mysql_data` を含む9本を破棄し、さらにソースから `--build` する)。
+それでも**統合せず、両方を残す**。理由は3つある。
+
+1. **問うている質問が違う。** `verify-clean-volume-boot.sh` は既存のイメージと既存の
+   Keycloak 状態を保ったまま、**MySQL の初期化と Flyway だけを変数にする**。
+   ゼロ構築が落ちたときは、イメージのビルド・レルムの再インポート・9本のボリュームの
+   再作成が同時に変わっているので、原因の切り分けにならない。#668 の起動デッドロック
+   (#583 / #786 / #785 で解消済み。[DOCKER_COMPOSE_ARCHITECTURE.md](DOCKER_COMPOSE_ARCHITECTURE.md))の
+   回帰を狭く・速く問う道具として意味が残る。
+2. **統合すると安全装置(1)を自分で壊す。** 1本にまとめるには
+   `rebuild-acceptance-env.sh` に `--target` と「`mysql_data` だけ破棄する」を足すことになるが、
+   破棄範囲と起動対象を引数で選べるようにした時点で、上の
+   「接続先・プロジェクト・ボリュームを引数で差し替えられない」という保証は消える。
+   統合の対価としては高すぎる。
+3. **`verify-clean-volume-boot.sh` は受け入れテスト環境を準備できない。** 素の
+   `docker compose`(`docker-compose.yml` だけ)で起動し、`docker-compose.e2e-stubs.yml` も
+   `docker-compose.shared-host.yml` も重ねない。ゼロ構築の経路(`test:at:clean` →
+   `globalSetup`)が呼ぶのは `rebuild-acceptance-env.sh` **だけ**であり、
+   `verify-clean-volume-boot.sh` は受け入れテストの経路から呼ばれない手動の診断用スクリプトである
+   (参照元は [DOCKER_COMPOSE_ARCHITECTURE.md](DOCKER_COMPOSE_ARCHITECTURE.md) と
+   [e2e-validation-guide.md](e2e-validation-guide.md) §2.4)。
+
+したがって #965 では `verify-clean-volume-boot.sh` を削除も変更もしない。
+将来 #668 の回帰を狭く問う価値が無くなったと判断するなら、削除は別Issueで扱う。
 
 ### 安全装置
 
-`reset-acceptance-env.sh` は**接続先を指定するオプションを持たない**。
-コンテナ名(`lbs-mysql` / `lbs-keycloak` / `lbs-wordpress` / `lbs-rabbitmq` / `lbs-media` /
-`lbs-comfyui`)とレルム名(`letsblog`)はスクリプト内で `readonly` に固定してある。
-`scripts/provision-e2e-keycloak-users.sh` と同じ設計で、共有/本番環境では実行できない。
+**(1) 接続先を引数で差し替えられない — 維持する。**
 
-Keycloak のユーザー削除は **`@letsblog.local` ドメインに限定**する。
-このレルムには利用者の実アカウント(`s.tonouchi@gmail.com`)が居るため、
-ドメインで区切ることが実装上の保証になっている。ドライラン(`--yes` なし)は
-削除対象と**保護対象**の両方を表示するので、実行前に必ず確認すること。
+両スクリプトとも**接続先を指定するオプションを持たない**。コンテナ名(`lbs-mysql` /
+`lbs-keycloak` / `lbs-wordpress` ほか)、レルム名(`letsblog`)に加えて、ゼロ構築側は
+**compose プロジェクト名(`lets_blog_server`)とボリューム名も**スクリプト内で `readonly` に
+固定してある。`scripts/provision-e2e-keycloak-users.sh` と同じ設計で、共有/本番環境では
+実行できない。破壊対象は `docker-compose.yml` と `docker-compose.e2e-stubs.yml` の
+compose プロジェクトに閉じる。
+
+`--yes` なしはドライランで、**破棄するボリューム / 保全するボリューム / これから作る
+プローブ**の3つを表示し、何も変更しない(プローブも作らない)。
 
 ```bash
-./scripts/reset-acceptance-env.sh          # ドライラン。何も消さない
-./scripts/reset-acceptance-env.sh --yes    # 実行
+./scripts/rebuild-acceptance-env.sh          # ドライラン。何も変更しない
+./scripts/rebuild-acceptance-env.sh --yes    # 実行
+./scripts/rebuild-acceptance-env.sh --yes --no-cache   # イメージをキャッシュ無しで作り直す
 ```
 
-### リセットは自分で検証する
+**(2) 削除対象のドメイン限定 — ゼロ構築経路には適用できないので、前提の明文化に置き換える。**
 
-リセットスクリプトは、最後に**成立したことを確かめてから**終わる。
-「消したつもり」で終わらせない — リセットが不完全なまま受け入れテストを始めると、
+データ層リセット経路(`reset-acceptance-env.sh`)は、Keycloak のユーザー削除を
+`@letsblog.local` ドメインに限定している。**この限定はそのまま維持する**(低リスクな経路
+として残す意味があるため)。
+
+しかしゼロ構築経路には、この安全装置を**原理的に適用できない**。`keycloak_postgres` ごと
+破棄するので、どのアカウントを残すかを選ぶ余地が無いからである。代わりに前提を明文化する。
+
+> **受け入れテスト環境の `letsblog` レルムには、失って困るアカウントを置かない。**
+> テストが使うアカウントはすべてテスト自身がその実行の中で作る。恒久的に保持したい
+> 実アカウントが必要になったら、受け入れテスト環境ではない別環境で扱う。
+
+これは利用者の判断(2026-09-04)であり、実測でも裏づけられている。
+
+| 確認(2026-09-04、`develop` / スタック稼働中) | 結果 |
+| --- | --- |
+| `kcadm get users -r letsblog --fields username,email` | `[ ]`(エンドユーザー0件) |
+| `SELECT COUNT(*) FROM lbs_identity.users` | `0` |
+| `infra/keycloak/realm-export.json` の `users` | `service-account-letsblog-services` のみ |
+
+テストが使うアカウントは既に全てテスト自身が作っている。
+
+| 段階 | 作るアカウント | 実体 |
+| --- | --- | --- |
+| `at-setup` | 最初の管理者(`E2E_PROVISION_ADMIN_EMAIL`) | `apps/web/e2e/features/auth/setup.feature` のシナリオが `/setup` 画面から作成する |
+| `at-seed` | `e2e-test@letsblog.local` / `e2e-admin@letsblog.local` | `scripts/provision-e2e-keycloak-users.sh`(`e2e-*@letsblog.local` 以外は明示的に拒否する) |
+
+**`E2E_PROVISION_ADMIN_EMAIL` には合成ダミーのアドレス(`@letsblog.local`)を指定すること。**
+ゼロ構築のたびに作り直されるアカウントであり、個人の実アドレスを置く場所ではない。
+値そのものはリポジトリ外の `~/.config/lets-blog-e2e.env` にある。
+
+ゼロ構築スクリプトが**自分で作る**アカウントは `at-wipe-probe-<epoch>@letsblog.local` だけで、
+それ以外のアカウントを名指しで作成・削除する処理は持たない。
+
+### ウォッシュアウト・プローブ — 撤去が成立したことを証明する
+
+「消えていること」だけを見る検証には弱点がある。**そもそも何も入っていなかった場合と
+区別できない。** そこで撤去の直前に自分でダミーを3つ置き、構築後にそれが消えていることで
+破棄の成立を示す。
+
+| いつ | 何を | どこへ | 乗るボリューム |
+| --- | --- | --- | --- |
+| 撤去の直前 | Keycloak ユーザー `at-wipe-probe-<epoch>@letsblog.local` | `kcadm create users -r letsblog` で**直接**作る | `keycloak_postgres` |
+| 撤去の直前 | MySQL データベース `at_wipe_probe_<epoch>` | `docker exec lbs-mysql mysql` | `mysql_data` |
+| 撤去の直前 | ディレクトリ `/var/www/html/sites/at-wipe-probe-<epoch>` | `docker exec lbs-wordpress` | `wordpress_sites` |
+
+- Keycloak は identity-service の API ではなく **`kcadm` で直接作る**。ゼロ構築の直前は
+  最初の管理者が居るとは限らず、API 経由では作れないことがあるため。
+- MySQL は9つのサービススキーマを汚さないよう**独立したデータベース**として作る。
+- **作成直後に3つとも存在することを確認する。** ここを省くと、後の「消えている」が
+  「そもそも作れていなかった」と区別できない。
+- **個別に削除する処理は書かない。** 消すのはボリューム破棄そのものであり、
+  それで消えること自体が検証対象である。
+- 構築後に3つとも存在しないことを確認し、**1つでも残っていればどれが残ったかを名指しして
+  非0で終了する**(残るということは、そのボリュームが破棄されていない)。
+- 直前のスタックが起動していない場合(初回実行など)はプローブを省略し、
+  `プローブ省略(直前のスタックが起動していないため)` と出力して、
+  ボリュームの `CreatedAt` 検査だけで判定する。省略したことは必ず出力に残る。
+- ドライランではプローブを作らない(作成予定として表示するだけ)。
+
+プローブは**スクリプトが直前に自分で作ったものだけ**であり、`at-wipe-probe-` 接頭辞で
+一意に識別できる。既存のアカウント・DB・サイトには触れない。
+
+### ゼロ構築は自分で検証する
+
+スクリプトは、最後に**成立したことを確かめてから**終わる。
+「消したつもり」「作り直したつもり」で終わらせない — 不完全なまま受け入れテストを始めると、
 前のデータに依存した結果が出て、しかもそれが分からない。
 
-1. 9スキーマに Flyway 管理テーブル以外のデータが残っていないこと
-2. Keycloak に `@letsblog.local` のアカウントが残っていないこと
-3. WordPress にサイト実体が残っていないこと
-4. `GET /api/auth/setup-status` が gateway 経由で 200 を返すこと
+1. 破棄対象のボリュームが**新規に作成されたものである**
+   (`docker volume inspect --format '{{.CreatedAt}}'` が実行開始時刻より後)
+2. `comfyui_models` の `CreatedAt` が**変わっていない**(保全が成立している)
+3. 全サービスが healthy(`scripts/wait-for-stack-healthy.sh` を再利用。重複実装しない)
+4. 9スキーマに Flyway 管理テーブル以外のデータが無い
+   (`roles` / `role_permissions` はマイグレーションが投入するマスタデータなので除外)
+5. `*_test` スキーマが `02-create-test-schemas.sh` で作り直されている
+6. `letsblog` レルムが存在し、ユーザーが `service-account-letsblog-services` のみ
+7. WordPress にサイト実体が無い
+8. `GET /api/auth/setup-status` が gateway 経由で 200 / `needsSetup: true` を返す
+9. ウォッシュアウト・プローブが3種とも消えている
 
-> 4番目は #951 の名残である。gateway の DNS キャッシュが古く、同時再起動で IP が
+> 8番目は #951 の名残である。gateway の DNS キャッシュが古く、同時再起動で IP が
 > 入れ替わると**別のサービスへ転送し続ける**という不具合があった(修正済み)。
-> 宛先の取り違えは症状が 401 なので認可の設定を疑ってしまう。この確認を残しておくと、
-> 同種の問題が再発したときに「リセットの最後」で止まって気づける。
+> 宛先の取り違えは症状が 401 なので認可の設定を疑ってしまう。全コンテナを作り直す
+> ゼロ構築ではこの検出はより重要になる。
 
-いずれかが崩れていればスクリプトは非0で終了する。
+いずれかが崩れていればスクリプトは非0で終了し、**後続の段階は実行されない**。
 
-### 所要時間(2026-09-01 実測)
+### GPU を持たないホストと、80/443 を共有するホスト
 
-| 段階 | 実測 |
-| --- | --- |
-| `reset` | 約 30 秒(うち大半はサービス11本の再起動と healthy 待ち) |
-| `at-seed` | 約 8 秒 |
-| `npm run test:at:clean` 全体(シナリオ7件) | 約 46 秒 |
+ゼロ構築は開発機の実環境を作り直すので、その環境の癖を2つ吸収する。
 
-毎回フルリセットしても、実行時間の支配項はシナリオ本体であって初期化ではない。
+- **`comfyui` が起動できないホスト。** サービス無指定の `docker compose up -d` は1つの
+  サービスの起動に失敗した時点で**中断**する。NVIDIA ランタイムが無いと `comfyui` は
+  `could not select device driver "nvidia"` で落ち、依存関係の下流(web / gateway /
+  keycloak / 各ドメインサービス)が `created` のまま残る。そこでスクリプトは必須サービスと
+  任意サービス(`comfyui`)を**分けて**起動し、任意サービスの起動失敗は警告に留める
+  (起動できなくてもボリュームは作られるので、破棄検証は成立する)。
+- **ホストの 80/443 を他プロセスが握っているホスト(§12)。** `lbs-reverse-proxy` が
+  ポートを公開していないことでこの構成を判定し、`docker-compose.shared-host.yml` を重ねて
+  起動し、構築後に `scripts/setup-shared-host-proxy.sh` を再適用する
+  (ネットワークを作り直すと `infra-proxy` の接続が失われるため)。再適用では
+  `LBS_BASE_URL=` で到達確認を省く。`up -d` が返った直後は web / gateway がまだ起動途中で
+  `https://localhost/` は 502 を返し、そこで落とすと「まだ早いだけ」でゼロ構築が止まるため。
+  到達性の判定はリトライを持つ `wait-for-stack-healthy.sh` に委ねる。
 
-**リセットを省略する選択肢は取らない**
+### 所要時間(2026-09-04 実測)
+
+| 対象 | 実測 | 内訳 |
+| --- | --- | --- |
+| ゼロ構築(**ビルドキャッシュあり**。既定) | 252 秒 / 260 秒(2回計測。約 4 分) | うちビルドと起動 169 秒 / 167 秒 |
+| ゼロ構築(**ビルドキャッシュなし**。`--no-cache`) | 804 秒(約 13 分) | うちビルドと起動 710 秒 |
+| データ層リセット(`reset-acceptance-env.sh`。参考・2026-09-01 実測) | 約 30 秒 | — |
+| `at-seed`(2026-09-01 実測) | 約 8 秒 | — |
+
+ゼロ構築はデータ層リセット(約30秒)の**8倍以上**かかる。支配項はイメージのビルドと起動で、
+残り(80〜90秒)が空のボリュームからの初期化と healthy 待ち — MySQL の初期化、
+9サービス分の Flyway、Keycloak のレルムインポートである。
+
+**`--no-cache` を既定にしない。** 実測で所要時間が約3倍(4分 → 13分)になる一方、
+`--build`(既定)でも**変更されたレイヤは作り直される**ので、ソースの変更が反映されるか
+どうかの検出力は変わらない。`--no-cache` が要るのは、ベースイメージや依存取得の側を
+疑うときだけである。
+
+**ゼロ構築を省略する選択肢は取らない**
 (それをやると「前のテストの残骸に依存して通るテスト」が戻ってくる)。
-時間が問題になったら、段階の並列化や不要なコンテナの停止で対処すること。
+速く回したいときは `npm run test:at:fast`(既存スタックに対する高速経路)を使うこと。
 
 ### 前段が失敗したときの見え方
 
@@ -575,8 +745,8 @@ identity-service の `KeycloakAdminClient#createUser` は `firstName`/`lastName`
 
 ### `E2E_DB_CLEANUP` はもう受け入れテストには要らない
 
-受け入れテストは実行の**前**に全部消してから始めるので、終了時の後片付けは不要である。
-むしろ残しておいたほうが失敗の調査ができる。
+**後片付けをしない理由は「次回実行の先頭で全撤去するから」である**(利用者の方針そのもの。
+本節冒頭を参照)。終了時に消さないので、失敗の調査は実行後のスタックに対してそのまま行える。
 
 `global-teardown.ts` と `E2E_DB_CLEANUP` を残しているのは、`.feature` へ未移行の
 Playwright spec(`apps/web/e2e/*.spec.ts`)が「既存データを壊さない一意なフィクスチャ」という
