@@ -1,5 +1,14 @@
 server:
   port: 8080
+  tomcat:
+    # issue #1061: Tomcatは上限超過でリクエストを打ち切ったあと、未読のリクエストボディを
+    # 読み捨ててから応答を返す。読み捨てる量の上限が max-swallow-size(既定2MB)で、これを
+    # 超える残りがあると応答を返さずにコネクションを閉じるため、クライアントには413ではなく
+    # 接続リセットが見える。バックアップアーカイブは数十MB〜数百MBになるため、既定のままでは
+    # 「サイズが原因だと分かる応答を返す」という目的が実サイズでは達成できない。
+    # 値は下の max-request-size と同じにする(nginx / Server Action がそもそも通す最大量と
+    # 同じなので、既に受け入れている負荷を超える新しい負荷にはならない)。
+    max-swallow-size: 512MB
 
 logging:
   level:
@@ -34,6 +43,27 @@ springdoc:
 spring:
   application:
     name: lets-blog-platform
+  servlet:
+    multipart:
+      # issue #1061: 未設定だとSpring Bootの既定(1ファイル1MB / リクエスト全体10MB)が効き、
+      # バックアップの復元(POST /api/backup/restore)が失敗していた。全サービスのMySQLスキーマ +
+      # Keycloak PostgreSQL + 生成画像ファイルを収めた実在のアーカイブが1MBを下回ることは
+      # まずないため、この復旧経路は事実上まったく機能していなかった。
+      #
+      # 値の根拠は「送り側の経路が通す最大量へ受け側を合わせる」(nginx側を下げるのではない)。
+      # この経路は ブラウザ → nginx の location /(infra/nginx/conf.d/default.conf:271、500M)
+      # → web の Server Action(apps/web/next.config.ts の bodySizeLimit /
+      #   proxyClientMaxBodySize がいずれも 500mb。apps/web/src/app/admin/backup/actions.ts)
+      # → gateway(docker-compose.yml の LETS_BLOG_GATEWAY_URL=http://gateway:8080。lbs-net 内の
+      #   直通なので nginx は通らない)→ platform であり、500M まで届く。
+      # max-request-size は 500MB のファイル1つ + confirm/acknowledgeKeyMismatch のフォーム項目が
+      # 収まるよう 512MB とする(こちらが先に効いて500MBのファイルが弾かれるのを避けるため)。
+      max-file-size: 500MB
+      max-request-size: 512MB
+      # 0 は「閾値なし = 常にディスクへ退避する」(Spring Bootの既定値と同じ)。上限を500MBまで
+      # 引き上げた以上、multipartのパース時点でヒープに載せない意図をここで明示しておく。
+      # BackupService は MultipartFile#getInputStream で逐次読むので、ヒープにも載らない。
+      file-size-threshold: 0B
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lbs_platform?useSSL=false&serverTimezone=UTC}
     username: ${SPRING_DATASOURCE_USERNAME:lbs_platform}
