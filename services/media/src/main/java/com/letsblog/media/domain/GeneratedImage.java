@@ -58,6 +58,13 @@ public class GeneratedImage {
     @Column(name = "batch_size")
     private Integer batchSize;
 
+    /**
+     * バッチ内の位置(0起点、issue #1101)。{@code batchSize > 1}で生成した複数枚を
+     * 区別するために持つ。#1101以前に保存した行と、位置を持たない保存経路ではnull。
+     */
+    @Column(name = "batch_index")
+    private Integer batchIndex;
+
     @Column(length = 255)
     private String checkpoint;
 

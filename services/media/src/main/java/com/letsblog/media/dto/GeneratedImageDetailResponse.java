@@ -16,6 +16,8 @@ public record GeneratedImageDetailResponse(
         Integer width,
         Integer height,
         Integer batchSize,
+        /** バッチ内の位置(0起点、issue #1101)。#1101以前に生成した行はnull。 */
+        Integer batchIndex,
         String checkpoint,
         String loraName,
         Double loraWeight,

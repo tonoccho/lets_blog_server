@@ -55,10 +55,17 @@ export interface GeneratedImageDetail extends GeneratedImageSummary {
   cfgScale: number;
   samplerName: string;
   scheduler: string;
-  seed: number;
+  /**
+   * 生成に実際に使われたseed(issue #1101)。COMFYUIでは常に入る。
+   * ChatGPTの画像生成API(gpt-image-1)はseedを受け付けず再現できないためnull。
+   * #1101以前に生成した画像もnullになる(遡って補完する手段が無い)。
+   */
+  seed: number | null;
   width: number;
   height: number;
   batchSize: number;
+  /** バッチ内の位置(0起点、issue #1101)。#1101以前に生成した画像はnull。 */
+  batchIndex: number | null;
   loraName: string | null;
   loraWeight: number | null;
 }

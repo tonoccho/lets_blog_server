@@ -23,6 +23,8 @@ public record CreateGeneratedImageRequest(
         Integer width,
         Integer height,
         Integer batchSize,
+        /** バッチ内の位置(0起点、issue #1101)。単発保存や#1101以前の行はnull。 */
+        Integer batchIndex,
         String checkpoint,
         String loraName,
         Double loraWeight,

@@ -144,7 +144,8 @@ public class GeneratedImageController {
                 image.getId(), image.getProjectId(), image.getPrompt(), image.getNegativePrompt(),
                 image.getSteps(), image.getCfgScale() != null ? image.getCfgScale().doubleValue() : null,
                 image.getSamplerName(), image.getScheduler(), image.getSeed(),
-                image.getWidth(), image.getHeight(), image.getBatchSize(), image.getCheckpoint(),
+                image.getWidth(), image.getHeight(), image.getBatchSize(), image.getBatchIndex(),
+                image.getCheckpoint(),
                 image.getLoraName(), image.getLoraWeight() != null ? image.getLoraWeight().doubleValue() : null,
                 image.getCreatedAt(), parseTags(image.getTagsJson()), image.getProvider());
     }

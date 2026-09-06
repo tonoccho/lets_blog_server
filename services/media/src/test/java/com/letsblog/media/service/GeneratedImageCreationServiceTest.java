@@ -16,6 +16,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -62,7 +63,7 @@ class GeneratedImageCreationServiceTest {
         });
 
         CreateGeneratedImageRequest request = new CreateGeneratedImageRequest(
-                1L, "a cat", "blurry", 20, 7.0, "euler", "normal", 123L, 512, 512, 1,
+                1L, "a cat", "blurry", 20, 7.0, "euler", "normal", 123L, 512, 512, 2, 1,
                 "checkpoint.safetensors", null, null, "image/png", "COMFYUI", "[\"猫\"]", imageData);
 
         GeneratedImage saved = service.create(request);
@@ -85,10 +86,34 @@ class GeneratedImageCreationServiceTest {
         assertEquals(123L, captured.getSeed());
         assertEquals(512, captured.getWidth());
         assertEquals(512, captured.getHeight());
+        assertEquals(2, captured.getBatchSize());
+        // issue #1101: バッチ内のどの位置の画像かを行に残す。
+        assertEquals(1, captured.getBatchIndex());
         assertEquals("checkpoint.safetensors", captured.getCheckpoint());
         assertEquals("image/png", captured.getMimeType());
 
         verify(domainEventPublisher).publishImageGenerated(42L, 1L);
+    }
+
+    /** LoRAを使った生成は {@code loraName}/{@code loraWeight} も行へ残す。 */
+    @Test
+    void LoRAの適用強度も保存する() {
+        byte[] imageData = new byte[]{4};
+        when(generatedImageStorageService.store(1L, imageData)).thenReturn("1/0002.png");
+        when(generatedImageRepository.save(any(GeneratedImage.class))).thenAnswer(inv -> {
+            GeneratedImage image = inv.getArgument(0);
+            image.setId(43L);
+            return image;
+        });
+
+        CreateGeneratedImageRequest request = new CreateGeneratedImageRequest(
+                1L, "a cat", null, 20, 7.0, "euler", "normal", 1L, 512, 512, 1, 0,
+                "checkpoint.safetensors", "anime.safetensors", 0.75, "image/png", "COMFYUI", null, imageData);
+
+        GeneratedImage saved = service.create(request);
+
+        assertEquals("anime.safetensors", saved.getLoraName());
+        assertEquals(0, BigDecimal.valueOf(0.75).compareTo(saved.getLoraWeight()));
     }
 
     /** {@code loraWeight}/{@code cfgScale} は null 可。BigDecimal 変換で NPE にならないこと。 */
@@ -103,12 +128,15 @@ class GeneratedImageCreationServiceTest {
         });
 
         CreateGeneratedImageRequest request = new CreateGeneratedImageRequest(
-                null, "a dog", null, null, null, null, null, null, null, null, null,
+                null, "a dog", null, null, null, null, null, null, null, null, null, null,
                 null, null, null, "image/png", "CHATGPT", null, imageData);
 
         GeneratedImage saved = service.create(request);
 
         assertEquals(7L, saved.getId());
+        // issue #1101: batchIndex も null 可(既存行・単発保存)。
+        assertNull(saved.getBatchIndex());
+        assertNull(saved.getSeed());
         verify(domainEventPublisher).publishImageGenerated(7L, null);
     }
 }

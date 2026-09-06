@@ -317,6 +317,8 @@ export const GeneratedImageDetailSchema = z.object({
   width: z.number().nullish(),
   height: z.number().nullish(),
   batchSize: z.number().nullish(),
+  // バッチ内の位置(0起点、issue #1101)。#1101以前に生成した画像はnull。
+  batchIndex: z.number().nullish(),
   checkpoint: z.string().nullish(),
   loraName: z.string().nullish(),
   loraWeight: z.number().nullish(),

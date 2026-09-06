@@ -308,13 +308,25 @@ export function ImageGalleryGrid({
                   <dt className="font-semibold">scheduler</dt>
                   <dd className="text-neutral-600 dark:text-neutral-400">{detail.scheduler}</dd>
                   <dt className="font-semibold">seed</dt>
-                  <dd className="text-neutral-600 dark:text-neutral-400">{detail.seed}</dd>
+                  {/*
+                    issue #1101: seedが無い画像は再現できないので、値の代わりにそう分かる表示にする。
+                    ChatGPTの画像生成API(gpt-image-1)はseedを受け付けないため常にここへ来る。
+                    #1101以前に生成した画像も、実際に使われたseedが残っていないので同じ扱いになる。
+                  */}
+                  <dd className="text-neutral-600 dark:text-neutral-400">
+                    {detail.seed != null ? detail.seed : "再現不可(この画像生成AIはseedに対応していません)"}
+                  </dd>
                   <dt className="font-semibold">size</dt>
                   <dd className="text-neutral-600 dark:text-neutral-400">
                     {detail.width}x{detail.height}
                   </dd>
                   <dt className="font-semibold">batch size</dt>
                   <dd className="text-neutral-600 dark:text-neutral-400">{detail.batchSize}</dd>
+                  {/* issue #1101: 同じseed・同じbatch sizeで再実行したときの、この画像の位置。 */}
+                  <dt className="font-semibold">batch index</dt>
+                  <dd className="text-neutral-600 dark:text-neutral-400">
+                    {detail.batchIndex != null ? detail.batchIndex : "-"}
+                  </dd>
                   <dt className="font-semibold">画像生成AI</dt>
                   <dd className="text-neutral-600 dark:text-neutral-400">
                     {PROVIDER_LABEL[detail.provider] ?? detail.provider}

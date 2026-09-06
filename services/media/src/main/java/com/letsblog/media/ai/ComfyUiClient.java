@@ -23,6 +23,7 @@ import java.util.UUID;
  * 処理完了後はVRAMをクリアし、メモリリークを防止する。
  * baseUrlはImageGenerationConfigProviderから呼び出しの都度取得する(issue #531でWeb管理画面の
  * システム設定から変更可能になったため、LlmClientと同様に構築時に固定値として保持しない)。
+ * seedの実値は決めない(issue #1101)。渡されたparams.seed()をそのままワークフローへ埋め込む。
  */
 @Component
 @Slf4j
@@ -56,6 +57,13 @@ public class ComfyUiClient implements ImageGenerationProvider {
      */
     @Override
     public List<ComfyUiImage> generateImage(ComfyUiGenerationParams params) {
+        if (params.seed() == null) {
+            // issue #1101: seedの実値決定は呼び出し側(SeedResolver経由のImageGenerationService)の責務。
+            // ここでランダム値を作ると、その値が呼び出し元へ返らずgenerated_images.seedがNULLになる
+            // (=生成した画像を再現できない)という#1101の不具合そのものが再発する。黙って進めない。
+            throw new AiServiceException(
+                    "ComfyUIの画像生成にはseedの実値が必要です(呼び出し側で解決してください)", null);
+        }
         String baseUrl = configProvider.comfyUiBaseUrl();
         String clientId = UUID.randomUUID().toString();
         ObjectNode workflow = buildWorkflow(params);
@@ -276,9 +284,7 @@ public class ComfyUiClient implements ImageGenerationProvider {
         ObjectNode sampler = factory.objectNode();
         sampler.put("class_type", "KSampler");
         ObjectNode samplerInputs = sampler.putObject("inputs");
-        long seed = params.seed() != null && params.seed() >= 0
-                ? params.seed() : (System.nanoTime() & 0xFFFFFFFFL);
-        samplerInputs.put("seed", seed);
+        samplerInputs.put("seed", params.seed());
         samplerInputs.put("steps", params.steps());
         samplerInputs.put("cfg", params.cfgScale());
         samplerInputs.put("sampler_name", params.samplerName());

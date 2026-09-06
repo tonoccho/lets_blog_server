@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -92,6 +93,57 @@ class GeneratedImageControllerTest {
         assertEquals(List.of("猫", "動物"), result.get(0).tags());
     }
 
+    /** projectId 指定時はそのプロジェクトの画像だけを引き、メンバー判定を通す(issue #830)。 */
+    @Test
+    void list_projectId指定時はそのプロジェクトの画像だけを返す() {
+        when(generatedImageRepository.findAllByProjectIdOrderByCreatedAtDesc(5L))
+                .thenReturn(List.of(buildImage(1L, "a cat", "[\"猫\"]")));
+
+        List<GeneratedImageSummaryResponse> result = controller.list(5L, null);
+
+        assertEquals(1, result.size());
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(5L);
+    }
+
+    @Test
+    void list_タグが空文字の画像は空リストとして扱う() {
+        when(generatedImageRepository.findAllByOrderByCreatedAtDesc())
+                .thenReturn(List.of(buildImage(1L, "a cat", "   ")));
+
+        List<GeneratedImageSummaryResponse> result = controller.list(null, null);
+
+        assertEquals(List.of(), result.get(0).tags());
+    }
+
+    /** cfgScale / loraWeight は DECIMAL 列。詳細では double へ落として返す。 */
+    @Test
+    void get_cfgScaleとloraWeightをdoubleで返す() {
+        GeneratedImage image = buildImage(1L, "a cat", null);
+        image.setCfgScale(new java.math.BigDecimal("7.50"));
+        image.setLoraName("anime.safetensors");
+        image.setLoraWeight(new java.math.BigDecimal("0.80"));
+        when(generatedImageRepository.findById(1L)).thenReturn(Optional.of(image));
+
+        GeneratedImageDetailResponse result = controller.get(1L);
+
+        assertEquals(7.5, result.cfgScale());
+        assertEquals(0.8, result.loraWeight());
+        assertEquals("anime.safetensors", result.loraName());
+    }
+
+    @Test
+    void updateTags_nullを渡してもタグが解除される() {
+        GeneratedImage image = buildImage(1L, "a cat", "[\"猫\"]");
+        when(generatedImageRepository.findById(1L)).thenReturn(Optional.of(image));
+        when(generatedImageRepository.save(any(GeneratedImage.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        GeneratedImageDetailResponse result = controller.updateTags(
+                1L, new UpdateGeneratedImageTagsRequest(null));
+
+        assertEquals(List.of(), result.tags());
+        assertNull(image.getTagsJson());
+    }
+
     @Test
     void list_タグ未設定の画像は空リストとして扱う() {
         when(generatedImageRepository.findAllByOrderByCreatedAtDesc())
@@ -120,6 +172,40 @@ class GeneratedImageControllerTest {
         GeneratedImageDetailResponse result = controller.get(1L);
 
         assertEquals(List.of("猫"), result.tags());
+    }
+
+    /**
+     * issue #1101: 生成時に実際に使ったseedと、バッチ内の位置を詳細で返す。
+     * ギャラリーの「この設定で画像生成」(#294)と「この画像の設定をコピー」(#437)が
+     * これを読んで同じ画像を再現する。
+     */
+    @Test
+    void get_seedとバッチ内位置を詳細で返す() {
+        GeneratedImage image = buildImage(1L, "a cat", null);
+        image.setSeed(864213579L);
+        image.setBatchSize(2);
+        image.setBatchIndex(1);
+        when(generatedImageRepository.findById(1L)).thenReturn(Optional.of(image));
+
+        GeneratedImageDetailResponse result = controller.get(1L);
+
+        assertEquals(864213579L, result.seed());
+        assertEquals(2, result.batchSize());
+        assertEquals(1, result.batchIndex());
+    }
+
+    /** issue #1101: CHATGPT由来の画像はseedを持たないため、詳細でもNULLのまま返る。 */
+    @Test
+    void get_CHATGPT由来の画像はseedがnullのまま返る() {
+        GeneratedImage image = buildImage(1L, "a cat", null);
+        image.setProvider("CHATGPT");
+        when(generatedImageRepository.findById(1L)).thenReturn(Optional.of(image));
+
+        GeneratedImageDetailResponse result = controller.get(1L);
+
+        assertNull(result.seed());
+        assertNull(result.batchIndex());
+        assertEquals("CHATGPT", result.provider());
     }
 
     @Test
@@ -163,7 +249,7 @@ class GeneratedImageControllerTest {
     void create_認可を確認してから保存サービスへ委譲する() {
         byte[] imageData = new byte[]{1, 2, 3};
         CreateGeneratedImageRequest request = new CreateGeneratedImageRequest(
-                1L, "a cat", "blurry", 20, 7.0, "euler", "normal", 123L, 512, 512, 1,
+                1L, "a cat", "blurry", 20, 7.0, "euler", "normal", 123L, 512, 512, 1, 0,
                 "checkpoint.safetensors", null, null, "image/png", "COMFYUI", "[\"猫\"]", imageData);
 
         GeneratedImage saved = buildImage(42L, "a cat", "[\"猫\"]");

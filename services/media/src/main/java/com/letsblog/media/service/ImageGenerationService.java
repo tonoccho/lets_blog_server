@@ -8,6 +8,7 @@ import com.letsblog.media.ai.ComfyUiGenerationParams;
 import com.letsblog.media.ai.ComfyUiImage;
 import com.letsblog.media.ai.ImageGenerationProvider;
 import com.letsblog.media.ai.ImageProvider;
+import com.letsblog.media.ai.SeedResolver;
 import com.letsblog.media.client.AiGenerationClient;
 import com.letsblog.media.client.GenerationJobClient;
 import com.letsblog.media.dto.AiImageBatchResponse;
@@ -70,6 +71,7 @@ public class ImageGenerationService {
     private final ObjectMapper objectMapper;
     private final ProjectImageDefaultsResolver defaultsResolver;
     private final ProhibitedContentFilterService prohibitedContentFilterService;
+    private final SeedResolver seedResolver;
     private final HttpServletRequest request;
 
     public ImageGenerationService(
@@ -83,6 +85,7 @@ public class ImageGenerationService {
             ObjectMapper objectMapper,
             ProjectImageDefaultsResolver defaultsResolver,
             ProhibitedContentFilterService prohibitedContentFilterService,
+            SeedResolver seedResolver,
             HttpServletRequest request) {
         this.aiGenerationClient = aiGenerationClient;
         this.comfyUiClient = comfyUiClient;
@@ -94,6 +97,7 @@ public class ImageGenerationService {
         this.objectMapper = objectMapper;
         this.defaultsResolver = defaultsResolver;
         this.prohibitedContentFilterService = prohibitedContentFilterService;
+        this.seedResolver = seedResolver;
         this.request = request;
     }
 
@@ -104,7 +108,7 @@ public class ImageGenerationService {
                 provider == ImageProvider.CHATGPT ? "chatgpt_image" : "comfyui_image",
                 Map.of("prompt", imageRequest.prompt()));
         try {
-            ComfyUiGenerationParams params = resolveParams(imageRequest);
+            ComfyUiGenerationParams params = resolveParams(imageRequest, provider);
             prohibitedContentFilterService.check(
                     params.prompt(),
                     defaultsResolver.resolveBlockSexualContent(imageRequest.projectId()),
@@ -114,15 +118,20 @@ public class ImageGenerationService {
             // バッチ内の全画像は同じprompt/negativePromptから生成されるため、タグ提案は1回で済ませて使い回す。
             String tagsJson = suggestImageTagsJson(params.prompt());
             List<AiImageResponse> responses = new ArrayList<>();
+            // issue #1101: バッチ内の位置(0起点)を1枚ずつ振り、seedとともに行とレスポンスへ残す。
+            // これが無いと、batchSize>1で生成した複数枚が全て同じ行内容になり区別できない。
+            int batchIndex = 0;
             for (ComfyUiImage image : images) {
                 Long savedId = generatedImageCreationService.create(new CreateGeneratedImageRequest(
                         imageRequest.projectId(), params.prompt(), params.negativePrompt(), params.steps(),
                         params.cfgScale(), params.samplerName(), params.scheduler(), params.seed(),
-                        params.width(), params.height(), params.batchSize(), params.checkpoint(),
+                        params.width(), params.height(), params.batchSize(), batchIndex, params.checkpoint(),
                         params.loraName(), params.loraWeight(), image.mimeType(), provider.name(), tagsJson,
                         image.data())).getId();
                 String base64 = Base64.getEncoder().encodeToString(image.data());
-                responses.add(new AiImageResponse(savedId, image.fileName(), base64, image.mimeType()));
+                responses.add(new AiImageResponse(
+                        savedId, image.fileName(), base64, image.mimeType(), params.seed(), batchIndex));
+                batchIndex++;
             }
             completeJob(jobId, Map.of("count", String.valueOf(responses.size())));
             return new AiImageBatchResponse(responses);
@@ -165,7 +174,16 @@ public class ImageGenerationService {
         }
     }
 
-    private ComfyUiGenerationParams resolveParams(AiImageRequest imageRequest) {
+    /**
+     * リクエストの未指定項目をプロジェクト既定値・サーバー既定値で埋める。
+     *
+     * <p>issue #1101: seedの実値はここで決める。COMFYUIプロバイダへ渡す
+     * {@link ComfyUiGenerationParams#seed()}は常に非nullになり、その値がそのまま
+     * {@code generated_images.seed}とAPIレスポンスに載る。CHATGPTは
+     * {@code ChatGptImageClient}がseedを無視する(gpt-image-1がseedを受け付けない)ため、
+     * 再現できないことが分かるようnullのままにする。
+     */
+    private ComfyUiGenerationParams resolveParams(AiImageRequest imageRequest, ImageProvider provider) {
         String checkpoint = imageRequest.checkpoint() != null && !imageRequest.checkpoint().isBlank()
                 ? imageRequest.checkpoint()
                 : comfyUiModelService.getSelectedCheckpointOrGlobalDefault(imageRequest.projectId());
@@ -176,6 +194,7 @@ public class ImageGenerationService {
         String prompt = qualityPrompt == null || qualityPrompt.isBlank()
                 ? imageRequest.prompt()
                 : imageRequest.prompt() + ", " + qualityPrompt;
+        Long seed = provider == ImageProvider.CHATGPT ? null : seedResolver.resolve(imageRequest.seed());
         return new ComfyUiGenerationParams(
                 prompt,
                 negativePrompt,
@@ -183,7 +202,7 @@ public class ImageGenerationService {
                 imageRequest.cfgScale() != null ? imageRequest.cfgScale() : 7.0,
                 imageRequest.samplerName() != null ? imageRequest.samplerName() : "euler",
                 imageRequest.scheduler() != null ? imageRequest.scheduler() : "normal",
-                imageRequest.seed(),
+                seed,
                 imageRequest.width() != null
                         ? imageRequest.width()
                         : defaultsResolver.resolveDefaultGeneratedImageWidth(imageRequest.projectId()),

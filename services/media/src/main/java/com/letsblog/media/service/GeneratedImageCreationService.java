@@ -50,6 +50,8 @@ public class GeneratedImageCreationService {
         image.setWidth(request.width());
         image.setHeight(request.height());
         image.setBatchSize(request.batchSize());
+        // issue #1101: バッチ内の位置(0起点)。単発保存や#1101以前の経路ではnull。
+        image.setBatchIndex(request.batchIndex());
         image.setCheckpoint(request.checkpoint());
         image.setLoraName(request.loraName());
         image.setLoraWeight(request.loraWeight() != null ? BigDecimal.valueOf(request.loraWeight()) : null);
