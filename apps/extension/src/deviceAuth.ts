@@ -1,4 +1,5 @@
-import { httpRequest } from './httpClient';
+import { httpRequest, HttpResponse } from './httpClient';
+import { ApiError, NetworkError, TimeoutError } from './errorHandler';
 
 /**
  * Device Authorization Grant(RFC 8628)によるログイン処理(issue #565)。
@@ -16,6 +17,31 @@ import { httpRequest } from './httpClient';
 
 /** Keycloak側に登録済みのpublicクライアントID(client_secret不要、infra/keycloak/realm-export.json参照)。 */
 export const DEVICE_CLIENT_ID = 'letsblog-vscode';
+
+/**
+ * デバイス認可要求で要求するスコープ(issue #1098)。
+ *
+ * 通常のリフレッシュトークンはKeycloakのSSOセッション(realmの ssoSessionIdleTimeout = 30分 /
+ * ssoSessionMaxLifespan = 10時間)に紐づくため、IDE拡張の使い方——エディタを開いたまま、
+ * 執筆の合間に断続的に呼ぶ——では30分の無操作や10時間の連続利用で強制ログアウトになる。
+ * offline_accessを要求するとoffline tokenが発行され、SSOセッションの寿命から独立する
+ * (offlineSessionIdleTimeout = 30日、上限なし)。
+ *
+ * 要求するのはデバイス認可要求のときだけでよい。RFC 8628 §3.4のアクセストークン要求は
+ * grant_type/device_code/client_idのみを取り、スコープはデバイス認可要求時に束縛される。
+ * リフレッシュ(RFC 6749 §6)のscopeは「元の許諾を超えない範囲での絞り込み」なので、
+ * 省略すれば元のスコープが維持される(apps/web/src/lib/auth.ts のrefreshも送っていない)。
+ */
+export const DEVICE_SCOPE = 'offline_access';
+
+/**
+ * トークンエンドポイントへの単発リクエストを諦めるまでの時間。中断はconfig.tsのAbortControllerが
+ * 行うが、中断をTimeoutErrorとして表すのはここなので、値の定義もここに置いて一致させる。
+ */
+export const TOKEN_REQUEST_TIMEOUT_MS = 30_000;
+
+/** リフレッシュトークン自体がもう使えないことを示すOAuth 2.0のエラーコード(RFC 6749 §5.2)。 */
+const REVOKED_TOKEN_ERRORS = new Set(['invalid_grant', 'invalid_client', 'unauthorized_client']);
 
 /**
  * letsBlog.serverUrl(仲介APIサーバーの外部ベースURL)から、Keycloakのrealmエンドポイントの
@@ -129,7 +155,7 @@ export async function requestDeviceAuthorization(
   const res = await httpRequest(`${realmBaseUrl(serverUrl)}/protocol/openid-connect/auth/device`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ client_id: DEVICE_CLIENT_ID }).toString(),
+    body: new URLSearchParams({ client_id: DEVICE_CLIENT_ID, scope: DEVICE_SCOPE }).toString(),
     signal,
     allowInsecureTls,
   });
@@ -165,26 +191,89 @@ export async function pollForToken(
   return classifyPollResponse(res.status, body);
 }
 
-/** リフレッシュトークンでアクセストークンを更新する。失敗時(失効・取り消し等)は例外を投げる。 */
+/** 応答本文(文字列でもパース済みオブジェクトでも可)からOAuthのerrorコードを安全に取り出す。 */
+function oauthErrorCodeOf(body: unknown): string | undefined {
+  let parsed: unknown = body;
+  if (typeof body === 'string') {
+    // Keycloakが落ちている間はリバースプロキシがHTMLのエラーページを返すことがある。
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return undefined;
+    }
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    return undefined;
+  }
+  const code = (parsed as Record<string, unknown>).error;
+  return typeof code === 'string' ? code : undefined;
+}
+
+/**
+ * リフレッシュ失敗が「確定的な失効」——リフレッシュトークン自体が失効・取り消しされていて、
+ * 何度試しても成功しない状態——かどうかを判定する純関数(issue #1098)。
+ *
+ * HTTPステータスだけでは判断しない。Keycloakは失効したリフレッシュトークンに対して
+ * 400 + `{"error":"invalid_grant"}` を返すが、リバースプロキシ経由の一時的な400や
+ * 本文を伴わない4xxもありうるため、応答本文のerror値まで見て初めて破棄を決める。
+ * 5xx・429は一過性(isRetryable()が真)なので、本文の内容によらず失効とはみなさない。
+ */
+export function isRevokedRefreshResponse(status: number, body: unknown): boolean {
+  if (status < 400 || status >= 500) {
+    return false;
+  }
+  const code = oauthErrorCodeOf(body);
+  return code !== undefined && REVOKED_TOKEN_ERRORS.has(code);
+}
+
+/** refreshAccessTokenが投げた例外が、確定的な失効を示すかどうかを判定する(issue #1098)。 */
+export function isRefreshTokenRevoked(error: unknown): boolean {
+  return error instanceof ApiError && isRevokedRefreshResponse(error.status, error.responseBody);
+}
+
+/**
+ * リフレッシュトークンでアクセストークンを更新する。
+ *
+ * 失敗は拡張の既存の例外体系(errorHandler.ts)で表現し、一過性(再試行で回復しうる)か
+ * 確定的かを呼び出し側が区別できるようにする(issue #1098)。分類の規則そのものは
+ * isRetryable()に委ね、ここでは例外型の組み立てだけを行う——apiClient.tsのrequest()と同じ形。
+ */
 export async function refreshAccessToken(
   serverUrl: string,
   refreshToken: string,
   allowInsecureTls: boolean,
   signal: AbortSignal
 ): Promise<TokenResult> {
-  const res = await httpRequest(`${realmBaseUrl(serverUrl)}/protocol/openid-connect/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: refreshToken,
-      client_id: DEVICE_CLIENT_ID,
-    }).toString(),
-    signal,
-    allowInsecureTls,
-  });
+  const url = `${realmBaseUrl(serverUrl)}/protocol/openid-connect/token`;
+  let res: HttpResponse;
+  try {
+    res = await httpRequest(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+        client_id: DEVICE_CLIENT_ID,
+      }).toString(),
+      signal,
+      allowInsecureTls,
+    });
+  } catch (error) {
+    if (signal.aborted) {
+      throw new TimeoutError('トークンの更新が時間内に完了しませんでした', url, TOKEN_REQUEST_TIMEOUT_MS);
+    }
+    throw new NetworkError('トークンの更新でサーバーへ到達できませんでした', url, error);
+  }
   if (!res.ok) {
-    throw new Error(`トークンの更新に失敗しました (HTTP ${res.status})`);
+    // 本文はApiErrorへそのまま持たせる。確定的な失効かどうかの判定材料になる
+    // (Keycloakの400 invalid_grant)ため、読めなかった場合もstatusTextで補う。
+    const body = await res.text().catch(() => '');
+    throw new ApiError(
+      `トークンの更新に失敗しました (HTTP ${res.status})`,
+      res.status,
+      body || res.statusText,
+      url
+    );
   }
   return parseTokenResult(await res.json());
 }

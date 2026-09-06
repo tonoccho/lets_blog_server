@@ -91,8 +91,8 @@ apiClient.ts が呼ぶ `/api/**` は例外なく APIゲートウェイ(services/
 | `errorHandler.ts` | 例外型(`ApiError` / `NetworkError` / `TimeoutError` / `ResponseValidationError` / `CancelledError`)の定義、原因と対応策を含むメッセージへの整形、指数バックオフによるリトライ。5xx・タイムアウトでは`downstreamServices.ts`で担当サービスを逆引きして通知に含める(issue #585)。 |
 | `downstreamServices.ts` | リクエストパスから、gatewayが転送する下流サービス(コンテナ名・日本語表示名)を逆引きする純粋関数(issue #585)。gatewayのルート表のうち拡張が呼ぶ部分だけを同じ「先勝ち」順序で写している。他の拡張内モジュールへ依存しない。 |
 | `logger.ts` | 構造化ログ。出力パネル「Let's Blog」へ書き出す。認証情報らしいキーの値はマスクする。 |
-| `config.ts` | 設定値と資格情報の読み書き。**SecretStorageに触れるのはこのファイルだけ**。アクセストークンの期限管理・自動リフレッシュ(`requireAccessToken`)もここに置く。 |
-| `deviceAuth.ts` | Device Authorization Grant(issue #565)のプロトコル部分。デバイス認可/トークンエンドポイントへのリクエストと、応答の解釈(成功/pending/slow_down/denied/expired)。`config.ts`から呼ばれる。 |
+| `config.ts` | 設定値と資格情報の読み書き。**SecretStorageに触れるのはこのファイルだけ**。アクセストークンの期限管理・自動リフレッシュ(`requireAccessToken`)もここに置く。保存済みトークンを破棄するのは`deviceAuth.ts`の`isRefreshTokenRevoked()`が確定的な失効と判定した場合だけで、一過性の失敗では保持したまま例外を投げる(issue #1098)。 |
+| `deviceAuth.ts` | Device Authorization Grant(issue #565)のプロトコル部分。デバイス認可/トークンエンドポイントへのリクエストと、応答の解釈(成功/pending/slow_down/denied/expired)。デバイス認可要求では`scope=offline_access`を要求し、SSOセッション寿命に縛られないoffline tokenを得る(issue #1098)。リフレッシュ失敗は`errorHandler.ts`の`ApiError`/`NetworkError`/`TimeoutError`へ分類し、確定的な失効かどうかの判定(`isRevokedRefreshResponse()`)を純関数として公開する。`config.ts`から呼ばれる。 |
 | `jwtClaims.ts` | アクセストークン(JWT)のペイロードを署名検証なしでデコードし、表示用のemail/roleを取り出す純粋関数(issue #565)。 |
 
 ### 3.4 ドメインロジック(vscode APIに依存しない純粋関数)

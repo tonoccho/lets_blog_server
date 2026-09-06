@@ -13,7 +13,7 @@ OWASP Top 10 (2021) に対する現状の対応をまとめたものです。
 
 | 情報 | 保管先 | キー | 生存期間 |
 | --- | --- | --- | --- |
-| アクセストークン/リフレッシュトークン | `context.secrets`(VSCode Secret Storage) | `letsBlog.tokens` | ログアウト相当(リフレッシュ失敗による破棄)/再ログインまで |
+| アクセストークン/リフレッシュトークン | `context.secrets`(VSCode Secret Storage) | `letsBlog.tokens` | リフレッシュトークンが**確定的に失効**するまで(Keycloakが `400 invalid_grant` 等を返した時点で破棄)/再ログインまで |
 | ログインユーザー(Actor、表示用) | `context.secrets` | `letsBlog.actor` | ログアウト/再ログインまで |
 | 選択中のプロジェクトID | `context.workspaceState` | `letsBlog.projectId` | ワークスペース単位で永続 |
 
@@ -30,9 +30,20 @@ OSの資格情報ストア(macOS: Keychain、Windows: 資格情報マネージ�
 - issue #565(Device Authorization Grantへの移行)以降、拡張はメールアドレス/パスワードを一切扱いません。
   ログイン(`src/extension.ts` の `commandLogin`)はKeycloakへのデバイス認可リクエスト・ユーザーによる
   ブラウザ上での承認・トークンエンドポイントのポーリングのみで完結し、資格情報は拡張を経由しません。
+- 拡張はデバイス認可要求時に `scope=offline_access` を要求します(issue #1098、`deviceAuth.ts` の
+  `DEVICE_SCOPE`)。発行されるリフレッシュトークンは **offline token** となり、KeycloakのSSOセッション
+  (realm `letsblog` の `ssoSessionIdleTimeout` = 30分 / `ssoSessionMaxLifespan` = 10時間)ではなく
+  offline session(`offlineSessionIdleTimeout` = 30日、`offlineSessionMaxLifespanEnabled` = false のため
+  上限なし)の寿命に従います。使うたびにidle期限が延長されるため、通常の執筆作業の中では
+  再ログインを求められません。device_code交換とrefresh_token交換には `scope` を送りません
+  (RFC 8628 §3.4 / RFC 6749 §6。refresh時の `scope` は元の許諾の絞り込みを意味するため)。
 - アクセストークンは有効期限が近い/切れている場合、`config.ts` の `requireAccessToken` が
-  リフレッシュトークンを使って自動的に更新します。リフレッシュにも失敗した場合(リフレッシュトークン自体の
-  失効・取り消し等)は保存済みトークンを破棄し、再ログインを促します。
+  リフレッシュトークンを使って自動的に更新します。**保存済みトークンを破棄するのは、リフレッシュトークン
+  自体が失効・取り消しされたと判断できる場合(確定的な失効)だけです**(issue #1098)。判定には
+  Keycloakが400応答本文で返す `error` 値(`invalid_grant` / `invalid_client` / `unauthorized_client`)を
+  使い、HTTPステータスだけでは判断しません。サーバー再起動・瞬断・タイムアウトのような一過性の失敗
+  (`NetworkError` / `TimeoutError` / 429 / 5xx。分類は `errorHandler.ts` の `isRetryable()`)では
+  トークンを保持したまま「一時的な失敗である」旨の例外を投げ、復旧後は再ログインなしで更新が成功します。
 - Actorの保存値は読み出し時に `ActorSchema`(Zod)で検証し、壊れていた場合は破棄して再ログインを促します。
   Device Authorization Grant移行後のActorはKeycloakのJWTクレーム(email/realm_access.roles)から
   復元した表示専用の値で、ローカルDBの数値ユーザーIDは持ちません。
@@ -117,6 +128,11 @@ issue #565(Device Authorization Grantへの移行)以降、拡張はパスワー
 - **メモリ上のトークンを消去できない**: JavaScriptの文字列は不変のため、アクセストークン/
   リフレッシュトークンをメモリからゼロ埋めで消すことはできません(issue #565以降、拡張はパスワードを
   一切扱わないため、この制約の影響範囲はトークンに限定されます)。
+- **offline tokenの寿命が長い**: `offline_access` を要求する設計(issue #1098)のため、端末の
+  Secret Storage には既定で30日間(使うたびに延長され、realmの設定上は上限なし)有効な
+  リフレッシュトークンが載ります。拡張にはログアウト(offline tokenのrevoke)コマンドが無いため、
+  端末紛失時などに失効させる手段はKeycloak管理コンソールからのoffline session削除になります。
+  寿命の見直しとログアウトコマンドの追加はissue #1098のOpen Questionsとして別Issue扱いです。
 - **`allowInsecureTls: true` 時の中間者攻撃**: 利用者が明示的に有効化した場合、
   証明書検証を行わないため中間者攻撃を検出できません。ローカル環境専用の設定です。
 - **Webviewの `style-src 'unsafe-inline'`**: 3章に記載の理由により許容しています。

@@ -42,6 +42,25 @@ Layer 1 / Layer 2 のどちらからも観測できない。
 > トークンの保存・自動更新・証明書検証・接続失敗時のメッセージは Layer 1
 > (`e2e/features/auth/`)で自動検証済み。ここで見るのは**画面表示だけ**。
 
+### 2.1 セッションの寿命とサーバー瞬断(issue #1098)
+
+`offline_access` を要求した結果 Keycloak が実際に offline token を発行するかは、
+**拡張のコード側からは観測できない**(検証対象が Keycloak の応答そのものであり、
+単体テストではモックした応答しか見られない)。ローカルスタック(`https://localhost`)に対する
+手動確認としてここに置く。
+
+- [ ] ログイン直後、`letsBlog.debugMode` を有効にした状態で保存された `refresh_token` の
+      JWT ペイロードをデコードし、`typ` クレームが `Offline` であることを確認する
+      (ペイロードは `echo '<refresh_token の2番目のセグメント>' | base64 -d` で読める)
+- [ ] ログインから **30分以上**(realm の `ssoSessionIdleTimeout` = 1800 秒を超過)
+      拡張のコマンドを一切実行せずに放置した後、`Let's Blog: Select Project` を実行すると
+      再ログインを求められずに成功する
+- [ ] `docker compose restart keycloak` の実行中(Keycloak が応答しない間)に
+      `Let's Blog: Select Project` を実行すると、「一時的な失敗」である旨のメッセージが出て
+      **再ログインは案内されない**
+- [ ] 上記の直後、Keycloak が復帰してから同じコマンドを再実行すると、
+      再ログインなしで成功する(`letsBlog.tokens` が消えていない)
+
 ## 3. プロジェクト / サイトの選択(AC-EXT-002 / 003)
 
 - [ ] `Let's Blog: Select Project` のクイックピックにプロジェクト名が並び、選ぶとステータスバー/以後の操作へ反映される

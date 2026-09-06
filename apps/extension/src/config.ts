@@ -3,7 +3,13 @@ import { z } from 'zod';
 import { logger } from './logger';
 import { Actor, ActorSchema } from './schemas';
 import { messageOf } from './errorHandler';
-import { computeExpiresAt, refreshAccessToken as requestTokenRefresh, TokenResult } from './deviceAuth';
+import {
+  computeExpiresAt,
+  isRefreshTokenRevoked,
+  refreshAccessToken as requestTokenRefresh,
+  TOKEN_REQUEST_TIMEOUT_MS,
+  TokenResult,
+} from './deviceAuth';
 
 const TOKENS_SECRET = 'letsBlog.tokens';
 const ACTOR_SECRET = 'letsBlog.actor';
@@ -67,9 +73,6 @@ export type TokenSet = z.infer<typeof TokenSetSchema>;
 /** アクセストークンの有効期限までこの猶予(ミリ秒)を切ったら、まだ有効でも先んじてリフレッシュする。 */
 const REFRESH_SKEW_MS = 30_000;
 
-/** リフレッシュ等、トークンエンドポイントへの単発リクエストのタイムアウト。 */
-const TOKEN_REQUEST_TIMEOUT_MS = 30_000;
-
 /**
  * SecretStorageに保存されたトークン一式を復元する。壊れた値が残っていると以降のログイン状態判定が
  * 常に失敗し続けるため、解析に失敗した場合はログに残した上で保存値を破棄し、再ログインを促す
@@ -94,7 +97,7 @@ async function setTokens(context: vscode.ExtensionContext, tokens: TokenSet): Pr
   await context.secrets.store(TOKENS_SECRET, JSON.stringify(tokens));
 }
 
-/** 保管されたトークンを削除する(リフレッシュ失敗時の破棄に使う)。 */
+/** 保管されたトークンを削除する(リフレッシュトークンが確定的に失効した場合の破棄に使う)。 */
 async function clearTokens(context: vscode.ExtensionContext): Promise<void> {
   await context.secrets.delete(TOKENS_SECRET);
 }
@@ -117,8 +120,12 @@ function isExpiredOrNearExpiry(tokens: TokenSet, now: number): boolean {
 
 /**
  * 有効なアクセストークンを返す。期限切れ間近/切れの場合はリフレッシュトークンで自動更新してから返す。
- * リフレッシュにも失敗した場合(リフレッシュトークン自体の失効・取り消し等)は保存済みトークンを破棄し、
- * 再ログインを促す例外を投げる。未ログインの場合も同様。
+ *
+ * リフレッシュに失敗した場合、保存済みトークンを破棄するのは**確定的な失効**
+ * (リフレッシュトークン自体が失効・取り消しされ、何度試しても成功しない)と判断できるときだけにする
+ * (issue #1098)。サーバーの再起動・瞬断・VPN切り替えのような一過性の失敗でトークンを捨てると、
+ * まだ有効なリフレッシュトークンを失って強制ログアウトになるため、その場合は保管したまま例外を投げ、
+ * 復旧後に同じcontextで呼び直せば再ログインなしで更新が成功するようにする。
  */
 export async function requireAccessToken(context: vscode.ExtensionContext): Promise<string> {
   const tokens = await getTokens(context);
@@ -136,9 +143,18 @@ export async function requireAccessToken(context: vscode.ExtensionContext): Prom
     await storeTokens(context, refreshed);
     return refreshed.accessToken;
   } catch (error) {
-    logger.warn('アクセストークンの更新に失敗しました。再ログインが必要です。', { reason: messageOf(error) });
-    await clearTokens(context);
-    throw new Error("ログインの有効期限が切れました。「Let's Blog: Login」で再ログインしてください。");
+    if (isRefreshTokenRevoked(error)) {
+      logger.warn('リフレッシュトークンが失効しています。再ログインが必要です。', { reason: messageOf(error) });
+      await clearTokens(context);
+      throw new Error("ログインの有効期限が切れました。「Let's Blog: Login」で再ログインしてください。");
+    }
+    logger.warn('アクセストークンの更新に一時的に失敗しました。保存済みのログイン情報は保持します。', {
+      reason: messageOf(error),
+    });
+    throw new Error(
+      'アクセストークンを更新できませんでした(一時的な失敗の可能性があります)。' +
+        `保存済みのログイン情報は保持しているため、しばらく待ってから再実行してください。 原因: ${messageOf(error)}`
+    );
   } finally {
     clearTimeout(timer);
   }
