@@ -122,10 +122,11 @@ public class LlmClient {
         if (provider == AiProvider.CLAUDE) {
             return generateWithClaude(prompt, model, apiKey);
         }
-        return generateWithOpenAiCompatible(prompt, model, apiKey, configProvider.baseUrlFor(provider));
+        return generateWithOpenAiCompatible(prompt, model, apiKey, configProvider.baseUrlFor(provider), provider);
     }
 
-    private String generateWithOpenAiCompatible(String prompt, String modelName, String apiKey, String baseUrl) {
+    private String generateWithOpenAiCompatible(
+            String prompt, String modelName, String apiKey, String baseUrl, AiProvider provider) {
         try {
             ArrayNode messages = JsonNodeFactory.instance.arrayNode();
             messages.add(JsonNodeFactory.instance.objectNode().put("role", "user").put("content", prompt));
@@ -134,7 +135,9 @@ public class LlmClient {
                     .put("stream", false)
                     .set("messages", messages);
 
-            JsonNode response = buildClient(baseUrl, apiKey).post()
+            // OLLAMAは自ホスト上のコンテナで認証を持たない。APIキーはそもそも解決されない(空)ため、
+            // Authorizationヘッダ自体を付けない(issue #1086 / R4)。
+            JsonNode response = buildClient(baseUrl, provider == AiProvider.OLLAMA ? null : apiKey).post()
                     .uri("/chat/completions")
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
@@ -144,6 +147,9 @@ public class LlmClient {
             String content = response.get("choices").get(0).get("message").get("content").asText();
             return stripThinkingBlocks(content).trim();
         } catch (RestClientResponseException e) {
+            if (provider == AiProvider.OLLAMA && isModelNotFound(e)) {
+                throw new AiServiceException(modelNotFoundMessage(modelName), e);
+            }
             throw new AiServiceException("LLM呼び出しに失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
         } catch (Exception e) {
             throw new AiServiceException("LLM呼び出し中にエラーが発生しました（タイムアウトまたはネットワークエラーの可能性があります）: " + e.getMessage(), e);
@@ -187,6 +193,33 @@ public class LlmClient {
         }
     }
 
+    /**
+     * Ollamaが「モデルを持っていない」ときに返す応答を見分ける。OpenAI互換エンドポイントは
+     * 404 と {@code model "..." not found, try pulling it first} を返す(issue #1086 / R3)。
+     * 同じ404でもエンドポイント自体が無い場合(URLの設定ミス)は本文に該当文字列が無いため、
+     * 従来どおり応答内容を添えたメッセージのままにする。
+     *
+     * <p>この判定は<b>呼び出し側でOLLAMAに限定する</b>こと。整形後の文言はOllama固有
+     * (ollama-model-initのログを見るよう案内する)であり、OpenAI互換エンドポイントは
+     * OpenAI本体に限らずGroq/OpenRouter/自前サーバ等でもよいため({@code LLM_BASE_URL})、
+     * それらの404本文に "not found" が含まれると無関係な案内をしてしまう。
+     */
+    private static boolean isModelNotFound(RestClientResponseException e) {
+        return e.getStatusCode().value() == 404 && e.getResponseBodyAsString().contains("not found");
+    }
+
+    /**
+     * 生の404本文やスタックトレースではなく、「モデルがまだ無い/取得中である」と分かる文言を返す
+     * (issue #1086 / R3)。初回起動直後はollama-model-initがモデルを取得している最中で、
+     * 数分のあいだこの状態になりうる。
+     */
+    private static String modelNotFoundMessage(String modelName) {
+        return "モデル「" + modelName + "」がまだ利用できません。"
+                + "ローカルLLM(Ollama)では初回起動時のモデル取得に数分かかります。"
+                + "取得の進捗は docker logs -f lbs-ollama-model-init で確認できます。";
+    }
+
+    /** apiKeyがnullの場合はAuthorizationヘッダを付けない(認証を持たないOLLAMA向け、issue #1086)。 */
     private RestClient buildClient(String baseUrl, String apiKey) {
         Duration requestTimeout = Duration.ofSeconds(configProvider.requestTimeoutSeconds());
         JdkClientHttpRequestFactory requestFactory =
@@ -194,8 +227,10 @@ public class LlmClient {
         requestFactory.setReadTimeout(requestTimeout);
         RestClient.Builder builder = RestClient.builder()
                 .baseUrl(baseUrl)
-                .requestFactory(requestFactory)
-                .defaultHeader("Authorization", "Bearer " + apiKey);
+                .requestFactory(requestFactory);
+        if (apiKey != null) {
+            builder.defaultHeader("Authorization", "Bearer " + apiKey);
+        }
         LegacyJacksonRestClientConfig.preferJackson2(builder);
         return builder.build();
     }

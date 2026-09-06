@@ -43,6 +43,8 @@ Keycloak / 各ドメインサービス)を見据えた構成に整えた(#556)�
 | `keycloak` | 8080(管理/ヘルスチェックは9000) | reverse-proxy経由のみ(`/auth/`) | `KC_HTTP_RELATIVE_PATH=/auth`。#559 |
 | `keycloak-postgres` | 5432 | 非公開 | Keycloak専用PostgreSQL。#559 |
 | `penpot-frontend` | 8080 | `9001:8080`(直接公開。ハンドオフURL生成のため) | |
+| `ollama` | 11434 | 非公開(platform/ai経由) | ローカルLLM(#1086)。GPUは**オプトイン**(下記)。`platform` が `LLM_OLLAMA_BASE_URL=http://ollama:11434/v1` を解決し、ai-service がその設定で呼ぶ。reverse-proxy は中継しない |
+| `ollama-model-init` | — | — | 既定モデルを起動時に取得するワンショット(#1086)。`restart: "no"` で終了コード0なら `ContainerStatusService`(#725)が「正常に完了したジョブ」として扱う |
 | `comfyui` | 8188 | 非公開(media経由) | GPU必須。#979でreverse-proxyの`/comfyui/`中継を削除した(ブラウザから開く導線が無く、無認証で任意のワークフローを実行できてしまうため)。media-serviceが`COMFYUI_BASE_URL=http://comfyui:8188`でlbs-net経由に呼ぶ |
 | `plantuml` | 8080 | 非公開(content/media経由) | #979でreverse-proxyの`/plantuml/`中継を削除した(ブラウザからの参照が無く、無認証で任意のソースをサーバー側で描画させられるため)。media-serviceが`PLANTUML_BASE_URL=http://plantuml:8080`でlbs-net経由に呼ぶ |
 | `drawio` | 8080 | reverse-proxy経由(`/drawio/`) | **無認証で公開する意図的な判断(#979)**。VSCode拡張の`diagramEditorPanel.ts`がwebviewのiframeへ`/drawio/?embed=1&...`を読み込む。webviewはlbs-netの外のブラウザ文脈のためコンテナ間通信に寄せられない。webからは参照しない |
@@ -102,6 +104,64 @@ healthy を待つ。この循環のため、空の MySQL ボリュームから�
 再現手順は `scripts/verify-clean-volume-boot.sh` としてスクリプト化してある
 (`lets_blog_server_mysql_data` ボリュームを削除し、クリーンな状態から
 `docker compose up -d` して全サービスがhealthyになることを確認する)。
+
+## GPU のオプトイン(#1086)
+
+`ollama` は GPU を**オプトインで**使う。仕組みは compose の1行だけである。
+
+```yaml
+  ollama:
+    runtime: ${GPU_RUNTIME:-}
+```
+
+- 既定(空)ならDockerの既定ランタイムで起動する。**NVIDIA ランタイムを持たないホストでも
+  `docker compose up -d` は成功する。**
+- GPU を使うホストは `.env` に `GPU_RUNTIME=nvidia` を書く。コマンドライン引数は不要で、
+  `docker compose up -d` のままGPUが使われる。
+
+`comfyui` が持つ無条件の `deploy.resources.reservations.devices` を写さないのは、それだと
+NVIDIA ランタイムのないホストで `could not select device driver "nvidia"` になり、サービス
+無指定の `docker compose up -d` がそこで**中断する**ためである(#1066)。#1086 で実測した
+代替案の結果:
+
+| 書き方 | 未搭載ホストでの挙動 |
+| --- | --- |
+| `count: ${N:-0}` | **失敗**。count が 0 でもデバイスドライバの選択は行われる |
+| `gpus: ${X:-}` | **失敗**。`services.ollama.gpus value must be 'all'` で検証に落ちる |
+| `runtime: ${GPU_RUNTIME:-}` | 成功。未指定は「Dockerの既定ランタイム」に倒れる |
+
+#1066 は `comfyui` に同じ1行を適用すればよい(新しい仕組みを2つ作らない)。
+
+## Ollama のモデル取得と VRAM(#1086)
+
+モデルの初回取得は `ollama-model-init` が行う。手動の `ollama pull` は要らない。
+
+```bash
+# 取得の進捗(初回は数分。qwen2.5:7b-instruct は約4.7GB)
+docker logs -f lbs-ollama-model-init
+# 取得済みモデルの一覧
+docker exec lbs-ollama ollama list
+```
+
+`docker compose up -d` は既に正常終了しているワンショットを再実行しない。モデルを消して
+しまった場合や、`LLM_OLLAMA_MODEL` を変えた場合は明示的に作り直す。
+
+```bash
+docker compose up -d --force-recreate ollama-model-init
+```
+
+取得の完了前に AI 機能を叩くと、ai-service が Ollama の 404 を
+「モデル「…」がまだ利用できません。…取得の進捗は docker logs -f lbs-ollama-model-init で
+確認できます。」に変換して返す(`LlmClient`)。生の 404 は表示しない。
+
+VRAM は `lbs-comfyui` と共有する(単一GPU前提)。ComfyUI は生成後に VRAM を解放するが
+(`ComfyUiClient#clearMemory`)、Ollama は既定でモデルを常駐させ続けるため、次の3つで抑える。
+
+| 変数 | 既定 | 意味 |
+| --- | --- | --- |
+| `OLLAMA_KEEP_ALIVE` | `5m` | 生成後にモデルをVRAMへ残す時間。**ComfyUI 側で VRAM 不足が出るなら `30s` へ下げる** |
+| `OLLAMA_MAX_LOADED_MODELS` | `1`(固定) | 同時にロードするモデル数 |
+| `OLLAMA_CONTEXT_LENGTH` | `8192` | コンテキスト長。Ollama の既定は小さく、超過分は**黙って切り捨てられる**。伸ばすほど KV キャッシュが VRAM を食う |
 
 ## GPU/メモリを満たさない環境向けの縮退起動(検討結果)
 

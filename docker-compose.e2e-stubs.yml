@@ -122,6 +122,15 @@ services:
     environment:
       LLM_BASE_URL: http://llm-stub:8080
       LLM_API_KEY: e2e-stub-key
+      # issue #1086: 既定プロバイダの環境変数既定値は OLLAMA になった。受け入れテスト環境には
+      # ollama コンテナを持ち込まない(GPU依存とスタブ方針を崩さないため)ので、AT では
+      # OPENAI に固定してスタブへ向ける。scripts/e2e-clear-llm-db-overrides.sh が DB 上書きを
+      # 消すため、ここで固定しないと環境変数既定の OLLAMA がそのまま効く。
+      LLM_PROVIDER: OPENAI
+      # 上の固定が何かの拍子に外れても(DBに llm_provider=OLLAMA が残っている等)、
+      # 存在しない ollama コンテナではなくスタブへ向くようにしておく。
+      LLM_OLLAMA_BASE_URL: http://llm-stub:8080
+      LLM_OLLAMA_MODEL: e2e-stub-model
       # media-service は画像生成の接続設定を platform の
       # /api/internal/platform/image-generation-config から取る(PlatformServiceClient)。
       # したがって ChatGPT 画像生成の向き先はここで決まる。

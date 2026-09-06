@@ -11,7 +11,9 @@ const GROUPS: { title: string; description: string; keys: string[] }[] = [
     title: "外部LLMサービス連携",
     description:
       "下書き/校正/要約支援・タグ提案・記事プランニングに使用するAIプロバイダーの接続設定です。" +
-      "llm_providerでOLLAMA/OPENAI/CLAUDEのいずれかを選択してください(OLLAMA/OPENAIはllm_base_url/llm_api_keyを共用します)。",
+      "llm_providerでOLLAMA/OPENAI/CLAUDEのいずれかを選択してください。" +
+      "接続設定はプロバイダーごとに独立しています(OLLAMAはllm_ollama_base_url/llm_ollama_model、" +
+      "OPENAIはllm_base_url/llm_api_key/llm_model、CLAUDEはllm_claude_api_key/llm_claude_model)。",
     keys: [
       "llm_provider",
       "llm_api_key",
@@ -19,6 +21,8 @@ const GROUPS: { title: string; description: string; keys: string[] }[] = [
       "llm_model",
       "llm_available_models",
       "llm_request_timeout_seconds",
+      "llm_ollama_base_url",
+      "llm_ollama_model",
       "llm_claude_api_key",
       "llm_claude_model",
     ],

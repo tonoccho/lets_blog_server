@@ -41,6 +41,8 @@ public class AppSettingService {
     static final String LLM_PROVIDER = "llm_provider";
     static final String LLM_CLAUDE_API_KEY = "llm_claude_api_key";
     static final String LLM_CLAUDE_MODEL = "llm_claude_model";
+    static final String LLM_OLLAMA_BASE_URL = "llm_ollama_base_url";
+    static final String LLM_OLLAMA_MODEL = "llm_ollama_model";
     static final String COMFYUI_BASE_URL = "comfyui_base_url";
     static final String IMAGE_LLM_API_KEY = "image_llm_api_key";
     static final String IMAGE_LLM_BASE_URL = "image_llm_base_url";
@@ -72,11 +74,13 @@ public class AppSettingService {
 
     private static final List<Definition> DEFINITIONS = List.of(
             new Definition(LLM_PROVIDER, "AIプロバイダー(OLLAMA/OPENAI/CLAUDEのいずれか)", false),
-            new Definition(LLM_API_KEY, "LLM APIキー(Ollama/OpenAI用)", true),
-            new Definition(LLM_BASE_URL, "LLM ベースURL(Ollama/OpenAI用)", false),
-            new Definition(LLM_MODEL, "LLM 既定モデル(Ollama/OpenAI用)", false),
-            new Definition(LLM_AVAILABLE_MODELS, "LLM 選択可能モデル(カンマ区切り、Ollama/OpenAI用)", false),
+            new Definition(LLM_API_KEY, "LLM APIキー(OpenAI用)", true),
+            new Definition(LLM_BASE_URL, "LLM ベースURL(OpenAI用)", false),
+            new Definition(LLM_MODEL, "LLM 既定モデル(OpenAI用)", false),
+            new Definition(LLM_AVAILABLE_MODELS, "LLM 選択可能モデル(カンマ区切り、OpenAI用)", false),
             new Definition(LLM_REQUEST_TIMEOUT_SECONDS, "LLM リクエストタイムアウト(秒)", false),
+            new Definition(LLM_OLLAMA_BASE_URL, "Ollama ベースURL(OLLAMA用。OpenAI互換の /v1 まで含める)", false),
+            new Definition(LLM_OLLAMA_MODEL, "Ollama 既定モデル(OLLAMA用)", false),
             new Definition(LLM_CLAUDE_API_KEY, "Claude APIキー", true),
             new Definition(LLM_CLAUDE_MODEL, "Claude 既定モデル", false),
             new Definition(COMFYUI_BASE_URL, "ComfyUI ベースURL", false),
@@ -104,9 +108,11 @@ public class AppSettingService {
             @Value("${app.llm-model}") String llmModelEnvDefault,
             @Value("${app.llm-available-models}") String llmAvailableModelsEnvDefault,
             @Value("${app.llm-request-timeout-seconds}") String llmRequestTimeoutSecondsEnvDefault,
-            @Value("${app.llm-provider:OPENAI}") String llmProviderEnvDefault,
+            @Value("${app.llm-provider:OLLAMA}") String llmProviderEnvDefault,
             @Value("${app.llm-claude-api-key:}") String llmClaudeApiKeyEnvDefault,
             @Value("${app.llm-claude-model:claude-3-5-haiku-20241022}") String llmClaudeModelEnvDefault,
+            @Value("${app.llm-ollama-base-url:http://ollama:11434/v1}") String llmOllamaBaseUrlEnvDefault,
+            @Value("${app.llm-ollama-model:qwen2.5:7b-instruct}") String llmOllamaModelEnvDefault,
             @Value("${app.comfyui-base-url}") String comfyUiBaseUrlEnvDefault,
             @Value("${app.image-llm-api-key:}") String imageLlmApiKeyEnvDefault,
             @Value("${app.image-llm-base-url:https://api.openai.com/v1}") String imageLlmBaseUrlEnvDefault,
@@ -129,6 +135,8 @@ public class AppSettingService {
         defaults.put(LLM_PROVIDER, llmProviderEnvDefault);
         defaults.put(LLM_CLAUDE_API_KEY, llmClaudeApiKeyEnvDefault);
         defaults.put(LLM_CLAUDE_MODEL, llmClaudeModelEnvDefault);
+        defaults.put(LLM_OLLAMA_BASE_URL, llmOllamaBaseUrlEnvDefault);
+        defaults.put(LLM_OLLAMA_MODEL, llmOllamaModelEnvDefault);
         defaults.put(COMFYUI_BASE_URL, comfyUiBaseUrlEnvDefault);
         defaults.put(IMAGE_LLM_API_KEY, imageLlmApiKeyEnvDefault);
         defaults.put(IMAGE_LLM_BASE_URL, imageLlmBaseUrlEnvDefault);
@@ -212,7 +220,8 @@ public class AppSettingService {
         }
         switch (key) {
             case LLM_PROVIDER -> requireValidProvider(key, value);
-            case LLM_BASE_URL, APP_WEB_BASE_URL, COMFYUI_BASE_URL, IMAGE_LLM_BASE_URL -> requireUrl(key, value);
+            case LLM_BASE_URL, LLM_OLLAMA_BASE_URL, APP_WEB_BASE_URL, COMFYUI_BASE_URL, IMAGE_LLM_BASE_URL ->
+                    requireUrl(key, value);
             case LLM_REQUEST_TIMEOUT_SECONDS -> requirePositiveInt(key, value);
             case MAIL_PORT -> requirePort(key, value);
             case APP_MAIL_FROM -> requireEmailLike(key, value);
@@ -310,7 +319,11 @@ public class AppSettingService {
         return Long.parseLong(resolve(LLM_REQUEST_TIMEOUT_SECONDS));
     }
 
-    /** 未設定(空文字)はOPENAIにフォールバックする(既存の環境変数既定値がOpenAIのため)。 */
+    /**
+     * 未設定(空文字)はOPENAIにフォールバックする。環境変数の既定値自体はissue #1086でOLLAMAへ
+     * 変更したが({@code app.llm-provider})、ここは「環境変数に明示的に空文字が入っている」場合の
+     * 最終手段であり、従来の挙動を変えない。
+     */
     @Transactional(readOnly = true)
     public AiProvider getLlmProvider() {
         AiProvider provider = AiProvider.fromString(resolve(LLM_PROVIDER));
@@ -325,6 +338,20 @@ public class AppSettingService {
     @Transactional(readOnly = true)
     public String getLlmClaudeModel() {
         return resolve(LLM_CLAUDE_MODEL);
+    }
+
+    /**
+     * OLLAMA専用の接続先(issue #1086)。OpenAI互換のChat Completions APIを叩くため、
+     * {@code /v1}までを含めた値を保持する(LlmClientが{@code {baseUrl}/chat/completions}へPOSTする)。
+     */
+    @Transactional(readOnly = true)
+    public String getLlmOllamaBaseUrl() {
+        return resolve(LLM_OLLAMA_BASE_URL);
+    }
+
+    @Transactional(readOnly = true)
+    public String getLlmOllamaModel() {
+        return resolve(LLM_OLLAMA_MODEL);
     }
 
     @Transactional(readOnly = true)
@@ -409,16 +436,33 @@ public class AppSettingService {
         return defaultModelFor(provider());
     }
 
+    /**
+     * OLLAMAは自ホスト上のコンテナであり認証を持たない。共用の{@code llm_api_key}(OpenAIのキー)を
+     * 返すとローカルコンテナへ外部サービスのキーを送ることになるため、空を返す(issue #1086 / R4)。
+     * LlmClient側はOLLAMAに限りAPIキー必須判定を免除し、Authorizationヘッダも付けない。
+     */
     public String apiKeyFor(AiProvider provider) {
-        return provider == AiProvider.CLAUDE ? getLlmClaudeApiKey() : getLlmApiKey();
+        return switch (provider) {
+            case CLAUDE -> getLlmClaudeApiKey();
+            case OLLAMA -> "";
+            case OPENAI -> getLlmApiKey();
+        };
     }
 
     public String defaultModelFor(AiProvider provider) {
-        return provider == AiProvider.CLAUDE ? getLlmClaudeModel() : getLlmModel();
+        return switch (provider) {
+            case CLAUDE -> getLlmClaudeModel();
+            case OLLAMA -> getLlmOllamaModel();
+            case OPENAI -> getLlmModel();
+        };
     }
 
     public String baseUrlFor(AiProvider provider) {
-        return provider == AiProvider.CLAUDE ? ANTHROPIC_BASE_URL : getLlmBaseUrl();
+        return switch (provider) {
+            case CLAUDE -> ANTHROPIC_BASE_URL;
+            case OLLAMA -> getLlmOllamaBaseUrl();
+            case OPENAI -> getLlmBaseUrl();
+        };
     }
 
     public long requestTimeoutSeconds() {
