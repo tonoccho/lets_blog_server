@@ -249,15 +249,23 @@ API: media `ImageGenerationController`, `GeneratedImageController`, `MediaContro
 
 API: media `DiagramController`, `RenderController` / 拡張のダイアグラムコマンド
 
+受け入れシナリオは `apps/web/e2e/features/diagram/` の5ファイル(#937 / AT-11)。
+**全て `@api` である。** Web のダイアグラムギャラリーは #662 で削除済みで、図のUIは
+VSCode 拡張だけにあるため、この節の受け入れ基準に対応する画面がそもそも存在しない
+(docs/ACCEPTANCE_TESTING.md §4 の例外を明示的に使っている)。
+`/api/render/**` は gateway のルート表に載っていない(#830)ので、lbs-net 上の踏み台
+コンテナから media-service を直接呼ぶ(`e2e/support/services.ts` の
+`postJsonToServiceDirectly`)。
+
 | 機能ID | 機能 | 利用者から見た価値 | 受け入れ基準(要約) | 対応シナリオ | 状態 |
 | --- | --- | --- | --- | --- | --- |
-| AC-DIAG-001 | ダイアグラムの作成・編集・削除 | 図を記事に添えられる | `POST/PUT/DELETE /api/diagrams` の結果が一覧に反映される | — | 未着手 |
-| AC-DIAG-002 | ダイアグラム一覧・詳細 | 作った図を再利用できる | `GET /api/diagrams` と `/{id}` が保存内容を返す | — | 未着手 |
-| AC-DIAG-003 | SVG取得 | 図が記事に埋め込める | `GET /api/diagrams/{id}/svg` が描画済みSVGを返す | — | 未着手 |
-| AC-DIAG-004 | PlantUML レンダリング | テキストからUMLを描ける | `POST /api/render/plantuml` が図を返し、不正な記法はエラーになる | — | 未着手 |
-| AC-DIAG-005 | recharts レンダリング | データからグラフを描ける | `POST /api/render/recharts` が図を返す | — | 未着手 |
-| AC-DIAG-006 | Penpot デザインファイル連携 | デザインを記事素材にできる | `POST /api/render/penpot/design-file` がデザインを取り込む | — | 未着手 |
-| AC-DIAG-007 | draw.io 編集 | 図をGUIで描ける | 拡張の `addNewDiagram` / `editDiagram` で draw.io が開き、保存内容が `GET /api/diagrams/{id}` に反映される | — | 未着手 |
+| AC-DIAG-001 | ダイアグラムの作成・編集・削除 | 図を記事に添えられる | `POST/PUT/DELETE /api/diagrams` の結果が一覧に反映される | `features/diagram/diagram-storage.feature` › drawio で描いた図を保存すると、あとから同じ内容を取り出して編集を続けられる / ダイアグラムを作成すると一覧に現れ、SVGを取得できる / ダイアグラムを削除すると一覧から消え、SVGは404になる、`features/diagram/diagram-authorization.feature` › 未認証では図の作成・取得・削除ができない / 他プロジェクトのダイアグラムは取得も削除もできない | 検証済 |
+| AC-DIAG-002 | ダイアグラム一覧・詳細 | 作った図を再利用できる | `GET /api/diagrams` と `/{id}` が保存内容を返す | `features/diagram/diagram-storage.feature` › drawio で描いた図を保存すると、あとから同じ内容を取り出して編集を続けられる / ダイアグラムを作成すると一覧に現れ、SVGを取得できる | 検証済 |
+| AC-DIAG-003 | SVG取得 | 図が記事に埋め込める | `GET /api/diagrams/{id}/svg` が描画済みSVGを返す | `features/diagram/diagram-storage.feature` › ダイアグラムを作成すると一覧に現れ、SVGを取得できる / ソースを更新すると、取り直したSVGは更新後の内容になる(キャッシュが残らないこと)/ ダイアグラムを削除すると一覧から消え、SVGは404になる | 検証済 |
+| AC-DIAG-004 | PlantUML レンダリング | テキストからUMLを描ける | `POST /api/render/plantuml` が図を返し、不正な記法はエラーになる | `features/diagram/plantuml-rendering.feature` › 妥当なPlantUMLソースを渡すと、ノード名を含む図がPNGとして返る / 不正な構文では、理由の分かるエラーが返り、生の500にはならない / 巨大な入力にはサイズ上限のエラーが返り、待たされ続けない | 検証済(返る画像は SVG ではなく PNG。中身は埋め込みメタデータと寸法で検証している) |
+| AC-DIAG-005 | recharts レンダリング | データからグラフを描ける | `POST /api/render/recharts` が図を返す | `features/diagram/recharts-rendering.feature` › チャート定義を渡すと、元データが反映されたSVGが返る / 系列の指定を欠いた定義ではエラーが返る | 検証済 |
+| AC-DIAG-006 | Penpot デザインファイル連携 | デザインを記事素材にできる | `POST /api/render/penpot/design-file` がデザインを取り込む | `features/diagram/penpot-unavailable.feature` › Penpot が起動していないとき、デザインファイルの要求は理由の分かるエラーになる | 部分的に検証(`@destructive`。Penpot は任意サービスなので **未起動時の振る舞い**を受け入れ基準にしている。成功経路は共有 Penpot に消せないファイルを残すため叩かない) |
+| AC-DIAG-007 | draw.io 編集 | 図をGUIで描ける | 拡張の `addNewDiagram` / `editDiagram` で draw.io が開き、保存内容が `GET /api/diagrams/{id}` に反映される | `features/diagram/diagram-storage.feature` › drawio で描いた図を保存すると、あとから同じ内容を取り出して編集を続けられる(サービス側の契約)、`ext:diagrams/diagrams.feature` › ダイアグラムを作成し編集して一覧から参照できる(拡張のコマンド)、手動: チェックリスト §7 | 検証済(draw.io のエディタ操作は手動) |
 
 ### 2.10 カスタムタグ・テンプレート・コンテンツ設定 — `TAG`
 
@@ -560,12 +568,17 @@ APIレベルの受け入れテスト・単体テスト・手動チェックリ�
 | `POST` | 13 | | `ANA` | 6 | | `STUB` | 2 |
 | `BULK` | 13 | | | | | | |
 
-**受け入れテストが1件も無い領域**: `BULK` `AI` `DIAG` `ANA` `SYS` `LOG`
-(6領域 / 59 機能ID)。これが issue #927 が可視化しようとした穴である。
+**受け入れテストが1件も無い領域**: `BULK` `AI` `ANA` `SYS` `LOG`
+(5領域 / 52 機能ID)。これが issue #927 が可視化しようとした穴である。
 `SET`(初回セットアップ)は #929(AT-3)で、`EXT`(VSCode拡張)は #942(AT-16)で、
-`PLAN`(記事プランとGitHub Issue連携)は #935(AT-9)で埋めた。
-なお `AI` / `DIAG` の一部は拡張側(`AC-EXT-*`)から同じサーバー契約を検証しているが、
-Web管理画面としての受け入れ基準は AT-8 / AT-11 の担当のままである。
+`PLAN`(記事プランとGitHub Issue連携)は #935(AT-9)で、
+`DIAG`(ダイアグラムとレンダリング)は #937(AT-11)で埋めた。
+なお `AI` の一部は拡張側(`AC-EXT-*`)から同じサーバー契約を検証しているが、
+Web管理画面としての受け入れ基準は AT-8 の担当のままである。
+
+> 上の状態別・領域別の件数は #927 の作成時点(2026-09-01)のままで、その後の AT Issue が
+> `検証済` にした行が反映されていない。件数の集計だけを機械的に取り直す作業は
+> どの AT Issue のスコープにも入っていない(#1133)。
 
 入力ソースの網羅状況:
 

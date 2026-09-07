@@ -8,6 +8,11 @@ import {
   fetchAccessToken,
   waitForServicesHealthy,
 } from '../support';
+import {
+  SERVICE_CONTROL_TIMEOUT_MS,
+  startService,
+  stopService,
+} from '../support/serviceControl';
 
 /**
  * 下流サービス障害時の縮退のステップ定義(issue #943 / AT-17)。
@@ -19,33 +24,12 @@ import {
  *
  * 停止したサービスは {@link After} で必ず起動し直し、healthy になるまで待つ。
  * 待たずに次のシナリオへ進むと、無関係なシナリオが起動途中のサービスで落ちる。
+ * 下の後始末は `ctx.stoppedServices` に積まれたものを見るので、**このファイル以外の
+ * `@destructive` シナリオが止めたサービス**も同じように復旧する
+ * (`support/serviceControl.ts` を参照。issue #937 の Penpot がそれである)。
+ *
+ * サービスの停止・起動のヘルパーは `support/serviceControl.ts` にある。
  */
-
-/**
- * サービスの停止・起動・healthy待ちは分単位で時間がかかる。Playwright の既定タイムアウト
- * (30秒)のままでは、検証したい表示に辿り着く前にシナリオが打ち切られる。
- * 該当のステップだけを延長する(設定ファイルの既定値を動かすと、無関係なシナリオの
- * 打ち切り時間まで変わってしまう)。
- */
-const SERVICE_CONTROL_TIMEOUT_MS = 300_000;
-
-/** 停止したサービスを覚えておき、シナリオの後始末で復旧させる。 */
-function markStopped(ctx: Record<string, unknown>, service: string): void {
-  const stopped = (ctx.stoppedServices as string[] | undefined) ?? [];
-  ctx.stoppedServices = [...stopped, service];
-}
-
-function stopService(ctx: Record<string, unknown>, service: string): void {
-  composeServiceControl('stop', service);
-  markStopped(ctx, service);
-}
-
-function startService(ctx: Record<string, unknown>, service: string): void {
-  composeServiceControl('start', service);
-  waitForServicesHealthy([service], 180);
-  ctx.stoppedServices = ((ctx.stoppedServices as string[] | undefined) ?? [])
-    .filter((stopped) => stopped !== service);
-}
 
 async function adminToken(request: APIRequestContext): Promise<string> {
   return fetchAccessToken(request, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);

@@ -15,7 +15,7 @@
  * 踏み台には gateway コンテナを使う。lbs-net の全サービスへ到達でき、curl を持ち、
  * 常時起動しているため。踏み台自身の状態は変えない(読み取りのみ)。
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 
 /** 認証ゲートの検証対象。ADR-0008 の「全サービスが自分で認証を要求する」の"全"がこれ。 */
 export const DOMAIN_SERVICES = [
@@ -83,6 +83,103 @@ export function requestServiceDirectly(
   return {
     status: Number(output.slice(separator + 1).trim()),
     body: output.slice(0, separator),
+  };
+}
+
+export interface DirectBodyResponse {
+  status: number;
+  /** 応答の Content-Type。中身が画像かエラーJSONかを取り違えないために見る。 */
+  contentType: string;
+  /** 応答本文。PNG のようなバイナリを壊さずに扱えるよう Buffer で返す。 */
+  body: Buffer;
+}
+
+/**
+ * サービスへ**JSONの本文を伴う**リクエストを直接送り、応答をバイト列で受け取る
+ * (issue #937 / AT-11)。
+ *
+ * ## {@link requestServiceDirectly} と分けてある理由
+ *
+ * 踏み台と経路は同じだが、用途と必要な入出力が違う。
+ *
+ * - **なぜ gateway を通さないのか**が違う。{@link requestServiceDirectly} は
+ *   「gateway を迂回しても各サービスが自分で認証を要求する」ことを確かめるために
+ *   **わざと**迂回する(ADR-0008)。こちらは `/api/render/**` が
+ *   **gateway のルート表にそもそも載っていない**(issue #830。
+ *   `services/gateway/src/main/resources/application.yml` の「`/api/render/**` は載せない」)
+ *   ため、lbs-net の中からしか到達できないという事実に従っているだけである。
+ *   認可は依頼する側が済ませている前提の、サービス間専用のエンドポイントである。
+ * - **本文を送れる必要がある。** レンダリング要求は JSON の本文がすべてで、
+ *   {@link requestServiceDirectly} は本文を送れない。
+ * - **応答をバイト列で受け取る必要がある。** `POST /api/render/plantuml` は PNG を返す。
+ *   文字列として読むと PNG のシグネチャもメタデータチャンクも壊れ、
+ *   「返ってきた画像の中身」を検証できない(#937 の受け入れ基準がそれを要求している)。
+ *
+ * ## 呼び出し方は {@link requestServiceDirectly} と同じにしてある
+ *
+ * `docker exec ... curl ...` を**引数の配列**で起動する。コンテナの中でシェルを
+ * 起動しないので、引用符やエスケープの穴が生まれない。ステータスの取り出し方も
+ * `--write-out` を本文の後ろに付ける同じやり方で、Content-Type だけを足してある。
+ * 本文を Buffer のまま読む(PNG が返るため文字列にすると壊れる)ので、区切りは
+ * 最後の改行バイトで探す。
+ *
+ * 本文は標準入力から curl へ渡す(`--data-binary @-` と `spawnSync` の `input`)。
+ * 巨大な入力に対するふるまいを確かめるシナリオが数百KBのソースを送るため、
+ * コマンドラインに載せると引数長の上限に触れる。
+ *
+ * @param service 対象サービス(compose のサービス名 = lbs-net 上のホスト名)
+ * @param path    `/api/...` 形式のパス
+ * @param json    リクエスト本文。`JSON.stringify` して送る
+ * @param options `token` を渡すと `Authorization: Bearer` を付ける。
+ *                media-service は `/api/render/**` にも認証を要求する(SecurityConfig)。
+ */
+export function postJsonToServiceDirectly(
+  service: DomainService,
+  path: string,
+  json: unknown,
+  options: { token?: string; timeoutSeconds?: number } = {}
+): DirectBodyResponse {
+  const timeoutSeconds = options.timeoutSeconds ?? 120;
+  const args = [
+    'exec', '-i', BASTION_CONTAINER, 'curl',
+    '--silent', '--show-error', '--max-time', String(timeoutSeconds),
+    // 本文の後ろにステータスと Content-Type を付ける({@link requestServiceDirectly} と同じ)。
+    '--write-out', '\n%{http_code} %{content_type}',
+    '--request', 'POST',
+    '--header', 'Content-Type: application/json',
+  ];
+  if (options.token) {
+    args.push('--header', `Authorization: Bearer ${options.token}`);
+  }
+  args.push('--data-binary', '@-', `http://${service}:8080${path}`);
+
+  // encoding を渡さないので stdout/stderr は Buffer のまま返る。PNG を壊さずに読める。
+  const result = spawnSync('docker', args, {
+    input: JSON.stringify(json),
+    maxBuffer: 64 * 1024 * 1024,
+    timeout: (timeoutSeconds + 30) * 1000,
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  const stdout = result.stdout ?? Buffer.alloc(0);
+  // `--write-out` は必ず末尾に付き、その中に改行は無い。最後の改行が本文との区切りである。
+  const separator = stdout.lastIndexOf(0x0a);
+  if (separator < 0) {
+    throw new Error(
+      `${service} への直接リクエストの結果を解釈できませんでした`
+      + ` (POST ${path}): ${(result.stderr ?? Buffer.alloc(0)).toString('utf8')}`
+    );
+  }
+  const [status, contentType = ''] = stdout
+    .subarray(separator + 1)
+    .toString('utf8')
+    .trim()
+    .split(' ');
+  return {
+    status: Number(status),
+    contentType,
+    body: stdout.subarray(0, separator),
   };
 }
 
