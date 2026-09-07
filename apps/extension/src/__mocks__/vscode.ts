@@ -22,6 +22,8 @@ export function resetMocks(): void {
   warningResponse = undefined;
   openedDocuments.length = 0;
   workspaceFolders = undefined;
+  appliedEdits.length = 0;
+  shownInformations.length = 0;
 }
 
 /** showWarningMessage が返す選択肢(未設定なら「閉じた」= undefined)。 */
@@ -32,6 +34,15 @@ export function setWarningResponse(value: string | undefined): void {
 
 /** openTextDocument / showTextDocument に渡されたパス。 */
 export const openedDocuments: string[] = [];
+
+/**
+ * workspace.applyEdit に渡された編集内容の記録(issue #1104)。
+ * 実ドキュメントを持たないため、編集を適用せず「何をどこへ書こうとしたか」だけを残す。
+ */
+export const appliedEdits: { kind: 'replace' | 'insert'; uri: string; text: string }[] = [];
+
+/** showInformationMessage で表示した文言。 */
+export const shownInformations: string[] = [];
 
 /** workspace.workspaceFolders の差し替え口。 */
 let workspaceFolders: { uri: { fsPath: string } }[] | undefined;
@@ -78,7 +89,33 @@ export const workspace = {
     };
   },
   onDidChangeConfiguration: () => ({ dispose: () => undefined }),
+  applyEdit(edit: WorkspaceEdit): Promise<boolean> {
+    appliedEdits.push(...edit.entries);
+    return Promise.resolve(true);
+  },
 };
+
+/** vscode.Position / vscode.Range の最小再現(位置は文字オフセットで表す)。 */
+export class Position {
+  constructor(public readonly offset: number) {}
+}
+
+export class Range {
+  constructor(public readonly start: unknown, public readonly end: unknown) {}
+}
+
+/** vscode.WorkspaceEdit の最小再現。適用はせず、内容を記録するだけ。 */
+export class WorkspaceEdit {
+  public readonly entries: { kind: 'replace' | 'insert'; uri: string; text: string }[] = [];
+
+  replace(uri: unknown, _range: unknown, text: string): void {
+    this.entries.push({ kind: 'replace', uri: String(uri), text });
+  }
+
+  insert(uri: unknown, _position: unknown, text: string): void {
+    this.entries.push({ kind: 'insert', uri: String(uri), text });
+  }
+}
 
 /** createWebviewPanelが返す最後のパネル(テストからwebview.html等を検査するために保持する)。 */
 export let lastCreatedWebviewPanel: MockWebviewPanel | undefined;
@@ -120,6 +157,10 @@ export const window = {
   },
   showErrorMessage: (message: string) => {
     shownErrors.push(message);
+    return Promise.resolve(undefined);
+  },
+  showInformationMessage: (message: string) => {
+    shownInformations.push(message);
     return Promise.resolve(undefined);
   },
   createWebviewPanel: (): MockWebviewPanel => {

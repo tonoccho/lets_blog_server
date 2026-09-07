@@ -611,6 +611,11 @@ export async function listCustomTags(
 
 /**
  * ComfyUIで画像を生成する。生成結果はサーバー側にも保存される。
+ *
+ * batch sizeで指定した枚数はサーバーが`AiImageBatchResponse.images`として全件返すため、
+ * ここでも全件を返す(issue #1104)。以前は先頭1枚だけを返しており、残りは生成時間と
+ * ディスクを消費したうえで利用者の目に触れずに失われていた。
+ *
  * @param signal 利用者によるキャンセル用。
  */
 export async function generateImage(
@@ -619,7 +624,7 @@ export async function generateImage(
   projectId: number | undefined,
   params: ImageGenerationParams,
   signal?: AbortSignal
-): Promise<AiImageResult> {
+): Promise<AiImageResult[]> {
   // 生成画像はサーバー側に保存されるため、再試行すると重複した生成結果が残る。
   const batch = await requestJson('/api/ai/image', {
     label: 'generateImage',
@@ -628,7 +633,7 @@ export async function generateImage(
     headers: buildHeaders(apiKey, actor),
     createBody: jsonBody({ projectId, ...params }),
   }, schemas.AiImageBatchResponseSchema);
-  return batch.images[0];
+  return batch.images;
 }
 
 /** 画像生成で選択できるモデル/サンプラー/スケジューラ/LoRAの一覧を取得する。 */

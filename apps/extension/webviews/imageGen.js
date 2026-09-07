@@ -1,5 +1,10 @@
   const vscode = acquireVsCodeApi();
-  let currentImage = null;
+  /**
+   * 直近の生成結果の「ファイル名だけ」(issue #1104)。base64本体はここに持たない。
+   * 保存時にパネル側へ送り返さないための方針で、選択位置(index)だけを送る。
+   */
+  let currentImages = [];
+  let selectedIndex = 0;
   let chatHistory = [];
 
   function post(command, payload) {
@@ -167,43 +172,108 @@
     post('generate', { params });
   }
 
-  function renderGenerated(result) {
-    LetsBlogLoading.end();
-    // base64本体は<img>のsrcへ渡した後は保持しない(Webview側にコピーを残さない)。
-    currentImage = { fileName: result.fileName };
-    document.getElementById('previewSection').style.display = 'block';
-    // 生成後は次の操作(保存)へ進めるようフォーカスを移す。
-    document.getElementById('setAsEyecatchButton').focus();
-    // mimeTypeはサーバー応答由来のため、既知の画像種別だけをデータURIへ組み立てる。
+  // mimeTypeはサーバー応答由来のため、既知の画像種別だけをデータURIへ組み立てる。
+  function toDataUri(result) {
     const safeMimeType = /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/.test(result.mimeType || '')
       ? result.mimeType
       : 'image/png';
-    document.getElementById('previewImage').src = 'data:' + safeMimeType + ';base64,' + result.dataBase64;
-    document.getElementById('previewInfo').textContent =
-      'ファイル名: ' + result.fileName + '\n生成時刻: ' + new Date().toLocaleString();
-    showMessage('生成しました。', 'success');
+    return 'data:' + safeMimeType + ';base64,' + result.dataBase64;
   }
 
-  // 保存対象の画像データはパネル側が保持しているため、コマンドだけを送る
+  function updatePreviewInfo() {
+    const current = currentImages[selectedIndex];
+    const position = currentImages.length > 1
+      ? ' (' + (selectedIndex + 1) + '/' + currentImages.length + '枚目)'
+      : '';
+    document.getElementById('previewInfo').textContent =
+      'ファイル名: ' + current.fileName + position + '\n生成時刻: ' + new Date().toLocaleString();
+  }
+
+  /**
+   * 保存対象を選び直す(issue #1104)。拡大表示のsrcはサムネイルの<img>から取り出す。
+   * base64本体をJS側の変数へ持たないための方針で、実体はDOMにしか置かない。
+   */
+  function selectImage(index) {
+    selectedIndex = index;
+    const thumbnails = document.getElementById('thumbnailStrip').children;
+    for (let i = 0; i < thumbnails.length; i += 1) {
+      const isSelected = i === index;
+      thumbnails[i].className = isSelected ? 'thumbnail selected' : 'thumbnail';
+      thumbnails[i].setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+      if (isSelected) {
+        document.getElementById('previewImage').src = thumbnails[i].children[0].src;
+      }
+    }
+    updatePreviewInfo();
+  }
+
+  /**
+   * batch sizeで生成された全枚数を表示する(issue #1104)。2枚以上のときだけ
+   * サムネイル列を出し、1枚のときは従来どおり単一プレビューのままにする。
+   */
+  function renderGenerated(results) {
+    LetsBlogLoading.end();
+    const images = Array.isArray(results) ? results : [results];
+    const strip = document.getElementById('thumbnailStrip');
+    strip.innerHTML = '';
+    if (images.length === 0) {
+      currentImages = [];
+      strip.style.display = 'none';
+      showMessage('生成結果が空でした。もう一度生成してください。', 'error');
+      return;
+    }
+    // base64本体は<img>のsrcへ渡した後は保持しない(Webview側にコピーを残さない)。
+    currentImages = images.map(function (result) { return { fileName: result.fileName }; });
+    selectedIndex = 0;
+    document.getElementById('previewSection').style.display = 'block';
+
+    if (images.length > 1) {
+      images.forEach(function (result, index) {
+        const thumbnail = document.createElement('button');
+        thumbnail.type = 'button';
+        thumbnail.className = 'thumbnail';
+        thumbnail.setAttribute('aria-label', (index + 1) + '枚目: ' + result.fileName);
+        thumbnail.addEventListener('click', function () { selectImage(index); });
+        const image = document.createElement('img');
+        image.src = toDataUri(result);
+        image.alt = '';
+        thumbnail.appendChild(image);
+        strip.appendChild(thumbnail);
+      });
+      strip.style.display = 'flex';
+      // 未選択の状態を作らないよう、先頭を既定で選択する。
+      selectImage(0);
+      showMessage(images.length + '枚生成しました。1枚選んで保存してください。', 'success');
+    } else {
+      strip.style.display = 'none';
+      document.getElementById('previewImage').src = toDataUri(images[0]);
+      updatePreviewInfo();
+      showMessage('生成しました。', 'success');
+    }
+    // 生成後は次の操作(保存)へ進めるようフォーカスを移す。
+    document.getElementById('setAsEyecatchButton').focus();
+  }
+
+  // 保存対象の画像データはパネル側が保持しているため、コマンドと選択位置だけを送る
   // (数MBのbase64文字列をWebview境界で往復させない)。
   function setAsEyecatch() {
-    if (!currentImage || LetsBlogLoading.isRunning()) return;
+    if (currentImages.length === 0 || LetsBlogLoading.isRunning()) return;
     LetsBlogLoading.begin({
       buttonIds: ['setAsEyecatchButton', 'addAsAssetButton'],
       text: 'アイキャッチとして保存しています…',
       kind: 'load',
     });
-    post('setAsEyecatch');
+    post('setAsEyecatch', { index: selectedIndex });
   }
 
   function addAsAsset() {
-    if (!currentImage || LetsBlogLoading.isRunning()) return;
+    if (currentImages.length === 0 || LetsBlogLoading.isRunning()) return;
     LetsBlogLoading.begin({
       buttonIds: ['setAsEyecatchButton', 'addAsAssetButton'],
       text: 'アセットとして保存しています…',
       kind: 'load',
     });
-    post('addAsAsset');
+    post('addAsAsset', { index: selectedIndex });
   }
 
   // Ctrl/Cmd+Enter で生成、Escape で実行中の処理を中断する。

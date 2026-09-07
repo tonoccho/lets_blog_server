@@ -57,8 +57,10 @@ export type ImageGenInboundMessage =
   | (WebviewMessageBase<'generate'> & { params: api.ImageGenerationParams })
   // 生成画像の実体(base64)はパネル側が保持し、Webviewからは送り返さない。
   // 数MBの文字列をWebview境界で往復させると、その都度コピーが作られるため。
-  | WebviewMessageBase<'setAsEyecatch'>
-  | WebviewMessageBase<'addAsAsset'>
+  // batch sizeで複数枚生成されるようになったため(issue #1104)、Webviewが送るのは
+  // 「生成結果の何枚目を保存するか」というindexだけにする。
+  | (WebviewMessageBase<'setAsEyecatch'> & { index: number })
+  | (WebviewMessageBase<'addAsAsset'> & { index: number })
   | (WebviewMessageBase<'sendChat'> & { history: api.PlanChatMessage[]; message: string; provider?: string });
 
 export type ImageGenOutboundCommand =

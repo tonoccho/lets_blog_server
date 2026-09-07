@@ -16,10 +16,11 @@ const ALLOWED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bm
  */
 export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, ImageGenOutboundCommand> {
   /**
-   * 直近の生成結果。base64データはここに1つだけ保持し、Webviewへは
-   * プレビュー表示用に一度送るだけにする(保存時に送り返させない)。
+   * 直近の生成結果(batch sizeで指定した枚数すべて。issue #1104)。base64データは
+   * ここだけに保持し、Webviewへはプレビュー表示用に一度送るだけにする
+   * (保存時はindexだけを送らせ、実体を送り返させない)。
    */
-  private _lastGenerated: api.AiImageResult | undefined;
+  private _lastGenerated: api.AiImageResult[] = [];
   /** 直近の生成に使ったprompt(アセット挿入時のalt文言に使う)。 */
   private _lastPrompt: string | undefined;
   /**
@@ -81,9 +82,9 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
       case 'generate':
         return this._handleGenerate(message);
       case 'setAsEyecatch':
-        return this._handleSetAsEyecatch();
+        return this._handleSetAsEyecatch(message.index);
       case 'addAsAsset':
-        return this._handleAddAsAsset();
+        return this._handleAddAsAsset(message.index);
       case 'sendChat':
         return this._handleSendChat(message);
     }
@@ -106,12 +107,12 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
   ): Promise<void> {
     const apiKey = await requireAccessToken(this.context);
     const actor = await getActor(this.context);
-    const result = await this.runCancellable((signal) =>
+    const results = await this.runCancellable((signal) =>
       api.generateImage(apiKey, actor, this._projectId, message.params, signal)
     );
-    this._lastGenerated = result;
+    this._lastGenerated = results;
     this._lastPrompt = message.params.prompt;
-    this.postMessage('generated', result);
+    this.postMessage('generated', results);
   }
 
   /** チャットメッセージ(と履歴)からOllamaで画像生成プロンプトを作成する。 */
@@ -134,8 +135,8 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
     this.postMessage('promptGenerated', result);
   }
 
-  private async _handleSetAsEyecatch(): Promise<void> {
-    const generated = this._requireGenerated();
+  private async _handleSetAsEyecatch(index: number): Promise<void> {
+    const generated = this._requireGenerated(index);
     const fileName = this._saveToAssets(generated.dataBase64, generated.fileName, 'eyecatch');
 
     const article = parseArticle(this._editor.document.getText());
@@ -146,8 +147,8 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
     vscode.window.showInformationMessage(`アイキャッチを 'assets/${fileName}' に設定しました。`);
   }
 
-  private async _handleAddAsAsset(): Promise<void> {
-    const generated = this._requireGenerated();
+  private async _handleAddAsAsset(index: number): Promise<void> {
+    const generated = this._requireGenerated(index);
     const fileName = this._saveToAssets(generated.dataBase64, generated.fileName, 'generated-asset');
 
     const markdownImage = `![${this._lastPrompt ?? ''}](assets/${fileName})`;
@@ -160,12 +161,23 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
     vscode.window.showInformationMessage(`アセットを 'assets/${fileName}' に追加しました。`);
   }
 
-  /** 保存対象の生成結果を取り出す。生成前に保存操作が来た場合は明示的に失敗させる。 */
-  private _requireGenerated(): api.AiImageResult {
-    if (!this._lastGenerated) {
+  /**
+   * 保存対象の生成結果を、Webviewで選択されている位置から取り出す(issue #1104)。
+   * 生成前に保存操作が来た場合と、選択位置が生成枚数の範囲外の場合は明示的に失敗させる
+   * (黙って先頭を保存すると、利用者が選んだのと違う画像が記事に入る)。
+   */
+  private _requireGenerated(index: number): api.AiImageResult {
+    if (this._lastGenerated.length === 0) {
       throw new Error('保存できる生成画像がありません。先に画像を生成してください。');
     }
-    return this._lastGenerated;
+    const selected = this._lastGenerated[index];
+    if (!selected) {
+      throw new Error(
+        `選択された画像が見つかりません(${this._lastGenerated.length}枚中${index + 1}枚目)。` +
+          'プレビューから画像を選び直してください。'
+      );
+    }
+    return selected;
   }
 
   /** Base64画像データを{baseDir}/assets配下へ保存し、生成したファイル名を返す。 */

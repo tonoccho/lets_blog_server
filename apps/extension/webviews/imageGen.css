@@ -18,6 +18,13 @@
   .preview-section { display: none; border: 1px solid var(--vscode-panel-border, #ccc); padding: 10px; }
   .preview-section img { max-width: 100%; display: block; margin-bottom: 8px; }
   .preview-info { font-size: 0.9em; opacity: 0.9; margin-bottom: 8px; white-space: pre-wrap; }
+  /* batch sizeで複数枚生成したときの候補一覧(issue #1104)。枚数が増えても
+     プレビュー領域の高さが伸びないよう、固定高さの横スクロールにする。 */
+  .thumbnail-strip { display: flex; gap: 8px; overflow-x: auto; margin-bottom: 8px; padding-bottom: 4px; }
+  .thumbnail { flex: 0 0 auto; padding: 2px; background: none; border: 2px solid transparent; line-height: 0; }
+  .thumbnail img { width: 96px; height: 96px; object-fit: contain; margin-bottom: 0; }
+  .thumbnail.selected { border-color: var(--vscode-focusBorder, #007acc); }
+  .thumbnail:focus-visible { outline: 1px solid var(--vscode-focusBorder, #007acc); outline-offset: 1px; }
   .button-group { display: flex; gap: 10px; }
   #message { margin-top: 16px; display: none; }
   #message.error { color: var(--vscode-errorForeground, #d32f2f); }
