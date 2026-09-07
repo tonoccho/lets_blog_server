@@ -16,6 +16,8 @@ jest(v8) の branch map も同様にコンパイル後の分岐を数える。
 
 レポートを必須にするのは、ランナーが実際に走査するツリー(`MEASURABLE_PATTERNS`)に
 限る。プロダクションコードではあるが計測手段が存在しない層は対象外として報告する(#988)。
+計測可能なツリーの中にあっても、実行時コードを一切 emit しない型定義のみのモジュールは
+計測エントリ自体が存在しえないため、別区分として報告したうえで免除する(#1116)。
 
 終了コード 0 = 基準を満たす / 1 = 満たさない・計測可能なのにレポートが無い。
 
@@ -76,6 +78,169 @@ def is_measurable(path):
     プロダクションコードかどうかは判定しない(それは `paths.is_production()` の役割)。
     """
     return any(r.search(path) for r in MEASURABLE_RE)
+
+
+# 型定義のみのモジュールの判定(#1116)。
+#
+# `apps/*/src/` には、実行時コードを一切生成しない TypeScript モジュールがある
+# (`export type` / `export interface` だけのファイル)。tsc が出力する JS が空になるため
+# istanbul は計測エントリを作らず、`coverage-final.json` にキーが現れない。
+# これを「テストをカバレッジ付きで回し忘れた」ケースと同じ失敗にすると、型を1行足しただけで
+# Merge Request が開けなくなる(#1104 で実際に発生した)。
+#
+# 判定はソースの正規表現による当て推量ではなく、**TypeScript 自身に emit させて**
+# 出力が空であることを確かめる。istanbul が計測するのはまさにその emit 結果なので、
+# 「計測エントリが存在しえない」ことの直接の根拠になる。
+#
+# `ts.transpileModule` は単一ファイルの構文変換(`isolatedModules` 相当)で、型情報を使わない。
+# そのぶん**保守的側に外れる**という性質がある:
+#   - 値として使われうる import は残す(副作用 import `import './polyfill';` は消えない)
+#   - enum / const enum は実体を出力する
+#   - 値と型が同名で衝突するような曖昧な場合は値として扱う
+# つまり誤判定は「実行時コードがある」= レポートを要求する側へ倒れる。
+# 判定できないとき(node が無い、typescript を解決できない、ファイルが読めない、
+# `.ts` / `.tsx` ではない)も同様に型のみとはみなさず、従来どおりレポートを要求する。
+#
+# 宣言ファイル(`.d.ts` / `.d.mts` / `.d.cts`)だけは emit 結果を見ない。tsc は宣言ファイルから
+# JS を1バイトも出力しないので、istanbul の計測エントリは定義上存在しえない。
+# しかも `ts.transpileModule` に `x.d.ts` という `fileName` をそのまま渡すと TypeScript が
+# `Debug Failure. Output generation failed` を投げるため、emit 結果で判定しようとすると
+# **すべての宣言ファイルが内容に関係なく免除されない**(実在する
+# `apps/web/src/types/next-auth.d.ts` がこれに当たった)。
+# そこで宣言ファイルは `fileName` から `.d` を落として TypeScript にパースさせ、
+# **構文エラーが1件も無いこと**を確認したうえで型のみとみなす。拡張子だけで通すのではなく、
+# 読めること・パースできることを実際に確かめるので、抜け穴にはならない。
+#
+# 起動コストは node + typescript のロードが支配的で、実測 0.15 秒(1ファイル)〜
+# 0.25 秒(20ファイルまとめて、1回の node 起動で処理)。しかもこの判定は
+# **レポートが見つからなかったファイルがある場合にしか**走らないので、
+# ゲートの常用経路(全ファイルにレポートがある)には一切コストがかからない。
+# `.d.mts` / `.d.cts` は `.ts` で終わらないため個別に挙げる。
+TYPE_ONLY_EXTENSIONS = (".ts", ".tsx", ".d.mts", ".d.cts")
+
+# 判定を諦めるまでの秒数。`guard.py` の `check_pr_coverage()` はこのスクリプト全体を
+# 120 秒で打ち切るので、**必ずそれより先に**諦める必要がある。外側が先に切れると
+# `TimeoutExpired` がフックまで抜け、「判定できなかった(=レポートを要求する)」という
+# 通常の失敗ではなく例外で終わってしまう。
+TYPE_ONLY_TIMEOUT_SECONDS = 30
+
+# emit 結果が「空」とみなせる形。ESNext モジュールとして emit すると、
+# 実行時の中身が無いモジュールは空文字か `export {};` だけになる。
+TYPE_ONLY_EMIT = ("", "export{};")
+
+# stdin から {root, files, resolveDirs, emptyEmits} を受け取り、実行時コードを emit しない
+# ファイルの一覧を JSON で返す。typescript はリポジトリ内の node_modules から解決する。
+TYPE_ONLY_HELPER_JS = r"""
+const fs = require('fs');
+const path = require('path');
+let input;
+try {
+  input = JSON.parse(fs.readFileSync(0, 'utf8'));
+} catch (e) {
+  process.exit(2);
+}
+const root = input.root;
+const dirs = [];
+for (const f of input.files) dirs.push(path.dirname(path.resolve(root, f)));
+for (const d of input.resolveDirs || []) dirs.push(d);
+let ts = null;
+for (const d of dirs) {
+  try {
+    ts = require(require.resolve('typescript', { paths: [d] }));
+    break;
+  } catch (e) {
+    /* 次の候補を試す */
+  }
+}
+if (!ts) process.exit(3);
+const compilerOptions = {
+  target: ts.ScriptTarget.ES2020,
+  module: ts.ModuleKind.ESNext,
+  jsx: ts.JsxEmit.React,
+  removeComments: true,
+  isolatedModules: true,
+};
+const DECLARATION = /\.d\.(ts|mts|cts)$/;
+const typeOnly = [];
+for (const f of input.files) {
+  let source;
+  try {
+    source = fs.readFileSync(path.resolve(root, f), 'utf8');
+  } catch (e) {
+    continue; // 読めないファイルは型のみとみなさない(厳しい側へ倒す)
+  }
+  const base = path.basename(f);
+  const isDeclaration = DECLARATION.test(base);
+  // 宣言ファイルの fileName をそのまま渡すと transpileModule が Debug Failure を投げるので、
+  // `.d` を落とした名前でパースさせる。ここでの関心は emit ではなく「パースできるか」。
+  const fileName = isDeclaration ? base.replace(DECLARATION, '.$1') : base;
+  let result;
+  try {
+    result = ts.transpileModule(source, {
+      compilerOptions,
+      fileName,
+      reportDiagnostics: isDeclaration,
+    });
+  } catch (e) {
+    continue; // 変換できないファイルも型のみとみなさない
+  }
+  if (isDeclaration) {
+    // 宣言ファイルは tsc が JS を出力しないので、パースできた時点で計測エントリは存在しえない。
+    if ((result.diagnostics || []).length === 0) typeOnly.push(f);
+    continue;
+  }
+  const stripped = result.outputText.replace(/\s+/g, '');
+  if (input.emptyEmits.indexOf(stripped) !== -1) typeOnly.push(f);
+}
+process.stdout.write(JSON.stringify(typeOnly));
+"""
+
+
+def typescript_resolve_dirs(root):
+    """typescript を探す候補ディレクトリ。リポジトリ内の各アプリと root を見る。"""
+    dirs = [ROOT, root]
+    apps = os.path.join(ROOT, "apps")
+    if os.path.isdir(apps):
+        dirs += [os.path.join(apps, d) for d in sorted(os.listdir(apps))]
+    return [d for d in dirs if os.path.isdir(d)]
+
+
+def emits_no_runtime_code(paths, root=ROOT):
+    """`paths` のうち、TypeScript が実行時コードを一切 emit しないファイルの集合を返す。
+
+    判定できない場合は空集合寄り(=型のみとみなさない)に倒す。理由は上のコメント。
+    """
+    candidates = [p for p in paths if p.endswith(TYPE_ONLY_EXTENSIONS)]
+    if not candidates:
+        return set()
+    payload = json.dumps(
+        {
+            "root": root,
+            "files": candidates,
+            "resolveDirs": typescript_resolve_dirs(root),
+            "emptyEmits": list(TYPE_ONLY_EMIT),
+        }
+    )
+    try:
+        proc = subprocess.run(
+            ["node", "-e", TYPE_ONLY_HELPER_JS],
+            input=payload,
+            capture_output=True,
+            text=True,
+            timeout=TYPE_ONLY_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()  # node が無い・起動できない・時間切れ
+    if proc.returncode != 0:
+        return set()  # typescript を解決できない等
+    try:
+        result = json.loads(proc.stdout)
+    except (TypeError, ValueError):
+        return set()
+    if not isinstance(result, list):
+        return set()
+    allowed = set(candidates)
+    return {p for p in result if p in allowed}
 
 
 def run(args):
@@ -203,6 +368,20 @@ def main():
         total_missed += missed
         total_covered += covered
 
+    # レポートが無いファイルのうち、実行時コードを emit しないものを切り分ける(#1116)。
+    # 「計測すべき分岐が存在しない」ことと「テストを回し忘れた」ことは別の事象であり、
+    # 前者だけを免除する。実行時コードを1行でも持つファイルは従来どおり落ちる。
+    if missing:
+        type_only = emits_no_runtime_code(missing)
+        missing = [p for p in missing if p not in type_only]
+        if type_only:
+            # `apps/*/webviews/` のような「計測できないが受け入れテストで検証する層」とは
+            # 別の区分として出す。型のみのモジュールには検証すべき実行時の振る舞いが無い。
+            print("次の変更ファイルは実行時コードを持たない型定義のみのモジュールです(検証すべき分岐がありません):")
+            for path in sorted(type_only):
+                print("  - %s" % path)
+            print("")
+
     if missing:
         print("次の変更ファイルのカバレッジレポートが見つかりません:")
         for path in missing:
@@ -211,6 +390,10 @@ def main():
         print("  ./gradlew :services:<svc>:test jacocoTestReport")
         print("  cd apps/web && npm run test:coverage")
         return 1
+
+    if not rows:
+        print("分岐を持つ変更はありませんでした。カバレッジ判定をスキップします。")
+        return 0
 
     total = total_missed + total_covered
     rate = 100.0 * total_covered / total if total else 100.0

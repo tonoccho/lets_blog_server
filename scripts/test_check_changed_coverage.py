@@ -14,7 +14,9 @@ import contextlib
 import importlib.util
 import io
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -200,6 +202,292 @@ class MeasurabilityClassifier(unittest.TestCase):
         for path in self.UNMEASURABLE:
             with self.subTest(path=path):
                 self.assertTrue(paths.is_production(path))
+
+
+class TypeOnlyModuleDetection(unittest.TestCase):
+    """`emits_no_runtime_code()` の判定(#1116)。
+
+    判定は正規表現による当て推量ではなく、**TypeScript 自身に emit させて**
+    出力が空(`export {};` だけ)であることを見る。istanbul が計測するのは
+    まさにその emit 結果なので、「計測エントリが存在しない」ことの根拠になる。
+
+    誤判定は必ず「厳しすぎる側」へ倒れること — 判定できない場合(node や
+    typescript が無い、ファイルが読めない、.ts 以外)は型のみとみなさず、
+    従来どおりレポートを要求する。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="ccc-typeonly-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def write(self, name, source):
+        path = os.path.join(self.tmp, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(source)
+        return name
+
+    def detect(self, names):
+        return ccc.emits_no_runtime_code(names, root=self.tmp)
+
+    # --- 型のみ(実行時コードが1行も残らない) ---
+
+    def test_type_and_interface_only(self):
+        rel = self.write(
+            "types.ts",
+            "export type A = { a: number };\nexport interface B { b: string }\n",
+        )
+        self.assertEqual(self.detect([rel]), {rel})
+
+    def test_type_only_tsx(self):
+        rel = self.write("props.tsx", "export interface Props { children?: unknown }\n")
+        self.assertEqual(self.detect([rel]), {rel})
+
+    def test_imports_used_only_as_types_are_erased(self):
+        """型としてしか使われない import は emit から消えるので型のみと判定する。"""
+        rel = self.write(
+            "aliases.ts",
+            "import type { Foo } from './foo';\n"
+            "import * as api from './api';\n"
+            "export type B = Foo & api.Bar;\n",
+        )
+        self.assertEqual(self.detect([rel]), {rel})
+
+    def test_declaration_only_module(self):
+        rel = self.write("ambient.ts", "declare module 'foo' { export type X = 1; }\nexport {};\n")
+        self.assertEqual(self.detect([rel]), {rel})
+
+    def test_comment_only_module(self):
+        rel = self.write("doc.ts", "// 説明だけのモジュール\n/* 何も出力しない */\n")
+        self.assertEqual(self.detect([rel]), {rel})
+
+    # --- 抜け穴防止: 実行時コードを1行でも持つなら型のみではない ---
+
+    def test_exported_const_is_runtime_code(self):
+        rel = self.write("const.ts", "export type A = number;\nexport const DEFAULT: A = 1;\n")
+        self.assertEqual(self.detect([rel]), set())
+
+    def test_function_is_runtime_code(self):
+        rel = self.write("fn.ts", "export interface P { p: number }\nexport function f(p: P) { return p.p; }\n")
+        self.assertEqual(self.detect([rel]), set())
+
+    def test_class_is_runtime_code(self):
+        rel = self.write("cls.ts", "export class C { m() { return 1; } }\n")
+        self.assertEqual(self.detect([rel]), set())
+
+    def test_enum_is_runtime_code(self):
+        rel = self.write("enum.ts", "export enum E { A, B }\n")
+        self.assertEqual(self.detect([rel]), set())
+
+    def test_const_enum_is_runtime_code(self):
+        """`const enum` も isolatedModules 下では実体が emit される。"""
+        rel = self.write("constenum.ts", "export const enum CE { A }\n")
+        self.assertEqual(self.detect([rel]), set())
+
+    def test_side_effect_import_is_runtime_code(self):
+        """副作用 import は型を書いていても実行時の振る舞いを持つ。"""
+        rel = self.write("sideeffect.ts", "import './polyfill';\nexport type A = { a: number };\n")
+        self.assertEqual(self.detect([rel]), set())
+
+    def test_declaration_file_with_runtime_neighbour(self):
+        """混在した入力でも、型のみのファイルだけが返ること。"""
+        types = self.write("mixed/types.ts", "export type A = number;\n")
+        code = self.write("mixed/logic.ts", "export const x = 1;\n")
+        self.assertEqual(self.detect([types, code]), {types})
+
+    # --- 宣言ファイル(.d.ts / .d.mts / .d.cts): 定義上ランタイムコードを emit しえない ---
+
+    def test_declaration_file_is_type_only(self):
+        """`.d.ts` は宣言ファイルであり、tsc は JS を1バイトも出力しない。"""
+        rel = self.write(
+            "shapes.d.ts",
+            "export type A = { a: number };\nexport interface B { b: string }\n",
+        )
+        self.assertEqual(self.detect([rel]), {rel})
+
+    def test_declaration_file_augmenting_a_module_is_type_only(self):
+        """`declare module` によるモジュール拡張(最も普通の .d.ts の形)。"""
+        rel = self.write(
+            "augment.d.ts",
+            'import type { X } from "lib";\n\ndeclare module "lib" {\n  interface Y { z: X }\n}\n',
+        )
+        self.assertEqual(self.detect([rel]), {rel})
+
+    def test_declaration_file_with_ambient_value_export_is_type_only(self):
+        """宣言された値を re-export していても、宣言ファイルからは実体が出ない。"""
+        rel = self.write("ambient-value.d.ts", "declare const x: number;\nexport { x };\n")
+        self.assertEqual(self.detect([rel]), {rel})
+
+    def test_declaration_mts_and_cts_are_type_only(self):
+        mts = self.write("esm.d.mts", "export type A = number;\n")
+        cts = self.write("cjs.d.cts", "export interface B { b: string }\n")
+        self.assertEqual(self.detect([mts, cts]), {mts, cts})
+
+    def test_real_repository_declaration_file(self):
+        """レビュー指摘の実例。`apps/web/src/types/next-auth.d.ts` は実在の宣言ファイル。"""
+        rel = "apps/web/src/types/next-auth.d.ts"
+        self.assertEqual(ccc.emits_no_runtime_code([rel]), {rel})
+
+    # --- 判定できないときは厳しい側へ倒す ---
+
+    def test_missing_file_is_not_type_only(self):
+        self.assertEqual(self.detect(["nonexistent.ts"]), set())
+
+    def test_missing_declaration_file_is_not_type_only(self):
+        """拡張子だけで無条件に通さない。読めない宣言ファイルは免除しない。"""
+        self.assertEqual(self.detect(["nonexistent.d.ts"]), set())
+
+    def test_unparsable_declaration_file_is_not_type_only(self):
+        """構文が壊れている宣言ファイルも免除しない(パースできることを確かめる)。"""
+        rel = self.write("broken.d.ts", "export interface A {\n  b: ;;; @@@\n")
+        self.assertEqual(self.detect([rel]), set())
+
+    def test_javascript_is_never_type_only(self):
+        rel = self.write("empty.js", "")
+        self.assertEqual(self.detect([rel]), set())
+
+    def test_node_unavailable_is_not_type_only(self):
+        rel = self.write("types.ts", "export type A = number;\n")
+        with mock.patch.object(ccc.subprocess, "run", side_effect=FileNotFoundError("node")):
+            self.assertEqual(self.detect([rel]), set())
+
+    def test_unparsable_output_is_not_type_only(self):
+        rel = self.write("types.ts", "export type A = number;\n")
+        fake = mock.Mock(returncode=0, stdout="typescript を解決できません", stderr="")
+        with mock.patch.object(ccc.subprocess, "run", return_value=fake):
+            self.assertEqual(self.detect([rel]), set())
+
+    def test_helper_failure_is_not_type_only(self):
+        rel = self.write("types.ts", "export type A = number;\n")
+        fake = mock.Mock(returncode=3, stdout="", stderr="Cannot find module 'typescript'")
+        with mock.patch.object(ccc.subprocess, "run", return_value=fake):
+            self.assertEqual(self.detect([rel]), set())
+
+    def test_timeout_is_bounded_well_inside_the_guard_timeout(self):
+        """判定は `guard.py` の外側タイムアウト(120秒)より十分早く諦めること。
+
+        外側が先に切れると `check_pr_coverage()` の `subprocess.run` が
+        `TimeoutExpired` を投げ、フックが「判定できなかった」ではなく
+        例外で終わる。内側が必ず先に諦めれば、厳しい側(=レポートを要求する)へ
+        倒れた通常の失敗として報告できる。
+        """
+        rel = self.write("types.ts", "export type A = number;\n")
+        captured = {}
+
+        def fake_run(*args, **kwargs):
+            captured.update(kwargs)
+            return mock.Mock(returncode=0, stdout="[]", stderr="")
+
+        with mock.patch.object(ccc.subprocess, "run", side_effect=fake_run):
+            self.detect([rel])
+        self.assertLessEqual(captured.get("timeout", 10**9), 60)
+
+    def test_timeout_is_not_type_only(self):
+        rel = self.write("types.ts", "export type A = number;\n")
+        expired = ccc.subprocess.TimeoutExpired(cmd="node", timeout=1)
+        with mock.patch.object(ccc.subprocess, "run", side_effect=expired):
+            self.assertEqual(self.detect([rel]), set())
+
+    def test_non_list_output_is_not_type_only(self):
+        """JSON ではあるが配列でない応答も信用しない。"""
+        rel = self.write("types.ts", "export type A = number;\n")
+        fake = mock.Mock(returncode=0, stdout='{"types.ts": true}', stderr="")
+        with mock.patch.object(ccc.subprocess, "run", return_value=fake):
+            self.assertEqual(self.detect([rel]), set())
+
+    def test_paths_outside_the_request_are_ignored(self):
+        """問い合わせていないパスが返ってきても採用しない。"""
+        rel = self.write("types.ts", "export type A = number;\n")
+        fake = mock.Mock(returncode=0, stdout='["types.ts", "other.ts"]', stderr="")
+        with mock.patch.object(ccc.subprocess, "run", return_value=fake):
+            self.assertEqual(self.detect([rel]), {rel})
+
+    def test_resolve_dirs_without_an_apps_directory(self):
+        """apps/ が無いツリーでも候補ディレクトリの算出が壊れないこと。"""
+        with mock.patch.object(ccc, "ROOT", os.path.join(self.tmp, "no-such-root")):
+            dirs = ccc.typescript_resolve_dirs(self.tmp)
+        self.assertEqual(dirs, [self.tmp])
+
+    def test_resolve_dirs_lists_each_app(self):
+        dirs = ccc.typescript_resolve_dirs(REPO_ROOT)
+        self.assertIn(os.path.join(REPO_ROOT, "apps", "extension"), dirs)
+
+    def test_no_candidates_does_not_invoke_node(self):
+        """計測可能な .ts が無いときは判定を起動しない(ゲートの常用経路を遅くしない)。"""
+        with mock.patch.object(ccc.subprocess, "run", side_effect=AssertionError("node を起動した")):
+            self.assertEqual(ccc.emits_no_runtime_code([], root=self.tmp), set())
+            self.assertEqual(ccc.emits_no_runtime_code(["a.java"], root=self.tmp), set())
+
+    def test_real_repository_type_only_module(self):
+        """#1116 の実例。`apps/extension/src/webviewMessages.ts` は全 export が型。"""
+        rel = "apps/extension/src/webviewMessages.ts"
+        self.assertEqual(ccc.emits_no_runtime_code([rel]), {rel})
+
+    def test_real_repository_runtime_module(self):
+        """同じツリーの実行時コードは型のみと判定されないこと。"""
+        rel = "apps/extension/src/proofreadLogic.ts"
+        self.assertEqual(ccc.emits_no_runtime_code([rel]), set())
+
+
+class TypeOnlyModuleGate(unittest.TestCase):
+    """型のみのモジュールに対するゲートの振る舞い(#1116)。"""
+
+    TYPE_ONLY = "apps/extension/src/webviewMessages.ts"
+    RUNTIME = "apps/extension/src/proofreadLogic.ts"
+    DECLARATION = "apps/web/src/types/next-auth.d.ts"
+
+    def test_type_only_module_without_report_passes(self):
+        code, out = run_main([self.TYPE_ONLY])
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("カバレッジレポートが見つかりません", out)
+
+    def test_type_only_module_is_reported_not_silently_dropped(self):
+        _, out = run_main([self.TYPE_ONLY])
+        self.assertIn(self.TYPE_ONLY, out)
+        self.assertIn("型定義のみ", out)
+
+    def test_type_only_report_is_distinct_from_the_unmeasurable_section(self):
+        """`apps/*/webviews/` のような「計測できないが検証は必要」な層と混同しないこと。"""
+        _, out = run_main([self.TYPE_ONLY])
+        self.assertNotIn("受け入れテストで検証する層", out)
+
+    def test_runtime_module_without_report_still_fails(self):
+        """抜け穴防止の要。実行時コードを持つファイルはレポート無しで落ちること。"""
+        code, out = run_main([self.RUNTIME])
+        self.assertEqual(code, 1)
+        self.assertIn("カバレッジレポートが見つかりません", out)
+        self.assertIn(self.RUNTIME, out)
+        self.assertNotIn("型定義のみ", out)
+
+    def test_type_only_does_not_mask_a_runtime_module(self):
+        code, out = run_main([self.TYPE_ONLY, self.RUNTIME])
+        self.assertEqual(code, 1)
+        self.assertIn(self.RUNTIME, out)
+
+    def test_type_only_path_with_a_report_is_still_measured(self):
+        """レポートに現れているなら免除しない(閾値判定は従来どおり)。"""
+        code, out = run_main([self.TYPE_ONLY], {self.TYPE_ONLY: (2, 8)})
+        self.assertEqual(code, 1)
+        self.assertIn("下回っています", out)
+
+    def test_declaration_file_without_report_passes(self):
+        """実在の `.d.ts` を変更しただけのブランチがゲートを通ること。"""
+        code, out = run_main([self.DECLARATION])
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("カバレッジレポートが見つかりません", out)
+        self.assertIn(self.DECLARATION, out)
+        self.assertIn("型定義のみ", out)
+
+    def test_declaration_file_does_not_mask_a_runtime_module(self):
+        code, out = run_main([self.DECLARATION, self.RUNTIME])
+        self.assertEqual(code, 1)
+        self.assertIn("カバレッジレポートが見つかりません", out)
+        self.assertIn(self.RUNTIME, out)
+
+    def test_only_type_only_changes_skips_the_gate(self):
+        code, out = run_main([self.TYPE_ONLY, "apps/extension/webviews/diagramGallery.js"])
+        self.assertEqual(code, 0, out)
+        self.assertIn("スキップ", out)
 
 
 if __name__ == "__main__":
