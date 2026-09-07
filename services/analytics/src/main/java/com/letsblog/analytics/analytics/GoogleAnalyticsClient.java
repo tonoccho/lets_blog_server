@@ -2,6 +2,7 @@ package com.letsblog.analytics.analytics;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.MissingNode;
+import com.letsblog.analytics.client.GoogleApiFailureMessage;
 import com.letsblog.analytics.config.LegacyJacksonRestClientConfig;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -77,7 +78,7 @@ public class GoogleAnalyticsClient {
             return accessToken;
         } catch (RestClientResponseException e) {
             throw new GoogleAnalyticsException(
-                    "Google OAuth認証に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+                    GoogleApiFailureMessage.of("Google OAuth認証", e.getStatusCode(), e.getResponseBodyAsString()), e);
         }
     }
 
@@ -99,8 +100,9 @@ public class GoogleAnalyticsClient {
             return parseReport(response);
         } catch (RestClientResponseException e) {
             throw new GoogleAnalyticsException(
-                    "Google Analytics Data APIの呼び出しに失敗しました: " + e.getStatusCode() + " "
-                            + e.getResponseBodyAsString(), e);
+                    GoogleApiFailureMessage.of(
+                            "Google Analytics Data APIの呼び出し", e.getStatusCode(), e.getResponseBodyAsString()),
+                    e);
         }
     }
 
@@ -170,8 +172,9 @@ public class GoogleAnalyticsClient {
             return response == null ? MissingNode.getInstance() : response;
         } catch (RestClientResponseException e) {
             throw new GoogleAnalyticsException(
-                    "Google Analytics Data APIの呼び出しに失敗しました: " + e.getStatusCode() + " "
-                            + e.getResponseBodyAsString(), e);
+                    GoogleApiFailureMessage.of(
+                            "Google Analytics Data APIの呼び出し", e.getStatusCode(), e.getResponseBodyAsString()),
+                    e);
         }
     }
 

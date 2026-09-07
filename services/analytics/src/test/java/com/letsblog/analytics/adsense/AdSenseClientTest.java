@@ -8,7 +8,9 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.http.HttpMethod.GET;
 import static org.springframework.http.HttpMethod.POST;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
@@ -169,5 +171,151 @@ class AdSenseClientTest {
     void クライアント資格情報が未設定なら例外() {
         assertThrows(AdSenseException.class,
                 () -> client.exchangeAuthorizationCode("", "", "code", "https://example.com/callback"));
+    }
+
+    /**
+     * issue #939 (AT-13) 受け入れ基準10。リフレッシュトークンが失効すると
+     * ダッシュボードのAdSenseパネルにこの文言がそのまま出る
+     * ({@code AdSenseReportResponse.error} → 「取得に失敗しました: …」)。
+     * 利用者が次に何をすればよいか(= 再認証)が読み取れる必要がある。
+     */
+    @Test
+    void refreshAccessToken_401なら再認証を促すメッセージになる() {
+        server.expect(requestTo(TOKEN_URI))
+                .andExpect(method(POST))
+                .andRespond(withStatus(HttpStatus.UNAUTHORIZED)
+                        .body("{\"error\":\"invalid_grant\",\"error_description\":\"Token has been expired\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        AdSenseException exception = assertThrows(
+                AdSenseException.class,
+                () -> client.refreshAccessToken("client-id", "client-secret", "refresh-abc"));
+
+        assertTrue(exception.getMessage().contains("再認証"), exception.getMessage());
+        assertFalse(exception.getMessage().contains("invalid_grant"), exception.getMessage());
+        assertFalse(exception.getMessage().contains("error_description"), exception.getMessage());
+    }
+
+    /** issue #939 (AT-13) 受け入れ基準11。レート制限は「認証に失敗」ではない。 */
+    @Test
+    void fetchReport_429なら回数制限と分かるメッセージになる() {
+        server.expect(requestTo(DATA_API_BASE_URL
+                        + "/v2/accounts/pub-123/reports:generate?dateRange=LAST_30_DAYS"
+                        + "&metrics=ESTIMATED_EARNINGS&metrics=CLICKS&metrics=IMPRESSIONS"))
+                .andExpect(method(GET))
+                .andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS)
+                        .body("{\"error\":{\"status\":\"RESOURCE_EXHAUSTED\"}}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        AdSenseException exception = assertThrows(
+                AdSenseException.class, () -> client.fetchReport("access-abc", "pub-123", "LAST_30_DAYS"));
+
+        assertTrue(exception.getMessage().contains("回数制限"), exception.getMessage());
+        assertFalse(exception.getMessage().contains("認証"), exception.getMessage());
+        assertFalse(exception.getMessage().contains("RESOURCE_EXHAUSTED"), exception.getMessage());
+    }
+
+    // ---- issue #939 (AT-13): 変更したファイルの分岐カバレッジ(C1/C2)を基準まで上げる ----
+    //
+    // 新しいふるまいではなく、既にあった分岐のうち到達していなかったものを埋める。
+    // CLAUDE.md の Coverage が求める 90% は「このIssueで変更したファイル」に掛かる。
+
+    @Test
+    void exchangeAuthorizationCode_refresh_tokenが空文字なら例外() {
+        server.expect(requestTo(TOKEN_URI))
+                .andExpect(method(POST))
+                .andRespond(withSuccess(
+                        "{\"access_token\":\"access-abc\",\"refresh_token\":\"\"}", MediaType.APPLICATION_JSON));
+
+        assertThrows(AdSenseException.class, () -> client.exchangeAuthorizationCode(
+                "client-id", "client-secret", "auth-code", "https://example.com/callback"));
+    }
+
+    @Test
+    void refreshAccessToken_access_tokenが含まれなければ例外() {
+        server.expect(requestTo(TOKEN_URI))
+                .andExpect(method(POST))
+                .andRespond(withSuccess("{\"token_type\":\"Bearer\"}", MediaType.APPLICATION_JSON));
+
+        assertThrows(AdSenseException.class,
+                () -> client.refreshAccessToken("client-id", "client-secret", "refresh-abc"));
+    }
+
+    @Test
+    void refreshAccessToken_access_tokenが空文字なら例外() {
+        server.expect(requestTo(TOKEN_URI))
+                .andExpect(method(POST))
+                .andRespond(withSuccess("{\"access_token\":\"\"}", MediaType.APPLICATION_JSON));
+
+        assertThrows(AdSenseException.class,
+                () -> client.refreshAccessToken("client-id", "client-secret", "refresh-abc"));
+    }
+
+    /** 本文の無い200。{@code body(GoogleOAuthTokens.class)} が null を返す経路。 */
+    @Test
+    void refreshAccessToken_トークン応答に本文が無ければ例外() {
+        server.expect(requestTo(TOKEN_URI)).andExpect(method(POST)).andRespond(withSuccess());
+
+        assertThrows(AdSenseException.class,
+                () -> client.refreshAccessToken("client-id", "client-secret", "refresh-abc"));
+    }
+
+    @Test
+    void クライアントIDがnullなら例外() {
+        assertThrows(AdSenseException.class,
+                () -> client.refreshAccessToken(null, "client-secret", "refresh-abc"));
+    }
+
+    @Test
+    void クライアントシークレットがnullなら例外() {
+        assertThrows(AdSenseException.class, () -> client.refreshAccessToken("client-id", null, "refresh-abc"));
+    }
+
+    @Test
+    void クライアントシークレットが空文字なら例外() {
+        assertThrows(AdSenseException.class, () -> client.refreshAccessToken("client-id", "", "refresh-abc"));
+    }
+
+    /** totals.cells が「空の配列」の場合。totals そのものが無い場合とは別の分岐を通る。 */
+    @Test
+    void fetchReport_totalsのcellsが空配列でも0を返す() {
+        expectReport("", "{\"totals\":{\"cells\":[]}}");
+        expectReport("&dimensions=DATE", "{}");
+        expectReport("&dimensions=PLATFORM_TYPE_NAME", "{}");
+
+        AdSenseReport report = client.fetchReport("access-abc", "pub-123", "LAST_30_DAYS");
+
+        assertEquals("0", report.estimatedEarnings());
+        assertEquals(0, report.clicks());
+        assertEquals(0, report.impressions());
+    }
+
+    /** 本文の無い200。{@code body(JsonNode.class)} が null を返す経路。 */
+    @Test
+    void fetchReport_応答に本文が無くても0を返す() {
+        expectEmptyReport("");
+        expectEmptyReport("&dimensions=DATE");
+        expectEmptyReport("&dimensions=PLATFORM_TYPE_NAME");
+
+        AdSenseReport report = client.fetchReport("access-abc", "pub-123", "LAST_30_DAYS");
+
+        assertEquals("0", report.estimatedEarnings());
+        assertEquals(0, report.dailyDataPoints().size());
+        assertEquals(0, report.platformBreakdown().size());
+    }
+
+    private String reportUri(String dimensions) {
+        return DATA_API_BASE_URL + "/v2/accounts/pub-123/reports:generate?dateRange=LAST_30_DAYS"
+                + dimensions + "&metrics=ESTIMATED_EARNINGS&metrics=CLICKS&metrics=IMPRESSIONS";
+    }
+
+    private void expectReport(String dimensions, String body) {
+        server.expect(requestTo(reportUri(dimensions)))
+                .andExpect(method(GET))
+                .andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
+    }
+
+    private void expectEmptyReport(String dimensions) {
+        server.expect(requestTo(reportUri(dimensions))).andExpect(method(GET)).andRespond(withSuccess());
     }
 }

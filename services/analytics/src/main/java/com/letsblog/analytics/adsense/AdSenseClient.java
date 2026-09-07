@@ -2,6 +2,7 @@ package com.letsblog.analytics.adsense;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.MissingNode;
+import com.letsblog.analytics.client.GoogleApiFailureMessage;
 import com.letsblog.analytics.config.LegacyJacksonRestClientConfig;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -102,7 +103,9 @@ public class AdSenseClient {
             return tokens;
         } catch (RestClientResponseException e) {
             throw new AdSenseException(
-                    "Google OAuthトークン取得に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+                    GoogleApiFailureMessage.of(
+                            "Google OAuthトークン取得", e.getStatusCode(), e.getResponseBodyAsString()),
+                    e);
         }
     }
 
@@ -129,8 +132,9 @@ public class AdSenseClient {
                     totals.estimatedEarnings(), totals.clicks(), totals.impressions(), dailyDataPoints, platformBreakdown);
         } catch (RestClientResponseException e) {
             throw new AdSenseException(
-                    "AdSense Management APIの呼び出しに失敗しました: " + e.getStatusCode() + " "
-                            + e.getResponseBodyAsString(), e);
+                    GoogleApiFailureMessage.of(
+                            "AdSense Management APIの呼び出し", e.getStatusCode(), e.getResponseBodyAsString()),
+                    e);
         }
     }
 

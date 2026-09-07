@@ -304,14 +304,31 @@ API: content `CustomTagController`, `CustomTagTemplateController`, `ProjectCusto
 画面: `/projects/[id]/settings/google-analytics`, `/projects/[id]/settings/adsense`, `/projects/[id]/dashboard`
 API: analytics `ProjectAnalyticsApiKeyController`, `ProjectDashboardController`
 
+受け入れシナリオは `apps/web/e2e/features/analytics/` の4ファイル・14シナリオ(#939 / AT-13)。
+**実 Google は叩かない。** 向き先は `docker-compose.e2e-stubs.yml` が `ga-stub` / `adsense-stub`
+へ差し替える(#928 / AT-2)ため、全シナリオが `@stub` である。状態欄について3点:
+
+- **`@api` と書いてある行は、ブラウザ経路がそもそも成立しない。** OAuth の起点
+  (`/connect/adsense/start`)は accounts.google.com へリダイレクトし、同意画面は
+  スタブ化の対象外(#928 が置き換えたのはトークン交換とレポートAPIだけ)なので、
+  認可コードをブラウザから得る手段が無い。`state` 照合だけは Next.js の Route Handler にあり、
+  `apps/web/src/app/connect/adsense/__tests__/callback-route.test.ts` が担当する。
+- **`実装中` の行はシナリオが書かれているが、この開発ホストでは実行できていない。**
+  Playwright のブラウザが OS の共有ライブラリを欠いていて起動しないため(#1045)。
+  ブラウザを起動できる環境で `npm run test:at` を通した時点で `検証済` へ変える。
+  AT-12(§2.10)と同じ扱いである。
+- **異常系の文言は #939 で直した。** 401 / 429 のとき、従来はステータスとGoogleの応答本文が
+  そのまま画面に出るだけで「再認証すればよい」「待てばよい」が伝わらなかった
+  (`GoogleApiFailureMessage`、コミット 9eb0eb87)。
+
 | 機能ID | 機能 | 利用者から見た価値 | 受け入れ基準(要約) | 対応シナリオ | 状態 |
 | --- | --- | --- | --- | --- | --- |
-| AC-ANA-001 | GA 認証情報の登録・削除 | 自分の計測データを見られる | `GET/PUT/DELETE /api-keys/google-analytics` の結果がダッシュボードの表示可否に反映される | — | 未着手 |
-| AC-ANA-002 | GA ダッシュボード | アクセス状況を把握できる | `GET /dashboard/google-analytics` の内容が画面に表示される | — | 未着手(`@stub`) |
-| AC-ANA-003 | AdSense 認証情報の登録・削除 | 収益を見られる | `GET/PUT/DELETE /api-keys/adsense` の結果がダッシュボードの表示可否に反映される | — | 未着手 |
-| AC-ANA-004 | AdSense クライアントシークレット | OAuth連携を設定できる | `PUT /api-keys/adsense/client-secret` 後、OAuth開始できる | — | 未着手 |
-| AC-ANA-005 | AdSense OAuth コールバック | 認可を完了できる | `POST /api-keys/adsense/oauth-callback` 後、ダッシュボードにデータが出る | — | 未着手(`@stub`) |
-| AC-ANA-006 | AdSense ダッシュボード | 収益状況を把握できる | `GET /dashboard/adsense` の内容が画面に表示される | — | 未着手(`@stub`) |
+| AC-ANA-001 | GA 認証情報の登録・削除 | 自分の計測データを見られる | `GET/PUT/DELETE /api-keys/google-analytics` の結果がダッシュボードの表示可否に反映される。保存した秘密鍵は画面にもAPI応答にも再表示されない | `features/analytics/credentials.feature` › Google Analytics の資格情報を登録すると、設定済みとして表示される / 登録済みの資格情報は、画面にもAPI応答にも平文で再表示されない / Google Analytics の資格情報を削除すると、未設定状態に戻る、`features/analytics/analytics-authorization.feature` › 未認証では資格情報の読み書きができない / 自分がメンバーでないプロジェクトの資格情報は読み書きできない | 検証済(`@api` の認可2シナリオ)/ 実装中(画面の3シナリオ。#1045 によりこの開発ホストではブラウザを起動できず未実行) |
+| AC-ANA-002 | GA ダッシュボード | アクセス状況を把握できる | `GET /dashboard/google-analytics` の内容が画面に表示される。未設定なら「未設定」と分かり、失効・レート制限・タイムアウトは理由が分かる形で示され画面が壊れない | `features/analytics/dashboard-report.feature` › GA資格情報が設定されたプロジェクトのダッシュボードに、スタブが返す指標が表示される / 資格情報が未設定のプロジェクトでは、ダッシュボードが未設定と分かる表示になる、`features/analytics/report-failures.feature` › 資格情報が失効していると、再認証が必要と分かるメッセージが出る / 外部APIがレート制限を返したとき、利用者に分かる形で示され画面が壊れない / 外部APIがタイムアウトしても、ダッシュボードの他のパネルは表示され続ける | 実装中(全て画面のシナリオ。#1045 によりこの開発ホストではブラウザを起動できず未実行)。文言そのものは `GoogleAnalyticsClientTest` が検証済 |
+| AC-ANA-003 | AdSense 認証情報の登録・削除 | 収益を見られる | `GET/PUT/DELETE /api-keys/adsense` の結果がダッシュボードの表示可否に反映される。クライアントシークレットとリフレッシュトークンは再表示されない | `features/analytics/credentials.feature` › AdSense のパブリッシャーIDとOAuthクライアントを登録できる / 登録済みの資格情報は、画面にもAPI応答にも平文で再表示されない、`features/analytics/analytics-authorization.feature` › 全2シナリオ(`adsense` 系4エンドポイントを含む) | 検証済(`@api` の認可2シナリオ)/ 実装中(画面の2シナリオ。#1045 によりこの開発ホストではブラウザを起動できず未実行) |
+| AC-ANA-004 | AdSense クライアントシークレット | OAuth連携を設定できる | `PUT /api-keys/adsense/client-secret` 後、Googleとの連携を開始できる。保存した値は再表示されない | `features/analytics/credentials.feature` › AdSense のパブリッシャーIDとOAuthクライアントを登録できる(設定済み表示と連携リンクの出現)/ 登録済みの資格情報は、画面にもAPI応答にも平文で再表示されない | 実装中(画面のシナリオ。#1045 によりこの開発ホストではブラウザを起動できず未実行) |
+| AC-ANA-005 | AdSense OAuth コールバック | 認可を完了できる | `POST /api-keys/adsense/oauth-callback` 後にレポートが取得でき、不正な認可コード・不正な `state` は拒否される | `features/analytics/credentials.feature` › AdSense の認可コードをコールバックで受け取ると、リフレッシュトークンが保存される / 不正な認可コードや不正なstateのコールバックは拒否される、単体 `src/app/connect/adsense/__tests__/callback-route.test.ts`(cookie と `state` の照合) | 検証済(`@stub` `@api`。Google の同意画面はスタブ化の対象外でブラウザ経路が成立しない) |
+| AC-ANA-006 | AdSense ダッシュボード | 収益状況を把握できる | `GET /dashboard/adsense` の内容が画面に表示される。未設定なら「未設定」と分かり、他パネルの障害に巻き込まれない | `features/analytics/dashboard-report.feature` › AdSense資格情報が設定されたプロジェクトのダッシュボードに、収益レポートが表示される / 資格情報が未設定のプロジェクトでは、ダッシュボードが未設定と分かる表示になる、`features/analytics/report-failures.feature` › 外部APIがタイムアウトしても、ダッシュボードの他のパネルは表示され続ける | 実装中(全て画面のシナリオ。#1045 によりこの開発ホストではブラウザを起動できず未実行)。レポートの取得自体は `credentials.feature` › 保存されたリフレッシュトークンでAdSenseのレポートを取得できる が `@api` で検証済 |
 
 ### 2.12 システム設定・バックアップ・拡張配布・ダッシュボード — `SYS`
 
@@ -572,7 +589,8 @@ APIレベルの受け入れテスト・単体テスト・手動チェックリ�
 (5領域 / 52 機能ID)。これが issue #927 が可視化しようとした穴である。
 `SET`(初回セットアップ)は #929(AT-3)で、`EXT`(VSCode拡張)は #942(AT-16)で、
 `PLAN`(記事プランとGitHub Issue連携)は #935(AT-9)で、
-`DIAG`(ダイアグラムとレンダリング)は #937(AT-11)で埋めた。
+`DIAG`(ダイアグラムとレンダリング)は #937(AT-11)で、
+`ANA`(Analytics)は #939(AT-13)で埋めた。
 なお `AI` の一部は拡張側(`AC-EXT-*`)から同じサーバー契約を検証しているが、
 Web管理画面としての受け入れ基準は AT-8 の担当のままである。
 
