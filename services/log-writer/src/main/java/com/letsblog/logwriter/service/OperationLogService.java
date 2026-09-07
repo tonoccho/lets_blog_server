@@ -46,6 +46,10 @@ public class OperationLogService {
 
     @Transactional
     public void record(OperationLog entry) {
+        // 記録時刻はキュー経路とフォールバック経路で同じ値を使う。どちらを通ったかで
+        // 時刻の意味が変わってはいけない。
+        LocalDateTime recordedAt = LocalDateTime.now();
+
         OperationLogMessage message = new OperationLogMessage(
                 entry.getOperationId(),
                 entry.getUserId(),
@@ -56,13 +60,23 @@ public class OperationLogService {
                 entry.getDurationMs(),
                 entry.isSuccess(),
                 entry.getErrorMessage(),
-                LocalDateTime.now().toString());
+                recordedAt.toString());
 
         try {
             rabbitTemplate.convertAndSend(
                     LogExchanges.LOG_EXCHANGE, LogExchanges.OPERATION_LOG_ROUTING_KEY, message);
         } catch (AmqpException e) {
             log.warn("操作ログのキュー発行に失敗したため、同期DB書き込みへフォールバックします", e);
+            // createdAtはここで入れる(issue #941)。呼び出し元が渡すOperationLogは
+            // OperationLogRequest#toDomainが組み立てたもので、createdAtを持たない。
+            // キュー経由ならLogMessageListenerがメッセージのcreatedAtから埋めるため
+            // 成立していたが、フォールバック経路には埋める者が居らず、
+            // operation_logs.created_at(NOT NULL)へnullを挿そうとして
+            // DataIntegrityViolationExceptionになっていた。RabbitMQ停止中の
+            // POST /api/operation-logs が500になり、ログを残すための経路が
+            // ログを落としていた。しかもWebのBFF(apps/web/src/lib/apiClient.tsの
+            // recordOperationLog)は記録の失敗を握り潰すので、誰も気付かない。
+            entry.setCreatedAt(recordedAt);
             repository.save(entry);
         }
     }

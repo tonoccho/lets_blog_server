@@ -17,6 +17,8 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -76,6 +78,55 @@ class OperationLogServiceTest {
         ArgumentCaptor<OperationLog> captor = ArgumentCaptor.forClass(OperationLog.class);
         verify(repository, times(1)).save(captor.capture());
         assertEquals("op-1", captor.getValue().getOperationId());
+    }
+
+    /**
+     * フォールバックで保存する行にも{@code created_at}が要る(issue #941 / AT-15)。
+     *
+     * <p>{@code operation_logs.created_at}は{@code nullable = false}だが、
+     * {@link com.letsblog.logwriter.dto.OperationLogRequest#toDomain}はこれを設定しない。
+     * 発行できた場合は{@link com.letsblog.logwriter.listener.LogMessageListener}が
+     * メッセージの{@code createdAt}から埋めるため成立していたが、フォールバック経路には
+     * それが無く、RabbitMQ停止中の{@code POST /api/operation-logs}は
+     * {@code DataIntegrityViolationException: Column 'created_at' cannot be null}で
+     * 500になっていた。BFF側({@code apps/web/src/lib/apiClient.ts}の
+     * {@code recordOperationLog})は記録の失敗を握り潰すため、
+     * <b>ログが落ちていること自体が誰にも見えない</b>。
+     *
+     * <p>受け入れテストの
+     * {@code apps/web/e2e/features/logging/async-path.feature}
+     * 「RabbitMQ停止中のログは、定義どおり操作ログとエラーログが残り監査ログが失われる」
+     * が同じ欠陥を経路全体で押さえる。
+     */
+    @Test
+    void record_フォールバックで保存する行にも作成日時が入る() {
+        service = new OperationLogService(repository, rabbitTemplate);
+        doThrow(new AmqpException("キュー接続エラー"))
+                .when(rabbitTemplate).convertAndSend(any(String.class), any(String.class), any(Object.class));
+        LocalDateTime before = LocalDateTime.now();
+
+        service.record(entry());
+
+        ArgumentCaptor<OperationLog> captor = ArgumentCaptor.forClass(OperationLog.class);
+        verify(repository, times(1)).save(captor.capture());
+        LocalDateTime createdAt = captor.getValue().getCreatedAt();
+        assertNotNull(createdAt, "created_atがnullのままではDBのNOT NULL制約で保存できない");
+        assertFalse(createdAt.isBefore(before), "created_atが記録時刻より前になっている");
+        assertFalse(createdAt.isAfter(LocalDateTime.now()), "created_atが未来になっている");
+    }
+
+    /** キューへ発行できた場合も、メッセージの{@code createdAt}は空にしない。 */
+    @Test
+    void record_キューへ発行するメッセージにも作成日時が入る() {
+        service = new OperationLogService(repository, rabbitTemplate);
+
+        service.record(entry());
+
+        ArgumentCaptor<OperationLogMessage> captor = ArgumentCaptor.forClass(OperationLogMessage.class);
+        verify(rabbitTemplate).convertAndSend(
+                eq(LogExchanges.LOG_EXCHANGE), eq(LogExchanges.OPERATION_LOG_ROUTING_KEY), captor.capture());
+        assertNotNull(captor.getValue().createdAt(), "メッセージのcreatedAtが空だと受信側が現在時刻で代替してしまう");
+        assertNotNull(LocalDateTime.parse(captor.getValue().createdAt()));
     }
 
     @Test

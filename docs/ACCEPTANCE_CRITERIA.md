@@ -354,13 +354,16 @@ API: log-writer `AuditLogController`, `OperationLogController`, `FrontendErrorLo
 
 | 機能ID | 機能 | 利用者から見た価値 | 受け入れ基準(要約) | 対応シナリオ | 状態 |
 | --- | --- | --- | --- | --- | --- |
-| AC-LOG-001 | 操作ログ一覧 (`/operation-logs`) | 誰が何をしたか追える | 操作を行うと `GET /api/operation-logs` に記録が現れる(#825 の再発検知: 常に空にならない) | — | 未着手 |
-| AC-LOG-002 | 操作ログの詳細 | 個別操作の内訳を見られる | `GET /api/operation-logs/{operationId}` が該当操作の詳細を返す | — | 未着手 |
-| AC-LOG-003 | 統合ログ | 操作と監査を突き合わせられる | `GET /api/operation-logs/unified` が両者を時系列で返す | — | 未着手 |
-| AC-LOG-004 | 監査ログ | 権限変更等を追跡できる | 権限変更後、`GET /api/audit-logs` に記録が現れる | — | 未着手 |
-| AC-LOG-005 | フロントエンドエラーログ | 画面側の異常を検知できる | `POST /api/logs/errors` した内容が `GET /api/logs/errors` で読める | — | 未着手 |
+| AC-LOG-001 | 操作ログ一覧 (`/operation-logs`) | 誰が何をしたか追える | 操作を行うと `GET /api/operation-logs` に記録が現れる(#825 の再発検知: 常に空にならない) | `features/logging/operation-log.feature` › 画面から業務操作を行うと、その操作が操作ログに記録され操作ログ画面に現れる | 検証済(記録は非同期のため、固定 sleep ではなくポーリングで待つ。操作ログを書くのは Web の BFF だけなので、操作は必ず画面から行う) |
+| AC-LOG-002 | 操作ログの詳細 | 個別操作の内訳を見られる | `GET /api/operation-logs/{operationId}` が該当操作の詳細を返す | `features/logging/operation-log.feature` › operationIdで1つの操作に紐づく一連のログを取得できる | 検証済 |
+| AC-LOG-003 | 統合ログ | 操作と監査を突き合わせられる | `GET /api/operation-logs/unified` が両者を時系列で返す | `features/logging/operation-log.feature` › 統合ビューで、複数サービスにまたがる1操作のログが時系列で並ぶ | 検証済(操作ログの発行元は log-writer、監査ログの発行元は project-service。この2件が揃うことを「複数サービスにまたがる」の判定にしている) |
+| AC-LOG-004 | 監査ログ | 権限変更等を追跡できる | 権限変更後、`GET /api/audit-logs` に記録が現れる。記録は利用者から改変・削除できない | `features/logging/audit-log.feature` › プロジェクトメンバーのロール付与・変更・剥奪が監査ログに記録される / 監査ログは利用者から改変・削除できない | 検証済(`@api`)。ただし**ユーザーの無効化・role 変更・一括削除は監査ログを1件も残さない**ため対象にできない(#1137)。記録が無いことを期待値として固定しない |
+| AC-LOG-005 | フロントエンドエラーログ | 画面側の異常を検知できる | `POST /api/logs/errors` した内容が `GET /api/logs/errors` で読める。送信は認証済みの経路で行われ、認証ゲートが有効でも欠落しない | `features/logging/frontend-error-log.feature` › 画面でクライアント側エラーが起きると、そのエラーが読み取りAPIで取得できる / エラーログの送信は認証済みの経路で行われ、認証ゲートが有効でも欠落しない | 検証済(#791 の退行検知。`errorLogger.ts` の送信先を `/client-errors` から `/api/logs/errors` へ戻すと2シナリオとも落ちることを実測で確認済み) |
 | AC-LOG-006 | 非同期生成ジョブの完了通知 | 長い処理の完了に気付ける | 生成ジョブがキュー経由で完了状態に遷移し、画面に反映される | — | 未着手(`@slow`) |
-| AC-LOG-007 | 操作者の解決 | ログに「誰が」が正しく残る | ログの操作者が実際のログインユーザーと一致する(#906 / #916 の再発検知) | — | 未着手 |
+| AC-LOG-007 | 操作者の解決 | ログに「誰が」が正しく残る | ログの操作者が実際のログインユーザーと一致する(#906 / #916 の再発検知) | `features/logging/operation-log.feature` › 操作ログに、誰が・いつ・何に対して・結果はどうだったかが記録されている、`features/logging/audit-log.feature` › 監査ログの各件には操作者・日時・対象・操作種別が揃っている、`features/logging/frontend-error-log.feature` › そのエラーログには発生画面のURLと操作者が記録されている | 検証済(`userId` と JWT の `sub` の両方を、実際にログインしたアカウントのものと突き合わせる) |
+| AC-LOG-008 | ログ経路の障害耐性 | ログのために業務操作が失敗しない | RabbitMQ または log-writer が停止していても、業務操作は成功し画面は壊れない | `features/logging/async-path.feature` › RabbitMQが停止していても業務操作は成功する / log-writerが停止していても画面からの業務操作は成功する | 検証済(`@slow` `@destructive`。実際にコンテナを停止する) |
+| AC-LOG-009 | 停止中に発生したログの扱い | ログが残るのか消えるのかが決まっている | 操作ログとフロントエンドエラーログは同期DB書き込みへフォールバックして**残る**。監査ログは発行元が `lbs_log` へ書けない(ADR-0004)ため**失われる**。取りこぼしを後から再送する仕組み(outbox)は無い | `features/logging/async-path.feature` › RabbitMQ停止中のログは、定義どおり操作ログとエラーログが残り監査ログが失われる | 検証済(`@slow` `@destructive`)。#941 で仕様を確定させた。確定の過程で、操作ログのフォールバックが `created_at` を設定せず 500 になる欠陥(記録は失われ、BFF が握り潰すので誰も気付かない)を発見し #941 で修正した |
+| AC-LOG-010 | ログの閲覧と認可 | 見たいログに辿り着け、他人のログは見えない | `/operation-logs` で種別とキーワードで絞り込める。監査ログは日時と利用者で絞り込める。一般ユーザーは他人の操作ログ・監査ログ・エラーログを読めない | `features/logging/log-viewing.feature` › 操作ログ画面で種別とキーワードによる絞り込みができる / 監査ログを日時と利用者で絞り込める / 一般ユーザーは他人の操作ログと監査ログを閲覧できない | 検証済。ただし `/operation-logs` の画面に**日時の絞り込みが無い**(#1138)。利用者の絞り込みは、操作ログAPIが常に閲覧者本人に固定されるため画面に持たせる意味が無く、対象外 |
 
 ### 2.14 VSCode拡張 — `EXT`
 
@@ -539,7 +542,7 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 | AT-12 (#938) | カスタムタグ・テンプレート・コンテンツ設定 | AC-TAG-001〜015 |
 | AT-13 (#939) | Analytics | AC-ANA-001〜006 |
 | AT-14 (#940) | システム設定・バックアップ・拡張配布・ダッシュボード | AC-SYS-001〜009 |
-| AT-15 (#941) | ログと非同期経路 | AC-LOG-001〜007 |
+| AT-15 (#941) | ログと非同期経路 | AC-LOG-001〜010(008〜010 は #941 で追加。ログ経路の障害耐性・停止中のログの扱い・閲覧と認可) |
 | AT-16 (#942) | VSCode拡張 | AC-EXT-001〜024(AC-EXT-019 は対象外) |
 | AT-17 (#943) | 認可・ルーティング・レート制限・相関ID・縮退 | AC-XC-001〜010 |
 | AT-18 (#944) | i18n・アクセシビリティ・レスポンシブ | AC-UX-001〜008 |
@@ -639,7 +642,7 @@ Web管理画面としての受け入れ基準は AT-8 の担当のままであ�
 | `/sites/[id]/edit` | AC-SITE-007〜009, AC-SITE-011 |
 | `/custom-tag-templates` | AC-TAG-008〜011 |
 | `/image-gallery` | AC-IMG-003〜008 |
-| `/operation-logs` | AC-LOG-001〜005 |
+| `/operation-logs` | AC-LOG-001〜005, AC-LOG-010 |
 
 ---
 
