@@ -275,10 +275,10 @@ Then('Keycloakのホスト型ログイン画面が表示される', async ({ pag
 | `site-registration.spec.ts` | AT-5 (#931) | 未 |
 | `post-creation.spec.ts` | AT-6 (#932) | 未 |
 | `image-upload.spec.ts` | AT-10 (#936) | **移行完了。spec は削除済み**(`features/media/image-gallery.feature`) |
-| `custom-tag-generation.spec.ts` | AT-12 (#938) | 未 |
+| `custom-tag-generation.spec.ts` | AT-12 (#938) | **移行完了**(`features/custom-tag/generation.feature`・`templates.feature`)。レスポンシブテスト1件だけを残してある — ブラウザ/ビューポート差の検証で、移行先は AT-18 (#944) が決める |
 | `service-degradation.spec.ts` | AT-17 (#943) | **移行完了。spec は削除済み**(`features/cross-cutting/service-degradation.feature`) |
-| `security.spec.ts` | AT-17 (#943) | 未 |
-| `performance.spec.ts` | — | 移行対象外。受け入れ基準ではなく応答時間の閾値検証であり、#915 の判断で「唯一の性能テスト」として Playwright spec のまま維持する |
+| `security.spec.ts` | AT-17 (#943) | 未。ただし**カスタムタグ領域の5件は AT-12 (#938) が移行済み**(`features/custom-tag/generation.feature`・`templates.feature`)。残る CSRF・SQLインジェクション・入力サニタイズは AC-XC-008〜010 で #943 の担当 |
+| `performance.spec.ts` | AT-12 (#938) | **移行完了。spec は削除済み**(`features/custom-tag/performance.feature`)。#915 は「唯一の性能テストとして spec のまま維持する」と判断していたが、#938 の受け入れ基準が2つの閾値を `.feature` として要求したため、そちらが新しい判断になる。「Ollamaレスポンス時間が10秒以内であること」だけは移行先を持たせずに削除した(理由は同 feature の冒頭) |
 
 ---
 

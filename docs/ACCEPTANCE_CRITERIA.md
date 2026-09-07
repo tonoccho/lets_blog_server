@@ -264,23 +264,32 @@ API: media `DiagramController`, `RenderController` / 拡張のダイアグラム
 画面: `/custom-tag-templates`, `/projects/[id]/tags`, `/admin/tag-design`
 API: content `CustomTagController`, `CustomTagTemplateController`, `ProjectCustomTagController`, `ProjectContentSettingsController`, `ContentCacheController` / project `TagDesignSettingController`, `GlobalTagDesignSettingController`
 
+受け入れシナリオは `apps/web/e2e/features/custom-tag/` の6ファイル(#938 / AT-12)。
+状態欄について2点:
+
+- **`@api` と書いてある行は、画面がそもそも存在しない**(AC-TAG-009 / 011 / 013)。
+  API も Server Action も実装済みで、それを呼ぶコンポーネントだけが無い。#1128 で扱う。
+- **`実装中` の行はシナリオが書かれているが、この開発ホストでは実行できていない。**
+  Playwright のブラウザが OS の共有ライブラリを欠いていて起動しないため(#1045)。
+  ブラウザを起動できる環境で `npm run test:at` を通した時点で `検証済` へ変える。
+
 | 機能ID | 機能 | 利用者から見た価値 | 受け入れ基準(要約) | 対応シナリオ | 状態 |
 | --- | --- | --- | --- | --- | --- |
-| AC-TAG-001 | カスタムタグ生成 | 記事に使う装飾を自分で作れる | プロンプトからタグが生成され自動保存される | `e2e/custom-tag-generation.spec.ts` › 正常系: プロンプト入力からタグ生成・自動保存までの完全フロー | 既存spec(`@stub`) |
-| AC-TAG-002 | タグ名のバリデーション | 使えない名前で作らずに済む | パターンに一致しないタグ名では生成が開始されない | `e2e/custom-tag-generation.spec.ts` › バリデーション: パターンに一致しないタグ名では生成が開始されない | 既存spec |
-| AC-TAG-003 | 生成物のセキュリティ検証 | 危険なHTMLが公開先へ入らない | script タグ・イベントハンドラ・`javascript:`・CSS `behavior` を含む生成は拒否され、生成後の検証結果(成功/警告/エラー)が画面に示される | `e2e/security.spec.ts` › XSS脆弱性チェック: scriptタグの検出 / XSS脆弱性チェック: イベントハンドラの検出 / XSS脆弱性チェック: JavaScriptプロトコルの検出 / CSS インジェクション検出: behavior プロパティ、`e2e/custom-tag-generation.spec.ts` › セキュリティ検証: 不正なHTMLを要求した場合は拒否されるか検証結果が示される | 既存spec |
-| AC-TAG-004 | 生成失敗時のエラー表示 | 失敗に気付ける | 生成に失敗するとエラーメッセージが表示される | `e2e/custom-tag-generation.spec.ts` › エラーハンドリング: 生成に失敗した場合はエラーメッセージが表示される | 既存spec |
-| AC-TAG-005 | タグの一覧・編集・削除 | 作ったタグを保守できる | `GET/PUT/DELETE /api/custom-tags` の結果が一覧に反映される | — | 未着手 |
-| AC-TAG-006 | タグ検証API | 貼る前に安全か確かめられる | `POST /api/custom-tags/validate` が `isValid` と理由を返す | (検証は AC-TAG-003 の spec 群が担保。応答時間は AC-PERF-001) | 既存spec(部分) |
-| AC-TAG-007 | CSSバンドルの取得 | 公開先でタグの見た目が再現される | `GET /api/custom-tags/css-bundle` がタグ定義に対応するCSSを返す | — | 未着手 |
-| AC-TAG-008 | テンプレートギャラリー (`/custom-tag-templates`) | 他人の作ったタグを再利用できる | 検索・詳細表示・クローンができる | `e2e/custom-tag-generation.spec.ts` › テンプレート検索・詳細表示・クローンフロー | 既存spec |
-| AC-TAG-009 | テンプレートの公開・非公開 | 共有範囲を選べる | `publish` / `unpublish` の結果がギャラリーの見え方に反映される | — | 未着手 |
-| AC-TAG-010 | テンプレート削除の認可 | 他人のテンプレートを消されない | 非adminユーザーはテンプレートを削除できない | `e2e/security.spec.ts` › 認可テスト: 非adminユーザーはテンプレートを削除できないこと | 既存spec |
-| AC-TAG-011 | 自分のテンプレート一覧 | 自作を管理できる | `GET /api/custom-tag-templates/my-templates` が自分の作成分を返す | — | 未着手 |
-| AC-TAG-012 | プロジェクト別タグとプレビュー | プロジェクトごとの見た目を確認できる | `GET /projects/{id}/custom-tags` と `POST /preview` が期待の描画を返す | — | 未着手 |
-| AC-TAG-013 | CSSセレクタ接頭辞の設定 | 公開先の既存CSSと衝突しない | `PUT /projects/{projectId}/css-selector-prefix` の設定が保存され、詳細画面に表示される(#913) | — | 未着手 |
+| AC-TAG-001 | カスタムタグ生成 | 記事に使う装飾を自分で作れる | プロンプトからタグが生成され自動保存される | `e2e/features/custom-tag/generation.feature` › プロンプトからタグを生成すると、検証を通過した内容が自動保存される || 実装中(画面のシナリオ。#1045 によりこの開発ホストではブラウザを起動できず未実行)、`@stub` |
+| AC-TAG-002 | タグ名のバリデーション | 使えない名前で作らずに済む | パターンに一致しないタグ名では生成が開始されない | `e2e/features/custom-tag/generation.feature` › 命名規則に反するタグ名では生成が開始されない || 実装中(画面のシナリオ。#1045 によりこの開発ホストではブラウザを起動できず未実行) |
+| AC-TAG-003 | 生成物のセキュリティ検証 | 危険なHTMLが公開先へ入らない | script タグ・イベントハンドラ・`javascript:`・CSS `behavior` を含む生成は拒否され、生成後の検証結果(成功/警告/エラー)が画面に示される | `e2e/features/custom-tag/generation.feature` › 危険なHTMLを含むカスタムタグは検証で拒否される / CSSのインジェクションを含むカスタムタグは検証で拒否される / プロンプトからタグを生成すると、検証を通過した内容が自動保存される(検証結果の表示) || 検証済(`@api` の2シナリオ)/ 実装中(画面のシナリオ。#1045 によりこの開発ホストではブラウザを起動できず未実行) |
+| AC-TAG-004 | 生成失敗時のエラー表示 | 失敗に気付ける | 生成に失敗するとエラーメッセージが表示される | `e2e/features/custom-tag/generation.feature` › 生成に失敗したときエラーが表示される || 実装中(画面のシナリオ。#1045 によりこの開発ホストではブラウザを起動できず未実行)、`@stub` |
+| AC-TAG-005 | タグの一覧・編集・削除 | 作ったタグを保守できる | `GET/PUT/DELETE /api/custom-tags` の結果が一覧に反映される。使用中のタグも削除でき、記事側はショートコードが未展開のまま残る | `e2e/features/custom-tag/management.feature` › 既存タグの内容を編集して保存でき、再読込後も反映されている / タグを削除すると、一覧から消える / 記事で使用中のタグを削除しても削除は成功し、記事にはショートコードが残る || 検証済(`@api` の1シナリオ)/ 実装中(画面のシナリオ。#1045 によりこの開発ホストではブラウザを起動できず未実行) |
+| AC-TAG-006 | タグ検証API | 貼る前に安全か確かめられる | `POST /api/custom-tags/validate` が `isValid` と理由を返す | `e2e/features/custom-tag/generation.feature` › 危険なHTMLを含むカスタムタグは検証で拒否される、`e2e/features/custom-tag/performance.feature` › カスタムタグの検証APIが所定の時間内に応答する | 検証済 |
+| AC-TAG-007 | CSSバンドルの取得 | 公開先でタグの見た目が再現される | `GET /api/projects/{id}/custom-tags/css-bundle` がタグ定義に対応するCSSを返し、画面から取得できる | `e2e/features/custom-tag/preview-and-css.feature` › プロジェクトの統合CSSに、そのプロジェクトのタグのCSSが含まれる || 実装中(画面のシナリオ。#1045 によりこの開発ホストではブラウザを起動できず未実行) |
+| AC-TAG-008 | テンプレートギャラリー (`/custom-tag-templates`) | 他人の作ったタグを再利用できる | ギャラリーから詳細を開き、複製が自分のプロジェクトへ独立して作られる | `e2e/features/custom-tag/templates.feature` › テンプレートを複製すると、自分のプロジェクトに独立した複製が作られる || 実装中(画面のシナリオ。#1045 によりこの開発ホストではブラウザを起動できず未実行) |
+| AC-TAG-009 | テンプレートの公開・非公開 | 共有範囲を選べる | `publish` / `unpublish` の結果が他利用者から見える一覧に反映される | `e2e/features/custom-tag/templates.feature` › タグをテンプレートとして公開すると、他の利用者からも見えるようになる / 公開をやめると、他の利用者から見えなくなる | 検証済(`@api`。切り替える画面が無い。#1128) |
+| AC-TAG-010 | テンプレート削除の認可 | 他人のテンプレートを消されない | 非adminユーザーはテンプレートを削除できない | `e2e/features/custom-tag/templates.feature` › 非adminは他人のテンプレートを削除できない | 検証済 |
+| AC-TAG-011 | 自分のテンプレート一覧 | 自作を管理できる | `GET /api/custom-tag-templates/my-templates` が自分の作成分だけを返す | `e2e/features/custom-tag/templates.feature` › 自分のテンプレート一覧には、自分が作ったものだけが出る | 検証済(`@api`。表示する画面が無い。#1128) |
+| AC-TAG-012 | プロジェクト別タグとプレビュー | プロジェクトごとの見た目を確認できる | 保存前のHTML/CSSでも、実際の投稿と同じ描画結果をプレビューで確認できる | `e2e/features/custom-tag/preview-and-css.feature` › タグのプレビューで、保存前に描画結果を確認できる || 実装中(画面のシナリオ。#1045 によりこの開発ホストではブラウザを起動できず未実行) |
+| AC-TAG-013 | CSSセレクタ接頭辞の設定 | 公開先の既存CSSと衝突しない | `PUT /api/projects/{projectId}/css-selector-prefix` の設定が統合CSSのセレクタへ反映され、他プロジェクトと衝突しない | `e2e/features/custom-tag/preview-and-css.feature` › CSSセレクタ接頭辞を変えると、統合CSSのセレクタが接頭辞付きになり他プロジェクトと衝突しない | 検証済(`@api`。変更する画面が無い。#1128) |
 | AC-TAG-014 | タグデザイン設定(プロジェクト/全体) | タグの見た目を一括で決められる | `/projects/{id}/tag-design-settings` と `/api/tag-design-settings` の保存・生成結果が公開先の見た目に反映される(#861 の再発検知) | — | 未着手 |
-| AC-TAG-015 | コンテンツキャッシュ | 外部URLの情報をカード表示できる | `GET /api/content-cache` が取得結果を返し、内部アドレスへの取得は拒否される(#902 SSRF の再発検知) | — | 未着手 |
+| AC-TAG-015 | コンテンツキャッシュ | 外部URLの情報をカード表示できる | `GET /api/content-cache` が取得結果を返してキャッシュし、内部アドレスへの取得は拒否される(#902 SSRF の再発検知) | `e2e/features/custom-tag/content-cache.feature` › 外部URLのコンテンツを取得してキャッシュできる / 内部アドレスのコンテンツ取得はSSRF対策で拒否される | 検証済 |
 
 ### 2.11 Analytics — `ANA`
 
@@ -453,11 +462,16 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 「面倒だから」は理由にならない。ここに移すのは、利用者から見た受け入れ基準が定義できないか、
 別の種類のテストが担当する場合だけ。
 
+**AC-PERF-001 / AC-PERF-003 は #938 (AT-12) で対象外から外した。** #915 は
+「受け入れ基準ではなく性能の閾値検証だから spec に残す」と判断していたが、#938 の受け入れ基準が
+この2つを `.feature` のシナリオとして要求したため、そちらが新しい判断になる。移行先は
+`e2e/features/custom-tag/performance.feature`(検証APIの応答時間 / タグ画面のページロード時間)で、
+移行元の `apps/web/e2e/performance.spec.ts` は削除した。
+**両シナリオとも外部LLMを呼ばない**ので、スタブ構成でも実LLM構成でも同じものを測る。
+
 | 機能ID | 機能 | 対象外の理由 |
 | --- | --- | --- |
-| AC-PERF-001 | カスタムタグ検証APIの応答時間 | 受け入れ基準ではなく性能の閾値検証。#915 の判断で `apps/web/e2e/performance.spec.ts` に残す。対応: `APIレスポンス時間が2秒以内であること` / `複数リクエストの並列処理パフォーマンス` |
-| AC-PERF-002 | AI生成の応答時間 | 同上。外部LLMの応答時間に依存し、受け入れ可否の判定に使えない。対応: `performance.spec.ts` › `Ollamaレスポンス時間が10秒以内であること` |
-| AC-PERF-003 | タグ画面のページロード時間 | 同上。対応: `performance.spec.ts` › `UIレンダリング性能: タグ画面のページロード時間` |
+| AC-PERF-002 | AI生成の応答時間 | 外部LLMの応答時間に依存し、受け入れ可否の判定に使えない。移行前の `performance.spec.ts` › `Ollamaレスポンス時間が10秒以内であること` は #938 で移行先を持たせずに削除した — 閾値10秒は当時の Ollama の実測に由来し、受け入れテストがLLMをスタブへ向ける現在の構成では**スタブの往復時間**を測ることにしかならないため。生成が成立すること自体は `e2e/features/custom-tag/generation.feature` が確かめる |
 | AC-EXT-019 | `letsBlog.previewDevTools` | 開発者向けのデバッグ機能。利用者から見た受け入れ基準を持たない |
 | AC-USR-012 | `POST /api/users/migrate-to-keycloak` | #566 のKeycloak移行時にのみ使う一度きりの移行操作。恒常的な利用者機能ではない |
 | AC-USR-013 | `POST /api/users/reconcile-keycloak` | 同上(移行後の突き合わせ用の運用操作) |

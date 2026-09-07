@@ -1,16 +1,7 @@
-import {
-  test,
-  expect,
-  type APIRequestContext,
-  type Dialog,
-  type Locator,
-  type Page,
-} from '@playwright/test';
+import { test, expect, type Dialog, type Locator, type Page } from '@playwright/test';
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
-  E2E_TEST_EMAIL,
-  E2E_TEST_PASSWORD,
   createFixtureProject,
   deleteFixtureProject,
   fetchAccessToken,
@@ -24,18 +15,26 @@ import {
  * (XSS/CSSインジェクション検出・CSRF保護・認可・SQLインジェクション耐性・入力サニタイズ)は
  * そのままに、現在の構成へ合わせて書き直している。
  *
- *   - 検証APIは gateway 経由の POST /api/custom-tags/validate(content-service の
- *     CustomTagController#validate)。PlaywrightのrequestフィクスチャからKeycloakの
- *     アクセストークン付きで呼ぶ(main-scenario.spec.ts と同じ方針)。
- *     レスポンスは `valid` ではなく `isValid`、エラー種別は CustomTagValidationService の
- *     `script-tag-detected` / `event-handler-detected` / `javascript-protocol-detected` /
- *     `css-injection-detected`。
  *   - カスタムタグ生成UIはプロジェクト詳細の「タグ」ページ(/projects/{id}/tags)の
  *     「カスタムタグ管理」タブ。requireAdminSession() で保護されているため
  *     helpers.ts の loginAsAdmin でログインしてから遷移する。
  *   - テンプレートギャラリーの実際のルートは `/custom-tag-templates`。
  *   - サニタイズテスト用のフィクスチャ(プロジェクト1件)は gateway のAPIを直接呼んで
  *     作成・削除する(理由は createFixtureProject() のコメント参照)。
+ *
+ * issue #938 (AT-12): このうち**カスタムタグ領域に属する2つの describe** は
+ * `e2e/features/custom-tag/` の受け入れシナリオへ移行し、このファイルから削除した。
+ *
+ * | 移行前のテスト | 移行先 |
+ * | --- | --- |
+ * | XSS脆弱性チェック: scriptタグ / イベントハンドラ / JavaScriptプロトコルの検出 | `generation.feature` › 危険なHTMLを含むカスタムタグは検証で拒否される(3例) |
+ * | CSS インジェクション検出: behavior プロパティ | `generation.feature` › CSSのインジェクションを含むカスタムタグは検証で拒否される |
+ * | 認可テスト: 非adminユーザーはテンプレートを削除できないこと | `templates.feature` › 非adminは他人のテンプレートを削除できない |
+ *
+ * **残した2つの describe は横断的品質(AT-17 / #943)の担当範囲**である。
+ * CSRF保護・SQLインジェクション耐性・入力サニタイズはカスタムタグ画面を舞台にしているが、
+ * 受け入れ基準はカスタムタグ機能ではなくアプリ全体の防御(AC-XC-008〜010)であり、
+ * 移行先は #943 が決める。
  */
 
 /** 「カスタムタグ管理」タブ内のAI生成フォーム。同じ画面の手動追加フォームと区別する。 */
@@ -122,94 +121,6 @@ async function clickGenerateUntilSubmitted(page: Page, form: Locator): Promise<n
       '握りつぶしている可能性が高い(issue #778)。'
   );
 }
-
-test.describe('カスタムタグ検証APIのセキュリティ', () => {
-  test.skip(!E2E_ADMIN_PASSWORD, 'E2E_ADMIN_PASSWORDが未設定のためスキップ');
-
-  /** 検証APIを呼び、エラー種別の配列とともに結果を返す。 */
-  async function validate(
-    request: APIRequestContext,
-    htmlTemplate: string,
-    cssContent: string
-  ): Promise<{ isValid: boolean; errorTypes: string[] }> {
-    const accessToken = await fetchAccessToken(request, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);
-    const response = await request.post('/api/custom-tags/validate', {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      data: { htmlTemplate, cssContent },
-    });
-    expect(
-      response.ok(),
-      `検証APIの呼び出しに失敗しました (status=${response.status()}): ${await response.text()}`
-    ).toBe(true);
-
-    const body = (await response.json()) as { isValid: boolean; errors: { type: string }[] };
-    return { isValid: body.isValid, errorTypes: body.errors.map((e) => e.type) };
-  }
-
-  test('XSS脆弱性チェック: scriptタグの検出', async ({ request }) => {
-    const { isValid, errorTypes } = await validate(
-      request,
-      '<div><script>alert("xss")</script>{{content}}</div>',
-      ''
-    );
-
-    // scriptタグはバリデーションエラーになる
-    expect(isValid).toBe(false);
-    expect(errorTypes).toContain('script-tag-detected');
-  });
-
-  test('XSS脆弱性チェック: イベントハンドラの検出', async ({ request }) => {
-    const { isValid, errorTypes } = await validate(
-      request,
-      '<div onclick="alert(\'xss\')">{{content}}</div>',
-      ''
-    );
-
-    // on* 属性はバリデーションエラーになる
-    expect(isValid).toBe(false);
-    expect(errorTypes).toContain('event-handler-detected');
-  });
-
-  test('XSS脆弱性チェック: JavaScriptプロトコルの検出', async ({ request }) => {
-    const { isValid, errorTypes } = await validate(
-      request,
-      '<a href="javascript:alert(\'xss\')">{{content}}</a>',
-      ''
-    );
-
-    // javascript: プロトコルはバリデーションエラーになる
-    expect(isValid).toBe(false);
-    expect(errorTypes).toContain('javascript-protocol-detected');
-  });
-
-  test('CSS インジェクション検出: behavior プロパティ', async ({ request }) => {
-    const { isValid, errorTypes } = await validate(
-      request,
-      '<div>{{content}}</div>',
-      '.alert { behavior: url(xss.htc); }'
-    );
-
-    // IE固有のCSS機能(expression/behavior)はバリデーションエラーになる
-    expect(isValid).toBe(false);
-    expect(errorTypes).toContain('css-injection-detected');
-  });
-});
-
-test.describe('カスタムタグテンプレートの認可', () => {
-  test.skip(!E2E_TEST_PASSWORD, 'E2E_TEST_PASSWORDが未設定のためスキップ');
-
-  test('認可テスト: 非adminユーザーはテンプレートを削除できないこと', async ({ request }) => {
-    // 現在の実装(CustomTagTemplateService#delete)は削除をadmin権限に限定しており、
-    // admin判定(AdminAuthorizationService#requireAdmin)は存在チェックより前に行われる。
-    // したがって非adminのトークンでは、テンプレートの有無に関わらず削除されず403になる。
-    const accessToken = await fetchAccessToken(request, E2E_TEST_EMAIL, E2E_TEST_PASSWORD);
-    const response = await request.delete('/api/custom-tag-templates/1', {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-
-    expect(response.status()).toBe(403);
-  });
-});
 
 test.describe('Web UIのセキュリティ', () => {
   test.skip(!E2E_ADMIN_PASSWORD, 'E2E_ADMIN_PASSWORDが未設定のためスキップ');

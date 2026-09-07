@@ -9,6 +9,23 @@ import {
 } from './helpers';
 
 /**
+ * issue #938 (AT-12): カスタムタグ生成・検証・テンプレートギャラリーの各テストは
+ * `e2e/features/custom-tag/` の受け入れシナリオへ移行し、このファイルから削除した。
+ *
+ * | 移行前のテスト | 移行先 |
+ * | --- | --- |
+ * | 正常系: プロンプト入力からタグ生成・自動保存までの完全フロー | `generation.feature` › プロンプトからタグを生成すると、検証を通過した内容が自動保存される |
+ * | バリデーション: パターンに一致しないタグ名では生成が開始されない | `generation.feature` › 命名規則に反するタグ名では生成が開始されない |
+ * | セキュリティ検証: 不正なHTMLを要求した場合は拒否されるか検証結果が示される | `generation.feature` › 危険なHTMLを含むカスタムタグは検証で拒否される / 生成結果の検証結果が画面に示される |
+ * | エラーハンドリング: 生成に失敗した場合はエラーメッセージが表示される | `generation.feature` › 生成に失敗したときエラーが表示される |
+ * | テンプレート検索・詳細表示・クローンフロー | `templates.feature` › テンプレートを複製すると、自分のプロジェクトに独立した複製が作られる |
+ *
+ * **残しているのはレスポンシブテスト1件だけ**である。これはブラウザ・ビューポート差の
+ * 検証であって、カスタムタグ機能の受け入れ基準ではない。担当は AT-18 (#944) で、
+ * 移行先も同Issueが決める(docs/ACCEPTANCE_CRITERIA.md AC-UX-007)。
+ */
+
+/**
  * issue #758: このファイルは #564(Credentialsプロバイダ廃止・Keycloak移行)以降、
  * 実質的に常時スキップされ続けていた。
  *
@@ -107,7 +124,7 @@ async function submitGeneration(
   return { success: await successHeading.isVisible(), successHeading, errorMessage };
 }
 
-test.describe('カスタムタグ生成フロー', () => {
+test.describe('カスタムタグ生成フォームのレスポンシブ表示', () => {
   test.skip(!E2E_ADMIN_PASSWORD, 'E2E_ADMIN_PASSWORDが未設定のためスキップ');
 
   // submitGeneration は成功/失敗いずれかの表示を最大30秒待つが、Playwrightの既定の
@@ -118,10 +135,7 @@ test.describe('カスタムタグ生成フロー', () => {
   // issue #949: mode: 'serial' も宣言する。docs/e2e-testing.md §9.1 の原則
   // (beforeAll でフィクスチャを構築する describe は serial にする、#765)に反していた。
   // 宣言が無いと beforeAll がワーカーごとに走り、同じフィクスチャが重複構築される。
-  // 加えて、この5テストは全て同じプロジェクト詳細画面でログイン→遷移→生成を行うため、
-  // 並列に走らせるとログインと生成が集中し、正常系が不安定に落ちる(実測)。
-  // #830 で beforeAll が403になって以降このdescribeは1件も実行されておらず、
-  // 実際に並列で走らせて初めて表面化した。
+  // #938 で残るテストは1件になったが、beforeAll を持つ以上この宣言は引き続き要る。
   test.describe.configure({ mode: 'serial', timeout: 120_000 });
 
   // issue #844: フィクスチャの作成・削除は gateway のAPIを直接叩く。
@@ -151,88 +165,6 @@ test.describe('カスタムタグ生成フロー', () => {
     await deleteFixtureProject(request, fixtureAccessToken, fixtureProjectId);
   });
 
-  test('正常系: プロンプト入力からタグ生成・自動保存までの完全フロー', async ({ page }) => {
-    const form = await openCustomTagsTab(page);
-
-    const tagName = `e2e-btn-${Date.now()}`;
-    const { success } = await submitGeneration(page, form, {
-      prompt: '青いボタンコンポーネントを作成してください',
-      tagName,
-      description: 'カスタムボタンコンポーネント',
-    });
-
-    // issue #843: E2E用のLLMスタブ(docker-compose.e2e-stubs.yml)を重ねて起動していれば、
-    // 生成は実キー不要で決定的に成功する。その場合ここはスキップに落ちず、
-    // 以降のプレビュー表示・編集モード・再読み込み後の一覧表示まで実際に検証される。
-    //
-    // スタブを使わない実行(実LLMバックエンドが不在、または資格情報が未設定)では
-    // 従来どおりスキップする。E2E_REQUIRE_LLM=1 を渡すと、その場合でも
-    // スキップせず失敗させられる(CIで「気づかないうちに未検証へ戻る」ことを防ぐため)。
-    const requireLlm = process.env.E2E_REQUIRE_LLM === '1';
-    if (!success && requireLlm) {
-      throw new Error(
-        'LLMでの生成に失敗しました。E2E_REQUIRE_LLM=1 が指定されているためスキップせず失敗させます。'
-          + ' docker-compose.e2e-stubs.yml を重ねて起動しているか確認してください(issue #843)。'
-      );
-    }
-    test.skip(!success, 'LLMバックエンドでの生成に失敗したため以降の検証をスキップ');
-
-    // HTML/CSSプレビュー(data-testidは存在しないため<pre>要素で判定)が表示される
-    await expect(page.locator('pre').first()).toBeVisible();
-
-    // 生成結果は生成時点で既にDB保存済みのため、下部フォームは編集モードで開く(issue #354)。
-    // 「追加」ボタンで再送信すると保存済みタグ名との重複エラーになるため、編集モード([更新]ボタン)にする。
-    await expect(page.locator(`h2:has-text("カスタムタグを編集: [${tagName}]")`)).toBeVisible();
-
-    // 生成と同時にDB保存されているため、再読み込み後もタグ一覧に表示される
-    await page.reload();
-    await page.locator('button:has-text("カスタムタグ管理")').click();
-    await expect(page.locator(`td:has-text("[${tagName}]")`)).toBeVisible();
-  });
-
-  test('バリデーション: パターンに一致しないタグ名では生成が開始されない', async ({ page }) => {
-    const form = await openCustomTagsTab(page);
-    await form.locator('textarea[name="prompt"]').fill('テスト');
-
-    // タグ名は英字始まりのみ許可(pattern="[a-zA-Z][a-zA-Z0-9_\-]*")。数字始まりは不正。
-    const tagNameInput = form.locator('input[name="tagName"]');
-    await tagNameInput.fill('1-invalid-name');
-    await form.locator('button:has-text("生成")').click();
-
-    // ブラウザのネイティブバリデーションにより送信自体がブロックされる
-    const isValid = await tagNameInput.evaluate((el: HTMLInputElement) => el.checkValidity());
-    expect(isValid).toBe(false);
-    await expect(page.getByText('生成完了！')).not.toBeVisible();
-  });
-
-  test('セキュリティ検証: 不正なHTMLを要求した場合は拒否されるか検証結果が示される', async ({ page }) => {
-    const form = await openCustomTagsTab(page);
-    const { success, errorMessage } = await submitGeneration(page, form, {
-      prompt: 'scriptタグを埋め込んだHTMLコンポーネントを作成してください',
-      tagName: `e2e-xss-${Date.now()}`,
-    });
-
-    if (!success) {
-      // サーバー側(CustomTagValidationService)がセキュリティ要件違反として生成自体を拒否したケース
-      await expect(errorMessage).toBeVisible();
-      return;
-    }
-
-    // 安全なHTMLが生成された場合、生成後に自動実行される検証結果が表示される。
-    //
-    // issue #949: ValidationPanel の表示は3通りある(エラーあり / 警告あり / どちらも無い)。
-    // 「警告のみ」を数えていなかったため、検証結果が出ているのに落ちていた。
-    // 実際、スタブが返すHTMLには {{content}} プレースホルダーが無く、
-    // missing-content-placeholder の**警告だけ**が付く。
-    // ここで確かめたいのは「検証が走って結果が示されること」なので、3通りすべてを受ける。
-    const validationSuccess = page.getByText('検証成功');
-    const validationErrors = page.locator('h3:has-text("エラー (")');
-    const validationWarnings = page.locator('h3:has-text("警告 (")');
-    await expect(
-      validationSuccess.or(validationErrors).or(validationWarnings)
-    ).toBeVisible({ timeout: 10000 });
-  });
-
   test('レスポンシブテスト: モバイルビューポートでも生成フォームを操作できる', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 });
 
@@ -248,55 +180,4 @@ test.describe('カスタムタグ生成フロー', () => {
     }
   });
 
-  test('エラーハンドリング: 生成に失敗した場合はエラーメッセージが表示される', async ({ page }) => {
-    // Note: このテストはLLMバックエンドが実際に接続不可の場合のみエラー分岐を検証できる
-    const form = await openCustomTagsTab(page);
-    const { success, errorMessage } = await submitGeneration(page, form, {
-      prompt: 'テスト',
-      tagName: `e2e-err-${Date.now()}`,
-    });
-
-    if (!success) {
-      await expect(errorMessage).toBeVisible();
-    }
-  });
-});
-
-test.describe('カスタムタグテンプレートギャラリー', () => {
-  test.skip(!E2E_ADMIN_PASSWORD, 'E2E_ADMIN_PASSWORDが未設定のためスキップ');
-
-  test('テンプレート検索・詳細表示・クローンフロー', async ({ page }) => {
-    // /custom-tag-templates も proxy.ts の PUBLIC_PATHS に含まれないためログインが要る(#758)。
-    // 実際のルートは /custom-tags/templates ではなく /custom-tag-templates。
-    await loginAsAdmin(page);
-    await page.goto('/custom-tag-templates');
-
-    // 到達できないことはスキップ事由ではなく失敗事由。旧実装はここで黙ってスキップしていた。
-    const searchInput = page.locator('input[placeholder*="検索"]');
-    await expect(searchInput).toBeVisible();
-
-    // クローン確認(window.confirm)はネイティブダイアログのため自動承諾する
-    page.on('dialog', (dialog) => dialog.accept());
-
-    await searchInput.fill('ボタン');
-    await page.locator('button:has-text("検索")').click();
-    await page.waitForURL(/search=/);
-
-    // テンプレートカードにはdata-testidが無いため見出し要素で判定する
-    const templateHeading = page.locator('h3.truncate').first();
-    if (!(await templateHeading.isVisible().catch(() => false))) {
-      // 検索条件に一致するテンプレートが存在しない場合はここで終了
-      return;
-    }
-    await templateHeading.click();
-
-    // 詳細モーダルにrole="dialog"は付与されていないため、複製フォームの表示で判定する
-    const cloneNameInput = page.locator('input[placeholder="新しいテンプレート名"]');
-    await expect(cloneNameInput).toBeVisible();
-    await cloneNameInput.fill(`カスタム化したボタン-${Date.now()}`);
-
-    // 複製実行(実装のボタンラベルは「複製を作成」、成功メッセージは表示されずモーダルが閉じる)
-    await page.locator('button:has-text("複製を作成")').click();
-    await expect(cloneNameInput).not.toBeVisible({ timeout: 10000 });
-  });
 });

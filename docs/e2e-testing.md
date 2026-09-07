@@ -49,9 +49,8 @@ Keycloak クライアント `letsblog-web` の redirect_uri が
 | `site-registration.spec.ts` | サイト管理・疎通確認(ManagedWordPress フィクスチャ) | admin |
 | `post-creation.spec.ts` | プロジェクト作成ワークフロー | admin |
 | `accessibility.spec.ts` | アクセシビリティ(アプリ画面 + Keycloak ログイン画面) | user |
-| `custom-tag-generation.spec.ts` | カスタムタグ生成(プロジェクト詳細タブ) | - |
-| `performance.spec.ts` | カスタムタグ検証 API の応答時間とタグ画面のページロード性能 | admin |
-| `security.spec.ts` | XSS/CSS インジェクション検出、テンプレート削除の認可、CSRF・SQL インジェクション対策 | 両方 |
+| `custom-tag-generation.spec.ts` | カスタムタグ生成フォームのレスポンシブ表示(残りは #938 で `features/custom-tag/` へ移行済み) | admin |
+| `security.spec.ts` | CSRF・SQL インジェクション対策・入力サニタイズ(XSS検出とテンプレート削除の認可は #938 で `features/custom-tag/` へ移行済み) | admin |
 
 ---
 
@@ -287,7 +286,7 @@ docker compose -f docker-compose.yml -f docker-compose.e2e-stubs.yml up -d
 ./scripts/e2e-clear-llm-db-overrides.sh
 
 # 生成が失敗したらスキップせず落とす(未検証へ戻ったことに気づけるようにする)
-E2E_REQUIRE_LLM=1 npx playwright test e2e/custom-tag-generation.spec.ts
+npm run test:at -- --grep "@custom-tag"
 ```
 
 スタブの一覧・応答内容・エラー注入の方法は
