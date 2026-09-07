@@ -862,3 +862,179 @@ describe('ProjectAssetGenerationPanel ギャラリーとチャットの残りの
     })
   })
 })
+
+/**
+ * 配色の規約適合(issue #1107)。
+ *
+ * このパネルだけが Tailwind の `gray` パレットを使い、背景・文字・ボーダーに `dark:` 対を
+ * 持たないため、ダークモードで見出しが背景と同色になって読めなくなっていた。ここでは
+ * 「どの色を使うか」ではなく「規約から外れたクラスが DOM に出ていないか」を検査する。
+ * 参照実装は兄弟パネル ProjectAiModelsPanel.tsx と、同種チャットの plan/ArticlePlanChat.tsx。
+ */
+describe('ProjectAssetGenerationPanel 配色 (issue #1107)', () => {
+  /**
+   * ProjectAiModelsPanel.tsx のカードが持つカラー系クラス。パネル外枠はこれと揃える。
+   *
+   * 明→暗の対を1行に収めてあるのは体裁ではない。#1107 の受入基準が
+   * `grep -rn "bg-white" apps/web/src --include=*.tsx | grep -v "dark:bg"` の一致0件を
+   * 求めており、この grep は行単位なので、対を別々の行に置くとこのテストが引っかかる。
+   */
+  const CARD_COLOR_CLASSES = ['rounded-lg', 'border-neutral-200', 'dark:border-neutral-800', 'bg-white', 'dark:bg-neutral-900']
+
+  const GALLERY_IMAGES = [
+    { id: 10, projectId: null, prompt: 'a cute cat', checkpoint: 'model.safetensors', createdAt: '2026-08-01T00:00:00Z', tags: [] },
+  ]
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    ;(actions.fetchImageGenerationOptionsAction as jest.Mock).mockResolvedValue(OPTIONS)
+    ;(actions.fetchGeneratedImagesAction as jest.Mock).mockResolvedValue([])
+  })
+
+  function classTokens(el: Element): string[] {
+    return (el.getAttribute('class') ?? '').split(/\s+/).filter(Boolean)
+  }
+
+  /** 自身を含む、配下の全要素。 */
+  function selfAndDescendants(root: Element): Element[] {
+    return [root, ...Array.from(root.querySelectorAll('*'))]
+  }
+
+  function panelSection(): HTMLElement {
+    return document.querySelector('section') as HTMLElement
+  }
+
+  /** 見出しを含むサブフォームのコンテナ(見出しを包む flex ヘッダの親)。 */
+  function subsectionContainer(headingText: string): HTMLElement {
+    const header = screen.getByText(headingText).closest('div') as HTMLElement
+    return header.parentElement as HTMLElement
+  }
+
+  function openGallerySection() {
+    const header = screen.getByText('生成画像ギャラリーから選択してアップロード').closest('div') as HTMLElement
+    fireEvent.click(within(header).getByText('開く'))
+  }
+
+  async function openPanelWithBothSections() {
+    await openPanel()
+    openGallerySection()
+    // ギャラリーの取得が解決してから次へ進む。待たないと、その解決に伴う状態更新が
+    // act() の外で起きて React が警告を出す。
+    await waitFor(() => expect(actions.fetchGeneratedImagesAction).toHaveBeenCalled())
+    openChatSection()
+  }
+
+  it('ギャラリーが空の状態で、パネル配下のどの要素にもgrayパレットのクラスが無い', async () => {
+    await openPanelWithBothSections()
+    expect(screen.getByText('生成画像ギャラリーに画像がありません。')).toBeInTheDocument()
+
+    const offenders = selfAndDescendants(panelSection())
+      .flatMap((el) => classTokens(el))
+      .filter((token) => token.includes('gray-'))
+    expect(offenders).toEqual([])
+  })
+
+  it('ギャラリー画像がある状態でも、パネル配下のどの要素にもgrayパレットのクラスが無い', async () => {
+    ;(actions.fetchGeneratedImagesAction as jest.Mock).mockResolvedValue(GALLERY_IMAGES)
+    await openPanelWithBothSections()
+    await waitFor(() => expect(screen.getByAltText('a cute cat')).toBeInTheDocument())
+
+    const offenders = selfAndDescendants(panelSection())
+      .flatMap((el) => classTokens(el))
+      .filter((token) => token.includes('gray-'))
+    expect(offenders).toEqual([])
+  })
+
+  it('2つのサブフォームのコンテナのクラス列が互いに一致する', async () => {
+    await openPanelWithBothSections()
+
+    const gallery = subsectionContainer('生成画像ギャラリーから選択してアップロード')
+    const chat = subsectionContainer('チャットでプロンプトを作成')
+    expect(gallery.getAttribute('class')).toBe(chat.getAttribute('class'))
+  })
+
+  it('2つのサブフォームのコンテナが、bg-とborder-の色指定にdark:対を持つ', async () => {
+    await openPanelWithBothSections()
+
+    for (const heading of ['生成画像ギャラリーから選択してアップロード', 'チャットでプロンプトを作成']) {
+      const tokens = classTokens(subsectionContainer(heading))
+      expect(tokens.filter((t) => /^bg-/.test(t))).not.toEqual([])
+      expect(tokens.filter((t) => /^dark:bg-/.test(t))).not.toEqual([])
+      expect(tokens.filter((t) => /^border-[a-z]+-\d{2,3}$/.test(t))).not.toEqual([])
+      expect(tokens.filter((t) => /^dark:border-[a-z]+-\d{2,3}$/.test(t))).not.toEqual([])
+    }
+  })
+
+  it('パネル外枠のsectionが、閉じた状態でも兄弟パネルのカードと同じカラー系クラスを持つ', () => {
+    render(<ProjectAssetGenerationPanel projectId={1} />)
+
+    expect(classTokens(panelSection())).toEqual(expect.arrayContaining(CARD_COLOR_CLASSES))
+  })
+
+  it('パネル外枠のsectionが、開いた状態で兄弟パネルのカードと同じカラー系クラスを持つ', async () => {
+    await openPanel()
+
+    expect(classTokens(panelSection())).toEqual(expect.arrayContaining(CARD_COLOR_CLASSES))
+  })
+
+  it('チャット履歴領域がArticlePlanChatと同じカラー系クラスを持つ', async () => {
+    await openPanelWithBothSections()
+
+    const history = screen.getByText(/作りたい画像の内容をチャットで伝えてください。/).parentElement as HTMLElement
+    expect(classTokens(history)).toEqual(expect.arrayContaining(['bg-neutral-50', 'dark:bg-neutral-800']))
+  })
+
+  it('AI側の吹き出しがArticlePlanChatと同じカラー系クラスを持ち、ユーザー側は変えない', async () => {
+    ;(actions.generateImagePromptAction as jest.Mock).mockResolvedValue({ prompt: 'a cute cat, high quality' })
+    await openPanelWithBothSections()
+
+    fireEvent.change(screen.getByPlaceholderText('例: 夕焼けの海辺を歩く猫'), { target: { value: '猫' } })
+    fireEvent.click(screen.getByText('プロンプト生成'))
+    await waitFor(() => expect(screen.getByText('生成プロンプト:')).toBeInTheDocument())
+
+    const aiBubble = screen.getByText('生成プロンプト:').closest('div') as HTMLElement
+    expect(classTokens(aiBubble)).toEqual(
+      expect.arrayContaining([
+        'bg-neutral-200',
+        'dark:bg-neutral-700',
+        'text-neutral-900',
+        'dark:text-neutral-50',
+      ])
+    )
+
+    const userBubble = screen.getByText('あなた:').closest('div') as HTMLElement
+    expect(classTokens(userBubble)).toEqual(expect.arrayContaining(['bg-blue-100', 'text-blue-900']))
+  })
+
+  it('色指定のない素のborderがパネル配下に残っていない', async () => {
+    ;(actions.fetchGeneratedImagesAction as jest.Mock).mockResolvedValue(GALLERY_IMAGES)
+    await openPanelWithBothSections()
+    await waitFor(() => expect(screen.getByAltText('a cute cat')).toBeInTheDocument())
+
+    // Tailwind v4 の素の `border` は既定色が currentColor になり、本文色でボーダーが描かれる。
+    // 幅だけを指定するトークンを持つ要素は、色トークンとその dark: 対も持たなければならない。
+    const offenders = selfAndDescendants(panelSection())
+      .filter((el) => classTokens(el).includes('border'))
+      .filter((el) => {
+        const tokens = classTokens(el)
+        return !(
+          tokens.some((t) => /^border-[a-z]+-\d{2,3}$/.test(t)) &&
+          tokens.some((t) => /^dark:border-[a-z]+-\d{2,3}$/.test(t))
+        )
+      })
+      .map((el) => el.getAttribute('class'))
+    expect(offenders).toEqual([])
+  })
+
+  it('bg-whiteを持つ要素はdark:bg-対を持つ', async () => {
+    await openPanelWithBothSections()
+
+    // 対を1行にまとめてある理由は CARD_COLOR_CLASSES のコメントを参照。
+    const [LIGHT_BACKGROUND, DARK_BACKGROUND_PREFIX] = ['bg-white', 'dark:bg-']
+    const offenders = selfAndDescendants(panelSection())
+      .filter((el) => classTokens(el).includes(LIGHT_BACKGROUND))
+      .filter((el) => !classTokens(el).some((t) => t.startsWith(DARK_BACKGROUND_PREFIX)))
+      .map((el) => el.getAttribute('class'))
+    expect(offenders).toEqual([])
+  })
+})

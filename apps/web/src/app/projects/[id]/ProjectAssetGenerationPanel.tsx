@@ -17,6 +17,26 @@ import {
 } from "./actions";
 
 /**
+ * パネル外枠のカード。同じ「AI」タブに並ぶ兄弟パネル ProjectAiModelsPanel.tsx と同じ
+ * クラス列にして、角丸半径・ボーダー色・背景を揃える(issue #1107)。Tailwind v4 では
+ * 色指定のない `border` の既定色が currentColor になり本文色でボーダーが描かれるため、
+ * 色は必ず明示する。
+ */
+const PANEL_CLASS =
+  "rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4";
+
+/**
+ * ネストする2つのサブフォーム(ギャラリー / チャット)のコンテナ。同じ階層・同じ役割なので
+ * 互いに同一のクラス列にする(issue #1107)。定数に切り出してあるのは、両者が一致している
+ * ことを ProjectAssetGenerationPanel.test.tsx が className の比較で検査するため。
+ *
+ * 背景に dark: 対が無いと、文字色を持たない中の <h3> が body の dark:text-neutral-50 を
+ * 継承してほぼ白の背景に載り、コントラスト比が約1.0:1 になって読めなくなる。
+ */
+const SUBSECTION_CLASS =
+  "space-y-3 rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 p-3";
+
+/**
  * プロジェクト管理画面でComfyUI画像を生成し(automatic1111相当のパラメータ)、
  * 選択した1枚をlocal/test/production全環境へアセットとしてアップロードするパネル。
  * フォーム項目はVSCode拡張のimageGenPanel.tsと揃えている。
@@ -238,7 +258,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
 
   if (!open) {
     return (
-      <section className="rounded border p-4">
+      <section className={PANEL_CLASS}>
         <button
           type="button"
           onClick={handleOpen}
@@ -251,26 +271,26 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
   }
 
   return (
-    <section className="space-y-4 rounded border p-4">
+    <section className={`space-y-4 ${PANEL_CLASS}`}>
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">アセット画像生成</h2>
-        <button type="button" onClick={() => setOpen(false)} className="text-sm text-gray-500 hover:underline">
+        <button type="button" onClick={() => setOpen(false)} className="text-sm text-neutral-500 dark:text-neutral-400 hover:underline">
           閉じる
         </button>
       </div>
 
-      <div className="space-y-3 rounded border bg-gray-50 p-3">
+      <div className={SUBSECTION_CLASS}>
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold">生成画像ギャラリーから選択してアップロード</h3>
-          <button type="button" onClick={handleGalleryToggle} className="text-xs text-gray-500 hover:underline">
+          <button type="button" onClick={handleGalleryToggle} className="text-xs text-neutral-500 dark:text-neutral-400 hover:underline">
             {galleryOpen ? "閉じる" : "開く"}
           </button>
         </div>
         {galleryOpen && (
           <>
-            {galleryLoading && <p className="text-xs text-gray-500">読み込んでいます…</p>}
+            {galleryLoading && <p className="text-xs text-neutral-500 dark:text-neutral-400">読み込んでいます…</p>}
             {galleryImages && galleryImages.length === 0 && (
-              <p className="text-xs text-gray-500">生成画像ギャラリーに画像がありません。</p>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">生成画像ギャラリーに画像がありません。</p>
             )}
             {galleryImages && galleryImages.length > 0 && (
               <>
@@ -308,29 +328,29 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
       </div>
 
       {loadingOptions ? (
-        <p className="text-sm text-gray-500">パラメータ選択肢を読み込んでいます…</p>
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">パラメータ選択肢を読み込んでいます…</p>
       ) : (
         <div className="grid gap-3">
-          <div className="space-y-2 rounded border bg-gray-50 p-3">
+          <div className={SUBSECTION_CLASS}>
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold">チャットでプロンプトを作成</h3>
               <button
                 type="button"
                 onClick={() => setChatOpen((v) => !v)}
-                className="text-xs text-gray-500 hover:underline"
+                className="text-xs text-neutral-500 dark:text-neutral-400 hover:underline"
               >
                 {chatOpen ? "閉じる" : "開く"}
               </button>
             </div>
             {chatOpen && (
               <>
-                <label className="flex items-center gap-2 text-xs text-gray-600">
+                <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400">
                   <span>AIプロバイダー</span>
                   <select
                     value={chatProvider}
                     onChange={(e) => setChatProvider(e.target.value)}
                     disabled={chatLoading}
-                    className="rounded border p-1 text-xs disabled:bg-gray-100"
+                    className="rounded border border-neutral-300 dark:border-neutral-700 p-1 text-xs disabled:bg-neutral-100 dark:disabled:bg-neutral-800"
                   >
                     <option value="">(プロジェクト/グローバル既定を使用)</option>
                     <option value="OLLAMA">Ollama</option>
@@ -338,9 +358,9 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
                     <option value="CLAUDE">Claude (Anthropic)</option>
                   </select>
                 </label>
-                <div className="max-h-48 space-y-2 overflow-y-auto rounded bg-white p-2">
+                <div className="max-h-48 space-y-2 overflow-y-auto rounded bg-neutral-50 dark:bg-neutral-800 p-2">
                   {chatHistory.length === 0 ? (
-                    <p className="text-xs text-gray-500">
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400">
                       作りたい画像の内容をチャットで伝えてください。生成されたプロンプトが下のprompt欄に反映されます。
                     </p>
                   ) : (
@@ -348,7 +368,9 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
                       <div
                         key={idx}
                         className={`rounded px-2 py-1 text-xs ${
-                          msg.role === "user" ? "bg-blue-100 text-blue-900" : "bg-gray-200 text-gray-900"
+                          msg.role === "user"
+                            ? "bg-blue-100 text-blue-900"
+                            : "bg-neutral-200 dark:bg-neutral-700 text-neutral-900 dark:text-neutral-50"
                         }`}
                       >
                         <strong>{msg.role === "user" ? "あなた" : "生成プロンプト"}:</strong> {msg.content}
@@ -368,7 +390,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
                     }}
                     placeholder="例: 夕焼けの海辺を歩く猫"
                     disabled={chatLoading}
-                    className="flex-1 rounded border p-2 text-xs disabled:bg-gray-100"
+                    className="flex-1 rounded border border-neutral-300 dark:border-neutral-700 p-2 text-xs disabled:bg-neutral-100 dark:disabled:bg-neutral-800"
                   />
                   <button
                     type="button"
@@ -386,7 +408,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
           <div>
             <label className="block text-sm font-medium">prompt</label>
             <textarea
-              className="mt-1 w-full rounded border p-2 text-sm"
+              className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               placeholder="生成したい画像の説明"
@@ -400,7 +422,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
           <div>
             <label className="block text-sm font-medium">negative prompt</label>
             <textarea
-              className="mt-1 w-full rounded border p-2 text-sm"
+              className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
               value={negativePrompt}
               onChange={(e) => setNegativePrompt(e.target.value)}
               placeholder={options?.defaultNegativePrompt ?? "low quality, blurry, watermark, text"}
@@ -411,7 +433,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
               <label className="block text-sm font-medium">steps</label>
               <input
                 type="number"
-                className="mt-1 w-full rounded border p-2 text-sm"
+                className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
                 value={steps}
                 min={1}
                 max={150}
@@ -423,7 +445,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
               <input
                 type="number"
                 step={0.1}
-                className="mt-1 w-full rounded border p-2 text-sm"
+                className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
                 value={cfgScale}
                 onChange={(e) => setCfgScale(Number(e.target.value))}
               />
@@ -432,7 +454,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
               <label className="block text-sm font-medium">seed(空欄でランダム)</label>
               <input
                 type="text"
-                className="mt-1 w-full rounded border p-2 text-sm"
+                className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
                 value={seed}
                 onChange={(e) => setSeed(e.target.value)}
               />
@@ -442,7 +464,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
             <div>
               <label className="block text-sm font-medium">sampler</label>
               <select
-                className="mt-1 w-full rounded border p-2 text-sm"
+                className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
                 value={samplerName}
                 onChange={(e) => setSamplerName(e.target.value)}
               >
@@ -456,7 +478,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
             <div>
               <label className="block text-sm font-medium">scheduler</label>
               <select
-                className="mt-1 w-full rounded border p-2 text-sm"
+                className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
                 value={scheduler}
                 onChange={(e) => setScheduler(e.target.value)}
               >
@@ -474,7 +496,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
               <input
                 type="number"
                 step={8}
-                className="mt-1 w-full rounded border p-2 text-sm"
+                className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
                 value={width}
                 onChange={(e) => setWidth(Number(e.target.value))}
               />
@@ -484,7 +506,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
               <input
                 type="number"
                 step={8}
-                className="mt-1 w-full rounded border p-2 text-sm"
+                className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
                 value={height}
                 onChange={(e) => setHeight(Number(e.target.value))}
               />
@@ -498,7 +520,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
                 type="number"
                 min={1}
                 max={16}
-                className="mt-1 w-full rounded border p-2 text-sm"
+                className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
                 value={batchSize}
                 onChange={(e) => setBatchSize(Number(e.target.value))}
               />
@@ -513,7 +535,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
                 min={1}
                 max={16}
                 aria-describedby="asset-batch-count-help"
-                className="mt-1 w-full rounded border p-2 text-sm"
+                className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
                 value={batchCount}
                 onChange={(e) => setBatchCount(Number(e.target.value))}
               />
@@ -529,7 +551,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
           <div>
             <label className="block text-sm font-medium">checkpoint</label>
             <select
-              className="mt-1 w-full rounded border p-2 text-sm"
+              className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
               value={checkpoint}
               onChange={(e) => setCheckpoint(e.target.value)}
             >
@@ -544,7 +566,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
             <div>
               <label className="block text-sm font-medium">LoRA</label>
               <select
-                className="mt-1 w-full rounded border p-2 text-sm"
+                className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
                 value={loraName}
                 onChange={(e) => setLoraName(e.target.value)}
               >
@@ -564,7 +586,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
                   step={0.1}
                   min={0}
                   max={2}
-                  className="mt-1 w-full rounded border p-2 text-sm"
+                  className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
                   value={loraWeight}
                   onChange={(e) => setLoraWeight(Number(e.target.value))}
                 />
@@ -584,7 +606,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
             <button
               type="button"
               onClick={handleCreateFromClipboard}
-              className="w-fit rounded border border-gray-400 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
+              className="w-fit rounded border border-neutral-300 dark:border-neutral-700 px-4 py-2 text-sm font-medium text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800"
             >
               クリップボードから作成
             </button>

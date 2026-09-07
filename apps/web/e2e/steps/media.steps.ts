@@ -373,3 +373,75 @@ Then('生成ボタンは押せる状態のままで、サーバーからの応�
   await expect(page.getByText(/CHATGPT/)).toBeVisible({ timeout: 180_000 });
   await expect(page.getByRole('button', { name: '生成', exact: true })).toBeEnabled();
 });
+
+/**
+ * ダークモードでの可読性(issue #1107)。
+ *
+ * アセット画像生成パネルのサブフォームは背景色を持つのに中の見出しが文字色を持たず、
+ * body 由来の色を継承していた。ライトでは偶然読めるがダークでは背景とほぼ同色になる。
+ * クラス名の検査は jest 側で足りるが、「実際に読める色になったか」は、カスケードを
+ * ブラウザに解決させて初めて分かる。ここでは getComputedStyle が返す実効色から
+ * WCAG 2.1 の相対輝度とコントラスト比を計算する。
+ */
+
+/** ThemeSwitcher が読む localStorage の値を、遷移前に仕込む。 */
+Given('テーマをダークにする', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem('theme', 'dark');
+  });
+});
+
+Then(
+  /^見出し「(.+)」の文字色と背景色のコントラスト比が「([\d.]+)」以上である$/,
+  async ({ page }, headingText: string, minimum: string) => {
+    const heading = page.getByRole('heading', { name: headingText });
+    await expect(heading).toBeVisible({ timeout: 15_000 });
+
+    const measured = await heading.evaluate((el) => {
+      /** `rgb(r, g, b)` / `rgba(r, g, b, a)` を数値へ。解釈できなければ null。 */
+      const parse = (value: string): [number, number, number, number] | null => {
+        const m = value.match(/rgba?\(([^)]+)\)/);
+        if (!m) return null;
+        const parts = m[1].split(/[\s,/]+/).filter(Boolean).map(Number);
+        if (parts.length < 3 || parts.some(Number.isNaN)) return null;
+        return [parts[0], parts[1], parts[2], parts.length > 3 ? parts[3] : 1];
+      };
+
+      // 最近傍の「透明でない背景色」を祖先方向へ探す。どの祖先も透明なら白地とみなす。
+      let node: Element | null = el;
+      let background: [number, number, number, number] = [255, 255, 255, 1];
+      while (node) {
+        const parsed = parse(getComputedStyle(node).backgroundColor);
+        if (parsed && parsed[3] > 0) {
+          background = parsed;
+          break;
+        }
+        node = node.parentElement;
+      }
+      const foreground = parse(getComputedStyle(el).color) ?? [0, 0, 0, 1];
+
+      // WCAG 2.1 の相対輝度。
+      const luminance = ([r, g, b]: number[]) => {
+        const channel = (c: number) => {
+          const s = c / 255;
+          return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+        };
+        return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+      };
+      const lf = luminance(foreground);
+      const lb = luminance(background);
+      const ratio = (Math.max(lf, lb) + 0.05) / (Math.min(lf, lb) + 0.05);
+      return {
+        ratio,
+        foreground: `rgb(${foreground.slice(0, 3).join(', ')})`,
+        background: `rgb(${background.slice(0, 3).join(', ')})`,
+      };
+    });
+
+    expect(
+      measured.ratio,
+      `見出し「${headingText}」のコントラスト比が不足しています: ` +
+        `文字色 ${measured.foreground} / 背景色 ${measured.background} = ${measured.ratio.toFixed(2)}:1`
+    ).toBeGreaterThanOrEqual(Number(minimum));
+  }
+);
