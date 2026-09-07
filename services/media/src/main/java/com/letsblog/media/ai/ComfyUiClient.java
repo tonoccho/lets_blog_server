@@ -30,11 +30,77 @@ import java.util.UUID;
 public class ComfyUiClient implements ImageGenerationProvider {
 
     private static final int POLL_INTERVAL_MS = 1000;
-    private static final int MAX_POLL_ATTEMPTS = 120;
+
+    /**
+     * 投入したバッチの枚数によらず必要な待ち時間(秒相当の回数)。キュー待ち・モデルのロード・
+     * VAEデコードなど、枚数に比例しない部分の取り分。
+     *
+     * <p>実測(512×512・20ステップ・単一GPU)の固定部分は約3秒だが、実測時は
+     * チェックポイントが常駐していた。コールドな読み込みと、GPUを共有する
+     * {@code lbs-ollama}(docker-compose.yml 920-995行)の推論待ちを見込んで60秒とする
+     * (実測の約20倍)。
+     */
+    static final int BASE_POLL_ATTEMPTS = 60;
+
+    /**
+     * 1枚あたりに上乗せする待ち時間(秒相当の回数)。
+     *
+     * <p><b>値の根拠(issue #1102 レビュー指摘)</b>。実測(512×512・20ステップ・単一GPU)は
+     * 1枚3.8秒 / 4枚5.3秒 / 16枚17秒 / 32枚34秒で、限界コストは約1.06秒/枚。
+     * 8秒/枚はその約7.5倍で、固定分(60秒)と合わせた1投入あたりの予算は
+     * どのbatchSizeでも実測の10倍以上になる。
+     *
+     * <pre>
+     *   batchSize=1  : 120秒 (下限。比例式では68秒)
+     *   batchSize=4  : 120秒 (下限。比例式では92秒)
+     *   batchSize=8  : 124秒 (実測7秒前後の17倍)
+     *   batchSize=16 : 188秒 (実測17秒の11.1倍)
+     * </pre>
+     *
+     * <p>比例式が{@link #MIN_POLL_ATTEMPTS}(120)を上回るのは{@code batchSize >= 8}から。
+     * それ未満は下限が効く。
+     *
+     * <p>#1102の当初実装は{@code 60 + 60 × batchSize}(16枚で1020秒=実測の60倍)だった。
+     * この過大な1枚あたりの取り分が最悪ケース4.5時間を生み、gatewayに5時間の
+     * {@code response-timeout}を要求し、nginxの{@code location /api/}(1200s)と
+     * 矛盾させていた。<b>1枚あたりの取り分を実測へ寄せることが、鎖全体を1時間以内へ
+     * 収める根拠</b>である。縮めてよいのは枚数に比例する部分だけで、#1102以前から
+     * 実行できた範囲の予算は{@link #MIN_POLL_ATTEMPTS}が守る。
+     *
+     * <p><b>見直しが要るとき</b>: {@code AiImageRequest}の{@code batchSize}/
+     * {@code batchCount}の上限を上げたとき、あるいは既定の解像度・ステップ数を
+     * 大きくしたとき。上限は
+     * {@code ImageGenerationTimeoutChainTest}(media)が
+     * {@code nginx >= gateway >= mediaの最悪ケース}として機械的に見ているので、
+     * そこが落ちたら3層すべて(このクラス /
+     * {@code services/gateway/src/main/resources/application.yml} の{@code ai-image} /
+     * {@code infra/nginx/conf.d/default.conf} の{@code location = /api/ai/image})を
+     * 揃えて直すこと。
+     */
+    static final int POLL_ATTEMPTS_PER_IMAGE = 8;
+
+    /**
+     * 投入したバッチの枚数によらず必ず与える最低の待ち時間(秒相当の回数)。
+     *
+     * <p><b>値の由来</b>: #1102以前の{@code MAX_POLL_ATTEMPTS = 120}。当時
+     * {@code batchSize}の上限は4で、予算はbatchSizeによらずこの120秒固定だった。
+     * 比例式{@code BASE + PER × batchSize}をそのまま当てると 1枚68秒 / 2枚76秒 /
+     * 4枚92秒となり、<b>#1102以前に実行できた入力の全域で予算が短くなる</b>。
+     * {@code AiImageRequest}は{@code width}/{@code height}を最大2048、{@code steps}を
+     * 最大150まで受理するので、512×512・20ステップの実測だけを根拠にこの範囲を縮めると、
+     * 以前なら通っていた重いリクエストが新たに504になりうる。#1102はbatchの追加であって
+     * 既存の単一画像生成を厳しくするものではないため、<b>従来の120秒を割り込まない</b>
+     * ことを下限として保証する(#1102 レビュー差し戻し note_4592)。
+     *
+     * <p>この下限は解像度・ステップ数を予算に織り込む代わりではない。重い単発生成に
+     * 見合う予算をパラメータから導く設計変更は#1111で扱う。
+     */
+    static final int MIN_POLL_ATTEMPTS = 120;
 
     private final RestClient client;
     private final ImageGenerationConfigProvider configProvider;
     private final String checkpointName;
+    private final int pollIntervalMs;
 
     @Autowired
     public ComfyUiClient(ImageGenerationConfigProvider configProvider,
@@ -44,10 +110,37 @@ public class ComfyUiClient implements ImageGenerationProvider {
 
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
     ComfyUiClient(RestClient.Builder builder, ImageGenerationConfigProvider configProvider, String checkpointName) {
+        this(builder, configProvider, checkpointName, POLL_INTERVAL_MS);
+    }
+
+    /** テスト専用: ポーリング間隔を詰めて、タイムアウトの検証を実時間を掛けずに行うためのコンストラクタ。 */
+    ComfyUiClient(RestClient.Builder builder, ImageGenerationConfigProvider configProvider,
+                  String checkpointName, int pollIntervalMs) {
         LegacyJacksonRestClientConfig.preferJackson2(builder);
         this.client = builder.build();
         this.configProvider = configProvider;
         this.checkpointName = checkpointName;
+        this.pollIntervalMs = pollIntervalMs;
+    }
+
+    /**
+     * 1回の投入を待つポーリング回数の上限(1回あたり{@value #POLL_INTERVAL_MS}ミリ秒)。
+     * 投入した枚数に比例して伸ばす(issue #1102)。ただし{@link #MIN_POLL_ATTEMPTS}
+     * (=#1102以前の固定値120)を下回らせない。{@code batchSize}が未指定・0以下のときは
+     * 1枚として扱う。
+     */
+    static int maxPollAttempts(Integer batchSize) {
+        int size = batchSize != null && batchSize > 0 ? batchSize : 1;
+        return Math.max(MIN_POLL_ATTEMPTS, BASE_POLL_ATTEMPTS + POLL_ATTEMPTS_PER_IMAGE * size);
+    }
+
+    /**
+     * 1回の投入を待つ上限を秒で返す。回数と間隔の掛け算を呼び出し側が再現すると
+     * {@code POLL_INTERVAL_MS}を変えたときに黙ってずれるため、変換はここに置く
+     * (タイムアウトの鎖を検証する{@code ImageGenerationTimeoutChainTest}が使う)。
+     */
+    static int maxPollSeconds(Integer batchSize) {
+        return maxPollAttempts(batchSize) * POLL_INTERVAL_MS / 1000;
     }
 
     /**
@@ -85,7 +178,7 @@ public class ComfyUiClient implements ImageGenerationProvider {
             throw new AiServiceException("ComfyUIへのジョブ投入に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
         }
 
-        List<JsonNode> outputImages = pollForResult(baseUrl, promptId);
+        List<JsonNode> outputImages = pollForResult(baseUrl, promptId, maxPollAttempts(params.batchSize()));
         List<ComfyUiImage> images = new ArrayList<>();
         for (JsonNode outputImage : outputImages) {
             String filename = outputImage.get("filename").asText();
@@ -112,8 +205,8 @@ public class ComfyUiClient implements ImageGenerationProvider {
         return images;
     }
 
-    private List<JsonNode> pollForResult(String baseUrl, String promptId) {
-        for (int attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
+    private List<JsonNode> pollForResult(String baseUrl, String promptId, int maxPollAttempts) {
+        for (int attempt = 0; attempt < maxPollAttempts; attempt++) {
             JsonNode history = client.get().uri(baseUrl + "/history/" + promptId).retrieve().body(JsonNode.class);
             JsonNode entry = history != null ? history.get(promptId) : null;
 
@@ -128,7 +221,7 @@ public class ComfyUiClient implements ImageGenerationProvider {
             }
 
             try {
-                Thread.sleep(POLL_INTERVAL_MS);
+                Thread.sleep(pollIntervalMs);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new AiServiceException("ComfyUIの結果待機が中断されました", e);

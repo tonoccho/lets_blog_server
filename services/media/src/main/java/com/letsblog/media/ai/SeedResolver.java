@@ -21,8 +21,14 @@ import org.springframework.stereotype.Component;
 public class SeedResolver {
 
     /**
-     * ランダムseedの上限(含む)。#1101以前の{@code System.nanoTime() & 0xFFFFFFFFL}と同じ
+     * seedの上限(含む)。#1101以前の{@code System.nanoTime() & 0xFFFFFFFFL}と同じ
      * 非負32bitの範囲を保つ。automatic1111系のUIが扱うseedもこの範囲に収まる。
+     *
+     * <p>ランダム値だけでなく、明示指定されたseedと{@code +repeatIndex}の結果にも
+     * この上限を適用する({@link #resolve(Long, int)})。リクエスト側の
+     * {@code AiImageRequest.seed}にも同じ上限を{@code @Max}として置いてあるので、
+     * ここへ届く値は既に範囲内だが、{@code +repeatIndex}で上端を越える場合だけは
+     * ここで巻き戻す。
      */
     static final long MAX_RANDOM_SEED = 0xFFFFFFFFL;
 
@@ -54,8 +60,30 @@ public class SeedResolver {
      * そうでなければ0以上{@link #MAX_RANDOM_SEED}以下のランダム値を返す。
      */
     public long resolve(Long requested) {
+        return resolve(requested, 0);
+    }
+
+    /**
+     * batch countのリピート{@code repeatIndex}回目(0起点)で使うseedを決める(issue #1102)。
+     *
+     * <p>seedが指定されている場合は{@code requested + repeatIndex}を返す。automatic1111の
+     * batch countと同じで、1回目は指定値そのもの、2回目は+1、…となる。同じ指定を再度投げれば
+     * 同じ並びの画像が得られる(再現性が壊れない)。
+     *
+     * <p>seedが未指定(または負値)の場合はリピートごとに新しいランダム値を引く。
+     * 「候補を何枚も見たい」ためのbatch countで同じseedを繰り返しても意味が無いためである。
+     *
+     * <p><b>戻り値は常に0以上{@link #MAX_RANDOM_SEED}以下</b>である。加算が上端を越える
+     * ときは0へ巻き戻す。#1102の当初実装はここを素の加算にしたうえで、
+     * 「{@code Long.MAX_VALUE}近傍であふれた値はComfyUIのKSamplerに拒否されるので
+     * そのリピートだけが失敗する」とJavadocに<b>事実として</b>書いていたが、それは
+     * 検証していない主張だった(#1102 レビュー指摘)。ComfyUIが負のseedをどう扱うかに
+     * 依存しないよう、あふれない形にして値域の保証を維持する。
+     * リクエストの{@code seed}にも同じ上限を{@code @Max}で置き、入口で弾いている。
+     */
+    public long resolve(Long requested, int repeatIndex) {
         if (requested != null && requested >= 0) {
-            return requested;
+            return (requested + repeatIndex) % (MAX_RANDOM_SEED + 1);
         }
         return random.nextLong(MAX_RANDOM_SEED + 1);
     }

@@ -311,12 +311,47 @@ app:
       #
       # response-timeoutは画像生成の実時間に合わせて延ばす。ComfyUI/ChatGPTの画像生成は
       # 既定の60秒(default-response-timeout)を超えうる。
+      #
+      # issue #1102で、生成(POST /api/ai/image)と参照(GET /api/ai/image-options)を
+      # 別ルートに分けた。生成は1リクエストで batchSize(最大16)×batchCount(最大16)=256枚を
+      # 同期で作りうる。
+      #
+      # response-timeout は「nginx >= gateway >= media の最悪ケース」という鎖の
+      # 真ん中として決める。この鎖は自動テストが固定している
+      # (media: ImageGenerationTimeoutChainTest / gateway: AiImageRouteTimeoutTest)。
+      #
+      #   media の最悪ケース  3308s = 300s(ポーリング以外: タグ提案LLM 180s + ジョブ2往復
+      #                              + 最大256枚の取得・保存) + 16リピート × 188s
+      #                              (ComfyUiClient のポーリング予算 60 + 8 × batchSize 秒)
+      #   gateway            3400s  ← ここ
+      #   nginx              3600s (infra/nginx/conf.d/default.conf の location = /api/ai/image)
+      #
+      # ポーリング予算 60 + 8 × batchSize 秒は実測から導いた。512×512・20ステップ・単一GPU
+      # (lbs-ollama とGPUを共有)で 1枚3.8秒 / 4枚5.3秒 / 16枚17秒 / 32枚34秒であり、
+      # この予算はどの batchSize でも実測の10倍以上になる(16枚で188秒 = 11.1倍)。
+      #
+      # #1102の当初実装はここが 18000s(5時間)だったが、実クライアントは必ず
+      # reverse-proxy(nginx)を通り、nginx の location /api/ が proxy_read_timeout 1200s
+      # で頭打ちにしていたため一度も効いていなかった(レビュー指摘)。gateway だけを
+      # 伸ばしても意味が無いので、3層まとめて 3600s 以内へ揃えている。
+      # gateway を nginx より少しだけ短くしてあるのは、先に gateway が 504 を返して
+      # 相関IDつきのエラーになるようにするため。
+      #
+      # 打ち切られた場合でも、それまでに生成できた画像は generated_images に残り
+      # ギャラリーには現れる。失われるのは応答だけ。
+      #
+      # 参照系の /api/ai/image-options に同じ長さを与えると、ComfyUIが無応答のときに
+      # 接続を何時間も掴んだままになるため、こちらは従来の300sのままにする。
+      - id: ai-image-options
+        uri: ${MEDIA_SERVICE_URI:http://media:8080}
+        paths:
+          - /api/ai/image-options
+        response-timeout: 300s
       - id: ai-image
         uri: ${MEDIA_SERVICE_URI:http://media:8080}
         paths:
           - /api/ai/image
-          - /api/ai/image-options
-        response-timeout: 300s
+        response-timeout: 3400s
       # LLM呼び出しはLLM_REQUEST_TIMEOUT_SECONDS(既定120秒)まで掛かりうり、記事プランの壁打ちは
       # Web検索+LLM呼び出しでさらに長くなりうるため、既定の60秒(default-response-timeout)より
       # 長いタイムアウトを設定する(issue #574の受入基準)。AiGenerationClient/GenerationJobClientの

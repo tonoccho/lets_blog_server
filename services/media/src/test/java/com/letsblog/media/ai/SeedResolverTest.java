@@ -115,6 +115,50 @@ class SeedResolverTest {
                         + "内部実装クラスはランタイム構成に依存する: " + implementation.getName());
     }
 
+    // --- issue #1102 レビュー指摘: seedの値域は +repeatIndex のあとも壊れない ---
+
+    /**
+     * {@code resolve()}の値域は0..{@code 0xFFFFFFFF}である。batch countのリピートで
+     * {@code repeatIndex}を足したあともこの範囲を出てはならない。
+     *
+     * <p>#1102の当初実装は「{@code Long.MAX_VALUE}近傍で加算があふれても、その値は
+     * ComfyUIのKSamplerに拒否されてそのリピートだけが失敗する」とJavadocに<b>事実として</b>
+     * 書いていたが、これは検証されていない主張だった(レビュー指摘)。主張を弱めるのではなく、
+     * <b>あふれない形</b>にして値域の保証を維持する。
+     */
+    @Test
+    void 値域の上端にrepeatIndexを足しても値域を出ない() {
+        SeedResolver resolver = new SeedResolver();
+        long max = 0xFFFFFFFFL;
+
+        assertEquals(max, resolver.resolve(max, 0));
+        assertEquals(0L, resolver.resolve(max, 1), "上端の次は0へ巻き戻る");
+        assertEquals(1L, resolver.resolve(max, 2));
+    }
+
+    @Test
+    void 値域内のどのseedにrepeatIndexを足しても0以上0xFFFFFFFF以下に収まる() {
+        SeedResolver resolver = new SeedResolver();
+        long max = 0xFFFFFFFFL;
+
+        for (long requested : new long[]{0L, 1L, 123456789L, max - 15, max - 1, max}) {
+            for (int repeat = 0; repeat < 16; repeat++) {
+                long seed = resolver.resolve(requested, repeat);
+                assertTrue(seed >= 0 && seed <= max,
+                        "seedが値域を出た: requested=" + requested + " repeat=" + repeat + " seed=" + seed);
+            }
+        }
+    }
+
+    @Test
+    void 値域内であればrepeatIndexぶんそのまま増える() {
+        SeedResolver resolver = new SeedResolver();
+
+        assertEquals(12345L, resolver.resolve(12345L, 0));
+        assertEquals(12346L, resolver.resolve(12345L, 1));
+        assertEquals(12347L, resolver.resolve(12345L, 2));
+    }
+
     /** {@code nextLong(bound)}だけを固定値に差し替える最小のRandomGenerator。 */
     private record FixedRandom(long value) implements RandomGenerator {
         @Override

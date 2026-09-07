@@ -9,6 +9,7 @@ import com.letsblog.media.service.ForbiddenException;
 import com.letsblog.media.service.GeneratedImageNotFoundException;
 import com.letsblog.media.service.GenerationJobBridgeException;
 import com.letsblog.media.service.IdentityServiceUnavailableException;
+import com.letsblog.media.service.UnsupportedBatchSizeException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -32,6 +33,15 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<ErrorResponse> handleIllegalState(IllegalStateException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /**
+     * issue #1102: プロバイダ別のbatchSize上限超過。リクエストの誤りなので400で返し、
+     * メッセージにプロバイダ名と上限を含める(利用者が枚数を直せるようにするため)。
+     */
+    @ExceptionHandler(UnsupportedBatchSizeException.class)
+    public ResponseEntity<ErrorResponse> handleUnsupportedBatchSize(UnsupportedBatchSizeException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(GeneratedImageNotFoundException.class)
