@@ -296,3 +296,80 @@ After({ tags: '@media' }, async ({ ctx, request }) => {
     await request.delete(`/api/projects/${projectId}`, { headers });
   }
 });
+
+/**
+ * アセット画像生成フォームのbatch size / batch count(issue #1103)のステップ定義。
+ *
+ * ここは #1102 のステップと違い、APIを直接叩かず**画面から**操作する。確かめたいのが
+ * 「フォームがどの値を出し、どの値を送り、返ってきた枚数をどう見せるか」だからである。
+ * 画像生成AIには ChatGPT スタブを使う(ComfyUI はGPU必須の任意サービスで受け入れテスト環境に
+ * 常在しない)。スタブは1回に10枚までしか作れないため、16×16 のシナリオは**サーバー側で
+ * 拒否される**のが正しい結末で、それでもフォームが要求を送ったことがこのシナリオの主張になる。
+ *
+ * 生成された画像の後始末は上の `@media` の After が ctx.mediaProjectId ごと行う
+ * (画面から作った画像はプロジェクトに紐づくため、プロジェクト削除で一緒に消える)。
+ */
+
+/** アセット画像生成パネルの、ラベル文字列で特定する数値入力。 */
+function panelNumberInput(page: Page, label: string) {
+  return page.getByLabel(label);
+}
+
+When('そのプロジェクトの管理画面でアセット画像生成パネルを開く', async ({ ctx, page }) => {
+  await page.goto(`/projects/${ctx.mediaProjectId}`, { waitUntil: 'commit' });
+  await page.locator('button:has-text("アセット画像生成")').click();
+  await expect(page.getByRole('heading', { name: 'アセット画像生成' })).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(page.getByPlaceholder('生成したい画像の説明')).toBeVisible({ timeout: 15_000 });
+});
+
+Then(/^batch sizeの入力があり、上限は「(\d+)」である$/, async ({ page }, max: string) => {
+  const input = panelNumberInput(page, `batch size(最大${max})`);
+  await expect(input).toBeVisible();
+  await expect(input).toHaveAttribute('max', max);
+});
+
+Then(/^batch countの入力があり、上限は「(\d+)」である$/, async ({ page }, max: string) => {
+  const input = panelNumberInput(page, `batch count(最大${max})`);
+  await expect(input).toBeVisible();
+  await expect(input).toHaveAttribute('max', max);
+});
+
+Then('合計枚数の目安と、枚数によっては長時間かかる旨が表示される', async ({ page }) => {
+  await expect(page.getByText(/この設定で合計\d+枚/)).toBeVisible();
+  await expect(page.getByText(/非常に長時間かかります/)).toBeVisible();
+});
+
+When(
+  /^batch sizeに「(\d+)」、batch countに「(\d+)」を入力して生成する$/,
+  async ({ page }, batchSize: string, batchCount: string) => {
+    await page.getByPlaceholder('生成したい画像の説明').fill('e2e 1103 asset image');
+    await panelNumberInput(page, 'batch size(最大16)').fill(batchSize);
+    await panelNumberInput(page, 'batch count(最大16)').fill(batchCount);
+    const generate = page.getByRole('button', { name: '生成', exact: true });
+    await expect(generate).toBeEnabled();
+    await generate.click();
+  }
+);
+
+Then(/^生成結果に画像が「(\d+)」枚並ぶ$/, async ({ page }, expected: string) => {
+  const grid = page.getByTestId('generated-image-grid');
+  await expect(grid).toBeVisible({ timeout: 180_000 });
+  await expect(grid.locator('img')).toHaveCount(Number(expected), { timeout: 180_000 });
+});
+
+Then('生成結果の1枚を選んでアセットとして追加できる', async ({ page }) => {
+  await page.getByTestId('generated-image-grid').locator('img').first().click();
+  await page.getByRole('button', { name: 'アセットとして追加(全環境へアップロード)' }).click();
+  await expect(page.getByText(/環境へアップロードしました。|環境でアップロードに失敗しました。/)).toBeVisible({
+    timeout: 120_000,
+  });
+});
+
+Then('生成ボタンは押せる状態のままで、サーバーからの応答が表示される', async ({ page }) => {
+  // フォームが要求を止めていれば、サーバーの応答は出ずボタンも押せないままになる。
+  // ChatGPT スタブは1回に10枚までなので、16枚の要求はサーバー側で拒否されるのが正しい。
+  await expect(page.getByText(/CHATGPT/)).toBeVisible({ timeout: 180_000 });
+  await expect(page.getByRole('button', { name: '生成', exact: true })).toBeEnabled();
+});

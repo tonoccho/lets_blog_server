@@ -17,9 +17,13 @@ import {
 } from "./actions";
 
 /**
- * プロジェクト管理画面でComfyUI画像を生成し(automatic1111相当のパラメータ、最大4枚)、
+ * プロジェクト管理画面でComfyUI画像を生成し(automatic1111相当のパラメータ)、
  * 選択した1枚をlocal/test/production全環境へアセットとしてアップロードするパネル。
  * フォーム項目はVSCode拡張のimageGenPanel.tsと揃えている。
+ *
+ * 1回の要求で生成する枚数は batch size × batch count(issue #1103)。どちらも上限は16で、
+ * 掛け算の合計には上限が無い(#1102 の決定)。合計を止めない代わりに、利用者が枚数を
+ * 自分で判断できるよう、合計枚数と所要時間の目安をフォームに示す。
  */
 export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }) {
   const [open, setOpen] = useState(false);
@@ -36,11 +40,15 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
   const [width, setWidth] = useState(1920);
   const [height, setHeight] = useState(1080);
   const [batchSize, setBatchSize] = useState(4);
+  // リピート回数。1回の要求のうちにサーバー側で繰り返され、リピートごとにseedが変わる(issue #1103)。
+  const [batchCount, setBatchCount] = useState(1);
   const [checkpoint, setCheckpoint] = useState("");
   const [loraName, setLoraName] = useState("");
   const [loraWeight, setLoraWeight] = useState(1.0);
 
   const [generating, setGenerating] = useState(false);
+  // 生成中に表示する「要求した」総枚数。生成中に入力を変えても要求時の枚数を出し続ける。
+  const [requestedTotal, setRequestedTotal] = useState(0);
   const [images, setImages] = useState<AiImageResult[] | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -86,6 +94,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
       return;
     }
     setGenerating(true);
+    setRequestedTotal(batchSize * batchCount);
     setMessage(null);
     setImages(null);
     setSelectedId(null);
@@ -100,6 +109,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
       width,
       height,
       batchSize,
+      batchCount,
       checkpoint: checkpoint || undefined,
       loraName: loraName || undefined,
       loraWeight: loraName ? loraWeight : undefined,
@@ -150,6 +160,9 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
     if (typeof settings.width === "number") setWidth(settings.width);
     if (typeof settings.height === "number") setHeight(settings.height);
     if (typeof settings.batchSize === "number") setBatchSize(settings.batchSize);
+    // ギャラリーのコピー用JSONはbatchCountを持たない(#1102の方針)。持たない設定を読み込んだら、
+    // 前の入力を引きずらずリピート1回=コピー元の1枚を再現する形に戻す。
+    setBatchCount(typeof settings.batchCount === "number" ? settings.batchCount : 1);
     setCheckpoint(settings.checkpoint ?? "");
     setLoraName(settings.loraName ?? "");
     if (typeof settings.loraWeight === "number") setLoraWeight(settings.loraWeight);
@@ -455,7 +468,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
               </select>
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div>
               <label className="block text-sm font-medium">width</label>
               <input
@@ -477,17 +490,42 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
               />
             </div>
             <div>
-              <label className="block text-sm font-medium">batch size(最大4)</label>
+              <label htmlFor="asset-batch-size" className="block text-sm font-medium">
+                batch size(最大16)
+              </label>
               <input
+                id="asset-batch-size"
                 type="number"
                 min={1}
-                max={4}
+                max={16}
                 className="mt-1 w-full rounded border p-2 text-sm"
                 value={batchSize}
                 onChange={(e) => setBatchSize(Number(e.target.value))}
               />
             </div>
+            <div>
+              <label htmlFor="asset-batch-count" className="block text-sm font-medium">
+                batch count(最大16)
+              </label>
+              <input
+                id="asset-batch-count"
+                type="number"
+                min={1}
+                max={16}
+                aria-describedby="asset-batch-count-help"
+                className="mt-1 w-full rounded border p-2 text-sm"
+                value={batchCount}
+                onChange={(e) => setBatchCount(Number(e.target.value))}
+              />
+              <p id="asset-batch-count-help" className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                batch size枚の生成を繰り返す回数です。リピートのたびにseedが変わるので、同じ設定のまま違う絵柄の候補を増やせます。
+              </p>
+            </div>
           </div>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">
+            この設定で合計{batchSize * batchCount}枚(batch size {batchSize} × batch count {batchCount})を生成します。
+            合計枚数に上限はありませんが、枚数に比例して時間がかかり、最大の256枚では非常に長時間かかります。
+          </p>
           <div>
             <label className="block text-sm font-medium">checkpoint</label>
             <select
@@ -551,23 +589,53 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
               クリップボードから作成
             </button>
           </div>
+          {generating && (
+            <p
+              aria-live="polite"
+              aria-atomic="true"
+              className="text-sm text-neutral-600 dark:text-neutral-300"
+            >
+              合計{requestedTotal}枚を生成しています。枚数によっては非常に長い時間がかかります。完了するまでこのページを離れないでください。
+            </p>
+          )}
         </div>
       )}
 
       {images && images.length > 0 && (
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <p className="text-sm text-neutral-600 dark:text-neutral-300">
+            生成された{images.length}枚から、アセットにする1枚を選んでください。
+          </p>
+          {/*
+            最大256枚(batch size 16 × batch count 16)が並びうるため、高さを固定して
+            スクロールさせる。そうしないと下のアップロードボタンが画面外へ押し出される。
+          */}
+          <div
+            data-testid="generated-image-grid"
+            className="grid max-h-[32rem] grid-cols-2 gap-3 overflow-y-auto sm:grid-cols-4 lg:grid-cols-6"
+          >
             {images.map((img) => (
               <button
                 type="button"
                 key={img.id}
+                aria-pressed={selectedId === img.id}
                 onClick={() => setSelectedId(img.id)}
                 className={`rounded border-2 p-1 ${selectedId === img.id ? "border-blue-600" : "border-transparent"}`}
               >
+                {/*
+                  data URIをそのままDOMに置くため、最大256枚ぶんのbase64(1920×1080なら
+                  1枚1MBを超えうる)が同時に載る。loading="lazy"で画面外のサムネイルの
+                  デコード・描画をブラウザに遅らせ、実コストを下げる。
+                  残存リスク: 実ブラウザ・実サイズ256枚での描画コストは未検証。ChatGPT
+                  スタブがnを10でクランプするため受入テストは生成開始前に止まり、目視
+                  確認は #1097(e2eアカウントのKeycloak認証)でブロックされている。jest側
+                  では1枚40KB相当×256枚でReactとDOMが壊れないことまでを確認している。
+                */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={`data:${img.mimeType};base64,${img.dataBase64}`}
                   alt={img.fileName}
+                  loading="lazy"
                   className="aspect-square w-full rounded bg-neutral-100 object-contain dark:bg-neutral-800"
                 />
               </button>

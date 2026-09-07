@@ -480,6 +480,8 @@ export interface AiImageGenerationParams {
   width?: number;
   height?: number;
   batchSize?: number;
+  /** batch sizeでの生成を何回繰り返すか(1リクエスト内、リピートごとにseedが変わる。issue #1102/#1103)。 */
+  batchCount?: number;
   checkpoint?: string;
   loraName?: string;
   loraWeight?: number;
