@@ -111,7 +111,7 @@ afterEach(() => {
 });
 
 describe('ImageGenPanel', () => {
-  it('batch sizeで生成した全枚数をWebviewへ渡す', async () => {
+  it('生成完了ではファイル名の一覧だけをWebviewへ渡し、画像データは送らない', async () => {
     generateImageMock.mockResolvedValue([
       result(1, 'a.png', IMAGE_A),
       result(2, 'b.png', IMAGE_B),
@@ -120,10 +120,8 @@ describe('ImageGenPanel', () => {
 
     await send({ command: 'generate', params: { prompt: '猫', batchSize: 2 } });
 
-    expect(payloadOf('generated')).toEqual([
-      result(1, 'a.png', IMAGE_A),
-      result(2, 'b.png', IMAGE_B),
-    ]);
+    expect(payloadOf('generated')).toEqual([{ fileName: 'a.png' }, { fileName: 'b.png' }]);
+    expect(JSON.stringify(payloadOf('generated'))).not.toContain(IMAGE_A);
   });
 
   it('1枚だけ生成した場合も配列としてWebviewへ渡す', async () => {
@@ -132,7 +130,63 @@ describe('ImageGenPanel', () => {
 
     await send({ command: 'generate', params: { prompt: '犬', batchSize: 1 } });
 
-    expect(payloadOf('generated')).toEqual([result(1, 'only.png', IMAGE_A)]);
+    expect(payloadOf('generated')).toEqual([{ fileName: 'only.png' }]);
+  });
+
+  /**
+   * 転送方式(issue #1105)。#1104までは全画像のbase64を1つのメッセージで送っていたため、
+   * 256枚(batch size 16 × batch count 16)では数十MBがWebview境界を一度に越えていた。
+   * パネルが実体を保持し、Webviewが必要になった1枚だけを取りに来る形へ改める。
+   */
+  it('requestImageで指定された1枚だけを返す', async () => {
+    generateImageMock.mockResolvedValue([
+      result(1, 'a.png', IMAGE_A),
+      result(2, 'b.jpg', IMAGE_B, 'image/jpeg'),
+    ]);
+    open();
+    await send({ command: 'generate', params: { prompt: '猫', batchSize: 2 } });
+
+    await send({ command: 'requestImage', index: 1 });
+
+    expect(payloadOf('imageData')).toEqual({
+      index: 1,
+      fileName: 'b.jpg',
+      mimeType: 'image/jpeg',
+      dataBase64: IMAGE_B,
+    });
+  });
+
+  it('生成前のrequestImageはエラーになる', async () => {
+    open();
+
+    await send({ command: 'requestImage', index: 0 });
+
+    expect(payloadOf('error')).toEqual({ error: expect.stringContaining('先に画像を生成してください') });
+  });
+
+  it('生成枚数の範囲外のrequestImageはエラーになる', async () => {
+    generateImageMock.mockResolvedValue([result(1, 'a.png', IMAGE_A)]);
+    open();
+    await send({ command: 'generate', params: { prompt: '猫', batchSize: 1 } });
+
+    await send({ command: 'requestImage', index: 5 });
+
+    expect(payloadOf('error')).toEqual({ error: expect.stringContaining('選び直して') });
+  });
+
+  it('256枚を生成しても生成完了メッセージは数十KBに収まる', async () => {
+    // 1920×1080のPNGをbase64にすると1枚1MBを超える。それを256枚ぶん保持させる。
+    const oneMegabyte = 'A'.repeat(1_000_000);
+    generateImageMock.mockResolvedValue(
+      Array.from({ length: 256 }, (_, i) => result(i + 1, `image-${i}.png`, oneMegabyte))
+    );
+    open();
+
+    await send({ command: 'generate', params: { prompt: '猫', batchSize: 16, batchCount: 16 } });
+
+    const serialized = JSON.stringify(payloadOf('generated'));
+    expect(serialized.length).toBeLessThan(20_000);
+    expect(serialized).not.toContain(oneMegabyte);
   });
 
   it('2枚目を選んでアイキャッチにすると2枚目のファイルが保存され、front matterがそれを指す', async () => {

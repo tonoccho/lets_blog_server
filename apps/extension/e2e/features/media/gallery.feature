@@ -16,3 +16,9 @@
   シナリオ: batch sizeで指定した枚数の生成画像がすべて返る
     もし batch size 2 で画像を生成する
     ならば 生成画像が 2 枚返る
+
+  # batch count は batch size 枚の生成を繰り返すため、生成時間も枚数に比例する(issue #1105)。
+  @slow
+  シナリオ: batch count で指定した回数ぶん繰り返して生成される
+    もし batch size 2 と batch count 2 で画像を生成する
+    ならば 生成画像が 4 枚返る

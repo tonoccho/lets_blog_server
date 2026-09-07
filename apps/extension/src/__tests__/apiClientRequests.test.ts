@@ -259,6 +259,26 @@ describe('apiClientが解釈するレスポンス', () => {
     expect(recorded[0].body).toEqual({ projectId: 7, prompt: '猫', batchSize: 2 });
   });
 
+  it('画像生成はbatch sizeとbatch countの双方を送る(issue #1105)', async () => {
+    respondWith({
+      images: Array.from({ length: 6 }, (_, i) => ({
+        id: i + 1,
+        fileName: `image-${i}.png`,
+        dataBase64: 'QUFB',
+        mimeType: 'image/png',
+      })),
+    });
+
+    const images = await apiClient.generateImage('token', undefined, 7, {
+      prompt: '猫',
+      batchSize: 2,
+      batchCount: 3,
+    });
+
+    expect(images).toHaveLength(6);
+    expect(recorded[0].body).toEqual({ projectId: 7, prompt: '猫', batchSize: 2, batchCount: 3 });
+  });
+
   it('画像生成が1枚だけ返した場合も1要素の配列になる', async () => {
     respondWith({ images: [{ id: 1, fileName: 'only.png', dataBase64: 'QUFB', mimeType: 'image/png' }] });
 
@@ -422,6 +442,10 @@ describe('apiClientが解釈するレスポンス', () => {
     ).rejects.toBeInstanceOf(CancelledError);
   });
 
+  // 画像生成は要求枚数ぶんの下限タイムアウトを持つようになったため(issue #1105)、
+  // 「利用者設定の1ミリ秒で即座に切れる」ことはもう成立しない。下限を持たない
+  // 参照系のエンドポイントで、タイムアウトがTimeoutErrorになることを確かめる
+  // (画像生成側の下限そのものは apiClientImageTimeout.test.ts が受け持つ)。
   it('タイムアウトした場合はTimeoutErrorになる', async () => {
     setConfiguration('letsBlog.requestTimeoutMs', 1);
     mockedRequest.mockImplementation(
@@ -431,9 +455,7 @@ describe('apiClientが解釈するレスポンス', () => {
         })
     );
 
-    await expect(apiClient.generateImage('token', undefined, 7, { prompt: '猫' })).rejects.toBeInstanceOf(
-      TimeoutError
-    );
+    await expect(apiClient.listSites('token')).rejects.toBeInstanceOf(TimeoutError);
   });
 
   it('接続自体に失敗した場合はNetworkErrorになる', async () => {

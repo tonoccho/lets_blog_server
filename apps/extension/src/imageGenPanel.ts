@@ -16,8 +16,8 @@ const ALLOWED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bm
  */
 export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, ImageGenOutboundCommand> {
   /**
-   * 直近の生成結果(batch sizeで指定した枚数すべて。issue #1104)。base64データは
-   * ここだけに保持し、Webviewへはプレビュー表示用に一度送るだけにする
+   * 直近の生成結果(batch size × batch countで指定した枚数すべて。issue #1104 / #1105)。
+   * base64データはここだけに保持し、Webviewへは表示に必要な1枚ずつしか渡さない
    * (保存時はindexだけを送らせ、実体を送り返させない)。
    */
   private _lastGenerated: api.AiImageResult[] = [];
@@ -81,6 +81,8 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
         return;
       case 'generate':
         return this._handleGenerate(message);
+      case 'requestImage':
+        return this._handleRequestImage(message.index);
       case 'setAsEyecatch':
         return this._handleSetAsEyecatch(message.index);
       case 'addAsAsset':
@@ -112,7 +114,28 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
     );
     this._lastGenerated = results;
     this._lastPrompt = message.params.prompt;
-    this.postMessage('generated', results);
+    // Webviewへ渡すのはファイル名の一覧だけにする(issue #1105)。batch size 16 ×
+    // batch count 16 で最大256枚になり、1920×1080のPNGはbase64で1枚1MBを超えるため、
+    // 全枚数を1つのメッセージで送ると数百MBがWebview境界を一度に越える。
+    // 画像データはWebviewが表示に必要になった時点で1枚ずつ取りに来る(requestImage)。
+    this.postMessage(
+      'generated',
+      results.map((generated) => ({ fileName: generated.fileName }))
+    );
+  }
+
+  /**
+   * Webviewが表示しようとしている1枚だけを渡す(issue #1105)。
+   * 1メッセージあたりの大きさは常に画像1枚ぶんに収まる。
+   */
+  private async _handleRequestImage(index: number): Promise<void> {
+    const generated = this._requireGenerated(index);
+    this.postMessage('imageData', {
+      index,
+      fileName: generated.fileName,
+      mimeType: generated.mimeType,
+      dataBase64: generated.dataBase64,
+    });
   }
 
   /** チャットメッセージ(と履歴)からOllamaで画像生成プロンプトを作成する。 */

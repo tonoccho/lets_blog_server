@@ -77,10 +77,18 @@
         <input type="number" id="height" min="64" max="2048" step="8" value="1080">
       </div>
       <div class="form-group">
-        <label for="batchSize">batch size</label>
-        <input type="number" id="batchSize" min="1" max="4" value="1">
+        <label for="batchSize">batch size(最大16)</label>
+        <input type="number" id="batchSize" min="1" max="16" value="1">
+      </div>
+      <div class="form-group">
+        <label for="batchCount">batch count(最大16)</label>
+        <input type="number" id="batchCount" min="1" max="16" value="1" aria-describedby="batchCountHint">
       </div>
     </div>
+    <p class="hint" id="batchCountHint">
+      batch size枚の生成を繰り返す回数です。リピートのたびにseedが変わるので、同じ設定のまま違う絵柄の候補を増やせます。
+      合計はbatch size × batch count枚で、上限はありませんが、枚数に比例して時間がかかり、最大の256枚では非常に長時間かかります。
+    </p>
     <div class="form-group">
       <label for="checkpoint">checkpoint</label>
       <select id="checkpoint"></select>

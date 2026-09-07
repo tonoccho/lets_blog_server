@@ -61,3 +61,24 @@ Then('生成画像が {int} 枚返る', (world, expected) => {
     }
   }
 });
+
+/**
+ * batch count が「batch size 枚の生成を batchCount 回繰り返す」ものとして受理され、
+ * 合計 batchSize × batchCount 枚が拡張へ返ることの検証(issue #1105)。
+ */
+When('batch size {int} と batch count {int} で画像を生成する', async (world, batchSize, batchCount) => {
+  const scope = w(world);
+  (scope as { generated?: unknown }).generated = await apiClient.generateImage(
+    scope.token,
+    scope.actor,
+    scope.project.id,
+    {
+      prompt: 'a plain blue square, flat color',
+      width: 64,
+      height: 64,
+      steps: 4,
+      batchSize: Number(batchSize),
+      batchCount: Number(batchCount),
+    }
+  );
+});

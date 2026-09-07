@@ -75,6 +75,10 @@ export class FakeElement {
     this.attributes[name] = value;
   }
 
+  removeAttribute(name: string): void {
+    delete this.attributes[name];
+  }
+
   getAttribute(name: string): string | null {
     return this.attributes[name] ?? null;
   }
@@ -111,6 +115,13 @@ export interface WebviewHarness {
   readonly loading: { running: boolean; begins: unknown[]; ends: number };
   /** documentレベルのキー入力を再現する。 */
   pressKey(event: Partial<FakeEvent> & { key: string }): void;
+  /**
+   * IntersectionObserverで監視中の要素が画面内へ入った状況を再現する(issue #1105)。
+   * 遅延読み込みは「見えているものだけを要求する」挙動なので、可視性を注入できないと検証できない。
+   */
+  intersect(targets: FakeElement[], isIntersecting?: boolean): void;
+  /** IntersectionObserverで監視されている要素。 */
+  readonly observed: FakeElement[];
 }
 
 /**
@@ -122,10 +133,24 @@ export function loadWebview(name: string): WebviewHarness {
   const source = fs.readFileSync(path.join(webviewsDir, `${name}.js`), 'utf-8');
 
   const elements = new Map<string, FakeElement>();
-  for (const match of html.matchAll(/\bid="([^"]+)"/g)) {
-    const element = new FakeElement('div');
-    element.id = match[1];
-    elements.set(match[1], element);
+  // HTMLの属性(min/max/value/type)まで読み取る(issue #1105)。入力欄の上限のような
+  // 「HTMLにしか書かれていない仕様」を、テストがHTMLを介して検証できるようにするため。
+  for (const tag of html.matchAll(/<(\w+)\s([^>]*?)\/?>/g)) {
+    const attributes: Record<string, string> = {};
+    for (const attribute of tag[2].matchAll(/([\w-]+)="([^"]*)"/g)) {
+      attributes[attribute[1]] = attribute[2];
+    }
+    if (!attributes.id) continue;
+    const element = new FakeElement(tag[1]);
+    element.id = attributes.id;
+    for (const [name, value] of Object.entries(attributes)) {
+      element.setAttribute(name, value);
+    }
+    element.type = attributes.type ?? '';
+    element.value = attributes.value ?? '';
+    element.placeholder = attributes.placeholder ?? '';
+    element.className = attributes.class ?? '';
+    elements.set(attributes.id, element);
   }
 
   const documentListeners = new Map<string, Listener[]>();
@@ -165,12 +190,35 @@ export function loadWebview(name: string): WebviewHarness {
     constructor(public readonly type: string) {}
   }
 
+  const observed: FakeElement[] = [];
+  const observerCallbacks: ((entries: { isIntersecting: boolean; target: FakeElement }[]) => void)[] = [];
+
+  class FakeIntersectionObserver {
+    constructor(callback: (entries: { isIntersecting: boolean; target: FakeElement }[]) => void) {
+      observerCallbacks.push(callback);
+    }
+
+    observe(element: FakeElement): void {
+      observed.push(element);
+    }
+
+    unobserve(element: FakeElement): void {
+      const at = observed.indexOf(element);
+      if (at >= 0) observed.splice(at, 1);
+    }
+
+    disconnect(): void {
+      observed.length = 0;
+    }
+  }
+
   const run = new Function(
     'acquireVsCodeApi',
     'document',
     'window',
     'LetsBlogLoading',
     'Event',
+    'IntersectionObserver',
     source
   );
   run(
@@ -178,7 +226,8 @@ export function loadWebview(name: string): WebviewHarness {
     fakeDocument,
     fakeWindow,
     letsBlogLoading,
-    FakeEventCtor
+    FakeEventCtor,
+    FakeIntersectionObserver
   );
 
   return {
@@ -195,5 +244,12 @@ export function loadWebview(name: string): WebviewHarness {
         listener({ type: 'keydown', preventDefault: () => undefined, stopPropagation: () => undefined, ...event });
       }
     },
+    intersect: (targets, isIntersecting = true): void => {
+      const entries = targets.map((target) => ({ isIntersecting, target }));
+      for (const callback of observerCallbacks) {
+        callback(entries);
+      }
+    },
+    observed,
   };
 }

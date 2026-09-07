@@ -61,11 +61,17 @@ export type ImageGenInboundMessage =
   // 「生成結果の何枚目を保存するか」というindexだけにする。
   | (WebviewMessageBase<'setAsEyecatch'> & { index: number })
   | (WebviewMessageBase<'addAsAsset'> & { index: number })
+  // 生成結果のうち表示に必要な1枚だけを取りに来る(issue #1105)。最大256枚
+  // (batch size 16 × batch count 16)のbase64を1つのメッセージで送ると、
+  // 数百MBがWebview境界を一度に越えるため、実体はパネル側が保持したままにする。
+  | (WebviewMessageBase<'requestImage'> & { index: number })
   | (WebviewMessageBase<'sendChat'> & { history: api.PlanChatMessage[]; message: string; provider?: string });
 
 export type ImageGenOutboundCommand =
   | 'options'
+  // 'generated' が運ぶのはファイル名の一覧だけ。画像データは 'imageData' で1枚ずつ渡す(issue #1105)。
   | 'generated'
+  | 'imageData'
   | 'eyecatchSet'
   | 'assetAdded'
   | 'promptGenerated'

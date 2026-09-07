@@ -33,6 +33,33 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 const PUBLISH_MIN_TIMEOUT_MS = 1_200_000;
 
 /**
+ * 画像生成(/api/ai/image)のタイムアウトを、要求枚数からmedia-service自身の予算として
+ * 組み立てるための定数(issue #1105)。値はmedia側の実装と対にしてある:
+ *
+ * - {@link IMAGE_GEN_OVERHEAD_MS} = `ImageGenerationTimeoutChainTest.NON_POLLING_OVERHEAD_SECONDS`
+ * - {@link IMAGE_GEN_BASE_POLL_MS} / {@link IMAGE_GEN_PER_IMAGE_POLL_MS} /
+ *   {@link IMAGE_GEN_MIN_POLL_MS} = `ComfyUiClient.maxPollAttempts()`(1回1000ms)
+ *
+ * サーバーが自分へ許している時間より先にクライアントが諦めると、生成はサーバー側で続いて
+ * `generated_images`へ保存されるのに、利用者にはTimeoutErrorしか見えない。#1105以前の
+ * 固定120秒がまさにそれで、batch size 16(≒17秒)やbatch count併用では確実に超えていた。
+ */
+const IMAGE_GEN_OVERHEAD_MS = 300_000;
+const IMAGE_GEN_BASE_POLL_MS = 60_000;
+const IMAGE_GEN_PER_IMAGE_POLL_MS = 8_000;
+const IMAGE_GEN_MIN_POLL_MS = 120_000;
+
+/**
+ * 画像生成のタイムアウトの上限(issue #1105)。
+ *
+ * 実クライアントのトラフィックは`lbs-reverse-proxy`を経由し、nginxの
+ * `location = /api/ai/image`が`proxy_read_timeout 3600s`で頭打ちにする。これを超える値を
+ * 拡張側に持たせても先にnginxが切るため意味が無い(タイムアウトの鎖:
+ * media最悪ケース3308s ≦ gateway 3400s ≦ nginx 3600s)。
+ */
+const IMAGE_GEN_MAX_TIMEOUT_MS = 3_600_000;
+
+/**
  * gatewayが全応答へ付与する相関IDのヘッダ名
  * (services/gateway CorrelationIdWebFilter.CORRELATION_ID_HEADER、issue #582)。
  */
@@ -334,9 +361,35 @@ export interface ImageGenerationParams {
   width?: number;
   height?: number;
   batchSize?: number;
+  /**
+   * batch size枚の生成を繰り返す回数(issue #1105)。合計はbatchSize × batchCount枚になる。
+   * 合計枚数の上限は設けない方針(#1102)のため、最大256枚を要求できる。
+   */
+  batchCount?: number;
   checkpoint?: string;
   loraName?: string;
   loraWeight?: number;
+}
+
+/**
+ * 画像生成が最低限確保すべきタイムアウト(ミリ秒)を要求枚数から求める(issue #1105)。
+ *
+ * media-serviceが1リクエストへ許している時間
+ * (`NON_POLLING_OVERHEAD_SECONDS + batchCount × ComfyUiClient.maxPollSeconds(batchSize)`)
+ * をそのまま辿るので、サーバーがまだ処理を続けている間にクライアントだけが諦めることがない。
+ * nginxの上限(3600秒)は超えない——超えても先にnginxが切るため。
+ *
+ * 利用者設定`letsBlog.requestTimeoutMs`がこれより長ければ、そちらが優先される
+ * (`request()`の`Math.max`)。
+ */
+export function imageGenerationMinTimeoutMs(params: ImageGenerationParams): number {
+  const batchSize = params.batchSize != null && params.batchSize > 0 ? params.batchSize : 1;
+  const batchCount = params.batchCount != null && params.batchCount > 0 ? params.batchCount : 1;
+  const perRepeatMs = Math.max(
+    IMAGE_GEN_MIN_POLL_MS,
+    IMAGE_GEN_BASE_POLL_MS + IMAGE_GEN_PER_IMAGE_POLL_MS * batchSize
+  );
+  return Math.min(IMAGE_GEN_MAX_TIMEOUT_MS, IMAGE_GEN_OVERHEAD_MS + perRepeatMs * batchCount);
 }
 
 // メールアドレス/パスワードでのログイン(login()/verifyTotpLogin())は、issue #565で
@@ -630,6 +683,9 @@ export async function generateImage(
     label: 'generateImage',
     signal,
     method: 'POST',
+    // 枚数に応じた時間を確保する(issue #1105)。既定の120秒ではbatch size 16や
+    // batch countを使った生成が、サーバー側で成功しているのに失敗として扱われる。
+    minTimeoutMs: imageGenerationMinTimeoutMs(params),
     headers: buildHeaders(apiKey, actor),
     createBody: jsonBody({ projectId, ...params }),
   }, schemas.AiImageBatchResponseSchema);
