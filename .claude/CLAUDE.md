@@ -213,8 +213,9 @@ measure it (see **How to check what actually ran**) before relying on it.
 Resulting assignments:
 
 - `haiku` — `git-workflow`, `triage-backlog`, `ready-issue`
-- `sonnet` — `merge-request`, `work-next`, `review-issue`, `qa-issue`, `complete-issue`; the `reviewer` and `qa` agents
-- `opus` — `implement-issue`, `plan-issue`, `discover-issues`; the `implementer` agent
+- `sonnet` — `merge-request`, `work-next`, `review-issue`, `qa-issue`, `complete-issue`,
+  `implement-issue`; the `reviewer`, `qa` and `implementer` agents
+- `opus` — `plan-issue`, `discover-issues`
 
 Two deliberate exceptions:
 
@@ -223,35 +224,14 @@ Two deliberate exceptions:
 
 ## What actually ran
 
-Measured 2026-09-02 across the three unattended `work-next` cycles whose session IDs appear in
-`~/.local/state/claude-auto/*.log` (411 assistant responses). The loop was invoking
-`claude -p "/work-next" --model opus` at the time.
+**A frontmatter declaration is a request, not a guarantee** — measure it, do not assume it. A
+2026-09-02 measurement across three unattended cycles found every stage but `work-next` running
+on a model it had not declared, and `implement-issue` never once reaching the `opus` it asked
+for. Never assume a stage ran on the model it declares.
 
-| Stage | Declares | Observed | Match |
-| --- | --- | --- | --- |
-| (no skill attributed — top-level turns) | — | `opus` ×125, 90K output tok | — |
-| `work-next` | `sonnet` | `sonnet` ×92 | yes |
-| `git-workflow` | `haiku` | `sonnet` ×57 | no |
-| `implement-issue` | `opus` | `sonnet` ×56, `opus` ×0 | no |
-| `qa-issue` | `sonnet` | `opus` ×24, `sonnet` ×7 | no |
-| `review-issue` | `sonnet` | `opus` ×17, `sonnet` ×11 | no |
-| `merge-request`（改名前に計測。#1033） | `sonnet` | `sonnet` ×18, `opus` ×4 | partial |
-| `complete-issue` | `sonnet` | `sonnet` ×14, `opus` ×12 | partial |
-
-Three findings, and they are why this section no longer states the assignment as fact:
-
-1. **The CLI `--model` governed the largest block** — the top-level turns attributed to no
-   skill: 125 responses and 90K output tokens, the single biggest consumer.
-2. **`implement-issue` never reached `opus`** in any measured cycle, despite declaring it.
-3. **`review-issue` / `qa-issue` ran mostly on `opus`**, despite declaring `sonnet` — the
-   inverse of the intent.
-
-In these cycles every response ran at `effort=medium`. Interactive sessions in the same
-transcript directory show `effort=high`, so this is a property of how the loop invokes
-`claude`, not a repository-wide setting.
-
-The sample is small: session IDs have only been logged since 2026-09-02, so 3 of 24 cycles
-could be attributed. Closing the gap between declaration and behaviour is #1011.
+The measurement table, the three findings, and the `jq` command that reproduces them (including
+why a subagent's model cannot be read from these transcripts) are in
+`docs/WORKFLOW_RULE_RATIONALE.md` → モデル選択. Closing the gap is #1011.
 
 ## Implementation runs on Sonnet
 
@@ -262,7 +242,10 @@ every implementation response ran on Sonnet.
 By the user's decision (2026-09-02), implementation runs on **Sonnet by default**, and Opus is
 reserved for escalation rather than spent up front:
 
-- The unattended loop (`~/.local/bin/claude-work-next.sh`) invokes `--model sonnet`.
+- The unattended loop invokes `--model sonnet --effort medium`. There is no
+  `claude-work-next.sh`; the two runners are `~/.local/bin/claude-auto-cycle.sh`
+  (discover → triage → ready → work-next) and `~/.local/bin/claude-auto-queue.sh`
+  (a fixed list of Issues, in order). Both live outside this repository.
 - When an Issue is rolled back from `Review` or `QA` to `In progress` **twice within one
   cycle**, the loop stops implementing, returns the Issue to `Ready`, and re-assesses its
   readiness on **Opus** in a fresh context. Repeated rollbacks are treated as evidence of a
@@ -270,21 +253,6 @@ reserved for escalation rather than spent up front:
 
 Do not reinstate an "Opus only" rule for production code without also making it enforceable.
 An unenforced model rule is exactly what produced the three-way mismatch above.
-
-## How to check what actually ran
-
-```bash
-cd ~/.claude/projects/-home-seiji-src-lets-blog-server
-cat *.jsonl | jq -R 'fromjson? // empty' \
-  | jq -sr '[.[] | select(.type=="assistant")]
-      | group_by((.attributionSkill // "(none)") + "|" + .message.model)
-      | map({k: .[0], n: length}) | sort_by(-.n) | .[]
-      | "\(.n)  \(.k.attributionSkill // "(none)")  \(.k.message.model)  effort=\(.k.effort)"'
-```
-
-`attributionSkill`, `message.model` and `effort` are recorded per response. A subagent's own
-responses are **not** in these transcripts, so the model behind an `Agent` call cannot be
-confirmed this way — that blind spot is part of #1011.
 
 ---
 
@@ -624,23 +592,14 @@ never carry a dependency's status over from an earlier comment — re-read it li
 
 ### Why there is no status-based blocker (changed 2026-09-03, #1024)
 
-This section used to open with a different rule:
+The rule that an open `blocked_by` link is the one status-based blocker **is withdrawn**:
+GitLab CE has no directional dependency link (`blocks` / `is_blocked_by` are Premium, and
+`relates_to` states no direction), so the mechanism it named does not exist here. Keeping a rule
+that points at a missing mechanism invites a verdict to claim a formal ground it never checked.
+The full reasoning: `docs/WORKFLOW_RULE_RATIONALE.md` → status ベースのブロッカー.
 
-> **An open `blocked_by` link is the only status-based blocker.** If the formal dependency
-> graph names an open Issue, the Issue is blocked. Full stop.
-
-**That rule is withdrawn, because the mechanism it named does not exist here.** GitHub's issue
-dependency graph is directional: `blocked_by` says which Issue blocks which. GitLab Community
-Edition has no equivalent — `blocks` / `is_blocked_by` are Premium, and the only link type
-available is `relates_to`, which carries no direction. A `relates_to` link cannot express "A
-blocks B", so it cannot be a blocker.
-
-The rule was already close to dead: this repository barely used `blocked_by` links, and the old
-rule 2 was the path nearly every verdict took. Keeping a rule that points at a missing mechanism
-is worse than deleting it — it invites a verdict to claim a formal ground it never checked.
-
-What replaces it is not "nothing". It is the same inspection the old rule 2 demanded, now
-applying to every dependency without exception: **look at the code.** A verdict that asserts
+What replaces it is not "nothing". It is the same inspection the old rule demanded, now applying
+to every dependency without exception: **look at the code.** A verdict that asserts
 "dependencies do not block" without **naming the concrete files, endpoints, or config it
 inspected** is not a verdict; treat it as unverified and do the inspection. The script prints the
 inputs — it does not inspect the codebase for you.
@@ -713,39 +672,15 @@ The rules above are not only written down; the ones that can be checked mechanic
 
 ### Where squash is enforced
 
-In two places, deliberately. Neither alone is enough.
+In two places, deliberately — the GitLab project (`squash_option: always`, `merge_method: ff`)
+and the `guard.py` hook (`--squash` required on `glab mr merge`). Neither alone is enough: the
+project setting is one API call away from being changed back and teaches the caller nothing,
+while the hook cannot see a web-UI merge or shell indirection.
 
-| Layer | Setting | Covers | Misses |
-| --- | --- | --- | --- |
-| GitLab project | `squash_option: always`, `merge_method: ff` | every merge, including the web UI | says nothing about *why*; a project admin can change it |
-| `guard.py` hook | `--squash` required on `glab mr merge` | agent and CLI merges | web UI merges, and any shell indirection |
-
-The hook is not made redundant by the project setting. It fails loudly at the moment of the
-mistake and names the rule; a silent server-side rewrite teaches the caller nothing, and the
-setting is one API call away from being changed back.
-
-**`merge_method: ff` is what makes the history linear**, and it is the half that is easy to
-miss. Squash alone is not enough: with `merge_method: merge`, GitLab creates the squashed
-commit *and then a merge commit on top of it*. That is what happened to !1020 (#1030) —
-
-```
-*   8cdb16dd Merge branch 'fix/1022-glab-guards' into 'develop'
-|\
-| * b40b02c1 fix: guard.py の空振りしていた… (!1020)
-|/
-* 1c054624 test: 記事プランと… (#1019)
-```
-
-— which is not what GitHub's squash merge did, and not what the rest of this history looks
-like. With `ff`, the squashed commit is created on top of the target and fast-forwarded in:
-one Issue, one commit, no merge bubble.
-
-`ff` requires the source branch to be mergeable without a merge commit. Squash satisfies that
-by construction (the squashed commit is built on the current target), so the ordinary flow is
-unaffected. A conflict is still resolved on the working branch per **Merge Conflicts**.
-
-`.claude/hooks/paths.py` is the single classifier for test / production / neutral paths. Both
-the Claude Code hook and the git hook import it; do not restate the patterns anywhere else.
+**`merge_method: ff` is the half that makes the history linear**, and the half that is easy to
+miss — with `merge_method: merge`, GitLab creates the squashed commit *and then a merge commit
+on top of it*. What that did to !1020 (#1030), and why `ff` does not disturb the ordinary flow:
+`docs/WORKFLOW_RULE_RATIONALE.md` → squash.
 
 ## Git hook — `scripts/git-hooks/pre-commit`
 
@@ -805,12 +740,11 @@ The guards stop **mistakes**, not **circumvention**. They inspect the command a 
 to run, and a shell can always defeat inspection — `bash -c '...'`, `eval`, a variable that
 expands to the forbidden word. Making them airtight is not achievable and is not the goal.
 
-This distinction is load-bearing, because the guards were once assumed to be stronger than they
-are. Until #1029 they matched a regex anchored to the start of the command, so **`timeout 60
-git push --no-verify` passed** — no circumvention, just an ordinary way to write a command.
-They now parse the command (splitting on separators, stripping env assignments and wrappers
-like `timeout` / `env` / `nice` / `sudo`, respecting quotes), which closes that class of hole
-without pretending to close all of them.
+This distinction is load-bearing: the guards were once assumed to be stronger than they are.
+They now parse the command (splitting on separators, stripping env assignments and wrappers like
+`timeout` / `env` / `nice` / `sudo`, respecting quotes) rather than matching a regex anchored to
+the start of it. Which ordinary command used to slip past, and what that cost:
+`docs/WORKFLOW_RULE_RATIONALE.md` → ガード.
 
 Defence against deliberate circumvention lives elsewhere and must stay there:
 
@@ -830,8 +764,7 @@ Two operators look alike and are treated oppositely, because they mean opposite 
 | `>` `>>` `>\|` `&>` | a file name | refused unless `/dev/null` |
 | `>&` | a file descriptor (`2>&1`, `1>&2`, `2>&-`) | allowed — it writes no file |
 
-Getting this wrong cost twice (#1034): `2>&1` was refused as a write to a file named `1`, while
-`&>` was not recognised as an operator at all, so `echo x &> real.txt` passed straight through.
+Getting this wrong cost twice (#1034) — see `docs/WORKFLOW_RULE_RATIONALE.md` → ガード.
 
 To see how a guard reads a command:
 

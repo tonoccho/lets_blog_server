@@ -2,7 +2,7 @@
 name: implementer
 description: Use this agent when a GitLab Issue is Ready for implementation and production code needs to be analyzed, planned, implemented, and validated. This agent should implement only the defined issue scope and must not change product requirements.
 tools: Read, Write, Edit, Glob, Grep, Bash
-model: opus
+model: sonnet
 color: green
 ---
 
