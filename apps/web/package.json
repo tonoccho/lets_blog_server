@@ -11,6 +11,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
+    "playwright:install": "playwright install",
     "test:e2e": "rm -rf .features-gen && bddgen && playwright test",
     "test:e2e:ui": "rm -rf .features-gen && bddgen && playwright test --ui",
     "test:e2e:debug": "rm -rf .features-gen && bddgen && playwright test --debug",

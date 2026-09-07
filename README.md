@@ -167,6 +167,18 @@ python3 -m unittest discover -s .claude/hooks -t .claude/hooks -p 'test_*.py'
 python3 -m unittest discover -s scripts -t scripts -p 'test_*.py'
 ```
 
+受け入れテスト(`npm run test:at`)は、初回だけ Playwright のブラウザの導入が要る。
+**2段あり、下の段は root 権限が要るので自動実行しない**(#1045)。
+
+```bash
+cd apps/web
+npm run playwright:install     # 1. ブラウザ本体。root 不要
+sudo npx playwright install-deps   # 2. ブラウザが依存する OS 共有ライブラリ。root が要る
+```
+
+どちらが足りないかは、`global-setup` の前提確認が導入コマンド付きで示す。
+手順の詳細と導入方針の理由は [docs/e2e-testing.md §3.3](docs/e2e-testing.md)。
+
 依存の更新は自動化していない（Dependabot は GitLab では動かない）。定期的に手元で確認する。
 
 ```bash

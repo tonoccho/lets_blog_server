@@ -144,6 +144,91 @@ export E2E_ADMIN_PASSWORD='...'
 未設定の場合、ログインを要する spec は `test.skip` により **明示的にスキップ** される
 (暗黙に成功したことにはならない)。
 
+### 3.3 Playwright のブラウザと OS 共有ライブラリ(issue #1045)
+
+**この節を飛ばすと、受け入れテストは1本目で落ちて残り全部が「did not run」になる。**
+
+必要なものは2段ある。**下の段は root 権限を要するので、リポジトリ側では自動実行しない**
+(#1045 Requirement 4)。判断できる形でコマンドだけ示す。
+
+| 段 | 何を入れるか | コマンド | root |
+| --- | --- | --- | --- |
+| 1 | ブラウザ本体(chromium / firefox / webkit と chrome-headless-shell) | `cd apps/web && npm run playwright:install` | 不要 |
+| 2 | ブラウザが依存する OS の共有ライブラリ | `cd apps/web && sudo npx playwright install-deps` | **必要** |
+
+```bash
+cd apps/web
+npm install
+npm run playwright:install                # 段1。初回のみ。root 不要
+
+# 段2。root が要るので、内容を確認したうえで自分で実行する
+sudo npx playwright install-deps
+```
+
+段2を飛ばすと、バイナリは在るのに起動しない状態になる。
+
+```
+chrome-headless-shell: error while loading shared libraries: libatk-1.0.so.0:
+  cannot open shared object file: No such file or directory
+```
+
+この状態は `npm run playwright:install` を何度打っても直らない。#1045 では、
+「ブラウザが無い」と読んだ担当者が段1を繰り返して堂々巡りになった。
+
+`install-deps` が対応していないディストリビューションでは、apt で直接入れる
+(chromium 用。Ubuntu 24.04 以降の `t64` 付きの名前。22.04 以前は接尾辞なし)。
+
+```bash
+sudo apt-get install -y libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 \
+  libatspi2.0-0t64 libcairo2 libcups2t64 libdbus-1-3 libdrm2 libgbm1 \
+  libglib2.0-0t64 libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 \
+  libxcomposite1 libxdamage1 libxext6 libxfixes3 libxkbcommon0 libxrandr2
+```
+
+不足しているものは自分で調べられる。
+
+```bash
+ldd ~/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell \
+  | grep 'not found'
+```
+
+#### 導入できているかは globalSetup が確認する
+
+`apps/web/e2e/global-setup.ts` が、docker の healthy 待ちより**前に**、設定が宣言する
+ブラウザを実際に1つずつ起動して閉じる([browser-prerequisite.ts](../apps/web/e2e/browser-prerequisite.ts))。
+起動できなければ、段1と段2のどちらが足りないかを判別して、その段の導入コマンドだけを
+示して終了する。シナリオは1本も実行されない。
+
+ファイルの存在では判定しない。#1045 のホストは**バイナリが在るのに起動できない**状態で、
+起動してみる以外に確かめようがなかったからである。
+
+#### ブラウザを起動できないホストで `@api` シナリオだけ回す
+
+前提確認は globalSetup で落ちるため、そのままではブラウザを使わないシナリオも道連れになる。
+`E2E_SKIP_BROWSER_CHECK=1` で確認だけを外せる(`E2E_SKIP_HEALTH_WAIT` と同じ形)。
+
+```bash
+cd apps/web
+E2E_SKIP_BROWSER_CHECK=1 npm run test:at:fast -- --no-deps --grep @api
+```
+
+`--no-deps` は段階依存(at-setup → at-seed → at-provision)を飛ばす。段2が未導入の
+ホストで土台の検証だけを回すための逃げ道であり、**ブラウザ経路の受け入れ基準は
+これでは検証できない。**
+
+#### 導入方針とその理由(#1045 AC4)
+
+| 論点 | 決めたこと | 理由 |
+| --- | --- | --- |
+| ブラウザの**バージョン固定** | 別途固定しない | revision を決めるのは `apps/web/package.json` の `@playwright/test` で、`playwright install` はその版が要求する revision を取りに行く。別に固定すると正が2つになり、`@playwright/test` を上げた瞬間に静かにずれる |
+| 入れるブラウザの範囲 | `playwright install` に引数を付けない | `playwright.config.ts` は `CROSS_BROWSER_SPECS` 用に firefox / webkit のプロジェクトも宣言している。chromium に絞ると `npm run test:e2e` が別の形で落ちる |
+| `install-deps` か apt か | `install-deps` を第一手、apt は逃げ道 | 必要なパッケージ名はブラウザの版とディストリビューションの版の両方で変わる(24.04 の `t64` 改名など)。playwright-core が対応表を持っており、`@playwright/test` を上げれば一緒に更新される |
+| `--with-deps` を使うか | 使わない | 内部で apt を root 実行する。root を要する手順を自動実行しない(#1045 Requirement 4) |
+| `postinstall` で自動導入するか | しない | `npm install` / `npm ci` のたびに数百 MB を黙って落とすことになる。導入は明示の1コマンドに留め、未導入は globalSetup が検知する |
+
+これらが実装・エラーメッセージ・本文書の間でずれないことは
+`scripts/test_playwright_browser_setup.py` が検査する。
+
 ---
 
 ## 4. 実行
@@ -151,7 +236,7 @@ export E2E_ADMIN_PASSWORD='...'
 ```bash
 cd apps/web
 npm install
-npx playwright install    # 初回のみ
+npm run playwright:install    # 初回のみ。共有ライブラリも要る(§3.3)
 
 npm run test:e2e                       # 全spec(chromium は全件、他ブラウザは対象を絞る)
 npm run test:e2e:ui                    # Playwright Test UI
@@ -169,9 +254,10 @@ npx playwright test -g "サイトを登録して記事を公開"     # テスト
 
 `globalSetup` が実行前に以下を行うため、`docker compose up -d` の直後でもそのまま実行してよい。
 
-1. `scripts/wait-for-stack-healthy.sh` で全サービスの healthy を待つ
-2. `https://localhost/` へ HTTP リクエストして到達性を確認する
-3. `https://localhost/auth/realms/letsblog/.well-known/openid-configuration` で Keycloak を確認する
+1. 設定が宣言するブラウザを実際に起動して閉じる(§3.3。ホスト内で完結するので最初に行う)
+2. `scripts/wait-for-stack-healthy.sh` で全サービスの healthy を待つ
+3. `https://localhost/` へ HTTP リクエストして到達性を確認する
+4. `https://localhost/auth/realms/letsblog/.well-known/openid-configuration` で Keycloak を確認する
 
 いずれかが失敗した場合、テストは1件も実行されずに前提エラーとして終了する。
 
@@ -183,6 +269,7 @@ npx playwright test -g "サイトを登録して記事を公開"     # テスト
 | --- | --- | --- |
 | `E2E_TEST_PASSWORD` | (なし) | `e2e-test@letsblog.local` のパスワード。未設定なら該当 spec をスキップ |
 | `E2E_ADMIN_PASSWORD` | (なし) | `e2e-admin@letsblog.local` のパスワード。未設定なら該当 spec をスキップ |
+| `E2E_SKIP_BROWSER_CHECK` | (なし) | `1` で globalSetup のブラウザ起動確認をスキップ(ブラウザを起動できないホストで `@api` シナリオだけ回す場合。§3.3。issue #1045) |
 | `E2E_SKIP_HEALTH_WAIT` | (なし) | `1` で globalSetup の healthy 待ちをスキップ(docker CLI が無い環境等) |
 | `ACCEPTANCE_RESET` | (なし) | `1` で受け入れテスト環境をリセットしてから開始(破壊的。issue #945。[ACCEPTANCE_TESTING.md](ACCEPTANCE_TESTING.md) §10) |
 | `COMPOSE_PROJECT_NAME` | リポジトリのディレクトリ名 | healthy 待ちが対象とする compose プロジェクト(issue #842) |
@@ -410,6 +497,11 @@ test.describe('機能名', () => {
 ---
 
 ## 11. トラブルシューティング
+
+### globalSetup が「Playwright のブラウザを起動できません」で失敗する
+
+前提確認がブラウザの起動に失敗した。メッセージが原因(ブラウザ本体か OS 共有ライブラリか)と
+その段の導入コマンドを示すので、そのとおりに実行する。**§3.3 が発生源。**
 
 ### globalSetup が「healthy になっていません」で失敗する
 

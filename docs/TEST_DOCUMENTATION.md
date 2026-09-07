@@ -432,9 +432,16 @@ identity だけ `flyway.enabled: false` + `ddl-auto: create-drop` になって�
 cd apps/web
 npm install
 
-# Playwrightブラウザのインストール
-npx playwright install
+# Playwrightブラウザのインストール(root 不要)
+npm run playwright:install
+
+# ブラウザが依存する OS 共有ライブラリ(root が要る。内容を確認して自分で実行する)
+sudo npx playwright install-deps
 ```
+
+2段目を飛ばすと、バイナリは在るのに `error while loading shared libraries` で
+起動しない状態になる。手順と導入方針の理由は
+[e2e-testing.md §3.3](e2e-testing.md) を参照(issue #1045)。
 
 #### web の必須検証コマンド
 
@@ -512,13 +519,23 @@ ollama serve
 
 ### Playwright ブラウザエラー
 
-**原因**: ブラウザがインストールされていない
+**原因**: ブラウザ本体、または**ブラウザが依存する OS 共有ライブラリ**が入っていない。
+症状が似ているのに対処が違うので、どちらかを見分ける必要がある(issue #1045)。
 
-**解決方法**:
+**解決方法**: `apps/web/e2e/global-setup.ts` の前提確認が、どちらが足りないかを判別して
+その段の導入コマンドを示す。示されたほうを実行する。
 
 ```bash
-npx playwright install
+cd apps/web
+
+# 1. ブラウザ本体が無い(`Executable doesn't exist`)場合。root 不要
+npm run playwright:install
+
+# 2. 共有ライブラリが無い(`error while loading shared libraries`)場合。root が要る
+sudo npx playwright install-deps
 ```
+
+手順の全体と導入方針の理由は [e2e-testing.md §3.3](e2e-testing.md) を参照。
 
 ### ポート競合エラー
 

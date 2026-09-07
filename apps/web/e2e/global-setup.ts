@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { request, type FullConfig } from '@playwright/test';
+import { checkBrowsersLaunchable, requiredBrowserNames } from './browser-prerequisite';
 import { waitForServicesHealthy } from './helpers';
 
 /**
@@ -22,10 +23,18 @@ import { waitForServicesHealthy } from './helpers';
  * プローブが「撤去で消えた」ことの証拠になりうる唯一の場所である(#965 §7-A)。
  * 破壊的なので、既定では実行しない。
  *
+ * issue #1045: ブラウザが起動できないホストでは、Playwright は1本目のシナリオの中で
+ * 落ち、残りは「did not run」になる(実測 1 failed / 72 did not run)。しかも原因は
+ * 60 行のブラウザ起動ログに1行だけ埋もれる。docker のhealthy待ちや疎通確認と同じ理由で、
+ * これも前提確認として先に、導入コマンドを添えて落とす。詳細は ./browser-prerequisite.ts。
+ *
  * 環境変数:
  *   ACCEPTANCE_RESET=1     : scripts/rebuild-acceptance-env.sh --yes を実行してから始める
  *                            (compose プロジェクトを撤去し、Docker ボリュームを破棄し、
  *                             ソースからビルドして起動し直す。破壊的)
+ *   E2E_SKIP_BROWSER_CHECK=1 : Playwrightのブラウザ起動確認をスキップする
+ *                            (ブラウザを起動できないホストで @api シナリオだけ回す場合向け。
+ *                             docs/e2e-testing.md §3.3)
  *   E2E_SKIP_HEALTH_WAIT=1 : docker composeのhealthy待ちをスキップする
  *                            (スタック外でPlaywrightだけ動かす場合や、docker CLIが無い環境向け)
  *   E2E_HEALTH_TIMEOUT     : healthy待ちのタイムアウト秒数(既定600)
@@ -33,6 +42,16 @@ import { waitForServicesHealthy } from './helpers';
 export default async function globalSetup(config: FullConfig): Promise<void> {
   const baseURL = config.projects[0]?.use?.baseURL ?? 'https://localhost';
   const repoRoot = path.resolve(__dirname, '..', '..', '..');
+
+  // ブラウザの確認は全ての前に置く。ホスト内で完結し、数秒で終わり、他の前提に依存しない。
+  // ACCEPTANCE_RESET のゼロ構築(最大90分)を終えてからブラウザで落ちるのは、待った分だけ無駄になる。
+  if (process.env.E2E_SKIP_BROWSER_CHECK === '1') {
+    console.log('[e2e] E2E_SKIP_BROWSER_CHECK=1 のため Playwright のブラウザ起動確認をスキップします');
+  } else {
+    const browsers = requiredBrowserNames(config.projects);
+    console.log(`[e2e] Playwright のブラウザが起動できることを確認します (${browsers.join(', ')})`);
+    await checkBrowsersLaunchable(browsers);
+  }
 
   if (process.env.ACCEPTANCE_RESET === '1') {
     console.log('[e2e] ACCEPTANCE_RESET=1: 受け入れテスト環境をゼロから構築し直します(破壊的)');
@@ -72,5 +91,5 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
     await context.dispose();
   }
 
-  console.log('[e2e] 前提確認OK: 全サービスhealthy、公開URLとKeycloakへ疎通');
+  console.log('[e2e] 前提確認OK: ブラウザ起動、全サービスhealthy、公開URLとKeycloakへ疎通');
 }

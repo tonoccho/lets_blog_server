@@ -106,6 +106,17 @@ UI操作(コマンドパレット・Webview・キーバインド)は自動化せ
 `auth` / `users` / `projects` / `posts` / `bulk` / `ai` / `plans` / `media` / `diagrams` /
 `content` / `analytics` / `system` / `logs` / `extension` / `cross-cutting`。
 
+このほか、製品ではなく**受け入れテストの土台**を検証するものが2つある。
+土台が壊れると、それに乗るシナリオが理由の分からない形で落ちるため、
+製品のドメインには混ぜず別に置く。
+
+| パス | 何を固定するか |
+| --- | --- |
+| `features/stubs/` | 外部依存スタブの決定性とエラー注入(#928 / AT-2、§9) |
+| `features/harness/` | Playwright のブラウザ前提確認の判定と文面(#1045、[e2e-testing.md §3.3](e2e-testing.md)) |
+
+どちらも `@api` で書く。ブラウザを起動できないホストでも土台の検証だけは回せる必要がある。
+
 ### support/ を「移設」しないこと
 
 `helpers.ts` は移行前の13 spec が依存している。移行が終わるまでは spec とステップ定義の
@@ -152,6 +163,12 @@ UI操作(コマンドパレット・Webview・キーバインド)は自動化せ
 
 ホストの 80/443 を他のプロセスが占有している場合は、先に §12 を読むこと。
 その状態では global-setup の疎通確認で全シナリオが始まらない。
+
+**Playwright のブラウザは初回に自分で入れる**([e2e-testing.md §3.3](e2e-testing.md)、issue #1045)。
+入っていないと global-setup の前提確認で落ち、シナリオは1本も実行されない。
+ブラウザ本体は `cd apps/web && npm run playwright:install`(root 不要)、
+それが依存する OS 共有ライブラリは `sudo npx playwright install-deps`(**root が要る**ので
+自動実行しない)。どちらが足りないかは前提確認の失敗メッセージが示す。
 
 ```bash
 cd apps/web
