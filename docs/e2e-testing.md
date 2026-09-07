@@ -48,7 +48,6 @@ Keycloak クライアント `letsblog-web` の redirect_uri が
 | `main-scenario.spec.ts` | **主要シナリオ**: サイト登録 → 記事公開 → 履歴確認 | admin |
 | `site-registration.spec.ts` | サイト管理・疎通確認(ManagedWordPress フィクスチャ) | admin |
 | `post-creation.spec.ts` | プロジェクト作成ワークフロー | admin |
-| `image-upload.spec.ts` | 画像ギャラリー(ComfyUI 生成フィクスチャ) | admin |
 | `accessibility.spec.ts` | アクセシビリティ(アプリ画面 + Keycloak ログイン画面) | user |
 | `custom-tag-generation.spec.ts` | カスタムタグ生成(プロジェクト詳細タブ) | - |
 | `performance.spec.ts` | カスタムタグ検証 API の応答時間とタグ画面のページロード性能 | admin |

@@ -231,19 +231,19 @@ API: media `ImageGenerationController`, `GeneratedImageController`, `MediaContro
 
 | 機能ID | 機能 | 利用者から見た価値 | 受け入れ基準(要約) | 対応シナリオ | 状態 |
 | --- | --- | --- | --- | --- | --- |
-| AC-IMG-001 | 画像生成 (`POST /api/ai/image`) | 記事の挿絵を自分で用意しなくてよい | プロンプトから画像が生成され、ギャラリーに現れる | — | 未着手(`@slow` `@stub`) |
-| AC-IMG-002 | 生成オプションの取得 | 選べる設定が画面に出る | `GET /api/ai/image-options` の内容が生成フォームの選択肢と一致する | — | 未着手 |
-| AC-IMG-003 | ギャラリー一覧 (`/image-gallery`) | 生成済み画像を探せる | 生成済み画像が一覧に表示される | `e2e/image-upload.spec.ts` › Navigate to image gallery page / Image gallery displays the fixture generated image | 既存spec |
-| AC-IMG-004 | 画像詳細 | どのプロンプトで作ったか分かる | 詳細モーダルに生成パラメータが表示される | `e2e/image-upload.spec.ts` › Image detail modal opens and shows generation parameters | 既存spec |
-| AC-IMG-005 | 画像削除 | 不要な画像を消せる | `DELETE /api/generated-images/{id}` 後、一覧から消える | `e2e/image-upload.spec.ts` › Image deletion removes the fixture image from the gallery | 既存spec |
-| AC-IMG-006 | 画像タグ編集 | 画像を分類して探しやすくできる | `PUT /api/generated-images/{id}/tags` の結果が一覧の絞り込みに反映される | `e2e/image-upload.spec.ts` › Search/filter input is not implemented on the image gallery page(UI未実装の確認のみ) | 既存spec(部分) |
-| AC-IMG-007 | 画像ファイルの取得 | 生成画像を記事に貼れる | `GET /api/generated-images/{id}/file` が画像バイト列を返す | — | 未着手 |
-| AC-IMG-008 | 画像アップロード | 手元の画像も使える | `POST /api/media/upload` した画像がギャラリーに現れる | `e2e/image-upload.spec.ts` › Local file upload input is not implemented on the image gallery page(UI未実装の確認のみ) | 既存spec(部分) |
-| AC-IMG-009 | 画像プロバイダの選択 | ComfyUI と外部APIを切り替えられる | `PUT /ai-models/image/provider/selection` の選択が以後の生成に使われる | — | 未着手 |
-| AC-IMG-010 | ComfyUI チェックポイント管理 | 使うモデルを選べる | チェックポイントの一覧・選択・導入・削除の結果が生成に反映される | — | 未着手(`@slow`) |
-| AC-IMG-011 | 画像生成の既定設定 | 毎回同じ設定を入れ直さなくてよい | プロンプト既定値・サイズ既定値・リサイズ既定値の保存内容が生成フォームに反映される(#913 の再発検知) | — | 未着手 |
-| AC-IMG-012 | 画像コンテンツフィルタ設定 | 不適切な生成を抑止できる | `PUT /image-content-filter-settings` の設定が生成結果に反映される | — | 未着手 |
-| AC-IMG-013 | メディアのガベージコレクション | 使われていない画像で容量を食わない | `GET /media-garbage-collection/scan` が未使用を列挙し、`POST /delete` で削除される | —(削除経路そのものは `ext:articles/deletion.feature` › アイキャッチ画像付きの記事を削除すると、未参照になったメディアも削除できる が #1001 の再発検知として通る。画面としての受け入れは AT-10 で別途) | 未着手(`@destructive`) |
+| AC-IMG-001 | 画像生成 (`POST /api/ai/image`) | 記事の挿絵を自分で用意しなくてよい | プロンプトから画像が生成され、ギャラリーに現れる | `features/media/image-generation.feature` › プロンプトを指定してComfyUIで画像を生成すると、生成画像の一覧に現れる / 生成に使ったプロンプト・サイズ・チェックポイントが生成画像の詳細に残る、`features/media/image-generation-chatgpt.feature` › 画像生成に失敗したときは理由が示され、壊れた画像レコードは残らない | 検証済(`@slow` は GPU 必須。`@stub` 経路は GPU 非搭載でも通る) |
+| AC-IMG-002 | 生成オプションの取得 | 選べる設定が画面に出る | `GET /api/ai/image-options` の内容が生成フォームの選択肢と一致する | `features/media/image-settings.feature` › 画像生成のデフォルトプロンプトを保存すると、次の生成の既定値になる(既定値の部分のみ) | 部分的に検証 |
+| AC-IMG-003 | ギャラリー一覧 (`/image-gallery`) | 生成済み画像を探せる | 生成済み画像が一覧に表示される | `features/media/image-gallery.feature` › 保存済みの生成画像がギャラリーに一覧表示される | 検証済 |
+| AC-IMG-004 | 画像詳細 | どのプロンプトで作ったか分かる | 詳細モーダルに生成パラメータが表示される | `features/media/image-gallery.feature` › 詳細モーダルに生成パラメータが表示される | 検証済 |
+| AC-IMG-005 | 画像削除 | 不要な画像を消せる | `DELETE /api/generated-images/{id}` 後、一覧から消える | `features/media/image-gallery.feature` › 画像を削除するとギャラリーから消え、ファイル実体も取得できなくなる | 検証済 |
+| AC-IMG-006 | 画像タグ編集 | 画像を分類して探しやすくできる | `PUT /api/generated-images/{id}/tags` の結果が一覧の絞り込みに反映される | `features/media/image-gallery.feature` › 画像にタグを付けて保存でき、そのタグで絞り込める | 検証済 |
+| AC-IMG-007 | 画像ファイルの取得 | 生成画像を記事に貼れる | `GET /api/generated-images/{id}/file` が画像バイト列を返す | `features/media/image-gallery.feature` › 保存済みの生成画像がギャラリーに一覧表示される(一覧の `img` が同エンドポイントを参照する)/ 画像を削除するとギャラリーから消え、ファイル実体も取得できなくなる | 検証済 |
+| AC-IMG-008 | 画像アップロード | 手元の画像も使える | `POST /api/media/upload` した画像がギャラリーに現れる | —(`/image-gallery` にファイルアップロードのUIは無い。#645 で確認済み。移行元 spec が持っていた「未実装であることの確認」は受け入れ基準ではないので #936 では移していない) | 未着手 |
+| AC-IMG-009 | 画像プロバイダの選択 | ComfyUI と外部APIを切り替えられる | `PUT /ai-models/image/provider/selection` の選択が以後の生成に使われる | `features/media/image-generation-chatgpt.feature` › 画像生成AIをChatGPTに切り替えると、ChatGPTの経路で生成される | 検証済(`@stub`) |
+| AC-IMG-010 | ComfyUI チェックポイント管理 | 使うモデルを選べる | チェックポイントの一覧・選択・導入・削除の結果が生成に反映される | `features/media/comfyui-checkpoints.feature` › 利用可能なチェックポイントの一覧が取得でき、選んだものが保存される / チェックポイントを導入すると、導入後の一覧に現れる / 選択中のチェックポイントは削除できず、選択していないものは削除できる | 検証済(`@slow`。GPU 必須) |
+| AC-IMG-011 | 画像生成の既定設定 | 毎回同じ設定を入れ直さなくてよい | プロンプト既定値・サイズ既定値・リサイズ既定値の保存内容が生成フォームに反映される(#913 の再発検知) | `features/media/image-settings.feature` › 画像生成のデフォルトプロンプトを保存すると、次の生成の既定値になる / デフォルトサイズと記事内画像のリサイズ幅は、保存後にページを開き直しても表示される | 検証済 |
+| AC-IMG-012 | 画像コンテンツフィルタ設定 | 不適切な生成を抑止できる | `PUT /image-content-filter-settings` の設定が生成結果に反映される | `features/media/image-settings.feature` › コンテンツフィルタに抵触するプロンプトは、生成を始めずに拒否される | 検証済 |
+| AC-IMG-013 | メディアのガベージコレクション | 使われていない画像で容量を食わない | `GET /media-garbage-collection/scan` が未使用を列挙し、`POST /delete` で削除される | `features/media/media-garbage-collection.feature` › どの記事からも参照されていないメディアをスキャンで検出できる / ガベージコレクションを実行すると、選んだ未参照の画像だけが削除される / 記事から参照されている画像は、ガベージコレクションを実行しても残っている | 検証済(`@destructive`) |
 
 ### 2.9 ダイアグラムとレンダリング — `DIAG`
 

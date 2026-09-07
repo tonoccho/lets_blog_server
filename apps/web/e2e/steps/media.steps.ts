@@ -1,6 +1,7 @@
 import type { APIRequestContext, Page } from '@playwright/test';
 import { After, Given, Then, When } from './fixtures';
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken } from '../support';
+import { STUB_URLS, forceStubStatus, resetStub, stubRequestCount } from '../support/stubs';
 
 /**
  * 生成画像ギャラリーのseed表示のステップ定義(issue #1101)。
@@ -134,6 +135,29 @@ interface ImageGenerationOutcome {
   images: { id: number }[];
   /** 要求前に存在した生成画像のID集合。「1枚も増えていない」の比較に使う。 */
   idsBefore: number[];
+  /**
+   * 要求前に ChatGPT 画像生成スタブが受け取っていた件数(issue #936、シナリオ3)。
+   * 「ChatGPT の経路を通ったか」は生成された画像だけを見ても分からない
+   * (どちらのプロバイダでも同じ形の画像が返る)ため、スタブの受信件数の増分で見る。
+   * スタブが起動していない実行(`@stub` を付けないシナリオ)では null になる。
+   */
+  chatGptStubCallsBefore: number | null;
+}
+
+/**
+ * ChatGPT 画像生成スタブの受信件数。スタブが起動していなければ null を返す。
+ *
+ * ここを例外にしないのは、この関数を通る {@link requestImageGeneration} が
+ * `@stub` の付いていないシナリオ(`image-batch-count.feature`)からも使われるため。
+ * スタブの起動を要求するのは `@stub` の Before(`steps/stubs.steps.ts`)の仕事であって、
+ * この関数の仕事ではない。
+ */
+async function chatGptStubCalls(): Promise<number | null> {
+  try {
+    return await stubRequestCount('openai-image');
+  } catch {
+    return null;
+  }
 }
 
 async function listGeneratedImageIds(request: APIRequestContext): Promise<number[]> {
@@ -155,6 +179,7 @@ async function requestImageGeneration(
 ): Promise<void> {
   const token = await adminToken(request);
   const idsBefore = await listGeneratedImageIds(request);
+  const chatGptStubCallsBefore = await chatGptStubCalls();
   const response = await request.post('/api/ai/image', {
     headers: { Authorization: `Bearer ${token}` },
     data: { prompt: 'e2e batch count', ...body },
@@ -170,6 +195,7 @@ async function requestImageGeneration(
     body: text,
     images,
     idsBefore,
+    chatGptStubCallsBefore,
   } satisfies ImageGenerationOutcome;
   ctx.mediaGeneratedIds = images.map((image) => image.id);
 }
@@ -445,3 +471,582 @@ Then(
     ).toBeGreaterThanOrEqual(Number(minimum));
   }
 );
+
+/**
+ * ここから下は issue #936(AT-10)。画像生成・ギャラリー・画像設定・ComfyUIチェックポイントの
+ * 受け入れシナリオを支えるステップ定義。メディアGCだけは前提(WordPressサイトの構築)と
+ * 後片付けの形が大きく違うため `mediaGarbageCollection.steps.ts` に分けてある。
+ *
+ * 画面から確かめるものとAPIから確かめるものが混在する。分け方の理由は各 `.feature` の
+ * 冒頭に書いてある(要約: 画面のふるまいが受け入れ基準なら画面から、サーバーの判断が
+ * 受け入れ基準ならAPIから)。
+ */
+
+/** 生成画像ギャラリーのURL。 */
+const IMAGE_GALLERY_PATH = '/image-gallery';
+
+/**
+ * 検証用に導入する小さなチェックポイント(issue #936 シナリオ13・14)。
+ *
+ * #936 の方針は実生成に SDXL base(約6.9GB)を使うことだが、**導入シナリオが確かめるのは
+ * ダウンロードと配置が成立することだけ**なので、Implementation Notes の
+ * 「小さいモデルで検証する」に従って 283KB の safetensors を使う。
+ * 6.9GB を毎回落とすのは受け入れテストの所要時間として現実的でない。
+ *
+ * ComfyUI のチェックポイント一覧は `checkpoints/` に置かれたファイル名をそのまま返すので、
+ * 中身が拡散モデルとして完全である必要は無い(このシナリオは生成を行わない)。
+ */
+const TINY_CHECKPOINT_URL =
+  'https://huggingface.co/hf-internal-testing/tiny-sd-pipe/resolve/main/text_encoder/model.safetensors';
+
+/** 導入先のファイル名。ComfyUiCheckpointTable の SAFE_FILE_NAME(英数字・_・-・.)に収める。 */
+const TINY_CHECKPOINT_FILE_NAME = 'e2e-936-tiny.safetensors';
+
+/** 非同期ジョブ(GenerationJob)の完了を待つときの上限。導入はダウンロードを伴う。 */
+const JOB_TIMEOUT_MS = 300_000;
+
+interface GeneratedImageDetail {
+  id: number;
+  prompt: string;
+  width: number;
+  height: number;
+  checkpoint: string | null;
+  provider: string;
+  tags: string[];
+}
+
+/** プロジェクトを作り、画像生成AIを選ぶ。フィクスチャは `@media` の After が片付ける。 */
+async function createProjectWithImageProvider(
+  request: APIRequestContext,
+  ctx: Record<string, unknown>,
+  provider: 'COMFYUI' | 'CHATGPT',
+  slugPrefix: string
+): Promise<number> {
+  const token = await adminToken(request);
+  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const created = await request.post('/api/projects', {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { name: `E2E ${slugPrefix} ${suffix}`, slug: `e2e-${slugPrefix}-${suffix}` },
+  });
+  expect(
+    created.ok(),
+    `プロジェクトの作成に失敗しました (status=${created.status()}): ${await created.text()}`
+  ).toBe(true);
+  const projectId = ((await created.json()) as { id: number }).id;
+  const selected = await request.put(`/api/projects/${projectId}/ai-models/image/provider/selection`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { provider },
+  });
+  expect(
+    selected.ok(),
+    `画像生成AIの選択に失敗しました (status=${selected.status()}): ${await selected.text()}`
+  ).toBe(true);
+  ctx.mediaProjectId = projectId;
+  return projectId;
+}
+
+/** 生成画像の詳細を取得する。 */
+async function fetchGeneratedImageDetail(
+  request: APIRequestContext,
+  id: number
+): Promise<GeneratedImageDetail> {
+  const token = await adminToken(request);
+  const response = await request.get(`/api/generated-images/${id}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(
+    response.ok(),
+    `生成画像の詳細取得に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+  return (await response.json()) as GeneratedImageDetail;
+}
+
+/** 直前の要求で生成された画像のうち1枚目。詳細を確かめるステップが使う。 */
+function firstGeneratedImageId(ctx: Record<string, unknown>): number {
+  const result = outcome(ctx);
+  expect(
+    result.status,
+    `画像生成に失敗しました (status=${result.status}): ${result.body}`
+  ).toBe(200);
+  expect(result.images.length, '生成された画像がありません').toBeGreaterThan(0);
+  return result.images[0].id;
+}
+
+/** GenerationJob が done / failed になるまで待ち、最終状態を返す。 */
+async function waitForGenerationJob(
+  request: APIRequestContext,
+  jobId: number
+): Promise<{ status: string; resultPayload: string | null }> {
+  const token = await adminToken(request);
+  const deadline = Date.now() + JOB_TIMEOUT_MS;
+  let last: { status: string; resultPayload: string | null } = { status: 'unknown', resultPayload: null };
+  while (Date.now() < deadline) {
+    const response = await request.get(`/api/generation-jobs/${jobId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(
+      response.ok(),
+      `ジョブの取得に失敗しました (status=${response.status()}): ${await response.text()}`
+    ).toBe(true);
+    last = (await response.json()) as { status: string; resultPayload: string | null };
+    if (last.status !== 'running' && last.status !== 'pending') {
+      return last;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  throw new Error(`ジョブ ${jobId} が ${JOB_TIMEOUT_MS}ms 以内に終わりませんでした(最後の状態: ${last.status})`);
+}
+
+/** プロジェクト詳細の指定タブを開く。パネルはタブの中にあるため、これを通らないと見えない。 */
+async function openProjectTab(page: Page, projectId: number, tabLabel: string): Promise<void> {
+  await page.goto(`/projects/${projectId}`, { waitUntil: 'commit' });
+  const tab = page.getByRole('button', { name: tabLabel, exact: true });
+  await expect(tab).toBeVisible({ timeout: 30_000 });
+  await tab.click();
+}
+
+// ---- 画像生成(image-generation.feature) ----
+
+Given('画像生成にComfyUIを使うプロジェクトがある', async ({ ctx, request }) => {
+  await createProjectWithImageProvider(request, ctx, 'COMFYUI', '936-comfyui');
+});
+
+When(
+  /^そのプロジェクトで「([^」]+)」の画像生成を要求する$/,
+  async ({ ctx, request }, prompt: string) => {
+    await requestImageGeneration(request, ctx, { projectId: ctx.mediaProjectId, prompt, batchSize: 1 });
+  }
+);
+
+When(
+  /^そのプロジェクトで「([^」]+)」を「(\d+)」x「(\d+)」で画像生成を要求する$/,
+  async ({ ctx, request }, prompt: string, width: string, height: string) => {
+    await requestImageGeneration(request, ctx, {
+      projectId: ctx.mediaProjectId,
+      prompt,
+      batchSize: 1,
+      width: Number(width),
+      height: Number(height),
+    });
+  }
+);
+
+Then(
+  /^生成された画像の詳細のプロンプトに「([^」]+)」が含まれる$/,
+  async ({ ctx, request }, prompt: string) => {
+    const detail = await fetchGeneratedImageDetail(request, firstGeneratedImageId(ctx));
+    // 画質プロンプト(プロジェクト/アプリの既定値)が末尾へ連結されるため前方一致では見ない。
+    expect(detail.prompt).toContain(prompt);
+  }
+);
+
+Then(
+  /^生成された画像の詳細のサイズは「(\d+)」x「(\d+)」である$/,
+  async ({ ctx, request }, width: string, height: string) => {
+    const detail = await fetchGeneratedImageDetail(request, firstGeneratedImageId(ctx));
+    expect(detail.width).toBe(Number(width));
+    expect(detail.height).toBe(Number(height));
+  }
+);
+
+Then('生成された画像の詳細にチェックポイント名が残っている', async ({ ctx, request }) => {
+  const detail = await fetchGeneratedImageDetail(request, firstGeneratedImageId(ctx));
+  expect(detail.checkpoint, '生成に使ったチェックポイントが記録されていません').toBeTruthy();
+});
+
+Then('ChatGPTの画像生成が呼ばれている', async ({ ctx }) => {
+  const result = outcome(ctx);
+  expect(
+    result.chatGptStubCallsBefore,
+    'ChatGPT画像生成スタブの受信件数を取得できませんでした(スタブが起動していません)'
+  ).not.toBeNull();
+  const after = await stubRequestCount('openai-image');
+  expect(
+    after,
+    `ChatGPTの画像生成が呼ばれていません(要求前 ${result.chatGptStubCallsBefore} 件 / 要求後 ${after} 件)`
+  ).toBeGreaterThan(result.chatGptStubCallsBefore as number);
+});
+
+Then(
+  /^生成された画像の詳細の画像生成AIは「([A-Z]+)」である$/,
+  async ({ ctx, request }, provider: string) => {
+    const detail = await fetchGeneratedImageDetail(request, firstGeneratedImageId(ctx));
+    expect(detail.provider).toBe(provider);
+  }
+);
+
+Given(
+  /^ChatGPTの画像生成が次の1回だけ「(\d+)」で失敗するようにする$/,
+  async ({ ctx }, status: string) => {
+    await forceStubStatus('openai-image', Number(status), 1);
+    ctx.mediaForcedStub = 'openai-image';
+  }
+);
+
+/**
+ * 「壊れた画像レコードが残らない」を**そのプロジェクトの中で**確かめる。
+ *
+ * 既存の「生成画像は1枚も増えていない」は全プロジェクトの一覧を見るため、並列に走る
+ * 他のシナリオが作った画像を拾って落ちる(実測でそうなった)。失敗した生成が
+ * 行を残さないことはプロジェクト単位で言えれば足りる。
+ */
+Then('そのプロジェクトの生成画像は1枚も残っていない', async ({ ctx, request }) => {
+  const token = await adminToken(request);
+  const response = await request.get(`/api/generated-images?projectId=${ctx.mediaProjectId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(
+    response.ok(),
+    `生成画像一覧の取得に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+  expect(await response.json()).toEqual([]);
+});
+
+Then(
+  /^拒否の理由に失敗した画像生成AIと状態コード「(\d+)」が示される$/,
+  async ({ ctx }, status: string) => {
+    const result = outcome(ctx);
+    expect(result.body).toContain('ChatGPT');
+    // playwright-bdd は数字だけのキャプチャを number として渡すため、明示的に文字列へ戻す。
+    expect(result.body).toContain(String(status));
+  }
+);
+
+/**
+ * 仕込んだエラー注入が消費されずに残っていたときだけ解除する。
+ *
+ * **無条件に `resetStub()` を呼んではいけない。** リセットはスタブの受信件数を0へ戻すので、
+ * 並列に走っている「ChatGPTの画像生成が呼ばれている」(受信件数の増分を見るシナリオ)を
+ * 巻き添えで落とす。実測でそうなった。注入は `count: 1` なので通常はシナリオ内の
+ * 1回の生成要求で消費され、ここで解除する必要は無い。残るのは、要求へ届く前に
+ * シナリオが落ちた場合だけである。
+ */
+After({ tags: '@media' }, async ({ ctx }) => {
+  if (ctx.mediaForcedStub !== 'openai-image') {
+    return;
+  }
+  const response = await fetch(`${STUB_URLS['openai-image']}/__control/state`);
+  const state = (await response.json()) as { forced: unknown };
+  if (state.forced) {
+    await resetStub('openai-image');
+  }
+});
+
+// ---- ギャラリー(image-gallery.feature) ----
+
+Given(
+  /^プロンプト「([^」]+)」の生成画像がギャラリーにある$/,
+  async ({ ctx, request }, prompt: string) => {
+    ctx.mediaImageId = await createGeneratedImage(request, { prompt, provider: 'COMFYUI', seed: 936_000 });
+    ctx.mediaImagePrompt = prompt;
+  }
+);
+
+When('生成画像ギャラリーを開く', async ({ page }) => {
+  await page.goto(IMAGE_GALLERY_PATH, { waitUntil: 'commit' });
+  await expect(page.getByRole('heading', { name: '生成画像ギャラリー' })).toBeVisible({ timeout: 30_000 });
+});
+
+Then(
+  /^ギャラリーにプロンプト「([^」]+)」の画像が表示される$/,
+  async ({ page }, prompt: string) => {
+    await expect(page.locator(`img[alt="${prompt}"]`)).toBeVisible({ timeout: 30_000 });
+  }
+);
+
+Then(
+  /^ギャラリーにプロンプト「([^」]+)」の画像は表示されない$/,
+  async ({ page }, prompt: string) => {
+    await expect(page.locator(`img[alt="${prompt}"]`)).toHaveCount(0, { timeout: 30_000 });
+  }
+);
+
+Then(
+  /^詳細に「([^」]+)」として「([^」]+)」が表示される$/,
+  async ({ page }, label: string, value: string) => {
+    await expect(detailValue(page, label)).toHaveText(value);
+  }
+);
+
+When(/^タグ「([^」]+)」を追加する$/, async ({ page }, tag: string) => {
+  await page.getByPlaceholder('タグを追加').fill(tag);
+  await page.getByRole('button', { name: '追加', exact: true }).click();
+});
+
+Then(/^詳細のタグ一覧に「([^」]+)」が表示される$/, async ({ page }, tag: string) => {
+  await expect(page.getByRole('button', { name: `タグ「${tag}」を削除` })).toBeVisible({ timeout: 30_000 });
+});
+
+Then(
+  /^ギャラリーを開き直すとタグ「([^」]+)」で絞り込める$/,
+  async ({ ctx, page }, tag: string) => {
+    await page.goto(IMAGE_GALLERY_PATH, { waitUntil: 'commit' });
+    const filter = page.getByRole('button', { name: tag, exact: true });
+    await expect(filter).toBeVisible({ timeout: 30_000 });
+    await filter.click();
+    await expect(page.locator(`img[alt="${ctx.mediaImagePrompt as string}"]`)).toBeVisible();
+  }
+);
+
+When('詳細から画像を削除する', async ({ page }) => {
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: '削除', exact: true }).click();
+  await expect(page.getByText('生成画像の詳細')).toHaveCount(0, { timeout: 30_000 });
+});
+
+Then('その画像のファイルはもう取得できない', async ({ ctx, request }) => {
+  const token = await adminToken(request);
+  const response = await request.get(`/api/generated-images/${ctx.mediaImageId}/file`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(
+    response.status(),
+    `削除したはずの画像のファイルが取得できてしまいました (status=${response.status()})`
+  ).toBe(404);
+  // 削除済みなので @media の After が重ねて消さないようにする。
+  ctx.mediaImageId = undefined;
+});
+
+// ---- 画像設定(image-settings.feature) ----
+
+Given('画像設定を確かめるためのプロジェクトがある', async ({ ctx, request }) => {
+  // 画像設定そのものを見るので、画像生成AIは既定(ComfyUI)のままでよい。
+  await createProjectWithImageProvider(request, ctx, 'COMFYUI', '936-settings');
+});
+
+When(
+  /^そのプロジェクトの画像設定でnegative promptの既定値に「([^」]+)」を保存する$/,
+  async ({ ctx, page }, value: string) => {
+    await openProjectTab(page, ctx.mediaProjectId as number, 'AI・アセット');
+    const form = page.locator('form').filter({ has: page.locator('textarea[name="defaultNegativePrompt"]') });
+    await form.locator('textarea[name="defaultNegativePrompt"]').fill(value);
+    await form.getByRole('button', { name: '保存', exact: true }).click();
+  }
+);
+
+Then('保存しましたと表示される', async ({ page }) => {
+  await expect(page.getByText('保存しました。').first()).toBeVisible({ timeout: 30_000 });
+});
+
+Then(
+  /^そのプロジェクトの画像生成の既定値としてnegative prompt「([^」]+)」が返る$/,
+  async ({ ctx, request }, value: string) => {
+    const token = await adminToken(request);
+    const response = await request.get(`/api/ai/image-options?projectId=${ctx.mediaProjectId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(
+      response.ok(),
+      `画像生成の既定値の取得に失敗しました (status=${response.status()}): ${await response.text()}`
+    ).toBe(true);
+    const options = (await response.json()) as { defaultNegativePrompt: string | null };
+    expect(options.defaultNegativePrompt).toBe(value);
+  }
+);
+
+When(
+  /^そのプロジェクトの画像設定でデフォルトサイズに「(\d+)」x「(\d+)」を保存する$/,
+  async ({ ctx, page }, width: string, height: string) => {
+    await openProjectTab(page, ctx.mediaProjectId as number, 'AI・アセット');
+    const form = page
+      .locator('form')
+      .filter({ has: page.locator('input[name="defaultGeneratedImageWidth"]') });
+    await form.locator('input[name="defaultGeneratedImageWidth"]').fill(width);
+    await form.locator('input[name="defaultGeneratedImageHeight"]').fill(height);
+    await form.getByRole('button', { name: '保存', exact: true }).click();
+    await expect(form.getByText('保存しました。')).toBeVisible({ timeout: 30_000 });
+  }
+);
+
+When(
+  /^そのプロジェクトの画像設定で記事内画像のリサイズ幅に「(\d+)」を保存する$/,
+  async ({ page }, longEdgePx: string) => {
+    const form = page
+      .locator('form')
+      .filter({ has: page.locator('input[name="defaultArticleImageLongEdgePx"]') });
+    await form.locator('input[name="defaultArticleImageLongEdgePx"]').fill(longEdgePx);
+    await form.getByRole('button', { name: '保存', exact: true }).click();
+    await expect(form.getByText('保存しました。')).toBeVisible({ timeout: 30_000 });
+  }
+);
+
+When('そのプロジェクトの画像設定をページを開き直して表示する', async ({ ctx, page }) => {
+  // #913 と同型の退行検知。保存直後の画面ではなく、**開き直した**画面を見る。
+  await openProjectTab(page, ctx.mediaProjectId as number, 'AI・アセット');
+});
+
+Then(
+  /^デフォルトサイズの入力には「(\d+)」と「(\d+)」が入っている$/,
+  async ({ page }, width: string, height: string) => {
+    await expect(page.locator('input[name="defaultGeneratedImageWidth"]')).toHaveValue(width, {
+      timeout: 30_000,
+    });
+    await expect(page.locator('input[name="defaultGeneratedImageHeight"]')).toHaveValue(height);
+  }
+);
+
+Then(
+  /^記事内画像のリサイズ幅の入力には「(\d+)」が入っている$/,
+  async ({ page }, longEdgePx: string) => {
+    await expect(page.locator('input[name="defaultArticleImageLongEdgePx"]')).toHaveValue(longEdgePx, {
+      timeout: 30_000,
+    });
+  }
+);
+
+Given('そのプロジェクトで性的な画像の生成を禁止する設定が保存されている', async ({ ctx, request }) => {
+  const token = await adminToken(request);
+  const response = await request.put(
+    `/api/projects/${ctx.mediaProjectId}/image-content-filter-settings`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      data: { blockSexualContent: true, blockViolentContent: true, blockDiscriminatoryContent: true },
+    }
+  );
+  expect(
+    response.ok(),
+    `コンテンツフィルタ設定の保存に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+  const saved = (await response.json()) as { blockSexualContent: boolean };
+  expect(saved.blockSexualContent, '性的コンテンツの禁止が保存されていません').toBe(true);
+});
+
+Then(
+  /^拒否の理由に禁止されたカテゴリ「([^」]+)」が示される$/,
+  async ({ ctx }, category: string) => {
+    expect(outcome(ctx).body).toContain(category);
+  }
+);
+
+// ---- ComfyUIチェックポイント(comfyui-checkpoints.feature) ----
+
+interface CheckpointList {
+  checkpoints: string[];
+  selected: string;
+}
+
+async function fetchCheckpoints(
+  request: APIRequestContext,
+  projectId: number
+): Promise<CheckpointList> {
+  const token = await adminToken(request);
+  const response = await request.get(`/api/projects/${projectId}/ai-models/comfyui/checkpoints`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(
+    response.ok(),
+    `チェックポイント一覧の取得に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+  return (await response.json()) as CheckpointList;
+}
+
+When('そのプロジェクトで利用可能なチェックポイントの一覧を取得する', async ({ ctx, request }) => {
+  ctx.mediaCheckpoints = await fetchCheckpoints(request, ctx.mediaProjectId as number);
+});
+
+Then('チェックポイントが1件以上返る', async ({ ctx }) => {
+  const list = ctx.mediaCheckpoints as CheckpointList;
+  expect(list.checkpoints.length, 'ComfyUIから利用可能なチェックポイントが1件も返りません').toBeGreaterThan(0);
+});
+
+When('一覧の先頭のチェックポイントを選択する', async ({ ctx, request }) => {
+  const list = ctx.mediaCheckpoints as CheckpointList;
+  const target = list.checkpoints[0];
+  const token = await adminToken(request);
+  const response = await request.put(
+    `/api/projects/${ctx.mediaProjectId}/ai-models/comfyui/checkpoints/selection`,
+    { headers: { Authorization: `Bearer ${token}` }, data: { checkpointName: target } }
+  );
+  expect(
+    response.ok(),
+    `チェックポイントの選択に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+  ctx.mediaSelectedCheckpoint = target;
+});
+
+Then('そのプロジェクトの選択中チェックポイントは選択したものになる', async ({ ctx, request }) => {
+  const list = await fetchCheckpoints(request, ctx.mediaProjectId as number);
+  expect(list.selected).toBe(ctx.mediaSelectedCheckpoint);
+});
+
+When('そのプロジェクトへ検証用の小さなチェックポイントを導入する', async ({ ctx, request }) => {
+  const token = await adminToken(request);
+  const response = await request.post(
+    `/api/projects/${ctx.mediaProjectId}/ai-models/comfyui/checkpoints/install`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      data: { downloadUrl: TINY_CHECKPOINT_URL, fileName: TINY_CHECKPOINT_FILE_NAME },
+    }
+  );
+  expect(
+    response.ok(),
+    `チェックポイントの導入開始に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+  const job = (await response.json()) as { id: number };
+  ctx.mediaInstallJob = await waitForGenerationJob(request, job.id);
+  ctx.mediaInstalledCheckpoint = TINY_CHECKPOINT_FILE_NAME;
+});
+
+Then('導入のジョブは成功で終わる', async ({ ctx }) => {
+  const job = ctx.mediaInstallJob as { status: string; resultPayload: string | null };
+  expect(job.status, `導入ジョブが失敗しました: ${job.resultPayload}`).toBe('done');
+});
+
+Then('導入したチェックポイントがそのプロジェクトの一覧に現れる', async ({ ctx, request }) => {
+  const list = await fetchCheckpoints(request, ctx.mediaProjectId as number);
+  expect(list.checkpoints).toContain(ctx.mediaInstalledCheckpoint);
+});
+
+When('そのプロジェクトの管理画面でComfyUIチェックポイントの一覧を開く', async ({ ctx, page }) => {
+  // チェックポイント表は二段のタブの奥にある。プロジェクト詳細の「AI・アセット」タブを開き、
+  // その中の「AIモデル管理」パネルで「画像生成」サブタブへ切り替えて初めて取得・描画される
+  // (ProjectAiModelsPanel は開いたタブの分だけをクライアント側で取りに行く)。
+  await openProjectTab(page, ctx.mediaProjectId as number, 'AI・アセット');
+  await page.getByRole('button', { name: '画像生成', exact: true }).click();
+  await expect(page.getByText('選択中のチェックポイント:')).toBeVisible({ timeout: 30_000 });
+});
+
+/** チェックポイント名の行。表の1列目がその名前である行を選ぶ。 */
+function checkpointRow(page: Page, name: string) {
+  return page.locator('tr').filter({ has: page.locator(`td:has-text("${name}")`) });
+}
+
+Then('選択中のチェックポイントの削除ボタンは押せず、理由が示される', async ({ page }) => {
+  const selectedRow = page.locator('tr').filter({ has: page.getByText('選択中', { exact: true }) });
+  const deleteButton = selectedRow.getByRole('button', { name: '削除', exact: true });
+  await expect(deleteButton).toBeDisabled();
+  await expect(deleteButton).toHaveAttribute('title', '選択中のチェックポイントは削除できません');
+});
+
+When('導入したチェックポイントを画面から削除する', async ({ ctx, page }) => {
+  const name = ctx.mediaInstalledCheckpoint as string;
+  page.once('dialog', (dialog) => dialog.accept());
+  await checkpointRow(page, name).getByRole('button', { name: '削除', exact: true }).click();
+  await expect(page.getByText('完了しました。')).toBeVisible({ timeout: JOB_TIMEOUT_MS });
+});
+
+Then('導入したチェックポイントが一覧から消える', async ({ ctx, request }) => {
+  const list = await fetchCheckpoints(request, ctx.mediaProjectId as number);
+  expect(list.checkpoints).not.toContain(ctx.mediaInstalledCheckpoint);
+});
+
+/**
+ * 導入したチェックポイントは ComfyUI のモデル領域に残るので、必ず消す。
+ * このボリューム(`comfyui_models`)はゼロ構築でも**保全される**(モデルの再取得が
+ * 現実的でないため。docs/ACCEPTANCE_TESTING.md §10)ので、後片付けをしないと
+ * 実行のたびに増え続ける。
+ */
+After({ tags: '@media' }, async ({ ctx, request }) => {
+  const projectId = ctx.mediaProjectId as number | undefined;
+  if (ctx.mediaInstalledCheckpoint === undefined || projectId === undefined) {
+    return;
+  }
+  const token = await adminToken(request);
+  const response = await request.delete(
+    `/api/projects/${projectId}/ai-models/comfyui/checkpoints/${ctx.mediaInstalledCheckpoint as string}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (response.ok()) {
+    await waitForGenerationJob(request, ((await response.json()) as { id: number }).id);
+  }
+});

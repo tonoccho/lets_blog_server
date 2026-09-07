@@ -9,6 +9,7 @@ import com.letsblog.media.service.ForbiddenException;
 import com.letsblog.media.service.GeneratedImageNotFoundException;
 import com.letsblog.media.service.GenerationJobBridgeException;
 import com.letsblog.media.service.IdentityServiceUnavailableException;
+import com.letsblog.media.service.ProhibitedContentException;
 import com.letsblog.media.service.UnsupportedBatchSizeException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,6 +42,22 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(UnsupportedBatchSizeException.class)
     public ResponseEntity<ErrorResponse> handleUnsupportedBatchSize(UnsupportedBatchSizeException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /**
+     * issue #532 の不適切コンテンツフィルタがプロンプトをブロックしたとき。
+     *
+     * <p>状態コードと本文は #532 の実装時点からの契約(400と理由の文面)をそのまま復元したもの。
+     * #583 の legacy-api 解体で {@link ProhibitedContentException} が media-service へ移った際、
+     * legacy-api の {@code GlobalExceptionHandler} が持っていたこのハンドラだけが移設されず、
+     * <b>ブロックが素の 500 Internal Server Error になっていた</b>(issue #936 で検出)。
+     * 利用者には理由が何も出ず、フィルタが働いたのかサーバーが壊れたのかも区別できない。
+     *
+     * <p>400 なのは、直せるのは利用者が送ったプロンプトの側だからである。
+     */
+    @ExceptionHandler(ProhibitedContentException.class)
+    public ResponseEntity<ErrorResponse> handleProhibitedContent(ProhibitedContentException e) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
     }
 

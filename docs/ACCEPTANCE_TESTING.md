@@ -274,7 +274,7 @@ Then('Keycloakのホスト型ログイン画面が表示される', async ({ pag
 | `main-scenario.spec.ts` | AT-6 (#932) | 未 |
 | `site-registration.spec.ts` | AT-5 (#931) | 未 |
 | `post-creation.spec.ts` | AT-6 (#932) | 未 |
-| `image-upload.spec.ts` | AT-10 (#936) | 未 |
+| `image-upload.spec.ts` | AT-10 (#936) | **移行完了。spec は削除済み**(`features/media/image-gallery.feature`) |
 | `custom-tag-generation.spec.ts` | AT-12 (#938) | 未 |
 | `service-degradation.spec.ts` | AT-17 (#943) | **移行完了。spec は削除済み**(`features/cross-cutting/service-degradation.feature`) |
 | `security.spec.ts` | AT-17 (#943) | 未 |
@@ -369,7 +369,7 @@ ComfyUI は**実機とスタブの両方を使う**(#1106 / #936、2026-09-07 �
 
 | 使うもの | 何を検証するか | シナリオ | タグ | 前提 |
 | --- | --- | --- | --- | --- |
-| 実機 `lbs-comfyui` | 実際に画像が生成できること、生成パラメータが記録に残ること、チェックポイントの一覧・導入・削除 | #936(AT-10)の 1・2 と 12〜14 | `@slow` | **GPU 必須**。無ければ明示的に失敗する(暗黙スキップにしない) |
+| 実機 `lbs-comfyui` | 実際に画像が生成できること、生成パラメータが記録に残ること、チェックポイントの一覧・導入・削除 | `features/media/image-generation.feature`、`features/media/comfyui-checkpoints.feature`(#936(AT-10)の 1・2 と 12〜14) | `@slow` | **GPU 必須**。無ければ明示的に失敗する(暗黙スキップにしない) |
 | `comfyui-stub` | batch size の枚数(1〜16)、リピートごとに seed が変わること、seed が生成画像に残ること、`/api/ai/image-options` の一覧 | `features/stubs/comfyui-stub.feature`、および #1101 / #1102 / #1103 / #1105 の枚数・seed のシナリオ | `@stub` | GPU 不要。**GPU 非搭載環境でも通る** |
 
 分ける理由は実行時間と決定性である。実機の生成は1枚あたり数十秒かかるため、
@@ -382,6 +382,22 @@ batch size 16 の枚数検証や batch count のリピート検証を実生成�
 
 スタブが再現しないもの: 画像の見た目、モデル固有の挙動、生成時間、VRAM の実際の解放。
 `/view` が返すのは 1×1 の PNG 固定である(`openai-image` スタブと同じバイト列)。
+
+#### チェックポイント導入シナリオが使うモデル(#936)
+
+`comfyui-checkpoints.feature` の導入シナリオは **283KB の safetensors**
+(`hf-internal-testing/tiny-sd-pipe` の `text_encoder/model.safetensors`。URL は
+`apps/web/e2e/steps/media.steps.ts` の `TINY_CHECKPOINT_URL`)を落とす。
+#936 の当初方針は実生成と同じ SDXL base(約6.9GB)だったが、**導入シナリオが確かめるのは
+ダウンロードと配置が成立することだけ**であり、大きさは検証内容に関係しない。
+
+所要時間の実測(2026-09-07、この開発ホスト): ダウンロード開始からジョブ完了まで **9.5 秒**。
+同じ日に SDXL base 相当の 5.7MB を試したときは回線が 4KB/s まで落ちて 20 分見込みになり、
+Playwright の既定タイムアウトを超えた。フィーチャに `@timeout:600000` を付けてあるのは
+そのためで、モデルの大きさではなく回線の遅さに備えるものである。
+
+導入したファイルは `@media` の `After` が必ず削除する。`comfyui_models` ボリュームは
+ゼロ構築でも**保全される**(§10)ため、消さないと実行のたびに溜まる。
 
 投入したワークフローの seed と batch size は制御エンドポイントから読める。
 「リピートごとに seed が変わる」(#1102)ことは、生成された画像だけを見ても分からない。
