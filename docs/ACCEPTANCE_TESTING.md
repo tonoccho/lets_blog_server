@@ -129,7 +129,7 @@ UI操作(コマンドパレット・Webview・キーバインド)は自動化せ
 | --- | --- | --- |
 | `@slow` | 分単位で時間がかかる | ComfyUI の実生成、WordPress への実公開、サイトのプロビジョニング |
 | `@destructive` | 環境の共有状態を壊す | 一括削除、バックアップ/リストア、ユーザーの無効化、ログアウト。**前後で復旧すること**。§10 の `at-destructive` 段階で最後にまとめて実行される |
-| `@stub` | 外部依存スタブの起動が前提 | LLM / GA / AdSense / Brave Search / OpenAI画像生成 / GitHub(§9) |
+| `@stub` | 外部依存スタブの起動が前提 | LLM / GA / AdSense / Brave Search / OpenAI画像生成 / GitHub / ComfyUI(§9) |
 | `@api` | UI を経由せず HTTP で検証する | 認証ゲート、拡張のAPI、非同期経路 |
 
 ドメインタグ(`@auth`, `@media` など)は自由に付けてよい。上記4つは**意味が固定**なので、
@@ -302,6 +302,7 @@ cd apps/web && npm run test:at
 | `brave-stub` | Brave Search API | `BRAVE_SEARCH_BASE_URL` | 18084 |
 | `image-stub` | OpenAI 画像生成(gpt-image-1) | `IMAGE_LLM_BASE_URL`(platform) | 18085 |
 | `github-stub` | GitHub REST API(issues) | `GITHUB_API_BASE_URL`(ai) | 18086 |
+| `comfyui-stub` | ComfyUI(画像生成。**枚数と seed の検証だけ**) | `COMFYUI_BASE_URL`(platform / media) | 18087 |
 
 実装は `infra/e2e-stubs/<name>/server.js`、共通土台は `infra/e2e-stubs/lib/stub.js`。
 `node:22-alpine` にソースをマウントするだけなので、イメージのビルドは要らない。
@@ -341,8 +342,53 @@ docker compose exec -w /app web sh      # web は npm を /app で動かす
 docker exec -w /app lbs-e2e-llm-stub sh # スタブのソースは /app:ro
 ```
 
-**スタブ化しないもの**: ComfyUI / PlantUML / draw.io / Penpot / WordPress。
+**スタブ化しないもの**: PlantUML / draw.io / Penpot / WordPress。
 いずれもローカルコンテナとして実物が動くため、実物に対して検証する。
+
+### ComfyUI だけは実機とスタブを併用する
+
+ComfyUI は**実機とスタブの両方を使う**(#1106 / #936、2026-09-07 の方針決定)。
+どちらか一方への置き換えではないので、シナリオを書くときは下の切り分けに従うこと。
+
+| 使うもの | 何を検証するか | シナリオ | タグ | 前提 |
+| --- | --- | --- | --- | --- |
+| 実機 `lbs-comfyui` | 実際に画像が生成できること、生成パラメータが記録に残ること、チェックポイントの一覧・導入・削除 | #936(AT-10)の 1・2 と 12〜14 | `@slow` | **GPU 必須**。無ければ明示的に失敗する(暗黙スキップにしない) |
+| `comfyui-stub` | batch size の枚数(1〜16)、リピートごとに seed が変わること、seed が生成画像に残ること、`/api/ai/image-options` の一覧 | `features/stubs/comfyui-stub.feature`、および #1101 / #1102 / #1103 / #1105 の枚数・seed のシナリオ | `@stub` | GPU 不要。**GPU 非搭載環境でも通る** |
+
+分ける理由は実行時間と決定性である。実機の生成は1枚あたり数十秒かかるため、
+batch size 16 の枚数検証や batch count のリピート検証を実生成で行うと現実的な時間に
+収まらない。逆に、実際に絵が出ることはスタブでは分からない。
+
+**スタブは実機のシナリオを置き換えない。** `@slow` のシナリオが `COMFYUI_BASE_URL` を
+スタブへ向けたまま通ってしまうと、「実機で生成できること」が誰も検証しない状態になる。
+スタブを使う構成(`docker-compose.e2e-stubs.yml`)で `@slow` を回さないこと。
+
+スタブが再現しないもの: 画像の見た目、モデル固有の挙動、生成時間、VRAM の実際の解放。
+`/view` が返すのは 1×1 の PNG 固定である(`openai-image` スタブと同じバイト列)。
+
+投入したワークフローの seed と batch size は制御エンドポイントから読める。
+「リピートごとに seed が変わる」(#1102)ことは、生成された画像だけを見ても分からない。
+
+```bash
+curl -s http://127.0.0.1:18087/__control/state | jq '.prompts[-1] | {seed, batchSize}'
+```
+
+#### comfyui-stub のシナリオを回す前に DB 上書きを消す
+
+**`lbs_platform.system_settings` に `comfyui_base_url` の行があると、overlay の
+`COMFYUI_BASE_URL=http://comfyui-stub:8080` は黙って無視され、スタブへ向かない。**
+`AppSettingService.resolve()` が DB 優先で、`comfyui_base_url` は管理APIから保存できる
+設定キーだからである(下の「落とし穴」と同じ仕組み。#1106)。
+
+`scripts/e2e-clear-llm-db-overrides.sh` はこの行も消す(#1106 で `KEYS` に追加した)。
+comfyui-stub を使うシナリオの前に実行すること。
+
+```bash
+./scripts/e2e-clear-llm-db-overrides.sh --yes
+```
+
+GPU の無いホストでは、この行が残っていると存在しない実 ComfyUI へ向かうため、
+スタブは healthy なのにシナリオだけが不可解に落ちる。
 
 ### 決定性
 
@@ -415,6 +461,11 @@ LLM と画像生成の接続設定は「DB(`lbs_platform.system_settings`)に値
 ./scripts/e2e-clear-llm-db-overrides.sh --yes    # 削除して platform を再起動
 ```
 
+**`comfyui_base_url` も同じ扱いである**(#1106)。管理APIから保存できる設定キーなので、
+行が入ると `COMFYUI_BASE_URL` の差し替えが効かない。上のスクリプトが消す
+(`KEYS` に入っている)。新しい向き先や資格情報のキーを `AppSettingService` に足したら、
+`KEYS` にも足すこと — 足し忘れは `scripts/test_e2e_clear_db_overrides.py` が検出する。
+
 GA / AdSense / Brave / GitHub の資格情報は**プロジェクト単位のDB設定**であって
 システム設定ではないため、この問題は起きない。向き先(baseUrl)だけが環境変数で決まる。
 
@@ -438,7 +489,7 @@ GA / AdSense / Brave / GitHub の資格情報は**プロジェクト単位のDB�
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.e2e-stubs.yml restart \
-  llm-stub ga-stub adsense-stub brave-stub image-stub github-stub
+  llm-stub ga-stub adsense-stub brave-stub image-stub github-stub comfyui-stub
 ```
 
 ---

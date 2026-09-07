@@ -20,7 +20,8 @@ export type StubName =
   | 'adsense'
   | 'brave-search'
   | 'openai-image'
-  | 'github';
+  | 'github'
+  | 'comfyui';
 
 /** ホストから見たスタブの公開先。docker-compose.e2e-stubs.yml の ports と対応する。 */
 export const STUB_URLS: Record<StubName, string> = {
@@ -30,6 +31,7 @@ export const STUB_URLS: Record<StubName, string> = {
   'brave-search': 'http://127.0.0.1:18084',
   'openai-image': 'http://127.0.0.1:18085',
   github: 'http://127.0.0.1:18086',
+  comfyui: 'http://127.0.0.1:18087',
 };
 
 export const ALL_STUBS = Object.keys(STUB_URLS) as StubName[];
@@ -133,4 +135,49 @@ export async function stubRequestCount(name: StubName): Promise<number> {
   const res = await fetch(`${STUB_URLS[name]}/__control/state`);
   const state = (await res.json()) as { requests: number };
   return state.requests;
+}
+
+/**
+ * ComfyUI のワークフロー(issue #1106)。
+ *
+ * media-service の `ComfyUiClient.buildWorkflow` が組み立てる形をそのまま写している。
+ * スタブが読むのは `EmptyLatentImage.inputs.batch_size` と `KSampler.inputs.seed` で、
+ * ノード番号ではなく `class_type` で探すため、番号は実物に合わせてあるだけである。
+ *
+ * ここに置くのは、スタブの決定性プローブ(steps/stubs.steps.ts)と ComfyUI スタブの
+ * シナリオが**同じ形**を投げる必要があるため。片方だけ形が古くなると、決定性は通るのに
+ * 枚数だけ落ちるという分かりにくい失敗になる。
+ */
+export function comfyUiWorkflow(options: {
+  seed: number;
+  batchSize: number;
+  prompt?: string;
+  checkpoint?: string;
+}): Record<string, unknown> {
+  const { seed, batchSize } = options;
+  const prompt = options.prompt ?? 'a blue button on a white background';
+  const checkpoint = options.checkpoint ?? 'v1-5-pruned-emaonly.safetensors';
+  return {
+    '4': { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: checkpoint } },
+    '5': { class_type: 'EmptyLatentImage', inputs: { width: 512, height: 512, batch_size: batchSize } },
+    '6': { class_type: 'CLIPTextEncode', inputs: { text: prompt, clip: ['4', 1] } },
+    '7': { class_type: 'CLIPTextEncode', inputs: { text: '', clip: ['4', 1] } },
+    '3': {
+      class_type: 'KSampler',
+      inputs: {
+        seed,
+        steps: 20,
+        cfg: 7.0,
+        sampler_name: 'euler',
+        scheduler: 'normal',
+        denoise: 1.0,
+        model: ['4', 0],
+        positive: ['6', 0],
+        negative: ['7', 0],
+        latent_image: ['5', 0],
+      },
+    },
+    '8': { class_type: 'VAEDecode', inputs: { samples: ['3', 0], vae: ['4', 2] } },
+    '9': { class_type: 'SaveImage', inputs: { filename_prefix: 'letsblog', images: ['8', 0] } },
+  };
 }

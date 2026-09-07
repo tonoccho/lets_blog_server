@@ -271,7 +271,7 @@ class StubCommandsResolveThroughTheMount(unittest.TestCase):
             "スタブの command が実在しないファイルを指している:\n  " + "\n  ".join(missing),
         )
 
-    def test_all_six_stubs_are_covered(self):
+    def test_all_stubs_are_covered(self):
         names = {
             n
             for n, s in services(STUB_COMPOSE).items()
@@ -285,6 +285,9 @@ class StubCommandsResolveThroughTheMount(unittest.TestCase):
                 "brave-stub",
                 "image-stub",
                 "github-stub",
+                # ComfyUI スタブ(#1106)。GPU を持たないホストでも画像生成の経路を
+                # 検証できるようにするため、7本目として追加した。
+                "comfyui-stub",
             },
             names,
         )
@@ -336,6 +339,7 @@ class CheckerSanity(unittest.TestCase):
             (STUB_COMPOSE, "image-stub"),
             (STUB_COMPOSE, "adsense-stub"),
             (STUB_COMPOSE, "github-stub"),
+            (STUB_COMPOSE, "comfyui-stub"),
         ]:
             with self.subTest(service=expected):
                 self.assertIn(expected, found)

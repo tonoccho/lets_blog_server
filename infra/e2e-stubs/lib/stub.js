@@ -89,8 +89,13 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  *        注入したエラーの本文。実サービスの形に寄せたいときに上書きする。
  * @param {() => void} [options.onReset]
  *        `POST /__control/reset` で呼ばれる。状態を持つスタブ(github)が初期シードへ戻すために使う。
+ * @param {() => object} [options.extraState]
+ *        `GET /__control/state` の応答へ混ぜるスタブ固有の状態。
+ *        `forced` と `requests` だけでは表せないものを受け入れテストへ見せるために使う
+ *        (comfyui スタブが投入ごとの seed と batch size を返す、issue #1106)。
+ *        **応答本文には出さないこと。** 決定性を壊すため、外へ見せるのはこの制御経路だけにする。
  */
-function createStub({ name, port, handle, errorBody, onReset }) {
+function createStub({ name, port, handle, errorBody, onReset, extraState }) {
   const state = {
     /** 注入中のエラー。{ status?, delayMs?, remaining } */
     forced: null,
@@ -118,7 +123,7 @@ function createStub({ name, port, handle, errorBody, onReset }) {
     }
 
     if (pathname.startsWith(CONTROL_PREFIX)) {
-      await handleControl(req, res, pathname, state, name, onReset);
+      await handleControl(req, res, pathname, state, name, onReset, extraState);
       return;
     }
 
@@ -187,16 +192,21 @@ function createStub({ name, port, handle, errorBody, onReset }) {
   return server;
 }
 
-async function handleControl(req, res, pathname, state, name, onReset) {
+async function handleControl(req, res, pathname, state, name, onReset, extraState) {
   if (req.method === 'GET' && pathname === `${CONTROL_PREFIX}/state`) {
-    sendJson(res, 200, { name, forced: state.forced, requests: state.requests });
+    sendJson(res, 200, {
+      name,
+      forced: state.forced,
+      requests: state.requests,
+      ...(extraState ? extraState() : {}),
+    });
     return;
   }
   if (req.method === 'POST' && pathname === `${CONTROL_PREFIX}/reset`) {
     state.forced = null;
     state.requests = 0;
     if (onReset) onReset();
-    sendJson(res, 200, { name, forced: null, requests: 0 });
+    sendJson(res, 200, { name, forced: null, requests: 0, ...(extraState ? extraState() : {}) });
     return;
   }
   if (req.method === 'POST' && pathname === `${CONTROL_PREFIX}/force`) {

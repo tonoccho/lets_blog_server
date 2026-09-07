@@ -1,6 +1,6 @@
 #!/bin/bash
-# 受け入れテストの前処理: system_settings(DB)にあるLLM/画像生成の接続設定を削除する
-# (issue #928 / AT-2)。
+# 受け入れテストの前処理: system_settings(DB)にあるLLM/画像生成(ComfyUI含む)の
+# 接続設定を削除する (issue #928 / AT-2)。
 #
 # なぜ必要か:
 #   LLM と画像生成の接続設定は「DB(system_settings)があればDB、無ければ環境変数の既定値」
@@ -13,8 +13,14 @@
 #   手順として実行できる形にする。
 #
 # 何を消すか:
-#   system_settings の llm_* / image_llm_* の行だけ。他の設定(メール・レート制限・
-#   comfyui_base_url 等)には触れない。行を消すと環境変数の既定値へ戻る。
+#   system_settings の llm_* / image_llm_* / comfyui_base_url の行だけ。
+#   他の設定(メール・レート制限・Webの公開URL等)には触れない。
+#   行を消すと環境変数の既定値へ戻る。
+#
+#   comfyui_base_url も対象である(#1106)。ComfyUI の向き先も管理APIから保存できる
+#   設定キーなので、行が入ると docker-compose.e2e-stubs.yml の
+#   COMFYUI_BASE_URL=http://comfyui-stub:8080 が黙って無視され、comfyui-stub ではなく
+#   実 ComfyUI(GPUの無いホストには存在しない)へ出ていく。
 #
 # 使い方:
 #   ./scripts/e2e-clear-llm-db-overrides.sh          # ドライラン(消す行を表示するだけ)
@@ -55,7 +61,8 @@ fi
 KEYS="'llm_api_key','llm_base_url','llm_model','llm_available_models',\
 'llm_request_timeout_seconds','llm_provider','llm_claude_api_key','llm_claude_model',\
 'llm_ollama_base_url','llm_ollama_model',\
-'image_llm_api_key','image_llm_base_url'"
+'image_llm_api_key','image_llm_base_url',\
+'comfyui_base_url'"
 
 run_sql() {
   docker exec -i "$MYSQL_CONTAINER" \
@@ -65,7 +72,7 @@ run_sql() {
 EXISTING="$(run_sql "SELECT setting_key FROM lbs_platform.system_settings WHERE setting_key IN ($KEYS);" || true)"
 
 if [ -z "$EXISTING" ]; then
-  echo "OK: system_settings にLLM/画像生成の上書きはありません(環境変数の既定値が使われます)"
+  echo "OK: system_settings にLLM/画像生成(ComfyUI含む)の上書きはありません(環境変数の既定値が使われます)"
   exit 0
 fi
 

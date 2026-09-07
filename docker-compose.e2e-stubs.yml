@@ -4,6 +4,8 @@
 #
 # 受け入れテストは外部SaaSに依存しない。実キーが要る依存(LLM / Google Analytics /
 # AdSense / Brave Search / OpenAI画像生成 / GitHub)を、決定的に応答するスタブへ置き換える。
+# ComfyUI は外部SaaSではないが、GPU が要り実生成が遅いので、枚数と seed の決定的な検証の
+# ためだけにスタブを併置する(#1106。実生成の検証は #936 が実機で行う)。
 # 詳細と使い方は docs/ACCEPTANCE_TESTING.md の「外部依存スタブ」節を参照。
 #
 # #843 で導入した docker-compose.e2e-llm-stub.yml は本ファイルへ統合し、削除した。
@@ -97,6 +99,17 @@ services:
     ports:
       - "127.0.0.1:18086:8080"
 
+  # ComfyUI(issue #1106)。実機は NVIDIA ランタイムが要り、1枚あたり数十秒かかるため、
+  # batch size 16 の枚数検証も「リピートごとに seed が変わる」ことの確認も実行時間に乗らない。
+  # スタブが引き受けるのは枚数と seed の決定的な検証だけで、画像の見た目は再現しない。
+  # #936(AT-10)の実生成シナリオ(@slow)は実機の ComfyUI を使い続ける(併用)。
+  comfyui-stub:
+    <<: *stub-base
+    container_name: lbs-e2e-comfyui-stub
+    command: ["node", "/app/comfyui/server.js"]
+    ports:
+      - "127.0.0.1:18087:8080"
+
   # ---- 各サービスの向き先をスタブへ ----
 
   # LLM を実際に呼ぶのは ai-service、その接続設定の既定値を持つのは platform-service
@@ -136,10 +149,35 @@ services:
       # したがって ChatGPT 画像生成の向き先はここで決まる。
       IMAGE_LLM_BASE_URL: http://image-stub:8080
       IMAGE_LLM_API_KEY: e2e-stub-image-key
+      # ComfyUI の向き先も同じ経路で決まる(issue #1106)。media-service は
+      # ComfyUiClient が呼ぶ都度 platform の image-generation-config から baseUrl を取るので、
+      # **ここを向けないと media 側だけ差し替えてもスタブへは届かない**。
+      # platform 自身の ConnectedServiceStatusService(連携サービスの状況)も
+      # この値の /system_stats を叩くため、スタブがその経路を実装している。
+      COMFYUI_BASE_URL: http://comfyui-stub:8080
     depends_on:
       llm-stub:
         condition: service_healthy
       image-stub:
+        condition: service_healthy
+      comfyui-stub:
+        condition: service_healthy
+
+  # 画像生成の実行者。向き先そのものは上の platform が決める(DB > 環境変数の順に解決される
+  # AppSettingService が正、issue #531)。
+  #
+  # **現時点で media の Java コードはこの値を読んでいない**(#1106 のレビュー指摘)。
+  # media の application.yml は app.comfyui-base-url を宣言しているが @Value 注入する
+  # コードが無く、ComfyUiClient は呼ぶ都度 configProvider.comfyUiBaseUrl()
+  # (= platform の /api/internal/platform/image-generation-config)から baseUrl を取る。
+  # したがってこの行は現状では効いていない。**防御として残している**: media が
+  # app.comfyui-base-url を直接読む形に戻ったとき、GPUの無いホストで実 ComfyUI へ
+  # 出ていく経路を作らないため。消すと、その変更が黙って実機に向く。
+  media:
+    environment:
+      COMFYUI_BASE_URL: http://comfyui-stub:8080
+    depends_on:
+      comfyui-stub:
         condition: service_healthy
 
   analytics:
