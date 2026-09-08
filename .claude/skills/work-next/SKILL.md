@@ -6,24 +6,14 @@ model: sonnet
 
 # Work Next
 
-You are the orchestrator of the project's AI development workflow.
+You are the orchestrator of the project's AI development workflow: select the next Ready
+GitLab Issue and drive it all the way to a merged Merge Request and a `Done` Issue. You do not
+implement application code directly — you coordinate `git-workflow`, `implement-issue`,
+`review-issue`, `qa-issue`, `merge-request`, and `complete-issue` (squash merge, `Done`, branch
+cleanup).
 
-Your responsibility is to select the next Ready GitLab Issue and drive it all the way to a merged Merge Request and a `Done` Issue.
-
-You do not directly implement application code.
-
-You coordinate:
-
-- git-workflow (branch creation, commit, push)
-- implement-issue
-- review-issue
-- qa-issue
-- merge-request
-- complete-issue (squash merge, `Done`, branch cleanup)
-
-This skill's run ends when the Merge Request has been merged and the Issue is `Done`, not when the Merge Request is opened.
-
-The GitLab Issue status is the source of truth.
+This skill's run ends when the Merge Request is merged and the Issue is `Done`, not when it is
+opened. The GitLab Issue status is the source of truth.
 
 ---
 
@@ -31,82 +21,47 @@ The GitLab Issue status is the source of truth.
 
 ## Step 1: Inspect the repository
 
-Before selecting work:
+Before selecting work, read `CLAUDE.md`, inspect the Git repository status, and inspect the
+GitLab Issue board (`status::` labels) to identify Issues in `Ready`.
 
-1. Read `CLAUDE.md`.
-2. Inspect the Git repository status.
-3. Inspect the GitLab Issue board (`status::` labels).
-4. Identify Issues currently in `Ready`.
-
-Do not start implementation if the working tree contains unexpected changes that could interfere with the selected Issue.
-
-If there are unrelated uncommitted changes:
-
-Stop and report them.
+Stop and report unrelated uncommitted changes that could interfere with the selected Issue.
 
 ---
 
 # Step 2: Find Ready Issues
 
-Search GitLab for Issues with (`glab issue list --label 'status::Ready'`):
-
-`Status = Ready`
-
-Ignore Issues in:
-
-- Inbox
-- Backlog
-- In Progress
-- Review
-- QA
-- Done
+`glab issue list --label 'status::Ready'`. Any other `status::` (Inbox, Backlog, In Progress,
+Review, QA, Done) is out of scope here.
 
 ---
 
 # Step 3: Select the next Issue
 
-If multiple Ready Issues exist, prioritize them using:
+If multiple Ready Issues exist, prioritize by explicit project priority, then blocking
+dependencies, then dependency readiness, then Issue age — never merely by search-result order.
 
-1. Explicit project priority
-2. Blocking dependencies
-3. Dependency readiness
-4. Issue age
-
-Do not choose an Issue merely because it appears first in the search results.
-
-Before proceeding, report:
-
-- Issue number
-- Title
-- Priority
-- Why it was selected
+Before proceeding, report the Issue number, title, priority, and why it was selected.
 
 ---
 
 # Step 4: Verify readiness
 
-Read the complete Issue, **including its existing comments**. A readiness verdict already
-posted on the Issue is part of the input to this step, not noise to be re-derived around.
-
-Then run:
+Read the complete Issue, **including its existing comments** — a readiness verdict already
+posted on it is part of the input to this step, not noise to be re-derived around. Then run:
 
 ```bash
 scripts/issue-dependency-status.sh <issue-number>
 ```
 
-This prints the live state of every dependency the Issue records, and lists the readiness
-verdicts already posted on it.
-
+This prints the live state of every dependency and the readiness verdicts already posted.
 Confirm:
 
 - Goal is clear
 - Requirements are clear
 - Acceptance criteria are testable
 - Scope is bounded
-- Dependencies are resolved — per **Dependency Resolution** in `CLAUDE.md`. Do not invent a
-  second definition here. In particular: a dependency Issue that is open but named only in the
-  body's prose is not by itself a blocker; what decides readiness is whether this Issue's
-  acceptance criteria can be implemented and verified against the codebase as it stands.
+- Dependencies are resolved — per `CLAUDE.md` → **Dependency Resolution** → **What counts as a
+  blocker**. Do not invent a second definition here.
 - No blocking questions remain
 
 If the Issue is not actually Ready:
@@ -127,172 +82,89 @@ If every ground still holds, the disagreement is about the definition of "resolv
 facts. Apply `CLAUDE.md` → **Dependency Resolution** and proceed; do not post a contradicting
 verdict.
 
-This guard exists because of #751: on #584, a Ready promotion (01:27Z) and a Backlog rollback
-(01:32Z) were posted five minutes apart, and **both were factually correct**. One judged by the
-code the dependencies had delivered; the other judged by the dependency Issues' board status.
-Neither was reading the other, and this skill did not say which one governs.
+This guard exists because of #751, where a Ready promotion and a Backlog rollback five minutes
+apart were both factually correct — one judged by delivered code, the other by board status —
+because neither read the other.
 
 ---
 
 # Step 5: Write the acceptance tests first (RED)
 
-Before any production code changes, the Issue's Acceptance Criteria are turned into failing
-Gherkin scenarios. This is governed by `CLAUDE.md` → **Test-First Implementation**; do not
-apply a different order here.
+Governed by `CLAUDE.md` → **Test-First Implementation** — the RED/GREEN order, phase
+separation, and the service-level-test exception are defined there; do not restate them here.
 
 `implement-issue` performs this work, on the Issue branch, immediately after `git-workflow`
 creates it and before the `implementer` agent touches any production file. This skill's job is
-to require the red evidence and to refuse an implementation report that lacks it.
-
-What must happen:
-
-1. The Issue branch exists first — never write the scenarios on `develop`.
-2. Each Acceptance Criterion becomes one or more scenarios in
-   `apps/web/e2e/features/**/*.feature` (Japanese keywords), with step definitions in
-   `apps/web/e2e/steps/` and the right `@stage:` tag.
-3. Run them: `cd apps/web && npm run test:at:fast` (or the stage project that applies).
-4. **Confirm they fail, and capture the output.** A scenario that passes here does not exercise
-   its criterion — fix the scenario, do not proceed.
-5. Commit the test phase on its own (`test: …`). No production file is in that commit.
+to require the red evidence and to refuse an implementation report that lacks it. The Issue
+branch must exist first — never write the scenarios on `develop`.
 
 Do not continue to implementation until red is recorded for every criterion being implemented
-in this cycle. If a criterion cannot be reached through the web UI, `implement-issue` must say
-so explicitly and cover it with a service-level test — accept that only as a stated exception,
-never as a silent omission.
+in this cycle.
 
 ---
 
 # Step 6: Implement
 
-Invoke the `implement-issue` skill.
+Invoke the `implement-issue` skill. It moves the Issue to `In Progress`, creates the working
+branch, and drives the `implementer` agent through the full test-first cycle defined in
+`CLAUDE.md` → **Test-First Implementation** (Step 5 above is that cycle's RED phase) —
+including the C1/C2 coverage measurement, committing each phase separately, and pushing.
 
-The implementation workflow must:
-
-1. Change the Issue to `In Progress`.
-2. Create the working branch from `develop` via `git-workflow`.
-3. Invoke the `implementer` agent.
-4. Investigate the codebase.
-5. Create an implementation plan.
-6. Write the failing acceptance tests and record the red output (Step 5).
-7. Change the production code — in a phase that touches no test file.
-8. Run tests, and measure C1/C2 coverage of the changed production code (≥ 90%).
-9. Verify acceptance criteria.
-10. Commit each phase separately and push via `git-workflow`.
-
-Items 6 and 7 alternate in small cycles and never merge into one edit, per `CLAUDE.md` →
-**Test-First Implementation**. Item 6 is Step 5 of this skill; it is listed here because
-`implement-issue` is what actually runs it.
-
-If implementation fails:
-
-If the failure is a blocking requirement ambiguity that only the user can resolve, stop and report it — this is a genuine blocker, not a retryable failure.
-
-Otherwise (a fixable problem: failing tests, an incomplete step, a bug introduced during implementation), address it and re-invoke `implement-issue` automatically. Do not stop to ask the user whether to continue — this workflow does not pause between recoverable stages (see `CLAUDE.md` → Autonomous Task Execution).
-
-Track implementation attempts for this Issue. After 3 failed attempts without reaching `Review`, stop and report the unresolved blocker instead of retrying further.
+If implementation fails on a blocking requirement ambiguity only the user can resolve, stop and
+report it — a genuine blocker, not a retryable failure. Otherwise (failing tests, an incomplete
+step, a bug introduced during implementation) it is a recoverable stage outcome: address it and
+re-invoke `implement-issue` automatically without pausing for the user (`CLAUDE.md` →
+**Autonomous Task Execution**). After 3 failed attempts without reaching `Review`, stop and
+report the unresolved blocker instead of retrying further.
 
 ---
 
 # Step 7: Review
 
-If implementation succeeds and the Issue reaches `Review`:
-
-Invoke the `review-issue` skill.
-
-The reviewer must independently inspect:
-
-- Original Issue
-- Acceptance Criteria
-- Git diff
-- Changed files
-- Architecture
-- Tests
+If implementation succeeds and the Issue reaches `Review`, invoke the `review-issue` skill. The
+reviewer must independently inspect the original Issue, Acceptance Criteria, git diff, changed
+files, architecture, and tests.
 
 ---
 
 # Step 8: Handle review result
 
-If the reviewer returns:
-
-`APPROVED`
-
-continue to QA.
-
-If the reviewer returns:
-
-`CHANGES REQUIRED`
-
-the Issue should return to:
-
-`In Progress`
-
-Re-invoke `implement-issue` automatically to address the reviewer's findings, then return to Review again. Do not stop to ask the user whether to continue — this workflow is explicitly configured to retry automatically (see `CLAUDE.md` → Autonomous Task Execution).
-
-Track review cycles for this Issue. After 3 consecutive `CHANGES REQUIRED` results without reaching `APPROVED`, stop and report the unresolved findings instead of retrying further.
-
-If the reviewer returns:
-
-`REQUIREMENT CLARIFICATION`
-
-return the Issue to:
-
-`Backlog`
-
-and stop. This is a genuine blocker outside this workflow's authority — it requires the user (via `project-planner`) to resolve the ambiguity, so do not retry automatically here.
+- `APPROVED` — continue to QA.
+- `CHANGES REQUIRED` — Issue returns to `In Progress`. Re-invoke `implement-issue` automatically
+  to address the findings, then return to Review. Do not stop to ask the user — retry
+  automatically (`CLAUDE.md` → **Autonomous Task Execution**). After 3 consecutive
+  `CHANGES REQUIRED` results without reaching `APPROVED`, stop and report the unresolved
+  findings instead of retrying further.
+- `REQUIREMENT CLARIFICATION` — Issue returns to `Backlog` and this workflow stops: a genuine
+  blocker outside its authority, requiring the user (via `project-planner`) to resolve it.
 
 ---
 
 # Step 9: QA
 
-If review is approved:
-
-Invoke the `qa-issue` skill.
-
-QA must verify the actual behavior against the acceptance criteria.
+If review is approved, invoke the `qa-issue` skill to verify the actual behavior against the
+acceptance criteria.
 
 ---
 
 # Step 10: Handle QA result
 
-If QA returns:
-
-`PASS`
-
-The `qa-issue` skill itself invokes `merge-request` to open the Merge Request. The Issue status is still `QA` at that point.
-
-Then invoke `complete-issue` for this Issue. It merges the Merge Request (`glab mr merge --squash --remove-source-branch`), moves the Issue `status::QA → status::Done`, and cleans up the branch. Do not stop to ask the user whether to merge — reaching `PASS` with an open Merge Request is what authorizes it (see `CLAUDE.md` → Autonomous Task Execution).
-
-If `complete-issue` stops on a **merge conflict**, that is not a stop: resolve it on the
-working branch per `CLAUDE.md` → **Merge Conflicts**, re-run validation, push, and re-invoke
-`complete-issue`. If validation fails after the resolution, fix the production code first;
-change a test only if the test case itself is demonstrably wrong, and never by skipping it.
-Track these as implementation attempts under the same 3-attempt limit.
-
-If `complete-issue` stops for any other reason (draft, blocked merge state, or the Issue is not
-in `QA`), do not work around it. Report exactly which precondition failed, leave the Pull
-Request open, and stop.
-
-If QA returns:
-
-`FAIL`
-
-change:
-
-`QA → In Progress`
-
-Re-invoke `implement-issue` automatically to fix the failing scenario, then proceed back through Review and QA again. Do not stop to ask the user whether to continue — this workflow is explicitly configured to retry automatically (see `CLAUDE.md` → Autonomous Task Execution).
-
-Track QA cycles for this Issue. After 3 consecutive `FAIL` results without reaching `PASS`, stop and report the unresolved failure instead of retrying further.
-
-If QA returns:
-
-`BLOCKED`
-
-keep the Issue in:
-
-`QA`
-
-Then stop. `BLOCKED` means verification itself cannot proceed (e.g. missing environment, external dependency) — this is a genuine blocker, not a retryable failure.
+- `PASS` — `qa-issue` itself invokes `merge-request` to open the Merge Request (Issue status
+  still `QA`). Then invoke `complete-issue`: it merges (`glab mr merge --squash
+  --remove-source-branch`), moves `status::QA → status::Done`, and cleans up the branch. Do not
+  stop to ask the user — reaching `PASS` with an open Merge Request authorizes it (`CLAUDE.md`
+  → **Autonomous Task Execution**). If `complete-issue` stops on a **merge conflict**, resolve
+  it on the working branch per `CLAUDE.md` → **Merge Conflicts**, re-validate, push, and
+  re-invoke `complete-issue` (counts against the same 3-attempt limit). If it stops for any
+  other reason (draft, blocked merge state, Issue not in `QA`), do not work around it — report
+  exactly which precondition failed and stop.
+- `FAIL` — change `QA → In Progress`. Re-invoke `implement-issue` automatically to fix the
+  failing scenario, then proceed back through Review and QA. Do not stop to ask the user —
+  retry automatically (`CLAUDE.md` → **Autonomous Task Execution**). After 3 consecutive `FAIL`
+  results without reaching `PASS`, stop and report the unresolved failure instead of retrying
+  further.
+- `BLOCKED` — keep the Issue in `QA` and stop. Verification cannot proceed (e.g. missing
+  environment) — a genuine blocker, not a retryable failure.
 
 ---
 
@@ -302,8 +174,7 @@ Report:
 
 ## Issue
 
-- Issue number
-- Title
+Issue number and title.
 
 ## Workflow so far
 
@@ -321,44 +192,33 @@ Ready
 
 ## Tests
 
-The red evidence (which scenarios failed, and the command that produced it) and the measured
-C1/C2 coverage of the changed production code.
+Carry forward the red evidence and the measured C1/C2 coverage numbers from
+`implement-issue`'s report — do not regenerate them.
 
 ## Unrelated Issues Filed
 
-Aggregate any new Issue numbers reported by `implement-issue`, `review-issue`, or `qa-issue` for unrelated problems discovered along the way. If none:
-
-`None`
+Aggregate any new Issue numbers reported by `implement-issue`, `review-issue`, or `qa-issue`.
+`None` if none.
 
 ## Merge
 
-Merge Request number and URL, the squash-merge confirmation, and the branch cleanup result.
+MR number/URL, squash-merge confirmation, branch cleanup result.
 
 ---
 
 # Rules
 
-Never mark an Issue `Done` from this skill directly — `Done` is set by `complete-issue`, and only after it has confirmed the Merge Request is actually merged.
-
-Never skip branch creation (`git-workflow`) before invoking the `implementer` agent.
-
-Never let production code change before a failing acceptance test exists for the criterion it
-implements. If an implementation report claims a change without red evidence for it, treat the
-stage as failed and re-invoke `implement-issue` — it is a recoverable outcome, not a blocker.
-
-Never accept an implementation report that lacks the measured C1/C2 coverage of the changed
-production code, or that reports it below 90%.
-
-Never accept a run made green by skipping, ignoring, or deleting a test.
-
-Never create a Merge Request before QA has passed.
-
-Never merge a Merge Request from this skill directly — always delegate to `complete-issue`, which enforces the squash method and the merge preconditions.
-
-Once this workflow starts an Issue, do not pause to ask the user whether to continue after a recoverable stage outcome (implementation issues, Review `CHANGES REQUIRED`, QA `FAIL`) — retry automatically, up to that stage's retry limit (3 cycles), until the Issue either reaches a merged Merge Request or hits a genuine blocker.
-
-Only stop short of a merged Merge Request for a genuine blocker: unresolved requirement ambiguity (`REQUIREMENT CLARIFICATION`, or a blocking question during implementation), QA `BLOCKED`, a retry limit exceeded, a Merge Request that cannot be merged as-is **for a reason other than a conflict** (a draft, a blocked merge state), or a live-system mutation requiring explicit user confirmation. When any of these stops the workflow, report it clearly rather than silently halting.
-
-A merge conflict is not on that list. Resolve it on the working branch, re-validate, push, and continue (`CLAUDE.md` → **Merge Conflicts**).
-
-Any Issue filed to `Inbox` during this workflow (by `implement-issue`, `review-issue`, or `qa-issue`) must have its `Priority` field (P0/P1/P2) set — never leave it unset.
+- Never mark an Issue `Done` from this skill directly — `Done` is set by `complete-issue`, only
+  after confirming the merge.
+- Never skip branch creation (`git-workflow`) before invoking the `implementer` agent.
+- Never accept a stage report that violates `CLAUDE.md` → **Test-First Implementation**
+  (production before red evidence, missing/sub-90% C1/C2 coverage, or a test skipped/weakened
+  to pass) — treat the stage as failed and re-invoke `implement-issue`; it is recoverable.
+- Never create a Merge Request before QA has passed, and never merge one directly — delegate to
+  `complete-issue`, which enforces the squash method and merge preconditions.
+- Once this workflow starts an Issue, retry automatically after a recoverable stage outcome, up
+  to that stage's retry limit (3 cycles), per `CLAUDE.md` → **Autonomous Task Execution** —
+  which is also the single definition of genuine blockers (a merge conflict is not one; resolve
+  it per **Merge Conflicts**).
+- Any Issue filed to `Inbox` during this workflow must have its `Priority` field set — never
+  leave it unset.
