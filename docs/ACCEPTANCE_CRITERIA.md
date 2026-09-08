@@ -106,6 +106,7 @@ API: identity `UserController`, `RoleController`, `ProjectUserController` / cont
 | AC-USR-010 | GitHubトークンの登録 | 記事プランのIssue連携が使える | `PUT /api/users/{id}/github-token` 後、Issue連携が成功する | — | 未着手 |
 | AC-USR-011 | メタデータ(投稿ステータス/ロール)の取得 | 画面の選択肢がサーバー定義と一致する | `GET /api/metadata/post-statuses` と `/roles` が画面の選択肢と一致する | — | 未着手 |
 | AC-USR-014 | 本人設定(タイムゾーン/ロケール)の保存 | 自分の表示設定を保てる | `PATCH /api/identity/me/preferences` で保存した内容が、再ログイン後も `GET /api/identity/me` に反映される(#784 の退行検知) | `features/identity/user-management.feature` › 利用者が自分のタイムゾーン/ロケールを保存でき、再ログイン後も保持される | 検証済 |
+| AC-USR-015 | ユーザー操作の認可 | 権限の無い利用者にアカウントを改変されない | 一般ユーザーは `POST/PATCH/DELETE /api/users` を実行できず(403)、実行後も一覧・対象の状態が変化していない(#796 の退行検知) | `features/identity/user-authorization.feature` › 一般ユーザーは新しいメンバーを登録できず、ユーザー一覧は変化しない / 一般ユーザーは他人のロールも削除も操作できず、対象の状態は変化しない | 検証済 |
 
 ### 2.3 プロジェクト・環境・サイト — `PRJ` / `SITE`
 
