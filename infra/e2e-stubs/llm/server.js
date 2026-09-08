@@ -303,12 +303,31 @@ function completionFor(prompt) {
   return GENERIC_COMPLETION;
 }
 
+/**
+ * 直近に受け取ったリクエストの `model` フィールドの履歴(issue #1148 / AT-8-3)。
+ *
+ * LLMモデル/プロバイダーの選択(ProjectLlmModelController)が実際の生成要求に反映されるかは、
+ * 応答内容(プロンプトの特徴語で決まり、モデル名を反映しない)からは確認できない。
+ * `/__control/state` の拡張状態(extraState)として公開し、受け入れテストが
+ * 「選択したモデルがそのままリクエストに載っているか」を直接検査できるようにする。
+ *
+ * 「直近1件」ではなく履歴にするのは、このスタブへは複数の受け入れシナリオが並列に
+ * リクエストを送るため、1件しか覚えないと自分のリクエストの直後に他シナリオの
+ * リクエストが割り込んで上書きし、確認前に消えてしまうことがある(実測で発生した)。
+ */
+const RECENT_MODELS_LIMIT = 50;
+let recentModels = [];
+
 createStub({
   name: 'llm',
   port: Number(process.env.PORT || 8080),
   errorBody: (status, name) => ({
     error: { message: `[${name}] forced ${status}`, type: 'stub_error', code: String(status) },
   }),
+  onReset: () => {
+    recentModels = [];
+  },
+  extraState: () => ({ recentModels: [...recentModels] }),
   async handle({ method, pathname, body, res, sendJson }) {
     // OpenAI互換クライアントは baseUrl の末尾に /v1 を含める流儀もあるため、両方を受ける。
     if (method !== 'POST' || !/\/(v1\/)?chat\/completions$/.test(pathname)) return false;
@@ -317,6 +336,12 @@ createStub({
     try {
       const parsed = JSON.parse(body || '{}');
       prompt = (parsed.messages || []).map((m) => m.content || '').join('\n');
+      if (typeof parsed.model === 'string') {
+        recentModels.push(parsed.model);
+        if (recentModels.length > RECENT_MODELS_LIMIT) {
+          recentModels.shift();
+        }
+      }
     } catch {
       // 解析できないボディでも応答は返す(呼び元の形式差で落とさない)。
     }
