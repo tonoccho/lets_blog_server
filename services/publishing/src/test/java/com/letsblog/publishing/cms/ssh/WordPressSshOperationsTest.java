@@ -7,6 +7,7 @@ import com.letsblog.publishing.cms.ConnectionCheckResult;
 import com.letsblog.publishing.cms.MediaUploadResult;
 import com.letsblog.publishing.cms.PostContent;
 import com.letsblog.publishing.cms.PostResult;
+import com.letsblog.publishing.cms.WpCliInstallResult;
 import com.letsblog.publishing.cms.ssh.SshCommandExecutor.SshCommandResult;
 import com.letsblog.publishing.cms.ssh.SshCommandExecutor.SshConnectionParams;
 import com.letsblog.publishing.domain.BulkOperationType;
@@ -138,6 +139,71 @@ class WordPressSshOperationsTest {
         when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("error"));
 
         assertEquals(false, operations.hasAuthorProvisioningCapability(creds()));
+    }
+
+    // ------------------------------------------------------------------------------------
+    // installWpCli(issue #1169 / AT-5-5、AC2: SSHトランスポートのサイトへのwp-cli導入と、
+    // 導入後の一括管理操作(applyPluginTheme)の成功。managed(AGENT)サイトはwp-cliが
+    // Dockerイメージへビルド時導入済みで対象外(installWpCliはSSHのみ対応、
+    // WordPressAdapter#installWpCli参照)なので、実インフラにSSHサーバが無いこのリポジトリでは
+    // E2Eで再現できない(issue #1197)。SshCommandExecutorをモックした本テストが
+    // 唯一の検証経路になる。
+    // ------------------------------------------------------------------------------------
+
+    @Test
+    void installWpCli_未導入なら導入コマンドを実行し成功結果を返す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(fail("wp: command not found")) // command -v wp
+                .thenReturn(ok("WP-CLI 2.9.0")); // インストールスクリプト(--versionの出力)
+
+        WpCliInstallResult result = operations.installWpCli(creds());
+
+        assertEquals(true, result.message().contains("インストールしました"));
+        assertEquals(true, result.message().contains("WP-CLI 2.9.0"));
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals("command -v wp", commandCaptor.getAllValues().get(0));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("curl -fsSL -o \"$HOME/bin/wp\""));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("wp-cli.phar"));
+    }
+
+    @Test
+    void installWpCli_既にインストール済みなら例外を投げ導入コマンドは実行しない() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("/home/deploy/bin/wp"));
+
+        assertThrows(IllegalStateException.class, () -> operations.installWpCli(creds()));
+        verify(executor, times(1)).exec(any(SshConnectionParams.class), any(), isNull());
+    }
+
+    @Test
+    void installWpCli_導入コマンドが失敗したら例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(fail("")) // command -v wp: 未導入
+                .thenReturn(fail("curl: command not found"));
+
+        SshOperationException exception =
+                assertThrows(SshOperationException.class, () -> operations.installWpCli(creds()));
+        assertEquals(true, exception.getMessage().contains("curl: command not found"));
+    }
+
+    @Test
+    void installWpCli_導入成功後に一括管理操作のプラグイン有効化が実行できる() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(fail("wp: command not found")) // command -v wp
+                .thenReturn(ok("WP-CLI 2.9.0")) // インストールスクリプト
+                .thenReturn(ok("")); // 一括管理操作(plugin activate)
+
+        WpCliInstallResult installResult = operations.installWpCli(creds());
+        assertEquals(true, installResult.message().contains("インストールしました"));
+
+        WordPressSshOperations.SshApplyResult applyResult =
+                operations.applyPluginTheme(creds(), BulkOperationType.PLUGIN_ACTIVATE, "akismet");
+
+        assertEquals("SUCCESS", applyResult.status());
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(3)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getAllValues().get(2).contains("plugin activate 'akismet'"));
     }
 
     @Test
