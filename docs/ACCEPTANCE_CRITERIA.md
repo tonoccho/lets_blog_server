@@ -193,6 +193,9 @@ API: ai `AiController`, `ProjectLlmModelController`, `ProjectBraveSearchApiKeyCo
 | AC-AI-009 | LLMモデルの選択 | 精度とコストを選べる | `PUT /ai-models/llm/models/selection` の選択が以後の生成に使われる | `ai/model-selection.feature` › 利用可能なLLMモデル一覧が取得でき、選択したモデルが以後の生成要求に反映される(`@api`)。LLMスタブが受け取ったリクエストのmodelまで検査する(issue #1148) | 実装済み(`@stub` `@api`) |
 | AC-AI-010 | Brave Search APIキー管理 | 検索機能を自分の鍵で使える | `GET/PUT/DELETE /api-keys/brave-search-api-key` の結果が検索付き質問の可否に反映される。保存後のキーは平文で再表示されない | `ai/web-search.feature` › プロジェクトのBrave Search APIキーを保存・削除でき、保存後のキーは平文で再表示されない(`@api`) | 実装済み(`@stub` `@api`) |
 | AC-AI-011 | 生成ジョブの照会 | 長い生成の進捗を追える | `GET /api/generation-jobs` と `/{id}` が状態(実行中/完了/失敗)を返す | — | 未着手 |
+| AC-AI-012 | LLMのレート制限 | 429でも生の例外ログではなく次の行動が分かる | LLMが429を返したとき、`AiServiceException`経由でHTTP 502・`error`にレート制限と分かる文言が返る | `ai/resilience.feature` › LLMが429を返したとき、利用者にレート制限と分かるメッセージが出る(`@api`) | 実装済み(`@stub` `@api`、issue #1149) |
+| AC-AI-013 | LLMのタイムアウト/接続断 | 生成が固まらず再試行できる | LLMがタイムアウト/接続断したとき、速やかに失敗が返り、直後の通常リクエストは成功する | `ai/resilience.feature` › LLMがタイムアウトしたとき、UIが固まらず速やかに失敗が返り再試行できる(`@api`) | 実装済み(`@stub` `@api`、issue #1149) |
+| AC-AI-014 | LLM接続設定の不備 | 生成前に設定不備と分かる | プロバイダのAPIキーが未設定/不正なとき、LLM呼び出し前に設定不備の文言で失敗する | `ai/resilience.feature` › LLM接続設定が未設定/不正なとき、生成前に設定不備と分かるメッセージが出る(`@api`) | 実装済み(`@stub` `@api`、issue #1149) |
 
 ### 2.7 記事プランとGitHub Issue連携 — `PLAN`
 
@@ -549,7 +552,7 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 | AT-5 (#931) | プロジェクト・環境・サイト | AC-PRJ-001〜009, AC-SITE-001〜011 |
 | AT-6 (#932) | 執筆から公開までのジャーニー | AC-POST-001〜013 |
 | AT-7 (#933) | 一括管理・環境間比較 | AC-BULK-001〜013 |
-| AT-8 (#934) | AI執筆支援 | AC-AI-001〜011 |
+| AT-8 (#934) | AI執筆支援 | AC-AI-001〜014 |
 | AT-9 (#935) | 記事プランとGitHub Issue連携 | AC-PLAN-001〜012 |
 | AT-10 (#936) | 画像生成・ギャラリー・メディアGC | AC-IMG-001〜013 |
 | AT-11 (#937) | ダイアグラムとレンダリング | AC-DIAG-001〜007 |
