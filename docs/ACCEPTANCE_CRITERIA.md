@@ -154,7 +154,7 @@ API: content `PostController` / publishing `PostController`, `ArticlePreviewCont
 | AC-POST-009 | プレビュー(骨組み+差し込み) | 公開前に実際の見た目を確認できる | `POST /api/projects/{projectId}/preview/skeleton` と `/render` で、公開先テーマ相当の見た目が得られる | — | 未着手 |
 | AC-POST-010 | プレビュー用テーマCSSの取得 | プレビューが公開先の見た目と一致する | `GET /api/projects/{projectId}/preview/theme-css` が公開先のCSSを返す | — | 未着手 |
 | AC-POST-011 | プレビュー投稿の後始末 | プレビューの残骸が公開先に残らない | `DELETE /api/projects/{projectId}/preview/preview-post` 後、公開先にプレビュー記事が残らない | — | 未着手 |
-| AC-POST-012 | カテゴリ・タグの解決 | 記事に付けた分類が公開先で正しく紐付く | `POST /api/taxonomy/resolve` が既存分類に解決し、無ければ作成する | — | 未着手 |
+| AC-POST-012 | カテゴリ・タグの解決 | 記事に付けた分類が公開先で正しく紐付く | `POST /api/taxonomy/resolve` が既存分類に解決し、無ければ作成する | `features/publishing/taxonomy.feature` › 既にあるカテゴリ・タグは大文字小文字を無視した完全一致で解決される / 存在しないカテゴリ・タグを指定すると新規作成される | 検証済 |
 | AC-POST-013 | プロジェクトダッシュボード (`/projects/[id]/dashboard`) | プロジェクトの状況を一目で掴める | 記事数・公開状況・Analytics サマリが表示される | — | 未着手 |
 
 ### 2.5 一括管理・環境間比較 — `BULK`
