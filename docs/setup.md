@@ -238,6 +238,14 @@ docker exec lbs-comfyui ls /root/ComfyUI/models/checkpoints/
 Web管理画面自身のサーバーサイドAPI呼び出しがコンテナ間の平文HTTP通信になるため、
 Web管理画面側では自己署名証明書の信頼設定(`NODE_EXTRA_CA_CERTS`)は不要。
 
+`docker-compose.yml` の `web` サービスは `./apps/web:/app` をバインドマウントするため、
+イメージビルド時に作られた `/app/node_modules` はマウントで覆い隠される。クローン直後など
+ホストに `apps/web/node_modules` が無い場合、`apps/web/docker-entrypoint.sh` が起動時に
+それを検知してコンテナ内(`node:22-alpine`、musl)で `npm ci` を実行し、生成された
+`node_modules` の所有者をバインドマウント元(ホストの実行ユーザー)へ揃える。ホストの
+Node(`npm install` 済みの場合)とコンテナのNodeでネイティブバイナリ(`@next/swc`等)の
+ABIが異なりうるため、インストールは常にコンテナ内で行う(#1050)。
+
 ### (代替)ホスト上で `npm run dev` を直接起動する場合
 
 より高速なホットリロードを求める場合など、コンテナを使わずホスト上で直接起動することもできる。
