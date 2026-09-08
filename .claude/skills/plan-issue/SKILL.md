@@ -84,6 +84,10 @@ Create a GitLab Issue containing:
 - Open Questions
 - Implementation Notes
 
+**At most five Acceptance Criteria** — see `CLAUDE.md` → **At most five Acceptance Criteria**.
+More than five means the Issue is too big: create a second Issue instead of compressing the
+wording to fit.
+
 Use the repository's existing Issue conventions if they exist.
 
 ---

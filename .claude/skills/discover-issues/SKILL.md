@@ -65,7 +65,7 @@ confirm a finding, and never fixes what it finds:
 
 1. Confirm the finding is real (read the actual code, not just a comment claiming a problem).
 2. Determine impact and who is affected.
-3. Draft a proposed Issue using the same template as `plan-issue` Step 4 (Title, Background, Problem, Goal, Requirements, Acceptance Criteria, Scope, Out of Scope, Dependencies, Open Questions, Implementation Notes).
+3. Draft a proposed Issue using the same template as `plan-issue` Step 4 (Title, Background, Problem, Goal, Requirements, Acceptance Criteria, Scope, Out of Scope, Dependencies, Open Questions, Implementation Notes). **At most five Acceptance Criteria** — see `CLAUDE.md` → **At most five Acceptance Criteria**; a finding that needs more is more than one Issue.
 4. Assess a Priority (P0/P1/P2) and Size (XS–XL) using the project's existing Priority/Size fields. Priority is mandatory for every Issue this skill files, even though many pre-existing Issues in the project leave it unset.
 
 Do not invent problems to hit a quota. A short list of real findings is better than a long list of speculative ones.

@@ -119,6 +119,10 @@ Specific expected behavior.
 
 Observable conditions that can be verified.
 
+**At most five.** More than five means the Issue is too big: split it into another Issue rather
+than fitting it into five. See `CLAUDE.md` → **At most five Acceptance Criteria** for the single
+definition, including when a split is not allowed.
+
 Use concrete criteria.
 
 Bad:

@@ -108,7 +108,13 @@ FAIL if important product behavior remains ambiguous.
 
 ### Acceptance Criteria
 
-Acceptance criteria must be observable and testable.
+Acceptance criteria must be observable and testable, and there must be **at most five** of them
+(`CLAUDE.md` → **At most five Acceptance Criteria**).
+
+Count them. **Six or more is a FAIL**, however well each one is written — the Issue is too big,
+and the fix is to split it, not to reword it. Say so in Required Changes and name the seam you
+would cut on. Rewriting six criteria into five by merging two checks into one bullet does not
+make the Issue ready; it hides a requirement.
 
 Good:
 - [ ] User can search articles by title.

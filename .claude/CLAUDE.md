@@ -480,6 +480,31 @@ Create the new GitLab Issue in `Inbox`, using the `project-planner` Issue templa
 
 The Issue's `Priority` field (P0/P1/P2) must be set before the Issue is considered filed. Never leave priority unset on a newly discovered Issue, even though older Issues in the project may have it unset.
 
+## At most five Acceptance Criteria
+
+This is the single definition. `plan-issue`, `discover-issues` and the `project-planner` agent
+defer to it; do not restate it differently anywhere else.
+
+**An Issue carries at most five Acceptance Criteria.** More than five means the Issue is too
+big — **split it into another Issue**, do not fit it into five.
+
+Fitting is the failure mode this forbids: coarsening the wording, or folding several checks
+into one bullet, hides requirements without making the Issue smaller. If the work genuinely
+needs more than five observable conditions, it is more than one Issue.
+
+Split only where each part can be implemented, reviewed, QA'd and merged **without waiting for
+its siblings**. If no such seam exists, do not split — reduce the scope instead and record what
+was left out under **Out of Scope**, naming the follow-up Issue. A sequence-dependent split is
+worse than a large Issue: it produces the "the predecessor's work is not in the code yet"
+stall, which accounted for 6 of the 17 `NOT READY` verdicts in the 2026-09-08 Backlog sweep.
+
+**Why the cap is five.** The measured fixed cost of an Issue — Review + QA + Merge Request +
+merge — is 15–25 minutes (#938: 18 of 68 min; #941: 21 of 99; #940: 20 of 129), so splitting
+raises total wall-clock time; it does not lower it. The cap does not buy speed. It bounds
+**what one rollback destroys.** #940 carried 17 scenarios; three of them failed QA, the Issue
+was rolled back twice, and CLAUDE.md's escalation abandoned all four commits — including the
+14 scenarios that worked.
+
 Then report:
 
 - What was discovered
