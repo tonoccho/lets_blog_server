@@ -196,6 +196,8 @@ API: ai `AiController`, `ProjectLlmModelController`, `ProjectBraveSearchApiKeyCo
 | AC-AI-012 | LLMのレート制限 | 429でも生の例外ログではなく次の行動が分かる | LLMが429を返したとき、`AiServiceException`経由でHTTP 502・`error`にレート制限と分かる文言が返る | `ai/resilience.feature` › LLMが429を返したとき、利用者にレート制限と分かるメッセージが出る(`@api`) | 実装済み(`@stub` `@api`、issue #1149) |
 | AC-AI-013 | LLMのタイムアウト/接続断 | 生成が固まらず再試行できる | LLMがタイムアウト/接続断したとき、速やかに失敗が返り、直後の通常リクエストは成功する | `ai/resilience.feature` › LLMがタイムアウトしたとき、UIが固まらず速やかに失敗が返り再試行できる(`@api`) | 実装済み(`@stub` `@api`、issue #1149) |
 | AC-AI-014 | LLM接続設定の不備 | 生成前に設定不備と分かる | プロバイダのAPIキーが未設定/不正なとき、LLM呼び出し前に設定不備の文言で失敗する | `ai/resilience.feature` › LLM接続設定が未設定/不正なとき、生成前に設定不備と分かるメッセージが出る(`@api`) | 実装済み(`@stub` `@api`、issue #1149) |
+| AC-AI-015 | LLM設定(`/ai-models/llm/**`)の非メンバー拒否 | 他人のプロジェクトのLLM設定を書き換えられない | 一般利用者は、対象プロジェクトのメンバーか否かに関わらず`requireAdmin()`により403で拒否される(現状の実装。是正は本Issueの対象外) | `ai/authorization.feature` › 一般利用者はプロジェクトのメンバーでなくてもLLM設定を読み書きできない(`@api`) | 実装済み(`@api`、issue #1150) |
+| AC-AI-016 | Brave Search APIキーの非メンバー拒否 | 他人のプロジェクトのBrave Search APIキーを読み書きできない | `requireProjectMemberOrAdmin(projectId)`により、メンバーでないプロジェクトへのGET/PUT/DELETEが403で拒否される。自分のプロジェクトでは読み書きできる | `ai/authorization.feature` › 自分がメンバーでないプロジェクトのBrave Search APIキーは読み書きできない(`@api`) | 実装済み(`@api`、issue #1150) |
 
 ### 2.7 記事プランとGitHub Issue連携 — `PLAN`
 
