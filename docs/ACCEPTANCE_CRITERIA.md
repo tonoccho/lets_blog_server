@@ -182,13 +182,13 @@ API: ai `AiController`, `ProjectLlmModelController`, `ProjectBraveSearchApiKeyCo
 
 | 機能ID | 機能 | 利用者から見た価値 | 受け入れ基準(要約) | 対応シナリオ | 状態 |
 | --- | --- | --- | --- | --- | --- |
-| AC-AI-001 | 下書き生成 (`/api/ai/draft`) | 白紙から書き始めなくてよい | テーマを与えると記事の下書きが返る | — | 未着手(`@stub`) |
-| AC-AI-002 | 質問 (`/api/ai/ask`) | 執筆中の疑問をその場で解ける | 質問に対する回答が返る | — | 未着手(`@stub`) |
+| AC-AI-001 | 下書き生成 (`/api/ai/draft`) | 白紙から書き始めなくてよい | テーマを与えると記事の下書きが返る | `ai/generation.feature` › 下書き生成に見出しと要望を渡すと、スタブの決定的な下書きがそのまま返る(`@api`) | 実装済み(`@stub` `@api`) |
+| AC-AI-002 | 質問 (`/api/ai/ask`) | 執筆中の疑問をその場で解ける | 質問に対する回答が返る | `ai/generation.feature` › セクション生成に追加の指示を続けると、直前の生成を踏まえた壁打ちの再生成を依頼できる(`@api`)。`/api/ai/ask`(AiAskRequest)は history を持たないため、対象を history/message を持つ `/api/ai/section` の壁打ち再生成に合わせて検証する(issue #1146。feature内のコメント参照) | 実装済み(`@stub` `@api`) |
 | AC-AI-003 | タグ提案 (`/api/ai/tags`) | 分類を考える手間が減る | 本文からタグ候補が返る | — | 未着手(`@stub`) |
 | AC-AI-004 | 校正 (`/api/ai/proofread`) | 誤字や言い回しを直せる | 本文に対する指摘が返る | — | 未着手(`@stub`) |
-| AC-AI-005 | セクション生成 (`/api/ai/section`) | 見出し単位で書き足せる | 見出しを与えるとその節の本文が返る | — | 未着手(`@stub`) |
+| AC-AI-005 | セクション生成 (`/api/ai/section`) | 見出し単位で書き足せる | 見出しを与えるとその節の本文が返る | `ai/generation.feature` › セクション生成が、指定した見出し配下の本文として返る(`@api`) | 実装済み(`@stub` `@api`) |
 | AC-AI-006 | Web検索付き質問 | 最新情報を踏まえた回答が得られる | Brave Search APIキー設定時、検索結果を根拠にした回答が返る | — | 未着手(`@stub`) |
-| AC-AI-007 | 画像プロンプト生成 | 記事に合う画像を頼みやすい | `POST /api/projects/{projectId}/ai/generate-image-prompt` が本文に沿ったプロンプトを返す | — | 未着手(`@stub`) |
+| AC-AI-007 | 画像プロンプト生成 | 記事に合う画像を頼みやすい | `POST /api/projects/{projectId}/ai/generate-image-prompt` が本文に沿ったプロンプトを返す | `ai/generation.feature` › 画像プロンプト生成が、記事内容に基づくプロンプト文字列を返す(`@api`) | 実装済み(`@stub` `@api`) |
 | AC-AI-008 | LLMプロバイダの選択 | 用途に応じてAIを切り替えられる | `PUT /ai-models/llm/provider/selection` の選択が以後の生成に使われる | — | 未着手 |
 | AC-AI-009 | LLMモデルの選択 | 精度とコストを選べる | `PUT /ai-models/llm/models/selection` の選択が以後の生成に使われる | — | 未着手 |
 | AC-AI-010 | Brave Search APIキー管理 | 検索機能を自分の鍵で使える | `GET/PUT/DELETE /api-keys/brave-search-api-key` の結果が検索付き質問の可否に反映される | — | 未着手 |
