@@ -122,12 +122,12 @@ API: project `ProjectController`, `SiteController`, `SshKeyPairController`, `Sit
 | AC-PRJ-007 | 環境間の同期 | 検証環境を本番に揃えられる | `POST /api/projects/{id}/environments/sync` 後、差分が解消する | — | 未着手 |
 | AC-PRJ-008 | GitHubリポジトリの紐付け | 記事プランをIssueと連携できる | `PUT /api/projects/{id}/github-repository` 後、Issue一覧が取得できる | — | 未着手 |
 | AC-PRJ-009 | GitHubトークン(プロジェクト) | プロジェクト単位で連携先を分けられる | `PUT/DELETE /api/projects/{projectId}/api-keys/github-token` の結果が連携の成否に反映される | — | 未着手 |
-| AC-SITE-001 | サイト一覧 (`/sites`) | 公開先を一覧できる | 一覧に登録済みサイトと接続状態が表示される | `e2e/site-registration.spec.ts` › Navigate to sites page and view site list / Sites page displays connection status controls for the fixture site | 既存spec |
-| AC-SITE-002 | サイト検索 | 多数のサイトから目的の1件を探せる | 検索語で一覧が絞り込まれる | `e2e/site-registration.spec.ts` › Search filters the site list down to the fixture site | 既存spec |
+| AC-SITE-001 | サイト一覧 (`/sites`) | 公開先を一覧できる | 一覧に登録済みサイトと接続状態が表示される | `features/project/site-provisioning.feature` › サイト一覧ページとサイト作成フォームが表示される / プロビジョニング済みサイトの接続状態表示と検索絞り込みができる | 検証済 |
+| AC-SITE-002 | サイト検索 | 多数のサイトから目的の1件を探せる | 検索語で一覧が絞り込まれる | `features/project/site-provisioning.feature` › プロビジョニング済みサイトの接続状態表示と検索絞り込みができる | 検証済(`@slow`) |
 | AC-SITE-003 | 既存WordPressの登録 | 手持ちのブログを繋げられる | `POST /api/sites` で登録でき、一覧に現れる | `e2e/site-registration.spec.ts` › Site creation form is accessible(フォーム到達のみ) | 既存spec(部分) |
-| AC-SITE-004 | ManagedWordPress の新規構築 | WordPressを自分で用意しなくてよい | `POST /api/sites/managed-wordpress` でサイトが構築され、公開URLが応答する | — | 未着手(`@slow`) |
+| AC-SITE-004 | ManagedWordPress の新規構築 | WordPressを自分で用意しなくてよい | `POST /api/sites/managed-wordpress` でサイトが構築され、公開URLが応答する | `features/project/site-provisioning.feature` › ManagedWordPressを新規プロビジョニングすると、サイトが作成され疎通確認が成功する / 1つのプロジェクトが2環境(=2サイト)を持てる / プロビジョニング済みサイトの識別子をat-main段階のシナリオから参照できる | 検証済(`@slow`) |
 | AC-SITE-005 | ManagedWordPress の引き取り | 既存のコンテナを管理下に置ける | `POST /api/sites/managed-wordpress/adopt` 後、通常のサイトとして操作できる | — | 未着手 |
-| AC-SITE-006 | 接続確認 | 公開前に繋がるか確かめられる | `POST /api/sites/{id}/test-connection` の結果が画面の接続状態に反映される | `e2e/site-registration.spec.ts` › Test site connection for the fixture site | 既存spec |
+| AC-SITE-006 | 接続確認 | 公開前に繋がるか確かめられる | `POST /api/sites/{id}/test-connection` の結果が画面の接続状態に反映される | `features/project/site-provisioning.feature` › ManagedWordPressを新規プロビジョニングすると、サイトが作成され疎通確認が成功する | 検証済(`@slow`) |
 | AC-SITE-007 | サイト編集・削除 (`/sites/[id]/edit`) | 認証情報やURLを直せる | `PUT/DELETE /api/sites/{id}` の結果が一覧に反映される | — | 未着手 |
 | AC-SITE-008 | WP-CLI の導入 | 一括管理機能が使えるようになる | `POST /api/sites/{id}/install-wp-cli` 後、一括管理の操作が成功する | — | 未着手(`@slow`) |
 | AC-SITE-009 | 再プロビジョニング | 壊れたサイトを作り直せる | `POST /api/sites/{id}/reprovision` 後、サイトが再び応答する | — | 未着手(`@slow` `@destructive`) |
