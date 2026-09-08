@@ -351,13 +351,83 @@ WRAPPERS = {
 ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 
+def _heredoc_marker(line):
+    """`line` がヒアドキュメント演算子を含むなら `(終端語, タブ除去するか)` を返す。
+
+    引用符の内側の `<<` を演算子と誤認しないよう、この1行だけを shlex で解析する
+    (本文はまだ読んでいないので、この行の中に閉じない引用符が無い限り安全)。
+    `<<WORD` と `<<-WORD` はどちらも `<<` トークンの直後に `WORD`(`<<-` の場合は
+    `-WORD`)が続く形で出てくる — `-` は句読点文字ではないので、`<<-` 自体が
+    1つのトークンになることはない。
+    """
+    try:
+        lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return None
+    for i, token in enumerate(tokens):
+        if token == "<<" and i + 1 < len(tokens):
+            word = tokens[i + 1]
+            strip_tabs = word.startswith("-")
+            return (word[1:] if strip_tabs else word), strip_tabs
+    return None
+
+
+def strip_heredoc_bodies(command):
+    """ヒアドキュメントの本文行を取り除いた文字列を返す。
+
+    本文中の `;` `|` `>` はシェルの演算子ではなく、ただの文字である(#1035)。
+    行単位で処理し、終端語(`<<-` なら先頭タブを落としてから比較)と完全一致する
+    行が来るまで、本文行を丸ごと落とす。落とした行(終端行を含む)は出力に含めない
+    — 空行を残しても `split_commands` の判定に影響しないため、追跡は不要。
+
+    **扱える範囲**: 1行につきヒアドキュメント演算子は1つまで。同じ行に複数の
+    ヒアドキュメント(`cmd <<A <<B`)が並ぶ場合、2つ目以降は対象外(最初の演算子
+    の本文だけを終端語まで読み飛ばし、その後は通常どおり解析される)。改行を
+    跨がない `<<<`(herestring)はそもそも対象外(演算子自体が別物で、本文を
+    複数行に持たない)。
+    """
+    if "<<" not in command:
+        return command
+    lines = command.split("\n")
+    out = []
+    delimiter = None
+    strip_tabs = False
+    for line in lines:
+        if delimiter is not None:
+            candidate = line.lstrip("\t") if strip_tabs else line
+            if candidate == delimiter:
+                delimiter = None
+                strip_tabs = False
+            continue
+        out.append(line)
+        marker = _heredoc_marker(line)
+        if marker is not None:
+            delimiter, strip_tabs = marker
+    return "\n".join(out)
+
+
+PROCESS_SUBSTITUTION_OPENERS = {"<(", ">("}
+
+
 def split_commands(command):
     """コマンド文字列を「実行される個々のコマンド」のトークン列へ分解する。
 
     戻り値は `(argv, redirect_targets)` の並び。解析できない場合は None を返す
     (呼び出し側が保守的なフォールバックへ倒すため。空リストと区別する)。
+
+    ヒアドキュメントの本文は事前に取り除く(`strip_heredoc_bodies`)。プロセス
+    置換 `>(...)` / `<(...)` の中身は、外側のコマンドの引数としてではなく、
+    それ自体が独立して実行される1コマンドとして `commands` に加える —
+    実際のシェルでもサブシェルとして実行されるので、この分解は虚構ではない。
+
+    **扱える範囲**: 1階層のプロセス置換。入れ子(`diff <(cat <(x)) y`)は、
+    最も内側の境界まで丸ごと1つの塊として扱うため、内側の置換だけを独立した
+    コマンドとして取り出すことはしない(完全性は主張しない。CLAUDE.md →
+    Enforcement → What the guards are, and are not)。
     """
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer = shlex.shlex(strip_heredoc_bodies(command), posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
     try:
         tokens = list(lexer)
@@ -371,12 +441,41 @@ def split_commands(command):
     redirects = []
     # None = ターゲットを待っていない / True = ファイル名を待つ / False = fd を待つ
     expect_target = None
-    for token in tokens:
+    i = 0
+    n = len(tokens)
+    while i < n:
+        token = tokens[i]
+        i += 1
         if expect_target is not None:
             # fd 複製のターゲット(`1` / `2` / `-`)はファイルではないので捨てる。
             if expect_target:
                 redirects.append(token)
             expect_target = None
+            continue
+        if token in PROCESS_SUBSTITUTION_OPENERS:
+            # 開き括弧1つ分から始まる。句読点文字はまとめて1トークンになるので
+            # (`))` のように)、閉じ括弧の分だけ深さを引き、1文字ずつではなく
+            # トークン単位で追う。
+            depth = 1
+            inner = []
+            while i < n and depth > 0:
+                t = tokens[i]
+                i += 1
+                delta = t.count("(") - t.count(")")
+                if depth + delta <= 0:
+                    trimmed = t
+                    remaining = depth
+                    while remaining > 0 and trimmed.endswith(")"):
+                        trimmed = trimmed[:-1]
+                        remaining -= 1
+                    if trimmed:
+                        inner.append(trimmed)
+                    depth = 0
+                else:
+                    inner.append(t)
+                    depth += delta
+            if inner:
+                commands.append((inner, []))
             continue
         if token in SEPARATORS:
             if argv or redirects:

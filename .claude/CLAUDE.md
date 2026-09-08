@@ -871,6 +871,27 @@ Defence against deliberate circumvention lives elsewhere and must stay there:
 - **GitLab protected-branch settings** — who may merge and push, enforced server-side
 - **`scripts/git-hooks/pre-commit`** — runs for any committer, agent or human
 
+### Process substitution is not indirect execution (#1035)
+
+`bash -c '...'` and `eval` above are the deliberate-circumvention non-goal: a caller has to
+choose to hand the guard an opaque string. **Process substitution (`>(...)` / `<(...)`) is not
+that** — `diff <(sort a) <(sort b)` is an everyday investigation command, not a way to defeat
+inspection, and it can be written unintentionally by anyone who reaches for it out of habit. The
+guard treats it accordingly: `split_commands()` parses the content of a process substitution as
+its own independent command and runs it through the same destructive-command check as anything
+else, rather than letting it hide inside the outer command's argument list.
+
+**What is handled**: one level of process substitution. **What is not**: nesting
+(`diff <(cat <(x)) y` is parsed as a single opaque block, not decomposed further) — the same
+"completeness is not claimed" boundary as everywhere else in this section.
+
+A heredoc's body is a related but opposite problem: it is not indirect execution at all, just
+text that used to be misread as shell syntax. `split_commands()` now skips the body between a
+`<<WORD` / `<<-WORD` introducer and its terminator line before parsing, so `;` and `>` inside
+the body are no longer mistaken for a command separator or a real file write. A heredoc's own
+redirect (`cat <<EOF > out.txt`) is unaffected — that token appears before the body starts and
+is still caught.
+
 ### Redirections, and what a read-only stage refuses
 
 A read-only stage refuses **every** output redirection whose target is not `/dev/null` (or

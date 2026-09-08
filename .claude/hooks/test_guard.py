@@ -429,6 +429,93 @@ if len(b)>3000: print("big")'""",
         self.assertIn("real.txt", reason)
 
 
+class HeredocAndProcessSubstitution(unittest.TestCase):
+    """#1035: ヒアドキュメント本文とプロセス置換の中身を正しく扱う。
+
+    #1029 で導入した `split_commands()` は、シェルの構文をコマンド区切り・リダイレクト
+    演算子のトークンとして解釈する。しかしヒアドキュメントの本文とプロセス置換の中身は
+    その解析器では未対応で、逆向きの2つの欠陥が出ていた。
+
+      * ヒアドキュメント本文中の `;` `>` が演算子として解釈され、無害な本文が
+        破壊的コマンド・ファイル書き込みとして誤検知される(偽陽性)。
+      * プロセス置換 `>(...)` / `<(...)` の中身は外側コマンドの引数トークンに
+        埋もれ、`destructive_reason()` は `argv[0]` しか見ないため検知されない(偽陰性)。
+    """
+
+    def _in_stage(self, command):
+        root = tempfile.mkdtemp()
+        state = os.path.join(root, ".claude", ".state")
+        os.makedirs(state)
+        with open(os.path.join(state, "readonly-test-session"), "w") as f:
+            f.write("ready-issue")
+        env_backup = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        try:
+            return run_hook("bash", bash_payload(command, cwd=root))
+        finally:
+            if env_backup is not None:
+                os.environ["CLAUDE_PROJECT_DIR"] = env_backup
+
+    def test_heredoc_body_semicolon_is_not_a_false_positive(self):
+        """本文中の `; rm -rf ...` はコマンド区切りではない。"""
+        command = "cat <<EOF\nsafe text; rm -rf /tmp/foo\nEOF"
+        self.assertIsNone(
+            self._in_stage(command),
+            "ヒアドキュメント本文の `; rm -rf` が破壊的コマンドとして拒否された",
+        )
+
+    def test_heredoc_body_redirect_is_not_a_false_positive(self):
+        """本文中の `> looks-like-redirect.txt` はリダイレクトではない。"""
+        command = "cat <<EOF\nsome text > looks-like-redirect.txt\nEOF"
+        self.assertIsNone(
+            self._in_stage(command),
+            "ヒアドキュメント本文の `>` がファイル書き込みとして拒否された",
+        )
+
+    def test_heredocs_own_redirect_is_still_denied(self):
+        """ヒアドキュメント自身に付いたリダイレクトは実際のファイル書き込みである。"""
+        command = "cat <<EOF > out.txt\nsome body\nEOF"
+        reason = self._in_stage(command)
+        self.assertIsNotNone(reason, "`cat <<EOF > out.txt` のリダイレクトが素通りした")
+        self.assertIn("out.txt", reason)
+
+    def test_dash_heredoc_body_is_skipped_too(self):
+        """`<<-WORD` 形式(タブ除去)でも本文はコマンドとして解釈されない。"""
+        command = "cat <<-EOF\n\tsafe; rm -rf /tmp/foo\n\tEOF"
+        self.assertIsNone(
+            self._in_stage(command),
+            "`<<-EOF` の本文が破壊的コマンドとして拒否された",
+        )
+
+    def test_process_substitution_output_is_denied(self):
+        """`>(...)` の中身は独立したコマンドとして検査対象になる。"""
+        reason = self._in_stage("diff >(rm -rf build) /dev/null")
+        self.assertIsNotNone(reason, "`diff >(rm -rf build) x` の中身が検知されなかった")
+
+    def test_process_substitution_input_is_denied(self):
+        """`<(...)` の中身も独立したコマンドとして検査対象になる。"""
+        reason = self._in_stage("cat <(rm -rf build)")
+        self.assertIsNotNone(reason, "`cat <(rm -rf build)` の中身が検知されなかった")
+
+    def test_harmless_process_substitutions_are_allowed(self):
+        """`diff <(sort a) <(sort b)` は日常的な調査コマンドであり、無害。"""
+        self.assertIsNone(
+            self._in_stage("diff <(sort a) <(sort b)"),
+            "無害なプロセス置換が拒否された",
+        )
+
+    def test_explain_does_not_show_heredoc_body_as_a_command(self):
+        """本文にたまたま含まれる語(`rm` など)を、解析結果に出さないこと。"""
+        proc = subprocess.run(
+            [sys.executable, HOOK, "explain", "cat <<EOF\nsafe text; rm -rf /tmp/foo\nEOF"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(0, proc.returncode, proc.stderr)
+        self.assertIn("1 個のコマンド", proc.stdout, "ヒアドキュメント本文が別コマンドとして数えられた")
+        self.assertNotIn("読み取り専用ステージ: 拒否", proc.stdout)
+
+
 class ExplainSubcommand(unittest.TestCase):
     """#1029 Requirement 3: ガードの解釈を確認できること。
 
