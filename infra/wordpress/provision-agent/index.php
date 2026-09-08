@@ -46,67 +46,9 @@ function combinedOutput(string $stdout, string $stderr): string
     return trim($stdout . ($stderr !== '' ? "\n$stderr" : ''));
 }
 
-/**
- * escapeshellargで各トークンを個別にエスケープしてからシェルへ渡す(コマンドインジェクション対策)。
- * stdout/stderrは分離して返す。porcelain出力(投稿ID等)はstdoutのみから取り出すこと
- * (stderrにPHP Warning等が出た場合に、stdoutの値と混ざって壊れるのを防ぐため)。
- * @param string[] $args
- * @return array{0:int,1:string,2:string}
- */
-function runCommand(array $args): array
-{
-    $command = implode(' ', array_map('escapeshellarg', $args));
-    $descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
-    $process = proc_open($command, $descriptors, $pipes);
-    if (!is_resource($process)) {
-        return [1, '', 'proc_openに失敗しました'];
-    }
-    fclose($pipes[0]);
-    $stdout = stream_get_contents($pipes[1]);
-    $stderr = stream_get_contents($pipes[2]);
-    fclose($pipes[1]);
-    fclose($pipes[2]);
-    $exitCode = proc_close($process);
-    return [$exitCode, trim($stdout), trim($stderr)];
-}
-
-/**
- * wp-cli(phar)実行時、PHP CLIのデフォルトmemory_limitではWordPressコア展開時に
- * メモリ不足になることがあるため、明示的に緩和した上で実行する。
- * @param string[] $args wp-cliへのサブコマンド以降の引数
- * @return array{0:int,1:string,2:string}
- */
-function runWp(array $args): array
-{
-    return runCommand(array_merge(['php', '-d', 'memory_limit=512M', '/usr/local/bin/wp'], $args));
-}
-
-/**
- * 投稿本文の送信等、STDIN経由の入力が必要なwp-cli呼び出し用。
- * runWp/runCommandと同様に各トークンをescapeshellargで個別にエスケープしたコマンド文字列を
- * proc_openでSTDINパイプ付き実行する(exec()はSTDINを渡せないため)。
- * stdout/stderrは分離して返す(runCommandと同じ理由)。
- * @param string[] $args
- * @return array{0:int,1:string,2:string}
- */
-function runWpWithStdin(array $args, string $stdin): array
-{
-    $command = implode(' ', array_map('escapeshellarg',
-        array_merge(['php', '-d', 'memory_limit=512M', '/usr/local/bin/wp'], $args)));
-    $descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
-    $process = proc_open($command, $descriptors, $pipes);
-    if (!is_resource($process)) {
-        return [1, '', 'proc_openに失敗しました'];
-    }
-    fwrite($pipes[0], $stdin);
-    fclose($pipes[0]);
-    $stdout = stream_get_contents($pipes[1]);
-    $stderr = stream_get_contents($pipes[2]);
-    fclose($pipes[1]);
-    fclose($pipes[2]);
-    $exitCode = proc_close($process);
-    return [$exitCode, trim($stdout), trim($stderr)];
-}
+// runCommand/runWp/runWpWithStdinはproc_open経由の外部コマンド実行を担う(issue #1122で
+// process-runner.phpへ切り出し、stdout/stderrの多重化・実行時間上限を追加した)。
+require __DIR__ . '/process-runner.php';
 
 /**
  * 指定slugのサイトディレクトリパスを返す。存在しなければnullを返す
