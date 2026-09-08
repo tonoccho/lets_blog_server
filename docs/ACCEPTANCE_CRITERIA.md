@@ -115,10 +115,10 @@ API: project `ProjectController`, `SiteController`, `SshKeyPairController`, `Sit
 
 | 機能ID | 機能 | 利用者から見た価値 | 受け入れ基準(要約) | 対応シナリオ | 状態 |
 | --- | --- | --- | --- | --- | --- |
-| AC-PRJ-001 | プロジェクト一覧 (`/projects`) | 管理対象のブログを一覧できる | 一覧に自分が参加するプロジェクトが表示される | `e2e/post-creation.spec.ts` › Navigate to projects page and view project list / Project list displays project information / Project search/filter input is not implemented yet | 既存spec |
-| AC-PRJ-002 | プロジェクト作成 | 新しいブログの管理を始められる | フォームから作成でき、一覧と詳細に反映される | `e2e/post-creation.spec.ts` › Project creation form is accessible / Create a new project with basic information | 既存spec |
-| AC-PRJ-003 | プロジェクト詳細 (`/projects/[id]`) | 設定・サイト・記事をまとめて見られる | 作成時に入力した値が詳細画面に表示される(#913 の再発検知) | `e2e/post-creation.spec.ts` › View project details | 既存spec |
-| AC-PRJ-004 | プロジェクト編集・削除 | 不要になったら消せる | `PUT/DELETE /api/projects/{id}` の結果が一覧に反映される | `e2e/post-creation.spec.ts` › Project row delete button is not implemented yet(UI未実装の確認のみ) | 既存spec(部分) |
+| AC-PRJ-001 | プロジェクト一覧 (`/projects`) | 管理対象のブログを一覧できる | 一覧に自分が参加するプロジェクトが表示される。**対象外**: 検索・フィルタ入力欄は`/projects`に未実装(`ProjectsTable.tsx`は定義されているが`page.tsx`から未使用のdead code、issue #645で確認・#1165で再確認)のため、シナリオでは対象としない。実装されたら本行とシナリオを更新すること | `features/project/project-management.feature` › プロジェクトを作成すると一覧に現れ、詳細を開ける | 検証済 |
+| AC-PRJ-002 | プロジェクト作成 | 新しいブログの管理を始められる | フォームから作成でき、一覧と詳細に反映される | `features/project/project-management.feature` › プロジェクトを作成すると一覧に現れ、詳細を開ける | 検証済 |
+| AC-PRJ-003 | プロジェクト詳細 (`/projects/[id]`) | 設定・サイト・記事をまとめて見られる | 作成時に入力した値が詳細画面に表示される。プロジェクト設定(画像生成のデフォルトサイズ・CSSセレクタ接頭辞)を保存すると、再取得後も反映されている(#913 の再発検知) | `features/project/project-management.feature` › プロジェクトを作成すると一覧に現れ、詳細を開ける / プロジェクト設定を保存すると、再読込後も表示される(#913の退行検知) | 検証済 |
+| AC-PRJ-004 | プロジェクト編集・削除 | 不要になったら消せる | 詳細画面の`DeleteProjectButton.tsx`(確認ダイアログ含む)経由で削除すると一覧に反映され、紐付いていたサイトは削除されずに残る(`ProjectService#deleteProject`はプロジェクト行のみ削除する現行仕様どおり)。**対象外**: 一覧行の削除ボタンは`/projects`に未実装(`ProjectsTable.tsx`は定義されているが`page.tsx`から未使用のdead code、issue #645で確認・#1165で再確認)。実装されたら本行とシナリオを更新すること | `features/project/project-management.feature` › プロジェクトを削除すると一覧から消え、紐付くサイトは残る | 検証済 |
 | AC-PRJ-005 | 環境の追加・削除 | 本番と検証を分けて運用できる | `POST/DELETE /api/projects/{id}/environments` の結果が環境選択に現れる | — | 未着手 |
 | AC-PRJ-006 | マスタ環境の指定 | どの環境を正とするか決められる | `PUT /api/projects/{id}/master-environment` の指定が比較・同期の基準になる | — | 未着手 |
 | AC-PRJ-007 | 環境間の同期 | 検証環境を本番に揃えられる | `POST /api/projects/{id}/environments/sync` 後、差分が解消する | — | 未着手 |
