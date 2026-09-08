@@ -346,8 +346,8 @@ API: platform `SystemSettingController`, `AppSettingController`, `BackupControll
 | AC-SYS-002 | コンテナ状態パネル | コンテナ単位の異常に気付ける | `GET /api/dashboard/container-status` の内容が表示される(#876 の再発検知) | — | 未着手 |
 | AC-SYS-003 | 状態のストリーミング更新 | 手動リロードなしで最新が見える | `/service-status/stream` `/container-status/stream` が更新を push する | — | 未着手 |
 | AC-SYS-004 | サービス状態の詳細 | 障害の原因に辿り着ける | `GET /service-status/detail` が個別サービスの詳細を返す | — | 未着手 |
-| AC-SYS-005 | Brave Search APIキー(システム全体) | 全プロジェクト共通で検索を使える | `GET/PUT/DELETE /api/system-settings/brave-search-api-key` の設定が検索付き質問に反映される | — | 未着手 |
-| AC-SYS-006 | アプリ設定 (`/admin/system-settings`) | 全体の挙動を調整できる | `GET/PUT /api/system-settings/app-settings` の設定が保存され画面に反映される | — | 未着手 |
+| AC-SYS-005 | Brave Search APIキー(システム全体) | 全プロジェクト共通で検索を使える | `GET/PUT/DELETE /api/system-settings/brave-search-api-key` の設定が検索付き質問に反映される | `features/platform/system-settings.feature` › Brave Search APIキーを保存・削除でき、保存後は平文で再表示されない | 検証済(`@api`。この設定にはWeb画面が無いためAPIレベルで検証。「削除後は未設定になる」ではなく「DB由来ではなくなる」で判定する。この環境は`BRAVE_SEARCH_API_KEY`環境変数を設定済みのため、削除後も環境変数へフォールバックし`configured`はtrueのままになる) |
+| AC-SYS-006 | アプリ設定 (`/admin/system-settings`) | 全体の挙動を調整できる | `GET/PUT /api/system-settings/app-settings` の設定が保存され画面に反映される。一般ユーザーは変更できない。LLM接続設定(`llm_provider`/`llm_base_url`)の変更はDB側が環境変数より優先される | `features/platform/system-settings.feature` › システム設定を保存すると、再読込後も反映されている / 一般ユーザーはシステム設定を変更できない / LLM接続設定を変更すると、以後のAI生成が新しい向き先へ行く(DB側優先の確認、`@destructive`) | 検証済(非管理者の拒否はAPIレベル403で検証。ページアクセス自体の拒否は`features/auth/permissions.feature`の`ADMIN_ONLY_PREFIXES`検証で既にカバーされている。LLM接続設定の検証は、システム全体既定を使う`/api/ai/tags`をDB設定変更の前後で呼び、到達不能なURLへ変更した直後は失敗し元に戻すと再び成功することで確認する。システム全体のLLM既定を書き換えるため`@destructive`) |
 | AC-SYS-007 | バックアップのダウンロード | 環境を失っても復旧できる | `GET /api/backup/download` がリストア可能なアーカイブを返す | — | 未着手(`@slow`) |
 | AC-SYS-008 | バックアップからのリストア | 実際に復旧できる | `POST /api/backup/restore` 後、バックアップ時点のデータが復元される | — | 未着手(`@slow` `@destructive`) |
 | AC-SYS-009 | VSCode拡張の配布 | 拡張をサーバーから入手できる | `GET /api/system/vscode-extension` が `.vsix` を返す | — | 未着手 |
