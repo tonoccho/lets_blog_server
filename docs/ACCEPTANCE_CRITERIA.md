@@ -101,7 +101,7 @@ API: identity `UserController`, `RoleController`, `ProjectUserController` / cont
 | AC-USR-005 | 無効化 / 再有効化 | 退職者を消さずに止められる | `deactivate` でログイン・API利用が拒否され、`reactivate` で戻る | `features/identity/user-deactivation.feature` › 管理者がアカウントを無効化でき、無効化されたアカウントではログインできない / 無効化したアカウントを再有効化でき、再びログインできる | 検証済 |
 | AC-USR-006 | ロール付与 / 剥奪 | 権限を後から変えられる | `POST/DELETE /api/users/{userId}/roles/{roleName}` の結果が `/me/permissions` に反映される | `features/identity/roles-and-permissions.feature` › ロールを付与/剥奪すると対象ユーザーのGET /api/identity/me/permissionsの内容が変わる / 権限(users.roleの付与/剥奪)の変化がUIのメニュー出し分けに反映される | 検証済 |
 | AC-USR-007 | ロール一覧 (`/admin/roles`) | どんな権限セットがあるか分かる | `GET /api/roles` の内容が画面に表示される | `features/identity/roles-and-permissions.feature` › /admin/rolesに表示されるロールごとの権限一覧はGET /api/rolesの内容と一致する | 検証済 |
-| AC-USR-008 | プロジェクトメンバー管理 | プロジェクト単位でアクセスを絞れる | `/api/projects/{id}/users` の追加・変更・削除が、そのユーザーの見えるプロジェクトに反映される | — | 未着手 |
+| AC-USR-008 | プロジェクトメンバー管理 | プロジェクト単位でアクセスを絞れる | `/api/projects/{id}/users` の追加・変更・削除が、そのユーザーの見えるプロジェクトに反映される | `features/identity/project-members.feature` › 管理者がプロジェクトにメンバーを追加でき、そのメンバーがプロジェクトを閲覧できる / プロジェクトメンバーの役割を変更できる / メンバーから外された利用者は、そのプロジェクトへアクセスできない | 検証済 |
 | AC-USR-009 | 自分の参加プロジェクト一覧 | 自分に関係するプロジェクトだけ見える | `GET /api/project-users` が自分の所属だけを返す | — | 未着手 |
 | AC-USR-010 | GitHubトークンの登録 | 記事プランのIssue連携が使える | `PUT /api/users/{id}/github-token` 後、Issue連携が成功する | — | 未着手 |
 | AC-USR-011 | メタデータ(投稿ステータス/ロール)の取得 | 画面の選択肢がサーバー定義と一致する | `GET /api/metadata/post-statuses` と `/roles` が画面の選択肢と一致する | — | 未着手 |
