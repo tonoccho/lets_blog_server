@@ -109,6 +109,101 @@ one**: an Issue with no `status::` label appears in no board column and is invis
 `work-next` and to triage, so nothing ever complains about it. Two means the Issue is in no
 defined stage at all.
 
+### Legal Transitions
+
+This is the single definition of which `status::` → `status::` transitions are legitimate.
+`guard.py` → `check_status_label_integrity` encodes this table as data (a set of `(from, to)`
+tuples with a comment pointing back here) — it does not restate the rationale below. If the
+table here changes, update `guard.py` to match; do not let the two drift.
+
+#1023's uniqueness check (above) does not catch a transition that skips stages — the Issue
+still carries exactly one `status::` label before and after, so nothing about "exactly one"
+is violated by `status::Ready → status::Done`. That is a different failure (#1031): **no stage
+was actually passed through**, even though the label looks fine at every moment.
+
+| Kind | Transition | Driven by |
+| --- | --- | --- |
+| Forward | `Inbox → Backlog` | `triage-backlog` |
+| Forward | `Backlog → Ready` | `ready-issue` |
+| Forward | `Ready → In Progress` | `work-next` Step 6 |
+| Forward | `In Progress → Review` | `work-next` Step 7 |
+| Forward | `Review → QA` | `review-issue` APPROVED |
+| Forward | `QA → Done` | `complete-issue`, after confirming the merge |
+| Rollback | `Review → In Progress` | `review-issue` CHANGES REQUIRED |
+| Rollback | `QA → In Progress` | `qa-issue` FAIL |
+| Rollback | `Ready → Backlog` | `work-next` Step 4 |
+| Rollback | `Review → Backlog` | `review-issue` REQUIREMENT CLARIFICATION |
+| Rollback | `In Progress → Ready` | re-assessment after two rollbacks in one cycle (see **Implementation runs on Sonnet**) |
+
+This table was checked against every skill that changes a `status::` label
+(`triage-backlog`, `ready-issue`, `work-next`, `review-issue`, `qa-issue`, `complete-issue`) as
+of #1031, and every transition those skills perform is listed above. **Default is reject, not
+warn**: an unlisted transition is refused outright by `guard.py`, because a warning is easy to
+ignore under the unattended loop that this rule exists to protect (see **Autonomous Task
+Execution**). If a future skill change needs a transition not in this table, add it here and to
+`guard.py`'s `LEGAL_STATUS_TRANSITIONS` in the same change — do not work around the guard.
+
+Only the (from, to) pair is checked, from the `remove_labels=` / `add_labels=` values of a
+single paired call — the same command text `check_status_label_integrity` already parses for
+the uniqueness check. This stays command-text-only, exactly like the uniqueness check: no
+network call, no query of the Issue's current labels.
+
+**Historical transitions are not validated.** This only gates new label changes going forward;
+it says nothing about how an Issue reached its current label.
+
+### Merge precondition (#1031)
+
+`complete-issue` reads the Issue's `status::` label before merging (Step 2 of its skill), but
+that is a documented procedure, not a mechanical guarantee — #959 is exactly the case where an
+Issue was merged while still `status::In Progress`, despite the skill instructions.
+
+Three options were considered (see #1031 for the full text):
+
+- **A** — have `guard.py` query the GitLab API before allowing `glab mr merge`, to confirm the
+  Issue is in `status::QA`. Rejected: it would make the hook depend on the network and a token,
+  which #1023 deliberately avoided for `check_status_label_integrity`, and the merge command
+  alone does not carry the Issue number as a syntactic guarantee.
+- **B** — rely solely on `complete-issue`'s Step 2 documentation. Rejected as the *only*
+  mechanism: it is exactly what #959 shows is not enough on its own.
+- **C** (chosen) — extend `scripts/check-issue-labels.sh` to detect the inconsistency after the
+  fact.
+
+**First attempt, and why it was wrong.** The first cut of C flagged every `state: closed` Issue
+that did not carry `status::Done`, on the theory that no MR lookup was needed: every Merge
+Request `merge-request` opens has a description containing `Closes #<issue-number>`
+(`.claude/skills/merge-request/SKILL.md`), and GitLab acts on that itself — merging such an MR
+auto-closes the linked Issue independently of its labels. That theory is correct for Issues
+merge-request actually closed, but the check as written could not tell those apart from
+everything else that is `state: closed`: an independent review ran it against this project and
+found **47 false positives** — almost all historical Issues that predate the `status::`
+labelling convention (#1023), or Issues closed manually for reasons unrelated to merging
+(duplicate, wontfix). It also queried only `per_page=100` with no pagination on either the
+open- or closed-Issue list, so Issues beyond page 1 (this project has 490 closed Issues) were
+silently never inspected at all. Flagging every historically-closed Issue also directly violated
+this Issue's own Out of Scope #4 (existing Issues' transition history is not judged).
+
+**What replaced it.** `check-issue-labels.sh` now narrows the check two ways before flagging
+anything, and paginates both list queries to completion (loop until an empty page, not a single
+`per_page=100` request):
+
+1. **Cutoff** — only closed Issues whose `closed_at` is on or after `2026-09-03T02:44:25Z` (the
+   merge time of #1023, `!1025`) are examined. Before that, `status::` labelling was not yet the
+   established convention, so a missing `status::Done` says nothing about a skipped stage — it is
+   exactly the historical-transition judgment Out of Scope #4 forbids.
+2. **MR cross-check** — for a candidate that survives the cutoff, `check-issue-labels.sh` calls
+   `issues/<iid>/closed_by` and only flags it if a **merged** Merge Request is in the result. An
+   Issue closed manually (duplicate, wontfix, etc.) is not the #959 pattern and is left alone.
+
+Run live against this project after the fix: the violation count dropped from 47 to **1** — #1110
+(closed by the merged `!1056`, still carrying `status::Inbox`), a genuine, currently-unresolved
+instance of the #959 pattern that the fix correctly surfaces rather than hides.
+
+This keeps `guard.py` network-free (Option A's cost) while going beyond a documentation-only
+promise (Option B's gap) — the same division of labour the uniqueness check already uses
+between prevention (`guard.py`) and after-the-fact detection (`check-issue-labels.sh`). The
+cross-check does cost `check-issue-labels.sh` one API call per surviving candidate, but that
+script was never claimed to be network-free — only `guard.py` was.
+
 ---
 
 # Agent Responsibilities

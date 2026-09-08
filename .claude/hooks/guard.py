@@ -535,6 +535,39 @@ def _has_status(value):
     return any(part.strip().startswith("status::") for part in value.split(","))
 
 
+def _status_name(value):
+    """`value`(`add_labels=`/`remove_labels=` の右辺)から `status::` の中身を返す。
+
+    複数のステータスラベルが混じっていた場合は最初の1つだけを見る。それ以外は
+    #1023 の一意性チェック(この関数の呼び出し元より前)がすでに拒否している。
+    """
+    for part in value.split(","):
+        part = part.strip()
+        if part.startswith("status::"):
+            return part[len("status::"):]
+    return None
+
+
+# CLAUDE.md → How to change status → Legal Transitions が単一の定義であり、ここは
+# それをデータとして符号化しているだけ(#1031)。表そのものの根拠・網羅性の検証は
+# CLAUDE.md 側に書く。ここに理由を再掲しない。
+LEGAL_STATUS_TRANSITIONS = {
+    # 前進
+    ("Inbox", "Backlog"),
+    ("Backlog", "Ready"),
+    ("Ready", "In Progress"),
+    ("In Progress", "Review"),
+    ("Review", "QA"),
+    ("QA", "Done"),
+    # 差し戻し
+    ("Review", "In Progress"),
+    ("QA", "In Progress"),
+    ("Ready", "Backlog"),
+    ("Review", "Backlog"),
+    ("In Progress", "Ready"),
+}
+
+
 def check_status_label_integrity(command):
     """CLAUDE.md → How to change status: ステータスは常にちょうど1つ(#1023)。
 
@@ -584,6 +617,20 @@ def check_status_label_integrity(command):
                 "ボードのどの列にも現れず、`work-next` からも triage からも見えなくなります"
                 "(CLAUDE.md → How to change status)。"
                 "同じ呼び出しに `add_labels=status::<次の値>` を含めてください。"
+            )
+
+        # ここまでで「片側だけの付け外し」は拒否済みなので、残るのは
+        # 「どちらも status:: を含まない(このステータス変更とは無関係)」か
+        # 「両方が status:: を含む(実際の遷移)」のどちらか。後者だけを遷移表で検証する。
+        old_status = _status_name(removed)
+        new_status = _status_name(added)
+        if old_status and new_status and (old_status, new_status) not in LEGAL_STATUS_TRANSITIONS:
+            emit_deny(
+                "`status::%s → status::%s` は正当な遷移として定義されていません"
+                "(CLAUDE.md → How to change status → Legal Transitions)。"
+                "段を飛ばした遷移か、定義されていない差し戻しです。"
+                "定義済みの遷移の一覧は CLAUDE.md を参照してください。"
+                % (old_status, new_status)
             )
 
 

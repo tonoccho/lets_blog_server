@@ -497,11 +497,22 @@ class StatusLabelIntegrity(unittest.TestCase):
     PUT = "glab api projects/:id/issues/42 --method PUT "
 
     def test_paired_transition_is_allowed(self):
+        """`In Progress` のような複数語のステータス名は、CLAUDE.md の例と同じく引用する。
+
+        #1031 で明らかになった不備: 引用符無しの `add_labels=status::In Progress` は
+        シェルの単語分割で `add_labels=status::In` と `Progress` という2トークンに
+        割れてしまい、この呼び出しは実際には `status::In`(実在しないステータス名)
+        への遷移しかテストしていなかった。#1023 の一意性チェックだけの頃は
+        ステータス名の中身を見ていなかったので気づかれなかったが、#1031 で
+        (from, to) の組を実際に検証するようになり、この不備が失敗として表面化した。
+        テスト対象の振る舞いではなくテストコマンド自体の不備なので、引用を修正する。
+        """
         self.assertIsNone(
             run_hook(
                 "bash",
                 bash_payload(
-                    self.PUT + "-f remove_labels=status::Ready -f add_labels=status::In Progress"
+                    self.PUT
+                    + '-f "remove_labels=status::Ready" -f "add_labels=status::In Progress"'
                 ),
             )
         )
@@ -553,4 +564,72 @@ class StatusLabelIntegrity(unittest.TestCase):
         self.assertIsNone(
             run_hook("bash", bash_payload("glab api projects/:id/issues/42"))
         )
+
+
+class StatusTransitionValidity(unittest.TestCase):
+    """CLAUDE.md → How to change status → Legal Transitions(#1031)。
+
+    #1023 の `check_status_label_integrity` はステータスが常にちょうど1つであることしか
+    見ていない。`status::Ready → status::Done` のように段を飛ばした遷移も「常に1つ」を
+    満たすので、#1023 の検査は何も言わない。ここではその (from, to) の組が、
+    CLAUDE.md が定義する正当な遷移の表に載っているかどうかを追加で検証する。
+
+    表そのものは CLAUDE.md 側の単一定義であり、ここには再掲しない。
+    """
+
+    PUT = "glab api projects/:id/issues/42 --method PUT "
+
+    @staticmethod
+    def transition(frm, to):
+        return (
+            StatusTransitionValidity.PUT
+            + '-f "remove_labels=status::%s" -f "add_labels=status::%s"' % (frm, to)
+        )
+
+    # CLAUDE.md → How to change status → Legal Transitions と一致させること。
+    FORWARD_EDGES = [
+        ("Inbox", "Backlog"),
+        ("Backlog", "Ready"),
+        ("Ready", "In Progress"),
+        ("In Progress", "Review"),
+        ("Review", "QA"),
+        ("QA", "Done"),
+    ]
+    ROLLBACK_EDGES = [
+        ("Review", "In Progress"),
+        ("QA", "In Progress"),
+        ("Ready", "Backlog"),
+        ("Review", "Backlog"),
+        ("In Progress", "Ready"),
+    ]
+
+    def test_ready_to_done_direct_transition_is_denied(self):
+        reason = run_hook("bash", bash_payload(self.transition("Ready", "Done")))
+        self.assertIsNotNone(reason, "Ready→Done の一足飛びが拒否されていない")
+
+    def test_inbox_to_in_progress_direct_transition_is_denied(self):
+        reason = run_hook("bash", bash_payload(self.transition("Inbox", "In Progress")))
+        self.assertIsNotNone(reason, "Inbox→In Progress の一足飛びが拒否されていない")
+
+    def test_every_forward_edge_is_allowed(self):
+        for frm, to in self.FORWARD_EDGES:
+            with self.subTest(frm=frm, to=to):
+                self.assertIsNone(
+                    run_hook("bash", bash_payload(self.transition(frm, to))),
+                    "正当な前進の遷移 %s→%s が拒否された" % (frm, to),
+                )
+
+    def test_every_rollback_edge_is_allowed(self):
+        for frm, to in self.ROLLBACK_EDGES:
+            with self.subTest(frm=frm, to=to):
+                self.assertIsNone(
+                    run_hook("bash", bash_payload(self.transition(frm, to))),
+                    "正当な差し戻しの遷移 %s→%s が拒否された" % (frm, to),
+                )
+
+    def test_wrapped_illegal_transition_is_still_denied(self):
+        """#1029 の教訓。前置詞を付けても違法な遷移が素通りしないこと。"""
+        command = "timeout 60 " + self.transition("Ready", "Done")
+        reason = run_hook("bash", bash_payload(command))
+        self.assertIsNotNone(reason, "前置詞付きの Ready→Done が素通りした")
 
