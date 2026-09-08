@@ -142,4 +142,61 @@ describe('SiteListTable', () => {
     const editLinks = screen.getAllByText('管理')
     expect(editLinks.length).toBeGreaterThan(0)
   })
+
+  it('filters unbound projects only(issue #944: aria-label付きselectで絞り込む)', () => {
+    render(
+      <SiteListTable sites={mockSites} projects={mockProjects} isAdmin={false} timezone="Asia/Tokyo" />
+    )
+    fireEvent.change(screen.getByLabelText('プロジェクト紐付け状況で絞り込む'), {
+      target: { value: 'UNBOUND' },
+    })
+    expect(screen.queryByText('Test Site 1')).not.toBeInTheDocument()
+    expect(screen.getByText('Test Site 2')).toBeInTheDocument()
+  })
+
+  it('CMS種別で絞り込める(issue #944: aria-label付きselect)', () => {
+    render(
+      <SiteListTable sites={mockSites} projects={mockProjects} isAdmin={false} timezone="Asia/Tokyo" />
+    )
+    fireEvent.change(screen.getByLabelText('CMS種別で絞り込む'), { target: { value: 'WORDPRESS' } })
+    expect(screen.getByText('Test Site 1')).toBeInTheDocument()
+    expect(screen.getByText('Test Site 2')).toBeInTheDocument()
+  })
+
+  it('絞り込んだ結果が0件のとき「全n件」とだけ表示する', () => {
+    render(
+      <SiteListTable sites={mockSites} projects={mockProjects} isAdmin={false} timezone="Asia/Tokyo" />
+    )
+    fireEvent.change(screen.getByPlaceholderText(/サイトキー・表示名・URLで検索/), {
+      target: { value: '該当なし' },
+    })
+    expect(screen.getByText('全2件')).toBeInTheDocument()
+  })
+
+  it('表示名の列見出しをクリックすると並び替え、再クリックで昇順/降順が切り替わる', () => {
+    render(
+      <SiteListTable sites={mockSites} projects={mockProjects} isAdmin={false} timezone="Asia/Tokyo" />
+    )
+    const nameHeader = screen.getByText('表示名').closest('th') as HTMLElement
+    fireEvent.click(nameHeader)
+    fireEvent.click(nameHeader)
+
+    const createdHeader = screen.getByText('登録日').closest('th') as HTMLElement
+    fireEvent.click(createdHeader)
+
+    expect(screen.getByText('Test Site 1')).toBeInTheDocument()
+  })
+
+  it('テスト環境・本番環境に紐付いたサイトのプロジェクト表示も出る', () => {
+    const projects: Project[] = [
+      {
+        ...mockProjects[0],
+        localSite: null,
+        testSite: mockSites[0],
+        productionSite: mockSites[1],
+      },
+    ]
+    render(<SiteListTable sites={mockSites} projects={projects} isAdmin={false} timezone="Asia/Tokyo" />)
+    expect(screen.getAllByText('Project 1').length).toBe(2)
+  })
 })

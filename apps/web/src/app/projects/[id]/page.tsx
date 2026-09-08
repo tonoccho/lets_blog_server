@@ -108,7 +108,7 @@ export default async function ProjectDetailPage({
           <ProjectNameForm projectId={project.id} name={project.name} />
 
           <div>
-            <h3 className="text-sm font-semibold mb-3">環境設定</h3>
+            <h2 className="text-sm font-semibold mb-3">環境設定</h2>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <EnvironmentSlot projectId={project.id} environment="local" site={project.localSite} candidateSites={sites} />
               <EnvironmentSlot projectId={project.id} environment="test" site={project.testSite} candidateSites={sites} />

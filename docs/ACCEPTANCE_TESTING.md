@@ -270,12 +270,12 @@ Then('Keycloakのホスト型ログイン画面が表示される', async ({ pag
 | spec | 移行先 Issue | 状態 |
 | --- | --- | --- |
 | `auth-flow.spec.ts` | AT-3 (#929) | **移行完了。spec は削除済み**(`features/auth/` の6ファイル) |
-| `accessibility.spec.ts` | AT-18 (#944) | 未 |
+| `accessibility.spec.ts` | AT-18 (#944) | **移行完了。spec は削除済み**(`features/ui-quality/accessibility.feature`。旧`Identify accessibility violations for review`は合否を決めない調査用テストだったため移行対象から除外) |
 | `main-scenario.spec.ts` | AT-6 (#932) | 未 |
 | `site-registration.spec.ts` | AT-5 (#931) | 未 |
 | `post-creation.spec.ts` | AT-6 (#932) | 未 |
 | `image-upload.spec.ts` | AT-10 (#936) | **移行完了。spec は削除済み**(`features/media/image-gallery.feature`) |
-| `custom-tag-generation.spec.ts` | AT-12 (#938) | **移行完了**(`features/custom-tag/generation.feature`・`templates.feature`)。レスポンシブテスト1件だけを残してある — ブラウザ/ビューポート差の検証で、移行先は AT-18 (#944) が決める |
+| `custom-tag-generation.spec.ts` | AT-12 (#938) → AT-18 (#944) | **移行完了。spec は削除済み**。レスポンシブテスト1件(モバイル幅でのカスタムタグ生成フォーム操作)は AT-12 (#938) が移行先の判断を AT-18 (#944) へ委ねていた。AT-18 は横断的なレスポンシブ検証(`features/ui-quality/responsive.feature` › モバイル幅で主要な操作(ナビゲーション・フォーム送信)ができる、プロジェクト作成フォームで検証)を既に持っており、LLMバックエンド固有の生成フローの再検証はAT-18のスコープ外(個別機能の振る舞い)と判断し、個別移行はせず削除した |
 | `service-degradation.spec.ts` | AT-17 (#943) | **移行完了。spec は削除済み**(`features/cross-cutting/service-degradation.feature`) |
 | `security.spec.ts` | AT-17 (#943) | 未。ただし**カスタムタグ領域の5件は AT-12 (#938) が移行済み**(`features/custom-tag/generation.feature`・`templates.feature`)。残る CSRF・SQLインジェクション・入力サニタイズは AC-XC-008〜010 で #943 の担当 |
 | `performance.spec.ts` | AT-12 (#938) | **移行完了。spec は削除済み**(`features/custom-tag/performance.feature`)。#915 は「唯一の性能テストとして spec のまま維持する」と判断していたが、#938 の受け入れ基準が2つの閾値を `.feature` として要求したため、そちらが新しい判断になる。「Ollamaレスポンス時間が10秒以内であること」だけは移行先を持たせずに削除した(理由は同 feature の冒頭) |

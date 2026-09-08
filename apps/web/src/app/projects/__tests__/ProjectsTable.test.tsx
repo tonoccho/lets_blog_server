@@ -1,6 +1,22 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { ProjectsTable } from "../ProjectsTable";
-import type { Project } from "@/lib/apiClient";
+import type { Project, Site } from "@/lib/apiClient";
+
+function site(overrides: Partial<Site> = {}): Site {
+  return {
+    id: 1,
+    name: "サイト",
+    siteKey: "site-key",
+    cmsType: "WORDPRESS",
+    baseUrl: "https://example.com",
+    createdAt: "",
+    updatedAt: "",
+    connectionCheckStatus: null,
+    managedWordpress: true,
+    sshConfigured: false,
+    ...overrides,
+  } as Site;
+}
 
 function project(overrides: Partial<Project> = {}): Project {
   return {
@@ -32,5 +48,47 @@ describe("ProjectsTable", () => {
     expect(screen.getByRole("link", { name: "計画" })).toHaveAttribute("href", "/projects/1/plan");
     expect(screen.getByRole("link", { name: "タグデザイン" })).toHaveAttribute("href", "/projects/1/tag-design");
     expect(screen.getByRole("link", { name: "詳細" })).toHaveAttribute("href", "/projects/1");
+  });
+
+  it("環境が紐付いていれば、それぞれの環境バッジに色が付く(issue #944: 未紐付け側の配色調整)", () => {
+    render(
+      <ProjectsTable
+        projects={[
+          project({
+            localSite: site({ siteKey: "local" }),
+            testSite: site({ siteKey: "test" }),
+            productionSite: site({ siteKey: "prod" }),
+          }),
+        ]}
+        timezone={null}
+      />
+    );
+
+    expect(screen.getByText("local")).toBeInTheDocument();
+    expect(screen.getByText("test")).toBeInTheDocument();
+    expect(screen.getByText("production")).toBeInTheDocument();
+  });
+
+  it("プロジェクトが1件も無ければ空状態のメッセージを表示する", () => {
+    render(<ProjectsTable projects={[]} timezone={null} />);
+    expect(screen.getByText("登録済みプロジェクトはありません")).toBeInTheDocument();
+  });
+
+  it("列見出しクリックで並び替え、もう一度押すと昇順/降順が切り替わる", () => {
+    render(
+      <ProjectsTable
+        projects={[project({ id: 1, name: "B" }), project({ id: 2, name: "A" })]}
+        timezone={null}
+      />
+    );
+
+    const nameHeader = screen.getByText("名前").closest("th") as HTMLElement;
+    fireEvent.click(nameHeader);
+    fireEvent.click(nameHeader);
+
+    const createdAtHeader = screen.getByText("作成日").closest("th") as HTMLElement;
+    fireEvent.click(createdAtHeader);
+
+    expect(screen.getAllByRole("link", { name: /^[AB]$/ }).length).toBe(2);
   });
 });

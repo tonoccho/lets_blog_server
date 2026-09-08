@@ -429,14 +429,28 @@ API: log-writer `AuditLogController`, `OperationLogController`, `FrontendErrorLo
 
 | 機能ID | 機能 | 利用者から見た価値 | 受け入れ基準(要約) | 対応シナリオ | 状態 |
 | --- | --- | --- | --- | --- | --- |
-| AC-UX-001 | アクセシビリティ(アプリ画面) | 支援技術で操作できる | 主要画面で axe の重大な違反が出ない | `e2e/accessibility.spec.ts` › Home page should not have accessibility violations / Identify accessibility violations for review | 既存spec |
-| AC-UX-002 | アクセシビリティ(ログイン画面) | ログインから支援技術で使える | Keycloak ログイン画面で重大な違反が出ない | `e2e/accessibility.spec.ts` › Login page should not have accessibility violations | 既存spec |
-| AC-UX-003 | キーボード操作 | マウス無しで操作できる | ナビゲーションがキーボードで辿れ、フォーカスが視認できる | `e2e/accessibility.spec.ts` › Navigation should be keyboard accessible / Focus indicators should be visible | 既存spec |
-| AC-UX-004 | 見出し階層・代替テキスト・リンク文言 | 読み上げで内容が分かる | 見出し階層が妥当、画像にalt、リンクに説明的な文言がある | `e2e/accessibility.spec.ts` › Page should have valid heading hierarchy / Images should have alt text / Links should have descriptive text | 既存spec |
-| AC-UX-005 | フォームのラベルとARIA | 入力欄の意味が伝わる | フォーム要素にラベル/ARIA属性がある | `e2e/accessibility.spec.ts` › Forms should have proper labels and ARIA attributes | 既存spec |
-| AC-UX-006 | 色コントラスト | 弱視でも読める | 主要テキストのコントラスト比が基準を満たす | `e2e/accessibility.spec.ts` › Color contrast should be sufficient (manual check)(自動判定していない) | 既存spec(部分) |
-| AC-UX-007 | レスポンシブ(モバイル) | スマートフォンでも操作できる | モバイルビューポートで主要画面の操作が成立する | `e2e/custom-tag-generation.spec.ts` › レスポンシブテスト: モバイルビューポートでも生成フォームを操作できる、`e2e/image-upload.spec.ts` › Responsive layout on mobile | 既存spec(部分) |
-| AC-UX-008 | 言語表示(i18n) | 日本語で一貫して読める | 画面の文言が言語設定に従い、未翻訳のキーが露出しない | — | 未着手 |
+issue #944(AT-18)で、旧 `e2e/accessibility.spec.ts`(Playwright直書き、ホーム画面と
+Keycloakログイン画面の2画面のみ)を `e2e/features/ui-quality/` の4ファイル・16シナリオへ
+全面移行し、対象を `docs/ACCEPTANCE_CRITERIA.md` §6 が数える全24ページへ広げた。
+`Identify accessibility violations for review`(違反を記録するだけで合否を決めない調査用
+テスト)は移行対象から外し、合否を決めるものだけを引き継いだ。
+
+| AC-UX-001 | アクセシビリティ(アプリ画面) | 支援技術で操作できる | 全24ページで axe の critical・serious 相当の違反が出ない | `features/ui-quality/accessibility.feature` › 全ページでaxeによる重大な違反が無い | 検証済 |
+| AC-UX-002 | アクセシビリティ(ログイン画面) | ログインから支援技術で使える | Keycloak ログイン画面で critical・serious 相当の違反が出ない | `features/ui-quality/accessibility.feature` › Keycloakのログイン画面も同じ基準を満たす | 検証済 |
+| AC-UX-003 | キーボード操作 | マウス無しで操作できる | ログイン→プロジェクト作成→保存がキーボードのみで完了し、フォーカスが視認できる | `features/ui-quality/accessibility.feature` › 主要な操作がキーボードのみで完了できる / フォーカスインジケータが視認できる | 検証済 |
+| AC-UX-004 | 見出し階層・代替テキスト・リンク文言 | 読み上げで内容が分かる | このアプリ自身がレンダリングする全ページで見出し階層が妥当、画像にalt、リンクに説明的な文言がある | `features/ui-quality/accessibility.feature` › 全ページで見出し階層が妥当である / 画像に代替テキストがある / リンクテキストが内容を説明している | 検証済(`/login` `/setup` はKeycloakのホスト型画面へリダイレクトするため見出し階層の対象外。当該ページ自身のaxe検査はAC-UX-002が行う) |
+| AC-UX-005 | フォームのラベルとARIA | 入力欄の意味が伝わる | フォーム要素にラベル/ARIA属性がある | `features/ui-quality/accessibility.feature` › フォーム要素にラベルとARIA属性が付いている | 検証済 |
+| AC-UX-006 | 色コントラスト | 弱視でも読める | 全24ページで axe の color-contrast(serious)が0件 | `features/ui-quality/accessibility.feature` › 全ページでaxeによる重大な違反が無い(AC-UX-001と同一シナリオ。axeのcolor-contrastルールはseriousとして検出される) | 検証済(発見した違反は本Issueで是正: `EnvironmentSlot` 等のバッジ・`UnifiedLogRow` のKeycloak Subバッジの配色) |
+| AC-UX-007 | レスポンシブ(モバイル・タブレット) | スマートフォン・タブレットでも操作できる | 375px/768pxで全24ページが横スクロールを起こさず、375pxでナビゲーション・フォーム送信が成立する | `features/ui-quality/responsive.feature` › モバイル幅(375px)で全ページが横スクロールを起こさない / モバイル幅で主要な操作(ナビゲーション・フォーム送信)ができる / タブレット幅(768px)で崩れない | 検証済(発見した横スクロールは本Issueで是正: `HeaderNav` のデスクトップナビ切替を`sm:`→`lg:`へ、`ProjectSectionNav`に`overflow-x-auto`を追加、`UnifiedLogRow`に`flex-wrap`を追加) |
+| AC-UX-008 | 言語表示(i18n) | 日本語で一貫して読める | 画面の文言が言語設定に従い、未翻訳のキーが露出しない。翻訳ファイル間でキーの過不足が無い。日時が利用者のタイムゾーンに従う | `features/ui-quality/internationalization.feature` › 対応する全ロケールで、翻訳キーの欠落が無い(issue #718の退行を検出できることを同シナリオ内で証明) / ロケールを切り替えると画面のラベルが切り替わり、再読込後も保持される / 日付・時刻が利用者のタイムゾーン設定に従って表示される / 翻訳ファイル間でキーの過不足が無い | 検証済(メインナビゲーション自体は`t()`を経由しない既知のギャップがあり、別issue #1145で追跡。本シナリオは実際に`t()`を経由する要素の範囲で検証) |
+
+クロスブラウザ(Firefox / WebKit での認証フロー・主要画面のレンダリング)は、新しい機能IDを
+起こさず(§6集計の機械的な取り直しは#1133のスコープ外)、`features/ui-quality/cross-browser.feature`
+› 認証フローと主要画面がレンダリングされる として AC-UX-001 の追加観点に位置付ける。
+`playwright.config.ts` に `at-cross-browser-firefox` / `at-cross-browser-webkit` を追加し、
+`@stage:cross-browser` のシナリオをそれぞれのブラウザで実行する(chromiumでは`at-main`でも
+実行される)。開発ホストにFirefox/WebKitの起動に必要なOS共有ライブラリが無い場合は
+`docs/e2e-testing.md` §3.3の手順(`sudo npx playwright install-deps`)が必要。
 
 ### 2.17 外部依存スタブ — `STUB`
 

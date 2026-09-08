@@ -127,6 +127,7 @@ export function SiteListTable({
         <select
           value={cmsFilter}
           onChange={(e) => setCmsFilter(e.target.value as CmsFilter)}
+          aria-label="CMS種別で絞り込む"
           className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
         >
           <option value="ALL">CMS種別: すべて</option>
@@ -135,6 +136,7 @@ export function SiteListTable({
         <select
           value={projectFilter}
           onChange={(e) => setProjectFilter(e.target.value as ProjectFilter)}
+          aria-label="プロジェクト紐付け状況で絞り込む"
           className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
         >
           <option value="ALL">プロジェクト紐付け: すべて</option>

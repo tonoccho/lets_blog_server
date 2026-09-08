@@ -292,9 +292,9 @@ DBへ接続するテスト・サービス間契約テスト・他サービス呼
 応答時間を扱う。実行と記法は
 [ACCEPTANCE_TESTING.md](ACCEPTANCE_TESTING.md) を参照。
 
-`custom-tag-generation.spec.ts` に残っているのは
-「レスポンシブテスト: モバイルビューポートでも生成フォームを操作できる」1件だけで、
-これはブラウザ/ビューポート差の検証（移行先は AT-18 / #944）。
+`custom-tag-generation.spec.ts` に残っていた「レスポンシブテスト: モバイルビューポートでも
+生成フォームを操作できる」1件は、AT-18 (#944) が横断的なレスポンシブ検証
+（`e2e/features/ui-quality/responsive.feature`）へ引き取り、spec は削除した。
 
 **実行方法**:
 

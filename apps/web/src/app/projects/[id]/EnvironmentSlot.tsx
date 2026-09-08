@@ -51,7 +51,12 @@ export function EnvironmentSlot({
         </div>
       ) : (
         <form action={formAction} className="space-y-2 text-sm">
-          <select name="siteId" required className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm">
+          <select
+            name="siteId"
+            required
+            aria-label={`${ENVIRONMENT_LABEL[environment]}環境に紐付けるサイト`}
+            className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
+          >
             <option value="">サイトを選択…</option>
             {candidateSites.map((candidate) => (
               <option key={candidate.id} value={candidate.id}>

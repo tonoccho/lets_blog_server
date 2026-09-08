@@ -230,7 +230,7 @@ function TagDesignGenerationForm({
 
   return (
     <div className="space-y-2 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-4">
-      <h3 className="text-sm font-medium">AIでデザインを生成</h3>
+      <h2 className="text-sm font-medium">AIでデザインを生成</h2>
       <p className="text-xs text-neutral-600 dark:text-neutral-400">
         AIに自然言語で見た目の要望を送信すると、CSS(必要であればHTMLテンプレートも)が自動生成されます。
         生成結果はすぐには保存されません。内容を確認し、適用したうえで下のフォームから保存してください。
@@ -533,14 +533,14 @@ export function TagDesignSettingsPanel({
                   {setting.customCss ? (
                     <code className="whitespace-pre-wrap break-all">{setting.customCss}</code>
                   ) : (
-                    <span className="text-neutral-400 dark:text-neutral-600">標準</span>
+                    <span className="text-neutral-500 dark:text-neutral-400">標準</span>
                   )}
                 </td>
                 <td className="px-4 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-400">
                   {setting.htmlTemplate ? (
                     <code className="whitespace-pre-wrap break-all">{setting.htmlTemplate}</code>
                   ) : (
-                    <span className="text-neutral-400 dark:text-neutral-600">標準</span>
+                    <span className="text-neutral-500 dark:text-neutral-400">標準</span>
                   )}
                 </td>
                 <td className="px-4 py-2 text-right whitespace-nowrap">

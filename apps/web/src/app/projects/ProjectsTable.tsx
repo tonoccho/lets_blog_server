@@ -87,21 +87,21 @@ export function ProjectsTable({ projects: initialProjects, timezone }: { project
                 <div className="flex gap-1">
                   <span
                     className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
-                      project.localSite ? "bg-blue-100 text-blue-700" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500"
+                      project.localSite ? "bg-blue-100 text-blue-700" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400"
                     }`}
                   >
                     local
                   </span>
                   <span
                     className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
-                      project.testSite ? "bg-amber-100 text-amber-700" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500"
+                      project.testSite ? "bg-amber-100 text-amber-700" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400"
                     }`}
                   >
                     test
                   </span>
                   <span
                     className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
-                      project.productionSite ? "bg-green-100 text-green-700" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500"
+                      project.productionSite ? "bg-green-100 text-green-700" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400"
                     }`}
                   >
                     production

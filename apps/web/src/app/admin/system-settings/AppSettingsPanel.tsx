@@ -74,7 +74,7 @@ function SettingField({ setting }: { setting: AppSetting }) {
         className={
           setting.configured
             ? "text-xs text-neutral-500 dark:text-neutral-400"
-            : "text-xs text-neutral-400 dark:text-neutral-600"
+            : "text-xs text-neutral-500 dark:text-neutral-400"
         }
       >
         {sourceLabel(setting.source)}

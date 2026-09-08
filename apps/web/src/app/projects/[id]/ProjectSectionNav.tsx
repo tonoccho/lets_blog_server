@@ -13,7 +13,7 @@ const SECTIONS: { id: ProjectSection; label: string; hrefSuffix: string }[] = [
 /** プロジェクトの詳細・計画・タグページ間を行き来するための共通ナビゲーション(issue #182)。 */
 export function ProjectSectionNav({ projectId, active }: { projectId: number; active: ProjectSection }) {
   return (
-    <nav aria-label="プロジェクトセクション" className="flex gap-2 border-b border-neutral-200 dark:border-neutral-800">
+    <nav aria-label="プロジェクトセクション" className="flex gap-2 overflow-x-auto border-b border-neutral-200 dark:border-neutral-800">
       {SECTIONS.map((section) => {
         const isActive = section.id === active;
         return (

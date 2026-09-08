@@ -100,6 +100,7 @@ function UserRoleRow({ user, roles }: { user: UserRow; roles: RoleOption[] }) {
           <select
             value={selected}
             onChange={(e) => setSelected(e.target.value)}
+            aria-label={`${user.email}に追加するロール`}
             className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-sm"
           >
             {roles.map((role) => (

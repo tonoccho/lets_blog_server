@@ -14,6 +14,10 @@ import { defineBddProject } from 'playwright-bdd';
  * とし、実行時間を抑えつつクロスブラウザ検証の意図は維持する。
  */
 // auth-flow.spec.ts は AT-3(#929)で features/auth/ へ全移行し削除した。
+// accessibility.spec.ts は AT-18(#944)で features/ui-quality/ へ全移行し削除したため、
+// この配列は現在どのファイルにも一致しない(firefox/webkit/Mobile系プロジェクトは0件で
+// 通過する)。クロスブラウザの受け入れシナリオは
+// `at-cross-browser-firefox` / `at-cross-browser-webkit`(下記)が担う。
 const CROSS_BROWSER_SPECS = [/accessibility\.spec\.ts/];
 
 /**
@@ -93,6 +97,31 @@ const atDestructive = defineBddProject({
   tags: '@destructive and not @stage:setup and not @stage:provision',
 });
 
+/**
+ * クロスブラウザ検証専用の段階(issue #944 / AT-18)。
+ *
+ * `CROSS_BROWSER_SPECS`(下記)は Playwright直書きの `.spec.ts` を対象にした古い仕組みで、
+ * `.feature` から生成される spec は `testDir('./e2e')` の意図的に外(`.features-gen/`)に
+ * 出るため、`firefox` / `webkit` プロジェクト(下記、`testDir` 未指定=`./e2e`)からは
+ * 元々見えない。`accessibility.spec.ts` を `.feature` へ全面移行するにあたり、
+ * `@stage:cross-browser` タグを付けたシナリオだけを対象にする専用の bdd プロジェクトを
+ * ブラウザごとに用意する。`at-provision` に依存させ、合成アカウントが発行済みの状態で走らせる
+ * (chromium 版はタグ除外していないので `at-main` でも実行される。ここは追加のブラウザ差分)。
+ */
+const atCrossBrowserTags = '@stage:cross-browser';
+const atCrossBrowserFirefox = defineBddProject({
+  ...BDD_COMMON,
+  name: 'at-cross-browser-firefox',
+  outputDir: '.features-gen/at-cross-browser-firefox',
+  tags: atCrossBrowserTags,
+});
+const atCrossBrowserWebkit = defineBddProject({
+  ...BDD_COMMON,
+  name: 'at-cross-browser-webkit',
+  outputDir: '.features-gen/at-cross-browser-webkit',
+  tags: atCrossBrowserTags,
+});
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
@@ -163,6 +192,16 @@ export default defineConfig({
       ...atDestructive,
       use: { ...devices['Desktop Chrome'] },
       dependencies: ['at-main'],
+    },
+    {
+      ...atCrossBrowserFirefox,
+      use: { ...devices['Desktop Firefox'] },
+      dependencies: ['at-provision'],
+    },
+    {
+      ...atCrossBrowserWebkit,
+      use: { ...devices['Desktop Safari'] },
+      dependencies: ['at-provision'],
     },
     {
       name: 'chromium',

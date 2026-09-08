@@ -39,8 +39,8 @@ export function UnifiedLogRow({ entry, timezone }: { entry: UnifiedLogEntry; tim
   }
 
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-neutral-100 dark:border-neutral-800 px-4 py-3 last:border-0">
-      <div className="flex flex-1 items-center gap-3 text-sm">
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-100 dark:border-neutral-800 px-4 py-3 last:border-0">
+      <div className="flex flex-1 flex-wrap items-center gap-3 text-sm">
         <span className="w-36 shrink-0 text-neutral-600 dark:text-neutral-400">
           {formatOperationLogDateTime(entry.createdAt, timezone)}
         </span>
@@ -53,7 +53,7 @@ export function UnifiedLogRow({ entry, timezone }: { entry: UnifiedLogEntry; tim
         )}
         {entry.actorKeycloakSub && (
           <span
-            className="shrink-0 truncate rounded bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 font-mono text-xs text-neutral-500 dark:text-neutral-400"
+            className="shrink-0 truncate rounded bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 font-mono text-xs text-neutral-600 dark:text-neutral-400"
             title={`Keycloak Sub: ${entry.actorKeycloakSub}`}
           >
             Keycloak: {entry.actorKeycloakSub}

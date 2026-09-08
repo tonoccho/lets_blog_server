@@ -48,8 +48,6 @@ Keycloak クライアント `letsblog-web` の redirect_uri が
 | `main-scenario.spec.ts` | **主要シナリオ**: サイト登録 → 記事公開 → 履歴確認 | admin |
 | `site-registration.spec.ts` | サイト管理・疎通確認(ManagedWordPress フィクスチャ) | admin |
 | `post-creation.spec.ts` | プロジェクト作成ワークフロー | admin |
-| `accessibility.spec.ts` | アクセシビリティ(アプリ画面 + Keycloak ログイン画面) | user |
-| `custom-tag-generation.spec.ts` | カスタムタグ生成フォームのレスポンシブ表示(残りは #938 で `features/custom-tag/` へ移行済み) | admin |
 | `security.spec.ts` | CSRF・SQL インジェクション対策・入力サニタイズ(XSS検出とテンプレート削除の認可は #938 で `features/custom-tag/` へ移行済み) | admin |
 
 ---
@@ -411,7 +409,11 @@ healthy になるまで待つ。`E2E_ALLOW_SERVICE_DISRUPTION` によるオプ�
 
 - `chromium`: 全 spec を実行する(網羅ブラウザ)
 - `firefox` / `webkit` / `Mobile Chrome` / `Mobile Safari`:
-  ブラウザ差が意味を持つ `accessibility.spec.ts` のみ
+  ブラウザ差が意味を持つ spec のみ。旧 `accessibility.spec.ts` は AT-18(#944)で
+  `features/ui-quality/` へ全面移行して削除したため、この4プロジェクトの `testMatch`
+  (`CROSS_BROWSER_SPECS`)は現在どのファイルにも一致しない(0件で通過する)。
+  受け入れテストのクロスブラウザ検証は専用の `at-cross-browser-firefox` /
+  `at-cross-browser-webkit` プロジェクト(`@stage:cross-browser`)が担う
 - `fullyParallel: true`。フィクスチャ名はタイムスタンプ+乱数で一意なので、**名前は**並列でも衝突しない
   (ただし後述の通り、名前が衝突しないことと並列実行して安全なことは別問題)
 - ワーカー数は `E2E_WORKERS` で上書き可能(既定は CI で1、ローカルは Playwright の自動判定)
