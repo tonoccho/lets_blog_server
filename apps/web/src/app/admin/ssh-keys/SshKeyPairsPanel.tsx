@@ -48,7 +48,9 @@ export function SshKeyPairsPanel({ keyPairs }: { keyPairs: SavedSshKeyPair[] }) 
     <div className="space-y-8">
       <section className="space-y-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
         <h2 className="font-medium">新しいSSH鍵ペアを生成</h2>
-        <form onSubmit={handleGenerate} className="space-y-3">
+        {/* issue #1051: JS無効時のネイティブGETフォールバックで入力値がURLへ漏れることを防ぐため、
+            method="post"を明示する。送信自体はhandleGenerateがpreventDefaultして処理する。 */}
+        <form onSubmit={handleGenerate} method="post" className="space-y-3">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-neutral-600 dark:text-neutral-400">名前</span>

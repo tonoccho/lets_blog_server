@@ -375,8 +375,11 @@ function NewItemForm({
   }
 
   return (
+    // issue #1051: JS無効時のネイティブGETフォールバックで入力値がURLへ漏れることを防ぐため、
+    // method="post"を明示する。送信自体はhandleSubmitがpreventDefaultして処理する。
     <form
       onSubmit={handleSubmit}
+      method="post"
       className="flex flex-wrap items-end gap-2 rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 p-3 text-sm"
     >
       <Field label="名前" name="value" required />
@@ -440,7 +443,9 @@ function EditItemForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-wrap items-end gap-2 text-sm">
+    // issue #1051: JS無効時のネイティブGETフォールバックで入力値がURLへ漏れることを防ぐため、
+    // method="post"を明示する。送信自体はhandleSubmitがpreventDefaultして処理する。
+    <form onSubmit={handleSubmit} method="post" className="flex flex-wrap items-end gap-2 text-sm">
       <Field label="名前" name="value" defaultValue={row.name} required />
       <Field label="スラッグ" name="categorySlug" defaultValue={masterValue.slug ?? ""} required />
       {kind === "category" && (

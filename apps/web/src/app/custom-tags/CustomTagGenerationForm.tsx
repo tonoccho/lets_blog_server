@@ -107,7 +107,9 @@ export function CustomTagGenerationForm({
           <p className="text-sm text-neutral-600 dark:text-neutral-400">
             AIに自然言語でUIコンポーネントのリクエストを送信すると、HTMLテンプレートとCSSが自動生成されます。
           </p>
-          <form ref={formRef} onSubmit={handleSubmit} className="space-y-3">
+          {/* issue #1051: JS無効時のネイティブGETフォールバックで入力値がURLへ漏れることを防ぐため、
+              method="post"を明示する。送信自体はhandleSubmitがpreventDefaultして処理する。 */}
+          <form ref={formRef} onSubmit={handleSubmit} method="post" className="space-y-3">
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-neutral-600 dark:text-neutral-400">プロンプト（UIコンポーネントの説明）</span>
               <textarea

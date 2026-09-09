@@ -47,7 +47,9 @@ export function LlmModelPanel({
         <p className={`text-sm ${message.type === "error" ? "text-red-600" : "text-green-600"}`}>{message.text}</p>
       )}
 
-      <form onSubmit={handleSave} className="flex flex-wrap items-end gap-2">
+      {/* issue #1051: JS無効時のネイティブGETフォールバックで入力値がURLへ漏れることを防ぐため、
+          method="post"を明示する。送信自体はhandleSaveがpreventDefaultして処理する。 */}
+      <form onSubmit={handleSave} method="post" className="flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-neutral-600 dark:text-neutral-400">モデル名(例: gpt-4o-mini)</span>
           <input

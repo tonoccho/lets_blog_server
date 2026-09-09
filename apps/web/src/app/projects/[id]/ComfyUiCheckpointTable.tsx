@@ -128,8 +128,11 @@ export function ComfyUiCheckpointTable({
       )}
 
       {showNewForm && (
+        // issue #1051: JS無効時のネイティブGETフォールバックで入力値がURLへ漏れることを防ぐため、
+        // method="post"を明示する。送信自体はhandleInstallSubmitがpreventDefaultして処理する。
         <form
           onSubmit={handleInstallSubmit}
+          method="post"
           className="flex flex-wrap items-end gap-2 rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 p-3 text-sm"
         >
           <label className="flex flex-col gap-1">

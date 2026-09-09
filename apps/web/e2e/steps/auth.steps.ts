@@ -1,4 +1,4 @@
-import type { APIRequestContext, Page } from '@playwright/test';
+import type { APIRequestContext, BrowserContext, Page } from '@playwright/test';
 import { Given, Step, Then, When } from './fixtures';
 import {
   E2E_ADMIN_EMAIL,
@@ -257,6 +257,52 @@ When('初回セットアップ画面から最初の管理者を作成する', as
   }
   await page.locator('button[type="submit"]').click();
   ctx.setupAdminEmail = SETUP_ADMIN_EMAIL;
+});
+
+/**
+ * issue #1051: `<input minlength="8">`はHTML5の制約検証(JS不要・ブラウザ組み込み)で守られて
+ * いるため、それより短い値では送信自体がブロックされ、サーバーへ到達する前に終わってしまう。
+ * 8文字の空白はminlengthを満たしたまま送信を通過し、サーバー側の`.trim()`で空文字列になって
+ * バリデーションエラーを返す。この経路ならアカウントを作らずに(=「ユーザーが1人も居ない」
+ * 前提を消費せずに)サーバーの応答まで確認できる。
+ */
+const NO_JS_BLANK_PASSWORD = '        ';
+
+When('JavaScriptを無効にして初回セットアップ画面から空白だけのパスワードで送信する', async ({ page, ctx }) => {
+  const browser = page.context().browser();
+  if (!browser) {
+    throw new Error('ブラウザインスタンスを取得できない(JS無効コンテキストを作成できない)');
+  }
+  const noJsContext = await browser.newContext({ ignoreHTTPSErrors: true, javaScriptEnabled: false });
+  const noJsPage = await noJsContext.newPage();
+  await noJsPage.goto('/setup');
+  await noJsPage.locator('input[name="email"]').fill(`nojs-setup-${Date.now()}@letsblog.local`);
+  await noJsPage.locator('input[name="password"]').fill(NO_JS_BLANK_PASSWORD);
+  await noJsPage.locator('button[type="submit"]').click();
+  await noJsPage.waitForLoadState('load');
+  ctx.noJsPage = noJsPage;
+  ctx.noJsContext = noJsContext;
+});
+
+Then('入力エラーが画面に表示される', async ({ ctx }) => {
+  const noJsPage = ctx.noJsPage as Page;
+  await expect(
+    noJsPage.getByText('メールアドレスとパスワードを入力してください。'),
+    'JS無効での送信後にサーバーのバリデーションエラーが表示されない(無反応な画面のままの疑い)'
+  ).toBeVisible({ timeout: 15000 });
+});
+
+Then('送信後のURLにパスワードが含まれない', async ({ ctx }) => {
+  const noJsPage = ctx.noJsPage as Page;
+  try {
+    const url = noJsPage.url();
+    expect(
+      url,
+      `JS無効時の送信後URLにpassword=が含まれている(GETフォールバックでクエリ文字列に漏れた疑い): ${url}`
+    ).not.toContain('password=');
+  } finally {
+    await (ctx.noJsContext as BrowserContext).close();
+  }
 });
 
 Then('管理者アカウントを作成した旨が表示される', async ({ page }) => {
