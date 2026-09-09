@@ -40,6 +40,7 @@ export class FakeElement {
   public scrollTop = 0;
   public scrollHeight = 0;
   public focused = false;
+  public checked = false;
   public readonly style: Record<string, string> = {};
   public readonly attributes: Record<string, string> = {};
   public readonly children: FakeElement[] = [];
@@ -164,10 +165,37 @@ export function loadWebview(name: string): WebviewHarness {
     map.set(type, existing);
   };
 
+  /**
+   * `#scopeId tag[attr=value]:checked` の形だけを解釈する最小 querySelectorAll(issue #1062)。
+   * plan.js / articleCreation.js が使うのはこの1パターン
+   * (`#categoryCheckboxes input[type=checkbox]:checked`)だけなので、汎用CSSエンジンは持ち込まない。
+   */
+  const querySelectorAll = (selector: string): FakeElement[] => {
+    const match = /^#([\w-]+)\s+([\w-]+)(?:\[([\w-]+)=([\w-]+)\])?(:checked)?$/.exec(selector.trim());
+    if (!match) return [];
+    const [, scopeId, tag, attrName, attrValue, checkedPseudo] = match;
+    const scope = elements.get(scopeId);
+    if (!scope) return [];
+    const results: FakeElement[] = [];
+    const visit = (el: FakeElement): void => {
+      for (const child of el.children) {
+        const tagMatches = child.tagName.toLowerCase() === tag.toLowerCase();
+        const attrMatches =
+          !attrName || (attrName === 'type' ? child.type === attrValue : child.getAttribute(attrName) === attrValue);
+        const checkedMatches = !checkedPseudo || child.checked;
+        if (tagMatches && attrMatches && checkedMatches) results.push(child);
+        visit(child);
+      }
+    };
+    visit(scope);
+    return results;
+  };
+
   const fakeDocument = {
     getElementById: (id: string): FakeElement | undefined => elements.get(id),
     createElement: (tagName: string): FakeElement => new FakeElement(tagName),
     addEventListener: (type: string, listener: Listener): void => addListener(documentListeners, type, listener),
+    querySelectorAll,
   };
 
   const fakeWindow = {

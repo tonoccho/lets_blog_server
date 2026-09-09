@@ -275,7 +275,12 @@
 
   function showMetadataForm(suggestion) {
     const titles = suggestion.titles || [];
-    const slugs = suggestion.slugs || [];
+    // スラッグはサーバー/LLMの提案(suggestion.slugs)がそのまま記事ディレクトリ名になる。
+    // articleScaffold.tsのパスへ検証前の応答文字列を混ぜないため
+    // (imageGalleryPanel.tsのサーバー応答をパスに混ぜない方針と同趣旨)、
+    // ここで許可リストの正規表現を通らない提案は候補にも初期値にも出さない。
+    // 通る提案が無ければ空欄のまま利用者に直接入力させる(approveMetadataの検証で最終的に守られる)。
+    const slugs = (suggestion.slugs || []).filter((slug) => /^[a-z0-9][a-z0-9-]*$/.test(slug));
     renderOptionList('titleOptions', 'titleInput', titles);
     renderOptionList('slugOptions', 'slugInput', slugs);
     document.getElementById('titleInput').value = titles[0] || '';
@@ -302,6 +307,12 @@
     const tags = document.getElementById('tagsInput').value.split(',').map((s) => s.trim()).filter(Boolean);
     if (!title || !slug) {
       showMessage('タイトルとスラッグは必須です。', 'error');
+      return;
+    }
+    // ディレクトリ名になるため、パス区切りなどが混入しないことを確認する
+    // (articleCreation.jsのslug検証と同じ規則・同じメッセージ。issue #1062)。
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
+      showMessage('スラッグは半角英数字とハイフンのみで入力してください(先頭は英数字)。', 'error');
       return;
     }
     LetsBlogLoading.begin({

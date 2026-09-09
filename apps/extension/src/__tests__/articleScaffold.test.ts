@@ -105,6 +105,26 @@ describe('createArticleScaffold', () => {
     expect(fs.readFileSync(path.join(articleDir, 'article.md'), 'utf-8')).toBe('古い内容');
   });
 
+  /**
+   * 呼び出し元(articleCreation.js / extension.ts / plan.js)ごとの入口検証は片方が抜け得るため
+   * (issue #1062)、ディレクトリ名を組み立てるここ自身も最終防衛線として検証する。
+   */
+  it.each(['../../../evil', 'a/b', '..', ''])(
+    '不正なスラッグ(%s)は例外を投げ、何も作られない',
+    async (slug) => {
+      await expect(
+        createArticleScaffold({
+          workspaceRoot,
+          slug,
+          frontMatter: { title: '記事タイトル' },
+          content: '本文',
+        })
+      ).rejects.toThrow('スラッグは半角英数字とハイフンのみで入力してください(先頭は英数字)。');
+
+      expect(fs.readdirSync(workspaceRoot)).toEqual([]);
+    }
+  );
+
   it('確認ダイアログを閉じた場合も上書きしない', async () => {
     const articleDir = path.join(workspaceRoot, 'articles', 'dismissed');
     fs.mkdirSync(articleDir, { recursive: true });

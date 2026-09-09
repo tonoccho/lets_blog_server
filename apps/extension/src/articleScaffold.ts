@@ -32,13 +32,28 @@ export interface ArticleScaffoldResult {
 
 const PLACEHOLDER_CONTENT = '記事本文をここに記入してください。';
 
+/** slugはそのままディレクトリ名になるため、パス区切りなどが混入しないことを確認する。 */
+const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+
+/** articleCreation.js / extension.ts の入口検証と同じ文言(issue #1062)。 */
+const INVALID_SLUG_MESSAGE = 'スラッグは半角英数字とハイフンのみで入力してください(先頭は英数字)。';
+
 /**
  * 記事ディレクトリと article.md、画像置き場の assets/ を生成する。
  * 既存ディレクトリがある場合は上書き確認を行い、拒否された場合はundefinedを返す。
+ *
+ * slugの検証は本来 articleCreation.js / extension.ts の入口側でも行われているが、
+ * 呼び出し元(plan.js)がそれを行っていなかった経緯がある(issue #1062)。
+ * ディレクトリ名を組み立てるここ自身が最終防衛線として検証することで、
+ * 将来呼び出し元が増えても入口検証の書き漏れがワークスペース外への書き込みに直結しないようにする。
  */
 export async function createArticleScaffold(
   options: ArticleScaffoldOptions
 ): Promise<ArticleScaffoldResult | undefined> {
+  if (!SLUG_PATTERN.test(options.slug)) {
+    throw new Error(INVALID_SLUG_MESSAGE);
+  }
+
   const articleDir = path.join(options.workspaceRoot, 'articles', options.slug);
 
   if (fs.existsSync(articleDir)) {
