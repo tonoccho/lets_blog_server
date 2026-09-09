@@ -2,6 +2,7 @@ import "server-only";
 import type { Account, NextAuthOptions } from "next-auth";
 import type { JWT } from "next-auth/jwt";
 import { decodeJwt } from "jose";
+import { resolveAccessToken } from "./tokenRefreshPolicy";
 
 const KEYCLOAK_REALM_PATH = "/auth/realms/letsblog";
 const KEYCLOAK_CLIENT_ID = "letsblog-web";
@@ -152,11 +153,10 @@ export const authOptions: NextAuthOptions = {
         return token;
       }
 
-      if (token.accessTokenExpires && Date.now() < token.accessTokenExpires) {
-        return token;
-      }
-
-      return refreshAccessToken(token);
+      // 更新要否の判定(猶予込み)はtokenRefreshPolicy.tsへ切り出してある(issue #1053)。
+      // 「既に失効していなければ更新しない」(猶予ゼロ)だったのが元の不具合であり、
+      // 実際のリフレッシュ実行(refreshAccessToken)だけをここから注入する。
+      return resolveAccessToken(token, Date.now(), refreshAccessToken);
     },
     // accessToken/refreshToken/idTokenはHttpOnly cookie内のJWTにのみ保持し、ブラウザ側JS
     // (useSession等)から参照可能なsession.userには意図的にコピーしない(旧apiKeyと同じ方針)。

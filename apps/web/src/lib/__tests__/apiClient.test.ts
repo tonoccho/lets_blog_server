@@ -187,6 +187,22 @@ describe('apiRequest の失敗経路', () => {
     await expect(getGeneratedImage(1)).rejects.toThrow('APIエラー (404): not found')
   })
 
+  /**
+   * issue #1053: 更新猶予を入れてもなお401が返るのは、ssoSessionIdleTimeout超過など
+   * 正当に再ログインが必要な場合に限られる。生の `APIエラー (401): Unauthorized` は
+   * 利用者に何をすればよいか伝えないため、再ログインを促す文言に差し替える。
+   */
+  it('401は生の文言ではなく再ログインを促すメッセージにする', async () => {
+    fetchMock.mockImplementation((url: string) =>
+      url.includes('/api/operation-logs')
+        ? Promise.resolve(jsonResponse({}))
+        : Promise.resolve(textResponse('Unauthorized', 401, 'Unauthorized'))
+    )
+
+    await expect(getGeneratedImage(1)).rejects.toThrow('再度ログインしてください')
+    await expect(getGeneratedImage(1)).rejects.not.toThrow(/APIエラー \(401\)/)
+  })
+
   it('エラーボディが空ならstatusTextを使う', async () => {
     fetchMock.mockImplementation((url: string) =>
       url.includes('/api/operation-logs')

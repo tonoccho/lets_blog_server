@@ -211,6 +211,36 @@ export function waitForServicesHealthy(services?: string[], timeoutSeconds = 600
   });
 }
 
+let cachedNextAuthSecret: string | undefined;
+
+/**
+ * 実行中のwebコンテナが使っている `NEXTAUTH_SECRET` を取得する(issue #1053)。
+ *
+ * NextAuthのセッションCookieはこの鍵でJWE暗号化されている。「リフレッシュトークンが
+ * 使えない状態にする」ステップ(auth.steps.ts)はCookieを直接decode/re-encodeして
+ * リフレッシュトークンを壊れた値に差し替えるため、webコンテナと同じ鍵が要る。
+ * 開発者のホスト側シェルが `NEXTAUTH_SECRET` を export しているかに依存させたくないため、
+ * (`E2E_TEST_PASSWORD` 等と違い、この値はdocker-composeがwebコンテナへ渡す側の秘密であり
+ * `~/.config/lets-blog-e2e.env` の対象ではない)、実際に動いているコンテナへ直接問い合わせる。
+ */
+export function getNextAuthSecret(): string {
+  if (cachedNextAuthSecret) {
+    return cachedNextAuthSecret;
+  }
+  const secret = execFileSync(
+    'docker',
+    ['compose', 'exec', '-T', 'web', 'printenv', 'NEXTAUTH_SECRET'],
+    { cwd: REPO_ROOT, stdio: ['ignore', 'pipe', 'pipe'] }
+  )
+    .toString()
+    .trim();
+  if (!secret) {
+    throw new Error('webコンテナからNEXTAUTH_SECRETを取得できなかった(コンテナが起動しているか確認すること)');
+  }
+  cachedNextAuthSecret = secret;
+  return secret;
+}
+
 /**
  * フィクスチャのプロジェクトを gateway 経由のAPIで直接作成する(issue #753、共通化は #844)。
  *

@@ -1,12 +1,19 @@
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { APIRequestContext, BrowserContext, Page } from '@playwright/test';
-import { Given, Step, Then, When } from './fixtures';
+import { decode, encode } from 'next-auth/jwt';
+import type { JWT } from 'next-auth/jwt';
+import { After, Given, Step, Then, When } from './fixtures';
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
   E2E_TEST_EMAIL,
   E2E_TEST_PASSWORD,
+  createFixtureProject,
   expect,
   fetchAccessToken,
+  getNextAuthSecret,
   loginViaKeycloak,
 } from '../support';
 import {
@@ -612,4 +619,289 @@ When('不正なセッションで保護ページを開く', async ({ page }) => 
 
 Then('認証を求められる', async ({ page }) => {
   await page.waitForURL(new RegExp(`/(login|${REALM_BASE.slice(1)})`), { timeout: 15000 });
+});
+
+// ----------------------------------------------------------------- アクセストークンの寿命(issue #1053)
+
+/**
+ * Keycloakのrealm設定(infra/keycloak/realm-export.jsonのaccessTokenLifespan)と同じ値。
+ * apps/web/src/lib/tokenRefreshPolicy.ts の ACCESS_TOKEN_LIFESPAN_SECONDS と揃えること
+ * (揃っているかはJestの単体テスト tokenRefreshPolicy.test.ts が固定する。ここは
+ * 「寿命を実時間で跨ぐ」ための待機時間としてのみ使うので、e2e からプロダクションコードを
+ * importはしない)。
+ */
+const ACCESS_TOKEN_LIFESPAN_SECONDS = 300;
+
+/**
+ * 待機時間の安全マージン(秒)。gateway(Spring Security Resource Server)のJWT検証は
+ * `JwtTimestampValidator` の既定クロックスキュー60秒を持つため、寿命ちょうどで待つと
+ * 実際にはまだ許容範囲内で通ってしまい、シナリオが偽陰性(本来落ちるべきなのに通る)になる。
+ * 実測(#1053): 30秒のマージンでは修正前のコードでもシナリオが通ってしまった。
+ * 60秒のクロックスキューを確実に超えるよう倍のマージンを取る。
+ */
+const GATEWAY_CLOCK_SKEW_MARGIN_SECONDS = 120;
+
+async function ensureTokenLifecycleProject(request: APIRequestContext, ctx: Record<string, unknown>): Promise<void> {
+  if (ctx.tlcProjectId !== undefined) {
+    return;
+  }
+  const adminToken = await fetchAccessToken(request, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);
+  ctx.tlcAdminToken = adminToken;
+
+  const project = await createFixtureProject(request, adminToken, 'at1053-tlc');
+  ctx.tlcProjectId = project.id;
+  ctx.tlcProjectName = project.name;
+
+  const siteKey = `e2e-at1053-tlc-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const siteResponse = await request.post('/api/sites', {
+    headers: { Authorization: `Bearer ${adminToken}` },
+    data: {
+      name: `E2E at1053 tlc site ${siteKey}`,
+      siteKey,
+      cmsType: 'WORDPRESS',
+      credentials: {
+        transport: 'AGENT',
+        baseUrl: 'http://wordpress',
+        username: 'at1053-tlc-fixture',
+        appPassword: 'at1053-tlc fixture app password',
+      },
+    },
+  });
+  expect(
+    siteResponse.ok(),
+    `フィクスチャのサイト登録に失敗しました (status=${siteResponse.status()}): ${await siteResponse.text()}`
+  ).toBe(true);
+  ctx.tlcSiteId = ((await siteResponse.json()) as { id: number }).id;
+  ctx.tlcSiteKey = siteKey;
+}
+
+Given('プロジェクトとサイトが登録されている', async ({ request, ctx }) => {
+  await ensureTokenLifecycleProject(request, ctx);
+});
+
+/**
+ * 実時間でアクセストークンの寿命(ACCESS_TOKEN_LIFESPAN_SECONDS)を跨いで待つ(issue #1053)。
+ *
+ * 「同じタブで待機する」がこのシナリオの要である。SessionProvider(apps/web/src/app/
+ * SessionProvider.tsx)の再取得間隔(ACCESS_TOKEN_REFETCH_INTERVAL_SECONDS)によるポーリングは
+ * 開いているタブの中で動くため、タブを開いたまま実時間で待つことで、修正後の実装が実際に
+ * 寿命前にCookieを更新し続けることを検証できる。修正前(develop)はこの猶予が無いため、
+ * 寿命(300秒)を過ぎてから次の再取得(240秒周期)までの窓で失効済みトークンが残り、
+ * 後続の操作が401になる。
+ */
+Step('アクセストークンの寿命を超える時間、同じタブで待機する', async ({ page }) => {
+  await page.waitForTimeout((ACCESS_TOKEN_LIFESPAN_SECONDS + GATEWAY_CLOCK_SKEW_MARGIN_SECONDS) * 1000);
+});
+
+const TLC_ENVIRONMENT_LABEL = 'テスト環境に紐付けるサイト';
+
+function tlcEnvironmentSlot(page: Page) {
+  return page
+    .locator('div.rounded-lg', { has: page.getByRole('heading', { name: 'テスト環境' }) })
+    .first();
+}
+
+When('プロジェクトの環境にサイトを紐付ける', async ({ page, request, ctx }) => {
+  await ensureTokenLifecycleProject(request, ctx);
+  const projectId = ctx.tlcProjectId as number;
+  const siteId = ctx.tlcSiteId as number;
+
+  await page.goto(`/projects/${projectId}`);
+  await page.waitForLoadState('load');
+
+  // requireAdminSession()(apps/web/src/lib/session.ts)が再ログインへ誘導した場合、
+  // /projects/{id}には留まらない(シナリオ3: リフレッシュトークンが使えない場合)。
+  // その場合はフォームが存在しないため、ここでは操作せず終える
+  // (再ログイン導線が出たことの検証はThenステップ側で行う)。
+  if (!page.url().includes(`/projects/${projectId}`)) {
+    return;
+  }
+
+  await page.locator(`select[aria-label="${TLC_ENVIRONMENT_LABEL}"]`).selectOption(String(siteId));
+  await tlcEnvironmentSlot(page).locator('button:has-text("紐付ける")').click();
+});
+
+Then('紐付けは成功する', async ({ page, ctx }) => {
+  const siteKey = ctx.tlcSiteKey as string;
+  await expect(tlcEnvironmentSlot(page).getByText(siteKey, { exact: true })).toBeVisible({ timeout: 10000 });
+});
+
+Then('「APIエラー \\(401)」を含むメッセージは表示されない', async ({ page }) => {
+  await expect(page.getByText('APIエラー (401)')).toHaveCount(0);
+});
+
+When('プロジェクト詳細を開く', async ({ page, request, ctx }) => {
+  await ensureTokenLifecycleProject(request, ctx);
+  const projectId = ctx.tlcProjectId as number;
+  await page.goto(`/projects/${projectId}`);
+});
+
+Then('プロジェクト名とメンバー一覧が表示される', async ({ page, ctx }) => {
+  const projectName = ctx.tlcProjectName as string;
+  await expect(page.locator('input[name="name"]')).toHaveValue(projectName, { timeout: 10000 });
+
+  await page.locator('button:has-text("メンバー")').click();
+  await expect(page.getByText('メールアドレス')).toBeVisible({ timeout: 10000 });
+});
+
+/** NextAuthのセッションCookie名。webのNEXTAUTH_URLはhttps固定のためSecure prefix側を使う。 */
+const SESSION_COOKIE_NAME = '__Secure-next-auth.session-token';
+
+/**
+ * next-authはセッションCookieが4096バイトを超えると `<name>.0` / `<name>.1` ... へ分割する
+ * (`node_modules/next-auth/core/lib/cookie.js` の `SessionStore`)。このJWTはaccessToken/
+ * refreshToken/idTokenを含み実際に複数チャンクへ分割される。読み書き両方でこの分割を
+ * 再現する必要がある。
+ */
+function tokenLifecycleChunkSuffix(name: string): number {
+  const last = name.split('.').pop() ?? '';
+  return /^\d+$/.test(last) ? Number(last) : 0;
+}
+
+async function readTokenLifecycleSessionCookie(page: Page) {
+  const cookies = await page.context().cookies();
+  const chunks = cookies
+    .filter((c) => c.name === SESSION_COOKIE_NAME || c.name.startsWith(`${SESSION_COOKIE_NAME}.`))
+    .sort((a, b) => tokenLifecycleChunkSuffix(a.name) - tokenLifecycleChunkSuffix(b.name));
+  if (chunks.length === 0) {
+    throw new Error(
+      `セッションCookieが見つからない(先にログインしていること)。実際のCookie名: ${cookies.map((c) => c.name).join(', ')}`
+    );
+  }
+  const value = chunks.map((c) => c.value).join('');
+  const secret = getNextAuthSecret();
+  const token = await decode({ token: value, secret });
+  if (!token) {
+    throw new Error('セッションCookieを復号できなかった(NEXTAUTH_SECRETの取得元がwebコンテナと食い違っている疑い)');
+  }
+  return { template: chunks[0], chunkNames: chunks.map((c) => c.name), secret, token };
+}
+
+/** next-authのCHUNK_SIZE( `ALLOWED_COOKIE_SIZE(4096) - ESTIMATED_EMPTY_COOKIE_SIZE(163)` )と同じ値。 */
+const SESSION_COOKIE_CHUNK_SIZE = 4096 - 163;
+
+async function writeTokenLifecycleSessionCookie(
+  page: Page,
+  template: Awaited<ReturnType<typeof readTokenLifecycleSessionCookie>>['template'],
+  chunkNames: string[],
+  secret: string,
+  token: JWT
+): Promise<void> {
+  const value = await encode({ token, secret });
+  const chunkCount = Math.max(1, Math.ceil(value.length / SESSION_COOKIE_CHUNK_SIZE));
+  const newCookies = Array.from({ length: chunkCount }, (_, i) => ({
+    ...template,
+    name: chunkCount === 1 ? SESSION_COOKIE_NAME : `${SESSION_COOKIE_NAME}.${i}`,
+    value: value.substring(i * SESSION_COOKIE_CHUNK_SIZE, (i + 1) * SESSION_COOKIE_CHUNK_SIZE),
+  }));
+  // チャンク数が変わって古いチャンク名が余る場合に備え、既存のチャンクは一度すべて消してから書く。
+  await page.context().clearCookies({ name: new RegExp(`^${SESSION_COOKIE_NAME.replace(/[.]/g, '\\.')}(\\.\\d+)?$`) });
+  await page.context().addCookies(newCookies.map(({ name, value: v, ...rest }) => ({ ...rest, name, value: v })));
+  void chunkNames;
+}
+
+const KEYCLOAK_CONTAINER = 'lbs-keycloak';
+const KEYCLOAK_REALM = 'letsblog';
+const KCADM_BIN = '/opt/keycloak/bin/kcadm.sh';
+/** リポジトリルート(apps/web/e2e/steps から4階層上)。`.env`からKeycloakのmaster管理者資格情報を読む。 */
+const KCADM_REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
+
+/** userDeactivation.steps.ts と同じ形(docker exec で kcadm.sh を叩く)。ステップ定義ファイルは
+ * 兄弟issueと相乗りしない方針のため、小さいこのヘルパーはここに複製する。 */
+function readEnvValue(key: string): string {
+  const envPath = path.join(KCADM_REPO_ROOT, '.env');
+  const content = fs.readFileSync(envPath, 'utf-8');
+  const match = content.match(new RegExp(`^${key}=(.*)$`, 'm'));
+  if (!match) {
+    throw new Error(`.env に ${key} が見つかりません`);
+  }
+  return match[1].trim();
+}
+
+function kcadm(args: string[]): string {
+  return execFileSync('docker', ['exec', KEYCLOAK_CONTAINER, KCADM_BIN, ...args], {
+    encoding: 'utf-8',
+    timeout: 30_000,
+  });
+}
+
+function kcadmLogin(): void {
+  const username = readEnvValue('KEYCLOAK_ADMIN_USERNAME');
+  const password = readEnvValue('KEYCLOAK_ADMIN_PASSWORD');
+  kcadm([
+    'config', 'credentials',
+    '--server', 'http://localhost:8080/auth',
+    '--realm', 'master',
+    '--user', username,
+    '--password', password,
+  ]);
+}
+
+/**
+ * KeycloakのSSOセッション自体を終了させる(issue #1053)。
+ *
+ * Cookieのrefresh_token値を壊すだけでは、KeycloakのSSOセッション自体は生きたままなので、
+ * `/login`が呼ぶ`signIn("keycloak")`はKeycloak側で無言のまま自動的に再認証してしまい
+ * (ブラウザはKeycloakの有効なSSO Cookieを持っている)、利用者には何も見えないまま新しい
+ * セッションへすり替わる。これは実運用の`ssoSessionIdleTimeout`超過(Keycloak側のSSO
+ * セッションも同時に失効している)とは違う状態であり、「再ログインを促される」の検証には
+ * ならない。SSOセッション自体もここで終了させ、実際にKeycloakのホスト型ログイン画面が
+ * 出ることを保証する。
+ */
+function revokeKeycloakSsoSession(email: string): void {
+  kcadmLogin();
+  const usersJson = kcadm(['get', 'users', '-r', KEYCLOAK_REALM, '-q', `email=${email}`, '--fields', 'id']);
+  const users = JSON.parse(usersJson) as { id: string }[];
+  if (users.length === 0) {
+    throw new Error(`Keycloakに ${email} が見つかりません`);
+  }
+  kcadm(['create', `users/${users[0].id}/logout`, '-r', KEYCLOAK_REALM, '-b', '{}']);
+}
+
+/**
+ * リフレッシュトークンをKeycloakが確実に拒否する値へ差し替える(issue #1053)。
+ *
+ * 実運用での典型例は `ssoSessionIdleTimeout` 超過だが、それを実時間で再現するのは
+ * 非現実的(既定1800秒)なので、Cookie自体を直接decode/re-encodeして壊れたリフレッシュ
+ * トークンへ差し替える。あわせてaccessTokenExpiresも過去へ書き換え、次のjwtコールバック
+ * (requireAdminSession経由)で確実に更新が試行されるようにする。KeycloakのSSOセッション
+ * 自体もここで終了させる(理由は{@link revokeKeycloakSsoSession}参照)。
+ */
+Given('リフレッシュトークンが使えない状態にする', async ({ page }) => {
+  revokeKeycloakSsoSession(E2E_ADMIN_EMAIL);
+
+  const { template, chunkNames, secret, token } = await readTokenLifecycleSessionCookie(page);
+  const tampered: JWT = {
+    ...token,
+    accessTokenExpires: Date.now() - 1000,
+    refreshToken: 'e2e-invalidated-refresh-token-1053',
+  };
+  await writeTokenLifecycleSessionCookie(page, template, chunkNames, secret, tampered);
+});
+
+Then('再ログインを促すメッセージが表示される', async ({ page }) => {
+  // requireAdminSession()(apps/web/src/lib/session.ts)がsession.errorを見て/loginへ
+  // リダイレクトする。/loginはマウント時にKeycloakのホスト型ログイン画面へ即座に遷移する
+  // (apps/web/src/app/login/page.tsx)。
+  await page.waitForURL(new RegExp(`/(login|${REALM_BASE.slice(1)})`), { timeout: 15000 });
+});
+
+Then('「APIエラー \\(401): Unauthorized」という文言は表示されない', async ({ page }) => {
+  await expect(page.getByText('APIエラー (401): Unauthorized')).toHaveCount(0);
+});
+
+After({ tags: '@auth' }, async ({ ctx, request }) => {
+  const projectId = ctx.tlcProjectId as number | undefined;
+  const siteId = ctx.tlcSiteId as number | undefined;
+  if (projectId === undefined && siteId === undefined) {
+    return;
+  }
+  const adminToken = (ctx.tlcAdminToken as string | undefined) ?? (await fetchAccessToken(request, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD));
+  const headers = { Authorization: `Bearer ${adminToken}` };
+  if (siteId !== undefined) {
+    await request.delete(`/api/sites/${siteId}`, { headers });
+  }
+  if (projectId !== undefined) {
+    await request.delete(`/api/projects/${projectId}`, { headers });
+  }
 });

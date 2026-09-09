@@ -124,8 +124,19 @@ export interface UserCreateInput {
  *
  * 注意: ここで読むCookieは、SessionProvider(apps/web/src/app/SessionProvider.tsx)のrefetchIntervalに
  * よってブラウザが定期的に/api/auth/sessionを叩くことでjwtコールバックのリフレッシュが走り、
- * 更新され続けている前提。getToken()自体はjwtコールバックを再実行しない生のCookieデコードのため、
+ * 更新され続けている前提(再取得間隔・更新猶予・トークン寿命の関係はissue #1053で
+ * `apps/web/src/lib/tokenRefreshPolicy.ts` に集約し、テストで固定した)。
+ * getToken()自体はjwtコールバックを再実行しない生のCookieデコードのため、
  * ここで読むaccessTokenが失効間際でないかはSessionProvider側の更新頻度に依存する。
+ *
+ * これは `@/lib/session.ts` の `requireSession()` / `requireAdminSession()` が呼ぶ
+ * `getServerSession(authOptions)`(引数1個・RSCモード)がjwtコールバックを再評価して得た
+ * 更新済みトークンとは**別物**である点に注意(issue #1053)。RSCモードではnext-authが
+ * `setCookie(){}` という何もしないresスタブを組み立てるため、その呼び出しがリフレッシュに
+ * 成功してもCookieへは書き戻されず、結果は捨てられる。したがってServer Component /
+ * Server Actionからの`requireAdminSession()`通過は「Cookie内のaccessTokenが更新された」
+ * ことを意味しない。ここ(currentToken)が実際に読むのは、あくまで
+ * SessionProvider側のポーリングが最後に書き込んだCookieの生の値である。
  */
 async function currentToken() {
   return getToken({
@@ -194,6 +205,20 @@ interface ApiRequestInit extends RequestInit {
 }
 
 /**
+ * gatewayが401を返したときに例外へ載せる文言(issue #1053)。
+ *
+ * 更新猶予(tokenRefreshPolicy.ts)を入れてもなお401が返るのは、`ssoSessionIdleTimeout`
+ * 超過など**正当に再ログインが必要な場合**に限られる(auth.tsのrefreshAccessToken()が
+ * 失敗しtoken.errorが立つが、currentToken()は生のCookieデコードのためtoken.errorを見ずに
+ * 失効済みaccessTokenをそのまま送ってしまう。gatewayはBearerが付いていれば無条件に検証し
+ * 失効していれば401を返す。SecurityConfigのjavadoc参照)。この場合に生の
+ * `APIエラー (401): Unauthorized` を出すと、利用者は何をすればよいか分からない。
+ * 401のときだけ再ログインを促す文言に差し替える(他のステータスコードの文言整備は
+ * 本Issueのスコープ外)。
+ */
+const SESSION_EXPIRED_MESSAGE = 'セッションの有効期限が切れました。お手数ですが再度ログインしてください。';
+
+/**
  * バックエンド(gateway)への全リクエストが通る唯一の共通経路(issue #584)。
  * ベースURLの組み立て・Authorizationヘッダーの付与・キャッシュ無効化・操作ログの記録・
  * エラーハンドリングをここに集約する。
@@ -241,9 +266,13 @@ async function apiRequest(path: string, init?: ApiRequestInit): Promise<Response
   const durationMs = Date.now() - startedAt;
 
   if (!res.ok) {
-    // throwOnError=falseのときはボディを呼び出し元へそのまま渡すため消費しない。
+    // throwOnError=falseのときはボディを呼び出し元へそのまま渡すため消費しない
+    // (SSE中継等の意味論。この分岐自体は変えない。issue #1053のスコープはthrowOnError=trueの
+    // 401のみ)。
     const message = throwOnError
-      ? `APIエラー (${res.status}): ${(await res.text().catch(() => '')) || res.statusText}`
+      ? res.status === 401
+        ? SESSION_EXPIRED_MESSAGE
+        : `APIエラー (${res.status}): ${(await res.text().catch(() => '')) || res.statusText}`
       : `APIエラー (${res.status}): ${res.statusText}`;
     scheduleLog({ operationId: operationId ?? '', method, path, statusCode: res.status, durationMs, success: false, errorMessage: message });
     if (throwOnError) {
