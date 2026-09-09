@@ -14,12 +14,16 @@ import com.letsblog.publishing.cms.PostResult;
 import com.letsblog.publishing.dto.PostPublishCommand;
 import com.letsblog.publishing.dto.PostPublishResponse;
 import com.letsblog.publishing.messaging.DomainEventPublisher;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -302,6 +306,236 @@ class PostPublishServiceTest {
         ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
         verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
         assertEquals("11", contentCaptor.getValue().featuredMediaId());
+    }
+
+    // issue #1060: 一方の参照がもう一方の部分文字列になっている場合(eyecatch.png ⊂ assets/eyecatch.png、
+    // img1.png ⊂ img10.png)に、単純なString#replaceの全件置換だと短い方が長い方の内部を書き換えてしまい、
+    // 長い方の置換が黙って失敗する回帰を防ぐ。
+
+    @Test
+    void publish_短い参照が長い参照の部分文字列でもそれぞれ正しいURLに置換される() {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
+                .thenReturn(new MediaUploadResult("11", "https://example.com/wp-content/uploads/eyecatch.png"));
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0002.png"), any(), any()))
+                .thenReturn(new MediaUploadResult("12", "https://example.com/wp-content/uploads/assets-eyecatch.png"));
+        when(contentServiceClient.renderPreImage(anyString(), any(), anyBoolean()))
+                .thenReturn("![a](eyecatch.png)\n![b](assets/eyecatch.png)");
+
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}),
+                new MockMultipartFile("images", "eyecatch2.png", "image/png", new byte[]{2}));
+
+        service.publish(command("my-article", "My Article", images, null,
+                List.of("eyecatch.png", "assets/eyecatch.png")));
+
+        verify(contentServiceClient).finalizeHtml(
+                "![a](https://example.com/wp-content/uploads/eyecatch.png)\n"
+                        + "![b](https://example.com/wp-content/uploads/assets-eyecatch.png)",
+                null);
+    }
+
+    @Test
+    void publish_imagesの並び順を入れ替えても置換結果は同一になる() {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        // 並び順が入れ替わったので、1番目(0001)がassets/eyecatch.png、2番目(0002)がeyecatch.pngの
+        // アップロード結果になる。それでも各参照の置換先URLは、順序を入れ替える前のテストと同じでなければならない。
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
+                .thenReturn(new MediaUploadResult("12", "https://example.com/wp-content/uploads/assets-eyecatch.png"));
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0002.png"), any(), any()))
+                .thenReturn(new MediaUploadResult("11", "https://example.com/wp-content/uploads/eyecatch.png"));
+        when(contentServiceClient.renderPreImage(anyString(), any(), anyBoolean()))
+                .thenReturn("![a](eyecatch.png)\n![b](assets/eyecatch.png)");
+
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "eyecatch2.png", "image/png", new byte[]{2}),
+                new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
+
+        service.publish(command("my-article", "My Article", images, null,
+                List.of("assets/eyecatch.png", "eyecatch.png")));
+
+        verify(contentServiceClient).finalizeHtml(
+                "![a](https://example.com/wp-content/uploads/eyecatch.png)\n"
+                        + "![b](https://example.com/wp-content/uploads/assets-eyecatch.png)",
+                null);
+    }
+
+    @Test
+    void publish_数字接尾辞違いの参照でも短い方が長い方の内部を書き換えない() {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
+                .thenReturn(new MediaUploadResult("11", "https://example.com/wp-content/uploads/img1.png"));
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0002.png"), any(), any()))
+                .thenReturn(new MediaUploadResult("12", "https://example.com/wp-content/uploads/img10.png"));
+        when(contentServiceClient.renderPreImage(anyString(), any(), anyBoolean()))
+                .thenReturn("![a](img1.png)\n![b](img10.png)");
+
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "img1.png", "image/png", new byte[]{1}),
+                new MockMultipartFile("images", "img10.png", "image/png", new byte[]{2}));
+
+        service.publish(command("my-article", "My Article", images, null,
+                List.of("img1.png", "img10.png")));
+
+        verify(contentServiceClient).finalizeHtml(
+                "![a](https://example.com/wp-content/uploads/img1.png)\n"
+                        + "![b](https://example.com/wp-content/uploads/img10.png)",
+                null);
+    }
+
+    @Test
+    void publish_本文中に見つからない参照がある場合は警告ログを出す() {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
+                .thenReturn(new MediaUploadResult("11", "https://example.com/wp-content/uploads/1.png"));
+        when(contentServiceClient.renderPreImage(anyString(), any(), anyBoolean()))
+                .thenReturn("![a](other.png)");
+
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
+
+        Logger logger = (Logger) LoggerFactory.getLogger(PostPublishService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            service.publish(command("my-article", "My Article", images, null,
+                    List.of("eyecatch.png")));
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        boolean warned = appender.list.stream()
+                .anyMatch(event -> event.getLevel() == ch.qos.logback.classic.Level.WARN
+                        && event.getFormattedMessage().contains("eyecatch.png"));
+        assertTrue(warned, "本文中に見つからなかった参照についてWARNレベルのログが出力されること");
+        verify(contentServiceClient).finalizeHtml("![a](other.png)", null);
+    }
+
+    // 以下は#1060の変更でこのファイル全体のC1/C2カバレッジがゲート(90%)を割ったために追加した、
+    // 既存分岐(このIssueの変更対象ではない箇所を含む)のカバレッジ補完。CLAUDE.mdのカバレッジ節が
+    // 変更後ファイル単位でゲートするため、このIssueで触れたファイルの既存の未検証分岐も対象になる。
+
+    @Test
+    void publish_statusが未指定の場合はdraftとして投稿される() {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        PostPublishCommand command = new PostPublishCommand(
+                "main", "My Article", "my-article", null, List.of(), List.of(), null, "本文", List.of(), null,
+                List.of(), null);
+
+        service.publish(command);
+
+        ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
+        verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
+        assertEquals("draft", contentCaptor.getValue().status());
+    }
+
+    @Test
+    void publish_投稿済み画像情報が空文字の場合はパースせず再アップロードして続行する() {
+        when(contentServiceClient.findPost(1L, "55")).thenReturn(Optional.of(bridgePost("55", "  ")));
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
+
+        PostPublishCommand command = new PostPublishCommand(
+                "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", List.of(), null,
+                List.of(), null);
+
+        PostPublishResponse response = service.publish(command);
+
+        assertEquals("55", response.wpPostId());
+    }
+
+    @Test
+    void publish_発信者は判明しているがメールアドレス未設定なら著者未設定のまま続行する() {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        when(currentActorService.getCurrentActorId()).thenReturn(10L);
+        when(currentActorService.getCurrentActorEmail()).thenReturn(null);
+
+        service.publish(command("my-article", "My Article", List.of(), null));
+
+        ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
+        verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
+        assertNull(contentCaptor.getValue().authorId());
+        verify(cmsAdapter, never()).findAuthorIdByEmail(any(), any());
+    }
+
+    @Test
+    void publish_imagesがnullの場合は空扱いで画像処理をスキップする() {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+
+        PostPublishCommand command = new PostPublishCommand(
+                "main", "My Article", "my-article", "draft", List.of(), List.of(), null, "本文", null, null,
+                List.of(), null);
+
+        PostPublishResponse response = service.publish(command);
+
+        assertEquals("101", response.wpPostId());
+    }
+
+    @Test
+    void publish_imagesが空でfeaturedImageFilenameのみ指定された場合は警告して続行する() {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+
+        service.publish(command("my-article", "My Article", List.of(), "eyecatch.png"));
+
+        ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
+        verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
+        assertNull(contentCaptor.getValue().featuredMediaId());
+    }
+
+    @Test
+    void publish_imageReferencesがimagesより短い場合は不足分をoriginalFilenameで補う() {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
+                .thenReturn(new MediaUploadResult("11", "https://example.com/wp-content/uploads/1.png"));
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0002.png"), any(), any()))
+                .thenReturn(new MediaUploadResult("12", "https://example.com/wp-content/uploads/2.png"));
+
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}),
+                new MockMultipartFile("images", "photo.png", "image/png", new byte[]{2}));
+
+        service.publish(command("my-article", "My Article", images, null, List.of("assets/eyecatch.png")));
+
+        verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.png"), any(), any());
+        verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0002.png"), any(), any());
+    }
+
+    @Test
+    void publish_参照文字列が空文字の画像はアップロード対象から除外される() {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
+
+        service.publish(command("my-article", "My Article", images, null, List.of("  ")));
+
+        verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
+    }
+
+    @Test
+    void publish_slugもtitleも未指定の場合はpostがデフォルトになる() {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        when(cmsAdapter.uploadMedia(any(), eq("post-0001.png"), any(), any()))
+                .thenReturn(new MediaUploadResult("11", "https://example.com/wp-content/uploads/1.png"));
+
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
+
+        service.publish(command(null, null, images, null));
+
+        verify(cmsAdapter).uploadMedia(eq(credentials), eq("post-0001.png"), any(), any());
     }
 
     @Test

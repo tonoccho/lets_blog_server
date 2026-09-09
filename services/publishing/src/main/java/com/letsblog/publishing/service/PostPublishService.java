@@ -27,15 +27,20 @@ import java.io.IOException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Markdown記事の投稿パイプライン:
@@ -315,15 +320,59 @@ public class PostPublishService {
             }
         }
 
-        for (Map.Entry<String, String> entry : referenceToUrl.entrySet()) {
-            rewritten = rewritten.replace(entry.getKey(), entry.getValue());
-        }
+        rewritten = replaceReferencesInSinglePass(rewritten, referenceToUrl);
         if (featuredImageFilename != null && featuredMediaId == null) {
             log.warn("featuredImageFilename='{}' がimages中のどの参照とも一致しなかったため、featuredMediaIdはnullのままです(imageReferences={})",
                     featuredImageFilename, imageReferences);
         }
         log.info("アイキャッチ解決結果: featuredMediaId={}", featuredMediaId);
         return new ImageReplacementResult(rewritten, featuredMediaId, updatedUploads);
+    }
+
+    /**
+     * 本文中の画像参照(referenceToUrlのキー)を、対応するアップロード後URLへ1回の走査で同時に置換する
+     * (issue #1060)。
+     *
+     * <p>{@code referenceToUrl}のキーは{@code imageReferences}由来の生の参照文字列であり、Markdownの
+     * {@code ![...](参照)}記法の括弧内に限らず、本文中の任意の位置に現れうる(収集側 :272-274 が
+     * Markdown構文を一切解釈していないため)。したがって置換側もMarkdown構文を前提にできず、収集側と
+     * 同じ「本文中の生の文字列一致」で置換する必要がある。
+     *
+     * <p>単純な{@code String#replace}を参照ごとに繰り返すと、ある参照が別の参照の部分文字列である場合
+     * (例: {@code eyecatch.png}は{@code assets/eyecatch.png}の部分文字列)、先に短い方を置換すると
+     * 長い方の出現内部を壊してしまい、後続の置換対象が本文から消えて置換されないまま残る(#1060)。
+     * これを避けるため、全参照を1つの正規表現の選択(alternation)にまとめ、{@link Matcher}で本文を
+     * 1回だけ左から右へ走査しながら{@link Matcher#appendReplacement}で書き換える。走査は既に書き換えた
+     * (置換後URLを含む)領域へは戻らないため、置換結果の中に別の参照文字列が偶然含まれていても
+     * 再置換されない。同じ開始位置で複数の参照が候補になる場合(部分文字列関係にある場合)は、
+     * 長い参照を優先させるため、参照文字列は長さの降順で選択に並べる。
+     */
+    private String replaceReferencesInSinglePass(String markdown, Map<String, String> referenceToUrl) {
+        if (referenceToUrl.isEmpty()) {
+            return markdown;
+        }
+        List<String> referencesLongestFirst = new java.util.ArrayList<>(referenceToUrl.keySet());
+        referencesLongestFirst.sort(Comparator.comparingInt(String::length).reversed());
+        String alternation = referencesLongestFirst.stream()
+                .map(Pattern::quote)
+                .collect(Collectors.joining("|"));
+        Matcher matcher = Pattern.compile(alternation).matcher(markdown);
+
+        StringBuilder result = new StringBuilder();
+        Set<String> matchedReferences = new java.util.HashSet<>();
+        while (matcher.find()) {
+            String reference = matcher.group();
+            matchedReferences.add(reference);
+            matcher.appendReplacement(result, Matcher.quoteReplacement(referenceToUrl.get(reference)));
+        }
+        matcher.appendTail(result);
+
+        for (String reference : referenceToUrl.keySet()) {
+            if (!matchedReferences.contains(reference)) {
+                log.warn("画像参照 '{}' が本文中に見つからなかったため、URLへの置換は行われませんでした", reference);
+            }
+        }
+        return result.toString();
     }
 
     private String generateSlugForFilename(String providedSlug, String title) {
