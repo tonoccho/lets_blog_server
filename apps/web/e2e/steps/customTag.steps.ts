@@ -722,6 +722,87 @@ Then('その一覧にそのテンプレートは含まれない', async ({ ctx }
   expect(templates.map((template) => template.id)).not.toContain(ctx.tagTemplateId);
 });
 
+// ---- プロジェクト認可(authorization.feature) ----
+
+interface DeniedOutcome {
+  status: number;
+  body: string;
+}
+
+Given(
+  'カスタムタグを置くプロジェクトが2つあり、一般利用者は片方だけのメンバーである',
+  async ({ ctx, request }) => {
+    const memberProject = await createProject(request, ctx);
+    const otherProject = await createProject(request, ctx);
+
+    const me = await request.get('/api/identity/me', {
+      headers: { Authorization: `Bearer ${await otherUserToken(request)}` },
+    });
+    expect(me.ok(), `一般利用者の情報を取得できませんでした (status=${me.status()})`).toBe(true);
+    const memberUserId = ((await me.json()) as { id: number }).id;
+
+    const added = await request.post(`/api/projects/${memberProject.id}/users`, {
+      headers: await authHeaders(request),
+      data: { userId: memberUserId, wpRole: 'editor' },
+    });
+    expect(
+      added.ok(),
+      `プロジェクトメンバーの追加に失敗しました (status=${added.status()}): ${await added.text()}`
+    ).toBe(true);
+
+    ctx.tagAuthzMemberProjectId = memberProject.id;
+    ctx.tagAuthzOtherProjectId = otherProject.id;
+    ctx.tagAuthzMemberUserId = memberUserId;
+  }
+);
+
+Given('他プロジェクトに未公開のカスタムタグテンプレートがある', async ({ ctx, request }) => {
+  const template = await createTemplate(request, ctx, ctx.tagAuthzOtherProjectId as number);
+  expect(template.isPublished, 'テンプレートが作成直後から公開されています').toBe(false);
+});
+
+When('一般利用者が他プロジェクトのカスタムタグ一覧を要求する', async ({ ctx, request }) => {
+  const response = await request.get(`/api/custom-tags?projectId=${ctx.tagAuthzOtherProjectId}`, {
+    headers: { Authorization: `Bearer ${await otherUserToken(request)}` },
+  });
+  ctx.tagAuthzDenied = { status: response.status(), body: await response.text() } satisfies DeniedOutcome;
+});
+
+When('一般利用者が他プロジェクトの統合CSSを要求する', async ({ ctx, request }) => {
+  const response = await request.get(
+    `/api/custom-tags/css-bundle?projectId=${ctx.tagAuthzOtherProjectId}`,
+    { headers: { Authorization: `Bearer ${await otherUserToken(request)}` } }
+  );
+  ctx.tagAuthzDenied = { status: response.status(), body: await response.text() } satisfies DeniedOutcome;
+});
+
+When('一般利用者が他プロジェクトの詳細カスタムタグ一覧を要求する', async ({ ctx, request }) => {
+  const response = await request.get(`/api/projects/${ctx.tagAuthzOtherProjectId}/custom-tags`, {
+    headers: { Authorization: `Bearer ${await otherUserToken(request)}` },
+  });
+  ctx.tagAuthzDenied = { status: response.status(), body: await response.text() } satisfies DeniedOutcome;
+});
+
+When(
+  '一般利用者が他プロジェクトの未公開を含むテンプレート一覧を要求する',
+  async ({ ctx, request }) => {
+    const response = await request.get(
+      `/api/custom-tag-templates?projectId=${ctx.tagAuthzOtherProjectId}&showAll=true`,
+      { headers: { Authorization: `Bearer ${await otherUserToken(request)}` } }
+    );
+    ctx.tagAuthzDenied = { status: response.status(), body: await response.text() } satisfies DeniedOutcome;
+  }
+);
+
+Then('カスタムタグの操作はプロジェクトメンバーではないとして拒否される', async ({ ctx }) => {
+  const outcome = ctx.tagAuthzDenied as DeniedOutcome | undefined;
+  expect(outcome, 'カスタムタグ関連の拒否結果が記録されていません').toBeDefined();
+  expect(outcome!.status, `応答本文: ${outcome!.body}`).toBe(403);
+  expect(outcome!.body, '拒否理由にプロジェクトメンバーである旨が示されていない').toContain(
+    'プロジェクトメンバー'
+  );
+});
+
 // ---- コンテンツキャッシュ(content-cache.feature) ----
 
 interface ContentCacheOutcome {
@@ -902,6 +983,13 @@ After({ tags: '@custom-tag' }, async ({ ctx, request }) => {
     for (const tag of (await response.json()) as CustomTagFixture[]) {
       await request.delete(`/api/custom-tags/${tag.id}`, { headers });
     }
+  }
+  // authorization.feature が追加したプロジェクトメンバーシップ(project_users)は、
+  // project_id に外部キーが無い(ADR-0004)ためプロジェクト削除では消えず、先に消す必要がある。
+  const authzMemberUserId = ctx.tagAuthzMemberUserId as number | undefined;
+  const authzMemberProjectId = ctx.tagAuthzMemberProjectId as number | undefined;
+  if (authzMemberUserId !== undefined && authzMemberProjectId !== undefined) {
+    await request.delete(`/api/projects/${authzMemberProjectId}/users/${authzMemberUserId}`, { headers });
   }
   for (const projectId of projectIds) {
     await request.delete(`/api/projects/${projectId}`, { headers });

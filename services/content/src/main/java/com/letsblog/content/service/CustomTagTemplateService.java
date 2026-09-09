@@ -140,8 +140,22 @@ public class CustomTagTemplateService {
         return templates.stream().map(CustomTagTemplateResponse::from).toList();
     }
 
+    /**
+     * {@code showAll=true}経路。公開状態を問わず全件返す({@code findAllTemplatesByProject}は
+     * {@code isPublished}を条件にしない)。projectId指定時はプロジェクトメンバーまたはadminのみに
+     * 絞る(issue #1057)。以前はここに認可チェックが無く、非メンバーでもprojectIdを指定するだけで
+     * 他プロジェクトの未公開テンプレートまで読めていた。
+     *
+     * <p>projectIdがnullの場合はグローバルテンプレートのみが対象で、プロジェクト単位の判定対象が
+     * そもそも存在しないためプロジェクトメンバー判定は行わない({@link #listPublished}/
+     * {@link #searchByKeyword}/{@link #filterByCategory}と同じ、projectId=nullを「グローバル」
+     * として扱う既存の規約)。
+     */
     @Transactional(readOnly = true)
     public List<CustomTagTemplateResponse> list(Long projectId) {
+        if (projectId != null) {
+            adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        }
         List<CustomTagTemplate> templates = projectId == null
                 ? customTagTemplateRepository.findGlobalTemplates()
                 : customTagTemplateRepository.findAllTemplatesByProject(projectId);

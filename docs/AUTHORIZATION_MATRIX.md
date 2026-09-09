@@ -877,8 +877,8 @@ platform-service所有(issue #694)。未認証401はplatform-serviceの`Security
 | POST /api/custom-tags/generate | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `CustomTagGenerationService.generate()`内 |
 | POST /api/custom-tags/validate | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | ステートレスな検証のみ(DBへの副作用なし) |
 | POST /api/custom-tags | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `CustomTagService.create()`内 |
-| GET /api/custom-tags | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | グローバルタグ一覧の参照 |
-| GET /api/custom-tags/css-bundle | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | CSSバンドルの参照 |
+| GET /api/custom-tags | requireProjectMemberOrAdmin(projectId指定時のみ、service層) | 401 | 403(projectId指定時) | 認可OK | 現状維持 | `CustomTagService.list()`内。issue #1057で追加。projectId未指定(グローバルタグのみ)は従来通り認証済みなら誰でも参照可 |
+| GET /api/custom-tags/css-bundle | requireProjectMemberOrAdmin(projectId指定時のみ、service層) | 401 | 403(projectId指定時) | 認可OK | 現状維持 | `CustomTagService.buildCssBundle()`内。issue #1057で追加。projectId未指定時は上記と同じ |
 | PUT /api/custom-tags/{id} | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `CustomTagService.update()`内 |
 | DELETE /api/custom-tags/{id} | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `CustomTagService.delete()`内 |
 
@@ -888,7 +888,7 @@ platform-service所有(issue #694)。未認証401はplatform-serviceの`Security
 | --- | --- | --- | --- | --- | --- | --- |
 | POST /api/custom-tag-templates | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `CustomTagTemplateService.create()`内 |
 | GET /api/custom-tag-templates/{id} | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | 単一テンプレート参照(未公開含む) |
-| GET /api/custom-tag-templates | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | `showAll=true`で未公開含む全件も無条件参照可能 |
+| GET /api/custom-tag-templates | requireProjectMemberOrAdmin(`showAll=true`かつprojectId指定時のみ、service層) | 401 | 403(該当時) | 認可OK | 現状維持 | `CustomTagTemplateService.list()`内。issue #1057で追加。`showAll=true`は公開状態を問わず全件返すため、projectId指定時はプロジェクトメンバー判定が必須(以前は無条件参照可能で、非メンバーが他プロジェクトの未公開テンプレートを読めた)。`showAll=false`(既定、公開済みのみ)とsearch/categoryは元々`isPublished=true`のクエリで公開範囲が絞られておりこのIssueの対象外。projectId未指定(グローバル)も対象外 |
 | GET /api/custom-tag-templates/my-templates | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | 呼び出し元自身のテンプレートに限定される想定だが、明示チェックは無い |
 | PUT /api/custom-tag-templates/{id} | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `CustomTagTemplateService.update()`内 |
 | POST /api/custom-tag-templates/{id}/publish | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `CustomTagTemplateService.publish()`内 |

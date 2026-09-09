@@ -120,9 +120,19 @@ public class CustomTagService {
 
     /**
      * projectId が null ならグローバルタグのみ、指定時はそのプロジェクトのタグ + グローバルタグを返す。
+     *
+     * <p>projectId が null の場合はプロジェクトメンバー判定を行わない(グローバルタグは
+     * 認証済み利用者なら誰でも参照できる範囲という既存の仕様、issue #1057)。projectId
+     * 指定時は、対になる{@code /api/projects/{projectId}/custom-tags}
+     * ({@link com.letsblog.content.controller.ProjectCustomTagController#list})と同じく
+     * プロジェクトメンバーまたはadminのみに絞る。以前はここに認可チェックが無く、非メンバーでも
+     * projectIdを指定するだけで他プロジェクトのタグ(HTMLテンプレート・CSS等)を読めていた。
      */
     @Transactional(readOnly = true)
     public List<CustomTagResponse> list(Long projectId) {
+        if (projectId != null) {
+            adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        }
         List<CustomTag> tags = projectId == null
                 ? customTagRepository.findByProjectIdIsNull()
                 : customTagRepository.findByProjectIdOrProjectIdIsNull(projectId);
@@ -138,6 +148,10 @@ public class CustomTagService {
      */
     @Transactional(readOnly = true)
     public String buildCssBundle(Long projectId) {
+        // list()と同じ理由(issue #1057)でprojectId指定時のみプロジェクトメンバー判定を行う。
+        if (projectId != null) {
+            adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        }
         List<CustomTag> tags = projectId == null
                 ? customTagRepository.findByProjectIdIsNull()
                 : customTagRepository.findByProjectIdOrProjectIdIsNull(projectId);

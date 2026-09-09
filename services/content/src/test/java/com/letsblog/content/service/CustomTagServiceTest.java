@@ -202,6 +202,42 @@ class CustomTagServiceTest {
         assertEquals(2, result.size());
     }
 
+    /**
+     * issue #1057: /api/custom-tags?projectId= は非メンバーでも他プロジェクトのタグを読めていた
+     * (対になる /api/projects/{projectId}/custom-tags は requireProjectMemberOrAdmin を経由するのに、
+     * こちらには認可チェックが無かった)。projectId 指定時はプロジェクトメンバー判定を必須にする。
+     */
+    @Test
+    void list_projectId指定時はプロジェクトメンバー判定を行う() {
+        when(customTagRepository.findByProjectIdOrProjectIdIsNull(PROJECT_ID)).thenReturn(List.of());
+
+        service.list(PROJECT_ID);
+
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(PROJECT_ID);
+    }
+
+    @Test
+    void list_プロジェクトメンバーでなければForbiddenExceptionが伝播する() {
+        doThrow(new ForbiddenException("not a member"))
+                .when(adminAuthorizationService).requireProjectMemberOrAdmin(PROJECT_ID);
+
+        assertThrows(ForbiddenException.class, () -> service.list(PROJECT_ID));
+        verify(customTagRepository, never()).findByProjectIdOrProjectIdIsNull(any());
+    }
+
+    /**
+     * projectId 未指定(グローバルタグのみ)は、CustomTagService#list の Javadoc が明示する通り
+     * 誰でも参照できる範囲なので、プロジェクトメンバー判定を経由しない。
+     */
+    @Test
+    void list_projectId未指定ならプロジェクトメンバー判定を行わない() {
+        when(customTagRepository.findByProjectIdIsNull()).thenReturn(List.of());
+
+        service.list(null);
+
+        verify(adminAuthorizationService, never()).requireProjectMemberOrAdmin(any());
+    }
+
     @Test
     void listByProject_グローバルタグを含まずプロジェクト固有のみ() {
         when(customTagRepository.findByProjectId(PROJECT_ID)).thenReturn(List.of(buildTag(2L, "p", PROJECT_ID)));
@@ -453,6 +489,38 @@ class CustomTagServiceTest {
         assertTrue(result.contains(".myproj .lb-toc {color:red;}"), "実際の出力: " + result);
         assertTrue(result.contains(".myproj .g { color: red; }"));
         assertTrue(result.contains(".myproj .p { color: blue; }"));
+    }
+
+    /**
+     * issue #1057: /api/custom-tags/css-bundle?projectId= も list() と同じ抜けを持っていた。
+     */
+    @Test
+    void buildCssBundle_projectId指定時はプロジェクトメンバー判定を行う() {
+        stubEmbedTagCss();
+        when(projectContentSettingsService.resolveCssSelectorPrefix(PROJECT_ID)).thenReturn(PREFIX);
+        when(customTagRepository.findByProjectIdOrProjectIdIsNull(PROJECT_ID)).thenReturn(List.of());
+
+        service.buildCssBundle(PROJECT_ID);
+
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(PROJECT_ID);
+    }
+
+    @Test
+    void buildCssBundle_プロジェクトメンバーでなければForbiddenExceptionが伝播する() {
+        doThrow(new ForbiddenException("not a member"))
+                .when(adminAuthorizationService).requireProjectMemberOrAdmin(PROJECT_ID);
+
+        assertThrows(ForbiddenException.class, () -> service.buildCssBundle(PROJECT_ID));
+        verify(customTagRepository, never()).findByProjectIdOrProjectIdIsNull(any());
+    }
+
+    @Test
+    void buildCssBundle_projectId未指定ならプロジェクトメンバー判定を行わない() {
+        when(customTagRepository.findByProjectIdIsNull()).thenReturn(List.of());
+
+        service.buildCssBundle(null);
+
+        verify(adminAuthorizationService, never()).requireProjectMemberOrAdmin(any());
     }
 
     @Test

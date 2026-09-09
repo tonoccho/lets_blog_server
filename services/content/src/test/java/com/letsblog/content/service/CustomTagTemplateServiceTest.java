@@ -19,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -252,6 +253,44 @@ class CustomTagTemplateServiceTest {
         List<CustomTagTemplateResponse> result = service.list(5L);
 
         assertEquals(1, result.size());
+    }
+
+    /**
+     * issue #1057: GET /api/custom-tag-templates?projectId=&showAll=true は、公開状態を問わず
+     * 全件返す(findAllTemplatesByProject は isPublished を条件にしない)にもかかわらず
+     * プロジェクトメンバー判定が無く、非メンバーが他プロジェクトの未公開テンプレートを読めていた。
+     * searchByKeyword/filterByCategoryは isPublished=true を条件にしたクエリのため対象外
+     * (このIssueの対象は list() のみ)。
+     */
+    @Test
+    void list_projectId指定時はプロジェクトメンバー判定を行う() {
+        when(customTagTemplateRepository.findAllTemplatesByProject(5L)).thenReturn(List.of());
+
+        service.list(5L);
+
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(5L);
+    }
+
+    @Test
+    void list_プロジェクトメンバーでなければForbiddenExceptionが伝播する() {
+        doThrow(new ForbiddenException("not a member"))
+                .when(adminAuthorizationService).requireProjectMemberOrAdmin(5L);
+
+        assertThrows(ForbiddenException.class, () -> service.list(5L));
+        verify(customTagTemplateRepository, never()).findAllTemplatesByProject(any());
+    }
+
+    /**
+     * projectId 未指定(グローバルテンプレートのみ)はプロジェクト単位の判定対象がそもそも無いため、
+     * requireProjectMemberOrAdmin は経由しない(list() の null 分岐は元から変更していない)。
+     */
+    @Test
+    void list_projectId未指定ならプロジェクトメンバー判定を行わない() {
+        when(customTagTemplateRepository.findGlobalTemplates()).thenReturn(List.of());
+
+        service.list(null);
+
+        verify(adminAuthorizationService, never()).requireProjectMemberOrAdmin(any());
     }
 
     @Test

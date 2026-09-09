@@ -35,6 +35,18 @@ import java.util.stream.Stream;
  *
  * <p><b>この契約テストは「認可が正しいか」を判定しない。</b>認可呼び出しが<b>書かれているか</b>
  * だけを見る。呼んでいる認可が適切かどうかはレビューの仕事である。
+ *
+ * <p><b>既知の限界(issue #1057): 委譲先サービスの判定はファイル単位で、メソッド単位ではない。</b>
+ * {@code authorizingServicesIn} はコントローラが委譲するサービスの<b>ファイル全体</b>を走査し、
+ * {@link #AUTHORIZATION_CALL}が<b>どこかに1箇所でも</b>あれば、そのファイルが持つ
+ * <b>すべての</b>コントローラメソッドの委譲を「認可あり」とみなす。実際にどのメソッドが
+ * その呼び出しを持つかは見ない。そのため、同じサービスクラス内で一部のメソッド
+ * (例: {@code create}/{@code update}/{@code delete})だけが{@code requireAdmin()}を呼び、
+ * 別のメソッド(例: {@code list}/{@code buildCssBundle})が呼んでいなくても、後者は
+ * 誤って「認可あり」と判定され、許可リストにも載らないまま見過ごされる。
+ * {@code CustomTagService}がまさにこの形で、{@code list}/{@code buildCssBundle}に
+ * プロジェクトメンバー判定が無いまま(#1057で追加)このコントラクトを素通りしていた。
+ * メソッド単位の判定への書き換えは本クラスの責務を超えるため対象外とし、別Issueで扱う。
  */
 public final class AuthorizationCoverageContract {
 
