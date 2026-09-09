@@ -550,6 +550,76 @@ test, and why the old assertion was wrong.
 
 ---
 
+# Issue Provenance
+
+This is the single definition of the `user-request` label. `plan-issue`, `discover-issues`,
+and every stage that files an Issue under **Scope Control** defer to it. Do not restate it
+differently anywhere else — if you find a second definition in `.claude/`, that is a bug to
+fix, not a variant to follow.
+
+`user-request` marks an Issue **whose content came from the user's own statement of what they
+want.** It answers one question, later, when nobody remembers the session: *did I ask for this,
+or did Claude come up with it?*
+
+Add it when the user described the change — a feature they want, a bug they hit, a paste of an
+error they saw, a requirement list they wrote out. It does not matter which skill created the
+Issue, or whether the user said "起票して" explicitly.
+
+Do **not** add it when Claude authored the content, even though the user set the work in
+motion:
+
+| Situation | Label |
+| --- | --- |
+| "この機能を実装してほしい" / "―が壊れている、調べて起票して" | `user-request` |
+| A pasted error message or log the user hit | `user-request` |
+| `discover-issues` findings — including when the user ran the sweep | none |
+| "改善点を上げられる限り上げて起票して" — the user asked, Claude found | none |
+| Claude proposed a finding mid-work and the user said "起票して" | none |
+| **Scope Control** discoveries during implementation / review / QA | none |
+
+The line is **who authored the substance**, not who typed first. A sweep the user requested
+still produces Claude's findings; an error message the user pasted is still the user's report.
+
+An Issue with no `user-request` label means "Claude's own, or provenance unknown" — it is not
+an assertion that the user did not ask. Backfilling provenance for old Issues is best-effort
+(see below), so absence proves nothing.
+
+## Applying it
+
+Only ever with `add_labels`, never by writing the whole label set:
+
+```bash
+glab api "projects/:id/issues/<iid>" --method PUT -f "add_labels=user-request"
+```
+
+Writing `labels=` would silently drop `epic`, `bug`, and the `status::` / `priority::` labels
+the workflow depends on (see **How to change status**).
+
+To list them:
+
+```bash
+glab api "projects/:id/issues?per_page=100&state=all&labels=user-request" --paginate
+```
+
+## The 2026-09-09 backfill
+
+167 existing Issues were labelled by reconstructing provenance from the Claude Code
+transcripts in `~/.claude/projects/-home-seiji-*lets-blog-server/`: every `gh`/`glab issue
+create` call was matched to the last real user prompt before it, and to the response's
+`attributionSkill`. Issues created under `work-next`, `implement-issue`, `review-issue`,
+`qa-issue`, `git-workflow`, `merge-request` or `discover-issues` were classified as Claude's;
+free-text user prompts as the user's.
+
+**417 of 682 Issues could not be attributed at all** — transcripts only go back to 2026-08-10,
+and the project migrated from GitHub Issues to GitLab, which broke the number mapping. Those
+were deliberately left unlabelled rather than guessed at. Do not treat the backfill as
+complete, and do not re-run a guess over the unattributed remainder.
+
+Two labels named `source::user` and `source::agent` exist in the project and are used by
+nothing. They predate this rule and are not part of it.
+
+---
+
 # Scope Control
 
 Do not change unrelated files.

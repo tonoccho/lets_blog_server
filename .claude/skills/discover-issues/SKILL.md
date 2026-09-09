@@ -100,6 +100,9 @@ Set the `Priority` field (P0/P1/P2) determined in Step 3. Never leave a newly cr
 
 Apply appropriate existing labels (e.g. `bug`, `enhancement`, `architecture`) where they clearly fit.
 
+Never apply `user-request`. Everything this skill files is Claude's own finding — that stays
+true when the user is the one who ran the sweep. See `CLAUDE.md` → **Issue Provenance**.
+
 ---
 
 ## Step 6: Report

@@ -90,6 +90,16 @@ wording to fit.
 
 Use the repository's existing Issue conventions if they exist.
 
+#### Provenance label
+
+This skill converts a user's request into an Issue, so the Issue it creates normally carries
+`user-request` — add it alongside `status::Inbox` and `priority::`.
+
+The exception is when the user asked Claude to *find* the work rather than describing it
+("改善点を上げられる限り上げて起票して", "コードベースを解析して起票して"). Then the substance
+is Claude's, not the user's, and the label does not apply. See `CLAUDE.md` →
+**Issue Provenance** for the full rule; do not restate it here.
+
 ---
 
 ### Step 5: Set initial status
