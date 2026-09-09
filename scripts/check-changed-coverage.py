@@ -71,12 +71,30 @@ MEASURABLE_PATTERNS = [
 
 MEASURABLE_RE = [re.compile(p) for p in MEASURABLE_PATTERNS]
 
+# `packages/**/src` は Gradle サブプロジェクト(JaCoCo が走査する範囲)を想定した
+# パターンだが、`packages/api-client`(`@lets-blog/api-client`、orval が生成する
+# TypeScript クライアント)も字面上は同じパターンにマッチしてしまう(#1228)。
+# このツリーには Gradle も jest も配線されておらず(`package.json` の scripts は
+# `generate` / `typecheck` のみ)、原理的にレポートが出ない。
+#
+# `MEASURABLE_PATTERNS` 自体を「Gradle サブプロジェクトの一覧」に絞ると、将来
+# packages/ 配下に増える非JVMパッケージのたびに同じ穴が再発する。そこで
+# 「計測可能パターンにマッチするが実際には計測手段が無い」ツリーを明示的な
+# 例外として持ち、`is_measurable()` の判定でそれを優先する。
+UNMEASURABLE_OVERRIDE_PATTERNS = [
+    r"^packages/api-client/",
+]
+
+UNMEASURABLE_OVERRIDE_RE = [re.compile(p) for p in UNMEASURABLE_OVERRIDE_PATTERNS]
+
 
 def is_measurable(path):
     """カバレッジレポートが出る仕組みのあるツリーなら True。
 
     プロダクションコードかどうかは判定しない(それは `paths.is_production()` の役割)。
     """
+    if any(r.search(path) for r in UNMEASURABLE_OVERRIDE_RE):
+        return False
     return any(r.search(path) for r in MEASURABLE_RE)
 
 

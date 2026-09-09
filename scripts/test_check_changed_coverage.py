@@ -71,6 +71,35 @@ class UnmeasurableProductionCode(unittest.TestCase):
         code, out = run_main(["infra/e2e-stubs/lib/stub.js"])
         self.assertEqual(code, 0, out)
 
+    def test_api_client_generated_controller_does_not_fail(self):
+        """#1228: orval が生成する packages/api-client には JaCoCo も jest も無い。
+
+        `packages/**/src` に単純にマッチさせると、Gradle サブプロジェクトを想定した
+        パターンが非JVMの生成物ツリーまで「計測可能」と誤判定し、レポートが
+        存在しないため exit 1 になっていた(#1211 で実地発生)。
+        """
+        code, out = run_main(
+            [
+                "packages/api-client/src/generated/ai/project-llm-model-controller/"
+                "project-llm-model-controller.ts"
+            ]
+        )
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("カバレッジレポートが見つかりません", out)
+
+    def test_api_client_generated_schema_does_not_fail(self):
+        code, out = run_main(["packages/api-client/src/generated/ai/openAPIDefinition.schemas.ts"])
+        self.assertEqual(code, 0, out)
+
+    def test_api_client_generated_is_reported_as_unmeasurable(self):
+        _, out = run_main(
+            [
+                "packages/api-client/src/generated/ai/project-llm-model-controller/"
+                "project-llm-model-controller.ts"
+            ]
+        )
+        self.assertIn("計測対象外", out)
+
     def test_next_config_does_not_fail(self):
         """`apps/web/next.config.ts` も src/ の外にあり jest の計測対象ではない。"""
         code, out = run_main(["apps/web/next.config.ts"])
@@ -109,6 +138,17 @@ class MeasurableProductionCodeStillGated(unittest.TestCase):
     def test_packages_missing_report_fails(self):
         code, out = run_main(["packages/lbs-common/src/main/java/com/example/common/Json.java"])
         self.assertEqual(code, 1)
+
+    def test_api_client_does_not_mask_a_measurable_jvm_package(self):
+        """#1228 の免除と混在しても、実際にJaCoCoが計測するJVMパッケージは従来どおり落ちること。"""
+        code, out = run_main(
+            [
+                "packages/api-client/src/generated/ai/openAPIDefinition.schemas.ts",
+                "packages/lbs-common/src/main/java/com/example/common/Json.java",
+            ]
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("packages/lbs-common", out)
 
     def test_jvm_below_threshold_fails(self):
         code, out = run_main([self.JVM], {self.JVM: (5, 5)})
@@ -182,6 +222,10 @@ class MeasurabilityClassifier(unittest.TestCase):
         "infra/e2e-stubs/llm/server.js",
         "infra/e2e-stubs/lib/stub.js",
         "apps/web/next.config.ts",
+        "packages/api-client/src/generated/ai/openAPIDefinition.schemas.ts",
+        "packages/api-client/src/generated/ai/project-llm-model-controller/"
+        "project-llm-model-controller.ts",
+        "packages/api-client/src/index.ts",
     ]
 
     def test_measurable_trees(self):
