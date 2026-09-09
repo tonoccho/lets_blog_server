@@ -615,8 +615,34 @@ and the project migrated from GitHub Issues to GitLab, which broke the number ma
 were deliberately left unlabelled rather than guessed at. Do not treat the backfill as
 complete, and do not re-run a guess over the unattributed remainder.
 
-Two labels named `source::user` and `source::agent` exist in the project and are used by
-nothing. They predate this rule and are not part of it.
+## Selection order
+
+**A `user-request` Issue is selected before any Issue without it.** Provenance is the first
+sort key, ahead of priority (decided by the user, 2026-09-09). `ready-issue` Select-Next Mode
+and `work-next` Step 3 defer to this; it is repeated in neither.
+
+1. **Provenance** — `user-request` first; every other Issue after it.
+2. **Priority — highest first.** `P0` > `P1` > `P2` > unset. Unset always ranks last.
+3. **Is blocking count — largest first**, from `dependencies/blocking`.
+4. **Issue number — oldest first.**
+
+The keys apply strictly in order, so a `user-request` `P2` **is** selected ahead of an
+unlabelled `P0`. That is the intended effect: the user's own list is the queue, and work Claude
+proposed to itself waits behind it.
+
+The cost is real and must not be papered over. Two things follow from it:
+
+- An unlabelled `P0` — a production defect, a broken build, a security hole `discover-issues`
+  found — can sit behind a large `user-request` backlog. **Do not silently reorder to fix
+  that.** Report it and let the user decide.
+- **Absence is not evidence.** 417 of 682 Issues could not be attributed (see below), so an
+  unlabelled Issue may well be one the user asked for. Ranking it last is a consequence of
+  missing data, not a judgment that the user did not ask. Never argue from the absence of the
+  label, and never add it to an old Issue to promote it — if the user wants one prioritized,
+  they will say so, and labelling it then is the right response.
+
+Naming an Issue explicitly always overrides the order. "#123 を実装して" selects #123, whatever
+its provenance. So does `queue-priority.txt` in the unattended runner.
 
 ---
 

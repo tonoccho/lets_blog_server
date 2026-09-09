@@ -1,6 +1,6 @@
 ---
 name: ready-issue
-description: Validate GitLab Issue(s) in Backlog and move them to Ready when requirements, acceptance criteria, scope, and dependencies are sufficiently defined for implementation. Supports a single named Issue, or selecting the single highest-priority Backlog Issue (Priority → Is blocking count → oldest Issue number) and promoting it (e.g. "実装可能なタスクをReadyに移動して"). Use when the user asks to make Issue(s) Ready for implementation.
+description: Validate GitLab Issue(s) in Backlog and move them to Ready when requirements, acceptance criteria, scope, and dependencies are sufficiently defined for implementation. Supports a single named Issue, or selecting the single highest-priority Backlog Issue (user-request → Priority → Is blocking count → oldest Issue number) and promoting it (e.g. "実装可能なタスクをReadyに移動して"). Use when the user asks to make Issue(s) Ready for implementation.
 model: haiku
 ---
 
@@ -272,11 +272,17 @@ If every Backlog Issue is blocked, report that and stop.
 
 Sort the remaining candidates by this fixed order:
 
-1. **Priority — highest first.** `P0` > `P1` > `P2` > unset. Unset always ranks last.
-2. **Is blocking count — largest first.** The number of open Issues this Issue blocks, from `dependencies/blocking`. An Issue that unblocks more work is selected first.
-3. **Issue number — oldest first.** The lowest Issue number wins.
+1. **Provenance — `user-request` first.** Every other Issue ranks after it.
+2. **Priority — highest first.** `P0` > `P1` > `P2` > unset. Unset always ranks last.
+3. **Is blocking count — largest first.** The number of open Issues this Issue blocks, from `dependencies/blocking`. An Issue that unblocks more work is selected first.
+4. **Issue number — oldest first.** The lowest Issue number wins.
 
-These three keys are applied strictly in order. Do not substitute your own judgment about which Issue is more interesting or easier.
+These four keys are applied strictly in order, per `CLAUDE.md` → **Issue Provenance** →
+Selection order. Do not substitute your own judgment about which Issue is more interesting or
+easier.
+
+Read the label; never infer provenance from an Issue's wording, and never add `user-request`
+to an Issue in order to promote it.
 
 ## Step 4: Evaluate the top candidate
 
