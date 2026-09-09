@@ -58,10 +58,28 @@ spring:
     password: ${RABBITMQ_PASSWORD:guest}
     listener:
       simple:
-        # メッセージ処理(DB書き込み)に失敗した場合は自動リトライせず、キューにrequeueして
-        # 別インスタンス/後続の受信で再試行させる(issue #466: 受信側の一時的なDB障害等でも
-        # ログを欠落させない)。
-        default-requeue-rejected: true
+        # issue #1059: #466の「default-requeue-rejected: true」は一時的な失敗(DB接続断等)を
+        # 想定していたが、NOT NULL違反のような永続的な失敗も無限にrequeueしてしまい、
+        # 1件の不正なメッセージが対象キューのコンシューマーを占有し続ける事故を起こした
+        # (#1059の失敗シナリオ)。
+        #
+        # 一時的な失敗と永続的な失敗を例外の型では区別せず、「リトライ回数」で区別する方針に
+        # 変更する: 一時的な失敗は数回のリトライで解消する見込みが高く、解消しない失敗は
+        # 実質的に永続的な失敗として扱ってよい。下記retryで有限回(3回、初回込みで最大4回)
+        # リトライし、それでも失敗したメッセージはrequeueされず(既定のRejectAndDontRequeueRecoverer
+        # がAmqpRejectAndDontRequeueExceptionを投げる)、各キューのx-dead-letter-exchange設定
+        # (RabbitMqConfig参照)によりletsblog.logs.dlx経由でDLQへ配送される。
+        #
+        # default-requeue-rejectedはリトライadviceが例外を握って再スローしない限り(想定外の
+        # 例外がリスナー自体から漏れた場合など)にのみ効くフォールバックのため、falseにして
+        # そちらも無限requeueにならないようにする。
+        retry:
+          enabled: true
+          max-retries: 3
+          initial-interval: 1000
+          multiplier: 2.0
+          max-interval: 10000
+        default-requeue-rejected: false
 
 # ログ読み取りAPIのadmin判定・自分自身のuserId解決のため、呼び出し元のBearerトークンをそのまま
 # identity-serviceの/api/identity/meへ転送して問い合わせる(#572)。lbs_logスキーマは

@@ -11,6 +11,8 @@ dependencies {
 
     implementation 'org.springframework.boot:spring-boot-starter-amqp'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    // POST /api/logs/errorsの入口検証(issue #1059)。@Valid/@NotBlank/@Sizeを使う。
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
     // ログ読み取りAPI(#572でlegacy-apiから移設)を公開するREST APIサーバー。以前はDocker
     // healthcheck用のactuator公開のみが理由だったが、いまはAuditLog/OperationLog/
     // FrontendErrorLogの各読み取りコントローラーが実際にこれを使う。

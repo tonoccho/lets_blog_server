@@ -5,6 +5,7 @@ import com.letsblog.logwriter.dto.FrontendErrorLogRequest;
 import com.letsblog.logwriter.service.AdminAuthorizationService;
 import com.letsblog.logwriter.service.ForbiddenException;
 import com.letsblog.logwriter.service.FrontendErrorLogService;
+import java.time.LocalDateTime;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -66,5 +67,49 @@ class FrontendErrorLogControllerTest {
         controller().getErrors("error", null, null, null, pageable);
 
         verify(service).findByLevel("ERROR", pageable);
+    }
+
+    @Test
+    void getErrors_startDateとendDateが両方あればfindByDateRangeへ委譲する() {
+        Pageable pageable = PageRequest.of(0, 20);
+        LocalDateTime start = LocalDateTime.of(2026, 1, 1, 0, 0);
+        LocalDateTime end = LocalDateTime.of(2026, 1, 2, 0, 0);
+        when(service.findByDateRange(start, end, pageable)).thenReturn(Page.empty());
+
+        controller().getErrors(null, start, end, null, pageable);
+
+        verify(service).findByDateRange(start, end, pageable);
+    }
+
+    @Test
+    void getErrors_startDateのみではfindByDateRangeへ委譲しない() {
+        Pageable pageable = PageRequest.of(0, 20);
+        LocalDateTime start = LocalDateTime.of(2026, 1, 1, 0, 0);
+        when(service.findAll(pageable)).thenReturn(Page.empty());
+
+        controller().getErrors(null, start, null, null, pageable);
+
+        verify(service, times(0)).findByDateRange(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(service).findAll(pageable);
+    }
+
+    @Test
+    void getErrors_url指定でfindByUrlへ委譲する() {
+        Pageable pageable = PageRequest.of(0, 20);
+        when(service.findByUrl("https://example.com", pageable)).thenReturn(Page.empty());
+
+        controller().getErrors(null, null, null, "https://example.com", pageable);
+
+        verify(service).findByUrl("https://example.com", pageable);
+    }
+
+    @Test
+    void getErrors_条件無しならfindAllへ委譲する() {
+        Pageable pageable = PageRequest.of(0, 20);
+        when(service.findAll(pageable)).thenReturn(Page.empty());
+
+        controller().getErrors(null, null, null, null, pageable);
+
+        verify(service).findAll(pageable);
     }
 }

@@ -4,6 +4,7 @@ import com.letsblog.logwriter.domain.FrontendErrorLog;
 import com.letsblog.logwriter.dto.FrontendErrorLogRequest;
 import com.letsblog.logwriter.service.AdminAuthorizationService;
 import com.letsblog.logwriter.service.FrontendErrorLogService;
+import jakarta.validation.Valid;
 import java.time.LocalDateTime;
 import java.util.Locale;
 import org.springframework.data.domain.Page;
@@ -40,7 +41,7 @@ public class FrontendErrorLogController {
      * 読み取り側({@code GET /errors})には別途認可が掛かっている。
      */
     @PostMapping("/errors")
-    public ResponseEntity<Void> logError(@RequestBody FrontendErrorLogRequest request) {
+    public ResponseEntity<Void> logError(@Valid @RequestBody FrontendErrorLogRequest request) {
         FrontendErrorLog errorLog = request.toDomain();
         service.logError(errorLog);
         return ResponseEntity.status(HttpStatus.CREATED).build();

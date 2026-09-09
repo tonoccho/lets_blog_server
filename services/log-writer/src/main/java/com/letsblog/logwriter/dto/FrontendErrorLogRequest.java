@@ -1,12 +1,23 @@
 package com.letsblog.logwriter.dto;
 
 import com.letsblog.logwriter.domain.FrontendErrorLog;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
 import java.util.Set;
 
+/**
+ * {@code message}の検証(issue #1059)。DB列({@code frontend_error_logs.message}、
+ * V1__create_log_tables.sql)がMySQLの{@code TEXT}かつ{@code NOT NULL}のため、それぞれに対応する
+ * 制約を入口に付ける。{@code TEXT}の実容量上限は65,535バイトだが、UTF-8のマルチバイト文字を
+ * 考慮せず文字数でその値をそのまま上限にする(バイト数で厳密に一致させる必要はなく、
+ * 「実質的にTEXT列に収まる」ことを保証する趣旨のため)。
+ */
 public record FrontendErrorLogRequest(
+        @NotBlank(message = "messageは必須です")
+        @Size(max = 65535, message = "messageは65535文字以内である必要があります")
         String message,
         String stack,
         String componentStack,
