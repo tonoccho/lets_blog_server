@@ -96,6 +96,53 @@ if [ -n "$blanked" ]; then
     echo "$blanked" | sed 's/^/    /'
 fi
 
+# issue #1058: 存在・重複・空欄だけでは、「.env.example をコピーしただけ」でも
+# ✓ になってしまう。CredentialCipher(packages/lbs-common)がAPP_ENCRYPTION_KEYを
+# strict Base64として受け取り、32バイトでなければ起動時に落ちる — 検査に通った
+# のに5サービスが黙って落ちる、というのが本Issueの中身。
+#
+# 値を取り出す(後の定義が勝つので最後の行を採る。duplicate_keys_ofと同じ前提)。
+value_of_key() {
+    grep -E "^$1=" "$2" | tail -n1 | cut -d'=' -f2-
+}
+
+# 未変更のプレースホルダを検出する必須変更キー。棚卸しは別Issue(#982)なので、
+# 現時点では本Issueが対象とするAPP_ENCRYPTION_KEYのみを挙げる。
+PLACEHOLDER_MUST_CHANGE_VARS="APP_ENCRYPTION_KEY"
+
+for var in $PLACEHOLDER_MUST_CHANGE_VARS; do
+    if ! grep -qE "^${var}=" "$EXAMPLE" || ! grep -qE "^${var}=" "$TARGET"; then
+        continue  # 契約に無い/不足は上の検査が既に報告する
+    fi
+    example_value="$(value_of_key "$var" "$EXAMPLE")"
+    target_value="$(value_of_key "$var" "$TARGET")"
+    if [ "$target_value" = "$example_value" ]; then
+        status=1
+        echo "✗ ${var} が .env.example のプレースホルダのまま変更されていません:"
+        echo "    → openssl rand -base64 32 で生成した値に置き換えてください"
+    fi
+done
+
+# APP_ENCRYPTION_KEY固有: CredentialCipherと同じ条件(strict Base64・32バイト)を
+# ここで検査し、check-env.shの✓が「起動する」ことを裏付けるようにする。
+if grep -qE "^APP_ENCRYPTION_KEY=" "$TARGET"; then
+    key_value="$(value_of_key "APP_ENCRYPTION_KEY" "$TARGET")"
+    if [ -n "$key_value" ]; then
+        if ! printf '%s' "$key_value" | base64 -d >/dev/null 2>&1; then
+            status=1
+            echo "✗ APP_ENCRYPTION_KEY がBase64として不正です:"
+            echo "    → openssl rand -base64 32 で生成した値に置き換えてください"
+        else
+            decoded_len="$(printf '%s' "$key_value" | base64 -d | wc -c)"
+            if [ "$decoded_len" -ne 32 ]; then
+                status=1
+                echo "✗ APP_ENCRYPTION_KEY はBase64デコード後32バイトである必要があります(実際: ${decoded_len}バイト):"
+                echo "    → openssl rand -base64 32 で生成した値に置き換えてください"
+            fi
+        fi
+    fi
+fi
+
 if [ "$status" -ne 0 ]; then
     echo
     echo "  対処:"

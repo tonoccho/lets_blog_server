@@ -29,7 +29,15 @@ public class CredentialCipher {
         if (base64Key == null || base64Key.isBlank()) {
             throw new IllegalStateException("app.encryption-key (APP_ENCRYPTION_KEY) が設定されていません");
         }
-        byte[] decoded = Base64.getDecoder().decode(base64Key);
+        byte[] decoded;
+        try {
+            decoded = Base64.getDecoder().decode(base64Key);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException(
+                    "APP_ENCRYPTION_KEY (.env) がBase64として不正です。"
+                            + "openssl rand -base64 32 で生成した値を設定してください",
+                    e);
+        }
         if (decoded.length != 32) {
             throw new IllegalStateException("APP_ENCRYPTION_KEY は32バイト(Base64エンコード)である必要があります");
         }

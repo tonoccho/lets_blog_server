@@ -42,4 +42,24 @@ class CredentialCipherTest {
     void 鍵が未設定の場合は例外を投げる() {
         assertThrows(IllegalStateException.class, () -> new CredentialCipher(""));
     }
+
+    @Test
+    void 鍵がnullの場合は例外を投げる() {
+        assertThrows(IllegalStateException.class, () -> new CredentialCipher(null));
+    }
+
+    @Test
+    void 鍵がBase64として不正な場合はAPP_ENCRYPTION_KEYを名指しする例外を投げる() {
+        // issue #1058: `.env.example` の旧プレースホルダ相当。`_` はstrict Base64の
+        // basicアルファベットに含まれず、Base64.getDecoder()はIllegalArgumentExceptionを
+        // 投げる。これをそのまま伝播させると原因(APP_ENCRYPTION_KEY/.env)が名指しされない。
+        String invalidBase64 = "changeme_base64_32byte_key";
+
+        IllegalStateException ex = assertThrows(
+                IllegalStateException.class,
+                () -> new CredentialCipher(invalidBase64));
+
+        assertEquals(true, ex.getMessage().contains("APP_ENCRYPTION_KEY"));
+        assertEquals(true, ex.getMessage().contains(".env"));
+    }
 }

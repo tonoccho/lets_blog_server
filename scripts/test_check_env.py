@@ -91,11 +91,25 @@ class CheckEnvDetectsDuplicates(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def env_from_example(self, extra_lines=()):
-        """`.env.example` をそのまま写した `.env` を作る(不足を出さないため)。"""
+    def env_from_example(self, extra_lines=(), overrides=None):
+        """`.env.example` をそのまま写した `.env` を作る(不足を出さないため)。
+
+        `overrides` は `{キー: 値}`。該当行の値をその場で書き換える
+        (末尾に別行として足すと重複キー扱いになってしまうため)。
+        """
+        overrides = overrides or {}
         path = os.path.join(self.tmp, ".env")
-        with open(EXAMPLE, encoding="utf-8") as src, open(path, "w", encoding="utf-8") as dst:
-            dst.write(src.read())
+        with open(EXAMPLE, encoding="utf-8") as src:
+            lines = src.read().splitlines()
+        out = []
+        for line in lines:
+            m = KEY_LINE.match(line)
+            if m and m.group(1) in overrides:
+                out.append("%s=%s" % (m.group(1), overrides[m.group(1)]))
+            else:
+                out.append(line)
+        with open(path, "w", encoding="utf-8") as dst:
+            dst.write("\n".join(out) + "\n")
             for line in extra_lines:
                 dst.write(line + "\n")
         return path
@@ -105,8 +119,17 @@ class CheckEnvDetectsDuplicates(unittest.TestCase):
             ["bash", SCRIPT, target], capture_output=True, text=True, timeout=90
         )
 
+    # issue #1058: `.env.example` を素のままコピーした `.env` は、もはや
+    # 「clean」ではない(APP_ENCRYPTION_KEYが未変更のプレースホルダのまま)。
+    # このクラスの「clean」テストは重複検査を確かめるためのものなので、
+    # APP_ENCRYPTION_KEYだけは実際に変更した値に差し替える。
+    VALID_ENCRYPTION_KEY = "Q2hlY2tFbnZUZXN0VmFsaWREdW1teUtleTMyQnl0ZXM="
+
     def test_clean_env_still_passes(self):
-        r = self.run_check(self.env_from_example())
+        target = self.env_from_example(
+            overrides={"APP_ENCRYPTION_KEY": self.VALID_ENCRYPTION_KEY}
+        )
+        r = self.run_check(target)
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
 
     def test_duplicate_key_in_env_is_reported(self):
@@ -137,6 +160,85 @@ class CheckEnvDetectsDuplicates(unittest.TestCase):
         # `.env` 側に同じ重複が入ることで検出されることを確認する。
         r = self.run_check(os.path.join(broken, ".env"))
         self.assertNotEqual(0, r.returncode)
+
+
+class CheckEnvDetectsAppEncryptionKeyProblems(unittest.TestCase):
+    """受入基準1・2・3: APP_ENCRYPTION_KEY 固有の検査(#1058)。
+
+    `CredentialCipher`(packages/lbs-common)がBase64として厳密デコードする値で、
+    `.env.example` をコピーしただけだと不正なBase64のまま5サービスが黙って
+    落ちていた。`check-env.sh` にこの1件を検出させる。
+    """
+
+    VALID_ENCRYPTION_KEY = "Q2hlY2tFbnZUZXN0VmFsaWREdW1teUtleTMyQnl0ZXM="
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def env_from_example(self, overrides=None):
+        """`.env.example` をそのまま写した `.env` を作る。
+
+        `overrides` は `{キー: 値}`。該当行の値をその場で書き換える。
+        """
+        overrides = overrides or {}
+        path = os.path.join(self.tmp, ".env")
+        with open(EXAMPLE, encoding="utf-8") as src:
+            lines = src.read().splitlines()
+        out = []
+        for line in lines:
+            m = KEY_LINE.match(line)
+            if m and m.group(1) in overrides:
+                out.append("%s=%s" % (m.group(1), overrides[m.group(1)]))
+            else:
+                out.append(line)
+        with open(path, "w", encoding="utf-8") as dst:
+            dst.write("\n".join(out) + "\n")
+        return path
+
+    def run_check(self, target):
+        return subprocess.run(
+            ["bash", SCRIPT, target], capture_output=True, text=True, timeout=90
+        )
+
+    def test_unchanged_placeholder_is_rejected(self):
+        # .env.example をそのままコピーしただけ(APP_ENCRYPTION_KEYも未変更)。
+        target = self.env_from_example()
+        r = self.run_check(target)
+        out = r.stdout + r.stderr
+        self.assertNotEqual(0, r.returncode, "プレースホルダ未変更なのに終了コード0: " + out)
+        self.assertIn("APP_ENCRYPTION_KEY", out)
+        self.assertIn("openssl rand -base64 32", out, "生成方法が示されていない")
+
+    def test_invalid_base64_value_is_rejected(self):
+        # 未変更ではない(.env.exampleの値とは異なる)が、Base64として不正。
+        target = self.env_from_example(
+            overrides={"APP_ENCRYPTION_KEY": "not_a_valid_base64_value_at_all"}
+        )
+        r = self.run_check(target)
+        out = r.stdout + r.stderr
+        self.assertNotEqual(0, r.returncode, "不正なBase64なのに終了コード0: " + out)
+        self.assertIn("APP_ENCRYPTION_KEY", out)
+
+    def test_wrong_length_value_is_rejected(self):
+        # 正しいBase64だが、デコード後が32バイトでない(16バイト)。
+        import base64
+        short_key = base64.b64encode(b"0123456789abcdef").decode()
+        target = self.env_from_example(overrides={"APP_ENCRYPTION_KEY": short_key})
+        r = self.run_check(target)
+        out = r.stdout + r.stderr
+        self.assertNotEqual(0, r.returncode, "32バイトでないのに終了コード0: " + out)
+        self.assertIn("APP_ENCRYPTION_KEY", out)
+
+    def test_valid_generated_value_passes(self):
+        # openssl rand -base64 32 相当の、正しい32バイト値。プレースホルダとも異なる。
+        target = self.env_from_example(
+            overrides={"APP_ENCRYPTION_KEY": self.VALID_ENCRYPTION_KEY}
+        )
+        r = self.run_check(target)
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
 
 
 if __name__ == "__main__":
