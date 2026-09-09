@@ -261,6 +261,23 @@ export interface GenerationJobDetailResponse {
   updatedAt?: string;
 }
 
+export interface SelectReviewStepModelRequest {
+  provider?: string;
+  model?: string;
+}
+
+export interface ReviewStepSettingResponse {
+  stepKey?: string;
+  provider?: string;
+  model?: string;
+}
+
+export interface ReviewStepSettingsResponse {
+  steps?: ReviewStepSettingResponse[];
+  availableProviders?: string[];
+  availableModels?: string[];
+}
+
 export type ListIssuesParams = {
 state?: string;
 };

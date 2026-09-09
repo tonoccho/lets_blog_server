@@ -1,11 +1,15 @@
 package com.letsblog.ai.controller;
 
+import com.letsblog.ai.domain.ReviewStepKey;
 import com.letsblog.ai.dto.LlmModelListResponse;
 import com.letsblog.ai.dto.LlmProviderListResponse;
+import com.letsblog.ai.dto.ReviewStepSettingsResponse;
 import com.letsblog.ai.dto.SelectLlmModelRequest;
 import com.letsblog.ai.dto.SelectLlmProviderRequest;
+import com.letsblog.ai.dto.SelectReviewStepModelRequest;
 import com.letsblog.ai.service.AdminAuthorizationService;
 import com.letsblog.ai.service.LlmModelService;
+import com.letsblog.ai.service.ReviewStepModelService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -31,11 +35,15 @@ public class ProjectLlmModelController {
 
     private final LlmModelService llmModelService;
     private final AdminAuthorizationService adminAuthorizationService;
+    private final ReviewStepModelService reviewStepModelService;
 
     public ProjectLlmModelController(
-            LlmModelService llmModelService, AdminAuthorizationService adminAuthorizationService) {
+            LlmModelService llmModelService,
+            AdminAuthorizationService adminAuthorizationService,
+            ReviewStepModelService reviewStepModelService) {
         this.llmModelService = llmModelService;
         this.adminAuthorizationService = adminAuthorizationService;
+        this.reviewStepModelService = reviewStepModelService;
     }
 
     @GetMapping("/models")
@@ -62,5 +70,25 @@ public class ProjectLlmModelController {
             @PathVariable Long id, @RequestBody SelectLlmProviderRequest request) {
         adminAuthorizationService.requireAdmin();
         return llmModelService.selectProvider(id, request.provider());
+    }
+
+    /**
+     * 多段レビュー(issue #1210)の5ステップぶんの選択値・選択可能なprovider/model一覧を返す
+     * (issue #1211)。
+     */
+    @GetMapping("/review-steps")
+    public ReviewStepSettingsResponse listReviewStepSettings(@PathVariable Long id) {
+        adminAuthorizationService.requireAdmin();
+        return reviewStepModelService.listSettings(id);
+    }
+
+    /** provider/modelが空ならそのステップの上書きを解除する(issue #1211)。 */
+    @PutMapping("/review-steps/{stepKey}")
+    public ReviewStepSettingsResponse updateReviewStepSetting(
+            @PathVariable Long id,
+            @PathVariable ReviewStepKey stepKey,
+            @RequestBody SelectReviewStepModelRequest request) {
+        adminAuthorizationService.requireAdmin();
+        return reviewStepModelService.selectSetting(id, stepKey, request.provider(), request.model());
     }
 }

@@ -84,6 +84,9 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("PUT", "/api/projects/1/ai-models/llm/models/selection"),
                 new Endpoint("GET", "/api/projects/1/ai-models/llm/provider"),
                 new Endpoint("PUT", "/api/projects/1/ai-models/llm/provider/selection"),
+                // issue #1211: 多段レビューのステップ別provider/model設定
+                new Endpoint("GET", "/api/projects/1/ai-models/llm/review-steps"),
+                new Endpoint("PUT", "/api/projects/1/ai-models/llm/review-steps/JAPANESE"),
 
                 // -- GenerationJobController --
                 new Endpoint("GET", "/api/generation-jobs"),

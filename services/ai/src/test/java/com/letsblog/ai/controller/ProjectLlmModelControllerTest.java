@@ -1,12 +1,17 @@
 package com.letsblog.ai.controller;
 
+import com.letsblog.ai.domain.ReviewStepKey;
 import com.letsblog.ai.dto.LlmModelListResponse;
 import com.letsblog.ai.dto.LlmProviderListResponse;
+import com.letsblog.ai.dto.ReviewStepSettingResponse;
+import com.letsblog.ai.dto.ReviewStepSettingsResponse;
 import com.letsblog.ai.dto.SelectLlmModelRequest;
 import com.letsblog.ai.dto.SelectLlmProviderRequest;
+import com.letsblog.ai.dto.SelectReviewStepModelRequest;
 import com.letsblog.ai.service.AdminAuthorizationService;
 import com.letsblog.ai.service.ForbiddenException;
 import com.letsblog.ai.service.LlmModelService;
+import com.letsblog.ai.service.ReviewStepModelService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -34,8 +39,11 @@ class ProjectLlmModelControllerTest {
     @Mock
     private AdminAuthorizationService adminAuthorizationService;
 
+    @Mock
+    private ReviewStepModelService reviewStepModelService;
+
     private ProjectLlmModelController controller() {
-        return new ProjectLlmModelController(llmModelService, adminAuthorizationService);
+        return new ProjectLlmModelController(llmModelService, adminAuthorizationService, reviewStepModelService);
     }
 
     @Test
@@ -92,5 +100,56 @@ class ProjectLlmModelControllerTest {
 
         assertEquals("CLAUDE", response.selected());
         verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void listReviewStepSettings_認可後にサービスへ委譲する() {
+        ProjectLlmModelController controller = controller();
+        ReviewStepSettingsResponse expected = new ReviewStepSettingsResponse(
+                List.of(new ReviewStepSettingResponse("JAPANESE", null, null)),
+                List.of("OLLAMA", "OPENAI", "CLAUDE"),
+                List.of("gpt-4o-mini"));
+        when(reviewStepModelService.listSettings(1L)).thenReturn(expected);
+
+        ReviewStepSettingsResponse response = controller.listReviewStepSettings(1L);
+
+        assertEquals(expected, response);
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void listReviewStepSettings_認可拒否ならForbidden() {
+        ProjectLlmModelController controller = controller();
+        doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.listReviewStepSettings(1L));
+    }
+
+    @Test
+    void updateReviewStepSetting_認可後にサービスへ委譲する() {
+        ProjectLlmModelController controller = controller();
+        ReviewStepSettingsResponse expected = new ReviewStepSettingsResponse(
+                List.of(new ReviewStepSettingResponse("STYLE", "CLAUDE", "gpt-4o")),
+                List.of("OLLAMA", "OPENAI", "CLAUDE"),
+                List.of("gpt-4o"));
+        when(reviewStepModelService.selectSetting(1L, ReviewStepKey.STYLE, "CLAUDE", "gpt-4o"))
+                .thenReturn(expected);
+
+        ReviewStepSettingsResponse response = controller.updateReviewStepSetting(
+                1L, ReviewStepKey.STYLE, new SelectReviewStepModelRequest("CLAUDE", "gpt-4o"));
+
+        assertEquals(expected, response);
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void updateReviewStepSetting_認可拒否ならForbidden() {
+        ProjectLlmModelController controller = controller();
+        doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(
+                ForbiddenException.class,
+                () -> controller.updateReviewStepSetting(
+                        1L, ReviewStepKey.STYLE, new SelectReviewStepModelRequest("CLAUDE", "gpt-4o")));
     }
 }

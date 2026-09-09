@@ -7,8 +7,10 @@
 import type {
   LlmModelListResponse,
   LlmProviderListResponse,
+  ReviewStepSettingsResponse,
   SelectLlmModelRequest,
-  SelectLlmProviderRequest
+  SelectLlmProviderRequest,
+  SelectReviewStepModelRequest
 } from '../openAPIDefinition.schemas';
 
 
@@ -179,6 +181,93 @@ export const listLlmModels = async (id: number, options?: RequestInit): Promise<
 
   const data: listLlmModelsResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as listLlmModelsResponse
+}
+
+
+export type updateReviewStepSettingResponse200 = {
+  data: ReviewStepSettingsResponse
+  status: 200
+}
+
+export type updateReviewStepSettingResponseSuccess = (updateReviewStepSettingResponse200) & {
+  headers: Headers;
+};
+;
+
+export type updateReviewStepSettingResponse = (updateReviewStepSettingResponseSuccess)
+
+export const getUpdateReviewStepSettingUrl = (id: number,
+    stepKey: 'JAPANESE' | 'PROOFREADING' | 'FACT_CHECK' | 'READER_PERSPECTIVE' | 'STYLE',) => {
+
+
+
+
+  return `http://localhost:8080/api/projects/${id}/ai-models/llm/review-steps/${stepKey}`
+}
+
+export const updateReviewStepSetting = async (id: number,
+    stepKey: 'JAPANESE' | 'PROOFREADING' | 'FACT_CHECK' | 'READER_PERSPECTIVE' | 'STYLE',
+    selectReviewStepModelRequest: SelectReviewStepModelRequest, options?: RequestInit): Promise<updateReviewStepSettingResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+const res = await fetch(getUpdateReviewStepSettingUrl(id,stepKey),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(selectReviewStepModelRequest)
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: updateReviewStepSettingResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as updateReviewStepSettingResponse
+}
+
+
+export type listReviewStepSettingsResponse200 = {
+  data: ReviewStepSettingsResponse
+  status: 200
+}
+
+export type listReviewStepSettingsResponseSuccess = (listReviewStepSettingsResponse200) & {
+  headers: Headers;
+};
+;
+
+export type listReviewStepSettingsResponse = (listReviewStepSettingsResponseSuccess)
+
+export const getListReviewStepSettingsUrl = (id: number,) => {
+
+
+
+
+  return `http://localhost:8080/api/projects/${id}/ai-models/llm/review-steps`
+}
+
+export const listReviewStepSettings = async (id: number, options?: RequestInit): Promise<listReviewStepSettingsResponse> => {
+
+  const res = await fetch(getListReviewStepSettingsUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: listReviewStepSettingsResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as listReviewStepSettingsResponse
 }
 
 
