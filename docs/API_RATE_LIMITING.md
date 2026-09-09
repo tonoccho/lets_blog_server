@@ -76,10 +76,22 @@ traffic for the host's IP. Raise `API_RATE_LIMIT_REQUESTS` if that becomes a lim
 #### 2. Authentication Rate Limiter (`auth-endpoint`)
 - **Default Limit**: 5 requests per 1 minute, **process-wide** (not partitioned)
 - **Environment Variable**: `AUTH_RATE_LIMIT_REQUESTS` (default: 5)
-- **Applies to**: `/auth/*`, `/login`, `/register` endpoints
+- **Applies to**: paths that actually pass through the gateway and contain `/auth/`, `/login`
+  or `/register` — in practice `/api/auth/**` (identity-service's one-time setup flow,
+  `AuthSetupController`). See issues #781 and #321, both about this `/api/auth/**` path.
 - **Does not apply to**: the read-only status checks `/api/auth/setup-status` and
   `/api/auth/totp/status`, which use `api-global` / `api-internal` instead
-- **Purpose**: Prevents brute force attacks
+- **Purpose**: Prevents brute force attacks against the gateway-routed setup/login endpoints
+- **Does NOT apply to `/auth/*`** (Keycloak's hosted login and token endpoint,
+  `/auth/realms/letsblog/...`). `infra/nginx/conf.d/default.conf`'s `location /auth/` proxies
+  directly to Keycloak and never reaches the gateway, so `RateLimitWebFilter` — and this
+  `auth-endpoint` bucket — never sees that traffic, no matter how the name reads. The password
+  Keycloak actually verifies is protected by Keycloak's own brute force detection instead
+  (`bruteForceProtected` in `infra/keycloak/realm-export.json`, enabled by issue #1056; see
+  `scripts/apply-keycloak-bruteforce-protection.sh` for reflecting it onto an already-running
+  environment). Do not confuse the two: #781/#321 are about the gateway-routed `/api/auth/**`
+  covered by this bucket; #1056 is about the separate `/auth/*` path that this bucket never
+  touches.
 
 #### 3. Upload Rate Limiter (`upload-endpoint`)
 - **Default Limit**: 10 requests per 1 hour, **process-wide** (not partitioned)

@@ -123,6 +123,20 @@ E2E_ADMIN_PASSWORD='<任意の強いパスワード>' \
    **初回起動時にしか読まない** ため、既に起動済みの環境ではこのスクリプトで作る必要がある。
    既存の `admin-cli` などの実運用クライアントには一切触れない。
 
+   > **`directAccessGrantsEnabled: true` を残す判断(issue #1056)。** このクライアントは
+   > クライアントシークレット無しで Resource Owner Password Credentials グラントを叩ける
+   > (`publicClient: true`)。本番同等の realm にこの組み合わせが居てよい理由は3つ:
+   > (1) `redirectUris` が空で `webOrigins` も無く、ブラウザ経由の認可コードフローには
+   > 使えない——このクライアントで到達できるのは password グラントだけである。
+   > (2) `docs/CUTOVER_RUNBOOK.md` の記載どおり、本番カットオーバーではこのクライアントを
+   > 転用せず E2E 専用のまま残す。
+   > (3) issue #1056 で Keycloak の brute force detection (`bruteForceProtected`) を有効化した
+   > ため、シークレットが無くても連続した失敗はアカウント単位でロックされ、
+   > `letsblog-e2e` を使った総当たりも他の経路と同様に防御される。
+   > 削除しなかったのは、`apps/web/e2e/helpers.ts` の `fetchAccessToken` を筆頭に
+   > 多数の受け入れシナリオがこのグラントでトークンを取得しており(§7 参照)、
+   > Authorization Code + PKCE 専用の `letsblog-web` / `letsblog-vscode` では代替できないため。
+
 > **共有 / 本番 Keycloak では実行しないこと。**
 > スクリプトはコンテナ名 `lbs-keycloak` 固定で、任意の URL を指定するオプションを持たない。
 > 操作対象も `e2e-*@letsblog.local` に限定されており、それ以外のメールアドレスを渡すと中止する。
