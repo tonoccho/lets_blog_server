@@ -17,11 +17,21 @@ const openPanels = new Map<string, { reveal(): void }>();
  * 各パネルが個別にstatic currentPanelを持つと、破棄時のクリアを書き漏らした際に
  * 「閉じたのに二度と開けない」状態になる。破棄時の後始末を基底クラス側へ寄せるため、
  * 生存管理をここへ集約している。
+ *
+ * issue #1063: 既存パネルを前面に出すだけでは、生成時に渡したTextEditor/baseDir等を
+ * 握ったままになり、記事を切り替えて再度開いても前の記事へ書き込み続けてしまう。
+ * 既存パネルを再利用する場合にだけ`onReveal`を呼び、呼び出し元が最新の状態を
+ * 押し込めるようにする(新規生成時はコンストラクタ引数で既に最新のため呼ばない)。
  */
-export function showSingletonPanel<T extends { reveal(): void }>(viewType: string, create: () => T): T {
+export function showSingletonPanel<T extends { reveal(): void }>(
+  viewType: string,
+  create: () => T,
+  onReveal?: (existing: T) => void
+): T {
   const existing = openPanels.get(viewType) as T | undefined;
   if (existing) {
     existing.reveal();
+    onReveal?.(existing);
     return existing;
   }
   const created = create();

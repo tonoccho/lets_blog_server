@@ -28,21 +28,40 @@ export class DiagramGalleryPanel extends WebviewPanelBase<
   ): void {
     showSingletonPanel(
       'letsBlog.diagramGallery',
-      () => new DiagramGalleryPanel(context, editor, baseDir, projectId)
+      () => new DiagramGalleryPanel(context, editor, baseDir, projectId),
+      (existing) => existing.updateTarget(editor, baseDir, projectId)
     );
   }
 
+  /** 挿入・保存先(issue #1063)。シングルトン再利用時に書き換わるためreadonlyにしない。 */
+  private _editor: vscode.TextEditor;
+  private _baseDir: string;
+  private _projectId: number;
+
   private constructor(
     context: vscode.ExtensionContext,
-    private readonly _editor: vscode.TextEditor,
-    private readonly _baseDir: string,
-    private readonly _projectId: number
+    editor: vscode.TextEditor,
+    baseDir: string,
+    projectId: number
   ) {
     super(context, {
       viewType: 'letsBlog.diagramGallery',
       title: 'Diagram Gallery',
       assetName: 'diagramGallery',
     });
+    this._editor = editor;
+    this._baseDir = baseDir;
+    this._projectId = projectId;
+  }
+
+  /**
+   * 既存パネルを別の記事へ向け直す唯一の入口(issue #1063)。
+   * 記事を切り替えてから同じパネルを再度開いた際、挿入・保存先を新しい記事へ切り替える。
+   */
+  public updateTarget(editor: vscode.TextEditor, baseDir: string, projectId: number): void {
+    this._editor = editor;
+    this._baseDir = baseDir;
+    this._projectId = projectId;
   }
 
   protected async handleMessage(message: DiagramGalleryInboundMessage): Promise<void> {
@@ -103,7 +122,9 @@ export class DiagramGalleryPanel extends WebviewPanelBase<
     await this._editor.document.save();
 
     this.postMessage('diagramInserted', { fileName });
-    vscode.window.showInformationMessage(`'assets/${fileName}' を記事へ挿入しました。`);
+    vscode.window.showInformationMessage(
+      `'assets/${fileName}' を記事「${this._articleName()}」へ挿入しました。`
+    );
   }
 
   private async _handleDeleteDiagram(
@@ -124,6 +145,11 @@ export class DiagramGalleryPanel extends WebviewPanelBase<
 
     this.postMessage('diagramDeleted', { diagramId: message.diagramId });
     vscode.window.showInformationMessage(`ダイアグラム(ID: ${message.diagramId})を削除しました。`);
+  }
+
+  /** 通知メッセージへ出す挿入先の識別名(issue #1063 要件4)。imageGalleryPanelと同じ判断。 */
+  private _articleName(): string {
+    return path.basename(this._baseDir);
   }
 
   /** サーバーからSVGを取得し、{baseDir}/assets 配下へ保存してファイル名を返す。 */

@@ -243,4 +243,39 @@ describe('showSingletonPanel', () => {
     expect(second).not.toBe(first);
     second.close();
   });
+
+  /**
+   * issue #1063: シングルトンを再利用する際、呼び出し元が最新の状態(editor/baseDir等)を
+   * 既存パネルへ差し込めるようにするための拡張。既存パネルを返す場合にだけonRevealを呼び、
+   * 生成直後のパネルには渡さない(生成時の引数で既に最新の状態になっているため)。
+   */
+  it('既存パネルを返すときはonRevealへ既存インスタンスを渡す', () => {
+    const context = createContext();
+    const revealed: unknown[] = [];
+    const first = showSingletonPanel('letsBlog.test', () => new TestPanel(context));
+
+    const second = showSingletonPanel(
+      'letsBlog.test',
+      () => new TestPanel(context),
+      (existing) => revealed.push(existing)
+    );
+
+    expect(revealed).toEqual([first]);
+    expect(second).toBe(first);
+    first.close();
+  });
+
+  it('新規作成時はonRevealを呼ばない', () => {
+    const context = createContext();
+    const revealed: unknown[] = [];
+
+    const panel = showSingletonPanel(
+      'letsBlog.test',
+      () => new TestPanel(context),
+      (existing) => revealed.push(existing)
+    );
+
+    expect(revealed).toEqual([]);
+    panel.close();
+  });
 });

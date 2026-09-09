@@ -31,21 +31,40 @@ export class ImageGalleryPanel extends WebviewPanelBase<
   ): void {
     showSingletonPanel(
       'letsBlog.imageGallery',
-      () => new ImageGalleryPanel(context, editor, baseDir, projectId)
+      () => new ImageGalleryPanel(context, editor, baseDir, projectId),
+      (existing) => existing.updateTarget(editor, baseDir, projectId)
     );
   }
 
+  /** 挿入・保存先(issue #1063)。シングルトン再利用時に書き換わるためreadonlyにしない。 */
+  private _editor: vscode.TextEditor;
+  private _baseDir: string;
+  private _projectId: number;
+
   private constructor(
     context: vscode.ExtensionContext,
-    private readonly _editor: vscode.TextEditor,
-    private readonly _baseDir: string,
-    private readonly _projectId: number
+    editor: vscode.TextEditor,
+    baseDir: string,
+    projectId: number
   ) {
     super(context, {
       viewType: 'letsBlog.imageGallery',
       title: 'Image Gallery',
       assetName: 'imageGallery',
     });
+    this._editor = editor;
+    this._baseDir = baseDir;
+    this._projectId = projectId;
+  }
+
+  /**
+   * 既存パネルを別の記事へ向け直す唯一の入口(issue #1063)。
+   * 記事を切り替えてから同じパネルを再度開いた際、挿入・保存先を新しい記事へ切り替える。
+   */
+  public updateTarget(editor: vscode.TextEditor, baseDir: string, projectId: number): void {
+    this._editor = editor;
+    this._baseDir = baseDir;
+    this._projectId = projectId;
   }
 
   /** Webviewからのコマンドを対応する処理へ振り分ける。 */
@@ -117,7 +136,9 @@ export class ImageGalleryPanel extends WebviewPanelBase<
     await this._editor.document.save();
 
     this.postMessage('imageInserted', { fileName });
-    vscode.window.showInformationMessage(`'assets/${fileName}' を記事へ挿入しました。`);
+    vscode.window.showInformationMessage(
+      `'assets/${fileName}' を記事「${this._articleName()}」へ挿入しました。`
+    );
   }
 
   private async _handleSetAsEyecatch(
@@ -138,7 +159,9 @@ export class ImageGalleryPanel extends WebviewPanelBase<
     await document.save();
 
     this.postMessage('eyecatchSet', { fileName });
-    vscode.window.showInformationMessage(`アイキャッチを 'assets/${fileName}' に設定しました。`);
+    vscode.window.showInformationMessage(
+      `記事「${this._articleName()}」のアイキャッチを 'assets/${fileName}' に設定しました。`
+    );
   }
 
   private async _handleDeleteImage(
@@ -175,6 +198,16 @@ export class ImageGalleryPanel extends WebviewPanelBase<
 
     const { ImageGenPanel } = await import('./imageGenPanel');
     ImageGenPanel.createOrShow(this.context, this._editor, this._baseDir, this._projectId, detail);
+  }
+
+  /**
+   * 通知メッセージへ出す挿入先の識別名(issue #1063 要件4)。
+   * シングルトンパネルは記事を切り替えても閉じずに使われうるため、挿入・保存先が
+   * どの記事なのかを利用者へ明示する(baseDirは記事ディレクトリを指すため、その
+   * ディレクトリ名で足りる。front matterのtitleを都度パースするよりも安価)。
+   */
+  private _articleName(): string {
+    return path.basename(this._baseDir);
   }
 
   /** サーバーから画像を取得し、{baseDir}/assets 配下へ保存してファイル名を返す。 */

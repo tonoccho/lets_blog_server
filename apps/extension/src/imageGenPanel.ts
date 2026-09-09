@@ -44,22 +44,42 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
   ): void {
     const panel = showSingletonPanel(
       'letsBlog.imageGen',
-      () => new ImageGenPanel(context, editor, baseDir, projectId, prefill)
+      () => new ImageGenPanel(context, editor, baseDir, projectId, prefill),
+      (existing) => existing.updateTarget(editor, baseDir, projectId)
     );
     if (prefill) {
       panel.applyPrefill(prefill);
     }
   }
 
+  /** 保存先(issue #1063)。シングルトン再利用時に書き換わるためreadonlyにしない。 */
+  private _editor: vscode.TextEditor;
+  private _baseDir: string;
+  private _projectId: number;
+
   private constructor(
     context: vscode.ExtensionContext,
-    private readonly _editor: vscode.TextEditor,
-    private readonly _baseDir: string,
-    private readonly _projectId: number,
+    editor: vscode.TextEditor,
+    baseDir: string,
+    projectId: number,
     prefill?: api.GeneratedImageDetail
   ) {
     super(context, { viewType: 'letsBlog.imageGen', title: 'Generate Image', assetName: 'imageGen' });
+    this._editor = editor;
+    this._baseDir = baseDir;
+    this._projectId = projectId;
     this._pendingPrefill = prefill;
+  }
+
+  /**
+   * 既存パネルを別の記事へ向け直す唯一の入口(issue #1063)。
+   * prefillは_handleRegenerateWithSettingsから別途applyPrefillで反映されるため、
+   * ここでは挿入・保存先だけを差し替える。
+   */
+  public updateTarget(editor: vscode.TextEditor, baseDir: string, projectId: number): void {
+    this._editor = editor;
+    this._baseDir = baseDir;
+    this._projectId = projectId;
   }
 
   /**
@@ -167,7 +187,9 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
     await this._replaceEditorText(stringifyArticle(article));
 
     this.postMessage('eyecatchSet', { fileName });
-    vscode.window.showInformationMessage(`アイキャッチを 'assets/${fileName}' に設定しました。`);
+    vscode.window.showInformationMessage(
+      `記事「${this._articleName()}」のアイキャッチを 'assets/${fileName}' に設定しました。`
+    );
   }
 
   private async _handleAddAsAsset(index: number): Promise<void> {
@@ -181,7 +203,9 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
     await this._editor.document.save();
 
     this.postMessage('assetAdded', { fileName });
-    vscode.window.showInformationMessage(`アセットを 'assets/${fileName}' に追加しました。`);
+    vscode.window.showInformationMessage(
+      `記事「${this._articleName()}」へアセット 'assets/${fileName}' を追加しました。`
+    );
   }
 
   /**
@@ -201,6 +225,11 @@ export class ImageGenPanel extends WebviewPanelBase<ImageGenInboundMessage, Imag
       );
     }
     return selected;
+  }
+
+  /** 通知メッセージへ出す挿入先の識別名(issue #1063 要件4)。imageGalleryPanelと同じ判断。 */
+  private _articleName(): string {
+    return path.basename(this._baseDir);
   }
 
   /** Base64画像データを{baseDir}/assets配下へ保存し、生成したファイル名を返す。 */

@@ -318,6 +318,59 @@ describe('ImageGenPanel', () => {
     expect(payloadOf('promptGenerated')).toEqual({ prompt: 'a cat on the beach' });
   });
 
+  /**
+   * issue #1063: シングルトンパネルが生成時のTextEditor/baseDirを掴み続け、記事を
+   * 切り替えた後の挿入・保存先が前の記事のままになる不具合の検証。
+   */
+  it('記事Aで開いたあと閉じずに記事Bで再度開くと、アセット追加は記事Bへ行われる (issue #1063)', async () => {
+    generateImageMock.mockResolvedValue([result(1, 'a.png', IMAGE_A)]);
+    const baseDirA = baseDir;
+    const documentTextA = documentText;
+    const baseDirB = fs.mkdtempSync(path.join(os.tmpdir(), 'letsblog-imagegen-b-'));
+    const documentTextB = '---\ntitle: 記事B\n---\n\n本文B\n';
+
+    ImageGenPanel.createOrShow(
+      createContext(),
+      { document: { uri: 'file:///workspace/a.md', getText: () => documentTextA, positionAt: (o: number) => o, save: () => Promise.resolve(true) }, selection: { active: 0 } } as unknown as vscode.TextEditor,
+      baseDirA,
+      7
+    );
+    ImageGenPanel.createOrShow(
+      createContext(),
+      { document: { uri: 'file:///workspace/b.md', getText: () => documentTextB, positionAt: (o: number) => o, save: () => Promise.resolve(true) }, selection: { active: 0 } } as unknown as vscode.TextEditor,
+      baseDirB,
+      8
+    );
+
+    await send({ command: 'generate', params: { prompt: '猫', batchSize: 1 } });
+    await send({ command: 'addAsAsset', index: 0 });
+
+    const filesA = fs.existsSync(path.join(baseDirA, 'assets')) ? fs.readdirSync(path.join(baseDirA, 'assets')) : [];
+    expect(filesA).toEqual([]);
+    const filesB = fs.readdirSync(path.join(baseDirB, 'assets'));
+    expect(filesB).toHaveLength(1);
+    const inserted = appliedEdits.find((e) => e.kind === 'insert');
+    expect(inserted?.uri).toBe('file:///workspace/b.md');
+
+    fs.rmSync(baseDirB, { recursive: true, force: true });
+  });
+
+  it('再度開かずに連続して保存しても、同じ記事へ書き込まれ続ける(回帰確認)', async () => {
+    generateImageMock.mockResolvedValue([result(1, 'a.png', IMAGE_A), result(2, 'b.png', IMAGE_B)]);
+    open();
+    await send({ command: 'generate', params: { prompt: '猫', batchSize: 2 } });
+
+    // 2回目の保存はsetAsEyecatchで行う(addAsAssetを2連続にすると、ファイル名が
+    // 同一ミリ秒のDate.now()に基づくため既存の別バグで上書きされうる。issue #1063の
+    // 対象外のため、ここでは経路を分けて衝突を避ける)。
+    await send({ command: 'addAsAsset', index: 0 });
+    await send({ command: 'setAsEyecatch', index: 1 });
+
+    expect(assetFiles()).toHaveLength(2);
+    const inserts = appliedEdits.filter((e) => e.kind === 'insert' || e.kind === 'replace');
+    expect(inserts.every((e) => e.uri === 'file:///workspace/article.md')).toBe(true);
+  });
+
   it('cancelは進行中の生成を中断し、キャンセルとして通知する', async () => {
     let abortSignal: AbortSignal | undefined;
     generateImageMock.mockImplementation(

@@ -33,23 +33,58 @@ export class DiagramEditorPanel extends WebviewPanelBase<
   ): void {
     showSingletonPanel(
       'letsBlog.diagramEditor',
-      () => new DiagramEditorPanel(context, editor, baseDir, projectId, mode)
+      () => new DiagramEditorPanel(context, editor, baseDir, projectId, mode),
+      (existing) => existing.updateTarget(editor, baseDir, projectId, mode)
     );
   }
 
+  /** 挿入・保存先とモード(issue #1063)。シングルトン再利用時に書き換わるためreadonlyにしない。 */
+  private _editor: vscode.TextEditor;
+  private _baseDir: string;
+  private _projectId: number;
+  private _mode: DiagramEditorMode;
+
   private constructor(
     context: vscode.ExtensionContext,
-    private readonly _editor: vscode.TextEditor,
-    private readonly _baseDir: string,
-    private readonly _projectId: number,
-    private readonly _mode: DiagramEditorMode
+    editor: vscode.TextEditor,
+    baseDir: string,
+    projectId: number,
+    mode: DiagramEditorMode
   ) {
     super(context, {
       viewType: 'letsBlog.diagramEditor',
-      title: _mode.kind === 'edit' ? `Edit Diagram: ${_mode.name}` : 'New Diagram',
+      title: mode.kind === 'edit' ? `Edit Diagram: ${mode.name}` : 'New Diagram',
       assetName: 'diagramEditor',
       extraCspDirectives: [`frame-src ${getServerUrl()}`],
     });
+    this._editor = editor;
+    this._baseDir = baseDir;
+    this._projectId = projectId;
+    this._mode = mode;
+  }
+
+  /**
+   * 既存パネルを別の記事/モードへ向け直す唯一の入口(issue #1063)。
+   *
+   * 他の3パネル(Image Gallery / Diagram Gallery / Generate Image)と違い、このパネルは
+   * modeが「何を描画するか」そのものを決める(新規作成 or 既存ダイアグラムの編集)。
+   * 「New Diagram」を開いたまま閉じずに「Edit Diagram」を実行した場合、パネルを
+   * 前面に出すだけではWebviewは初回の`ready`で受け取ったinitのまま(新規作成画面)
+   * になってしまう。Webview側は一度読み込んだ後は`ready`を再送してこないため、
+   * ここでmode/タイトルを更新したうえで明示的にinitを再送する。
+   */
+  public updateTarget(
+    editor: vscode.TextEditor,
+    baseDir: string,
+    projectId: number,
+    mode: DiagramEditorMode
+  ): void {
+    this._editor = editor;
+    this._baseDir = baseDir;
+    this._projectId = projectId;
+    this._mode = mode;
+    this.panel.title = mode.kind === 'edit' ? `Edit Diagram: ${mode.name}` : 'New Diagram';
+    this._handleReady();
   }
 
   protected async handleMessage(message: DiagramEditorInboundMessage): Promise<void> {
@@ -98,7 +133,9 @@ export class DiagramEditorPanel extends WebviewPanelBase<
     await this._insertMarkdown(fileName, detail.name);
 
     this.postMessage('inserted', { fileName });
-    vscode.window.showInformationMessage(`'assets/${fileName}' を記事へ挿入しました。`);
+    vscode.window.showInformationMessage(
+      `'assets/${fileName}' を記事「${this._articleName()}」へ挿入しました。`
+    );
     this.close();
   }
 
@@ -123,7 +160,9 @@ export class DiagramEditorPanel extends WebviewPanelBase<
     fs.writeFileSync(path.join(assetsDir, this._mode.existingFileName), detail.svg, 'utf-8');
 
     this.postMessage('saved', {});
-    vscode.window.showInformationMessage(`ダイアグラム(ID: ${detail.id})を上書き保存しました。`);
+    vscode.window.showInformationMessage(
+      `記事「${this._articleName()}」のダイアグラム(ID: ${detail.id})を上書き保存しました。`
+    );
     this.close();
   }
 
@@ -142,8 +181,15 @@ export class DiagramEditorPanel extends WebviewPanelBase<
     await this._insertMarkdown(fileName, detail.name);
 
     this.postMessage('saved', {});
-    vscode.window.showInformationMessage(`新しいダイアグラム(ID: ${detail.id})として 'assets/${fileName}' に保存しました。`);
+    vscode.window.showInformationMessage(
+      `新しいダイアグラム(ID: ${detail.id})として記事「${this._articleName()}」へ 'assets/${fileName}' を保存しました。`
+    );
     this.close();
+  }
+
+  /** 通知メッセージへ出す挿入先の識別名(issue #1063 要件4)。imageGalleryPanelと同じ判断。 */
+  private _articleName(): string {
+    return path.basename(this._baseDir);
   }
 
   /** {baseDir}/assets 配下へSVGを書き出し、ファイル名を返す。 */
