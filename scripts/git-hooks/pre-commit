@@ -22,16 +22,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", ".claude", "hooks"))
 from paths import classify, is_production, is_test  # noqa: E402
-
-SILENCERS = [
-    (r"@Disabled\b", "@Disabled"),
-    (r"@Ignore\b", "@Ignore"),
-    (r"\b(test|it|describe|context)\.skip\s*\(", "test.skip()"),
-    (r"\b(test|it|describe)\.fixme\s*\(", "test.fixme()"),
-    (r"\bxit\s*\(", "xit()"),
-    (r"\bxdescribe\s*\(", "xdescribe()"),
-    (r"testPathIgnorePatterns", "testPathIgnorePatterns"),
-]
+from silencers import SILENCERS  # noqa: E402
 
 RED = "\033[31m"
 OFF = "\033[0m"

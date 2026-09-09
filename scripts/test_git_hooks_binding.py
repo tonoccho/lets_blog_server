@@ -118,6 +118,10 @@ class TempRepo(unittest.TestCase):
             os.path.join(REPO_ROOT, ".claude", "hooks", "paths.py"),
             os.path.join(self.tmp, ".claude", "hooks", "paths.py"),
         )
+        shutil.copy(
+            os.path.join(REPO_ROOT, ".claude", "hooks", "silencers.py"),
+            os.path.join(self.tmp, ".claude", "hooks", "silencers.py"),
+        )
         git(["init", "-q"], cwd=self.tmp)
         git(["config", "user.email", "t@example.com"], cwd=self.tmp)
         git(["config", "user.name", "t"], cwd=self.tmp)
@@ -257,6 +261,67 @@ class PlainGitEnforcesPhaseSeparation(TempRepo):
             cwd=self.tmp,
         )
         self.assertEqual(0, self.commit("feat: mixed").returncode)
+
+
+class FeatureSkipTagIsRejected(TempRepo):
+    """#1055: Gherkin の `.feature` に `@skip` / `@fixme` を付けたコミットが `pre-commit` で拒否される。
+
+    `pre-commit` の `SILENCERS` には長らく `@(skip|fixme)` パターンが無く、`.claude/hooks/guard.py`
+    にはあった。このリポジトリの受け入れテストは Gherkin (`.feature`) であり、そのシナリオを
+    黙らせる手段はまさに `@skip` タグなので、この欠落はコミット層でこの黙殺手段を素通りさせていた。
+    """
+
+    def commit(self, message):
+        return git(["commit", "-m", message], cwd=self.tmp)
+
+    FEATURE_WITH_SKIP = (
+        "@skip\n"
+        "機能: サンプル\n"
+        "  シナリオ: 何か\n"
+        "    前提 何かがある\n"
+    )
+
+    def test_feature_file_with_skip_tag_is_rejected(self):
+        self.run_setup()
+        git(
+            ["add", self.write("apps/web/e2e/features/sample.feature", self.FEATURE_WITH_SKIP)],
+            cwd=self.tmp,
+        )
+        r = self.commit("test: add skipped scenario")
+        self.assertNotEqual(0, r.returncode, "@skip タグ付きの .feature コミットが通ってしまった")
+        self.assertIn("@skip / @fixme タグ", r.stdout + r.stderr)
+
+    def test_feature_file_with_fixme_tag_is_rejected(self):
+        self.run_setup()
+        git(
+            [
+                "add",
+                self.write(
+                    "apps/web/e2e/features/sample2.feature",
+                    self.FEATURE_WITH_SKIP.replace("@skip", "@fixme"),
+                ),
+            ],
+            cwd=self.tmp,
+        )
+        r = self.commit("test: add fixme scenario")
+        self.assertNotEqual(0, r.returncode, "@fixme タグ付きの .feature コミットが通ってしまった")
+        self.assertIn("@skip / @fixme タグ", r.stdout + r.stderr)
+
+    def test_feature_file_without_skip_tag_is_accepted(self):
+        """常に落ちるのでは検査になっていない。通るべきものが通ることも見る。"""
+        self.run_setup()
+        git(
+            [
+                "add",
+                self.write(
+                    "apps/web/e2e/features/sample3.feature",
+                    self.FEATURE_WITH_SKIP.replace("@skip\n", ""),
+                ),
+            ],
+            cwd=self.tmp,
+        )
+        r = self.commit("test: add scenario")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
 
 
 def paragraph_starting_with(text, prefix):

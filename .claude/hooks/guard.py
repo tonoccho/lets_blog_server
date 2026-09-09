@@ -25,20 +25,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import classify, is_production, is_test, strip_worktree  # noqa: E402
+from silencers import SILENCERS  # noqa: E402
 
 READ_ONLY_SKILLS = {"discover-issues", "triage-backlog", "ready-issue"}
-
-# テストを黙らせる手段。CLAUDE.md → Test-First Implementation → Never skip a test。
-SILENCERS = [
-    (r"@Disabled\b", "@Disabled"),
-    (r"@Ignore\b", "@Ignore"),
-    (r"\b(test|it|describe|context)\.skip\s*\(", "test.skip()"),
-    (r"\b(test|it|describe)\.fixme\s*\(", "test.fixme()"),
-    (r"\bxit\s*\(", "xit()"),
-    (r"\bxdescribe\s*\(", "xdescribe()"),
-    (r"testPathIgnorePatterns", "testPathIgnorePatterns"),
-    (r"@(skip|fixme)\b", "@skip / @fixme タグ"),
-]
 
 # 読み取り専用ステージ中に禁止するコマンド。**コマンド名で判定する**(#986)。
 # 旧実装は生の文字列に `\b(rm|mv|cp|tee|patch|truncate)\b` をかけていたため、

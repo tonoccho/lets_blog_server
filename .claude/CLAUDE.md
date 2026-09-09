@@ -790,6 +790,20 @@ The rules above are not only written down; the ones that can be checked mechanic
 | Merge method | `Bash` (`glab mr merge`) | `--rebase`, and **any invocation without `--squash`** |
 | Coverage | `Bash` (`glab mr create`) | Opening a Merge Request while changed-code C1/C2 coverage is under 90% |
 
+### SILENCERS has a single source
+
+`.claude/hooks/silencers.py` defines the `SILENCERS` pattern table once; both `guard.py`'s Test
+silencing check and `scripts/git-hooks/pre-commit`'s import it rather than each keeping their own
+copy. This is the same precedent `.claude/hooks/paths.py` already set for path classification —
+one module, imported by both hooks, so the two never see a different set of patterns.
+
+Before #1055, the two hooks each restated `SILENCERS` independently, and the copies had already
+drifted: `pre-commit` was missing the `@(skip|fixme)` tag pattern that `guard.py` had. This
+repository's acceptance tests are Gherkin (`apps/web/e2e/features/**/*.feature`), and `@skip` /
+`@fixme` is exactly how a Gherkin scenario gets silenced — so the missing pattern meant a
+`.feature` file silenced with `@skip` committed cleanly through `pre-commit`, undetected. Do not
+restate `SILENCERS` in either hook again; import it from `silencers.py`.
+
 ### Where squash is enforced
 
 In two places, deliberately — the GitLab project (`squash_option: always`, `merge_method: ff`)
