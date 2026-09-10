@@ -41,15 +41,17 @@ If multiple Ready Issues exist, rank them by `CLAUDE.md` → **Issue Provenance*
 order — never merely by search-result order:
 
 1. **Provenance — `user-request` first.** Every other Issue ranks after it.
-2. **Priority — highest first.** `P0` > `P1` > `P2` > unset.
-3. **Is blocking count — largest first**, then dependency readiness.
-4. **Issue number — oldest first.**
+2. **Kind — `bug` first.** Every other Issue ranks after it.
+3. **Priority — highest first.** `P0` > `P1` > `P2` > unset.
+4. **Is blocking count — largest first**, then dependency readiness.
+5. **Issue number — oldest first.**
 
 The keys apply strictly in order, so a `user-request` `P2` is selected ahead of an unlabelled
-`P0`. Read the label; never infer provenance from an Issue's wording.
+`P0`, and a `bug` `P2` ahead of a non-bug `P0` of the same provenance. Read the labels; never
+infer provenance or bug-ness from an Issue's wording.
 
 Before proceeding, report the Issue number, title, priority, **whether it is `user-request`**,
-and why it was selected.
+**whether it is `bug`**, and why it was selected.
 
 ---
 

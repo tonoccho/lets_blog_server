@@ -618,23 +618,31 @@ complete, and do not re-run a guess over the unattributed remainder.
 ## Selection order
 
 **A `user-request` Issue is selected before any Issue without it.** Provenance is the first
-sort key, ahead of priority (decided by the user, 2026-09-09). `ready-issue` Select-Next Mode
-and `work-next` Step 3 defer to this; it is repeated in neither.
+sort key, ahead of priority (decided by the user, 2026-09-09). **A `bug` Issue comes next**,
+also ahead of priority (decided by the user, 2026-09-10). `ready-issue` Select-Next Mode and
+`work-next` Step 3 defer to this; it is repeated in neither.
 
 1. **Provenance** — `user-request` first; every other Issue after it.
-2. **Priority — highest first.** `P0` > `P1` > `P2` > unset. Unset always ranks last.
-3. **Is blocking count — largest first**, from `dependencies/blocking`.
-4. **Issue number — oldest first.**
+2. **Kind** — `bug` first; every other Issue after it.
+3. **Priority — highest first.** `P0` > `P1` > `P2` > unset. Unset always ranks last.
+4. **Is blocking count — largest first**, from `dependencies/blocking`.
+5. **Issue number — oldest first.**
 
 The keys apply strictly in order, so a `user-request` `P2` **is** selected ahead of an
-unlabelled `P0`. That is the intended effect: the user's own list is the queue, and work Claude
-proposed to itself waits behind it.
+unlabelled `P0`, and among Issues with the same provenance a `bug` `P2` **is** selected ahead of
+a non-bug `P0`. That is the intended effect: the user's own list is the queue, work Claude
+proposed to itself waits behind it, and within each of those a defect is fixed before new work
+is added.
 
-The cost is real and must not be papered over. Two things follow from it:
+The cost is real and must not be papered over. Three things follow from it:
 
 - An unlabelled `P0` — a production defect, a broken build, a security hole `discover-issues`
   found — can sit behind a large `user-request` backlog. **Do not silently reorder to fix
   that.** Report it and let the user decide.
+- A trivial `bug` `P2` is selected ahead of an urgent non-bug `P0` of the same provenance. The
+  same applies: report it, do not silently reorder. Read the `bug` label as it stands — never
+  add or remove it to steer the order; a defect filed without the label simply ranks with the
+  non-bugs until someone labels it.
 - **Absence is not evidence.** 417 of 682 Issues could not be attributed (see below), so an
   unlabelled Issue may well be one the user asked for. Ranking it last is a consequence of
   missing data, not a judgment that the user did not ask. Never argue from the absence of the
