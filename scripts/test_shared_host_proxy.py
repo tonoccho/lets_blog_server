@@ -172,8 +172,14 @@ class VhostIsSafeToLoadIntoTheSharedProxy(unittest.TestCase):
         self.assertRegex(self.conf, r"proxy_set_header\s+Connection\s+\$connection_upgrade\s*;")
 
     def test_body_and_header_limits_match_the_lbs_proxy(self):
-        """上限が下流より小さいと、手前で 413 / 502 になって原因が分かりにくい。"""
-        self.assertRegex(self.conf, r"client_max_body_size\s+100M\s*;")
+        """上限が下流より小さいと、手前で 413 / 502 になって原因が分かりにくい。
+
+        値は下流(`infra/nginx/conf.d/default.conf`)の**最大**の location 上限に合わせる。
+        #1243 で `/sites`(managed WordPress の管理画面)が 1025M になったため、
+        前段がここより小さいと 1GB のメディアアップロードが手前で 413 になる。
+        1025M = 1GB のファイル本体 + multipart のフォーム項目・境界文字列の余裕1MB。
+        """
+        self.assertRegex(self.conf, r"client_max_body_size\s+1025M\s*;")
         self.assertRegex(
             self.conf,
             r"proxy_buffer_size\s+16k\s*;",
