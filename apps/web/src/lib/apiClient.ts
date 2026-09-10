@@ -2234,6 +2234,44 @@ export function selectLlmProvider(
   });
 }
 
+/**
+ * 多段レビュー(issue #1210)のステップ別LLMプロバイダー/モデル設定(issue #1211のAPI、
+ * issue #1212で画面から使う)。5ステップぶんの選択値(未設定はnull)と選択可能な
+ * provider/model一覧を返す。
+ */
+export interface ReviewStepSetting {
+  stepKey: string;
+  provider: string | null;
+  model: string | null;
+}
+
+export interface ReviewStepSettingsResponse {
+  steps: ReviewStepSetting[];
+  availableProviders: string[];
+  availableModels: string[];
+}
+
+export function listReviewStepSettings(projectId: number): Promise<ReviewStepSettingsResponse> {
+  return apiFetch<ReviewStepSettingsResponse>(`/api/projects/${projectId}/ai-models/llm/review-steps`);
+}
+
+/** provider/modelともに空文字は、そのステップの上書きを解除する(null送信)。 */
+export function updateReviewStepSetting(
+  projectId: number,
+  stepKey: string,
+  provider: string,
+  model: string
+): Promise<ReviewStepSettingsResponse> {
+  return apiFetch<ReviewStepSettingsResponse>(
+    `/api/projects/${projectId}/ai-models/llm/review-steps/${stepKey}`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: provider || null, model: model || null }),
+    }
+  );
+}
+
 /** selectedはプロジェクト単位の上書き値(未設定時null)。未設定時はComfyUIとして扱われる。 */
 export interface ImageProviderListResponse {
   availableProviders: string[];

@@ -27,6 +27,8 @@ import {
   downloadGeneratedImageFile,
   deleteGeneratedImage,
   streamConnectedServiceStatuses,
+  listReviewStepSettings,
+  updateReviewStepSetting,
 } from '@/lib/apiClient'
 
 type FetchCall = [string, RequestInit & { headers?: Record<string, string> }]
@@ -298,5 +300,59 @@ describe('throwOnError: false の中継経路', () => {
     fetchMock.mockResolvedValue(upstream)
 
     await expect(streamConnectedServiceStatuses()).resolves.toBe(upstream)
+  })
+})
+
+/**
+ * issue #1212: レビューステップ別(#1210)のLLMプロバイダー/モデル設定(#1211のAPI)の
+ * 一覧取得・更新。既存の listLlmProvider/selectLlmProvider と同じ薄いラッパーだが、
+ * 変更したファイルの分岐カバレッジ(CLAUDE.md → Coverage)を満たすためここで固定する。
+ */
+describe('レビューステップ別のLLM設定(issue #1212)', () => {
+  it('一覧を取得する', async () => {
+    const body = {
+      steps: [{ stepKey: 'JAPANESE', provider: null, model: null }],
+      availableProviders: ['OPENAI'],
+      availableModels: ['gpt-4o-mini'],
+    }
+    fetchMock.mockResolvedValue(jsonResponse(body))
+
+    const result = await listReviewStepSettings(7)
+
+    expect(result).toEqual(body)
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/ai-models/llm/review-steps')
+    expect(init.method ?? 'GET').toBe('GET')
+  })
+
+  it('providerとmodelを指定してステップの設定を更新する', async () => {
+    const body = {
+      steps: [{ stepKey: 'JAPANESE', provider: 'OPENAI', model: 'gpt-4o-mini' }],
+      availableProviders: ['OPENAI'],
+      availableModels: ['gpt-4o-mini'],
+    }
+    fetchMock.mockResolvedValue(jsonResponse(body))
+
+    const result = await updateReviewStepSetting(7, 'JAPANESE', 'OPENAI', 'gpt-4o-mini')
+
+    expect(result).toEqual(body)
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/ai-models/llm/review-steps/JAPANESE')
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(String(init.body))).toEqual({ provider: 'OPENAI', model: 'gpt-4o-mini' })
+  })
+
+  it('未選択(空文字)はprovider/modelともにnullとして送る(上書き解除)', async () => {
+    const body = {
+      steps: [{ stepKey: 'JAPANESE', provider: null, model: null }],
+      availableProviders: ['OPENAI'],
+      availableModels: ['gpt-4o-mini'],
+    }
+    fetchMock.mockResolvedValue(jsonResponse(body))
+
+    await updateReviewStepSetting(7, 'JAPANESE', '', '')
+
+    const [, init] = calls()[0]
+    expect(JSON.parse(String(init.body))).toEqual({ provider: null, model: null })
   })
 })

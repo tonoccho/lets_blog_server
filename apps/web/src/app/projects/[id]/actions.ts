@@ -48,6 +48,8 @@ import {
   selectLlmModel,
   listLlmProvider,
   selectLlmProvider,
+  listReviewStepSettings,
+  updateReviewStepSetting,
   listImageProvider,
   selectImageProvider,
   listComfyUiCheckpoints,
@@ -82,6 +84,7 @@ import {
   PluginThemeStatus,
   LlmModelListResponse,
   LlmProviderListResponse,
+  ReviewStepSettingsResponse,
   ImageProviderListResponse,
   ComfyUiCheckpointListResponse,
   GenerationJobDetail,
@@ -807,6 +810,28 @@ export async function selectLlmProviderAction(
 
   try {
     await selectLlmProvider(projectId, provider);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+  revalidatePath(`/projects/${projectId}`);
+  return {};
+}
+
+export async function fetchReviewStepSettingsAction(projectId: number): Promise<ReviewStepSettingsResponse> {
+  await requireAdminSession();
+  return listReviewStepSettings(projectId);
+}
+
+export async function updateReviewStepSettingAction(
+  projectId: number,
+  stepKey: string,
+  provider: string,
+  model: string
+): Promise<{ error?: string }> {
+  await requireAdminSession();
+
+  try {
+    await updateReviewStepSetting(projectId, stepKey, provider, model);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

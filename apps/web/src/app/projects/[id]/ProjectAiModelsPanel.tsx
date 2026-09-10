@@ -4,17 +4,20 @@ import { useEffect, useState } from "react";
 import type {
   LlmModelListResponse,
   LlmProviderListResponse,
+  ReviewStepSettingsResponse,
   ImageProviderListResponse,
   ComfyUiCheckpointListResponse,
 } from "@/lib/apiClient";
 import {
   fetchLlmModelsAction,
   fetchLlmProviderAction,
+  fetchReviewStepSettingsAction,
   fetchImageProviderAction,
   fetchComfyUiCheckpointsAction,
 } from "./actions";
 import { LlmModelPanel } from "./LlmModelPanel";
 import { LlmProviderPanel } from "./LlmProviderPanel";
+import { ReviewStepSettingsPanel } from "./ReviewStepSettingsPanel";
 import { ImageProviderPanel } from "./ImageProviderPanel";
 import { ComfyUiCheckpointTable } from "./ComfyUiCheckpointTable";
 
@@ -31,6 +34,7 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
   // 疎通を待たせないため。一括管理パネルのプラグイン/テーマタブと同じ方針)。
   const [llmData, setLlmData] = useState<LlmModelListResponse | null>(null);
   const [llmProviderData, setLlmProviderData] = useState<LlmProviderListResponse | null>(null);
+  const [reviewStepData, setReviewStepData] = useState<ReviewStepSettingsResponse | null>(null);
   const [imageProviderData, setImageProviderData] = useState<ImageProviderListResponse | null>(null);
   const [comfyuiData, setComfyuiData] = useState<ComfyUiCheckpointListResponse | null>(null);
   const [loadingTab, setLoadingTab] = useState<Tab | null>(null);
@@ -41,6 +45,7 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
       setLoadingTab(nextTab);
       setLlmData(await fetchLlmModelsAction(projectId));
       setLlmProviderData(await fetchLlmProviderAction(projectId));
+      setReviewStepData(await fetchReviewStepSettingsAction(projectId));
       setLoadingTab(null);
     } else if (nextTab === "COMFYUI" && comfyuiData === null) {
       setLoadingTab(nextTab);
@@ -54,6 +59,7 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
   useEffect(() => {
     fetchLlmModelsAction(projectId).then(setLlmData);
     fetchLlmProviderAction(projectId).then(setLlmProviderData);
+    fetchReviewStepSettingsAction(projectId).then(setReviewStepData);
   }, [projectId]);
 
   return (
@@ -82,6 +88,7 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
           <div className="space-y-4">
             {llmProviderData && <LlmProviderPanel projectId={projectId} initialData={llmProviderData} />}
             <LlmModelPanel projectId={projectId} initialData={llmData} />
+            {reviewStepData && <ReviewStepSettingsPanel projectId={projectId} initialData={reviewStepData} />}
           </div>
         ) : (
           <TabLoading loading={loadingTab === "LLM"} />
