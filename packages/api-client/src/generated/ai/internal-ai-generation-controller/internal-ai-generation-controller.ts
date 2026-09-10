@@ -27,7 +27,7 @@ export const getGenerateUrl = () => {
 
 
 
-  return `http://localhost:8080/api/ai/internal/generate`
+  return `http://localhost:8080/api/internal/ai/generate`
 }
 
 export const generate = async (generateRequest: GenerateRequest, options?: RequestInit): Promise<generateResponse> => {

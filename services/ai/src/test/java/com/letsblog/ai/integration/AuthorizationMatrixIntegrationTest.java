@@ -101,6 +101,9 @@ class AuthorizationMatrixIntegrationTest {
                 // -- AiController(画像生成プロンプト。issue #583でlegacy-apiから移設) --
                 new Endpoint("POST", "/api/projects/1/ai/generate-image-prompt"),
 
+                // -- AiController(レビューステップ単位の指摘生成。issue #1213) --
+                new Endpoint("POST", "/api/projects/1/ai/review-steps/JAPANESE/suggestions"),
+
                 // -- ProjectBraveSearchApiKeyController(issue #583でlegacy-apiから移設) --
                 new Endpoint("GET", "/api/projects/1/api-keys/brave-search-api-key"),
                 new Endpoint("PUT", "/api/projects/1/api-keys/brave-search-api-key"),

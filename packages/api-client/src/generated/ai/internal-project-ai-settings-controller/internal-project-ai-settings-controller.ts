@@ -10,19 +10,19 @@ import type {
 } from '../openAPIDefinition.schemas';
 
 
-export type statusResponse200 = {
+export type status1Response200 = {
   data: BraveSearchApiKeyStatusResponse
   status: 200
 }
 
-export type statusResponseSuccess = (statusResponse200) & {
+export type status1ResponseSuccess = (status1Response200) & {
   headers: Headers;
 };
 ;
 
-export type statusResponse = (statusResponseSuccess)
+export type status1Response = (status1ResponseSuccess)
 
-export const getStatusUrl = (projectId: number,) => {
+export const getStatus1Url = (projectId: number,) => {
 
 
 
@@ -30,9 +30,9 @@ export const getStatusUrl = (projectId: number,) => {
   return `http://localhost:8080/api/internal/ai/projects/${projectId}/brave-search-api-key`
 }
 
-export const status = async (projectId: number, options?: RequestInit): Promise<statusResponse> => {
+export const status1 = async (projectId: number, options?: RequestInit): Promise<status1Response> => {
 
-  const res = await fetch(getStatusUrl(projectId),
+  const res = await fetch(getStatus1Url(projectId),
   {
     ...options,
     method: 'GET'
@@ -44,24 +44,24 @@ export const status = async (projectId: number, options?: RequestInit): Promise<
 
   const body = [204, 205, 304].includes(res.status) ? null : await res.text();
 
-  const data: statusResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as statusResponse
+  const data: status1Response['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as status1Response
 }
 
 
-export type setResponse200 = {
+export type set1Response200 = {
   data: void
   status: 200
 }
 
-export type setResponseSuccess = (setResponse200) & {
+export type set1ResponseSuccess = (set1Response200) & {
   headers: Headers;
 };
 ;
 
-export type setResponse = (setResponseSuccess)
+export type set1Response = (set1ResponseSuccess)
 
-export const getSetUrl = (projectId: number,) => {
+export const getSet1Url = (projectId: number,) => {
 
 
 
@@ -69,8 +69,8 @@ export const getSetUrl = (projectId: number,) => {
   return `http://localhost:8080/api/internal/ai/projects/${projectId}/brave-search-api-key`
 }
 
-export const set = async (projectId: number,
-    setBraveSearchApiKeyRequest: SetBraveSearchApiKeyRequest, options?: RequestInit): Promise<setResponse> => {
+export const set1 = async (projectId: number,
+    setBraveSearchApiKeyRequest: SetBraveSearchApiKeyRequest, options?: RequestInit): Promise<set1Response> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -78,7 +78,7 @@ export const set = async (projectId: number,
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-const res = await fetch(getSetUrl(projectId),
+const res = await fetch(getSet1Url(projectId),
   {
     ...options,
     method: 'PUT',
@@ -90,24 +90,24 @@ const res = await fetch(getSetUrl(projectId),
 
   const body = [204, 205, 304].includes(res.status) ? null : await res.text();
 
-  const data: setResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as setResponse
+  const data: set1Response['data'] = body ? JSON.parse(body) : undefined
+  return { data, status: res.status, headers: res.headers } as set1Response
 }
 
 
-export type clearResponse200 = {
+export type clear1Response200 = {
   data: void
   status: 200
 }
 
-export type clearResponseSuccess = (clearResponse200) & {
+export type clear1ResponseSuccess = (clear1Response200) & {
   headers: Headers;
 };
 ;
 
-export type clearResponse = (clearResponseSuccess)
+export type clear1Response = (clear1ResponseSuccess)
 
-export const getClearUrl = (projectId: number,) => {
+export const getClear1Url = (projectId: number,) => {
 
 
 
@@ -115,9 +115,9 @@ export const getClearUrl = (projectId: number,) => {
   return `http://localhost:8080/api/internal/ai/projects/${projectId}/brave-search-api-key`
 }
 
-export const clear = async (projectId: number, options?: RequestInit): Promise<clearResponse> => {
+export const clear1 = async (projectId: number, options?: RequestInit): Promise<clear1Response> => {
 
-  const res = await fetch(getClearUrl(projectId),
+  const res = await fetch(getClear1Url(projectId),
   {
     ...options,
     method: 'DELETE'
@@ -129,8 +129,8 @@ export const clear = async (projectId: number, options?: RequestInit): Promise<c
 
   const body = [204, 205, 304].includes(res.status) ? null : await res.text();
 
-  const data: clearResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as clearResponse
+  const data: clear1Response['data'] = body ? JSON.parse(body) : undefined
+  return { data, status: res.status, headers: res.headers } as clear1Response
 }
 
 

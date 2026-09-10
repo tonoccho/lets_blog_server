@@ -201,6 +201,7 @@ API: ai `AiController`, `ProjectLlmModelController`, `ProjectBraveSearchApiKeyCo
 | AC-AI-014 | LLM接続設定の不備 | 生成前に設定不備と分かる | プロバイダのAPIキーが未設定/不正なとき、LLM呼び出し前に設定不備の文言で失敗する | `ai/resilience.feature` › LLM接続設定が未設定/不正なとき、生成前に設定不備と分かるメッセージが出る(`@api`) | 実装済み(`@stub` `@api`、issue #1149) |
 | AC-AI-015 | LLM設定(`/ai-models/llm/**`)の非メンバー拒否 | 他人のプロジェクトのLLM設定を書き換えられない | 一般利用者は、対象プロジェクトのメンバーか否かに関わらず`requireAdmin()`により403で拒否される(現状の実装。是正は本Issueの対象外) | `ai/authorization.feature` › 一般利用者はプロジェクトのメンバーでなくてもLLM設定を読み書きできない(`@api`) | 実装済み(`@api`、issue #1150) |
 | AC-AI-016 | Brave Search APIキーの非メンバー拒否 | 他人のプロジェクトのBrave Search APIキーを読み書きできない | `requireProjectMemberOrAdmin(projectId)`により、メンバーでないプロジェクトへのGET/PUT/DELETEが403で拒否される。自分のプロジェクトでは読み書きできる | `ai/authorization.feature` › 自分がメンバーでないプロジェクトのBrave Search APIキーは読み書きできない(`@api`) | 実装済み(`@api`、issue #1150) |
+| AC-AI-017 | レビューステップ単位の指摘生成(`/api/projects/{projectId}/ai/review-steps/{stepKey}/suggestions`、`JAPANESE`/`PROOFREADING`) | 多段レビュー(#1210)のステップごとに、そのステップの観点だけの指摘が得られる | ステップキー・本文・projectIdを渡すと、そのステップキーと本文中に実在する該当箇所を持つ指摘一覧が返る。同じ本文・同じステップへの呼び出しは指摘の識別子(ステップキー+引用+指摘内容から導出、本文中の位置を含まない)が一致し、指摘箇所より前方への加筆があっても識別子は変わらない | `ai/review-step-suggestions.feature` › 「JAPANESE」/「PROOFREADING」ステップの指摘が、そのステップキーと本文中に実在する該当箇所を持って返る / 同じ本文・同じステップへの2回の呼び出しは指摘の識別子が一致する / 指摘箇所より前方に文字を挿入しても、同じ指摘の識別子は変わらない(`@api`) | 実装済み(`@stub` `@api`、issue #1213) |
 
 ### 2.7 記事プランとGitHub Issue連携 — `PLAN`
 

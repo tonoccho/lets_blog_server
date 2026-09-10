@@ -5,12 +5,15 @@ import com.letsblog.ai.ai.AiProvider;
 import com.letsblog.ai.ai.BraveSearchResult;
 import com.letsblog.ai.ai.LlmClient;
 import com.letsblog.ai.domain.GenerationJob;
+import com.letsblog.ai.domain.ReviewStepKey;
 import com.letsblog.ai.dto.AiAskRequest;
 import com.letsblog.ai.dto.AiAskResponse;
 import com.letsblog.ai.dto.AiDraftRequest;
 import com.letsblog.ai.dto.AiDraftResponse;
+import com.letsblog.ai.dto.AiImagePromptResponse;
 import com.letsblog.ai.dto.AiProofreadRequest;
 import com.letsblog.ai.dto.AiProofreadResponse;
+import com.letsblog.ai.dto.AiReviewStepSuggestionsResponse;
 import com.letsblog.ai.dto.AiSectionRequest;
 import com.letsblog.ai.dto.AiSectionResponse;
 import com.letsblog.ai.dto.AiTagsRequest;
@@ -27,10 +30,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
@@ -56,6 +62,8 @@ class AiAssistServiceTest {
     private WebSearchService webSearchService;
     @Mock
     private ArticlePlanService articlePlanService;
+    @Mock
+    private ReviewStepModelService reviewStepModelService;
 
     private AiAssistService service;
 
@@ -63,7 +71,7 @@ class AiAssistServiceTest {
     void setUp() {
         service = new AiAssistService(
                 llmClient, llmModelService, generationJobRepository, webSearchService, new ObjectMapper(),
-                articlePlanService);
+                articlePlanService, reviewStepModelService);
 
         lenient().when(generationJobRepository.save(any())).thenAnswer(inv -> {
             GenerationJob job = inv.getArgument(0);
@@ -92,6 +100,50 @@ class AiAssistServiceTest {
 
         assertEquals("結果", result);
         org.mockito.Mockito.verify(llmModelService, org.mockito.Mockito.never()).getSelectedModel(any());
+    }
+
+    @Test
+    void generateForBridge_providerOverride未指定でprojectId指定時はプロジェクトの選択中プロバイダーを使う() {
+        when(llmModelService.getSelectedModel(1L)).thenReturn("llama3");
+        when(llmModelService.getSelectedProvider(1L)).thenReturn(AiProvider.OPENAI);
+        when(llmClient.generate("プロンプト", "llama3", AiProvider.OPENAI)).thenReturn("結果");
+
+        String result = service.generateForBridge(1L, "プロンプト", null);
+
+        assertEquals("結果", result);
+        org.mockito.Mockito.verify(llmModelService).getSelectedProvider(1L);
+    }
+
+    @Test
+    void generateImagePrompt_履歴が無い場合はSystem_Userのみのプロンプトを組み立てる() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("english, prompt");
+
+        AiImagePromptResponse response = service.generateImagePrompt(null, null, "夕焼けの海辺", null);
+
+        assertEquals("english, prompt", response.prompt());
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture(), any(), any());
+        assertTrue(promptCaptor.getValue().contains("夕焼けの海辺"));
+        assertTrue(promptCaptor.getValue().trim().endsWith("Assistant:"));
+    }
+
+    @Test
+    void generateImagePrompt_履歴がある場合はuser_assistantを交えたプロンプトを組み立てる() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("english, prompt 2");
+
+        List<PlanChatMessage> history = List.of(
+                new PlanChatMessage("user", "猫を追加して"),
+                new PlanChatMessage("assistant", "前回の生成結果"));
+
+        AiImagePromptResponse response = service.generateImagePrompt(1L, history, "もっと明るく", null);
+
+        assertEquals("english, prompt 2", response.prompt());
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture(), any(), any());
+        String prompt = promptCaptor.getValue();
+        assertTrue(prompt.contains("User: 猫を追加して"));
+        assertTrue(prompt.contains("Assistant: 前回の生成結果"));
+        assertTrue(prompt.contains("もっと明るく"));
     }
 
     @Test
@@ -263,6 +315,97 @@ class AiAssistServiceTest {
     }
 
     @Test
+    void generateSection_articleTitle_precedingContext_headingが未指定なら既定値で組み立てる() {
+        when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.failure("未設定"));
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("セクション本文");
+
+        AiSectionResponse response = service.generateSection(
+                new AiSectionRequest("body", null, null, null, null, null, null, null));
+
+        assertEquals("セクション本文", response.result());
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture(), any(), any());
+        assertTrue(promptCaptor.getValue().contains("(未設定)"));
+        assertTrue(promptCaptor.getValue().contains("(なし)"));
+    }
+
+    @Test
+    void generateSection_articleTitle_precedingContext_headingが空白のみなら既定値で組み立てる() {
+        when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.failure("未設定"));
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("リード文");
+
+        AiSectionResponse response = service.generateSection(
+                new AiSectionRequest("lead-subsections", "   ", "   ", "   ", List.of(), null, null, null));
+
+        assertEquals("リード文", response.result());
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture(), any(), any());
+        assertTrue(promptCaptor.getValue().contains("(未設定)"));
+        assertTrue(promptCaptor.getValue().contains("(なし)"));
+    }
+
+    @Test
+    void generateSection_messageが空白のみの場合は壁打ちにならず通常のプロンプトを組み立てる() {
+        when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.failure("未設定"));
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("セクション本文");
+
+        AiSectionResponse response = service.generateSection(
+                new AiSectionRequest("body", "導入部", "文脈", "記事タイトル", null, null, "   ", null));
+
+        assertEquals("セクション本文", response.result());
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture(), any(), any());
+        assertTrue(!promptCaptor.getValue().contains("System:"));
+    }
+
+    @Test
+    void generateSection_壁打ちで履歴が無い場合は往復無しでプロンプトを組み立てる() {
+        when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.failure("未設定"));
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("再生成結果");
+
+        AiSectionResponse response = service.generateSection(
+                new AiSectionRequest("body", "導入部", "文脈", "記事タイトル", null, null, "もっと短く", null));
+
+        assertEquals("再生成結果", response.result());
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture(), any(), any());
+        String prompt = promptCaptor.getValue();
+        assertTrue(prompt.contains("System:"));
+        assertTrue(prompt.contains("もっと短く"));
+    }
+
+    @Test
+    void generateSection_壁打ちの履歴にuserロールが含まれる場合はUserとして整形する() {
+        when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.failure("未設定"));
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("再生成結果");
+
+        List<PlanChatMessage> history = List.of(new PlanChatMessage("user", "最初の指示"));
+
+        AiSectionResponse response = service.generateSection(
+                new AiSectionRequest("body", "導入部", "文脈", "記事タイトル", null, history, "もっと短く", null));
+
+        assertEquals("再生成結果", response.result());
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(llmClient).generate(promptCaptor.capture(), any(), any());
+        assertTrue(promptCaptor.getValue().contains("User: 最初の指示"));
+    }
+
+    @Test
+    void generateSection_articleTitleと見出しの合計が200文字を超える場合は検索クエリを先頭200文字に丸める() {
+        when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.failure("未設定"));
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("セクション本文");
+        String longHeading = "あ".repeat(250);
+
+        AiSectionResponse response = service.generateSection(
+                new AiSectionRequest("body", longHeading, "文脈", "記事タイトル", null, null, null, null));
+
+        assertEquals("セクション本文", response.result());
+        ArgumentCaptor<String> searchQueryCaptor = ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(webSearchService).searchSafely(searchQueryCaptor.capture());
+        assertEquals(200, searchQueryCaptor.getValue().length());
+    }
+
+    @Test
     void suggestTags_projectId未指定なら既存タグを問い合わせずプロンプトはそのまま() {
         when(llmClient.generate(anyString(), any(), any()))
                 .thenReturn("{\"categories\": [\"技術\"], \"tags\": [\"Java\", \"Spring\"]}");
@@ -298,6 +441,36 @@ class AiAssistServiceTest {
     @Test
     void suggestTags_不正なJSON応答は空のcategories_tagsにフォールバックする() {
         when(llmClient.generate(anyString(), any(), any())).thenReturn("これはJSONではありません");
+
+        AiTagsResponse response = service.suggestTags(new AiTagsRequest("記事本文", null, null));
+
+        assertEquals(List.of(), response.categories());
+        assertEquals(List.of(), response.tags());
+    }
+
+    @Test
+    void suggestTags_閉じ括弧のみでJSONオブジェクトが開始しない応答は空にフォールバックする() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("}invalid{");
+
+        AiTagsResponse response = service.suggestTags(new AiTagsRequest("記事本文", null, null));
+
+        assertEquals(List.of(), response.categories());
+        assertEquals(List.of(), response.tags());
+    }
+
+    @Test
+    void suggestTags_categories_tagsキーが無い応答は空のリストになる() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("{\"foo\": 1}");
+
+        AiTagsResponse response = service.suggestTags(new AiTagsRequest("記事本文", null, null));
+
+        assertEquals(List.of(), response.categories());
+        assertEquals(List.of(), response.tags());
+    }
+
+    @Test
+    void suggestTags_開き括弧のみで閉じ括弧が無い応答は空にフォールバックする() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("{\"categories\": [\"技術\"]");
 
         AiTagsResponse response = service.suggestTags(new AiTagsRequest("記事本文", null, null));
 
@@ -342,5 +515,206 @@ class AiAssistServiceTest {
         AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null));
 
         assertEquals(List.of(), response.issues());
+    }
+
+    @Test
+    void proofreadContent_JSON配列でない応答は空の指摘一覧にフォールバックする() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("{}");
+
+        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null));
+
+        assertEquals(List.of(), response.issues());
+    }
+
+    @Test
+    void proofreadContent_開き括弧のみで閉じ括弧が無い応答は空にフォールバックする() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("[{\"originalText\": \"こんにちは\"");
+
+        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null));
+
+        assertEquals(List.of(), response.issues());
+    }
+
+    @Test
+    void proofreadContent_originalTextキーが無い指摘は除外する() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(
+                "[{\"type\": \"typo\", \"message\": \"originalTextが無い\"}]");
+
+        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null));
+
+        assertEquals(List.of(), response.issues());
+    }
+
+    @Test
+    void proofreadContent_originalTextが空文字の指摘は除外する() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(
+                "[{\"type\": \"typo\", \"originalText\": \"\", \"message\": \"空文字\"}]");
+
+        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null));
+
+        assertEquals(List.of(), response.issues());
+    }
+
+    @Test
+    void proofreadContent_suggestionキーが無い指摘はsuggestionがnullになる() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(
+                "[{\"type\": \"readability\", \"originalText\": \"こんにちは\", \"message\": \"読みにくい\"}]");
+
+        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null));
+
+        assertEquals(1, response.issues().size());
+        assertNull(response.issues().get(0).suggestion());
+    }
+
+    @Test
+    void proofreadContent_suggestionが明示的にnullの指摘はsuggestionがnullになる() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(
+                "[{\"type\": \"readability\", \"originalText\": \"こんにちは\", "
+                        + "\"message\": \"読みにくい\", \"suggestion\": null}]");
+
+        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null));
+
+        assertEquals(1, response.issues().size());
+        assertNull(response.issues().get(0).suggestion());
+    }
+
+    // ---- issue #1213: レビューステップ単位の指摘生成 ----
+
+    @Test
+    void generateReviewStepSuggestions_JAPANESEステップはそのステップキーを持つ指摘一覧を返す() {
+        when(reviewStepModelService.resolveModel(1L, ReviewStepKey.JAPANESE)).thenReturn("model-a");
+        when(reviewStepModelService.resolveProvider(1L, ReviewStepKey.JAPANESE)).thenReturn(AiProvider.OPENAI);
+        when(llmClient.generate(anyString(), eq("model-a"), eq(AiProvider.OPENAI))).thenReturn(
+                "[{\"originalText\": \"ら抜き言葉の例\", \"message\": \"ら抜き言葉です\"}]");
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.JAPANESE, "これはら抜き言葉の例です");
+
+        assertEquals(1, response.suggestions().size());
+        assertEquals("JAPANESE", response.suggestions().get(0).stepKey());
+        assertEquals("ら抜き言葉の例", response.suggestions().get(0).originalText());
+        assertEquals("ら抜き言葉です", response.suggestions().get(0).message());
+    }
+
+    @Test
+    void generateReviewStepSuggestions_PROOFREADINGステップはそのステップキーを持つ指摘一覧を返す() {
+        when(reviewStepModelService.resolveModel(1L, ReviewStepKey.PROOFREADING)).thenReturn("model-b");
+        when(reviewStepModelService.resolveProvider(1L, ReviewStepKey.PROOFREADING)).thenReturn(AiProvider.CLAUDE);
+        when(llmClient.generate(anyString(), eq("model-b"), eq(AiProvider.CLAUDE))).thenReturn(
+                "[{\"originalText\": \"衍字の例\", \"message\": \"衍字があります\"}]");
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.PROOFREADING, "これは衍字の例です");
+
+        assertEquals(1, response.suggestions().size());
+        assertEquals("PROOFREADING", response.suggestions().get(0).stepKey());
+        assertEquals("衍字の例", response.suggestions().get(0).originalText());
+    }
+
+    @Test
+    void generateReviewStepSuggestions_本文に存在しないoriginalTextの指摘は除外する() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(
+                "[{\"originalText\": \"本文に無い文字列\", \"message\": \"指摘\"}]");
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.JAPANESE, "こんにちは世界");
+
+        assertEquals(List.of(), response.suggestions());
+    }
+
+    @Test
+    void generateReviewStepSuggestions_同じステップキーと本文と指摘内容なら識別子が一致する() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(
+                "[{\"originalText\": \"対象の指摘\", \"message\": \"指摘内容\"}]");
+
+        AiReviewStepSuggestionsResponse first =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.JAPANESE, "本文中に対象の指摘があります");
+        AiReviewStepSuggestionsResponse second =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.JAPANESE, "本文中に対象の指摘があります");
+
+        assertEquals(1, first.suggestions().size());
+        assertEquals(first.suggestions().get(0).id(), second.suggestions().get(0).id());
+    }
+
+    @Test
+    void generateReviewStepSuggestions_ステップキーが異なれば同じ引用_同じ内容でも識別子が異なる() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(
+                "[{\"originalText\": \"対象の指摘\", \"message\": \"指摘内容\"}]");
+
+        AiReviewStepSuggestionsResponse japanese =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.JAPANESE, "本文中に対象の指摘があります");
+        AiReviewStepSuggestionsResponse proofreading =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.PROOFREADING, "本文中に対象の指摘があります");
+
+        assertNotEquals(japanese.suggestions().get(0).id(), proofreading.suggestions().get(0).id());
+    }
+
+    @Test
+    void generateReviewStepSuggestions_プロンプト未実装のステップキーは例外() {
+        assertThrows(IllegalArgumentException.class,
+                () -> service.generateReviewStepSuggestions(1L, ReviewStepKey.STYLE, "本文"));
+    }
+
+    @Test
+    void generateReviewStepSuggestions_LLM呼び出しが例外を投げたらジョブを失敗にして再送出する() {
+        when(llmClient.generate(anyString(), any(), any())).thenThrow(new RuntimeException("LLM呼び出し失敗"));
+
+        assertThrows(RuntimeException.class,
+                () -> service.generateReviewStepSuggestions(1L, ReviewStepKey.JAPANESE, "本文"));
+    }
+
+    @Test
+    void generateReviewStepSuggestions_JSON配列でない応答は空の指摘一覧にフォールバックする() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("{}");
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.JAPANESE, "本文");
+
+        assertEquals(List.of(), response.suggestions());
+    }
+
+    @Test
+    void generateReviewStepSuggestions_不正なJSON応答は空の指摘一覧にフォールバックする() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("これはJSONではありません");
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.JAPANESE, "本文");
+
+        assertEquals(List.of(), response.suggestions());
+    }
+
+    @Test
+    void generateReviewStepSuggestions_originalTextが無い指摘は除外する() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(
+                "[{\"message\": \"originalTextが無い指摘\"}]");
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.JAPANESE, "本文");
+
+        assertEquals(List.of(), response.suggestions());
+    }
+
+    @Test
+    void generateReviewStepSuggestions_originalTextが空文字の指摘は除外する() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(
+                "[{\"originalText\": \"\", \"message\": \"空文字の指摘\"}]");
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.JAPANESE, "本文");
+
+        assertEquals(List.of(), response.suggestions());
+    }
+
+    @Test
+    void generateReviewStepSuggestions_messageが無い指摘でも識別子を計算して返す() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(
+                "[{\"originalText\": \"対象の指摘\"}]");
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.JAPANESE, "本文中に対象の指摘があります");
+
+        assertEquals(1, response.suggestions().size());
+        assertNull(response.suggestions().get(0).message());
+        assertNotEquals("", response.suggestions().get(0).id());
     }
 }

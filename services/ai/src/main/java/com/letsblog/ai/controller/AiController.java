@@ -1,5 +1,6 @@
 package com.letsblog.ai.controller;
 
+import com.letsblog.ai.domain.ReviewStepKey;
 import com.letsblog.ai.dto.AiAskRequest;
 import com.letsblog.ai.dto.AiAskResponse;
 import com.letsblog.ai.dto.AiDraftRequest;
@@ -8,6 +9,8 @@ import com.letsblog.ai.dto.AiImagePromptResponse;
 import com.letsblog.ai.dto.AiDraftResponse;
 import com.letsblog.ai.dto.AiProofreadRequest;
 import com.letsblog.ai.dto.AiProofreadResponse;
+import com.letsblog.ai.dto.AiReviewStepSuggestionsRequest;
+import com.letsblog.ai.dto.AiReviewStepSuggestionsResponse;
 import com.letsblog.ai.dto.AiSectionRequest;
 import com.letsblog.ai.dto.AiSectionResponse;
 import com.letsblog.ai.dto.AiTagsRequest;
@@ -102,5 +105,20 @@ public class AiController {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         return aiAssistService.generateImagePrompt(
                 projectId, request.history(), request.message(), request.provider());
+    }
+
+    /**
+     * 多段レビュー(issue #1210)のステップ単位の指摘生成(issue #1213)。プロバイダー/モデルは
+     * {@link com.letsblog.ai.service.ReviewStepModelService}(issue #1211)経由でプロジェクトの
+     * ステップ設定を読むため、{@link #generateImagePrompt}と同じ理由(保存済みのプロジェクト設定を
+     * 読む)でプロジェクトメンバー(またはadmin)に限定する(issue #830)。
+     */
+    @PostMapping("/api/projects/{projectId}/ai/review-steps/{stepKey}/suggestions")
+    public AiReviewStepSuggestionsResponse reviewStepSuggestions(
+            @PathVariable Long projectId,
+            @PathVariable ReviewStepKey stepKey,
+            @Valid @RequestBody AiReviewStepSuggestionsRequest request) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        return aiAssistService.generateReviewStepSuggestions(projectId, stepKey, request.text());
     }
 }

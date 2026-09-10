@@ -160,6 +160,48 @@ function proofreadJsonCompletion(prompt) {
   return JSON.stringify(issues);
 }
 
+// ------------------------------------ レビューステップ単位の指摘生成(issue #1213)
+
+/**
+ * ai-service の AiAssistService#REVIEW_STEP_PROMPT_TEMPLATES が積む、出力例そのものではなく
+ * ステップ固有の指示文言をマーカーにする({@link PROOFREAD_JSON_MARKER}と同じ考え方)。
+ * JAPANESE/PROOFREADING の両テンプレートは出力例の行(`{"originalText": ...`)が同一のため、
+ * それでは区別できない。指示文言はそれぞれのステップだけが持つ観点の語であり、
+ * 取り違えようがない(出典: ai-service の REVIEW_STEP_PROMPT_TEMPLATES)。
+ */
+const JAPANESE_STEP_MARKER = 'ら抜き言葉';
+const PROOFREADING_STEP_MARKER = '衍字';
+
+const JAPANESE_STEP_MESSAGE = 'E2Eスタブが検出した日本語チェックの指摘です。';
+const PROOFREADING_STEP_MESSAGE = 'E2Eスタブが検出した校正チェックの指摘です。';
+
+/**
+ * 本文の**最後の**文断片を引用として使う(校正チェック用の{@link proofreadQuotes}が先頭からN件
+ * 取るのとは逆)。「指摘箇所より前方に文字を挿入しても同じ指摘の識別子が変わらない」ことを
+ * 検証するシナリオ(issue #1213)は、本文の先頭に文章を追加してもこの指摘の引用文だけは
+ * 変わらないことを前提にしている。先頭から数える方式だと追加した分だけ区切りの数がずれて
+ * 別の断片を拾ってしまうが、末尾から数える方式なら追加分が末尾に及ばない限り安定する。
+ */
+function reviewStepQuote(body) {
+  const segments = body
+    .split(/[\n。、!?!?]/)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment !== '');
+  if (segments.length === 0) {
+    return '';
+  }
+  const last = segments[segments.length - 1];
+  return Array.from(last).slice(0, PROOFREAD_QUOTE_LENGTH).join('');
+}
+
+function reviewStepJsonCompletion(prompt, message) {
+  const quote = reviewStepQuote(promptBodyText(prompt));
+  if (!quote) {
+    return JSON.stringify([]);
+  }
+  return JSON.stringify([{ originalText: quote, message }]);
+}
+
 /**
  * JSON形式を要求するプロンプトへの応答。判別できなければ null を返し、呼び元へ委ねる。
  *
@@ -171,6 +213,10 @@ function proofreadJsonCompletion(prompt) {
 function jsonFormatCompletionFor(prompt) {
   if (prompt.includes(TAGS_JSON_MARKER)) return TAGS_JSON_COMPLETION;
   if (prompt.includes(PROOFREAD_JSON_MARKER)) return proofreadJsonCompletion(prompt);
+  if (prompt.includes(JAPANESE_STEP_MARKER)) return reviewStepJsonCompletion(prompt, JAPANESE_STEP_MESSAGE);
+  if (prompt.includes(PROOFREADING_STEP_MARKER)) {
+    return reviewStepJsonCompletion(prompt, PROOFREADING_STEP_MESSAGE);
+  }
   return null;
 }
 

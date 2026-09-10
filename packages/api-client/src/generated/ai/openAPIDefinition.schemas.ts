@@ -4,6 +4,28 @@
  * OpenAPI definition
  * OpenAPI spec version: v0
  */
+export interface SetProjectBraveSearchApiKeyRequest {
+  /** @minLength 1 */
+  apiKey: string;
+}
+
+export interface SelectReviewStepModelRequest {
+  provider?: string;
+  model?: string;
+}
+
+export interface ReviewStepSettingResponse {
+  stepKey?: string;
+  provider?: string;
+  model?: string;
+}
+
+export interface ReviewStepSettingsResponse {
+  steps?: ReviewStepSettingResponse[];
+  availableProviders?: string[];
+  availableModels?: string[];
+}
+
 export interface SelectLlmProviderRequest {
   provider?: string;
 }
@@ -106,6 +128,33 @@ export interface AcceptPlanResponse {
   results?: AcceptPlanResultItem[];
 }
 
+export interface AiReviewStepSuggestionsRequest {
+  /** @minLength 1 */
+  text: string;
+}
+
+export interface ReviewStepSuggestion {
+  id?: string;
+  stepKey?: string;
+  originalText?: string;
+  message?: string;
+}
+
+export interface AiReviewStepSuggestionsResponse {
+  suggestions?: ReviewStepSuggestion[];
+}
+
+export interface AiImagePromptRequest {
+  history?: PlanChatMessage[];
+  /** @minLength 1 */
+  message: string;
+  provider?: string;
+}
+
+export interface AiImagePromptResponse {
+  prompt?: string;
+}
+
 export interface CreateGenerationJobRequest {
   /** @minLength 1 */
   type: string;
@@ -118,6 +167,16 @@ export interface GenerationJobResponse {
   status?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface GenerateRequest {
+  projectId?: number;
+  prompt?: string;
+  providerOverride?: string;
+}
+
+export interface GenerateResponse {
+  result?: string;
 }
 
 export interface AiTagsRequest {
@@ -170,16 +229,6 @@ export interface ProofreadIssue {
 
 export interface AiProofreadResponse {
   issues?: ProofreadIssue[];
-}
-
-export interface GenerateRequest {
-  projectId?: number;
-  prompt?: string;
-  providerOverride?: string;
-}
-
-export interface GenerateResponse {
-  result?: string;
 }
 
 export interface AiDraftRequest {
@@ -247,6 +296,10 @@ export interface CategoryOption {
   parentName?: string;
 }
 
+export interface ProjectApiKeyStatusResponse {
+  configured?: boolean;
+}
+
 export interface BraveSearchApiKeyStatusResponse {
   configured?: boolean;
 }
@@ -259,23 +312,6 @@ export interface GenerationJobDetailResponse {
   resultPayload?: string;
   createdAt?: string;
   updatedAt?: string;
-}
-
-export interface SelectReviewStepModelRequest {
-  provider?: string;
-  model?: string;
-}
-
-export interface ReviewStepSettingResponse {
-  stepKey?: string;
-  provider?: string;
-  model?: string;
-}
-
-export interface ReviewStepSettingsResponse {
-  steps?: ReviewStepSettingResponse[];
-  availableProviders?: string[];
-  availableModels?: string[];
 }
 
 export type ListIssuesParams = {

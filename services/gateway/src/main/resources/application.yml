@@ -128,6 +128,14 @@ app:
         paths:
           - /api/projects/*/ai/generate-image-prompt
         response-timeout: 180s
+      # 多段レビュー(issue #1210)のステップ単位の指摘生成(issue #1213)。上の
+      # project-ai-generate-image-promptと同じ理由(専用ルートが無いと下のprojectルートへ
+      # 先勝ちマッチして404になる、issue #771と同型)で、同期のLLM呼び出しぶんタイムアウトも揃える。
+      - id: project-ai-review-step-suggestions
+        uri: ${AI_SERVICE_URI:http://ai:8080}
+        paths:
+          - /api/projects/*/ai/review-steps/*/suggestions
+        response-timeout: 180s
       # プロジェクト単位の設定も issue #583 で所有サービスへ分割した。
       #   - cssSelectorPrefix(project_content_settings)→ content-service(#576で所有権移管済み。
       #     legacy-api側は素通しだった)

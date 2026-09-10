@@ -1,10 +1,14 @@
 package com.letsblog.ai.controller;
 
+import com.letsblog.ai.domain.ReviewStepKey;
 import com.letsblog.ai.dto.AiProofreadRequest;
+import com.letsblog.ai.dto.AiReviewStepSuggestionsRequest;
+import com.letsblog.ai.dto.AiReviewStepSuggestionsResponse;
 import com.letsblog.ai.dto.AiTagsRequest;
 import com.letsblog.ai.dto.AiTagsResponse;
 import com.letsblog.ai.dto.AiProofreadResponse;
 import com.letsblog.ai.dto.ProofreadIssue;
+import com.letsblog.ai.dto.ReviewStepSuggestion;
 import com.letsblog.ai.service.AdminAuthorizationService;
 import com.letsblog.ai.service.AiAssistService;
 import com.letsblog.ai.service.ForbiddenException;
@@ -85,5 +89,33 @@ class AiControllerTest {
         controller().tags(request);
 
         verify(adminAuthorizationService, never()).requireProjectMemberOrAdmin(org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    // ---- issue #1213: レビューステップ単位の指摘生成 ----
+
+    @Test
+    void reviewStepSuggestions_プロジェクトメンバー判定を通してサービスへ委譲する() {
+        AiReviewStepSuggestionsRequest request = new AiReviewStepSuggestionsRequest("本文");
+        AiReviewStepSuggestionsResponse expected = new AiReviewStepSuggestionsResponse(
+                List.of(new ReviewStepSuggestion("id1", "JAPANESE", "本文", "指摘")));
+        when(aiAssistService.generateReviewStepSuggestions(7L, ReviewStepKey.JAPANESE, "本文")).thenReturn(expected);
+
+        AiReviewStepSuggestionsResponse response =
+                controller().reviewStepSuggestions(7L, ReviewStepKey.JAPANESE, request);
+
+        assertEquals(expected, response);
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(7L);
+    }
+
+    @Test
+    void reviewStepSuggestions_プロジェクトメンバーでなければ生成せずに拒否する() {
+        AiReviewStepSuggestionsRequest request = new AiReviewStepSuggestionsRequest("本文");
+        doThrow(new ForbiddenException("この操作にはプロジェクトメンバーまたはadmin権限が必要です"))
+                .when(adminAuthorizationService).requireProjectMemberOrAdmin(7L);
+
+        assertThrows(ForbiddenException.class,
+                () -> controller().reviewStepSuggestions(7L, ReviewStepKey.JAPANESE, request));
+
+        verifyNoInteractions(aiAssistService);
     }
 }

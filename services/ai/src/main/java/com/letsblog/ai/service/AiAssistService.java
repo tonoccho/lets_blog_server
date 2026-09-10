@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.ai.ai.AiProvider;
 import com.letsblog.ai.ai.LlmClient;
 import com.letsblog.ai.domain.GenerationJob;
+import com.letsblog.ai.domain.ReviewStepKey;
 import com.letsblog.ai.dto.AiAskRequest;
 import com.letsblog.ai.dto.AiAskResponse;
 import com.letsblog.ai.dto.AiDraftRequest;
@@ -12,19 +13,25 @@ import com.letsblog.ai.dto.AiImagePromptResponse;
 import com.letsblog.ai.dto.AiDraftResponse;
 import com.letsblog.ai.dto.AiProofreadRequest;
 import com.letsblog.ai.dto.AiProofreadResponse;
+import com.letsblog.ai.dto.AiReviewStepSuggestionsResponse;
 import com.letsblog.ai.dto.AiSectionRequest;
 import com.letsblog.ai.dto.AiSectionResponse;
 import com.letsblog.ai.dto.AiTagsRequest;
 import com.letsblog.ai.dto.PlanChatMessage;
 import com.letsblog.ai.dto.AiTagsResponse;
 import com.letsblog.ai.dto.ProofreadIssue;
+import com.letsblog.ai.dto.ReviewStepSuggestion;
 import com.letsblog.ai.repository.GenerationJobRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 
@@ -140,6 +147,48 @@ public class AiAssistService {
             %s
             """;
 
+    /**
+     * issue #1213: 多段レビュー(issue #1210)のステップ別指摘生成用プロンプト。PROOFREAD_CHECK_
+     * PROMPT_TEMPLATE(3観点まとめて1回で返す、エディタのリアルタイム校正用)とは異なり、
+     * ステップごとに1観点だけを問い、応答も{originalText, message}のみ(typeやsuggestionは持たない)。
+     * 識別子(id)は本文中の出現位置を含めないためLLMには出させず、サーバ側で
+     * {@link #computeSuggestionId}が算出する。5ステップのうちプロンプト未実装のステップ
+     * (FACT_CHECK/READER_PERSPECTIVE/STYLE)はこのMapに含めない
+     * (#1214/#1221が担当。{@link #generateReviewStepSuggestions}が未実装ステップを例外にする)。
+     */
+    private static final Map<ReviewStepKey, String> REVIEW_STEP_PROMPT_TEMPLATES = buildReviewStepPromptTemplates();
+
+    private static Map<ReviewStepKey, String> buildReviewStepPromptTemplates() {
+        Map<ReviewStepKey, String> templates = new EnumMap<>(ReviewStepKey.class);
+        templates.put(ReviewStepKey.JAPANESE, """
+                あなたは日本語のプロの校正者です。以下のブログ記事本文を読み、日本語としての正しさ
+                (文法誤り、ら抜き言葉、二重否定、修飾関係の曖昧さ、助詞の誤用など)の観点でのみ問題を指摘してください。
+                誤字脱字や表記ゆれなど表記の正しさは対象外です(別の観点で扱います)。
+
+                出力は必ず次のJSON配列の形式のみとし、他の文章は一切含めないでください。問題が無ければ空配列 [] を返してください。
+                originalTextには本文中の該当箇所を、一字一句変えずにそのまま引用してください(位置の特定に使うため)。
+
+                [{"originalText": "本文中の該当箇所", "message": "指摘内容"}]
+
+                本文:
+                %s
+                """);
+        templates.put(ReviewStepKey.PROOFREADING, """
+                あなたは日本語のプロの校正者です。以下のブログ記事本文を読み、表記の正しさ
+                (誤字脱字、表記ゆれ(例: サーバ/サーバー)、送り仮名、半角/全角の不統一、衍字など)の観点でのみ問題を指摘してください。
+                日本語の文法的な正しさは対象外です(別の観点で扱います)。
+
+                出力は必ず次のJSON配列の形式のみとし、他の文章は一切含めないでください。問題が無ければ空配列 [] を返してください。
+                originalTextには本文中の該当箇所を、一字一句変えずにそのまま引用してください(位置の特定に使うため)。
+
+                [{"originalText": "本文中の該当箇所", "message": "指摘内容"}]
+
+                本文:
+                %s
+                """);
+        return templates;
+    }
+
     /** issue #526: エディタ右クリックメニュー「Ask AI」からの質問に、Web検索結果を踏まえて回答する。 */
     private static final String ASK_PROMPT_TEMPLATE = """
             あなたはブログ執筆アシスタントです。以下の質問についてWeb検索結果を参考にしながら調査し、
@@ -156,18 +205,21 @@ public class AiAssistService {
     private final WebSearchService webSearchService;
     private final ObjectMapper objectMapper;
     private final ArticlePlanService articlePlanService;
+    private final ReviewStepModelService reviewStepModelService;
 
     public AiAssistService(LlmClient llmClient,
                            LlmModelService llmModelService,
                            GenerationJobRepository generationJobRepository,
                            WebSearchService webSearchService, ObjectMapper objectMapper,
-                           ArticlePlanService articlePlanService) {
+                           ArticlePlanService articlePlanService,
+                           ReviewStepModelService reviewStepModelService) {
         this.llmClient = llmClient;
         this.llmModelService = llmModelService;
         this.generationJobRepository = generationJobRepository;
         this.webSearchService = webSearchService;
         this.objectMapper = objectMapper;
         this.articlePlanService = articlePlanService;
+        this.reviewStepModelService = reviewStepModelService;
     }
 
     /**
@@ -473,6 +525,81 @@ public class AiAssistService {
             return issues;
         } catch (Exception e) {
             return List.of();
+        }
+    }
+
+    /**
+     * issue #1213: 多段レビューのステップ別指摘生成。プロンプト・応答形式はステップごとに異なるが、
+     * プロバイダー/モデルの解決は{@link ReviewStepModelService}(issue #1211、ステップ設定 →
+     * プロジェクト既定 → グローバル既定)へ委譲する。generation_jobsのtypeにステップキーを含め、
+     * どのステップが生成したか判別できるようにする。
+     */
+    public AiReviewStepSuggestionsResponse generateReviewStepSuggestions(
+            Long projectId, ReviewStepKey stepKey, String text) {
+        String template = REVIEW_STEP_PROMPT_TEMPLATES.get(stepKey);
+        if (template == null) {
+            throw new IllegalArgumentException(
+                    "このレビューステップのプロンプトはまだ実装されていません: " + stepKey);
+        }
+
+        GenerationJob job = startJob("llm_review_step_" + stepKey.name().toLowerCase(), Map.of(
+                "projectId", String.valueOf(projectId), "stepKey", stepKey.name(), "text", text));
+        try {
+            String model = reviewStepModelService.resolveModel(projectId, stepKey);
+            AiProvider provider = reviewStepModelService.resolveProvider(projectId, stepKey);
+            String prompt = template.formatted(text);
+            String raw = llmClient.generate(prompt, model, provider);
+            List<ReviewStepSuggestion> suggestions = parseReviewStepSuggestions(raw, text, stepKey);
+            completeJob(job, Map.of("result", raw));
+            return new AiReviewStepSuggestionsResponse(suggestions);
+        } catch (RuntimeException e) {
+            failJob(job, e);
+            throw e;
+        }
+    }
+
+    private List<ReviewStepSuggestion> parseReviewStepSuggestions(String raw, String sourceText, ReviewStepKey stepKey) {
+        String jsonPart = extractJsonArray(raw);
+        try {
+            JsonNode node = objectMapper.readTree(jsonPart);
+            if (!node.isArray()) {
+                return List.of();
+            }
+            List<ReviewStepSuggestion> suggestions = new ArrayList<>();
+            for (JsonNode item : node) {
+                String originalText = item.path("originalText").asText(null);
+                // parseProofreadResponseと同じ防御: 本文中に実在しない引用は位置特定できないため除外する。
+                if (originalText == null || originalText.isEmpty() || !sourceText.contains(originalText)) {
+                    continue;
+                }
+                String message = item.path("message").asText(null);
+                String id = computeSuggestionId(stepKey, originalText, message);
+                suggestions.add(new ReviewStepSuggestion(id, stepKey.name(), originalText, message));
+            }
+            return suggestions;
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    /**
+     * ステップキー+引用(originalText)+指摘内容(message)から安定した識別子を導く(issue #1213)。
+     * 本文中の出現位置を含めないため、前方への加筆で位置がずれても同じ指摘は同じidのままになる。
+     * サーバは状態を持たないため、同じ入力からは常に同じidを再計算できるハッシュにしている。
+     */
+    private String computeSuggestionId(ReviewStepKey stepKey, String originalText, String message) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            String payload = stepKey.name() + ' ' + originalText + ' ' + (message == null ? "" : message);
+            byte[] hash = digest.digest(payload.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                hex.append(String.format("%02x", b));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            // JVM は SHA-256 を標準で提供するため実運用では発生しない(issue #1213)。
+            throw new IllegalStateException("SHA-256が利用できません", e);
         }
     }
 

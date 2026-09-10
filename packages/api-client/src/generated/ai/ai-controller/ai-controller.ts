@@ -9,13 +9,111 @@ import type {
   AiAskResponse,
   AiDraftRequest,
   AiDraftResponse,
+  AiImagePromptRequest,
+  AiImagePromptResponse,
   AiProofreadRequest,
   AiProofreadResponse,
+  AiReviewStepSuggestionsRequest,
+  AiReviewStepSuggestionsResponse,
   AiSectionRequest,
   AiSectionResponse,
   AiTagsRequest,
   AiTagsResponse
 } from '../openAPIDefinition.schemas';
+
+
+export type reviewStepSuggestionsResponse200 = {
+  data: AiReviewStepSuggestionsResponse
+  status: 200
+}
+
+export type reviewStepSuggestionsResponseSuccess = (reviewStepSuggestionsResponse200) & {
+  headers: Headers;
+};
+;
+
+export type reviewStepSuggestionsResponse = (reviewStepSuggestionsResponseSuccess)
+
+export const getReviewStepSuggestionsUrl = (projectId: number,
+    stepKey: 'JAPANESE' | 'PROOFREADING' | 'FACT_CHECK' | 'READER_PERSPECTIVE' | 'STYLE',) => {
+
+
+
+
+  return `http://localhost:8080/api/projects/${projectId}/ai/review-steps/${stepKey}/suggestions`
+}
+
+export const reviewStepSuggestions = async (projectId: number,
+    stepKey: 'JAPANESE' | 'PROOFREADING' | 'FACT_CHECK' | 'READER_PERSPECTIVE' | 'STYLE',
+    aiReviewStepSuggestionsRequest: AiReviewStepSuggestionsRequest, options?: RequestInit): Promise<reviewStepSuggestionsResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+const res = await fetch(getReviewStepSuggestionsUrl(projectId,stepKey),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(aiReviewStepSuggestionsRequest)
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: reviewStepSuggestionsResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as reviewStepSuggestionsResponse
+}
+
+
+export type generateImagePromptResponse200 = {
+  data: AiImagePromptResponse
+  status: 200
+}
+
+export type generateImagePromptResponseSuccess = (generateImagePromptResponse200) & {
+  headers: Headers;
+};
+;
+
+export type generateImagePromptResponse = (generateImagePromptResponseSuccess)
+
+export const getGenerateImagePromptUrl = (projectId: number,) => {
+
+
+
+
+  return `http://localhost:8080/api/projects/${projectId}/ai/generate-image-prompt`
+}
+
+export const generateImagePrompt = async (projectId: number,
+    aiImagePromptRequest: AiImagePromptRequest, options?: RequestInit): Promise<generateImagePromptResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+const res = await fetch(getGenerateImagePromptUrl(projectId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(aiImagePromptRequest)
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: generateImagePromptResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as generateImagePromptResponse
+}
 
 
 export type tagsResponse200 = {
