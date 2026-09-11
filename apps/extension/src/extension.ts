@@ -14,6 +14,7 @@ import {
   requireProjectId,
   getConfiguredAiProvider,
   setConfiguredAiProvider,
+  logout,
 } from './config';
 import * as deviceAuth from './deviceAuth';
 import { decodeJwtPayload, extractEmail, extractPrimaryRoleName } from './jwtClaims';
@@ -82,6 +83,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.createArticleWithoutAi', () => commandCreateArticleWithoutAi(context)),
     vscode.commands.registerCommand('letsBlog.schedulePublication', () => commandSchedulePublication()),
     vscode.commands.registerCommand('letsBlog.login', () => commandLogin(context)),
+    vscode.commands.registerCommand('letsBlog.logout', () => commandLogout(context)),
     vscode.commands.registerCommand('letsBlog.selectSite', () => commandSelectSite(context)),
     vscode.commands.registerCommand('letsBlog.publish', () => commandPublish(context)),
     vscode.commands.registerCommand('letsBlog.deletePost', () => commandDeletePost(context)),
@@ -340,6 +342,30 @@ async function commandLogin(context: vscode.ExtensionContext): Promise<void> {
     );
   } catch (err) {
     reportError('ログインに失敗しました', err);
+  }
+}
+
+/**
+ * ログアウトする(issue #1099)。端末側の資格情報(SecretStorage)の削除は
+ * config.logout()がKeycloakへの通信結果によらず必ず行う。ここではその結果に応じて
+ * 利用者への通知文言を切り替えるだけの薄いUI層(commandLoginと同じ役割分担)。
+ */
+async function commandLogout(context: vscode.ExtensionContext): Promise<void> {
+  const result = await logout(context);
+  // 前のユーザーの参照結果が残らないようにする(commandLoginと同じ理由、issue #1099)。
+  api.clearResponseCache();
+
+  if (!result.wasLoggedIn) {
+    vscode.window.showInformationMessage('ログアウトしました。');
+    return;
+  }
+  if (result.keycloakSessionEnded) {
+    vscode.window.showInformationMessage('ログアウトしました。');
+  } else {
+    vscode.window.showWarningMessage(
+      'ログアウトしました(端末側の資格情報は削除済みです)。' +
+        'ただし、Keycloak側のセッション終了に失敗したため、サーバー側のセッションが残っている可能性があります。'
+    );
   }
 }
 

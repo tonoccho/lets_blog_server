@@ -14,6 +14,7 @@ import {
   getProjectId,
   setProjectId,
   requireProjectId,
+  logout,
 } from '../config';
 import * as deviceAuth from '../deviceAuth';
 import { ApiError, NetworkError, TimeoutError } from '../errorHandler';
@@ -292,6 +293,86 @@ describe('Actor', () => {
 
   it('requireActorは未ログインなら対応方法を含む例外を投げる', async () => {
     await expect(requireActor(createContext())).rejects.toThrow('Login');
+  });
+});
+
+/**
+ * issue #1099: ログアウト。端末側の資格情報削除はKeycloakへの通信結果によらず必ず行う
+ * (apps/web/src/lib/auth.tsのsignOutと同じ判断)。
+ */
+describe('logout(issue #1099)', () => {
+  const LOGGED_IN_TOKENS = { accessToken: 'access-1', refreshToken: 'refresh-1', expiresAt: Date.now() + 3_600_000 };
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('ログイン済みの場合、Keycloak側のoffline sessionを終了し端末側のトークン/Actorを削除する', async () => {
+    const context = createContext();
+    context.secretValues.set('letsBlog.tokens', JSON.stringify(LOGGED_IN_TOKENS));
+    await setActor(context, ACTOR);
+    const revokeSpy = jest.spyOn(deviceAuth, 'revokeRefreshToken').mockResolvedValue(undefined);
+
+    const result = await logout(context);
+
+    expect(revokeSpy).toHaveBeenCalledWith(
+      'https://localhost',
+      LOGGED_IN_TOKENS.refreshToken,
+      false,
+      expect.any(AbortSignal)
+    );
+    expect(result).toEqual({ wasLoggedIn: true, keycloakSessionEnded: true });
+    expect(context.secretValues.has('letsBlog.tokens')).toBe(false);
+    await expect(getActor(context)).resolves.toBeUndefined();
+  });
+
+  it('Keycloakへの通信に失敗しても端末側のトークン/Actorの削除は完了する', async () => {
+    const context = createContext();
+    context.secretValues.set('letsBlog.tokens', JSON.stringify(LOGGED_IN_TOKENS));
+    await setActor(context, ACTOR);
+    jest.spyOn(deviceAuth, 'revokeRefreshToken').mockRejectedValue(new NetworkError('到達できません', 'https://localhost', new Error('ECONNREFUSED')));
+
+    const result = await logout(context);
+
+    expect(result).toEqual({ wasLoggedIn: true, keycloakSessionEnded: false });
+    expect(context.secretValues.has('letsBlog.tokens')).toBe(false);
+    await expect(getActor(context)).resolves.toBeUndefined();
+  });
+
+  it('未ログイン状態で実行しても例外にならず、Keycloakへは通信しない', async () => {
+    const context = createContext();
+    const revokeSpy = jest.spyOn(deviceAuth, 'revokeRefreshToken').mockResolvedValue(undefined);
+
+    await expect(logout(context)).resolves.toEqual({ wasLoggedIn: false, keycloakSessionEnded: true });
+    expect(revokeSpy).not.toHaveBeenCalled();
+  });
+
+  // requireAccessTokenの「リフレッシュが応答しない場合は中断する」テスト(config.ts:133近辺)と
+  // 同じ理由で、logoutもKeycloakのoffline session終了要求に30秒のタイムアウトを設けている。
+  it('Keycloakが応答しない場合は中断し、端末側の削除は完了したままkeycloakSessionEnded:falseを返す', async () => {
+    jest.useFakeTimers();
+    try {
+      const context = createContext();
+      context.secretValues.set('letsBlog.tokens', JSON.stringify(LOGGED_IN_TOKENS));
+      await setActor(context, ACTOR);
+
+      jest.spyOn(deviceAuth, 'revokeRefreshToken').mockImplementation((_serverUrl, _refreshToken, _allowInsecureTls, signal) => {
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () =>
+            reject(new TimeoutError('Keycloak側のoffline session終了がタイムアウトしました', 'https://localhost', 30_000))
+          );
+        });
+      });
+
+      const pending = logout(context);
+      await jest.advanceTimersByTimeAsync(30_000);
+      const result = await pending;
+
+      expect(result).toEqual({ wasLoggedIn: true, keycloakSessionEnded: false });
+      expect(context.secretValues.has('letsBlog.tokens')).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
 

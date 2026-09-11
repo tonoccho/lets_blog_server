@@ -31,6 +31,10 @@
         "title": "Let's Blog: Login"
       },
       {
+        "command": "letsBlog.logout",
+        "title": "Let's Blog: Logout"
+      },
+      {
         "command": "letsBlog.publish",
         "title": "Let's Blog: Publish"
       },

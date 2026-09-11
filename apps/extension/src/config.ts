@@ -7,6 +7,7 @@ import {
   computeExpiresAt,
   isRefreshTokenRevoked,
   refreshAccessToken as requestTokenRefresh,
+  revokeRefreshToken,
   TOKEN_REQUEST_TIMEOUT_MS,
   TokenResult,
 } from './deviceAuth';
@@ -211,6 +212,47 @@ export async function requireActor(context: vscode.ExtensionContext): Promise<Ac
     throw new Error('ログインしていません。「Let\'s Blog: Login」を先に実行してください。');
   }
   return actor;
+}
+
+/** logoutの結果。Keycloak側の終了に成功したかを呼び出し側(extension.ts)が通知文言に反映する。 */
+export interface LogoutResult {
+  /** 実行前にログイン状態だったか。未ログインでの実行はKeycloakへ通信しない(issue #1099)。 */
+  wasLoggedIn: boolean;
+  /** Keycloak側のoffline sessionを終了できたか。未ログインだった場合はtrue(終了すべき対象が無いため)。 */
+  keycloakSessionEnded: boolean;
+}
+
+/**
+ * ログアウトする(issue #1099)。
+ *
+ * SecretStorageの `letsBlog.tokens` / `letsBlog.actor` の削除は、Keycloakへの通信結果によらず
+ * 必ず行う——手元の資格情報を消せないほうが危険であるため(apps/web/src/lib/auth.tsのsignOutと
+ * 同じ判断)。Keycloak側のoffline session終了に失敗しても、ログアウト操作自体は成功として扱い、
+ * 呼び出し側がサーバー側セッションが残りうる旨を利用者に伝えられるよう結果を返す。
+ */
+export async function logout(context: vscode.ExtensionContext): Promise<LogoutResult> {
+  const tokens = await getTokens(context);
+  await clearTokens(context);
+  await clearActor(context);
+
+  if (!tokens) {
+    return { wasLoggedIn: false, keycloakSessionEnded: true };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TOKEN_REQUEST_TIMEOUT_MS);
+  try {
+    await revokeRefreshToken(getServerUrl(), tokens.refreshToken, allowsInsecureTls(), controller.signal);
+    return { wasLoggedIn: true, keycloakSessionEnded: true };
+  } catch (error) {
+    logger.warn(
+      'Keycloak側のoffline session終了に失敗しました。サーバー側のセッションが残っている可能性があります。',
+      { reason: messageOf(error) }
+    );
+    return { wasLoggedIn: true, keycloakSessionEnded: false };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** 選択中のプロジェクトID。ワークスペース単位で保持する。 */

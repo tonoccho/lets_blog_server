@@ -277,3 +277,48 @@ export async function refreshAccessToken(
   }
   return parseTokenResult(await res.json());
 }
+
+/**
+ * 保存済みリフレッシュトークンでKeycloak側のoffline sessionを終了させる(issue #1099)。
+ *
+ * revocation_endpoint(RFC 7009)を使う。end_session_endpointも実機確認済みで通るが、
+ * revokeはRFC 7009準拠で未知/無効なトークンに対しても200を返す(=冪等)ため、
+ * 「ログアウトを何度実行しても失敗にならない」という要件に自然に合う
+ * (Implementation Notes参照)。publicクライアントであるためclient_secretは送らない。
+ */
+export async function revokeRefreshToken(
+  serverUrl: string,
+  refreshToken: string,
+  allowInsecureTls: boolean,
+  signal: AbortSignal
+): Promise<void> {
+  const url = `${realmBaseUrl(serverUrl)}/protocol/openid-connect/revoke`;
+  let res: HttpResponse;
+  try {
+    res = await httpRequest(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: DEVICE_CLIENT_ID,
+        token: refreshToken,
+        token_type_hint: 'refresh_token',
+      }).toString(),
+      signal,
+      allowInsecureTls,
+    });
+  } catch (error) {
+    if (signal.aborted) {
+      throw new TimeoutError('Keycloak側のoffline session終了が時間内に完了しませんでした', url, TOKEN_REQUEST_TIMEOUT_MS);
+    }
+    throw new NetworkError('Keycloak側のoffline session終了でサーバーへ到達できませんでした', url, error);
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new ApiError(
+      `Keycloak側のoffline sessionの終了に失敗しました (HTTP ${res.status})`,
+      res.status,
+      body || res.statusText,
+      url
+    );
+  }
+}

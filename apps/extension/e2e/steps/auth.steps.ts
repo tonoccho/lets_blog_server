@@ -1,19 +1,23 @@
 /** ログイン・接続設定のステップ(issue #942 / AT-16)。 */
 
-import { Then, When } from '../support/gherkin';
+import { Given, Then, When } from '../support/gherkin';
 import { attempt, capturedError, ctx, w } from './common.steps';
 import {
   ADMIN_EMAIL,
+  SERVER_URL,
   asExtensionContext,
+  configureExtension,
   createContext,
   loginWithDeviceCode,
   requireCredentials,
 } from '../support/env';
 import { setConfiguration } from '../../src/__mocks__/vscode';
-import { requireAccessToken } from '../../src/config';
+import { requireAccessToken, logout } from '../../src/config';
+import { refreshAccessToken, isRefreshTokenRevoked } from '../../src/deviceAuth';
 import * as apiClient from '../../src/apiClient';
 
 const TOKENS_SECRET = 'letsBlog.tokens';
+const ACTOR_SECRET = 'letsBlog.actor';
 
 When('デバイスコードフローで管理者としてログインする', async (world) => {
   const { adminPassword } = requireCredentials();
@@ -123,4 +127,59 @@ Then('ログインを促すエラーになる', (world) => {
   if (!error.message.includes('Login')) {
     throw new Error(`ログインを促すメッセージではありません: ${error.message}`);
   }
+});
+
+/**
+ * issue #1099: ログアウト検証。「管理者としてログイン済みである」は複数シナリオで
+ * リフレッシュトークンを使い回すため、それを失効させるこの検証専用に新しくログインする。
+ */
+Given('ログアウト確認用に新しくログインする', async (world) => {
+  const { adminPassword } = requireCredentials();
+  configureExtension();
+  const scope = w(world);
+  scope.context = createContext();
+  await loginWithDeviceCode(scope.context, ADMIN_EMAIL, adminPassword);
+});
+
+Given('未ログイン状態である', (world) => {
+  configureExtension();
+  w(world).context = createContext();
+});
+
+When('ログアウトする', async (world) => {
+  const scope = w(world);
+  const stored = await scope.context.secrets.get(TOKENS_SECRET);
+  if (stored) {
+    const tokens = JSON.parse(stored) as { refreshToken: string };
+    (scope as unknown as { previousRefreshToken?: string }).previousRefreshToken = tokens.refreshToken;
+  }
+  await attempt(world, () => logout(ctx(world)));
+});
+
+Then('SecretStorageからトークンとActorが削除されている', async (world) => {
+  const scope = w(world);
+  const tokens = await scope.context.secrets.get(TOKENS_SECRET);
+  const actor = await scope.context.secrets.get(ACTOR_SECRET);
+  if (tokens !== undefined) throw new Error('letsBlog.tokensが削除されていません');
+  if (actor !== undefined) throw new Error('letsBlog.actorが削除されていません');
+});
+
+Then('ログアウト前のリフレッシュトークンでのトークン更新はKeycloakに拒否される', async (world) => {
+  const previous = (w(world) as unknown as { previousRefreshToken?: string }).previousRefreshToken;
+  if (!previous) throw new Error('ログアウト前のリフレッシュトークンが記録されていません');
+
+  const controller = new AbortController();
+  const error = await refreshAccessToken(SERVER_URL, previous, true, controller.signal).then(
+    () => undefined,
+    (e: unknown) => e
+  );
+  if (!error) throw new Error('ログアウト後も旧リフレッシュトークンでの更新が成功してしまいました');
+  if (!isRefreshTokenRevoked(error)) {
+    throw new Error(`失効として判定されないエラーでした: ${String(error)}`);
+  }
+});
+
+Then('例外にならない', (world) => {
+  const error = w(world).error;
+  if (error) throw error instanceof Error ? error : new Error(String(error));
 });

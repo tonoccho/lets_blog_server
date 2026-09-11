@@ -13,8 +13,8 @@ OWASP Top 10 (2021) に対する現状の対応をまとめたものです。
 
 | 情報 | 保管先 | キー | 生存期間 |
 | --- | --- | --- | --- |
-| アクセストークン/リフレッシュトークン | `context.secrets`(VSCode Secret Storage) | `letsBlog.tokens` | リフレッシュトークンが**確定的に失効**するまで(Keycloakが `400 invalid_grant` 等を返した時点で破棄)/再ログインまで |
-| ログインユーザー(Actor、表示用) | `context.secrets` | `letsBlog.actor` | ログアウト/再ログインまで |
+| アクセストークン/リフレッシュトークン | `context.secrets`(VSCode Secret Storage) | `letsBlog.tokens` | リフレッシュトークンが**確定的に失効**するまで(Keycloakが `400 invalid_grant` 等を返した時点で破棄)/`Let's Blog: Logout` 実行まで/再ログインまで |
+| ログインユーザー(Actor、表示用) | `context.secrets` | `letsBlog.actor` | `Let's Blog: Logout` 実行まで/再ログインまで |
 | 選択中のプロジェクトID | `context.workspaceState` | `letsBlog.projectId` | ワークスペース単位で永続 |
 
 トークンとActorは **VSCode の Secret Storage API** に保管します。Secret Storage は
@@ -47,6 +47,17 @@ OSの資格情報ストア(macOS: Keychain、Windows: 資格情報マネージ�
 - Actorの保存値は読み出し時に `ActorSchema`(Zod)で検証し、壊れていた場合は破棄して再ログインを促します。
   Device Authorization Grant移行後のActorはKeycloakのJWTクレーム(email/realm_access.roles)から
   復元した表示専用の値で、ローカルDBの数値ユーザーIDは持ちません。
+- `letsBlog.logout`(コマンドパレット表示: `Let's Blog: Logout`、issue #1099)で、利用者が管理者を
+  介さずに資格情報を切れます。実行すると `src/config.ts` の `logout()` が、保存済みリフレッシュ
+  トークンでKeycloakのrevocation_endpoint(`protocol/openid-connect/revoke`、RFC 7009)を呼んで
+  offline sessionを終了させたうえで、`letsBlog.tokens` / `letsBlog.actor` をSecretStorageから
+  削除します。**端末側の削除はKeycloakへの通信結果によらず必ず行います**(手元の資格情報を
+  消せないほうが危険であるため、`apps/web/src/lib/auth.ts` のNextAuth `signOut` と同じ判断)。
+  Keycloak側の終了に失敗した場合は、サーバー側のセッションが残りうる旨を利用者に通知します。
+  未ログイン状態で実行してもKeycloakへは通信せず、例外にもなりません。
+  上記「offline tokenが実質無期限」であることの対処は、本コマンドの追加により
+  「利用者自身が任意のタイミングで終了できる」状態になりました(管理者によるユーザー無効化 /
+  offline session削除という既存の失効手段に加わる形です)。
 
 ### 1.3 ログへの出力
 
@@ -130,9 +141,10 @@ issue #565(Device Authorization Grantへの移行)以降、拡張はパスワー
   一切扱わないため、この制約の影響範囲はトークンに限定されます)。
 - **offline tokenの寿命が長い**: `offline_access` を要求する設計(issue #1098)のため、端末の
   Secret Storage には既定で30日間(使うたびに延長され、realmの設定上は上限なし)有効な
-  リフレッシュトークンが載ります。拡張にはログアウト(offline tokenのrevoke)コマンドが無いため、
-  端末紛失時などに失効させる手段はKeycloak管理コンソールからのoffline session削除になります。
-  寿命の見直しとログアウトコマンドの追加はissue #1098のOpen Questionsとして別Issue扱いです。
+  リフレッシュトークンが載ります。issue #1099で`Let's Blog: Logout`コマンドを追加したため、
+  利用者自身が管理者を介さず端末紛失時などに失効させられます(1.2節参照)。管理者による
+  ユーザー無効化 / Keycloak管理コンソールからのoffline session削除も引き続き有効な失効手段です。
+  寿命方針(上限の有無、リフレッシュトークンの回転)自体の見直しはissue #1100で扱います。
 - **`allowInsecureTls: true` 時の中間者攻撃**: 利用者が明示的に有効化した場合、
   証明書検証を行わないため中間者攻撃を検出できません。ローカル環境専用の設定です。
 - **Webviewの `style-src 'unsafe-inline'`**: 3章に記載の理由により許容しています。
