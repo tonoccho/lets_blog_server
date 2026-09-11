@@ -314,6 +314,23 @@ GPUの無いホストでもこの `up -d` は中断しない。画像生成の�
 `comfyui-stub` が受けるので、GPUの無いホストでもE2Eは通る。GPUを持つホストで実機の
 `comfyui` も併せて起動したい場合は `.env` の `COMPOSE_PROFILES=gpu` を有効にする。
 
+### gateway の `api-global` 枠を受け入れテスト用に引き上げる(issue #1132)
+
+`docker-compose.e2e-stubs.yml` は `gateway` サービスにも重なっており、
+`API_RATE_LIMIT_REQUESTS` を本番既定値(100 req/分)より引き上げている。
+
+`@api` タグのシナリオ(約150本)は nginx 経由(`https://localhost`)で gateway を叩くため、
+gateway からは**ブラウザ経由の外部トラフィックと区別が付かない**。`api-global` は
+クライアント単位に分割されているが(issue #749)、受け入れテストの実行元は常に1台の
+Playwright プロセスなので、分割してもスイート全体が「1クライアント」のままである。
+結果として、フィクスチャ構築の呼び出し(`POST /api/projects` 等、シナリオ本来の検証とは
+無関係)だけで本番既定の100req/分を使い切り、無関係なシナリオが429で落ちる
+(詳しい実測とバケット選定の根拠は `docs/API_RATE_LIMITING.md` の
+「Acceptance-test override (issue #1132)」を参照)。
+
+**本番の既定値は変えていない。** この上書きは `docker-compose.e2e-stubs.yml` の
+`gateway:` サービスにだけ効き、`docker-compose.yml` 単体(本番相当の構成)には影響しない。
+
 ### 何をスタブ化しているか
 
 | スタブ | 置き換える依存 | 向き先を決める環境変数 | ホスト公開 |

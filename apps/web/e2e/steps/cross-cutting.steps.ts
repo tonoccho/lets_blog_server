@@ -24,6 +24,7 @@ import {
 import {
   fetchThroughGateway,
   floodGateway,
+  gatewayApiGlobalLimit,
   probeThroughGateway,
   sendThroughGateway,
   waitForContainerLog,
@@ -384,18 +385,43 @@ Then('すべてのサービスが401で拒否される', async ({ ctx }) => {
  */
 const RATE_LIMITED_PATH = '/api/auth/setup-status';
 
-/** api-global の上限(100req/分)を確実に超える回数。 */
-const OVER_LIMIT_REQUEST_COUNT = 105;
+/**
+ * api-global の上限を確実に超える回数。
+ *
+ * 上限そのものを決め打ちしない(issue #1132)。`docker-compose.e2e-stubs.yml` は
+ * 受け入れテスト実行時に `API_RATE_LIMIT_REQUESTS` を本番既定値(100)から引き上げるため、
+ * ここで100を決め打ちすると引き上げ後の環境では上限に達せず前提が壊れる。
+ * {@link gatewayApiGlobalLimit} が実際にコンテナへ設定されている値を読むので、
+ * どちらの環境でも(引き上げていても、いなくても)確実に上限を超える。
+ */
+function overLimitRequestCount(): number {
+  return gatewayApiGlobalLimit() + 5;
+}
 
-/** シナリオごとに別のクライアントとして扱われるよう、実行のたびに別のIPを使う。 */
+/**
+ * シナリオごとに別のクライアントとして扱われるよう、呼び出しのたびに別のIPを使う。
+ *
+ * 乱数一択ではなく、プロセスごとに開始位置をずらした連番にする(issue #1132)。
+ * `fullyParallel: true`(playwright.config.ts)のため、同一ファイル内のシナリオでも
+ * 別のワーカー(別のNode.jsプロセス、したがって別のモジュール状態)で並行に走りうる。
+ * `API_RATE_LIMIT_REQUESTS` を引き上げた受け入れテスト環境では
+ * {@link overLimitRequestCount} により1回のfloodが長くなる(105件→設定値+5件)ため、
+ * 複数プロセスのfloodが同じ60秒ウィンドウで重なる時間が伸び、250通りからの単純な乱択では
+ * 「別のクライアントのはずが実は同じキーだった」という取り違えを引く確率がその分だけ
+ * 上がる(実測: この変更前に1回観測した)。`process.pid` を初期値にすることで、
+ * プロセスをまたいだ1回目の呼び出しどうしが同じ値になる事態を避けつつ、
+ * 同一プロセス内での呼び出しどうしは連番により確実に重複しない。
+ */
+let clientIpSequence = process.pid % 250;
 function uniqueClientIp(): string {
-  return `203.0.113.${Math.floor(Math.random() * 250) + 1}`;
+  clientIpSequence = (clientIpSequence % 250) + 1;
+  return `203.0.113.${clientIpSequence}`;
 }
 
 function floodUntilLimited(ctx: Record<string, unknown>): number[] {
   const clientIp = uniqueClientIp();
   ctx.rateLimitClientIp = clientIp;
-  const statuses = floodGateway(RATE_LIMITED_PATH, clientIp, OVER_LIMIT_REQUEST_COUNT);
+  const statuses = floodGateway(RATE_LIMITED_PATH, clientIp, overLimitRequestCount());
   ctx.rateLimitStatuses = statuses;
   return statuses;
 }

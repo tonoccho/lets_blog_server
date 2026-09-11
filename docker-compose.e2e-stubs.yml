@@ -57,6 +57,22 @@ x-stub-base: &stub-base
     retries: 10
 
 services:
+  # api-global のレート制限を受け入れテスト用に引き上げる(issue #1132)。
+  #
+  # `@api` シナリオは nginx 経由(https://localhost)で gateway を叩くため、gateway からは
+  # 外部の実クライアントと区別が付かない。api-global はクライアント単位に分割済みだが
+  # (issue #749)、受け入れテストの実行元は常に1台の Playwright プロセスなので、
+  # 分割してもスイート全体が「1クライアント」に潰れる。本番既定の100req/分のままだと、
+  # フィクスチャ構築の呼び出しだけで枠を使い切り、無関係なシナリオが429で落ちる。
+  #
+  # 本番既定値(API_RATE_LIMIT_REQUESTS 未設定 = 100)はここでは変更しない。
+  # 値の根拠(実測とヘッドルームの計算)は docs/API_RATE_LIMITING.md
+  # 「Acceptance-test override (issue #1132)」を参照。docs/ACCEPTANCE_TESTING.md §9 にも
+  # 同じ内容を要約している。
+  gateway:
+    environment:
+      API_RATE_LIMIT_REQUESTS: "1000"
+
   llm-stub:
     <<: *stub-base
     container_name: lbs-e2e-llm-stub

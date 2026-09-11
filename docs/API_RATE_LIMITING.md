@@ -62,6 +62,55 @@ traffic for the host's IP. Raise `API_RATE_LIMIT_REQUESTS` if that becomes a lim
   peaked at 54 req/min for a single source IP in the measurement above, so the pre-#749 value is
   kept — only its unit changed from "whole process" to "per client".
 
+##### Acceptance-test override (issue #1132)
+
+The `@api`-tagged acceptance-test suite (`apps/web/e2e/features/**`, ~150 scenarios) reaches the
+gateway through nginx (`https://localhost`) like a real browser, so every scenario's fixture
+traffic — `POST /api/projects`, `/api/diagrams`, `/api/custom-tag-templates`, etc. — is *external*
+by the detection rule above, and Playwright always runs from a single host. The per-client
+partitioning that #749 added does not help here: from the gateway's point of view the whole suite
+is **one client**, so it collapses back onto the same "process-wide 100 req/min" problem that
+#749 fixed for real users, just for a different caller.
+
+Measured against this bucket alone (`docker-compose.yml` + `docker-compose.e2e-stubs.yml`,
+`--project=at-main --grep "@api" --grep-invert "@slow"`, 4 Playwright workers, reverse-proxy
+access log, 2026-09-11): a sliding 60-second window peaked at **136 requests** to paths that fall
+into `api-global` — and that is itself an undercount, because roughly half the scenarios in that
+run aborted early on unrelated Keycloak credential failures (issue #1097, already tracked,
+unrelated to this bucket) before making their full sequence of fixture calls. At the production
+default of 100 req/min this reproduces the exact failure the Issue describes: unrelated scenarios
+fail with `429 {"error":"Rate limit exceeded"}` while building fixtures, well before the scenario's
+own acceptance criteria are evaluated.
+
+Candidates considered (Issue #1132 Requirements, in the Issue's own preference order):
+
+1. **Raise `API_RATE_LIMIT_REQUESTS` only for the acceptance-test configuration** (chosen).
+2. Split `api-global` further, e.g. by a per-scenario/per-worker synthetic key. Rejected: the
+   partitioning already exists (#749) and doesn't help, because the confound here is that the
+   *whole suite* is legitimately one external client (one host reaching the gateway through
+   nginx) — there is no additional identity to split by without inventing one purely for tests
+   (which is exactly what caused the unrelated #995 worker-collision problem for a different
+   bucket; not worth reopening that pattern here).
+3. Reduce fixture-call volume or add waits. Rejected per the Issue's own ranking: this is real
+   fixture-building traffic the scenarios need, and hard-coded waits both slow the suite and
+   violate this repo's "no hardcoded waits" convention (`docs/ACCEPTANCE_TESTING.md` §6).
+
+**The production default (100 req/60s) is deliberately left unchanged.** Its rationale — real
+browser-originated traffic peaking at 54 req/min per client IP — is unrelated to acceptance-test
+volume, and there is no evidence that value is wrong for production use. Only the acceptance-test
+environment overrides it.
+
+**Value chosen: `API_RATE_LIMIT_REQUESTS=1000`**, set in `docker-compose.e2e-stubs.yml` on the
+`gateway` service (always overlaid onto `docker-compose.yml` for acceptance-test runs — see
+`scripts/rebuild-acceptance-env.sh`, `docs/ACCEPTANCE_TESTING.md` §9). This gives roughly 7x
+headroom over the measured (undercounted) 136 req/60s peak — comparable in spirit to the ~2.5x
+headroom `api-internal`'s 600 req/min keeps over its own measured peak, but generous on purpose
+here because the measurement is known to be an undercount and the acceptance-test environment
+carries no brute-force/resource-exhaustion concern this limiter is meant to police (it is a
+single trusted Playwright process on an isolated docker network, not internet-facing traffic).
+Raising it does not weaken anything this limiter defends against in production, because the
+production default is untouched.
+
 #### 1b. Internal (BFF) API Rate Limiter (`api-internal`)
 - **Default Limit**: 600 requests per 1 minute, **per logged-in user** (JWT `sub`)
 - **Environment Variable**: `INTERNAL_API_RATE_LIMIT_REQUESTS` (default: 600),
