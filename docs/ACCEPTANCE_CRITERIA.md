@@ -143,14 +143,14 @@ API: content `PostController` / publishing `PostController`, `ArticlePreviewCont
 
 | 機能ID | 機能 | 利用者から見た価値 | 受け入れ基準(要約) | 対応シナリオ | 状態 |
 | --- | --- | --- | --- | --- | --- |
-| AC-POST-001 | 主要ジャーニー(サイト登録→公開→履歴) | 記事を書いて公開するという中心的な価値が成立する | サイトを登録して記事を公開すると投稿履歴に表示される | `e2e/main-scenario.spec.ts` › サイトを登録して記事を公開すると投稿履歴に表示される | 既存spec |
-| AC-POST-002 | 投稿履歴一覧 (`/posts`) | 何をいつ公開したか追える | `GET /api/posts` の内容が一覧に表示される | — | 未着手 |
+| AC-POST-001 | 主要ジャーニー(サイト登録→公開→履歴) | 記事を書いて公開するという中心的な価値が成立する | サイトを登録して記事を公開すると投稿履歴に表示される | `features/publishing/publish-lifecycle.feature` › 記事を新規公開すると、WordPress側に記事が作成され投稿履歴に表示される(issue #1171 / AT-6-1、親issue #932の親シナリオ1。`e2e/main-scenario.spec.ts`から移行し同specは削除) | 検証済(`@slow`) |
+| AC-POST-002 | 投稿履歴一覧 (`/posts`) | 何をいつ公開したか追える | `GET /api/posts` の内容が一覧に表示される | `features/publishing/publish-lifecycle.feature` › 記事を新規公開すると、WordPress側に記事が作成され投稿履歴に表示される(issue #1171 / AT-6-1)。**対象外**: 複数件の一覧表示・絞り込みは未検証(このシナリオは新規公開した1件が`/posts`に現れることのみ確認する) | 検証済(新規公開時の1件表示のみ) |
 | AC-POST-003 | プロジェクト別の記事一覧 (`/projects/[id]/posts`) | プロジェクト単位で記事を管理できる | 該当プロジェクトの記事だけが表示される | — | 未着手 |
-| AC-POST-004 | 記事の公開 | 書いた記事が実際にブログに載る | `POST /api/posts/publish` 後、公開先URLで記事が閲覧できる | — | 未着手(`@slow`) |
-| AC-POST-005 | 記事の更新 | 公開後に直せる | 同じ記事を再公開すると、公開先の本文が更新され重複投稿されない | — | 未着手(`@slow`) |
+| AC-POST-004 | 記事の公開 | 書いた記事が実際にブログに載る | `POST /api/posts/publish` 後、公開先URLで記事が閲覧できる | `features/publishing/publish-lifecycle.feature` › 公開した記事はWordPress上で本文・タイトル・アイキャッチが送信内容と一致する(issue #1171 / AT-6-1、親issue #932の親シナリオ2。WordPress側の実体をwp-cliで直接確認し、公開先URLへのHTTPアクセスまでは行わない) | 検証済(`@slow`) |
+| AC-POST-005 | 記事の更新 | 公開後に直せる | 同じ記事を再公開すると、公開先の本文が更新され重複投稿されない | `features/publishing/publish-lifecycle.feature` › 同じ記事を更新して再公開すると、新規作成されずに既存記事が更新される(issue #1171 / AT-6-1、親issue #932の親シナリオ3) | 検証済(`@slow`) |
 | AC-POST-006 | 予約公開 | 書いた日と公開日を分けられる | 予約した記事は指定時刻まで公開されず、時刻到来後に公開される | — | 未着手 |
 | AC-POST-007 | 記事の削除 | 誤って出した記事を取り下げられる | `DELETE /api/posts/{site}/{wpPostId}` 後、公開先で記事が閲覧できなくなる | — | 未着手(`@destructive`) |
-| AC-POST-008 | スラッグによる記事取得 | 公開済み記事を一意に特定できる | `GET /api/posts/{site}/by-slug/{slug}` が該当記事を返す | — | 未着手 |
+| AC-POST-008 | スラッグによる記事取得 | 公開済み記事を一意に特定できる | `GET /api/posts/{site}/by-slug/{slug}` が該当記事を返す | `features/publishing/publish-lifecycle.feature` › 同じ記事を更新して再公開すると、新規作成されずに既存記事が更新される(issue #1171 / AT-6-1。VSCode拡張と同じ経路で`GET /api/posts/{site}/by-slug/{slug}`から既存投稿のwpPostIdを解決してから再公開する) | 検証済(`@slow`) |
 | AC-POST-009 | プレビュー(骨組み+差し込み) | 公開前に実際の見た目を確認できる | `POST /api/projects/{projectId}/preview/skeleton` と `/render` で、公開先テーマ相当の見た目が得られる | `features/publishing/preview.feature` › プレビューを生成すると公開せずに実テーマの見た目を確認できる | 検証済 |
 | AC-POST-010 | プレビュー用テーマCSSの取得 | プレビューが公開先の見た目と一致する | `GET /api/projects/{projectId}/preview/theme-css` が公開先のCSSを返す | `features/publishing/preview.feature` › プレビューを生成すると公開せずに実テーマの見た目を確認できる | 検証済 |
 | AC-POST-011 | プレビュー投稿の後始末 | プレビューの残骸が公開先に残らない | `DELETE /api/projects/{projectId}/preview/preview-post` 後、公開先にプレビュー記事が残らない | `features/publishing/preview.feature` › プレビュー用の一時投稿はプレビュー終了時にWordPress側に残らない | 検証済 |
