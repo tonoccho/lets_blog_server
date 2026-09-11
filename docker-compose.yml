@@ -812,6 +812,12 @@ services:
       - "9001:8080"
     volumes:
       - penpot_assets:/opt/data/assets
+      # issue #1093: PENPOT_PUBLIC_URI は http://localhost:9001 のまま据え置き、
+      # https://localhost/penpot/ (reverse-proxy経由)からの /api 呼び出しにだけ
+      # CORSヘッダーを足す。penpot-frontend公式の拡張ポイント
+      # (/etc/nginx/overrides/{http,server}.d/*.conf)へ読み取り専用でマウントする。
+      - ./infra/penpot/nginx-overrides/http.d/lbs-cors.conf:/etc/nginx/overrides/http.d/lbs-cors.conf:ro
+      - ./infra/penpot/nginx-overrides/server.d/lbs-cors-api.conf:/etc/nginx/overrides/server.d/lbs-cors-api.conf:ro
     depends_on:
       - penpot-backend
       - penpot-exporter
