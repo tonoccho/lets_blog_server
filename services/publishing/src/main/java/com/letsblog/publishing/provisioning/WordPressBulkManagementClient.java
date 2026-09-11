@@ -1,17 +1,24 @@
 package com.letsblog.publishing.provisioning;
 
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 
 import com.letsblog.common.util.StackTraceUtil;
 
+import java.net.http.HttpClient;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -24,23 +31,65 @@ import java.util.Map;
  *
  * <p>legacy-apiの{@code com.letsblog.api.provisioning.WordPressBulkManagementClient}を
  * publishing-serviceへ移設したもの(issue #708、Epic #551 C6-2)。
+ *
+ * <p><b>タイムアウト(issue #1123)。</b>接続/リードタイムアウトを設定せずに{@link RestClient}を
+ * 組み立てると、provision-agentが固着(issue #1122)して応答を返さなくなったとき、JDK
+ * {@link HttpClient}は応答を無期限に待つ。この呼び出しは
+ * {@code TermComparisonService}の{@code @Transactional(readOnly = true)}の内側で行われるため、
+ * 待っているスレッドはJDBCコネクションを握ったままになり、HikariCPのプール(既定10)が
+ * 10並行リクエストで枯渇し、publishing-service全体のDBアクセスが道連れで失敗する
+ * (2026-09-06/07に実際に発生)。platform-serviceの{@code ConnectedServiceStatusService}が
+ * 同じ依存先に対して既に行っている、{@code HttpClient.connectTimeout}+
+ * {@code JdkClientHttpRequestFactory.setReadTimeout}によるタイムアウト設定と同じ手法を使う。
+ *
+ * <p>一覧取得系({@link #listCategories}/{@link #listTags}/{@link #listPlugins}/
+ * {@link #listThemes})とapply系({@link #apply}/{@link #applyZip})とでは所要時間の桁が
+ * 大きく異なる(zipアップロードは長時間処理になりうる)ため、タイムアウト値は用途別に
+ * 分けて設定できるようにする(要件1)。値はapplication.yml経由で環境変数から上書きできる
+ * (要件2)。タイムアウトによる打ち切りとエラー応答(HTTPエラーステータス)は、
+ * {@link ResourceAccessException}(タイムアウト・接続不可)と
+ * {@link RestClientResponseException}(エラー応答)とで別々に捕捉し、ログと
+ * (apply系では){@link BulkApplyResult#errorMessage()}の文言を区別する(要件3)。
  */
 @Component
+@Slf4j
 public class WordPressBulkManagementClient {
 
-    private final RestClient client;
+    private final RestClient listingClient;
+    private final RestClient applyClient;
     private final String provisionToken;
 
+    @Autowired
     public WordPressBulkManagementClient(
             @Value("${app.wordpress-provision-base-url}") String baseUrl,
-            @Value("${app.wordpress-provision-token}") String provisionToken) {
-        this.client = RestClient.builder().baseUrl(baseUrl).build();
+            @Value("${app.wordpress-provision-token}") String provisionToken,
+            @Value("${app.wordpress-provision-listing-timeout-seconds}") long listingTimeoutSeconds,
+            @Value("${app.wordpress-provision-apply-timeout-seconds}") long applyTimeoutSeconds) {
+        this(baseUrl, provisionToken,
+                Duration.ofSeconds(listingTimeoutSeconds), Duration.ofSeconds(applyTimeoutSeconds));
+    }
+
+    /**
+     * テスト専用: タイムアウト値を{@link Duration}で直接指定して検証するためのコンストラクタ
+     * (LlmClientの同種のテスト専用コンストラクタと同じ位置付け)。
+     */
+    WordPressBulkManagementClient(
+            String baseUrl, String provisionToken, Duration listingTimeout, Duration applyTimeout) {
+        this.listingClient = buildClient(baseUrl, listingTimeout);
+        this.applyClient = buildClient(baseUrl, applyTimeout);
         this.provisionToken = provisionToken;
+    }
+
+    private static RestClient buildClient(String baseUrl, Duration timeout) {
+        HttpClient httpClient = HttpClient.newBuilder().connectTimeout(timeout).build();
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
+        requestFactory.setReadTimeout(timeout);
+        return RestClient.builder().baseUrl(baseUrl).requestFactory(requestFactory).build();
     }
 
     public BulkApplyResult apply(BulkApplyCommand command) {
         try {
-            Map<String, String> body = client.post()
+            Map<String, String> body = applyClient.post()
                     .uri("/bulk-management")
                     .header("X-Provision-Token", provisionToken)
                     .body(command)
@@ -48,6 +97,16 @@ public class WordPressBulkManagementClient {
                     .body(new ParameterizedTypeReference<Map<String, String>>() {
                     });
             return resultOf(body);
+        } catch (ResourceAccessException e) {
+            log.warn("provision-agentへの接続がタイムアウトしました (action={}): {}",
+                    command.action(), e.getMessage());
+            return BulkApplyResult.failed(new RestClientException(
+                    "provision-agentへの接続がタイムアウトしました: " + e.getMessage(), e));
+        } catch (RestClientResponseException e) {
+            log.warn("provision-agentがエラー応答を返しました (action={}, status={})",
+                    command.action(), e.getStatusCode());
+            return BulkApplyResult.failed(new RestClientException(
+                    "provision-agentがエラー応答を返しました (status=" + e.getStatusCode() + "): " + e.getMessage(), e));
         } catch (RestClientException e) {
             return BulkApplyResult.failed(e);
         }
@@ -64,7 +123,7 @@ public class WordPressBulkManagementClient {
                     return filename;
                 }
             });
-            Map<String, String> body = client.post()
+            Map<String, String> body = applyClient.post()
                     .uri("/bulk-management/upload")
                     .header("X-Provision-Token", provisionToken)
                     .contentType(MediaType.MULTIPART_FORM_DATA)
@@ -73,6 +132,14 @@ public class WordPressBulkManagementClient {
                     .body(new ParameterizedTypeReference<Map<String, String>>() {
                     });
             return resultOf(body);
+        } catch (ResourceAccessException e) {
+            log.warn("provision-agentへの接続がタイムアウトしました (action={}): {}", action, e.getMessage());
+            return BulkApplyResult.failed(new RestClientException(
+                    "provision-agentへの接続がタイムアウトしました: " + e.getMessage(), e));
+        } catch (RestClientResponseException e) {
+            log.warn("provision-agentがエラー応答を返しました (action={}, status={})", action, e.getStatusCode());
+            return BulkApplyResult.failed(new RestClientException(
+                    "provision-agentがエラー応答を返しました (status=" + e.getStatusCode() + "): " + e.getMessage(), e));
         } catch (RestClientException e) {
             return BulkApplyResult.failed(e);
         }
@@ -96,7 +163,7 @@ public class WordPressBulkManagementClient {
 
     private List<CategoryInfo> listTerms(String uri, String bodyKey, String slug) {
         try {
-            Map<String, Object> body = client.post()
+            Map<String, Object> body = listingClient.post()
                     .uri(uri)
                     .header("X-Provision-Token", provisionToken)
                     .body(Map.of("slug", slug))
@@ -118,6 +185,12 @@ public class WordPressBulkManagementClient {
                                 asString(term.get("description")));
                     })
                     .toList();
+        } catch (ResourceAccessException e) {
+            log.warn("provision-agentへの接続がタイムアウトしました (uri={}, slug={}): {}", uri, slug, e.getMessage());
+            return List.of();
+        } catch (RestClientResponseException e) {
+            log.warn("provision-agentがエラー応答を返しました (uri={}, slug={}, status={})", uri, slug, e.getStatusCode());
+            return List.of();
         } catch (RestClientException e) {
             return List.of();
         }
@@ -141,7 +214,7 @@ public class WordPressBulkManagementClient {
 
     private List<PluginThemeInfo> listPluginsOrThemes(String uri, String bodyKey, String slug) {
         try {
-            Map<String, Object> body = client.post()
+            Map<String, Object> body = listingClient.post()
                     .uri(uri)
                     .header("X-Provision-Token", provisionToken)
                     .body(Map.of("slug", slug))
@@ -159,6 +232,12 @@ public class WordPressBulkManagementClient {
                         return new PluginThemeInfo(asString(entry.get("name")), asString(entry.get("status")));
                     })
                     .toList();
+        } catch (ResourceAccessException e) {
+            log.warn("provision-agentへの接続がタイムアウトしました (uri={}, slug={}): {}", uri, slug, e.getMessage());
+            return List.of();
+        } catch (RestClientResponseException e) {
+            log.warn("provision-agentがエラー応答を返しました (uri={}, slug={}, status={})", uri, slug, e.getStatusCode());
+            return List.of();
         } catch (RestClientException e) {
             return List.of();
         }

@@ -49,6 +49,9 @@ dependencies {
     testImplementation 'org.springframework.security:spring-security-test'
     testImplementation testFixtures(project(':packages:lbs-common'))
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    // issue #1123: WordPressBulkManagementClientHikariPoolTestがHikariCPのプール枯渇を
+    // 検証するために使う、実DB不要のインメモリJDBCドライバ。
+    testImplementation 'com.h2database:h2'
 }
 
 tasks.named('test') {
