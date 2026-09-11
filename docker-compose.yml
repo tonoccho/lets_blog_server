@@ -988,9 +988,28 @@ services:
         ollama pull "$${LLM_OLLAMA_MODEL}"
         ollama list
 
+  # GPUはオプトイン(issue #1066)。
+  #
+  # ollama(#1086)は `runtime: ${GPU_RUNTIME:-}` の1行でGPUをオプトイン化したが、
+  # comfyui はその1行だけでは同じようにいかない。ollamaはGPUが無くてもCPUで正常に
+  # 動作するのに対し、comfyui の既定イメージ(cu130-slim)はCUDA前提のビルドで、
+  # README.md の「ハードウェア要件」もCPU動作には別イメージタグへの変更を要求している
+  # (本Issueの Out of Scope はComfyUIをCPUで動かすこと自体を除外している)。
+  # `runtime:` の未指定をDocker既定ランタイムに倒すだけでは、GPUの無いホストで
+  # CUDA前提イメージの起動がクラッシュし、`restart: unless-stopped` により再起動を
+  # 繰り返す(`docker ps -a` には残らないが `state=running` に安定しないため、
+  # `wait-for-stack-healthy.sh --all` がタイムアウトする恐れが残る)。
+  #
+  # そこで `profiles: ["gpu"]` を付け、既定の `docker compose up -d`(サービス無指定)
+  # ではコンテナ自体を作らないようにする。GPUを持つホストは `.env` に
+  # `COMPOSE_PROFILES=gpu` を書く(または `docker compose --profile gpu up -d`)。
+  # コンテナが作られなければ `docker compose ps --all` にも現れないため、
+  # `wait-for-stack-healthy.sh --all`(scripts/verify-clean-volume-boot.shが使う)の
+  # 待機対象からも自動的に外れる(スクリプト側の変更は不要)。
   comfyui:
     image: ${COMFYUI_IMAGE:-yanwk/comfyui-boot:cu130-slim}
     container_name: lbs-comfyui
+    profiles: ["gpu"]
     <<: *common-service
     volumes:
       - comfyui_models:/root/ComfyUI/models

@@ -215,6 +215,12 @@ CPUのみでも動作するイメージタグ(`COMFYUI_IMAGE`をCPU向けタグ�
 AI機能(下書き/校正支援・画像生成)が実用的な速度で動作しないため、AI機能を利用する場合は
 上記GPU要件を満たすことを前提とする。
 
+**`comfyui` はGPUオプトインのcompose profile(`gpu`)を持つ(issue #1066)。** GPUの無い
+ホストで `docker compose up -d`(サービス無指定)を実行しても、`comfyui` はコンテナ自体が
+作られないため起動は中断しない(画像生成機能だけが使えない状態になる)。GPUを持つホストは
+`.env` の `COMPOSE_PROFILES=gpu` の行を有効にする(コメントアウトを外す)ことで、従来どおり
+`docker compose up -d` のまま `comfyui` が起動する。
+
 ## 前提ソフトウェア要件
 
 | ソフトウェア | 用途 |

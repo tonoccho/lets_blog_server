@@ -130,7 +130,24 @@ NVIDIA ランタイムのないホストで `could not select device driver "nvi
 | `gpus: ${X:-}` | **失敗**。`services.ollama.gpus value must be 'all'` で検証に落ちる |
 | `runtime: ${GPU_RUNTIME:-}` | 成功。未指定は「Dockerの既定ランタイム」に倒れる |
 
-#1066 は `comfyui` に同じ1行を適用すればよい(新しい仕組みを2つ作らない)。
+**この節はかつて「#1066 は `comfyui` に同じ1行を適用すればよい(新しい仕組みを2つ作らない)」
+と書いていたが、#1066 の実装時にその方針は変更した。** ollama と `comfyui` には決定的な
+違いがある。ollama は GPU が無くてもCPUで正常に動作するのに対し、`comfyui` の既定イメージ
+(`yanwk/comfyui-boot:cu130-slim`)はCUDA前提のビルドで、README.md の「ハードウェア要件」も
+CPU動作には別イメージタグへの変更を要求している(#1066 の Out of Scope は ComfyUI を CPU で
+動かすこと自体を除外している)。`runtime: ${GPU_RUNTIME:-}` を `comfyui` にも適用すると、
+未指定時はDockerの既定ランタイムで起動を**試みてしまい**、GPUの無いホストではCUDA前提の
+イメージがクラッシュし、`restart: unless-stopped` により再起動を繰り返す
+(`state=running` に安定しないため、`wait-for-stack-healthy.sh --all` がタイムアウトする
+おそれが残る)。
+
+そこで `comfyui` は `runtime:` ではなく `profiles: ["gpu"]` を使う。既定の
+`docker compose up -d`(サービス無指定)ではコンテナ自体を作らないため、GPUの無いホストでは
+起動の試行そのものが起きない。GPUを持つホストは `.env` の `COMPOSE_PROFILES=gpu` で
+オプトインする(`docker compose --profile gpu up -d` でも同じ)。コンテナが作られなければ
+`docker compose ps --all` にも現れないため、`wait-for-stack-healthy.sh --all` の待機対象
+からも自動的に外れる(スクリプト側の変更は不要だった)。「新しい仕組みを2つ作らない」の
+判断は、ollamaとcomfyuiのCPU動作可否という前提の違いにより成り立たなかった。
 
 ## Ollama のモデル取得と VRAM(#1086)
 

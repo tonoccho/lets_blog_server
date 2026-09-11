@@ -309,6 +309,11 @@ docker compose -f docker-compose.yml -f docker-compose.e2e-stubs.yml up -d
 cd apps/web && npm run test:at
 ```
 
+`comfyui`(実機の画像生成コンテナ)は `profiles: ["gpu"]` を持つため(issue #1066)、
+GPUの無いホストでもこの `up -d` は中断しない。画像生成の受け入れシナリオは
+`comfyui-stub` が受けるので、GPUの無いホストでもE2Eは通る。GPUを持つホストで実機の
+`comfyui` も併せて起動したい場合は `.env` の `COMPOSE_PROFILES=gpu` を有効にする。
+
 ### 何をスタブ化しているか
 
 | スタブ | 置き換える依存 | 向き先を決める環境変数 | ホスト公開 |
@@ -799,12 +804,17 @@ compose プロジェクトに閉じる。
 
 ゼロ構築は開発機の実環境を作り直すので、その環境の癖を2つ吸収する。
 
-- **`comfyui` が起動できないホスト。** サービス無指定の `docker compose up -d` は1つの
-  サービスの起動に失敗した時点で**中断**する。NVIDIA ランタイムが無いと `comfyui` は
-  `could not select device driver "nvidia"` で落ち、依存関係の下流(web / gateway /
-  keycloak / 各ドメインサービス)が `created` のまま残る。そこでスクリプトは必須サービスと
-  任意サービス(`comfyui`)を**分けて**起動し、任意サービスの起動失敗は警告に留める
-  (起動できなくてもボリュームは作られるので、破棄検証は成立する)。
+- **`comfyui` が起動できないホスト。** 以前はサービス無指定の `docker compose up -d` が
+  1つのサービスの起動に失敗した時点で**中断**していた。NVIDIA ランタイムが無いと
+  `comfyui` は `could not select device driver "nvidia"` で落ち、依存関係の下流
+  (web / gateway / keycloak / 各ドメインサービス)が `created` のまま残っていた。issue #1066
+  で `comfyui` に `profiles: ["gpu"]` を付けたため、GPUの無いホストでは `docker compose
+  up -d` がそもそも `comfyui` のコンテナを作らなくなり、この中断は起きなくなった。
+  このスクリプトが必須サービスと任意サービス(`comfyui`)を**分けて**起動し、任意サービスの
+  起動失敗を警告に留める作りは#1066より前からの防御として残している
+  (`docker compose up -d comfyui` は `--profile gpu` を指定しなくても明示的にサービス名を
+  指定すれば起動を試みるため、GPUの無いホストではやはり失敗しうる。起動できなくても
+  ボリュームは作られるので、破棄検証は成立する)。
 - **ホストの 80/443 を他プロセスが握っているホスト(§12)。** `lbs-reverse-proxy` が
   ポートを公開していないことでこの構成を判定し、`docker-compose.shared-host.yml` を重ねて
   起動し、構築後に `scripts/setup-shared-host-proxy.sh` を再適用する
