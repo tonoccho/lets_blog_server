@@ -418,6 +418,30 @@ if ($path === '/sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
         runCommand(['rm', '-f', $dumpFile]);
 
+        // 上のsedはバッククォートで囲まれた識別子(テーブル名)しか書き換えないため、
+        // WordPressがロール定義を持つoptions行(option_name='{prefix}user_roles')は
+        // データの値であり書き換わらない。ダンプのoptionsテーブルはDROP/CREATEで
+        // 丸ごと置き換わるため、同期先には同期元由来の'{fromPrefix}user_roles'だけが残り、
+        // 同期先が実際に探す'{toPrefix}user_roles'が存在しなくなる。結果、同期先の
+        // ロール定義が0件になり全ユーザーが全ケーパビリティを失う(issue #1075)。
+        // このキー1件だけを改名する(前方一致での一括改名は、wp_page_for_privacy_policy等
+        // プレフィックス由来ではないのに"wp_"で始まるコアオプションを壊すため行わない)。
+        // $fromPrefix/$toPrefixは既に上で`^[A-Za-z0-9_]+$`を検証済みのため、SQL文字列への
+        // 埋め込みは安全(テーブル名はバッククォートで囲む)。
+        if ($fromPrefix !== $toPrefix) {
+            $toOptionsTable = $toPrefix . 'options';
+            // 改名先のキーが既に存在する場合のUNIQUE制約違反を避けるため、先に削除してから改名する。
+            $renameUserRolesSql = 'DELETE FROM `' . $toOptionsTable . "` WHERE option_name = '{$toPrefix}user_roles'; "
+                . 'UPDATE `' . $toOptionsTable . "` SET option_name = '{$toPrefix}user_roles' "
+                . "WHERE option_name = '{$fromPrefix}user_roles'";
+            [$code, $out, $err] = runCommand(['sh', '-c',
+                'mysql --skip-ssl -h' . escapeshellarg($dbHost) . ' -uroot -p' . escapeshellarg($rootPassword)
+                    . ' ' . escapeshellarg($toDbName) . ' -e ' . escapeshellarg($renameUserRolesSql)]);
+            if ($code !== 0) {
+                respond(500, ['error' => 'ロール定義(user_roles)の付け替えに失敗しました', 'detail' => combinedOutput($out, $err)]);
+            }
+        }
+
         // コピー元のURLがwp_options等に焼き込まれたままになるため、コピー先自身のURLへ書き戻す
         $fromUrl = "https://localhost/sites/$fromSlug";
         $toUrl = "https://localhost/sites/$toSlug";

@@ -333,6 +333,29 @@ WordPress環境である必要がある。SSH接続/REST接続で外部のWordPr
 - メディア(`wp-content/uploads`)・テーマ・プラグインは、同期先の既存ファイルをバックアップした上で
   マスタ環境の内容で置き換えられる。
 
+**テーブルプレフィックスが同期元・同期先で異なる場合**(issue #1075):
+
+managedサイトのテーブルプレフィックスは`/provision`で作った直後は`wp_`だが、SSH管理サイトからの
+`/db-import`(#511)を経由した環境は、取り込み元に合わせてプレフィックスが書き換わっているため、
+同期元・同期先でプレフィックスが食い違うことがある。DB同期はテーブル名(識別子)だけでなく、
+WordPressのロール定義(`option_name = '{プレフィックス}user_roles'`)もこのキー1件に限り
+同期先のプレフィックスへ付け替えるため、通常の操作で復旧する(手動での対処は不要)。
+
+**再同期しないサイトが既に壊れている場合の手動復旧手順**(#1075修正の適用前に同期していた場合):
+
+同期先のロール定義が失われ、全ユーザーが`wp-admin`を開けなくなっている(全ケーパビリティを失う)
+症状が出ている場合は、同じ同期元・同期先の組み合わせで環境同期(DB)をもう一度実行するだけで
+復旧する。何らかの理由で再同期できない場合は、`phpMyAdmin`(`/phpmyadmin/`)または
+`docker exec`経由のwp-cliで、同期先の実際のテーブルプレフィックス(`wp config get table_prefix`)を
+確認した上で、次のSQLを同期先のDBに対して直接実行する(`{prefix}`は同期先の実際のプレフィックスに、
+`{正しいロール定義}`は同期元(または同種の正常なサイト)の`{prefix}user_roles`の値に読み替える)。
+
+```sql
+DELETE FROM `{prefix}options` WHERE option_name = '{prefix}user_roles';
+INSERT INTO `{prefix}options` (option_name, option_value, autoload)
+  VALUES ('{prefix}user_roles', '{正しいロール定義}', 'yes');
+```
+
 ## トラブルシューティング
 
 **ポート80/443が使用中で `docker compose up -d` が失敗する**
