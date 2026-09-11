@@ -242,6 +242,7 @@ glab api "projects/:id" | jq '{merge_method, squash_option}'
 | `401 Unauthorized` | トークン未設定、期限切れ、スコープ不足（`api` が要る） |
 | `glab: command not found` | `~/.local/bin` が `PATH` に無い |
 | `glab auth login` が固まる | 端末が無い環境で対話ログインしている。`--stdin` か `GITLAB_TOKEN` を使う |
+| `glab mr create` だけ `404 Project Not Found`（`glab issue` 系・`glab mr list` は動く）。エラー URL のプロジェクトパスに `gitlab/` が二重に入っている（例: `projects/gitlab/seiji/lets_blog_server`） | `api_host` に `/gitlab` を直接書いてしまっている（例: `api_host: server.tonoccho.local/gitlab`）。`subfolder` は既に別項目として存在するので、二重に持たせると `mr create` のプロジェクト解決だけがこれを壊す（#1091）。`glab config set api_host server.tonoccho.local --host server.tonoccho.local` で `api_host` から `/gitlab` を外し、`subfolder` 側だけに持たせる。手順3の `glab config set` をそのまま実行していれば発生しない |
 
 ---
 
