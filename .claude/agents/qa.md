@@ -80,6 +80,12 @@ Prioritize risk.
 
 ## Step 3: Execute Available Validation
 
+Before verifying behavior against any running container, confirm it reflects the branch's
+current code — a `healthy` status alone does not guarantee this, since `docker compose up -d`
+does not recreate a container whose image was already built. Follow the container build
+freshness check in `qa-issue` SKILL.md → Step 2a (image `Created` time vs. last commit time for
+the relevant paths; rebuild only if the image predates the commit).
+
 Use the available repository tools and test commands.
 
 Where full end-to-end verification is unavailable:

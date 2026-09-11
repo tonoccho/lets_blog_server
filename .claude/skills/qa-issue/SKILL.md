@@ -45,6 +45,47 @@ Do not collapse multiple criteria into one vague test.
 
 ---
 
+## Step 2a: Check container build freshness (before hands-on verification)
+
+**A "healthy" container status is not evidence that it is running the branch's latest code.**
+`docker compose up -d` does not recreate a container whose image was already built — a running
+container keeps the image it started with even if the source under its `build:` context has
+since changed. #1102's QA is the concrete case this caught too late: `lbs-media` /
+`lbs-gateway` were reported healthy while running images built ~51 minutes before the branch's
+last two commits, and only a manual check before verification caught it.
+
+Run this before any hands-on/manual verification against a running container (Step 3), for
+every service whose `build:` context overlaps files this Issue changed (check
+`docker-compose.yml` for the service's `build.context` / `dockerfile`, e.g. `media` →
+`services/media/`, `gateway` → `services/gateway/`):
+
+```bash
+# Image build time of the running container
+docker inspect --format '{{.Created}}' <container-name>   # e.g. lbs-media, lbs-gateway
+
+# Last commit time on this branch for the paths that feed that service's image
+git log -1 --format=%cI -- <relevant-path>                # e.g. services/media services/gateway
+```
+
+**Decision rule:** if the image's `Created` timestamp is **older than** the last commit
+timestamp for the relevant paths, the running container is stale — rebuild and recreate only
+the affected services before proceeding:
+
+```bash
+docker compose build --no-deps <service...>
+docker compose up -d --no-deps --force-recreate <service...>
+```
+
+If the image is already newer than (or equal to) the last relevant commit, no rebuild is
+needed — do not rebuild unconditionally on every QA run; that costs minutes even when nothing
+changed. Record which check was performed (image time, commit time, and whether a rebuild was
+triggered) in the QA report (Step 6).
+
+This check applies to any container QA verifies behavior against, not only `media`/`gateway` —
+those are simply the services #1102 exposed the gap on.
+
+---
+
 ## Step 3: Invoke QA agent
 
 Ask the `qa` agent to verify:
@@ -137,6 +178,8 @@ Include:
 - Results
 - Acceptance criteria
 - Known limitations
+- Container build freshness check (Step 2a): the containers checked, whether a rebuild was
+  needed, and the evidence (image `Created` time vs. last relevant commit time)
 
 ---
 
@@ -177,6 +220,9 @@ If PASS, include the Merge Request URL from Step 5a and state that the Issue mov
 ---
 
 ## Rules
+
+Never treat a container's "healthy" status as evidence that it runs current code — verify build
+freshness per Step 2a before any hands-on verification against it.
 
 Never claim UI or end-to-end behavior was verified unless it was actually tested.
 
