@@ -88,6 +88,7 @@ public class ImageGenerationService {
     private final ObjectMapper objectMapper;
     private final ProjectImageDefaultsResolver defaultsResolver;
     private final ProhibitedContentFilterService prohibitedContentFilterService;
+    private final SafetyNegativePromptService safetyNegativePromptService;
     private final SeedResolver seedResolver;
     private final HttpServletRequest request;
 
@@ -102,6 +103,7 @@ public class ImageGenerationService {
             ObjectMapper objectMapper,
             ProjectImageDefaultsResolver defaultsResolver,
             ProhibitedContentFilterService prohibitedContentFilterService,
+            SafetyNegativePromptService safetyNegativePromptService,
             SeedResolver seedResolver,
             HttpServletRequest request) {
         this.aiGenerationClient = aiGenerationClient;
@@ -114,6 +116,7 @@ public class ImageGenerationService {
         this.objectMapper = objectMapper;
         this.defaultsResolver = defaultsResolver;
         this.prohibitedContentFilterService = prohibitedContentFilterService;
+        this.safetyNegativePromptService = safetyNegativePromptService;
         this.seedResolver = seedResolver;
         this.request = request;
     }
@@ -152,13 +155,16 @@ public class ImageGenerationService {
             // 既定値の解決はDB往復を伴うので、リピート間で変わらないものは1回だけ引く
             // (issue #1102 レビュー指摘。batchCount=16のとき品質プロンプトを18回引いていた)。
             String prompt = resolvePrompt(imageRequest);
-            prohibitedContentFilterService.check(
-                    prompt,
-                    defaultsResolver.resolveBlockSexualContent(imageRequest.projectId()),
-                    defaultsResolver.resolveBlockViolentContent(imageRequest.projectId()),
-                    defaultsResolver.resolveBlockDiscriminatoryContent(imageRequest.projectId()));
+            // issue #1085: ブロックフラグはこのあとnegative promptの安全側抑制語連結にも使うため、
+            // resolveParamsの中で再度引き直さず、ここで1回だけ解決して使い回す
+            // (issue #1102 レビュー指摘と同じ「リピート間で変わらない値は1回だけ引く」方針)。
+            boolean blockSexual = defaultsResolver.resolveBlockSexualContent(imageRequest.projectId());
+            boolean blockViolent = defaultsResolver.resolveBlockViolentContent(imageRequest.projectId());
+            boolean blockDiscriminatory = defaultsResolver.resolveBlockDiscriminatoryContent(imageRequest.projectId());
+            prohibitedContentFilterService.check(prompt, blockSexual, blockViolent, blockDiscriminatory);
             String tagsJson = suggestImageTagsJson(prompt);
-            ComfyUiGenerationParams baseParams = resolveParams(imageRequest, prompt);
+            ComfyUiGenerationParams baseParams = resolveParams(
+                    imageRequest, prompt, provider, blockSexual, blockViolent, blockDiscriminatory);
             List<AiImageResponse> responses = new ArrayList<>();
             RuntimeException firstFailure = null;
             int consecutiveFailures = 0;
@@ -332,14 +338,32 @@ public class ImageGenerationService {
      * {@link #withRepeatSeed}が差し替える。
      *
      * <p>seedはここでは決めない(nullのまま)。
+     *
+     * <p>issue #1085: 有効な安全側ブロックカテゴリの抑制語をnegative promptへ連結する。
+     * <b>COMFYUIのときだけ</b>連結する — ChatGPTはnegative promptを送れず、連結した語を
+     * {@code generated_images.negative_prompt}に残すと「使っていない語」を記録してしまう
+     * (Requirement 6)。連結はユーザー指定のnegativePromptを解決した<b>あと</b>に行うため、
+     * ユーザー指定があっても消えない。ブロック判定({@link ProhibitedContentFilterService#check})は
+     * この連結より前にpositive prompt(引数{@code prompt})に対して既に完了しているため、
+     * 連結した語自身がブロック判定に巻き込まれることもない。
      */
-    private ComfyUiGenerationParams resolveParams(AiImageRequest imageRequest, String prompt) {
+    private ComfyUiGenerationParams resolveParams(
+            AiImageRequest imageRequest,
+            String prompt,
+            ImageProvider provider,
+            boolean blockSexual,
+            boolean blockViolent,
+            boolean blockDiscriminatory) {
         String checkpoint = imageRequest.checkpoint() != null && !imageRequest.checkpoint().isBlank()
                 ? imageRequest.checkpoint()
                 : comfyUiModelService.getSelectedCheckpointOrGlobalDefault(imageRequest.projectId());
         String negativePrompt = imageRequest.negativePrompt() != null && !imageRequest.negativePrompt().isBlank()
                 ? imageRequest.negativePrompt()
                 : defaultsResolver.resolveDefaultNegativePrompt(imageRequest.projectId());
+        if (provider == ImageProvider.COMFYUI) {
+            negativePrompt = safetyNegativePromptService.appendSafetyWords(
+                    negativePrompt, blockSexual, blockViolent, blockDiscriminatory);
+        }
         return new ComfyUiGenerationParams(
                 prompt,
                 negativePrompt,

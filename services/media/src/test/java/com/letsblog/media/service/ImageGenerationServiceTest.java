@@ -91,6 +91,15 @@ class ImageGenerationServiceTest {
     @Mock
     private HttpServletRequest request;
 
+    /**
+     * issue #1085: 実際の連結ロジックを確かめたいので、モックではなく実インスタンスを使う
+     * ({@link ProjectImageDefaultsResolver}等の他の依存はオーケストレーション順序の検証が
+     * 目的のためモックのままでよいが、安全側ネガティブプロンプトの連結結果そのものが
+     * このテストの受け入れ基準の対象であるため)。
+     */
+    private final SafetyNegativePromptService safetyNegativePromptService =
+            new SafetyNegativePromptService("nsfw, nude", "gore", "nazi symbol");
+
     private ImageGenerationService service;
 
     @BeforeEach
@@ -98,7 +107,7 @@ class ImageGenerationServiceTest {
         service = new ImageGenerationService(
                 aiGenerationClient, comfyUiClient, chatGptImageClient, imageModelService, comfyUiModelService,
                 generatedImageCreationService, generationJobClient, new ObjectMapper(), defaultsResolver,
-                prohibitedContentFilterService, new SeedResolver(), request);
+                prohibitedContentFilterService, safetyNegativePromptService, new SeedResolver(), request);
 
         when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.COMFYUI);
         when(comfyUiModelService.getSelectedCheckpointOrGlobalDefault(any())).thenReturn("global.safetensors");
@@ -304,6 +313,104 @@ class ImageGenerationServiceTest {
         service.generateImage(requestWithSeed(1L));
 
         assertEquals("a cat", capturedComfyParams().prompt());
+    }
+
+    // ------------------------------------------------------------------
+    // issue #1085: 安全側ネガティブプロンプトの連結
+    // ------------------------------------------------------------------
+
+    @Test
+    void 性的ブロックがONならnegativePrompt未指定でも安全側の抑制語が連結される() {
+        comfyReturns(1);
+        when(defaultsResolver.resolveBlockSexualContent(1L)).thenReturn(true);
+
+        service.generateImage(requestWithSeed(1L));
+
+        assertEquals("default negative, nsfw, nude", capturedComfyParams().negativePrompt());
+    }
+
+    @Test
+    void 性的ブロックがONならユーザー指定のnegativePromptと抑制語の両方が残る() {
+        comfyReturns(1);
+        when(defaultsResolver.resolveBlockSexualContent(1L)).thenReturn(true);
+
+        service.generateImage(new AiImageRequest(
+                "a cat", "cat", null, null, null, null, 1L, null, null, null, null, null, null, null, 1L));
+
+        assertEquals("cat, nsfw, nude", capturedComfyParams().negativePrompt());
+    }
+
+    @Test
+    void 性的ブロックがOFFなら安全側の抑制語は連結されない() {
+        comfyReturns(1);
+        when(defaultsResolver.resolveBlockSexualContent(1L)).thenReturn(false);
+
+        service.generateImage(requestWithSeed(1L));
+
+        assertEquals("default negative", capturedComfyParams().negativePrompt());
+    }
+
+    @Test
+    void 暴力的ブロックと差別的ブロックはカテゴリごとに独立して反映される() {
+        comfyReturns(1);
+        when(defaultsResolver.resolveBlockViolentContent(1L)).thenReturn(true);
+        when(defaultsResolver.resolveBlockDiscriminatoryContent(1L)).thenReturn(false);
+
+        service.generateImage(requestWithSeed(1L));
+
+        String negativePrompt = capturedComfyParams().negativePrompt();
+        assertTrue(negativePrompt.contains("gore"), negativePrompt);
+        assertTrue(!negativePrompt.contains("nazi symbol"), negativePrompt);
+    }
+
+    @Test
+    void 差別的ブロックのみONなら差別側の抑制語だけが連結される() {
+        comfyReturns(1);
+        when(defaultsResolver.resolveBlockDiscriminatoryContent(1L)).thenReturn(true);
+
+        service.generateImage(requestWithSeed(1L));
+
+        String negativePrompt = capturedComfyParams().negativePrompt();
+        assertTrue(negativePrompt.contains("nazi symbol"), negativePrompt);
+        assertTrue(!negativePrompt.contains("gore"), negativePrompt);
+    }
+
+    @Test
+    void ユーザー指定のnegativePromptに既に同じ抑制語が含まれていれば大小文字無視で重複させない() {
+        comfyReturns(1);
+        when(defaultsResolver.resolveBlockSexualContent(1L)).thenReturn(true);
+
+        service.generateImage(new AiImageRequest(
+                "a cat", "NSFW", null, null, null, null, 1L, null, null, null, null, null, null, null, 1L));
+
+        assertEquals("NSFW, nude", capturedComfyParams().negativePrompt());
+    }
+
+    @Test
+    void 安全側ネガティブプロンプトの連結有無にかかわらずpositive側プロンプトは変わらない() {
+        comfyReturns(1);
+        when(defaultsResolver.resolveBlockSexualContent(1L)).thenReturn(true);
+        when(defaultsResolver.resolveBlockViolentContent(1L)).thenReturn(true);
+        when(defaultsResolver.resolveBlockDiscriminatoryContent(1L)).thenReturn(true);
+
+        service.generateImage(requestWithSeed(1L));
+
+        assertEquals("a cat, masterpiece", capturedComfyParams().prompt());
+    }
+
+    @Test
+    void CHATGPT経路では性的ブロックがONでも安全側の抑制語を保存しない() {
+        when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.CHATGPT);
+        when(chatGptImageClient.generateImage(any())).thenAnswer(inv -> images(1));
+        when(defaultsResolver.resolveBlockSexualContent(1L)).thenReturn(true);
+        when(defaultsResolver.resolveBlockViolentContent(1L)).thenReturn(true);
+        when(defaultsResolver.resolveBlockDiscriminatoryContent(1L)).thenReturn(true);
+
+        service.generateImage(requestWithSeed(1L));
+
+        String savedNegativePrompt = capturedSaveRequests(1).get(0).negativePrompt();
+        assertEquals("default negative", savedNegativePrompt,
+                "ChatGPT経路では安全側ネガティブプロンプトの連結を行わない(#1085 Requirement 6)");
     }
 
     @Test

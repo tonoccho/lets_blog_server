@@ -83,6 +83,14 @@ app:
   default-block-sexual-content: ${DEFAULT_BLOCK_SEXUAL_CONTENT:true}
   default-block-violent-content: ${DEFAULT_BLOCK_VIOLENT_CONTENT:true}
   default-block-discriminatory-content: ${DEFAULT_BLOCK_DISCRIMINATORY_CONTENT:true}
+  # issue #1085: 上記のblock-*-contentが有効なカテゴリで、ComfyUI経路のnegative promptへ
+  # 自動連結する安全側の抑制語(safety negative prompt)。ChatGPT経路には連結しない
+  # (negative promptを送れないため。ChatGptImageClient参照)。空文字にするとそのカテゴリは
+  # 連結しない(SafetyNegativePromptService参照)。
+  safety-negative-prompt:
+    sexual: ${SAFETY_NEGATIVE_PROMPT_SEXUAL:nsfw, nude, naked, nudity, explicit, sexual, lewd, erotic, underwear, lingerie, cleavage}
+    violent: ${SAFETY_NEGATIVE_PROMPT_VIOLENT:gore, gory, mutilated, dismembered, corpse, blood, violence, decapitated}
+    discriminatory: ${SAFETY_NEGATIVE_PROMPT_DISCRIMINATORY:nazi symbol, hate symbol, racist imagery, offensive stereotype}
   # メディアガベージコレクションのCMSブリッジ(/api/internal/publishing/**、CmsBridgeClient参照)の
   # 呼び出し先。#573 stage3ではlegacy-apiが所有していたためlegacy-api-uriを使っていたが、
   # issue #709でCmsMediaBridgeControllerの所有権がpublishing-serviceへ移ったため、

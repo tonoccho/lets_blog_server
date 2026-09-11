@@ -29,6 +29,12 @@ export function ProjectImageContentFilterSettingsForm({
         プロンプトのキーワードによる簡易フィルタのため、生成される画像の内容そのものまでは判定できません。
         ChatGPT(DALL-E)側は性的コンテンツ等を常に強制フィルタするため、設定を解除してもプロバイダー側でブロックされる場合があります。
       </p>
+      <p className="mb-3 text-sm text-neutral-500 dark:text-neutral-400">
+        各項目をONにすると、対応するカテゴリの安全側の抑制語が自動的に付与されます(negative
+        promptへ連結され、指定済みのnegative promptを置き換えることはありません)。この抑制語の付与は
+        <strong>ComfyUI経路にのみ有効</strong>です。ChatGPT経路では抑制語は付与されず、プロバイダー側のモデレーションに依存します。
+        いずれの経路でも、生成される画像の内容を<strong>完全に防止するものではありません</strong>。
+      </p>
       <form action={formAction} className="space-y-2 text-sm">
         <label className="flex items-center gap-2">
           <input
