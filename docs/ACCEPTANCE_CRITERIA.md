@@ -156,6 +156,7 @@ API: content `PostController` / publishing `PostController`, `ArticlePreviewCont
 | AC-POST-011 | プレビュー投稿の後始末 | プレビューの残骸が公開先に残らない | `DELETE /api/projects/{projectId}/preview/preview-post` 後、公開先にプレビュー記事が残らない | `features/publishing/preview.feature` › プレビュー用の一時投稿はプレビュー終了時にWordPress側に残らない | 検証済 |
 | AC-POST-012 | カテゴリ・タグの解決 | 記事に付けた分類が公開先で正しく紐付く | `POST /api/taxonomy/resolve` が既存分類に解決し、無ければ作成する | `features/publishing/taxonomy.feature` › 既にあるカテゴリ・タグは大文字小文字を無視した完全一致で解決される / 存在しないカテゴリ・タグを指定すると新規作成される | 検証済 |
 | AC-POST-013 | プロジェクトダッシュボード (`/projects/[id]/dashboard`) | プロジェクトの状況を一目で掴める | 記事数・公開状況・Analytics サマリが表示される | — | 未着手 |
+| AC-POST-014 | 複数サイトへの同時公開と一部失敗時の挙動 | 2サイトに出せる。片方が落ちても成功した側は出て、失敗が握り潰されない | 2サイトへ公開すると両方に記事が作成される。片方のサイトが到達不能なとき、成功した側は公開され、失敗した側はエラー応答として利用者に示される(全体が巻き戻ることも、失敗が握り潰されることもない) | `features/publishing/multi-site-publish.feature` › 2つのサイトを選んで公開すると、両方のサイトに記事が作成される / 片方のサイトが到達不能なとき、成功した側は公開され失敗した側は失敗として示される(issue #1173 / AT-6-3、親issue #932の親シナリオ8・9。`POST /api/posts/publish`はサイトごとの単発呼び出しであり、公開APIはサイトを跨いだトランザクションを持たない) | 検証済(`@slow`) |
 | AC-POST-015 | 記事の著者マッピングと著者の自動プロビジョニング | 公開した本人がWordPress側の投稿者として正しく現れる | 公開者に対応するWordPress著者(`user_site_authors`のキャッシュ、無ければメール検索)がpost_authorに設定される。対応する著者が存在しない場合は`POST /api/projects/{id}/users`経由(内部的に`POST /api/internal/publishing/sites/{siteKey}/authors`、AC-INT-018)で自動作成される(issue #1176 / AT-6-6、親issue #932の親シナリオ14・15) | `features/publishing/authors.feature` › 記事の著者マッピングに従い、WordPress側の投稿者が期待通りになる / WordPress側に対応する著者が存在しない場合、自動プロビジョニングされる | 検証済 |
 
 ### 2.5 一括管理・環境間比較 — `BULK`
