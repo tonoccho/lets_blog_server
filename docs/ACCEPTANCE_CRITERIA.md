@@ -104,7 +104,7 @@ API: identity `UserController`, `RoleController`, `ProjectUserController` / cont
 | AC-USR-008 | プロジェクトメンバー管理 | プロジェクト単位でアクセスを絞れる | `/api/projects/{id}/users` の追加・変更・削除が、そのユーザーの見えるプロジェクトに反映される | `features/identity/project-members.feature` › 管理者がプロジェクトにメンバーを追加でき、そのメンバーがプロジェクトを閲覧できる / プロジェクトメンバーの役割を変更できる / メンバーから外された利用者は、そのプロジェクトへアクセスできない | 検証済 |
 | AC-USR-009 | 自分の参加プロジェクト一覧 | 自分に関係するプロジェクトだけ見える | `GET /api/project-users` が自分の所属だけを返す | — | 未着手 |
 | AC-USR-010 | GitHubトークンの登録 | 記事プランのIssue連携が使える | `PUT /api/users/{id}/github-token` 後、Issue連携が成功する | — | 未着手 |
-| AC-USR-011 | メタデータ(投稿ステータス/ロール)の取得 | 画面の選択肢がサーバー定義と一致する | `GET /api/metadata/post-statuses` と `/roles` が画面の選択肢と一致する | — | 未着手 |
+| AC-USR-011 | メタデータ(投稿ステータス/ロール)の取得 | 画面の選択肢がサーバー定義と一致する | `GET /api/metadata/post-statuses` と `/roles` が画面の選択肢と一致する | `features/publishing/publish-status.feature` › 投稿ステータスの選択肢はAPIとUIで一致する(issue #1172 / AT-6-2、親issue #932の親シナリオ7。投稿ステータス側のみ。プロジェクト一括管理画面「ポスト/ページ」タブのステータス変更セレクトと比較する)。**対象外**: ロール(`/roles`)側は #1163(AT-6-7)が担当、未検証のまま | 検証済(`@slow`。投稿ステータス側のみ) |
 | AC-USR-014 | 本人設定(タイムゾーン/ロケール)の保存 | 自分の表示設定を保てる | `PATCH /api/identity/me/preferences` で保存した内容が、再ログイン後も `GET /api/identity/me` に反映される(#784 の退行検知) | `features/identity/user-management.feature` › 利用者が自分のタイムゾーン/ロケールを保存でき、再ログイン後も保持される | 検証済 |
 | AC-USR-015 | ユーザー操作の認可 | 権限の無い利用者にアカウントを改変されない | 一般ユーザーは `POST/PATCH/DELETE /api/users` を実行できず(403)、実行後も一覧・対象の状態が変化していない(#796 の退行検知) | `features/identity/user-authorization.feature` › 一般ユーザーは新しいメンバーを登録できず、ユーザー一覧は変化しない / 一般ユーザーは他人のロールも削除も操作できず、対象の状態は変化しない | 検証済 |
 
@@ -148,8 +148,8 @@ API: content `PostController` / publishing `PostController`, `ArticlePreviewCont
 | AC-POST-003 | プロジェクト別の記事一覧 (`/projects/[id]/posts`) | プロジェクト単位で記事を管理できる | 該当プロジェクトの記事だけが表示される | — | 未着手 |
 | AC-POST-004 | 記事の公開 | 書いた記事が実際にブログに載る | `POST /api/posts/publish` 後、公開先URLで記事が閲覧できる | `features/publishing/publish-lifecycle.feature` › 公開した記事はWordPress上で本文・タイトル・アイキャッチが送信内容と一致する(issue #1171 / AT-6-1、親issue #932の親シナリオ2。WordPress側の実体をwp-cliで直接確認し、公開先URLへのHTTPアクセスまでは行わない) | 検証済(`@slow`) |
 | AC-POST-005 | 記事の更新 | 公開後に直せる | 同じ記事を再公開すると、公開先の本文が更新され重複投稿されない | `features/publishing/publish-lifecycle.feature` › 同じ記事を更新して再公開すると、新規作成されずに既存記事が更新される(issue #1171 / AT-6-1、親issue #932の親シナリオ3) | 検証済(`@slow`) |
-| AC-POST-006 | 予約公開 | 書いた日と公開日を分けられる | 予約した記事は指定時刻まで公開されず、時刻到来後に公開される | — | 未着手 |
-| AC-POST-007 | 記事の削除 | 誤って出した記事を取り下げられる | `DELETE /api/posts/{site}/{wpPostId}` 後、公開先で記事が閲覧できなくなる | — | 未着手(`@destructive`) |
+| AC-POST-006 | 予約公開 | 書いた日と公開日を分けられる | 予約した記事は指定時刻まで公開されず、時刻到来後に公開される | `features/publishing/publish-status.feature` › 予約投稿すると、指定日時が設定された状態でWordPressに登録される(issue #1172 / AT-6-2、親issue #932の親シナリオ6。本番サイトへ`publishScheduledAt`付きで投稿し、WordPress側がfutureステータスかつ指定日時(`post_date_gmt`)で登録されることをwp-cliで確認する)。**対象外**: 指定時刻到来後の自動公開そのもの(WordPress標準のcronに委ねる)は未検証 | 検証済(`@slow`。future登録までを検証) |
+| AC-POST-007 | 記事の削除 | 誤って出した記事を取り下げられる | `DELETE /api/posts/{site}/{wpPostId}` 後、公開先で記事が閲覧できなくなる | `features/publishing/publish-status.feature` › 公開済み記事を取り下げると、WordPress側からも消え、投稿履歴の状態が更新される(issue #1172 / AT-6-2、親issue #932の親シナリオ4。取り下げ後のWordPress側のpost_statusがtrashになること、および`GET /api/posts/{site}/by-slug/{slug}`が返す投稿履歴の状態もtrashに更新されることをそれぞれ確認する) | 検証済(`@slow`) |
 | AC-POST-008 | スラッグによる記事取得 | 公開済み記事を一意に特定できる | `GET /api/posts/{site}/by-slug/{slug}` が該当記事を返す | `features/publishing/publish-lifecycle.feature` › 同じ記事を更新して再公開すると、新規作成されずに既存記事が更新される(issue #1171 / AT-6-1。VSCode拡張と同じ経路で`GET /api/posts/{site}/by-slug/{slug}`から既存投稿のwpPostIdを解決してから再公開する) | 検証済(`@slow`) |
 | AC-POST-009 | プレビュー(骨組み+差し込み) | 公開前に実際の見た目を確認できる | `POST /api/projects/{projectId}/preview/skeleton` と `/render` で、公開先テーマ相当の見た目が得られる | `features/publishing/preview.feature` › プレビューを生成すると公開せずに実テーマの見た目を確認できる | 検証済 |
 | AC-POST-010 | プレビュー用テーマCSSの取得 | プレビューが公開先の見た目と一致する | `GET /api/projects/{projectId}/preview/theme-css` が公開先のCSSを返す | `features/publishing/preview.feature` › プレビューを生成すると公開せずに実テーマの見た目を確認できる | 検証済 |
