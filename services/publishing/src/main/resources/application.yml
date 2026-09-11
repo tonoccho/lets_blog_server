@@ -66,9 +66,15 @@ spring:
       # 引き上げた以上、multipartのパース時点でヒープに載せない意図をここで明示しておく。
       file-size-threshold: 0B
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lbs_publishing?useSSL=false&serverTimezone=UTC}
+    # issue #1095: mysqlコンテナ再作成後も再起動なしで自力回復できるよう、ai-serviceの
+    # application.ymlと同じ理由でconnectTimeout/socketTimeoutを設定する。
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lbs_publishing?useSSL=false&serverTimezone=UTC&connectTimeout=10000&socketTimeout=30000}
     username: ${SPRING_DATASOURCE_USERNAME:lbs_publishing}
     password: ${SPRING_DATASOURCE_PASSWORD:lbs_publishing}
+    hikari:
+      # issue #1095: ai-serviceのapplication.ymlと同じ理由で、プール枯渇時にヘルスチェックを
+      # 含む全呼び出しがsocketTimeoutの自力回復を待たず早く失敗するようconnection-timeoutを縮める。
+      connection-timeout: 10000
   # 現時点では自身が所有するドメインテーブルは無い(posts/sites/user_site_authors等はいずれも他
   # サービス所有。issue #707)が、専用スキーマ(lbs_publishing、ADR-0004)・Flyway基盤自体は
   # 他サービスと同じ構成で用意しておく。bulk_operation_logsは#572で「将来のpublishing-serviceに

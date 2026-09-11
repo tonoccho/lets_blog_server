@@ -35,9 +35,22 @@ spring:
   application:
     name: lets-blog-ai
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lbs_ai?useSSL=false&serverTimezone=UTC}
+    # issue #1095: mysqlコンテナが再作成されると、その時点で確立済みだった接続はFIN/RSTを
+    # 受け取らずサイレントに応答不能になる。connectTimeout/socketTimeoutが無いと、その接続
+    # 上のクエリ(や検証クエリ)は無期限にブロックし、HikariCPのプールが「active のまま返却
+    # されない」状態で枯渇し、再起動するまで自力回復しない。有限のsocketTimeoutを設定する
+    # ことで、死んだ接続上の読み取りが有限時間で失敗してHikariCPに破棄させ、以降の借用は
+    # (mysql自体は復旧しているので)新しい物理接続で成功するようにする。
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lbs_ai?useSSL=false&serverTimezone=UTC&connectTimeout=10000&socketTimeout=30000}
     username: ${SPRING_DATASOURCE_USERNAME:lbs_ai}
     password: ${SPRING_DATASOURCE_PASSWORD:lbs_ai}
+    hikari:
+      # issue #1095: socketTimeout=30000により死んだ接続はおよそ30秒で破棄される。
+      # HikariCPの connection-timeout(プールから借用できるまで待つ上限)の既定値も30000msで
+      # 両者がほぼ同時に満了すると、プール枯渇中でもヘルスチェックがsocketTimeout側の自力回復に
+      # 間に合ってしまい、枯渇状態を検知し損ねることがある。10000msに縮めて、枯渇時はどの呼び出し
+      # (ヘルスチェックを含む)も自力回復を待たずに早く失敗し、確実にDOWNを観測できるようにする。
+      connection-timeout: 10000
   jpa:
     hibernate:
       ddl-auto: validate

@@ -53,6 +53,13 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+    // issue #1095: HikariDeadConnectionRecoveryIntegrationTestは実DockerコンテナでHikariCPの
+    // 障害復旧を検証するため、既定では@EnabledIfSystemPropertyでスキップされる。
+    // `./gradlew :services:publishing:test -Dlbs.dockerAvailable=true` のように明示指定した
+    // ときだけ実行されるよう、Gradle起動時の-DをフォークしたテストJVMへ転送する
+    // (Gradleの-Dはビルドプロセス自身のJVMプロパティであり、テストは別JVMで動くため
+    // 明示的な転送が無いと届かない)。
+    systemProperty 'lbs.dockerAvailable', System.getProperty('lbs.dockerAvailable', 'false')
     finalizedBy jacocoTestReport
 }
 

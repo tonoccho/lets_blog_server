@@ -393,6 +393,77 @@ or `rabbitmq` never becomes healthy, everything that depends on them stays stuck
    `docker compose down -v` (destroys the MySQL volume — only do this in a disposable dev
    environment) followed by `docker compose up -d`.
 
+---
+
+### `mysql` Container Recreated While Dependent Services Are Already Running
+
+**Problem (#1095):** `docker compose -f docker-compose.yml -f docker-compose.host-tests.yml up -d mysql`
+(per #762, to publish `127.0.0.1:3306` for host `./gradlew test` runs), or any `docker compose
+up -d <subset>` that happens to recreate `mysql` as a dependency, replaces the `mysql`
+container while other JVM services (`publishing`, `project`, `content`, `media`, `identity`,
+`log-writer`, `analytics`, `ai`, `platform`) are still running against it. Every TCP connection
+those services already held to the old `mysql` process goes dead — the client OS never gets a
+FIN/RST for it, because the peer container is simply gone — but nothing on the client side
+notices, so HikariCP keeps handing the dead connections out.
+
+**Symptom:** requests that touch the DB start failing (`500`, or `504` at the gateway once its
+300s route timeout beats Hikari's 30s connection-timeout — see comment below). `docker ps` still
+shows every dependent service `healthy` and `actuator/health` still returns `UP`, so nothing in
+routine monitoring flags it. The only visible symptom reported by an actual user was "clicking
+into a project's detail page does nothing" (the SSR fetch to
+`/api/projects/{id}/bulk-management/categories/comparison` hangs, so Next.js never completes
+the navigation). Before the fix below, the only recovery was `docker compose restart` on the
+affected services.
+
+**Root cause (identified and evidenced by
+`services/publishing/.../HikariDeadConnectionRecoveryIntegrationTest`, issue #1095):** this is
+**not a connection leak.** HikariCP's own leak-detection (`leak-detection-threshold`) would
+catch a genuine leak — a connection that application code never returns to the pool. Here the
+connection *is* still tracked by Hikari as `active`; it never comes back because a
+query issued on it (including Hikari's own validation query) blocks forever on a TCP socket
+whose peer no longer exists. Every service's `application.yml` datasource URL had no
+`connectTimeout` / `socketTimeout` on the JDBC connection, so neither the driver nor the OS ever
+gives up on that read — it hangs until the process is restarted. `total=10, active=10, idle=0`
+in the pool logs is the visible effect of every connection being stuck in that unbounded wait,
+not of a leak.
+
+**Fix:** `connectTimeout=10000&socketTimeout=30000` was added to the JDBC URL in every service's
+`application.yml` (`services/*/src/main/resources/application.yml`). A query on a dead socket
+now fails after at most 30s instead of hanging indefinitely; HikariCP then discards the broken
+connection and the next borrow opens a fresh physical connection against the (already recovered)
+`mysql` container — the pool self-heals without a restart. This is verified by
+`HikariDeadConnectionRecoveryIntegrationTest`, which freezes a real connection's TCP socket
+(via a disposable MySQL container and a proxy that stops forwarding bytes, simulating exactly
+this scenario) and asserts the pool recovers on its own.
+
+The health check side of Requirement 3 needed one further production change:
+`spring.datasource.hikari.connection-timeout: 10000` (`services/*/src/main/resources/
+application.yml`, next to the datasource block). Spring Boot's standard
+`DataSourceHealthIndicator` calls `getConnection()` with the pool's own `connection-timeout`,
+so while the pool is exhausted it reports non-`UP` — but HikariCP's *default*
+`connection-timeout` is 30000ms, the same magnitude as the `socketTimeout` above. With both at
+30s, a health check's own wait for a free connection can race a frozen active connection's
+socketTimeout-driven eviction: occasionally the evicted connection's slot frees up moments
+before the health check's 30s wait gives up, so it acquires the freed connection and reports
+`UP` instead of `DOWN` — an intermittent false negative, not a fixed non-issue. Lowering
+`connection-timeout` to 10000ms (still well clear of Hikari's `validation-timeout`, which
+defaults to a value that must fit under it) gives any caller, including the health check, a
+wide margin to fail fast and observe an exhausted pool as `DOWN` before the 30s self-heal can
+possibly complete — confirmed by the same test, not assumed.
+
+**If you are on a deployment that predates this fix** (`socketTimeout` missing from the
+datasource URL), the interim workaround still applies: after recreating `mysql`, restart every
+dependent service that was already running —
+
+```bash
+MY=$(docker inspect lbs-mysql --format '{{.State.StartedAt}}')
+for c in $(docker ps --format '{{.Names}}' | grep -E '^lbs-(publishing|project|content|media|identity|log-writer|analytics|ai|platform)$'); do
+  S=$(docker inspect $c --format '{{.State.StartedAt}}')
+  [[ "$S" < "$MY" ]] && echo "$c is older than mysql (needs restart)"
+done
+docker compose restart <services listed above>
+```
+
 **Problem:** A container fails to start with `port is already allocated` / `bind: address already in use`.
 
 **Cause:** With 19 containers, more host ports are in play than just 80/443 — `9001`

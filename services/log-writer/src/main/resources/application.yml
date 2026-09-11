@@ -36,9 +36,15 @@ spring:
   application:
     name: lets-blog-log-writer
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lbs_log?useSSL=false&serverTimezone=UTC}
+    # issue #1095: mysqlコンテナ再作成後も再起動なしで自力回復できるよう、ai-serviceの
+    # application.ymlと同じ理由でconnectTimeout/socketTimeoutを設定する。
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lbs_log?useSSL=false&serverTimezone=UTC&connectTimeout=10000&socketTimeout=30000}
     username: ${SPRING_DATASOURCE_USERNAME:lbs_log}
     password: ${SPRING_DATASOURCE_PASSWORD:lbs_log}
+    hikari:
+      # issue #1095: ai-serviceのapplication.ymlと同じ理由で、プール枯渇時にヘルスチェックを
+      # 含む全呼び出しがsocketTimeoutの自力回復を待たず早く失敗するようconnection-timeoutを縮める。
+      connection-timeout: 10000
   jpa:
     hibernate:
       ddl-auto: validate
