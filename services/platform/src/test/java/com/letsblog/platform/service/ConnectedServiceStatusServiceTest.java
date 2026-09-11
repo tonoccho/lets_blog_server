@@ -1,5 +1,6 @@
 package com.letsblog.platform.service;
 
+import com.letsblog.platform.ai.AiProvider;
 import com.letsblog.platform.dto.ConnectedServiceStatusDetailResponse;
 import com.letsblog.platform.dto.ConnectedServiceStatusResponse;
 import com.letsblog.platform.dto.ConnectedServiceStatusResponse.Status;
@@ -27,6 +28,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
@@ -50,6 +53,7 @@ class ConnectedServiceStatusServiceTest {
     private static final String PLANTUML_URL = "http://plantuml.test";
     private static final String WORDPRESS_URL = "http://wordpress-provision.test";
     private static final String PENPOT_URL = "http://penpot.test";
+    private static final String OLLAMA_URL = "http://ollama.test/v1";
     private static final String PLANTUML_HEALTHCHECK_PATH =
             "/png/" + PlantUmlEncoder.encode("@startuml\nA->B\n@enduml");
 
@@ -57,6 +61,8 @@ class ConnectedServiceStatusServiceTest {
     private DataSource dataSource;
     @Mock
     private SystemSettingService systemSettingService;
+    @Mock
+    private AppSettingService appSettingService;
     @Mock
     private Connection connection;
 
@@ -72,29 +78,33 @@ class ConnectedServiceStatusServiceTest {
     private MockRestServiceServer plantUmlServer;
     private MockRestServiceServer wordpressServer;
     private MockRestServiceServer penpotServer;
+    private MockRestServiceServer ollamaServer;
     private ConnectedServiceStatusService service;
 
-    private ConnectedServiceStatusService buildService(String llmApiKey) {
+    private ConnectedServiceStatusService buildService() {
         RestClient.Builder comfyUiBuilder = RestClient.builder().baseUrl(COMFYUI_URL);
         RestClient.Builder plantUmlBuilder = RestClient.builder().baseUrl(PLANTUML_URL);
         RestClient.Builder wordpressBuilder = RestClient.builder().baseUrl(WORDPRESS_URL);
         RestClient.Builder penpotBuilder = RestClient.builder().baseUrl(PENPOT_URL);
+        RestClient.Builder ollamaBuilder = RestClient.builder().baseUrl(OLLAMA_URL);
 
         comfyUiServer = MockRestServiceServer.bindTo(comfyUiBuilder).build();
         plantUmlServer = MockRestServiceServer.bindTo(plantUmlBuilder).build();
         wordpressServer = MockRestServiceServer.bindTo(wordpressBuilder).build();
         penpotServer = MockRestServiceServer.bindTo(penpotBuilder).build();
+        ollamaServer = MockRestServiceServer.bindTo(ollamaBuilder).build();
 
         return new ConnectedServiceStatusService(
                 dataSource,
-                llmApiKey,
                 comfyUiBuilder, COMFYUI_URL,
                 plantUmlBuilder, PLANTUML_URL,
                 wordpressBuilder, WORDPRESS_URL,
                 penpotBuilder, PENPOT_URL,
                 systemSettingService,
+                appSettingService,
                 letsBlogServiceStatusService,
-                rabbitMqQueueStatusService);
+                rabbitMqQueueStatusService,
+                ignoredBaseUrl -> ollamaBuilder);
     }
 
     @BeforeEach
@@ -104,7 +114,10 @@ class ConnectedServiceStatusServiceTest {
         lenient().when(letsBlogServiceStatusService.targetUrl()).thenReturn("http://gateway:8080/actuator/health");
         lenient().when(rabbitMqQueueStatusService.check())
                 .thenReturn(new RabbitMqQueueStatusService.QueueStatus(true, false, null, "http://rabbitmq:15672/api/queues"));
-        service = buildService("test-llm-api-key");
+        // LLMチェックの既定はOPENAI・キー設定済み。個々のテストで上書きする。
+        lenient().when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OPENAI);
+        lenient().when(appSettingService.getLlmApiKey()).thenReturn("test-llm-api-key");
+        service = buildService();
     }
 
     private void respondSuccessToAll() {
@@ -152,7 +165,8 @@ class ConnectedServiceStatusServiceTest {
 
     @Test
     void checkAll_LLM_APIキー未設定であればWARNINGを返す() throws SQLException {
-        service = buildService("");
+        when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OPENAI);
+        when(appSettingService.getLlmApiKey()).thenReturn("");
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.isValid(3)).thenReturn(true);
         respondSuccessToAll();
@@ -161,6 +175,98 @@ class ConnectedServiceStatusServiceTest {
         List<ConnectedServiceStatusResponse> statuses = service.checkAll();
 
         assertEquals(Status.WARNING, toMapById(statuses).get("llm"));
+    }
+
+    @Test
+    void checkAll_LLM_APIキーがnullであればWARNINGを返す() throws SQLException {
+        when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OPENAI);
+        when(appSettingService.getLlmApiKey()).thenReturn(null);
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(true);
+        respondSuccessToAll();
+        mockBraveSearchConfigured(true);
+
+        List<ConnectedServiceStatusResponse> statuses = service.checkAll();
+
+        assertEquals(Status.WARNING, toMapById(statuses).get("llm"));
+    }
+
+    @Test
+    void checkAll_LLM_provider_OPENAIでAPIキー設定済みであればNORMALを返す() throws SQLException {
+        when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OPENAI);
+        when(appSettingService.getLlmApiKey()).thenReturn("configured-key");
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(true);
+        respondSuccessToAll();
+        mockBraveSearchConfigured(true);
+
+        List<ConnectedServiceStatusResponse> statuses = service.checkAll();
+
+        assertEquals(Status.NORMAL, toMapById(statuses).get("llm"));
+    }
+
+    @Test
+    void checkAll_LLM_provider_CLAUDEはllm_claude_api_keyの設定有無で判定する_未設定はWARNING() throws SQLException {
+        when(appSettingService.getLlmProvider()).thenReturn(AiProvider.CLAUDE);
+        when(appSettingService.getLlmClaudeApiKey()).thenReturn("");
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(true);
+        respondSuccessToAll();
+        mockBraveSearchConfigured(true);
+
+        List<ConnectedServiceStatusResponse> statuses = service.checkAll();
+
+        assertEquals(Status.WARNING, toMapById(statuses).get("llm"));
+        verify(appSettingService, never()).getLlmApiKey();
+    }
+
+    @Test
+    void checkAll_LLM_provider_CLAUDEはllm_claude_api_keyの設定有無で判定する_設定済みはNORMAL() throws SQLException {
+        when(appSettingService.getLlmProvider()).thenReturn(AiProvider.CLAUDE);
+        when(appSettingService.getLlmClaudeApiKey()).thenReturn("claude-key");
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(true);
+        respondSuccessToAll();
+        mockBraveSearchConfigured(true);
+
+        List<ConnectedServiceStatusResponse> statuses = service.checkAll();
+
+        assertEquals(Status.NORMAL, toMapById(statuses).get("llm"));
+        verify(appSettingService, never()).getLlmApiKey();
+    }
+
+    @Test
+    void checkAll_LLM_provider_OLLAMAで疎通確認できればAPIキーに関わらずNORMALを返す() throws SQLException {
+        when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OLLAMA);
+        when(appSettingService.getLlmOllamaBaseUrl()).thenReturn(OLLAMA_URL);
+        ollamaServer.expect(requestTo(OLLAMA_URL + "/models")).andRespond(withSuccess());
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(true);
+        respondSuccessToAll();
+        mockBraveSearchConfigured(true);
+
+        List<ConnectedServiceStatusResponse> statuses = service.checkAll();
+
+        assertEquals(Status.NORMAL, toMapById(statuses).get("llm"));
+        verify(appSettingService, never()).getLlmApiKey();
+    }
+
+    @Test
+    void checkAll_LLM_provider_OLLAMAで疎通不可であればAPIキーに関わらずERRORを返す() throws SQLException {
+        when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OLLAMA);
+        when(appSettingService.getLlmOllamaBaseUrl()).thenReturn(OLLAMA_URL);
+        ollamaServer.expect(requestTo(OLLAMA_URL + "/models")).andRespond(request -> {
+            throw new java.io.IOException("connection refused");
+        });
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(true);
+        respondSuccessToAll();
+        mockBraveSearchConfigured(true);
+
+        List<ConnectedServiceStatusResponse> statuses = service.checkAll();
+
+        assertEquals(Status.ERROR, toMapById(statuses).get("llm"));
+        verify(appSettingService, never()).getLlmApiKey();
     }
 
     @Test
@@ -303,6 +409,126 @@ class ConnectedServiceStatusServiceTest {
         assertEquals(Status.ERROR, comfyui.status());
         assertNotNull(comfyui.errorMessage());
         assertNull(comfyui.httpStatus());
+    }
+
+    @Test
+    void checkAll_DB接続検証に失敗すればERRORを返す() throws SQLException {
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(false);
+        respondSuccessToAll();
+        mockBraveSearchConfigured(true);
+
+        List<ConnectedServiceStatusResponse> statuses = service.checkAll();
+
+        assertEquals(Status.ERROR, toMapById(statuses).get("database"));
+    }
+
+    @Test
+    void checkAll_RabbitMqキューが滞留していればWARNINGを返す() throws SQLException {
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(true);
+        when(rabbitMqQueueStatusService.check())
+                .thenReturn(new RabbitMqQueueStatusService.QueueStatus(
+                        false, true, "キューが滞留しています", "http://rabbitmq:15672/api/queues"));
+        respondSuccessToAll();
+        mockBraveSearchConfigured(true);
+
+        List<ConnectedServiceStatusResponse> statuses = service.checkAll();
+
+        assertEquals(Status.WARNING, toMapById(statuses).get("rabbitmq-queues"));
+    }
+
+    @Test
+    void checkAll_RabbitMq疎通確認自体が失敗すればERRORを返す() throws SQLException {
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(true);
+        when(rabbitMqQueueStatusService.check())
+                .thenReturn(new RabbitMqQueueStatusService.QueueStatus(
+                        false, false, "接続できません", "http://rabbitmq:15672/api/queues"));
+        respondSuccessToAll();
+        mockBraveSearchConfigured(true);
+
+        List<ConnectedServiceStatusResponse> statuses = service.checkAll();
+
+        assertEquals(Status.ERROR, toMapById(statuses).get("rabbitmq-queues"));
+    }
+
+    @Test
+    void checkAll_LetsBlog内部サービスが停止していればERRORを返す() throws SQLException {
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(true);
+        when(letsBlogServiceStatusService.checkAll()).thenReturn(List.of(
+                new LetsBlogServiceStatusService.ServiceHealth(
+                        "media-service", "media-service", false, "画像アップロード不可", "接続できません")));
+        respondSuccessToAll();
+        mockBraveSearchConfigured(true);
+
+        List<ConnectedServiceStatusResponse> statuses = service.checkAll();
+
+        assertEquals(Status.ERROR, toMapById(statuses).get("media-service"));
+    }
+
+    @Test
+    void checkAll_LetsBlog内部サービスが正常であればNORMALを返す() throws SQLException {
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(true);
+        when(letsBlogServiceStatusService.checkAll()).thenReturn(List.of(
+                new LetsBlogServiceStatusService.ServiceHealth(
+                        "media-service", "media-service", true, null, null)));
+        respondSuccessToAll();
+        mockBraveSearchConfigured(true);
+
+        List<ConnectedServiceStatusResponse> statuses = service.checkAll();
+
+        assertEquals(Status.NORMAL, toMapById(statuses).get("media-service"));
+    }
+
+    @Test
+    void checkAll_PlantUMLが5xxを返せばWARNINGを返す() throws SQLException {
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(true);
+        comfyUiServer.expect(requestTo(COMFYUI_URL + "/system_stats")).andRespond(withSuccess());
+        plantUmlServer.expect(requestTo(PLANTUML_URL + PLANTUML_HEALTHCHECK_PATH)).andRespond(withServerError());
+        wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
+        penpotServer.expect(requestTo(PENPOT_URL + "/readyz")).andRespond(withSuccess());
+        mockBraveSearchConfigured(true);
+
+        List<ConnectedServiceStatusResponse> statuses = service.checkAll();
+
+        assertEquals(Status.WARNING, toMapById(statuses).get("plantuml"));
+    }
+
+    @Test
+    void checkAll_PlantUMLが4xxを返せばNORMALを返す() throws SQLException {
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(true);
+        comfyUiServer.expect(requestTo(COMFYUI_URL + "/system_stats")).andRespond(withSuccess());
+        plantUmlServer.expect(requestTo(PLANTUML_URL + PLANTUML_HEALTHCHECK_PATH))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+        wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
+        penpotServer.expect(requestTo(PENPOT_URL + "/readyz")).andRespond(withSuccess());
+        mockBraveSearchConfigured(true);
+
+        List<ConnectedServiceStatusResponse> statuses = service.checkAll();
+
+        assertEquals(Status.NORMAL, toMapById(statuses).get("plantuml"));
+    }
+
+    @Test
+    void checkAll_PlantUMLが接続不可であればERRORを返す() throws SQLException {
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(true);
+        comfyUiServer.expect(requestTo(COMFYUI_URL + "/system_stats")).andRespond(withSuccess());
+        plantUmlServer.expect(requestTo(PLANTUML_URL + PLANTUML_HEALTHCHECK_PATH)).andRespond(request -> {
+            throw new java.io.IOException("connection refused");
+        });
+        wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
+        penpotServer.expect(requestTo(PENPOT_URL + "/readyz")).andRespond(withSuccess());
+        mockBraveSearchConfigured(true);
+
+        List<ConnectedServiceStatusResponse> statuses = service.checkAll();
+
+        assertEquals(Status.ERROR, toMapById(statuses).get("plantuml"));
     }
 
     private static Map<String, Status> toMapById(List<ConnectedServiceStatusResponse> statuses) {

@@ -1,5 +1,6 @@
 package com.letsblog.platform.service;
 
+import com.letsblog.platform.ai.AiProvider;
 import com.letsblog.platform.dto.ConnectedServiceStatusDetailResponse;
 import com.letsblog.platform.dto.ConnectedServiceStatusResponse;
 import com.letsblog.platform.dto.ConnectedServiceStatusResponse.Status;
@@ -22,6 +23,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -47,58 +49,68 @@ public class ConnectedServiceStatusService {
     private final RestClient wordpressProvisioningClient;
     private final RestClient penpotClient;
     private final SystemSettingService systemSettingService;
+    private final AppSettingService appSettingService;
     private final LetsBlogServiceStatusService letsBlogServiceStatusService;
     private final RabbitMqQueueStatusService rabbitMqQueueStatusService;
     private final String comfyUiBaseUrl;
     private final String plantUmlBaseUrl;
     private final String wordpressProvisionBaseUrl;
     private final String penpotBaseUrl;
-    private final String llmApiKey;
+    /**
+     * OLLAMAのbaseUrlはAppSettingService経由でDB優先に実行時解決される(#1086)ため、他の外部連携と
+     * 異なりコンストラクタ時点でRestClientを固定できない。チェックの都度、解決済みbaseUrlから
+     * RestClient.Builderを組み立てるための差し替え可能な生成関数として保持する(テストでは
+     * MockRestServiceServerに束縛済みのBuilderを返す関数に差し替える)。
+     */
+    private final Function<String, RestClient.Builder> ollamaClientBuilderFactory;
 
     @Autowired
     public ConnectedServiceStatusService(
             DataSource dataSource,
-            @Value("${app.llm-api-key}") String llmApiKey,
             @Value("${app.comfyui-base-url}") String comfyUiBaseUrl,
             @Value("${app.plantuml-base-url}") String plantUmlBaseUrl,
             @Value("${app.wordpress-provision-base-url}") String wordpressProvisionBaseUrl,
             @Value("${app.penpot-base-url}") String penpotBaseUrl,
             SystemSettingService systemSettingService,
+            AppSettingService appSettingService,
             LetsBlogServiceStatusService letsBlogServiceStatusService,
             RabbitMqQueueStatusService rabbitMqQueueStatusService) {
         this(dataSource,
-                llmApiKey,
                 builderWithTimeout(comfyUiBaseUrl), comfyUiBaseUrl,
                 builderWithTimeout(plantUmlBaseUrl), plantUmlBaseUrl,
                 builderWithTimeout(wordpressProvisionBaseUrl), wordpressProvisionBaseUrl,
                 builderWithTimeout(penpotBaseUrl), penpotBaseUrl,
-                systemSettingService, letsBlogServiceStatusService, rabbitMqQueueStatusService);
+                systemSettingService, appSettingService,
+                letsBlogServiceStatusService, rabbitMqQueueStatusService,
+                ConnectedServiceStatusService::builderWithTimeout);
     }
 
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
     ConnectedServiceStatusService(
             DataSource dataSource,
-            String llmApiKey,
             RestClient.Builder comfyUiBuilder, String comfyUiBaseUrl,
             RestClient.Builder plantUmlBuilder, String plantUmlBaseUrl,
             RestClient.Builder wordpressBuilder, String wordpressProvisionBaseUrl,
             RestClient.Builder penpotBuilder, String penpotBaseUrl,
             SystemSettingService systemSettingService,
+            AppSettingService appSettingService,
             LetsBlogServiceStatusService letsBlogServiceStatusService,
-            RabbitMqQueueStatusService rabbitMqQueueStatusService) {
+            RabbitMqQueueStatusService rabbitMqQueueStatusService,
+            Function<String, RestClient.Builder> ollamaClientBuilderFactory) {
         this.dataSource = dataSource;
-        this.llmApiKey = llmApiKey;
         this.comfyUiClient = comfyUiBuilder.build();
         this.plantUmlClient = plantUmlBuilder.build();
         this.wordpressProvisioningClient = wordpressBuilder.build();
         this.penpotClient = penpotBuilder.build();
         this.systemSettingService = systemSettingService;
+        this.appSettingService = appSettingService;
         this.letsBlogServiceStatusService = letsBlogServiceStatusService;
         this.rabbitMqQueueStatusService = rabbitMqQueueStatusService;
         this.comfyUiBaseUrl = comfyUiBaseUrl;
         this.plantUmlBaseUrl = plantUmlBaseUrl;
         this.wordpressProvisionBaseUrl = wordpressProvisionBaseUrl;
         this.penpotBaseUrl = penpotBaseUrl;
+        this.ollamaClientBuilderFactory = ollamaClientBuilderFactory;
     }
 
     private static RestClient.Builder builderWithTimeout(String baseUrl) {
@@ -193,11 +205,31 @@ public class ConnectedServiceStatusService {
     }
 
     /**
-     * 外部ホスト型LLM APIは第三者の有料APIのため、疎通確認のために定期的に実リクエストを送ることはせず、
-     * APIキーが設定されているかどうかを稼働状況の代わりとして扱う(Brave Searchと同じ方針)。
+     * 実効プロバイダー(DB優先で解決される{@link AppSettingService#getLlmProvider()}、issue #1087)
+     * によって判定方法を切り替える。OLLAMAは自ホスト上のコンテナで無料のため実際に疎通確認する
+     * (ComfyUIと同じ方針)。OPENAI/CLAUDEは第三者の有料APIのため、疎通確認のために定期的に実リクエスト
+     * を送ることはせず、APIキーが設定されているかどうかを稼働状況の代わりとして扱う(Brave Searchと
+     * 同じ方針)。この場合も参照するAPIキーはプロバイダーに対応するもの(OPENAI→llm_api_key、
+     * CLAUDE→llm_claude_api_key)に切り替える。
      */
     private CheckOutcome checkLlm() {
-        if (llmApiKey != null && !llmApiKey.isBlank()) {
+        AiProvider provider = appSettingService.getLlmProvider();
+        return switch (provider) {
+            case OLLAMA -> checkLlmOllama();
+            case CLAUDE -> checkLlmApiKeyConfigured(appSettingService.getLlmClaudeApiKey());
+            case OPENAI -> checkLlmApiKeyConfigured(appSettingService.getLlmApiKey());
+        };
+    }
+
+    /** OLLAMA専用の接続先(issue #1086)へOpenAI互換のモデル一覧エンドポイントで疎通確認する。 */
+    private CheckOutcome checkLlmOllama() {
+        String baseUrl = appSettingService.getLlmOllamaBaseUrl();
+        RestClient client = ollamaClientBuilderFactory.apply(baseUrl).build();
+        return checkHttpService(client, baseUrl, "/models");
+    }
+
+    private CheckOutcome checkLlmApiKeyConfigured(String apiKey) {
+        if (apiKey != null && !apiKey.isBlank()) {
             return CheckOutcome.normal(null);
         }
         return new CheckOutcome(Status.WARNING, null, "APIキーが設定されていません", null);
