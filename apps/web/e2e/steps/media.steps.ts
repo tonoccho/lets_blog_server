@@ -794,6 +794,108 @@ When('詳細から画像を削除する', async ({ page }) => {
   await expect(page.getByText('生成画像の詳細')).toHaveCount(0, { timeout: 30_000 });
 });
 
+/**
+ * ログイン必須の生成画像配信のCache-Control(issue #1064)。
+ *
+ * `page.goto()` で直接ナビゲーションすることで、実際のブラウザのHTTPキャッシュを経由させる。
+ * `request` フィクスチャ(APIRequestContext)は`page`とキャッシュを共有しないため、
+ * 「ログアウト後にブラウザキャッシュから返ってしまわないか」は`page`でしか確かめられない
+ * (`context.clearCookies()`はHTTPキャッシュを消さないため、同一の`page`/`BrowserContext`を
+ * ログイン→閲覧→ログアウト→再アクセスまで使い続けることが要になる)。
+ */
+When('その画像のファイルへ直接アクセスする', async ({ ctx, page }) => {
+  ctx.mediaFileResponse = await page.goto(`/image-gallery/${ctx.mediaImageId}/file`, {
+    waitUntil: 'commit',
+  });
+});
+
+/**
+ * ログアウトをUIのクリックを経由せず、next-auth/reactのsignOut()が内部で行うのと同じ
+ * HTTP呼び出し(csrfToken取得 → `/api/auth/signout`へPOST)を`page.request`で直接行う。
+ *
+ * `page.request`は`page`と同じ`BrowserContext`のCookieを共有するため、ページを操作せずに
+ * セッションだけを終了できる。issue #1236(サーバー/ブラウザのタイムゾーン差によるハイドレー
+ * ション不一致でクリックが失われることがある、本Issueとは無関係の既知の不具合)を避けつつ、
+ * 実際にアプリが使うのと同じサインアウト経路を通すための選択(本物のUIクリックの代用であり、
+ * セッションCookieを直接消すような近道ではない)。
+ */
+When('そのページのセッションをログアウトAPI経由で終了する', async ({ page }) => {
+  const csrfResponse = await page.request.get('/api/auth/csrf');
+  expect(csrfResponse.ok(), `CSRFトークンの取得に失敗しました (status=${csrfResponse.status()})`).toBe(true);
+  const { csrfToken } = (await csrfResponse.json()) as { csrfToken: string };
+  const signOutResponse = await page.request.post('/api/auth/signout', {
+    form: { csrfToken },
+  });
+  expect(
+    signOutResponse.ok(),
+    `ログアウトAPIの呼び出しに失敗しました (status=${signOutResponse.status()})`
+  ).toBe(true);
+});
+
+/**
+ * UIのモーダル操作(issue #1236の影響を受けうる)を経由せず、APIで直接削除する。
+ *
+ * `ctx.mediaImageId`はこの後の「その画像のファイルへ直接アクセスする」でも使うため保持し、
+ * @mediaのAfterが重ねて消そうとする分は削除済みIDへの2度目のDELETE(無視される)に留める。
+ */
+When('その画像をAPI経由で削除する', async ({ ctx, request }) => {
+  const token = await adminToken(request);
+  const response = await request.delete(`/api/generated-images/${ctx.mediaImageId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(response.ok(), `画像の削除に失敗しました (status=${response.status()})`).toBe(true);
+});
+
+Then('画像の取得は成功する', async ({ ctx }) => {
+  const response = ctx.mediaFileResponse as import('@playwright/test').Response | null;
+  expect(response, 'ファイルへのアクセス結果が記録されていません').not.toBeNull();
+  expect(response?.status()).toBe(200);
+});
+
+/**
+ * `apps/web/src/proxy.ts`はセッション(NextAuthのトークン)を持たないアクセスを
+ * `/image-gallery/**`を含む保護パス全般で`/login`へリダイレクトする(このハンドラ自身の
+ * `getSession()`チェックより手前で働く)。そのため未ログイン状態での直接アクセスは
+ * (ブラウザキャッシュを経由しない限り)401ではなく`/login`へのリダイレクト=最終的に
+ * 200で`/login`のHTMLが返る形になる。ここで確かめたいのは画像そのものが返らないことなので、
+ * 最終URLとContent-Typeの両方を見る。
+ */
+Then('ログイン画面へ転送され、画像は返らない', async ({ ctx, page }) => {
+  const response = ctx.mediaFileResponse as import('@playwright/test').Response | null;
+  expect(response, 'ファイルへのアクセス結果が記録されていません').not.toBeNull();
+  expect(page.url(), 'ログアウト後もログイン画面へ転送されていない').toContain('/login');
+  const contentType = response?.headers()['content-type'] ?? '';
+  expect(
+    contentType,
+    `ログアウト後も画像本体が返っている疑いがある(issue #1064): content-type=${contentType}`
+  ).not.toContain('image/');
+});
+
+Then('画像の取得は成功しない', async ({ ctx }) => {
+  const response = ctx.mediaFileResponse as import('@playwright/test').Response | null;
+  expect(response, 'ファイルへのアクセス結果が記録されていません').not.toBeNull();
+  const contentType = response?.headers()['content-type'] ?? '';
+  expect(
+    contentType,
+    `削除したはずの画像本体が返っている疑いがある(issue #1064): content-type=${contentType}`
+  ).not.toContain('image/');
+});
+
+Then('応答のCache-Controlに「public」は含まれない', async ({ ctx }) => {
+  const response = ctx.mediaFileResponse as import('@playwright/test').Response | null;
+  const cacheControl = response?.headers()['cache-control'] ?? '';
+  expect(
+    cacheControl,
+    `Cache-Controlに"public"が含まれ、共有キャッシュ経由での取得を許してしまっている: ${cacheControl}`
+  ).not.toMatch(/(^|[,\s])public(\s|,|$)/);
+});
+
+Then('応答のCache-Controlは「no-store」を含む', async ({ ctx }) => {
+  const response = ctx.mediaFileResponse as import('@playwright/test').Response | null;
+  const cacheControl = response?.headers()['cache-control'] ?? '';
+  expect(cacheControl, `Cache-Control: ${cacheControl}`).toContain('no-store');
+});
+
 Then('その画像のファイルはもう取得できない', async ({ ctx, request }) => {
   const token = await adminToken(request);
   const response = await request.get(`/api/generated-images/${ctx.mediaImageId}/file`, {
