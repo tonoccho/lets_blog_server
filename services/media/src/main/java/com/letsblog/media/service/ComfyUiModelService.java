@@ -92,13 +92,13 @@ public class ComfyUiModelService {
         requireHttpUrl(downloadUrl);
         GenerationJobSummary job =
                 startJob("comfyui_checkpoint_download", Map.of("url", downloadUrl, "fileName", fileName));
-        modelInstallJobRunner.runComfyUiDownload(job.id(), downloadUrl, fileName, bearerToken());
+        modelInstallJobRunner.runComfyUiDownload(job.id(), downloadUrl, fileName);
         return toResponse(job);
     }
 
     public GenerationJobResponse startDelete(String fileName) {
         GenerationJobSummary job = startJob("comfyui_checkpoint_delete", Map.of("fileName", fileName));
-        modelInstallJobRunner.runComfyUiDelete(job.id(), fileName, bearerToken());
+        modelInstallJobRunner.runComfyUiDelete(job.id(), fileName);
         return toResponse(job);
     }
 

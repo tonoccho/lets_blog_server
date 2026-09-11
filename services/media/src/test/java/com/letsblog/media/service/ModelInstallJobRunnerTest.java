@@ -25,6 +25,10 @@ import static org.mockito.Mockito.verify;
  * 置き換わったことを検証する(元はGenerationJobRepositoryへの直接JPA書き込みだった)。
  * {@code @Async}は素のオブジェクトへの直接呼び出しでは効かない(Springプロキシを経由しないため)
  * ため、このテストではメソッドを同期的に呼び出して検証する。
+ *
+ * <p>issue #1083: 起動時の呼び出し元Bearerトークンを非同期ジョブの生存期間全体で引き回すのが
+ * 根本原因(#1083)だったため、bearerToken引数自体を廃止した。GenerationJobClient側が
+ * サービス自身のトークンで認証するため、このクラスはもはやBearerトークンを保持しない。
  */
 @ExtendWith(MockitoExtension.class)
 class ModelInstallJobRunnerTest {
@@ -43,17 +47,35 @@ class ModelInstallJobRunnerTest {
 
     @SuppressWarnings("unchecked")
     @Test
-    void runComfyUiDownload_成功時はdoneとしてBearerトークンを転送して報告する() {
+    void runComfyUiDownload_成功時はdoneとして報告する() {
         doAnswer(invocation -> {
             Consumer<DownloadProgress> onProgress = invocation.getArgument(2);
             onProgress.accept(new DownloadProgress(100, 100));
             return null;
         }).when(comfyUiCheckpointStorageService).downloadCheckpoint(anyString(), anyString(), any(Consumer.class));
 
-        runner.runComfyUiDownload(1L, "https://example.com/model.safetensors", "model.safetensors", "Bearer token-123");
+        runner.runComfyUiDownload(1L, "https://example.com/model.safetensors", "model.safetensors");
 
-        // 進捗報告("running")と完了報告("done")の両方が、同じjobId・Bearerトークンで呼ばれる。
-        verify(generationJobClient).updateStatus(eq(1L), eq("done"), anyString(), eq("Bearer token-123"));
+        // 進捗報告("running")と完了報告("done")の両方が、同じjobIdで呼ばれる(bearerTokenは
+        // もはや引き回さない。#1083)。
+        verify(generationJobClient).updateStatus(eq(1L), eq("done"), anyString());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void runComfyUiDownload_totalBytes不明でも進捗を報告できパーセントはnull() {
+        doAnswer(invocation -> {
+            Consumer<DownloadProgress> onProgress = invocation.getArgument(2);
+            // totalBytes<=0(不明)の場合、percentはnullになる分岐。連続で呼んで
+            // 直近報告からの間隔が短い(スロットリングでスキップされる)分岐も併せて通す。
+            onProgress.accept(new DownloadProgress(10, 0));
+            onProgress.accept(new DownloadProgress(20, 0));
+            return null;
+        }).when(comfyUiCheckpointStorageService).downloadCheckpoint(anyString(), anyString(), any(Consumer.class));
+
+        runner.runComfyUiDownload(5L, "https://example.com/model.safetensors", "model.safetensors");
+
+        verify(generationJobClient).updateStatus(eq(5L), eq("done"), anyString());
     }
 
     @Test
@@ -61,25 +83,25 @@ class ModelInstallJobRunnerTest {
         doThrow(new RuntimeException("接続できません"))
                 .when(comfyUiCheckpointStorageService).downloadCheckpoint(anyString(), anyString(), any());
 
-        runner.runComfyUiDownload(2L, "https://example.com/model.safetensors", "model.safetensors", "Bearer token-456");
+        runner.runComfyUiDownload(2L, "https://example.com/model.safetensors", "model.safetensors");
 
-        verify(generationJobClient).updateStatus(eq(2L), eq("failed"), anyString(), eq("Bearer token-456"));
+        verify(generationJobClient).updateStatus(eq(2L), eq("failed"), anyString());
     }
 
     @Test
     void runComfyUiDelete_成功時はdoneとして報告する() {
-        runner.runComfyUiDelete(3L, "model.safetensors", "Bearer token-789");
+        runner.runComfyUiDelete(3L, "model.safetensors");
 
         verify(comfyUiCheckpointStorageService).deleteCheckpoint("model.safetensors");
-        verify(generationJobClient).updateStatus(eq(3L), eq("done"), anyString(), eq("Bearer token-789"));
+        verify(generationJobClient).updateStatus(eq(3L), eq("done"), anyString());
     }
 
     @Test
     void runComfyUiDelete_失敗時はfailedとして報告する() {
         doThrow(new RuntimeException("ファイルが見つかりません")).when(comfyUiCheckpointStorageService).deleteCheckpoint("missing.safetensors");
 
-        runner.runComfyUiDelete(4L, "missing.safetensors", "Bearer token-000");
+        runner.runComfyUiDelete(4L, "missing.safetensors");
 
-        verify(generationJobClient).updateStatus(eq(4L), eq("failed"), anyString(), eq("Bearer token-000"));
+        verify(generationJobClient).updateStatus(eq(4L), eq("failed"), anyString());
     }
 }

@@ -3,9 +3,7 @@ package com.letsblog.media.controller;
 import com.letsblog.media.dto.DeleteComfyUiCheckpointCommand;
 import com.letsblog.media.dto.InstallComfyUiCheckpointCommand;
 import com.letsblog.media.service.ModelInstallJobRunner;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -20,18 +18,20 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>gatewayは経由しない(legacy-apiコンテナからmediaコンテナへdocker network越しに直接呼ぶ、
  * MediaRenderClientの逆方向と同じ経路)。認証は、legacy-api側で既に検証済みのユーザーの
- * Bearerトークンをそのまま転送してもらい、ここではさらに検証はせず、非同期実行の間
- * (ModelInstallJobRunner)引き回してGenerationJob更新呼び出しに使う。
+ * Bearerトークンをそのまま転送してもらうが、ここで検証するのみで、以前のように非同期実行の間
+ * (ModelInstallJobRunner)引き回すことはしない。ダウンロードがKeycloakの
+ * {@code accessTokenLifespan}(既定300秒)を超えて長引くとこのトークンが失効し、
+ * 完了/失敗通知が握りつぶされてジョブがDB上{@code running}のまま残る不具合があったため
+ * (issue #1083)、GenerationJob更新呼び出しはmedia-service自身のClient Credentialsトークンで
+ * 認証するように変更した({@link com.letsblog.media.client.GenerationJobClient}参照)。
  */
 @RestController
 public class ComfyUiCheckpointController {
 
     private final ModelInstallJobRunner modelInstallJobRunner;
-    private final HttpServletRequest request;
 
-    public ComfyUiCheckpointController(ModelInstallJobRunner modelInstallJobRunner, HttpServletRequest request) {
+    public ComfyUiCheckpointController(ModelInstallJobRunner modelInstallJobRunner) {
         this.modelInstallJobRunner = modelInstallJobRunner;
-        this.request = request;
     }
 
     /**
@@ -42,19 +42,14 @@ public class ComfyUiCheckpointController {
      */
     @PostMapping("/api/comfyui/checkpoints/install")
     public ResponseEntity<Void> install(@Valid @RequestBody InstallComfyUiCheckpointCommand command) {
-        modelInstallJobRunner.runComfyUiDownload(
-                command.jobId(), command.downloadUrl(), command.fileName(), bearerToken());
+        modelInstallJobRunner.runComfyUiDownload(command.jobId(), command.downloadUrl(), command.fileName());
         return ResponseEntity.accepted().build();
     }
 
     /** 認可不要: {@link #install}と同じ理由(gateway非経由・呼び出し元が認可済み、issue #830)。 */
     @PostMapping("/api/comfyui/checkpoints/delete")
     public ResponseEntity<Void> delete(@Valid @RequestBody DeleteComfyUiCheckpointCommand command) {
-        modelInstallJobRunner.runComfyUiDelete(command.jobId(), command.fileName(), bearerToken());
+        modelInstallJobRunner.runComfyUiDelete(command.jobId(), command.fileName());
         return ResponseEntity.accepted().build();
-    }
-
-    private String bearerToken() {
-        return request.getHeader(HttpHeaders.AUTHORIZATION);
     }
 }

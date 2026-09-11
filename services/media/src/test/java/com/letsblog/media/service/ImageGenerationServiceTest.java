@@ -324,7 +324,7 @@ class ImageGenerationServiceTest {
 
         assertThrows(IllegalStateException.class, () -> service.generateImage(requestWithSeed(1L)));
 
-        verify(generationJobClient).updateStatus(eq(9L), eq("failed"), anyString(), any());
+        verify(generationJobClient).updateStatus(eq(9L), eq("failed"), anyString());
     }
 
     /**
@@ -525,7 +525,7 @@ class ImageGenerationServiceTest {
     /** generation_jobs へ記録した結果ペイロード(JSON)。 */
     private com.fasterxml.jackson.databind.JsonNode capturedJobResult(String status) {
         ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
-        verify(generationJobClient).updateStatus(eq(9L), eq(status), captor.capture(), any());
+        verify(generationJobClient).updateStatus(eq(9L), eq(status), captor.capture());
         try {
             return new ObjectMapper().readTree(captor.getValue());
         } catch (Exception e) {
@@ -727,7 +727,7 @@ class ImageGenerationServiceTest {
 
         assertThrows(IllegalStateException.class, () -> service.generateImage(imageRequest));
 
-        verify(generationJobClient).updateStatus(eq(9L), eq("failed"), anyString(), any());
+        verify(generationJobClient).updateStatus(eq(9L), eq("failed"), anyString());
         verify(generatedImageCreationService, never()).create(any());
     }
 

@@ -18,9 +18,13 @@ import java.util.Map;
  * 引き続きlegacy-apiが所有するため、進捗・完了・失敗の反映は{@link GenerationJobClient}経由の
  * HTTP呼び出しで行う(元々はGenerationJobRepositoryへの直接JPA書き込みだった)。
  *
- * <p>{@code bearerToken}は、ジョブを起動した同期リクエスト(ComfyUiCheckpointControllerが
- * legacy-apiから転送を受けた時点)のBearerトークンを、このバックグラウンドスレッドの生存期間
- * 全体で使い回す({@link com.letsblog.media.client.GenerationJobClient}のjavadoc参照)。
+ * <p>以前は、ジョブを起動した同期リクエスト(ComfyUiCheckpointControllerがlegacy-apiから
+ * 転送を受けた時点)のBearerトークンを、このバックグラウンドスレッドの生存期間全体で使い回して
+ * いた。しかしKeycloakの{@code accessTokenLifespan}(既定300秒)より長くかかる大きな
+ * チェックポイントのダウンロード中にトークンが失効し、完了/失敗通知が握りつぶされて
+ * ジョブがDB上{@code running}のまま残る不具合(issue #1083)の原因になっていた。
+ * {@link GenerationJobClient#updateStatus}が自身のClient Credentialsトークンで認証する
+ * ように変更(#1083)されたため、このクラスはもはやBearerトークンを保持・転送しない。
  */
 @Service
 public class ModelInstallJobRunner {
@@ -42,8 +46,8 @@ public class ModelInstallJobRunner {
     }
 
     @Async("modelInstallExecutor")
-    public void runComfyUiDownload(Long jobId, String url, String fileName, String bearerToken) {
-        runJob(jobId, bearerToken, reporter -> comfyUiCheckpointStorageService.downloadCheckpoint(url, fileName, progress -> {
+    public void runComfyUiDownload(Long jobId, String url, String fileName) {
+        runJob(jobId, reporter -> comfyUiCheckpointStorageService.downloadCheckpoint(url, fileName, progress -> {
             Integer percent = progress.totalBytes() > 0
                     ? (int) Math.round(progress.bytesDownloaded() * 100.0 / progress.totalBytes())
                     : null;
@@ -56,8 +60,8 @@ public class ModelInstallJobRunner {
     }
 
     @Async("modelInstallExecutor")
-    public void runComfyUiDelete(Long jobId, String fileName, String bearerToken) {
-        runJob(jobId, bearerToken, reporter -> comfyUiCheckpointStorageService.deleteCheckpoint(fileName));
+    public void runComfyUiDelete(Long jobId, String fileName) {
+        runJob(jobId, reporter -> comfyUiCheckpointStorageService.deleteCheckpoint(fileName));
     }
 
     @FunctionalInterface
@@ -70,7 +74,7 @@ public class ModelInstallJobRunner {
         void report(String phase, Integer percent, Long bytesDone, Long bytesTotal);
     }
 
-    private void runJob(Long jobId, String bearerToken, JobAction action) {
+    private void runJob(Long jobId, JobAction action) {
         long[] lastReportedAt = {0L};
         ProgressReporter reporter = (phase, percent, bytesDone, bytesTotal) -> {
             long now = System.currentTimeMillis();
@@ -79,17 +83,16 @@ public class ModelInstallJobRunner {
             }
             lastReportedAt[0] = now;
             generationJobClient.updateStatus(
-                    jobId, "running", toJson(new JobProgressPayload(phase, percent, bytesDone, bytesTotal)),
-                    bearerToken);
+                    jobId, "running", toJson(new JobProgressPayload(phase, percent, bytesDone, bytesTotal)));
         };
 
         try {
             action.run(reporter);
-            generationJobClient.updateStatus(jobId, "done", toJson(Map.of("success", "true")), bearerToken);
+            generationJobClient.updateStatus(jobId, "done", toJson(Map.of("success", "true")));
         } catch (RuntimeException e) {
             log.warn("Model install job {} failed", jobId, e);
             generationJobClient.updateStatus(
-                    jobId, "failed", toJson(Map.of("error", String.valueOf(e.getMessage()))), bearerToken);
+                    jobId, "failed", toJson(Map.of("error", String.valueOf(e.getMessage()))));
         }
     }
 

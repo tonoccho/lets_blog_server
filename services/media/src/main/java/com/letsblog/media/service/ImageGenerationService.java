@@ -435,12 +435,12 @@ public class ImageGenerationService {
     }
 
     private void completeJob(Long jobId, Map<String, String> resultPayload) {
-        generationJobClient.updateStatus(jobId, "done", toJson(resultPayload), bearerToken());
+        generationJobClient.updateStatus(jobId, "done", toJson(resultPayload));
     }
 
     private void failJob(Long jobId, Exception e) {
         generationJobClient.updateStatus(
-                jobId, "failed", toJson(Map.of("error", String.valueOf(e.getMessage()))), bearerToken());
+                jobId, "failed", toJson(Map.of("error", String.valueOf(e.getMessage()))));
     }
 
     private String toJson(Object value) {

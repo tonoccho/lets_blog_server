@@ -47,12 +47,24 @@ class MediaGarbageCollectionJobRunnerTest {
         verify(cmsBridgeClient).deleteMedia(1L, "local", "20", "Bearer token");
 
         ArgumentCaptor<String> resultPayloadCaptor = ArgumentCaptor.forClass(String.class);
-        verify(generationJobClient).updateStatus(eq(123L), eq("done"), resultPayloadCaptor.capture(), eq("Bearer token"));
+        verify(generationJobClient).updateStatus(eq(123L), eq("done"), resultPayloadCaptor.capture());
         assertTrue(resultPayloadCaptor.getValue().contains("\"deletedCount\":2"));
         assertTrue(resultPayloadCaptor.getValue().contains("\"failedCount\":0"));
 
         verify(auditLogService).log(eq(9L), eq("keycloak-sub-1"), eq(AuditLogService.ACTION_MEDIA_GARBAGE_COLLECTED),
                 eq("PROJECT"), eq(1L), anyString(), eq(null), eq(null));
+    }
+
+    @Test
+    void runDelete_対象が空でも完了として報告する() {
+        // deleted/failuresが両方空になる分岐(mediaIds自体が空のケース)。ループが1回も
+        // 回らないためreportProgressは呼ばれず、statusはdoneになる。
+        runner().runDelete(123L, 1L, "local", List.of(), 9L, "keycloak-sub-1", "Bearer token");
+
+        ArgumentCaptor<String> resultPayloadCaptor = ArgumentCaptor.forClass(String.class);
+        verify(generationJobClient).updateStatus(eq(123L), eq("done"), resultPayloadCaptor.capture());
+        assertTrue(resultPayloadCaptor.getValue().contains("\"deletedCount\":0"));
+        assertTrue(resultPayloadCaptor.getValue().contains("\"failedCount\":0"));
     }
 
     @Test
@@ -63,7 +75,7 @@ class MediaGarbageCollectionJobRunnerTest {
         runner().runDelete(123L, 1L, "local", List.of("10", "20"), 9L, "keycloak-sub-1", "Bearer token");
 
         ArgumentCaptor<String> resultPayloadCaptor = ArgumentCaptor.forClass(String.class);
-        verify(generationJobClient).updateStatus(eq(123L), eq("done"), resultPayloadCaptor.capture(), eq("Bearer token"));
+        verify(generationJobClient).updateStatus(eq(123L), eq("done"), resultPayloadCaptor.capture());
         assertTrue(resultPayloadCaptor.getValue().contains("\"deletedCount\":1"));
         assertTrue(resultPayloadCaptor.getValue().contains("\"failedCount\":1"));
         verify(auditLogService).log(eq(9L), eq("keycloak-sub-1"), eq(AuditLogService.ACTION_MEDIA_GARBAGE_COLLECTED),
@@ -80,7 +92,7 @@ class MediaGarbageCollectionJobRunnerTest {
         runner().runDelete(123L, 1L, "local", List.of("10"), 9L, "keycloak-sub-1", "Bearer token");
 
         ArgumentCaptor<String> resultPayloadCaptor = ArgumentCaptor.forClass(String.class);
-        verify(generationJobClient).updateStatus(eq(123L), eq("failed"), resultPayloadCaptor.capture(), eq("Bearer token"));
+        verify(generationJobClient).updateStatus(eq(123L), eq("failed"), resultPayloadCaptor.capture());
         assertTrue(resultPayloadCaptor.getValue().contains("\"failedCount\":1"));
         verify(auditLogService).log(eq(9L), eq("keycloak-sub-1"), eq(AuditLogService.ACTION_MEDIA_GARBAGE_COLLECTED),
                 eq("PROJECT"), eq(1L), anyString(), eq(null), eq(null));
@@ -97,6 +109,6 @@ class MediaGarbageCollectionJobRunnerTest {
 
         runner().runDelete(123L, 1L, "local", List.of("10"), 9L, "keycloak-sub-1", "Bearer token");
 
-        verify(generationJobClient).updateStatus(eq(123L), eq("failed"), anyString(), eq("Bearer token"));
+        verify(generationJobClient).updateStatus(eq(123L), eq("failed"), anyString());
     }
 }

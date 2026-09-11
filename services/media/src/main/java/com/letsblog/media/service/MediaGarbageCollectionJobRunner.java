@@ -66,7 +66,7 @@ public class MediaGarbageCollectionJobRunner {
                     log.warn("メディア削除に失敗しました(jobId={}, mediaId={}): {}", jobId, mediaId, e.getMessage());
                     failures.put(mediaId, String.valueOf(e.getMessage()));
                 }
-                reportProgress(jobId, lastReportedAt, i + 1, mediaIds.size(), bearerToken);
+                reportProgress(jobId, lastReportedAt, i + 1, mediaIds.size());
             }
 
             auditLogService.log(actorId, actorKeycloakSub, AuditLogService.ACTION_MEDIA_GARBAGE_COLLECTED, "PROJECT",
@@ -83,15 +83,15 @@ public class MediaGarbageCollectionJobRunner {
                     "deletedCount", deleted.size(),
                     "failedCount", failures.size(),
                     "deletedMediaIds", deleted,
-                    "failures", failures)), bearerToken);
+                    "failures", failures)));
         } catch (RuntimeException e) {
             log.warn("メディアガベージコレクションジョブが失敗しました(jobId={})", jobId, e);
             generationJobClient.updateStatus(
-                    jobId, "failed", toJson(Map.of("error", String.valueOf(e.getMessage()))), bearerToken);
+                    jobId, "failed", toJson(Map.of("error", String.valueOf(e.getMessage()))));
         }
     }
 
-    private void reportProgress(Long jobId, long[] lastReportedAt, int done, int total, String bearerToken) {
+    private void reportProgress(Long jobId, long[] lastReportedAt, int done, int total) {
         long now = System.currentTimeMillis();
         if (now - lastReportedAt[0] < PROGRESS_UPDATE_INTERVAL_MS) {
             return;
@@ -99,7 +99,7 @@ public class MediaGarbageCollectionJobRunner {
         lastReportedAt[0] = now;
         int percent = total > 0 ? (int) Math.round(done * 100.0 / total) : 100;
         generationJobClient.updateStatus(jobId, "running",
-                toJson(new JobProgressPayload("deleting", percent, (long) done, (long) total)), bearerToken);
+                toJson(new JobProgressPayload("deleting", percent, (long) done, (long) total)));
     }
 
     private String toJson(Object value) {

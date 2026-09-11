@@ -91,6 +91,11 @@ app:
   # GitHub REST APIのベースURL。受け入れテストではスタブへ向ける(issue #928)。
   # 実GitHubのままだと、記事プランの検証(#935)がテストのたびに本物のIssueを作ってしまう。
   github-api-base-url: ${GITHUB_API_BASE_URL:https://api.github.com}
+  # StaleGenerationJobSweepService(issue #1083要件4)。この時間以上runningのまま更新されない
+  # ジョブをfailedとして解消する(media-service側の終端通知が最終的に届かなかった場合の保険)。
+  generation-job:
+    stale-running-timeout-minutes: ${GENERATION_JOB_STALE_TIMEOUT_MINUTES:15}
+    stale-sweep-interval-ms: ${GENERATION_JOB_STALE_SWEEP_INTERVAL_MS:300000}
 
 # KeycloakのJWT検証。identity-service/log-writer/media-serviceのSecurityConfig/JwtDecoderConfigと
 # 同じ理由により、issuer-uriによる自動設定は使わずJWKS取得先と期待issuerを個別に指定して組み立てている。
