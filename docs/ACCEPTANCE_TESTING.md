@@ -1075,7 +1075,59 @@ lbs スタックが動いている間は何の症状も出ないため、レビ�
 
 ---
 
-## 13. 参考
+## 13. 実行区間の排他(#1187)
+
+受け入れテストはMySQL・Keycloakの合成アカウント・`infra/e2e-stubs/**`のエラー注入状態・
+WordPressのプロビジョニング結果といったホスト状態を共有し、`at-setup → at-seed →
+at-provision → at-main → at-destructive` の段階順に走る。2つの実行が同一ホストで重なると、
+一方が仕込んだ状態を他方が横取りし、**無関係なシナリオが確率的に落ちる**。
+
+そこで、受け入れテストの実行開始時にホスト単位の排他ロックを獲得し、終了時に解放する
+(`apps/web/e2e/at-lock.ts`)。2つ目の実行は1つ目の完了を待ってから始まる — スキップにも
+失敗にもならない。
+
+### なぜ npm script をラップしないのか
+
+`npm run test:at` を `flock` で包む案は、`npx playwright test --project=at-main` のような
+**直接起動**を取りこぼす(エージェントは実際によく直に叩く)。そこで、Playwrightのどの
+起動経路でも必ず呼ばれる `globalSetup` / `globalTeardown`(`playwright.config.ts` のconfig
+レベルの設定)でロックの獲得・解放を行う。`ACCEPTANCE_RESET=1` のゼロ構築(最大90分)も
+ロックの獲得**後**に実行するため、撤去中に他方がテストするような重なりも防がれる。
+
+ロックの獲得は、ブラウザ起動確認(`checkBrowsersLaunchable`、#1045)の**後**に置く。
+ブラウザが無いホストを、ロック待ちで無駄に待たせないためである。
+
+### OSが自動解放する仕組み
+
+ロックファイルは `${XDG_RUNTIME_DIR:-<OSの一時ディレクトリ>}/lets-blog-server-acceptance-test.lock`
+に置く(リポジトリ外。read-onlyステージのガードと衝突させず、worktree間で共有するため)。
+
+Node自身がこのファイルのfdを開いたまま保持し、`flock` コマンドへそのfdを子プロセスの
+`stdio` 経由で継承させて `flock(2)` を呼ばせる。`flock(2)` のロックはfd番号ではなく
+「オープンファイル記述」に対して張られるため、子プロセスが直後に終了してもロックは
+保持され続ける一方、**保持しているNodeプロセスが `SIGKILL` を含む何らかの理由で終了すれば、
+カーネルが終了時に全fdを強制的に閉じるため、ロックは後始末コードなしに即座に解放される**。
+次の実行はロック待ちにならず、直ちに獲得できる。
+
+### 待機の可視化と上限
+
+待機中は無言で止まらない。ロックの保持者(PID・獲得時刻)と自分の経過待機時間を、
+一定間隔で標準出力へ出す。
+
+環境変数:
+
+| 変数 | 既定 | 意味 |
+| --- | --- | --- |
+| `AT_LOCK_FILE` | `${XDG_RUNTIME_DIR:-<OSの一時ディレクトリ>}/lets-blog-server-acceptance-test.lock` | ロックファイルの場所を上書きする |
+| `AT_LOCK_TIMEOUT_SECONDS` | `7200`(2時間) | 待機上限。`ACCEPTANCE_RESET` のゼロ構築(最大90分)+テスト実行時間を見込む |
+| `AT_LOCK_POLL_SECONDS` | `30` | 待機中の再試行間隔 |
+
+待機上限を超えると、保持者の情報と `AT_LOCK_TIMEOUT_SECONDS` での調整方法を示した
+明確なエラーメッセージとともに非0で終了する。
+
+---
+
+## 14. 参考
 
 - [ACCEPTANCE_CRITERIA.md](ACCEPTANCE_CRITERIA.md) — 受け入れ基準カタログ(機能IDと検証状況)
 - `docker-compose.e2e-stubs.yml` / `infra/e2e-stubs/` — 外部依存スタブ(§9)

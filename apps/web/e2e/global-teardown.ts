@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
+import { releaseAcceptanceTestLock } from './at-lock';
 
 /**
  * E2E終了後のテストデータ後片付け(issue #588)。
@@ -19,19 +20,27 @@ import path from 'node:path';
  * この変数を残しているのは、`.feature` へ未移行の Playwright spec(apps/web/e2e/*.spec.ts)が
  * 「既存データを壊さない一意なフィクスチャ」という逆の前提で書かれており、その孤児行の
  * 掃除には依然として必要だから。全 spec の移行が終わった時点で、この teardown ごと削除する。
+ *
+ * issue #1187: `globalSetup` が獲得した受け入れテストの排他ロックを、実行の完了時に
+ * 必ず解放する(自プロセスが保持していなければ何もしない冪等な呼び出しなので、
+ * `globalSetup` がロック獲得より前で失敗した場合でも安全)。Playwrightは`globalSetup`が
+ * 途中で失敗した場合でも`globalTeardown`を呼ぶため、ここに置けば取りこぼしがない。
  */
 export default async function globalTeardown(): Promise<void> {
   const repoRoot = path.resolve(__dirname, '..', '..', '..');
   const script = path.join(repoRoot, 'scripts', 'e2e-cleanup-test-data.sh');
 
-  if (process.env.E2E_DB_CLEANUP !== '1') {
-    console.log(
-      '[e2e] E2E_DB_CLEANUP=1 が未設定のため、DBの後片付けをスキップします' +
-        `(手動で確認する場合: ${script})`
-    );
-    return;
+  try {
+    if (process.env.E2E_DB_CLEANUP !== '1') {
+      console.log(
+        '[e2e] E2E_DB_CLEANUP=1 が未設定のため、DBの後片付けをスキップします' +
+          `(手動で確認する場合: ${script})`
+      );
+    } else {
+      console.log('[e2e] 全スキーマからE2Eテストデータを削除します');
+      execFileSync(script, ['--yes'], { cwd: repoRoot, stdio: 'inherit', timeout: 300_000 });
+    }
+  } finally {
+    releaseAcceptanceTestLock();
   }
-
-  console.log('[e2e] 全スキーマからE2Eテストデータを削除します');
-  execFileSync(script, ['--yes'], { cwd: repoRoot, stdio: 'inherit', timeout: 300_000 });
 }

@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { request, type FullConfig } from '@playwright/test';
+import { acquireAcceptanceTestLock } from './at-lock';
 import { checkBrowsersLaunchable, requiredBrowserNames } from './browser-prerequisite';
 import { waitForServicesHealthy } from './helpers';
 
@@ -28,10 +29,19 @@ import { waitForServicesHealthy } from './helpers';
  * 60 行のブラウザ起動ログに1行だけ埋もれる。docker のhealthy待ちや疎通確認と同じ理由で、
  * これも前提確認として先に、導入コマンドを添えて落とす。詳細は ./browser-prerequisite.ts。
  *
+ * issue #1187: 受け入れテストはMySQL・Keycloakの合成アカウント・infra/e2e-stubsのエラー注入
+ * 状態・WordPressのプロビジョニングといったホスト状態を共有する。2つの実行が重なると
+ * 一方が仕込んだ状態を他方が横取りするため、ホスト単位で排他する(詳細は ./at-lock.ts)。
+ * ブラウザ確認の**後**、ACCEPTANCE_RESET のゼロ構築(最大90分)の**前**に置く。
+ * ブラウザが無いホストを無駄に待たせないのは#1045と同じ理由、ゼロ構築を排他の内側に
+ * 入れるのは、撤去中に他方がテストしていたら意味がないため(#1187)。
+ *
  * 環境変数:
  *   ACCEPTANCE_RESET=1     : scripts/rebuild-acceptance-env.sh --yes を実行してから始める
  *                            (compose プロジェクトを撤去し、Docker ボリュームを破棄し、
  *                             ソースからビルドして起動し直す。破壊的)
+ *   AT_LOCK_FILE / AT_LOCK_TIMEOUT_SECONDS / AT_LOCK_POLL_SECONDS
+ *                           : 受け入れテストの排他ロックの設定(詳細は ./at-lock.ts)
  *   E2E_SKIP_BROWSER_CHECK=1 : Playwrightのブラウザ起動確認をスキップする
  *                            (ブラウザを起動できないホストで @api シナリオだけ回す場合向け。
  *                             docs/e2e-testing.md §3.3)
@@ -52,6 +62,8 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
     console.log(`[e2e] Playwright のブラウザが起動できることを確認します (${browsers.join(', ')})`);
     await checkBrowsersLaunchable(browsers);
   }
+
+  await acquireAcceptanceTestLock();
 
   if (process.env.ACCEPTANCE_RESET === '1') {
     console.log('[e2e] ACCEPTANCE_RESET=1: 受け入れテスト環境をゼロから構築し直します(破壊的)');
