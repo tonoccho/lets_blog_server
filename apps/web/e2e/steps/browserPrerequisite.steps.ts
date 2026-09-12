@@ -5,7 +5,9 @@ import {
   PREREQUISITE_ERROR_PREFIX,
   checkBrowsersLaunchable,
   describeBrowserLaunchFailure,
+  parseProjectSelectionFromArgv,
   requiredBrowserNames,
+  resolveExecutedProjects,
   type ProjectBrowserSelection,
 } from '../browser-prerequisite';
 
@@ -51,18 +53,57 @@ Then('失敗の説明に apt で導入するパッケージが全て列挙され
 /**
  * `"at-main=defaultBrowserType:chromium, firefox=browserName:firefox"` という書式を
  * `FullConfig['projects']` 相当の形へ戻す。`<プロジェクト>=` はブラウザ未指定を表す。
+ *
+ * `|deps:` を続けると `dependencies`(`playwright.config.ts` の同名フィールド)を表せる。
+ * 複数の依存元は `+` で連ねる(例: `at-main=defaultBrowserType:chromium|deps:at-provision`)。
  */
 function parseProjectSelection(spec: string): ProjectBrowserSelection[] {
   return spec.split(',').map((entry) => {
-    const [name, value] = entry.split('=').map((s) => s.trim());
-    if (!value) return { name, use: {} };
-    const [key, browser] = value.split(':').map((s) => s.trim());
-    return { name, use: { [key]: browser } };
+    const [name, rest] = entry.split('=').map((s) => s.trim());
+    if (!rest) return { name, use: {} };
+    const [value, depsSpec] = rest.split('|deps:').map((s) => s.trim());
+    const project: ProjectBrowserSelection = { name, use: {} };
+    if (value) {
+      const [key, browser] = value.split(':').map((s) => s.trim());
+      project.use = { [key]: browser };
+    }
+    if (depsSpec) {
+      project.dependencies = depsSpec.split('+').map((s) => s.trim());
+    }
+    return project;
   });
 }
 
-Given('実行対象のプロジェクトのブラウザ指定が {string} である', async ({ ctx }, spec: string) => {
-  ctx[BROWSERS] = requiredBrowserNames(parseProjectSelection(spec));
+const PROJECTS = 'browserPrerequisiteProjects';
+const ARGV_SELECTION = 'browserPrerequisiteArgvSelection';
+
+Given('宣言されている全プロジェクトのブラウザ指定が {string} である', async ({ ctx }, spec: string) => {
+  const projects = parseProjectSelection(spec);
+  ctx[BROWSERS] = requiredBrowserNames(resolveExecutedProjects(projects, null));
+});
+
+Given('宣言されているプロジェクトが {string} である', async ({ ctx }, spec: string) => {
+  ctx[PROJECTS] = parseProjectSelection(spec);
+});
+
+Given('選択されたプロジェクトが {string} である', async ({ ctx }, spec: string) => {
+  const selected = spec.split(',').map((s) => s.trim());
+  const projects = ctx[PROJECTS] as ProjectBrowserSelection[];
+  ctx[BROWSERS] = requiredBrowserNames(resolveExecutedProjects(projects, selected));
+});
+
+Given('Playwright に渡されたコマンドライン引数が {string} である', async ({ ctx }, argvSpec: string) => {
+  const argv = argvSpec.trim() === '' ? [] : argvSpec.split(/\s+/);
+  ctx[ARGV_SELECTION] = parseProjectSelectionFromArgv(argv);
+});
+
+Then('プロジェクトの選択は {string} である', async ({ ctx }, expected: string) => {
+  const selection = ctx[ARGV_SELECTION] as string[] | null;
+  if (expected === '指定なし') {
+    expect(selection).toBeNull();
+    return;
+  }
+  expect(selection).toEqual(expected.split(',').map((s) => s.trim()));
 });
 
 Then('前提確認が起動を試すブラウザは {string} である', async ({ ctx }, expected: string) => {

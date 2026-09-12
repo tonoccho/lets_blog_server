@@ -2,7 +2,12 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { request, type FullConfig } from '@playwright/test';
 import { acquireAcceptanceTestLock } from './at-lock';
-import { checkBrowsersLaunchable, requiredBrowserNames } from './browser-prerequisite';
+import {
+  checkBrowsersLaunchable,
+  parseProjectSelectionFromArgv,
+  requiredBrowserNames,
+  resolveExecutedProjects,
+} from './browser-prerequisite';
 import { waitForServicesHealthy } from './helpers';
 
 /**
@@ -28,6 +33,15 @@ import { waitForServicesHealthy } from './helpers';
  * 落ち、残りは「did not run」になる(実測 1 failed / 72 did not run)。しかも原因は
  * 60 行のブラウザ起動ログに1行だけ埋もれる。docker のhealthy待ちや疎通確認と同じ理由で、
  * これも前提確認として先に、導入コマンドを添えて落とす。詳細は ./browser-prerequisite.ts。
+ *
+ * issue #1194: `FullConfig['projects']` は Playwright 自身の仕様により、`--project` で
+ * 絞ってもなお**設定が宣言する全プロジェクト**を返す。これを理由に、以前はここで
+ * 常に全プロジェクトのブラウザ(chromium/firefox/webkit)を確認していたため、
+ * chromium しか使わない `npm run test:at:fast`(`--project=at-main`)まで firefox / webkit
+ * の共有ライブラリ不足で落ちていた。ここでは `process.argv` から `--project` を自分で
+ * 解析し(`parseProjectSelectionFromArgv`)、選択されたプロジェクトとその依存先だけに
+ * 絞ってから(`resolveExecutedProjects`)必要ブラウザを求める。`--project` が指定されない
+ * 実行(全プロジェクトを回す)では、これまで通り全プロジェクトを確認する。
  *
  * issue #1187: 受け入れテストはMySQL・Keycloakの合成アカウント・infra/e2e-stubsのエラー注入
  * 状態・WordPressのプロビジョニングといったホスト状態を共有する。2つの実行が重なると
@@ -58,7 +72,9 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
   if (process.env.E2E_SKIP_BROWSER_CHECK === '1') {
     console.log('[e2e] E2E_SKIP_BROWSER_CHECK=1 のため Playwright のブラウザ起動確認をスキップします');
   } else {
-    const browsers = requiredBrowserNames(config.projects);
+    const selectedProjectNames = parseProjectSelectionFromArgv(process.argv);
+    const executedProjects = resolveExecutedProjects(config.projects, selectedProjectNames);
+    const browsers = requiredBrowserNames(executedProjects);
     console.log(`[e2e] Playwright のブラウザが起動できることを確認します (${browsers.join(', ')})`);
     await checkBrowsersLaunchable(browsers);
   }

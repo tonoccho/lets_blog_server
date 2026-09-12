@@ -154,9 +154,19 @@ export E2E_ADMIN_PASSWORD='...'
 未設定の場合、ログインを要する spec は `test.skip` により **明示的にスキップ** される
 (暗黙に成功したことにはならない)。
 
-### 3.3 Playwright のブラウザと OS 共有ライブラリ(issue #1045)
+### 3.3 Playwright のブラウザと OS 共有ライブラリ(issue #1045 / #1194)
 
 **この節を飛ばすと、受け入れテストは1本目で落ちて残り全部が「did not run」になる。**
+
+> **`npm run test:at` / `npm run test:at:fast` は firefox / webkit の共有ライブラリを
+> 要求しない(#1194)。** これらは `--project=at-destructive` / `--project=at-main` で、
+> その依存関係チェーン(at-setup → at-seed → at-provision → at-main [→ at-destructive])は
+> `playwright.config.ts` の通り chromium(`devices['Desktop Chrome']`)しか使わない。
+> `apps/web/e2e/global-setup.ts` は `--project` 引数と `playwright.config.ts` の
+> `dependencies` を自分で解決し、実際に実行されるプロジェクトが必要とするブラウザだけを
+> 起動確認する(このチェーンが chromium のみで構成される限り)。firefox / webkit の
+> 共有ライブラリが必要になるのは、`at-cross-browser-firefox` / `at-cross-browser-webkit`
+> を明示的に指定して実行する場合だけである。
 
 必要なものは2段ある。**下の段は root 権限を要するので、リポジトリ側では自動実行しない**
 (#1045 Requirement 4)。判断できる形でコマンドだけ示す。
@@ -204,8 +214,10 @@ ldd ~/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux
 
 #### 導入できているかは globalSetup が確認する
 
-`apps/web/e2e/global-setup.ts` が、docker の healthy 待ちより**前に**、設定が宣言する
-ブラウザを実際に1つずつ起動して閉じる([browser-prerequisite.ts](../apps/web/e2e/browser-prerequisite.ts))。
+`apps/web/e2e/global-setup.ts` が、docker の healthy 待ちより**前に**、実際に実行される
+プロジェクト(`--project` で選択したプロジェクトとその依存先。指定が無ければ設定が
+宣言する全プロジェクト。#1194)が使うブラウザを実際に1つずつ起動して閉じる
+([browser-prerequisite.ts](../apps/web/e2e/browser-prerequisite.ts))。
 起動できなければ、段1と段2のどちらが足りないかを判別して、その段の導入コマンドだけを
 示して終了する。シナリオは1本も実行されない。
 

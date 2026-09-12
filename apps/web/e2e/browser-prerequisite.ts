@@ -108,6 +108,8 @@ export type BrowserLaunchDiagnosis =
 export type ProjectBrowserSelection = {
   name?: string;
   use?: { browserName?: string; defaultBrowserType?: string };
+  /** `playwright.config.ts` の同名フィールド。依存先プロジェクトの名前の配列。 */
+  dependencies?: string[];
 };
 
 /** 失敗メッセージから原因を判定する。判定は文字列だけを見るので、単体で検証できる。 */
@@ -181,21 +183,92 @@ export function describeBrowserLaunchFailure(browserName: string, error: unknown
  * 渡されたプロジェクトが必要とするブラウザを、重複を除いて列挙する。
  *
  * ブラウザ名を `chromium` に決め打ちしないのは、`playwright.config.ts` が
- * `CROSS_BROWSER_SPECS` 用に firefox / webkit のプロジェクトも宣言しているため。
- * 確認するブラウザは設定から導き、プロジェクトが増減したら自動で追随させる。
+ * `CROSS_BROWSER_SPECS` / `at-cross-browser-*` 用に firefox / webkit のプロジェクトも
+ * 宣言しているため。確認するブラウザは設定から導き、プロジェクトが増減したら自動で追随させる。
  *
- * <p><b>`--project` で絞っても対象は減らない。</b>`globalSetup` が受け取る
- * `FullConfig['projects']` は**設定が宣言した全プロジェクト**で、`--project` による
- * 絞り込みは反映されない(実測: `--project=at-main` でも chromium/firefox/webkit の
- * 3つが返る)。したがって `npm run test:at:fast` でも3ブラウザを確認する。
- * 起動確認は1ブラウザあたり1秒未満で、`npm run playwright:install` は
- * どのみち3つとも入れるため、これで困る状況は無い。
+ * <p>ここに渡す `projects` は**呼び出し側が絞り込んだ後の一覧**を渡すこと。
+ * `globalSetup` が受け取る `FullConfig['projects']` 自体は Playwright が返す時点で
+ * 既に**設定が宣言した全プロジェクト**であり、これは Playwright 自身の仕様で
+ * 変わらない(`--project` による絞り込みは反映されない)。#1194 より前はこれを理由に
+ * 絞り込みを諦め、常に全プロジェクトのブラウザを確認していたため、
+ * `npm run test:at:fast`(`--project=at-main`。chromium しか使わない)でも
+ * firefox / webkit の起動可否を要求し、OS の共有ライブラリが片方でも欠けると
+ * chromium だけで足りる実行まで一律に落ちていた。
+ * #1194 以降は `globalSetup` 側で {@link resolveExecutedProjects} を使い、CLI の
+ * `--project` 引数({@link parseProjectSelectionFromArgv})から実際に実行される
+ * プロジェクト(選択したプロジェクトとその依存先)だけに絞ってからここへ渡す。
+ * `--project` が指定されない実行(全プロジェクトを回す)では、これまで通り
+ * 全プロジェクトを渡せばよい。
  */
 export function requiredBrowserNames(projects: readonly ProjectBrowserSelection[]): string[] {
   const names = projects.map(
     (project) => project.use?.browserName ?? project.use?.defaultBrowserType ?? DEFAULT_BROWSER
   );
   return [...new Set(names)];
+}
+
+/**
+ * `playwright.config.ts` の `dependencies` を辿り、実際に実行されるプロジェクトを解決する(#1194)。
+ *
+ * `selectedNames` が `null` のときは「`--project` 未指定 = 全プロジェクトを実行する」を
+ * 意味し、`projects` をそのまま返す。`--project` が指定されている場合は、選択された
+ * プロジェクトと、その `dependencies` が指すプロジェクトを推移的に(依存の依存も)辿って
+ * 集める。Playwright は `--project` を指定すると、選択したプロジェクトが依存する
+ * プロジェクトを自動で先に実行するため、ここで解決する集合は実際に起動されるものと一致する。
+ */
+export function resolveExecutedProjects(
+  projects: readonly ProjectBrowserSelection[],
+  selectedNames: readonly string[] | null
+): ProjectBrowserSelection[] {
+  if (selectedNames === null) return [...projects];
+
+  const byName = new Map(
+    projects.filter((project) => project.name !== undefined).map((project) => [project.name as string, project])
+  );
+  const included = new Set<string>();
+  const pending = [...selectedNames];
+  while (pending.length > 0) {
+    const name = pending.pop() as string;
+    if (included.has(name)) continue;
+    included.add(name);
+    const project = byName.get(name);
+    for (const dependency of project?.dependencies ?? []) {
+      pending.push(dependency);
+    }
+  }
+
+  return projects.filter((project) => project.name !== undefined && included.has(project.name));
+}
+
+/** `--project` の値の1つ分。`--project=X` / `--project X` の両方をここに正規化する。 */
+const PROJECT_FLAG_RE = /^--project(?:=(.*))?$/;
+
+/**
+ * Playwright の CLI 引数(`process.argv` 相当)から `--project` の選択を取り出す(#1194)。
+ *
+ * `--project` は Playwright 自身が複数回の指定をサポートする(例:
+ * `--project=at-cross-browser-firefox --project=at-cross-browser-webkit`)ため、
+ * ここでも全ての出現を集める。1つも無ければ「絞り込み無し(= 全プロジェクト実行)」を
+ * 表す `null` を返す。`resolveExecutedProjects` の `selectedNames` はこの区別を前提にしている。
+ */
+export function parseProjectSelectionFromArgv(argv: readonly string[]): string[] | null {
+  const selected: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const match = PROJECT_FLAG_RE.exec(argv[i]);
+    if (match === null) continue;
+    if (match[1] !== undefined) {
+      // `--project=X` 形式。
+      selected.push(match[1]);
+      continue;
+    }
+    // `--project X` 形式。値は次のトークン。
+    const value = argv[i + 1];
+    if (value !== undefined) {
+      selected.push(value);
+      i++;
+    }
+  }
+  return selected.length > 0 ? selected : null;
 }
 
 /**
