@@ -256,6 +256,16 @@ if [ "$APPLY" -eq 0 ]; then
   exit 0
 fi
 
+# 実行中の lets_blog_server compose プロジェクトが、このスクリプトを実行している
+# 作業ツリーとは別の作業ツリーから作られている場合は、撤去(1/5)を始める前に止める(#1202)。
+# 無人ループを複数worktreeで並列に走らせているとき、このまま進むと共有スタックを
+# 別ワーカーから黙って乗っ取ってしまう。プロダクションコード差分の有無は問わない —
+# 再構築という操作そのものが、相手の足元のスタックを作り替えるため。
+# 唯一の迂回路は AT_WORKTREE_CHECK_BYPASS=1(scripts/check-worktree-match.py 側で定義)。
+if ! python3 "$SCRIPT_DIR/check-worktree-match.py" rebuild; then
+  exit 1
+fi
+
 START_TS=$(date +%s)
 COMFYUI_MODELS_BEFORE="$(volume_created_at "${VOLUME_PREFIX}comfyui_models")"
 

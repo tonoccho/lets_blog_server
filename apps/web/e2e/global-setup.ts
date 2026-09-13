@@ -50,6 +50,14 @@ import { waitForServicesHealthy } from './helpers';
  * ブラウザが無いホストを無駄に待たせないのは#1045と同じ理由、ゼロ構築を排他の内側に
  * 入れるのは、撤去中に他方がテストしていたら意味がないため(#1187)。
  *
+ * issue #1202: 無人ループを複数worktree・複数ブランチで並列に走らせると、この共有スタックが
+ * どのブランチのコードを載せているかは誰も保証しない。プロダクションコードを変更した
+ * ブランチが、別の作業ツリーが作ったスタック(=変更前のコード)に対して緑になる事故を防ぐため、
+ * 何より先に(ブラウザ確認・ロック取得・ゼロ構築より前に) scripts/check-worktree-match.py
+ * で「どの作業ツリーがこのスタックを作ったか」と「このブランチがorigin/developから
+ * プロダクションコードを変更しているか」を確認する。判定ロジックはそこが唯一の実装であり、
+ * ここに書き写さない。
+ *
  * 環境変数:
  *   ACCEPTANCE_RESET=1     : scripts/rebuild-acceptance-env.sh --yes を実行してから始める
  *                            (compose プロジェクトを撤去し、Docker ボリュームを破棄し、
@@ -62,10 +70,28 @@ import { waitForServicesHealthy } from './helpers';
  *   E2E_SKIP_HEALTH_WAIT=1 : docker composeのhealthy待ちをスキップする
  *                            (スタック外でPlaywrightだけ動かす場合や、docker CLIが無い環境向け)
  *   E2E_HEALTH_TIMEOUT     : healthy待ちのタイムアウト秒数(既定600)
+ *   AT_WORKTREE_CHECK_BYPASS=1 : 作業ツリー一致チェック(#1202)を明示的に迂回する唯一の
+ *                            エスケープハッチ。迂回したことは標準出力に記録される。
  */
 export default async function globalSetup(config: FullConfig): Promise<void> {
   const baseURL = config.projects[0]?.use?.baseURL ?? 'https://localhost';
   const repoRoot = path.resolve(__dirname, '..', '..', '..');
+
+  // 作業ツリーの一致確認は全ての前に置く。ここで拒否された場合、後続のブラウザ確認・
+  // ロック取得・ゼロ構築(最大90分)を無駄に費やす前に落とせる。
+  console.log('[e2e] 共有スタックを作った作業ツリーとの一致を確認します');
+  try {
+    execFileSync(
+      'python3',
+      [path.join(repoRoot, 'scripts', 'check-worktree-match.py'), 'at-start'],
+      { cwd: repoRoot, stdio: 'inherit' }
+    );
+  } catch {
+    throw new Error(
+      '共有スタックを作った作業ツリーと、テストしようとしている作業ツリーが一致しません。' +
+        '詳細は上のログを参照してください。'
+    );
+  }
 
   // ブラウザの確認は全ての前に置く。ホスト内で完結し、数秒で終わり、他の前提に依存しない。
   // ACCEPTANCE_RESET のゼロ構築(最大90分)を終えてからブラウザで落ちるのは、待った分だけ無駄になる。
