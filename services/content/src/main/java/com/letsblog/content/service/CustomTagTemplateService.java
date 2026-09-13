@@ -125,10 +125,21 @@ public class CustomTagTemplateService {
         customTagTemplateRepository.deleteById(id);
     }
 
+    /**
+     * issue #1220: 認可チェックが無く、非メンバーがprojectIdをidから逆引きするだけで他プロジェクトの
+     * 未公開テンプレートを読めていた。{@link #list}/{@link #buildCssBundle}(issue #1057)と同じ方針
+     * (isPublished=false かつ projectId 指定時のみプロジェクトメンバー判定)を適用する。公開済み
+     * テンプレートは projectId を問わず誰でも参照できる既存の挙動を変えない。projectId 未指定
+     * (グローバルテンプレート)は他メソッドと同じ既存の規約でプロジェクト単位の判定対象がそもそも
+     * 無いため、未公開でもプロジェクトメンバー判定は経由しない。
+     */
     @Transactional(readOnly = true)
     public CustomTagTemplateResponse getById(Long id) {
         CustomTagTemplate template = customTagTemplateRepository.findById(id)
                 .orElseThrow(() -> new CustomTagTemplateNotFoundException("id " + id + " のテンプレートは登録されていません"));
+        if (!Boolean.TRUE.equals(template.getIsPublished()) && template.getProjectId() != null) {
+            adminAuthorizationService.requireProjectMemberOrAdmin(template.getProjectId());
+        }
         return CustomTagTemplateResponse.from(template);
     }
 

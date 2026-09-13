@@ -887,7 +887,7 @@ platform-service所有(issue #694)。未認証401はplatform-serviceの`Security
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
 | POST /api/custom-tag-templates | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `CustomTagTemplateService.create()`内 |
-| GET /api/custom-tag-templates/{id} | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | 単一テンプレート参照(未公開含む) |
+| GET /api/custom-tag-templates/{id} | requireProjectMemberOrAdmin(`isPublished=false`かつ`projectId`が非null時のみ、service層) | 401 | 403(該当時) | 認可OK | 現状維持 | `CustomTagTemplateService.getById()`内。issue #1220で追加。単一テンプレート参照で、公開済みなら`projectId`を問わず誰でも参照できる(退行なし)。未公開かつ`projectId`指定時はプロジェクトメンバー判定が必須(以前は無条件参照可能で、非メンバーがidを指定するだけで他プロジェクトの未公開テンプレートを読めた)。未公開でも`projectId`未指定(グローバル)は他メソッドと同じ既存の規約で対象外 |
 | GET /api/custom-tag-templates | requireProjectMemberOrAdmin(`showAll=true`かつprojectId指定時のみ、service層) | 401 | 403(該当時) | 認可OK | 現状維持 | `CustomTagTemplateService.list()`内。issue #1057で追加。`showAll=true`は公開状態を問わず全件返すため、projectId指定時はプロジェクトメンバー判定が必須(以前は無条件参照可能で、非メンバーが他プロジェクトの未公開テンプレートを読めた)。`showAll=false`(既定、公開済みのみ)とsearch/categoryは元々`isPublished=true`のクエリで公開範囲が絞られておりこのIssueの対象外。projectId未指定(グローバル)も対象外 |
 | GET /api/custom-tag-templates/my-templates | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | 呼び出し元自身のテンプレートに限定される想定だが、明示チェックは無い |
 | PUT /api/custom-tag-templates/{id} | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `CustomTagTemplateService.update()`内 |

@@ -218,6 +218,65 @@ class CustomTagTemplateServiceTest {
         assertThrows(CustomTagTemplateNotFoundException.class, () -> service.getById(99L));
     }
 
+    /**
+     * issue #1220: GET /api/custom-tag-templates/{id} には認可チェックが無く、非メンバーが
+     * 他プロジェクトの未公開テンプレートを読めていた。#1057と同じ方針
+     * (isPublished=false かつ projectId 指定時のみプロジェクトメンバー判定)を適用する。
+     */
+    @Test
+    void getById_非公開かつprojectId指定時はプロジェクトメンバー判定を行う() {
+        CustomTagTemplate template = buildTemplate(1L);
+        template.setIsPublished(false);
+        template.setProjectId(5L);
+        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(template));
+
+        service.getById(1L);
+
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(5L);
+    }
+
+    @Test
+    void getById_非公開テンプレートで他プロジェクトのメンバーでなければForbiddenExceptionが伝播する() {
+        CustomTagTemplate template = buildTemplate(1L);
+        template.setIsPublished(false);
+        template.setProjectId(5L);
+        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(template));
+        doThrow(new ForbiddenException("not a member"))
+                .when(adminAuthorizationService).requireProjectMemberOrAdmin(5L);
+
+        assertThrows(ForbiddenException.class, () -> service.getById(1L));
+    }
+
+    @Test
+    void getById_公開済みならプロジェクトメンバー判定を行わない() {
+        CustomTagTemplate template = buildTemplate(1L);
+        template.setIsPublished(true);
+        template.setProjectId(5L);
+        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(template));
+
+        CustomTagTemplateResponse response = service.getById(1L);
+
+        assertTrue(response.isPublished());
+        verify(adminAuthorizationService, never()).requireProjectMemberOrAdmin(any());
+    }
+
+    /**
+     * projectId未指定(グローバルテンプレート)は list()/listPublished() 等と同じ既存の規約
+     * (projectId=nullは「グローバル」としてプロジェクト単位の判定対象がそもそも無い)ため、
+     * 未公開でもプロジェクトメンバー判定は経由しない。
+     */
+    @Test
+    void getById_非公開でもprojectId未指定ならプロジェクトメンバー判定を行わない() {
+        CustomTagTemplate template = buildTemplate(1L);
+        template.setIsPublished(false);
+        template.setProjectId(null);
+        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(template));
+
+        service.getById(1L);
+
+        verify(adminAuthorizationService, never()).requireProjectMemberOrAdmin(any());
+    }
+
     @Test
     void listPublished_projectId未指定ならグローバル公開テンプレートのみ() {
         when(customTagTemplateRepository.findPublishedGlobalTemplates()).thenReturn(List.of(buildTemplate(1L)));

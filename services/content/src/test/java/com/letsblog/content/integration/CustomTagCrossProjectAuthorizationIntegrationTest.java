@@ -5,10 +5,14 @@ import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
 import com.letsblog.content.client.IdentityBridgeClient;
 import com.letsblog.content.client.ProjectBridgeClient;
+import com.letsblog.content.domain.CustomTagTemplate;
+import com.letsblog.content.repository.CustomTagTemplateRepository;
 import java.util.Optional;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
@@ -20,6 +24,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -35,6 +40,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @ActiveProfiles("test")
 @DisplayName("content-service: カスタムタグのクロスプロジェクト認可(issue #1057)")
 class CustomTagCrossProjectAuthorizationIntegrationTest {
@@ -43,6 +49,9 @@ class CustomTagCrossProjectAuthorizationIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private CustomTagTemplateRepository customTagTemplateRepository;
 
     @MockitoBean
     private JwtDecoder jwtDecoder;
@@ -55,6 +64,22 @@ class CustomTagCrossProjectAuthorizationIntegrationTest {
 
     @MockitoBean
     private ProjectBridgeClient projectBridgeClient;
+
+    @AfterEach
+    void cleanUp() {
+        customTagTemplateRepository.deleteAll();
+    }
+
+    private CustomTagTemplate persistTemplate(Long projectId, boolean isPublished) {
+        CustomTagTemplate template = new CustomTagTemplate();
+        template.setTemplateName("cross-project-template");
+        template.setHtmlTemplate("<div>{{content}}</div>");
+        template.setProjectId(projectId);
+        template.setCreatedBy(1L);
+        template.setVersion(1);
+        template.setIsPublished(isPublished);
+        return customTagTemplateRepository.save(template);
+    }
 
     private String nonMemberHeader() throws Exception {
         String token = "cross-project-jwt";
@@ -101,5 +126,32 @@ class CustomTagCrossProjectAuthorizationIntegrationTest {
                         .header(HttpHeaders.AUTHORIZATION, nonMemberHeader()))
                 .andExpect(status().isForbidden())
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("プロジェクトメンバー")));
+    }
+
+    /**
+     * issue #1220: GET /api/custom-tag-templates/{id} には認可チェックが無く、非メンバーが
+     * projectIdをidから逆引きするだけで他プロジェクトの未公開テンプレートを読めていた。
+     */
+    @Test
+    @DisplayName("GET /api/custom-tag-templates/{id} 他プロジェクトの未公開テンプレートは非メンバーに403")
+    void customTagTemplateGetByIdの未公開テンプレートは非メンバーに403() throws Exception {
+        CustomTagTemplate template = persistTemplate(OTHER_PROJECT_ID, false);
+
+        mockMvc.perform(get("/api/custom-tag-templates/" + template.getId())
+                        .header(HttpHeaders.AUTHORIZATION, nonMemberHeader()))
+                .andExpect(status().isForbidden())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("プロジェクトメンバー")));
+    }
+
+    @Test
+    @DisplayName("退行防止: GET /api/custom-tag-templates/{id} 公開済みテンプレートは非メンバーでも取得できる")
+    void customTagTemplateGetByIdの公開済みテンプレートは非メンバーでも取得できる() throws Exception {
+        CustomTagTemplate template = persistTemplate(OTHER_PROJECT_ID, true);
+
+        mockMvc.perform(get("/api/custom-tag-templates/" + template.getId())
+                        .header(HttpHeaders.AUTHORIZATION, nonMemberHeader()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(template.getId()))
+                .andExpect(jsonPath("$.isPublished").value(true));
     }
 }
