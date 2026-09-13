@@ -996,6 +996,115 @@ class ArticlePreviewServiceTest {
         assertEquals(null, contentCaptor.getValue().featuredMediaId());
     }
 
+    /**
+     * issue #1240 AC1: PNGのdata URIをアイキャッチとして渡した場合、uploadMediaへ渡す
+     * ファイル名は拡張子".png"で終わる必要がある(WordPressのwp_check_filetype_and_ext()が
+     * 拡張子なしファイル名からMIMEを判定できず拒否するため)。アップロードが成功すれば
+     * featuredMediaIdも投稿へ設定される。
+     */
+    @Test
+    void renderSkeleton_アイキャッチがPNGの場合は拡張子pngのファイル名でアップロードする() {
+        assertPreviewUploadExtension("data:image/png;base64,AAAA", "image/png", ".png");
+    }
+
+    /** issue #1240 AC2: image/jpeg, image/gif, image/webp, image/svg+xmlそれぞれの拡張子解決。 */
+    @Test
+    void renderSkeleton_アイキャッチがJPEGの場合は拡張子jpgのファイル名でアップロードする() {
+        assertPreviewUploadExtension("data:image/jpeg;base64,AAAA", "image/jpeg", ".jpg");
+    }
+
+    @Test
+    void renderSkeleton_アイキャッチがGIFの場合は拡張子gifのファイル名でアップロードする() {
+        assertPreviewUploadExtension("data:image/gif;base64,AAAA", "image/gif", ".gif");
+    }
+
+    @Test
+    void renderSkeleton_アイキャッチがWEBPの場合は拡張子webpのファイル名でアップロードする() {
+        assertPreviewUploadExtension("data:image/webp;base64,AAAA", "image/webp", ".webp");
+    }
+
+    @Test
+    void renderSkeleton_アイキャッチがSVGの場合は拡張子svgのファイル名でアップロードする() {
+        assertPreviewUploadExtension("data:image/svg+xml;base64,AAAA", "image/svg+xml", ".svg");
+    }
+
+    private void assertPreviewUploadExtension(String dataUri, String expectedContentType, String expectedExtension) {
+        Project project = projectWithMaster("test", 40L, null);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteService.getById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        org.mockito.ArgumentCaptor<String> filenameCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        when(cmsAdapter.uploadMedia(org.mockito.ArgumentMatchers.eq(sshCredentials()),
+                filenameCaptor.capture(), org.mockito.ArgumentMatchers.eq(expectedContentType),
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new com.letsblog.publishing.cms.MediaUploadResult("77", "http://production.example.com/media/77"));
+        org.mockito.ArgumentCaptor<com.letsblog.publishing.cms.PostContent> contentCaptor =
+                org.mockito.ArgumentCaptor.forClass(com.letsblog.publishing.cms.PostContent.class);
+        when(cmsAdapter.createOrUpdatePost(org.mockito.ArgumentMatchers.eq(sshCredentials()),
+                contentCaptor.capture(), org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn(new com.letsblog.publishing.cms.PostResult(
+                        "99", "http://production.example.com/?p=99", "private"));
+        when(cmsAdapter.generateAuthCookie(sshCredentials()))
+                .thenReturn(new com.letsblog.publishing.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
+        when(contentServiceClient.fetchRealPost(
+                "http://production.example.com/?p=99", "wordpress_logged_in_x", "cookie-value"))
+                .thenReturn(bridged("<article>real page</article>", true, null, false, ""));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 40L, "新タイトル", "<p>新本文</p>", dataUri, null, null, null, null);
+
+        assertTrue(response.available());
+        assertTrue(filenameCaptor.getValue().endsWith(expectedExtension),
+                "ファイル名が拡張子" + expectedExtension + "で終わっていません。実際: " + filenameCaptor.getValue());
+        assertEquals("77", contentCaptor.getValue().featuredMediaId());
+    }
+
+    /**
+     * issue #1240 AC3: contentTypeが既知の画像形式へ解決できない場合(decodeDataUriの
+     * application/octet-stringフォールバックを含む)、uploadMedia自体を試みず、
+     * available=trueのままwarningで理由を伝える。featuredMediaIdはnullのまま投稿される。
+     */
+    @Test
+    void renderSkeleton_アイキャッチのcontentTypeが未知の場合はアップロードを試みずwarningを返す() {
+        Project project = projectWithMaster("test", 40L, null);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteService.getById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        org.mockito.ArgumentCaptor<com.letsblog.publishing.cms.PostContent> contentCaptor =
+                org.mockito.ArgumentCaptor.forClass(com.letsblog.publishing.cms.PostContent.class);
+        when(cmsAdapter.createOrUpdatePost(org.mockito.ArgumentMatchers.eq(sshCredentials()),
+                contentCaptor.capture(), org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn(new com.letsblog.publishing.cms.PostResult(
+                        "99", "http://production.example.com/?p=99", "private"));
+        when(cmsAdapter.generateAuthCookie(sshCredentials()))
+                .thenReturn(new com.letsblog.publishing.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
+        when(contentServiceClient.fetchRealPost(
+                "http://production.example.com/?p=99", "wordpress_logged_in_x", "cookie-value"))
+                .thenReturn(bridged("<article>real page</article>", true, null, false, ""));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 40L, "新タイトル", "<p>新本文</p>", "data:application/octet-stream;base64,AAAA",
+                null, null, null, null);
+
+        assertTrue(response.available());
+        assertTrue(response.warning() != null && response.warning().contains("アイキャッチ画像のアップロードに失敗しました"),
+                "実際: " + response.warning());
+        assertEquals(null, contentCaptor.getValue().featuredMediaId());
+        org.mockito.Mockito.verify(cmsAdapter, org.mockito.Mockito.never()).uploadMedia(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
     @Test
     void renderSkeleton_SSH認証情報にusernameが無い場合は投稿を作成せず従来経路にフォールバックする() {
         Project project = projectWithMaster("production", null, 40L);

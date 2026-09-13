@@ -426,8 +426,12 @@ public class ArticlePreviewService {
         if (StringUtils.hasText(featuredImageDataUri)) {
             try {
                 DecodedDataUri decoded = decodeDataUri(featuredImageDataUri);
+                String extension = previewImageExtension(decoded.contentType());
+                if (extension == null) {
+                    throw new IllegalArgumentException("非対応の画像形式です: " + decoded.contentType());
+                }
                 MediaUploadResult media = cmsAdapter.uploadMedia(
-                        credentials, "preview-featured-image", decoded.contentType(), decoded.data());
+                        credentials, "preview-featured-image" + extension, decoded.contentType(), decoded.data());
                 featuredMediaId = media.id();
             } catch (Exception e) {
                 logger.warn("プレビュー用アイキャッチのアップロードに失敗しました: {}", site.getSiteKey(), e);
@@ -511,6 +515,30 @@ public class ArticlePreviewService {
             }
         }
         return false;
+    }
+
+    /**
+     * プレビュー用アイキャッチのcontentTypeから、uploadMediaへ渡すファイル名の拡張子を解決する
+     * (issue #1240)。拡張子なしファイル名(旧実装の固定文字列"preview-featured-image")では
+     * WordPressの{@code wp_check_filetype_and_ext()}がMIMEを判定できずアップロードを拒否するため。
+     * 未知の形式({@code decodeDataUri}の{@code application/octet-stream}フォールバックを含む)は
+     * nullを返し、呼び出し側でアップロード自体を試みず警告とする。
+     *
+     * <p>公開経路の{@link PostPublishService#extensionForMimeType}はjpeg/png限定かつ
+     * 元ファイル名によるフォールバックを持つため、そちらは変更せずこちらへ個別に定義する
+     * (プレビューはgif/webp/svg+xmlも扱い、元ファイル名を持たない)。呼び出し元は
+     * {@link #decodeDataUri}が返した非null文字列(未知形式は"application/octet-stream")
+     * しか渡さないため、null受け取りは想定していない。
+     */
+    private String previewImageExtension(String contentType) {
+        return switch (contentType.toLowerCase(java.util.Locale.ROOT)) {
+            case "image/png" -> ".png";
+            case "image/jpeg" -> ".jpg";
+            case "image/gif" -> ".gif";
+            case "image/webp" -> ".webp";
+            case "image/svg+xml" -> ".svg";
+            default -> null;
+        };
     }
 
     /** data URI(data:&lt;contentType&gt;;base64,&lt;data&gt;)をデコードした結果。 */
