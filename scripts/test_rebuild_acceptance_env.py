@@ -52,6 +52,8 @@ Playwright はスタックが上がっていることを前提に起動するた
                           構築後の存在確認に現れる = 手順4-7 が捕まえるべき壊れ方
     FAKE_UNHEALTHY        1 なら compose ps が unhealthy を返す
     FAKE_EXTRA_KC_USER    構築後の letsblog レルムに居座る余計なユーザー名
+    FAKE_KCADM_GET_USERS_FAILS  1 なら `kcadm get users` が SIGPIPE ではない本物の
+                          エラー(認可切れ等)で失敗する(#1233 のフォローアップ)
     FAKE_DIRTY_SCHEMA     行が残っているスキーマ名
     FAKE_SETUP_STATUS     setup-status の応答ボディ
     FAKE_SETUP_CODE       setup-status の HTTP ステータス
@@ -320,13 +322,21 @@ if args[:1] == ["exec"]:
             sys.stderr.write("Created new user with id 'fake-id'\n")
             sys.exit(0)
         if " get users" in joined:
+            if os.environ.get("FAKE_KCADM_GET_USERS_FAILS") == "1":
+                # 本物のエラー(認可切れ・接続断など)を模す。SIGPIPE(141)とは違う、
+                # kcadm 自身が非0で終わる本物の失敗。
+                fail("Unable to send request - Invalid access token")
             users = read_lines("kcusers")
             extra = os.environ.get("FAKE_EXTRA_KC_USER", "")
             if extra and extra not in users:
                 users = users + [extra]
+            # 本物の kcadm はユーザー名の辞書順で返す。プローブが中間に来ることで
+            # SIGPIPE を再現する(#1233)ので、その順序をここでも模す。
+            users = sorted(users)
             print(
                 json.dumps(
-                    [{"id": "id-%d" % i, "username": u, "email": u} for i, u in enumerate(users)]
+                    [{"id": "id-%d" % i, "username": u, "email": u} for i, u in enumerate(users)],
+                    indent=2,
                 )
             )
             sys.exit(0)
@@ -801,6 +811,69 @@ class ProbesAreCreatedBeforeTheTeardown(RebuildScriptHarness):
             with self.subTest(call=call):
                 self.assertNotIn("DROP DATABASE", call)
                 self.assertNotIn("rm -rf /var/www/html/sites/at-wipe-probe", call)
+
+
+class PlacementCheckSurvivesSigpipeUnderManyExistingUsers(RebuildScriptHarness):
+    """#1233: `kcadm get users | grep -q ...` が SIGPIPE で誤って失敗しないことを確かめる。
+
+    `grep -q` は最初の一致を見つけた時点で標準入力を閉じて終了する。このとき
+    kcadm(ここでは偽 docker)がまだ大量の残り出力を書き込み中だと、パイプの
+    読み手が消えたことで SIGPIPE(終了コード141)を受けて死ぬ。`set -o pipefail`
+    下ではパイプ全体の終了コードが141になり、grep 自身は一致していた
+    (本来は成功)にもかかわらず `|| placed_ok=0` に落ちて
+    「設置を確認できなかった」という誤検知になる。
+
+    実運用では既存ユーザーが18人でも再現した(プローブ名がアルファベット順で
+    中間に来るため)。ここでは確実に再現させるため、プローブより後にソートされる
+    大量のダミーユーザーを用意し、`kcadm get users` の出力を OS パイプの容量
+    (既定64KB)を大きく超えさせ、grep の早期終了時になお書き込み中にする。
+    """
+
+    def setUp(self):
+        super().setUp()
+        # "at-wipe-probe-<epoch>@letsblog.local" よりアルファベット順で後に来る
+        # 大量のダミーユーザーを用意する。grep がプローブに一致して即座に
+        # 標準入力を閉じたあとも、まだ書き込むべき出力が大量に残っている状況を作る。
+        padding = "x" * 200
+        many_users = ["zzz-user-%05d-%s@letsblog.local" % (i, padding) for i in range(3000)]
+        self.write_state("kcusers", many_users)
+
+    def test_placement_check_is_not_defeated_by_sigpipe(self):
+        r = self.run_script("--yes")
+        out = self.out(r)
+        self.assertEqual(
+            0,
+            r.returncode,
+            "既存ユーザーが多いと SIGPIPE で誤って失敗する(#1233):\n" + out,
+        )
+        self.assertNotIn(
+            "プローブを設置できたことを確認できませんでした",
+            out,
+            "設置確認が誤検知で失敗した(#1233):\n" + out,
+        )
+
+
+class PlacementCheckReportsAGenuineKcadmFailure(RebuildScriptHarness):
+    """#1233 フォローアップ: `kcadm get users` が SIGPIPE ではなく本物のエラーで
+    失敗したとき、診断メッセージ無しに黙って終了してはいけない。
+
+    `kc_users_output="$(kcadm get users ...)"` という代入文は、それ自体は
+    どの `||`/`&&` リストにも入っていない裸の文なので、`set -e` 下で kcadm が
+    (SIGPIPE ではなく)本当に失敗すると、`placed_ok` を見る前にその場で
+    スクリプトが終了してしまう。kcadm の標準エラーは `/dev/null` に捨てているため、
+    これは無言のまま(診断メッセージ無しに)終了する退行になる。
+    """
+
+    def test_reports_diagnostic_when_kcadm_get_users_genuinely_fails(self):
+        r = self.run_script("--yes", FAKE_KCADM_GET_USERS_FAILS="1")
+        out = self.out(r)
+        self.assertNotEqual(0, r.returncode, "kcadm の本物の失敗が握りつぶされている:\n" + out)
+        self.assertIn(
+            "プローブを設置できたことを確認できませんでした",
+            out,
+            "kcadm が本物のエラーで失敗しても、診断メッセージ無しに無言で終了している(#1233 フォローアップ):\n"
+            + out,
+        )
 
 
 class ProbesAreGoneAfterTheRebuild(RebuildScriptHarness):

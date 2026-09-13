@@ -291,8 +291,24 @@ if [ "$STACK_UP" -eq 1 ]; then
   # 作成直後の存在確認。ここを省くと、後の「消えている」が
   # 「そもそも作れていなかった」と区別できない(現行リセットの自己検証が持つ弱点)。
   placed_ok=1
-  kcadm get users -r "$KEYCLOAK_REALM" --fields username 2>/dev/null \
-    | grep -q "$PROBE_KC_USER" || placed_ok=0
+  # `kcadm get users | grep -q ...` のまま書くと、grep -q は最初の一致を
+  # 見つけた瞬間に自分の標準入力(パイプの読み側)を閉じて終了する。このとき
+  # kcadm がまだ出力を書き込み中だと(既存ユーザー数が多く、プローブのユーザー名が
+  # アルファベット順で中間に来ると起きやすい)、書き込み中の kcadm は読み手を
+  # 失って SIGPIPE を受け、終了コード141で死ぬ。`set -o pipefail` が有効な
+  # このスクリプトでは、パイプ全体の終了コードがその141(非0)になり、
+  # grep 自身は一致していた(本来は成功=0)にもかかわらず `|| placed_ok=0` に
+  # 落ちて「設置を確認できなかった」という誤検知になる(#1233)。
+  # 対策として、kcadm の出力を変数へ丸ごと読み切ってから(この時点で kcadm は
+  # 完全に書き終えて終了済み)grep をヒアストリングで実行する。ヒアストリングは
+  # パイプではなく一時ファイル経由の入力なので、grep が早期終了しても
+  # 書き込み側に SIGPIPE が飛ぶ余地がない。
+  # `|| true` を付けないと、kcadm がSIGPIPEではなく本物のエラー(認可切れ等)で
+  # 失敗したとき、この代入文自体はどの||/&&リストにも入っていないため
+  # set -e がここで即座に発火し、下の placed_ok 診断へ落ちる前に無言で
+  # 終了してしまう。
+  kc_users_output="$(kcadm get users -r "$KEYCLOAK_REALM" --fields username 2>/dev/null)" || true
+  grep -q "$PROBE_KC_USER" <<< "$kc_users_output" || placed_ok=0
   [ -n "$(mysql_q "SHOW DATABASES LIKE '${PROBE_MYSQL_DB}';" || true)" ] || placed_ok=0
   docker exec "$WORDPRESS_CONTAINER" sh -c "test -d ${PROBE_WP_DIR}" || placed_ok=0
   if [ "$placed_ok" -ne 1 ]; then
