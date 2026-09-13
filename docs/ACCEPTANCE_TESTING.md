@@ -1204,7 +1204,124 @@ Node自身がこのファイルのfdを開いたまま保持し、`flock` コマ
 
 ---
 
-## 15. 参考
+## 15. develop の検証済みコミットを main へ載せ、semver タグを付ける(#1274)
+
+`scripts/release-verify-tag.py` は、develop のコミットを1つ指定して(既定は
+`origin/develop` の先頭)、次を1コマンドで行う。
+
+```
+python3 scripts/release-verify-tag.py [commit] [--bump patch|minor|major]
+```
+
+### 使い方と手順の一覧
+
+1. 対象コミットを解決し固定する。`origin/develop` から到達できない、または既に
+   `origin/main` に含まれる場合(リリース済み、またはそれより古い)は、どの手順も
+   始めずに拒否する。
+2. メイン作業ツリーとは別の**clone**(`git worktree` ではない。§「なぜ push か」参照)で、
+   固定したコミットを detached で検証する。メイン作業ツリーの HEAD・ブランチ・インデックス・
+   ファイルは変更しない。gitignore 対象で clone に含まれない `.env` と `certs/` は、
+   メイン作業ツリーから隔離チェックアウトへ別途コピーする(`.env` が無ければ、手順を
+   1つも始めずに理由を表示して失敗する)。資格情報は `~/.config/lets-blog-e2e.env`
+   から読み込み、各手順のサブプロセス環境へ渡す。
+3. §13 の `cycle.lock`(`${CLAUDE_AUTO_STATE_DIR:-~/.local/state/claude-auto}/cycle.lock`、
+   無人ループのスクリプトと共有)を、最初の手順を始める前から push と引き渡しの完了まで
+   保持する。待機中は保持者と経過時間を表示し、上限(環境変数 `RELEASE_VERIFY_LOCK_TIMEOUT`
+   で変更可。既定は **28800秒(8時間)** — パイプライン1回が最大で3件×160分
+   (約8時間)に達しうるため(Q4、Issue Open Questions)、通常の1〜2時間の実行を
+   打ち切らない側に余裕を持たせて8時間にしている)を超えたら origin に触れずに非0で
+   終了する。
+4. **事前確認**: `origin/main` の先頭に固定したコミットを `--no-ff` でマージし、結果の
+   木が固定したコミットの木と同一であることを確かめる。不一致なら、テスト手順を1つも
+   始めずに失敗する(誰かが main へ直接コミットした、などのずれを、1〜2時間かかる
+   検証の前に検出するため)。
+5. 依存導入(`npm ci`)、`scripts/` と `.claude/hooks/` の Python ユニットテスト、
+   `apps/web` / `apps/extension` / `apps/mcp-server` / `apps/penpot-plugin` /
+   `packages/api-client` のテスト・lint・build・typecheck、`apps/web` の
+   `npm run test:at:clean`(`ACCEPTANCE_RESET=1`、迂回 `AT_WORKTREE_CHECK_BYPASS=1` を明示的に
+   使い、ログに残す。迂回の根拠は手順3の `cycle.lock`)、`apps/extension` の
+   `npm run test:at`、`docker-compose.host-tests.yml` を重ねて MySQL を公開し直したうえでの
+   `scripts/check-test-db.sh` と `./gradlew test lint` を、隔離したチェックアウトで実行する。
+6. **ゼロ許容**: 全手順の終了コードが0であり、かつ failed / skipped / did not run / flaky が
+   すべて0であるときだけ成功とする。既知の失敗(#1140、#1262 など)も例外にしない。
+   終了コードだけでは隠れる skip を防ぐため、`web-test`(jest `--json`)・
+   `web-test-at-clean`(Playwright の `json` レポーター)・`extension-test-at`
+   (jest `--json`)・`backend-gradle-test-lint`(全11モジュールの JUnit XML を集計)の
+   4手順は、実際の出力ファイルから passed/failed/skipped/flaky を抽出して判定する。
+7. 成功したら、`origin/main` を再取得してもう一度マージ+木の同一性確認を行い(検証中に
+   main が進んでいてもそのときの先頭に対して行う)、マージコミットに注釈付き semver タグを
+   付け、`git push --atomic origin <マージコミット>:refs/heads/main refs/tags/<版>` で
+   `main` とタグを1回で送る。`develop` は push しない。
+8. 成功・失敗にかかわらず、終了前(`cycle.lock` を保持している間)に共有スタックを
+   メイン作業ツリーが所有・稼働する状態へ戻す。
+
+失敗した場合は、`origin` の `main` は実行前のまま、新しい semver タグは origin にも
+ローカルにも残らず、失敗した手順の名前と理由・ログの場所が表示されて非0で終了する。
+ログ・`docker compose logs`・Playwright のレポートはリポジトリの外
+(`~/.local/state/release-verify-tag/`)に保存し、コミットしない。
+
+### semver の上げ方
+
+タグ名は `MAJOR.MINOR.PATCH`(`v` 接頭辞なし)。次の番号は、origin 上の厳密な semver
+タグ(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$` に一致するもの。`dev-*` や
+`v1.0.0`、プレリリース表記は無視する)の最大値を**数値として**比較し、`--bump` に従って
+上げたものとする(`0.9.0` と `0.10.0` があれば `0.10.0` を基準にする。文字列順ではない)。
+
+`--bump` の既定は `patch`。既存の `0.3.0` から数えて最初の手動リリースだけ、利用者が
+`--bump minor` を明示して実行し `0.4.0` にする。以後は省略して `0.4.1`、`0.4.2` … と
+進める。
+
+### ゼロ許容
+
+要件5のとおり、既知の失敗も含めて1件でも failed / skipped / did not run / flaky があれば
+リリースを作らない。「ほぼ通った」を許容する経路は無い。
+
+### main へのマージが Issue の MR ではなく直接 push である理由
+
+`.claude/CLAUDE.md` の squash / `ff` の規則(**Where squash is enforced**)は develop へ
+入る **Issue の Merge Request** のためのものであり、本スクリプトが main へ行う直接 push は
+その規則の対象ではない(下の1文を参照)。MR では実現できない理由は次のとおり:
+
+- プロジェクト設定の `merge_method: ff` は、ソースブランチが対象ブランチの先頭を含んで
+  いることを要求する。develop は main にしか無い6コミットを含まないため、develop の
+  rebase を求められる。develop は保護ブランチで強制 push できない。
+- 仮に squash されると、develop の親を持たないコミットが1つ main に積まれ、以後の
+  「衝突しない・木が一致する」という不変条件(次項)が崩れる。
+
+木の同一性確認は、main の木が(検証済みの)develop の祖先の木と常に一致しているという
+不変条件を守るための機械的な検査である。初回は、既存の `0.3.0` 以降 main にだけ積まれた
+6コミットが merge-base の木を変えていない(`git diff` が空)ことに支えられている。
+2回目以降は、前回のリリースで main の木が検証済み SHA の木と一致した状態になっている
+ことに支えられる。崩れるのは、誰かが main へ直接コミットしたときだけで、それを検出する
+のが事前確認・本番確認の役目である。
+
+### ロックと引き渡し
+
+`cycle.lock` は無人ループ(`~/.local/bin/claude-auto-*.sh`)と共有する。ロックを保持して
+いる間だけ、この検証は共有スタック(と、それを使う無人ループ)を止める。実行後は
+成功・失敗にかかわらず、ロックを解放する前に共有スタックをメイン作業ツリーの所有へ戻す
+(未整理のままだと `docker compose ls` からは消えていても、次のループが行う
+`--no-deps` 実行が health 待ちで落ちる)。
+
+### GitHub への反映
+
+このスクリプトは GitLab(origin)にしか触れない。GitHub の資格情報は使わず、ミラーの
+完了も待たない。main とタグが GitHub に届くのは #1256 の push ミラーの役目である。
+
+### 想定所要時間
+
+未実測(実機での初回実行は #1278 の解消後になる見込み)。ゼロ構築だけで約4分(§10)。
+全体では1〜2時間程度を想定する。実測が取れたらここへ追記する。
+
+### ループが稼働中のとき
+
+無人ループが `cycle.lock` を保持している間は、上記のとおり待機し、上限を超えれば
+何も変えずに失敗する。逆に本スクリプトがロックを保持している間は、無人ループの次サイクル
+は開始できない。
+
+---
+
+## 16. 参考
 
 - [ACCEPTANCE_CRITERIA.md](ACCEPTANCE_CRITERIA.md) — 受け入れ基準カタログ(機能IDと検証状況)
 - `docker-compose.e2e-stubs.yml` / `infra/e2e-stubs/` — 外部依存スタブ(§9)

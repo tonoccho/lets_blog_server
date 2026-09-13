@@ -920,6 +920,10 @@ miss — with `merge_method: merge`, GitLab creates the squashed commit *and the
 on top of it*. What that did to !1020 (#1030), and why `ff` does not disturb the ordinary flow:
 `docs/WORKFLOW_RULE_RATIONALE.md` → squash.
 
+These squash / `ff` rules govern Issue Merge Requests into `develop`. The release merge into
+`main` is a direct push by `scripts/release-verify-tag.py` (#1274), not an Issue MR, and is not
+a violation of this rule — a later stage must not misread a merge commit on `main` as one.
+
 ## Git hook — `scripts/git-hooks/pre-commit`
 
 Bound by `bash scripts/setup-git-hooks.sh`, which sets `core.hooksPath` to
