@@ -348,7 +348,9 @@ function panelNumberInput(page: Page, label: string) {
 }
 
 When('そのプロジェクトの管理画面でアセット画像生成パネルを開く', async ({ ctx, page }) => {
-  await page.goto(`/projects/${ctx.mediaProjectId}`, { waitUntil: 'commit' });
+  // アセット画像生成パネルは「AI・アセット」タブの中にしか描画されない(issue #1127)。
+  // タブを開かずに直接ボタンを探すと、既定タブ「概要」にはボタンが存在せず失敗する。
+  await openProjectTab(page, ctx.mediaProjectId as number, 'AI・アセット');
   await page.locator('button:has-text("アセット画像生成")').click();
   await expect(page.getByRole('heading', { name: 'アセット画像生成' })).toBeVisible({
     timeout: 15_000,
