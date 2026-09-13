@@ -78,6 +78,9 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("PUT", "/api/users/1/github-token"),
                 new Endpoint("POST", "/api/users/1/roles/admin"),
                 new Endpoint("DELETE", "/api/users/1/roles/admin"),
+                // -- AvatarController(issue #1241) --
+                new Endpoint("POST", "/api/users/1/avatar"),
+                new Endpoint("GET", "/api/users/1/avatar"),
 
                 // -- RoleController --
                 new Endpoint("GET", "/api/roles"),

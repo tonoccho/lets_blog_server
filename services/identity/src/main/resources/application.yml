@@ -36,6 +36,12 @@ springdoc:
 spring:
   application:
     name: identity
+  # issue #1241: アバターアップロード(POST /api/users/{id}/avatar)。未設定だとSpring Bootの
+  # 既定1MBが黙って効いてしまう(#1061と同種の失敗)ため、要件通り20MBを明示する。
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 20MB
   # ユーザー/ロール管理を扱う(#561)。#786で専用スキーマlbs_identityへ分離済み(ADR-0004)。
   # #583でproject_users/user_site_authorsの所有権も移ってきたため、lbs_identityが持つのは
   # users / roles / role_permissions / user_roles / project_users / user_site_authors の6テーブル。
@@ -70,6 +76,9 @@ spring:
 # 参照するため、legacy-apiと同一のAPP_ENCRYPTION_KEYを共有する必要がある。
 app:
   encryption-key: ${APP_ENCRYPTION_KEY:}
+  # issue #1241: アバター画像(512x512 JPEG)の保存先。media-serviceのgenerated-images-storage-path
+  # と同じ考え方の、identity-service専用ボリューム。
+  avatar-storage-path: ${AVATAR_STORAGE_PATH:/app/data/avatars}
   # issue #583: project_users/user_site_authors の所有権がidentity-serviceへ移ったのに伴い、
   # ProjectUserSyncService がプロジェクト/サイトの照会(project-service)と、
   # WordPress側ユーザーの作成・更新(publishing-service)を内部ブリッジ経由で行う。

@@ -643,7 +643,12 @@ services:
       # (infra/keycloak/realm-export.jsonで定義済み)。他の値(token-uri等)はコンテナ間の既定URLで
       # 足りるためservices/identity/src/main/resources/application.ymlの既定値に委ねる。
       KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
+      # issue #1241: アバター画像(512x512 JPEG、メタ情報削除済み)の保存先。
+      # media-serviceのGENERATED_IMAGES_STORAGE_PATHと同じ考え方の、identity-service専用ボリューム。
+      AVATAR_STORAGE_PATH: /app/data/avatars
       <<: *rabbitmq-env
+    volumes:
+      - avatar_images:/app/data/avatars
     depends_on:
       mysql:
         condition: service_healthy
@@ -1100,3 +1105,5 @@ volumes:
   wordpress_sites:
   bulk_upload_files:
   generated_images:
+  # issue #1241: アバター画像の専用ボリューム(identity-service)。
+  avatar_images:

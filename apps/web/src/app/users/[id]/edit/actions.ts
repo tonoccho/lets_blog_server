@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import {
   updateUserProfile,
   updateMyPreferences,
+  uploadAvatar,
   type CustomLink,
   type SocialLinks,
   type UserProfile,
@@ -82,6 +83,43 @@ export async function updateUserProfileAction(
         customLinks,
       }
     );
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/users/${userId}/edit`);
+  return { success: true };
+}
+
+export interface UploadAvatarState {
+  error?: string;
+  success?: boolean;
+}
+
+/**
+ * プロフィール編集画面でクライアント側(Canvas)切り抜き済みの正方形画像をアップロードする
+ * (issue #1241)。認可判定は{@link updateUserProfileAction}と同じ(本人またはadmin)。
+ */
+export async function uploadAvatarAction(
+  userId: number,
+  _prevState: UploadAvatarState,
+  formData: FormData
+): Promise<UploadAvatarState> {
+  const session = await requireSession();
+
+  const viewer = await getViewerProfile();
+  const isSelf = viewer?.id === userId;
+  if (!isSelf && session.user.role !== "admin") {
+    return { error: "この操作を行う権限がありません。" };
+  }
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return { error: "画像ファイルを選択してください。" };
+  }
+
+  try {
+    await uploadAvatar(userId, file);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

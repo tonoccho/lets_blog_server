@@ -685,6 +685,33 @@ export function updateUserProfile(id: number, input: UserProfileInput): Promise<
   });
 }
 
+/**
+ * プロフィール編集画面でクライアント側(Canvas)で切り抜いた正方形画像をアップロードする
+ * (issue #1241)。`restoreBackup`/`runBulkOperationUpload`と同じFormData + apiFetchの形。
+ * 成功するとidentity-service側がavatarUrlを配信URL(`/api/users/{id}/avatar`)へ更新する。
+ */
+export function uploadAvatar(id: number, file: File): Promise<UserProfile> {
+  const formData = new FormData();
+  formData.append('file', file);
+  return apiFetch<UserProfile>(`/api/users/${id}/avatar`, {
+    method: 'POST',
+    body: formData,
+  });
+}
+
+/**
+ * アバター画像のバイト列を取得する(issue #1241)。`downloadBackupFile`と同じ
+ * 「JSONを返さない呼び出しは`apiRequest`を直接使う」パターン。
+ *
+ * ブラウザの`<img src="/api/users/{id}/avatar">`はAuthorizationヘッダーを付けられないため、
+ * Route Handler(`apps/web/src/app/api/users/[id]/avatar/route.ts`)がサーバー側の
+ * アクセストークンでこの関数を呼び、結果をそのままブラウザへ中継する。
+ */
+export async function getAvatarBytes(id: number): Promise<{ body: ArrayBuffer; contentType: string }> {
+  const res = await apiRequest(`/api/users/${id}/avatar`);
+  return { body: await res.arrayBuffer(), contentType: res.headers.get('content-type') ?? 'image/jpeg' };
+}
+
 export interface UpdateUserPreferencesInput {
   locale: string;
   timezone: string;

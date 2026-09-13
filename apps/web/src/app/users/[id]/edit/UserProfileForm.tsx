@@ -6,6 +6,7 @@ import type { UserProfile } from "@/lib/apiClient";
 import { updateUserProfileAction, UpdateProfileState } from "./actions";
 import { DisplayNameSelect } from "./DisplayNameSelect";
 import { CustomLinksEditor } from "./CustomLinksEditor";
+import { AvatarUploadField } from "./AvatarUploadField";
 
 const initialState: UpdateProfileState = {};
 
@@ -151,19 +152,24 @@ export function UserProfileForm({ profile }: { profile: UserProfile }) {
           className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
         />
       </label>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-neutral-600 dark:text-neutral-400">アバターURL(Gravatar等)</span>
-        <input
-          name="avatarUrl"
-          type="url"
-          defaultValue={profile.avatarUrl ?? ""}
-          className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-        />
-        {profile.avatarUrl && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={profile.avatarUrl} alt="" className="mt-2 h-16 w-16 rounded-full border border-neutral-200 dark:border-neutral-800" />
-        )}
-      </label>
+      <div className="flex flex-col gap-3">
+        <span className="text-sm text-neutral-600 dark:text-neutral-400">アバター</span>
+
+        {/* issue #1241: 手元の画像ファイルをアップロード・正方形に切り抜いてアバターにする。
+            既存の「アバターURL」テキスト入力(下)とは独立して動作し、どちらの方法でも
+            設定できる(併存。テキスト入力欄の廃止・移行はスコープ外)。 */}
+        <AvatarUploadField userId={profile.id} initialAvatarUrl={profile.avatarUrl} />
+
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-neutral-600 dark:text-neutral-400">アバターURL(Gravatar等)</span>
+          <input
+            name="avatarUrl"
+            type="url"
+            defaultValue={profile.avatarUrl ?? ""}
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
+          />
+        </label>
+      </div>
 
       <fieldset className="flex flex-col gap-3">
         <legend className="text-sm font-medium text-neutral-600 dark:text-neutral-400">SNSリンク</legend>

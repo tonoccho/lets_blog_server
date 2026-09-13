@@ -138,6 +138,17 @@ public class RateLimitWebFilter implements WebFilter {
      *       upload-endpointに残す判断をした</li>
      * </ul>
      *
+     * <p><b>{@code POST /api/users/{id}/avatar}(issue #1241、プロフィール編集画面のアバター
+     * アップロード、最大20MB)は意図的にここへ含めない。</b>実バイナリのアップロードという点は
+     * 上の4件と同じだが、upload-endpointは<b>プロセス全体で1バケット</b>(クラスJavadoc参照)
+     * であり、他ユーザーの操作(記事の画像アップロード等)がこの共有枠を消費していると、
+     * 自分のアバター変更が横から巻き込まれて429になる。これはまさに本Issueが要件5の
+     * カッコ書きで名指しした#999の実害パターンであり、許可リストに機械的に追加することは
+     * その再発を意味する。アバター変更は「総量に対する上限」で守るべき資源枯渇のリスクが
+     * 低い(ユーザーが自分の意思で行う低頻度な個人操作であり、他ユーザーの操作から
+     * 隔離されているべき)ため、api-global(クライアント単位に分割されたバケット。
+     * クラスJavadoc参照)に委ねる。</p>
+     *
      * <p>{@code apps/web/e2e/support/endpoints.ts#isUploadBucketPath}に全く同じ定義を
      * 持つ(二重管理)。両者が食い違っていないことは
      * {@code RateLimitUploadBucketSyncTest}が検証している(#999 受入基準4)。
