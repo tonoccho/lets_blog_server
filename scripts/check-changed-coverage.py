@@ -4,6 +4,13 @@
 `CLAUDE.md` → **Test-First Implementation** → Coverage の実行機構。基準は 90%。
 対象は「このIssueで変更した本番コード」であり、リポジトリ全体ではない。
 
+集計はファイル単位ではなく、**このブランチが実際に変更・追加した行に対応する分岐だけ**
+に絞る(#1230)。ファイルを触っただけで、そのファイルに残る無関係な既存コード
+(レガシーハンドラ等)の分岐まで合算すると、変更した箇所は100%カバーでも
+ファイル全体では基準を下回ることがある(#1063 で実際に発生)。`git diff` の hunk から
+変更行番号を取り、JaCoCo は `<line>` 要素の `mb`/`cb`、jest は `branchMap` の
+座標をその行番号でフィルタしてから合算する。
+
 読むもの:
   - JVM      : services/<svc>/build/reports/jacoco/test/jacocoTestReport.xml の BRANCH counter
   - フロント : apps/web/coverage/coverage-final.json の branch map
@@ -275,8 +282,54 @@ def changed_production_files(base):
     return [p for p in files if is_production(p) and p.endswith((".java", ".kt", ".ts", ".tsx", ".js", ".jsx"))]
 
 
-def jacoco_branches():
-    """{リポジトリ相対パス: (missed, covered)} を JaCoCo XML から集める。"""
+def changed_lines_by_file(base):
+    """{リポジトリ相対パス: 変更・追加された行番号の集合} を `git diff` の hunk から得る。
+
+    削除だけの行はカバレッジと無関係なので含めない(要件1)。hunk ヘッダ
+    `@@ -a[,b] +c[,d] @@` の `+c[,d]` 側だけを見る。`d` を省略した1行の hunk は
+    `d=1` と同義(unified diff の記法)。`d=0` は追加行を持たない純粋な削除hunk
+    なので、行番号を採らずスキップする。
+    """
+    merge_base = run(["git", "merge-base", base, "HEAD"]) or base
+    diff = run(["git", "diff", "-U0", "--diff-filter=ACMR", merge_base, "HEAD"])
+    if diff is None:
+        return {}
+    result = {}
+    current = None
+    hunk_re = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+    for line in diff.splitlines():
+        if line.startswith("+++ "):
+            path = line[4:].strip()
+            if path == "/dev/null":
+                current = None
+                continue
+            if path.startswith("b/"):
+                path = path[2:]
+            current = path
+            result.setdefault(current, set())
+            continue
+        if current is None:
+            continue
+        m = hunk_re.match(line)
+        if not m:
+            continue
+        start = int(m.group(1))
+        count = int(m.group(2)) if m.group(2) is not None else 1
+        if count == 0:
+            continue  # 追加行を持たない純粋な削除hunk
+        result[current].update(range(start, start + count))
+    return result
+
+
+def jacoco_branches(changed_lines):
+    """{リポジトリ相対パス: (missed, covered)} を JaCoCo XML から、変更行に絞って集める。
+
+    ファイル単位の `counter[@type='BRANCH']`(集計済みの合計)ではなく、`<line>`
+    要素ごとの `mb`(missed branches)/`cb`(covered branches)を、変更行の集合に
+    含まれる `nr` のものだけ合算する(要件2)。`changed_lines` に無いファイルや、
+    変更行に分岐が無いファイルは (0, 0) を返す — 呼び出し側がそれを
+    「対象の分岐がない」として除外する。
+    """
     result = {}
     services_dir = os.path.join(ROOT, "services")
     roots = []
@@ -300,15 +353,46 @@ def jacoco_branches():
                 name = sourcefile.get("name", "")
                 lang = "kotlin" if name.endswith(".kt") else "java"
                 rel = os.path.join(module, "src", "main", lang, pkg, name)
-                counter = sourcefile.find("counter[@type='BRANCH']")
-                missed = int(counter.get("missed", 0)) if counter is not None else 0
-                covered = int(counter.get("covered", 0)) if counter is not None else 0
+                lines = changed_lines.get(rel) or set()
+                missed = covered = 0
+                for line_el in sourcefile.findall("line"):
+                    nr = line_el.get("nr")
+                    if nr is None:
+                        continue
+                    try:
+                        nr_int = int(nr)
+                    except ValueError:
+                        continue
+                    if nr_int not in lines:
+                        continue
+                    missed += int(line_el.get("mb", 0))
+                    covered += int(line_el.get("cb", 0))
                 result[rel] = (missed, covered)
     return result
 
 
-def jest_branches():
-    """{リポジトリ相対パス: (missed, covered)} を jest の coverage-final.json から集める。"""
+def _branch_location_overlaps(loc, lines):
+    """jest の branchMap の座標(`{start:{line}, end:{line}}`)が変更行と重なるか。"""
+    if not loc:
+        return False
+    start = (loc.get("start") or {}).get("line")
+    if start is None:
+        return False
+    end = (loc.get("end") or {}).get("line")
+    if end is None:
+        end = start
+    if end < start:
+        start, end = end, start
+    return any(n in lines for n in range(start, end + 1))
+
+
+def jest_branches(changed_lines):
+    """{リポジトリ相対パス: (missed, covered)} を jest の coverage-final.json から、
+    変更行に絞って集める。
+
+    `branchMap` の各分岐(`locations`、無ければ `loc`)の座標が変更行の集合と
+    重なるものだけを分子・分母に含める(要件2)。
+    """
     result = {}
     for app in ("apps/web", "apps/extension", "apps/mcp-server"):
         report = os.path.join(ROOT, app, "coverage", "coverage-final.json")
@@ -324,9 +408,16 @@ def jest_branches():
                 rel = os.path.relpath(os.path.realpath(abs_path), ROOT)
             except ValueError:
                 continue
+            lines = changed_lines.get(rel) or set()
+            branch_map = entry.get("branchMap") or {}
             covered = missed = 0
-            for counts in (entry.get("b") or {}).values():
-                for hit in counts:
+            for branch_id, counts in (entry.get("b") or {}).items():
+                meta = branch_map.get(branch_id) or {}
+                locations = meta.get("locations") or ([meta["loc"]] if meta.get("loc") else [])
+                for i, hit in enumerate(counts):
+                    loc = locations[i] if i < len(locations) else (locations[-1] if locations else None)
+                    if not _branch_location_overlaps(loc, lines):
+                        continue
                     if hit > 0:
                         covered += 1
                     else:
@@ -370,9 +461,10 @@ def main():
         print("計測可能なプロダクションコードの変更はありません。カバレッジ判定をスキップします。")
         return 0
 
+    changed_lines_map = changed_lines_by_file(base)
     coverage = {}
-    coverage.update(jacoco_branches())
-    coverage.update(jest_branches())
+    coverage.update(jacoco_branches(changed_lines_map))
+    coverage.update(jest_branches(changed_lines_map))
 
     missing, rows, total_missed, total_covered = [], [], 0, 0
     for path in changed:
@@ -381,7 +473,7 @@ def main():
             continue
         missed, covered = coverage[path]
         if missed + covered == 0:
-            continue  # 分岐を持たないファイル
+            continue  # 変更行に分岐が無いファイル(#1230: ファイル全体ではなく変更行のみを見る)
         rows.append((path, covered, missed, 100.0 * covered / (missed + covered)))
         total_missed += missed
         total_covered += covered

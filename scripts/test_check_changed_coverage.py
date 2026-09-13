@@ -13,6 +13,7 @@
 import contextlib
 import importlib.util
 import io
+import json
 import os
 import shutil
 import sys
@@ -532,6 +533,213 @@ class TypeOnlyModuleGate(unittest.TestCase):
         code, out = run_main([self.TYPE_ONLY, "apps/extension/webviews/diagramGallery.js"])
         self.assertEqual(code, 0, out)
         self.assertIn("スキップ", out)
+
+
+class ChangedLinesByFile(unittest.TestCase):
+    """`changed_lines_by_file()`: git diff の hunk から追加/変更行番号を得る(#1230)。"""
+
+    def test_parses_added_line_ranges_and_skips_pure_deletions(self):
+        diff_text = (
+            "diff --git a/apps/web/src/lib/format.ts b/apps/web/src/lib/format.ts\n"
+            "index 111..222 100644\n"
+            "--- a/apps/web/src/lib/format.ts\n"
+            "+++ b/apps/web/src/lib/format.ts\n"
+            "@@ -10,0 +11,2 @@ function foo() {\n"
+            "+  const a = 1;\n"
+            "+  const b = 2;\n"
+            "@@ -30,2 +33,0 @@ function bar() {\n"
+            "-  const c = 3;\n"
+            "-  const d = 4;\n"
+        )
+
+        def fake_run(args):
+            if args[:2] == ["git", "diff"]:
+                return diff_text
+            return ""
+
+        with mock.patch.object(ccc, "run", side_effect=fake_run):
+            result = ccc.changed_lines_by_file("origin/develop")
+        self.assertEqual(result["apps/web/src/lib/format.ts"], {11, 12})
+
+    def test_single_line_hunk_without_a_count(self):
+        diff_text = (
+            "diff --git a/apps/web/src/lib/format.ts b/apps/web/src/lib/format.ts\n"
+            "--- a/apps/web/src/lib/format.ts\n"
+            "+++ b/apps/web/src/lib/format.ts\n"
+            "@@ -5 +5 @@ function foo() {\n"
+            "-  const a = 1;\n"
+            "+  const a = 2;\n"
+        )
+
+        def fake_run(args):
+            if args[:2] == ["git", "diff"]:
+                return diff_text
+            return ""
+
+        with mock.patch.object(ccc, "run", side_effect=fake_run):
+            result = ccc.changed_lines_by_file("origin/develop")
+        self.assertEqual(result["apps/web/src/lib/format.ts"], {5})
+
+    def test_diff_failure_returns_empty_map(self):
+        with mock.patch.object(ccc, "run", return_value=None):
+            result = ccc.changed_lines_by_file("origin/develop")
+        self.assertEqual(result, {})
+
+
+class LineScopedJacocoBranches(unittest.TestCase):
+    """`jacoco_branches()`: 行番号でJaCoCoの`<line>`要素を絞り込む(#1230)。"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="ccc-linescope-jacoco-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.rel = "services/identity/src/main/java/com/example/identity/UserService.java"
+        xml_dir = os.path.join(self.tmp, "services", "identity", "build", "reports", "jacoco", "test")
+        os.makedirs(xml_dir)
+        with open(os.path.join(xml_dir, "jacocoTestReport.xml"), "w", encoding="utf-8") as f:
+            f.write(
+                '<?xml version="1.0"?>\n'
+                "<report>\n"
+                '  <package name="com/example/identity">\n'
+                '    <sourcefile name="UserService.java">\n'
+                # このIssueが変更した行(10行目): 完全カバー
+                '      <line nr="10" mi="0" ci="2" mb="0" cb="2"/>\n'
+                # 変更していない既存のレガシー行(50行目): 未カバー
+                '      <line nr="50" mi="4" ci="0" mb="4" cb="0"/>\n'
+                "    </sourcefile>\n"
+                '    <counter type="BRANCH" missed="4" covered="2"/>\n'
+                "  </package>\n"
+                "</report>\n"
+            )
+
+    def test_only_changed_line_branches_are_counted(self):
+        with mock.patch.object(ccc, "ROOT", self.tmp):
+            result = ccc.jacoco_branches({self.rel: {10}})
+        self.assertEqual(result[self.rel], (0, 2))
+
+    def test_unchanged_line_branches_are_excluded(self):
+        with mock.patch.object(ccc, "ROOT", self.tmp):
+            result = ccc.jacoco_branches({self.rel: {50}})
+        self.assertEqual(result[self.rel], (4, 0))
+
+    def test_file_with_no_changed_line_reports_zero_branches(self):
+        """変更行が分岐を持たない場合は (0, 0) になり、上位で除外できること。"""
+        with mock.patch.object(ccc, "ROOT", self.tmp):
+            result = ccc.jacoco_branches({self.rel: {999}})
+        self.assertEqual(result[self.rel], (0, 0))
+
+
+class LineScopedJestBranches(unittest.TestCase):
+    """`jest_branches()`: branchMap の座標で変更行に絞り込む(#1230)。"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="ccc-linescope-jest-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.rel = "apps/web/src/lib/format.ts"
+        self.src_path = os.path.join(self.tmp, *self.rel.split("/"))
+        os.makedirs(os.path.dirname(self.src_path))
+        with open(self.src_path, "w", encoding="utf-8") as f:
+            f.write("// fixture\n")
+        coverage_dir = os.path.join(self.tmp, "apps", "web", "coverage")
+        os.makedirs(coverage_dir)
+        data = {
+            self.src_path: {
+                "branchMap": {
+                    "0": {
+                        "loc": {"start": {"line": 5}, "end": {"line": 5}},
+                        "locations": [
+                            {"start": {"line": 5}, "end": {"line": 5}},
+                            {"start": {"line": 5}, "end": {"line": 5}},
+                        ],
+                    },
+                    "1": {
+                        "loc": {"start": {"line": 50}, "end": {"line": 50}},
+                        "locations": [
+                            {"start": {"line": 50}, "end": {"line": 50}},
+                            {"start": {"line": 50}, "end": {"line": 50}},
+                        ],
+                    },
+                },
+                "b": {"0": [1, 0], "1": [0, 0]},
+            }
+        }
+        with open(os.path.join(coverage_dir, "coverage-final.json"), "w", encoding="utf-8") as f:
+            json.dump(data, f)
+
+    def test_only_branches_on_changed_lines_are_counted(self):
+        with mock.patch.object(ccc, "ROOT", self.tmp):
+            result = ccc.jest_branches({self.rel: {5}})
+        self.assertEqual(result[self.rel], (1, 1))
+
+    def test_branches_outside_changed_lines_are_excluded(self):
+        """変更行がどの branchMap 座標とも重ならない場合は (0, 0) になること。"""
+        with mock.patch.object(ccc, "ROOT", self.tmp):
+            result = ccc.jest_branches({self.rel: {999}})
+        self.assertEqual(result[self.rel], (0, 0))
+
+
+class LineScopedGateEndToEnd(unittest.TestCase):
+    """AC2/AC3: 変更行だけでカバレッジを判定する(#1230)。
+
+    #1063 で実際に起きた事象そのもの: ファイル全体では基準を下回っていても、
+    このIssueが変更した行が100%カバーなら通ること。逆に変更した行自体が
+    カバーされていなければ、他の行がどれだけカバーされていても落ちること。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="ccc-e2e-linescope-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.rel = "services/identity/src/main/java/com/example/identity/UserService.java"
+        xml_dir = os.path.join(self.tmp, "services", "identity", "build", "reports", "jacoco", "test")
+        os.makedirs(xml_dir)
+        with open(os.path.join(xml_dir, "jacocoTestReport.xml"), "w", encoding="utf-8") as f:
+            f.write(
+                '<?xml version="1.0"?>\n'
+                "<report>\n"
+                '  <package name="com/example/identity">\n'
+                '    <sourcefile name="UserService.java">\n'
+                '      <line nr="10" mi="0" ci="2" mb="0" cb="2"/>\n'
+                '      <line nr="50" mi="4" ci="0" mb="4" cb="0"/>\n'
+                "    </sourcefile>\n"
+                '    <counter type="BRANCH" missed="4" covered="2"/>\n'
+                "  </package>\n"
+                "</report>\n"
+            )
+
+    def diff_text(self, changed_line):
+        return (
+            "diff --git a/%s b/%s\n" % (self.rel, self.rel)
+            + "index 111..222 100644\n"
+            + "--- a/%s\n" % self.rel
+            + "+++ b/%s\n" % self.rel
+            + "@@ -%d,0 +%d,1 @@ void m() {\n" % (changed_line - 1, changed_line)
+            + "+  doSomething();\n"
+        )
+
+    def run_gate(self, changed_line):
+        def fake_run(args):
+            if args[:2] == ["git", "diff"]:
+                return self.diff_text(changed_line)
+            return ""
+
+        with mock.patch.object(ccc, "ROOT", self.tmp), mock.patch.object(
+            ccc, "run", side_effect=fake_run
+        ), mock.patch.object(
+            ccc, "changed_production_files", return_value=[self.rel]
+        ), mock.patch.object(sys, "argv", ["check-changed-coverage.py"]):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = ccc.main()
+        return code, buf.getvalue()
+
+    def test_changed_line_fully_covered_passes_despite_low_file_wide_coverage(self):
+        """全体は2/6=33%だが、変更したのは10行目(2/2)だけなので基準を満たす。"""
+        code, out = self.run_gate(changed_line=10)
+        self.assertEqual(code, 0, out)
+
+    def test_changed_line_uncovered_fails_even_if_other_lines_are_covered(self):
+        code, out = self.run_gate(changed_line=50)
+        self.assertEqual(code, 1, out)
+        self.assertIn("下回っています", out)
 
 
 if __name__ == "__main__":
