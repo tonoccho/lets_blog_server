@@ -25,6 +25,14 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
  * {@code spring.jpa.hibernate.ddl-auto: validate} になっているため、食い違えば
  * Spring コンテキストの起動自体が落ちる(#886 で identity-service が
  * 「missing table [role_permissions]」で起動できなかったのがこの形)。
+ *
+ * <p><b>issue #1250 の回帰カバレッジ(赤evidence)</b>: {@code GenerationJobClient} に
+ * {@code @Autowired} の無い2つのコンストラクタが同居していたため、
+ * このクラスを含む本ApplicationContextの起動自体が
+ * {@code BeanInstantiationException}("No default constructor found")で失敗し、
+ * media-serviceの{@code @SpringBootTest}統合テスト47件が連鎖的に落ちていた。
+ * このクラスはコンテキスト起動を前提にしているため、その修正の回帰検知を兼ねる
+ * (新規シナリオの追加は不要 — 既存の{@code @SpringBootTest}群がそのまま赤/緑の証跡になる)。
  */
 @SpringBootTest
 @ActiveProfiles("test")
