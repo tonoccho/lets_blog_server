@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { GeneratedSshKeyPair, SavedSshKeyPair } from "@/lib/apiClient";
+import { formatDateTime } from "@/lib/formatDate";
 import { createSshKeyPairAction, deleteSshKeyPairAction } from "./actions";
 
 export function SshKeyPairsPanel({ keyPairs }: { keyPairs: SavedSshKeyPair[] }) {
@@ -158,7 +159,7 @@ export function SshKeyPairsPanel({ keyPairs }: { keyPairs: SavedSshKeyPair[] }) 
                       />
                     </td>
                     <td className="py-2 pr-4 whitespace-nowrap text-neutral-600 dark:text-neutral-400">
-                      {new Date(keyPair.createdAt).toLocaleString("ja-JP")}
+                      {formatDateTime(keyPair.createdAt)}
                     </td>
                     <td className="py-2 pr-4">
                       <button

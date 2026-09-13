@@ -1,6 +1,12 @@
-import type { APIRequestContext, Page } from '@playwright/test';
+import type { APIRequestContext, BrowserContext, Page } from '@playwright/test';
 import { After, Given, Then, When } from './fixtures';
-import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken } from '../support';
+import {
+  E2E_ADMIN_EMAIL,
+  E2E_ADMIN_PASSWORD,
+  expect,
+  fetchAccessToken,
+  loginViaKeycloak,
+} from '../support';
 import { STUB_URLS, forceStubStatus, resetStub, stubRequestCount } from '../support/stubs';
 
 /**
@@ -1150,5 +1156,93 @@ After({ tags: '@media' }, async ({ ctx, request }) => {
   );
   if (response.ok()) {
     await waitForGenerationJob(request, ((await response.json()) as { id: number }).id);
+  }
+});
+
+/**
+ * ブラウザ/プロフィールのタイムゾーン差によるハイドレーション不一致(issue #1236)。
+ *
+ * `ImageGalleryGrid` は生成日時を `formatDateTime` でロケール整形して表示する。修正前は
+ * オフセット無しの日時文字列(バックエンドのLocalDateTime由来)を実行環境のローカルタイムと
+ * して解釈していたため、SSR(コンテナ、TZ=UTC)とブラウザで表示結果が食い違い、
+ * ハイドレーション不一致が発生し得た。ブラウザTZをプロフィールTZと意図的に違えて開き、
+ * コンソールにハイドレーションエラーが記録されないことを確かめる。
+ *
+ * ブラウザTZは Playwright の `newContext({ timezoneId })` でしか指定できない(既存の
+ * `page` は生成済みのコンテキストに属し、後から変更できない)ため、ここだけ専用の
+ * `BrowserContext` / `Page` を作り、その中でログインする。
+ */
+Given(/^個人設定のタイムゾーンを「([^」]+)」に変更する$/, async ({ ctx, request }, timezone: string) => {
+  const token = await adminToken(request);
+  const me = await request.get('/api/identity/me', { headers: { Authorization: `Bearer ${token}` } });
+  expect(me.ok(), `自ユーザー情報の取得に失敗しました (status=${me.status()})`).toBe(true);
+  const profile = (await me.json()) as { locale: string | null; timezone: string | null };
+  ctx.mediaOriginalTimezone = profile.timezone;
+  ctx.mediaOriginalLocale = profile.locale;
+  const response = await request.patch('/api/identity/me/preferences', {
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    data: { locale: profile.locale ?? 'ja', timezone },
+  });
+  expect(
+    response.ok(),
+    `タイムゾーンの変更に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+});
+
+When(
+  /^ブラウザのタイムゾーンを「([^」]+)」にして管理者としてログインし、生成画像ギャラリーを開く$/,
+  async ({ ctx, page }, timezoneId: string) => {
+    const browser = page.context().browser();
+    if (!browser) {
+      throw new Error('ブラウザインスタンスを取得できない(TZ指定のコンテキストを作成できない)');
+    }
+    const tzContext = await browser.newContext({ ignoreHTTPSErrors: true, timezoneId });
+    const tzPage = await tzContext.newPage();
+    const consoleErrors: string[] = [];
+    tzPage.on('console', (msg) => {
+      if (msg.type() === 'error') {
+        consoleErrors.push(msg.text());
+      }
+    });
+    tzPage.on('pageerror', (err) => {
+      consoleErrors.push(err.message);
+    });
+    ctx.mediaTzContext = tzContext;
+    ctx.mediaTzConsoleErrors = consoleErrors;
+
+    await loginViaKeycloak(tzPage, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);
+    await tzPage.goto(IMAGE_GALLERY_PATH, { waitUntil: 'networkidle' });
+    await expect(tzPage.getByRole('heading', { name: '生成画像ギャラリー' })).toBeVisible({ timeout: 30_000 });
+    // ハイドレーション後の再描画にも猶予を見る(#1236の症状は再描画のタイミングで起きる)。
+    await tzPage.waitForTimeout(1000);
+  }
+);
+
+/** ハイドレーション関連のReact/Next.jsエラーに必ず現れる文言(大文字小文字を区別しない)。 */
+const HYDRATION_ERROR_MARKER = /hydrat/i;
+
+Then('コンソールにハイドレーションエラーが記録されない', async ({ ctx }) => {
+  const consoleErrors = (ctx.mediaTzConsoleErrors as string[] | undefined) ?? [];
+  const hydrationErrors = consoleErrors.filter((text) => HYDRATION_ERROR_MARKER.test(text));
+  expect(
+    hydrationErrors,
+    `ハイドレーションエラーが記録されている(issue #1236):\n  ${hydrationErrors.join('\n  ')}`
+  ).toEqual([]);
+});
+
+After({ tags: '@media' }, async ({ ctx, request }) => {
+  const tzContext = ctx.mediaTzContext as BrowserContext | undefined;
+  if (tzContext) {
+    await tzContext.close();
+  }
+  if (ctx.mediaOriginalTimezone !== undefined) {
+    const token = await adminToken(request);
+    await request.patch('/api/identity/me/preferences', {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: {
+        locale: (ctx.mediaOriginalLocale as string | null) ?? 'ja',
+        timezone: (ctx.mediaOriginalTimezone as string | null) ?? 'Asia/Tokyo',
+      },
+    });
   }
 });

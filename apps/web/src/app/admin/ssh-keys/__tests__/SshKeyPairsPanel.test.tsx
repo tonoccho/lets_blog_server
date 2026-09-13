@@ -2,6 +2,16 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { SshKeyPairsPanel } from "../SshKeyPairsPanel";
 import { createSshKeyPairAction, deleteSshKeyPairAction } from "../actions";
 import type { SavedSshKeyPair } from "@/lib/apiClient";
+import { formatDateTime } from "@/lib/formatDate";
+
+/**
+ * issue #1236: `new Date(keyPair.createdAt).toLocaleString("ja-JP")` を直接呼んでいたため、
+ * オフセット無しの日時文字列(バックエンドのLocalDateTime由来)が実行環境のTZでパースされ、
+ * SSRとブラウザで表示がずれ得た。共有ヘルパ`formatDateTime`を経由するよう変更する。
+ */
+jest.mock("@/lib/formatDate", () => ({
+  formatDateTime: jest.fn(() => "FORMATTED_CREATED_AT"),
+}));
 
 /**
  * issue #1051: 生成フォームの<form>にmethod="post"を明示した(JS無効時のネイティブGET
@@ -100,5 +110,13 @@ describe("SshKeyPairsPanel", () => {
       expect(deleteMock).toHaveBeenCalledWith(1);
       expect(screen.getByText("削除に失敗しました")).toBeInTheDocument();
     });
+  });
+
+  it("作成日時は共有ヘルパformatDateTime経由で表示する(issue #1236)", () => {
+    const pair = keyPair({ createdAt: "2026-09-08T20:03:35" });
+    render(<SshKeyPairsPanel keyPairs={[pair]} />);
+
+    expect(formatDateTime).toHaveBeenCalledWith(pair.createdAt);
+    expect(screen.getByText("FORMATTED_CREATED_AT")).toBeInTheDocument();
   });
 });

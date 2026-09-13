@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
 import type { ConnectedServiceStatus, ConnectedServiceStatusDetail } from "@/lib/apiClient";
+import { formatDateTime } from "@/lib/formatDate";
 
 const POLL_INTERVAL_MS = 30000;
 
@@ -183,7 +184,7 @@ export function ConnectedServiceStatusPanel({
                       {detail.targetUrl ?? "-"}
                     </td>
                     <td className="py-2 text-neutral-700 dark:text-neutral-300">
-                      {new Date(detail.checkedAt).toLocaleString("ja-JP")}
+                      {formatDateTime(detail.checkedAt)}
                     </td>
                   </tr>
                 ))}
