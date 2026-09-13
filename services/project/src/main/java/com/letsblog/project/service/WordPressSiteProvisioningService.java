@@ -14,6 +14,8 @@ import com.letsblog.project.provisioning.WordPressSyncClient;
 import com.letsblog.project.repository.SiteRepository;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
  * {@code site.deleted}ドメインイベント(issue #580、下記{@link DomainEventPublisher})はcontent-service
  * 側が購読済みのため、非同期経路での投稿削除は行われる(即時ではなくイベント配送後になる)。
  */
+@Slf4j
 @Service
 public class WordPressSiteProvisioningService {
 
@@ -137,6 +140,16 @@ public class WordPressSiteProvisioningService {
 
         Site site = siteRepository.findBySiteKey(request.siteKey())
                 .orElseThrow(() -> new SiteNotFoundException("siteKey '" + request.siteKey() + "' は登録されていません"));
+
+        // issue #1198 AC1: 同じ物理実体(同じ正規化wp_slug)を既に別のサイトレコードが参照している
+        // 場合でも、adopt自体は拒否しない(site-adoption.featureのフィクスチャ手順がこの成功を
+        // 前提にしているため。Out of Scope)。ただし「無条件で成功しただけ」にはせず、共有先の
+        // 既存サイトを名指ししたWARNログを残し、運用者が意図的な共有状態だと確認できるようにする。
+        findOtherSiteWithWpSlug(slug, site.getId()).ifPresent(existing -> log.warn(
+                "adoptManagedSite: siteKey '{}' はwp_slug '{}' を既存のサイトid={}(siteKey={})と共有しています。"
+                        + "同じ物理実体(ディレクトリ・DB)を複数のサイトレコードが参照する状態です(issue #1198)。",
+                request.siteKey(), slug, existing.getId(), existing.getSiteKey()));
+
         site.setManagedWordpress(true);
         site.setWpSlug(slug);
         site.setWpDbName(dbName);
@@ -154,7 +167,7 @@ public class WordPressSiteProvisioningService {
         Site site = siteRepository.findById(siteId)
                 .orElseThrow(() -> new SiteNotFoundException("id " + siteId + " のサイトは登録されていません"));
 
-        if (site.isManagedWordpress()) {
+        if (site.isManagedWordpress() && findOtherSiteWithWpSlug(site.getWpSlug(), site.getId()).isEmpty()) {
             provisioningClient.deprovision(site.getWpSlug(), site.getWpDbName());
         }
         siteRepository.delete(site);
@@ -162,6 +175,22 @@ public class WordPressSiteProvisioningService {
         // site.deletedイベント(letsblog.events、issue #580)はcontent-service側が購読済みのため、
         // 非同期経路で投稿削除が行われる。
         domainEventPublisher.publishSiteDeleted(siteId);
+    }
+
+    /**
+     * issue #1198: {@code adoptManagedSite}は、正規化後に同じ{@code wp_slug}(=同じ物理実体
+     * ディレクトリ・DB)を指す複数のサイトレコードが存在すること自体は拒否しない
+     * (site-adoption.featureのフィクスチャ手順が、この挙動を使って「provision-agent側には
+     * 実体があるがDBには未登録」の状態を意図的に再現しているため。issue #1198のOut of Scope)。
+     * そのため{@code deleteSite}では、自分以外に同じwp_slugを参照しているレコードがまだ残って
+     * いるかをここで確認し、残っていれば物理的な実体の削除(deprovision)を見送る。DBレコード
+     * 自体は通常どおり削除してよい(最後の参照が消えたときに、その削除で初めてdeprovisionされる)。
+     * {@code adoptManagedSite}は、この結果を使って共有先の既存サイトをWARNログへ明示する。
+     */
+    private Optional<Site> findOtherSiteWithWpSlug(String wpSlug, Long excludingSiteId) {
+        return siteRepository.findAll().stream()
+                .filter(other -> !other.getId().equals(excludingSiteId) && wpSlug.equals(other.getWpSlug()))
+                .findFirst();
     }
 
     private void cloneFromTemplate(Long templateSiteId, Site newSite, String slug, String dbName) {
