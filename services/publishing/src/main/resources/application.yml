@@ -134,3 +134,12 @@ app:
 keycloak:
   jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/certs}
   issuer: ${KEYCLOAK_ISSUER:https://localhost/auth/realms/letsblog}
+  # サービス間のClient Credentials認証(#567)。issue #1207で、テーマ骨格取得ブリッジ
+  # (ContentServiceClientのfetch-and-splice/fetch-real-post、利用者単位の認可を行わないPlaywright
+  # 専用呼び出し)が呼び出し元ユーザーのBearerトークン転送(forwardedBearer)から本サービス自身の
+  # トークンへ切り替わったため追加した(ServiceTokenClientConfig参照。media-service/identity-service
+  # と同じ設定キー)。
+  admin:
+    token-uri: ${KEYCLOAK_TOKEN_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/token}
+    client-id: ${KEYCLOAK_SERVICES_CLIENT_ID:letsblog-services}
+    client-secret: ${KEYCLOAK_SERVICES_CLIENT_SECRET:}

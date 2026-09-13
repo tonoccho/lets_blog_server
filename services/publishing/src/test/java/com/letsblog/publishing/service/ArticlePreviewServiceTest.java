@@ -14,8 +14,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 
 import java.util.Optional;
@@ -720,6 +723,184 @@ class ArticlePreviewServiceTest {
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    /**
+     * issue #1207 Requirement 4: content-serviceのテーマ骨格取得ブリッジ呼び出しが401/403で失敗した
+     * 場合、他の失敗(タイムアウト・5xx・通信断)と区別できるよう、理由に「認証エラー」を含める。
+     * ContentServiceClient#fetchRealPostは下流の{@code RestClientResponseException}を
+     * {@code IllegalStateException}のcauseとして包んで再送出するため、そのcauseチェーンを見て
+     * 判定する(ContentServiceClient側は変更しない、ArticlePreviewService側だけの変更)。
+     */
+    @Test
+    void renderSkeleton_非公開投稿の実ページ取得が認証エラーで失敗した場合は理由に認証エラーであることを含める() {
+        Project project = projectWithMaster("test", 40L, null);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteService.getById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.createOrUpdatePost(org.mockito.ArgumentMatchers.eq(sshCredentials()),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn(new com.letsblog.publishing.cms.PostResult(
+                        "99", "http://production.example.com/?p=99", "private"));
+        when(cmsAdapter.generateAuthCookie(sshCredentials()))
+                .thenReturn(new com.letsblog.publishing.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
+        HttpClientErrorException unauthorized = HttpClientErrorException.create(
+                HttpStatus.UNAUTHORIZED, "Unauthorized", HttpHeaders.EMPTY, new byte[0], null);
+        when(contentServiceClient.fetchRealPost(
+                "http://production.example.com/?p=99", "wordpress_logged_in_x", "cookie-value"))
+                .thenThrow(new IllegalStateException(
+                        "content-serviceのテーマ骨格取得呼び出しに失敗しました: 401 Unauthorized: [no body]",
+                        unauthorized));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 40L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+
+        assertFalse(response.available());
+        assertTrue(response.reason().contains("認証エラー"),
+                "認証エラー(401/403)は他の失敗原因と区別できる文言にする。実際: " + response.reason());
+    }
+
+    @Test
+    void renderSkeleton_非公開投稿の実ページ取得がタイムアウト等で失敗した場合は理由に認証エラーと書かない() {
+        Project project = projectWithMaster("test", 40L, null);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteService.getById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.createOrUpdatePost(org.mockito.ArgumentMatchers.eq(sshCredentials()),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn(new com.letsblog.publishing.cms.PostResult(
+                        "99", "http://production.example.com/?p=99", "private"));
+        when(cmsAdapter.generateAuthCookie(sshCredentials()))
+                .thenReturn(new com.letsblog.publishing.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
+        when(contentServiceClient.fetchRealPost(
+                "http://production.example.com/?p=99", "wordpress_logged_in_x", "cookie-value"))
+                .thenThrow(new IllegalStateException(
+                        "content-serviceのテーマ骨格取得呼び出しに失敗しました: Read timed out",
+                        new java.net.SocketTimeoutException("Read timed out")));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 40L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+
+        assertFalse(response.available());
+        assertFalse(response.reason().contains("認証エラー"),
+                "認証以外の失敗を認証エラーと誤表示してはいけない。実際: " + response.reason());
+    }
+
+    /** isAuthFailureの分岐カバレッジ: 403も401と同じく認証エラーとして扱う。 */
+    @Test
+    void renderSkeleton_非公開投稿の実ページ取得が403で失敗した場合も理由に認証エラーであることを含める() {
+        Project project = projectWithMaster("test", 40L, null);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteService.getById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.createOrUpdatePost(org.mockito.ArgumentMatchers.eq(sshCredentials()),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn(new com.letsblog.publishing.cms.PostResult(
+                        "99", "http://production.example.com/?p=99", "private"));
+        when(cmsAdapter.generateAuthCookie(sshCredentials()))
+                .thenReturn(new com.letsblog.publishing.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
+        HttpClientErrorException forbidden = HttpClientErrorException.create(
+                HttpStatus.FORBIDDEN, "Forbidden", HttpHeaders.EMPTY, new byte[0], null);
+        when(contentServiceClient.fetchRealPost(
+                "http://production.example.com/?p=99", "wordpress_logged_in_x", "cookie-value"))
+                .thenThrow(new IllegalStateException(
+                        "content-serviceのテーマ骨格取得呼び出しに失敗しました: 403 Forbidden: [no body]",
+                        forbidden));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 40L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+
+        assertFalse(response.available());
+        assertTrue(response.reason().contains("認証エラー"),
+                "403も認証エラーとして扱う。実際: " + response.reason());
+    }
+
+    /**
+     * isAuthFailureの分岐カバレッジ: 401/403以外のRestClientResponseException(5xx)は
+     * 認証エラーとして扱わない(status.value()==401/==403のいずれもfalseになる経路)。
+     */
+    @Test
+    void renderSkeleton_非公開投稿の実ページ取得が500で失敗した場合は理由に認証エラーと書かない() {
+        Project project = projectWithMaster("test", 40L, null);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteService.getById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.createOrUpdatePost(org.mockito.ArgumentMatchers.eq(sshCredentials()),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn(new com.letsblog.publishing.cms.PostResult(
+                        "99", "http://production.example.com/?p=99", "private"));
+        when(cmsAdapter.generateAuthCookie(sshCredentials()))
+                .thenReturn(new com.letsblog.publishing.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
+        org.springframework.web.client.HttpServerErrorException serverError =
+                org.springframework.web.client.HttpServerErrorException.create(
+                        HttpStatus.INTERNAL_SERVER_ERROR, "Internal Server Error", HttpHeaders.EMPTY,
+                        new byte[0], null);
+        when(contentServiceClient.fetchRealPost(
+                "http://production.example.com/?p=99", "wordpress_logged_in_x", "cookie-value"))
+                .thenThrow(new IllegalStateException(
+                        "content-serviceのテーマ骨格取得呼び出しに失敗しました: 500 Internal Server Error: [no body]",
+                        serverError));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 40L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+
+        assertFalse(response.available());
+        assertFalse(response.reason().contains("認証エラー"),
+                "5xxは認証エラーではない。実際: " + response.reason());
+    }
+
+    /**
+     * isAuthFailureの分岐カバレッジ: 本サービス自身のClient Credentialsトークン取得失敗
+     * (ServiceTokenUnavailableException、issue #567・#1207)も認証エラーとして扱う。
+     */
+    @Test
+    void renderSkeleton_自身のサービストークン取得が失敗した場合も理由に認証エラーであることを含める() {
+        Project project = projectWithMaster("test", 40L, null);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteService.getById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter = org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.createOrUpdatePost(org.mockito.ArgumentMatchers.eq(sshCredentials()),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn(new com.letsblog.publishing.cms.PostResult(
+                        "99", "http://production.example.com/?p=99", "private"));
+        when(cmsAdapter.generateAuthCookie(sshCredentials()))
+                .thenReturn(new com.letsblog.publishing.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
+        when(contentServiceClient.fetchRealPost(
+                "http://production.example.com/?p=99", "wordpress_logged_in_x", "cookie-value"))
+                .thenThrow(new com.letsblog.common.auth.ServiceTokenUnavailableException(
+                        "サービストークンの取得に失敗しました(client_id=letsblog-services): 401 Unauthorized"));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 40L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+
+        assertFalse(response.available());
+        assertTrue(response.reason().contains("認証エラー"),
+                "自身のサービストークン取得失敗も認証エラーとして扱う。実際: " + response.reason());
     }
 
     @Test

@@ -505,6 +505,12 @@ services:
       # (起動時の依存関係(depends_on)には含めない。循環しない実行時呼び出し先としてのみ設定する)。
       # CurrentActorService の自分自身の userId 解決も同じ宛先。
       IDENTITY_SERVICE_URI: http://identity:8080
+      # サービス間のClient Credentials認証(#567)。issue #1207で、テーマ骨格取得ブリッジ
+      # (ContentServiceClientのfetch-and-splice/fetch-real-post)がforwardedBearerから
+      # 本サービス自身のトークンへ切り替わったため追加した。他の値(token-uri等)はコンテナ間の
+      # 既定URLで足りるためservices/publishing/src/main/resources/application.ymlの既定値に
+      # 委ねる(media/identity-serviceと同じ方針)。
+      KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
       # 投稿画像リサイズのプロジェクト別デフォルト(project_image_settings、MediaSettingsBridgeClient)は
       # issue #583 で media-service が所有するようになったため、下の MEDIA_SERVICE_URI 経由で解決する。
       # [plantuml]/```plantumlの埋め込み(PlantUmlEmbedService/PlantUmlTagRenderService)の実際の

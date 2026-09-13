@@ -1,5 +1,7 @@
 package com.letsblog.publishing.client;
 
+import com.letsblog.common.auth.ServiceTokenClient;
+import com.letsblog.common.client.ServiceAuthHeaders;
 import com.letsblog.publishing.service.InvalidRechartsTagException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.http.HttpClient;
@@ -43,14 +45,16 @@ public class ContentServiceClient {
     private final RestClient restClient;
     private final RestClient previewSkeletonRestClient;
     private final HttpServletRequest request;
+    private final ServiceTokenClient serviceTokenClient;
 
     public ContentServiceClient(
             RestClient.Builder builder, @Value("${app.content-service-uri}") String contentServiceUri,
-            HttpServletRequest request) {
+            HttpServletRequest request, ServiceTokenClient serviceTokenClient) {
         this.renderRestClient = build(builder, contentServiceUri, RENDER_READ_TIMEOUT);
         this.restClient = build(builder, contentServiceUri, READ_TIMEOUT);
         this.previewSkeletonRestClient = build(builder, contentServiceUri, PREVIEW_SKELETON_READ_TIMEOUT);
         this.request = request;
+        this.serviceTokenClient = serviceTokenClient;
     }
 
     private RestClient build(RestClient.Builder builder, String baseUrl, Duration readTimeout) {
@@ -192,6 +196,15 @@ public class ContentServiceClient {
      * ArticlePreviewService#renderSkeletonが使う。Playwrightを持つのはcontent-serviceのため
      * (issue #576の注記)、CMS/Site認証情報の解決は本サービス側で済ませた上で、navigateUrl・
      * 差し替え内容のみを渡してPreviewSkeletonFetcher#fetchAndSpliceを実行してもらう。
+     *
+     * <p><b>認証(issue #1207で変更)</b>: このエンドポイントはnavigateUrl・差し替え内容を受け取って
+     * Playwrightを動かすだけで、利用者単位の認可を一切行わない。以前は他の内部ブリッジ呼び出しと
+     * 同じく呼び出し元ユーザーのBearerトークンをそのまま転送していた({@code forwardedBearer})が、
+     * これは呼び出し完了までそのトークンが有効であることに暗黙に依存し、WordPressエージェント投稿
+     * (WordPressAgentOperations)からの一連の同期呼び出しの終盤で行われるこの呼び出しでは不必要な
+     * 失敗要因になっていた。media-serviceのGenerationJobClient(issue #1083、同種の判断)と同じく、
+     * 本サービス自身のClient Credentialsトークン({@link ServiceTokenClient}、issue #567)へ切り替えた
+     * (docs/SYNC_SERVICE_CALLS.md「認証」節参照)。
      */
     public ThemeSkeletonBridgeResponse fetchAndSplice(
             String url, String titleRendered, String contentRendered, String ourTitle, String ourContentHtml,
@@ -204,8 +217,9 @@ public class ContentServiceClient {
             body.put("ourTitle", ourTitle);
             body.put("ourContentHtml", ourContentHtml);
             body.put("featuredImageDataUri", featuredImageDataUri);
-            ThemeSkeletonBridgeResponse result = authorized(previewSkeletonRestClient.post()
-                    .uri("/api/internal/content/preview-skeleton/fetch-and-splice"))
+            ThemeSkeletonBridgeResponse result = previewSkeletonRestClient.post()
+                    .uri("/api/internal/content/preview-skeleton/fetch-and-splice")
+                    .headers(ServiceAuthHeaders.clientCredentials(serviceTokenClient))
                     .body(body)
                     .retrieve()
                     .body(ThemeSkeletonBridgeResponse.class);
@@ -218,12 +232,17 @@ public class ContentServiceClient {
         }
     }
 
-    /** ArticlePreviewService#renderRealPrivatePostが使う。 */
+    /**
+     * ArticlePreviewService#renderRealPrivatePostが使う。
+     *
+     * <p>認証方式は{@link #fetchAndSplice}と同じ理由(issue #1207)でclientCredentialsを使う。
+     */
     public ThemeSkeletonBridgeResponse fetchRealPost(String url, String cookieName, String cookieValue) {
         try {
             Map<String, Object> body = Map.of("url", url, "cookieName", cookieName, "cookieValue", cookieValue);
-            ThemeSkeletonBridgeResponse result = authorized(previewSkeletonRestClient.post()
-                    .uri("/api/internal/content/preview-skeleton/fetch-real-post"))
+            ThemeSkeletonBridgeResponse result = previewSkeletonRestClient.post()
+                    .uri("/api/internal/content/preview-skeleton/fetch-real-post")
+                    .headers(ServiceAuthHeaders.clientCredentials(serviceTokenClient))
                     .body(body)
                     .retrieve()
                     .body(ThemeSkeletonBridgeResponse.class);

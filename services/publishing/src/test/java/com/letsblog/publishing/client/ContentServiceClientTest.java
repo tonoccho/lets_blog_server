@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.letsblog.common.auth.ServiceTokenClient;
 import com.letsblog.publishing.service.InvalidRechartsTagException;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -15,6 +16,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -26,12 +28,19 @@ import org.springframework.web.client.RestClient;
  * リクエストボディの組み立てで落ちず、content-serviceへ{@code projectId}をnullとして送れることを、
  * 実際のHTTPサーバー(JDK標準の{@link HttpServer})を使って検証する
  * (SyncServiceClientTestと同じ手法)。
+ *
+ * <p>issue #1207: {@code preview-skeleton/fetch-and-splice}・{@code fetch-real-post}の2エンドポイントは
+ * 利用者単位の認可を一切行わないPlaywright専用ブリッジのため、呼び出し元ユーザーのBearerトークン転送
+ * ({@code forwardedBearer})ではなく本サービス自身のClient Credentialsトークン({@link ServiceTokenClient}、
+ * issue #567)を使う。media-serviceの{@code GenerationJobClientTest}(issue #1083)と同じく、
+ * トークンエンドポイントも同じ{@link HttpServer}上の別パスとして待ち受ける。
  */
 class ContentServiceClientTest {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private HttpServer httpServer;
+    private ServiceTokenClient serviceTokenClient;
 
     @AfterEach
     void tearDown() {
@@ -140,10 +149,71 @@ class ContentServiceClientTest {
         assertEquals(7L, body.path("projectId").asLong());
     }
 
+    /**
+     * issue #1207: fetch-and-splice/fetch-real-postは利用者単位の認可を行わないPlaywright専用
+     * ブリッジのため、呼び出し元ユーザーのAuthorizationヘッダー({@code "Bearer test-token"})では
+     * なく、本サービス自身のClient Credentialsトークン({@code "Bearer service-token-1"}、
+     * {@link #serviceTokenClient}参照)が付与されることを固定する。
+     */
+    @Test
+    void fetchAndSplice_呼び出し元のBearerではなく自身のClientCredentialsトークンを付与する() throws IOException {
+        AtomicReference<List<String>> receivedAuth = new AtomicReference<>();
+        httpServer = startHttpServer(exchange -> {
+            receivedAuth.set(exchange.getRequestHeaders().get("Authorization"));
+            readBody(exchange);
+            respond(exchange, 200,
+                    "{\"html\":\"<article>page</article>\",\"available\":true,\"reason\":null,"
+                            + "\"eyecatchSpliced\":true,\"css\":\"\"}");
+        });
+        ContentServiceClient client = newClient();
+
+        client.fetchAndSplice(
+                "http://example.com/post", "参照タイトル", "参照本文", "自分のタイトル", "<p>自分の本文</p>", null);
+
+        assertNotNull(receivedAuth.get());
+        assertEquals(List.of("Bearer service-token-1"), receivedAuth.get());
+    }
+
+    @Test
+    void fetchRealPost_呼び出し元のBearerではなく自身のClientCredentialsトークンを付与する() throws IOException {
+        AtomicReference<List<String>> receivedAuth = new AtomicReference<>();
+        httpServer = startHttpServer(exchange -> {
+            receivedAuth.set(exchange.getRequestHeaders().get("Authorization"));
+            readBody(exchange);
+            respond(exchange, 200,
+                    "{\"html\":\"<article>page</article>\",\"available\":true,\"reason\":null,"
+                            + "\"eyecatchSpliced\":false,\"css\":\"\"}");
+        });
+        ContentServiceClient client = newClient();
+
+        client.fetchRealPost("http://example.com/post?p=1", "wordpress_logged_in_x", "cookie-value");
+
+        assertNotNull(receivedAuth.get());
+        assertEquals(List.of("Bearer service-token-1"), receivedAuth.get());
+    }
+
     private ContentServiceClient newClient() {
         MockHttpServletRequest servletRequest = new MockHttpServletRequest();
         servletRequest.addHeader("Authorization", "Bearer test-token");
-        return new ContentServiceClient(RestClient.builder(), baseUrl(httpServer), servletRequest);
+        return new ContentServiceClient(
+                RestClient.builder(), baseUrl(httpServer), servletRequest, serviceTokenClient(httpServer));
+    }
+
+    /**
+     * {@link ServiceTokenClient}が問い合わせるClient Credentialsトークンエンドポイントを、
+     * 呼び出し元のHTTPサーバーと同じ{@link HttpServer}上の別パス({@code /token})として待ち受ける
+     * (media-serviceのGenerationJobClientTest、issue #1083と同じ手法)。
+     */
+    private ServiceTokenClient serviceTokenClient(HttpServer server) {
+        if (serviceTokenClient == null) {
+            server.createContext("/token", exchange -> {
+                readBody(exchange);
+                respond(exchange, 200, "{\"access_token\":\"service-token-1\",\"expires_in\":3600}");
+            });
+            serviceTokenClient = new ServiceTokenClient(
+                    RestClient.builder(), baseUrl(server) + "/token", "letsblog-services", "test-secret");
+        }
+        return serviceTokenClient;
     }
 
     private HttpServer startHttpServer(HttpHandler handler) throws IOException {

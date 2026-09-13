@@ -21,9 +21,11 @@ import com.letsblog.publishing.dto.ThemeSkeletonResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -472,8 +474,14 @@ public class ArticlePreviewService {
                     bridged.html(), bridged.available(), bridged.reason(), bridged.eyecatchSpliced(), bridged.css());
         } catch (Exception e) {
             logger.warn("プレビュー用投稿ページの取得に失敗しました: {}", site.getSiteKey(), e);
+            // issue #1207 Requirement 4: 401/403(認証エラー)は、タイムアウト・5xx・通信断といった
+            // 他の失敗原因と混ぜず区別できるよう理由に明記する。ContentServiceClient#fetchRealPostは
+            // RestClientResponseExceptionをIllegalStateExceptionのcauseとして包んで再送出するため、
+            // causeチェーンを辿って判定する(ContentServiceClient自体は変更しない)。
+            String prefix = isAuthFailure(e) ? "投稿ページの取得に失敗しました(認証エラー): "
+                    : "投稿ページの取得に失敗しました: ";
             return new ThemeSkeletonResponse(
-                    null, false, "投稿ページの取得に失敗しました: " + e.getMessage(), false, "", result.id());
+                    null, false, prefix + e.getMessage(), false, "", result.id());
         }
 
         String css = internalOrigin != null ? fetched.css().replace(internalOrigin, publicOrigin) : fetched.css();
@@ -482,6 +490,27 @@ public class ArticlePreviewService {
         }
         String html = internalOrigin != null ? fetched.html().replace(internalOrigin, publicOrigin) : fetched.html();
         return new ThemeSkeletonResponse(html, true, null, false, css, result.id(), eyecatchWarning);
+    }
+
+    /**
+     * issue #1207 Requirement 4: 例外(のcauseチェーン)に401/403の{@link RestClientResponseException}、
+     * または本サービス自身のClient Credentialsトークン取得失敗
+     * ({@link com.letsblog.common.auth.ServiceTokenUnavailableException}、issue #567)が
+     * 含まれるかどうかで、認証エラーとそれ以外(タイムアウト・5xx・通信断)を区別する。
+     */
+    private boolean isAuthFailure(Throwable e) {
+        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            if (cause instanceof RestClientResponseException responseException) {
+                HttpStatusCode status = responseException.getStatusCode();
+                if (status.value() == 401 || status.value() == 403) {
+                    return true;
+                }
+            }
+            if (cause instanceof com.letsblog.common.auth.ServiceTokenUnavailableException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** data URI(data:&lt;contentType&gt;;base64,&lt;data&gt;)をデコードした結果。 */
