@@ -81,6 +81,27 @@ GitHub の squash merge とは結果が違い、`develop` の線形履歴が崩�
 `issueParser`、`infra/e2e-stubs/github/`）は**移行対象外**（利用者決定）。開発ワークフローとは
 別物であり、GitLab 対応にはしない。
 
+### 7. GitHub はコードとタグの一方向ミラーとして残す（2026-09-13 追記、#1256）
+
+決定4（CI 不稼働）は「`.github/` を削除した」理由が「CI が動かないため」であって、GitHub の
+存在自体を否定するものではなかった。移行元の GitHub リポジトリ `tonoccho/lets_blog_server`
+（private）は削除せず、**GitLab → GitHub の一方向 push ミラー**として維持することにした
+（#1256）。
+
+- **GitHub はコードとタグの副本にとどまる。** Issue・Merge Request・CI は GitLab に一本化
+  したまま変えない。GitHub 側で Issue・PR・Actions を運用することはしない。
+- ミラー対象は `main` / `develop` の2ブランチ（`only_protected_branches: true`）とタグ全件
+  （GitLab の push ミラーはタグを絞り込めない。gitlab-org/gitlab#24873、#457680）。
+- #1274 が GitLab の `main` へ検証済み develop をマージし semver タグを付ける運用に対し、
+  本ミラーが GitHub 側へその `main` とタグを届ける経路になる。GitHub の `main` に付いた
+  タグが、以後のリリースバージョンとして扱われる。
+- 認証は GitHub の fine-grained personal access token（対象リポジトリ限定、
+  Contents: Read and write、Workflows: Read and write）。同期方向は一方向のみで、GitHub 側の
+  変更が GitLab へ戻ることはない。
+
+設定手順・トークンの権限とその理由・運用手順は
+[GITLAB_WORKFLOW_SETUP.md](../GITLAB_WORKFLOW_SETUP.md) の「7. GitHub へのミラー」を参照。
+
 ## 帰結
 
 ### 得たもの

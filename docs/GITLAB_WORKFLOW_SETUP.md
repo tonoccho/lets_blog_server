@@ -233,6 +233,155 @@ glab api "projects/:id" | jq '{merge_method, squash_option}'
 
 ---
 
+## 7. GitHub へのミラー
+
+移行元の GitHub リポジトリ `tonoccho/lets_blog_server`（private、削除していない）を、
+**GitLab → GitHub の一方向 push ミラー**として維持する（#1256）。GitLab がコード・Issue・
+MR の source of truth であることは変わらない。GitHub 側の変更が GitLab へ戻ることはなく、
+GitHub 上での Issue・PR・CI の運用も行わない（[ADR-0010](adr/0010-github-to-gitlab-migration.md)
+決定4・決定7）。
+
+### 7.1 前提: `main` を保護ブランチにする
+
+GitLab CE では正規表現によるブランチ絞り込み（Mirror specific branches）が使えず（Premium
+機能）、ミラー側で選べる絞り込みは `only_protected_branches` のみである。これを効かせるため、
+`develop` と同じ条件で `main` も保護ブランチに追加しておく。
+
+| 項目 | 値 |
+| --- | --- |
+| push | Maintainers（access level 40） |
+| merge | Maintainers（access level 40） |
+| `allow_force_push` | `false` |
+
+作成は Web UI の Settings → Repository → Protected branches → Add protected branch で、
+Branch に `main`、Allowed to merge と Allowed to push and merge に Maintainers を選び、
+Allowed to force push をオフにする。作成後に確認する:
+
+```bash
+glab api "projects/:id/protected_branches" | jq '[.[] | {name, allow_force_push}]'
+```
+
+`main` の保護は、`develop` と同様に直接 push を Maintainers に制限する。#1274 のリリース
+push（develop を main へマージし semver タグを付ける）は Owner の `seiji` が行うため影響しない。
+
+### 7.2 GitHub トークンを発行する
+
+GitHub 側で fine-grained personal access token を発行する。**利用者が GitHub の Web UI で
+発行し、次の 7.3 のミラー設定画面に直接入力する。** トークンの値は、リポジトリにも docs にも
+エージェントとの会話にも出さない。
+
+| 項目 | 値 |
+| --- | --- |
+| Resource owner | `tonoccho` |
+| Repository access | Only select repositories → `tonoccho/lets_blog_server` |
+| Contents | Read and write |
+| Workflows | **Read and write** |
+| Metadata | Read-only（自動で付く） |
+| それ以外 | No access |
+
+**Workflows がなぜ要るか。** GitHub は `.github/workflows/` 配下のファイルを作成・変更・
+**削除**するコミットの push を、Workflows 権限の無いトークンでは拒否する。
+
+- develop の初回同期（GitHub 側 HEAD → GitLab の develop 先頭）には、CI 設定を削除した
+  コミット（!1027、ADR-0010 決定4）が含まれ、`.github/workflows/*.yml` の削除を push する。
+- GitHub の `main` の木には現時点で `.github/workflows/` が残っている。#1274 で develop を
+  main へマージすると、main 上でも同じ削除が push される。
+
+「ADR-0010 で `.github/` を削除済みだから Workflows 権限は要らない」という判断は誤りだった
+（#1256 のコメントで訂正済み）。削除そのものが Workflows 権限を要求する。
+
+有効期限は利用者が発行時に決める。期限切れ時の再発行手順は 7.6 を参照。
+
+### 7.3 GitLab 側にミラーを設定する
+
+GitLab の Web UI: Settings → Repository → Mirroring repositories → Add new mirror repository。
+
+| 項目 | 値 |
+| --- | --- |
+| Git repository URL | `https://github.com/tonoccho/lets_blog_server.git` |
+| Mirror direction | Push |
+| Authentication method | Username and Password |
+| Username | `tonoccho` |
+| Password | 7.2 で発行したトークン |
+| Mirror only protected branches | 有効 |
+| Keep divergent refs | 無効（既定の GitLab push ミラーの動作。強制 push・履歴書き換えが
+  GitHub 側にあっても上書きしてよいという利用者決定に一致する） |
+
+API から確認する場合（ミラー URL の応答はユーザー名までマスクされる。トークンは含まれない）:
+
+```bash
+glab api "projects/:id/remote_mirrors" | \
+  jq '.[] | {id, url, enabled, only_protected_branches, keep_divergent_refs, update_status, last_error}'
+```
+
+### 7.4 ブランチ・タグの初回整合
+
+- `develop`・`main` は、ミラーの初回同期で GitHub 側へ fast-forward で反映される。手作業の
+  push は不要。
+- **GitHub にだけ残っているブランチ**（`main` / `develop` 以外）は、保護ブランチのみの
+  ミラーが触れないため、消えずに残る。GitHub の Web UI で手動で削除する。
+- 同期の前に、GitHub 側のブランチとタグの一覧を控えておく。GitHub にだけ存在するタグが
+  あれば扱いを利用者が決める。
+
+### 7.5 タグは絞り込めない（常に全件ミラーされる）
+
+`only_protected_branches: true` にしていても、GitLab の push ミラーは**タグを全件 GitHub へ
+送る**。GitLab 側にタグの絞り込みオプションは無い（gitlab-org/gitlab#24873、#457680。CE・
+Premium を問わず未実装）。
+
+帰結として、**GitLab 上で作ったタグは、どのコミットを指していても GitHub に公開される。**
+運用規約として、GitLab に使い捨てのタグを作らない（動作確認用の一時タグを除き、確認後は
+GitLab・GitHub 双方から削除する）。#1274 が付ける semver タグは、この経路でそのまま
+GitHub 側のリリースバージョンになる。
+
+### 7.6 同期状況の確認・失敗時の対処・トークン再発行
+
+**状況の確認:**
+
+```bash
+glab api "projects/:id/remote_mirrors" | \
+  jq '.[] | {update_status, last_update_started_at, last_successful_update_at, last_error}'
+```
+
+| フィールド | 意味 |
+| --- | --- |
+| `update_status` | `finished` なら直近の同期は完了している |
+| `last_successful_update_at` | 最後に成功した同期時刻 |
+| `last_error` | `null` でなければ同期が失敗している。理由がここに入る |
+
+反映は push から最大5分、`only_protected_branches` が有効なら最大1分。即時ではない。
+
+**GitLab の Web UI は同期完了後も「Updating」と表示され続けることがある**（画面を再読み込み
+するまで更新されない、2026-09-13 に実機で確認）。UI の表示だけで判断せず、上記 API で
+`update_status` / `last_error` を確認すること。
+
+同期を今すぐ走らせたい場合は、Web UI の「Update now」ボタン、または API で:
+
+```bash
+glab api "projects/:id/remote_mirrors/<id>/sync" --method POST
+```
+
+**`last_error` が入っている場合の対処:**
+
+- 認証エラー（トークン期限切れ・権限不足）→ 下記「トークンの再発行」の手順で新しいトークンに
+  差し替える。
+- `.github/workflows/` を含む差分で拒否される場合 → トークンの Workflows 権限が
+  「Read and write」になっているか確認する（7.2）。
+- 到達性の問題（GitLab コンテナから `github.com:443` に出られない）→ ネットワーク側の調査に
+  切り分ける。この環境では 2026-09-13 時点で到達可能（HTTP 200）であることを確認済み。
+
+**トークンの再発行手順:**
+
+1. GitHub の Web UI で新しい fine-grained PAT を、7.2 と同じ権限（Contents: Read and write、
+   Workflows: Read and write）で発行する。
+2. GitLab の Web UI: Settings → Repository → Mirroring repositories → 対象ミラーの
+   Edit → Password 欄に新しいトークンを入力して保存する（URL やユーザー名は変えない）。
+3. 「Update now」で同期を走らせる。
+4. `glab api "projects/:id/remote_mirrors"` で `last_error: null` を確認する。
+5. 確認できたら、GitHub 側で旧トークンを Revoke する。
+
+---
+
 ## トラブルシュート
 
 | 症状 | 原因 |
@@ -253,3 +402,5 @@ glab api "projects/:id" | jq '{merge_method, squash_option}'
 - `scripts/setup-gitlab-board.sh` — ラベルとボードの定義
 - `scripts/check-issue-labels.sh` — ラベル整合性の検査
 - `scripts/issue-dependency-status.sh` — Ready/Backlog 判定の入力を取得する
+- [`adr/0010-github-to-gitlab-migration.md`](adr/0010-github-to-gitlab-migration.md) —
+  GitHub を一方向ミラーとして残す方針の記録
