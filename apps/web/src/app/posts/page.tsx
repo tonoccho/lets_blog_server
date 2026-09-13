@@ -1,9 +1,13 @@
 import { listPosts } from "@/lib/apiClient";
-import { getViewerTimeZone } from "@/lib/session";
+import { requireSession, getViewerTimeZone } from "@/lib/session";
 import { formatDateTime } from "@/lib/formatDate";
 import { PostsTable } from "./PostsTable";
 
 export default async function PostsPage() {
+  // セッションが更新不能なときはここで /login へリダイレクトする(issue #1234)。
+  // 以前はセッションの状態を見ずに描画しており、失敗したlistPosts()を
+  // catch(() => [])で握り潰すため「投稿履歴が0件」に見えていた。
+  await requireSession();
   const [posts, timezone] = await Promise.all([listPosts().catch(() => []), getViewerTimeZone()]);
 
   return (

@@ -1,14 +1,17 @@
 import { listSites, listProjects, listUsers, listSshKeyPairs } from "@/lib/apiClient";
-import { getSession, getViewerTimeZone } from "@/lib/session";
+import { requireSession, getViewerTimeZone } from "@/lib/session";
 import { SiteCreationPanel } from "./SiteCreationPanel";
 import { SiteListTable } from "./SiteListTable";
 
 export default async function SitesPage() {
-  const [sites, projects, users, session, timezone] = await Promise.all([
+  // セッションが更新不能なときはここで /login へリダイレクトする(issue #1234)。
+  // 以前はgetSession()でsession.errorを見ておらず、リロードしないと再ログイン画面へ
+  // 遷移できなかった。
+  const session = await requireSession();
+  const [sites, projects, users, timezone] = await Promise.all([
     listSites().catch(() => []),
     listProjects().catch(() => []),
     listUsers().catch(() => []),
-    getSession(),
     getViewerTimeZone(),
   ]);
   const isAdmin = session?.user.role === "admin";

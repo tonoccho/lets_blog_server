@@ -7,12 +7,15 @@ import {
   getConnectedServiceStatusDetail,
   getContainerStatuses,
 } from "@/lib/apiClient";
-import { getSession } from "@/lib/session";
+import { requireSession } from "@/lib/session";
 import { ConnectedServiceStatusPanel } from "./ConnectedServiceStatusPanel";
 import { ContainerStatusPanel } from "./ContainerStatusPanel";
 
 export default async function DashboardPage() {
-  const session = await getSession();
+  // セッションが更新不能(session.error === "RefreshAccessTokenError")なときはここで
+  // /login へリダイレクトする(issue #1234)。以前はgetSession()でsession.errorを見ずに
+  // 描画していたため、リロードしないと再ログイン画面へ遷移できなかった。
+  const session = await requireSession();
   const isAdmin = session?.user.role === "admin";
 
   const [sites, posts, jobs, serviceStatuses, serviceStatusDetail, containerStatuses] = await Promise.all([

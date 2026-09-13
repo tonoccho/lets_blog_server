@@ -890,6 +890,45 @@ Then('「APIエラー \\(401): Unauthorized」という文言は表示されな�
   await expect(page.getByText('APIエラー (401): Unauthorized')).toHaveCount(0);
 });
 
+// ------------------------------------------------------ ソフト遷移(issue #1234)
+
+/**
+ * ヘッダーの<Link>、またはダッシュボードのカードの<Link>を、名前(可視テキスト)で
+ * クリックする。`page.goto()` を使わないのが要点(issue #1234): 利用者の報告は
+ * クリックによるクライアント側のソフト遷移では再ログインへ飛ばないというものであり、
+ * `page.goto()` はページ全体を再読み込みするため症状を再現しない。
+ *
+ * ヘッダーのリンクは `title`属性と可視テキストが同じ(HeaderNav.tsx)、ダッシュボードの
+ * カードのリンクは「ラベル+件数」を可視テキストに持つ(page.tsx)ため、部分一致の
+ * アクセシブルネームで両方を1つのステップで扱える。
+ */
+/**
+ * ヘッダーの`<Link>`はアクセシブルネームがラベルそのもの(`title`属性、HeaderNav.tsx)なので
+ * 完全一致(`exact: true`)で特定する。ダッシュボードのカードの`<Link>`はラベルの後ろに
+ * 件数が続く(「投稿数0」のように、`page.tsx`)ため部分一致にする必要があり、`exact`は
+ * 呼び出し側で選ばせる。
+ */
+async function clickLinkByName(page: Page, label: string, exact: boolean): Promise<void> {
+  await page.getByRole('link', { name: label, exact }).first().click();
+}
+
+Step('「ダッシュボード」のリンクをクリックする', async ({ page }) => clickLinkByName(page, 'ダッシュボード', true));
+Step('「サイト」のリンクをクリックする', async ({ page }) => clickLinkByName(page, 'サイト', true));
+Step('「投稿数」のリンクをクリックする', async ({ page }) => clickLinkByName(page, '投稿数', false));
+Step('「生成画像ギャラリー」のリンクをクリックする', async ({ page }) => clickLinkByName(page, '生成画像ギャラリー', true));
+
+Then('「登録サイト数」という文言は表示されない', async ({ page }) => {
+  await expect(page.getByText('登録サイト数')).toHaveCount(0);
+});
+
+Then('「全0件を表示」という文言は表示されない', async ({ page }) => {
+  await expect(page.getByText('全0件を表示')).toHaveCount(0);
+});
+
+Then('「生成画像がありません」という文言は表示されない', async ({ page }) => {
+  await expect(page.getByText('生成画像がありません', { exact: false })).toHaveCount(0);
+});
+
 After({ tags: '@auth' }, async ({ ctx, request }) => {
   const projectId = ctx.tlcProjectId as number | undefined;
   const siteId = ctx.tlcSiteId as number | undefined;

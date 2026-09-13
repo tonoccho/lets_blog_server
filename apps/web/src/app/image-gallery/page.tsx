@@ -1,8 +1,12 @@
 import { listGeneratedImages } from "@/lib/apiClient";
-import { getViewerTimeZone } from "@/lib/session";
+import { requireSession, getViewerTimeZone } from "@/lib/session";
 import { ImageGalleryGrid } from "./ImageGalleryGrid";
 
 export default async function ImageGalleryPage() {
+  // セッションが更新不能なときはここで /login へリダイレクトする(issue #1234)。
+  // 以前はセッションの状態を見ずに描画しており、失敗したlistGeneratedImages()を
+  // catch(() => [])で握り潰すため「生成画像がありません」に見えていた。
+  await requireSession();
   const [images, timezone] = await Promise.all([
     listGeneratedImages().catch(() => []),
     getViewerTimeZone(),
