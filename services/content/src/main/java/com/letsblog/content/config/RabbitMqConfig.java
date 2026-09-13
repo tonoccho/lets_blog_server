@@ -4,6 +4,7 @@ import com.letsblog.common.messaging.CorrelationIdListenerAdvice;
 import com.letsblog.common.messaging.CorrelationIdMessagePostProcessor;
 import com.letsblog.common.messaging.EventExchanges;
 import com.letsblog.common.messaging.LogExchanges;
+import org.aopalliance.aop.Advice;
 import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.BindingBuilder;
 import org.springframework.amqp.core.Queue;
@@ -234,8 +235,15 @@ public class RabbitMqConfig {
 
     /**
      * {@link SimpleRabbitListenerContainerFactoryConfigurer}経由でapplication.ymlの
-     * spring.rabbitmq.listener.simple.retry設定(issue #580のリトライ回数・DLQ方針)を適用した
-     * リスナーコンテナファクトリ。EventMessageListenerの全{@code @RabbitListener}メソッドが使う。
+     * spring.rabbitmq.listener.simple.retry設定(issue #580のリトライ回数・DLQ方針)を適用したうえで、
+     * 相関ID(issue #582)のMDC設定adviceをその手前に足したリスナーコンテナファクトリ。
+     * EventMessageListenerの全{@code @RabbitListener}メソッドが使う。
+     *
+     * <p><b>issue #1227。</b> 以前は{@code configure(...)}が設定したadvice chainを
+     * {@code factory.setAdviceChain(new CorrelationIdListenerAdvice())}で丸ごと上書きしており、
+     * {@code setAdviceChain}が可変長引数を置き換える(追加ではない)ため、issue #580のリトライ→DLQ
+     * adviceが跡形もなく消えていた。log-writer側(issue #1059)の{@code prependCorrelationAdvice}と
+     * 同じ方針で、{@code configure(...)}が設定したchainを読み出してから合成する。
      */
     @Bean
     public RabbitListenerContainerFactory<?> eventsListenerContainerFactory(
@@ -245,8 +253,24 @@ public class RabbitMqConfig {
         SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
         configurer.configure(factory, connectionFactory);
         factory.setMessageConverter(converter);
-        // メッセージヘッダの相関ID(issue #582)をMDCへ設定してからリスナーメソッドを呼び出す。
-        factory.setAdviceChain(new CorrelationIdListenerAdvice());
+        // configure()が設定したリトライ→DLQのadvice chain(issue #580)を丸ごと置き換えず、
+        // 相関ID(issue #582)のMDC設定を先頭に足す(消さずに共存させる、issue #1227)。
+        factory.setAdviceChain(prependCorrelationAdvice(factory.getAdviceChain()));
         return factory;
+    }
+
+    /**
+     * 既存のadvice chainの先頭に{@link CorrelationIdListenerAdvice}を追加する(issue #1227、
+     * log-writerの{@code RabbitMqConfig#prependCorrelationAdvice}と同じ方針)。相関IDのMDC設定を
+     * 先に行ってからリトライの成否判定に入るようにする(順序が重要)。
+     */
+    Advice[] prependCorrelationAdvice(Advice[] existing) {
+        int existingLength = existing != null ? existing.length : 0;
+        Advice[] combined = new Advice[existingLength + 1];
+        combined[0] = new CorrelationIdListenerAdvice();
+        if (existingLength > 0) {
+            System.arraycopy(existing, 0, combined, 1, existingLength);
+        }
+        return combined;
     }
 }
