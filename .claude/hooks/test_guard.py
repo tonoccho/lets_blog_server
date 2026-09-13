@@ -162,6 +162,70 @@ class CoverageGate(unittest.TestCase):
     def test_unrelated_command_does_not_run_the_check(self):
         self.assertIsNone(self._run("glab mr list", 1))
 
+    # ------------------------------------------------------------- #1229
+    #
+    # `check_pr_coverage` はツール呼び出しの cwd(ここでは payload の `cwd`)にある
+    # 実際の git ブランチを判定対象にする。worktree かどうかを問わず、`root` を
+    # 決めた後にそのブランチ名を読めることを、実際の git リポジトリで確認する。
+
+    def _git_project(self, exit_code, branch="fix/1229-test"):
+        """実際の git リポジトリの上に、指定コードで終了する偽の検査スクリプトを置く。"""
+        root = tempfile.mkdtemp()
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=root, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)
+        subprocess.run(["git", "checkout", "-q", "-b", branch], cwd=root, check=True)
+        scripts = os.path.join(root, "scripts")
+        os.makedirs(scripts)
+        with open(os.path.join(scripts, "check-changed-coverage.py"), "w") as f:
+            f.write(
+                "import sys\n"
+                "print('coverage report placeholder')\n"
+                "sys.exit(%d)\n" % exit_code
+            )
+        with open(os.path.join(root, "README.md"), "w") as f:
+            f.write("x")
+        subprocess.run(["git", "add", "."], cwd=root, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=root, check=True)
+        return root
+
+    def _run_in_git_project(self, command, exit_code, branch="fix/1229-test"):
+        root = self._git_project(exit_code, branch=branch)
+        env_backup = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        try:
+            return run_hook("bash", bash_payload(command, cwd=root))
+        finally:
+            if env_backup is not None:
+                os.environ["CLAUDE_PROJECT_DIR"] = env_backup
+
+    def test_denial_message_names_the_branch_that_was_measured(self):
+        """要件3: 拒否メッセージにカバレッジを測ったブランチ名が含まれる。"""
+        reason = self._run_in_git_project(
+            "glab mr create --target-branch develop", 1, branch="fix/1229-test"
+        )
+        self.assertIsNotNone(reason)
+        self.assertIn("fix/1229-test", reason)
+
+    def test_source_branch_mismatch_is_denied(self):
+        """要件4: `--source-branch` が実際に計測したブランチと食い違うなら拒否する。"""
+        reason = self._run_in_git_project(
+            "glab mr create --source-branch other-branch --target-branch develop",
+            0,
+            branch="fix/1229-test",
+        )
+        self.assertIsNotNone(reason, "--source-branch の食い違いが素通りした")
+        self.assertIn("fix/1229-test", reason)
+        self.assertIn("other-branch", reason)
+
+    def test_source_branch_matching_current_branch_is_allowed(self):
+        """`--source-branch` が実際のブランチと一致していれば通常どおり通す。"""
+        reason = self._run_in_git_project(
+            "glab mr create --source-branch fix/1229-test --target-branch develop",
+            0,
+            branch="fix/1229-test",
+        )
+        self.assertIsNone(reason)
+
 
 class NoStaleGitHubReferences(unittest.TestCase):
     """移行後に `gh` 前提の判定・文言が残っていないこと(#1022 の受入基準)。"""

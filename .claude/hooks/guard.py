@@ -564,6 +564,16 @@ def _has_flag(args, long_name, short):
     return False
 
 
+def _flag_value(args, long_name):
+    """`--flag value` / `--flag=value` の値を返す。指定が無ければ None。"""
+    for i, arg in enumerate(args):
+        if arg == long_name:
+            return args[i + 1] if i + 1 < len(args) else None
+        if arg.startswith(long_name + "="):
+            return arg[len(long_name) + 1 :]
+    return None
+
+
 def check_merge_flags(command):
     """CLAUDE.md → Completion Definition: Issue の MR は squash のみ。
 
@@ -755,10 +765,52 @@ def check_commit_phase(payload, command):
         )
 
 
+def coverage_worktree_root(payload):
+    """カバレッジ検査の対象にすべき作業ツリーのルートを返す(#1229)。
+
+    `project_dir()` は `CLAUDE_PROJECT_DIR` を `payload["cwd"]` より優先するため、
+    `glab mr create` を worktree から実行した場合にセッションのメイン作業ツリーを
+    指してしまう — worktree の HEAD ではなく、その時メインツリーがたまたま乗っていた
+    ブランチが計測される。
+
+    ここではその優先順位を逆にする: **ツール呼び出しの実際の cwd
+    (`payload["cwd"]`)を優先し**、それが取れない場合だけ `CLAUDE_PROJECT_DIR` に
+    フォールバックする。取得できた cwd は `git rev-parse --show-toplevel` でその
+    worktree 自身のルートに正規化する — worktree のサブディレクトリから呼ばれても、
+    そのツリー自身の HEAD を指すようにするため。
+
+    この関数はカバレッジ検査だけに使う。他のガード(フェーズ分離・マージ方式など)の
+    `project_dir()` 依存はこの Issue の Scope 外であり、ここでは変更しない。
+    """
+    cwd = payload.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+    cwd = os.path.realpath(cwd)
+    toplevel = git(["rev-parse", "--show-toplevel"], cwd)
+    if toplevel:
+        return os.path.realpath(toplevel.strip())
+    return cwd
+
+
 def check_pr_coverage(payload, command):
-    if not invokes(command, "glab", ("mr", "create")):
+    calls = invokes(command, "glab", ("mr", "create"))
+    if not calls:
         return
-    root = project_dir(payload)
+    root = coverage_worktree_root(payload)
+    branch_out = git(["rev-parse", "--abbrev-ref", "HEAD"], root)
+    branch = branch_out.strip() if branch_out else None
+
+    if branch:
+        for args in calls:
+            source = _flag_value(args, "--source-branch")
+            if source and source != branch:
+                emit_deny(
+                    "`--source-branch %s` が、実際にカバレッジを計測したブランチ `%s`"
+                    "(%s)と食い違っています(CLAUDE.md → Test-First Implementation → "
+                    "Coverage)。\n食い違ったまま Merge Request を作ると、指定と別の"
+                    "ブランチが計測されます。`--source-branch` を計測対象のブランチに"
+                    "合わせるか、計測対象のブランチをチェックアウトしてください。"
+                    % (source, branch, root)
+                )
+
     script = os.path.join(root, "scripts", "check-changed-coverage.py")
     if not os.path.exists(script):
         return
@@ -768,8 +820,9 @@ def check_pr_coverage(payload, command):
     if result.returncode != 0:
         emit_deny(
             "変更したプロダクションコードの C1/C2 カバレッジが基準(90%%)を満たしていないため、"
-            "Merge Request を作成できません(CLAUDE.md → Test-First Implementation → Coverage)。\n\n%s"
-            % (result.stdout + result.stderr).strip()[:2000]
+            "Merge Request を作成できません(CLAUDE.md → Test-First Implementation → Coverage)。\n"
+            "計測したブランチ: %s (%s)\n\n%s"
+            % (branch or "(不明)", root, (result.stdout + result.stderr).strip()[:2000])
         )
 
 
