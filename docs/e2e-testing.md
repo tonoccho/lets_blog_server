@@ -118,6 +118,8 @@ E2E_ADMIN_PASSWORD='<任意の強いパスワード>' \
 2. Keycloak Admin CLI でパスワードを設定する(`temporary=false`)。
 3. admin アカウントに realm ロール `admin` を付与する(JWT の `realm_access.roles` に載る)。
 4. (手順 0 で作成済み)E2E 専用クライアント `letsblog-e2e`(public / direct access grant 可)。
+   `apps/web/e2e` がブラウザを介さず API を直接叩くための専用トークン発行クライアントとして
+   issue #588 で導入した(realm 既定の `admin-cli` を使わない理由は §7 参照)。
    `main-scenario.spec.ts` が API を直接叩くときのトークン発行に使う(§7 参照)。
    `infra/keycloak/realm-export.json` にも同じ定義があるが、Keycloak は realm export を
    **初回起動時にしか読まない** ため、既に起動済みの環境ではこのスクリプトで作る必要がある。
@@ -401,7 +403,7 @@ E2E 専用クライアント `letsblog-e2e`(public / direct access grant 可)か
 Resource Owner Password Credentials グラントで取得する(`helpers.ts` の `fetchAccessToken`)。
 ローカル開発スタック専用の手段であり、アプリケーションの認証フローには影響しない。
 
-> realm 既定の `admin-cli` は使わない。Keycloak の既定で
+> realm 既定の `admin-cli` は使わない(issue #588)。Keycloak の既定で
 > `client.use.lightweight.access.token.enabled=true` が付いており、発行される
 > アクセストークンから `sub` と `realm_access.roles` が落ちる。その状態では
 > identity-service の `/api/identity/me` が 403 になり、publishing-service が 502 を返して

@@ -743,7 +743,7 @@
       "id": "6b1f0b6e-6a2b-4a3c-9a7e-1f4c0b2d8e51",
       "clientId": "letsblog-e2e",
       "name": "Let's Blog E2E (local development only)",
-      "description": "apps/web/e2e がブラウザを介さずAPIを直接叩くためのトークン発行専用クライアント(issue #588)。realm既定のadmin-cliはlightweight access tokenが有効でsub/realm_access.rolesが載らないため、E2E専用に用意する。ローカル開発スタック専用で、アプリケーションの認証フロー(letsblog-web / letsblog-vscode)には使わない。directAccessGrantsEnabled=true・publicClient=trueは維持する(issue #1056で判断): apps/web/e2e/helpers.ts の fetchAccessToken がResource Owner Password Credentialsグラントで多数のシナリオのトークンを取得しており、Authorization Code + PKCEしか使えないwebクライアントでは代替できない。本番同等のrealmにpublicなROPCクライアントが居てよい理由は、(1) redirectUrisが空でwebOriginsも無く、ブラウザ経由では到達できない、(2) CUTOVER_RUNBOOK.md記載の通り本番への移行では使わずE2E専用のまま残す、(3) issue #1056でbruteForceProtectedを有効化したため、シークレット無しで叩けても連続失敗はアカウント単位でロックされ無制限の総当たりはできない、の3点。",
+      "description": "apps/web/e2e がAPIを直接叩くための専用トークン発行クライアント(issue #588)。directAccessGrantsEnabled/publicClientの維持理由(issue #1056)や実務上の判断根拠はdocs/e2e-testing.mdのletsblog-e2eクライアントの節を参照。ローカル開発専用、letsblog-web/letsblog-vscodeの認証フローには使わない。",
       "surrogateAuthRequired": false,
       "enabled": true,
       "alwaysDisplayInConsole": false,
