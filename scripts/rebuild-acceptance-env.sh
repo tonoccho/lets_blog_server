@@ -418,14 +418,22 @@ if [ "$SHARED_HOST" -eq 1 ]; then
   # ここは up -d が返った直後で、web / gateway はまだ起動途中である。
   # 素の呼び出しでは 502 を掴んで非0終了し、ゼロ構築全体が止まる(2026-09-04 実測)。
   # 到達性の判定はリトライを持つ次の手順(wait-for-stack-healthy.sh)に委ねる。
-  LBS_BASE_URL="" bash "$SCRIPT_DIR/setup-shared-host-proxy.sh" >/dev/null \
+  #
+  # COMPOSE_PROJECT_NAME を明示するのは #1297: このスクリプトが隔離clone
+  # (release-verify-tag.pyが`checkout-XXXX`に作るもの)から呼ばれると、
+  # setup-shared-host-proxy.sh自身の既定(`${COMPOSE_PROJECT_NAME:-$(basename "$REPO_ROOT")}`)
+  # がcloneのディレクトリ名に解決してしまい、共有スタックのネットワークを見失う。
+  # このスクリプトの$COMPOSE_PROJECTは常に"lets_blog_server"に固定されているので、
+  # それをそのまま渡せば呼び出し元のbasenameに依存しなくなる。
+  LBS_BASE_URL="" COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT" bash "$SCRIPT_DIR/setup-shared-host-proxy.sh" >/dev/null \
     || { echo "エラー: 共有プロキシの再適用に失敗しました。" >&2; exit 1; }
 fi
 
 # ---------------------------------------------------------------- 3. 健全性待ち
 
 step "3/5 全サービスが healthy になるまで待ちます(最大 ${HEALTH_TIMEOUT_SECONDS} 秒)"
-if ! "$SCRIPT_DIR/wait-for-stack-healthy.sh" --timeout "$HEALTH_TIMEOUT_SECONDS"; then
+# COMPOSE_PROJECT_NAME を明示する理由は上の setup-shared-host-proxy.sh 呼び出しと同じ(#1297)。
+if ! COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT" "$SCRIPT_DIR/wait-for-stack-healthy.sh" --timeout "$HEALTH_TIMEOUT_SECONDS"; then
   echo "エラー: ゼロ構築後に healthy になりませんでした(上のサービス名を参照)。" >&2
   echo "       後続の段階は実行されません。docker compose logs <service> を確認してください。" >&2
   exit 1

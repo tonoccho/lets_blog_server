@@ -955,6 +955,58 @@ class EvidenceIsRetainedBeforeCheckoutIsDeleted(Harness):
         self.assertFalse(os.path.exists(os.path.join(log_dir, "docker-compose-logs.txt")))
 
 
+class TouchesStackStepsReceiveTheSharedComposeProjectName(Harness):
+    """#1297: 隔離チェックアウトは `tempfile.mkdtemp(prefix="checkout-")` に作られ、
+    `.env` にも `docker-compose.yml` にも compose プロジェクト名が無いので、
+    明示しない呼び出しは clone のディレクトリ名(`checkout-XXXX`)に解決されてしまう。
+    `touches_stack` な手順は共有スタックのプロジェクト `lets_blog_server` を明示的に
+    サブプロセス環境で受け取ること。"""
+
+    def test_touches_stack_step_env_has_compose_project_name(self):
+        step = self.fake_step_checking_env("touches-stack-step", "COMPOSE_PROJECT_NAME")
+        step["touches_stack"] = True
+        table = self.write_step_table([step])
+        r = self.run_script(
+            self.origin.d,
+            extra_env={
+                "RELEASE_VERIFY_STEP_TABLE": table,
+                "RELEASE_VERIFY_HANDOFF_COMMAND": self.write_handoff(),
+            },
+        )
+        out = self.out(r)
+        self.assertEqual(0, r.returncode, out)
+        self.assertIn(
+            "touches-stack-step:lets_blog_server",
+            self.calls(),
+            "touches_stack な手順のサブプロセス環境に COMPOSE_PROJECT_NAME=lets_blog_server が無い:\n"
+            + out,
+        )
+
+    def test_backend_expose_mysql_step_is_wired_to_the_shared_compose_project(self):
+        """要件2: `backend-expose-mysql` が別プロジェクトの `mysql` を作らないよう、
+        既定の手順表でも同じ配線になっていること。"""
+        checkout_dir = tempfile.mkdtemp(prefix="checkout-")
+        log_dir = tempfile.mkdtemp(prefix="rvt-logs-")
+        self.addCleanup(shutil.rmtree, checkout_dir, ignore_errors=True)
+        self.addCleanup(shutil.rmtree, log_dir, ignore_errors=True)
+        step = next(s for s in rvt.DEFAULT_STEPS if s["name"] == "backend-expose-mysql")
+        self.assertTrue(step.get("touches_stack"), "backend-expose-mysql が touches_stack でない")
+        probe = dict(step)
+        probe["argv"] = [
+            sys.executable,
+            "-c",
+            "import os,sys; sys.stdout.write(os.environ.get('COMPOSE_PROJECT_NAME','<unset>'))",
+        ]
+        res = rvt.run_step(probe, checkout_dir, log_dir)
+        with open(res.log_path, encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn(
+            "lets_blog_server",
+            content,
+            "backend-expose-mysql 相当の手順が COMPOSE_PROJECT_NAME=lets_blog_server を受け取っていない",
+        )
+
+
 class DefaultStepsCoverEveryRequiredCommand(unittest.TestCase):
     """要件4: 「しっかり」= 全部。既定の手順表が要求されたコマンドを網羅している。"""
 

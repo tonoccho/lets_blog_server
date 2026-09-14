@@ -517,11 +517,24 @@ class StepResult:
         )
 
 
+#: 共有スタックのcompose project名(#1297)。隔離チェックアウトは
+#: `tempfile.mkdtemp(prefix="checkout-")` に作られ、`.env`にも`docker-compose.yml`にも
+#: project名が無いため、明示しない呼び出しはcloneのディレクトリ名(`checkout-XXXX`)に
+#: 解決されてしまう。`touches_stack`な手順のサブプロセス環境へ明示することで、
+#: `scripts/wait-for-stack-healthy.sh`・`scripts/setup-shared-host-proxy.sh`・
+#: `docker compose`直接呼び出し(`backend-expose-mysql`)のいずれも共有スタック
+#: `lets_blog_server`を対象にする(`scripts/rebuild-acceptance-env.sh`が自分の
+#: `COMPOSE_PROJECT`を子プロセスへ明示的に渡すのと対になる修正)。
+SHARED_COMPOSE_PROJECT_NAME = "lets_blog_server"
+
+
 def run_step(step, checkout_dir, log_dir, credential_env=None):
     argv = substitute(step["argv"], checkout_dir)
     cwd = os.path.join(checkout_dir, step.get("cwd", "") or "")
     env = dict(os.environ)
     env.update(credential_env or {})  # 要件2: 資格情報をサブプロセス環境へ読み込む
+    if step.get("touches_stack"):
+        env["COMPOSE_PROJECT_NAME"] = SHARED_COMPOSE_PROJECT_NAME
     step_env = {k: v.replace("%CHECKOUT%", checkout_dir) for k, v in step.get("env", {}).items()}
     env.update(step_env)
     log_path = os.path.join(log_dir, "%s.log" % step["name"])

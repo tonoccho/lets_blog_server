@@ -1167,6 +1167,107 @@ class PostBuildVerification(RebuildScriptHarness):
                 )
 
 
+class HelperScriptsReceiveTheSharedComposeProjectNameExplicitly(RebuildScriptHarness):
+    """#1297: `release-verify-tag.py` の隔離チェックアウトは basename が `checkout-XXXX` に
+    なる。`wait-for-stack-healthy.sh`・`setup-shared-host-proxy.sh` はどちらも
+    `COMPOSE_PROJECT_NAME` が設定されていなければ `basename "$REPO_ROOT"` へ落ちるので、
+    `rebuild-acceptance-env.sh` は自分の `COMPOSE_PROJECT`(常に `lets_blog_server`)を
+    ヘルパー呼び出しへ明示的に渡さなければならない。basename に依存させないことを検証する
+    ため、実際に basename が `checkout-` で始まる別ディレクトリへスクリプトのコピーを置き、
+    2つのヘルパーをスタブへ差し替えて、スタブが受け取った環境変数を検査する。
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.checkout = tempfile.mkdtemp(prefix="checkout-")
+        self.addCleanup(shutil.rmtree, self.checkout, ignore_errors=True)
+        # scripts/ の他のファイル(check-worktree-match.py の `from paths import classify` が
+        # 辿る .claude/hooks を含む)はシンボリックリンクで実体を共有する。rebuild-acceptance-env.sh
+        # 自身もシンボリックリンクにすることで、実装フェーズでの本物への修正がそのまま反映される。
+        os.symlink(os.path.join(REPO_ROOT, ".claude"), os.path.join(self.checkout, ".claude"))
+        checkout_scripts = os.path.join(self.checkout, "scripts")
+        os.makedirs(checkout_scripts)
+        real_scripts = os.path.join(REPO_ROOT, "scripts")
+        for entry in os.listdir(real_scripts):
+            if entry in ("wait-for-stack-healthy.sh", "setup-shared-host-proxy.sh"):
+                continue
+            os.symlink(os.path.join(real_scripts, entry), os.path.join(checkout_scripts, entry))
+
+        with open(os.path.join(self.checkout, ".env"), "w", encoding="utf-8") as f:
+            f.write(
+                "MYSQL_ROOT_PASSWORD=secret\n"
+                "KEYCLOAK_ADMIN_USERNAME=admin\n"
+                "KEYCLOAK_ADMIN_PASSWORD=admin\n"
+            )
+
+        self.helper_log = os.path.join(self.tmp, "helper-calls.log")
+        self.write_stub_helper(checkout_scripts, "wait-for-stack-healthy.sh")
+        self.write_stub_helper(checkout_scripts, "setup-shared-host-proxy.sh")
+
+    def write_stub_helper(self, checkout_scripts, name):
+        """本物のヘルパーの代わりに、受け取った環境変数を記録して非0で即終了するスタブを置く。
+
+        非0で終わらせるのは、スタブより先の手順(healthy待ちの後始末や検証)まで
+        本物のdocker/mysql/kcadmを模す必要をなくすため。呼び出し元は
+        `|| { echo エラー; exit 1; }` / `if ! ...; then ...; exit 1; fi` の形で
+        非0を正しくエラーとして扱うので、ここで打ち切っても呼び出しの検証には影響しない。
+        """
+        p = os.path.join(checkout_scripts, name)
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(
+                "#!/bin/bash\n"
+                'echo "%s COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-<unset>}" >> %s\n'
+                "exit 1\n" % (name, self.helper_log)
+            )
+        os.chmod(p, 0o755)
+
+    def run_isolated_script(self, *args, **env_overrides):
+        env = dict(os.environ)
+        env["PATH"] = self.bin + os.pathsep + env["PATH"]
+        env["FAKE_STATE"] = self.state
+        env["FAKE_DOCKER_LOG"] = self.log
+        env["ACCEPTANCE_HEALTH_TIMEOUT"] = "10"
+        env["INFRA_DIR"] = self.infra
+        env["GITLAB_HEALTH_URL"] = ""
+        env["AT_WORKTREE_CHECK_BYPASS"] = "1"
+        env.update({k: str(v) for k, v in env_overrides.items()})
+        return subprocess.run(
+            ["bash", os.path.join(self.checkout, "scripts", "rebuild-acceptance-env.sh")]
+            + list(args),
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+            cwd=self.checkout,
+        )
+
+    def helper_log_content(self):
+        if not os.path.exists(self.helper_log):
+            return ""
+        with open(self.helper_log, encoding="utf-8") as f:
+            return f.read()
+
+    def test_wait_for_stack_healthy_receives_the_shared_project_name(self):
+        self.run_isolated_script("--yes")
+        content = self.helper_log_content()
+        self.assertIn(
+            "wait-for-stack-healthy.sh COMPOSE_PROJECT_NAME=lets_blog_server",
+            content,
+            "basename が checkout-... なクローンから実行しても、wait-for-stack-healthy.sh は "
+            "COMPOSE_PROJECT_NAME=lets_blog_server を受け取るべき:\n" + content,
+        )
+
+    def test_setup_shared_host_proxy_receives_the_shared_project_name(self):
+        self.run_isolated_script("--yes", FAKE_SHARED_HOST="1")
+        content = self.helper_log_content()
+        self.assertIn(
+            "setup-shared-host-proxy.sh COMPOSE_PROJECT_NAME=lets_blog_server",
+            content,
+            "共有ホスト構成でも、setup-shared-host-proxy.sh は "
+            "COMPOSE_PROJECT_NAME=lets_blog_server を受け取るべき:\n" + content,
+        )
+
+
 class RunningItTwiceGivesTheSameResult(RebuildScriptHarness):
     """受入基準: 2回連続で実行して、2回目も1回目と同じ結果になる。"""
 
