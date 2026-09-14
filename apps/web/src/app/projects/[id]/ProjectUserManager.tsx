@@ -1,13 +1,35 @@
 "use client";
 
-import { useTransition } from "react";
-import type { ProjectUser } from "@/lib/apiClient";
-import { updateProjectUserRoleAction, removeProjectUserAction } from "./actions";
+import { useState, useTransition } from "react";
+import type { ProjectUser, ProjectUserSyncSiteResult } from "@/lib/apiClient";
+import { updateProjectUserRoleAction, removeProjectUserAction, syncProjectUserAction } from "./actions";
 
 const WP_ROLES = ["administrator", "editor", "author", "contributor", "subscriber"];
 
+/** issue #1242: メンバー個別のユーザー情報同期の結果を、成功/失敗の別なく一覧表示する。 */
+function SyncResultList({ results }: { results: ProjectUserSyncSiteResult[] }) {
+  if (results.length === 0) {
+    return (
+      <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+        紐づくWordPress環境がありません。
+      </p>
+    );
+  }
+  return (
+    <ul className="mt-1 space-y-0.5 text-xs">
+      {results.map((r) => (
+        <li key={r.siteId} className={r.success ? "text-green-700 dark:text-green-400" : "text-red-600"}>
+          {r.siteName}: {r.success ? "成功" : `失敗${r.errorMessage ? `(${r.errorMessage})` : ""}`}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function MemberRow({ projectId, member }: { projectId: number; member: ProjectUser }) {
   const [isPending, startTransition] = useTransition();
+  const [syncResults, setSyncResults] = useState<ProjectUserSyncSiteResult[] | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   function handleRoleChange(newRole: string) {
     startTransition(() => {
@@ -21,6 +43,19 @@ function MemberRow({ projectId, member }: { projectId: number; member: ProjectUs
     }
     startTransition(() => {
       removeProjectUserAction(projectId, member.userId);
+    });
+  }
+
+  function handleSync() {
+    setSyncError(null);
+    startTransition(async () => {
+      const result = await syncProjectUserAction(projectId, member.userId);
+      if (result.error) {
+        setSyncError(result.error);
+        setSyncResults(null);
+      } else {
+        setSyncResults(result.results ?? []);
+      }
     });
   }
 
@@ -43,14 +78,26 @@ function MemberRow({ projectId, member }: { projectId: number; member: ProjectUs
         </select>
       </td>
       <td className="px-4 py-2 text-right">
-        <button
-          type="button"
-          onClick={handleRemove}
-          disabled={isPending}
-          className="text-sm text-red-600 hover:underline disabled:text-neutral-400"
-        >
-          {isPending ? "処理中…" : "削除"}
-        </button>
+        <div className="flex items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={handleSync}
+            disabled={isPending}
+            className="text-sm text-blue-600 hover:underline disabled:text-neutral-400"
+          >
+            {isPending ? "処理中…" : "ユーザー情報を同期"}
+          </button>
+          <button
+            type="button"
+            onClick={handleRemove}
+            disabled={isPending}
+            className="text-sm text-red-600 hover:underline disabled:text-neutral-400"
+          >
+            {isPending ? "処理中…" : "削除"}
+          </button>
+        </div>
+        {syncError && <p className="mt-1 text-xs text-red-600">{syncError}</p>}
+        {syncResults && <SyncResultList results={syncResults} />}
       </td>
     </tr>
   );

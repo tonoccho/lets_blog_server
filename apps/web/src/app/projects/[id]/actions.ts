@@ -18,6 +18,8 @@ import {
   addProjectUser,
   updateProjectUserRole,
   removeProjectUser,
+  syncProjectUser,
+  ProjectUserSyncSiteResult,
   syncProjectEnvironment,
   applyToEnvironment,
   applyToAllEnvironments,
@@ -483,6 +485,26 @@ export async function removeProjectUserAction(projectId: number, userId: number)
   await requireAdminSession();
   await removeProjectUser(projectId, userId);
   revalidatePath(`/projects/${projectId}`);
+}
+
+export interface SyncProjectUserState {
+  error?: string;
+  results?: ProjectUserSyncSiteResult[];
+}
+
+/**
+ * issue #1242: メンバー個別のユーザー情報再同期。追加/ロール変更時の同期と違い、
+ * ローカルの`project_users`/表示は変化しないため`revalidatePath`は不要。
+ */
+export async function syncProjectUserAction(projectId: number, userId: number): Promise<SyncProjectUserState> {
+  await requireAdminSession();
+
+  try {
+    const results = await syncProjectUser(projectId, userId);
+    return { results };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 export interface SyncEnvironmentState {

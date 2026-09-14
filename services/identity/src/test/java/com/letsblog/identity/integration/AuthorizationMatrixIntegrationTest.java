@@ -90,6 +90,8 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("POST", "/api/projects/1/users"),
                 new Endpoint("PUT", "/api/projects/1/users/1"),
                 new Endpoint("DELETE", "/api/projects/1/users/1"),
+                // issue #1242: メンバー個別のユーザー情報再同期
+                new Endpoint("POST", "/api/projects/1/users/1/sync"),
                 new Endpoint("GET", "/api/project-users"),
 
                 // -- 内部ブリッジ(InternalProjectUserController、issue #583) --

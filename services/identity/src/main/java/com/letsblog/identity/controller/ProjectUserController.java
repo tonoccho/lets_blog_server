@@ -3,6 +3,7 @@ package com.letsblog.identity.controller;
 import com.letsblog.identity.dto.AddProjectUserRequest;
 import com.letsblog.identity.dto.ProjectUserResponse;
 import com.letsblog.identity.dto.ProjectUserSummaryResponse;
+import com.letsblog.identity.dto.ProjectUserSyncSiteResult;
 import com.letsblog.identity.dto.UpdateProjectUserRequest;
 import com.letsblog.identity.service.AdminAuthorizationService;
 import com.letsblog.identity.service.ProjectUserSyncService;
@@ -64,6 +65,17 @@ public class ProjectUserController {
         adminAuthorizationService.requireAdmin();
         projectUserSyncService.removeUserFromProject(id, userId);
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * issue #1242: メンバー個別のユーザー情報再同期。ロール変更を伴わず、現在のプロフィールを
+     * プロジェクトに紐づく全WordPress環境へ再送信する。一部の環境が失敗しても他の環境の結果は
+     * 保持され、応答にサイトごとの成否と失敗理由が含まれる(要件3)。
+     */
+    @PostMapping("/api/projects/{id}/users/{userId}/sync")
+    public List<ProjectUserSyncSiteResult> syncUser(@PathVariable Long id, @PathVariable Long userId) {
+        adminAuthorizationService.requireAdmin();
+        return projectUserSyncService.syncUserProfileToProjectSites(id, userId);
     }
 
     /** 全プロジェクトのメンバー割り当て一覧(Web管理画面のユーザー編集画面が使う)。 */

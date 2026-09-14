@@ -21,6 +21,10 @@ dependencies {
     // user.deactivatedドメインイベント発行(letsblog.events、issue #580)。プロデューサー側のみを
     // 担うため、コンシューマー側(spring-retry等)は不要。
     implementation 'org.springframework.boot:spring-boot-starter-amqp'
+    // issue #1242: AuditLogServiceがcom.fasterxml.jackson.databind.ObjectMapperを直接使うため
+    // 明示的に追加する(Boot 4の既定JSONコンバータ・既定ObjectMapperはJackson3系(tools.jackson)に
+    // 変わったため。project/media/ai/content-serviceと同じ構成。services/project/build.gradle参照)。
+    implementation 'org.springframework.boot:spring-boot-jackson2'
     implementation 'org.springframework.security:spring-security-crypto'
     implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0'

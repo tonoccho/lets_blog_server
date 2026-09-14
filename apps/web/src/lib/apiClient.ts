@@ -2195,6 +2195,25 @@ export function removeProjectUser(projectId: number, userId: number): Promise<vo
   return apiFetch<void>(`/api/projects/${projectId}/users/${userId}`, { method: 'DELETE' });
 }
 
+/** issue #1242: メンバー個別のユーザー情報再同期の、サイト1件分の結果。 */
+export interface ProjectUserSyncSiteResult {
+  siteId: number;
+  siteKey: string;
+  siteName: string;
+  success: boolean;
+  errorMessage: string | null;
+}
+
+/**
+ * issue #1242: ロール変更を伴わず、メンバーの現在のプロフィールをプロジェクトに紐づく
+ * 全WordPress環境へ再送信する。一部の環境が失敗しても他の環境の結果は保持される。
+ */
+export function syncProjectUser(projectId: number, userId: number): Promise<ProjectUserSyncSiteResult[]> {
+  return apiFetch<ProjectUserSyncSiteResult[]>(`/api/projects/${projectId}/users/${userId}/sync`, {
+    method: 'POST',
+  });
+}
+
 export interface ProjectUserSummary {
   projectId: number;
   userId: number;

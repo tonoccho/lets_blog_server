@@ -7,9 +7,11 @@ import com.letsblog.identity.domain.User;
 import com.letsblog.identity.domain.UserSiteAuthor;
 import com.letsblog.identity.dto.ProjectUserResponse;
 import com.letsblog.identity.dto.ProjectUserSummaryResponse;
+import com.letsblog.identity.dto.ProjectUserSyncSiteResult;
 import com.letsblog.identity.repository.ProjectUserRepository;
 import com.letsblog.identity.repository.UserRepository;
 import com.letsblog.identity.repository.UserSiteAuthorRepository;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -143,6 +145,37 @@ public class ProjectUserSyncService {
             }
             provisionUserOnSite(site, user, projectUser.getWpRole());
         }
+    }
+
+    /**
+     * issue #1242: メンバー1人分のプロフィール(email/wpRole/firstName/lastName/displayName/
+     * websiteUrl/bio/locale)を、そのプロジェクトに紐づく全WordPress環境へ再送信する
+     * (追加/ロール変更を伴わない)。
+     *
+     * <p>{@code addUserToProject}/{@code updateUserProjectRole}と異なり{@code @Transactional}を
+     * 持たない。要件3により、一部の環境への反映が失敗しても成功した環境の結果はロールバックせず
+     * 保持し、失敗した環境とその理由を呼び出し元へ返す。サイトごとの{@code provisionUserOnSite}
+     * (内部で{@code user_site_authors}へ保存する)は独立して実行され、失敗した環境の分だけ
+     * その保存がスキップされる。
+     */
+    public List<ProjectUserSyncSiteResult> syncUserProfileToProjectSites(Long projectId, Long userId) {
+        ProjectUser projectUser = projectUserRepository.findByProjectIdAndUserId(projectId, userId)
+                .orElseThrow(() -> new ProjectUserNotFoundException(
+                        "プロジェクト " + projectId + " にユーザー " + userId + " は参加していません"));
+        ProjectServiceClient.ProjectBridge project = projectServiceClient.getProject(projectId);
+        User user = getUser(userId);
+
+        List<ProjectUserSyncSiteResult> results = new ArrayList<>();
+        for (ProjectServiceClient.SiteBridge site : getProjectSites(project)) {
+            try {
+                provisionUserOnSite(site, user, projectUser.getWpRole());
+                results.add(new ProjectUserSyncSiteResult(site.id(), site.siteKey(), site.name(), true, null));
+            } catch (RuntimeException e) {
+                results.add(new ProjectUserSyncSiteResult(site.id(), site.siteKey(), site.name(), false, e.getMessage()));
+            }
+        }
+        auditLogService.logProjectUserSyncAction(projectId, userId, results);
+        return results;
     }
 
     private void syncToProjectSites(ProjectServiceClient.ProjectBridge project, User user, String wpRole) {

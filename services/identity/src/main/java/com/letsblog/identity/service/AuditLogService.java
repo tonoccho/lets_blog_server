@@ -1,8 +1,12 @@
 package com.letsblog.identity.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.common.messaging.AuditLogMessage;
 import com.letsblog.common.messaging.LogExchanges;
+import com.letsblog.identity.dto.ProjectUserSyncSiteResult;
 import java.time.LocalDateTime;
+import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.stereotype.Service;
@@ -25,15 +29,20 @@ public class AuditLogService {
     public static final String ACTION_PROJECT_USER_ADDED = "PROJECT_USER_ADDED";
     public static final String ACTION_PROJECT_USER_ROLE_UPDATED = "PROJECT_USER_ROLE_UPDATED";
     public static final String ACTION_PROJECT_USER_REMOVED = "PROJECT_USER_REMOVED";
+    /** issue #1242: メンバー個別のユーザー情報再同期。 */
+    public static final String ACTION_PROJECT_USER_SYNCED = "PROJECT_USER_SYNCED";
 
     private static final String RESOURCE_TYPE_PROJECT_USER = "PROJECT_USER";
 
     private final RabbitTemplate rabbitTemplate;
     private final CurrentActorService currentActorService;
+    private final ObjectMapper objectMapper;
 
-    public AuditLogService(RabbitTemplate rabbitTemplate, CurrentActorService currentActorService) {
+    public AuditLogService(
+            RabbitTemplate rabbitTemplate, CurrentActorService currentActorService, ObjectMapper objectMapper) {
         this.rabbitTemplate = rabbitTemplate;
         this.currentActorService = currentActorService;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -57,5 +66,38 @@ public class AuditLogService {
         } catch (RuntimeException e) {
             log.warn("監査ログの記録に失敗しました: action={}, projectId={}", action, projectId, e);
         }
+    }
+
+    /**
+     * issue #1242要件5: メンバー個別のユーザー情報再同期の実行結果(対象メンバー、対象プロジェクト、
+     * 成功/失敗した環境)を監査ログに記録する。{@code changes}には対象メンバーとサイトごとの
+     * 成否・失敗理由をJSONで残す({@link #logProjectUserAction}の対象3操作は戻り値がvoidのため
+     * 常にnullだったが、この操作は「何が起きたか」自体が記録の主眼のため明示的に持たせる)。
+     */
+    public void logProjectUserSyncAction(Long projectId, Long userId, List<ProjectUserSyncSiteResult> results) {
+        try {
+            String changes = objectMapper.writeValueAsString(new SyncChanges(userId, results));
+            AuditLogMessage message = new AuditLogMessage(
+                    currentActorService.getCurrentActorId(),
+                    currentActorService.getCurrentActorKeycloakSub(),
+                    ACTION_PROJECT_USER_SYNCED,
+                    RESOURCE_TYPE_PROJECT_USER,
+                    projectId,
+                    changes,
+                    currentActorService.getRemoteIp(),
+                    currentActorService.getUserAgent(),
+                    LocalDateTime.now().toString());
+            rabbitTemplate.convertAndSend(LogExchanges.LOG_EXCHANGE, LogExchanges.AUDIT_LOG_ROUTING_KEY, message);
+            log.info(
+                    "Audit log published to queue: action={}, projectId={}, userId={}",
+                    ACTION_PROJECT_USER_SYNCED, projectId, userId);
+        } catch (RuntimeException | JsonProcessingException e) {
+            log.warn(
+                    "監査ログの記録に失敗しました: action={}, projectId={}, userId={}",
+                    ACTION_PROJECT_USER_SYNCED, projectId, userId, e);
+        }
+    }
+
+    private record SyncChanges(Long userId, List<ProjectUserSyncSiteResult> results) {
     }
 }
