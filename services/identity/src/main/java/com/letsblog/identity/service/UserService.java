@@ -80,6 +80,7 @@ public class UserService {
     private final CredentialCipher credentialCipher;
     private final KeycloakAdminClient keycloakAdminClient;
     private final DomainEventPublisher domainEventPublisher;
+    private final UserMigrationPersister userMigrationPersister;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     public UserService(
@@ -87,12 +88,14 @@ public class UserService {
             RoleRepository roleRepository,
             CredentialCipher credentialCipher,
             KeycloakAdminClient keycloakAdminClient,
-            DomainEventPublisher domainEventPublisher) {
+            DomainEventPublisher domainEventPublisher,
+            UserMigrationPersister userMigrationPersister) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.credentialCipher = credentialCipher;
         this.keycloakAdminClient = keycloakAdminClient;
         this.domainEventPublisher = domainEventPublisher;
+        this.userMigrationPersister = userMigrationPersister;
     }
 
     @Transactional(readOnly = true)
@@ -477,8 +480,20 @@ public class UserService {
      * ユーザーは(userIdsに含まれていても)スキップし、二重登録しない(再実行が安全なように)。
      *
      * <p>1ユーザーの失敗で全体を中断せず、成功/失敗を集計して返す。
+     *
+     * <p><b>トランザクション境界(レビュー対応、issue #964)</b>: このメソッド自体には
+     * {@code @Transactional}を付けない。理由は2つ。(1) このメソッドが直接行う書き込みは
+     * 無く({@code findByKeycloakSubIsNull}/{@code findAllById}はSpring Data JPAの
+     * リポジトリメソッドが自前でトランザクションを持つ読み取り専用の呼び出し)、ループ全体を
+     * まとめて包む必要が無い。(2) 包んでしまうと、1ユーザーの{@code saveAndFlush}を
+     * {@link UserMigrationPersister}(下記)の{@code REQUIRES_NEW}へ委譲しても、外側の
+     * トランザクションが「他に何も書き込んでいないのに」ループ全体を1つの長いトランザクションで
+     * 覆い続けることになり、意味のない結合が残る。1ユーザー分のローカル保存は
+     * {@code UserMigrationPersister#saveAndFlush}が独立した新規トランザクションで行うため、
+     * ある1人の保存失敗がその新規トランザクション(=独立したHibernateセッション)の中だけで
+     * 完結し、既に保存済みの他ユーザーのコミット状態や、これから保存する別ユーザーの
+     * 永続化コンテキストへ波及しない。
      */
-    @Transactional
     public MigrationSummaryResponse migrateToKeycloak(List<Long> userIds) {
         List<User> targets = (userIds == null || userIds.isEmpty())
                 ? userRepository.findByKeycloakSubIsNull()
@@ -506,7 +521,36 @@ public class UserService {
                     throw syncFailure;
                 }
                 user.setKeycloakSub(keycloakSub);
-                userRepository.save(user);
+                // issue #964: saveではなくsaveAndFlushを使う。userは同一トランザクションで
+                // findByKeycloakSubIsNull/findAllByIdした管理下のエンティティなので、saveは
+                // UPDATE文の発行をフラッシュまで遅延させる(#955のupdateと同じ理由)。
+                // ここでフラッシュを強制しないと、ローカルDBの書き込み失敗(例:
+                // DataIntegrityViolationException)がこのtry/catchの外、
+                // トランザクションのコミット時まで表面化せず、その頃には
+                // ループが他の全ユーザーの処理を終えてしまっている。
+                //
+                // 保存失敗を検知したら、直前にKeycloakへ作成したユーザーを孤児にしないよう
+                // 削除する(create/updateと同じ補償)。DataIntegrityViolationExceptionのような
+                // 一般のRuntimeExceptionはKeycloakUserSyncExceptionではないため、下のcatchでは
+                // 捕まえられない。要件3の明示的な決定:
+                // このユーザーだけ移行失敗として記録し、バッチ全体は中断せず残りのユーザーの
+                // 移行を続行する(既存のKeycloakUserSyncExceptionの扱いと一貫させる)。
+                //
+                // issue #964(レビュー対応): userRepository.saveAndFlushを直接呼ばず、
+                // UserMigrationPersisterへ委譲する。これは1ユーザー分の保存をREQUIRES_NEWの
+                // 独立トランザクションで実行するためであり、このユーザーの保存失敗が
+                // (同一トランザクション/セッションを共有する)他ユーザーの保存へ波及したり、
+                // 既に保存済みの他ユーザーのコミット状態を後から巻き戻したりしないようにする。
+                try {
+                    userMigrationPersister.saveAndFlush(user);
+                } catch (RuntimeException saveFailure) {
+                    user.setKeycloakSub(null);
+                    compensateKeycloakUser(keycloakSub);
+                    log.warn("ユーザー(id={})のKeycloak移行に失敗しました(ローカル保存失敗): {}",
+                            user.getId(), saveFailure.getMessage());
+                    failed.put(user.getId(), saveFailure.getMessage());
+                    continue;
+                }
                 keycloakAdminClient.sendPasswordResetEmail(keycloakSub);
                 migrated.add(user.getId());
             } catch (KeycloakUserSyncException e) {

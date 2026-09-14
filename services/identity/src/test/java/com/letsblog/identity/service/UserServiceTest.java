@@ -31,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -50,12 +51,16 @@ class UserServiceTest {
     @Mock
     private DomainEventPublisher domainEventPublisher;
 
+    @Mock
+    private UserMigrationPersister userMigrationPersister;
+
     private final CredentialCipher credentialCipher = new CredentialCipher(
             java.util.Base64.getEncoder().encodeToString(new byte[32]));
 
     private UserService service() {
         return new UserService(
-                userRepository, roleRepository, credentialCipher, keycloakAdminClient, domainEventPublisher);
+                userRepository, roleRepository, credentialCipher, keycloakAdminClient, domainEventPublisher,
+                userMigrationPersister);
     }
 
     @Test
@@ -517,7 +522,9 @@ class UserServiceTest {
         User user = buildUser();
         when(userRepository.findByKeycloakSubIsNull()).thenReturn(List.of(user));
         when(keycloakAdminClient.createUser("user@example.com", null, null, true)).thenReturn("kc-sub-7");
-        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        // issue #964: migrateToKeycloakはsaveではなくsaveAndFlushを使うようになった。
+        // issue #964(レビュー対応): このsaveAndFlushはUserMigrationPersister(独立トランザクション)へ委譲される。
+        doNothing().when(userMigrationPersister).saveAndFlush(any(User.class));
 
         MigrationSummaryResponse summary = service.migrateToKeycloak(null);
 
@@ -525,6 +532,31 @@ class UserServiceTest {
         assertTrue(summary.failedUserIds().isEmpty());
         assertEquals("kc-sub-7", user.getKeycloakSub());
         verify(keycloakAdminClient).sendPasswordResetEmail("kc-sub-7");
+    }
+
+    /**
+     * issue #964(レビュー対応): 同一トランザクション内で複数ユーザーのsaveAndFlushを続けて呼ぶと、
+     * 1件の失敗が他のユーザーの永続化コンテキストへ波及しうる(レビュー指摘)。これを構造的に
+     * 断つため、1ユーザー分のローカル保存は{@link UserMigrationPersister}(REQUIRES_NEWの
+     * 独立トランザクション)へ委譲し、{@code migrateToKeycloak}自身は{@code userRepository.saveAndFlush}
+     * を直接呼ばない。Mockitoでは実際のHibernateセッション分離までは検証できないため、ここでは
+     * 「委譲先が確かにUserMigrationPersisterであり、migrateToKeycloak自身はsaveAndFlushを呼ばない」
+     * という構造を検証する(実DBでのトランザクション境界の検証はIssue本文に記載の理由により
+     * 本環境では実施できない)。
+     */
+    @Test
+    void migrateToKeycloak_ローカル保存はUserMigrationPersisterへ委譲される_issue964() {
+        UserService service = service();
+        User user = buildUser();
+        when(userRepository.findByKeycloakSubIsNull()).thenReturn(List.of(user));
+        when(keycloakAdminClient.createUser("user@example.com", null, null, true)).thenReturn("kc-sub-964-3");
+        doNothing().when(userMigrationPersister).saveAndFlush(any(User.class));
+
+        MigrationSummaryResponse summary = service.migrateToKeycloak(null);
+
+        assertEquals(List.of(1L), summary.migratedUserIds());
+        verify(userMigrationPersister).saveAndFlush(user);
+        verify(userRepository, never()).saveAndFlush(any(User.class));
     }
 
     @Test
@@ -548,7 +580,7 @@ class UserServiceTest {
         user.setRole("admin");
         when(userRepository.findByKeycloakSubIsNull()).thenReturn(List.of(user));
         when(keycloakAdminClient.createUser("user@example.com", null, null, true)).thenReturn("kc-sub-955-11");
-        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        doNothing().when(userMigrationPersister).saveAndFlush(any(User.class));
 
         MigrationSummaryResponse summary = service.migrateToKeycloak(null);
 
@@ -562,7 +594,7 @@ class UserServiceTest {
         User user = buildUser();
         when(userRepository.findByKeycloakSubIsNull()).thenReturn(List.of(user));
         when(keycloakAdminClient.createUser("user@example.com", null, null, true)).thenReturn("kc-sub-955-12");
-        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        doNothing().when(userMigrationPersister).saveAndFlush(any(User.class));
 
         service.migrateToKeycloak(null);
 
@@ -587,6 +619,59 @@ class UserServiceTest {
         assertNull(user.getKeycloakSub());
         verify(keycloakAdminClient).deleteUser("kc-sub-955-13");
         verify(userRepository, never()).save(any(User.class));
+    }
+
+    /**
+     * issue #964: {@code save}(=merge、管理下エンティティのUPDATEをフラッシュまで遅延させる)
+     * ではなく{@code saveAndFlush}を使うことで、ローカル保存の失敗をこのユーザーのtry/catchの
+     * 中で検知する(#955のupdateと同じ理由)。検知できたら、直前に作成したKeycloakユーザーを
+     * 孤児にしないよう削除する(create/updateと同じ補償)。
+     */
+    @Test
+    void migrateToKeycloak_ローカル保存に失敗したらKeycloakユーザーを削除する_issue964() {
+        UserService service = service();
+        User user = buildUser();
+        when(userRepository.findByKeycloakSubIsNull()).thenReturn(List.of(user));
+        when(keycloakAdminClient.createUser("user@example.com", null, null, true)).thenReturn("kc-sub-964-1");
+        org.mockito.Mockito.doThrow(new RuntimeException("DB書き込み失敗"))
+                .when(userMigrationPersister).saveAndFlush(user);
+
+        MigrationSummaryResponse summary = service.migrateToKeycloak(null);
+
+        assertTrue(summary.migratedUserIds().isEmpty());
+        assertTrue(summary.failedUserIds().containsKey(1L));
+        verify(keycloakAdminClient).deleteUser("kc-sub-964-1");
+        verify(keycloakAdminClient, never()).sendPasswordResetEmail(any());
+    }
+
+    /**
+     * issue #964: 1ユーザーのローカル保存失敗は、そのユーザーを移行失敗として記録した上で
+     * バッチ全体を中断せず、他のユーザーの移行は続行する(既存のKeycloakUserSyncExceptionの
+     * 扱いと一貫させる。要件3の明示的な決定: 継続)。
+     */
+    @Test
+    void migrateToKeycloak_ローカル保存の失敗は他ユーザーの移行を妨げない_issue964() {
+        UserService service = service();
+        User failingUser = buildUser();
+        User succeedingUser = new User();
+        succeedingUser.setId(2L);
+        succeedingUser.setEmail("other@example.com");
+        succeedingUser.setRole("user");
+        succeedingUser.setEnabled(true);
+
+        when(userRepository.findByKeycloakSubIsNull()).thenReturn(List.of(failingUser, succeedingUser));
+        when(keycloakAdminClient.createUser("user@example.com", null, null, true)).thenReturn("kc-sub-964-2a");
+        when(keycloakAdminClient.createUser("other@example.com", null, null, true)).thenReturn("kc-sub-964-2b");
+        org.mockito.Mockito.doThrow(new RuntimeException("DB書き込み失敗"))
+                .when(userMigrationPersister).saveAndFlush(failingUser);
+        doNothing().when(userMigrationPersister).saveAndFlush(succeedingUser);
+
+        MigrationSummaryResponse summary = service.migrateToKeycloak(null);
+
+        assertTrue(summary.failedUserIds().containsKey(1L));
+        assertEquals(List.of(2L), summary.migratedUserIds());
+        verify(keycloakAdminClient).deleteUser("kc-sub-964-2a");
+        verify(keycloakAdminClient).sendPasswordResetEmail("kc-sub-964-2b");
     }
 
     /**
