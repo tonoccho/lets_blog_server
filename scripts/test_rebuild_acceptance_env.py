@@ -195,6 +195,28 @@ identity media ai content analytics project publishing platform log-writer""".sp
 
 PROBE_CONTAINERS = ["lbs-mysql", "lbs-keycloak", "lbs-wordpress", "lbs-reverse-proxy"]
 
+# #1293: gpu プロファイル(comfyui)の残存コンテナを模す。
+#
+# FAKE_LEFTOVER_GPU_CONTAINER=1 のとき、初回起動時に一度だけマーカーファイルを置く。
+# これは「直前の実行が終わったあとも lbs-comfyui が Created/Exited のまま残っている」
+# 状態を表す。`compose down` が `--profile` 付きで呼ばれて初めてこのマーカーを消す
+# (= プロファイル込みで撤去されて初めて片付く)。プロファイル無しの `down` では
+# 消えないので、そのまま comfyui_output の `volume rm` を失敗させる。
+GPU_LEFTOVER_CONTAINER_NAME = "lbs-comfyui"
+if os.environ.get("FAKE_LEFTOVER_GPU_CONTAINER") == "1" and not os.path.exists(
+    path("gpu_leftover_initialized")
+):
+    with open(path("gpu_leftover_container"), "w", encoding="utf-8") as _f:
+        _f.write(GPU_LEFTOVER_CONTAINER_NAME)
+    open(path("gpu_leftover_initialized"), "w", encoding="utf-8").close()
+
+
+def gpu_leftover_container():
+    if os.path.exists(path("gpu_leftover_container")):
+        with open(path("gpu_leftover_container"), encoding="utf-8") as f:
+            return f.read().strip()
+    return ""
+
 
 def fail(msg, code=1):
     sys.stderr.write(msg + "\n")
@@ -240,9 +262,15 @@ if args[:1] == ["volume"]:
     if sub == "rm":
         undeletable = os.environ.get("FAKE_UNDELETABLE", "").split()
         sticky = sticky_data_files()
+        referencing = os.environ.get("FAKE_REFERENCING_CONTAINER", "")
         for n in args[2:]:
             if any(n.endswith(u) for u in undeletable if u):
+                if referencing:
+                    fail("Error response from daemon: remove %s: volume is in use - [%s]" % (n, referencing))
                 fail("Error: volume is in use: %s" % n)
+            leftover = gpu_leftover_container()
+            if n.endswith("comfyui_output") and leftover:
+                fail("Error response from daemon: remove %s: volume is in use - [%s]" % (n, leftover))
             if volume_exists(n):
                 os.remove(path("volumes", n))
                 data = VOLUME_DATA.get(n)
@@ -403,6 +431,10 @@ if args[:1] == ["compose"]:
             break
     if verb == "down":
         write_lines("containers", [])
+        # #1293: `--profile` 付きで撤去されて初めて、gpu プロファイルの残存
+        # コンテナ(lbs-comfyui)も片付く。プロファイル無しの撤去では残ったままにする。
+        if "--profile" in rest and os.path.exists(path("gpu_leftover_container")):
+            os.remove(path("gpu_leftover_container"))
         sys.exit(0)
     if verb in ("up", "build"):
         if verb == "up":
@@ -450,6 +482,30 @@ if args[:1] == ["compose"]:
 
 # ---------------------------------------------------------------- ps / network / その他
 if args[:1] == ["ps"]:
+    # #1293: `docker ps -a --filter "volume=<name>" --format '{{.Names}}'` —
+    # ボリューム破棄が失敗したとき、参照しているコンテナ名を名指しするために使う。
+    filter_value = ""
+    i = 1
+    while i < len(args):
+        if args[i] == "--filter":
+            filter_value = args[i + 1] if i + 1 < len(args) else ""
+            i += 2
+            continue
+        if args[i].startswith("--filter="):
+            filter_value = args[i].split("=", 1)[1]
+            i += 1
+            continue
+        i += 1
+    if filter_value.startswith("volume="):
+        vol = filter_value.split("=", 1)[1]
+        names = []
+        if vol.endswith("comfyui_output") and gpu_leftover_container():
+            names.append(gpu_leftover_container())
+        extra = os.environ.get("FAKE_REFERENCING_CONTAINER", "")
+        if extra and extra not in names:
+            names.append(extra)
+        print("\n".join(names))
+        sys.exit(0)
     print("")
     sys.exit(0)
 
@@ -1448,6 +1504,102 @@ class Documentation(unittest.TestCase):
 
     def test_names_the_new_script(self):
         self.assertIn("rebuild-acceptance-env.sh", self.section10())
+
+
+class TeardownTargetsAllDeclaredProfiles(RebuildScriptHarness):
+    """#1293: gpu プロファイル(comfyui)のコンテナも撤去の対象に含める。
+
+    `docker-compose.yml` の comfyui は `profiles: ["gpu"]` を持つため、プロファイル指定
+    無しの `compose down` では対象にならない。プロファイル込みの `lbs-comfyui` が
+    Created/Exited のまま残ると、それが参照する comfyui_output の `volume rm` が失敗し、
+    撤去(1/5)が途中で止まる(他のボリュームは既に破棄済みという中途半端な状態が残る)。
+    """
+
+    def test_compose_down_is_invoked_with_all_profiles(self):
+        r = self.run_script("--yes")
+        self.assertEqual(0, r.returncode, self.out(r))
+        found = False
+        for call in self.docker_calls():
+            parts = call.split("\t")
+            if parts[0] == "compose" and "down" in parts:
+                found = True
+                self.assertIn(
+                    "--profile",
+                    parts,
+                    "compose down がプロファイル指定なしで呼ばれている(gpu プロファイルの"
+                    "コンテナが撤去対象から漏れる、#1293):\n" + call,
+                )
+                self.assertLess(
+                    parts.index("--profile"),
+                    parts.index("down"),
+                    "--profile が down より後ろに指定されている: " + call,
+                )
+        self.assertTrue(found, "compose down が呼ばれていない:\n" + "\n".join(self.docker_calls()))
+
+    def test_dry_run_shows_profiled_services_are_included(self):
+        r = self.run_script()
+        out = self.out(r)
+        self.assertEqual(0, r.returncode, out)
+        self.assertIn("--profile", out, "ドライランがプロファイルを含めることを示していない(#1293)")
+        self.assertIn(
+            "comfyui", out, "ドライランが gpu プロファイルのサービス名を示していない(#1293)"
+        )
+
+
+class LeftoverGpuProfileContainerDoesNotBlockTeardown(RebuildScriptHarness):
+    """受入基準: 残存する gpu プロファイルのコンテナ(lbs-comfyui, Created/Exited)がいても、
+    撤去(1/5)が完走し comfyui_output が破棄される(#1293)。
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.r = self.run_script("--yes", FAKE_LEFTOVER_GPU_CONTAINER="1")
+        self.out_text = self.out(self.r)
+
+    def test_succeeds(self):
+        self.assertEqual(0, self.r.returncode, self.out_text)
+
+    def test_comfyui_output_is_destroyed_and_recreated(self):
+        self.assertNotEqual(
+            "2020-01-01T00:00:00Z",
+            self.volume_created_at("comfyui_output"),
+            "残存する gpu プロファイルのコンテナのせいで comfyui_output が"
+            "破棄・再作成されていない(#1293):\n" + self.out_text,
+        )
+
+    def test_protected_volume_is_not_destroyed(self):
+        """受入基準: 保全対象(comfyui_models)は、gpu プロファイルの撤去に巻き込まれない。"""
+        self.assertEqual(
+            "2020-01-01T00:00:00Z",
+            self.volume_created_at("comfyui_models"),
+            "保全対象の comfyui_models まで作り直されている:\n" + self.out_text,
+        )
+
+
+class VolumeDestructionFailureNamesTheReferencingContainer(RebuildScriptHarness):
+    """受入基準: ボリューム破棄が失敗したとき、参照しているコンテナ名をエラーに含める(#1293)。"""
+
+    def test_error_names_the_referencing_container(self):
+        r = self.run_script(
+            "--yes",
+            FAKE_UNDELETABLE="rabbitmq_data",
+            FAKE_REFERENCING_CONTAINER="lbs-some-leftover",
+        )
+        out = self.out(r)
+        self.assertNotEqual(0, r.returncode, "破棄できていないのに成功した:\n" + out)
+        self.assertIn("rabbitmq_data", out)
+        self.assertIn(
+            "lbs-some-leftover",
+            out,
+            "参照しているコンテナ名がエラーメッセージに含まれていない(#1293):\n" + out,
+        )
+
+    def test_falls_back_to_the_generic_message_when_no_container_is_found(self):
+        """参照コンテナが見つからない失敗では、従来どおりの一般メッセージのままにする。"""
+        r = self.run_script("--yes", FAKE_UNDELETABLE="rabbitmq_data")
+        out = self.out(r)
+        self.assertNotEqual(0, r.returncode, out)
+        self.assertIn("まだ使用中の可能性があります", out)
 
 
 if __name__ == "__main__":

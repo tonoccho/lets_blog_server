@@ -181,6 +181,12 @@ cd "$REPO_ROOT"
 container_running() { docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null | grep -q true; }
 volume_created_at() { docker volume inspect --format '{{.CreatedAt}}' "$1" 2>/dev/null || true; }
 to_epoch() { date -d "$1" +%s 2>/dev/null || echo 0; }
+# ボリューム破棄が失敗したとき、まだ参照しているコンテナ名を診断に添えるため(#1293)。
+# -a を付けるのは、Created/Exited のまま残ったコンテナ(running していない)も
+# ボリュームを握ったままのことがあるため。
+referencing_containers() {
+  docker ps -a --filter "volume=$1" --format '{{.Names}}' 2>/dev/null | tr '\n' ' ' | sed 's/ *$//'
+}
 
 mysql_q() {
   docker exec -i "$MYSQL_CONTAINER" \
@@ -241,6 +247,12 @@ else
   log "  プローブ省略(直前のスタックが起動していないため)"
   log "  この場合はボリュームの CreatedAt 検査だけで破棄を判定する。"
 fi
+
+step "撤去コマンドの対象範囲(#1293)"
+log "  docker compose --profile '*' down --remove-orphans: docker-compose.yml が宣言する"
+log "  全プロファイル(comfyui の gpu 等)のコンテナも撤去の対象に含めます。"
+log "  プロファイルを指定しないと、Created/Exited のまま残ったコンテナが"
+log "  それの乗るボリューム(comfyui_output 等)の破棄をブロックし、途中で止まります。"
 
 if [ "$SHARED_HOST" -eq 1 ]; then
   log ""
@@ -334,7 +346,11 @@ for rel in "${HOST_ARTIFACTS[@]}"; do
 done
 
 down_out=""
-if ! down_out="$(compose down --remove-orphans --timeout 60 2>&1)"; then
+# --profile '*' を付けるのは、docker-compose.yml が宣言する全プロファイル
+# (comfyui の gpu 等)のコンテナも撤去の対象に含めるため(#1293)。プロファイル名を
+# 個別に列挙する代わりに '*' を選んだのは、今後プロファイルが増減しても
+# このスクリプトを追随させる必要がないようにするため。
+if ! down_out="$(compose --profile '*' down --remove-orphans --timeout 60 2>&1)"; then
   printf '%s\n' "$down_out" | sed 's/^/  /'
   if printf '%s' "$down_out" | grep -q 'active endpoints'; then
     # 共有プロキシ(infra-proxy)が lbs-net に接続していると、ネットワークだけは削除できない。
@@ -356,7 +372,12 @@ for v in "${DESTROY_VOLUMES[@]}"; do
   if docker volume rm "$name" >/dev/null 2>&1; then
     log "  破棄: $name"
   else
-    echo "エラー: ボリューム $name を破棄できませんでした(まだ使用中の可能性があります)。" >&2
+    refs="$(referencing_containers "$name")"
+    if [ -n "$refs" ]; then
+      echo "エラー: ボリューム $name を破棄できませんでした(参照しているコンテナ: ${refs})。" >&2
+    else
+      echo "エラー: ボリューム $name を破棄できませんでした(まだ使用中の可能性があります)。" >&2
+    fi
     exit 1
   fi
 done
