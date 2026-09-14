@@ -91,6 +91,7 @@ readonly DESTROY_VOLUMES=(
   wordpress_sites
   bulk_upload_files
   generated_images
+  avatar_images
 )
 
 # 保全するボリューム。
