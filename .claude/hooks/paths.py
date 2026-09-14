@@ -80,6 +80,12 @@ DOC_PATTERNS = [
 #   Dockerfile / Dockerfile.*
 #       【採用】実行時イメージそのものの定義。compose をプロダクションとしながら
 #       compose が組み立てるイメージ定義を中立に残すのは一貫しない。
+#   apps/*/docker-entrypoint.sh
+#       【採用】Dockerfile の ENTRYPOINT/CMD から起動される apps/*/ 直下のスクリプト
+#       (#1208)。npm ci を実行するかどうか、生成物の所有権をどうするかという、
+#       実行時イメージの振る舞いそのものを決める。Dockerfile をプロダクション扱い
+#       としながら、その ENTRYPOINT が呼ぶスクリプトだけ TEST/DOC/NEUTRAL のどれにも
+#       当たらず黙って中立に落ちるのは一貫しない。
 PRODUCTION_PATTERNS = [
     r"^apps/[^/]+/src/",
     r"^services/[^/]+/src/",
@@ -92,6 +98,7 @@ PRODUCTION_PATTERNS = [
     r"^infra/",
     r"^docker-compose(\.[^/]+)?\.ya?ml$",
     r"(^|/)Dockerfile(\.[^/]+)?$",
+    r"^apps/[^/]+/docker-entrypoint\.sh$",
 ]
 
 # 中立。テストと同じコミットに入れてもフェーズ分離違反にならず、

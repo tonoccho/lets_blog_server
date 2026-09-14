@@ -91,6 +91,8 @@ class ProductionCodeClassification(unittest.TestCase):
         "apps/web/Dockerfile",
         "services/identity/Dockerfile",
         "infra/wordpress/Dockerfile",
+        # #1208: Dockerfile の ENTRYPOINT/CMD から起動される apps/*/ 直下のスクリプト。
+        "apps/web/docker-entrypoint.sh",
         # 実装判断: 実行時・ビルド出力を決める設定。
         "apps/web/next.config.ts",
         "apps/web/postcss.config.mjs",
