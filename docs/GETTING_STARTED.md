@@ -48,6 +48,28 @@ The system is built on Docker and includes all necessary services (API server, d
 
 ## Installation Steps
 
+### Quick setup with `setup.sh`
+
+On a fresh Ubuntu/Debian machine with no prerequisites installed, running `setup.sh` once
+after cloning takes you straight to a running `https://localhost` — it installs prerequisites
+(Docker Engine + Compose v2, and the NVIDIA Container Toolkit only if `nvidia-smi` works),
+generates `.env` (auto-generating internal secrets, leaving external values like
+`LLM_API_KEY` blank for you to fill in), generates the TLS certificate, starts the stack, and
+waits for it to become healthy:
+
+```bash
+git clone -b develop <this repository's URL>
+cd lets_blog_server
+./setup.sh
+```
+
+By default it refuses to run on any branch other than `develop`; pass `--branch <name>` or
+`--main` to allow another branch. If `.env` already exists, it is left untouched.
+
+The rest of this section walks through the same steps manually — useful if prerequisites are
+already installed, if you're not on Ubuntu/Debian, or if you want to understand what
+`setup.sh` does under the hood.
+
 ### Step 1: Clone the Repository
 
 ```bash

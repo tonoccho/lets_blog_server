@@ -7,8 +7,27 @@ Docker Compose管理下のコンテナとして起動するため、`docker comp
 
 ## クイックスタート
 
+前提ソフトが何も入っていない Ubuntu/Debian 系の機械であれば、`setup.sh` を1回実行すれば
+`https://localhost` にアクセスできる状態まで到達する(前提ソフト導入・`.env` 生成・
+TLS証明書生成・全サービス起動・healthy確認を一括で行う。詳細は
+[README.md の「アプリケーションの起動(Docker)」](../README.md#アプリケーションの起動docker)
+を参照)。
+
 ```bash
-git clone <このリポジトリのURL>
+git clone -b develop <このリポジトリのURL>
+cd lets_blog_server
+./setup.sh
+```
+
+`.env` が既に存在する場合は上書きしない。既定は `develop` ブランチでの実行のみを許可する
+(`--branch <name>` / `--main` で上書き可能)。
+
+### `setup.sh` が行っている手順を個別に実行する場合
+
+前提ソフトが既に導入済みの環境や、Ubuntu/Debian 以外の環境では、以下を手動でなぞる。
+
+```bash
+git clone -b develop <このリポジトリのURL>
 cd lets_blog_server
 
 # 1. 環境変数を設定
@@ -21,9 +40,12 @@ bash scripts/generate-certs.sh
 
 # 3. Docker Compose で全サービスを起動(reverse-proxy/web/api/log-writer/mysql/rabbitmq/
 #    phpmyadmin/comfyui/plantuml/drawio/wordpress/Penpotスイート。計19コンテナ)
-docker compose up -d
+docker compose up -d --build
 
-# 4. ブラウザで https://localhost にアクセス(自己署名証明書の警告は例外承認する)
+# 4. 全サービスがhealthyになるまで待機
+bash scripts/wait-for-stack-healthy.sh --all
+
+# 5. ブラウザで https://localhost にアクセス(自己署名証明書の警告は例外承認する)
 ```
 
 ## システム要件

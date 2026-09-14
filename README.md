@@ -291,12 +291,37 @@ sudo snap install code --classic
 
 ## アプリケーションの起動(Docker)
 
-```bash
-git clone <このリポジトリのURL>
-cd lets_blog_server
+前提ソフトが何も入っていない Ubuntu/Debian 系の機械であれば、`setup.sh` を1回実行すれば
+そのまま `https://localhost` にアクセスできる状態になる(前提ソフト導入・`.env` 生成・
+TLS証明書生成・全サービス起動・healthy確認まで一括で行う)。
 
-# 1. git フックを有効にする（コミット時の規約検査。このリポジトリにコミットするなら必須）
+```bash
+git clone -b develop <このリポジトリのURL>
+cd lets_blog_server
+./setup.sh
+```
+
+既定では `develop` ブランチ上での実行のみを許可する。他ブランチで使う場合は
+`./setup.sh --branch <name>` または `./setup.sh --main` を指定する。
+
+`.env` は既に存在する場合は上書きしない。存在しない場合は `.env.example` を土台に、
+値が何でもよい内部の秘密値(DBパスワード・`NEXTAUTH_SECRET` 等)は自動生成して書き込み、
+利用者自身が用意する外部の値(`LLM_API_KEY`・`BRAVE_SEARCH_API_KEY`・`MAIL_PASSWORD` 等)は
+生成せず空のまま残して実行の最後に一覧表示する。それらの機能を使う場合は `.env` を手動で
+編集する。
+
+### `setup.sh` が内部で行っていること(手動でも同じ手順で進められる)
+
+`setup.sh` は以下を順に、冪等に実行しているだけである。前提ソフトが既に導入済みの環境や、
+Ubuntu/Debian 以外の環境では、同じ手順を手動でなぞればよい。
+
+```bash
+# 0. git フックを有効にする（コミット時の規約検査。このリポジトリにコミットするなら必須。
+#    setup.shはこのリポジトリへのコミットを前提にしないため呼ばない)
 bash scripts/setup-git-hooks.sh
+
+# 1. 前提ソフトの導入(git/curl/openssl、Docker Engine + Compose v2、dockerグループ、
+#    nvidia-smiが通る場合のみNVIDIA Container Toolkit。導入コマンドは次節を参照)
 
 # 2. 環境変数を設定
 cp .env.example .env
@@ -307,9 +332,12 @@ bash scripts/check-env.sh   # .env が .env.example の全項目を満たして�
 bash scripts/generate-certs.sh
 
 # 4. Docker Composeで全サービスを起動
-docker compose up -d
+docker compose up -d --build
 
-# 5. ブラウザで https://localhost にアクセス(自己署名証明書の警告は例外承認する)
+# 5. 全サービスがhealthyになるまで待機(setup.shはこれで起動完了を判定する)
+bash scripts/wait-for-stack-healthy.sh --all
+
+# 6. ブラウザで https://localhost にアクセス(自己署名証明書の警告は例外承認する)
 ```
 
 `web`(Next.js)はコンテナ起動時のエントリポイントが `apps/web/node_modules` の有無を確認し、
