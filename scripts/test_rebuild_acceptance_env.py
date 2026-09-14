@@ -94,7 +94,7 @@ DESTROYED_VOLUMES = [
     "bulk_upload_files",
     "generated_images",
 ]
-PRESERVED_VOLUMES = ["comfyui_models"]
+PRESERVED_VOLUMES = ["comfyui_models", "ollama_models"]
 VOLUME_PREFIX = "lets_blog_server_"
 
 SERVICE_SCHEMAS = [
@@ -774,6 +774,23 @@ class SafetyDeviceIsHardcodedTargets(unittest.TestCase):
         self.assertRegex(self.text, r"readonly\s+PRESERVE_VOLUMES=\(\s*comfyui_models")
         self.assertIn("モデル", self.text, "comfyui_models を保全する理由がコメントに無い")
 
+    def test_preserves_ollama_models_and_says_why(self):
+        """#1089: ollama_models も comfyui_models と同じく保全対象で、理由が明文化されている。"""
+        self.assertIn(
+            "ollama_models",
+            re.search(r"readonly\s+PRESERVE_VOLUMES=\([^)]*\)", self.text, re.S).group(0),
+            "ollama_models が PRESERVE_VOLUMES に無い",
+        )
+        preserve_block = re.search(
+            r"保全するボリューム。.*?readonly\s+PRESERVE_VOLUMES=\([^)]*\)", self.text, re.S
+        )
+        self.assertIsNotNone(preserve_block, "PRESERVE_VOLUMES 直上のコメント塊が見つからない")
+        self.assertIn(
+            "ollama_models",
+            preserve_block.group(0),
+            "ollama_models を保全する理由のコメントが無い",
+        )
+
     def test_reuses_the_existing_health_wait(self):
         """#965 §1-3: `wait-for-stack-healthy.sh` を再利用する(重複実装しない)。"""
         self.assertIn("wait-for-stack-healthy.sh", self.text)
@@ -807,6 +824,16 @@ class DryRunChangesNothing(RebuildScriptHarness):
         out = self.out(self.r)
         self.assertIn("保全するボリューム", out)
         self.assertIn(VOLUME_PREFIX + "comfyui_models", out)
+        self.assertIn(VOLUME_PREFIX + "ollama_models", out, "ollama_models が保全リストに出ていない")
+
+    def test_does_not_list_ollama_models_as_a_volume_to_destroy(self):
+        out = self.out(self.r)
+        destroy_section = out.split("保全するボリューム", 1)[0]
+        self.assertNotIn(
+            VOLUME_PREFIX + "ollama_models",
+            destroy_section,
+            "ollama_models が破棄するボリュームの一覧に出ている",
+        )
 
     def test_lists_the_probes_it_would_create(self):
         out = self.out(self.r)
@@ -1103,6 +1130,29 @@ class VolumesAreDestroyedAndRecreated(RebuildScriptHarness):
             "2020-01-01T00:00:00Z",
             self.volume_created_at("comfyui_models"),
             "保全対象の comfyui_models が作り直されている",
+        )
+
+    def test_ollama_models_is_never_removed(self):
+        """#1089: ollama_models も comfyui_models と同じく volume rm の対象にならない。"""
+        self.run_script("--yes")
+        for call in self.docker_calls():
+            if call.startswith("volume\trm"):
+                with self.subTest(call=call):
+                    self.assertNotIn("ollama_models", call)
+
+    def test_ollama_models_created_at_is_unchanged(self):
+        """#1089: ollama_models の CreatedAt が実行後も変わらないことを検証する。"""
+        r = self.run_script("--yes")
+        self.assertEqual(0, r.returncode, self.out(r))
+        self.assertEqual(
+            "2020-01-01T00:00:00Z",
+            self.volume_created_at("ollama_models"),
+            "保全対象の ollama_models が作り直されている",
+        )
+        self.assertRegex(
+            self.out(r),
+            r"OK:.*ollama_models.*保全",
+            "ollama_models の保全検証の OK ログが出ていない",
         )
 
     def test_a_volume_that_cannot_be_destroyed_is_fatal_at_the_teardown(self):

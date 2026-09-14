@@ -651,6 +651,7 @@ Playwright はファイルをまたぐ直列化の手段を持たない(`@mode:s
 | 保全するボリューム | 保全する理由 |
 | --- | --- |
 | `lets_blog_server_comfyui_models` | 画像生成の**モデル重み**。再取得に長時間かかり、そもそもテスト対象の状態ではない。`CreatedAt` が実行をまたいで変わらないことをスクリプトが検証する |
+| `lets_blog_server_ollama_models` | Ollama の**モデル重み**(約4.7GB)。再取得に長時間かかり、受け入れテストの LLM 呼び出しは `llm-stub` が受けるためテスト対象の状態でもない。`comfyui_models` と同様、`CreatedAt` が実行をまたいで変わらないことをスクリプトが検証する |
 
 `*_test` スキーマ(ホストからの `./gradlew test` 用)は `mysql_data` ごと巻き添えで消えるが、
 構築時に `infra/mysql/init/02-create-test-schemas.sh` が本来の経路で作り直す。

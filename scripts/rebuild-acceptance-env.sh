@@ -97,11 +97,15 @@ readonly DESTROY_VOLUMES=(
 #
 #   comfyui_models — 画像生成のモデル重み。再取得に長時間かかり、テスト対象の状態でもない。
 #                    ここだけは実行をまたいで保持する(CreatedAt が変わらないことを検証する)。
+#   ollama_models  — Ollama のモデル重み(issue #1086)。約4.7GBあり、再取得に長時間かかる。
+#                    受け入れテストの LLM 呼び出しは llm-stub が受けるため(#1086 R7)、
+#                    テスト対象の状態でもない。comfyui_models と同様、実行をまたいで
+#                    保持する(CreatedAt が変わらないことを検証する)。
 #
 # mysql_data 内の *_test スキーマ(ホストからの ./gradlew test 用)は mysql_data ごと
 # 巻き添えで消えるが、構築時に infra/mysql/init/02-create-test-schemas.sh が本来の経路で
 # 作り直す。作り直されたことは手順4で確認する。
-readonly PRESERVE_VOLUMES=(comfyui_models)
+readonly PRESERVE_VOLUMES=(comfyui_models ollama_models)
 
 readonly MYSQL_CONTAINER="lbs-mysql"
 readonly KEYCLOAK_CONTAINER="lbs-keycloak"
@@ -294,7 +298,11 @@ if ! python3 "$SCRIPT_DIR/check-worktree-match.py" rebuild; then
 fi
 
 START_TS=$(date +%s)
-COMFYUI_MODELS_BEFORE="$(volume_created_at "${VOLUME_PREFIX}comfyui_models")"
+# 保全対象ごとの CreatedAt(実行前)。手順4-1b でまとめて「変わっていないこと」を検証する。
+declare -A PRESERVE_VOLUMES_BEFORE
+for v in "${PRESERVE_VOLUMES[@]}"; do
+  PRESERVE_VOLUMES_BEFORE["$v"]="$(volume_created_at "${VOLUME_PREFIX}${v}")"
+done
 
 # ---------------------------------------------------------------- 0. プローブ設置
 
@@ -497,13 +505,17 @@ done
 [ "$verify_failed" -eq 0 ] && log "  OK: 破棄対象のボリュームは全て CreatedAt が更新されています"
 
 # 4-1b. 保全対象が作り直されていないこと。
-COMFYUI_MODELS_AFTER="$(volume_created_at "${VOLUME_PREFIX}comfyui_models")"
-if [ -n "$COMFYUI_MODELS_BEFORE" ] && [ "$COMFYUI_MODELS_BEFORE" != "$COMFYUI_MODELS_AFTER" ]; then
-  echo "  NG: ${VOLUME_PREFIX}comfyui_models の CreatedAt が変わりました(保全できていない)" >&2
-  verify_failed=1
-else
-  log "  OK: ${VOLUME_PREFIX}comfyui_models は保全されています(CreatedAt ${COMFYUI_MODELS_AFTER})"
-fi
+for v in "${PRESERVE_VOLUMES[@]}"; do
+  name="${VOLUME_PREFIX}${v}"
+  before="${PRESERVE_VOLUMES_BEFORE[$v]}"
+  after="$(volume_created_at "$name")"
+  if [ -n "$before" ] && [ "$before" != "$after" ]; then
+    echo "  NG: ${name} の CreatedAt が変わりました(保全できていない)" >&2
+    verify_failed=1
+  else
+    log "  OK: ${name} は保全されています(CreatedAt ${after})"
+  fi
+done
 
 # 4-3. 9スキーマに Flyway 管理テーブル以外のデータが無いこと。
 #
