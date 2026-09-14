@@ -1205,10 +1205,11 @@ Node自身がこのファイルのfdを開いたまま保持し、`flock` コマ
 
 ---
 
-## 15. develop の検証済みコミットを main へ載せ、semver タグを付ける(#1274)
+## 15. develop の検証済みコミットに版数コミットを積み、main へ載せて semver タグを付け、
+    develop を次の開発版数へ進める(#1274, #1305)
 
-`scripts/release-verify-tag.py` は、develop のコミットを1つ指定して(既定は
-`origin/develop` の先頭)、次を1コマンドで行う。
+`scripts/release-verify-tag.py` は、develop のコミットを1つ指定して(既定・実質必須は
+`origin/develop` の先頭。詳細は手順1)、次を1コマンドで行う。
 
 ```
 python3 scripts/release-verify-tag.py [commit] [--bump patch|minor|major]
@@ -1216,45 +1217,55 @@ python3 scripts/release-verify-tag.py [commit] [--bump patch|minor|major]
 
 ### 使い方と手順の一覧
 
-1. 対象コミットを解決し固定する。`origin/develop` から到達できない、または既に
-   `origin/main` に含まれる場合(リリース済み、またはそれより古い)は、どの手順も
-   始めずに拒否する。
-2. メイン作業ツリーとは別の**clone**(`git worktree` ではない。§「なぜ push か」参照)で、
-   固定したコミットを detached で検証する。メイン作業ツリーの HEAD・ブランチ・インデックス・
-   ファイルは変更しない。gitignore 対象で clone に含まれない `.env` と `certs/` は、
-   メイン作業ツリーから隔離チェックアウトへ別途コピーする(`.env` が無ければ、手順を
-   1つも始めずに理由を表示して失敗する)。資格情報は `~/.config/lets-blog-e2e.env`
-   から読み込み、各手順のサブプロセス環境へ渡す。
-3. §13 の `cycle.lock`(`${CLAUDE_AUTO_STATE_DIR:-~/.local/state/claude-auto}/cycle.lock`、
+1. P(`origin/develop` の先頭)を固定する。指定したコミットが現在の `origin/develop` の
+   先頭と一致しなければ、どの手順も始めずに拒否する(#1305: 古いコミットを指定した
+   リリースはできない)。
+2. 版数 X を `compute_next_version` で決める(テスト手順より前。#1305 要件2)。同名タグが
+   既に origin に存在しないかを、ここ(計算時)と push 直前の両方で確認する。
+3. メイン作業ツリーとは別の**clone**(`git worktree` ではない。§「なぜ push か」参照)で
+   検証する。メイン作業ツリーの HEAD・ブランチ・インデックス・ファイルは変更しない。
+   まず P を detached で checkout し、**版数ファイルだけを変更するリリースコミット R**
+   (P の子)を、git フックを束縛する**前**に作る(#1305 要件3。`apps/mcp-server/src/server.js`
+   はプロダクション扱いなので、束縛したまま作ると隔離チェックアウトの pre-commit フックが
+   テストファースト規則で拒否する)。以降の事前確認・全手順・本番の木チェックは、すべて
+   **R に対して**行う(検証するのはタグの付く木そのもの)。gitignore 対象で clone に
+   含まれない `.env` と `certs/` は、メイン作業ツリーから隔離チェックアウトへ別途コピーする
+   (`.env` が無ければ、手順を1つも始めずに理由を表示して失敗する)。資格情報は
+   `~/.config/lets-blog-e2e.env` から読み込み、各手順のサブプロセス環境へ渡す。
+4. §13 の `cycle.lock`(`${CLAUDE_AUTO_STATE_DIR:-~/.local/state/claude-auto}/cycle.lock`、
    無人ループのスクリプトと共有)を、最初の手順を始める前から push と引き渡しの完了まで
    保持する。待機中は保持者と経過時間を表示し、上限(環境変数 `RELEASE_VERIFY_LOCK_TIMEOUT`
    で変更可。既定は **28800秒(8時間)** — パイプライン1回が最大で3件×160分
    (約8時間)に達しうるため(Q4、Issue Open Questions)、通常の1〜2時間の実行を
    打ち切らない側に余裕を持たせて8時間にしている)を超えたら origin に触れずに非0で
    終了する。
-4. **事前確認**: `origin/main` の先頭に固定したコミットを `--no-ff` でマージし、結果の
-   木が固定したコミットの木と同一であることを確かめる。不一致なら、テスト手順を1つも
-   始めずに失敗する(誰かが main へ直接コミットした、などのずれを、1〜2時間かかる
-   検証の前に検出するため)。
-5. 依存導入(`npm ci`)、`scripts/` と `.claude/hooks/` の Python ユニットテスト、
+5. **事前確認**: `origin/main` の先頭に R を `--no-ff` でマージし、結果の木が R の木と
+   同一であることを確かめる。不一致なら、テスト手順を1つも始めずに失敗する(誰かが main
+   へ直接コミットした、などのずれを、1〜2時間かかる検証の前に検出するため)。
+6. 依存導入(`npm ci`)、`scripts/` と `.claude/hooks/` の Python ユニットテスト、
    `apps/web` / `apps/extension` / `apps/mcp-server` / `apps/penpot-plugin` /
    `packages/api-client` のテスト・lint・build・typecheck、`apps/web` の
    `npm run test:at:clean`(`ACCEPTANCE_RESET=1`、迂回 `AT_WORKTREE_CHECK_BYPASS=1` を明示的に
-   使い、ログに残す。迂回の根拠は手順3の `cycle.lock`)、`apps/extension` の
+   使い、ログに残す。迂回の根拠は手順4の `cycle.lock`)、`apps/extension` の
    `npm run test:at`、`docker-compose.host-tests.yml` を重ねて MySQL を公開し直したうえでの
-   `scripts/check-test-db.sh` と `./gradlew test lint` を、隔離したチェックアウトで実行する。
-6. **ゼロ許容**: 全手順の終了コードが0であり、かつ failed / skipped / did not run / flaky が
+   `scripts/check-test-db.sh` と `./gradlew test lint` を、R をチェックアウトした隔離
+   チェックアウトで実行する。
+7. **ゼロ許容**: 全手順の終了コードが0であり、かつ failed / skipped / did not run / flaky が
    すべて0であるときだけ成功とする。既知の失敗(#1140、#1262 など)も例外にしない。
    終了コードだけでは隠れる skip を防ぐため、`web-test`(jest `--json`)・
    `web-test-at-clean`(Playwright の `json` レポーター)・`extension-test-at`
    (jest `--json`)・`backend-gradle-test-lint`(全11モジュールの JUnit XML を集計)の
    4手順は、実際の出力ファイルから passed/failed/skipped/flaky を抽出して判定する。
-7. 成功したら、`origin/main` を再取得してもう一度マージ+木の同一性確認を行い(検証中に
-   main が進んでいてもそのときの先頭に対して行う)、マージコミットに注釈付き semver タグを
-   付け、`git push --atomic origin <マージコミット>:refs/heads/main refs/tags/<版>` で
-   `main` とタグを1回で送る。`develop` は push しない。
-8. 成功・失敗にかかわらず、終了前(`cycle.lock` を保持している間)に共有スタックを
-   メイン作業ツリーが所有・稼働する状態へ戻す。
+8. 成功したら、`origin/main` を再取得してもう一度マージ+木の同一性確認を R に対して
+   行い(検証中に main が進んでいてもそのときの先頭に対して行う)、同名タグの不存在と
+   `origin/develop` が依然として P のままであることを再確認する(#1305: 検証中に develop が
+   進んでいたら、再試行せず全体を失敗として扱う)。
+9. **次の開発版数コミット V**(R の子。全箇所を `X.Y.(Z+1)-DEVELOP` へ。`DEVELOP` は大文字)
+   を作る。マージコミット M(main, R)に P と R の SHA を記録した注釈付き semver タグ X を
+   付け、`git push --atomic origin M:refs/heads/main V:refs/heads/develop refs/tags/X` で
+   `main`・`develop`・タグを**1回で**送る(#1305 要件5: `--force` は使わない)。
+10. 成功・失敗にかかわらず、終了前(`cycle.lock` を保持している間)に共有スタックを
+    メイン作業ツリーが所有・稼働する状態へ戻す。
 
 失敗した場合は、`origin` の `main` は実行前のまま、新しい semver タグは origin にも
 ローカルにも残らず、失敗した手順の名前と理由・ログの場所が表示されて非0で終了する。
@@ -1277,11 +1288,14 @@ python3 scripts/release-verify-tag.py [commit] [--bump patch|minor|major]
 要件5のとおり、既知の失敗も含めて1件でも failed / skipped / did not run / flaky があれば
 リリースを作らない。「ほぼ通った」を許容する経路は無い。
 
-### main へのマージが Issue の MR ではなく直接 push である理由
+### main へのマージ・develop への次期開発版数コミットが Issue の MR ではなく直接 push である理由
 
 `.claude/CLAUDE.md` の squash / `ff` の規則(**Where squash is enforced**)は develop へ
-入る **Issue の Merge Request** のためのものであり、本スクリプトが main へ行う直接 push は
-その規則の対象ではない(下の1文を参照)。MR では実現できない理由は次のとおり:
+入る **Issue の Merge Request** のためのものであり、本スクリプトが main へ行う直接 push、
+および R の検証成功後に develop へ行う V の直接 push は、その規則の対象ではない
+(下の1文、および `.claude/CLAUDE.md` **Where squash is enforced** の該当箇所を参照)。
+develop への push はこのスクリプトだけの例外で、Issue の MR / squash の規則には違反しない
+(#1305 利用者決定)。MR では実現できない理由は次のとおり:
 
 - プロジェクト設定の `merge_method: ff` は、ソースブランチが対象ブランチの先頭を含んで
   いることを要求する。develop は main にしか無い6コミットを含まないため、develop の

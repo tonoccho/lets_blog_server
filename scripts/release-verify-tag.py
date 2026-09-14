@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""developの検証済みコミットをmainへ直接マージし、semverタグを付ける(#1274)。
+"""developの検証済みコミットに版数コミットを積んでmainへ直接マージし、semverタグを
+付ける。タグ付け後、developだけを次の開発版数へ進める(#1274, #1305)。
 
     python3 scripts/release-verify-tag.py [commit] [--bump patch|minor|major]
 
-利用者の決定(Issue #1274 Background):
+利用者の決定(Issue #1274 Background、#1305 Background):
 
   1. main / develop は GitHub と同期を取り、main に付いたタグを次のリリースバージョンとする。
   2. タグ名はsemver(`MAJOR.MINOR.PATCH`、`v`接頭辞なし)。既存の `0.3.0` の続きにする。
@@ -11,28 +12,38 @@
      マージコミットの木が検証したコミットの木と同一であることを機械的に確かめる。
   4. タグはGitLab(origin)で作る。GitHubへは#1256のpushミラーが届ける
      (このスクリプトはGitHubに一切触れない)。
+  5. リリースを1回実行すると、全コンポーネントの版数をXにしたコミットにタグを付け、
+     タグ付け後はdevelopだけを`X.Y.(Z+1)-DEVELOP`へ進める(#1305)。
 
 ## 何をするか
 
-1. 対象コミットを解決し固定する(省略時は`origin/develop`の先頭)。
-   `origin/develop`から到達できない、または既に`origin/main`に含まれる場合は
-   どの手順も始めずに拒否する。
-2. メイン作業ツリーとは別のclone(isolated checkout)を作り、固定したSHAをdetachedで
+1. P(`origin/develop`の先頭。指定時はそれと一致することを要求)を固定する。
+   Pが現在の`origin/develop`の先頭でなければ、どの手順も始めずに拒否する
+   (#1305 要件6: 古いコミットを指定したリリースはできない)。
+2. メイン作業ツリーとは別のclone(isolated checkout)を作り、Pをdetachedで
    検証する。`git worktree`はref(ブランチ・タグ)を元リポジトリと共有してしまうため
    使わない(Issue Implementation Notes)。
 3. 無人ループと共有している`cycle.lock`
    (`${CLAUDE_AUTO_STATE_DIR:-$HOME/.local/state/claude-auto}/cycle.lock`)を取得する。
    最初の手順を始める前から、push・引き渡しの完了まで保持する。
-4. 事前確認: `origin/main`の先頭に固定したSHAを`--no-ff`でマージし、
-   結果の木が固定したSHAの木と同一であることを確かめる。不一致ならテスト手順を
-   1つも始めずに失敗する。
-5. 全手順(依存導入・Pythonユニットテスト・web/extension/mcp-server/penpot-plugin/
+4. 版数X を`compute_next_version`で決める(#1305 要件2: テスト手順より前)。
+   同名タグが既に存在しないかを、ここ(計算時)と push 直前の両方で確認する。
+5. リリースコミットR(Pの子。版数ファイルの変更だけを含む)を、git フックを
+   束縛する前に作る(#1305 要件3。Implementation Notes: `apps/mcp-server/src/server.js`は
+   プロダクション扱いなので、束縛したまま作ると隔離チェックアウトのpre-commitフックに
+   拒否される)。
+6. 事前確認: `origin/main`の先頭にRを`--no-ff`でマージし、結果の木がRの木と
+   同一であることを確かめる。不一致ならテスト手順を1つも始めずに失敗する。
+7. 全手順(依存導入・Pythonユニットテスト・web/extension/mcp-server/penpot-plugin/
    api-clientのテスト・lint・build・受け入れテスト・バックエンドの`./gradlew test lint`)を
-   実行する。ゼロ許容(全終了コード0、failed/skipped/did not run/flakyが全て0)。
-6. 成功したら、`origin/main`を再取得してもう一度マージ+木の同一性確認を行い、
-   マージコミットにsemverの注釈付きタグを付け、`git push --atomic`で
-   `main`とタグを1回で送る。
-7. 成功・失敗にかかわらず、終了前に共有スタックをメイン作業ツリーが所有する状態へ戻す。
+   Rに対して実行する。ゼロ許容(全終了コード0、failed/skipped/did not run/flakyが全て0)。
+8. 成功したら、`origin/main`を再取得してもう一度マージ+木の同一性確認をRに対して行い、
+   同名タグの不存在とdevelopがPのままであることを再確認する(#1305 要件2/5/6: 競合対策)。
+9. 次の開発版数コミントV(Rの子。全箇所を`X.Y.(Z+1)-DEVELOP`へ)を作る(#1305 要件4)。
+   マージコミットM(main, R)にsemverの注釈付きタグ(PとRのSHAを記録)を付け、
+   `git push --atomic`で`M:refs/heads/main`・`V:refs/heads/develop`・タグを
+   1回で送る(#1305 要件5: `--force`は使わない。developがPから進んでいたら全体を失敗とする)。
+10. 成功・失敗にかかわらず、終了前に共有スタックをメイン作業ツリーが所有する状態へ戻す。
 
 ## テスト専用の差し替え口(本番では絶対に設定しない)
 
@@ -62,16 +73,145 @@ import xml.etree.ElementTree as ET
 
 SEMVER_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
-MSG_UNREACHABLE = "対象コミットは origin/develop から到達できません"
-MSG_ALREADY_RELEASED = "対象コミットは既に origin/main に含まれています"
-MSG_TREE_MISMATCH = "木が一致しません(main へ直接コミットされた可能性)"
+MSG_P_NOT_TIP = (
+    "P(対象コミット)が現在の origin/develop の先頭と一致しません"
+    "(#1305 要件6: 古いコミットを指定したリリースはできません)"
+)
+MSG_TREE_MISMATCH = "木が一致しません(main へ直接コミットされた可能性、または R の生成に問題)"
 MSG_LOCK_TIMEOUT = "ロックの取得がタイムアウトしました"
 MSG_PUSH_REJECTED = "origin への push が拒否されました"
 MSG_VERSION_EXISTS = "タグが既に origin に存在します"
+MSG_DEVELOP_ADVANCED = (
+    "検証中に origin/develop が P から進みました(#1305 要件5: 再試行はしません)"
+)
 MSG_ENV_FILE_MISSING = (
     "メイン作業ツリーに .env が見つかりません(要件2: gitignore対象の入力)。"
     "cp .env.example .env で作成してください。"
 )
+
+
+# --------------------------------------------------------------------- version files (#1305 要件1)
+#: Requirement 1 の全ファイル・全箇所。(相対パス, 種別)。
+#: 種別ごとの意味は set_version_everywhere() / read_version() 参照。
+VERSION_LOCATIONS = [
+    ("apps/web/package.json", "npm_pkg"),
+    ("apps/web/package-lock.json", "npm_lock"),
+    ("apps/extension/package.json", "npm_pkg"),
+    ("apps/extension/package-lock.json", "npm_lock"),
+    ("apps/mcp-server/package.json", "npm_pkg"),
+    ("apps/mcp-server/package-lock.json", "npm_lock"),
+    ("apps/mcp-server/src/server.js", "server_js"),
+    ("apps/penpot-plugin/package.json", "npm_pkg"),
+    ("apps/penpot-plugin/package-lock.json", "npm_lock"),
+    ("packages/api-client/package.json", "npm_pkg"),
+    ("packages/api-client/package-lock.json", "npm_lock"),
+    ("build.gradle", "gradle"),
+]
+
+#: npm の package.json / package-lock.json の `"version": "..."` フィールド。
+VERSION_FIELD_RE = re.compile(r'"version":\s*"[^"]*"')
+#: build.gradle の `subprojects { version = '...' }`。
+GRADLE_VERSION_RE = re.compile(r"(version\s*=\s*)'[^']*'")
+#: apps/mcp-server/src/server.js の health 応答の `version: '...'`。
+SERVER_JS_VERSION_RE = re.compile(r"(version:\s*)'[^']*'")
+
+
+class VersionFieldNotFound(RuntimeError):
+    """版数欄が見つからないファイルがある(要件1: 黙って飛ばさず失敗させる)。"""
+
+
+def _replace_first_n(text, pattern, make_replacement, n, path):
+    """`pattern` に一致する最初の n 件だけを書き換える。n 件に満たなければ失敗する
+    (npm lockfile は `"version":` が依存パッケージの数だけ出現するため、対象は
+    「先頭から n 件」= ルートパッケージの `version` と `packages[""].version` に限定する)。
+    """
+    out_parts = []
+    last = 0
+    count = 0
+    for m in pattern.finditer(text):
+        if count >= n:
+            break
+        out_parts.append(text[last:m.start()])
+        out_parts.append(make_replacement(m))
+        last = m.end()
+        count += 1
+    if count < n:
+        raise VersionFieldNotFound("バージョン欄が見つかりません: %s" % path)
+    out_parts.append(text[last:])
+    return "".join(out_parts)
+
+
+def set_version_everywhere(checkout_dir, version, out):
+    """#1305 要件1: VERSION_LOCATIONS の全ファイル・全箇所を version へ書き換える。
+
+    1箇所でも版数欄が見つからなければ VersionFieldNotFound を送出する(黙って
+    スキップしない)。
+    """
+    for rel, kind in VERSION_LOCATIONS:
+        path = os.path.join(checkout_dir, rel)
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        if kind == "npm_pkg":
+            new_text = _replace_first_n(
+                text, VERSION_FIELD_RE, lambda m: '"version": "%s"' % version, 1, rel
+            )
+        elif kind == "npm_lock":
+            new_text = _replace_first_n(
+                text, VERSION_FIELD_RE, lambda m: '"version": "%s"' % version, 2, rel
+            )
+        elif kind == "gradle":
+            new_text = _replace_first_n(
+                text,
+                GRADLE_VERSION_RE,
+                lambda m: "%s'%s'" % (m.group(1), version),
+                1,
+                rel,
+            )
+        elif kind == "server_js":
+            new_text = _replace_first_n(
+                text,
+                SERVER_JS_VERSION_RE,
+                lambda m: "%s'%s'" % (m.group(1), version),
+                1,
+                rel,
+            )
+        else:
+            raise AssertionError("未知の種別: %s" % kind)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(new_text)
+        if out is not None:
+            out.write("    版数設定: %s -> %s\n" % (rel, version))
+
+
+def read_version(text, kind):
+    """`set_version_everywhere` が書き込んだ版数を読み戻す(テスト・診断用)。"""
+    if kind == "npm_pkg":
+        m = VERSION_FIELD_RE.search(text)
+    elif kind == "npm_lock":
+        matches = list(VERSION_FIELD_RE.finditer(text))
+        m = matches[1] if len(matches) > 1 else None
+    elif kind == "gradle":
+        m = GRADLE_VERSION_RE.search(text)
+    elif kind == "server_js":
+        m = SERVER_JS_VERSION_RE.search(text)
+    else:
+        raise AssertionError("未知の種別: %s" % kind)
+    if not m:
+        return None
+    # 値は最後のクォート区間(キー側の `"version"` を値と取り違えないため、
+    # コロン/イコールより後ろだけを見る)。
+    after_separator = re.split(r"[:=]", m.group(0), maxsplit=1)[1]
+    q = re.search(r"['\"]([^'\"]*)['\"]", after_separator)
+    return q.group(1) if q else None
+
+
+def compute_dev_version(version):
+    """#1305 要件4: X から次の開発版数 `X.Y.(Z+1)-DEVELOP` を決める(DEVELOP は大文字)。"""
+    m = SEMVER_RE.match(version)
+    if not m:
+        raise ValueError("semver ではありません: %s" % version)
+    major, minor, patch = (int(g) for g in m.groups())
+    return "%d.%d.%d-DEVELOP" % (major, minor, patch + 1)
 
 
 # --------------------------------------------------------------------- semver
@@ -132,6 +272,33 @@ def is_ancestor(cwd, ancestor, descendant):
 def list_tags(cwd):
     r = git(["tag", "--list"], cwd=cwd)
     return [l for l in r.stdout.splitlines() if l.strip()]
+
+
+def list_remote_tags(cwd):
+    """origin の実際のタグ名を読み取り専用で確認する(要件2: push直前の再確認に、
+    ローカル ref を書き換える `git fetch` ではなく `ls-remote` を使う)。"""
+    r = git(["ls-remote", "--tags", "origin"], cwd=cwd)
+    names = set()
+    for line in r.stdout.splitlines():
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        ref = parts[1]
+        if ref.endswith("^{}"):
+            continue
+        if ref.startswith("refs/tags/"):
+            names.add(ref[len("refs/tags/"):])
+    return names
+
+
+def remote_ref_sha(cwd, ref):
+    """origin 上の ref の先頭を読み取り専用で確認する(要件5/6: developが検証中に
+    進んでいないかの再確認)。"""
+    r = git(["ls-remote", "origin", ref], cwd=cwd)
+    lines = [l for l in r.stdout.splitlines() if l.strip()]
+    if not lines:
+        return None
+    return lines[0].split()[0]
 
 
 # --------------------------------------------------------------------- gitignored inputs (要件2)
@@ -642,11 +809,13 @@ def do_merge_and_check_tree(checkout_dir, main_tip, pinned_sha):
     return merge_commit, match
 
 
-def build_tag_message(pinned_sha, main_before, merge_commit, tree_id, start_time, end_time, step_results):
+def build_tag_message(p_sha, r_sha, main_before, merge_commit, tree_id, start_time, end_time, step_results):
+    """#1305 要件7: P(develop 先頭)と R(版数コミット)の両方をタグメッセージに記録する。"""
     lines = [
         "release-verify-tag.py による自動リリース",
-        "pinned_sha: %s" % pinned_sha,
-        "parents: %s %s" % (main_before, pinned_sha),
+        "P (develop先頭): %s" % p_sha,
+        "R (版数コミット): %s" % r_sha,
+        "parents: %s %s" % (main_before, r_sha),
         "tree: %s" % tree_id,
         "start: %s" % start_time,
         "end: %s" % end_time,
@@ -740,18 +909,16 @@ def main(argv=None):
         out.write("==> 隔離チェックアウトを作成: %s\n" % checkout_dir)
         git(["clone", "--origin", "origin", origin_url, checkout_dir], cwd=None, timeout=600)
 
+        # #1305 要件6: P(develop の先頭)が現在の origin/develop の先頭でなければ、
+        # どの手順も始めずに拒否する。古いコミットを指定したリリースはできない。
         develop_tip = rev_parse(checkout_dir, "origin/develop")
-        sha = rev_parse(checkout_dir, args.commit) if args.commit else develop_tip
-
-        out.write("==> 対象コミット: %s\n" % sha)
-        if not is_ancestor(checkout_dir, sha, develop_tip):
-            fail(out, MSG_UNREACHABLE, "commit=%s develop=%s" % (sha, develop_tip))
+        p_sha = rev_parse(checkout_dir, args.commit) if args.commit else develop_tip
+        out.write("==> P(develop先頭): %s\n" % p_sha)
+        if p_sha != develop_tip:
+            fail(out, MSG_P_NOT_TIP, "指定=%s develop先頭=%s" % (p_sha, develop_tip))
             return 1
 
         main_before = rev_parse(checkout_dir, "origin/main")
-        if is_ancestor(checkout_dir, sha, main_before):
-            fail(out, MSG_ALREADY_RELEASED, "commit=%s main=%s" % (sha, main_before))
-            return 1
 
         out.write("==> cycle.lock を取得: %s\n" % lock_path)
         lock_fh = acquire_lock(lock_path, lock_timeout, lock_poll_interval, out)
@@ -760,13 +927,40 @@ def main(argv=None):
             return 1
         out.write("==> ロックを取得しました\n")
 
-        out.write("==> 事前確認: main へのマージと木の同一性\n")
-        _merge_commit, tree_match = do_merge_and_check_tree(checkout_dir, main_before, sha)
+        # #1305 要件2: 版数 X の計算をテスト手順より前に移す。同名タグの確認は
+        # ここ(計算時)と、push 直前の両方で行う。
+        out.write("==> 版数 X を計算(要件2: テスト手順より前)\n")
+        existing_tags = list_remote_tags(checkout_dir)
+        version = compute_next_version(existing_tags, args.bump)
+        if version in existing_tags:
+            fail(out, MSG_VERSION_EXISTS, "version=%s" % version)
+            return 1
+        out.write("==> 版数 X=%s\n" % version)
+
+        # #1305 要件3: リリースコミット R を P の子として作る(版数ファイルの変更だけ)。
+        # Implementation Notes: git フックを束縛する前に作ること
+        # (apps/mcp-server/src/server.js はプロダクション扱いなので、束縛したまま
+        #  だと隔離チェックアウトの pre-commit フックがテストファースト規則で拒否する)。
+        out.write("==> リリースコミット R を作成(P の子、版数ファイルのみ)\n")
+        git(["checkout", "--detach", p_sha], cwd=checkout_dir)
+        try:
+            set_version_everywhere(checkout_dir, version, out)
+        except VersionFieldNotFound as e:
+            fail(out, str(e))
+            return 1
+        git(["add"] + [rel for rel, _ in VERSION_LOCATIONS], cwd=checkout_dir)
+        git(["commit", "-m", "release: %s" % version], cwd=checkout_dir)
+        r_sha = rev_parse(checkout_dir, "HEAD")
+        out.write("==> R: %s\n" % r_sha)
+
+        # #1305 要件3: 事前の木チェック・全手順・本番の木チェックは、すべて R に対して行う。
+        out.write("==> 事前確認: main へのマージと木の同一性(R に対して)\n")
+        _merge_commit, tree_match = do_merge_and_check_tree(checkout_dir, main_before, r_sha)
         if not tree_match:
-            fail(out, MSG_TREE_MISMATCH, "main=%s commit=%s" % (main_before, sha))
+            fail(out, MSG_TREE_MISMATCH, "main=%s R=%s" % (main_before, r_sha))
             return 1
 
-        git(["checkout", "--detach", sha], cwd=checkout_dir)
+        git(["checkout", "--detach", r_sha], cwd=checkout_dir)
 
         out.write("==> gitignore対象の入力(.env / certs/)をメイン作業ツリーからコピー\n")
         if not copy_gitignored_inputs(main_worktree, checkout_dir):
@@ -824,33 +1018,62 @@ def main(argv=None):
             )
             return 1
 
-        out.write("==> 本番: origin/main を再取得してマージ+木の同一性を再確認\n")
+        out.write("==> 本番: origin/main を再取得してマージ+木の同一性を再確認(R に対して)\n")
         git(["fetch", "origin", "main"], cwd=checkout_dir)
         main_now = rev_parse(checkout_dir, "origin/main")
-        merge_commit, tree_match2 = do_merge_and_check_tree(checkout_dir, main_now, sha)
+        merge_commit, tree_match2 = do_merge_and_check_tree(checkout_dir, main_now, r_sha)
         if not tree_match2:
-            fail(out, MSG_TREE_MISMATCH, "main=%s commit=%s" % (main_now, sha))
+            fail(out, MSG_TREE_MISMATCH, "main=%s R=%s" % (main_now, r_sha))
             return 1
 
-        version = compute_next_version(list_tags(checkout_dir), args.bump)
-        if version in list_tags(checkout_dir):
+        # #1305 要件2: 同名タグの確認を push 直前にもう一度行う(競合対策)。
+        existing_tags2 = list_remote_tags(checkout_dir)
+        if version in existing_tags2:
             fail(out, MSG_VERSION_EXISTS, "version=%s" % version)
             return 1
 
+        # #1305 要件5/6: 検証中に origin/develop が P から進んでいないか再確認する
+        # (進んでいたら再試行はせず、全体を失敗として扱う)。
+        develop_now = remote_ref_sha(checkout_dir, "refs/heads/develop")
+        if develop_now != p_sha:
+            fail(out, MSG_DEVELOP_ADVANCED, "develop_now=%s P=%s" % (develop_now, p_sha))
+            return 1
+
+        # #1305 要件4: 全手順が成功したら、次の開発版数 V を R の子として作る。
+        out.write("==> 次の開発版数コミット V を作成(R の子)\n")
+        dev_version = compute_dev_version(version)
+        git(["checkout", "--detach", r_sha], cwd=checkout_dir)
+        try:
+            set_version_everywhere(checkout_dir, dev_version, out)
+        except VersionFieldNotFound as e:
+            fail(out, str(e))
+            return 1
+        git(["add"] + [rel for rel, _ in VERSION_LOCATIONS], cwd=checkout_dir)
+        git(["commit", "-m", "chore: 次の開発版数 %s" % dev_version], cwd=checkout_dir)
+        v_sha = rev_parse(checkout_dir, "HEAD")
+        out.write("==> V: %s (%s)\n" % (v_sha, dev_version))
+
         end_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        tree_id = tree_of(checkout_dir, "HEAD")
+        tree_id = tree_of(checkout_dir, merge_commit)
         message = build_tag_message(
-            sha, main_now, merge_commit, tree_id, start_time, end_time, step_results
+            p_sha, r_sha, main_now, merge_commit, tree_id, start_time, end_time, step_results
         )
         git(["tag", "-a", version, "-m", message, merge_commit], cwd=checkout_dir)
 
-        out.write("==> push: %s と %s を1回で送る\n" % (merge_commit[:12], version))
+        # #1305 要件5: M(main, タグ)・V(develop)・タグを1回の atomic push で送る。
+        # --force は使わない(develop が P から進んでいれば non-fast-forward で拒否される。
+        # 上の明示チェックと二重の防御)。
+        out.write(
+            "==> push: %s(main) と %s(develop) と %s を1回のatomicで送る\n"
+            % (merge_commit[:12], v_sha[:12], version)
+        )
         push = git(
             [
                 "push",
                 "--atomic",
                 "origin",
                 "%s:refs/heads/main" % merge_commit,
+                "%s:refs/heads/develop" % v_sha,
                 "refs/tags/%s" % version,
             ],
             cwd=checkout_dir,
@@ -860,7 +1083,9 @@ def main(argv=None):
             fail(out, MSG_PUSH_REJECTED, push.stdout + push.stderr)
             return 1
 
-        out.write("==> 成功: main=%s tag=%s\n" % (merge_commit, version))
+        out.write(
+            "==> 成功: main=%s develop=%s tag=%s\n" % (merge_commit, v_sha, version)
+        )
         return 0
     finally:
         if stack_touched:

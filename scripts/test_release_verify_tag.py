@@ -24,6 +24,7 @@
 """
 
 import fcntl
+import io
 import json
 import os
 import shutil
@@ -104,6 +105,7 @@ class OriginFixture:
         git(["config", "user.name", "Test"], cwd=self.seed)
 
         commit(self.seed, "root", {"README.md": "root"})
+        commit(self.seed, "version fixture files (#1305)", self._version_fixture_files())
         self._add_git_hooks_fixture()
         self.a = commit(self.seed, "ancestor A", {"a.txt": "a"})
         git(["tag", "-a", "0.3.0", "-m", "release 0.3.0", self.a], cwd=self.seed)
@@ -119,6 +121,39 @@ class OriginFixture:
         git(["push", "origin", "main"], cwd=self.seed)
 
         git(["checkout", "develop"], cwd=self.seed)
+
+    def _version_fixture_files(self, version="0.1.0"):
+        """#1305: `rvt.VERSION_LOCATIONS` の全ファイル・全箇所を、実物と同じ形(npmの
+        package.json/lock の `version` と `packages[""].version`、build.gradle の
+        `version = '...'`、server.js の health 応答の `version: '...'`)で fixture に置く。
+        本物のリスト(`rvt.VERSION_LOCATIONS`)を直接使うので、対象が増減しても
+        fixture が自動的に追従する。"""
+        files = {}
+        for rel, kind in rvt.VERSION_LOCATIONS:
+            if kind == "npm_pkg":
+                name = os.path.basename(os.path.dirname(rel))
+                files[rel] = json.dumps({"name": name, "version": version}, indent=2) + "\n"
+            elif kind == "npm_lock":
+                name = os.path.basename(os.path.dirname(rel))
+                files[rel] = json.dumps(
+                    {
+                        "name": name,
+                        "version": version,
+                        "lockfileVersion": 3,
+                        "requires": True,
+                        "packages": {"": {"name": name, "version": version}},
+                    },
+                    indent=2,
+                ) + "\n"
+            elif kind == "gradle":
+                files[rel] = "subprojects {\n    version = '%s'\n}\n" % version
+            elif kind == "server_js":
+                files[rel] = (
+                    "res.json({ status: 'ok', service: 'x', version: '%s' });\n" % version
+                )
+            else:
+                raise AssertionError("未知の kind: %s" % kind)
+        return files
 
     def _add_git_hooks_fixture(self):
         """#1298: 隔離チェックアウトでの `bash scripts/setup-git-hooks.sh` 実行を検証できるよう、
@@ -358,8 +393,82 @@ class SemverBumpArithmetic(unittest.TestCase):
         self.assertEqual("1.0.0", rvt.compute_next_version(["0.9.5"], "major"))
 
 
-class FullSuccessProducesTheMergeCommitAndTag(Harness):
-    """AC1: 全手順成功 → main が新しいマージコミット、木が一致、タグにメッセージ。"""
+class DevVersionArithmetic(unittest.TestCase):
+    """#1305 要件4: X から次の開発版数 `X.Y.(Z+1)-DEVELOP` を決める。"""
+
+    def test_bumps_patch_and_appends_develop_suffix(self):
+        self.assertEqual("0.4.1-DEVELOP", rvt.compute_dev_version("0.4.0"))
+
+    def test_uses_uppercase_develop_literally(self):
+        self.assertIn("-DEVELOP", rvt.compute_dev_version("1.2.3"))
+        self.assertNotIn("-develop", rvt.compute_dev_version("1.2.3"))
+
+
+FIXTURE_CONTENT = {
+    "npm_pkg": '{\n  "name": "x",\n  "version": "0.1.0"\n}\n',
+    "npm_lock": (
+        '{\n  "name": "x",\n  "version": "0.1.0",\n  "lockfileVersion": 3,\n'
+        '  "requires": true,\n  "packages": {\n    "": {\n      "name": "x",\n'
+        '      "version": "0.1.0"\n    },\n    "node_modules/other": {\n'
+        '      "version": "2.0.0"\n    }\n  }\n}\n'
+    ),
+    "gradle": "subprojects {\n    version = '0.1.0'\n}\n",
+    "server_js": "res.json({ status: 'ok', service: 'x', version: '0.1.0' });\n",
+}
+
+
+class SetVersionEverywhereWritesAllLocations(unittest.TestCase):
+    """AC1: 版数設定の処理は Requirement 1 の全ファイル・全箇所を書き換え、それ以外には
+    触れない。版数欄が見つからないファイルがあれば非0(例外)で失敗する。"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="rvt-setver-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        for rel, kind in rvt.VERSION_LOCATIONS:
+            path = os.path.join(self.tmp, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(FIXTURE_CONTENT[kind])
+        git(["init", "-q", "-b", "main"], cwd=self.tmp)
+        git(["config", "user.email", "t@t"], cwd=self.tmp)
+        git(["config", "user.name", "t"], cwd=self.tmp)
+        git(["add", "."], cwd=self.tmp)
+        git(["commit", "-q", "-m", "seed"], cwd=self.tmp)
+
+    def test_writes_version_to_every_location(self):
+        rvt.set_version_everywhere(self.tmp, "9.8.7", io.StringIO())
+        for rel, kind in rvt.VERSION_LOCATIONS:
+            with open(os.path.join(self.tmp, rel), encoding="utf-8") as f:
+                text = f.read()
+            self.assertEqual("9.8.7", rvt.read_version(text, kind), rel)
+
+    def test_npm_lock_other_packages_version_is_left_untouched(self):
+        """`packages[""].version` 以外(依存パッケージ自身の version)は変えない。"""
+        rvt.set_version_everywhere(self.tmp, "9.8.7", io.StringIO())
+        lock_rel = next(rel for rel, kind in rvt.VERSION_LOCATIONS if kind == "npm_lock")
+        with open(os.path.join(self.tmp, lock_rel), encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertEqual(
+            "2.0.0", data["packages"]["node_modules/other"]["version"]
+        )
+
+    def test_git_diff_shows_only_version_files(self):
+        rvt.set_version_everywhere(self.tmp, "9.8.7", io.StringIO())
+        r = git(["diff", "--name-only"], cwd=self.tmp)
+        changed = sorted(l for l in r.stdout.splitlines() if l.strip())
+        expected = sorted(rel for rel, _ in rvt.VERSION_LOCATIONS)
+        self.assertEqual(expected, changed)
+
+    def test_missing_version_field_fails_loudly_not_silently(self):
+        path = os.path.join(self.tmp, "apps/web/package.json")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('{\n  "name": "web"\n}\n')
+        with self.assertRaises(rvt.VersionFieldNotFound):
+            rvt.set_version_everywhere(self.tmp, "9.8.7", io.StringIO())
+
+
+class FullSuccessProducesTheReleaseCommitDevCommitAndTag(Harness):
+    """AC2: 成功経路で、origin の main・develop・タグが仕様どおりになる。"""
 
     def setUp(self):
         super().setUp()
@@ -367,7 +476,6 @@ class FullSuccessProducesTheMergeCommitAndTag(Harness):
         table = self.write_step_table(self.default_steps())
         handoff = self.write_handoff()
         self.r = self.run_script(
-            self.origin.d,
             "--bump",
             "minor",
             extra_env={
@@ -379,41 +487,65 @@ class FullSuccessProducesTheMergeCommitAndTag(Harness):
     def test_exits_zero(self):
         self.assertEqual(0, self.r.returncode, self.out(self.r))
 
-    def test_main_advances_to_a_new_merge_commit(self):
+    def _shas(self):
+        v_sha = self.origin.develop_sha()
+        r_sha = git(["rev-parse", v_sha + "^"], cwd=self.origin.bare).stdout.strip()
+        p_sha = git(["rev-parse", v_sha + "^^"], cwd=self.origin.bare).stdout.strip()
+        return p_sha, r_sha, v_sha
+
+    def test_develop_tip_v_has_r_as_parent_and_p_as_grandparent(self):
+        p_sha, r_sha, v_sha = self._shas()
+        self.assertEqual(self.origin.d, p_sha, "P は事前の develop 先頭のはず")
+
+    def _assert_all_versions_are(self, sha, expected):
+        for rel, kind in rvt.VERSION_LOCATIONS:
+            text = git(["show", "%s:%s" % (sha, rel)], cwd=self.origin.bare).stdout
+            self.assertEqual(expected, rvt.read_version(text, kind), "%s @ %s" % (rel, sha))
+
+    def test_r_has_version_x_everywhere(self):
+        _, r_sha, _ = self._shas()
+        self._assert_all_versions_are(r_sha, "0.4.0")
+
+    def test_v_has_the_next_dev_version_everywhere(self):
+        _, _, v_sha = self._shas()
+        self._assert_all_versions_are(v_sha, "0.4.1-DEVELOP")
+
+    def test_main_tip_is_merge_of_old_main_and_r(self):
         after = self.origin.main_sha()
-        self.assertNotEqual(self.before_main, after)
+        _, r_sha, _ = self._shas()
         parents = git(
             ["log", "-1", "--format=%P", after], cwd=self.origin.bare
         ).stdout.split()
-        self.assertEqual([self.before_main, self.origin.d], parents)
-
-    def test_merge_commit_tree_matches_pinned_sha_tree(self):
-        after = self.origin.main_sha()
+        self.assertEqual([self.before_main, r_sha], parents)
         self.assertEqual(
-            tree_of(self.origin.bare, after), tree_of(self.origin.bare, self.origin.d)
+            tree_of(self.origin.bare, after), tree_of(self.origin.bare, r_sha)
         )
 
-    def test_develop_is_unchanged(self):
-        self.assertEqual(self.origin.d, self.origin.develop_sha())
-
-    def test_new_tag_is_annotated_with_the_right_message(self):
-        tags = self.origin.tags()
-        self.assertIn("0.4.0", tags, "0.3.0 からの --bump minor は 0.4.0 のはず: %s" % tags)
-        obj_type = git(
-            ["cat-file", "-t", "0.4.0"], cwd=self.origin.bare
-        ).stdout.strip()
-        self.assertEqual("tag", obj_type, "注釈付きタグになっていない")
-        msg = git(["tag", "-l", "-n99", "0.4.0"], cwd=self.origin.bare).stdout
-        for expect in (self.origin.d, self.before_main, "acceptance-tests"):
-            with self.subTest(expect=expect):
-                self.assertIn(expect, msg)
-
-    def test_tag_points_at_the_merge_commit(self):
+    def test_tag_points_at_main_tip(self):
         after = self.origin.main_sha()
         pointed = git(
             ["rev-list", "-n", "1", "0.4.0"], cwd=self.origin.bare
         ).stdout.strip()
         self.assertEqual(after, pointed)
+
+    def test_new_tag_is_annotated_with_the_right_message(self):
+        tags = self.origin.tags()
+        self.assertIn("0.4.0", tags, "0.3.0 からの --bump minor は 0.4.0 のはず: %s" % tags)
+        obj_type = git(["cat-file", "-t", "0.4.0"], cwd=self.origin.bare).stdout.strip()
+        self.assertEqual("tag", obj_type, "注釈付きタグになっていない")
+
+    def test_tag_message_records_both_p_and_r(self):
+        _, r_sha, _ = self._shas()
+        msg = git(["tag", "-l", "-n99", "0.4.0"], cwd=self.origin.bare).stdout
+        for expect in (self.origin.d, r_sha, "acceptance-tests"):
+            with self.subTest(expect=expect):
+                self.assertIn(expect, msg)
+
+    def test_main_tree_has_no_develop_suffix_anywhere(self):
+        after = self.origin.main_sha()
+        for rel, kind in rvt.VERSION_LOCATIONS:
+            text = git(["show", "%s:%s" % (after, rel)], cwd=self.origin.bare).stdout
+            self.assertNotIn("-DEVELOP", text, rel)
 
 
 class SingleFailedScenarioLeavesMainUnchanged(Harness):
@@ -492,13 +624,14 @@ class TreeMismatchAbortsBeforeAnyStep(Harness):
         self.assertEqual(["0.3.0"], self.origin.tags())
 
 
-class ShaAlreadyReleasedOrUnreachableIsRejected(Harness):
-    """AC2-最後: 対象SHAが既にmainに含まれる/developから到達不能 → 手順ゼロで拒否。"""
+class TargetCommitMustBeTheCurrentDevelopTip(Harness):
+    """AC5(要件6): P(指定コミット)が origin/develop の先頭でなければ、
+    どの手順も始めずに拒否する。古いコミットを指定したリリースはできない。"""
 
-    def test_sha_already_in_main_is_rejected_without_any_step(self):
+    def test_stale_ancestor_is_rejected_without_any_step(self):
         table = self.write_step_table(self.default_steps())
         r = self.run_script(
-            self.origin.a,  # main に含まれる(main の親)
+            self.origin.a,  # develop 先頭 D の祖先であって、先頭そのものではない
             extra_env={
                 "RELEASE_VERIFY_STEP_TABLE": table,
                 "RELEASE_VERIFY_HANDOFF_COMMAND": self.write_handoff(),
@@ -506,11 +639,11 @@ class ShaAlreadyReleasedOrUnreachableIsRejected(Harness):
         )
         out = self.out(r)
         self.assertNotEqual(0, r.returncode, out)
-        self.assertEqual([], self.calls())
+        self.assertEqual([], self.calls(), "P起点チェックに落ちたのに手順が呼ばれた:\n" + out)
         self.assertEqual(self.origin.m, self.origin.main_sha())
+        self.assertEqual(self.origin.d, self.origin.develop_sha())
 
-    def test_sha_unreachable_from_develop_is_rejected_without_any_step(self):
-        # main 上の直接コミットは develop から到達できない。
+    def test_commit_unreachable_from_develop_is_rejected_without_any_step(self):
         unreachable = self.origin.add_direct_main_commit()
         table = self.write_step_table(self.default_steps())
         r = self.run_script(
@@ -523,6 +656,101 @@ class ShaAlreadyReleasedOrUnreachableIsRejected(Harness):
         out = self.out(r)
         self.assertNotEqual(0, r.returncode, out)
         self.assertEqual([], self.calls())
+
+
+class DevelopAdvancingDuringVerificationAbortsThePushWithNoPartialState(Harness):
+    """AC4: 検証中(手順の途中)に origin/develop が別プロセスで進んだ場合、
+    push 全体を拒否し、main・develop・タグのいずれも実行前から変えない
+    (develop 自体はレース側のコミットで進むが、それはスクリプトの外の変化であって、
+    スクリプトが V を積んだ結果ではないことを確かめる)。"""
+
+    def race_advance_step(self, name="race-advance-develop"):
+        code = (
+            "import subprocess, tempfile, os\n"
+            "bare = %r\n"
+            "tmp = tempfile.mkdtemp()\n"
+            "subprocess.run(['git', 'clone', bare, tmp], check=True, capture_output=True)\n"
+            "subprocess.run(['git', '-C', tmp, 'config', 'user.email', 'race@test'], check=True)\n"
+            "subprocess.run(['git', '-C', tmp, 'config', 'user.name', 'race'], check=True)\n"
+            "open(os.path.join(tmp, 'race.txt'), 'w').write('race')\n"
+            "subprocess.run(['git', '-C', tmp, 'add', 'race.txt'], check=True)\n"
+            "subprocess.run(['git', '-C', tmp, 'commit', '-m', 'race advance'], check=True)\n"
+            "subprocess.run(['git', '-C', tmp, 'push', 'origin', 'develop'], check=True)\n"
+            "open(%r, 'a').write(%r + chr(10))\n"
+        ) % (self.origin.bare, self.docker_log, name)
+        return {
+            "name": name,
+            "argv": [sys.executable, "-c", code],
+            "cwd": "",
+            "touches_stack": False,
+        }
+
+    def test_push_is_aborted_and_origin_keeps_only_the_race_commit(self):
+        before_main = self.origin.main_sha()
+        before_tags = self.origin.tags()
+        steps = [self.race_advance_step(), self.fake_step("unit-tests")]
+        table = self.write_step_table(steps)
+        r = self.run_script(
+            self.origin.d,
+            extra_env={
+                "RELEASE_VERIFY_STEP_TABLE": table,
+                "RELEASE_VERIFY_HANDOFF_COMMAND": self.write_handoff(),
+            },
+        )
+        out = self.out(r)
+        self.assertNotEqual(0, r.returncode, out)
+        self.assertEqual(before_main, self.origin.main_sha())
+        self.assertEqual(before_tags, self.origin.tags())
+        tip = self.origin.develop_sha()
+        raced = git(["show", "%s:race.txt" % tip], cwd=self.origin.bare, check=False)
+        self.assertEqual(
+            0, raced.returncode, "developの先頭がレースコミットのはず(スクリプトのVは積まれない)"
+        )
+
+
+class StepsSeeVersionXInTheCheckedOutTree(Harness):
+    """AC3: 手順が見る checkout の版数ファイルはすべて X(検証しているのはタグの付く木R)。"""
+
+    def version_probe_step(self, name="version-probe"):
+        code = (
+            "import sys, json, os, importlib.util\n"
+            "spec = importlib.util.spec_from_file_location('rvt', %r)\n"
+            "rvt = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(rvt)\n"
+            "checkout = sys.argv[1]\n"
+            "values = {}\n"
+            "for rel, kind in rvt.VERSION_LOCATIONS:\n"
+            "    with open(os.path.join(checkout, rel), encoding='utf-8') as f:\n"
+            "        text = f.read()\n"
+            "    values[rel] = rvt.read_version(text, kind)\n"
+            "open(%r, 'a').write(%r + ':' + json.dumps(values) + chr(10))\n"
+        ) % (SCRIPT, self.docker_log, name)
+        return {
+            "name": name,
+            "argv": [sys.executable, "-c", code, "%CHECKOUT%"],
+            "cwd": "",
+            "touches_stack": False,
+        }
+
+    def test_all_locations_report_x_during_steps(self):
+        step = self.version_probe_step()
+        table = self.write_step_table([step])
+        r = self.run_script(
+            self.origin.d,
+            "--bump",
+            "minor",
+            extra_env={
+                "RELEASE_VERIFY_STEP_TABLE": table,
+                "RELEASE_VERIFY_HANDOFF_COMMAND": self.write_handoff(),
+            },
+        )
+        out = self.out(r)
+        self.assertEqual(0, r.returncode, out)
+        matching = [l for l in self.calls() if l.startswith("version-probe:")]
+        self.assertEqual(1, len(matching), out)
+        values = json.loads(matching[0].split(":", 1)[1])
+        for rel, _ in rvt.VERSION_LOCATIONS:
+            self.assertEqual("0.4.0", values[rel], rel)
 
 
 class PushRejectionIsHandledAsFailure(Harness):
@@ -562,6 +790,7 @@ class PushRejectionIsHandledAsFailure(Harness):
         self.assertNotEqual(0, r.returncode, out)
         self.assertIn("push", out.lower())
         self.assertEqual(self.origin.m, self.origin.main_sha())
+        self.assertEqual(self.origin.d, self.origin.develop_sha(), "atomic push なので develop も無傷のはず")
         self.assertEqual(before_tags, self.origin.tags())
 
 

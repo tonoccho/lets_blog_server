@@ -923,6 +923,9 @@ on top of it*. What that did to !1020 (#1030), and why `ff` does not disturb the
 These squash / `ff` rules govern Issue Merge Requests into `develop`. The release merge into
 `main` is a direct push by `scripts/release-verify-tag.py` (#1274), not an Issue MR, and is not
 a violation of this rule — a later stage must not misread a merge commit on `main` as one.
+The same script's direct push of the release commit R and the next-dev-version commit V to
+`develop` (#1305), performed only after R has passed the full verification the release merge
+requires, is the same documented exception — not a violation of the squash/MR rule either.
 
 ## Git hook — `scripts/git-hooks/pre-commit`
 
