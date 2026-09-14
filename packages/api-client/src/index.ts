@@ -117,24 +117,22 @@ export * from './generated/ai/ai-controller/ai-controller';
 export * from './generated/ai/article-plan-controller/article-plan-controller';
 export * from './generated/ai/project-llm-model-controller/project-llm-model-controller';
 
-// GenerationJobController(ai)のlist/get/create/updateは、log-writer/mediaのlist集約と同様に
+// GenerationJobController(ai)のlist/getは、log-writer/mediaのlist集約と同様に
 // 汎用的な関数名がAuditLogController/OperationLogController/GeneratedImageController等と衝突しうる
 // ため、明示的に再エクスポートして曖昧性を防ぐ(既存のlist衝突解消コメント参照)。
+// create/updateは認可欠如のため/api/internal/ai/generation-jobsへ移管され、gatewayから到達不能に
+// なった(InternalGenerationJobControllerのJavadoc参照)。それに伴いopenapi/ai.jsonの
+// /api/generation-jobsもgetのみを定義するようになり、生成元のgeneration-job-controller.tsも
+// list/getしかエクスポートしないため、ここでのcreate/updateの再エクスポートは削除する(#1299)。
 export {
   list as listGenerationJobs,
   get as getGenerationJob,
-  create as createGenerationJob,
-  update as updateGenerationJob,
   getListUrl as getListGenerationJobsUrl,
   getGetUrl as getGetGenerationJobUrl,
-  getCreateUrl as getCreateGenerationJobUrl,
-  getUpdateUrl as getUpdateGenerationJobUrl,
 } from './generated/ai/generation-job-controller/generation-job-controller';
 export type {
   listResponse as listGenerationJobsResponse,
   getResponse as getGenerationJobResponse,
-  createResponse as createGenerationJobResponse,
-  updateResponse as updateGenerationJobResponse,
 } from './generated/ai/generation-job-controller/generation-job-controller';
 
 // content(記事本文(posts)・カスタムタグ・Markdownレンダリング・記事プレビュー・コンテンツキャッシュの
