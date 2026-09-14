@@ -773,21 +773,48 @@ def main(argv=None):
             fail(out, MSG_ENV_FILE_MISSING, "main_worktree=%s" % main_worktree)
             return 1
 
+        # #1298: 隔離チェックアウト自身の git フックを束縛する。python-unittest-scripts
+        # 手順が実行する test_git_hooks_binding.py の test_core_hooks_path_is_bound は
+        # 「このチェックアウトの」core.hooksPath を見るため、隔離チェックアウト
+        # (メイン作業ツリーとは別の.git/config)では明示的に束縛しない限り必ず失敗する。
+        # メイン作業ツリーの core.hooksPath には一切触れない(setup-git-hooks.sh は
+        # 自分の位置からリポジトリ根を割り出すので、cwd=checkout_dir で実行すれば
+        # 隔離チェックアウトの .git/config だけが書き換わる)。
+        #
+        # 束縛は手順の実行中だけに留める: 前後の do_merge_and_check_tree が作る
+        # マージコミットは、束縛されたままだと隔離チェックアウト自身の pre-commit
+        # フック(フェーズ分離等)を通ってしまい、release の性質(検証済みの木を
+        # そのままmainへ運ぶ)と無関係な理由で失敗しかねない。手順の直前で束縛し、
+        # 手順の直後で必ず外す。
+        out.write("==> 隔離チェックアウトで git フックを束縛: bash scripts/setup-git-hooks.sh\n")
+        bind_result = sh(["bash", "scripts/setup-git-hooks.sh"], cwd=checkout_dir, check=False)
+        if bind_result.returncode != 0:
+            fail(
+                out,
+                "隔離チェックアウトでの git フック束縛に失敗しました",
+                bind_result.stdout + bind_result.stderr,
+            )
+            return 1
+
         out.write("==> 手順を実行(ゼロ許容)\n")
         step_results = []
         overall_ok = True
         failing = None
-        for step in steps:
-            if step.get("touches_stack"):
-                stack_touched = True
-            out.write("--- %s\n" % step["name"])
-            res = run_step(step, checkout_dir, log_dir, credential_env=credential_env)
-            step_results.append(res)
-            out.write("    rc=%s %s (%.1fs)\n" % (res.returncode, res.summary(), res.duration))
-            if not res.ok:
-                overall_ok = False
-                failing = res
-                break
+        try:
+            for step in steps:
+                if step.get("touches_stack"):
+                    stack_touched = True
+                out.write("--- %s\n" % step["name"])
+                res = run_step(step, checkout_dir, log_dir, credential_env=credential_env)
+                step_results.append(res)
+                out.write("    rc=%s %s (%.1fs)\n" % (res.returncode, res.summary(), res.duration))
+                if not res.ok:
+                    overall_ok = False
+                    failing = res
+                    break
+        finally:
+            # 手順の外(事前確認・本番のマージ、push)では束縛しない(上記コメント参照)。
+            git(["config", "--unset", "core.hooksPath"], cwd=checkout_dir, check=False)
 
         if not overall_ok:
             fail(

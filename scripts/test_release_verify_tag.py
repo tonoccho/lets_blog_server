@@ -104,6 +104,7 @@ class OriginFixture:
         git(["config", "user.name", "Test"], cwd=self.seed)
 
         commit(self.seed, "root", {"README.md": "root"})
+        self._add_git_hooks_fixture()
         self.a = commit(self.seed, "ancestor A", {"a.txt": "a"})
         git(["tag", "-a", "0.3.0", "-m", "release 0.3.0", self.a], cwd=self.seed)
 
@@ -118,6 +119,29 @@ class OriginFixture:
         git(["push", "origin", "main"], cwd=self.seed)
 
         git(["checkout", "develop"], cwd=self.seed)
+
+    def _add_git_hooks_fixture(self):
+        """#1298: 隔離チェックアウトでの `bash scripts/setup-git-hooks.sh` 実行を検証できるよう、
+        本物の `scripts/setup-git-hooks.sh` と、実行ビット付きのダミー `pre-commit` を
+        fixture リポジトリへコミットする(実物の origin には両方とも入っている)。
+
+        `pre-commit` はダミー(`exit 0`)で十分: この Issue が検証したいのは
+        「束縛されるかどうか」(`core.hooksPath`)であって、pre-commit の中身(#1039 が
+        別途担保)ではない。ダミーなら、束縛後に隔離チェックアウト内で行われるマージ
+        コミット(事前確認・本番)がフックの実ロジック(フェーズ分離チェック等)に
+        巻き込まれてテストを不安定にすることもない。
+        """
+        setup_script_src = os.path.join(REPO_ROOT, "scripts", "setup-git-hooks.sh")
+        setup_script_dst = os.path.join(self.seed, "scripts", "setup-git-hooks.sh")
+        os.makedirs(os.path.dirname(setup_script_dst), exist_ok=True)
+        shutil.copy(setup_script_src, setup_script_dst)
+
+        pre_commit_dst = os.path.join(self.seed, "scripts", "git-hooks", "pre-commit")
+        write_file(pre_commit_dst, "#!/bin/sh\nexit 0\n")
+        os.chmod(pre_commit_dst, 0o755)
+
+        git(["add", "scripts/setup-git-hooks.sh", "scripts/git-hooks/pre-commit"], cwd=self.seed)
+        commit(self.seed, "add git-hooks fixture (#1298)")
 
     def add_direct_main_commit(self, message="unexpected direct commit to main"):
         """main の木をAからずらす(木不一致 fixture)。"""
@@ -233,6 +257,25 @@ class Harness(unittest.TestCase):
         return {
             "name": name,
             "argv": [sys.executable, "-c", code],
+            "cwd": "",
+            "touches_stack": False,
+        }
+
+    def fake_step_checking_hooks_path(self, name, rc=0):
+        """隔離チェックアウト自身の `core.hooksPath` を docker_log へ記録する
+        (#1298: 手順が始まる時点で束縛済みかを確かめるため)。"""
+        code = (
+            "import subprocess,sys\n"
+            "checkout = sys.argv[1]\n"
+            "r = subprocess.run(['git', 'config', '--get', 'core.hooksPath'], "
+            "cwd=checkout, capture_output=True, text=True)\n"
+            "value = r.stdout.strip() if r.returncode == 0 else '<unset>'\n"
+            "open(%r, 'a').write(%r + ':' + value + chr(10))\n"
+            "sys.exit(%d)\n"
+        ) % (self.docker_log, name, rc)
+        return {
+            "name": name,
+            "argv": [sys.executable, "-c", code, "%CHECKOUT%"],
             "cwd": "",
             "touches_stack": False,
         }
@@ -1038,6 +1081,76 @@ class DefaultStepsCoverEveryRequiredCommand(unittest.TestCase):
         for token in required:
             with self.subTest(token=token):
                 self.assertIn(token, self.text, "既定の手順表に %s が無い" % token)
+
+
+class IsolatedCheckoutBindsGitHooks(Harness):
+    """#1298: 隔離チェックアウトは `scripts/setup-git-hooks.sh` で git フックを束縛する。
+
+    束縛しないと、`python-unittest-scripts` 手順内の
+    `test_git_hooks_binding.py::ThisCheckoutIsBound.test_core_hooks_path_is_bound` が
+    その隔離チェックアウト自身に対して必ず落ちる(#1039 で追加されたテストが見ているのは
+    「このチェックアウトの」`core.hooksPath` であり、隔離チェックアウトはメイン作業ツリーとは
+    別の `.git/config` を持つため)。
+    """
+
+    def test_core_hooks_path_is_bound_in_the_isolated_checkout_before_the_first_step(self):
+        steps = [self.fake_step_checking_hooks_path("check-hooks")] + self.default_steps()
+        table = self.write_step_table(steps)
+        r = self.run_script(
+            self.origin.d,
+            extra_env={
+                "RELEASE_VERIFY_STEP_TABLE": table,
+                "RELEASE_VERIFY_HANDOFF_COMMAND": self.write_handoff(),
+            },
+        )
+        out = self.out(r)
+        self.assertEqual(0, r.returncode, out)
+        self.assertIn(
+            "check-hooks:scripts/git-hooks",
+            self.calls(),
+            "隔離チェックアウトで手順開始前に core.hooksPath=scripts/git-hooks に"
+            "束縛されていない:\n" + out,
+        )
+
+    def test_release_verify_tag_invokes_setup_git_hooks_script(self):
+        """AC4: 束縛の手段が `scripts/setup-git-hooks.sh` であることをソース上でも名指しする。"""
+        with open(SCRIPT, encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn(
+            "setup-git-hooks.sh",
+            text,
+            "release-verify-tag.py が scripts/setup-git-hooks.sh を呼び出していない",
+        )
+
+
+class MainWorktreeHooksPathIsUnaffectedByReleaseVerification(Harness):
+    """#1298: 隔離チェックアウトでの束縛が、メイン作業ツリー(fixture)の
+    `core.hooksPath` を変えないこと。"""
+
+    def hooks_path_of_main_worktree(self):
+        r = git(
+            ["config", "--get", "core.hooksPath"], cwd=self.main_worktree, check=False
+        )
+        return r.stdout.strip() if r.returncode == 0 else None
+
+    def test_main_worktree_core_hooks_path_is_unchanged_after_a_successful_run(self):
+        before = self.hooks_path_of_main_worktree()
+        self.assertIsNone(
+            before, "fixture のメイン作業ツリーは束縛されていない状態から始まるはず"
+        )
+        table = self.write_step_table(self.default_steps())
+        r = self.run_script(
+            self.origin.d,
+            extra_env={
+                "RELEASE_VERIFY_STEP_TABLE": table,
+                "RELEASE_VERIFY_HANDOFF_COMMAND": self.write_handoff(),
+            },
+        )
+        self.assertEqual(0, r.returncode, self.out(r))
+        after = self.hooks_path_of_main_worktree()
+        self.assertEqual(
+            before, after, "メイン作業ツリーの core.hooksPath が変更されてしまった"
+        )
 
 
 if __name__ == "__main__":
