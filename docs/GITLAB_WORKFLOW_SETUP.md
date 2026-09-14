@@ -279,6 +279,7 @@ GitHub 側で fine-grained personal access token を発行する。**利用者�
 | Metadata | Read-only（自動で付く） |
 | それ以外 | No access |
 
+<!-- github-mirror-note:start -->
 **Workflows がなぜ要るか。** GitHub は `.github/workflows/` 配下のファイルを作成・変更・
 **削除**するコミットの push を、Workflows 権限の無いトークンでは拒否する。
 
@@ -289,6 +290,11 @@ GitHub 側で fine-grained personal access token を発行する。**利用者�
 
 「ADR-0010 で `.github/` を削除済みだから Workflows 権限は要らない」という判断は誤りだった
 （#1256 のコメントで訂正済み）。削除そのものが Workflows 権限を要求する。
+<!-- github-mirror-note:end -->
+
+（この注記は GitHub ミラー先の事情を説明するものであり、このリポジトリ自身に削除済みの
+ディレクトリを復活させる案内ではない。`.claude/hooks/test_workflow_docs.py` の
+`NoReferencesToDeletedPaths` が、マーカーの外に出た言及を引き続き検出する。）
 
 有効期限は利用者が発行時に決める。期限切れ時の再発行手順は 7.6 を参照。
 
@@ -365,8 +371,10 @@ glab api "projects/:id/remote_mirrors/<id>/sync" --method POST
 
 - 認証エラー（トークン期限切れ・権限不足）→ 下記「トークンの再発行」の手順で新しいトークンに
   差し替える。
+<!-- github-mirror-note:start -->
 - `.github/workflows/` を含む差分で拒否される場合 → トークンの Workflows 権限が
   「Read and write」になっているか確認する（7.2）。
+<!-- github-mirror-note:end -->
 - 到達性の問題（GitLab コンテナから `github.com:443` に出られない）→ ネットワーク側の調査に
   切り分ける。この環境では 2026-09-13 時点で到達可能（HTTP 200）であることを確認済み。
 

@@ -211,11 +211,39 @@ def repo_docs():
     return [p for p in out if p.endswith(".md")]
 
 
+# このリポジトリの `.github/` は削除済みだが、GitHub 側のミラー先には今も存在する
+# (#1256)。ミラー運用を説明する行は「削除済みパスを有効な場所として案内する」のではなく
+# 「ミラー先の事情を説明する」ものなので、この明示的なマーカーで囲んだ範囲だけを
+# 検出対象から外す(#1289)。マーカーの外に `.github/` が出てくれば、これまでどおり検出する。
+GITHUB_MIRROR_NOTE_START = "<!-- github-mirror-note:start -->"
+GITHUB_MIRROR_NOTE_END = "<!-- github-mirror-note:end -->"
+
+
+def find_dot_github_references(text):
+    """`.github/` を指す行のうち、ミラー注記マーカーの外にあるものを返す。"""
+    offenders = []
+    in_note = False
+    for i, line in enumerate(text.splitlines(), 1):
+        if GITHUB_MIRROR_NOTE_START in line:
+            in_note = True
+            continue
+        if GITHUB_MIRROR_NOTE_END in line:
+            in_note = False
+            continue
+        if in_note:
+            continue
+        if ".github/" in line:
+            offenders.append((i, line))
+    return offenders
+
+
 class NoReferencesToDeletedPaths(unittest.TestCase):
     """削除した `.github/` を指す記述が残っていないこと(#1028)。
 
     #1027 で `.github/` を消したため、これらは**存在しないパスへの案内**になった。
     `docs/COVERAGE_TARGETS.md` には相対リンクもあり、リンク切れになっている。
+    GitHub ミラー先の事情を説明する箇所は例外で、`GITHUB_MIRROR_NOTE_START` /
+    `_END` マーカーで明示的に囲まれた範囲のみ許される(#1289)。
     """
 
     def test_docs_do_not_point_at_dot_github(self):
@@ -223,12 +251,33 @@ class NoReferencesToDeletedPaths(unittest.TestCase):
         for path in repo_docs():
             if path.startswith(ADR_DIR):
                 continue  # 過去の記録。書き換えない
-            for i, line in enumerate(read(path).splitlines(), 1):
-                if ".github/" in line:
-                    offenders.append("%s:%d  %s" % (path, i, line.strip()[:80]))
+            for i, line in find_dot_github_references(read(path)):
+                offenders.append("%s:%d  %s" % (path, i, line.strip()[:80]))
         self.assertEqual(
             [], offenders, "削除済みの .github/ を指す記述が残っている:\n" + "\n".join(offenders)
         )
+
+    def test_mirror_note_marker_does_not_weaken_detection(self):
+        """マーカーの外にある `.github/` 言及は、これまでどおり検出されること。
+
+        マーカーは「明示的に囲んだ範囲」だけを許す仕組みであって、`.github/` への
+        言及そのものを一般に免除するものではないことを固定する(#1289 AC3)。
+        """
+        unmarked = "GitHub Actions の設定は `.github/workflows/ci.yml` を参照。"
+        self.assertEqual(
+            [(1, unmarked)], find_dot_github_references(unmarked),
+        )
+
+    def test_mirror_note_marker_exempts_only_the_marked_block(self):
+        marked = "\n".join([
+            "前置きの行。",
+            GITHUB_MIRROR_NOTE_START,
+            "GitHub 側には `.github/workflows/` が残っている。",
+            GITHUB_MIRROR_NOTE_END,
+            "後続の行に `.github/` が出てきたら、これは検出されるべき。",
+        ])
+        offenders = find_dot_github_references(marked)
+        self.assertEqual([5], [i for i, _ in offenders])
 
     def test_docs_do_not_describe_github_only_mechanisms_as_current(self):
         """GitLab に存在しない仕組みを、現に動いているものとして案内しないこと。"""
