@@ -58,6 +58,9 @@ Playwright はスタックが上がっていることを前提に起動するた
     FAKE_SETUP_STATUS     setup-status の応答ボディ
     FAKE_SETUP_CODE       setup-status の HTTP ステータス
     FAKE_SHARED_HOST      1 なら reverse-proxy がポートを公開していない(#1038 の構成)
+    FAKE_OTHER_STACK_HOLDS_PORT  1 なら、このスタックに属さない別コンテナ(infra-proxy等)
+                          が80/443番を公開している(#1065: 直前のスタックが完全停止
+                          していても検知できるべき構成)
 """
 
 import json
@@ -485,6 +488,7 @@ if args[:1] == ["ps"]:
     # #1293: `docker ps -a --filter "volume=<name>" --format '{{.Names}}'` —
     # ボリューム破棄が失敗したとき、参照しているコンテナ名を名指しするために使う。
     filter_value = ""
+    format_value = ""
     i = 1
     while i < len(args):
         if args[i] == "--filter":
@@ -493,6 +497,14 @@ if args[:1] == ["ps"]:
             continue
         if args[i].startswith("--filter="):
             filter_value = args[i].split("=", 1)[1]
+            i += 1
+            continue
+        if args[i] == "--format":
+            format_value = args[i + 1] if i + 1 < len(args) else ""
+            i += 2
+            continue
+        if args[i].startswith("--format="):
+            format_value = args[i].split("=", 1)[1]
             i += 1
             continue
         i += 1
@@ -505,6 +517,20 @@ if args[:1] == ["ps"]:
         if extra and extra not in names:
             names.append(extra)
         print("\n".join(names))
+        sys.exit(0)
+    # #1065: `docker ps --format '{{.Names}}\t{{.Ports}}'` —
+    # 直前のスタックの起動有無に依らず、ホストの80/443番を握るコンテナを
+    # 名前を問わず調べるための呼び方。フィルタは付かない(全コンテナが対象)。
+    if "{{.Names}}" in format_value and "{{.Ports}}" in format_value:
+        lines_out = []
+        for c in read_lines("containers"):
+            ports = ""
+            if c == "lbs-reverse-proxy" and os.environ.get("FAKE_SHARED_HOST") != "1":
+                ports = "0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp"
+            lines_out.append("%s\t%s" % (c, ports))
+        if os.environ.get("FAKE_OTHER_STACK_HOLDS_PORT") == "1":
+            lines_out.append("infra-proxy\t0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp")
+        print("\n".join(lines_out))
         sys.exit(0)
     print("")
     sys.exit(0)
@@ -1364,6 +1390,17 @@ class SharedHostProxyIsReapplied(RebuildScriptHarness):
 
     def test_mentions_reapplying_the_shared_host_setup(self):
         self.assertIn("setup-shared-host-proxy.sh", read(SCRIPT))
+
+    def test_uses_the_shared_host_override_when_the_previous_stack_is_fully_stopped(self):
+        """#1065: 直前のスタックが完全停止していても、80/443番を握る別コンテナ
+
+        (infra-proxy等、`lbs-`で始まらないコンテナ)がいれば共有ホスト構成と判定する。
+        `container_running "$REVERSE_PROXY_CONTAINER"` が偽になる状況でも検知できることが要点。
+        """
+        self.set_containers([])
+        self.run_script("--yes", FAKE_OTHER_STACK_HOLDS_PORT="1")
+        calls = "\n".join(self.docker_calls())
+        self.assertIn("docker-compose.shared-host.yml", calls)
 
     def test_reapplication_does_not_gate_on_a_stack_that_is_still_starting(self):
         """**回帰させてはいけない検査(2026-09-04 の実測で踏んだ)。**

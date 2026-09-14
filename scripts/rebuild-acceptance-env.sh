@@ -202,10 +202,25 @@ kcadm_login() {
 # 公開せず、共有プロキシ(infra-proxy)が localhost を中継する。この構成を撤去前に判定し、
 # 構築時に docker-compose.shared-host.yml を重ねる。判定しないまま素の compose で起動すると
 # ポート公開に失敗し、reverse-proxy が**どのネットワークにも所属しないまま running** になる。
+#
+# 自分自身の reverse-proxy コンテナの状態には依存しない(#1065)。直前のスタックが
+# 完全停止している(先行実行の撤去が途中で失敗した直後の再実行、または真に最初の1回)と
+# container_running が常に偽になり、下の inspect 判定だけでは検知できない。
+# ホストの80/443番を他コンテナが公開しているかどうかを名前を問わず調べることで、
+# 自スタックの起動有無に依らず判定する。
+other_container_holds_host_port() {
+  docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null \
+    | awk -F'\t' -v me="$REVERSE_PROXY_CONTAINER" '$1 != me' \
+    | grep -Eq ':(80|443)->'
+}
+
 SHARED_HOST=0
 if container_running "$REVERSE_PROXY_CONTAINER"; then
   bindings="$(docker inspect "$REVERSE_PROXY_CONTAINER" --format '{{len .HostConfig.PortBindings}}' 2>/dev/null || echo 0)"
   [ "${bindings:-0}" = "0" ] && SHARED_HOST=1
+fi
+if [ "$SHARED_HOST" -eq 0 ] && other_container_holds_host_port; then
+  SHARED_HOST=1
 fi
 
 COMPOSE_ARGS=(-p "$COMPOSE_PROJECT" -f "$REPO_ROOT/docker-compose.yml" -f "$REPO_ROOT/docker-compose.e2e-stubs.yml")
