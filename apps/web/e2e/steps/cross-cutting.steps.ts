@@ -121,7 +121,37 @@ function requiresInputLookup(): Set<string> {
   );
 }
 
-Then('どれも成功せず、本文を伴わない要求は403で拒否される', async ({ ctx }) => {
+/**
+ * 対象リソースの存在確認が認可チェックより先に走るエンドポイント(issue #1130、Option A)。
+ *
+ * `DiagramController#findAuthorized` / `GeneratedImageController#findAuthorized` は、
+ * 所属プロジェクトで認可判定するために対象を一度読む必要があり、その読み出し
+ * (`findOrThrow`)が認可チェックより先に走る。対象が存在しなければ、認可チェックへ
+ * 届く前に404が返る。これは「認可の手前で対象の存在有無を未認可の利用者に漏らさない」
+ * という標準的なセキュリティ慣行であり、正しい実装として受理する(`docs/AUTHORIZATION_MATRIX.md`
+ * の該当行の備考に同じ理由を明記)。
+ *
+ * `toSamplePath` が `{id}` を固定の `1` に置き換えるため、この一斉走査は
+ * 「id=1が環境にたまたま存在するか」に結果が左右されてはならない
+ * (docs/ACCEPTANCE_TESTING.md §10)。そこでここに列挙したエンドポイントに限り、
+ * 403と404のどちらも「拒否された」証跡として受理する。
+ *
+ * 表の同じ理由の行のうち PUT /api/diagrams/{id} と PUT /api/generated-images/{id}/tags は
+ * `@RequestBody` が必須で、既に {@link requiresInputLookup} 側の理由(本文を組み立てずに
+ * 叩くと400で終わる)で対象外になっているため、ここへ重ねて列挙する必要はない。
+ */
+function existenceCheckedBeforeAuthorizationLookup(): Set<string> {
+  return new Set([
+    'GET /api/diagrams/*',
+    'GET /api/diagrams/*/svg',
+    'DELETE /api/diagrams/*',
+    'GET /api/generated-images/*',
+    'GET /api/generated-images/*/file',
+    'DELETE /api/generated-images/*',
+  ]);
+}
+
+Then('どれも成功せず、本文を伴わない要求は403または404で拒否される', async ({ ctx }) => {
   const results = ctx.probeResults as GatewayProbeResult[];
   const rows = ctx.matrixRows as AuthorizationMatrixRow[];
   const succeeded = results.filter((result) => result.status >= 200 && result.status < 300);
@@ -131,13 +161,21 @@ Then('どれも成功せず、本文を伴わない要求は403で拒否され�
   ).toEqual([]);
 
   const requiresInput = requiresInputLookup();
+  const existenceCheckedFirst = existenceCheckedBeforeAuthorizationLookup();
   const notForbidden = results.filter((result, index) => {
     const key = `${result.method} ${toComparablePath(rows[index].path)}`;
-    return !requiresInput.has(key) && result.status !== 403;
+    if (requiresInput.has(key)) {
+      return false;
+    }
+    if (existenceCheckedFirst.has(key)) {
+      return result.status !== 403 && result.status !== 404;
+    }
+    return result.status !== 403;
   });
   expect(
     notForbidden.map(describe),
-    '認可マトリクスが「権限不足なら403」としているのに、そうならないエンドポイントがある'
+    '認可マトリクスが「権限不足なら403」としているのに、そうならず(存在確認が先立つ行は404も'
+      + '許容してなお)拒否もされていないエンドポイントがある'
   ).toEqual([]);
 });
 
