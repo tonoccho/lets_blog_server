@@ -89,19 +89,35 @@ Given('seedを持たないChatGPT画像がギャラリーにある', async ({ ct
   });
 });
 
+/**
+ * サムネイルの `<button>`(`ImageGalleryGrid`)はクライアントコンポーネントで、SSRされた
+ * 直後はまだハイドレーションが完了しておらず `onClick` が紐付いていない。実ブラウザの
+ * ホストではヘッドレスCIよりハイドレーションが遅く、その間にクリックすると取りこぼされ、
+ * 詳細ダイアログが開かないまま `toBeVisible` がタイムアウトする(issue #1284、#1283と同種)。
+ * 見出しが現れるまでクリックを再試行する。
+ */
 When('生成画像ギャラリーでその画像の詳細を開く', async ({ ctx, page }) => {
   await page.goto('/image-gallery', { waitUntil: 'commit' });
-  await page.locator(`img[src="/image-gallery/${ctx.mediaImageId}/file"]`).click();
-  await expect(page.getByText('生成画像の詳細')).toBeVisible({ timeout: 15_000 });
+  const thumbnail = page.locator(`img[src="/image-gallery/${ctx.mediaImageId}/file"]`);
+  await expect(thumbnail).toBeVisible({ timeout: 30_000 });
+
+  await expect(async () => {
+    await thumbnail.click();
+    await expect(page.getByText('生成画像の詳細')).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
+
   await expect(detailValue(page, 'prompt')).toBeVisible({ timeout: 15_000 });
 });
 
+// `(\d+)` はcucumber-expressionsの組み込み `int` 型と正規表現が一致するため、TSの型注釈に
+// 関わらず実行時には数値(number)で渡ってくる(playwright-bdd/@cucumber/cucumber-expressions)。
+// `toHaveText()` は string | RegExp しか受け付けないため、明示的に文字列化する。
 Then(/^詳細にseed「(\d+)」が表示される$/, async ({ page }, seed: string) => {
-  await expect(detailValue(page, 'seed')).toHaveText(seed);
+  await expect(detailValue(page, 'seed')).toHaveText(String(seed));
 });
 
 Then(/^詳細にバッチ内位置「(\d+)」が表示される$/, async ({ page }, batchIndex: string) => {
-  await expect(detailValue(page, 'batch index')).toHaveText(batchIndex);
+  await expect(detailValue(page, 'batch index')).toHaveText(String(batchIndex));
 });
 
 Then('詳細にseedの値は表示されず、再現不可と分かる表示になる', async ({ page }) => {
