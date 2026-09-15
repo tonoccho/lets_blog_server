@@ -172,6 +172,61 @@ production default is untouched.
   issue #560 only the static defaults above apply; re-introducing a dynamic override is issue
   #444's scope.
 
+##### Acceptance-test override (issue #1286)
+
+`docker-compose.e2e-stubs.yml`'s override of `API_RATE_LIMIT_REQUESTS` for `api-global`
+(issue #1132, above) left `upload-endpoint` untouched. `apps/web/e2e/features/media/
+image-generation.feature`'s header comment documents the acceptance-test suite's entire
+consumption of this bucket: `image-batch-count.feature` (5), `asset-image-batch-form.feature`
+(2), `image-generation-chatgpt.feature` (2) and `image-settings.feature` (1) account for the 10
+scenarios that run without `@slow` (`test:at:fast`), and `image-generation.feature` itself adds 2
+more that only run with `@slow` (the full `test:at` / `test:at:clean`). A full run therefore
+consumes exactly **12** against a process-wide bucket whose production default is **10 per
+hour** — 2 over the limit, so whichever of the 12 calls lands last always gets `429`. Re-running
+the same full suite within the same hour lands on the same (not yet refreshed) bucket, so a
+second run needs the same 12 again before the first hour's window rolls over.
+
+Reproduced directly against the running `gateway` container (bypassing Playwright, since the
+bucket is process-wide and does not depend on which caller hits it) on 2026-09-15, with the
+acceptance-test overlay's `UPLOAD_RATE_LIMIT_REQUESTS` at its then-current state (unset, i.e. the
+production default of 10):
+
+```
+$ docker exec lbs-gateway sh -c 'for i in $(seq 1 12); do
+    curl -s -o /dev/null -w "call $i: %{http_code}\n" -X POST http://localhost:8080/api/ai/image \
+      -H "Content-Type: application/json" -d "{}"
+  done'
+call 1: 401
+...
+call 10: 401
+call 11: 429
+call 12: 429
+```
+
+(`401` because the probe carries no token — the bucket is consumed by `RateLimitWebFilter`
+before Spring Security's chain runs, so an unauthenticated call still counts.) Two further calls
+immediately after (simulating a same-hour re-run) both returned `429` as well, confirming the
+bucket does not recover mid-hour.
+
+**The production default (10 req/hour) is deliberately left unchanged.** It exists to bound
+resource exhaustion from real image generation / upload traffic (`docs/API_RATE_LIMITING.md`
+"Purpose" above), and there is no evidence that value is wrong for production use — the failure
+above is purely an acceptance-test-suite volume problem, and #444 (not this Issue) is the place to
+reconsider admin-configurability of the production value.
+
+**Value chosen: `UPLOAD_RATE_LIMIT_REQUESTS=40`**, set in `docker-compose.e2e-stubs.yml` on the
+`gateway` service (always overlaid onto `docker-compose.yml` for acceptance-test runs — see
+`scripts/rebuild-acceptance-env.sh`, `docs/ACCEPTANCE_TESTING.md` §9). The floor this bucket must
+clear to satisfy this Issue's acceptance criteria is **24** — a full run's 12, twice, to survive a
+same-hour re-run without any `429`. 40 keeps roughly 1.7x headroom over that floor, enough for an
+extra partial re-run of a single failing scenario during debugging within the same hour without
+requiring a wait, while staying far short of a value that would mask a real resource-exhaustion
+regression in this bucket's purpose. `apps/web/e2e/support/gateway.ts#gatewayUploadEndpointLimit`
+and `apps/web/e2e/features/cross-cutting/rate-limit.feature` read the actual configured value from
+the container rather than assuming either the production default or this overlay's value, mirroring
+`gatewayApiGlobalLimit` (#1132) — so this check stays correct even if the chosen value here changes
+later.
+
 #### 4. Operation Log Rate Limiter (`operation-log-endpoint`)
 - **Default Limit**: 300 requests per 1 minute, **process-wide** (not partitioned)
 - **Environment Variable**: `OPERATION_LOG_RATE_LIMIT_REQUESTS` (default: 300),

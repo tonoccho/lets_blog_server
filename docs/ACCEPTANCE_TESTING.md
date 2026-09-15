@@ -331,6 +331,18 @@ Playwright プロセスなので、分割してもスイート全体が「1ク�
 **本番の既定値は変えていない。** この上書きは `docker-compose.e2e-stubs.yml` の
 `gateway:` サービスにだけ効き、`docker-compose.yml` 単体(本番相当の構成)には影響しない。
 
+### gateway の `upload-endpoint` 枠を受け入れテスト用に引き上げる(issue #1286)
+
+`upload-endpoint`(画像生成/アップロード、既定 **1時間に10回**、プロセス全体で1バケット)は
+#1132 では対象外だった。`image-generation.feature` 冒頭の内訳どおり、`@slow` を含む全件実行
+(`test:at` / `test:at:clean`)の消費はちょうど12で、既定値の10を2つ超える。`@slow` を除いた
+通常実行(`test:at:fast`)は10でぴったり枠に収まるが、全件実行では必ずどれか2シナリオが
+429で落ちる。1時間以内の再実行も同じ(まだ明けていない)枠を使うため、同じ問題が起きる。
+
+**本番の既定値は変えていない。** この上書きも `docker-compose.e2e-stubs.yml` の `gateway:`
+サービスにだけ効く。値の根拠(消費の内訳とヘッドルームの計算)は `docs/API_RATE_LIMITING.md`
+「Acceptance-test override (issue #1286)」を参照。
+
 ### 何をスタブ化しているか
 
 | スタブ | 置き換える依存 | 向き先を決める環境変数 | ホスト公開 |

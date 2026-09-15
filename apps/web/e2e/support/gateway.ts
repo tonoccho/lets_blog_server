@@ -213,6 +213,31 @@ export function gatewayApiGlobalLimit(): number {
 }
 
 /**
+ * gateway コンテナに実際に効いている `upload-endpoint` の上限
+ * (`RateLimitProperties.uploadEndpoint`)を `UPLOAD_RATE_LIMIT_REQUESTS` 環境変数から読む
+ * (issue #1286)。{@link gatewayApiGlobalLimit} と同じ理由・同じ作り —
+ * `docker-compose.e2e-stubs.yml` が受け入れテスト実行時にこの値を引き上げるため
+ * (`docs/API_RATE_LIMITING.md` 「Acceptance-test override」)、上限を決め打ちする検証は
+ * 実際にコンテナへ設定されている値を都度読む必要がある。
+ *
+ * 変数が未設定なら、gateway 自身の既定値(`RateLimitProperties`、10)にフォールバックする。
+ */
+export function gatewayUploadEndpointLimit(): number {
+  const DEFAULT_LIMIT = 10; // RateLimitProperties の既定値と同じ
+  try {
+    const output = execFileSync(
+      'docker', ['exec', GATEWAY_CONTAINER, 'printenv', 'UPLOAD_RATE_LIMIT_REQUESTS'],
+      { encoding: 'utf8', timeout: 30_000 }
+    ).trim();
+    const parsed = Number(output);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_LIMIT;
+  } catch {
+    // 環境変数が未設定だと printenv は非0で終了する(=本番既定値のまま)。
+    return DEFAULT_LIMIT;
+  }
+}
+
+/**
  * 同じクライアント(= 同じ `X-Forwarded-For` 末尾)から連続して送り、ステータスの列を返す。
  * レート制限の検証に使う。
  */

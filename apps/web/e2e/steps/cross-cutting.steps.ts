@@ -25,6 +25,7 @@ import {
   fetchThroughGateway,
   floodGateway,
   gatewayApiGlobalLimit,
+  gatewayUploadEndpointLimit,
   probeThroughGateway,
   sendThroughGateway,
   waitForContainerLog,
@@ -578,6 +579,34 @@ Then('全て200で返り、429は一度も返らない', async ({ ctx }) => {
     '画像生成設定の取得がupload-endpointの枠(プロセス全体で10req/時)を消費し、'
       + '11回連続で呼べていない(#999)'
   ).toEqual(Array(IMAGE_SETTINGS_REQUEST_COUNT).fill(200));
+});
+
+// ------------------------------------- upload-endpoint 枠の受け入れテスト用余裕(issue #1286)
+
+/**
+ * `upload-endpoint` バケットが、受け入れテストの実消費をまかなえているかを検査する
+ * (issue #1286)。
+ *
+ * 実際にHTTPを叩いて枠を消費させはしない — このバケットは受け入れテスト全体で共有される
+ * 希少資源であり、検証のために消費してしまうと無関係な画像生成シナリオを巻き添えにする
+ * (この Issue が固定しようとしている問題そのもの)。代わりに、gateway に実際に設定されて
+ * いる上限を {@link gatewayUploadEndpointLimit} で読み、あらかじめ数えてある消費量から
+ * 計算した必要最小値と比較するだけにする。
+ *
+ * 消費量の内訳(通常実行10 + `@slow`分2 = 12)は
+ * `apps/web/e2e/features/media/image-generation.feature` 冒頭のコメントが唯一の値の
+ * 出どころ(二重管理をしない)。1時間以内の再実行(AC2)も429無しでまかなうには、
+ * 同じ1時間の枠の中で少なくとも2回分を吸収できる必要がある。
+ */
+const FULL_RUN_UPLOAD_ENDPOINT_CONSUMPTION = 12; // apps/web/e2e/features/media/image-generation.feature 冒頭コメント参照
+const REQUIRED_UPLOAD_ENDPOINT_MINIMUM = FULL_RUN_UPLOAD_ENDPOINT_CONSUMPTION * 2; // 全件実行 + 1時間以内の再実行(issue #1286 AC1・AC2)
+
+Then('upload-endpointの枠が全件実行の消費を再実行込みでまかなえている', () => {
+  expect(
+    gatewayUploadEndpointLimit(),
+    `upload-endpointの枠(UPLOAD_RATE_LIMIT_REQUESTS)が、全件実行の消費(${FULL_RUN_UPLOAD_ENDPOINT_CONSUMPTION})`
+      + `の1時間以内の再実行込みで少なくとも${REQUIRED_UPLOAD_ENDPOINT_MINIMUM}必要(issue #1286)`
+  ).toBeGreaterThanOrEqual(REQUIRED_UPLOAD_ENDPOINT_MINIMUM);
 });
 
 After({ tags: '@cross-cutting' }, async ({ ctx, request }) => {
