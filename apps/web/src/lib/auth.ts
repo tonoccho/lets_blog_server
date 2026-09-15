@@ -1,8 +1,8 @@
 import "server-only";
 import type { Account, NextAuthOptions } from "next-auth";
 import type { JWT } from "next-auth/jwt";
-import { decodeJwt } from "jose";
 import { resolveAccessToken } from "./tokenRefreshPolicy";
+import { deriveRole } from "./deriveRole";
 
 const KEYCLOAK_REALM_PATH = "/auth/realms/letsblog";
 const KEYCLOAK_CLIENT_ID = "letsblog-web";
@@ -26,25 +26,9 @@ const keycloakExternalBase = `${(process.env.NEXTAUTH_URL ?? "https://localhost"
 const keycloakTokenUrl = `${keycloakInternalBase}/protocol/openid-connect/token`;
 const keycloakLogoutUrl = `${keycloakInternalBase}/protocol/openid-connect/logout`;
 
-interface KeycloakAccessTokenClaims {
-  realm_access?: { roles?: string[] };
-}
-
-/**
- * Keycloakのrealmロール(admin/editor/viewer。ロールクレームなし)を、Webアプリ自身の
- * 2値ロールモデル(admin/user。requireAdminSession()・proxy.tsが依存する既存の権限判定)へ変換する。
- * ここでのJWTデコードは署名検証を伴わない(このapiClient内部の表示用ロールフラグとしてのみ使い、
- * 実際のAPI認可はlegacy-api側がAuthorizationヘッダーのJWTを署名検証した上で判定する)。
- */
-function deriveRole(accessToken: string): "admin" | "user" {
-  try {
-    const claims = decodeJwt(accessToken) as KeycloakAccessTokenClaims;
-    const roles = claims.realm_access?.roles ?? [];
-    return roles.includes("admin") ? "admin" : "user";
-  } catch {
-    return "user";
-  }
-}
+// ロール判定(deriveRole)は`./deriveRole.ts`へ切り出してある(issue #969)。
+// auth.ts自体は`server-only`のためJestから直接importできないが、副作用の無い
+// 判定ロジックだけを分離することで、そちらは通常のモジュールとして単体テストできる。
 
 interface KeycloakTokenResponse {
   access_token: string;
