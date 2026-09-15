@@ -1175,10 +1175,27 @@ Then('選択中のチェックポイントの削除ボタンは押せず、理�
   await expect(deleteButton).toHaveAttribute('title', '選択中のチェックポイントは削除できません');
 });
 
+/**
+ * issue #1316: 導入したはずのチェックポイントが一覧に現れないケース(実機ComfyUIが
+ * 応答していない、あるいはGPU無しホストでスタブが静的な一覧しか返さない場合)の
+ * 防御線。「導入したチェックポイントがそのプロジェクトの一覧に現れる」の前提チェックが
+ * 主たる検出経路だが、ここでも明示タイムアウトを与えておく — さもないと
+ * `getByRole(...).click()` はタイムアウト指定を持たないロケーター操作として、
+ * シナリオの`@timeout:600000`(`@slow`適用で30分)いっぱいまで無言でポーリングし続け、
+ * 「明示的に失敗する」という docs/ACCEPTANCE_TESTING.md の方針に反してハングする。
+ */
+const CHECKPOINT_ROW_TIMEOUT_MS = 30_000;
+
 When('導入したチェックポイントを画面から削除する', async ({ ctx, page }) => {
   const name = ctx.mediaInstalledCheckpoint as string;
+  const row = checkpointRow(page, name);
+  await expect(
+    row,
+    `導入したはずのチェックポイント「${name}」が一覧に見つかりません` +
+      '(実機ComfyUIが応答していないか、GPU無しホストの可能性があります)'
+  ).toBeVisible({ timeout: CHECKPOINT_ROW_TIMEOUT_MS });
   page.once('dialog', (dialog) => dialog.accept());
-  await checkpointRow(page, name).getByRole('button', { name: '削除', exact: true }).click();
+  await row.getByRole('button', { name: '削除', exact: true }).click({ timeout: CHECKPOINT_ROW_TIMEOUT_MS });
   await expect(page.getByText('完了しました。')).toBeVisible({ timeout: JOB_TIMEOUT_MS });
 });
 
