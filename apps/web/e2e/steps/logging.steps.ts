@@ -802,7 +802,14 @@ Then('その監査ログは日時の範囲で絞り込める', async ({ ctx, req
 
   // 基準はサーバーが記録した createdAt 自身。実行ホストと log-writer コンテナの
   // タイムゾーンが一致する保証が無いので、ホストの現在時刻からは範囲を作らない。
-  const at = Date.parse(entry.createdAt);
+  //
+  // entry.createdAt はゾーン情報の無いISO文字列(例: "2026-09-15T21:33:54")で、
+  // バックエンド(LocalDateTime.now().toString() で送出・LocalDateTime.parse() で
+  // 保存・LocalDateTime で受けるクエリパラメータ)は一貫してこれをUTCの壁時計値として
+  // 扱っている(#1314)。`Date.parse` はゾーン無し文字列を**実行ホストのローカル
+  // タイムゾーン**として解釈するため(ECMAScript仕様)、そのまま渡すとホストの
+  // タイムゾーンがUTCでない場合に範囲がずれる。'Z' を明示的に付けてUTCとして解釈させる。
+  const at = Date.parse(`${entry.createdAt}Z`);
   const iso = (millis: number) => new Date(millis).toISOString().replace('Z', '');
 
   const inRange = await listAuditLogs(
