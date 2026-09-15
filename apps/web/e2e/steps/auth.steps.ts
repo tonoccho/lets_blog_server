@@ -253,7 +253,31 @@ Then('初回セットアップ画面へ誘導される', async ({ page }) => {
   await page.waitForURL(/\/setup/, { timeout: 15000 });
 });
 
+/**
+ * issue #1280: このステップは以前、パスワード欄の`fill()`が「送信までに値を失った」ように
+ * 見えるタイムアウト(ブラウザのHTML5必須入力検証「Please fill out this field.」)で落ちて
+ * いた。スクリーンショットではメールアドレス欄は正しく埋まっているのに、パスワード欄だけが
+ * 空だった。原因は `fill()` とハイドレーションの競合(製品側)ではなく、
+ * `SETUP_ADMIN_PASSWORD`(`E2E_PROVISION_ADMIN_PASSWORD` / `E2E_ADMIN_PASSWORD` が未設定なら
+ * 空文字列に解決される)を**そのまま**`fill()`していたこと(シナリオ側)だった。
+ * `SETUP_ADMIN_EMAIL`はハードコードされた既定値へフォールバックする(helpers.ts の
+ * `E2E_ADMIN_EMAIL`)ため常に埋まるが、パスワードには既定値が無く、空文字列で`fill('')`
+ * すると入力欄は本当に空のままになり、必須入力検証が送信をブロックしたままステップが
+ * 30秒でタイムアウトする。「値が失われた」ように見えたのは、実際には最初から空だった
+ * ためである(CPUを6倍・ネットワークを400ms/50KB/sへ絞った条件下でも、埋めた値が
+ * 勝手に消えることは確認できなかった)。
+ * ここで早期に失敗させることで、後続の30秒タイムアウトと紛らわしいスクリーンショットの
+ * 代わりに、原因がひと目で分かるメッセージを出す。
+ */
 When('初回セットアップ画面から最初の管理者を作成する', async ({ page, ctx }) => {
+  expect(
+    SETUP_ADMIN_PASSWORD,
+    'E2E_PROVISION_ADMIN_PASSWORD / E2E_ADMIN_PASSWORD が未設定(または空文字列)のため、'
+      + '初回セットアップの管理者パスワードが空文字列になっている。この状態で送信すると'
+      + 'ブラウザの必須入力検証(HTML5 required)で送信がブロックされたまま30秒タイムアウト'
+      + 'し、原因が分かりにくい(#1280)。資格情報を環境変数で設定してから再実行すること'
+      + '(docs/e2e-testing.md §3.2)。'
+  ).not.toBe('');
   await page.goto('/setup');
   await page.locator('input[type="email"]').fill(SETUP_ADMIN_EMAIL);
   // パスワード欄は「パスワード」と「確認用」の2つ。両方同じ値を入れる。
@@ -320,15 +344,25 @@ Then('管理者アカウントを作成した旨が表示される', async ({ pa
 });
 
 Then('作成した管理者でログインすると管理者専用ページへ入れる', async ({ page }) => {
-  await page.goto('/login');
-  await page.waitForURL(new RegExp(`${REALM_BASE}/`), { timeout: 15000 });
+  // helpers.ts の loginViaKeycloak と同じ理由(issue #1017)で、goto を load 完了まで
+  // 待たせない。/login からのクライアント側リダイレクトが進行中の goto を中断しうるため。
+  await page.goto('/login', { waitUntil: 'commit' });
+  await expect(page).toHaveURL(new RegExp(`${REALM_BASE}/`), { timeout: 30000 });
+  await page.waitForLoadState('load');
+
   await page.locator('#username').fill(SETUP_ADMIN_EMAIL);
   await page.locator('#password').fill(SETUP_ADMIN_PASSWORD);
   await page.locator('#kc-login').click();
 
   await completeKeycloakProfileIfPrompted(page);
 
-  await page.goto('/users');
+  // ログイン後のコールバック(Keycloak → /api/auth/callback/keycloak → /)が完了して
+  // からでないと、直後の goto('/users') が進行中のクライアント側リダイレクトと競合し
+  // /users ではなく / に着地することがある(#1078・#1017と同種の競合)。
+  await expect(page).toHaveURL('/', { timeout: 30000 });
+  await page.waitForLoadState('load');
+
+  await page.goto('/users', { waitUntil: 'commit' });
   await expect(
     page,
     '初回セットアップで作った管理者が管理者専用ページへ入れない'
