@@ -506,6 +506,22 @@ Then('authorization_pending が返る', async ({ ctx }) => {
     .toBe('authorization_pending');
 });
 
+// issue #1266: 承認完了後に Keycloak が実際に遷移する成功画面のURL。
+// (`/protocol/openid-connect/...` ではなく `/device/status`。認可コード付与後、
+// 「Device Login Successful / You may close this browser window」を表示するだけの
+// 静的な確認画面で、拡張はブラウザではなくポーリングでトークンを受け取るため、
+// この画面自体をシナリオが操作することはない。)
+const DEVICE_STATUS_URL_PATTERN = /\/protocol\/openid-connect\/auth\/device\/status(\?|$)|\/device\/status(\?|$)/;
+
+async function loginIfPromptedForDeviceCode(page: Page): Promise<void> {
+  const usernameField = page.locator('#username');
+  if (await usernameField.isVisible({ timeout: 5000 }).catch(() => false)) {
+    await usernameField.fill(E2E_ADMIN_EMAIL);
+    await page.locator('#password').fill(E2E_ADMIN_PASSWORD);
+    await page.locator('#kc-login').click();
+  }
+}
+
 When('管理者がブラウザでデバイス認可を承認する', async ({ page, ctx }) => {
   const auth = ctx.deviceAuthorization as DeviceAuthorization;
   // verification_uri_complete はユーザーコードを埋め込んだURL。拡張もこれを開く。
@@ -513,12 +529,7 @@ When('管理者がブラウザでデバイス認可を承認する', async ({ pa
   await page.goto(verificationUrl);
 
   // 未ログインならログイン画面が出る。ログイン済みなら承認画面へ直行する。
-  const usernameField = page.locator('#username');
-  if (await usernameField.isVisible({ timeout: 5000 }).catch(() => false)) {
-    await usernameField.fill(E2E_ADMIN_EMAIL);
-    await page.locator('#password').fill(E2E_ADMIN_PASSWORD);
-    await page.locator('#kc-login').click();
-  }
+  await loginIfPromptedForDeviceCode(page);
 
   // ユーザーコードの入力を求められる場合(verification_uri を開いたとき)に備える。
   const codeField = page.locator('#device-user-code');
@@ -532,8 +543,36 @@ When('管理者がブラウザでデバイス認可を承認する', async ({ pa
   await expect(approve, 'デバイス認可の承認ボタンが見つからない').toBeVisible({ timeout: 15000 });
   await approve.click();
 
-  // 承認完了の表示を待つ。文言はロケール依存なので、承認ボタンが消えたことで判断する。
-  await expect(approve).toBeHidden({ timeout: 15000 });
+  // issue #1266: 原因は「画面遷移の誤認識」だった。承認完了を「承認ボタンが消えたこと」
+  // (`toBeHidden()`)で判定していたが、この同意画面の承認ボタンは `#kc-login` にも
+  // 一致する(通常のログイン送信ボタンと同じidを共有元セレクタに含めているため)。
+  // 受け入れテストは e2e-admin という同一アカウントを並列実行の複数シナリオ間で共有して
+  // おり、負荷が高い状況では承認クリック直後に Keycloak がセッション競合により
+  // ログイン再認証画面(`/login-actions/authenticate?...`)へフローを差し戻すことが
+  // 実際に観測された(#1266 調査ログ)。この再認証画面の "Sign In" ボタンも同じ
+  // id="kc-login" を持つため、`toBeHidden()` は「まだ同じ承認ボタンが残っている」と
+  // 誤認識し、実際には全く別の画面(ログイン画面)に戻っているのに15秒間ずっと
+  // "visible" と判定してタイムアウトしていた。
+  //
+  // 完了判定を、承認ボタンという同意画面内のDOM要素の状態ではなく、Keycloakが実際に
+  // 遷移する完了画面のURL(`/device/status`)で行うよう変更する。ログイン画面へ
+  // 差し戻された場合は、そのURLへは決して遷移しないため誤検知が起きず、再ログインして
+  // 承認をやり直すことでセッション競合を吸収できる。
+  try {
+    await page.waitForURL(DEVICE_STATUS_URL_PATTERN, { timeout: 15000 });
+  } catch {
+    // セッション競合でログイン画面へ差し戻された場合の救済(#1266 調査で確認済み)。
+    // 再ログインし、承認ボタンをもう一度クリックしてから完了画面への遷移を待つ。
+    await loginIfPromptedForDeviceCode(page);
+    const approveAgain = page
+      .locator('#kc-login, input[name="accept"], button[name="accept"]')
+      .first();
+    await expect(approveAgain, 'デバイス認可の承認ボタン(再ログイン後)が見つからない').toBeVisible({
+      timeout: 15000,
+    });
+    await approveAgain.click();
+    await page.waitForURL(DEVICE_STATUS_URL_PATTERN, { timeout: 15000 });
+  }
 });
 
 When('トークンを要求する', async ({ request, ctx }) => {
