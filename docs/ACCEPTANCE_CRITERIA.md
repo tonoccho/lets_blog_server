@@ -107,6 +107,7 @@ API: identity `UserController`, `RoleController`, `ProjectUserController` / cont
 | AC-USR-011 | メタデータ(投稿ステータス/ロール)の取得 | 画面の選択肢がサーバー定義と一致する | `GET /api/metadata/post-statuses` と `/roles` が画面の選択肢と一致する | `features/publishing/publish-status.feature` › 投稿ステータスの選択肢はAPIとUIで一致する(issue #1172 / AT-6-2、親issue #932の親シナリオ7。投稿ステータス側のみ。プロジェクト一括管理画面「ポスト/ページ」タブのステータス変更セレクトと比較する)。**対象外**: ロール(`/roles`)側は #1163(AT-6-7)が担当、未検証のまま | 検証済(`@slow`。投稿ステータス側のみ) |
 | AC-USR-014 | 本人設定(タイムゾーン/ロケール)の保存 | 自分の表示設定を保てる | `PATCH /api/identity/me/preferences` で保存した内容が、再ログイン後も `GET /api/identity/me` に反映される(#784 の退行検知) | `features/identity/user-management.feature` › 利用者が自分のタイムゾーン/ロケールを保存でき、再ログイン後も保持される | 検証済 |
 | AC-USR-015 | ユーザー操作の認可 | 権限の無い利用者にアカウントを改変されない | 一般ユーザーは `POST/PATCH/DELETE /api/users` を実行できず(403)、実行後も一覧・対象の状態が変化していない(#796 の退行検知) | `features/identity/user-authorization.feature` › 一般ユーザーは新しいメンバーを登録できず、ユーザー一覧は変化しない / 一般ユーザーは他人のロールも削除も操作できず、対象の状態は変化しない | 検証済 |
+| AC-USR-016 | 自己権限昇格・自己締め出しの防止 | 権限を持つ利用者でも自分を特別扱いできない | ROLE_MANAGE保有者(非admin)は自分自身へ特権ロールを付与できず(403)、管理者は自分自身を無効化できず(403)、いずれも実行後に権限・アカウント状態が変化していない(#798 の退行検知) | `features/identity/self-guard.feature` › ROLE_MANAGE保有者は自分自身に特権ロールを付与できず、権限は変化しない / 管理者は自分自身を無効化できず、アカウント状態は変化しない | 検証済 |
 
 ### 2.3 プロジェクト・環境・サイト — `PRJ` / `SITE`
 
