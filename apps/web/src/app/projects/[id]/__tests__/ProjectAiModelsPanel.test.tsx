@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import { ProjectAiModelsPanel } from "../ProjectAiModelsPanel";
 import {
@@ -125,5 +126,28 @@ describe("ProjectAiModelsPanel のLLMタブ(issue #1212)", () => {
       expect(fetchComfyUiCheckpointsMock).toHaveBeenCalledWith(1);
     });
     expect(screen.queryByText("レビューステップ別のAIモデル設定")).not.toBeInTheDocument();
+  });
+
+  /**
+   * issue #1310: 開発サーバー(React Strict Mode)ではマウント時のuseEffectが2回発火し、
+   * fetchReviewStepSettingsAction等が同じprojectIdに対して2回ずつ並行して呼ばれる。
+   * この2重リクエストが引き金となり、リロード直後に保存済みの値が読めないことがある
+   * (受け入れテストの間欠的な失敗として観測。#1310のリードエビデンス参照)。
+   * 同じprojectIdに対する2回目の発火では取得を行わないことを固定する。
+   */
+  it("Strict Modeでマウント時のuseEffectが2回発火しても、同じprojectIdへの初回取得は1回だけ行う", async () => {
+    render(
+      <StrictMode>
+        <ProjectAiModelsPanel projectId={1} />
+      </StrictMode>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("選択中のモデル:")).toBeInTheDocument();
+    });
+
+    expect(fetchLlmModelsMock).toHaveBeenCalledTimes(1);
+    expect(fetchLlmProviderMock).toHaveBeenCalledTimes(1);
+    expect(fetchReviewStepSettingsMock).toHaveBeenCalledTimes(1);
   });
 });

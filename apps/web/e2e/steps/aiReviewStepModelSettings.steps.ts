@@ -21,21 +21,43 @@ Given('レビューステップ設定検証用のプロジェクトがある', a
   ctx.reviewStepProjectId = project.id;
 });
 
+/**
+ * 「AI・アセット」タブを開き、レビューステップ設定パネルが見えるまで待つ。
+ *
+ * タブボタン自体はサーバーレンダリングされて先に見えているため、ハイドレーション完了前に
+ * クリックすると onClick がまだ紐付いておらず取りこぼされることがある(#1283と同型、
+ * media.steps.tsのopenProjectTabが採る対策と同じ)。マーカー要素が見えるまでクリックを
+ * 再試行する。
+ */
+async function openAiTabAndWaitForReviewStepPanel(page: Page): Promise<void> {
+  const aiTab = page.getByRole('button', { name: 'AI・アセット', exact: true });
+  await expect(aiTab).toBeVisible({ timeout: 30_000 });
+
+  const marker = page.getByText('レビューステップ別のAIモデル設定');
+  await expect(async () => {
+    await aiTab.click();
+    await expect(marker).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
+}
+
 async function openLlmTab(page: Page, projectId: number): Promise<void> {
   await loginAsAdmin(page);
   await page.goto(`/projects/${projectId}`, { waitUntil: 'commit' });
-  const aiTab = page.getByRole('button', { name: 'AI・アセット', exact: true });
-  await expect(aiTab).toBeVisible({ timeout: 30_000 });
-  await aiTab.click();
-  await expect(page.getByText('レビューステップ別のAIモデル設定')).toBeVisible({ timeout: 30_000 });
+  await openAiTabAndWaitForReviewStepPanel(page);
 }
 
 When('プロジェクト詳細ページのAIモデル管理カードのLLMタブを開く', async ({ ctx, page }) => {
   await openLlmTab(page, ctx.reviewStepProjectId as number);
 });
 
-When('画面を再読み込みしてAIモデル管理カードのLLMタブを開く', async ({ ctx, page }) => {
-  await openLlmTab(page, ctx.reviewStepProjectId as number);
+// 既にログイン済みのページを対象に「再読み込み」するだけのステップ。loginAsAdmin()を
+// もう一度呼ぶと、Keycloak側のSSOセッションが有効なままフォーム無しで即座にコールバックが
+// 返ってきて `/auth/realms/letsblog/` へ一度も遷移しない競合を起こす(この方針変更前は
+// この2つ目のシナリオが#1310のクリック取りこぼし修正後に新たに露呈した)。他のspecの
+// 「再読み込み」ステップ(siteRegistration.steps.ts等)と同様、page.reload()で揃える。
+When('画面を再読み込みしてAIモデル管理カードのLLMタブを開く', async ({ page }) => {
+  await page.reload({ waitUntil: 'commit' });
+  await openAiTabAndWaitForReviewStepPanel(page);
 });
 
 Then(
@@ -97,11 +119,17 @@ Then(/^「(.+)」の行の表示が保存した値になる$/, async ({ ctx, pag
   expect(await selectedOptionText(page, `${stepLabel}のモデル`)).toBe(ctx.reviewStepSavedModelLabel);
 });
 
+// リロード直後は、ProjectAiModelsPanelのマウント時fetch(開発サーバーのReact Strict Mode
+// により1マウントにつき2回発火する)がまだ確定値へ収束しきっていない一瞬を拾って、単発
+// expectだと間欠的に「(プロジェクト既定を使用)」を読んでしまうことがある(#1310のQA参照)。
+// 保存直後の同種のassertion(115-119行目)と同じくexpect.pollでリトライする。
 Then(/^「(.+)」の行の表示が保存した値のままである$/, async ({ ctx, page }, stepLabel: string) => {
-  expect(await selectedOptionText(page, `${stepLabel}のプロバイダー`)).toBe(
-    providerLabelOf(ctx.reviewStepSavedProvider as string)
-  );
-  expect(await selectedOptionText(page, `${stepLabel}のモデル`)).toBe(ctx.reviewStepSavedModelLabel);
+  await expect
+    .poll(async () => selectedOptionText(page, `${stepLabel}のプロバイダー`))
+    .toBe(providerLabelOf(ctx.reviewStepSavedProvider as string));
+  await expect
+    .poll(async () => selectedOptionText(page, `${stepLabel}のモデル`))
+    .toBe(ctx.reviewStepSavedModelLabel);
 });
 
 /** ReviewStepSettingsPanel.tsxのPROVIDER_LABELと同じ対応表。 */

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   LlmModelListResponse,
   LlmProviderListResponse,
@@ -38,6 +38,15 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
   const [imageProviderData, setImageProviderData] = useState<ImageProviderListResponse | null>(null);
   const [comfyuiData, setComfyuiData] = useState<ComfyUiCheckpointListResponse | null>(null);
   const [loadingTab, setLoadingTab] = useState<Tab | null>(null);
+  // 直近に初回取得を行ったprojectId(issue #1310)。開発サーバー(React Strict Mode)では
+  // マウント時のuseEffectが2回発火し、fetchLlmModelsAction等が同じprojectIdに対して
+  // 並行で2回ずつ(6並行)呼ばれる。実際に落ちた受け入れテストの再現では、この2回の
+  // fetchReviewStepSettingsActionがどちらも同じ(誤った)未設定値を返しており、
+  // 「後勝ちの順序問題」ではなく、この並行リクエストのバースト自体がサーバー側の
+  // 読み取り不整合を誘発していた(直前のPUTで保存した値がGETに反映されない)。
+  // 本番(Strict Modeなし)ではuseEffectは1回しか発火しないため、このrefで開発時の
+  // 2回目の発火を無視し、本番と同じ「projectIdごとに1回だけ取得する」挙動に揃える。
+  const fetchedProjectIdRef = useRef<number | null>(null);
 
   async function handleTabChange(nextTab: Tab) {
     setTab(nextTab);
@@ -57,6 +66,10 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
 
   // 初回マウント時に、デフォルト表示のLLMタブ分だけ取得しておく
   useEffect(() => {
+    if (fetchedProjectIdRef.current === projectId) {
+      return;
+    }
+    fetchedProjectIdRef.current = projectId;
     fetchLlmModelsAction(projectId).then(setLlmData);
     fetchLlmProviderAction(projectId).then(setLlmProviderData);
     fetchReviewStepSettingsAction(projectId).then(setReviewStepData);
