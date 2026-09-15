@@ -551,7 +551,42 @@ public class UserService {
                     failed.put(user.getId(), saveFailure.getMessage());
                     continue;
                 }
-                keycloakAdminClient.sendPasswordResetEmail(keycloakSub);
+                // issue #966: サブがローカルDBへ確定した(直前のsaveAndFlush)後にメール送信だけが
+                // 失敗すると、以前はこのユーザーを「失敗」に集計しつつも、既にコミット済みの
+                // keycloak_subは取り消されないままだった。その結果、targets(冒頭の
+                // findByKeycloakSubIsNull)がこのユーザーを二度と拾わなくなり、実際には
+                // Keycloak側もローカルも移行済みなのに再実行(=再送信)する手段が無くなっていた。
+                // ここでは、メール送信の失敗を検知したら他の失敗経路(realmロール付与失敗・
+                // ローカル保存失敗)と同じ形に揃える: 直前にKeycloakへ作成したユーザーを削除し、
+                // ローカルのkeycloak_subも(今回確定させた分を)取り消して未移行の状態へ戻す。
+                // こうすると「失敗」と報告される内容とローカルDBの状態(keycloak_sub未確定)が
+                // 一致し(要件1)、次回のmigrateToKeycloak呼び出しがこのユーザーを自動的に
+                // 再度対象にする(要件2)。
+                try {
+                    keycloakAdminClient.sendPasswordResetEmail(keycloakSub);
+                } catch (RuntimeException emailFailure) {
+                    user.setKeycloakSub(null);
+                    // issue #966(レビュー対応): このロールバック用saveAndFlush自体が
+                    // (一時的なDB障害等で)失敗することがありうる。この例外は
+                    // KeycloakUserSyncExceptionではないため、外側のcatchでは捕まえられず、
+                    // 何もしなければmigrateToKeycloak全体から伝播してバッチ呼び出し全体を
+                    // 中断させてしまう(下のcompensateKeycloakUser自身が自己防御されているのと
+                    // 非対称になる)。ここでも同じ考え方で自己防御し、失敗してもログに残すのみに
+                    // 留め、このユーザーは失敗として記録した上で残りのユーザーの移行を続行する。
+                    try {
+                        userMigrationPersister.saveAndFlush(user);
+                    } catch (RuntimeException rollbackSaveFailure) {
+                        log.error(
+                                "ユーザー(id={})のKeycloak移行失敗(メール送信失敗)後、"
+                                        + "keycloak_subの取り消し保存にも失敗しました。手動での確認が必要です。",
+                                user.getId(), rollbackSaveFailure);
+                    }
+                    compensateKeycloakUser(keycloakSub);
+                    log.warn("ユーザー(id={})のKeycloak移行に失敗しました(メール送信失敗): {}",
+                            user.getId(), emailFailure.getMessage());
+                    failed.put(user.getId(), emailFailure.getMessage());
+                    continue;
+                }
                 migrated.add(user.getId());
             } catch (KeycloakUserSyncException e) {
                 log.warn("ユーザー(id={})のKeycloak移行に失敗しました: {}", user.getId(), e.getMessage());

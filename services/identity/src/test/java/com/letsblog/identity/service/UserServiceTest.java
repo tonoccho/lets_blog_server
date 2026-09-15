@@ -675,6 +675,76 @@ class UserServiceTest {
     }
 
     /**
+     * issue #966: パスワード再設定メール送信のみが失敗した場合、createUser・realmロール付与・
+     * ローカル保存(saveAndFlush)はいずれも成功し、ローカルDBにkeycloak_subが確定した
+     * 「後」でメール送信が失敗する。旧実装ではこの確定を取り消さないまま「失敗」として
+     * 報告していたため、targets(findByKeycloakSubIsNull)から除外されて再実行不能に
+     * なっていた(このユーザーは実際にはKeycloak側は完全に移行済み)。
+     *
+     * <p>この決定では、メール送信の失敗を検知したら他の失敗経路(realmロール付与失敗・
+     * ローカル保存失敗)と同じ形に揃える: ローカルのkeycloak_subを取り消して保存し直し
+     * (2回目のsaveAndFlush)、直前に作成したKeycloakユーザーも削除する。これにより
+     * 「失敗」と報告される内容とローカルDBの状態(keycloak_sub未確定)が一致し(要件1)、
+     * 次回のmigrateToKeycloak呼び出しがこのユーザーを自動的に再度対象にする(要件2)。
+     */
+    @Test
+    void migrateToKeycloak_メール送信のみ失敗したらローカルのsub確定を取り消して移行失敗にする_issue966() {
+        UserService service = service();
+        User user = buildUser();
+        when(userRepository.findByKeycloakSubIsNull()).thenReturn(List.of(user));
+        when(keycloakAdminClient.createUser("user@example.com", null, null, true)).thenReturn("kc-sub-966-1");
+        org.mockito.Mockito.doThrow(new KeycloakUserSyncException("SMTPが停止しています"))
+                .when(keycloakAdminClient).sendPasswordResetEmail("kc-sub-966-1");
+
+        MigrationSummaryResponse summary = service.migrateToKeycloak(null);
+
+        assertTrue(summary.migratedUserIds().isEmpty());
+        assertTrue(summary.failedUserIds().containsKey(1L));
+        // ローカルDBの最終状態はkeycloak_sub未確定に戻す: 次回の対象抽出
+        // (findByKeycloakSubIsNull)がこのユーザーを再び拾えるようにするため。
+        assertNull(user.getKeycloakSub());
+        // 1回目はkeycloak_subを確定させる保存、2回目はメール送信失敗を受けてそれを
+        // 取り消す保存(いずれもUserMigrationPersisterへ委譲される)。
+        verify(userMigrationPersister, org.mockito.Mockito.times(2)).saveAndFlush(user);
+        // 直前に作成したKeycloakユーザーを孤児にしないよう削除する(create/updateと同じ補償)。
+        verify(keycloakAdminClient).deleteUser("kc-sub-966-1");
+    }
+
+    /**
+     * issue #966(レビュー対応): メール送信失敗を受けたロールバック処理自体
+     * (keycloak_subを未確定へ戻すための2回目のsaveAndFlush)が、一時的なDB障害等で
+     * それ自身失敗することがありうる。この2回目のsaveAndFlushが投げる例外は
+     * KeycloakUserSyncExceptionではない一般のRuntimeExceptionであり、
+     * 外側のcatch(KeycloakUserSyncException e)では捕まえられないため、
+     * 何も対処しなければmigrateToKeycloak全体から例外が伝播し、このユーザー以降の
+     * 全ユーザーの移行結果ごとバッチ呼び出し全体が中断してしまう
+     * (compensateKeycloakUser自身のdeleteUser呼び出しが自己防御されているのと非対称)。
+     *
+     * <p>この決定では、ロールバックのsaveAndFlush自体の失敗も自己防御し、
+     * ログに残した上でこのユーザーを失敗として記録し、バッチ全体は中断せず
+     * 通常のサマリを返す。
+     */
+    @Test
+    void migrateToKeycloak_ロールバックの保存自体が失敗してもバッチ全体は中断しない_issue966() {
+        UserService service = service();
+        User user = buildUser();
+        when(userRepository.findByKeycloakSubIsNull()).thenReturn(List.of(user));
+        when(keycloakAdminClient.createUser("user@example.com", null, null, true)).thenReturn("kc-sub-966-2");
+        org.mockito.Mockito.doThrow(new KeycloakUserSyncException("SMTPが停止しています"))
+                .when(keycloakAdminClient).sendPasswordResetEmail("kc-sub-966-2");
+        // 1回目(sub確定)は成功、2回目(ロールバック)はDB障害等で失敗する想定。
+        org.mockito.Mockito.doNothing()
+                .doThrow(new RuntimeException("一時的なDB書き込み失敗"))
+                .when(userMigrationPersister).saveAndFlush(user);
+
+        MigrationSummaryResponse summary = service.migrateToKeycloak(null);
+
+        assertTrue(summary.migratedUserIds().isEmpty());
+        assertTrue(summary.failedUserIds().containsKey(1L));
+        verify(keycloakAdminClient).deleteUser("kc-sub-966-2");
+    }
+
+    /**
      * この経路はusers.roleを変えないため、失敗しても「ローカルだけがadmin」という
      * #955のずれは生まれない。例外にするとadmin性と無関係なRBACロールの付け外しまで
      * 502になるので、警告ログに留めて成功を返す。
