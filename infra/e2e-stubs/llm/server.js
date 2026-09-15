@@ -323,6 +323,56 @@ function articlePlanCompletionFor(prompt) {
   return null;
 }
 
+// --------------------------------------------------- セクション生成の壁打ち(issue #1037)
+
+/**
+ * `AiAssistService#buildSectionChatPrompt` が組み立てる壁打ち(追加指示による再生成)プロンプトの形。
+ * 記事プランの壁打ち(`ArticlePlanService#buildChatPrompt`)や画像プロンプト生成の壁打ち
+ * (`AiAssistService#buildImagePromptChat`)と全く同じ
+ * 「System: <指示文>(空行)(履歴/User・Assistant行…)User: <追加指示>(改行)Assistant: 」の形をしており、
+ * 語尾に固定の "Assistant: "(直後は空、応答待ち)が来ることまでは他の壁打ちと共通で見分けが付かない。
+ */
+const SECTION_CHAT_PROMPT_PATTERN = /^System: [\s\S]*\nAssistant: $/;
+
+/**
+ * `SECTION_PROMPT_TEMPLATES`(body/lead/lead-subsections)がいずれも冒頭に持つ、
+ * セクション生成専用の指示文言(出典: AiAssistService.SECTION_PROMPT_TEMPLATES)。
+ * 記事プランの壁打ち(`PLAN_SYSTEM_MARKER`)や画像プロンプト生成の壁打ち
+ * (`IMAGE_PROMPT_SYSTEM_PROMPT` = 「あなたは画像生成AI(Stable Diffusion)向けの…」)は
+ * この文言を持たないため、{@link SECTION_CHAT_PROMPT_PATTERN}(形だけの判定)と組み合わせて
+ * 初めてセクション生成の壁打ちだけを取り出せる。
+ */
+const SECTION_CHAT_SYSTEM_MARKER = 'あなたはブログ執筆アシスタントです。';
+
+/**
+ * プロンプトに積まれた追加指示(User行)の件数。記事プランの{@link planUserTurnCount}と同じ考え方で、
+ * 「直前までの文脈(履歴)がLLMへ渡っているか」を応答の中身からシナリオが観測できるようにする。
+ * 同じ入力なら同じ件数になるので決定性は崩れない。
+ */
+function sectionChatUserTurnCount(prompt) {
+  return prompt.split('\n').filter((line) => line.startsWith('User: ')).length;
+}
+
+/**
+ * セクション生成の壁打ち用の応答。用途が判別できなければ null を返し、呼び元の一般判定へ委ねる。
+ *
+ * 一般判定(`completionFor`)より**先に**通す必要がある。{@link SECTION_CHAT_SYSTEM_MARKER}や
+ * basePromptに含まれる「記事タイトル」は「記事」を含むため、後ろに置くと一般判定の
+ * {@link DRAFT_COMPLETION} に吸われて履歴・追加指示が応答へ反映されない
+ * (このIssue自体が報告している症状)。
+ *
+ * 初回生成(historyもmessageも無い、通常のセクション生成)は"System: "で始まらず
+ * "Assistant: "で終わらないため、ここには来ず従来どおり一般判定へ委ねられ、
+ * {@link DRAFT_COMPLETION} を返す(既存シナリオ「セクション生成が、指定した見出し配下の本文
+ * として返る」を壊さない)。
+ */
+function sectionChatCompletionFor(prompt) {
+  if (!SECTION_CHAT_PROMPT_PATTERN.test(prompt)) return null;
+  if (!prompt.includes(SECTION_CHAT_SYSTEM_MARKER)) return null;
+  return `E2Eスタブのセクション再生成です(直前までの追加指示 ${sectionChatUserTurnCount(prompt)} 件)。`
+    + '直前までの内容を踏まえて書き直しました。';
+}
+
 /**
  * プロンプトから用途を推定する。ai-service 側のプロンプト文言に依存しすぎないよう、
  * 判定はゆるく、既定は汎用応答にしている。
@@ -332,6 +382,10 @@ function completionFor(prompt) {
   const planCompletion = articlePlanCompletionFor(prompt);
   if (planCompletion !== null) {
     return planCompletion;
+  }
+  const sectionChatCompletion = sectionChatCompletionFor(prompt);
+  if (sectionChatCompletion !== null) {
+    return sectionChatCompletion;
   }
   const jsonCompletion = jsonFormatCompletionFor(prompt);
   if (jsonCompletion !== null) {

@@ -120,13 +120,65 @@ When(
       response.ok(),
       `セクションの壁打ち再生成に失敗しました (status=${response.status()}): ${await response.text()}`
     ).toBe(true);
+    ctx.sectionRetryMessage = message;
     ctx.sectionRetryResult = (await response.json()) as SectionResult;
   }
 );
 
+/**
+ * 直前と全く同じ history/message を積み直し、再生成を依頼する(issue #1037)。
+ * スタブの決定性(同じ入力なら同じ応答)を、応答の中身を突き合わせて確かめる。
+ */
+When('同じ追加の指示でセクションの再生成をもう一度依頼する', async ({ ctx, request }) => {
+  const token = await adminToken(request);
+  const previous = (ctx.sectionResult as SectionResult).result;
+  const message = ctx.sectionRetryMessage as string;
+  const response = await request.post('/api/ai/section', {
+    headers: { Authorization: `Bearer ${token}` },
+    data: {
+      mode: 'body',
+      heading: ctx.sectionHeading,
+      articleTitle: 'E2Eスタブのタイトル',
+      history: [{ role: 'assistant', content: previous }],
+      message,
+    },
+  });
+  expect(
+    response.ok(),
+    `セクションの壁打ち再生成(2回目)に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+  ctx.sectionRetryResultAgain = (await response.json()) as SectionResult;
+});
+
 Then('2回目のセクション生成も結果が返る', async ({ ctx }) => {
   const retry = ctx.sectionRetryResult as SectionResult;
   expect(retry.result.length, '2回目のセクション生成の結果が空でした').toBeGreaterThan(0);
+});
+
+/**
+ * issue #1037: 壁打ちの再生成が history/message をプロンプトへ積んで都度LLMへ送っていることを、
+ * 応答内容(スタブが埋め込む文脈由来の文字列)から確認する。初回生成(固定文の
+ * DRAFT_COMPLETION)と同じ文字列が返ってきていないか(=文脈が無視されて一般判定に
+ * 吸われていないか)も併せて確かめる。
+ */
+Then('2回目のセクション生成の結果に、直前までの文脈を踏まえた内容が含まれる', async ({ ctx }) => {
+  const retry = ctx.sectionRetryResult as SectionResult;
+  expect(retry.result, `2回目のセクション生成の結果: ${JSON.stringify(retry)}`).toContain(
+    '直前までの追加指示'
+  );
+  expect(
+    retry.result,
+    '壁打ちの再生成が初回生成と同じ固定文になっており、文脈が反映されていません'
+  ).not.toContain('これは受け入れテスト用の決定的な下書きです。');
+});
+
+Then('2回目と3回目のセクション再生成の結果が一致する', async ({ ctx }) => {
+  const retry = ctx.sectionRetryResult as SectionResult;
+  const retryAgain = ctx.sectionRetryResultAgain as SectionResult;
+  expect(
+    retryAgain.result,
+    `2回目: ${JSON.stringify(retry)} / 3回目: ${JSON.stringify(retryAgain)}`
+  ).toBe(retry.result);
 });
 
 Then('セクション生成の結果がスタブの決定的な本文と一致する', async ({ ctx }) => {
