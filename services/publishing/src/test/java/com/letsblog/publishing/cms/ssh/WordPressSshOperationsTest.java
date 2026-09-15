@@ -578,8 +578,9 @@ class WordPressSshOperationsTest {
 
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
         verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
-        assertEquals(true, commandCaptor.getValue().contains("post delete 99 --yes"));
+        assertEquals(true, commandCaptor.getValue().contains("post delete 99"));
         assertEquals(false, commandCaptor.getValue().contains("--force"));
+        assertEquals(false, commandCaptor.getValue().contains("--yes"));
     }
 
     @Test
@@ -587,6 +588,26 @@ class WordPressSshOperationsTest {
         when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("post not found"));
 
         assertThrows(SshOperationException.class, () -> operations.deletePost(creds(), "99"));
+    }
+
+    @Test
+    void deleteMedia_forceありpost_deleteを実行する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok(""));
+
+        operations.deleteMedia(creds(), "123");
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getValue().contains("post delete 123"));
+        assertEquals(true, commandCaptor.getValue().contains("--force"));
+        assertEquals(false, commandCaptor.getValue().contains("--yes"));
+    }
+
+    @Test
+    void deleteMedia_失敗したら例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("delete failed"));
+
+        assertThrows(SshOperationException.class, () -> operations.deleteMedia(creds(), "123"));
     }
 
     @Test

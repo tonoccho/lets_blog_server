@@ -779,7 +779,7 @@ public class WordPressSshOperations {
      * 同じ挙動になる想定)。
      */
     public void deletePost(WordPressCredentials creds, String postId) {
-        SshCommandResult result = exec(creds, wpCli(creds, "post delete " + postId + " --yes"));
+        SshCommandResult result = exec(creds, wpCli(creds, "post delete " + postId));
         if (!result.ok()) {
             throw new SshOperationException("WordPress投稿の削除に失敗しました: "
                     + firstLine(result.stderr(), result.stdout()));
@@ -956,7 +956,7 @@ public class WordPressSshOperations {
      * `--force`を付けてゴミ箱を経由せず物理削除する(アップロード済みファイルも合わせて削除される)。
      */
     public void deleteMedia(WordPressCredentials creds, String mediaId) {
-        SshCommandResult result = exec(creds, wpCli(creds, "post delete " + mediaId + " --force --yes"));
+        SshCommandResult result = exec(creds, wpCli(creds, "post delete " + mediaId + " --force"));
         if (!result.ok()) {
             throw new SshOperationException("メディアの削除に失敗しました: "
                     + firstLine(result.stderr(), result.stdout()));
