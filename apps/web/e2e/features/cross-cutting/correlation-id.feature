@@ -16,3 +16,12 @@
   シナリオ: 1つの操作のログをgatewayと下流サービスで同じ相関IDから追える
     もし 相関IDを指定してgateway経由で要求する
     ならば gatewayと下流サービスの双方のログを同じ相関IDで串刺しできる
+
+  シナリオアウトライン: 1つの操作のログをgatewayと「<サービス>」で同じ相関IDから追える(issue #992)
+    もし 相関IDを指定して「<メソッド>」「<パス>」をgateway経由で要求する
+    ならば gatewayと「<コンテナ>」の双方のログを同じ相関IDで串刺しできる
+
+    例:
+      | サービス           | メソッド | パス                      | コンテナ       |
+      | project-service    | POST    | /api/tag-design-settings  | lbs-project    |
+      | publishing-service | GET     | /api/taxonomy/resolve     | lbs-publishing |

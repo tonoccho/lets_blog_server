@@ -665,6 +665,36 @@ Then('gatewayと下流サービスの双方のログを同じ相関IDで串刺�
   ).toBe(true);
 });
 
+/**
+ * project-service / publishing-service個別の相関ID伝播を検証する(issue #992)。
+ * 汎用の DOWNSTREAM_CONTAINER 版と異なり、サービスごとに405を起こすメソッド/パスの組が違うため
+ * シナリオアウトラインの例から渡す。
+ */
+When(/^相関IDを指定して「([^」]+)」「([^」]+)」をgateway経由で要求する$/, async (
+  { ctx, request }, method: string, path: string
+) => {
+  const correlationId = `at17-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  ctx.correlationId = correlationId;
+  ctx.correlationResponse = sendThroughGateway({
+    method,
+    path,
+    token: await adminToken(request),
+    headers: { 'X-Correlation-Id': correlationId },
+  });
+});
+
+Then(/^gatewayと「([^」]+)」の双方のログを同じ相関IDで串刺しできる$/, async ({ ctx }, container: string) => {
+  const correlationId = ctx.correlationId as string;
+  expect(
+    waitForContainerLog(GATEWAY_CONTAINER_NAME, correlationId),
+    `gateway のログに相関ID(${correlationId})が無い`
+  ).toBe(true);
+  expect(
+    waitForContainerLog(container, correlationId),
+    `${container} のログに相関ID(${correlationId})が無い`
+  ).toBe(true);
+});
+
 When('相関IDを指定せずにgateway経由で要求する', async ({ ctx }) => {
   ctx.correlationResponse = sendThroughGateway({ path: RATE_LIMITED_PATH });
 });
