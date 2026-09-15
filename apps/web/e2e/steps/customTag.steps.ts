@@ -664,11 +664,22 @@ When('テンプレートギャラリーでそのテンプレートを複製す�
     timeout: 30_000,
   });
 
-  await page.getByRole('heading', { name: ctx.tagTemplateName as string }).click();
+  // ギャラリーカードは `"use client"` の `CustomTagTemplateGallery` が描画するため、
+  // ハイドレーション完了前にクリックすると `onClick`(`setSelectedTemplate`)が
+  // まだ紐付いておらず取りこぼされ、詳細モーダルが開かないまま複製名入力欄の
+  // 待機がタイムアウトする(issue #1312、#1283/#1284と同種)。
+  // `level: 3` でカードの `<h3>` に限定する。モーダルが開くと同じテンプレート名の
+  // `<h2>` も現れるため、限定しないとリトライ2周目以降で複数要素にマッチしてしまう。
+  const cardHeading = page.getByRole('heading', { name: ctx.tagTemplateName as string, level: 3 });
+  await expect(cardHeading).toBeVisible({ timeout: 30_000 });
+
+  const cloneNameInput = page.getByPlaceholder('新しいテンプレート名');
+  await expect(async () => {
+    await cardHeading.click();
+    await expect(cloneNameInput).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
 
   const cloneName = `E2E938 複製 ${uniqueSuffix()}`;
-  const cloneNameInput = page.getByPlaceholder('新しいテンプレート名');
-  await expect(cloneNameInput).toBeVisible({ timeout: 30_000 });
   await cloneNameInput.fill(cloneName);
   trackedTemplateNames(ctx).push(cloneName);
   ctx.tagCloneName = cloneName;
