@@ -374,16 +374,20 @@ When('そのプロジェクトの管理画面でアセット画像生成パネ�
   await expect(page.getByPlaceholder('生成したい画像の説明')).toBeVisible({ timeout: 15_000 });
 });
 
+// `(\d+)` はcucumber-expressionsの組み込み `int` 型と正規表現が一致するため、TSの型注釈に
+// 関わらず実行時には数値(number)で渡ってくる(playwright-bdd/@cucumber/cucumber-expressions、
+// a96990e1/#1284と同種)。`toHaveAttribute()` は string | RegExp しか受け付けないため、
+// 明示的に文字列化する(issue #1315)。
 Then(/^batch sizeの入力があり、上限は「(\d+)」である$/, async ({ page }, max: string) => {
   const input = panelNumberInput(page, `batch size(最大${max})`);
   await expect(input).toBeVisible();
-  await expect(input).toHaveAttribute('max', max);
+  await expect(input).toHaveAttribute('max', String(max));
 });
 
 Then(/^batch countの入力があり、上限は「(\d+)」である$/, async ({ page }, max: string) => {
   const input = panelNumberInput(page, `batch count(最大${max})`);
   await expect(input).toBeVisible();
-  await expect(input).toHaveAttribute('max', max);
+  await expect(input).toHaveAttribute('max', String(max));
 });
 
 Then('合計枚数の目安と、枚数によっては長時間かかる旨が表示される', async ({ page }) => {
@@ -394,9 +398,11 @@ Then('合計枚数の目安と、枚数によっては長時間かかる旨が�
 When(
   /^batch sizeに「(\d+)」、batch countに「(\d+)」を入力して生成する$/,
   async ({ page }, batchSize: string, batchCount: string) => {
+    // 上と同じ理由(#1315)で batchSize/batchCount は実行時には number。
+    // `Locator.fill()` は string しか受け付けないため文字列化する。
     await page.getByPlaceholder('生成したい画像の説明').fill('e2e 1103 asset image');
-    await panelNumberInput(page, 'batch size(最大16)').fill(batchSize);
-    await panelNumberInput(page, 'batch count(最大16)').fill(batchCount);
+    await panelNumberInput(page, 'batch size(最大16)').fill(String(batchSize));
+    await panelNumberInput(page, 'batch count(最大16)').fill(String(batchCount));
     const generate = page.getByRole('button', { name: '生成', exact: true });
     await expect(generate).toBeEnabled();
     await generate.click();
