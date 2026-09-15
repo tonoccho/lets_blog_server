@@ -1,5 +1,6 @@
 package com.letsblog.identity.config;
 
+import jakarta.servlet.DispatcherType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -59,6 +60,15 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http.csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(authorize -> authorize
+                        // issue #993: Spring Security 6は既定でREQUEST以外のdispatcher typeにも
+                        // 認可を適用する。Bootの ErrorPageFilter は @Valid 失敗
+                        // (MethodArgumentNotValidException)等を DispatcherType.ERROR として
+                        // /error へ再ディスパッチするため、これが anyRequest().authenticated() に
+                        // 掛かると、公開パスであっても入力エラーが401(認証エラー)に化けてしまう。
+                        // ERROR ディスパッチ自体は既にPUBLIC_PATHSかどうかを問わずGlobalExceptionHandler
+                        // (通常のREQUESTディスパッチ内で解決される)以外の経路でしか到達しないため、
+                        // 一律permitAllにしてよい。
+                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers(PUBLIC_PATHS).permitAll()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(

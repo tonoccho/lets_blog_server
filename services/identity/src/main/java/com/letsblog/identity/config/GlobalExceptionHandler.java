@@ -14,9 +14,15 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.servlet.autoconfigure.MultipartProperties;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -61,6 +67,34 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponse> handleIllegalArgument(IllegalArgumentException e) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /**
+     * {@code @Valid}の検証失敗(issue #993)。{@code POST /api/auth/setup}のような公開エンドポイントで
+     * このハンドラが無いと、Spring MVCの既定処理に委ねられた結果、Bootの{@code ErrorPageFilter}が
+     * {@code DispatcherType.ERROR}として{@code /error}へ再ディスパッチし、{@code SecurityConfig}の
+     * {@code anyRequest().authenticated()}に掛かって401(認証エラー)を返してしまう。ここで
+     * 通常のREQUESTディスパッチ内で解決することで、入力エラーとして素直に400を返す
+     * (content/publishing等、他サービスのGlobalExceptionHandlerと同じ写像)。
+     */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException e) {
+        List<Map<String, String>> errors = e.getBindingResult().getFieldErrors().stream()
+                .map(fe -> Map.of(
+                        "field", fe.getField(),
+                        "message", fe.getDefaultMessage()))
+                .collect(Collectors.toList());
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of("Validation failed", errors));
+    }
+
+    /**
+     * リクエストボディがそもそもJSONとして読めない場合(不正なJSON、型不一致等、issue #993)。
+     * {@link #handleValidation}と同じ理由でここに置かないとERROR再ディスパッチ経由で401になる。
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleMessageNotReadable(HttpMessageNotReadableException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of("リクエストボディを読み取れません"));
     }
 
     /**
