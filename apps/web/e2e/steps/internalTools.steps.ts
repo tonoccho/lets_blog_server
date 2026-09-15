@@ -64,6 +64,20 @@ const PNG_SIGNATURE = '\x89PNG';
 const INTERNAL_PLANTUML_ORIGIN = 'http://plantuml:8080';
 const INTERNAL_COMFYUI_ORIGIN = 'http://comfyui:8188';
 
+/**
+ * ComfyUI の向き先として正当な内部ホスト。
+ *
+ * 本番相当の構成では実 ComfyUI({@link INTERNAL_COMFYUI_ORIGIN})、受け入れテスト環境では
+ * `docker-compose.e2e-stubs.yml` が向ける comfyui-stub のどちらも「lbs-net 内で完結し、
+ * 公開インターネットへ出ない」という本シナリオの意図を満たす(issue #1311)。
+ */
+const INTERNAL_COMFYUI_ORIGINS = [INTERNAL_COMFYUI_ORIGIN, 'http://comfyui-stub:8080'];
+
+/** media-service が持つ、サービス間 Client Credentials 認証の既定値(#567)。 */
+const KEYCLOAK_SERVICES_TOKEN_URI = 'http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/token';
+const KEYCLOAK_SERVICES_CLIENT_ID = 'letsblog-services';
+const PLATFORM_SERVICE_ORIGIN = 'http://platform:8080';
+
 interface ProbedResponse {
   status: number;
   body: string;
@@ -86,6 +100,52 @@ function execInContainer(container: string, args: string[]): string {
     encoding: 'utf8',
     timeout: 60_000,
   });
+}
+
+/**
+ * media-service が実際に使う ComfyUI の向き先を取得する。
+ *
+ * media-service コンテナの `COMFYUI_BASE_URL` 環境変数は読まれていない
+ * (`ComfyUiClient` は呼ぶ都度 `PlatformServiceClient` 経由で platform-service の
+ * `/api/internal/platform/image-generation-config` から取得する。#1106 のレビュー指摘)。
+ * さらに `docker-compose.e2e-stubs.yml` は受け入れテスト環境で media の
+ * `COMFYUI_BASE_URL` を常に `comfyui-stub` へ固定するため、この環境変数を読んでも
+ * 「実際に効いている値」の確認にならない(issue #1311)。
+ *
+ * 実際に効いている値を見るため、media-service 自身と同じ経路——Client Credentials Grant で
+ * 自身のサービストークンを取得し、そのトークンで platform-service の内部ブリッジを呼ぶ——を
+ * このステップからも辿る。クライアントシークレットだけは環境ごとに異なる秘密情報なので、
+ * media コンテナの環境変数から都度読む(ハードコードしない)。
+ *
+ * シークレットは Node 側の `execFileSync` の argv には一切載せない(レビュー指摘、issue #1311)。
+ * curl 呼び出し自体を `lbs-media` コンテナ内の `sh -c` に投げ、コンテナ自身の環境変数
+ * `$KEYCLOAK_SERVICES_CLIENT_SECRET` をそのシェルに展開させる。こうすると `curl --fail` が
+ * 失敗して `execFileSync` が例外を投げても、その `.message`(`Command failed: <結合済みコマンド>`)
+ * には argv に載っていた値しか出ないため、シークレットの平文が Playwright のコンソール出力や
+ * テストレポート、CI ログに漏れることがない。この経路が成立する以上、シークレットを一度
+ * Node 側に読み出す `printenv` 呼び出し(それ自体が `execFileSync` の戻り値として一瞬 Node
+ * 側に渡ってしまう)はもう不要なので削除した。
+ */
+function fetchEffectiveComfyUiBaseUrl(): string {
+  const tokenResponse = execFileSync('docker', [
+    'exec', 'lbs-media', 'sh', '-c',
+    'curl --silent --fail --max-time 30 ' +
+      '--data-urlencode grant_type=client_credentials ' +
+      `--data-urlencode client_id=${KEYCLOAK_SERVICES_CLIENT_ID} ` +
+      '--data-urlencode "client_secret=$KEYCLOAK_SERVICES_CLIENT_SECRET" ' +
+      KEYCLOAK_SERVICES_TOKEN_URI,
+  ], {
+    encoding: 'utf8',
+    timeout: 60_000,
+  });
+  const accessToken = (JSON.parse(tokenResponse) as { access_token: string }).access_token;
+
+  const configResponse = execInContainer('lbs-media', [
+    'curl', '--silent', '--fail', '--max-time', '30',
+    '-H', `Authorization: Bearer ${accessToken}`,
+    `${PLATFORM_SERVICE_ORIGIN}/api/internal/platform/image-generation-config`,
+  ]);
+  return (JSON.parse(configResponse) as { comfyUiBaseUrl: string }).comfyUiBaseUrl.trim();
 }
 
 When('未認証で ComfyUI のパスを開く', async ({ ctx, request }) => {
@@ -204,7 +264,7 @@ Then('media-service の PlantUML 参照先は内部ホスト名である', async
 });
 
 Then('media-service の ComfyUI 参照先は内部ホスト名である', async () => {
-  const configured = execInContainer('lbs-media', ['printenv', 'COMFYUI_BASE_URL']).trim();
-  expect(configured, 'media-service が reverse-proxy 経由で ComfyUI を呼んでいる')
-    .toBe(INTERNAL_COMFYUI_ORIGIN);
+  const configured = fetchEffectiveComfyUiBaseUrl();
+  expect(INTERNAL_COMFYUI_ORIGINS, `media-service が reverse-proxy 経由で ComfyUI を呼んでいる(${configured})`)
+    .toContain(configured);
 });
