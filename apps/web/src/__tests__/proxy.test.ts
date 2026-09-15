@@ -100,4 +100,71 @@ describe('proxy', () => {
       expect(res.headers.get('location')).toBeNull();
     });
   });
+
+  describe('/users/{id}/edit の自己アクセス例外 (issue #1313)', () => {
+    it('一般ユーザーが自分自身のIDの編集画面へ来たら素通しする', async () => {
+      mockGetToken.mockResolvedValue({ role: 'user', accessToken: 'token-abc' } as never);
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ id: 42 }),
+      } as Response);
+
+      const res = await proxy(request('/users/42/edit'));
+
+      expect(res.headers.get('location')).toBeNull();
+      expect(global.fetch).toHaveBeenCalledWith(
+        'http://gateway:8080/api/identity/me',
+        expect.objectContaining({ headers: { Authorization: 'Bearer token-abc' } })
+      );
+    });
+
+    it('一般ユーザーが他人のIDの編集画面へ来たら / へ戻す', async () => {
+      mockGetToken.mockResolvedValue({ role: 'user', accessToken: 'token-abc' } as never);
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ id: 42 }),
+      } as Response);
+
+      const res = await proxy(request('/users/99/edit'));
+
+      expect(res.headers.get('location')).toBe('https://localhost/');
+    });
+
+    it('自ユーザーID取得に失敗したら / へ戻す(フェイルクローズ)', async () => {
+      mockGetToken.mockResolvedValue({ role: 'user', accessToken: 'token-abc' } as never);
+      global.fetch = jest.fn().mockResolvedValue({ ok: false } as Response);
+
+      const res = await proxy(request('/users/42/edit'));
+
+      expect(res.headers.get('location')).toBe('https://localhost/');
+    });
+
+    it('自ユーザーID取得が例外を投げても / へ戻す(フェイルクローズ)', async () => {
+      mockGetToken.mockResolvedValue({ role: 'user', accessToken: 'token-abc' } as never);
+      global.fetch = jest.fn().mockRejectedValue(new Error('network error'));
+
+      const res = await proxy(request('/users/42/edit'));
+
+      expect(res.headers.get('location')).toBe('https://localhost/');
+    });
+
+    it('accessTokenを持たないトークンでは自己アクセス判定を行わず / へ戻す', async () => {
+      mockGetToken.mockResolvedValue({ role: 'user' } as never);
+
+      const res = await proxy(request('/users/42/edit'));
+
+      expect(res.headers.get('location')).toBe('https://localhost/');
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('/users(一覧)自体は自己アクセス例外の対象にならず、一般ユーザーは / へ戻す', async () => {
+      mockGetToken.mockResolvedValue({ role: 'user', accessToken: 'token-abc' } as never);
+
+      const res = await proxy(request('/users'));
+
+      expect(res.headers.get('location')).toBe('https://localhost/');
+      // /users/{id}/edit専用の判定なので、一覧ページでは自己ID確認のfetchを呼ばない
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+  });
 });

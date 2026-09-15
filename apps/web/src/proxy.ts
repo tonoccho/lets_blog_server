@@ -24,6 +24,40 @@ async function needsInitialSetup(): Promise<boolean> {
   }
 }
 
+// /users/{id}/edit だけの自己アクセス例外(issue #1313)。
+// page.tsx(apps/web/src/app/users/[id]/edit/page.tsx)は自分自身のIDであれば
+// admin以外でも編集画面を開ける設計(issue #784のisSelf分岐)だが、そのロジックは
+// ADMIN_ONLY_PREFIXESによってミドルウェア段階で一律ブロックされ、一度も到達していなかった
+// (#1313調査: avatar-upload.featureの5シナリオが`[data-testid="avatar-file-input"]`の
+// タイムアウトで落ちる原因は、この一律ブロックによる`/`へのサイレントリダイレクトだった)。
+// 末尾は"/edit"自身のみに絞る(末尾スラッシュのみ許容)。`(\/.*)?`のように配下を
+// 丸ごと許すと、将来"/users/{id}/edit/"配下にadmin専用の別ルートが増えたとき、
+// このミドルウェアを一切触らないまま自己アクセス例外が自動的にそこへも及んでしまう
+// (レビュー指摘、issue #1313)。
+const SELF_EDIT_PATH_PATTERN = /^\/users\/(\d+)\/edit\/?$/;
+
+/**
+ * トークンの自己主張ではなく、identity-serviceに問い合わせて確定した自分のIDを返す。
+ * ミドルウェア(edge)はKeycloakのsub(UUID)しか持たず、ローカルの数値IDを知らないため
+ * (apps/web/src/lib/apiClient.tsのgetMyProfile()と同じ理由)。取得できなければnull
+ * (呼び出し側はフェイルクローズし、admin限定ブロックを維持する)。
+ */
+async function fetchOwnUserId(accessToken: string): Promise<number | null> {
+  try {
+    const res = await fetch(gatewayUrl("/api/identity/me"), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      return null;
+    }
+    const data = (await res.json()) as { id: number };
+    return data.id;
+  } catch {
+    return null;
+  }
+}
+
 const OPERATION_ID_HEADER = "x-operation-id";
 
 /**
@@ -74,6 +108,14 @@ export async function proxy(request: NextRequest) {
   }
 
   if (ADMIN_ONLY_PREFIXES.some((prefix) => pathname.startsWith(prefix)) && token.role !== "admin") {
+    const selfEditMatch = pathname.match(SELF_EDIT_PATH_PATTERN);
+    if (selfEditMatch && typeof token.accessToken === "string") {
+      const requestedId = selfEditMatch[1];
+      const ownId = await fetchOwnUserId(token.accessToken);
+      if (ownId !== null && String(ownId) === requestedId) {
+        return NextResponse.next({ request: { headers: requestHeaders } });
+      }
+    }
     return NextResponse.redirect(new URL("/", request.url));
   }
 

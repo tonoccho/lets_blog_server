@@ -192,13 +192,25 @@ Given('そのメンバーは切り抜き済みのアバターを保存済みで�
     multipart: { file: { name: 'initial-avatar.png', mimeType: 'image/png', buffer: png } },
   });
   expect(response.ok(), `事前アバター保存に失敗しました (status=${response.status()})`).toBe(true);
-  ctx.avatarUploadPreviousBytes = png;
+  // GET /api/users/{id}/avatar はサーバー側で512x512のJPEGへ変換したうえで配信する
+  // (AvatarController.getAvatar)。ここでアップロードした生PNGのバイト列をそのまま
+  // 「変更されていないこと」の比較基準にすると、変換前後でフォーマットが異なるため
+  // 何もしなくても必ず不一致になる。実際に配信されるバイト列は、ログイン後
+  // (page.requestがCookie認証を持つ状態)に「そのメンバーでプロフィール編集画面を開く」で
+  // 取得し直す(#1313)。
+  ctx.avatarUploadHasPresetAvatar = true;
 });
 
 When('そのメンバーでプロフィール編集画面を開く', async ({ page, ctx }) => {
   const { userId, email, password } = fixture(ctx);
   await loginViaKeycloak(page, email, password);
   await page.goto(`/users/${userId}/edit`);
+
+  if (ctx.avatarUploadHasPresetAvatar) {
+    const response = await page.request.get(`/api/users/${userId}/avatar`);
+    expect(response.ok(), `事前アバターの取得に失敗しました (status=${response.status()})`).toBe(true);
+    ctx.avatarUploadPreviousBytes = await response.body();
+  }
 });
 
 When('{int}x{int}の画像ファイルを選択する', async ({ page }, width: number, height: number) => {
@@ -282,25 +294,25 @@ Then('サイズ超過エラーが表示される', async ({ page }) => {
   await expect(page.locator('[data-testid="avatar-upload-error"]')).toBeVisible();
 });
 
-Then('アバターは変更されていない', async ({ request, ctx }) => {
-  const { userId, email, password } = fixture(ctx);
-  const token = await fetchAccessToken(request, email, password);
-  const response = await request.get(`/api/users/${userId}/avatar`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+Then('アバターは変更されていない', async ({ page, ctx }) => {
+  const { userId } = fixture(ctx);
+  // GET /api/users/{id}/avatar はWeb側のRoute Handler(apps/web/src/app/api/users/[id]/avatar/route.ts)が
+  // NextAuthのセッションCookieからアクセストークンを取り出して中継する経路であり、Authorizationヘッダーは
+  // 見ていない。標準の`request`フィクスチャ(loginViaKeycloakしたpageとはCookieを共有しない独立した
+  // APIRequestContext)で叩くと未認証としてミドルウェアに`/login`へリダイレクトされ、302追従後の
+  // ログイン画面のHTMLをアバター画像のボディとして受け取ってしまう(#1313で判明)。`page.request`を使い
+  // ログイン済みブラウザコンテキストとCookieを共有させる。
+  const response = await page.request.get(`/api/users/${userId}/avatar`);
   expect(response.ok(), `アバター取得に失敗しました (status=${response.status()})`).toBe(true);
   const body = await response.body();
   const previous = ctx.avatarUploadPreviousBytes as Buffer;
   expect(Buffer.compare(body, previous)).toBe(0);
 });
 
-Then('配信されるアバターの内容が新しい画像に置き換わっている', async ({ request, ctx }) => {
-  const { userId, email, password } = fixture(ctx);
-  const token = await fetchAccessToken(request, email, password);
+Then('配信されるアバターの内容が新しい画像に置き換わっている', async ({ page, ctx }) => {
+  const { userId } = fixture(ctx);
   await expect(async () => {
-    const response = await request.get(`/api/users/${userId}/avatar`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const response = await page.request.get(`/api/users/${userId}/avatar`);
     expect(response.ok()).toBe(true);
     const body = await response.body();
     const previous = ctx.avatarUploadPreviousBytes as Buffer;
