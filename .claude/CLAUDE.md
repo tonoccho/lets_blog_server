@@ -525,7 +525,9 @@ Tests must cover the production code this Issue adds or changes to at least **90
   produced them. "Tests pass" is not a coverage report.
 - The repository-wide thresholds (`apps/web/jest.config.ts` → `coverageThreshold`, currently
   40) are a floor for legacy code and a separate concern. Do not lower them, and do not raise
-  them as a side effect of an Issue.
+  them as a side effect of an Issue. Breaking this floor is detected automatically — see
+  **Git hook** → `scripts/git-hooks/pre-commit` below — rather than depending on a developer
+  remembering to run `npm run test:coverage` by hand (#1040).
 
 - **Production code no coverage runner reaches** carries no numeric target — `apps/*/webviews/`,
   `infra/e2e-stubs/**`, `next.config.ts`. It is verified by acceptance tests instead. See
@@ -937,6 +939,18 @@ Once bound, it enforces the same invariants for **any** committer, agent or huma
 2. **No test silencing** — nothing that disables a test is added to a test or production file.
 3. **Test-first** — a commit containing production code is refused while the branch has no test
    change at all. Write the failing Gherkin scenario first.
+4. **`apps/web` coverage floor** (#1040) — any commit touching `apps/web/**` runs
+   `cd apps/web && npm run test:coverage` and is refused if it exits non-zero. This is the
+   automatic detection path the Coverage section above requires: the repository-wide
+   `coverageThreshold` floor in `apps/web/jest.config.ts` is checked on every relevant commit,
+   not only when a developer happens to run the command by hand. It is skipped when
+   `apps/web/package.json` does not exist (e.g. a throwaway fixture repo used to unit-test this
+   hook itself), and it is a separate mechanism from `scripts/check-changed-coverage.py`, which
+   gates only the C1/C2 coverage of the lines this branch changed. It resolves `apps/web` from
+   the worktree the commit is actually made in (`git rev-parse --show-toplevel`, not the hook
+   script's own physical location), so it also checks the right directory from a linked
+   `git worktree` — a QA-found regression (#1040, #1319) when it derived the path from
+   `__file__` instead.
 
 **Never assert that the binding is in place — check it.** `core.hooksPath` is git
 configuration, not repository content: it is in no clone, no checkout and no diff. This

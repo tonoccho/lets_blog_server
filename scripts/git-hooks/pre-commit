@@ -20,9 +20,19 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, os.path.join(HERE, "..", "..", ".claude", "hooks"))
 from paths import classify, is_production, is_test  # noqa: E402
 from silencers import SILENCERS  # noqa: E402
+
+# apps/web のリポジトリ全体カバレッジ床(#1040)。`apps/web/jest.config.ts` の
+# `coverageThreshold.global` は「レガシーコードのための床」で、下げてはならないと
+# CLAUDE.md → Test-First Implementation → Coverage が明記している。ところが
+# `npm run test:coverage` を手で叩かない限り、床を割った状態は誰にも気づかれない
+# (#1040 本文が示した、統計もテストも全緑なのに閾値だけ非0で終わる状態)。
+# `scripts/check-changed-coverage.py`(このIssueが変更した行のC1/C2、90%基準)とは
+# 別の指標・別のスクリプトである — そちらは変更しない(#1040 の Out of Scope)。
+WEB_PATTERN = re.compile(r"^apps/web/")
 
 RED = "\033[31m"
 OFF = "\033[0m"
@@ -105,6 +115,59 @@ def check_test_first(files):
     )
 
 
+def touches_web(files):
+    return any(WEB_PATTERN.match(p) for p in files)
+
+
+def committing_worktree_root():
+    """このコミットが実際に行われている worktree のトップレベルを返す(#1040 QA FAIL)。
+
+    `REPO_ROOT` は `pre-commit` スクリプト自身の物理配置(`__file__`)から導出しているため、
+    `core.hooksPath` がメイン作業ツリーの絶対パスを指す構成(このリポジトリの実環境)では、
+    linked worktree からコミットしても常にメイン作業ツリーの物理ファイルが実行され、
+    `__file__` は常にメインを指す。git がフックを起動する時の cwd は、コミットが実際に
+    行われている worktree のトップレベルに設定される(メイン・linked のどちらでも)ため、
+    `git rev-parse --show-toplevel` をデフォルトの cwd(= 呼び出し元プロセスの cwd)で実行す
+    れば、常に「このコミットの worktree」を得られる。取得できない場合は `REPO_ROOT` に
+    フォールバックする。
+    """
+    out = (run(["git", "rev-parse", "--show-toplevel"]) or "").strip()
+    return out or REPO_ROOT
+
+
+def check_web_coverage_floor(files):
+    """apps/web を触るコミットに限り `npm run test:coverage` を走らせ、床割れを検知する(#1040)。
+
+    services/**・packages/** だけを触るコミットで毎回 jest のフルカバレッジ実行
+    (実測20秒超)を課さないよう、apps/web に触れていない限り一切実行しない
+    (#1040 が明示した要求)。
+    """
+    if not touches_web(files):
+        return
+    web_dir = os.path.join(committing_worktree_root(), "apps", "web")
+    if not os.path.isfile(os.path.join(web_dir, "package.json")):
+        # apps/web が実際の npm プロジェクトでない(このリポジトリでは常に存在するが、
+        # 他のフック検査を単体テストする際の使い捨てリポジトリ雛形にはそもそも無い)。
+        # その場合は判定対象がないので黙って抜ける — フェーズ分離等の他の検査には無関係。
+        return
+    result = subprocess.run(
+        ["npm", "run", "test:coverage"],
+        cwd=web_dir,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        fail(
+            "apps/web のリポジトリ全体カバレッジ床(jest.config.ts の coverageThreshold)を"
+            "下回っています",
+            "cd apps/web && npm run test:coverage が非0で終了しました:\n\n%s\n\n"
+            "テストを追加して床(40%%)を回復してください。閾値そのものを下げる場合は、"
+            "CLAUDE.md → Test-First Implementation → Coverage の記述を根拠とともに"
+            "書き換える、独立した判断として行うこと(安易に下げないこと)。"
+            % (result.stdout + result.stderr).strip()[-4000:],
+        )
+
+
 def main():
     files = staged_files()
     if not files:
@@ -112,6 +175,7 @@ def main():
     check_phase_separation(files)
     check_silencers(files)
     check_test_first(files)
+    check_web_coverage_floor(files)
     return 0
 
 
