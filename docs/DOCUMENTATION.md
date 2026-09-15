@@ -278,6 +278,8 @@ lets-blog-server/
 │   └── DOCUMENTATION.md (本ファイル)
 │
 ├── apps/                          # 利用者が直接触るアプリケーション(#963)
+│   ├── extension/                 # VSCode 拡張
+│   │
 │   ├── mcp-server/                # MCP サーバー（Ollama 連携）
 │   │   ├── src/
 │   │   │   ├── server.js
@@ -308,11 +310,33 @@ lets-blog-server/
 │       ├── package.json
 │       └── ...
 │
+├── services/                      # バックエンドの10サービス(Spring Boot、#963)
+│   ├── gateway/                   # 単一入口。ルーティング・JWT検証・レート制限
+│   ├── identity/                  # ユーザー・ロール・権限・プロジェクトメンバー
+│   ├── project/                   # プロジェクト・サイト・SSH鍵ペア・デザイン設定
+│   ├── content/                   # 投稿本文・カスタムタグ・コンテンツキャッシュ
+│   ├── media/                     # 画像生成(ComfyUI/ChatGPT)・生成画像・図
+│   ├── ai/                        # LLM生成(下書き/校正/タグ/セクション)・記事プラン
+│   ├── publishing/                # WordPressへの公開・削除・一括管理
+│   ├── analytics/                 # Google Analytics / AdSense のレポート
+│   ├── platform/                  # システム設定・バックアップ・VSCode拡張の配布
+│   └── log-writer/                # 監査ログ・操作ログ・フロントエンドエラーログ
+│
+├── packages/                      # サービス・アプリ間で共有するライブラリ(#963)
+│   ├── lbs-common/                # Java 共通ライブラリ
+│   └── api-client/                # OpenAPI から生成する TypeScript クライアント
+│
 └── infra/                         # ミドルウェアの設定(#963)
-    └── nginx/                     # Reverse Proxy
-        └── conf.d/
-            ├── penpot.conf
-            └── mcp.conf
+    ├── nginx/                     # Reverse Proxy
+    │   └── conf.d/
+    │       ├── penpot.conf
+    │       └── mcp.conf
+    ├── keycloak/                  # 認証基盤(Keycloak)の設定
+    ├── mysql/                     # MySQL の初期化・設定
+    ├── wordpress/                 # WordPress の設定
+    ├── e2e-stubs/                 # E2E用スタブサービス
+    ├── penpot/                    # Penpot の設定
+    └── shared-host/               # 共有ホスト向けの構成
 ```
 
 ### コンポーネント開発
