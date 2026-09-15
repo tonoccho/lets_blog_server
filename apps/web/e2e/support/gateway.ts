@@ -17,6 +17,9 @@
  * lbs-net 上のコンテナの中から curl を実行する。ここでは gateway 自身を踏み台にする。
  */
 import { execFileSync } from 'node:child_process';
+import { closeSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const GATEWAY_CONTAINER = 'lbs-gateway';
 const GATEWAY_ORIGIN = 'http://localhost:8080';
@@ -27,16 +30,111 @@ const GATEWAY_ORIGIN = 'http://localhost:8080';
  * TEST-NET-2(RFC 5737。文書用に予約され実在しない)から採る。
  */
 const PROBE_CHUNK_SIZE = 80;
+const PROBE_IP_POOL_SIZE = 250;
+
+/**
+ * 払い出し済みの連番を全Workerプロセスで共有するための状態ファイル(issue #995)。
+ *
+ * 以前はこの連番をモジュール変数(= プロセス単位)として持っていた。`playwright.config.ts`
+ * は `workers: process.env.CI ? 1 : undefined` としており、`CI` を設定しないローカル実行では
+ * Playwright既定の並列Worker数(複数プロセス)で走る。各プロセスが独立したモジュール変数を
+ * 持つ以上、開始位置を乱数にしても衝突を避けられるのは確率的でしかなく、実際に#943のQAで
+ * 2回、異なるWorkerが同じIPを選んで無関係なシナリオが429で落ちた。
+ *
+ * OSの一時ディレクトリ上のファイルへ連番を書き出し、全Workerプロセスがそこを読み書きする
+ * ことで、プロセス数によらず同じ連番(= 同じIP)が二重に払い出されないようにする。
+ * 複数プロセスからの同時読み書きを直列化するため、ロックファイルによる排他制御を伴う
+ * (下記 {@link acquireProbeLock})。
+ *
+ * ファイル名は**1回の `playwright test` 実行にスコープ**する。固定ファイル名だと、Worker間の
+ * 衝突は直っても、同一ホスト上で無関係な別の `playwright test` 実行(開発者の別ターミナル、
+ * 共有ホスト上の別ジョブ等)とカウンタ・ロックを共有してしまう(実行間の分離が失われる。
+ * ホスト共有時の衝突は本プロジェクトで既知の運用課題、#1065)。`process.ppid` — このモジュールを
+ * 読み込むWorkerプロセスの**親**プロセス、すなわちPlaywrightが全Workerをforkする側のテスト
+ * ランナー本体のPID — は1回の実行内の全Workerで共通かつ安定している一方、別の実行(別の
+ * ターミナル・別ジョブ)では別のプロセスなので別の値になる。これをファイル名へ含めることで、
+ * 実行内ではWorkerをまたいで共有しつつ、実行間では自然に分離される。
+ */
+export function probeStateFilePath(scopePid: number): string {
+  return join(tmpdir(), `lbs-e2e-probe-client-ip.${scopePid}.state`);
+}
+const PROBE_STATE_FILE = probeStateFilePath(process.ppid);
+const PROBE_LOCK_FILE = `${PROBE_STATE_FILE}.lock`;
+/** ロック保持中に異常終了したプロセスが残したロックを、これより古ければ放棄する。 */
+const PROBE_LOCK_STALE_MS = 30_000;
+/** ロック取得を待つ上限。通常は連番の読み書きだけなのでほぼ即時に取得できる。 */
+const PROBE_LOCK_TIMEOUT_MS = 10_000;
+
+/** ロックファイルが古すぎる(保持していたプロセスが解放せずに終了した)かどうか。 */
+function isProbeLockStale(): boolean {
+  try {
+    return Date.now() - statSync(PROBE_LOCK_FILE).mtimeMs > PROBE_LOCK_STALE_MS;
+  } catch {
+    return false; // 既に他プロセスが解放済み
+  }
+}
+
+/** 状態ファイルへの排他アクセスを取得する。取得できるまで待つ(busy-wait)。 */
+function acquireProbeLock(): void {
+  const deadline = Date.now() + PROBE_LOCK_TIMEOUT_MS;
+  for (;;) {
+    try {
+      // 'wx' はファイルが既に存在すると失敗する(= 排他的な作成)。この失敗自体を
+      // 「他プロセスがロック中」の判定に使う。
+      closeSync(openSync(PROBE_LOCK_FILE, 'wx'));
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+        throw error;
+      }
+      if (isProbeLockStale()) {
+        try {
+          unlinkSync(PROBE_LOCK_FILE);
+        } catch {
+          // 放棄判定と削除の間に別プロセスが解放/再取得した。ループして取り直す。
+        }
+        continue;
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`probeClientIpのロック取得がタイムアウトしました: ${PROBE_LOCK_FILE}`);
+      }
+    }
+  }
+}
+
+function releaseProbeLock(): void {
+  try {
+    unlinkSync(PROBE_LOCK_FILE);
+  } catch {
+    // 既に無い(放棄判定で他プロセスに削除された等)なら何もしない。
+  }
+}
+
+function readProbeSequence(): number {
+  try {
+    const parsed = Number(readFileSync(PROBE_STATE_FILE, 'utf8').trim());
+    return Number.isInteger(parsed) ? parsed : 0;
+  } catch {
+    // 初回実行で状態ファイルがまだ無い。以前の「開始位置を乱数にする」挙動を踏襲する。
+    return Math.floor(Math.random() * PROBE_IP_POOL_SIZE);
+  }
+}
+
 /**
  * 呼び出しをまたいで別のIPを使う。1回の走査の中で区切るだけでは足りない
  * (同じ1分の中で2つのシナリオが走ると、2つ目が1つ目の使った枠を引き継いでしまい、
- * ルーティングの検証が丸ごと429になる)。開始位置を乱数にしてあるのは、
- * ワーカーが別プロセスで並列に走る場合に同じIPから始めないため。
+ * ルーティングの検証が丸ごと429になる)。連番を状態ファイルで共有し、ロックで直列化する
+ * ことで、Workerプロセスをまたいでも同じIPが払い出されないようにする(issue #995)。
  */
-let probeClientSequence = Math.floor(Math.random() * 250);
-const nextProbeClientIp = (): string => {
-  probeClientSequence = (probeClientSequence + 1) % 250;
-  return `198.51.100.${probeClientSequence + 1}`;
+export const nextProbeClientIp = (): string => {
+  acquireProbeLock();
+  try {
+    const sequence = (readProbeSequence() + 1) % PROBE_IP_POOL_SIZE;
+    writeFileSync(PROBE_STATE_FILE, String(sequence));
+    return `198.51.100.${sequence + 1}`;
+  } finally {
+    releaseProbeLock();
+  }
 };
 
 export interface GatewayProbe {
