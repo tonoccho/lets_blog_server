@@ -84,7 +84,9 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
               aria-expanded={isAdminDropdownOpen}
               className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg px-3 py-2 text-neutral-600 dark:text-neutral-400 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-50"
             >
-              <span className="font-medium">{t("header", "admin")}</span>
+              <span className="font-medium" data-testid="header-admin-menu-label">
+                {t("header", "admin")}
+              </span>
               <ChevronDown
                 className={`h-4 w-4 transition-transform ${
                   isAdminDropdownOpen ? "rotate-180" : ""

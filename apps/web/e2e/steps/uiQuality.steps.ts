@@ -296,16 +296,58 @@ Then('header.adminキーを欠落させた状態を再現すると、その欠�
   ).toBe(true);
 });
 
-const ADMIN_LABEL_LOCATOR = 'button[aria-expanded] span.font-medium';
+// #1317: 以前は `button[aria-expanded] span.font-medium` を `.first()` で掴んでいた。
+// 現状のDOMではモバイル用ハンバーガーボタンは`span.font-medium`を持たないため実害は無いが、
+// 要素が増えたときの取り違えを防ぐため、管理者メニュー見出し専用の`data-testid`
+// (`apps/web/src/app/HeaderNav.tsx`)を一意に指す形に変える。
+const ADMIN_LABEL_LOCATOR = '[data-testid="header-admin-menu-label"]';
+
+/**
+ * 表示言語を切り替える(#1317)。
+ *
+ * `LanguageSwitcher`(`apps/web/src/app/LanguageSwitcher.tsx`)の`<select>`は
+ * `value={locale}`で制御されたコンポーネントで、ハイドレーション完了前に
+ * `selectOption`しても`onChange`が紐付いておらず`localStorage`への保存も
+ * `window.location.reload()`も起きない。ハイドレーション後の再レンダーで
+ * 選択値は元の値に戻ってしまう(#1283/#1284と同種の欠陥)。
+ *
+ * トレース調査(#1317のIssueコメント参照): `goto(waitUntil: 'load')`直後に
+ * `selectOption('en')`した場合、選択直後・500ms後のいずれも
+ * `localStorage.getItem('locale')`は`null`のままで、`<select>`の値は`ja`に
+ * 戻っていた。つまり保存も再読み込みも起きておらず、原因は候補1
+ * (ハイドレーション完了前の操作の取りこぼし)である。
+ *
+ * `localStorage`に保存されるまで選択をリトライする(#1283/#1284と同じ`expect().toPass()`の
+ * 形に揃える)。保存直後に`window.location.reload()`が走るため、`page.evaluate`が
+ * ナビゲーション中に実行コンテキスト破棄で失敗することがあるが、その場合はナビゲーションの
+ * 完了を待ってから読み直す。
+ */
+async function switchDisplayLocale(page: Page, locale: string): Promise<void> {
+  const localeSelect = page.getByLabel('言語選択');
+
+  const readStoredLocale = () =>
+    page.evaluate((key) => window.localStorage.getItem(key), 'locale').catch(() => null);
+
+  await expect(async () => {
+    await localeSelect.selectOption(locale);
+
+    if ((await readStoredLocale()) === locale) {
+      return;
+    }
+
+    // 保存直後の再読み込みが進行中の可能性があるため、完了を待ってから読み直す。
+    await page.waitForLoadState('load').catch(() => {});
+    expect(await readStoredLocale()).toBe(locale);
+  }).toPass({ timeout: 30_000 });
+}
 
 When('表示言語を英語に切り替える', async ({ page }) => {
   await page.goto('/', { waitUntil: 'load' });
-  await page.getByLabel('言語選択').selectOption('en');
-  await page.waitForLoadState('load');
+  await switchDisplayLocale(page, 'en');
 });
 
 Then('ヘッダーのラベルが英語表示になる', async ({ page }) => {
-  await expect(page.locator(ADMIN_LABEL_LOCATOR).first()).toHaveText(messagesEn.header.admin);
+  await expect(page.locator(ADMIN_LABEL_LOCATOR)).toHaveText(messagesEn.header.admin);
 });
 
 When('ページを再読み込みする', async ({ page }) => {
@@ -313,7 +355,7 @@ When('ページを再読み込みする', async ({ page }) => {
 });
 
 Then('ヘッダーのラベルは英語表示のままである', async ({ page }) => {
-  await expect(page.locator(ADMIN_LABEL_LOCATOR).first()).toHaveText(messagesEn.header.admin);
+  await expect(page.locator(ADMIN_LABEL_LOCATOR)).toHaveText(messagesEn.header.admin);
 });
 
 // タイムゾーン(issue #944 シナリオ11)
