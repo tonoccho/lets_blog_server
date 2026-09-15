@@ -113,6 +113,40 @@ class UnmeasurableProductionCode(unittest.TestCase):
         self.assertIn("計測対象外", out)
         self.assertNotIn("カバレッジレポートが見つかりません", out)
 
+    def test_extension_ts_only_does_not_fail(self):
+        """#1272: 拡張ホスト層(コマンド登録)は jest で原理的に到達できない。"""
+        code, out = run_main(["apps/extension/src/extension.ts"])
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("カバレッジレポートが見つかりません", out)
+
+    def test_extension_ts_is_reported_as_unmeasurable(self):
+        """黙って捨てず、計測対象外として一覧に載ること(要件2)。"""
+        _, out = run_main(["apps/extension/src/extension.ts"])
+        self.assertIn("apps/extension/src/extension.ts", out)
+        self.assertIn("計測対象外", out)
+
+    def test_panel_ts_generation_does_not_fail(self):
+        """#1272: `*Panel.ts`(拡張ホストの生成部)も同様に免除する。"""
+        code, out = run_main(["apps/extension/src/askAiPanel.ts"])
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("カバレッジレポートが見つかりません", out)
+
+    def test_panel_ts_is_reported_as_unmeasurable(self):
+        _, out = run_main(["apps/extension/src/askAiPanel.ts"])
+        self.assertIn("apps/extension/src/askAiPanel.ts", out)
+        self.assertIn("計測対象外", out)
+
+    def test_completion_provider_ts_does_not_fail(self):
+        """#1272: `*CompletionProvider.ts` も拡張ホスト層として免除する。"""
+        code, out = run_main(["apps/extension/src/frontMatterCompletionProvider.ts"])
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("カバレッジレポートが見つかりません", out)
+
+    def test_completion_provider_ts_is_reported_as_unmeasurable(self):
+        _, out = run_main(["apps/extension/src/frontMatterCompletionProvider.ts"])
+        self.assertIn("apps/extension/src/frontMatterCompletionProvider.ts", out)
+        self.assertIn("計測対象外", out)
+
 
 class MeasurableProductionCodeStillGated(unittest.TestCase):
     """回帰ガード: 計測可能なツリーの扱いは従来どおりであること。"""
@@ -135,6 +169,18 @@ class MeasurableProductionCodeStillGated(unittest.TestCase):
         code, out = run_main(["apps/extension/src/proofreadLogic.ts"])
         self.assertEqual(code, 1)
         self.assertIn("カバレッジレポートが見つかりません", out)
+
+    def test_web_panel_tsx_missing_report_still_fails(self):
+        """#1272: `.tsx` の Panel は免除対象外。`apps/web` には jest で実測される
+
+        `*Panel.tsx` が多数あり(例: BackupPanel.tsx)、これを拡張ホスト層の
+        `*Panel.ts` と取り違えて免除してはならない。
+        """
+        web_panel = "apps/web/src/app/admin/backup/BackupPanel.tsx"
+        code, out = run_main([web_panel])
+        self.assertEqual(code, 1)
+        self.assertIn("カバレッジレポートが見つかりません", out)
+        self.assertIn(web_panel, out)
 
     def test_packages_missing_report_fails(self):
         code, out = run_main(["packages/lbs-common/src/main/java/com/example/common/Json.java"])
@@ -215,6 +261,8 @@ class MeasurabilityClassifier(unittest.TestCase):
         "apps/web/src/app/page.tsx",
         "apps/extension/src/config.ts",
         "apps/mcp-server/src/tools/designSuggestion.js",
+        # #1272: `.tsx` の Panel は拡張ホスト層の免除の対象外(apps/web に実測対象が多数ある)。
+        "apps/web/src/app/admin/backup/BackupPanel.tsx",
     ]
 
     UNMEASURABLE = [
@@ -227,6 +275,10 @@ class MeasurabilityClassifier(unittest.TestCase):
         "packages/api-client/src/generated/ai/project-llm-model-controller/"
         "project-llm-model-controller.ts",
         "packages/api-client/src/index.ts",
+        # #1272: VSCode拡張ホストに依存する層(docs/COVERAGE_TARGETS.md の表)。
+        "apps/extension/src/extension.ts",
+        "apps/extension/src/askAiPanel.ts",
+        "apps/extension/src/frontMatterCompletionProvider.ts",
     ]
 
     def test_measurable_trees(self):

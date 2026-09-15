@@ -88,8 +88,22 @@ MEASURABLE_RE = [re.compile(p) for p in MEASURABLE_PATTERNS]
 # packages/ 配下に増える非JVMパッケージのたびに同じ穴が再発する。そこで
 # 「計測可能パターンにマッチするが実際には計測手段が無い」ツリーを明示的な
 # 例外として持ち、`is_measurable()` の判定でそれを優先する。
+#
+# `apps/extension/src/extension.ts`(コマンド登録)・各 `apps/*/src/**/*Panel.ts` の
+# 生成部・`apps/*/src/**/*CompletionProvider.ts` は VSCode 拡張ホストに依存する層で、
+# `docs/COVERAGE_TARGETS.md`(「VSCode拡張ホストに依存する層」の表)がそもそも
+# 数値目標を置かないと明記している。jest はいずれの変更でも拡張ホスト(VSCode API)を
+# 起動できないため到達できず、原理的に 0% のまま基準を満たせない(#1206 で実際に
+# `glab mr create` が常にブロックされた、#1272)。
+#
+# 粒度はファイル単位(#1230 が進める変更行単位への一般化とは独立)。`.tsx` は対象外 —
+# `apps/web/src/app/**/*Panel.tsx` のように jest で実測される Panel コンポーネントが
+# 多数あり、拡張子を `\.ts$` で厳密に区切らないとそれらまで誤って免除してしまう。
 UNMEASURABLE_OVERRIDE_PATTERNS = [
     r"^packages/api-client/",
+    r"^apps/extension/src/extension\.ts$",
+    r"^apps/[^/]+/src/.*Panel\.ts$",
+    r"^apps/[^/]+/src/.*CompletionProvider\.ts$",
 ]
 
 UNMEASURABLE_OVERRIDE_RE = [re.compile(p) for p in UNMEASURABLE_OVERRIDE_PATTERNS]
