@@ -209,14 +209,41 @@ async function fetchProjectCssBundle(
 // ---- 画面操作の共通部品 ----
 
 /**
+ * タブ切り替え後にしか現れない要素(#1283)。`Tabs`(`src/components/Tabs.tsx`)は
+ * クライアントコンポーネントで、タブボタン自体はサーバーレンダリングされて先に
+ * 見えているため、ハイドレーション完了前にクリックすると `onClick` が
+ * まだ紐付いておらず取りこぼされる。実ブラウザのホストではヘッドレスCIより
+ * ハイドレーションが遅く、この取りこぼしが表面化しやすい。
+ */
+const TAG_PAGE_TAB_MARKERS: Record<string, (page: Page) => Locator> = {
+  'カスタムタグ管理': (page) => page.locator('form#custom-tag-form'),
+  '統合CSSの取得': (page) =>
+    page.getByText('このプロジェクトのカスタムタグのCSSをまとめて', { exact: false }),
+};
+
+/**
  * プロジェクト詳細の「タグ」ページを開き、指定タブへ切り替える。
  * パネルはタブの中にあるため、これを通らないと描画されない。
+ *
+ * クリックそのものは成功しても、ハイドレーション前だとハンドラが付いておらず
+ * 何も起きないことがある(#1283)。そのタブでしか現れないマーカーが見えるまで
+ * クリックを再試行する。
  */
 async function openTagsTab(page: Page, projectId: number, tabLabel: string): Promise<void> {
   await page.goto(`/projects/${projectId}/tags`, { waitUntil: 'commit' });
   const tab = page.getByRole('button', { name: tabLabel, exact: true });
   await expect(tab).toBeVisible({ timeout: 30_000 });
-  await tab.click();
+
+  const markerFactory = TAG_PAGE_TAB_MARKERS[tabLabel];
+  if (!markerFactory) {
+    throw new Error(`openTagsTab: 未知のタブです(マーカー未登録): ${tabLabel}`);
+  }
+  const marker = markerFactory(page);
+
+  await expect(async () => {
+    await tab.click();
+    await expect(marker).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
 }
 
 /**
