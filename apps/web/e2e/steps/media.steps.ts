@@ -1,4 +1,4 @@
-import type { APIRequestContext, BrowserContext, Page } from '@playwright/test';
+import type { APIRequestContext, BrowserContext, Locator, Page } from '@playwright/test';
 import { After, Given, Then, When } from './fixtures';
 import {
   E2E_ADMIN_EMAIL,
@@ -329,7 +329,7 @@ Then(
   async ({ ctx }, provider: string, limit: string) => {
     const result = outcome(ctx);
     expect(result.body).toContain(provider);
-    expect(result.body).toContain(limit);
+    expect(result.body).toContain(String(limit));
   }
 );
 
@@ -621,12 +621,39 @@ async function waitForGenerationJob(
   throw new Error(`ジョブ ${jobId} が ${JOB_TIMEOUT_MS}ms 以内に終わりませんでした(最後の状態: ${last.status})`);
 }
 
-/** プロジェクト詳細の指定タブを開く。パネルはタブの中にあるため、これを通らないと見えない。 */
+/**
+ * タブ切り替え後にしか現れない要素(#1283 と同型)。`Tabs`(`src/components/Tabs.tsx`)は
+ * クライアントコンポーネントで、タブボタン自体はサーバーレンダリングされて先に
+ * 見えているため、ハイドレーション完了前にクリックすると `onClick` がまだ
+ * 紐付いておらず取りこぼされる。実ブラウザのホストではヘッドレスCIよりハイドレーション
+ * が遅く、この取りこぼしが表面化しやすい。
+ */
+const PROJECT_TAB_MARKERS: Record<string, (page: Page) => Locator> = {
+  'AI・アセット': (page) => page.locator('input[name="defaultGeneratedImageWidth"]'),
+};
+
+/**
+ * プロジェクト詳細の指定タブを開く。パネルはタブの中にあるため、これを通らないと見えない。
+ *
+ * クリックそのものは成功しても、ハイドレーション前だとハンドラが付いておらず何も
+ * 起きないことがある(#1283)。そのタブでしか現れないマーカーが見えるまでクリックを
+ * 再試行する。
+ */
 async function openProjectTab(page: Page, projectId: number, tabLabel: string): Promise<void> {
   await page.goto(`/projects/${projectId}`, { waitUntil: 'commit' });
   const tab = page.getByRole('button', { name: tabLabel, exact: true });
   await expect(tab).toBeVisible({ timeout: 30_000 });
-  await tab.click();
+
+  const markerFactory = PROJECT_TAB_MARKERS[tabLabel];
+  if (!markerFactory) {
+    throw new Error(`openProjectTab: 未知のタブです(マーカー未登録): ${tabLabel}`);
+  }
+  const marker = markerFactory(page);
+
+  await expect(async () => {
+    await tab.click();
+    await expect(marker).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
 }
 
 // ---- 画像生成(image-generation.feature) ----
@@ -977,8 +1004,8 @@ When(
     const form = page
       .locator('form')
       .filter({ has: page.locator('input[name="defaultGeneratedImageWidth"]') });
-    await form.locator('input[name="defaultGeneratedImageWidth"]').fill(width);
-    await form.locator('input[name="defaultGeneratedImageHeight"]').fill(height);
+    await form.locator('input[name="defaultGeneratedImageWidth"]').fill(String(width));
+    await form.locator('input[name="defaultGeneratedImageHeight"]').fill(String(height));
     await form.getByRole('button', { name: '保存', exact: true }).click();
     await expect(form.getByText('保存しました。')).toBeVisible({ timeout: 30_000 });
   }
@@ -990,7 +1017,7 @@ When(
     const form = page
       .locator('form')
       .filter({ has: page.locator('input[name="defaultArticleImageLongEdgePx"]') });
-    await form.locator('input[name="defaultArticleImageLongEdgePx"]').fill(longEdgePx);
+    await form.locator('input[name="defaultArticleImageLongEdgePx"]').fill(String(longEdgePx));
     await form.getByRole('button', { name: '保存', exact: true }).click();
     await expect(form.getByText('保存しました。')).toBeVisible({ timeout: 30_000 });
   }
@@ -1004,19 +1031,23 @@ When('そのプロジェクトの画像設定をページを開き直して表�
 Then(
   /^デフォルトサイズの入力には「(\d+)」と「(\d+)」が入っている$/,
   async ({ page }, width: string, height: string) => {
-    await expect(page.locator('input[name="defaultGeneratedImageWidth"]')).toHaveValue(width, {
-      timeout: 30_000,
-    });
-    await expect(page.locator('input[name="defaultGeneratedImageHeight"]')).toHaveValue(height);
+    await expect(page.locator('input[name="defaultGeneratedImageWidth"]')).toHaveValue(
+      String(width),
+      { timeout: 30_000 }
+    );
+    await expect(page.locator('input[name="defaultGeneratedImageHeight"]')).toHaveValue(
+      String(height)
+    );
   }
 );
 
 Then(
   /^記事内画像のリサイズ幅の入力には「(\d+)」が入っている$/,
   async ({ page }, longEdgePx: string) => {
-    await expect(page.locator('input[name="defaultArticleImageLongEdgePx"]')).toHaveValue(longEdgePx, {
-      timeout: 30_000,
-    });
+    await expect(page.locator('input[name="defaultArticleImageLongEdgePx"]')).toHaveValue(
+      String(longEdgePx),
+      { timeout: 30_000 }
+    );
   }
 );
 
