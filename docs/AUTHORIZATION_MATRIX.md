@@ -73,6 +73,7 @@ identity-service / log-writer が従来から行っていた、各コントロ�
 | `POST・DELETE /api/users/{userId}/roles/{roleName}` | 特権ロールは `requireAdmin()`、それ以外は `requirePermission(ROLE_MANAGE)` | **#798 で変更**。下記参照 |
 | `POST /api/users/migrate-to-keycloak`・`/reconcile-keycloak` | `requireAdmin()` | 従来どおり |
 | `GET /api/users/{id}`・`PUT /api/users/{id}`・`PATCH /{id}/preferences`・`PUT /{id}/github-token` | `requireSelfOrAdmin(id)` | 本人が変更してよいプロフィール項目。個人設定は `PATCH /api/identity/me/preferences`(#784)も使える |
+| `POST /api/users/{id}/avatar`・`GET /api/users/{id}/avatar` | `requireSelfOrAdmin(id)` | **issue #1241 で追加**。プロフィール編集画面のアバター画像アップロード/配信。アバター画像も本人のプロフィール情報の一部として、上記と同じ認可に揃えている(`AvatarController.java`) |
 | `GET /api/identity/me`・`/me/permissions`・`PATCH /me/preferences` | 自ユーザー限定(JWTの `sub` から解決) | クライアントから識別子を受け取らないため、ID の取り違えが構造的に起きない(#784) |
 
 ##### ロール付与・剥奪の認可(#798)
@@ -774,7 +775,7 @@ legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行して�
 
 ---
 
-## AiController (8エンドポイント、ベースパスなし)
+## AiController (9エンドポイント、ベースパスなし)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -786,6 +787,7 @@ legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行して�
 | GET /api/ai/image-options | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | projectIdは任意パラメータだが未チェック |
 | POST /api/ai/section | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | 同上 |
 | POST /api/projects/{projectId}/ai/generate-image-prompt | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | 唯一projectIdを取り、正しくチェックしている |
+| POST /api/projects/{projectId}/ai/review-steps/{stepKey}/suggestions | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1213 で追加**。多段レビュー(#1210)のステップ単位の指摘生成。プロジェクト設定を読むため`generate-image-prompt`と同じ理由でプロジェクトメンバー限定 |
 
 ## AppSettingController (2エンドポイント、ベースパス `/api/system-settings/app-settings`)
 
@@ -1041,7 +1043,7 @@ media-service所有(issue #573 stage3)。CMSのメディアライブラリへ直
 | GET /api/posts/{site}/by-slug/{slug} | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | |
 | DELETE /api/posts/{site}/{wpPostId} | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | 投稿削除(WordPress上はゴミ箱移動)がプロジェクト所属確認なしに可能 |
 
-## ProjectAiModelController (10エンドポイント、ベースパス `/api/projects/{id}/ai-models`)
+## ProjectAiModelController (12エンドポイント、ベースパス `/api/projects/{id}/ai-models`)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -1055,6 +1057,8 @@ media-service所有(issue #573 stage3)。CMSのメディアライブラリへ直
 | PUT .../comfyui/checkpoints/selection | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 同上 |
 | POST .../comfyui/checkpoints/install | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 同上 |
 | DELETE .../comfyui/checkpoints/{fileName} | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 同上 |
+| GET .../llm/review-steps | requireAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1211 で追加**。多段レビュー(#1210)の5ステップぶんの選択値・選択可能なprovider/model一覧(`ProjectLlmModelController.java`) |
+| PUT .../llm/review-steps/{stepKey} | requireAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1211 で追加**。同上。provider/modelが空ならそのステップの上書きを解除する(`ProjectLlmModelController.java`) |
 
 ## ProjectApiKeyController (14エンドポイント、ベースパス `/api/projects/{projectId}/api-keys`)
 
@@ -1086,7 +1090,7 @@ content-service所有(issue #576、#913)。実装は`GET /content-settings`と`P
 | --- | --- | --- | --- | --- | --- | --- |
 | GET /api/projects/{projectId}/content-settings | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | `ProjectContentSettingsController.java:43-47` |
 
-## ProjectController (42エンドポイント、ベースパス `/api/projects`)
+## ProjectController (43エンドポイント、ベースパス `/api/projects`)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -1132,6 +1136,7 @@ content-service所有(issue #576、#913)。実装は`GET /content-settings`と`P
 | POST /api/projects/{id}/users | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
 | PUT /api/projects/{id}/users/{userId} | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
 | DELETE /api/projects/{id}/users/{userId} | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
+| POST /api/projects/{id}/users/{userId}/sync | requireAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1242 で追加**。メンバー個別のユーザー情報再同期(`ProjectUserController.java`)。#1294 実装時に判明した、この節の他行と同じ認可判定の未掲載行 |
 
 ## ProjectCustomTagController (3エンドポイント、ベースパス `/api/projects/{projectId}/custom-tags`)
 
