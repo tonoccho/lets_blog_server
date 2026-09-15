@@ -145,11 +145,16 @@ Not implemented, and why:
   through iframes and images, and the development server needs `eval` and inline scripts, so a
   policy that is both correct and useful cannot be written without a dedicated effort. (The
   article preview has its own CSP, applied to the previewed HTML only.)
-- **CORS** — there is no explicit CORS configuration anywhere in this repository (no
-  `CorsConfiguration`, `addCorsMappings`, `CorsWebFilter`, `@CrossOrigin`, nor a hand-written
-  `Access-Control-Allow-Origin`). The browser reaches the web app and the API through the same
-  origin (the reverse proxy publishes both under one host), so cross-origin requests are
-  rejected by the browser's same-origin policy by default and no allow-list is granted.
+- **CORS** — the admin web application itself declares no CORS policy (no `CorsConfiguration`,
+  `addCorsMappings`, `CorsWebFilter`, `@CrossOrigin`). The browser reaches the web app and its
+  API through the same origin (the reverse proxy publishes both under one host), so
+  cross-origin requests are rejected by the browser's same-origin policy by default and no
+  allow-list is granted. Penpot's embedded editor is the one exception: nginx
+  (`infra/penpot/nginx-overrides/server.d/lbs-cors-api.conf`, issue #1093) adds a hand-written
+  `Access-Control-Allow-Origin` on `/api/` only, echoing back the caller's Origin when it is on
+  an allow-list (`overrides/http.d/lbs-cors.conf`), because Penpot's frontend calls that
+  endpoint with fetch credentials mode `include` from within the VSCode webview and needs a
+  credentialed cross-origin response.
 
 HTTPS enforcement and session handling are unchanged: the reverse proxy redirects port 80 to
 443 (`infra/nginx/conf.d/default.conf`), and sessions are handled by NextAuth.js with
