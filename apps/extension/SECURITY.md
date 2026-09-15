@@ -128,7 +128,7 @@ issue #565(Device Authorization Grantへの移行)以降、拡張はパスワー
 | A03 | インジェクション | Webviewへの動的値は `textContent`/DOM APIで描画。CSPでnonce付きスクリプトのみ許可。multipartのヘッダ値は改行・引用符を除去(`src/multipart.ts`)。ファイル名は接頭辞とタイムスタンプから生成し、サーバー応答由来のパス要素を混入させない。 |
 | A04 | 安全でない設計 | 資格情報の取り扱いを `config.ts` に、通信を `apiClient.ts`/`httpClient.ts` に集約し、経路を限定。再試行は冪等な操作のみに限定し、重複投稿を設計上防止。 |
 | A05 | セキュリティ設定ミス | 危険側(TLS検証無効)を既定にしない。有効時は警告ログを出力。Webviewは `default-src 'none'` を起点に必要最小限のみ許可。 |
-| A06 | 脆弱で古いコンポーネント | 実行時依存は `gray-matter` と `zod` のみ(`node-fetch`/`form-data` を廃止)。Dependabot が `/extension` を週次で監視。 |
+| A06 | 脆弱で古いコンポーネント | 実行時依存は `gray-matter` と `zod` のみ(`node-fetch`/`form-data` を廃止)。依存更新は自動化していない(Dependabot はGitLabでは動かないため削除済み)。手順は[docs/DEPENDENCY_UPDATE_POLICY.md](../../docs/DEPENDENCY_UPDATE_POLICY.md)を参照。 |
 | A07 | 識別と認証の失敗 | 認証はKeycloak(Device Authorization Grant)に委譲し、拡張はパスワードを扱わない。2段階認証等の認証強度はKeycloak側の設定に従う。トークンはSecret Storageに保管し設定ファイルへ書かない。 |
 | A08 | ソフトウェアとデータの整合性の不備 | APIレスポンスをZodスキーマで検証し(`src/schemas.ts`)、想定外の形式を拡張内部へ持ち込まない。 |
 | A09 | ログとモニタリングの失敗 | 構造化ログ(`src/logger.ts`)で失敗を記録。資格情報らしいキーの値はマスク。`letsBlog.debugMode` で詳細ログを取得可能。 |
