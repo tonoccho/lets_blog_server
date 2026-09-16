@@ -14,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -30,6 +31,7 @@ import java.util.zip.ZipOutputStream;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.greaterThan;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -481,6 +483,59 @@ class BackupServiceTest {
             service.restoreBackup(new ByteArrayInputStream(archive), true, false);
 
             verify(adminAuthorizationService).requireAdmin();
+        }
+    }
+
+    @Nested
+    @DisplayName("PostgreSQL dump excludes the volatile jgroups_ping table (issue #1142)")
+    class PostgresDumpJgroupsPingExclusionTests {
+
+        /**
+         * jgroups_pingはKeycloakのJGroups/Infinispanクラスタ構成員検出用の一時テーブルで、
+         * Keycloakが稼働中は継続的に書き込む。pg_restore --cleanは対象テーブルをDROPして
+         * CREATE TABLE(制約なし)し、データ投入後にPRIMARY KEY制約を追加する2段構成のため、
+         * この間の一瞬の間隙にKeycloak自身の書き込みが入ると、ダンプ内の行と重複して
+         * duplicate keyエラーになる(issue #1142の再現条件)。address列は再起動すれば
+         * Keycloakが自然に再構築する一時的なクラスタ状態のため、バックアップ/リストアの
+         * 対象から丸ごと除外する(pg_dump --exclude-table)ことで、この間隙自体を無くす。
+         * pg_restore --clean --if-existsは元々対象に無いテーブルへは何もしないため、
+         * リストア側の変更は不要。
+         */
+        private BackupProperties.Postgres postgresProperties() {
+            BackupProperties.Postgres postgres = new BackupProperties.Postgres();
+            postgres.setHost("localhost");
+            postgres.setPort("5432");
+            postgres.setUser("keycloak");
+            postgres.setPassword("secret");
+            postgres.setDatabase(POSTGRES_DATABASE);
+            return postgres;
+        }
+
+        @SuppressWarnings("unchecked")
+        private List<String> invokeBuildPgDumpCommand(BackupProperties.Postgres postgres) throws Exception {
+            Method method = BackupService.class.getDeclaredMethod("buildPgDumpCommand",
+                    BackupProperties.Postgres.class);
+            method.setAccessible(true);
+            return (List<String>) method.invoke(null, postgres);
+        }
+
+        @Test
+        @DisplayName("pg_dump command excludes public.jgroups_ping to avoid the restore-time "
+                + "duplicate key race against Keycloak's own concurrent writes")
+        void pgDumpCommandExcludesJgroupsPing() throws Exception {
+            List<String> command = invokeBuildPgDumpCommand(postgresProperties());
+
+            assertThat(command, hasItem("--exclude-table=public.jgroups_ping"));
+        }
+
+        @Test
+        @DisplayName("pg_dump command still targets the configured database and format")
+        void pgDumpCommandStillTargetsConfiguredDatabase() throws Exception {
+            List<String> command = invokeBuildPgDumpCommand(postgresProperties());
+
+            assertThat(command, hasItem(POSTGRES_DATABASE));
+            assertThat(command, hasItem("--format=custom"));
+            assertThat(command, not(hasItem("jgroups_ping")));
         }
     }
 

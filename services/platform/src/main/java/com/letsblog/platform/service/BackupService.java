@@ -213,15 +213,48 @@ public class BackupService {
 
     private byte[] dumpPostgresDatabase() {
         BackupProperties.Postgres postgres = backupProperties.getPostgres();
-        List<String> command = List.of(
+        return runProcess(buildPgDumpCommand(postgres), "PGPASSWORD", postgres.getPassword(), null, "pg_dump");
+    }
+
+    /**
+     * pg_dumpコマンドを構築する。{@code jgroups_ping}(KeycloakのInfinispan/JGroupsクラスタ
+     * 構成員検出用の一時テーブル、issue #1142)を{@code --exclude-table}で丸ごと除外する。
+     *
+     * <p>Keycloakは稼働中このテーブルへ継続的に書き込む。pg_restore
+     * {@code --clean --if-exists}は対象テーブルをDROPしてCREATE TABLE(この時点では
+     * PRIMARY KEY制約はまだ無い)し、行データをCOPYした後で初めてPRIMARY KEY制約を追加する
+     * 2段階構成のため、CREATE〜制約追加の間の一瞬の間隙でKeycloak自身の書き込みが入ると、
+     * ダンプ内の行と{@code address}列が重複し、制約追加時にduplicate keyエラーで
+     * リストア全体が失敗する(タイミング依存、約3回に1回の頻度で再現)。
+     *
+     * <p>検討した他の対策(issue #1142参照):
+     * <ul>
+     *   <li>リストア前に{@code jgroups_ping}だけをTRUNCATEしてから流し込む — DROP/CREATE/
+     *       COPY/制約追加という2段階構成自体は変わらないため、間隙そのものは残り
+     *       根本解決にならない。</li>
+     *   <li>リストア中はKeycloakコンテナを一時停止する — 根絶できるが、リストアの度に
+     *       Keycloakへのログイン・トークン発行が全断する運用上のコストが大きく、
+     *       既存の{@link #restoreBackup}の実行モデル(単一トランザクション的に完結させる)
+     *       とも整合しない。</li>
+     * </ul>
+     *
+     * <p>{@code jgroups_ping}はクラスタ構成員の一時的な発見状態そのもので、Keycloakの
+     * 再起動時に自然に再構築される(ユーザーデータ・認証情報等の永続データではない)ため、
+     * バックアップ/リストアの対象から丸ごと除外するのが最も小さく確実な対策である。
+     * ダンプに含めなければpg_restoreの{@code --clean --if-exists}もこのテーブルには
+     * 何も行わないため、リストア側({@link #restorePostgresDatabase}のコマンド)の変更は
+     * 不要になる。
+     */
+    private static List<String> buildPgDumpCommand(BackupProperties.Postgres postgres) {
+        return List.of(
                 "pg_dump",
                 "--host=" + postgres.getHost(),
                 "--port=" + postgres.getPort(),
                 "--username=" + postgres.getUser(),
                 "--format=custom",
                 "--no-password",
+                "--exclude-table=public.jgroups_ping",
                 postgres.getDatabase());
-        return runProcess(command, "PGPASSWORD", postgres.getPassword(), null, "pg_dump");
     }
 
     private void restorePostgresDatabase(byte[] dump) {
