@@ -242,9 +242,11 @@ public class BackupService {
      * mysqldump/mysql/pg_dump/pg_restoreの実行を共通化する。stdinがnullの場合は標準入力を渡さず
      * すぐに閉じる(ダンプ取得時)。stdinが指定されている場合はプロセスへ書き込んでから閉じる
      * (リストア時)。標準出力の内容をバイト列として返す(ダンプ取得時のみ意味を持つ)。
+     *
+     * <p>パッケージプライベート(テストから直接呼び出すため。issue #1203)。
      */
-    private byte[] runProcess(List<String> command, String passwordEnvVar, String password, byte[] stdin,
-                               String operationLabel) {
+    byte[] runProcess(List<String> command, String passwordEnvVar, String password, byte[] stdin,
+                       String operationLabel) {
         ProcessBuilder builder = new ProcessBuilder(command);
         builder.environment().put(passwordEnvVar, password);
 
@@ -256,9 +258,17 @@ public class BackupService {
             ByteArrayOutputStream stderr = new ByteArrayOutputStream();
             Thread stderrReader = readInBackground(process.getErrorStream(), stderr);
 
+            // stdinの書き込み中に発生するIOException(典型的には不正なアーカイブを検知した
+            // pg_restore等が読み込みを打ち切り、パイプの読み込み側を閉じたことによる
+            // "Broken pipe")は、書き込み側から見えた症状であって真の失敗理由ではない。
+            // ここでは直ちに例外化せず、プロセスの終了と標準エラー出力の収集を待ってから、
+            // 実際に収集できた標準エラーを使って失敗理由を組み立てる(issue #1203)。
+            IOException stdinWriteFailure = null;
             if (stdin != null) {
                 try (OutputStream out = process.getOutputStream()) {
                     out.write(stdin);
+                } catch (IOException e) {
+                    stdinWriteFailure = e;
                 }
             } else {
                 process.getOutputStream().close();
@@ -271,9 +281,9 @@ public class BackupService {
                 process.destroyForcibly();
                 throw new BackupException(operationLabel + "がタイムアウトしました");
             }
-            if (process.exitValue() != 0) {
-                throw new BackupException(operationLabel + "が失敗しました(exit=" + process.exitValue() + "): "
-                        + stderr.toString(StandardCharsets.UTF_8));
+            if (process.exitValue() != 0 || stdinWriteFailure != null) {
+                throw new BackupException(buildFailureMessage(operationLabel, process.exitValue(),
+                        stderr.toString(StandardCharsets.UTF_8), stdinWriteFailure));
             }
             return stdout.toByteArray();
         } catch (IOException | InterruptedException e) {
@@ -282,6 +292,25 @@ public class BackupService {
             }
             throw new BackupException(operationLabel + "の実行に失敗しました: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * プロセス失敗時のメッセージを組み立てる。標準エラーが取得できていれば、それを失敗理由として
+     * 提示する(「Broken pipe」のような書き込み側の症状だけでは根本原因が分からないため。issue
+     * #1203)。標準エラーが空の場合に限り、代わりにstdin書き込み時の例外メッセージ(取得できて
+     * いれば)を使う。
+     */
+    private String buildFailureMessage(String operationLabel, int exitValue, String stderrText,
+                                        IOException stdinWriteFailure) {
+        StringBuilder message = new StringBuilder(operationLabel)
+                .append("が失敗しました(exit=").append(exitValue).append(")");
+        String trimmedStderr = stderrText.strip();
+        if (!trimmedStderr.isEmpty()) {
+            message.append(": ").append(trimmedStderr);
+        } else if (stdinWriteFailure != null) {
+            message.append(": ").append(stdinWriteFailure.getMessage());
+        }
+        return message.toString();
     }
 
     /**

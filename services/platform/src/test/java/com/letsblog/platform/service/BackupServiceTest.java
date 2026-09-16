@@ -14,12 +14,15 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
@@ -27,9 +30,11 @@ import java.util.zip.ZipOutputStream;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.greaterThan;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doThrow;
@@ -59,6 +64,11 @@ class BackupServiceTest {
 
     @BeforeEach
     void setUp() {
+        service = new BackupService(buildDefaultProperties(), generatedImagesDir.toString(), ENCRYPTION_KEY,
+                adminAuthorizationService, new ObjectMapper());
+    }
+
+    private BackupProperties buildDefaultProperties() {
         BackupProperties properties = new BackupProperties();
         properties.getMysql().setHost("localhost");
         properties.getMysql().setPort("3306");
@@ -70,9 +80,7 @@ class BackupServiceTest {
         properties.getPostgres().setUser("keycloak");
         properties.getPostgres().setPassword("secret");
         properties.getPostgres().setDatabase(POSTGRES_DATABASE);
-
-        service = new BackupService(properties, generatedImagesDir.toString(), ENCRYPTION_KEY,
-                adminAuthorizationService, new ObjectMapper());
+        return properties;
     }
 
     private byte[] buildArchive(String encryptionKeyHash) throws IOException {
@@ -123,6 +131,118 @@ class BackupServiceTest {
             zip.closeEntry();
         }
         return out.toByteArray();
+    }
+
+    @Nested
+    @DisplayName("runProcess stderr handling on failure (issue #1203)")
+    class RunProcessStderrHandlingTests {
+
+        private static final String STDIN_ENV_VAR = "IRRELEVANT_ENV_VAR";
+        private static final String STDIN_ENV_VALUE = "irrelevant";
+
+        /**
+         * pg_restoreが読み込めないアーカイブを検知して早期に終了し、標準入力の読み込み側を閉じた
+         * 状況を模す: "head -c 5"が5バイトだけ読んで終了し、標準エラーへ本来のエラーメッセージを
+         * 出力してから非0で終了する。Java側からstdin全体(head容量よりずっと大きい)を書き込もうと
+         * すると、既に読み込み側が閉じているため IOException("Broken pipe") が発生する。
+         */
+        @Test
+        @DisplayName("AC1/AC3: stdin書き込み中にBroken pipeが起きても、握りつぶさずプロセスの標準エラー内容を"
+                + "主因として例外メッセージに含める(「Broken pipe」だけにはしない)")
+        void includesStderrWhenStdinWriteBreaksDueToEarlyProcessExit() {
+            String stderrMessage = "pg_restore: error: unsupported version (1.16) in file header";
+            List<String> command = List.of("sh", "-c",
+                    "head -c 5 >/dev/null; echo '" + stderrMessage + "' 1>&2; exit 1");
+            byte[] largeStdin = new byte[2_000_000];
+
+            BackupException exception = assertThrows(BackupException.class,
+                    () -> service.runProcess(command, STDIN_ENV_VAR, STDIN_ENV_VALUE, largeStdin, "pg_restore"));
+
+            assertThat("stderr should be surfaced as the primary reason",
+                    exception.getMessage(), containsString(stderrMessage));
+            assertThat("raw \"Broken pipe\" alone must not be the reported reason once stderr is available",
+                    exception.getMessage(), not(containsString("Broken pipe")));
+        }
+
+        /**
+         * stdin書き込みが壊れない(=Broken pipeが発生しない)、通常の非0終了のケース。
+         * この場合も引き続き標準エラーの内容が例外メッセージに含まれること(既存の挙動の回帰確認)。
+         */
+        @Test
+        @DisplayName("AC3(no regression): stdinの書き込みが壊れない通常の非0終了でも、標準エラーの内容が"
+                + "引き続き例外メッセージに含まれる")
+        void includesStderrForPlainNonzeroExitWithoutBrokenPipe() {
+            String stderrMessage = "mysql: error: some plain failure";
+            List<String> command = List.of("sh", "-c",
+                    "cat >/dev/null; echo '" + stderrMessage + "' 1>&2; exit 2");
+            byte[] stdin = "SELECT 1;".getBytes(StandardCharsets.UTF_8);
+
+            BackupException exception = assertThrows(BackupException.class,
+                    () -> service.runProcess(command, STDIN_ENV_VAR, STDIN_ENV_VALUE, stdin, "mysqlによるリストア"));
+
+            assertThat(exception.getMessage(), containsString(stderrMessage));
+            assertThat(exception.getMessage(), containsString("exit=2"));
+        }
+
+        @Test
+        @DisplayName("AC4(no regression): stdinを伴う成功時は例外を投げず標準出力をそのまま返す")
+        void returnsStdoutOnSuccessWithStdin() throws Exception {
+            List<String> command = List.of("sh", "-c", "cat >/dev/null; printf 'STDOUT_CONTENT'; exit 0");
+            byte[] stdin = "dump-content".getBytes(StandardCharsets.UTF_8);
+
+            byte[] result = service.runProcess(command, STDIN_ENV_VAR, STDIN_ENV_VALUE, stdin, "mysqlによるリストア");
+
+            assertEquals("STDOUT_CONTENT", new String(result, StandardCharsets.UTF_8));
+        }
+
+        @Test
+        @DisplayName("AC4(no regression): stdinを伴わない成功時(ダンプ取得)も例外を投げず標準出力を返す")
+        void returnsStdoutOnSuccessWithoutStdin() {
+            List<String> command = List.of("sh", "-c", "printf 'DUMP_BYTES'; exit 0");
+
+            byte[] result = service.runProcess(command, STDIN_ENV_VAR, STDIN_ENV_VALUE, null, "pg_dump");
+
+            assertEquals("DUMP_BYTES", new String(result, StandardCharsets.UTF_8));
+        }
+
+        /**
+         * requirement 1のカバレッジ完全化: stdin書き込みがBroken pipeで失敗したにもかかわらず、
+         * プロセス自体はexit=0で終了する稀なケースでも、書き込み失敗を握りつぶさず失敗として扱う
+         * ことを検証する(exitValue!=0とstdinWriteFailure!=nullのOR条件のうち、後者のみが
+         * trueとなる分岐)。
+         */
+        @Test
+        @DisplayName("stdin書き込みがBroken pipeで失敗した場合、プロセス自体がexit=0でも失敗として扱う")
+        void treatsAsFailureWhenStdinWriteBreaksEvenIfProcessExitsZero() {
+            List<String> command = List.of("sh", "-c", "head -c 5 >/dev/null; exit 0");
+            byte[] largeStdin = new byte[2_000_000];
+
+            BackupException exception = assertThrows(BackupException.class,
+                    () -> service.runProcess(command, STDIN_ENV_VAR, STDIN_ENV_VALUE, largeStdin, "pg_restore"));
+
+            assertThat(exception.getMessage(), containsString("exit=0"));
+            assertThat("stderr was empty, so the stdin write failure's own message "
+                            + "(e.g. \"Broken pipe\") must be the fallback content in the built message",
+                    exception.getMessage(), containsString("Broken pipe"));
+        }
+
+        /**
+         * buildFailureMessageの分岐カバレッジ完全化: 標準エラー出力が全く無く、かつstdin書き込みも
+         * 破綻していない(=stdinWriteFailureがnull)、非0終了のケース。この場合はexitのみを
+         * 含んだメッセージになる(付加情報を捏造しない)。
+         */
+        @Test
+        @DisplayName("標準エラーが空でstdin書き込みも壊れていない非0終了では、exit番号のみのメッセージになる")
+        void nonzeroExitWithNoStderrAndNoStdinFailureYieldsExitOnlyMessage() {
+            List<String> command = List.of("sh", "-c", "cat >/dev/null; exit 3");
+            byte[] stdin = "SELECT 1;".getBytes(StandardCharsets.UTF_8);
+
+            BackupException exception = assertThrows(BackupException.class,
+                    () -> service.runProcess(command, STDIN_ENV_VAR, STDIN_ENV_VALUE, stdin, "mysqlによるリストア"));
+
+            assertThat(exception.getMessage(), containsString("exit=3"));
+            assertEquals("mysqlによるリストアが失敗しました(exit=3)", exception.getMessage());
+        }
     }
 
     private String sha256Hex(String value) {
@@ -441,6 +561,48 @@ class BackupServiceTest {
             // A legitimate sibling entry in the same archive must still be restored normally.
             assertTrue(Files.exists(generatedImagesDir.resolve("legit.txt")),
                     "legit.txt should still have been restored despite the sibling traversal entry");
+        }
+    }
+
+    /**
+     * coverage follow-up (issue #1203のカバレッジ不足フォローアップ): runProcess()の
+     * catch(IOException | InterruptedException e)ブロック内、
+     * 「e instanceof InterruptedException」がtrueとなる分岐(プロセス終了待機中にスレッドが
+     * 割り込まれた場合)を検証する。falseの分岐(IOException、例: 実行ファイルが見つからない)は、
+     * 他の多くのテスト(実バイナリが存在しない環境で"mysql"/"pg_restore"等を起動しようとするもの)で
+     * 既に踏まれている。
+     */
+    @Nested
+    @DisplayName("runProcess interruption branch (coverage follow-up for #1203)")
+    class RunProcessInterruptionTests {
+
+        @Test
+        @DisplayName("プロセス終了待機中にスレッドが割り込まれた場合、InterruptedExceptionの分岐を通り、"
+                + "割り込み状態を再設定した上でBackupExceptionとして失敗を伝える")
+        void treatsInterruptionDuringWaitAsFailureAndRestoresInterruptFlag() throws InterruptedException {
+            List<String> command = List.of("sh", "-c", "sleep 5; exit 0");
+            AtomicReference<Throwable> captured = new AtomicReference<>();
+            AtomicBoolean interruptedWhenCaught = new AtomicBoolean(false);
+
+            Thread worker = new Thread(() -> {
+                try {
+                    service.runProcess(command, "IRRELEVANT_ENV_VAR", "irrelevant", null, "sleep-test");
+                } catch (Throwable t) {
+                    captured.set(t);
+                    interruptedWhenCaught.set(Thread.currentThread().isInterrupted());
+                }
+            });
+
+            worker.start();
+            Thread.sleep(200);
+            worker.interrupt();
+            worker.join(10_000);
+
+            assertFalse(worker.isAlive(), "worker thread should have finished after being interrupted");
+            assertInstanceOf(BackupException.class, captured.get(),
+                    "an InterruptedException during waitFor should surface as a BackupException");
+            assertTrue(interruptedWhenCaught.get(),
+                    "the thread's interrupt status must be restored before the exception propagates");
         }
     }
 }
