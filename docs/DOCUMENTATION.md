@@ -534,23 +534,14 @@ test.describe('Login Flow', () => {
 
 #### 本番環境への デプロイ
 
-```bash
-# 1. 本番用 .env を設定
-cp .env.production .env
-# セキュアなパスワード・シークレットキーを設定
+本番専用の compose ファイルや環境変数ファイルはまだ整備されていない。リポジトリに存在する
+compose ファイルは `docker-compose.yml` / `docker-compose.e2e-stubs.yml` /
+`docker-compose.host-tests.yml` / `docker-compose.shared-host.yml` の4本で、いずれも本番向け
+ではない。
 
-# 2. Docker イメージをビルド
-docker compose -f docker-compose.prod.yml build
-
-# 3. コンテナを起動
-docker compose -f docker-compose.prod.yml up -d
-
-# 4. データベース マイグレーション（必要な場合）
-docker compose exec web npm run db:migrate
-
-# 5. SSL 証明書設定（Let's Encrypt）
-# nginx で SSL 設定済み
-```
+データベース マイグレーションは web（Next.js）側に手動実行コマンドがあるわけではなく、
+`identity` / `content` / `platform` / `analytics` / `ai` / `project` の各サービスが
+Spring Boot 起動時に Flyway で自動的に適用する。
 
 ---
 
