@@ -418,8 +418,8 @@ API: log-writer `AuditLogController`, `OperationLogController`, `FrontendErrorLo
 | AC-EXT-020 | `letsBlog.addNewDiagram` | 図を新規作成できる | draw.io が開き、保存すると図が登録される | `ext:diagrams/diagrams.feature` › ダイアグラムを作成し編集して一覧から参照できる(作成とSVG取得)、単体 `diagramEditorPanel.test.ts`、手動: チェックリスト §7 | 検証済(draw.io操作は手動) |
 | AC-EXT-021 | `letsBlog.editDiagram` | 図を修正できる | 既存の図が draw.io で開き、保存内容が反映される | `ext:diagrams/diagrams.feature`(更新して一覧へ反映)、手動: チェックリスト §7 | 検証済(draw.io操作は手動) |
 | AC-EXT-022 | `letsBlog.diagramGallery` | 作った図を再利用できる | 図の一覧から選択して記事へ挿入できる | `ext:diagrams/diagrams.feature`(一覧・削除)、手動: チェックリスト §7 | 検証済(挿入操作は手動) |
-| AC-EXT-023 | `letsBlog.pasteSmartCard` | リンクを見栄えよく貼れる | URLがブログカード/Amazonカードとして挿入される | 単体 `urlPaste.test.ts`(カード記法の生成)、`features/cross-cutting/gateway-routing.feature` › URLをクエリに載せて要求しても、gatewayが値を再エンコードせず下流へ渡す(カード情報の先読み `/api/content-cache` の疎通。#1002 で解消)、手動: チェックリスト §9 | 検証済(部分。拡張のコマンドから挿入するまでは手動。#1071) |
-| AC-EXT-024 | `letsBlog.pasteAsLink` | リンクを簡潔に貼れる | URLがタイトル付きリンクとして挿入される | 単体 `urlPaste.test.ts`(リンク記法の生成)、`features/cross-cutting/gateway-routing.feature`(タイトル解決 `/api/content-cache` の疎通。#1002 で解消)、手動: チェックリスト §9 | 検証済(部分。拡張のコマンドから挿入するまでは手動。#1071) |
+| AC-EXT-023 | `letsBlog.pasteSmartCard` | リンクを見栄えよく貼れる | URLがブログカード/Amazonカードとして挿入される | 単体 `urlPaste.test.ts`(カード記法の生成)、`features/cross-cutting/gateway-routing.feature`(カード情報の先読み `/api/content-cache` の疎通。#1002 で解消)、手動: チェックリスト §9 | 検証済(部分。カード記法自体はURL種別のみで即時組み立てられ取得情報を含まないため、記法への反映はAC-EXT-024側で検証。カード記法の見た目確認は手動。#1071) |
+| AC-EXT-024 | `letsBlog.pasteAsLink` | リンクを簡潔に貼れる | URLがタイトル付きリンクとして挿入される | 単体 `urlPaste.test.ts`(リンク記法の生成)、`features/cross-cutting/gateway-routing.feature`(タイトル解決 `/api/content-cache` の疎通。#1002 で解消)、`ext:articles/url-paste.feature` › pasteAsLinkはカード情報の先読みに成功するとタイトル付きリンクを組み立てる / 失敗するとURLのみへフォールバックする(#1071) | 検証済 |
 
 ### 2.15 横断的品質(認可・ルーティング・レート制限・相関ID・縮退) — `XC`
 
