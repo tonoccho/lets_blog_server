@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { Given, Then, When } from '../support/gherkin';
-import { w } from './common.steps';
+import { attempt, capturedError, w } from './common.steps';
 import * as apiClient from '../../src/apiClient';
 import { httpRequest } from '../../src/httpClient';
 import { LocalImageReference, parseArticle, stringifyArticle } from '../../src/frontMatter';
@@ -251,6 +251,27 @@ When('公開した記事を削除する', async (world) => {
   const scope = w(world);
   const published = (scope as unknown as { published: { wpPostId: string } }).published;
   await apiClient.deletePost(scope.token, scope.actor, scope.site.siteKey, published.wpPostId);
+});
+
+/**
+ * 一度削除した投稿IDへ再度削除を要求する(issue #1070)。
+ * wp-cliが対象を特定できず失敗する経路であり、インフラ障害(502)ではなく
+ * 対象なし(404)として区別できることを確かめるためのシナリオ専用ステップ。
+ */
+When('削除済みの記事をもう一度削除する', async (world) => {
+  const scope = w(world);
+  const published = (scope as unknown as { published: { wpPostId: string } }).published;
+  await attempt(world, () =>
+    apiClient.deletePost(scope.token, scope.actor, scope.site.siteKey, published.wpPostId)
+  );
+});
+
+Then('削除は対象なしとして区別される', (world) => {
+  const error = capturedError(world);
+  const status = (error as { status?: number }).status;
+  if (status !== 404) {
+    throw new Error(`対象なし(404)として区別されませんでした: status=${String(status)} ${error.message}`);
+  }
 });
 
 Then('削除した記事はスラッグ照会で公開済みとして返らない', async (world) => {

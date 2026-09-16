@@ -211,10 +211,18 @@ public class WordPressAgentOperations {
         }
     }
 
+    /**
+     * 対象が存在しない場合(issue #1070)は、エージェント/wp-cliの疎通・実行そのものの失敗
+     * ({@link AgentOperationException}、502)とは区別し、{@link PostNotFoundException}(404)を投げる。
+     * provision-agent側は{@code /wp-cli/post-exists}と同じ存在確認を削除前に行い、対象なしを404で返す。
+     */
     public void deletePost(WordPressCredentials creds, String postId) {
         try {
             post("/wp-cli/post-delete", Map.of("slug", creds.wpSlug(), "postId", postId));
         } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                throw new PostNotFoundException("投稿 '" + postId + "' が見つかりません: " + agentErrorDetail(e));
+            }
             throw new AgentOperationException("WordPress投稿の削除に失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
             throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
@@ -331,10 +339,17 @@ public class WordPressAgentOperations {
      * メディア(添付ファイル)を完全に削除する(issue #500)。{@link #deletePost}と異なり
      * ゴミ箱を経由せず物理削除する(provision-agent側で`wp post delete --force`を実行する)。
      */
+    /**
+     * メディアも{@code wp_posts}(post_type=attachment)ベースの削除のため、{@link #deletePost}と
+     * 同じく対象が存在しない場合(issue #1070)は{@link PostNotFoundException}(404)を投げる。
+     */
     public void deleteMedia(WordPressCredentials creds, String mediaId) {
         try {
             post("/wp-cli/media-delete", Map.of("slug", creds.wpSlug(), "mediaId", mediaId));
         } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                throw new PostNotFoundException("メディア '" + mediaId + "' が見つかりません: " + agentErrorDetail(e));
+            }
             throw new AgentOperationException("メディアの削除に失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
             throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);

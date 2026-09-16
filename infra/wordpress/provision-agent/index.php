@@ -1231,6 +1231,15 @@ if ($path === '/wp-cli/post-delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         respond(404, ['error' => "サイト '$slug' が見つかりません"]);
     }
 
+    // issue #1070: 対象が存在しない場合、`wp post delete`は投稿タイプを判定できず
+    // (「Posts of type '' do not support being sent to trash.」)非0で終了するが、これは
+    // 呼び出し側の入力ミスであり、エージェント/wp-cliの実行そのものの失敗(500)とは区別する。
+    // `/wp-cli/post-exists`と同じ`wp post get --field=ID`で削除前に存在確認する。
+    [$existsCode, , ] = runWp(['post', 'get', $postId, '--field=ID', "--path=$sitePath", '--allow-root']);
+    if ($existsCode !== 0) {
+        respond(404, ['error' => "投稿 '$postId' が見つかりません"]);
+    }
+
     // --forceを付けない = WordPressコアのwp_delete_post()既定挙動(ゴミ箱対応の投稿タイプはゴミ箱へ移動)に委ねる。
     // --yesは付けない。`wp post delete`は確認プロンプトを出さず、このフラグを受け付けない
     // (`wp db reset`等のコマンド専用)。渡すと"unknown --yes parameter"で必ず失敗する(issue #1001)。
@@ -1475,6 +1484,13 @@ if ($path === '/wp-cli/media-delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $sitePath = resolveExistingSitePath($slug);
     if ($sitePath === null) {
         respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    // issue #1070 AC3: メディア(添付ファイル)もwp_postsベースの`wp post delete`のため、
+    // post-deleteと同じく削除前に存在確認し、対象なしを404で区別する。
+    [$existsCode, , ] = runWp(['post', 'get', $mediaId, '--field=ID', "--path=$sitePath", '--allow-root']);
+    if ($existsCode !== 0) {
+        respond(404, ['error' => "メディア '$mediaId' が見つかりません"]);
     }
 
     [$code, $out, $err] = runWp(['post', 'delete', $mediaId, '--force', "--path=$sitePath", '--allow-root']);

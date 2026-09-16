@@ -3,6 +3,7 @@ package com.letsblog.publishing.config;
 import com.letsblog.common.web.ErrorResponse;
 import com.letsblog.publishing.cms.CmsApiException;
 import com.letsblog.publishing.cms.agent.AgentOperationException;
+import com.letsblog.publishing.cms.agent.PostNotFoundException;
 import com.letsblog.publishing.cms.ssh.SshOperationException;
 import com.letsblog.publishing.render.MediaRenderException;
 import com.letsblog.publishing.service.ForbiddenException;
@@ -158,6 +159,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AgentOperationException.class)
     public ResponseEntity<ErrorResponse> handleAgentOperationException(AgentOperationException e) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /**
+     * 削除対象の投稿/メディアがそもそも存在しなかった場合(issue #1070)。
+     * {@link SiteNotFoundException}/{@link ProjectNotFoundException}と同じ404扱いにし、
+     * エージェントの疎通・実行自体の失敗({@link AgentOperationException}、502)とは区別する。
+     */
+    @ExceptionHandler(PostNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handlePostNotFound(PostNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(MediaRenderException.class)

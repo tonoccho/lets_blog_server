@@ -232,6 +232,50 @@ class WordPressAgentOperationsTest {
     }
 
     @Test
+    void deletePost_存在しない投稿IDならPostNotFoundExceptionを投げる() {
+        // issue #1070: 対象が存在しないケースは、エージェント側で疎通・実行そのものが失敗した
+        // AgentOperationException(502)ではなく、呼び出し側の入力ミスとして404へ区別する。
+        server.expect(requestTo("http://wordpress:9000/wp-cli/post-delete"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"投稿 '999999999' が見つかりません\"}"));
+
+        assertThrows(PostNotFoundException.class, () -> operations.deletePost(creds(), "999999999"));
+    }
+
+    @Test
+    void deleteMedia_成功時は例外を投げない() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/media-delete"))
+                .andExpect(content().json("{\"slug\":\"main\",\"mediaId\":\"77\"}"))
+                .andRespond(withSuccess("{\"mediaId\":\"77\"}", MediaType.APPLICATION_JSON));
+
+        operations.deleteMedia(creds(), "77");
+
+        server.verify();
+    }
+
+    @Test
+    void deleteMedia_失敗時は例外を投げる() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/media-delete"))
+                .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"メディアの削除に失敗しました\",\"detail\":\"boom\"}"));
+
+        assertThrows(AgentOperationException.class, () -> operations.deleteMedia(creds(), "77"));
+    }
+
+    @Test
+    void deleteMedia_存在しないメディアIDならPostNotFoundExceptionを投げる() {
+        // issue #1070 AC3: media-delete も post-delete と同じwp_postsベースの削除のため、同じ区別が必要。
+        server.expect(requestTo("http://wordpress:9000/wp-cli/media-delete"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"メディア '999999999' が見つかりません\"}"));
+
+        assertThrows(PostNotFoundException.class, () -> operations.deleteMedia(creds(), "999999999"));
+    }
+
+    @Test
     void uploadMedia_メディア情報を返す() {
         server.expect(requestTo("http://wordpress:9000/wp-cli/media-upload"))
                 .andRespond(withSuccess(
