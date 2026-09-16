@@ -587,6 +587,65 @@ class TypeOnlyModuleGate(unittest.TestCase):
         self.assertIn("スキップ", out)
 
 
+class ChangedProductionFilesFiltering(unittest.TestCase):
+    """`changed_production_files()`: 収集は `paths.is_production()` だけで決めること(#1072)。
+
+    以前は `paths.is_production()` に加えて拡張子ホワイトリスト
+    (`.java`/`.kt`/`.ts`/`.tsx`/`.js`/`.jsx`)でも絞り込んでいたため、
+    `infra/` 配下の `.php` や `docker-compose*.yml` のような、拡張子ホワイトリストに
+    無いプロダクションコードが計測対象外リストにすら現れず、「変更されたプロダクション
+    コードはありません」と誤って報告されていた(#988 の計測対象外レポートに一度も
+    載らない)。拡張子による絞り込みは `is_measurable()` が既に正しく担っており、
+    ここで重複させる理由がない。
+    """
+
+    def fake_run(self, diff_output):
+        def _run(args):
+            if args[1] == "merge-base":
+                return "deadbeef"
+            if args[1] == "diff":
+                return diff_output
+            return ""
+
+        return _run
+
+    def test_php_file_under_infra_is_collected(self):
+        """`.php` は拡張子ホワイトリストに無いが、`infra/` はプロダクション判定される。"""
+        diff = "infra/wordpress/provision-agent/index.php\n"
+        with mock.patch.object(ccc, "run", side_effect=self.fake_run(diff)):
+            result = ccc.changed_production_files("origin/develop")
+        self.assertIn("infra/wordpress/provision-agent/index.php", result)
+
+    def test_docker_compose_yaml_is_collected(self):
+        """`docker-compose.yml` も同様に拡張子ホワイトリストの外にある。"""
+        diff = "docker-compose.yml\n"
+        with mock.patch.object(ccc, "run", side_effect=self.fake_run(diff)):
+            result = ccc.changed_production_files("origin/develop")
+        self.assertIn("docker-compose.yml", result)
+
+    def test_non_production_file_is_still_excluded(self):
+        """フィルタを緩めても、プロダクションでないファイルは従来どおり含めない。"""
+        diff = "docs/README.md\n"
+        with mock.patch.object(ccc, "run", side_effect=self.fake_run(diff)):
+            result = ccc.changed_production_files("origin/develop")
+        self.assertEqual(result, [])
+
+    def test_infra_php_change_is_reported_as_unmeasurable_not_skipped(self):
+        """main() 全体で見たとき、`.php` の変更が「変更なし」ではなく計測対象外扱いになること。"""
+        diff = "infra/wordpress/provision-agent/index.php\n"
+        with mock.patch.object(ccc, "run", side_effect=self.fake_run(diff)), mock.patch.object(
+            sys, "argv", ["check-changed-coverage.py"]
+        ):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = ccc.main()
+        out = buf.getvalue()
+        self.assertEqual(code, 0, out)
+        self.assertIn("infra/wordpress/provision-agent/index.php", out)
+        self.assertIn("計測対象外", out)
+        self.assertNotIn("変更されたプロダクションコードはありません", out)
+
+
 class ChangedLinesByFile(unittest.TestCase):
     """`changed_lines_by_file()`: git diff の hunk から追加/変更行番号を得る(#1230)。"""
 

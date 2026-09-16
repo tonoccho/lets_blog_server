@@ -293,7 +293,7 @@ def changed_production_files(base):
     if diff is None:
         return None
     files = [p for p in diff.splitlines() if p.strip()]
-    return [p for p in files if is_production(p) and p.endswith((".java", ".kt", ".ts", ".tsx", ".js", ".jsx"))]
+    return [p for p in files if is_production(p)]
 
 
 def changed_lines_by_file(base):
