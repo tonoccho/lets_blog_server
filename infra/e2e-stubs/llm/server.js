@@ -76,9 +76,19 @@ const GENERIC_COMPLETION = 'E2Eスタブの応答です。';
  * 出典は ai-service の AiAssistService:
  *   TAGS_PROMPT_TEMPLATE            → {"categories": ["カテゴリ1", ...], "tags": [...]}
  *   PROOFREAD_CHECK_PROMPT_TEMPLATE → [{"type": "typo", "originalText": ..., ...}]
+ *
+ * media-service の画像タグ提案(issue #281 / #1077)はこの2つとは別の呼び元だが、
+ * 出力例が {"tags": [...]} だけの単独オブジェクトで、{@link TAGS_JSON_MARKER}
+ * ({"categories": ... を含む複合オブジェクト)とは文字列として重ならない
+ * (出典: ImageGenerationService.IMAGE_TAGS_PROMPT_TEMPLATE)。このプロンプトは
+ * 「画像」「プロンプト」も含むため、一般判定({@link completionFor}の
+ * `prompt.includes('画像') && (プロンプト系)` 分岐)に先に吸われると
+ * IMAGE_PROMPT_COMPLETION(英文のSDプロンプト)が返り、JSON解釈に失敗して
+ * media-service側のタグ提案が常に空になる(#1077 の症状そのもの)。
  */
 const TAGS_JSON_MARKER = '{"categories":';
 const PROOFREAD_JSON_MARKER = '{"type": "typo"';
+const IMAGE_TAGS_JSON_MARKER = '{"tags": ["タグ1", "タグ2", "タグ3"]}';
 
 /** タグ提案の候補。タグ名は散文版({@link TAGS_COMPLETION})と同じにしてある。 */
 const TAGS_JSON_CATEGORIES = ['E2Eスタブのカテゴリ'];
@@ -88,6 +98,11 @@ const TAGS_JSON_COMPLETION = JSON.stringify({
   categories: TAGS_JSON_CATEGORIES,
   tags: TAGS_JSON_TAGS,
 });
+
+/** 画像タグ提案の候補(issue #281 / #1077)。散文版とは独立した専用の値にしてある。 */
+const IMAGE_TAGS_JSON_TAGS = ['e2e-stub-image-tag-a', 'e2e-stub-image-tag-b', 'e2e-stub-image-tag-c'];
+
+const IMAGE_TAGS_JSON_COMPLETION = JSON.stringify({ tags: IMAGE_TAGS_JSON_TAGS });
 
 /**
  * 校正の指摘。引用({@code originalText})だけは本文から作るので、ここには持たない。
@@ -212,6 +227,7 @@ function reviewStepJsonCompletion(prompt, message) {
  */
 function jsonFormatCompletionFor(prompt) {
   if (prompt.includes(TAGS_JSON_MARKER)) return TAGS_JSON_COMPLETION;
+  if (prompt.includes(IMAGE_TAGS_JSON_MARKER)) return IMAGE_TAGS_JSON_COMPLETION;
   if (prompt.includes(PROOFREAD_JSON_MARKER)) return proofreadJsonCompletion(prompt);
   if (prompt.includes(JAPANESE_STEP_MARKER)) return reviewStepJsonCompletion(prompt, JAPANESE_STEP_MESSAGE);
   if (prompt.includes(PROOFREADING_STEP_MARKER)) {

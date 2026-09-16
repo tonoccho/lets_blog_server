@@ -732,6 +732,22 @@ Then(
   }
 );
 
+/**
+ * 生成画像のタグ提案(issue #281)がJSONとして解釈できているかを検証する(issue #1077)。
+ *
+ * `ImageGenerationService#suggestImageTagsJson` はLLMの応答をJSONとして解釈できないと
+ * 例外を握りつぶし、タグ無し(null)で保存を続行する(補助機能のため画像生成自体は
+ * 失敗させない設計)。したがって「タグが1件以上ある」ことだけが、LLMスタブが
+ * このプロンプトへJSON形式で応答できているかの外部から観測できる唯一の手がかりになる。
+ */
+Then('生成された画像の詳細に1件以上のタグが提案されている', async ({ ctx, request }) => {
+  const detail = await fetchGeneratedImageDetail(request, firstGeneratedImageId(ctx));
+  expect(
+    detail.tags,
+    '生成画像にタグが1件も提案されていません(LLMスタブがJSON形式で応答できていない疑いがあります)'
+  ).not.toHaveLength(0);
+});
+
 Given(
   /^ChatGPTの画像生成が次の1回だけ「(\d+)」で失敗するようにする$/,
   async ({ ctx }, status: string) => {
