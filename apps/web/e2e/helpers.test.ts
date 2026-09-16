@@ -42,6 +42,7 @@ import {
   fetchAccessToken,
   _resetAccessTokenCacheForTests,
   _sharedTokenCacheFilePathForTests,
+  prefetchAccessTokensForAllE2eAccounts,
 } from './helpers';
 
 const EMAIL_A = 'e2e-test@letsblog.local';
@@ -267,5 +268,77 @@ describe('fetchAccessTokenの共有キャッシュファイル(issue #1295フォ
 
     expect(post).toHaveBeenCalledTimes(1);
     expect(token).not.toBe('expired-token');
+  });
+});
+
+/**
+ * issue #1097: `at-seed`段階(`stages/seed.setup.ts`)が資格情報のドリフト
+ * (Keycloak上のパスワードが`~/.config/lets-blog-e2e.env`とずれている状態)を
+ * 実行前に検知できることを保証する回帰テスト。
+ *
+ * `seed.setup.ts`は`scripts/seed-acceptance-env.sh`実行直後に、実際に両E2E合成アカウント
+ * (`E2E_TEST_EMAIL`/`E2E_ADMIN_EMAIL`)のアクセストークンを`prefetchAccessTokensForAllE2eAccounts`
+ * 経由で1回ずつ取得する。ここでは、どちらか一方でもKeycloakへのトークン取得に失敗した場合、
+ * `at-seed`段階全体(Playwrightのテスト)がその例外で失敗することを、この関数がその例外を
+ * そのまま伝播することによって検証する。
+ *
+ * 実測(issue #1097実装報告に記録): 本テストが検証する挙動(`fetchAccessToken`が失敗応答で
+ * 例外を投げること)自体はissue #1295(コミット049df711)で既に実装済みであり、
+ * 本テストは新規の本番コード変更なしに最初からGREENで通った。本Issueにおける真の
+ * RED→GREENの実測は、稼働中Keycloakに対して意図的にパスワードのドリフトを起こし
+ * (`kcadm set-password`で一方のアカウントのパスワードを書き換え)、実際に`at-seed`
+ * プロジェクトを実行して確認した(実装報告参照)。
+ */
+describe('prefetchAccessTokensForAllE2eAccounts(issue #1097: at-seed段階の資格情報ドリフト検知)', () => {
+  let tokenCacheDir: string;
+
+  beforeEach(() => {
+    _resetAccessTokenCacheForTests();
+    // 他テスト・実際に稼働中のホストへ書かれた共有キャッシュファイル(os.tmpdir())から
+    // 隔離する。隔離しないと、事前にKeycloakへ実リクエストして書かれた有効なキャッシュを
+    // 拾ってしまい、mockした`post`が一度も呼ばれないまま解決してしまう(実測: この隔離を
+    // 入れる前は両テストともRED。実装報告に記録)。
+    tokenCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lbs-e2e-token-cache-test-'));
+    process.env.E2E_TOKEN_CACHE_DIR = tokenCacheDir;
+  });
+
+  afterEach(() => {
+    delete process.env.E2E_TOKEN_CACHE_DIR;
+    fs.rmSync(tokenCacheDir, { recursive: true, force: true });
+  });
+
+  test('両アカウントのトークン取得に成功すれば解決する', async () => {
+    const post = createImmediatePostMock(300);
+    const request = { post } as unknown as APIRequestContext;
+
+    await expect(prefetchAccessTokensForAllE2eAccounts(request)).resolves.toBeUndefined();
+
+    expect(post).toHaveBeenCalledTimes(2);
+  });
+
+  test('一方のアカウントでもトークン取得に失敗すれば、at-seed段階を落とすため例外を伝播する', async () => {
+    const post = jest
+      .fn()
+      // 1件目(e2e-test)は成功する。
+      .mockResolvedValueOnce({
+        ok: () => true,
+        status: () => 200,
+        json: async () => ({ access_token: 'token-e2e-test', expires_in: 300 }),
+        text: async () => '',
+      })
+      // 2件目(e2e-admin)はドリフトしたパスワードを想定し、Keycloakが invalid_grant を返す。
+      .mockResolvedValueOnce({
+        ok: () => false,
+        status: () => 401,
+        json: async () => ({}),
+        text: async () => '{"error":"invalid_grant","error_description":"Invalid user credentials"}',
+      });
+    const request = { post } as unknown as APIRequestContext;
+
+    await expect(prefetchAccessTokensForAllE2eAccounts(request)).rejects.toThrow(
+      /Keycloakからのトークン取得に失敗しました/
+    );
+
+    expect(post).toHaveBeenCalledTimes(2);
   });
 });
