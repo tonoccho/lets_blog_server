@@ -417,6 +417,30 @@ batch size 16 の枚数検証や batch count のリピート検証を実生成�
 スタブが再現しないもの: 画像の見た目、モデル固有の挙動、生成時間、VRAM の実際の解放。
 `/view` が返すのは 1×1 の PNG 固定である(`openai-image` スタブと同じバイト列)。
 
+#### `@requires-gpu`: リリース検証だけは除外する(#1318、利用者の決定 2026-09-15)
+
+GPU の無いホスト(実機 `lbs-comfyui` を起動できない)でも `scripts/release-verify-tag.py`
+によるリリース検証(`test:at:clean`)がゼロ許容で通せるよう、実機 GPU が無いと必ず失敗する
+シナリオ(`comfyui-checkpoints.feature` の導入・削除の2つ)には `@requires-gpu` を付けている。
+一覧取得のシナリオと `image-generation.feature` は GPU の無いホストでも(スタブを相手に)通るため
+対象にしていない。ただしスタブで通っている以上、これらは実機を検証していない — その是正は
+#1318 の Out of Scope として残っている。
+
+- **リリース検証(`release-verify-tag.py`)だけが除外する。** `web-test-at-clean` 手順は
+  `AT_EXCLUDE_REQUIRES_GPU=1` を設定して `test:at:clean` を実行し、
+  `apps/web/playwright.config.ts` の `at-main` / `at-destructive` の生成時タグ式
+  (`defineBddProject` の `tags`)がこの環境変数を見て `and not @requires-gpu` を足す。
+  `--grep-invert` では実現できない — `test:at:clean` が選ぶ `at-destructive` の
+  対象シナリオは依存プロジェクト `at-main` に属し、Playwright の `--grep` /
+  `--grep-invert` は依存プロジェクトのテストを絞り込まないため(#1318 Readiness評価で実測)。
+- **`test:at:clean` / `test:at` を手で実行したときは対象外にしない。** 環境変数を設定しない
+  限りタグ式は従来どおりで、GPU の無いホストでは方針(上表「GPU 必須。無ければ明示的に
+  失敗する」)どおり明示的に失敗する。暗黙のスキップではない。
+- 除外したシナリオ(パスとシナリオ名)は `.feature` の `@requires-gpu` から機械的に作り、
+  リリース検証の実行ログとタグの注釈(`build_tag_message()`)の両方に記録する。
+- `CLAUDE.md` → Test-First Implementation → **Never skip a test** が禁じる
+  `--grep-invert` 等による除外の**唯一の例外**である(本決定、#1318)。
+
 #### チェックポイント導入シナリオが使うモデル(#936)
 
 `comfyui-checkpoints.feature` の導入シナリオは **283KB の safetensors**

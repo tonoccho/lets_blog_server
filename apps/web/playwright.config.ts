@@ -70,12 +70,21 @@ const atProvision = defineBddProject({
   tags: '@stage:provision',
 });
 
+/**
+ * issue #1318: GPU の無いホストでのリリース検証(`scripts/release-verify-tag.py`)は
+ * `AT_EXCLUDE_REQUIRES_GPU=1` を設定して `web-test-at-clean` を実行する。このときだけ
+ * `@requires-gpu`(実機 `lbs-comfyui` が無いと通らないシナリオ)を生成時タグ式で除外する
+ * (`--grep-invert` は依存プロジェクトを絞り込まないため使えない。Readiness評価で実測)。
+ * 未設定(通常の `test:at:clean` / `test:at`)では今までどおり全シナリオが対象になる。
+ */
+const excludeRequiresGpu = process.env.AT_EXCLUDE_REQUIRES_GPU === '1' ? ' and not @requires-gpu' : '';
+
 /** 段階4: それ以外すべて。@destructive は含めない(下の at-destructive が最後にまとめて実行する)。 */
 const atMain = defineBddProject({
   ...BDD_COMMON,
   name: 'at-main',
   outputDir: '.features-gen/at-main',
-  tags: 'not @stage:setup and not @stage:provision and not @destructive',
+  tags: 'not @stage:setup and not @stage:provision and not @destructive' + excludeRequiresGpu,
 });
 
 /**
@@ -94,7 +103,7 @@ const atDestructive = defineBddProject({
   ...BDD_COMMON,
   name: 'at-destructive',
   outputDir: '.features-gen/at-destructive',
-  tags: '@destructive and not @stage:setup and not @stage:provision',
+  tags: '@destructive and not @stage:setup and not @stage:provision' + excludeRequiresGpu,
 });
 
 /**

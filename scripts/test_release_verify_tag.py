@@ -1034,6 +1034,146 @@ class DefaultStepsWireRealCountsParsers(unittest.TestCase):
         self.assertEqual("junit_xml_glob", step.get("counts_parser"))
         self.assertIn("build/test-results", step.get("counts_source", ""))
 
+    def test_web_test_at_clean_excludes_requires_gpu_scenarios(self):
+        """#1318 要件2: GPUの無いこのホストでは web-test-at-clean を
+        AT_EXCLUDE_REQUIRES_GPU=1 で実行し、apps/web/playwright.config.ts の
+        生成時タグ式から @requires-gpu を除外する(test:at:clean 自体は変えない)。"""
+        step = self.steps_by_name()["web-test-at-clean"]
+        self.assertEqual("1", step.get("env", {}).get("AT_EXCLUDE_REQUIRES_GPU"))
+
+
+class FindRequiresGpuScenariosParsesFeatureFilesMechanically(unittest.TestCase):
+    """#1318 要件3: 除外対象の一覧は `.feature` の `@requires-gpu` から機械的に作る
+    (手書きしない)。シナリオ単位のタグ・フィーチャ単位のタグ・タグ無しの3通りを検証する。"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="rvt-features-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.features_dir = os.path.join(self.tmp, "apps", "web", "e2e", "features")
+
+    def write_feature(self, rel, text):
+        path = os.path.join(self.features_dir, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        return "/".join(("apps", "web", "e2e", "features", rel))
+
+    def test_scenario_level_tag_is_detected_and_untagged_sibling_is_not(self):
+        rel = self.write_feature(
+            "media/scenario-tag.feature",
+            "@media\n"
+            "機能: シナリオ単位のタグ\n"
+            "\n"
+            "  @requires-gpu\n"
+            "  シナリオ: GPUが要るシナリオ\n"
+            "    もし 何かする\n"
+            "    ならば 何か起きる\n"
+            "\n"
+            "  シナリオ: GPUが要らないシナリオ\n"
+            "    もし 何かする\n"
+            "    ならば 何か起きる\n",
+        )
+        result = rvt.find_requires_gpu_scenarios(self.tmp)
+        self.assertEqual([(rel, "GPUが要るシナリオ")], result)
+
+    def test_feature_level_tag_applies_to_every_scenario_in_the_file(self):
+        rel = self.write_feature(
+            "media/feature-tag.feature",
+            "@media @requires-gpu\n"
+            "機能: フィーチャ単位のタグ\n"
+            "\n"
+            "  シナリオ: 1つ目\n"
+            "    もし 何かする\n"
+            "    ならば 何か起きる\n"
+            "\n"
+            "  シナリオ: 2つ目\n"
+            "    もし 何かする\n"
+            "    ならば 何か起きる\n",
+        )
+        result = rvt.find_requires_gpu_scenarios(self.tmp)
+        self.assertEqual([(rel, "1つ目"), (rel, "2つ目")], result)
+
+    def test_no_tags_produces_an_empty_list(self):
+        self.write_feature(
+            "media/no-tag.feature",
+            "@media\n"
+            "機能: タグ無し\n"
+            "\n"
+            "  シナリオ: 何も要らない\n"
+            "    もし 何かする\n"
+            "    ならば 何か起きる\n",
+        )
+        result = rvt.find_requires_gpu_scenarios(self.tmp)
+        self.assertEqual([], result)
+
+
+class ExcludedScenariosAreRecordedInLogAndTagMessage(Harness):
+    """#1318 要件3: 除外したシナリオの一覧が実行ログとタグの注釈(build_tag_message)の
+    両方に出る。"""
+
+    FEATURE_REL = "apps/web/e2e/features/media/gpu-dummy.feature"
+    FEATURE_TEXT = (
+        "@media @slow\n"
+        "機能: GPU必須のダミー\n"
+        "\n"
+        "  @requires-gpu\n"
+        "  シナリオ: GPUが要るダミーシナリオ\n"
+        "    もし 何かする\n"
+        "    ならば 何か起きる\n"
+        "\n"
+        "  シナリオ: GPUが要らないダミーシナリオ\n"
+        "    もし 何かする\n"
+        "    ならば 何か起きる\n"
+    )
+
+    def setUp(self):
+        super().setUp()
+        # develop 先頭に @requires-gpu 付きのフィーチャを積む(R はこの子になるので
+        # 隔離チェックアウトの checkout_dir にもそのまま現れる)。
+        commit(
+            self.origin.seed,
+            "add requires-gpu fixture feature (#1318)",
+            {self.FEATURE_REL: self.FEATURE_TEXT},
+        )
+        git(["push", "origin", "develop"], cwd=self.origin.seed)
+
+    def test_excluded_scenario_appears_in_run_log_and_tag_message(self):
+        table = self.write_step_table(self.default_steps())
+        r = self.run_script(
+            extra_env={
+                "RELEASE_VERIFY_STEP_TABLE": table,
+                "RELEASE_VERIFY_HANDOFF_COMMAND": self.write_handoff(),
+            },
+        )
+        out = self.out(r)
+        self.assertEqual(0, r.returncode, out)
+        self.assertIn(self.FEATURE_REL, out, out)
+        self.assertIn("GPUが要るダミーシナリオ", out, out)
+        self.assertNotIn("GPUが要らないダミーシナリオ", out, out)
+
+        version_tags = [t for t in self.origin.tags() if t != "0.3.0"]
+        self.assertEqual(1, len(version_tags), version_tags)
+        msg = git(["tag", "-l", "-n99", version_tags[0]], cwd=self.origin.bare).stdout
+        self.assertIn(self.FEATURE_REL, msg, msg)
+        self.assertIn("GPUが要るダミーシナリオ", msg, msg)
+        self.assertNotIn("GPUが要らないダミーシナリオ", msg, msg)
+
+
+class NoExcludedScenariosIsStatedExplicitly(Harness):
+    """#1318 要件3: 除外対象が0件のときも「無い」と明示する(何も出さないのではなく)。"""
+
+    def test_empty_exclusion_list_is_stated_explicitly_in_the_log(self):
+        table = self.write_step_table(self.default_steps())
+        r = self.run_script(
+            extra_env={
+                "RELEASE_VERIFY_STEP_TABLE": table,
+                "RELEASE_VERIFY_HANDOFF_COMMAND": self.write_handoff(),
+            },
+        )
+        out = self.out(r)
+        self.assertEqual(0, r.returncode, out)
+        self.assertIn("該当なし", out, out)
+
 
 class RealShapedStepEndToEndSkipIsCaughtByParser(Harness):
     """要件5(統合): counts_parser 配線が main() の実行を通じて実際に効くこと

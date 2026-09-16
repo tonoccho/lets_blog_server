@@ -550,6 +550,12 @@ inappropriate: it asserts behavior the Issue's Acceptance Criteria do not requir
 encodes an assumption this Issue deliberately changed. When you do change one, report which
 test, and why the old assertion was wrong.
 
+**The one exception**: by the user's decision (#1318, 2026-09-15), scenarios tagged
+`@requires-gpu` (GPU-only ComfyUI behavior this host cannot run) are excluded from release
+verification via a generation-time `tags` expression in `apps/web/playwright.config.ts`
+(`AT_EXCLUDE_REQUIRES_GPU=1`, not `--grep-invert`), and the excluded list is recorded in the
+release run log and tag annotation — see `docs/ACCEPTANCE_TESTING.md` → `@requires-gpu`.
+
 ---
 
 # Issue Provenance
