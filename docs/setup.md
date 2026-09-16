@@ -268,6 +268,20 @@ Web管理画面側では自己署名証明書の信頼設定(`NODE_EXTRA_CA_CERT
 Node(`npm install` 済みの場合)とコンテナのNodeでネイティブバイナリ(`@next/swc`等)の
 ABIが異なりうるため、インストールは常にコンテナ内で行う(#1050)。
 
+`docker-entrypoint.sh` は `npm ci`/`chown` のために一旦rootで動くが、最後に
+`su-exec`でバインドマウント元(=ホストの実行ユーザー)の uid/gid へ権限を落としてから
+`next dev` を実行する(#1042)。これにより、コンテナが稼働し続ける間に `next dev` が
+作り続ける `apps/web/.next` や `apps/web/next-env.d.ts` もホストユーザー所有のまま
+保たれ、`docker compose up -d` 後にホストから `cd apps/web && npm run build` が
+そのまま実行できる。`.next` を匿名/named volumeにせずバインドマウント内に置く方針
+(上記コメント参照、ルートディスク圧迫を避けるため)は変えていない。
+
+#1042 以前に起動したことがあり、`apps/web/.next` や `apps/web/next-env.d.ts` が
+既にroot所有で残っている場合は、ホストの `sudo rm -rf apps/web/.next` で削除するか
+(次回起動時にホストユーザー所有で作り直される)、`docker run --rm -v
+"$(pwd)/apps/web:/app" alpine chown -R "$(id -u):$(id -g)" /app/.next
+/app/next-env.d.ts` のようにコンテナ経由でsudo無しに所有者を付け替える。
+
 ### (代替)ホスト上で `npm run dev` を直接起動する場合
 
 より高速なホットリロードを求める場合など、コンテナを使わずホスト上で直接起動することもできる。
