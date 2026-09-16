@@ -539,11 +539,35 @@ if ($path === '/db-import' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         // (例: wp_capabilities/wp_user_level)。WordPressは$wpdb->prefix(=新プレフィックス)を
         // 前置したmeta_keyを参照して権限判定するため、書き換えないとログインはできても権限が
         // 認識されずwp-adminが403になる(issue #511)。
+        //
+        // プレフィックス由来のmeta_keyは`capabilities`/`user_level`の2つだけであり、
+        // これ以外に旧プレフィックスの付け替えが必要なコアのmeta_keyは無い。以前は
+        // LEFT(meta_key, ...)による前方一致で改名していたため、プレフィックス由来ではない
+        // (たまたま同じ文字列で始まるだけの)meta_key(例: `wp_notes_notify`のようなプラグイン
+        // 独自キー)まで巻き込んで改名してしまっていた(issue #1074)。完全一致の2キーのみを
+        // 対象にする。
+        //
+        // 新プレフィックス側に`{newPrefix}capabilities`/`{newPrefix}user_level`が既に
+        // 存在するケース(例えば同じ新プレフィックスで再度/db-importした場合)ではUPDATEが
+        // UNIQUE制約(user_id, meta_key相当の重複)には抵触しないが、行が2重に残ってしまうと
+        // WordPressの権限判定が意図せず複数行を参照しうるため、先に削除してから改名する
+        // (冪等にする)。
         if ($effectivePrefix !== $originalPrefix) {
             $usermetaTable = $effectivePrefix . 'usermeta';
-            $renameMetaKeysSql = 'UPDATE `' . $usermetaTable . '` SET meta_key = CONCAT('
-                . "'" . $effectivePrefix . "', SUBSTRING(meta_key, LENGTH('" . $originalPrefix . "')+1)) "
-                . "WHERE LEFT(meta_key, LENGTH('" . $originalPrefix . "')) = '" . $originalPrefix . "'";
+            $oldCapabilitiesKey = $originalPrefix . 'capabilities';
+            $oldUserLevelKey = $originalPrefix . 'user_level';
+            $newCapabilitiesKey = $effectivePrefix . 'capabilities';
+            $newUserLevelKey = $effectivePrefix . 'user_level';
+            $deleteExistingSql = 'DELETE FROM `' . $usermetaTable . '` WHERE meta_key IN ('
+                . "'" . $newCapabilitiesKey . "', '" . $newUserLevelKey . "')";
+            $renameMetaKeysSql = 'UPDATE `' . $usermetaTable . '` SET meta_key = CASE meta_key '
+                . "WHEN '" . $oldCapabilitiesKey . "' THEN '" . $newCapabilitiesKey . "' "
+                . "WHEN '" . $oldUserLevelKey . "' THEN '" . $newUserLevelKey . "' "
+                . 'ELSE meta_key END '
+                . "WHERE meta_key IN ('" . $oldCapabilitiesKey . "', '" . $oldUserLevelKey . "')";
+            runCommand(['sh', '-c',
+                'mysql --skip-ssl -h' . escapeshellarg($dbHost) . ' -uroot -p' . escapeshellarg($rootPassword)
+                    . ' ' . escapeshellarg($dbName) . ' -e ' . escapeshellarg($deleteExistingSql)]);
             runCommand(['sh', '-c',
                 'mysql --skip-ssl -h' . escapeshellarg($dbHost) . ' -uroot -p' . escapeshellarg($rootPassword)
                     . ' ' . escapeshellarg($dbName) . ' -e ' . escapeshellarg($renameMetaKeysSql)]);
