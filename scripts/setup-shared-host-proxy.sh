@@ -134,6 +134,37 @@ assert_gitlab_alive() {
     return 1
 }
 
+# 撤去(rollback)したあとの "復旧 reload" を実行し、その成否と GitLab の生存を確認して
+# 記録する(issue #1038 / #1044)。呼び出し元(reload 自体が失敗した分岐・適用後に
+# GitLab が死んだ分岐のどちらも)は、置いたファイルを撤去した**その直後**であり、
+# infra-proxy が元の設定を読み直せたのか、GitLab が実際に戻ったのかが分からない。
+# 確認せずに exit 1 すると、呼び出し元には「撤去した」以上のことが伝わらない。
+report_recovery() {
+    local reload_failed=0
+    if "$DOCKER_BIN" exec "$PROXY_CONTAINER" nginx -s reload >/dev/null 2>&1; then
+        echo "  ✓ 復旧の reload に成功しました(元の設定に戻りました)" >&2
+    else
+        echo "✗ 復旧の reload にも失敗しました。" >&2
+        reload_failed=1
+    fi
+    local gitlab_ok=1
+    if ! assert_gitlab_alive "復旧後"; then
+        gitlab_ok=0
+    fi
+    # reload 自体が失敗した場合はもちろん、reload には成功しても GitLab が戻って
+    # 来ない場合(issue #1044)にも、確認せずに exit 1 すると呼び出し元には
+    # 「失敗した」以上のことが伝わらない。どちらか一方でも異常なら手順を示す。
+    if [ "$reload_failed" -eq 1 ] || [ "$gitlab_ok" -eq 0 ]; then
+        if [ "$gitlab_ok" -eq 0 ]; then
+            echo "  → GitLab が停止しています。手動で確認してください:" >&2
+        else
+            echo "  → 復旧 reload には失敗しましたが GitLab には到達できています。念のため手動で確認してください:" >&2
+        fi
+        echo "    $DOCKER_BIN exec $PROXY_CONTAINER nginx -t" >&2
+        echo "    $DOCKER_BIN restart $PROXY_CONTAINER" >&2
+    fi
+}
+
 docker_available() {
     command -v "$DOCKER_BIN" >/dev/null 2>&1 || [ -x "$DOCKER_BIN" ]
 }
@@ -326,25 +357,17 @@ if ! "$DOCKER_BIN" exec "$PROXY_CONTAINER" nginx -s reload; then
     rollback
     # ここへ来る可能性は低い(nginx -t を通過済み)。しかし来たときこそ infra-proxy は
     # 新しい設定を読み込みかけて失敗した直後であり、**GitLab が生きているか分からない**。
-    # 復旧 reload の成否も生存も確認せずに exit 1 すると、呼び出し元には
-    # 「失敗した」以上のことが伝わらない。両方を確認して記録する。
-    if "$DOCKER_BIN" exec "$PROXY_CONTAINER" nginx -s reload >/dev/null 2>&1; then
-        echo "  ✓ 復旧の reload に成功しました(元の設定に戻りました)" >&2
-    else
-        echo "✗ 復旧の reload にも失敗しました。手動で確認してください:" >&2
-        echo "    $DOCKER_BIN exec $PROXY_CONTAINER nginx -t" >&2
-        echo "    $DOCKER_BIN restart $PROXY_CONTAINER" >&2
-    fi
-    if ! assert_gitlab_alive "復旧後"; then
-        echo "  → GitLab が停止しています。上の手順で infra-proxy を復旧させてください。" >&2
-    fi
+    report_recovery
     exit 1
 fi
 
 if ! assert_gitlab_alive "適用後"; then
     echo "✗ 適用後に GitLab へ到達できなくなりました。撤去して元に戻します。" >&2
     rollback
-    "$DOCKER_BIN" exec "$PROXY_CONTAINER" nginx -s reload >/dev/null 2>&1
+    # ここは「GitLab が死んだ」と検出した**その場所**である。撤去はしたが、それが
+    # 実際に GitLab を復旧させたのかを確認せずに exit 1 すると、呼び出し元には
+    # 「撤去した」以上のことが伝わらない(issue #1044)。
+    report_recovery
     exit 1
 fi
 

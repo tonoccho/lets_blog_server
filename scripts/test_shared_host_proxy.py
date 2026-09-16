@@ -751,6 +751,102 @@ class SetupScriptVerifiesRecoveryWhenReloadFails(SetupScriptBase):
         self.assertNotEqual(0, r.returncode)
 
 
+class ScriptedGitlabHandler(BaseHTTPRequestHandler):
+    """呼ばれた順に `codes` のステータスを返す(最後の要素は尽きたあとも繰り返す)。
+
+    `CountingGitlabHandler` は「生きている→死ぬ」しか表現できない(単調に減る回数しか
+    持たない)。適用後に一度だけ死に、そのあとの復旧確認では生き返る/生き返らないの
+    両方を1本のテストで作り分けたいため、応答の並びを直接指定できる版を別に用意する。
+    """
+
+    codes = [200]
+    calls = 0
+
+    def do_GET(self):  # noqa: N802
+        cls = type(self)
+        idx = min(cls.calls, len(cls.codes) - 1)
+        code = cls.codes[idx]
+        cls.calls += 1
+        self.send_response(code)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def log_message(self, *args):
+        pass
+
+
+class SetupScriptVerifiesRecoveryWhenApplyBreaksGitlab(SetupScriptBase):
+    """適用直後に GitLab が死んだとき、撤去(復旧)の結果を黙って捨てない(#1044)。
+
+    reload 自体の失敗(#1038)とは別の分岐: `nginx -t` も `nginx -s reload` も成功するが、
+    reload 後に GitLab 自身が到達できなくなっているケース。ここは「GitLab が死んだ」と
+    検出した**その場所**であり、復旧が本当にできたのかを確認せずに `exit 1` すると、
+    呼び出し元には「撤去した」以上のことが伝わらない。
+    """
+
+    def start_scripted_gitlab_stub(self, codes):
+        handler = type(
+            "GitlabScriptedStub", (ScriptedGitlabHandler,), {"codes": list(codes), "calls": 0}
+        )
+        server = HTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return "http://127.0.0.1:%d/" % server.server_address[1]
+
+    def run_apply_breaks_gitlab(self, recovered):
+        # 呼ばれる順に: 適用前(200) -> 適用後(503, ここで異常検出) -> 復旧後(recovered次第)
+        codes = [200, 503, 200 if recovered else 503]
+        url = self.start_scripted_gitlab_stub(codes)
+        return self.run_setup(GITLAB_HEALTH_URL=url)
+
+    def test_exits_non_zero(self):
+        r = self.run_apply_breaks_gitlab(recovered=True)
+        self.assertNotEqual(
+            0, r.returncode, "適用後に GitLab へ到達できなくなったのに成功した: " + r.stdout
+        )
+
+    def test_removes_the_placed_vhost(self):
+        self.run_apply_breaks_gitlab(recovered=True)
+        self.assertNotIn("proxy/conf.d/20-localhost.conf", self.placed_files())
+
+    def test_reports_the_outcome_of_the_recovery_reload(self):
+        """撤去したあとの reload の成否を報告する。黙って捨てると、元の設定が読み直された
+        のかどうかが誰にも分からないまま exit 1 になる。"""
+        r = self.run_apply_breaks_gitlab(recovered=True)
+        out = r.stdout + r.stderr
+        self.assertRegex(
+            out,
+            r"復旧の\s*reload",
+            "復旧 reload の成否を報告していない:\n" + out,
+        )
+
+    def test_checks_that_gitlab_is_alive_after_recovery(self):
+        r = self.run_apply_breaks_gitlab(recovered=True)
+        out = r.stdout + r.stderr
+        self.assertIn("復旧後", out, "復旧後の GitLab 生存確認をしていない:\n" + out)
+        self.assertRegex(
+            out,
+            r"✓ GitLab 生存確認 \(復旧後\)",
+            "復旧後に GitLab へ到達できたことが記録されていない:\n" + out,
+        )
+
+    def test_shows_manual_steps_when_gitlab_is_still_dead_after_recovery(self):
+        """生存確認の結果が「死んでいる」ときにこそ、呼び出し元は手動での確認手順を必要とする。"""
+        r = self.run_apply_breaks_gitlab(recovered=False)
+        out = r.stdout + r.stderr
+        self.assertRegex(
+            out,
+            r"✗ GitLab へ到達できません \(復旧後\)",
+            "復旧後も GitLab が死んでいることを報告していない:\n" + out,
+        )
+        self.assertIn("nginx -t", out, "手動確認の手順(nginx -t)が示されていない:\n" + out)
+        self.assertIn(
+            "docker restart", out, "手動確認の手順(docker restart)が示されていない:\n" + out
+        )
+        self.assertNotEqual(0, r.returncode)
+
+
 def section(text, heading):
     lines = text.splitlines()
     level = heading.split(" ")[0]
